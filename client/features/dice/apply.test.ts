@@ -19,7 +19,8 @@ const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
 const { ApplyTo } = await import("./ApplyTo.tsx");
-const { applyNow, applySlot, APPLY_GONE, APPLY_UNKNOWN, toastChips } = await import("./apply.ts");
+const { applyNow, applySlot, APPLY_BUSY, APPLY_GONE, APPLY_UNKNOWN, toastChips } = await import("./apply.ts");
+const { createRoomStore } = await import("../../state/store.ts");
 const { rollChip } = await import("./targets.ts");
 
 function table(playersApplyDamage = false): RoomState {
@@ -62,9 +63,11 @@ describe("applyNow, the DM's chip", () => {
     assert.deepEqual(op, { t: "actor.hp", target: { tokenId: "thorn" }, change: { kind: "damage", amount: 6, parts: [{ amount: 6, type: "slashing" }] } });
     assert.equal(sent[0]!.quiet, true, "the row says a refusal, not a toast");
     assert.equal(env.applies.getState().rolls["9:0"]!.busy, "character:c-thorn");
-    // A second tap while it waits sends nothing.
-    assert.equal(await applyNow(env, chip, thorn), null);
+    // A second tap while it waits sends nothing and says so, so a toast's chip keeps its toast.
+    assert.equal(await applyNow(env, chip, thorn), APPLY_BUSY);
+    assert.equal(await applyNow(env, chip, { tokenId: "g1", holder: "token:g1", name: "Goblin 1" }), APPLY_BUSY, "another creature's chip of the roll");
     assert.equal(sent.length, 1);
+    assert.equal(env.applies.getState().rolls["9:0"]!.said, null, "the waiting chip's row says nothing of it");
     sent[0]!.onAnswer!("taken");
     assert.equal(await done, null);
     assert.deepEqual(env.applies.getState().rolls["9:0"], { busy: null, said: null, applied: [{ holder: "character:c-thorn", name: "Thorn" }] });
@@ -114,6 +117,24 @@ describe("toastChips, a toast's chips on the DM's device", () => {
     const player = harness(table(true), { memberId: "p1", role: "player" as never });
     assert.deepEqual(toastChips(player.env, [slash("p2")], { sceneId: "s1", selected: [] }), [], "never on a player's toast");
     assert.deepEqual(toastChips(env, [diceLine("9:1", "t", [{ formula: "1d20+4", faces: [12], total: 16, label: "Scimitar", tokenId: "g1" }])], { sceneId: "s1", selected: [] }), []);
+  });
+
+  test("a toast's chip pressed while the Dice panel's chip of the roll waits says so, sends nothing and keeps the toast", async () => {
+    const { env, sent } = harness(table());
+    const lines = [slash("p1", { tokenId: "thorn" })];
+    void applyNow(env, rollChip(lines)!, { tokenId: "g1", holder: "token:g1", name: "Goblin Warrior 1" });
+    const room = createRoomStore({ roomId: "room", you: { memberId: "dm1", role: "dm" }, clientId: "device" });
+    try {
+      room.ui.notify("Bree rolled 6 for Scimitar damage.", "info", undefined, { label: "Apply to", buttons: toastChips(env, lines, { sceneId: "s1", selected: [] }) }, true);
+      const toast = () => room.store.getState().toasts[0];
+      room.ui.toastsDrawn([toast()!.id]);
+      room.ui.pressToast!(toast()!.id, 1);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(sent.length, 1, "only the panel's apply went");
+      assert.deepEqual([toast()?.said, toast()?.busy], [APPLY_BUSY, undefined], "the toast stays, saying why, its chips live again");
+    } finally {
+      room.dispose();
+    }
   });
 });
 

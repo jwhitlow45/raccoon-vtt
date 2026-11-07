@@ -40,6 +40,8 @@ export const APPLY_UNKNOWN = "This may have happened. Check the log.";
 export const APPLY_GONE = "That creature is no longer on the map.";
 /** A change the store would not queue. */
 export const APPLY_UNSENT = "That could not be sent.";
+/** A press while another chip of the same roll waits on its answer, as a toast's chip can be beside the Dice panel's. */
+export const APPLY_BUSY = "Already applying this roll.";
 
 /** What applying needs, none of it a component's, so a toast's button, which outlives every surface, applies the same way. */
 export type ApplyEnv = {
@@ -58,13 +60,16 @@ function setRoll(applies: StoreApi<Applies>, key: string, next: RollApplied): vo
  * entry's own path (groupHp.ts sendHpEntry), so its defenses count as in
  * the entry and a critical hit on a creature at 0 HP counts as the entry's
  * ticked Crit. Resolves null once the server took it, or the words of why
- * not. A second press while one waits, or on a creature it already landed
- * on, does nothing and resolves null.
+ * not. A press on a creature it already landed on does nothing and
+ * resolves null, as taken. A press while another chip of the roll waits
+ * sends nothing and says so, so a toast's chip keeps its toast rather
+ * than closing it with nothing applied.
  */
 export function applyNow(env: ApplyEnv, chip: HpChip, to: ApplyTarget): Promise<string | null> {
   const key = chip.lineId;
   const was = env.applies.getState().rolls[key] ?? NOTHING_YET;
-  if (was.busy !== null || was.applied.some((a) => a.holder === to.holder)) return Promise.resolve(null);
+  if (was.applied.some((a) => a.holder === to.holder)) return Promise.resolve(null);
+  if (was.busy !== null) return Promise.resolve(APPLY_BUSY);
   const { view, you } = env.room();
   const token = view?.tokens[to.tokenId];
   if (!view || !you || !token) return Promise.resolve(APPLY_GONE);
