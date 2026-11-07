@@ -701,8 +701,11 @@ describe("the Sound panel", { concurrency: false }, () => {
     const stopSound = card.getByRole("button", { name: "Stop the sound", exact: true });
     await stopSound.waitFor();
     assert.equal(await stopAll.count(), 0, "a 3-second effect leaves the player's rows alone");
+    // mfa-1 lifted the blackout, so the Chime is in the players' list. An ended effect stays there as history, and only a stop empties it.
+    await until("the Chime in the players' list", () => playing()?.effects.some((e) => e.soundId === run.sounds.Chime));
     await stopSound.click();
-    await until("the DM's effect stopped", () => (playing()?.dmEffects ?? []).length === 0);
+    await until("every effect stopped", () => (playing()?.effects ?? []).length === 0 && (playing()?.dmEffects ?? []).length === 0);
+    await stopSound.waitFor({ state: "detached" });
     await card.getByRole("button", { name: "Dismiss", exact: true }).click();
   });
 
