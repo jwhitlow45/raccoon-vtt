@@ -36,7 +36,7 @@ Each design ran a throwaway prototype on main, never committed, with a seeded ro
 - The DM's chip applies at once through `sendHpEntry`, as one Play step, busy until the server answers, then gone from the row, which reads "Applied to Thorn." Undo takes it back.
 - A player's chip only fills the HP entry, since a player has no Undo, and only with "Players can apply damage and healing" on and only under their own roll.
 
-**Q3.** A digit keeps its browser default so the field takes it. A key a device moved to a digit keeps it and leaves the HP range on that device. The sheet shows "1 to 9", or "2 to 9" with "1 is Ruler on this device."
+**Q3.** A digit keeps its browser default so the field takes it. A browser that types nothing into a field focused during the key's own event gets the digit put in by an input event, never through the HP draft, and Enter then returns focus to the page, only for an entry a digit started. A key a device moved to a digit keeps it and leaves the HP range on that device. The sheet shows "1 to 9", or "2 to 9" with "1 is Ruler on this device."
 
 **Q8, Q9, Q12.** Q8's count was recounted in round 2: the group bar's Save opens the page with its own ability picker, one press more than draft 2 said. Q9 shows the last three DCs sent for a save only, since a save's DC is the effect's. Q12 starts the fight, then runs Auto Initiative's own press for the monster rows without a value. The start's ops (`encounter.start` and every `encounter.add` batch) go as one gesture with one group, so a fight of 101 rows is one Play step, and the totals stay their own. With `monsterInitScore` on, the switch rolls only monster rows still without a score.
 
@@ -78,13 +78,15 @@ A player's strip takes steps 11 and 12 too, and if it is still short, "Your turn
 
 **The worst case**, a long room name, a fight with a timer and a long turn name, a blackout, two phases, the clock, Search and Now playing, at 900 x 900 and at 1170 x 900 at 130%, overflowed by 229 px with steps 0 to 10. Steps 11 and 12 free 186 and 66 px. No measured state overflows. The turn chip's faces failed the alignment row-height check at 1440 (a 26 px face beside 22 px faces), so the next faces stand in one unpainted group.
 
-**The chips' look.** A chip that opens a menu has a 16 px caret inside the same 28 px pill, in a 44 px tall target. Hover and focus show a tooltip only where the words are cut.
+**The chips' look.** A chip that opens a menu has a 16 px caret inside the same 28 px pill, in a 44 px tall target. The round forms, a member's dot and the crossed eye, stand where the bar is shortest, so their caret is smaller and tighter: 32 px wide against the plain dot's 28. Hover and focus show a tooltip only where the words are cut.
 
 **Words.** The DM chip reads "DM", named "DM options" (its dot adds "You are the DM"). The crossed eye is named "DM options. Players see black". The menu's headings are Handouts, Players' screens, Map phase, Preview, Time and Now playing. Handout items read "Hide <title>" with "Showing", and "Show <title>" with "to everyone" or "to Pat". The blackout menu reads "End the blackout" ("Players see the map again.") and "Show players <scene>" ("Moves the players here and ends the blackout in one step."). A player's chip is named "You are Pat. Your options", and its menu "You".
 
 ## 5. The search
 
-**Opening.** Ctrl+K or Cmd+K, the top bar's **Search** (a 28 px field-like button after the chips with the key, then a 44 px icon), or on a phone the field atop the Panels list and the top bar's icon. A dialog 640 px wide under the bar on a computer, and below 600 px a whole-screen sheet with Cancel. Pressing the key again, Escape, a click outside or Cancel close it and focus goes back. There is no search in View as a player or on a table display.
+**Opening.** Ctrl+K or Cmd+K, the top bar's **Search** (a 28 px field-like button after the chips with the key, then a 44 px icon), or on a phone the field atop the Panels list and the top bar's icon. A dialog 640 px wide under the bar on a computer, and below 600 px a whole-screen sheet with Cancel. Pressing the key again, Escape, a click outside or Cancel close it, and focus goes back where it was, or to the map's focus target when it was on the page itself. There is no search in View as a player or on a table display.
+
+**What it finds.** Panels, their sections and settings, actions with every DM menu item, keys but the arrows and Page keys, the tokens on the scene in view, characters and their fields, the selection's fields and conditions, scenes, monsters, playlists and tracks, journal pages, handouts and a typed dice formula. A player finds their own panels, the tokens their map draws, their characters with every field, and the pages and handouts they hold. A DM finds the few fields play reads on every character: HP, AC, Passive Perception, Senses, the rests and conditions. Each feature lists its rows in a `search.ts` beside it, gathered in `features/search/catalog/`. The DM menu's Time and Now playing are left out, since the search reaches Time and Sound as panels. A creature's field is offered only where its token panel or page draws the control, by that surface's own rule (`features/tokens/panelDraws.ts`), so a player lent a character's token without the character finds none of its card.
 
 **The results.** An empty field shows **Recent** (this device's last five picks for the room and member, shown only while still in the index) then **Suggested**: in a fight Next turn first, else Start a fight, then Show a handout, Black out, Long Rest for the party and Sound, and for a player their character's page, Dice and the X-card. Typed words give one flat list of at most 40 rows, the first highlighted, each with the kind's icon, the title with the starts of typed words in bold, a second line with the kind and where it lives, a value where there is one, and the key where a key does the same. One flat list, not groups, since Enter runs the top row.
 
@@ -95,6 +97,8 @@ A player's strip takes steps 11 and 12 too, and if it is still short, "Your turn
 - About 80 synonyms stand for app words ("hp", "init", "conc", "dv", "lr"), matching whole words or starts and never by typo.
 - An entry may name best bets, the words it is meant by most often, and it comes first for them.
 - Rank order: tier, then nearness (the selection, a player's own character), then the kind's group, then cost, then the shorter title, then A to Z with numbers in order. Nothing ranks by use.
+
+**Words.** The field's placeholder reads "Search panels, settings, actions, tokens…" for a DM and "Search panels, settings, your character…" for a player, and the Panels list's field "Search panels, settings and the room". The list says "Recent", "Suggested", "No match for “x”.", "Loading monsters…", "Loading the DM's results…" and "Some results could not load." A DM menu item's row takes the menu's own words. The synonyms live in `features/search/words.ts`.
 
 **Acting.** A verb does it and a noun goes to it.
 
@@ -124,7 +128,7 @@ A press goes through the real control, so confirm, disabled state, busy look and
 
 **What keeps it current.** A unit test holds ids unique, each route to a real panel and fold, each anchor to exactly one `search=` in client code and the reverse, every panel and shortcut in the index for its roles, and every kind of DM menu item with a twin. An e2e sweep opens every panel and page as the DM and a player, unfolds every fold, and fails on any fold header, switch, checkbox, radio group, select, slider or labeled field with no anchor, short of an allowlist. Golden queries hold each case's first result.
 
-**Keys.** Ctrl+K in the Keys table, and a Search surface: Up and Down, Enter, Shift+Enter and Escape. The top bar's button carries `aria-keyshortcuts="Control+K Meta+K"` and the tooltip "Search (Ctrl+K)".
+**Keys.** Ctrl+K in the Keys table, and a Search surface: Up and Down, Enter, Shift+Enter and Escape. Ctrl+K and Cmd+K open it from anywhere but a dialog, a one-line field and a select box included, while a text area keeps every key. A Mac's Ctrl+K in a one-line field stays the field's (it deletes to the line's end), so there only Cmd+K opens it. Up, Down, Enter and Shift+Enter act on the list from the field alone, which keeps its own Home, End, Left and Right, and a button in the sheet, such as Cancel or Try again, keeps its own Enter. The top bar's button carries `aria-keyshortcuts="Control+K Meta+K"` and the tooltip "Search (Ctrl+K)".
 
 ## 6. Shared pieces, one owner each
 
@@ -144,7 +148,7 @@ The streams and their order were the sound layout, then the polish pass, then th
 ## 7. UI checklist
 
 - **Loading.** The search's parts, a re-show, a move, Next, an apply chip and the start's roll each show busy and refuse a second press. Slow rows use the shared indicator after 200 ms.
-- **Keys and focus.** A menu opens on its first item. Escape closes back to its chip. A landing focuses the control and rings it, and a key pressed meanwhile ends a landing still waiting. Enter after a typed digit returns focus to the page.
+- **Keys and focus.** A menu opens on its first item. Escape closes back to its chip. C opens the Conditions on their first cell, and Escape closes them back on the bar. A landing focuses the control and rings it, and a key pressed meanwhile ends a landing still waiting. Enter after a typed digit returns focus to the page.
 - **Screen readers.** The search is a combobox over a listbox with a polite status ("No match", "1 result", "<n> results"). A chip's name is its words. A cramped player's bar keeps its turn notice in a live region.
 - **Large interface sizes.** Every surface was measured at 130%. A target is 44 px tall. Nothing needs hover or a long press.
 - **Words.** Headings are short nouns ("Tab row", "Recent"). Buttons are verbs.
@@ -163,6 +167,7 @@ The streams and their order were the sound layout, then the polish pass, then th
 | A chip applied twice | the first lands, the creature leaves the row, one Play step |
 | A digit moved to another action on this device | that digit leaves the HP range |
 | An overrun timer on a cramped bar | "+1:25", "Your turn" dropped and still announced |
+| Enter on Long Rest for the party in the search | Characters opens with the party's card and its Finish focused, and nobody rests until Finish is pressed |
 
 ## 9. Decisions
 
@@ -194,4 +199,4 @@ Built in lanes Q0 (the contract), S0 (the search core), L1 to L4 (attacks and ap
 - **The route** (S1). One microtask-ordered landing with no waits, which waits for the pane, the page and the anchor, and a MutationObserver asks again when code loads late. A route that names only a panel focuses the panel. A waiting landing ends at the viewer's next press or the panel closing, with no timer. A scene lands on its row with the folder opened for now. A player never reaches Menu's settings page.
 - **The catalogs** (S2a, S2b). Anchors sit on fold headers. Room settings' anchors are made from the form's data with their values. The DM menu's view reaches the context so a recent showing reads "Show Belak's letter to Pat". A phase's and a move's twin is the scene's row. A row is offered only while its control is drawn. Light level and Automatic walls anchor at their wide setting row so the name stays in view. Shift+Enter on a dice row fills the field without rolling. Not placed: Dice actions and spells (they load after the panel opens), the clock's start switch, an Initiative Turn sound row, and Join requests. Room name and New scenes anchor on the control under their name for now.
 - **The sheet** (S3). A dice row rolls, then opens Dice. "Ctrl+K" is written as Ctrl+Z is. The phone sheet is used below 600 px and the bar's field is a fixed 240 px. Every index pick is kept as Recent. A phone's DM placeholder runs past the field beside Cancel and cuts mid-word, since Chrome draws no ellipsis in a focused input. At 390 at 130% Search folds into the Panels field before the gaps tighten and View folds, by this note's order.
-- **Open items.** Ctrl+K does nothing while a select box has focus (`isOneLineField` excludes selects). The Now playing item in the DM menu names no track. Short Rest for the party stays for later (D-261106-113).
+- **Open items.** The Now playing item in the DM menu names no track. Short Rest for the party stays for later (D-261106-113).
