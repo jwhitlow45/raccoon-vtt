@@ -157,13 +157,16 @@ export type SheetKey = "up" | "down" | "go" | "goOnly" | "close" | null;
  * Right, Enter goes or does, Shift+Enter only goes, Escape closes, and so
  * does the key that opened it, but for a Mac's Ctrl+K in the field, which
  * deletes to the line's end there. Nothing while an input method composes.
+ * The list's keys act from the field alone: rows never take focus, and a
+ * button the viewer moved to, such as Cancel or Try again, keeps its own
+ * Enter rather than running the highlighted row.
  */
 export function sheetKey(e: Pick<KeyPress, "key" | "code" | "ctrlKey" | "metaKey" | "shiftKey" | "altKey">, opts: { composing: boolean; apple: boolean; inField: boolean }): SheetKey {
   if (opts.composing) return null;
-  const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
-  if (plain && !e.shiftKey && e.key === "ArrowDown") return "down";
-  if (plain && !e.shiftKey && e.key === "ArrowUp") return "up";
-  if (plain && e.key === "Enter") return e.shiftKey ? "goOnly" : "go";
+  const listKey = opts.inField && !e.ctrlKey && !e.metaKey && !e.altKey;
+  if (listKey && !e.shiftKey && e.key === "ArrowDown") return "down";
+  if (listKey && !e.shiftKey && e.key === "ArrowUp") return "up";
+  if (listKey && e.key === "Enter") return e.shiftKey ? "goOnly" : "go";
   if (e.key === "Escape") return "close";
   if (!e.altKey && !e.shiftKey && letterOf(e) === "k" && (e.metaKey || (e.ctrlKey && !(opts.apple && opts.inField)))) return "close";
   return null;

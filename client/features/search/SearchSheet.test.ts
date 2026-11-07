@@ -205,6 +205,15 @@ describe("keys inside the search (search.md 5.6)", () => {
     assert.equal(sheetKey(key("ArrowDown"), { ...opts, composing: true }), null);
   });
 
+  test("off the field, Up, Down, Enter and Shift+Enter are a button's own, and Escape and the key that opened it still close", () => {
+    const off = { ...opts, inField: false };
+    for (const k of ["ArrowDown", "ArrowUp", "Enter"]) assert.equal(sheetKey(key(k), off), null, `${k} on Cancel, Close, Try again or Reload`);
+    assert.equal(sheetKey(key("Enter", { shiftKey: true }), off), null, "Shift+Enter on a button");
+    assert.equal(sheetKey(key("Escape"), off), "close");
+    assert.equal(sheetKey(key("k", { ctrlKey: true }, "KeyK"), off), "close");
+    assert.equal(sheetKey(key("k", { metaKey: true }, "KeyK"), { ...off, apple: true }), "close");
+  });
+
   test("the key that opened it closes it, but a Mac's Ctrl+K in the field deletes to the line's end there", () => {
     assert.equal(sheetKey(key("k", { ctrlKey: true }, "KeyK"), opts), "close");
     assert.equal(sheetKey(key("k", { metaKey: true }, "KeyK"), { ...opts, apple: true }), "close");

@@ -1196,7 +1196,7 @@ describe("the room search", { concurrency: false }, () => {
     await viewScene(dm, run.mat);
   });
 
-  test("se-17. a DM's phone: the top bar's Search icon and Cancel, the Panels list's field, landings inside the panel's sheet, a token picked with the sheet closed first, and at 320 x 568 at 130% Search folded into the Panels field with nothing overflowing", async () => {
+  test("se-17. a DM's phone: the top bar's Search icon and Cancel, Enter on Cancel running no row, the Panels list's field, landings inside the panel's sheet, a token picked with the sheet closed first, and at 320 x 568 at 130% Search folded into the Panels field with nothing overflowing", async () => {
     let phone = await dmPhone();
     try {
       const page = phone.page;
@@ -1209,6 +1209,20 @@ describe("the room search", { concurrency: false }, () => {
       await sheet(page).getByRole("button", { name: "Cancel", exact: true }).tap();
       await sheet(page).waitFor({ state: "detached" });
       assert.equal((await focused(page))?.open, "bar", "Cancel: focus back on the icon");
+
+      // Enter on Cancel is Cancel's own: the search closes and the highlighted row, Black out here, runs nothing.
+      await setBlackout(false);
+      await barSearch(page).tap();
+      await sheet(page).waitFor();
+      await field(page).fill("pause");
+      await waitFor("pause's best bet highlighted", async () => ((await rows(page).first().getAttribute("data-search-row")) === "item:blackout" && (await rows(page).first().getAttribute("aria-selected")) === "true" ? true : null));
+      await sheet(page).getByRole("button", { name: "Cancel", exact: true }).focus();
+      await page.keyboard.press("Enter");
+      await sheet(page).waitFor({ state: "detached" });
+      assert.equal((await focused(page))?.open, "bar", "Enter on Cancel: focus back on the icon");
+      await settle(page);
+      await sleep(300);
+      assert.equal(blackout(), false, "Enter on Cancel ran no row");
 
       // The Panels list's field, always atop the list.
       await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).tap();
@@ -1308,7 +1322,7 @@ describe("the room search", { concurrency: false }, () => {
     }
   });
 
-  test("se-19. the DM's results while their chunk loads, Loading the DM's results… after the shared delay with the rest listed, then failed with Try again, and Reload once Chrome keeps the failed module", async () => {
+  test("se-19. the DM's results while their chunk loads, Loading the DM's results… after the shared delay with the rest listed, then failed with Try again, which Enter presses, and Reload once Chrome keeps the failed module", async () => {
     const context = await dmContext({ viewport: DESK }, WINDOWS, "failed");
     try {
       const held: (() => void)[] = [];
@@ -1331,8 +1345,13 @@ describe("the room search", { concurrency: false }, () => {
       fail = true;
       for (const h of held.splice(0)) h();
       await page.getByText("Some results could not load.").waitFor();
-      await sheet(page).getByRole("button", { name: "Try again" }).click();
+      // Enter on Try again is its own press, never the highlighted row's.
+      const rowsBefore = await rowIds(page);
+      await sheet(page).getByRole("button", { name: "Try again" }).focus();
+      await page.keyboard.press("Enter");
       await sheet(page).getByRole("button", { name: "Reload" }).waitFor();
+      assert.equal(await sheet(page).count(), 1, "the search stays open");
+      assert.deepEqual(await rowIds(page), rowsBefore, "no row ran");
       assert.ok((await focused(page))?.field, "Try again hands focus to the field as its line goes");
       await shots.take(page, "se-19-reload");
     } finally {
