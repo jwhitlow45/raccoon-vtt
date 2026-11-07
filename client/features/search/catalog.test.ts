@@ -247,11 +247,21 @@ describe("every anchor is drawn by exactly one search= in client/**/*.tsx, and t
   /** `search="id"`, `data-search="id"`, a literal inside `search={…}`, and a `search: "id"` an element's props or data hold. */
   const SEARCH = /(?<![\w-])(?:data-)?search=(?:"([^"]*)"|\{([^}\n]*)\})|(?<![\w-])search:\s*"([^"]*)"/g;
 
+  /*
+   * An attribute named search is always an anchor, whatever its value, so a
+   * malformed one there fails the check below. A property named search is
+   * one only when its value is dotted, as every anchor id is (entry.ts
+   * SEARCH_ID: a panel part and a control part): `search` is a common key,
+   * an icon's name in the icon map (`search: "search"`) or a row's typed
+   * text (`search: ""`), and neither is an anchor. A dotted value is still
+   * held to the id's form, and an undotted anchor meant for a control
+   * leaves its entry's anchor unwritten, which the reverse check fails.
+   */
   function literals(text: string): string[] {
     const out: string[] = [];
     for (const m of text.matchAll(SEARCH)) {
       if (m[1] !== undefined) out.push(m[1]);
-      if (m[3] !== undefined) out.push(m[3]);
+      if (m[3] !== undefined && m[3].includes(".")) out.push(m[3]);
       if (m[2] !== undefined) for (const l of m[2].matchAll(/"([^"]*)"/g)) out.push(l[1]!);
     }
     return out;
@@ -303,6 +313,16 @@ describe("every anchor is drawn by exactly one search= in client/**/*.tsx, and t
     assert.deepEqual(literals(`<Button search={props.fold ? "dm.link.show" : undefined}>`), ["dm.link.show"]);
     assert.deepEqual(literals(`{ key: "music", search: "menu.this-device.sounds.music" }`), ["menu.this-device.sounds.music"]);
     assert.deepEqual(literals(`<Switch search={settingAnchor(field.key)} /> <ImagePicker search={(q) => q} /> research="x" data-search-page="scene:1"`), []);
+  });
+
+  test("an icon's name or a row's typed text under a key named search is no anchor, and every anchor form is still read whole", () => {
+    assert.deepEqual(literals(`  queue: "list-music",\n  search: "search",\n};`), []);
+    assert.deepEqual(literals(`{ key: "token:1", search: "" }`), []);
+    // A dotted value under the key is an anchor, held to the id's form, a malformed one included.
+    assert.deepEqual(literals(`{ search: "menu.This_device" }`), ["menu.This_device"]);
+    // An attribute is an anchor whatever its value, so an undotted or empty one fails the form check.
+    assert.deepEqual(literals(`<Switch search="blackout" /> <b data-search="" /> <Button search={on ? "Dm.Show" : undefined}>`), ["blackout", "", "Dm.Show"]);
+    for (const id of ["menu.This_device", "blackout", "", "Dm.Show"]) assert.ok(!isSearchId(id), id);
   });
 
   test("each anchor written is well formed, written once, and routed to", () => {
