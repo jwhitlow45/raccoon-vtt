@@ -28,7 +28,9 @@ export async function buildFixture(): Promise<string> {
   const source = `
 import { createElement as h, createRef } from "react";
 import { createRoot } from "react-dom/client";
+import { createStore } from "zustand/vanilla";
 import { RoomScope, RoomScopeProvider } from "./state/scope.ts";
+import { RoomProvider } from "./state/view.ts";
 import { SideTabs } from "./pages/SideTabs.tsx";
 import { panelsFor } from "./features/panels.ts";
 import { chromeZoom } from "./features/device/layout.ts";
@@ -36,8 +38,10 @@ import { uiScale } from "./features/device/settings.ts";
 import { theme } from "./lib/theme.ts";
 const scale = uiScale();
 const noop = () => {};
+// SideTabs reads the viewer's role from the room, for the panels this device keeps in its row (pages/SideTabs.tsx), so a DM's room view stands behind it.
+const view = createStore(() => ({ you: { role: "dm" } }));
 createRoot(document.getElementById("fl5-root")).render(
-  h(RoomScopeProvider, { scope: new RoomScope() },
+  h(RoomProvider, { store: view, actions: {}, ui: {} }, h(RoomScopeProvider, { scope: new RoomScope() },
     h("aside", { style: { ...chromeZoom(scale), position: "fixed", right: 0, top: 0,
       width: Math.min(theme.layout.sidePanelWidth, innerWidth / scale),
       height: innerHeight / scale, background: theme.color.surface } },
@@ -45,7 +49,7 @@ createRoot(document.getElementById("fl5-root")).render(
         badges: {}, badgeLabels: {}, grouped: true, onTab: noop, onHide: noop,
         split: { on: false, fits: true, below: null, onToggle: noop },
         onCutTitle: noop, tabRef: createRef(), onTabsDrawn: noop,
-        tabId: (id) => "fl5-" + id, panelId: "fl5-panel" })))
+        tabId: (id) => "fl5-" + id, panelId: "fl5-panel" }))))
 );
 `;
   const built = await build({
