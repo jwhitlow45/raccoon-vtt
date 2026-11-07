@@ -1,4 +1,4 @@
-import { createElement, lazy, type ComponentType, type LazyExoticComponent } from "react";
+import { createElement, lazy, useState, type ComponentType, type LazyExoticComponent } from "react";
 
 /**
  * React.lazy keeps a failed load for good: rendering the component again
@@ -119,20 +119,36 @@ export function preloadInBackground(load: () => Promise<unknown>, roles: readonl
  * React.lazy, except that a failed load can be tried again (see above).
  * `roles` lists who preloadLazies loads it for. Left out, it is never
  * preloaded.
+ *
+ * A part mounted once its preload is in draws in its first render.
+ * React.lazy, whose own load had not run, suspended there even with the
+ * code here, and React shows what a Suspense boundary waited for only some
+ * 300 ms after its fallback, so the party bar over the side panel's tabs
+ * came in that late as the panel first showed and pushed the panel's
+ * content down (D-261106-393). A part that loaded through its own mount
+ * needs none of this, as its resolved lazy draws at once from then on.
+ * Each mount keeps the kind it started with, since a switch from the lazy
+ * wrapper to the component would mount it afresh and lose its state.
  */
 export function retryableLazy<P extends object>(
   load: () => Promise<{ default: ComponentType<P> }>,
   options: { roles?: readonly Role[] } = {},
 ): ComponentType<P> {
+  let here: ComponentType<P> | null = null;
   const loader = new RetryableLoad(load);
-  if (options.roles) preloadable.push({ load, roles: options.roles, started: false });
+  const preload = () =>
+    load().then((module) => {
+      here = module.default;
+    });
+  if (options.roles) preloadable.push({ load: preload, roles: options.roles, started: false });
   let made: { generation: number; component: LazyExoticComponent<ComponentType<P>> } | null = null;
   const current = () => {
     if (!made || made.generation !== loader.generation) made = { generation: loader.generation, component: lazy(() => loader.run()) };
     return made.component;
   };
   function Retryable(props: P) {
-    return createElement(current(), props);
+    const [direct] = useState(() => here);
+    return createElement(direct ?? current(), props);
   }
   return Retryable;
 }
