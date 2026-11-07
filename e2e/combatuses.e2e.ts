@@ -689,7 +689,8 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await turn.locator('[data-use-row="legendary"]').getByText("After other creatures' turns", { exact: true }).waitFor();
     assert.equal(await turn.locator('[data-use-row="legendary"] button').count(), 0, "no legendary action on the card");
     await countShows(turn, "resist", "2 of 3");
-    await alerts(phone, "turn").getByText(`${DRAGON}'s turn: 3 uses`, { exact: true }).waitFor();
+    // Its one attack, Rend, counts ahead of its uses on the folded line (QOL audit Q1).
+    await alerts(phone, "turn").getByText(`${DRAGON}'s turn: 1 attack, 3 uses`, { exact: true }).waitFor();
     await shots.take(desk, "cu-b-dragon-turn-desk");
     await shots.take(phone, "cu-b-dragon-turn-phone");
     // On its own turn the dragon takes no legendary action, wherever the DM looks.
@@ -731,7 +732,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
       const e = el as unknown as { getAttribute(n: string): string | null; ownerDocument: { getElementById(id: string): { textContent: string | null } | null } };
       return e.ownerDocument.getElementById(e.getAttribute("aria-describedby") ?? "")?.textContent ?? null;
     });
-    assert.equal(count, "3 uses", "the count its name leaves out is its description");
+    assert.equal(count, "1 attack, 3 uses", "the count its name leaves out is its description");
     await show.click();
     const collapse = alerts(phone, "turn").getByRole("button", { name: `Collapse ${DRAGON}'s turn`, exact: true });
     await collapse.waitFor();
