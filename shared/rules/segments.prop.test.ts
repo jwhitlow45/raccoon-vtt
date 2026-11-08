@@ -42,6 +42,21 @@ describe("the exact wall predicates (property)", () => {
     );
   });
 
+  test("the orientation is consistent at the edge of the domain the walls use, 1e-100 and the lattice's finest step", () => {
+    const edge = [0, 1e-100, -1e-100, 1 / LATTICE, -1 / LATTICE, 0.0227, -0.0227, 1, 2_000, -2_000];
+    for (const ax of edge) for (const ay of edge) for (const bx of edge) for (const by of edge) for (const cx of edge) for (const cy of edge) {
+      const o = orient(ax, ay, bx, by, cx, cy);
+      if (orient(bx, by, ax, ay, cx, cy) !== (-o || 0) || orient(bx, by, cx, cy, ax, ay) !== o) assert.fail(`inconsistent at ${[ax, ay, bx, by, cx, cy].join(", ")}`);
+    }
+  });
+
+  // The doc comment of orient says "exact for any doubles", which holds only while no product underflows (ORIENT-UNDERFLOW).
+  // Play never gets here, since an eye is stepped off a wall long before it is 1e-100 from the line. This pins the limit so a fix or an upgrade is noticed.
+  test("known limit: a coordinate in the subnormal range can break the turn rule, so the properties keep clear of it", () => {
+    const o = orient(0, 0, 0, 0.0227, 7.4e-323, -0.0227);
+    assert.notEqual(orient(0, 0.0227, 7.4e-323, -0.0227, 0, 0), o);
+  });
+
   test("how two walls meet does not hang on which is first or which way either runs", () => {
     holds(
       fc.property(pointsOn(4), ([a, b, c, d]) => {
