@@ -60,6 +60,7 @@ The browser tests are measured in a run of their own and then added. With `E2E_C
 
 ```bash
 pnpm build
+rm -rf test-results/e2e-coverage
 E2E_COVERAGE_DIR=test-results/e2e-coverage pnpm test:e2e:shard 1 1
 pnpm coverage --e2e test-results/e2e-coverage
 ```
@@ -228,9 +229,10 @@ shard prints the time every file took. After a file grows or a new one
 lands, rewrite the list from a few green runs with
 `node scripts/e2e-durations.ts <run id> ...`, which reads those times
 through `gh`. The list holds CI seconds, the largest of the runs given, and
-the shard count is chosen so the longest shard plans about 8 minutes. A run
-is 18 jobs and peaks at 16 at once, of the account's 20 Linux jobs, so a
-second run that overlaps it queues part of its shards.
+the longest of the 14 shards plans about 16 minutes. A 15th shard would save
+about one minute of that, so the count stays. A run is 18 jobs and peaks at 16
+at once, of the account's 20 Linux jobs, so a second run that overlaps it
+queues part of its shards.
 
 A file that takes much over 5 minutes in CI holds its shard up, so a long
 one is split into files that each build their own room from a module they

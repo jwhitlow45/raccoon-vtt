@@ -574,7 +574,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 ## Images and art
 
 - The image picker gets an image six ways: Icons, Starter, Device (an upload, or the camera roll on a phone), Link (an image's web address), Search the web, and Library. Pasting a copied image works there too, and in New scene's Map image, a scene's Map image and phases, Show a handout and the stamp picker. On a computer, the DM can paste over the map and choose what it is for, and the choice opens New scene or Handouts even when its group is folded.
-  - Layout: On a phone the sources stand in two rows of three of one height, the taller where Search the web takes two lines.
+  - Layout: On a phone the sources stand in two rows of three, both as tall as the taller, which is the row where Search the web takes two lines.
 - **Icons**: 4,180 game-icons.net icons, each on a colored disk, found by name or artist. Picking one needs no upload and no search, so it works when web search is used up, and once the icon list has loaded it works offline too. Each icon names its artist and license where you pick it.
 - **Search the web**: type "goblin archer" and tap a result. It searches Google Images, with safe search on, while the server has a Google search key and searches left this month. Otherwise it searches Openverse's openly licensed images, and "Search Openverse instead" asks Openverse on purpose. An Openverse image keeps its credit (title, author, license and what was changed), shown in the library and the token panel.
 - **Starter packs**: 501 openly licensed works in 14 packs, each from one artist or project, ready for a DM with no art of their own.
