@@ -319,7 +319,7 @@ The docs (FEATURES.md, docs/dm-guide.md and the notes under docs/design) come la
 
 ## 13. Later phases, and what waits
 
-**C2, time-span durations** (designed in outline, with the next free op and snapshot numbers, and a short addendum reviewed before its build):
+**C2, time-span durations** (built as OP 54 and SNAPSHOT 41, and C3 as OP 55 and SNAPSHOT 42, from the reviewed addendum [design-v1-calendar-c2c3.md](design-v1-calendar-c2c3.md), which replaces this outline and holds what differed). The outline as first written:
 
 - An effect may end at a clock time: `Effect.ends?: { at: number, clock: string }`, apart from `duration`. With a clock, the duration picker offers 1 minute, 10 minutes, 1 hour, 8 hours, 24 hours and Other. Without one, minutes turn into rounds as today.
 - It ends on any clock op whose `clockNow` reaches `at`, and in a fight at the start of the round whose `clockNow` reaches it, with today's expiry line and notice. A 1 minute spell cast in round 1 ends at the start of round 11. Turn-exact durations keep the rounds modes.

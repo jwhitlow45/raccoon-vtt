@@ -163,6 +163,10 @@ and for how to use it, the [DM guide](../dm-guide.md).
 - [design-v1-calendar.md](design-v1-calendar.md): the in-game calendar and
   time of day, with the Time panel in the side panel and a chip in the top
   bar.
+- [design-v1-calendar-c2c3.md](design-v1-calendar-c2c3.md): effects that
+  last a length of time and run out with the clock, the table display's date
+  and time, and scene light that follows the time of day, with dawn and dusk
+  set in the Time panel.
 
 ## The look
 
