@@ -11,7 +11,7 @@ import { mark, newPage } from "../dice/groupSave/chain.ts";
 import { buildPlan } from "../dice/groupSave/plan.ts";
 import { groupRows } from "../dice/groupSave/rows.ts";
 import { BONUS_WORDS, knownOrTyped, TYPE_BONUS } from "../rolls/card.ts";
-import { actor, apply, AT, character, DM, effect, entry, P1, P2, room, token } from "#shared/testutil.ts";
+import { actor, apply, AT, character, DM, effect, entry, P1, P2, room, scene, token } from "#shared/testutil.ts";
 import {
   askSaveOp,
   cardRoll,
@@ -275,6 +275,17 @@ describe("a save-ends card for a creature a player plays", () => {
     const pending = only(view);
     assert.deepEqual(pending.target, { characterId: "c1" });
     assert.deepEqual(saveFacts(view, pending.target), { name: "Bree", played: true, askable: true, legendaryLeft: 0 });
+  });
+
+  test("a creature is askable on any floor of the players' scene, not on another scene", () => {
+    const view = breeRoom({ sceneId: "up" });
+    view.scenes.s1 = scene("s1", { floor: { of: "s1", level: 0, name: "Ground floor" } });
+    view.scenes.up = scene("up", { floor: { of: "s1", level: 1, name: "Upper floor" } });
+    view.scenes.s2 = scene("s2");
+    const target = only(view).target;
+    assert.equal(saveFacts(view, target).askable, true);
+    view.tokens.b1 = { ...view.tokens.b1!, sceneId: "s2" };
+    assert.equal(saveFacts(view, target).askable, false);
   });
 });
 

@@ -1,6 +1,7 @@
 import type { RoomState } from "#shared/model.ts";
 import { perPlayerScene, withheldFromViewer } from "#shared/project.ts";
 import type { ClientOp } from "#shared/protocol.ts";
+import { playersSee } from "#shared/rules/floors.ts";
 import type { OpAnswer } from "../state/types.ts";
 import { displayName, type ViewToken } from "../lib/scene.ts";
 
@@ -116,7 +117,8 @@ export function watchDrop(input: { role: "dm" | "player"; store: SettleStore; mo
   const watched = view ? losable(input.role, input.moves).filter((m) => onVisionScene(view, m.token)) : [];
   const sceneId = watched[0]?.token.sceneId;
   if (!view || sceneId === undefined) return null;
-  const stillOn = (now: RoomState | null) => now !== null && now.meta.playerSceneId === sceneId && now.meta.view?.blackout !== true;
+  const dropScene: string = sceneId;
+  const stillOn = (now: RoomState | null) => now !== null && playersSee(now, dropScene);
   const taken = new Map<string, boolean>();
   let answered = 0;
   let expected: number | null = null;
@@ -133,7 +135,7 @@ export function watchDrop(input: { role: "dm" | "player"; store: SettleStore; mo
     if (now === null || !stillOn(now)) return;
     const gone = watched.filter((m) => taken.get(m.token.id) === true && now.tokens[m.token.id] === undefined).map((m) => displayName(m.token));
     // On a per-player scene the creature left this player's own sight, which may still be another's (docs/design/design-v1-per-player-vision.md 11).
-    const text = intoFogText(gone, perPlayerScene(now.scenes[now.meta.playerSceneId ?? ""]) ? "yours" : "party");
+    const text = intoFogText(gone, perPlayerScene(now.scenes[dropScene]) ? "yours" : "party");
     if (text) input.notify(text);
   }
   const settle = () => {

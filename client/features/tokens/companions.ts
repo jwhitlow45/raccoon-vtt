@@ -1,6 +1,7 @@
 import type { Actor, Character, CompanionTurn, CreatureSize, ImageRef, RoomState, Token } from "#shared/model.ts";
 import { companionLegBlocker, withinCompanionReach } from "#shared/permissions.ts";
 import type { ClientOp, TokenInput } from "#shared/protocol.ts";
+import { floorsOf, sameScene } from "#shared/rules/floors.ts";
 import { sceneGrid } from "#shared/rules/grid.ts";
 import { rowCharacter } from "#shared/rules/initiative.ts";
 import { fitLine, type StatBlockMonster } from "#shared/srd/monsters.ts";
@@ -260,12 +261,15 @@ export type Placement = { ok: true; sceneId: string; x: number; y: number; eleva
 
 /**
  * Where a player's new companion goes (3.6.3, settled by default D1): only
- * next to the character's token on the players' scene. Each way it cannot
+ * next to the character's token on the players' scene (on the floor shown, else its lowest floor with one). Each way it cannot
  * is the reason the form shows under its disabled button.
  */
-export function playerPlacement(view: PlaceView, character: Pick<Character, "id" | "name">, draft: Pick<TokenInput, "size" | "w" | "h">): Placement {
-  const sceneId = view.meta.playerSceneId;
-  if (sceneId === null || view.meta.view.blackout || !view.scenes[sceneId]) return { ok: false, reason: "No map to place it on yet." };
+export function playerPlacement(view: PlaceView, character: Pick<Character, "id" | "name">, draft: Pick<TokenInput, "size" | "w" | "h">, shown: string | null = null): Placement {
+  const start = view.meta.playerSceneId;
+  if (start === null || view.meta.view.blackout || !view.scenes[start]) return { ok: false, reason: "No map to place it on yet." };
+  // The floor shown if the character has a token there, else the lowest floor it stands on (floors design 7.3's order).
+  const floors = [...(shown !== null && sameScene(view, start, shown) ? [shown] : []), ...floorsOf(view, start).map((f) => f.id)];
+  const sceneId = floors.find((id) => characterTokensOn(view, character.id, id).length > 0) ?? start;
   const own = characterTokensOn(view, character.id, sceneId);
   if (own.length === 0) return { ok: false, reason: `${character.name} has no token on the map.` };
   for (const beside of own) {

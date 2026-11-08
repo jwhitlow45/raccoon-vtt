@@ -181,6 +181,21 @@ describe("who a request asks", () => {
     );
   });
 
+  test("with floors, a character on any floor of the players' scene counts as there, and viewing any floor of it is the players' scene", () => {
+    const state = setup();
+    state.scenes.s1 = { ...state.scenes.s1!, floor: { of: "s1", level: 0, name: "Ground floor" } };
+    state.scenes.up = { ...state.scenes.s1, id: "up", floor: { of: "s1", level: 1, name: "Upper floor" } };
+    state.tokens.a1 = { ...state.tokens.a1!, sceneId: "up" };
+    state.tokens.wolf = { ...state.tokens.wolf!, sceneId: "up" };
+    const names = (viewing?: string | null) => defaultTargets(state, { kind: "party" }, viewing).map((t) => [t.name, t.ticked, t.why ?? ""]);
+    const here = [["Bram", false, "on another scene"], ["Ayla", true, ""]];
+    assert.deepEqual(names(), here, "Ayla stands on the upper floor, which is on the players' scene");
+    assert.deepEqual(names("up"), here, "viewing the upper floor is viewing the players' scene");
+    assert.deepEqual(names("s2"), [["Bram", true, ""], ["Ayla", true, ""]], "another scene calls no one elsewhere");
+    assert.equal(askTarget(state, state.tokens.wolf!)?.blocked, undefined, "a familiar on the upper floor can be asked");
+    assert.equal(askTarget(state, state.tokens.far!)?.blocked, true, "one on another scene cannot");
+  });
+
   test("from the action bar the selected creatures start ticked, a familiar included, then the rest of the party", () => {
     const state = setup();
     const targets = defaultTargets(state, { kind: "selection", tokenIds: ["wolf", "a1", "goblin", "far"] });

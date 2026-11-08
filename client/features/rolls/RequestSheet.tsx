@@ -65,11 +65,12 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
   const characters = useRoomView((s) => s.view?.characters);
   const tokens = useRoomView((s) => s.view?.tokens);
   const meta = useRoomView((s) => s.view?.meta);
+  const scenes = useRoomView((s) => s.view?.scenes);
   const viewing = useRoomView((s) => s.sceneId);
   const open = useRoomView((s) => Object.keys(s.view?.rolls ?? {}).length);
   // Worked out once, when the sheet opens: a creature that moves meanwhile keeps the tick the DM gave it.
   const [options] = useState(() =>
-    members && characters && tokens && meta ? defaultTargets({ members, characters, tokens, meta }, props.from, viewing) : [],
+    members && characters && tokens && meta && scenes ? defaultTargets({ members, characters, tokens, meta, scenes }, props.from, viewing) : [],
   );
   const [recent] = useState(() => readRecent(roomId));
   // Read once as the sheet opens, as its recent requests are, so a chip never moves under the DM's finger.

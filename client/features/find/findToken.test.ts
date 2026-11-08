@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Character, RoomState, Token } from "#shared/model.ts";
-import { character, reveal, token } from "#shared/testutil.ts";
+import { character, reveal, scene, token } from "#shared/testutil.ts";
 import { fitRect, NO_INSETS, viewToScreen, type Camera } from "../../lib/camera.ts";
 import { heightsStand, isometric, standScale, TOP_DOWN, toView, viewBox } from "../../lib/view.ts";
 import { barCover, largerEach, pastBars } from "../../canvas/barDock.ts";
@@ -9,8 +9,12 @@ import { FIND_ROOM_CELLS, findCamera, findRect, findTokenCamera, frameOf, nextOw
 import { boardPickFor, drawnAt, DrawnHeightsMemo, flatPick, groundIn, ringCenter, tokenBase } from "../../canvas/boardPick.ts";
 import { raised, world } from "../movement/testing.ts";
 
-function view(tokens: Token[], characters: Character[] = []) {
-  return { tokens: Object.fromEntries(tokens.map((t) => [t.id, t])), characters: Object.fromEntries(characters.map((c) => [c.id, c])) };
+function view(tokens: Token[], characters: Character[] = [], scenes = [scene("s1"), scene("s2")]) {
+  return {
+    tokens: Object.fromEntries(tokens.map((t) => [t.id, t])),
+    characters: Object.fromEntries(characters.map((c) => [c.id, c])),
+    scenes: Object.fromEntries(scenes.map((s) => [s.id, s])),
+  };
 }
 
 function presses(v: ReturnType<typeof view>, count: number, memberId = "p1", sceneId = "s1"): (string | null)[] {
@@ -44,6 +48,13 @@ describe("find my token", () => {
       token("e-goblin"),
     ]);
     assert.deepEqual(presses(v, 5), ["c-hero", "b-familiar", "d-wolf", "a-marker", "c-hero"]);
+  });
+
+  test("cycles across the floors of one scene, and never reaches another scene", () => {
+    const floors = [scene("s1", { floor: { level: 0, name: "Ground floor" } }), scene("s1up", { floor: { level: 1, name: "Upper floor" } }), scene("s2")];
+    const v = view([token("a", { ownerIds: ["p1"], sceneId: "s1" }), token("b", { ownerIds: ["p1"], sceneId: "s1up" }), token("c", { ownerIds: ["p1"], sceneId: "s2" })], [], floors);
+    assert.deepEqual(presses(v, 3), ["a", "b", "a"]);
+    assert.deepEqual(presses(v, 3, "p1", "s1up"), ["a", "b", "a"]);
   });
 
   test("counts a token owned through its character", () => {

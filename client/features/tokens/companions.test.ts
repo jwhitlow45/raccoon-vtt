@@ -142,6 +142,22 @@ describe("where a player's companion goes", () => {
     assert.notEqual(companionSpot(walled, walled.tokens.bt!, { size: "small" }), null, "walls stop nothing on a scene that does not block moves");
   });
 
+  test("with floors, beside the character's token on the floor shown, else on the lowest floor it stands on", () => {
+    const state = bree();
+    state.scenes.s1 = { ...state.scenes.s1!, floor: { of: "s1", level: 0, name: "Ground floor" } };
+    state.scenes.up = { ...state.scenes.s1, id: "up", floor: { of: "s1", level: 1, name: "Upper floor" } };
+    state.tokens.high = { ...state.tokens.bt!, id: "high", sceneId: "up" };
+    const placed = (shown: string | null) => {
+      const p = playerPlacement(state, state.characters.bree!, { size: "small" }, shown);
+      return p.ok ? p.sceneId : p.reason;
+    };
+    assert.equal(placed("up"), "up", "the floor shown wins");
+    assert.equal(placed("s1"), "s1");
+    assert.equal(placed(null), "s1", "else the lowest floor it stands on");
+    delete state.tokens.bt;
+    assert.equal(placed("s1"), "up", "a floor shown without its token falls back to the floor it stands on");
+  });
+
   test("with no token of the character on the players' scene, or no map, the button says why", () => {
     const away = bree();
     away.tokens.bt = { ...away.tokens.bt!, sceneId: "s2" };

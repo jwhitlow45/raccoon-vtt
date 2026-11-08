@@ -1,6 +1,7 @@
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Character, type CharacterId, type Member, type RollAnswer, type RollChange, type RollChoice, type RollRequest, type RollTarget, type RollTest, type RoomState, type SkillKey, type Token } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { anyPlayer, playersToken } from "#shared/project.ts";
+import { onPlayersScene } from "#shared/rules/floors.ts";
 import { z } from "zod";
 import { dmToolSchemas, type ActorTarget, type ClientOp } from "#shared/protocol.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
@@ -19,7 +20,7 @@ import { displayName } from "../../lib/scene.ts";
  * player rolls the answer on the server or types the total they rolled.
  */
 
-type View = Pick<RoomState, "members" | "characters" | "tokens" | "meta">;
+type View = Pick<RoomState, "members" | "characters" | "tokens" | "meta" | "scenes">;
 
 /** A key for one creature a request asks, as the sheet and the cards tell them apart. */
 export function targetKey(target: Pick<RollTarget, "tokenId" | "characterId">): string {
@@ -61,6 +62,16 @@ export function characterToken(tokens: Readonly<Record<string, Token | undefined
   return found;
 }
 
+/** Whether the floor in view lies in the players' scene (any floor of it, floors design 8.3). */
+function viewingPlayersScene(view: Pick<RoomState, "meta" | "scenes">, viewing: string | null): boolean {
+  return viewing === view.meta.playerSceneId || (viewing !== null && onPlayersScene(view, viewing));
+}
+
+/** Whether a character has a token on any floor of the players' scene. */
+function characterOnPlayersScene(view: Pick<RoomState, "meta" | "scenes" | "tokens">, characterId: CharacterId): boolean {
+  return Object.values(view.tokens).some((t) => t !== undefined && "ref" in t.actor && t.actor.ref === characterId && onPlayersScene(view, t.sceneId));
+}
+
 /** One creature the sheet lists, ticked or not. `why` says why one starts unticked, and `blocked` that it cannot be asked at all. */
 export type TargetOption = { key: string; ref: ActorTarget; name: string; ticked: boolean; why?: string; blocked?: boolean };
 
@@ -90,8 +101,7 @@ export type AskFrom = ({ kind: "party" } | { kind: "selection"; tokenIds: readon
  * scene" (LP5-ROLLS-2). A selected token is in view, so its own rule holds.
  */
 export function defaultTargets(view: View, from: AskFrom, viewing?: string | null): TargetOption[] {
-  const playerScene = view.meta.playerSceneId;
-  const playersSceneInView = viewing === undefined || viewing === playerScene;
+  const playersSceneInView = viewing === undefined || viewingPlayersScene(view, viewing);
   const out: TargetOption[] = [];
   const seen = new Set<string>();
   const add = (option: TargetOption) => {
@@ -107,7 +117,7 @@ export function defaultTargets(view: View, from: AskFrom, viewing?: string | nul
     }
   }
   for (const character of partyCharacters(view)) {
-    const here = !playersSceneInView || characterToken(view.tokens, character.id, playerScene) !== undefined;
+    const here = !playersSceneInView || characterOnPlayersScene(view, character.id);
     add({
       key: `c:${character.id}`,
       ref: { characterId: character.id },
@@ -129,16 +139,16 @@ export function defaultTargets(view: View, from: AskFrom, viewing?: string | nul
  * rolls nothing of its own (docs/design/design-v1-token-panel.md 3.3), so neither
  * bar offers "Request a roll" for it and the sheet does not list it.
  */
-export function askTarget(view: Pick<RoomState, "members" | "characters" | "meta">, token: Token): TargetOption | null {
+export function askTarget(view: Pick<RoomState, "members" | "characters" | "meta" | "scenes">, token: Token): TargetOption | null {
   if (token.kind === "object" || !playersToken(view, token)) return null;
   const character = "ref" in token.actor ? view.characters[token.actor.ref] : undefined;
   if (character && anyPlayer(view, character.ownerIds)) return { key: `c:${character.id}`, ref: { characterId: character.id }, name: character.name, ticked: true };
-  if (token.sceneId === view.meta.playerSceneId) return { key: `t:${token.id}`, ref: { tokenId: token.id }, name: displayName(token), ticked: true };
+  if (onPlayersScene(view, token.sceneId)) return { key: `t:${token.id}`, ref: { tokenId: token.id }, name: displayName(token), ticked: true };
   return { key: `t:${token.id}`, ref: { tokenId: token.id }, name: displayName(token), ticked: false, why: "not on the players' scene", blocked: true };
 }
 
 /** Whether a token action bar offers "Request a roll": some selected creature can be asked, by the rule the sheet ticks them by. */
-export function offersRequest(view: Pick<RoomState, "members" | "characters" | "meta">, tokens: readonly Token[]): boolean {
+export function offersRequest(view: Pick<RoomState, "members" | "characters" | "meta" | "scenes">, tokens: readonly Token[]): boolean {
   return tokens.some((t) => {
     const option = askTarget(view, t);
     return option !== null && option.blocked !== true;
@@ -663,11 +673,11 @@ export function newestFirst(rolls: Readonly<Record<string, RollRequest | undefin
  * target missing from it may well be on the players' scene still, and is
  * not called removed.
  */
-export function targetName(view: Pick<RoomState, "tokens" | "characters" | "meta">, target: Pick<RollTarget, "tokenId" | "characterId">, viewing?: string | null): string {
+export function targetName(view: Pick<RoomState, "tokens" | "characters" | "meta" | "scenes">, target: Pick<RollTarget, "tokenId" | "characterId">, viewing?: string | null): string {
   if (target.tokenId !== undefined) {
     const token = view.tokens[target.tokenId];
     if (token) return displayName(token);
-    return viewing !== undefined && viewing !== view.meta.playerSceneId ? "A token not on this scene" : "A removed token";
+    return viewing !== undefined && !viewingPlayersScene(view, viewing) ? "A token not on this scene" : "A removed token";
   }
   return view.characters[target.characterId ?? ""]?.name ?? "A removed character";
 }

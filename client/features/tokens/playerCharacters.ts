@@ -1,5 +1,6 @@
 import { LIMITS } from "#shared/limits.ts";
 import type { Character, RoomState, Scene } from "#shared/model.ts";
+import { onPlayersScene } from "#shared/rules/floors.ts";
 import { sceneGrid } from "#shared/rules/grid.ts";
 import type { TokenInput } from "#shared/protocol.ts";
 import { ownsCharacter } from "./access.ts";
@@ -11,7 +12,7 @@ import { characterToken, occupiedBoxes, sizeFootprint, spreadPositions, type Poi
  * (shared/permissions.ts). These only keep the buttons honest about it.
  */
 
-type View = Pick<RoomState, "meta" | "characters" | "tokens">;
+type View = Pick<RoomState, "meta" | "characters" | "tokens" | "scenes">;
 
 /** Whether this player may make another character now, and why not when they may not. */
 export function newCharacterState(view: View, memberId: string): { allowed: true } | { allowed: false; reason: "off" | "full" } {
@@ -40,7 +41,7 @@ export function playerToken(input: {
   id: string;
 }): TokenInput | null {
   const { view, scene, character } = input;
-  if (view.meta.settings.playersCreateCharacters !== true || view.meta.playerSceneId !== scene.id) return null;
+  if (view.meta.settings.playersCreateCharacters !== true || !onPlayersScene(view, scene.id)) return null;
   if (!ownsCharacter(input.memberId, character) || onScene(view, character.id, scene.id)) return null;
   const fp = sizeFootprint(character.size);
   const [at] = spreadPositions({ grid: sceneGrid(scene), center: input.center, footprint: fp, count: 1, bounds: scene.bounds, occupied: occupiedBoxes(Object.values(view.tokens), scene.id) });

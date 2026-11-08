@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { JournalPage, Pin } from "#shared/model.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
+import { room, scene } from "#shared/testutil.ts";
 import { editDraft, saveAnswered, saveSent, saveState } from "../journal/pendingSave.ts";
 import { isometric, toView } from "../../lib/view.ts";
 import { viewToScreen } from "../../lib/camera.ts";
-import { dmOnlyPin, PIN_HEIGHT_PX, pinAt, pinTip, pinAudience, pinCommit, pinDraftOf, pinOutline, pinSaveAnswer, pinTapCounts, pinToolTap, pinUnder, withDmOnly, withPage, withPageGone } from "./rules.ts";
+import { dmOnlyPin, PIN_HEIGHT_PX, pinAt, pinTip, pinAudience, pinCommit, pinDraftOf, pinOutline, pinSaveAnswer, pinTapCounts, pinToolTap, pinUnder, withDmOnly, withPage, withPageGone, playersAwayFrom } from "./rules.ts";
 
 const page = (id: string, title: string, access: JournalPage["access"]): JournalPage => ({ id, rev: 0, title, access, blocks: [] });
 const PAGES = { all: page("all", "Tavern", "all"), dm: page("dm", "Villain plans", "dm"), thorn: page("thorn", "Old Map", { member: "m1" }), mira: page("mira", "Letter", { member: "m2" }) };
@@ -199,5 +200,33 @@ describe("map pins", () => {
     assert.equal(withPageGone(linked, PAGES), linked);
     const none = pinDraftOf(pin());
     assert.equal(withPageGone(none, {}), none);
+  });
+});
+
+describe("when players are away from a pin", () => {
+  function table() {
+    const state = room();
+    state.scenes.s1 = scene("s1", { floor: { of: "s1", level: 0, name: "Ground floor" } });
+    state.scenes.up = scene("up", { floor: { of: "s1", level: 1, name: "Upper floor" } });
+    state.scenes.s2 = scene("s2");
+    state.meta.playerSceneId = "s1";
+    return state;
+  }
+
+  test("names a floor when the players are on another floor of the pin's scene, else a scene", () => {
+    const state = table();
+    assert.equal(playersAwayFrom(state, "s1"), null);
+    assert.equal(playersAwayFrom(state, "up"), "floor", "a floor not reached");
+    assert.equal(playersAwayFrom(state, "s2"), "scene");
+    state.openFloors = { up: { sceneId: "up", rev: 0 } };
+    assert.equal(playersAwayFrom(state, "up"), null, "an opened floor");
+  });
+
+  test("a scene without floors keeps the players' scene rule, a blackout included", () => {
+    const state = room();
+    state.meta.playerSceneId = "s1";
+    state.meta.view = { ...state.meta.view, blackout: true };
+    assert.equal(playersAwayFrom(state, "s1"), null);
+    assert.equal(playersAwayFrom(state, "s2"), "scene");
   });
 });

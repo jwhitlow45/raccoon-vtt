@@ -329,7 +329,8 @@ function CastBlockView(props: Parameters<typeof RowCast>[0] & { spec: CastBlock 
     const now = room.getState().view;
     const at = now ? casterToken(now, spec.creature, sceneId) : undefined;
     if (!at || !now) return null;
-    return askInput({ caster: at.id, sceneId: now.meta.playerSceneId ?? at.sceneId, spell: spec.spell, slot, area: spec.area, targets: spec.area ? [] : selectionTargets(now, room.getState().local.selectedIds, at.id, sceneId), roll: named?.key });
+    // On a scene with floors the ask lives on the caster's own floor, where the server checks caster, targets and area together.
+    return askInput({ caster: at.id, sceneId: now.scenes[at.sceneId]?.floor !== undefined ? at.sceneId : (now.meta.playerSceneId ?? at.sceneId), spell: spec.spell, slot, area: spec.area, targets: spec.area ? [] : selectionTargets(now, room.getState().local.selectedIds, at.id, sceneId), roll: named?.key });
   };
   const go = (withRoll: boolean, override?: RollModeOverride) => {
     const input = ask();

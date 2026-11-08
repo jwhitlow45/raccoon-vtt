@@ -63,4 +63,33 @@ describe("weatherFor", () => {
     delete view.scenes.cellar!.weather;
     assert.equal(weatherFor({ view }, { characterId: "pat" }, "forest"), undefined);
   });
+
+  describe("floors", () => {
+    function tower(): RoomState {
+      const s = room({
+        characters: { pat: character("pat", { name: "Pat", ownerIds: ["p1"] }) },
+        tokens: {
+          low: token("low", { sceneId: "ground", kind: "pc", actor: { ref: "pat" } }),
+          high: token("high", { sceneId: "upper", kind: "pc", actor: { ref: "pat" } }),
+        },
+      });
+      s.scenes.ground = scene("ground", { weather: RAIN, floor: { of: "ground", level: 0, name: "Ground floor" } });
+      s.scenes.upper = scene("upper", { weather: SNOW, floor: { of: "ground", level: 1, name: "Upper floor" } });
+      s.scenes.elsewhere = scene("elsewhere");
+      s.meta.playerSceneId = "ground";
+      return s;
+    }
+
+    test("a character stands in the weather of the floor shown when its token is there", () => {
+      assert.deepEqual(weatherFor({ view: tower() }, { characterId: "pat" }, "upper"), SNOW);
+    });
+
+    test("else of the lowest floor it stands on, and a token is in its own floor's weather", () => {
+      const view = tower();
+      assert.deepEqual(weatherFor({ view }, { characterId: "pat" }, "elsewhere"), RAIN);
+      delete view.tokens.low;
+      assert.deepEqual(weatherFor({ view }, { characterId: "pat" }, "elsewhere"), SNOW);
+      assert.deepEqual(weatherFor({ view }, { tokenId: "high" }, "ground"), SNOW);
+    });
+  });
 });

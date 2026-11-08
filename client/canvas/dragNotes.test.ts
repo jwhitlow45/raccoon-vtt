@@ -174,6 +174,45 @@ describe("a creature a player drops on a per-player vision scene (docs/design/de
   });
 });
 
+describe("a creature a player drops on a floor", () => {
+  function floorTable() {
+    const state = room();
+    state.scenes.s1 = { ...state.scenes.s1!, floor: { of: "s1", level: 0, name: "Ground floor" } };
+    state.scenes.up = { ...state.scenes.s1, id: "up", vision: { on: true, light: "dark", perPlayer: true }, floor: { of: "s1", level: 1, name: "Upper floor" } };
+    state.openFloors = { up: { sceneId: "up", rev: 0 } };
+    state.tokens.gob = token("gob", { name: "Goblin", sceneId: "up", x: 5, y: 2 });
+    let view: RoomState = state;
+    const listeners = new Set<() => void>();
+    const store = { getState: () => ({ view }), subscribe: (l: () => void) => (listeners.add(l), () => void listeners.delete(l)) };
+    const notes: string[] = [];
+    const moves = [{ token: { ...state.tokens.gob!, aboveFog: false }, owns: false, x: 30, y: 20 }];
+    const watch = watchDrop({ role: "player", store, moves, notify: (text) => notes.push(text) })!;
+    const set = (next: RoomState) => {
+      view = next;
+      for (const l of listeners) l();
+    };
+    return { state, watch, notes, set };
+  }
+
+  test("is named while the players still see that floor, by that floor's own vision rule", () => {
+    const t = floorTable();
+    t.watch.sent(1);
+    const { gob: _gone, ...rest } = t.state.tokens;
+    t.set({ ...t.state, tokens: rest });
+    t.watch.answer({ t: "token.moveMany", moves: [{ tokenId: "gob", x: 30, y: 20 }] }, "taken");
+    assert.deepEqual(t.notes, ["Goblin is out of your sight now."]);
+  });
+
+  test("says nothing once the players no longer see that floor", () => {
+    const t = floorTable();
+    t.watch.sent(1);
+    const { gob: _gone, ...rest } = t.state.tokens;
+    t.set({ ...t.state, tokens: rest, openFloors: {} });
+    t.watch.answer({ t: "token.moveMany", moves: [{ tokenId: "gob", x: 30, y: 20 }] }, "taken");
+    assert.deepEqual(t.notes, []);
+  });
+});
+
 describe("a creature a player drops on a vision scene", () => {
   test("is named once the server took the move and no longer sends it, when it lands out of the party's sight", () => {
     const t = darkTable();

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import type { Scene } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import { P1, apply, character, room, token } from "#shared/testutil.ts";
 import { newCharacterState, onScene, playerToken } from "./playerCharacters.ts";
@@ -42,6 +43,15 @@ describe("a player's own characters", () => {
     state.tokens.t1 = token("t1", { kind: "pc", actor: { ref: "c1" }, x: 5, y: 4 });
     assert.ok(onScene(state, "c1", "s1"));
     assert.equal(playerToken({ view: state, scene, character: state.characters.c1!, memberId: "p1", center: { x: 5, y: 4 }, id: "t2" }), null);
+  });
+
+  test("a token goes on any floor of the players' scene, never on another scene", () => {
+    const state = setup();
+    state.scenes.s1 = { ...state.scenes.s1!, floor: { of: "s1", level: 0, name: "Ground floor" } };
+    state.scenes.up = { ...state.scenes.s1, id: "up", floor: { of: "s1", level: 1, name: "Upper floor" } };
+    const place = (scene: Scene | undefined) => playerToken({ view: state, scene: scene!, character: state.characters.c1!, memberId: "p1", center: { x: 3, y: 3 }, id: "t" });
+    assert.equal(place(state.scenes.up)?.sceneId, "up");
+    assert.equal(place(state.scenes.s2), null);
   });
 
   test("never for someone else's character, another scene, or with the setting off", () => {

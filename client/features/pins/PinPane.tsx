@@ -25,7 +25,7 @@ import { PaneFooter } from "../builder/PaneFooter.tsx";
 import { accessText, groupPages } from "../journal/draft.ts";
 import { journalSlot } from "../journal/store.ts";
 import { closedAnswerText, editDraft, pendingCloseText, saveAnswered, saveNotSent, saveSent, saveState } from "../journal/pendingSave.ts";
-import { pinAudience, pinCommit, pinDraftOf, pinSaveAnswer, pinScreenBox, withDmOnly, withPage, withPageGone, type PinDraft, type PinView } from "./rules.ts";
+import { pinAudience, pinCommit, pinDraftOf, pinSaveAnswer, pinScreenBox, withDmOnly, withPage, withPageGone, playersAwayFrom, type PinDraft, type PinView } from "./rules.ts";
 
 const EMPTY_PAGES: Record<string, JournalPage> = {};
 const EMPTY_MEMBERS: Record<string, Member> = {};
@@ -119,7 +119,7 @@ export function PinEditor(props: { pin: Pin; onClose(): void; dismissRef: { curr
   const scope = useRoomScope();
   const pages = useRoomView((s) => s.view?.journal ?? EMPTY_PAGES);
   const members = useRoomView((s) => s.view?.members ?? EMPTY_MEMBERS);
-  const playerSceneId = useRoomView((s) => s.view?.meta.playerSceneId ?? null);
+  const playersAway = useRoomView((s) => (s.view ? playersAwayFrom(s.view, pin.sceneId) : null));
   const fog = useRoomView((s) => s.view?.scenes[pin.sceneId]?.fogEnabled === true);
   // The draft locks while Done is pending (journal/pendingSave.ts), so nothing changed then is lost when the acknowledgment closes the pane.
   const [state, setState] = useState(() => saveState<PinDraft>(pinDraftOf(pin)));
@@ -271,7 +271,7 @@ export function PinEditor(props: { pin: Pin; onClose(): void; dismissRef: { curr
       </div>
       {draft.autoDmOnly === "restricted" ? <Note>DM only turned on, because the page it was linked to is not for every player. Turn DM only off to let players see the pin.</Note> : null}
       {draft.autoDmOnly === "deleted" ? <Note>DM only turned on, because the page it was linked to was deleted. Turn DM only off to let players see the pin.</Note> : null}
-      {!draft.dmOnly && audience !== "Only the DM" && playerSceneId !== pin.sceneId ? <Help>Players are on another scene, so they see it once they come here.</Help> : null}
+      {!draft.dmOnly && audience !== "Only the DM" && playersAway !== null ? <Help>Players are on another {playersAway}, so they see it once they come here.</Help> : null}
       {fog && !draft.dmOnly && audience !== "Only the DM" ? <Help>The fog still hides it while it covers the pin.</Help> : null}
       {commit.kind === "tooLong" ? <Note>A label is at most {MAX_NAME} characters.</Note> : null}
       {failure !== null ? (

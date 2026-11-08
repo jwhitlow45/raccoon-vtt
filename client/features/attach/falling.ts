@@ -61,7 +61,7 @@ export function fallText(rider: Token, mount: Token): string {
  * rider, a Dexterity save against DC 10. Null when no player plays the
  * rider, whose save the DM rolls at the table.
  */
-export function fallAsk(view: Pick<RoomState, "members" | "characters" | "meta">, rider: Token): AskFrom | null {
+export function fallAsk(view: Pick<RoomState, "members" | "characters" | "meta" | "scenes">, rider: Token): AskFrom | null {
   if (!askTarget(view, rider)) return null;
   return { kind: "selection", tokenIds: [rider.id], fill: { test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 10 } };
 }

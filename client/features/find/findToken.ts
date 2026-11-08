@@ -4,6 +4,7 @@ import { TOP_DOWN, toView, viewBox, type View, type ViewBox } from "../../lib/vi
 import { drawnAt, footprint } from "../../lib/scene.ts";
 import { liftIn, tokenBase, type BoardPick } from "../../canvas/boardPick.ts";
 import type { FootprintToken } from "#shared/rules/footprint.ts";
+import { sameScene } from "#shared/rules/floors.ts";
 import { ownsToken } from "../tokens/access.ts";
 
 /**
@@ -24,16 +25,18 @@ const KIND_ORDER: Record<Token["kind"], number> = { pc: 0, npc: 1, monster: 1, o
  * the one found last, wrapping round. Player characters come first, then
  * other creatures, then objects, each in the order they were made (token
  * ids are UUIDv7). Ownership counts through a character, as on the server.
- * Null when they own none there.
+ * With floors, the next one on any floor the player holds (D-261107-222),
+ * and the caller shows the floor the token stands on. Null when they own
+ * none there.
  */
 export function nextOwnToken(input: {
-  view: Pick<RoomState, "tokens" | "characters">;
+  view: Pick<RoomState, "tokens" | "characters" | "scenes">;
   sceneId: SceneId;
   memberId: MemberId;
   lastId: string | null;
 }): Token | null {
   const own = Object.values(input.view.tokens)
-    .filter((t) => t.sceneId === input.sceneId && ownsToken(input.view, input.memberId, t))
+    .filter((t) => sameScene(input.view, t.sceneId, input.sceneId) && ownsToken(input.view, input.memberId, t))
     .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   if (own.length === 0) return null;
   const last = own.findIndex((t) => t.id === input.lastId);

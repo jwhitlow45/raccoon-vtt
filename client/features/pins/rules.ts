@@ -1,10 +1,12 @@
-import type { JournalPage, Member, Pin } from "#shared/model.ts";
+import type { JournalPage, Member, Pin, RoomState } from "#shared/model.ts";
+import { playersSee } from "#shared/rules/floors.ts";
 import { MAX_NAME, type PinInput } from "#shared/protocol.ts";
 import { viewToScreen, type Camera, type Point } from "../../lib/camera.ts";
 import { TOP_DOWN, toView, type View, type ViewPoint } from "../../lib/view.ts";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { cleanLabelText } from "../builder/labelEdit.ts";
+import { placeKind } from "../floors/words.ts";
 
 /**
  * Map pins on this side (docs/design/design-v1-dm-tools.md 3.8): the marker's
@@ -222,4 +224,15 @@ export function pinSaveAnswer(answer: OpAnswer, refusal?: OpRefusal): PinSaveAns
 export function dmOnlyPin(pin: Pick<Pin, "visibility" | "pageId">, pages: Readonly<Record<string, Pick<JournalPage, "access">>>): boolean {
   if (pin.visibility === "dm") return true;
   return pin.pageId !== undefined && pages[pin.pageId]?.access === "dm";
+}
+
+/**
+ * What the pin's pane tells the DM when players cannot see the pin's place:
+ * the kind of place they are on instead, or null when they see it. On a
+ * scene with floors, players see a pin only on a floor they see now (floors
+ * design 8.3), else only on the players' scene.
+ */
+export function playersAwayFrom(room: RoomState, sceneId: string): "floor" | "scene" | null {
+  const seen = room.scenes[sceneId]?.floor !== undefined ? playersSee(room, sceneId) : room.meta.playerSceneId === sceneId;
+  return seen ? null : placeKind(room, room.meta.playerSceneId ?? "", sceneId);
 }

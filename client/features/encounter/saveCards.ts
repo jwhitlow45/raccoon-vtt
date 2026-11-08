@@ -2,6 +2,7 @@ import type { D20Test } from "#shared/dice/bonus.ts";
 import { advantageFields, type AdvantageSource } from "#shared/dice/formula.ts";
 import type { Effect, RollChange, RollTarget, RoomState } from "#shared/model.ts";
 import { anyPlayer, playersToken } from "#shared/project.ts";
+import { onPlayersScene } from "#shared/rules/floors.ts";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
 import { dcOnLine, startsSecret } from "#shared/dice/secret.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
@@ -91,7 +92,7 @@ export type SaveFacts = {
   legendaryLeft: number;
 };
 
-type FactsView = Pick<RoomState, "tokens" | "characters" | "members" | "meta">;
+type FactsView = Pick<RoomState, "tokens" | "characters" | "members" | "meta" | "scenes">;
 
 export function saveFacts(view: FactsView, target: ActorTarget): SaveFacts {
   const name = entryName(view, target);
@@ -103,7 +104,7 @@ export function saveFacts(view: FactsView, target: ActorTarget): SaveFacts {
   const token = view.tokens[target.tokenId];
   const played = token !== undefined && playersToken(view, token);
   const actor = token && "inline" in token.actor ? token.actor.inline : undefined;
-  return { name, played, askable: played && token.sceneId === view.meta.playerSceneId, legendaryLeft: legendaryLeft(actor) };
+  return { name, played, askable: played && onPlayersScene(view, token.sceneId), legendaryLeft: legendaryLeft(actor) };
 }
 
 /** An effect as its chip names it: "Frightened", "Concentrating: Bless", a custom effect's label. */
