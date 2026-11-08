@@ -657,7 +657,7 @@ export class KeptRig {
     // The board's render sets the draw context at its own camera, which a draw sets again from the stage.
     const relief = this.#relief;
     const turn = this.turn;
-    Object.assign(this.#dc, { turn, camera: this.camera, view: cull.view, openings: (region: Parameters<NonNullable<DrawContext["openings"]>>[0], box: VBox, asker: object) => relief.openingsMeeting(region, turn, box, asker) });
+    Object.assign(this.#dc, { turn, camera: this.camera, view: cull.view, openings: (region: Parameters<NonNullable<DrawContext["openings"]>>[0], box: VBox, asker?: object) => relief.openingsMeeting(region, turn, box, asker) });
     this.items = relief.layout(this.turn, cull.box, standees, this.areas.map((a) => this.#volume(a)));
     this.rendered = { key: cull.key, box: cull.box };
     this.pendingLayout = false;

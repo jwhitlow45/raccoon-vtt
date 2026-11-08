@@ -36,7 +36,7 @@ export type DrawContext = {
   /** The canvas's view box, so a piece off screen costs a box test. */
   view: VBox;
   /** The cells of a pit region whose openings meet a view box (buckets.ts openingsMeeting). Absent, every cell of the region. */
-  openings?: (region: PitRegion, box: VBox, asker: object) => readonly CellPiece[];
+  openings?: (region: PitRegion, box: VBox, asker?: object) => readonly CellPiece[];
   /** The ground's pixels as one pattern for every top a relief draw copies, made again once the ground has drawn since. Absent, each copy makes its own. */
   groundCopy?: GroundCopy;
   /**
@@ -656,16 +656,48 @@ function outlineTops(g: CanvasRenderingContext2D, cells: readonly CellPiece[], d
  * the nearer one shows, each with its own pixels and one shade.
  */
 function drawPit(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext, view: VBox): void {
-  g.save();
-  g.beginPath();
-  for (const o of openingsOf(p, dc)) addPoly(g, shapeOf(o, dc.turn).atZero);
-  g.clip("nonzero");
   copyGround(g, [p], dc, theme.relief.side, view);
   const floor = topsPath(g, [p], dc.turn);
   g.fillStyle = theme.relief.pitShade;
   fillWith(g, floor);
   drawSides(g, p, dc);
+}
+
+/**
+ * Pits drawn one after another, each as `drawPit` draws it, inside one
+ * clip: the openings of their region that meet any of their bounds. A pit's
+ * own clip held the openings meeting its bounds, and a pit as deep as its
+ * region is wide on screen meets dozens, so a scene sunk 100 ft spent most
+ * of each draw building clip paths, the same openings again for each pit
+ * (SUNKEN-PAN). An opening that meets none of a pit's bounds adds nothing
+ * inside them, so each pit keeps its pixels, but where its antialiased edge
+ * reaches past its bounds. Only pits of one region share a clip: a pit
+ * with none draws inside its own opening alone.
+ */
+function drawPits(g: CanvasRenderingContext2D, pits: readonly CellPiece[], dc: DrawContext, view: VBox): void {
+  g.save();
+  g.beginPath();
+  for (const o of pitOpenings(pits, dc)) addPoly(g, shapeOf(o, dc.turn).atZero);
+  g.clip("nonzero");
+  for (const p of pits) drawPit(g, p, dc, view);
   g.restore();
+}
+
+/** The openings at 0 a run of pits of one region draws inside: those meeting any of their bounds, or a lone pit's own (openingsOf). */
+function pitOpenings(pits: readonly CellPiece[], dc: DrawContext): readonly CellPiece[] {
+  const first = pits[0]!;
+  if (pits.length === 1 || !first.region) return openingsOf(first, dc);
+  if (!dc.openings) return first.region.cells;
+  const box: VBox = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for (const p of pits) {
+    const b = boundsAt(p, dc.turn);
+    box.x0 = Math.min(box.x0, b.x0);
+    box.y0 = Math.min(box.y0, b.y0);
+    box.x1 = Math.max(box.x1, b.x1);
+    box.y1 = Math.max(box.y1, b.y1);
+  }
+  // A run's pits change with what a draw paints, so the openings are found afresh, a scan of the region's grid over the box.
+  return dc.openings(first.region, box);
 }
 
 /**
@@ -1064,10 +1096,22 @@ export function drawRun(g: CanvasRenderingContext2D, pieces: readonly DrawPiece[
     }
     // A stair's steps can stand over tops held at their lift, so those are copied first (ISOD-08).
     flush();
+    if (p.kind === "pit") {
+      // Pits of one region next in the order share a clip (drawPits). A pit with no region draws alone.
+      const pits: CellPiece[] = [];
+      let end = i;
+      for (; end < pieces.length; end++) {
+        const q = pieces[end]!;
+        if (q.kind !== "pit" || (end > i && (!p.region || q.region !== p.region))) break;
+        if (paints(paintedBox(q, dc), dc, view)) pits.push(q);
+      }
+      i = end - 1;
+      if (pits.length > 0) drawPits(g, pits, dc, view);
+      continue;
+    }
     if (!paints(paintedBox(p, dc), dc, view)) continue;
     if (p.kind === "wall") drawWall(g, p, dc);
-    else if (p.kind === "steps") drawSteps(g, p, dc, view);
-    else drawPit(g, p, dc, view);
+    else drawSteps(g, p, dc, view);
   }
   flush();
   g.restore();

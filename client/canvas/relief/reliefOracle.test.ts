@@ -454,3 +454,63 @@ describe("the relief's terrain against a ray oracle (design 10.4)", () => {
     }
   });
 });
+
+describe("a deep depression's pits share their region's clip (SUNKEN-PAN)", () => {
+  /** A scene sunk `depth` cells over all of it but a raised rim, so its pits are one region whose openings each pit's depth reaches across. */
+  const sunk = (grid: Grid, side: number, depth: number): Scene => {
+    const ground = new Map<string, number>();
+    for (let row = 0; row < side + 2; row++) for (let col = 0; col < side + 2; col++) ground.set(`${col},${row}`, col < 2 || row < 2 ? 0 : -depth);
+    return { grid, w: side, h: side, ground };
+  };
+
+  test("a run of one region's pits draws inside one clip, each opening in it once, and every point still shows the oracle's surface", () => {
+    for (const [name, grid] of GRIDS) {
+      const s = sunk(grid, 16, 10);
+      const relief = relieve(s);
+      const items = relief.layout(0, { x0: -1e6, y0: -1e6, x1: 1e6, y1: 1e6 }, []);
+      let clips = 0;
+      let polys = 0;
+      let open = 0;
+      const g = {
+        save() {},
+        restore() {},
+        beginPath: () => void (open = 0),
+        moveTo: () => void open++,
+        lineTo() {},
+        closePath() {},
+        rect() {},
+        clip: () => {
+          clips++;
+          polys += open;
+        },
+        fill() {},
+        stroke() {},
+        setTransform() {},
+        createPattern: () => ({ setTransform() {} }),
+        set fillStyle(_: unknown) {},
+        set strokeStyle(_: unknown) {},
+        set lineWidth(_: unknown) {},
+        set globalAlpha(_: unknown) {},
+      } as unknown as CanvasRenderingContext2D;
+      const dc: DrawContext = {
+        turn: 0,
+        camera: CAM,
+        pixelRatio: 1,
+        ground: { width: 4000, height: 4000 } as HTMLCanvasElement,
+        textures: {},
+        view: { x0: -1e6, y0: -1e6, x1: 1e6, y1: 1e6 },
+        openings: (r, box, asker) => relief.openingsMeeting(r, 0, box, asker),
+      };
+      const runs = items.filter((i) => i.kind === "run");
+      const pits = runs.flatMap((r) => r.pieces).filter((p) => p.kind === "pit").length;
+      for (const item of runs) drawRun(g, item.pieces, dc);
+      assert.equal(relief.regions.length, 1, `${name}: one region`);
+      assert.ok(pits > 150, `${name}: ${pits} pits`);
+      // Each pit clipped by the openings its depth reaches across built a clip of dozens each, thousands in all.
+      assert.ok(clips <= runs.length, `${name}: ${clips} clips for ${runs.length} runs of ${pits} pits`);
+      assert.ok(polys <= relief.regions[0]!.cells.length * runs.length, `${name}: ${polys} openings in the clips, the region has ${relief.regions[0]!.cells.length}`);
+      const rand = mulberry32(0x5e4);
+      for (const turn of [0, 1, 2, 3] as Turn[]) assert.deepEqual(check(s, turn, rand, 40, relief), [], `${name} turn ${turn}`);
+    }
+  });
+});
