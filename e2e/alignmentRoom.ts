@@ -7043,6 +7043,68 @@ export function clockTests(): void {
     }
     assert.deepEqual(lines, [], "The clock popover and the expiry notice overlap");
   });
+
+  test(`ck-e. daylight: the Light group with Time of day and its help with the clock shown, hidden and stopped, and the Time panel's Dawn and dusk row open and refused, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+    const lines: string[] = [];
+    const before = dmSocket.state?.scenes[run.sceneId]?.vision;
+    try {
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(atName(at));
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, at.size, at.scale);
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        await daylightScreens(sweep, page);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { vision: { on: before?.on === true, light: before?.light ?? "bright", byClock: false } } }).catch(() => {});
+      if (dmSocket.state?.clock) await ops.send({ t: "clock.stop" }).catch(() => {});
+    }
+    assert.deepEqual(lines, [], "Time of day's or Dawn and dusk's screen out of line");
+  });
+}
+
+/**
+ * Daylight's screens at one size (docs/design/design-v1-calendar-c2c3.md 9): the Light group of the
+ * scene settings with Time of day chosen, its help with the clock shown, hidden and stopped, and the
+ * Time panel's Dawn and dusk row open, then refused under its field. Party vision is on for the scene
+ * and the clock starts at 8:00 AM, and the test puts both back after.
+ */
+async function daylightScreens(sweep: Sweep, page: Page): Promise<void> {
+  await closeSheets(page);
+  await escapeAll(page);
+  if (dmSocket.state?.clock) await ops.send({ t: "clock.stop" });
+  await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { vision: { on: true, light: "bright", byClock: true } } });
+  await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
+  const scenes = await openDmPanel(page, "Scenes");
+  const light = sceneGroup(scenes, "Light and weather");
+  await light.getByRole("radio", { name: "Time of day", exact: true }).waitFor();
+  const help = (words: string) => light.getByText(words, { exact: false }).first().waitFor();
+  await help("It is Bright now.");
+  await light.scrollIntoViewIfNeeded();
+  await sweep.measure(page, "dl-light", light);
+  await ops.send({ t: "clock.update", shown: false });
+  await help("they see the light change");
+  await sweep.measure(page, "dl-light-hidden", light);
+  await ops.send({ t: "clock.stop" });
+  await help("The clock is stopped");
+  await sweep.measure(page, "dl-light-stopped", light);
+  await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
+
+  await closeSheets(page);
+  const panel = await openPanel(page, "Time");
+  const row = panel.getByRole("heading", { name: "Dawn and dusk", exact: true }).locator("xpath=ancestor::section[1]");
+  await row.getByRole("button", { name: "Change", exact: true }).click();
+  await row.getByLabel("Dawn", { exact: true }).waitFor();
+  await row.scrollIntoViewIfNeeded();
+  await sweep.measure(page, "dl-dawn-dusk-open", row);
+  await row.getByLabel("Dawn", { exact: true }).fill("11:01");
+  await row.getByRole("button", { name: "Save", exact: true }).click();
+  await row.getByText("Pick a dawn from 12:00 AM to 11:00 AM.", { exact: true }).waitFor();
+  await sweep.measure(page, "dl-dawn-dusk-refused", row);
+  await row.getByRole("button", { name: "Cancel", exact: true }).click();
+  await row.getByRole("button", { name: "Change", exact: true }).waitFor();
 }
 
 /** The Conditions section of an open character page. */
