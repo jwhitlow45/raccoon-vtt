@@ -5,6 +5,7 @@ import { DAIS_RISE } from "./heights.ts";
 import { blockPlaceholder, PAGE_PLACEHOLDER, pinPlaceholder } from "./ops.ts";
 import type { DungeonPlan, KeyDoor, KeyRoom } from "./plan.ts";
 import { CHOICE_NAMES, HEIGHT_PRESETS, LIT_PRESETS, SECRET_PRESETS, SIZE_SIDES, TRAP_PRESETS, type DungeonSettings } from "./settings.ts";
+import { THEME_SPECS } from "./themes.ts";
 import { sizeLine } from "./words.ts";
 
 /*
@@ -80,7 +81,8 @@ export function madeWith(s: DungeonSettings, feetPerCell: number): string {
     ...(s.deadEnds ? ["dead ends"] : []),
     `Heights ${onMarks(HEIGHT_PRESETS, s.heights, percent)}`,
     s.traps > 0 ? `Traps ${traps} at ${BAND_NAMES[s.band].toLowerCase()}` : `Traps ${traps}`,
-    `Secret doors ${onMarks(SECRET_PRESETS, s.secrets, twelfths)}`,
+    // The held pick stays in the settings on a Cave, which has no doors to hold it.
+    `Secret doors ${THEME_SPECS[s.theme].doors ? onMarks(SECRET_PRESETS, s.secrets, twelfths) : "None"}`,
     `Lit rooms ${onMarks(LIT_PRESETS, s.lit, percent)}`,
     `Dressing ${CHOICE_NAMES.dressing[s.dressing]}`,
     `${feetPerCell} ft squares`,

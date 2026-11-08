@@ -71,6 +71,12 @@ test("DG2B: Made with names each slider's mark, or its value off the marks, and 
   );
 });
 
+test("DG2B: on a Cave, Made with says Secret doors None whatever pick the DM holds", () => {
+  const line = madeWith({ ...DEFAULT_SETTINGS, theme: "cave", secrets: 5 }, 5);
+  assert.match(line, /Secret doors None,/);
+  assert.doesNotMatch(line, /Secret doors 5/);
+});
+
 /** A plan with one room of 6 by 8 squares raised 10 ft, for the design's example line. */
 function exampleRoom(extra: Partial<KeyRoom> = {}): { plan: DungeonPlan; k: KeyRoom } {
   const plan = twoRooms();
