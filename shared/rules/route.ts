@@ -3,7 +3,7 @@ import type { AttachKind, PathStop } from "../model.ts";
 import type { Blocker, BuildState } from "../ruleHooks.ts";
 import { legFeet, type DiagonalCounter, type DistanceSettings } from "./distance.ts";
 import { convexHull } from "./aoe.ts";
-import { canSqueeze, footprintRect, footprintSize, isSqueezed, occupiedHexes, placedOnHex, rangeAtInto, sizeCategory, snapStep, squeezedSize, stopFootprint, storedCenter, tokenRefHex, type CellRange, type PlacedToken, type SizeCategory } from "./footprint.ts";
+import { canSqueeze, footprintRect, footprintSize, isSqueezed, occupiedHexes, occupiedRange, placedOnHex, rangeAtInto, sizeCategory, snapStep, squeezedSize, stopFootprint, storedCenter, tokenRefHex, type CellRange, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
 import { hexDistance, hexKey, hexLine, hexNeighbors, type Hex, type HexGrid } from "./hex.ts";
@@ -978,10 +978,22 @@ export function routeSpots(build: BuildState, route: readonly RoutePoint[], toke
  * How `routeSpots` judges a walk's stands: the last spot's squeeze, as the
  * op has it, whether every spot between the ends stands only full size,
  * the ground that judges the spots between the ends from op version 37,
- * and whether a spot between them stands only where the move's own stand
- * test would leave the walker (`fullStand`, migrate.ts stopsStandClear).
+ * whether a spot between them stands only where the move's own stand
+ * test would leave the walker (`fullStand`, migrate.ts stopsStandClear),
+ * and how a point core reads that ground from op version 52.
  */
-export type StandRule = { squeeze?: boolean; fullBetween?: boolean; publicGround?: PublicGround; fullStand?: boolean };
+export type StandRule = {
+  squeeze?: boolean;
+  fullBetween?: boolean;
+  publicGround?: PublicGround;
+  fullStand?: boolean;
+  /**
+   * On that ground, whether a point core's stand reads its line and the
+   * squares its footprint covers at the spot and at the piece's start
+   * alone (`squareProof`, migrate.ts stopsByCoveredSquares).
+   */
+  covers?: boolean;
+};
 
 /**
  * The ground every player sees, as a stop between a walk's ends reads it
@@ -1010,14 +1022,22 @@ export type StandGroup = { readonly size: SizeCategory; readonly refs: readonly 
  * walk itself proves (`StandRule.publicGround`). The stand test reads the
  * leg from the piece's start, its core swept with the shifted paths half a
  * cell aside (none for a point core, which takes the straight path alone),
- * the core at the spot and, for a squeeze, the full footprint there. A
- * player's stored walk passed the leg test piece by piece, so a corner of
- * its route is a stand without reading a wall, and so is a spot exactly on
- * its piece's line for a point core. The straight walk's own route may
- * have passed only as its one whole leg (`routeStop`), so there only a
- * point core's spot on that whole leg's line is.
+ * the core at the spot and, for a squeeze, the full footprint there. So
+ * `live` asks whether all of that lies on the ground: the hull of the core
+ * at the piece's start, grown half a cell, and the footprint at the spot.
+ * With `covers` a point core asks three parts instead (D-261107-177, 255):
+ * its line, and the squares its footprint covers at the spot and at the
+ * piece's start, the ground the stand test reads under it there (movement.ts
+ * ledgeFloor). A point core cannot squeeze, so nothing else that test reads
+ * lies on a square its footprint only touches, and a Medium walker on the
+ * last revealed column stops there. A player's stored walk passed the leg
+ * test piece by piece, so a corner of its route is a stand without reading
+ * a wall, and so is a spot exactly on its piece's line for a point core.
+ * The straight walk's own route may have passed only as its one whole leg
+ * (`routeStop`), so there only a point core's spot on that whole leg's line
+ * is.
  */
-function squareProof(token: Walker, route: readonly RoutePoint[], start: Walker): { reach(from: Point, at: Point): Point[]; proven(i: number, end: boolean, at: Point): boolean } {
+function squareProof(token: Walker, route: readonly RoutePoint[], start: Walker, ground: PublicGround, covers: boolean): { live(from: Point, at: Point): boolean; proven(i: number, end: boolean, at: Point): boolean } {
   const core = coreSize(token);
   const point = core.w === 0 && core.h === 0;
   const grow = point ? 0 : 0.5;
@@ -1031,11 +1051,22 @@ function squareProof(token: Walker, route: readonly RoutePoint[], start: Walker)
   const first = route[0]!;
   const last = route[route.length - 1]!;
   const onLine = (a: Point, b: Point, w: Point) => Math.abs((b.x - a.x) * (w.y - a.y) - (b.y - a.y) * (w.x - a.x)) < SLACK;
+  // A hull half a cell inside the squares a footprint covers touches exactly those squares, a hair past touching included.
+  const covered = (at: Point): Point[] => {
+    const r = occupiedRange(SQUARES, { ...token, x: at.x, y: at.y });
+    return convexHull([
+      { x: r.x0 + 0.5, y: r.y0 + 0.5 },
+      { x: r.x1 - 0.5, y: r.y0 + 0.5 },
+      { x: r.x1 - 0.5, y: r.y1 - 0.5 },
+      { x: r.x0 + 0.5, y: r.y1 - 0.5 },
+    ]);
+  };
   return {
-    reach(from, at) {
+    live(from, at) {
       const a = storedCenter({ ...token, x: from.x, y: from.y });
       const c = storedCenter({ ...token, x: at.x, y: at.y });
-      return convexHull([
+      if (point && covers) return ground.hull(convexHull([a, c])) && ground.hull(covered(at)) && ground.hull(covered(from));
+      return ground.hull(convexHull([
         { x: a.x - hx, y: a.y - hy },
         { x: a.x + hx, y: a.y - hy },
         { x: a.x + hx, y: a.y + hy },
@@ -1044,7 +1075,7 @@ function squareProof(token: Walker, route: readonly RoutePoint[], start: Walker)
         { x: c.x + fx, y: c.y - fy },
         { x: c.x + fx, y: c.y + fy },
         { x: c.x - fx, y: c.y + fy },
-      ]);
+      ]));
     },
     proven(i, end, at) {
       if (!end && !(point && onLine(route[i]!, route[i + 1]!, at))) return false;
@@ -1084,7 +1115,7 @@ export function routeStands(build: BuildState, route: readonly RoutePoint[], tok
     return (pieces[i] ??= { endAt: walkEnds(build, trace[i]!), exact: latticePiece(b.x - a.x, b.y - a.y, lattice) });
   };
   const ground = opts.publicGround;
-  const proof = ground ? squareProof(token, route, trace[0]!) : null;
+  const proof = ground ? squareProof(token, route, trace[0]!, ground, opts.covers === true) : null;
   const known: RouteSpot[] = [];
   const spot = (s: number): RouteSpot => {
     const hit = known[s];
@@ -1102,7 +1133,7 @@ export function routeStands(build: BuildState, route: readonly RoutePoint[], tok
     const spotEnd = () => (ended ??= piece.endAt(p));
     const onGrid = multipleOf(w.x - token.x, grid) && multipleOf(w.y - token.y, grid);
     if (ground && proof && !last) {
-      if (ground.hull(proof.reach(at, w))) {
+      if (proof.live(at, p)) {
         // The stand test of op version 35, squeezes included, with the leg cut at the spot: the whole piece's sweep reads past it.
         const sq = squeezes && squeezeFits(build, spotEnd());
         const ok = (sq || onGrid) && !coreBlocked(build, spotEnd()) && (!blocks || legStop(build, at, { x: w.x, y: w.y, elevation: w.elevation }) === null);

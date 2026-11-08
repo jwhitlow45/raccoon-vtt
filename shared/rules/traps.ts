@@ -2,7 +2,7 @@ import { CHUNK_CELLS, FOG_SUBCELLS, MIN_HEIGHT_FT, type BuildChunk, type CellRec
 import { chunkKey, wallMidpoint } from "../keys.ts";
 import { gridOfScene, playersToken, seenByNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
-import { followsInSingleFileOnHexes, stopsFileApart, stopsOnPublicGround, stopsOnTrap, stopsStandClear, stopsStandFullSize } from "../migrate.ts";
+import { followsInSingleFileOnHexes, stopsByCoveredSquares, stopsFileApart, stopsOnPublicGround, stopsOnTrap, stopsStandClear, stopsStandFullSize } from "../migrate.ts";
 import { isWritable } from "../writable.ts";
 import { creaturesInArea, type AreaToken } from "./aoe.ts";
 import { holderOf, insideHolder, linkHolds, onHolder, seatHolds, walkerFor } from "./attach.ts";
@@ -1582,15 +1582,17 @@ function standSpots(walks: Walks, walk: Walk, before: RoomState, seen: (id: stri
 
 /**
  * How a stop judges a walk's spots between its ends, by the op's version:
- * from 36 only full size, and from 37 by the ground every player sees
- * (route.ts StandRule, migrate.ts stopsOnPublicGround).
+ * from 36 only full size, from 37 by the ground every player sees
+ * (route.ts StandRule, migrate.ts stopsOnPublicGround), and from 52 a
+ * point core by the squares it covers there (migrate.ts
+ * stopsByCoveredSquares).
  */
 function standRule(walks: Walks, before: RoomState, sceneId: string): StandRule {
   const rule: StandRule = { fullBetween: stopsStandFullSize(walks.opVersion), ...(stopsStandClear(walks.opVersion) ? { fullStand: true } : {}) };
   if (!stopsOnPublicGround(walks.opVersion)) return rule;
   let ground = walks.grounds.get(sceneId);
   if (!ground) walks.grounds.set(sceneId, (ground = groundMaker(before, sceneId)));
-  return { ...rule, publicGround: ground };
+  return { ...rule, publicGround: ground, ...(stopsByCoveredSquares(walks.opVersion) ? { covers: true } : {}) };
 }
 
 /**

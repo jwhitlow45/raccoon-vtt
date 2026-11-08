@@ -12,7 +12,7 @@ import { ownEntry } from "./records.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 39;
-export const OP_VERSION = 51;
+export const OP_VERSION = 52;
 
 export type MigrationStep = {
   from: number;
@@ -1255,6 +1255,22 @@ export const opMigrations: MigrationStep[] = [
     to: 51,
     apply: (op) => op,
   },
+  {
+    // Rules 50, lane C (docs/design/design-v1-traps.md 5.5): no op changes
+    // shape, so the step is the identity. From this version a stop between
+    // a walk's ends on squares reads, for a creature of one square or
+    // less, only the squares its footprint covers where it stands and where
+    // its piece starts, beside its line (`stopsByCoveredSquares`). Older
+    // ops replay by the rules they were written under, so a stored stop
+    // lands where it landed then.
+    // Deploy: back up first and reload open pages, since a DM's page
+    // predicts its own trap stops by the old rule. Rollback needs the
+    // backup only for a room with version 52 ops after its last snapshot,
+    // which an older build refuses to migrate down.
+    from: 51,
+    to: 52,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -1727,6 +1743,22 @@ export function followsInSingleFileOnHexes(opVersion: number | undefined): boole
  */
 export function seatsApartOnHexes(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 51);
+}
+
+/**
+ * Whether a stop between a walk's ends on squares judges a creature whose
+ * core is a point, one square or less (movement.ts coreSize), on the
+ * ground every player sees by three parts alone (D-261107-177, 255,
+ * route.ts StandRule.covers): its line from where its piece starts to the
+ * spot, and the squares its footprint covers at the spot and at the
+ * piece's start, never a square it only touches. So a Medium walker
+ * stopped on the last revealed column stops there. Ops stored before
+ * version 52 read the hull of its line and its footprint at the spot,
+ * every square that touches included, and replay so. Live ops carry no
+ * stored version and take today's rule.
+ */
+export function stopsByCoveredSquares(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 52);
 }
 
 /**
