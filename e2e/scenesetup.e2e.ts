@@ -848,7 +848,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
 
   test("dp-1a. the scene settings groups fold as the panel kit's groups, their summaries under the name where a phone's row is too narrow, and the scene's settings read in order", async () => {
     const SUMMARIES =
-      /^((Bright|Dim|Dark) · )?(Clear|.+)$|^(Explore|Reveal by hand|Everything|Custom)( · Per player)?$|^(No map image|Map image) · (Squares|Hex rows|Hex columns)(, [\d.]+ px)?$|^Walls (do not )?block moves$|^\d+ × \d+ (squares|hexes)( · Isometric)?$/;
+      /^((Bright|Dim|Dark) · )?(Clear|.+)$|^(Explore|Reveal by hand|Everything|Custom)( · Per player)?$|^(No map image|Map image) · (Squares|Hex rows|Hex columns)(, [\d.]+ px)?$|^Walls (do not )?block moves$|^\d+ × \d+ (squares|hexes)( · Isometric)?$|^(One floor|\d+ floors( · .+ shown)?)$/;
     // This run's server offers no sound files, so Scene sound is not drawn (docs/design/design-v1-scenes-reorg.md 5).
     const GROUPS: string[] = SCENE_GROUP_NAMES.filter((g) => g !== "Scene sound");
     const state = await signInAsDm();
@@ -880,8 +880,8 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
         assert.equal(await name.evaluate((el) => (el as unknown as { closest(s: string): { querySelector(s: string): { textContent: string | null } | null } | null }).closest("section")?.querySelector("h3")?.textContent), "This scene", `${at.name}: Scene name under This scene`);
 
         // A phone opens Light and weather alone, the group used in play, then the DM folds it too.
-        for (const [i, group] of GROUPS.entries()) assert.equal(await fold(group).getAttribute("aria-expanded"), i === 0 ? "true" : "false", `${at.name}: ${group} on a phone`);
-        await fold(GROUPS[0]!).click();
+        for (const group of GROUPS) assert.equal(await fold(group).getAttribute("aria-expanded"), group === "Light and weather" ? "true" : "false", `${at.name}: ${group} on a phone`);
+        await fold("Light and weather").click();
         const heads = await panel.evaluate((root) => {
           type R = { top: number; bottom: number; left: number; right: number; width: number; height: number };
           type E = { getAttribute(n: string): string | null; getBoundingClientRect(): R; querySelector(s: string): E | null; querySelectorAll(s: string): ArrayLike<E>; textContent: string | null; scrollWidth: number; clientWidth: number };

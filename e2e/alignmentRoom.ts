@@ -25,6 +25,7 @@ import { measureSpacing, spacingLines, type SpacingFinding } from "./helpers/spa
 import { moreMenuFixture } from "./helpers/menuFixture.ts";
 import { openGroup } from "./helpers/groups.ts";
 import { SCENE_GROUP_NAMES } from "./helpers/sceneGroups.ts";
+import { floorRoot } from "../client/features/floors/ids.ts";
 import { framesFor, silentFrames } from "../shared/audio/mp3Testutil.ts";
 
 /**
@@ -7994,6 +7995,107 @@ export function sceneSettingsTests(): void {
     assert.deepEqual(lines, [], "a hex scene's settings or Room settings out of line");
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     withinSnapshotBudget("hx4-a");
+  });
+  floorsRootTests();
+}
+
+/*
+ * flr-a: the screens of several floors (docs/design/design-v1-floors.md 13),
+ * measured at FU30_AT's sizes through the roots the contract names
+ * (client/features/floors/ids.ts): the Floors group folded and open, a
+ * floor's page on the top floor and on the lowest, which has no height row,
+ * the top bar's Floor button with its Floors menu or the Menu panel's Floor
+ * row where the bar folds it, and Move to floor's list in a token's bar. The
+ * Viewing notice is a player's, so it is measured in the lane that draws
+ * it (floors-view.e2e.ts), and so is the DM menu on a floor (floors-menus.e2e.ts).
+ * Tower is a scene of its own, deleted at the end, so no other step of the
+ * file sees the Floor button.
+ */
+function floorsRootTests(): void {
+  test(`flr-a. the Floors group folded and open, a floor's page, Floor and its menu or the Menu row, and Move to floor's list, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+    await newDmSession();
+    const tower = randomUUID();
+    const upper = randomUUID();
+    const scout = randomUUID();
+    await ops.send({ t: "scene.create", scene: { id: tower, name: "Tower", bounds: BOUNDS, background: "#2b2b31" } });
+    await ops.send({ t: "scene.create", scene: { id: upper, name: "Tower", bounds: BOUNDS }, floor: { beside: tower, side: "above" } });
+    await ops.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor" } } });
+    await ops.send({ t: "token.create", token: { id: scout, sceneId: tower, kind: "npc", name: "Scout", size: "medium", x: 5, y: 5, visibility: "all", actor: { inline: actor() } } });
+    const lines: string[] = [];
+    try {
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(`flr-${atName(at)}`);
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        if (page.url().startsWith(server.origin)) await page.evaluate(() => localStorage.removeItem("rvtt.sceneSettingsFolds"));
+        await openAt(page, at.size, at.scale);
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        try {
+          const panel = await openDmPanel(page, "Scenes");
+          await viewScene(panel, tower);
+          const root = (name: Parameters<typeof floorRoot>[0]) => panel.locator(floorRoot(name));
+          const fold = sceneGroupFold(panel, "Floors");
+          if ((await fold.getAttribute("aria-expanded")) === "true") await fold.click();
+          await sweep.measure(page, "floors-group-folded", root("group"));
+          await openSceneGroup(panel, "Floors");
+          await root("group").scrollIntoViewIfNeeded();
+          await sweep.measure(page, "floors-group", root("group"));
+          await shots.take(page, `alignment-${sweep.at}-floors-group`);
+          // The top floor's page, with its height row, then the lowest floor's, without.
+          const rows = root("group").getByRole("listitem").getByRole("button");
+          await rows.first().click();
+          await root("page").waitFor();
+          await sweep.measure(page, "floors-page", root("page"));
+          await shots.take(page, `alignment-${sweep.at}-floors-page`);
+          await root("page").getByRole("button", { name: "Back to Floors" }).click();
+          await rows.last().click();
+          await root("page").waitFor();
+          await sweep.measure(page, "floors-page-lowest", root("page"));
+          await root("page").getByRole("button", { name: "Back to Floors" }).click();
+          await closeSheets(page);
+
+          // Floor in the top bar with its menu, or where the bar folded it, the Menu panel's Floor row.
+          const button = page.locator(floorRoot("button"));
+          if (await visible(button)) {
+            await sweep.measure(page, "floors-button", button);
+            await button.first().click();
+            await page.locator(floorRoot("menu")).first().waitFor();
+            await sweep.measure(page, "floors-menu", page.locator(floorRoot("menu")));
+            await shots.take(page, `alignment-${sweep.at}-floors-menu`);
+            await escapeAll(page);
+          } else {
+            const menu = await openMenu(page);
+            await sweep.measure(page, "floors-menu-row", menu.locator(floorRoot("menu-row")));
+            await closeSheets(page);
+          }
+
+          // Move to floor in Scout's bar.
+          await tapCell(page, BOUNDS, { x: 5, y: 5 });
+          const bar = page.getByRole("dialog", { name: "Scout actions" });
+          await bar.waitFor();
+          await expandBar(bar);
+          const open = await barControl(bar, /^(Move to floor…|Floor…)$/);
+          await open.scrollIntoViewIfNeeded();
+          await open.click();
+          await sweep.measure(page, "floors-move-list", bar.locator(floorRoot("move-list")));
+          await shots.take(page, `alignment-${sweep.at}-floors-move-list`);
+          await escapeAll(page);
+        } finally {
+          await escapeAll(page);
+        }
+        console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      await ops.send({ t: "scene.delete", sceneId: tower }).catch(() => {});
+      // Later steps start on the players' scene.
+      const page = await dmPageFor(FU30_AT.at(-1)!.size);
+      await viewScene(await openDmPanel(page, "Scenes"), run.sceneId);
+      await escapeAll(page);
+    }
+    assert.deepEqual(lines, [], "the floors screens out of line");
+    assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
+    withinSnapshotBudget("flr-a");
   });
 }
 
