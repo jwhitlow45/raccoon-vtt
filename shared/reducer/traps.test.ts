@@ -476,7 +476,8 @@ describe("a trap's text in the protocol", () => {
       ["trap.create rig.hits", (rect) => parses({ t: "trap.create", trap: { ...base, rig: { ...base.rig, hits: { cells: [rect] } } } })],
       ["trap.update zone", (rect) => parses({ t: "trap.update", trapId: "t", patch: { zone: { cells: [rect] } } })],
       ["trap.update rig.hits", (rect) => parses({ t: "trap.update", trapId: "t", patch: { rig: { hits: { cells: [rect] } } } })],
-      ["a room's import", (rect) => parseRoomState(room({ traps: { t: trap("t", { zone: { cells: [rect] } }) } })).ok],
+      ["a room's import zone", (rect) => parseRoomState(room({ traps: { t: trap("t", { zone: { cells: [rect] } }) } })).ok],
+      ["a room's import rig.hits", (rect) => parseRoomState(room({ traps: { t: trap("t", { rig: { ...base.rig, hits: { cells: [rect] } } }) } })).ok],
     ];
     for (const [where, reads] of places) {
       assert.equal(reads({ x: 0, y: 0, w: 2, h: 2 }), true, `${where}: a square within its bounds reads`);
