@@ -17,13 +17,13 @@ import type { RulerStop } from "./ruler.ts";
  * searches the holder alone, then takes that way where what it drags
  * follows in single file, as the drag does (routeDrag.ts inFile), so it
  * reads the way and cost the drag will take. Where one cannot follow so,
- * it searches with them by their places, as before. The holder-alone
+ * it finds no way, as the drag does. The holder-alone
  * search and a leg that ends squeezed each keep a cache entry of their
  * own (DR-A4).
  */
 
 /** Rock from x 8 to 16 but for a corridor along row 10, a Large warhorse west of it dragging a goblin, on a scene the players have seen. */
-function squares(second = false): RoomState {
+function squares(second = false, gx = 3, gy = 8): RoomState {
   const s = baseRoom({ scenes: { s1: scene("s1", { bounds: { w: 30, h: 20 }, blockMovement: true, autoWalls: "off" }) } });
   s.buildChunks = {};
   const runs: [[number, number], [number, number]][] = [
@@ -34,7 +34,7 @@ function squares(second = false): RoomState {
   runs.forEach(([a, b], i) => wall(s, `rulesa${String(i).padStart(6, "0")}`, a, b));
   s.tokens.horse = token("horse", { size: "large", x: 3, y: 9, name: "Warhorse", kind: "npc", ownerIds: ["p1"] });
   s.tokens.gob = token("gob", { x: 1, y: 10, name: "Goblin", kind: "npc", ownerIds: ["p1"], attached: { to: "horse", kind: "drag" } });
-  if (second) s.tokens.grik = token("grik", { x: 3, y: 8, name: "Grik", kind: "npc", ownerIds: ["p1"], attached: { to: "horse", kind: "drag" } });
+  if (second) s.tokens.grik = token("grik", { x: gx, y: gy, name: "Grik", kind: "npc", ownerIds: ["p1"], attached: { to: "horse", kind: "drag" } });
   return s;
 }
 
@@ -80,10 +80,15 @@ describe("the walking ruler into a corridor one wide with a creature in tow", ()
     assert.match(m.extra ?? "", /squeezing and dragging/);
   });
 
-  test("on squares, where the second creature in tow would end out of reach, it searches with them by their places and finds no way in", () => {
+  test("on squares, where the second creature in tow would end out of reach, it finds no way in, as the drag does", () => {
     const m = measured(squares(true), [{ x: 0, y: 0, tokenId: "horse" }, { x: 12.5, y: 10.5 }]);
-    const leg = m.legs[0]!;
-    assert.ok(leg.none || leg.to.x < 8, `${leg.to.x}, ${leg.to.y}: no way into the corridor`);
+    assert.equal(m.legs[0]!.none, true, "no way into the corridor");
+  });
+
+  // The places search finds a way to the corridor's mouth here, so only the named follower makes it none (RULES-OPUS-2).
+  test("on squares, a follower that cannot follow in file gives no way even where a search by places finds one", () => {
+    const m = measured(squares(true, 0, 0), [{ x: 0, y: 0, tokenId: "horse" }, { x: 8.5, y: 10.5 }]);
+    assert.equal(m.legs[0]!.none, true, "no way into the corridor's mouth");
   });
 
   for (const [name, g] of [

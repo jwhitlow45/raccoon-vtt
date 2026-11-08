@@ -231,6 +231,9 @@ function aloneSearchFor(view: RoomState, group: RouteSearch, key: string, budget
  * legs needs a leg's search only while that leg is searched (review
  * ASTRA-07).
  */
+// A follower that cannot follow in single file means no way, as the drag answers (routeDrag.ts #inFile), not a search by places.
+const NO_FILE_WAY: Found = { kind: "none", capped: false };
+
 function legFound(view: RoomState, at: Walked, walker: Token & Walker, input: WalkInput, target: Point & { squeeze?: boolean }, budget: WorkBudget, progress: Progress): { found: Found; search: () => RouteSearch } | null {
   const kept = keptFor(view, walker.sceneId);
   const key = `${at.history}#${searchKey(walker, input.everything, publicCounters(gridOfView(view, walker.sceneId), walker, at.left, rulesOf(view), input.viewer.role === "dm"))}`;
@@ -254,7 +257,7 @@ function legFound(view: RoomState, at: Walked, walker: Token & Walker, input: Wa
       return null;
     }
     if (check.open) {
-      if (group.world.fileBlocked([group.world.input.token, target]) === null) found = { kind: "open" };
+      found = group.world.fileBlocked([group.world.input.token, target]) === null ? { kind: "open" } : NO_FILE_WAY;
     } else {
       const settled = alone.settle(target, budget);
       const traced = settled === "settled" ? alone.traceTo(target, budget) : null;
@@ -262,7 +265,7 @@ function legFound(view: RoomState, at: Walked, walker: Token & Walker, input: Wa
         progress.on = { leg: legKey, search: alone, check, alone: true };
         return null;
       }
-      if (traced && group.world.fileBlocked(traced.points) === null) found = { kind: "route", route: { pieces: traced.pieces } };
+      if (traced) found = group.world.fileBlocked(traced.points) === null ? { kind: "route", route: { pieces: traced.pieces } } : NO_FILE_WAY;
     }
     own = null;
   }
