@@ -7,6 +7,9 @@ import type { ActorTarget, Op } from "#shared/protocol.ts";
 import { reminderPreset, type RollPreset } from "#shared/rules/rollReminders.ts";
 import { pendingSaves, type PendingSave } from "#shared/rules/saveEnds.ts";
 import { logSeq, remembered, rowTag } from "../dice/optionState.ts";
+import { mark, newPage } from "../dice/groupSave/chain.ts";
+import { buildPlan } from "../dice/groupSave/plan.ts";
+import { groupRows } from "../dice/groupSave/rows.ts";
 import { BONUS_WORDS, knownOrTyped, TYPE_BONUS } from "../rolls/card.ts";
 import { actor, apply, AT, character, DM, effect, entry, P1, P2, room, token } from "#shared/testutil.ts";
 import {
@@ -403,5 +406,49 @@ describe("a card's roll keeps a DC players may not see off its line", () => {
     assert.equal(seen && "dc" in seen, false);
     // A DM's monster rolls in secret, so its DC stays on the line for the DMs alone.
     assert.deepEqual(concentrationRollTo(goblinRoom(), true, { target: { tokenId: "g2" }, dc: 11 }), { to: "dm", dc: 11 });
+  });
+});
+
+/**
+ * FL3-OPUS-7: shared/reducer/outcome.ts removes a target's effects before it
+ * deals damage, while the save page previews with the effects still on. That
+ * only matters for an outcome that carries both `remove` and damage, and no
+ * producer builds one today. This pins that, so a producer that starts to
+ * combine them fails here and the preview gets fixed first.
+ */
+describe("no outcome both removes an effect and deals damage", () => {
+  test("Legendary Resistance removes the effect and carries no damage, conditions or effects", () => {
+    const op = resistOp(only(goblinRoom({ resist: { max: 3, used: 0 } })), "plan1");
+    assert.equal(op.t, "actor.outcome");
+    const [target] = (op as Extract<Op, { t: "actor.outcome" }>).targets;
+    assert.deepEqual(Object.keys(target!).sort(), ["remove", "resist", "target"]);
+  });
+
+  test("the group save's Apply never sends remove, with damage, conditions and a save-ends rider on the page", () => {
+    const view = room({ tokens: { g1: token("g1", { kind: "monster", name: "Goblin", actor: { inline: actor({ hp: { cur: 30, max: 30, temp: 0 } }) } }) } });
+    const dice = { you: { memberId: "dm1", role: "dm" as const }, view, srd: { monsters: [], rolls: {} } };
+    const rows = groupRows(dice, ["g1"], { kind: "save", ability: "con" }, false);
+    const page = mark(
+      {
+        ...newPage({
+          id: "p",
+          sceneId: "s1",
+          source: { kind: "selection", tokenIds: ["g1"] },
+          test: { kind: "save", ability: "con" },
+          dc: 13,
+          secret: false,
+          spell: false,
+          switches: { dcShown: true, resultShown: true },
+          outcome: { damage: "2d6 fire", conditions: ["blinded"], saveEnds: { ability: "con", dc: 13 } },
+        }),
+        phase: "rolled" as const,
+        rows,
+      },
+      rows[0]!.holder,
+      "fail",
+    );
+    const plan = buildPlan(page, dice, [{ amount: 9, type: "fire" }], { plan: "plan", newId: () => "e1" })!;
+    assert.ok(plan.targets.some((t) => t.damage), "the plan does deal damage");
+    for (const t of plan.targets) assert.equal("remove" in t, false, "and removes nothing");
   });
 });
