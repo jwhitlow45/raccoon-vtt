@@ -5,6 +5,7 @@ import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { currentFocus, focusEvent, focusFromStage, publishFocus } from "./camera.ts";
 import { sendsView, useShowView, viewEvent } from "./tableDisplay.ts";
+import { playersSee } from "#shared/rules/floors.ts";
 
 /** At most this often while the DM pans with "Follow me" on: smooth enough to follow, light on the players' phones. */
 const FOLLOW_MS = 120;
@@ -24,8 +25,9 @@ const FOLLOW_MS = 120;
  * With "Show my view on the table display" on, it also sends the area it
  * shows to table displays (docs/design/design-v1-dm-tools.md 3.1), as often as
  * Follow me does, once more when another display connects, and never at
- * rest. Only while this device views the players' scene, so a TV never
- * moves to a scene they cannot see.
+ * rest. Only while this device shows a floor players see, so a TV never
+ * moves to a scene or a floor they cannot see. Each event goes out on the
+ * floor shown, which the server sends only to displays that hold it.
  */
 export function CameraController(props: ControllerProps) {
   // The latest camera, for the timers that send it later.
@@ -42,11 +44,11 @@ export function CameraController(props: ControllerProps) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const roomId = useRoomView((s) => s.roomId);
   const showView = useShowView(roomId);
-  const playerSceneId = useRoomView((s) => s.view?.meta.playerSceneId ?? null);
   const displays = useRoomView((s) => s.displays ?? 0);
-  const blackout = useRoomView((s) => s.view?.meta.view.blackout === true);
+  // A floor players see now: the players' scene of one floor, an open floor of it, and none behind a blackout (docs/design/design-v1-floors.md 8.3).
+  const seen = useRoomView((s) => (s.view ? playersSee(s.view, sceneId) : false));
   // With no display connected there is no one to send to.
-  const toDisplays = sendsView({ dm, on: showView, sceneId, playerSceneId, blackout }) && displays > 0;
+  const toDisplays = sendsView({ dm, on: showView, seen }) && displays > 0;
   const viewSentRef = useRef(Number.NEGATIVE_INFINITY);
   const viewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** The area sent last, so a render that moved nothing sends nothing. */

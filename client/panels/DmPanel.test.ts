@@ -24,6 +24,8 @@ const { joinRequestsSlot } = await import("../features/dm/JoinRequests.tsx");
 const { dmPanelFoldsSlot } = await import("../lib/folds.ts");
 const { pdfJobSlot } = await import("../features/handouts/pdf/job.ts");
 const { partySightSlot } = await import("../features/vision/sightMode.ts");
+const { publishFocus } = await import("../features/dm/camera.ts");
+const { tower, TOWER, UPPER, CAVE } = await import("../features/floors/testing.ts");
 
 /** A device's storage for the file, which the panel's fold store reads as it is made: with none, every section opens (lib/folds.ts). */
 const items = new Map<string, string>();
@@ -165,5 +167,35 @@ describe("Join requests over the folding groups", () => {
         ["Table display", true],
       ],
     );
+  });
+});
+
+describe("Players' screens on a scene of several floors (docs/design/design-v1-floors.md 7.3)", () => {
+  /** The Players' screens group's notice, if any, and whether Bring everyone here is on. */
+  const screens = (markup: string) => {
+    const group = markup.slice(markup.indexOf("Players&#x27; screens"), markup.indexOf(">Preview<"));
+    const notice = /role="status"[^>]*>(?:<div[^>]*>)?([^<]*)</.exec(group)?.[1]?.replace(/&#x27;/g, "'") ?? null;
+    const bring = /<button[^>]*data-search="dm.screens.bring"[^>]*>/.exec(group)?.[0] ?? "";
+    return { notice, bring: !/\sdisabled=""/.test(bring) };
+  };
+  const at = (view: RoomState, sceneId: string) => {
+    const scope = new RoomScope();
+    publishFocus(scope, { sceneId, x: 4, y: 4, zoom: 40 });
+    return screens(draw({ view, sceneId, scope }));
+  };
+
+  test("on a floor of the players' scene they hold, Bring everyone here is on with no notice, as the DM menu shows it", () => {
+    assert.deepEqual(at(tower({ openFloors: { [UPPER]: { sceneId: UPPER, rev: 0 } } }), UPPER), { notice: null, bring: true });
+    assert.deepEqual(at(tower(), TOWER), { notice: null, bring: true }, "the start floor");
+  });
+
+  test("on a floor of it they have not reached, Bring everyone here is off with the menu's line", () => {
+    assert.deepEqual(at(tower(), UPPER), { notice: "Players haven't reached Upper floor, so their maps stay.", bring: false });
+  });
+
+  test("on another scene, today's notice names the players' place, whatever the floor", () => {
+    const { notice, bring } = at(tower(), CAVE);
+    assert.equal(bring, false);
+    assert.match(notice ?? "", /than the players, who are on Tower · Ground floor\. Follow/);
   });
 });

@@ -14,6 +14,9 @@ import { viewAsSlot } from "./viewAs.tsx";
 import { PartySightToggle } from "../vision/PartySightToggle.tsx";
 import { partySightSlot, visionOn } from "../vision/sightMode.ts";
 import { checkSummary, screensSummary } from "./summaries.ts";
+import { onPlayersScene, openFloor } from "#shared/rules/floors.ts";
+import { playersPlace } from "../floors/words.ts";
+import { notReached } from "../../pages/chipWords.ts";
 
 /** A DM panel group's fold, from the panel's store (lib/folds.ts). */
 type GroupFold = { open: boolean; onToggle(): void };
@@ -32,9 +35,11 @@ export function ViewControls(props: { screens: GroupFold; check: GroupFold }) {
   const view = useRoomView((s) => s.view?.meta.view);
   const members = useRoomView((s) => s.view?.members);
   const sceneId = useRoomView((s) => s.sceneId);
-  const playerSceneId = useRoomView((s) => s.view?.meta.playerSceneId ?? null);
-  const playerSceneName = useRoomView((s) => (playerSceneId ? s.view?.scenes[playerSceneId]?.name : undefined));
-  const onPlayerScene = sceneId !== null && sceneId === playerSceneId;
+  // The DM menu's two inputs (pages/chipMenus.ts DmMenuView, docs/design/design-v1-floors.md 7.3), so the panel and the menu show one of three states alike.
+  const holdHere = useRoomView((s) => (s.view && s.sceneId ? openFloor(s.view, s.sceneId) : false));
+  const sceneHere = useRoomView((s) => (s.view && s.sceneId ? onPlayersScene(s.view, s.sceneId) : false));
+  const playersAt = useRoomView((s) => (s.view && s.view.meta.playerSceneId ? playersPlace(s.view, s.view.meta.playerSceneId, s.sceneId) : ""));
+  const floorName = useRoomView((s) => (s.sceneId ? (s.view?.scenes[s.sceneId]?.floor?.name ?? "") : ""));
   const scope = useRoomScope();
   const subscribe = useCallback((listener: () => void) => subscribeFocus(scope, listener), [scope]);
   const focus = () => currentFocus(scope)?.sceneId ?? null;
@@ -49,15 +54,17 @@ export function ViewControls(props: { screens: GroupFold; check: GroupFold }) {
   });
 
   if (!view) return null;
-  const screens = screensSummary({ onPlayerScene, playerSceneName: playerSceneName ?? null, follow: view.follow, blackout: view.blackout });
+  const screens = screensSummary({ onPlayerScene: holdHere, playerSceneName: playersAt || null, follow: view.follow, blackout: view.blackout });
   return (
     <>
       <Group label="Players' screens" {...props.screens} keep wholeSummary summary={screens} search="dm.screens">
-        {!onPlayerScene ? (
+        {!sceneHere ? (
           <Notice role="status">
-            You are looking at a different scene than the players{playerSceneName ? `, who are on ${playerSceneName}` : ""}. Follow
+            You are looking at a different scene than the players{playersAt ? `, who are on ${playersAt}` : ""}. Follow
             me and Bring everyone here move players only while you look at their scene.
           </Notice>
+        ) : !holdHere ? (
+          <Notice role="status">{notReached(floorName)}</Notice>
         ) : null}
         <Switch
           label="Follow me"
@@ -70,7 +77,7 @@ export function ViewControls(props: { screens: GroupFold; check: GroupFold }) {
           <Button
             size="sm"
             search="dm.screens.bring"
-            disabled={!onPlayerScene || focusScene !== sceneId}
+            disabled={!holdHere || focusScene !== sceneId}
             onClick={() => {
               const f = currentFocus(scope);
               if (!f || f.sceneId !== sceneId) return;

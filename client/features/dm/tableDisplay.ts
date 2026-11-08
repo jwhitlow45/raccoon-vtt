@@ -86,15 +86,18 @@ export function viewEvent(live: Live): Extract<EphEvent, { k: "view" }> {
 }
 
 /**
- * Whether this DM device sends its camera now: the switch is on and it views
- * the players' scene, so a TV never moves to a scene players cannot see.
- * Never during a pause, when a display shows the pause screen and gets no
- * events. A display clears what it holds of the scene when the pause ends,
- * so the end of a pause counts as this device coming to the players' scene,
- * and the camera goes out once more though it has not moved.
+ * Whether this DM device sends its camera now: the switch is on and it shows
+ * a floor players see (`seen`, shared/rules/floors.ts playersSee): on a
+ * scene of one floor the players' scene, on one with floors an open floor
+ * of it (docs/design/design-v1-floors.md 8.3). So a TV never moves to a
+ * scene or a floor players cannot see. Never during a pause, when a display
+ * shows the pause screen and gets no events: playersSee is false then. A
+ * display clears what it holds of the scene when the pause ends, so the end
+ * of a pause counts as this device coming to the players' scene, and the
+ * camera goes out once more though it has not moved.
  */
-export function sendsView(input: { dm: boolean; on: boolean; sceneId: string; playerSceneId: string | null; blackout: boolean }): boolean {
-  return input.dm && input.on && input.sceneId === input.playerSceneId && !input.blackout;
+export function sendsView(input: { dm: boolean; on: boolean; seen: boolean }): boolean {
+  return input.dm && input.on && input.seen;
 }
 
 /** "1 display connected" from the server's count of open display sockets. */

@@ -41,6 +41,7 @@ import { choiceOf, choiceWords, isoOffered, pickOf, TURN_LEFT, TURN_LEFT_DESCRIP
 import { displayViewKey } from "../view/store.ts";
 import { SuggestionHelp, useViewChoice, useViewVoice, ViewVoice, type ViewChoiceState } from "../view/ViewMenu.tsx";
 import { useWeatherVoice } from "../weather/WeatherVoice.ts";
+import { useFloorVoice } from "../floors/useFloors.ts";
 import { SoundHost } from "../sound/engine/SoundHost.tsx";
 import { somethingToHear, useSoundHere } from "../sound/engine/store.ts";
 import {
@@ -126,12 +127,12 @@ export default function DisplayRoom(props: { roomId: string; memberId: string })
   if (!live) return <div style={{ position: "fixed", inset: 0, background: theme.color.stage }} />;
   return (
     <RoomProvider store={live.room.store} actions={live.actions} ui={live.room.ui} assets={assets} display>
-      <DisplayScreen roomId={roomId} />
+      <DisplayScreen roomId={roomId} followDm={live.room.followDm} />
     </RoomProvider>
   );
 }
 
-function DisplayScreen(props: { roomId: string }) {
+function DisplayScreen(props: { roomId: string; followDm(on: boolean): void }) {
   const [scope] = useState(() => new RoomScope());
   useEffect(() => () => scope.dispose(), [scope]);
   const ended = useRoomView((s) => s.ended);
@@ -140,14 +141,14 @@ function DisplayScreen(props: { roomId: string }) {
   if (ended) return <DisplayEnded ended={ended} roomId={props.roomId} />;
   return (
     <RoomScopeProvider scope={scope}>
-      <DisplayTable roomId={props.roomId} />
+      <DisplayTable roomId={props.roomId} followDm={props.followDm} />
       {/* The room's sound, as a player who owns nothing hears it (docs/design/design-v1-music.md 4.5). */}
       <SoundHost />
     </RoomScopeProvider>
   );
 }
 
-function DisplayTable(props: { roomId: string }) {
+function DisplayTable(props: { roomId: string; followDm(on: boolean): void }) {
   const view = useRoomView((s) => s.view);
   const sceneId = useRoomView((s) => s.sceneId);
   const connection = useRoomView((s) => s.connection);
@@ -157,6 +158,9 @@ function DisplayTable(props: { roomId: string }) {
   const [showTurn, setShowTurn] = useState(readDisplayTurn);
   const [showDate, setShowDate] = useState(readDisplayDate);
   useEffect(() => saveDisplayChoices({ mode, turn: showTurn, date: showDate }), [mode, showTurn, showDate]);
+  // Following the DM, the display shows the DM's floor while it holds it, else the party's (docs/design/design-v1-floors.md 7.3, features/floors/displayFloor.ts).
+  const { followDm } = props;
+  useEffect(() => followDm(mode === "follow"), [followDm, mode]);
 
   const handout = useDisplayHandout(props.roomId, memberId);
   const paging = useHandoutPaging(handout.current);
@@ -169,7 +173,8 @@ function DisplayTable(props: { roomId: string }) {
   const suggested = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId]?.suggestedView : undefined));
   const viewChoice = useViewChoice({ key: displayViewKey(props.roomId), sceneId, suggested });
   useViewVoice(viewChoice);
-  // The display's polite status speaks the weather too, for a screen reader at the table (docs/design/design-v1-weather.md 4.2).
+  // The display's polite status speaks the weather too, for a screen reader at the table (docs/design/design-v1-weather.md 4.2), and each switch of floors before it: "Showing Roof. Weather here: Heavy rain." (docs/design/design-v1-floors.md 7.3).
+  useFloorVoice();
   useWeatherVoice();
 
   // A handout takes every tap and key, and its bar takes the menu's place, so a menu open when one comes up goes.

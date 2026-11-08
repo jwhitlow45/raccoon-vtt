@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal, flushSync } from "react-dom";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
-import type { Effect, LogEntry } from "#shared/model.ts";
+import type { Effect, InitEntry, LogEntry } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { RollResultLine } from "../rolls/card.ts";
@@ -217,6 +217,7 @@ function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement>; fit: St
   const { current, next } = useMemo(() => stripRows({ dm, entries, activeEntryId, count: STRIP_FACES, skip: facts.skip }), [entries, activeEntryId, dm, facts.skip]);
   const yours = current !== null && facts.mine(current);
   const { name, line } = whoseTurn({ dm, started, activeName: current ? entryName(facts.view, current) : null, yours });
+  const onFloor = useTurnFloor(current);
   const timed = timer && current ? timer : null;
   useReportTurn(props.onTurn, { dm, round, current: current?.id ?? null, name, yours, endTurn: !dm && (yours || waiting), notice: props.notice, timer: timed, next });
   // Where the bar's give-way cut the name or took it, the whole name shows on hover and keyboard focus (design-v1-qol.md 4, The give-way, step 11). The tracker button's own name keeps it for a reader.
@@ -237,7 +238,7 @@ function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement>; fit: St
           padding: `0 ${yours && props.fit.yourTurn ? (TURN_PILL_PX - TURN_FACE_PX) / 2 : theme.space(3)}px 0 ${theme.space(3)}px`,
         }}
       >
-        <TrackerTarget label={`Initiative, round ${round}. ${line}. Open the tracker.`} reach={(theme.touch - TURN_PILL_PX) / 2} tip={cut ? tip : undefined} />
+        <TrackerTarget label={`Initiative, round ${round}. ${line}${onFloor}. Open the tracker.`} reach={(theme.touch - TURN_PILL_PX) / 2} tip={cut ? tip : undefined} />
         <span aria-hidden style={roundStyle}>
           R{round}
         </span>
@@ -311,6 +312,7 @@ function Band(props: { notice: boolean; onTurn?(turn: TurnFacts): void }) {
   const { current, next } = useMemo(() => stripRows({ dm, entries, activeEntryId, count: STRIP_FACES, skip: facts.skip }), [entries, activeEntryId, dm, facts.skip]);
   const yours = current !== null && facts.mine(current);
   const { name, line } = whoseTurn({ dm, started, activeName: current ? entryName(facts.view, current) : null, yours });
+  const onFloor = useTurnFloor(current);
   useReportTurn(props.onTurn, { dm, round, current: current?.id ?? null, name, yours, endTurn: !dm && (yours || waiting), notice: props.notice, timer: timer && current ? timer : null, next });
   if (round === null) return null;
 
@@ -335,7 +337,7 @@ function Band(props: { notice: boolean; onTurn?(turn: TurnFacts): void }) {
         fontFamily: theme.font.body,
       }}
     >
-      <TrackerTarget label={`Initiative, round ${round}. ${line}. Open the tracker.`} reach={0} />
+      <TrackerTarget label={`Initiative, round ${round}. ${line}${onFloor}. Open the tracker.`} reach={0} />
       {fit.round ? (
         <span aria-hidden style={roundStyle}>
           R{round}
@@ -395,6 +397,30 @@ function Band(props: { notice: boolean; onTurn?(turn: TurnFacts): void }) {
       {dm ? <NextButton start={activeEntryId === null} empty={entries.length === 0} /> : <EndTurnButton stack={fit.stackEnd} />}
     </div>
   );
+}
+
+/**
+ * " on Upper floor" while the acting creature stands on another floor than
+ * the one shown (docs/design/design-v1-floors.md 7.6, D-261107-223), for the
+ * turn chip's name only: the chip has the bar's least room, and still opens
+ * the tracker, whose row tag shows that floor. Nothing on a scene of one
+ * floor, and nothing of a floor this device does not hold, which its copy
+ * lacks.
+ */
+function useTurnFloor(current: Pick<InitEntry, "tokenId" | "characterId"> | null): string {
+  return useRoomView((s) => {
+    if (!current || !s.view || !s.sceneId) return "";
+    const shown = s.sceneId;
+    let token = current.tokenId !== undefined ? s.view.tokens[current.tokenId] : undefined;
+    // A row added for a character finds that character's token, on the floor shown first.
+    if (!token && current.characterId !== undefined) {
+      const own = Object.values(s.view.tokens).filter((t) => t !== undefined && "ref" in t.actor && t.actor.ref === current.characterId);
+      token = own.find((t) => t.sceneId === shown) ?? own[0];
+    }
+    if (!token || token.sceneId === shown) return "";
+    const floor = s.view.scenes[token.sceneId]?.floor;
+    return floor && s.view.scenes[shown]?.floor ? ` on ${floor.name}` : "";
+  });
 }
 
 /** The turn chip's outline, like the top bar's other chips, lit on the player's own turn as the tracker lights the active row. */
