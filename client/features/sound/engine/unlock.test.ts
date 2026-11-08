@@ -486,4 +486,13 @@ describe("the room sound's unlock", () => {
     assert.equal(el.preload, "auto");
     assert.equal(el.preservesPitch, false, "a time-stretch clicks at every change of rate (D-261102-870)");
   });
+
+  test("an older browser's prefixed pitch switch is let go too, and none is made up where the browser has none", () => {
+    const safari = poolElement({ preload: "none", preservesPitch: true, webkitPreservesPitch: true });
+    assert.equal(safari.webkitPreservesPitch, false, "Safari before 15.4 reads only the webkit name");
+    const firefox = poolElement({ preload: "none", preservesPitch: true, mozPreservesPitch: true });
+    assert.equal(firefox.mozPreservesPitch, false, "Firefox before 101 reads only the moz name");
+    const plain = poolElement({ preload: "none", preservesPitch: true });
+    assert.ok(!("webkitPreservesPitch" in plain) && !("mozPreservesPitch" in plain));
+  });
 });

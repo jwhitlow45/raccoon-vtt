@@ -215,16 +215,27 @@ function browserContext(): AudioContext | null {
  * Readies a pooled element. Elements play at speed 1 (settle.ts), but the
  * pitch stays let go, since a change of rate with the pitch kept makes
  * Chrome time-stretch, and every change then steps the waveform, a click
- * players heard as a bad network (D-261102-870).
+ * players heard as a bad network (D-261102-870). Safari before 15.4 and
+ * Firefox before 101 read only their prefixed names, so those are let go
+ * too where the element has them.
  */
-export function poolElement<T extends { preload: string; preservesPitch: boolean }>(el: T): T {
+export function poolElement<T extends PitchElement>(el: T): T {
   el.preload = "auto";
   el.preservesPitch = false;
+  if ("webkitPreservesPitch" in el) el.webkitPreservesPitch = false;
+  if ("mozPreservesPitch" in el) el.mozPreservesPitch = false;
   return el;
 }
 
+interface PitchElement {
+  preload: string;
+  preservesPitch: boolean;
+  webkitPreservesPitch?: boolean;
+  mozPreservesPitch?: boolean;
+}
+
 function browserElement(): PoolElement {
-  return poolElement(new Audio() as HTMLAudioElement & { preservesPitch: boolean });
+  return poolElement(new Audio() as HTMLAudioElement & PitchElement);
 }
 
 let shared: SoundUnlock | null = null;
