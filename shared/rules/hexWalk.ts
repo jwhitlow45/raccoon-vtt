@@ -1,9 +1,9 @@
 import type { BuildChunk } from "../model.ts";
 import { CHUNK_CELLS } from "../model.ts";
-import { canSqueeze, footprintSize, hexSqueezedSize, isSqueezed, sizeCategory, tokenHeightFt, type SizeCategory } from "./footprint.ts";
+import { canSqueeze, footprintSize, hexSqueezedSize, isSqueezed, sizeCategory, tokenHeightFt, tokenRefHex, type SizeCategory } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { isHex, sceneGrid } from "./grid.ts";
-import { hexCenter, hexDistance, hexInScene, hexNeighbors, hexSubcells, sceneHexSpan, type Hex, type HexGrid } from "./hex.ts";
+import { hexCenter, hexDistance, hexInScene, hexLine, hexNeighbors, hexSubcells, sceneHexSpan, type Hex, type HexGrid } from "./hex.ts";
 import { footing, hexesGround, standing, type Standing } from "./heights.ts";
 import { legFeet } from "./distance.ts";
 import {
@@ -20,6 +20,7 @@ import {
   hexStandPlace,
   hexStartStand,
   hexWallsOf,
+  legStop,
   onOffHolder,
   onSqueezedLattice,
   pastHolder,
@@ -28,7 +29,8 @@ import {
   type HexWalls,
   type Walker,
 } from "./movement.ts";
-import { followedHeight, seatShift, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "./route.ts";
+import { fileOutOfReach, fileShift, followedHeight, hexFileClasses, hexFileRoutes, seatShift, type FileEnd, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "./route.ts";
+import { onHolder } from "./attach.ts";
 import { LegCheck, MAX_SETTLED, WalkSearch, WalkWorld, WorkBudget, worldUnits, type SettleResult, type Slice, type WalkInput, type WalkRoute } from "./walk.ts";
 import { ownEntry } from "../records.ts";
 
@@ -123,6 +125,8 @@ export class HexWalkWorld {
   readonly #members: ReadonlyMap<string, Follower>;
   /** The walk its followers are read against (route.ts followedHeight). */
   readonly #lead: FollowLead;
+  /** Those every player sees sitting on the walker, seated apart where it squeezes as the move seats them (route.ts seatShift). */
+  readonly #riders: readonly Follower[];
 
   constructor(input: WalkInput) {
     this.input = input;
@@ -142,6 +146,8 @@ export class HexWalkWorld {
     // Only where walls stop moves, as the server tests them there alone (permissions.ts draggedWalls).
     this.#towed = this.walls ? (input.towed ?? []).map((t) => ({ walker: t, dx: t.x - token.x, dy: t.y - token.y })) : [];
     this.#members = new Map((input.group ?? input.towed ?? []).map((m) => [m.id, m]));
+    const leadId = (token as { id?: string }).id;
+    this.#riders = [...this.#members.values()].filter((m) => m.attached !== undefined && m.attached.to === leadId && onHolder(m.attached.kind));
     const span = sceneHexSpan(g, scene.bounds);
     this.cols = span.cols;
     this.rows = span.rows;
@@ -351,7 +357,7 @@ export class HexWalkWorld {
     const { token } = this.input;
     // Where the walk starts, as it stands, each creature stands where it is, as the move's first point leaves it (moveLeg.ts squeezedSeats).
     if (p.x === token.x && p.y === token.y && squeezed === isSqueezed(token)) return { x: 0, y: 0 };
-    return seatShift(this.g, token as Walker & { id?: string }, (m) => this.#members.get(m), t.walker.id, p, squeezed);
+    return seatShift(this.g, token as Walker & { id?: string }, (m) => this.#members.get(m), t.walker.id, p, squeezed, this.#riders);
   }
 
   /** Whether the walker stands squeezed with its box at `at`: by its stand where the search has one, at the walk's start as it stands, else by where it is (route.ts walkSqueezes). */
@@ -552,6 +558,57 @@ export class HexWalkWorld {
     if (this.mode === "inside") return false;
     const elevation = this.elevationOf(s);
     return hexStandHexes(this.g, s).some((h) => this.#creaturesOn(h).some((c) => c.way === "blocked" && this.#overlaps(c, elevation)));
+  }
+
+  /** Whether a walk that ends squeezed takes what the walker drags in single file (route.ts hexFileClasses): each of them is of one hex. */
+  get followsInFile(): boolean {
+    return this.#towed.length > 0 && hexFileClasses(this.#towed.map((t) => t.walker), [])[0].length > 0;
+  }
+
+  /**
+   * The first creature the walker drags beside it that cannot follow a walk
+   * along `points` in single file (route.ts hexFileRoutes, D-261107-172),
+   * as the server's move takes them along a walk that ends squeezed: each
+   * on its own walk, every hex of each piece on ground the search may read,
+   * each piece by the leg test the server runs on it, and then each where
+   * it ends by its own holder's reach (route.ts fileOutOfReach), as
+   * permissions.ts draggedWalls judges them. Null when all of them follow,
+   * and where they do not walk in single file (`followsInFile`).
+   */
+  fileBlocked(points: readonly Point[]): string | null {
+    if (!this.followsInFile) return null;
+    const { token, build } = this.input;
+    const g = this.g;
+    const n = points.length - 1;
+    const file = hexFileRoutes(g, token, points, [this.#towed.map((t) => t.walker)]);
+    // The walker's height at point `k` of its walk, as it stands there: squeezed where the walk ends.
+    const leadAt = (k: number) => this.elevationOf(k === n ? hexStandAt(g, token, points[k]!, true) : hexEndStand(g, token, points[k]!));
+    const ends = new Map<string, FileEnd>();
+    for (const t of this.#towed) {
+      const walk = file.get(t.walker.id);
+      if (!walk) continue;
+      const memberOf = (m: string) => (m === t.walker.id ? t.walker : this.#members.get(m));
+      // Each spot as the move takes it along: at the height its holders' walk gives it there, on its ground where that is not followed.
+      const at = (k: number): Walker => {
+        if (k === 0) return t.walker;
+        const p = walk[k]!;
+        const shift = fileShift(file, memberOf, k, { x: points[k]!.x - token.x, y: points[k]!.y - token.y });
+        const height = followedHeight(build.buildChunks, this.#lead, (m) => this.#members.get(m), t.walker.id, shift, leadAt(k));
+        return { ...t.walker, x: p.x, y: p.y, elevation: height ?? hexesGround(build.buildChunks, token.sceneId, [tokenRefHex(g, { ...t.walker, ...p })]) };
+      };
+      const size = sizeCategory(t.walker);
+      let from = at(0);
+      for (let k = 1; k <= n; k++) {
+        const to = at(k);
+        const line = hexLine(g, tokenRefHex(g, from), tokenRefHex(g, to));
+        if (!line.every((ref) => this.standable({ size, ref })) || legStop(build, from, { x: to.x, y: to.y, elevation: to.elevation, squeeze: false }) !== null) return t.walker.id;
+        from = to;
+      }
+      ends.set(t.walker.id, { x: from.x, y: from.y, elevation: from.elevation });
+    }
+    const last = points[n]!;
+    const lead: Follower = { ...token, id: (token as { id?: string }).id ?? "" };
+    return fileOutOfReach(g, this.input.rules, lead, { x: last.x, y: last.y, elevation: leadAt(n) }, (m) => this.#members.get(m), ends, this.#riders);
   }
 
   /** The first creature dragged beside the walker that a walk along `points` leaves behind, piece by piece, or null when all of them follow it. */

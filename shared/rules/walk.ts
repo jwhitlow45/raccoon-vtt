@@ -661,6 +661,11 @@ export class WalkWorld {
     return this.#towed.length > 0;
   }
 
+  /** Whether a walk that ends squeezed takes what the walker drags in single file: on squares every one of them (route.ts fileRoutes). */
+  get followsInFile(): boolean {
+    return this.tows;
+  }
+
   /** Whether the footprint at a stored position lies on ground the search may read: every square under it seen, under the squeezed footprint where it squeezes. */
   seenAt(x: number, y: number, n = -2): boolean {
     if (!this.input.seen) return true;

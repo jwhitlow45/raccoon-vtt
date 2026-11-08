@@ -8,7 +8,7 @@ import { applyOp } from "#shared/reducer.ts";
 import { planMove } from "#shared/rules/moveLeg.ts";
 import { occupiedHexes } from "#shared/rules/footprint.ts";
 import { hexKey, hexNeighbors, type Hex } from "#shared/rules/hex.ts";
-import { findRouteOn } from "#shared/rules/hexWalk.ts";
+import { findRouteOn, HexWalkWorld } from "#shared/rules/hexWalk.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, sideWall, wallsRound } from "#shared/rules/hexWalls.testkit.ts";
 import { hexStandPlace, ownWalk } from "#shared/rules/movement.ts";
 import { routePoints, seatShift } from "#shared/rules/route.ts";
@@ -252,5 +252,38 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
         assert.ok(allowed.ok, `${JSON.stringify(op)}: ${allowed.ok ? "" : allowed.message}`);
       }
     });
+  });
+}
+
+/**
+ * Riders apart on a squeezed hex mount (SEAT-TIE-HEX, D-261107-173): the
+ * device's search and cut read a prisoner a rider leads beside the rider's
+ * seat apart from the others, as the move puts it (route.ts seatShift with
+ * the riders every player sees). A wall cage round the hex the prisoner
+ * would stand on were its rider seated alone, which only that reading meets,
+ * shows they agree.
+ */
+for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const) {
+  test(`${name}: three riders on a Huge mount squeezed partway, the second leading a prisoner: the device's search and cut take the walk the server takes`, () => {
+    const cage = g.orient === "rows" ? { col: 14, row: 9 } : { col: 14, row: 10 };
+    const s = hexWallRoom(g.orient === "rows" ? "hexRows" : "hexColumns", 30, 30, [0, 1, 2, 3, 4, 5].map((d) => sideWall(g, cage, d)));
+    s.tokens.mount = onHex(g, "mount", "huge", { col: 8, row: 8 }, { name: "Elephant", kind: "npc", ownerIds: ["p1"] });
+    const own = occupiedHexes(g, s.tokens.mount);
+    for (const i of [0, 1, 2]) s.tokens[`r${i}`] = onHex(g, `r${i}`, "medium", own[i]!, { name: `Rider ${i}`, kind: "npc", ownerIds: ["p1"], attached: { to: "mount", kind: "ride" } });
+    const beside = hexNeighbors(g, own[1]!).find((h) => !own.some((o) => hexKey(o) === hexKey(h)))!;
+    s.tokens.led = onHex(g, "led", "medium", beside, { name: "Prisoner", kind: "npc", ownerIds: ["p1"], attached: { to: "r1", kind: "drag" } });
+    const mount = s.tokens.mount;
+    const mid = hexStandPlace(g, mount, { size: "large", ref: { col: 13, row: 8 }, squeezed: true });
+    const end = hexStandPlace(g, mount, { size: "huge", ref: { col: 13, row: 3 }, squeezed: false });
+    const op: OpOf<"token.move"> = { t: "token.move", tokenId: "mount", ...end, route: [[mid.x, mid.y, 1, 0], [end.x, end.y, 0, 0]] };
+    // Seated alone, the second rider would take the third's hex, and the prisoner would stand in the cage.
+    const alone = planMove(op, s, P1, { opVersion: 50 }).find((m) => m.tokenId === "led")!;
+    assert.equal(hexKey(occupiedHexes(g, { ...s.tokens.led, ...alone.route[1]! })[0]!), hexKey(cage), "the cage is where the old seat put it");
+    served(s, op);
+    const points = routePoints(s.buildChunks, ownWalk(mount), op.route!, mount.elevation);
+    const world = groupWalkWorld(s, ownWalk(mount), { role: "player" });
+    assert.ok(world.input.towed?.some((t) => t.id === "led"), "the prisoner walks with the search");
+    assert.equal(new HexWalkWorld(world.input).cannotFollow(points), null, "the search's walk of it");
+    assert.equal(walkersStop(seenRoom(s), ownWalk(mount), points, [s.tokens.led], { route: op.route!, squeeze: false }), null, "no cut for it");
   });
 }

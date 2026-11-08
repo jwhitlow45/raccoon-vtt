@@ -10,8 +10,8 @@ import { hexAt, hexKey, hexNeighbors, type Hex } from "#shared/rules/hex.ts";
 import { deviceGround } from "#shared/rules/held.ts";
 import { footing } from "#shared/rules/heights.ts";
 import { coreBlocked, coreWalled, groundUnder, hexEndStand, hexFitWall, hexLegOf, hexLegStand, hexNarrow, hexStandHexes, hexStandInside, hexStandPlace, hexStartStand, hexWallsOf, landedElevation, landing, legSpots, legStop, offGridWallThrough, onSqueezedLattice, ownWalk, previewChunks, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type HexStand, type HexWalls, type Walker } from "#shared/rules/movement.ts";
-import { fileOutOfReach, fileRoutes, fileShift, followedHeight, followerTrace, routeLattice, routePoints, routeStop, routeWalkers, seatShift, walkSqueezes, walkTrace, type FileEnd, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
-import { followsInSingleFile } from "#shared/migrate.ts";
+import { fileOutOfReach, fileRoutes, fileShift, followedHeight, followerTrace, hexFileClasses, hexFileRoutes, routeLattice, routePoints, routeStop, routeWalkers, seatShift, walkSqueezes, walkTrace, type FileEnd, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
+import { followsInSingleFile, followsInSingleFileOnHexes } from "#shared/migrate.ts";
 import { checkSetReach } from "#shared/rules/moveLeg.ts";
 import type { WalkRoute } from "#shared/rules/walk.ts";
 import { routeLegCheck, type RouteWorld } from "#shared/rules/hexWalk.ts";
@@ -726,14 +726,17 @@ type WalkersState = BuildState & { tokens?: Readonly<Record<string, Token | unde
  * walked by its own rule (route.ts followerTrace). One that a token
  * sitting on the holder drags, as a rider drags a goblin, goes with that
  * token's seat, which moves where the holder squeezes (route.ts seatShift,
- * review DP34-ASTRA-01). `end` is whether the walk ends squeezed, as the
+ * review DP34-ASTRA-01), on hexes apart from the other riders every player
+ * sees. `end` is whether the walk ends squeezed, as the
  * op says, else as where it stands: a cut along a piece ends it full.
  * `stop` is the first of them whose leg from the holder's piece `i`'s
  * start a wall or a ledge stops, with the holder at `to` on that piece,
  * and with `ends`, where the walk ends there, the first that would stand
  * full size off its grid with a wall through its box. A walk on squares
  * that ends squeezed takes them in single file (`file`, route.ts
- * fileRoutes, D-261101-250), as the server's move does: each on its own
+ * fileRoutes, D-261101-250), as the server's move does, and so does one on
+ * hexes where each of them is of one hex (route.ts hexFileRoutes and
+ * hexFileClasses, D-261107-172): each on its own
  * walk along the holder's line, so `to` is then the walk's own point `i`,
  * since a cut of it lands full and takes them by their places, and where
  * the walk ends one it leaves out of its own holder's reach is stopped too
@@ -756,7 +759,9 @@ function followersOf(state: WalkersState, lead: Walker, points: readonly RoutePo
   const squeezedAt = (i: number, to: Point) => to.x === points[i]!.x && to.y === points[i]!.y && squeezes[i]!;
   const groundAt = (w: DropToken, p: Point, by: Point) => groundUnder(state.buildChunks, followerTrace(w, [w])[0]!, { x: p.x + w.x - lead.x + by.x, y: p.y + w.y - lead.y + by.y });
   // In single file each walks its own walk, as the move takes it along (moveLeg.ts singleFile): every walker here is a public one.
-  const file = end === true && !isHex(g) && followsInSingleFile(undefined) ? fileRoutes(lead, points, [walkers]) : null;
+  const inFile = isHex(g) ? hexFileClasses(walkers, [])[0] : walkers;
+  const file = end !== true || inFile.length === 0 ? null : isHex(g) ? (followsInSingleFileOnHexes(undefined) ? hexFileRoutes(g, lead, points, [inFile]) : null) : followsInSingleFile(undefined) ? fileRoutes(lead, points, [walkers]) : null;
+  const riders = ridersSeen(state, named);
   // In single file each holder up its chain is read where its own walk has it (route.ts fileShift), else all where the lead's walk takes them.
   const heightAt = (w: DropToken, p: RoutePoint, by: Point, i: number) => {
     const shift = { x: p.x - lead.x + by.x, y: p.y - lead.y + by.y };
@@ -766,7 +771,7 @@ function followersOf(state: WalkersState, lead: Walker, points: readonly RoutePo
     const own = file?.get(w.id);
     // One whose height is not followed stands on its ground, so it meets every ledge, the most any walk of it could.
     const spot = (p: RoutePoint, squeezed: boolean, i: number): RoutePoint => {
-      const by = own ? { x: own[i]!.x - (p.x + w.x - lead.x), y: own[i]!.y - (p.y + w.y - lead.y) } : seatShift(g, named, memberOf, w.id, p, squeezed);
+      const by = own ? { x: own[i]!.x - (p.x + w.x - lead.x), y: own[i]!.y - (p.y + w.y - lead.y) } : seatShift(g, named, memberOf, w.id, p, squeezed, riders);
       return { x: p.x + w.x - lead.x + by.x, y: p.y + w.y - lead.y + by.y, elevation: heightAt(w, p, by, i) ?? groundAt(w, p, by) };
     };
     return { spot, trace: followerTrace(w, [{ x: w.x, y: w.y, elevation: w.elevation }, ...points.slice(1).map((p, k) => spot(p, squeezes[k + 1]!, k + 1))]) };
@@ -786,9 +791,9 @@ function followersOf(state: WalkersState, lead: Walker, points: readonly RoutePo
       if (ends && file && file.size > 0 && state.meta) {
         const there = new Map<string, FileEnd>();
         for (const [k, w] of linked.entries()) if (file.has(w.id)) there.set(w.id, follows[k]!.spot(points[i]!, squeezedAt(i, to), i));
-        const inFile = new Map([...file.keys()].flatMap((id) => (there.has(id) ? [[id, there.get(id)!] as const] : [])));
+        const ends = new Map([...file.keys()].flatMap((id) => (there.has(id) ? [[id, there.get(id)!] as const] : [])));
         const end = points[i]!;
-        if (fileOutOfReach(g, state.meta.settings, { ...lead, id: named.id ?? "" }, { x: end.x, y: end.y, elevation: end.elevation }, memberOf, inFile, ridersSeen(state, named)) !== null) return { blocker: "wall" as const, door: null };
+        if (fileOutOfReach(g, state.meta.settings, { ...lead, id: named.id ?? "" }, { x: end.x, y: end.y, elevation: end.elevation }, memberOf, ends, riders) !== null) return { blocker: "wall" as const, door: null };
       }
       return null;
     },

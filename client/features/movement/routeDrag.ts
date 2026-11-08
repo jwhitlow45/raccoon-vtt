@@ -1,5 +1,5 @@
 import type { Point } from "#shared/rules/geom.ts";
-import { WalkWorld, WorkBudget, type WalkInput, type WalkRoute } from "#shared/rules/walk.ts";
+import { WorkBudget, type WalkInput, type WalkRoute } from "#shared/rules/walk.ts";
 import { routeLegCheck, routeSearch, routeWorld, routeWorldUnits, type RouteLegCheck, type RouteSearch, type RouteWorld } from "#shared/rules/hexWalk.ts";
 import type { RouteJob, RouteWork } from "./routeWork.ts";
 
@@ -38,7 +38,7 @@ export class RouteDrag {
   #alone: RouteSearch | null = null;
   #built = false;
   #target: Point | null = null;
-  /** Whether the drop at the target ends squeezed, so on squares what the walker drags follows it in single file (route.ts fileRoutes). */
+  /** Whether the drop at the target ends squeezed, so what the walker drags follows it in single file (route.ts fileRoutes, hexFileRoutes). */
   #squeezed = false;
   #check: RouteLegCheck | null = null;
   #answer: RouteAnswer = { kind: "open" };
@@ -156,7 +156,7 @@ export class RouteDrag {
     };
     const world = this.#worldNow(budget);
     if (!world) return this.#answered({ kind: "open" });
-    if (this.#squeezed && world.tows && world instanceof WalkWorld) return this.#inFile(world, to, budget);
+    if (this.#squeezed && world.followsInFile) return this.#inFile(world, to, budget);
     // The straight leg first: most drags need no search (5.2).
     this.#check ??= routeLegCheck(world, to);
     if (!this.#check.done && !this.#check.run(late)) return false;
@@ -206,14 +206,15 @@ export class RouteDrag {
   }
 
   /**
-   * A drop on squares that ends squeezed, so what the walker drags follows
-   * it in single file along its own walk (D-261101-250, route.ts
-   * fileRoutes), as the server's move takes them: the walker's own way
-   * there, the straight leg first, taken when every one of them follows it
-   * so on ground the search may read (walk.ts fileBlocked), else no way,
-   * naming the first that cannot follow.
+   * A drop that ends squeezed, so what the walker drags follows it in
+   * single file along its own walk (D-261101-250, route.ts fileRoutes, on
+   * hexes D-261107-172 and route.ts hexFileRoutes, for creatures of one
+   * hex), as the server's move takes them: the walker's own way there, the
+   * straight leg first, taken when every one of them follows it so on
+   * ground the search may read (walk.ts and hexWalk.ts fileBlocked), else
+   * no way, naming the first that cannot follow.
    */
-  #inFile(world: WalkWorld, to: Point, budget: WorkBudget): boolean {
+  #inFile(world: RouteWorld, to: Point, budget: WorkBudget): boolean {
     const late = (units = 1) => {
       budget.charge(units);
       return budget.spent;
