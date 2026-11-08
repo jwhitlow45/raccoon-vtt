@@ -3,7 +3,7 @@ import { imageAssetId } from "./imageRef.ts";
 import { eventLines } from "./logRings.ts";
 import type { Actor, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, MapVideo, PromptKey, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
 import { MAX_ROUTE_REACH, syncStampFits, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
-import { gridOfToken, hash128, heldFreeDoor, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, shownFreeWall, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
+import { gridOfToken, hash128, heldFreeDoor, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, shownFreeWall, stableStringify, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
 import { CHARACTER_CHANGED, LIMITS, stillFitsVideo } from "./limits.ts";
 import { referencedVideoIds, restoreAddedAssets } from "./referencedAssets.ts";
 import { handoutPages } from "./handouts.ts";
@@ -18,6 +18,7 @@ import { groundAt } from "./rules/heights.ts";
 import { convexHull } from "./rules/aoe.ts";
 import type { Point } from "./rules/geom.ts";
 import { convexLive, fogClassOf, groundOf, partLive, type Ground } from "./rules/held.ts";
+import { deleteSet, heldFloors, startFloor, unhiddenPartyMember } from "./rules/floors.ts";
 import {
   LEDGE_IN_THE_WAY,
   WALL_IN_THE_WAY,
@@ -569,6 +570,20 @@ export const MOVE_PLAYERS_FIRST = "Move the players to another scene first.";
 export const MOVE_PLAYERS_FIRST_BACK = "move the players to another scene first";
 
 /**
+ * Why a floor cannot go or be hidden (docs/design/design-v1-floors.md 7.1),
+ * which the floor's page shows on its Remove and Hide too: removing the
+ * start floor would move the players to another scene, and removing or
+ * hiding a floor an unhidden party member stands on would take it from the
+ * players who see them there.
+ */
+export const FLOOR_REFUSALS = {
+  removeStart: "The players start here. Move the players to another floor first.",
+  removeParty: (floor: string) => `Move the party off ${floor} first.`,
+  hideStart: "The players start here.",
+  hideParty: (floor: string) => `Players are on ${floor}.`,
+} as const;
+
+/**
  * Whether an op names a "save ends" save or occurrence on an effect. Only
  * the DM sets one, since its DC is the DM's, and only the server writes an
  * occurrence, so every op that carries effects is checked: an effect added
@@ -700,7 +715,9 @@ function forDm(op: Op, c: Check): Decision {
       return mapVideosUsable(c, op.scene.map ? [op.scene.map] : []);
     case "scene.delete":
       // Here, where ops arrive, never in the reducer: a stored delete of the players' scene from before the rule still replays, moving them on as it did.
-      return op.sceneId === c.state.meta.playerSceneId ? refuse("invalid", MOVE_PLAYERS_FIRST) : OK;
+      return deleteCheck(c, op.sceneId);
+    case "floor.open":
+      return op.open ? OK : hideCheck(c, op.sceneId);
     case "scene.setMap":
       if (op.map && !c.asset(op.map.assetId, "map")) return GONE;
       return mapVideosUsable(c, op.map ? [op.map] : []);
@@ -845,9 +862,41 @@ function pageReader(c: Check, access: JournalAccess): Decision {
   return ownEntry(c.state.members, access.member)?.kind === "dm" ? refuse("invalid", PAGE_FOR_A_PLAYER) : OK;
 }
 
+/**
+ * A delete of a scene or a removal of one floor (D-261102-493): the whole
+ * set of floors it takes, refused while it holds the start floor, and a
+ * removal while an unhidden party member stands on the floor. A delete of
+ * a scene with floors takes every floor, whoever stands on them, as a
+ * delete of any scene takes what is on it.
+ */
+function deleteCheck(c: Check, sceneId: string): Decision {
+  const scene = ownEntry(c.state.scenes, sceneId);
+  if (!scene) return OK;
+  const set = deleteSet(c.state, scene);
+  const removal = scene.floor !== undefined && scene.floor.of !== scene.id;
+  const start = startFloor(c.state);
+  if (start !== null && set.some((s) => s.id === start)) return refuse("invalid", removal ? FLOOR_REFUSALS.removeStart : MOVE_PLAYERS_FIRST);
+  if (removal && partyOn(c.state, scene.id)) return refuse("invalid", FLOOR_REFUSALS.removeParty(scene.floor!.name));
+  return OK;
+}
+
+/** Hide from players (7.1): never the start floor, nor a floor an unhidden party member stands on, which stays open anyway. */
+function hideCheck(c: Check, sceneId: string): Decision {
+  const scene = ownEntry(c.state.scenes, sceneId);
+  if (!scene?.floor) return OK;
+  if (sceneId === startFloor(c.state)) return refuse("invalid", FLOOR_REFUSALS.hideStart);
+  if (partyOn(c.state, sceneId)) return refuse("invalid", FLOOR_REFUSALS.hideParty(scene.floor.name));
+  return OK;
+}
+
+function partyOn(state: RoomState, sceneId: string): boolean {
+  return Object.values(state.tokens).some((t) => t.sceneId === sceneId && unhiddenPartyMember(state, t));
+}
+
 function forPlayer(op: Op, c: Check): Decision {
-  // The scene the player holds, which behind a blackout is none (design 7.3): an op on the table then answers as if it were not there.
-  const playerScene = viewerSceneId(c.state, c.actor, c.opts);
+  // The floors the player holds, which behind a blackout are none (design 7.3): an op on the table then answers as if it were not there.
+  const held = heldFloors(c.state, c.actor, c.opts);
+  const holds = (sceneId: string) => held.has(sceneId);
   switch (op.t) {
     case "room.update":
     case "room.setPlayerScene":
@@ -989,9 +1038,9 @@ function forPlayer(op: Op, c: Check): Decision {
       return rollChangeCheck(c, op);
 
     case "cast.ask":
-      return castAskCheck(c, op, playerScene);
+      return castAskCheck(c, op, holds);
     case "cast.close":
-      return castCloseCheck(c, op, playerScene);
+      return castCloseCheck(c, op, held.size > 0);
 
     case "dice.roll":
       return diceRollCheck(c, op);
@@ -1166,9 +1215,10 @@ function forPlayer(op: Op, c: Check): Decision {
       if (ownEntry(c.state.templates, t.id)) return GONE;
       if (t.ownerId !== c.actor.memberId) return NOT_YOURS;
       if (t.visibility !== "all") return refuse("forbidden", "players cannot hide areas");
-      if (t.sceneId !== playerScene) return GONE;
-      if (t.attachedTo !== undefined && !c.visibleToken(t.attachedTo)) return GONE;
-      if (t.casterId !== undefined && !c.visibleToken(t.casterId)) return GONE;
+      if (!holds(t.sceneId)) return GONE;
+      // An area stays on its floor (docs/design/design-v1-floors.md 7.7, FLR-OPUS-38): what it follows and its caster stand there too.
+      if (t.attachedTo !== undefined && c.visibleToken(t.attachedTo)?.sceneId !== t.sceneId) return GONE;
+      if (t.casterId !== undefined && c.visibleToken(t.casterId)?.sceneId !== t.sceneId) return GONE;
       return OK;
     }
     case "template.update": {
@@ -1196,9 +1246,9 @@ function forPlayer(op: Op, c: Check): Decision {
       if (ownEntry(c.state.drawings, d.id)) return GONE;
       if (d.ownerId !== c.actor.memberId) return NOT_YOURS;
       if (d.visibility !== "all") return refuse("forbidden", "players cannot hide drawings");
-      if (d.sceneId !== playerScene) return GONE;
-      // A kept ruler stands only on tokens the player can see, like any reference (design 8.2).
-      if (d.anchors?.some((id) => id !== null && !c.visibleToken(id))) return GONE;
+      if (!holds(d.sceneId)) return GONE;
+      // A kept ruler stands only on tokens the player can see, like any reference (design 8.2), on its own floor (FLR-OPUS-38).
+      if (d.anchors?.some((id) => id !== null && c.visibleToken(id)?.sceneId !== d.sceneId)) return GONE;
       return OK;
     }
     case "drawing.delete": {
@@ -1208,7 +1258,7 @@ function forPlayer(op: Op, c: Check): Decision {
     }
     case "drawing.clear":
       if (op.scope !== "own") return FORBIDDEN;
-      return op.sceneId === playerScene ? OK : GONE;
+      return holds(op.sceneId) ? OK : GONE;
 
     case "encounter.add": {
       // A fight the player's projection does not hold, as behind a blackout, answers as no fight does.
@@ -1310,7 +1360,7 @@ function forPlayer(op: Op, c: Check): Decision {
         const current = ownEntry(c.state.drawings, entry.key.slice("drawing:".length));
         // Only on the scene the player holds, as a drawing op is, so an undo never writes off it and answers
         // the same whether a scene the players left is still there or was deleted since.
-        if ((before && before.sceneId !== playerScene) || (current && current.sceneId !== playerScene)) return GONE;
+        if ((before && !holds(before.sceneId)) || (current && !holds(current.sceneId))) return GONE;
         if (before && (before.ownerId !== c.actor.memberId || before.visibility !== "all")) return FORBIDDEN;
         if (current && (current.ownerId !== c.actor.memberId || current.visibility !== "all")) return FORBIDDEN;
         // Putting a drawing back draws it again, so it needs the permission a new one does (docs/design/design-v1-dm-tools.md 2.6).
@@ -1632,21 +1682,27 @@ export function waitingAsks(state: Pick<RoomState, "casts" | "tokens" | "charact
  * caster, area or target answers as a missing one, so a refusal never says
  * a hidden thing is there.
  */
-function castAskCheck(c: Check, op: OpOf<"cast.ask">, playerScene: string | null): Decision {
+/**
+ * A player's ask for saves (docs/design/design-v1-player-save-spell.md 5.3):
+ * the caster on a floor they hold, and the cast, its area and its targets
+ * on the caster's floor (docs/design/design-v1-floors.md 8.3), since a spell
+ * never reaches across floors.
+ */
+function castAskCheck(c: Check, op: OpOf<"cast.ask">, holds: (sceneId: string) => boolean): Decision {
   const input = op.cast;
   if (ownEntry(c.state.casts, input.id)) return GONE;
   const caster = c.visibleToken(input.caster);
-  if (!caster || playerScene === null || caster.sceneId !== playerScene || input.sceneId !== playerScene) return GONE;
+  if (!caster || !holds(caster.sceneId) || input.sceneId !== caster.sceneId) return GONE;
   if (!ownsToken(c.state, c.actor, caster)) return NOT_YOURS;
   if (input.area !== undefined) {
     const area = ownEntry(c.state.templates, input.area);
-    if (!area || area.sceneId !== playerScene || !c.visible(keys.template(input.area))) return GONE;
+    if (!area || area.sceneId !== caster.sceneId || !c.visible(keys.template(input.area))) return GONE;
     if (area.ownerId !== c.actor.memberId) return NOT_YOURS;
   }
   if (input.targets !== undefined) {
     for (const id of input.targets) {
       const target = c.visibleToken(id);
-      if (!target || target.sceneId !== playerScene) return GONE;
+      if (!target || target.sceneId !== caster.sceneId) return GONE;
     }
     if (new Set(input.targets).size !== input.targets.length) return refuse("invalid", "a target is named twice");
   }
@@ -1657,10 +1713,10 @@ function castAskCheck(c: Check, op: OpOf<"cast.ask">, playerScene: string | null
 }
 
 /** A player's withdrawal, of an ask whose caster they own now. The DM's resolve and dismissal are the DM's alone. */
-function castCloseCheck(c: Check, op: OpOf<"cast.close">, playerScene: string | null): Decision {
+function castCloseCheck(c: Check, op: OpOf<"cast.close">, holdsAny: boolean): Decision {
   const ask = ownEntry(c.state.casts, op.castId);
   // Behind a pause a player holds no ask (shared/project.ts), so none is there to withdraw.
-  if (!ask || playerScene === null || !c.ownsTokenId(ask.caster)) return refuse("gone", ASK_CLOSED);
+  if (!ask || !holdsAny || !c.ownsTokenId(ask.caster)) return refuse("gone", ASK_CLOSED);
   return op.end === "withdrawn" ? OK : FORBIDDEN;
 }
 
@@ -3106,7 +3162,8 @@ function companionCheck(c: Check, input: TokenInput, link: NonNullable<TokenInpu
   if (!character) return GONE;
   if (!ownsCharacter(c.actor, character)) return NOT_YOURS;
   const scene = ownEntry(c.state.scenes, input.sceneId);
-  if (ownEntry(c.state.tokens, input.id) || !scene || input.sceneId !== viewerSceneId(c.state, c.actor, c.opts)) return GONE;
+  // On a floor the player holds (docs/design/design-v1-floors.md 8.3), beside a token of the character there.
+  if (ownEntry(c.state.tokens, input.id) || !scene || !heldFloors(c.state, c.actor, c.opts).has(input.sceneId)) return GONE;
   if (!insideScene(scene, input, input)) return refuse("forbidden", "place it inside the map");
   const settings = c.state.meta.settings;
   const placed = { ...input, elevation: input.elevation ?? 0 };
@@ -3180,7 +3237,8 @@ function placeTokenCheck(c: Check, input: Extract<Op, { t: "token.create" }>["to
   if (!character) return GONE;
   if (!ownsCharacter(c.actor, character)) return NOT_YOURS;
   const scene = ownEntry(c.state.scenes, input.sceneId);
-  if (ownEntry(c.state.tokens, input.id) || !scene || input.sceneId !== viewerSceneId(c.state, c.actor, c.opts)) return GONE;
+  // On a floor the player holds (docs/design/design-v1-floors.md 8.3), one token of the character there.
+  if (ownEntry(c.state.tokens, input.id) || !scene || !heldFloors(c.state, c.actor, c.opts).has(input.sceneId)) return GONE;
   const special =
     input.kind !== "pc" ||
     (input.visibility ?? "all") !== "all" ||
