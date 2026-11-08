@@ -2153,7 +2153,7 @@ A re-sync from D&D Beyond is a Setup step, and so is the dialog's **Undo the re-
 
 # Scenarios
 
-These scenarios follow situations from real sessions, from building the map to running the scene, and name the tools you use at each step. Read one when you are about to run something like it, or skim them all to see how the tools fit together. The screenshots come from a test room with a party of four level 5 characters: Thorn (fighter), Bree (cleric), Mara (rogue) and Ivo (wizard).
+These scenarios follow situations from real sessions, from building the map to running the scene, and name the tools you use at each step. Read one when you are about to run something like it, or skim them all to see how the tools fit together, and follow a step's link for the rule behind it. The screenshots come from a test room with a party of four level 5 characters: Thorn (fighter), Bree (cleric), Mara (rogue) and Ivo (wizard).
 
 ## A forest road ambush
 
@@ -2173,13 +2173,13 @@ Goblins and wolves wait in the trees beside a road, and the party is about to wa
 **Running it**
 
 1. If the party is surprised, select the four characters (with **Multi-select**), open **Conditions** in the group's bar, and tap **Surprised**. Their Initiative rolls then have Disadvantage, and their rows show **Dis**.
-2. In **Initiative**, under **New fight**, press **Everyone here**. Use this rather than "Visible to players", which would leave the hidden goblins out. Their rows start hidden.
+2. In **Initiative**, under **New fight**, press **Everyone here**. Use this rather than "Visible to players", which would leave the hidden goblins out.
 3. The players roll their own Initiative. Press **Auto Initiative**: the four goblin warriors share one roll ("By creature"), and so do the two wolves. Then press **Start**.
-4. The hidden goblins appear on their first turn, thanks to "Reveal hidden combatants on their turn". If you would rather spring them all at once, select them and press **Hidden** in the group's bar, and their tokens appear together. If one of them has already appeared on its own turn, the first press hides that one again along with the rest, so press **Hidden** a second time to bring them all out. Their rows still join the players' order one by one, on each goblin's first turn, because that is how **Initiative order players see** works in a new room. If you want the rows to appear along with the tokens, set that option to **Everyone** in Room settings before the fight.
-5. On a goblin's turn, tap it and press **Roll** to see its roll options. On its Scimitar line ("+4 to hit"), press **Attack** to roll against Thorn's AC, then **Damage**. Tap Thorn, use the **Use 5** chip in his HP entry, and press **Apply**.
+4. The hidden goblins appear on their first turn, thanks to "Reveal hidden combatants on their turn". If you would rather spring them all at once, select them and press **Hidden** in the group's bar, and their tokens appear together. If one of them has already appeared on its own turn, the first press hides that one again along with the rest, so press **Hidden** a second time to bring them all out. Their rows still join the players' order one by one, on each goblin's first turn, unless you set **Initiative order players see** to **Everyone** in Room settings before the fight (see [What players see of the order](#what-players-see-of-the-order)).
+5. On a goblin's turn, its turn card lists its attacks (see [A creature's turn](#a-creatures-turn)), as do its roll options when you tap it and press **Roll** in its bar. On its Scimitar line ("+4 to hit"), press **Attack** to roll against Thorn's AC, then **Damage**, and tap **Apply to Thorn** under the damage. Or tap Thorn, use the **Use 5** chip in his HP entry, and press **Apply**.
 6. A wolf hits Mara and knocks her down: open **Conditions** on her token and tap **Prone**.
 7. Ivo casts Fireball. His player picks the **Area** tool, searches "fireball", and places the 20 ft Sphere among the goblins. Your screen shows the area, with "In area (4): …" naming who it catches.
-8. Press **Save and damage** on the area. The group save fills itself in from Ivo's stat block: "Dexterity save, DC 15 (Ivo's spell save DC), 8d6 Fire, half on a pass." Press the roll button, and the goblins roll on the server. Take Ivo's own damage roll ("Use Ivo's 28") or press **Roll**, check the rows, and press **Apply**. A single undo would take all of it back.
+8. Press **Save and damage** on the area, and the group save fills itself in from Ivo's stat block (see [The group save](#the-group-save)). Press the roll button, and the goblins roll on the server. Take Ivo's own damage roll ("Use Ivo's 28") or press **Roll**, check the rows, and press **Apply**.
 9. Press **Next** through the turns. When the fight ends, press **End the fight** and tap it again to confirm.
 
 ![Ivo's Fireball over the goblins: the group save with each goblin's save, its damage, and Apply.](dm-guide/ambush-fireball.webp)
@@ -2205,8 +2205,8 @@ The party explores a crypt by torchlight, and the players should see only what t
 
 **Running it**
 
-1. **Move players** to the crypt. To check what they see, tap Mara's token and press **View as** followed by her player's name to see the scene as her player sees it, or turn on **Party sight** in the DM panel: the hall by torchlight, and darkness everywhere else.
-2. The players move and see more as they go, and ground they have explored stays on their map, dimmed, as they last saw it. They can open the closed door themselves, by tapping it or with **Open door** in their token's action bar.
+1. **Move players** to the crypt. To check what they see, tap Mara's token and press **View as** and her player's name to see the scene as that player sees it, or turn on **Party sight** in the DM panel: the hall by torchlight, and darkness everywhere else.
+2. The players move and see more as they go (see [Light and party vision](#light-and-party-vision)), and they can open the closed door themselves, by tapping it or with **Open door** in their token's action bar.
 3. The chamber door is locked. When Mara picks the lock, use **Select**, tap the door, and press **Unlock**, then **Open**.
 4. When a character lights a brazier, go to the builder's **Lights** mode, tap the brazier, and set it **Lit**. The chamber lights up for everyone who can see it.
 5. Someone searches the east wall and finds the secret door. Tap it with **Select** and press **Mark found**, and the players now see a door.
@@ -2222,17 +2222,17 @@ A watchtower stands on a rise above a field, and harpies circle overhead.
 
 1. In **Scenes**, under **New scene**, pick **Builder**, and paint Grass over the field with **Rectangle room**. Set **Automatic walls** to **Around floor only** or **Off**, so the field isn't walled in.
 2. Pick **Heights/stairs**, then **Height**, set it to 10 ft up, choose **Area**, and drag out the rise. Then set 30 ft up and drag the tower's top onto the rise.
-3. Pick **Stairs** with **Auto**, and paint a run of stairs up the rise and another up the tower. Each stair points uphill. Where a "?" shows, pick an arrow and paint that stair again.
-4. Place an archer on the tower. A token placed on raised ground stands on top of it.
+3. Pick **Stairs** with **Auto**, and paint a run of stairs up the rise and another up the tower. Where a "?" shows, pick an arrow and paint that stair again.
+4. Place an archer on the tower. It stands on the tower's top, 30 ft up.
 5. Place the harpies and raise them to 40 ft with **+5** in the action bar, or Page Up. Each shows "↑40", with a shadow on the ground under it.
 
 ![The watchtower: the rise and the tower with their stairs, Mara on top as the archer, harpies flying at 40 ft, and the Ruler from Mara down to Thorn reading 50 ft.](dm-guide/heights-build.webp)
 
 **Running it**
 
-- With **Walls and ledges block players' moves** on, a character dropped on the tower walks there by the stairs, once the party has seen them. Until then the walk stops at the ledge ("Ledge in the way. No stairs you have seen lead there."). A flier passes over.
+- With **Walls and ledges block players' moves** on, a character dropped on the tower walks there by the stairs, once the party has seen them, and until then stops at the ledge (see [When walls stop a move](#when-walls-stop-a-move)). A flier passes over.
 - Tap the ground with **Select** to read a height. The Ruler and token distances count height as if it were one more diagonal. Under the default rule (every square 5 ft), the larger of the two distances is what counts. So the Ruler from the archer, 30 ft up, to a goblin on the ground 10 squares (50 ft) away reads 50 ft.
-- Ivo casts Fireball on the ground under a harpy flying at 40 ft. The shaded squares include the harpy's square, but "In area" leaves it out, since the Sphere reaches only 20 ft up. To catch the harpy, center the Sphere on its token, or raise **Elevation** under **⋯** before placing it.
+- Ivo casts Fireball on the ground under a harpy flying at 40 ft. The shaded squares include the harpy's square, but "In area" leaves it out, since the Sphere reaches only 20 ft up. To catch the harpy, center the Sphere on its token, or raise **Elevation** under **⋯** before placing it (see [Height](#height)).
 - When a harpy is knocked out of the air, lower its elevation to the ground, and apply any falling damage through its HP entry. The **Flying** status is only a reminder for you, and it is separate from the token's elevation.
 
 ![A Fireball under a flying harpy: the squares under it shaded, but "In area" leaves it out.](dm-guide/heights-fireball.webp)
@@ -2244,18 +2244,18 @@ The party faces an adult red dragon in its lair. It has Multiattack, Fire Breath
 **Setting it up**
 
 1. In **Monsters**, search for "red dragon" and tap **Adult Red Dragon**. On its place card, tick **In its lair**, then press **Place on the map** and tap its spot. In its lair the dragon gets 4 Legendary Actions and 4 Legendary Resistances instead of 3, and its lair XP.
-2. Add the dragon to the fight along with the party. It joins with **In lair** on: its tracker row has a "Lair" tag, which the players see too, and "LA 4/4" and "LR 4/4", which only you see. If you forgot to tick **In its lair**, turn on **In lair** in the row's **⋯**, which does the same.
+2. Add the dragon to the fight along with the party. It joins with **In lair** on, so its tracker row has a "Lair" tag and "LA 4/4" and "LR 4/4" (see [In its lair](#in-its-lair)). If you forgot to tick **In its lair**, turn on **In lair** in the row's **⋯**, which does the same.
 
 **Its turn**
 
-1. Tap the dragon, then press **Roll** in its bar. The Dice panel shows the dragon's card, with its rolls in folding groups under it. Multiattack is a note at the head of its **Actions**: roll each Rend it names with **Attack** and **Damage**, and apply each hit with the **Use** chip in the target's HP entry.
-2. Fire Breath's line in the roll options reads "Recharge 5–6 · DC 21 DEX, half on a pass, 17d6 Fire". Press its **Group save**. The group save opens with "17d6 Fire, half on a pass." Its rows follow what you have selected, so select the characters in the Cone first. Or place a Cone **Area** from the dragon and use its **Save and damage**, which picks them for you. The players are asked to roll. Roll the damage, then press **Apply**. Fire Breath is now marked used, on all your devices, and its row shows a "Fire Breath used" chip.
-3. At the start of the dragon's next turn, a card says "Fire Breath can recharge (5–6)." Press **Roll**: on a 5 or 6 the mark clears, and the card says "Rolled 5: Fire Breath is ready." The dragon's turn card lists its Legendary Resistances, counts its Legendary Actions for the other creatures' turns, and shows Fire Breath, ready or used.
+1. Tap the dragon, then press **Roll** in its bar. Multiattack is a note at the head of its **Actions**: roll each Rend it names with **Attack** and **Damage** (see [Roll options](#roll-options)), and apply each hit with **Apply to** under the damage or the **Use** chip in the target's HP entry.
+2. Fire Breath's line in the roll options reads "Recharge 5–6 · DC 21 DEX, half on a pass, 17d6 Fire". Press its **Group save**. Its rows follow what you have selected, so select the characters in the Cone first. Or place a Cone **Area** from the dragon and use its **Save and damage**, which picks them for you. The players are asked to roll. Roll the damage, then press **Apply**. Fire Breath is now marked used, and its row shows a "Fire Breath used" chip.
+3. At the start of the dragon's next turn, a card asks for Fire Breath's recharge roll. Press **Roll**, and on a 5 or 6 the mark clears (see [A creature's turn](#a-creatures-turn)). The dragon's turn card lists its Legendary Resistances, counts its Legendary Actions for the other creatures' turns, and shows Fire Breath, ready or used.
 
 **Between turns**
 
-- To take a Legendary Action, tap the dragon and press **Uses** in its action bar, or open its row's **⋯**, and tap the action by name, such as **Fiery Rays**. The count goes down, and Fiery Rays, which the dragon can't take again until its next turn, stays off until then. They all come back at the start of its turn. If you tap the wrong one, **Undo** in the top bar takes it back.
-- When the dragon fails a save in a group save, its row offers **Use Legendary Resistance (4 left)** the first time, since the label counts the uses it still has, and a save-ends or Concentration card offers the same. For a save you roll yourself from its roll options, press **Use** beside **Legendary Resistance** in its **Uses**.
+- To take a Legendary Action, tap the dragon and press **Uses** in its action bar, or open its row's **⋯**, and tap the action by name, such as **Fiery Rays**. The count goes down, and Fiery Rays stays off until the start of the dragon's next turn, when they all come back. If you tap the wrong one, **Undo** in the top bar takes it back (see [Uses and Legendary Actions](#uses-and-legendary-actions)).
+- When the dragon fails a save in a group save, its row offers **Use Legendary Resistance (4 left)**, and a save-ends or Concentration card offers the same. For a save you roll yourself from its roll options, press **Use** beside **Legendary Resistance** in its **Uses**.
 
 ![The dragon's turn after its Fire Breath and a Rend: its action bar with "Use 14 (Rend damage)", which every HP entry now offers, and Uses after a lightning bolt, and the Dice panel with the Rend damage on top, Rend's Attack, Damage and Critical, and Fire Breath marked Used.](dm-guide/boss.webp)
 
@@ -2267,7 +2267,7 @@ Bree casts Spirit Guardians and wades into the goblins, while Ivo's owl familiar
 
 1. Bree's player picks the **Area** tool. With Bree on the scene, it reads "From Bree". They search for "spirit guardians", which gives a 15 ft Emanation around Bree, attached so it moves with her, with the **Enters**, **Ends turn** and **Once a turn** reminders on. They press **Place**.
 2. From Bree's **Conditions**, give her **Concentrating** with the spell "Spirit Guardians".
-3. When a goblin moves into the aura, or Bree walks up to one, the log says "Goblin Warrior 1 entered Spirit Guardians." and you get a notice. The same happens when a goblin ends its turn inside.
+3. When a goblin moves into the aura, Bree walks up to one, or a goblin ends its turn inside, the log says so ("Goblin Warrior 1 entered Spirit Guardians.") and you get a notice (see [Reminders](#reminders)).
 4. Resolve it. For one goblin, select it, roll its Wisdom save from its roll options, and apply Bree's 3d8 Radiant damage (half on a pass) with the **Use** chip. For several at once, press **Save and damage** on the aura and **Skip** the rows that weren't affected this time.
 5. When Bree takes damage, her player gets the Concentration save. If it fails, delete the aura from the **Areas** panel, because areas don't end on their own when Concentration does.
 
@@ -2275,19 +2275,19 @@ Bree casts Spirit Guardians and wades into the goblins, while Ivo's owl familiar
 
 **The familiar**
 
-1. Ivo's player opens **Characters**, which opens straight onto Ivo's page, since Ivo is the only character they play (if they have gone back to the list since they opened the room, they tap Ivo first), and presses **Add a companion**. They name it "Hoot", pick **A creature**, and under **Choose a stat block** pick the SRD Owl. Under the 2024 rules a familiar rolls its own Initiative, so they set **Turn** to **Its own turn**. **Add and place** puts the owl next to Ivo.
-2. Since Ivo is in a running fight, Hoot joins it at once, in a row of its own that reads "Companion of Ivo", and its player rolls its Initiative. Outside a fight, it joins with **Add Hoot** under **Your creatures**, or with **Everyone here** when you start one.
+1. Ivo's player opens **Characters**, which opens straight onto Ivo's page, since Ivo is the only character they play, and presses **Add a companion**. They name it "Hoot", pick **A creature**, and under **Choose a stat block** pick the SRD Owl. Under the 2024 rules a familiar rolls its own Initiative, so they set **Turn** to **Its own turn**. **Add and place** puts the owl next to Ivo.
+2. Since Ivo is in a running fight, Hoot joins it at once, in a row of its own that reads "Companion of Ivo", and its player rolls its Initiative (see [Companions](#companions) for one added outside a fight).
 3. Under party vision, the owl lends the party its sight, so it can scout a dark room ahead of everyone else.
-4. The next time Ivo summons a familiar, his player simply picks the SRD Owl again. A pasted or typed stat block would be kept under **Stat blocks** on Ivo's page instead.
+4. The next time Ivo summons a familiar, his player picks the SRD Owl again. A pasted or typed stat block would be kept under **Stat blocks** on Ivo's page instead.
 
-A companion that acts on its character's turn, such as a summoned spirit or a steed, is listed under its character's row with its own Reaction. An effect such as Spiritual Weapon takes **On Bree's turn, not listed**.
+A companion that acts on its character's turn, such as a summoned spirit or a steed, is listed under its character's row instead, and an effect such as Spiritual Weapon takes **On Bree's turn, not listed**.
 
 ## The party travels between scenes
 
 The fight on the road is over, and the party heads for the crypt.
 
-1. **Prepare ahead.** In **Scenes**, tap the crypt's row. You see the crypt, while the players stay on the road. Build it, place monsters and set the fog while they play. The Outliner on the crypt reads as the players will see it once they arrive.
-2. **Move the players.** Press **Move players** on the crypt, and every player's view switches to it. Their tokens don't come along, though: they stay on the road. Place each character on the crypt with **Characters**, **Place a token**, or let the players place their own. Their HP and conditions come with them, since characters belong to the room. Delete the old tokens on the road when you're done there.
+1. **Prepare ahead.** In **Scenes**, tap the crypt's row. You see the crypt while the players stay on the road, so you can build it, place monsters and set the fog while they play. The Outliner on the crypt reads as the players will see it once they arrive.
+2. **Move the players.** Press **Move players** on the crypt, and every player's view switches to it, while their tokens stay on the road (see [Scenes](#scenes)). Place each character on the crypt with **Characters**, **Place a token**, or let the players place their own. Their HP and conditions come with them, since characters belong to the room. Delete the old tokens on the road when you're done there.
 3. **Bring them to the start.** **Save current view**, in the **Size and view** group of the crypt's settings, sets where the scene opens. Or frame the map yourself and use **Bring everyone here** in the DM panel.
 4. **Companions left behind.** Ivo's owl stayed on the road. Open the road scene, press `/`, and type "companion". Once Ivo's token is gone from the road, the owl's row reads "Away from Ivo". Delete its token there, and Ivo's player adds it again on the crypt with **Add a companion** and the Owl.
 5. **Monsters left behind** are their own copies, and they stay where they were. If you want a clean copy of a scene to come back to, duplicate it (from its **⋯**, **Duplicate…**) before a fight changes it.
@@ -2296,14 +2296,14 @@ The fight on the road is over, and the party heads for the crypt.
 
 ## A secret door and a reveal
 
-The party finds a hidden vault, and you want the reveal to land with a bit of drama.
+The party finds a hidden vault, and you want the players to see it all at once.
 
 1. Build the vault behind a **Secret door** set to **Hidden**, and keep it under fog.
 2. When the party finds the door, tap it with **Select** and press **Mark found**.
-3. Before they open it, go to the **DM** panel and turn on **Black out players' screens**. The players now see "The DM has paused the game."
+3. Before they open it, turn on **Black out players' screens**, in the **DM** panel or in the **DM** chip's menu in the top bar. The players' screens go black (see [DM panel](#dm-panel)).
 4. While the screens are dark, reveal the vault with the **Fog** tool, place or unhide its guardian, and switch to a night phase if the map has one.
 5. In **Handouts**, use **Show a handout** to show the vault's inscription to **Everyone**.
-6. Turn **Black out players' screens** off. The players see the room and the handout together. If you set the vault up on its own scene, open the **Players see black** menu instead and press **Show players** and the vault's name (see [The DM menu](#the-dm-menu)).
+6. Turn **Black out players' screens** off, or press **End the blackout** in the **Players see black** menu. The players see the room and the handout together. If you set the vault up on its own scene, open the **Players see black** menu instead and press **Show players** and the vault's name (see [The DM menu](#the-dm-menu)).
 
 ![A player's phone during the blackout: "The DM has paused the game." and the X-card.](dm-guide/reveal-blackout.webp)
 
@@ -2314,15 +2314,15 @@ The crypt's builders left a pit just inside the chamber's door, and the party is
 **Setting it up**
 
 1. While the players are still on another scene, open the crypt and pick the **Trap** tool. Under **Start from**, pick **Hidden Pit**, and set **Party level** to **Levels 5–10**, which makes it a 30 ft pit that deals 3d6 Bludgeoning damage. Tap the first square inside the chamber's door.
-2. In the trap's pane, open **Finding and disarming**. The SRD finds a hidden pit with an Intelligence (Investigation) check, which a character has to ask for. If you want a watchful character to have a chance of noticing it without searching, add a Wisdom (Perception) check too, such as DC 14 for "the seams in the floor", and then tick **Hint when a creature's Passive Perception would notice it**, which stays off on this trap until you do. The app then tells you when someone's Passive Perception would notice it.
+2. In the trap's pane, open **Finding and disarming**. The SRD finds a hidden pit with an Intelligence (Investigation) check, which a character has to ask for. If you want a watchful character to have a chance of noticing it without searching, add a Wisdom (Perception) check too, such as DC 14 for "the seams in the floor", and then tick **Hint when a creature's Passive Perception would notice it**, which stays off on this trap until you do (see [Found traps, searching and disarming](#found-traps-searching-and-disarming)).
 3. Close the pane. The pit waits, hatched in red on your map and nowhere on the players'.
 
 **Running it**
 
-1. **Move players** to the crypt. When Mara ends a walk within 10 feet of the pit, her Passive Perception of 14 meets the DC, and you get a toast: "Mara's Passive Perception (14) would notice the seams in the floor of Hidden Pit (DC 14)." If you tell her, press **Mark found**. The players then see the pit's outline and name, and a drag across it warns "Crosses Hidden Pit". If you'd rather keep quiet, simply let the toast go.
-2. If you kept quiet, Thorn's player drags him straight into the chamber. The pit stops him once he stands wholly over it, opens, and drops him 30 ft. You get the toast "Hidden Pit went off: Thorn." and the card among your alerts, and his player reads "The floor gives way!"
+1. **Move players** to the crypt. When Mara ends a walk within 10 feet of the pit, her Passive Perception of 14 meets the DC, and a toast tells you she would notice "the seams in the floor". If you tell her, press **Mark found**. The players then see the pit's outline and name, and a drag across it warns them. If you'd rather keep quiet, let the toast go.
+2. If you kept quiet, Thorn's player drags him straight into the chamber. The pit stops him once he stands wholly over it, opens, and drops him 30 ft (see [Pits](#pits)). You get the trap's toast and its card among your alerts, and his player reads "The floor gives way!"
 3. On the card, press **Save and damage**. The Hidden Pit has no save, so the group save opens on "No save: everyone takes it" with 3d6 Bludgeoning for Thorn. Roll the damage and press **Apply**, which also settles the card.
-4. **Undo move** leaves Thorn's bar, since the pit has already happened, so a change of heart is your call.
+4. **Undo move** leaves Thorn's bar, since the pit has already happened, so a change of heart is your call (see [When a trap goes off](#when-a-trap-goes-off)).
 5. Getting out is up to the table, and the trap's note reminds you what it takes. The pit is ground 30 ft down now, with no stairs, so Thorn can't walk out of it on a scene where walls and ledges stop players' moves. When his climb succeeds, or a rope comes down, drag him out yourself, since your own moves are never stopped. The pit stays open afterwards, so the next creature through the door had better go around it.
 
 # Reference
