@@ -5,7 +5,7 @@ import { entranceSide, fitLine, fogLine, makingLine, NO_FOG_WARNING, outcomeText
 test("DG-C: the size line in the room's feet per square", () => {
   assert.equal(sizeLine(30, 30, 5), "30 × 30 squares (150 by 150 ft)");
   assert.equal(sizeLine(50, 20, 10), "50 × 20 squares (500 by 200 ft)");
-  assert.equal(roomsHint(10), "2 to 10 on this size");
+  assert.equal(roomsHint(10), "2 to 10 on this size. Fewer fit when the layout is tight.");
 });
 
 test("DG-C: the status line counts rooms, doors with the locked ones, and traps", () => {

@@ -46,8 +46,9 @@ export function sizeLine(w: number, h: number, feetPerCell: number): string {
   return `${w} × ${h} squares (${w * feetPerCell} by ${h * feetPerCell} ft)`;
 }
 
+/** The cap is what the size could take at best. A Wide, Sparse or small map fits fewer, and the status line says how many did (DG-ROOMS-CAP). */
 export function roomsHint(max: number): string {
-  return `2 to ${max} on this size`;
+  return `2 to ${max} on this size. Fewer fit when the layout is tight.`;
 }
 
 /** Heights' value in words, for the Rooms asked: "Flat", or "About 3 rooms of 12 off flat ground". */
