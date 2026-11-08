@@ -68,14 +68,16 @@ function save(): void {
 async function take(page: Page): Promise<void> {
   const cdp = await sessions.get(page);
   if (!cdp) return;
+  // Cleared in finally: a rejected take would otherwise leave the timer holding the process open.
+  let timer: NodeJS.Timeout | undefined;
   try {
-    let timer: NodeJS.Timeout | undefined;
     const late = new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), TAKE_TIMEOUT_MS)));
     const taken = await Promise.race([cdp.send("Profiler.takePreciseCoverage"), late]);
-    clearTimeout(timer);
     if (taken) record(taken.result);
   } catch {
     // The page closed or crashed, and what it ran since the last take is lost.
+  } finally {
+    clearTimeout(timer);
   }
 }
 
