@@ -354,7 +354,8 @@ function stoneSpots(input: SpotInput, straight: Straight): Spot[] {
 const apart = (a: Spot, b: Spot) => Math.max(Math.abs(a.mid[0] - b.mid[0]), Math.abs(a.mid[1] - b.mid[1])) >= 2 * TRAP_SPACING;
 const PRESET: Readonly<Record<Exclude<SpotKind, "pit">, string>> = { net: FALLING_NET, needle: POISONED_NEEDLE, roof: COLLAPSING_ROOF, darts: POISONED_DARTS, statue: FIRE_STATUE, stone: ROLLING_STONE };
 
-export type PickedTraps = { traps: PlanTrap[]; statues: PlanStamp[]; stones: [number, number][] };
+/** The traps, each one's squares (its zone's, what it hits, a statue's block, a stone's stretch), and the statues' and stones' places. */
+export type PickedTraps = { traps: PlanTrap[]; squares: number[][]; statues: PlanStamp[]; stones: [number, number][] };
 
 /**
  * Picks up to `count` traps (5.4): each time a kind among those with a spot
@@ -365,7 +366,7 @@ export type PickedTraps = { traps: PlanTrap[]; statues: PlanStamp[]; stones: [nu
  * MAX_STONES stones.
  */
 export function pickTraps(rng: Stream, spots: readonly Spot[], count: number, reaches: (spot: Spot) => boolean = () => true): PickedTraps {
-  const out: PickedTraps = { traps: [], statues: [], stones: [] };
+  const out: PickedTraps = { traps: [], squares: [], statues: [], stones: [] };
   let left = [...spots];
   let tries = 0;
   const taken = new Set<number>();
@@ -398,6 +399,7 @@ export function pickTraps(rng: Stream, spots: readonly Spot[], count: number, re
       if (out.stones.length >= MAX_STONES) left = left.filter((s) => s.kind !== "stone");
     }
     out.traps.push(trap);
+    out.squares.push(spot.squares);
   }
   return out;
 }

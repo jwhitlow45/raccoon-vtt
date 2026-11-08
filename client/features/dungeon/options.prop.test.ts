@@ -5,7 +5,7 @@ import { holds } from "#shared/propertyTestutil.ts";
 import { planDungeon } from "./plan.ts";
 import { Stream } from "./random.ts";
 import { CROCKFORD, newSeed, versionChar, type Seed } from "./seed.ts";
-import { clampSettings, DEFAULT_SETTINGS, defaultRooms, HEIGHT_PRESETS, SECRET_PRESETS, HEIGHTS_MAX, HEIGHTS_STEP, raisedCount, roomCap, SIZE_SIDES, TRAP_PRESETS, TRAPS_MAX, trapCount } from "./settings.ts";
+import { clampSettings, DEFAULT_SETTINGS, defaultRooms, HEIGHT_PRESETS, LIT_PRESETS, SECRET_PRESETS, HEIGHTS_MAX, HEIGHTS_STEP, raisedCount, roomCap, SIZE_SIDES, TRAP_PRESETS, TRAPS_MAX, trapCount } from "./settings.ts";
 
 /*
  * The options look as they say at every Size (D-261102-832, 836). Heights
@@ -137,6 +137,26 @@ describe("the options look as they say", () => {
         });
         const want = look(planDungeon({ ...base, deadEnds: false, secrets: 0 }, seed));
         for (const deadEnds of [false, true]) for (const secrets of Object.values(SECRET_PRESETS)) assert.deepEqual(look(planDungeon({ ...base, deadEnds, secrets }, seed)), want, `${size} dead ends ${deadEnds} secrets ${secrets}`);
+      }
+    }
+  });
+
+  test("Lit rooms, Dressing and DM key keep the rooms, corridors, doors and traps, and DM key moves no prop or light", () => {
+    for (const [i, size] of SIZES.entries()) {
+      const side = SIZE_SIDES[size];
+      const base = { ...DEFAULT_SETTINGS, w: side, h: side, rooms: defaultRooms(size, side, side), traps: TRAP_PRESETS.Many };
+      for (const seed of seeds(120 + i, 8)) {
+        const look = (p: ReturnType<typeof planDungeon>) => ({ rooms: p.plan.rooms, paint: p.plan.paint, doors: p.plan.doors, heights: p.plan.heights, stairs: p.plan.stairs, traps: p.plan.traps, stones: p.plan.stones });
+        const want = look(planDungeon({ ...base, lit: 0, dressing: "none", key: false }, seed));
+        for (const lit of Object.values(LIT_PRESETS)) {
+          for (const dressing of ["none", "some", "full"] as const) {
+            const off = planDungeon({ ...base, lit, dressing, key: false }, seed);
+            const on = planDungeon({ ...base, lit, dressing, key: true }, seed);
+            assert.deepEqual(look(off), want, `${size} lit ${lit} ${dressing}`);
+            assert.deepEqual(look(on), want, `${size} lit ${lit} ${dressing} with the key`);
+            assert.deepEqual([on.plan.stamps, on.plan.lights], [off.plan.stamps, off.plan.lights], `${size}: DM key moved a prop or a light`);
+          }
+        }
       }
     }
   });

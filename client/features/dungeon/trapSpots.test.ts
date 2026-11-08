@@ -13,7 +13,7 @@ import { planDungeon } from "./plan.ts";
 import { paintedOf, seeds } from "./plan.samples.ts";
 import { landDungeon, previewScene } from "./scratch.ts";
 import { clampSettings, trapCount, type DungeonSettings } from "./settings.ts";
-import { FIRE_STATUE, ROLLING_STONE, stepYaw, statueReaches, type Reach } from "./trapSpots.ts";
+import { FIRE_STATUE, ROLLING_STONE, STATUE_STAMP, stepYaw, statueReaches, type Reach } from "./trapSpots.ts";
 
 /*
  * Where the traps go (phase 2, 5.4): the Fire-Casting Statue's reach,
@@ -157,7 +157,7 @@ describe("the new traps in generated plans", () => {
       for (const { p, seed } of plans(theme === "dungeon" ? 121 : 122, { theme, dressing: "none", band: "5-10" }, 5)) {
         const statues = p.plan.traps.filter((t) => t.preset === FIRE_STATUE);
         assert.equal(p.plan.stamps.filter((st) => st.key === "ph-statue").length, statues.length, `${seed}: a stamp per statue`);
-        for (const st of p.plan.stamps) {
+        for (const st of p.plan.stamps.filter((x) => x.key === STATUE_STAMP.key)) {
           const box = stampCells(st);
           const rooms = new Set<number>();
           for (let y = box.y0; y < box.y1; y++) for (let x = box.x0; x < box.x1; x++) rooms.add(p.board.roomAt[y * p.plan.w + x]! - 1);

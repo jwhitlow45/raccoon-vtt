@@ -1,4 +1,5 @@
 import type { CellRect, StairDirection, TerrainId, TrapZone } from "#shared/model.ts";
+import { trapPreset } from "#shared/srd/traps.ts";
 import { bends, Router, TURN_COST } from "./corridors.ts";
 import { daisClear, doorLines, doorStates, placePillars, placePits, placeRubble, roomFloors } from "./dress.ts";
 import { DAIS_RISE, placeDais, raiseRooms, type Dais } from "./heights.ts";
@@ -7,9 +8,11 @@ import { seedStream } from "./random.ts";
 import type { Seed } from "./seed.ts";
 import { besideDoorway, bulgeTunnels, erodeRoom, placeColumns } from "./cave.ts";
 import { deadEndCount, placeDeadEnds, type Spur } from "./deadEnds.ts";
-import { pinSquare } from "./keyRooms.ts";
+import { furnish } from "./furnish.ts";
+import { keyRooms, pinSquare } from "./keyRooms.ts";
+import { placeLights } from "./lightSpots.ts";
 import { chooseSecrets, secretCandidates, stillWhole, type Candidate } from "./secrets.ts";
-import { clampContext, clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, MAX_DOOR_EDGES, SEARCH_BUDGET, secretCount, trapCount, type DungeonSettings, type PlanContext, type Theme } from "./settings.ts";
+import { clampContext, clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, MAX_DOOR_EDGES, SEARCH_BUDGET, litCount, secretCount, trapCount, type DungeonSettings, type PlanContext, type Theme } from "./settings.ts";
 import { channelWater, placeCisterns, type Channel } from "./sewer.ts";
 import { THEME_SPECS } from "./themes.ts";
 import { propsFor } from "./props.ts";
@@ -107,9 +110,9 @@ const ROOMS_PER_LOOP = 4;
  * and traps.
  */
 const LANE_SECRETS = 2;
-export const LANE_LIGHTS = 3;
-export const LANE_DRESSING = 4;
-export const LANE_KEY = 5;
+const LANE_LIGHTS = 3;
+const LANE_DRESSING = 4;
+const LANE_KEY = 5;
 const LANE_DEAD_ENDS = 6;
 
 /** What the drops did, for the tests that drive each branch with a small budget. */
@@ -438,7 +441,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   };
   const picked: PickedTraps =
     s.traps === 0
-      ? { traps: [], statues: [], stones: [] }
+      ? { traps: [], squares: [], statues: [], stones: [] }
       : pickTraps(
           rng,
           trapSpots({
@@ -465,6 +468,61 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
           },
         );
   const traps = picked.traps;
+
+  // Lights (5.5), from their own stream after the traps, so Lit rooms keeps the rooms, corridors, doors and traps.
+  const used = new Set(picked.squares.flat());
+  const stampsIn = new Map<number, number>();
+  const roomOf = (k: number) => board.roomAt[k]! - 1;
+  for (const st of picked.statues) {
+    const i = roomOf(Math.floor(st.y - 0.5) * W + Math.floor(st.x - 0.5));
+    stampsIn.set(i, (stampsIn.get(i) ?? 0) + 1);
+  }
+  const own = (i: number, k: number) => k >= 0 && k < W * H && board.roomAt[k] === i + 1 && inRoom(k);
+  const free = (i: number, k: number) => own(i, k) && !overlay.has(k) && !clear.has(k) && !inside.has(k) && !openLines.get(i)!.has(k) && k !== pins.get(i) && !used.has(k);
+  const lit = placeLights(seedStream(seed, GENERATOR_VERSION, LANE_LIGHTS), board, kept, litCount(s.lit, kept.length), own, free, theme);
+  for (const l of lit) {
+    used.add(l.square);
+    stampsIn.set(l.room, (stampsIn.get(l.room) ?? 0) + 1);
+  }
+  const groundAt = (k: number) => daisSquares.get(k) ?? board.rooms[roomOf(k)]?.ground ?? 0;
+
+  // Dressing (5.5), from its own stream after the lights, so Dressing keeps everything before it.
+  const props = furnish(seedStream(seed, GENERATOR_VERSION, LANE_DRESSING), {
+    board,
+    rooms: kept,
+    dressing: s.dressing,
+    props: (i) => propsFor(s.theme, floors[i]!),
+    free,
+    ground: groundAt,
+    held: (i) => stampsIn.get(i) ?? 0,
+    total: picked.statues.length + lit.length,
+  });
+
+  // The key (5.6), from its own stream, last: DM key moves nothing before it.
+  const roomTraps = new Map<number, string[]>();
+  const doorRoom = new Map<string, number>();
+  for (const d of doorways) d.inside.forEach((_, j) => doorRoom.set(doorEdgeOf(board, d, j), d.room));
+  picked.traps.forEach((t) => {
+    const z = t.zone;
+    const i = "door" in z ? ("edge" in z.door ? (doorRoom.get(z.door.edge) ?? -1) : -1) : "cells" in z ? roomOf(board.cell(z.cells[0]!.x, z.cells[0]!.y)) : -1;
+    if (i >= 0) roomTraps.set(i, [...(roomTraps.get(i) ?? []), trapPreset(t.preset, s.band)?.name ?? t.preset]);
+  });
+  const lights = new Map(lit.map((l) => [l.room, l.light.label]));
+  const pitRooms = new Set([...overlay].flatMap(([k, t]) => (t === "pit" && board.roomAt[k] !== 0 ? [roomOf(k)] : [])));
+  const keyed = s.key
+    ? keyRooms(seedStream(seed, GENERATOR_VERSION, LANE_KEY), {
+        kept,
+        links,
+        entrance: entrance.room,
+        doors: doorways.map((d) => ({ doorway: d, state: !theme.doors ? ("open" as const) : isSecret(d) ? ("secret" as const) : states.get(d.id)! })),
+        traps: (i) => roomTraps.get(i) ?? [],
+        light: (i) => lights.get(i),
+        secret: (i) => secretRooms.has(i),
+        dais: (i) => daises.has(i),
+        pit: (i) => pitRooms.has(i),
+        cistern: (i) => cisterns.has(i),
+      })
+    : null;
 
   // The plan.
   const terrain = new Map<number, TerrainId>();
@@ -530,12 +588,12 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
       (a, b) => a - b,
     ).map(({ v, cells }) => ({ ft: v, cells })),
     stairs: grouped(ups, (a, b) => DIR_ORDER.indexOf(a) - DIR_ORDER.indexOf(b)).map(({ v, cells }) => ({ up: v, cells })),
-    stamps: [...picked.statues],
-    lights: [],
+    stamps: [...picked.statues, ...lit.map((l) => l.stamp), ...props.map((f) => f.stamp)],
+    lights: lit.map((l) => l.light),
     stones: picked.stones,
     traps,
     entrance: entrance.room >= 0 ? { x: rects[entrance.room]!.x, y: rects[entrance.room]!.y, w: rects[entrance.room]!.w, h: rects[entrance.room]!.h } : { x: 0, y: 0, w: 0, h: 0 },
-    key: null,
+    key: keyed,
   };
   return {
     plan,
