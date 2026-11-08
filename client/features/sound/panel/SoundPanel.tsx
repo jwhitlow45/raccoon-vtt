@@ -23,7 +23,7 @@ import { useWakeAt } from "./controls.tsx";
 import { EffectsBoard } from "./EffectsBoard.tsx";
 import { RoomSoundControls, serverRoomSound, useServerRoomSoundState, type ServerSound } from "./engine.ts";
 import { LoopsSection } from "./LoopsSection.tsx";
-import { DeviceLine, nextWords, TableSound } from "./NowPlaying.tsx";
+import { DeviceLine, DmOnlyLine, DmOnlySwitch, nextWords, TableSound } from "./NowPlaying.tsx";
 import { PlayerSound } from "./PlayerSound.tsx";
 import { SoundPage } from "./SoundPage.tsx";
 import { nameOf, serverNow, soundsOf, type Sounds } from "./state.ts";
@@ -230,8 +230,10 @@ export function useDmSoundPages(parent: string): DmSoundPages {
  * remount puts each view back where it was and never one's place on the
  * other. A switch of view puts the scroller at the new view's top itself,
  * since the keeper only restores as the panel shown changes. With the
- * server's switch off: no view row, its line, Effects and On this device,
- * since nothing could play a file.
+ * server's switch off: no view row, its line, Effects, Table sound with
+ * Only DM devices play alone (docs/design/design-v1-sound-dm-only.md 4),
+ * since the built-in effects still play on players' devices, and On this
+ * device, since nothing could play a file.
  */
 export function DmSoundFirstPage(props: DmSoundFirst) {
   const server = useServerRoomSoundState();
@@ -253,6 +255,9 @@ export function DmSoundFirstPage(props: DmSoundFirst) {
           <ServerLine server={server} onRetry={() => void serverRoomSound()} />
         </Section>
         {effects}
+        <Section label={TABLE_SOUND}>
+          <DmOnlySwitch />
+        </Section>
         <Section label="On this device">
           <RoomSoundControls />
         </Section>
@@ -309,8 +314,10 @@ function useViewStart(view: SoundView, root: RefObject<HTMLElement | null>, toSe
 
 /**
  * Now playing, in the order of 4.2 (D-261106-091): the player with Stop
- * all sound in its own row and the device line, Up next folded, Effects,
- * Table sound, Background, then On this device and the storage line.
+ * all sound in its own row, Only DM devices play's reminder over the
+ * device line (docs/design/design-v1-sound-dm-only.md 4), Up next folded,
+ * Effects, Table sound, Background, then On this device and the storage
+ * line.
  */
 function NowPlayingView(props: { first: DmSoundFirst; effects: ReactNode; onLibrary(): void }) {
   const { first } = props;
@@ -320,6 +327,7 @@ function NowPlayingView(props: { first: DmSoundFirst; effects: ReactNode; onLibr
     <>
       <div data-sound-player="" style={{ display: "grid", gap: theme.space(3), minWidth: 0 }}>
         <NowFull stopAll onLibrary={props.onLibrary} />
+        <DmOnlyLine />
         <DeviceLine />
       </div>
       <UpNextFold />

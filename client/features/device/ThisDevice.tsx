@@ -14,7 +14,7 @@ import { thisDeviceFoldsSlot, useFolds, type ThisDeviceSection } from "../../lib
 import { theme } from "../../lib/theme.ts";
 import { UNBOUND, type KeyMap } from "../../state/keyBindings.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { useRoomRoleIfAny } from "../../state/view.ts";
+import { useRoomRoleIfAny, useRoomView } from "../../state/view.ts";
 import { panelsFor, type PanelDef } from "../panels.ts";
 import { useLayoutSize } from "./layout.ts";
 import { keySuffix, keyText, setShortcutSheet, useKeyHint, useShortcutKeys } from "../../state/shortcuts.ts";
@@ -26,7 +26,7 @@ import { useWeatherStillReason, WEATHER_CARDS } from "../weather/store.ts";
 import { useDeviceStillReason } from "../animmap/AnimMapController.tsx";
 import { useServerAnimatedMaps } from "../animmap/status.ts";
 import { ANIMATED_MAPS_CHOICES, ANIMATED_MAPS_HELP, ANIMATED_MAPS_LABEL, ANIMATED_MAPS_WORDS, deviceStillHelp, LOW_POWER_HELP, type AnimatedMapsChoice } from "../animmap/words.ts";
-import { THIS_DEVICE_ONLY } from "../sound/panel/words.ts";
+import { DM_PLAYS_IT, THIS_DEVICE_ONLY } from "../sound/panel/words.ts";
 import { DiceSetPicker } from "./DiceSetPicker.tsx";
 import { MAP_IMAGE_WORDS, deviceSummaries } from "./summaries.ts";
 import {
@@ -223,6 +223,7 @@ export default function ThisDevice() {
         </div>
       </Group>
       <Group label="Sounds" {...group("sounds")} search="menu.this-device.sounds">
+        <DmPlaysNote />
         <RoomSoundControls anchored />
         <Switch label="Turn sound" search="menu.this-device.sounds.turn" help="A short chime on your turn. Android phones also vibrate." checked={turnSound} onChange={setSoundOn} />
         <Switch
@@ -310,8 +311,30 @@ function TabRowSection(props: { role: TabRowRole; panels: readonly PanelDef[]; l
   );
 }
 
-/** Room sound's help (docs/design/design-v1-music.md 4.4). */
-export const ROOM_SOUND_HELP = `${THIS_DEVICE_ONLY} Music, background sounds and effects the DM plays. If everyone sits at one table, turn it on for one device only, such as the table display. Music uses about 60 MB of data an hour. On an iPhone it pauses music from other apps and plays even with the ringer off.`;
+/**
+ * Room sound's help (docs/design/design-v1-music.md 4.4). For one table it
+ * points at the DM's switch, not at one device, since Only DM devices play
+ * keeps the table display quiet (docs/design/design-v1-sound-dm-only.md 5).
+ */
+export const ROOM_SOUND_HELP = `${THIS_DEVICE_ONLY} Music, background sounds and effects the DM plays. If everyone sits at one table, the DM can turn on Only DM devices play in Sound. Music uses about 60 MB of data an hour. On an iPhone it pauses music from other apps and plays even with the ringer off.`;
+
+/**
+ * A player's line above Room sound while the room keeps its sound to DM
+ * devices (docs/design/design-v1-sound-dm-only.md 5), so a player who
+ * turns Room sound on and hears nothing is told why. Outside
+ * RoomSoundControls, since the Sound panel says it under Now playing and
+ * would say it twice. Never on a DM's device or a table display, and
+ * nothing outside a room.
+ */
+export function DmPlaysNote() {
+  const room = useRoomRoleIfAny();
+  return room?.role === "player" && !room.display ? <DmPlaysLine /> : null;
+}
+
+function DmPlaysLine() {
+  const on = useRoomView((s) => s.view?.meta.settings.soundDmOnly === true);
+  return on ? <Help>{DM_PLAYS_IT}</Help> : null;
+}
 
 const MIX_PARTS: readonly { key: keyof SoundMix; label: string; search: string }[] = [
   { key: "music", label: "Music", search: "menu.this-device.sounds.music" },

@@ -27,6 +27,21 @@ export function SoundHost() {
 
 const NO_SOUNDS: Readonly<Record<SoundId, Sound>> = Object.freeze({});
 
+/**
+ * Whether this page may play the room's sound: its own setting on, and,
+ * for a table display, no blackout and Only DM devices play off
+ * (docs/design/design-v1-sound-dm-only.md 5). Its projection holds no
+ * sound then anyway, but a display that stayed enabled would still be
+ * eligible in the one-page handoff (handoff.ts) and could win it over a
+ * DM's page in the same browser, as a display window on the DM's laptop
+ * would, leaving the DM's page silent. A member's page follows its own
+ * setting alone: a DM's plays on through both, and a player's has nothing
+ * to play. Pure.
+ */
+export function soundEnabled(on: boolean, display: boolean, blackout: boolean, dmOnly: boolean): boolean {
+  return on && !(display && (blackout || dmOnly));
+}
+
 function Host() {
   const store = useRoomStore();
   const display = useIsDisplay();
@@ -37,9 +52,9 @@ function Host() {
   const sounds = useRoomView((s) => s.confirmed?.sounds ?? NO_SOUNDS);
   const connected = useRoomView((s) => s.connection === "open");
   const blackout = useRoomView((s) => s.view?.meta.view.blackout === true);
+  const dmOnly = useRoomView((s) => s.view?.meta.settings.soundDmOnly === true);
   const on = useRoomSoundOn();
-  // A display behind a blackout is silent: its projection holds no sound then anyway.
-  const enabled = on && !(display && blackout);
+  const enabled = soundEnabled(on, display, blackout, dmOnly);
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
 

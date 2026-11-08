@@ -13,7 +13,10 @@ import { firedAfter, setRoomSound } from "./store.ts";
  * music or a loop starts, or when an effect is fired after the page
  * loaded. Passed unanswered, the device stays quiet and does not ask again
  * in that page load: Room sound in the Sound panel or This device turns
- * it on.
+ * it on. A state with nothing about sound, while Only DM devices play or
+ * behind a blackout, closes an open ask without passing it
+ * (docs/design/design-v1-sound-dm-only.md 5), so the device is asked again
+ * at the first state after with something to hear, as a late joiner is.
  */
 
 /** An ask nobody answers passes after this. */
@@ -38,6 +41,21 @@ export function askWorthy(playing: Playing | null | undefined, firstIds: Readonl
   return playing.effects.some((e) => !firstIds.has(e.id) && firedAfter(e, loadAt));
 }
 
+/**
+ * Whether the ask shows after a change, from whether it shows now. A device
+ * that is no longer eligible (a choice made here or elsewhere) has its
+ * answer. An open ask stays until the state holds nothing about sound
+ * (`playing` null), and then closes without passing, since its timer is
+ * what passes it. A closed one opens on a state with something to hear,
+ * unless it passed in this page load. Undefined, a reconnect's cleared
+ * store, keeps an open ask. Pure.
+ */
+export function askShows(asking: boolean, now: { eligible: boolean; passed: boolean; playing: Playing | null | undefined; worthy: boolean }): boolean {
+  if (!now.eligible) return false;
+  if (asking) return now.playing !== null;
+  return !now.passed && now.worthy;
+}
+
 export function useSoundAsk(): SoundAsk {
   const preview = usePreview() !== null;
   const display = useIsDisplay();
@@ -51,20 +69,16 @@ export function useSoundAsk(): SoundAsk {
   const first = useRef<{ ids: Set<string>; at: number } | null>(null);
   const [asking, setAsking] = useState(false);
 
+  // A choice made elsewhere (This device, another window) answers it too, as eligible goes false.
   useEffect(() => {
-    if (playing === undefined) return;
-    if (first.current === null) {
+    if (playing !== undefined && first.current === null) {
       const offset = store.getState().serverOffset;
       first.current = { ids: new Set(playing?.effects.map((e) => e.id) ?? []), at: offset === undefined ? Date.now() : performance.now() + offset };
     }
-    if (!eligible || asking || passed.has(roomId)) return;
-    if (askWorthy(playing, first.current.ids, first.current.at)) setAsking(true);
+    const worthy = first.current !== null && askWorthy(playing, first.current.ids, first.current.at);
+    const next = askShows(asking, { eligible, passed: passed.has(roomId), playing, worthy });
+    if (next !== asking) setAsking(next);
   }, [playing, eligible, asking, roomId, store]);
-
-  // A choice made elsewhere (This device, another window) answers it too.
-  useEffect(() => {
-    if (asking && !eligible) setAsking(false);
-  }, [asking, eligible]);
 
   useEffect(() => {
     if (!asking) return;

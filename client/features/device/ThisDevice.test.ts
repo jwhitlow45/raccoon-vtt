@@ -79,3 +79,41 @@ test("Room sound's help starts with the scope, so it reads apart from Table soun
   assert.ok(ROOM_SOUND_HELP.startsWith(`${THIS_DEVICE_ONLY} `));
   assert.ok(!ROOM_SOUND_HELP.includes('"'));
 });
+
+/*
+ * Only DM devices play (docs/design/design-v1-sound-dm-only.md 5): Room
+ * sound's help points a table at the DM's switch, not at one device, and a
+ * player's Sounds says above Room sound that the DM plays it.
+ */
+describe("This device's Sounds while Only DM devices play", async () => {
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createStore } = await import("zustand/vanilla");
+  const { room } = await import("#shared/testutil.ts");
+  const { RoomProvider } = await import("../../state/view.ts");
+  const { DmPlaysNote } = await import("./ThisDevice.tsx");
+  const noop = () => {};
+
+  const note = (role: "dm" | "player", dmOnly: boolean, display = false) => {
+    const view = room();
+    if (dmOnly) view.meta.settings = { ...view.meta.settings, soundDmOnly: true };
+    const store = createStore(() => ({ view, you: { memberId: role === "dm" ? "dm1" : "p1", role }, roomId: "r1", sceneId: "s1", serverOffset: 0, connection: "open", pending: [], online: [], displays: 0, local: { selectedIds: [], multi: false } }));
+    return renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: { dispatch: () => 1, newId: () => "x", sendEph: noop } as never, ui: { notify: noop, openPanel: noop } as never, display, children: createElement(DmPlaysNote) }));
+  };
+
+  test("Room sound's help, word for word, names the switch and no longer sends the sound to one device", () => {
+    assert.equal(
+      ROOM_SOUND_HELP,
+      "This device only: Music, background sounds and effects the DM plays. If everyone sits at one table, the DM can turn on Only DM devices play in Sound. Music uses about 60 MB of data an hour. On an iPhone it pauses music from other apps and plays even with the ringer off.",
+    );
+    assert.doesNotMatch(ROOM_SOUND_HELP, /one device only|table display/);
+  });
+
+  test("the DM plays it, on a player's device while it is on, and nowhere else", () => {
+    assert.match(note("player", true), /^<p[^>]*>The DM plays the sound on their own device\.<\/p>$/);
+    assert.equal(note("player", false), "", "off");
+    assert.equal(note("dm", true), "", "a DM's device plays it");
+    assert.equal(note("player", true, true), "", "a table display's menu has its own Sound row");
+    assert.equal(renderToStaticMarkup(createElement(DmPlaysNote)), "", "outside a room");
+  });
+});

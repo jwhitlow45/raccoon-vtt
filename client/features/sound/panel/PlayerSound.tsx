@@ -7,7 +7,7 @@ import type { Playing } from "#shared/sound.ts";
 import { Tile, TILE } from "../music/tile.ts";
 import { RoomSoundControls, retryMusic, useSoundHere, type MusicHere, type SoundHere } from "./engine.ts";
 import { soundsOf, type Sounds } from "./state.ts";
-import { ANOTHER_WINDOW, LOADING_MUSIC, MUSIC_FAILED, MUSIC_IS_PLAYING, NOTHING_PLAYING, playerLoopsLine, TAP_TO_START } from "./words.ts";
+import { ANOTHER_WINDOW, DM_PLAYS_IT, LOADING_MUSIC, MUSIC_FAILED, MUSIC_IS_PLAYING, NOTHING_PLAYING, playerLoopsLine, TAP_TO_START } from "./words.ts";
 
 /**
  * The name the tile takes its tint from while the DM keeps the names: one
@@ -24,9 +24,13 @@ const UNNAMED_TINT = "";
  * alone are that line, with no card, since the card stands for the music.
  * Then how this device is doing with them. Effects show nowhere
  * (D-261102-479). A name a player's projection lacks reads as not shared,
- * so nothing here can name what the DM keeps.
+ * so nothing here can name what the DM keeps. While Only DM devices play
+ * (docs/design/design-v1-sound-dm-only.md 5), one line says the DM plays
+ * it, in place of all of that and of this device's tap and other-window
+ * lines, so it reads the same whether or not anything plays.
  */
-export function PlayerNow(props: { playing: Playing | null; sounds: Sounds; here: SoundHere; music: MusicHere; onRetry(): void }) {
+export function PlayerNow(props: { playing: Playing | null; sounds: Sounds; here: SoundHere; music: MusicHere; dmOnly: boolean; onRetry(): void }) {
+  if (props.dmOnly) return <p style={QUIET}>{DM_PLAYS_IT}</p>;
   const music = props.playing?.music ?? null;
   const loops = props.playing ? Object.values(props.playing.loops) : [];
   const musicName = music ? (props.sounds[music.now.soundId]?.name ?? null) : null;
@@ -52,7 +56,7 @@ export function PlayerNow(props: { playing: Playing | null; sounds: Sounds; here
           {loopsLine}
         </p>
       ) : null}
-      {!music && !loopsLine ? <p style={{ margin: 0, fontSize: theme.font.body14, color: theme.color.textMuted }}>{NOTHING_PLAYING}</p> : null}
+      {!music && !loopsLine ? <p style={QUIET}>{NOTHING_PLAYING}</p> : null}
       {music && props.here === "plays" && props.music === "loading" ? <Loading text={LOADING_MUSIC} small delay={0} /> : null}
       {music && props.here === "plays" && props.music === "failed" ? (
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
@@ -72,11 +76,12 @@ export function PlayerNow(props: { playing: Playing | null; sounds: Sounds; here
 export function PlayerSound() {
   const playing = useRoomView((s) => s.view?.playing ?? null);
   const sounds = useRoomView((s) => soundsOf(s.view));
+  const dmOnly = useRoomView((s) => s.view?.meta.settings.soundDmOnly === true);
   const { here, music } = useSoundHere();
   return (
     <div style={{ display: "grid", gap: theme.space(4), minWidth: 0 }}>
       <Section label="Now playing" divider={false}>
-        <PlayerNow playing={playing} sounds={sounds} here={here} music={music} onRetry={retryMusic} />
+        <PlayerNow playing={playing} sounds={sounds} here={here} music={music} dmOnly={dmOnly} onRetry={retryMusic} />
       </Section>
       <Section label="On this device">
         <RoomSoundControls />
@@ -84,3 +89,6 @@ export function PlayerSound() {
     </div>
   );
 }
+
+/** "Nothing is playing." and the DM's line in its place: one muted line. */
+const QUIET = { margin: 0, fontSize: theme.font.body14, color: theme.color.textMuted } as const;

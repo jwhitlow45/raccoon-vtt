@@ -458,6 +458,18 @@ describe("what the rest of the panels offer and say now (design-v1-qol.md 5, The
     for (const id of ["section:sound.library", "section:sound.table", "section:sound.background", "action:sound.library.add", "action:sound.stop-all", "section:sound.upnext"]) assert.ok(!now.has(id), id);
   });
 
+  test("Only DM devices play is offered whatever the server's switch, both of Sound's layouts drawing it, with its value now (docs/design/design-v1-sound-dm-only.md 4)", () => {
+    const room = seededRoom();
+    const off = ctxOf(viewOf(room, DM));
+    assert.ok(offered(DM_CATALOG, off).has("setting:sound.table.dmonly"), "with the switch not known");
+    const entry = DM_CATALOG.entries.find((e) => e.id === "setting:sound.table.dmonly");
+    assert.equal(entry?.valueNow?.(off), "Off");
+    room.meta.settings = { ...room.meta.settings, soundDmOnly: true };
+    assert.equal(entry?.valueNow?.(ctxOf(viewOf(room, DM))), "On");
+    for (const name of ["only play for me", "play on my speaker"]) assert.ok(entry?.names?.includes(name), name);
+    assert.ok(!offered(EVERYONE, ctxOf(PAT_VIEW())).has("setting:sound.table.dmonly"), "the DM's alone");
+  });
+
   test("the Dice panel's creature groups while it shows one creature: the DM's one selected token, a player's own", () => {
     const dice = (view: RoomView) => offered(EVERYONE, ctxOf(view)).has("section:dice.saves");
     assert.equal(dice(DM_VIEW()), false, "nothing selected");

@@ -13,8 +13,9 @@ import { RoomScope } from "../../../state/scope.ts";
  * 4.3 and 12): the DM's two views and their order, Up next's fold, the
  * idle line, the switch-off page, Table sound and Use what's playing, the
  * fifth loop, Edit turning the board into a list, the scene line's states,
- * the rules of the view's end and of Open Sound, and the player's card
- * with and without names.
+ * the rules of the view's end and of Open Sound, the player's card
+ * with and without names, and Only DM devices play's switch, reminder and
+ * player's line (docs/design/design-v1-sound-dm-only.md 4 and 5).
  */
 
 const { createElement } = await import("react");
@@ -110,6 +111,24 @@ describe("Table sound (docs/design/design-v1-sound-layout.md 4.2 and 7)", () => 
     assert.ok(line > html.indexOf(">Effects<"), "after the volumes");
     assert.ok(html.indexOf("Use what&#x27;s playing") > line);
     assert.ok(html.indexOf("Players see what is playing") > html.indexOf("Use what&#x27;s playing"));
+  });
+
+  test("Only DM devices play last, after the names switch, with its help as its description, off in a room that never set it", () => {
+    const html = draw();
+    const at = html.indexOf(">Only DM devices play<");
+    assert.ok(at > html.indexOf("Players see what is playing"), "after the names switch");
+    const row = /<button type="button" role="switch" aria-checked="(true|false)" aria-labelledby="[^"]+" aria-describedby="([^"]+)" data-search="sound\.table\.dmonly"/.exec(html);
+    assert.ok(row, "a switch with the search's anchor");
+    assert.equal(row[1], "false");
+    assert.match(html, new RegExp(`id="${row[2]}"[^>]*>For a table that hears the sound from one speaker\. Players&#x27; devices and the table display play nothing and don&#x27;t ask\. Each DM device still plays while its Room sound is on\.<`));
+  });
+
+  test("Only DM devices play on: the switch says so, and Players see what is playing keeps its own value", () => {
+    const html = draw({ meta: { ...room().meta, settings: { ...room().meta.settings, soundDmOnly: true, soundNames: true } } });
+    const checked = (name: string) => new RegExp(`role="switch" aria-checked="(true|false)"[^>]*>(?:(?!</button>).)*>${name}<`).exec(html)?.[1];
+    assert.equal(checked("Only DM devices play"), "true");
+    assert.equal(checked("Players see what is playing"), "true", "kept for a game played apart (D-261107-245)");
+    assert.doesNotMatch(/<button[^>]*role="switch"[^>]*>(?:(?!<\/button>).)*Players see what is playing/.exec(html)?.[0] ?? "", /disabled/, "and stays enabled");
   });
 
   test("with no scene in view there is no scene line and no Use what's playing", () => {
@@ -225,7 +244,7 @@ describe("a player's panel", () => {
     volume: { music: 100, effects: 100 },
   };
   const player = (sounds: Record<string, Sound>, here: "plays" | "tap" | "other" | "off" = "plays", musicHere: "playing" | "failed" = "playing") =>
-    renderToStaticMarkup(createElement(PlayerNow, { playing: p, sounds, here, music: musicHere, onRetry: noop }));
+    renderToStaticMarkup(createElement(PlayerNow, { playing: p, sounds, here, music: musicHere, dmOnly: false, onRetry: noop }));
 
   test("with names shared: a card with the tile and the track's name, the background by name under it, never an effect", () => {
     const html = player({ pony: sound("pony", "music", 190_000, "The Prancing Pony"), rain: sound("rain", "loop", 40_000, "Rain"), crowd: sound("crowd", "loop", 30_000, "Crowd"), thunder: sound("thunder", "effect", 25_000) });
@@ -242,7 +261,7 @@ describe("a player's panel", () => {
     assert.match(html, /2 background sounds are playing\./);
     const tint = (h: string) => /data-music-tile="" style="[^"]*background:([^;"]+)/.exec(h)?.[1];
     const other: Playing = { ...p, music: { ...p.music!, now: { soundId: "harbor", at: 0 } } };
-    const again = renderToStaticMarkup(createElement(PlayerNow, { playing: other, sounds: { harbor: sound("harbor", "music", 60_000) }, here: "plays", music: "playing", onRetry: noop }));
+    const again = renderToStaticMarkup(createElement(PlayerNow, { playing: other, sounds: { harbor: sound("harbor", "music", 60_000) }, here: "plays", music: "playing", dmOnly: false, onRetry: noop }));
     assert.equal(tint(html), tint(again), "every hidden track gets the one tint");
     assert.equal(tint(html), tileBackground(""));
     assert.notEqual(tint(html), tileBackground("The Prancing Pony"), "never the tint of a name the player lacks");
@@ -250,14 +269,21 @@ describe("a player's panel", () => {
 
   test("background sounds alone: their line, with no card", () => {
     const loopsOnly: Playing = { ...p, music: null };
-    const html = renderToStaticMarkup(createElement(PlayerNow, { playing: loopsOnly, sounds: { rain: sound("rain", "loop", 40_000, "Rain"), crowd: sound("crowd", "loop", 30_000, "Crowd") }, here: "plays", music: "playing", onRetry: noop }));
+    const html = renderToStaticMarkup(createElement(PlayerNow, { playing: loopsOnly, sounds: { rain: sound("rain", "loop", 40_000, "Rain"), crowd: sound("crowd", "loop", 30_000, "Crowd") }, here: "plays", music: "playing", dmOnly: false, onRetry: noop }));
     assert.doesNotMatch(html, /data-sound-player-card|data-music-tile/);
     assert.match(html, /data-sound-player-loops=""[^>]*>Background: Rain, Crowd</);
   });
 
   test("nothing playing, a Sound kept open after it stopped: Nothing is playing", () => {
-    const html = renderToStaticMarkup(createElement(PlayerNow, { playing: null, sounds: {}, here: "plays", music: "playing", onRetry: noop }));
+    const html = renderToStaticMarkup(createElement(PlayerNow, { playing: null, sounds: {}, here: "plays", music: "playing", dmOnly: false, onRetry: noop }));
     assert.match(html, />Nothing is playing\.</);
+  });
+
+  test("while Only DM devices play: the DM plays it, in place of nothing is playing, with no tap or other-window line", () => {
+    for (const here of ["plays", "tap", "other", "off"] as const) {
+      const html = renderToStaticMarkup(createElement(PlayerNow, { playing: null, sounds: {}, here, music: "none", dmOnly: true, onRetry: noop }));
+      assert.match(html, /^<p style="[^"]*color:var\(--rvtt-text-muted[^"]*">The DM plays the sound on their own device\.<\/p>$/, `the one muted line, ${here}`);
+    }
   });
 
   test("this device's state: a tap to start, another window, a track that failed", () => {
@@ -300,9 +326,13 @@ describe("the DM's Sound panel (docs/design/design-v1-sound-layout.md 4.1 to 4.4
     effects: [],
     volume: { music: 100, effects: 100 },
   });
-  const view = (playing: Playing | null) => room({ sounds: { ...tracks, rain: sound("rain", "loop", 40_000, "Rain") }, playlists: { p: { id: "p", rev: 0, name: "Tavern night", sounds: ["a", "b", "c"], repeat: "all", fade: 0 } }, ...(playing ? { playing } : null) });
-  const draw = (playing: Playing | null, scope = new RoomScope()) => {
-    const store = createStore(() => ({ view: view(playing), you: { memberId: "dm1", role: "dm" }, roomId: "r1", sceneId: "s1", serverOffset: 0, connection: "open", pending: [], online: [], displays: 0, local: { selectedIds: [], multi: false, panel: null, tab: "sound", below: null } }));
+  const view = (playing: Playing | null, dmOnly = false) => {
+    const state = room({ sounds: { ...tracks, rain: sound("rain", "loop", 40_000, "Rain") }, playlists: { p: { id: "p", rev: 0, name: "Tavern night", sounds: ["a", "b", "c"], repeat: "all", fade: 0 } }, ...(playing ? { playing } : null) });
+    if (dmOnly) state.meta.settings = { ...state.meta.settings, soundDmOnly: true };
+    return state;
+  };
+  const draw = (playing: Playing | null, scope = new RoomScope(), dmOnly = false) => {
+    const store = createStore(() => ({ view: view(playing, dmOnly), you: { memberId: "dm1", role: "dm" }, roomId: "r1", sceneId: "s1", serverOffset: 0, connection: "open", pending: [], online: [], displays: 0, local: { selectedIds: [], multi: false, panel: null, tab: "sound", below: null } }));
     return renderToStaticMarkup(
       createElement(RoomScopeProvider, {
         scope,
@@ -393,7 +423,32 @@ describe("the DM's Sound panel (docs/design/design-v1-sound-layout.md 4.1 to 4.4
     assert.doesNotMatch(html, /role="radiogroup" aria-label="Sound"/);
     assert.match(html, /This server doesn&#x27;t offer sound files\./);
     assert.ok(html.indexOf(">On this device<") > html.indexOf(">Effects<"));
-    assert.doesNotMatch(html, /data-music-now|>Table sound<|>Up next</);
+    assert.doesNotMatch(html, /data-music-now|>Up next</);
+    assert.ok(html.indexOf(">Table sound<") > html.indexOf(">Effects<"), "Table sound, with Only DM devices play alone, after Effects");
+  });
+
+  test("Only DM devices play on: its reminder under the player, over the device line, with nothing playing too, and none while it is off", async () => {
+    await serverSays(true);
+    const REMINDER = ">Only DM devices play the sound.<";
+    const SILENT = ">This device plays no sound. Turn on Room sound under On this device.<";
+    for (const playing of [run(), null]) {
+      const html = draw(playing, new RoomScope(), true);
+      const player = html.slice(html.indexOf("data-sound-player"), html.indexOf(">Effects<"));
+      // A page with no engine reads this device's Room sound as off, so the device line shows under the reminder.
+      assert.ok(player.includes(REMINDER) && player.includes(SILENT), `both in the player's area, ${playing ? "playing" : "silent"}`);
+      assert.ok(player.indexOf(REMINDER) < player.indexOf(SILENT), "the reminder first");
+    }
+    assert.doesNotMatch(draw(run()), /Only DM devices play the sound\./);
+  });
+
+  test("with the server's switch off: Table sound after Effects holds Only DM devices play alone, so a room that kept it can still turn it off", async () => {
+    await serverSays(false);
+    const html = draw(run(), new RoomScope(), true);
+    const table = html.indexOf(">Table sound<");
+    assert.ok(table > html.indexOf(">Effects<") && table < html.indexOf(">On this device<"), "between Effects and On this device");
+    const section = html.slice(table, html.indexOf(">On this device<"));
+    assert.deepEqual([...section.matchAll(/<button[^>]*role="switch"[^>]*>/g)].map((m) => [/aria-checked="(\w+)"/.exec(m[0])?.[1], /data-search="([^"]+)"/.exec(m[0])?.[1]]), [["true", "sound.table.dmonly"]], "the one switch, on");
+    assert.doesNotMatch(section, /Players see what is playing|volume for everyone|What everyone at the table hears|Only DM devices play the sound\./);
   });
 
   test("with the switch off a Library view left in the slot still draws the off page", async () => {

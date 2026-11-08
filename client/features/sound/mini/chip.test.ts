@@ -63,8 +63,9 @@ async function serverSays(on: boolean): Promise<void> {
 }
 
 /** A room around `child` with `play` playing, the viewer `role`, and what it sends, opens and focuses. */
-function inRoom(play: Playing | null, role: "dm" | "player" = "dm") {
+function inRoom(play: Playing | null, role: "dm" | "player" = "dm", dmOnly = false) {
   const view = room({ sounds: SOUNDS, playlists: PLAYLISTS, ...(play ? { playing: play } : null) });
+  if (dmOnly) view.meta.settings = { ...view.meta.settings, soundDmOnly: true };
   const store = createStore(() => ({ view, you: { memberId: role === "dm" ? "dm1" : "p1", role }, roomId: "r1", sceneId: "s1", serverOffset: 0, connection: "open", pending: [], online: [], displays: 0, local: { selectedIds: [], multi: false } }));
   const scope = new RoomScope();
   const sent: { t: string; [k: string]: unknown }[] = [];
@@ -319,6 +320,13 @@ describe("the chip's player (5.3)", () => {
     const foot = html.slice(html.indexOf("data-now-foot"));
     order(foot, ["Stop all sound", "Open Sound"]);
     assert.doesNotMatch(html, /data-music-stop-all/, "Stop all sound only at the foot, not under the player too");
+  });
+
+  test("while Only DM devices play: its reminder under the player, before the Next line, with nothing playing too, and none while it is off", () => {
+    const on = (play: Playing | null) => renderToStaticMarkup(inRoom(play, "dm", true).around(createElement(NowPlayer, { fadeControl: "inline", onOpenSound: noop })));
+    order(on(playing({ music: music() })), ["data-music-now", "Only DM devices play the sound.", "data-now-next"]);
+    order(on(playing()), ["data-music-idle", "Only DM devices play the sound.", "data-now-open-sound"]);
+    assert.doesNotMatch(draw(playing({ music: music() })), /Only DM devices play/);
   });
 
   test("Crossfade in place in the popover, its menu in the card and the sheet", () => {

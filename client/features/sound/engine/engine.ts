@@ -32,7 +32,7 @@ export type EngineInput = {
   /** The confirmed projection's `playing`: null for nothing (a blackout included), undefined while the store is cleared for a reconnect. */
   playing: Playing | null | undefined;
   sounds: Readonly<Record<SoundId, Sound>>;
-  /** Room sound on, or a display's Sound on and no blackout. */
+  /** Room sound on, or a display's Sound on with no blackout and Only DM devices play off (SoundHost.tsx soundEnabled). */
   enabled: boolean;
   /** The socket is open: a reconnect starts a new measurement epoch. */
   connected: boolean;

@@ -37,6 +37,8 @@ export const SOUND_ENTRIES: readonly CatalogEntry[] = [
   section(NOW, "sound.effects", "Effects", { names: ["sound effects", "effects board"] }),
   section(NOW, "sound.table", "Table sound", { names: ["volume for everyone", "mix"], when: filesOn }),
   setting(NOW, "sound.table.names", "Players see what is playing", { names: ["track names"], when: filesOn, valueNow: (ctx) => (ctx.state.view?.meta.settings.soundNames ? "On" : "Off") }),
+  // Both layouts draw it, Table sound's last switch and, with the server's switch off, its one (SoundPanel.tsx DmSoundFirstPage), so it waits for nothing.
+  setting(NOW, "sound.table.dmonly", "Only DM devices play", { names: ["only play for me", "play on my speaker"], valueNow: (ctx) => (ctx.state.view?.meta.settings.soundDmOnly ? "On" : "Off") }),
   section(NOW, "sound.background", "Background", { names: ["background sounds", "ambience", "loops"], when: filesOn }),
   action(IN_LIBRARY, "sound.library.new-playlist", "New playlist", { names: ["make a playlist"], when: filesOn }),
   action(IN_LIBRARY, "sound.library.add", "Add music…", { names: ["upload music", "add songs"], when: filesOn }),

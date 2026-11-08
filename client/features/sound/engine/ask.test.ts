@@ -1,3 +1,4 @@
+import "../../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { LEAD_MS, type Playing } from "#shared/sound.ts";
@@ -9,7 +10,8 @@ import { LEAD_MS, type Playing } from "#shared/sound.ts";
  * fired before it. And what counts as something to hear at all.
  */
 
-const { askWorthy } = await import("./useSoundAsk.ts");
+const { askShows, askWorthy } = await import("./useSoundAsk.ts");
+const { soundEnabled } = await import("./SoundHost.tsx");
 const { firedAfter, resetServerRoomSoundForTests, serverRoomSound, serverSound, somethingToHear } = await import("./store.ts");
 const { api } = await import("../../../lib/api.ts");
 
@@ -50,6 +52,55 @@ describe("the ask", () => {
     const run = { run: "r", repeat: "one" as const, fade: 5 as const, now: { soundId: "s", at: T - 60_000 } };
     assert.equal(somethingToHear({ ...quiet, music: run }, sounds, T), true);
     assert.equal(somethingToHear({ ...quiet, music: { ...run, paused: 4_000 } }, sounds, T), false, "a DM's paused run, which a player's projection drops");
+  });
+});
+
+/*
+ * An open ask and a state with nothing about sound in it
+ * (docs/design/design-v1-sound-dm-only.md 5): while Only DM devices play,
+ * and behind a blackout, a player's projection has no `playing`, so the ask
+ * closes at once without passing, and the device is asked again at the
+ * first state after with something to hear, as a late joiner is.
+ */
+describe("the ask and a state with nothing about sound", () => {
+  const music: Playing = { ...quiet, music: { run: "r", repeat: "all", fade: 5, now: { soundId: "s", at: T - 60_000 } } };
+  /** The ask through a run of confirmed states, from closed, as the hook steps it: shown or not after each, and whether the timer passed it. */
+  const through = (states: (Playing | null | undefined)[], passed = false) => {
+    let asking = false;
+    return states.map((playing) => (asking = askShows(asking, { eligible: true, passed, playing, worthy: askWorthy(playing, new Set(), T) })));
+  };
+
+  test("an open ask closes when Only DM devices play turns on, unpassed, and asks again once it is off", () => {
+    // The switch on: the player's projection loses `playing`.
+    assert.deepEqual(through([music, null, null, music]), [true, false, false, true]);
+  });
+
+  test("the same behind a blackout, which also leaves a player no playing", () => {
+    assert.deepEqual(through([music, music, null, music]), [true, true, false, true]);
+  });
+
+  test("a reconnect's cleared store keeps it open, a passed ask never comes back, and a choice answers it", () => {
+    assert.deepEqual(through([music, undefined, music]), [true, true, true]);
+    assert.deepEqual(through([music, null, music], true), [false, false, false]);
+    assert.equal(askShows(true, { eligible: false, passed: false, playing: music, worthy: true }), false);
+    assert.equal(askShows(true, { eligible: true, passed: true, playing: music, worthy: true }), true, "the timer closes it, not a state");
+  });
+});
+
+describe("a page's sound and the table display (docs/design/design-v1-sound-dm-only.md 5)", () => {
+
+  test("a display is enabled only with its Sound on, no blackout and Only DM devices play off, so it never wins the handoff then", () => {
+    assert.equal(soundEnabled(true, true, false, false), true);
+    assert.equal(soundEnabled(true, true, false, true), false, "Only DM devices play");
+    assert.equal(soundEnabled(true, true, true, false), false, "a blackout");
+    assert.equal(soundEnabled(false, true, false, false), false);
+  });
+
+  test("a member's page follows its own Room sound alone, so a DM's plays on through both", () => {
+    for (const blackout of [false, true]) for (const dmOnly of [false, true]) {
+      assert.equal(soundEnabled(true, false, blackout, dmOnly), true);
+      assert.equal(soundEnabled(false, false, blackout, dmOnly), false);
+    }
   });
 });
 

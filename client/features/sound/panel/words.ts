@@ -69,6 +69,13 @@ export const MUSIC_LABEL = "Music";
 export const EFFECTS_LABEL = "Effects";
 /** How Room sound's help begins under On this device, so it reads apart from Table sound's (7). */
 export const THIS_DEVICE_ONLY = "This device only:";
+/** Only DM devices play (docs/design/design-v1-sound-dm-only.md 4), the last switch in Table sound. */
+export const DM_ONLY_SWITCH = "Only DM devices play";
+export const DM_ONLY_HELP = "For a table that hears the sound from one speaker. Players' devices and the table display play nothing and don't ask. Each DM device still plays while its Room sound is on.";
+/** The DM's reminder while it is on, in Now playing and the chip's player, so a game played apart never starts silent unnoticed. */
+export const DM_ONLY_ON = "Only DM devices play the sound.";
+/** A player's line while it is on (5), in the Sound panel and This device, the same whether or not anything plays. */
+export const DM_PLAYS_IT = "The DM plays the sound on their own device.";
 
 /* The Now playing chip and its player (5). */
 export const CHIP_PAUSE = "Pause";

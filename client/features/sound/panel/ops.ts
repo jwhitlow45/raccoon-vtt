@@ -13,7 +13,7 @@ export type SoundOp =
   | OpOf<"loop.start" | "loop.set" | "loop.stop" | "effect.fire" | "sound.mix" | "sound.scene" | "sound.stopAll">
   | OpOf<"sound.update" | "sound.delete" | "playlist.create" | "playlist.update" | "playlist.delete" | "playlist.add">
   | { t: "scene.update"; sceneId: string; patch: { sound: SceneSound | null } }
-  | { t: "room.update"; settings: { soundNames: boolean } };
+  | { t: "room.update"; settings: { soundNames: boolean } | { soundDmOnly: boolean } };
 
 /** Sends a sound op through the room's one dispatch, as every panel sends its ops, and hears its answer when asked to. */
 export function send(actions: Pick<RoomActions, "dispatch">, op: SoundOp, onAnswer?: OnAnswer): void {

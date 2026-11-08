@@ -79,6 +79,13 @@ describe("the words of the Sound panel's views and the Now playing chip (docs/de
     assert.ok(words.MUSIC_VOLUME.startsWith(words.MUSIC_LABEL), "and holds the visible word");
   });
 
+  test("Only DM devices play: the switch, its help, the DM's reminder and the players' line, word for word (docs/design/design-v1-sound-dm-only.md 11)", () => {
+    assert.equal(words.DM_ONLY_SWITCH, "Only DM devices play");
+    assert.equal(words.DM_ONLY_HELP, "For a table that hears the sound from one speaker. Players' devices and the table display play nothing and don't ask. Each DM device still plays while its Room sound is on.");
+    assert.equal(words.DM_ONLY_ON, "Only DM devices play the sound.");
+    assert.equal(words.DM_PLAYS_IT, "The DM plays the sound on their own device.");
+  });
+
   test("the chip's player, its loading lines and the maker's", () => {
     assert.deepEqual(
       [words.CHIP_PAUSE, words.CHIP_PLAY, words.PLAYER_TITLE, words.BACKGROUND, words.OPEN_SOUND, words.OPENING_PLAYER, words.PLAYER_FAILED, words.OPENING_PLAYLIST, words.PLAYLIST_FAILED, words.MUSIC_IS_PLAYING],

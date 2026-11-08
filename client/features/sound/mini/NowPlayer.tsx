@@ -8,7 +8,7 @@ import type { Playing } from "#shared/sound.ts";
 import { comingNext } from "../music/dragOrder.ts";
 import { NowFull, type FadeControl } from "../music/NowFull.tsx";
 import { useSoundToStop, useWakeAt } from "../panel/controls.tsx";
-import { MusicVolume, nextWords, StopAllButton } from "../panel/NowPlaying.tsx";
+import { DmOnlyLine, MusicVolume, nextWords, StopAllButton } from "../panel/NowPlaying.tsx";
 import { send } from "../panel/ops.ts";
 import { nameOf, serverNow, soundsOf, type Sounds } from "../panel/state.ts";
 import { BACKGROUND, OPEN_SOUND, stopName } from "../panel/words.ts";
@@ -17,8 +17,10 @@ import { crossfadeAt } from "./NowChip.tsx";
 /**
  * The Now playing chip's player (docs/design/design-v1-sound-layout.md
  * 5.3), loaded with the music's code once the chip first shows: the
- * player the Sound panel holds (NowFull), with no Library to point at, the
- * Next line and the music's volume while music plays, each background
+ * player the Sound panel holds (NowFull), with no Library to point at,
+ * Only DM devices play's reminder while the room keeps it on
+ * (docs/design/design-v1-sound-dm-only.md 4), the Next line and the
+ * music's volume while music plays, each background
  * sound with its Stop while any plays, then Stop all sound while anything
  * sounds and Open Sound. So with only background sounds playing the
  * player still has its reason to open. In the chip's popover Crossfade is
@@ -33,6 +35,7 @@ export default function NowPlayer(props: { fadeControl: FadeControl; onOpenSound
   return (
     <div data-now-player="" style={BODY}>
       <NowFull fadeControl={props.fadeControl} />
+      <DmOnlyLine />
       {music ? <NextLine /> : null}
       <MusicVolume />
       <Background />

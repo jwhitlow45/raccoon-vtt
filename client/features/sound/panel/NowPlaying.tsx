@@ -15,6 +15,9 @@ import {
   ANOTHER_WINDOW,
   CLEAR,
   DEVICE_SILENT,
+  DM_ONLY_HELP,
+  DM_ONLY_ON,
+  DM_ONLY_SWITCH,
   EFFECTS_LABEL,
   EFFECTS_VOLUME,
   loopVolumeName,
@@ -36,10 +39,11 @@ import {
 /*
  * The parts of the DM's Sound panel around the player
  * (docs/design/design-v1-sound-layout.md 4.2): Stop all sound, the device
- * line, Table sound with Use what's playing, the music's volume and the
- * names switch, and the Next line's words. The Now playing chip's player
- * (5.3, mini/NowPlayer.tsx) draws Stop all sound, the music's volume and
- * the Next line from here too. Scenes draws the scene's sound line
+ * line, Only DM devices play's reminder, Table sound with Use what's
+ * playing, the music's volume, the names switch and Only DM devices play,
+ * and the Next line's words. The Now playing chip's player (5.3,
+ * mini/NowPlayer.tsx) draws Stop all sound, the reminder, the music's
+ * volume and the Next line from here too. Scenes draws the scene's sound line
  * (SceneSoundLine) in its Scene sound group.
  */
 
@@ -110,11 +114,25 @@ export function DeviceLine() {
 }
 
 /**
+ * Only DM devices play's reminder (docs/design/design-v1-sound-dm-only.md
+ * 4), while the room keeps it on, with nothing playing too: the room keeps
+ * it until the DM turns it off, so a game played apart would otherwise
+ * start silent on every player's device with nothing on the DM's screen
+ * saying why. Plain help, not live, as no change of sound says anything
+ * aloud.
+ */
+export function DmOnlyLine() {
+  const on = useRoomView((s) => s.view?.meta.settings.soundDmOnly === true);
+  return on ? <Help>{DM_ONLY_ON}</Help> : null;
+}
+
+/**
  * Table sound, once What players hear (D-261102-766,
  * docs/design/design-v1-sound-layout.md 4.2 and 7): its help, then the
  * volumes for everyone, the music's, each background sound's with its
  * Stop and the effects', then the scene's line with Use what's playing
- * (6.2) and the names switch. Each slider shows a plain name, "Music", the
+ * (6.2), the names switch and Only DM devices play
+ * (docs/design/design-v1-sound-dm-only.md 4). Each slider shows a plain name, "Music", the
  * sound's or "Effects", since the help says once that these are for every
  * device, and keeps "volume for everyone" in its accessible name.
  */
@@ -143,6 +161,7 @@ export function TableSound() {
       <VolumeSlider label={EFFECTS_LABEL} name={EFFECTS_VOLUME} value={playing?.volume.effects ?? 100} onChange={(v) => send(actions, { t: "sound.mix", effects: v })} />
       <SceneSoundUse playing={playing} />
       <NamesSwitch />
+      <DmOnlySwitch />
     </div>
   );
 }
@@ -209,4 +228,18 @@ export function NamesSwitch() {
   const actions = useRoomActions();
   const on = useRoomView((s) => s.view?.meta.settings.soundNames === true);
   return <Switch label={NAMES_SWITCH} search="sound.table.names" help={NAMES_HELP} checked={on} onChange={(next) => send(actions, { t: "room.update", settings: { soundNames: next } })} />;
+}
+
+/**
+ * Only DM devices play (docs/design/design-v1-sound-dm-only.md 4), one
+ * setting: last in Table sound, and alone in the Table sound the panel
+ * shows while the server's switch is off, since the built-in effects
+ * still play on players' devices then, and a room may keep it from
+ * before the switch went off. Players see what is playing stays as it is
+ * beside it, keeping its value for a game played apart (D-261107-245).
+ */
+export function DmOnlySwitch() {
+  const actions = useRoomActions();
+  const on = useRoomView((s) => s.view?.meta.settings.soundDmOnly === true);
+  return <Switch label={DM_ONLY_SWITCH} search="sound.table.dmonly" help={DM_ONLY_HELP} checked={on} onChange={(next) => send(actions, { t: "room.update", settings: { soundDmOnly: next } })} />;
 }
