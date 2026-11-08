@@ -23,7 +23,7 @@ const PITS = new Set(["hidden-pit", "spiked-pit"]);
 const FALLING_NET = "falling-net";
 const POISONED_NEEDLE = "poisoned-needle";
 
-const FLOORS: ReadonlySet<TerrainId> = new Set(["stone", "wood"]);
+const FLOORS: ReadonlySet<TerrainId> = new Set(["stone", "wood", "cave", "dirt"]);
 const BLOCKS_WALK: ReadonlySet<TerrainId> = new Set(["pillar", "pit"]);
 
 /** A plan read back into grids. */
@@ -49,8 +49,9 @@ export class PlanGrid {
     for (const [t, cells] of Object.entries(plan.paint)) for (const c of cells) this.terrain[this.k(c)] = t as TerrainId;
     for (const { ft, cells } of plan.heights) for (const c of cells) this.ground[this.k(c)] = ft;
     for (const { up, cells } of plan.stairs) for (const c of cells) this.up[this.k(c)] = up as Side;
+    // A cave room's eroded ring squares and rock columns are rock, not room.
     plan.rooms.forEach((r, i) => {
-      for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) this.room[y * W + x] = i;
+      for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (this.terrain[y * W + x] !== undefined) this.room[y * W + x] = i;
     });
     for (const d of plan.doors) this.doors.set(d.edge, d.state);
   }
@@ -152,6 +153,13 @@ export function flood(g: PlanGrid, from: number): Set<number> {
   return seen;
 }
 
+/** The grid edge across a room's side square `k` toward `side`. */
+function doorEdgeOf(k: number, side: Side, W: number): string {
+  const x = k % W;
+  const y = (k - x) / W;
+  return side === "n" ? `${x},${y},n` : side === "s" ? `${x},${y + 1},n` : side === "w" ? `${x},${y},w` : `${x + 1},${y},w`;
+}
+
 /** Every problem with a plan, as sentences, or none. */
 export function planProblems(planned: Planned, s: DungeonSettings): string[] {
   const { plan } = planned;
@@ -190,7 +198,13 @@ export function planProblems(planned: Planned, s: DungeonSettings): string[] {
     for (let y = r.y; y < r.y + r.h; y++) {
       for (let x = r.x; x < r.x + r.w; x++) {
         const k = y * W + x;
-        if (!g.painted(k)) say(`room ${i} square ${x},${y} unpainted`);
+        const ring = x === r.x || y === r.y || x === r.x + r.w - 1 || y === r.y + r.h - 1;
+        if (!g.painted(k)) {
+          // Only a cave loses room squares: ring squares, and columns standing alone two in from its walls.
+          const column = x >= r.x + 2 && y >= r.y + 2 && x <= r.x + r.w - 3 && y <= r.y + r.h - 3 && [-1, 0, 1].every((dy) => [-1, 0, 1].every((dx) => (dx === 0 && dy === 0) || g.painted(k + dy * W + dx)));
+          if (plan.theme !== "cave" || !(ring || column)) say(`room ${i} square ${x},${y} unpainted`);
+          continue;
+        }
         const ft = g.ground[k]!;
         if (ft !== r.ground && ft !== r.ground + DAIS_RISE) say(`room ${i} square ${x},${y} at ${ft} ft, room at ${r.ground}`);
       }
@@ -209,11 +223,16 @@ export function planProblems(planned: Planned, s: DungeonSettings): string[] {
     for (let y = r.y; y < r.y + r.h; y++) {
       for (let x = r.x; x < r.x + r.w; x++) {
         const ring = x === r.x || y === r.y || x === r.x + r.w - 1 || y === r.y + r.h - 1;
-        if (ring && g.ground[y * W + x] !== r.ground) say(`room ${i}'s dais touches its wall at ${x},${y}`);
+        if (ring && g.painted(y * W + x) && g.ground[y * W + x] !== r.ground) say(`room ${i}'s dais touches its wall at ${x},${y}`);
       }
     }
   });
 
+  // A cave's doorways are bare openings, so its plan holds no door.
+  const cave = plan.theme === "cave";
+  if (cave && plan.doors.length > 0) say("doors in a cave");
+  const openings = new Set<string>();
+  if (cave) for (const d of planned.board.doorways) if (!d.removed) d.inside.forEach((k) => openings.add(doorEdgeOf(k, d.side, W)));
   // Doors: between a room's side square and a painted square outside it, never at a corner.
   for (const { edge } of plan.doors) {
     const [xs, ys, side] = edge.split(",");
@@ -237,7 +256,7 @@ export function planProblems(planned: Planned, s: DungeonSettings): string[] {
   // No painted square touches a room but across a door, so every wall is automatic and Reveal room stops at the doors.
   for (let k = 0; k < W * g.H; k++) {
     if (!g.painted(k) || g.room[k]! >= 0) continue;
-    for (const { n, edge } of g.neighbors(k)) if (g.room[n]! >= 0 && !g.doors.has(edge)) say(`${at(k)} touches room ${g.room[n]} without a door`);
+    for (const { n, edge } of g.neighbors(k)) if (g.room[n]! >= 0 && !g.doors.has(edge) && !openings.has(edge)) say(`${at(k)} touches room ${g.room[n]} without a door`);
   }
 
   // Ledges: none between two squares outside the rooms, none across a door, inside a room only round a dais.
@@ -307,16 +326,25 @@ export function planProblems(planned: Planned, s: DungeonSettings): string[] {
     });
   }
 
-  // Reveal room: exactly the room.
+  // Reveal room: exactly the room, but the whole cave in a cave, whose openings have no door.
+  let paintedCount = 0;
+  for (let k = 0; k < W * g.H; k++) if (g.painted(k)) paintedCount++;
   plan.rooms.forEach((r, i) => {
-    const got = flood(g, (r.y + 1) * W + r.x + 1);
+    const from = (r.y + 1) * W + r.x + 1;
+    const got = flood(g, from);
+    if (cave) {
+      if (got.size !== paintedCount) say(`Reveal room in cave ${i} floods ${got.size} squares, not all ${paintedCount}`);
+      return;
+    }
     if (got.size !== r.w * r.h || [...got].some((k) => g.room[k] !== i)) say(`Reveal room in room ${i} floods ${got.size} squares, not ${r.w * r.h}`);
   });
 
   // Nothing stands on a doorway's inside square, the lines from a room's doorways to its middle, or a dais's stair, the square before it and the square at its top.
   const width = s.wide ? 2 : 1;
   const doorsBySide = new Map<string, { k: number; side: Side }[]>();
-  for (const { edge } of plan.doors) {
+  // A secret doorway's lines are plain floor (D-261107-262), so only the others are kept clear.
+  const lineDoors = cave ? [...openings] : plan.doors.filter((d) => d.state !== "secret").map((d) => d.edge);
+  for (const edge of lineDoors) {
     const [xs, ys, axis] = edge.split(",");
     const x = Number(xs);
     const y = Number(ys);

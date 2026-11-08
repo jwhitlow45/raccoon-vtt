@@ -5,7 +5,13 @@ import { DAIS_RISE, placeDais, raiseRooms, type Dais } from "./heights.ts";
 import { Board, chooseEntrance, doorEdge, facingSides, loopLinks, placeDoorway, placeRooms, rockBetween, treeLinks, type Doorway, type Link, type Rect, type Side } from "./layout.ts";
 import { seedStream } from "./random.ts";
 import type { Seed } from "./seed.ts";
-import { clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, MAX_DOOR_EDGES, SEARCH_BUDGET, trapCount, type DungeonSettings, type PlanContext, type Theme } from "./settings.ts";
+import { besideDoorway, bulgeTunnels, erodeRoom, placeColumns } from "./cave.ts";
+import { deadEndCount, placeDeadEnds, type Spur } from "./deadEnds.ts";
+import { pinSquare } from "./keyRooms.ts";
+import { chooseSecrets, secretCandidates, stillWhole, type Candidate } from "./secrets.ts";
+import { clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, MAX_DOOR_EDGES, SEARCH_BUDGET, secretCount, trapCount, type DungeonSettings, type PlanContext, type Theme } from "./settings.ts";
+import { channelWater, placeCisterns, type Channel } from "./sewer.ts";
+import { THEME_SPECS } from "./themes.ts";
 import { pickTraps, trapSpots } from "./trapSpots.ts";
 
 /*
@@ -91,6 +97,20 @@ const WRAP_BELOW = { narrow: 8, wide: 10 } as const;
 /** About one extra way round per this many rooms. */
 const ROOMS_PER_LOOP = 4;
 
+/*
+ * The streams a seed starts (random.ts `seedStream`, phase 2 5.7): the main
+ * one (lane 0) and the corridors' (1) as in phase 1, then one for each
+ * choice that must keep what came before it. Secret doors and Dead ends
+ * keep the rooms and the linked corridors. Lights, dressing and the key run
+ * last, so Lit rooms, Dressing and DM key keep the rooms, corridors, doors
+ * and traps.
+ */
+const LANE_SECRETS = 2;
+export const LANE_LIGHTS = 3;
+export const LANE_DRESSING = 4;
+export const LANE_KEY = 5;
+const LANE_DEAD_ENDS = 6;
+
 /** What the drops did, for the tests that drive each branch with a small budget. */
 export type PlanTrace = {
   /** Tree links retried with their raised or sunk end rooms made flat. */
@@ -125,6 +145,18 @@ export type Planned = {
   stubPath: number[] | null;
   entrance: number;
   daises: Map<number, Dais>;
+  /** Kept rooms, by board index. */
+  kept: number[];
+  spurs: Spur[];
+  /** Squares Cave's tunnels gained. */
+  bulges: number[];
+  secret: Candidate[];
+  /** Room squares left unpainted: Cave's eroded ring squares and rock columns. */
+  unpainted: Set<number>;
+  /** Rooms holding a cistern. */
+  cisterns: Set<number>;
+  /** Each kept room's pin square, by board index. */
+  pins: Map<number, number>;
 };
 
 export function generate(settings: DungeonSettings, seed: Seed, context: PlanContext, budget: number = SEARCH_BUDGET): DungeonPlan {
@@ -134,6 +166,7 @@ export function generate(settings: DungeonSettings, seed: Seed, context: PlanCon
 /** The plan with its working. A caller with no room (a bench script) plans at the default 5 ft a square. */
 export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanContext = DEFAULT_CONTEXT, budget: number = SEARCH_BUDGET): Planned {
   const s = clampSettings(input);
+  const theme = THEME_SPECS[s.theme];
   const { w: W, h: H } = s;
   const width = s.wide ? 2 : 1;
   const rng = seedStream(seed);
@@ -243,11 +276,13 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   });
   trace.loopsLeft = options.budget.left;
   let stubPath: number[] | null = null;
+  let stubChain: number[] | null = null;
   if (stub) {
     const found = router.route(stub, { edge: entrance.side }, options);
     if (found.ok) {
       for (const k of found.cells) board.laid[k] = 1;
       stubPath = found.cells;
+      stubChain = found.chain;
     }
   }
   if (!stubPath) trace.stubFailed = true;
@@ -258,36 +293,16 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   const kept = board.rooms.flatMap((r, i) => (r.dropped ? [] : [i]));
   const doorways = board.doorways.filter((d) => !d.removed);
 
-  // Step 8: doors.
-  const states = doorStates(rng, doorways, s.theme, stub);
-
-  // Step 9: daises, floors and dressing, kept off the ways the party walks.
-  const lines = new Map(kept.map((i) => [i, doorLines(board, i)]));
-  const onLine = (k: number) => {
-    const room = board.roomAt[k]! - 1;
-    return room >= 0 && (lines.get(room)?.has(k) ?? false);
-  };
-  const daises = new Map<number, Dais>();
-  for (const i of kept) {
-    const dais = placeDais(rng, board, i, (k) => lines.get(i)!.has(k));
-    if (dais) daises.set(i, dais);
-  }
-  const daisSquares = new Map<number, number>();
-  const clear = new Set<number>();
-  for (const [i, dais] of daises) {
-    for (let y = dais.rect.y; y < dais.rect.y + dais.rect.h; y++) for (let x = dais.rect.x; x < dais.rect.x + dais.rect.w; x++) daisSquares.set(board.cell(x, y), board.rooms[i]!.ground + DAIS_RISE);
-    for (const k of daisClear(dais)) clear.add(k);
-  }
-  const floors = roomFloors(rng, board, s.theme);
-
   // The corridor squares: every built way, and each kept doorway's run or flattened run.
+  const realRuns = new Set<number>();
   const runSquares = new Set<number>();
   const mouths = new Set<number>();
   for (const d of doorways) {
     for (const k of d.outside) mouths.add(k);
-    if (d.run) for (const k of [...d.run.near, ...d.run.stairs.map((st) => st.cell), ...d.run.far]) runSquares.add(k);
+    if (d.run) for (const k of [...d.run.near, ...d.run.stairs.map((st) => st.cell), ...d.run.far]) realRuns.add(k);
     if (d.flat) for (const k of d.flat) runSquares.add(k);
   }
+  for (const k of realRuns) runSquares.add(k);
   const edgeStairs = new Set<number>();
   if (stubPath) {
     for (const k of stubPath) {
@@ -297,21 +312,113 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     }
   }
   const builtPaths = [...paths.filter((p): p is number[] => p !== null), ...(stubPath ? [stubPath] : [])];
+  const builtChains = [...chains.filter((c): c is number[] => c !== null), ...(stubChain ? [stubChain] : [])];
   const corridor = new Set<number>([...builtPaths.flat(), ...runSquares]);
   const plainCorridor = (k: number) => !runSquares.has(k) && !mouths.has(k) && !edgeStairs.has(k);
 
-  const overlay = new Map<number, TerrainId>();
-  if (s.theme === "dungeon") {
-    placeRubble(rng, builtPaths, plainCorridor, overlay);
-    placePits(rng, board, kept, (i, k) => !lines.get(i)!.has(k) && !daisSquares.has(k) && !clear.has(k), overlay);
-  } else {
-    placePillars(board, kept, (i, k) => !lines.get(i)!.has(k) && !clear.has(k), overlay);
+  // Cave's tunnels bulge where a corridor could have gone (phase 2, 5.1), from the main stream.
+  let bulges: number[] = [];
+  if (theme.cave) {
+    bulges = bulgeTunnels(rng, board, builtPaths, plainCorridor, router.openSquares(false));
+    for (const k of bulges) {
+      corridor.add(k);
+      board.laid[k] = 1;
+    }
   }
 
-  // Step 10: traps.
-  const inside = new Set(doorways.flatMap((d) => d.inside));
-  const painted = (k: number) => board.roomAt[k] !== 0 || corridor.has(k);
-  const floorFree = (k: number) => painted(k) && !overlay.has(k) && !daisSquares.has(k) && !clear.has(k) && !inside.has(k) && (board.roomAt[k] !== 0 || plainCorridor(k));
+  // Dead ends (5.2), from their own stream, so the switch keeps the rooms and the linked corridors.
+  let spurs: Spur[] = [];
+  if (s.deadEnds && kept.length > 0) {
+    const all = width === 1 ? [...new Set(builtPaths.flat())] : [...new Set(builtChains.flat())];
+    const block = (k: number) => (width === 1 ? [k] : [k, k + 1, k + W, k + W + 1]);
+    const starts = all.filter((k) => block(k).every((q) => corridor.has(q) && plainCorridor(q)));
+    spurs = placeDeadEnds(seedStream(seed, GENERATOR_VERSION, LANE_DEAD_ENDS), { board, width, starts, corridor, open: router.openSquares(false), count: deadEndCount(kept.length) });
+  }
+  const spurPaths = spurs.map((sp) => sp.cells);
+
+  // Step 8: doors, then the floors, both drawn before the secret doors, so whatever moves those keeps the locks and the floors.
+  const states = doorStates(rng, doorways, theme, stub);
+  const floors = roomFloors(rng, board, theme);
+
+  // Secret doors (5.3), from their own stream, chosen before anything is placed round the doorways.
+  let secret: Candidate[] = [];
+  const secrets = theme.doors ? secretCount(s.secrets, kept.length) : 0;
+  if (secrets > 0) {
+    const painted = (k: number) => board.roomAt[k] !== 0 || corridor.has(k);
+    const candidates = secretCandidates({ doorways, links, entrance: entrance.room, stub, locked: (d) => states.get(d.id) === "locked" });
+    secret = chooseSecrets(seedStream(seed, GENERATOR_VERSION, LANE_SECRETS), candidates, secrets, (set) => stillWhole(board, painted, entrance.room, kept, set));
+  }
+  const secretIds = new Set(secret.map((c) => c.doorway.id));
+  const isSecret = (d: Doorway) => secretIds.has(d.id);
+  const secretRooms = new Set(secret.flatMap((c) => (c.kind === "leaf" ? [c.doorway.room] : [])));
+
+  // Step 9: daises, floors and dressing, kept off the ways the party walks. A secret doorway's
+  // lines are plain floor for what stands in a room (`openLines`), but daises and pits keep off
+  // them all, so a Large creature walks in once it is found (D-261107-262).
+  const lines = new Map(kept.map((i) => [i, doorLines(board, i)]));
+  const openLines = new Map(kept.map((i) => [i, doorLines(board, i, isSecret)]));
+  const onLine = (k: number) => {
+    const room = board.roomAt[k]! - 1;
+    return room >= 0 && (openLines.get(room)?.has(k) ?? false);
+  };
+  const daises = new Map<number, Dais>();
+  for (const i of kept) {
+    const dais = placeDais(rng, board, i, (k) => lines.get(i)!.has(k), (d) => !isSecret(d));
+    if (dais) daises.set(i, dais);
+  }
+  const daisSquares = new Map<number, number>();
+  const clear = new Set<number>();
+  for (const [i, dais] of daises) {
+    for (let y = dais.rect.y; y < dais.rect.y + dais.rect.h; y++) for (let x = dais.rect.x; x < dais.rect.x + dais.rect.w; x++) daisSquares.set(board.cell(x, y), board.rooms[i]!.ground + DAIS_RISE);
+    for (const k of daisClear(dais)) clear.add(k);
+  }
+
+  // Cave rooms lose their corners and nibbles of their ring, never a doorway or its lines.
+  const unpainted = new Set<number>();
+  if (theme.cave) {
+    for (const i of kept) {
+      const keep = new Set<number>([...lines.get(i)!, ...clear]);
+      for (const d of doorways) if (d.room === i) for (const k of [...d.inside, ...besideDoorway(board, d.inside, d.side)]) keep.add(k);
+      for (const k of erodeRoom(rng, board, i, (k) => keep.has(k) || daisSquares.has(k))) unpainted.add(k);
+    }
+  }
+  const inRoom = (k: number) => board.roomAt[k] !== 0 && !unpainted.has(k);
+
+  const overlay = new Map<number, TerrainId>();
+  const tunnels = [...builtPaths, ...spurPaths];
+  if (theme.rubble) placeRubble(rng, tunnels, theme.rubble, plainCorridor, overlay);
+  if (theme.pits) placePits(rng, board, kept, theme.pits, (i, k) => inRoom(k) && !lines.get(i)!.has(k) && !daisSquares.has(k) && !clear.has(k), overlay);
+  // A Narrow ring may stand on a secret doorway's line, since a Medium creature steps round a pillar. A Wide one keeps off it for a Large one.
+  if (theme.pillars) placePillars(board, kept, (i, k) => !(s.wide ? lines : openLines).get(i)!.has(k) && !clear.has(k), overlay);
+  const cisterns = new Set<number>();
+  if (theme.sewer) {
+    const channels: Channel[] = [...builtChains.map((chain) => ({ chain })), ...spurs.map((sp) => ({ cells: sp.cells, side: sp.side }))];
+    const ordinaryMouths = new Set(doorways.filter((d) => !isSecret(d)).flatMap((d) => d.outside));
+    const dry = (k: number) => realRuns.has(k) || edgeStairs.has(k) || (!s.wide && ordinaryMouths.has(k));
+    for (const k of channelWater(board, s.wide, corridor, channels, dry)) overlay.set(k, "water");
+    for (const [i, water] of placeCisterns(rng, board, kept, (i) => daises.has(i), (i) => openLines.get(i)!)) {
+      cisterns.add(i);
+      for (const k of water) overlay.set(k, "water");
+    }
+  }
+
+  // Pin squares (5.6), whatever DM key says: free floor nearest each room's middle, before columns,
+  // lights and dressing keep off them.
+  const pins = new Map<number, number>();
+  for (const i of kept) pins.set(i, pinSquare(board, i, (k) => inRoom(k) && !overlay.has(k) && !daisSquares.has(k)));
+  if (theme.cave) {
+    for (const i of kept) {
+      const near = (k: number) => lines.get(i)!.has(k) || daisSquares.has(k) || clear.has(k) || k === pins.get(i);
+      for (const k of placeColumns(rng, board, i, near, inRoom)) unpainted.add(k);
+    }
+  }
+
+  // Step 10: traps. A secret doorway's inside squares are plain floor, and its outside squares and edges take none.
+  const inside = new Set(doorways.filter((d) => !isSecret(d)).flatMap((d) => d.inside));
+  const secretMouths = new Set(secret.flatMap((c) => c.doorway.outside));
+  const painted = (k: number) => inRoom(k) || corridor.has(k);
+  const floorFree = (k: number) =>
+    painted(k) && !overlay.has(k) && !daisSquares.has(k) && !clear.has(k) && !inside.has(k) && !secretMouths.has(k) && (board.roomAt[k] !== 0 || plainCorridor(k));
   const traps =
     s.traps === 0
       ? []
@@ -322,7 +429,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
             rooms: kept.filter((i) => i !== entrance.room),
             onLine,
             floorFree,
-            corridor: [...new Set(builtPaths.flat())],
+            corridor: [...new Set([...builtPaths.flat(), ...spurPaths.flat()])],
             painted,
             wide: s.wide,
             locked: doorways.filter((d) => d.room !== entrance.room && states.get(d.id) === "locked").map((d) => doorEdgeOf(board, d, 0)),
@@ -334,15 +441,15 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   const terrain = new Map<number, TerrainId>();
   for (const i of kept) {
     const r = board.rooms[i]!;
-    for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) terrain.set(board.cell(x, y), floors[i]!);
+    for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (inRoom(board.cell(x, y))) terrain.set(board.cell(x, y), floors[i]!);
   }
-  for (const k of corridor) terrain.set(k, "stone");
-  for (const [k, t] of overlay) terrain.set(k, t);
+  for (const k of corridor) terrain.set(k, theme.corridor);
+  for (const [k, t] of overlay) if (terrain.has(k)) terrain.set(k, t);
 
   const ground = new Map<number, number>();
   for (const i of kept) {
     const r = board.rooms[i]!;
-    if (r.ground !== 0) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) ground.set(board.cell(x, y), r.ground);
+    if (r.ground !== 0) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (inRoom(board.cell(x, y))) ground.set(board.cell(x, y), r.ground);
   }
   for (const [k, ft] of daisSquares) ground.set(k, ft);
   const ups = new Map<number, Side>();
@@ -366,6 +473,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   const paint: Partial<Record<TerrainId, string[]>> = {};
   for (const { v, cells } of grouped(terrain, (a, b) => (a < b ? -1 : a > b ? 1 : 0))) paint[v] = cells;
   const DIR_ORDER = "nesw";
+  const xy = (k: number): [number, number] => [k % W, Math.floor(k / W)];
   const plan: DungeonPlan = {
     version: GENERATOR_VERSION,
     theme: s.theme,
@@ -374,10 +482,20 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     asked: s.rooms,
     rooms: kept.map((i) => {
       const r = board.rooms[i]!;
-      return { x: r.x, y: r.y, w: r.w, h: r.h, ground: r.ground, floor: floors[i]!, pin: [r.x + Math.floor(r.w / 2), r.y + Math.floor(r.h / 2)] as [number, number], ...(i === entrance.room ? { entrance: true as const } : {}) };
+      return {
+        x: r.x,
+        y: r.y,
+        w: r.w,
+        h: r.h,
+        ground: r.ground,
+        floor: floors[i]!,
+        pin: xy(pins.get(i)!),
+        ...(i === entrance.room ? { entrance: true as const } : {}),
+        ...(secretRooms.has(i) ? { secret: true as const } : {}),
+      };
     }),
     paint,
-    doors: doorways.flatMap((d) => d.inside.map((_, j) => ({ edge: doorEdgeOf(board, d, j), state: states.get(d.id)! }))),
+    doors: theme.doors ? doorways.flatMap((d) => d.inside.map((_, j) => ({ edge: doorEdgeOf(board, d, j), state: isSecret(d) ? ("secret" as const) : states.get(d.id)! }))) : [],
     heights: grouped(
       new Map([...ground].filter(([, ft]) => ft !== 0)),
       (a, b) => a - b,
@@ -390,7 +508,25 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     entrance: entrance.room >= 0 ? { x: rects[entrance.room]!.x, y: rects[entrance.room]!.y, w: rects[entrance.room]!.w, h: rects[entrance.room]!.h } : { x: 0, y: 0, w: 0, h: 0 },
     key: null,
   };
-  return { plan, trace, board, links, paths, chains, stub: stub && !stub.removed ? stub : null, stubPath, entrance: entrance.room, daises };
+  return {
+    plan,
+    trace,
+    board,
+    links,
+    paths,
+    chains,
+    stub: stub && !stub.removed ? stub : null,
+    stubPath,
+    entrance: entrance.room,
+    daises,
+    kept,
+    spurs,
+    bulges,
+    secret,
+    unpainted,
+    cisterns,
+    pins,
+  };
 }
 
 function doorEdgeOf(board: Board, d: Doorway, j: number): string {

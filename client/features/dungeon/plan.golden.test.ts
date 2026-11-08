@@ -6,8 +6,8 @@ import { generate } from "./plan.ts";
 import { clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, type DungeonSettings } from "./settings.ts";
 
 /*
- * Twelve plans pinned by hash (docs/design/design-v1-dungeon-generator.md
- * 5.1). Replay never runs the generator, so it may change, but a change
+ * Plans pinned by hash (docs/design/design-v1-dungeon-generator.md
+ * 5.1), every theme among them, at the default 5 ft a square. Replay never runs the generator, so it may change, but a change
  * that moves any plan bumps GENERATOR_VERSION and this fixture together:
  * an old seed then says it is from another version. UPDATE_FIXTURES=1
  * rewrites the fixture, but never moves a plan under the version it was
@@ -31,6 +31,9 @@ const CASES: { name: string; settings: Partial<DungeonSettings>; seed: string }[
   { name: "Custom and Wide", settings: { w: 37, h: 63, rooms: 11, wide: true, heights: 10, traps: 3, band: "17-20" }, seed: "1D6E7F8G9H0J1K2M" },
   { name: "a Large Straight Wide Crypt", settings: { w: 80, h: 80, rooms: 20, theme: "crypt", corridors: "straight", wide: true, loops: false }, seed: "1N3P4Q5R6S7T8V9W" },
   { name: "Bending with traps at 5 to 10", settings: { traps: 4, band: "5-10" }, seed: "1X0Y1Z2A3B4C5D6E" },
+  { name: "a Cave with dead ends", settings: { theme: "cave", w: 60, h: 60, rooms: 16 }, seed: "1C4V3D3AD3ND5000" },
+  { name: "a Wide Mine with secret doors", settings: { theme: "mine", wide: true, secrets: 4, heights: 50 }, seed: "1M1N3S7AF7Y0DEEP" },
+  { name: "a Narrow Sewer with secret doors and no dead ends", settings: { theme: "sewer", secrets: 6, deadEnds: false, traps: 6 }, seed: "1SEWER0RAT5N0SE5" },
 ];
 
 /**
@@ -76,7 +79,7 @@ describe("golden dungeon plans", () => {
     assert.equal(fixture.version, GENERATOR_VERSION);
   });
 
-  test("twelve fixed seeds and choices make the plans they made", () => {
+  test("fixed seeds and choices, one or more of each theme, make the plans they made", () => {
     const now = today();
     if (process.env.UPDATE_FIXTURES === "1") {
       const refused = rewriteRefused(JSON.parse(readFileSync(FIXTURE, "utf8")) as Golden, now);
@@ -84,7 +87,7 @@ describe("golden dungeon plans", () => {
       writeFileSync(FIXTURE, `${JSON.stringify(now, null, 2)}\n`);
     }
     const fixture = JSON.parse(readFileSync(FIXTURE, "utf8")) as Golden;
-    assert.equal(fixture.plans.length, 12);
+    assert.equal(fixture.plans.length, CASES.length);
     assert.deepEqual(now, fixture, "a plan moved: bump GENERATOR_VERSION and rerun with UPDATE_FIXTURES=1");
   });
 });

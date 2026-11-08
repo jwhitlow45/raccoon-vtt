@@ -7,7 +7,9 @@ import { generate, planDungeon, type Planned } from "./plan.ts";
 import { planProblems } from "./plan.testkit.ts";
 import { Stream } from "./random.ts";
 import { CROCKFORD, newSeed, versionChar, type Seed } from "./seed.ts";
-import { clampSettings, DEFAULT_CONTEXT, DEFAULT_SETTINGS, defaultRooms, GENERATOR_VERSION, HEIGHT_PRESETS, HEIGHTS_MAX, HEIGHTS_STEP, roomCap, SEARCH_BUDGET, SIZE_SIDES, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
+import { doorLines } from "./dress.ts";
+import { middle2 } from "./heights.ts";
+import { clampSettings, DEFAULT_CONTEXT, DEFAULT_SETTINGS, defaultRooms, DRESSINGS, GENERATOR_VERSION, HEIGHT_PRESETS, HEIGHTS_MAX, HEIGHTS_STEP, LIT_MAX, LIT_STEP, roomCap, SEARCH_BUDGET, SECRETS_MAX, SIZE_SIDES, THEMES, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
 
 /*
  * Property tests of the dungeon generator (docs/design/design-v1-dungeon-generator.md
@@ -27,10 +29,15 @@ const settingsArb: fc.Arbitrary<DungeonSettings> = fc
     corridors: fc.constantFrom("straight", "bending", "winding"),
     wide: fc.boolean(),
     loops: fc.boolean(),
-    theme: fc.constantFrom("dungeon", "crypt"),
+    theme: fc.constantFrom(...THEMES),
     heights: fc.integer({ min: 0, max: HEIGHTS_MAX / HEIGHTS_STEP }).map((n) => n * HEIGHTS_STEP),
     traps: fc.integer({ min: 0, max: TRAPS_MAX }),
     band: fc.constantFrom("1-4", "5-10", "11-16", "17-20"),
+    deadEnds: fc.boolean(),
+    secrets: fc.integer({ min: 0, max: SECRETS_MAX }),
+    lit: fc.integer({ min: 0, max: LIT_MAX / LIT_STEP }).map((n) => n * LIT_STEP),
+    dressing: fc.constantFrom(...DRESSINGS),
+    key: fc.boolean(),
   } as const)
   .map((s) => clampSettings({ ...s, rooms: Math.min(s.rooms, roomCap(s.w, s.h)) }));
 
@@ -75,8 +82,8 @@ describe("dungeon plans", () => {
           const r = t.zone.cells[0]!;
           for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) assert.ok(!runs.has(y * s.w + x), `trap on a run at ${x},${y}`);
         }
-        // The way in is always closed, never locked.
-        if (p.stub) {
+        // The way in is always closed, never locked, and a cave's is a bare opening.
+        if (p.stub && s.theme !== "cave") {
           const k = p.stub.inside[0]!;
           assert.equal(p.plan.doors.find((d) => d.edge === doorEdge(k % s.w, Math.floor(k / s.w), p.stub!.side))?.state, "closed");
         }
@@ -85,14 +92,81 @@ describe("dungeon plans", () => {
     );
   });
 
-  test("the largest choices keep the invariants and the door cap", () => {
-    for (const wide of [false, true]) {
-      for (const density of ["sparse", "dense"] as const) {
-        const s = clampSettings({ w: 100, h: 100, rooms: 40, density, corridors: "winding", wide, loops: true, theme: "crypt", heights: HEIGHTS_MAX, traps: TRAPS_MAX, band: "17-20" });
-        const next = seeds(wide ? 1 : 2);
-        for (let i = 0; i < 3; i++) ok(planDungeon(s, next()), s);
+  test("the largest choices of every theme keep the invariants and the door cap", () => {
+    for (const theme of THEMES) {
+      for (const wide of [false, true]) {
+        for (const density of ["sparse", "dense"] as const) {
+          const s = clampSettings({ w: 100, h: 100, rooms: 40, density, corridors: "winding", wide, loops: true, theme, heights: HEIGHTS_MAX, traps: TRAPS_MAX, band: "17-20", secrets: SECRETS_MAX, lit: LIT_MAX, dressing: "full" });
+          const next = seeds(wide ? 1 : 2);
+          for (let i = 0; i < 2; i++) ok(planDungeon(s, next()), s);
+        }
       }
     }
+  });
+
+  test("Theme moves no room or corridor: every theme fits the same rooms through the same ways, so fit rates match at every size", () => {
+    for (const size of ["small", "medium", "large"] as const) {
+      const side = SIZE_SIDES[size];
+      const next = seeds(90 + side);
+      for (let i = 0; i < 8; i++) {
+        const seed = next();
+        const base = { ...DEFAULT_SETTINGS, w: side, h: side, rooms: defaultRooms(size, side, side), deadEnds: false };
+        const shape = (p: Planned) => [p.plan.rooms.map(({ x, y, w, h, ground }) => [x, y, w, h, ground]), p.paths, p.stubPath];
+        const want = shape(planDungeon({ ...base, theme: "dungeon" }, seed));
+        for (const theme of THEMES) assert.deepEqual(shape(planDungeon({ ...base, theme }, seed)), want, `${size} ${theme}`);
+      }
+    }
+  });
+
+  test("a secret doorway leaves no mark: a Narrow Crypt's ring may take its line and a Wide one never, daises and pits keep off it, and a dais stair faces an ordinary door", () => {
+    let ringOnLine = 0;
+    let daisRooms = 0;
+    for (const wide of [false, true]) {
+      const s = clampSettings({ w: 90, h: 90, rooms: 34, density: "dense", theme: "crypt", wide, secrets: SECRETS_MAX });
+      const dungeon = clampSettings({ ...s, theme: "dungeon" });
+      const next = seeds(wide ? 95 : 96);
+      for (let i = 0; i < 12; i++) {
+        const seed = next();
+        for (const p of [planDungeon(s, seed), planDungeon(dungeon, seed)]) {
+          const W = p.plan.w;
+          const secret = new Set(p.secret.map((c) => c.doorway.id));
+          const pillars = new Set(p.plan.paint.pillar ?? []);
+          const pits = new Set(p.plan.paint.pit ?? []);
+          const key = (k: number) => `${k % W},${Math.floor(k / W)}`;
+          for (const i of p.kept) {
+            const all = doorLines(p.board, i);
+            const open = doorLines(p.board, i, (d) => secret.has(d.id));
+            for (const k of all) {
+              assert.ok(!pits.has(key(k)), `${seed}: a pit on a line`);
+              if (!pillars.has(key(k))) continue;
+              assert.ok(!open.has(k), `${seed}: a pillar on an ordinary line`);
+              assert.ok(!wide, `${seed}: a Wide ring on a secret line`);
+              ringOnLine++;
+            }
+            const dais = p.daises.get(i);
+            if (!dais) continue;
+            for (let y = dais.rect.y; y < dais.rect.y + dais.rect.h; y++) for (let x = dais.rect.x; x < dais.rect.x + dais.rect.w; x++) assert.ok(!all.has(y * W + x), `${seed}: a dais on a line`);
+            const doors = p.board.doorways.filter((d) => !d.removed && d.room === i);
+            const shown = doors.filter((d) => !secret.has(d.id));
+            if (shown.length === 0 || shown.length === doors.length) continue;
+            // The stair faces the nearest doorway that is not secret, as placeDais measured it.
+            const [mx, my] = [2 * dais.rect.x + dais.rect.w, 2 * dais.rect.y + dais.rect.h];
+            const dist = (d: (typeof doors)[number]) => {
+              const [x, y] = middle2(p.board, d.inside);
+              return Math.abs(x - mx) + Math.abs(y - my);
+            };
+            const nearest = shown.reduce((a, b) => (dist(b) < dist(a) ? b : a));
+            const [nx, ny] = middle2(p.board, nearest.inside);
+            const face = Math.abs(nx - mx) >= Math.abs(ny - my) ? (nx > mx ? "e" : "w") : ny > my ? "s" : "n";
+            const up = { n: "s", s: "n", e: "w", w: "e" }[face];
+            assert.equal(dais.up, up, `${seed}: room ${i}'s dais stair faces a secret door`);
+            daisRooms++;
+          }
+        }
+      }
+    }
+    assert.ok(ringOnLine > 0, "a Narrow ring stands on a secret line");
+    assert.ok(daisRooms > 0, "a dais in a room with a secret door");
   });
 
   test("more rooms than fit: fewer kept, and a map that fits under two still makes a well-formed plan", () => {

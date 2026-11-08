@@ -177,13 +177,18 @@ export type Dais = {
  * above the floor, a square in from the walls and off the doorway lines,
  * with a stair on the floor square before its side facing the nearest
  * doorway, pointing up onto it. The stair and the square before it stay
- * inside the room. `blocked` marks squares a dais may not cover.
+ * inside the room. `blocked` marks squares a dais may not cover. `faces`
+ * says which doorways the stair may face: never a secret one, unless the
+ * room has no other, since a stair turned to a blank wall points at the
+ * door (phase 2, D-261107-262).
  */
-export function placeDais(rng: Stream, board: Board, room: number, blocked: (k: number) => boolean): Dais | null {
+export function placeDais(rng: Stream, board: Board, room: number, blocked: (k: number) => boolean, faces: (d: Doorway) => boolean = () => true): Dais | null {
   const r = board.rooms[room]!;
   if (r.w < DAIS_MIN_ROOM || r.h < DAIS_MIN_ROOM) return null;
   if (!rng.chance(...DAIS_CHANCE)) return null;
-  const doors = board.doorways.filter((d) => d.room === room && !d.removed);
+  const all = board.doorways.filter((d) => d.room === room && !d.removed);
+  const shown = all.filter(faces);
+  const doors = shown.length > 0 ? shown : all;
   if (doors.length === 0) return null;
   for (let t = 0; t < DAIS_TRIES; t++) {
     const long = rng.int(2, 4);

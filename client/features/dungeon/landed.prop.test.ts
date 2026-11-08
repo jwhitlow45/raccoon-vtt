@@ -61,9 +61,9 @@ function cellsOf(room: RoomState): Map<string, string> {
   return out;
 }
 
-/** The room with every door open, as a party that opened each would walk it. */
+/** The room with every door open, as a party that found and opened each would walk it: a hidden secret door is a wall. */
 function opened(room: RoomState): RoomState {
-  const open = (f: EdgeFeature): EdgeFeature => (f.kind === "door" ? { ...f, state: "open" } : f);
+  const open = (f: EdgeFeature): EdgeFeature => (f.kind === "door" ? { ...f, state: "open", ...(f.secret ? { discovered: true } : {}) } : f);
   const chunks: Record<string, BuildChunk> = {};
   for (const [k, c] of Object.entries(room.buildChunks)) chunks[k] = { ...c, edges: Object.fromEntries(Object.entries(c.edges).map(([e, f]) => [e, open(f)])) };
   return { ...room, buildChunks: chunks };

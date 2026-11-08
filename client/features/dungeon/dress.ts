@@ -2,7 +2,7 @@ import type { TerrainId } from "#shared/model.ts";
 import type { Dais } from "./heights.ts";
 import { type Board, type Doorway } from "./layout.ts";
 import type { Stream } from "./random.ts";
-import type { Theme } from "./settings.ts";
+import type { ThemeSpec } from "./themes.ts";
 
 /*
  * Doors and dressing (docs/design/design-v1-dungeon-generator.md 5.3 steps
@@ -11,11 +11,6 @@ import type { Theme } from "./settings.ts";
  * the square before it and the dais square at its top.
  */
 
-/** Locked doors in a hundred, by theme. The rest are closed. */
-const LOCKED_IN_100: Readonly<Record<Theme, number>> = { dungeon: 15, crypt: 25, cave: 0, mine: 10, sewer: 20 };
-const WOOD_CHANCE = [1, 5] as const;
-const RUBBLE_CHANCE = [1, 3] as const;
-const PIT_CHANCE = [1, 6] as const;
 /**
  * Crypt rooms this size or larger get pillars: a 5 by 5 room's ring holds
  * one at each corner. From 6, Sparse rooms (3 to 6 squares a side) almost
@@ -27,13 +22,15 @@ const PILLAR_MIN_ROOM = 5;
 /**
  * The squares from each of a room's doorways to its middle: straight in
  * from the doorway to the middle's row or column, then along it, as wide as
- * the doorway, so a Large creature on Wide finds its way clear.
+ * the doorway, so a Large creature on Wide finds its way clear. `skip`
+ * leaves out doorways whose lines count as plain floor: a secret doorway's
+ * leaves no mark (phase 2, D-261107-262).
  */
-export function doorLines(board: Board, room: number): Set<number> {
+export function doorLines(board: Board, room: number, skip: (d: Doorway) => boolean = () => false): Set<number> {
   const r = board.rooms[room]!;
   const out = new Set<number>();
   for (const d of board.doorways) {
-    if (d.room !== room || d.removed) continue;
+    if (d.room !== room || d.removed || skip(d)) continue;
     const mx = r.x + Math.floor((r.w - d.width) / 2);
     const my = r.y + Math.floor((r.h - d.width) / 2);
     const xs = d.inside.map((k) => k % board.W);
@@ -57,31 +54,33 @@ export function doorLines(board: Board, room: number): Set<number> {
 
 /**
  * Each kept doorway's door, a Wide doorway's two edges alike: closed or
- * locked by theme, the entrance's own door always closed.
+ * locked by theme, the entrance's own door always closed. A theme without
+ * doors (Cave) draws none.
  */
-export function doorStates(rng: Stream, doorways: readonly Doorway[], theme: Theme, stub: Doorway | null): Map<number, "closed" | "locked"> {
+export function doorStates(rng: Stream, doorways: readonly Doorway[], theme: ThemeSpec, stub: Doorway | null): Map<number, "closed" | "locked"> {
   const out = new Map<number, "closed" | "locked">();
+  if (!theme.doors) return out;
   for (const d of doorways) {
     if (d.removed) continue;
-    const locked = rng.chance(LOCKED_IN_100[theme], 100);
+    const locked = rng.chance(theme.lockedIn100, 100);
     out.set(d.id, d === stub || !locked ? "closed" : "locked");
   }
   return out;
 }
 
-/** The floor each kept room is painted with: wood in about a fifth of a Dungeon's rooms, else stone. */
-export function roomFloors(rng: Stream, board: Board, theme: Theme): TerrainId[] {
-  return board.rooms.map((r) => (r.dropped || theme !== "dungeon" ? "stone" : rng.chance(...WOOD_CHANCE) ? "wood" : "stone"));
+/** The floor each kept room is painted with: the theme's, and wood in about a fifth of a Dungeon's rooms. */
+export function roomFloors(rng: Stream, board: Board, theme: ThemeSpec): TerrainId[] {
+  return board.rooms.map((r) => (r.dropped || !theme.wood ? theme.floor : rng.chance(...theme.wood) ? "wood" : theme.floor));
 }
 
 /**
- * Rubble in about a third of a Dungeon's corridors: 1 to 3 squares in a row
+ * Rubble in the theme's share of the corridors: 1 to 3 squares in a row
  * along the corridor's way, never on a run, a flattened run, a doorway's
  * outside square or the stub's stairs.
  */
-export function placeRubble(rng: Stream, corridors: readonly (readonly number[])[], kept: (k: number) => boolean, out: Map<number, TerrainId>): void {
+export function placeRubble(rng: Stream, corridors: readonly (readonly number[])[], chance: readonly [number, number], kept: (k: number) => boolean, out: Map<number, TerrainId>): void {
   for (const path of corridors) {
-    if (!rng.chance(...RUBBLE_CHANCE)) continue;
+    if (!rng.chance(...chance)) continue;
     const n = rng.int(1, 3);
     const free = (k: number) => kept(k) && !out.has(k);
     const starts = path.map((_, i) => i).filter((i) => free(path[i]!));
@@ -92,14 +91,15 @@ export function placeRubble(rng: Stream, corridors: readonly (readonly number[])
 }
 
 /**
- * A Pit of 1 or 2 squares in a few of a Dungeon's rooms, on squares
- * `free` allows, the second beside the first.
+ * A Pit in the theme's share of the rooms, on squares `free` allows:
+ * Dungeon's of 1 or 2 squares, the second beside the first, and Mine's
+ * 1-square shafts.
  */
-export function placePits(rng: Stream, board: Board, rooms: readonly number[], free: (room: number, k: number) => boolean, out: Map<number, TerrainId>): void {
+export function placePits(rng: Stream, board: Board, rooms: readonly number[], pits: NonNullable<ThemeSpec["pits"]>, free: (room: number, k: number) => boolean, out: Map<number, TerrainId>): void {
   for (const i of rooms) {
-    if (!rng.chance(...PIT_CHANCE)) continue;
+    if (!rng.chance(...pits.chance)) continue;
     const r = board.rooms[i]!;
-    const size = rng.int(1, 2);
+    const size = pits.most === 1 ? 1 : rng.int(1, 2);
     const ok = (k: number) => free(i, k) && !out.has(k);
     const spots: number[][] = [];
     for (let y = r.y; y < r.y + r.h; y++) {

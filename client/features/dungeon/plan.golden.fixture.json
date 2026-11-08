@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "plans": [
     {
       "name": "the defaults",
@@ -22,7 +22,7 @@
         "key": true
       },
       "seed": "1K7QH2MXA9F3TWQ5",
-      "sha256": "08dc2de8a275c5221e1d2c8a719a6da9910b902e334f9d0e819a4b7774c8f15d"
+      "sha256": "eac0fb92fee123ff96663945131e21459f044ad9034d94df82fe8660cb702a6b"
     },
     {
       "name": "Small",
@@ -45,7 +45,7 @@
         "key": true
       },
       "seed": "1Q8V2DR4HJ0Y7ZB3",
-      "sha256": "c98f546c10113eafc045682dc2e7d52f35797af4fb551a29ff7df3e8bf175cae"
+      "sha256": "fc8dd521937032ad369486973d07680c61ffe81f0f201d3e525eba9147d2436a"
     },
     {
       "name": "Large",
@@ -68,7 +68,7 @@
         "key": true
       },
       "seed": "1M3T9WCEX5PK2AGN",
-      "sha256": "239d5b8fc9bef7f4405094526d2d3263d02c8173e90c0297afffe27e355e5bc8"
+      "sha256": "4ad95a2c5840c9ac36e10832c28b0e999075196899fc0f501549ef18fa2b78c4"
     },
     {
       "name": "a Crypt, Dense, Winding and Wide",
@@ -91,7 +91,7 @@
         "key": true
       },
       "seed": "1A0B1C2D3E4F5G6H",
-      "sha256": "7450f38e65603162ae82a020f1784fcb36b4394b0b7fb833907ca0a547a7fb93"
+      "sha256": "3f293b0851ecd0b741beec273bcc183d1d8ed79e2c0f957c31c494238a6718e0"
     },
     {
       "name": "Sparse and Straight, flat, no loops or traps",
@@ -114,7 +114,7 @@
         "key": true
       },
       "seed": "1ZZZZZZZZZZZZZZZ",
-      "sha256": "875986515bd323a614e34392f6ce08317ed7429ebd6e1218e2286fd1b8d65f93"
+      "sha256": "5e672e86887f7605cba50aca25d8de7165f4f97d159e24767ad725770418225e"
     },
     {
       "name": "a Dense Winding Crypt with many traps",
@@ -137,7 +137,7 @@
         "key": true
       },
       "seed": "1000000000000001",
-      "sha256": "bcd2c7708ad1ceebe8feb1b429422d9d5513e4ca467268d66b30bcbb5a7a60cb"
+      "sha256": "ef6d1f1115c4f48b5223e634c4ea1f8237de152b24b3786f58fc9032ebf63cb2"
     },
     {
       "name": "the largest Wide",
@@ -160,7 +160,7 @@
         "key": true
       },
       "seed": "1VVVVWWWWXXXXYYY",
-      "sha256": "1bc314d16d68e7129789e9c5f7f2419f67ca76fde97e59d8497432bd0978c203"
+      "sha256": "31ee1901fbbda30208cd296cd71523d14d09c5d417b22eefd97f776806f6804b"
     },
     {
       "name": "the largest Narrow",
@@ -183,7 +183,7 @@
         "key": true
       },
       "seed": "1RS7TV8WX9YZ0123",
-      "sha256": "676a7f0c062627e4cbc06aa5cddae88733db0098ef5d0d2d19d6dcfe4b686a04"
+      "sha256": "a1ebc7b10a616a090450488e47b2edc26221aa4ae64458f2067a00291787dd27"
     },
     {
       "name": "the smallest",
@@ -206,7 +206,7 @@
         "key": true
       },
       "seed": "1HJKMNPQRST45678",
-      "sha256": "a75ec24f83ffbbf371b831c182bf2680d952349edca5025f990e9240681ca55a"
+      "sha256": "55c146a455a7331ae14da1e1b3736f3724159934a434d15cbb23ac63c3f628da"
     },
     {
       "name": "Custom and Wide",
@@ -229,7 +229,7 @@
         "key": true
       },
       "seed": "1D6E7F8G9H0J1K2M",
-      "sha256": "0612f8459e428e3d8da16b6a03ea8a1c8db72630851b6dad060004bdd59ba12e"
+      "sha256": "446fb55befb9ba33f2271447562417e554c7db1c502a433602ddd925200971f3"
     },
     {
       "name": "a Large Straight Wide Crypt",
@@ -252,7 +252,7 @@
         "key": true
       },
       "seed": "1N3P4Q5R6S7T8V9W",
-      "sha256": "8f583bb43029bd0915988ae7f28483e6a7c57e8fa4aac733990ee3f6021cc0da"
+      "sha256": "6a448f3be36f4e68324115adc18c656809c0a99b4080db0eb92f3ba2e977a163"
     },
     {
       "name": "Bending with traps at 5 to 10",
@@ -275,7 +275,76 @@
         "key": true
       },
       "seed": "1X0Y1Z2A3B4C5D6E",
-      "sha256": "99107a84f8f6b848dd9f495200802eda6ec8152ca699c5929129d5cbf9928374"
+      "sha256": "920d56a98e2c110d543640b0f9c68b88caca95371ceda7a00f36ccc240cdefc8"
+    },
+    {
+      "name": "a Cave with dead ends",
+      "settings": {
+        "w": 60,
+        "h": 60,
+        "rooms": 16,
+        "density": "normal",
+        "corridors": "bending",
+        "wide": false,
+        "loops": true,
+        "theme": "cave",
+        "heights": 25,
+        "traps": 2,
+        "band": "1-4",
+        "deadEnds": true,
+        "secrets": 1,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
+      },
+      "seed": "1C4V3D3AD3ND5000",
+      "sha256": "fa6e90aa97df39e7c02527a37977f525609c207297a9bcd63d54cfc9cad6bf5e"
+    },
+    {
+      "name": "a Wide Mine with secret doors",
+      "settings": {
+        "w": 50,
+        "h": 50,
+        "rooms": 12,
+        "density": "normal",
+        "corridors": "bending",
+        "wide": true,
+        "loops": true,
+        "theme": "mine",
+        "heights": 50,
+        "traps": 2,
+        "band": "1-4",
+        "deadEnds": true,
+        "secrets": 4,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
+      },
+      "seed": "1M1N3S7AF7Y0DEEP",
+      "sha256": "92dbff5ee2585aa491223ae3b75ae5701d6d7360de30aa8deeb03cdc0aba5f44"
+    },
+    {
+      "name": "a Narrow Sewer with secret doors and no dead ends",
+      "settings": {
+        "w": 50,
+        "h": 50,
+        "rooms": 12,
+        "density": "normal",
+        "corridors": "bending",
+        "wide": false,
+        "loops": true,
+        "theme": "sewer",
+        "heights": 25,
+        "traps": 6,
+        "band": "1-4",
+        "deadEnds": false,
+        "secrets": 6,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
+      },
+      "seed": "1SEWER0RAT5N0SE5",
+      "sha256": "3643009eab157eb5d27fd3cc6b97174078bc1a1e31b8af44471ec797b9eaeddc"
     }
   ]
 }
