@@ -1873,7 +1873,7 @@ If your group plays around a table, a TV can show the players' view of the map, 
 - **Add a TV** shows a code (such as `K7QH 2MXA 4F`), a link and a QR code. The code works once, for 10 minutes. On the TV's browser, open the Home page, choose **Set up a table display**, and enter the code.
 - **Open on this device** opens the display in a new window instead, for a laptop wired to the TV.
 
-![Add a TV in the DM panel: the code to type on the TV, how long it lasts, and its QR code.](dm-guide/table-display.webp)
+![Add a TV in the DM panel: the code to type on the TV and how long it lasts, beside the map.](dm-guide/table-display.webp)
 
 The display shows the players' scene the way the players see it: fog, party vision, tokens, shared areas, drawings, pings and rulers, and handouts shown to everyone. On a scene where each player sees for themselves, it shows only what the creatures that share sight with the party see (see [Sight for each player](#sight-for-each-player)). Panels, chat and the Initiative strip stay off it, and to show whose turn it is, tap the display and turn on **Show whose turn it is**.
 
