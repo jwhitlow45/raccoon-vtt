@@ -14,24 +14,54 @@ import { ON_BOARD, ON_BOARD_STYLE, theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { BAND_NAMES } from "../traps/rules.ts";
-import { builderScene, cleanName, pickNow, withPlayersSee, type NewSceneIntent, type SceneInput } from "../scenes/create.ts";
+import { builderScene, cleanName, pickNow, type NewSceneIntent, type SceneInput } from "../scenes/create.ts";
 import { NumberInput } from "../scenes/controls.tsx";
 import { closePreviews, preview, warmPreviews, type Preview } from "./client.ts";
 import { counted, drawable, flowStep, readiness, startFlow, type Flow, type FlowEvent } from "./flow.ts";
+import { journalFull } from "./keyHold.ts";
+import { keyOps, type KeyInput } from "./keyPage.ts";
+import { LookCloser } from "./LookCloser.tsx";
 import { SCENE_PLACEHOLDER, withIds } from "./ops.ts";
 import { DungeonPreview, type Drawn } from "./Preview.tsx";
 import { loadChoices, saveChoices, settingsOf, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
 import { formatSeed, newSeed, parseSeed, type Seed } from "./seed.ts";
 import { PresetSlider, type Preset } from "./PresetSlider.tsx";
-import { clampRooms, HEIGHT_PRESETS, HEIGHTS_MAX, HEIGHTS_STEP, MAX_SIDE, MIN_ROOMS, MIN_SIDE, roomCap, TRAP_PRESETS, TRAPS_MAX, type SizeChoice } from "./settings.ts";
+import {
+  CHOICE_NAMES,
+  clampRooms,
+  DRESSINGS,
+  HEIGHT_PRESETS,
+  HEIGHTS_MAX,
+  HEIGHTS_STEP,
+  LIT_MAX,
+  LIT_PRESETS,
+  LIT_STEP,
+  MAX_SIDE,
+  MIN_ROOMS,
+  MIN_SIDE,
+  roomCap,
+  SECRET_PRESETS,
+  SECRETS_MAX,
+  THEMES,
+  TRAP_PRESETS,
+  TRAPS_MAX,
+  type SizeChoice,
+} from "./settings.ts";
 import { sendDungeon } from "./send.ts";
 import {
+  DEAD_ENDS_HELP,
   DENSITY_HELP,
+  DRESSING_HELP,
   entranceSide,
   FIT_NONE,
   fitLine,
   HEIGHTS_HELP,
   heightsWords,
+  KEY_FULL,
+  KEY_HELP,
+  LIT_HELP,
+  lightLine,
+  litWords,
   LOOPS_HELP,
   makingLine,
   fogLine,
@@ -41,9 +71,14 @@ import {
   PICTURE_FAILED,
   previewName,
   roomsHint,
+  SECRETS_CAVE,
+  SECRETS_HELP,
+  secretsWords,
   SEED_BAD,
+  SEED_HELP,
   SEED_OTHER_VERSION,
   sizeLine,
+  startScene,
   statusLine,
   THEME_HELP,
   TRAPS_HELP,
@@ -54,6 +89,8 @@ import {
 
 const HEIGHT_MARKS: readonly Preset[] = Object.entries(HEIGHT_PRESETS).map(([label, value]) => ({ label, value }));
 const TRAP_MARKS: readonly Preset[] = Object.entries(TRAP_PRESETS).map(([label, value]) => ({ label, value }));
+const SECRET_MARKS: readonly Preset[] = Object.entries(SECRET_PRESETS).map(([label, value]) => ({ label, value }));
+const LIT_MARKS: readonly Preset[] = Object.entries(LIT_PRESETS).map(([label, value]) => ({ label, value }));
 
 /** A change of choice or seed draws a new preview after this much quiet (4.3). */
 const QUIET_MS = 150;
@@ -98,7 +135,12 @@ export function GenerateDialog(props: {
   const frames = useScoped(fitSlot);
   const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
   const offline = useRoomView((s) => s.connection !== "open");
-  const fogWarning = useRoomView((s) => fogLine(pickNow(props.intent, s.view, "builder").pick));
+  const journal = useRoomView((s) => s.view?.journal);
+  const myColor = useRoomView((s) => s.view?.members[s.you?.memberId ?? ""]?.color ?? null);
+  /** The DM's tap of Keep it lit. Held until the dialog closes, and a Lit rooms change keeps it (the import's rule). */
+  const [keptLit, setKeptLit] = useState(false);
+  const [looking, setLooking] = useState(false);
+  const [lookFailed, setLookFailed] = useState<string | null>(null);
   const [choices, setChoices] = useState<Choices>(() => startChoices(loadChoices(props.roomId), props.form));
   const [seedText, setSeedText] = useState(() => formatSeed(newSeed()));
   const [flow, step] = useReducer((f: Flow<Shown>, e: FlowEvent<Shown>) => flowStep(f, e), undefined, startFlow<Shown>);
@@ -119,7 +161,10 @@ export function GenerateDialog(props: {
   const sceneName = cleanName(props.name, "Dungeon");
   // The preview's scene: the form's name at the chosen size. Players see goes on at Make, read then.
   const scene: SceneInput = useMemo(() => builderScene({ id: SCENE_PLACEHOLDER, name: props.name, w, h }), [props.name, w, h]);
-  const key = parsed.ok ? JSON.stringify([settings, parsed.seed]) : null;
+  // Held when the journal has room for nothing more: the preview then lands no key, and the switch reads off.
+  const [keyHeld, setKeyHeld] = useState(false);
+  const keyInput: KeyInput | null = choices.key && !keyHeld && myColor ? { name: sceneName, color: myColor, feetPerCell } : null;
+  const key = parsed.ok ? JSON.stringify([settings, parsed.seed, keyInput]) : null;
 
   // The worker loads as the dialog opens, and closing ends it, dropping any late answer (client.ts).
   useEffect(() => {
@@ -149,7 +194,7 @@ export function GenerateDialog(props: {
     step({ k: "ask", id: asked });
     const seed = parsed.seed;
     const timer = setTimeout(() => {
-      preview(settings, seed, scene, { feetPerCell }, null).then(
+      preview(settings, seed, scene, { feetPerCell }, keyInput).then(
         (result) => {
           if (!mounted.current) return;
           if (!result.ok) return step({ k: "answer", id: asked, answer: { ok: false, error: result.error } });
@@ -171,7 +216,32 @@ export function GenerateDialog(props: {
   const locked = busy || (failed !== null && !failed.retry);
   const ready = readiness(flow);
   const current = ready.current?.result ?? null;
+  const secretRooms = (counted(flow)?.result.summary.secretRooms ?? 0) > 0;
+  /** Lit rooms start the scene dark with party vision on, unless the DM tapped Keep it lit (4.1 row 7). */
+  const startsDark = choices.lit > 0 && !keptLit;
+  const fogWarning = useRoomView((s) => fogLine(startsDark ? { preset: "explore" } : pickNow(props.intent, s.view, "builder").pick, secretRooms));
   const { problem } = flow;
+  const plan = current?.plan ?? null;
+
+  // The key is held only when the live room's journal fits without it and not with it, so another cap the room is
+  // already over never blames the journal (D-261107-270). The page is built from the plan, not the preview's ops,
+  // because a held key leaves the preview without one.
+  useEffect(() => {
+    const room = store.getState().view;
+    if (!choices.key || !plan || !room || !myColor) {
+      setKeyHeld(false);
+      return;
+    }
+    let held = false;
+    try {
+      held = journalFull(room, keyOps(plan, settings, { name: sceneName, color: myColor, feetPerCell }, SCENE_PLACEHOLDER), store.getState().you?.memberId ?? "");
+    } catch {
+      // The key page is not built or the room cannot be read: nothing to hold.
+    }
+    setKeyHeld(held);
+    // The plan and the journal are what the check reads. `settings` and `sceneName` only reshape the page and come with a new plan.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [choices.key, plan, journal, myColor, feetPerCell]);
   const canMake = !locked && parsed.ok && current !== null && current.summary.rooms >= 2;
 
   const close = () => props.onClose(sceneMayExist.current);
@@ -184,7 +254,7 @@ export function GenerateDialog(props: {
     // Players see as the form says now: Like reads its scene at Make, as the form's own Create does.
     const { pick, gone } = pickNow(props.intent, store.getState().view, "builder");
     if (gone) ui.notify(gone);
-    const ops = made.ops.map((op) => (op.t === "scene.create" ? { ...op, scene: withPlayersSee(op.scene, pick) } : op));
+    const ops = made.ops.map((op) => (op.t === "scene.create" ? { ...op, scene: startScene(op.scene, pick, startsDark) } : op));
     const { plan } = current;
     // Only this device's camera frames the entrance, through its own room scope, and nothing is stored (4.5).
     frames.frameOnOpen = { sceneId: made.sceneId, rect: grownWithin({ x: plan.entrance.x, y: plan.entrance.y, width: plan.entrance.w, height: plan.entrance.h }, FRAME_MARGIN, { w: plan.w, h: plan.h }) };
@@ -228,15 +298,19 @@ export function GenerateDialog(props: {
     </span>
   ) : null;
 
+  // Off until the picture on screen is the dungeon Make would send.
+  const looksReady = !ready.drawing && !ready.pictureFailed && current !== null;
+
   // Reroll stands in the preview's corner, so the preview and the choices each keep one left edge. Its ring can fall on the picture's stone, so it is the board's two-tone ring (Preview.tsx CORNER_SLOT).
   const previewBox = (
     <DungeonPreview
       drawn={drawable(flow)}
       width={layout.width}
       height={layout.height}
-      drawing={ready.drawing}
+      drawing={ready.drawing || looking}
       onPictured={(drawn) => step({ k: "pictured", drawn })}
       onPictureFailed={(drawn) => step({ k: "pictureFailed", drawn })}
+      leftCorner={<LookCloser drawn={looksReady ? drawable(flow) : null} name={sceneName} disabled={locked} onDrawing={setLooking} onFailed={setLookFailed} />}
     >
       <Button size="sm" {...ON_BOARD} style={ON_BOARD_STYLE} disabled={locked} onClick={() => setSeedText(formatSeed(newSeed()))}>
         Reroll
@@ -244,13 +318,14 @@ export function GenerateDialog(props: {
     </DungeonPreview>
   );
 
+  const cave = choices.theme === "cave";
   const roomsLimit = roomCap(w, h);
   const rooms = clampRooms(choices.rooms, w, h);
   const fit = current ? fitLine(current.summary) : null;
   // Pinned above the foot with the fog warning, so a DM scrolled down sees why Make is off.
   const errorLine = failed ? <ErrorText>{failed.text}</ErrorText> : null;
   const previewError =
-    problem === "fit" ? <ErrorText>{FIT_NONE}</ErrorText> : problem === "bug" ? <ErrorText>{NOT_MADE}</ErrorText> : ready.pictureFailed ? <ErrorText>{PICTURE_FAILED}</ErrorText> : null;
+    problem === "fit" ? <ErrorText>{FIT_NONE}</ErrorText> : problem === "bug" ? <ErrorText>{NOT_MADE}</ErrorText> : ready.pictureFailed ? <ErrorText>{PICTURE_FAILED}</ErrorText> : lookFailed ? <ErrorText>{lookFailed}</ErrorText> : null;
   const choicesBox = (
     <div style={{ display: "grid", gap: theme.space(4), minWidth: 0, alignContent: "start" }}>
       {problem === null && !ready.pictureFailed && fit ? <Note>{fit}</Note> : null}
@@ -261,10 +336,7 @@ export function GenerateDialog(props: {
             name="Theme"
             value={choices.theme}
             onChange={(theme) => set({ theme })}
-            options={[
-              { value: "dungeon", label: "Dungeon" },
-              { value: "crypt", label: "Crypt" },
-            ]}
+            options={THEMES.map((value) => ({ value, label: CHOICE_NAMES.theme[value] }))}
             help={THEME_HELP[choices.theme]}
           />
         </div>
@@ -327,6 +399,7 @@ export function GenerateDialog(props: {
           help={WIDE_HELP}
         />
         <Switch label="Extra ways around" help={LOOPS_HELP} checked={choices.loops} onChange={(loops) => set({ loops })} />
+        <Switch label="Dead ends" help={DEAD_ENDS_HELP} checked={choices.deadEnds} onChange={(deadEnds) => set({ deadEnds })} />
         <PresetSlider
           name="Heights"
           value={choices.heights}
@@ -358,8 +431,42 @@ export function GenerateDialog(props: {
             help={PARTY_LEVEL_HELP}
           />
         )}
+        {/* Caves have no doors. The DM's own pick stays in the choices and comes back with the next theme. */}
+        <Held held={cave} style={{ display: "grid", minWidth: 0 }}>
+          <PresetSlider
+            name="Secret doors"
+            value={cave ? 0 : choices.secrets}
+            min={0}
+            max={SECRETS_MAX}
+            step={1}
+            presets={SECRET_MARKS}
+            words={secretsWords(cave ? 0 : choices.secrets, rooms)}
+            help={cave ? SECRETS_CAVE : choices.secrets === 0 ? undefined : SECRETS_HELP}
+            onChange={(secrets) => set({ secrets })}
+          />
+        </Held>
+        <PresetSlider
+          name="Lit rooms"
+          value={choices.lit}
+          min={0}
+          max={LIT_MAX}
+          step={LIT_STEP}
+          presets={LIT_MARKS}
+          words={litWords(choices.lit, rooms)}
+          help={LIT_HELP[choices.theme]}
+          onChange={(lit) => set({ lit })}
+        />
+        {choices.lit > 0 ? <LightLine kept={keptLit} onToggle={() => setKeptLit((k) => !k)} /> : null}
+        <Choice<Choices["dressing"]>
+          name="Dressing"
+          value={choices.dressing}
+          onChange={(dressing) => set({ dressing })}
+          options={DRESSINGS.map((value) => ({ value, label: CHOICE_NAMES.dressing[value] }))}
+          help={DRESSING_HELP}
+        />
+        <Switch label="DM key" help={keyHeld ? KEY_FULL : KEY_HELP} checked={choices.key && !keyHeld} disabled={keyHeld} onChange={(key) => set({ key })} />
       </Held>
-      <SeedField text={seedText} seed={parsed.ok ? parsed.seed : null} disabled={locked} error={parsed.ok ? null : SEED_BAD} note={parsed.ok && parsed.otherVersion ? SEED_OTHER_VERSION : null} onChange={setSeedText} />
+      <SeedField text={seedText} seed={parsed.ok ? parsed.seed : null} disabled={locked} error={parsed.ok ? null : SEED_BAD} note={parsed.ok && parsed.otherVersion ? SEED_OTHER_VERSION : SEED_HELP} onChange={setSeedText} />
     </div>
   );
 
@@ -452,6 +559,21 @@ function useBodyLayout(root: RefObject<HTMLDivElement | null>): { wide: boolean;
 export function previewSide(width: number, height: number): number {
   const room = width - theme.space(4);
   return Math.max(0, Math.floor(Math.min(Math.max(room / 2, room - theme.layout.sidePanelWidth), height)));
+}
+
+/** The light line: what the scene starts as with lights in it, and the one tap that flips it. Focus stays on the button as the words swap. */
+function LightLine(props: { kept: boolean; onToggle(): void }) {
+  const line = lightLine(props.kept);
+  return (
+    <div style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
+      <Help>{line.text}</Help>
+      <div>
+        <Button size="sm" onClick={props.onToggle}>
+          {line.action}
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 const NAME_STYLE = { fontSize: theme.font.body14, fontWeight: theme.weight.strong } as const;

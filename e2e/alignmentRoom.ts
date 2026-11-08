@@ -1382,6 +1382,32 @@ async function dungeonScreens(sweep: Sweep, page: Page, size: Size, scale: numbe
       }
       await settled(dialog.getByRole("img", { name: /^Preview of the dungeon/ }));
     }
+    // Phase 2's rows: the light line in both states, Secret doors held on Cave, and Look closer's viewer.
+    const preview = dialog.getByRole("img", { name: /^Preview of the dungeon/ });
+    const keepLit = dialog.getByRole("button", { name: "Keep it lit", exact: true });
+    await keepLit.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "dungeon-light-line", keepLit.locator("xpath=ancestor::div[2]"));
+    await keepLit.click();
+    const startDark = dialog.getByRole("button", { name: "Start it dark", exact: true });
+    await sweep.measure(page, "dungeon-light-line-kept", startDark.locator("xpath=ancestor::div[2]"));
+    await startDark.click();
+    await dialog.getByRole("radio", { name: "Cave", exact: true }).click();
+    await settled(preview);
+    const secrets = dialog.getByRole("slider", { name: "Secret doors" });
+    await secrets.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "dungeon-secrets-held", secrets.locator("xpath=ancestor::fieldset[1]"));
+    await dialog.getByRole("radio", { name: "Dungeon", exact: true }).click();
+    await settled(preview);
+    await sweep.measure(page, "dungeon-dialog-rows", dialog);
+    await dialog.getByRole("button", { name: "Look closer", exact: true }).click();
+    const picture = page.getByRole("img", { name: /, the DM view$/ });
+    if (await showsWithin(picture, 30_000)) {
+      const viewer = page.getByRole("dialog").filter({ has: picture });
+      await sweep.measure(page, "dungeon-look-closer", viewer);
+      await shots.take(page, `alignment-${sweep.at}-dungeon-look-closer`);
+      await viewer.getByRole("button", { name: /^Close/ }).first().click();
+      await viewer.waitFor({ state: "detached" });
+    } else await sweep.missing(page, "dungeon-look-closer", "Look closer never opened its picture");
     await dialog.getByRole("radio", { name: "Medium", exact: true }).click();
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await dialog.waitFor({ state: "detached" });

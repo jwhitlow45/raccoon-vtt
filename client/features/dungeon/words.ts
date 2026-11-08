@@ -1,7 +1,7 @@
-import { playersSeeFields, type NewScenePick } from "../scenes/create.ts";
+import { playersSeeFields, withPlayersSee, type NewScenePick, type SceneInput } from "../scenes/create.ts";
 import type { DungeonPlan } from "./plan.ts";
 import { versionChar } from "./seed.ts";
-import { raisedCount, trapCount } from "./settings.ts";
+import { litCount, raisedCount, secretCount, trapCount, type Theme } from "./settings.ts";
 import type { DungeonOutcome } from "./send.ts";
 import type { Summary } from "./client.ts";
 
@@ -28,12 +28,66 @@ export const HEIGHTS_HELP = "Rooms raised or sunk 5 or 10 ft, with stairs to the
 export const TRAPS_HELP = "Example traps from the SRD. Players see one only once it is found.";
 /** Party level picks the SRD's column for each example trap, as the Trap tool's does: nothing else in the dungeon reads it. */
 export const PARTY_LEVEL_HELP = "How strong the traps are: their save DCs, damage and pit depths follow the SRD for a party of these levels.";
+export const DEAD_ENDS_HELP = "Adds corridors that end in rock, so not every dead end hides a secret door.";
+export const SECRETS_HELP = "Some lead to a secret room. Players see plain wall there until it is found.";
+export const SECRETS_CAVE = "Caves have no doors, so none are secret.";
+export const DRESSING_HELP = "Furniture, bones and clutter from the shipped stamps, kept off the ways through each room.";
+export const KEY_HELP = "A DM-only journal page describing each room by number, and a DM-only numbered pin in each room.";
+export const KEY_FULL = "The journal is full, so there is no room for a key.";
+export const SEED_HELP = "A seed makes the same dungeon again on this version of the app, at the same feet per square.";
 export const NO_FOG_WARNING = "Players see this scene without fog, so every room shows at once. Explore or Reveal by hand keeps rooms dark until found.";
+export const NO_FOG_SECRET_WARNING = "Players see this scene without fog, so every room shows at once, secret rooms too. Explore or Reveal by hand keeps rooms dark until found.";
+
+/** The Lit rooms help, by theme: what the room's light stamp is and which light it gives. */
+export const LIT_HELP: Readonly<Record<Theme, string>> = {
+  dungeon: "Each lit room has a fire pit that lights it as a torch does.",
+  crypt: "Each lit room has a candelabra that lights it as a candle does.",
+  cave: "Each lit room has a campfire that lights it as a torch does.",
+  mine: "Each lit room has a lantern that lights it as a hooded lantern does.",
+  sewer: "Each lit room has a lantern that lights it as a hooded lantern does.",
+};
 
 /** The warning above the foot when the form's Players see leaves fog off (Everything, or Like a scene without fog), else null. */
-export function fogLine(pick: NewScenePick): string | null {
-  return playersSeeFields(pick).fogEnabled ? null : NO_FOG_WARNING;
+export function fogLine(pick: NewScenePick, secretRooms = false): string | null {
+  if (playersSeeFields(pick).fogEnabled) return null;
+  return secretRooms ? NO_FOG_SECRET_WARNING : NO_FOG_WARNING;
 }
+
+/**
+ * The light line while Lit rooms is above None, mirroring the import's
+ * (vision/uvttLight.ts `lightsLead`). `kept` is the DM's tap of Keep it lit,
+ * which the dialog holds until it closes.
+ */
+export function lightLine(kept: boolean): { text: string; action: string } {
+  return kept
+    ? { text: "Start the scene dark with party vision on, so its lights light it for the party.", action: "Start it dark" }
+    : { text: "The scene starts dark with party vision on, so its lights light it for the party.", action: "Keep it lit" };
+}
+
+/**
+ * The scene Make sends: Players see from the form, or Explore with the light
+ * Dark when the lights are to light it for the party (4.1 row 7, as the
+ * import does). Keep it lit is the form's pick with the default Bright.
+ */
+export function startScene(scene: SceneInput, pick: NewScenePick, dark: boolean): SceneInput {
+  return dark ? withPlayersSee(scene, { preset: "explore" }, "dark") : withPlayersSee(scene, pick);
+}
+
+/** Secret doors in words, for the Rooms asked: "No secret doors", or "About 2 secret doors". */
+export function secretsWords(twelfths: number, rooms: number): string {
+  const n = secretCount(twelfths, rooms);
+  return n === 0 ? "No secret doors" : `About ${n} secret ${n === 1 ? "door" : "doors"}`;
+}
+
+/** Lit rooms in words, for the Rooms asked: "No lights", or "About 3 of 12 rooms lit". */
+export function litWords(share: number, rooms: number): string {
+  const n = litCount(share, rooms);
+  return n === 0 ? "No lights" : `About ${n} of ${rooms} rooms lit`;
+}
+
+export const LOOK_CLOSER = "Look closer";
+export const LOOK_CLOSER_DETAILS = "The DM view: secret doors, traps and room numbers show only here.";
+export const LOOK_CLOSER_FAILED = "This device could not draw the dungeon larger.";
 
 export const DRAWING = "Drawing the dungeon…";
 export const WAITING = "Waiting for the server…";
@@ -70,11 +124,16 @@ function counted(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-/** The foot's status: "12 rooms, 18 doors (3 locked), 4 traps." A count of none says so rather than "(0 locked)". */
+/**
+ * The foot's status: "12 rooms (1 secret), 18 doors (3 locked, 2 secret), 4 traps." A count of none says
+ * so rather than "(0 locked)", and a dungeon with no doors, a cave, says "no doors".
+ */
 export function statusLine(s: Summary): string {
-  const doors = counted(s.doors, "door", "doors") + (s.locked > 0 ? ` (${s.locked} locked)` : "");
+  const rooms = counted(s.rooms, "room", "rooms") + (s.secretRooms > 0 ? ` (${s.secretRooms} secret)` : "");
+  const kinds = [...(s.locked > 0 ? [`${s.locked} locked`] : []), ...(s.secretDoors > 0 ? [`${s.secretDoors} secret`] : [])];
+  const doors = s.doors === 0 ? "no doors" : counted(s.doors, "door", "doors") + (kinds.length > 0 ? ` (${kinds.join(", ")})` : "");
   const traps = s.traps === 0 ? "no traps" : counted(s.traps, "trap", "traps");
-  return `${counted(s.rooms, "room", "rooms")}, ${doors}, ${traps}.`;
+  return `${rooms}, ${doors}, ${traps}.`;
 }
 
 /** Said when fewer rooms fit than were asked for, else null. */
@@ -102,9 +161,11 @@ export function entranceSide(plan: Pick<DungeonPlan, "w" | "h" | "entrance">): S
   return best[0];
 }
 
-/** The preview image's name: "Preview of the dungeon: 12 rooms, entrance on the west side." */
-export function previewName(s: Pick<Summary, "rooms">, side: Side): string {
-  return `Preview of the dungeon: ${counted(s.rooms, "room", "rooms")}, entrance on the ${side} side.`;
+/** The preview image's name: "Preview of the dungeon: 12 rooms, 2 secret doors, 3 lit rooms, entrance on the west side." */
+export function previewName(s: Pick<Summary, "rooms"> & Partial<Pick<Summary, "secretDoors" | "lights">>, side: Side): string {
+  const secret = s.secretDoors ? [counted(s.secretDoors, "secret door", "secret doors")] : [];
+  const lit = s.lights ? [counted(s.lights, "lit room", "lit rooms")] : [];
+  return `Preview of the dungeon: ${[counted(s.rooms, "room", "rooms"), ...secret, ...lit].join(", ")}, entrance on the ${side} side.`;
 }
 
 /**

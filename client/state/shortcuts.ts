@@ -1367,7 +1367,7 @@ export const BEHAVIORS: readonly Behavior[] = [
   { id: "dialogEscape", input: "Escape", does: "Close it. A journal page or a monster with unsaved changes asks first", roles: EVERYONE, device: "keys", surface: "Dialogs" },
   { id: "dialogTab", input: "Tab, Shift+Tab", does: "Move through its controls without leaving it", roles: EVERYONE, device: "keys", surface: "Dialogs" },
   // features/dungeon/PresetSlider.tsx (D-261102-839).
-  { id: "dungeonMarks", input: "Page Up, Page Down", does: "In Generate a dungeon, move Heights or Traps to its next or previous mark", roles: DM, device: "keys", surface: "Dialogs" },
+  { id: "dungeonMarks", input: "Page Up, Page Down", does: "In Generate a dungeon, move Heights, Traps, Secret doors or Lit rooms to its next or previous mark", roles: DM, device: "keys", surface: "Dialogs" },
 
   { id: "setupUndo", input: "Ctrl+Z (Cmd+Z on a Mac)", does: "Undo the next setup step", roles: DM, device: "keys", surface: "Setup history" },
   { id: "setupRedo", input: "Ctrl+Shift+Z (Cmd+Shift+Z on a Mac)", does: "Redo the next setup step", roles: DM, device: "keys", surface: "Setup history" },
@@ -1432,7 +1432,7 @@ const SURFACE_INTRO: Partial<Record<Surface, string>> = {
     "On a screen 900 px or wider, with a tab or More's list focused. There, and on a focused choice or slider, the arrow and Page keys never move a token, and in the list a letter goes to a panel instead of running a shortcut.",
   "Side panel width": "On a screen 900 px or wider. With the edge focused, the arrow keys resize the panel and never move a token.",
   "Two panels": "On a screen 900 px or wider, with two panels in the side panel. With the bar's grip focused, the arrow keys move the bar and never move a token.",
-  "Handout viewer": "A handout the DM shows, or a picture or a PDF opened from the Library.",
+  "Handout viewer": "A handout the DM shows, a picture or a PDF opened from the Library, or the dungeon Look closer shows.",
   "Token window": "Where the action bar opens as a window: on a screen 600 px or wider, or a phone on its side. With its grip or corner handle focused, the arrow keys move or resize it and never move a token.",
   "Images":
     "Choose an image, the stamp picker, New scene's Map image, Show a handout, and a scene's Map image or Add a phase with focus there. In a text field, only a copied image with no text.",

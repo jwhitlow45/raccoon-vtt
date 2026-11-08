@@ -165,7 +165,7 @@ async function statusText(dialog: Locator, timeout = 30_000): Promise<string> {
 }
 
 async function previewImg(dialog: Locator): Promise<Locator> {
-  const img = dialog.getByRole("img", { name: /^Preview of the dungeon: \d+ rooms?, entrance on the (west|north|east|south) side\.$/ });
+  const img = dialog.getByRole("img", { name: /^Preview of the dungeon: \d+ rooms?(, \d+ secret doors?)?(, \d+ lit rooms?)?, entrance on the (west|north|east|south) side\.$/ });
   await img.waitFor({ timeout: 30_000 });
   return img;
 }
@@ -530,21 +530,93 @@ describe("dungeon generator", { concurrency: false }, () => {
     await dialog.getByRole("radio", { name: "Narrow", exact: true }).check();
   });
 
+  test("DG2C-1. the new rows: five themes, Dead ends, Secret doors held on Cave and back, Lit rooms with its light line, Dressing and DM key", async () => {
+    const dialog = dialogOf(dm);
+    for (const theme of ["Dungeon", "Crypt", "Cave", "Mine", "Sewer"]) assert.equal(await dialog.getByRole("radio", { name: theme, exact: true }).count(), 1, theme);
+    const deadEnds = dialog.getByRole("switch", { name: "Dead ends", exact: true });
+    assert.equal(await deadEnds.getAttribute("aria-checked"), "true", "Dead ends start on");
+    assert.equal(await dialog.getByRole("switch", { name: "DM key", exact: true }).getAttribute("aria-checked"), "true", "DM key starts on");
+    assert.equal(await dialog.getByRole("radio", { name: "Some", exact: true }).first().isVisible(), true, "Dressing");
+
+    // Secret doors: a mark sets it, Cave holds it at None with its line, and the DM's pick comes back with the next theme.
+    const secrets = dialog.getByRole("slider", { name: "Secret doors", exact: true });
+    await mark(dialog, "Secret doors", "Many").click();
+    assert.equal(await secrets.inputValue(), "4");
+    await dialog.getByRole("radio", { name: "Cave", exact: true }).check();
+    assert.equal(await secrets.isDisabled(), true, "held on Cave");
+    assert.equal(await secrets.inputValue(), "0");
+    assert.equal(await secrets.getAttribute("aria-valuetext"), "No secret doors");
+    await dialog.getByText("Caves have no doors, so none are secret.", { exact: true }).waitFor();
+    await statusText(dialog);
+    await shots.take(dm, "DG2C-1-cave-secrets-held");
+    await dialog.getByRole("radio", { name: "Mine", exact: true }).check();
+    assert.equal(await secrets.isDisabled(), false, "free again off Cave");
+    assert.equal(await secrets.inputValue(), "4", "the DM's pick came back");
+    await mark(dialog, "Secret doors", "Few").click();
+
+    // Lit rooms: Page Up jumps to the next mark, and its words and help follow the theme.
+    const lit = dialog.getByRole("slider", { name: "Lit rooms", exact: true });
+    assert.equal(await lit.inputValue(), "25");
+    await lit.focus();
+    await lit.press("PageUp");
+    assert.equal(await lit.inputValue(), "50");
+    assert.match((await lit.getAttribute("aria-valuetext")) ?? "", /^About \d+ of \d+ rooms lit$/);
+    await dialog.getByText("Each lit room has a lantern that lights it as a hooded lantern does.", { exact: true }).waitFor();
+    await mark(dialog, "Lit rooms", "Few").click();
+
+    // The light line swaps in place with focus on the button, and a Lit rooms change keeps the tap.
+    await dialog.getByText("The scene starts dark with party vision on, so its lights light it for the party.", { exact: true }).waitFor();
+    await dialog.getByRole("button", { name: "Keep it lit", exact: true }).click();
+    const startDark = dialog.getByRole("button", { name: "Start it dark", exact: true });
+    await startDark.waitFor();
+    await dialog.getByText("Start the scene dark with party vision on, so its lights light it for the party.", { exact: true }).waitFor();
+    assert.equal(await startDark.evaluate((el) => el === el.ownerDocument.activeElement), true, "focus stays on the button");
+    await mark(dialog, "Lit rooms", "Half").click();
+    await startDark.waitFor();
+    await mark(dialog, "Lit rooms", "None").click();
+    assert.equal(await dialog.getByRole("button", { name: /^(Keep it lit|Start it dark)$/ }).count(), 0, "no lights, no light line");
+    await mark(dialog, "Lit rooms", "Few").click();
+    await startDark.waitFor();
+    await statusText(dialog);
+    await shots.take(dm, "DG2C-1-lit-rooms");
+  });
+
+  test("DG2C-2. Look closer opens the DM view in the viewer, zooms with the + key, and closing returns focus to its button", async () => {
+    const dialog = dialogOf(dm);
+    await statusText(dialog);
+    const look = dialog.getByRole("button", { name: "Look closer", exact: true });
+    assert.equal(await look.isEnabled(), true);
+    await look.click();
+    const picture = dm.getByRole("img", { name: /, the DM view$/ });
+    await picture.waitFor({ timeout: 30_000 });
+    const viewer = dm.getByRole("dialog").filter({ has: picture });
+    await viewer.getByText("The DM view: secret doors, traps and room numbers show only here.", { exact: true }).waitFor();
+    const before = await picture.boundingBox();
+    await dm.keyboard.press("+");
+    await waitFor("the picture grown", async () => (((await picture.boundingBox())?.width ?? 0) > (before?.width ?? 0) ? true : null), 5_000);
+    await shots.take(dm, "DG2C-2-look-closer");
+    await dm.keyboard.press("Escape");
+    await viewer.waitFor({ state: "detached" });
+    assert.equal(await look.evaluate((el) => el === el.ownerDocument.activeElement), true, "focus is back on Look closer");
+    assert.equal(await dialog.count(), 1, "the dialog stays");
+  });
+
   test("DG-4. Make sends every op in one Setup group, its dispatch task under 100 ms at the 4x slowdown, and the scene opens framed on its entrance with no starting view", async () => {
     const dialog = dialogOf(dm);
     await (await seedField(dialog)).fill(SEED);
     await statusText(dialog);
+    // DG2C-1 left Keep it lit tapped: the scene starts as the form says, which later cases rely on.
     const sent = dmSocket.sent.length;
     const known = new Set(Object.keys(state(dmSocket)!.scenes));
     const { makeMs, dispatchMs, tasks, limitMs, referenceMs } = await makeMeasured(dialog);
     run.measured.push(`Make at 4x, default choices: the dispatch task ${dispatchMs} ms (limit ${limitMs} ms, the reference task ${referenceMs} ms), ${makeMs} ms of main-thread tasks from the press to the dialog closing (the answers and the new scene's first drawing included), long tasks ${JSON.stringify(tasks)}`);
 
     const frames = opsSent(dmSocket, sent);
-    assert.ok(frames.length >= 2 && frames.length <= 60, `${frames.length} ops`);
+    assert.ok(frames.length >= 2 && frames.length <= 100, `${frames.length} ops`);
     assert.equal(frames[0]!.op.t, "scene.create", "the scene first");
     assert.equal(new Set(frames.map((f) => f.g)).size, 1, "one group");
     assert.ok(frames.every((f) => f.g && f.groupScope === "setup"), "a Setup group");
-    assert.ok(frames.every((f) => ["scene.create", "build.paint", "build.edge", "build.height", "build.stairs", "trap.create"].includes(f.op.t)), frames.map((f) => f.op.t).join(", "));
+    assert.ok(frames.every((f) => ["scene.create", "build.paint", "build.edge", "build.height", "build.stairs", "build.stamps", "build.lights", "token.create", "trap.create", "journal.create", "pin.put"].includes(f.op.t)), frames.map((f) => f.op.t).join(", "));
     assert.equal(frames[0]!.op.scene?.defaultView, undefined, "no starting view sent");
     run.sceneId = frames[0]!.op.scene!.id;
     assert.ok(!known.has(run.sceneId), "a fresh scene id");

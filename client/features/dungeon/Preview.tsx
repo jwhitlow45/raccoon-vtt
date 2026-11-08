@@ -7,6 +7,7 @@ import { exportContent } from "../mapexport/content.ts";
 import { renderMapPng } from "../mapexport/render.ts";
 import { encodeThumb } from "../scenes/thumbnail.ts";
 import type { DungeonPlan } from "./plan.ts";
+import { lightMarks, LIGHT_RING, NUMBER_SIZE, numberMarks, RING_OUTLINE, RING_RADIUS } from "./marks.ts";
 import { DRAWING } from "./words.ts";
 
 /** What a preview draws: the plan, and the scratch room its ops made (client.ts `preview`). */
@@ -40,6 +41,8 @@ export function DungeonPreview(props: {
   onPictured(drawn: Drawn): void;
   /** The picture of `drawn` could not be made, so the box empties and Make stays off. */
   onPictureFailed(drawn: Drawn): void;
+  /** Stands in the bottom left corner, where Look closer is (CORNER_SLOT's mirror). */
+  leftCorner?: ReactNode;
   children?: ReactNode;
 }) {
   const { drawn, width, height, onPictured, onPictureFailed } = props;
@@ -58,7 +61,7 @@ export function DungeonPreview(props: {
     const long = Math.max(scene.bounds.w, scene.bounds.h);
     const pxPerCell = LONG_SIDE_PX / long;
     const size = { pxPerCell, requested: pxPerCell, width: Math.round(scene.bounds.w * pxPerCell), height: Math.round(scene.bounds.h * pxPerCell) };
-    const content = exportContent({ buildChunks: drawn.room.buildChunks, labels: {}, fogTiles: {}, stamps: {}, scene, view: "dm" });
+    const content = exportContent({ buildChunks: drawn.room.buildChunks, labels: {}, fogTiles: {}, stamps: drawn.room.stamps, scene, view: "dm" });
     // The picture and its report land in one update, so Make never turns on a render before the picture shows.
     renderMapPng({ scene, size, content, grid: false, map: null, encode: encodeThumb }).then(
       (blob) => {
@@ -114,12 +117,24 @@ export function DungeonPreview(props: {
               <TrapMark key={t.id} trap={t} room={shown.room} sceneId={sceneId} hatch={hatch} />
             ))}
             <EntranceRing rect={plan.entrance} />
+            {lightMarks(plan).map((m, i) => (
+              <g key={`l${i}`}>
+                <circle cx={m.x} cy={m.y} r={RING_RADIUS} fill="none" stroke={RING_OUTLINE} strokeWidth={4} style={THIN} />
+                <circle cx={m.x} cy={m.y} r={RING_RADIUS} fill="none" stroke={LIGHT_RING} strokeWidth={2} style={THIN} />
+              </g>
+            ))}
+            {numberMarks(plan).map((m) => (
+              <text key={`n${m.n}`} x={m.x} y={m.y} textAnchor="middle" dominantBaseline="central" fontSize={NUMBER_SIZE} fontWeight={700} fontFamily="sans-serif" fill={boardTheme.color.white} stroke={RING_OUTLINE} strokeWidth={4} paintOrder="stroke" style={THIN}>
+                {m.n}
+              </text>
+            ))}
           </svg>
         </div>
       ) : null}
       {props.children ? <div style={CORNER_SLOT}>{props.children}</div> : null}
+      {props.leftCorner ? <div style={{ ...CORNER_SLOT, right: "auto", left: theme.space(2) }}>{props.leftCorner}</div> : null}
       {props.drawing ? (
-        <div style={{ position: "absolute", left: theme.space(2), bottom: theme.space(2), padding: `${theme.space(1)}px ${theme.space(2)}px`, borderRadius: theme.radius.sm, background: theme.color.surface }}>
+        <div style={{ position: "absolute", left: theme.space(2), top: theme.space(2), padding: `${theme.space(1)}px ${theme.space(2)}px`, borderRadius: theme.radius.sm, background: theme.color.surface }}>
           <Loading text={DRAWING} />
         </div>
       ) : null}
