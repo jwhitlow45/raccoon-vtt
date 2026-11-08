@@ -11,6 +11,7 @@ import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
 import { nudgeValid } from "#shared/rules/nudge.ts";
 import { withLevelInRange } from "#shared/srd/conditions.ts";
 import { sceneWeatherSchema } from "#shared/weather.ts";
+import { floorProblem } from "#shared/rules/floors.ts";
 import {
   MAX_ALT_IMAGES,
   MAX_RESTORE_ENTRIES,
@@ -33,6 +34,7 @@ import {
   combatUseSchemas,
   durationRemainingSchema,
   effectDueSchema,
+  FLOOR_HEIGHT,
   areaSlows,
   areaTriggersSchema,
   moveAnyTokenSchema,
@@ -128,6 +130,18 @@ const meta = z.strictObject({
 const member = z.strictObject({ id, rev, name, color, kind: z.enum(["dm", "player"]), createdAt: iso });
 
 /**
+ * A floor of a scene with more than one (docs/design/design-v1-floors.md 9):
+ * its main floor, its level, its own name and its height. How the floors of
+ * one scene fit together is floorProblem's to check, in parseRoomState.
+ */
+const sceneFloor = z.strictObject({
+  of: id,
+  level: z.number().int().min(0).max(LIMITS.floorsPerScene - 1),
+  name: name.max(LIMITS.floorNameChars),
+  height: z.number().int().min(FLOOR_HEIGHT.min).max(FLOOR_HEIGHT.max).multipleOf(FLOOR_HEIGHT.step).optional(),
+});
+
+/**
  * A scene's phases come with their active one and their grid reference, or
  * not at all (Scene.phases), and the active one is in the list. The import
  * remaps phase images and drops a phase whose image did not come through
@@ -182,6 +196,8 @@ const scene = z
     weather: sceneWeatherSchema.optional(),
     // Backups from before sound have none, which reads as no sound of its own. What it names is parseRoomState's to check.
     sound: sceneSoundSchema.optional(),
+    // Backups from before floors have none, which reads as a scene of one floor (docs/design/design-v1-floors.md 9).
+    floor: sceneFloor.optional(),
   })
   .refine(
     (s) =>
@@ -1047,6 +1063,8 @@ export const roomStateSchema = z.strictObject({
   memoryBy: memoryChunks("holder").default({}),
   playedScenes: sceneMarks.default({}),
   memoryShared: shareMarks.default({}),
+  // The floors players reached (docs/design/design-v1-floors.md 9). Backups from before floors have none, which reads as none.
+  openFloors: sceneMarks.optional(),
   // The in-game clock. Backups from before it have none, and absent and null both read as none (docs/design/design-v1-calendar.md 6.6).
   clock: roomClock.nullable().optional(),
   // Synced music and sound. Backups from before it have none, which reads as an empty library and silence, and absent and
@@ -1164,6 +1182,13 @@ export function parseRoomState(value: unknown, now = Date.now()): { ok: true; st
   }
   const sound = soundProblem(state);
   if (sound) return { ok: false, message: sound };
+  // A scene's floors fit together as every op leaves them (docs/design/design-v1-floors.md 9, D-261107-221), and a mark
+  // lies only on a floor. An empty collection of marks reads as none, and the import keeps none.
+  if (state.openFloors !== undefined && Object.keys(state.openFloors).length === 0) delete state.openFloors;
+  for (const sceneId of [...new Set([...Object.keys(state.scenes), ...Object.keys(state.openFloors ?? {})])].sort()) {
+    const problem = floorProblem(state, sceneId);
+    if (problem) return { ok: false, message: `scenes.${sceneId}.floor: ${problem}` };
+  }
   for (const character of Object.values(state.characters)) {
     if (character.ddbSync && syncAtAhead(character.ddbSync.at, now)) character.ddbSync = { ...character.ddbSync, at: new Date(now).toISOString() };
   }

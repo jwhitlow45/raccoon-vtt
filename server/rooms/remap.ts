@@ -57,6 +57,7 @@ import { withPcActors, withShapeRules } from "#shared/rules/pcStats.ts";
 import { phaseMap, withPhaseLight } from "#shared/reducer/phases.ts";
 import { normalWeather } from "#shared/weather.ts";
 import { soundUseFits, stillFitsVideo } from "#shared/limits.ts";
+import { onPlayersScene } from "#shared/rules/floors.ts";
 import { checkedVideoFacts } from "#shared/protocol.ts";
 import type { AssetKind } from "../assets/kinds.ts";
 import { SOUND_MEDIA, soundFactsOfRow } from "../assets/store.ts";
@@ -310,6 +311,9 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   }
   for (const s of Object.values(state.scenes)) {
     const next: Scene = { ...s, id: scenes.of(s.id) };
+    // A floor names its main floor by its new id (docs/design/design-v1-floors.md 7.8). A main floor the file lacks keeps
+    // the old id, which no scene has, so the import's floor check refuses the room.
+    if (s.floor) next.floor = { ...s.floor, ...(s.floor.of !== undefined ? { of: scenes.of(s.floor.of) } : {}) };
     // A hand-made backup may spell a weather longhand, and the room keeps one stored form (docs/design/design-v1-weather.md 9.3).
     if (s.weather !== undefined) next.weather = normalWeather(s.weather);
     if (s.sound) next.sound = sceneSoundUnder(s.sound, sounds, playlists);
@@ -350,8 +354,22 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   if (state.meta.playerSceneId !== null && scenes.has(state.meta.playerSceneId)) {
     out.meta.playerSceneId = scenes.of(state.meta.playerSceneId);
   } else {
-    const first = Object.values(out.scenes).sort((a, b) => a.order - b.order)[0];
+    // A main floor, as Delete leaves the players (docs/design/design-v1-floors.md 8.3): the scene's place in the order is its main floor's.
+    const first = Object.values(out.scenes)
+      .filter((scene) => scene.floor === undefined || scene.floor.of === scene.id)
+      .sort((a, b) => a.order - b.order)[0];
     out.meta.playerSceneId = first?.id ?? null;
+  }
+  // The floors players reached follow their floors (docs/design/design-v1-floors.md 9). A mark is bookkeeping of the room,
+  // as a played mark is, so it comes through as it stands.
+  if (state.openFloors) {
+    const opened: Record<string, SceneMark> = {};
+    for (const mark of Object.values(state.openFloors)) {
+      if (!scenes.has(mark.sceneId)) continue;
+      const sceneId = scenes.of(mark.sceneId);
+      opened[sceneId] = { ...mark, sceneId };
+    }
+    if (Object.keys(opened).length > 0) out.openFloors = opened;
   }
   for (const c of Object.values(state.buildChunks)) {
     if (!scenes.has(c.sceneId)) continue;
@@ -996,8 +1014,8 @@ function remapMemory(
     const sceneId = scenes.of(mark.sceneId);
     playedScenes[sceneId] = { ...mark, sceneId };
   }
-  const players = out.meta.playerSceneId;
-  if (players !== null) playedScenes[players] ??= { sceneId: players, rev: 0 };
+  // Every floor of the players' scene is played, as markPlayed leaves it (docs/design/design-v1-floors.md 9).
+  for (const scene of Object.values(out.scenes)) if (onPlayersScene(out, scene.id)) playedScenes[scene.id] ??= { sceneId: scene.id, rev: 0 };
   for (const mark of Object.values(state.memoryShared ?? {})) {
     if (!scenes.has(mark.sceneId)) continue;
     const sceneId = scenes.of(mark.sceneId);
