@@ -2483,6 +2483,55 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     }
   });
 
+  test("lp32-3. Type several values puts focus in the first value field, whole in the panel's view under the round header, from a click and from the search's press (LP32-A-SRCH-3)", async () => {
+    await ops.send({ t: "encounter.end" }).catch(() => {});
+    const rows = Array.from({ length: 14 }, (_, i) => ({ id: randomUUID(), label: `Bandit ${i + 1}`, value: 20 - i }));
+    await ops.send({ t: "encounter.start", entries: rows });
+    await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === rows.length ? true : null));
+    try {
+      await openSideTab(dm, "Initiative");
+      const tracker = dm.getByRole("tabpanel", { name: sideTabName("Initiative") });
+      const press = tracker.getByRole("button", { name: "Type several values", exact: true });
+      // Focus on the first value field, which shows whole between the round header and the scroller's foot.
+      const landed = (how: string) =>
+        waitFor(`focus in the first value field after ${how}`, () =>
+          dm.evaluate(() => {
+            type Rect = { top: number; bottom: number };
+            type Node = { tagName: string; getAttribute(n: string): string | null; closest(s: string): (Node & { querySelector(s: string): Node | null }) | null; getBoundingClientRect(): Rect };
+            const doc = (globalThis as unknown as { document: { activeElement: Node | null } }).document;
+            const el = doc.activeElement;
+            const form = el?.closest("form");
+            const scroller = el?.closest("[data-pane-body]");
+            const header = scroller?.querySelector("[data-round-header]");
+            if (!el || el.tagName !== "INPUT" || !form || !scroller || !header || form.querySelector("input") !== el) return null;
+            const r = el.getBoundingClientRect();
+            return { label: el.getAttribute("aria-label"), whole: r.top >= header.getBoundingClientRect().bottom - 0.5 && r.bottom <= scroller.getBoundingClientRect().bottom + 0.5 };
+          }),
+        );
+      // A click, with the panel scrolled to the button, as a DM reaching for it would have it.
+      await press.scrollIntoViewIfNeeded();
+      await press.click();
+      const clicked = await landed("a click");
+      assert.equal(clicked.label, "Bandit 1 Initiative");
+      assert.ok(clicked.whole, "the first value field is out of the panel's view after a click");
+      await shots.take(dm, "lp32-3-click");
+      await tracker.getByRole("button", { name: "Cancel", exact: true }).click();
+      await press.waitFor();
+      // The search's press: its landing scrolls the button near the panel's top, so the fields open above it, out of sight.
+      await dm.locator('[data-search-open="bar"]').click();
+      await dm.locator("[data-search-field]").fill("type several values");
+      await dm.locator('[data-search-row="action:tracker.initiative.values"]').waitFor();
+      await dm.keyboard.press("Enter");
+      const searched = await landed("the search's press");
+      assert.equal(searched.label, "Bandit 1 Initiative");
+      assert.ok(searched.whole, "the first value field is out of the panel's view after the search's press");
+      await shots.take(dm, "lp32-3-search");
+      await tracker.getByRole("button", { name: "Cancel", exact: true }).click();
+    } finally {
+      await ops.send({ t: "encounter.end" }).catch(() => {});
+    }
+  });
+
   test("14. no page logged an error", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(anaConsole.errors, [], "Ana's page logged errors");

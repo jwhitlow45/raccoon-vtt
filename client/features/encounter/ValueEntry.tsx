@@ -1,12 +1,14 @@
-import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import type { InitEntry } from "#shared/model.ts";
 import { MAX_ENTRIES_PER_OP } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Help } from "../../components/Panel.tsx";
+import { startInScrollBox } from "../../lib/reveal.ts";
 import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { takeOverPanelScroll } from "../panels.ts";
 import { entryName, groupEntries, valueChanges, valueText, type ValueField } from "./logic.ts";
 import { Portrait } from "./parts.tsx";
 
@@ -29,6 +31,23 @@ export function ValueEntry(props: { entries: InitEntry[]; onDone(): void }) {
   // Only Save sends the values typed, so a sheet's swipe springs back while any is typed (docs/design/design-v1-sheet-swipe.md 4.5).
   useUnsavedSince(texts);
   const byId = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries]);
+  const formRef = useRef<HTMLFormElement>(null);
+  /*
+   * Type several values opens this above itself and turns itself off, so
+   * the browser drops focus to the page, and the form may open scrolled out
+   * of sight (LP32-A-SRCH-3). The first value field takes focus, from a
+   * click and the search's press alike, with the form brought to the
+   * panel's top under the round header that sticks over it (globals.css
+   * scroll-margin-top).
+   */
+  useLayoutEffect(() => {
+    const form = formRef.current;
+    const first = form?.querySelector("input");
+    if (!form || !first) return;
+    takeOverPanelScroll(form);
+    startInScrollBox(form, parseFloat(getComputedStyle(first).scrollMarginTop) || 0);
+    first.focus({ preventScroll: true });
+  }, []);
 
   const fields = useMemo(() => {
     const out: (ValueField & { label: string; first: InitEntry; count: number })[] = [];
@@ -74,7 +93,7 @@ export function ValueEntry(props: { entries: InitEntry[]; onDone(): void }) {
   };
 
   return (
-    <form onSubmit={save} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
+    <form ref={formRef} onSubmit={save} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
       <Help>Type each roll as rolled. Leave a box empty to clear it.</Help>
       <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
         {fields.map((field) => (
