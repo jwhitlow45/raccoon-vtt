@@ -416,6 +416,17 @@ export function loggedRowTag(log: readonly LogEntry[], row: { by: string; creatu
   return null;
 }
 
+/**
+ * Whether a turn card's damage result offers Apply to. A DM's chip applies at
+ * one tap, so a result read back from the log after a reload offers none,
+ * since the damage may already have been applied before it and one tap would
+ * apply it twice (D-261107-287). A player's chip only fills the HP entry,
+ * which is safe to offer again.
+ */
+export function cardOffersApplyTo(readBack: boolean, dm: boolean): boolean {
+  return !(readBack && dm);
+}
+
 /** What a row says under it once its line lands (4.2, 4.3). */
 export function resultWords(rolls: readonly DiceRoll[], kind: "d20" | "attack" | "damage" | "recharge" | "plain", opts: { recharge?: number } = {}): string {
   const first = rolls[0];

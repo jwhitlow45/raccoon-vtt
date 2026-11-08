@@ -32,6 +32,7 @@ import {
   initiativeOp,
   initiativeRow,
   initiativeTag,
+  cardOffersApplyTo,
   loggedRowTag,
   markOf,
   markOnRoll,
@@ -739,6 +740,13 @@ describe("a turn card's results after a reload (LP32-B-CARD-2)", () => {
     const cutAttack = attack(15, { label: cutLabel(long) });
     assert.equal(loggedRowTag([line(11, { tag: "swing", rolls: [cutAttack] })], { ...blade, name: long }), null, "a cut attack label is no damage");
     assert.equal(loggedRowTag([line(11, { tag: "d20cut", rolls: [{ ...d20damage, label: cutLabel(`${long} damage, Force`) }] })], { ...blade, name: long }), "d20cut", "a cut label with a damage type is damage");
+  });
+
+  test("Apply to: a DM's read-back result offers none, a player's keeps it, and a live result keeps it for both (D-261107-287)", () => {
+    assert.equal(cardOffersApplyTo(true, true), false, "a DM's card read back after a reload could apply twice");
+    assert.equal(cardOffersApplyTo(true, false), true, "a player's chip only fills the HP entry");
+    assert.equal(cardOffersApplyTo(false, true), true);
+    assert.equal(cardOffersApplyTo(false, false), true);
   });
 
   test("nothing another member rolled, nothing for another creature, no line without a tag, and no plain roll under the same name", () => {

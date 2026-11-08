@@ -83,6 +83,7 @@ import {
   testLabel,
   typedTap,
   typedText,
+  cardOffersApplyTo,
   loggedRowTag,
   type Marks,
   type Pickable,
@@ -1402,7 +1403,7 @@ function useCardResult(row: string | null, after: number | undefined, of: { crea
   const speaks = useReceiptVoice(live, true);
   const committed = useCommittedRoll(tag === null ? null : receipt);
   const rolls = useMemo(() => (live !== null ? result.rolls : loggedReceipt?.state === "committed" ? rollsOf(loggedReceipt.lines) : []), [live, result.rolls, loggedReceipt]);
-  return { tag, receipt, rolls, waiting: live !== null && result.waiting, speaks, committed };
+  return { tag, receipt, rolls, waiting: live !== null && result.waiting, speaks, committed, readBack: live === null && logged !== null };
 }
 
 type CardResult = ReturnType<typeof useCardResult>;
@@ -1447,7 +1448,8 @@ function CardResults(props: { attackRow: string | null; damageRow: string | null
   const damage = useCardResult(props.damageRow, props.after, { creature: props.creature, name: props.name, kind: "damage" });
   const attackLine = resultLine("attack", attack);
   const damageLine = resultLine("damage", damage);
-  const damageLines = damage.receipt?.state === "committed" ? damage.receipt.lines : null;
+  const dm = useRoomView((s) => s.you?.role === "dm");
+  const damageLines = damage.receipt?.state === "committed" && cardOffersApplyTo(damage.readBack, dm) ? damage.receipt.lines : null;
   return (
     <>
       {attackLine || damageLine ? (
