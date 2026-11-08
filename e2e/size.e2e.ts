@@ -622,6 +622,9 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await sound.getByRole("radiogroup", { name: "Sound", exact: true }).getByRole("radio", { name: "Library", exact: true }).click();
         await sound.getByRole("list", { name: "Playlists" }).getByRole("button", { name: /^Tavern night/ }).click();
         const maker = page.getByRole("dialog", { name: "Tavern night", exact: true });
+        // Until the maker's code is in (MakerHost.tsx), a card of the same name says it is opening, and the maker's own
+        // takes its place some 300 ms later, so a read that found the first card read a node already gone.
+        await maker.locator("footer").getByRole("button", { name: "Save", exact: true }).waitFor();
         await checkDialog(maker, `${label}, the playlist maker`, { name: "Save", in: "footer" });
         await shoot("maker");
         const addTracks = maker.getByRole("radio", { name: "Add tracks", exact: true });
