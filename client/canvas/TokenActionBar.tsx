@@ -2157,8 +2157,8 @@ function QuickConditions(props: { lit(key: Effect["key"]): Lit; onToggle(key: Ef
   const group = (title: string, keys: readonly Effect["key"][]) => (
     <div role="group" aria-label={title} style={{ display: "grid", gap: theme.space(1) }}>
       <div style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{title}</div>
-      {/* Three across leaves room for the longest names ("Incapacitated") on one line at the bar's 304 px. */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))", gap: theme.space(1) }}>
+      {/* Three across leaves room for the longest names ("Incapacitated") on one line at the bar's 304 px. Two-word names such as "Heroic Inspiration" can still take two lines, so every row is as tall as the tallest (QE2-OLD). */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))", gridAutoRows: "1fr", gap: theme.space(1) }}>
         {keys.map((key) => {
           const lit = props.lit(key);
           const active = lit === "all";

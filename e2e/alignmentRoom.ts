@@ -10247,6 +10247,10 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
       // The Recent row alone: the Statuses grid under it is older than it and not its.
       if (await showsWithin(recent, 3_000)) await sweep.measure(page, "qe-bar-conditions", recent);
       else await sweep.missing(page, "qe-bar-conditions", "the bar's Conditions have no Recent row");
+      // The Statuses grid on its own, where a two-word name wraps to a second line (QE2-OLD).
+      const statuses = bar.getByRole("group", { name: "Other statuses", exact: true });
+      await statuses.scrollIntoViewIfNeeded().catch(() => {});
+      await sweep.measure(page, "qe-bar-statuses", statuses);
       await conditions.click();
       // The Token panel's picker opens with the same Recent row: the list is this device's, not the bar's (L2).
       const details = bar.getByRole("button", { name: "Details" });
