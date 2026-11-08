@@ -2341,7 +2341,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     }
   });
 
-  test("qe-5. Roll monsters' Initiative, on at first: a start of more than one batch waits for the server with Everyone here reading Rolling…, then every monster rolls and the party's rows wait for their players, and Undo takes back the totals, then the whole start, leaving the roll's line (QOL audit Q12)", async () => {
+  test("qe-5. Roll monsters' Initiative, on at first: a start of more than one batch shows the fight at once and waits for the server with Auto Initiative reading Rolling…, then every monster rolls and the party's rows wait for their players, and Undo takes back the totals, then the whole start, leaving the roll's line (QOL audit Q12)", async () => {
     const { page, wire } = qeDesk();
     await ops.send({ t: "encounter.end" }).catch(() => {});
     // 90 kobolds, so every creature here makes more than the 100 rows one op may carry.
@@ -2355,6 +2355,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const roll = page.getByRole("switch", { name: /^Roll monsters' Initiative/ });
     assert.equal(await roll.getAttribute("aria-checked"), "true", "the switch starts on");
     const everyone = page.getByRole("button", { name: /^Everyone here \(\d+\)$/ });
+    // The innermost section that holds the Auto Initiative heading: the panel's own sections may hold it too.
+    const auto = page.locator("section").filter({ has: page.locator('[data-search="tracker.auto"]') }).last();
     const count = Number(/\((\d+)\)/.exec(await everyone.innerText())?.[1]);
     assert.ok(count > 100, `only ${count} creatures here`);
     const rolls = sentOps(wire, "dice.roll");
@@ -2362,8 +2364,10 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     try {
       await everyone.click();
       await waitFor("the start's two batches on the wire", () => (wire.held.length === 2 ? true : null));
-      const rolling = page.getByRole("button", { name: "Rolling…", exact: true });
+      // The start is predicted, so the fight's sections replace New fight at once, and the button that waits is Auto Initiative's (LP32-B-INIT-1).
+      const rolling = auto.getByRole("button", { name: "Rolling…", exact: true });
       await rolling.waitFor();
+      assert.equal(await page.getByRole("button", { name: "Rolling…", exact: true }).count(), 1, "a button other than Auto Initiative's reads Rolling…");
       assert.equal(await rolling.getAttribute("aria-busy"), "true");
       await shots.take(page, "qe-5-rolling");
       // Nothing rolls before the server takes the start: the rows are not in the view yet.
@@ -2385,7 +2389,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       return rows && rows.all === count && rows.monsters.every((v) => v !== null) ? true : null;
     }, 20_000);
     assert.deepEqual(fightRows()!.party, [null, null], "the party's rows did not wait for their players");
-    await page.getByRole("button", { name: "Rolling…", exact: true }).waitFor({ state: "detached" });
+    await auto.getByRole("button", { name: /^Auto Initiative/ }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Rolling…", exact: true }).count(), 0, "a button still reads Rolling…");
     assert.ok(sentOps(wire, "dice.roll") > rolls, "no roll went");
     const line = newestRoll(/Initiative/);
     assert.ok(line, "no Initiative roll in the log");
