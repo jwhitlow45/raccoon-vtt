@@ -99,8 +99,8 @@ type Track = {
   pasp?: { h: number; v: number };
   /** A real `clap` crop or an uneven `tapt`: `video_geometry`, once the codec has been judged (4.1, 4.5). */
   reshaped?: boolean;
-  /** A MOV's `tapt` sizes in raw 16.16, clean, production and encoded, checked against `tkhd`'s once both are read. Null for one that is not those three. */
-  aperture?: Array<[number, number]> | null;
+  /** A MOV's `tapt` sizes in raw 16.16, clean, production and encoded, checked against `tkhd`'s and the sample entry's once all are read. Null for one that is not those three. */
+  aperture?: { clef: [number, number]; prof: [number, number]; enof: [number, number] } | null;
   /** A dropped timed metadata track's `trak`, renamed `free` once its samples are known to be safe to zero (4.5). */
   dropped?: Box;
   /** A dropped track's presentation in the movie's timescale, from its edits, when it has any. */
@@ -449,23 +449,34 @@ function plainVideoHeader(moov: Moov, video: Track): VideoGeometry {
   return { ...orientationFacts(orientation), ...(drawnWidth !== video.width ? { displayWidthPx: drawnWidth } : {}) };
 }
 
-/** A MOV's `tapt` says nothing new when each of its three sizes is `tkhd`'s, either way round (4.5: unconfirmed which way an iPhone writes it). */
+/**
+ * A MOV's `tapt` says nothing new when its clean and production sizes are
+ * `tkhd`'s and its encoded size is `tkhd`'s or the sample entry's coded size,
+ * each either way round (4.5: unconfirmed which way an iPhone writes it).
+ * An anamorphic camera or editor MOV writes the coded size in `enof`
+ * (AMROT-O-05).
+ */
 function evenAperture(track: Track): boolean {
   const t = track.tkhd!;
-  return track.aperture != null && track.aperture.every(([w, h]) => (w === t.width && h === t.height) || (w === t.height && h === t.width));
+  const a = track.aperture;
+  if (a == null) return false;
+  const roundOrSwapped = ([w, h]: [number, number], width: number, height: number) => (w === width && h === height) || (w === height && h === width);
+  const coded = track.width !== undefined && track.height !== undefined && roundOrSwapped(a.enof, track.width * 0x10000, track.height * 0x10000);
+  return roundOrSwapped(a.clef, t.width, t.height) && roundOrSwapped(a.prof, t.width, t.height) && (roundOrSwapped(a.enof, t.width, t.height) || coded);
 }
 
 const APERTURE_SIZES = new Set(["clef", "prof", "enof"]);
 
 /** A MOV's `tapt`: its clean, production and encoded sizes in raw 16.16, each once. Anything else in it answers null, which is uneven. */
-function aperture(moov: Moov, box: Box): Array<[number, number]> | null {
+function aperture(moov: Moov, box: Box): Track["aperture"] {
   const sizes = new Map<string, [number, number]>();
   for (const child of moov.children(box, 3)) {
     const p = moov.payload(child);
     if (!APERTURE_SIZES.has(child.type) || sizes.has(child.type) || p.length !== 12 || p.readUInt32BE(0) !== 0) return null;
     sizes.set(child.type, [p.readUInt32BE(4), p.readUInt32BE(8)]);
   }
-  return sizes.size === APERTURE_SIZES.size ? [...sizes.values()] : null;
+  const [clef, prof, enof] = [sizes.get("clef"), sizes.get("prof"), sizes.get("enof")];
+  return clef && prof && enof ? { clef, prof, enof } : null;
 }
 
 /**

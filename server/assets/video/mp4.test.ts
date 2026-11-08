@@ -919,6 +919,20 @@ describe("QuickTime MOV (4.5)", () => {
     }
   });
 
+  test("an anamorphic MOV's tapt, its enof the coded size either way round beside a clef and prof at tkhd's, goes as free (AMROT-O-05)", async () => {
+    const coded = (w: number, h: number) => visualEntry("avc1", w, h, "", bx("avcC", avcCBytes()), bx("pasp", fields([4, 4], [4, 3])));
+    for (const enof of [[480, 360], [360, 480]] as Array<[number, number]>) {
+      const bytes = mov({ video: { entry: coded(480, 360), tkhdSize: { width: 640, height: 360 }, extraTrak: [taptBox([640, 360], [640, 360], enof)] } });
+      const at = bytes.indexOf("tapt");
+      const { zeroed } = await checkVideoBytes(bytes);
+      assert.equal(zeroed.subarray(at, at + 4).toString("latin1"), "free", `enof ${enof}`);
+    }
+    // An enof that is neither the coded size nor tkhd's, or a clef or prof unlike tkhd's, is still uneven.
+    await refused(mov({ video: { entry: coded(480, 360), tkhdSize: { width: 640, height: 360 }, extraTrak: [taptBox([640, 360], [640, 360], [481, 360])] } }), "video_geometry");
+    await refused(mov({ video: { entry: coded(480, 360), tkhdSize: { width: 640, height: 360 }, extraTrak: [taptBox([480, 360], [640, 360], [480, 360])] } }), "video_geometry");
+    await refused(mov({ video: { entry: coded(480, 360), tkhdSize: { width: 640, height: 360 }, extraTrak: [taptBox([640, 360], [480, 360], [480, 360])] } }), "video_geometry");
+  });
+
   test("HEVC and Dolby Vision are video_hevc before an uneven tapt or the track count, and ProRes is video_codec", async () => {
     for (const type of ["hvc1", "hev1", "dvh1", "dvhe"]) await refused(mov({ video: { entry: visualEntry(type, 640, 360, "") } }), "video_hevc");
     await refused(mov({ video: { entry: visualEntry("dvh1", 640, 360, ""), extraTrak: [taptBox([1920, 1080])] } }), "video_hevc");
