@@ -2,6 +2,7 @@ import { useId } from "react";
 import type { Scene } from "#shared/model.ts";
 import type { SceneSound } from "#shared/sound.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { placeName } from "../floors/words.ts";
 import { SceneSoundLine } from "../sound/panel/NowPlaying.tsx";
 import { send } from "../sound/panel/ops.ts";
 import { playlistsOf, sceneOrder, sceneSoundFrom, sceneSoundNames, somethingPlays, soundsOf } from "../sound/panel/state.ts";
@@ -35,13 +36,15 @@ export function SceneSoundSettings(props: { scene: Scene }) {
   const sounds = useRoomView((s) => soundsOf(s.view));
   const playlists = useRoomView((s) => playlistsOf(s.view));
   const names = useSceneSoundNames(scene);
+  // Each floor has its own sound, so the help names the floor shown (docs/design/design-v1-floors.md 18.2).
+  const place = useRoomView((s) => (s.view ? placeName(s.view, scene.id) : "") || scene.name);
   // Its own ids, so Sound's line for the same scene, open beside it on a computer, never shares one.
   const helpId = useId();
   const sound = scene.sound ?? null;
   const setSound = (next: SceneSound | null) => send(actions, { t: "scene.update", sceneId: scene.id, patch: { sound: next } });
   return (
     <SceneSoundLine
-      sceneName={scene.name}
+      sceneName={place}
       sound={names === null ? null : { names }}
       canUsePlaying={somethingPlays(playing)}
       helpId={helpId}

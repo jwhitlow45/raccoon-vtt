@@ -232,13 +232,14 @@ export const dmPanelFoldsSlot = foldsSlot(DM_PANEL_FOLDS);
 
 /**
  * The scene settings' six groups (docs/design/design-v1-scenes-reorg.md 3):
- * Light and weather (`light`), Scene sound (`sound`), Fog and vision
+ * Floors (`floors`, last in the list so a device's stored folds keep their
+ * order and a new key reads as the start), Light and weather (`light`), Scene sound (`sound`), Fog and vision
  * (`players`, What players see's key, so a device's fold of it carries
  * over), Map and grid (`map`), Walls and movement (`walls`) and Size and
  * view (`scene`), and New scene. All scenes, the scene's name and Export
  * never fold.
  */
-export const SCENES_SECTIONS = ["light", "sound", "players", "map", "walls", "scene", "new"] as const;
+export const SCENES_SECTIONS = ["light", "sound", "players", "map", "walls", "scene", "new", "floors"] as const;
 export type ScenesSection = (typeof SCENES_SECTIONS)[number];
 
 /**
@@ -253,7 +254,7 @@ export const SCENES_FOLDS: FoldSurface<ScenesSection> = {
   sections: SCENES_SECTIONS,
   starts: (width, room) => {
     const wide = wideAt(width);
-    return { light: true, sound: wide, players: wide, map: wide, walls: wide, scene: wide, new: wide || !room.scenes };
+    return { light: true, sound: wide, players: wide, map: wide, walls: wide, scene: wide, new: wide || !room.scenes, floors: wide };
   },
 };
 export const scenesFoldsSlot = foldsSlot(SCENES_FOLDS);

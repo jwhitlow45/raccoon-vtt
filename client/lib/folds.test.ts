@@ -93,10 +93,10 @@ describe("where each surface starts with nothing stored (6.1, 6.2)", () => {
 
   test("Scenes (scenes-reorg 3): Light and weather open everywhere, Scene sound, Fog and vision and the setup groups by the width, New scene too and open while the room has no scene", () => {
     for (const width of [320, 390, 899]) {
-      assert.deepEqual(SCENES_FOLDS.starts(width, CLOCK), { light: true, sound: false, players: false, map: false, walls: false, scene: false, new: false }, `${width}`);
+      assert.deepEqual(SCENES_FOLDS.starts(width, CLOCK), { light: true, sound: false, players: false, map: false, walls: false, scene: false, new: false, floors: false }, `${width}`);
     }
     for (const width of [900, 1440]) {
-      assert.deepEqual(SCENES_FOLDS.starts(width, CLOCK), { light: true, sound: true, players: true, map: true, walls: true, scene: true, new: true }, `${width}`);
+      assert.deepEqual(SCENES_FOLDS.starts(width, CLOCK), { light: true, sound: true, players: true, map: true, walls: true, scene: true, new: true, floors: true }, `${width}`);
     }
     assert.equal(SCENES_FOLDS.starts(390, NO_SCENE).new, true);
     assert.equal(SCENES_FOLDS.starts(390, NO_SCENE).map, false, "only New scene reads the room");
@@ -134,7 +134,7 @@ describe("where each surface starts with nothing stored (6.1, 6.2)", () => {
       [SOUND_FOLDS.key, DM_PANEL_FOLDS.key, SCENES_FOLDS.key, THIS_DEVICE_FOLDS.key],
       ["rvtt.soundFolds", "rvtt.dmPanelFolds", "rvtt.sceneSettingsFolds", "rvtt.thisDeviceFolds"],
     );
-    assert.deepEqual(SCENES_SECTIONS, ["light", "sound", "players", "map", "walls", "scene", "new"]);
+    assert.deepEqual(SCENES_SECTIONS, ["light", "sound", "players", "map", "walls", "scene", "new", "floors"]);
     const exported = Object.keys(await import("./folds.ts"));
     assert.deepEqual(
       exported.filter((name) => /ambiance/i.test(name)),

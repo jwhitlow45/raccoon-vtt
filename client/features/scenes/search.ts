@@ -18,6 +18,7 @@ import { SCENE_GROUP_LABELS } from "./settingsFolds.ts";
 
 const SCENES: Place = { panel: "scenes", where: "Scenes", icon: "scenes" };
 const NEW = inside(SCENES, "New scene", "new");
+const FLOORS = inside(SCENES, SCENE_GROUP_LABELS.floors, "floors");
 const LIGHT = inside(SCENES, SCENE_GROUP_LABELS.light, "light");
 const SOUND = inside(SCENES, SCENE_GROUP_LABELS.sound, "sound");
 const PLAYERS = inside(SCENES, SCENE_GROUP_LABELS.players, "players");
@@ -34,10 +35,22 @@ function viewing(ctx: SearchContext): Scene | null {
   return (id ? ctx.state.view?.scenes[id] : undefined) ?? null;
 }
 const shown = (ctx: SearchContext) => viewing(ctx) !== null;
+/** The controls on a floor's page, which only a scene with floors has (FloorPage.tsx). */
+const onFloor = (ctx: SearchContext) => viewing(ctx)?.floor !== undefined;
 
 export const SCENES_ENTRIES: readonly CatalogEntry[] = [
   action(at(NEW), "scenes.new", "New scene", { names: ["add a scene", "add a map", "upload a map"], press: false }),
   setting(SCENES, "scenes.name", "Scene name", { names: ["rename the scene"], when: shown }),
+  section(at(FLOORS), "scenes.floors", SCENE_GROUP_LABELS.floors, { names: ["levels", "storeys", "stories", "upstairs", "downstairs", "cellar", "basement", "tower", "roof"], when: shown }),
+  // Adding a floor changes the room, so the search goes to the button and leaves the press to the DM.
+  action(FLOORS, "scenes.floors.add-above", "Add a floor above", { names: ["new floor", "upper floor", "roof", "second floor"], press: false, when: shown }),
+  action(FLOORS, "scenes.floors.add-below", "Add a floor below", { names: ["new floor", "lower floor", "cellar", "basement"], press: false, when: shown }),
+  setting(FLOORS, "scenes.floor.name", "Floor name", { names: ["rename the floor"], when: onFloor }),
+  setting(FLOORS, "scenes.floor.height", "Height above the floor below", { names: ["floor height", "storey height"], when: (ctx) => (viewing(ctx)?.floor?.level ?? 0) > 0 }),
+  action(FLOORS, "scenes.floor.players", "Show a floor to players", { names: ["hide a floor from players", "reveal a floor", "open a floor"], press: false, when: onFloor }),
+  action(FLOORS, "scenes.floor.order", "Move a floor up or down", { names: ["reorder the floors"], press: false, when: onFloor }),
+  action(FLOORS, "scenes.floor.show", "Show this floor", { names: ["switch floor", "look at a floor"], press: false, when: onFloor }),
+  action(FLOORS, "scenes.floor.remove", "Remove floor", { names: ["delete a floor"], press: false, when: onFloor }),
   section(at(LIGHT), "scenes.light", SCENE_GROUP_LABELS.light, { when: shown }),
   setting(LIGHT, "scenes.light.level", "Light level", {
     names: ["bright", "dim", "darkness", "time of day", "daylight", "night"],

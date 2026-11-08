@@ -28,8 +28,8 @@ const MAP = { assetId: "a", widthPx: 700, heightPx: 700, cellPx: 70, originPx: {
 const VIDEO_MAP = { ...MAP, video: { assetId: "v", widthPx: 700, heightPx: 700, container: "webm" as const, video: "vp09.00.40.08", fps: 30, durationMs: 4000, kbps: 900 } };
 
 type Folds = Partial<Record<ScenesSection, boolean>>;
-const PHONE: Folds = { light: true, sound: false, players: false, map: false, walls: false, scene: false };
-const ALL_OPEN: Folds = { light: true, sound: true, players: true, map: true, walls: true, scene: true };
+const PHONE: Folds = { floors: false, light: true, sound: false, players: false, map: false, walls: false, scene: false };
+const ALL_OPEN: Folds = { floors: true, light: true, sound: true, players: true, map: true, walls: true, scene: true };
 
 /** The page with the Room's folds set as `folds`, as taps would leave them, whatever this process's storage holds. */
 function page(folds: Folds, over: Partial<Scene> = {}, view?: (s: RoomState) => void): string {
@@ -102,31 +102,32 @@ async function soundOn(): Promise<void> {
 afterEach(() => sound.resetServerRoomSoundForTests());
 
 describe("the scene settings page's groups (docs/design/design-v1-scenes-reorg.md 3)", () => {
-  test("Light and weather, Scene sound, Fog and vision, Map and grid, Walls and movement, then Size and view, each with its icon", () => {
-    assert.deepEqual(SCENE_GROUPS, ["light", "sound", "players", "map", "walls", "scene"]);
+  test("Floors, Light and weather, Scene sound, Fog and vision, Map and grid, Walls and movement, then Size and view, each with its icon", () => {
+    assert.deepEqual(SCENE_GROUPS, ["floors", "light", "sound", "players", "map", "walls", "scene"]);
     assert.deepEqual(
       SCENE_GROUPS.map((g) => SCENE_GROUP_LABELS[g]),
-      ["Light and weather", "Scene sound", "Fog and vision", "Map and grid", "Walls and movement", "Size and view"],
+      ["Floors", "Light and weather", "Scene sound", "Fog and vision", "Map and grid", "Walls and movement", "Size and view"],
     );
     assert.deepEqual(
       SCENE_GROUPS.map((g) => SCENE_GROUP_ICONS[g]),
-      ["weather", "music", "shown", "image", "walls", "scenes"],
+      ["floors", "weather", "music", "shown", "image", "walls", "scenes"],
     );
   });
 
   test("with the server offering no sound files: the name, Light and weather open, the setup groups folded, then Export, and no Delete section", () => {
     const html = page(PHONE);
-    assert.deepEqual(headings(html), ["This scene", "Light and weather open", "Fog and vision folded", "Map and grid folded", "Walls and movement folded", "Size and view folded", "Export"]);
+    assert.deepEqual(headings(html), ["This scene", "Floors folded", "Light and weather open", "Fog and vision folded", "Map and grid folded", "Walls and movement folded", "Size and view folded", "Export"]);
     assert.doesNotMatch(html, />Delete scene</, "the row's ⋯ menu keeps Delete (SceneMenu.tsx)");
     assert.doesNotMatch(html, /What players see|Map image and grid|Export as image<\/h3>/);
   });
 
-  test("with sound files offered, Scene sound comes second, folded, and says what the scene plays", async () => {
+  test("with sound files offered, Scene sound comes after Light and weather, folded, and says what the scene plays", async () => {
     await soundOn();
     const html = page(PHONE);
-    assert.deepEqual(headings(html).slice(1, 4), ["Light and weather open", "Scene sound folded", "Fog and vision folded"]);
+    assert.deepEqual(headings(html).slice(2, 5), ["Light and weather open", "Scene sound folded", "Fog and vision folded"]);
     const summaries = [...html.matchAll(/<span id="([^"]+)-summary"[^>]*>([^<]*)<\/span>/g)].map((m) => m[2]);
-    assert.equal(summaries[0], "None of its own");
+    assert.equal(summaries[0], "One floor", "Floors comes first");
+    assert.equal(summaries[1], "None of its own");
     assert.match(html, /Crypt has no sound of its own\./, "the group holds the scene's line, kept drawn while folded");
     assert.match(page(PHONE, { sound: { music: null, loops: [] } }), /-summary"[^>]*>Silent</);
   });
@@ -145,8 +146,8 @@ describe("the scene settings page's groups (docs/design/design-v1-scenes-reorg.m
   test("folded, each group says what it holds beside its name, and Light and weather, open everywhere, says nothing", () => {
     const html = page({ ...PHONE, light: false }, { fogEnabled: true, vision: { on: true, light: "dim", perPlayer: true }, weather: { kind: "rain", heavy: true, wind: "strong" } });
     const summaries = [...html.matchAll(/<span id="([^"]+)-summary"[^>]*>([^<]*)<\/span>/g)].map((m) => m[2]);
-    assert.deepEqual(summaries, ["Dim · Heavy rain · Strong wind", "Explore · Per player", "No map image · Squares", "Walls do not block moves", "40 × 30 squares"]);
-    assert.equal((page(PHONE).match(/<span id="[^"]+-summary"/g) ?? []).length, 4, "open, Light and weather shows no summary");
+    assert.deepEqual(summaries, ["One floor", "Dim · Heavy rain · Strong wind", "Explore · Per player", "No map image · Squares", "Walls do not block moves", "40 × 30 squares"]);
+    assert.equal((page(PHONE).match(/<span id="[^"]+-summary"/g) ?? []).length, 5, "open, Light and weather shows no summary");
   });
 
   test("Map and grid's count row is Square count", () => {
@@ -158,7 +159,7 @@ describe("the scene settings page's groups (docs/design/design-v1-scenes-reorg.m
   test("each group's summary asks for its whole words, never the 4em floor that cut Map and grid's and Walls and movement's (docs/design/design-v1-polish-pass.md 3.1)", () => {
     const html = page({ ...PHONE, light: false }, { map: MAP, weather: { kind: "rain", heavy: true, wind: "strong" } });
     const looks = [...html.matchAll(/<span id="[^"]+-summary" style="([^"]*)"/g)].map((m) => m[1]!);
-    assert.equal(looks.length, 5);
+    assert.equal(looks.length, 6);
     for (const look of looks) {
       assert.match(look, /^flex:0 1 auto;min-width:0;margin-left:auto/, look);
       assert.doesNotMatch(look, /4em|max-width/, look);
@@ -167,8 +168,8 @@ describe("the scene settings page's groups (docs/design/design-v1-scenes-reorg.m
 
   test("a folded group keeps its settings drawn but hidden, and an open one shows them", () => {
     const bodies = (html: string) => [...html.matchAll(/<div (hidden="")? ?style="display:grid;grid-template-columns:minmax\(0, 1fr\);gap/g)].map((m) => (m[1] ? "hidden" : "shown"));
-    assert.deepEqual(bodies(page(PHONE)), ["shown", "hidden", "hidden", "hidden", "hidden"]);
-    assert.deepEqual(bodies(page(ALL_OPEN)), ["shown", "shown", "shown", "shown", "shown"]);
+    assert.deepEqual(bodies(page(PHONE)), ["hidden", "shown", "hidden", "hidden", "hidden", "hidden"]);
+    assert.deepEqual(bodies(page(ALL_OPEN)), ["shown", "shown", "shown", "shown", "shown", "shown"]);
   });
 });
 

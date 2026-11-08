@@ -8,8 +8,12 @@ import { scenesFoldsSlot, useFolds, type ScenesSection } from "../../lib/folds.t
  * stored values these groups always had, so a device's folds carry over.
  */
 
-/** The groups in the page's order, after the scene's name. Export follows them and never folds. */
-export const SCENE_GROUPS = ["light", "sound", "players", "map", "walls", "scene"] as const satisfies readonly ScenesSection[];
+/**
+ * The groups in the page's order, after the scene's name. Export follows
+ * them and never folds. Floors comes first, since it picks which floor the
+ * groups below set (docs/design/design-v1-floors.md 7.1).
+ */
+export const SCENE_GROUPS = ["floors", "light", "sound", "players", "map", "walls", "scene"] as const satisfies readonly ScenesSection[];
 export type SceneGroup = (typeof SCENE_GROUPS)[number];
 
 /**
@@ -19,6 +23,7 @@ export type SceneGroup = (typeof SCENE_GROUPS)[number];
  * so it never echoes the "This scene" label over the page (D-261028-07).
  */
 export const SCENE_GROUP_LABELS: Readonly<Record<SceneGroup, string>> = {
+  floors: "Floors",
   light: "Light and weather",
   sound: "Scene sound",
   players: "Fog and vision",
@@ -29,6 +34,7 @@ export const SCENE_GROUP_LABELS: Readonly<Record<SceneGroup, string>> = {
 
 /** Each group's icon, after its chevron (docs/design/design-v1-design-pass.md 4.1). */
 export const SCENE_GROUP_ICONS: Readonly<Record<SceneGroup, IconName>> = {
+  floors: "floors",
   light: "weather",
   sound: "music",
   players: "shown",

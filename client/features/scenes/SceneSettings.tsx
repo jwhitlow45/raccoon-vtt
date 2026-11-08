@@ -2,6 +2,7 @@ import { Children, Fragment, isValidElement, useEffect, useId, useRef, useState,
 import type { AutoWalls, Scene } from "#shared/model.ts";
 import { MAX_SCENE_CELLS, type OpOf } from "#shared/protocol.ts";
 import { autoWallsOf } from "#shared/rules/autoWalls.ts";
+import { FLOOR_WORDS, floorsOf } from "#shared/rules/floors.ts";
 import { gridOfShape, isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -43,6 +44,8 @@ import { ColorInput, ConfirmButton, NumberInput, Select, Slider } from "./contro
 import { fogsWithFirstMap, nameCellPx, refitsToNamedMap, replacement, viewFromCamera, type MapAsset } from "./create.ts";
 import { useStartFraming } from "./FrameView.tsx";
 import { sceneGroupSummary, sceneSoundSummary } from "./sceneSummary.ts";
+import { FloorsGroup } from "./FloorsGroup.tsx";
+import { floorSettingsLine } from "./floorWords.ts";
 import { SceneSoundSettings, useSceneSoundNames } from "./SceneSoundSettings.tsx";
 import { SCENE_GROUP_ICONS, SCENE_GROUP_LABELS, useSceneFolds, type SceneGroup } from "./settingsFolds.ts";
 import { currentStageCamera } from "./stageCamera.ts";
@@ -67,7 +70,7 @@ import type { PanelClose } from "../panels.ts";
  * off is a Switch row named by the setting (docs/design/design-v1-visual.md
  * 3.7), never a button named by its state.
  */
-export function SceneSettings(props: { scene: Scene; others: Scene[]; close: PanelClose }) {
+export function SceneSettings(props: { scene: Scene; others: Scene[]; close: PanelClose; floorsAsk?: number }) {
   const { scene } = props;
   const actions = useRoomActions();
   const ui = useRoomUi();
@@ -107,16 +110,22 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
     <>
       <Section label="This scene">
         <NameField key={scene.id} name={scene.name} onSave={(name) => update({ name })} />
+        {/* Every group below sets the floor on screen, and Floors says which that is (docs/design/design-v1-floors.md 7.1). */}
+        {scene.floor ? <Help>{floorSettingsLine(scene.floor.name)}</Help> : null}
       </Section>
 
+      <FloorsGroup scene={scene} fold={fold("floors")} {...(props.floorsAsk !== undefined ? { ask: props.floorsAsk } : {})} />
+
       <Group {...group("light", sceneGroupSummary(scene, "light"))} search="scenes.light">
-        <LightSettings scene={scene} />
-        <SceneWeather key={scene.id} scene={scene} />
+        <Fragment key={scene.id}>
+          <LightSettings scene={scene} />
+          <SceneWeather scene={scene} />
+        </Fragment>
       </Group>
 
       {sound ? (
         <Group {...group("sound", sceneSoundSummary(soundNames))} search="scenes.sound">
-          <SceneSoundSettings scene={scene} />
+          <SceneSoundSettings key={scene.id} scene={scene} />
         </Group>
       ) : null}
 
@@ -132,62 +141,68 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
         }
         describedBy={noWalls ? noWallsId : undefined}
       >
-        <VisionSettings scene={scene} wallless={wallless} />
+        <VisionSettings key={scene.id} scene={scene} wallless={wallless} />
       </Group>
 
       <Group {...group("map", sceneGroupSummary(scene, "map"))} search="scenes.map">
-        <MapImageRow scene={scene} close={props.close} />
-        <PhasesSection scene={scene} />
-        <GridStyle scene={scene} onChange={(grid) => update({ grid })} close={props.close} />
+        <Fragment key={scene.id}>
+          <MapImageRow scene={scene} close={props.close} />
+          <PhasesSection scene={scene} />
+          <GridStyle scene={scene} onChange={(grid) => update({ grid })} close={props.close} />
+        </Fragment>
       </Group>
 
       <Group {...group("walls", sceneGroupSummary(scene, "walls"))} search="scenes.walls">
-        <BlockMovementSetting scene={scene} />
-        <SettingRow name="Automatic walls" search="scenes.walls.auto" help={AUTO_WALLS_NOTE[autoWallsOf(scene)]} wide>
-          <Select<AutoWalls> label="Automatic walls" value={autoWallsOf(scene)} options={AUTO_WALLS} onChange={(autoWalls) => update({ autoWalls })} />
-        </SettingRow>
-        <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
-          <Button
-            size="sm"
-            search="scenes.walls.builder"
-            onClick={() => {
-              ui.setTool("build");
-              props.close({ placing: true });
-            }}
-          >
-            Open the builder
-          </Button>
-          <ConfirmButton label="Clear the build" confirm="Tap again to clear" title="Remove every floor, wall, door, height, stair, label, light and stamp" onConfirm={() => actions.dispatch({ t: "build.clear", sceneId: scene.id })} />
-        </div>
+        <Fragment key={scene.id}>
+          <BlockMovementSetting scene={scene} />
+          <SettingRow name="Automatic walls" search="scenes.walls.auto" help={AUTO_WALLS_NOTE[autoWallsOf(scene)]} wide>
+            <Select<AutoWalls> label="Automatic walls" value={autoWallsOf(scene)} options={AUTO_WALLS} onChange={(autoWalls) => update({ autoWalls })} />
+          </SettingRow>
+          <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
+            <Button
+              size="sm"
+              search="scenes.walls.builder"
+              onClick={() => {
+                ui.setTool("build");
+                props.close({ placing: true });
+              }}
+            >
+              Open the builder
+            </Button>
+            <ConfirmButton label="Clear the build" confirm="Tap again to clear" title="Remove every floor, wall, door, height, stair, label, light and stamp" onConfirm={() => actions.dispatch({ t: "build.clear", sceneId: scene.id })} />
+          </div>
+        </Fragment>
       </Group>
 
       <Group {...group("scene", sceneGroupSummary(scene, "scene"))} search="scenes.size">
-        <SettingRow name={size.name} help={size.holds ?? undefined} wide>
-          <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-            <NumberInput label={size.across} value={scene.bounds.w} min={1} max={MAX_SCENE_CELLS} onChange={(w) => update({ bounds: { ...scene.bounds, w } })} />
-            <span aria-hidden>×</span>
-            <NumberInput label={size.down} value={scene.bounds.h} min={1} max={MAX_SCENE_CELLS} onChange={(h) => update({ bounds: { ...scene.bounds, h } })} />
-          </div>
-        </SettingRow>
-        <SettingRow name="Background">
-          <ColorInput label="Background color" value={scene.background} onChange={(background) => update({ background })} />
-        </SettingRow>
-        <SettingRow name="Starting view" help={scene.defaultView ? "The scene opens where you saved it." : "The scene opens fitted to the screen."} wide>
-          <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
-            <Button size="sm" search="scenes.size.save-view" onClick={saveView}>
-              Save current view
-            </Button>
-            {scene.defaultView ? (
-              <Button size="sm" onClick={() => update({ defaultView: null })}>
-                Clear
+        <Fragment key={scene.id}>
+          <SettingRow name={size.name} help={size.holds ?? undefined} wide>
+            <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+              <NumberInput label={size.across} value={scene.bounds.w} min={1} max={MAX_SCENE_CELLS} onChange={(w) => update({ bounds: { ...scene.bounds, w } })} />
+              <span aria-hidden>×</span>
+              <NumberInput label={size.down} value={scene.bounds.h} min={1} max={MAX_SCENE_CELLS} onChange={(h) => update({ bounds: { ...scene.bounds, h } })} />
+            </div>
+          </SettingRow>
+          <SettingRow name="Background">
+            <ColorInput label="Background color" value={scene.background} onChange={(background) => update({ background })} />
+          </SettingRow>
+          <SettingRow name="Starting view" help={scene.defaultView ? "The scene opens where you saved it." : "The scene opens fitted to the screen."} wide>
+            <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
+              <Button size="sm" search="scenes.size.save-view" onClick={saveView}>
+                Save current view
               </Button>
-            ) : null}
-          </div>
-        </SettingRow>
-        {isoOffered ? <SuggestedView scene={scene} onChange={(suggestedView) => update({ suggestedView })} /> : null}
+              {scene.defaultView ? (
+                <Button size="sm" onClick={() => update({ defaultView: null })}>
+                  Clear
+                </Button>
+              ) : null}
+            </div>
+          </SettingRow>
+          {isoOffered ? <SuggestedView scene={scene} onChange={(suggestedView) => update({ suggestedView })} /> : null}
+        </Fragment>
       </Group>
 
-      <MapExport scene={scene} />
+      <MapExport key={scene.id} scene={scene} />
     </>
   );
 }
@@ -304,7 +319,13 @@ function GridShape(props: { scene: Scene; close: PanelClose }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
   const gridStore = useGridStore();
-  const refusal = (c: ShapeChoice) => (s: { view: Parameters<typeof shapeRefusal>[0] | null }) => (s.view ? shapeRefusal(s.view, scene, c) : null);
+  // A scene's floors line up square for square, so one grid shape holds for all of them (docs/design/design-v1-floors.md 7.1).
+  const hasFloors = useRoomView((s) => (scene.floor && s.view ? floorsOf(s.view, scene.id).length > 1 : false));
+  const refusal = (c: ShapeChoice) => (s: { view: Parameters<typeof shapeRefusal>[0] | null }) => {
+    if (!s.view) return null;
+    if (hasFloors && c !== shapeChoice(scene.gridShape)) return FLOOR_WORDS.oneShape(scene.name);
+    return shapeRefusal(s.view, scene, c);
+  };
   const squares = useRoomView(refusal("squares"));
   const rows = useRoomView(refusal("hexRows"));
   const columns = useRoomView(refusal("hexColumns"));

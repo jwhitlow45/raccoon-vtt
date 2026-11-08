@@ -21,7 +21,7 @@ const join = (parts: readonly (string | null)[]): string => parts.filter((p) => 
  * Scene sound's group says what it holds through `sceneSoundSummary`, from
  * the names the room's library gives, so it is no case here.
  */
-export function sceneGroupSummary(scene: Scene, group: Exclude<SceneGroup, "sound">): string {
+export function sceneGroupSummary(scene: Scene, group: Exclude<SceneGroup, "sound" | "floors">): string {
   switch (group) {
     case "light": {
       // The light does nothing while party vision is off (D-261102-933), so the summary leaves it out rather than name a level that plays no part.
