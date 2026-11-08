@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { generate } from "./plan.ts";
-import { clampSettings, GENERATOR_VERSION, type DungeonSettings } from "./settings.ts";
+import { clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, type DungeonSettings } from "./settings.ts";
 
 /*
  * Twelve plans pinned by hash (docs/design/design-v1-dungeon-generator.md
@@ -55,7 +55,7 @@ function today(): Golden {
     version: GENERATOR_VERSION,
     plans: CASES.map(({ name, settings, seed }) => {
       const s = clampSettings(settings);
-      return { name, settings: s, seed, sha256: hash(generate(s, seed)) };
+      return { name, settings: s, seed, sha256: hash(generate(s, seed, DEFAULT_CONTEXT)) };
     }),
   };
 }

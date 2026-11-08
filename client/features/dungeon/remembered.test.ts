@@ -11,7 +11,7 @@ function memory() {
 
 test("DG-C: the defaults are Dungeon, Medium, 12 rooms, Normal, Bending, Narrow, loops on, Heights Some, Traps Few at 1-4", () => {
   const s = settingsOf(DEFAULT_CHOICES);
-  assert.deepEqual(s, { theme: "dungeon", w: 50, h: 50, rooms: 12, density: "normal", corridors: "bending", wide: false, loops: true, heights: 25, traps: 2, band: "1-4" });
+  assert.deepEqual(s, { theme: "dungeon", w: 50, h: 50, rooms: 12, density: "normal", corridors: "bending", wide: false, loops: true, heights: 25, traps: 2, band: "1-4", deadEnds: true, secrets: 1, lit: 25, dressing: "some", key: true });
 });
 
 test("DG-C: a size's rooms start at 6, 12, 20 or one per 200 squares", () => {

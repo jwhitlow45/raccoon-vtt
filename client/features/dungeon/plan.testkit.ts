@@ -34,7 +34,7 @@ export class PlanGrid {
   readonly ground: Int16Array;
   readonly up: (Side | undefined)[];
   readonly room: Int16Array;
-  readonly doors = new Map<string, "closed" | "locked">();
+  readonly doors = new Map<string, DungeonPlan["doors"][number]["state"]>();
   readonly plan: DungeonPlan;
 
   constructor(plan: DungeonPlan) {

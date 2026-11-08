@@ -17,6 +17,9 @@ export const HEX_NOTE = "Generated dungeons are squares for now. Pick Squares ab
 export const THEME_HELP = {
   dungeon: "Stone and wood rooms, closed and locked doors, rubble and pits.",
   crypt: "Stone halls with pillars, more locked doors.",
+  cave: "Rough caverns of cave floor joined by tunnels, with no doors. The Fog tool's Builder room then reveals every cave the tunnels join.",
+  mine: "Dirt chambers and tunnels, wooden doors, rubble from old collapses and open shafts.",
+  sewer: "Stone halls, cisterns and corridors that run with water. Wide corridors keep a dry walkway beside the channel.",
 } as const;
 export const DENSITY_HELP = "How much of the map the rooms fill.";
 export const WIDE_HELP = "Wide corridors and their doorways are 2 squares across, with double doors, so Large creatures walk them without squeezing once the doors are open.";

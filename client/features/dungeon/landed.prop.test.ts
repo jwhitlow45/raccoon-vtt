@@ -15,7 +15,7 @@ import { SCENE_PLACEHOLDER } from "./ops.ts";
 import type { DungeonPlan, PlanRoom } from "./plan.ts";
 import { previewOf } from "./scratch.ts";
 import { newSeed } from "./seed.ts";
-import { clampRooms, HEIGHT_PRESETS, HEIGHTS_MAX, HEIGHTS_STEP, MAX_SIDE, MIN_SIDE, roomCap, TRAP_PRESETS, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
+import { clampRooms, DEFAULT_CONTEXT, DEFAULT_SETTINGS, DRESSINGS, HEIGHTS_MAX, HEIGHTS_STEP, LIT_MAX, LIT_STEP, MAX_SIDE, MIN_SIDE, roomCap, SECRETS_MAX, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
 
 /*
  * A generated dungeon as it lands (docs/design/design-v1-dungeon-generator.md
@@ -41,6 +41,11 @@ const settings: fc.Arbitrary<DungeonSettings> = fc
     heights: fc.integer({ min: 0, max: HEIGHTS_MAX / HEIGHTS_STEP }).map((n) => n * HEIGHTS_STEP),
     traps: fc.integer({ min: 0, max: TRAPS_MAX }),
     band: fc.constantFrom(...LEVEL_BANDS),
+    deadEnds: fc.boolean(),
+    secrets: fc.integer({ min: 0, max: SECRETS_MAX }),
+    lit: fc.integer({ min: 0, max: LIT_MAX / LIT_STEP }).map((n) => n * LIT_STEP),
+    dressing: fc.constantFrom(...DRESSINGS),
+    key: fc.boolean(),
   })
   .map((s) => ({ ...s, rooms: clampRooms(s.rooms, s.w, s.h) }));
 
@@ -168,7 +173,7 @@ function unsqueezedReach(room: RoomState, token: ReturnType<typeof ownWalk>, fro
 }
 
 function checkLanded(s: DungeonSettings, seedText: string): void {
-  const made = previewOf(s, seedText, builderScene({ id: "x", name: "Dungeon", w: s.w, h: s.h }));
+  const made = previewOf(s, seedText, builderScene({ id: "x", name: "Dungeon", w: s.w, h: s.h }), DEFAULT_CONTEXT, null);
   if (!made.ok) {
     assert.equal(made.error, "fit", `a plan the scratch room refuses is a generator bug (${JSON.stringify(s)} ${seedText})`);
     return;
@@ -259,7 +264,7 @@ test("DG-B: the defaults at each size, and Wide with heights, land by the same r
   const sizes: [number, number][] = [[30, 30], [50, 50], [80, 80]];
   holds(
     fc.property(fc.constantFrom(...sizes), fc.boolean(), seed, ([w, h], wide, seedText) =>
-      checkLanded({ w, h, rooms: Math.min(roomCap(w, h), w === 30 ? 6 : w === 50 ? 12 : 20), density: "normal", corridors: "bending", wide, loops: true, theme: "dungeon", heights: HEIGHT_PRESETS.Some, traps: TRAP_PRESETS.Few, band: "1-4" }, seedText),
+      checkLanded({ ...DEFAULT_SETTINGS, w, h, rooms: Math.min(roomCap(w, h), w === 30 ? 6 : w === 50 ? 12 : 20), wide }, seedText),
     ),
     24,
   );

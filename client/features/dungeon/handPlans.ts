@@ -25,12 +25,13 @@ function rect(x: number, y: number, w: number, h: number): string[] {
  * a Poisoned Needle on B's locked door.
  */
 export function twoRooms(): DungeonPlan {
-  const a: PlanRoom = { x: 3, y: 3, w: 5, h: 5, ground: 0, floor: "stone", entrance: true };
-  const b: PlanRoom = { x: 15, y: 3, w: 6, h: 6, ground: 5, floor: "wood" };
+  const a: PlanRoom = { x: 3, y: 3, w: 5, h: 5, ground: 0, floor: "stone", pin: [5, 5], entrance: true };
+  const b: PlanRoom = { x: 15, y: 3, w: 6, h: 6, ground: 5, floor: "wood", pin: [18, 6] };
   const corridor = ["0,5", "1,5", "2,5", "8,5", "9,5", "11,5", "12,5", "13,5", "14,5"];
   const paint: Partial<Record<TerrainId, string[]>> = { stone: [...rect(3, 3, 5, 5), ...corridor], wood: rect(15, 3, 6, 6), rubble: ["10,5"] };
   return {
     version: GENERATOR_VERSION,
+    theme: "dungeon",
     w: 30,
     h: 30,
     asked: 2,
@@ -50,7 +51,11 @@ export function twoRooms(): DungeonPlan {
       { preset: "hidden-pit", zone: { cells: [{ x: 17, y: 4, w: 2, h: 2 }] } },
       { preset: "poisoned-needle", zone: { door: { edge: "15,5,w" } } },
     ],
+    stamps: [],
+    lights: [],
+    stones: [],
     entrance: { x: 3, y: 3, w: 5, h: 5 },
+    key: null,
   };
 }
 
@@ -74,6 +79,7 @@ export function widestDoors(): DungeonPlan {
   }
   return {
     version: GENERATOR_VERSION,
+    theme: "dungeon",
     w: 100,
     h: 100,
     asked: 40,
@@ -83,7 +89,11 @@ export function widestDoors(): DungeonPlan {
     heights: [],
     stairs: [],
     traps: [],
+    stamps: [],
+    lights: [],
+    stones: [],
     entrance: { x: 0, y: 0, w: 2, h: 2 },
+    key: null,
   };
 }
 

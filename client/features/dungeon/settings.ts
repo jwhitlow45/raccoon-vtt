@@ -17,7 +17,9 @@ export const GENERATOR_VERSION = 5;
 
 export type Density = "sparse" | "normal" | "dense";
 export type CorridorStyle = "straight" | "bending" | "winding";
-export type Theme = "dungeon" | "crypt";
+export type Theme = "dungeon" | "crypt" | "cave" | "mine" | "sewer";
+/** Props from the shipped stamps (phase 2, 5.5): none, 1 or 2 in about 2 rooms of 3, or 2 to 4 in every room. */
+export type Dressing = "none" | "some" | "full";
 
 export type DungeonSettings = {
   /** Squares across and down, MIN_SIDE to MAX_SIDE. */
@@ -37,7 +39,26 @@ export type DungeonSettings = {
   /** Rooms with a trap, in twelfths: 0 to TRAPS_MAX, so Few's one per six and Some's one per three are steps. */
   traps: number;
   band: LevelBand;
+  /** Straight spurs that end in rock (phase 2, 5.2). */
+  deadEnds: boolean;
+  /** Secret doors, in twelfths of the kept rooms: 0 to SECRETS_MAX. Kept as the DM's pick on Cave, which has none. */
+  secrets: number;
+  /** Rooms lit by a light stamp and its SRD light, in percent: 0 to LIT_MAX in steps of LIT_STEP. */
+  lit: number;
+  dressing: Dressing;
+  /** The DM key: a DM-only journal page and a DM-only numbered pin in each room. */
+  key: boolean;
 };
+
+/**
+ * The room settings the plan reads (phase 2, section 5): only the feet per
+ * square, since the Fire-Casting Statue's reach and the Rolling Stone's roll
+ * are set in feet. Nothing else of the room reaches the plan, so a seed
+ * makes the same dungeon at the same scale.
+ */
+export type PlanContext = { feetPerCell: number };
+/** The room's default scale, which the golden plans pin. */
+export const DEFAULT_CONTEXT: Readonly<PlanContext> = { feetPerCell: 5 };
 
 export const HEIGHTS_MAX = 75;
 export const HEIGHTS_STEP = 5;
@@ -47,6 +68,13 @@ export const TRAPS_MAX = 6;
 /** The Traps slider's named marks: none, one per six rooms, one per three and one per two. */
 export const TRAP_PRESETS = { None: 0, Few: 2, Some: 4, Many: 6 } as const;
 /** What a device remembered from before the sliders, read as the marks that replaced them. */
+export const SECRETS_MAX = 6;
+/** The Secret doors slider's named marks, in twelfths of the kept rooms. */
+export const SECRET_PRESETS = { None: 0, Few: 1, Some: 2, Many: 4 } as const;
+export const LIT_MAX = 100;
+export const LIT_STEP = 5;
+/** The Lit rooms slider's named marks, in percent of the kept rooms. */
+export const LIT_PRESETS = { None: 0, Few: 25, Half: 50, All: 100 } as const;
 const OLD_HEIGHTS: Readonly<Record<string, number>> = { flat: HEIGHT_PRESETS.Flat, some: HEIGHT_PRESETS.Some };
 const OLD_TRAPS: Readonly<Record<string, number>> = { none: TRAP_PRESETS.None, few: TRAP_PRESETS.Few, some: TRAP_PRESETS.Some };
 
@@ -69,6 +97,18 @@ const PRESET_ROOMS: Readonly<Record<Exclude<SizeChoice, "custom">, number>> = { 
 export const MAX_TRAPS = 20;
 /** Door edges of one dungeon. The largest Wide topology makes 198, and one `build.edge` holds 500. */
 export const MAX_DOOR_EDGES = 200;
+/** Secret doors of one dungeon (phase 2, 5.3). A Wide doorway's two edges are one. */
+export const MAX_SECRET_DOORS = 12;
+/** Dead ends of one dungeon (phase 2, 5.2). */
+export const MAX_DEAD_ENDS = 10;
+/** Lights of one dungeon, of the scene's 100 (phase 2, section 10). */
+export const MAX_LIGHTS = 40;
+/** Stamps of one dungeon, light stamps and statues included, of the scene's 500, so two `build.stamps` ops hold them. */
+export const MAX_STAMPS = 160;
+/** Stamps of one room, its light stamp and statue included. */
+export const MAX_ROOM_STAMPS = 4;
+/** Rolling stones of one dungeon. */
+export const MAX_STONES = 2;
 /** Search expansions for the whole dungeon's corridors (5.4). */
 export const SEARCH_BUDGET = 400_000;
 
@@ -84,11 +124,30 @@ export const DEFAULT_SETTINGS: Readonly<DungeonSettings> = {
   heights: HEIGHT_PRESETS.Some,
   traps: TRAP_PRESETS.Few,
   band: "1-4",
+  deadEnds: true,
+  secrets: SECRET_PRESETS.Few,
+  lit: LIT_PRESETS.Few,
+  dressing: "some",
+  key: true,
 };
 
 const DENSITIES: readonly Density[] = ["sparse", "normal", "dense"];
 const CORRIDORS: readonly CorridorStyle[] = ["straight", "bending", "winding"];
-const THEMES: readonly Theme[] = ["dungeon", "crypt"];
+export const THEMES: readonly Theme[] = ["dungeon", "crypt", "cave", "mine", "sewer"];
+export const DRESSINGS: readonly Dressing[] = ["none", "some", "full"];
+
+/** Each choice's name as the dialog shows it and the key's "Made with" line writes it. */
+export const CHOICE_NAMES: {
+  theme: Readonly<Record<Theme, string>>;
+  density: Readonly<Record<Density, string>>;
+  corridors: Readonly<Record<CorridorStyle, string>>;
+  dressing: Readonly<Record<Dressing, string>>;
+} = {
+  theme: { dungeon: "Dungeon", crypt: "Crypt", cave: "Cave", mine: "Mine", sewer: "Sewer" },
+  density: { sparse: "Sparse", normal: "Normal", dense: "Dense" },
+  corridors: { straight: "Straight", bending: "Bending", winding: "Winding" },
+  dressing: { none: "None", some: "Some", full: "Full" },
+};
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -140,6 +199,26 @@ export function trapCount(twelfths: number, rooms: number): number {
 }
 
 /**
+ * Secret doors a Secret doors share places among `rooms` kept rooms: its
+ * twelfths of them, rounded down, at least one above None and at most
+ * MAX_SECRET_DOORS. The generator places none on Cave whatever this says.
+ */
+export function secretCount(twelfths: number, rooms: number): number {
+  if (twelfths <= 0 || rooms <= 0) return 0;
+  return clamp(Math.floor((rooms * twelfths) / 12), 1, MAX_SECRET_DOORS);
+}
+
+/**
+ * Rooms a Lit rooms share lights among `rooms` kept rooms, the entrance
+ * among them: the share rounded half up, at least one above None and at
+ * most every room, within MAX_LIGHTS.
+ */
+export function litCount(share: number, rooms: number): number {
+  if (share <= 0 || rooms <= 0) return 0;
+  return clamp(Math.floor((2 * share * rooms + 100) / 200), 1, Math.min(rooms, MAX_LIGHTS));
+}
+
+/**
  * Settings the generator can take from anything shaped like them, such as
  * choices a device remembered under an older build: each field read or
  * replaced by its default, sides and Rooms clamped.
@@ -159,5 +238,16 @@ export function clampSettings(s: Partial<Record<keyof DungeonSettings, unknown>>
     heights: onSlider(s.heights, HEIGHTS_MAX, HEIGHTS_STEP, OLD_HEIGHTS, DEFAULT_SETTINGS.heights),
     traps: onSlider(s.traps, TRAPS_MAX, 1, OLD_TRAPS, DEFAULT_SETTINGS.traps),
     band: oneOf(s.band, LEVEL_BANDS, DEFAULT_SETTINGS.band),
+    deadEnds: typeof s.deadEnds === "boolean" ? s.deadEnds : DEFAULT_SETTINGS.deadEnds,
+    secrets: onSlider(s.secrets, SECRETS_MAX, 1, {}, DEFAULT_SETTINGS.secrets),
+    lit: onSlider(s.lit, LIT_MAX, LIT_STEP, {}, DEFAULT_SETTINGS.lit),
+    dressing: oneOf(s.dressing, DRESSINGS, DEFAULT_SETTINGS.dressing),
+    key: typeof s.key === "boolean" ? s.key : DEFAULT_SETTINGS.key,
   };
+}
+
+/** A plan context from anything: the feet per square as the room settings hold it, 1 to 100, else the default. */
+export function clampContext(c: Partial<Record<keyof PlanContext, unknown>> | undefined): PlanContext {
+  const ft = c?.feetPerCell;
+  return { feetPerCell: typeof ft === "number" && Number.isFinite(ft) ? clamp(Math.round(ft), 1, 100) : DEFAULT_CONTEXT.feetPerCell };
 }

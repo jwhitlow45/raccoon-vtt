@@ -7,7 +7,7 @@ import { generate, planDungeon, type Planned } from "./plan.ts";
 import { planProblems } from "./plan.testkit.ts";
 import { Stream } from "./random.ts";
 import { CROCKFORD, newSeed, versionChar, type Seed } from "./seed.ts";
-import { clampSettings, DEFAULT_SETTINGS, defaultRooms, GENERATOR_VERSION, HEIGHT_PRESETS, HEIGHTS_MAX, HEIGHTS_STEP, roomCap, SEARCH_BUDGET, SIZE_SIDES, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
+import { clampSettings, DEFAULT_CONTEXT, DEFAULT_SETTINGS, defaultRooms, GENERATOR_VERSION, HEIGHT_PRESETS, HEIGHTS_MAX, HEIGHTS_STEP, roomCap, SEARCH_BUDGET, SIZE_SIDES, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
 
 /*
  * Property tests of the dungeon generator (docs/design/design-v1-dungeon-generator.md
@@ -48,8 +48,8 @@ describe("dungeon plans", () => {
   test("the same seed and choices make the same plan, which JSON keeps whole", () => {
     holds(
       fc.property(settingsArb, seedArb, (s, seed) => {
-        const a = generate(s, seed);
-        assert.deepEqual(generate(s, seed), a);
+        const a = generate(s, seed, DEFAULT_CONTEXT);
+        assert.deepEqual(generate(s, seed, DEFAULT_CONTEXT), a);
         assert.deepEqual(JSON.parse(JSON.stringify(a)), a);
       }),
       15,
@@ -122,7 +122,7 @@ describe("dungeon plans", () => {
       const s = { ...DEFAULT_SETTINGS, w: side, h: side, rooms: defaultRooms(size, side, side) };
       const next = seeds(10 + side);
       let all = 0;
-      for (let i = 0; i < 200; i++) if (generate(s, next()).rooms.length === s.rooms) all++;
+      for (let i = 0; i < 200; i++) if (generate(s, next(), DEFAULT_CONTEXT).rooms.length === s.rooms) all++;
       assert.ok(all >= 190, `${size}: ${all} of 200`);
     }
   });
@@ -149,7 +149,7 @@ describe("the mix", () => {
       let rooms = 0;
       let wood = 0;
       for (let i = 0; i < 40; i++) {
-        const p = generate(s, next());
+        const p = generate(s, next(), DEFAULT_CONTEXT);
         doors += p.doors.length;
         locked += p.doors.filter((d) => d.state === "locked").length;
         rooms += p.rooms.length;
@@ -162,7 +162,7 @@ describe("the mix", () => {
       } else {
         assert.ok(rate > 0.21 && rate < 0.29, `crypt locks ${rate}`);
         assert.equal(wood, 0);
-        assert.ok(!generate(s, next()).paint.rubble);
+        assert.ok(!generate(s, next(), DEFAULT_CONTEXT).paint.rubble);
       }
     }
   });
@@ -204,7 +204,7 @@ describe("the drops (5.4)", () => {
     const s = { ...DEFAULT_SETTINGS };
     const next = seeds(20);
     for (let i = 0; i < 5; i++) {
-      const p = planDungeon(s, next(), 0);
+      const p = planDungeon(s, next(), DEFAULT_CONTEXT, 0);
       ok(p, s);
       assert.equal(p.plan.rooms.length, 1);
       assert.ok(p.plan.rooms[0]!.entrance);
@@ -222,7 +222,7 @@ describe("the drops (5.4)", () => {
       const seed = next();
       const full = planDungeon(s, seed);
       // Half what the tree took: some links are built, then the budget is gone.
-      const p = planDungeon(s, seed, Math.floor((SEARCH_BUDGET - full.trace.treeLeft) / 2));
+      const p = planDungeon(s, seed, DEFAULT_CONTEXT, Math.floor((SEARCH_BUDGET - full.trace.treeLeft) / 2));
       ok(p, s);
       if (p.trace.dropped.length === 0) continue;
       seen++;
@@ -262,7 +262,7 @@ describe("the drops (5.4)", () => {
       }
       const raised = p.board.rooms.some((r) => r.ground !== 0);
       if (!raised) continue;
-      const short = planDungeon(s, seed, SEARCH_BUDGET - p.trace.treeLeft - 50);
+      const short = planDungeon(s, seed, DEFAULT_CONTEXT, SEARCH_BUDGET - p.trace.treeLeft - 50);
       ok(short, s);
       for (const li of short.trace.retried) {
         const l = short.links[li]!;
@@ -283,7 +283,7 @@ describe("the drops (5.4)", () => {
       const seed = next();
       const full = planDungeon(s, seed);
       for (const budget of [SEARCH_BUDGET, 0, Math.floor((SEARCH_BUDGET - full.trace.treeLeft) / 2)]) {
-        const p = planDungeon(s, seed, budget);
+        const p = planDungeon(s, seed, DEFAULT_CONTEXT, budget);
         ok(p, s);
         const why = new Map(p.trace.failed.map((f) => [f.link, f.why]));
         for (const f of p.trace.failed) whys.add(f.why);
@@ -310,7 +310,7 @@ describe("the drops (5.4)", () => {
       const full = planDungeon(s, seed);
       if (full.links.every((l) => l.kind === "tree")) continue;
       // Exactly the tree's budget: every tree link is built, the loops and the stub find none left.
-      const p = planDungeon(s, seed, SEARCH_BUDGET - full.trace.treeLeft);
+      const p = planDungeon(s, seed, DEFAULT_CONTEXT, SEARCH_BUDGET - full.trace.treeLeft);
       ok(p, s);
       assert.deepEqual(p.trace.dropped, []);
       assert.equal(p.plan.rooms.length, full.plan.rooms.length);
@@ -333,7 +333,7 @@ describe("the drops (5.4)", () => {
       const seed = next();
       const full = planDungeon(s, seed);
       assert.equal(full.trace.stubFailed, false);
-      const p = planDungeon(s, seed, SEARCH_BUDGET - full.trace.loopsLeft);
+      const p = planDungeon(s, seed, DEFAULT_CONTEXT, SEARCH_BUDGET - full.trace.loopsLeft);
       ok(p, s);
       assert.ok(p.trace.stubFailed);
       assert.equal(p.stub, null);

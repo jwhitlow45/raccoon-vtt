@@ -15,7 +15,12 @@
     "theme": "dungeon",
     "heights": 25,
     "traps": 2,
-    "band": "1-4"
+    "band": "1-4",
+    "deadEnds": true,
+    "secrets": 1,
+    "lit": 25,
+    "dressing": "some",
+    "key": true
    },
    "sceneId": "dungeon-scene",
    "trapIds": [
@@ -1361,7 +1366,12 @@
     "theme": "dungeon",
     "heights": 75,
     "traps": 6,
-    "band": "5-10"
+    "band": "5-10",
+    "deadEnds": true,
+    "secrets": 6,
+    "lit": 100,
+    "dressing": "full",
+    "key": true
    },
    "sceneId": "dungeon-scene",
    "trapIds": [

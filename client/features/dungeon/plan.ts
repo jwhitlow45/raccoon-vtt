@@ -1,11 +1,11 @@
-import type { StairDirection, TerrainId, TrapZone } from "#shared/model.ts";
+import type { CellRect, StairDirection, TerrainId, TrapZone } from "#shared/model.ts";
 import { bends, Router, TURN_COST } from "./corridors.ts";
 import { daisClear, doorLines, doorStates, placePillars, placePits, placeRubble, roomFloors } from "./dress.ts";
 import { DAIS_RISE, placeDais, raiseRooms, type Dais } from "./heights.ts";
 import { Board, chooseEntrance, doorEdge, facingSides, loopLinks, placeDoorway, placeRooms, rockBetween, treeLinks, type Doorway, type Link, type Rect, type Side } from "./layout.ts";
 import { seedStream } from "./random.ts";
 import type { Seed } from "./seed.ts";
-import { clampSettings, GENERATOR_VERSION, MAX_DOOR_EDGES, SEARCH_BUDGET, trapCount, type DungeonSettings } from "./settings.ts";
+import { clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, MAX_DOOR_EDGES, SEARCH_BUDGET, trapCount, type DungeonSettings, type PlanContext, type Theme } from "./settings.ts";
 import { pickTraps, trapSpots } from "./trapSpots.ts";
 
 /*
@@ -15,11 +15,49 @@ import { pickTraps, trapSpots } from "./trapSpots.ts";
  * version.
  */
 
-/** A kept room: its rectangle, its ground in feet, its floor terrain, and whether it is the entrance. */
-export type PlanRoom = { x: number; y: number; w: number; h: number; ground: number; floor: TerrainId; entrance?: true };
+/**
+ * A kept room: its rectangle, its ground in feet, its floor terrain,
+ * whether it is the entrance, and whether it is a secret room (its only
+ * doorway secret, phase 2 5.3). `pin` is the square its key pin stands on,
+ * x and y, chosen whatever DM key says (5.6).
+ */
+export type PlanRoom = { x: number; y: number; w: number; h: number; ground: number; floor: TerrainId; pin: [number, number]; entrance?: true; secret?: true };
+
+/** A door edge ("x,y,n" or "x,y,w"), a Wide doorway's two the same. A secret door is closed and hidden. */
+export type PlanDoor = { edge: string; state: "closed" | "locked" | "secret" };
+
+/** A stamp by its catalog key: its middle in cells, its size in cells, and its turn in degrees clockwise. Drawn in plan order. */
+export type PlanStamp = { key: string; x: number; y: number; w: number; h: number; rotation: 0 | 90 | 180 | 270 };
+
+/**
+ * A light: its place in cells on the free wall lattice, its SRD preset
+ * (vision/presets.ts `PLACED_LIGHTS`), its label, and the key of the stamp
+ * that pictures it, which stands in `stamps` with its middle here.
+ */
+export type PlanLight = { x: number; y: number; preset: "Candle" | "Torch" | "Hooded Lantern"; label: string; stamp: string };
+
+/**
+ * A trap: its SRD preset and zone, and where the generator sets what it
+ * hits: `hits` squares that replace the zone's own, a cone's origin in
+ * cells and its yaw in 45 degree steps, and the index in `stones` of the
+ * hidden token its one action shows.
+ */
+export type PlanTrap = { preset: string; zone: TrapZone; hits?: CellRect[]; cone?: { origin: [number, number]; yaw: number }; stone?: number };
+
+/** A room's doorway as the key reads it: its side, the other room's number or the map's edge, and its door ("open" on Cave). */
+export type KeyDoor = { side: "n" | "e" | "s" | "w"; to: number | "edge"; state: PlanDoor["state"] | "open" };
+
+/**
+ * A room as the key describes it: its number (1 for the entrance, breadth
+ * first), its index in `rooms`, its doorways, its light's label, its traps'
+ * names, an index into the SRD's trinket table (shared/srd/trinkets.ts
+ * `TRINKETS`), and what else stands in it.
+ */
+export type KeyRoom = { n: number; room: number; doors: KeyDoor[]; light?: string; traps: string[]; trinket: number; secret?: true; dais?: true; pit?: true; cistern?: true };
 
 export type DungeonPlan = {
   version: number;
+  theme: Theme;
   w: number;
   h: number;
   /** Rooms asked for. `rooms.length` is how many fit, read after the drops. */
@@ -27,15 +65,21 @@ export type DungeonPlan = {
   rooms: PlanRoom[];
   /** Every painted cell by terrain, "x,y", each cell under one terrain. */
   paint: Partial<Record<TerrainId, string[]>>;
-  /** Door edges ("x,y,n" or "x,y,w"), a Wide doorway's two the same. */
-  doors: { edge: string; state: "closed" | "locked" }[];
+  doors: PlanDoor[];
   /** Ground by value, merged, 0 left out. */
   heights: { ft: number; cells: string[] }[];
   stairs: { up: StairDirection; cells: string[] }[];
+  /** Props, light stamps and statues, at most MAX_STAMPS. */
+  stamps: PlanStamp[];
+  lights: PlanLight[];
+  /** Each Rolling Stone's hidden Large token: the top-left square of its 2 by 2. */
+  stones: [number, number][];
   /** SRD preset ids and where each lies. */
-  traps: { preset: string; zone: TrapZone }[];
+  traps: PlanTrap[];
   /** The entrance room's rectangle, which the creating device frames. */
   entrance: { x: number; y: number; w: number; h: number };
+  /** The DM key's rooms in number order, or null with DM key off. Never a seed (D-261102-023). */
+  key: KeyRoom[] | null;
 };
 
 /**
@@ -83,11 +127,12 @@ export type Planned = {
   daises: Map<number, Dais>;
 };
 
-export function generate(settings: DungeonSettings, seed: Seed, budget: number = SEARCH_BUDGET): DungeonPlan {
-  return planDungeon(settings, seed, budget).plan;
+export function generate(settings: DungeonSettings, seed: Seed, context: PlanContext, budget: number = SEARCH_BUDGET): DungeonPlan {
+  return planDungeon(settings, seed, context, budget).plan;
 }
 
-export function planDungeon(input: DungeonSettings, seed: Seed, budget: number = SEARCH_BUDGET): Planned {
+/** The plan with its working. A caller with no room (a bench script) plans at the default 5 ft a square. */
+export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanContext = DEFAULT_CONTEXT, budget: number = SEARCH_BUDGET): Planned {
   const s = clampSettings(input);
   const { w: W, h: H } = s;
   const width = s.wide ? 2 : 1;
@@ -323,12 +368,13 @@ export function planDungeon(input: DungeonSettings, seed: Seed, budget: number =
   const DIR_ORDER = "nesw";
   const plan: DungeonPlan = {
     version: GENERATOR_VERSION,
+    theme: s.theme,
     w: W,
     h: H,
     asked: s.rooms,
     rooms: kept.map((i) => {
       const r = board.rooms[i]!;
-      return { x: r.x, y: r.y, w: r.w, h: r.h, ground: r.ground, floor: floors[i]!, ...(i === entrance.room ? { entrance: true as const } : {}) };
+      return { x: r.x, y: r.y, w: r.w, h: r.h, ground: r.ground, floor: floors[i]!, pin: [r.x + Math.floor(r.w / 2), r.y + Math.floor(r.h / 2)] as [number, number], ...(i === entrance.room ? { entrance: true as const } : {}) };
     }),
     paint,
     doors: doorways.flatMap((d) => d.inside.map((_, j) => ({ edge: doorEdgeOf(board, d, j), state: states.get(d.id)! }))),
@@ -337,8 +383,12 @@ export function planDungeon(input: DungeonSettings, seed: Seed, budget: number =
       (a, b) => a - b,
     ).map(({ v, cells }) => ({ ft: v, cells })),
     stairs: grouped(ups, (a, b) => DIR_ORDER.indexOf(a) - DIR_ORDER.indexOf(b)).map(({ v, cells }) => ({ up: v, cells })),
+    stamps: [],
+    lights: [],
+    stones: [],
     traps,
     entrance: entrance.room >= 0 ? { x: rects[entrance.room]!.x, y: rects[entrance.room]!.y, w: rects[entrance.room]!.w, h: rects[entrance.room]!.h } : { x: 0, y: 0, w: 0, h: 0 },
+    key: null,
   };
   return { plan, trace, board, links, paths, chains, stub: stub && !stub.removed ? stub : null, stubPath, entrance: entrance.room, daises };
 }

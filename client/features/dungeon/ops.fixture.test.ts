@@ -5,7 +5,7 @@ import { builderScene } from "../scenes/create.ts";
 import { SCENE_PLACEHOLDER, trapPlaceholder } from "./ops.ts";
 import { parseSeed, versionChar } from "./seed.ts";
 import { previewOf } from "./scratch.ts";
-import { DEFAULT_SETTINGS, GENERATOR_VERSION, HEIGHTS_MAX, roomCap, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
+import { DEFAULT_CONTEXT, DEFAULT_SETTINGS, GENERATOR_VERSION, HEIGHTS_MAX, LIT_MAX, roomCap, SECRETS_MAX, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
 
 /*
  * The op fixture between the client and the server's tests (docs/design/design-v1-dungeon-generator.md
@@ -32,6 +32,11 @@ const LARGEST: DungeonSettings = {
   heights: HEIGHTS_MAX,
   traps: TRAPS_MAX,
   band: "5-10",
+  deadEnds: true,
+  secrets: SECRETS_MAX,
+  lit: LIT_MAX,
+  dressing: "full",
+  key: true,
 };
 
 const CASES: { name: string; seed: string; settings: DungeonSettings }[] = [
@@ -45,7 +50,7 @@ function today() {
     dungeons: CASES.map(({ name, seed, settings }) => {
       const parsed = parseSeed(seed);
       assert.ok(parsed.ok && !parsed.otherVersion, seed);
-      const made = previewOf(settings, parsed.seed, builderScene({ id: "fixture", name: "Dungeon", w: settings.w, h: settings.h }));
+      const made = previewOf(settings, parsed.seed, builderScene({ id: "fixture", name: "Dungeon", w: settings.w, h: settings.h }), DEFAULT_CONTEXT, null);
       assert.ok(made.ok, `${name} makes a dungeon`);
       return {
         name,

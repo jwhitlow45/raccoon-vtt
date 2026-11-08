@@ -16,6 +16,9 @@ import type { DungeonPlan } from "./plan.ts";
  * stream and a second Make never resends one.
  */
 
+/** Ops one Make sends at most (phase 2, section 6): past the server's burst of 60, paced by the store's busy retry. */
+export const MAX_OPS = 100;
+
 /** The scene's id while the dungeon is only a preview. */
 export const SCENE_PLACEHOLDER = "dungeon-scene";
 
@@ -31,7 +34,8 @@ export function trapPlaceholder(i: number): string {
  */
 const TERRAIN_ORDER: readonly TerrainId[] = ["stone", "wood", "grass", "dirt", "cave", "water", "difficult", "rubble", "pit", "pillar", "stairs"];
 
-function door(state: "closed" | "locked"): EdgeFeature {
+function door(state: DungeonPlan["doors"][number]["state"]): EdgeFeature {
+  if (state === "secret") return { kind: "door", state: "closed", secret: true, discovered: false };
   return { kind: "door", state, secret: false, discovered: false };
 }
 
@@ -82,15 +86,32 @@ export function trapOps(plan: DungeonPlan, chunks: Readonly<Record<string, Build
 }
 
 /**
+ * The dressing's ops (phase 2, section 6): the stamps, 100 an op, the
+ * lights in one op, and a hidden token per Rolling Stone. Contract stub:
+ * lane DG2-B builds the body.
+ */
+export function dressOps(plan: DungeonPlan, sceneId: string): ClientOp[] {
+  throw new Error(`not built: ${plan.stamps.length} stamps on ${sceneId}`);
+}
+
+/**
  * The ops with every id fresh: the scene's and each trap's. Every op must
  * name the one scene the first op makes, since an op naming any other
- * would land on a scene the DM never meant.
+ * would land on a scene the DM never meant. `ids` maps each placeholder to
+ * its fresh id, so the outcome's check follows a reference through it
+ * (phase 2, section 6).
  */
-export function withIds(ops: ClientOp[], newId: () => string): { ops: ClientOp[]; sceneId: string } {
+export function withIds(ops: ClientOp[], newId: () => string): { ops: ClientOp[]; sceneId: string; ids: ReadonlyMap<string, string> } {
   const create = ops[0];
   if (create?.t !== "scene.create") throw new Error("a dungeon's ops start with its scene");
   const was = create.scene.id;
   const sceneId = newId();
+  const ids = new Map<string, string>([[was, sceneId]]);
+  const fresh = (placeholder: string): string => {
+    const id = newId();
+    ids.set(placeholder, id);
+    return id;
+  };
   const onScene = (id: string): string => {
     if (id !== was) throw new Error("a dungeon op names another scene");
     return sceneId;
@@ -106,10 +127,10 @@ export function withIds(ops: ClientOp[], newId: () => string): { ops: ClientOp[]
       case "build.stairs":
         return { ...op, sceneId: onScene(op.sceneId) };
       case "trap.create":
-        return { ...op, trap: { ...op.trap, id: newId(), sceneId: onScene(op.trap.sceneId) } };
+        return { ...op, trap: { ...op.trap, id: fresh(op.trap.id), sceneId: onScene(op.trap.sceneId) } };
       default:
         throw new Error(`a dungeon sends no ${op.t}`);
     }
   });
-  return { ops: out, sceneId };
+  return { ops: out, sceneId, ids };
 }

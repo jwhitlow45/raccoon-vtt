@@ -9,9 +9,9 @@ test("DG-C: the size line in the room's feet per square", () => {
 });
 
 test("DG-C: the status line counts rooms, doors with the locked ones, and traps", () => {
-  assert.equal(statusLine({ rooms: 12, asked: 12, doors: 18, locked: 3, traps: 4 }), "12 rooms, 18 doors (3 locked), 4 traps.");
-  assert.equal(statusLine({ rooms: 2, asked: 2, doors: 1, locked: 0, traps: 0 }), "2 rooms, 1 door, no traps.");
-  assert.equal(statusLine({ rooms: 3, asked: 3, doors: 3, locked: 1, traps: 1 }), "3 rooms, 3 doors (1 locked), 1 trap.");
+  assert.equal(statusLine({ rooms: 12, asked: 12, doors: 18, locked: 3, traps: 4, secretDoors: 0, secretRooms: 0, lights: 0 }), "12 rooms, 18 doors (3 locked), 4 traps.");
+  assert.equal(statusLine({ rooms: 2, asked: 2, doors: 1, locked: 0, traps: 0, secretDoors: 0, secretRooms: 0, lights: 0 }), "2 rooms, 1 door, no traps.");
+  assert.equal(statusLine({ rooms: 3, asked: 3, doors: 3, locked: 1, traps: 1, secretDoors: 0, secretRooms: 0, lights: 0 }), "3 rooms, 3 doors (1 locked), 1 trap.");
 });
 
 test("DG-C: fewer rooms than asked says how many fit, and all of them says nothing", () => {

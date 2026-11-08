@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { builderScene } from "../scenes/create.ts";
 import { SCENE_PLACEHOLDER } from "./ops.ts";
-import { DEFAULT_SETTINGS } from "./settings.ts";
+import { DEFAULT_CONTEXT, DEFAULT_SETTINGS } from "./settings.ts";
 import type { FromWorker, ToWorker } from "./worker.ts";
 
 test("DG-B: the worker answers a preview with its id: the plan, the ops that parse, the room they make and the counts", async () => {
@@ -25,7 +25,7 @@ test("DG-B: the worker answers a preview with its id: the plan, the ops that par
     await import("./worker.ts");
     assert.ok(receive);
     const scene = builderScene({ id: "chosen", name: "Crypt", w: 50, h: 50 });
-    receive({ data: { t: "preview", id: 7, settings: DEFAULT_SETTINGS, seed: "1K7QH2MXA9F3TWQ5", scene } });
+    receive({ data: { t: "preview", id: 7, settings: DEFAULT_SETTINGS, seed: "1K7QH2MXA9F3TWQ5", scene, context: DEFAULT_CONTEXT, key: null } });
     assert.equal(answers.length, 1, "answered in the same task");
     const [answer] = answers;
     assert.equal(answer?.id, 7);

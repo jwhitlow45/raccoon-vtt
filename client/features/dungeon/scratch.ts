@@ -10,10 +10,11 @@ import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import { boardTheme } from "../../lib/theme.ts";
 import type { SceneInput } from "../scenes/create.ts";
 import type { Preview, Summary } from "./client.ts";
+import type { KeyInput } from "./keyPage.ts";
 import { buildOps, SCENE_PLACEHOLDER, trapOps } from "./ops.ts";
 import { generate, type DungeonPlan } from "./plan.ts";
 import type { Seed } from "./seed.ts";
-import { MIN_ROOMS, type DungeonSettings } from "./settings.ts";
+import { MIN_ROOMS, type DungeonSettings, type PlanContext } from "./settings.ts";
 
 /*
  * The scratch room (docs/design/design-v1-dungeon-generator.md 5.5): the
@@ -111,7 +112,7 @@ export type Landed = { ok: true; ops: ClientOp[]; room: RoomState } | { ok: fals
  * DM's room will hold. Anything refused here is a generator bug, which the
  * preview shows as its error with Make off.
  */
-export function landDungeon(plan: DungeonPlan, scene: SceneInput, band: LevelBand): Landed {
+export function landDungeon(plan: DungeonPlan, scene: SceneInput, band: LevelBand, context: PlanContext, key: KeyInput | null): Landed {
   const build = buildOps(plan, scene);
   const built = landAll(scratchRoom(), build);
   if (!built.ok) return { ok: false, why: `op ${built.at}: ${built.why}` };
@@ -137,15 +138,17 @@ export function previewScene(scene: SceneInput, plan: Pick<DungeonPlan, "w" | "h
  * so doors count doorways: door edges in a line, touching end to end, are
  * one, which is exact since doorways keep a square apart (5.3 step 4).
  */
-export function summarize(plan: Pick<DungeonPlan, "rooms" | "asked" | "doors" | "traps">): Summary {
+export function summarize(plan: Pick<DungeonPlan, "rooms" | "asked" | "doors" | "traps" | "lights">): Summary {
   const byKey = new Map(plan.doors.map((d) => [d.edge, d.state]));
   const seen = new Set<string>();
   let doors = 0;
   let locked = 0;
+  let secretDoors = 0;
   for (const { edge, state } of plan.doors) {
     if (seen.has(edge)) continue;
     doors++;
     if (state === "locked") locked++;
+    if (state === "secret") secretDoors++;
     // Walk the doorway's line both ways, marking each door edge in it.
     const [x, y, side] = edge.split(",") as [string, string, "n" | "w"];
     const step = side === "n" ? [1, 0] : [0, 1];
@@ -157,7 +160,7 @@ export function summarize(plan: Pick<DungeonPlan, "rooms" | "asked" | "doors" | 
       }
     }
   }
-  return { rooms: plan.rooms.length, asked: plan.asked, doors, locked, traps: plan.traps.length };
+  return { rooms: plan.rooms.length, asked: plan.asked, doors, locked, traps: plan.traps.length, secretDoors, secretRooms: plan.rooms.filter((r) => r.secret).length, lights: plan.lights.length };
 }
 
 /**
@@ -165,10 +168,17 @@ export function summarize(plan: Pick<DungeonPlan, "rooms" | "asked" | "doors" | 
  * the room they make and the foot's counts. Fewer than two rooms is the
  * "fit" error, and anything thrown or refused is a generator bug.
  */
-export function previewOf(settings: DungeonSettings, seed: Seed, scene: SceneInput, make: (settings: DungeonSettings, seed: Seed) => DungeonPlan = generate): Preview {
+export function previewOf(
+  settings: DungeonSettings,
+  seed: Seed,
+  scene: SceneInput,
+  context: PlanContext,
+  key: KeyInput | null,
+  make: (settings: DungeonSettings, seed: Seed, context: PlanContext) => DungeonPlan = generate,
+): Preview {
   let plan: DungeonPlan;
   try {
-    plan = make(settings, seed);
+    plan = make(settings, seed, context);
   } catch (err) {
     console.error("raccoon: the dungeon generator failed", err);
     return { ok: false, error: "bug" };
@@ -176,7 +186,7 @@ export function previewOf(settings: DungeonSettings, seed: Seed, scene: SceneInp
   if (plan.rooms.length < MIN_ROOMS) return { ok: false, error: "fit" };
   let landed: Landed;
   try {
-    landed = landDungeon(plan, previewScene(scene, plan), settings.band);
+    landed = landDungeon(plan, previewScene(scene, plan), settings.band, context, key);
   } catch (err) {
     console.error("raccoon: a generated dungeon could not be landed", err);
     return { ok: false, error: "bug" };

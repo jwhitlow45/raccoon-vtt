@@ -69,7 +69,7 @@ test("DG-B: the largest Wide topology's 198 door edges go in one build.edge, wel
   assert.ok(serializedBytes({ t: "op", n: 1_000_000, op: only, g: "0".repeat(36), groupScope: "setup" }) < FRAME_BYTES);
   assert.ok(clientOpSchema.safeParse(only).success);
   // Each doorway's two edges are one double door.
-  assert.deepEqual(summarize(plan), { rooms: 0, asked: 40, doors: 99, locked: 15, traps: 0 });
+  assert.deepEqual(summarize(plan), { rooms: 0, asked: 40, doors: 99, locked: 15, traps: 0, secretDoors: 0, secretRooms: 0, lights: 0 });
 });
 
 test("DG-B: traps are the presets at the party's level, unfound, the pit's floor under the raised room's ground", () => {

@@ -9,7 +9,7 @@ import { dialogScene, twoRooms } from "./handPlans.ts";
 import { withIds } from "./ops.ts";
 import { landAll, previewOf, scratchRoom } from "./scratch.ts";
 import { dungeonOutcome, sceneContents, sendDungeon, type DungeonOutcome, type SendRoom } from "./send.ts";
-import { DEFAULT_SETTINGS } from "./settings.ts";
+import { DEFAULT_CONTEXT, DEFAULT_SETTINGS } from "./settings.ts";
 import { NO_ANSWERS } from "../uvtt/rules.ts";
 
 type Sent = { op: ClientOp; group: string | undefined; groupScope: string | undefined; onAnswer: OnAnswer | undefined; n: number | null };
@@ -18,7 +18,7 @@ type Shown = Pick<RoomView, "sceneId" | "sceneLoad" | "ended"> & { view: RoomSta
 /** A made dungeon, and the room the server would hold once every op of it is taken. */
 function made() {
   const plan = twoRooms();
-  const preview = previewOf(DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", dialogScene(plan), () => plan);
+  const preview = previewOf(DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", dialogScene(plan), DEFAULT_CONTEXT, null, () => plan);
   assert.ok(preview.ok);
   let id = 0;
   const fresh = withIds(preview.ops, () => `fresh-${++id}`);

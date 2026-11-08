@@ -115,6 +115,11 @@ export function saveChoices(roomId: string, c: Choices, storage: Storage | null 
     heights: c.heights,
     traps: c.traps,
     band: c.band,
+    deadEnds: c.deadEnds,
+    secrets: c.secrets,
+    lit: c.lit,
+    dressing: c.dressing,
+    key: c.key,
   };
   try {
     storage?.setItem(keyOf(roomId), JSON.stringify(kept));

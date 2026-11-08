@@ -149,7 +149,7 @@ export function GenerateDialog(props: {
     step({ k: "ask", id: asked });
     const seed = parsed.seed;
     const timer = setTimeout(() => {
-      preview(settings, seed, scene).then(
+      preview(settings, seed, scene, { feetPerCell }, null).then(
         (result) => {
           if (!mounted.current) return;
           if (!result.ok) return step({ k: "answer", id: asked, answer: { ok: false, error: result.error } });
@@ -164,7 +164,7 @@ export function GenerateDialog(props: {
     return () => clearTimeout(timer);
     // `key` holds the settings and the seed, so the effect runs once per change of either.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, scene]);
+  }, [key, scene, feetPerCell]);
 
   const busy = sending !== null;
   /** The choices and Make wait while Make sends, and stay so after a partial or unconfirmed one: a scene exists then, and another Make would be a second dungeon. */

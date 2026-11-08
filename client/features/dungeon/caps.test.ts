@@ -7,7 +7,7 @@ import { builderScene } from "../scenes/create.ts";
 import { SCENE_PLACEHOLDER } from "./ops.ts";
 import { previewOf } from "./scratch.ts";
 import { newSeed } from "./seed.ts";
-import { HEIGHTS_MAX, MAX_DOOR_EDGES, roomCap, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
+import { DEFAULT_CONTEXT, HEIGHTS_MAX, LIT_MAX, MAX_DOOR_EDGES, roomCap, SECRETS_MAX, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
 
 /*
  * The caps at the largest choices (docs/design/design-v1-dungeon-generator.md
@@ -44,8 +44,13 @@ test("DG-B: the largest choices stay at or under 80% of the sight cap with pits 
       heights: HEIGHTS_MAX,
       traps: TRAPS_MAX,
       band: "17-20",
+      deadEnds: true,
+      secrets: SECRETS_MAX,
+      lit: LIT_MAX,
+      dressing: "full",
+      key: true,
     };
-    const made = previewOf(s, seedOf(i), builderScene({ id: "x", name: "Dungeon", w: 100, h: 100 }));
+    const made = previewOf(s, seedOf(i), builderScene({ id: "x", name: "Dungeon", w: 100, h: 100 }), DEFAULT_CONTEXT, null);
     assert.ok(made.ok, `seed ${i} lands (${JSON.stringify(s)})`);
     const counted = withPitsCounted(made.room, SCENE_PLACEHOLDER);
     const scene = counted.scenes[SCENE_PLACEHOLDER]!;

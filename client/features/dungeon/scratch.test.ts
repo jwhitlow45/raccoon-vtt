@@ -5,7 +5,7 @@ import { markIn } from "#shared/rules/heights.ts";
 import { dialogScene, twoRooms } from "./handPlans.ts";
 import { buildOps, SCENE_PLACEHOLDER } from "./ops.ts";
 import { landAll, landDungeon, previewOf, previewScene, scratchRoom } from "./scratch.ts";
-import { DEFAULT_SETTINGS } from "./settings.ts";
+import { DEFAULT_CONTEXT, DEFAULT_SETTINGS } from "./settings.ts";
 import type { DungeonPlan } from "./plan.ts";
 
 const SEED = "1K7QH2MXA9F3TWQ5";
@@ -16,7 +16,7 @@ function chunkOf(room: ReturnType<typeof scratchRoom>, x: number, y: number) {
 
 test("DG-B: a plan lands whole in a room holding only its scene, traps armed and unfound", () => {
   const plan = twoRooms();
-  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4");
+  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4", DEFAULT_CONTEXT, null);
   assert.ok(landed.ok, landed.ok ? "" : landed.why);
   const room = landed.room;
   assert.deepEqual(Object.keys(room.scenes), [SCENE_PLACEHOLDER]);
@@ -52,12 +52,12 @@ test("DG-B: a preview's scene is the dialog's under the placeholder id, square, 
 test("DG-B: a refusal names the op it stopped at, and nothing after it lands", () => {
   const plan = twoRooms();
   plan.traps = [{ preset: "hidden-pit", zone: { cells: [{ x: 29, y: 29, w: 2, h: 2 }] } }];
-  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4");
+  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4", DEFAULT_CONTEXT, null);
   assert.ok(!landed.ok);
   assert.match(landed.why, /^op 8: trap.create refused: a trap's squares lie inside its scene/);
   const noDoor = twoRooms();
   noDoor.traps = [{ preset: "poisoned-needle", zone: { door: { edge: "20,20,w" } } }];
-  const refused = landDungeon(noDoor, previewScene(dialogScene(noDoor), noDoor), "1-4");
+  const refused = landDungeon(noDoor, previewScene(dialogScene(noDoor), noDoor), "1-4", DEFAULT_CONTEXT, null);
   assert.ok(!refused.ok);
   assert.match(refused.why, /^op 8: trap.create refused/);
 });
@@ -65,7 +65,7 @@ test("DG-B: a refusal names the op it stopped at, and nothing after it lands", (
 test("DG-B: an op that does not parse is a bug, named as such", () => {
   const plan = twoRooms();
   plan.heights = [{ ft: 500, cells: ["16,4"] }];
-  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4");
+  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4", DEFAULT_CONTEXT, null);
   assert.ok(!landed.ok);
   assert.match(landed.why, /build.height does not parse/);
 });
@@ -102,14 +102,14 @@ test("DG-B: the room's limits are checked on each prefix", () => {
 
 test("DG-B: a preview is the plan, its ops, the room they make and the foot's counts, and a dungeon under two rooms is the fit error", () => {
   const plan = twoRooms();
-  const made = previewOf(DEFAULT_SETTINGS, SEED, dialogScene(plan), () => plan);
+  const made = previewOf(DEFAULT_SETTINGS, SEED, dialogScene(plan), DEFAULT_CONTEXT, null, () => plan);
   assert.ok(made.ok);
   assert.equal(made.plan, plan);
-  assert.deepEqual(made.summary, { rooms: 2, asked: 2, doors: 3, locked: 1, traps: 2 });
+  assert.deepEqual(made.summary, { rooms: 2, asked: 2, doors: 3, locked: 1, traps: 2, secretDoors: 0, secretRooms: 0, lights: 0 });
   assert.equal(made.ops.length, 10);
   assert.deepEqual(Object.keys(made.room.scenes), [SCENE_PLACEHOLDER]);
   const one = { ...plan, rooms: plan.rooms.slice(0, 1) };
-  assert.deepEqual(previewOf(DEFAULT_SETTINGS, SEED, dialogScene(plan), () => one), { ok: false, error: "fit" });
+  assert.deepEqual(previewOf(DEFAULT_SETTINGS, SEED, dialogScene(plan), DEFAULT_CONTEXT, null, () => one), { ok: false, error: "fit" });
 });
 
 test("DG-B: a generator that throws, or a plan the scratch room refuses, is the bug error", () => {
@@ -118,9 +118,9 @@ test("DG-B: a generator that throws, or a plan the scratch room refuses, is the 
   console.error = (...args: unknown[]) => void logged.push(args);
   try {
     const plan = twoRooms();
-    assert.deepEqual(previewOf(DEFAULT_SETTINGS, SEED, dialogScene(plan), () => { throw new Error("boom"); }), { ok: false, error: "bug" });
+    assert.deepEqual(previewOf(DEFAULT_SETTINGS, SEED, dialogScene(plan), DEFAULT_CONTEXT, null, () => { throw new Error("boom"); }), { ok: false, error: "bug" });
     const bad = { ...plan, traps: [{ preset: "hidden-pit", zone: { cells: [{ x: 40, y: 40, w: 2, h: 2 }] } }] };
-    assert.deepEqual(previewOf(DEFAULT_SETTINGS, SEED, dialogScene(plan), () => bad), { ok: false, error: "bug" });
+    assert.deepEqual(previewOf(DEFAULT_SETTINGS, SEED, dialogScene(plan), DEFAULT_CONTEXT, null, () => bad), { ok: false, error: "bug" });
     assert.equal(logged.length, 2, "each bug is logged for the console");
   } finally {
     console.error = quiet;

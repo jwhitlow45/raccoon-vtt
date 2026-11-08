@@ -1,8 +1,9 @@
 import type { SceneInput } from "../scenes/create.ts";
 import type { Preview } from "./client.ts";
+import type { KeyInput } from "./keyPage.ts";
 import { previewOf } from "./scratch.ts";
 import type { Seed } from "./seed.ts";
-import type { DungeonSettings } from "./settings.ts";
+import type { DungeonSettings, PlanContext } from "./settings.ts";
 
 /*
  * The dungeon worker (docs/design/design-v1-dungeon-generator.md 5.5 and 8,
@@ -12,7 +13,7 @@ import type { DungeonSettings } from "./settings.ts";
  * the order asked. The page drops answers it no longer wants.
  */
 
-export type ToWorker = { t: "preview"; id: number; settings: DungeonSettings; seed: Seed; scene: SceneInput };
+export type ToWorker = { t: "preview"; id: number; settings: DungeonSettings; seed: Seed; scene: SceneInput; context: PlanContext; key: KeyInput | null };
 export type FromWorker = { t: "preview"; id: number; preview: Preview };
 
 const scope = self as unknown as {
@@ -21,6 +22,6 @@ const scope = self as unknown as {
 };
 
 scope.addEventListener("message", (e) => {
-  const { id, settings, seed, scene } = e.data;
-  scope.postMessage({ t: "preview", id, preview: previewOf(settings, seed, scene) });
+  const { id, settings, seed, scene, context, key } = e.data;
+  scope.postMessage({ t: "preview", id, preview: previewOf(settings, seed, scene, context, key) });
 });

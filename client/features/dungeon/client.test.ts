@@ -4,7 +4,7 @@ import fc from "fast-check";
 import { holds } from "#shared/propertyTestutil.ts";
 import { DungeonPreviews, type Preview, type PreviewWorker } from "./client.ts";
 import { dialogScene, twoRooms } from "./handPlans.ts";
-import { DEFAULT_SETTINGS } from "./settings.ts";
+import { DEFAULT_CONTEXT, DEFAULT_SETTINGS } from "./settings.ts";
 import type { FromWorker, ToWorker } from "./worker.ts";
 
 /** A worker the test answers by hand: what it was sent, and a way to answer, crash or see it ended. */
@@ -43,7 +43,7 @@ function harness() {
   let calls = 0;
   const ask = () => {
     const n = ++calls;
-    void previews.preview({ ...DEFAULT_SETTINGS, rooms: n }, "1K7QH2MXA9F3TWQ5", dialogScene(twoRooms())).then((preview) => settled.push({ n, preview }));
+    void previews.preview({ ...DEFAULT_SETTINGS, rooms: n }, "1K7QH2MXA9F3TWQ5", dialogScene(twoRooms()), DEFAULT_CONTEXT, null).then((preview) => settled.push({ n, preview }));
     return n;
   };
   return { previews, workers, settled, ask, last: () => workers.at(-1)! };
@@ -119,7 +119,7 @@ test("DG-R1-08: a worker the page cannot start, or a message it cannot take, ans
     return w;
   });
   assert.doesNotThrow(() => previews.warm(), "the dialog's open never throws");
-  const ask = () => previews.preview(DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", dialogScene(twoRooms()));
+  const ask = () => previews.preview(DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", dialogScene(twoRooms()), DEFAULT_CONTEXT, null);
   assert.deepEqual(await ask(), { ok: false, error: "bug" }, "a start that throws answers the bug error");
   const later = ask();
   assert.equal(workers.length, 1, "the next preview starts a fresh worker");
@@ -133,7 +133,7 @@ test("DG-R1-08: a worker the page cannot start, or a message it cannot take, ans
   };
   const spawned: FakeWorker[] = [refusing, new FakeWorker()];
   const next = new DungeonPreviews(() => spawned.shift()!);
-  const ask2 = () => next.preview(DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", dialogScene(twoRooms()));
+  const ask2 = () => next.preview(DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", dialogScene(twoRooms()), DEFAULT_CONTEXT, null);
   assert.deepEqual(await ask2(), { ok: false, error: "bug" });
   assert.ok(refusing.ended);
   void ask2();

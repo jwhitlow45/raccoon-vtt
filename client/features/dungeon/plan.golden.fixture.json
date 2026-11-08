@@ -14,10 +14,15 @@
         "theme": "dungeon",
         "heights": 25,
         "traps": 2,
-        "band": "1-4"
+        "band": "1-4",
+        "deadEnds": true,
+        "secrets": 1,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
       },
       "seed": "1K7QH2MXA9F3TWQ5",
-      "sha256": "634d500912ceffbd3daa3362bc8e124adada30f14c81c8b5df98bbe36ac0d2c4"
+      "sha256": "08dc2de8a275c5221e1d2c8a719a6da9910b902e334f9d0e819a4b7774c8f15d"
     },
     {
       "name": "Small",
@@ -32,10 +37,15 @@
         "theme": "dungeon",
         "heights": 25,
         "traps": 2,
-        "band": "1-4"
+        "band": "1-4",
+        "deadEnds": true,
+        "secrets": 1,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
       },
       "seed": "1Q8V2DR4HJ0Y7ZB3",
-      "sha256": "482a617adfa4c31a17a3392fc64f4937ce719e98d909f3c43d4cc2933ca39c06"
+      "sha256": "c98f546c10113eafc045682dc2e7d52f35797af4fb551a29ff7df3e8bf175cae"
     },
     {
       "name": "Large",
@@ -50,10 +60,15 @@
         "theme": "dungeon",
         "heights": 25,
         "traps": 2,
-        "band": "1-4"
+        "band": "1-4",
+        "deadEnds": true,
+        "secrets": 1,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
       },
       "seed": "1M3T9WCEX5PK2AGN",
-      "sha256": "a59379b743675e0c56b0f42a0c136774515f8317faba14541f8ecc218465a93d"
+      "sha256": "239d5b8fc9bef7f4405094526d2d3263d02c8173e90c0297afffe27e355e5bc8"
     },
     {
       "name": "a Crypt, Dense, Winding and Wide",
@@ -68,10 +83,15 @@
         "theme": "crypt",
         "heights": 25,
         "traps": 2,
-        "band": "1-4"
+        "band": "1-4",
+        "deadEnds": true,
+        "secrets": 1,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
       },
       "seed": "1A0B1C2D3E4F5G6H",
-      "sha256": "2f350537f37edd2472ee60cd05debe04ecd87eb79f93f27550a36aa2697998f4"
+      "sha256": "7450f38e65603162ae82a020f1784fcb36b4394b0b7fb833907ca0a547a7fb93"
     },
     {
       "name": "Sparse and Straight, flat, no loops or traps",
@@ -86,10 +106,15 @@
         "theme": "dungeon",
         "heights": 0,
         "traps": 0,
-        "band": "1-4"
+        "band": "1-4",
+        "deadEnds": true,
+        "secrets": 1,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
       },
       "seed": "1ZZZZZZZZZZZZZZZ",
-      "sha256": "fec1c41c297f103dc7aacd0682a10988c7716e0769d475c5b8be3be06447f379"
+      "sha256": "875986515bd323a614e34392f6ce08317ed7429ebd6e1218e2286fd1b8d65f93"
     },
     {
       "name": "a Dense Winding Crypt with many traps",
@@ -104,10 +129,15 @@
         "theme": "crypt",
         "heights": 25,
         "traps": 4,
-        "band": "11-16"
+        "band": "11-16",
+        "deadEnds": true,
+        "secrets": 1,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
       },
       "seed": "1000000000000001",
-      "sha256": "203f09c9dc113d04a2320d738e748ea89560308fc4275a010dcbb558a7c9539e"
+      "sha256": "bcd2c7708ad1ceebe8feb1b429422d9d5513e4ca467268d66b30bcbb5a7a60cb"
     },
     {
       "name": "the largest Wide",
@@ -122,10 +152,15 @@
         "theme": "dungeon",
         "heights": 75,
         "traps": 6,
-        "band": "1-4"
+        "band": "1-4",
+        "deadEnds": true,
+        "secrets": 1,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
       },
       "seed": "1VVVVWWWWXXXXYYY",
-      "sha256": "2cdec79146c2b2c1690a15a7b28b77e73ae23bd22ff65f224924890efffdcfad"
+      "sha256": "1bc314d16d68e7129789e9c5f7f2419f67ca76fde97e59d8497432bd0978c203"
     },
     {
       "name": "the largest Narrow",
@@ -140,10 +175,15 @@
         "theme": "dungeon",
         "heights": 50,
         "traps": 4,
-        "band": "1-4"
+        "band": "1-4",
+        "deadEnds": true,
+        "secrets": 1,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
       },
       "seed": "1RS7TV8WX9YZ0123",
-      "sha256": "004d915ee1ce8495c715d844fb4d63f7962e9f21dd74366e1752cef6bcee32ba"
+      "sha256": "676a7f0c062627e4cbc06aa5cddae88733db0098ef5d0d2d19d6dcfe4b686a04"
     },
     {
       "name": "the smallest",
@@ -158,10 +198,15 @@
         "theme": "dungeon",
         "heights": 25,
         "traps": 2,
-        "band": "1-4"
+        "band": "1-4",
+        "deadEnds": true,
+        "secrets": 1,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
       },
       "seed": "1HJKMNPQRST45678",
-      "sha256": "daa89dfecb76a052156812e283d13efe31e1c99823bc12b5c14048649369eee0"
+      "sha256": "a75ec24f83ffbbf371b831c182bf2680d952349edca5025f990e9240681ca55a"
     },
     {
       "name": "Custom and Wide",
@@ -176,10 +221,15 @@
         "theme": "dungeon",
         "heights": 10,
         "traps": 3,
-        "band": "17-20"
+        "band": "17-20",
+        "deadEnds": true,
+        "secrets": 1,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
       },
       "seed": "1D6E7F8G9H0J1K2M",
-      "sha256": "e009ecc1dffff0084ee7821d7b27432222e27a55570fcd8ff42875c0d3c26b5d"
+      "sha256": "0612f8459e428e3d8da16b6a03ea8a1c8db72630851b6dad060004bdd59ba12e"
     },
     {
       "name": "a Large Straight Wide Crypt",
@@ -194,10 +244,15 @@
         "theme": "crypt",
         "heights": 25,
         "traps": 2,
-        "band": "1-4"
+        "band": "1-4",
+        "deadEnds": true,
+        "secrets": 1,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
       },
       "seed": "1N3P4Q5R6S7T8V9W",
-      "sha256": "2a58a7d593a6b690f0faab3baa5528e91b249b54d020cf3fd7dbee241f63d061"
+      "sha256": "8f583bb43029bd0915988ae7f28483e6a7c57e8fa4aac733990ee3f6021cc0da"
     },
     {
       "name": "Bending with traps at 5 to 10",
@@ -212,10 +267,15 @@
         "theme": "dungeon",
         "heights": 25,
         "traps": 4,
-        "band": "5-10"
+        "band": "5-10",
+        "deadEnds": true,
+        "secrets": 1,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
       },
       "seed": "1X0Y1Z2A3B4C5D6E",
-      "sha256": "3ed14d3a442cc8272fe4669fe18252a2459f4e284991d0b5c0bb653ab512a7b8"
+      "sha256": "99107a84f8f6b848dd9f495200802eda6ec8152ca699c5929129d5cbf9928374"
     }
   ]
 }

@@ -1,9 +1,10 @@
 import type { RoomState } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { SceneInput } from "../scenes/create.ts";
+import type { KeyInput } from "./keyPage.ts";
 import type { DungeonPlan } from "./plan.ts";
 import type { Seed } from "./seed.ts";
-import type { DungeonSettings } from "./settings.ts";
+import type { DungeonSettings, PlanContext } from "./settings.ts";
 import type { FromWorker, ToWorker } from "./worker.ts";
 
 /*
@@ -16,7 +17,8 @@ import type { FromWorker, ToWorker } from "./worker.ts";
  * ends the worker and drops whatever was waiting. Nothing here sends an op.
  */
 
-export type Summary = { rooms: number; asked: number; doors: number; locked: number; traps: number };
+/** The foot's counts. Secret doors count doorways as doors do, and are counted among them. */
+export type Summary = { rooms: number; asked: number; doors: number; locked: number; traps: number; secretDoors: number; secretRooms: number; lights: number };
 
 export type Preview = { ok: true; plan: DungeonPlan; ops: ClientOp[]; room: RoomState; summary: Summary } | { ok: false; error: "fit" | "bug" };
 
@@ -53,10 +55,10 @@ export class DungeonPreviews {
     }
   }
 
-  preview(settings: DungeonSettings, seed: Seed, scene: SceneInput): Promise<Preview> {
+  preview(settings: DungeonSettings, seed: Seed, scene: SceneInput, context: PlanContext, key: KeyInput | null): Promise<Preview> {
     const id = ++this.#next;
     return new Promise((resolve) => {
-      const request = { id, message: { t: "preview", id, settings, seed, scene } satisfies ToWorker, resolve };
+      const request = { id, message: { t: "preview", id, settings, seed, scene, context, key } satisfies ToWorker, resolve };
       // A request still waiting is no longer wanted: only the newest is drawn next.
       this.#waiting = request;
       this.#pump();
@@ -124,9 +126,9 @@ function previews(): DungeonPreviews {
   return shared;
 }
 
-/** A preview of the choices and seed, drawn in the worker. Only the newest call's promise settles. */
-export function preview(settings: DungeonSettings, seed: Seed, scene: SceneInput): Promise<Preview> {
-  return previews().preview(settings, seed, scene);
+/** A preview of the choices and seed at the room's scale, with its key or none, drawn in the worker. Only the newest call's promise settles. */
+export function preview(settings: DungeonSettings, seed: Seed, scene: SceneInput, context: PlanContext, key: KeyInput | null): Promise<Preview> {
+  return previews().preview(settings, seed, scene, context, key);
 }
 
 /** Loads the worker as the dialog opens (section 8). */

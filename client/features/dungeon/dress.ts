@@ -12,7 +12,7 @@ import type { Theme } from "./settings.ts";
  */
 
 /** Locked doors in a hundred, by theme. The rest are closed. */
-const LOCKED_IN_100: Readonly<Record<Theme, number>> = { dungeon: 15, crypt: 25 };
+const LOCKED_IN_100: Readonly<Record<Theme, number>> = { dungeon: 15, crypt: 25, cave: 0, mine: 10, sewer: 20 };
 const WOOD_CHANCE = [1, 5] as const;
 const RUBBLE_CHANCE = [1, 3] as const;
 const PIT_CHANCE = [1, 6] as const;
