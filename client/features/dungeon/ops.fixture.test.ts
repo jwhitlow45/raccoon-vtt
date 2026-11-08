@@ -5,7 +5,7 @@ import { builderScene } from "../scenes/create.ts";
 import { SCENE_PLACEHOLDER, trapPlaceholder } from "./ops.ts";
 import { parseSeed, versionChar } from "./seed.ts";
 import { previewOf } from "./scratch.ts";
-import { DEFAULT_CONTEXT, DEFAULT_SETTINGS, GENERATOR_VERSION, HEIGHTS_MAX, LIT_MAX, roomCap, SECRETS_MAX, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
+import { DEFAULT_CONTEXT, DEFAULT_SETTINGS, GENERATOR_VERSION, HEIGHTS_MAX, LIT_MAX, roomCap, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
 
 /*
  * The op fixture between the client and the server's tests (docs/design/design-v1-dungeon-generator.md
@@ -33,14 +33,15 @@ const LARGEST: DungeonSettings = {
   traps: TRAPS_MAX,
   band: "5-10",
   deadEnds: true,
-  secrets: SECRETS_MAX,
+  secrets: 0,
   lit: LIT_MAX,
   dressing: "full",
   key: true,
 };
 
+// Secret doors stay at None here until drules lane B's `cover` lands (phase 2 section 7): before it, a hidden secret door reaches players as a drawn wall.
 const CASES: { name: string; seed: string; settings: DungeonSettings }[] = [
-  { name: "medium", seed: `${versionChar()}K7Q-H2MX-A9F3-TWQ5`, settings: DEFAULT_SETTINGS },
+  { name: "medium", seed: `${versionChar()}K7Q-H2MX-A9F3-TWQ5`, settings: { ...DEFAULT_SETTINGS, secrets: 0 } },
   { name: "largest", seed: `${versionChar()}G3N-ERAT-0R5E-ED00`, settings: LARGEST },
 ];
 

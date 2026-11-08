@@ -17,7 +17,7 @@
     "traps": 2,
     "band": "1-4",
     "deadEnds": true,
-    "secrets": 1,
+    "secrets": 0,
     "lit": 25,
     "dressing": "some",
     "key": true
@@ -1058,7 +1058,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -1431,7 +1431,7 @@
     "traps": 6,
     "band": "5-10",
     "deadEnds": true,
-    "secrets": 6,
+    "secrets": 0,
     "lit": 100,
     "dressing": "full",
     "key": true
@@ -6221,7 +6221,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -6230,7 +6230,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -6473,7 +6473,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -6482,7 +6482,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -6869,7 +6869,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -6878,7 +6878,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -6923,7 +6923,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -6932,7 +6932,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -6959,7 +6959,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -6968,7 +6968,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -7607,7 +7607,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -7616,7 +7616,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -7661,7 +7661,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -7670,7 +7670,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -7697,7 +7697,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -7706,7 +7706,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -7733,7 +7733,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -7742,7 +7742,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -7769,7 +7769,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -7778,7 +7778,7 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": true,
+        "secret": false,
         "discovered": false
        }
       },
@@ -9274,7 +9274,6 @@
       "15,23",
       "14,24",
       "15,24",
-      "49,36",
       "87,39",
       "88,39",
       "59,58",
@@ -9308,6 +9307,7 @@
       "40,19",
       "82,33",
       "82,34",
+      "51,38",
       "56,43",
       "57,43",
       "56,44",
@@ -9329,8 +9329,8 @@
       "zone": {
        "cells": [
         {
-         "x": 16,
-         "y": 84,
+         "x": 82,
+         "y": 45,
          "w": 2,
          "h": 2
         }
@@ -9375,7 +9375,7 @@
        ],
        "hits": "trigger",
        "pit": {
-        "floor": -30
+        "floor": -35
        }
       }
      }
@@ -9388,8 +9388,8 @@
       "zone": {
        "cells": [
         {
-         "x": 15,
-         "y": 49,
+         "x": 33,
+         "y": 18,
          "w": 1,
          "h": 1
         }
@@ -9445,9 +9445,9 @@
          "shape": "cone",
          "size": 30,
          "origin": {
-          "x": 15.5,
-          "y": 49.5,
-          "z": 5
+          "x": 33.5,
+          "y": 18.5,
+          "z": 10
          },
          "yaw": 0,
          "includeOrigin": false
@@ -9464,12 +9464,12 @@
       "zone": {
        "wire": {
         "a": [
-         79,
-         36.5
+         3,
+         82.5
         ],
         "b": [
-         81,
-         36.5
+         5,
+         82.5
         ]
        }
       },
@@ -9512,8 +9512,8 @@
        "hits": {
         "cells": [
          {
-          "x": 79,
-          "y": 36,
+          "x": 3,
+          "y": 82,
           "w": 2,
           "h": 1
          }
@@ -9530,8 +9530,8 @@
       "zone": {
        "cells": [
         {
-         "x": 58,
-         "y": 80,
+         "x": 23,
+         "y": 32,
          "w": 1,
          "h": 1
         }
@@ -9587,9 +9587,9 @@
          "shape": "cone",
          "size": 30,
          "origin": {
-          "x": 58.5,
-          "y": 80.5,
-          "z": -5
+          "x": 23.5,
+          "y": 32.5,
+          "z": 0
          },
          "yaw": 0,
          "includeOrigin": false
@@ -9721,7 +9721,7 @@
       "sceneId": "dungeon-scene",
       "zone": {
        "door": {
-        "edge": "32,41,w"
+        "edge": "36,9,n"
        }
       },
       "name": "Poisoned Needle",
@@ -9780,8 +9780,8 @@
       "zone": {
        "cells": [
         {
-         "x": 81,
-         "y": 74,
+         "x": 41,
+         "y": 95,
          "w": 1,
          "h": 1
         }
@@ -9837,8 +9837,8 @@
          "shape": "cone",
          "size": 30,
          "origin": {
-          "x": 81.5,
-          "y": 74.5,
+          "x": 41.5,
+          "y": 95.5,
           "z": 0
          },
          "yaw": 0,
@@ -9856,341 +9856,8 @@
       "zone": {
        "cells": [
         {
-         "x": 85,
-         "y": 87,
-         "w": 2,
-         "h": 2
-        }
-       ]
-      },
-      "name": "Spiked Pit",
-      "rig": {
-       "who": "party",
-       "floor": true,
-       "resets": "never",
-       "stops": true,
-       "foundOnSpring": true,
-       "damage": [
-        {
-         "formula": "3d6",
-         "type": "bludgeoning"
-        },
-        {
-         "formula": "3d8",
-         "type": "piercing"
-        }
-       ],
-       "message": "The floor gives way onto spikes!",
-       "sound": "crash",
-       "actions": [],
-       "find": [
-        {
-         "ability": "int",
-         "skill": "investigation",
-         "dc": 15,
-         "what": "the pit's lid"
-        }
-       ],
-       "notice": false,
-       "disarm": {
-        "text": "Wedge an Iron Spike between the lid and the floor, or hold it shut with Arcane Lock."
-       },
-       "note": "A 30-foot pit with spikes at the bottom. The lid stays open once it opens. Climbing out needs a Climb Speed, climbing gear, or magic such as Spider Climb.",
-       "preset": "spiked-pit",
-       "on": [
-        "enter"
-       ],
-       "hits": "trigger",
-       "pit": {
-        "floor": -40
-       }
-      }
-     }
-    },
-    {
-     "t": "trap.create",
-     "trap": {
-      "id": "dungeon-trap-9",
-      "sceneId": "dungeon-scene",
-      "zone": {
-       "wire": {
-        "a": [
-         80,
-         25.5
-        ],
-        "b": [
-         82,
-         25.5
-        ]
-       }
-      },
-      "name": "Collapsing Roof",
-      "rig": {
-       "who": "party",
-       "floor": true,
-       "resets": "never",
-       "stops": true,
-       "foundOnSpring": true,
-       "save": {
-        "ability": "dex",
-        "dc": 15,
-        "onPass": "half"
-       },
-       "damage": [
-        {
-         "formula": "4d10",
-         "type": "bludgeoning"
-        }
-       ],
-       "message": "The ceiling comes crashing down!",
-       "sound": "crash",
-       "actions": [],
-       "find": [
-        {
-         "ability": "wis",
-         "skill": "perception",
-         "dc": 11,
-         "what": "the trip wire and the unstable ceiling"
-        }
-       ],
-       "notice": true,
-       "disarm": {
-        "text": "Once found, the trip wire can be cut or avoided, no check needed."
-       },
-       "note": "Draw the squares under the unstable ceiling: everyone there is hit. Rubble from the collapse turns the trapped area into Difficult Terrain.",
-       "preset": "collapsing-roof",
-       "on": [],
-       "hits": {
-        "cells": [
-         {
-          "x": 80,
-          "y": 25,
-          "w": 2,
-          "h": 1
-         }
-        ]
-       }
-      }
-     }
-    },
-    {
-     "t": "trap.create",
-     "trap": {
-      "id": "dungeon-trap-10",
-      "sceneId": "dungeon-scene",
-      "zone": {
-       "wire": {
-        "a": [
-         33,
-         34.5
-        ],
-        "b": [
-         35,
-         34.5
-        ]
-       }
-      },
-      "name": "Collapsing Roof",
-      "rig": {
-       "who": "party",
-       "floor": true,
-       "resets": "never",
-       "stops": true,
-       "foundOnSpring": true,
-       "save": {
-        "ability": "dex",
-        "dc": 15,
-        "onPass": "half"
-       },
-       "damage": [
-        {
-         "formula": "4d10",
-         "type": "bludgeoning"
-        }
-       ],
-       "message": "The ceiling comes crashing down!",
-       "sound": "crash",
-       "actions": [],
-       "find": [
-        {
-         "ability": "wis",
-         "skill": "perception",
-         "dc": 11,
-         "what": "the trip wire and the unstable ceiling"
-        }
-       ],
-       "notice": true,
-       "disarm": {
-        "text": "Once found, the trip wire can be cut or avoided, no check needed."
-       },
-       "note": "Draw the squares under the unstable ceiling: everyone there is hit. Rubble from the collapse turns the trapped area into Difficult Terrain.",
-       "preset": "collapsing-roof",
-       "on": [],
-       "hits": {
-        "cells": [
-         {
-          "x": 33,
-          "y": 34,
-          "w": 2,
-          "h": 1
-         }
-        ]
-       }
-      }
-     }
-    },
-    {
-     "t": "trap.create",
-     "trap": {
-      "id": "dungeon-trap-11",
-      "sceneId": "dungeon-scene",
-      "zone": {
-       "cells": [
-        {
-         "x": 61,
-         "y": 26,
-         "w": 1,
-         "h": 1
-        }
-       ]
-      },
-      "name": "Fire-Casting Statue",
-      "rig": {
-       "who": "party",
-       "floor": true,
-       "resets": "nextTurn",
-       "stops": true,
-       "foundOnSpring": true,
-       "save": {
-        "ability": "dex",
-        "dc": 15,
-        "onPass": "half"
-       },
-       "damage": [
-        {
-         "formula": "4d10",
-         "type": "fire"
-        }
-       ],
-       "message": "The statue breathes a cone of fire!",
-       "sound": "whoosh",
-       "actions": [],
-       "find": [
-        {
-         "ability": "wis",
-         "skill": "perception",
-         "dc": 15,
-         "what": "the pressure plate"
-        },
-        {
-         "ability": "wis",
-         "skill": "perception",
-         "dc": 10,
-         "what": "the glyph on the statue"
-        }
-       ],
-       "notice": true,
-       "disarm": {
-        "text": "Wedge an Iron Spike under the pressure plate, or deface the glyph with a sharp tool."
-       },
-       "note": "Place the 30-foot cone from the statue. It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
-       "preset": "fire-casting-statue",
-       "on": [
-        "enter",
-        "turnStart"
-       ],
-       "hits": {
-        "area": {
-         "shape": "cone",
-         "size": 30,
-         "origin": {
-          "x": 61.5,
-          "y": 26.5,
-          "z": 0
-         },
-         "yaw": 0,
-         "includeOrigin": false
-        }
-       }
-      }
-     }
-    },
-    {
-     "t": "trap.create",
-     "trap": {
-      "id": "dungeon-trap-12",
-      "sceneId": "dungeon-scene",
-      "zone": {
-       "wire": {
-        "a": [
-         38.5,
-         57
-        ],
-        "b": [
-         38.5,
-         59
-        ]
-       }
-      },
-      "name": "Collapsing Roof",
-      "rig": {
-       "who": "party",
-       "floor": true,
-       "resets": "never",
-       "stops": true,
-       "foundOnSpring": true,
-       "save": {
-        "ability": "dex",
-        "dc": 15,
-        "onPass": "half"
-       },
-       "damage": [
-        {
-         "formula": "4d10",
-         "type": "bludgeoning"
-        }
-       ],
-       "message": "The ceiling comes crashing down!",
-       "sound": "crash",
-       "actions": [],
-       "find": [
-        {
-         "ability": "wis",
-         "skill": "perception",
-         "dc": 11,
-         "what": "the trip wire and the unstable ceiling"
-        }
-       ],
-       "notice": true,
-       "disarm": {
-        "text": "Once found, the trip wire can be cut or avoided, no check needed."
-       },
-       "note": "Draw the squares under the unstable ceiling: everyone there is hit. Rubble from the collapse turns the trapped area into Difficult Terrain.",
-       "preset": "collapsing-roof",
-       "on": [],
-       "hits": {
-        "cells": [
-         {
-          "x": 38,
-          "y": 57,
-          "w": 1,
-          "h": 2
-         }
-        ]
-       }
-      }
-     }
-    },
-    {
-     "t": "trap.create",
-     "trap": {
-      "id": "dungeon-trap-13",
-      "sceneId": "dungeon-scene",
-      "zone": {
-       "cells": [
-        {
-         "x": 91,
-         "y": 22,
+         "x": 24,
+         "y": 56,
          "w": 2,
          "h": 2
         }
@@ -10243,13 +9910,346 @@
     {
      "t": "trap.create",
      "trap": {
+      "id": "dungeon-trap-9",
+      "sceneId": "dungeon-scene",
+      "zone": {
+       "wire": {
+        "a": [
+         21,
+         47.5
+        ],
+        "b": [
+         23,
+         47.5
+        ]
+       }
+      },
+      "name": "Collapsing Roof",
+      "rig": {
+       "who": "party",
+       "floor": true,
+       "resets": "never",
+       "stops": true,
+       "foundOnSpring": true,
+       "save": {
+        "ability": "dex",
+        "dc": 15,
+        "onPass": "half"
+       },
+       "damage": [
+        {
+         "formula": "4d10",
+         "type": "bludgeoning"
+        }
+       ],
+       "message": "The ceiling comes crashing down!",
+       "sound": "crash",
+       "actions": [],
+       "find": [
+        {
+         "ability": "wis",
+         "skill": "perception",
+         "dc": 11,
+         "what": "the trip wire and the unstable ceiling"
+        }
+       ],
+       "notice": true,
+       "disarm": {
+        "text": "Once found, the trip wire can be cut or avoided, no check needed."
+       },
+       "note": "Draw the squares under the unstable ceiling: everyone there is hit. Rubble from the collapse turns the trapped area into Difficult Terrain.",
+       "preset": "collapsing-roof",
+       "on": [],
+       "hits": {
+        "cells": [
+         {
+          "x": 21,
+          "y": 47,
+          "w": 2,
+          "h": 1
+         }
+        ]
+       }
+      }
+     }
+    },
+    {
+     "t": "trap.create",
+     "trap": {
+      "id": "dungeon-trap-10",
+      "sceneId": "dungeon-scene",
+      "zone": {
+       "wire": {
+        "a": [
+         86,
+         11.5
+        ],
+        "b": [
+         88,
+         11.5
+        ]
+       }
+      },
+      "name": "Collapsing Roof",
+      "rig": {
+       "who": "party",
+       "floor": true,
+       "resets": "never",
+       "stops": true,
+       "foundOnSpring": true,
+       "save": {
+        "ability": "dex",
+        "dc": 15,
+        "onPass": "half"
+       },
+       "damage": [
+        {
+         "formula": "4d10",
+         "type": "bludgeoning"
+        }
+       ],
+       "message": "The ceiling comes crashing down!",
+       "sound": "crash",
+       "actions": [],
+       "find": [
+        {
+         "ability": "wis",
+         "skill": "perception",
+         "dc": 11,
+         "what": "the trip wire and the unstable ceiling"
+        }
+       ],
+       "notice": true,
+       "disarm": {
+        "text": "Once found, the trip wire can be cut or avoided, no check needed."
+       },
+       "note": "Draw the squares under the unstable ceiling: everyone there is hit. Rubble from the collapse turns the trapped area into Difficult Terrain.",
+       "preset": "collapsing-roof",
+       "on": [],
+       "hits": {
+        "cells": [
+         {
+          "x": 86,
+          "y": 11,
+          "w": 2,
+          "h": 1
+         }
+        ]
+       }
+      }
+     }
+    },
+    {
+     "t": "trap.create",
+     "trap": {
+      "id": "dungeon-trap-11",
+      "sceneId": "dungeon-scene",
+      "zone": {
+       "cells": [
+        {
+         "x": 15,
+         "y": 18,
+         "w": 1,
+         "h": 1
+        }
+       ]
+      },
+      "name": "Fire-Casting Statue",
+      "rig": {
+       "who": "party",
+       "floor": true,
+       "resets": "nextTurn",
+       "stops": true,
+       "foundOnSpring": true,
+       "save": {
+        "ability": "dex",
+        "dc": 15,
+        "onPass": "half"
+       },
+       "damage": [
+        {
+         "formula": "4d10",
+         "type": "fire"
+        }
+       ],
+       "message": "The statue breathes a cone of fire!",
+       "sound": "whoosh",
+       "actions": [],
+       "find": [
+        {
+         "ability": "wis",
+         "skill": "perception",
+         "dc": 15,
+         "what": "the pressure plate"
+        },
+        {
+         "ability": "wis",
+         "skill": "perception",
+         "dc": 10,
+         "what": "the glyph on the statue"
+        }
+       ],
+       "notice": true,
+       "disarm": {
+        "text": "Wedge an Iron Spike under the pressure plate, or deface the glyph with a sharp tool."
+       },
+       "note": "Place the 30-foot cone from the statue. It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
+       "preset": "fire-casting-statue",
+       "on": [
+        "enter",
+        "turnStart"
+       ],
+       "hits": {
+        "area": {
+         "shape": "cone",
+         "size": 30,
+         "origin": {
+          "x": 15.5,
+          "y": 18.5,
+          "z": -10
+         },
+         "yaw": 0,
+         "includeOrigin": false
+        }
+       }
+      }
+     }
+    },
+    {
+     "t": "trap.create",
+     "trap": {
+      "id": "dungeon-trap-12",
+      "sceneId": "dungeon-scene",
+      "zone": {
+       "wire": {
+        "a": [
+         19.5,
+         66
+        ],
+        "b": [
+         19.5,
+         68
+        ]
+       }
+      },
+      "name": "Collapsing Roof",
+      "rig": {
+       "who": "party",
+       "floor": true,
+       "resets": "never",
+       "stops": true,
+       "foundOnSpring": true,
+       "save": {
+        "ability": "dex",
+        "dc": 15,
+        "onPass": "half"
+       },
+       "damage": [
+        {
+         "formula": "4d10",
+         "type": "bludgeoning"
+        }
+       ],
+       "message": "The ceiling comes crashing down!",
+       "sound": "crash",
+       "actions": [],
+       "find": [
+        {
+         "ability": "wis",
+         "skill": "perception",
+         "dc": 11,
+         "what": "the trip wire and the unstable ceiling"
+        }
+       ],
+       "notice": true,
+       "disarm": {
+        "text": "Once found, the trip wire can be cut or avoided, no check needed."
+       },
+       "note": "Draw the squares under the unstable ceiling: everyone there is hit. Rubble from the collapse turns the trapped area into Difficult Terrain.",
+       "preset": "collapsing-roof",
+       "on": [],
+       "hits": {
+        "cells": [
+         {
+          "x": 19,
+          "y": 66,
+          "w": 1,
+          "h": 2
+         }
+        ]
+       }
+      }
+     }
+    },
+    {
+     "t": "trap.create",
+     "trap": {
+      "id": "dungeon-trap-13",
+      "sceneId": "dungeon-scene",
+      "zone": {
+       "cells": [
+        {
+         "x": 83,
+         "y": 59,
+         "w": 2,
+         "h": 2
+        }
+       ]
+      },
+      "name": "Spiked Pit",
+      "rig": {
+       "who": "party",
+       "floor": true,
+       "resets": "never",
+       "stops": true,
+       "foundOnSpring": true,
+       "damage": [
+        {
+         "formula": "3d6",
+         "type": "bludgeoning"
+        },
+        {
+         "formula": "3d8",
+         "type": "piercing"
+        }
+       ],
+       "message": "The floor gives way onto spikes!",
+       "sound": "crash",
+       "actions": [],
+       "find": [
+        {
+         "ability": "int",
+         "skill": "investigation",
+         "dc": 15,
+         "what": "the pit's lid"
+        }
+       ],
+       "notice": false,
+       "disarm": {
+        "text": "Wedge an Iron Spike between the lid and the floor, or hold it shut with Arcane Lock."
+       },
+       "note": "A 30-foot pit with spikes at the bottom. The lid stays open once it opens. Climbing out needs a Climb Speed, climbing gear, or magic such as Spider Climb.",
+       "preset": "spiked-pit",
+       "on": [
+        "enter"
+       ],
+       "hits": "trigger",
+       "pit": {
+        "floor": -35
+       }
+      }
+     }
+    },
+    {
+     "t": "trap.create",
+     "trap": {
       "id": "dungeon-trap-14",
       "sceneId": "dungeon-scene",
       "zone": {
        "cells": [
         {
-         "x": 51,
-         "y": 75,
+         "x": 8,
+         "y": 49,
          "w": 2,
          "h": 2
         }
@@ -10307,8 +10307,8 @@
       "zone": {
        "cells": [
         {
-         "x": 46,
-         "y": 61,
+         "x": 27,
+         "y": 5,
          "w": 1,
          "h": 1
         }
@@ -10364,8 +10364,8 @@
          "shape": "cone",
          "size": 30,
          "origin": {
-          "x": 46.5,
-          "y": 61.5,
+          "x": 27.5,
+          "y": 5.5,
           "z": 0
          },
          "yaw": 0,
@@ -10383,8 +10383,8 @@
       "zone": {
        "cells": [
         {
-         "x": 83,
-         "y": 56,
+         "x": 47,
+         "y": 15,
          "w": 1,
          "h": 1
         }
@@ -10440,9 +10440,9 @@
          "shape": "cone",
          "size": 30,
          "origin": {
-          "x": 83.5,
-          "y": 56.5,
-          "z": -5
+          "x": 47.5,
+          "y": 15.5,
+          "z": 0
          },
          "yaw": 0,
          "includeOrigin": false
@@ -10459,8 +10459,8 @@
       "zone": {
        "cells": [
         {
-         "x": 92,
-         "y": 29,
+         "x": 48,
+         "y": 35,
          "w": 2,
          "h": 2
         }
@@ -10514,8 +10514,8 @@
       "zone": {
        "cells": [
         {
-         "x": 50,
-         "y": 34,
+         "x": 39,
+         "y": 31,
          "w": 1,
          "h": 1
         }
@@ -10571,8 +10571,8 @@
          "shape": "cone",
          "size": 30,
          "origin": {
-          "x": 50.5,
-          "y": 34.5,
+          "x": 39.5,
+          "y": 31.5,
           "z": 0
          },
          "yaw": 0,
@@ -10589,7 +10589,7 @@
       "sceneId": "dungeon-scene",
       "zone": {
        "door": {
-        "edge": "7,76,w"
+        "edge": "60,18,n"
        }
       },
       "name": "Poisoned Needle",
