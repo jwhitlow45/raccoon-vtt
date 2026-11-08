@@ -23,13 +23,15 @@ export function roomUpdate(tx: Tx, op: OpOf<"room.update">): void {
 
 /** Settings after a patch. New scenes on "squares" is stored as no setting, as every room from before it has. */
 function patchedSettings(settings: RoomSettings, patch: NonNullable<OpOf<"room.update">["settings"]>): RoomSettings {
-  const { newScenes, soundNames, ...rest } = patch;
+  const { newScenes, soundNames, soundDmOnly, ...rest } = patch;
   const next: RoomSettings = { ...settings, ...rest };
   if (newScenes === "squares") delete next.newScenes;
   else if (newScenes !== undefined) next.newScenes = newScenes;
   // Off is stored as no setting, as every room from before it has (docs/design/design-v1-music.md 6.1).
   if (soundNames === false) delete next.soundNames;
   else if (soundNames === true) next.soundNames = true;
+  if (soundDmOnly === false) delete next.soundDmOnly;
+  else if (soundDmOnly === true) next.soundDmOnly = true;
   return next;
 }
 

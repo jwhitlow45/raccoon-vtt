@@ -114,6 +114,8 @@ const settings = z.strictObject({
   newScenePlayers: memorySchemas.scenePreset.optional(),
   // Backups from before sound have none, which reads as off (docs/design/design-v1-music.md 4.1).
   soundNames: z.literal(true).optional(),
+  // Backups from before it have none, which reads as off (docs/design/design-v1-sound-dm-only.md 8).
+  soundDmOnly: z.literal(true).optional(),
 });
 
 const meta = z.strictObject({

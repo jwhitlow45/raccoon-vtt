@@ -94,6 +94,16 @@ describe("a backup's sound (docs/design/design-v1-music.md 6.7)", () => {
     passes((s) => delete s.meta.settings.soundNames, "absent");
     refused((s) => ((s.meta.settings as Record<string, unknown>).soundNames = false), /soundNames/);
   });
+
+  test("Only DM devices play is true or absent, and a room keeps it (docs/design/design-v1-sound-dm-only.md 8)", () => {
+    const on = full();
+    on.meta.settings = { ...on.meta.settings, soundDmOnly: true };
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(on)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assert.equal(parsed.state.meta.settings.soundDmOnly, true);
+    passes((s) => delete s.meta.settings.soundDmOnly, "absent");
+    for (const wrong of [false, "on", 1]) refused((s) => ((s.meta.settings as Record<string, unknown>).soundDmOnly = wrong), /soundDmOnly/);
+  });
 });
 
 describe("a stored sound (6.1, 8)", () => {

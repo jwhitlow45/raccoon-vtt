@@ -1890,6 +1890,33 @@ describe("op version 49, the guarded reveal (docs/design/design-v1-qol.md 6, D-2
   });
 });
 
+describe("op version 50 and snapshot 39, only DM devices play (docs/design/design-v1-sound-dm-only.md 8)", () => {
+  test("keeps stored operations and snapshots unchanged through the identity steps, the switch on and off included", () => {
+    assert.ok(OP_VERSION >= 50);
+    assert.ok(SNAPSHOT_VERSION >= 39);
+    const op = { t: "music.set", fade: 2 };
+    assert.equal(runMigrations(op, 49, 50, opMigrations), op);
+    assert.equal(migrateOp(op, 49), op);
+    for (const on of [true, false]) {
+      const setting = { t: "room.update", settings: { soundDmOnly: on } };
+      assert.equal(migrateOp(setting, 50), setting);
+      assert.ok(opSchema.safeParse(setting).success);
+    }
+    // Absent reads as off, so an older room needs nothing filled in.
+    const state = room();
+    assert.equal(runMigrations(state, 38, 39, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 38), state);
+  });
+
+  test("a build at 49 and 38 refuses a room from this one, so it never sends players the sound the switch keeps from them", () => {
+    const op = { t: "room.update", settings: { soundDmOnly: true } };
+    assert.throws(() => runMigrations(op, 50, 49, opMigrations), /down/);
+    const state = room();
+    state.meta.settings = { ...state.meta.settings, soundDmOnly: true };
+    assert.throws(() => runMigrations(state, 39, 38, snapshotMigrations), /down/);
+  });
+});
+
 describe("the map discovery upgrade step (docs/design/design-v1-map-discovery.md 5.5, ASTRA-31)", () => {
   const scenes = {
     s1: scene("s1", { fogEnabled: true, vision: { on: true, light: "dark" } }),

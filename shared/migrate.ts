@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 38;
-export const OP_VERSION = 49;
+export const SNAPSHOT_VERSION = 39;
+export const OP_VERSION = 50;
 
 export type MigrationStep = {
   from: number;
@@ -244,6 +244,10 @@ export const snapshotMigrations: MigrationStep[] = [
   // a v37 room is a v38 room as it is. The number moves so that an older build, whose strict state schema refuses the
   // field, refuses a v38 snapshot instead of loading it.
   { from: 37, to: 38, apply: (state) => state },
+  // Only DM devices play (docs/design/design-v1-sound-dm-only.md 8): the `soundDmOnly` setting is optional, and absent
+  // reads as off, so a v38 room is a v39 room as it is. The number moves so that an older build, whose strict state
+  // schema refuses the field, refuses a v39 snapshot instead of loading it and sending players the sound.
+  { from: 38, to: 39, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1213,6 +1217,22 @@ export const opMigrations: MigrationStep[] = [
     // its last snapshot, which an older build refuses to migrate down.
     from: 48,
     to: 49,
+    apply: (op) => op,
+  },
+  {
+    // Only DM devices play (docs/design/design-v1-sound-dm-only.md 8):
+    // `room.update`'s `soundDmOnly` is a new optional field, so no stored op
+    // changes shape and the step is the identity. No stored op from before
+    // can meet the setting, since only a version 50 op sets it, so the
+    // effect's routing needs no gate.
+    // Deploy: back up the database just before, and reload open pages,
+    // table displays included, so the switch and the players' line show.
+    // An old player page plays nothing meanwhile, since the server sends it
+    // nothing about sound. Rollback needs the backup for a room with
+    // version 50 ops after its last snapshot or a v39 snapshot, which an
+    // older build refuses.
+    from: 49,
+    to: 50,
     apply: (op) => op,
   },
 ];

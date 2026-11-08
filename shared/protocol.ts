@@ -446,6 +446,8 @@ const settingsPatch = z.strictObject({
   newScenePlayers: z.enum(SCENE_PRESETS).optional(),
   /** Players see what is playing (docs/design/design-v1-music.md 4.1). False removes the stored setting. */
   soundNames: z.boolean().optional(),
+  /** Only DM devices play (docs/design/design-v1-sound-dm-only.md 8). False removes the stored setting. */
+  soundDmOnly: z.boolean().optional(),
 });
 
 const fogShape = z.discriminatedUnion("kind", [

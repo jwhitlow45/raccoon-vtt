@@ -500,6 +500,7 @@ describe("no Setup op writes playing (D-261102-471)", () => {
       { t: "scene.update", sceneId: "s2", patch: { sound: { music: { playlistId: "tavern", repeat: "all", fade: 5 }, loops: [{ soundId: "rain", volume: 40 }] } } },
       { t: "scene.update", sceneId: "s1", patch: { sound: null } },
       { t: "room.update", settings: { soundNames: true } },
+      { t: "room.update", settings: { soundDmOnly: true } },
     ];
     for (const op of setup) {
       assert.equal(undoScope(op, state), "setup", op.t);
@@ -695,5 +696,20 @@ describe("a scene's Shuffle on the run it starts (docs/design/design-v1-music-pl
     const r = step(played, scene, 1_000);
     assert.equal(r.state.playing!.music, played.playing!.music);
     assert.equal(r.state.playing!.music?.shuffle, undefined);
+  });
+});
+
+describe("Only DM devices play (docs/design/design-v1-sound-dm-only.md 8)", () => {
+  const dmOnly = (on: boolean): Op => ({ t: "room.update", settings: { soundDmOnly: on } });
+
+  test("room.update stores it as true and clears it as no setting, a patch without it leaves it, and it is a Setup step", () => {
+    const on = step(soundRoom(), dmOnly(true));
+    assert.equal(on.state.meta.settings.soundDmOnly, true);
+    assert.equal(undoScope(dmOnly(true), soundRoom()), "setup");
+    const other = step(on.state, { t: "room.update", settings: { soundNames: true } });
+    assert.equal(other.state.meta.settings.soundDmOnly, true, "another setting's patch keeps it");
+    const off = step(other.state, dmOnly(false));
+    assert.equal("soundDmOnly" in off.state.meta.settings, false);
+    assert.deepEqual(step(soundRoom(), dmOnly(false)).state.meta.settings, soundRoom().meta.settings, "off on a room without it adds nothing");
   });
 });

@@ -486,6 +486,13 @@ export type RoomSettings = {
    * where players only hear them.
    */
   soundNames?: true;
+  /**
+   * Only DM devices play (docs/design/design-v1-sound-dm-only.md 8): players'
+   * devices and table displays get nothing of the room's sound, and an
+   * effect fired while it is on stays the DM's. Absent is off. The room
+   * keeps it until the DM turns it off, through every backup and import.
+   */
+  soundDmOnly?: true;
 };
 
 /** The 2024 defaults. See design section 6 for what each one means. */
