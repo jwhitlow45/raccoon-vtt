@@ -26,6 +26,14 @@ describe("deleting a scene", () => {
     assert.equal(MOVE_PLAYERS_FIRST, "Move the players to another scene first.");
   });
 
+  test("a scene with floors waits while the players start on any of its floors (docs/design/design-v1-floors.md 7.1)", () => {
+    const floors = ["tower", "tower-upper"];
+    assert.equal(deleteBlocked([crypt, road], "road", "tower-upper", ["road", ...floors]), MOVE_PLAYERS_FIRST);
+    assert.equal(deleteBlocked([crypt, road], "road", "road", ["road", ...floors]), MOVE_PLAYERS_FIRST);
+    assert.equal(deleteBlocked([crypt, road], "road", "crypt", ["road", ...floors]), null);
+    assert.equal(deleteBlocked([crypt, road], "road", null, ["road", ...floors]), null);
+  });
+
   test("the last scene never can, whoever is on it", () => {
     assert.equal(deleteBlocked([road], "road", "road"), LAST_SCENE);
     assert.equal(deleteBlocked([road], "road", null), LAST_SCENE);

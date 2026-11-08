@@ -19,7 +19,7 @@ import { thumbSceneOf } from "./thumbnail.ts";
  * stored thumbnail, which the mark says is out of date.
  */
 
-type Watched = Pick<RoomView, "you" | "sceneId" | "view" | "pending">;
+type Watched = Pick<RoomView, "you" | "projectedSceneId" | "view" | "pending">;
 
 export type ThumbWatch = {
   /**
@@ -51,18 +51,21 @@ export function createThumbWatch(): ThumbWatch {
         for (const p of s.pending) {
           if (p.n <= seen) continue;
           seen = p.n;
-          const id = thumbSceneOf(p.op, s.sceneId);
-          if (id !== null) dirty.set(id, p.n);
+          const id = thumbSceneOf(p.op, s.projectedSceneId);
+          // A scene's thumbnail shows its main floor, so an edit to another floor changes none (docs/design/design-v1-floors.md 10).
+          const floor = id === null ? undefined : s.view?.scenes[id]?.floor;
+          if (id !== null && (floor === undefined || floor.of === id)) dirty.set(id, p.n);
           // A copy starts with its original's stored thumbnail, which is out of date while the original is marked, so the copy is marked too.
           if (p.op.t === "scene.duplicate" && dirty.has(p.op.sceneId)) dirty.set(p.op.newSceneId, p.n);
         }
       }
       let left: { sceneId: string; room: RoomState } | null = null;
-      if (s.sceneId !== lastScene && lastScene !== null && dirty.has(lastScene)) {
+      // The projected scene changes with the scene, never with a switch of floor, so a switch draws nothing.
+      if (s.projectedSceneId !== lastScene && lastScene !== null && dirty.has(lastScene)) {
         if (lastView?.scenes[lastScene]) left = { sceneId: lastScene, room: lastView };
         else dirty.delete(lastScene);
       }
-      lastScene = s.sceneId;
+      lastScene = s.projectedSceneId;
       lastView = s.view;
       return s.you?.role === "dm" ? left : null;
     },

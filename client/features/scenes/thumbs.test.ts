@@ -17,74 +17,95 @@ describe("when a thumbnail is drawn", () => {
   test("leaving a scene this device changed hands back the view that still holds it", () => {
     const w = createThumbWatch();
     const a = view("a", "b");
-    assert.equal(w.observe({ you: dm, sceneId: "a", view: a, pending: [] }), null);
+    assert.equal(w.observe({ you: dm, projectedSceneId: "a", view: a, pending: [] }), null);
     const edited = view("a", "b");
-    assert.equal(w.observe({ you: dm, sceneId: "a", view: edited, pending: [{ n: 1, op: paint("a"), at: 0 }] }), null);
+    assert.equal(w.observe({ you: dm, projectedSceneId: "a", view: edited, pending: [{ n: 1, op: paint("a"), at: 0 }] }), null);
     assert.ok(w.changed("a"));
     // The snapshot of b replaces the view: the one before it still holds a.
-    const left = w.observe({ you: dm, sceneId: "b", view: view("a", "b"), pending: [] });
+    const left = w.observe({ you: dm, projectedSceneId: "b", view: view("a", "b"), pending: [] });
     assert.equal(left?.sceneId, "a");
     assert.equal(left?.room, edited);
   });
 
   test("a copy of a scene this device changed is marked too, so leaving the copy draws its own thumbnail", () => {
     const w = createThumbWatch();
-    w.observe({ you: dm, sceneId: "a", view: view("a"), pending: [{ n: 1, op: paint("a"), at: 0 }] });
+    w.observe({ you: dm, projectedSceneId: "a", view: view("a"), pending: [{ n: 1, op: paint("a"), at: 0 }] });
     const duplicate: ClientOp = { t: "scene.duplicate", sceneId: "a", newSceneId: "c", name: "A (copy)", include: { creatures: true, characters: false, fog: false, drawings: false } };
-    w.observe({ you: dm, sceneId: "a", view: view("a"), pending: [{ n: 2, op: duplicate, at: 0 }] });
+    w.observe({ you: dm, projectedSceneId: "a", view: view("a"), pending: [{ n: 2, op: duplicate, at: 0 }] });
     assert.ok(w.changed("c"));
     // The copy opens: the original is drawn as it is left.
-    assert.equal(w.observe({ you: dm, sceneId: "c", view: view("a", "c"), pending: [] })?.sceneId, "a");
+    assert.equal(w.observe({ you: dm, projectedSceneId: "c", view: view("a", "c"), pending: [] })?.sceneId, "a");
     // The copy carried the original's old picture. Leaving it draws its own.
-    assert.equal(w.observe({ you: dm, sceneId: "a", view: view("a", "c"), pending: [] })?.sceneId, "c");
+    assert.equal(w.observe({ you: dm, projectedSceneId: "a", view: view("a", "c"), pending: [] })?.sceneId, "c");
   });
 
   test("a copy of a scene this device has not changed keeps the original's thumbnail", () => {
     const w = createThumbWatch();
     const duplicate: ClientOp = { t: "scene.duplicate", sceneId: "a", newSceneId: "c", name: "A (copy)", include: { creatures: true, characters: false, fog: false, drawings: false } };
-    w.observe({ you: dm, sceneId: "a", view: view("a"), pending: [{ n: 1, op: duplicate, at: 0 }] });
+    w.observe({ you: dm, projectedSceneId: "a", view: view("a"), pending: [{ n: 1, op: duplicate, at: 0 }] });
     assert.equal(w.changed("c"), false);
-    assert.equal(w.observe({ you: dm, sceneId: "c", view: view("a", "c"), pending: [] }), null);
-    assert.equal(w.observe({ you: dm, sceneId: "a", view: view("a", "c"), pending: [] }), null);
+    assert.equal(w.observe({ you: dm, projectedSceneId: "c", view: view("a", "c"), pending: [] }), null);
+    assert.equal(w.observe({ you: dm, projectedSceneId: "a", view: view("a", "c"), pending: [] }), null);
   });
 
   test("a scene left unchanged, or changed only in ways a thumbnail does not show, is not drawn", () => {
     const w = createThumbWatch();
-    w.observe({ you: dm, sceneId: "a", view: view("a", "b"), pending: [{ n: 1, op: { t: "scene.update", sceneId: "a", patch: { name: "Crypt" } }, at: 0 }] });
-    assert.equal(w.observe({ you: dm, sceneId: "b", view: view("a", "b"), pending: [] }), null);
+    w.observe({ you: dm, projectedSceneId: "a", view: view("a", "b"), pending: [{ n: 1, op: { t: "scene.update", sceneId: "a", patch: { name: "Crypt" } }, at: 0 }] });
+    assert.equal(w.observe({ you: dm, projectedSceneId: "b", view: view("a", "b"), pending: [] }), null);
   });
 
   test("a player's view and a deleted scene draw nothing", () => {
     const player = createThumbWatch();
-    player.observe({ you: { memberId: "p", role: "player" }, sceneId: "a", view: view("a"), pending: [{ n: 1, op: paint("a"), at: 0 }] });
-    assert.equal(player.observe({ you: { memberId: "p", role: "player" }, sceneId: "b", view: view("b"), pending: [] }), null);
+    player.observe({ you: { memberId: "p", role: "player" }, projectedSceneId: "a", view: view("a"), pending: [{ n: 1, op: paint("a"), at: 0 }] });
+    assert.equal(player.observe({ you: { memberId: "p", role: "player" }, projectedSceneId: "b", view: view("b"), pending: [] }), null);
 
     const w = createThumbWatch();
-    w.observe({ you: dm, sceneId: "a", view: view("a", "b"), pending: [{ n: 1, op: paint("a"), at: 0 }] });
-    w.observe({ you: dm, sceneId: "a", view: view("b"), pending: [] });
-    assert.equal(w.observe({ you: dm, sceneId: "b", view: view("b"), pending: [] }), null);
+    w.observe({ you: dm, projectedSceneId: "a", view: view("a", "b"), pending: [{ n: 1, op: paint("a"), at: 0 }] });
+    w.observe({ you: dm, projectedSceneId: "a", view: view("b"), pending: [] });
+    assert.equal(w.observe({ you: dm, projectedSceneId: "b", view: view("b"), pending: [] }), null);
     assert.equal(w.changed("a"), false);
+  });
+
+  test("a switch of floor draws nothing, and an edit to a floor that is not the main one marks no thumbnail (docs/design/design-v1-floors.md 10)", () => {
+    const tower = (): RoomState =>
+      ({
+        scenes: {
+          g: { id: "g", floor: { of: "g", level: 0, name: "Ground floor" } },
+          u: { id: "u", floor: { of: "g", level: 1, name: "Upper floor" } },
+          b: { id: "b" },
+        },
+      }) as unknown as RoomState;
+    const w = createThumbWatch();
+    // The DM's projected scene is the main floor whichever floor is shown, so the switch to Upper is none.
+    w.observe({ you: dm, projectedSceneId: "g", view: tower(), pending: [{ n: 1, op: paint("g"), at: 0 }] });
+    assert.ok(w.changed("g"));
+    assert.equal(w.observe({ you: dm, projectedSceneId: "g", view: tower(), pending: [] }), null);
+    // An edit on Upper changes the main floor's picture not at all.
+    w.observe({ you: dm, projectedSceneId: "g", view: tower(), pending: [{ n: 2, op: paint("u"), at: 0 }] });
+    assert.equal(w.changed("u"), false);
+    // Leaving the scene draws the main floor.
+    assert.equal(w.observe({ you: dm, projectedSceneId: "b", view: tower(), pending: [] })?.sceneId, "g");
   });
 
   test("an op is counted once, however long it waits in the queue", () => {
     const w = createThumbWatch();
     const pending = [{ n: 4, op: paint("a"), at: 0 }];
-    w.observe({ you: dm, sceneId: "a", view: view("a"), pending });
+    w.observe({ you: dm, projectedSceneId: "a", view: view("a"), pending });
     const mark = w.begin("a")!;
     w.end("a", mark, true);
     // Still queued on the next state: not a new change.
-    w.observe({ you: dm, sceneId: "a", view: view("a"), pending });
+    w.observe({ you: dm, projectedSceneId: "a", view: view("a"), pending });
     assert.equal(w.changed("a"), false);
   });
 
   test("a drawing clears the mark only for changes made before it began, and one scene draws once at a time", () => {
     const w = createThumbWatch();
-    w.observe({ you: dm, sceneId: "a", view: view("a"), pending: [{ n: 1, op: paint("a"), at: 0 }] });
+    w.observe({ you: dm, projectedSceneId: "a", view: view("a"), pending: [{ n: 1, op: paint("a"), at: 0 }] });
     const mark = w.begin("a");
     assert.notEqual(mark, null);
     assert.equal(w.begin("a"), null);
     // An undo lands while it draws.
-    w.observe({ you: dm, sceneId: "a", view: view("a"), pending: [{ n: 2, op: { t: "undo", head: "00000000-0000-4000-8000-000000000001" } as ClientOp, at: 0 }] });
+    w.observe({ you: dm, projectedSceneId: "a", view: view("a"), pending: [{ n: 2, op: { t: "undo", head: "00000000-0000-4000-8000-000000000001" } as ClientOp, at: 0 }] });
     w.end("a", mark!, true);
     assert.ok(w.changed("a"));
     // A failed drawing keeps the mark for next time.
@@ -115,7 +136,7 @@ describe("a thumbnail update", () => {
       assets: { url: () => "" },
       picture: () => Promise.resolve("thumb-1"),
     };
-    thumbs.watch.observe({ you: dm, sceneId: "a", view: current, pending: [{ n: 1, op: paint("a"), at: 0 }] });
+    thumbs.watch.observe({ you: dm, projectedSceneId: "a", view: current, pending: [{ n: 1, op: paint("a"), at: 0 }] });
     const run = () => {
       const result = { settled: false };
       const work = makeThumbnail(thumbs, deps, "a", current);

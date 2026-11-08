@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import type { Scene } from "#shared/model.ts";
+import { mainFloorId } from "#shared/rules/floors.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { useSceneLoading } from "../../canvas/SceneLoading.tsx";
 import { Button } from "../../components/Button.tsx";
@@ -41,6 +42,8 @@ export function SceneList(props: {
   scenes: Scene[];
   viewingId: string | null;
   playerSceneId: string | null;
+  /** The scene a row's Move players sends the players to: the floor the DM shows when the row is its scene, else the row's main floor (movePlayers.ts). */
+  moveTarget?(row: Scene): Scene;
   /** A folder open for now, whatever this device keeps, for the search's route to a scene in it (features/search/route.ts). A tap on its header ends that. */
   shownFolder?: string | null;
   onShownFolderTap?(): void;
@@ -48,6 +51,13 @@ export function SceneList(props: {
   const { scenes, viewingId, playerSceneId } = props;
   const actions = useRoomActions();
   const roomId = useRoomView((s) => s.roomId);
+  const allScenes = useRoomView((s) => s.view?.scenes);
+  // Rows are main floors (D-261107-225), so a floor that is loading marks its scene's row, and a scene with floors says how many it holds.
+  const floorCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of Object.values(allScenes ?? {})) if (s.floor?.of !== undefined) counts.set(s.floor.of, (counts.get(s.floor.of) ?? 0) + 1);
+    return counts;
+  }, [allScenes]);
   const [arranging, setArranging] = useState(false);
   const [confirmMove, setConfirmMove] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(() => readCollapsed(browserStorage(), roomId));
@@ -55,15 +65,18 @@ export function SceneList(props: {
   const folderGroups = groups.filter((g) => g.folder !== null);
   const folders = useMemo(() => groups.flatMap((g) => (g.folder === null ? [] : [g.folder])), [groups]);
   const notice = useSceneLoading();
-  const loadingId = useDelayed(notice !== null) ? (notice?.sceneId ?? null) : null;
+  const loadingFloor = useDelayed(notice !== null) ? (notice?.sceneId ?? null) : null;
+  const loadingId = loadingFloor !== null && allScenes ? mainFloorId({ scenes: allScenes }, loadingFloor) : loadingFloor;
   const mover = useMovePlayers();
-  const moving = mover.shownMovingTo;
+  const movingTo = mover.shownMovingTo;
+  const moving = movingTo !== null && allScenes ? mainFloorId({ scenes: allScenes }, movingTo) : movingTo;
   const warningFor = mover.question;
 
   // The first press on a scene that warns shows the warning, and Move anyway presses again, confirmed.
-  const movePlayers = (scene: Scene) => {
-    const step = mover.move(scene, { confirmed: confirmMove === scene.id });
-    setConfirmMove(step.t === "ask" ? scene.id : null);
+  const movePlayers = (row: Scene) => {
+    const scene = props.moveTarget?.(row) ?? row;
+    const step = mover.move(scene, { confirmed: confirmMove === row.id });
+    setConfirmMove(step.t === "ask" ? row.id : null);
   };
 
   const reorder = (order: string[] | null) => {
@@ -141,7 +154,7 @@ export function SceneList(props: {
                 <span style={{ ...oneLine, fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight }}>{name}</span>
                 <span style={{ display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0, fontSize: theme.font.small, lineHeight: theme.leading.tight, color: theme.color.textMuted }}>
                   <span style={oneLine}>
-                    {sceneRowDetail(scene)}
+                    {sceneRowDetail(scene, floorCounts.get(scene.id))}
                     {loading ? " · " : viewing ? " · you are here" : ""}
                   </span>
                   {/* The row's button is the name a screen reader reads, so the wait is words in it, not a status of its own. */}
@@ -174,7 +187,7 @@ export function SceneList(props: {
           )}
           {confirmMove === scene.id ? (
             <div role="alert" style={{ display: "flex", alignItems: "center", gap: theme.space(2), padding: `0 ${theme.space(1)}px`, flexWrap: "wrap" }}>
-              <span style={{ flex: "1 1 100%", minWidth: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.warning }}>{warningFor(scene)}</span>
+              <span style={{ flex: "1 1 100%", minWidth: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.warning }}>{warningFor(props.moveTarget?.(scene) ?? scene)}</span>
               <Button size="sm" onClick={() => setConfirmMove(null)}>
                 Cancel
               </Button>

@@ -1,8 +1,9 @@
-import type { Scene, SightTile } from "#shared/model.ts";
+import type { RoomState, Scene, SightTile } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { OnAnswer, OpRefusal, RoomActions } from "../../state/types.ts";
 import type { ServerSound } from "../sound/engine/store.ts";
 import type { Playlists, Sounds } from "../sound/panel/state.ts";
+import { placeName } from "../floors/words.ts";
 import { moveWarning } from "../vision/moveWarning.ts";
 import { moveSoundOp } from "./moveSound.ts";
 
@@ -20,7 +21,7 @@ import { moveSoundOp } from "./moveSound.ts";
 export const MOVING_PLAYERS = "Moving players…";
 
 /** Where the server's room has the players and which scenes it has, as a snapshot that settled a move holds them (RoomView.confirmed). */
-export type ConfirmedRoom = { meta: { playerSceneId: string | null }; scenes: Readonly<Record<string, { name: string } | undefined>> };
+export type ConfirmedRoom = { meta: { playerSceneId: string | null }; scenes: Readonly<Record<string, Pick<Scene, "name" | "floor"> | undefined>> };
 
 /**
  * What a move reads of the room: the scene the DM looks at, whose sight
@@ -110,7 +111,9 @@ function lostMove(sceneId: string, confirmed: ConfirmedRoom | null | undefined):
   if (!confirmed) return null;
   const on = confirmed.meta.playerSceneId;
   if (on === sceneId) return { t: "moved" };
-  return { t: "notMoved", sceneGone: confirmed.scenes[sceneId] === undefined, playersOn: on === null ? null : (confirmed.scenes[on]?.name ?? null) };
+  // The helper reads only a scene's name and its floor's name, which the narrower record holds.
+  const place = on === null ? "" : placeName({ scenes: confirmed.scenes as RoomState["scenes"] }, on);
+  return { t: "notMoved", sceneGone: confirmed.scenes[sceneId] === undefined, playersOn: place === "" ? null : place };
 }
 
 /** The scene a move this page sent is going to while the server has not answered, or null. */

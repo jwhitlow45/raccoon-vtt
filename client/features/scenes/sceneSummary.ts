@@ -73,12 +73,14 @@ export function fogFoldSummary(scene: Pick<Scene, "fogEnabled" | "vision">): str
  * steps, so a row that read them would count one scene two ways. Squares
  * go unnamed, as they always did: a hex room's screens name squares only
  * where they are a choice (hex.e2e.ts HX4-4), and the list shows its
- * square scenes there too.
+ * square scenes there too. A scene with floors leads with their count.
  */
-export function sceneRowDetail(scene: Scene): string {
+export function sceneRowDetail(scene: Scene, floors = 1): string {
   // The summary's words stand alone, so their first letter is a capital. In the row's list they follow a comma.
   const size = isHex(sceneGrid(scene)) ? sizeText(scene).replace(/^No /, "no ") : `${scene.bounds.w} × ${scene.bounds.h}`;
-  return `${scene.map ? "Map" : "Grid"}, ${size}, fog ${scene.fogEnabled ? "on" : "off"}`;
+  const detail = `${scene.map ? "Map" : "Grid"}, ${size}, fog ${scene.fogEnabled ? "on" : "off"}`;
+  // A scene with floors is one row, and says how many it holds before its main floor's summary (docs/design/design-v1-floors.md 7.1).
+  return floors > 1 ? `${floors} floors · ${detail}` : detail;
 }
 
 function formatPx(v: number): string {

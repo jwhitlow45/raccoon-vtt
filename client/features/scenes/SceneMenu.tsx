@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import type { Scene } from "#shared/model.ts";
+import { floorsOf } from "#shared/rules/floors.ts";
 import { Button } from "../../components/Button.tsx";
 import { ErrorText, Input } from "../../components/Field.tsx";
 import { IconButton } from "../../components/IconButton.tsx";
@@ -41,6 +42,7 @@ function SceneMenu(props: { scene: Scene; viewing: boolean; scenes: readonly Sce
   const duplicate = useDuplicate(scene, onClose);
   const full = props.scenes.length >= LIMITS.scenesPerRoom;
   const name = scene.name || "Untitled";
+  const floors = useRoomView((s) => (s.view ? floorsOf(s.view, scene.id).length : 1));
 
   if (step === "folder") {
     return (
@@ -70,7 +72,7 @@ function SceneMenu(props: { scene: Scene; viewing: boolean; scenes: readonly Sce
           {/* Only Duplicate sends the choices, so a swipe springs back once any changed, inside the sheet whose swipe it holds (docs/design/design-v1-sheet-swipe.md 4.5). */}
           <UnsavedInput unsaved={!duplicate.busy && duplicate.changed} />
           <Help style={{ marginBottom: theme.space(2) }}>
-            The copy, {`"${name} (copy)"`}, always gets the map and its phases, the build, labels, stamps and lights. Also copy:
+            The copy, {`"${name} (copy)"`}, always gets the map and its phases, the build, labels, stamps and lights{floors > 1 ? ` of each of its ${floors} floors, with their weather and sound` : ""}. Also copy:
           </Help>
           <CheckRow label="Monsters, NPCs and objects" checked={duplicate.include.creatures} disabled={duplicate.busy} onChange={(creatures) => duplicate.set({ creatures })} />
           <CheckRow
@@ -291,7 +293,11 @@ function DeleteScene(props: { scene: Scene; viewing: boolean; scenes: readonly S
   const row = useRef<HTMLDivElement>(null);
   const next = sceneAfterDelete(props.scenes, scene.id);
   const playerSceneId = useRoomView((s) => s.view?.meta.playerSceneId ?? null);
-  const blocked = deleteBlocked(props.scenes, scene.id, playerSceneId);
+  // A scene with floors goes with all of them (docs/design/design-v1-floors.md 7.1).
+  const floorKey = useRoomView((s) => (s.view ? floorsOf(s.view, scene.id).map((f) => f.id) : [scene.id]).join(","));
+  const floorIds = floorKey.split(",");
+  const floorCount = floorIds.length;
+  const blocked = deleteBlocked(props.scenes, scene.id, playerSceneId, floorIds);
   const playersHere = next !== undefined && blocked !== null;
   useEffect(() => {
     if (playersHere) setArmed(false);
@@ -321,8 +327,8 @@ function DeleteScene(props: { scene: Scene; viewing: boolean; scenes: readonly S
   return (
     <div ref={row} style={{ display: "grid" }}>
       <SheetRow
-        label={armed ? "Tap again to delete" : "Delete"}
-        hint={blocked ?? "Removes its tokens, drawings, build and fog too."}
+        label={armed ? (floorCount > 1 ? `Delete ${scene.name || "Untitled"} and its ${floorCount} floors` : "Tap again to delete") : "Delete"}
+        hint={blocked ?? (floorCount > 1 ? "Removes every floor with its tokens, drawings, build and fog too." : "Removes its tokens, drawings, build and fog too.")}
         danger={armed ? "armed" : "rest"}
         disabled={!next}
         unavailable={playersHere}
