@@ -1378,6 +1378,17 @@ export function timedEnds(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 54);
 }
 
+/**
+ * Whether a scene on Time of day follows the clock
+ * (docs/design/design-v1-calendar-c2c3.md 6.3, 6.5): the pass after dispatch
+ * that relights it. No scene followed the clock before version 55, so the
+ * gate changes no replay today. Live ops carry no stored version and take
+ * today's rule.
+ */
+export function followsDaylight(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 55);
+}
+
 /** Historical restores keep their original log entries and numbering. */
 export function writesUndoCorrections(opVersion: number | undefined): boolean {
   return opVersion === undefined || opVersion >= 34;

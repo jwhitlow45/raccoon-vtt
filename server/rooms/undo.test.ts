@@ -868,6 +868,54 @@ describe("time spans on undo and redo (docs/design/design-v1-calendar-c2c3.md 4.
   });
 });
 
+describe("time of day light on undo and redo (docs/design/design-v1-calendar-c2c3.md 6.5)", () => {
+  const H = 3_600;
+  /** s1 on Time of day at 5:30 PM, so a step of an hour crosses dusk. */
+  function dusk(): UndoTable {
+    return new UndoTable(
+      room({
+        clock: { id: "c1", rev: 1, t: 17 * H + 30 * 60, shown: true, calendar: { kind: "days" } },
+        scenes: { s1: scene("s1", { vision: { on: false, light: "bright", byClock: true } }), s2: scene("s2", { order: 1 }) },
+      }),
+    );
+  }
+
+  test("a step's undo brings back the level with the clock, and its redo relights", () => {
+    const table = dusk();
+    assert.equal(table.play(DM, { t: "clock.advance", by: H }), "ok");
+    assert.equal(table.state.scenes.s1!.vision!.light, "dim");
+    assert.equal(table.undo(DM), "ok");
+    assert.equal(table.state.scenes.s1!.vision!.light, "bright");
+    assert.equal(table.state.clock!.t, 17 * H + 30 * 60);
+    assert.equal(table.redo(DM), "ok");
+    assert.equal(table.state.scenes.s1!.vision!.light, "dim");
+  });
+
+  test("a step that relit a scene guards it across scopes, both ways (accepted)", () => {
+    const earlier = dusk();
+    assert.equal(earlier.play(DM, { t: "scene.update", sceneId: "s1", patch: { name: "Crypt" } }), "ok");
+    assert.equal(earlier.play(DM, { t: "clock.advance", by: H }), "ok");
+    assert.notEqual(earlier.undo(DM, "setup"), "ok", "the rename's undo meets the relit scene");
+    assert.equal(earlier.state.scenes.s1!.name, "Crypt");
+    assert.equal(earlier.undo(DM), "ok");
+    assert.equal(earlier.undo(DM, "setup"), "ok");
+    assert.equal(earlier.state.scenes.s1!.name, "s1");
+    const later = dusk();
+    assert.equal(later.play(DM, { t: "clock.advance", by: H }), "ok");
+    assert.equal(later.play(DM, { t: "scene.update", sceneId: "s1", patch: { name: "Crypt" } }), "ok");
+    assert.notEqual(later.undo(DM), "ok", "the step's undo meets the rename");
+    assert.equal(later.state.scenes.s1!.vision!.light, "dim");
+  });
+
+  test("a step that crosses no part of the day guards no scene", () => {
+    const table = dusk();
+    assert.equal(table.play(DM, { t: "scene.update", sceneId: "s1", patch: { name: "Crypt" } }), "ok");
+    assert.equal(table.play(DM, { t: "clock.advance", by: 10 * 60 }), "ok");
+    assert.equal(table.undo(DM, "setup"), "ok");
+    assert.equal(table.state.scenes.s1!.name, "s1");
+  });
+});
+
 describe("placements between squares on undo and redo (docs/design/design-v1-snap-off.md 5.5)", () => {
   const owl = (over: Partial<Token> = {}) => token("owl", { kind: "npc", name: "Owl", ownerIds: ["p1"], x: 3, y: 3, ...over });
   const table = (over: Partial<Token> = {}) => new UndoTable(room({ members: { dm1: member("dm1", "dm"), p1: member("p1") }, tokens: { owl: owl(over) } }));

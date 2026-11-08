@@ -1,7 +1,8 @@
-import { CLOCK_TOO_FAR, clockNow, fightSeconds, lineDate } from "../calendar.ts";
-import { keys } from "../keys.ts";
+import { CLOCK_TOO_FAR, DAYLIGHT, clockNow, fightSeconds, lightAt, lineDate } from "../calendar.ts";
+import { keys, parseKey } from "../keys.ts";
 import { LIMITS } from "../limits.ts";
-import type { ClockLogEvent, RoomClock } from "../model.ts";
+import type { ClockLogEvent, Daylight, RoomClock, RoomState, Scene } from "../model.ts";
+import { ownEntry } from "../records.ts";
 import type { OpOf } from "../protocol.ts";
 import { gone, invalid, type Tx } from "./tx.ts";
 
@@ -89,4 +90,59 @@ export function clockAdvance(tx: Tx, op: OpOf<"clock.advance">): void {
   if (!within(clockNow(before, tx.state.encounter) + op.by) || !within(t)) throw invalid(CLOCK_TOO_FAR);
   const clock = written(tx, { ...before, t });
   line(tx, clock, { by: op.by, ...(op.why ? { why: op.why } : {}) }, op.claim);
+}
+
+function sameDaylight(a: Daylight | undefined, b: Daylight | undefined): boolean {
+  const x = a ?? DAYLIGHT;
+  const y = b ?? DAYLIGHT;
+  return x.dawn === y.dawn && x.dusk === y.dusk;
+}
+
+/** A scene's light settings: what decides its level, and nothing a door, a build op or the weather writes. */
+function sameLight(a: Scene, b: Scene): boolean {
+  const x = a.vision;
+  const y = b.vision;
+  return a.phaseId === b.phaseId && x?.on === y?.on && x?.light === y?.light && x?.perPlayer === y?.perPlayer && x?.byClock === y?.byClock;
+}
+
+/**
+ * Light that follows the time of day (docs/design/design-v1-calendar-c2c3.md
+ * 6.3): every scene on Time of day takes `lightAt` the current time where
+ * that differs. It runs for every such scene when the clock really changed
+ * (it appeared, or its id, `t` or dawn and dusk differ) or a fight went
+ * away, and for one scene when its own light settings changed or it is new.
+ * Each test compares values, so a door's or a build op's walls version, the
+ * weather and an unrelated Undo relight nothing. The trigger reads the
+ * stored `t` on purpose, where time spans read `clockNow` (4.3): Next and
+ * Previous move neither `t` nor a scene, so rounds alone never relight one,
+ * and a dusk the rounds reach darkens the map when the fight ends. A fight
+ * that goes without its end, by an Undo of its start, relights too, since
+ * the rounds it counted leave the current time with it.
+ */
+export function followDaylight(tx: Tx, before: Pick<RoomState, "clock" | "encounter" | "scenes">): void {
+  const clock = tx.state.clock;
+  if (!clock) return;
+  const was = before.clock;
+  const every = !was || was.id !== clock.id || was.t !== clock.t || !sameDaylight(was.daylight, clock.daylight) || (before.encounter != null && tx.state.encounter == null);
+  const ids = every ? Object.keys(tx.state.scenes).sort() : changedLight(tx, before);
+  const level = lightAt(clockNow(clock, tx.state.encounter), clock.daylight);
+  for (const id of ids) {
+    const scene = ownEntry(tx.state.scenes, id);
+    const vision = scene?.vision;
+    if (!scene || vision?.byClock !== true || vision.light === level) continue;
+    tx.write(keys.scene(id), { ...scene, vision: { ...vision, light: level } });
+  }
+}
+
+/** The scenes the op wrote whose light settings changed by value, or that it made. */
+function changedLight(tx: Tx, before: Pick<RoomState, "scenes">): string[] {
+  const ids: string[] = [];
+  for (const key of tx.touched()) {
+    const parsed = parseKey(key);
+    if (parsed?.kind !== "scene") continue;
+    const was = ownEntry(before.scenes, parsed.id);
+    const now = ownEntry(tx.state.scenes, parsed.id);
+    if (now && (!was || !sameLight(was, now))) ids.push(parsed.id);
+  }
+  return ids;
 }

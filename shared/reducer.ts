@@ -14,9 +14,9 @@ import {
 } from "./reducer/actors.ts";
 import { remindAfter, remindTurnEnd } from "./reducer/areaTriggers.ts";
 import { linkPass, settleMounts, tokenAttach, tokenDetach } from "./reducer/attach.ts";
-import { attaches, timedEnds, trapsGoOff, writesUndoCorrections } from "./migrate.ts";
+import { attaches, followsDaylight, timedEnds, trapsGoOff, writesUndoCorrections } from "./migrate.ts";
 import { clockCorrection, correctionViews } from "./undoCorrection.ts";
-import { clockAdvance, clockSet, clockStart, clockStop, clockUpdate } from "./reducer/clock.ts";
+import { clockAdvance, clockSet, clockStart, clockStop, clockUpdate, followDaylight } from "./reducer/clock.ts";
 import {
   effectFire,
   loopSet,
@@ -187,6 +187,8 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
     // Areas that hit a creature again remind the table around the op itself (reducer/areaTriggers.ts).
     if (op.t === "encounter.next" && !pressChangesNothing(state, actor, op, env)) remindTurnEnd(tx);
     dispatch(tx, moved);
+    // Before the sight passes, so they read the level the time gave (docs/design/design-v1-calendar-c2c3.md 6.3).
+    if (followsDaylight(env.opVersion)) followDaylight(tx, state);
     // A scene that stopped being per player pools its holders' maps (docs/design/design-v1-per-player-vision.md 6.3).
     foldSight(tx, state);
     // What players remember follows the scene's settings, and a scene the players move to is marked played (docs/design/design-v1-map-discovery.md 5.4, 5.5).
