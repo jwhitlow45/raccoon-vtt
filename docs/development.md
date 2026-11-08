@@ -35,7 +35,7 @@ follows `PORT`.
 | `pnpm test:int` | integration tests against the dev postgres (`*.itest.ts`). Run `pnpm db:up` first |
 | `pnpm test:e2e` | builds the client, then runs the browser tests (`e2e/*.e2e.ts`) against a server on port 3100 (`E2E_PORT`) and the dev postgres, one file at a time as a single shard of [continuous integration](#continuous-integration): the join limits' counts are cleared before each file, and a failing file runs once more. Needs Google Chrome installed. Screenshots go to `test-results/e2e-screenshots` (gitignored), or to the folder in `E2E_SCREENSHOT_DIR`, and `E2E_SCREENSHOT_DIR=0` takes none. Run it alone, not beside `pnpm test:int`, since both use the same database |
 | `pnpm test:e2e:shard <index> <count>` | one shard of the browser tests, as [continuous integration](#continuous-integration) runs them. Run `pnpm build` first |
-| `pnpm coverage` | line coverage of the unit and integration tests, with no new dependency. See [Coverage](#coverage). Needs `DATABASE_URL` set to a database the integration tests may use |
+| `pnpm coverage` | line coverage of the unit and integration tests, and with `--e2e <folder>` of the browser tests too, with no new dependency. See [Coverage](#coverage). Needs `DATABASE_URL` set to a database the integration tests may use |
 | `pnpm build` | the client into `dist/` |
 | `pnpm db:psql` | a psql shell in the dev postgres |
 | `pnpm db:down` | stop the dev postgres, keeping its data |
@@ -50,11 +50,23 @@ build before it goes to a server.
 
 ### Coverage
 
-`pnpm coverage` runs the unit tests, then the integration tests, with Node's built-in coverage (`--experimental-test-coverage`) and prints the share of lines run for `server`, `shared`, `client` and `scripts`, and one figure for the shipped code. Shipped code is `server`, `shared` and `client`, which is what runs in the image or the browser. `scripts` is build and release tooling that does not ship, so it is reported on its own and left out of that figure. The browser tests are not measured.
+`pnpm coverage` runs the unit tests, then the integration tests, with Node's built-in coverage (`--experimental-test-coverage`) and prints the share of lines run for `server`, `shared`, `client` and `scripts`, and one figure for the shipped code. Shipped code is `server`, `shared` and `client`, which is what runs in the image or the browser. `scripts` is build and release tooling that does not ship, so it is reported on its own and left out of that figure.
 
 Node's report lists only the files a test loaded, so a shipped file that no test imports would add nothing and hide its gap. The script therefore lists the tracked `.ts` and `.tsx` files in `server`, `shared` and `client` with `git ls-files` and adds each one the report left out, with all its lines at zero. Node counts every physical line of a loaded file, blank lines and comments included, so an unloaded file is counted the same way. A line that Node never reported for a loaded file stays uncounted.
 
 Test files (`*.test.ts`, `*.itest.ts`) and test infrastructure are left out whether a test loaded them or not. Test infrastructure is found by name in `scripts/coverage.ts`: a file ending in `Testing`, `Testutil` or `Testkit` (as in `shared/testutil.ts`, `shared/perPlayerTestutil.ts`, `server/rooms/undoTesting.ts`, `client/features/dice/abilityMenu.testing.ts`), and anything under `client/components/testing/`. A new helper named that way is left out with no further step. A few helpers have other names and are listed by hand (`server/assets/testApp.ts`, `server/assets/testImages.ts`, `shared/rules/testWorld.ts`, `shared/differential.ts`), as are the development-only room in `client/dev/` and its fixture, which the production bundle drops. Name a new helper to match, or add it to that list, or it counts as shipped code. A listed file that no longer exists fails the script's own test.
+
+The browser tests are measured in a run of their own and then added. With `E2E_COVERAGE_DIR` set to a folder, each browser test process saves Chrome's JavaScript coverage of the client there: which characters of each chunk in `dist/` ran. `pnpm coverage --e2e <folder>` maps those back to source lines through the build's source maps, with Node's `SourceMap` from `node:module`, and prints a second report in which a line counts when the unit, integration or browser tests ran it:
+
+```bash
+pnpm build
+E2E_COVERAGE_DIR=test-results/e2e-coverage pnpm test:e2e:shard 1 1
+pnpm coverage --e2e test-results/e2e-coverage
+```
+
+Taking the coverage made the whole suite about 3% slower in one shard on one machine. Start with an empty folder and leave `dist/` as the browser tests ran it: the script refuses a chunk that changed since, or a build from other sources than the checkout holds. In the browser's figure a line holding code counts when code from it ran. A line with none, such as a comment, a type or an import, counts unless the nearest code above and below it both never ran, so a function no test called counts as not run, comments and all, as Node counts it. Which lines hold code comes from a second build, into a temporary folder, that keeps every module whole and unminified, so code the shipped build leaves out counts as not run rather than as a comment.
+
+The browser's figure mostly errs low. Its coverage is taken before each navigation a test starts and before a page closes, so a navigation the page starts itself, such as `location.reload()`, loses what the page ran since the last take. Code that runs only in a Web Worker is not measured, and the server's code counts only from the unit and integration tests. It errs high on a closing line, such as a lone `}`, that the build places no code on, which counts when the code below it ran even if the function it closes never did.
 
 ### Property tests
 
