@@ -257,6 +257,9 @@ test("ISO34-LABELS: real area and trap candidates clear the raised name's halo b
       // Match the browser assertion's 1 px antialiasing allowance at every turn.
       assert.ok(gap >= -1, `turn ${turn}: ${placed.name} overlaps the raised name by ${-gap} px: ${JSON.stringify({ box, ink, chosen: placed })}`);
     }
+    const a = pillInkReach({ ...viewPill(chosen, view, ground), scale });
+    const t = pillInkReach({ ...viewPill(chosenTrap, view, ground), scale });
+    assert.ok(!overlaps(a, t), `turn ${turn}: Area name and Wire trap overlap: ${JSON.stringify({ a, t, chosen, chosenTrap })}`);
   }
 });
 

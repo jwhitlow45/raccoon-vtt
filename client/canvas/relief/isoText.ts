@@ -95,6 +95,32 @@ export function isoNamePill(candidates: readonly PillSpec[], layout: IsoNames, s
       }
     }
   }
+  // A name can still sit on another name (a trap's beside an area's) when
+  // the only token-clear spot is that one. Slide it along its pointer,
+  // within the same two view units, to the nearest spot that clears the
+  // tokens and the other names both (ISO-LABEL-OVERLAP).
+  if (otherCost > 0) {
+    const obstacles = [...layout.boxes, ...otherBoxes];
+    let distance = Infinity;
+    for (const candidate of candidates) {
+      if (!candidate.above && !candidate.below) continue;
+      const box = pillInkReach({ ...viewPill(candidate, layout.view, layout.ground), scale });
+      let shift = 0;
+      for (let round = 0; round < obstacles.length + 1; round++) {
+        const hit = obstacles.find((o) => overlap(box, [o]) > 0);
+        if (!hit) break;
+        const dy = candidate.above ? hit.y0 - box.y1 - 1 / scale : hit.y1 - box.y0 + 1 / scale;
+        shift += Math.abs(dy);
+        box.y0 += dy;
+        box.y1 += dy;
+      }
+      if (shift === 0 || shift > 2 || shift >= distance || overlap(box, obstacles) > 0) continue;
+      const pushed = { ...candidate, offsetPx: (candidate.offsetPx ?? 0) + shift * scale };
+      if (!allowed(pushed)) continue;
+      best = pushed;
+      distance = shift;
+    }
+  }
   return best;
 }
 
