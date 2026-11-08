@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { clockNow, lightAt } from "../calendar.ts";
+import { DAY_SECONDS, clockNow, lightAt } from "../calendar.ts";
 import { chunkKey, keys } from "../keys.ts";
 import type { BuildChunk, LightLevel, RoomState, SceneVision } from "../model.ts";
 import { opSchema, type Op } from "../protocol.ts";
@@ -204,6 +204,27 @@ describe("what turns it off and what keeps it (5.1, 6.3)", () => {
     assert.deepEqual(copied.scenes.s2!.vision, { on: false, light: "dark", byClock: true });
     const like = run(state, { t: "scene.create", scene: { id: "s9", name: "Crypt", bounds: { w: 10, h: 10 }, vision: { on: false, light: "bright", byClock: true } } }).state;
     assert.equal(light(like, "s9"), "dark");
+  });
+
+  test("a level follows dawn and dusk as the DM set them", () => {
+    const state = lit(5 * H + 45 * 60);
+    assert.equal(light(state), "dark");
+    const early = run(state, { t: "clock.update", daylight: { dawn: 5 * H + 30 * 60, dusk: 18 * H } });
+    assert.equal(light(early.state), "dim");
+    assert.equal(light(undo(early.state, early, "setup").state), "dark");
+    const next = run(early.state, { t: "clock.advance", by: DAY_SECONDS });
+    assert.equal(light(next.state), "dim");
+  });
+
+  test("dawn and dusk saved alone write the clock and no line, keep the time, and Start keeps none", () => {
+    const state = lit(12 * H);
+    const saved = run(state, { t: "clock.update", daylight: { dawn: 5 * H, dusk: 20 * H } });
+    assert.deepEqual(saved.state.clock!.daylight, { dawn: 5 * H, dusk: 20 * H });
+    assert.equal(saved.state.clock!.t, 12 * H);
+    assert.equal(saved.log.length, 0);
+    const stopped = run(saved.state, { t: "clock.stop" }).state;
+    const fresh = run(stopped, { t: "clock.start", id: "c2", at: 12 * H, shown: true, calendar: { kind: "days" } }).state;
+    assert.equal(fresh.clock!.daylight, undefined);
   });
 });
 

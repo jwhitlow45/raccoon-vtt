@@ -462,8 +462,8 @@ const character = z.strictObject({
   longRest: z.strictObject({ at: clockSchemas.clockTime, clock: id }).optional(),
 });
 
-/** The room's clock (docs/design/design-v1-calendar.md 6.1), by the bounds its ops keep. */
-const roomClock = z.strictObject({ id, rev, t: clockSchemas.clockTime, shown: z.boolean(), calendar: clockSchemas.calendar });
+/** The room's clock (docs/design/design-v1-calendar.md 6.1), by the bounds its ops keep, dawn and dusk too (docs/design/design-v1-calendar-c2c3.md 6.6). */
+const roomClock = z.strictObject({ id, rev, t: clockSchemas.clockTime, shown: z.boolean(), calendar: clockSchemas.calendar, daylight: clockSchemas.daylight.optional() });
 
 /*
  * Synced music and sound (docs/design/design-v1-music.md 6.1, 6.3 and 8), by

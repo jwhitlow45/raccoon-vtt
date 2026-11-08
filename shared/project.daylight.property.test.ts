@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import fc from "fast-check";
+import { DAYLIGHT_BOUNDS } from "./calendar.ts";
 import type { LightLevel, RoomState, SceneVision, Viewer } from "./model.ts";
 import { projectState, stableStringify } from "./project.ts";
 import { P1, P2, room, scene } from "./testutil.ts";
@@ -37,6 +38,26 @@ test("whether a scene follows the clock never reaches a player or a display", ()
       for (const who of VIEWERS) {
         const sceneId = a.meta.playerSceneId;
         assert.equal(stableStringify(projectState(a, who, { sceneId })), stableStringify(projectState(b, who, { sceneId })), who.memberId);
+      }
+    }),
+    { numRuns: 300 },
+  );
+});
+
+const minutes = (bounds: { min: number; max: number }) => fc.integer({ min: bounds.min / 60, max: bounds.max / 60 }).map((m) => m * 60);
+const daylight = fc.option(fc.record({ dawn: minutes(DAYLIGHT_BOUNDS.dawn), dusk: minutes(DAYLIGHT_BOUNDS.dusk) }), { nil: undefined });
+
+test("a hidden clock's dawn and dusk never reach a player or a display", () => {
+  fc.assert(
+    fc.property(fc.array(sceneLight, { minLength: 1, maxLength: 3 }), daylight, daylight, fc.boolean(), fc.boolean(), (scenes, one, two, hidden, blackout) => {
+      fc.pre(hidden || blackout);
+      const with_ = (d: typeof one) => {
+        const state = twin(scenes, (s) => s.follows, !hidden, blackout, 0);
+        if (d) state.clock!.daylight = d;
+        return state;
+      };
+      for (const who of VIEWERS) {
+        assert.equal(stableStringify(projectState(with_(one), who, { sceneId: "s0" })), stableStringify(projectState(with_(two), who, { sceneId: "s0" })), who.memberId);
       }
     }),
     { numRuns: 300 },

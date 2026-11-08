@@ -342,6 +342,8 @@ describe("the clock's undo labels (docs/design/design-v1-calendar.md 6.5)", () =
     assert.equal(describeOp({ t: "clock.update", calendar: { kind: "days" }, at: 0 }, s), "changing the calendar");
     assert.equal(describeOp({ t: "clock.update", at: 0 }, s), "setting the date and time");
     assert.equal(describeOp({ t: "clock.update", shown: false }, s), "turning off Players see the date and time");
+    // Dawn and dusk saved alone, from Time's own row (docs/design/design-v1-calendar-c2c3.md 5.2).
+    assert.equal(describeOp({ t: "clock.update", daylight: { dawn: 5 * 3_600, dusk: 19 * 3_600 } }, s), "changing dawn and dusk");
     assert.equal(describeOp({ t: "clock.update", shown: true }, s), "turning on Players see the date and time");
   });
 });

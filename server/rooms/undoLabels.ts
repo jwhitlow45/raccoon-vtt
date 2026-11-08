@@ -281,6 +281,8 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
     case "clock.update":
       if (op.calendar !== undefined) return "changing the calendar";
       if (op.at !== undefined) return "setting the date and time";
+      // Before the switch's, which would otherwise name an update of dawn and dusk alone (docs/design/design-v1-calendar-c2c3.md 6.2).
+      if (op.daylight !== undefined) return "changing dawn and dusk";
       return op.shown ? "turning on Players see the date and time" : "turning off Players see the date and time";
     case "clock.set":
       return "setting the date and time";

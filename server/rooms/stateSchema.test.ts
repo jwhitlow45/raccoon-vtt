@@ -845,6 +845,43 @@ describe("time spans in a backup (docs/design/design-v1-calendar-c2c3.md 4.7)", 
   });
 });
 
+describe("time of day light and dawn and dusk in a backup (docs/design/design-v1-calendar-c2c3.md 6.6)", () => {
+  const H = 3_600;
+  function daylit(): ReturnType<typeof room> {
+    let state = room();
+    state = apply(state, { t: "clock.start", id: "clock-1", at: 20 * H, shown: false, calendar: { kind: "days" } }, DM, 1);
+    state = apply(state, { t: "clock.update", daylight: { dawn: 5 * H + 30 * 60, dusk: 19 * H + 30 * 60 } }, DM, 2);
+    state = apply(state, { t: "scene.update", sceneId: "s1", patch: { vision: { on: true, light: "bright", byClock: true } } }, DM, 3);
+    return state;
+  }
+
+  test("export and import bring back a scene on Time of day and the clock's dawn and dusk", () => {
+    const state = daylit();
+    assert.deepEqual(state.scenes.s1!.vision, { on: true, light: "dim", byClock: true });
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    const out = remapState(parsed.state, { assets: new Map() });
+    assert.deepEqual(out.clock?.daylight, { dawn: 5 * H + 30 * 60, dusk: 19 * H + 30 * 60 });
+    assert.deepEqual(Object.values(out.scenes).find((s) => s.name === "s1")?.vision, { on: true, light: "dim", byClock: true });
+  });
+
+  test("dawn and dusk keep their bounds, and a stored vision never holds byClock false", () => {
+    const good = JSON.parse(JSON.stringify(daylit()));
+    const broken = (edit: (s: { clock: { daylight: Record<string, unknown> }; scenes: Record<string, { vision: Record<string, unknown> }> }) => void) => {
+      const s = JSON.parse(JSON.stringify(good));
+      edit(s);
+      return parseRoomState(s).ok;
+    };
+    assert.equal(broken(() => {}), true);
+    assert.equal(broken((s) => (s.clock.daylight.dawn = 11 * H + 60)), false);
+    assert.equal(broken((s) => (s.clock.daylight.dusk = 12 * H - 60)), false);
+    assert.equal(broken((s) => (s.clock.daylight.dawn = 5 * H + 1)), false);
+    assert.equal(broken((s) => delete s.clock.daylight.dusk), false);
+    assert.equal(broken((s) => (s.clock.daylight.extra = 1)), false);
+    assert.equal(broken((s) => (s.scenes.s1!.vision.byClock = false)), false);
+  });
+});
+
 describe("placements between squares in a backup (docs/design/design-v1-snap-off.md 5.7)", () => {
   function placed(): ReturnType<typeof room> {
     return room({

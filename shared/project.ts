@@ -154,7 +154,8 @@ export type ProjectedTrap = Omit<Trap, "state" | "found"> & Partial<Pick<Trap, "
 /**
  * The room's clock as a viewer gets it (docs/design/design-v1-calendar.md 6.4):
  * the DM's whole, a player's and a table display's without the sharing
- * switch, which they get only while it is on, and with rev 0.
+ * switch, which they get only while it is on, and with rev 0. Dawn and dusk
+ * come with it while set (docs/design/design-v1-calendar-c2c3.md 6.1).
  */
 export type ProjectedClock = Omit<RoomClock, "shown"> & { shown?: boolean };
 
@@ -4225,7 +4226,8 @@ function projectClockCtx(ctx: Ctx): ProjectedClock | null {
   if (!clock) return null;
   if (ctx.viewer.role === "dm") return clock;
   if (ctx.paused) return null;
-  return clock.shown ? { id: clock.id, rev: 0, t: clock.t, calendar: clock.calendar } : null;
+  // Dawn and dusk go with the shown clock, so a player's part of the day and To dawn read them (docs/design/design-v1-calendar-c2c3.md 6.4).
+  return clock.shown ? { id: clock.id, rev: 0, t: clock.t, calendar: clock.calendar, ...(clock.daylight ? { daylight: clock.daylight } : {}) } : null;
 }
 
 function projectMap<T, P>(map: Record<string, T>, project: (value: T) => P | null): Record<string, P> {

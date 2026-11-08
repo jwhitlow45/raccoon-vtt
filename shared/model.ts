@@ -209,7 +209,7 @@ export type RoomState = {
    * The in-game clock (docs/design/design-v1-calendar.md 6.1), off until the
    * DM starts it. Absent and null are both "no clock", so rooms from before
    * it need no migration. The DM gets it whole, a player and a table display
-   * only `{ id, rev: 0, t, calendar }` while it is shown (6.4).
+   * only `{ id, rev: 0, t, calendar }` and dawn and dusk while it is shown (6.4).
    */
   clock?: RoomClock | null;
   /**

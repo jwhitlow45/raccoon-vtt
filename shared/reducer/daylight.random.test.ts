@@ -9,10 +9,11 @@ import { DM, chance, character, env, int, pick, rng, room, scene, token } from "
 import { undoScope } from "../undoScope.ts";
 
 /**
- * Random sequences of clock ops near dawn and dusk, scene light picks,
- * Players see, phase switches, weather edits, door.set, build paints, token
- * moves, new scenes, fights started, turned, taken back and ended, and undo
- * and redo (docs/design/design-v1-calendar-c2c3.md 11). Invariants:
+ * Random sequences of clock ops near dawn and dusk, dawn and dusk changed,
+ * scene light picks, Players see, phase switches, weather edits, door.set,
+ * build paints, token moves, new scenes, fights started, turned, taken back
+ * and ended, and undo and redo (docs/design/design-v1-calendar-c2c3.md 11).
+ * Invariants:
  *
  * 1. With a clock and no fight, every scene on Time of day is lit as
  *    `lightAt` the current time (6.3).
@@ -62,6 +63,7 @@ function randomOp(r: () => number, state: RoomState): Op {
   if (roll < 0.05) return { t: "clock.start", id: `c${++ids}`, at: nearEdge(r, now), shown: chance(r, 0.6), calendar: { kind: "days" } };
   if (roll < 0.07) return { t: "clock.stop" };
   if (roll < 0.11) return chance(r, 0.5) ? { t: "clock.update", shown: chance(r, 0.5) } : { t: "clock.update", at: nearEdge(r, now) };
+  if (roll < 0.14) return { t: "clock.update", daylight: { dawn: int(r, 0, 11 * 60) * 60, dusk: int(r, 12 * 60, 23 * 60) * 60 } };
   if (roll < 0.16) return { t: "clock.set", at: nearEdge(r, now) };
   if (roll < 0.26) return { t: "clock.advance", by: pick(r, [1, 6, 30, 60, 600, H, 8 * H]) };
   if (roll < 0.3) return { t: "scene.update", sceneId, patch: { vision: { on: was.on, light: pick(r, LEVELS), byClock: false } } };
@@ -96,7 +98,7 @@ type Scope = "play" | "setup";
 type Stacks = Record<Scope, { undo: RestoreEntry[][]; redo: RestoreEntry[][] }>;
 
 test("daylight keeps its invariants over random play, undo and redo", () => {
-  const counts = { relit: 0, relitByClock: 0, relitBySettings: 0, restores: 0, checked: 0, nexts: 0, phases: 0, doors: 0 };
+  const counts = { relit: 0, relitByClock: 0, relitBySettings: 0, restores: 0, checked: 0, nexts: 0, phases: 0, doors: 0, daylight: 0 };
   for (let seed = 1; seed <= 60; seed++) {
     const r = rng(seed * 11 + 5);
     let state = start();
@@ -124,6 +126,7 @@ test("daylight keeps its invariants over random play, undo and redo", () => {
       const where = `seed ${seed} step ${i} ${op.t}`;
       if (op.t === "scene.setPhase") counts.phases++;
       if (op.t === "door.set") counts.doors++;
+      if (op.t === "clock.update" && op.daylight) counts.daylight++;
       const clock = state.clock;
       const now = clock ? clockNow(clock, state.encounter) : 0;
 
@@ -173,4 +176,5 @@ test("daylight keeps its invariants over random play, undo and redo", () => {
   assert.ok(counts.nexts > 1_000, `enough Next and Previous (${counts.nexts})`);
   assert.ok(counts.phases > 150, `enough phase switches (${counts.phases})`);
   assert.ok(counts.doors > 150, `enough doors (${counts.doors})`);
+  assert.ok(counts.daylight > 150, `enough dawn and dusk changes (${counts.daylight})`);
 });

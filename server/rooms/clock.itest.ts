@@ -147,6 +147,34 @@ describe("the room's clock on the server", () => {
     assert.deepEqual(frames.filter((frame) => frame.includes(claim) || frame.includes(head) || frame.includes('"claim"')), [], "and no claim");
   });
 
+  test("a scene on Time of day reaches a player by its level alone, and dawn and dusk only with the shown clock (docs/design/design-v1-calendar-c2c3.md 6.4)", async () => {
+    const dmClient = t.client();
+    const { roomId } = await dmClient.createRoom("Daylight");
+    const playerClient = t.client();
+    await playerClient.join(roomId, "Pip");
+    const dm = await t.connect(roomId, dmClient);
+    const player = await t.connect(roomId, playerClient);
+    const sceneId = ((await dm.snapshot("dm")).state as ProjectedState).meta.playerSceneId!;
+    await player.snapshot("p");
+    const frames = wire(player);
+    await dm.apply({ t: "clock.start", id: uuidv7(), at: 17 * 3_600 + 30 * 60, shown: false, calendar: MONTHS });
+    await dm.apply({ t: "clock.update", daylight: { dawn: 5 * 3_600 + 30 * 60, dusk: 18 * 3_600 } });
+    await dm.apply({ t: "scene.update", sceneId, patch: { vision: { on: false, light: "bright", byClock: true } } });
+    const step = await dm.apply({ t: "clock.advance", by: 3_600 });
+    const lit = step.changes.find((c) => c.key === `scene:${sceneId}`);
+    assert.ok(lit && "value" in lit && (lit.value as { vision?: { light?: string } }).vision?.light === "dim", "the DM's step relit the scene");
+    await dm.apply({ t: "log.chat", text: "fence" });
+    await player.next("ev", (m) => m.changes.some((c) => "value" in c && (c.value as LogEntry | null)?.text === "fence"));
+    assert.ok(frames.some((frame) => frame.includes('"light":"dim"')), "the player gets the level");
+    assert.deepEqual(frames.filter((frame) => frame.includes("byClock") || frame.includes("daylight")), [], "and neither the flag nor a hidden clock's dawn and dusk");
+
+    await dm.apply({ t: "clock.update", shown: true });
+    const shared = await player.next("ev", (m) => m.changes.some((c) => c.key === "clock"));
+    const clock = shared.changes.find((c) => c.key === "clock");
+    assert.deepEqual(clock && "value" in clock ? (clock.value as { daylight?: unknown }).daylight : null, { dawn: 5 * 3_600 + 30 * 60, dusk: 18 * 3_600 });
+    assert.ok(!frames.some((frame) => frame.includes("byClock")), "the flag never crosses, the clock shared or not");
+  });
+
   test("behind a blackout a shown clock and its lines never cross a player's or a display's socket, and come back when it ends (ASTRA-06)", async () => {
     const dmClient = t.client();
     const { roomId } = await dmClient.createRoom("Blackout clock");

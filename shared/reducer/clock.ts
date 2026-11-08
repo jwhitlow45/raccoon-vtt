@@ -60,8 +60,10 @@ export function clockStop(tx: Tx): void {
 
 /**
  * The calendar, the sharing switch and the time, from the Calendar dialog
- * and the switch (4.3). A save that moved the time writes the Set line. One
- * that kept it, a rename or the switch writes none (4.7).
+ * and the switch (4.3), and dawn and dusk from Time's own row
+ * (docs/design/design-v1-calendar-c2c3.md 5.2). A save that moved the time
+ * writes the Set line. One that kept it, a rename, the switch or dawn and
+ * dusk writes none (4.7).
  */
 export function clockUpdate(tx: Tx, op: OpOf<"clock.update">): void {
   const before = clockOf(tx);
@@ -69,6 +71,7 @@ export function clockUpdate(tx: Tx, op: OpOf<"clock.update">): void {
   if (op.calendar !== undefined) next.calendar = op.calendar;
   if (op.shown !== undefined) next.shown = op.shown;
   if (op.at !== undefined) next.t = storedFor(tx, op.at);
+  if (op.daylight !== undefined) next.daylight = op.daylight;
   const clock = written(tx, next);
   if (clock.t !== before.t) line(tx, clock, { why: "set" }, op.claim);
 }
