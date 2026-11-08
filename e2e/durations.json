@@ -17,6 +17,7 @@
     "barrest-edges-dm": 238,
     "barrest-edges-dm-card": 217,
     "barrest-edges-pat": 214,
+    "blockrolls": 200,
     "characters": 39,
     "chips": 25,
     "chips-bar": 30,
@@ -31,6 +32,7 @@
     "display": 43,
     "dmphone": 167,
     "dungeon": 30,
+    "encounters": 12,
     "fogedge": 61,
     "fold": 67,
     "fu28-forms": 8,
@@ -59,6 +61,7 @@
     "pdf": 91,
     "pervision": 17,
     "playerphone": 185,
+    "proficiency": 194,
     "reach": 194,
     "reach-player-100": 212,
     "reach-player-130": 204,
@@ -89,6 +92,7 @@
     "tokenpanel-words": 80,
     "tools": 32,
     "traps": 78,
+    "undo-scope": 24,
     "vision": 54,
     "weather": 55
   }
