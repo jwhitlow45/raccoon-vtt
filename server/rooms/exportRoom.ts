@@ -20,7 +20,7 @@ import { SOUND_MEDIA, isVideoContainer, soundFactsOfRow, variantPath, videoFacts
  * Sounds go in unless the DM leaves them out (docs/design/design-v1-music.md
  * 6.7, D-261102-475), and never while the server's switch is off, since it
  * then serves no sound bytes: without them the zip holds no sound file and
- * no part of the state about sound.
+ * no part of the state about sound but Only DM devices play.
  */
 export const EXPORT_FORMAT = "raccoon-vtt-room";
 export const EXPORT_FORMAT_VERSION = 1;
@@ -122,7 +122,8 @@ export type ExportChoice = { sounds: boolean };
  * The state as the export carries it: everything, with whispers the DM is
  * not party to removed, and without the record of the running turn's
  * reminders (RoomState.reminded), which belongs to that turn and which the
- * import would leave behind anyway. Without sounds, nothing about sound.
+ * import would leave behind anyway. Without sounds, nothing about sound but
+ * Only DM devices play.
  */
 export function exportableState(state: RoomState, dm: Viewer, choice: ExportChoice = { sounds: true }): RoomState {
   const log = state.log.filter((e) => e.kind !== "whisper" || e.from === dm.memberId || e.to?.includes(dm.memberId) === true);

@@ -13,7 +13,7 @@ import { parseRoomState } from "./stateSchema.ts";
  * what played is dropped so the room starts silent, `refillSoundFacts` takes
  * every length from the rows and leaves out a sound whose file failed or
  * whose length does not fit its use, with its places, and `withoutSound`
- * leaves nothing about sound at all.
+ * leaves nothing about sound but Only DM devices play.
  */
 
 // The intake's kinds (server/assets/kinds.ts) take "sound" with the intake itself (7.2).

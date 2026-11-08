@@ -56,7 +56,8 @@ import { parseRoomState } from "./stateSchema.ts";
  *   (docs/design/design-v1-animated-maps.md 9.3). Each sound goes through
  *   the upload's frame walk against the quota, and a zip without sounds,
  *   or an import while the sound switch is off, keeps no part about sound
- *   (docs/design/design-v1-music.md 6.7). The room starts silent either way;
+ *   but Only DM devices play (docs/design/design-v1-music.md 6.7). The
+ *   room starts silent either way;
  * - every id is remapped, uploaders included.
  *
  * The room row is written first so asset rows have something to reference,
