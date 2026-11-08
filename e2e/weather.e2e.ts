@@ -67,6 +67,8 @@ const run = {
   patId: "",
   area: randomUUID(),
   trap: randomUUID(),
+  /** What the run measured and did on its own, printed at the end: each page `moving` opened again, and the step-down's times in fu49perfc-1. */
+  measured: [] as string[],
 };
 
 type Weather = { kind: string; heavy?: true; wind?: "moderate" | "strong"; toward?: number; rules?: false } | null;
@@ -83,7 +85,7 @@ async function setWeather(sceneId: string, weather: Weather): Promise<void> {
  * ticks, which a weather held still passed (wx-5 on CI). `level` is the
  * step-down's (mode.ts).
  */
-type Probe = { key: string; ticks: number; cameraDraws: number; index: number; layers: number; ratio: number; shown: boolean; width: number; drawn: boolean; level: string };
+type Probe = { key: string; ticks: number; cameraDraws: number; index: number; layers: number; ratio: number; shown: boolean; width: number; drawn: boolean; level: string; frameCost: number };
 
 function probe(page: Page, where: "room" | "preview" = "room"): Promise<Probe | null> {
   return page.evaluate((inPreview) => {
@@ -95,10 +97,10 @@ function probe(page: Page, where: "room" | "preview" = "room"): Promise<Probe | 
       const layers = stage.getLayers();
       const index = layers.findIndex((l) => (l.getCanvas()._canvas as { dataset: Record<string, string> }).dataset.weather !== undefined);
       if (index < 0) continue;
-      const canvas = layers[index]!.getCanvas()._canvas as { dataset: Record<string, string>; weatherTicks?: number; weatherCameraDraws?: number; weatherLevel?: string };
+      const canvas = layers[index]!.getCanvas()._canvas as { dataset: Record<string, string>; weatherTicks?: number; weatherCameraDraws?: number; weatherLevel?: string; weatherFrameCost?: number };
       // The hidden tree keeps its layer mounted, unregistered: the one that shows is the one asked for.
       if (!stage.visible() || stage.width() === 0) continue;
-      return { key: canvas.dataset.weather!, ticks: canvas.weatherTicks ?? 0, cameraDraws: canvas.weatherCameraDraws ?? 0, index, layers: layers.length, ratio: layers[index]!.getCanvas().getPixelRatio(), shown: true, width: stage.width(), drawn: canvas.weatherTicks !== undefined, level: canvas.weatherLevel ?? "" };
+      return { key: canvas.dataset.weather!, ticks: canvas.weatherTicks ?? 0, cameraDraws: canvas.weatherCameraDraws ?? 0, index, layers: layers.length, ratio: layers[index]!.getCanvas().getPixelRatio(), shown: true, width: stage.width(), drawn: canvas.weatherTicks !== undefined, level: canvas.weatherLevel ?? "", frameCost: canvas.weatherFrameCost ?? 0 };
     }
     return null;
   }, where === "preview");
@@ -126,7 +128,10 @@ async function shown(page: Page, key: string, where: "room" | "preview" = "room"
  * opened again, which leaves a step at least two windows before it holds still.
  */
 async function moving(page: Page, key = "rain heavy strong"): Promise<void> {
-  if ((await shown(page, key)).level === "full") return;
+  const was = await shown(page, key);
+  if (was.level === "full") return;
+  // Said in the log, so a step-down on a machine with a GPU, which this reload would hide, shows there (CIFIX-F3). fu49perfc-1 holds the step-down itself to a cost the test sets.
+  run.measured.push(`moving: ${page === dm ? "the DM's" : page === pat ? "Pat's" : "a"} page had stepped down to ${was.level}, opened again`);
   await page.reload();
   await page.locator(".konvajs-content").first().waitFor();
   const fresh = await shown(page, key);
@@ -256,6 +261,7 @@ describe("weather over the map", { concurrency: false }, () => {
   });
 
   after(async () => {
+    if (run.measured.length > 0) console.log(`WX measured:\n${run.measured.join("\n")}`);
     if (process.env.E2E_DEBUG === "1") {
       for (const c of Object.values(consoles)) console.error(`[${c.label}] errors`, c.errors, "warnings", c.warnings);
       console.error(server?.output().split("\n").slice(-40).join("\n"));
@@ -515,6 +521,72 @@ describe("weather over the map", { concurrency: false }, () => {
     await waitFor("no weather while building", async () => ((await weatherCanvases(dm)) === 0 ? true : null));
     await pickTool(dm, "Select");
     await shown(dm, "rain heavy strong");
+  });
+
+  test("fu49perfc-1. the step-down at costs the test sets, on any machine: ticks that cost nothing keep moving past the windows that would hold them still, ticks that busy their frames 6 ms halve the rain, then hold it still, and This device says why, and ticks under 2 ms by the median that add 70 ms a second step down too", async () => {
+    /** A DM page of its own whose ticks cost what `cost` says (WeatherLayer.tsx WEATHER_TEST_COST), from its first tick, so no step before carries over. */
+    const open = async (cost: { skip?: boolean; ms?: number | number[] }) => {
+      const page = await dmContext.newPage();
+      consoles.dm.attach(page);
+      await page.addInitScript((c) => void ((globalThis as Record<string, unknown>).__rvttWeatherCost = c), cost);
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.locator(".konvajs-content").first().waitFor();
+      await shown(page, "rain heavy strong");
+      return { page, from: Date.now() };
+    };
+    /** The levels a page goes through over `ms`, and when each began, from the page's opening. */
+    const levelsOver = async (at: { page: Page; from: number }, ms: number, until?: string) => {
+      const seen: { level: string; at: number }[] = [];
+      while (Date.now() - at.from < ms) {
+        const p = await probe(at.page);
+        if (p && p.level !== seen.at(-1)?.level) seen.push({ level: p.level, at: Date.now() - at.from });
+        if (until && p?.level === until) break;
+        await sleep(200);
+      }
+      return seen;
+    };
+
+    // Past the 2 s warm-up and four 3 s windows: weather this slow would have held still by then, at 30 frames a second too (the weather design note, 6.3).
+    const cheap = await open({ skip: true });
+    try {
+      const levels = await levelsOver(cheap, 15_000);
+      const p = await probe(cheap.page);
+      run.measured.push(`fu49perfc-1: ticks costing their step alone, over 15 s: ${levels.map((l) => `${l.level} at ${(l.at / 1000).toFixed(1)} s`).join(", ")}, a tick's frame cost ${p?.frameCost.toFixed(2)} ms`);
+      assert.deepEqual(levels.map((l) => l.level), ["full"], "a tick that costs nothing never steps down");
+      assert.ok((await ticksOver(cheap.page, 1000)).ticks >= 20, "and it keeps ticking");
+    } finally {
+      await cheap.page.close();
+    }
+
+    const slow = await open({ ms: 6 });
+    try {
+      const levels = await levelsOver(slow, 30_000, "still");
+      run.measured.push(`fu49perfc-1: ticks busying their frames 6 ms: ${levels.map((l) => `${l.level} at ${(l.at / 1000).toFixed(1)} s`).join(", ")}`);
+      assert.deepEqual(levels.map((l) => l.level), ["full", "half", "still"], "6 ms a tick halves the rain, then holds it still");
+      // No step before the warm-up and a whole window, and the second a warm-up and a window after the first, at 30 frames a second a window later (6.3).
+      const [, half, still] = levels;
+      assert.ok(half!.at >= 4000, `halved at ${half!.at} ms`);
+      assert.ok(still!.at - half!.at >= 4000, `held still ${still!.at - half!.at} ms after it halved`);
+      assert.equal((await ticksOver(slow.page, 1000)).ticks, 0, "held still, it ticks no more");
+      const menu = await openThisDevice(slow.page);
+      const why = menu.getByText("Weather was slowing the map, so it stays still until you reload.", { exact: true });
+      await why.waitFor();
+      await why.scrollIntoViewIfNeeded();
+      await shots.take(slow.page, "fu49perfc-1-still-slow");
+    } finally {
+      await slow.page.close();
+    }
+
+    // Two ticks in three busy 1.5 ms and the third 4: a median of 1.5, under the 2 ms line, and about 70 ms a second with the loop's own work, over 6.1's 60 (mode.ts BUSY_MS_PER_S).
+    const busy = await open({ skip: true, ms: [1.5, 1.5, 4] });
+    try {
+      const levels = await levelsOver(busy, 30_000, "still");
+      const p = await probe(busy.page);
+      run.measured.push(`fu49perfc-1: ticks busying 1.5, 1.5 and 4 ms in turn: ${levels.map((l) => `${l.level} at ${(l.at / 1000).toFixed(1)} s`).join(", ")}, a tick's frame cost ${p?.frameCost.toFixed(2)} ms by the median`);
+      assert.deepEqual(levels.map((l) => l.level), ["full", "half", "still"], "70 ms a second steps down though the median is under the line");
+    } finally {
+      await busy.page.close();
+    }
   });
 
   test("wx-8. the table display draws it and says it in its polite status, and its menu's Off leaves a member's setting in the same browser alone", async () => {

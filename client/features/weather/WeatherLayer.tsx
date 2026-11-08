@@ -34,6 +34,21 @@ export type WeatherCanvas = HTMLCanvasElement & {
  */
 export const WEATHER_TEST_FLAG = "__rvttWeatherTest";
 
+/**
+ * Under WEATHER_TEST_FLAG only: what each tick costs, set by the e2e, so
+ * the step-down can be checked on any machine, with a GPU or none (the
+ * cifix review, CIFIX-F3). `skip` draws nothing, so a tick costs its step
+ * alone, and `ms` busies the tick's frame that long after its draw, or the
+ * list's times in turn, tick by tick.
+ */
+export const WEATHER_TEST_COST = "__rvttWeatherCost";
+export type WeatherTestCost = { skip?: boolean; ms?: number | readonly number[] };
+
+function testCost(): WeatherTestCost | null {
+  const g = globalThis as Record<string, unknown>;
+  return g[WEATHER_TEST_FLAG] === true ? ((g[WEATHER_TEST_COST] as WeatherTestCost | undefined) ?? null) : null;
+}
+
 function makeCanvas(width: number, height: number): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -120,8 +135,16 @@ export default function WeatherLayer(props: WeatherLayerProps) {
         if (!layer || !stage || !field) return;
         // The tick reads the camera its stage holds now, so marks keep their screen speed at any zoom. It subscribes to none.
         stepField(field, ms, cameraOfStage(stage));
+        const cost = testCost();
         // At once, in this frame: batchDraw would wait a frame and gate a 60 Hz clock down to 20 (5.2).
-        layer.draw();
+        if (!cost?.skip) layer.draw();
+        else {
+          const canvas = layer.getCanvas()._canvas as WeatherCanvas;
+          canvas.weatherTicks = room.mode.ticks;
+          canvas.weatherFrameCost = room.frameCost;
+        }
+        const busy = typeof cost?.ms === "number" ? cost.ms : (cost?.ms?.[room.mode.ticks % cost.ms.length] ?? 0);
+        for (const until = performance.now() + busy; performance.now() < until; );
       },
       camera() {
         const stage = layerRef.current?.getStage();
