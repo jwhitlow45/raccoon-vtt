@@ -1469,6 +1469,53 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
   });
 
   /*
+   * Lane rules-A's step (rulesa-): the walking ruler reads single file
+   * (RULER-SINGLE-FILE, D-261107-174). From a warhorse dragging a goblin,
+   * a leg into the vault's one-row corridor searched with the goblin by its
+   * place and found no way. It now takes the warhorse's own way in, where
+   * the goblin follows in single file, as the drag does.
+   */
+  test("rulesa-2. the walking ruler from a warhorse dragging a goblin into the one-row corridor reads the way the drag takes, squeezing and dragging named", async () => {
+    const horse = randomUUID();
+    const gob = randomUUID();
+    await ops.send(creature(horse, "Vault warhorse", "large", { col: 12, row: 13 }, { sceneId: run.vault, kind: "npc", disposition: "ally" }));
+    await ops.send(creature(gob, "Vault captive", "medium", { col: 12, row: 12 }, { sceneId: run.vault }));
+    await waitFor("the warhorse and the captive", () => (onVaultHex(horse, "large", { col: 12, row: 13 }) && onVaultHex(gob, "medium", { col: 12, row: 12 }) ? true : null));
+    const gobAt = placedOnHex(G, { size: "medium", x: 0, y: 0 }, { col: 12, row: 12 });
+    await ops.send({ t: "token.attach", tokenId: gob, to: horse, kind: "drag", ...gobAt, elevation: 0 });
+    await waitFor("the captive in tow", () => (vaultToken(gob)?.attached?.to === horse ? true : null));
+    try {
+      await pickTool(dm, "Ruler");
+      const { group, popover } = await measureChoice(dm);
+      await group.getByRole("radio", { name: "Walking", exact: true }).click();
+      if (popover) {
+        await dm.keyboard.press("Escape");
+        await popover.waitFor({ state: "detached" });
+      }
+      const from = placedOnHex(G, { size: "large", x: 0, y: 0 }, { col: 12, row: 13 });
+      await holdDrag(dm, { x: from.x + 1, y: from.y + 1 }, hexCenter(G, { col: 17, row: 14 }));
+      await dm.mouse.up();
+      const line = dm.getByRole("toolbar", { name: "Ruler options" }).locator("[data-options-line]");
+      const text = await waitFor("the walking reading", async () => {
+        const t = await line.innerText();
+        return /Walking \d+ ft/.test(t) ? t : null;
+      });
+      assert.match(text, /^Walking \d+ ft · \+\d+ ft for squeezing and dragging/, "the drag's own way in, its costs named");
+      assert.doesNotMatch(text, /No way through/, "a way through");
+      await shots.take(dm, "rulesa-walking-ruler-single-file");
+      const back = await measureChoice(dm);
+      await back.group.getByRole("radio", { name: "Straight", exact: true }).click();
+      if (back.popover) {
+        await dm.keyboard.press("Escape");
+        await back.popover.waitFor({ state: "detached" });
+      }
+      await pickTool(dm, "Select");
+    } finally {
+      for (const id of [gob, horse]) await ops.send({ t: "token.delete", tokenId: id });
+    }
+  });
+
+  /*
    * Lane HX-7's steps (HX7-): riding and traps on hexes, phase H2. A Medium
    * gets on a Large pony from the Attach list and off beside it, the Trap
    * tool draws a trap of hexes that Thorn's walk sets off, a found trap of

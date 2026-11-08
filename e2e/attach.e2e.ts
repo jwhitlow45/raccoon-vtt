@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import type { RoomState, Token } from "../shared/model.ts";
 import { occupiedHexes, placedOnHex } from "../shared/rules/footprint.ts";
-import { hexCenter, hexKey, type Hex, type HexGrid } from "../shared/rules/hex.ts";
+import { hexCenter, hexKey, hexNeighbors, type Hex, type HexGrid } from "../shared/rules/hex.ts";
 import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
 import { barControl, ConsoleWatch, dragCells, dragWorld, expandBar, OpSocket, openSideTab, pagePoint, pickOption, pickTool, Shots, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
 
@@ -1110,6 +1110,56 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await ops.send({ t: "scene.delete", sceneId: keep.scene });
   });
 
+  /*
+   * Lane rules-A's step (rulesa-): single file on hexes (RIDE-SINGLE-FILE-HEX,
+   * D-261107-172). A warhorse dragging a goblin that stands off the
+   * corridor's line went in alone before, the goblin by its place against
+   * the rock, so the drag held at the mouth. From op version 51 the goblin
+   * walks down onto the warhorse's line and in behind it.
+   */
+  test("rulesa-1. Pat drags the warhorse, which drags a goblin beside it, into a corridor one hex wide on hex rows: the goblin follows it in single file, on the hex right behind the squeezed warhorse (D-261107-172)", async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    const G: HexGrid = { shape: "hex", orient: "rows" };
+    const field = { w: 20, h: 12 };
+    const keep = { scene: randomUUID(), horse: randomUUID(), gob: randomUUID() };
+    await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "Rules A hex rows", bounds: field, fogEnabled: false, gridShape: "hexRows" } });
+    await ops.send({ t: "scene.update", sceneId: keep.scene, patch: { blockMovement: true } });
+    // Rock from column 7 to 12 but for a corridor along row 6.
+    const walls = wallsRound(G, field, (h: Hex) => h.col >= 7 && h.col <= 12 && h.row !== 6);
+    for (let i = 0; i < walls.length; i += 100) await ops.send({ t: "build.walls", sceneId: keep.scene, put: walls.slice(i, i + 100) });
+    const horseAt = placedOnHex(G, { size: "large", x: 0, y: 0 }, { col: 3, row: 6 });
+    await ops.send({ t: "token.create", token: { id: keep.horse, sceneId: keep.scene, kind: "npc", name: "Warhorse", size: "large", ...horseAt, disposition: "ally", visibility: "all", ownerIds: [run.patId], actor: { inline: actor({ speeds: { walk: 60 } }) } } });
+    // The goblin on a hex beside the warhorse above the corridor's row, so by its place it would walk into the rock.
+    const own = occupiedHexes(G, { size: "large", ...horseAt });
+    const beside = own.flatMap((h) => hexNeighbors(G, h)).find((h) => h.row === 5 && !own.some((o) => hexKey(o) === hexKey(h)))!;
+    const gobAt = placedOnHex(G, { size: "medium", x: 0, y: 0 }, beside);
+    await ops.send({ t: "token.create", token: { id: keep.gob, sceneId: keep.scene, kind: "monster", name: "Goblin", size: "medium", ...gobAt, disposition: "hostile", visibility: "all", actor: { inline: actor() } } });
+    await ops.send({ t: "token.attach", tokenId: keep.gob, to: keep.horse, kind: "drag", ...gobAt, elevation: 0 });
+    await ops.send({ t: "room.setPlayerScene", sceneId: keep.scene });
+    await waitFor("the goblin in tow in Pat's copy", () => (token(patSocket, keep.gob)?.attached ? true : null));
+    await waitFor("the corridor's walls in Pat's copy", () => (Object.values((patSocket.state as RoomState | null)?.buildChunks ?? {}).reduce((n, c) => n + (c?.sceneId === keep.scene ? (c.walls?.length ?? 0) : 0), 0) === walls.length ? true : null));
+    await pat.locator(".konvajs-content").first().waitFor();
+    const from = await pagePoint(pat, field, { x: horseAt.x + 1, y: horseAt.y + 1 });
+    const to = await pagePoint(pat, field, hexCenter(G, { col: 10, row: 6 }));
+    await touchSwipe(patCdp, from, to, { steps: 16, everyMs: 20 });
+    const horse = await waitFor("the warhorse squeezed in the corridor", () => {
+      const t = token(patSocket, keep.horse);
+      return t?.squeeze === true && hexKey(occupiedHexes(G, t)[0]!) === "10,6" ? t : null;
+    });
+    const gob = await waitFor("the goblin behind it", () => {
+      const t = token(patSocket, keep.gob);
+      return t && (t.x !== gobAt.x || t.y !== gobAt.y) ? t : null;
+    });
+    assert.deepEqual([occupiedHexes(G, gob).map(hexKey), gob.attached?.to], [["9,6"], keep.horse], "on the hex right behind the warhorse, still in tow");
+    assert.equal(occupiedHexes(G, horse).length, 1, "the warhorse on its one squeezed hex");
+    assert.equal(await pat.getByRole("status").filter({ hasText: /through there|Stopped at a wall/ }).count(), 0, "no note");
+    await shots.take(pat, "rulesa-goblin-follows-in-single-file-on-hexes");
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
+    await waitFor("Pat back on the party's scene", () => ((patSocket.state as RoomState | null)?.meta.playerSceneId === run.sceneId ? true : null));
+    for (const id of [keep.gob, keep.horse]) await ops.send({ t: "token.delete", tokenId: id });
+    await ops.send({ t: "scene.delete", sceneId: keep.scene });
+  });
+
   test("fu48m-1. Pat drags Brom on the warhorse, which drags a goblin, toward a corridor one square wide over a net at its mouth: the net stops the warhorse squeezed at the mouth, and the goblin stops on the square behind it, not on the warhorse's (TRAP-STOP-STACK)", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const field = { w: 20, h: 12 };
@@ -1275,7 +1325,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await ops.send({ t: "scene.delete", sceneId: keep.scene });
   });
 
-  test("drag46-2. the DM's walking ruler from the warhorse, which drags a goblin, into a corridor one square wide of plain stone finds no way through and names only squeezing", async () => {
+  test("drag46-2. the DM's walking ruler from the warhorse, which drags a goblin, into a corridor one square wide of plain stone takes the way in the goblin follows in single file and names only squeezing", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const field = { w: 28, h: 14 };
     const keep = { scene: randomUUID(), horse: randomUUID(), thorn: randomUUID(), gob: randomUUID() };
@@ -1304,10 +1354,12 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     const line = dm.getByRole("toolbar", { name: "Ruler options" }).locator("[data-options-line]");
     const text = await waitFor("the walking reading", async () => {
       const t = await line.innerText();
-      return /No way through/.test(t) ? t : null;
+      return /^Walking \d+ ft · \+\d+ ft/.test(t) ? t : null;
     });
-    assert.match(text, /^Walking 65 ft · \+20 ft for squeezing · No way through/, "the straight walk, no difficult terrain on plain stone");
-    await shots.take(dm, "drag46-ruler-no-way-through-squeezing");
+    // From op version 51 the ruler reads the warhorse's own way in, which the goblin follows in single file (RULER-SINGLE-FILE).
+    assert.match(text, /^Walking 75 ft · \+30 ft for squeezing/, "the way in, no difficult terrain on plain stone");
+    assert.doesNotMatch(text, /No way through|difficult/, "a way through, and squeezing alone");
+    await shots.take(dm, "drag46-ruler-single-file-squeezing");
     await pickOption(dm, "Ruler", "Measure", "Straight");
     await dm.keyboard.press("Escape");
     await pickTool(dm, "Select");
