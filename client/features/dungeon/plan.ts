@@ -9,10 +9,11 @@ import { besideDoorway, bulgeTunnels, erodeRoom, placeColumns } from "./cave.ts"
 import { deadEndCount, placeDeadEnds, type Spur } from "./deadEnds.ts";
 import { pinSquare } from "./keyRooms.ts";
 import { chooseSecrets, secretCandidates, stillWhole, type Candidate } from "./secrets.ts";
-import { clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, MAX_DOOR_EDGES, SEARCH_BUDGET, secretCount, trapCount, type DungeonSettings, type PlanContext, type Theme } from "./settings.ts";
+import { clampContext, clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, MAX_DOOR_EDGES, SEARCH_BUDGET, secretCount, trapCount, type DungeonSettings, type PlanContext, type Theme } from "./settings.ts";
 import { channelWater, placeCisterns, type Channel } from "./sewer.ts";
 import { THEME_SPECS } from "./themes.ts";
-import { pickTraps, trapSpots } from "./trapSpots.ts";
+import { propsFor } from "./props.ts";
+import { pickTraps, STATUE_STAMP, statueReaches, trapSpots, type PickedTraps } from "./trapSpots.ts";
 
 /*
  * The dungeon a seed and the choices make (docs/design/design-v1-dungeon-generator.md
@@ -166,6 +167,7 @@ export function generate(settings: DungeonSettings, seed: Seed, context: PlanCon
 /** The plan with its working. A caller with no room (a bench script) plans at the default 5 ft a square. */
 export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanContext = DEFAULT_CONTEXT, budget: number = SEARCH_BUDGET): Planned {
   const s = clampSettings(input);
+  const ctx = clampContext(context);
   const theme = THEME_SPECS[s.theme];
   const { w: W, h: H } = s;
   const width = s.wide ? 2 : 1;
@@ -419,9 +421,24 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   const painted = (k: number) => inRoom(k) || corridor.has(k);
   const floorFree = (k: number) =>
     painted(k) && !overlay.has(k) && !daisSquares.has(k) && !clear.has(k) && !inside.has(k) && !secretMouths.has(k) && (board.roomAt[k] !== 0 || plainCorridor(k));
-  const traps =
+  const ownFloor = (i: number, k: number) => board.roomAt[k] === i + 1 && inRoom(k) && k !== pins.get(i);
+  const roomTerrain = (i: number) => {
+    const r = board.rooms[i]!;
+    const terrain = new Map<number, TerrainId>();
+    const ground = new Map<number, number>();
+    for (let y = r.y; y < r.y + r.h; y++) {
+      for (let x = r.x; x < r.x + r.w; x++) {
+        const k = board.cell(x, y);
+        if (!inRoom(k)) continue;
+        terrain.set(k, overlay.get(k) ?? floors[i]!);
+        ground.set(k, daisSquares.get(k) ?? r.ground);
+      }
+    }
+    return { terrain, ground };
+  };
+  const picked: PickedTraps =
     s.traps === 0
-      ? []
+      ? { traps: [], statues: [], stones: [] }
       : pickTraps(
           rng,
           trapSpots({
@@ -429,13 +446,25 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
             rooms: kept.filter((i) => i !== entrance.room),
             onLine,
             floorFree,
+            hitFree: (k) => corridor.has(k) && plainCorridor(k) && !secretMouths.has(k),
             corridor: [...new Set([...builtPaths.flat(), ...spurPaths.flat()])],
             painted,
             wide: s.wide,
             locked: doorways.filter((d) => d.room !== entrance.room && states.get(d.id) === "locked").map((d) => doorEdgeOf(board, d, 0)),
+            statueRooms: kept.filter((i) => i !== entrance.room && propsFor(s.theme, floors[i]!).includes(STATUE_STAMP.key)),
+            blockFree: (i, k) => ownFloor(i, k) && !overlay.has(k) && !daisSquares.has(k) && !clear.has(k) && !inside.has(k) && !openLines.get(i)!.has(k),
+            plateFree: (i, k) => ownFloor(i, k) && openLines.get(i)!.has(k) && floorFree(k),
+            stones: s.wide && (s.band === "11-16" || s.band === "17-20"),
+            feetPerCell: ctx.feetPerCell,
           }),
           trapCount(s.traps, kept.length),
+          (spot) => {
+            const i = board.roomAt[spot.squares[0]!]! - 1;
+            const [z] = "cells" in spot.zone ? spot.zone.cells : [];
+            return i >= 0 && z !== undefined && spot.cone !== undefined && statueReaches({ w: W, h: H, ...roomTerrain(i), plate: [z.x, z.y], cone: spot.cone, band: s.band, feetPerCell: ctx.feetPerCell });
+          },
         );
+  const traps = picked.traps;
 
   // The plan.
   const terrain = new Map<number, TerrainId>();
@@ -501,9 +530,9 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
       (a, b) => a - b,
     ).map(({ v, cells }) => ({ ft: v, cells })),
     stairs: grouped(ups, (a, b) => DIR_ORDER.indexOf(a) - DIR_ORDER.indexOf(b)).map(({ v, cells }) => ({ up: v, cells })),
-    stamps: [],
+    stamps: [...picked.statues],
     lights: [],
-    stones: [],
+    stones: picked.stones,
     traps,
     entrance: entrance.room >= 0 ? { x: rects[entrance.room]!.x, y: rects[entrance.room]!.y, w: rects[entrance.room]!.w, h: rects[entrance.room]!.h } : { x: 0, y: 0, w: 0, h: 0 },
     key: null,

@@ -25,8 +25,6 @@ export type ThemeSpec = {
   cave: boolean;
   /** Water channels in the corridors and cisterns in the rooms. */
   sewer: boolean;
-  /** Whether a Fire-Casting Statue may stand in its rooms whose props hold the statue (D-261107-267). */
-  statue: boolean;
   light: { stamp: string; preset: PlanLight["preset"]; label: string };
 };
 
@@ -42,7 +40,6 @@ export const THEME_SPECS: Readonly<Record<Theme, ThemeSpec>> = {
     pillars: false,
     cave: false,
     sewer: false,
-    statue: true,
     light: { stamp: "fire-pit", preset: "Torch", label: "Fire pit" },
   },
   crypt: {
@@ -56,7 +53,6 @@ export const THEME_SPECS: Readonly<Record<Theme, ThemeSpec>> = {
     pillars: true,
     cave: false,
     sewer: false,
-    statue: true,
     light: { stamp: "ph-candelabra", preset: "Candle", label: "Candelabra" },
   },
   cave: {
@@ -70,7 +66,6 @@ export const THEME_SPECS: Readonly<Record<Theme, ThemeSpec>> = {
     pillars: false,
     cave: true,
     sewer: false,
-    statue: false,
     light: { stamp: "campfire", preset: "Torch", label: "Campfire" },
   },
   mine: {
@@ -84,7 +79,6 @@ export const THEME_SPECS: Readonly<Record<Theme, ThemeSpec>> = {
     pillars: false,
     cave: false,
     sewer: false,
-    statue: false,
     light: { stamp: "ph-lantern", preset: "Hooded Lantern", label: "Lantern" },
   },
   sewer: {
@@ -98,7 +92,6 @@ export const THEME_SPECS: Readonly<Record<Theme, ThemeSpec>> = {
     pillars: false,
     cave: false,
     sewer: true,
-    statue: false,
     light: { stamp: "ph-lantern", preset: "Hooded Lantern", label: "Lantern" },
   },
 };

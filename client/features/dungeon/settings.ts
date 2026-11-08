@@ -13,7 +13,7 @@ import { LEVEL_BANDS, type LevelBand } from "#shared/srd/traps.ts";
  * bumps this and the fixture together. Replay never reads it: the stored
  * ops hold the dungeon.
  */
-export const GENERATOR_VERSION = 6;
+export const GENERATOR_VERSION = 7;
 
 export type Density = "sparse" | "normal" | "dense";
 export type CorridorStyle = "straight" | "bending" | "winding";

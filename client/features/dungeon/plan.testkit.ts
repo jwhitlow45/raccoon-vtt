@@ -22,6 +22,10 @@ const TRAP_SPACING = 6;
 const PITS = new Set(["hidden-pit", "spiked-pit"]);
 const FALLING_NET = "falling-net";
 const POISONED_NEEDLE = "poisoned-needle";
+const COLLAPSING_ROOF = "collapsing-roof";
+/** Presets on one square: a plate. */
+const PLATES = new Set(["poisoned-darts", "fire-casting-statue", "rolling-stone"]);
+const MAX_STONES = 2;
 
 const FLOORS: ReadonlySet<TerrainId> = new Set(["stone", "wood", "cave", "dirt"]);
 const BLOCKS_WALK: ReadonlySet<TerrainId> = new Set(["pillar", "pit"]);
@@ -400,22 +404,49 @@ export function planProblems(planned: Planned, s: DungeonSettings): string[] {
   const trapMids: [number, number][] = [];
   const raisedRun = new Set<number>();
   for (let k = 0; k < W * g.H; k++) if (g.room[k]! < 0 && (g.ground[k] !== 0 || g.up[k] !== undefined)) raisedRun.add(k);
+  // The corridor squares just outside every door, where nothing lies in wait.
+  const doorMouths = new Set<number>();
+  for (const { edge } of plan.doors) {
+    const [xs, ys, side] = edge.split(",");
+    const x = Number(xs);
+    const y = Number(ys);
+    for (const k of side === "n" ? [(y - 1) * W + x, y * W + x] : [y * W + x - 1, y * W + x]) if (k >= 0 && g.room[k]! < 0) doorMouths.add(k);
+  }
   if (plan.traps.length > MAX_TRAPS) say(`${plan.traps.length} traps`);
   if (s.traps === 0 && plan.traps.length > 0) say("traps on None");
   for (const t of plan.traps) {
     const z = t.zone;
+    for (const h of t.hits ?? []) {
+      for (let y = h.y; y < h.y + h.h; y++) {
+        for (let x = h.x; x < h.x + h.w; x++) {
+          const k = y * W + x;
+          if (!g.painted(k) || g.room[k]! >= 0) say(`${t.preset} hits ${x},${y} off its corridor`);
+          if (raisedRun.has(k) || g.up[k] !== undefined) say(`${t.preset} hits a run or stair at ${x},${y}`);
+          if (doorMouths.has(k)) say(`${t.preset} hits a doorway's outside square at ${x},${y}`);
+        }
+      }
+    }
+    if (t.stone !== undefined) {
+      const [sx, sy] = plan.stones[t.stone] ?? [-1, -1];
+      for (const k of [sy * W + sx, sy * W + sx + 1, (sy + 1) * W + sx, (sy + 1) * W + sx + 1]) if (!g.painted(k) || g.room[k]! >= 0 || raisedRun.has(k) || doorMouths.has(k)) say(`a stone at ${sx},${sy} off plain corridor`);
+    }
     if ("cells" in z) {
-      if (!PITS.has(t.preset)) say(`${t.preset} on squares`);
+      const plate = PLATES.has(t.preset);
+      if (!PITS.has(t.preset) && !plate) say(`${t.preset} on squares`);
       const r = z.cells[0]!;
+      if (plate && (r.w !== 1 || r.h !== 1)) say(`${t.preset}'s plate is ${r.w} by ${r.h}`);
       const grounds = new Set<number>();
       for (let y = r.y; y < r.y + r.h; y++) {
         for (let x = r.x; x < r.x + r.w; x++) {
           const k = y * W + x;
           if (!FLOORS.has(g.terrain[k]!)) say(`trap on ${at(k)}, ${g.terrain[k] ?? "rock"}`);
           if (raisedRun.has(k) || g.up[k] !== undefined) say(`trap on a run or stair at ${at(k)}`);
+          if (doorMouths.has(k)) say(`trap on a doorway's outside square at ${at(k)}`);
           if (g.room[k]! >= 0 && plan.rooms[g.room[k]!]!.entrance) say("trap in the entrance room");
           if (g.room[k]! >= 0 && g.ground[k] !== plan.rooms[g.room[k]!]!.ground) say(`trap on a dais at ${at(k)}`);
-          if (g.room[k]! < 0 && !s.wide) say(`pit trap in a Narrow corridor at ${at(k)}`);
+          if (g.room[k]! < 0 && !s.wide && !plate) say(`pit trap in a Narrow corridor at ${at(k)}`);
+          if (t.preset === "fire-casting-statue" && g.room[k]! < 0) say(`a statue's plate in a corridor at ${at(k)}`);
+          if ((t.preset === "poisoned-darts" || t.preset === "rolling-stone") && g.room[k]! >= 0) say(`${t.preset} in a room at ${at(k)}`);
           grounds.add(g.ground[k]!);
         }
       }
@@ -423,17 +454,21 @@ export function planProblems(planned: Planned, s: DungeonSettings): string[] {
       // In a room, a pit lies on a doorway line, where the party walks.
       let line = false;
       for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (onLine.has(y * W + x)) line = true;
-      if (g.room[r.y * W + r.x]! >= 0 && !line) say(`pit trap at ${r.x},${r.y} off the doorway lines`);
+      if (g.room[r.y * W + r.x]! >= 0 && !line) say(`${t.preset} at ${r.x},${r.y} off the doorway lines`);
+      if (t.preset === "poisoned-darts" && s.wide) say("darts on Wide");
+      if (t.preset === "rolling-stone" && (!s.wide || t.stone === undefined || !plan.stones[t.stone])) say("a rolling stone without its stone, or on Narrow");
+      if (t.preset === "fire-casting-statue" && (!t.cone || t.cone.yaw % 45 !== 0)) say("a statue without its cone in a 45 degree step");
       trapMids.push([2 * r.x + r.w, 2 * r.y + r.h]);
     } else if ("wire" in z) {
-      if (t.preset !== FALLING_NET) say(`${t.preset} on a wire`);
-      if (s.wide) say("a wire on Wide");
+      if (t.preset !== FALLING_NET && t.preset !== COLLAPSING_ROOF) say(`${t.preset} on a wire`);
+      if (s.wide && t.preset === FALLING_NET) say("a net on Wide");
       const k = Math.floor(Math.min(z.wire.a[1], z.wire.b[1])) * W + Math.floor(Math.min(z.wire.a[0], z.wire.b[0]));
       if (!g.painted(k) || g.room[k]! >= 0) say(`wire off a corridor at ${at(k)}`);
-      // Across its square from one wall's midpoint to the other's: rock past both ends.
+      // Across the corridor from one wall's midpoint to the other's: rock past both ends.
       const across = z.wire.a[1] === z.wire.b[1];
-      const ends = across ? [k - 1, k + 1] : [k - W, k + W];
-      if (Math.abs(across ? z.wire.b[0] - z.wire.a[0] : z.wire.b[1] - z.wire.a[1]) !== 1 || ends.some((e) => g.painted(e))) say(`wire at ${at(k)} does not run wall to wall`);
+      const lanes = s.wide ? 2 : 1;
+      const ends = across ? [k - 1, k + lanes] : [k - W, k + lanes * W];
+      if (Math.abs(across ? z.wire.b[0] - z.wire.a[0] : z.wire.b[1] - z.wire.a[1]) !== lanes || ends.some((e) => g.painted(e))) say(`wire at ${at(k)} does not run wall to wall`);
       trapMids.push([z.wire.a[0] + z.wire.b[0], z.wire.a[1] + z.wire.b[1]]);
     } else {
       if (t.preset !== POISONED_NEEDLE) say(`${t.preset} on a door`);
@@ -448,6 +483,7 @@ export function planProblems(planned: Planned, s: DungeonSettings): string[] {
       }
     }
   }
+  if (plan.stones.length > MAX_STONES) say(`${plan.stones.length} stones`);
   for (let i = 0; i < trapMids.length; i++) {
     for (let j = i + 1; j < trapMids.length; j++) {
       const [a, b] = [trapMids[i]!, trapMids[j]!];
