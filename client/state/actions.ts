@@ -41,6 +41,7 @@ export function createRoomActions(room: RoomStore, socket: Pick<RoomSocket, "sen
   const actions: RoomActions = {
     // While a builder gesture waits on its asks, the store refuses whatever could land before it (store.ts holdBuild).
     dispatch: (op, opts) => room.dispatch(op, opts),
+    dispatchMany: (entries) => room.dispatchMany(entries),
     sendEph(e, opts) {
       if (!validEph(e)) {
         if (!reported.has(e.k)) {

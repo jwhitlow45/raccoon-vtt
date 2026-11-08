@@ -649,6 +649,13 @@ export type RoomActions = {
    */
   dispatch(op: ClientOp | HistoryCommand, opts?: UndoGroupOptions & { onAnswer?: OnAnswer; quiet?: boolean; holds?: () => readonly ClientOp[] }): number | null;
   /**
+   * Queues several ops in order as `dispatch` queues each, with one view
+   * rebuild for all, for a sender of many at once such as a generated
+   * dungeon. Each answer is its op's `n`, or null where `dispatch` would
+   * have refused it. Absent where nothing sends many, as on a preview.
+   */
+  dispatchMany?(entries: readonly { op: ClientOp; opts?: UndoGroupOptions & { onAnswer?: OnAnswer } }[]): (number | null)[];
+  /**
    * Sends an ephemeral event on the current scene, coalesced to one per
    * animation frame (design 7.6), and shows it locally as this member's own.
    * `localOnly` shows it here without sending, for a preview that is private

@@ -32,7 +32,7 @@ function made() {
  * answers null where `refuseAtInput` says, and switchScene shows the asked
  * scene's stored contents after a tick, unless `loads` is off.
  */
-function table(opts: { stored: RoomState | null; refuseAtInput?: (op: ClientOp, i: number) => boolean; loads?: boolean; shown?: boolean; checkMs?: number }) {
+function table(opts: { stored: RoomState | null; refuseAtInput?: (op: ClientOp, i: number) => boolean; loads?: boolean; shown?: boolean; checkMs?: number; many?: boolean }) {
   let state: Shown = { sceneId: "start", view: { ...scratchRoom(), scenes: {} } as RoomState, ended: null };
   const listeners = new Set<(s: RoomView, was: RoomView) => void>();
   const set = (next: Partial<Shown>) => {
@@ -42,15 +42,26 @@ function table(opts: { stored: RoomState | null; refuseAtInput?: (op: ClientOp, 
   };
   const sent: Sent[] = [];
   const switched: string[] = [];
+  /** Each dispatchMany call's count of ops. */
+  const batches: number[] = [];
   let n = 0;
+  const dispatch = (op: ClientOp, o?: { group?: string; groupScope?: string; onAnswer?: OnAnswer }) => {
+    const refused = opts.refuseAtInput?.(op, sent.length) ?? false;
+    const at = refused ? null : ++n;
+    sent.push({ op, group: o?.group, groupScope: o?.groupScope, onAnswer: o?.onAnswer, n: at });
+    return at;
+  };
   const actions = {
     newId: () => "group-1",
-    dispatch(op: ClientOp, o?: { group?: string; groupScope?: string; onAnswer?: OnAnswer }) {
-      const refused = opts.refuseAtInput?.(op, sent.length) ?? false;
-      const at = refused ? null : ++n;
-      sent.push({ op, group: o?.group, groupScope: o?.groupScope, onAnswer: o?.onAnswer, n: at });
-      return at;
-    },
+    dispatch,
+    ...(opts.many
+      ? {
+          dispatchMany(entries: { op: ClientOp; opts?: { group?: string; groupScope?: string; onAnswer?: OnAnswer } }[]) {
+            batches.push(entries.length);
+            return entries.map((e) => dispatch(e.op, e.opts));
+          },
+        }
+      : {}),
     switchScene(sceneId: string) {
       switched.push(sceneId);
       set({ sceneLoad: { requested: sceneId } as RoomView["sceneLoad"] });
@@ -71,7 +82,7 @@ function table(opts: { stored: RoomState | null; refuseAtInput?: (op: ClientOp, 
     set({ view: { ...(state.view as RoomState), scenes } });
   };
   const room: SendRoom = { store, shown: () => opts.shown ?? true, ...(opts.checkMs !== undefined ? { checkMs: opts.checkMs } : {}) };
-  return { actions, store, room, sent, switched, set, listScene, state: () => state };
+  return { actions, store, room, sent, switched, batches, set, listScene, state: () => state };
 }
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -96,6 +107,21 @@ test("DG-B: every op is dispatched in one task, in one Setup group, and every an
   assert.deepEqual(progress, m.ops.map((_, i) => [i + 1, m.ops.length]));
   assert.deepEqual(outcome, { k: "complete", checked: false });
   assert.deepEqual(t.switched, [m.sceneId], "the scene opens");
+});
+
+test("DG2B: with the store's dispatchMany, the scene goes alone and the rest in one call, in order, in the group, and a null there counts as refused", async () => {
+  const whole = await run(() => "taken", { many: true });
+  assert.deepEqual(whole.t.batches, [whole.m.ops.length - 1], "one call for all but the scene");
+  assert.deepEqual(whole.t.sent.map((s) => s.op), whole.m.ops);
+  assert.ok(whole.t.sent.every((s) => s.group === "group-1" && s.groupScope === "setup"));
+  assert.equal(whole.sentAtOnce, whole.m.ops.length, "all dispatched before the first await");
+  assert.deepEqual(whole.outcome, { k: "complete", checked: false });
+  const held = await run(() => "taken", { many: true, refuseAtInput: (op) => op.t === "trap.create" });
+  assert.deepEqual(held.outcome, { k: "partial" });
+  assert.deepEqual(held.progress.at(-1), [held.m.ops.length, held.m.ops.length], "every op answered once");
+  const noScene = await run(() => "taken", { many: true, refuseAtInput: (_op, i) => i === 0, exists: false });
+  assert.deepEqual(noScene.outcome, { k: "none", lost: false });
+  assert.deepEqual(noScene.t.batches, [], "nothing after a scene refused at input");
 });
 
 test("DG-B: the scene refused by the server is none, and the scene refused at input sends nothing after it", async () => {
@@ -191,13 +217,13 @@ function expected(answers: OpAnswer[], atInput: boolean[], exists: boolean, same
   return mayCheck && same ? { k: "complete", checked: true } : { k: "unconfirmed" };
 }
 
-test("DG-B: under any answers, in any order, refusals at input, a moved-on DM and a stored scene whole or short, the send ends once with the rule's outcome", async () => {
+test("DG-B: under any answers, in any order, refusals at input, a moved-on DM, a stored scene whole or short, and with or without the store's dispatchMany, the send ends once with the rule's outcome", async () => {
   const { made: m, stored } = made();
   const short = structuredClone(stored);
   for (const chunk of Object.values(short.buildChunks)) chunk.cells = {};
   const total = m.ops.length;
   const answer = fc.constantFrom<OpAnswer>("taken", "taken", "taken", "refused", "unknown", "unknown");
-  const runs: { answers: OpAnswer[]; atInput: boolean[]; order: number[]; exists: boolean; same: boolean; shown: boolean; movedOn: boolean }[] = [];
+  const runs: { answers: OpAnswer[]; atInput: boolean[]; order: number[]; exists: boolean; same: boolean; shown: boolean; movedOn: boolean; many: boolean }[] = [];
   holds(
     fc.property(
       fc.array(answer, { minLength: total, maxLength: total }),
@@ -207,12 +233,13 @@ test("DG-B: under any answers, in any order, refusals at input, a moved-on DM an
       fc.boolean(),
       fc.boolean(),
       fc.boolean(),
-      (answers, atInput, order, exists, same, shown, movedOn) => void runs.push({ answers, atInput, order, exists, same, shown, movedOn }),
+      fc.boolean(),
+      (answers, atInput, order, exists, same, shown, movedOn, many) => void runs.push({ answers, atInput, order, exists, same, shown, movedOn, many }),
     ),
     200,
   );
   for (const r of runs) {
-    const t = table({ stored: r.same ? stored : short, shown: r.shown, refuseAtInput: (_op, i) => r.atInput[i] === true, checkMs: 50 });
+    const t = table({ stored: r.same ? stored : short, shown: r.shown, refuseAtInput: (_op, i) => r.atInput[i] === true, checkMs: 50, many: r.many });
     const progress: number[] = [];
     let settled = 0;
     const done = sendDungeon(m, t.actions, (a) => progress.push(a), t.room).then((o) => {

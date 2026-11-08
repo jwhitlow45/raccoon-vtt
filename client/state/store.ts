@@ -350,6 +350,12 @@ export type RoomStore = {
 
   /** Queues an op, shows its predicted result at once, and sends it when the socket allows. Returns its `n`, or null when the op is malformed. */
   dispatch(op: ClientOp | HistoryCommand, opts?: DispatchOptions): number | null;
+  /**
+   * Queues several ops in order as `dispatch` queues each, with one view
+   * rebuild and one send for all of them. Returns each one's `n`, or null
+   * where `dispatch` would have refused it, and the rest still go.
+   */
+  dispatchMany(entries: readonly { op: ClientOp; opts?: DispatchOptions }[]): (number | null)[];
   activateHistory(direction: HistoryDirection, options?: HistoryActivation): boolean;
   applyHistory(message: HistoryMessage, connection?: number): void;
   historyConnection(): number;
@@ -843,6 +849,29 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     });
   }
 
+  /** An op as `dispatch` queues it, numbered, or null where it refuses it at input with its toast. */
+  function queued(op: ClientOp | HistoryCommand, opts: DispatchOptions | undefined): PendingOp | null {
+    // Nothing that could land before a builder gesture waiting on its asks goes, whoever sends it (D-261027-07).
+    if (held.length > 0 && overtakes(op)) return null;
+    if (opts?.groupScope && (!opts.group || get().you?.role !== "dm")) {
+      pushToast("Only a DM can declare a grouped setup change.");
+      return null;
+    }
+    const parsed = op.t === "undo" || op.t === "redo" ? historyCommandSchema.safeParse(op) : clientOpSchema.safeParse(op);
+    if (!parsed.success) {
+      console.error("raccoon: refusing to send a malformed op", op, parsed.error);
+      pushToast("That change could not be sent.");
+      return null;
+    }
+    const pendingOp: PendingOp = { n: nextN++, op: parsed.data, at: clock.now() };
+    if (opts?.group !== undefined) pendingOp.group = opts.group;
+    if (opts?.groupScope !== undefined) pendingOp.groupScope = opts.groupScope;
+    if (opts?.onAnswer !== undefined) pendingOp.onAnswer = opts.onAnswer;
+    if (opts?.quiet === true) pendingOp.quiet = true;
+    if (opts?.holds !== undefined) pendingOp.holds = opts.holds;
+    return pendingOp;
+  }
+
   // ------------------------------------------------------------ the store object
 
   const setLocal = (local: LocalUi) => {
@@ -998,28 +1027,26 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     historyConnection: () => history.generation,
 
     dispatch(op, opts) {
-      // Nothing that could land before a builder gesture waiting on its asks goes, whoever sends it (D-261027-07).
-      if (held.length > 0 && overtakes(op)) return null;
-      if (opts?.groupScope && (!opts.group || get().you?.role !== "dm")) {
-        pushToast("Only a DM can declare a grouped setup change.");
-        return null;
-      }
-      const parsed = op.t === "undo" || op.t === "redo" ? historyCommandSchema.safeParse(op) : clientOpSchema.safeParse(op);
-      if (!parsed.success) {
-        console.error("raccoon: refusing to send a malformed op", op, parsed.error);
-        pushToast("That change could not be sent.");
-        return null;
-      }
-      const n = nextN++;
-      const pendingOp: PendingOp = { n, op: parsed.data, at: clock.now() };
-      if (opts?.group !== undefined) pendingOp.group = opts.group;
-      if (opts?.groupScope !== undefined) pendingOp.groupScope = opts.groupScope;
-      if (opts?.onAnswer !== undefined) pendingOp.onAnswer = opts.onAnswer;
-      if (opts?.quiet === true) pendingOp.quiet = true;
-      if (opts?.holds !== undefined) pendingOp.holds = opts.holds;
+      const pendingOp = queued(op, opts);
+      if (!pendingOp) return null;
       commit({ pending: [...get().pending, pendingOp] });
       flush();
-      return n;
+      return pendingOp.n;
+    },
+
+    // One commit for all: each commit rebuilds the view over every pending op, so a dungeon's 100 dispatched one at a
+    // time cost the square of the count in one task (dungeon generator phase 2, D-261107-263).
+    dispatchMany(entries) {
+      const added: PendingOp[] = [];
+      const ns = entries.map(({ op, opts }) => {
+        const pendingOp = queued(op, opts);
+        if (pendingOp) added.push(pendingOp);
+        return pendingOp?.n ?? null;
+      });
+      if (added.length === 0) return ns;
+      commit({ pending: [...get().pending, ...added] });
+      flush();
+      return ns;
     },
 
     holdBuild(cancel) {

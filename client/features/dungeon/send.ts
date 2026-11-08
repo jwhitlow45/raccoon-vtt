@@ -54,9 +54,10 @@ export function dungeonOutcome(answers: Answers, created: OpAnswer, room: { exis
  * Sends the dungeon and says how it ended. Every op is dispatched in this
  * one task, in one group under Setup, so no other op of this device falls
  * inside the group and a DM who switches apps mid-send leaves nothing half
- * queued. An op the store refuses at input (`dispatch` null, as while a
- * builder gesture waits on its ask) counts as refused, and when the scene
- * itself is refused so, nothing after it is sent. `onAnswered` hears each
+ * queued, and all but the scene in one dispatch where the store offers it.
+ * An op the store refuses at input (null, as while a builder gesture waits
+ * on its ask) counts as refused, and when the scene itself is refused so,
+ * nothing after it is sent. `onAnswered` hears each
  * answer as it comes. The scene opens once complete, or to be compared
  * when answers were lost, unless a hidden dialog's DM moved on.
  */
@@ -88,15 +89,17 @@ export async function sendDungeon(
       };
     };
     const answer = made.ops.map((_, i) => settle(i));
-    for (const [i, op] of made.ops.entries()) {
-      if (actions.dispatch(op, { group, groupScope: "setup", onAnswer: answer[i] }) !== null) continue;
-      answer[i]!("refused");
-      if (i === 0) {
-        for (let k = 1; k < total; k++) answer[k]!("refused");
-        break;
-      }
+    const opts = (i: number) => ({ group, groupScope: "setup" as const, onAnswer: answer[i]! });
+    const [create, ...rest] = made.ops;
+    if (create === undefined) return resolve();
+    // The scene alone first: refused at input, nothing after it is sent.
+    if (actions.dispatch(create, opts(0)) === null) {
+      for (const a of answer) a("refused");
+      return;
     }
-    if (total === 0) resolve();
+    // The rest in one view rebuild where the store offers it, since one rebuild per op costs the square of the count (D-261107-263).
+    const ns = actions.dispatchMany ? actions.dispatchMany(rest.map((op, k) => ({ op, opts: opts(k + 1) }))) : rest.map((op, k) => actions.dispatch(op, opts(k + 1)));
+    for (const [k, n] of ns.entries()) if (n === null) answer[k + 1]!("refused");
   });
 
   const sceneId = made.sceneId;
