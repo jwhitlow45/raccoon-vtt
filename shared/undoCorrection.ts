@@ -134,9 +134,11 @@ export function projectCorrection(state: RoomState, viewer: Viewer, data: Correc
  * players never keep a line for time that no longer passed. An undo or redo that brings back or ends a fight writes
  * none, though the fight's seconds move the time: the DM took back the
  * fight's end, not a clock change. Its audience is the clock's after the
- * restore (project.ts lineReader).
+ * restore (project.ts lineReader). `claim` is the head of the history step
+ * the DM's command named, so the device that sent it knows the line
+ * (docs/design/design-v1-calendar-c2c3.md 4.6).
  */
-export function clockCorrection(before: RoomState, after: RoomState, from: HistoryDirection): ClockLogEvent | null {
+export function clockCorrection(before: RoomState, after: RoomState, from: HistoryDirection, claim?: string): ClockLogEvent | null {
   const was = before.clock;
   const now = after.clock;
   if (!was || !now) return null;
@@ -144,5 +146,5 @@ export function clockCorrection(before: RoomState, after: RoomState, from: Histo
   if (was.t === now.t) return null;
   if ((before.encounter === null) !== (after.encounter === null)) return null;
   const date = lineDate(clockNow(now, after.encounter), now.calendar);
-  return date === lineDate(clockNow(was, before.encounter), was.calendar) ? null : { type: "clock", date, from };
+  return date === lineDate(clockNow(was, before.encounter), was.calendar) ? null : { type: "clock", date, from, ...(claim !== undefined ? { claim } : {}) };
 }

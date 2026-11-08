@@ -1434,7 +1434,9 @@ export class RoomActor {
           saveOutcomeMissing = true;
         }
       }
-      const checked = checkServerOp({ t: "sys.restore", entries, from: op.t, scope: historyScope, ...(viewer.role === "dm" ? { correction: { label: step.label } } : {}), deps: true, ...(step.teleport ? { teleport: true as const } : {}), ...routes, ...rides, ...(quiet ? { quiet } : {}), ...(saveOutcome ? { saveOutcome } : {}) });
+      // A DM's restore carries the head its command named, which its clock line carries, so the sending device knows the line
+      // for its own (docs/design/design-v1-calendar-c2c3.md 4.6). A second command naming that head in this batch is refused above.
+      const checked = checkServerOp({ t: "sys.restore", entries, from: op.t, scope: historyScope, ...(viewer.role === "dm" ? { correction: { label: step.label }, claim: historyHead } : {}), deps: true, ...(step.teleport ? { teleport: true as const } : {}), ...routes, ...rides, ...(quiet ? { quiet } : {}), ...(saveOutcome ? { saveOutcome } : {}) });
       if (!checked.ok) {
         this.#undo.consume(viewer.memberId, op.t, historyScope, historyHead);
         this.#refuse(key, wm, n, "invalid", checked.message);

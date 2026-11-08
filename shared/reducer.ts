@@ -218,7 +218,7 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
     if (writesUndoCorrections(env.opVersion) && op.t === "sys.restore" && op.correction && op.scope && op.undid === undefined && actor.role === "dm") {
       tx.addCorrection({ type: "correction", from: op.from, scope: op.scope, label: op.correction.label }, correctionViews(state, tx.state, tx.touched(), op.from, op.scope, env));
       // The clock line follows the same gate, so a player's restore writes none (docs/design/design-v1-calendar.md 6.3).
-      const clock = clockCorrection(state, tx.state, op.from);
+      const clock = clockCorrection(state, tx.state, op.from, op.claim);
       if (clock) tx.addEvent(clock);
     }
     tx.finish();

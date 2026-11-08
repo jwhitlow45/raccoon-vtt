@@ -34,8 +34,9 @@ function clockOf(tx: Tx): RoomClock {
   return clock;
 }
 
-function line(tx: Tx, clock: RoomClock, data: Omit<ClockLogEvent, "type" | "date">): void {
-  tx.addEvent({ type: "clock", date: lineDate(clockNow(clock, tx.state.encounter), clock.calendar), ...data });
+/** `claim` is the sending device's, so it knows the line for its own (docs/design/design-v1-calendar-c2c3.md 4.6). */
+function line(tx: Tx, clock: RoomClock, data: Omit<ClockLogEvent, "type" | "date" | "claim">, claim: string | undefined): void {
+  tx.addEvent({ type: "clock", date: lineDate(clockNow(clock, tx.state.encounter), clock.calendar), ...data, ...(claim !== undefined ? { claim } : {}) });
 }
 
 /** The clock as written, so the line reads the rev and all that Tx gave it. */
@@ -47,7 +48,7 @@ function written(tx: Tx, clock: RoomClock): RoomClock {
 export function clockStart(tx: Tx, op: OpOf<"clock.start">): void {
   if (tx.state.clock) throw invalid("the clock is already running");
   const clock = written(tx, { id: op.id, rev: 0, t: storedFor(tx, op.at), shown: op.shown, calendar: op.calendar });
-  line(tx, clock, { why: "start" });
+  line(tx, clock, { why: "start" }, op.claim);
 }
 
 /** No line: the date and time go, and Undo setup brings them back (4.2, 4.7). */
@@ -68,13 +69,13 @@ export function clockUpdate(tx: Tx, op: OpOf<"clock.update">): void {
   if (op.shown !== undefined) next.shown = op.shown;
   if (op.at !== undefined) next.t = storedFor(tx, op.at);
   const clock = written(tx, next);
-  if (clock.t !== before.t) line(tx, clock, { why: "set" });
+  if (clock.t !== before.t) line(tx, clock, { why: "set" }, op.claim);
 }
 
 export function clockSet(tx: Tx, op: OpOf<"clock.set">): void {
   const before = clockOf(tx);
   const clock = written(tx, { ...before, t: storedFor(tx, op.at) });
-  line(tx, clock, { why: "set" });
+  line(tx, clock, { why: "set" }, op.claim);
 }
 
 /**
@@ -87,5 +88,5 @@ export function clockAdvance(tx: Tx, op: OpOf<"clock.advance">): void {
   const t = before.t + op.by;
   if (!within(clockNow(before, tx.state.encounter) + op.by) || !within(t)) throw invalid(CLOCK_TOO_FAR);
   const clock = written(tx, { ...before, t });
-  line(tx, clock, { by: op.by, ...(op.why ? { why: op.why } : {}) });
+  line(tx, clock, { by: op.by, ...(op.why ? { why: op.why } : {}) }, op.claim);
 }

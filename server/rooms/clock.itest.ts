@@ -121,6 +121,32 @@ describe("the room's clock on the server", () => {
     assert.deepEqual(again && "value" in again ? (again.value as { actor: { effects: { ends?: unknown }[] } }).actor.effects[0]!.ends : null, { span: 3_600 });
   });
 
+  test("a DM's line carries the op's claim, a DM's Undo carries the head it named, and no claim crosses a player's socket (docs/design/design-v1-calendar-c2c3.md 4.6)", async () => {
+    const dmClient = t.client();
+    const { roomId } = await dmClient.createRoom("Claims");
+    const playerClient = t.client();
+    await playerClient.join(roomId, "Pip");
+    const dm = await t.connect(roomId, dmClient);
+    const player = await t.connect(roomId, playerClient);
+    await dm.snapshot("dm");
+    await player.snapshot("p");
+    const frames = wire(player);
+    const claimOf = (ev: { changes: { key: string; value?: unknown }[] }) =>
+      ev.changes.flatMap((c) => (c.key.startsWith("log:") && (c.value as LogEntry | null)?.data?.type === "clock" ? [((c.value as LogEntry).data as { claim?: string }).claim] : []));
+    const claim = uuidv7();
+    await dm.apply({ t: "clock.start", id: uuidv7(), at: 8 * 3_600, shown: true, calendar: MONTHS });
+    const step = await dm.apply({ t: "clock.advance", by: 3_600, claim });
+    assert.deepEqual(claimOf(step), [claim], "the DM's own line names the step's claim");
+    const head = await dm.historyHead("play", "undo");
+    assert.ok(head);
+    const undone = await dm.step("undo");
+    assert.deepEqual(claimOf(undone), [head], "the Undo's line names the head the command named");
+    await dm.apply({ t: "log.chat", text: "fence" });
+    await player.next("ev", (m) => m.changes.some((c) => "value" in c && (c.value as LogEntry | null)?.text === "fence"));
+    assert.ok(frames.some((frame) => frame.includes('"type":"clock"')), "the player gets the lines");
+    assert.deepEqual(frames.filter((frame) => frame.includes(claim) || frame.includes(head) || frame.includes('"claim"')), [], "and no claim");
+  });
+
   test("behind a blackout a shown clock and its lines never cross a player's or a display's socket, and come back when it ends (ASTRA-06)", async () => {
     const dmClient = t.client();
     const { roomId } = await dmClient.createRoom("Blackout clock");

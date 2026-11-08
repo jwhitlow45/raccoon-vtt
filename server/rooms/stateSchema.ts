@@ -834,6 +834,7 @@ const logEvent = z.discriminatedUnion("type", [
     by: clockSchemas.clockStep.optional(),
     why: z.enum(["longRest", "set", "start"]).optional(),
     from: z.enum(["undo", "redo"]).optional(),
+    claim: id.optional(),
   }),
   z.strictObject({ type: z.literal("handout"), handoutId: id }),
   z.strictObject({ type: z.literal("member"), memberId: id, action: z.enum(["join", "kick", "dm", "undm", "remove"]) }),

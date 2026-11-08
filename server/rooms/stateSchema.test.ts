@@ -831,6 +831,18 @@ describe("time spans in a backup (docs/design/design-v1-calendar-c2c3.md 4.7)", 
     assert.equal(broken((ends) => (ends.extra = 1)), false);
     assert.equal(broken((_ends, effect) => (effect.duration = { remaining: 2, boundary: "turnStart", anchor: { characterId: "bree" } })), false);
   });
+
+  test("a clock line's claim comes back whole, held to an id's bounds (4.6)", () => {
+    const claim = "7d1f0b4e-3c2a-4e5b-9a6d-8c7b6a5f4e3d";
+    const state = apply(timed(), { t: "clock.advance", by: 60, claim }, DM, 9);
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    const out = remapState(parsed.state, { assets: new Map() });
+    assert.deepEqual(out.log.filter((l) => l.data?.type === "clock").map((l) => (l.data as { claim?: string }).claim), [undefined, claim]);
+    const long = JSON.parse(JSON.stringify(state));
+    long.log.find((l: { data?: { claim?: string } }) => l.data?.claim === claim).data.claim = "x".repeat(65);
+    assert.equal(parseRoomState(long).ok, false);
+  });
 });
 
 describe("placements between squares in a backup (docs/design/design-v1-snap-off.md 5.7)", () => {

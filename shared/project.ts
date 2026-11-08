@@ -21,6 +21,7 @@ import {
   type FogDraft,
   type FogTile,
   type FreeWall,
+  type ClockLogEvent,
   type CompanionBlock,
   type Handout,
   type HandoutDoc,
@@ -3616,6 +3617,11 @@ function holderInSight(ctx: Ctx, data: { tokenId?: string; characterId?: string 
  * line as its reader read it when it was written, so what it kept then
  * stands unless its creature, area or row is out of their sight now.
  */
+function withoutClaim(data: ClockLogEvent): ClockLogEvent {
+  const { claim: _claim, ...rest } = data;
+  return rest;
+}
+
 function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | null {
   // A copy of a secret roll of someone else's, read as the bare line then, names no roll or creature to check again.
   if (copy && data.type === "dice" && data.to === "dm" && data.rolls.length === 0) return ctx.member && data.by !== ctx.viewer.memberId ? data : null;
@@ -3702,7 +3708,10 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
       // A player keeps every clock line that reached them, after sharing goes off or the clock stops too (docs/design/design-v1-calendar.md 6.4).
       // Behind a blackout they wait with the clock, held back here at read time. A line's audience was frozen when it was written,
       // so one written while shared reaches players when the blackout lifts, even if sharing went off meanwhile (D-261102-530).
-      return ctx.paused ? null : data;
+      // Players never send clock ops, so the claim that tells a DM's device its own line is only bytes to them.
+      if (ctx.paused) return null;
+      if (data.claim === undefined || ctx.viewer.role === "dm") return data;
+      return withoutClaim(data);
     case "handout": {
       const handout = ownEntry(ctx.state.handouts, data.handoutId);
       return handout && projectHandoutCtx(ctx, handout) ? data : null;

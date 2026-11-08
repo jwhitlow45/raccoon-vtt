@@ -647,7 +647,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
         return { ...data, memberId: members.of(data.memberId) };
       case "encounter":
       case "correction":
-      // A clock line names no id (docs/design/design-v1-calendar.md 6.6).
+      // A clock line names nothing an import remaps (docs/design/design-v1-calendar.md 6.6): its claim is a device's own id.
       case "clock":
         return data;
       case "teleport":
