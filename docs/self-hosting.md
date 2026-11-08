@@ -643,6 +643,12 @@ newest first.
 
 **Since v0.3.1**
 
+- **Time of day light** ([design](design/design-v1-calendar-c2c3.md)): room
+  format 42, change format 55. Until it reloads, an old page reads dawn and
+  dusk as 6:00 AM and 6:00 PM, and an old DM page shows a scene on Time of
+  day as lit by hand. A level that page picks leaves Time of day on, so the
+  next change of the clock puts the time's level back. Reload DM pages
+  first, then every other open page, table displays included.
 - **Time spans** ([design](design/design-v1-calendar-c2c3.md)): room format
   41, change format 54. Until it reloads, an old page shows an effect that
   lasts a length of time as one with no duration, and can't pick a length.
