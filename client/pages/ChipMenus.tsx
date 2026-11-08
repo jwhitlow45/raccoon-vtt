@@ -29,6 +29,8 @@ import { SheetDialog } from "../features/tokens/SheetDialog.tsx";
 import { XCardCard } from "../features/xcard/XCardButton.tsx";
 import type { AssetRow } from "../lib/api.ts";
 import { theme } from "../lib/theme.ts";
+import { barDockSlot } from "../canvas/barDock.ts";
+import { useUiScale } from "../features/device/settings.ts";
 import { scopeSlot, useRoomScope, useScoped } from "../state/scope.ts";
 import { useAssets, useRoomActions, useRoomUi, useRoomView } from "../state/view.ts";
 import type { ClientOp } from "#shared/protocol.ts";
@@ -342,6 +344,52 @@ function useRaise(open: boolean, onOpen: ((open: boolean) => void) | undefined):
 }
 
 /**
+ * Tells the page where an open popover's box ends (viewport px, null once closed or
+ * gone), as it opens and whenever its size or place changes. The notices over the map
+ * start below it, so a toast such as "Blessed ended on Thorn." never stands under the
+ * clock's steps while a second step is taken (docs/design/design-v1-calendar-c2c3.md 9).
+ */
+function useClearance(open: boolean, box: RefObject<HTMLElement | null>, report: ((bottom: number | null) => void) | undefined): void {
+  useEffect(() => {
+    if (!open || !report) return;
+    let last: number | null = null;
+    let frame = 0;
+    let stop = () => {};
+    const measure = () => {
+      const el = box.current;
+      const r = el?.getBoundingClientRect();
+      // Unplaced, the box has no size yet: the observers report it again once it has.
+      const bottom = r && r.height > 0 ? r.bottom : null;
+      if (bottom !== last) report((last = bottom));
+    };
+    // The box is drawn after the open state commits, so it is watched from the first frame that has it.
+    const attach = () => {
+      const el = box.current;
+      if (!el) {
+        frame = requestAnimationFrame(attach);
+        return;
+      }
+      measure();
+      const resize = new ResizeObserver(measure);
+      resize.observe(el);
+      // Placement moves the box with its style, which a resize observer does not hear.
+      const style = new MutationObserver(measure);
+      style.observe(el, { attributes: true, attributeFilter: ["style"] });
+      stop = () => {
+        resize.disconnect();
+        style.disconnect();
+      };
+    };
+    attach();
+    return () => {
+      cancelAnimationFrame(frame);
+      stop();
+      report(null);
+    };
+  }, [open, box, report]);
+}
+
+/**
  * The DM's clock chip from 900 px up (design-v1-qol.md 4, C5, D-261106-126): its
  * words and a caret, opening the quick steps under it, which stay open
  * for a second step, so moving the clock no longer swaps the side panel's
@@ -351,6 +399,17 @@ function useRaise(open: boolean, onOpen: ((open: boolean) => void) | undefined):
 export function DmClockChip(props: { onOpenTime(): void; onOpen?(open: boolean): void }) {
   const pop = usePopover({ kind: "dialog" });
   useRaise(pop.open, props.onOpen);
+  const dock = useScoped(barDockSlot);
+  const zoom = useUiScale();
+  const report = useCallback(
+    (bottom: number | null) => {
+      // The dock reads the map's own px: from the page's top and in the chrome's zoom, as the lasting notices are.
+      const top = pop.anchor.current?.closest("[data-rvtt-topbar]")?.getBoundingClientRect().top ?? 0;
+      dock.setState({ popoverFoot: bottom === null ? null : (bottom - top) / zoom });
+    },
+    [dock, pop.anchor, zoom],
+  );
+  useClearance(pop.open, pop.box, report);
   const clock = useRoomView((s) => s.view?.clock);
   const encounter = useRoomView((s) => s.view?.encounter);
   if (!clock) return null;

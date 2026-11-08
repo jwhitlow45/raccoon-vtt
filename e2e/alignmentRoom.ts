@@ -7008,8 +7008,7 @@ export function clockTests(): void {
     assert.deepEqual(lines, [], "A time span's screen out of line");
   });
 
-  // A todo, since it finds a real overlap the build did not fix: the notices' lane spans the map under the chip's popover (design-v1-calendar-c2c3.md 9 asks for none).
-  test(`ck-d. a step from the clock chip's popover that ends an effect: the popover and the expiry notice never overlap, at 1440 x 900 at 100% and 130%`, { todo: "the toast lane runs under the chip popover" }, async () => {
+  test(`ck-d. a step from the clock chip's popover that ends an effect: the popover and the expiry notice never overlap, at 1440 x 900 at 100% and 130%`, async () => {
     const lines: string[] = [];
     try {
       await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });

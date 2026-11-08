@@ -678,7 +678,10 @@ function FightAlerts() {
   // The column's foot ends over the on-screen keyboard while someone types (barDock.ts placedChrome), on the page as it is (Typing `page`). Its fold rules read the chrome alone.
   const typing = useStore(dock, (s) => s.typing);
   const placed = useMemo(() => (chrome ? placedChrome(chrome, typing) : null), [chrome, typing]);
-  const lasting = useStore(dock, (s) => s.notices);
+  const noticesBottom = useStore(dock, (s) => s.notices);
+  // The DM clock chip's open steps hold the lane like a lasting notice does: the column starts below them.
+  const popoverFoot = useStore(dock, (s) => s.popoverFoot);
+  const lasting = noticesBottom === null ? popoverFoot : popoverFoot === null ? noticesBottom : Math.max(noticesBottom, popoverFoot);
   const noticesSpanning = useStore(dock, (s) => s.noticesSpanning);
   const mapToasts = useStore(dock, (s) => s.mapToasts);
   const toastRow = useStore(dock, (s) => s.toastRow);

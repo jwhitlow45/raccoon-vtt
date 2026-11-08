@@ -1845,6 +1845,11 @@ type BarDockState = {
   mapToasts: { top: number; bottom: number; keptBottom: number | null } | null;
   /** The bottom of the lasting notices wherever they stand, which the token bar and the tool's options keep clear of. */
   lasting: number | null;
+  /**
+   * The foot of the DM clock chip's open steps in chrome px, which stand over the lane. The alerts column
+   * starts below it, so the notice a step brings never stands under them (docs/design/design-v1-calendar-c2c3.md 9).
+   */
+  popoverFoot: number | null;
   /** A roll's card in the alerts column was asked for, by its chip or a summary (features/rolls/PlayerRolls.tsx). */
   columnRollAsked: boolean;
   /** This Room's spot. A "view as a player" preview reads the device's and keeps its own changes to itself. */
@@ -1927,7 +1932,7 @@ type BarDockState = {
 export const barDockSlot = scopeSlot(() =>
   createStore<BarDockState>(() => {
     forgetLarger();
-    return { chrome: null, typing: null, bar: null, column: null, notices: null, noticesSpanning: true, mapToasts: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, expanded: false, expandedHeight: null, expandedFor: null, clearRequest: null, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false, heldMode: null, cardAt: null, headerSummary: null, barOpen: false, toastRow: null };
+    return { chrome: null, typing: null, bar: null, column: null, notices: null, noticesSpanning: true, mapToasts: null, lasting: null, popoverFoot: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, expanded: false, expandedHeight: null, expandedFor: null, clearRequest: null, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false, heldMode: null, cardAt: null, headerSummary: null, barOpen: false, toastRow: null };
   }),
 );
 
