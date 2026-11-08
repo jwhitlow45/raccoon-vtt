@@ -25,7 +25,7 @@ function render(steer: boolean): string {
     token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 5, y: 5 }),
   ];
   state.tokens = Object.fromEntries(list.map((t) => [t.id, t]));
-  const store = createStore(() => ({ view: state, you: { role: "dm", memberId: DM.memberId } }));
+  const store = createStore(() => ({ view: state, floorView: state, you: { role: "dm", memberId: DM.memberId } }));
   const control = createElement(SteerControl, { token: state.tokens.thorn! });
   return renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: control }));
 }

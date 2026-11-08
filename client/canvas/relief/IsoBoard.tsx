@@ -169,9 +169,9 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const live = useScoped(liveCameraSlot);
   const schedulerRef = useRef<FrameScheduler | null>(null);
   // While hidden it keeps what it last read, so a brush stroke in Top-down walks no walls, heights or buckets here, and it reads afresh when shown.
-  const chunks = useShownView(!hidden, (s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
-  const feet = useShownView(!hidden, (s) => s.view?.meta.settings.feetPerCell ?? DEFAULT_SETTINGS.feetPerCell);
-  const allLabels = useShownView(!hidden, (s) => s.view?.labels);
+  const chunks = useShownView(!hidden, (s) => s.floorView?.buildChunks ?? EMPTY_CHUNKS);
+  const feet = useShownView(!hidden, (s) => s.floorView?.meta.settings.feetPerCell ?? DEFAULT_SETTINGS.feetPerCell);
+  const allLabels = useShownView(!hidden, (s) => s.floorView?.labels);
   const { w, h } = scene.bounds;
   // Footprints read the scene's grid as Top-down's do, so both views stand and lay flat the same hexes (hex grids 4.2).
   const grid = useMemo(() => sceneGrid(scene), [scene.gridShape]);
@@ -291,10 +291,10 @@ function IsoBoardImpl(props: IsoBoardProps) {
    * stand, by the stand rule on this viewer's live ground (D-261027-06),
    * built in slices nearest the middle first, and lies flat until then.
    */
-  const templates = useTreeShownView((s) => s.view?.templates ?? EMPTY_TEMPLATES);
-  const stored = useTreeShownView((s) => s.view?.tokens ?? EMPTY_TOKENS);
-  const settings = useTreeShownView((s) => s.view?.meta.settings);
-  const casts = useTreeShownView((s) => s.view?.casts);
+  const templates = useTreeShownView((s) => s.floorView?.templates ?? EMPTY_TEMPLATES);
+  const stored = useTreeShownView((s) => s.floorView?.tokens ?? EMPTY_TOKENS);
+  const settings = useTreeShownView((s) => s.floorView?.meta.settings);
+  const casts = useTreeShownView((s) => s.floorView?.casts);
   const youId = props.youId ?? "";
   const dragged = useDraggedIds();
   const areaTool = useTreeShownView((s) => s.local.tool);
@@ -399,7 +399,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const spots = useStore(useScoped(localDragSlot), (st) => (hidden ? NO_SPOTS : st.spots));
   const movedIso = useCallback(
     (t: ViewToken, spot: DragSpot, seat: Seat): Pick<IsoToken, "base" | "ground" | "drawn" | "capped" | "rise" | "inset"> => {
-      const room = store.getState().view;
+      const room = store.getState().floorView;
       const seen = seenChunks({ chunks, sceneId: scene.id, bounds: { w, h }, fog: props.viewerFog });
       // A seated token on its holder's base, where the holder stands or its drag puts it (stand.ts dragSpotBase).
       const { base, seated } = dragSpotBase(
@@ -681,7 +681,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const spot = rulesSpot(t, at);
       const cells = footprintCells(grid, { ...t, x: spot.x, y: spot.y, squeeze: undefined });
       // It previews where the drop would land it there, on the ground this viewer has seen, as this device's own drag does (4.3).
-      const room = store.getState().view;
+      const room = store.getState().floorView;
       const seen = seenChunks({ chunks, sceneId: scene.id, bounds: { w, h }, fog: props.viewerFog });
       const landing = room ? previewLanding(room, props.role, seen, t, spot) : t.elevation;
       const base = drawnStandBase(src, heights, cells, landing, feet);

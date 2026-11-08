@@ -52,7 +52,7 @@ function markSight(ctx: ToolContext): void {
   const { store } = ctx.scope.get(builderSlot);
   const s = store.getState();
   if (s.inSight) return;
-  const view = ctx.getState().view;
+  const view = ctx.getState().floorView;
   if (view && partySeesAny(view, ctx.scene, gestureCells(s))) store.setState({ inSight: true });
 }
 
@@ -75,7 +75,7 @@ function flushStroke(ctx: ToolContext, done: boolean): void {
   builderState.setState({ unsent: [] });
   const sceneId = gesture.stroke.sceneId;
   if (ctx.scene.id !== sceneId) return;
-  const view = ctx.getState().view;
+  const view = ctx.getState().floorView;
   const ops = paintOps(sceneId, unsent, mode === "erase" ? null : terrain, (key) => terrainAt(view, sceneId, key), erasable(view, sceneId));
   for (const op of ops) ctx.actions.dispatch(op, { group: gesture.stroke.group });
 }
@@ -99,7 +99,7 @@ function tapEdge(p: ToolPointer, ctx: ToolContext): void {
     builderState.setState({ note: "Tap an edge inside the scene." });
     return;
   }
-  const current = edgeAt(ctx.getState().view, sceneId, key);
+  const current = edgeAt(ctx.getState().floorView, sceneId, key);
   let feature: EdgeFeature | null;
   if (edge === "door") {
     if (isHiddenDoor(current)) {
@@ -118,7 +118,7 @@ function tapEdge(p: ToolPointer, ctx: ToolContext): void {
 /** Sends a dragged run, leaving alone the edges that already have what it puts down. */
 function sendRun(ctx: ToolContext, run: readonly string[]): void {
   const { edge, secretFound } = ctx.scope.get(builderSlot).store.getState();
-  const view = ctx.getState().view;
+  const view = ctx.getState().floorView;
   const edges: { key: string; feature: EdgeFeature | null }[] = [];
   for (const key of run) {
     const feature = runFeature(edge, edgeAt(view, ctx.scene.id, key), secretFound);
@@ -250,7 +250,7 @@ export const builderTool: ToolDef = {
         builderState.setState({ run: edgeRun(downAt.world, p.world, ctx.scene.bounds) });
       } else if (s.mode === "label" && gesture.labelGrab && (s.labelMove || !isTap(ctx, p))) {
         const grab = gesture.labelGrab;
-        const label = ctx.getState().view?.labels[grab.id];
+        const label = ctx.getState().floorView?.labels[grab.id];
         if (!label) return;
         builderState.setState({ labelMove: { id: label.id, x: p.world.x - grab.dx, y: p.world.y - grab.dy } });
       }
@@ -280,7 +280,7 @@ export const builderTool: ToolDef = {
         if (moved) {
           builderState.setState({ labelMove: null });
           // Gone mid-drag (undone, or erased by another DM): nothing left to move.
-          const label = ctx.getState().view?.labels[moved.id];
+          const label = ctx.getState().floorView?.labels[moved.id];
           if (label) {
             ctx.actions.dispatch({
               t: "build.label",

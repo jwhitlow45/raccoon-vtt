@@ -19,7 +19,7 @@ export function useAttachViewer(): AttachViewer {
 /** What the bar's attach slots hold for this token (detach.ts barSlots). */
 export function useAttachSlots(token: Token): ("detach" | "attach")[] {
   const viewer = useAttachViewer();
-  const view = useRoomView((s) => s.view);
+  const view = useRoomView((s) => s.floorView);
   return view ? barSlots(view, viewer, token) : [];
 }
 
@@ -35,7 +35,7 @@ export type DetachState = { choice: DetachChoice; place: { x: number; y: number;
  */
 export function useDetach(token: Token, shows: boolean): DetachState | null {
   const viewer = useAttachViewer();
-  const view = useRoomView((s) => s.view);
+  const view = useRoomView((s) => s.floorView);
   const choice = view && shows ? detachChoice(view.tokens, token) : null;
   const place = useMemo(() => (view && choice === "getOff" ? getOffPlace(view, viewer, token) : null), [view, viewer, token, choice]);
   if (!view || !choice) return null;
@@ -130,7 +130,7 @@ export function GroupLine(props: { token: Token; focusTo?: AttachFocus; nameFocu
   const actions = useRoomActions();
   const ui = useRoomUi();
   const viewer = useAttachViewer();
-  const view = useRoomView((s) => s.view);
+  const view = useRoomView((s) => s.floorView);
   if (!view) return null;
   const line = groupLine(view.tokens, token);
   if (!line.holder && line.carried.length === 0) return null;

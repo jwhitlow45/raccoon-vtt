@@ -30,8 +30,8 @@ import { holdSlot, stopNoteSlot } from "./store.ts";
 export const MoveLayer = memo(function MoveLayer(props: LayerProps) {
   const hold = useTreeShownStore(useScoped(holdSlot), (s) => s.hold);
   const note = useTreeShownStore(useScoped(stopNoteSlot), (s) => s.note);
-  const held = useTreeShownView((s) => (hold ? s.view?.tokens[hold.tokenId] : undefined));
-  const ghosted = useTreeShownView((s) => (note ? s.view?.tokens[note.tokenId] : undefined));
+  const held = useTreeShownView((s) => (hold ? s.floorView?.tokens[hold.tokenId] : undefined));
+  const ghosted = useTreeShownView((s) => (note ? s.floorView?.tokens[note.tokenId] : undefined));
   const iso = useIsoGround();
   return (
     <>

@@ -28,9 +28,9 @@ function gridIn(scenes: RoomState["scenes"]): (token: Pick<Token, "sceneId">) =>
  * a drag in the other view works for nothing there.
  */
 export function useLiveTokens(): { tokens: Record<string, Token>; moving: boolean } {
-  const tokens = useTreeShownView((s) => s.view?.tokens ?? EMPTY_TOKENS);
-  const scenes = useTreeShownView((s) => s.view?.scenes ?? EMPTY_SCENES);
-  const remote = useTreeShownView((s) => (s.view ? spotsKey(frameSpots<Token>(s.view.tokens, Object.values(s.ephemeral.drags), gridIn(s.view.scenes))) : ""));
+  const tokens = useTreeShownView((s) => s.floorView?.tokens ?? EMPTY_TOKENS);
+  const scenes = useTreeShownView((s) => s.floorView?.scenes ?? EMPTY_SCENES);
+  const remote = useTreeShownView((s) => (s.floorView ? spotsKey(frameSpots<Token>(s.floorView.tokens, Object.values(s.ephemeral.drags), gridIn(s.floorView.scenes))) : ""));
   const local = useTreeShownStore(useScoped(localDragSlot), (s) => spotsKey(dragSpots<Token>(tokens, Object.entries(s.spots).map(([tokenId, at]) => ({ tokenId, ...at })), gridIn(scenes))));
   const key = remote && local ? `${remote}|${local}` : remote || local;
   const live = useMemo(() => {

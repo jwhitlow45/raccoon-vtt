@@ -39,11 +39,11 @@ function viewerFog(pick: BoardPick, sceneId: string): FogView {
 export function labelUnder(ctx: Pick<ToolContext, "getState" | "scene" | "camera" | "scope">, world: Point, screen?: Point): Label | null {
   const pick = boardPickOf(ctx);
   const slop = LABEL_SLOP_PX / ctx.camera().scale;
-  if (pick.view.kind !== "isometric" || !screen) return labelAt(ctx.getState().view, ctx.scene.id, world, { measure: measureLabel, slop });
+  if (pick.view.kind !== "isometric" || !screen) return labelAt(ctx.getState().floorView, ctx.scene.id, world, { measure: measureLabel, slop });
   const v = pressView(pick, screen);
   const fog = viewerFog(pick, ctx.scene.id);
   let hit: Label | null = null;
-  for (const label of Object.values(ctx.getState().view?.labels ?? {})) {
+  for (const label of Object.values(ctx.getState().floorView?.labels ?? {})) {
     if (!label || label.sceneId !== ctx.scene.id) continue;
     const look = labelLook(pick, ctx.scene.id, label, fog);
     if (look.upright) {

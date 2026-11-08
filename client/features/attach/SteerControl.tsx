@@ -12,7 +12,7 @@ type Steer = "controlled" | "independent";
 
 /** The token panel's link tags (docs/design/design-v1-attach.md 4.5): "Riding Warhorse", "Carries Bree and Torch". */
 export function usePanelLinkTags(token: Token): string[] {
-  const tokens = useRoomView((s) => s.view?.tokens);
+  const tokens = useRoomView((s) => s.floorView?.tokens);
   return useMemo(() => (tokens ? panelLinkTags(tokens, token) : []), [tokens, token]);
 }
 
@@ -30,7 +30,7 @@ export function usePanelLinkTags(token: Token): string[] {
 export function SteerControl(props: { token: Token }) {
   const { token } = props;
   const viewer = useAttachViewer();
-  const view = useRoomView((s) => s.view);
+  const view = useRoomView((s) => s.floorView);
   const choice = useMemo(() => (view ? steerChoice(view, viewer, token) : null), [view, viewer, token]);
   const actions = useRoomActions();
   // The choice sent and not yet answered: shown meanwhile, and no second change goes until it is.

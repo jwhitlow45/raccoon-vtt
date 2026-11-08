@@ -71,9 +71,9 @@ export function MapExport(props: { scene: Scene }) {
   const options = useRef<HTMLDivElement>(null);
   useExpansionFocus(open, { inside: options, opener });
 
-  const chunks = useRoomView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
-  const labels = useRoomView((s) => s.view?.labels ?? EMPTY_LABELS);
-  const stamps = useRoomView((s) => s.view?.stamps ?? EMPTY_STAMPS);
+  const chunks = useRoomView((s) => s.floorView?.buildChunks ?? EMPTY_CHUNKS);
+  const labels = useRoomView((s) => s.floorView?.labels ?? EMPTY_LABELS);
+  const stamps = useRoomView((s) => s.floorView?.stamps ?? EMPTY_STAMPS);
   const hasBuild = useMemo(() => hasBuildOn(scene.id, chunks, labels, stamps), [scene.id, chunks, labels, stamps]);
   const size = exportSize(scene.bounds, pxPerCell);
   const words = exportWords(sceneGrid(scene), scene.bounds, size);

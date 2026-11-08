@@ -12,12 +12,12 @@ const NONE: { rows: SourceRow[]; overCap: number } = { rows: [], overCap: 0 };
  * build or the scene changes, not on every edit elsewhere in the room.
  */
 export function usePartyReport(sceneId: string, on: boolean): { rows: SourceRow[]; overCap: number } {
-  const tokens = useRoomView((s) => (on ? s.view?.tokens : undefined));
-  const characters = useRoomView((s) => (on ? s.view?.characters : undefined));
-  const buildChunks = useRoomView((s) => (on ? s.view?.buildChunks : undefined));
-  const lights = useRoomView((s) => (on ? s.view?.lights : undefined));
-  const scene = useRoomView((s) => (on ? s.view?.scenes[sceneId] : undefined));
-  const meta = useRoomView((s) => (on ? s.view?.meta : undefined));
+  const tokens = useRoomView((s) => (on ? s.floorView?.tokens : undefined));
+  const characters = useRoomView((s) => (on ? s.floorView?.characters : undefined));
+  const buildChunks = useRoomView((s) => (on ? s.floorView?.buildChunks : undefined));
+  const lights = useRoomView((s) => (on ? s.floorView?.lights : undefined));
+  const scene = useRoomView((s) => (on ? s.floorView?.scenes[sceneId] : undefined));
+  const meta = useRoomView((s) => (on ? s.floorView?.meta : undefined));
   return useMemo(() => {
     if (!tokens || !characters || !scene || !meta) return NONE;
     // The DM's projection holds every field the report reads, in the stored shape.

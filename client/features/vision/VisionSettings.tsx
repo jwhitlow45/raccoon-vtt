@@ -72,10 +72,10 @@ export function LightSettings(props: { scene: Scene }) {
   const light = lightOf(scene);
   const phases = scene.phases && scene.phases.length >= 2 ? scene.phases : null;
   // Only whether a clock exists and whether players see it, so a step of the clock re-renders nothing here.
-  const hasClock = useRoomView((s) => s.view?.clock != null);
-  const clockShown = useRoomView((s) => s.view?.clock?.shown);
+  const hasClock = useRoomView((s) => s.floorView?.clock != null);
+  const clockShown = useRoomView((s) => s.floorView?.clock?.shown);
   const clock = hasClock ? { shown: clockShown === true } : null;
-  const tokens = useRoomView((s) => (on && light !== "bright" ? s.view?.tokens : undefined));
+  const tokens = useRoomView((s) => (on && light !== "bright" ? s.floorView?.tokens : undefined));
   const unlit = useMemo(() => (tokens ? carriedLightsNote(tokens, scene.id, light) : null), [tokens, scene.id, light]);
   return (
     <>
@@ -133,7 +133,7 @@ export const LIGHT_NEEDS_VISION = "Light works only with party vision, which is 
  */
 export function useWallless(scene: Scene): boolean {
   // Only an Explore scene with a map image needs its walls counted.
-  const chunks = useRoomView((s) => (playersSeeOf(scene) === "explore" && scene.map ? s.view?.buildChunks : undefined));
+  const chunks = useRoomView((s) => (playersSeeOf(scene) === "explore" && scene.map ? s.floorView?.buildChunks : undefined));
   return useMemo(() => (chunks ? walllessImage(scene, sceneWalls(scene, chunks).sightPotential) : false), [chunks, scene]);
 }
 
@@ -172,13 +172,13 @@ export function VisionSettings(props: { scene: Scene; wallless: boolean }) {
   const perPlayer = scene.vision?.perPlayer === true;
   const showWorking = useDelayed(working);
   const choice = playersSeeOf(scene);
-  const explored = useRoomView((s) => (s.view ? exploredHere(s.view, scene.id) : false));
+  const explored = useRoomView((s) => (s.floorView ? exploredHere(s.floorView, scene.id) : false));
   const store = useRoomStore();
   const ask = useAsk<{ where: "preset" | "fold"; intent: PlayersSeeIntent }>();
   const fold = useFold(choice === "custom");
 
   const send = (intent: PlayersSeeIntent) => {
-    const patch = intentPatch(store.getState().view?.scenes[scene.id] ?? scene, intent);
+    const patch = intentPatch(store.getState().floorView?.scenes[scene.id] ?? scene, intent);
     if (patch) update(patch);
   };
   /** Sends a change of Players see or of its switches, asking first where it forgets what players remember. */
@@ -299,12 +299,12 @@ function SightRow(props: { scene: Scene; working: SightChoice | null }) {
   const showWorking = useDelayed(working !== null);
   const choice = sightOf(scene);
   const help = SIGHT_CHOICES.find((c) => c.value === choice)?.help;
-  const holdersExplored = useRoomView((s) => (s.view ? holdersExploredHere(s.view, scene.id) : false));
+  const holdersExplored = useRoomView((s) => (s.floorView ? holdersExploredHere(s.floorView, scene.id) : false));
   const store = useRoomStore();
   const ask = useAsk<boolean>();
   // The patch carries party vision and the light as the store has them as it goes, which an open question may have outlived.
   const send = (perPlayer: boolean) => {
-    const now = store.getState().view?.scenes[scene.id] ?? scene;
+    const now = store.getState().floorView?.scenes[scene.id] ?? scene;
     actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { vision: sightPatch(now, perPlayer) } });
   };
   return (
@@ -364,8 +364,8 @@ export function SightStatus(props: { help: string | undefined; working: string |
 function HolderList(props: { sceneId: string; busy: boolean }) {
   const { sceneId, busy } = props;
   const actions = useRoomActions();
-  const members = useRoomView((s) => s.view?.members);
-  const holders = useRoomView((s) => s.view?.holders);
+  const members = useRoomView((s) => s.floorView?.members);
+  const holders = useRoomView((s) => s.floorView?.holders);
   const rows = useMemo(() => holderRows({ members: members ?? {}, holders: holders ?? {} }, sceneId), [members, holders, sceneId]);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
@@ -489,7 +489,7 @@ function UntickQuestion(props: { open: boolean; name: string; busy: boolean; onC
 
 /** Riders whose controlled mount not every player sees, so they share no turn (7.1), each with what keeps it. */
 function MountNotes(props: { sceneId: string }) {
-  const view = useRoomView((s) => s.view);
+  const view = useRoomView((s) => s.floorView);
   const notes = useMemo(() => (view ? unsharedMounts(view, props.sceneId) : []), [view, props.sceneId]);
   if (notes.length === 0) return null;
   return (
@@ -507,10 +507,10 @@ function MountNotes(props: { sceneId: string }) {
  */
 function Sources(props: { sceneId: string; perPlayer: boolean }) {
   const report = usePartyReport(props.sceneId, true);
-  const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
-  const members = useRoomView((s) => (props.perPlayer ? s.view?.members : undefined));
-  const holders = useRoomView((s) => (props.perPlayer ? s.view?.holders : undefined));
-  const characters = useRoomView((s) => (props.perPlayer ? s.view?.characters : undefined));
+  const feetPerCell = useRoomView((s) => s.floorView?.meta.settings.feetPerCell ?? 5);
+  const members = useRoomView((s) => (props.perPlayer ? s.floorView?.members : undefined));
+  const holders = useRoomView((s) => (props.perPlayer ? s.floorView?.holders : undefined));
+  const characters = useRoomView((s) => (props.perPlayer ? s.floorView?.characters : undefined));
   // The DM's view holds every owner and the scene's list, all lendsText reads.
   const owners = useMemo(() => (members ? { members, holders: holders ?? {}, characters: characters ?? {} } : null), [members, holders, characters]);
   const lending = report.rows.filter((r) => r.lends).length;

@@ -79,7 +79,7 @@ const EMPTY_TILES: RoomState["fogTiles"] = {};
 
 export const TemplateLayer = memo(function TemplateLayer(props: LayerProps) {
   const { scene, scale, role } = props;
-  const templates = useTreeShownView((s) => s.view?.templates ?? EMPTY_TEMPLATES);
+  const templates = useTreeShownView((s) => s.floorView?.templates ?? EMPTY_TEMPLATES);
   // The template being moved or turned is drawn by the preview layer until its update lands.
   const editing = useTreeShownStore(useAreaScope().store, (s) => (s.live ? s.selectedId : null));
   const iso = useIsoGround();
@@ -128,12 +128,12 @@ export function useAreaParts(
   const { scene, scale, role, fog } = props;
   // Tokens being dragged count where they would drop, so an aura follows its token during the drag.
   const live = useLiveTokens();
-  const stored = useTreeShownView((s) => s.view?.tokens ?? EMPTY_TOKENS);
+  const stored = useTreeShownView((s) => s.floorView?.tokens ?? EMPTY_TOKENS);
   const shown = which === "live" ? live.tokens : stored;
   const moving = which === "live" && live.moving;
   const tokens = useMemo(() => (hide && hide.size > 0 ? withoutTokens(shown, hide) : shown), [shown, hide]);
-  const buildChunks = useTreeShownView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
-  const settings = useTreeShownView((s) => s.view?.meta.settings);
+  const buildChunks = useTreeShownView((s) => s.floorView?.buildChunks ?? EMPTY_CHUNKS);
+  const settings = useTreeShownView((s) => s.floorView?.meta.settings);
   const viewer = useViewerFog(props);
   // A player's rings go only to creatures whose rays lie on their live ground (coverage.ts raysLive).
   const ground = useLiveGround(fog ? scene : undefined, role);
@@ -161,7 +161,7 @@ export function useAreaParts(
     [tokens, scene.id, scale, others, names],
   );
   // A player's names keep off the opaque fog as well, which would cut them off. The DM sees through it.
-  const fogTiles = useTreeShownView((s) => s.view?.fogTiles ?? EMPTY_TILES);
+  const fogTiles = useTreeShownView((s) => s.floorView?.fogTiles ?? EMPTY_TILES);
   const fogged = useMemo(() => (role === "player" && fog ? foggedCells(fogTiles, scene.id, scene.bounds) : undefined), [role, fog, fogTiles, scene.id, scene.bounds]);
   return useMemo(() => (ctx ? { ctx, avoid, fogged, otherPills: others } : null), [ctx, avoid, fogged, others]);
 }

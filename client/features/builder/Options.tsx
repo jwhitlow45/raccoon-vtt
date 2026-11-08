@@ -151,8 +151,8 @@ export default function BuilderOptions() {
   // A gesture waiting on its asks says so once the wait shows (Loading.tsx), so a quick answer never flashes it.
   const asking = useDelayed(s.asking);
   const sceneId = useRoomView((v) => v.sceneId);
-  const scene = useRoomView((v) => (v.sceneId ? v.view?.scenes[v.sceneId] : undefined));
-  const hasLights = useRoomView((v) => (v.sceneId ? sceneHasLights(v.view?.lights, v.sceneId) : false));
+  const scene = useRoomView((v) => (v.sceneId ? v.floorView?.scenes[v.sceneId] : undefined));
+  const hasLights = useRoomView((v) => (v.sceneId ? sceneHasLights(v.floorView?.lights, v.sceneId) : false));
   const actions = useRoomActions();
   const historyUnavailable = useRoomView((s) => s.connection !== "open" || !!s.history?.pending);
   const preview = usePreview() !== null;

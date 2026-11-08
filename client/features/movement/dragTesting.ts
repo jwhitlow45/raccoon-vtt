@@ -61,7 +61,7 @@ function board(copy: RoomState, role: Role, budget = 1e9) {
   const sent: ClientOp[] = [];
   const scope = new RoomScope();
   const stops = dragStops({
-    store: { getState: () => ({ view: copy }) } as unknown as DragDeps["store"],
+    store: { getState: () => ({ view: copy, floorView: copy }) } as unknown as DragDeps["store"],
     actions: { dispatch: (op: ClientOp) => sent.push(op), newId: () => `drag-${sent.length}` } as unknown as DragDeps["actions"],
     ui: { notify: () => {}, showActions: () => {} } as unknown as DragDeps["ui"],
     scope,

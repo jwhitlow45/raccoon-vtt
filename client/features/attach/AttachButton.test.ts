@@ -31,7 +31,7 @@ function table(): RoomState {
 }
 
 function render(view: RoomState, capped: boolean, you: { role: "dm" | "player"; memberId: string } = { role: "dm", memberId: DM.memberId }): string {
-  const store = createStore(() => ({ view, you }));
+  const store = createStore(() => ({ view, floorView: view, you }));
   const list = createElement(AttachList, { token: view.tokens.thorn!, capped, onDone() {} });
   return renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, assets: { url: () => "" } as never, children: list }));
 }

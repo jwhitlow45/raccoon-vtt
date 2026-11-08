@@ -43,7 +43,7 @@ function setUp(turn: Turn) {
   const ctx = {
     actions: { dispatch: (op: unknown) => (sent.push(op), 1), newId: () => "new", sendEph: () => {} },
     ui: { select: () => {} },
-    getState: () => ({ view: state, you: { memberId: "dm1" }, local: { tool: "area", selectedId: null } }),
+    getState: () => ({ view: state, floorView: state, you: { memberId: "dm1" }, local: { tool: "area", selectedId: null } }),
     scene: state.scenes.s1!,
     role: "dm",
     camera: () => CAM,

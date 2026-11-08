@@ -59,7 +59,7 @@ export function emptyTap(ctx: ToolContext, tool: string, world: Point, held: boo
  */
 export function putAway(ctx: ToolContext, world: Point, options: { readout: boolean; screen?: Point } = { readout: true }): void {
   const pick = boardPickOf(ctx);
-  if (!pinUnder(ctx.getState().view, ctx.scene.id, pick.camera, options.screen ?? viewToScreen(pick.camera, toView(TOP_DOWN, world)), viewGround(pick))) closePinPopover(ctx.scope);
+  if (!pinUnder(ctx.getState().floorView, ctx.scene.id, pick.camera, options.screen ?? viewToScreen(pick.camera, toView(TOP_DOWN, world)), viewGround(pick))) closePinPopover(ctx.scope);
   if (options.readout) closeReadout(ctx.scope.get(readoutSlot));
 }
 

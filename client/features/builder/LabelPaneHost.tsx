@@ -30,7 +30,7 @@ export function LabelPaneHost(props: { scene: Scene; tool: string; chrome: Chrom
   const pane = useScoped(labelPaneSlot);
   const labelId = useStore(pane, (p) => p.labelId);
   const mode = useStore(useScoped(builderSlot).store, (b) => b.mode);
-  const label = useRoomView((s) => (labelId ? s.view?.labels[labelId] : undefined));
+  const label = useRoomView((s) => (labelId ? s.floorView?.labels[labelId] : undefined));
   const tokenSelected = useRoomView((s) => s.local.selectedId !== null);
   const role = useRoomView((s) => s.you?.role ?? "player");
   const open = labelId !== null && label !== undefined && label.sceneId === props.scene.id && !tokenSelected && labelPaneAllowed({ role, tool: props.tool, mode });

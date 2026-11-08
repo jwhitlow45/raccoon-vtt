@@ -49,9 +49,9 @@ export default function FogOptions() {
     useShallow((f) => ({ mode: f.mode, shape: f.shape, width: f.width, live: f.live, poly: f.poly, note: f.note })),
   );
   const sceneId = useRoomView((v) => v.sceneId);
-  const scene = useRoomView((v) => (v.sceneId ? v.view?.scenes[v.sceneId] : undefined));
-  const feetPerCell = useRoomView((v) => v.view?.meta.settings.feetPerCell ?? 5);
-  const draft = useRoomView((v) => (v.sceneId ? v.view?.fogDrafts[v.sceneId] : undefined));
+  const scene = useRoomView((v) => (v.sceneId ? v.floorView?.scenes[v.sceneId] : undefined));
+  const feetPerCell = useRoomView((v) => v.floorView?.meta.settings.feetPerCell ?? 5);
+  const draft = useRoomView((v) => (v.sceneId ? v.floorView?.fogDrafts[v.sceneId] : undefined));
   const store = useRoomStore();
   const actions = useRoomActions();
   if (!scene || !sceneId) return null;

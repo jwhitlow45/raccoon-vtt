@@ -17,7 +17,7 @@ const EMPTY: Record<string, Stamp> = {};
  * wait on comes in, which redraws the board.
  */
 export function useStampDrawing(sceneId: string, role: "dm" | "player"): ((g: CanvasRenderingContext2D) => void) | null {
-  const all = useRoomView((s) => s.view?.stamps ?? EMPTY);
+  const all = useRoomView((s) => s.floorView?.stamps ?? EMPTY);
   const preview = useStore(useStampStore(), (s) => s.preview);
   const assets = useAssets();
   const [loads, setLoads] = useState(0);

@@ -42,7 +42,7 @@ export const stampPointer = {
     const store = slot.store;
     note(ctx, null);
     const sceneId = ctx.scene.id;
-    const stamps = sceneStamps(ctx.getState().view?.stamps, sceneId);
+    const stamps = sceneStamps(ctx.getState().floorView?.stamps, sceneId);
     const scale = ctx.camera().scale;
     const selected = stamps.find((s) => s.id === store.getState().selectedId);
     const handle = selected ? handleAt(selected, p.world, scale) : null;
@@ -98,7 +98,7 @@ export const stampPointer = {
         }, slot.clickWait);
         return;
       }
-      const stamps = sceneStamps(ctx.getState().view?.stamps, ctx.scene.id);
+      const stamps = sceneStamps(ctx.getState().floorView?.stamps, ctx.scene.id);
       if (stamps.length >= LIMITS.stampsPerScene) {
         note(ctx, `This scene already has ${LIMITS.stampsPerScene} stamps, the most it can hold.`);
         return;
@@ -115,7 +115,7 @@ export const stampPointer = {
     store.setState({ preview: null });
     if (!preview || preview.id !== g.id) return;
     // Undone or erased by another DM while it was being dragged: nothing left to move.
-    const current = ctx.getState().view?.stamps[g.id];
+    const current = ctx.getState().floorView?.stamps[g.id];
     if (!current || current.sceneId !== ctx.scene.id || samePose(current, preview.pose)) return;
     ctx.actions.dispatch({ t: "build.stamps", sceneId: current.sceneId, put: [toInput({ ...current, ...preview.pose })] });
   },

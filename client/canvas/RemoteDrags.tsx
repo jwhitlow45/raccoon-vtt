@@ -54,7 +54,7 @@ export const RemoteDrags = memo(function RemoteDrags(props: {
   // A hidden tree reads no drags, so its ghosts unmount and nothing there works each frame.
   const shown = useTreeShown();
   const drags = useRoomView((s) => (shown ? s.ephemeral.drags : NO_DRAGS));
-  const members = useRoomView((s) => s.view?.members);
+  const members = useRoomView((s) => s.floorView?.members);
   const byId = useMemo(() => new Map(props.tokens.map((t) => [t.id, t])), [props.tokens]);
   const list = Object.entries(drags);
   if (list.length === 0) return null;

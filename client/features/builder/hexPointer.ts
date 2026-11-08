@@ -45,7 +45,7 @@ function heightChoice(ctx: ToolContext, g: HexGrid): Pick<HeightState, "paint" |
 
 /** The ops for a gesture's hexes in the mode it was made in. */
 function hexOps(ctx: ToolContext, g: HexGrid, mode: BuildMode, sceneId: string, keys: readonly string[]): ClientOp[] {
-  const view = ctx.getState().view;
+  const view = ctx.getState().floorView;
   if (mode === "rough") return hexRoughOps(view, sceneId, keys, roughChoice(ctx).on);
   if (mode === "height") return paintCells(view, sceneId, keys, heightChoice(ctx, g));
   return hexEraseOps(view, g, sceneId, keys);
@@ -255,7 +255,7 @@ export function withHexBuild(handlers: ToolPointerHandlers): ToolPointerHandlers
 function markSight(ctx: ToolContext, g: HexGrid, keys: readonly string[]): void {
   const store = ctx.scope.get(builderSlot).store;
   if (store.getState().inSight || keys.length === 0) return;
-  const view = ctx.getState().view;
+  const view = ctx.getState().floorView;
   if (view && partySeesAny(view, ctx.scene, hexSightCells(g, keys, ctx.scene.bounds))) store.setState({ inSight: true });
 }
 

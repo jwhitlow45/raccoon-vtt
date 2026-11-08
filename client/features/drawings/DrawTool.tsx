@@ -62,7 +62,7 @@ const round = (v: number) => Math.round(v * 100) / 100;
 function strokeColor(ctx: ToolContext, color: string | null): string {
   if (color) return color;
   const s = ctx.getState();
-  return (s.you && s.view?.members[s.you.memberId]?.color) || theme.color.crest;
+  return (s.you && s.floorView?.members[s.you.memberId]?.color) || theme.color.crest;
 }
 
 function create(ctx: ToolContext, kind: DrawingKind, points: number[], text?: string): void {
@@ -102,9 +102,9 @@ function measureText(line: string, fontSize: number): number {
 function eraseAt(p: ToolPointer, ctx: ToolContext): void {
   const s = ctx.getState();
   const gesture = ctx.scope.get(drawSlot).gesture;
-  if (!s.view || !s.you || !gesture) return;
+  if (!s.floorView || !s.you || !gesture) return;
   const mine = s.you.memberId;
-  const list = Object.values(s.view.drawings).filter((d) => d && d.sceneId === ctx.scene.id && d.kind !== "ruler");
+  const list = Object.values(s.floorView.drawings).filter((d) => d && d.sceneId === ctx.scene.id && d.kind !== "ruler");
   const hit = eraseTarget(list, p.world, ERASE_PX / ctx.camera().scale, (d) => ctx.role === "dm" || d.ownerId === mine, gesture.erased, measureText);
   if (!hit) return;
   if ("refused" in hit) {
@@ -302,7 +302,7 @@ function DrawOptions(props: { role: "dm" | "player" }) {
   }, [access, tool, ui, drawStore]);
   // Read when tapped: the canvas activates the tool after this first renders.
   const withTool = (fn: (ctx: ToolContext) => void) => tool.activeCtx && fn(tool.activeCtx);
-  const memberColor = useRoomView((s) => (s.you ? s.view?.members[s.you.memberId]?.color : undefined)) ?? theme.color.crest;
+  const memberColor = useRoomView((s) => (s.you ? s.floorView?.members[s.you.memberId]?.color : undefined)) ?? theme.color.crest;
   const actions = useRoomActions();
   const historyUnavailable = useRoomView((s) => s.connection !== "open" || !!s.history?.pending);
   const preview = usePreview() !== null;

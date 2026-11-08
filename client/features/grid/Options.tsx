@@ -45,7 +45,7 @@ const STEP = 1;
  */
 export default function GridOptions() {
   const sceneId = useRoomView((s) => s.sceneId);
-  const scene = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId] : undefined));
+  const scene = useRoomView((s) => (s.sceneId ? s.floorView?.scenes[s.sceneId] : undefined));
   const gridState = useGridStore();
   const box = useStore(gridState, (s) => s.box);
   const fitScene = useStore(gridState, (s) => s.fitScene);

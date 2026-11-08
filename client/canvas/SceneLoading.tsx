@@ -16,7 +16,7 @@ import { useMapProgressStore } from "./mapProgress.ts";
 export function useSceneLoading(): SceneLoadNotice | null {
   const load = useRoomView((s) => s.sceneLoad);
   const sceneId = useRoomView((s) => s.sceneId);
-  const scenes = useRoomView((s) => s.view?.scenes);
+  const scenes = useRoomView((s) => s.floorView?.scenes);
   const progress = useStore(useMapProgressStore(), (s) => s.progress);
   return useMemo(() => {
     const scene = sceneId ? scenes?.[sceneId] : undefined;

@@ -14,7 +14,7 @@ import { doorActions, doorsInReach } from "./doors.ts";
 export function DoorButton(props: { token: Token }) {
   const { token } = props;
   const actions = useRoomActions();
-  const view = useRoomView((s) => s.view);
+  const view = useRoomView((s) => s.floorView);
   const you = useRoomView((s) => s.you);
   const mine = you?.role === "player" && view !== null && ownsToken(view, you.memberId, token);
   // Reach reads only the build, the scene, the room's distances and the fog, so another op elsewhere in the room asks nothing again.

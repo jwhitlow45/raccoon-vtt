@@ -21,7 +21,7 @@ function flush(ctx: ToolContext, done: boolean): void {
   if (!done && !strokeMaySend(stroke.touch, stroke.startedAt, performance.now())) return;
   store.setState({ unsent: [] });
   if (ctx.scene.id !== stroke.sceneId) return;
-  for (const op of paintCells(ctx.getState().view, stroke.sceneId, s.unsent, { ...s, paint: gesture.paint })) ctx.actions.dispatch(op, { group: stroke.group });
+  for (const op of paintCells(ctx.getState().floorView, stroke.sceneId, s.unsent, { ...s, paint: gesture.paint })) ctx.actions.dispatch(op, { group: stroke.group });
 }
 
 function endStroke(ctx: ToolContext, send: boolean): void {
@@ -89,7 +89,7 @@ export const heightPointer = {
     store.setState({ area: null });
     gesture.areaSceneId = null;
     if (!area || sceneId !== ctx.scene.id) return;
-    dispatchBuild(buildContext(ctx), paintCells(ctx.getState().view, sceneId, areaCells(area.a, p.world, ctx.scene.bounds), { ...s, paint: gesture.paint }));
+    dispatchBuild(buildContext(ctx), paintCells(ctx.getState().floorView, sceneId, areaCells(area.a, p.world, ctx.scene.bounds), { ...s, paint: gesture.paint }));
   },
 
   /** A second finger landed or the tool changed. Cells a stroke already sent stay, and undo takes them back. The rest is dropped. */

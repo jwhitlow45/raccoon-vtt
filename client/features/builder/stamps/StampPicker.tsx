@@ -234,8 +234,8 @@ function Tile(props: { name: string; src: string; chosen: boolean; onPick(): voi
 function RoomImages(props: { chosen: string | null; onPick(chosen: ChosenArt): void; onMeasured(chosen: ChosenArt): void; paste: PasteHandle }) {
   const roomId = useRoomView((s) => s.roomId);
   const assets = useAssets();
-  const tokens = useRoomView((s) => s.view?.tokens);
-  const characters = useRoomView((s) => s.view?.characters);
+  const tokens = useRoomView((s) => s.floorView?.tokens);
+  const characters = useRoomView((s) => s.floorView?.characters);
   const library = useLibrary(roomId);
   const listed = useMemo(() => (library.rows ? new Map(library.rows.filter((a) => a.kind === "token").map((a) => [a.id, { width: a.width, height: a.height }])) : null), [library.rows]);
   // Try again's line gives way to the loading line, so the section takes focus from it.

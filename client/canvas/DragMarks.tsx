@@ -117,10 +117,10 @@ export const DragMarks = memo(function DragMarks(props: { tokenIds: readonly str
   // Where each drag would drop its token, as Top-down's marks follow it.
   const areas = useAreaParts(layer, "live", null);
   const { tokens } = useLiveTokens();
-  const stored = useTreeShownView((s) => s.view?.tokens ?? EMPTY_TOKENS);
-  const templates = useTreeShownView((s) => s.view?.templates ?? EMPTY_TEMPLATES);
-  const feetPerCell = useTreeShownView((s) => s.view?.meta.settings.feetPerCell ?? 5);
-  const diagonal = useTreeShownView((s) => s.view?.meta.settings.diagonal ?? "five");
+  const stored = useTreeShownView((s) => s.floorView?.tokens ?? EMPTY_TOKENS);
+  const templates = useTreeShownView((s) => s.floorView?.templates ?? EMPTY_TEMPLATES);
+  const feetPerCell = useTreeShownView((s) => s.floorView?.meta.settings.feetPerCell ?? 5);
+  const diagonal = useTreeShownView((s) => s.floorView?.meta.settings.diagonal ?? "five");
   const rules = useMemo<DistanceRules>(() => ({ feetPerCell, diagonal }), [feetPerCell, diagonal]);
   // The scene's grid, as Top-down's marks read it (hex grids 4.2).
   const grid = sceneGrid(layer.scene);

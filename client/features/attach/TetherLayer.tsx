@@ -34,7 +34,7 @@ const NO_SPOTS: Readonly<Record<string, { x: number; y: number }>> = {};
  */
 export const TetherLayer = memo(function TetherLayer(props: LayerProps) {
   const iso = useIsoGround();
-  const tokens = useTreeShownView((s) => s.view?.tokens ?? EMPTY);
+  const tokens = useTreeShownView((s) => s.floorView?.tokens ?? EMPTY);
   // The isometric ground reads where tokens stand: what a drag moves is the drag's own.
   const spots = useTreeShownStore(useScoped(localDragSlot), (s) => (iso ? NO_SPOTS : s.spots));
   const dragged = useDraggedIds();

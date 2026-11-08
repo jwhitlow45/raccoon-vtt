@@ -216,7 +216,7 @@ describe("a hidden drawing tree works for nothing each frame", () => {
     for (const file of sources) assert.doesNotMatch(read(file), /useRoomView\([^;]*\bbuildChunks\b/, `${file} reads the build through useTreeShownView`);
     assert.match(read("canvas/relief/context.ts"), /return useShownView\(useTreeShown\(\), select\);/);
     // A trap's name pill sits on its door, and both trees publish it under one key, so the hidden tree holds the traps with the build.
-    assert.match(read("features/traps/TrapLayer.tsx"), /const traps = useTreeShownView\(\(s\) => s\.view\?\.traps /);
+    assert.match(read("features/traps/TrapLayer.tsx"), /const traps = useTreeShownView\(\(s\) => s\.floorView\?\.traps /);
   });
 
   test("the moving marks' layers read every store only while their tree shows, so a drag or a ping in one view renders nothing in the other (ISO-3)", () => {
@@ -361,7 +361,7 @@ describe("the ground stage hides what Top-down hides (5.2, 12)", () => {
     const stage = read("canvas/Stage.tsx");
     assert.match(stage, /viewerFog=\{role === "player" && fog \? fogTiles : null\}/);
     assert.match(stage, /const drawnFogTiles = useDrawnFogTiles\(fogTiles, role\);/);
-    assert.match(read("features/vision/stageHooks.ts"), /const explored = useRoomView\(\(s\) => \(role === "dm" \? s\.view\?\.exploredTiles : undefined\)\);/);
+    assert.match(read("features/vision/stageHooks.ts"), /const explored = useRoomView\(\(s\) => \(role === "dm" \? s\.floorView\?\.exploredTiles : undefined\)\);/);
     // With no explored tiles, which only the DM reads, the drawn fog is the fog itself.
     const tiles = {};
     assert.equal(withExplored(tiles, undefined), tiles);

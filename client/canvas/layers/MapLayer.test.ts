@@ -44,7 +44,7 @@ function board(s: Scene, tool: string, part: (s: Scene) => ReturnType<typeof cre
   view.scenes[s.id] = s;
   const floor: BuildChunk = { sceneId: s.id, cx: 0, cy: 0, rev: 1, cells: { "1,1": "stone", "2,1": "stone" }, edges: {} };
   view.buildChunks = { floor };
-  const store = createStore(() => ({ view, you: { memberId: "dm1", role: "dm" }, roomId: "r1", sceneId: s.id, connection: "open", pending: [], local: { tool, selectedIds: [], multi: false } }));
+  const store = createStore(() => ({ view, floorView: view, you: { memberId: "dm1", role: "dm" }, roomId: "r1", sceneId: s.id, connection: "open", pending: [], local: { tool, selectedIds: [], multi: false } }));
   const dispatched: unknown[] = [];
   const errors: unknown[] = [];
   const caught = (error: unknown) => void errors.push(error);

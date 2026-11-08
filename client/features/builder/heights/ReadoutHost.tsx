@@ -48,8 +48,8 @@ export function ReadoutHost(props: { scene: Scene; tool: string; chrome: ChromeC
   const slot = useScoped(readoutSlot);
   const readout = useStore(slot.store, (s) => s.readout);
   const spoken = useStore(slot.store, (s) => s.spoken);
-  const chunks = useRoomView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
-  const fogTiles = useRoomView((s) => s.view?.fogTiles ?? EMPTY_FOG);
+  const chunks = useRoomView((s) => s.floorView?.buildChunks ?? EMPTY_CHUNKS);
+  const fogTiles = useRoomView((s) => s.floorView?.fogTiles ?? EMPTY_FOG);
   const role = useRoomView((s) => s.you?.role ?? "player");
   const tokenSelected = useRoomView((s) => s.local.selectedId !== null);
   // A table display takes no taps (docs/design/design-v1-dm-tools.md 3.1), so it never shows one.

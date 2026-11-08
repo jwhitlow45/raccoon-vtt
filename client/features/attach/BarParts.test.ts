@@ -32,7 +32,7 @@ function stable(): RoomState {
 }
 
 function render(view: RoomState, node: ReturnType<typeof createElement>): string {
-  const store = createStore(() => ({ view, you: { role: "dm", memberId: DM.memberId } }));
+  const store = createStore(() => ({ view, floorView: view, you: { role: "dm", memberId: DM.memberId } }));
   return renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: node }));
 }
 

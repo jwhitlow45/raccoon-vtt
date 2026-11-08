@@ -22,7 +22,7 @@ const HIDE = "#ff7a7a";
  */
 export function FogLayer(props: LayerProps) {
   const { scene, role, scale } = props;
-  const draft = useRoomView((s) => s.view?.fogDrafts[scene.id]);
+  const draft = useRoomView((s) => s.floorView?.fogDrafts[scene.id]);
   const active = useRoomView((s) => s.local.tool === "fog");
   if (role !== "dm") return null;
   return (

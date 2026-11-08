@@ -98,8 +98,8 @@ const gestureSlot = scopeSlot(() => ({
 
 function envOf(ctx: ToolContext): AreaEnv | null {
   const s = ctx.getState();
-  if (!s.view || !s.you) return null;
-  return { actions: ctx.actions, view: s.view, scene: ctx.scene, role: ctx.role, youId: s.you.memberId, area: ctx.scope.get(areaSlot) };
+  if (!s.floorView || !s.you) return null;
+  return { actions: ctx.actions, view: s.floorView, scene: ctx.scene, role: ctx.role, youId: s.you.memberId, area: ctx.scope.get(areaSlot) };
 }
 
 function sceneToken(env: AreaEnv, id: string | null): AreaToken | undefined {
@@ -364,13 +364,13 @@ export const areaTool: ToolDef = {
     const s = ctx.getState();
     const area = ctx.scope.get(areaSlot);
     const local = ctx.scope.get(gestureSlot);
-    if (s.view && s.you) {
+    if (s.floorView && s.you) {
       // A player's creature selected since the choice last changed becomes the choice (3.3 step 1). An old selection never undoes it.
       area.selection = seeSelection(area.selection, s.local.selectedIds);
       const saved = area.store.getState().saved;
       const next = savedChoice({
-        creatures: areaCreatures({ view: s.view, sceneId: ctx.scene.id, you: s.you }),
-        tokens: s.view.tokens,
+        creatures: areaCreatures({ view: s.floorView, sceneId: ctx.scene.id, you: s.you }),
+        tokens: s.floorView.tokens,
         sceneId: ctx.scene.id,
         choice: saved,
         selected: { id: s.local.selectedId, fresh: area.selection.count > area.choiceAt },

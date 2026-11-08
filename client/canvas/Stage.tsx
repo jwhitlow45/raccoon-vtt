@@ -157,7 +157,7 @@ type DragParts = {
 function rulerTokenIds(s: RoomView, sceneId: string): string {
   const ids = new Set<string>();
   for (const r of Object.values(s.ephemeral.rulers)) for (const p of r.points) if (p.tokenId) ids.add(p.tokenId);
-  for (const d of Object.values(s.view?.drawings ?? {})) {
+  for (const d of Object.values(s.floorView?.drawings ?? {})) {
     if (d && d.kind === "ruler" && d.sceneId === sceneId) for (const p of keptStops(d)) if (p.tokenId) ids.add(p.tokenId);
   }
   return [...ids].sort().join(" ");
@@ -275,14 +275,14 @@ export function MapStage(props: {
   const scope = useRoomScope();
   const popovers = scope.get(popoverSlot);
   const youId = useRoomView((s) => s.you?.memberId ?? null);
-  const allTokens = useRoomView((s) => s.view?.tokens ?? EMPTY_TOKENS);
-  const characters = useRoomView((s) => s.view?.characters);
-  const members = useRoomView((s) => s.view?.members);
-  const fogTiles = useRoomView((s) => s.view?.fogTiles ?? EMPTY_TILES);
+  const allTokens = useRoomView((s) => s.floorView?.tokens ?? EMPTY_TOKENS);
+  const characters = useRoomView((s) => s.floorView?.characters);
+  const members = useRoomView((s) => s.floorView?.members);
+  const fogTiles = useRoomView((s) => s.floorView?.fogTiles ?? EMPTY_TILES);
   const drawnFogTiles = useDrawnFogTiles(fogTiles, role);
   const sightMode = useSightMode(scene, role);
-  const settings = useRoomView((s) => s.view?.meta.settings);
-  const encounter = useRoomView((s) => s.view?.encounter ?? null);
+  const settings = useRoomView((s) => s.floorView?.meta.settings);
+  const encounter = useRoomView((s) => s.floorView?.encounter ?? null);
   const selectedId = useRoomView((s) => s.local.selectedId);
   const selectedIds = useRoomView((s) => s.local.selectedIds);
   const multi = useRoomView((s) => s.local.multi);
@@ -461,7 +461,7 @@ export function MapStage(props: {
     holdViewStill({
       shown, viewSeen: viewSeenRef, pendingCam: pendingCamRef, cam: camRef, size: sizeRef, fitted: fittedRef, insets: insetsRef.current,
       pick: (view, camera, s) =>
-        boardPickFor({ room: store.getState().view, scene: sceneRef.current, role, fog: fogRef.current.on, view, camera, lowPower: lowPowerRef.current, canvasHeight: s.height }, heightsMemoRef.current),
+        boardPickFor({ room: store.getState().floorView, scene: sceneRef.current, role, fog: fogRef.current.on, view, camera, lowPower: lowPowerRef.current, canvasHeight: s.height }, heightsMemoRef.current),
       selected: () => tokensByIdRef.current.get(store.getState().local.selectedId ?? ""),
       stands: (pick, selected) => standsFor(pick, aboveFogRef.current)(selected),
       setCam,
@@ -667,7 +667,7 @@ export function MapStage(props: {
     const prev = followedRef.current;
     followedRef.current = { entryId: activeEntryId, on: followTurn };
     if (!followTurn || (prev.on && prev.entryId === activeEntryId)) return;
-    const at = turnFocus(store.getState().view?.encounter, store.getState().view?.tokens ?? {}, scene.id);
+    const at = turnFocus(store.getState().floorView?.encounter, store.getState().floorView?.tokens ?? {}, scene.id);
     if (!at) return;
     const sheetOpen = sheetIsOpen(store.getState().local);
     requestPan(scope, { sceneId: scene.id, ...at, anchor: panAnchor(layoutSize(window, uiScale()), theme.layout.wideMinWidth, sheetOpen) });
@@ -770,7 +770,7 @@ export function MapStage(props: {
   const plateIds = useMemo(() => new Set([hoveredId, selectedId].filter((id): id is string => id !== null)), [hoveredId, selectedId]);
   const pills = useBoardPills();
   // The DM's labels on the map, as this viewer's projection holds them: token labels keep off them, measured as the builder draws them.
-  const allMapLabels = useRoomView((s) => s.view?.labels ?? EMPTY_MAP_LABELS);
+  const allMapLabels = useRoomView((s) => s.floorView?.labels ?? EMPTY_MAP_LABELS);
   // The board's text and marks follow the interface size (lib/boardScale.ts), so a new size lays the labels out again.
   const zoom = useUiScale();
   // So does the interface font arriving, since widths measured before it are the fallback's (boardFont.ts).
@@ -852,7 +852,7 @@ export function MapStage(props: {
   const pickOfRef = useRef<(c: Camera) => BoardPick>(null!);
   // At the camera on screen it reads the one the stages took, on the device grid, so a press and the drawing agree (liveCamera.ts appliedFor).
   pickOfRef.current = (c) =>
-    boardPickFor({ room: store.getState().view, scene: sceneRef.current, role, fog: fogRef.current.on, view: shownRef.current, camera: liveCam.appliedFor(c), lowPower: lowPowerRef.current, canvasHeight: sizeRef.current?.height }, heightsMemoRef.current);
+    boardPickFor({ room: store.getState().floorView, scene: sceneRef.current, role, fog: fogRef.current.on, view: shownRef.current, camera: liveCam.appliedFor(c), lowPower: lowPowerRef.current, canvasHeight: sizeRef.current?.height }, heightsMemoRef.current);
   /** Whether a creature draws above the fog for this viewer (vision/drawsAboveFog), for the stand rule's reads outside the board (boardPick.ts standsFor). */
   const aboveFogRef = useRef<(t: ViewToken) => boolean>(() => true);
   /** The highest drawn ground in a rectangle at a zoom, for a fit (fitScene). */
@@ -1520,7 +1520,7 @@ export function MapStage(props: {
      */
     const gripIso = (node: Konva.Node, pressed: ViewToken, lead: ViewToken, followers: readonly { node: Konva.Node }[]): Home[] => {
       const c = currentCam();
-      const room = store.getState().view;
+      const room = store.getState().floorView;
       const stage = node.getStage();
       if (!c || !room || !stage) return [];
       const pick = pickOfRef.current(c);
@@ -1612,7 +1612,7 @@ export function MapStage(props: {
         return t ? [{ token: t, owns: facts.ownsToken(t), x: m.x, y: m.y, squeeze: m.squeeze === true }] : [];
       });
       // The fog a drop lands in is known now, on a scene without party vision.
-      const view = facts.store.getState().view;
+      const view = facts.store.getState().floorView;
       const swallowed = view ? droppedIntoFog({ role: facts.role, view, moves: dropped }) : [];
       // What the party sees after it is the server's to say, on a vision scene: that note waits for the moves' answers.
       const watch = watchDrop({ role: facts.role, store: facts.store, moves: dropped, notify: (text) => uiRef.current.notify(text) });

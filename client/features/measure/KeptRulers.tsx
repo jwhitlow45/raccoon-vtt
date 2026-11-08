@@ -27,13 +27,13 @@ export type KeptRuler = { id: string; text: string };
 
 /** The kept rulers on this scene this member may remove, oldest first, each described as its button says it. */
 export function useKeptRulers(role: "dm" | "player"): KeptRuler[] {
-  const drawings = useRoomView((s) => s.view?.drawings ?? EMPTY);
+  const drawings = useRoomView((s) => s.floorView?.drawings ?? EMPTY);
   const sceneId = useRoomView((s) => s.sceneId);
   const youId = useRoomView((s) => s.you?.memberId ?? null);
-  const members = useRoomView((s) => s.view?.members);
-  const tokens = useRoomView((s) => s.view?.tokens);
-  const settings = useRoomView((s) => s.view?.meta.settings);
-  const gridShape = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId]?.gridShape : undefined));
+  const members = useRoomView((s) => s.floorView?.members);
+  const tokens = useRoomView((s) => s.floorView?.tokens);
+  const settings = useRoomView((s) => s.floorView?.meta.settings);
+  const gridShape = useRoomView((s) => (s.sceneId ? s.floorView?.scenes[s.sceneId]?.gridShape : undefined));
   return useMemo(() => {
     if (!tokens || !settings) return [];
     const grid = gridOfShape(gridShape);

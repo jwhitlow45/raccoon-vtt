@@ -19,8 +19,8 @@ export function GroundNotice(props: { token: Token }) {
   const { token } = props;
   const actions = useRoomActions();
   const you = useRoomView((s) => s.you);
-  const chunks = useRoomView((s) => s.view?.buildChunks ?? EMPTY);
-  const character = useRoomView((s) => ("ref" in token.actor ? s.view?.characters[token.actor.ref] : undefined));
+  const chunks = useRoomView((s) => s.floorView?.buildChunks ?? EMPTY);
+  const character = useRoomView((s) => ("ref" in token.actor ? s.floorView?.characters[token.actor.ref] : undefined));
   const below = useMemo(() => belowGround(chunks, token), [chunks, token]);
   if (!below || !you) return null;
   const access = tokenAccess({ role: you.role, memberId: you.memberId, view: { characters: character ? { [character.id]: character } : {} }, token });

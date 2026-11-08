@@ -22,10 +22,10 @@ export function LightChip(props: { token: Pick<Token, "id" | "sceneId" | "light"
   const { token } = props;
   const actions = useRoomActions();
   const vision = useRoomView((s) => {
-    const scene = s.view?.scenes[token.sceneId];
+    const scene = s.floorView?.scenes[token.sceneId];
     return scene !== undefined && visionOn(scene);
   });
-  const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
+  const feetPerCell = useRoomView((s) => s.floorView?.meta.settings.feetPerCell ?? 5);
   const [open, setOpen] = useState(false);
   const lit = token.light !== undefined && (token.light.bright > 0 || token.light.dim > 0);
   if (!vision && !lit) return null;
@@ -53,7 +53,7 @@ export function LightChoices(props: { light: TokenLight | undefined; onChoose(li
     if (props.reveal) ref.current?.scrollIntoView({ block: "nearest" });
   }, [props.reveal]);
   const lit = light !== undefined && (light.bright > 0 || light.dim > 0);
-  const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
+  const feetPerCell = useRoomView((s) => s.floorView?.meta.settings.feetPerCell ?? 5);
   const cap = radiusCapFt(feetPerCell);
   const [custom, setCustom] = useState(isCustom(light, CARRIED_LIGHTS));
   const [bright, setBright] = useState(String(light?.bright ?? 20));

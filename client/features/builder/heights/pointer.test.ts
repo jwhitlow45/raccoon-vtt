@@ -43,7 +43,7 @@ beforeEach(() => {
   ctx = {
     actions,
     ui: {} as RoomUi,
-    getState: () => ({ view: { buildChunks: chunks } as unknown as RoomState, local: { tool: "build" } }) as unknown as RoomView,
+    getState: () => ({ view: { buildChunks: chunks } as unknown as RoomState, floorView: { buildChunks: chunks } as unknown as RoomState, local: { tool: "build" } }) as unknown as RoomView,
     scene: { id: "scene", bounds: { w: 20, h: 12 } } as Scene,
     role: "dm",
     camera: () => ({ x: 0, y: 0, scale: 40 }),

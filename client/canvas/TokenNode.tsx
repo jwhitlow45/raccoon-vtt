@@ -136,11 +136,11 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
   const { token, scale, selected, active, draggable, holes } = props;
   const iso = props.iso ?? null;
   const interaction = useContext(TokenInteractionContext);
-  const character = useRoomView((s) => ("ref" in token.actor ? s.view?.characters[token.actor.ref] : undefined));
+  const character = useRoomView((s) => ("ref" in token.actor ? s.floorView?.characters[token.actor.ref] : undefined));
   const actor: Partial<Actor> | undefined = "inline" in token.actor ? token.actor.inline : character?.actor;
   const fp = footprint(token);
   const name = displayName(token);
-  const gridShape = useRoomView((s) => s.view?.scenes[token.sceneId]?.gridShape);
+  const gridShape = useRoomView((s) => s.floorView?.scenes[token.sceneId]?.gridShape);
   const hexes = useSelectedHexes(gridShape, token, selected);
   // The node sits where the token is drawn, its stored spot moved by its nudge (snap-off 6.2), so its picture, decor and hit area move together.
   const at = drawnAt(gridOfShape(gridShape), token);
@@ -441,9 +441,9 @@ export const TokenDecor = memo(function TokenDecor(props: DecorProps & {
   atY?: number;
 }) {
   const { token } = props;
-  const character = useRoomView((s) => ("ref" in token.actor ? s.view?.characters[token.actor.ref] : undefined));
+  const character = useRoomView((s) => ("ref" in token.actor ? s.floorView?.characters[token.actor.ref] : undefined));
   const effects = ("inline" in token.actor ? token.actor.inline.effects : character?.actor.effects) ?? NO_EFFECTS;
-  const gridShape = useRoomView((s) => s.view?.scenes[token.sceneId]?.gridShape);
+  const gridShape = useRoomView((s) => s.floorView?.scenes[token.sceneId]?.gridShape);
   // On its token's drawn spot (snap-off 6.2), as useBoardText laid it out.
   const at = drawnAt(gridOfShape(gridShape), token);
   return (
@@ -584,7 +584,7 @@ export const TokenGhost = memo(function TokenGhost(props: {
   clip?: readonly { x: number; y: number; w: number; h: number }[] | null;
 }) {
   const { token, x, y, scale, color } = props;
-  const character = useRoomView((s) => ("ref" in token.actor ? s.view?.characters[token.actor.ref] : undefined));
+  const character = useRoomView((s) => ("ref" in token.actor ? s.floorView?.characters[token.actor.ref] : undefined));
   const actor: Partial<Actor> | undefined = "inline" in token.actor ? token.actor.inline : character?.actor;
   const fp = footprint(token);
   const clip = props.clip;

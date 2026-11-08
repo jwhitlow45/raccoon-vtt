@@ -57,7 +57,7 @@ const EMPTY_DRAWINGS: RoomState["drawings"] = {};
 /** What the Draw tool offers this viewer now (gate.ts). */
 export function accessOf(s: RoomView): DrawAccess {
   if (!s.you) return "none";
-  return drawAccess({ role: s.you.role, memberId: s.you.memberId, settings: s.view?.meta.settings ?? {}, drawings: s.view?.drawings ?? EMPTY_DRAWINGS, sceneId: s.sceneId });
+  return drawAccess({ role: s.you.role, memberId: s.you.memberId, settings: s.floorView?.meta.settings ?? {}, drawings: s.floorView?.drawings ?? EMPTY_DRAWINGS, sceneId: s.sceneId });
 }
 
 /** The drawing tools in the row's order, which the tool's key steps through too. */

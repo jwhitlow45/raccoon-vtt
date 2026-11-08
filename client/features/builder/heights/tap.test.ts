@@ -63,7 +63,7 @@ function contextFor(role: "dm" | "player"): ToolContext {
   return {
     actions: {} as RoomActions,
     ui: { select: () => {} } as unknown as RoomUi,
-    getState: () => ({ view: state, local: { tool: "select", selectedId: null } }) as unknown as RoomView,
+    getState: () => ({ view: state, floorView: state, local: { tool: "select", selectedId: null } }) as unknown as RoomView,
     scene: state.scenes.s1!,
     role,
     camera: () => ({ x: 0, y: 0, scale: 40 }),

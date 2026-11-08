@@ -113,7 +113,7 @@ const ROW_DATA = { [ROW_ATTR]: "" };
 export function AttachList(props: { token: Token; capped?: boolean; onDone(): void }) {
   const actions = useRoomActions();
   const you = useRoomView((s) => s.you);
-  const view = useRoomView((s) => s.view);
+  const view = useRoomView((s) => s.floorView);
   const viewer = useMemo<AttachViewer>(() => ({ role: you?.role ?? "player", memberId: you?.memberId ?? null }), [you]);
   const rows = useMemo(() => (view ? attachRows(view, viewer, props.token.id) : []), [view, viewer, props.token.id]);
   const [riding, setRiding] = useState<string | null>(null);

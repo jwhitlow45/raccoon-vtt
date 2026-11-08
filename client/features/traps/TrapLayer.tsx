@@ -53,9 +53,9 @@ const HATCH_PX = 7;
  */
 export const TrapLayer = memo(function TrapLayer(props: LayerProps) {
   // Both trees publish a trap's name pill under one key, so a hidden tree holds its traps with the build they lie on and never sends a pill placed on an old build.
-  const traps = useTreeShownView((s) => s.view?.traps ?? NO_TRAPS);
-  const chunks = useTreeShownView((s) => s.view?.buildChunks ?? NO_CHUNKS);
-  const settings = useTreeShownView((s) => s.view?.meta.settings);
+  const traps = useTreeShownView((s) => s.floorView?.traps ?? NO_TRAPS);
+  const chunks = useTreeShownView((s) => s.floorView?.buildChunks ?? NO_CHUNKS);
+  const settings = useTreeShownView((s) => s.floorView?.meta.settings);
   const tool = useTreeShownView((s) => s.local.tool);
   const store = useScoped(trapSlot).store;
   const draft = useTreeShownStore(store, (s) => s.draft);

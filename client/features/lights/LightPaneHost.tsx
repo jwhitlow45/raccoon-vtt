@@ -33,7 +33,7 @@ export function LightPaneHost(props: { scene: Scene; chrome: ChromeCamera; viewp
   const lightMode = useStore(useScoped(builderSlot).store, (b) => b.mode === "light");
   const building = useRoomView((s) => s.local.tool === "build");
   const role = useRoomView((s) => s.you?.role ?? "player");
-  const light = useRoomView((s) => (lightId ? s.view?.lights[lightId] : undefined));
+  const light = useRoomView((s) => (lightId ? s.floorView?.lights[lightId] : undefined));
   const open = paneOpen && role === "dm" && building && lightMode && light !== undefined && light.sceneId === props.scene.id;
   // The frames shown while the pane loads or failed to stand where the pane will, beside the fight's alerts.
   const lane = useAlertsLane(props.viewport);

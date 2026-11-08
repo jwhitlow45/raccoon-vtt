@@ -32,7 +32,7 @@ function ctxFor(state: RoomState, role: "dm" | "player") {
   const scope = new RoomScope();
   const pick = boardPickFor({ room: state, scene: state.scenes.s1!, role, fog: true, view: isometric(0), camera: CAM, lowPower: false }, new DrawnHeightsMemo());
   scope.get(boardPickSlot).read = () => pick;
-  return { ctx: { getState: () => ({ view: state }) as never, scene: state.scenes.s1!, camera: () => CAM, scope }, pick };
+  return { ctx: { getState: () => ({ view: state, floorView: state }) as never, scene: state.scenes.s1!, camera: () => CAM, scope }, pick };
 }
 
 describe("a map label tapped in Isometric (docs/design/design-v1-isometric-view.md 6.2)", () => {

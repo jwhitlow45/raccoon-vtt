@@ -67,11 +67,11 @@ export function StopNoteHost(props: { scene: Scene; chrome: ChromeCamera; viewpo
   const slot = useScoped(stopNoteSlot);
   const note = useStore(slot, (s) => s.note);
   const busy = useStore(slot, (s) => s.busy);
-  const token = useRoomView((s) => (note ? s.view?.tokens[note.tokenId] : undefined));
+  const token = useRoomView((s) => (note ? s.floorView?.tokens[note.tokenId] : undefined));
   const barOpen = useRoomView((s) => s.local.actionBar && s.local.selectedId !== null);
-  const chunks = useRoomView((s) => s.view?.buildChunks ?? NO_CHUNKS);
+  const chunks = useRoomView((s) => s.floorView?.buildChunks ?? NO_CHUNKS);
   // The fog a door tap is held to (doors/tap.ts), so the note names only a door the player can tap.
-  const fog = useRoomView((s) => (s.you?.role === "player" && props.scene.fogEnabled !== false ? (s.view?.fogTiles ?? NO_FOG) : null));
+  const fog = useRoomView((s) => (s.you?.role === "player" && props.scene.fogEnabled !== false ? (s.floorView?.fogTiles ?? NO_FOG) : null));
   const actions = useRoomActions();
   const ui = useRoomUi();
   const store = useRoomStore();
@@ -126,7 +126,7 @@ export function StopNoteHost(props: { scene: Scene; chrome: ChromeCamera; viewpo
       // As the drop reads the room: a teleport off a holder every player sees lands by it (drop.ts dropLanding).
       view: () => {
         const state = store.getState();
-        return state.view ? dropView(state.view, state.you?.role ?? "player") : null;
+        return state.floorView ? dropView(state.floorView, state.you?.role ?? "player") : null;
       },
       dispatch: (op, opts) => actions.dispatch(op, opts),
       undo: (options) => actions.undo(options),

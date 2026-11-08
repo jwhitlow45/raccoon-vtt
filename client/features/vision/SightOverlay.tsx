@@ -111,7 +111,7 @@ export function sightPaint(mode: SightMode, isometric: boolean): { palette: Pale
  */
 export const SightOverlay = memo(function SightOverlay(props: { scene: Pick<Scene, "id" | "bounds">; mode: SightMode }) {
   const { scene, mode } = props;
-  const sight = useRoomView((s) => (s.view ? sightOf(s.view) : undefined));
+  const sight = useRoomView((s) => (s.floorView ? sightOf(s.floorView) : undefined));
   const isometric = useIsoGround() !== null;
   const paint = useMemo(() => sightPaint(mode, isometric), [mode, isometric]);
   const drawn = useMemo(() => new SightCanvas(scene.bounds, paint.palette), [scene.id, scene.bounds.w, scene.bounds.h, paint]);

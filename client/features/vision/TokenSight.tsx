@@ -29,16 +29,16 @@ import { playerOwned } from "#shared/project.ts";
 export function TokenSight(props: { token: Token; actor: Partial<Actor> | undefined; access: TokenAccess; update(patch: TokenPatch): void }) {
   const { token, access, update } = props;
   const vision = useRoomView((s) => {
-    const scene = s.view?.scenes[token.sceneId];
+    const scene = s.floorView?.scenes[token.sceneId];
     return scene !== undefined && visionOn(scene);
   });
   // The DM's view holds every creature on the scene, which the source cap's order reads.
   const report = usePartyReport(token.sceneId, access.dm && vision);
   const row = useMemo(() => report.rows.find((r) => r.token.id === token.id), [report, token.id]);
-  const characters = useRoomView((s) => (access.dm ? s.view?.characters : undefined));
+  const characters = useRoomView((s) => (access.dm ? s.floorView?.characters : undefined));
   // A creature players own is in the party already, so only the DM's own creatures need the mark.
   const owned = useMemo(() => (characters ? playerOwned({ characters } as RoomState, token) : true), [characters, token]);
-  const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
+  const feetPerCell = useRoomView((s) => s.floorView?.meta.settings.feetPerCell ?? 5);
   const canLight = access.canEditToken("light");
   const lit = token.light !== undefined && (token.light.bright > 0 || token.light.dim > 0);
   if (!access.dm && !canLight) return null;

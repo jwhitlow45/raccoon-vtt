@@ -42,9 +42,9 @@ export function useStampSlots(input: { more(): HTMLElement | null }): { slots: S
     useShallow((s) => ({ chosen: s.chosen, selectedId: s.selectedId, snap: s.snap, pickerOpen: s.pickerOpen })),
   );
   const sceneId = useRoomView((s) => s.sceneId);
-  const bounds = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId]?.bounds : undefined));
-  const stamp = useRoomView((s) => (selectedId ? s.view?.stamps[selectedId] : undefined));
-  const allStamps = useRoomView((s) => s.view?.stamps);
+  const bounds = useRoomView((s) => (s.sceneId ? s.floorView?.scenes[s.sceneId]?.bounds : undefined));
+  const stamp = useRoomView((s) => (selectedId ? s.floorView?.stamps[selectedId] : undefined));
+  const allStamps = useRoomView((s) => s.floorView?.stamps);
   const actions = useRoomActions();
   const assets = useAssets();
 

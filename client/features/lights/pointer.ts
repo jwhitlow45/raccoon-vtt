@@ -24,7 +24,7 @@ export const lightPointer = {
     const slot = ctx.scope.get(lightModeSlot);
     note(ctx, null);
     const sceneId = ctx.scene.id;
-    const hit = lightAt(ctx.getState().view?.lights, sceneId, p.world, LIGHT_REACH_PX / ctx.camera().scale);
+    const hit = lightAt(ctx.getState().floorView?.lights, sceneId, p.world, LIGHT_REACH_PX / ctx.camera().scale);
     if (hit) {
       ctx.scope.get(lightSlot).setState({ lightId: hit.id, dragTo: null });
       slot.gesture = { kind: "light", id: hit.id, sceneId, grab: { x: p.world.x - hit.x, y: p.world.y - hit.y }, downAt: p.screen };
@@ -48,7 +48,7 @@ export const lightPointer = {
     slot.gesture = null;
     if (!g) return;
     const selection = ctx.scope.get(lightSlot);
-    const lights = ctx.getState().view?.lights;
+    const lights = ctx.getState().floorView?.lights;
     if (g.kind === "place") {
       // A drag across empty map does nothing here: two fingers move the map.
       if (distance(g.downAt, p.screen) > TAP_SLOP_PX || ctx.scene.id !== g.sceneId) return;

@@ -109,7 +109,7 @@ function LightEditor(props: { light: Light; onClose(): void; sheet: boolean; con
   const { light } = props;
   const actions = useRoomActions();
   const scope = useRoomScope();
-  const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
+  const feetPerCell = useRoomView((s) => s.floorView?.meta.settings.feetPerCell ?? 5);
   const put = (patch: Partial<Omit<LightInput, "id">>) => actions.dispatch({ t: "build.lights", sceneId: light.sceneId, put: [patched(light, patch)] });
   const [name, setName] = useState(light.label ?? "");
   useEffect(() => {

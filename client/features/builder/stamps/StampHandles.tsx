@@ -20,7 +20,7 @@ export function StampHandles(props: LayerProps) {
   const stamping = useRoomView((s) => s.local.tool === "build");
   const mode = useStore(useScoped(builderSlot).store, (b) => b.mode);
   const { selectedId, preview } = useStore(useStampStore(), (s) => s);
-  const stamp = useRoomView((s) => (selectedId ? s.view?.stamps[selectedId] : undefined));
+  const stamp = useRoomView((s) => (selectedId ? s.floorView?.stamps[selectedId] : undefined));
   const { accent } = useAccent();
   if (props.role !== "dm" || !stamping || mode !== "stamp" || !stamp || stamp.sceneId !== props.scene.id) return null;
   const pose: StampPose = preview?.id === stamp.id ? preview.pose : stamp;

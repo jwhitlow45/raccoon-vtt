@@ -23,6 +23,6 @@ export function useSightMode(scene: Pick<Scene, "vision">, role: "dm" | "player"
  * merged by the server.
  */
 export function useDrawnFogTiles(fogTiles: RoomState["fogTiles"], role: "dm" | "player"): RoomState["fogTiles"] {
-  const explored = useRoomView((s) => (role === "dm" ? s.view?.exploredTiles : undefined));
+  const explored = useRoomView((s) => (role === "dm" ? s.floorView?.exploredTiles : undefined));
   return withExplored(fogTiles, explored) as RoomState["fogTiles"];
 }

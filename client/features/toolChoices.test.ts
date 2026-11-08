@@ -72,6 +72,10 @@ describe("each tool's main choice", () => {
       you: { memberId: role === "dm" ? "dm1" : "p1", role },
       sceneId: "s1",
       local: { tool: "", selectedIds: [], selectedId: null },
+      // The board reads the floor cut, which equals the view in these one-floor rooms.
+      get floorView() {
+        return this.view;
+      },
       view:
         input.scene === false
           ? { scenes: {}, templates: {}, tokens: {}, drawings: {}, members: {}, meta: { settings: {} } }

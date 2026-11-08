@@ -66,7 +66,7 @@ describe("Line up grid's line", () => {
       grid.getInitialState = grid.getState;
       const view = room();
       view.scenes.s1 = { ...view.scenes.s1!, gridShape: "hexRows", map };
-      const store = createStore(() => ({ view, sceneId: "s1", you: { memberId: "dm1", role: "dm" } }));
+      const store = createStore(() => ({ view, floorView: view, sceneId: "s1", you: { memberId: "dm1", role: "dm" } }));
       const html = renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope, children: createElement(GridOptions) }) }));
       assert.match(html, />Apply</);
       assert.equal(html.includes("Use default"), switched);

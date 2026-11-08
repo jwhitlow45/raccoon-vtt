@@ -116,7 +116,7 @@ const MORE = "More area options";
 export function AreaOptions(props: { role: "dm" | "player" }) {
   const area = useAreaScope();
   const st = useStore(area.store);
-  const view = useRoomView((s) => s.view);
+  const view = useRoomView((s) => s.floorView);
   const sceneId = useRoomView((s) => s.sceneId);
   const youId = useRoomView((s) => s.you?.memberId);
   const actions = useRoomActions();

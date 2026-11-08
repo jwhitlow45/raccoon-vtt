@@ -39,7 +39,7 @@ export function submitFog(ctx: Pick<ToolContext, "scene" | "actions" | "getState
   const sceneId = ctx.scene.id;
   const ops = fogOps(shapes, mode, ctx.actions.newId);
   if (!live) {
-    const drafted = ctx.getState().view?.fogDrafts[sceneId]?.ops.length ?? 0;
+    const drafted = ctx.getState().floorView?.fogDrafts[sceneId]?.ops.length ?? 0;
     if (drafted + ops.length > MAX_FOG_DRAFT_OPS) {
       fogState.setState({ note: "The draft is full. Reveal it to the players or discard it first." });
       return;
@@ -77,7 +77,7 @@ export const ROOM_MISSED = {
 } as const;
 
 function tapRoom(p: ToolPointer, ctx: ToolContext): void {
-  const view = ctx.getState().view;
+  const view = ctx.getState().floorView;
   const g = sceneGrid(ctx.scene);
   if (isHex(g)) {
     const shapes = hexRoomShapes(sceneWalls(ctx.scene, view?.buildChunks ?? {}), g, p.world, ctx.scene.bounds);

@@ -585,7 +585,7 @@ function board(view: RoomState, role: DragDeps["role"] = "player") {
   const frames = new Hand();
   const work = new RouteWork(frames, () => new WorkBudget({ limit: 100000 }));
   const deps: DragDeps = {
-    store: { getState: () => ({ view }) } as unknown as DragDeps["store"],
+    store: { getState: () => ({ view, floorView: view }) } as unknown as DragDeps["store"],
     actions: { dispatch: () => 1, newId: () => "id" } as unknown as DragDeps["actions"],
     ui: { notify: () => {}, showActions: () => {} } as unknown as DragDeps["ui"],
     scope: new RoomScope(),

@@ -61,8 +61,8 @@ const BuildBoard = memo(function BuildBoard(props: {
   const { sceneId, grid, autoWalls, role, scale, gridShape } = props;
   const { w, h } = props.bounds;
   // The build's paths are the costliest part of a build edit, so the tree not on screen keeps its last read.
-  const allChunks = useTreeShownView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
-  const allLabels = useTreeShownView((s) => s.view?.labels ?? EMPTY_LABELS);
+  const allChunks = useTreeShownView((s) => s.floorView?.buildChunks ?? EMPTY_CHUNKS);
+  const allLabels = useTreeShownView((s) => s.floorView?.labels ?? EMPTY_LABELS);
   const chunks = useMemo(() => Object.values(allChunks).filter((c): c is BuildChunk => !!c && c.sceneId === sceneId), [allChunks, sceneId]);
   const labels = useMemo(() => Object.values(allLabels).filter((l): l is Label => !!l && l.sceneId === sceneId), [allLabels, sceneId]);
   const paths = useMemo(() => buildPaths(chunks, role, { autoWalls, bounds: { w, h }, gridShape }), [chunks, role, autoWalls, w, h, gridShape]);
@@ -111,7 +111,7 @@ function LightMarks(props: { sceneId: string; scale: number }) {
 }
 
 function useSceneLights(sceneId: string): Light[] {
-  const allLights = useRoomView((s) => s.view?.lights ?? EMPTY_LIGHTS);
+  const allLights = useRoomView((s) => s.floorView?.lights ?? EMPTY_LIGHTS);
   return useMemo(() => Object.values(allLights).filter((l): l is Light => !!l && l.sceneId === sceneId), [allLights, sceneId]);
 }
 
@@ -126,12 +126,12 @@ function useSceneLights(sceneId: string): Light[] {
 export function LightReachLayer(props: LayerProps) {
   const { scene, role, scale, labelBoxes } = props;
   const lights = useSceneLights(scene.id);
-  const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
+  const feetPerCell = useRoomView((s) => s.floorView?.meta.settings.feetPerCell ?? 5);
   const building = useRoomView((s) => s.local.tool === "build");
   const lightMode = useStore(useBuilderStore(), (b) => b.mode === "light");
   const { lightId, dragTo } = useStore(useScoped(lightSlot), useShallow((l) => ({ lightId: l.lightId, dragTo: l.dragTo })));
   const { accent } = useAccent();
-  const tokens = useRoomView((s) => s.view?.tokens);
+  const tokens = useRoomView((s) => s.floorView?.tokens);
   const stored = role === "dm" && building && lightMode && lightId ? lights.find((l) => l.id === lightId) : undefined;
   if (!stored) return null;
   const picked = dragTo ? { ...stored, ...dragTo } : stored;
@@ -349,8 +349,8 @@ function LabelMarks() {
   const paneId = useStore(useScoped(labelPaneSlot), (p) => p.labelId);
   const moving = useStore(useBuilderStore(), (b) => b.labelMove);
   const building = useRoomView((s) => s.local.tool === "build");
-  const paneLabel = useRoomView((s) => (paneId ? s.view?.labels[paneId] : undefined));
-  const movingLabel = useRoomView((s) => (moving ? s.view?.labels[moving.id] : undefined));
+  const paneLabel = useRoomView((s) => (paneId ? s.floorView?.labels[paneId] : undefined));
+  const movingLabel = useRoomView((s) => (moving ? s.floorView?.labels[moving.id] : undefined));
   const { accent } = useAccent();
   const dragged = building && moving && movingLabel ? { ...movingLabel, x: moving.x, y: moving.y } : null;
   const outlined = [dragged, paneLabel && paneLabel.id !== dragged?.id ? paneLabel : null].filter((l): l is Label => !!l);

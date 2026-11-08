@@ -61,17 +61,17 @@ const DOT_PX = 3.5;
 const UNCOUNTED_OPACITY = 0.4;
 
 export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
-  const encounter = useTreeShownView((s) => s.view?.encounter);
+  const encounter = useTreeShownView((s) => s.floorView?.encounter);
   const role = useTreeShownView((s) => s.you?.role ?? "player");
   const activeTokenId = useTreeShownView((s) => {
-    const e = s.view?.encounter;
+    const e = s.floorView?.encounter;
     return e?.entries.find((entry) => entry.id === e.activeEntryId)?.tokenId;
   });
-  const moverId = useTreeShownView((s) => turnMoverId(s.view));
-  const rider = useTreeShownView((s) => (activeTokenId ? s.view?.tokens[activeTokenId] : undefined));
-  const mount = useTreeShownView((s) => (moverId !== undefined && moverId !== activeTokenId ? s.view?.tokens[moverId] : undefined));
-  const feetPerCell = useTreeShownView((s) => s.view?.meta.settings.feetPerCell ?? 5);
-  const diagonal = useTreeShownView((s) => s.view?.meta.settings.diagonal ?? "five");
+  const moverId = useTreeShownView((s) => turnMoverId(s.floorView));
+  const rider = useTreeShownView((s) => (activeTokenId ? s.floorView?.tokens[activeTokenId] : undefined));
+  const mount = useTreeShownView((s) => (moverId !== undefined && moverId !== activeTokenId ? s.floorView?.tokens[moverId] : undefined));
+  const feetPerCell = useTreeShownView((s) => s.floorView?.meta.settings.feetPerCell ?? 5);
+  const diagonal = useTreeShownView((s) => s.floorView?.meta.settings.diagonal ?? "five");
   const rules = useMemo<DistanceRules>(() => ({ feetPerCell, diagonal }), [feetPerCell, diagonal]);
   const gridShape = props.scene.gridShape;
   const grid = useMemo(() => sceneGrid({ gridShape }), [gridShape]);
@@ -80,13 +80,13 @@ export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
   // The pill's creature: the mount once it has a trail, else the active creature.
   const token = mountTrail ? mount : rider;
   const trail = mountTrail ?? riderTrail;
-  const speeds = useTreeShownView((s) => (token && s.view ? speedsOf(s.view, token) : undefined));
+  const speeds = useTreeShownView((s) => (token && s.floorView ? speedsOf(s.floorView, token) : undefined));
   const second = mountTrail && rider ? riderLine(displayName(rider), riderTrail) : null;
-  const templates = useTreeShownView((s) => s.view?.templates);
+  const templates = useTreeShownView((s) => s.floorView?.templates);
   const halved = useTreeShownView((s) => {
     // Only a viewer who knows the speeds reads them, and a Half Speed area halves them where the creature stands.
-    if (!s.view || !token || !speeds || !templates || !Object.values(templates).some((t) => t?.slows?.kind === "halfSpeed")) return false;
-    return halvedAt(speedAreas(s.view, token, { role }), token) !== null;
+    if (!s.floorView || !token || !speeds || !templates || !Object.values(templates).some((t) => t?.slows?.kind === "halfSpeed")) return false;
+    return halvedAt(speedAreas(s.floorView, token, { role }), token) !== null;
   });
   const scale = props.scale;
   const marker = useMemo(() => {

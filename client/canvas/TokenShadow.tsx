@@ -36,7 +36,7 @@ const NO_BOUNDS = { w: 0, h: 0 };
  */
 export const TokenShadow = memo(function TokenShadow(props: { token: ViewToken; w: number; h: number; at?: { x: number; y: number } }) {
   const { token, w, h } = props;
-  const chunks = useTreeShownView((s) => s.view?.buildChunks ?? EMPTY);
+  const chunks = useTreeShownView((s) => s.floorView?.buildChunks ?? EMPTY);
   // In a hidden tree (relief/context.ts) a drag's cell is never read, so the drag does no landing search there.
   const shown = useTreeShown();
   const spot = useStore(useScoped(localDragSlot), (s) => (shown ? s.spots[token.id] : undefined));
@@ -45,11 +45,11 @@ export const TokenShadow = memo(function TokenShadow(props: { token: ViewToken; 
   const ay = at?.y;
   const squeezed = !props.at && spot?.squeeze === true;
   // Only a token being dragged reads the room, for the drop's landing: by its holder while it sits on one every player sees.
-  const view = useRoomView((s) => (ax === undefined ? null : s.view));
+  const view = useRoomView((s) => (ax === undefined ? null : s.floorView));
   const role = useRoomView((s) => s.you?.role ?? "player");
-  const fogged = useRoomView((s) => role === "player" && s.view?.scenes[token.sceneId]?.fogEnabled !== false);
-  const tiles = useRoomView((s) => (fogged ? (s.view?.fogTiles ?? NO_TILES) : null));
-  const bounds = useRoomView((s) => s.view?.scenes[token.sceneId]?.bounds ?? NO_BOUNDS);
+  const fogged = useRoomView((s) => role === "player" && s.floorView?.scenes[token.sceneId]?.fogEnabled !== false);
+  const tiles = useRoomView((s) => (fogged ? (s.floorView?.fogTiles ?? NO_TILES) : null));
+  const bounds = useRoomView((s) => s.floorView?.scenes[token.sceneId]?.bounds ?? NO_BOUNDS);
   const lift = useMemo(() => {
     const ground = seenChunks({ chunks, sceneId: token.sceneId, bounds, fog: tiles });
     const spotAt = ax === undefined || ay === undefined ? undefined : { x: ax, y: ay, ...(squeezed ? { squeeze: true } : {}) };

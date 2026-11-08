@@ -289,7 +289,7 @@ export function dragStops(deps: DragDeps): DragStops {
 
   /** The board's picture of the walk: the line, the label and, while a drop waits, the ghost's words. */
   const publish = (w: Walk) => {
-    const view = pictureView(store.getState().view);
+    const view = pictureView(store.getState().floorView);
     const target = w.target;
     if (!view || !target || walk !== w) return;
     const answer = w.drag.answer;
@@ -379,7 +379,7 @@ export function dragStops(deps: DragDeps): DragStops {
 
   /** The preview again for the drag's answer now: held where its walk holds, and drawn. */
   const refresh = (w: Walk) => {
-    const now = pictureView(store.getState().view);
+    const now = pictureView(store.getState().floorView);
     if (walk === w && !w.waiting && now && w.node && w.drawn && w.target) follow(now, w, w.node, w.drawn, w.target);
     publish(w);
   };
@@ -394,7 +394,7 @@ export function dragStops(deps: DragDeps): DragStops {
       const w: Walk = { tokenId: token.id, drag: null as unknown as RouteDrag, world: null, basis, token, target: null, held: null, walkers: null, waiting: false, node: null, drawn: null, straight: null };
       w.drag = new RouteDrag(
         () => {
-          const now = seenView(store.getState().view) ?? view;
+          const now = seenView(store.getState().floorView) ?? view;
           w.world = worldFor(now, w.token, role);
           return w.world?.input ?? null;
         },
@@ -448,7 +448,7 @@ export function dragStops(deps: DragDeps): DragStops {
         const at = { x: node.x(), y: node.y() };
         rawFrom = { node: at, free };
         raw = { tokenId: token.id, ...ruled(token, at, free) };
-        const view = seenView(store.getState().view);
+        const view = seenView(store.getState().floorView);
         if (!view) {
           setHold(null);
           return;
@@ -473,7 +473,7 @@ export function dragStops(deps: DragDeps): DragStops {
       return routeFrame(route);
     },
     groupFields(token, at) {
-      const view = seenView(store.getState().view);
+      const view = seenView(store.getState().floorView);
       const full = view?.tokens[token.id];
       if (!view || !full) return {};
       const spot = rulesSpot(full, at);
@@ -484,7 +484,7 @@ export function dragStops(deps: DragDeps): DragStops {
       // A drop still waiting lands first, and the press steps on from where it put the token.
       reset(true);
       later((budget) => {
-        const view = seenView(store.getState().view);
+        const view = seenView(store.getState().floorView);
         if (view) send(pressPlan(view, drawn, asked, drawnGroup, role, budget));
       });
     },
@@ -503,7 +503,7 @@ export function dragStops(deps: DragDeps): DragStops {
          */
         const letGo = finger ?? { x: node.x(), y: node.y() };
         const pressedId = pressedOn?.leadId === token.id ? pressedOn.token.id : token.id;
-        const view = seenView(store.getState().view);
+        const view = seenView(store.getState().floorView);
         if (!view) {
           reset();
           land(NOTHING, { place: null, placed: false });
@@ -532,7 +532,7 @@ export function dragStops(deps: DragDeps): DragStops {
         w.drag.drop(target, (answer) => {
           // The landing is route work too: a straight drop counts what its straight leg walks over (drop.ts planWalk).
           later((budget) => {
-            const now = seenView(store.getState().view) ?? view;
+            const now = seenView(store.getState().floorView) ?? view;
             goStraight(w, null);
             if (walk === w) walk = null;
             setRoute(null);

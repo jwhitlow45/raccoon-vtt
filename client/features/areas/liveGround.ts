@@ -22,7 +22,7 @@ export function liveGroundOf(input: { scene: Scene | undefined; role: "dm" | "pl
 
 /** `liveGroundOf` from the room as this part of the page shows it, made again only when the scene, the fog or the sight changes. */
 export function useLiveGround(scene: Scene | undefined, role: "dm" | "player"): Ground | null {
-  const fogTiles = useTreeShownView((s) => s.view?.fogTiles ?? NO_FOG);
-  const sight = useTreeShownView((s) => (s.view ? sightOf(s.view) : undefined) ?? NO_SIGHT);
+  const fogTiles = useTreeShownView((s) => s.floorView?.fogTiles ?? NO_FOG);
+  const sight = useTreeShownView((s) => (s.floorView ? sightOf(s.floorView) : undefined) ?? NO_SIGHT);
   return useMemo(() => liveGroundOf({ scene, role, fogTiles, sight }), [scene, role, fogTiles, sight]);
 }

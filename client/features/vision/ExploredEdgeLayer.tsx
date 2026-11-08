@@ -17,8 +17,8 @@ const EDGE = "rgba(226, 228, 240, 0.8)";
  */
 export function ExploredEdgeLayer(props: LayerProps) {
   const { scene, role, scale, fog } = props;
-  const fogTiles = useRoomView((s) => s.view?.fogTiles ?? EMPTY_TILES);
-  const explored = useRoomView((s) => s.view?.exploredTiles);
+  const fogTiles = useRoomView((s) => s.floorView?.fogTiles ?? EMPTY_TILES);
+  const explored = useRoomView((s) => s.floorView?.exploredTiles);
   const shown = role === "dm" && fog;
   const outline = useMemo(() => new ExploredOutline(scene.bounds, scene.id), [scene.bounds.w, scene.bounds.h, scene.id]);
   const pieces = useMemo(() => (shown ? outline.update(fogTiles, explored) : []), [shown, outline, fogTiles, explored]);

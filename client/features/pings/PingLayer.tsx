@@ -34,7 +34,7 @@ const RING_MAX_PX = 44;
 
 export const PingLayer = memo(function PingLayer(props: LayerProps) {
   const pings = useTreeShownView((s) => s.ephemeral.pings);
-  const members = useTreeShownView((s) => s.view?.members);
+  const members = useTreeShownView((s) => s.floorView?.members);
   const still = useLowPower();
   const now = useFrameNow(pings.length > 0 && !still);
   const iso = useIsoGround();

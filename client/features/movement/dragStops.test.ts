@@ -56,7 +56,7 @@ function board(view: RoomState) {
   const sent: ClientOp[] = [];
   let n = 0;
   const deps: DragDeps = {
-    store: { getState: () => ({ view }) } as unknown as DragDeps["store"],
+    store: { getState: () => ({ view, floorView: view }) } as unknown as DragDeps["store"],
     actions: { dispatch: (op: ClientOp) => (sent.push(op), ++n), newId: () => `id${++n}` } as unknown as DragDeps["actions"],
     ui: { notify: () => {}, showActions: () => {} } as unknown as DragDeps["ui"],
     scope: new RoomScope(),

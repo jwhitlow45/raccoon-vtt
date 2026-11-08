@@ -19,7 +19,7 @@ import { flashSlot, type Flash } from "./flash.ts";
  */
 export function FlashLayer(props: LayerProps) {
   const current = useTreeShownStore(useScoped(flashSlot).store, (s) => s.flash);
-  const color = useTreeShownView((s) => (s.you ? s.view?.members[s.you.memberId]?.color : undefined));
+  const color = useTreeShownView((s) => (s.you ? s.floorView?.members[s.you.memberId]?.color : undefined));
   const iso = useIsoGround();
   if (props.role !== "dm" || !current || current.sceneId !== props.scene.id) return null;
   // The board keeps the dark look, so the flash takes the accent resolved for dark.

@@ -40,11 +40,11 @@ const PILL_HEIGHT = 48 + 44 + theme.space(1) + 2 * theme.space(2);
 export function DoorPillHost(props: { scene: Scene; tool: string; chrome: ChromeCamera; viewport: Size; insets: Insets }) {
   const slot = useScoped(doorPillSlot);
   const pill = useStore(slot, (s) => s.pill);
-  const chunks = useRoomView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
+  const chunks = useRoomView((s) => s.floorView?.buildChunks ?? EMPTY_CHUNKS);
   const role = useRoomView((s) => s.you?.role ?? "player");
   const tokenSelected = useRoomView((s) => s.local.selectedId !== null);
   const dragging = useStore(useScoped(localDragSlot), (s) => Object.keys(s.spots).length > 0);
-  const fogTiles = useRoomView((s) => s.view?.fogTiles ?? EMPTY_FOG);
+  const fogTiles = useRoomView((s) => s.floorView?.fogTiles ?? EMPTY_FOG);
   // The fog a player's tap is held to (tap.ts), so a pill goes once the DM's fog covers its door again.
   const fog = role === "player" && props.scene.fogEnabled !== false ? fogTiles : null;
   const door = useMemo(() => (pill && pill.sceneId === props.scene.id ? seenDoor(chunks, pill.sceneId, pill.ref, fog, sceneGrid(props.scene)) : null), [pill, chunks, fog, props.scene]);
@@ -66,7 +66,7 @@ function Pill(props: { door: DoorOnMap; selected: string | undefined; scene: Sce
   // Who opens it, whose door traps it sets off (docs/design/design-v1-traps.md 5.3).
   const opener = (): string | undefined => {
     const s = store.getState();
-    const view = s.view;
+    const view = s.floorView;
     if (!view) return undefined;
     return pillOpener(view, s.you, door, scene.id, props.selected, (t) => ownsToken(view, s.you?.memberId, t));
   };
@@ -85,7 +85,7 @@ function Pill(props: { door: DoorOnMap; selected: string | undefined; scene: Sce
    */
   const reached = (): boolean => {
     const s = store.getState();
-    const view = s.view;
+    const view = s.floorView;
     if (role === "dm" || !view) return true;
     return Object.values(view.tokens).some(
       (t): t is Token => !!t && t.sceneId === scene.id && ownsToken(view, s.you?.memberId, t) && reachesDoor(view, t, door.ref, door.chunk),

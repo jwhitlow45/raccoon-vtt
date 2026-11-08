@@ -30,7 +30,7 @@ function flatChrome(camera: { x: number; y: number; scale: number }) {
  */
 
 function inRoom(view: RoomState, child: ReturnType<typeof createElement>, scope = new RoomScope()): string {
-  const store = createStore(() => ({ view, you: { memberId: "dm", role: "dm" }, local: { actionBar: false, selectedId: null } }));
+  const store = createStore(() => ({ view, floorView: view, you: { memberId: "dm", role: "dm" }, local: { actionBar: false, selectedId: null } }));
   const room = createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: child });
   return renderToStaticMarkup(createElement(RoomScopeProvider, { scope, children: room }));
 }

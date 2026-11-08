@@ -94,7 +94,7 @@ function scopeFor(view: RoomView): RoomScope {
 }
 
 function draw(view: RoomView, Component: (props: never) => unknown, props: object = {}): string {
-  const store = createStore(() => ({ ...view, connection: "open", pending: [], online: [], displays: 0, accessVersion: 0, joinRequestsVersion: 0 }));
+  const store = createStore(() => ({ ...view, floorView: view.view, connection: "open", pending: [], online: [], displays: 0, accessVersion: 0, joinRequestsVersion: 0 }));
   return renderToStaticMarkup(
     createElement(RoomScopeProvider, {
       scope: scopeFor(view),

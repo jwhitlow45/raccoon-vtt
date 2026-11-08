@@ -34,8 +34,8 @@ const HALO_PX = 4;
 
 export const RangeRingLayer = memo(function RangeRingLayer(props: LayerProps) {
   const { tokens } = useLiveTokens();
-  const feetPerCell = useTreeShownView((s) => s.view?.meta.settings.feetPerCell ?? 5);
-  const diagonal = useTreeShownView((s) => s.view?.meta.settings.diagonal ?? "five");
+  const feetPerCell = useTreeShownView((s) => s.floorView?.meta.settings.feetPerCell ?? 5);
+  const diagonal = useTreeShownView((s) => s.floorView?.meta.settings.diagonal ?? "five");
   const rules = useMemo<DistanceRules>(() => ({ feetPerCell, diagonal }), [feetPerCell, diagonal]);
   const iso = useIsoGround();
   const dragged = useDraggedIds();

@@ -16,7 +16,7 @@ export function useSwitchRefusal(): (scene: GridScene, to: Grid) => string | nul
   const room = useRoomStore();
   return useCallback(
     (scene: GridScene, to: Grid) => {
-      const view = room.getState().view;
+      const view = room.getState().floorView;
       return view ? switchRefusal(view, scene, to) : null;
     },
     [room],
@@ -28,7 +28,7 @@ function useSceneOf(): (sceneId: string) => GridScene | null {
   const room = useRoomStore();
   return useCallback(
     (sceneId: string) => {
-      const scene = room.getState().view?.scenes[sceneId];
+      const scene = room.getState().floorView?.scenes[sceneId];
       return scene?.map ? { ...scene, map: scene.map } : null;
     },
     [room],

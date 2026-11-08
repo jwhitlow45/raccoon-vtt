@@ -113,7 +113,7 @@ describe("a fog gesture's messages", () => {
     const sent: { op: FogMessage; group: string | undefined }[] = [];
     const ctx = {
       actions: { dispatch: (op: FogMessage, opts?: { group?: string }) => (sent.push({ op, group: opts?.group }), sent.length), newId },
-      getState: () => ({ view: state }),
+      getState: () => ({ view: state, floorView: state }),
       scene: state.scenes[SCENE_ID]!,
       scope,
     } as unknown as Pick<ToolContext, "scene" | "actions" | "getState" | "scope">;

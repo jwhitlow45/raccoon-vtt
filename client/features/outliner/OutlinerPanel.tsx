@@ -36,7 +36,7 @@ export default function OutlinerPanel(props: PanelProps) {
 
 /** The parts of the view the rows read. Each keeps its identity until it changes, so the rows are made again only then. */
 function useScenePieces(): RoomState | null {
-  const view = useRoomView((s) => s.view);
+  const view = useRoomView((s) => s.floorView);
   const pieces = [
     view?.tokens,
     view?.stamps,

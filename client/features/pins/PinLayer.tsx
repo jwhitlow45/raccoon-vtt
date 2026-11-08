@@ -33,8 +33,8 @@ const EMPTY_PAGES: Record<string, JournalPage> = {};
  * (docs/design/design-v1-isometric-view.md 5.1).
  */
 export const PinLayer = memo(function PinLayer(props: LayerProps) {
-  const pins = useTreeShownView((s) => s.view?.pins ?? EMPTY_PINS);
-  const pages = useTreeShownView((s) => s.view?.journal ?? EMPTY_PAGES);
+  const pins = useTreeShownView((s) => s.floorView?.pins ?? EMPTY_PINS);
+  const pages = useTreeShownView((s) => s.floorView?.journal ?? EMPTY_PAGES);
   const pinStore = useScoped(pinSlot).store;
   const drag = useTreeShownStore(pinStore, (s) => s.drag);
   const popover = useTreeShownStore(pinStore, (s) => s.popover);

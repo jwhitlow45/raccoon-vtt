@@ -19,7 +19,7 @@ const NO_SCENE = { id: "", bounds: { w: 0, h: 0 } };
  */
 export function useViewerFog(layer: { scene: Pick<Scene, "id" | "bounds"> | undefined; role: "dm" | "player"; fog: boolean }): FogView {
   const iso = useIsoGround();
-  const tiles = useTreeShownView((s) => s.view?.fogTiles ?? EMPTY_TILES);
+  const tiles = useTreeShownView((s) => s.floorView?.fogTiles ?? EMPTY_TILES);
   const own = layer.role === "player" && layer.fog ? tiles : null;
   const { id, bounds } = layer.scene ?? NO_SCENE;
   const { w, h } = bounds;

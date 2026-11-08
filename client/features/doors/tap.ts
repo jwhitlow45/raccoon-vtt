@@ -35,7 +35,7 @@ export const DOOR_SLOP_PX = 22;
  */
 export function tapDoor(ctx: Pick<ToolContext, "getState" | "scene" | "camera" | "role" | "scope">, tool: string, world: Point, selected: string | null = null, screen?: Point): boolean {
   const pill = ctx.scope.get(doorPillSlot);
-  const view = ctx.getState().view;
+  const view = ctx.getState().floorView;
   const fogged = ctx.role === "player" && ctx.scene.fogEnabled !== false;
   const fog = fogged && view ? view.fogTiles : null;
   const pick = boardPickOf(ctx);

@@ -18,7 +18,7 @@ export function teleportToasts(fresh: readonly LogEntry[], names: LogNames): str
  * receive the line. The Log keeps it either way.
  */
 export function useTeleportToasts(role: Role): void {
-  const log = useRoomView((s) => s.view?.log);
+  const log = useRoomView((s) => s.floorView?.log);
   const confirmedSeq = useConfirmedSeq();
   const ui = useRoomUi();
   const store = useRoomStore();
@@ -27,7 +27,7 @@ export function useTeleportToasts(role: Role): void {
     if (!log || role !== "dm") return;
     const { seen: next, fresh } = arrivals(seen.current, log, confirmedSeq);
     seen.current = next;
-    const view = store.getState().view;
+    const view = store.getState().floorView;
     if (!view) return;
     for (const text of teleportToasts(fresh, view)) ui.notify(text, "info");
   }, [log, confirmedSeq, role, ui, store]);

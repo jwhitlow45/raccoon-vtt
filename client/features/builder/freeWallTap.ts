@@ -28,7 +28,7 @@ export function tapFreeWall(p: ToolPointer, ctx: ToolContext): boolean {
   const builderState = ctx.scope.get(builderSlot).store;
   const { edge } = builderState.getState();
   if (edge !== "door" && edge !== "clear") return false;
-  const view = ctx.getState().view;
+  const view = ctx.getState().floorView;
   const sceneId = ctx.scene.id;
   const chunks = sceneChunks(view?.buildChunks ?? {}, sceneId);
   const reach = FREE_WALL_REACH_PX / ctx.camera().scale;

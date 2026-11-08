@@ -91,10 +91,10 @@ function useAim(props: LayerProps) {
   // Tokens being dragged count where they would drop, so an aimed area's targets follow them.
   const dragged = useLiveTokens();
   const tokens = dragged.tokens;
-  const buildChunks = useTreeShownView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
-  const templates = useTreeShownView((s) => s.view?.templates ?? EMPTY_TEMPLATES);
-  const settings = useTreeShownView((s) => s.view?.meta.settings);
-  const members = useTreeShownView((s) => s.view?.members);
+  const buildChunks = useTreeShownView((s) => s.floorView?.buildChunks ?? EMPTY_CHUNKS);
+  const templates = useTreeShownView((s) => s.floorView?.templates ?? EMPTY_TEMPLATES);
+  const settings = useTreeShownView((s) => s.floorView?.meta.settings);
+  const members = useTreeShownView((s) => s.floorView?.members);
   const tool = useTreeShownView((s) => s.local.tool);
   const areaStore = useAreaScope().store;
   const draft = useTreeShownStore(areaStore, (s) => s.draft);
@@ -103,7 +103,7 @@ function useAim(props: LayerProps) {
   const moving = useTreeShownStore(areaStore, (s) => s.moving);
   const role = useTreeShownView((s) => s.you?.role ?? "player");
   const youId = useTreeShownView((s) => s.you?.memberId ?? "");
-  const casts = useTreeShownView((s) => s.view?.casts ?? EMPTY_CASTS);
+  const casts = useTreeShownView((s) => s.floorView?.casts ?? EMPTY_CASTS);
   const fog = useViewerFog(props);
   const ground = useLiveGround(props.fog ? scene : undefined, role);
 

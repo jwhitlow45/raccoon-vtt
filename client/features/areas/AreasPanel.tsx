@@ -32,10 +32,10 @@ import { useViewerFog } from "../../canvas/viewerFog.ts";
 const EMPTY: RoomState["templates"] = {};
 
 export default function AreasPanel(props: PanelProps) {
-  const view = useRoomView((s) => s.view);
+  const view = useRoomView((s) => s.floorView);
   const sceneId = useRoomView((s) => s.sceneId);
   const you = useRoomView((s) => s.you);
-  const templates = useRoomView((s) => s.view?.templates ?? EMPTY);
+  const templates = useRoomView((s) => s.floorView?.templates ?? EMPTY);
   const actions = useRoomActions();
   const ui = useRoomUi();
   const scope = useRoomScope();

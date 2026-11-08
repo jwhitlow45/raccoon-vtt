@@ -48,7 +48,7 @@ describe("a door tapped in Isometric (docs/design/design-v1-isometric-view.md 6.
     assert.ok(segmentDistance(world, { x: 6, y: 5 }, { x: 6, y: 6 }) > DOOR_SLOP_PX / pick.camera.scale);
     const scope = new RoomScope();
     scope.get(boardPickSlot).read = () => pick;
-    const ctx = { getState: () => ({ view: state }) as never, scene: state.scenes.s1!, camera: () => pick.camera, role: "dm" as const, scope };
+    const ctx = { getState: () => ({ view: state, floorView: state }) as never, scene: state.scenes.s1!, camera: () => pick.camera, role: "dm" as const, scope };
     assert.equal(tapDoor(ctx, "select", world, null, top), true);
     assert.deepEqual(scope.get(doorPillSlot).getState().pill, { sceneId: "s1", ref: { edge: "6,5,w" } });
   });
@@ -107,7 +107,7 @@ describe("a door tapped in Isometric (docs/design/design-v1-isometric-view.md 6.
       if (turn === 0) {
         const scope = new RoomScope();
         scope.get(boardPickSlot).read = () => pick;
-        const ctx = { getState: () => ({ view: state }) as never, scene: state.scenes.s1!, camera: () => pick.camera, role: "dm" as const, scope };
+        const ctx = { getState: () => ({ view: state, floorView: state }) as never, scene: state.scenes.s1!, camera: () => pick.camera, role: "dm" as const, scope };
         assert.equal(tapDoor(ctx, "select", pressAt(pick, onLeaf), null, onLeaf), true);
         assert.deepEqual(scope.get(doorPillSlot).getState().pill, { sceneId: "s1", ref: { edge: "6,5,w" } }, "the pill opens, the door's state untouched");
       }

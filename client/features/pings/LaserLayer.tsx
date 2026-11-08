@@ -32,7 +32,7 @@ const GLOW_PX = 9;
 
 export const LaserLayer = memo(function LaserLayer(props: LayerProps) {
   const lasers = useTreeShownView((s) => s.ephemeral.lasers);
-  const members = useTreeShownView((s) => s.view?.members);
+  const members = useTreeShownView((s) => s.floorView?.members);
   const trails = Object.values(lasers).filter((t) => t.points.length > 0);
   const still = useLowPower();
   const now = useFrameNow(trails.length > 0 && !still);

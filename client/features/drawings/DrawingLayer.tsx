@@ -35,7 +35,7 @@ const EMPTY: RoomState["drawings"] = {};
 const measureEm: MeasureEm = (line) => measurePill(line, 100, theme.font.body) / 100;
 
 export const DrawingLayer = memo(function DrawingLayer(props: LayerProps) {
-  const drawings = useTreeShownView((s) => s.view?.drawings ?? EMPTY);
+  const drawings = useTreeShownView((s) => s.floorView?.drawings ?? EMPTY);
   const tool$ = useScoped(drawSlot).store;
   const draft = useTreeShownStore(tool$, (s) => s.draft);
   const textAt = useTreeShownStore(tool$, (s) => s.textAt);
@@ -44,7 +44,7 @@ export const DrawingLayer = memo(function DrawingLayer(props: LayerProps) {
   const opacity = useTreeShownStore(tool$, (s) => s.opacity);
   const fill = useTreeShownStore(tool$, (s) => s.fill);
   const tool = useTreeShownView((s) => s.local.tool);
-  const memberColor = useTreeShownView((s) => (s.you ? s.view?.members[s.you.memberId]?.color : undefined)) ?? boardTheme.color.crest;
+  const memberColor = useTreeShownView((s) => (s.you ? s.floorView?.members[s.you.memberId]?.color : undefined)) ?? boardTheme.color.crest;
   const iso = useIsoGround();
   // Kept rulers are drawings in the state, drawn and measured by the ruler layer (features/measure).
   const list = Object.values(drawings).filter((d): d is Drawing => !!d && d.sceneId === props.scene.id && d.kind !== "ruler");

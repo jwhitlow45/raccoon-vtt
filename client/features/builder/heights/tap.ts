@@ -26,7 +26,7 @@ export function wordsAt(view: Pick<RoomState, "buildChunks" | "fogTiles">, scene
  */
 export function tapGround(ctx: Pick<ToolContext, "getState" | "scene" | "camera" | "role" | "scope">, tool: string, world: Point, screen?: Point): boolean {
   const slot = ctx.scope.get(readoutSlot);
-  const view = ctx.getState().view;
+  const view = ctx.getState().floorView;
   // A pin answers its own tap (features/pins/PinController.ts), where it stands in the view shown, and a reading beside its popover would be two things floating at once.
   // The square under the tap, or on a hex scene the hex that holds it, by its key.
   const g = sceneGrid(ctx.scene);

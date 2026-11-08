@@ -37,7 +37,7 @@ function page(folds: Folds, over: Partial<Scene> = {}, view?: (s: RoomState) => 
   const state: RoomState = room({ members: { dm1: member("dm1", "dm") } });
   state.scenes.s1 = s1;
   view?.(state);
-  const store = createStore(() => ({ view: state, you: { memberId: "dm1", role: "dm" }, roomId: "r1", sceneId: "s1", connection: "open", pending: [], local: { selectedIds: [], multi: false } }));
+  const store = createStore(() => ({ view: state, floorView: state, you: { memberId: "dm1", role: "dm" }, roomId: "r1", sceneId: "s1", connection: "open", pending: [], local: { selectedIds: [], multi: false } }));
   const scope = new RoomScope();
   const slot = scope.get(scenesFoldsSlot);
   slot.get(0, { clock: false, scenes: true });
@@ -207,7 +207,7 @@ describe("New scene, a folding group over the settings (docs/design/design-v1-pa
     const { default: ScenesPanel } = await import("../../panels/ScenesPanel.tsx");
     const state: RoomState = room({ members: { dm1: member("dm1", "dm") } });
     if (!scenes) state.scenes = {};
-    const store = createStore(() => ({ view: state, you: { memberId: "dm1", role: "dm" }, roomId: "r1", sceneId: null, connection: "open", pending: [], local: { selectedIds: [], multi: false } }));
+    const store = createStore(() => ({ view: state, floorView: state, you: { memberId: "dm1", role: "dm" }, roomId: "r1", sceneId: null, connection: "open", pending: [], local: { selectedIds: [], multi: false } }));
     const scope = new RoomScope();
     const slot = scope.get(scenesFoldsSlot);
     slot.get(390, { clock: false, scenes });

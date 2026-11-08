@@ -75,21 +75,21 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
   // Every read holds while this tree is hidden, so a ruler measured in the other view works for nothing here, its walk's search included.
   const rulers = useTreeShownView((s) => s.ephemeral.rulers);
   const drags = useTreeShownView((s) => s.ephemeral.drags);
-  const tokens = useTreeShownView((s) => s.view?.tokens ?? EMPTY_TOKENS);
-  const members = useTreeShownView((s) => s.view?.members);
-  const settings = useTreeShownView((s) => s.view?.meta.settings);
+  const tokens = useTreeShownView((s) => s.floorView?.tokens ?? EMPTY_TOKENS);
+  const members = useTreeShownView((s) => s.floorView?.members);
+  const settings = useTreeShownView((s) => s.floorView?.meta.settings);
   const youId = useTreeShownView((s) => s.you?.memberId ?? null);
-  const encounter = useTreeShownView((s) => s.view?.encounter);
-  const drawings = useTreeShownView((s) => s.view?.drawings ?? EMPTY_DRAWINGS);
-  const characters = useTreeShownView((s) => s.view?.characters);
+  const encounter = useTreeShownView((s) => s.floorView?.encounter);
+  const drawings = useTreeShownView((s) => s.floorView?.drawings ?? EMPTY_DRAWINGS);
+  const characters = useTreeShownView((s) => s.floorView?.characters);
   const role = useTreeShownView((s) => s.you?.role ?? "player");
   // Walking rulers search the room itself, so only they read the whole view.
-  const anyWalk = useTreeShownView((s) => Object.values(s.ephemeral.rulers).some((r) => r.walk) || Object.values(s.view?.drawings ?? {}).some((d) => d?.kind === "ruler" && d.walk === true));
-  const view = useTreeShownView((s) => (anyWalk ? s.view : null));
+  const anyWalk = useTreeShownView((s) => Object.values(s.ephemeral.rulers).some((r) => r.walk) || Object.values(s.floorView?.drawings ?? {}).some((d) => d?.kind === "ruler" && d.walk === true));
+  const view = useTreeShownView((s) => (anyWalk ? s.floorView : null));
   // This device's own drag, which the board's ruler controller hears from the stage on screen (RulerController.ts).
   const localDrag = useTreeShownStore(useScoped(localMeasureSlot), (s) => s.drag);
   // Only this device's own drag reads the room, for where its token lands: by its holder while it sits on one every player sees.
-  const dragRoom = useTreeShownView((s) => (localDrag ? s.view : null));
+  const dragRoom = useTreeShownView((s) => (localDrag ? s.floorView : null));
   const dropRoom = useMemo(() => (dragRoom ? dropView(dragRoom, role) : undefined), [dragRoom, role]);
   const feetPerCell = settings?.feetPerCell ?? 5;
   const diagonal = settings?.diagonal ?? "five";
@@ -99,7 +99,7 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
   const grid = useMemo(() => sceneGrid({ gridShape }), [gridShape]);
   const route = useTreeShownStore(useScoped(routeSlot), (s) => s.route);
   // The turn's walker: the active creature, or the controlled mount sharing its turn (docs/design/design-v1-attach.md 7.2).
-  const activeTokenId = useTreeShownView((s) => turnMoverId(s.view) ?? null);
+  const activeTokenId = useTreeShownView((s) => turnMoverId(s.floorView) ?? null);
   const read = useMemo<ReadDrag>(() => {
     return (token, to, walk) => {
       // Speeds are the actor's, which only the DM and the creature's owners receive.

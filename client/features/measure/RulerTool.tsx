@@ -47,7 +47,7 @@ import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 function sceneToken(ctx: ToolContext, id: string | null): RulerToken | undefined {
   if (!id) return undefined;
-  const t = ctx.getState().view?.tokens[id];
+  const t = ctx.getState().floorView?.tokens[id];
   return t && t.sceneId === ctx.scene.id ? t : undefined;
 }
 
@@ -58,7 +58,7 @@ function sceneToken(ctx: ToolContext, id: string | null): RulerToken | undefined
  * their fog, and receivers never need the measurer's fog to read it.
  */
 function groundOf(ctx: ToolContext): GroundReader {
-  const view = ctx.getState().view;
+  const view = ctx.getState().floorView;
   if (!view) return () => 0;
   const src = groundSource(view, ctx.scene, ctx.role);
   return (cell) => seenGround(src, cell) ?? 0;
@@ -117,7 +117,7 @@ function keep(ctx: ToolContext, ruler: RulerState | null): void {
           id: ctx.actions.newId(),
           sceneId: ctx.scene.id,
           ownerId: you.memberId,
-          color: s.view?.members[you.memberId]?.color ?? theme.color.crest,
+          color: s.floorView?.members[you.memberId]?.color ?? theme.color.crest,
           shared: shares(ctx),
           walk: ctx.scope.get(rulerSlot).store.getState().walk,
         }
@@ -156,11 +156,11 @@ function RulerOptions(props: { role: "dm" | "player" }) {
   const tool = useScoped(rulerSlot);
   const rulerStore = tool.store;
   const { ruler, share, walk: wantsWalk } = useStore(rulerStore);
-  const tokens = useRoomView((s) => s.view?.tokens);
-  const settings = useRoomView((s) => s.view?.meta.settings);
-  const scene = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId] : undefined));
+  const tokens = useRoomView((s) => s.floorView?.tokens);
+  const settings = useRoomView((s) => s.floorView?.meta.settings);
+  const scene = useRoomView((s) => (s.sceneId ? s.floorView?.scenes[s.sceneId] : undefined));
   const walk = wantsWalk;
-  const view = useRoomView((s) => (walk ? s.view : null));
+  const view = useRoomView((s) => (walk ? s.floorView : null));
   const kept = useKeptRulers(props.role);
   const stops = ruler ? allStops(ruler) : [];
   let info: ReactNode = "Drag to measure. Tap to add a waypoint. Double-tap to keep a ruler on the map.";

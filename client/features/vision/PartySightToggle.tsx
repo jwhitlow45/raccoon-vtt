@@ -15,7 +15,7 @@ export function PartySightToggle() {
   const slot = useScoped(partySightSlot);
   const on = useStore(slot, (s) => s.on);
   const shown = useRoomView((s) => {
-    const scene = s.sceneId ? s.view?.scenes[s.sceneId] : undefined;
+    const scene = s.sceneId ? s.floorView?.scenes[s.sceneId] : undefined;
     return scene !== undefined && visionOn(scene);
   });
   if (!shown) return null;

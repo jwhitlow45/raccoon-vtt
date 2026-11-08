@@ -34,7 +34,7 @@ function FogAndVision(props: { scene: Scene }) {
 }
 
 function render(view: RoomState, pending: { op: ClientOp }[] = [], part: typeof FogAndVision | typeof LightSettings = FogAndVision): string {
-  const store = createStore(() => ({ view, you: { memberId: "dm1", role: "dm" }, roomId: "r1", connection: "open", pending, local: { selectedIds: [], multi: false } }));
+  const store = createStore(() => ({ view, floorView: view, you: { memberId: "dm1", role: "dm" }, roomId: "r1", connection: "open", pending, local: { selectedIds: [], multi: false } }));
   return renderToStaticMarkup(
     createElement(RoomProvider, {
       store: store as never,
