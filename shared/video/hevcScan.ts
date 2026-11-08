@@ -147,13 +147,17 @@ export function videoSampleEntry(parts: readonly FilePart[], size: number): stri
     const hdlr = inMdia && only(inMdia, "hdlr");
     // The handler's type follows the version, the flags and four predefined bytes, and the server needs 20 bytes after the first 4.
     if (!inMdia || !hdlr || hdlr.end - hdlr.payload < 24 || !plainFull(read, hdlr)) return null;
-    if (fourCc(read(hdlr.payload + 8, 4)!, 0) !== "vide") continue;
+    // The handler type or the entry count can lie in the unread middle even when the box headers around them are read.
+    const handler = read(hdlr.payload + 8, 4);
+    if (!handler) return null;
+    if (fourCc(handler, 0) !== "vide") continue;
     const minf = only(inMdia, "minf");
     const inMinf = minf && children(read, minf);
     const stbl = inMinf && only(inMinf, "stbl");
     const inStbl = stbl && children(read, stbl);
     const stsd = inStbl && only(inStbl, "stsd");
-    if (!stsd || stsd.end - stsd.payload < 8 || !plainFull(read, stsd) || u32(read(stsd.payload + 4, 4)!, 0) !== 1) return null;
+    const count = stsd && stsd.end - stsd.payload >= 8 ? read(stsd.payload + 4, 4) : null;
+    if (!stsd || !count || !plainFull(read, stsd) || u32(count, 0) !== 1) return null;
     const entries = children(read, stsd, stsd.payload + 8);
     if (!entries || entries.length !== 1 || entries[0]!.end - entries[0]!.payload < 8) return null;
     return entries[0]!.type;

@@ -104,6 +104,25 @@ describe("the HEVC scan before the upload (AMROT-O-06)", () => {
     assert.equal(entryOf(bytes), "hvc1");
   });
 
+  // Each field is read after its box header, so a header can lie in a part while the field does not.
+  for (const [box4, fieldAt, name] of [["hdlr", 8, "handler type"], ["stsd", 4, "entry count"]] as const) {
+    test(`a ${box4} whose ${name} straddles the end of the first MiB of a 2 MiB + 1 file is not decided, and does not throw`, async () => {
+      const find = (b: Uint8Array) => Buffer.from(b).indexOf(box4);
+      const make = (pad: number) => moovOf(box("free", zeros(pad)), trak("vide", "hvc1"));
+      const ftyp = ftypOf("qt  ");
+      // The box's version and flags end before the first MiB does, the field crosses it.
+      const fieldIdx = MiB - 2 - fieldAt - 4;
+      const pad = 8 + (fieldIdx - ftyp.length - find(make(8)));
+      const moov = make(pad);
+      const bytes = concat(ftyp, moov, box("mdat", zeros(2 * MiB + 1 - ftyp.length - moov.length - 8)));
+      assert.equal(bytes.length, 2 * MiB + 1);
+      const fieldStart = find(bytes) + 4 + fieldAt;
+      assert.ok(fieldStart < MiB && fieldStart + 4 > MiB + 1, "the field is in neither part");
+      assert.equal(entryOf(bytes), null);
+      assert.equal(await isHevc(new Blob([bytes])), false);
+    });
+  }
+
   test("the first video track decides: a sound track before it is passed over, and a second video track's entry is not read", () => {
     assert.equal(entryOf(movie({ traks: [trak("soun", "mp4a"), trak("vide", "hvc1")], moovLast: true, media: 3 * MiB })), "hvc1");
     assert.equal(entryOf(movie({ traks: [trak("meta", "hvc1"), trak("vide", "avc1")] })), "avc1", "a metadata track's entry is not the video's");
