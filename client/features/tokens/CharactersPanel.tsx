@@ -315,7 +315,7 @@ function PartyLongRest(props: { characters: Character[] }) {
           size="sm"
           style={{ flex: 1 }}
           onClick={() => {
-            dispatchGesture(actions, partyRestOps(resting.map((c) => c.id), moveClock));
+            dispatchGesture(actions, partyRestOps(resting.map((c) => c.id), moveClock, actions.newId()));
             setAsking(false);
             setMoves(true);
           }}

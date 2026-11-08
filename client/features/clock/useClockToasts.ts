@@ -1,68 +1,51 @@
 import { useEffect, useRef } from "react";
 import { clockText } from "#shared/logText.ts";
 import type { LogEntry } from "#shared/model.ts";
-import type { ScopeHistory } from "#shared/undoContract.ts";
 import { arrivals } from "../areas/reminders.ts";
 import { useConfirmedSeq } from "../encounter/hooks.ts";
 import type { RoomView } from "../../state/types.ts";
 import { useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 
-type Kind = "step" | "history";
+/** An op this device sent that writes a clock line, by its `n` and the claim id the line will carry, until the server settles it. */
+export type Claim = { n: number; id: string };
 
-/** An op this device sent that writes a clock line, by its `n`, until the server settles it. */
-export type Claim = { n: number; kind: Kind };
-
-/**
- * The history labels of a step that moves the clock (server/rooms/undoLabels.ts
- * describeOp): a step, Set, a calendar save and the party's Long Rest. Only
- * their Undo or Redo can write the DM's "undid a clock change" line.
- */
-const CLOCK_STEP = /^(moving the clock on |setting the date and time$|changing the calendar$|the party's Long Rest$)/;
-
-type SentOp = { t: string; at?: number; head?: string; scope?: "play" | "setup"; of?: number };
+type SentOp = { t: string; claim?: string; head?: string; of?: number };
 
 /**
- * What a sent op writes a clock line as, or null for an op that writes none
- * (ASTRA-05). Stop, the sharing switch and a calendar save without a time
- * write none. An undo or redo writes one only when the step it names, the
- * head of its stack as this device last heard it, moved the clock. One that
- * names a step by `of` is not claimed, since the device holds only heads.
+ * The claim id a sent op's clock line will carry, or null for an op that
+ * writes none (docs/design/design-v1-calendar-c2c3.md 4.6). A clock op that
+ * can write a line carries a fresh id (claim.ts `withClaim`), and the reducer
+ * copies it onto the line. A DM's Undo or Redo names the head of its stack,
+ * which the server copies onto the line its restore writes. One that names a
+ * step by `of` is not claimed, since the device holds only heads. A head
+ * that moved no clock writes no line, and the claim is given up when its
+ * answer arrives with none.
  */
-export function ownKindOf(op: SentOp, history: { play: ScopeHistory; setup?: ScopeHistory } | null | undefined): Kind | null {
+export function ownClaimOf(op: SentOp): string | null {
   switch (op.t) {
     case "clock.start":
     case "clock.set":
     case "clock.advance":
-      return "step";
     case "clock.update":
-      return op.at !== undefined ? "step" : null;
+      return op.claim ?? null;
     case "undo":
-    case "redo": {
-      if (op.of !== undefined || op.head === undefined) return null;
-      const head = history?.[op.scope ?? "play"]?.[op.t].head;
-      return head?.id === op.head && CLOCK_STEP.test(head.label) ? "history" : null;
-    }
+    case "redo":
+      return op.of === undefined && op.head !== undefined ? op.head : null;
     default:
       return null;
   }
 }
 
-function kindOf(entry: LogEntry): Kind {
-  return entry.data?.type === "clock" && entry.data.from !== undefined ? "history" : "step";
-}
-
 /**
- * The clock lines this device's own ops wrote (ASTRA-05). A line names no
- * author and the server's answer names no line, so a claim is matched only
- * against the clock lines that arrived in the same update as its answer: a
- * batch's lines and its acks travel in one `ev`, and a snapshot that ends
- * an op unanswered carries its line if it wrote one. A refused op, and one
- * whose update held no line of its kind, gives its claim up there. Two
- * same-kind lines in one batch, one this device's and one another's, are
- * the one case left to chance.
+ * The clock lines this device's own ops wrote (ASTRA-05). A claim id is on
+ * the op and on the line it wrote, so a device knows its own lines exactly,
+ * whatever else arrives in the same update. A claim is looked for only among
+ * the clock lines that arrived in the same update as its answer: a batch's
+ * lines and its acks travel in one `ev`, and a snapshot that ends an op
+ * unanswered carries its line if it wrote one. A refused op, and one whose
+ * update held no line with its id, gives its claim up there.
  */
 export function settleClaims(claims: readonly Claim[], pending: ReadonlySet<number>, refused: ReadonlySet<number>, arrived: readonly LogEntry[]): { mine: string[]; left: Claim[] } {
-  const pool = arrived.slice();
   const mine: string[] = [];
   const left: Claim[] = [];
   for (const claim of claims) {
@@ -71,10 +54,8 @@ export function settleClaims(claims: readonly Claim[], pending: ReadonlySet<numb
       continue;
     }
     if (refused.has(claim.n)) continue;
-    const i = pool.findIndex((entry) => kindOf(entry) === claim.kind);
-    if (i < 0) continue;
-    mine.push(pool[i]!.id);
-    pool.splice(i, 1);
+    const line = arrived.find((entry) => entry.data?.type === "clock" && entry.data.claim === claim.id);
+    if (line) mine.push(line.id);
   }
   return { mine, left };
 }
@@ -101,8 +82,8 @@ export function ownLineWatcher(): { update(s: Watched, prev: Watched): void; tak
         for (const p of s.pending) {
           if (p.n <= lastN) continue;
           lastN = p.n;
-          const kind = ownKindOf(p.op as SentOp, s.history?.summary);
-          if (kind !== null) claims.push({ n: p.n, kind });
+          const id = ownClaimOf(p.op as SentOp);
+          if (id !== null) claims.push({ n: p.n, id });
         }
       }
       if (claims.length === 0) return;

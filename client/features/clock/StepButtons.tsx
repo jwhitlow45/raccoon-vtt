@@ -4,6 +4,7 @@ import { ErrorText, Input, Select } from "../../components/Field.tsx";
 import { SectionLabel } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions } from "../../state/view.ts";
+import { withClaim } from "./claim.ts";
 import { AMOUNT_UNITS, amountBy, stepName, STEPS, toDawn, type AmountUnit } from "./words.ts";
 
 /**
@@ -26,7 +27,7 @@ export function StepButtons(props: { now: number }) {
   const [count, setCount] = useState("");
   const [unit, setUnit] = useState<AmountUnit>("hours");
   const [error, setError] = useState<string | null>(null);
-  const step = (by: number) => actions.dispatch({ t: "clock.advance", by });
+  const step = (by: number) => actions.dispatch(withClaim({ t: "clock.advance", by }, () => actions.newId()));
 
   const moveOn = () => {
     const amount = amountBy(count, unit);
@@ -100,7 +101,7 @@ export function StepButtons(props: { now: number }) {
 export function ClockSteps(props: { now: number }) {
   const actions = useRoomActions();
   const dawn = toDawn(props.now);
-  const step = (by: number) => actions.dispatch({ t: "clock.advance", by });
+  const step = (by: number) => actions.dispatch(withClaim({ t: "clock.advance", by }, () => actions.newId()));
   return (
     <>
       {STEPS.map((s) => (

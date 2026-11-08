@@ -177,6 +177,6 @@ describe("after this device's own Start the clock (LP31-A-TIME-1)", () => {
     assert.ok(source.includes("if (clockId !== null) landOnOwnStart(startedHere, clockId, dateBlock.current);"), "the panel lands as its clock changes");
     assert.ok(source.includes("<div ref={dateBlock} tabIndex={-1} role=\"status\""), "on the date block");
     const start = readFileSync(new URL("./StartClock.tsx", import.meta.url), "utf8");
-    assert.match(start, /const id = actions\.newId\(\);\s*props\.onStart\(id\);\s*actions\.dispatch\(\{ t: "clock\.start", id,/, "told before the op is sent, so the predicted clock already finds it");
+    assert.match(start, /const id = actions\.newId\(\);\s*props\.onStart\(id\);\s*actions\.dispatch\(withClaim\(\{ t: "clock\.start", id,/, "told before the op is sent, so the predicted clock already finds it");
   });
 });

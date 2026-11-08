@@ -7,16 +7,16 @@ const clock: RoomClock = { id: "c1", rev: 0, t: 3 * 86_400 + 6 * 3_600, shown: t
 
 describe("partyRestOps", () => {
   it("sends the advance first, then each rest", () => {
-    const ops = partyRestOps(["a", "b"], true);
+    const ops = partyRestOps(["a", "b"], true, "k1");
     assert.deepEqual(ops, [
-      { t: "clock.advance", by: 8 * 3_600, why: "longRest" },
+      { t: "clock.advance", by: 8 * 3_600, why: "longRest", claim: "k1" },
       { t: "actor.rest", target: { characterId: "a" }, kind: "long" },
       { t: "actor.rest", target: { characterId: "b" }, kind: "long" },
     ]);
   });
   it("sends only the rests when the box is unticked or there is no clock", () => {
     assert.deepEqual(
-      partyRestOps(["a"], false).map((o) => o.t),
+      partyRestOps(["a"], false, "k1").map((o) => o.t),
       ["actor.rest"],
     );
   });

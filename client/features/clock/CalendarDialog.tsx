@@ -86,7 +86,7 @@ export function CalendarDialog(props: {
       return;
     }
     const update = calendarUpdate({ before: clock.calendar, calendar: result.calendar, today: composed, todayTouched: dateEdit !== null, now });
-    if (update) actions.dispatch({ t: "clock.update", ...update });
+    if (update) actions.dispatch({ t: "clock.update", ...update, ...(update.at !== undefined ? { claim: actions.newId() } : null) });
     props.onClose();
   };
 

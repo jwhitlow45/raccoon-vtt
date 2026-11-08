@@ -6,6 +6,7 @@ import { Dialog, DiscardQuestion } from "../../components/Dialog.tsx";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { DateFieldsEditor } from "./DateFieldsEditor.tsx";
 import { DISCARD, useDiscard } from "./useDiscard.ts";
+import { withClaim } from "./claim.ts";
 import { sameCalendar } from "./calendarDraft.ts";
 import { composeDraft, draftDate, keptSeconds, reconcileDate, remapMonth, setAt } from "./words.ts";
 
@@ -53,7 +54,7 @@ export function SetTimeDialog(props: { clock: RoomClock; opener: RefObject<HTMLE
     setTried(true);
     if (dirty && !composed.ok) return;
     const at = setAt(dirty, composed, now);
-    if (at !== null) actions.dispatch({ t: "clock.set", at });
+    if (at !== null) actions.dispatch(withClaim({ t: "clock.set", at }, () => actions.newId()));
     props.onClose();
   };
 

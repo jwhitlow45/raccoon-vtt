@@ -8,6 +8,7 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomActions } from "../../state/view.ts";
 import { CalendarDialog, KIND_OPTIONS, STARTING_MONTHS } from "./CalendarDialog.tsx";
 import { DateFieldsEditor } from "./DateFieldsEditor.tsx";
+import { withClaim } from "./claim.ts";
 import { pickStartKind, savedToStart, START_FORM, type StartForm } from "./calendarDraft.ts";
 import { composeDraft, calendarSummary } from "./words.ts";
 
@@ -45,7 +46,7 @@ export function StartClock(props: { onStart(id: string): void }) {
     if (!composed.ok) return;
     const id = actions.newId();
     props.onStart(id);
-    actions.dispatch({ t: "clock.start", id, at: composed.t, shown, calendar });
+    actions.dispatch(withClaim({ t: "clock.start", id, at: composed.t, shown, calendar }, () => actions.newId()));
   };
 
   return (
