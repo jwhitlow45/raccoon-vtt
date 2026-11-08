@@ -211,6 +211,12 @@ export const ASK_CHAIN_MS = 30_000;
  */
 const ASK_TURN_MS = 8;
 
+/** What a device is told when its op threw before it was staged (#commandFailed). */
+const OP_FAULT_WORDS = "That change could not be made: something went wrong on the server.";
+/** The third fault refusal within this window closes the device's socket (#faultsPastLimit). */
+const FAULT_REFUSALS_WINDOW_MS = 60_000;
+const FAULT_REFUSALS_BEFORE_CLOSE = 3;
+
 /** The most of a fault's message and stack one log line keeps (#fault). */
 const FAULT_MESSAGE_CHARS = 300;
 const FAULT_STACK_CHARS = 2_000;
@@ -226,7 +232,7 @@ type Lookup = { gen: number; ids: ReadonlySet<string> };
 export type DeletionRun<T> = (state: RoomState, seq: number) => Promise<{ deleted: readonly string[]; result: T }>;
 
 type Command =
-  | { t: "op"; conn: Connection; n: number; raw: unknown; group: string | undefined; groupScope: "setup" | undefined; facts: Map<string, AssetFact>; lookup: Lookup | null }
+  | { t: "op"; conn: Connection; n: number; raw: unknown; group: string | undefined; groupScope: "setup" | undefined; facts: Map<string, AssetFact>; lookup: Lookup | null; admitted?: Admitted | null; requeued?: boolean }
   | { t: "hello"; conn: Connection; clientId: string; resumeFrom: number; sceneId: string | undefined; ackDetails: boolean; stored: number; fresh: boolean }
   | { t: "snapshot"; conn: Connection; key: ClientKey }
   | { t: "sys"; op: ServerOnlyOp; resolve: () => void; reject: (err: Error) => void }
@@ -439,6 +445,8 @@ export class RoomActor {
    * client's next op of another group and when its socket goes.
    */
   #askRefused = new Map<ClientKey, string>();
+  /** When each client key's last fault refusals came, for the throttle (#faultsPastLimit). Gone with the room's unload. */
+  #faultRefusals = new Map<ClientKey, number[]>();
   /**
    * The ask being read over several turns (#readAsk). The room's queue
    * waits on it as on a step, so its sender's later ops stay behind it.
@@ -1029,9 +1037,13 @@ export class RoomActor {
   }
 
   /**
-   * A command that threw costs only its sender: its socket closes with 1011
-   * as a fault on the message path closes it (ws.ts), a server command is
-   * refused, and the queue goes on. Nothing is undone, as on that path.
+   * A command that threw costs only its sender. An op whose own handling
+   * threw before it was staged is refused and its socket stays open, so a
+   * throw that repeats on every resend cannot loop the device through
+   * reconnects (THROW-REFUSE). After staging, as for any other command, the
+   * socket closes with 1011 as a fault on the message path closes it
+   * (ws.ts), a server command is refused, and the queue goes on. Nothing is
+   * undone, as on that path.
    *
    * What stays whole: the room's state took all of an op or none of it,
    * since #reduce stages a state and its batch record together, and a
@@ -1046,27 +1058,66 @@ export class RoomActor {
    * in #runStep, and its flush first (#commitNow) does not throw.
    */
   #commandFailed(cmd: Command, err: unknown, before: Batch | null, records: number): void {
-    if (cmd.t === "op") this.#settleStaged(cmd, before, records);
+    let keepOpen = false;
+    if (cmd.t === "op") {
+      const joined = this.#settleStaged(cmd, before, records);
+      const key = cmd.conn.key;
+      const wm = key === null ? undefined : this.#watermarks.get(key);
+      // A requeued op's fault came from the commit that cleared the way for it, not from the op, so its device reconnects and resends.
+      if (!joined && !cmd.requeued && key !== null && wm && wm.staged < cmd.n) {
+        keepOpen = this.#refuseFault(key, wm, cmd.n, cmd.admitted ?? null);
+      }
+    }
     const conn = cmd.t === "op" || cmd.t === "hello" || cmd.t === "snapshot" ? cmd.conn : null;
-    this.#fault("room command failed", err, conn, cmd.t === "op" ? opKind(cmd.raw) : cmd.t === "sys" ? cmd.op.t : cmd.t);
+    this.#fault("room command failed", err, conn, cmd.t === "op" ? opKind(cmd.raw) : cmd.t === "sys" ? cmd.op.t : cmd.t, keepOpen);
     if (cmd.t === "sys") cmd.reject(err instanceof Error ? err : new Error(String(err)));
     this.#scheduleCommit();
   }
 
   /**
-   * Settles an op's number when its record joined the batch before it threw.
-   * Read from the batch and not from the staged seq, which a walk's flush
-   * moves before the op goes back to the queue unapplied (#processOp).
+   * Refuses an op that threw before it was staged. True when its socket may
+   * stay open: not when the refusal itself failed, and not for the third in
+   * a window (#faultsPastLimit).
    */
-  #settleStaged(cmd: Extract<Command, { t: "op" }>, before: Batch | null, records: number): void {
+  #refuseFault(key: ClientKey, wm: Watermark, n: number, admitted: Admitted | null): boolean {
+    try {
+      this.#refuse(key, wm, n, "invalid", OP_FAULT_WORDS, admitted);
+    } catch {
+      return false;
+    }
+    return !this.#faultsPastLimit(key);
+  }
+
+  /**
+   * Counts a fault refusal against the client's key, the device's, so a
+   * reconnect does not reset it. True from the third within
+   * FAULT_REFUSALS_WINDOW_MS, whose socket then closes so a crafted client
+   * cannot fill the error log faster than it can reconnect.
+   */
+  #faultsPastLimit(key: ClientKey): boolean {
+    const now = this.#opts.now();
+    const recent = (this.#faultRefusals.get(key) ?? []).filter((at) => now - at < FAULT_REFUSALS_WINDOW_MS);
+    recent.push(now);
+    this.#faultRefusals.set(key, recent);
+    return recent.length >= FAULT_REFUSALS_BEFORE_CLOSE;
+  }
+
+  /**
+   * Settles an op's number when its record joined the batch before it threw,
+   * and says whether one did. Read from the batch and not from the staged
+   * seq, which a walk's flush moves before the op goes back to the queue
+   * unapplied (#processOp).
+   */
+  #settleStaged(cmd: Extract<Command, { t: "op" }>, before: Batch | null, records: number): boolean {
     const key = cmd.conn.key;
     const wm = key === null ? undefined : this.#watermarks.get(key);
     const batch = this.#batch;
-    if (key === null || !wm || !batch) return;
+    if (key === null || !wm || !batch) return false;
     const joined = batch === before ? batch.ops.slice(records) : batch.ops;
-    if (!joined.some((record) => record.actor !== SERVER_ACTOR)) return;
+    if (!joined.some((record) => record.actor !== SERVER_ACTOR)) return false;
     if (wm.staged < cmd.n) wm.staged = cmd.n;
     batch.watermarks.set(key, Math.max(batch.watermarks.get(key) ?? 0, cmd.n));
+    return true;
   }
 
   /**
@@ -1075,11 +1126,11 @@ export class RoomActor {
    * message and stack are logged alone, since a logged error object would
    * carry every field the thrower attached to it.
    */
-  #fault(what: string, err: unknown, conn: Connection | null, kind?: string): void {
+  #fault(what: string, err: unknown, conn: Connection | null, kind?: string, keepOpen = false): void {
     const error = err instanceof Error ? err : new Error(String(err));
     // Capped, since a message can quote what a sender wrote, such as an id, and a fault repeated per op must not flood the log.
     this.#log.error({ roomId: this.roomId, memberId: conn?.memberId, kind, message: error.message.slice(0, FAULT_MESSAGE_CHARS), stack: error.stack?.slice(0, FAULT_STACK_CHARS) }, what);
-    conn?.close(1011, "internal error");
+    if (!keepOpen) conn?.close(1011, "internal error");
   }
 
   #handle(cmd: Command): void {
@@ -1136,6 +1187,7 @@ export class RoomActor {
 
   #processOp(cmd: Extract<Command, { t: "op" }>, facts: Map<string, AssetFact>): void {
     const conn = cmd.conn;
+    cmd.requeued = false;
     if (conn.closed) return;
     const key = conn.key;
     const wm = key === null ? undefined : this.#watermarks.get(key);
@@ -1148,6 +1200,8 @@ export class RoomActor {
     // Only an op the rates below will let through ends the batch, so one answered `busy` forces no commit.
     if (n > wm.committed && n === wm.staged + 1 && conn.opRate.wouldAllow() && this.#roomRate.tokens >= 1 && this.#walkEndsBatch(cmd.raw)) {
       this.#queue.unshift(cmd);
+      // Marked until it is handled again: a throw from this commit is a fault outside the op (#commandFailed).
+      cmd.requeued = true;
       this.#commitNow();
       return;
     }
@@ -1378,6 +1432,7 @@ export class RoomActor {
         return;
       }
       admitted = { memberId: viewer.memberId, player, ...tagged };
+      cmd.admitted = admitted;
     }
     /*
      * A player's block saves past their budget (docs/design/design-v1-companion-stat-blocks.md 3.5) are refused, never answered
@@ -1711,7 +1766,17 @@ export class RoomActor {
       // current one, since a hello from a new socket waits behind the reading, and the gesture's later ops go with it.
       this.#reading = null;
       this.#asking.delete(read.key);
-      this.#fault("ask read failed", err, this.#clients.get(read.key) ?? null, "build.ask");
+      // Before #finishAsk staged the ask, it is refused as an op that threw before staging is, and its socket stays.
+      const conn = this.#clients.get(read.key) ?? null;
+      let keepOpen = false;
+      if (read.wm.staged < read.n) {
+        keepOpen = this.#refuseFault(read.key, read.wm, read.n, null);
+      } else {
+        // Past staging its number is settled with it, so the resend after the reconnect is answered from the watermark.
+        const batch = this.#batch;
+        if (batch) batch.watermarks.set(read.key, Math.max(batch.watermarks.get(read.key) ?? 0, read.n));
+      }
+      this.#fault("ask read failed", err, conn, "build.ask", keepOpen);
       // A batch the reading began (#memoryEstimate) would otherwise wait for another command to commit it.
       this.#scheduleCommit();
     }

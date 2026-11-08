@@ -170,6 +170,16 @@ async function taken(socket: Socket, ...ns: number[]): Promise<void> {
   }
 }
 
+const FAULT_WORDS = "That change could not be made: something went wrong on the server.";
+
+/** The op `n` was refused for a fault, with the server's words, and its socket stays open. */
+async function refusedForFault(socket: Socket, n: number): Promise<void> {
+  const ev = await socket.next("ev", (m) => (m.rejects ?? []).some((r) => r.n === n));
+  const refusal = ev.rejects?.find((r) => r.n === n);
+  assert.deepEqual([refusal?.code, refusal?.message], ["invalid", FAULT_WORDS]);
+  assert.equal(socket.closeCode, null, "the socket stays open");
+}
+
 /** The room still takes an op from `socket` and shows it to `watcher`. */
 async function goesOn(socket: Socket, watcher: Socket, text: string): Promise<void> {
   const n = socket.op({ t: "log.chat", text });
@@ -202,25 +212,56 @@ describe("a fault in the room engine", () => {
   });
   after(() => t.close());
 
-  test("an op that throws after waiting behind a commit closes only its socket, and the ops queued after it apply", async () => {
+  test("an op that throws after waiting behind a commit is refused with its socket open, and the ops queued after it apply", async () => {
     const r = await room(t, "Behind a commit");
     const other = await room(t, "Elsewhere");
     const actor = t.manager.get(r.roomId)!;
     const failing = failCommits(t.pool, Array.from({ length: 1000 }, () => "before" as const));
     let first: number;
     let later: number;
+    let rolled: number;
     try {
       first = r.dm.op({ t: "log.chat", text: "first" });
       await until(() => actor.retrying, "the commit to retry");
       faults.draw = true;
-      r.player.op(roll());
+      rolled = r.player.op(roll());
       later = r.dm.op({ t: "log.chat", text: "later" });
       await until(() => actor.queueLength === 2, "both ops to wait behind the commit");
     } finally {
       failing.restore();
     }
-    assert.equal((await r.player.waitClosed()).code, 1011);
+    await refusedForFault(r.player, rolled);
     await taken(r.dm, first, later);
+    await goesOn(r.player, r.dm, "after the fault");
+    await contained(other);
+  });
+
+  test("the third fault refusal within a minute closes the socket, counted across a reconnect", async () => {
+    const r = await room(t, "Throttled");
+    const other = await room(t, "Elsewhere");
+    const clientId = uuidv7();
+    let last = 0;
+    const reconnect = async (): Promise<Socket> => {
+      const socket = await t.connect(r.roomId, r.playerClient);
+      socket.n = last;
+      await socket.snapshot(clientId, last + 1);
+      return socket;
+    };
+    let socket = await reconnect();
+    faults.draw = true;
+    last = socket.op(roll());
+    await refusedForFault(socket, last);
+    // A new socket of the same device does not start the count again.
+    socket.close();
+    socket = await reconnect();
+    faults.draw = true;
+    last = socket.op(roll());
+    await refusedForFault(socket, last);
+    faults.draw = true;
+    last = socket.op(roll());
+    assert.equal((await socket.waitClosed()).code, 1011);
+    const back = await reconnect();
+    await taken(back, back.op({ t: "log.chat", text: "after the third" }));
     await contained(other);
   });
 
@@ -253,7 +294,7 @@ describe("a fault in the room engine", () => {
     await contained(other);
   });
 
-  test("an op that throws after waiting behind an ask read in turns closes only its socket, and the ops queued after it apply", async () => {
+  test("an op that throws after waiting behind an ask read in turns is refused with its socket open, and the ops queued after it apply", async () => {
     const r = await room(t, "Behind an ask");
     const other = await room(t, "Elsewhere");
     const actor = t.manager.get(r.roomId)!;
@@ -261,30 +302,32 @@ describe("a fault in the room engine", () => {
     faults.growth = "slow";
     let ask: number;
     let later: number;
+    let rolled: number;
     try {
       ask = r.dm.nextN();
       r.dm.send({ t: "op", n: ask, op: { t: "build.ask", sceneId: r.sceneId, ops: paints, part: 0 }, g: uuidv7() });
       await until(() => actor.askState.reading, "the ask to be read");
       faults.draw = true;
-      r.player.op(roll());
+      rolled = r.player.op(roll());
       later = r.dm.op({ t: "log.chat", text: "later" });
       await until(() => actor.queueLength === 2, "both ops to wait behind the ask");
       assert.equal(actor.askState.reading, true, "the ask is still being read");
     } finally {
       faults.growth = "none";
     }
-    assert.equal((await r.player.waitClosed()).code, 1011);
+    await refusedForFault(r.player, rolled);
     await taken(r.dm, ask, later);
     await contained(other);
   });
 
-  test("an ask whose reading throws closes only its socket, and the room's queue goes on", async () => {
+  test("an ask whose reading throws is refused with its socket open, and the room's queue goes on", async () => {
     const r = await room(t, "A failed ask");
     const other = await room(t, "Elsewhere");
     const actor = t.manager.get(r.roomId)!;
     faults.growth = "throw";
-    r.dm.send({ t: "op", n: r.dm.nextN(), op: { t: "build.ask", sceneId: r.sceneId, ops: [{ t: "build.paint", sceneId: r.sceneId, terrain: "wood", cells: ["1,1"] }], part: 0 }, g: uuidv7() });
-    assert.equal((await r.dm.waitClosed()).code, 1011);
+    const ask = r.dm.nextN();
+    r.dm.send({ t: "op", n: ask, op: { t: "build.ask", sceneId: r.sceneId, ops: [{ t: "build.paint", sceneId: r.sceneId, terrain: "wood", cells: ["1,1"] }], part: 0 }, g: uuidv7() });
+    await refusedForFault(r.dm, ask);
     assert.equal(actor.askState.reading, false);
     const n = r.player.op({ t: "log.chat", text: "later" });
     await taken(r.player, n);
@@ -364,23 +407,24 @@ describe("a fault in the room engine", () => {
     assert.deepEqual(escaped, [], "nothing reached the process");
   });
 
-  test("an op that throws after its batch is begun leaves nothing staged, so the room unloads", async () => {
+  test("an op that throws after its batch is begun is refused and leaves nothing else staged, so the room unloads", async () => {
     const r = await room(t, "Begun");
     const other = await room(t, "Elsewhere");
     faults.growth = "unreadable";
-    r.dm.op({ t: "build.paint", sceneId: r.sceneId, terrain: "wood", cells: ["1,1"] });
-    assert.equal((await r.dm.waitClosed()).code, 1011);
+    const paint = r.dm.op({ t: "build.paint", sceneId: r.sceneId, terrain: "wood", cells: ["1,1"] });
+    await refusedForFault(r.dm, paint);
     assert.equal(faults.growth, "none", "the estimate ran");
     await unloads(t, r);
     await contained(other);
   });
 
-  test("an ask whose reading throws after its batch is begun leaves nothing staged, so the room unloads", async () => {
+  test("an ask whose reading throws after its batch is begun is refused and leaves nothing else staged, so the room unloads", async () => {
     const r = await room(t, "Ask begun");
     const other = await room(t, "Elsewhere");
     faults.growth = "unreadable";
-    r.dm.send({ t: "op", n: r.dm.nextN(), op: { t: "build.ask", sceneId: r.sceneId, ops: [{ t: "build.paint", sceneId: r.sceneId, terrain: "wood", cells: ["1,1"] }], part: 0 }, g: uuidv7() });
-    assert.equal((await r.dm.waitClosed()).code, 1011);
+    const ask = r.dm.nextN();
+    r.dm.send({ t: "op", n: ask, op: { t: "build.ask", sceneId: r.sceneId, ops: [{ t: "build.paint", sceneId: r.sceneId, terrain: "wood", cells: ["1,1"] }], part: 0 }, g: uuidv7() });
+    await refusedForFault(r.dm, ask);
     assert.equal(faults.growth, "none", "the estimate ran");
     await unloads(t, r);
     await contained(other);
