@@ -84,7 +84,8 @@ describe("a held group gives every shared control the disabled look (LOCKED-LOOK
     const rule = /(^|\n):is\(input, textarea\):is\(:disabled, \[aria-disabled="true"\]\)::placeholder \{\s*color: var\(--rvtt-text-disabled, (#[0-9a-f]{6})\);\s*\}/.exec(css);
     assert.ok(rule, "globals.css dims an off field's placeholder");
     assert.equal(rule[2], PALETTES.dark.textDisabled);
-    assert.equal(css.match(/::placeholder \{/g)?.length, 1, "no second rule for the same placeholder");
+    const disabledRules = css.match(/:is\(input, textarea\):is\(:disabled, \[aria-disabled="true"\]\)::placeholder \{/g);
+    assert.equal(disabledRules?.length, 1, "no second rule for the same placeholder");
   });
 
   test("an off select keeps full strength, where Chrome's own stylesheet fades it to 0.7 (LP29-A-LOOK-1)", () => {

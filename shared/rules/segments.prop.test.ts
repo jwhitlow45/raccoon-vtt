@@ -50,7 +50,7 @@ describe("the exact wall predicates (property)", () => {
     }
   });
 
-  // The doc comment of orient says "exact for any doubles", which holds only while no product underflows (ORIENT-UNDERFLOW).
+  // The doc comment of orient promises the exact sign only while no product of differences underflows into the subnormal range (ORIENT-UNDERFLOW).
   // Play never gets here, since an eye is stepped off a wall long before it is 1e-100 from the line. This pins the limit so a fix or an upgrade is noticed.
   test("known limit: a coordinate in the subnormal range can break the turn rule, so the properties keep clear of it", () => {
     const o = orient(0, 0, 0, 0.0227, 7.4e-323, -0.0227);

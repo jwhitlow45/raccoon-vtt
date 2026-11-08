@@ -13,9 +13,9 @@ export function guideHref(section?: string): string {
 /**
  * The guide's screenshots are 1280 by 800, a computer's window, except the
  * ones taken on a phone and the table display's, which stops above the
- * pairing QR code so no address shows. The page gives each image its size before it
- * loads, so the text never moves under a reader who followed a link to a
- * section. guide.test.ts reads every file's real size against this.
+ * pairing QR code so no address shows. The page gives each image its size
+ * before it loads, so the text never moves under a reader who followed a link
+ * to a section. guide.test.ts reads every file's real size against this.
  */
 const DEFAULT_SIZE = { width: 1280, height: 800 };
 const PHONE_SIZE = { width: 390, height: 844 };

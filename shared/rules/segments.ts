@@ -63,8 +63,9 @@ export const WALL_MARGIN = 1 / 4096;
  * The exact sign of the cross product (b - a) x (c - a), as long as no
  * product of differences underflows into the subnormal range (below about
  * 2.2e-308). Past that it can break the turn rule, which
- * segments.prop.test.ts pins. Play never gets near it. 1 when c lies clockwise of a to b on the y-down map (counterclockwise in
- * y-up axes), -1 the other way, 0 exactly on the line. Shewchuk's adaptive
+ * segments.prop.test.ts pins. Play never gets near it. 1 when c lies
+ * clockwise of a to b on the y-down map (counterclockwise in y-up axes),
+ * -1 the other way, 0 exactly on the line. Shewchuk's adaptive
  * arithmetic (robust-predicates), which uses only +, - and *. Its own sign
  * convention is the opposite one, hence the flip.
  */

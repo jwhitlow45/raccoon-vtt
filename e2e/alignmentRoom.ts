@@ -10049,7 +10049,7 @@ async function headingRoomLines(field: Locator, list: Locator, screen: string, s
     }
     return found;
   }, box.y + box.height);
-  if (rooms.length < 2) return [`${screen}: ${rooms.length} headings, a DM's list has three`];
+  if (rooms.length < 3) return [`${screen}: ${rooms.length} headings, a DM's list has three`];
   const layout = rooms.map((r) => ({ ...r, room: Math.round((r.room / scale) * 10) / 10 }));
   const least = Math.min(...layout.map((r) => r.room));
   const most = Math.max(...layout.map((r) => r.room));

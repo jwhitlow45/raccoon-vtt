@@ -795,7 +795,8 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await thorn.focus();
     await roll(second, run.thornCharId);
     // The card's header button takes it, so the keyboard stays inside the card (rollFocus.ts).
-    await waitFor("focus on the card's header after its row went", async () => ((await focused(player)) === "inside the card" && (await player.evaluate(() => (globalThis as unknown as PageGlobals).document.activeElement?.tagName)) === "BUTTON" ? true : null));
+    // The header's button is the one labeled to fold the card into a chip, and no answer row's button is.
+    await waitFor("focus on the card's header button after its row went", async () => ((await focused(player)) === "inside the card" && /fold it into a chip/i.test(await activeLabel()) ? true : null));
     await closeAll();
   });
 
