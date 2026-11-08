@@ -434,6 +434,10 @@ async function lineParts(line: Locator): Promise<{ label: LinePart; verdict: Lin
  * row or clipped inside their box, the dice chips included, by the rule the
  * line's fit hides the words by (Roller.tsx ResultRest). None means they had
  * room. The words go back as the fit left them.
+ *
+ * The loop is a copy of partCut in client/features/dice/Roller.tsx, since a
+ * page evaluate runs only the function it is given and cannot import one.
+ * The two change together.
  */
 async function cutByWords(line: Locator): Promise<string[]> {
   return line.evaluate((node) => {
