@@ -643,9 +643,35 @@ newest first.
 
 **Since v0.3.1**
 
+- **Showing players a scene during a blackout**
+  ([design](design/design-v1-qol.md)): change format 49. Lifting a blackout can
+  name the scene the players must still be on, so the DM menu's show-scene
+  item refuses when they have moved. An open page needs no reload.
+- **The music queue** ([design](design/design-v1-music-player.md)): room
+  format 38, change format 48. Until it reloads, an old page drops the queue
+  changes and a run's shuffle.
+- **Turned and stretched videos**
+  ([design](design/design-v1-video-turns.md)): room format 37, change format
+  47. Until it reloads, an old page draws a turned video on its side, and an
+  old DM page takes a turned video's still from its own frame.
+- **Synced music and sound** ([design](design/design-v1-music.md)): room
+  format 36, change format 46. Until it reloads, an old page drops the sound
+  library, the playlists and the playback changes.
+- **Animated maps** ([design](design/design-v1-animated-maps.md)): room
+  format 35, change format 45. Until it reloads, an old page drops a map's
+  video and draws its still.
 - **Placing a token between squares**
   ([design](design/design-v1-snap-off.md)): room format 34,
   change format 44.
+- **Weather** ([design](design/design-v1-weather.md)): room format 33,
+  change format 43. Until it reloads, an old page draws no weather.
+- **The in-game clock** ([design](design/design-v1-calendar.md)): room
+  format 32, change format 42. A fight's end adds its rounds to the clock,
+  and a character's Long Rest stamps when it ended.
+- **Riders on a mount off the grid** ([design](design/design-v1-attach.md)):
+  change format 41. Until it reloads, an old page seats a rider by the
+  mount's stored box, so its drop preview can part from where the rider
+  lands.
 - **Join requests** ([design](design/design-v1-join-requests.md)): no format
   step. The app adds two columns to `rooms` (`join_mode` and
   `player_pw_hash_held`) and the `ask_sessions` table at start, which older
@@ -665,6 +691,16 @@ newest first.
 
 **v0.3.0**
 
+- **Roll bounds on Lucky and Bardic Inspiration**: change format 40. Both
+  are refused where they would take a rolled answer past 100 dice, 20 parts
+  or 100 characters. A roll stored before the update keeps the old bounds, so
+  it still loads. An open page that asks past a bound hears the refusal.
+- **In lair on a token** ([design](design/design-v1-combat-controls.md)): change
+  format 39. A monster placed in its lair takes the tick, and the row's In
+  lair switch keeps it in step on the token. Until it reloads, an old page
+  joins a creature to a fight with a lair tick from its counts alone. Going
+  back needs the backup for a room whose snapshot holds a tick on a token,
+  because an older build would send it to the token's owners.
 - **Dragging in single file**: change format 38. Dragged creatures follow a
   squeezing holder in single file, its passengers sit apart, and a hidden
   creature in tow stands clear of walls. Until it reloads, an old page plans
@@ -691,6 +727,27 @@ newest first.
   Redo gets a "Reload to use Undo" refusal that takes nothing back, and its
   other queued changes that this build still accepts may still arrive. An
   old page shows no Setup history.
+- **Follow-up rules for mounts and traps**: change format 33. A controlled
+  ride reads the players' scene even for rows of characters only, a holder
+  pick checks the revision it is given, and a reminder or a trap counts a
+  center only inside the scene. Reload open pages.
+- **Riders and mounts, in three steps** ([design](design/design-v1-attach.md)):
+  change formats 32, 30 and 29. A rider gets off a mount that straddles two
+  heights on hexes, passengers on a mount that starts its walk squeezed keep
+  their own squares, and a rider on a squeezing mount sits on the hexes the
+  mount stands on. Until it reloads, an old page seats a rider, plans a way
+  down a stair band and searches a rider's way off a mount by the old
+  rules, which the server's moves no longer match.
+- **Typed damage**: change format 31. Hit point damage and group saves carry
+  the incoming parts and the DM's save choices. Until it reloads, an old page
+  has no typed input.
+- **Hex grids, second part** ([design](design/design-v1-hex-grids.md)): room
+  formats 28 and 29, change formats 27 and 28. Walls, difficult ground,
+  traps, links, Reveal room, heights, stairs and pits work on hex scenes.
+  Until it reloads, an old page reads those on a hex scene by squares.
+- **Map discovery** ([design](design/design-v1-map-discovery.md)): room
+  format 27, change format 26. Players' memory of the map starts empty in a
+  room from before it, and the first load marks every scene that was played.
 - **Hex scenes** ([design](design/design-v1-hex-grids.md)): no format step.
   The update adds the settings that make a hex scene (Grid on new scenes,
   the new scene form's Grid row and a scene's Grid shape). Until it reloads,
@@ -707,6 +764,9 @@ newest first.
 - **Hex grids, first part** ([design](design/design-v1-hex-grids.md)):
   room format 25, change format 24. The settings that make a hex scene came
   later, in v0.3.0.
+- **Per-player sight** ([design](design/design-v1-per-player-vision.md)):
+  room format 24, change format 23. A room from before it keeps the whole
+  party's sight on every scene.
 
 **Before v0.1.0**
 
