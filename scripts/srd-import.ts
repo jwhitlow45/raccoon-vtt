@@ -15,7 +15,8 @@ import { trapPresetFacts } from "../shared/srd/traps.ts";
  * monsters.json (every stat block), area-spells.json (spell presets for area
  * templates), save-spells.json (what a pass takes for each spell that deals
  * damage on a save), rules-text.json (the conditions and the statuses the SRD
- * defines, and the environment rules and weapon lists weather's rolls rest on) and xp-budget.json (the encounter XP budget per character). It
+ * defines, and the environment rules and weapon lists weather's rolls rest on) and xp-budget.json (the encounter XP budget per character) and
+ * trinkets.json (the d100 Trinkets table, for the dungeon generator's key). It
  * also checks the Trap tool's presets (shared/srd/traps.ts), which are
  * written by hand, against the SRD's example traps. The hand-written parts, such as summaries and colors, live in
  * conditions.ts and statuses.ts and are never touched here. rolls.json (each
@@ -1466,6 +1467,38 @@ function parseXpBudget(lines: readonly Line[]): XpBudgetRow[] {
 }
 
 // ---------------------------------------------------------------------------
+// Trinkets
+
+/**
+ * The Trinkets table (Character Creation, d100): 100 lines, entry i being the
+ * roll i + 1, with 00 as the last (roll 100). The table runs across a page
+ * break and repeats its header there, and long entries wrap, some at a hyphen
+ * that joinLines rejoins.
+ */
+function parseTrinkets(lines: readonly Line[]): string[] {
+  const title = findLine(lines, 0, (l) => l.text === "1d100 Trinket", "the Trinkets table's header");
+  const end = findLine(lines, title, (l) => l.text === "Classes", "the end of the Trinkets table");
+  const entries: Line[][] = [];
+  for (const line of lines.slice(title + 1, end)) {
+    if (line.text === "1d100 Trinket") continue;
+    if (/^\d\d [A-Z]/.test(line.text)) entries.push([{ ...line, text: line.text }]);
+    else {
+      const last = entries[entries.length - 1];
+      if (!last) throw new Error(`Trinkets line before the first entry: "${line.text}"`);
+      last.push(line);
+    }
+  }
+  if (entries.length !== 100) throw new Error(`expected 100 trinkets, found ${entries.length}`);
+  return entries.map((entry, i) => {
+    const text = joinLines(entry);
+    const roll = (i + 1) % 100;
+    const prefix = `${String(roll).padStart(2, "0")} `;
+    if (!text.startsWith(prefix)) throw new Error(`Trinket ${i + 1} reads "${text}", not roll ${prefix.trim()}`);
+    return text.slice(prefix.length);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Trap presets
 
 /**
@@ -1562,6 +1595,8 @@ function main(): void {
   const rulesText = buildRulesText(lines, spells);
   const xpBudget = parseXpBudget(lines);
   console.log(`XP budget levels: ${xpBudget.length}`);
+  const trinkets = parseTrinkets(lines);
+  console.log(`trinkets: ${trinkets.length}`);
   if (process.argv.includes("--verbose")) {
     const published = JSON.stringify([monsters, rulesText]);
     const used = [...hyphenGuesses].filter((w) => published.includes(w));
@@ -1573,6 +1608,7 @@ function main(): void {
   writeFileSync(new URL("save-spells.json", OUT_DIR), jsonLines(saveSpells));
   writeFileSync(new URL("rules-text.json", OUT_DIR), `${JSON.stringify(rulesText, null, 2)}\n`);
   writeFileSync(new URL("xp-budget.json", OUT_DIR), jsonLines(xpBudget));
+  writeFileSync(new URL("trinkets.json", OUT_DIR), jsonLines(trinkets));
 }
 
 /** A JSON array with one element per line, so a diff shows which entry changed. */
