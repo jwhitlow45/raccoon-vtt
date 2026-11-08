@@ -140,7 +140,8 @@ export type IconName =
   | "foldWidth"
   | "previous"
   | "queue"
-  | "search";
+  | "search"
+  | "floors";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -226,6 +227,7 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   previous: "skip-back",
   queue: "list-music",
   search: "search",
+  floors: "layers",
 };
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -749,6 +751,8 @@ const SHAPES: Record<IconName, ReactNode> = {
       <circle cx="11" cy="11" r="8" />
     </g>
   ),
+  // Lucide layers: a scene's floors (docs/design/design-v1-floors.md 12), on the top bar's Floor, the Floors menu, the Floors group and Move to floor. Never the board's layers, which have no icon.
+  floors: <path {...STROKE} d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83zM2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17" />,
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];
