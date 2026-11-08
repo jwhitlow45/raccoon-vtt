@@ -180,6 +180,45 @@ export function stepActive(active: number, count: number, key: "up" | "down"): n
   return key === "down" ? Math.min(at + 1, count - 1) : Math.max(at - 1, 0);
 }
 
+/**
+ * The highlight, kept as the entry it stands on (LP32-A-SRCH-1). The list is
+ * built again whenever the view, the scene or the selection changes, so a
+ * position would hand Enter whatever row now stands there, such as Bring
+ * everyone here after a co-DM's delete took the armed Move players anyway.
+ * `first` is the first row of what was typed until the viewer has seen it,
+ * and `none` follows an entry whose row left, so Enter runs nothing until
+ * the viewer types or moves.
+ */
+export type Highlight = { t: "first" } | { t: "entry"; id: string } | { t: "none" };
+
+export const FIRST_ROW: Highlight = Object.freeze({ t: "first" });
+const NO_ROW: Highlight = Object.freeze({ t: "none" });
+
+/** Where the highlight stands in the rows, -1 for none. */
+export function highlightAt(highlight: Highlight, rows: readonly Pick<SearchEntry, "id">[]): number {
+  if (highlight.t === "first") return rows.length > 0 ? 0 : -1;
+  if (highlight.t === "none") return -1;
+  return rows.findIndex((row) => row.id === highlight.id);
+}
+
+/** The highlight once the rows changed: none where its entry's row left, so a row that comes back is not run unasked. */
+export function heldHighlight(highlight: Highlight, rows: readonly Pick<SearchEntry, "id">[]): Highlight {
+  return highlight.t === "entry" && highlightAt(highlight, rows) < 0 ? NO_ROW : highlight;
+}
+
+/** The first row held by its entry, once the viewer has seen it. */
+export function pinHighlight(highlight: Highlight, rows: readonly Pick<SearchEntry, "id">[]): Highlight {
+  const first = rows[0];
+  return highlight.t === "first" && first ? { t: "entry", id: first.id } : highlight;
+}
+
+/** The highlight after Up or Down (stepActive). From none, Down starts at the first row and Up at the last. */
+export function stepHighlight(highlight: Highlight, rows: readonly Pick<SearchEntry, "id">[], key: "up" | "down"): Highlight {
+  const at = highlightAt(highlight, rows);
+  const next = rows[at < 0 ? (key === "down" ? 0 : rows.length - 1) : stepActive(at, rows.length, key)];
+  return next ? { t: "entry", id: next.id } : NO_ROW;
+}
+
 // ---------------------------------------------------------------- what a pick does
 
 /** The token panel's Conditions, where a condition's Shift+Enter goes, and Dice, where a dice row's roll shows. */
@@ -509,11 +548,29 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
   const recentIds = useStore(recentStore, (s) => s.ids);
 
   const [text, setText] = useState("");
-  const [active, setActive] = useState(0);
+  const [highlight, setHighlight] = useState<Highlight>(FIRST_ROW);
   const results = useMemo(() => searchResults(index, text, recentIds), [index, text, recentIds]);
   const typed = results.t === "typed";
   const rows: readonly SearchEntry[] = results.t === "typed" ? results.rows : [...results.recent, ...results.suggested];
-  const at = rows.length === 0 ? -1 : Math.min(Math.max(active, 0), rows.length - 1);
+  // An entry whose row left takes the highlight with it, in this render, before Enter can read a row in its place.
+  const held = heldHighlight(highlight, rows);
+  if (held !== highlight) setHighlight(held);
+  const at = highlightAt(held, rows);
+  /*
+   * The first row is held by its entry from the frame that paints it, as
+   * the viewer sees it: a row a load or another device adds above it later
+   * never takes its place. Before that frame the list may still change
+   * unseen, as recent picks do once read, and the first row then is theirs.
+   */
+  const drawnRows = useRef(rows);
+  useLayoutEffect(() => {
+    drawnRows.current = rows;
+  });
+  useEffect(() => {
+    if (highlight.t !== "first" || rows.length === 0) return;
+    const frame = requestAnimationFrame(() => setHighlight((h) => pinHighlight(h, drawnRows.current)));
+    return () => cancelAnimationFrame(frame);
+  }, [highlight, rows]);
   const words = useMemo(() => parseQuery(text).words, [text]);
   const load = loadRows(dm, monsters, typed);
 
@@ -540,6 +597,8 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
   const activeEntry = at >= 0 ? rows[at] : undefined;
   const activeLook = activeEntry ? itemLook(itemOf(activeEntry), asked, said) : null;
   const drawn = new Set(rows.flatMap((entry) => (entry.act.t === "item" && itemOf(entry) ? [entry.act.itemId] : [])));
+  // An item that asked first and then left the list is no longer armed, so its row coming back runs nothing unasked.
+  if (asked !== null && !drawn.has(asked.id)) setAsked(null);
   const stranded = strandedRefusal(latest, said, drawn);
   const rowSays = activeLook?.under?.text ?? stranded;
   const [status, setStatus] = useState("");
@@ -658,7 +717,7 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
 
   const change = (next: string) => {
     setText(next);
-    setActive(0);
+    setHighlight(FIRST_ROW);
     setAsked(null);
     setLatest(null);
   };
@@ -671,8 +730,12 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
     if (key === "close") close();
     else if (key === "up" || key === "down") {
       setAsked(null);
-      setActive(stepActive(at, rows.length, key));
-    } else if (activeEntry) pick(activeEntry, key === "goOnly");
+      setHighlight(stepHighlight(held, rows, key));
+    } else if (activeEntry) {
+      // Picked, the row is held by its entry, so an armed item's second Enter finds it however the list moves meanwhile.
+      setHighlight({ t: "entry", id: activeEntry.id });
+      pick(activeEntry, key === "goOnly");
+    }
   };
 
   const renderRow = (entry: SearchEntry, i: number) => {
@@ -690,11 +753,11 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
         onHover={() => {
           if (i !== at) {
             setAsked(null);
-            setActive(i);
+            setHighlight({ t: "entry", id: entry.id });
           }
         }}
         onPick={() => {
-          setActive(i);
+          setHighlight({ t: "entry", id: entry.id });
           pick(entry, false);
         }}
       />

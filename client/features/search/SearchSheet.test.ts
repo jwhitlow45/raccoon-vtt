@@ -34,6 +34,11 @@ const {
   sheetKey,
   statusWords,
   stepActive,
+  FIRST_ROW,
+  heldHighlight,
+  highlightAt,
+  pinHighlight,
+  stepHighlight,
   strandedRefusal,
   RefusalLine,
   BAR_FIELD_PX,
@@ -232,6 +237,27 @@ describe("keys inside the search (design-v1-qol.md 5, Keys)", () => {
     assert.equal(stepActive(7, 3, "up"), 1, "a highlight past a list that shrank");
     assert.equal(stepActive(-1, 3, "down"), 1);
     assert.equal(stepActive(0, 0, "down"), -1);
+  });
+
+  test("the highlight is its entry, so a row that enters or leaves above it never hands Enter another, and once its own row leaves none is highlighted (LP32-A-SRCH-1)", () => {
+    const rows = (...ids: string[]) => ids.map((id) => ({ id }));
+    const armed = rows("item:movePlayers", "action:dm.bring", "scene:hall");
+    // Typed, the first row is highlighted until the viewer has seen the list, then held by its entry.
+    assert.equal(highlightAt(FIRST_ROW, armed), 0);
+    const held = pinHighlight(FIRST_ROW, armed);
+    assert.deepEqual(held, { t: "entry", id: "item:movePlayers" });
+    assert.equal(highlightAt(held, rows("token:new", "item:movePlayers")), 1, "a row came in above it");
+    // A co-DM deleted the scene: the armed item's row left, and Bring everyone here now stands first.
+    const after = rows("action:dm.bring", "scene:hall");
+    assert.deepEqual(heldHighlight(held, after), { t: "none" });
+    assert.equal(highlightAt(heldHighlight(held, after), after), -1, "Enter finds no row to run");
+    assert.equal(heldHighlight(held, armed), held, "kept while its row is drawn");
+    // From no highlight, Down starts at the first row and Up at the last.
+    assert.deepEqual(stepHighlight({ t: "none" }, after, "down"), { t: "entry", id: "action:dm.bring" });
+    assert.deepEqual(stepHighlight({ t: "none" }, after, "up"), { t: "entry", id: "scene:hall" });
+    assert.deepEqual(stepHighlight(held, armed, "down"), { t: "entry", id: "action:dm.bring" });
+    assert.deepEqual(stepHighlight(held, rows(), "down"), { t: "none" });
+    assert.equal(pinHighlight(FIRST_ROW, rows()), FIRST_ROW, "nothing to hold yet");
   });
 });
 

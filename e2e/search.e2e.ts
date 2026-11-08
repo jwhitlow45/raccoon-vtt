@@ -770,6 +770,43 @@ describe("the room search", { concurrency: false }, () => {
     }
   });
 
+  test("lp32-1. a co-DM deletes the scene while Move players anyway is armed: the list built again highlights no row, Enter sends nothing and runs nothing, and Down highlights the first row again (LP32-A-SRCH-1)", async () => {
+    await movePlayersTo(run.mat);
+    const routed = await routedDm();
+    const page = routed.page;
+    const open = randomUUID();
+    try {
+      await ops.send({ t: "scene.create", scene: { id: open, name: "Open field", bounds: { w: 10, h: 10 }, fogEnabled: false } });
+      await viewScene(page, open);
+      await openSearch(page);
+      await typeFor(page, "move players here", "item:movePlayers");
+      assert.equal(await row(page, "item:movePlayers").getAttribute("aria-selected"), "true", "the move is the first row");
+      await page.keyboard.press("Enter");
+      await row(page, "item:movePlayers").getByText("Move players anyway").waitFor();
+      await shots.take(page, "lp32-1-armed");
+      const from = routed.sent.length;
+      await ops.send({ t: "scene.delete", sceneId: open });
+      // The DM's camera leaves the deleted scene for the players', where the menu's item is Bring everyone here.
+      await row(page, "item:movePlayers").waitFor({ state: "detached" });
+      await row(page, "item:bringEveryone").waitFor();
+      await shots.take(page, "lp32-1-rebuilt");
+      assert.equal(await sheet(page).locator('[aria-selected="true"]').count(), 0, "a row the DM never picked is highlighted");
+      assert.equal(await field(page).getAttribute("aria-activedescendant"), null, "the field names a row the DM never picked");
+      await page.keyboard.press("Enter");
+      await settle(page);
+      const frames = routed.sent.slice(from).filter((f) => /^\{"t":"(op|eph)"/.test(f));
+      assert.deepEqual(frames, [], "Enter ran a row the DM never picked");
+      assert.equal(await page.getByText("Players' maps moved to what you see now.").count(), 0, "Bring everyone here ran");
+      assert.equal(await sheet(page).count(), 1, "the search closed as if a row ran");
+      await page.keyboard.press("ArrowDown");
+      assert.equal(await sheet(page).locator('[aria-selected="true"]').count(), 1, "Down highlights no row");
+      assert.equal(await sheet(page).locator('[aria-selected="true"]').getAttribute("data-search-at"), "0", "Down starts at the first row");
+    } finally {
+      await ops.send({ t: "scene.delete", sceneId: open }).catch(() => {});
+      await routed.context.close();
+    }
+  });
+
   test("se-6. Show players <scene> refused: the row says why and the blackout stays on, a refusal after Escape is the room's toast, and a co-DM deleting the scene meanwhile leaves the blackout on", async () => {
     await movePlayersTo(run.mat);
     const routed = await routedDm();
