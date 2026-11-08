@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { fightStarted } from "#shared/calendar.ts";
 import { CONDITION_KEYS, STATUS_KEYS, type ConditionKey, type Effect, type StatusKey } from "#shared/model.ts";
 import { MAX_EFFECT_LEVEL, type ActorTarget, type ClientOp, type EffectInput } from "#shared/protocol.ts";
 import { CONDITIONS, EXHAUSTION_MAX_LEVEL } from "#shared/srd/conditions.ts";
@@ -20,13 +21,19 @@ import {
   DURATION_MODES,
   MAX_ROUNDS,
   SELF_KEY,
+  SPAN_MODES,
+  SPAN_UNITS,
   anchorOptions,
   describeDuration,
+  describeEnds,
   durationInput,
   emptyForm,
+  isSpanMode,
+  spanSeconds,
   type DurationForm,
   type DurationMode,
   type SelfRef,
+  type SpanUnit,
 } from "./durations.ts";
 import { EffectIcon } from "./EffectIcon.tsx";
 import { SaveEndsFields, sameSave, saveEndsForm, saveEndsText, saveOf } from "./SaveEndsFields.tsx";
@@ -154,9 +161,9 @@ export function EffectsSection(props: {
                   <EffectIcon effect={effect} />
                   <span style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
                     <span style={{ display: "block", fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight, fontVariantNumeric: "tabular-nums" }}>{effectChip(effect).label}</span>
-                    {effect.duration ? (
+                    {effect.duration || effect.ends ? (
                       <span style={{ ...UNDER_NAME, fontSize: theme.font.small, color: theme.color.textMuted }}>
-                        {describeDuration(view, effect.duration)}
+                        {effect.duration ? describeDuration(view, effect.duration) : describeEnds(view, effect.ends!)}
                       </span>
                     ) : null}
                     {effect.hiddenFromPlayers ? (
@@ -333,6 +340,8 @@ function EffectDetail(props: {
   const [durationTouched, setDurationTouched] = useState(!existing);
   const [rulesOpen, setRulesOpen] = useState(!canEdit);
   const [error, setError] = useState<string | null>(null);
+  /** Under Other length of time's fields, so a screen reader reads it with them. */
+  const [spanError, setSpanError] = useState<string | null>(null);
   // Only its button sends the effect, so a sheet's swipe springs back once anything in the form changed (docs/design/design-v1-sheet-swipe.md 4.5).
   useUnsavedSince({ level, counter, spell, label, glyph, color, hidden, triggerShown, form, saveForm });
 
@@ -342,6 +351,12 @@ function EffectDetail(props: {
   const submit = () => {
     if (key === "custom" && !label.trim() && !glyph.trim()) {
       setError("Give the status a label or a glyph.");
+      return;
+    }
+    // An untouched duration sends nothing, so an Other length left half typed on a form never opened stays quiet.
+    const span = durationTouched ? spanSeconds(form) : null;
+    if (span && !span.ok) {
+      setSpanError(span.reason);
       return;
     }
     const duration = durationInput(form, options);
@@ -381,7 +396,7 @@ function EffectDetail(props: {
       }
       if (durationTouched) {
         if (duration) patch.duration = duration;
-        else if (existing.duration) patch.duration = null;
+        else if (existing.duration || existing.ends) patch.duration = null;
       }
       if (dm && hidden !== (existing.hiddenFromPlayers ?? false)) patch.hiddenFromPlayers = hidden;
       if (dm && key === "readied" && triggerShown !== (existing.triggerShown ?? false)) patch.triggerShown = triggerShown;
@@ -437,6 +452,7 @@ function EffectDetail(props: {
         </div>
       ) : null}
       {existing?.duration ? <Note tone="info">{describeDuration(view, existing.duration)}</Note> : null}
+      {existing?.ends ? <Note tone="info">{describeEnds(view, existing.ends)}</Note> : null}
       {existing?.save && !(dm && canEdit) ? <Note tone="info">{saveEndsText(existing.save)}</Note> : null}
 
       {canEdit ? (
@@ -529,8 +545,11 @@ function EffectDetail(props: {
             onChange={(f) => {
               setForm(f);
               setDurationTouched(true);
+              setSpanError(null);
             }}
-            hint={existing?.duration && !durationTouched ? "Leave as is to keep the current count." : undefined}
+            spans={!!view?.clock}
+            hint={durationHint({ existing, touched: durationTouched, dm, clock: view?.clock, encounter: view?.encounter })}
+            spanError={spanError}
           />
           {error ? <Note tone="error">{error}</Note> : null}
           <div style={{ display: "flex", gap: theme.space(2) }}>
@@ -551,20 +570,49 @@ function EffectDetail(props: {
 }
 
 const MODE_OPTIONS = DURATION_MODES.map((m) => ({ value: m.mode, label: m.label }));
+const SPAN_OPTIONS = SPAN_MODES.map((m) => ({ value: m.mode as DurationMode, label: m.label }));
+
+/** The help under Duration: what keeping a count does, and what the clock means for a time span (docs/design/design-v1-calendar-c2c3.md 3.1). */
+function durationHint(o: {
+  existing: Effect | undefined;
+  touched: boolean;
+  dm: boolean;
+  clock: { shown?: boolean } | null | undefined;
+  encounter: Parameters<typeof fightStarted>[0];
+}): string | undefined {
+  const lines: string[] = [];
+  if (o.existing && !o.touched) {
+    if (o.existing.duration) lines.push("Leave as is to keep the current count.");
+    else if (o.existing.ends) lines.push("Leave as is to keep its end.");
+  }
+  if (!o.clock) {
+    if (o.dm) lines.push("Start the clock in Time to count minutes and hours.");
+  } else {
+    if (fightStarted(o.encounter)) lines.push("A length of time ends at the start of the round it reaches. N rounds ends on a creature's turn.");
+    if (o.dm && o.clock.shown === false) lines.push("Players don't see the date and time, but they see how long this lasts and when it ends.");
+  }
+  return lines.length > 0 ? lines.join(" ") : undefined;
+}
 
 export function DurationFields(props: {
   form: DurationForm;
   options: { key: string; label: string }[];
   onChange(form: DurationForm): void;
   hint?: string;
+  /** Whether the viewer's room view holds a clock, so the time spans are listed. */
+  spans?: boolean;
+  /** Why Other length of time's fields hold no time span, linked to them. */
+  spanError?: string | null;
 }) {
   const { form } = props;
+  const errorId = useId();
+  const modes = props.spans || isSpanMode(form.mode) ? [...MODE_OPTIONS, ...SPAN_OPTIONS] : MODE_OPTIONS;
   return (
     <div style={{ display: "grid", gap: theme.space(1) }}>
       <FieldRow label="Duration" fill hint={props.hint}>
-        <Select<DurationMode> label="Duration" value={form.mode} options={MODE_OPTIONS} onChange={(mode) => props.onChange({ ...form, mode })} />
+        <Select<DurationMode> label="Duration" value={form.mode} options={modes} onChange={(mode) => props.onChange({ ...form, mode })} />
       </FieldRow>
-      {form.mode !== "none" ? (
+      {form.mode !== "none" && !isSpanMode(form.mode) ? (
         <FieldRow label={form.mode === "rounds" ? "Counted on" : "X is"} fill>
           <Select<string>
             label={form.mode === "rounds" ? "Counted on whose turns" : "Whose turn"}
@@ -578,6 +626,31 @@ export function DurationFields(props: {
         <FieldRow label="Rounds">
           <NumberField label="Rounds" value={form.rounds} min={1} max={MAX_ROUNDS} onCommit={(n) => n !== null && props.onChange({ ...form, rounds: n })} />
         </FieldRow>
+      ) : null}
+      {form.mode === "spanOther" ? (
+        <>
+          {/* The number and its unit share a line that wraps only where the sheet is narrower than 300 px of content. */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2), alignItems: "center" }}>
+            <Input
+              type="text"
+              inputMode="numeric"
+              aria-label="Length"
+              aria-describedby={props.spanError ? errorId : undefined}
+              value={form.length}
+              error={props.spanError != null}
+              onChange={(e) => props.onChange({ ...form, length: e.target.value })}
+              style={{ flex: "1 1 120px", minWidth: 0, textAlign: "right" }}
+            />
+            <div style={{ flex: "1 1 140px", minWidth: 0 }}>
+              <Select<SpanUnit> label="Unit" value={form.unit} options={SPAN_UNITS} onChange={(unit) => props.onChange({ ...form, unit })} />
+            </div>
+          </div>
+          {props.spanError ? (
+            <p id={errorId} style={{ margin: 0, fontSize: theme.font.small, color: theme.color.dangerText }}>
+              {props.spanError}
+            </p>
+          ) : null}
+        </>
       ) : null}
     </div>
   );

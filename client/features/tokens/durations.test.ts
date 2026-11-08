@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState } from "#shared/model.ts";
-import { clientOpSchema } from "#shared/protocol.ts";
+import { clientOpSchema, type TurnDurationInput } from "#shared/protocol.ts";
 import { resolveDuration } from "#shared/rules/durations.ts";
 import { apply, character, entry, room, token } from "#shared/testutil.ts";
 import {
@@ -9,8 +9,11 @@ import {
   anchorOptions,
   defaultAnchorKey,
   describeDuration,
+  describeEnds,
   durationInput,
   emptyForm,
+  spanLength,
+  spanWords,
   type DurationForm,
 } from "./durations.ts";
 
@@ -48,7 +51,7 @@ describe("duration form options", () => {
     state.tokens.ws = token("ws", { kind: "npc", name: "Wildfire Spirit", companion: { of: "hero", turn: "shared" } });
     const options = anchorOptions(state, { tokenId: "ws" }, "Wildfire Spirit");
     assert.equal(options[0]!.label, "Wildfire Spirit (on Thorn's turn)");
-    const input = durationInput({ mode: "turnEnd", rounds: 1, anchorKey: SELF_KEY }, options)!;
+    const input = durationInput({ ...emptyForm(null, options), mode: "turnEnd", rounds: 1, anchorKey: SELF_KEY }, options) as TurnDurationInput;
     assert.deepEqual(resolveDuration(state, input).anchor, { entryId: "e-pc" });
     state.tokens.ws = { ...state.tokens.ws!, companion: { of: "hero", turn: "own" } };
     assert.equal(anchorOptions(state, { tokenId: "ws" }, "Wildfire Spirit")[0]!.label, "Wildfire Spirit (this creature)");
@@ -83,14 +86,14 @@ describe("duration form options", () => {
     assert.equal(defaultAnchorKey(state, forPc), "entry:e-g1");
     const forG1 = anchorOptions(state, { tokenId: "g1" }, "Goblin 1");
     assert.equal(defaultAnchorKey(state, forG1), SELF_KEY);
-    assert.deepEqual(emptyForm(state, forPc), { mode: "none", rounds: 10, anchorKey: "entry:e-g1" });
+    assert.deepEqual(emptyForm(state, forPc), { mode: "none", rounds: 10, anchorKey: "entry:e-g1", length: "", unit: "hours" });
   });
 });
 
 describe("duration form to op input", () => {
   const state = fixture(true);
   const options = anchorOptions(state, { tokenId: "pc" }, "Thorn");
-  const form = (patch: Partial<DurationForm>): DurationForm => ({ mode: "none", rounds: 10, anchorKey: SELF_KEY, ...patch });
+  const form = (patch: Partial<DurationForm>): DurationForm => ({ mode: "none", rounds: 10, anchorKey: SELF_KEY, length: "", unit: "hours", ...patch });
 
   test("each mode", () => {
     assert.equal(durationInput(form({}), options), null);
@@ -129,10 +132,10 @@ describe("duration form to op input", () => {
       }
     }
     // "End of X's next turn" during X's own turn needs two crossings.
-    const duringOwnTurn = resolveDuration(state, durationInput(form({ mode: "turnEnd", anchorKey: "entry:e-g1" }), options)!);
+    const duringOwnTurn = resolveDuration(state, durationInput(form({ mode: "turnEnd", anchorKey: "entry:e-g1" }), options) as TurnDurationInput);
     assert.deepEqual(duringOwnTurn, { remaining: 2, boundary: "turnEnd", anchor: { entryId: "e-g1" } });
     // The PC's own row is found through the token.
-    const self = resolveDuration(state, durationInput(form({ mode: "rounds", rounds: 3 }), options)!);
+    const self = resolveDuration(state, durationInput(form({ mode: "rounds", rounds: 3 }), options) as TurnDurationInput);
     assert.deepEqual(self, { remaining: 3, boundary: "turnStart", anchor: { entryId: "e-pc" } });
   });
 });
@@ -191,5 +194,67 @@ describe("describing a stored duration", () => {
     });
     const effect = (state.tokens.g1!.actor as { inline: { effects: { duration?: unknown }[] } }).inline.effects[0]!;
     assert.match(describeDuration(state, effect.duration as never), /paused \(outside combat\)$/);
+  });
+});
+
+describe("time spans", () => {
+  const options = anchorOptions(fixture(false), { tokenId: "pc" }, "Thorn");
+  const form = (patch: Partial<DurationForm>): DurationForm => ({ ...emptyForm(null, options), ...patch });
+  const calendar = { kind: "days" } as const;
+  const hours = (n: number) => n * 3_600;
+  const at = (day: number, h: number, m = 0) => (day - 1) * 86_400 + hours(h) + m * 60;
+
+  test("each fixed choice and Other send a span the protocol takes", () => {
+    const sent = [
+      [form({ mode: "span60" }), 60],
+      [form({ mode: "span600" }), 600],
+      [form({ mode: "span3600" }), 3_600],
+      [form({ mode: "span28800" }), 28_800],
+      [form({ mode: "span86400" }), 86_400],
+      [form({ mode: "spanOther", length: "90", unit: "minutes" }), 5_400],
+      [form({ mode: "spanOther", length: "365", unit: "days" }), 365 * 86_400],
+    ] as const;
+    for (const [f, seconds] of sent) {
+      const duration = durationInput(f, options);
+      assert.deepEqual(duration, { mode: "span", seconds });
+      const op = { t: "actor.effect.add", target: { tokenId: "pc" }, effect: { id: "x", key: "blessed", duration } };
+      assert.ok(clientOpSchema.safeParse(op).success, String(seconds));
+    }
+  });
+
+  test("Other holds a whole length from 1 minute to 365 days, and says so", () => {
+    for (const [length, unit] of [["", "hours"], ["0", "minutes"], ["1.5", "hours"], ["-2", "hours"], ["366", "days"], ["525601", "minutes"], ["abc", "days"]] as const) {
+      assert.deepEqual(spanLength(length, unit), { ok: false, reason: "Pick a length from 1 minute to 365 days." }, `${length} ${unit}`);
+    }
+    assert.deepEqual(spanLength(" 1 ", "minutes"), { ok: true, seconds: 60 });
+    assert.deepEqual(spanLength("525600", "minutes"), { ok: true, seconds: 365 * 86_400 });
+    assert.equal(durationInput(form({ mode: "spanOther", length: "400", unit: "days" }), options), null);
+  });
+
+  test("the length reads as the picker names it", () => {
+    assert.deepEqual([60, 600, 3_600, 28_800, 86_400, 5_400, 7_200, 172_800, 31_536_000].map(spanWords), [
+      "1 minute", "10 minutes", "1 hour", "8 hours", "24 hours", "90 minutes", "2 hours", "2 days", "365 days",
+    ]);
+  });
+
+  test("outside a fight it names the end and the time left, with the date when the end is another day", () => {
+    const clock = { id: "c1", t: at(5, 6, 12), calendar };
+    assert.equal(describeEnds({ clock }, { span: 3_600, at: at(5, 7), clock: "c1" }), "Lasts 1 hour, to 7:00 AM (48 minutes left)");
+    assert.equal(describeEnds({ clock: { ...clock, t: at(5, 19) } }, { span: hours(8), at: at(6, 3), clock: "c1" }), "Lasts 8 hours, to Day 6, 3:00 AM (8 hours left)");
+    assert.equal(describeEnds({ clock: { ...clock, t: at(5, 6, 30) } }, { span: 60, at: at(5, 6, 30) + 20, clock: "c1" }), "Lasts 1 minute, to 6:30 AM (1 minute left)");
+  });
+
+  test("in a started fight it names the round it ends at the start of", () => {
+    const encounter = { rev: 0, round: 3, activeEntryId: "e-pc", entries: [] };
+    // Round 3 is 12 s in, so a clock at t = 0 reads 12 and a 60 s span set then ends at 72 s, the start of round 13.
+    assert.equal(describeEnds({ clock: { id: "c1", t: 0, calendar }, encounter }, { span: 60, at: 72, clock: "c1" }), "Lasts 1 minute, to the start of round 13");
+    assert.equal(describeEnds({ clock: { id: "c1", t: 0, calendar }, encounter }, { span: 60, at: 73, clock: "c1" }), "Lasts 1 minute, to the start of round 14");
+  });
+
+  test("a copy with no end reads the length alone, and a clock that stopped or was replaced says so", () => {
+    assert.equal(describeEnds(null, { span: 3_600 }), "Lasts 1 hour");
+    assert.equal(describeEnds({ clock: { id: "c1", t: 0, calendar } }, { span: 3_600 }), "Lasts 1 hour");
+    assert.equal(describeEnds({ clock: null }, { span: 3_600, at: 3_600, clock: "c1" }), "Lasts 1 hour, on a clock that stopped");
+    assert.equal(describeEnds({ clock: { id: "c2", t: 0, calendar } }, { span: 3_600, at: 3_600, clock: "c1" }), "Lasts 1 hour, on a clock that stopped");
   });
 });

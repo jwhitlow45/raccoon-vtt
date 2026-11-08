@@ -1,5 +1,7 @@
-import type { DurationAnchor, Effect, RoomState } from "#shared/model.ts";
-import type { TurnDurationInput } from "#shared/protocol.ts";
+import { clockNow, DAY_SECONDS, dateText, fightStarted, ROUND_SECONDS, timeText } from "#shared/calendar.ts";
+import { LIMITS } from "#shared/limits.ts";
+import type { DurationAnchor, Effect, EffectEnds, RoomClock, RoomState } from "#shared/model.ts";
+import type { DurationInput } from "#shared/protocol.ts";
 import { displayName } from "../../lib/scene.ts";
 
 /**
@@ -10,9 +12,19 @@ import { displayName } from "../../lib/scene.ts";
  * only builds the input and later describes what was stored.
  */
 
-export type DurationMode = "none" | "turnStart" | "turnEnd" | "rounds";
+/** The fixed time spans are modes of their own, named by their seconds, so the Duration select lists them in one run (docs/design/design-v1-calendar-c2c3.md 3.1). */
+export type SpanMode = "span60" | "span600" | "span3600" | "span28800" | "span86400" | "spanOther";
+export type DurationMode = "none" | "turnStart" | "turnEnd" | "rounds" | SpanMode;
+export type SpanUnit = "minutes" | "hours" | "days";
 
-export type DurationForm = { mode: DurationMode; rounds: number; anchorKey: string };
+export type DurationForm = {
+  mode: DurationMode;
+  rounds: number;
+  anchorKey: string;
+  /** Other length of time: the number as typed, and its unit. */
+  length: string;
+  unit: SpanUnit;
+};
 
 export type AnchorOption = { key: string; label: string; anchor: DurationAnchor };
 
@@ -30,6 +42,50 @@ export const DURATION_MODES: readonly { mode: DurationMode; label: string }[] = 
   { mode: "turnEnd", label: "Until the end of X's next turn" },
   { mode: "rounds", label: "N rounds" },
 ];
+
+/** The time spans, listed after the turn choices while the viewer's room view holds a clock. */
+export const SPAN_MODES: readonly { mode: SpanMode; label: string; seconds: number }[] = [
+  { mode: "span60", label: "1 minute", seconds: 60 },
+  { mode: "span600", label: "10 minutes", seconds: 600 },
+  { mode: "span3600", label: "1 hour", seconds: 3_600 },
+  { mode: "span28800", label: "8 hours", seconds: 28_800 },
+  { mode: "span86400", label: "24 hours", seconds: DAY_SECONDS },
+  { mode: "spanOther", label: "Other length of time", seconds: 0 },
+];
+
+export function isSpanMode(mode: DurationMode): mode is SpanMode {
+  return mode.startsWith("span");
+}
+
+export const SPAN_UNITS: readonly { value: SpanUnit; label: string; seconds: number }[] = [
+  { value: "minutes", label: "Minutes", seconds: 60 },
+  { value: "hours", label: "Hours", seconds: 3_600 },
+  { value: "days", label: "Days", seconds: DAY_SECONDS },
+];
+
+export const SPAN_RANGE = "Pick a length from 1 minute to 365 days.";
+
+/** Other length of time: the seconds a count of a unit makes, or why it is not a time span. */
+export function spanLength(text: string, unit: SpanUnit): { ok: true; seconds: number } | { ok: false; reason: string } {
+  const trimmed = text.trim();
+  if (!/^\d{1,9}$/.test(trimmed)) return { ok: false, reason: SPAN_RANGE };
+  const seconds = Number(trimmed) * SPAN_UNITS.find((u) => u.value === unit)!.seconds;
+  return seconds >= 60 && seconds <= LIMITS.effectSpanMax ? { ok: true, seconds } : { ok: false, reason: SPAN_RANGE };
+}
+
+/** What the form's time span asks for, or null while the form holds a turn choice. */
+export function spanSeconds(form: DurationForm): ReturnType<typeof spanLength> | null {
+  if (!isSpanMode(form.mode)) return null;
+  if (form.mode === "spanOther") return spanLength(form.length, form.unit);
+  return { ok: true, seconds: SPAN_MODES.find((m) => m.mode === form.mode)!.seconds };
+}
+
+/** "1 minute", "90 minutes", "8 hours", "24 hours", "2 days": the length as the picker names it. */
+export function spanWords(seconds: number): string {
+  const [n, unit] =
+    seconds > DAY_SECONDS && seconds % DAY_SECONDS === 0 ? [seconds / DAY_SECONDS, "day"] : seconds % 3_600 === 0 ? [seconds / 3_600, "hour"] : [seconds / 60, "minute"];
+  return `${n} ${unit}${n === 1 ? "" : "s"}`;
+}
 
 /** A name for whoever an anchor points at, from this viewer's own projection. */
 export function anchorName(view: View | null | undefined, anchor: DurationAnchor): string {
@@ -111,11 +167,19 @@ export function defaultAnchorKey(view: View | null | undefined, options: AnchorO
 }
 
 export function emptyForm(view: View | null | undefined, options: AnchorOption[]): DurationForm {
-  return { mode: "none", rounds: 10, anchorKey: defaultAnchorKey(view, options) };
+  return { mode: "none", rounds: 10, anchorKey: defaultAnchorKey(view, options), length: "", unit: "hours" };
 }
 
-/** The op's duration input, or null for "No duration". An unknown anchor falls back to the creature itself. */
-export function durationInput(form: DurationForm, options: AnchorOption[]): TurnDurationInput | null {
+/**
+ * The op's duration input, or null for "No duration". An unknown anchor
+ * falls back to the creature itself. An Other length that is not a time
+ * span also gives null, and the form refuses it first (`spanSeconds`).
+ */
+export function durationInput(form: DurationForm, options: AnchorOption[]): DurationInput | null {
+  if (isSpanMode(form.mode)) {
+    const span = spanSeconds(form);
+    return span?.ok ? { mode: "span", seconds: span.seconds } : null;
+  }
   const option = options.find((o) => o.key === form.anchorKey) ?? options.find((o) => o.key === SELF_KEY);
   if (!option || form.mode === "none") return null;
   const of = option.anchor;
@@ -129,6 +193,7 @@ export function durationInput(form: DurationForm, options: AnchorOption[]): Turn
       return { mode: "rounds", rounds, of };
     }
   }
+  return null;
 }
 
 export function isPaused(duration: NonNullable<Effect["duration"]>): boolean {
@@ -155,4 +220,32 @@ export function describeDuration(view: View | null | undefined, duration: NonNul
     text = `Ends after ${r} more of ${who}'s turns`;
   }
   return isPaused(duration) ? `${text}, paused (outside combat)` : text;
+}
+
+type EndsView = { clock?: Pick<RoomClock, "id" | "t" | "calendar"> | null | undefined; encounter?: RoomState["encounter"] | null | undefined };
+
+/** "48 minutes left": the time to the end, rounded up to the unit it reads in. */
+function timeLeft(seconds: number): string {
+  const [n, unit] = seconds < 3_600 ? [Math.ceil(seconds / 60), "minute"] : seconds < DAY_SECONDS ? [Math.ceil(seconds / 3_600), "hour"] : [Math.ceil(seconds / DAY_SECONDS), "day"];
+  return `${n} ${unit}${n === 1 ? "" : "s"} left`;
+}
+
+/**
+ * A time span in words (docs/design/design-v1-calendar-c2c3.md 3.2). Outside a
+ * fight it names the end and the time left, in a started fight the round it
+ * ends at the start of, and a copy with no end (a player whose view holds no
+ * clock) only the length. An end on a clock that stopped or was replaced
+ * never comes by itself, which the DM's copy says.
+ */
+export function describeEnds(view: EndsView | null | undefined, ends: EffectEnds): string {
+  const lasts = `Lasts ${spanWords(ends.span)}`;
+  if (ends.at === undefined) return lasts;
+  const clock = view?.clock;
+  if (!clock || clock.id !== ends.clock) return `${lasts}, on a clock that stopped`;
+  const encounter = view?.encounter;
+  const now = clockNow(clock, encounter);
+  if (encounter && fightStarted(encounter)) return `${lasts}, to the start of round ${encounter.round + Math.ceil((ends.at - now) / ROUND_SECONDS)}`;
+  const sameDay = Math.floor(ends.at / DAY_SECONDS) === Math.floor(now / DAY_SECONDS);
+  const to = sameDay ? timeText(ends.at) : `${dateText(ends.at, clock.calendar, "short")}, ${timeText(ends.at)}`;
+  return `${lasts}, to ${to} (${timeLeft(Math.max(0, ends.at - now))})`;
 }
