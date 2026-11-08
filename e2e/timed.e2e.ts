@@ -224,6 +224,7 @@ describe("time spans on effects", () => {
     ]);
     await duration.selectOption({ label: "8 hours" });
     assert.equal(await section.getByLabel("Whose turn", { exact: true }).count(), 0, "a time span counts the clock, so it names no creature");
+    await duration.scrollIntoViewIfNeeded();
     await shots.take(dm, "tm-1-span-picker");
     await finishAdd(section);
     await section.getByText("Lasts 8 hours, to Day 2, 6:00 AM (8 hours left)", { exact: true }).waitFor();
@@ -245,6 +246,7 @@ describe("time spans on effects", () => {
     await shots.take(dm, "tm-1-other-refused");
     await length.fill("90");
     await section.getByRole("combobox", { name: "Unit", exact: true }).selectOption({ label: "Minutes" });
+    await length.scrollIntoViewIfNeeded();
     await shots.take(dm, "tm-1-other-row");
     await finishAdd(section);
     await section.getByText(/^Lasts 90 minutes, to 11:30 PM/).waitFor();

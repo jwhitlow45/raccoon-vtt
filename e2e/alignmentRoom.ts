@@ -6974,6 +6974,144 @@ export function clockTests(): void {
     }
     assert.deepEqual(lines, [], "Pat's Time, Sound or the chip out of line");
   });
+
+  test(`ck-c. time spans: the add form with its Duration choices and the Other row refused, an effect row reading its end in and out of a fight for the DM and for Pat, the display's date and time chip, and a step that ends an effect with the notice showing, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+    const lines: string[] = [];
+    try {
+      await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(atName(at));
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, at.size, at.scale);
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        await timedScreens(sweep, page, "dm");
+        if (at.size.width === 1440) {
+          await displayChipScreen(sweep, at.scale);
+        }
+        lines.push(...sweep.lines);
+      }
+      // Pat's session may load the room only so often in a minute, and the test before spent its loads.
+      await pat.waitForTimeout(65_000);
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(atName(at));
+        pat.setDefaultTimeout(10_000);
+        await openAt(pat, at.size, at.scale);
+        await timedScreens(sweep, pat, "pat");
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      await pat.goto("about:blank").catch(() => {});
+      if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" }).catch(() => {});
+      if (dmSocket.state?.clock) await ops.send({ t: "clock.stop" }).catch(() => {});
+    }
+    assert.deepEqual(lines, [], "A time span's screen out of line");
+  });
+
+  // A todo, since it finds a real overlap the build did not fix: the notices' lane spans the map under the chip's popover (design-v1-calendar-c2c3.md 9 asks for none).
+  test(`ck-d. a step from the clock chip's popover that ends an effect: the popover and the expiry notice never overlap, at 1440 x 900 at 100% and 130%`, { todo: "the toast lane runs under the chip popover" }, async () => {
+    const lines: string[] = [];
+    try {
+      await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
+      for (const at of FU30_AT.filter((x) => x.size.width === 1440)) {
+        const sweep = new Sweep(atName(at));
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, at.size, at.scale);
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        // A step that ends Thorn's effect: the popover and the notice it brings never overlap.
+          await closeSheets(page);
+          await escapeAll(page);
+          await ops.send({ t: "actor.effect.add", target: { characterId: run.ids.thornChar }, effect: { id: randomUUID(), key: "blessed", duration: { mode: "span", seconds: 600 } } });
+          const clock = barChip(page, "clock");
+          await clock.click();
+          const popover = page.getByRole("dialog", { name: "Time", exact: true }).filter({ has: page.locator("[data-chip-time]") });
+          await popover.waitFor();
+          await popover.getByRole("button", { name: "Move the clock on 10 minutes", exact: true }).click();
+          const notice = page.getByText("Blessed ended on Thorn.", { exact: true }).first();
+          if (await showsWithin(notice, 5_000)) {
+            const [a, b] = [await popover.boundingBox(), await notice.boundingBox()];
+            if (a && b && a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height) {
+              sweep.lines.push(`${sweep.at} tm-popover-notice: the clock popover ${JSON.stringify(a)} and the expiry notice ${JSON.stringify(b)} overlap`);
+              await shots.take(page, `alignment-${sweep.at}-tm-popover-notice`);
+            }
+          } else await sweep.missing(page, "tm-popover-notice", "the step showed no expiry notice");
+          await page.keyboard.press("Escape");
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      if (dmSocket.state?.clock) await ops.send({ t: "clock.stop" }).catch(() => {});
+    }
+    assert.deepEqual(lines, [], "The clock popover and the expiry notice overlap");
+  });
+}
+
+/** The Conditions section of an open character page. */
+function conditionsSection(panel: Locator): Locator {
+  return panel.locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Conditions"] or *[not(self::section)]/*[self::h3 or self::h4][normalize-space()="Conditions"]]');
+}
+
+/**
+ * Time spans' screens at one size (docs/design/design-v1-calendar-c2c3.md 9) on Thorn's page, for
+ * the DM or for Pat: the add form with its Duration select holding the spans and the Other row
+ * refused under its field, then the Conditions list with a span read outside a fight and in one.
+ * The clock is already running and Thorn holds no effect.
+ */
+async function timedScreens(sweep: Sweep, page: Page, who: "dm" | "pat"): Promise<void> {
+  const root = who === "dm" ? "tm-dm" : "tm-pat";
+  await closeSheets(page);
+  await escapeAll(page);
+  const panel = await thornsPage(page);
+  const fold = panel.getByRole("button", { name: "Combat", exact: true });
+  if ((await fold.count()) > 0 && (await fold.getAttribute("aria-expanded")) === "false") await fold.click();
+  const section = conditionsSection(panel);
+  const add = section.getByRole("button", { name: "Add", exact: true });
+  if (!(await showsWithin(add, 5_000))) await shots.take(page, `alignment-${sweep.at}-${root}-no-add`);
+  await add.click();
+  await section.getByRole("button", { name: /Blessed/ }).first().click();
+  const duration = section.getByRole("combobox", { name: "Duration", exact: true });
+  await duration.selectOption({ label: "Other length of time" });
+  await section.getByRole("textbox", { name: "Length", exact: true }).fill("0");
+  await section.getByRole("button", { name: "Add", exact: true }).click();
+  await section.getByText("Pick a length from 1 minute to 365 days.", { exact: true }).waitFor();
+  await sweep.measure(page, `${root}-form`, section);
+  await section.getByRole("button", { name: "Back", exact: true }).click();
+
+  await ops.send({ t: "actor.effect.add", target: { characterId: run.ids.thornChar }, effect: { id: randomUUID(), key: "blessed", duration: { mode: "span", seconds: 3_600 } } });
+  await section.getByText(/^Lasts 1 hour, to /).first().waitFor();
+  await sweep.measure(page, `${root}-row`, section);
+  if (who === "dm" && !dmSocket.state?.encounter) {
+    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), characterId: run.ids.thornChar, value: 12 }] });
+    await ops.send({ t: "encounter.next" });
+    await section.getByText(/^Lasts 1 hour, to the start of round /).first().waitFor();
+    await sweep.measure(page, "tm-dm-row-fight", section);
+    await ops.send({ t: "encounter.end" });
+  }
+  for (const effect of dmSocket.state?.characters[run.ids.thornChar]?.actor.effects ?? []) {
+    if (effect.ends) await ops.send({ t: "actor.effect.remove", target: { characterId: run.ids.thornChar }, effectId: effect.id });
+  }
+}
+
+/** The table display's date and time chip at the display's own text size (3.5), on a page paired like a TV is. */
+async function displayChipScreen(sweep: Sweep, scale: number): Promise<void> {
+  const res = await dmContext.request.post(`${server.origin}/api/rooms/${run.roomId}/display/code`, { headers: { Origin: server.origin } });
+  const { code } = (await res.json()) as { code: string };
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  try {
+    await context.addInitScript((size) => {
+      localStorage.setItem("rvtt.display.date", "on");
+      localStorage.setItem("rvtt.displayUiScale", size);
+    }, String(scale));
+    const tv = await context.newPage();
+    tv.setDefaultTimeout(10_000);
+    await tv.goto(`${server.origin}/display`);
+    await tv.getByLabel("Code from the DM's screen").fill(code);
+    await tv.getByRole("button", { name: "Connect" }).click();
+    await tv.locator(".konvajs-content").waitFor();
+    await sweep.measure(tv, "tm-display-chip", tv.getByRole("status", { name: /^Time: / }));
+  } finally {
+    await context.close();
+  }
 }
 
 /**
