@@ -63,6 +63,8 @@ export const CHIP_WORDS = {
   cancel: "Cancel",
   moving: MOVING_PLAYERS,
   liftRefused: "Not shown: the players are on another scene now. The blackout stays on.",
+  // Within one scene a move overtaken by another DM's names a floor (docs/design/design-v1-floors.md 18.6).
+  liftRefusedFloor: "Not shown: the players are on another floor now. The blackout stays on.",
   playersSeeBlack: "Players see black",
   blackoutMenuName: "Blackout",
   endBlackout: "End the blackout",
@@ -91,6 +93,8 @@ export const onScene = (scene: string) => `on ${scene}`;
 /** Follow me's detail while the DM looks at another scene than the players, and its description. */
 export const followOnly = (playersScene: string) => `only on ${playersScene}`;
 export const followOnlyDescription = (playersScene: string) => `Players' maps follow yours only while you look at their scene, ${playersScene}.`;
+/** Why Bring everyone here is off and Follow me stays put on a floor of the players' scene that they have not reached. */
+export const notReached = (floor: string) => `Players haven't reached ${floor}, so their maps stay.`;
 /** A refused move, with the refusal's own sentence (reasonText). */
 export const moveRefused = (reason: string) => `Players not moved. ${reason}`;
 /** Why a move whose answer was lost did not move the players, where its snapshot has them instead. */

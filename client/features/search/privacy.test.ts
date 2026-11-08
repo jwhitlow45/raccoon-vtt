@@ -7,7 +7,7 @@ import type { RoomView } from "../../state/types.ts";
 import type { Catalog } from "./catalog/types.ts";
 import type { SearchEntry } from "./entry.ts";
 import { buildIndex, catalogsFor, searchResults } from "./index.ts";
-import { DM_FIXTURE, keysOf, SRD, viewOf } from "./search.testutil.ts";
+import { DM_FIXTURE, keysOf, SRD, towerRoom, towerView, viewOf } from "./search.testutil.ts";
 
 /**
  * A player's search holds only what that player may see and do
@@ -190,5 +190,29 @@ describe("a player's search holds only what that player may see and do (design-v
       if (shown > 0 && shown < planted.all.length) both++;
     }
     assert.ok(both >= 15, `${both}`);
+  });
+});
+
+describe("a player's search and the floors they do not hold (design-v1-floors.md 18.7, 8)", () => {
+  test("a player who holds Ground alone finds no token, floor or name of Upper or Attic, whatever they are called", () => {
+    for (let seed = 1; seed <= 25; seed++) {
+      const r = rng(seed);
+      const room = towerRoom();
+      const words = { upper: word(r), attic: word(r), thorn: word(r), moth: word(r) };
+      room.scenes.upper!.floor!.name = `${words.upper} deck`;
+      room.scenes.attic!.floor!.name = `${words.attic} deck`;
+      room.tokens.thorn!.name = words.thorn;
+      room.tokens.moth!.name = words.moth;
+      // The copy a player holding Ground alone is sent (shared/project.ts): the held floor, and nothing of the others.
+      const view = towerView(room, P1, "ground", ["ground"]);
+      const index = buildIndex({ state: view, wide: true, keys: keysOf(view), catalogs: [], monsters: null, soundFiles: true });
+      const text = JSON.stringify(index.items.map((i) => i.entry)).toLowerCase();
+      for (const w of Object.values(words)) {
+        assert.ok(!text.includes(w), `seed ${seed}: the index holds "${w}"`);
+        const out = searchResults(index, w, []);
+        assert.deepEqual(out.t === "typed" && out.rows.map((e) => e.id), [], `seed ${seed}: typing "${w}"`);
+      }
+      assert.ok(!index.items.some((i) => i.entry.kind === "floor"), "one held floor offers no Floor row");
+    }
   });
 });

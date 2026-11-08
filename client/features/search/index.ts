@@ -1,9 +1,11 @@
 import { formatFormula, parseFormula } from "#shared/dice/formula.ts";
 import type { ProjectedActor } from "#shared/project.ts";
+import { floorsOf, mainFloorId, onPlayersScene } from "#shared/rules/floors.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { STATUSES } from "#shared/srd/statuses.ts";
 import { displayName } from "../../lib/scene.ts";
+import { placeName } from "../floors/words.ts";
 import { shortcutsFor, type Shortcut } from "../../state/shortcuts.ts";
 import type { RoomView } from "../../state/types.ts";
 import { panelsFor, SOUND_PANEL, type PanelsForOptions } from "../panels.ts";
@@ -254,7 +256,10 @@ export function buildIndex(input: IndexInput): SearchIndex {
   const view = state.view;
   if (!view) return finish(role, b);
   const sceneId = state.sceneId;
-  const sceneName = sceneId ? view.scenes[sceneId]?.name : undefined;
+  // Every floor this device holds of the scene in view: a player's copy and a DM's both hold exactly the floors they may see (design-v1-floors.md 8).
+  const floors = sceneId ? floorsOf(view, sceneId) : [];
+  const floorIds = new Set(floors.map((f) => f.id));
+  const withFloors = floors.length > 1;
 
   // The selection's fields and conditions, near the top while it is chosen, for a token the viewer may change.
   const selectedId = state.local.selectedId;
@@ -285,9 +290,24 @@ export function buildIndex(input: IndexInput): SearchIndex {
     }
   }
 
+  // A floor row for each held floor, once there are two to choose between. Picking one shows it.
+  if (withFloors) {
+    for (const f of floors) {
+      b.entry({
+        id: `floor:${f.id}`,
+        kind: "floor",
+        title: f.floor?.name ?? f.name,
+        where: f.id === sceneId ? `${f.name} · ${ROW_WORDS.showing}` : f.name,
+        icon: "scenes",
+        act: { t: "floor", sceneId: f.id },
+      });
+    }
+  }
+
   for (const tk of Object.values(view.tokens)) {
-    if (tk.sceneId !== sceneId) continue;
+    if (!floorIds.has(tk.sceneId)) continue;
     const kind = TOKEN_KIND_WORD[tk.kind];
+    const place = withFloors ? placeName(view, tk.sceneId) : (view.scenes[tk.sceneId]?.name ?? "");
     // A DM may type a hidden name's public one ("Hooded figure"). A player's view carries only that one, as the name.
     const publicName = role === "dm" && tk.nameHidden && tk.publicName ? [tk.publicName] : null;
     b.entry({
@@ -295,7 +315,7 @@ export function buildIndex(input: IndexInput): SearchIndex {
       kind: "token",
       title: displayName(tk),
       ...(publicName ? { names: publicName } : null),
-      where: sceneName ? ROW_WORDS.tokenOn(kind, sceneName) : kind,
+      where: place ? ROW_WORDS.tokenOn(kind, place) : kind,
       icon: "token",
       ...(role === "dm" && tk.visibility === "dm" ? { mark: ROW_WORDS.hidden } : null),
       act: { t: "token", tokenId: tk.id },
@@ -320,9 +340,11 @@ export function buildIndex(input: IndexInput): SearchIndex {
   }
 
   if (role === "dm") {
-    const playersOn = view.meta.playerSceneId;
+    // One row per scene, by its main floor (the Scenes panel lists it so). "Here" means any floor of it.
+    const viewing = sceneId ? mainFloorId(view, sceneId) : null;
     for (const sc of Object.values(view.scenes)) {
-      const where = [sc.id === sceneId ? ROW_WORDS.youAreHere : null, sc.id === playersOn ? ROW_WORDS.playersAreHere : null].filter((w) => w !== null).join(" · ");
+      if (sc.floor?.of !== undefined && sc.floor.of !== sc.id) continue;
+      const where = [sc.id === viewing ? ROW_WORDS.youAreHere : null, onPlayersScene(view, sc.id) ? ROW_WORDS.playersAreHere : null].filter((w) => w !== null).join(" · ");
       b.entry({ id: `scene:${sc.id}`, kind: "scene", title: sc.name, where, icon: "scenes", act: { t: "open", route: { panel: "scenes", page: recordPage("scene", sc.id) } } });
     }
     for (const m of input.monsters ?? []) {

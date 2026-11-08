@@ -1,6 +1,6 @@
 import { onPlayersScene, openFloor } from "#shared/rules/floors.ts";
 import type { IconName } from "../../../components/Icon.tsx";
-import { dmMenuSections, type ChipItem, type DmMenuView } from "../../../pages/chipMenus.ts";
+import { dmMenuSections, playerSceneOf, type ChipItem, type DmMenuView } from "../../../pages/chipMenus.ts";
 import { audienceDetail, CHIP_WORDS, type DmItemKind } from "../../../pages/chipWords.ts";
 import type { RoomView } from "../../../state/types.ts";
 import { TIME_ENTRIES } from "../../clock/search.ts";
@@ -37,8 +37,8 @@ export function searchedKind(kind: ChipItem["kind"]): kind is SearchedItemKind {
 
 const screens = (anchor: string): SearchRoute => ({ panel: "dm", section: "screens", anchor });
 const handouts = (anchor: string): SearchRoute => ({ panel: "dm", section: "handouts", anchor });
-/** The scene the DM looks at, by its row in Scenes. */
-const sceneRow = (view: DmMenuView): SearchRoute => (view.viewing ? { panel: "scenes", page: recordPage("scene", view.viewing.id) } : { panel: "scenes" });
+/** The scene the DM looks at, by its row in Scenes: one row per scene, filed under its main floor. */
+const sceneRow = (view: DmMenuView): SearchRoute => (view.viewing ? { panel: "scenes", page: recordPage("scene", view.viewing.floor?.of ?? view.viewing.id) } : { panel: "scenes" });
 
 /**
  * Each kind of item's twin (design-v1-qol.md 5, Acting): the panel control that does the
@@ -123,13 +123,11 @@ export function dmMenuEntries(view: DmMenuView): CatalogEntry[] {
  */
 export function dmMenuViewOf(state: Pick<RoomView, "view" | "sceneId">): DmMenuView {
   const view = state.view;
-  const playerId = view?.meta.playerSceneId ?? null;
-  const playerName = playerId ? view?.scenes[playerId]?.name : undefined;
   return {
     blackout: view?.meta.view.blackout === true,
     follow: view?.meta.view.follow === true,
     viewing: (state.sceneId ? view?.scenes[state.sceneId] : undefined) ?? null,
-    playerScene: playerId && playerName !== undefined ? { id: playerId, name: playerName } : null,
+    playerScene: view ? playerSceneOf(view) : null,
     playersHoldHere: view && state.sceneId ? openFloor(view, state.sceneId) : false,
     playersSceneHere: view && state.sceneId ? onPlayersScene(view, state.sceneId) : false,
     focusHere: true,

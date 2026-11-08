@@ -278,6 +278,10 @@ describe("what a pick does (design-v1-qol.md 5, Acting, D-261106-144)", () => {
     assert.deepEqual(pickStep({ t: "item", itemId: "blackout", twin }, true), { t: "route", route: { panel: "dm", section: "screens", anchor: "dm.screens.blackout" } });
   });
 
+  test("a floor row shows its floor, on Enter and on Shift+Enter alike", () => {
+    for (const only of [false, true]) assert.deepEqual(pickStep({ t: "floor", sceneId: "upper" }, only), { t: "floor", sceneId: "upper" });
+  });
+
   test("a token is selected and framed, or its panel opens, and a key, a character and a field act the same either way", () => {
     assert.deepEqual(pickStep({ t: "token", tokenId: "g1" }, false), { t: "token", tokenId: "g1" });
     assert.deepEqual(pickStep({ t: "token", tokenId: "g1" }, true), { t: "tokenPanel", tokenId: "g1" });

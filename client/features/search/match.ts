@@ -277,6 +277,7 @@ export const KIND_GROUP: Readonly<Record<SearchKind, number>> = {
   condition: 1,
   section: 2,
   scene: 2,
+  floor: 1,
   playlist: 2,
   track: 2,
   page: 2,

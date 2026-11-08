@@ -9,7 +9,7 @@ import { EVERYONE } from "./catalog/everyone.ts";
 import type { Catalog } from "./catalog/types.ts";
 import type { DmCatalogState } from "./dmCatalog.ts";
 import { buildIndex, catalogsFor, diceRow, OPEN_HANDOUT_ANCHOR, PLACE_MONSTER_ANCHOR, PLAY_PLAYLIST_ANCHOR, PLAYLIST_ANCHOR, searchResults, TRACK_ANCHOR, VIEW_ANCHORS } from "./index.ts";
-import { DM_VIEW, EVERYONE_FIXTURE, indexOf, keysOf, PAT_VIEW, seededRoom, viewOf } from "./search.testutil.ts";
+import { DM_VIEW, EVERYONE_FIXTURE, indexOf, keysOf, PAT_VIEW, rowsOf, seededRoom, towerRoom, towerView, viewOf } from "./search.testutil.ts";
 
 const ids = (state: RoomView, options?: Parameters<typeof indexOf>[1]) => new Set(indexOf(state, options).items.map((i) => i.entry.id));
 const entryOf = (state: RoomView, id: string) => indexOf(state).byId.get(id)?.entry;
@@ -274,5 +274,65 @@ describe("a typed dice formula", () => {
 
   test("anything else is no row", () => {
     for (const text of ["dmg", "d", "2", "3d", "dex save", "1d20+5 fire", "d20 please", "2d0"]) assert.equal(diceRow(text), null, text);
+  });
+});
+
+describe("several floors (design-v1-floors.md 18.7, D-261107-217)", () => {
+  const all = ["ground", "upper", "attic"];
+
+  test("a DM finds the tokens of every floor of the scene in view, each tagged by its floor, and none of another scene", () => {
+    const room = towerRoom();
+    room.tokens.cave = { ...room.tokens.g1!, id: "cave", name: "Cave rat", sceneId: "s2" };
+    const dm = towerView(room, DM, "ground", all);
+    const view = { ...dm, view: { ...dm.view!, tokens: { ...dm.view!.tokens, cave: room.tokens.cave } } } as RoomView;
+    const index = indexOf(view);
+    assert.deepEqual(["g1", "thorn", "moth"].map((id) => index.byId.get(`token:${id}`)?.entry.where), ["Monster on Tower · Ground floor", "NPC on Tower · Upper floor", "Monster on Tower · Attic"]);
+    assert.ok(!index.byId.has("token:cave"));
+  });
+
+  test("a scene without floors words its tokens as before", () => {
+    assert.equal(entryOf(DM_VIEW(), "token:g1")?.where, "Monster on Battle mat");
+  });
+
+  test("a Floor row for each held floor while two or more are held, the one in view marked, and none otherwise", () => {
+    const room = towerRoom();
+    const rows = (view: RoomView) => indexOf(view).items.map((i) => i.entry).filter((e) => e.kind === "floor");
+    const dm = rows(towerView(room, DM, "upper", all));
+    assert.deepEqual(dm.map((e) => [e.title, e.where, e.act]), [
+      ["Ground floor", "Tower", { t: "floor", sceneId: "ground" }],
+      ["Upper floor", "Tower · Showing", { t: "floor", sceneId: "upper" }],
+      ["Attic", "Tower", { t: "floor", sceneId: "attic" }],
+    ]);
+    assert.deepEqual(rows(towerView(room, P1, "ground", ["ground", "upper"])).map((e) => e.title), ["Ground floor", "Upper floor"]);
+    assert.deepEqual(rows(towerView(room, P1, "ground", ["ground"])), [], "one floor held is no choice");
+    assert.deepEqual(rows(DM_VIEW()), [], "a scene without floors");
+  });
+
+  test("typing a floor's name finds its row", () => {
+    const dm = indexOf(towerView(towerRoom(), DM, "ground", all));
+    assert.equal(rowsOf(dm, "attic").find((e) => e.kind === "floor")?.id, "floor:attic");
+  });
+
+  test("a scene with floors is one row by its main floor, 'you are here' and 'players are here' for any of its floors", () => {
+    const room = towerRoom();
+    const dm = indexOf(towerView(room, DM, "upper", all));
+    const scenes = dm.items.map((i) => i.entry).filter((e) => e.kind === "scene");
+    assert.deepEqual(scenes.map((e) => [e.id, e.title, e.where]), [
+      ["scene:ground", "Tower", "You are here · Players are here"],
+      ["scene:s2", "Goblin cave", ""],
+    ]);
+    room.meta.playerSceneId = "attic";
+    const elsewhere = indexOf(towerView(room, DM, "ground", all)).byId.get("scene:ground")?.entry;
+    assert.equal(elsewhere?.where, "You are here · Players are here", "the players on Attic are on Tower");
+    assert.equal(indexOf(towerView(room, DM, "ground", all)).byId.get("scene:s2")?.entry.where, "");
+  });
+
+  test("a player who holds Ground alone finds nothing of Upper or Attic, and with two floors held finds both", () => {
+    const room = towerRoom();
+    const alone = indexOf(towerView(room, P1, "ground", ["ground"]));
+    const text = JSON.stringify(alone.items.map((i) => i.entry)).toLowerCase();
+    for (const w of ["thorn", "moth", "upper", "attic"]) assert.ok(!text.includes(w), w);
+    const two = indexOf(towerView(room, P1, "ground", ["ground", "upper"]));
+    assert.ok(two.byId.has("token:thorn") && two.byId.has("floor:upper") && !two.byId.has("token:moth") && !two.byId.has("floor:attic"));
   });
 });

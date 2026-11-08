@@ -478,3 +478,63 @@ describe("a chip menu's item in the shared Menu", () => {
     assert.match(renderToStaticMarkup(busy.content as ReactElement), /Moving players…/);
   });
 });
+
+describe("the DM menu on a floor (design-v1-floors.md 18.6, 7.3)", () => {
+  const ground: Scene = sceneOf("ground", { name: "Tower", floor: { of: "ground", level: 0, name: "Ground floor" } });
+  const upper: Scene = sceneOf("upper", { name: "Tower", floor: { of: "ground", level: 1, name: "Upper floor" } });
+  const players = { id: "ground", name: "Tower · Ground floor" };
+  const screens = (view: DmMenuView) => dmMenuSections(view).find((s) => s.key === "screens")!;
+  const NOT_REACHED = "Players haven't reached Upper floor, so their maps stay.";
+
+  test("on a floor the players hold, Move players here names the floor and Bring everyone here is on with no notice", () => {
+    const view = viewOf({ viewing: upper, playerScene: players, playersHoldHere: true, playersSceneHere: true });
+    assert.deepEqual(screens(view).items.map((i) => i.title), ["Black out players' screens", "Follow me", "Move players here", "Bring everyone here"]);
+    const [follow, move, bring] = ["follow", "movePlayers", "bringEveryone"].map((id) => item(dmMenuSections(view), id));
+    assert.equal(move!.note, "on Tower · Upper floor");
+    assert.deepEqual([bring!.disabled, bring!.description, follow!.note, follow!.description], [false, undefined, undefined, undefined]);
+  });
+
+  test("on a floor they have not reached, Bring everyone here is off and Follow me says the same line", () => {
+    const view = viewOf({ viewing: upper, playerScene: players, playersHoldHere: false, playersSceneHere: true });
+    const bring = item(dmMenuSections(view), "bringEveryone");
+    assert.deepEqual([bring.disabled, bring.description], [true, NOT_REACHED]);
+    const follow = item(dmMenuSections(view), "follow");
+    assert.deepEqual([follow.note, follow.description], [undefined, NOT_REACHED]);
+  });
+
+  test("on another scene whatever players hold, there is no Bring everyone here and the notice names the players' place", () => {
+    const view = viewOf({ viewing: crypt, playerScene: players, playersHoldHere: true, playersSceneHere: false });
+    assert.ok(!itemsOf(dmMenuSections(view)).some((i) => i.id === "bringEveryone"));
+    const follow = item(dmMenuSections(view), "follow");
+    assert.deepEqual([follow.note, follow.description], ["only on Tower · Ground floor", "Players' maps follow yours only while you look at their scene, Tower · Ground floor."]);
+  });
+
+  test("Move players here, held, sends the move to the floor in view and Bring everyone here sends the camera", () => {
+    const view = viewOf({ viewing: upper, playerScene: players, playersHoldHere: true, playersSceneHere: true });
+    const room = fakeEnv("upper");
+    item(dmMenuSections(view), "bringEveryone").run(room.env);
+    assert.equal(room.eph.length, 1);
+    const move = item(dmMenuSections(view), "movePlayers").run(room.env);
+    assert.equal(move.t === "wait" || move.t === "ask", true);
+  });
+
+  test("Show players names the floor during a blackout", () => {
+    const view = viewOf({ viewing: upper, playerScene: players, blackout: true, playersHoldHere: false, playersSceneHere: true });
+    assert.equal(item(dmMenuSections(view), "showPlayers").title, "Show players Tower · Upper floor");
+  });
+
+  test("a reveal overtaken by another DM's move to another floor of the scene says floor, to another scene says scene", async () => {
+    const view = viewOf({ viewing: ground, playerScene: { id: "upper", name: "Tower · Upper floor" }, blackout: true, playersHoldHere: true, playersSceneHere: true });
+    const refuse = (playersOn: string) => {
+      const scenes = { ground, upper, crypt };
+      const room = fakeEnv("ground", () => ({ meta: { playerSceneId: playersOn }, scenes }) as never);
+      const result = item(dmMenuSections(view), "showPlayers").run(room.env, { confirmed: true });
+      if (result.t !== "wait") return assert.fail("waits");
+      for (const s of room.sent) if (s.op.t === "view.blackout") s.onAnswer?.("refused", { code: "invalid", message: "the players are on another scene now", text: "Not saved." });
+      return result.answer;
+    };
+    assert.deepEqual(await refuse("upper"), { t: "refused", words: "Not shown: the players are on another floor now. The blackout stays on." });
+    assert.deepEqual(await refuse("crypt"), { t: "refused", words: CHIP_WORDS.liftRefused });
+    assert.deepEqual(moveWords({ t: "refused", step: "lift", refusal: undefined }), { t: "refused", words: CHIP_WORDS.liftRefused }, "no room to read: the older words");
+  });
+});

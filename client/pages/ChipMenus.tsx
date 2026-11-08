@@ -35,6 +35,7 @@ import { scopeSlot, useRoomScope, useScoped } from "../state/scope.ts";
 import { useAssets, useRoomActions, useRoomUi, useRoomView } from "../state/view.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { onPlayersScene, openFloor } from "#shared/rules/floors.ts";
+import { placeName } from "../features/floors/words.ts";
 import {
   anywayId,
   asDrawn,
@@ -588,7 +589,8 @@ export function useDmMenuView(timeGaveWay: boolean, nowPlayingGaveWay: boolean, 
   const follow = useRoomView((s) => s.view?.meta.view.follow === true);
   const viewing = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId] : undefined)) ?? null;
   const playerId = useRoomView((s) => s.view?.meta.playerSceneId ?? null);
-  const playerName = useRoomView((s) => (playerId ? s.view?.scenes[playerId]?.name : undefined));
+  // The players' place ("Tower · Ground floor" with floors), a string so an unchanged one rerenders nothing.
+  const playerName = useRoomView((s) => (playerId && s.view?.scenes[playerId] ? placeName(s.view, playerId) : undefined));
   const playersHoldHere = useRoomView((s) => (s.view && s.sceneId ? openFloor(s.view, s.sceneId) : false));
   const playersSceneHere = useRoomView((s) => (s.view && s.sceneId ? onPlayersScene(s.view, s.sceneId) : false));
   const handouts = useRoomView((s) => s.view?.handouts);

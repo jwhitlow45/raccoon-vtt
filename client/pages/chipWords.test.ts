@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { CHIP_WORDS, DM_MENU_HEADINGS, DM_MENU_SECTIONS, audienceDescription, audienceDetail, recentDetail } from "./chipWords.ts";
+import { CHIP_WORDS, DM_MENU_HEADINGS, DM_MENU_SECTIONS, audienceDescription, audienceDetail, notReached, playersOn, recentDetail } from "./chipWords.ts";
 
 describe("the chips' words (docs/design/design-v1-qol.md 4, Words)", () => {
   test("a recent handout names its audience, by name up to two players and by count past them, its description naming them all", () => {
@@ -21,5 +21,12 @@ describe("the chips' words (docs/design/design-v1-qol.md 4, Words)", () => {
   test("every section has its heading, and no word carries an em dash or a semicolon", () => {
     assert.deepEqual(Object.keys(DM_MENU_HEADINGS).sort(), [...DM_MENU_SECTIONS].sort());
     for (const word of [...Object.values(CHIP_WORDS), ...Object.values(DM_MENU_HEADINGS)]) assert.doesNotMatch(word, /[\u2014;]/, word);
+  });
+
+  test("the words that name a floor (design-v1-floors.md 18.6)", () => {
+    assert.equal(notReached("Attic"), "Players haven't reached Attic, so their maps stay.");
+    assert.equal(CHIP_WORDS.liftRefusedFloor, "Not shown: the players are on another floor now. The blackout stays on.");
+    assert.equal(playersOn("another floor"), "They are on another floor.");
+    assert.equal(playersOn("Tower · Ground floor"), "They are on Tower · Ground floor.");
   });
 });

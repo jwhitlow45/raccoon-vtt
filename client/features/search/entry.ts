@@ -24,6 +24,7 @@ export type SearchKind =
   | "condition"
   | "section"
   | "scene"
+  | "floor"
   | "playlist"
   | "track"
   | "page"
@@ -60,6 +61,8 @@ export type SearchAct =
   | { t: "open"; route: SearchRoute }
   | { t: "key"; shortcut: string }
   | { t: "token"; tokenId: string }
+  /** A held floor of the scene in view: shows it, as the Floors menu's pick does. */
+  | { t: "floor"; sceneId: string }
   | { t: "character"; characterId: string; route?: SearchRoute }
   | { t: "condition"; condition: string; remove: boolean }
   /** `twin` is the panel control that does the same, which Shift+Enter goes to without pressing (design-v1-qol.md 5, Acting). */

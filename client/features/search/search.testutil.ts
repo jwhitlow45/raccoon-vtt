@@ -150,3 +150,49 @@ export function rowsOf(index: SearchIndex, text: string, recent: readonly string
 
 export const DM_VIEW = () => viewOf(seededRoom(), DM);
 export const PAT_VIEW = () => viewOf(seededRoom(), P1);
+
+/**
+ * Several floors (docs/design/design-v1-floors.md): Tower, a scene of three floors, on the seeded room.
+ * The players start on Ground, Thorn stands on Upper and a moth on Attic. The scene's name is
+ * every floor's record name, as the design has it.
+ */
+export function towerRoom(): RoomState {
+  const state = seededRoom();
+  const floor = (level: number, name: string, of = "ground") => ({ of, level, name });
+  state.scenes = {
+    ground: scene("ground", { name: "Tower", floor: floor(0, "Ground floor") }),
+    upper: scene("upper", { name: "Tower", floor: floor(1, "Upper floor") }),
+    attic: scene("attic", { name: "Tower", floor: floor(2, "Attic") }),
+    s2: scene("s2", { name: "Goblin cave", order: 1 }),
+  };
+  state.meta.playerSceneId = "ground";
+  state.tokens = {
+    g1: token("g1", { name: "Goblin", number: 1, sceneId: "ground" }),
+    thorn: token("thorn", { name: "Thorn", kind: "npc", sceneId: "upper", x: 6, y: 6 }),
+    moth: token("moth", { name: "Moth", sceneId: "attic", x: 7, y: 7 }),
+  };
+  state.characters = {};
+  return state;
+}
+
+/**
+ * A device's copy of the tower: the projection of each floor it holds, joined, as the server
+ * delivers them (flrb). The DM's copy keeps every scene record and a player's only the held
+ * floors, without `of` and `height` and, while one floor is held, without `floor` at all.
+ * `shown` is the floor in view.
+ */
+export function towerView(state: RoomState, viewer: Viewer, shown: string, held: readonly string[]): RoomView {
+  const parts = held.map((id) => viewOf({ ...state, meta: { ...state.meta, playerSceneId: id } }, viewer, { sceneId: id }));
+  const first = parts[Math.max(0, held.indexOf(shown))]!;
+  const dm = viewer.role === "dm";
+  const scenes: Record<string, unknown> = {};
+  for (const [id, sc] of Object.entries(state.scenes)) {
+    if (dm) scenes[id] = sc;
+    else if (held.includes(id)) {
+      const { floor: own, ...rest } = sc;
+      scenes[id] = held.length > 1 && own ? { ...rest, floor: { level: held.indexOf(id), name: own.name } } : rest;
+    }
+  }
+  const tokens = Object.assign({}, ...parts.map((p) => p.view!.tokens));
+  return { ...first, sceneId: shown, view: { ...first.view!, meta: { ...first.view!.meta, playerSceneId: state.meta.playerSceneId }, scenes, tokens } } as unknown as RoomView;
+}

@@ -1,10 +1,11 @@
-import type { Character, Handout, HandoutDoc, Member, Scene } from "#shared/model.ts";
+import type { Character, Handout, HandoutDoc, Member, RoomState, Scene } from "#shared/model.ts";
 import type { OpRefusal, RoomActions, Toast } from "../state/types.ts";
 import { focusEvent, type Focus } from "../features/dm/camera.ts";
 import { showHandoutOp } from "../features/handouts/handouts.ts";
 import { offerable, reshowInput, type RecentHandout, type RecentRoom, type RecentShow } from "../features/handouts/recent.ts";
 import { entryKey, reshowProblem, shownOf } from "../features/handouts/recentList.ts";
 import { reasonText } from "../features/resources/logic.ts";
+import { placeKind, placeName } from "../features/floors/words.ts";
 import { MOVING_PLAYERS, movePlayers, type MoveAnswer, type MoveRoom } from "../features/scenes/movePlayers.ts";
 import {
   audienceDescription,
@@ -14,6 +15,7 @@ import {
   followOnlyDescription,
   hideTitle,
   moveRefused,
+  notReached,
   onScene,
   playersOn,
   recentDetail,
@@ -106,7 +108,7 @@ export type DmMenuView = {
   follow: boolean;
   /** The scene the DM looks at. */
   viewing: Scene | null;
-  /** The players' scene's id and name. */
+  /** The players' floor's id and place: its name, "Tower · Ground floor" on a scene with floors (`placeName`). */
   playerScene: { id: string; name: string } | null;
   /**
    * Players hold the floor in view, an open floor of the players' scene
@@ -150,16 +152,46 @@ function refusalWords(refusal: OpRefusal | undefined): string {
   return refusal?.code === "gone" ? SCENE_GONE : reasonText(refusal);
 }
 
+/** The floor in view as the menu names it: "Tower · Upper floor" on a scene with floors, the scene's name without. */
+function placeOf(scene: Scene): string {
+  return placeName({ scenes: { [scene.id]: scene } }, scene.id);
+}
+
+/**
+ * The players' floor as the search's state-only view fills `DmMenuView.playerScene`
+ * (catalog/dm.ts). The menu's own builder (ChipMenus.tsx) reads the same
+ * `placeName` through store selectors. Null once the scene is gone.
+ */
+export function playerSceneOf(state: Pick<RoomState, "meta" | "scenes">): DmMenuView["playerScene"] {
+  const id = state.meta.playerSceneId;
+  if (id === null || state.scenes[id] === undefined) return null;
+  return { id, name: placeName(state, id) };
+}
+
 /**
  * A move's answer in the item's words (design-v1-qol.md 4, C2's move). A
  * lost answer whose snapshot has the players elsewhere says so as a refusal
  * would, and any other lost answer is the snapshot's, which the view
  * already shows.
  */
-export function moveWords(answer: MoveAnswer): ChipAnswer {
+export function moveWords(answer: MoveAnswer, overtaken: "floor" | "scene" = "scene"): ChipAnswer {
   if (answer.t === "notMoved") return { t: "refused", words: moveRefused(answer.sceneGone ? SCENE_GONE : answer.playersOn !== null ? playersOn(answer.playersOn) : reasonText(undefined)) };
   if (answer.t !== "refused") return { t: "taken" };
-  return { t: "refused", words: answer.step === "lift" ? CHIP_WORDS.liftRefused : moveRefused(refusalWords(answer.refusal)) };
+  if (answer.step === "lift") return { t: "refused", words: overtaken === "floor" ? CHIP_WORDS.liftRefusedFloor : CHIP_WORDS.liftRefused };
+  return { t: "refused", words: moveRefused(refusalWords(answer.refusal)) };
+}
+
+/**
+ * Whether the players, where the server's room has them now, are on another
+ * floor of the scene the move named or on another scene, for a reveal's
+ * refusal. Read at the answer, since the overtaking move came between the tap
+ * and the server. Without a room to read it says scene, the older words.
+ */
+function overtakenBy(room: MoveRoom, targetId: string): "floor" | "scene" {
+  const confirmed = room.confirmed();
+  const now = confirmed?.meta.playerSceneId ?? null;
+  // The store's confirmed room is a whole projection, so its scenes carry `floor` though ConfirmedRoom's type names only their name.
+  return confirmed && now !== null ? placeKind(confirmed as unknown as Pick<RoomState, "scenes">, targetId, now) : "scene";
 }
 
 /** Move players here, or for a reveal Show players <scene>: through the one move helper, asking first where it warns, and quiet, since the item says the refusal itself. */
@@ -167,7 +199,7 @@ function moveRun(scene: Scene, reveal: boolean): ChipRun {
   return (env, opts) => {
     const step = movePlayers(env.actions, scene, env.moveRoom, { confirmed: opts?.confirmed === true, reveal, quiet: true });
     if (step.t === "ask") return { t: "ask", warning: step.warning, anyway: reveal ? CHIP_WORDS.showAnyway : CHIP_WORDS.moveAnyway };
-    return { t: "wait", answer: step.answer.then(moveWords) };
+    return { t: "wait", answer: step.answer.then((answer) => moveWords(answer, overtakenBy(env.moveRoom, scene.id))) };
   };
 }
 
@@ -209,7 +241,7 @@ export function blackoutItems(view: DmMenuView): ChipItem[] {
   const items: ChipItem[] = [{ id: "endBlackout", kind: "endBlackout", title: CHIP_WORDS.endBlackout, role: "action", description: CHIP_WORDS.endBlackoutDescription, run: send({ t: "view.blackout", blackout: false }) }];
   const scene = view.viewing;
   if (scene && (elsewhere(view) || revealOut(view))) {
-    items.push({ id: "showPlayers", kind: "showPlayers", title: showPlayers(scene.name), role: "action", description: CHIP_WORDS.showPlayersDescription, ...moving(view, revealOut(view)), run: moveRun(scene, true) });
+    items.push({ id: "showPlayers", kind: "showPlayers", title: showPlayers(placeOf(scene)), role: "action", description: CHIP_WORDS.showPlayersDescription, ...moving(view, revealOut(view)), run: moveRun(scene, true) });
   }
   return items;
 }
@@ -245,9 +277,13 @@ export function dmMenuSections(view: DmMenuView): ChipSection[] {
   ]);
 
   // Players' screens: Black out (not during one, whose items lead), Follow me, then Bring everyone here or Move players here.
+  // The players' floor is the start floor, so the DM is "elsewhere" on any other floor, the players' scene included (design-v1-floors.md 18.6).
   const scene = view.viewing;
   const away = elsewhere(view);
   const players = view.playerScene?.name;
+  // Another floor of the players' scene: they may hold it or not, and Bring everyone here has somewhere to send only where they do.
+  const sibling = away && view.playersSceneHere && !moveOut(view);
+  const unreached = sibling && !view.playersHoldHere && scene ? notReached(scene.floor?.name ?? scene.name) : null;
   const screens: ChipItem[] = [];
   if (!view.blackout && view.revealing === null) screens.push({ id: "blackout", kind: "blackout", title: CHIP_WORDS.blackout, role: "checkbox", checked: false, run: send({ t: "view.blackout", blackout: true }) });
   screens.push({
@@ -257,11 +293,12 @@ export function dmMenuSections(view: DmMenuView): ChipSection[] {
     role: "checkbox",
     checked: view.follow,
     // Enabled elsewhere too, as the panel's switch is, with the limit said on the item (ViewControls.tsx).
-    ...(away && players ? { note: followOnly(players), description: followOnlyDescription(players) } : {}),
+    ...(unreached !== null ? { description: unreached } : away && !sibling && players ? { note: followOnly(players), description: followOnlyDescription(players) } : {}),
     run: send({ t: "view.follow", follow: !view.follow }),
   });
   if (scene && away) {
-    screens.push({ id: "movePlayers", kind: "movePlayers", title: CHIP_WORDS.movePlayers, role: "action", note: onScene(scene.name), ...moving(view, moveOut(view)), run: moveRun(scene, false) });
+    screens.push({ id: "movePlayers", kind: "movePlayers", title: CHIP_WORDS.movePlayers, role: "action", note: onScene(placeOf(scene)), ...moving(view, moveOut(view)), run: moveRun(scene, false) });
+    if (sibling) screens.push({ id: "bringEveryone", kind: "bringEveryone", title: CHIP_WORDS.bringEveryone, role: "action", disabled: !view.playersHoldHere || !view.focusHere, ...(unreached !== null ? { description: unreached } : {}), run: bringRun(scene.id) });
   } else if (scene) {
     screens.push({ id: "bringEveryone", kind: "bringEveryone", title: CHIP_WORDS.bringEveryone, role: "action", disabled: !view.focusHere, run: bringRun(scene.id) });
   }

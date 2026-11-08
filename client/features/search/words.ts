@@ -117,6 +117,7 @@ export const KIND_LABEL: Readonly<Record<SearchKind, string>> = {
   condition: "Condition",
   section: "Section",
   scene: "Scene",
+  floor: "Floor",
   playlist: "Playlist",
   track: "Track",
   page: "Page",

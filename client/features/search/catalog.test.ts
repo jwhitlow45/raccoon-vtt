@@ -18,7 +18,7 @@ import type { Catalog, CatalogEntry, SearchContext } from "./catalog/types.ts";
 import { isSearchId, type SearchEntry, type SearchRoute } from "./entry.ts";
 import { buildIndex, searchRole, VIEW_ANCHORS } from "./index.ts";
 import { MENU_PAGES, recordId, routeFolds } from "./route.ts";
-import { DM_VIEW, keysOf, PAT_VIEW, seededRoom, viewOf } from "./search.testutil.ts";
+import { DM_VIEW, keysOf, PAT_VIEW, seededRoom, towerRoom, towerView, viewOf } from "./search.testutil.ts";
 
 /*
  * The catalogs lanes S2a and S2b write (docs/design/design-v1-qol.md 5, What
@@ -241,6 +241,44 @@ describe("the DM menu's items (design-v1-qol.md 5, Acting and 6)", () => {
     assert.equal(view.viewing?.id, "s2");
     assert.deepEqual(view.playerScene, { id: "s1", name: "Battle mat" });
     assert.deepEqual(Object.keys(view.members).sort(), ["dm1", "p1", "p2"]);
+  });
+});
+
+describe("the DM menu's items on a floor of the players' scene (design-v1-floors.md 7.3, 14)", () => {
+  const room = towerRoom();
+  // Reached once an unhidden party member stands there (openFloor), not before.
+  const reached = () => {
+    const r = towerRoom();
+    r.tokens.tp = { ...r.tokens.g1!, id: "tp", name: "Thorn's friend", kind: "pc", ownerIds: ["p1"], sceneId: "upper" };
+    return r;
+  };
+  const rowsOf = (state: typeof room) => {
+    const view = towerView(state, DM, "upper", ["ground", "upper", "attic"]);
+    const menu = dmMenuViewOf(view);
+    return { menu, rows: new Map(dmMenuEntries(menu).map((r) => [r.id, r])), items: new Map(itemsOf(dmMenuSections(menu)).map((i) => [i.id, i])) };
+  };
+
+  test("not reached: Move players here names the floor, Bring everyone here is off with its line, in the menu and the search alike", () => {
+    const { menu, rows, items } = rowsOf(room);
+    assert.deepEqual([menu.playersHoldHere, menu.playersSceneHere, menu.playerScene?.name], [false, true, "Tower · Ground floor"]);
+    assert.equal(rows.get("item:movePlayers")?.value, "on Tower · Upper floor");
+    const line = "Players haven't reached Upper floor, so their maps stay.";
+    assert.equal(rows.get("item:bringEveryone")?.description, line);
+    assert.deepEqual([items.get("bringEveryone")?.disabled, items.get("bringEveryone")?.description], [true, line]);
+    assert.equal(rows.get("item:follow")?.description, line);
+  });
+
+  test("reached: Bring everyone here is on with no line, and both builders hold the same two flags", () => {
+    const { menu, rows, items } = rowsOf(reached());
+    assert.deepEqual([menu.playersHoldHere, menu.playersSceneHere], [true, true]);
+    assert.equal(items.get("bringEveryone")?.disabled, false);
+    assert.equal(rows.get("item:bringEveryone")?.description, undefined);
+  });
+
+  test("a scene's twin is the row of its main floor", () => {
+    const { menu } = rowsOf(room);
+    assert.deepEqual(TWINS.movePlayers(menu), { panel: "scenes", page: "scene:ground" });
+    assert.deepEqual(TWINS.showPlayers(menu), { panel: "scenes", page: "scene:ground" });
   });
 });
 

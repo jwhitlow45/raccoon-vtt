@@ -241,6 +241,7 @@ export type PickStep =
   | { t: "key"; shortcut: string }
   | { t: "token"; tokenId: string }
   | { t: "tokenPanel"; tokenId: string }
+  | { t: "floor"; sceneId: string }
   | { t: "condition"; condition: string; remove: boolean }
   | { t: "item"; itemId: string }
   | { t: "roll"; formula: string }
@@ -260,6 +261,8 @@ export function pickStep(act: SearchAct, only: boolean): PickStep {
       return { t: "key", shortcut: act.shortcut };
     case "token":
       return only ? { t: "tokenPanel", tokenId: act.tokenId } : { t: "token", tokenId: act.tokenId };
+    case "floor":
+      return { t: "floor", sceneId: act.sceneId };
     case "character":
       return { t: "route", route: act.route ?? { panel: "characters", page: recordPage("character", act.characterId) } };
     case "condition":
@@ -688,12 +691,17 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
         openAt(scope, ui, DICE_FIELD);
         close();
         return;
-      case "tokenPanel":
+      case "tokenPanel": {
+        // Its floor shows too, so the selection is on the board in view.
+        const now = store.getState();
+        const floor = now.view?.tokens[step.tokenId]?.sceneId;
+        if (floor !== undefined && floor !== now.sceneId) actions.showFloor(floor);
         ui.select(step.tokenId);
         ui.showActions(false);
         openAt(scope, ui, { panel: "token" });
         close();
         return;
+      }
     }
     // The rest act on the map or as a key would, once the search has gone and given focus back.
     flushSync(close);
@@ -704,10 +712,15 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
       if (shortcut && (!shortcut.when || shortcut.when(env))) shortcut.run(env, NO_PRESS);
     } else if (step.t === "token") {
       const row = tokenRow(s, step.tokenId);
-      if (!row || !s.sceneId || !s.view) return;
+      const floor = s.view?.tokens[step.tokenId]?.sceneId;
+      if (!row || !floor || !s.sceneId || !s.view) return;
+      // A token on another held floor of the scene: show that floor first, then select and frame it.
+      if (floor !== s.sceneId) actions.showFloor(floor);
       // On a phone the panel's sheet goes first, so the token is not under it, as the outliner's tap does.
       if (!props.wide) ui.closePanel();
-      focusOutlineRow(row, { scope, ui, actions, sceneId: s.sceneId, tokens: s.view.tokens });
+      focusOutlineRow(row, { scope, ui, actions, sceneId: floor, tokens: s.view.tokens });
+    } else if (step.t === "floor") {
+      actions.showFloor(step.sceneId);
     } else {
       const on = selectionEffects(s);
       const op = on ? conditionOp(on.effects, step, on.target, () => actions.newId()) : null;
