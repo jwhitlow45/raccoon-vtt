@@ -2716,7 +2716,8 @@ function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Recor
       {panelSections(props.panels, props.grouped).map((section, i) => (
         <Fragment key={section.key}>
           {section.label ? (
-            <li style={{ gridColumn: "1 / -1", paddingTop: i === 0 ? 0 : theme.space(2) }}>
+            // Every heading stands space(4) under what comes before it: a row, by the list's gap and this space(2), or for the first, the search field, which keeps space(3) under itself (search/SearchSheet.tsx PanelsSearchField), and this space(1) (QE2-OLD).
+            <li style={{ gridColumn: "1 / -1", paddingTop: i === 0 ? theme.space(1) : theme.space(2) }}>
               <SectionLabel>{section.label}</SectionLabel>
             </li>
           ) : section.line ? (

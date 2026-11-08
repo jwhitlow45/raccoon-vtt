@@ -9715,9 +9715,11 @@ async function qolRestScreens(sweep: Sweep, page: Page, at: { size: Size; scale:
     await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
     const region = page.getByRole("region", { name: "Panels" });
     const field = region.locator('[data-search-open="panels"]');
-    // The field alone: the list's headings under it are older than the search and not its (the Panels list's first heading has no room above it).
-    if (await showsWithin(field, 3_000)) await sweep.measure(page, "qe-panels-search", field);
-    else await sweep.missing(page, "qe-panels-search", "the Panels list has no search field");
+    // The field, then the room over each of the list's headings: the first under the field, the others under a row (QE2-OLD).
+    if (await showsWithin(field, 3_000)) {
+      await sweep.measure(page, "qe-panels-search", field);
+      await sweep.add(page, "qe-panels-headings", await headingRoomLines(field, region.getByRole("list", { name: "Panels" }), `${sweep.at} qe-panels-headings`, at.scale));
+    } else await sweep.missing(page, "qe-panels-search", "the Panels list has no search field");
     await region.getByRole("button", { name: "Close Panels" }).click();
     await region.waitFor({ state: "detached" });
   }
@@ -9739,6 +9741,33 @@ async function qolRestScreens(sweep: Sweep, page: Page, at: { size: Size; scale:
   await menuHome(page);
   await closeSheets(page);
   await escapeAll(page);
+}
+
+/**
+ * The room over each heading of a DM's Panels list, in layout px, from the
+ * foot of what stands above it (the search field over the first, else the
+ * row before) to the heading's box: one room for every heading. The first
+ * had 12 px under the field where the others had 16 under a row (QE2-OLD).
+ */
+async function headingRoomLines(field: Locator, list: Locator, screen: string, scale: number): Promise<string[]> {
+  const box = await field.boundingBox();
+  if (!box) return [`${screen}: the search field has no box`];
+  const rooms = await list.evaluate((ul, fieldFoot) => {
+    type El = { children: ArrayLike<El>; textContent: string | null; querySelector(s: string): El | null; getBoundingClientRect(): { top: number; bottom: number } };
+    const found: { words: string; room: number }[] = [];
+    let above = fieldFoot;
+    for (const li of Array.from((ul as unknown as El).children)) {
+      const heading = li.querySelector("[data-section-label]");
+      if (heading) found.push({ words: (heading.textContent ?? "").trim(), room: heading.getBoundingClientRect().top - above });
+      above = li.getBoundingClientRect().bottom;
+    }
+    return found;
+  }, box.y + box.height);
+  if (rooms.length < 2) return [`${screen}: ${rooms.length} headings, a DM's list has three`];
+  const layout = rooms.map((r) => ({ ...r, room: Math.round((r.room / scale) * 10) / 10 }));
+  const least = Math.min(...layout.map((r) => r.room));
+  const most = Math.max(...layout.map((r) => r.room));
+  return most - least > LIMIT_PX ? [`${screen}: the room over each heading differs by ${Math.round((most - least) * 10) / 10} px: ${layout.map((r) => `${r.words} ${r.room}`).join(", ")}`] : [];
 }
 
 /**
