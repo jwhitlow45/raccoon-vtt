@@ -34,7 +34,7 @@ export function forgetPassedAsksForTests(): void {
 
 export type SoundAsk = { asking: boolean; playHere(): void; notHere(): void };
 
-/** Whether a projection has something a player would ask about: music, a loop, or an effect fired after the load and not in the first look. */
+/** Whether a projection has something a player would ask about: music, a loop, or an effect fired after the load (or an unpassed close) and not listed in the look then. */
 export function askWorthy(playing: Playing | null | undefined, firstIds: ReadonlySet<string> | null, loadAt: number): boolean {
   if (!playing) return false;
   if (playing.music || Object.keys(playing.loops).length > 0) return true;
@@ -57,23 +57,37 @@ export function askShows(asking: boolean, now: { eligible: boolean; passed: bool
   return !now.passed && now.worthy;
 }
 
-/** The ask between changes. `closedAt` is the server time an open ask last closed unpassed, null until it does. */
-export type AskState = { asking: boolean; closedAt: number | null };
+/** A look at the room: the effects it listed, and from when, in server ms, an effect not among them counts as fired after it. */
+export type AskLook = { ids: ReadonlySet<string>; at: number };
+
+/**
+ * The ask between changes. `listed` is the effects of the last state that
+ * held a `playing`. `closed` is the last time an open ask closed unpassed,
+ * with the effects listed until then, null until it does.
+ */
+export type AskState = { asking: boolean; listed: ReadonlySet<string>; closed: AskLook | null };
+
+export const ASK_START: AskState = { asking: false, listed: new Set(), closed: null };
 
 /**
  * The ask after a change, at server time `at`, with the first look at the
  * room (null until there is one). An ask that closed unpassed reopens on
- * music, a loop, or an effect fired after `closedAt`. An effect fired before
- * the close has stopped sounding by then or was withdrawn by EffectPlayer,
- * but the room still lists it, so it would bring back an ask with nothing to
- * hear. Pure.
+ * music, a loop, or an effect fired after the close and not listed in the
+ * last state before it. An effect fired before the close has stopped
+ * sounding by then or was withdrawn by EffectPlayer, but the room still
+ * lists it, so it would bring back an ask with nothing to hear. The time
+ * alone cannot tell it from a fresh one: firedAfter's slack for a clock a
+ * little ahead counts one fired up to a second before the close
+ * (DMUSBUILD-SOL-01). Pure.
  */
-export function askStep(ask: AskState, now: { eligible: boolean; passed: boolean; playing: Playing | null | undefined; first: { ids: ReadonlySet<string>; at: number } | null; at: number }): AskState {
+export function askStep(ask: AskState, now: { eligible: boolean; passed: boolean; playing: Playing | null | undefined; first: AskLook | null; at: number }): AskState {
   const { eligible, passed, playing, first } = now;
-  const worthy = first !== null && askWorthy(playing, first.ids, ask.closedAt ?? first.at);
+  const since = ask.closed ?? first;
+  const worthy = since !== null && askWorthy(playing, since.ids, since.at);
   const asking = askShows(ask.asking, { eligible, passed, playing, worthy });
   const closedUnpassed = ask.asking && eligible && playing === null;
-  return { asking, closedAt: closedUnpassed ? now.at : ask.closedAt };
+  const closed = closedUnpassed ? { at: now.at, ids: ask.listed } : ask.closed;
+  return { asking, listed: playing ? new Set(playing.effects.map((e) => e.id)) : ask.listed, closed };
 }
 
 export function useSoundAsk(): SoundAsk {
@@ -86,8 +100,8 @@ export function useSoundAsk(): SoundAsk {
   const store = useRoomStore();
   const eligible = !preview && !display && role === "player" && choice === null;
   // The first look at the room: what played then counts for a late joiner, and an effect fired before it never asks.
-  const first = useRef<{ ids: Set<string>; at: number } | null>(null);
-  const closedAt = useRef<number | null>(null);
+  const first = useRef<AskLook | null>(null);
+  const between = useRef<Omit<AskState, "asking">>(ASK_START);
   const [asking, setAsking] = useState(false);
 
   // A choice made elsewhere (This device, another window) answers it too, as eligible goes false.
@@ -95,9 +109,9 @@ export function useSoundAsk(): SoundAsk {
     const offset = store.getState().serverOffset;
     const at = offset === undefined ? Date.now() : performance.now() + offset;
     if (playing !== undefined && first.current === null) first.current = { ids: new Set(playing?.effects.map((e) => e.id) ?? []), at };
-    const next = askStep({ asking, closedAt: closedAt.current }, { eligible, passed: passed.has(roomId), playing, first: first.current, at });
-    closedAt.current = next.closedAt;
-    if (next.asking !== asking) setAsking(next.asking);
+    const { asking: next, ...kept } = askStep({ ...between.current, asking }, { eligible, passed: passed.has(roomId), playing, first: first.current, at });
+    between.current = kept;
+    if (next !== asking) setAsking(next);
   }, [playing, eligible, asking, roomId, store]);
 
   useEffect(() => {

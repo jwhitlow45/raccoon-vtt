@@ -11,7 +11,7 @@ import type { AskState } from "./useSoundAsk.ts";
  * fired before it. And what counts as something to hear at all.
  */
 
-const { askShows, askStep, askWorthy } = await import("./useSoundAsk.ts");
+const { ASK_START, askShows, askStep, askWorthy } = await import("./useSoundAsk.ts");
 const { soundEnabled } = await import("./SoundHost.tsx");
 const { firedAfter, resetServerRoomSoundForTests, serverRoomSound, serverSound, somethingToHear } = await import("./store.ts");
 const { api } = await import("../../../lib/api.ts");
@@ -65,12 +65,14 @@ describe("the ask", () => {
  */
 describe("the ask and a state with nothing about sound", () => {
   const music: Playing = { ...quiet, music: { run: "r", repeat: "all", fade: 5, now: { soundId: "s", at: T - 60_000 } } };
-  /** The ask through a run of confirmed states, from closed, as the hook steps it: shown or not after each, and whether the timer passed it. The page loads at T and the states come 10 s apart. */
-  const through = (states: (Playing | null | undefined)[], passed = false) => {
-    let ask: AskState = { asking: false, closedAt: null };
-    const first = { ids: new Set<string>(), at: T };
-    return states.map((playing, i) => (ask = askStep(ask, { eligible: true, passed, playing, first, at: T + i * 10_000 })).asking);
+  /** The ask through a run of confirmed states at the given server times, from closed, as the hook steps it: shown or not after each, and whether the timer passed it. The page loads at `loadAt`. */
+  const timed = (states: [Playing | null | undefined, number][], passed = false, loadAt = T) => {
+    let ask: AskState = ASK_START;
+    const first = { ids: new Set<string>(), at: loadAt };
+    return states.map(([playing, at]) => (ask = askStep(ask, { eligible: true, passed, playing, first, at })).asking);
   };
+  /** The same with the page loaded at T and the states 10 s apart. */
+  const through = (states: (Playing | null | undefined)[], passed = false) => timed(states.map((playing, i) => [playing, T + i * 10_000]), passed);
 
   test("an open ask closes when Only DM devices play turns on, unpassed, and asks again once it is off", () => {
     // The switch on: the player's projection loses `playing`.
@@ -96,6 +98,18 @@ describe("the ask and a state with nothing about sound", () => {
   test("an effect fired after the switch turns off asks again", () => {
     const fresh = { id: "fresh", builtin: "rumble" as const, at: T + 30_000 + LEAD_MS };
     assert.deepEqual(through([effect, null, effect, { ...effect, effects: [fx, fresh] }]), [true, false, false, true]);
+  });
+
+  test("an effect fired under a second before the close, inside firedAfter's slack, does not bring it back either", () => {
+    // Fired at T, so scheduled at T + LEAD_MS, asked about at T + 500 and closed at T + 600 by the switch or a blackout.
+    const soon = { id: "soon", builtin: "crash" as const, at: T + LEAD_MS };
+    const listed: Playing = { ...quiet, effects: [soon] };
+    const fresh = { id: "fresh", builtin: "rumble" as const, at: T + 60_100 + LEAD_MS };
+    assert.deepEqual(
+      timed([[listed, T + 500], [null, T + 600], [listed, T + 60_000], [{ ...listed, effects: [soon, fresh] }, T + 60_200]], false, T - 10_000),
+      [true, false, false, true],
+      "only the effect fired after the close asks",
+    );
   });
 
   test("a reconnect's cleared store keeps it open, a passed ask never comes back, and a choice answers it", () => {
