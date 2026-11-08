@@ -146,6 +146,15 @@ describe("the ownership rules restated for the limits", () => {
   });
 });
 
+describe("held floors read only the players' scene", () => {
+  test("a creature without owners, as older fixtures hold, and one on another scene change nothing", () => {
+    const { ownerIds: _o, ...bare } = token("bare", { sceneId: "u" });
+    const state = tower({ tokens: { bare: bare as never, thorn: thornOn("p2", { visibility: "dm" }) } });
+    assert.deepEqual(held(state, P1), ["g"]);
+    assert.ok(!ownedBy(state, "p1", bare as never));
+  });
+});
+
 describe("rooms without floors give today's answers (8.3)", () => {
   test("held floors are the scene each viewer covers, and the questions are the players' scene", () => {
     for (let seed = 0; seed < 40; seed++) {

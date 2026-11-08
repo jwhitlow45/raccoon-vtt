@@ -123,12 +123,11 @@ function plainHeld(state: RoomState, viewer: Viewer, opts: ProjectOpts): Readonl
 function heldNow(state: RoomState, viewer: Viewer, opts: ProjectOpts): SceneId[] {
   if (viewer.role === "dm") return opts.sceneId === null ? [] : floorsOf(state, opts.sceneId).map((s) => s.id);
   // plainHeld answered a blackout and a room without a start floor already.
-  const start = startFloor(state)!;
+  const floors = floorsOf(state, startFloor(state)!);
+  const here = new Set(floors.map((floor) => floor.id));
   const owned = new Set<SceneId>();
-  for (const token of Object.values(state.tokens)) if (ownedBy(state, viewer.memberId, token)) owned.add(token.sceneId);
-  return floorsOf(state, start)
-    .filter((floor) => owned.has(floor.id) || openFloor(state, floor.id))
-    .map((floor) => floor.id);
+  for (const token of Object.values(state.tokens)) if (here.has(token.sceneId) && ownedBy(state, viewer.memberId, token)) owned.add(token.sceneId);
+  return floors.filter((floor) => owned.has(floor.id) || openFloor(state, floor.id)).map((floor) => floor.id);
 }
 
 /** Words for a refusal that names a scene's floors (docs/design/design-v1-floors.md 7.1, 9). */
@@ -234,11 +233,11 @@ export function unhiddenPartyMember(state: Pick<RoomState, "characters">, token:
   return character !== undefined && (character.ownerIds?.length ?? 0) > 0;
 }
 
-/** Whether the member owns the token, directly or through its character. */
+/** Whether the member owns the token, directly or through its character. A record without owners, as older fixtures hold, has none. */
 export function ownedBy(state: Pick<RoomState, "characters">, memberId: string, token: Token): boolean {
-  if (token.ownerIds.includes(memberId)) return true;
+  if (token.ownerIds?.includes(memberId) === true) return true;
   const character = "ref" in token.actor ? ownEntry(state.characters, token.actor.ref) : undefined;
-  return character !== undefined && character.ownerIds.includes(memberId);
+  return character?.ownerIds?.includes(memberId) === true;
 }
 
 /**
