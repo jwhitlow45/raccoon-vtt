@@ -647,7 +647,9 @@ newest first.
   room format 39, change format 50. Until it reloads, an old DM page shows
   neither the switch nor its reminder. An old player page or table display
   plays nothing while the switch is on, since the server sends it nothing
-  about sound.
+  about sound. An old table display window in a DM's browser keeps that
+  browser's sound until it reloads, so the DM's page stays silent too: reload
+  it.
 - **Showing players a scene during a blackout**
   ([design](design/design-v1-qol.md)): change format 49. Lifting a blackout can
   name the scene the players must still be on, so the DM menu's show-scene
