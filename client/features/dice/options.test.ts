@@ -32,6 +32,7 @@ import {
   initiativeOp,
   initiativeRow,
   initiativeTag,
+  loggedRowTag,
   markOf,
   markOnRoll,
   noNumbersNote,
@@ -705,5 +706,36 @@ describe("a preset's reminders beside its sources (docs/design/design-v1-weather
     ]);
     assert.equal(line, `Attacks Dis: Restrained. Longbow, Shortbow Dis: Strong wind. ${WIND.text}`);
     assert.equal(attacksLine(none, [{ name: "Scimitar", preset: none }]), "");
+  });
+});
+
+describe("a turn card's results after a reload (LP32-B-CARD-2)", () => {
+  const THORN = { characterId: "thorn" };
+  const line = (seq: number, data: Partial<Extract<NonNullable<LogEntry["data"]>, { type: "dice" }>> & { rolls: DiceRoll[] }): LogEntry =>
+    ({ id: `${seq}:0`, at: "2026-11-07T20:00:00.000Z", kind: "event", data: { type: "dice", by: "pat", to: "all", ...data } }) as LogEntry;
+  const attack = (total: number, over: Partial<DiceRoll> = {}): DiceRoll => ({ formula: "1d20+6", faces: [total - 6], total, label: "Longsword", characterId: "thorn", ...over });
+  const damage = (total: number, label = "Longsword damage, Slashing", over: Partial<DiceRoll> = {}): DiceRoll => ({ formula: "1d8+3", faces: [total - 3], total, label, characterId: "thorn", type: "slashing", ...over });
+  const row = (kind: "attack" | "damage", after = 10) => ({ by: "pat", creature: THORN, name: "Longsword", kind, after });
+
+  test("the newest line this viewer rolled for the row's creature and name since the turn began, by its tag", () => {
+    const log = [
+      line(8, { tag: "last-turn", rolls: [damage(7)] }),
+      line(11, { tag: "hit", rolls: [attack(17)] }),
+      line(12, { tag: "first-damage", rolls: [damage(6)] }),
+      line(13, { tag: "handaxe", rolls: [damage(5, "Handaxe damage, Slashing")] }),
+      line(14, { tag: "crit", rolls: [damage(14, "Longsword critical damage, Slashing")] }),
+    ];
+    assert.equal(loggedRowTag(log, row("attack")), "hit");
+    assert.equal(loggedRowTag(log, row("damage")), "crit", "the newest, a critical hit's");
+    assert.equal(loggedRowTag(log.slice(0, 3), row("damage")), "first-damage");
+    assert.equal(loggedRowTag(log.slice(0, 1), row("damage")), null, "last turn's damage is not this turn's");
+  });
+
+  test("nothing another member rolled, nothing for another creature, no line without a tag, and no plain roll under the same name", () => {
+    assert.equal(loggedRowTag([line(11, { tag: "dm", by: "dm", rolls: [damage(6)] })], row("damage")), null, "the DM's roll for Thorn");
+    assert.equal(loggedRowTag([line(11, { tag: "wren", rolls: [damage(6, undefined, { characterId: "wren" })] })], row("damage")), null, "another creature's");
+    assert.equal(loggedRowTag([line(11, { rolls: [attack(17)] })], row("attack")), null, "a line with no tag, as another viewer's copy has");
+    assert.equal(loggedRowTag([line(11, { tag: "plain", rolls: [{ formula: "1d4", faces: [3], total: 3, label: "Longsword", characterId: "thorn" }] })], row("attack")), null, "a plain roll is no attack");
+    assert.equal(loggedRowTag([line(11, { tag: "second", part: 1, rolls: [damage(6)] })], row("damage")), null, "a later part of a group's tag");
   });
 });

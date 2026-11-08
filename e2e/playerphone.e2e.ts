@@ -1912,6 +1912,48 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     assert.deepEqual(off, [], "a control of the bar under the card, or out of line by more than 1 px");
   });
 
+  test("lp32-9. a reload mid-turn keeps the turn card's results: Pat's Longsword attack and damage show under their row again with Apply to, said nowhere and toasted nowhere (LP32-B-CARD-2)", async () => {
+    await ops.send({ t: "character.update", characterId: run.thorn.characterId, patch: { level: 5, stats: THORN_WEAPONS } });
+    await ops.send({ t: "room.update", settings: { playersApplyDamage: true } });
+    await ops.send({ t: "encounter.start", entries: [{ id: run.thorn.entryId, tokenId: run.thorn.id, value: 18 }, { id: run.goblin.entryId, tokenId: run.goblin.id, value: 10 }] });
+    await ops.send({ t: "encounter.next" });
+    await waitFor("Thorn's turn on Pat's page", () => playerSocket.state?.encounter?.activeEntryId === run.thorn.entryId || null);
+    try {
+      await setUp({ ...PORTRAIT, scale: 1 });
+      const card = player.locator('[data-alert="turn"]');
+      const attacks = card.getByRole("group", { name: "Thorn's attacks" });
+      /** Taps a row's control and returns the total of the line it rolled. */
+      const roll = async (name: RegExp) => {
+        const lines = (playerSocket.state?.log ?? []).length;
+        await attacks.getByRole("button", { name }).tap();
+        const line = await waitFor(`${name.source} in the log`, () => (playerSocket.state?.log ?? []).slice(lines).find((l) => l.data?.type === "dice" && l.data.by === run.patId) ?? null);
+        return line.data?.type === "dice" ? line.data.rolls.reduce((n, r) => n + r.total, 0) : 0;
+      };
+      await card.getByRole("button", { name: "Show Thorn's turn" }).tap();
+      const hit = await roll(/^Longsword$/);
+      const hurt = await roll(/^Longsword damage/);
+      const result = attacks.locator("[data-card-result]");
+      await result.filter({ hasText: new RegExp(`${hurt} ?Slashing damage`) }).waitFor();
+      await shots.take(player, "lp32-9-before-reload");
+
+      await setUp({ ...PORTRAIT, scale: 1 });
+      await card.getByRole("button", { name: "Show Thorn's turn" }).tap();
+      await result.filter({ hasText: new RegExp(`${hurt} ?Slashing damage`) }).waitFor();
+      assert.match((await result.innerText()).replace(/\s+/g, " "), new RegExp(`${hit} ?to hit`), "the attack's result is gone after the reload");
+      await attacks.getByRole("button", { name: new RegExp(`^Fill ${hurt} Slashing damage for Goblin 1$`) }).waitFor();
+      await shots.take(player, "lp32-9-after-reload");
+      assert.deepEqual(alignmentLines(await measureAlignment(card), "Thorn's turn card read back after a reload at 390 x 844 at 100%"), []);
+      await player.waitForTimeout(500);
+      assert.equal(await card.getByText("Rolling…").count(), 0, "a result read back from the log reads as rolling");
+      assert.equal(await player.locator("[data-toast]").filter({ hasText: /Longsword/ }).count(), 0, "a result read back from the log toasted");
+      const said = await card.locator('[role="status"][aria-live="polite"]').allTextContents();
+      assert.deepEqual(said.filter((t) => t.trim() !== ""), [], "a result read back from the log was said again");
+    } finally {
+      await ops.send({ t: "encounter.end" }).catch(() => {});
+      await ops.send({ t: "room.update", settings: { playersApplyDamage: false } }).catch(() => {});
+    }
+  });
+
   test("20. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");

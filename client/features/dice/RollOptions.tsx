@@ -29,7 +29,7 @@ import { abilityOp, openRecord } from "../combat/logic.ts";
 import { useDeathSaveWaits, WAITS_FOR_REGENERATION } from "../combat/state.ts";
 import { useAnyPending } from "../encounter/hooks.ts";
 import { reasonText } from "../resources/logic.ts";
-import type { PanelProps } from "../panels.ts";
+import { usePanelShown, type PanelProps } from "../panels.ts";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { useOpenPcStats } from "../pcstats/open.ts";
@@ -83,11 +83,13 @@ import {
   testLabel,
   typedTap,
   typedText,
+  loggedRowTag,
   type Marks,
   type Pickable,
   type SummaryPart,
   type TypedBonus,
 } from "./options.ts";
+import { findRolls, rollsOf } from "./logic.ts";
 import { useOption, useOptionStore } from "./optionState.ts";
 import { presetFor } from "./presets.ts";
 import { marksTest } from "./proficiencyPresentation.ts";
@@ -107,7 +109,7 @@ import { useRollPresses } from "./useDicePanel.ts";
 import { useActOnce, useInitiativeChanged, useRollBlocked, useRollOption, useRowResult, useWatchInitiative } from "./useRollOption.ts";
 import { ApplyTo } from "./ApplyTo.tsx";
 import { useCommittedRoll } from "./Roller.tsx";
-import { useReceiptVoice } from "./useReceipt.ts";
+import { useReceiptVoice, type ReceiptState } from "./useReceipt.ts";
 import { chipWords, rollChip } from "./targets.ts";
 import { cardAttacks } from "../combat/alerts.ts";
 
@@ -1250,7 +1252,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
           {rowUse.status.text}
         </p>
       ) : null}
-      {ctx.card ? <CardResults attackRow={named.attack !== undefined ? `${ctx.key}|${props.named.key}|attack` : null} damageRow={hasDamage ? damageRow : null} after={ctx.card.after} /> : null}
+      {ctx.card ? <CardResults attackRow={named.attack !== undefined ? `${ctx.key}|${props.named.key}|attack` : null} damageRow={hasDamage ? damageRow : null} after={ctx.card.after} creature={ctx.creature} name={named.name} /> : null}
       {player ? (
         <RowCast
           dice={ctx.dice}
@@ -1373,13 +1375,34 @@ function CardAttacks(props: Shown) {
   );
 }
 
-/** One row's newest roll as a card shows it, with its voice: the card sent it, so the card says it. */
-function useCardResult(row: string | null, after: number | undefined) {
+/**
+ * One row's newest roll as a card shows it, with its voice: the card sent
+ * it, so the card says it. A page reloaded mid-turn keeps no tag it sent,
+ * so where this page sent none for the row, its newest roll this turn is
+ * read back from the log instead (loggedRowTag, LP32-B-CARD-2), with its
+ * lines as they stand there. A tag this page sent before the turn began
+ * still hides the row's result, as it did. A roll read back is said by
+ * nobody and toasts nowhere, since it was said as it landed.
+ */
+function useCardResult(row: string | null, after: number | undefined, of: { creature: ActorTarget; name: string; kind: "attack" | "damage" }) {
   const result = useRowResult(row ?? "", after);
-  const tag = row === null ? null : result.tag;
-  const speaks = useReceiptVoice(tag, true);
-  const committed = useCommittedRoll(tag === null ? null : result.receipt);
-  return { ...result, tag, speaks, committed };
+  const live = row === null ? null : result.tag;
+  const shown = usePanelShown();
+  const me = useRoomView((s) => s.you?.memberId ?? null);
+  const { creature, name, kind } = of;
+  const sent = useOption((s) => row !== null && s.tags[row] !== undefined);
+  const logged = useRoomView((s) => (row === null || sent || !shown || after === undefined || me === null ? null : loggedRowTag(s.view?.log ?? [], { by: me, creature, name, kind, after })));
+  const log = useRoomView((s) => s.view?.log);
+  const loggedReceipt = useMemo<ReceiptState | null>(() => {
+    const lines = logged === null ? [] : findRolls(log ?? [], logged);
+    return lines.length > 0 ? { state: "committed", lines } : null;
+  }, [log, logged]);
+  const tag = live ?? logged;
+  const receipt = live !== null ? result.receipt : loggedReceipt;
+  const speaks = useReceiptVoice(live, true);
+  const committed = useCommittedRoll(tag === null ? null : receipt);
+  const rolls = useMemo(() => (live !== null ? result.rolls : loggedReceipt?.state === "committed" ? rollsOf(loggedReceipt.lines) : []), [live, result.rolls, loggedReceipt]);
+  return { tag, receipt, rolls, waiting: live !== null && result.waiting, speaks, committed };
 }
 
 type CardResult = ReturnType<typeof useCardResult>;
@@ -1419,9 +1442,9 @@ function resultLine(kind: "attack" | "damage", result: CardResult): ReactNode {
  * damage result. The live regions stay mounted, so each result is said
  * once as it lands.
  */
-function CardResults(props: { attackRow: string | null; damageRow: string | null; after: number | undefined }) {
-  const attack = useCardResult(props.attackRow, props.after);
-  const damage = useCardResult(props.damageRow, props.after);
+function CardResults(props: { attackRow: string | null; damageRow: string | null; after: number | undefined; creature: ActorTarget; name: string }) {
+  const attack = useCardResult(props.attackRow, props.after, { creature: props.creature, name: props.name, kind: "attack" });
+  const damage = useCardResult(props.damageRow, props.after, { creature: props.creature, name: props.name, kind: "damage" });
   const attackLine = resultLine("attack", attack);
   const damageLine = resultLine("damage", damage);
   const damageLines = damage.receipt?.state === "committed" ? damage.receipt.lines : null;

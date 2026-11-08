@@ -379,6 +379,37 @@ export function namedRoll(formula: string, label: string, creature?: ActorTarget
 
 // ------------------------------------------------------------ results
 
+/**
+ * A turn card row's newest roll from this turn's log lines, for a page that
+ * reloaded mid-turn, which keeps no tag it sent (LP32-B-CARD-2): the newest
+ * line since the turn began (`after`, a room seq) that this viewer rolled
+ * for the row's creature under the row's name, as the row's Attack or
+ * Damage labels it (D20Cell, damageRolls). Its tag reads the result again
+ * as the row read it. Null for none.
+ */
+export function loggedRowTag(log: readonly LogEntry[], row: { by: string; creature: ActorTarget; name: string; kind: "attack" | "damage"; after: number }): string | null {
+  const attack = cutLabel(row.name);
+  const damage = [`${row.name} damage`, `${row.name} critical damage`];
+  const named = (label: string | undefined): boolean => {
+    if (label === undefined) return false;
+    if (row.kind === "attack") return label === attack;
+    // A label cut to fit ends in "…", so its words are the start of what the row sent.
+    const cut = label.endsWith("…") ? label.slice(0, -1) : null;
+    return damage.some((head) => label === head || label.startsWith(`${head} `) || label.startsWith(`${head},`) || (cut !== null && head.startsWith(cut)));
+  };
+  const own = (roll: DiceRoll): boolean => ("tokenId" in row.creature ? roll.tokenId === row.creature.tokenId : roll.characterId === row.creature.characterId);
+  for (let i = log.length - 1; i >= 0; i--) {
+    const line = log[i]!;
+    const seq = Number(line.id.split(":")[0]);
+    if (seq < row.after) break;
+    const data = line.data;
+    if (line.kind !== "event" || data?.type !== "dice" || data.tag === undefined || data.by !== row.by || (data.part ?? 0) !== 0) continue;
+    const first = data.rolls[0];
+    if (first && own(first) && named(first.label) && (keptD20(first) !== null) === (row.kind === "attack")) return data.tag;
+  }
+  return null;
+}
+
 /** What a row says under it once its line lands (4.2, 4.3). */
 export function resultWords(rolls: readonly DiceRoll[], kind: "d20" | "attack" | "damage" | "recharge" | "plain", opts: { recharge?: number } = {}): string {
   const first = rolls[0];
