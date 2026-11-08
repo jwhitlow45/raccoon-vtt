@@ -223,7 +223,7 @@ For one scene, the new scene form has its own **Players see** row under the name
 
 The new scene still gets the automatic walls that suit its kind, so a map image keeps walls around floor only, whatever the scene you copy uses. Like copies the scene as it is when the new one is made, after the upload. If that scene is deleted while your map uploads, the new scene starts on your room's choice instead, and a message says so.
 
-![A new Map image scene named Cave, with its file picked and Players see on Reveal by hand, before Upload and create.](dm-guide/scenes-new-map.webp)
+![A new Map image scene named Forest road, under the party bar, with Players see on Reveal by hand and the Explore and Everything choices around it.](dm-guide/scenes-new-map.webp)
 
 ### A scene's settings
 
@@ -834,7 +834,7 @@ Press **Expand** (a chevron pointing up, with its name beside it where there is 
 
 The fight's alert cards and the app's toasts stay above the strip and leave a band of map clear over it, and the cards fold into their one row when they would leave no band. Where the map above the strip is short, a new toast shows as one line over the top bar, and the alerts' row moves into the strip's header until the toast goes. Tap the toast's words to read the whole message.
 
-![A goblin's action bar: AC, HP, Speed after its footprints and PP, the HP entry, its saves, Stat block, Details and elevation, then Conditions, Hidden, Multi-select, Roll and Attach, Size, and the padlock, copy and trash can icons.](dm-guide/action-bar.webp)
+![A goblin's action bar: AC, HP, Speed and PP, the HP entry with a Fireball damage slip, its saves, Stat block, Details and elevation, then Conditions, Hidden, Multi-select, All 4 Goblin Warriors, Roll, Attach and Place freely.](dm-guide/action-bar.webp)
 
 The whole bar, as the window on a wider screen or the expanded bar on a phone, holds, from top to bottom:
 
@@ -919,7 +919,7 @@ Every HP change during a fight goes into the fight's **HP changes** list, where 
 > [!NOTE]
 > The **Hidden** status in this grid means the creature took the Hide action. It is not the same as **Hidden** in the action bar, which hides the token from players.
 
-![The Conditions grid in the action bar of four selected characters: the 15 conditions, then the other statuses.](dm-guide/conditions.webp)
+![The Conditions grid in the action bar of four selected characters: a Recent row of the three used last, then the 15 conditions, then the other statuses.](dm-guide/conditions.webp)
 
 For more control over a condition, use **Add** in the **Conditions** section of the Token panel. Pick a condition to read its rules text, then set any of these:
 
@@ -1254,7 +1254,7 @@ Players' routes count an area only as the players see it: a DM-only area never b
 
 The group save rolls one saving throw for many creatures at once and applies the damage and conditions to all of them in a single step, with a single undo. Start it from a placed area's **Save and damage**, or from a save action in the Dice panel's roll options.
 
-![The group save for a Fireball: the fill line, the count of passes and fails, each creature's row with its roll and damage, and Apply.](dm-guide/group-save.webp)
+![The group save for a Fireball before the roll: the fill line, the Save, Check and No save choice, the Ability, the DC with the Recent DCs 13 and 15 under it, the switches and the damage field.](dm-guide/group-save.webp)
 
 Started from an area, the page fills itself in from the spell and its caster: "From Fireball: Dexterity save, DC 15 (Ivo's spell save DC), 8d6 Fire, half on a pass." Then work down the page:
 
@@ -1371,7 +1371,7 @@ A few things move the mark:
 
 Moments in a fight that need an answer from you show as cards stacked at the right of the map, under the top bar: roll requests, Concentration saves, save-ends reminders, a trap that went off, and the cards a creature's turn brings. Concentration and save-ends cards come first, then the cards a creature's turn brings, then roll requests and traps, then the short news, and the turn card, which lasts the whole turn, comes last. Where the screen is short, the cards fold into one row that names the most pressing one and how many more are waiting. Tap the row to see them all.
 
-![The start of the dragon's turn: the recharge card, "Fire Breath can recharge (5–6)." with Roll, Mark ready and Dismiss, above the dragon's turn card, beside its tracker row with the Lair tag, LA 4/4, LR 4/4 and a Fire Breath used chip.](dm-guide/alerts.webp)
+![The start of the dragon's turn: the recharge card, "Fire Breath can recharge (5–6)." with Roll, Mark ready and Dismiss, above the dragon's turn card with Rend's Attack, Damage and Critical, beside its tracker row with the Lair tag, LA 4/4, LR 4/4 and a Fire Breath used chip.](dm-guide/alerts.webp)
 
 The cards keep out of the way of whatever you are working on. On a phone, a pane that opens from the bottom of the screen for a label, a pin, a light or a trap folds the cards into their row on the pane's top edge, so the pane's header and **Close** stay in reach. On a wider screen these panes open beside what they edit, to the left of the cards, and where the screen is too narrow for both, the cards fold into their row at the top right with the pane just under it. Tap the row, or close the pane, to bring the cards back.
 
@@ -1398,7 +1398,7 @@ At the start of a creature's turn, whoever answers for it, its player or you for
 
 - **Attacks**, for a creature that has them: its turn card lists them as the Dice panel's rows, with this turn's results under each and the **Apply to** chips under a damage result, so a goblin's turn can run from the card alone. The card counts them with its uses, such as "2 attacks, 3 uses".
 
-![The troll's turn after Ivo's Fire Bolt: its Regeneration card, "Troll regenerates 15 HP.", with "Recorded Fire damage may stop Regeneration.", a note that a plain typed number is not counted, and Apply, Skip and Dismiss, over its turn card with Loathsome Limbs, and its row in the tracker.](dm-guide/regeneration.webp)
+![The troll's turn after Ivo's Fire Bolt: its Regeneration card, "Troll regenerates 15 HP.", with "Recorded Fire damage may stop Regeneration.", a note that a plain typed number is not counted, and Apply, Skip and Dismiss, over its turn card with Rend's Attack, Damage and Critical and Loathsome Limbs, and its row in the tracker.](dm-guide/regeneration.webp)
 
 **Dismiss** (the x on the turn card) hides a card on this device only, for this turn, so tidying your phone never answers the player's card. **Skip** answers for everyone. Nothing on these cards happens by itself: the next **Next** puts away whatever is left, and **Previous** brings the cards back as they were.
 
@@ -1681,7 +1681,7 @@ A companion whose character has no token on this scene reads **Away from Bree**,
 
 The **DM** panel holds the tools that act on your players' screens.
 
-![The top of the DM panel: Handouts, Players' screens and Preview.](dm-guide/dm-panel.webp)
+![The top of the DM panel: Handouts with its Recent list holding one handout and Show to everyone, then Players' screens and Preview.](dm-guide/dm-panel.webp)
 
 - **Handouts**: **Show a handout** shows an image or a PDF as a popup, to **Everyone** or to **Chosen players**. Pick **From the library** or **Upload a file**, or press **From starter packs** to choose one of the pictures that come with the app (see [Starter art](#starter-art)). Give it a **Title** (a starter picture fills in its own name if you haven't typed one), then press **Show**. For a PDF, the app asks which pages to include (up to 100). **Showing now** lists what is up, with **Hide** to take a handout down for everyone. **Recent** lists the last five handouts this device showed in this room, newest first, each with a button that names its audience, such as **Show to Pat**, to show it again with one press.
 - **Players' screens**:
@@ -2182,7 +2182,7 @@ Goblins and wolves wait in the trees beside a road, and the party is about to wa
 8. Press **Save and damage** on the area, and the group save fills itself in from Ivo's stat block (see [The group save](#the-group-save)). Press the roll button, and the goblins roll on the server. Take Ivo's own damage roll ("Use Ivo's 28") or press **Roll**, check the rows, and press **Apply**.
 9. Press **Next** through the turns. When the fight ends, press **End the fight** and tap it again to confirm.
 
-![Ivo's Fireball over the goblins: the group save with each goblin's save, its damage, and Apply.](dm-guide/ambush-fireball.webp)
+![Ivo's Fireball over the goblins: the foot of the group save, with a row for each creature and Roll 4 saves and damage above Discard.](dm-guide/ambush-fireball.webp)
 
 ## A dungeon crawl in the dark
 
@@ -2257,7 +2257,7 @@ The party faces an adult red dragon in its lair. It has Multiattack, Fire Breath
 - To take a Legendary Action, tap the dragon and press **Uses** in its action bar, or open its row's **⋯**, and tap the action by name, such as **Fiery Rays**. The count goes down, and Fiery Rays stays off until the start of the dragon's next turn, when they all come back. If you tap the wrong one, **Undo** in the top bar takes it back (see [Uses and Legendary Actions](#uses-and-legendary-actions)).
 - When the dragon fails a save in a group save, its row offers **Use Legendary Resistance (4 left)**, and a save-ends or Concentration card offers the same. For a save you roll yourself from its roll options, press **Use** beside **Legendary Resistance** in its **Uses**.
 
-![The dragon's turn after its Fire Breath and a Rend: its action bar with "Use 14 (Rend damage)", which every HP entry now offers, and Uses after a lightning bolt, and the Dice panel with the Rend damage on top, Rend's Attack, Damage and Critical, and Fire Breath marked Used.](dm-guide/boss.webp)
+![The dragon's turn after its Fire Breath and a Rend: its action bar with "Use 30 (Rend critical damage)" and the breakdown of that roll, which every HP entry now offers, and the Dice panel with the Rend damage on top, Apply to on Mara, Rend's Attack, Damage and Critical, and Fire Breath marked Used.](dm-guide/boss.webp)
 
 ## Spirit Guardians and a summoned companion
 
