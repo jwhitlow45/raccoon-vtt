@@ -150,6 +150,7 @@ window.__su = {
       size: bytes.length,
       startsWithTag: bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33,
       walk: check.ok ? { ...check.facts, offsets: undefined, stripped: check.stripped } : { why: check.why },
+      copyPieces: check.ok ? this.pieces.mp3Pieces(check.facts, check.bytes.length).length : 0,
     };
   },
   async preRoll(index) {
@@ -196,6 +197,8 @@ type Prepared = {
   size?: number;
   startsWithTag?: boolean;
   walk?: { rateHz?: number; kbps?: number; channels?: number; ms?: number; stripped?: number; why?: string };
+  /** The room's copy's pieces: each is decoded once to measure it, copied or converted. */
+  copyPieces?: number;
   took: number;
   steps: string[];
   decodes: number;
@@ -245,10 +248,10 @@ describe("adding sounds", { concurrency: false }, () => {
     assert.deepEqual([tone.copied, tone.walk?.rateHz, tone.walk?.kbps, tone.walk?.channels], [false, 44_100, 128, 2]);
     assert.ok(Math.abs(tone.level! - 20) <= 5, `the tone's level ${tone.level}`);
     assert.ok(tone.steps.includes("converting"));
-    assert.equal(tone.decodes, 0, "a plain WAV is read straight from its PCM, never decoded");
+    assert.equal(tone.decodes, tone.copyPieces, "a plain WAV is read straight from its PCM: only the room's copy is decoded, to measure it");
     // The 48 kHz WAV keeps its rate.
-    assert.deepEqual([surround.copied, surround.walk?.rateHz, surround.walk?.channels, surround.decodes], [false, 48_000, 2, 0]);
-    assert.deepEqual([vbr.copied, vbr.walk?.kbps, vbr.decodes], [false, 128, 1]);
+    assert.deepEqual([surround.copied, surround.walk?.rateHz, surround.walk?.channels, surround.decodes - surround.copyPieces!], [false, 48_000, 2, 0]);
+    assert.deepEqual([vbr.copied, vbr.walk?.kbps, vbr.decodes - vbr.copyPieces!], [false, 128, 1]);
     assert.deepEqual([fast.copied, fast.walk?.kbps], [false, 128]);
     const taggedBytes = readFileSync(fixture("sound-tagged.mp3")).length;
     assert.equal(tagged.copied, true);
@@ -270,11 +273,21 @@ describe("adding sounds", { concurrency: false }, () => {
     assert.ok(info?.ok, JSON.stringify(info));
     assert.deepEqual([info.copied, info.size, info.decodes, info.walk?.stripped], [true, frames.length, 2, 0]);
     assert.ok(flagged?.ok, JSON.stringify(flagged));
-    assert.deepEqual([flagged.copied, flagged.decodes, flagged.walk?.kbps], [false, 1, 128]);
-    // The same audio measured in pieces past every tag and decoded whole reads the same. The encoder's own copy of a
-    // 1 kHz tone at -20 dBFS decodes about 0.4 dB under its source, so the level is near +2.4 dB.
-    assert.ok(Math.abs(info.level! - flagged.level!) <= 1, `pieces ${info.level}, whole ${flagged.level}`);
+    assert.deepEqual([flagged.copied, flagged.decodes - flagged.copyPieces!, flagged.walk?.kbps], [false, 1, 128]);
+    // The encoder's own copy of a 1 kHz tone at -20 dBFS decodes about 0.45 dB under its source, so the level is near
+    // +2.4 dB. The emphasis file is that copy converted again, measured from its own copy, which decodes about 0.45 dB
+    // under the first: its level makes that up, so both play alike.
     assert.ok(Math.abs(info.level! - 22) <= 4, `the level ${info.level}`);
+    assert.ok(flagged.level! - info.level! >= 2 && flagged.level! - info.level! <= 7, `copied ${info.level}, converted again ${flagged.level}`);
+  });
+
+  test("su-1c. a converted WAV is measured from the MP3 the room keeps, so it gets the level a copied MP3 of the same audio gets", async () => {
+    const tone = toneSamples({ seconds: 10, rateHz: 44_100, channels: 2, tone: { hz: 1000, dbfs: -20 } });
+    const [converted, copied] = await prepareAll([written("level-tone.wav", toneWav(10)), written("level-tone.mp3", mp3Of(tone, 44_100))], "effect");
+    assert.ok(converted?.ok && copied?.ok, JSON.stringify([converted, copied]));
+    assert.deepEqual([converted.copied, copied.copied], [false, true]);
+    // The encoder's copy decodes about 0.45 dB under its source: measured from the WAV, it read +1.9 dB to the copy's +2.4.
+    assert.ok(Math.abs(converted.level! - copied.level!) <= 1, `converted ${converted.level}, copied ${copied.level}`);
   });
 
   test("su-2. a 48 kHz MP3 in 60-second pieces: each piece's pre-roll of 10,584 samples dropped lines up with a whole decode", async () => {
@@ -299,7 +312,7 @@ describe("adding sounds", { concurrency: false }, () => {
     await page.evaluate("window.__su.failDecodeAt = 0");
     assert.ok(r?.ok, JSON.stringify(r));
     assert.equal(r.copied, false);
-    assert.equal(r.decodes, 3, "the first piece, the failed one, then the whole file");
+    assert.equal(r.decodes - r.copyPieces!, 3, "the first piece, the failed one, then the whole file, before the room's copy is measured");
     assert.deepEqual([r.walk?.rateHz, r.walk?.channels, r.walk?.kbps], [44_100, 1, 64]);
   });
 
@@ -323,7 +336,7 @@ describe("adding sounds", { concurrency: false }, () => {
     const file = written("ten-minutes.wav", toneWav(600));
     const [r] = await prepareAll([file], "music");
     assert.ok(r?.ok, JSON.stringify(r));
-    assert.equal(r.decodes, 0);
+    assert.equal(r.decodes, r.copyPieces, "only the room's copy is decoded, to measure it");
     console.log(`su-5: a 10-minute stereo 44.1 kHz WAV (${Math.round(readFileSync(file).length / MB)} MiB) converted in ${Math.round(r.took)} ms`);
     assert.ok(r.took < 60_000, `${r.took} ms`);
     rmSync(file);
@@ -343,7 +356,7 @@ describe("adding sounds", { concurrency: false }, () => {
     // The same file on a computer decodes whole, mixed from 4 channels at 22.05 kHz.
     const computer = (await page.evaluate(`window.__su.prepare(2, "music")`)) as Prepared;
     assert.ok(computer.ok, JSON.stringify(computer));
-    assert.deepEqual([computer.decodes, computer.walk?.rateHz, computer.walk?.channels], [1, 44_100, 2]);
+    assert.deepEqual([computer.decodes - computer.copyPieces!, computer.walk?.rateHz, computer.walk?.channels], [1, 44_100, 2]);
     assert.deepEqual(consoleWatch.errors, []);
   });
 });

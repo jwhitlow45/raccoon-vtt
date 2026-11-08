@@ -42,6 +42,8 @@ const PIECE_SECONDS = 10;
 const IN_FLIGHT = 2;
 /** How long the media element may take to give a length. */
 const METADATA_TIMEOUT_MS = 15_000;
+/** Where a conversion's percent stands once every piece is encoded: measuring the encoded file takes it on to 99. */
+const ENCODED_PERCENT = 90;
 
 export async function prepareSound(input: { file: File; use: SoundUse; signal: AbortSignal; onStep(step: ReadStep): void; budget?: number }): Promise<ReadOutcome> {
   try {
@@ -87,15 +89,19 @@ async function prepare(input: { file: File; use: SoundUse; signal: AbortSignal; 
 
 // ---------------------------------------------------------------- the three reads
 
-/** The copy's own frames in pieces: its offsets count from the first of them, past every tag, so they are taken together. */
-async function measureMp3(copy: Extract<CopyCheck, { ok: true }>, signal: AbortSignal): Promise<{ lufs: number; peak: number } | null> {
+/**
+ * The copy's own frames in pieces: its offsets count from the first of them, past every tag, so they are taken together.
+ * `onPiece` hears the share measured after each piece.
+ */
+async function measureMp3(copy: Extract<CopyCheck, { ok: true }>, signal: AbortSignal, onPiece?: (share: number) => void): Promise<{ lufs: number; peak: number } | null> {
   const { bytes, facts } = copy;
   const context = new OfflineAudioContext(1, 1, OUTPUT_RATE);
   const worker = new EncodeWorker(signal);
   try {
     let started = false;
     let seq = 0;
-    for (const piece of mp3Pieces(facts, bytes.length)) {
+    const pieces = mp3Pieces(facts, bytes.length);
+    for (const piece of pieces) {
       let audio: AudioBuffer;
       try {
         // decodeAudioData takes its buffer away, so each piece gets a copy of its own bytes.
@@ -111,6 +117,7 @@ async function measureMp3(copy: Extract<CopyCheck, { ok: true }>, signal: AbortS
       }
       const channels = Array.from({ length: audio.numberOfChannels }, (_, c) => audio.getChannelData(c).slice(piece.drop, piece.drop + piece.keep));
       await worker.send({ t: "pcm", seq: seq++, channels }, channels.map((c) => c.buffer));
+      onPiece?.(seq / pieces.length);
     }
     if (!started) return null;
     const done = await worker.end();
@@ -133,9 +140,9 @@ async function encodeWav(input: { file: File; use: SoundUse; signal: AbortSignal
       const bytes = await file.slice(start, Math.min(wav.dataOffset + wav.dataBytes, start + perPiece)).arrayBuffer();
       signal.throwIfAborted();
       await worker.send({ t: "wav", seq: i, bytes }, [bytes]);
-      input.onStep({ t: "converting", percent: Math.floor(((i + 1) / pieces) * 99) });
+      input.onStep({ t: "converting", percent: Math.floor(((i + 1) / pieces) * ENCODED_PERCENT) });
     }
-    return await finish(worker, input.use);
+    return await finish(worker, input);
   } finally {
     worker.close();
   }
@@ -172,25 +179,37 @@ async function encodeWhole(input: { file: File; use: SoundUse; signal: AbortSign
       const to = Math.min(audio.length, from + perPiece);
       const piece = Array.from({ length: channels }, (_, c) => audio!.getChannelData(c).slice(from, to));
       await worker.send({ t: "pcm", seq: i, channels: piece }, piece.map((p) => p.buffer));
-      input.onStep({ t: "converting", percent: Math.floor(((i + 1) / pieces) * 99) });
+      input.onStep({ t: "converting", percent: Math.floor(((i + 1) / pieces) * ENCODED_PERCENT) });
     }
     // Every piece is in the worker: the decoded file can go before the encoder's last frames.
     audio = null;
-    return await finish(worker, input.use);
+    return await finish(worker, input);
   } finally {
     audio = null;
     worker.close();
   }
 }
 
-/** The encoder's MP3, walked as the server will walk it, and its length checked against the use with the allowance. */
-async function finish(worker: EncodeWorker, use: SoundUse): Promise<Prepared> {
+/**
+ * The encoder's MP3, walked as the server will walk it, its length checked against the use with the allowance, and
+ * its level measured from its own frames in pieces, as a copied MP3's is. lamejs's file decodes about 0.45 dB under
+ * its source, more for a bright one, and its peak moves too, so a level from the source would leave a converted file
+ * quieter than a copied one and could take its peak past the cap. The source's measure stands only where this browser
+ * will not decode the encoded file.
+ */
+async function finish(worker: EncodeWorker, input: { use: SoundUse; signal: AbortSignal; onStep(step: ReadStep): void }): Promise<Prepared> {
+  const { use, signal } = input;
   const done = await worker.end();
+  worker.close();
   if (!done.mp3) throw new Error("the encoder made no file");
-  const walk = walkMp3(new Uint8Array(await done.mp3.arrayBuffer()));
+  const bytes = new Uint8Array(await done.mp3.arrayBuffer());
+  const walk = walkMp3(bytes);
   if (!walk.ok) throw new Error(`the encoder's file failed the walk: ${walk.why}`);
   if (!soundUseFits(use, walk.facts.ms)) throw new Refused(lengthRefusal(use, walk.facts.ms, true) ?? { t: "tooLong" });
-  return { blob: done.mp3, level: levelOf(done), ms: walk.facts.ms, copied: false };
+  const copy = copyable(bytes);
+  const onPiece = (share: number) => input.onStep({ t: "converting", percent: ENCODED_PERCENT + Math.floor(share * (99 - ENCODED_PERCENT)) });
+  const measured = (copy.ok ? await measureMp3(copy, signal, onPiece) : null) ?? done;
+  return { blob: done.mp3, level: levelOf(measured), ms: walk.facts.ms, copied: false };
 }
 
 /** A decoder that ran out of memory says so in a RangeError, or by name in its message. */
