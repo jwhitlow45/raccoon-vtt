@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -9,6 +9,7 @@ import sharp from "sharp";
 import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { alignmentLines, LIMIT_PX, measureAlignment } from "./helpers/alignment.ts";
 import { isometric, toView, toWorld, type Turn, type ViewPoint } from "../client/lib/view.ts";
+import type { Op } from "../shared/protocol.ts";
 import { placedOnHex } from "../shared/rules/footprint.ts";
 import { cornerAt, hexCenter, hexCorners, hexInScene, hexNeighbors, type Hex, type HexGrid } from "../shared/rules/hex.ts";
 
@@ -406,6 +407,26 @@ const cavern = { sceneId: "", thorn: randomUUID(), bat: randomUUID(), archer: ra
 const SPHERE = "#3fa7ff";
 const GUARDIANS = "#8e4ec6";
 const CONE = "#f38400";
+
+/** A generated dungeon with secret doors, from the server's fixture (client/features/dungeon/ops.fixture.test.ts), for DG2M-ISO. */
+const SECRETS_DUNGEON = (JSON.parse(readFileSync(new URL("../server/rooms/dungeon.fixture.json", import.meta.url), "utf8")) as { dungeons: { name: string; sceneId: string; rooms: { x: number; y: number; w: number; h: number }[]; ops: Op[] }[] }).dungeons.find((d) => d.name === "secrets")!;
+
+/** An upright piece of wall, door or window as the test hook gives it (relief/isoTest.ts BoardLayout walls). */
+type StandingWall = { id: string; kind: string; ax: number; ay: number; bx: number; by: number; auto: boolean; framed: boolean; base: number; rise: number };
+
+/** The upright pieces on a grid edge's line that cover its middle, read in the page so a whole dungeon's walls never cross the wire. */
+function wallsOn(page: Page, edge: string): Promise<StandingWall[] | null> {
+  return page.evaluate((key) => {
+    const layout = (globalThis as unknown as { __rvttIsoHook?: { layout?(): { walls?: StandingWall[] } | null } }).__rvttIsoHook?.layout?.();
+    if (!layout?.walls) return null;
+    const [x, y, side] = key.split(",");
+    const mx = Number(x) + (side === "n" ? 0.5 : 0);
+    const my = Number(y) + (side === "w" ? 0.5 : 0);
+    const on = (w: StandingWall) =>
+      side === "w" ? w.ax === mx && w.bx === mx && Math.min(w.ay, w.by) <= my && Math.max(w.ay, w.by) >= my : w.ay === my && w.by === my && Math.min(w.ax, w.bx) <= mx && Math.max(w.ax, w.bx) >= mx;
+    return layout.walls.filter(on);
+  }, edge);
+}
 
 /** The board's depth list as the test hook gives it (relief/isoTest.ts BoardLayout). */
 type BoardLayout = {
@@ -2929,6 +2950,69 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await open();
     const planeJoint = await dip({ x: 5, y: 3 }, 0.1, 0.4);
     assert.ok(planeJoint >= 12, `ISOD: below 24 px the wall's planes keep their line: ${planeJoint.toFixed(1)} (${dips})`);
+  });
+
+  test("DG2M-ISO. a generated secret door stands on Pat's board as the automatic wall it reads as, level with the room's walls, then from the higher ground once the DM raises its room, not at all with only the raised side held, and on the DM's as the hidden door it is, which stands as a wall until found", async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    const d = SECRETS_DUNGEON;
+    const sceneId = randomUUID();
+    const door = d.ops.flatMap((op) => (op.t === "build.edge" ? op.edges : [])).find((e) => e.feature?.kind === "door" && e.feature.secret)!.key;
+    const [dx, dy, side] = door.split(",") as [string, string, "n" | "w"];
+    const [x, y] = [Number(dx), Number(dy)];
+    const squares = side === "w" ? [`${x - 1},${y}`, `${x},${y}`] : [`${x},${y - 1}`, `${x},${y}`];
+    const at = (key: string) => key.split(",").map(Number) as [number, number];
+    const inRoom = (key: string, r: { x: number; y: number; w: number; h: number }) => at(key)[0] >= r.x && at(key)[0] < r.x + r.w && at(key)[1] >= r.y && at(key)[1] < r.y + r.h;
+    const room = d.rooms.find((r) => squares.some((k) => inRoom(k, r)))!;
+    const inside = squares.find((k) => inRoom(k, room))!;
+    const outside = squares.find((k) => k !== inside)!;
+    // The generated map alone, on a scene of its own: its build ops under the scene's id.
+    await ops.send({ t: "scene.create", scene: { id: sceneId, name: "DG2M secret door", bounds: { w: 50, h: 50 }, fogEnabled: true } });
+    for (const op of d.ops) if (op.t === "build.paint" || op.t === "build.edge" || op.t === "build.height" || op.t === "build.stairs") await ops.send({ ...op, sceneId } as Op);
+    await ops.send({ t: "scene.update", sceneId, patch: { suggestedView: "isometric", defaultView: { x: x + 0.5, y: y + 0.5, zoom: 48 } } });
+    await ops.send({ t: "fog.live", sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: x - 3, y: y - 3, w: 7, h: 7 } }] });
+    await ops.send({ t: "room.setPlayerScene", sceneId });
+    await waitFor("DG2M: Pat on the dungeon", () => (patSocket.state?.meta.playerSceneId === sceneId ? true : null));
+    await waitFor("DG2M: Pat's board in Isometric", async () => ((await shownView(pat)).startsWith("isometric") ? true : null));
+    await isoOn(pat, 0);
+    // Pat's copy holds the door as an automatic wall bit, never as a door or a drawn wall.
+    const chunk = () => Object.values(patSocket.state?.buildChunks ?? {}).find((c) => c?.sceneId === sceneId && c.cx === Math.floor(x / 16) && c.cy === Math.floor(y / 16));
+    await waitFor("DG2M: Pat holds the door's chunk", () => chunk() ?? null);
+    assert.equal(chunk()!.edges[door], undefined, "DG2M: no edge feature reaches Pat for the hidden door");
+    const standing = async (what: string, ok: (w: StandingWall[]) => boolean) => {
+      let last: StandingWall[] | null = null;
+      try {
+        return await waitFor(what, async () => ((last = await wallsOn(pat, door)) && ok(last) ? last : null), 15_000);
+      } catch (err) {
+        throw new Error(`${(err as Error).message}: ${JSON.stringify(last)}`);
+      }
+    };
+    const flat = await standing("DG2M: the door stands as the room's automatic wall", (w) => w.length === 1);
+    assert.deepEqual([flat[0]!.kind, flat[0]!.auto, flat[0]!.framed, flat[0]!.base, flat[0]!.rise], ["wall", true, false, 0, 0.5], "DG2M: an automatic wall, half a square tall on flat ground, with no frame");
+    await shots.take(pat, "dg2m-iso-1-secret-door-flat");
+    // The DM raises the door's room 10 ft: with both squares held, the piece stands on the higher ground as a drawn wall would (D-261107-260).
+    const roomCells: string[] = [];
+    for (let ry = room.y; ry < room.y + room.h; ry++) for (let rx = room.x; rx < room.x + room.w; rx++) roomCells.push(`${rx},${ry}`);
+    await ops.send({ t: "build.height", sceneId, cells: roomCells, height: 10 });
+    const raised = await standing("DG2M: the door stands on the raised room's ground", (w) => w.length === 1 && w[0]!.base === 2);
+    assert.deepEqual([raised[0]!.auto, raised[0]!.framed, raised[0]!.rise], [true, false, 0.5], "DG2M: half a square above the 10 ft room");
+    await shots.take(pat, "dg2m-iso-2-secret-door-raised");
+    // With only the raised side held, the room's own side is the wall, as beside rock: nothing stands on the door's line.
+    const [ox, oy] = at(outside);
+    await ops.send({ t: "fog.live", sceneId, ops: [{ id: randomUUID(), mode: "hide", shape: { kind: "rect", x: ox, y: oy, w: 1, h: 1 } }] });
+    await standing("DG2M: nothing stands with the corridor square unheld", (w) => w.length === 0);
+    await shots.take(pat, "dg2m-iso-3-secret-door-near-only");
+    // The DM's copy holds the door itself, which stands as a wall while hidden, not an automatic one.
+    await dm.bringToFront();
+    await openSideTab(dm, "Scenes");
+    const row = dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^DG2M secret door/ }).first();
+    await row.click();
+    await waitFor("DG2M: the DM's board on the dungeon", async () => ((await row.textContent())?.includes("you are here") ? true : null));
+    await isoOn(dm, 0);
+    let dmWalls: StandingWall[] | null = null;
+    await waitFor("DG2M: the DM's hidden door stands as a wall", async () => ((dmWalls = await wallsOn(dm, door)) && dmWalls.length === 1 && !dmWalls[0]!.auto && dmWalls[0]!.base === 2 ? true : null), 15_000).catch((err: Error) => {
+      throw new Error(`${err.message}: ${JSON.stringify(dmWalls)}`);
+    });
+    await shots.take(dm, "dg2m-iso-4-secret-door-dm");
   });
 
   test("ISO-12. no page logged an error", () => {

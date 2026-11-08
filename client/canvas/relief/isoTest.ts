@@ -81,7 +81,10 @@ export type BoardVolumesNow = { standing: number; waiting: boolean };
  * whether one waits to, the colors of the rings at each standee's base,
  * and the stairs the layout draws as steps, with their spans in cells of
  * height, and the doors whose open leaf stands upright, with its hinge, its
- * far end and its base (docs/design/design-v1-iso-depth.md 12).
+ * far end and its base (docs/design/design-v1-iso-depth.md 12), and every
+ * upright piece of wall, door or window with its ends, whether it is an
+ * automatic wall and stands in a frame, its base and its rise, so a test
+ * can read how a hidden secret door stands (docs/design/design-v1-maps-vision.md 2.1).
  */
 export type BoardLayout = {
   order: ({ kind: "standee"; id: string } | { kind: "band"; area: string; band: number })[];
@@ -90,6 +93,7 @@ export type BoardLayout = {
   rings: Record<string, string[]>;
   steps: { x: number; y: number; d: string; lo: number; hi: number }[];
   leaves: { door: string; ax: number; ay: number; bx: number; by: number; base: number }[];
+  walls: { id: string; kind: string; ax: number; ay: number; bx: number; by: number; auto: boolean; framed: boolean; base: number; rise: number }[];
 };
 
 function flagged(): boolean {
@@ -151,17 +155,21 @@ function layoutOf(r: Reported | null): BoardLayout | null {
   const order: BoardLayout["order"] = [];
   const steps: BoardLayout["steps"] = [];
   const leaves: BoardLayout["leaves"] = [];
+  const walls: BoardLayout["walls"] = [];
   for (const item of r.items) {
     if (item.kind === "standee") order.push({ kind: "standee", id: item.id });
     else
       for (const p of item.pieces) {
         if (p.kind === "volume") order.push({ kind: "band", area: p.area, band: p.band });
         else if (p.kind === "steps" && p.span) steps.push({ x: p.x, y: p.y, d: p.span.d, lo: p.span.lo, hi: p.span.hi });
-        else if (p.kind === "wall" && p.framed && p.piece.kind === "leaf") leaves.push({ door: leafDoorKey(p.piece) ?? "", ax: p.piece.ax, ay: p.piece.ay, bx: p.piece.bx, by: p.piece.by, base: p.base });
+        else if (p.kind === "wall") {
+          walls.push({ id: p.id, kind: p.piece.kind, ax: p.piece.ax, ay: p.piece.ay, bx: p.piece.bx, by: p.piece.by, auto: p.piece.auto, framed: p.framed === true, base: p.base, rise: p.rise });
+          if (p.framed && p.piece.kind === "leaf") leaves.push({ door: leafDoorKey(p.piece) ?? "", ax: p.piece.ax, ay: p.piece.ay, bx: p.piece.bx, by: p.piece.by, base: p.base });
+        }
       }
   }
   steps.sort((a, b) => a.y - b.y || a.x - b.x);
-  return { order, standing: [...(r.volumes?.standing ?? [])].sort(), waiting: r.volumes?.waiting ?? false, rings: Object.fromEntries([...(r.rings ?? [])].map(([id, colors]) => [id, [...colors]])), steps, leaves };
+  return { order, standing: [...(r.volumes?.standing ?? [])].sort(), waiting: r.volumes?.waiting ?? false, rings: Object.fromEntries([...(r.rings ?? [])].map(([id, colors]) => [id, [...colors]])), steps, leaves, walls };
 }
 
 /** Installs `__rvttIsoHook` while the test flag is set. */
