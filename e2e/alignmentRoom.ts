@@ -20,7 +20,7 @@ import { barControl, ConsoleWatch, dragCells, expandBar, multiSelect, OpSocket, 
 import { DEFAULT_SNAPSHOT_BUDGET } from "../server/rooms/budgets.ts";
 import { INTER_FILES } from "../client/lib/interFont.ts";
 import { PALETTES, theme } from "../client/lib/theme.ts";
-import { alignmentLines, containmentLines, disabledLookLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, menuWordLines, pillLines, popoverScrollbarLines, proficiencyHeightLines, proficiencyLines, rollingGridLines, rollRowLines, saveOutlineLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
+import { alignmentLines, badgeCrossLines, containmentLines, disabledLookLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, menuWordLines, pillLines, popoverScrollbarLines, proficiencyHeightLines, proficiencyLines, rollingGridLines, rollRowLines, saveOutlineLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 import { measureSpacing, spacingLines, type SpacingFinding } from "./helpers/spacing.ts";
 import { moreMenuFixture } from "./helpers/menuFixture.ts";
 import { openGroup } from "./helpers/groups.ts";
@@ -388,7 +388,8 @@ export class Sweep {
   async pills(page: Page, screen: string, opts: { points?: readonly PillPoint[]; needPills?: boolean } = {}): Promise<void> {
     const check = await pillLines(page, `${this.at} ${screen}`, opts);
     for (const words of check.matched) this.seen.add(`${screen} points at ${words}`);
-    await this.add(page, screen, check.lines);
+    const trapNames = Object.values(dmSocket.state?.traps ?? {}).map((t) => t.name);
+    await this.add(page, screen, [...check.lines, ...(await badgeCrossLines(page, `${this.at} ${screen}`, trapNames))]);
   }
 
   /** A screen the sweep must reach at this size and did not, shot as it stands. */

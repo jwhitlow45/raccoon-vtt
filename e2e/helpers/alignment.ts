@@ -1,6 +1,7 @@
 import type { Locator, Page } from "playwright-core";
 import sharp from "sharp";
 import { PALETTES, theme } from "../../client/lib/theme.ts";
+import { BADGE_PX } from "../../client/features/traps/badge.ts";
 
 /**
  * The alignment check (docs/design/design-v1-polish.md 4): what the polish pass
@@ -1901,6 +1902,65 @@ function pillsInPage(): { stages: number; pills: PillSeen[] } {
     }
   }
   return { stages: stages.length, pills };
+}
+
+/** A trap name's pill and the badge disc nearest it, in page px: the gap between their boxes (negative when they cross) and the rectangles. */
+type BadgeGap = { text: string; gap: number; pill: Box; badge: Box };
+
+/**
+ * Every pointed board pill whose words start with one of `names` (the
+ * traps' names), with the trap badge disc (a Konva Circle 20 px across on
+ * screen, TrapLayer.tsx BADGE_PX) nearest it. `gap` is the space between
+ * the two boxes along the axis they part on, and negative when they cross.
+ */
+function badgeGapsInPage([badgePx, names]: [number, string[]]): BadgeGap[] {
+  type KRect = { x: number; y: number; width: number; height: number };
+  type KNode = { isVisible(): boolean; getAbsoluteOpacity(): number; getClientRect(o?: { skipStroke?: boolean }): KRect };
+  type KLabel = KNode & { getTag(): (KNode & { pointerDirection(): string }) | undefined; getText(): (KNode & { text(): string }) | undefined };
+  type KStage = { container(): { getBoundingClientRect(): DomRect }; find(selector: string): KNode[] };
+  const g = globalThis as unknown as { Konva?: { stages: KStage[] } };
+  const out: BadgeGap[] = [];
+  for (const stage of g.Konva?.stages ?? []) {
+    const host = stage.container().getBoundingClientRect();
+    const place = (r: KRect): Box => ({ l: host.left + r.x, t: host.top + r.y, r: host.left + r.x + r.width, b: host.top + r.y + r.height });
+    const discs = stage
+      .find("Circle")
+      .filter((c) => c.isVisible() && c.getAbsoluteOpacity() >= 0.3)
+      .map((c) => c.getClientRect({ skipStroke: true }))
+      .filter((r) => Math.abs(r.width - badgePx) < 1.5 && Math.abs(r.height - badgePx) < 1.5)
+      .map(place);
+    for (const label of stage.find("Label") as KLabel[]) {
+      if (!label.isVisible() || label.getAbsoluteOpacity() < 0.3) continue;
+      const tag = label.getTag();
+      const direction = tag?.pointerDirection() ?? "none";
+      if (!tag || (direction !== "up" && direction !== "down")) continue;
+      const text = (label.getText()?.text() ?? "").replace(/\n/g, " / ");
+      // A long name is cut short in its pill, so only its start is compared.
+      if (!names.some((n) => text.startsWith(n.slice(0, 10)))) continue;
+      const pill = place(tag.getClientRect({ skipStroke: true }));
+      let nearest: BadgeGap | null = null;
+      for (const badge of discs) {
+        const gap = Math.max(Math.max(pill.l, badge.l) - Math.min(pill.r, badge.r), Math.max(pill.t, badge.t) - Math.min(pill.b, badge.b));
+        if (nearest === null || gap < nearest.gap) nearest = { text: text.slice(0, 60), gap, pill, badge };
+      }
+      if (nearest) out.push(nearest);
+    }
+  }
+  return out;
+}
+
+/** Each trap name's pill with the badge nearest it, for the sweep and for a look at the numbers. */
+export async function badgeGaps(page: Page, names: readonly string[]): Promise<BadgeGap[]> {
+  return page.evaluate(badgeGapsInPage, [BADGE_PX, [...names]] as [number, string[]]);
+}
+
+/** A line for each trap name whose pill crosses a trap badge by more than the limit, with the numbers. */
+export async function badgeCrossLines(page: Page, screen: string, names: readonly string[]): Promise<string[]> {
+  const round = (n: number) => Math.round(n * 10) / 10;
+  const box = (b: Box) => `${round(b.l)},${round(b.t)} to ${round(b.r)},${round(b.b)}`;
+  return (await badgeGaps(page, names))
+    .filter((c) => round(-c.gap) > LIMIT_PX)
+    .map((c) => `${screen}: pill "${c.text}" (${box(c.pill)}) crosses a trap badge (${box(c.badge)}) by ${round(-c.gap)} px`);
 }
 
 /**
