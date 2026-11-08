@@ -1660,6 +1660,7 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 | 0 | Fit the map | everyone |
 | I | Switch between top-down and isometric | everyone |
 | Q, E | Turn the isometric view left, right | everyone |
+| [, ] | Show the floor below, the floor above. At the bottom or the top floor, a note says there is none | everyone, on a scene of several floors |
 | / | Search the scene in the outliner | DM |
 | S | Hide or show the side panel, on a screen 900 px or wider | everyone |
 | O | Go to the other panel, with two in the side panel | everyone |
