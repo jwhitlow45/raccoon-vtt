@@ -755,12 +755,13 @@ describe("13. the held glow", () => {
     assert.equal(page.heldOn, false);
   });
 
-  test("a touch left to the browser, a cancelled touch, a new item and an unmount each let go at once", () => {
+  test("a touch left to the browser, a second finger, a cancelled touch, a new item and an unmount each let go at once", () => {
     const cases: [string, (session: InstanceType<typeof SwipeSession>) => void][] = [
       ["a sideways move", (s) => s.move({ dx: 30, dy: 2, at: 30, cancelable: true })],
       ["a move the browser will not let the page cancel", (s) => s.move({ dx: 0, dy: 20, at: 30, cancelable: false })],
-      // A second finger and a touchcancel both end in this cancel, from different listeners: swipe.e2e.ts test 5 checks the second finger's document listener and fu43c-c the surface's own touchcancel one.
-      ["a cancelled touch", (s) => s.cancel()],
+      // The document's second finger listener calls cancel() and the surface's own touchcancel listener calls drop(), so each gets its case (swipe.e2e.ts test 5 and fu43c-c check the listeners themselves).
+      ["a second finger", (s) => s.cancel()],
+      ["a cancelled touch", (s) => s.drop()],
       ["a new item", (s) => s.stop()],
       ["an unmount", (s) => s.dispose()],
     ];
