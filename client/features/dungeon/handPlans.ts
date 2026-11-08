@@ -2,10 +2,10 @@ import type { TerrainId } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { MEMBER_COLORS } from "../../lib/theme.ts";
 import { builderScene, type SceneInput } from "../scenes/create.ts";
-import { blockPlaceholder, buildOps, lightPlaceholder, PAGE_PLACEHOLDER, pinPlaceholder, stampPlaceholder, stonePlaceholder, trapOps } from "./ops.ts";
+import type { KeyInput } from "./keyPage.ts";
 import type { DungeonPlan, PlanRoom } from "./plan.ts";
-import { landAll, scratchRoom } from "./scratch.ts";
-import { GENERATOR_VERSION } from "./settings.ts";
+import { landDungeon } from "./scratch.ts";
+import { DEFAULT_CONTEXT, DEFAULT_SETTINGS, GENERATOR_VERSION, type DungeonSettings } from "./settings.ts";
 
 /*
  * Plans written by hand for the landing tests, so the ops, the scratch room
@@ -223,39 +223,47 @@ export function hundredPlan(): DungeonPlan {
   };
 }
 
-/**
- * The 100-op hand plan's ops as Make sends them, the stamps, lights,
- * stones, key page and pins written out here so section 6's measure runs
- * before the landing writes them itself. Each key block is about as long
- * as a generated room's line.
- */
+/** The choices the hand plans were "made" with: the largest, with the key, at levels 11 to 16 so a Rolling Stone stands. */
+export const HAND_SETTINGS: DungeonSettings = { ...DEFAULT_SETTINGS, w: 100, h: 100, rooms: 40, density: "dense", corridors: "winding", wide: true, band: "11-16", dressing: "full", lit: 100, key: true };
+
+/** The key's room facts for a hand plan's preview: the dialog's name, a DM's color, 5 ft squares. */
+export function handKey(name = "Crypt"): KeyInput {
+  return { name, color: MEMBER_COLORS[0]!, feetPerCell: 5 };
+}
+
+/** The 100-op hand plan's ops as Make sends them, landed through the scratch room as the worker lands a plan. */
 export function hundredOps(scene: SceneInput): ClientOp[] {
-  const plan = hundredPlan();
-  const sceneId = scene.id;
-  const build = buildOps(plan, scene);
-  const stamps = plan.stamps.map((s, i) => ({ id: stampPlaceholder(i), art: { key: s.key }, x: s.x, y: s.y, w: s.w, h: s.h, rotation: s.rotation, z: i, visibility: "all" as const }));
-  const dress: ClientOp[] = [
-    { t: "build.stamps", sceneId, put: stamps.slice(0, 100) },
-    { t: "build.stamps", sceneId, put: stamps.slice(100) },
-    { t: "build.lights", sceneId, put: plan.lights.map((l, i) => ({ id: lightPlaceholder(i), x: l.x, y: l.y, bright: 20, dim: 20, on: true, walls: true, label: l.label })) },
-    ...plan.stones.map(([x, y], i): ClientOp => ({
-      t: "token.create",
-      token: { id: stonePlaceholder(i), sceneId, kind: "object", name: "Rolling stone", size: "large", x, y, visibility: "dm", hpVisibility: "hidden", actor: { inline: { hp: { cur: 100, max: 100, temp: 0 }, life: "alive", ac: 17, speeds: { walk: 60 }, initBonus: 8, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" } } },
-    })),
+  const landed = landDungeon(hundredPlan(), scene, HAND_SETTINGS.band, DEFAULT_CONTEXT, handKey(scene.name), HAND_SETTINGS);
+  if (!landed.ok) throw new Error(landed.why);
+  return landed.ops;
+}
+
+/**
+ * twoRooms dressed (phase 2): a fire pit and its Torch in A, a bed and a
+ * chest in B, a hidden Rolling stone in the corridor that a Rolling Stone
+ * trap on its plate shows, Poisoned Darts with hits along the corridor, a
+ * Fire-Casting Statue's cone from B's statue, and the key for both rooms,
+ * B lit, trapped and raised.
+ */
+export function dressedRooms(): DungeonPlan {
+  const plan = twoRooms();
+  plan.stamps = [
+    { key: "fire-pit", x: 4.5, y: 4.5, w: 1, h: 1, rotation: 0 },
+    { key: "bed", x: 19.5, y: 4.75, w: 1, h: 1.5, rotation: 0 },
+    { key: "chest", x: 16.5, y: 8.5, w: 0.75, h: 0.5, rotation: 90 },
+    { key: "ph-statue", x: 20.5, y: 8.375, w: 1, h: 1.25, rotation: 270 },
   ];
-  const built = landAll(scratchRoom(), [...build, ...dress]);
-  if (!built.ok) throw new Error(built.why);
-  const line = (n: number) => `**${n}.** 8 × 8 squares (40 by 40 ft). Doors: north to ${n + 1}, east to ${n + 8} (locked). A dais 5 ft up. Lit by a fire pit. Trap: Hidden Pit. Trinket: A tiny silver icon of a raven.`;
-  const blocks = [{ id: blockPlaceholder(0), text: "A generated Dungeon of 40 rooms on 100 × 100 squares (500 by 500 ft). Room 1 is the way in. Each room's pin carries its number." }, ...plan.rooms.map((_, i) => ({ id: blockPlaceholder(i + 1), text: line(i + 1) }))];
-  const key: ClientOp[] = [
-    { t: "journal.create", page: { id: PAGE_PLACEHOLDER, title: `${scene.name} key`, folder: "Dungeon keys", access: "dm", blocks } },
-    ...plan.rooms.map((r, i): ClientOp => ({ t: "pin.put", pin: { id: pinPlaceholder(i), sceneId, x: r.pin[0] + 0.5, y: r.pin[1] + 0.5, label: String(i + 1), pageId: PAGE_PLACEHOLDER, color: MEMBER_COLORS[0]!, visibility: "dm" } })),
+  plan.lights = [{ x: 4.5, y: 4.5, preset: "Torch", label: "Fire pit", stamp: "fire-pit" }];
+  plan.stones = [[8, 4]];
+  plan.traps = [
+    ...plan.traps,
+    { preset: "rolling-stone", zone: { cells: [{ x: 11, y: 5, w: 1, h: 1 }] }, stone: 0 },
+    { preset: "poisoned-darts", zone: { cells: [{ x: 9, y: 5, w: 1, h: 1 }] }, hits: [{ x: 8, y: 5, w: 4, h: 1 }] },
+    { preset: "fire-casting-statue", zone: { cells: [{ x: 19, y: 7, w: 1, h: 1 }] }, cone: { origin: [20.5, 8.5], yaw: 225 } },
   ];
-  // A Rolling Stone's one action shows its stone.
-  const traps = trapOps(plan, built.room.buildChunks, "11-16", sceneId).map((op, i): ClientOp => {
-    const stone = plan.traps[i]?.stone;
-    if (op.t !== "trap.create" || stone === undefined) return op;
-    return { ...op, trap: { ...op.trap, rig: { ...op.trap.rig, actions: [{ show: { tokenId: stonePlaceholder(stone) } }] } } };
-  });
-  return [...build, ...dress, ...traps, ...key];
+  plan.key = [
+    { n: 1, room: 0, doors: [{ side: "w", to: "edge", state: "closed" }, { side: "e", to: 2, state: "closed" }], light: "Fire pit", traps: [], trinket: 0 },
+    { n: 2, room: 1, doors: [{ side: "w", to: 1, state: "locked" }], traps: ["Hidden Pit", "Poisoned Needle", "Fire-Casting Statue"], trinket: 99, dais: true },
+  ];
+  return plan;
 }

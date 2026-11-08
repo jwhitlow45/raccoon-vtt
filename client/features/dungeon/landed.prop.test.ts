@@ -11,7 +11,7 @@ import { findRoute, WalkSearch, WalkWorld, type WalkInput } from "#shared/rules/
 import { floodRoom, indexBuild, LEDGE, sceneWalls } from "#shared/rules/walls.ts";
 import { LEVEL_BANDS } from "#shared/srd/traps.ts";
 import { builderScene } from "../scenes/create.ts";
-import { SCENE_PLACEHOLDER } from "./ops.ts";
+import { MAX_OPS, SCENE_PLACEHOLDER } from "./ops.ts";
 import type { DungeonPlan, PlanRoom } from "./plan.ts";
 import { previewOf } from "./scratch.ts";
 import { newSeed } from "./seed.ts";
@@ -173,16 +173,19 @@ function unsqueezedReach(room: RoomState, token: ReturnType<typeof ownWalk>, fro
 }
 
 function checkLanded(s: DungeonSettings, seedText: string): void {
-  const made = previewOf(s, seedText, builderScene({ id: "x", name: "Dungeon", w: s.w, h: s.h }), DEFAULT_CONTEXT, null);
+  const made = previewOf(s, seedText, builderScene({ id: "x", name: "Dungeon", w: s.w, h: s.h }), DEFAULT_CONTEXT, { name: "Dungeon", color: "#30a46c", feetPerCell: 5 });
   if (!made.ok) {
     assert.equal(made.error, "fit", `a plan the scratch room refuses is a generator bug (${JSON.stringify(s)} ${seedText})`);
     return;
   }
   const { plan, room } = made;
-  assert.ok(made.ops.length <= 60, `${made.ops.length} ops fit the server's burst`);
+  assert.ok(made.ops.length <= MAX_OPS, `${made.ops.length} ops within Make's cap`);
   assert.equal(made.ops[0]?.t, "scene.create");
-  const firstTrap = made.ops.findIndex((op) => op.t === "trap.create");
-  if (firstTrap >= 0) assert.ok(made.ops.slice(firstTrap).every((op) => op.t === "trap.create"), "traps last");
+  // Phase 2's order (section 6): each kind after the ones it reads, a trap after the stone it shows and a pin after its page.
+  const order = ["scene.create", "build.paint", "build.edge", "build.height", "build.stairs", "build.stamps", "build.lights", "token.create", "trap.create", "journal.create", "pin.put"];
+  const ranks = made.ops.map((op) => order.indexOf(op.t));
+  assert.ok(ranks.every((r, i) => r >= 0 && (i === 0 || r >= ranks[i - 1]!)), `ops in order: ${made.ops.map((op) => op.t).join(", ")}`);
+  assert.equal(made.ops.some((op) => op.t === "journal.create"), s.key && plan.key !== null, "the key's page exactly with DM key on");
   for (const op of made.ops) if (op.t === "build.edge") for (const e of op.edges) assert.equal(e.feature?.kind, "door", "only doors are drawn");
   // Heights merged by value, 0 left out: a value takes more than one op only once it fills an op's cells.
   const heights = made.ops.flatMap((op) => (op.t === "build.height" ? [op] : []));

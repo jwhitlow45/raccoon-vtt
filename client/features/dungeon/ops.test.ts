@@ -3,8 +3,9 @@ import { test } from "node:test";
 import { serializedBytes } from "#shared/limits.ts";
 import { clientOpSchema, MAX_BUILD_CELLS, type ClientOp } from "#shared/protocol.ts";
 import { trapPreset } from "#shared/srd/traps.ts";
-import { dialogScene, hundredOps, hundredPlan, twoRooms, widestDoors } from "./handPlans.ts";
-import { buildOps, MAX_OPS, PAGE_PLACEHOLDER, SCENE_PLACEHOLDER, trapOps, trapPlaceholder, withIds } from "./ops.ts";
+import { groundAt } from "#shared/rules/heights.ts";
+import { dialogScene, dressedRooms, hundredOps, hundredPlan, twoRooms, widestDoors } from "./handPlans.ts";
+import { buildOps, dressOps, MAX_OPS, PAGE_PLACEHOLDER, SCENE_PLACEHOLDER, stonePlaceholder, trapInputOf, trapOps, trapPlaceholder, withIds } from "./ops.ts";
 import { landAll, scratchRoom, summarize } from "./scratch.ts";
 import { OP_BYTES } from "../uvtt/batch.ts";
 
@@ -205,4 +206,86 @@ test("DG2B: withIds refuses a reference to anything this send did not make befor
   assert.throws(() => withIds(removes, id), /removes no stamp/);
   const pinElsewhere = ops.map((op) => (op.t === "pin.put" ? { ...op, pin: { ...op.pin, sceneId: "elsewhere" } } : op));
   assert.throws(() => withIds(pinElsewhere, id), /another scene/);
+});
+
+test("DG2B: stamps go 100 an op in plan order, drawn in that order, for everyone, at the plan's place, size and turn", () => {
+  const plan = hundredPlan();
+  const ops = dressOps(plan, SCENE_PLACEHOLDER);
+  const stampOps = ops.filter((op) => op.t === "build.stamps");
+  assert.deepEqual(stampOps.map((op) => (op.t === "build.stamps" ? op.put?.length : 0)), [100, 60]);
+  const put = stampOps.flatMap((op) => (op.t === "build.stamps" ? op.put ?? [] : []));
+  assert.deepEqual(put.map((p) => p.z), plan.stamps.map((_, i) => i), "z in placement order");
+  for (const [i, p] of put.entries()) {
+    const s = plan.stamps[i]!;
+    assert.deepEqual({ art: p.art, x: p.x, y: p.y, w: p.w, h: p.h, rotation: p.rotation, visibility: p.visibility }, { art: { key: s.key }, x: s.x, y: s.y, w: s.w, h: s.h, rotation: s.rotation, visibility: "all" });
+  }
+  for (const op of ops) assert.ok(clientOpSchema.safeParse(op).success && serializedBytes(op) <= OP_BYTES, op.t);
+});
+
+test("DG2B: lights go in one op with their SRD preset's radii, lit, casting shadows, labeled", () => {
+  const plan = twoRooms();
+  plan.lights = [
+    { x: 4.5, y: 4.5, preset: "Torch", label: "Fire pit", stamp: "fire-pit" },
+    { x: 16.5, y: 3.5, preset: "Candle", label: "Candelabra", stamp: "ph-candelabra" },
+    { x: 20.25, y: 8.75, preset: "Hooded Lantern", label: "Lantern", stamp: "ph-lantern" },
+  ];
+  const lights = dressOps(plan, SCENE_PLACEHOLDER).filter((op) => op.t === "build.lights");
+  assert.equal(lights.length, 1);
+  const put = lights[0]!.t === "build.lights" ? lights[0]!.put ?? [] : [];
+  assert.deepEqual(put.map(({ id: _id, ...l }) => l), [
+    { x: 4.5, y: 4.5, bright: 20, dim: 20, on: true, walls: true, label: "Fire pit" },
+    { x: 16.5, y: 3.5, bright: 5, dim: 5, on: true, walls: true, label: "Candelabra" },
+    { x: 20.25, y: 8.75, bright: 30, dim: 30, on: true, walls: true, label: "Lantern" },
+  ]);
+});
+
+test("DG2B: a Rolling Stone's token is a hidden Large object with the stone's numbers, and its trap's one action shows it", () => {
+  const plan = dressedRooms();
+  const tokens = dressOps(plan, SCENE_PLACEHOLDER).flatMap((op) => (op.t === "token.create" ? [op.token] : []));
+  assert.equal(tokens.length, 1);
+  const stone = tokens[0]!;
+  assert.deepEqual({ id: stone.id, kind: stone.kind, name: stone.name, size: stone.size, x: stone.x, y: stone.y, visibility: stone.visibility, image: stone.image, notes: stone.notes }, {
+    id: stonePlaceholder(0),
+    kind: "object",
+    name: "Rolling stone",
+    size: "large",
+    x: 8,
+    y: 4,
+    visibility: "dm",
+    image: { icon: "lorc/stone-sphere", color: "#2a2a32" },
+    notes: "Damage Threshold 10. A Large object.",
+  });
+  const actor = "inline" in stone.actor ? stone.actor.inline : null;
+  assert.deepEqual([actor?.initBonus, actor?.speeds, actor?.ac, actor?.hp], [8, { walk: 60 }, 17, { cur: 100, max: 100, temp: 0 }]);
+  const landed = landAll(scratchRoom(), [...buildOps(plan, { ...dialogScene(plan), id: SCENE_PLACEHOLDER }), ...dressOps(plan, SCENE_PLACEHOLDER)]);
+  assert.ok(landed.ok, landed.ok ? "" : landed.why);
+  const roll = trapOps(plan, landed.room.buildChunks, "11-16", SCENE_PLACEHOLDER).find((op) => op.t === "trap.create" && op.trap.rig.preset === "rolling-stone");
+  assert.ok(roll?.t === "trap.create");
+  assert.deepEqual(roll.trap.rig.actions, [{ show: { tokenId: stonePlaceholder(0) } }]);
+});
+
+test("DG2B: a trap's planned hits replace the zone's squares, and a cone takes the plan's origin at the ground there and its yaw", () => {
+  const plan = dressedRooms();
+  const landed = landAll(scratchRoom(), buildOps(plan, { ...dialogScene(plan), id: SCENE_PLACEHOLDER }));
+  assert.ok(landed.ok);
+  const chunks = landed.room.buildChunks;
+  const darts = trapInputOf(plan.traps[3]!, "t", chunks, "1-4", SCENE_PLACEHOLDER);
+  assert.deepEqual(darts.rig.hits, { cells: [{ x: 8, y: 5, w: 4, h: 1 }] });
+  assert.deepEqual(darts.zone, { cells: [{ x: 9, y: 5, w: 1, h: 1 }] }, "the zone stays the plate");
+  const statue = trapInputOf(plan.traps[4]!, "t", chunks, "5-10", SCENE_PLACEHOLDER);
+  const hits = statue.rig.hits;
+  assert.ok(typeof hits === "object" && "area" in hits);
+  assert.equal(groundAt(chunks, SCENE_PLACEHOLDER, 20, 8), 5, "the statue stands in the raised room");
+  assert.deepEqual({ origin: hits.area.origin, yaw: hits.area.yaw, shape: hits.area.shape, size: hits.area.size }, { origin: { x: 20.5, y: 8.5, z: 5 }, yaw: 225, shape: "cone", size: 30 });
+  const plain = trapInputOf({ preset: "hidden-pit", zone: { cells: [{ x: 17, y: 4, w: 2, h: 2 }] } }, "t", chunks, "1-4", SCENE_PLACEHOLDER);
+  assert.equal(plain.rig.hits, "trigger", "a trap without planned hits keeps the preset's");
+  assert.deepEqual(plain.rig.actions, []);
+  assert.throws(() => trapInputOf({ preset: "hidden-pit", zone: { cells: [{ x: 17, y: 4, w: 2, h: 2 }] }, cone: { origin: [1, 1], yaw: 0 } }, "t", chunks, "1-4", SCENE_PLACEHOLDER), /no cone/);
+});
+
+test("DG2B: a secret door is written closed, hidden and unfound until drules lane B's cover lands", () => {
+  const plan = twoRooms();
+  plan.doors = [...plan.doors, { edge: "8,6,w", state: "secret" }];
+  const edges = buildOps(plan, { ...dialogScene(plan), id: SCENE_PLACEHOLDER }).flatMap((op) => (op.t === "build.edge" ? op.edges : []));
+  assert.deepEqual(edges.at(-1), { key: "8,6,w", feature: { kind: "door", state: "closed", secret: true, discovered: false } });
 });

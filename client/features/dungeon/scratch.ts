@@ -10,8 +10,8 @@ import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import { boardTheme } from "../../lib/theme.ts";
 import type { SceneInput } from "../scenes/create.ts";
 import type { Preview, Summary } from "./client.ts";
-import type { KeyInput } from "./keyPage.ts";
-import { buildOps, SCENE_PLACEHOLDER, trapOps } from "./ops.ts";
+import { keyOps, type KeyInput } from "./keyPage.ts";
+import { buildOps, dressOps, MAX_OPS, SCENE_PLACEHOLDER, SECRET_DOORS_HELD, trapOps } from "./ops.ts";
 import { generate, type DungeonPlan } from "./plan.ts";
 import type { Seed } from "./seed.ts";
 import { MIN_ROOMS, type DungeonSettings, type PlanContext } from "./settings.ts";
@@ -39,9 +39,11 @@ export function scratchRoom(): RoomState {
 
 export type Landing = { ok: true; room: RoomState } | { ok: false; at: number; why: string };
 
-/** The scenes whose per-scene limits the op can push, as the server's `scenesOf` reads the six ops a dungeon sends. */
+/** The scene whose per-scene limits the op can push, as the server's `scenesOf` reads the ops a dungeon sends: none for a trap or a page. */
 function limitScene(op: Op): string | null {
   if (op.t === "scene.create") return op.scene.id;
+  if (op.t === "token.create") return op.token.sceneId;
+  if (op.t === "pin.put") return op.pin.sceneId;
   return "sceneId" in op && typeof op.sceneId === "string" ? op.sceneId : null;
 }
 
@@ -107,19 +109,32 @@ export function landAll(room: RoomState, ops: readonly ClientOp[], firstSeq = 1)
 export type Landed = { ok: true; ops: ClientOp[]; room: RoomState } | { ok: false; why: string };
 
 /**
- * The whole dungeon through the scratch room: the build ops, then the traps
- * written from the chunks those left, so a pit's floor reads the ground the
- * DM's room will hold. Anything refused here is a generator bug, which the
+ * The whole dungeon through the scratch room, in the order the ops apply
+ * (phase 2, section 6): the ground, the stamps, the lights and the stones,
+ * then the traps written from the chunks those left, so a pit's floor
+ * reads the ground the DM's room will hold and a trap follows the stone it
+ * shows, then the key's page and its pins, which follow the page they
+ * link. The key needs the choices for its Made with line, and its lengths
+ * read in the key's feet per square, the room's, which the plan was made
+ * at. Anything refused here, or past MAX_OPS, is a generator bug, which the
  * preview shows as its error with Make off.
  */
-export function landDungeon(plan: DungeonPlan, scene: SceneInput, band: LevelBand, context: PlanContext, key: KeyInput | null): Landed {
-  const build = buildOps(plan, scene);
+export function landDungeon(plan: DungeonPlan, scene: SceneInput, band: LevelBand, _context: PlanContext, key: KeyInput | null, settings?: DungeonSettings): Landed {
+  if (key && !settings) throw new Error("the key needs the choices it was made with");
+  const build = [...buildOps(plan, scene), ...dressOps(plan, scene.id)];
   const built = landAll(scratchRoom(), build);
   if (!built.ok) return { ok: false, why: `op ${built.at}: ${built.why}` };
-  const traps = trapOps(plan, built.room.buildChunks, band, scene.id);
-  const armed = landAll(built.room, traps, build.length + 1);
-  if (!armed.ok) return { ok: false, why: `op ${build.length + armed.at}: ${armed.why}` };
-  return { ok: true, ops: [...build, ...traps], room: armed.room };
+  const rest = [...trapOps(plan, built.room.buildChunks, band, scene.id), ...(key && settings ? keyOps(plan, settings, key, scene.id) : [])];
+  const ops = [...build, ...rest];
+  if (ops.length > MAX_OPS) return { ok: false, why: `${ops.length} ops, past ${MAX_OPS}` };
+  const landed = landAll(built.room, rest, build.length + 1);
+  if (!landed.ok) return { ok: false, why: `op ${build.length + landed.at}: ${landed.why}` };
+  return { ok: true, ops, room: landed.room };
+}
+
+/** The choices a preview plans with: as chosen, but with Secret doors at None while they are held (ops.ts `SECRET_DOORS_HELD`). */
+export function planned(settings: DungeonSettings): DungeonSettings {
+  return SECRET_DOORS_HELD ? { ...settings, secrets: 0 } : settings;
 }
 
 /**
@@ -165,17 +180,19 @@ export function summarize(plan: Pick<DungeonPlan, "rooms" | "asked" | "doors" | 
 
 /**
  * A preview whole, as the worker answers it: the plan, the ops Make sends,
- * the room they make and the foot's counts. Fewer than two rooms is the
+ * the room they make and the foot's counts, the key's page and pins among
+ * the ops when `key` is given and DM key is on. Fewer than two rooms is the
  * "fit" error, and anything thrown or refused is a generator bug.
  */
 export function previewOf(
-  settings: DungeonSettings,
+  chosen: DungeonSettings,
   seed: Seed,
   scene: SceneInput,
   context: PlanContext,
   key: KeyInput | null,
   make: (settings: DungeonSettings, seed: Seed, context: PlanContext) => DungeonPlan = generate,
 ): Preview {
+  const settings = planned(chosen);
   let plan: DungeonPlan;
   try {
     plan = make(settings, seed, context);
@@ -186,7 +203,7 @@ export function previewOf(
   if (plan.rooms.length < MIN_ROOMS) return { ok: false, error: "fit" };
   let landed: Landed;
   try {
-    landed = landDungeon(plan, previewScene(scene, plan), settings.band, context, key);
+    landed = landDungeon(plan, previewScene(scene, plan), settings.band, context, key, settings);
   } catch (err) {
     console.error("raccoon: a generated dungeon could not be landed", err);
     return { ok: false, error: "bug" };

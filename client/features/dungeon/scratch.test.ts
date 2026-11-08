@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { groundAt } from "#shared/rules/heights.ts";
 import { markIn } from "#shared/rules/heights.ts";
-import { dialogScene, twoRooms } from "./handPlans.ts";
-import { buildOps, SCENE_PLACEHOLDER } from "./ops.ts";
-import { landAll, landDungeon, previewOf, previewScene, scratchRoom } from "./scratch.ts";
-import { DEFAULT_CONTEXT, DEFAULT_SETTINGS } from "./settings.ts";
+import { dialogScene, dressedRooms, HAND_SETTINGS, handKey, hundredPlan, twoRooms } from "./handPlans.ts";
+import { buildOps, MAX_OPS, SCENE_PLACEHOLDER, SECRET_DOORS_HELD } from "./ops.ts";
+import { landAll, landDungeon, planned, previewOf, previewScene, scratchRoom } from "./scratch.ts";
+import { DEFAULT_CONTEXT, DEFAULT_SETTINGS, SECRET_PRESETS, type DungeonSettings } from "./settings.ts";
 import type { DungeonPlan } from "./plan.ts";
 
 const SEED = "1K7QH2MXA9F3TWQ5";
@@ -125,4 +125,46 @@ test("DG-B: a generator that throws, or a plan the scratch room refuses, is the 
   } finally {
     console.error = quiet;
   }
+});
+
+test("DG2B: the ground, the stamps, the lights and the stones land, then the traps, then the key's page and its pins", () => {
+  const plan = dressedRooms();
+  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), HAND_SETTINGS.band, DEFAULT_CONTEXT, handKey(), HAND_SETTINGS);
+  assert.ok(landed.ok, landed.ok ? "" : landed.why);
+  const kinds = landed.ops.map((op) => op.t).filter((t, i, all) => all[i - 1] !== t);
+  assert.deepEqual(kinds, ["scene.create", "build.paint", "build.edge", "build.height", "build.stairs", "build.stamps", "build.lights", "token.create", "trap.create", "journal.create", "pin.put"]);
+  const room = landed.room;
+  const on = <T extends { sceneId: string }>(r: Record<string, T>) => Object.values(r).filter((x) => x.sceneId === SCENE_PLACEHOLDER);
+  assert.deepEqual([on(room.stamps).length, on(room.lights).length, on(room.tokens).length, on(room.traps).length, on(room.pins).length], [4, 1, 1, 5, 2]);
+  assert.equal(Object.keys(room.journal).length, 1);
+  const off = landDungeon(plan, previewScene(dialogScene(plan), plan), HAND_SETTINGS.band, DEFAULT_CONTEXT, null);
+  assert.ok(off.ok);
+  assert.equal(off.ops.some((op) => op.t === "journal.create" || op.t === "pin.put"), false, "no key without the key's room facts");
+  const keyOff = landDungeon(plan, previewScene(dialogScene(plan), plan), HAND_SETTINGS.band, DEFAULT_CONTEXT, handKey(), { ...HAND_SETTINGS, key: false });
+  assert.ok(keyOff.ok);
+  assert.equal(keyOff.ops.some((op) => op.t === "journal.create" || op.t === "pin.put"), false, "none with DM key off");
+  assert.throws(() => landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4", DEFAULT_CONTEXT, handKey()), /the choices it was made with/);
+});
+
+test("DG2B: a dungeon past MAX_OPS is refused as a bug, never sent past the cap", () => {
+  const plan = hundredPlan();
+  const scene = previewScene(dialogScene(plan), plan);
+  assert.ok(landDungeon(plan, scene, HAND_SETTINGS.band, DEFAULT_CONTEXT, handKey(), HAND_SETTINGS).ok);
+  const over = { ...plan, traps: [...plan.traps, { preset: "hidden-pit", zone: { cells: [{ x: 4, y: 4, w: 1, h: 1 }] } }] };
+  const refused = landDungeon(over, scene, HAND_SETTINGS.band, DEFAULT_CONTEXT, handKey(), HAND_SETTINGS);
+  assert.deepEqual(refused, { ok: false, why: `${MAX_OPS + 1} ops, past ${MAX_OPS}` });
+});
+
+test("DG2B: while secret doors are held, the preview plans with Secret doors at None and the key says so", () => {
+  assert.equal(SECRET_DOORS_HELD, true, "lifted only by the commit on drules lane B");
+  const chosen: DungeonSettings = { ...DEFAULT_SETTINGS, secrets: SECRET_PRESETS.Many };
+  assert.equal(planned(chosen).secrets, 0);
+  assert.equal(chosen.secrets, SECRET_PRESETS.Many, "the DM's pick is left as it was");
+  const asked: number[] = [];
+  const plan = dressedRooms();
+  const made = previewOf(chosen, SEED, dialogScene(plan), DEFAULT_CONTEXT, handKey(), (s) => (asked.push(s.secrets), plan));
+  assert.deepEqual(asked, [0]);
+  assert.ok(made.ok);
+  const page = made.ops.find((op) => op.t === "journal.create");
+  assert.ok(page?.t === "journal.create" && page.page.blocks[0]!.text.includes("Secret doors None"));
 });
