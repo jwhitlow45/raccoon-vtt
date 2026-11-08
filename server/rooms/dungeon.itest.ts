@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { after, before, describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import { createInitialState } from "#shared/initial.ts";
+import { journalPageBytes, LIMITS } from "#shared/limits.ts";
 import type { Member, RoomState, Trap } from "#shared/model.ts";
 import { stableStringify, type ProjectedState } from "#shared/project.ts";
 import { clientOpSchema, type Op, type ServerMessage } from "#shared/protocol.ts";
@@ -25,10 +27,19 @@ import { startEngine, type Engine, type Socket, type TestClient } from "./testin
  */
 
 type Rect = { x: number; y: number; w: number; h: number };
-type FixtureDungeon = { name: string; sceneId: string; trapIds: string[]; rooms: Rect[]; entrance: Rect; ops: Op[] };
+type FixtureDungeon = { name: string; sceneId: string; trapIds: string[]; placeholders: string[]; rooms: Rect[]; entrance: Rect; ops: Op[]; stones?: [number, number][]; pins?: [number, number][] };
 const FIXTURE = JSON.parse(readFileSync(new URL("./dungeon.fixture.json", import.meta.url), "utf8")) as { generatorVersion: number; dungeons: FixtureDungeon[] };
 const MEDIUM = FIXTURE.dungeons.find((d) => d.name === "medium")!;
 const LARGEST = FIXTURE.dungeons.find((d) => d.name === "largest")!;
+/** Phase 2's hand plans (client/features/dungeon/handPlans.ts): two rooms dressed, with a stone and the key, and the 100-op plan. */
+const DRESSED = FIXTURE.dungeons.find((d) => d.name === "dressed")!;
+const HUNDRED = FIXTURE.dungeons.find((d) => d.name === "hundred")!;
+
+const BLOCK_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
+/** A journal block's id: 12 characters, as Make draws them. */
+function blockId(): string {
+  return Array.from(randomBytes(12), (b) => BLOCK_CHARS[b % BLOCK_CHARS.length]).join("");
+}
 
 const NAME = "Crypt";
 
@@ -37,17 +48,20 @@ const NAME = "Crypt";
  * name and Players see on the scene: Reveal by hand unless told, or
  * Explore with party vision on.
  */
-function made(d: FixtureDungeon, see: "reveal" | "explore" = "reveal"): { sceneId: string; trapIds: string[]; ops: Op[] } {
+function made(d: FixtureDungeon, see: "reveal" | "explore" | "dark" = "reveal"): { sceneId: string; trapIds: string[]; ids: Map<string, string>; ops: Op[] } {
   const sceneId = uuidv7();
-  const trapIds = d.trapIds.map(() => uuidv7());
-  let text = JSON.stringify(d.ops).replaceAll(JSON.stringify(d.sceneId), JSON.stringify(sceneId));
-  for (const [i, id] of d.trapIds.entries()) text = text.replaceAll(JSON.stringify(id), JSON.stringify(trapIds[i]));
+  const ids = new Map<string, string>([[d.sceneId, sceneId]]);
+  // Every id Make gives a fresh one, a key block's 12 characters as Make draws them.
+  for (const id of d.placeholders) ids.set(id, id.startsWith("dungeonblk") ? blockId() : uuidv7());
+  let text = JSON.stringify(d.ops);
+  for (const [was, now] of ids) text = text.replaceAll(JSON.stringify(was), JSON.stringify(now));
   const ops = JSON.parse(text) as Op[];
   const create = ops[0];
   assert.ok(create?.t === "scene.create");
   const { vision: _v, ...rest } = create.scene;
-  ops[0] = { t: "scene.create", scene: { ...rest, name: NAME, fogEnabled: true, ...(see === "explore" ? { vision: { on: true, light: "bright" as const } } : {}) } };
-  return { sceneId, trapIds, ops };
+  const vision = see === "explore" ? { vision: { on: true, light: "bright" as const } } : see === "dark" ? { vision: { on: true, light: "dark" as const } } : {};
+  ops[0] = { t: "scene.create", scene: { ...rest, name: NAME, fogEnabled: true, ...vision } };
+  return { sceneId, trapIds: d.trapIds.map((id) => ids.get(id)!), ids, ops };
 }
 
 /** Sends ops in one Setup group and waits for every answer, returning the refusals. */
@@ -421,3 +435,206 @@ describe("a generated dungeon refused partway", () => {
   });
 });
 
+
+/** A scene's phase 2 contents beside its build: its stamps, lights, tokens and pins, and the room's journal pages, revs left out. */
+function dressing(state: Pick<RoomState, "stamps" | "lights" | "tokens" | "pins" | "journal">, sceneId: string): string {
+  const on = <T extends { sceneId: string; rev: number }>(r: Readonly<Record<string, T>>) =>
+    Object.values(r)
+      .filter((x) => x.sceneId === sceneId)
+      .map(({ rev: _rev, ...x }) => stableStringify(x))
+      .sort();
+  const pages = Object.values(state.journal).map(({ rev: _rev, ...p }) => stableStringify(p)).sort();
+  return stableStringify({ stamps: on(state.stamps), lights: on(state.lights), tokens: on(state.tokens), pins: on(state.pins), pages });
+}
+
+const count = <T extends { sceneId: string }>(r: Readonly<Record<string, T>> | undefined, sceneId: string) => Object.values(r ?? {}).filter((x) => x.sceneId === sceneId).length;
+
+/**
+ * Sends ops in one Setup group as the store sends them past the server's
+ * burst (client/state/store.ts `retryOps`): all at once, then, on a
+ * `retry`, every op from the first retried one again after a backoff, so
+ * the server takes them in order. Each op's first answer is counted once.
+ */
+async function sendPaced(socket: Socket, ops: readonly Op[], g: string = uuidv7()): Promise<{ refused: { n: number; code: string; message: string }[]; busy: number; resends: number; answered: number }> {
+  const ns = ops.map(() => socket.nextN());
+  const waiting = new Set(ns);
+  const refused: { n: number; code: string; message: string }[] = [];
+  let busy = 0;
+  let resends = 0;
+  let answered = 0;
+  const sendFrom = (from: number) => {
+    for (const [i, n] of ns.entries()) if (n >= from && waiting.has(n)) socket.send({ t: "op", n, op: ops[i], g, groupScope: "setup" });
+  };
+  sendFrom(ns[0]!);
+  const deadline = Date.now() + 60_000;
+  while (waiting.size > 0) {
+    assert.ok(Date.now() < deadline, `${waiting.size} ops still unanswered`);
+    const ev = await socket.maybe("ev", (m) => (m.acks ?? []).some((n) => waiting.has(n)) || (m.rejects ?? []).some((r) => waiting.has(r.n)), 200);
+    for (const n of ev?.acks ?? []) if (waiting.delete(n)) answered++;
+    for (const r of ev?.rejects ?? []) if (waiting.delete(r.n)) (answered++, refused.push({ n: r.n, code: r.code, message: r.message }));
+    const retries = socket.received.filter((m): m is Extract<ServerMessage, { t: "retry" }> => m.t === "retry" && m.n !== undefined && ns.includes(m.n));
+    if (retries.length === 0) continue;
+    for (const r of retries) socket.received.splice(socket.received.indexOf(r), 1);
+    busy += retries.filter((r) => r.code === "busy").length;
+    const from = Math.min(...retries.map((r) => r.n!));
+    if (!waiting.has(from) && ![...waiting].some((n) => n > from)) continue;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    resends++;
+    sendFrom(from);
+  }
+  return { refused, busy, resends, answered };
+}
+
+describe("a dressed dungeon on the server (phase 2)", () => {
+  let t: Engine;
+  before(async () => {
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
+  });
+  after(() => t.close());
+
+  test("DG2B: the dressed dungeon is taken whole, and stores and replays its stamps, lights, stone, key page and pins as the client's reducer lands them", async () => {
+    const tb = await table(t, "Dressed parity");
+    const m = made(DRESSED);
+    assert.deepEqual(await send(tb.dmSocket, m.ops), []);
+    const live = t.manager.get(tb.roomId)!.committed.state;
+    assert.deepEqual([count(live.stamps, m.sceneId), count(live.lights, m.sceneId), count(live.tokens, m.sceneId), count(live.pins, m.sceneId), count(live.traps, m.sceneId)], [4, 1, 1, 2, 5]);
+    const stone = Object.values(live.tokens).find((x) => x.sceneId === m.sceneId)!;
+    assert.deepEqual([stone.name, stone.size, stone.visibility, stone.kind], ["Rolling stone", "large", "dm", "object"]);
+    const page = Object.values(live.journal).find((p) => p.folder === "Dungeon keys")!;
+    assert.deepEqual([page.title, page.access, page.blocks.length], ["Crypt key", "dm", 3]);
+    assert.ok(Object.values(live.pins).filter((p) => p.sceneId === m.sceneId).every((p) => p.pageId === page.id && p.visibility === "dm"));
+    const roll = Object.values(live.traps).find((x) => x.sceneId === m.sceneId && x.rig?.preset === "rolling-stone")!;
+    assert.deepEqual(roll.rig?.actions, [{ show: { tokenId: stone.id } }], "its trap shows the stone this send made");
+    assert.equal(dressing(reducerLanding(m.ops), m.sceneId), dressing(live, m.sceneId), "the server stored what the client's reducer lands");
+    assert.equal(contents(reducerLanding(m.ops), m.sceneId), contents(live, m.sceneId));
+    tb.dmSocket.close();
+    await t.manager.unload(tb.roomId, 1011, false);
+    const replayed = await loadRoom(t.pool, tb.roomId);
+    assert.ok(replayed && !replayed.replayFailed);
+    assert.equal(dressing(replayed.state, m.sceneId), dressing(live, m.sceneId), "replay makes the same");
+  });
+
+  test("DG2B: one Undo setup takes the dressed dungeon back, its key page and pins included, and Redo setup brings it back", async () => {
+    const tb = await table(t, "Dressed undo");
+    const m = made(DRESSED);
+    assert.deepEqual(await send(tb.dmSocket, m.ops), []);
+    assert.equal((await setupHistory(tb.dmSocket)).depth, 1, "one Setup step");
+    const whole = dressing(t.manager.get(tb.roomId)!.committed.state, m.sceneId);
+    assert.equal((await tb.dmSocket.step("undo", "setup")).rejects, undefined);
+    const undone = t.manager.get(tb.roomId)!.committed.state;
+    assert.equal(undone.scenes[m.sceneId], undefined);
+    assert.deepEqual([count(undone.stamps, m.sceneId), count(undone.lights, m.sceneId), count(undone.tokens, m.sceneId), count(undone.pins, m.sceneId), count(undone.traps, m.sceneId)], [0, 0, 0, 0, 0]);
+    assert.equal(Object.values(undone.journal).some((p) => p.folder === "Dungeon keys"), false, "the key page goes with it");
+    assert.equal((await tb.dmSocket.step("redo", "setup")).rejects, undefined);
+    assert.equal(dressing(t.manager.get(tb.roomId)!.committed.state, m.sceneId), whole);
+    tb.dmSocket.close();
+  });
+
+  test("DG2B: Delete removes the scene with its stamps, lights, stone, traps and pins, and leaves the key page in the journal", async () => {
+    const tb = await table(t, "Dressed delete");
+    const m = made(DRESSED);
+    assert.deepEqual(await send(tb.dmSocket, m.ops), []);
+    const pageId = m.ids.get("dungeon-key")!;
+    assert.equal((await tb.dmSocket.apply({ t: "scene.delete", sceneId: m.sceneId })).rejects, undefined);
+    const state = t.manager.get(tb.roomId)!.committed.state;
+    assert.deepEqual([count(state.stamps, m.sceneId), count(state.lights, m.sceneId), count(state.tokens, m.sceneId), count(state.pins, m.sceneId), count(state.traps, m.sceneId)], [0, 0, 0, 0, 0]);
+    assert.equal(Object.values(state.buildChunks).some((c) => c.sceneId === m.sceneId), false);
+    assert.equal(state.journal[pageId]?.title, "Crypt key", "the DM deletes the key page in the Journal (D-261107-209)");
+    tb.dmSocket.close();
+  });
+
+  test("DG2B: a player shown the entrance room, by hand or on Explore in the dark, gets its stamps and nothing else: no light, pin, key page, hidden stone or unseen stamp", async () => {
+    for (const see of ["reveal", "dark"] as const) {
+      const tb = await table(t, `Dressed players ${see}`);
+      const watcher = await t.connect(tb.roomId, tb.player);
+      await watcher.snapshot(`watcher-${see}`);
+      const m = made(DRESSED, see);
+      assert.deepEqual(await send(tb.dmSocket, m.ops), []);
+      const e = DRESSED.entrance;
+      const shown = grown(e, 1);
+      if (see === "reveal") {
+        assert.equal((await tb.dmSocket.apply({ t: "fog.live", sceneId: m.sceneId, ops: [{ id: "r1", mode: "reveal", shape: { kind: "rect", ...shown } }] })).rejects, undefined);
+      } else {
+        // The fire pit lights the entrance, and nothing else does: a party without darkvision sees the entrance by it.
+        const actor = { inline: { hp: { cur: 12, max: 12, temp: 0 }, life: "alive", ac: 14, speeds: { walk: 30 }, initBonus: 2, passivePerception: 12, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" } };
+        const token = { id: uuidv7(), sceneId: m.sceneId, kind: "pc", name: "Pip's", disposition: "ally", size: "medium", ownerIds: [tb.playerId], x: e.x + 2, y: e.y + 2, actor };
+        assert.equal((await tb.dmSocket.apply({ t: "token.create", token } as Op)).rejects, undefined);
+        assert.equal((await tb.dmSocket.apply({ t: "token.move", tokenId: token.id, x: e.x + 1, y: e.y + 2 })).rejects, undefined);
+      }
+      assert.equal((await tb.dmSocket.apply({ t: "room.setPlayerScene", sceneId: m.sceneId })).rejects, undefined);
+      const p = await playerView(t, tb, `dressed-${see}`);
+      const stamps = Object.values(p.stamps ?? {}).filter((x) => x.sceneId === m.sceneId);
+      assert.deepEqual(stamps.map((x) => (x.art as { key: string }).key), ["fire-pit"], `${see}: the entrance's stamp alone`);
+      assert.equal(count(p.lights, m.sceneId), 0, `${see}: no light`);
+      assert.equal(count(p.pins, m.sceneId), 0, `${see}: no pin`);
+      assert.equal(Object.keys(p.journal ?? {}).length, 0, `${see}: no key page`);
+      assert.equal(Object.values(p.tokens).some((x) => x.sceneId === m.sceneId && x.kind === "object"), false, `${see}: no hidden stone`);
+      assert.deepEqual(Object.keys(p.traps), [], `${see}: no unfound trap`);
+      const seen = JSON.stringify(watcher.received) + JSON.stringify(p);
+      for (const [placeholder, id] of m.ids) {
+        if (/^dungeon-(stamp-0|scene)$/.test(placeholder)) continue;
+        assert.ok(!seen.includes(id), `${see}: nothing names ${placeholder}`);
+      }
+      assert.ok(!seen.includes("Crypt key") && !seen.includes("Dungeon keys"), `${see}: nothing of the key page`);
+      watcher.close();
+      tb.dmSocket.close();
+    }
+  });
+
+  test("DG2B: 100 ops past the burst: the server answers the rest busy, the sender resends them in order, each op is answered once and all are taken in one Setup step", async () => {
+    const tb = await table(t, "Hundred paced");
+    const m = made(HUNDRED);
+    assert.equal(m.ops.length, 100);
+    const sent = await sendPaced(tb.dmSocket, m.ops);
+    assert.deepEqual(sent.refused, []);
+    assert.equal(sent.answered, 100, "each op answered once");
+    assert.ok(sent.busy > 0 && sent.resends > 0, `past the burst: ${sent.busy} busy, ${sent.resends} resends`);
+    const live = t.manager.get(tb.roomId)!.committed.state;
+    assert.deepEqual([count(live.stamps, m.sceneId), count(live.lights, m.sceneId), count(live.tokens, m.sceneId), count(live.pins, m.sceneId), count(live.traps, m.sceneId)], [160, 40, 2, 40, 20]);
+    assert.equal(dressing(reducerLanding(m.ops), m.sceneId), dressing(live, m.sceneId), "landed in order, as the reducer lands them");
+    assert.equal((await setupHistory(tb.dmSocket)).depth, 1, "one Setup step");
+    tb.dmSocket.close();
+  });
+
+  test("DG2B: a co-DM filling the journal mid-send: the key page is refused, its pins with it, and the rest lands", async () => {
+    const tb = await table(t, "Journal filled mid-send");
+    const co = t.client();
+    await co.claimDm(tb.roomId, tb.dmKey);
+    // A page of about `bytes`, in blocks of at most 3,900 characters.
+    const page = (bytes: number) => {
+      const blocks = Math.max(1, Math.ceil(bytes / 3_900));
+      const text = "x".repeat(Math.max(1, Math.floor(bytes / blocks) - 40));
+      return { t: "journal.create", page: { id: uuidv7(), title: "Notes", access: "dm", blocks: Array.from({ length: blocks }, () => ({ id: blockId(), text })) } } as Op;
+    };
+    const total = () => Object.values(t.manager.get(tb.roomId)!.committed.state.journal).reduce((n, p) => n + journalPageBytes(p), 0);
+    const room = LIMITS.journalBytes;
+    // Pages near a page's 32 KiB, from sockets of their own so none passes its bytes a second, until two pages' room is left.
+    for (let k = 0; k < 4; k++) {
+      const s = await t.connect(tb.roomId, co);
+      await s.snapshot(`co-${k}`);
+      for (let i = 0; i < 8 && room - total() > 64_000; i++) assert.equal((await s.apply(page(31_000))).rejects, undefined);
+      s.close();
+    }
+    const m = made(DRESSED);
+    const keyBytes = journalPageBytes(Object.values(reducerLanding(m.ops).journal)[0]!);
+    const coSocket = await t.connect(tb.roomId, co);
+    await coSocket.snapshot("co-last");
+    const g = uuidv7();
+    const at = m.ops.findIndex((op) => op.t === "journal.create");
+    assert.deepEqual(await send(tb.dmSocket, m.ops.slice(0, at - 1), g), []);
+    // Mid-send, the co-DM's pages leave less room than the key page needs. A page's own fields take about 250 bytes beside its text.
+    while (room - total() >= keyBytes) {
+      const want = Math.min(31_000, room - total() - Math.floor(keyBytes / 2) - 250);
+      assert.ok(want > 0, `${room - total()} bytes left`);
+      assert.equal((await coSocket.apply(page(want))).rejects, undefined);
+    }
+    const refused = await send(tb.dmSocket, m.ops.slice(at - 1), g);
+    assert.deepEqual(refused.map((r) => [m.ops[r.n - (tb.dmSocket.n - m.ops.length) - 1]?.t, r.code]), [["journal.create", "quota"], ["pin.put", "gone"], ["pin.put", "gone"]]);
+    const live = t.manager.get(tb.roomId)!.committed.state;
+    assert.equal(count(live.traps, m.sceneId), 5, "the traps before the key landed");
+    assert.equal(count(live.pins, m.sceneId), 0);
+    assert.equal(Object.values(live.journal).some((p) => p.folder === "Dungeon keys"), false);
+    coSocket.close();
+    tb.dmSocket.close();
+  });
+});
