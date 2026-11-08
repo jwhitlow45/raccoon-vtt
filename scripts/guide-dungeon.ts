@@ -1,17 +1,18 @@
 /**
  * The DM guide's pictures of the dungeon generator (docs/dm-guide.md,
  * "Generating a dungeon", docs/design/design-v1-dungeon-generator.md): the
- * Generate a dungeon dialog on its default choices with a preview, and the
- * scene Make the scene opens, framed on the entrance, taken from the real
- * server on the production build so they always show the app as it is.
+ * Generate a dungeon dialog on its default choices, the same dialog scrolled
+ * to its last rows, Look closer, the scene Make the scene opens framed on the
+ * entrance, and the DM key page in the Journal, taken from the real server on
+ * the production build so they always show the app as it is.
  *
  * The seed is fixed, so the same app version draws the same dungeon each
  * time the pictures are made again.
  *
  * It needs `pnpm build` first and a Postgres in DATABASE_URL. It makes a
- * room, writes docs/dm-guide/dungeon-generator.webp and
- * dungeon-generator-made.webp at 1280 x 800, as the guide's other pictures
- * are, and deletes the room:
+ * room, writes docs/dm-guide/dungeon-generator.webp, -rows, -closer, -made
+ * and -journal at 1280 x 800, as the guide's other pictures are, and deletes
+ * the room:
  *
  *   DATABASE_URL=postgres://... GUIDE_PORT=3197 node scripts/guide-dungeon.ts
  */
@@ -70,13 +71,13 @@ try {
   const panel = dm.getByRole("tabpanel", { name: sideTabName("Scenes") });
   const form = panel.getByRole("heading", { name: "New scene", exact: true }).locator("xpath=ancestor::*[self::section or @data-panel-group][1]");
   await form.getByRole("radio", { name: "Builder", exact: true }).click();
-  await form.getByRole("textbox", { name: "Scene name" }).fill("Sunken crypt");
+  await form.getByRole("textbox", { name: "Scene name" }).fill("Sunken halls");
   await form.getByRole("button", { name: "Generate a dungeon", exact: true }).click();
 
   const dialog = dm.getByRole("dialog", { name: "Generate a dungeon" });
   const seed = dialog.getByRole("textbox", { name: "Seed", exact: true });
   await seed.fill(SEED);
-  await dialog.getByRole("img", { name: /^Preview of the dungeon: \d+ rooms?, entrance on the (west|north|east|south) side\.$/ }).waitFor({ timeout: 30_000 });
+  await dialog.getByRole("img", { name: /^Preview of the dungeon: \d+ rooms?(, \d+ secret doors?)?(, \d+ lit rooms?)?, entrance on the (west|north|east|south) side\.$/ }).waitFor({ timeout: 30_000 });
   // The status line holds still once the preview for this seed stands.
   const status = dialog.locator("footer [aria-live=polite]");
   let last = "";
@@ -91,9 +92,26 @@ try {
   await dialog.getByText("Theme", { exact: true }).evaluate((el) => (el as unknown as { scrollIntoView(o: unknown): void }).scrollIntoView({ block: "start" }));
   await picture(dm, "dungeon-generator");
 
+  // The rows from Secret doors to DM key, with the light line showing.
+  await dialog.getByText("Secret doors", { exact: true }).evaluate((el) => (el as unknown as { scrollIntoView(o: unknown): void }).scrollIntoView({ block: "start" }));
+  await picture(dm, "dungeon-generator-rows");
+
+  // Look closer opens the DM view in the viewer, where the secret doors, traps and room numbers show.
+  await dialog.getByRole("button", { name: "Look closer", exact: true }).click();
+  await dm.getByRole("dialog", { name: /Sunken halls/ }).waitFor({ timeout: 60_000 });
+  await picture(dm, "dungeon-generator-closer");
+  await dm.keyboard.press("Escape");
+
   await dialog.getByRole("button", { name: "Make the scene", exact: true }).click();
   await dialog.waitFor({ state: "detached", timeout: 60_000 });
+  // The "Saved. Undo in Setup history." toast leaves by itself and no picture shows it.
+  await dm.locator("button[data-toast]").waitFor({ state: "detached", timeout: 30_000 });
   await picture(dm, "dungeon-generator-made");
+
+  // The DM key, the journal page Make filed in "Dungeon keys".
+  await openSideTab(dm, "Journal");
+  await dm.getByText("Sunken halls key", { exact: true }).first().click();
+  await picture(dm, "dungeon-generator-journal");
 } finally {
   if (roomId) await dmContext.request.delete(`${server.origin}/api/rooms/${roomId}`, { headers: { Origin: server.origin }, data: { name: roomName } }).catch(() => undefined);
   await browser.close();
