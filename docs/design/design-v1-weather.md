@@ -10,7 +10,7 @@ Asked for in docs/design/mvp.md section 11, Later: "Weather overlays." The proje
 - **A look, plus the SRD's roll rules where they need no judgment.** Weather never changes what anyone can see on the map: sight, fog and light work as they do today. Heavy rain, heavy snow and a sandstorm put Disadvantage on Wisdom (Perception) checks, and strong wind on attacks the app knows are with a ranged weapon, for creatures whose token stands on that scene, as a condition's preset does. The rest shows as text (section 2). A "Weather rules on rolls" switch, on by default, drops the rolls' part for an indoor scene and keeps the look.
 - **Drawn in code on one extra Konva layer.** In Top-down it lies on the ground: over the map and the board layer, under every creature, the darkness, the fog and every token's name, chips and HP bar. In Isometric it falls through the air: over the ground and the standees, under the drag and upright layers. No image files.
 - **Cheap by design.** Particles drawn at 1 device pixel per CSS pixel, 30 ticks a second owned by one controller, counted by the screen's area and capped. It stops whenever nobody can see it. The particles live in the stage's own plane, so they stay with the ground through a zoom (design-v1-weather-zoom.md).
-- **Every device decides how it looks.** This device, Weather: Moving (the default), Still or Off, and the same three in the table display's tap menu. Reduced motion and Low power keep it still, and a device that cannot keep up steps itself down to half the particles, then to still.
+- **Every device decides how it looks.** This device, Weather: Moving (the default), Still or Off, and the same three in the table display's tap menu. Reduced motion and Low power keep it still, and a device that cannot keep up steps itself down to half the particles, then to still (fog has no particles to halve, so it goes straight to still).
 - **Nothing new reaches a player** but the weather of the scene they are on, which names nothing of the map.
 - **Versions:** the next free op and snapshot versions, both identity steps, so an older build refuses a room that may hold weather (section 9.4). As built they are 43 and 33.
 
@@ -295,7 +295,7 @@ export function weatherName(w: SceneWeather): string;
 | Isometric | The weather canvas is the main stage's second layer, clipped to the ground outline, drawn with its stage's camera | weather.e2e wx-6 |
 | Top-down | Third of five layers, no Konva warning in the console | weather.e2e wx-6 |
 | The DM picks the Builder | Weather hides, Select brings it back | weather.e2e wx-7 |
-| A device too slow | Half the particles, then Still, This device says so | mode random test |
+| A device too slow | Half the particles, then Still (fog straight to Still), This device says so | mode random test |
 | One stall on resume, a remount, a scene load | No step-down | mode random test |
 | Turn the phone, resize the window | Particles recounted by area, none jump | sim test |
 | Tab back after a minute away | Particles continue from where they were, not thrown | sim test (step clamp) |
