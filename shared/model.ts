@@ -799,8 +799,18 @@ export type EdgeFeature =
   | { kind: "wall" }
   /** Removes an automatic wall. */
   | { kind: "none" }
-  | { kind: "door"; state: "open" | "closed" | "locked"; secret: boolean; discovered: boolean }
+  | { kind: "door"; state: "open" | "closed" | "locked"; secret: boolean; discovered: boolean; cover?: DoorCover }
   | { kind: "window" };
+
+/**
+ * The wall a secret door on a grid edge looks like to players while it
+ * stays hidden (docs/design/design-v1-maps-vision.md 2.1): an automatic wall
+ * or a drawn one. Only a `build.edge` from DOOR_COVER_OP_VERSION
+ * (shared/migrate.ts) writes it, on a square grid edge. The schemas refuse it on a free wall and in memory, and
+ * players never receive it. A door from before has none and keeps the look
+ * it had then.
+ */
+export type DoorCover = "auto" | "drawn";
 
 /**
  * One 16x16-cell chunk of a scene's build, in scene coordinates.

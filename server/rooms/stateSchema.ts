@@ -240,7 +240,8 @@ const terrain = z.enum(["stone", "wood", "grass", "dirt", "cave", "water", "diff
 const edgeFeature = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("wall") }),
   z.strictObject({ kind: z.literal("none") }),
-  z.strictObject({ kind: z.literal("door"), state: z.enum(["open", "closed", "locked"]), secret: z.boolean(), discovered: z.boolean() }),
+  // A grid edge's door may carry its cover (model.ts DoorCover). Free walls take the protocol's door, which has none.
+  z.strictObject({ kind: z.literal("door"), state: z.enum(["open", "closed", "locked"]), secret: z.boolean(), discovered: z.boolean(), cover: z.enum(["auto", "drawn"]).optional() }),
   z.strictObject({ kind: z.literal("window") }),
 ]);
 const cellKey = z.string().regex(/^-?\d{1,4},-?\d{1,4}$/);

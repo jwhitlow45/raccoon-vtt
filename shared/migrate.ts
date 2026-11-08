@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 39;
-export const OP_VERSION = 52;
+export const SNAPSHOT_VERSION = 40;
+export const OP_VERSION = 53;
 
 export type MigrationStep = {
   from: number;
@@ -248,6 +248,12 @@ export const snapshotMigrations: MigrationStep[] = [
   // reads as off, so a v38 room is a v39 room as it is. The number moves so that an older build, whose strict state
   // schema refuses the field, refuses a v39 snapshot instead of loading it and sending players the sound.
   { from: 38, to: 39, apply: (state) => state },
+  // Secret door covers (docs/design/design-v1-maps-vision.md 2.1): a grid edge's door may carry `cover`, and absent reads
+  // as the look a door had before, so a v39 room is a v40 room as it is, byte for byte, and every stored restore's guard
+  // still matches. No step gives an old door a cover. The number moves so that an older build refuses a v40 snapshot
+  // instead of loading it: its `unlocked` would send a found door's cover to players, and its map step would write the
+  // cover into memory, fail its own check of that op and fall back to the forget that fails closed.
+  { from: 39, to: 40, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1273,6 +1279,22 @@ export const opMigrations: MigrationStep[] = [
     to: 52,
     apply: (op) => op,
   },
+  {
+    // Secret door covers (docs/design/design-v1-maps-vision.md 2.1):
+    // `build.edge` may carry a door's `cover`, a new optional field, so no
+    // stored op changes shape and the step is the identity. From this
+    // version `build.edge` writes a hidden secret door's cover
+    // (writesDoorCover), and a stored one from before replays writing none,
+    // so its door keeps the look it had.
+    // Deploy: back up the database just before, and reload open pages, so
+    // Isometric stands an automatic wall between two painted squares as a
+    // drawn one. An old page draws the same walls apart from that.
+    // Rollback needs the backup for a room with version 53 ops after its
+    // last snapshot or a v40 snapshot, which an older build refuses.
+    from: 52,
+    to: 53,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -1306,6 +1328,20 @@ export function musicQueues(opVersion: number | undefined): boolean {
  */
 export function musicSetReveals(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 50);
+}
+
+/** The first op version whose `build.edge` writes a secret door's cover (writesDoorCover), and the snapshot version that came with it. */
+export const DOOR_COVER_OP_VERSION = 53;
+export const DOOR_COVER_SNAPSHOT_VERSION = 40;
+
+/**
+ * Whether `build.edge` writes a hidden secret door's cover
+ * (docs/design/design-v1-maps-vision.md 2.1). Ops stored before
+ * DOOR_COVER_OP_VERSION wrote none and replay so, so a door they made keeps
+ * the look it had. Live ops carry no stored version and take today's rule.
+ */
+export function writesDoorCover(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < DOOR_COVER_OP_VERSION);
 }
 
 /** Historical restores keep their original log entries and numbering. */

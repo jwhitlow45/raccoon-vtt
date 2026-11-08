@@ -470,10 +470,17 @@ const doorFeature = z.strictObject({
   discovered: z.boolean(),
 });
 
+/**
+ * A door on a grid edge, which may carry the wall it looks like while hidden
+ * (model.ts DoorCover). Free walls keep `doorFeature`: a hidden free door
+ * already joins the walls on its line.
+ */
+const edgeDoorFeature = z.strictObject({ ...doorFeature.shape, cover: z.enum(["auto", "drawn"]).optional() });
+
 const edgeFeature = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("wall") }),
   z.strictObject({ kind: z.literal("none") }),
-  doorFeature,
+  edgeDoorFeature,
   z.strictObject({ kind: z.literal("window") }),
 ]);
 
