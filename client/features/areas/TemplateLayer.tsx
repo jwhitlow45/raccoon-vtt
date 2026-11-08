@@ -1,7 +1,7 @@
 import { createContext, memo, useContext, useMemo, type ReactNode } from "react";
 import { Group } from "react-konva";
 import type { AreaTemplate, RoomState, Token } from "#shared/model.ts";
-import type { AreaContext } from "#shared/rules/aoe.ts";
+import type { AreaContext, AreaTemplateInput } from "#shared/rules/aoe.ts";
 import type { LayerProps } from "../layers.ts";
 import { useBoardPillsExcept, usePublishPills, type PillSpec } from "../../canvas/boardView.ts";
 import { useDraggedIds } from "../../canvas/draggedIds.ts";
@@ -233,6 +233,25 @@ const StillShading = memo(Shading);
 /** A placed area's ring round each creature it catches, in screen pixels. */
 export const CAUGHT_RING = { widthPx: 3, gapPx: 3 } as const;
 
+const outlines = new WeakMap<AreaTemplateInput, WeakMap<AreaContext, Outline | null>>();
+
+/**
+ * A placed area's outline, kept while its template and the layer's context
+ * stay the same objects. areaOutline makes a new one on every call, which
+ * undid the memo of the name pill's spec, so each placed area's isometric
+ * name drew again on any render of its area, such as the frame a cube
+ * publishes on (CUBE-PUBLISH-FRAME).
+ */
+export function placedOutline(t: AreaTemplateInput, ctx: AreaContext): Outline | null {
+  let byContext = outlines.get(t);
+  if (!byContext) outlines.set(t, (byContext = new WeakMap()));
+  const kept = byContext.get(ctx);
+  if (kept !== undefined) return kept;
+  const outline = areaOutline(t, ctx);
+  byContext.set(ctx, outline);
+  return outline;
+}
+
 export const PlacedArea = memo(function PlacedArea(props: {
   template: AreaTemplate;
   ctx: AreaContext;
@@ -250,7 +269,7 @@ export const PlacedArea = memo(function PlacedArea(props: {
 }) {
   const { template: t, ctx, scale } = props;
   const cov = cachedCoverage(t, ctx);
-  const outline = areaOutline(t, ctx);
+  const outline = placedOutline(t, ctx);
   const caught = caughtTokens(t, ctx, props.sceneId);
   const hidden = t.visibility === "dm";
   const name = `${areaTitle(t)}${hidden && props.dm ? " (hidden)" : ""}`;
