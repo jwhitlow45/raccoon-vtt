@@ -113,6 +113,7 @@ describe("the HEVC scan against the server's check (AMROT-O-06)", () => {
 
   test("any bit flips and any overwritten bytes: the scan never calls HEVC a file the server takes", async () => {
     const before = { ...seen };
+    const numRuns = runs ?? 120;
     await fc.assert(
       fc.asyncProperty(layout, fc.array(fc.tuple(position, fc.integer({ min: 0, max: 255 }), fc.boolean()), { minLength: 1, maxLength: 6 }), async (o, damage) => {
         const bytes = Buffer.from(build(o));
@@ -124,10 +125,11 @@ describe("the HEVC scan against the server's check (AMROT-O-06)", () => {
         }
         await agrees(bytes);
       }),
-      { seed, numRuns: runs ?? 120 },
+      { seed, numRuns },
     );
+    // The floors scale with the runs, so a short FC_RUNS run does not fail a rate it has too few cases to show.
     // The damage must leave enough files the scan still decides, and calls HEVC, for the rule to have been tried.
-    assert.ok(seen.decided - before.decided > 10, `only ${seen.decided - before.decided} damaged files decided`);
-    assert.ok(seen.hevc - before.hevc > 5, `only ${seen.hevc - before.hevc} damaged files called HEVC`);
+    assert.ok(seen.decided - before.decided >= Math.floor(numRuns / 12), `only ${seen.decided - before.decided} damaged files decided`);
+    assert.ok(seen.hevc - before.hevc >= Math.floor(numRuns / 24), `only ${seen.hevc - before.hevc} damaged files called HEVC`);
   });
 });
