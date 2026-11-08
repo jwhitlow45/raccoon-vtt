@@ -294,7 +294,7 @@ All of this is the DM's.
   - Phone videos show the way the phone showed them ([design](docs/design/design-v1-video-turns.md)).
     - A video recorded upright, turned, mirrored or with stretched pixels (up to twice as wide or tall) is accepted, and the server rewrites only the file's headers, so every browser plays the same plain picture and the app turns or stretches it on the map, in the Library and in its still.
     - An iPhone's MOV, recorded with Settings > Camera > Formats > Most Compatible, is stored as an MP4 without its location, face and device data. That is about 30 seconds of 1080p video under the 64 MB cap.
-    - HEVC, the iPhone's High Efficiency default, is refused on the device before anything uploads, with how to export it as H.264, and a video whose file crops its picture is refused too.
+    - HEVC, the iPhone's High Efficiency default, is refused on the device before anything uploads when the first or last megabyte of the file shows it, and the server refuses it otherwise, with how to export it as H.264 either way, and a video whose file crops its picture is refused too.
   - When the DM's device can't read the first frame before the upload, or the video is turned or stretched, the still is read from the uploaded copy instead, and the button says "Reading the first frame…" again. A device that can't read that either (a WebM on an iPhone before iOS 17.4) asks for a still image of the video's shape as it shows, keeping the uploaded video, and after iOS Low Power Mode refused it, offers Try again.
   - The map moves for everyone on its scene, under the board, the tokens, darkness, fog and weather. Each device loops its own copy from its own start, with no sound. Players get only the video of the phase showing.
   - The Map image row says "A 1920 × 1080 px video, 0:42, looping. Its first frame is the still." (the size as it shows, so a portrait phone video is 1080 × 1920) and, under it, "Moving on this device." or why this device shows the still. **Use the still only** drops the video in one Setup step and keeps the still as a plain map. A video phase shows "Video" after its name.
@@ -312,7 +312,7 @@ All of this is the DM's.
   - One Undo setup in Setup history takes it all back. A phone takes files up to 40 MB, so large maps import on a computer.
 - **Generate a dungeon**, under New scene's Builder form ("Or start from a generated dungeon"), makes a whole Builder scene on squares: rooms joined by corridors, automatic walls, a closed or locked door at every doorway, and a way in at the room nearest the map's edge, a closed door and then a corridor to stairs at the edge. The dialog's choices are Theme, Size, Rooms, Density, Corridors, Corridor width, Extra ways around, Heights and Traps.
   - **Theme**: Dungeon (stone and wood rooms, rubble and pits, about 1 door in 7 locked) or Crypt (stone halls whose rooms 5 by 5 or larger have a ring of pillars, about 1 door in 4 locked). Any room 6 by 6 or larger may have a dais 5 ft up with a stair.
-  - **Size**: Small, Medium or Large (30, 50 or 80 squares a side) or Custom (20 to 100 across and down), shown in the room's feet. **Rooms** run from 2 up to one per 90 squares and at most 40, and start at 6, 12 or 20 by size. **Density** is Sparse, Normal or Dense.
+  - **Size**: Small, Medium or Large (30, 50 or 80 squares a side) or Custom (20 to 100 across and down), shown in the room's feet. **Rooms** run from 2 up to one per 90 squares and at most 40, and start at 6, 12 or 20 by size, with a hint under the field such as "2 to 10 on this size. Fewer fit when the layout is tight." **Density** is Sparse, Normal or Dense.
   - **Corridors**: Straight ones take the shortest way between doorways that face each other, turning only where they must.
     - Bending ones take a few deliberate turns, their doorways set off the line between the rooms.
     - Winding ones snake from side to side and wind round a room where the rock between two rooms is narrow, so they run longest.
@@ -325,6 +325,8 @@ All of this is the DM's.
   - A slider steps with the arrow keys, goes to its ends with Home and End, and jumps to its next or previous mark with Page Up and Page Down. A tap on a mark's name sets it.
 - **The generator's preview** is the map drawn from exactly what Make the scene sends, with each trap's zone hatched and the entrance ringed.
   - **Reroll** draws another dungeon from the same choices.
+  - Errors that turn Make the scene off (no fit, not made, picture failed, or a Make that failed) stay pinned above the foot while the choices scroll.
+  - A seed that stops reading stops any picture still drawing, and the last good picture stays.
   - The **Seed** (16 letters and digits such as `5K7Q-H2MX-A9F3-TWQ5`, read without regard to case, spaces or dashes) makes the same dungeon again on this version of the app, and **Copy seed** copies it in that form, however it was typed. A seed from another version says it makes a different dungeon now. The seed is never stored or sent: the dialog remembers this device's last choices for the room, never the seed.
   - The foot counts rooms, doors (locked ones in brackets) and traps, and a line above the choices says when fewer rooms fit than asked or when fewer than two fit, which turns Make the scene off. Make the scene stays off, with "Drawing the dungeon…", until the new dungeon's picture is on screen, so it always makes the dungeon shown. A picture this device cannot draw says so and keeps Make the scene off until a Reroll or another choice draws one.
   - Layout: On a computer the dialog is wide and the preview fills its column, as tall as the dialog's body allows, while the choices keep at least 360 px beside it once the window is wide enough.
@@ -342,7 +344,7 @@ All of this is the DM's.
 Everyone, the DM and every player, picks how their own device shows the map.
 
 - The **View** button in the top bar, before Fit, shows a square grid in Top-down and a diamond in Isometric, turned with the view. It opens the View menu, a pop-up on a wide screen and a sheet on a phone: "Follow the scene", "Top-down" or "Isometric", then "Turn left" and "Turn right".
-  - In Top-down the turn buttons stay, disabled, with "Turning works in Isometric." under them.
+  - On a wide screen the pop-up keeps the turn buttons in Top-down too, disabled, with "Turning works in Isometric." under them. The phone's sheet shows them only in Isometric.
   - On the narrowest phones at a large Interface size, or on a crowded wide bar, the button folds into Menu as a **View** row that opens the same sheet, so Undo and Redo keep their place in the bar.
 - **Isometric** tilts the map and stands what is on it up: creatures as standees with a ring and a shadow on the ground under them, walls in stone, doors in wood stained darker than a wood floor, windows as panes, pillars, map labels, pins and the names of areas and traps.
   - Raised ground stands up with the builder's textures, lighter on the left and darker on the right, and pits sink.
@@ -477,7 +479,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
   - The DM's list goes on to tokens up to 30 ft away under "Farther away", for setting up a scene.
   - The list takes the arrow keys and Enter.
   - An empty list says "Nothing within 5 ft to ride, carry or drag.", and tells a player that a grappled creature can be dragged once the DM marks it Grappled.
-  - Layout: The list opens as a pop-up from 900 px up and as a sheet from the bottom on a phone.
+  - The list opens as a pop-up on a screen 900 px wide or more and as a sheet from the bottom on a phone.
 - Ride asks Controlled (the default) or Independent, two words side by side, with a line under them saying what the chosen one does: "Warhorse moves on Bree's turn." or "Warhorse keeps its own turn." The rider's Token panel shows the same choice under its tags.
 - A holder carries what it holds: drag a warhorse and its rider rides along, a cart takes its passengers, a creature the torch in its hand, each with what those carry in turn.
   - What rides takes its holder's change of height.
@@ -808,7 +810,7 @@ A scene can have weather over its map: rain, snow, fog, falling leaves, ash or s
     - **DM note**
   - Each change saves as you make it. The sections are the panel's own switches, choices and removes, the last way a trap goes off keeps its tick and says why, and a cleared name goes back to the trap's name, saying why once you stop typing. No note comes as you leave a field, so a press below it always lands.
   - A trap that lies past the scene's edge because the scene was made smaller can still be renamed, marked found and edited. Only a new zone or new squares it hits must lie inside the scene.
-  - Layout: the pane is a bottom sheet where the map is under 600 px wide, as on a phone held upright, and otherwise a card over the map beside the trap.
+  - The pane is a bottom sheet where the map is under 600 px wide, as on a phone held upright, and otherwise a card over the map beside the trap.
 - The pane's foot holds **Armed** and **Found**, **Ask to search** and **Ask to disarm**, which open a roll request filled with the trap's checks for the selected creatures or the party, **Set it off**, which sets it off by the selected creatures or else those standing on it, and Delete on a second tap. Arming a trap with no uses left asks for its uses first.
 - On the DM's map an armed trap is hatched in red with the wolf-trap icon and its name over it, a sprung one is grey, a disarmed one a grey dashed outline, and a found one shows an eye. A wire is a dashed line with a pin at each end, and a door trap a badge on its door. While its pane is open, what it hits draws faintly. Zoomed out as far as a creature's name hides, a trap's name hides too and its icon stays, on players' maps as well.
 - **Going off**: a trap goes off for the creatures it is set for as they walk onto it or across it, open its door, land on it from the height controls, or start or end a turn on it, in the order the SRD's rules give, each trap at most once a move.
@@ -916,7 +918,7 @@ A scene can have weather over its map: rain, snow, fog, falling leaves, ash or s
 - **The turn card**: from a creature's turn start to its end, whoever answers for it gets its menu, "Adult Red Dragon's turn": Use Legendary Resistance, Legendary Actions with their pips and "After other creatures' turns" with no button on its own turn, its recharge and X/Day abilities, a character's class resources, and a block for each other creature of the turn they answer for, such as a controlled mount.
   - Its x, Dismiss, hides it on this device for the turn, and the chevron before its title, Collapse, folds it back where it was folded, to one line of its name and its count that opens again on a tap.
   - It stands last among the alerts, under the time-up line and notices, so on a phone held sideways those stay whole above a docked action bar.
-- **A creature's attacks on its turn card**: the card lists them as the Dice panel's rows (Attack, Damage, Critical and the rest), with this turn's results under each, the card's title counting "2 attacks, 3 uses". A reload during the turn shows those results again, read back from the log. It says "Loading attacks…" while they load. Tapping Attack or Damage there rolls as in the Dice panel. A player's own turn card lists their creature's weapons. If the rolls table fails to load, an attacks-only turn card stays and says "The attacks did not load. Reload to try again."
+- **A creature's attacks on its turn card**: the card lists them as the Dice panel's rows (Attack, Damage, Critical and the rest), with this turn's results under each, the card's title counting "2 attacks, 3 uses". A reload during the turn shows those results again, read back from the log. On the DM's card a result read back this way offers no Apply to, since the damage may already be applied, and a player's card keeps it. It says "Loading attacks…" while they load. Tapping Attack or Damage there rolls as in the Dice panel. A player's own turn card lists their creature's weapons. If the rolls table fails to load, an attacks-only turn card stays and says "The attacks did not load. Reload to try again."
 - A Ready marker (Hold is the same thing) records the trigger and shows on the row and the token until the creature's next turn. Players learn only that a monster readied, not its trigger.
 - The combat log keeps each HP change ("Goblin 2 takes 7 damage, 3/7 left"). The DM can take any one back while the creature is still as that change left it.
 - An HP change whose take-back record is very large, such as one that removed many effects at once, can't be taken back.
@@ -1280,7 +1282,8 @@ The DM asks players for a saving throw or an ability check, and each player roll
   - On a phone it is the Party panel.
   - A long name ends in "…" and its HP stays in view.
   - A tap jumps to that character's token and opens its action bar, and a character with no token on the scene in view reads "Not on this scene" and draws off, its HP and AC still shown.
-  - Layout: On a wide screen it sits above the side panel's tabs, hides with the panel, draws with the panel once the room has loaded, so the panel never moves down under it, and folds to one line: the names and HP, which scroll sideways when they don't all fit (with a mouse the wheel scrolls them, and Tab reaches each one), and Ask, short for Ask the party.
+  - On a wide screen it sits above the side panel's tabs, hides with the panel, and draws with the panel once the room has loaded, so the panel never moves down under it.
+  - It folds to one line: the names and HP, which scroll sideways when they don't all fit (with a mouse the wheel scrolls them, and Tab reaches each one), and Ask, short for Ask the party.
 
 ## Date and time ([design](docs/design/design-v1-calendar.md))
 
@@ -1297,7 +1300,8 @@ The DM asks players for a saving throw or an ability check, and each player roll
 - The DM starts the clock from Time (Day count or their own Months calendar), moves it on 10 minutes, 1 hour, 8 hours, to dawn or any amount (Other amount, in minutes, hours or days, up to 100 years), sets the date and time, and chooses whether players see it.
   - There is no negative step: **Set the date and time** sets it back.
   - Set sends nothing unless the DM changed a field, and a date changed alone keeps the clock's seconds, such as a fight's.
-  - A month moved elsewhere while Set is open stays picked, and one removed or renamed while Set or Today names it reads "Pick a month", which Set says under the field.
+  - A month moved elsewhere while Set is open stays picked, and one removed or renamed while Set is open reads "Pick a month", which Set says under the field.
+  - Today in the Calendar dialog keeps its month by its row in the list, so renaming the month leaves it picked and removing the row clears it.
   - Cancel or Escape with changes asks "Discard changes?", and a screen reader hears "Throw away your changes?".
   - A step that would take the clock past about 317,000 years is refused with "The clock can't go that far."
 - **Calendars**: **Day count** reads "Day 4" and on.
@@ -1413,7 +1417,7 @@ Show the players' view of the map on a TV at the table, with nothing else on scr
 
 ## Sound ([design](docs/design/design-v1-music.md), [music player](docs/design/design-v1-music-player.md), [Sound and Time as panels](docs/design/design-v1-sound-layout.md), [Only DM devices play](docs/design/design-v1-sound-dm-only.md))
 
-Music, background sounds and effects the DM plays for the room, starting within a second or two of each other on every device that plays them, or as soon as a slow connection has loaded them. Once a track or background sound starts, each device plays it straight through, so a slow connection never makes it stutter, and a pause and a resume start every device again from the DM's place. Sound files need the server's switch (Running the server). The five built-in effects work without it.
+Music, background sounds and effects the DM plays for the room, starting within a second or two of each other on every device that plays them, or as soon as a slow connection has loaded them. Once a track or background sound starts, each device plays it straight through, so a slow connection never makes it stutter, and a pause and a resume start every device again from the DM's place. A track or background sound the browser stops decoding partway, as Chrome now and then does, loads again by itself and plays on from where the room is, up to three times a minute. Sound files need the server's switch (Running the server). The five built-in effects work without it.
 
 - **Sound** is a panel under Run the table, after Scenes.
   - The DM and co-DMs always have it. A player has it while the room plays something they hear, and one left open stays until they close it.
@@ -1430,7 +1434,7 @@ Music, background sounds and effects the DM plays for the room, starting within 
   - On a computer the player opens under the chip and the map keeps working, with Crossfade as a row of its four choices (Off, 2 s, 5 s, 10 s). A window under 900 px opens it as a card, and a phone as a sheet over the panel already open. The card and the sheet say "Opening the player…" and "Couldn't open the player." as they load.
   - If playback ends while the player is open, the chip stays as "Now playing, stopped" until the player closes. With nothing playing the chip is not on the bar, and the player says "No music is playing."
   - As the bar fills the chip shrinks to its music icon and then moves into the DM menu, whose **Now playing** opens the same player.
-  - Layout: the chip is one 28 px pill with two 44 px tall targets and the name cut past 180 px. The popover's body is 340 px wide and the card 440 px.
+  - Layout: The chip is one 28 px pill with two 44 px tall targets and the name cut past 180 px. The popover's body is 340 px wide and the card 440 px.
 - **Effects**: a board of buttons, five built in (Click, Rumble, Crash, Whoosh, Hiss), then the room's effects, each a tap that plays it for everyone and stays pressed while it sounds. Edit, on Background or Effects, turns them into rows that open each sound's page.
 - **Table sound** follows Effects: its help says it is what everyone at the table hears, set here for every device, then the volumes (Music, each background sound with its Stop, and Effects, which keep "volume for everyone" in their accessible names), the scene's line as help text ("Goblin cave's sound: Tavern night.", "… has no sound of its own." or "… is silent.", or "Play something first." while nothing plays) over **Use what's playing**, Players see what is playing, and Only DM devices play. Room sound, under On this device, starts "This device only:".
 - **A scene's sound** is set in the scene's settings, **Scene sound**, for the scene in view: Use what's playing saves the music's playlist or track with its repeat, shuffle and crossfade, and the background sounds at their volumes.
@@ -1469,6 +1473,7 @@ Music, background sounds and effects the DM plays for the room, starting within 
   - A changed use says which playlists and scenes the sound leaves.
 - **Adding sounds**: Add music… (in Library), Add background sounds… and Add effects… each take up to 20 audio files at a time, in any format the browser plays.
   - The DM's browser reads each file, evens its loudness and stores an MP3: a constant bitrate MP3 of 64 to 192 kbps at 44.1 or 48 kHz is copied without its tags, anything else is converted to 128 kbps stereo or 64 kbps mono. Files with 4 or 6 channels are mixed to stereo, other channel counts are refused.
+  - A converted file's loudness is measured from the MP3 it becomes, as a copied file's is, so both play equally loud.
   - Music runs 30 seconds to 15 minutes, background sounds 2 seconds and up, effects up to 30 seconds, 24 MB a file.
   - Each file shows its step and percent with Cancel, and a refusal stays on its row with the reason.
   - A file over 200 MB is refused. Constant bitrate MP3s of 64 to 192 kbps and plain WAVs, each at 44.1 or 48 kHz, are read in pieces at any length. Other files are decoded whole, a 320 kbps, variable bitrate or 32 kHz MP3 included: about 3 minutes of stereo FLAC on a phone or tablet, about 16 on a computer, so a long file of another kind may be too big for a phone and is best added from a computer.
@@ -1500,7 +1505,7 @@ Menu, This device holds settings kept on this device alone. Its sections fold, f
 - **Theme**: Dark (the default), Light, or Auto, which follows this device's own setting. The map, the fog, the dice tray and the table display stay dark in Light too. A change shows at once, in every page of the app open on this device, the DM guide in another tab included.
 - **Full screen**: the room fills the whole screen, where the browser allows it. The switch is not there on an iPhone.
 - **Low power**: draws the map at a lower resolution, loads the phone size map, skips small animations, keeps weather and animated maps still, shows rolls without dice and waits for 48 px a square, not 24, to draw Isometric's slabs, frames and steps, to save battery on long sessions. Text on the map looks softer.
-- **Weather**: Moving (rain falls, snow drifts and fog rolls, using more battery), Still (shows the weather without moving it) or Off (no weather on this device, though rolls still follow it). Moving at first. Reduced motion and Low power keep it still, and a device that cannot keep up halves the particles, then holds them still until the page reloads, and says so here.
+- **Weather**: Moving (rain falls, snow drifts and fog rolls, using more battery), Still (shows the weather without moving it) or Off (no weather on this device, though rolls still follow it). Moving at first. Reduced motion and Low power keep it still, and a device that cannot keep up, by slow frames or by weather taking more than 6% of its time, halves the particles, then holds them still until the page reloads, and says so here.
 - **Map detail**: Phone size (up to 4096 pixels across, loads faster) or Full size (sharper on a large screen). Folded, it reads "Phone size · Moving · Held still" while something holds animated maps still, as Weather's line does.
 - **Animated maps**: Moving (the default, which downloads each map's video) or Still (shows the first frame and downloads no video), shown while the server takes videos. Low power, reduced motion or a video that slowed the device keeps them still, and the help under the row says so.
 - **Sounds**: **Room sound** plays the music, background sounds and effects the DM plays, with, while it is on, **Music**, **Background** and **Effects** volumes (80% at first).
@@ -1551,7 +1556,8 @@ Search finds a panel, a setting, an action, a key, or a thing in the room, and e
 - **What a player can reach**: only what their own screen already holds and what they may do. The DM's settings, actions, scenes, monsters, music and notes are not in a player's list, a token whose name is hidden is found by the name the player sees, and the list shows no count of what is left out.
 - **Loading**: everything is on the device, so it works offline. The DM's part loads with the DM's panels. While monsters or the DM's results are not in yet, the list shows the rest and, after about 200 ms, "Loading monsters…" or "Loading the DM's results…". A part that failed says "Some results could not load." with **Try again**, then **Reload**.
   - A polite status reads "No match", "1 result" or "<n> results".
-  - Layout: the dialog is 640 px wide, the phone sheet is used below 600 px, and the top bar's field is 240 px.
+  - Under 600 px wide the search is the phone's sheet over the whole screen.
+  - Layout: The dialog is 640 px wide and the top bar's field is 240 px.
 
 ## Shortcuts
 
