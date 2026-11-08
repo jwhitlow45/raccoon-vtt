@@ -24,6 +24,11 @@ export function clientKey(sessionId: string, clientId: string): ClientKey {
   return `${sessionId}|${clientId}`;
 }
 
+/** The session a client key was made for. The session id is the server's own, so it never holds the separator. */
+export function sessionOfKey(key: ClientKey): string {
+  return key.slice(0, key.indexOf("|"));
+}
+
 /** What a socket sends through the ephemeral channel and may still be showing on other screens. */
 export type PreviewKind = "drag" | "ruler" | "aoe";
 

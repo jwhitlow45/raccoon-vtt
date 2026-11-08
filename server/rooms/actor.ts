@@ -27,7 +27,7 @@ import type { RoomGateway } from "./gateway.ts";
 import { roomStoredBytes } from "../assets/quota.ts";
 import { SnapshotBudget, TokenBucket, type Clock } from "./budgets.ts";
 import { CloseWrites } from "./closeWrites.ts";
-import { CLOSE, clientKey, type ClientKey, type Connection } from "./connection.ts";
+import { CLOSE, clientKey, sessionOfKey, type ClientKey, type Connection } from "./connection.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { cancelPreviews, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
 import { exploreOp } from "./explore.ts";
@@ -447,8 +447,12 @@ export class RoomActor {
    * client's next op of another group and when its socket goes.
    */
   #askRefused = new Map<ClientKey, string>();
-  /** When each client key's last fault refusals came, for the throttle (#faultsPastLimit). Gone with the room's unload. */
-  #faultRefusals = new Map<ClientKey, number[]>();
+  /**
+   * When each session's last fault refusals came, for the throttle (#faultsPastLimit). Keyed by session and not
+   * by client key: a client picks its own client id, so a key that held it would give each fresh id a throttle
+   * of its own, and a map that grows with them. Gone with the room's unload.
+   */
+  #faultRefusals = new Map<string, number[]>();
   /**
    * The ask being read over several turns (#readAsk). The room's queue
    * waits on it as on a step, so its sender's later ops stay behind it.
@@ -1087,20 +1091,20 @@ export class RoomActor {
     } catch {
       return false;
     }
-    return !this.#faultsPastLimit(key);
+    return !this.#faultsPastLimit(sessionOfKey(key));
   }
 
   /**
-   * Counts a fault refusal against the client's key, the device's, so a
-   * reconnect does not reset it. True from the third within
+   * Counts a fault refusal against the session, the device's, so neither a
+   * reconnect nor a fresh client id resets it. True from the third within
    * FAULT_REFUSALS_WINDOW_MS, whose socket then closes so a crafted client
    * cannot fill the error log faster than it can reconnect.
    */
-  #faultsPastLimit(key: ClientKey): boolean {
+  #faultsPastLimit(session: string): boolean {
     const now = this.#opts.now();
-    const recent = (this.#faultRefusals.get(key) ?? []).filter((at) => now - at < FAULT_REFUSALS_WINDOW_MS);
+    const recent = (this.#faultRefusals.get(session) ?? []).filter((at) => now - at < FAULT_REFUSALS_WINDOW_MS);
     recent.push(now);
-    this.#faultRefusals.set(key, recent);
+    this.#faultRefusals.set(session, recent);
     return recent.length >= FAULT_REFUSALS_BEFORE_CLOSE;
   }
 

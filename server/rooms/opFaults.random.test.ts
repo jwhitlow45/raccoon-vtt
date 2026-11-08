@@ -20,7 +20,7 @@ import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
  *
  * Invariants: each op number is answered at most once on a socket, no op is
  * applied twice, a socket closes only for a throw after staging or for the
- * third fault refusal within 60 s, an op that threw before staging is
+ * third fault refusal within 60 s of one session (a fresh client id keeps the count), an op that threw before staging is
  * refused with the server's words, and nothing is left staged at the end.
  */
 
@@ -75,8 +75,8 @@ function seeded(seed: number): () => number {
   };
 }
 
-type Action = "chat" | "beforeStaging" | "afterStaging" | "askRead" | "reconnect" | "resend" | "wait";
-const ACTIONS: Action[] = ["chat", "chat", "beforeStaging", "beforeStaging", "afterStaging", "askRead", "reconnect", "resend", "wait"];
+type Action = "chat" | "beforeStaging" | "afterStaging" | "askRead" | "reconnect" | "newId" | "resend" | "wait";
+const ACTIONS: Action[] = ["chat", "chat", "beforeStaging", "beforeStaging", "afterStaging", "askRead", "reconnect", "newId", "resend", "wait"];
 
 type Device = {
   who: Member;
@@ -89,17 +89,19 @@ type Device = {
   unheard: Map<number, { raw: unknown; text: string | null }>;
   /** Fault refusals the model expects the server to have counted, by time. */
   faultTimes: number[];
+  /** When its client id last changed, for counting the throttles a fresh id would have reset. */
+  idChangedAt: number;
   /** Every socket it has had, with what the model expects of it. */
   sockets: Array<{ conn: Connection; sent: ServerMessage[]; mayClose: boolean }>;
 };
 
 /** What the sequences reached, so a generator that stops reaching a case fails. */
-const reached = { refusals: 0, throttled: 0, afterStaging: 0 };
+const reached = { refusals: 0, throttled: 0, afterStaging: 0, newIds: 0, throttledAcrossIds: 0 };
 
 /** The room being run, so a failed sequence still stops its timers. */
 let live: RoomActor | null = null;
 
-async function run(seed: number, steps: number): Promise<void> {
+async function run(seed: number, steps: number, script?: readonly Action[]): Promise<void> {
   const rand = seeded(seed);
   const dm = member("DM", "dm");
   const pc = member("Pip", "player");
@@ -162,7 +164,7 @@ async function run(seed: number, steps: number): Promise<void> {
   }
 
   async function device(who: Member): Promise<Device> {
-    const d: Device = { who, clientId: uuidv7(), sessionId: uuidv7(), conn: null as never, sent: [], nextN: 1, unheard: new Map(), faultTimes: [], sockets: [] };
+    const d: Device = { who, clientId: uuidv7(), sessionId: uuidv7(), conn: null as never, sent: [], nextN: 1, unheard: new Map(), faultTimes: [], idChangedAt: 0, sockets: [] };
     await open(d, 1);
     devices.push(d);
     return d;
@@ -204,13 +206,14 @@ async function run(seed: number, steps: number): Promise<void> {
     const closes = d.faultTimes.length >= 3;
     reached.refusals++;
     if (closes) reached.throttled++;
+    if (closes && d.faultTimes.some((at) => at < d.idChangedAt)) reached.throttledAcrossIds++;
     if (closes) d.sockets[d.sockets.length - 1]!.mayClose = true;
     return closes;
   }
 
   for (let step = 0; step < steps; step++) {
     clock.t += 300 + Math.floor(rand() * 20_000);
-    const action = ACTIONS[Math.floor(rand() * ACTIONS.length)]!;
+    const action = script ? script[step % script.length]! : ACTIONS[Math.floor(rand() * ACTIONS.length)]!;
     const d = action === "askRead" ? desk : pip;
     if (d.conn.closed && action !== "reconnect") {
       const first = [...d.unheard.keys()][0] ?? d.nextN;
@@ -265,6 +268,17 @@ async function run(seed: number, steps: number): Promise<void> {
         await open(d, first);
         break;
       }
+      case "newId": {
+        // A client picks its own id, so a fresh one must not buy a fresh throttle. Only with nothing unheard, which a new id's watermark could not resume.
+        if (d.unheard.size === 0) {
+          d.clientId = uuidv7();
+          d.idChangedAt = clock.t;
+          reached.newIds++;
+        }
+        const first = [...d.unheard.keys()][0] ?? d.nextN;
+        await open(d, first);
+        break;
+      }
       case "resend": {
         for (const [n, entry] of d.unheard) await actor.op(d.conn, n, entry.raw);
         break;
@@ -312,7 +326,9 @@ describe("ops that throw", () => {
   test("random sequences of plain ops, throws before and after staging, ask reads, reconnects and resends keep the rules", async () => {
     try {
       for (let seed = 1; seed <= 8; seed++) await run(seed, 30);
-      assert.ok(reached.refusals > 0 && reached.throttled > 0 && reached.afterStaging > 0, `the sequences reached ${JSON.stringify(reached)}`);
+      // Faults with a fresh client id between them, so the third has to count across ids.
+      for (let seed = 101; seed <= 108; seed++) await run(seed, 30, ["beforeStaging", "newId", "beforeStaging", "newId", "beforeStaging", "newId"]);
+      assert.ok(reached.refusals > 0 && reached.throttled > 0 && reached.afterStaging > 0 && reached.newIds > 0 && reached.throttledAcrossIds > 0, `the sequences reached ${JSON.stringify(reached)}`);
     } finally {
       await live?.shutdown({ code: 1012, snapshot: false });
     }
