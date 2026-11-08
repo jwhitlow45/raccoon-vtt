@@ -9,6 +9,7 @@ import sharp from "sharp";
 import { accentFor } from "../client/lib/accent.ts";
 import { PALETTES } from "../client/lib/theme.ts";
 import { lightOnly, normal, parseColor, partColors, ratio, sweepContrast, sweepRing, type Sweep } from "./helpers/contrast.ts";
+import { versionChar } from "../client/features/dungeon/seed.ts";
 import { openGroup } from "./helpers/groups.ts";
 import { ConsoleWatch, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
@@ -1180,13 +1181,19 @@ async function setModality(page: Page, mode: "pointer" | "keys"): Promise<void> 
 }
 
 /**
+ * Fifteen-character seed bodies for the dungeon dialog's ring check, tried in order after the generator's version character. The first five put stone under the ring at 1440 x 900, and the rest are spares for the other pages.
+ * A change to the generator's version or its drawing can leave none that does, and then the check names this list.
+ */
+const RING_SEEDS = ["7MP0RTCF4BDDBNK", "CGES8Y9NQJ4733N", "DJG64Q9WFP4NQMM", "DWA5XDKTW240GAW", "R5BWPG1R266EHXG", "EJKFCJCA1A1GWM5", "TQJSHC9N7P0PM8P", "KGQPX8QECK67QV4"];
+
+/**
  * The dungeon generator's dialog (review LTB-1): its words, and Reroll's
  * ring in the preview's corner, where it stands on the board's dark ground
  * or the picture in either scheme. The ring sweep leaves out what lies over
  * the picture, an image, so the ring is measured on the pixels the page
  * paints beside its line (review LTA-1), with a blue member's accent, whose
- * dark shade reads 2.6:1 on the generated stone, and a dungeon rerolled
- * until stone lies under the ring.
+ * dark shade reads 2.6:1 on the generated stone, and a pinned seed that
+ * draws stone under the ring.
  */
 async function dungeonDialog(page: Page, at: string, kind: "computer" | "phone", scheme: "dark" | "light", found: { failures: string[]; counts: Map<string, number> }): Promise<void> {
   const dmId = dmSocket.you!.memberId;
@@ -1207,20 +1214,22 @@ async function dungeonDialog(page: Page, at: string, kind: "computer" | "phone",
     const accent = accentFor(BLUE, "dark").accent;
     const tooLow = (p: [number, number, number]) => ratio(parseColor(accent), parseColor(`rgb(${p.join(", ")})`)) < 3;
 
-    // A dungeon with stone under the ring's line, where the accent alone would read under 3:1.
+    // A dungeon with stone under the ring's line, where the accent alone would read under 3:1. The seeds are pinned, so a run draws the same dungeons each time (LTB-11).
+    const seedBox = dialog.getByRole("textbox", { name: "Seed", exact: true });
     let points: { x: number; y: number }[] = [];
-    for (let tries = 0; tries < 30; tries++) {
+    let drawn = 0;
+    for (const body of RING_SEEDS) {
       await page.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur?(): void } | null } }).document.activeElement?.blur?.());
+      const before = await picture.getAttribute("src");
+      await seedBox.fill(`${versionChar()}${body}`);
+      await waitFor("the picture of the next seed", async () => ((await picture.getAttribute("src")) !== before && (await reroll.isEnabled()) ? true : null), 30_000);
+      drawn++;
       points = await ringPoints(reroll);
       const bare = await pagePixels(page, points);
       if (bare.some(tooLow)) break;
       points = [];
-      const before = await picture.getAttribute("src");
-      await reroll.click();
-      await waitFor("the next picture", async () => ((await picture.getAttribute("src")) !== before && (await reroll.isEnabled()) ? true : null), 30_000);
     }
-    assert.ok(points.length > 0, `${at}: no dungeon put stone under Reroll's ring in 30 rerolls`);
-
+    assert.ok(points.length > 0, `${at}: none of the ${drawn} pinned seeds put stone under Reroll's ring: pick new ones in RING_SEEDS`);
     await page.keyboard.press("Shift");
     await setModality(page, "keys");
     await reroll.focus();
