@@ -52,9 +52,8 @@ describe("a floating toolbar button", () => {
         for (const art of BOARD_GROUNDS) {
           const ground = over(a.tint, over(p.overlay, art));
           const ratio = contrast(a.accent, ground);
-          // Its name is 13 px text, so 4.5:1. Dark's translucent overlay lets white art lift the ground to about 4.1:1 for a mid-light accent, still 3:1 for the icon and up from 2.2:1 with the tint alone: a follow-up on dark's overlay, not this square.
-          const least = scheme === "dark" && art !== boardTheme.color.bg ? 3 : 4.5;
-          assert.ok(ratio >= least, `${color} on ${scheme} over ${art}: ${ratio.toFixed(2)}`);
+          // Its name is 13 px text, so 4.5:1, over white art too: at 0.88 dark's overlay let white art lift the ground to 4.1:1 for a mid-light accent (LT-DARK-OVERLAY).
+          assert.ok(ratio >= 4.5, `${color} on ${scheme} over ${art}: ${ratio.toFixed(2)}`);
         }
       }
     });

@@ -73,7 +73,11 @@ export type Palette = {
   ally: string;
   neutral: string;
   hostile: string;
-  /** Bars floating over the map, translucent so the map stays in view. */
+  /**
+   * Bars floating over the map, translucent so the map stays in view. Both
+   * schemes lie at 0.92: at 0.88 white art lifted dark's ground enough that
+   * a chosen tool's name in a mid-light accent read about 4.1:1.
+   */
   overlay: string;
   /** Behind every dialog. */
   scrim: string;
@@ -107,7 +111,7 @@ export const PALETTES: Readonly<Record<Scheme, Readonly<Palette>>> = {
     ally: "#3e8ef7",
     neutral: "#c9c9c9",
     hostile: "#e5484d",
-    overlay: "rgba(22, 22, 26, 0.88)",
+    overlay: "rgba(22, 22, 26, 0.92)",
     scrim: "rgba(0, 0, 0, 0.6)",
     markRing: "#3a3a44",
   },
