@@ -34,3 +34,23 @@ test("a short body caps the side at its height", () => {
 test("a body narrower than the gap gives 0", () => {
   assert.equal(previewSide(10, TALL), 0);
 });
+
+/*
+ * DG-R2-02: the preview box stands in one place of the tree whatever the
+ * card's width, or crossing 640 px remounts it empty while Make is still on.
+ * DGFIX-FU-1: the error lines are pinned above the foot, not at the top of
+ * the choices that scroll away.
+ */
+const { readFileSync } = await import("node:fs");
+const source = readFileSync(new URL("./GenerateDialog.tsx", import.meta.url), "utf8");
+
+test("DG-R2-02: the preview box is rendered once, in a wrapper whose style changes with the width", () => {
+  assert.equal(source.match(/\{previewBox\}/g)?.length, 1);
+});
+
+test("DGFIX-FU-1: the errors share the pinned foot with the fog warning, and the choices column holds none", () => {
+  const choices = source.slice(source.indexOf("const choicesBox"), source.indexOf("return (\n    <Dialog"));
+  assert.doesNotMatch(choices, /<ErrorText>/);
+  const pinned = source.slice(source.indexOf("...PINNED_FOOT") - 200, source.indexOf("</Dialog>"));
+  assert.match(pinned, /errorLine/);
+});

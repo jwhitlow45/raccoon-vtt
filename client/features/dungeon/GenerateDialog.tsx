@@ -241,18 +241,13 @@ export function GenerateDialog(props: {
   const roomsLimit = roomCap(w, h);
   const rooms = clampRooms(choices.rooms, w, h);
   const fit = current ? fitLine(current.summary) : null;
+  // Pinned above the foot with the fog warning, so a DM scrolled down sees why Make is off.
+  const errorLine = failed ? <ErrorText>{failed.text}</ErrorText> : null;
+  const previewError =
+    problem === "fit" ? <ErrorText>{FIT_NONE}</ErrorText> : problem === "bug" ? <ErrorText>{NOT_MADE}</ErrorText> : ready.pictureFailed ? <ErrorText>{PICTURE_FAILED}</ErrorText> : null;
   const choicesBox = (
     <div style={{ display: "grid", gap: theme.space(4), minWidth: 0, alignContent: "start" }}>
-      {failed ? <ErrorText>{failed.text}</ErrorText> : null}
-      {problem === "fit" ? (
-        <ErrorText>{FIT_NONE}</ErrorText>
-      ) : problem === "bug" ? (
-        <ErrorText>{NOT_MADE}</ErrorText>
-      ) : ready.pictureFailed ? (
-        <ErrorText>{PICTURE_FAILED}</ErrorText>
-      ) : fit ? (
-        <Note>{fit}</Note>
-      ) : null}
+      {problem === null && !ready.pictureFailed && fit ? <Note>{fit}</Note> : null}
       {/* Held while Make sends and once a scene exists, so no choice draws a preview Make can no longer send. */}
       <Held held={locked} style={{ display: "grid", gap: theme.space(4), minWidth: 0 }}>
         <div ref={themeRef}>
@@ -390,18 +385,17 @@ export function GenerateDialog(props: {
          * wide card, in a column of its own placed at the left, and over them
          * on a narrow one.
          */}
-        {layout.wide ? (
-          <div style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: layout.width }}>
-            <div style={{ position: "sticky", top: 0 }}>{previewBox}</div>
-          </div>
-        ) : (
-          <div style={{ position: "sticky", top: 0, zIndex: 1, background: theme.color.surface, paddingBottom: theme.space(2), marginBottom: -theme.space(2) }}>{previewBox}</div>
-        )}
+        <div style={layout.wide ? { position: "absolute", top: 0, left: 0, bottom: 0, width: layout.width } : { position: "sticky", top: 0, zIndex: 1, background: theme.color.surface, paddingBottom: theme.space(2), marginBottom: -theme.space(2) }}>
+          {/* One place in the tree at either width, or crossing the breakpoint remounts the preview empty. */}
+          <div style={layout.wide ? { position: "sticky", top: 0 } : undefined}>{previewBox}</div>
+        </div>
         {choicesBox}
         {/* Above the foot whatever the scroll, so it is read before Make. */}
-        {fogWarning ? (
-          <div style={PINNED_FOOT}>
-            <Note>{fogWarning}</Note>
+        {errorLine || previewError || fogWarning ? (
+          <div style={{ ...PINNED_FOOT, display: "grid", gap: theme.space(2) }}>
+            {errorLine}
+            {previewError}
+            {fogWarning ? <Note>{fogWarning}</Note> : null}
           </div>
         ) : null}
       </div>
