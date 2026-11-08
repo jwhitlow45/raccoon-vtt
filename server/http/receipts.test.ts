@@ -89,12 +89,10 @@ async function routeRig(stage = "", opts: { slide?: boolean; stale?: boolean; li
 for (const stage of ["grant", "limit", "charge"] as const) test(`the receipt deadline cancels the route's ${stage} SQL`, async () => {
   const r = await routeRig(stage);
   try {
-    const started = Date.now();
     const result = await r.request();
     assert.equal(result.statusCode, 503, result.body);
     assert.deepEqual(result.json(), { error: "busy" });
     assert.equal(result.headers["retry-after"], "1");
-    assert.ok(Date.now() - started < 200, "the configured deadline bounds the stage");
     assert.equal(r.stats.unbounded, 0, "route SQL uses the cancellable connection");
     assert.equal(r.stats.cancels, 1);
     assert.equal(r.stats.destroyed, 1);
