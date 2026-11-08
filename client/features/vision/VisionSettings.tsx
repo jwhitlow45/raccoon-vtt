@@ -84,7 +84,8 @@ export function LightSettings(props: { scene: Scene }) {
           label="Light level"
           value={lightChoiceOf(scene)}
           options={lightChoices(scene, hasClock)}
-          even
+          // Each choice keeps the width its words ask for and the row wraps, so "Time of day" never sits cramped in a quarter of a narrow panel.
+          grow
           onChange={(choice) => update({ vision: choice === "clock" ? timeOfDayPatch(scene) : lightPatch(scene, choice) })}
         />
       </SettingRow>
