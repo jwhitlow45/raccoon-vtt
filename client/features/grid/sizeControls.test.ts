@@ -17,7 +17,7 @@ function render(kind: "panel" | "bar", gridShape: GridShape | undefined, size: T
   const t = token("t1", { sceneId: "s1", size, locked, ownerIds: [P1.memberId] });
   const view = room({ scenes: { s1: scene("s1", { gridShape }), s2: scene("s2") }, tokens: { t1: t } });
   const you = locked ? P1 : DM;
-  const store = createStore(() => ({ view, you, sceneId: "s2" }));
+  const store = createStore(() => ({ view, floorView: view, you, sceneId: "s2" }));
   const access = tokenAccess({ view, role: you.role, memberId: you.memberId, token: t });
   const node = kind === "panel"
     ? createElement(SizeField, { token: t, actor: {}, access, feetPerCell: 5 })

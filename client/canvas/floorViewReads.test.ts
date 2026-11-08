@@ -32,8 +32,8 @@ const FOLDERS = [
   "features/weather",
   "features/animmap",
 ];
-/** Other lanes' files (the action bar belongs to Floors settings) and readers that mean every floor. */
-const SKIPPED = new Set(["canvas/TokenActionBar.tsx", "canvas/barButtons.ts", "features/areas/reminders.ts", "features/attach/turns.ts", "features/areas/useAreaReminders.ts"]);
+/** Readers that mean every floor. */
+const SKIPPED = new Set(["features/areas/reminders.ts", "features/attach/turns.ts", "features/areas/useAreaReminders.ts"]);
 const FLOOR_SCOPED = "tokens|buildChunks|fogTiles|exploredTiles|labels|stamps|lights|pins|traps|templates|drawings|fogDrafts|holders|exploredBy|memory|memoryBy";
 const OFFENDING = new RegExp(`\\b(?:s|v)\\.view\\??\\.(?:${FLOOR_SCOPED})\\b|getState\\(\\)\\.view\\b`);
 

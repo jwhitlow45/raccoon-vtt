@@ -255,14 +255,14 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
   const actions = useRoomActions();
   const ui = useRoomUi();
   const you = useRoomView((s) => s.you);
-  const character = useRoomView((s) => ("ref" in token.actor ? s.view?.characters[token.actor.ref] : undefined));
-  const playersApplyDamage = useRoomView((s) => s.view?.meta.settings.playersApplyDamage ?? false);
-  const scene = useRoomView((s) => s.view?.scenes[token.sceneId]);
-  const tokens = useRoomView((s) => s.view?.tokens);
+  const character = useRoomView((s) => ("ref" in token.actor ? s.floorView?.characters[token.actor.ref] : undefined));
+  const playersApplyDamage = useRoomView((s) => s.floorView?.meta.settings.playersApplyDamage ?? false);
+  const scene = useRoomView((s) => s.floorView?.scenes[token.sceneId]);
+  const tokens = useRoomView((s) => s.floorView?.tokens);
   const multi = useRoomView((s) => s.local.multi);
-  const encounter = useRoomView((s) => s.view?.encounter);
-  const monsters = useRoomView((s) => s.view?.monsters);
-  const blocks = useRoomView((s) => s.view?.companionBlocks);
+  const encounter = useRoomView((s) => s.floorView?.encounter);
+  const monsters = useRoomView((s) => s.floorView?.monsters);
+  const blocks = useRoomView((s) => s.floorView?.companionBlocks);
   const [drawer, setDrawer] = useState<Drawer>(null);
   const scope = useRoomScope();
   const openRolls = useOpenRollOptions();
@@ -310,7 +310,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
   // A dead creature's bar offers the DM Revive after the Dead tag, and tells a player who may heal it what healing will do (docs/design/design-v1-combat-flow.md 3.5).
   // An HP-less token shows no life tag, so it has neither (docs/design/design-v1-token-panel.md 3.2).
   const noHp = hpLess(actor, token);
-  const revives = useRoomView((s) => healRevivesDead(s.view?.meta.settings ?? {}));
+  const revives = useRoomView((s) => healRevivesDead(s.floorView?.meta.settings ?? {}));
   const deadLineId = useId();
   const revive = access.life && !noHp && offersRevive(life, token.kind);
   const deadLine = revive ? REVIVE_NOTE : life === "dead" && !noHp && !access.dm && access.hp !== "none" ? deadHealLine(displayName(token), revives) : null;
@@ -699,9 +699,9 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
   const actions = useRoomActions();
   const multi = useRoomView((s) => s.local.multi);
   const you = useRoomView((s) => s.you);
-  const characters = useRoomView((s) => s.view?.characters ?? NO_CHARACTERS);
-  const playersApplyDamage = useRoomView((s) => s.view?.meta.settings.playersApplyDamage ?? false);
-  const encounter = useRoomView((s) => s.view?.encounter ?? null);
+  const characters = useRoomView((s) => s.floorView?.characters ?? NO_CHARACTERS);
+  const playersApplyDamage = useRoomView((s) => s.floorView?.meta.settings.playersApplyDamage ?? false);
+  const encounter = useRoomView((s) => s.floorView?.encounter ?? null);
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [more, setMore] = useState(false);
   const moreButton = useRef<HTMLButtonElement>(null);
@@ -723,7 +723,7 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
   const joinState = join.stateOf(joining);
   const outOfFight = fightCandidates(tokens, encounter).length;
   const scope = useRoomScope();
-  const anyPlayed = useRoomView((s) => (s.view ? offersRequest(s.view, tokens) : false));
+  const anyPlayed = useRoomView((s) => (s.floorView ? offersRequest(s.floorView, tokens) : false));
   const openRolls = useOpenRollOptions();
   const undoOffer = useStore(useScoped(lastMoveSlot), offered);
   const rest = frame.rest;
@@ -895,7 +895,7 @@ function useOpenRollOptions(): () => void {
 /** Whether the turn is the viewer's own, as the strip's End turn reads it (InitiativeStrip.tsx EndTurnButton): never the DM's. */
 function useYourTurn(): boolean {
   const entries = useSortedEntries();
-  const activeEntryId = useRoomView((s) => s.view?.encounter?.activeEntryId ?? null);
+  const activeEntryId = useRoomView((s) => s.floorView?.encounter?.activeEntryId ?? null);
   const facts = useRowFacts();
   return turnStatus({ entries, activeEntryId, mine: facts.mine }) === "yours";
 }
@@ -973,7 +973,7 @@ function UndoMoveButton(props: { tokenIds: readonly string[]; arrow?: boolean })
 function CountLegButton(props: { token: ViewToken }) {
   const actions = useRoomActions();
   const role = useRoomView((s) => s.you?.role ?? "player");
-  const encounter = useRoomView((s) => s.view?.encounter);
+  const encounter = useRoomView((s) => s.floorView?.encounter);
   const slot = useScoped(lastMoveSlot);
   const offer = useStore(slot, offered);
   const undoing = useStore(slot, (s) => s.undoing !== null);
@@ -2353,7 +2353,7 @@ function DeleteButton(props: { onDelete(): void; armedText?: string; holdsRoom?:
 export function SizeRow(props: { token: ViewToken; owner: boolean; canResize: boolean }) {
   const { token } = props;
   const resize = useResize();
-  const gridShape = useRoomView((s) => s.view?.scenes[token.sceneId]?.gridShape);
+  const gridShape = useRoomView((s) => s.floorView?.scenes[token.sceneId]?.gridShape);
   const smaller = useRef<HTMLButtonElement>(null);
   const larger = useRef<HTMLButtonElement>(null);
   if (token.size === "custom" || !props.canResize) {
