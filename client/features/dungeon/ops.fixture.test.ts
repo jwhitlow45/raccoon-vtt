@@ -96,7 +96,7 @@ function today() {
         return { ...entry(name, made.plan, made.ops), seed: parsed.seed, settings };
       }),
       (() => {
-        const landed = landDungeon(dressed, { ...dialogScene(dressed), id: SCENE_PLACEHOLDER }, HAND_SETTINGS.band, DEFAULT_CONTEXT, handKey(), HAND_SETTINGS);
+        const landed = landDungeon(dressed, { ...dialogScene(dressed), id: SCENE_PLACEHOLDER }, HAND_SETTINGS.band, { input: handKey(), settings: HAND_SETTINGS });
         assert.ok(landed.ok, landed.ok ? "" : landed.why);
         return { ...entry("dressed", dressed, landed.ops), stones: dressed.stones, pins: dressed.rooms.map((r) => r.pin) };
       })(),

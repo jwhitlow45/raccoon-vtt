@@ -5,7 +5,7 @@ import { builderScene, type SceneInput } from "../scenes/create.ts";
 import type { KeyInput } from "./keyPage.ts";
 import type { DungeonPlan, PlanRoom } from "./plan.ts";
 import { landDungeon } from "./scratch.ts";
-import { DEFAULT_CONTEXT, DEFAULT_SETTINGS, GENERATOR_VERSION, type DungeonSettings } from "./settings.ts";
+import { DEFAULT_SETTINGS, GENERATOR_VERSION, type DungeonSettings } from "./settings.ts";
 
 /*
  * Plans written by hand for the landing tests, so the ops, the scratch room
@@ -233,7 +233,7 @@ export function handKey(name = "Crypt"): KeyInput {
 
 /** The 100-op hand plan's ops as Make sends them, landed through the scratch room as the worker lands a plan. */
 export function hundredOps(scene: SceneInput): ClientOp[] {
-  const landed = landDungeon(hundredPlan(), scene, HAND_SETTINGS.band, DEFAULT_CONTEXT, handKey(scene.name), HAND_SETTINGS);
+  const landed = landDungeon(hundredPlan(), scene, HAND_SETTINGS.band, { input: handKey(scene.name), settings: HAND_SETTINGS });
   if (!landed.ok) throw new Error(landed.why);
   return landed.ops;
 }

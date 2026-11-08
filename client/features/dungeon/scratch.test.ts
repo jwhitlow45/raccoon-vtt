@@ -16,7 +16,7 @@ function chunkOf(room: ReturnType<typeof scratchRoom>, x: number, y: number) {
 
 test("DG-B: a plan lands whole in a room holding only its scene, traps armed and unfound", () => {
   const plan = twoRooms();
-  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4", DEFAULT_CONTEXT, null);
+  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4", null);
   assert.ok(landed.ok, landed.ok ? "" : landed.why);
   const room = landed.room;
   assert.deepEqual(Object.keys(room.scenes), [SCENE_PLACEHOLDER]);
@@ -52,12 +52,12 @@ test("DG-B: a preview's scene is the dialog's under the placeholder id, square, 
 test("DG-B: a refusal names the op it stopped at, and nothing after it lands", () => {
   const plan = twoRooms();
   plan.traps = [{ preset: "hidden-pit", zone: { cells: [{ x: 29, y: 29, w: 2, h: 2 }] } }];
-  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4", DEFAULT_CONTEXT, null);
+  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4", null);
   assert.ok(!landed.ok);
   assert.match(landed.why, /^op 8: trap.create refused: a trap's squares lie inside its scene/);
   const noDoor = twoRooms();
   noDoor.traps = [{ preset: "poisoned-needle", zone: { door: { edge: "20,20,w" } } }];
-  const refused = landDungeon(noDoor, previewScene(dialogScene(noDoor), noDoor), "1-4", DEFAULT_CONTEXT, null);
+  const refused = landDungeon(noDoor, previewScene(dialogScene(noDoor), noDoor), "1-4", null);
   assert.ok(!refused.ok);
   assert.match(refused.why, /^op 8: trap.create refused/);
 });
@@ -65,7 +65,7 @@ test("DG-B: a refusal names the op it stopped at, and nothing after it lands", (
 test("DG-B: an op that does not parse is a bug, named as such", () => {
   const plan = twoRooms();
   plan.heights = [{ ft: 500, cells: ["16,4"] }];
-  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4", DEFAULT_CONTEXT, null);
+  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4", null);
   assert.ok(!landed.ok);
   assert.match(landed.why, /build.height does not parse/);
 });
@@ -129,7 +129,7 @@ test("DG-B: a generator that throws, or a plan the scratch room refuses, is the 
 
 test("DG2B: the ground, the stamps, the lights and the stones land, then the traps, then the key's page and its pins", () => {
   const plan = dressedRooms();
-  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), HAND_SETTINGS.band, DEFAULT_CONTEXT, handKey(), HAND_SETTINGS);
+  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), HAND_SETTINGS.band, { input: handKey(), settings: HAND_SETTINGS });
   assert.ok(landed.ok, landed.ok ? "" : landed.why);
   const kinds = landed.ops.map((op) => op.t).filter((t, i, all) => all[i - 1] !== t);
   assert.deepEqual(kinds, ["scene.create", "build.paint", "build.edge", "build.height", "build.stairs", "build.stamps", "build.lights", "token.create", "trap.create", "journal.create", "pin.put"]);
@@ -137,21 +137,25 @@ test("DG2B: the ground, the stamps, the lights and the stones land, then the tra
   const on = <T extends { sceneId: string }>(r: Record<string, T>) => Object.values(r).filter((x) => x.sceneId === SCENE_PLACEHOLDER);
   assert.deepEqual([on(room.stamps).length, on(room.lights).length, on(room.tokens).length, on(room.traps).length, on(room.pins).length], [4, 1, 1, 5, 2]);
   assert.equal(Object.keys(room.journal).length, 1);
-  const off = landDungeon(plan, previewScene(dialogScene(plan), plan), HAND_SETTINGS.band, DEFAULT_CONTEXT, null);
+  const off = landDungeon(plan, previewScene(dialogScene(plan), plan), HAND_SETTINGS.band, null);
   assert.ok(off.ok);
   assert.equal(off.ops.some((op) => op.t === "journal.create" || op.t === "pin.put"), false, "no key without the key's room facts");
-  const keyOff = landDungeon(plan, previewScene(dialogScene(plan), plan), HAND_SETTINGS.band, DEFAULT_CONTEXT, handKey(), { ...HAND_SETTINGS, key: false });
+  const keyOff = landDungeon(plan, previewScene(dialogScene(plan), plan), HAND_SETTINGS.band, { input: handKey(), settings: { ...HAND_SETTINGS, key: false } });
   assert.ok(keyOff.ok);
   assert.equal(keyOff.ops.some((op) => op.t === "journal.create" || op.t === "pin.put"), false, "none with DM key off");
-  assert.throws(() => landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4", DEFAULT_CONTEXT, handKey()), /the choices it was made with/);
+  // Never called: the types alone must refuse a key without the choices it was made with.
+  const typeOnly = () =>
+    // @ts-expect-error settings are required beside the key
+    landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4", { input: handKey() });
+  assert.equal(typeof typeOnly, "function");
 });
 
 test("DG2B: a dungeon past MAX_OPS is refused as a bug, never sent past the cap", () => {
   const plan = hundredPlan();
   const scene = previewScene(dialogScene(plan), plan);
-  assert.ok(landDungeon(plan, scene, HAND_SETTINGS.band, DEFAULT_CONTEXT, handKey(), HAND_SETTINGS).ok);
+  assert.ok(landDungeon(plan, scene, HAND_SETTINGS.band, { input: handKey(), settings: HAND_SETTINGS }).ok);
   const over = { ...plan, traps: [...plan.traps, { preset: "hidden-pit", zone: { cells: [{ x: 4, y: 4, w: 1, h: 1 }] } }] };
-  const refused = landDungeon(over, scene, HAND_SETTINGS.band, DEFAULT_CONTEXT, handKey(), HAND_SETTINGS);
+  const refused = landDungeon(over, scene, HAND_SETTINGS.band, { input: handKey(), settings: HAND_SETTINGS });
   assert.deepEqual(refused, { ok: false, why: `${MAX_OPS + 1} ops, past ${MAX_OPS}` });
 });
 

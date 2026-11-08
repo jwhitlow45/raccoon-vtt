@@ -119,12 +119,11 @@ export type Landed = { ok: true; ops: ClientOp[]; room: RoomState } | { ok: fals
  * at. Anything refused here, or past MAX_OPS, is a generator bug, which the
  * preview shows as its error with Make off.
  */
-export function landDungeon(plan: DungeonPlan, scene: SceneInput, band: LevelBand, _context: PlanContext, key: KeyInput | null, settings?: DungeonSettings): Landed {
-  if (key && !settings) throw new Error("the key needs the choices it was made with");
+export function landDungeon(plan: DungeonPlan, scene: SceneInput, band: LevelBand, key: { input: KeyInput; settings: DungeonSettings } | null): Landed {
   const build = [...buildOps(plan, scene), ...dressOps(plan, scene.id)];
   const built = landAll(scratchRoom(), build);
   if (!built.ok) return { ok: false, why: `op ${built.at}: ${built.why}` };
-  const rest = [...trapOps(plan, built.room.buildChunks, band, scene.id), ...(key && settings ? keyOps(plan, settings, key, scene.id) : [])];
+  const rest = [...trapOps(plan, built.room.buildChunks, band, scene.id), ...(key ? keyOps(plan, key.settings, key.input, scene.id) : [])];
   const ops = [...build, ...rest];
   if (ops.length > MAX_OPS) return { ok: false, why: `${ops.length} ops, past ${MAX_OPS}` };
   const landed = landAll(built.room, rest, build.length + 1);
@@ -197,7 +196,7 @@ export function previewOf(
   if (plan.rooms.length < MIN_ROOMS) return { ok: false, error: "fit" };
   let landed: Landed;
   try {
-    landed = landDungeon(plan, previewScene(scene, plan), settings.band, context, key, settings);
+    landed = landDungeon(plan, previewScene(scene, plan), settings.band, key && { input: key, settings });
   } catch (err) {
     console.error("raccoon: a generated dungeon could not be landed", err);
     return { ok: false, error: "bug" };

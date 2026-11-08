@@ -67,7 +67,7 @@ function apply(state: RoomState, raw: unknown, seq: number): RoomState {
 /** The hand room landed through the scratch room's own path, written apart from statueReaches. */
 function handRoom(r: Pick<Reach, "w" | "h" | "terrain" | "ground">): RoomState {
   const plan = { version: 0, theme: "dungeon" as const, w: r.w, h: r.h, asked: 0, rooms: [], paint: {}, doors: [], heights: [], stairs: [], stamps: [], lights: [], stones: [], traps: [], entrance: { x: 0, y: 0, w: 0, h: 0 }, key: null };
-  const scratch = landDungeon(plan, previewScene(builderScene({ id: "hand", name: "Hand", w: r.w, h: r.h }), plan), "1-4", { feetPerCell: 5 }, null);
+  const scratch = landDungeon(plan, previewScene(builderScene({ id: "hand", name: "Hand", w: r.w, h: r.h }), plan), "1-4", null);
   assert.ok(scratch.ok);
   let state = scratch.room;
   const sceneId = Object.keys(state.scenes)[0]!;
@@ -182,7 +182,7 @@ describe("the new traps in generated plans", () => {
       for (const { s, p, seed } of plans(123 + fpc, { theme: "crypt", band: "11-16" }, fpc, 6)) {
         const W = p.plan.w;
         const secret = new Set(p.secret.map((c) => c.doorway.id));
-        const landed = landDungeon(p.plan, previewScene(builderScene({ id: "x", name: "D", w: W, h: p.plan.h }), p.plan), s.band, { feetPerCell: fpc }, null);
+        const landed = landDungeon(p.plan, previewScene(builderScene({ id: "x", name: "D", w: W, h: p.plan.h }), p.plan), s.band, null);
         assert.ok(landed.ok);
         const ground = (x: number, y: number) => p.plan.heights.find((h) => h.cells.includes(`${x},${y}`))?.ft ?? 0;
         for (const t of p.plan.traps) {
