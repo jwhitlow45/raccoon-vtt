@@ -957,7 +957,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await groupSave.tap();
     const question = sheet.getByRole("alert").filter({ hasText: "Discard the Dexterity save for 2?" });
     await question.waitFor();
-    await waitFor("the question whole in view", async () => ((await wholeInReach(question)) ? true : null), 3_000);
+    await waitFor("the question whole in view", async () => ((await wholeInReach(question)) ? true : null));
     assert.equal(await question.evaluate((el) => el.ownerDocument.activeElement?.textContent ?? null), "Keep it", "focus on the choice that loses nothing");
     assert.ok(await wholeInReach(sheet.getByRole("button", { name: "Close Dice" })), "the sheet's header stays in view");
     assert.deepEqual(alignmentLines(await measureAlignment(question), "the replace question at 375 x 667 at 130%"), []);
@@ -985,7 +985,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
       await groupSave.click();
       const question = panel.getByRole("alert").filter({ hasText: "Discard the Dexterity save for 2?" });
       await question.waitFor();
-      await waitFor("the question whole in view", async () => ((await wholeInReach(question)) ? true : null), 3_000);
+      await waitFor("the question whole in view", async () => ((await wholeInReach(question)) ? true : null));
       assert.equal(await question.evaluate((el) => el.ownerDocument.activeElement?.textContent ?? null), "Keep it", "focus on the choice that loses nothing");
       assert.deepEqual(alignmentLines(await measureAlignment(question), "the replace question at 1440 x 900 at 130%"), []);
       await shots.take(dm, "fu43a-replace-confirm-in-view-wide");
@@ -1012,7 +1012,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
       await card.getByRole("button", { name: /Open/ }).click();
       const question = card.getByRole("alert").filter({ hasText: "Discard the Dexterity save for 2?" });
       await question.waitFor();
-      await waitFor("the question whole in view", async () => ((await wholeInReach(question)) ? true : null), 3_000);
+      await waitFor("the question whole in view", async () => ((await wholeInReach(question)) ? true : null));
       assert.equal(await question.evaluate((el) => el.ownerDocument.activeElement?.textContent ?? null), "Keep it", "focus on the choice that loses nothing");
       assert.deepEqual(alignmentLines(await measureAlignment(question), "the cast page's replace question at 1440 x 900 at 130%"), []);
       await shots.take(dm, "fu43a-replace-confirm-cast-wide");
