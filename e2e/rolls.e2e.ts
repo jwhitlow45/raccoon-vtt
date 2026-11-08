@@ -764,6 +764,41 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await closeAll();
   });
 
+  test("wg-1. a sibling's result leaves focus on Thorn's total field, and Thorn's own result, which removes that field, sends focus to the card's header (FU43B-WIRING-GAPS)", async () => {
+    await closeAll();
+    // Bob is the character the step before made, owned by the same player, so one card holds both answer rows.
+    const bob = Object.values(dmSocket.state!.characters).find((c) => c.name === "Bob")!.id;
+    const thorn = player.getByLabel("Total Thorn rolled");
+    const activeLabel = () => player.evaluate(() => (globalThis as unknown as PageGlobals).document.activeElement?.getAttribute("aria-label") ?? "none");
+    const ask2 = async (): Promise<string> => {
+      const id = uuidv7();
+      await ops.send({ t: "roll.ask", request: { id, test: { kind: "check", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thornCharId }, { characterId: bob }] } });
+      run.open.push(id);
+      await waitFor(`request ${id} on the player's phone`, () => playerSocket.state?.rolls[id]);
+      await thorn.waitFor();
+      return id;
+    };
+    // A rolled result is the one that replaces an answer row's controls. A typed total leaves its field in place.
+    const roll = async (id: string, characterId: string) => {
+      await ops.send({ t: "roll.dice", tag: uuidv7(), rollId: id, target: { characterId }, bonus: 0 });
+      await waitFor("the roll on the player's phone", () => playerSocket.state?.rolls[id]?.targets.find((t) => t.characterId === characterId)?.dice || null);
+    };
+
+    const first = await ask2();
+    await thorn.focus();
+    await roll(first, bob);
+    await player.getByLabel("Total Bob rolled").waitFor({ state: "detached" });
+    assert.equal(await activeLabel(), "Total Thorn rolled", "a sibling's result left focus on the unchanged row");
+    await closeAll();
+
+    const second = await ask2();
+    await thorn.focus();
+    await roll(second, run.thornCharId);
+    // The card's header button takes it, so the keyboard stays inside the card (rollFocus.ts).
+    await waitFor("focus on the card's header after its row went", async () => ((await focused(player)) === "inside the card" && (await player.evaluate(() => (globalThis as unknown as PageGlobals).document.activeElement?.tagName)) === "BUTTON" ? true : null));
+    await closeAll();
+  });
+
   test("au-1. after a reload with sound on, one tap on a touch phone unlocks both the turn chime's audio and the ping sound's (AUDIO-UNLOCK-TOUCH)", async () => {
     await player.evaluate(() => (globalThis as unknown as PageGlobals).localStorage.setItem("rvtt.sound", "on"));
     await player.reload();
