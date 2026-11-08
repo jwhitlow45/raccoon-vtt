@@ -668,3 +668,112 @@ describe("only DM devices play in a live room", () => {
     display.close();
   });
 });
+
+/**
+ * A change of crossfade after the reveal in a live room and through replay
+ * (docs/design/design-v1-sound-dm-only.md 9 and 12): Off just after the
+ * reveal withdraws the next track from Pat's frames and its file, the tick
+ * reveals it again 20 s before its new start, and a `music.set` stored at
+ * version 49 replays keeping the next track as it played.
+ */
+describe("the next track's reveal after a change of crossfade", () => {
+  const xclock = { now: Date.now() };
+  let t: Engine;
+  before(async () => {
+    t = await startEngine({ env: { ROOM_SOUND: "1" }, rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, now: () => xclock.now } } });
+  });
+  after(() => t.close());
+  let level = 40;
+
+  test("Crossfade 10 s set to Off just after the reveal withdraws the next track and its file from Pat, and the tick reveals it again 20 s before it starts", async () => {
+    const dmClient = t.client();
+    const { roomId } = await dmClient.createRoom("Crossfade");
+    const files: { id: string; audio: { ms: number } }[] = [];
+    for (const seed of [31, 32]) {
+      const body = silentFrames(framesFor(60_000), { bits: (i) => ({ private: ((seed >> i % 30) & 1) === 1 }) });
+      const res = await dmClient.request("PUT", `/api/rooms/${roomId}/assets?kind=sound`, undefined, { "content-type": "audio/mpeg" }, Buffer.from(body));
+      assert.equal(res.statusCode, 200, res.body);
+      files.push(res.json<{ id: string; audio: { ms: number } }>());
+    }
+    const [fa, fb] = files as [(typeof files)[0], (typeof files)[0]];
+    const playerClient = t.client();
+    await playerClient.join(roomId, "Pat");
+    const dm = await t.connect(roomId, dmClient);
+    await dm.snapshot("dm");
+    const applied = async (op: Op) => {
+      const ev = await dm.apply(op);
+      assert.equal(ev.rejects, undefined, op.t);
+      return ev;
+    };
+    await applied({ t: "sound.create", id: "a", assetId: fa.id, name: "First", use: "music", ms: fa.audio.ms });
+    await applied({ t: "sound.create", id: "b", assetId: fb.id, name: "Second", use: "music", ms: fb.audio.ms });
+    await applied({ t: "playlist.create", id: "night", name: "Night", sounds: ["a", "b"], repeat: "all", fade: 10 });
+    const player = await t.connect(roomId, playerClient);
+    await player.snapshot("pat");
+    const pat = recorder(player);
+    const read = (id: string) => playerClient.request("GET", `/api/assets/${id}/full`, undefined, { range: "bytes=0-99" });
+    const nextOf = (f: ServerMessage[]) => {
+      const p = latest(f, "playing");
+      return p && "value" in p ? ((p.value as Playing).music?.next ?? null) : undefined;
+    };
+
+    const start = xclock.now + 400;
+    await applied({ t: "music.play", run: "x1", playlistId: "night", order: ["a", "b"], repeat: "all", fade: 10 });
+    const ms = fa.audio.ms;
+    xclock.now = start + ms - 10_000 - 20_000 + 100;
+    await applied({ t: "sound.mix", music: level++ });
+    assert.deepEqual(await pat.until((f) => nextOf(f) ?? undefined, "the reveal"), { soundId: "b", at: start + ms - 10_000 });
+    assert.equal((await read(fb.id)).statusCode, 206);
+
+    const set = await applied({ t: "music.set", fade: 0 });
+    const frame = await pat.until((f) => f.find((m) => m.t === "ev" && m.seq === set.seq), "the set's frame");
+    assert.ok(frame.t === "ev");
+    const playing = frame.changes.find((c) => c.key === "playing");
+    assert.ok(playing && "value" in playing);
+    assert.equal((playing.value as Playing).music?.next, undefined, "it would start 30 s ahead");
+    assert.deepEqual(frame.changes.find((c) => c.key === "sound:b"), { key: "sound:b", deleted: true }, "its sound leaves in that batch");
+    assert.equal((await read(fb.id)).statusCode, 404);
+
+    xclock.now = start + ms - 20_000 + 100;
+    await applied({ t: "sound.mix", music: level++ });
+    assert.deepEqual(await pat.until((f) => nextOf(f) ?? undefined, "the reveal again"), { soundId: "b", at: start + ms });
+    assert.equal((await read(fb.id)).statusCode, 206);
+    dm.close();
+    player.close();
+  });
+
+  test("a music.set stored at version 49 replays keeping the next track revealed 30 s ahead, and one at 50 withdraws it", async () => {
+    const owner = t.client();
+    const { roomId } = await owner.createRoom("Stored crossfade");
+    const { base, initial } = await withLibrary(t, roomId);
+    const dm = await t.connect(roomId, owner);
+    await dm.snapshot("dm");
+    const start = xclock.now + 400;
+    assert.equal((await dm.apply({ t: "music.play", run: "x2", playlistId: "night", order: ["pony", "road"], repeat: "all", fade: 10 })).rejects, undefined);
+    xclock.now = start + 60_000 - 30_000 + 100;
+    assert.equal((await dm.apply({ t: "sound.mix", music: level++ })).rejects, undefined);
+    const deadline = Date.now() + 5_000;
+    while (!t.manager.get(roomId)!.committed.state.playing?.music?.next && Date.now() < deadline) await delay(10);
+    assert.deepEqual(t.manager.get(roomId)!.committed.state.playing?.music?.next, { soundId: "road", at: start + 50_000 });
+    assert.equal((await dm.apply({ t: "music.set", fade: 0 })).rejects, undefined);
+    const live = t.manager.get(roomId)!.committed.state.playing!;
+    assert.equal(live.music?.next, undefined);
+    dm.close();
+    await dm.waitClosed();
+    await t.manager.unload(roomId);
+
+    const replay = async () => {
+      await t.pool.query("update room_snapshots set seq = $2, state = $3 where room_id = $1", [roomId, base, JSON.stringify(initial)]);
+      const loaded = await loadRoom(t.pool, roomId);
+      assert.ok(loaded && !loaded.replayFailed);
+      return loaded.state.playing!;
+    };
+    const { rows } = await t.pool.query<{ op_version: number }>("select op_version from room_ops where room_id = $1 and op->>'t' = 'music.set'", [roomId]);
+    assert.deepEqual(rows.map((r) => r.op_version), [OP_VERSION]);
+    assert.deepEqual(await replay(), live, "stored at today's version, it replays to the live room");
+    await t.pool.query("update room_ops set op_version = 49 where room_id = $1 and op->>'t' = 'music.set'", [roomId]);
+    const old = await replay();
+    assert.deepEqual(old.music?.next, { soundId: "road", at: start + 60_000 }, "kept 30 s ahead, as a version 49 build played it");
+    assert.deepEqual({ ...old.music, next: undefined }, { ...live.music, next: undefined });
+  });
+});

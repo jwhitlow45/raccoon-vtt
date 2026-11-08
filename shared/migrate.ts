@@ -1224,7 +1224,10 @@ export const opMigrations: MigrationStep[] = [
     // `room.update`'s `soundDmOnly` is a new optional field, so no stored op
     // changes shape and the step is the identity. No stored op from before
     // can meet the setting, since only a version 50 op sets it, so the
-    // effect's routing needs no gate.
+    // effect's routing needs no gate. `music.set` changes meaning: from this
+    // version a revealed next track stays revealed only while it starts
+    // within 20 s (musicSetReveals), and a stored one from before replays
+    // by the rule it met.
     // Deploy: back up the database just before, and reload open pages,
     // table displays included, so the switch and the players' line show.
     // An old player page plays nothing meanwhile, since the server sends it
@@ -1257,6 +1260,17 @@ export function clockTicks(opVersion: number | undefined): boolean {
  */
 export function musicQueues(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 48);
+}
+
+/**
+ * Whether a `music.set` keeps the next track's reveal within its 20 s
+ * window (docs/design/design-v1-sound-dm-only.md 9): a revealed `next`
+ * stays revealed only while its new start is within 20 s of the op. Ops
+ * stored before version 50 kept every revealed `next` and replay so. Live
+ * ops carry no stored version and take today's rule.
+ */
+export function musicSetReveals(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 50);
 }
 
 /** Historical restores keep their original log entries and numbering. */

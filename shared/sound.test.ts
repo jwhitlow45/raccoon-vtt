@@ -158,3 +158,64 @@ describe("fired effects", () => {
     assert.equal(effectLengthMs({ id: "e4", soundId: "gone", at: T }, sounds), 0);
   });
 });
+
+describe("a change of crossfade keeps the next track's reveal within 20 s (docs/design/design-v1-sound-dm-only.md 9)", () => {
+  test("a 30 s track at Crossfade 2, revealed at 8 s and set to 10 s at 9 s, keeps its next, now 11 s ahead", () => {
+    const { sounds, order } = tracks(30_000, 30_000);
+    const first = run(order, { fade: 2 });
+    assert.equal(soundDue(playing(first), sounds), T + 8_000);
+    const revealed = step(first, sounds, T + 8_000)!;
+    assert.deepEqual(revealed.next, { soundId: "s1", at: T + 28_000 });
+    const set = musicChanged(revealed, { t: "set", fade: 10 }, sounds, T + 9_000)!;
+    assert.deepEqual(set.next, { soundId: "s1", at: T + 20_000 }, "kept, though the clamp would reveal it at 10 s under the new fade");
+  });
+
+  test("Crossfade 10 s set to Off just after a reveal withdraws the next track, and the tick reveals it again 20 s before its start", () => {
+    const { sounds, order } = tracks(60_000, 60_000);
+    const revealed = step(run(order, { fade: 10 }), sounds, T + 30_000)!;
+    assert.deepEqual(revealed.next, { soundId: "s1", at: T + 50_000 });
+    const set = musicChanged(revealed, { t: "set", fade: 0 }, sounds, T + 30_001)!;
+    assert.equal(set.next, undefined, "it would start 30 s ahead");
+    assert.equal(soundDue(playing(set), sounds), T + 40_000);
+    assert.deepEqual(step(set, sounds, T + 40_000)!.next, { soundId: "s1", at: T + 60_000 });
+  });
+
+  test("Crossfade Off set to 10 s just after a reveal keeps the next track, now 10 s ahead", () => {
+    const { sounds, order } = tracks(60_000, 60_000);
+    const revealed = step(run(order, { fade: 0 }), sounds, T + 40_000)!;
+    assert.deepEqual(revealed.next, { soundId: "s1", at: T + 60_000 });
+    const set = musicChanged(revealed, { t: "set", fade: 10 }, sounds, T + 40_000)!;
+    assert.deepEqual(set.next, { soundId: "s1", at: T + 50_000 });
+  });
+
+  test("a next exactly 20 s ahead stays, one a millisecond further leaves", () => {
+    const { sounds, order } = tracks(60_000, 60_000);
+    const revealed = step(run(order, { fade: 10 }), sounds, T + 30_000)!;
+    assert.deepEqual(musicChanged(revealed, { t: "set", fade: 5 }, sounds, T + 35_000)!.next, { soundId: "s1", at: T + 55_000 });
+    assert.equal(musicChanged(revealed, { t: "set", fade: 5 }, sounds, T + 34_999)!.next, undefined);
+    // The schedule never reveals inside the crossing into now, so only a hand-made run meets the edge where the clamp would
+    // reveal later: a 35 s track 5 s in, set to 10 s, whose next would start exactly 20 s ahead.
+    const { sounds: short, order: two } = tracks(35_000, 35_000);
+    const early: MusicRun = { ...run(two, { fade: 0 }), next: { soundId: "s1", at: T + 35_000 } };
+    assert.deepEqual(reanchor({ ...early, fade: 10 }, early, short, T + 5_000).next, { soundId: "s1", at: T + 25_000 });
+  });
+
+  test("a set stored before op version 50 keeps a revealed next wherever it now starts, as it played", () => {
+    const { sounds, order } = tracks(60_000, 60_000);
+    const revealed = step(run(order, { fade: 10 }), sounds, T + 30_000)!;
+    const old = musicChanged(revealed, { t: "set", fade: 0 }, sounds, T + 30_000, false)!;
+    assert.deepEqual(old.next, { soundId: "s1", at: T + 60_000 }, "30 s ahead");
+    assert.deepEqual(reanchor({ ...revealed, fade: 0 }, revealed, sounds, T + 30_000, false).next, old.next);
+    assert.equal(reanchor({ ...revealed, fade: 0 }, revealed, sounds, T + 30_000).next, undefined);
+  });
+
+  test("Repeat one, and Repeat off on the last track, drop the next track by design", () => {
+    const { sounds, order } = tracks(60_000, 60_000);
+    const revealed = step(run(order, { fade: 5 }), sounds, T + 35_000)!;
+    assert.ok(revealed.next);
+    assert.equal(musicChanged(revealed, { t: "set", repeat: "one" }, sounds, T + 36_000)!.next, undefined);
+    const last = step({ ...run(order, { fade: 5 }), index: 1, now: { soundId: "s1", at: T } }, sounds, T + 35_000)!;
+    assert.deepEqual(last.next, { soundId: "s0", at: T + 55_000 });
+    assert.equal(musicChanged(last, { t: "set", repeat: "off" }, sounds, T + 36_000)!.next, undefined);
+  });
+});

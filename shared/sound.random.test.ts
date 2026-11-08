@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import fc from "fast-check";
-import { FADES, REPEATS, fadeMs, following, lengthAs, musicChanged, occurrencesAt, playingAt, soundDue, soundStep, type MusicChange, type MusicRun, type Playing, type SoundLengths } from "./sound.ts";
+import { SOUND_LIMITS } from "./limits.ts";
+import { FADES, REPEATS, fadeMs, following, lengthAs, musicAt, musicChanged, occurrencesAt, playingAt, soundDue, soundStep, type MusicChange, type MusicRun, type Playing, type SoundLengths } from "./sound.ts";
 
 /**
  * The server's music schedule (docs/design/design-v1-music.md 6.3, 6.4 and
@@ -18,6 +19,10 @@ import { FADES, REPEATS, fadeMs, following, lengthAs, musicChanged, occurrencesA
  * 7. A change of repeat or crossfade keeps the place heard, a pause keeps it, and a resume goes on from it.
  * 8. An op never places `next` before its own time.
  * 9. After a step, the next due time lies in the future.
+ * 10. After any op or a tick at t, a revealed `next` starts at most 20 s after t
+ *     (docs/design/design-v1-sound-dm-only.md 9).
+ * 11. A change of repeat or crossfade that leaves a following track never
+ *     withdraws a revealed `next` that now starts within 20 s.
  */
 
 const T0 = 1_800_000_000_000;
@@ -40,7 +45,8 @@ const change: fc.Arbitrary<MusicChange> = fc.oneof(
 const action: fc.Arbitrary<Action> = fc.oneof(
   { weight: 4, arbitrary: fc.constant<Action>({ kind: "due" }) },
   { weight: 2, arbitrary: fc.record({ kind: fc.constant("late" as const), gap: fc.integer({ min: 0, max: 20 * 60_000 }), hops: fc.array(fc.integer({ min: 0, max: 5 * 60_000 }), { maxLength: 4 }) }) },
-  { weight: 3, arbitrary: fc.record({ kind: fc.constant("op" as const), gap: fc.oneof(fc.integer({ min: 0, max: 60_000 }), fc.integer({ min: 0, max: 15 * 60_000 })), change }) },
+  // Gaps of a few seconds put a change of crossfade just after a reveal often (invariant 11).
+  { weight: 3, arbitrary: fc.record({ kind: fc.constant("op" as const), gap: fc.oneof(fc.integer({ min: 0, max: 3_000 }), fc.integer({ min: 0, max: 60_000 }), fc.integer({ min: 0, max: 15 * 60_000 })), change }) },
 );
 
 function playing(music: MusicRun | null): Playing {
@@ -74,7 +80,15 @@ function heard(music: MusicRun, sounds: SoundLengths, t: number): { soundId: str
   return o ? { soundId: at.soundId, positionMs: o.positionMs } : null;
 }
 
+/** Invariant 10: players hold a next track no more than 20 s before it starts. */
+function withinWindow(music: MusicRun | null, t: number, what: string): void {
+  if (music?.next === undefined) return;
+  assert.ok(music.next.at - t <= SOUND_LIMITS.revealMaxMs, `${what}: next starts ${music.next.at - t} ms after it`);
+}
+
 test("the music schedule: random playlists, ops and ticks keep every invariant", () => {
+  let kept = 0;
+  let withdrawn = 0;
   fc.assert(
     fc.property(library, fc.constantFrom(...REPEATS), fc.constantFrom(...FADES), fc.array(action, { minLength: 10, maxLength: 60 }), ({ sounds, order }, repeat, fade, actions) => {
       let t = T0;
@@ -104,6 +118,7 @@ test("the music schedule: random playlists, ops and ticks keep every invariant",
             const lead = after.next.at - due;
             assert.ok(lead >= 10_000 && lead <= 20_000, `revealed ${lead} ms before its start`);
           }
+          withinWindow(after, at, "a tick");
           music = after;
           t = at;
         } else if (a.kind === "late") {
@@ -115,6 +130,7 @@ test("the music schedule: random playlists, ops and ticks keep every invariant",
           for (const at of times) many = stepped(many, sounds, at);
           const one = stepped(music, sounds, end);
           assert.deepEqual(many, one, "many steps equal one step at the last");
+          withinWindow(one, end, "a late tick");
           music = one;
           t = end;
         } else {
@@ -122,6 +138,16 @@ test("the music schedule: random playlists, ops and ticks keep every invariant",
           const caught = stepped(music, sounds, at);
           const before = caught === null ? null : heard(caught, sounds, at);
           const after = musicChanged(music, a.change, sounds, at);
+          withinWindow(after, at, a.change.t);
+          // The run a change acts on is musicAt's, promoted during a crossing, so a next that became now is no withdrawal.
+          if (a.change.t === "set" && musicAt(music, sounds, at)?.next !== undefined && after !== null && after.paused === undefined && after.repeat !== "one" && following(after) !== null) {
+            // 11: a set that leaves a following track keeps a revealed next unless it now starts more than 20 s ahead.
+            const startsAt = after.now.at + lengthAs(sounds, after.now.soundId, "music")! - fadeMs(after);
+            if (after.next === undefined) {
+              assert.ok(startsAt - at > SOUND_LIMITS.revealMaxMs, `a set withdrew a next starting ${startsAt - at} ms ahead`);
+              withdrawn++;
+            } else kept++;
+          }
           if (after !== null && after.next !== undefined && a.change.t !== "pause") {
             // 8: an op places next at its own time or later, unless the schedule placed it, which a step's catch-up did.
             const placedByOp = caught === null || caught.next === undefined || caught.next.at !== after.next.at || caught.next.soundId !== after.next.soundId;
@@ -163,4 +189,6 @@ test("the music schedule: random playlists, ops and ticks keep every invariant",
     }),
     { numRuns: 3_000 },
   );
+  // The generator reaches both sides of invariant 11, so it holds over something. Withdrawals ran 28 to 44 over six runs.
+  assert.ok(kept > 100 && withdrawn > 10, `${kept} revealed next tracks kept by a set, ${withdrawn} withdrawn`);
 });

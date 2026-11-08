@@ -4,7 +4,7 @@ import { keys } from "../keys.ts";
 import type { RoomState, Viewer } from "../model.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp, type Applied, type Env } from "../reducer.ts";
-import type { FiredEffect, MusicRun, Playing, Playlist, SceneSound, Sound, SoundUse } from "../sound.ts";
+import { soundDue, soundStep, type FiredEffect, type MusicRun, type Playing, type Playlist, type SceneSound, type Sound, type SoundUse } from "../sound.ts";
 import { AT, DM, member, room } from "../testutil.ts";
 import { undoScope } from "../undoScope.ts";
 import { SOUND_WORDS } from "./sound.ts";
@@ -733,5 +733,33 @@ describe("Only DM devices play (docs/design/design-v1-sound-dm-only.md 8)", () =
     const plain = step(step(soundRoom(), playTavern).state, { t: "loop.start", id: "l1", soundId: "rain", volume: 70 }, 1_000).state;
     const on = step(step(step(soundRoom(), dmOnly(true)).state, playTavern).state, { t: "loop.start", id: "l1", soundId: "rain", volume: 70 }, 1_000).state;
     assert.deepEqual(on.playing, plain.playing);
+  });
+});
+
+describe("a change of crossfade after the reveal (docs/design/design-v1-sound-dm-only.md 9, op version 50)", () => {
+  const at = (state: RoomState, op: Op, ms: number, opVersion?: number) => applyOp(state, op, DM, { ...envAt(ms), ...(opVersion !== undefined ? { opVersion } : {}) });
+  /** Tavern night at Crossfade 10 with Lanterns revealed by the server's step 20 s before it starts, 180 s into Harbor. */
+  function revealed(): RoomState {
+    const state = step(soundRoom(), { ...playTavern, fade: 10 } as Op).state;
+    const next = soundStep(playing(state), state.sounds!, S0 + 160_000);
+    assert.ok(next.changed && next.music?.next);
+    assert.deepEqual(next.music.next, { soundId: "m2", at: S0 + 180_000 });
+    return step(state, { t: "sys.sound", from: playing(state).rev, music: next.music as never }, 160_000).state;
+  }
+  const off: Op = { t: "music.set", fade: 0 };
+
+  test("live and from version 50, Off just after the reveal withdraws a next that would start 30 s ahead", () => {
+    for (const version of [undefined, 50]) {
+      const r = at(revealed(), off, 160_000, version);
+      assert.ok(r.ok, r.ok ? "" : r.message);
+      assert.equal(playing(r.state).music!.next, undefined, `version ${version}`);
+      assert.equal(soundDue(r.state.playing!, r.state.sounds!), S0 + 170_000, "the tick reveals it 20 s before its new start");
+    }
+  });
+
+  test("a stored version 49 set replays keeping the next revealed 30 s ahead, as it played", () => {
+    const r = at(revealed(), off, 160_000, 49);
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    assert.deepEqual(playing(r.state).music!.next, { soundId: "m2", at: S0 + 190_000 });
   });
 });

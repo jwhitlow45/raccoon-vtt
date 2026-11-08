@@ -255,11 +255,22 @@ function revealAt(nowAt: number, nextAt: number, fade: number): number {
  * The run with `now.at` moved to the start of the occurrence sounding at
  * `t` under the period before a `music.set`, so the place heard goes on
  * (6.3). `before` holds the repeat and fade the run had, `music` the new
- * ones. The next track follows this pass: a `next` already revealed, or
- * one whose reveal is due at `t`, is placed at the new crossfade's start,
- * never before `t`. Repeat one has none. A paused run keeps its place.
+ * ones. The next track follows this pass, placed at the new crossfade's
+ * start, never before `t`. Repeat one has none. A paused run keeps its
+ * place.
+ *
+ * A `next` already revealed stays revealed while its new start is within
+ * SOUND_LIMITS.revealMaxMs of `t`, and one whose reveal is due at `t` is
+ * revealed (docs/design/design-v1-sound-dm-only.md 9). So a crossfade made
+ * shorter withdraws a revealed `next` that would now start further ahead,
+ * which the tick reveals again 20 s before its start, and players never
+ * hold a next track more than 20 s early. A crossfade made longer keeps a
+ * revealed `next`, now nearer, even where `revealAt`'s clamp would reveal
+ * it later under the new fade. `windowed` is false only for a `music.set`
+ * stored before op version 50 (musicSetReveals), which kept every revealed
+ * `next` as it played.
  */
-export function reanchor(music: MusicRun, before: Pick<MusicRun, "repeat" | "fade">, sounds: SoundLengths, t: number): MusicRun {
+export function reanchor(music: MusicRun, before: Pick<MusicRun, "repeat" | "fade">, sounds: SoundLengths, t: number, windowed = true): MusicRun {
   const nowMs = lengthAs(sounds, music.now.soundId, "music");
   if (nowMs === undefined || music.paused !== undefined) return music;
   let at = music.now.at;
@@ -270,7 +281,8 @@ export function reanchor(music: MusicRun, before: Pick<MusicRun, "repeat" | "fad
   }
   const { next: revealed, ...rest } = music;
   const out: MusicRun = { ...rest, now: { ...music.now, at } };
-  return withNextAt(out, nowMs, t, revealed !== undefined);
+  const kept = revealed !== undefined && (!windowed || out.now.at + nowMs - fadeMs(out) - t <= SOUND_LIMITS.revealMaxMs);
+  return withNextAt(out, nowMs, t, kept);
 }
 
 /**
@@ -417,9 +429,10 @@ export type MusicChange = { t: "pause" } | { t: "resume"; run: string } | { t: "
  * it again under a new run, a skip starts the next track, and a change of
  * repeat or crossfade keeps the place heard (reanchor). Null is silence.
  * A change that does not apply, a pause of a paused run or a resume of a
- * playing one, leaves the run as the schedule has it.
+ * playing one, leaves the run as the schedule has it. `windowed` goes to
+ * reanchor: false only for a `music.set` stored before op version 50.
  */
-export function musicChanged(music: MusicRun | null, change: MusicChange, sounds: SoundLengths, t: number): MusicRun | null {
+export function musicChanged(music: MusicRun | null, change: MusicChange, sounds: SoundLengths, t: number, windowed = true): MusicRun | null {
   const current = musicAt(music, sounds, t);
   if (current === null || change.t === "stop") return null;
   switch (change.t) {
@@ -432,7 +445,7 @@ export function musicChanged(music: MusicRun | null, change: MusicChange, sounds
     case "set": {
       const set: MusicRun = { ...current, repeat: change.repeat ?? current.repeat, fade: change.fade ?? current.fade };
       if (set.repeat === current.repeat && set.fade === current.fade) return current;
-      return set.paused !== undefined ? set : reanchor(set, current, sounds, t);
+      return set.paused !== undefined ? set : reanchor(set, current, sounds, t, windowed);
     }
   }
 }

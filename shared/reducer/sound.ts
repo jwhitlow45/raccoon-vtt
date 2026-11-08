@@ -1,6 +1,6 @@
 import { keys } from "../keys.ts";
 import { SOUND_LIMITS, soundUseFits } from "../limits.ts";
-import { musicQueues } from "../migrate.ts";
+import { musicQueues, musicSetReveals } from "../migrate.ts";
 import type { RoomState, Scene } from "../model.ts";
 import type { OpOf } from "../protocol.ts";
 import { namesPrototypeMember, ownEntry } from "../records.ts";
@@ -373,7 +373,7 @@ export function musicChange(tx: Tx, change: MusicChange): void {
     return;
   }
   if (musicAt(playing.music, sounds, t) === null) throw invalid(SOUND_WORDS.nothingPlaying);
-  const music = musicChanged(playing.music, change, sounds, t);
+  const music = musicChanged(playing.music, change, sounds, t, musicSetReveals(tx.env.opVersion));
   if (music !== playing.music) play(tx, playing, { ...playing, music });
 }
 

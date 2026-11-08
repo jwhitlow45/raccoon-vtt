@@ -37,6 +37,7 @@ import {
   stopsFileApart,
   clockTicks,
   musicQueues,
+  musicSetReveals,
   seatsApart,
   hiddenTowStands,
   stopsStandClear,
@@ -1906,6 +1907,10 @@ describe("op version 50 and snapshot 39, only DM devices play (docs/design/desig
     const state = room();
     assert.equal(runMigrations(state, 38, 39, snapshotMigrations), state);
     assert.equal(migrateSnapshot(state, 38), state);
+  });
+
+  test("gates the next track's 20 s window after a music.set at 50", () => {
+    assert.deepEqual([musicSetReveals(1), musicSetReveals(49), musicSetReveals(50), musicSetReveals(undefined)], [false, false, true, true]);
   });
 
   test("a build at 49 and 38 refuses a room from this one, so it never sends players the sound the switch keeps from them", () => {
