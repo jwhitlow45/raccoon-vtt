@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 42;
-export const OP_VERSION = 55;
+export const SNAPSHOT_VERSION = 43;
+export const OP_VERSION = 56;
 
 export type MigrationStep = {
   from: number;
@@ -264,6 +264,13 @@ export const snapshotMigrations: MigrationStep[] = [
   // which loads stored state without the import's check and sends a scene's vision whole to players, refuses a v42
   // snapshot instead of loading it and telling them a clock exists.
   { from: 41, to: 42, apply: (state) => state },
+  // Several floors in one scene (docs/design/design-v1-floors.md 9): a scene's `floor` and the room's `openFloors` are
+  // optional, and absent reads as a scene with one floor and no floor reached, so a v42 room is a v43 room as it is. The
+  // number moves so that an older build, which loads stored state without the import's check and knows nothing of
+  // floors, refuses a v43 snapshot instead of loading it: its Delete would remove a main floor alone and leave the other
+  // floors naming a scene that is gone, and it would project only the start floor, dropping every creature off it from
+  // players' trackers.
+  { from: 42, to: 43, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1338,6 +1345,24 @@ export const opMigrations: MigrationStep[] = [
     to: 55,
     apply: (op) => op,
   },
+  {
+    // Several floors in one scene (docs/design/design-v1-floors.md 9):
+    // `scene.create` may carry `floor`, `scene.update`'s patch `floor`, and
+    // `floor.order` and `floor.open` are new ops, all of which an older
+    // strict schema refuses, so no stored op changes shape and the step is
+    // the identity. From this version every op ends with `markOpened`
+    // (floorsOps). On a scene without `floor` every rule gives the answer
+    // it gave before, and no stored op wrote a `floor`, so the gate
+    // changes no replay today.
+    // Deploy: back up the database just before, and reload open pages,
+    // table displays included, since an old page validates the server's
+    // `eph` strictly and refuses its new `sceneId`. Rollback needs the
+    // backup for a room with version 56 ops after its last snapshot or a
+    // v43 snapshot, which an older build refuses.
+    from: 55,
+    to: 56,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -1408,6 +1433,20 @@ export function timedEnds(opVersion: number | undefined): boolean {
  */
 export function followsDaylight(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 55);
+}
+
+/** The first op version of several floors in one scene (floorsOps). */
+export const FLOORS_OP_VERSION = 56;
+
+/**
+ * Whether the op knows floors (docs/design/design-v1-floors.md 9): it ends
+ * with `markOpened`, which marks the floors players reach. Ops stored
+ * before version 56 met no floor and replay without the pass, which would
+ * change nothing for them anyway, since it only marks floors of scenes
+ * with `floor`. Live ops carry no stored version and take today's rule.
+ */
+export function floorsOps(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < FLOORS_OP_VERSION);
 }
 
 /** Historical restores keep their original log entries and numbering. */

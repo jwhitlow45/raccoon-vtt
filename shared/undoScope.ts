@@ -18,6 +18,9 @@ export const UNDO_SCOPE_BY_OP = {
   "scene.setGrid": "setup",
   "scene.setPhase": "play",
   "scene.duplicate": "setup",
+  // A scene's floors are built in Setup, and Show and Hide are play, as fog is (docs/design/design-v1-floors.md 9).
+  "floor.order": "setup",
+  "floor.open": "play",
   "vision.holders": "setup",
   "token.create": "play",
   "token.update": "fields",

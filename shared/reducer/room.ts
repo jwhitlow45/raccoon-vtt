@@ -11,6 +11,7 @@ import { deleteToken, sortedById } from "./tokens.ts";
 import { ownEntry } from "../records.ts";
 import { normalWeather } from "../weather.ts";
 import { checkedSceneSound } from "./sound.ts";
+import { FLOORS_NOT_YET } from "./floors.ts";
 
 export function roomUpdate(tx: Tx, op: OpOf<"room.update">): void {
   const meta = tx.state.meta;
@@ -220,6 +221,8 @@ const DEFAULT_BACKGROUND = "#2b2b31";
 export function sceneCreate(tx: Tx, op: OpOf<"scene.create">): void {
   const input = op.scene;
   if (ownEntry(tx.state.scenes, input.id)) throw invalid("scene already exists");
+  // The contract's stand-in until the floors reducer lands: an add never makes a plain scene by mistake.
+  if (op.floor !== undefined) throw invalid(FLOORS_NOT_YET);
   const order = Object.values(tx.state.scenes).reduce((max, s) => Math.max(max, s.order + 1), 0);
   const scene: Scene = {
     id: input.id,
@@ -266,6 +269,7 @@ function onHexGrid(scene: Scene): Scene {
 
 export function sceneUpdate(tx: Tx, op: OpOf<"scene.update">): void {
   const scene = tx.scene(op.sceneId);
+  if (op.patch.floor !== undefined) throw invalid(FLOORS_NOT_YET);
   const next: Scene = { ...scene };
   const p = op.patch;
   if (p.name !== undefined) next.name = p.name;

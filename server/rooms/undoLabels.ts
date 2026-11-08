@@ -92,6 +92,10 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
     }
     case "scene.duplicate":
       return `duplicating ${scene(op.sceneId)}`;
+    case "floor.order":
+      return `reordering the floors of ${scene(op.sceneId)}`;
+    case "floor.open":
+      return op.open ? `showing ${scene(op.sceneId)} to players` : `hiding ${scene(op.sceneId)} from players`;
     case "token.create":
       return `adding ${tokenName(op.token)}`;
     case "token.update": {

@@ -108,6 +108,15 @@ export type DmMenuView = {
   viewing: Scene | null;
   /** The players' scene's id and name. */
   playerScene: { id: string; name: string } | null;
+  /**
+   * Players hold the floor in view, an open floor of the players' scene
+   * (docs/design/design-v1-floors.md 7.3, `openFloor`): Bring everyone here
+   * and Look here have somewhere to send. On a scene with one floor, the
+   * DM looks at the players' scene.
+   */
+  playersHoldHere: boolean;
+  /** The floor in view lies in the players' scene, its main floor against `playerScene`'s (`onPlayersScene`). */
+  playersSceneHere: boolean;
   /** The DM's camera is on the scene they look at, so Bring everyone here has a place to send. */
   focusHere: boolean;
   handouts: Readonly<Record<string, Handout | undefined>>;

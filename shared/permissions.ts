@@ -862,6 +862,8 @@ function forPlayer(op: Op, c: Check): Decision {
     case "scene.setPhase":
     case "vision.holders":
     case "scene.duplicate":
+    case "floor.order":
+    case "floor.open":
     case "actor.life":
     case "actor.damageMany":
     case "monster.create":

@@ -8,7 +8,7 @@ import { UNDO_SCOPE_BY_OP, undoScope } from "./undoScope.ts";
 
 const inventory = {
   play: [
-    "token.move", "token.moveMany", "token.countLeg", "token.attach", "token.detach", "token.create", "token.delete", "token.deleteMany",
+    "token.move", "token.moveMany", "token.countLeg", "token.attach", "token.detach", "token.create", "token.delete", "token.deleteMany", "floor.open",
     "actor.hp", "actor.damageMany", "actor.deathSave", "actor.life", "actor.rest", "actor.effect.add", "actor.effect.update", "actor.effect.remove", "actor.effects", "actor.saveDue", "actor.use", "actor.prompt", "actor.outcome",
     "encounter.start", "encounter.end", "encounter.add", "encounter.remove", "encounter.setValue", "encounter.setValues", "encounter.reorder", "encounter.next", "encounter.prev", "encounter.update",
     "roll.ask", "roll.answer", "roll.reopen", "roll.close", "template.create", "template.update", "template.delete", "drawing.create", "drawing.delete", "drawing.clear",
@@ -18,7 +18,7 @@ const inventory = {
   ],
   setup: [
     "trap.create", "trap.delete", "character.create", "character.delete", "monster.create", "monster.update", "monster.delete", "monster.setSrdImage", "companionBlock.create", "companionBlock.update", "companionBlock.delete",
-    "savedEncounter.create", "savedEncounter.update", "savedEncounter.delete", "scene.create", "scene.delete", "scene.duplicate", "scene.reorder", "scene.setMap", "scene.setGrid", "vision.holders", "room.update",
+    "savedEncounter.create", "savedEncounter.update", "savedEncounter.delete", "scene.create", "scene.delete", "scene.duplicate", "scene.reorder", "scene.setMap", "scene.setGrid", "vision.holders", "room.update", "floor.order",
     "journal.create", "journal.update", "journal.delete", "pin.put", "pin.remove", "handoutDoc.create", "handoutDoc.delete",
     "clock.start", "clock.stop", "clock.update",
     "sound.update", "playlist.create", "playlist.update", "playlist.delete", "playlist.add",
@@ -138,7 +138,7 @@ describe("undo classifier inventory", () => {
   }
 
   const sceneFields = {
-    name: ["Dungeon", "setup"], bounds: [{ w: 20, h: 20 }, "setup"], grid: [{ show: false, color: "#ffffff", opacity: 0.2, lineWidth: 1 }, "setup"], background: ["#000000", "setup"], fogEnabled: [true, "setup"], defaultView: [null, "setup"], autoWalls: ["off", "setup"], folder: [null, "setup"], thumb: [null, "none"], phases: [[], "setup"], blockMovement: [true, "setup"], vision: [{ on: true, light: "dark" }, "setup"], gridShape: ["hexRows", "setup"], suggestedView: ["isometric", "play"], weather: [{ kind: "rain", heavy: true }, "play"], sound: [{ music: null, loops: [] }, "setup"],
+    name: ["Dungeon", "setup"], bounds: [{ w: 20, h: 20 }, "setup"], grid: [{ show: false, color: "#ffffff", opacity: 0.2, lineWidth: 1 }, "setup"], background: ["#000000", "setup"], fogEnabled: [true, "setup"], defaultView: [null, "setup"], autoWalls: ["off", "setup"], folder: [null, "setup"], thumb: [null, "none"], phases: [[], "setup"], blockMovement: [true, "setup"], vision: [{ on: true, light: "dark" }, "setup"], gridShape: ["hexRows", "setup"], suggestedView: ["isometric", "play"], weather: [{ kind: "rain", heavy: true }, "play"], sound: [{ music: null, loops: [] }, "setup"], floor: [{ name: "Upper floor" }, "setup"],
   } satisfies Record<keyof OpOf<"scene.update">["patch"], readonly [unknown, UndoScope]>;
   for (const [field, [value, expected]] of Object.entries(sceneFields)) {
     test(`scene field ${field} is ${expected}`, () => assert.equal(scope({ t: "scene.update", sceneId: "s1", patch: { [field]: value } }), expected));

@@ -574,6 +574,11 @@ const lightInput = z.strictObject(lightFields);
 const autoWalls = z.enum(["all", "floor", "off"]);
 /** A Scenes panel folder: a single line that cannot pass for another name, as member names cannot. */
 const folderName = z.string().min(1).max(LIMITS.folderNameChars).regex(NAME_CHARS, "folder names cannot hold control or text direction characters");
+/** A floor's own name (Scene.floor.name, docs/design/design-v1-floors.md 9): unique among its scene's floors, which permissions check. */
+const floorName = z.string().min(1).max(LIMITS.floorNameChars).regex(NAME_CHARS, "floor names cannot hold control or text direction characters");
+/** Feet above the floor below (Scene.floor.height), 5 to 50 in 5 ft steps. */
+export const FLOOR_HEIGHT = { min: 5, max: 50, step: 5, initial: 10 } as const;
+const floorHeight = z.number().int().min(FLOOR_HEIGHT.min).max(FLOOR_HEIGHT.max).multipleOf(FLOOR_HEIGHT.step);
 /** A map phase. Its size is the asset's, which the server fills in from the asset row before anything reads it. */
 const mapPhase = z.strictObject({ id, name, assetId: id, widthPx: pixelSize, heightPx: pixelSize, light: lightLevel.optional(), video: mapVideo.optional() });
 const mapPhases = z
@@ -2208,6 +2213,25 @@ const stateClientOps = [
       /** Absent makes squares, whatever the room's New scenes says: only the form reads that (docs/design/design-v1-hex-grids.md HX-D19). */
       gridShape: gridShapeChoice.optional(),
     }),
+    /**
+     * Add a floor (docs/design/design-v1-floors.md 7.1, 9): the new scene
+     * record is a floor of `beside`'s scene, just above or below it. The
+     * reducer takes the record's id alone: its name is the scene's, its
+     * settings copy the floor beside (section 6), the floor gets a free
+     * name ("New floor", "New floor 2" and on) and every floor's level is
+     * renumbered. `besideName` names the floor beside on the scene's first
+     * add, "Ground floor" when absent, and is ignored after.
+     */
+    floor: z
+      .strictObject({
+        beside: id,
+        side: z.enum(["above", "below"]),
+        besideName: floorName.optional(),
+      })
+      .optional(),
+  }).refine((o) => o.floor === undefined || Object.keys(o.scene).every((k) => k === "id" || k === "name" || k === "bounds"), {
+    message: "a new floor copies the floor beside it, so it carries only its id, name and size",
+    path: ["scene"],
   }),
   op("scene.update", {
     sceneId: id,
@@ -2243,6 +2267,12 @@ const stateClientOps = [
       weather: sceneWeatherSchema.nullable().optional(),
       /** The scene's sound (docs/design/design-v1-music.md 4.6), the DM's alone. Null removes it, an empty one is silence. */
       sound: sceneSoundSchema.nullable().optional(),
+      /**
+       * The floor's own name and height (docs/design/design-v1-floors.md 9),
+       * refused on a scene with one floor. `name` above, the scene's,
+       * renames every floor of the scene together.
+       */
+      floor: z.strictObject({ name: floorName.optional(), height: floorHeight.optional() }).optional(),
     }),
   }),
   /**
@@ -2264,6 +2294,25 @@ const stateClientOps = [
   }),
   op("scene.delete", { sceneId: id }),
   op("scene.reorder", { order: z.array(id).min(1).max(50) }),
+  /**
+   * The order of a scene's floors (docs/design/design-v1-floors.md 9): every
+   * floor of `sceneId`'s scene, each once, bottom first. Move up and Move
+   * down send it. Setup.
+   */
+  op("floor.order", {
+    sceneId: id,
+    floors: z
+      .array(id)
+      .min(2)
+      .max(LIMITS.floorsPerScene)
+      .refine((ids) => new Set(ids).size === ids.length, { message: "a floor is listed twice" }),
+  }),
+  /**
+   * Show to players (`open: true`) or Hide from players (`false`) a floor of
+   * a scene with floors (docs/design/design-v1-floors.md 7.1, 9), its opened
+   * mark in RoomState.openFloors. Play, as fog is.
+   */
+  op("floor.open", { sceneId: id, open: z.boolean() }),
   op("scene.setMap", { sceneId: id, map: sceneMap.nullable() }),
   op("scene.setGrid", {
     sceneId: id,
@@ -3342,7 +3391,12 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
     blocked: z.array(z.number().int().min(1)).optional(),
   }),
   z.strictObject({ t: z.literal("retry"), n: z.number().int().min(1).optional(), code: z.enum(["busy", "gap"]) }),
-  z.strictObject({ t: z.literal("eph"), from: id, e: ephEventSchema }),
+  /**
+   * `sceneId` is the floor the event happened on (docs/design/design-v1-floors.md
+   * 8.2), which the receiver holds: a device keeps events per floor and
+   * draws the shown floor's.
+   */
+  z.strictObject({ t: z.literal("eph"), from: id, sceneId: id, e: ephEventSchema }),
   /** `online` never lists a table display. DM sockets also get `displays`, how many display sockets are open (wave 5). */
   z.strictObject({ t: z.literal("presence"), online: z.array(id).max(1_000), displays: z.number().int().min(0).max(1_000).optional() }),
   /**

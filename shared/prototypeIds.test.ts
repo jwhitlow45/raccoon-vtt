@@ -56,6 +56,8 @@ function handMade(state: RoomState): Case[] {
   both({ t: "vision.holders", sceneId: "s1", on: ["p1"] });
   both({ t: "scene.delete", sceneId: "s2" });
   both({ t: "scene.reorder", order: ["s2", "s1"] });
+  both({ t: "floor.order", sceneId: "s1", floors: ["s2", "s1"] });
+  both({ t: "floor.open", sceneId: "s2", open: true });
   both({ t: "token.moveMany", moves: [{ tokenId: t0, x: 3, y: 3 }, { tokenId: t1, x: 4, y: 4 }] });
   both({ t: "actor.deathSave", target: { characterId: c0 }, ok: 1, fail: 0 });
   both({ t: "actor.effect.update", ...effect, patch: { label: "x" } });

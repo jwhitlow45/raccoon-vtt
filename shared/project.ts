@@ -163,6 +163,12 @@ export type ProjectedState = Omit<RoomState, "meta" | "tokens" | "characters" | 
   meta: RoomMeta & {
     /** DM only, never stored. Retained HP undo records, including lines outside the live projection. */
     hpUndoLogIds?: string[];
+    /**
+     * Table displays only, never stored (docs/design/design-v1-floors.md 7.3,
+     * D-261102-491): the held floors with the most unhidden party members,
+     * worked out on the server, which a display follows.
+     */
+    partyFloors?: string[];
   };
   tokens: Record<string, ProjectedToken>;
   traps: Record<string, ProjectedTrap>;
@@ -2925,6 +2931,8 @@ export const SCENE_FOR_PLAYERS = {
   // Players' devices draw it and their rolls follow it (docs/design/design-v1-weather.md 7). It names a look and its rules, nothing of the map.
   weather: "copied",
   sound: "dm: the playlist and loops the scene starts, which players hear only once they play (docs/design/design-v1-music.md 6.5)",
+  // Players learn a floor's place and name, never which floor is main or its height (docs/design/design-v1-floors.md 8, D-261102-492).
+  floor: "changed: { level, name }, levels renumbered among the floors held, and only while two or more are held",
 } as const satisfies Record<keyof Scene, PlayerField>;
 
 /** A scene as a player gets it: an allowlist, field by field as SCENE_FOR_PLAYERS rules. */
@@ -4045,6 +4053,9 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
     case "memoryBy":
     case "played":
     case "memoryShared":
+      return null;
+    // A floor's opened mark reaches DM projections only (docs/design/design-v1-floors.md 8): FLR-B projects it.
+    case "opened":
       return null;
     case "holders":
       return value ? projectHoldersCtx(ctx, value as SightHolders) : null;

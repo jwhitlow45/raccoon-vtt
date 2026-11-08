@@ -186,6 +186,10 @@ export function reads(op: Op, state: RoomState): Reads {
       return of([{ key: keys.scene(op.sceneId) }], ["scenes", `scene:${op.sceneId}`, "encounter"]);
     case "scene.reorder":
       return of(op.order.map((id) => ({ key: keys.scene(id) })), ["scenes"]);
+    case "floor.order":
+      return of(op.floors.map((id) => ({ key: keys.scene(id) })), ["scenes"]);
+    case "floor.open":
+      return of([{ key: keys.scene(op.sceneId) }, { key: keys.opened(op.sceneId) }]);
 
     case "token.create": {
       // A companion's checks read its character's tokens and the walls, and a player's writes the DM's line, so its

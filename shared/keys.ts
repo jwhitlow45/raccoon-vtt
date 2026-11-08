@@ -77,6 +77,8 @@ export type ParsedKey =
   /** A scene's mark, by the scene's id. */
   | { kind: "played"; id: string }
   | { kind: "memoryShared"; id: string }
+  /** A floor's opened mark (RoomState.openFloors, docs/design/design-v1-floors.md 9), by the floor's id. */
+  | { kind: "opened"; id: string }
   | { kind: "encounter" }
   | { kind: "encounterHistory" }
   /** The room's clock (RoomState.clock, docs/design/design-v1-calendar.md 6.1), a singleton like the encounter. */
@@ -151,6 +153,8 @@ export const keys = {
   played: (sceneId: string): EntityKey => `played:${sceneId}`,
   /** A scene's mark that its memory takes a share of the room (RoomState.memoryShared, 5.5). */
   memoryShared: (sceneId: string): EntityKey => `memoryShared:${sceneId}`,
+  /** A floor's opened mark (RoomState.openFloors): players have reached it. */
+  opened: (sceneId: string): EntityKey => `opened:${sceneId}`,
   encounter: "encounter" as EntityKey,
   encounterHistory: "encounterHistory" as EntityKey,
   clock: "clock" as EntityKey,
@@ -292,6 +296,7 @@ export function parseKey(key: EntityKey): ParsedKey | null {
     // Apart from the list above, which TypeScript narrows only up to 25 kinds at once.
     case "sound":
     case "playlist":
+    case "opened":
       return { kind, id: rest };
     case "fogDraft":
     case "holders":
@@ -409,6 +414,8 @@ export function collectionOf(key: EntityKey): keyof RoomState | null {
       return "playedScenes";
     case "memoryShared":
       return "memoryShared";
+    case "opened":
+      return "openFloors";
     case "sound":
       return "sounds";
     case "playlist":
@@ -502,6 +509,8 @@ export function readEntity(state: RoomState, key: EntityKey): unknown {
       return ownEntry(state.playedScenes, parsed.id) ?? null;
     case "memoryShared":
       return ownEntry(state.memoryShared, parsed.id) ?? null;
+    case "opened":
+      return ownEntry(state.openFloors, parsed.id) ?? null;
     case "sound":
       return ownEntry(state.sounds, parsed.id) ?? null;
     case "playlist":
@@ -631,6 +640,10 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
       return { ...state, playedScenes: withEntry(state.playedScenes ?? {}, parsed.id, value as SceneMark | null) };
     case "memoryShared":
       return { ...state, memoryShared: withEntry(state.memoryShared ?? {}, parsed.id, value as SceneMark | null) };
+    // Absent reads as no floor reached, and a DM projection holds the field only while it holds a mark, so a copy built
+    // from changes matches a fresh snapshot.
+    case "opened":
+      return withField(state, "openFloors", withEntry(state.openFloors ?? {}, parsed.id, value as SceneMark | null));
     // A room from before sound has neither collection, which reads as empty (docs/design/design-v1-music.md 6.7). A
     // projection holds each field only while it holds something (project.ts soundFields), so a change that empties one
     // takes it away, and a device's copy built from changes matches a fresh snapshot.
@@ -661,8 +674,8 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
   }
 }
 
-/** A state with the library or the playlists replaced, and without the field once it is empty. */
-function withField(state: RoomState, field: "sounds" | "playlists", map: Record<string, unknown>): RoomState {
+/** A state with the library, the playlists or the opened marks replaced, and without the field once it is empty. */
+function withField(state: RoomState, field: "sounds" | "playlists" | "openFloors", map: Record<string, unknown>): RoomState {
   const out = { ...state } as Record<string, unknown>;
   if (Object.keys(map).length === 0) delete out[field];
   else out[field] = map;

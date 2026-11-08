@@ -137,10 +137,12 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
   let snapTimer: ReturnType<typeof setTimeout> | null = null;
 
   // What the player's own room shows, as their socket holds it. The view keeps its identity until the server changes it.
-  const derive = (src: RoomView): Pick<RoomView, "view" | "sceneId" | "connection" | "online" | "roomId" | "ephemeral"> => ({
+  const derive = (src: RoomView): Pick<RoomView, "view" | "floorView" | "sceneId" | "projectedSceneId" | "connection" | "online" | "roomId" | "ephemeral"> => ({
     roomId: src.roomId,
     view: src.view,
+    floorView: src.floorView,
     sceneId: src.sceneId,
+    projectedSceneId: src.projectedSceneId,
     connection: src.connection,
     online: src.online,
     ephemeral: src.ephemeral,
@@ -253,6 +255,7 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
     },
     sendEph() {},
     switchScene() {},
+    showFloor() {},
     undo: refuse,
     redo: refuse,
     newId: () => uuidv7(),

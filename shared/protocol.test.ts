@@ -318,7 +318,9 @@ describe("messages", () => {
     ok(serverMessageSchema, { t: "clock", at: "2026-10-31T08:00:00.000Z" });
     bad(serverMessageSchema, { t: "clock", at: "2026-10-31T08:00:00.000Z", seq: 1 });
     ok(serverMessageSchema, { t: "resync", reason: "scene" });
-    ok(serverMessageSchema, { t: "eph", from: "m", e: { k: "dragCancel", tokenId: "t" } });
+    ok(serverMessageSchema, { t: "eph", from: "m", sceneId: "s", e: { k: "dragCancel", tokenId: "t" } });
+    // The floor the event happened on (docs/design/design-v1-floors.md 8.2), which a device files it under.
+    bad(serverMessageSchema, { t: "eph", from: "m", e: { k: "dragCancel", tokenId: "t" } });
   });
 });
 

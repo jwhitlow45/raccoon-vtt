@@ -180,7 +180,7 @@ function startGhost(server: LocalServer, push: ReturnType<typeof localSocketFact
     }, ms);
     timers.add(t);
   };
-  const send = (e: EphEvent) => push({ t: "eph", from: FIXTURE_IDS.vex, e });
+  const send = (e: EphEvent) => push({ t: "eph", from: FIXTURE_IDS.vex, sceneId: FIXTURE_IDS.cave, e });
   const run = () => {
     const token = server.state.tokens[tokenId];
     if (!token) return;

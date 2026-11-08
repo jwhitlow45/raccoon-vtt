@@ -520,8 +520,28 @@ export type RoomView = {
    * that did not change keep their object identity across updates.
    */
   view: (RoomState & { meta: ProjectedState["meta"] }) | null;
-  /** The scene shown: always the player scene for players, the DM's pick for a DM. */
+  /**
+   * The floor shown (docs/design/design-v1-floors.md 7.3, 10): on a scene
+   * with one floor, the scene. A player's follows their creature unless
+   * they picked another, a DM's is the DM's pick, a table display's
+   * follows the party. Board layers read it with `floorView`.
+   */
   sceneId: SceneId | null;
+  /**
+   * The cut of `view` the board reads (state/floorView.ts): its
+   * floor-scoped collections cut to `sceneId`, the floor shown, and the
+   * rest of `view` whole. Every-floor readers (the tracker, the log, the
+   * search) keep reading `view`.
+   */
+  floorView: (RoomState & { meta: ProjectedState["meta"] }) | null;
+  /**
+   * The scene the server projects (D-261107-288): on a DM's device that
+   * scene's main floor, which the `scene` message names, and on a
+   * player's device and a display what they are sent, the start floor or
+   * null behind a blackout, never normalized to a main floor. Prediction
+   * reads it, so a floor switch never un-predicts a pending op.
+   */
+  projectedSceneId: SceneId | null;
   /** `open` only once the snapshot has arrived (section 7.5). */
   connection: ConnectionState;
   /** The scene this device asked for and is waiting on (sceneLoad.ts). A read-only player preview leaves it out. */
@@ -664,6 +684,15 @@ export type RoomActions = {
   sendEph(e: EphEvent, opts?: { localOnly?: boolean }): void;
   /** DM only: view another scene. The latest pick wins. */
   switchScene(sceneId: SceneId): void;
+  /**
+   * Shows another floor this device holds of the projected scene
+   * (docs/design/design-v1-floors.md 7.2, 7.3): a pick in Floors, `[` or
+   * `]`, a tracker tag, a search row. It sends nothing, since every held
+   * floor is in `view` already. A player's pick holds until their followed
+   * creature changes floor, their turn starts or they tap Back, and null
+   * is Back: the device follows their creature again.
+   */
+  showFloor(sceneId: SceneId | null): void;
   /** Sends an undo, or while a builder gesture waits on its asks, cancels the newest such gesture instead (holdBuild). */
   undo(options?: HistoryActivation): void;
   /** Sends a redo, or while a builder gesture waits on its asks, does nothing (holdBuild). */

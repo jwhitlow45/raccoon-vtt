@@ -25,11 +25,14 @@ function playerView(): RoomState {
 
 /** The preview socket's store once Thorn's snapshot is in. */
 function source() {
+  const view = playerView();
   return createStore<RoomView>()(() => ({
     roomId: "DEVR00M0",
     you: { memberId: thorn, role: "player" },
-    view: playerView(),
+    view,
+    floorView: view,
     sceneId: cave,
+    projectedSceneId: cave,
     connection: "open",
     online: [thorn],
     accessVersion: 0,

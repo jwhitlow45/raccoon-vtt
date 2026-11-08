@@ -227,6 +227,16 @@ export type RoomState = {
    * get null behind a blackout.
    */
   playing?: Playing | null;
+  /**
+   * DM only: the floors players have reached (docs/design/design-v1-floors.md
+   * 9, D-261102-482), `keys.opened(id)`. Reducer bookkeeping outside undo,
+   * written by `markOpened` after every op: the start floor whenever its
+   * scene has floors, each floor of the players' scene where an unhidden
+   * party member stands, and the floors the DM shows, until Hide. Marks
+   * lie only on floors of scenes with floors. Absent reads as none, so
+   * rooms from before floors need no migration. Only DM projections hold it.
+   */
+  openFloors?: Record<SceneId, SceneMark>;
 };
 
 /** One month of a Months calendar: its name and its length in days. */
@@ -626,6 +636,35 @@ export type Scene = {
    * is no sound of its own, and null in a patch removes it.
    */
   sound?: SceneSound;
+  /**
+   * The scene's place among its scene's floors (docs/design/design-v1-floors.md
+   * 9), on every floor of a scene with more than one and absent on a scene
+   * with one. A player gets `{ level, name }` only, renumbered among the
+   * floors they hold, and only while they hold two or more.
+   */
+  floor?: SceneFloor;
+};
+
+/**
+ * A floor of a scene with more than one (docs/design/design-v1-floors.md 9).
+ * Each floor is a scene record with its own build, fog, tokens and
+ * settings. Every floor's `name` (the record's) is the scene's, renamed
+ * together, and `floor.name` names the floor.
+ */
+export type SceneFloor = {
+  /**
+   * DM only. The main floor, the one the scene was made with: it holds the
+   * scene's place in the Scenes panel, its folder and its thumbnail. The
+   * main floor's `of` is its own id. Absent on a player's copy, which
+   * never learns which floor is main.
+   */
+  of?: SceneId;
+  /** 0 the lowest. The reducer renumbers every floor on an add, a move and a removal, so levels run 0 to n - 1. */
+  level: number;
+  /** At most LIMITS.floorNameChars characters, unique among the scene's floors. */
+  name: string;
+  /** DM only. Feet above the floor below, 5 to 50 in 5 ft steps, 10 by default. Phase 2's climbs read it. */
+  height?: number;
 };
 
 /**

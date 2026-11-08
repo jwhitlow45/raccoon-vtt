@@ -64,6 +64,7 @@ function fullScene(): Required<Scene> {
     suggestedView: "isometric",
     weather: { kind: "rain", heavy: true, wind: "strong", toward: 90 },
     sound: { music: { playlistId: "pl1", repeat: "all", fade: 5 }, loops: [{ soundId: "rain", volume: 70 }] },
+    floor: { of: "s0", level: 1, name: "Upper floor", height: 10 },
   };
 }
 

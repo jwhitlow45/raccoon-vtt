@@ -218,18 +218,18 @@ export function routeEphemeral(state: RoomState, sender: Connection, sceneId: st
     if (receiver === sender || receiver.closed || receiver.held === null) continue;
     if (viewerSceneId(state, receiver.viewer, { sceneId: receiver.sceneId }) !== sceneId) continue;
     if (bareEnd) {
-      if (heldKey && receiver.previewsHeld.delete(heldKey)) receiver.send({ t: "eph", from: sender.memberId, e });
+      if (heldKey && receiver.previewsHeld.delete(heldKey)) receiver.send({ t: "eph", from: sender.memberId, sceneId, e });
       continue;
     }
     if (senderMay && allowed(state, receiver, e, withheld)) {
-      receiver.send({ t: "eph", from: sender.memberId, e: receiver.role === "player" ? forPlayer(state, sceneId, e, receiver) : e });
+      receiver.send({ t: "eph", from: sender.memberId, sceneId, e: receiver.role === "player" ? forPlayer(state, sceneId, e, receiver) : e });
       if (heldKey && preview) {
         if (preview.ends) receiver.previewsHeld.delete(heldKey);
         else receiver.previewsHeld.set(heldKey, sender.id);
       }
     } else if (heldKey && preview && receiver.previewsHeld.has(heldKey)) {
       receiver.previewsHeld.delete(heldKey);
-      receiver.send({ t: "eph", from: sender.memberId, e: cancelEvent(preview.kind, preview.id) });
+      receiver.send({ t: "eph", from: sender.memberId, sceneId, e: cancelEvent(preview.kind, preview.id) });
     }
   }
   if (preview && !preview.ends) keepSent(sender, `${preview.kind}:${preview.id}`, { kind: preview.kind, id: preview.id, sceneId, last: e, at: sender.now() }, all);
@@ -256,10 +256,10 @@ function expireStale(sender: Connection, receivers: readonly Connection[]): void
   }
 }
 
-function dropSent(sender: Connection, key: string, sent: { kind: PreviewKind; id: string }, receivers: readonly Connection[]): void {
+function dropSent(sender: Connection, key: string, sent: { kind: PreviewKind; id: string; sceneId: string }, receivers: readonly Connection[]): void {
   sender.previewsSent.delete(key);
   const heldKey = `${sender.memberId}|${key}`;
-  for (const receiver of receivers) if (release(receiver, heldKey, sender)) receiver.send({ t: "eph", from: sender.memberId, e: cancelEvent(sent.kind, sent.id) });
+  for (const receiver of receivers) if (release(receiver, heldKey, sender)) receiver.send({ t: "eph", from: sender.memberId, sceneId: sent.sceneId, e: cancelEvent(sent.kind, sent.id) });
 }
 
 /*
@@ -324,7 +324,7 @@ export function rejudgePreviews(state: RoomState, connections: Iterable<Connecti
         const here = judged && viewerSceneId(state, receiver.viewer, { sceneId: receiver.sceneId }) === sceneId;
         if (here && senderMay && allowed(state, receiver, last, withheld)) continue;
         release(receiver, heldKey, sender);
-        receiver.send({ t: "eph", from: sender.memberId, e: cancelEvent(kind, id) });
+        receiver.send({ t: "eph", from: sender.memberId, sceneId, e: cancelEvent(kind, id) });
       }
       // A preview no screen shows from this socket any more keeps no frame.
       if (!showsAnywhere(sender, heldKey, all)) sender.previewsSent.delete(key);
@@ -337,8 +337,8 @@ export function cancelPreviews(sender: Connection, receivers: Iterable<Connectio
   if (sender.previewsSent.size === 0) return;
   for (const receiver of receivers) {
     if (receiver === sender || receiver.closed) continue;
-    for (const { kind, id } of sender.previewsSent.values()) {
-      if (release(receiver, `${sender.memberId}|${kind}:${id}`, sender)) receiver.send({ t: "eph", from: sender.memberId, e: cancelEvent(kind, id) });
+    for (const { kind, id, sceneId } of sender.previewsSent.values()) {
+      if (release(receiver, `${sender.memberId}|${kind}:${id}`, sender)) receiver.send({ t: "eph", from: sender.memberId, sceneId, e: cancelEvent(kind, id) });
     }
   }
   sender.previewsSent.clear();

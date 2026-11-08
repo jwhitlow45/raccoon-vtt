@@ -1,3 +1,4 @@
+import { onPlayersScene, openFloor } from "#shared/rules/floors.ts";
 import type { IconName } from "../../../components/Icon.tsx";
 import { dmMenuSections, type ChipItem, type DmMenuView } from "../../../pages/chipMenus.ts";
 import { audienceDetail, CHIP_WORDS, type DmItemKind } from "../../../pages/chipWords.ts";
@@ -129,6 +130,8 @@ export function dmMenuViewOf(state: Pick<RoomView, "view" | "sceneId">): DmMenuV
     follow: view?.meta.view.follow === true,
     viewing: (state.sceneId ? view?.scenes[state.sceneId] : undefined) ?? null,
     playerScene: playerId && playerName !== undefined ? { id: playerId, name: playerName } : null,
+    playersHoldHere: view && state.sceneId ? openFloor(view, state.sceneId) : false,
+    playersSceneHere: view && state.sceneId ? onPlayersScene(view, state.sceneId) : false,
     focusHere: true,
     handouts: view?.handouts ?? {},
     handoutDocs: view?.handoutDocs ?? {},

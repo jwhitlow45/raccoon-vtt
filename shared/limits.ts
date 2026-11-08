@@ -175,6 +175,13 @@ export const LIMITS = {
   /** Map phases per scene, the active one included (section 3.4). */
   phasesPerScene: 8,
   folderNameChars: 40,
+  /**
+   * Floors in one scene (docs/design/design-v1-floors.md 11). Every floor is
+   * a scene record, so each counts toward scenesPerRoom, and a scene's
+   * floors share one scene's byte budget and its token and area caps.
+   */
+  floorsPerScene: 8,
+  floorNameChars: 40,
   /** A scene thumbnail upload, and its stored long side (section 3.3). */
   thumbUploadBytes: 512 * 1024,
   thumbMaxPx: 320,

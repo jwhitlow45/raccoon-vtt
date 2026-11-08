@@ -14,7 +14,7 @@ import {
 } from "./reducer/actors.ts";
 import { remindAfter, remindTurnEnd } from "./reducer/areaTriggers.ts";
 import { linkPass, settleMounts, tokenAttach, tokenDetach } from "./reducer/attach.ts";
-import { attaches, followsDaylight, timedEnds, trapsGoOff, writesUndoCorrections } from "./migrate.ts";
+import { attaches, floorsOps, followsDaylight, timedEnds, trapsGoOff, writesUndoCorrections } from "./migrate.ts";
 import { clockCorrection, correctionViews } from "./undoCorrection.ts";
 import { clockAdvance, clockSet, clockStart, clockStop, clockUpdate, followDaylight } from "./reducer/clock.ts";
 import {
@@ -77,6 +77,7 @@ import {
 } from "./reducer/map.ts";
 import { buildHeight, buildRough, buildStairs } from "./reducer/heights.ts";
 import { sceneDuplicate } from "./reducer/duplicate.ts";
+import { floorOpen, floorOrder, markOpened } from "./reducer/floors.ts";
 import { journalCreate, journalDelete, journalReveal, journalUpdate } from "./reducer/journal.ts";
 import { actorEffects, tokenDeleteMany, tokenUpdateMany } from "./reducer/many.ts";
 import { pinPut, pinRemove } from "./reducer/pins.ts";
@@ -194,6 +195,8 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
     // What players remember follows the scene's settings, and a scene the players move to is marked played (docs/design/design-v1-map-discovery.md 5.4, 5.5).
     keepMemory(tx, state);
     markPlayed(tx, state);
+    // The floors players reach, beside the scenes they played (docs/design/design-v1-floors.md 9).
+    if (floorsOps(env.opVersion)) markOpened(tx, state);
     // Every op's dispatch ends with the links that no longer hold coming loose (docs/design/design-v1-attach.md 5.2).
     if (attaches(env.opVersion)) {
       linkPass(tx);
@@ -294,6 +297,10 @@ function dispatch(tx: Tx, op: Op): void {
       return sceneSetPhase(tx, op);
     case "scene.duplicate":
       return sceneDuplicate(tx, op);
+    case "floor.order":
+      return floorOrder(tx, op);
+    case "floor.open":
+      return floorOpen(tx, op);
     case "token.create":
       return tokenCreate(tx, op);
     case "token.update":

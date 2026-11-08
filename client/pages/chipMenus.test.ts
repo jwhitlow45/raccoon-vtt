@@ -44,7 +44,13 @@ const doc: HandoutDoc = { id: "letter", rev: 0, title: "Strange letter", pages: 
 const showing: Handout = { id: "h1", rev: 0, assetId: "map", title: "The old map", to: "all", shownAt: at(5) };
 
 function viewOf(over: Partial<DmMenuView> = {}): DmMenuView {
+  // On scenes with one floor, players hold the floor in view exactly when it is the players' scene.
+  const viewing = over.viewing !== undefined ? over.viewing : hall;
+  const players = over.playerScene !== undefined ? over.playerScene : { id: hall.id, name: hall.name };
+  const here = viewing !== null && viewing.id === players?.id;
   return {
+    playersHoldHere: here,
+    playersSceneHere: here,
     blackout: false,
     follow: false,
     viewing: hall,

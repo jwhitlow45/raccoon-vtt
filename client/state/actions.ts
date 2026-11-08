@@ -56,6 +56,8 @@ export function createRoomActions(room: RoomStore, socket: Pick<RoomSocket, "sen
       if (!opts?.localOnly) socket.sendEph(e);
     },
     switchScene: (sceneId) => socket.switchScene(sceneId),
+    // The contract's stand-in: FLR-D1 shows the floor. On a scene with one floor there is no other to show.
+    showFloor: () => {},
     // Undo while a gesture waits takes back that gesture, which the server never saw, and sends no undo.
     undo: (options) => {
       if (options?.scope !== "setup" && options?.of === undefined && room.cancelHeld()) return;

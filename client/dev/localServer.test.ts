@@ -129,7 +129,7 @@ describe("the dev room's View as a player (D-261026-10, docs/design/design-v1-pe
     assert.ok(snapshot && snapshot.t === "snapshot" && snapshot.you.memberId === "p1" && snapshot.you.role === "player");
     assert.ok(preview.got.some((m) => m.t === "pong" && m.k === 7));
     // The DM's own socket still gets what it gets, and the preview only its player's view.
-    sockets.push({ t: "eph", from: "dm1", e: { k: "ping", x: 1, y: 1 } });
+    sockets.push({ t: "eph", from: "dm1", sceneId: "s1", e: { k: "ping", x: 1, y: 1 } });
     settle();
     assert.equal(preview.got.filter((m) => m.t === "eph").length, 0, "the DM's frames reached the preview");
     preview.socket.send(JSON.stringify({ t: "op", n: 1, op: { t: "log.chat", text: "from the preview" } }));

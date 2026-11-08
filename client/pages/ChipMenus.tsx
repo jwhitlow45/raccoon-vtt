@@ -34,6 +34,7 @@ import { useUiScale } from "../features/device/settings.ts";
 import { scopeSlot, useRoomScope, useScoped } from "../state/scope.ts";
 import { useAssets, useRoomActions, useRoomUi, useRoomView } from "../state/view.ts";
 import type { ClientOp } from "#shared/protocol.ts";
+import { onPlayersScene, openFloor } from "#shared/rules/floors.ts";
 import {
   anywayId,
   asDrawn,
@@ -588,6 +589,8 @@ export function useDmMenuView(timeGaveWay: boolean, nowPlayingGaveWay: boolean, 
   const viewing = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId] : undefined)) ?? null;
   const playerId = useRoomView((s) => s.view?.meta.playerSceneId ?? null);
   const playerName = useRoomView((s) => (playerId ? s.view?.scenes[playerId]?.name : undefined));
+  const playersHoldHere = useRoomView((s) => (s.view && s.sceneId ? openFloor(s.view, s.sceneId) : false));
+  const playersSceneHere = useRoomView((s) => (s.view && s.sceneId ? onPlayersScene(s.view, s.sceneId) : false));
   const handouts = useRoomView((s) => s.view?.handouts);
   const handoutDocs = useRoomView((s) => s.view?.handoutDocs);
   const members = useRoomView((s) => s.view?.members);
@@ -611,6 +614,8 @@ export function useDmMenuView(timeGaveWay: boolean, nowPlayingGaveWay: boolean, 
     follow,
     viewing,
     playerScene: playerId && playerName !== undefined ? { id: playerId, name: playerName } : null,
+    playersHoldHere,
+    playersSceneHere,
     focusHere: viewing !== null && focusScene === viewing.id,
     handouts: handouts ?? {},
     handoutDocs: handoutDocs ?? {},

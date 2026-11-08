@@ -24,6 +24,7 @@ import { applyOp } from "#shared/reducer.ts";
 import type { ConnectionState } from "../lib/connection.ts";
 import { applyEph, clearTokens, keepLocal, keepMembers, nextExpiry, sweepEph } from "./ephemeral.ts";
 import { SCENE_LOAD_IDLE, sceneLoadFailureText, stepSceneLoad, type SceneLoad, type SceneLoadEvent } from "./sceneLoad.ts";
+import { floorViewOf } from "./floorView.ts";
 import { shareRecord, shareState } from "./share.ts";
 import { backoffDelay, realClock, Timer, type Clock } from "./timing.ts";
 import { addToSelection, bringToken, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
@@ -561,7 +562,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     roomId: options.roomId,
     you: options.you,
     view: null,
+    floorView: null,
     sceneId: null,
+    projectedSceneId: null,
     connection: "connecting",
     online: [],
     accessVersion: 0,
@@ -665,9 +668,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   }, clock);
 
   /** Rebuilds the view from `confirmed` and `pending`, sharing every entity that did not change. */
-  function derive(next: Pick<RoomStoreState, "confirmed" | "seq" | "pending" | "you" | "sceneId">): Pick<RoomStoreState, "view" | "busy"> {
+  function derive(next: Pick<RoomStoreState, "confirmed" | "seq" | "pending" | "you" | "sceneId">): Pick<RoomStoreState, "view" | "floorView" | "busy"> {
     const prev = get();
-    if (!next.confirmed) return { view: null, busy: EMPTY_BUSY };
+    if (!next.confirmed) return { view: null, floorView: null, busy: EMPTY_BUSY };
     let state = next.confirmed as unknown as RoomState;
     let busy: Readonly<Record<string, true>> = EMPTY_BUSY;
     if (next.pending.length > 0) {
@@ -681,7 +684,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       state = replay.state;
       if (replay.waiting.length > 0) busy = shareRecord(prev.busy, Object.fromEntries(replay.waiting.map((k) => [k, true as const])));
     }
-    return { view: shareState(prev.view, state), busy };
+    const view = shareState(prev.view, state);
+    return { view, floorView: floorViewOf(view, next.sceneId, prev.floorView), busy };
   }
 
   /** One store update with a fresh view. */
@@ -780,7 +784,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       you: patch.you !== undefined ? patch.you : s.you,
       sceneId: patch.sceneId !== undefined ? patch.sceneId : s.sceneId,
     };
-    store.setState({ ...patch, ...derive(next) });
+    // The contract keeps the projected scene beside the floor shown, as on a scene with one floor. FLR-D1 splits them.
+    const projected = patch.projectedSceneId === undefined && patch.sceneId !== undefined ? { projectedSceneId: patch.sceneId } : {};
+    store.setState({ ...patch, ...projected, ...derive(next) });
     history.refresh();
   }
 
