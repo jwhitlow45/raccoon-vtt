@@ -165,8 +165,12 @@ export function Field(
  * for. The label asks for no more than its words, and the control for its
  * whole width, so a short label stays beside it wherever both fit and the
  * row wraps wherever they do not (S2-POS-1).
+ *
+ * `stack` puts the label on a line of its own over a control that takes the
+ * whole row, for a select whose option names are longer than the half a
+ * label leaves it (a native select cannot wrap its name).
  */
-export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactNode; fill?: boolean; fixed?: boolean; children: ReactNode } & Searchable) {
+export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactNode; fill?: boolean; fixed?: boolean; stack?: boolean; children: ReactNode } & Searchable) {
   const hintId = useId();
   return (
     <div data-search={props.search} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: theme.touch }}>
@@ -187,7 +191,7 @@ export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactN
        */}
       <label
         htmlFor={props.htmlFor}
-        style={{ flex: `1 1 min(${LABEL_BASIS}px, 40%)`, ...(props.fixed ? { maxWidth: "max-content" } : null), minWidth: 0, fontSize: theme.font.body14, color: theme.color.text }}
+        style={{ flex: props.stack ? "1 1 100%" : `1 1 min(${LABEL_BASIS}px, 40%)`, ...(props.fixed ? { maxWidth: "max-content" } : null), minWidth: 0, fontSize: theme.font.body14, color: theme.color.text }}
       >
         {props.label}
       </label>
@@ -196,8 +200,8 @@ export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactN
        * the label stops growing at its words: the auto margin then keeps the
        * control at the row's end, on the label's line or on its own.
        */}
-      <div style={{ ...(props.fixed ? { flex: "none", marginInlineStart: "auto" } : { flex: props.fill ? `1 1 ${CONTROLS_BASIS}px` : "1 1 auto" }), minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
-        <div style={{ ...(props.fixed ? null : { minWidth: "100%", maxWidth: CONTROLS_BASIS }), display: "flex", gap: theme.space(2), alignItems: "center", justifyContent: "flex-end" }}>
+      <div style={{ ...(props.fixed ? { flex: "none", marginInlineStart: "auto" } : { flex: props.stack ? "1 1 100%" : props.fill ? `1 1 ${CONTROLS_BASIS}px` : "1 1 auto" }), minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ ...(props.fixed ? null : { minWidth: "100%", maxWidth: props.stack ? undefined : CONTROLS_BASIS }), display: "flex", gap: theme.space(2), alignItems: "center", justifyContent: "flex-end" }}>
           <RowHint.Provider value={props.hint ? hintId : undefined}>{props.children}</RowHint.Provider>
         </div>
       </div>

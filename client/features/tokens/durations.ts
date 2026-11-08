@@ -38,8 +38,8 @@ type View = Pick<RoomState, "tokens" | "characters" | "encounter">;
 
 export const DURATION_MODES: readonly { mode: DurationMode; label: string }[] = [
   { mode: "none", label: "No duration" },
-  { mode: "turnStart", label: "Until the start of X's next turn" },
-  { mode: "turnEnd", label: "Until the end of X's next turn" },
+  { mode: "turnStart", label: "Start of X's next turn" },
+  { mode: "turnEnd", label: "End of X's next turn" },
   { mode: "rounds", label: "N rounds" },
 ];
 

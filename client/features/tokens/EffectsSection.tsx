@@ -610,11 +610,11 @@ export function DurationFields(props: {
   const modes = props.spans || isSpanMode(form.mode) ? [...MODE_OPTIONS, ...SPAN_OPTIONS] : MODE_OPTIONS;
   return (
     <div style={{ display: "grid", gap: theme.space(1) }}>
-      <FieldRow label="Duration" fill hint={props.hint}>
+      <FieldRow label="Duration" stack hint={props.hint}>
         <Select<DurationMode> label="Duration" value={form.mode} options={modes} onChange={(mode) => props.onChange({ ...form, mode })} />
       </FieldRow>
       {form.mode !== "none" && !isSpanMode(form.mode) ? (
-        <FieldRow label={form.mode === "rounds" ? "Counted on" : "X is"} fill>
+        <FieldRow label={form.mode === "rounds" ? "Counted on" : "X is"} stack>
           <Select<string>
             label={form.mode === "rounds" ? "Counted on whose turns" : "Whose turn"}
             value={form.anchorKey}

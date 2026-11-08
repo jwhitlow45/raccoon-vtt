@@ -212,8 +212,8 @@ describe("time spans on effects", () => {
     const duration = await startAdd(section, /Blessed/);
     assert.deepEqual(await duration.locator("option").allInnerTexts(), [
       "No duration",
-      "Until the start of X's next turn",
-      "Until the end of X's next turn",
+      "Start of X's next turn",
+      "End of X's next turn",
       "N rounds",
       "1 minute",
       "10 minutes",
@@ -331,7 +331,7 @@ describe("time spans on effects", () => {
     await patSection.getByRole("button", { name: "Add", exact: true }).click();
     await patSection.getByRole("button", { name: /Hasted/ }).first().click();
     const options = await patSection.getByRole("combobox", { name: "Duration", exact: true }).locator("option").allInnerTexts();
-    assert.deepEqual(options, ["No duration", "Until the start of X's next turn", "Until the end of X's next turn", "N rounds"], "no time span while the clock is hidden");
+    assert.deepEqual(options, ["No duration", "Start of X's next turn", "End of X's next turn", "N rounds"], "no time span while the clock is hidden");
     await patSection.getByRole("button", { name: "Back", exact: true }).click();
 
     await ops.send({ t: "clock.update", shown: true });

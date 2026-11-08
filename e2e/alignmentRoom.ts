@@ -7113,6 +7113,59 @@ function conditionsSection(panel: Locator): Locator {
 }
 
 /**
+ * Whether every select in `scope` shows a whole name. A native select cannot wrap a name, so a box
+ * narrower than the name, its padding, its border and the picker's arrow cuts it, as the Duration
+ * select cut "Other length of time" (the calfix lane). Each select is checked with its longest
+ * option chosen (`longest`) or with the one it shows. A name that does not fit is a line.
+ * SELECT_ARROW_PX is the room Chrome keeps at a select's end, found by drawing one narrower and narrower.
+ */
+const SELECT_ARROW_PX = 13;
+
+type SelectEl = {
+  options: ArrayLike<{ textContent: string | null; value: string }>;
+  selectedOptions: ArrayLike<{ textContent: string | null }>;
+  clientWidth: number;
+  getAttribute(n: string): string | null;
+  ownerDocument: {
+    createElement(tag: string): { getContext(kind: string): { font: string; measureText(text: string): { width: number } } };
+    defaultView: { getComputedStyle(e: unknown): { font: string; paddingLeft: string; paddingRight: string } };
+  };
+};
+
+async function selectNameLines(sweep: Sweep, scope: Locator, screen: string, longest: boolean): Promise<string[]> {
+  const lines: string[] = [];
+  // Only the selects whose names the app words: the creature's select lists the table's own names, which no layout can make fit.
+  const selects = scope.locator('select:visible[aria-label="Duration"], select:visible[aria-label="Unit"]');
+  for (let i = 0; i < (await selects.count()); i++) {
+    const select = selects.nth(i);
+    if (longest) {
+      const pick = await select.evaluate((el) => {
+        const e = el as unknown as SelectEl;
+        const ctx = e.ownerDocument.createElement("canvas").getContext("2d");
+        ctx.font = e.ownerDocument.defaultView.getComputedStyle(el).font;
+        let best = { value: "", width: -1 };
+        for (const o of Array.from(e.options)) {
+          const width = ctx.measureText((o.textContent ?? "").trim()).width;
+          if (width > best.width) best = { value: o.value, width };
+        }
+        return best.value;
+      });
+      await select.selectOption(pick);
+    }
+    const fit = await select.evaluate((el) => {
+      const e = el as unknown as SelectEl;
+      const css = e.ownerDocument.defaultView.getComputedStyle(el);
+      const ctx = e.ownerDocument.createElement("canvas").getContext("2d");
+      ctx.font = css.font;
+      const name = (e.selectedOptions[0]?.textContent ?? "").trim();
+      return { name, label: e.getAttribute("aria-label"), words: ctx.measureText(name).width, room: e.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight) };
+    });
+    if (fit.words + SELECT_ARROW_PX > fit.room) lines.push(`${sweep.at} ${screen}: select "${fit.label}" cuts "${fit.name}", ${fit.words.toFixed(1)} px of words in ${(fit.room - SELECT_ARROW_PX).toFixed(1)} px`);
+  }
+  return lines;
+}
+
+/**
  * Time spans' screens at one size (docs/design/design-v1-calendar-c2c3.md 9) on Thorn's page, for
  * the DM or for Pat: the add form with its Duration select holding the spans and the Other row
  * refused under its field, then the Conditions list with a span read outside a fight and in one.
@@ -7136,6 +7189,10 @@ async function timedScreens(sweep: Sweep, page: Page, who: "dm" | "pat"): Promis
   await section.getByRole("button", { name: "Add", exact: true }).click();
   await section.getByText("Pick a length from 1 minute to 365 days.", { exact: true }).waitFor();
   await sweep.measure(page, `${root}-form`, section);
+  // Other's name as it shows, then Duration and Unit with their longest option chosen.
+  await sweep.add(page, `${root}-form`, await selectNameLines(sweep, section, `${root}-form`, false));
+  await sweep.add(page, `${root}-form-longest`, await selectNameLines(sweep, section, `${root}-form-longest`, true));
+  await sweep.measure(page, `${root}-form-longest`, section);
   await section.getByRole("button", { name: "Back", exact: true }).click();
 
   await ops.send({ t: "actor.effect.add", target: { characterId: run.ids.thornChar }, effect: { id: randomUUID(), key: "blessed", duration: { mode: "span", seconds: 3_600 } } });
