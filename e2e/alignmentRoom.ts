@@ -3321,8 +3321,12 @@ async function ic2Screens(sweep: Sweep, page: Page, size: Size, scale: number): 
     await list.waitFor();
     // Each row of places, its icon leading (3.1), apart from the list's own labels.
     await sweep.measure(page, "ic2-panel-list", list.locator("li:has(button)"));
-    // The Run the table label (panel-groups design 3) must be there. The whole list is not measured: a label after the first keeps space above it by the label rule (fu41-c), which the sweep reads as a line out of line.
+    // The Run the table label (panel-groups design 3) must be there. The whole list is not measured for alignment: a label after the first keeps space above it by the label rule (fu41-c), which the sweep reads as a line out of line.
     await list.getByText("Run the table", { exact: true }).waitFor();
+    // Its spacing is: each label stands its gap over its first row (DPGROUPS-ASTRA-03), and all three are measured.
+    const spacing = await measureSpacing(list);
+    const labels = spacing.filter((f) => f.rule === "section-label").length;
+    await sweep.add(page, "ic2-panel-labels", [...spacingLines(spacing, `${at} ic2-panel-labels`), ...(labels < 3 ? [`${at} ic2-panel-labels: ${labels} labels measured, a DM's list has three`] : [])]);
     await escapeAll(page);
     await closeSheets(page);
   }
