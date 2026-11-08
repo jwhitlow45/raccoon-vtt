@@ -1023,7 +1023,6 @@ describe("bounded work (design 6)", () => {
         reads++;
         return ground(x, y);
       };
-      const started = performance.now();
       const vol = buildVolume({ area, bounds, ground: counted, px: 40 });
       const most = { work: 0, vertices: 0, visits: 0, reads: 0 };
       let calls = 0;
@@ -1044,12 +1043,10 @@ describe("bounded work (design 6)", () => {
         while (!call(() => vol.ensure(key, 0)));
         bucketMost = Math.max(bucketMost, vol.vertexCount - start);
       }
-      const ms = performance.now() - started;
       assert.equal(vol.failed, 0, name);
       assert.ok(calls > 2 * vol.keys.length, `${name}: ${calls} calls`);
       assert.ok(most.work <= 1024 && most.vertices <= 400 && most.visits <= 128 && most.reads <= 512, `${name}: at most ${JSON.stringify(most)} in one call`);
-      // Generous, so a slow machine does not fail it. The slices' time is the bench's (VOLUME_BENCH=1 below).
-      assert.ok(ms < 5000, `${name} took ${ms} ms`);
+      // Steps are counted, never timed: a wall-clock limit failed under load on a busy machine. The slices' time is the bench's (VOLUME_BENCH=1 below).
       if (t.id !== "sphere 500" || ctx.walls) continue;
       // Slicing changes nothing: the same mesh as a build in one go.
       const whole = buildVolume({ area, bounds, ground, px: 40 });
