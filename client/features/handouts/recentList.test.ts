@@ -79,9 +79,12 @@ describe("a showing remembered, then shown again", () => {
     assert.notEqual(entryKey({ kind: "image", assetId: "x" }), entryKey({ kind: "doc", docId: "x" }));
   });
 
-  test("a refused or unsure re-show says so in its row", () => {
-    assert.equal(reshowProblem("refused", { text: "That image is gone.", message: "gone" }), "That image is gone.");
-    assert.equal(reshowProblem("refused", { message: "invalid" }), "invalid");
+  test("a refused or unsure re-show says so in its row in the words FEATURES.md gives, a full room's reason after them (LP32-A-HAND-1)", () => {
+    // An image deleted on another device: the store's toast words would read "Not saved. That is not here."
+    assert.equal(reshowProblem("refused", { code: "gone", text: "Not saved. That is not here.", message: "that is not here" }), "That handout could not be shown.");
+    assert.equal(reshowProblem("refused", { code: "invalid", text: "Not saved. Invalid.", message: "invalid" }), "That handout could not be shown.");
+    assert.equal(reshowProblem("refused", { code: "quota", text: "Not saved. This room is full.", message: "this room is full" }), "That handout could not be shown. This room is full.");
+    assert.equal(reshowProblem("refused", { code: "quota", text: "Not saved.", message: "" }), "That handout could not be shown.");
     assert.equal(reshowProblem("refused"), "That handout could not be shown.");
     assert.equal(reshowProblem("unknown"), "It may not have shown. Try again.");
   });

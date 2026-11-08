@@ -346,7 +346,7 @@ describe("Handouts in the DM menu", () => {
     assert.deepEqual(dmMenuSections(view)[0]!.items.map((i) => i.title), ["Show a handout…"]);
   });
 
-  test("Show <title> shows it at once to the same audience, quiet, remembered once taken, and a refusal is a toast", () => {
+  test("Show <title> shows it at once to the same audience, quiet, remembered once taken, and a refusal is a toast in the Recent list's words (LP32-A-HAND-1)", () => {
     const view = viewOf({ recent: [recent({ title: "Belak's letter", assetId: "b", to: ["pat"], at: 8 }), { kind: "doc", docId: "letter", title: "Strange letter", to: "all", at: 6 }] });
     const room = fakeEnv();
     assert.deepEqual(item(dmMenuSections(view), "recent:image:b").run(room.env), { t: "done" });
@@ -358,8 +358,10 @@ describe("Handouts in the DM menu", () => {
     item(dmMenuSections(view), "recent:doc:letter").run(room.env);
     const docOp = room.sent[1]!.op as Extract<ClientOp, { t: "handout.show" }>;
     assert.deepEqual("pages" in docOp.handout && docOp.handout.pages.map((p) => p.assetId), ["p1", "p2"], "a document sends its pages as they are now");
-    room.sent[1]!.onAnswer!("refused", { code: "invalid", message: "too many handouts", text: "Not saved. Too many handouts." });
-    assert.deepEqual(room.toasts, ["error: Not saved. Too many handouts."]);
+    room.sent[1]!.onAnswer!("refused", { code: "quota", message: "too many handouts", text: "Not saved. Too many handouts." });
+    item(dmMenuSections(view), "recent:image:b").run(room.env);
+    room.sent[2]!.onAnswer!("refused", { code: "gone", message: "that is not here", text: "Not saved. That is not here." });
+    assert.deepEqual(room.toasts, ["error: That handout could not be shown. Too many handouts.", "error: That handout could not be shown."]);
   });
 });
 

@@ -1,6 +1,7 @@
 import type { Handout, HandoutDoc, Member } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { AssetRow } from "../../lib/api.ts";
+import type { OpRefusal } from "../../state/types.ts";
 import { audienceText } from "./handouts.ts";
 import type { RecentHandout, RecentPick, RecentRoom, RecentShow } from "./recent.ts";
 
@@ -57,9 +58,18 @@ export function shownOf(op: Extract<ClientOp, { t: "handout.show" }>, pick: Rece
   return { ...what, title: op.handout.title, to: op.handout.to };
 }
 
-/** A refused or unsure re-show's words in its row. */
-export function reshowProblem(answer: "refused" | "unknown", refusal?: { text?: string; message?: string }): string {
+/** The words of a refused re-show, in its row, the DM menu's toast and the search's alike. */
+const NOT_SHOWN = "That handout could not be shown.";
+
+/**
+ * A refused or unsure re-show's words in its row. A refusal is the one
+ * sentence, since the store's own words ("Not saved. That is not here.")
+ * speak of a save, not a showing. Only a full room's reason follows it,
+ * which the DM can act on.
+ */
+export function reshowProblem(answer: "refused" | "unknown", refusal?: Partial<OpRefusal>): string {
   // One that did show leaves the list, since it shows now, so these words stay only where it did not.
   if (answer === "unknown") return "It may not have shown. Try again.";
-  return refusal?.text || refusal?.message || "That handout could not be shown.";
+  const reason = refusal?.code === "quota" ? (refusal.message ?? "").trim().replace(/\.$/, "") : "";
+  return reason ? `${NOT_SHOWN} ${reason[0]!.toUpperCase()}${reason.slice(1)}.` : NOT_SHOWN;
 }
