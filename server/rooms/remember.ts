@@ -4,6 +4,7 @@ import { chunkPositions, shownEdge, shownFreeWall, shownUpDir, sightHolders, sta
 import type { OpOf } from "#shared/protocol.ts";
 import { keepsMemory, layerHeld, type Layer } from "#shared/reducer/memory.ts";
 import { autoWallsOf, paintedCell } from "#shared/rules/autoWalls.ts";
+import { openFloor } from "#shared/rules/floors.ts";
 import { encodeTile, labelCells, TILE_CELLS, TILE_SUB } from "#shared/rules/fog.ts";
 import type { CellRange } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
@@ -151,9 +152,14 @@ function memoryIndex(state: RoomState): MemoryIndex {
   return out;
 }
 
-/** Whether a scene's live ground can have grown in the batch: the DM's fog changed, or it is the players' scene before or after, where sight moves. */
+/**
+ * Whether a scene's live ground can have grown in the batch: the DM's fog
+ * changed, or it is a floor of the players' scene they have reached
+ * (openFloor) before or after, where sight moves
+ * (docs/design/design-v1-floors.md 8.3).
+ */
 function liveMayGrow(before: RoomState, after: RoomState, sceneId: string): boolean {
-  return before.fogTiles !== after.fogTiles || before.meta.playerSceneId === sceneId || after.meta.playerSceneId === sceneId;
+  return before.fogTiles !== after.fogTiles || openFloor(before, sceneId) || openFloor(after, sceneId);
 }
 
 // ---------------------------------------------------------------------------

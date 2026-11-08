@@ -20,7 +20,8 @@ import { CHANGED_SINCE, DEPENDED_ON, PARENT_GONE, restoreReferenceConflicts } fr
 import { stampedAt } from "#shared/reducer/tokens.ts";
 import { splitCheck } from "#shared/rules/walls.ts";
 import { pitsMoved, withPitsCounted } from "#shared/rules/pitCount.ts";
-import { liveTrapScene } from "#shared/rules/traps.ts";
+import { trapsLiveOn } from "#shared/rules/traps.ts";
+import { floorProblem, mainFloorId } from "#shared/rules/floors.ts";
 import { renewOpenDisplay } from "../auth/displaySessions.ts";
 import { checkDisplayGrant, checkGrant } from "../auth/grants.ts";
 import type { RoomGateway } from "./gateway.ts";
@@ -30,7 +31,7 @@ import { CloseWrites } from "./closeWrites.ts";
 import { CLOSE, clientKey, sessionOfKey, type ClientKey, type Connection } from "./connection.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { cancelPreviews, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
-import { exploreOp } from "./explore.ts";
+import { exploreOp, floorsExplored } from "./explore.ts";
 import { buildSnapshot, publishBatch, takeKeptRejects, type Reject, type Restored, type Stamped } from "./fanout.ts";
 import type { SocketFilter } from "./gateway.ts";
 import {
@@ -1205,8 +1206,9 @@ export class RoomActor {
 
   /**
    * Whether a move must wait for the batch staged so far to commit: one
-   * that walks a token on the scene where traps go off (traps.ts
-   * liveTrapScene), with fog and party vision on there, while the batch
+   * that walks a token on a floor where traps go off (traps.ts trapsLiveOn,
+   * a floor players see now, docs/design/design-v1-floors.md 7.7), with fog
+   * and party vision on there, while the batch
    * holds any work, a server op's or a staged change. Its stop reads the
    * party's sight as the room has it before the move (traps.ts
    * stopGround), so the batch's explore and map steps run first and that
@@ -1221,12 +1223,13 @@ export class RoomActor {
     if (!batch || this.#inFlight !== null) return false;
     const state = this.#staged.state;
     if (batch.ops.length === 0 && state === this.#committed.state) return false;
-    const sceneId = liveTrapScene(state);
-    const scene = sceneId === null ? undefined : state.scenes[sceneId];
-    if (!scene || !scene.fogEnabled || scene.vision?.on !== true) return false;
     if (raw === null || typeof raw !== "object") return false;
     const op = raw as { t?: unknown; tokenId?: unknown; moves?: unknown };
-    const on = (id: unknown) => typeof id === "string" && state.tokens[id]?.sceneId === sceneId;
+    const on = (id: unknown) => {
+      const sceneId = typeof id === "string" ? state.tokens[id]?.sceneId : undefined;
+      const scene = sceneId === undefined ? undefined : state.scenes[sceneId];
+      return scene !== undefined && scene.fogEnabled && scene.vision?.on === true && trapsLiveOn(state, scene.id);
+    };
     if (op.t === "token.move") return on(op.tokenId);
     if (op.t === "token.moveMany" && Array.isArray(op.moves)) return op.moves.some((m: unknown) => m !== null && typeof m === "object" && on((m as { tokenId?: unknown }).tokenId));
     return false;
@@ -1879,6 +1882,12 @@ export class RoomActor {
       const more = checkLimits(measured.state, sceneId, before, viewer.role);
       if (!more.ok) return more;
     }
+    // A scene's floors fit together after every op, undo, redo and restore (docs/design/design-v1-floors.md 9,
+    // D-261107-221): checked here on the server's own state, never in the reducer, which a device replays on its copy.
+    for (const sceneId of floorsWritten(measured.touched, sceneIds)) {
+      const problem = floorProblem(measured.state, sceneId);
+      if (problem !== null) return { ok: false, code: "invalid", message: problem };
+    }
     // The split's counting pass (docs/design/design-v1-maps-vision.md 2.1), on every scene whose walls the op may have changed. Over a
     // cap it refuses with `quota` before any piece is built. Both it and the sight cap read every pit border as raised, so a
     // pit trap counts its walls from the start and opening one never raises a count (docs/design/design-v1-traps.md 6.7).
@@ -1897,7 +1906,10 @@ export class RoomActor {
     const grown = [...new Set([...sceneIds, ...touchedScenes(this.#staged.state, measured.state, measured.touched), ...touchedScenes(this.#staged.state, result.state, result.touched)])];
     const size = this.#sizes.check(measured.state, grown, growthBound(this.#staged.state, measured.state, measured.touched), this.#staged.state, viewer.role);
     // The state limit is what refuses a block save here, since the projected scene leaves blocks out: it says what to do.
-    if (!size.ok) return isBlockSave(op) ? { ...size, message: BLOCKS_ROOM_TOO_FULL } : size;
+    if (!size.ok) {
+      const refused = withFloorWords(op, this.#staged.state, size, this.#sizes.refusedScene);
+      return isBlockSave(op) ? { ...refused, message: BLOCKS_ROOM_TOO_FULL } : refused;
+    }
     // Only the DM's ops grow players' memory by what they build: a player's door is touched, which drops its entries.
     // An op that asks is refused only past a cap, so it is scanned as applied: nearly every one goes on to its map step.
     const memory = viewer.role === "dm" && viewer !== SERVER_ACTOR ? this.#memoryEstimate(result.state, result.touched, true) : null;
@@ -2026,8 +2038,11 @@ export class RoomActor {
     conn.held = null;
     this.#clients.set(key, conn);
     if (conn.role === "dm") {
-      const scenes = this.#staged.state.scenes;
-      conn.sceneId = cmd.sceneId !== undefined && scenes[cmd.sceneId] ? cmd.sceneId : this.#staged.state.meta.playerSceneId;
+      const state = this.#staged.state;
+      const asked = cmd.sceneId !== undefined && state.scenes[cmd.sceneId] ? cmd.sceneId : state.meta.playerSceneId;
+      // A DM's projection covers every floor of the scene they view, so it is named by its main floor whichever floor
+      // the device asks for or the players start on (docs/design/design-v1-floors.md 10, D-261107-288).
+      conn.sceneId = asked === null ? null : mainFloorId(state, asked);
     }
     if (cmd.fresh) {
       const over = this.#budget.delay(this.#budget.keys(conn.sessionId, conn.ip, this.pinned)) > 0;
@@ -2258,10 +2273,16 @@ export class RoomActor {
     }
   }
 
-  /** The explore step on the staged state now, inside the batch: before its end where an op wrote an area's reminder. */
+  /**
+   * The explore step on the staged state now, inside the batch: before its end where an op wrote an area's reminder.
+   * One op for each floor that explores (docs/design/design-v1-floors.md 7.5), each read off the state the one before
+   * left, as it would be on its own.
+   */
   #exploreNow(batch: Batch): void {
-    const op = exploreOp(this.#staged.state);
-    if (op) this.#appendServerOp(batch, op, "explore");
+    for (const sceneId of floorsExplored(this.#staged.state)) {
+      const op = exploreOp(this.#staged.state, sceneId);
+      if (op) this.#appendServerOp(batch, op, "explore");
+    }
   }
 
   /**
@@ -2400,7 +2421,7 @@ export class RoomActor {
     // caught here, each owed snapshot and resync on its own socket, and the rest sets timers or drains the queue, which
     // catches per command (#drain) and whose flush cannot throw (#commitNow).
     try {
-      publishBatch(
+      const published = publishBatch(
         {
           seq: batch.seq,
           before: batch.before,
@@ -2419,8 +2440,9 @@ export class RoomActor {
         (key) => this.#clients.get(key),
         (conn, delivered) => this.#sendHistory(conn, delivered),
       );
-      // A batch that re-projects everything can take away what a held drag or live ruler showed (docs/design/design-v1-per-player-vision.md 7.2).
-      if (batch.global) rejudgePreviews(batch.state, this.#connections);
+      // A batch that re-projects everything can take away what a held drag or live ruler showed (docs/design/design-v1-per-player-vision.md 7.2),
+      // and so can one that changed the floors a socket holds (docs/design/design-v1-floors.md 8.1).
+      if (batch.global || published.heldChanged) rejudgePreviews(batch.state, this.#connections);
       for (const conn of this.#connections) this.#previewStands(conn, batch.state);
     } catch (err) {
       // The batch is stored, but which sockets it reached is unknown: each one takes the committed room afresh as it reconnects.
@@ -3001,6 +3023,38 @@ function wallsMoved(before: RoomState, after: RoomState): string[] {
     if (!was || was.wallsVersion !== scene.wallsVersion) out.push(id);
   }
   return out;
+}
+
+/**
+ * The floors whose invariants an op may have broken (floorProblem): each
+ * scene record and opened mark it wrote, gone ones included, and each scene
+ * whose limits it pushed. floorProblem checks a floor's whole scene, so one
+ * floor of each stands for the rest.
+ */
+function floorsWritten(touched: readonly EntityKey[], sceneIds: readonly string[]): string[] {
+  const out = new Set(sceneIds);
+  for (const key of touched) {
+    const parsed = parseKey(key);
+    if (parsed?.kind === "scene" || parsed?.kind === "opened") out.add(parsed.id);
+  }
+  return [...out];
+}
+
+/**
+ * The refusal of an add that would take a scene past its budget, in the
+ * words of the floors the scene holds (docs/design/design-v1-floors.md 9):
+ * every floor counts toward the one scene's budget, its exploring room
+ * among them.
+ */
+export function floorFullWords(scene: string): string {
+  return `${scene} is too full for another floor. Delete unused floors or clear some of the build.`;
+}
+
+/** A size refusal as the DM reads it: an add of a floor that the scene's own budget refused (`scene`, SizeGuard.refusedScene) says so, and any other stays. */
+function withFloorWords(op: Op, before: RoomState, refused: Extract<LimitCheck, { ok: false }>, scene: string | null): Extract<LimitCheck, { ok: false }> {
+  if (op.t !== "scene.create" || op.floor === undefined || scene === null || scene !== mainFloorId(before, op.floor.beside)) return refused;
+  const beside = before.scenes[op.floor.beside];
+  return beside ? { ...refused, message: floorFullWords(beside.name) } : refused;
 }
 
 /** The scenes whose per-scene limits an op can push, for checkLimits (design 10.5). */

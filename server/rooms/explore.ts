@@ -1,8 +1,9 @@
 import { holderTileKey, tileKey } from "#shared/keys.ts";
-import { exploringSceneId, LIMITS } from "#shared/limits.ts";
+import { LIMITS } from "#shared/limits.ts";
 import type { FogTile, RoomState, Scene, SightTile, Token } from "#shared/model.ts";
 import { perPlayerScene, sightHolders } from "#shared/project.ts";
 import type { OpOf } from "#shared/protocol.ts";
+import { floorsOf, playersSee, startFloor } from "#shared/rules/floors.ts";
 import { visionRules } from "#shared/ruleHooks.ts";
 import { decodeTile, encodeTile } from "#shared/rules/fog.ts";
 import { seenFogBits, visionReport, type VisionWorld } from "#shared/rules/vision.ts";
@@ -11,11 +12,13 @@ import { sceneWalls } from "#shared/rules/walls.ts";
 /**
  * The explore step (docs/design/design-v1-maps-vision.md 4.3.3): after a batch,
  * what the party sees on the player scene that its explored layer lacks,
- * as the one `sys.explore` the actor appends to the batch. Only the player
- * scene explores, only while its vision and fog are on, and nothing is
- * explored behind a blackout, since players are shown nothing then. The
- * DM's own fog is not read: ground the DM revealed is recorded as explored
- * once the party sees it, so undoing the reveal leaves it to players.
+ * as one `sys.explore` the actor appends to the batch for each floor that
+ * explores (floorsExplored). Only the player scene explores, on each of
+ * its floors players have reached (docs/design/design-v1-floors.md 7.5), only
+ * while that floor's vision and fog are on, and nothing is explored behind
+ * a blackout, since players are shown nothing then. The DM's own fog is not
+ * read: ground the DM revealed is recorded as explored once the party sees
+ * it, so undoing the reveal leaves it to players.
  *
  * Each tile carries its new bits, the explored tile joined with what the
  * party sees there, so the stored op says what the layer became. Tiles go
@@ -27,15 +30,31 @@ import { sceneWalls } from "#shared/rules/walls.ts";
  * and each holder's own sight, less what the party's layer and their own
  * hold, into theirs (perPlayerExplore).
  */
-export function exploreOp(state: RoomState): OpOf<"sys.explore"> | null {
-  if (state.meta.view?.blackout === true) return null;
-  const playerScene = state.meta.playerSceneId === null ? undefined : state.scenes[state.meta.playerSceneId];
-  if (playerScene && perPlayerScene(playerScene)) return perPlayerExplore(state, playerScene);
-  const sceneId = exploringSceneId(state);
-  if (sceneId === null) return null;
+export function exploreOp(state: RoomState, sceneId: string | null = startFloor(state)): OpOf<"sys.explore"> | null {
+  if (sceneId === null || !playersSee(state, sceneId)) return null;
+  const scene = state.scenes[sceneId];
+  if (!scene) return null;
+  if (perPlayerScene(scene)) return perPlayerExplore(state, scene);
+  if (scene.vision?.on !== true || !scene.fogEnabled) return null;
   const tiles = partyTiles(state, sceneId, visionRules.partySight(state, sceneId).tiles);
   if (tiles.length === 0) return null;
   return { t: "sys.explore", sceneId, tiles };
+}
+
+/**
+ * The floors the explore step reads, bottom first: every floor of the
+ * players' scene players see now (playersSee), the start floor alone on a
+ * scene without floors, and none behind a blackout. A floor whose vision or
+ * fog is off explores nothing (exploreOp). The actor reads each one's op
+ * off the state the last one left, so each floor's op is what it would be
+ * on its own.
+ */
+export function floorsExplored(state: RoomState): string[] {
+  const start = startFloor(state);
+  if (start === null) return [];
+  return floorsOf(state, start)
+    .filter((floor) => playersSee(state, floor.id))
+    .map((floor) => floor.id);
 }
 
 type ExploredTiles = { tx: number; ty: number; bits: string }[];
