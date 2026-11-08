@@ -1,21 +1,23 @@
 # Self-hosting
 
-How to run RaccoonVTT on your own server, keep it up to date and back it
-up. The simplest way runs the image each release publishes, as
-[Self-hosting with the published image](#self-hosting-with-the-published-image)
-describes. [Deploying](#deploying) builds the image on the server from a
-copy of the repository instead, and the published image's steps refer back
-to it for the parts the two share. Running the site day to day, its admin
-commands, admin page and logs, is in [operations.md](operations.md).
+There are two ways to run RaccoonVTT on your own server, and the first is
+simpler:
+
+- [Self-hosting with the published image](#self-hosting-with-the-published-image)
+  runs the image each release publishes.
+- [Deploying](#deploying) builds the image on the server from a copy of the
+  repository. The published image's steps refer back to it for the parts
+  the two share.
+
+[Updating](#updating) and [Backups](#backups) cover both. Running the site
+day to day, its admin commands, admin page and logs, is in
+[operations.md](operations.md).
 
 ## Deploying
 
-This section builds the image on the server from a copy of the repository.
-To run the image each release publishes instead, with no copy and no build,
-see [Self-hosting with the published image](#self-hosting-with-the-published-image).
-
-The production stack is `docker-compose.server.yml`. It runs four
-containers, and none of them publishes a port:
+The production stack, `docker-compose.server.yml`, builds the image on the
+server from a copy of the repository. It runs four containers, and none of
+them publishes a port:
 
 - `raccoon`, the app. Read-only root filesystem, no capabilities, runs as the
   `node` user (uid 1000). It can write only to `/data/assets` (the
@@ -155,7 +157,7 @@ without ...` or `Invalid environment`.
 The `egress` container is the only one with a real gateway, so it could
 address the host itself. squid refuses private addresses already, and these
 two rules back that up in case squid is compromised or a DNS answer changes
-between squid's check and its connect (design section 15.3).
+between squid's check and its connect.
 
 ```bash
 sudo iptables -I INPUT 1 -i br-rvtt-egress -j DROP
@@ -265,8 +267,7 @@ app.
 
 ### 6. If you use Cloudflare
 
-These zone settings keep Cloudflare from breaking the app (design section
-15.6):
+These zone settings keep Cloudflare from breaking the app:
 
 - Network: WebSockets on.
 - SSL/TLS, Edge Certificates: Always Use HTTPS on.
@@ -314,16 +315,16 @@ joins without typing anything. Replace `ABCD-EFGH` with the printed room ID.
 ## Self-hosting with the published image
 
 Each release is also an image on Docker Hub,
-`docker.io/jwhitlow45/raccoon-vtt`, for linux/amd64 and linux/arm64. With
-it a server needs no copy of this repository and builds nothing: two files
-are the whole setup. `selfhost/compose.yml` is the stack of
+`docker.io/jwhitlow45/raccoon-vtt`, for linux/amd64 and linux/arm64, so a
+server needs only two files from the release, `compose.yml` and `.env`.
+`selfhost/compose.yml` is the stack of
 [Deploying](#deploying) with the published image in place of the build, so
 what that section says about the containers, the networks and the egress
 proxy holds here too. It adds two things:
 
 - `config-files`, which copies the egress proxy's rules, the backup script
   and Caddy's settings onto a volume, then exits. All three are written
-  into `compose.yml` itself, so there is nothing else to download.
+  into `compose.yml` itself.
 - An optional `https` profile that runs Caddy as the HTTPS front end.
 
 Its project, network and volume names are the same as
