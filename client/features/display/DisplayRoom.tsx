@@ -836,7 +836,7 @@ function TopPills(props: { children: ReactNode }) {
 function DatePill() {
   const text = useRoomView((s) => {
     const clock = s.view?.clock;
-    return clock ? chipName(clockNow(clock, s.view?.encounter), clock.calendar).replace(/^Time: /, "") : null;
+    return clock ? chipName(clockNow(clock, s.view?.encounter), clock).replace(/^Time: /, "") : null;
   });
   return text ? <Pill text={text} label={`Time: ${text}`} /> : null;
 }

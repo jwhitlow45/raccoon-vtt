@@ -22,7 +22,7 @@ export function ClockChip(props: { onOpen(): void }) {
   const encounter = useRoomView((s) => s.view?.encounter);
   if (!clock) return null;
   const now = clockNow(clock, encounter);
-  const name = chipName(now, clock.calendar);
+  const name = chipName(now, clock);
   return (
     <button
       type="button"

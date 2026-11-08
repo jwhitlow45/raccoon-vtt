@@ -21,9 +21,9 @@ export function stepName(label: string): string {
   return `Move the clock on ${label}`;
 }
 
-/** To dawn: the seconds to the next 6:00 AM, and the button's name. */
-export function toDawn(now: number): { by: number; name: string } {
-  const dawn = nextDawn(now);
+/** To dawn: the seconds to the next dawn of the clock, and the button's name. */
+export function toDawn(now: number, clock: Pick<RoomClock, "daylight">): { by: number; name: string } {
+  const dawn = nextDawn(now, clock.daylight);
   return { by: dawn - now, name: `Move the clock on to dawn, ${timeText(dawn)}` };
 }
 
@@ -55,8 +55,8 @@ export function chipText(t: number, calendar: Calendar): string {
 }
 
 /** The chip's name and tooltip, and the panel's date block read aloud. */
-export function chipName(t: number, calendar: Calendar): string {
-  return `Time: ${dateText(t, calendar, "short")}, ${timeText(t)}, ${partOfDay(t)}`;
+export function chipName(t: number, clock: Pick<RoomClock, "calendar" | "daylight">): string {
+  return `Time: ${dateText(t, clock.calendar, "short")}, ${timeText(t)}, ${partOfDay(t, clock.daylight)}`;
 }
 
 /**

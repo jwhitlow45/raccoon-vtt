@@ -25,9 +25,9 @@ describe("the steps' names", () => {
   });
 
   test("To dawn is the next 6:00 AM, the next day's at exactly 6:00 AM", () => {
-    assert.deepEqual(toDawn(22 * H), { by: 8 * H, name: "Move the clock on to dawn, 6:00 AM" });
-    assert.equal(toDawn(6 * H).by, DAY);
-    assert.equal(toDawn(5 * H + 59 * 60).by, 60);
+    assert.deepEqual(toDawn(22 * H, {}), { by: 8 * H, name: "Move the clock on to dawn, 6:00 AM" });
+    assert.equal(toDawn(6 * H, {}).by, DAY);
+    assert.equal(toDawn(5 * H + 59 * 60, {}).by, 60);
   });
 });
 
@@ -36,6 +36,13 @@ describe("dawn and dusk in the panel", () => {
     assert.equal(timeLine(5 * H + 30 * 60, {}), "5:30 AM, Night");
     assert.equal(timeLine(5 * H + 30 * 60, { daylight: { dawn: 5 * H + 30 * 60, dusk: 18 * H } }), "5:30 AM, Dawn");
     assert.equal(timeLine(18 * H, { daylight: { dawn: 6 * H, dusk: 20 * H } }), "6:00 PM, Afternoon");
+  });
+
+  test("To dawn and the chip's name follow the clock's own dawn and dusk", () => {
+    const daylight = { dawn: 5 * H + 30 * 60, dusk: 18 * H };
+    assert.deepEqual(toDawn(22 * H, { daylight }), { by: 7 * H + 30 * 60, name: "Move the clock on to dawn, 5:30 AM" });
+    assert.equal(chipName(5 * H + 40 * 60, { calendar: DAYS, daylight }), "Time: Day 1, 5:40 AM, Dawn");
+    assert.equal(chipName(5 * H + 40 * 60, { calendar: DAYS }), "Time: Day 1, 5:40 AM, Night");
   });
 
   test("the row reads 6:00 AM and 6:00 PM until the DM sets others, and the fields start from them", () => {
@@ -81,7 +88,7 @@ describe("Other amount", () => {
 describe("the chip and the summary", () => {
   test("Day count and Months read short in the chip, with the part of the day in its name", () => {
     assert.equal(chipText(3 * DAY + 6 * H, DAYS), "Day 4, 6:00 AM");
-    assert.equal(chipName(3 * DAY + 6 * H, DAYS), "Time: Day 4, 6:00 AM, Dawn");
+    assert.equal(chipName(3 * DAY + 6 * H, { calendar: DAYS }), "Time: Day 4, 6:00 AM, Dawn");
     assert.equal(chipText(2 * DAY + 6 * H, MONTHS), "Deepwinter 3, 6:00 AM");
   });
 

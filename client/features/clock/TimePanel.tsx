@@ -112,7 +112,7 @@ function RunningClock(props: { clock: RoomClock; now: number; fight: boolean }) 
     <>
       {props.fight ? <Help>{FIGHT_NOTE}</Help> : null}
       {clock.shown ? null : <Help>{HIDDEN_NOTE}</Help>}
-      <StepButtons now={props.now} />
+      <StepButtons now={props.now} clock={clock} />
       <div style={{ display: "flex" }}>
         <Button ref={setButton} search="time.set" onClick={() => setDialog("set")}>
           Set the date and time…

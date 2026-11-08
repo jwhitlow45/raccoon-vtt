@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import type { RoomClock } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { ErrorText, Input, Select } from "../../components/Field.tsx";
 import { SectionLabel } from "../../components/Panel.tsx";
@@ -20,7 +21,7 @@ import { AMOUNT_UNITS, amountBy, stepName, STEPS, toDawn, type AmountUnit } from
  * however wide), with Other amount… across its own row. Move on keeps the
  * default size too.
  */
-export function StepButtons(props: { now: number }) {
+export function StepButtons(props: { now: number; clock: Pick<RoomClock, "daylight"> }) {
   const actions = useRoomActions();
   const nameId = useId();
   const [other, setOther] = useState(false);
@@ -46,7 +47,7 @@ export function StepButtons(props: { now: number }) {
         Move the clock on
       </SectionLabel>
       <div role="group" aria-labelledby={nameId} style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(max(176px, calc(50% - ${theme.space(1)}px)), 1fr))`, gap: theme.space(2) }}>
-        <ClockSteps now={props.now} />
+        <ClockSteps now={props.now} clock={props.clock} />
         <Button expanded={other} onClick={() => setOther(!other)} style={{ gridColumn: "1 / -1" }}>
           Other amount…
         </Button>
@@ -98,9 +99,9 @@ export function StepButtons(props: { now: number }) {
  * with Other amount… after them, and the DM's clock chip two by two in its
  * popover (docs/design/design-v1-qol.md 4, C5), so both send the same steps.
  */
-export function ClockSteps(props: { now: number }) {
+export function ClockSteps(props: { now: number; clock: Pick<RoomClock, "daylight"> }) {
   const actions = useRoomActions();
-  const dawn = toDawn(props.now);
+  const dawn = toDawn(props.now, props.clock);
   const step = (by: number) => actions.dispatch(withClaim({ t: "clock.advance", by }, () => actions.newId()));
   return (
     <>

@@ -308,8 +308,8 @@ function HandoutDialog(props: { opener: RefObject<HTMLElement | null>; onClose()
 }
 
 /** The DM clock's date line, "Day 4, 8:00 PM, Night": the chip's name less its "Time: ", which the popover's title says. */
-function dateLine(t: number, calendar: Parameters<typeof chipName>[1]): string {
-  return chipName(t, calendar).replace(/^Time: /, "");
+function dateLine(t: number, clock: Parameters<typeof chipName>[1]): string {
+  return chipName(t, clock).replace(/^Time: /, "");
 }
 
 /**
@@ -324,9 +324,9 @@ export function TimeSteps(props: { onOpenTime(): void }) {
   const now = clockNow(clock, encounter);
   return (
     <div data-chip-time="" style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
-      <div style={{ fontSize: theme.font.body14, fontWeight: theme.weight.strong }}>{dateLine(now, clock.calendar)}</div>
+      <div style={{ fontSize: theme.font.body14, fontWeight: theme.weight.strong }}>{dateLine(now, clock)}</div>
       <div role="group" aria-label="Move the clock on" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(120px, 1fr))", gap: theme.space(2) }}>
-        <ClockSteps now={now} />
+        <ClockSteps now={now} clock={clock} />
       </div>
       <Button variant="quiet" onClick={props.onOpenTime} style={{ justifySelf: "start" }}>
         {CHIP_WORDS.openTime}
@@ -357,7 +357,7 @@ export function DmClockChip(props: { onOpenTime(): void; onOpen?(open: boolean):
   const now = clockNow(clock, encounter);
   return (
     <>
-      <ChipButton anchor={pop.anchorProps} label={chipName(now, clock.calendar)} outline={theme.color.border} data={{ "data-chip": "clock" }}>
+      <ChipButton anchor={pop.anchorProps} label={chipName(now, clock)} outline={theme.color.border} data={{ "data-chip": "clock" }}>
         {chipText(now, clock.calendar)}
       </ChipButton>
       <Popover handle={pop} side="below" flip bound={viewportBound} title={CHIP_WORDS.timeTitle}>
@@ -558,7 +558,7 @@ export function useDmMenuView(timeGaveWay: boolean, nowPlayingGaveWay: boolean, 
     members: members ?? {},
     recent,
     images,
-    time: timeGaveWay && clock && now !== null ? { text: chipText(now, clock.calendar), name: chipName(now, clock.calendar) } : null,
+    time: timeGaveWay && clock && now !== null ? { text: chipText(now, clock.calendar), name: chipName(now, clock) } : null,
     nowPlaying: nowPlayingGaveWay,
     movingTo,
     revealing,
