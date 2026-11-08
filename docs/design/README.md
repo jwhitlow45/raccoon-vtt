@@ -213,3 +213,7 @@ and for how to use it, the [DM guide](../dm-guide.md).
   window, a dialog with Library beside Now playing and a queue the DM
   edits under Up next, and a playlist maker that pops up, with the Sound
   group keeping a compact Now playing.
+- [design-v1-sound-dm-only.md](design-v1-sound-dm-only.md): Only DM
+  devices play, a switch in Table sound for a table that hears the sound
+  from one speaker, and a next track that a change of crossfade keeps
+  shared only within its 20 second window.
