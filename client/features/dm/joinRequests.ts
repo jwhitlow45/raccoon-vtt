@@ -142,6 +142,13 @@ export function ownAnswerOver<L>(own: OwnAnswer<L>, latest: L, deciding: boolean
   return false;
 }
 
+/**
+ * How long the tapping device keeps its own words for a refused let-in. It
+ * matches how long the server keeps the same words on the list (REFUSAL_SHOWN_MS),
+ * so this device does not show them for good while every other DM device drops them.
+ */
+export const OWN_ERROR_SHOWN_MS = 60_000;
+
 export function rowBusyText(busy: RowBusy, name: string): string {
   if (busy === "letting") return "Letting in…";
   if (busy === "turning") return "Turning away…";

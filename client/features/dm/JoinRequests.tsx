@@ -17,6 +17,7 @@ import { usePreview } from "./previewContext.ts";
 import { viewAsSlot } from "./viewAs.tsx";
 import {
   answerErrorText,
+  OWN_ERROR_SHOWN_MS,
   askedText,
   carryOnNote,
   carryOnPlayers,
@@ -371,6 +372,12 @@ function RequestRow(props: {
   useEffect(() => {
     if (own && ownAnswerOver(own, props.listed, request.deciding === true)) setOwn(null);
   }, [own, props.listed, request.deciding]);
+
+  useEffect(() => {
+    if (error === null) return;
+    const timer = setTimeout(() => setError(null), OWN_ERROR_SHOWN_MS);
+    return () => clearTimeout(timer);
+  }, [error]);
 
   const run = async (kind: "letting" | "turning") => {
     if (busyRef.current) return;

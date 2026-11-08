@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { REFUSAL_SHOWN_MS } from "../../../server/auth/joinRequests.ts";
 import { FakeClock } from "../../state/testing.ts";
 import {
   answerErrorText,
+  OWN_ERROR_SHOWN_MS,
   askedText,
   carryOnNote,
   carryOnPlayers,
@@ -392,4 +394,8 @@ describe("the list's fetches", () => {
     assert.equal(t.clock.pendingTimers, 0);
     assert.equal(t.loader.state.kind, "loading");
   });
+});
+
+test("the tapping device keeps its own refusal words as long as the list does", () => {
+  assert.equal(OWN_ERROR_SHOWN_MS, REFUSAL_SHOWN_MS);
 });
