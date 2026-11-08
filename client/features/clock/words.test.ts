@@ -100,6 +100,9 @@ describe("the date fields", () => {
     assert.equal(remapMonth(may, cal("May", "May", "June"), cal("May", "June")).month, "", "a name the old calendar held twice");
     assert.equal(remapMonth(may, spring, { ...spring, era: "AF" }), may, "the months unchanged");
     assert.equal(remapMonth(may, spring, DAYS), may, "a kind change is not its to follow");
+    const doubled = cal("May", "May", "June");
+    const sameDoubled = { day: "6", month: "0", year: "1204", time: "08:00" };
+    assert.equal(remapMonth(sameDoubled, doubled, { ...doubled, era: "AF" }), sameDoubled, "doubled names, only the era changed (CALB-O-14)");
   });
 
   test("Day count refuses a day under 1 (CALB-O-06)", () => {

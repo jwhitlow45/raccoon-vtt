@@ -203,6 +203,8 @@ export function reconcileDate(draft: DateDraft, calendar: Calendar): DateDraft {
  */
 export function remapMonth(draft: DateDraft, before: Calendar, after: Calendar): DateDraft {
   if (before.kind !== "months" || after.kind !== "months" || draft.month === "") return draft;
+  // Same names in the same order: every index still means its month, even where a name repeats and the name alone cannot tell.
+  if (before.months.length === after.months.length && before.months.every((m, i) => m.name === after.months[i]?.name)) return draft;
   const name = before.months[whole(draft.month)]?.name;
   const once = (months: readonly { name: string }[]) => months.flatMap((m, i) => (m.name === name ? [i] : []));
   const was = name === undefined ? [] : once(before.months);
