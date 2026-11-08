@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { HEVC_ENTRIES, isHevc, readVideoSampleEntry, SCAN_BYTES, scanRanges, videoSampleEntry } from "./hevcScan.ts";
+import { HEVC_ENTRIES, SCAN_BYTES, scanRanges, videoSampleEntry } from "#shared/video/hevcScan.ts";
+import { isHevc, readVideoSampleEntry } from "./hevcScan.ts";
 import { box, concat, ftypOf, full, moovOf, movie, sampleEntry, stsdOf, text, trak, word, zeros, type Bytes } from "./mp4Boxes.testutil.ts";
 
 const MiB = 1024 * 1024;

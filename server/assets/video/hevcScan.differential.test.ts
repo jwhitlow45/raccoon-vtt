@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import fc from "fast-check";
 import { runSettings } from "#shared/propertyTestutil.ts";
-import { HEVC_ENTRIES, scanRanges, videoSampleEntry } from "../../../client/features/animmap/hevcScan.ts";
+import { HEVC_ENTRIES, scanRanges, videoSampleEntry } from "#shared/video/hevcScan.ts";
 import { AssetError } from "../errors.ts";
 import { checkVideoBytes } from "./check.ts";
 import { avcCBytes, bx, defaultSoundTrack, defaultVideoTrack, iphoneMov, metadataTrack, mp4File, visualEntry, type Mp4Track } from "./videoTestutil.ts";
 
 /**
- * The device's HEVC scan (client/features/animmap/hevcScan.ts, AMROT-O-06)
+ * The device's HEVC scan (shared/video/hevcScan.ts, AMROT-O-06)
  * against the server's check on the same bytes, built by the server's own
  * test writer and then damaged at random. The scan refuses a file before it
  * uploads, so it must never call HEVC a file the server would take, and an
