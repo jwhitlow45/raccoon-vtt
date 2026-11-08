@@ -41,6 +41,7 @@ import { openAsk } from "../features/rolls/open.ts";
 import { EffectIcon } from "../features/tokens/EffectIcon.tsx";
 import { DefenseLines, MoreStats, SavesLine, useLinkedBlock, VitalsLine } from "../features/tokens/StatSummary.tsx";
 import { openStatBlock } from "../features/tokens/statBlockOpen.ts";
+import { MOVE_TO_FLOOR, MOVE_TO_FLOOR_SHORT, MoveToFloorList, useOffersMoveToFloor } from "../features/tokens/MoveToFloor.tsx";
 import { shortSplit, vitals } from "../features/tokens/statSummary.ts";
 import { opensStatBlock, statBlockShown, tokenStatBlock } from "../features/monsters/statBlockLink.ts";
 import { visionOn } from "../features/vision/sightMode.ts";
@@ -184,7 +185,7 @@ function ButtonRow(props: { row: "passing" | "play" | "less"; children: ReactNod
   );
 }
 
-type Drawer = "conditions" | "uses" | null;
+type Drawer = "conditions" | "uses" | "floor" | null;
 
 /**
  * Where focus goes once Revive leaves the bar: its frame, which announces
@@ -321,6 +322,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
   };
 
   const duplicate = useDuplicate(token, DUPLICATE_FOCUS_IN_BAR);
+  const offersFloors = useOffersMoveToFloor(useMemo(() => [token], [token]));
 
   const path = pathNow(encounter, token, you?.role ?? "player");
   const undoIds = barTokenIds(tokens, token);
@@ -345,6 +347,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
     placeFreely: props.drags && scene !== undefined && !isHex(sceneGrid(scene)),
     snapToGrid: token.nudge !== undefined && (access.dm || (access.owner && !token.locked)),
     allOfKind: kin.length > 1,
+    floors: access.dm && offersFloors,
     // On an upright phone only, where the strip's End turn is out of the thumb's reach (docs/design/design-v1-qol.md 3, Q6). Kept while it waits, so a press shows busy to its answer.
     endTurn: rest !== null && (yourTurn || endTurn.waiting),
   };
@@ -443,6 +446,13 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
         return (
           <BarButton key={id} icon="locked" iconOnly shortcut="lock" pressed={token.locked} onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { locked: !token.locked } })}>
             Locked
+          </BarButton>
+        );
+      // Where the last row is short its words give way to "Floor…" (docs/design/design-v1-floors.md 7.4).
+      case "moveToFloor":
+        return (
+          <BarButton key={id} pressed={drawer === "floor"} onClick={() => setDrawer((d) => (d === "floor" ? null : "floor"))}>
+            {short ? MOVE_TO_FLOOR_SHORT : MOVE_TO_FLOOR}
           </BarButton>
         );
       case "duplicate":
@@ -638,6 +648,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
           {rows.less.length > 0 ? (
             <ButtonRow row="less">{rows.less.map(button)}</ButtonRow>
           ) : null}
+          {drawer === "floor" ? <MoveToFloorList tokens={[token]} onMoved={() => setDrawer(null)} /> : null}
         </>
       )}
     </>

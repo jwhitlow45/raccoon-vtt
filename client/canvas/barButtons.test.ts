@@ -59,6 +59,13 @@ describe("the bar's rows", () => {
     });
   });
 
+  test("the DM on a scene with floors gets Move to floor first in the last row, and nobody else does (docs/design/design-v1-floors.md 7.4)", () => {
+    assert.deepEqual(barButtons({ ...DM, floors: true }).less, ["moveToFloor", "locked", "duplicate", "delete"]);
+    assert.deepEqual(barButtons({ ...DM, floors: false }).less, ["locked", "duplicate", "delete"]);
+    assert.deepEqual(barButtons({ ...OWNER, floors: true }).less, [], "an owner who is no DM never moves a creature between floors");
+    assert.deepEqual(barButtons({ ...OWNER, companion: true, floors: true }).less, ["dismiss"]);
+  });
+
   test("the DM on a creature a player plays, such as a companion: Roll after Multi-select in Request a roll's place, and Delete, never Dismiss", () => {
     const rows = barButtons({ ...DM, companion: true, light: true });
     assert.deepEqual(rows.play, ["conditions", "hidden", "multiSelect", "roll", "light"]);

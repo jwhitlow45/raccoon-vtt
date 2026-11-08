@@ -24,6 +24,7 @@ export type BarButtonId =
   | "uses"
   | "locked"
   | "duplicate"
+  | "moveToFloor"
   | "delete"
   | "dismiss"
   | "endTurn";
@@ -62,6 +63,8 @@ export type BarButtonInput = {
   snapToGrid?: boolean;
   /** More than one living token of this one's kind stands on its scene (state/selection.ts sameKind), for the DM's "All 4 Goblin Warriors". Left out, no. */
   allOfKind?: boolean;
+  /** The DM's token stands on a scene with more than one floor, so Move to floor has somewhere to go (docs/design/design-v1-floors.md 7.4). Left out, no. */
+  floors?: boolean;
   /** An upright phone's bar, on the viewer's own turn or while their End turn waits, for a player's own token (docs/design/design-v1-qol.md 3, Q6). Left out, no. */
   endTurn?: boolean;
 };
@@ -108,7 +111,7 @@ export function barButtons(input: BarButtonInput): { passing: BarButtonId[]; pla
   // At the right end, where the thumb just acted, and after everything else, since it comes and goes with the turn (docs/design/design-v1-qol.md 3, Q6).
   if (!dm && owner && input.endTurn) play.push("endTurn");
   const less: BarButtonId[] = [];
-  if (dm) less.push("locked", "duplicate", "delete");
+  if (dm) less.push(...(input.floors ? (["moveToFloor"] as const) : []), "locked", "duplicate", "delete");
   // The DM keeps Delete and gets no second button.
   else if (owner && input.companion) less.push("dismiss");
   return { passing, play, less };

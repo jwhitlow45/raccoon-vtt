@@ -9,6 +9,7 @@ import { dispatchGesture } from "../../state/actions.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { ImageField } from "../images/ImageField.tsx";
+import { MoveToFloorList, useOffersMoveToFloor } from "./MoveToFloor.tsx";
 import { ownerOps, ownersLit, shared, sharedImage, updateManyOps, type Lit } from "./groupEdit.ts";
 import { resizeGroup } from "./resize.ts";
 import { growthsSlot } from "./resizeMemory.ts";
@@ -69,6 +70,7 @@ export function GroupMoreSheet(props: { tokens: readonly Token[]; onClose(): voi
     memory.setState(group.growths);
   };
 
+  const offersFloors = useOffersMoveToFloor(tokens);
   const disposition = shared(tokens, (t) => t.disposition);
   const hpVisibility = shared(tokens, (t) => t.hpVisibility);
   const size = shared(tokens, (t) => t.size);
@@ -154,6 +156,12 @@ export function GroupMoreSheet(props: { tokens: readonly Token[]; onClose(): voi
           </>
         )}
       </Section>
+      {offersFloors ? (
+        <Section title="Floor">
+          <Note>Moves all {tokens.length} to the same squares on the floor you pick, with what they carry. Undo puts them back.</Note>
+          <MoveToFloorList tokens={tokens} onMoved={props.onClose} />
+        </Section>
+      ) : null}
     </SheetDialog>
   );
 }
