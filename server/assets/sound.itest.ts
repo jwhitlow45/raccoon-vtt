@@ -14,7 +14,7 @@ import { formatDisplayCode } from "../auth/displaySessions.ts";
 import type { ExportManifest } from "../rooms/exportRoom.ts";
 import type { Logger } from "../rooms/actor.ts";
 import { importRoom } from "../rooms/importRoom.ts";
-import { startEngine, type Engine, type TestClient } from "../rooms/testing.ts";
+import { startEngine, tmpLeftovers, type Engine, type TestClient } from "../rooms/testing.ts";
 import { sweepOrphanFiles, sweepUnnamed } from "./cleanup.ts";
 import { SOUND_PIPELINE } from "./kinds.ts";
 import { roomStoredBytes } from "./quota.ts";
@@ -126,7 +126,7 @@ describe("sound files with the switch on", () => {
     // The same bytes again reuse the row, so two sounds may name one file.
     const again = await uploaded(dm, roomId, bytes);
     assert.deepEqual({ id: again.id, created: again.created }, { id: first.id, created: false });
-    assert.deepEqual(await readdir(join(t.assetDir, "tmp")), []);
+    assert.deepEqual(await tmpLeftovers(join(t.assetDir, "tmp")), []);
     // No library lists a sound: the room's sounds name them.
     const library = await dm.get(`/api/rooms/${roomId}/assets`);
     assert.deepEqual(library.json<{ assets: unknown[] }>().assets, []);
@@ -201,7 +201,7 @@ describe("sound files with the switch on", () => {
       assert.deepEqual(res.json(), { error: code });
     }
     assert.equal((await t.pool.query("select 1 from assets where room_id = $1", [roomId])).rowCount, 0);
-    assert.deepEqual(await readdir(join(t.assetDir, "tmp")), []);
+    assert.deepEqual(await tmpLeftovers(join(t.assetDir, "tmp")), []);
     // Over the size cap by its Content-Length: refused before the body.
     const huge = await dm.request("PUT", `/api/rooms/${roomId}/assets?kind=sound`, undefined, { "content-type": "audio/mpeg", "content-length": String(SOUND_LIMITS.fileBytes + 1) }, Buffer.alloc(16));
     assert.equal(huge.statusCode, 413);
@@ -511,7 +511,7 @@ describe("the sound check off the main thread (D-261102-539)", () => {
       assert.deepEqual(res.json(), { error: "busy" });
       assert.ok(performance.now() - started >= 1_400);
       assert.equal((await t.pool.query("select 1 from assets where room_id = $1 and kind = 'sound'", [roomId])).rowCount, 0);
-      assert.deepEqual(await readdir(join(t.assetDir, "tmp")), []);
+      assert.deepEqual(await tmpLeftovers(join(t.assetDir, "tmp")), []);
     } finally {
       await t.close();
     }

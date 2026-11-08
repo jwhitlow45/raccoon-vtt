@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from "fastify";
@@ -462,4 +462,18 @@ export function failCommits(pool: pg.Pool, modes: Array<"before" | "committed" |
       (pool as { connect: unknown }).connect = original;
     },
   };
+}
+
+/**
+ * What an upload left in the asset folder's tmp dir, once the server is done with it. The server removes its intake file in the
+ * handler's finally, which can run after the reply reached the client, so a test that reads the folder at once could see the file
+ * of the upload it just finished. Waits up to `waitMs` for the folder to empty and answers what is left.
+ */
+export async function tmpLeftovers(dir: string, waitMs = 5_000): Promise<string[]> {
+  const until = Date.now() + waitMs;
+  for (;;) {
+    const left = await readdir(dir);
+    if (left.length === 0 || Date.now() >= until) return left;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
 }

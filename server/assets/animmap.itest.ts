@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -12,7 +12,7 @@ import type { ProjectedState } from "#shared/project.ts";
 import { formatDisplayCode } from "../auth/displaySessions.ts";
 import type { ExportManifest, ManifestAsset } from "../rooms/exportRoom.ts";
 import { importRoom } from "../rooms/importRoom.ts";
-import { startEngine, type Engine, type Socket, type TestClient } from "../rooms/testing.ts";
+import { startEngine, tmpLeftovers, type Engine, type Socket, type TestClient } from "../rooms/testing.ts";
 import { VIDEO_PIPELINE } from "./kinds.ts";
 import { sweepOrphanFiles } from "./cleanup.ts";
 import { roomStoredBytes } from "./quota.ts";
@@ -150,7 +150,7 @@ describe("animated maps with the switch on", () => {
     const again = await uploaded(dm, roomId, bytes);
     assert.equal(again.id, first.id);
     assert.equal(again.created, false);
-    assert.deepEqual(await readdir(join(t.assetDir, "tmp")), []);
+    assert.deepEqual(await tmpLeftovers(join(t.assetDir, "tmp")), []);
   });
 
   test("an MP4 the same way, served as video/mp4 with the image headers, a strong ETag and no identifying text", async () => {
@@ -230,7 +230,7 @@ describe("animated maps with the switch on", () => {
       assert.deepEqual(res.json(), { error: code });
     }
     assert.equal((await t.pool.query("select 1 from assets where room_id = $1", [roomId])).rowCount, 0);
-    assert.deepEqual(await readdir(join(t.assetDir, "tmp")), []);
+    assert.deepEqual(await tmpLeftovers(join(t.assetDir, "tmp")), []);
   });
 
   test("ranges: one range is 206, past the end 416, several ranges the whole file, and If-Range by the ETag", async () => {

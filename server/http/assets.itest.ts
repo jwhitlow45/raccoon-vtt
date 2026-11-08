@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { access, readdir } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { after, before, describe, test } from "node:test";
@@ -11,7 +11,7 @@ import { PIPELINE } from "../assets/kinds.ts";
 import { deleteUnreferencedFiles, roomFileKeys, variantPath } from "../assets/store.ts";
 import { FakeAuth, buildAssetApp, dropRooms, makeRoom, testConfig, testPool } from "../assets/testApp.ts";
 import { SVG, checkerboardPng, solid, tempDir } from "../assets/testImages.ts";
-import { startEngine, type Engine, type TestClient } from "../rooms/testing.ts";
+import { startEngine, tmpLeftovers, type Engine, type TestClient } from "../rooms/testing.ts";
 import { uuidv7 } from "#shared/ids.ts";
 
 let pool: pg.Pool;
@@ -96,7 +96,7 @@ describe("upload", () => {
       assert.ok(await exists(path), path);
     }
     // Nothing is left in the temp folder.
-    assert.deepEqual(await readdir(join(dir, "tmp")), []);
+    assert.deepEqual(await tmpLeftovers(join(dir, "tmp")), []);
   });
 
   test("identical bytes from a second member reuse the row with an identical answer", async () => {
@@ -214,7 +214,7 @@ describe("upload", () => {
     assert.deepEqual(res.json(), { error: "unsupported_type" });
     const { rows } = await pool.query(`select count(*)::int as n from assets where room_id = $1`, [roomId]);
     assert.equal(rows[0].n, 0);
-    assert.deepEqual(await readdir(join(dir, "tmp")), []);
+    assert.deepEqual(await tmpLeftovers(join(dir, "tmp")), []);
   });
 });
 
@@ -371,7 +371,7 @@ describe("quota", () => {
       assert.equal(rowCount, 0);
       // No variant files were placed, and the temp folder is empty.
       assert.equal(await exists(variantPath(quotaDir.dir, sha(checker), "map", "full", PIPELINE)), false);
-      assert.deepEqual(await readdir(join(quotaDir.dir, "tmp")), []);
+      assert.deepEqual(await tmpLeftovers(join(quotaDir.dir, "tmp")), []);
       assert.equal(small.assets.quota.reservedBytes(roomId), 0);
       // A small image still fits.
       assert.equal((await upload(small, roomId, dm, "token", otherPng)).statusCode, 200);

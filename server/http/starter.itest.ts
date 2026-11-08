@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import type { FastifyInstance } from "fastify";
@@ -16,7 +16,7 @@ import { RoomQuota, roomStoredBytes } from "../assets/quota.ts";
 import { FakeAuth, buildAssetApp, dropRooms, makeRoom, testConfig, testPool } from "../assets/testApp.ts";
 import { solid, tempDir } from "../assets/testImages.ts";
 import type { ExportManifest } from "../rooms/exportRoom.ts";
-import { startEngine, type Engine } from "../rooms/testing.ts";
+import { startEngine, tmpLeftovers, type Engine } from "../rooms/testing.ts";
 
 /**
  * Starter picks (docs/design/design-v1-starter-art.md 5 and 12.10): the route that
@@ -597,7 +597,7 @@ describe("a starter pick", () => {
     }
     // The picker reads it as it reads an upload.
     assert.equal((await app.inject({ url: `/api/assets/${body.id}/full`, headers: player.headers })).statusCode, 200);
-    assert.deepEqual(await readdir(join(dir, "tmp")), []);
+    assert.deepEqual(await tmpLeftovers(join(dir, "tmp")), []);
   });
 
   test("the credit stored is the catalog's, whatever a request might say, and a public domain work names its dedication", async () => {
@@ -700,7 +700,7 @@ describe("a starter pick", () => {
       const again = await pick(app, roomId, dm, { work: "test-pack/inn", kind: "map" });
       assert.equal(again.statusCode, 200, again.body);
       assert.equal(again.body, first.body);
-      assert.deepEqual(await readdir(join(dir, "tmp")), []);
+      assert.deepEqual(await tmpLeftovers(join(dir, "tmp")), []);
       // The role rule still comes first: a map the room holds is no more a player's to pick.
       assert.equal((await pick(app, roomId, player, { work: "test-pack/inn", kind: "map" })).statusCode, 403);
       // A player's held pick still makes them an uploader of the row, which is their read access to it.
@@ -747,7 +747,7 @@ describe("a starter pick", () => {
       assert.deepEqual(res.json(), { error: "internal" });
     }
     assert.deepEqual(await rowsOf(roomId), []);
-    assert.deepEqual(await readdir(join(dir, "tmp")), []);
+    assert.deepEqual(await tmpLeftovers(join(dir, "tmp")), []);
     assert.equal(app.assets.slots.inUse, 0);
   });
 });
