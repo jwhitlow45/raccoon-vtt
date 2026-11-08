@@ -614,7 +614,7 @@ describe("the label names a squeeze as squeezing", () => {
    * full size and named difficult terrain on plain stone (guide pass 6,
    * RULER-DIFFICULT-WORDS).
    */
-  test("the straight walk's own route into a corridor one square wide says squeezing alone, on the drag's label and on the walking ruler that finds no way for a goblin in tow", () => {
+  test("the straight walk's own route into a corridor one square wide says squeezing alone, on the drag's label and on the walking ruler that takes the way in a goblin in tow follows in single file", () => {
     // Guide pass 6's Narrow way: a hall, a corridor one square wide along row 4 and one two wide along rows 8 and 9, and a far room, walled by the build.
     let s = room({ scenes: {} });
     s.buildChunks = {};
@@ -629,7 +629,9 @@ describe("the label names a squeeze as squeezing", () => {
     s.tokens.thorn = token("thorn", { x: 7, y: 3, name: "Thorn", kind: "pc", attached: { to: "horse", kind: "ride", steer: true } });
     s.tokens.gob = token("gob", { size: "small", x: 5, y: 4, name: "Goblin", kind: "monster", attached: { to: "horse", kind: "drag" } });
     const m = measureWalk({ view: s, sceneId: "s1", stops: [{ x: 0, y: 0, tokenId: "horse" }, { x: 15.5, y: 4.5 }], viewer: { role: "dm" }, everything: true })!;
-    assert.deepEqual([walkText(m), m.legs[0]!.none, m.legs[0]!.corners], ["Walking 65 ft\n+20 ft for squeezing", true, [{ x: 10, y: 3 }]], "the ruler's No way through, along the straight leg");
+    // From op version 51 the ruler takes the warhorse's own way, which the goblin follows in single file (RULER-SINGLE-FILE), where
+    // it read No way through along the straight leg, and still names squeezing alone on plain stone.
+    assert.deepEqual([walkText(m), m.legs[0]!.none], ["Walking 75 ft\n+30 ft for squeezing", false], "the ruler's way in");
   });
 
   test("on hex rows and hex columns a piece that starts squeezed walks squeezed: out of the corridor, and out over rubble, the feet as the walk pays them", () => {

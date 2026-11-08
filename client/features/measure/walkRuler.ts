@@ -121,8 +121,12 @@ const MAX_STEPS = 512;
 /** What simulating and planning a leg charges to the frame's budget: enough that the budget's clock is read after it. */
 const STEP_UNITS = 16;
 
-/** A ruler's walk so far: its legs worked out, and the search and open-ground check of the leg still searching. */
-type Progress = { steps: Step[]; on: { leg: string; search: RouteSearch; check: RouteLegCheck } | null };
+/**
+ * A ruler's walk so far: its legs worked out, and the search and
+ * open-ground check of the leg still searching, `alone` while that is the
+ * walker's own search without what it drags (`legFound`).
+ */
+type Progress = { steps: Step[]; on: { leg: string; search: RouteSearch; check: RouteLegCheck; alone?: true } | null };
 
 /**
  * Where a ruler's walk stands before a leg: the room as the legs before it
@@ -191,46 +195,96 @@ function searchFor(view: RoomState, at: Walked, walker: Token & Walker, input: W
 }
 
 /**
+ * The walker's own search without what it drags, beside the group's under
+ * a key of its own (DR-A4): the world a drag's single file is searched in
+ * (routeDrag.ts), dragging's extra foot kept.
+ */
+function aloneSearchFor(view: RoomState, group: RouteSearch, key: string, budget: WorkBudget): RouteSearch {
+  const kept = keptFor(view, group.world.input.token.sceneId);
+  const aloneKey = `${key}|alone`;
+  let search = kept.searches.get(aloneKey);
+  if (search) kept.searches.delete(aloneKey);
+  else {
+    const { towed: _towed, ...input } = group.world.input;
+    search = routeSearch(routeWorld(input));
+    budget.charge(routeWorldUnits(search.world) + Math.ceil((search.world.nx * search.world.ny) / 400));
+    if (kept.searches.size >= MAX_SEARCHES) kept.searches.delete(kept.searches.keys().next().value!);
+  }
+  kept.searches.set(aloneKey, search);
+  return search;
+}
+
+/**
  * What a leg's search found, as a drag's search finds it (routeDrag.ts):
- * the straight leg on open ground, else the route, or none. Worked on the
+ * the straight leg on open ground, else the route, or none. A leg that
+ * ends squeezed from a walker whose drag takes what it drags in single
+ * file (RULER-SINGLE-FILE, D-261107-174) searches the walker alone first,
+ * the straight leg first, and takes that way where each follows it in
+ * single file on ground the search may read (walk.ts and hexWalk.ts
+ * fileBlocked), so it reads the way the drag goes. Otherwise it searches
+ * with them by their places. Worked on the
  * frame's budget: null while it is still searching. Once the budget is
  * spent no leg begins, and none gets an allowance of its own: the frame's
  * work (routeWork.ts) gives the frame's first work its bit of progress,
  * once a frame (review ASTRA-14). Kept by the legs before it, its start,
- * 5-10-5 residue and spot, so a ruler of many legs needs a leg's search
- * only while that leg is searched (review ASTRA-07).
+ * 5-10-5 residue, spot and whether it ends squeezed, so a ruler of many
+ * legs needs a leg's search only while that leg is searched (review
+ * ASTRA-07).
  */
-function legFound(view: RoomState, at: Walked, walker: Token & Walker, input: WalkInput, target: Point, budget: WorkBudget, progress: Progress): { found: Found; search: () => RouteSearch } | null {
+function legFound(view: RoomState, at: Walked, walker: Token & Walker, input: WalkInput, target: Point & { squeeze?: boolean }, budget: WorkBudget, progress: Progress): { found: Found; search: () => RouteSearch } | null {
   const kept = keptFor(view, walker.sceneId);
   const key = `${at.history}#${searchKey(walker, input.everything, publicCounters(gridOfView(view, walker.sceneId), walker, at.left, rulesOf(view), input.viewer.role === "dm"))}`;
-  const legKey = `${key}|${target.x},${target.y}`;
+  const legKey = `${key}|${target.x},${target.y},${target.squeeze === true}`;
   const searchOf = () => searchFor(view, at, walker, input, key, budget);
   const known = kept.legs.get(legKey);
   if (known) return { found: known, search: searchOf };
   if (budget.spent) return null;
-  const own = progress.on?.leg === legKey ? progress.on : null;
-  const search = own ? own.search : searchOf();
-  const check = own ? own.check : routeLegCheck(search.world, target);
   const late = (units = 1) => {
     budget.charge(units);
     return budget.spent;
   };
-  let found: Found;
-  // The open-ground check, the search and its trace all share the budget: a ruler's frame never runs past it.
-  if (!check.done && !check.run(late)) {
-    progress.on = { leg: legKey, search, check };
-    return null;
-  }
-  if (check.open) found = { kind: "open" };
-  else {
-    const settled = search.settle(target, budget);
-    const traced = settled === "settled" ? search.traceTo(target, budget) : null;
-    if (settled === "paused" || traced === "paused") {
-      progress.on = { leg: legKey, search, check };
+  let own = progress.on?.leg === legKey ? progress.on : null;
+  const group = own && !own.alone ? own.search : searchOf();
+  let found: Found | null = null;
+  if (target.squeeze === true && group.world.followsInFile && (!own || own.alone)) {
+    const alone = own ? own.search : aloneSearchFor(view, group, key, budget);
+    const check = own ? own.check : routeLegCheck(alone.world, target);
+    if (!check.done && !check.run(late)) {
+      progress.on = { leg: legKey, search: alone, check, alone: true };
       return null;
     }
-    found = traced ? { kind: "route", route: { pieces: traced.pieces } } : { kind: "none", capped: settled === "capped" };
+    if (check.open) {
+      if (group.world.fileBlocked([group.world.input.token, target]) === null) found = { kind: "open" };
+    } else {
+      const settled = alone.settle(target, budget);
+      const traced = settled === "settled" ? alone.traceTo(target, budget) : null;
+      if (settled === "paused" || traced === "paused") {
+        progress.on = { leg: legKey, search: alone, check, alone: true };
+        return null;
+      }
+      if (traced && group.world.fileBlocked(traced.points) === null) found = { kind: "route", route: { pieces: traced.pieces } };
+    }
+    own = null;
   }
+  if (!found) {
+    const check = own ? own.check : routeLegCheck(group.world, target);
+    // The open-ground check, the search and its trace all share the budget: a ruler's frame never runs past it.
+    if (!check.done && !check.run(late)) {
+      progress.on = { leg: legKey, search: group, check };
+      return null;
+    }
+    if (check.open) found = { kind: "open" };
+    else {
+      const settled = group.settle(target, budget);
+      const traced = settled === "settled" ? group.traceTo(target, budget) : null;
+      if (settled === "paused" || traced === "paused") {
+        progress.on = { leg: legKey, search: group, check };
+        return null;
+      }
+      found = traced ? { kind: "route", route: { pieces: traced.pieces } } : { kind: "none", capped: settled === "capped" };
+    }
+  }
+  const search = group;
   progress.on = null;
   if (kept.legs.size >= MAX_LEGS) kept.legs.delete(kept.legs.keys().next().value!);
   kept.legs.set(legKey, found);
