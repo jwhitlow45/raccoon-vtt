@@ -643,6 +643,10 @@ newest first.
 
 **Since v0.3.1**
 
+- **Time spans** ([design](design/design-v1-calendar-c2c3.md)): room format
+  41, change format 54. Until it reloads, an old page shows an effect that
+  lasts a length of time as one with no duration, and can't pick a length.
+  Reload every open page, table displays included.
 - **Secret doors that look like their wall**
   ([design](design/design-v1-maps-vision.md)): room format 40, change format
   53. Until it reloads, an old page draws nothing in Isometric at a hidden
