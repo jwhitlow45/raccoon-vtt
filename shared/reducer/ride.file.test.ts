@@ -191,7 +191,8 @@ describe("squares: what a holder drags follows it in single file where its move 
     wall(s, "fu48ms000001", [2.25, 7.75], [2.25, 8]);
     s.traps.t1 = trap("t1", { zone: { cells: [{ x: 4, y: 5, w: 1, h: 2 }] }, rig: { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false } });
     const op: OpOf<"token.move"> = { t: "token.move", tokenId: "horse", x: 9.5, y: 5.5, squeeze: true, route: [[3, 5, 1, 0], [3.5, 5.5, 1, 0], [4, 5.5, 1, 0], [9.5, 5.5, 2, 0]] };
-    assert.deepEqual(poses(served(s, op), ["horse", "ogre"]), [[3, 5, 0, undefined], [3, 5, 0, "horse"]]);
+    // At op 51: from 52 its walk's spots off its grid are judged snapped to it, and one of those is (traps.fileSnap.test.ts).
+    assert.deepEqual(poses(served(s, op, P1, 51), ["horse", "ogre"]), [[3, 5, 0, undefined], [3, 5, 0, "horse"]]);
   });
 
   test("a hidden one in the file carrying an owl every player sees keeps the stop's spot, where the owl stays in its arms (TRAP-STOP-STACK, D-261101-403)", () => {
@@ -221,19 +222,24 @@ describe("squares: what a holder drags follows it in single file where its move 
     });
 
     test("where the ogre would be left out of the imp's reach with no spot of its own, neither steps back and both stay in tow", () => {
+      // At op 51: from 52 the ogre's snapped spots give it one (traps.fileSnap.test.ts).
       const s = loop("seen");
-      const after = served(s, op);
+      const after = served(s, op, P1, 51);
       assert.deepEqual(poses(after, ["imp", "ogre"]), [[1, 4, 0, "horse"], [1, 4, 0, "imp"]]);
-      assert.deepEqual(landings(s, op), poses(after, ["horse", "imp", "ogre"]));
+      assert.deepEqual(landings(s, op, 51), poses(after, ["horse", "imp", "ogre"]));
     });
 
     test("an ogre players cannot see changes nothing they see, and it takes a spot in the imp's reach rather than let go", () => {
-      const s = loop("hidden");
-      const after = served(s, op);
-      assert.deepEqual(poses(after, ["imp", "ogre"]), [[3, 5, 0, "horse"], [3, 5, 0, "imp"]]);
-      const without = served(loop("none"), op);
-      for (const viewer of [P1, P2]) assert.equal(stableStringify(projectState(after, viewer, { sceneId: "s1" }).tokens), stableStringify(projectState(without, viewer, { sceneId: "s1" }).tokens), viewer.memberId);
-      for (const [id, pose] of trapLandings(op, s, P1, {})) assert.deepEqual([after.tokens[id]!.x, after.tokens[id]!.y], [pose.x, pose.y], id);
+      // At op 51, where the imp's square was the ogre's only spot in its reach. From 52 its snapped spots hold more.
+      for (const opVersion of [51, undefined]) {
+        const s = loop("hidden");
+        const after = served(s, op, P1, opVersion);
+        if (opVersion === 51) assert.deepEqual(poses(after, ["imp", "ogre"]), [[3, 5, 0, "horse"], [3, 5, 0, "imp"]]);
+        assert.deepEqual(poses(after, ["imp", "ogre"]).map((p) => p[3]), ["horse", "imp"], `op ${opVersion}: both in tow`);
+        const without = served(loop("none"), op, P1, opVersion);
+        for (const viewer of [P1, P2]) assert.equal(stableStringify(projectState(after, viewer, { sceneId: "s1" }).tokens), stableStringify(projectState(without, viewer, { sceneId: "s1" }).tokens), `op ${opVersion}: ${viewer.memberId}`);
+        for (const [id, pose] of trapLandings(op, s, P1, opVersion === undefined ? {} : { opVersion })) assert.deepEqual([after.tokens[id]!.x, after.tokens[id]!.y], [pose.x, pose.y], `op ${opVersion}: ${id}`);
+      }
     });
   });
 
@@ -243,7 +249,8 @@ describe("squares: what a holder drags follows it in single file where its move 
     wall(s, "fu45bf000010", [2.25, 7.75], [2.25, 8]);
     s.traps.t1 = trap("t1", { zone: { cells: [{ x: 4, y: 5, w: 1, h: 2 }] }, rig: { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false } });
     const op: OpOf<"token.move"> = { t: "token.move", tokenId: "horse", x: 9.5, y: 5.5, squeeze: true, route: [[3, 5, 1, 0], [3.5, 5.5, 1, 0], [4, 5.5, 1, 0], [9.5, 5.5, 2, 0]] };
-    const after = served(s, op);
+    // At op 51: from 52 it stands on its walk's spot snapped to its grid (traps.fileSnap.test.ts).
+    const after = served(s, op, P1, 51);
     const horse = after.tokens.horse!;
     assert.deepEqual([horse.x, horse.y, horse.squeeze], [3, 5, undefined], "stopped full size on the trap");
     // Where the trap step's walk of it stood at the horse's stop: its latest spot at or before it.
@@ -341,10 +348,13 @@ describe("squares: what a holder drags follows it in single file where its move 
     assert.equal(placed.state.traps.t2!.state, "sprung", "by its place");
     const whole = served(setup(false), op);
     assert.deepEqual([whole.tokens.ogre!.elevation, whole.traps.t2!.state], [0, "sprung"], "in single file, the whole walk");
-    const cut = served(setup(true), op);
-    assert.deepEqual([cut.tokens.horse!.x, cut.tokens.horse!.y], [3, 5], "stopped on the trap");
-    const ogre = cut.tokens.ogre!;
-    assert.deepEqual([ogre.x, ogre.y, ogre.elevation, ogre.attached?.to, cut.traps.t2!.state], [2, 6, 0, "horse", "sprung"], "in single file, cut");
+    // At op 51, and from 52 on its walk's spot snapped to its grid, on its own ground there too.
+    for (const [opVersion, x, y] of [[51, 2, 6], [undefined, 1, 7]] as const) {
+      const cut = served(setup(true), op, P1, opVersion);
+      assert.deepEqual([cut.tokens.horse!.x, cut.tokens.horse!.y], [3, 5], "stopped on the trap");
+      const ogre = cut.tokens.ogre!;
+      assert.deepEqual([ogre.x, ogre.y, ogre.elevation, ogre.attached?.to, cut.traps.t2!.state], [x, y, 0, "horse", "sprung"], `op ${opVersion}: in single file, cut`);
+    }
   });
 
   test("one whose walk in the file ends where it started walks it for the trap step all the same, so a trap's cut stops it where that walk had it, never by its place", () => {
@@ -356,8 +366,9 @@ describe("squares: what a holder drags follows it in single file where its move 
     s.traps.t1 = trap("t1", { zone: { cells: [{ x: 7, y: 5, w: 1, h: 2 }] } });
     const op: OpOf<"token.move"> = { t: "token.move", tokenId: "horse", x: 10, y: 5, squeeze: true, route: [[6, 5, 1, 0], [10, 5, 1, 0]] };
     assert.equal(walkOf(s, op, "imp"), undefined, "the move writes no imp");
-    // As the reducer runs it, its trap step and its dispatch: no permission reads a trap.
-    const r = applyOp(s, op, P1, env(5));
+    // As the reducer runs it, its trap step and its dispatch: no permission reads a trap. At op 51: from 52 the imp half a square
+    // off its grid is judged on its grid beside it, so the stop waits for no whole square (traps.fileSnap.test.ts).
+    const r = applyOp(s, op, P1, { ...env(5), opVersion: 51 });
     assert.ok(r.ok);
     // The stop waits for a spot where both stand, the imp on whole squares, which on the way back is where the horse reaches 9, 5.
     assert.deepEqual([r.state.tokens.horse!.x, r.state.tokens.horse!.y, r.state.traps.t1!.state], [9, 5, "sprung"], "stopped by the trap");

@@ -2,7 +2,7 @@ import { CHUNK_CELLS, FOG_SUBCELLS, MIN_HEIGHT_FT, type BuildChunk, type CellRec
 import { chunkKey, wallMidpoint } from "../keys.ts";
 import { gridOfScene, playersToken, seenByNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
-import { followsInSingleFileOnHexes, stopsByCoveredSquares, stopsFileApart, stopsOnPublicGround, stopsOnTrap, stopsStandClear, stopsStandFullSize } from "../migrate.ts";
+import { fileStandsSnapped, followsInSingleFileOnHexes, stopsByCoveredSquares, stopsFileApart, stopsOnPublicGround, stopsOnTrap, stopsStandClear, stopsStandFullSize } from "../migrate.ts";
 import { isWritable } from "../writable.ts";
 import { creaturesInArea, type AreaToken } from "./aoe.ts";
 import { holderOf, insideHolder, linkHolds, onHolder, seatHolds, walkerFor } from "./attach.ts";
@@ -813,14 +813,15 @@ function inFile(walk: Walk): boolean {
  * as `elevationOnStep` reads a shared walk: what rides takes its holder's
  * change, and a dragged creature its own ground behind a holder on the
  * ground, else the holder's change but never below the ground. The holder
- * is read at its latest spot at the same progress.
+ * is read at its latest spot at the same progress. `at` is where it stands
+ * there, its spot but where a stop snaps it to its grid (`stopPose`).
  */
-function fileElevation(walk: Walk, holder: Walk, before: RoomState, j: number): number {
+function fileElevation(walk: Walk, holder: Walk, before: RoomState, j: number, at: { x: number; y: number } = walk.spots[j]!): number {
   const s = walk.spots[j]!;
   const up = holder.elevation(latestIndex(holder.spots, s.progress));
   const kind = walk.token.attached?.kind;
   if (kind !== undefined && onHolder(kind)) return up + (walk.token.elevation - holder.token.elevation);
-  const ground = groundUnder(before.buildChunks, walk.entry.trace[s.progress[0]]!, { x: s.x, y: s.y });
+  const ground = groundUnder(before.buildChunks, walk.entry.trace[s.progress[0]]!, { x: at.x, y: at.y });
   const grounded = footing(before.buildChunks, holder.entry.trace[0]!) === "ground";
   return grounded ? ground : Math.max(walk.token.elevation + (up - holder.token.elevation), ground);
 }
@@ -1248,9 +1249,11 @@ export type MovePlan = { springings: Springing[]; op: Op };
  * it at its stop (`until`): the stop itself, or for an op stored before
  * version 17 the event that stopped it (migrate.ts stopsOnTrap). `back`
  * holds the spot each walk stepped back to off the creatures ahead of it
- * in single file, and what rides on those (`fileApart`).
+ * in single file, and what rides on those (`fileApart`). `at` holds where
+ * a walk stands at its spot there where that is not the spot itself: one
+ * in single file on its snapped stand, and what rides on it (`stopPose`).
  */
-type Stop = { until: Progress; s: Progress; back?: ReadonlyMap<Walk, number> };
+type Stop = { until: Progress; s: Progress; back?: ReadonlyMap<Walk, number>; at?: ReadonlyMap<Walk, Token> };
 
 /**
  * The trap step's plan of a move (13.2 step 1): both passes, their events,
@@ -1281,7 +1284,9 @@ export function trapLandings(op: Op, before: TrapRoom, actor: Viewer, env: { opV
   for (const walk of parts.walks.all) {
     if (!walk.isPublic) continue;
     const stop = parts.stops.get(walk.group.named);
-    pose(walk, stop ? stopIndex(walk, stop) : walk.spots.length - 1);
+    const moved = stop?.at?.get(walk);
+    if (moved) out.set(walk.token.id, { x: moved.x, y: moved.y, elevation: moved.elevation });
+    else pose(walk, stop ? stopIndex(walk, stop) : walk.spots.length - 1);
   }
   for (const walk of (parts.rest ?? parts.walks).all) if (!walk.isPublic) pose(walk, walk.spots.length - 1);
   // A stop that stands the named token squeezed short of its walk's end lands it on the ground under its squeezed footprint, as
@@ -1331,7 +1336,9 @@ function trapMoveParts(op: Op, before: TrapRoom, actor: Viewer, env: { opVersion
         // A stop where the group was going anyway changes nothing, so it is no stop (6.5).
         if (compareProgress(s, endOf(group)) >= 0) continue;
         const back = fileApart(walks, group, s, before, seen);
-        stops.set(group.named, { until: forward ? s : event.at, s, ...(back ? { back } : {}) });
+        const stop: Stop = { until: forward ? s : event.at, s, ...(back ? { back } : {}) };
+        const at = stopPoses(walks, group, stop, before, seen);
+        stops.set(group.named, at ? { ...stop, at } : stop);
       }
     }
     springings.push(springingIn(trap, event.how, "public", together, momentAt(before, walks.byId, event.at, stops), env));
@@ -1503,7 +1510,9 @@ function opening(trap: Trap, before: RoomState, opens?: (trap: Trap) => boolean)
   const g = gridOfScene(before, trap.sceneId);
   return (spot, walk) => {
     const { squeeze: _squeeze, ...token } = walk.token;
-    const at: PlacedToken = { ...token, x: spot.x, y: spot.y, ...(spot.squeezed ? { squeeze: true } : {}) };
+    // Where it would stand there: a creature in single file stands on its snapped spot (route.ts StandRule.snaps).
+    const where = spot.snapped ?? spot;
+    const at: PlacedToken = { ...token, x: where.x, y: where.y, ...(spot.squeezed ? { squeeze: true } : {}) };
     if (isHex(g)) return occupiedHexes(g, at).every((h) => squares.has(hexKey(h)));
     const r = footprintRect(SQUARES, at);
     for (let y = Math.floor(r.y + 1e-9); y < Math.ceil(r.y + r.h - 1e-9); y++) for (let x = Math.floor(r.x + 1e-9); x < Math.ceil(r.x + r.w - 1e-9); x++) if (!squares.has(`${x},${y}`)) return false;
@@ -1574,7 +1583,9 @@ function standSpots(walks: Walks, walk: Walk, before: RoomState, seen: (id: stri
     // The group's head walks its group's own walk at its step, so its spots are already there.
     const head = walk.entry === walk.group.head && walk.step === walk.group.step;
     const full = standRule(walks, before, walk.token.sceneId);
-    stands = routeStands(storedBuild(before, walks.opVersion), walk.entry.route, token, walk.group.step, walk.holder ? full : { ...full, squeeze: walk.squeezeAtEnd }, head ? walk.group.base(walk.group.step) : undefined);
+    // A creature in single file walks its holder's middle, off its own grid behind a larger holder, so it is judged on its grid beside it.
+    const own = walk.holder ? (snapsInFile(walks, walk) ? { ...full, snaps: true } : full) : { ...full, squeeze: walk.squeezeAtEnd };
+    stands = routeStands(storedBuild(before, walks.opVersion), walk.entry.route, token, walk.group.step, own, head ? walk.group.base(walk.group.step) : undefined);
   }
   walks.stands.set(walk, stands);
   return stands;
@@ -1593,6 +1604,11 @@ function standRule(walks: Walks, before: RoomState, sceneId: string): StandRule 
   let ground = walks.grounds.get(sceneId);
   if (!ground) walks.grounds.set(sceneId, (ground = groundMaker(before, sceneId)));
   return { ...rule, publicGround: ground, ...(stopsByCoveredSquares(walks.opVersion) ? { covers: true } : {}) };
+}
+
+/** Whether a walk is one in single file on squares that a stop judges on its own grid's spots, from op version 52 (migrate.ts fileStandsSnapped). */
+function snapsInFile(walks: Walks, walk: Walk): boolean {
+  return inSingleFile(walk) && !isHex(walk.grid) && fileStandsSnapped(walks.opVersion);
 }
 
 /**
@@ -1632,15 +1648,21 @@ function spotIn(m: Moment, walk: Walk): number {
   return stop && compareProgress(m.p, stop.until) > 0 ? stopIndex(walk, stop) : latestIndex(walk.spots, m.p);
 }
 
+/** Where a walk stands at the moment off its spot, as its group's stop leaves it there (`Stop.at`). */
+function movedIn(m: Moment, walk: Walk): Token | undefined {
+  const stop = m.stops.get(walk.group.named);
+  return stop?.at && compareProgress(m.p, stop.until) > 0 ? stop.at.get(walk) : undefined;
+}
+
 function tokenAt(m: Moment, id: string): Token | undefined {
   const walk = m.walks.get(id);
-  return walk ? placedAt(walk, spotIn(m, walk)) : ownEntry(m.before.tokens, id);
+  return walk ? (movedIn(m, walk) ?? placedAt(walk, spotIn(m, walk))) : ownEntry(m.before.tokens, id);
 }
 
 function roomAt(m: Moment): RoomState {
   if (!m.room) {
     const tokens = { ...m.before.tokens };
-    for (const walk of m.walks.values()) tokens[walk.token.id] = placedAt(walk, spotIn(m, walk));
+    for (const walk of m.walks.values()) tokens[walk.token.id] = movedIn(m, walk) ?? placedAt(walk, spotIn(m, walk));
     m.room = { ...m.before, tokens };
   }
   return m.room;
@@ -1778,9 +1800,9 @@ function cutWalks(walks: Walks, named: string, stop: Stop, points: number, befor
   return { file: file.size > 0 ? file : null, own: kept.size > 0 ? kept : null };
 }
 
-/** A walk's own route to its spot at the stop (`stopIndex`), that spot at the height the trap step had it at there. */
+/** A walk's own route to its spot at the stop (`stopIndex`), that spot where and as high as the trap step had it there (`Stop.at`). */
 function walkToStop(walk: Walk, stop: Stop): RoutePoint[] {
-  return walkTo(walk, stopIndex(walk, stop));
+  return walkTo(walk, stopIndex(walk, stop), stop.at?.get(walk));
 }
 
 /** A walk's spot at its group's stop: its latest at or before it, or the one it stepped back to (`fileApart`). */
@@ -1849,7 +1871,9 @@ function fileApart(walks: Walks, group: Group, s: Progress, before: RoomState, s
     return latest(w);
   };
   const settings = before.meta.settings;
-  const drags = (w: Walk) => !inSingleFile(w) || !w.holder || linkHolds(w.grid, settings, "drag", placedAt(w, indexOf(w)), placedAt(w.holder, indexOf(w.holder)));
+  // Where each stands at its spot, on its snapped stand in the file (`stopPose`).
+  const poseAt = (w: Walk, j: number) => stopPose(walks, w, j, indexOf, before, seen) ?? placedAt(w, j);
+  const drags = (w: Walk) => !inSingleFile(w) || !w.holder || linkHolds(w.grid, settings, "drag", poseAt(w, indexOf(w)), poseAt(w.holder, indexOf(w.holder)));
   // The latest spot of its walk at or before the stop that it may stop at in its holder's reach, the stop's spot without one.
   const inReach = (w: Walk) => {
     const stands = standSpots(walks, w, before, seen);
@@ -1861,7 +1885,7 @@ function fileApart(walks: Walks, group: Group, s: Progress, before: RoomState, s
   };
   // What a walk takes at spot `j`: on squares its box, on hexes its hexes, which a box round an anchor overlaps where no hex is shared.
   const g = lead.grid;
-  const boxAt = (walk: Walk, j: number): Rect | ReadonlySet<string> => (isHex(g) ? new Set(occupiedHexes(g, placedAt(walk, j)).map(hexKey)) : footprintRect(walk.grid, placedAt(walk, j)));
+  const boxAt = (walk: Walk, j: number): Rect | ReadonlySet<string> => (isHex(g) ? new Set(occupiedHexes(g, placedAt(walk, j)).map(hexKey)) : footprintRect(walk.grid, poseAt(walk, j)));
   const ahead: (Rect | ReadonlySet<string>)[] = [boxAt(lead, latest(lead))];
   // A class at a time, those every player sees first, so a hidden one never decides where a public one stands.
   for (const order of classes) {
@@ -1912,6 +1936,47 @@ function fileApart(walks: Walks, group: Group, s: Progress, before: RoomState, s
   return back;
 }
 
+/**
+ * Where a walk stands at its spot `j` where a stop leaves it there, or
+ * undefined on the spot itself (TRAP-FILE-HALF-OFF, D-261107-178). One in
+ * single file whose spot there is a stand only on its snapped spot
+ * (route.ts StandRule.snaps) stands on that, at the height its rule gives
+ * it there (`fileElevation`), and what rides on it, all the way up, moves
+ * with it. `index` is the spot the stop leaves each holder on.
+ */
+function stopPose(walks: Walks, walk: Walk, j: number, index: (w: Walk) => number, before: RoomState, seen: (id: string) => boolean): Token | undefined {
+  const holder = walk.holder;
+  if (!holder) return undefined;
+  if (inSingleFile(walk)) {
+    if (!snapsInFile(walks, walk)) return undefined;
+    const stands = standSpots(walks, walk, before, seen);
+    const snapped = stands.spot(latestIndex(stands.walk, walk.spots[j]!.progress)).snapped;
+    if (!snapped) return undefined;
+    return { ...placedAt(walk, j), x: snapped.x, y: snapped.y, elevation: fileElevation(walk, holder, before, j, snapped) };
+  }
+  const kind = walk.token.attached?.kind;
+  if (keepsOwn(walk) || kind === undefined || !onHolder(kind)) return undefined;
+  const h = index(holder);
+  const up = stopPose(walks, holder, h, index, before, seen);
+  if (!up) return undefined;
+  const was = placedAt(holder, h);
+  const own = placedAt(walk, j);
+  return { ...own, x: own.x + (up.x - was.x), y: own.y + (up.y - was.y), elevation: own.elevation + (up.elevation - was.elevation) };
+}
+
+/** Where a stop leaves each walk of its group off its spot (`stopPose`), or undefined where it leaves each on its spot. */
+function stopPoses(walks: Walks, group: Group, stop: Stop, before: RoomState, seen: (id: string) => boolean): Map<Walk, Token> | undefined {
+  if (!fileStandsSnapped(walks.opVersion)) return undefined;
+  const index = (w: Walk) => stopIndex(w, stop);
+  const out = new Map<Walk, Token>();
+  for (const walk of walks.all) {
+    if (walk.group !== group) continue;
+    const moved = stopPose(walks, walk, index(walk), index, before, seen);
+    if (moved) out.set(walk, moved);
+  }
+  return out.size > 0 ? out : undefined;
+}
+
 /** Whether two boxes share more than an edge, or two sets of hexes a hex. */
 function boxesOverlap(a: Rect | ReadonlySet<string>, b: Rect | ReadonlySet<string>): boolean {
   if (!("x" in a) || !("x" in b)) {
@@ -1923,13 +1988,13 @@ function boxesOverlap(a: Rect | ReadonlySet<string>, b: Rect | ReadonlySet<strin
   return a.x < b.x + b.w - e && b.x < a.x + a.w - e && a.y < b.y + b.h - e && b.y < a.y + a.h - e;
 }
 
-/** A walk's own route to its spot `j`, that spot at the height the trap step had it at there. */
-function walkTo(walk: Walk, j: number): RoutePoint[] {
+/** A walk's own route to its spot `j`, that spot at the height the trap step had it at there, or to `moved` where a stop moves it off that spot. */
+function walkTo(walk: Walk, j: number, moved?: Token): RoutePoint[] {
   const spot = spotAt(walk, j);
   const [piece, k] = spot.progress;
   const route = walk.entry.route.slice(0, piece + 1).map(({ x, y, elevation }) => ({ x, y, elevation }));
   // Its spot where the stop leaves it, as high as the trap step had it there.
-  if (k > 0) route.push({ x: spot.x, y: spot.y, elevation: walk.elevation(j) });
+  if (k > 0) route.push(moved ? { x: moved.x, y: moved.y, elevation: moved.elevation } : { x: spot.x, y: spot.y, elevation: walk.elevation(j) });
   else route[route.length - 1] = { ...route[route.length - 1]!, elevation: walk.elevation(j) };
   return route;
 }
@@ -2034,7 +2099,8 @@ function hitsIn(trap: Trap, m: Moment, by: readonly string[], opVersion?: number
   for (const t of Object.values(m.before.tokens)) {
     if (t.sceneId !== trap.sceneId || !trapCreature(m.before, t)) continue;
     const walk = m.walks.get(t.id);
-    const on = isHex(g) ? hexesOnRects(g, walk ? lightAt(walk, spotIn(m, walk)) : t, rects) : onRects(walk ? cellsAt(walk, spotIn(m, walk), scratch) : occupiedRange(g, t), rects, box);
+    const moved = walk ? movedIn(m, walk) : undefined;
+    const on = isHex(g) ? hexesOnRects(g, walk ? lightAt(walk, spotIn(m, walk)) : t, rects) : onRects(moved ? occupiedRange(g, moved) : walk ? cellsAt(walk, spotIn(m, walk), scratch) : occupiedRange(g, t), rects, box);
     if (on) out.push(t.id);
   }
   return out.sort(cmp);

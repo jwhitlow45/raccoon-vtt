@@ -1260,9 +1260,11 @@ export const opMigrations: MigrationStep[] = [
     // shape, so the step is the identity. From this version a stop between
     // a walk's ends on squares reads, for a creature of one square or
     // less, only the squares its footprint covers where it stands and where
-    // its piece starts, beside its line (`stopsByCoveredSquares`). Older
-    // ops replay by the rules they were written under, so a stored stop
-    // lands where it landed then.
+    // its piece starts, beside its line (`stopsByCoveredSquares`), and a
+    // creature in single file half a square off its grid is judged on its
+    // own grid's spot beside it (`fileStandsSnapped`). Older ops replay by
+    // the rules they were written under, so a stored stop lands where it
+    // landed then.
     // Deploy: back up first and reload open pages, since a DM's page
     // predicts its own trap stops by the old rule. Rollback needs the
     // backup only for a room with version 52 ops after its last snapshot,
@@ -1758,6 +1760,21 @@ export function seatsApartOnHexes(opVersion: number | undefined): boolean {
  * stored version and take today's rule.
  */
 export function stopsByCoveredSquares(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 52);
+}
+
+/**
+ * Whether, on squares, a creature in single file whose spot between the
+ * walk's ends lies off its own grid is judged at that spot snapped to its
+ * grid, toward where it stood when the walk began, on the ground every
+ * player sees alone, and stands there where the stop leaves it
+ * (D-261107-178, route.ts StandRule.snaps). So a Small goblin a Large
+ * horse drags in single file stops at a net where the party sees the
+ * ground. Ops stored before version 52 judged it on its spot, where it
+ * never stood, and replay so. Live ops carry no stored version and take
+ * today's rule.
+ */
+export function fileStandsSnapped(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 52);
 }
 

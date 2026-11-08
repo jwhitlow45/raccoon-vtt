@@ -798,6 +798,8 @@ export type RouteSpot = {
   /** The token may stop here: its core fits, off its snap grid only squeezed, and the walk cut here is allowed. */
   stand: boolean;
   progress: [piece: number, k: number, n: number];
+  /** Where it stands when it stops here, where that is not the spot: the spot snapped to its own grid (`StandRule.snaps`). */
+  snapped?: Point;
 };
 
 /** Whether a piece runs along one of the eight lattice directions in whole lattice steps, so its spots lie exactly on it. */
@@ -980,7 +982,7 @@ export function routeSpots(build: BuildState, route: readonly RoutePoint[], toke
  * the ground that judges the spots between the ends from op version 37,
  * whether a spot between them stands only where the move's own stand
  * test would leave the walker (`fullStand`, migrate.ts stopsStandClear),
- * and how a point core reads that ground from op version 52.
+ * and the two readings of that ground from op version 52.
  */
 export type StandRule = {
   squeeze?: boolean;
@@ -993,6 +995,13 @@ export type StandRule = {
    * alone (`squareProof`, migrate.ts stopsByCoveredSquares).
    */
   covers?: boolean;
+  /**
+   * Whether a spot between the ends off the walker's own grid is judged at
+   * that spot snapped to its grid, on that ground alone, and stands there
+   * (`snapToward`, migrate.ts fileStandsSnapped): a creature in single file,
+   * which walks its holder's middle.
+   */
+  snaps?: boolean;
 };
 
 /**
@@ -1084,6 +1093,17 @@ function squareProof(token: Walker, route: readonly RoutePoint[], start: Walker,
   };
 }
 
+/**
+ * `v` snapped to the grid of `step` from `from` on its axis, to the whole
+ * step on the side of `from` where it lies off that grid (D-261107-178): a
+ * creature in single file snaps back toward where its walk began.
+ */
+function snapToward(v: number, from: number, step: number): number {
+  if (multipleOf(v - from, step)) return v;
+  const lo = from + Math.floor((v - from) / step) * step;
+  return v < from ? lo + step : lo;
+}
+
 /** Whether a creature with a side a squeeze shrinks stands off its own grid at `at`, where only the walls can tell its box clear (movement.ts offGridWallThrough). */
 function offOwnGrid(token: PlacedToken, at: Point): boolean {
   const step = snapStep(token);
@@ -1133,13 +1153,17 @@ export function routeStands(build: BuildState, route: readonly RoutePoint[], tok
     const spotEnd = () => (ended ??= piece.endAt(p));
     const onGrid = multipleOf(w.x - token.x, grid) && multipleOf(w.y - token.y, grid);
     if (ground && proof && !last) {
-      if (proof.live(at, p)) {
+      // Off its grid a creature in single file is judged on its grid's spot beside it, which its holder's walk never proves.
+      const snapped = opts.snaps === true && !onGrid ? { x: snapToward(w.x, token.x, grid), y: snapToward(w.y, token.y, grid) } : null;
+      const judged = snapped ?? p;
+      if (proof.live(at, judged)) {
         // The stand test of op version 35, squeezes included, with the leg cut at the spot: the whole piece's sweep reads past it.
-        const sq = squeezes && squeezeFits(build, spotEnd());
-        const ok = (sq || onGrid) && !coreBlocked(build, spotEnd()) && (!blocks || legStop(build, at, { x: w.x, y: w.y, elevation: w.elevation }) === null);
+        const there = snapped ? piece.endAt(snapped) : spotEnd();
+        const sq = squeezes && squeezeFits(build, there);
+        const ok = (sq || onGrid || snapped !== null) && !coreBlocked(build, there) && (!blocks || legStop(build, at, { ...judged, elevation: w.elevation }) === null);
         // Full size there, it stands where the move's own stand test would leave it (migrate.ts stopsStandClear).
-        const clear = sq || !opts.fullStand || !blocks || !offGridWallThrough(build, spotEnd());
-        return (known[s] = { ...w, squeezed: sq, stand: ok && clear });
+        const clear = sq || !opts.fullStand || !blocks || !offGridWallThrough(build, there);
+        return (known[s] = { ...w, squeezed: sq, stand: ok && clear, ...(snapped && ok && clear ? { snapped } : {}) });
       }
       // Off that ground nothing proves a box off its grid clear of the walls, so it is no stand there.
       return (known[s] = { ...w, squeezed: false, stand: onGrid && proof.proven(i, end, w) && (!opts.fullStand || !blocks || !offOwnGrid(token, w)) });

@@ -115,9 +115,13 @@ describe("a hidden lead's box at a trap stop moves only what players see under a
     });
   });
 
-  test("a goblin every player sees in the hidden horse's file: the horse's size decides whether the group stops at all, and still nothing else they see changes", () => {
-    // The file runs on the horse's middle, so behind a Large horse it leaves the goblin half a square off its grid, and no spot
-    // short of the walk's end stands it there. Only behind the Huge one does the trap stop the group.
-    compareTwins("dragged", "gob", (s, size) => assert.equal(planTrapMove(east, s, DM, {}).op !== east, size === "huge", `${size}: whether the trap cuts the move`));
+  test("a goblin every player sees in the hidden horse's file: the group stops behind either horse, and still nothing else they see changes", () => {
+    // The file runs on the horse's middle, so behind a Large horse it leaves the goblin half a square off its grid. From op version
+    // 52 it is judged there on its own grid's spot beside it, on ground every player sees (TRAP-FILE-HALF-OFF), so the trap stops
+    // the group behind the Large horse too. At 51 only behind the Huge one did it.
+    compareTwins("dragged", "gob", (s, size) => {
+      assert.notEqual(planTrapMove(east, s, DM, {}).op, east, `${size}: the trap cuts the move`);
+      assert.equal(planTrapMove(east, s, DM, { opVersion: 51 }).op !== east, size === "huge", `${size}: whether the trap cut the move at op 51`);
+    });
   });
 });
