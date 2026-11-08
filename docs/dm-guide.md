@@ -528,7 +528,7 @@ A new scene starts on your room's choice, or on the one you pick as you make it 
 
 Two groups of the scene's settings fine-tune it. **Light** sits first in **Light and weather**, since it is the one you change during play, and the rest sit under Players see in **Fog and vision**:
 
-- **Light**: **Bright** (lit everywhere, as by day), **Dim** or **Dark**. The light level matters only while party vision is on, so on Explore or Custom. While party vision is off, Light says so and points you to Explore in Fog and vision, and the folded group leaves the light out of its summary. On a map with phases, **Light per phase** under it sets the light for each phase (see [Map phases, imports and exports](#map-phases-imports-and-exports)).
+- **Light**: **Bright** (lit everywhere, as by day), **Dim** or **Dark**. The light level matters only while party vision is on, so on Explore or Custom. While party vision is off, Light says so and points you to Explore in Fog and vision, and the folded group leaves the light out of its summary. On a map with phases, **Light per phase** under it sets the light for each phase (see [Map phases, imports and exports](#map-phases-imports-and-exports)). Once a clock runs, a fourth choice, **Time of day**, lets the scene follow the clock (see [Time of day light](#time-of-day-light)).
 - **Sight**: **Whole party**, the default, or **Per player**. On Whole party the party shares its sight and its map: every player sees everything any of the party's creatures can see, so when the rogue scouts ahead, the whole table sees what she finds. Per player lets each player see only through their own creatures' eyes and those of any creature that shares sight with the party, and remember only where those creatures have been (see [Sight for each player](#sight-for-each-player)).
 - **Sight sources**: the party's creatures on the scene, with their senses and lights. To add an allied NPC, so the party sees what it sees, turn on **Shares sight with the party** in the **Sight** section of its token's panel.
 - **Switches**, a fold that holds the two switches Players see sets for you: **Fog** and **Party vision**. While it is folded, it tells you how both stand, such as "Fog on · Party vision on". You rarely need them. The one mix that no choice names, party vision on with fog off, shows as **Custom**: players then see the whole map, dimmed outside what their characters see, and the fold opens so you can see why.
@@ -549,6 +549,18 @@ The app speaks up in three cases where a change to what players see could surpri
 - **Leaving Explore.** On Explore, players keep a map of what they explored. If you switch a scene they have explored to Reveal by hand or Everything, or turn off fog or party vision in Switches, the app asks first: "Players will see the build as it is now on everything they explored. Undo does not bring back what they remembered." Press **Change** to go ahead, or **Cancel** (or Escape) to leave things as they are. Switching **Sight** from **Per player** back to **Whole party** asks the same way when players have maps of their own there, since each player's map then joins the party's for good.
 - **A map image with no walls.** When you choose Explore on a map image with nothing yet that blocks sight, the settings warn you: "This map has no walls yet, so party vision shows players all of it at once. Add walls first, or choose Reveal by hand." On a phone, where Fog and vision starts folded, its row wears a **No walls** tag while the warning holds, so you never miss it. When you move the players to a scene with party vision, the app reminds you of the same thing if that scene is a map image, since it can't check another scene's walls from where you are.
 - **A first map image.** When a scene on Everything with nothing built on it yet gets its first map image, it moves to Reveal by hand, so players see only what you reveal of the new picture. A scene you have already built on keeps its setting. On the scene the players are on, you choose as you pick the image: untick **Start it under fog, so they see only what you reveal** to keep it on Everything.
+
+### Time of day light
+
+A road, a village or a camp has a sun, and moving the light by hand at every dusk is a chore you will forget. **Time of day**, the fourth choice of **Light** once a clock runs (see [Time and the calendar](#time-and-the-calendar)), makes the scene follow the clock: Bright by day, Dim in the hour from dawn and the hour from dusk, and Dark at night. You choose when dawn and dusk come (see [Dawn and dusk](#dawn-and-dusk)).
+
+![The Light group in the Scenes panel with Time of day chosen beside Bright, Dim and Dark, and its help: it follows the time of day, and it is Dim now.](dm-guide/light-time-of-day.webp)
+
+The level changes in the same step that moves the clock. A step, **Set the date and time**, a Long Rest, the end of a fight and an **Undo** that moves the clock each work the level out again, so Undo puts the light back with the time. A fight's rounds never change it on their own, so a fight that runs past dusk darkens the map when you end it. Opening a door and building never change it.
+
+Picking **Bright**, **Dim** or **Dark** by hand takes the scene off the clock. So does switching to a map phase with a light of its own, since you chose that light on purpose. A phase set to **Leave the light** keeps the scene on Time of day.
+
+Players see the map change and never the setting behind it. With the clock hidden they still see the light change, though not the date or time, and the help under Light says so. **Stop the clock** keeps the choice, and the light follows again once a clock runs. The change writes no Log line, since the map changing is the news. **Copy to other scenes…**, and **Like** on a new scene, copy the choice with the rest of the light.
 
 ### Using one scene's settings on others
 
@@ -754,7 +766,7 @@ If the connection drops during **Make the scene**, the app opens the new scene a
 2. Once there are two or more phases, a row of chips switches between them with one tap. On a computer, the **Phase** menu in the top bar does the same.
 3. **Edit** lets you rename a phase, move it in the list, or remove it.
 
-A phase can also set the scene's light. Under **Light and weather**, **Light per phase** picks Bright, Dim, Dark or **Leave the light** for each phase, so switching to Night can make the scene dark. It won't turn party vision on by itself, though, and light matters only while party vision is on.
+A phase can also set the scene's light. Under **Light and weather**, **Light per phase** picks Bright, Dim, Dark or **Leave the light** for each phase, so switching to Night can make the scene dark. It won't turn party vision on by itself, though, and light matters only while party vision is on. A phase with its own light also takes the scene off Time of day (see [Time of day light](#time-of-day-light)).
 
 **Universal VTT files.** If you make maps in Dungeondraft, Dungeon Alchemist, Arkenforge or DungeonFog, you can bring in a whole map, walls, doors and lights included. Choose **From a Universal VTT file** under New scene and pick a `.dd2vtt`, `.uvtt` or `.df2vtt` file. The app reads the file and shows you what it found ("412 walls (380 on the grid, 32 free), 14 doors, 3 windows, 9 lights") before it makes anything. Then choose:
 
@@ -949,7 +961,7 @@ For more control over a condition, use **Add** in the **Conditions** section of 
 
 - **Exhaustion level** (1 to 6), or a **Counter** for rounds or charges left, shown on the condition's icon.
 - **Spell**, for Concentrating ("Concentrating: Bless").
-- **Duration**: a number of rounds, or until the start or end of a chosen creature's next turn. Durations count down as Initiative moves, and everyone is told when one ends.
+- **Duration**: a number of rounds, until the start or end of a chosen creature's next turn, or, while a clock runs, a length of time such as 8 hours (see [Timed effects](#timed-effects)). A count of turns goes down as Initiative moves, and everyone is told when any duration ends.
 - **A Wisdom save at the end of each of its turns ends it**, with the save and its DC, for conditions such as Hold Person's. See [Alerts during a fight](#alerts-during-a-fight).
 - **Hidden from players**: nobody but you sees the condition, not even the creature's owner, and the log shows it to you alone.
 - **Custom status**: your own label, an icon of up to 2 characters or an emoji, and a color.
@@ -1899,7 +1911,7 @@ If your group plays around a table, a TV can show the players' view of the map, 
 
 ![Add a TV in the DM panel: the code to type on the TV and how long it lasts, beside the map.](dm-guide/table-display.webp)
 
-The display shows the players' scene the way the players see it: fog, party vision, tokens, shared areas, drawings, pings and rulers, and handouts shown to everyone. On a scene where each player sees for themselves, it shows only what the creatures that share sight with the party see (see [Sight for each player](#sight-for-each-player)). Panels, chat and the Initiative strip stay off it, and to show whose turn it is, tap the display and turn on **Show whose turn it is**.
+The display shows the players' scene the way the players see it: fog, party vision, tokens, shared areas, drawings, pings and rulers, and handouts shown to everyone. On a scene where each player sees for themselves, it shows only what the creatures that share sight with the party see (see [Sight for each player](#sight-for-each-player)). Panels, chat and the Initiative strip stay off it, and to show whose turn it is, tap the display and turn on **Show whose turn it is**. **Show the date and time**, beside it, adds a pill such as "Day 4, 6:00 AM, Dawn" under the turn. Both start off, the display remembers them, and the date shows only while you share the clock with players and no blackout is on.
 
 To have the display show what your own screen shows, turn on **Show my view on the table display** in the DM panel, then tap the display and pick **Follow the DM**. The display's menu also has its own **View**, so the TV can show the map in Isometric while your screen stays Top-down, or the other way round (see [The isometric view](#the-isometric-view)). A room can have up to 4 displays.
 
@@ -1999,10 +2011,10 @@ Nothing reaches the table before that last press. A clock you start hidden never
 
 ### Moving the clock on
 
-With the clock running, Time's top shows the date, the time and the part of the day. The parts are fixed: Dawn from 6 to 7 AM, Morning until noon, Afternoon until 6 PM, Dusk from 6 to 7 PM and Night until 6 AM. Under it, **Move the clock on** has four buttons:
+With the clock running, Time's top shows the date, the time and the part of the day. The parts follow dawn and dusk (see [Dawn and dusk](#dawn-and-dusk)), which start at 6:00 AM and 6:00 PM: Dawn is the hour from dawn, Morning runs until noon, Afternoon until dusk, Dusk is the hour from dusk and Night runs until dawn. Under it, **Move the clock on** has four buttons:
 
 - **10 minutes**, **1 hour** and **8 hours** move it on by that much.
-- **To dawn** moves it to the next 6:00 AM. At exactly 6:00 AM it goes to the next morning's.
+- **To dawn** moves it to the next dawn, and its name says the time, such as "Move the clock on to dawn, 5:30 AM". At exactly dawn it goes to the next morning's.
 
 **Other amount…** opens a row for a number and a unit, **Minutes**, **Hours** or **Days**, and **Move on** sends it. A single step can be up to 100 years.
 
@@ -2015,6 +2027,14 @@ On a computer, a small chip in the top bar shows the date and time, such as "Dee
 **Set the date and time…** opens a dialog with the fields of your calendar. A Day count clock has a **Day** field. A Months clock has **Month**, **Day** and **Year**, and reads the weekday under them ("A Thursday."). **Time** is the phone's own time picker. If a day is past the end of its month, the dialog stays open and says so, such as "Pick a day from 1 to 30." Press **Set** to send it, or **Cancel** to leave.
 
 Set only sends what you changed. Press **Set** without touching a field and the clock stays exactly where it was. Change only the date and the clock keeps its seconds, such as the 18 seconds a three-round fight added. If another DM moves the month you picked while the dialog is open, the field follows it. If they remove or rename it, the **Month** field reads "Pick a month" until you choose another.
+
+### Dawn and dusk
+
+A new clock puts dawn at 6:00 AM and dusk at 6:00 PM. A winter campaign in the far north wants a late dawn and an early dusk, so the **Dawn and dusk** row in Time, after **Calendar…**, shows the two times and has **Change**. Change opens a **Dawn** and a **Dusk** field with **Save** and **Cancel**.
+
+![The Time panel's Dawn and dusk row open: its help line, the Dawn field at 5:30 AM, the Dusk field at 6:00 PM, and Save and Cancel above Stop the clock.](dm-guide/time-dawn-dusk.webp)
+
+Dawn can start from 12:00 AM to 11:00 AM and dusk from 12:00 PM to 11:00 PM, in whole minutes, and a time outside those says "Pick a dawn from 12:00 AM to 11:00 AM." or "Pick a dusk from 12:00 PM to 11:00 PM." under its field. Each lasts an hour. They set the part of the day on the panel and the chip, the time **To dawn** moves to and the light of scenes on Time of day. Players read the part of the day through the same times while they share the clock. Saving is a setup step, "changing dawn and dusk", in **Setup history**, and writes no line to the Log.
 
 ### Who sees it
 
@@ -2052,6 +2072,20 @@ A fight moves the clock on 6 seconds a round, the rules' length of a round, and 
 **Long Rest for the party**, in the **Characters** panel, has a checkbox while a clock runs: **Move the clock on 8 hours**, ticked each time. **Finish the Long Rest** then moves the clock on first and rests everyone, so each character's rest ends at the new time. One **Undo** takes the whole rest back, as long as nothing else changed in between. A Long Rest of one character, from its own **Rest** section, never moves the clock, since two players resting would move it twice.
 
 The app remembers when each character's last Long Rest ended, and shows it only to you. The rules ask for 16 hours between Long Rests, so when you open the party's rest, or choose a Long Rest for one character, a note says when each character who has one can start the next: "Bree finished a Long Rest at Day 4, 6:00 AM. The next can start from Day 4, 10:00 PM." Characters who finished one at the same moment share one sentence, such as "Bree and Thorn finished a Long Rest at Midwinter, 5:00 PM. The next can start from Thaw 1, 9:00 AM.", and a date in the clock's current year leaves out its weekday and year. The note never stops a rest. Once the time has come it goes away, a little later for a rest that did not move the clock, since the app records when such a rest was finished but not when it began.
+
+### Timed effects
+
+A spell such as Mage Armor lasts 8 hours, and counting turns for it means nothing. While a clock runs, the **Duration** select of a condition's form, in the Token panel or on a character's page, lists **1 minute**, **10 minutes**, **1 hour**, **8 hours**, **24 hours** and **Other length of time**. Other opens a number and a unit, **Minutes**, **Hours** or **Days**, from 1 minute to 365 days.
+
+![Bree's Conditions in the Characters panel: Blessed, lasting 8 hours, to Day 3, 2:20 AM, and Hasted, lasting 90 minutes, to 7:50 PM, each with the time left.](dm-guide/effect-time-span.webp)
+
+The effect ends in the step that brings the clock to its end, whether you move the clock on, set it, take a Long Rest, end a fight or **Undo** a step. It ends as any effect does, with its line in the Log and a notice on every device that gets the line, such as "Mage Armor ended on Bree." Setting the clock back gives a running effect more time, and one that already ended stays ended.
+
+In a fight the clock moves only as a round starts, so a 1 minute spell cast in round 1 ends as round 11 begins, at 6 seconds a round. The row says so: "Lasts 1 minute, to the start of round 11". **Previous** brings the effect back with the round, unless you have moved the clock past its end since. Use **N rounds** for an effect that must end on a particular creature's turn.
+
+**Stop the clock** ends nothing. An effect on a stopped clock reads "Lasts 1 hour, on a clock that stopped" and waits for you to remove it, and **Undo setup** of the stop brings the clock back, so the effect counts again.
+
+Players with the clock shared see when an effect ends, and can pick a length of time for their own effects. With the clock hidden they see how long an effect lasts and not when it ends, and a length of time they send is refused with "The DM isn't sharing the date and time." With no clock the form lists no lengths and says "Start the clock in Time to count minutes and hours." Group saves and trap rigs still count rounds and turns.
 
 ### The Log and the journal
 
