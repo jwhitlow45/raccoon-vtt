@@ -22,7 +22,11 @@ repository to exist.
 1. On main, bump `version` in `package.json` to the new `X.Y.Z` and run
    `pnpm selfhost`, which writes the new `X.Y` into `selfhost/`, and
    `pnpm readme-button`, which draws the new version into the Docker Hub
-   button at the top of the README (it needs Chrome).
+   button at the top of the README (it needs Chrome). Then, in the
+   [update notes](self-hosting.md#update-notes), add the release's row to
+   the top of the table, with `SNAPSHOT_VERSION` and `OP_VERSION` from
+   `shared/migrate.ts`, rename the **Since** group, named for the release
+   before, to **vX.Y.Z**, and open a new **Since vX.Y.Z** group above it.
 2. Regenerate the changelog before tagging. Replace `X.Y.Z` with the new
    version:
 
