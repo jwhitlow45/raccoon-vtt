@@ -12,15 +12,18 @@ export function guideHref(section?: string): string {
 
 /**
  * The guide's screenshots are 1280 by 800, a computer's window, except the
- * ones taken on a phone. The page gives each image its size before it
+ * ones taken on a phone and the table display's, which stops above the
+ * pairing QR code so no address shows. The page gives each image its size before it
  * loads, so the text never moves under a reader who followed a link to a
  * section. guide.test.ts reads every file's real size against this.
  */
 const DEFAULT_SIZE = { width: 1280, height: 800 };
 const PHONE_SIZE = { width: 390, height: 844 };
+const TABLE_DISPLAY_SIZE = { width: 1280, height: 491 };
 const PHONE_SHOTS = new Set(["screen-phone.webp", "reveal-blackout.webp", "phone-strip.webp", "discovery-player.webp", "sheet-handle.webp", "ask-to-join.webp", "sheet-arrows.webp", "music-up-next.webp"]);
 
 export function guideImageSize(fileName: string): { width: number; height: number } {
+  if (fileName === "table-display.webp") return TABLE_DISPLAY_SIZE;
   return PHONE_SHOTS.has(fileName) ? PHONE_SIZE : DEFAULT_SIZE;
 }
 
