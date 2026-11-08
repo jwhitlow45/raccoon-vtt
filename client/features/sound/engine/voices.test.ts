@@ -873,4 +873,31 @@ describe("the voices on the pool", () => {
     assert.equal(states.at(-1), "failed");
     voices.dispose();
   });
+
+  test("a voice released late, as a throttled tab's timer runs it, leaves the handlers of a newer voice that took its element", async () => {
+    const clock = { ms: 0 };
+    const now = mock.method(performance, "now", () => clock.ms);
+    try {
+      const t = { now: T };
+      const states: MusicState[] = [];
+      const { voices, pool } = rig(t, { gestures: new EventTarget(), onMusic: (s) => states.push(s) });
+      voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+      const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+      voices.update([], () => SHORT_FADE_MS);
+      // Its release is due in 350 ms, but a socket's message comes first, after the clock passed that.
+      clock.ms += 1_000;
+      const road: Playing = { ...quiet, music: { run: "r2", repeat: "all", fade: 5, now: { soundId: "road", at: T - 1_000 } } };
+      voices.update(planVoices(road, SOUNDS, t.now), () => SHORT_FADE_MS);
+      assert.equal(el.src, "/api/assets/a-road", "the newer voice took the element");
+      await wait(SHORT_FADE_MS + 100);
+      assert.ok(el.onerror && el.onplaying, "its handlers are still there");
+      assert.ok(!el.paused);
+      el.error = { code: 4 };
+      el.onerror();
+      assert.equal(states.at(-1), "failed", "so its file's error still reaches the line");
+      voices.dispose();
+    } finally {
+      now.mock.restore();
+    }
+  });
 });

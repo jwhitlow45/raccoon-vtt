@@ -690,11 +690,14 @@ export class Voices {
     if (this.#live.get(v.plan.key) === v) this.#live.delete(v.plan.key);
     if (v.startTimer) clearTimeout(v.startTimer);
     v.startTimer = null;
-    v.el.onerror = null;
-    v.el.onplaying = null;
-    v.el.onwaiting = null;
-    // Only once no newer voice took the element.
-    if (![...this.#live.values()].some((o) => o.index === v.index)) v.el.pause();
+    // Only once no newer voice took the element. A release timer a throttled tab runs late can find one there: its element
+    // looked free once the fade's time had passed.
+    if (![...this.#live.values()].some((o) => o.index === v.index)) {
+      v.el.onerror = null;
+      v.el.onplaying = null;
+      v.el.onwaiting = null;
+      v.el.pause();
+    }
     v.fade.disconnect();
     v.env.disconnect();
     v.mix.disconnect();

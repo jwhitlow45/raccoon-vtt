@@ -24,6 +24,8 @@ import { leaveMs, planVoices, Voices, type MusicState } from "./voices.ts";
  *   track starts that was not there when it said loading.
  * - A stopped page's elements are all paused once their fades are over,
  *   the longest a stop's 2 s for a voice that was leaving already.
+ * - Every voice's element keeps its handlers, its error's and its start's,
+ *   though the voice it took the element from is released after it.
  */
 
 const T = 1_000_000;
@@ -188,6 +190,11 @@ async function walk(seed: number): Promise<string[]> {
       voices.check();
     }
     await flush();
+    const live = voices.snapshot();
+    for (const sound of new Set(live.map((v) => v.sound))) {
+      const handled = pool.filter((e) => e.onerror && e.onplaying && e.src === `/api/assets/a-${sound}`).length;
+      if (handled < live.filter((v) => v.sound === sound).length) world.failures.push(`${world.step}: a ${sound} voice's element lost its handlers`);
+    }
     if (!world.active && voices.snapshot().length > 0) world.failures.push(`${world.step}: a voice sounds on a stopped page`);
     if (stoppedAt !== null && world.clock - stoppedAt > STOP_FADE_MS + 100 && pool.some((el) => !el.paused)) world.failures.push(`${world.step}: an element plays after the stop's fade`);
   }
