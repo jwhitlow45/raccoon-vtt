@@ -81,6 +81,25 @@ describe("a ring on the board (ON_BOARD) is two-tone", () => {
   });
 });
 
+describe("reduced motion", () => {
+  /** The declarations of the reduced-motion block's rule for every element. */
+  function reducedAll(): string {
+    const block = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce) {"));
+    const open = block.indexOf("*::after {");
+    assert.ok(open >= 0, "the reduced-motion block has a rule for every element");
+    return block.slice(open, block.indexOf("}", open));
+  }
+
+  test("turns transitions off, so a style change lands in the frame that makes it (REDUCED-MOTION-ALL)", () => {
+    const all = reducedAll();
+    // A duration given to every element would start a transition on every property of every element, as `all` is the default.
+    assert.match(all, /transition: none !important;/);
+    assert.doesNotMatch(all, /transition-duration/);
+    // Animations still end on their last frame, so a forwards fill holds.
+    assert.match(all, /animation-duration: 0\.01ms !important;/);
+  });
+});
+
 function escape(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

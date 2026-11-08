@@ -406,11 +406,15 @@ select:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* No transitions at all, rather than a short one: a duration given to
+     every element starts a transition on every property that changes, since
+     `all` is the default, so a style change would land a frame late. No
+     code waits for a transition's end. */
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+    transition: none !important;
   }
 
   /* Cut to 0.01 ms, the tray would jump to its faded end. Still, the scrim, the rings and the disc hold for the dice's 2 s, which then go, and a toast's ring holds for its toast. */
