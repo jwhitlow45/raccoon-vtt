@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { projectArchivedLog } from "#shared/project.ts";
+import { mainFloorId } from "#shared/rules/floors.ts";
 import { accessErrors, type AuthKit, HttpError, roomParam } from "../auth/http.ts";
 import { ReceiptLines, receiptWait } from "../rooms/logHistory.ts";
 import { ScanBusyError, ScanCancelledError } from "../rooms/logScanBudget.ts";
@@ -74,7 +75,9 @@ export async function registerReceiptRoutes(app: FastifyInstance, kit: AuthKit, 
         // The state is taken after the rows are read, once it holds every committed receipt's op (stateThrough).
         const found = await archive.lookup(roomId, viewer, tag.data, signal, (rows) => stateThrough(actor, newestCommitted(rows), signal));
         const { rows, state, lines } = found;
-        const scene = grant.role === "dm" ? state.meta.playerSceneId : null;
+        // The DM's lines read as on the players' scene, every floor of it (docs/design/design-v1-floors.md 8.3).
+        const start = grant.role === "dm" ? state.meta.playerSceneId : null;
+        const scene = start === null ? null : mainFloorId(state, start);
         const parts: ReceiptPart[] = [];
         for (const row of rows) {
           if (row.state === "refused" || row.seq === null) {

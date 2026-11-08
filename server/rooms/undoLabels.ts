@@ -24,7 +24,9 @@ import { cellWord, SQUARES, type Grid } from "#shared/rules/grid.ts";
  * never names anything its reader could not see when they acted.
  */
 export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, after?: RoomState): string {
-  const scene = (id: string) => the("scene", before.scenes[id]?.name);
+  const scene = (id: string) => the("scene", placeOf(before, id));
+  // A floor by its own name, as Floors lists it (docs/design/design-v1-floors.md 7.1).
+  const floor = (state: RoomState, id: string) => quoted(state.scenes[id]?.floor?.name, "a floor");
   const token = (id: string) => tokenName(viewer?.role === "player" ? seenBy(before, viewer, id) : before.tokens[id]);
   const target = (t: ActorTarget) => ("tokenId" in t ? token(t.tokenId) : quoted(before.characters[t.characterId]?.name, "a character"));
   switch (op.t) {
@@ -47,8 +49,13 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
     case "member.update":
       return "changing your name or color";
     case "scene.create":
+      // The reducer names a new floor, so the label reads the state after it (docs/design/design-v1-floors.md 9).
+      if (op.floor !== undefined) return `adding ${after ? floor(after, op.scene.id) : "a floor"}`;
       return `adding ${the("scene", op.scene.name)}`;
     case "scene.update":
+      if (op.patch.floor !== undefined && Object.keys(op.patch).length === 1) {
+        return op.patch.floor.name !== undefined ? `renaming ${floor(before, op.sceneId)}` : `changing the height of ${floor(before, op.sceneId)}`;
+      }
       if (op.patch.folder !== undefined && Object.keys(op.patch).length === 1) {
         return op.patch.folder === null ? `taking ${scene(op.sceneId)} out of its folder` : `moving ${scene(op.sceneId)} to ${the("folder", op.patch.folder)}`;
       }
@@ -78,8 +85,12 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `changing ${scene(op.sceneId)}`;
     case "vision.holders":
       return `choosing who sees for themselves on ${scene(op.sceneId)}`;
-    case "scene.delete":
-      return `deleting ${scene(op.sceneId)}`;
+    case "scene.delete": {
+      // Remove floor takes one floor, and Delete a scene's main floor takes every floor with it (docs/design/design-v1-floors.md 9).
+      const of = before.scenes[op.sceneId]?.floor?.of;
+      if (of !== undefined && of !== op.sceneId) return `removing ${floor(before, op.sceneId)}`;
+      return `deleting ${the("scene", before.scenes[op.sceneId]?.name)}`;
+    }
     case "scene.reorder":
       return "reordering scenes";
     case "scene.setMap":
@@ -91,11 +102,12 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `switching ${scene(op.sceneId)} to ${the("phase", phase?.name)}`;
     }
     case "scene.duplicate":
-      return `duplicating ${scene(op.sceneId)}`;
+      // Duplicate copies every floor of the scene (docs/design/design-v1-floors.md 9), so it names the scene alone.
+      return `duplicating ${the("scene", before.scenes[op.sceneId]?.name)}`;
     case "floor.order":
-      return `reordering the floors of ${scene(op.sceneId)}`;
+      return `reordering the floors of ${the("scene", before.scenes[op.sceneId]?.name)}`;
     case "floor.open":
-      return op.open ? `showing ${scene(op.sceneId)} to players` : `hiding ${scene(op.sceneId)} from players`;
+      return op.open ? `showing ${floor(before, op.sceneId)} to players` : `hiding ${floor(before, op.sceneId)} from players`;
     case "token.create":
       return `adding ${tokenName(op.token)}`;
     case "token.update": {
@@ -672,6 +684,19 @@ function erasingLabel(e: Erased): string {
 
 /** A use as its undo phrase says it: "using Rain as background". */
 const USE_WORDS = { music: "music", loop: "background", effect: "an effect" } as const;
+
+/**
+ * A scene's name, and on a floor of a scene with floors the floor's too,
+ * "Tower · Upper floor", as the DM's place words name it
+ * (docs/design/design-v1-floors.md 18.6), so a step on one floor never reads as
+ * a step on another.
+ */
+function placeOf(state: RoomState, sceneId: string): string | undefined {
+  const scene = state.scenes[sceneId];
+  if (!scene?.floor) return scene?.name;
+  const name = quoted(scene.name, "");
+  return name ? `${name} · ${quoted(scene.floor.name, "a floor")}` : undefined;
+}
 
 /** "the scene Cave", or "a scene" when it has no name to give. */
 function the(kind: string, name: string | undefined): string {

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { BuildChunk, FogTile, Label, RoomState, Scene, Stamp, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
+import { playersSee } from "#shared/rules/floors.ts";
 import { WindowLimiter } from "../assets/limits.ts";
 import { accessErrors, type AuthKit, HttpError, requireGrant, roomParam } from "../auth/http.ts";
 import { ActorClosedError } from "../rooms/actor.ts";
@@ -21,13 +22,14 @@ import type { RoomManager } from "../rooms/manager.ts";
  * 404 `room_not_found`, 404 `not_found` for a scene the room lacks, 429
  * `rate_limited` and 503 `busy`, both with Retry-After.
  *
- * The players' scene answers what a table display's snapshot holds of it.
- * Any other scene, or the players' scene behind a blackout, answers it as
- * nobody looks at it now: no party sight, so its held ground is the DM's
- * fog and the party's explored layer, live only where the DM revealed it
- * and as the party remembers it elsewhere. That is what players know of a
- * scene they left, and what they know behind a pause, since the map step
- * counts no sight there either (5.3).
+ * A floor players see now (playersSee: the players' scene, or a floor of it
+ * players have reached, outside a blackout) answers what a table display's
+ * snapshot holds of it. Any other scene or floor, or one behind a blackout,
+ * answers it as nobody looks at it now: no party sight, so its held ground
+ * is the DM's fog and the party's explored layer, live only where the DM
+ * revealed it and as the party remembers it elsewhere. That is what players
+ * know of a scene they left, and what they know behind a pause, since the
+ * map step counts no sight there either (5.3).
  */
 export type PlayerView = {
   /** The scene as players' copy holds it. With fog on its `autoWalls` is "off": the chunks carry the automatic walls players hold, in `auto`. */
@@ -88,17 +90,19 @@ async function committedState(manager: RoomManager, roomId: string): Promise<Roo
 export function playerView(state: RoomState, sceneId: string): PlayerView | null {
   // By own keys only, so a scene id such as "__proto__" names nothing.
   if (!Object.hasOwn(state.scenes, sceneId)) return null;
-  const looking = state.meta.playerSceneId === sceneId && !state.meta.view.blackout;
+  const looking = playersSee(state, sceneId);
   const seen = projectState(looking ? state : unwatched(state, sceneId), TABLE, { sceneId: null });
   const scene = Object.hasOwn(seen.scenes, sceneId) ? seen.scenes[sceneId] : undefined;
   if (!scene) return null;
-  return { scene, buildChunks: seen.buildChunks, labels: seen.labels, stamps: seen.stamps, fogTiles: seen.fogTiles };
+  // A display holds every floor players reached (docs/design/design-v1-floors.md 8), and the export is of this one.
+  const here = <T extends { sceneId: string }>(all: Record<string, T>) => Object.fromEntries(Object.entries(all).filter(([, v]) => v.sceneId === sceneId));
+  return { scene, buildChunks: here(seen.buildChunks), labels: here(seen.labels), stamps: here(seen.stamps), fogTiles: here(seen.fogTiles) };
 }
 
 /**
- * The room as if the players stood on the scene with nobody looking: a
- * display projects only the players' scene, and only outside a blackout,
- * and with the scene's creatures gone its party sight is empty. Its ground
+ * The room as if the players started on the scene with nobody looking: a
+ * display projects only floors of the players' scene, and only outside a
+ * blackout, and with the floor's creatures gone its party sight is empty. Its ground
  * is then the one the real room gives a scene the players are not on
  * (rules/held.ts classSight), labels and stamps included. Only the scene
  * and the four collections are read from the projection, so nothing else

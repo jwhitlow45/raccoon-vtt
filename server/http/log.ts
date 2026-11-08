@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type pg from "pg";
 import { z } from "zod";
 import type { Viewer } from "#shared/model.ts";
+import { mainFloorId } from "#shared/rules/floors.ts";
 import { accessErrors, type AuthKit, enforce, HttpError, requireGrant, roomParam } from "../auth/http.ts";
 import { sha256 } from "../auth/tokens.ts";
 import type { GrantContext } from "../auth/types.ts";
@@ -281,7 +282,9 @@ export async function registerLogRoutes(app: FastifyInstance, kit: AuthKit, deps
         const actor = await deps.manager.acquire(roomId);
         const committed = actor.committed;
         if (as !== undefined && committed.state.members[as]?.kind !== "player") throw new HttpError(403, "no_access");
-        const scene = grant.role === "dm" && as === undefined ? (sceneId ?? committed.state.meta.playerSceneId) : null;
+        // A DM's page reads the scene they view, every floor of it, named by its main floor as their socket is (docs/design/design-v1-floors.md 10).
+        const asked = grant.role === "dm" && as === undefined ? (sceneId ?? committed.state.meta.playerSceneId) : null;
+        const scene = asked === null ? null : mainFloorId(committed.state, asked);
         const viewer: Viewer = as === undefined ? { memberId: grant.memberId, role: grant.role } : { memberId: as, role: "player" };
         const view = captureView(committed, roomId, viewer, { sceneId: scene, previewBy: as === undefined ? null : grant.memberId });
         opened = openScan(reply, "page", roomId, grant.memberId, pageMs);
