@@ -51,7 +51,7 @@ import { IsoGroundContext, TreeShownContext, useShownView, useTreeShown, useTree
 import { drawRun, runPaintedBox, standeePaintedBox, type DrawContext, type GroundCopy } from "./drawRelief.ts";
 import { FogView } from "./fogView.ts";
 import { cellLook, CellTints, hexLook, imageReader } from "./looks.ts";
-import type { VBox } from "./pieces.ts";
+import { heldPainted, type VBox } from "./pieces.ts";
 import { floorOf, leafDoorKey, pillarPieces, wallPieces, type WallPiece } from "./runs.ts";
 import { FrameScheduler, type KeptLayer } from "./scheduler.ts";
 import { keptHost, onDeviceGrid, screenBox } from "./kept.ts";
@@ -229,6 +229,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       src: {
         ground: (x, y) => heights.at(x, y),
         terrain: (x, y) => terrainAt(chunks, scene.id, x, y),
+        painted: heldPainted(chunks, scene.id),
         look: (x, y, t) => (isHex(grid) ? hexLook(fog, tints, grid, { col: x, row: y }, t) : cellLook(fog, tints, x, y, t)),
         bounds: { w, h },
         grid,

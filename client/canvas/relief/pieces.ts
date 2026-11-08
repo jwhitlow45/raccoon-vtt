@@ -1,4 +1,5 @@
 import { CHUNK_CELLS, type BuildChunk, type TerrainId } from "#shared/model.ts";
+import { paintedAt } from "#shared/rules/autoWalls.ts";
 import { isHex, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { chunkMarks, STEP } from "#shared/rules/heights.ts";
 import type { Point } from "../../lib/camera.ts";
@@ -471,7 +472,22 @@ export type PieceSource = {
   runs?: StairRuns;
   /** Whether the detail shows (view.ts heightsDetail): only then does a stepping stair draw its steps, and its neighbors' faces read them. */
   detail?: boolean;
+  /**
+   * Whether this device holds a cell painted, a stair mark included, as its
+   * chunks do (heldPainted). An automatic wall between two such cells
+   * stands as a drawn one (standOf). None painted when left out.
+   */
+  painted?: (x: number, y: number) => boolean;
 };
+
+/**
+ * PieceSource.painted from a device's chunks, by the one painted predicate
+ * the walls read. A player's chunk holds only the cells its fog class
+ * holds, so a cell it does not hold reads unpainted.
+ */
+export function heldPainted(chunks: Readonly<Record<string, BuildChunk>>, sceneId: string): (x: number, y: number) => boolean {
+  return (x, y) => paintedAt(chunks, sceneId, x, y) !== "empty";
+}
 
 /** The column, pit and steps pieces of one 16 by 16 bucket of keys, the chunk at cx, cy. */
 export function cellPieces(src: PieceSource, cx: number, cy: number, chunk: BuildChunk | undefined): CellPiece[] {
@@ -587,8 +603,12 @@ function sideJoins(src: PieceSource, x: number, y: number, z: number, around: re
  * reaches that top no piece stands, since the raised ground's own side is
  * the wall. A pit's floor never brings that top below a wall on the ground
  * at 0, so a pit at a room's edge and a sunken room keep their rim.
+ * Between two cells the device holds painted there is no raised ground's
+ * side to be the wall, so an automatic wall there stands as a drawn one, as
+ * every rule of the device reads it (docs/design/design-v1-maps-vision.md
+ * 2.1): a hidden secret door beside a raised room never stands as nothing.
  */
-export function wallItems(src: Pick<PieceSource, "ground" | "detail">, pieces: readonly WallPiece[], near: readonly WallPiece[] = pieces): WallItem[] {
+export function wallItems(src: Pick<PieceSource, "ground" | "detail" | "painted">, pieces: readonly WallPiece[], near: readonly WallPiece[] = pieces): WallItem[] {
   const out: WallItem[] = [];
   const detail = src.detail === true;
   for (const piece of pieces) {
@@ -612,14 +632,15 @@ export function wallItems(src: Pick<PieceSource, "ground" | "detail">, pieces: r
 }
 
 /** Where a piece stands, from `base` up `rise` cells (wallItems), or null where an automatic wall has nothing left to show. */
-function standOf(src: Pick<PieceSource, "ground">, piece: WallPiece): { base: number; rise: number } | null {
+function standOf(src: Pick<PieceSource, "ground" | "painted">, piece: WallPiece): { base: number; rise: number } | null {
   // On hexes a run stands on its host's ground, on a shared side the higher of the two, off the scene on 0 (D-261030-461).
   if (piece.hosts) return { base: Math.max(...piece.hosts.map((h) => src.ground(h.cell.col, h.cell.row))), rise: WALL_RISE };
   if (!piece.beside) return { base: src.ground(piece.cx, piece.cy), rise: WALL_RISE };
   const a = src.ground(piece.beside[0], piece.beside[1]);
   const b = src.ground(piece.beside[2], piece.beside[3]);
   const high = Math.max(a, b);
-  if (!piece.auto) return { base: high, rise: WALL_RISE };
+  const painted = src.painted;
+  if (!piece.auto || (painted !== undefined && painted(piece.beside[0], piece.beside[1]) && painted(piece.beside[2], piece.beside[3]))) return { base: high, rise: WALL_RISE };
   const top = Math.min(high, Math.max(Math.min(a, b), 0)) + WALL_RISE;
   // Ground is whole feet over feet per cell, so a top level with the higher ground can land a float's hair above it, which would draw a hairline. A real rise is at least 1 / 200 cell.
   if (top - high < 1e-9) return null;
@@ -633,7 +654,7 @@ type EndIndex = Map<string, EndEntry[]>;
 const endKey = (p: Point) => `${Math.round(p.x * 1e6)},${Math.round(p.y * 1e6)}`;
 
 /** The standing walls and frames on squares near a bucket, filed by each of their ends. */
-function endIndex(src: Pick<PieceSource, "ground">, near: readonly WallPiece[]): EndIndex {
+function endIndex(src: Pick<PieceSource, "ground" | "painted">, near: readonly WallPiece[]): EndIndex {
   const index: EndIndex = new Map();
   for (const q of near) {
     if (q.hosts || (q.kind !== "wall" && q.kind !== "door" && q.kind !== "open" && q.kind !== "window")) continue;
