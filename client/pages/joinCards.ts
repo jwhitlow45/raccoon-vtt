@@ -44,3 +44,32 @@ export function askView(input: { tapped: boolean; found: boolean; spent: boolean
   if (input.tapped) return "ask";
   return input.found && !input.spent && !input.linked ? "ask" : "password";
 }
+
+/** How often the page reads the room's mode again while it says "Requests are off" over the password card. */
+export const CLOSED_POLL_MS = 15_000;
+
+/** The parts of the browser the poll listens to, apart so a test can stand in for them. */
+export type ClosedPollEnv = {
+  page: { visibilityState: string; addEventListener(type: string, fn: () => void): void; removeEventListener(type: string, fn: () => void): void };
+  win: { addEventListener(type: string, fn: () => void): void; removeEventListener(type: string, fn: () => void): void };
+};
+
+/**
+ * Reads on a timer, on focus and when the page comes back into view, but
+ * never for a hidden page, which would spend a request nobody sees.
+ * Returns the stop that removes every listener and the timer, called when
+ * the card it polled for is gone.
+ */
+export function startClosedPoll(refresh: () => void, env: ClosedPollEnv): () => void {
+  const read = () => {
+    if (env.page.visibilityState === "visible") refresh();
+  };
+  const timer = setInterval(read, CLOSED_POLL_MS);
+  env.win.addEventListener("focus", read);
+  env.page.addEventListener("visibilitychange", read);
+  return () => {
+    clearInterval(timer);
+    env.win.removeEventListener("focus", read);
+    env.page.removeEventListener("visibilitychange", read);
+  };
+}

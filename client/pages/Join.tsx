@@ -16,7 +16,7 @@ import { AskToJoin, OutcomeCard } from "./AskToJoin.tsx";
 import { completeWithRecovery, hasMember } from "./askToJoin.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
 import { HomeHeader } from "./Home.tsx";
-import { askView, joinCards } from "./joinCards.ts";
+import { askView, joinCards, startClosedPoll } from "./joinCards.ts";
 import {
   CHALLENGE_NOTICE,
   CHALLENGE_UNAVAILABLE,
@@ -191,9 +191,6 @@ export function Join(props: {
   );
 }
 
-/** How often the page reads the room's mode again while it says "Requests are off" over the password card. */
-const CLOSED_POLL_MS = 15_000;
-
 /**
  * Nothing tells a join page that the DM turned requests back on, so while
  * it says "Requests are off" over the password card it reads the room
@@ -205,17 +202,7 @@ function useClosedPoll(on: boolean, refresh: () => void): void {
   latest.current = refresh;
   useEffect(() => {
     if (!on) return;
-    const read = () => {
-      if (document.visibilityState === "visible") latest.current();
-    };
-    const timer = setInterval(read, CLOSED_POLL_MS);
-    window.addEventListener("focus", read);
-    document.addEventListener("visibilitychange", read);
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener("focus", read);
-      document.removeEventListener("visibilitychange", read);
-    };
+    return startClosedPoll(() => latest.current(), { page: document, win: window });
   }, [on]);
 }
 
