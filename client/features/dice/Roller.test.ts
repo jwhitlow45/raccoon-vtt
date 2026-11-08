@@ -41,7 +41,7 @@ function inRoom(viewer: Viewer, children: unknown[], scope = new RoomScope(), co
       actions: { dispatch: () => 1 } as never,
       ui: {} as never,
       assets: { url: () => "" } as never,
-      children: createElement(RoomScopeProvider, { scope, children: createElement(PanelHere, { id: "dice", shown, children: children as never }) as never }),
+      children: createElement(RoomScopeProvider, { scope, children: createElement(PanelHere, { id: "dice", shown }, ...(children as never[])) as never }),
     }),
   );
 }
