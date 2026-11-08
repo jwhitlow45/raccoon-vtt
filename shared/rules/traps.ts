@@ -2,12 +2,12 @@ import { CHUNK_CELLS, FOG_SUBCELLS, MIN_HEIGHT_FT, type BuildChunk, type CellRec
 import { chunkKey, wallMidpoint } from "../keys.ts";
 import { gridOfScene, playersToken, seenByNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
-import { stopsFileApart, stopsOnPublicGround, stopsOnTrap, stopsStandClear, stopsStandFullSize } from "../migrate.ts";
+import { followsInSingleFileOnHexes, stopsFileApart, stopsOnPublicGround, stopsOnTrap, stopsStandClear, stopsStandFullSize } from "../migrate.ts";
 import { isWritable } from "../writable.ts";
 import { creaturesInArea, type AreaToken } from "./aoe.ts";
 import { holderOf, insideHolder, linkHolds, onHolder, seatHolds, walkerFor } from "./attach.ts";
 import type { Rect } from "./geom.ts";
-import { footprintRect, footprintSize, isSqueezed, occupiedHexes, occupiedRange, rangeAtInto, sizeCategory, type CellRange, type PlacedToken } from "./footprint.ts";
+import { footprintRect, footprintSize, isSqueezed, occupiedHexes, occupiedRange, placedOnHex, rangeAtInto, sizeCategory, tokenRefHex, type CellRange, type PlacedToken } from "./footprint.ts";
 import { footing, footprintGround, groundAt, sceneGround, standing } from "./heights.ts";
 import { pendingGround } from "./held.ts";
 import { planWalks, walkedIn, withTrapCut, type MovedToken } from "./moveLeg.ts";
@@ -1764,7 +1764,7 @@ function cutWalks(walks: Walks, named: string, stop: Stop, points: number, befor
     const riders = seated.get(walk.token.id);
     if (walk.isPublic || !riders) continue;
     const on = riders.flatMap((t) => (landed.has(t.id) ? [{ token: t, at: landed.get(t.id)!.at(-1)! }] : []));
-    const route = seatingWalk(walk, stopIndex(walk, stop), on);
+    const route = seatingWalk(walk, stopIndex(walk, stop), on, isHex(walk.grid) && followsInSingleFileOnHexes(walks.opVersion));
     routes.set(walk, route);
     (inSingleFile(walk) ? file : kept).set(walk.token.id, route);
     landed.set(walk.token.id, route);
@@ -1794,8 +1794,9 @@ function stopIndex(walk: Walk, stop: Stop): number {
  * the file's order (route.ts fileOrder), steps back along its own walk,
  * whose spots the trap step already walked, to the latest one where it may
  * stop (`standsAt`, the stop's own test) and its box clears the boxes of
- * the stopped holder and of those ahead of it. With none, it keeps the
- * stop's spot. What rides on one comes back with it, at the same progress.
+ * the stopped holder and of those ahead of it, on hexes where it shares no
+ * hex with them (D-261107-172). With none, it keeps the stop's spot. What
+ * rides on one comes back with it, at the same progress.
  *
  * Each class of the file is worked out by itself, those every player sees
  * first, so none of their spots reads a walk they cannot see. Where its
@@ -1856,8 +1857,10 @@ function fileApart(walks: Walks, group: Group, s: Progress, before: RoomState, s
     }
     if (!drags(w) || back.get(w) === latest(w)) back.delete(w);
   };
-  const boxAt = (walk: Walk, j: number) => footprintRect(walk.grid, placedAt(walk, j));
-  const ahead: Rect[] = [boxAt(lead, latest(lead))];
+  // What a walk takes at spot `j`: on squares its box, on hexes its hexes, which a box round an anchor overlaps where no hex is shared.
+  const g = lead.grid;
+  const boxAt = (walk: Walk, j: number): Rect | ReadonlySet<string> => (isHex(g) ? new Set(occupiedHexes(g, placedAt(walk, j)).map(hexKey)) : footprintRect(walk.grid, placedAt(walk, j)));
+  const ahead: (Rect | ReadonlySet<string>)[] = [boxAt(lead, latest(lead))];
   // A class at a time, those every player sees first, so a hidden one never decides where a public one stands.
   for (const order of classes) {
     const was = ahead.length;
@@ -1907,8 +1910,13 @@ function fileApart(walks: Walks, group: Group, s: Progress, before: RoomState, s
   return back;
 }
 
-/** Whether two boxes share more than an edge. */
-function boxesOverlap(a: Rect, b: Rect): boolean {
+/** Whether two boxes share more than an edge, or two sets of hexes a hex. */
+function boxesOverlap(a: Rect | ReadonlySet<string>, b: Rect | ReadonlySet<string>): boolean {
+  if (!("x" in a) || !("x" in b)) {
+    if ("x" in a || "x" in b) return true;
+    for (const k of a) if (b.has(k)) return true;
+    return false;
+  }
   const e = 1e-9;
   return a.x < b.x + b.w - e && b.x < a.x + a.w - e && a.y < b.y + b.h - e && b.y < a.y + a.h - e;
 }
@@ -1938,11 +1946,24 @@ function walkTo(walk: Walk, j: number): RoutePoint[] {
  * off it is a new leg, which the private pass may stop short, but no token
  * players see moves for that: one with a walk of its own walks it whole
  * (moveLeg.ts follow, review FU45B-ASTRA-12), and the seat lets go
- * (D-261101-403).
+ * (D-261101-403). With `hexes`, from op version 51 on hexes, its own
+ * lattice is its own anchors and a pose off its spot stands on a
+ * neighboring hex, since a box half a square off an anchor snaps back.
  */
-function seatingWalk(walk: Walk, j: number, on: readonly { token: Token; at: RoutePoint }[]): RoutePoint[] {
+function seatingWalk(walk: Walk, j: number, on: readonly { token: Token; at: RoutePoint }[], hexes = false): RoutePoint[] {
   const lattice = routeLattice(walk.token);
-  const onLattice = (p: { x: number; y: number }) => [p.x - walk.token.x, p.y - walk.token.y].every((v) => Math.abs(v / lattice - Math.round(v / lattice)) < 1e-9);
+  // From op version 51 a holder on hexes stands on its own anchors, and a pose off its spot is a neighboring hex's (D-261107-172).
+  const g = walk.grid;
+  const anchored = (p: { x: number; y: number }) => {
+    if (!isHex(g)) return p;
+    return placedOnHex(g, walk.token, tokenRefHex(g, { ...walk.token, x: p.x, y: p.y }));
+  };
+  const onLattice = hexes
+    ? (p: { x: number; y: number }) => {
+        const a = anchored(p);
+        return Math.abs(a.x - p.x) < 1e-9 && Math.abs(a.y - p.y) < 1e-9;
+      }
+    : (p: { x: number; y: number }) => [p.x - walk.token.x, p.y - walk.token.y].every((v) => Math.abs(v / lattice - Math.round(v / lattice)) < 1e-9);
   const holds = (p: { x: number; y: number }) => on.every((s) => seatHolds(walk.grid, s.token.attached!.kind, { ...s.token, x: s.at.x, y: s.at.y }, { ...walk.token, x: p.x, y: p.y }));
   const seats = (p: { x: number; y: number }) => holds(p) && (on.length > 0 || onLattice(p));
   // Its spot, then back before on within a square of the stop at its step, nearest first.
@@ -1955,8 +1976,9 @@ function seatingWalk(walk: Walk, j: number, on: readonly { token: Token; at: Rou
   const route = walkTo(walk, j);
   const at = route[route.length - 1]!;
   const off: { x: number; y: number }[] = [];
-  // Along one axis before both.
-  for (const [dx, dy] of [[-0.5, 0], [0.5, 0], [0, -0.5], [0, 0.5], [-0.5, -0.5], [-0.5, 0.5], [0.5, -0.5], [0.5, 0.5]] as const) off.push({ x: at.x + dx, y: at.y + dy });
+  // Along one axis before both, or on hexes each neighboring hex in the lattice's order.
+  if (hexes && isHex(g)) for (const n of hexNeighbors(g, tokenRefHex(g, { ...walk.token, x: at.x, y: at.y }))) off.push(placedOnHex(g, walk.token, n));
+  else for (const [dx, dy] of [[-0.5, 0], [0.5, 0], [0, -0.5], [0, 0.5], [-0.5, -0.5], [-0.5, 0.5], [0.5, -0.5], [0.5, 0.5]] as const) off.push({ x: at.x + dx, y: at.y + dy });
   const pose = off.filter(seats).sort((a, b) => Number(!onLattice(a)) - Number(!onLattice(b)))[0];
   if (pose) route[route.length - 1] = { ...at, ...pose };
   return route;

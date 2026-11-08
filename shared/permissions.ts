@@ -1727,9 +1727,10 @@ function namedMoveCheck(c: Check, tokenId: string, to?: Pick<Token, "x" | "y"> &
  * The walls test of a player's group move (docs/design/design-v1-attach.md 4.2):
  * besides each named token's own legs, each dragged creature among the
  * public members walks its walk as the move takes it along, piece by
- * piece, on its own ground: the holder's route offset by its place, or on
- * squares, where the holder's own move ends squeezed, its walk in single
- * file (rules/moveLeg.ts singleFile). A step onto a seat and a get-off leg
+ * piece, on its own ground: the holder's route offset by its place, or,
+ * where the holder's own move ends squeezed, its walk in single file, on
+ * squares and from op version 51 on hexes, each step by the hex step test
+ * (rules/moveLeg.ts singleFile). A step onto a seat and a get-off leg
  * are walks too, so what the stepping token drags meets the walls as it
  * would on a move. What sits on its holder rides and is not tested, and a
  * dragged creature some player cannot see walks in the private pass,

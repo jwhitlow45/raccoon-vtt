@@ -305,9 +305,12 @@ function seatPlace(g: Grid, seated: PlacedToken, walker: PlacedToken, at: Point,
  * first to the spots, so a caller that puts the tokens every player sees
  * first keeps their seats from reading the rest. `walker` and the tokens
  * are as they stand where the walk starts, `at` the walker's stored box
- * where the walk ends. By id, every token of `classes`.
+ * where the walk ends. By id, every token of `classes`. On hexes the
+ * placements are anchors and the walk seats them so wherever the walker
+ * stands squeezed (`hexSeatsApart`).
  */
 export function squeezedSeatsApart(g: Grid, walker: PlacedToken, at: Point, classes: readonly (readonly (PlacedToken & { id: string })[])[], opVersion?: number): Map<string, Point> {
+  if (isHex(g)) return hexSeatsApart(g, walker, at, classes, opVersion);
   const out = new Map<string, Point>();
   const box = footprintRect(g, { ...unsqueezed(walker), x: at.x, y: at.y, squeeze: true });
   const taken: Rect[] = [];
@@ -327,6 +330,58 @@ export function squeezedSeatsApart(g: Grid, walker: PlacedToken, at: Point, clas
       taken.push(p.spot);
     }
     for (const token of seated) if (!out.has(token.id)) out.set(token.id, seatedAt(g, token, walker, at, true, opVersion));
+  }
+  return out;
+}
+
+/**
+ * `squeezedSeatsApart` on hexes (D-261107-173, D-261107-253, migrate.ts
+ * seatsApartOnHexes): each token's valid placements are the anchors of its
+ * size whose hexes all lie on the walker's squeezed stand at `at`
+ * (`hexPlacements`), as `hexSeatOn` accepts them, so a Large rider on a
+ * Huge mount squeezed onto three hexes has one. Of every pair of a token
+ * and a placement, nearest the seat the walk carries it to first, then by
+ * token id, then by the placement's lattice order, each is taken while
+ * every hex of the placement is free, and it reserves them all. One left
+ * with no free placement shares its nearest valid one, and one with none
+ * at all keeps its carried seat, both as `seatedAt` seats a lone token
+ * (DR-ASTRA-16). Each class is seated before the next, so a caller that
+ * puts the tokens every player sees first keeps their hexes from reading
+ * the rest. The seat reads only the stand and the tokens, never a walk.
+ */
+function hexSeatsApart(g: HexGrid, walker: PlacedToken, at: Point, classes: readonly (readonly (PlacedToken & { id: string })[])[], opVersion?: number): Map<string, Point> {
+  const out = new Map<string, Point>();
+  const stand = occupiedHexes(g, { ...unsqueezed(walker), x: at.x, y: at.y, squeeze: true });
+  const taken = new Set<string>();
+  for (const seated of classes) {
+    const pairs: { id: string; spot: Point; keys: string[]; order: number; d: number }[] = [];
+    for (const token of seated) {
+      const from = storedCenter({ ...unsqueezed(token), ...seatPlace(g, token, walker, at, opVersion) });
+      for (const [order, p] of hexPlacements(g, token, stand).entries()) pairs.push({ id: token.id, spot: p.spot, keys: p.hexes.map(hexKey), order, d: (p.anchor.x - from.x) ** 2 + (p.anchor.y - from.y) ** 2 });
+    }
+    pairs.sort((a, b) => (Math.abs(a.d - b.d) > EPS ? a.d - b.d : a.id < b.id ? -1 : a.id > b.id ? 1 : a.order - b.order));
+    for (const p of pairs) {
+      if (out.has(p.id) || p.keys.some((k) => taken.has(k))) continue;
+      out.set(p.id, p.spot);
+      for (const k of p.keys) taken.add(k);
+    }
+    for (const token of seated) if (!out.has(token.id)) out.set(token.id, seatedAt(g, token, walker, at, true, opVersion));
+  }
+  return out;
+}
+
+/** A placement of a token on hexes: where its stored box goes, its anchor, and its hexes. */
+export type HexPlacement = { spot: Point; anchor: Point; hexes: Hex[] };
+
+/** The anchors of a token's full size whose hexes all lie on `on`, as `hexSeatOn` accepts them, in the lattice order of their reference hexes. */
+export function hexPlacements(g: HexGrid, carried: PlacedToken, on: readonly Hex[]): HexPlacement[] {
+  const held = new Set(on.map(hexKey));
+  const out: HexPlacement[] = [];
+  for (const ref of [...on].sort((a, b) => latticeOrder(g, a, b))) {
+    const spot = placedOnHex(g, unsqueezed(carried), ref);
+    const seated = { ...unsqueezed(carried), x: spot.x, y: spot.y };
+    const hexes = fullHexes(g, seated);
+    if (hexes.every((h) => held.has(hexKey(h)))) out.push({ spot, anchor: hexAnchor(g, seated), hexes });
   }
   return out;
 }

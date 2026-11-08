@@ -12,7 +12,7 @@ import { ownEntry } from "./records.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 39;
-export const OP_VERSION = 50;
+export const OP_VERSION = 51;
 
 export type MigrationStep = {
   from: number;
@@ -1238,6 +1238,23 @@ export const opMigrations: MigrationStep[] = [
     to: 50,
     apply: (op) => op,
   },
+  {
+    // Rules 50, lane A (docs/design/design-v1-attach.md 4.2 and 5.1): no op
+    // changes shape, so the step is the identity. From this version, on
+    // hexes, the creatures of one hex a holder drags follow it in single
+    // file where its own move ends squeezed (`followsInSingleFileOnHexes`),
+    // and what sits on it takes hexes of its own wherever it stands squeezed
+    // (`seatsApartOnHexes`). Older ops replay by the rules they were
+    // written under, so they put each token where they put it then, and a
+    // stored restore's hash guards still match.
+    // Deploy: back up first and reload open pages, since an old page plans
+    // a drag into a corridor one hex wide by the old rule. Rollback needs
+    // the backup only for a room with version 51 ops after its last
+    // snapshot, which an older build refuses to migrate down.
+    from: 50,
+    to: 51,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -1681,6 +1698,35 @@ export function followsInSingleFile(opVersion: number | undefined): boolean {
  */
 export function seatsApart(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 38);
+}
+
+/**
+ * Whether, on hexes, the creatures of one hex a holder's walk drags along
+ * follow it in single file where the holder's own move ends squeezed
+ * (D-261107-172, route.ts hexFileRoutes): each walks from its own hex to
+ * the hex the holder's stand counts its steps from at each corner of the
+ * walk, and ends on the latest hex of that walk clear of the holder and of
+ * those ahead of it, so a goblin a warhorse drags goes with it into a
+ * corridor one hex wide. Each class of the drag decides for itself, the
+ * creatures every player sees by theirs alone (D-261107-252). Ops stored
+ * before version 51 took each by its place beside the holder all the way,
+ * and replay so. Live ops carry no stored version and take today's rule.
+ */
+export function followsInSingleFileOnHexes(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 51);
+}
+
+/**
+ * Whether, on hexes, what sits on a holder takes hexes of its own at every
+ * point of the holder's walk where it stands squeezed (D-261107-173,
+ * attach.ts squeezedSeatsApart), each on a placement whose hexes all lie
+ * on the squeezed stand and are free, so four riders on a Huge mount
+ * squeezed onto three hexes stop piling onto one. Ops stored before
+ * version 51 took each one's nearest placement alone, and replay so. Live
+ * ops carry no stored version and take today's rule.
+ */
+export function seatsApartOnHexes(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 51);
 }
 
 /**

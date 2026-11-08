@@ -1,13 +1,13 @@
-import { seatsFullBetweenEnds } from "../migrate.ts";
+import { seatsApartOnHexes, seatsFullBetweenEnds } from "../migrate.ts";
 import type { AttachKind, PathStop } from "../model.ts";
 import type { Blocker, BuildState } from "../ruleHooks.ts";
 import { legFeet, type DiagonalCounter, type DistanceSettings } from "./distance.ts";
 import { convexHull } from "./aoe.ts";
-import { canSqueeze, footprintRect, footprintSize, isSqueezed, placedOnHex, rangeAtInto, snapStep, squeezedSize, stopFootprint, storedCenter, tokenRefHex, type CellRange, type PlacedToken, type SizeCategory } from "./footprint.ts";
+import { canSqueeze, footprintRect, footprintSize, isSqueezed, occupiedHexes, placedOnHex, rangeAtInto, sizeCategory, snapStep, squeezedSize, stopFootprint, storedCenter, tokenRefHex, type CellRange, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
 import { hexDistance, hexKey, hexLine, hexNeighbors, type Hex, type HexGrid } from "./hex.ts";
-import { onHolder, seatedAt, squeezedSeatsApart, withinReach } from "./attach.ts";
+import { hexPlacements, onHolder, seatedAt, squeezedSeatsApart, withinReach } from "./attach.ts";
 import { footing, footprintGround, sceneGround } from "./heights.ts";
 import {
   coreBlocked,
@@ -19,6 +19,7 @@ import {
   hexLegStand,
   hexNarrow,
   hexStandAt,
+  hexStandHexes,
   hexStandPlace,
   hexStartStand,
   hexWallsOf,
@@ -200,10 +201,13 @@ export function fileShift(file: ReadonlyMap<string, readonly Point[]>, memberOf:
  * sits, as the move takes it along (moveLeg.ts follow). `lead` and the
  * members are as they stand where the walk starts.
  */
-export function seatShift(g: Grid, lead: PlacedToken & { id?: string | undefined }, memberOf: (id: string) => Follower | undefined, id: string, at: Point, squeezed: boolean): Point {
+export function seatShift(g: Grid, lead: PlacedToken & { id?: string | undefined }, memberOf: (id: string) => Follower | undefined, id: string, at: Point, squeezed: boolean, riders: readonly (PlacedToken & { id: string })[] = []): Point {
   const member = seatedOn(lead, memberOf, id);
   if (!member) return { x: 0, y: 0 };
-  const seat = seatedAt(g, member, lead, at, squeezed);
+  // On hexes the riders take hexes of their own where the lead stands squeezed (attach.ts squeezedSeatsApart, migrate.ts
+  // seatsApartOnHexes), as the move seats them (moveLeg.ts endSeatsApart), so `riders` are those every player sees on the lead.
+  const apart = isHex(g) && squeezed && riders.length > 1 && seatsApartOnHexes(undefined) ? squeezedSeatsApart(g, lead, at, [riders]).get(member.id) : undefined;
+  const seat = apart ?? seatedAt(g, member, lead, at, squeezed);
   return { x: seat.x - (at.x + (member.x - lead.x)), y: seat.y - (at.y + (member.y - lead.y)) };
 }
 
@@ -294,6 +298,85 @@ export function fileOrder<T extends PlacedToken & { id: string }>(lead: PlacedTo
   return [...members].sort((a, b) => near(a) - near(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
+/**
+ * Which of the creatures a holder drags along on hexes follow it in single
+ * file (D-261107-252, migrate.ts followsInSingleFileOnHexes), by class:
+ * `shown` are those every player sees and `hidden` the rest. Only a
+ * creature of one hex walks in the file, so the creatures every player
+ * sees go when each of them is one hex, and then each hidden one of one
+ * hex goes behind them, while a larger hidden one walks by its place
+ * beside the holder, as a hidden creature in tow does (moveLeg.ts
+ * stoppedAtWalls). Where the shown class does not go, the hidden one
+ * decides by its own members alike. So no hidden creature changes whether
+ * or how one every player sees walks. The classes in single file, the
+ * shown first.
+ */
+export function hexFileClasses<T extends PlacedToken>(shown: readonly T[], hidden: readonly T[]): [T[], T[]] {
+  const oneHex = (t: T) => {
+    const size = sizeCategory(t);
+    return size === "tiny" || size === "small" || size === "medium";
+  };
+  if (shown.length > 0 && shown.every(oneHex)) return [[...shown], hidden.filter(oneHex)];
+  return [[], hidden.length > 0 && hidden.every(oneHex) ? [...hidden] : []];
+}
+
+/**
+ * Where each creature of one hex a holder's walk on hexes drags along
+ * stands at each point of that walk when it follows in single file
+ * (D-261107-172, D-261107-254, migrate.ts followsInSingleFileOnHexes): on
+ * a walk that ends squeezed, as the op says. The holder's file hex at a
+ * point is the hex of its stand there nearest the stand's middle, ties by
+ * the stand's own order (footprint.ts occupiedHexes), which for every size
+ * is the stand's reference hex: a Large or Gargantuan stand's three top
+ * hexes lie alike round its corner, the first of them its reference, and
+ * a Huge one's middle is its own. The holder stands as it starts at the
+ * walk's start, by its lattice between (`walkSqueezes`), and squeezed at
+ * the end. Each creature walks from its own hex to the holder's file hex
+ * at each corner of the walk, so past its first piece it walks the hex
+ * lines the holder's own reference hex walked, which the holder's step
+ * test cleared. In `classes` order and within a class nearest the holder
+ * first (`fileOrder`), each ends on the latest hex of its walk that shares
+ * no hex with the holder's last stand or with those ahead of it, its start
+ * where none is. The walk keeps one point per point of the holder's walk:
+ * one that ends before the holder's last corner holds its end there to the
+ * last (moveLeg.ts follow reads past a shorter walk by the creature's
+ * place). `lead` is the holder as it stands where the walk starts and
+ * `points` its walk's points, its start first.
+ */
+export function hexFileRoutes(g: HexGrid, lead: PlacedToken, points: readonly Point[], classes: readonly (readonly (PlacedToken & { id: string })[])[]): Map<string, Point[]> {
+  const out = new Map<string, Point[]>();
+  const n = points.length - 1;
+  if (n < 1) return out;
+  const stands = points.map((p, i) => hexStandAt(g, lead, p, i === 0 ? isSqueezed(lead) : i === n ? true : onSqueezedLattice(g, lead, p)));
+  const fileHex = (i: number): Hex => stands[i]!.ref;
+  const taken = new Set(hexStandHexes(g, stands[n]!).map(hexKey));
+  for (const members of classes) {
+    for (const member of fileOrder(lead, members)) {
+      // Its walk's hexes in order, each with the piece of the holder's walk it lies on, 0 for its start.
+      const start = tokenRefHex(g, member);
+      const hexes: { hex: Hex; piece: number }[] = [{ hex: start, piece: 0 }];
+      let from = start;
+      for (let i = 1; i <= n; i++) {
+        for (const hex of hexLine(g, from, fileHex(i)).slice(1)) hexes.push({ hex, piece: i });
+        from = fileHex(i);
+      }
+      let end = hexes[0]!;
+      for (let k = hexes.length - 1; k >= 0; k--) {
+        if (taken.has(hexKey(hexes[k]!.hex))) continue;
+        end = hexes[k]!;
+        break;
+      }
+      const own: Point = { x: member.x, y: member.y };
+      const there = end.piece === 0 ? own : placedOnHex(g, member, end.hex);
+      const walk: Point[] = [own];
+      for (let i = 1; i <= n; i++) walk.push(i < end.piece ? placedOnHex(g, member, fileHex(i)) : there);
+      out.set(member.id, walk);
+      taken.add(hexKey(end.hex));
+    }
+  }
+  return out;
+}
+
 /** Where a member of a walk in single file stands where the walk ends, as `fileOutOfReach` reads it. */
 export type FileEnd = { x: number; y: number; elevation: number };
 
@@ -310,9 +393,12 @@ export type FileEnd = { x: number; y: number; elevation: number };
  * those before the rest (attach.ts squeezedSeatsApart, moveLeg.ts
  * endSeatsApart), so that seat reads none a player cannot see (review
  * FU45BR-OPUS-10). Any other one sitting on the lead is read from each
- * corner of the squares the lead squeezes onto, since its seat there turns
- * on hidden riders too, so a creature it drags passes only where every seat
- * keeps it in reach. The server's check and the device's read it with the
+ * corner of the squares the lead squeezes onto, on hexes from each
+ * placement it could take on them, since its seat there turns on hidden
+ * riders too, so a creature it drags passes only where every seat keeps it
+ * in reach. Reach is the link pass's own (attach.ts withinReach), between
+ * full footprints, so on hexes too it reads the holder's whole footprint
+ * where the walk leaves it, squeeze stripped (D-261107-254). The server's check and the device's read it with the
  * same ends and riders, so both hold the drag at the same place.
  */
 export function fileOutOfReach(
@@ -338,6 +424,12 @@ export function fileOutOfReach(
     const rise = member.elevation - holder.elevation;
     const seat = holder.id === lead.id ? seats?.get(member.id) : undefined;
     if (seat) return [{ x: seat.x, y: seat.y, elevation: end.elevation + rise }];
+    if (holder.id === lead.id && isHex(g)) {
+      // On hexes each placement it could take on the lead's squeezed stand, or its own carried seat with none (attach.ts hexSeatsApart).
+      const stand = occupiedHexes(g, { size: lead.size, x: end.x, y: end.y, ...(lead.w !== undefined ? { w: lead.w } : {}), ...(lead.h !== undefined ? { h: lead.h } : {}), squeeze: true });
+      const spots = hexPlacements(g, member, stand).map((p) => p.spot);
+      return (spots.length > 0 ? spots : [seatedAt(g, member, lead, end, true)]).map((p) => ({ x: p.x, y: p.y, elevation: end.elevation + rise }));
+    }
     if (holder.id === lead.id) {
       const box = footprintRect(g, { size: lead.size, x: end.x, y: end.y, ...(lead.w !== undefined ? { w: lead.w } : {}), ...(lead.h !== undefined ? { h: lead.h } : {}), squeeze: true });
       const { w, h } = footprintSize(member);

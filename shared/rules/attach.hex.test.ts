@@ -2,7 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import type { CreatureSize, Token } from "../model.ts";
 import { rng, token } from "../testutil.ts";
-import { attachDistanceFt, getOffFits, getOffSpot, insideHolder, kindRefusal, linkHolds, overlaps, seatSpot, withinReach } from "./attach.ts";
+import { attachDistanceFt, getOffFits, getOffSpot, hexPlacements, insideHolder, kindRefusal, linkHolds, overlaps, seatedAt, seatSpot, squeezedSeatsApart, withinReach } from "./attach.ts";
 import { dismountCost, dismountSplit } from "./dismount.ts";
 import { hexAnchor, occupiedHexes, placedOnHex } from "./footprint.ts";
 import { ownWalk } from "./movement.ts";
@@ -191,6 +191,112 @@ describe("getting off on hexes", () => {
         ]);
         const first = hexLine(g, { col: 4, row: 4 }, to).find((h) => !held.has(hexKey(h)))!;
         assert.deepEqual({ x: split.off.x, y: split.off.y }, placedOnHex(g, seat, first), `${g.orient} to ${hexKey(to)}`);
+      }
+    }
+  });
+});
+
+/**
+ * Seats apart on hexes (SEAT-TIE-HEX, D-261107-173, D-261107-253,
+ * DR-ASTRA-16, migrate.ts seatsApartOnHexes): where a holder stands
+ * squeezed, each passenger takes a placement whose hexes all lie on the
+ * squeezed stand and are free, nearest the seat the walk carries it to
+ * first. One left with none free shares its nearest valid one, and one
+ * with no valid placement at all keeps its carried seat.
+ */
+describe("seats apart on a squeezed hex holder", () => {
+  /** A Huge mount whose stored box stands squeezed onto three hexes at `ref`, its box as the move leaves it. */
+  function squeezedHuge(g: HexGrid, ref: Hex): { mount: Token; at: { x: number; y: number }; stand: Set<string> } {
+    const mount = on(g, "mount", "huge", { col: 8, row: 8 });
+    const small = on(g, "probe", "large", ref);
+    // A squeezed Huge creature stands on a Large one's anchor, with its own box round it.
+    const at = { x: small.x - 0.5, y: small.y - 0.5 };
+    const stand = keys(g, { ...mount, ...at, squeeze: true });
+    assert.equal(stand.size, 3, `${g.orient}: three hexes squeezed`);
+    return { mount, at, stand };
+  }
+
+  test("4 riders on a squeezed Huge mount, one of them Large: the Large one on its one valid placement, which covers all three hexes, and the rest share, whichever is taken first", () => {
+    for (const g of GRIDS) {
+      const { mount, at, stand } = squeezedHuge(g, { col: 8, row: 8 });
+      const large = on(g, "a-large", "large", { col: 8, row: 8 });
+      const mediums = [...stand].map((k, i) => {
+        const [col, row] = k.split(",").map(Number) as [number, number];
+        return on(g, `m${i}`, "medium", { col, row });
+      });
+      const placements = hexPlacements(g, large, [...stand].map((k) => ({ col: Number(k.split(",")[0]), row: Number(k.split(",")[1]) })));
+      assert.equal(placements.length, 1, `${g.orient}: the Large rider has one placement`);
+      assert.deepEqual(new Set(placements[0]!.hexes.map(hexKey)), stand, `${g.orient}: and it covers the whole stand`);
+      // Its carried seat lies on the placement where it rides the middle of the mount, so it is taken first. Offset far, a Medium
+      // rider on a stand hex is taken first, and the Large one then shares its one placement.
+      for (const [label, rider] of [["first", large], ["after a Medium one", { ...large, x: large.x + 3, y: large.y + 3 }]] as const) {
+        const seats = squeezedSeatsApart(g, mount, at, [[rider, ...mediums]]);
+        const seat = seats.get(large.id)!;
+        assert.deepEqual(keys(g, { ...large, ...seat }), stand, `${g.orient}, Large ${label}: on its one placement`);
+        for (const m of mediums) assert.ok(stand.has(hexKey(occupiedHexes(g, { ...m, ...seats.get(m.id)! })[0]!)), `${g.orient}, Large ${label}: ${m.id} on the stand`);
+        const free = [...stand].filter((k) => ![rider, ...mediums].some((t) => keys(g, { ...t, ...seats.get(t.id)! }).has(k)));
+        assert.deepEqual(free, [], `${g.orient}, Large ${label}: no hex left free`);
+      }
+    }
+  });
+
+  test("a Large rider taken first reserves every hex of its placement: a Medium one beside it shares its nearest hex, never one the Large covers as if free", () => {
+    for (const g of GRIDS) {
+      const { mount, at, stand } = squeezedHuge(g, { col: 8, row: 8 });
+      const probe = on(g, "a-large", "large", { col: 8, row: 8 });
+      const place = hexPlacements(g, probe, [...stand].map((k) => ({ col: Number(k.split(",")[0]), row: Number(k.split(",")[1]) })))[0]!;
+      // The walk carries each seat by the mount's move to `at`: the Large one's onto its placement exactly, so it goes first, and the
+      // Medium one's a hair off the placement's first hex.
+      const by = { x: at.x - mount.x, y: at.y - mount.y };
+      const large = { ...probe, x: place.spot.x - by.x, y: place.spot.y - by.y };
+      const first = place.hexes[0]!;
+      const spot = placedOnHex(g, { ...probe, size: "medium" }, first);
+      const medium = { ...on(g, "b-medium", "medium", first), x: spot.x - by.x + 0.05, y: spot.y - by.y };
+      const seats = squeezedSeatsApart(g, mount, at, [[large, medium]]);
+      assert.deepEqual(keys(g, { ...large, ...seats.get(large.id)! }), stand, `${g.orient}: the Large one on the stand`);
+      assert.equal(hexKey(occupiedHexes(g, { ...medium, ...seats.get(medium.id)! })[0]!), hexKey(first), `${g.orient}: the Medium one on its nearest hex, shared`);
+    }
+  });
+
+  test("three Medium riders take the three hexes, a fourth shares its nearest, and a Huge one with no placement at all keeps its carried seat", () => {
+    for (const g of GRIDS) {
+      const { mount, at, stand } = squeezedHuge(g, { col: 8, row: 8 });
+      const riders = [0, 1, 2, 3].map((i) => on(g, `m${i}`, "medium", occupiedHexes(g, mount)[i]!));
+      const seats = squeezedSeatsApart(g, mount, at, [riders]);
+      const hexes = riders.map((t) => hexKey(occupiedHexes(g, { ...t, ...seats.get(t.id)! })[0]!));
+      assert.ok(hexes.every((k) => stand.has(k)), `${g.orient}: every one on the stand`);
+      assert.equal(new Set(hexes).size, 3, `${g.orient}: the stand's three hexes taken, and the fourth shares one`);
+      // A Huge passenger on a Huge cart squeezed onto three hexes has no placement there: it keeps the seat the walk carries it to.
+      const huge = on(g, "huge", "huge", { col: 8, row: 8 });
+      assert.equal(hexPlacements(g, huge, occupiedHexes(g, { ...mount, ...at, squeeze: true })).length, 0);
+      const alone = squeezedSeatsApart(g, mount, at, [[huge, ...riders.slice(0, 3)]]);
+      assert.deepEqual(alone.get("huge"), seatedAt(g, huge, mount, at, true), `${g.orient}: its carried seat`);
+      assert.deepEqual(alone.get("huge"), { x: huge.x + at.x - mount.x, y: huge.y + at.y - mount.y }, `${g.orient}: carried by the mount's move`);
+      assert.equal(new Set(riders.slice(0, 3).map((t) => hexKey(occupiedHexes(g, { ...t, ...alone.get(t.id)! })[0]!))).size, 3, `${g.orient}: the Medium ones still take all three`);
+    }
+  });
+
+  test("passengers no player sees are seated after the rest and move no public seat", () => {
+    const r = rng(73);
+    for (const g of GRIDS) {
+      for (let i = 0; i < 60; i++) {
+        const { mount, at, stand } = squeezedHuge(g, { col: 8, row: 8 });
+        const own = occupiedHexes(g, mount);
+        const shown = Array.from({ length: 1 + Math.floor(r() * 3) }, (_, k) => on(g, `s${k}`, r() < 0.2 ? "large" : "medium", own[Math.floor(r() * own.length)]!));
+        const hidden = Array.from({ length: 1 + Math.floor(r() * 3) }, (_, k) => on(g, `h${k}`, r() < 0.2 ? "large" : "medium", own[Math.floor(r() * own.length)]!));
+        const without = squeezedSeatsApart(g, mount, at, [shown, []]);
+        const withHidden = squeezedSeatsApart(g, mount, at, [shown, hidden]);
+        for (const t of shown) assert.deepEqual(withHidden.get(t.id), without.get(t.id), `${g.orient} ${i}: ${t.id}`);
+        // No two share a hex while one of them has a placement free of every other passenger's hexes.
+        const all = [...shown, ...hidden];
+        const taken = (id: string) => keys(g, { ...all.find((t) => t.id === id)!, ...withHidden.get(id)! });
+        for (const t of all) {
+          const mine = taken(t.id);
+          const others = new Set(all.filter((o) => o.id !== t.id).flatMap((o) => [...taken(o.id)]));
+          if (![...mine].some((k) => others.has(k))) continue;
+          const spots = hexPlacements(g, t, [...stand].map((k) => ({ col: Number(k.split(",")[0]), row: Number(k.split(",")[1]) })));
+          assert.ok(spots.every((p) => p.hexes.some((h) => others.has(hexKey(h)))), `${g.orient} ${i}: ${t.id} shares with a free placement left`);
+        }
       }
     }
   });

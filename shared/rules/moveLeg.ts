@@ -1,15 +1,16 @@
-import { attaches, draggedWalkFull, followsInSingleFile, hiddenTowStands, seatsApart, seatsFromSnappedFull, seatsOnSqueeze, walksRoutes } from "../migrate.ts";
+import { attaches, draggedWalkFull, followsInSingleFile, followsInSingleFileOnHexes, hiddenTowStands, seatsApart, seatsApartOnHexes, seatsFromSnappedFull, seatsOnSqueeze, walksRoutes } from "../migrate.ts";
 import type { RoomState, Token, Viewer } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { movementRules, type BuildState } from "../ruleHooks.ts";
 import { carriedGroup, moveGroups, onHolder, publicMembers, seatedAt, squeezedSeatsApart, walkerFor, type SeenByAll } from "./attach.ts";
-import { footprintRect } from "./footprint.ts";
+import { footprintRect, placedOnHex, tokenRefHex } from "./footprint.ts";
 import type { Point } from "./geom.ts";
-import { isHex, sceneGrid, type Grid } from "./grid.ts";
+import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
+import { hexDistance, hexLine } from "./hex.ts";
 import { footing } from "./heights.ts";
 import { groundUnder, hexFullStop, landing, legSpots, legStop, offGridWallThrough, storedBuild, walkEnd, type MovingToken } from "./movement.ts";
-import { fileRoutes, followerTrace, pieceReach, routeWalkers, walkSqueezes, type RoutePoint, type WalkTrace } from "./route.ts";
+import { fileRoutes, followerTrace, hexFileClasses, hexFileRoutes, pieceReach, routeWalkers, walkSqueezes, type RoutePoint, type WalkTrace } from "./route.ts";
 import { ownEntry } from "../records.ts";
 
 /**
@@ -153,7 +154,10 @@ function namedMoves(op: Op, before: RoomState, env: Versioned): Named[] {
  *
  * On squares, from op version 38, a walk that ends squeezed takes what it
  * drags in single file instead of by its place (`singleFile`), and seats
- * what sits on it on squeezed squares of its own (`endSeatsApart`).
+ * what sits on it on squeezed squares of its own (`endSeatsApart`). On
+ * hexes, from op version 51, it takes the creatures of one hex it drags so,
+ * and seats what sits on it on hexes of its own wherever it stands
+ * squeezed.
  *
  * On a player's walk on a scene whose walls stop moves, a dragged creature
  * outside the public members stops where its own leg test stops it, and
@@ -246,7 +250,9 @@ function followGroup(before: RoomState, lead: MovedToken, members: readonly stri
     return link !== undefined && isPublic(id, link.to);
   };
   const file: ReadonlyMap<string, readonly FilePoint[]> | null = cut?.file ?? singleFile(before, lead, members.slice(1), pub, env);
-  const apart = new Map<string, Map<string, Point> | null>();
+  const scene = ownEntry(before.scenes, lead.from.sceneId);
+  const g = scene ? sceneGrid(scene) : SQUARES;
+  const apart = new Map<string, SeatsApart | null>();
   const seatsOn = (holder: MovedToken) => {
     let seats = apart.get(holder.tokenId);
     if (seats === undefined) apart.set(holder.tokenId, (seats = endSeatsApart(before, holder, members, pub, env)));
@@ -266,7 +272,7 @@ function followGroup(before: RoomState, lead: MovedToken, members: readonly stri
     const upOwn = up ? file?.get(up.tokenId) : undefined;
     // A trap's cut keeps each walk in the file where the trap step had it, behind its holder already, so no holder's walk in the
     // move, which the private pass may stop short, moves it on (review FU45B-ASTRA-12).
-    const walk = own && up && upOwn && !cut ? behindStop(member, own, upOwn, up.route) : own;
+    const walk = own && up && upOwn && !cut ? behindStop(g, member, own, upOwn, up.route) : own;
     const moved = follow(before, member, holderMove, pub(id), byPlayer, env, { file: walk, kept: cut?.own?.get(id), seats: seatsOn, stands: stands && cut?.judged(member) !== true });
     if (!moved) continue;
     walked.set(id, moved);
@@ -277,36 +283,65 @@ function followGroup(before: RoomState, lead: MovedToken, members: readonly stri
 
 /**
  * Where each creature the lead's walk drags along walks when it follows in
- * single file (route.ts fileRoutes, D-261101-250): from op version 38, on
- * squares, on the lead's own walk that ends squeezed as the op says. Every
- * dragged member of the group goes, the public ones first. Null where they
- * follow by their places.
+ * single file, on the lead's own walk that ends squeezed as the op says:
+ * from op version 38 on squares (route.ts fileRoutes, D-261101-250), where
+ * every dragged member of the group goes, and from op version 51 on hexes
+ * (route.ts hexFileRoutes, D-261107-172), where those of one hex go as each
+ * class of them decides (route.ts hexFileClasses, D-261107-252). The
+ * public ones go first. Null where they follow by their places.
  */
 function singleFile(before: RoomState, lead: MovedToken, members: readonly string[], pub: (id: string) => boolean, env: Versioned): Map<string, Point[]> | null {
-  if (!followsInSingleFile(env.opVersion) || lead.squeezed !== true || lead.how !== "walk" || lead.carriedBy !== undefined) return null;
+  if (lead.squeezed !== true || lead.how !== "walk" || lead.carriedBy !== undefined) return null;
   const scene = ownEntry(before.scenes, lead.from.sceneId);
   const standing = ownEntry(before.tokens, lead.tokenId);
-  if (!scene || !standing || isHex(sceneGrid(scene))) return null;
+  if (!scene || !standing) return null;
+  const g = sceneGrid(scene);
+  if (isHex(g) ? !followsInSingleFileOnHexes(env.opVersion) : !followsInSingleFile(env.opVersion)) return null;
   const dragged = members.map((id) => ownEntry(before.tokens, id)!).filter((t) => t.attached?.kind === "drag");
   if (dragged.length === 0) return null;
-  return fileRoutes(standing, lead.route, [dragged.filter((t) => pub(t.id)), dragged.filter((t) => !pub(t.id))]);
+  const shown = dragged.filter((t) => pub(t.id));
+  const rest = dragged.filter((t) => !pub(t.id));
+  if (!isHex(g)) return fileRoutes(standing, lead.route, [shown, rest]);
+  const classes = hexFileClasses(shown, rest);
+  return classes[0].length > 0 || classes[1].length > 0 ? hexFileRoutes(g, standing, lead.route, classes) : null;
 }
 
+/** Where each passenger of a holder sits apart from the others at point `i` of the holder's walk, by id, or null at a point where each takes its nearest alone. */
+type SeatsApart = (i: number) => ReadonlyMap<string, Point> | null;
+
 /**
- * Where what sits on `holder` sits where its walk ends squeezed, each on a
- * squeezed square of its own where there are enough (attach.ts
- * squeezedSeatsApart, D-261101-251): from op version 38, on squares, on the
- * holder's own walk, the public passengers first. Null where each takes its
- * nearest alone.
+ * Where what sits on `holder` sits apart from the others on it, the public
+ * passengers first (attach.ts squeezedSeatsApart), on the holder's own
+ * walk: from op version 38 on squares, where its walk ends squeezed, each
+ * on a squeezed square of its own where there are enough (D-261101-251),
+ * and from op version 51 on hexes, at every point where it stands
+ * squeezed, the walk's end as the op says, each on a placement of its own
+ * whose hexes are free (D-261107-173). Null where each takes its nearest
+ * alone.
  */
-function endSeatsApart(before: RoomState, holder: MovedToken, members: readonly string[], pub: (id: string) => boolean, env: Versioned): Map<string, Point> | null {
-  if (!seatsApart(env.opVersion) || holder.squeezed !== true || holder.how !== "walk" || holder.carriedBy !== undefined) return null;
+function endSeatsApart(before: RoomState, holder: MovedToken, members: readonly string[], pub: (id: string) => boolean, env: Versioned): SeatsApart | null {
+  if (holder.how !== "walk" || holder.carriedBy !== undefined) return null;
   const scene = ownEntry(before.scenes, holder.from.sceneId);
   const standing = ownEntry(before.tokens, holder.tokenId);
-  if (!scene || !standing || isHex(sceneGrid(scene))) return null;
+  if (!scene || !standing) return null;
+  const g = sceneGrid(scene);
+  if (isHex(g) ? !seatsApartOnHexes(env.opVersion) : !seatsApart(env.opVersion) || holder.squeezed !== true) return null;
   const seated = members.map((id) => ownEntry(before.tokens, id)!).filter((t) => t.attached?.to === holder.tokenId && onHolder(t.attached.kind));
   if (seated.length < 2) return null;
-  return squeezedSeatsApart(sceneGrid(scene), standing, holder.route[holder.route.length - 1]!, [seated.filter((t) => pub(t.id)), seated.filter((t) => !pub(t.id))], env.opVersion);
+  const classes = [seated.filter((t) => pub(t.id)), seated.filter((t) => !pub(t.id))];
+  const last = holder.route.length - 1;
+  if (!isHex(g)) {
+    const end = squeezedSeatsApart(g, standing, holder.route[last]!, classes, env.opVersion);
+    return (i) => (i === last ? end : null);
+  }
+  const squeezedAt = walkSqueezes(before, standing, holder.route, holder.trace, holder.squeezed === true, env.opVersion);
+  const known = new Map<number, Map<string, Point>>();
+  return (i) => {
+    if (i === 0 || squeezedAt[i] !== true) return null;
+    let seats = known.get(i);
+    if (!seats) known.set(i, (seats = squeezedSeatsApart(g, standing, holder.route[i]!, classes, env.opVersion)));
+    return seats;
+  };
 }
 
 /**
@@ -315,13 +350,23 @@ function endSeatsApart(before: RoomState, holder: MovedToken, members: readonly 
  * the walks are index by index with the lead's, so the holder stopped a
  * share of the way along its piece, and this walk stops as far along its
  * own, on its own lattice, short rather than past it. Taken whole where
- * the holder walked its whole walk.
+ * the holder walked its whole walk. On hexes the share counts hex steps,
+ * the holder in the file being of one hex as the creature is.
  */
-function behindStop(member: MovingToken, own: readonly FilePoint[], holderOwn: readonly Point[], walked: readonly Point[]): readonly FilePoint[] {
+function behindStop(g: Grid, member: MovingToken, own: readonly FilePoint[], holderOwn: readonly Point[], walked: readonly Point[]): readonly FilePoint[] {
   const m = walked.length - 1;
   if (m === 0) return own.slice(0, 1);
   const end = walked[m]!;
   if (m === holderOwn.length - 1 && end.x === holderOwn[m]!.x && end.y === holderOwn[m]!.y) return own;
+  if (isHex(g)) {
+    const hexOf = (p: Point) => tokenRefHex(g, { ...member, x: p.x, y: p.y });
+    const whole = hexDistance(g, hexOf(holderOwn[m - 1]!), hexOf(holderOwn[m]!));
+    const share = whole === 0 ? 1 : hexDistance(g, hexOf(holderOwn[m - 1]!), hexOf(end)) / whole;
+    const line = hexLine(g, hexOf(own[m - 1]!), hexOf(own[m]!));
+    const k = Math.floor(share * (line.length - 1) + 1e-9);
+    const at = k === 0 ? own[m - 1]! : k === line.length - 1 ? own[m]! : placedOnHex(g, member, line[k]!);
+    return [...own.slice(0, m), at];
+  }
   const reach = (a: Point, b: Point) => Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y));
   const whole = reach(holderOwn[m - 1]!, holderOwn[m]!);
   const share = whole === 0 ? 1 : reach(holderOwn[m - 1]!, end) / whole;
@@ -341,7 +386,7 @@ type FilePoint = Point & { elevation?: number };
  * holder's squeezed seats apart, and whether a hidden one takes the stand
  * test.
  */
-type Following = { file?: readonly FilePoint[] | undefined; kept?: readonly FilePoint[] | undefined; seats?: (holder: MovedToken) => Map<string, Point> | null; stands?: boolean };
+type Following = { file?: readonly FilePoint[] | undefined; kept?: readonly FilePoint[] | undefined; seats?: (holder: MovedToken) => SeatsApart | null; stands?: boolean };
 
 function samePose(a: Pose, b: Pose): boolean {
   return a.sceneId === b.sceneId && a.x === b.x && a.y === b.y && a.elevation === b.elevation;
@@ -368,7 +413,8 @@ function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: 
     // What sits on its holder keeps its height above it at every point, and a scene change takes all by the holder's change. On a
     // cut it lands where the stop judged it, and a holder players cannot see stops where that seat holds (traps.ts seatingWalk).
     const oz = member.elevation - holder.from.elevation;
-    const seats = onHolder(kind) ? squeezedSeats(before, member, holder, env, how.seats?.(holder)?.get(member.id)) : null;
+    const apart = onHolder(kind) ? how.seats?.(holder) : null;
+    const seats = onHolder(kind) ? squeezedSeats(before, member, holder, env, apart ? (i) => apart(i)?.get(member.id) : undefined) : null;
     const route = along.map((p, i) => {
       const kept = i > 0 ? own?.[i] : undefined;
       return kept ? { x: kept.x, y: kept.y, elevation: kept.elevation ?? p.elevation + oz } : { ...(seats?.[i] ?? { x: p.x + ox, y: p.y + oy }), elevation: p.elevation + oz };
@@ -429,10 +475,10 @@ function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: 
  * seats it, and one nudged off its anchor sits on it again, as a device
  * reads it (review DP34-OPUS-10). Its link reads the full footprint
  * (docs/design/design-v1-attach.md 5.1), which every such seat lies in, so it
- * never lets go mid-corridor. `apart` is its seat where the walk ends,
+ * never lets go mid-corridor. `apart` is its seat at a point of the walk
  * where it takes one apart from the others on the holder (`endSeatsApart`).
  */
-function squeezedSeats(before: RoomState, member: Token, holder: MovedToken, env: Versioned, apart?: Point): (Point | null)[] | null {
+function squeezedSeats(before: RoomState, member: Token, holder: MovedToken, env: Versioned, apart?: (i: number) => Point | undefined): (Point | null)[] | null {
   if (!seatsOnSqueeze(env.opVersion) || holder.carriedBy !== undefined || (holder.how !== "walk" && holder.how !== "teleport")) return null;
   const scene = ownEntry(before.scenes, member.sceneId);
   const standing = ownEntry(before.tokens, holder.tokenId);
@@ -441,9 +487,8 @@ function squeezedSeats(before: RoomState, member: Token, holder: MovedToken, env
   const g = sceneGrid(scene);
   // From op version 41 a holder that starts off its snap grid carries its seats by its snapped box (attach.ts seatedAt), not its offset.
   if (!isHex(g) && !squeezedAt.some((s) => s) && !(seatsFromSnappedFull(env.opVersion) && offSnapGrid(g, standing))) return null;
-  const last = holder.route.length - 1;
-  // Where the walk ends squeezed, the seat it takes apart from the others on the holder, where it has one (followGroup).
-  return holder.route.map((p, i) => (i === 0 ? null : i === last && apart ? apart : seatedAt(g, member, standing, p, squeezedAt[i]!, env.opVersion)));
+  // Where the holder stands squeezed, the seat it takes apart from the others on it, where it has one (followGroup).
+  return holder.route.map((p, i) => (i === 0 ? null : (apart?.(i) ?? seatedAt(g, member, standing, p, squeezedAt[i]!, env.opVersion))));
 }
 
 /** Whether a token's stored box lies off the box it snaps to, along either axis: a Large creature half a square off the grid of squares. */
