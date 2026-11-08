@@ -368,7 +368,7 @@ All of this is the DM's.
   - A secret door not yet found reads to them as the wall beside it, and a secret room stays dark until found.
   - On Explore or Reveal by hand they get a stamp only on ground they have seen, and a light only as what their creatures see lit. They never get the key page, the pins, a light's source, the Rolling Stone's hidden stone or a trap not yet found.
   - Where the form's Players see leaves fog off, the dialog warns that every room shows at once, "secret rooms too" when the dungeon has one.
-  - With Lit rooms above None and the form's Players see on Explore, the scene starts dark so its lights light it, unless Keep it lit is tapped.
+  - With Lit rooms above None, the scene starts on Explore with the light on Dark so its lights light it, whatever the form's Players see, unless Keep it lit is tapped.
 - On a hex Grid the Generate a dungeon button is off, with "Generated dungeons are squares for now. Pick Squares above to make one."
 
 ### Isometric view
