@@ -7,7 +7,7 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page } 
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { openGroup } from "./helpers/groups.ts";
 import { ConsoleWatch, OpSocket, openSideTab, Shots, sideTabName, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
-import { addSound, errors, inStep, IPHONE_AUDIO, musicVoice, readTap, roomSoundScript, SOUND_TAP, SOUND_TEST_FLAG, soundProbe, soundSays, tapGlitches, toneSound, type SoundProbe } from "./soundRoom.ts";
+import { addSound, errors, inStep, IPHONE_AUDIO, musicVoice, readTap, roomSoundScript, SOUND_TAP, SOUND_TEST_FLAG, soundProbe, soundSays, tapGlitches, toneSound, uploadSound, type SoundProbe } from "./soundRoom.ts";
 
 /**
  * Synced music and sound on every device (docs/design/design-v1-music.md 5
@@ -18,6 +18,8 @@ import { addSound, errors, inStep, IPHONE_AUDIO, musicVoice, readTap, roomSoundS
  * a hidden page. lp30fix-1 restarts the
  * server while an iPhone's files still load. The sounds are silence
  * built frame by frame (soundRoom.ts), uploaded through the asset route.
+ * sndglitch-1, sndfade-1 and sndfade-2 play a tone into a tap, each in the
+ * quiet room (`quietRoom`), so they may run in any order.
  *
  * Each page's engine is read through its test hook (testHook.ts): the root
  * element's `data-sound` ("playing music loops:2", set on change) and,
@@ -69,12 +71,14 @@ function runId(): string {
   return `run${++run.runs}`;
 }
 
-async function join(context: BrowserContext, name: string, color: string): Promise<string> {
+type RoomAccess = { roomId: string; password: string };
+
+async function join(context: BrowserContext, name: string, color: string, room: RoomAccess = run): Promise<string> {
   const headers = { Origin: server.origin, "content-type": "application/json" };
-  const joined = await context.request.post(`${server.origin}/api/rooms/${run.roomId}/join`, { headers, data: { password: run.password } });
+  const joined = await context.request.post(`${server.origin}/api/rooms/${room.roomId}/join`, { headers, data: { password: room.password } });
   assert.ok(joined.ok(), `joining answered ${joined.status()}`);
   const { ticket } = (await joined.json()) as { ticket: string };
-  const done = await context.request.post(`${server.origin}/api/rooms/${run.roomId}/join/complete`, { headers, data: { ticket, name, color } });
+  const done = await context.request.post(`${server.origin}/api/rooms/${room.roomId}/join/complete`, { headers, data: { ticket, name, color } });
   assert.ok(done.ok(), `completing the join answered ${done.status()}`);
   return ((await done.json()) as { member: { id: string } }).member.id;
 }
@@ -97,15 +101,50 @@ async function createRoom(page: Page, context: BrowserContext): Promise<void> {
   ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
 }
 
-async function openRoom(page: Page): Promise<void> {
-  await page.goto(`${server.origin}/r/${run.roomId}`);
+async function openRoom(page: Page, room: RoomAccess = run): Promise<void> {
+  await page.goto(`${server.origin}/r/${room.roomId}`);
   await page.getByRole("status", { name: "Connected" }).first().waitFor();
 }
 
-async function playTrack(soundId: string, fade: 0 | 2 | 5 | 10 = 0, repeat: "all" | "one" | "off" = "off"): Promise<string> {
+async function playTrack(soundId: string, fade: 0 | 2 | 5 | 10 = 0, repeat: "all" | "one" | "off" = "off", via: OpSocket = ops): Promise<string> {
   const id = runId();
-  await ops.send({ t: "music.play", run: id, soundId, order: [soundId], repeat, fade });
+  await via.send({ t: "music.play", run: id, soundId, order: [soundId], repeat, fade });
   return id;
+}
+
+/**
+ * A room of its own for the steps that play a tone into a tap, made once
+ * by a DM with no page open. Only the step's own player page plays there,
+ * never the DM's or Pat's aloud where the tests run, and the main room's
+ * pages stay as the other steps left them, so these steps may run in any
+ * order. Each step gets its own op socket, since lp30fix-1 restarts the
+ * server, and starts from silence.
+ */
+const quiet = { roomId: "", password: "quiet room for the tap", context: null as BrowserContext | null, tones: {} as Record<string, string> };
+
+async function quietRoom(): Promise<{ room: RoomAccess; ops: OpSocket }> {
+  if (!quiet.context) {
+    const context = await browser.newContext();
+    const res = await context.request.post(`${server.origin}/api/rooms`, { headers: { Origin: server.origin }, data: { name: `${run.roomName} quiet`, playerPassword: quiet.password, dmName: "Dana the DM" } });
+    assert.ok(res.ok(), `creating the quiet room answered ${res.status()}`);
+    quiet.roomId = ((await res.json()) as { roomId: string }).roomId;
+    quiet.context = context;
+  }
+  const cookie = (await quiet.context.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+  const via = await OpSocket.open({ origin: server.origin, roomId: quiet.roomId, cookie });
+  await via.send({ t: "sound.stopAll" });
+  return { room: quiet, ops: via };
+}
+
+/** A tone in the quiet room, added once, and its asset. */
+async function quietTone(via: OpSocket, id: string, name: string, use: "music" | "loop", seconds: number): Promise<string> {
+  if (!quiet.tones[id]) {
+    const row = await uploadSound(quiet.context!, server.origin, quiet.roomId, toneSound(seconds), `${name}.mp3`);
+    assert.ok(row.audio, `the server read the tone ${name}`);
+    await via.send({ t: "sound.create", id, assetId: row.id, name, use, ms: row.audio.ms });
+    quiet.tones[id] = row.id;
+  }
+  return quiet.tones[id];
 }
 
 /** How far apart two pages' music sounds: each place against its own aim, read as close together as two evaluations go. */
@@ -250,12 +289,16 @@ describe("synced music and sound", { concurrency: false }, () => {
       console.error(server?.output().split("\n").slice(-40).join("\n"));
     }
     ops?.close();
-    if (run.roomId && dmContext) {
+    for (const [roomId, name, context] of [
+      [run.roomId, run.roomName, dmContext],
+      [quiet.roomId, `${run.roomName} quiet`, quiet.context],
+    ] as const) {
+      if (!roomId || !context) continue;
       try {
-        const res = await dmContext.request.delete(`${server.origin}/api/rooms/${run.roomId}`, { headers: { Origin: server.origin }, data: { name: run.roomName } });
-        if (!res.ok()) console.error(`Deleting room ${run.roomId} answered ${res.status()}`);
+        const res = await context.request.delete(`${server.origin}/api/rooms/${roomId}`, { headers: { Origin: server.origin }, data: { name } });
+        if (!res.ok()) console.error(`Deleting room ${roomId} answered ${res.status()}`);
       } catch (err) {
-        console.error(`Deleting room ${run.roomId} failed`, err);
+        console.error(`Deleting room ${roomId} failed`, err);
       }
     }
     await browser?.close();
@@ -811,14 +854,11 @@ describe("synced music and sound", { concurrency: false }, () => {
     }
   });
 
-  // Runs last: it turns the DM's room sound off, reloads the DM's page and closes Pat's, and restores none of them.
+  // In the quiet room: Gus's page alone plays the tone, into the tap.
   test("sndglitch-1. through a throttled network: once a track plays, nothing seeks it or changes its speed, through wakes, a small slip or a long stall, and the output has no click or dropout", async () => {
-    // A tone on the DM's page or Pat's would sound aloud where the tests run: Gus's page alone plays it, into the tap.
-    await dm.evaluate(() => localStorage.setItem("rvtt.roomSound", "off"));
-    await openRoom(dm);
-    await pat.close();
-    const toneId = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: "snd-tone", name: "Tone", use: "music", ms: 60_000, bytes: toneSound(60) });
-    const asset = await waitFor("the tone's asset", () => dmSocket.state?.sounds?.[toneId]?.assetId ?? null);
+    const { room, ops: via } = await quietRoom();
+    const toneId = "snd-tone";
+    const asset = await quietTone(via, toneId, "Tone", "music", 60);
     const gusContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, bypassCSP: true });
     try {
       await gusContext.addInitScript(SOUND_TEST_FLAG);
@@ -830,14 +870,14 @@ describe("synced music and sound", { concurrency: false }, () => {
         ws.onMessage((m) => upstream.send(m));
         upstream.onMessage((m) => setTimeout(() => ws.send(m), 100));
       });
-      await join(gusContext, "Gus", "#eab308");
+      await join(gusContext, "Gus", "#eab308", room);
       const gus = await gusContext.newPage();
       // A phone on a fair link: the page and every range of the track through it.
       const cdp = await gusContext.newCDPSession(gus);
       await cdp.send("Network.enable");
       await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 150, downloadThroughput: 1_500_000 / 8, uploadThroughput: 750_000 / 8 });
-      await openRoom(gus);
-      await playTrack(toneId, 0, "off");
+      await openRoom(gus, room);
+      await playTrack(toneId, 0, "off", via);
       await soundSays(gus, /^playing music/, 10_000);
       // Through the slow link it starts within a second or two of its place.
       await inStep(gus, 2 * START_MS, 10_000);
@@ -889,36 +929,44 @@ describe("synced music and sound", { concurrency: false }, () => {
       assert.deepEqual(found.dropouts, [], "no dropout");
     } finally {
       await gusContext.close();
+      via.close();
     }
   });
 
-  // After sndglitch-1, whose silenced DM page it keeps: Hal's page alone plays, into the tap.
+  // In the quiet room: Hal's page alone plays, into the tap.
   test("sndfade-1. the music fades in over 2 s when it starts and when it resumes, and out over 2 s when it pauses and when the last track ends with nothing after it, as a background sound does", async () => {
-    const toneId = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: "snd-tone-short", name: "Short tone", use: "music", ms: 32_000, bytes: toneSound(32) });
-    const loopId = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: "snd-tone-loop", name: "Tone loop", use: "loop", ms: 10_000, bytes: toneSound(10) });
-    await waitFor("the tones' assets", () => (dmSocket.state?.sounds?.[toneId]?.assetId && dmSocket.state?.sounds?.[loopId]?.assetId ? true : null));
+    const { room, ops: via } = await quietRoom();
+    const toneId = "snd-tone-short";
+    const loopId = "snd-tone-loop";
+    await quietTone(via, toneId, "Short tone", "music", 32);
+    await quietTone(via, loopId, "Tone loop", "loop", 10);
     const halContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, bypassCSP: true });
+    const halSocket = new SocketWatch("hal");
     try {
       await halContext.addInitScript(SOUND_TEST_FLAG);
       await halContext.addInitScript(roomSoundScript("on"));
       await halContext.addInitScript(SOUND_TAP);
-      await join(halContext, "Hal", "#a855f7");
+      await join(halContext, "Hal", "#a855f7", room);
       const hal = await halContext.newPage();
-      await openRoom(hal);
+      await halSocket.attach(halContext, hal);
+      await openRoom(hal, room);
       // Repeat off and one track: nothing follows it, so its end fades out.
-      await playTrack(toneId, 0, "off");
+      await playTrack(toneId, 0, "off", via);
       await soundSays(hal, /^playing music/, 10_000);
       await sleep(6_000);
-      await ops.send({ t: "music.pause" });
+      await via.send({ t: "music.pause" });
       await sleep(4_000);
-      await ops.send({ t: "music.resume", run: runId() });
-      await waitFor("the run to end", () => (dmSocket.state?.playing?.music === null ? true : null), 40_000);
+      const resumed = runId();
+      await via.send({ t: "music.resume", run: resumed });
+      // A player's view holds no music while it is paused, so the end is read only once Hal's view has the resumed run.
+      await waitFor("Hal's view to resume", () => (halSocket.state?.playing?.music?.run === resumed ? true : null), 10_000);
+      await waitFor("the run to end", () => (halSocket.state && (halSocket.state.playing?.music ?? null) === null ? true : null), 40_000);
       await sleep(1_000);
       // A background sound already fades in and out over 2 s: checked on its own span of the tap, at its own level.
       const loopFrom = await hal.evaluate(() => (globalThis as unknown as { __soundTap: { ctx: { currentTime: number } } }).__soundTap.ctx.currentTime);
-      await ops.send({ t: "loop.start", id: "loop-tone", soundId: loopId, volume: 100 });
+      await via.send({ t: "loop.start", id: "loop-tone", soundId: loopId, volume: 100 });
       await sleep(6_000);
-      await ops.send({ t: "loop.stop", id: "loop-tone" });
+      await via.send({ t: "loop.stop", id: "loop-tone" });
       await sleep(3_000);
       const { quanta } = await readTap(hal);
       const ramps = fadeRamps(quanta.filter((q) => q.at < loopFrom));
@@ -947,12 +995,14 @@ describe("synced music and sound", { concurrency: false }, () => {
       });
     } finally {
       await halContext.close();
+      via.close();
     }
   });
 
-  // After sndfade-1, whose short tone it plays: Ivy's page alone plays, into the tap.
+  // In the quiet room, with the short tone sndfade-1 plays, added here when it ran first: Ivy's page alone plays, into the tap.
   test("sndfade-2. music whose first load is held 3 s still fades in over 2 s once it sounds, not at full", async () => {
-    const asset = await waitFor("the short tone's asset", () => dmSocket.state?.sounds?.["snd-tone-short"]?.assetId ?? null);
+    const { room, ops: via } = await quietRoom();
+    const asset = await quietTone(via, "snd-tone-short", "Short tone", "music", 32);
     const ivyContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, bypassCSP: true });
     try {
       await ivyContext.addInitScript(SOUND_TEST_FLAG);
@@ -964,13 +1014,13 @@ describe("synced music and sound", { concurrency: false }, () => {
         if (Date.now() < releaseAt) await sleep(releaseAt - Date.now());
         await route.continue();
       });
-      await join(ivyContext, "Ivy", "#14b8a6");
+      await join(ivyContext, "Ivy", "#14b8a6", room);
       const ivy = await ivyContext.newPage();
-      await openRoom(ivy);
+      await openRoom(ivy, room);
       releaseAt = Date.now() + 3_500;
-      await playTrack("snd-tone-short", 0, "off");
+      await playTrack("snd-tone-short", 0, "off", via);
       await sleep(10_000);
-      await ops.send({ t: "music.stop" });
+      await via.send({ t: "music.stop" });
       await sleep(3_000);
       const ramps = fadeRamps((await readTap(ivy)).quanta);
       console.log(`sndfade-2 ramps ${JSON.stringify(ramps)}`);
@@ -984,6 +1034,7 @@ describe("synced music and sound", { concurrency: false }, () => {
       );
     } finally {
       await ivyContext.close();
+      via.close();
     }
   });
 });
