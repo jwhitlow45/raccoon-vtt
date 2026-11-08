@@ -95,7 +95,7 @@ Nothing joins `shared/model.ts` or `shared/protocol.ts`. No op, no permission, n
 | turnTint | rgba(247, 223, 0, 0.2) | | | | rgba(247, 223, 0, 0.08) | |
 | dangerTint | rgba(209, 52, 58, 0.1) | | | | rgba(229, 72, 77, 0.12) | |
 | dangerFill, warningFill | #fbe4e3, #fbecd2 (text 14.3, 14.9) | | | | #3b1214, #3a2a07 | |
-| overlay | rgba(252, 251, 248, 0.92) | | | | rgba(22, 22, 26, 0.88) | |
+| overlay | rgba(252, 251, 248, 0.92) | | | | rgba(22, 22, 26, 0.92) | |
 | scrim | rgba(20, 18, 24, 0.45) | | | | rgba(0, 0, 0, 0.6) | |
 | markRing (new) | #7a7781 | | | | #3a3a44 | |
 
@@ -251,7 +251,7 @@ The contract came first and alone: the palettes, the variables with their dark f
 - **The kit page has a Theme switch** that holds the scheme for that page alone, and `?theme=light` or `?theme=dark`.
 - **The Room page's rules where it meets the board live in pages/onBoard.ts**, since Room.tsx cannot load under the unit tests. The chip's member dot reads the one `MARK_RING` of lib/memberColor.ts.
 - **The display's hold covers the `/display` code page too** (D-261102-555). The preview's wait sets its own text color under its dark scope.
-- **Dark, a floating chosen tool over pure white art** reads about 4.1:1 for mid-light member colors (2.2:1 before), enough for the icon and short of 4.5:1 for a named tool's 13 px label: dark's overlay alpha. A follow-up (D-261102-556).
+- **Dark, a floating chosen tool over pure white art** read about 4.1:1 for mid-light member colors (2.2:1 before), enough for the icon and short of 4.5:1 for a named tool's 13 px label. The follow-up is closed: dark's overlay alpha went from 0.88 to 0.92, and every member color now holds 4.5:1 over white art, a blue Select label going from 4.06:1 to 4.66:1 (D-261108-006).
 - **The dot ring lives in components/Row.tsx's `RowDot`**, which covers the Members rows, the picker sample, the dot labels and the Claim, Join and join request dots. A second `danger` text use in the party bar, the folded pill's word, takes `dangerText` too. On light, a yellow member's note reads the general "darker shade" words, and the crest's words stay for orange (D-261102-562).
 - **The contrast sweep reads the ground the browser paints**, from the stack of elements under each word's line with every element made hit-testable while it reads, not from DOM parents: a phone toolbar's band is a sibling drawn behind its buttons. A sign of one or two characters hidden from screen readers, such as the HP mode's "−", is an icon its control's name carries, held to 3:1 as a graphic (WCAG 1.4.11). lt-4 reads a part's colors where they draw: an inherited text color on a box with no words is not read.
 - **lt-4's scene gate is the gate's wait**, with the room's socket held so no snapshot comes. **lt-6's popover** is the Area tool's Shape choice, and **its bottom-sheet dialog** the X-card as the DM gets it.

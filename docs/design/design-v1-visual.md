@@ -119,7 +119,7 @@ export const theme = {
     neutral: "#c9c9c9",
     hostile: "#e5484d",
     fog: "#0d0d12",
-    overlay: "rgba(22, 22, 26, 0.88)",
+    overlay: "rgba(22, 22, 26, 0.92)",
     textHalo: "#000000",
     /** Behind every dialog. */
     scrim: "rgba(0, 0, 0, 0.6)",
