@@ -1,6 +1,6 @@
 # The dungeon generator: design draft 2.1 (2026-11-02)
 
-Status: built, phase 1 (2026-11-02). Draft 2.1 passed design review in round 3, and the build followed it except where **As built** says otherwise. The Round 1, Round 2 and Round 3 sections at the end list each finding and what changed, and Build review round 1 the fixes after the build. From [mvp.md](mvp.md) section 3, Later: "Dungeon generator." The project owner set the Later order on 2026-11-02 (D-261102-007): the generator comes right after the easy items. Code was cited from the tree before this feature, at OP_VERSION 41 and SNAPSHOT_VERSION 31. The generator adds no op or snapshot version of its own: it ships at whatever versions the app is on. Decisions are D-261102-370 to D-261102-389 (section 16) with D-261102-022 to 024, and the build's own guesses are in As built.
+Status: built, phases 1 and 2 (2026-11-02 and 2026-11-08). Draft 2.1 passed design review in round 3, and the build followed it except where **As built** says otherwise. The Round 1, Round 2 and Round 3 sections at the end list each finding and what changed, and Build review round 1 the fixes after the build. From [mvp.md](mvp.md) section 3, Later: "Dungeon generator." The project owner set the Later order on 2026-11-02 (D-261102-007): the generator comes right after the easy items. Code was cited from the tree before this feature, at OP_VERSION 41 and SNAPSHOT_VERSION 31. The generator adds no op or snapshot version of its own: it ships at whatever versions the app is on. Decisions are D-261102-370 to D-261102-389 (section 16) with D-261102-022 to 024, and the build's own guesses are in As built.
 
 ## Summary
 
@@ -448,6 +448,42 @@ The design left these to the build, and only the ones it gives a limit could fai
 ### Tests
 
 Unit tests sit beside each file in `client/features/dungeon/`: the ChaCha20 stream against the RFC 8439 vector and OpenSSL across block edges, the seed, settings, layout, heights (the eight height and width fixtures at every facing), corridors, trap spots, plan properties with the fit floor, twelve golden plans, ops, the scratch room, the client, the send (including a randomized test of answers, order, input refusals, a moved-on DM and a short scene), the worker, the caps, the remembered choices and the words. `landed.prop.test.ts` runs 40 random settings and 24 default plans through every prefix of their ops, with walks, no corridor ledge, stairs facing up with both axis edges linked, daises walked onto and Reveal room exact. `server/rooms/dungeon.itest.ts` holds 12 cases through the real actor (parity and replay, players on another scene, Undo setup and Redo setup as one step, another device splitting it, a co-DM moving the players, a restart, a fogged scene, one revealed room, Duplicate and backup, and a size refusal partway). `flow.test.ts` walks the preview's state through random requests, late answers, bad seeds, pictures and failed pictures, with Make held to the newest answer on screen. The integration test also lands the fixture's ops with the shared reducer alone and compares the result with the DM's snapshot. `e2e/dungeon.e2e.ts` (prefix `DG`, and `DGFIX` for the build review's steps) covers the dialog and Make on a desktop and a phone, holds the picture's encoding to show Make off while an answered preview draws, a newer answer arriving mid-drawing included, and fails it to show the error, and the alignment sweeps gained the dialog and New scene's Builder form.
+
+## As built, phase 2
+
+Phase 2 is built: five themes, dead ends, secret doors and secret rooms, four more traps, lit rooms, dressing, the DM key with pins, Look closer and the dialog's new rows. It took no op or snapshot step of its own. The landing is ordinary builder, stamp, light, trap, pin and journal ops, and the secret doors it lands use the cover that the secret door rules work brought in. The generator went from version 5 to 8 (cave, mine and sewer, dead ends, secret doors and pin squares at 6, the four traps at 7, lights, dressing and the key at 8), so a seed from before makes another dungeon. The build's guesses are D-261108-170 to D-261108-188, D-261108-223 to D-261108-226 and D-261108-234. This section lists where the build went its own way.
+
+### The generator
+
+- **Rolling Stone (D-261108-170).** It needs 35 straight feet past its 2 by 2 squares, plate 25 ft along, rather than 60 ft of roll. At 60 ft it almost never fit at 5 ft a square.
+- **`PlanRoom.secret` (D-261108-171).** Secret rooms are marked in the plan, so the foot's "(1 secret)" and the fog warning's "secret rooms too" read it with DM key off.
+- **Trinkets (D-261108-172).** `KeyRoom.trinket` indexes the SRD's d100 table from 0 to 99. The table was imported by its own commit (`shared/srd/trinkets.json`, with the SRD notice updated), drawn without repeats.
+- **Sewer and cave shapes (D-261108-173, D-261108-174, D-261108-177).** A cistern skips rooms with a dais. Every Wide sewer corridor square follows the block rule, doorway mouths included, and Narrow keeps a doorway's outside square dry. A cave tunnel bulges onto any side that faces open rock, and rock columns stand two squares in from the walls.
+- **Placing things (D-261108-175, D-261108-176, D-261108-178, D-261108-179).** A prop or statue faces its room by turning in quarter turns. A light stands on a free edge square among those nearest a corner. Room floors are drawn before secret doors, so Dead ends and Secret doors keep the floors and the locks. A Fire-Casting Statue's plate lies on one of 8 exact directions from its block, and a trap's hit squares may be water.
+- **Secret doors on by default.** The generator makes them whenever Secret doors is above None. In the dungeon, some loop corridors have a secret door at both ends. That leaves 14 to 30 squares reachable only through a secret door, which stays inside the rule that every room is reached (D-261108-234).
+
+### The landing
+
+- **The 100-op measure (D-261108-180, D-261108-181).** It lives in `e2e/dungeonsend.e2e.ts` rather than `dungeon.e2e.ts`, and swaps the worker's answer for a hand plan of 100 ops. The first run failed, with dispatch taking 147 and 206 ms against limits of 116 and 177 ms, so the named remedy was built: the store's `dispatchMany`, one view rebuild for all but the scene's op. At 4x it measures 75 ms, and the paced send has no long task.
+- **A scene opened mid-send (D-261108-182).** The opening task of a DM who opens the scene while ops wait (132 to 178 ms) is reported, not held.
+- **Signatures and the comparison (D-261108-184, D-261108-185, D-261108-188).** `landDungeon` takes the choices last, for the key's "Made with" line. `sendDungeon`'s `made.ids` is optional, and without it the outcome is unconfirmed. The outcome compares stamps, lights, stones, pins and the key page, also each pin's visibility and the page's folder, access and blocks.
+- **The key's words (D-261108-186, D-261108-187).** "Traps 3 in 12 rooms" off the marks, the size's name from the sides, "A pit." and "A cistern.". The Rolling Stone's note "Damage Threshold 10. A Large object." is read once the trap shows the stone.
+- **The held row is gone.** A first stack held Secret doors at None until the cover landed (D-261108-183, D-261108-223 to D-261108-226). That hold, its line "Secret doors come in a later version of the app.", and its e2e steps were removed once the cover shipped, and the server fixture holds eight dungeons, two of them with secret doors.
+
+### The dialog
+
+- **Look closer and "Drawing the dungeon…".** The message moved from the preview's bottom left to its top left, since Look closer took the bottom left corner. Its picture comes after a frame paints, as the design says.
+- **The key hold.** The dialog checks the journal's limits with the page the preview lands, built from the planned choices. A page the reducer refuses counts as a full journal.
+- **Not built.** The phone render budget of D-261107-269 and per-room edits in the preview, which phase 3 holds.
+- **Alignment.** The sweep gained the roots dungeon-light-line, dungeon-light-line-kept, dungeon-secrets-held (the Secret doors row, named while the hold stood), dungeon-dialog-rows and dungeon-look-closer. The held DM key row is covered by a unit test only.
+
+### Tests
+
+- **New files.** Cave, sewer, dead ends, secrets (a property over every theme), trap spots (the statue's reach under all 9 area rule pairs against an independent run), light spots, furnish, props, key rooms, themes, options (each option keeps what the design says it keeps), key page, `dispatchMany`, key hold, marks and Look closer. The golden plans hold 15 plans, one for each theme and more.
+- **The SB6 gate.** `server/rooms/dungeon.secret.test.ts` runs 8 cases through the room actor: Narrow and Wide, a loop doorway's room side and a secret room's corridor side, and Explore (whole party and per player) and Reveal by hand. It makes 1,040 comparisons of projected state, 660 of them with the near square held, and asserts the adjacency precondition before each. The isometric view has its own case, DG2M-ISO.
+- **Mutants.** The generator's runner put 38 rules back wrong, and 32 were caught. One went with the redundant flag it targeted, and 5 are equivalent today, such as a stone allowed on Narrow, where no two-lane straight stretch exists. The landing's 27 mutants left one equivalent, and the gate's 2 were caught.
+- **Measures.** At the largest choices a plan holds at most 2,410 sight pieces (under 4,800), at most about 83 ops and 156 of 160 stamps, and takes 30 to 82 ms on a Mac mini against 2.5 ms for the defaults. The worker bundle gained 5 KB, to 262 KB gzipped.
+- **Guide pictures.** The guide's five pictures are made by `scripts/guide-dungeon.ts` from the production build.
 
 ## Round 1
 
