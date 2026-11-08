@@ -429,6 +429,37 @@ async function lineParts(line: Locator): Promise<{ label: LinePart; verdict: Lin
   });
 }
 
+/**
+ * The parts a line's mode words would cut, shown: those wrapped out of the
+ * row or clipped inside their box, the dice chips included, by the rule the
+ * line's fit hides the words by (Roller.tsx ResultRest). None means they had
+ * room. The words go back as the fit left them.
+ */
+async function cutByWords(line: Locator): Promise<string[]> {
+  return line.evaluate((node) => {
+    type E = { parentElement: E; style: { display: string }; textContent: string | null; scrollWidth: number; clientWidth: number; contains(e: E): boolean; getBoundingClientRect(): { top: number; bottom: number; width: number }; querySelector(s: string): E | null; querySelectorAll(s: string): Iterable<E> };
+    const root = node as unknown as E & { ownerDocument: { defaultView: { getComputedStyle(e: E): { overflowX: string } } } };
+    const words = root.querySelector("[data-result-mode]");
+    if (!words) return [];
+    const row = words.parentElement;
+    const was = words.style.display;
+    words.style.display = "";
+    try {
+      const bottom = row.getBoundingClientRect().bottom;
+      const cut: string[] = [];
+      for (const el of row.querySelectorAll("*")) {
+        if (words.contains(el)) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0) continue;
+        if (r.top >= bottom - 0.5 || (el.scrollWidth > el.clientWidth + 1 && root.ownerDocument.defaultView.getComputedStyle(el).overflowX !== "visible")) cut.push(el.textContent ?? "");
+      }
+      return cut;
+    } finally {
+      words.style.display = was;
+    }
+  });
+}
+
 /** The line's parts once two reads in a row agree: a resize or a new answer fits the line a frame or two after it lands (FL20-2-FLAKE). */
 async function steadyParts(line: Locator): Promise<Awaited<ReturnType<typeof lineParts>>> {
   let last = "";
@@ -1838,8 +1869,15 @@ describe("raccoon-vtt rolling from a stat block", { timeout: 900_000 }, () => {
       const wide = resultOf(view).first();
       await wide.locator("[data-result-label]").waitFor();
       parts = await steadyParts(wide);
-      // A natural 1 or 20 adds a verdict, which shows too.
-      assert.deepEqual({ ...parts, verdict: parts.verdict === "absent" ? "shown" : parts.verdict }, { label: "shown", verdict: "shown", mode: "shown" }, "at 390 x 844 the whole line shows");
+      // A natural 1 or 20 adds a verdict, which shows too. Beside "Natural 20" the words can lack the room at this
+      // width, so there they go first, as at 320: hidden only where, shown, they would cut a part, a die's chip too.
+      assert.deepEqual({ label: parts.label, verdict: parts.verdict === "absent" ? "shown" : parts.verdict }, { label: "shown", verdict: "shown" }, `at 390 x 844 the label and any verdict show whole: ${JSON.stringify(parts)}`);
+      const cut = await cutByWords(wide);
+      if (parts.mode === "shown") assert.deepEqual(cut, [], "the words shown cut no part");
+      else {
+        assert.notEqual(parts.verdict, "absent", `with no verdict at 390 x 844 the whole line shows: ${JSON.stringify(parts)}`);
+        assert.notDeepEqual(cut, [], `the words are hidden only where, shown, they would cut a part: ${JSON.stringify(parts)}`);
+      }
     } finally {
       await ops.send({ t: "roll.close", rollIds: [requestId] }).catch(() => undefined);
       await closeSheets(pat);
