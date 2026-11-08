@@ -492,6 +492,22 @@ async function timed(page: Page, cdp: CDPSession, steps: number, act: (i: number
 
 type Timer = (page: Page, cdp: CDPSession, steps: number, act: (i: number) => Promise<void>) => Promise<number[]>;
 
+/** Like `timed`, also noting when each step's frames began and ended, in µs on the clock CPU profiles use (`--profile`). */
+function windowed(windows: [number, number][], settleFrames = 4): Timer {
+  return async (page, cdp, steps, act) => {
+    const out: number[] = [];
+    for (let i = 0; i < steps; i++) {
+      const before = await busyAt(cdp);
+      await act(i);
+      await frames(page, settleFrames);
+      const after = await busyAt(cdp);
+      out.push(after.busy - before.busy);
+      windows.push([before.at, after.at]);
+    }
+    return out;
+  };
+}
+
 /** What a frame did, read from the test hook (relief/isoTest.ts), which a build before the kept picture lacks. */
 export type FrameParts = { ms: number; whole: boolean; sliced: boolean; rendered: boolean };
 
@@ -542,19 +558,27 @@ export function partsPast(parts: readonly FrameParts[], over: number): { frames:
  * it. `done` is asked from the `from`th frame on, as a board can report
  * what stood before the act for a frame or two.
  */
-export async function timedUntil(page: Page, cdp: CDPSession, act: () => Promise<void>, done: () => Promise<boolean>, from = 3, max = 3000): Promise<{ frames: number[]; ms: number }> {
+export async function timedUntil(page: Page, cdp: CDPSession, act: () => Promise<void>, done: () => Promise<boolean>, from = 3, max = 3000, windows?: [number, number][]): Promise<{ frames: number[]; ms: number }> {
   const out: number[] = [];
   const start = Date.now();
-  let last = await busy(cdp);
+  let last = await busyAt(cdp);
   await act();
   for (let i = 1; i <= max; i++) {
     await frames(page, 1);
-    const now = await busy(cdp);
-    out.push(now - last);
+    const now = await busyAt(cdp);
+    out.push(now.busy - last.busy);
+    windows?.push([last.at, now.at]);
     last = now;
     if (i >= from && (await done())) return { frames: out, ms: Date.now() - start };
   }
   throw new Error(`still building after ${max} frames`);
+}
+
+/** The main thread's busy time so far in ms, and the time now in µs on the clock CPU profiles use (`--profile`). */
+async function busyAt(cdp: CDPSession): Promise<{ busy: number; at: number }> {
+  const { metrics } = (await cdp.send("Performance.getMetrics")) as { metrics: { name: string; value: number }[] };
+  const read = (name: string) => metrics.find((m) => m.name === name)?.value ?? 0;
+  return { busy: read("TaskDuration") * 1000, at: read("Timestamp") * 1e6 };
 }
 
 /**
@@ -894,7 +918,7 @@ async function openView(context: BrowserContext, page: Page, view: View, roomId:
 
 // ---------------------------------------------------------------- the run
 
-export async function runBench(view: View, opts: { parity?: string; shots?: string; only?: readonly string[] } = {}): Promise<BenchRow[]> {
+export async function runBench(view: View, opts: { parity?: string; shots?: string; only?: readonly string[]; profile?: string } = {}): Promise<BenchRow[]> {
   if (!existsSync(path.join(ROOT, "dist/index.html"))) throw new Error("No production build in dist/. Run `pnpm build` first.");
   const port = Number(process.env.BENCH_PORT ?? 7590);
   const databaseUrl = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
@@ -998,7 +1022,7 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       return all;
     };
     /** A pan row: its moves, and each counted round's largest move, which the largest-move gate pairs with Top-down's (D-261030-538). */
-    const addPan = async (row: string, run: () => Promise<number[]>) => {
+    const addPan = async (row: string, run: (time?: Timer) => Promise<number[]>) => {
       if (opts.only && !opts.only.some((o) => row.includes(o))) return;
       const maxes: number[] = [];
       const all = await throttled(async () => {
@@ -1012,6 +1036,27 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
         return out;
       });
       rows.push({ row, view, ms: { ...stats(all), rounds: maxes } });
+      if (opts.profile) await profiled(row, run);
+    };
+    /**
+     * With `--profile <dir>`, one more round of a pan row under Chrome's CPU
+     * profiler, counted nowhere: the profile, and each move's busy time and
+     * window on the profile's clock, so a slow move can be read by what it
+     * ran. The profiler slows every call, so its times are only shares.
+     */
+    const profiled = async (row: string, run: (time?: Timer) => Promise<number[]>) => {
+      const dir = opts.profile!;
+      mkdirSync(dir, { recursive: true });
+      const windows: [number, number][] = [];
+      await cdp.send("Profiler.enable");
+      await cdp.send("Profiler.setSamplingInterval", { interval: 100 });
+      await cdp.send("Profiler.start");
+      const busyMs = await throttled(() => run(windowed(windows)));
+      const { profile } = (await cdp.send("Profiler.stop")) as { profile: unknown };
+      await cdp.send("Profiler.disable");
+      const name = `${view}-${row.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")}`;
+      writeFileSync(path.join(dir, `${name}.cpuprofile`), JSON.stringify(profile));
+      writeFileSync(path.join(dir, `${name}.moves.json`), JSON.stringify({ row, view, busy: busyMs, windows }));
     };
     const throttled = async <T>(run: () => Promise<T>) => {
       await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_SLOWDOWN });
@@ -1098,13 +1143,13 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       await add("pan, caps, fit", () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
       // The caps at 12 px, its largest move reported, not gated (D-261030-538).
       await open("caps", 12);
-      await addPan("pan, caps, 12 px", () => touchPan(page, cdp, STEPS));
+      await addPan("pan, caps, 12 px", (t) => touchPan(page, cdp, STEPS, t));
       // At the zoom stairs start to step, and in Low power at the first zoom they step there (docs/design/design-v1-iso-depth.md 7).
       await open("caps", 24);
-      await addPan("pan, caps, 24 px", () => touchPan(page, cdp, STEPS));
+      await addPan("pan, caps, 24 px", (t) => touchPan(page, cdp, STEPS, t));
       await page.evaluate(() => localStorage.setItem("rvtt.lowPower", "on"));
       await open("caps", 48);
-      await addPan("pan, caps, 48 px in Low power", () => touchPan(page, cdp, STEPS));
+      await addPan("pan, caps, 48 px in Low power", (t) => touchPan(page, cdp, STEPS, t));
       await page.evaluate(() => localStorage.removeItem("rvtt.lowPower"));
       await open("caps", 40);
       await add("pan, caps, 40 px", () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
@@ -1195,7 +1240,7 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
         await page.evaluate((on) => (on ? localStorage.setItem("rvtt.lowPower", "on") : localStorage.removeItem("rvtt.lowPower")), low);
         await open(kind, zoom);
         const pan = hexRow(orient, `pan, ${zoom === "fit" ? "fit" : `${zoom} px`}${low ? ` in Low power, ${zoom === 24 ? "standing" : "flat"}` : ""}`);
-        await addPan(pan, () => touchPan(page, cdp, STEPS));
+        await addPan(pan, (t) => touchPan(page, cdp, STEPS, t));
         if (view === "isometric" && (zoom === 40 || zoom === 12) && (!opts.only || opts.only.some((o) => pan.includes(o)))) {
           const c = await throttled(() => canvasCalls(page, cdp, STEPS));
           const count = (what: string, v: number) => rows.push({ row: hexRow(orient, `pan, ${zoom} px, ${what} a frame (calls, not ms)`), view, ms: { median: v, max: v, n: STEPS } });
@@ -1215,7 +1260,7 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
           await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...p, id: 0 }] });
           await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
           await frames(page, 12);
-          await addPan(hexRow(orient, `pan, ${zoom} px, with the walker's action bar shown`), () => touchPan(page, cdp, STEPS));
+          await addPan(hexRow(orient, `pan, ${zoom} px, with the walker's action bar shown`), (t) => touchPan(page, cdp, STEPS, t));
           await page.keyboard.press("Escape");
         }
         // Across two cull steps among the four areas, each step restarting their build: every frame held, as a build's frames are, and the slow ones named by what they did.
@@ -1274,36 +1319,55 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
         const builds: number[] = [];
         let others = -1;
         const standing = async () => (await volumesNow(page))?.standing ?? 0;
-        const frames2 = await throttled(() =>
-          rounds(async () => {
-            if (made) {
-              const had = view === "isometric" ? await standing() : 0;
-              await dm.op({ t: "template.delete", templateId: (made.template as { id: string }).id });
-              if (view === "isometric") for (const until = Date.now() + 10_000; Date.now() < until && (await standing()) >= had; ) await page.waitForTimeout(20);
-            }
-            // Read again each round, once the cube before is gone: what else stands can change between rounds.
-            if (view === "isometric") {
-              if (others < 0) await waitStood(page);
-              others = await standing();
-            }
-            made = template(dm.sceneId, dm.memberId, HEX_CUBE);
-            const sent = Date.now();
-            arrivals.push(...(await timed(page, cdp, 1, () => dm.op(made!), 1)));
-            if (view === "topDown") return timed(page, cdp, 3, async () => undefined, 1);
-            const got = await timedUntil(
-              page,
-              cdp,
-              async () => undefined,
-              async () => {
-                const v = await volumesNow(page);
-                return !!v && !v.waiting && v.standing > others;
-              },
-              1,
-            );
-            builds.push(Date.now() - sent);
-            return got.frames;
-          }),
-        );
+        /** One round: the cube before goes, and a new one comes in. With `windows`, each frame's window on the profile's clock, the arrival first. */
+        const cubeRound = async (windows?: [number, number][]) => {
+          if (made) {
+            const had = view === "isometric" ? await standing() : 0;
+            await dm.op({ t: "template.delete", templateId: (made.template as { id: string }).id });
+            if (view === "isometric") for (const until = Date.now() + 10_000; Date.now() < until && (await standing()) >= had; ) await page.waitForTimeout(20);
+          }
+          // Read again each round, once the cube before is gone: what else stands can change between rounds.
+          if (view === "isometric") {
+            if (others < 0) await waitStood(page);
+            others = await standing();
+          }
+          made = template(dm.sceneId, dm.memberId, HEX_CUBE);
+          const sent = Date.now();
+          arrivals.push(...(await (windows ? windowed(windows, 1) : (p: Page, c: CDPSession, n: number, act: (i: number) => Promise<void>) => timed(p, c, n, act, 1))(page, cdp, 1, () => dm.op(made!))));
+          if (view === "topDown") return timed(page, cdp, 3, async () => undefined, 1);
+          const got = await timedUntil(
+            page,
+            cdp,
+            async () => undefined,
+            async () => {
+              const v = await volumesNow(page);
+              return !!v && !v.waiting && v.standing > others;
+            },
+            1,
+            3000,
+            windows,
+          );
+          builds.push(Date.now() - sent);
+          return got.frames;
+        };
+        const frames2 = await throttled(() => rounds(() => cubeRound()));
+        if (opts.profile && view === "isometric") {
+          // One more round under the profiler, counted nowhere, as a pan row's (`profiled`).
+          const windows: [number, number][] = [];
+          await cdp.send("Profiler.enable");
+          await cdp.send("Profiler.setSamplingInterval", { interval: 100 });
+          await cdp.send("Profiler.start");
+          const busyMs = await throttled(() => cubeRound(windows));
+          const { profile } = (await cdp.send("Profiler.stop")) as { profile: unknown };
+          await cdp.send("Profiler.disable");
+          // Its arrival and its time to stand count nowhere either.
+          const arrival = arrivals.pop() ?? 0;
+          builds.pop();
+          const name = `${view}-cube-${orient}`;
+          mkdirSync(opts.profile, { recursive: true });
+          writeFileSync(path.join(opts.profile, `${name}.cpuprofile`), JSON.stringify(profile));
+          writeFileSync(path.join(opts.profile, `${name}.moves.json`), JSON.stringify({ row: `cube ${orient}`, view, busy: [arrival, ...busyMs], windows }));
+        }
         rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, the frame it lands in, 40 px"), view, ms: stats(arrivals.slice(1)) });
         rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, each frame while it builds, 40 px"), view, ms: frameStats(frames2) });
         if (view === "isometric") rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, from its sending until it stands (ms whole, not a frame)"), view, ms: stats(builds.slice(1)) });
@@ -1328,7 +1392,7 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
         await page.evaluate((on) => (on ? localStorage.setItem("rvtt.lowPower", "on") : localStorage.removeItem("rvtt.lowPower")), low);
         await open("dungeon", zoom);
         const at = `${zoom} px${low ? " in Low power" : ""}`;
-        await addPan(dungeonRow(`pan, ${at}`), () => touchPan(page, cdp, STEPS));
+        await addPan(dungeonRow(`pan, ${at}`), (t) => touchPan(page, cdp, STEPS, t));
         await add(dungeonRow(`local drag up a run, whole frame, ${at}`), () => throttled(() => rounds(() => touchDrag(page, cdp, scene.walker, STEPS))));
         if (view === "isometric" && (!opts.only || opts.only.some((o) => dungeonRow(`pan, ${at}`).includes(o)))) {
           // What the walls, frames, steps and outlines cost a frame, counted on an untimed pan of its own (docs/design/design-v1-iso-depth.md 7).
@@ -1358,7 +1422,7 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       // No areas stand on this scene, so nothing waits to stand.
       await open("pits", 12);
       await frames(page, 30);
-      await addPan(PITS_ROW, () => touchPan(page, cdp, STEPS));
+      await addPan(PITS_ROW, (t) => touchPan(page, cdp, STEPS, t));
       if (view === "isometric") {
         const c = await throttled(() => canvasCalls(page, cdp, STEPS));
         const count = (what: string, v: number) => rows.push({ row: `${PITS_ROW}: ${what} a frame (calls, not ms)`, view, ms: { median: v, max: v, n: STEPS } });
@@ -1390,7 +1454,7 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       if (view === "isometric") await waitStood(page);
       const labels = await pinLabels(page);
       if (labels.shown < pinIds.length || labels.onScreen < 20) throw new Error(`the pins' labels do not show: ${JSON.stringify(labels)}`);
-      await addPan(PILLS_ROW, () => touchPan(page, cdp, STEPS));
+      await addPan(PILLS_ROW, (t) => touchPan(page, cdp, STEPS, t));
       if (view === "isometric") {
         // Back in Top-down with the isometric tree kept and hidden: its pills hear no camera (review HXPERF2B-ASTRA-01).
         const pills = () => page.evaluate(() => (globalThis as unknown as { __rvttIsoHook?: { kept?(): { pillCommits?: number } | null } }).__rvttIsoHook?.kept?.()?.pillCommits ?? null);
@@ -1830,7 +1894,9 @@ if (argv[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts
     const shots = arg("--shots");
     // `--only a,b` times just the rows whose names hold one of those words, for a quick look at a change.
     const only = arg("--only")?.split(",");
-    const rows = await runBench(view, parity ? { parity, ...(shots ? { shots } : {}) } : only ? { only } : {});
+    // `--profile <dir>` adds a profiled round to each pan row timed (runBench `profiled`).
+    const profile = arg("--profile");
+    const rows = await runBench(view, parity ? { parity, ...(shots ? { shots } : {}) } : { ...(only ? { only } : {}), ...(profile ? { profile } : {}) });
     const out = arg("--out");
     if (out) writeFileSync(out, JSON.stringify(rows, null, 2));
     if (!parity) console.log(formatReport([rows]));

@@ -233,7 +233,10 @@ async function recordFrames(page: Page): Promise<() => Promise<number[]>> {
 }
 
 async function main(): Promise<void> {
-  const { values } = parseArgs({ options: { out: { type: "string" }, software: { type: "boolean" } } });
+  const { values } = parseArgs({ options: { out: { type: "string" }, software: { type: "boolean" }, only: { type: "string" } } });
+  // `--only a,b` measures just the rows whose names hold one of those words, as bench-iso's does: `--only rest` for the rest rows alone.
+  const only = values.only?.split(",");
+  const wanted = (row: string) => !only || only.some((o) => row.includes(o));
   const port = Number(process.env.BENCH_PORT ?? 7591);
   const databaseUrl = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
   const work = mkdtempSync(path.join(tmpdir(), "raccoon-bench-weather-"));
@@ -427,31 +430,40 @@ async function main(): Promise<void> {
         return p95(await stop());
       });
 
+    /** Measures a row unless `--only` names others. */
+    const measure = async (row: string, view: View, unit: Row["unit"], run: () => Promise<number>) => {
+      if (wanted(row)) add({ row, view, value: await run(), unit });
+    };
     for (const view of ["topDown", "isometric"] as const) {
       await fresh(view, null);
-      add({ row: "rest, none", view, value: await rest(), unit: "ms/s" });
-      add({ row: "pan, none", view, value: await pan(), unit: "ms p95" });
-      add({ row: "drag, none", view, value: await drag(), unit: "ms p95" });
-      add({ row: "pinch, none", view, value: await pinch(), unit: "ms p95" });
+      // Every rest row is read against none's, so none comes with any of them.
+      if (["rest, none", ...HEAVIEST.map((k) => `rest, ${k.name}`), "rest, rain still", "rest, rain off"].some(wanted)) add({ row: "rest, none", view, value: await rest(), unit: "ms/s" });
+      await measure("pan, none", view, "ms p95", pan);
+      await measure("drag, none", view, "ms p95", drag);
+      await measure("pinch, none", view, "ms p95", pinch);
       for (const k of HEAVIEST) {
+        if (!wanted(`rest, ${k.name}`)) continue;
         add({ row: `rest, ${k.name}`, view, value: await rest(() => fresh(view, k.weather)), unit: "ms/s" });
         add({ row: `level, ${k.name}`, view, value: await level(page), unit: "level" });
         add({ row: `frame cost, ${k.name}`, view, value: await frameCost(page), unit: "ms" });
       }
-      await fresh(view, HEAVIEST[0]!.weather);
-      add({ row: "pan, rain", view, value: await pan(), unit: "ms p95" });
-      add({ row: "drag, rain", view, value: await drag(), unit: "ms p95" });
-      add({ row: "pinch, rain", view, value: await pinch(), unit: "ms p95" });
-      add({ row: "level after pans, rain", view, value: await onAndOff(view, swipes), unit: "level" });
-      add({ row: "level after pinches, rain", view, value: await onAndOff(view, pinchOnce), unit: "level" });
+      if (["pan, rain", "drag, rain", "pinch, rain"].some(wanted)) await fresh(view, HEAVIEST[0]!.weather);
+      await measure("pan, rain", view, "ms p95", pan);
+      await measure("drag, rain", view, "ms p95", drag);
+      await measure("pinch, rain", view, "ms p95", pinch);
+      await measure("level after pans, rain", view, "level", () => onAndOff(view, swipes));
+      await measure("level after pinches, rain", view, "level", () => onAndOff(view, pinchOnce));
       let from: { x: number; y: number } | null = null;
-      add({ row: "level after drags, rain", view, value: await onAndOff(view, async (touches) => dragOnce(touches, (from ??= await tokenAt()))), unit: "level" });
-      add({ row: "level after a long pinch, rain", view, value: await longPinch(view), unit: "level" });
+      await measure("level after drags, rain", view, "level", () => onAndOff(view, async (touches) => dragOnce(touches, (from ??= await tokenAt()))));
+      await measure("level after a long pinch, rain", view, "level", () => longPinch(view));
       // Held still, a pinch draws the weather in every frame as a camera draw, and streaks fade in thirds there.
-      await page.evaluate(() => localStorage.setItem("rvtt.weather", "still"));
-      await fresh(view, HEAVIEST[0]!.weather);
-      add({ row: "pinch, rain still", view, value: await pinch(), unit: "ms p95" });
+      if (wanted("pinch, rain still")) {
+        await page.evaluate(() => localStorage.setItem("rvtt.weather", "still"));
+        await fresh(view, HEAVIEST[0]!.weather);
+        add({ row: "pinch, rain still", view, value: await pinch(), unit: "ms p95" });
+      }
       for (const mode of ["still", "off"] as const) {
+        if (!wanted(`rest, rain ${mode}`)) continue;
         await page.evaluate((m) => localStorage.setItem("rvtt.weather", m), mode);
         await fresh(view, HEAVIEST[0]!.weather);
         await sleep(700);
