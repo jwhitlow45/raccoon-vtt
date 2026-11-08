@@ -121,7 +121,7 @@ export type Playing = {
   loops: Record<string, LoopPlaying>;
   /** The newest SOUND_LIMITS.effectsKept, and older ones still sounding, SOUND_LIMITS.effectsListed at most. */
   effects: FiredEffect[];
-  /** DM only, always stored: the same, fired behind a blackout, which stay the DM's for good. */
+  /** DM only, always stored: the same, fired behind a blackout or while Only DM devices play, which stay the DM's for good. */
   dmEffects?: FiredEffect[];
   /** 0 to 100, for everyone. */
   volume: { music: number; effects: number };
