@@ -1,10 +1,11 @@
 import { chunkKey, doorChunk, keys, parseKey, partsKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { linesPastStart } from "#shared/logRings.ts";
-import type { Label, LogEntry, RoomState, Stamp, Trap, Viewer } from "#shared/model.ts";
+import type { Label, LogEntry, RoomState, SceneId, Stamp, Trap, Viewer } from "#shared/model.ts";
 import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, namedByMemory, perPlayerScene, playerChunkBatch, projectEntity, projectState, sightHolders, stampCells, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
 import { MAX_KEPT_REFUSALS, type Change, type RefusalCode } from "#shared/protocol.ts";
 import type { OpAcknowledgment } from "#shared/undoContract.ts";
 import { visionRules, type PartySight } from "#shared/ruleHooks.ts";
+import { heldFloors } from "#shared/rules/floors.ts";
 import { labelCells, TILE_CELLS } from "#shared/rules/fog.ts";
 import type { CellRange } from "#shared/rules/footprint.ts";
 import { zoneRanges } from "#shared/rules/traps.ts";
@@ -75,15 +76,70 @@ export function candidateKeys(batch: CommittedBatch, watched: Iterable<string> =
   return new Set([...touched, ...dependents(batch.before, touched, batch.after), ...dependents(batch.after, touched, batch.before), ...passed]);
 }
 
-/** The scenes the batch's viewers hold: the player scene, unless a blackout hides it, and each DM's own. */
-function watchedScenes(after: RoomState, connections: Iterable<Connection>): Set<string> {
+/** The floors the batch's viewers hold (heldFloors): a player's, none behind a blackout, and every floor of each DM's scene. */
+function watchedScenes(held: Iterable<ReadonlySet<SceneId>>): Set<string> {
   const out = new Set<string>();
-  for (const conn of connections) {
-    if (conn.closed || conn.held === null) continue;
-    const scene = viewerSceneId(after, conn.viewer, { sceneId: conn.sceneId });
-    if (scene !== null) out.add(scene);
-  }
+  for (const floors of held) for (const id of floors) out.add(id);
   return out;
+}
+
+/**
+ * The floors a connection's projection covers in a state
+ * (docs/design/design-v1-floors.md 8.1), memoized per finished state and
+ * viewer by heldFloors itself.
+ */
+export function heldBy(state: RoomState, conn: Connection): ReadonlySet<SceneId> {
+  return heldFloors(state, conn.viewer, { sceneId: conn.sceneId });
+}
+
+function sameFloors(a: ReadonlySet<SceneId>, b: ReadonlySet<SceneId>): boolean {
+  if (a.size !== b.size) return false;
+  for (const id of a) if (!b.has(id)) return false;
+  return true;
+}
+
+/**
+ * The floor a key of a scene's own collections lies on in `state`, or null
+ * for a room-level key and for an entity the state no longer holds, whose
+ * projection is per viewer and reads its own rule (docs/design/design-v1-floors.md
+ * 8.1). A remembered label or stamp the live build lost is such a key.
+ */
+export function floorOfKey(state: RoomState, key: EntityKey): SceneId | null {
+  const parsed = parseKey(key);
+  if (!parsed) return null;
+  switch (parsed.kind) {
+    case "scene":
+    case "played":
+    case "memoryShared":
+    case "opened":
+      return parsed.id;
+    case "chunk":
+    case "fog":
+    case "explored":
+    case "sight":
+    case "sightAll":
+    case "fogAll":
+    case "exploredAny":
+    case "exploredBy":
+    case "holders":
+    case "fogDraft":
+    case "memory":
+    case "memoryBy":
+      return parsed.sceneId;
+    case "token":
+    case "template":
+    case "drawing":
+    case "label":
+    case "stamp":
+    case "light":
+    case "pin":
+    case "trap": {
+      const sceneId = (readEntity(state, key) as { sceneId?: unknown } | null)?.sceneId;
+      return typeof sceneId === "string" ? sceneId : null;
+    }
+    default:
+      return null;
+  }
 }
 
 /*
@@ -152,9 +208,6 @@ export function perPlayerClasses(state: RoomState, sceneId: string, memberId: st
   return { sight, fog: holder ? partsKey(["holder", memberId]) : "shared" };
 }
 
-/** A player's three classes, each a string naming what it reads. */
-type PlayerClasses = { scene: string; sight: string; fog: string };
-
 /*
  * The fog classes' projections of labels, stamps and found traps, kept
  * across batches by every input they read (6.9): the entity object, the
@@ -197,28 +250,48 @@ class Projector {
   readonly #byClass = new Map<string, Map<EntityKey, unknown>>();
   /** A name for each sight object, which viewers with the same sources share. */
   readonly #sights = new Map<PartySight, number>();
+  /** Each member's classes on each floor, worked out once a batch however many of the floor's keys ask. */
+  readonly #classes = new Map<string, { sight: string; fog: string }>();
 
   constructor(state: RoomState) {
     this.#state = state;
   }
 
-  project(conn: Connection, candidates: readonly EntityKey[]): Map<EntityKey, unknown> {
+  /**
+   * One connection's projection of the candidates. For a player, a table
+   * display or a preview, a key on a floor outside `held` projects to null
+   * before any class is asked (docs/design/design-v1-floors.md 8.1), since a
+   * class shares one answer among players who may hold different floors.
+   * The scene kinds' class is that of the whole held set, since a floor's
+   * level is renumbered among the floors held, and the sight and fog
+   * classes are each floor's own.
+   */
+  project(conn: Connection, candidates: readonly EntityKey[], held: ReadonlySet<SceneId>): Map<EntityKey, unknown> {
     const out = new Map<EntityKey, unknown>();
     const own = (key: EntityKey) => () => projectEntity(key, this.#state, conn.viewer, { sceneId: conn.sceneId });
     if (conn.role === "dm") {
       for (const key of candidates) out.set(key, own(key)());
       return out;
     }
-    const of = this.#classesOf(conn);
-    this.#prepareChunks(conn, of.fog, candidates);
+    // Encoded arrays, since a scene id, which the DM names, may hold any separator (FANOUT-CLASS-KEYS).
+    const scenes = partsKey(["scene", ...[...held].sort()]);
     for (const key of candidates) {
+      const floor = floorOfKey(this.#state, key);
+      if (floor !== null && !held.has(floor)) {
+        out.set(key, null);
+        continue;
+      }
       const kind = key.slice(0, key.indexOf(":"));
-      if (SCENE_KINDS.has(kind)) out.set(key, this.#shared(of.scene, key, own(key)));
-      else if (kind === "sight") out.set(key, this.#shared(of.sight, key, own(key)));
+      if (SCENE_KINDS.has(kind)) out.set(key, this.#shared(scenes, key, own(key)));
+      // A key of a scene kind whose entity is gone, or any other kind, reads who the player is: per member.
+      else if (floor === null) out.set(key, own(key)());
+      else if (kind === "sight") out.set(key, this.#shared(this.#classesOf(conn, floor).sight, key, own(key)));
       // A chunk holds what its fog class holds (docs/design/design-v1-map-discovery.md 5.6), a holder's own sight and fog among them.
-      else if (kind === "fog" || kind === "chunk") out.set(key, this.#shared(of.fog, key, own(key)));
-      else if (FOG_KINDS.has(kind)) out.set(key, this.#shared(of.fog, key, () => this.#fogged(conn, of.fog, key)));
-      else out.set(key, own(key)());
+      else if (kind === "fog" || kind === "chunk") out.set(key, this.#shared(this.#fogClass(conn, floor, candidates), key, own(key)));
+      else if (FOG_KINDS.has(kind)) {
+        const cls = this.#fogClass(conn, floor, candidates);
+        out.set(key, this.#shared(cls, key, () => this.#fogged(conn, cls, key)));
+      } else out.set(key, own(key)());
     }
     if (conn.previewBy !== null) {
       for (const [key, value] of out) if (key.startsWith("log:") && value !== null && previewOmits(value as LogEntry, conn.previewBy)) out.set(key, null);
@@ -226,13 +299,19 @@ class Projector {
     return out;
   }
 
-  /** Populate the class once, cutting the union of changed chunks' neighborhoods together. */
-  #prepareChunks(conn: Connection, cls: string, candidates: readonly EntityKey[]): void {
+  /** The floor's fog class for the connection, populated with the floor's changed chunks the first time it is asked. */
+  #fogClass(conn: Connection, sceneId: SceneId, candidates: readonly EntityKey[]): string {
+    const cls = this.#classesOf(conn, sceneId).fog;
+    this.#prepareChunks(conn, sceneId, cls, candidates);
+    return cls;
+  }
+
+  /** Populate the class once, cutting the union of its floor's changed chunks' neighborhoods together. */
+  #prepareChunks(conn: Connection, sceneId: SceneId, cls: string, candidates: readonly EntityKey[]): void {
     if (this.#byClass.has(cls)) return;
     const values = new Map<EntityKey, unknown>();
     this.#byClass.set(cls, values);
-    const sceneId = viewerSceneId(this.#state, conn.viewer, { sceneId: conn.sceneId });
-    if (sceneId === null || !this.#state.scenes[sceneId]?.fogEnabled) return;
+    if (!this.#state.scenes[sceneId]?.fogEnabled) return;
     const positions = candidates.flatMap((key) => {
       const parsed = parseKey(key);
       return parsed?.kind === "chunk" && parsed.sceneId === sceneId ? [parsed] : [];
@@ -250,29 +329,35 @@ class Projector {
   }
 
   /**
-   * The classes of a player's socket, a table display's or a preview's.
-   * Sight holders are the scene's players whose entry is on, as projection
-   * reads them, and the sight object is the one their projection reads.
+   * A floor's sight and fog classes for a player's socket, a table display's
+   * or a preview's. Sight holders are the floor's players whose entry is on,
+   * as projection reads them, and the sight object is the one their
+   * projection reads. Each floor keeps its own holder list, so a holder's
+   * classes are per floor (docs/design/design-v1-floors.md 8.1).
    */
-  #classesOf(conn: Connection): PlayerClasses {
+  #classesOf(conn: Connection, sceneId: SceneId): { sight: string; fog: string } {
+    const key = partsKey([conn.memberId, sceneId]);
+    let classes = this.#classes.get(key);
+    if (classes) return classes;
     const state = this.#state;
-    const sceneId = viewerSceneId(state, conn.viewer, { sceneId: conn.sceneId });
-    const scene = sceneId === null ? undefined : state.scenes[sceneId];
-    // Encoded arrays, since a scene id, which the DM names, may hold any separator (FANOUT-CLASS-KEYS).
-    if (sceneId === null || !scene || !perPlayerScene(scene)) return { scene: partsKey(["scene", sceneId]), sight: partsKey(["sight", sceneId, "party"]), fog: partsKey(["fog", sceneId, "party"]) };
-    const { sight, fog } = perPlayerClasses(state, sceneId, conn.memberId, this.#sights);
-    return { scene: partsKey(["scene", sceneId]), sight: partsKey(["sight", sceneId, sight]), fog: partsKey(["fog", sceneId, fog]) };
+    const scene = state.scenes[sceneId];
+    if (!scene || !perPlayerScene(scene)) classes = { sight: partsKey(["sight", sceneId, "party"]), fog: partsKey(["fog", sceneId, "party"]) };
+    else {
+      const { sight, fog } = perPlayerClasses(state, sceneId, conn.memberId, this.#sights);
+      classes = { sight: partsKey(["sight", sceneId, sight]), fog: partsKey(["fog", sceneId, fog]) };
+    }
+    this.#classes.set(key, classes);
+    return classes;
   }
 
-  /** A label, stamp or found trap for a fog class, through the memo when it stands on the class's own scene. */
+  /** A label, stamp or found trap for its floor's fog class, through the memo. The held-floor gate ran before it. */
   #fogged(conn: Connection, cls: string, key: EntityKey): unknown {
     const state = this.#state;
     const opts = { sceneId: conn.sceneId };
     const project = () => projectEntity(key, state, conn.viewer, opts);
     const value = readEntity(state, key) as Label | Stamp | Trap | null;
-    const sceneId = viewerSceneId(state, conn.viewer, opts);
-    const scene = sceneId === null ? undefined : state.scenes[sceneId];
-    if (!value || !scene || value.sceneId !== scene.id) return project();
+    const scene = value ? state.scenes[value.sceneId] : undefined;
+    if (!value || !scene) return project();
     const kind = parseKey(key)?.kind;
     if ((kind === "label" || kind === "stamp") && namedByMemory(state, scene.id, kind === "label" ? "labels" : "stamps", value.id)) return project();
     const path: object[] = [value, scene.fogEnabled ? FOG_ON : FOG_OFF];
@@ -327,18 +412,35 @@ function keepRejects(conn: Connection, rejects: readonly Reject[]): void {
  * client that reconnected during the commit still gets them. A current
  * socket that holds no snapshot is sent nothing and keeps its refusals for
  * the snapshot it waits on (takeKeptRejects).
+ *
+ * A connection whose held floors the batch changed (heldBy before and
+ * after) is projected whole and diffed against what it holds, as every
+ * connection is on a global batch, so the rows, casts, roll requests and
+ * log lines of a floor it gains or loses come and go with the floor
+ * (docs/design/design-v1-floors.md 8.1). The answer says whether any did, so
+ * the actor judges held previews again.
  */
-export function publishBatch(batch: CommittedBatch, connections: Iterable<Connection>, current: (key: ClientKey) => Connection | undefined, history?: (conn: Connection, delivered: boolean) => void): void {
+export function publishBatch(
+  batch: CommittedBatch,
+  connections: Iterable<Connection>,
+  current: (key: ClientKey) => Connection | undefined,
+  history?: (conn: Connection, delivered: boolean) => void,
+): { heldChanged: boolean } {
   const all = [...connections];
+  const live = all.filter((conn) => !conn.closed && conn.held !== null);
+  const held = new Map(live.map((conn) => [conn, heldBy(batch.after, conn)] as const));
+  const changed = new Set(batch.global ? [] : live.filter((conn) => !sameFloors(heldBy(batch.before, conn), held.get(conn)!)));
   // In key order, never the order the reducer wrote them, so the order of a viewer's changes says nothing of work they never see.
   const candidates = [
     ...candidateKeys(
       batch,
-      watchedScenes(batch.after, all),
-      all.filter((conn) => !conn.closed && conn.held !== null).map((conn) => conn.viewer),
+      watchedScenes(held.values()),
+      live.map((conn) => conn.viewer),
     ),
   ].sort();
+  let everything: EntityKey[] | null = null;
   const projections = new Map<string, Map<EntityKey, unknown>>();
+  const wholes = new Map<string, Map<EntityKey, unknown>>();
   const projector = new Projector(batch.after);
   for (const conn of all) {
     if (conn.closed) continue;
@@ -349,10 +451,13 @@ export function publishBatch(batch: CommittedBatch, connections: Iterable<Connec
       continue;
     }
     const cls = viewerClass(conn, batch.after);
-    let next = projections.get(cls);
+    const whole = changed.has(conn);
+    const known = whole ? wholes : projections;
+    let next = known.get(cls);
     if (!next) {
-      next = projector.project(conn, candidates);
-      projections.set(cls, next);
+      if (whole) everything ??= [...new Set([...allKeys(batch.before), ...allKeys(batch.after)])].sort();
+      next = projector.project(conn, whole ? everything! : candidates, held.get(conn)!);
+      known.set(cls, next);
     }
     const diff = diffProjection(conn.held, next, hashOf);
     conn.held = diff.held;
@@ -384,6 +489,7 @@ export function publishBatch(batch: CommittedBatch, connections: Iterable<Connec
     conn.send(msg);
     history?.(conn, true);
   }
+  return { heldChanged: changed.size > 0 };
 }
 
 /*
