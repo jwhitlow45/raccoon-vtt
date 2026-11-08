@@ -210,7 +210,7 @@ export function viewerSceneId(state: RoomState, viewer: Viewer, opts: ProjectOpt
  * client replays on may lack the view settings, which reads as no blackout
  * there: only the server's projection decides what a player receives.
  */
-function paused(state: RoomState, viewer: Viewer): boolean {
+function paused(state: Pick<RoomState, "meta">, viewer: Viewer): boolean {
   return viewer.role === "player" && state.meta.view?.blackout === true;
 }
 
@@ -4181,6 +4181,20 @@ function soundFields(ctx: Ctx): Pick<ProjectedState, "sounds" | "playlists" | "p
  * encounter: the clock read without the fight's rounds would show the wrong
  * time, and a blackout's global re-projection brings both back together.
  */
+/**
+ * The clock a viewer's view holds, as projectClockCtx sends it: the DM's
+ * always, a player's and a table display's only while it is shown and no
+ * blackout is on. A player's own copy carries no `shown`, since it holds a
+ * clock only while shown, so a device's replay of its own op reads it as
+ * held (docs/design/design-v1-calendar-c2c3.md 3.4).
+ */
+export function heldClock(state: Pick<RoomState, "clock" | "meta">, viewer: Viewer): RoomClock | null {
+  const clock = state.clock;
+  if (!clock) return null;
+  if (viewer.role === "dm") return clock;
+  return clock.shown !== false && !paused(state, viewer) ? clock : null;
+}
+
 function projectClockCtx(ctx: Ctx): ProjectedClock | null {
   const clock = ctx.state.clock;
   if (!clock) return null;

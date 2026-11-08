@@ -527,6 +527,8 @@ export const LIMITS = {
   clockSecondsMax: 10_000_000_000_000,
   clockStepMax: 100 * 365 * 86_400,
   clockDateChars: 120,
+  /** The longest time span an effect may last, 365 days (docs/design/design-v1-calendar-c2c3.md 4.1). */
+  effectSpanMax: 365 * 86_400,
 } as const;
 
 const MiB = 1024 * 1024;

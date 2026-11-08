@@ -732,8 +732,8 @@ describe("the reducer projects only through calls that take the op's envelope", 
     seenByNonOwners: 2,
     seenMark: 2,
   };
-  /** Read ownership, members, grids, fog or text, and no walls. */
-  const NO_WALLS = new Set(["allKeys", "anyPlayer", "gridOfScene", "gridOfToken", "groundAnyPlayerSees", "hash128", "hashValue", "initiativeHidden", "listsStripped", "ownsCharacter", "ownsToken", "playerPlays", "playersToken", "stableStringify", "stampCells", "unionSightOf"]);
+  /** Read ownership, members, grids, fog, the clock or text, and no walls. */
+  const NO_WALLS = new Set(["allKeys", "anyPlayer", "gridOfScene", "gridOfToken", "groundAnyPlayerSees", "hash128", "hashValue", "heldClock", "initiativeHidden", "listsStripped", "ownsCharacter", "ownsToken", "playerPlays", "playersToken", "stableStringify", "stampCells", "unionSightOf"]);
   /*
    * permissions.ts judges ops live, before the reducer applies them, and
    * calls live projections. The reducer takes only these from it, each

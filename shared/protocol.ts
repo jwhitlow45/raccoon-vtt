@@ -220,15 +220,20 @@ const durationAnchor = z.union([
   z.strictObject({ characterId: id }),
 ]);
 
+/** A time span's length (docs/design/design-v1-calendar-c2c3.md 4.1): whole minutes, as seconds, from 1 minute to 365 days. */
+const effectSpan = z.number().int().min(60).max(LIMITS.effectSpanMax).multipleOf(60);
+
 /**
  * A duration as the UI offers it (design 9.5). The reducer turns it into
  * boundary crossings of the anchor entry, or pauses it on a token or
- * character when the creature is not in an encounter.
+ * character when the creature is not in an encounter. A `span` counts the
+ * room's clock instead, so it names no creature (docs/design/design-v1-calendar-c2c3.md 4.2).
  */
 const durationInput = z.discriminatedUnion("mode", [
   z.strictObject({ mode: z.literal("turnStart"), of: durationAnchor }),
   z.strictObject({ mode: z.literal("turnEnd"), of: durationAnchor }),
   z.strictObject({ mode: z.literal("rounds"), rounds: z.number().int().min(1).max(1_000), of: durationAnchor }),
+  z.strictObject({ mode: z.literal("span"), seconds: effectSpan }),
 ]);
 
 const durationRemaining = z.number().int().min(0).max(10_000);
@@ -2578,17 +2583,20 @@ const stateClientOps = [
    * rounds, which the reducer stores less those rounds (5.1). The design
    * names it `t`, which every op's own type already holds. Start is refused
    * while a clock exists, the others while none does. Start, Stop and
-   * Update are Setup history steps, Set and Advance play steps.
+   * Update are Setup history steps, Set and Advance play steps. `claim` is
+   * a fresh id the sending device puts on an op that can write a line,
+   * which the line carries, so the device knows it for its own
+   * (docs/design/design-v1-calendar-c2c3.md 4.6).
    */
-  op("clock.start", { id, at: clockTime, shown: z.boolean(), calendar }),
+  op("clock.start", { id, at: clockTime, shown: z.boolean(), calendar, claim: id.optional() }),
   op("clock.stop", {}),
-  op("clock.update", { calendar: calendar.optional(), shown: z.boolean().optional(), at: clockTime.optional() }).refine(
+  op("clock.update", { calendar: calendar.optional(), shown: z.boolean().optional(), at: clockTime.optional(), claim: id.optional() }).refine(
     (o) => o.calendar !== undefined || o.shown !== undefined || o.at !== undefined,
     { message: "a clock update changes something" },
   ),
-  op("clock.set", { at: clockTime }),
+  op("clock.set", { at: clockTime, claim: id.optional() }),
   /** `why` marks the party's Long Rest, whose gesture sends the advance first (4.5). */
-  op("clock.advance", { by: clockStep, why: z.literal("longRest").optional() }),
+  op("clock.advance", { by: clockStep, why: z.literal("longRest").optional(), claim: id.optional() }),
   /**
    * Synced music and sound (docs/design/design-v1-music.md 6.2), the DM's
    * alone. A sound's `ms` is the encoded length its upload checked, which
@@ -2806,6 +2814,11 @@ export const serverOnlyOps = [
     /** The log line of the HP change this restore takes back, so the log says so (an undo with `log`). */
     undid: logId.optional(),
     /**
+     * A DM's Undo or Redo: the head of the history step its command named,
+     * which a clock line it writes carries (docs/design/design-v1-calendar-c2c3.md 4.6).
+     */
+    claim: id.optional(),
+    /**
      * The step is a teleport's (`token.move` with `teleport`), so a player's
      * redo of it skips the wall and ledge test as the teleport did (section
      * 4.1). Only permissions read it.
@@ -2978,6 +2991,8 @@ export type ActorTarget = z.infer<typeof actorTarget>;
 export type DiceRollInput = z.infer<typeof diceRollInput>;
 export type DiceResultInput = z.infer<typeof diceResult>;
 export type DurationInput = z.infer<typeof durationInput>;
+/** A duration counted in a creature's turns, every mode but a time span. */
+export type TurnDurationInput = Exclude<DurationInput, { mode: "span" }>;
 export type EffectInput = z.infer<typeof effectInput>;
 export type ActorPatch = z.infer<typeof actorPatch>;
 export type TokenInput = z.infer<typeof tokenInput>;
@@ -3033,6 +3048,13 @@ export const durationRemainingSchema = durationRemaining;
  * op's actor carries it (W7B-P-9).
  */
 export const actorSchemaForImport = actorSchema.extend({
+  /**
+   * A time span's end, which only the reducer writes, so no create op's
+   * actor carries one: an end already due would never run out
+   * (docs/design/design-v1-calendar-c2c3.md 4.7). The stored state always holds
+   * `at` and `clock`.
+   */
+  effects: z.array(effectStored.extend({ ends: z.strictObject({ span: effectSpan, at: clockTime, clock: id }).optional() })).max(MAX_EFFECTS),
   unshaped: z.strictObject({ ac: z.number().int().min(0).max(100), speeds, shapeTemp: z.literal(true).optional() }).optional(),
   /** The reducer writes these alone, so no op's actor carries them either (docs/design/design-v1-combat-controls.md 3.6). */
   uses: uses.optional(),

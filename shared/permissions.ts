@@ -1130,8 +1130,10 @@ function forPlayer(op: Op, c: Check): Decision {
       if (hides !== undefined) return refuse("forbidden", "only the DM hides a condition from players");
       const shows = op.t === "actor.effect.add" ? op.effect.triggerShown : op.patch.triggerShown;
       if (shows !== undefined) return refuse("forbidden", "only the DM shows a trigger to players");
+      // A time span counts the clock, not a creature's turns, so it names no anchor to check. The reducer refuses one the
+      // player's view holds no clock for (docs/design/design-v1-calendar-c2c3.md 4.2).
       const duration = op.t === "actor.effect.add" ? op.effect.duration : op.patch.duration;
-      if (duration && !c.anchorVisible(duration.of)) return GONE;
+      if (duration && duration.mode !== "span" && !c.anchorVisible(duration.of)) return GONE;
       return OK;
     }
 

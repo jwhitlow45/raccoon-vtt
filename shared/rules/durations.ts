@@ -1,5 +1,5 @@
-import type { DurationAnchor, Effect, Encounter, EntryId, InitEntry, RoomState } from "../model.ts";
-import type { DurationInput } from "../protocol.ts";
+import type { DurationAnchor, Effect, Encounter, EntryId, InitEntry, RoomClock, RoomState } from "../model.ts";
+import type { TurnDurationInput } from "../protocol.ts";
 import { rowCharacter } from "./initiative.ts";
 import { ownEntry } from "../records.ts";
 
@@ -66,7 +66,7 @@ export function findEntryFor(state: RoomState, of: DurationAnchor): InitEntry | 
  * needs two crossings. With no entry for X, the duration is anchored to the
  * token or character and waits.
  */
-export function resolveDuration(state: RoomState, input: DurationInput): StoredDuration {
+export function resolveDuration(state: RoomState, input: TurnDurationInput): StoredDuration {
   const entry = findEntryFor(state, input.of);
   const anchor: DurationAnchor = entry ? { entryId: entry.id } : pausedAnchor(state, input.of);
   const active = entry !== undefined && state.encounter?.activeEntryId === entry.id;
@@ -96,6 +96,26 @@ export function pausedAnchorForEntry(entry: InitEntry): DurationAnchor {
   if (entry.tokenId !== undefined) return { tokenId: entry.tokenId };
   if (entry.characterId !== undefined) return { characterId: entry.characterId };
   return { entryId: entry.id };
+}
+
+/** The DM's refusal of a time span while no clock runs (docs/design/design-v1-calendar-c2c3.md 4.2). */
+export const SPAN_NEEDS_CLOCK = "Start the clock first.";
+/**
+ * A player's refusal of a time span while their view holds no clock, in one
+ * code and these words whether there is none, it is hidden or a blackout is
+ * on, so the answer never tells a hidden clock from none (3.4).
+ */
+export const SPAN_CLOCK_UNSHARED = "The DM isn't sharing the date and time.";
+
+/**
+ * Whether a time span has run out (docs/design/design-v1-calendar-c2c3.md 4.3):
+ * it runs on this very clock and the current time `now` has reached its end.
+ * A span on a clock that stopped or was replaced never ends by itself, and
+ * a player's copy without the clock's time never reads as due.
+ */
+export function endsDue(effect: Effect, clock: Pick<RoomClock, "id">, now: number): boolean {
+  const ends = effect.ends;
+  return ends !== undefined && ends.at !== undefined && ends.clock === clock.id && ends.at <= now;
 }
 
 export type TickResult = { effects: Effect[]; expired: Effect[]; changed: boolean };

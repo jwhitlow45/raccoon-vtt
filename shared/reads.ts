@@ -1,6 +1,6 @@
 import { doorChunk, keys, readEntity, type EntityKey } from "./keys.ts";
 import type { RoomState, Viewer } from "./model.ts";
-import type { ActorTarget, Op } from "./protocol.ts";
+import type { ActorTarget, DurationInput, Op } from "./protocol.ts";
 import type { ProjectedState } from "./project.ts";
 import type { QueueEdit } from "./sound.ts";
 import { moveGroups } from "./rules/attach.ts";
@@ -70,6 +70,22 @@ function endsReads(state: RoomState, rollIds: readonly string[]): Read[] {
  */
 function clockRead(state: RoomState): Read[] {
   return state.clock ? [{ key: keys.clock }] : [];
+}
+
+/**
+ * What a duration reads besides its creature's effects: the token or
+ * character it counts the turns of, or for a time span the clock it counts,
+ * where the view holds one (docs/design/design-v1-calendar-c2c3.md 4.3). A
+ * span with no clock in view is refused by the reducer alike on every
+ * device, so it still predicts.
+ */
+function durationReads(state: RoomState, duration: DurationInput | undefined): Read[] {
+  if (!duration) return [];
+  if (duration.mode === "span") return clockRead(state);
+  const of_ = duration.of;
+  if ("tokenId" in of_) return [{ key: keys.token(of_.tokenId) }];
+  if ("characterId" in of_) return [{ key: keys.character(of_.characterId) }];
+  return [];
 }
 
 /**
@@ -226,11 +242,7 @@ export function reads(op: Op, state: RoomState): Reads {
       const r: Read[] = [];
       for (const item of op.targets) {
         r.push(holderRead(state, item.target, ["hp", "life", "effects", "legendary", "deathSaves"]));
-        for (const effect of item.effects ?? []) {
-          const of_ = effect.duration?.of;
-          if (of_ && "tokenId" in of_) r.push({ key: keys.token(of_.tokenId) });
-          else if (of_ && "characterId" in of_) r.push({ key: keys.character(of_.characterId) });
-        }
+        for (const effect of item.effects ?? []) r.push(...durationReads(state, effect.duration));
       }
       if (op.cast !== undefined) r.push({ key: keys.cast(op.cast) });
       if (op.trap !== undefined) r.push({ key: keys.trap(op.trap.trapId) });
@@ -251,13 +263,8 @@ export function reads(op: Op, state: RoomState): Reads {
       return of([holderRead(state, op.target, ["hp", "life", "effects"]), ...clockRead(state)]);
     case "actor.effect.add":
     case "actor.effect.update": {
-      const r: Read[] = [holderRead(state, op.target, ["effects"])];
       const duration = op.t === "actor.effect.add" ? op.effect.duration : op.patch.duration;
-      if (duration) {
-        if ("tokenId" in duration.of) r.push({ key: keys.token(duration.of.tokenId) });
-        else if ("characterId" in duration.of) r.push({ key: keys.character(duration.of.characterId) });
-      }
-      return of(r);
+      return of([holderRead(state, op.target, ["effects"]), ...durationReads(state, duration ?? undefined)]);
     }
     case "actor.effect.remove":
       return of([holderRead(state, op.target, ["effects"])]);
@@ -466,10 +473,7 @@ export function reads(op: Op, state: RoomState): Reads {
     case "actor.effects": {
       const r: Read[] = [];
       for (const item of op.add ?? []) {
-        r.push(holderRead(state, item.target, ["effects"]));
-        const of_ = item.effect.duration?.of;
-        if (of_ && "tokenId" in of_) r.push({ key: keys.token(of_.tokenId) });
-        else if (of_ && "characterId" in of_) r.push({ key: keys.character(of_.characterId) });
+        r.push(holderRead(state, item.target, ["effects"]), ...durationReads(state, item.effect.duration));
       }
       for (const item of op.remove ?? []) r.push(holderRead(state, item.target, ["effects"]));
       return of(r);

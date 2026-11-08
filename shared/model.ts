@@ -1867,6 +1867,12 @@ export type Effect = {
    */
   duration?: { remaining: number; boundary: "turnStart" | "turnEnd"; anchor: DurationAnchor };
   /**
+   * A length of time read against the room's clock (docs/design/design-v1-calendar-c2c3.md
+   * 4.1), apart from `duration` and never both. It ends on the first op
+   * whose current time (`clockNow`) reaches `at` on the clock it names.
+   */
+  ends?: EffectEnds;
+  /**
    * Wave 7: a save at the end of each of the creature's own turns ends it
    * (docs/design/design-v1-roll-options.md 6.1), `spell` when it is against a
    * spell. Only the DM sets it. Players keep the ability and lose the DC
@@ -1880,6 +1886,21 @@ export type Effect = {
    * The DM's.
    */
   due?: { id: string; state: "pending" | "resolved" | "dismissed" };
+};
+
+/**
+ * A time span's end (docs/design/design-v1-calendar-c2c3.md 4.1). The stored
+ * state always holds `at` and `clock`. A player's and a table display's copy
+ * keeps them only while their view holds that very clock, so a hidden
+ * clock's time never reaches them through an effect.
+ */
+export type EffectEnds = {
+  /** The length chosen, in whole minutes as seconds: 60 to `LIMITS.effectSpanMax`. */
+  span: number;
+  /** `clockNow` when it was set, plus `span`. */
+  at?: number;
+  /** The clock it runs on (RoomClock.id). Absent exactly when `at` is. */
+  clock?: string;
 };
 
 export type AreaShape = "sphere" | "cylinder" | "cone" | "cube" | "line" | "emanation";
@@ -2839,7 +2860,20 @@ export type LogEvent =
  * a step, and `from` the DM's Undo or Redo of a change. Its audience is
  * frozen when written: shared while the clock is shown, the DM's otherwise.
  */
-export type ClockLogEvent = { type: "clock"; date: string; by?: number; why?: "longRest" | "set" | "start"; from?: "undo" | "redo" };
+export type ClockLogEvent = {
+  type: "clock";
+  date: string;
+  by?: number;
+  why?: "longRest" | "set" | "start";
+  from?: "undo" | "redo";
+  /**
+   * The client id on the clock op that wrote the line, or for a DM's Undo
+   * or Redo the head of the history step it named, so a device knows its
+   * own lines exactly (docs/design/design-v1-calendar-c2c3.md 4.6). The DM's
+   * and co-DMs' alone: a player's copy never holds it.
+   */
+  claim?: string;
+};
 
 /**
  * One roll of a `dice` line: its result, the label and creature asked, and

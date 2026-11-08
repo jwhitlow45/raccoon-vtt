@@ -1,5 +1,5 @@
 import type { DurationAnchor, Effect, RoomState } from "#shared/model.ts";
-import type { DurationInput } from "#shared/protocol.ts";
+import type { TurnDurationInput } from "#shared/protocol.ts";
 import { displayName } from "../../lib/scene.ts";
 
 /**
@@ -115,7 +115,7 @@ export function emptyForm(view: View | null | undefined, options: AnchorOption[]
 }
 
 /** The op's duration input, or null for "No duration". An unknown anchor falls back to the creature itself. */
-export function durationInput(form: DurationForm, options: AnchorOption[]): DurationInput | null {
+export function durationInput(form: DurationForm, options: AnchorOption[]): TurnDurationInput | null {
   const option = options.find((o) => o.key === form.anchorKey) ?? options.find((o) => o.key === SELF_KEY);
   if (!option || form.mode === "none") return null;
   const of = option.anchor;

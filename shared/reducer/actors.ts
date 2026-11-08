@@ -1,8 +1,10 @@
 import { clockTicks, combatUses, healRevivesDead, reviveToOne } from "../migrate.ts";
-import { clockNow } from "../calendar.ts";
-import type { Effect } from "../model.ts";
-import { MAX_EFFECTS, type DurationInput, type OpOf, type OutcomeDamage } from "../protocol.ts";
-import { resolveDuration } from "../rules/durations.ts";
+import { CLOCK_TOO_FAR, clockNow } from "../calendar.ts";
+import { LIMITS } from "../limits.ts";
+import type { Effect, EffectEnds } from "../model.ts";
+import { heldClock } from "../project.ts";
+import { MAX_EFFECTS, type OpOf, type OutcomeDamage, type TurnDurationInput } from "../protocol.ts";
+import { SPAN_CLOCK_UNSHARED, SPAN_NEEDS_CLOCK, resolveDuration } from "../rules/durations.ts";
 import {
   INCAPACITATING_KEYS,
   applyDamage,
@@ -129,11 +131,24 @@ function stripUndefined<T extends object>(value: T): T {
 }
 
 /** The creature a duration is measured against must exist, or the timer could never run. */
-function checkAnchor(tx: Tx, input: DurationInput): void {
+function checkAnchor(tx: Tx, input: TurnDurationInput): void {
   const of = input.of;
   if ("tokenId" in of) tx.token(of.tokenId);
   else if ("characterId" in of) tx.character(of.characterId);
   else if (!tx.state.encounter?.entries.some((e) => e.id === of.entryId)) throw gone("entry");
+}
+
+/**
+ * A time span's end, counted from the current time on the clock the actor's
+ * view holds (docs/design/design-v1-calendar-c2c3.md 4.3). A player whose view
+ * holds none gets one refusal for no clock, a hidden one and a blackout.
+ */
+function spanEnds(tx: Tx, seconds: number): EffectEnds {
+  const clock = heldClock(tx.state, tx.actor);
+  if (!clock) throw invalid(tx.actor.role === "dm" ? SPAN_NEEDS_CLOCK : SPAN_CLOCK_UNSHARED);
+  const at = clockNow(clock, tx.state.encounter) + seconds;
+  if (at > LIMITS.clockSecondsMax) throw invalid(CLOCK_TOO_FAR);
+  return { span: seconds, at, clock: clock.id };
 }
 
 export function effectAdd(tx: Tx, op: OpOf<"actor.effect.add">): void {
@@ -143,7 +158,8 @@ export function effectAdd(tx: Tx, op: OpOf<"actor.effect.add">): void {
   if (actor.effects.some((e) => e.id === op.effect.id)) throw invalid("effect already exists");
   const { duration, ...rest } = op.effect;
   const effect: Effect = stripUndefined(rest);
-  if (duration) {
+  if (duration?.mode === "span") effect.ends = spanEnds(tx, duration.seconds);
+  else if (duration) {
     checkAnchor(tx, duration);
     effect.duration = resolveDuration(tx.state, duration);
   }
@@ -173,10 +189,17 @@ export function effectUpdate(tx: Tx, op: OpOf<"actor.effect.update">): void {
     if (value === null) delete next[field];
     else (next as Record<string, unknown>)[field] = value;
   }
-  if (p.duration === null) delete next.duration;
-  else if (p.duration !== undefined) {
+  // An effect lasts a count of turns or a length of time, never both, and `null` takes away either.
+  if (p.duration === null) {
+    delete next.duration;
+    delete next.ends;
+  } else if (p.duration?.mode === "span") {
+    delete next.duration;
+    next.ends = spanEnds(tx, p.duration.seconds);
+  } else if (p.duration !== undefined) {
     checkAnchor(tx, p.duration);
     next.duration = resolveDuration(tx.state, p.duration);
+    delete next.ends;
   }
   // An effect no save ends has no occurrence waiting, so a request linked to one closes (shared/reducer/rolls.ts endSaves).
   if (p.save === null) {
