@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Calendar } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
-import { amountBy, calendarSummary, chipName, chipText, composeDraft, DAY_FROM_ONE, draftDate, firstDay, keptSeconds, reconcileDate, joinNames, partyRestNotes, remapMonth, restNote, setAt, stepName, STEPS, timeSeconds, timeValue, toDawn, weekdayLine } from "./words.ts";
+import { amountBy, calendarSummary, chipName, chipText, composeDaylight, composeDraft, DAY_FROM_ONE, daylightDraft, daylightText, DAWN_RANGE, draftDate, DUSK_RANGE, firstDay, keptSeconds, reconcileDate, joinNames, partyRestNotes, remapMonth, restNote, sameDaylight, setAt, stepName, STEPS, timeLine, timeSeconds, timeValue, toDawn, weekdayLine } from "./words.ts";
 
 const DAY = 86_400;
 const H = 3_600;
@@ -28,6 +28,35 @@ describe("the steps' names", () => {
     assert.deepEqual(toDawn(22 * H), { by: 8 * H, name: "Move the clock on to dawn, 6:00 AM" });
     assert.equal(toDawn(6 * H).by, DAY);
     assert.equal(toDawn(5 * H + 59 * 60).by, 60);
+  });
+});
+
+describe("dawn and dusk in the panel", () => {
+  test("the second line reads the part of the day through the clock's own dawn and dusk", () => {
+    assert.equal(timeLine(5 * H + 30 * 60, {}), "5:30 AM, Night");
+    assert.equal(timeLine(5 * H + 30 * 60, { daylight: { dawn: 5 * H + 30 * 60, dusk: 18 * H } }), "5:30 AM, Dawn");
+    assert.equal(timeLine(18 * H, { daylight: { dawn: 6 * H, dusk: 20 * H } }), "6:00 PM, Afternoon");
+  });
+
+  test("the row reads 6:00 AM and 6:00 PM until the DM sets others, and the fields start from them", () => {
+    assert.equal(daylightText({}), "6:00 AM and 6:00 PM");
+    assert.equal(daylightText({ daylight: { dawn: 5 * H + 30 * 60, dusk: 19 * H } }), "5:30 AM and 7:00 PM");
+    assert.deepEqual(daylightDraft({}), { dawn: "06:00", dusk: "18:00" });
+  });
+
+  test("dawn runs from 12:00 AM to 11:00 AM and dusk from 12:00 PM to 11:00 PM, and a refusal names its field", () => {
+    assert.deepEqual(composeDaylight({ dawn: "05:30", dusk: "18:00" }), { ok: true, daylight: { dawn: 5 * H + 1_800, dusk: 18 * H } });
+    assert.equal(composeDaylight({ dawn: "00:00", dusk: "12:00" }).ok, true, "the lower bounds");
+    assert.equal(composeDaylight({ dawn: "11:00", dusk: "23:00" }).ok, true, "the upper bounds");
+    assert.deepEqual(composeDaylight({ dawn: "11:01", dusk: "18:00" }), { ok: false, field: "dawn", reason: "Pick a dawn from 12:00 AM to 11:00 AM." });
+    assert.deepEqual(composeDaylight({ dawn: "06:00", dusk: "23:01" }), { ok: false, field: "dusk", reason: "Pick a dusk from 12:00 PM to 11:00 PM." });
+    assert.deepEqual(composeDaylight({ dawn: "06:00", dusk: "11:59" }), { ok: false, field: "dusk", reason: DUSK_RANGE });
+    assert.deepEqual(composeDaylight({ dawn: "", dusk: "18:00" }), { ok: false, field: "dawn", reason: DAWN_RANGE }, "an empty field is refused");
+  });
+
+  test("saving the same times changes nothing", () => {
+    assert.equal(sameDaylight({}, { dawn: 6 * H, dusk: 18 * H }), true, "absent reads as 6:00 AM and 6:00 PM");
+    assert.equal(sameDaylight({ daylight: { dawn: 5 * H, dusk: 18 * H } }, { dawn: 6 * H, dusk: 18 * H }), false);
   });
 });
 

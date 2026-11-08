@@ -22,7 +22,9 @@ export const TIME_ENTRIES: readonly CatalogEntry[] = [
   section(TIME, "time.steps", "Move the clock on", { names: ["advance time", "pass time", "skip ahead"], when: running }),
   action(TIME, "time.set", "Set the date and time…", { names: ["change the date"], when: running }),
   setting(TIME, "time.shown", "Players see the date and time", { names: ["share the date"], when: running, valueNow: (ctx) => onOff(ctx.state.view?.clock?.shown === true) }),
-  action(TIME, "time.calendar", "Calendar…", { names: ["months", "change the calendar"], when: running }),
+  // Found by the words for its effect too: dawn and dusk set the part of the day and the light of Time of day scenes.
+  action(TIME, "time.calendar", "Calendar…", { names: ["months", "change the calendar", "dawn", "dusk", "sunrise", "sunset"], when: running }),
+  section(TIME, "time.daylight", "Dawn and dusk", { names: ["daylight", "time of day light"], when: running }),
   // Its own first press arms it, "Tap again to stop the clock".
   action(TIME, "time.stop", "Stop the clock", { names: ["remove the clock"], when: running }),
 ];

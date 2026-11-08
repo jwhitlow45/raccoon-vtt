@@ -10,6 +10,7 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { takeOverPanelScroll, type PanelProps } from "../panels.ts";
 import { CalendarDialog } from "./CalendarDialog.tsx";
+import { DaylightRow } from "./DaylightRow.tsx";
 import { SetTimeDialog } from "./SetTimeDialog.tsx";
 import { SHARE_HELP, StartClock } from "./StartClock.tsx";
 import { StepButtons } from "./StepButtons.tsx";
@@ -54,7 +55,7 @@ export default function TimePanel(_props: PanelProps) {
           {dateText(now, clock.calendar, "full")}
         </span>
         <span data-clock-time="" style={{ fontSize: theme.font.heading, color: theme.color.textMuted }}>
-          {timeLine(now)}
+          {timeLine(now, clock)}
         </span>
       </div>
       {/* Keyed by the clock, so an armed Stop, an open dialog or Other amount's row goes with the clock it was for, however it went: a stop here or on another device, or an Undo (ASTRA-07). */}
@@ -128,6 +129,7 @@ function RunningClock(props: { clock: RoomClock; now: number; fight: boolean }) 
           {calendarSummary(clock.calendar)}
         </span>
       </div>
+      <DaylightRow clock={clock} />
       <Section label="Stop" tone="danger">
         <Help>{STOP_HELP}</Help>
         <div style={{ display: "flex" }}>

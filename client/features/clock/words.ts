@@ -1,6 +1,6 @@
-import { composeDate, DAY_SECONDS, dateOf, dateText, nextDawn, partOfDay, timeText, type ComposedDate, type DateFields } from "#shared/calendar.ts";
+import { composeDate, DAY_SECONDS, DAYLIGHT, DAYLIGHT_BOUNDS, dateOf, dateText, nextDawn, partOfDay, timeText, type ComposedDate, type DateFields } from "#shared/calendar.ts";
 import { LIMITS } from "#shared/limits.ts";
-import type { Calendar, LongRestStamp } from "#shared/model.ts";
+import type { Calendar, Daylight, LongRestStamp, RoomClock } from "#shared/model.ts";
 
 /**
  * The words and small rules of the Time panel
@@ -59,9 +59,48 @@ export function chipName(t: number, calendar: Calendar): string {
   return `Time: ${dateText(t, calendar, "short")}, ${timeText(t)}, ${partOfDay(t)}`;
 }
 
-/** The panel's second line: "6:00 AM, Dawn". */
-export function timeLine(t: number): string {
-  return `${timeText(t)}, ${partOfDay(t)}`;
+/**
+ * The panel's second line: "6:00 AM, Dawn". It takes the whole clock, a
+ * required argument, so a caller that forgot it would fail to typecheck
+ * rather than read dawn and dusk as 6:00 AM and 6:00 PM
+ * (docs/design/design-v1-calendar-c2c3.md 6.2).
+ */
+export function timeLine(t: number, clock: Pick<RoomClock, "daylight">): string {
+  return `${timeText(t)}, ${partOfDay(t, clock.daylight)}`;
+}
+
+export const DAYLIGHT_HELP = "Each lasts an hour. They set the part of the day, To dawn, and the light of scenes that follow the time of day.";
+export const DAWN_RANGE = `Pick a dawn from ${timeText(DAYLIGHT_BOUNDS.dawn.min)} to ${timeText(DAYLIGHT_BOUNDS.dawn.max)}.`;
+export const DUSK_RANGE = `Pick a dusk from ${timeText(DAYLIGHT_BOUNDS.dusk.min)} to ${timeText(DAYLIGHT_BOUNDS.dusk.max)}.`;
+
+/** The Dawn and dusk row's value: "6:00 AM and 6:00 PM". */
+export function daylightText(clock: Pick<RoomClock, "daylight">): string {
+  const { dawn, dusk } = clock.daylight ?? DAYLIGHT;
+  return `${timeText(dawn)} and ${timeText(dusk)}`;
+}
+
+/** The two time fields as text, from the clock's dawn and dusk. */
+export function daylightDraft(clock: Pick<RoomClock, "daylight">): { dawn: string; dusk: string } {
+  const { dawn, dusk } = clock.daylight ?? DAYLIGHT;
+  return { dawn: timeValue(dawn), dusk: timeValue(dusk) };
+}
+
+/**
+ * The fields as the `daylight` an update sends, or the field at fault and
+ * why. A time field holds whole minutes, so only the range can refuse.
+ */
+export function composeDaylight(draft: { dawn: string; dusk: string }): { ok: true; daylight: Daylight } | { ok: false; field: "dawn" | "dusk"; reason: string } {
+  const dawn = timeSeconds(draft.dawn);
+  if (dawn === null || dawn < DAYLIGHT_BOUNDS.dawn.min || dawn > DAYLIGHT_BOUNDS.dawn.max) return { ok: false, field: "dawn", reason: DAWN_RANGE };
+  const dusk = timeSeconds(draft.dusk);
+  if (dusk === null || dusk < DAYLIGHT_BOUNDS.dusk.min || dusk > DAYLIGHT_BOUNDS.dusk.max) return { ok: false, field: "dusk", reason: DUSK_RANGE };
+  return { ok: true, daylight: { dawn, dusk } };
+}
+
+/** Whether saving would change nothing, so Save sends no op and no Setup step. */
+export function sameDaylight(a: Pick<RoomClock, "daylight">, b: Daylight): boolean {
+  const now = a.daylight ?? DAYLIGHT;
+  return now.dawn === b.dawn && now.dusk === b.dusk;
 }
 
 /** What the Calendar button shows beside it: "Day count", or "12 months, 7-day week". */

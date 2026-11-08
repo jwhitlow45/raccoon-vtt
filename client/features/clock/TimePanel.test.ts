@@ -74,7 +74,17 @@ describe("the DM's Time", () => {
     const html = draw("dm", CLOCK);
     assert.match(html, /data-clock-date=""[^>]*>Day 4</);
     const headings = [...html.matchAll(/<h(\d)[^>]*>([^<]*)<\/h\1>/g)].map((m) => `h${m[1]} ${m[2]}`);
-    assert.deepEqual(headings, ["h3 Move the clock on", "h3 Sharing", "h3 Stop"], "no h4 left from Ambiance's Time group");
+    assert.deepEqual(headings, ["h3 Move the clock on", "h3 Sharing", "h3 Dawn and dusk", "h3 Stop"], "no h4 left from Ambiance's Time group");
+  });
+
+  test("Dawn and dusk reads the room's times with a Change button, and the part of the day follows them", () => {
+    const plain = draw("dm", CLOCK);
+    assert.match(plain, /data-clock-daylight=""[^>]*>6:00 AM and 6:00 PM</);
+    assert.match(plain, />Change</);
+    assert.match(plain, /Each lasts an hour\. They set the part of the day, To dawn, and the light of scenes that follow the time of day\./);
+    const early = draw("dm", { ...CLOCK, t: 3 * 86_400 + 5 * 3_600 + 40 * 60, daylight: { dawn: 5 * 3_600 + 30 * 60, dusk: 19 * 3_600 } });
+    assert.match(early, /data-clock-daylight=""[^>]*>5:30 AM and 7:00 PM</);
+    assert.match(early, /data-clock-time=""[^>]*>5:40 AM, Dawn</);
   });
 
   test("the five step buttons are one size in one grid, Other amount… across its own row (D-261106-095)", () => {
@@ -96,7 +106,7 @@ describe("a player's Time", () => {
   test("with the clock shared: the date and time, and no controls", () => {
     const html = draw("player", CLOCK);
     assert.match(html, /data-clock-date=""[^>]*>Day 4</);
-    assert.doesNotMatch(html, /Move the clock on|Start the clock|Stop the clock/);
+    assert.doesNotMatch(html, /Move the clock on|Start the clock|Stop the clock|Dawn and dusk/);
   });
 
   test("left open after the DM stops sharing: it says so", () => {
