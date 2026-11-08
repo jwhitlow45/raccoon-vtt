@@ -643,6 +643,11 @@ newest first.
 
 **Since v0.3.1**
 
+- **Single file and seats apart on hexes**
+  ([design](design/design-v1-attach.md)): change format 51. Until it reloads,
+  an old page plans a drag into a corridor one hex wide with creatures in tow
+  by the old rule, so it can hold a drag the server would take, or send one
+  whose riders and creatures in tow land elsewhere than its preview shows.
 - **Only DM devices play** ([design](design/design-v1-sound-dm-only.md)):
   room format 39, change format 50. Until it reloads, an old DM page shows
   neither the switch nor its reminder. An old player page or table display
