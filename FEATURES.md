@@ -1716,7 +1716,7 @@ On a screen 900 px or wider, with two panels in the side panel. With the bar's g
 
 ### Handout viewer
 
-A handout the DM shows, or a picture or a PDF opened from the Library.
+A handout the DM shows, a picture or a PDF opened from the Library, or the dungeon Look closer shows.
 
 | Key | Does | Who |
 | --- | --- | --- |
@@ -1804,7 +1804,7 @@ Where the action bar opens as a window: on a screen 600 px or wider, or a phone 
 | --- | --- | --- |
 | Escape | Close it. A journal page or a monster with unsaved changes asks first | everyone |
 | Tab, Shift+Tab | Move through its controls without leaving it | everyone |
-| Page Up, Page Down | In Generate a dungeon, move Heights or Traps to its next or previous mark | DM |
+| Page Up, Page Down | In Generate a dungeon, move Heights, Traps, Secret doors or Lit rooms to its next or previous mark | DM |
 
 ### Images
 
