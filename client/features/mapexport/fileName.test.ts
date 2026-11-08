@@ -58,3 +58,15 @@ test("a hex scene's name says hex where a square one has its size, and the uploa
     }
   }
 });
+
+test("a floor's name follows the scene's, before the size (docs/design/design-v1-floors.md 7.8)", () => {
+  assert.equal(exportFileName(SQUARES, "Tower", { w: 30, h: 20 }, 70, "player", "Upper floor"), "tower-upper-floor-30x20-70px.png");
+  assert.equal(exportFileName(SQUARES, "Tower", { w: 30, h: 20 }, 70, "dm", "Roof"), "tower-roof-30x20-70px-dm.png");
+  // A floor name with nothing a file name can hold, and a scene without floors, add nothing.
+  assert.equal(exportFileName(SQUARES, "Tower", { w: 30, h: 20 }, 70, "player", "🐉"), "tower-30x20-70px.png");
+  assert.equal(exportFileName(SQUARES, "Tower", { w: 30, h: 20 }, 70, "player"), "tower-30x20-70px.png");
+  // A size inside a floor's name cannot win over the grid's, and the upload still reads the scale back.
+  const name = exportFileName(SQUARES, "Tower", { w: 30, h: 20 }, 70, "player", "Room 3x3");
+  assert.equal(name, "tower-room-3-x-3-30x20-70px.png");
+  assert.equal(cellPxHint(name, 30 * 70, 20 * 70), 70);
+});

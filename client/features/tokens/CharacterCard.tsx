@@ -32,7 +32,7 @@ import { characterPageDraws } from "./panelDraws.ts";
 import { usePanelFolds, type FoldKey } from "./panelFolds.ts";
 import { cardCombat, combatSummary, headerActions, playersPlace, reactionSpent, type CardCombatId, type CardPartId } from "./panelOrder.ts";
 import { PLACE_TOOL_ID, setPending } from "./placement.ts";
-import { onScene, playerToken } from "./playerCharacters.ts";
+import { onSceneFloors, placementScene, playerToken } from "./playerCharacters.ts";
 import { QuickNumbers } from "./QuickNumbers.tsx";
 import { RestSection } from "./RestSection.tsx";
 import { hpUnits, unitText, vitals } from "./statSummary.ts";
@@ -339,9 +339,11 @@ function PlaceMine(props: { character: Character; close(): void }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
   const scope = useRoomScope();
-  const scene = view?.meta.playerSceneId ? view.scenes[view.meta.playerSceneId] : undefined;
+  const shownId = useRoomView((s) => s.sceneId);
+  // On the floor they show, when that is one of the players' scene (design-v1-floors.md 8.3).
+  const scene = view ? placementScene(view, shownId, you?.role === "dm") : undefined;
   if (!view || !you || !scene || view.meta.settings.playersCreateCharacters !== true) return null;
-  if (onScene(view, character.id, scene.id)) return <Help style={{ overflowWrap: "anywhere" }}>{character.name} is on the map.</Help>;
+  if (onSceneFloors(view, character.id, scene.id)) return <Help style={{ overflowWrap: "anywhere" }}>{character.name} is on the map.</Help>;
   return (
     <Button
       size="sm"

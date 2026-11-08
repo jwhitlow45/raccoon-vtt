@@ -146,7 +146,7 @@ export function MapExport(props: { scene: Scene }) {
     try {
       const blob = await renderMapPng({ scene: drawn, size, content, grid, map, assets });
       if (run !== runRef.current) return;
-      const file = new File([blob], exportFileName(sceneGrid(scene), scene.name, scene.bounds, size.pxPerCell, view), { type: "image/png" });
+      const file = new File([blob], exportFileName(sceneGrid(scene), scene.name, scene.bounds, size.pxPerCell, view, scene.floor?.name), { type: "image/png" });
       const url = URL.createObjectURL(file);
       urlRef.current = url;
       setStatus({

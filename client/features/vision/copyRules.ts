@@ -39,16 +39,18 @@ export const MAPS_RESET = "Players' remembered maps here reset.";
 export const MAPS_JOIN = "Each player's own map here joins the party's.";
 
 /**
- * What a scene's line says the copy would do there (8.3). Whether players
+ * What a scene's line says the copy would do there (8.3). `playersSeeIt` is
+ * whether players see the scene now (rules/floors.ts `playersSee`): on the
+ * players' scene, a floor they have reached, and no blackout. Whether players
  * explored a scene the DM is not looking at is not in the DM's view, so a
  * scene that leaves Explore is always said to reset: saying so where
  * nothing was explored costs a line, and not saying it where something was
  * would surprise the DM.
  */
-export function copyNotes(scene: Pick<Scene, "id" | "fogEnabled" | "vision">, patch: CopyPatch, playerSceneId: string | null): string[] {
+export function copyNotes(scene: Pick<Scene, "fogEnabled" | "vision">, patch: CopyPatch, playersSeeIt: boolean): string[] {
   const notes: string[] = [];
   if (copiesNothing(scene, patch)) return notes;
-  if (scene.id === playerSceneId) notes.push(PLAYERS_HERE);
+  if (playersSeeIt) notes.push(PLAYERS_HERE);
   const after = playersSeeOf({ fogEnabled: patch.fogEnabled, vision: { on: patch.vision.on, light: patch.vision.light } });
   if (playersSeeOf(scene) === "explore" && after !== "explore") notes.push(MAPS_RESET);
   if (scene.vision?.perPlayer === true && !patch.vision.perPlayer) notes.push(MAPS_JOIN);
@@ -56,8 +58,8 @@ export function copyNotes(scene: Pick<Scene, "id" | "fogEnabled" | "vision">, pa
 }
 
 /** A scene's line under its name: what players see there now, then what the copy would do there. */
-export function copyLine(scene: Pick<Scene, "id" | "fogEnabled" | "vision">, patch: CopyPatch, playerSceneId: string | null): string {
-  return [`${playersSeeLabel(playersSeeOf(scene))}.`, ...copyNotes(scene, patch, playerSceneId)].join(" ");
+export function copyLine(scene: Pick<Scene, "fogEnabled" | "vision">, patch: CopyPatch, playersSeeIt: boolean): string {
+  return [`${playersSeeLabel(playersSeeOf(scene))}.`, ...copyNotes(scene, patch, playersSeeIt)].join(" ");
 }
 
 export function copyTitle(sourceName: string): string {

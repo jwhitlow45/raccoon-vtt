@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Scene } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
-import { DM, room } from "#shared/testutil.ts";
+import { DM, room, scene as sceneRecord } from "#shared/testutil.ts";
 import { LocalServer } from "../../dev/localServer.ts";
 import { createRoomStore } from "../../state/store.ts";
 import { FakeClock, FakeOutbox } from "../../state/testing.ts";
@@ -200,6 +200,22 @@ describe("after Hide", () => {
     // Opening the new scene themselves is no reason to keep it closed.
     assert.equal(movedOn("s1", at("s1", "new"), "new"), false);
     assert.equal(movedOn("s1", at("new"), "new"), false);
+  });
+
+  test("a switch to another floor of the scene the import began on is no move away, another scene is (docs/design/design-v1-floors.md 10)", () => {
+    const view = room({
+      scenes: {
+        g: sceneRecord("g", { floor: { of: "g", level: 0, name: "Ground floor" } }),
+        u: sceneRecord("u", { floor: { of: "g", level: 1, name: "Upper floor", height: 10 } }),
+        s2: sceneRecord("s2"),
+        n: sceneRecord("n"),
+      },
+    });
+    const on = (sceneId: string) => ({ sceneId, sceneLoad: SCENE_LOAD_IDLE, view });
+    assert.equal(movedOn("g", on("u"), "n"), false);
+    assert.equal(movedOn("u", on("g"), "n"), false);
+    assert.equal(movedOn("g", on("s2"), "n"), true);
+    assert.equal(movedOn("g", { sceneId: "u", sceneLoad: { ...SCENE_LOAD_IDLE, requested: "s2" }, view }, "n"), true);
   });
 
   function fakeStore(initial: Partial<RoomView>) {

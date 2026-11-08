@@ -1,6 +1,7 @@
 import { sightOf, tileKey } from "#shared/keys.ts";
 import { FOG_SUBCELLS, type RoomState, type Scene } from "#shared/model.ts";
 import { TILE_CELLS, TILE_SUB } from "#shared/rules/fog.ts";
+import { playersSee } from "#shared/rules/floors.ts";
 import { seenFogBits } from "#shared/rules/vision.ts";
 import { rectBetween } from "./cells.ts";
 import type { BuilderState } from "./store.ts";
@@ -38,14 +39,15 @@ export function gestureCells(s: Pick<BuilderState, "unsent" | "rect" | "run" | "
 }
 
 /**
- * Whether the party sees any of `cells` now: on the players' scene with
- * fog and party vision on and no blackout, any sub-cell in the sight the
+ * Whether the party sees any of `cells` now: on a floor players see (the
+ * players' scene, opened, with no blackout) with fog and party vision on, any sub-cell in the sight the
  * DM's copy holds (the union of every source's, project.ts unionSightOf).
  * With fog off players hold the whole build anyway, so there is nothing
  * to say.
  */
 export function partySeesAny(view: RoomState, scene: Pick<Scene, "id" | "vision" | "fogEnabled">, cells: readonly string[]): boolean {
-  if (cells.length === 0 || scene.fogEnabled !== true || scene.vision?.on !== true || view.meta.playerSceneId !== scene.id || view.meta.view?.blackout === true) return false;
+  // The floor the DM builds on counts only while players see it now: an open floor of their scene, and no blackout (docs/design/design-v1-floors.md 8.3).
+  if (cells.length === 0 || scene.fogEnabled !== true || scene.vision?.on !== true || !playersSee(view, scene.id)) return false;
   const sight = sightOf(view);
   if (!sight) return false;
   const tiles = new Map<string, Uint8Array | null>();

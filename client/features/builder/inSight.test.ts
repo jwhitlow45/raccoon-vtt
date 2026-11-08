@@ -47,3 +47,27 @@ describe("the builder's note while the party sees where the DM builds", () => {
     assert.equal(partySeesAny(dmCopy({ lit: true }), dmCopy({ lit: true }).scenes.s1!, []), false);
   });
 });
+
+describe("the note on a floor of the players' scene (docs/design/design-v1-floors.md 8.3)", () => {
+  /** Tower: Ground (the start floor) and Upper, the party's sight over Upper's tile where `lit`. */
+  function tower(opts: { reached: boolean; blackout?: boolean }): RoomState {
+    const state = room({
+      scenes: {
+        g: scene("g", { fogEnabled: true, vision: { on: true, light: "bright" }, floor: { of: "g", level: 0, name: "Ground floor" } }),
+        u: scene("u", { fogEnabled: true, vision: { on: true, light: "bright" }, floor: { of: "g", level: 1, name: "Upper floor", height: 10 } }),
+      },
+    });
+    state.meta = { ...state.meta, playerSceneId: "g", view: { follow: false, blackout: opts.blackout === true } };
+    if (opts.reached) state.openFloors = { u: { sceneId: "u", rev: 0 } };
+    return { ...state, sight: { [tileKey("u", 0, 0)]: { f: 1 } } } as RoomState;
+  }
+
+  test("a floor the players have reached counts like the players' scene, one they have not reached or a blackout does not", () => {
+    const reached = tower({ reached: true });
+    assert.equal(partySeesAny(reached, reached.scenes.u!, ["3,3"]), true);
+    const unreached = tower({ reached: false });
+    assert.equal(partySeesAny(unreached, unreached.scenes.u!, ["3,3"]), false, "the DM builds Upper in private");
+    const dark = tower({ reached: true, blackout: true });
+    assert.equal(partySeesAny(dark, dark.scenes.u!, ["3,3"]), false);
+  });
+});

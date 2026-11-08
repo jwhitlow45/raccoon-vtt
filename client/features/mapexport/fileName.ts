@@ -14,11 +14,22 @@ import type { Grid } from "#shared/rules/grid.ts";
  * `crypt-hex-70px.png` (docs/design/design-v1-hex-grids.md HX-D13): other VTTs
  * read `30x20` as squares, and the upload's size hint passes over it.
  *
+ * A floor of a scene with floors adds its name after the scene's, as in
+ * `tower-upper-floor-30x20-70px.png`.
+ *
  * The DM view adds `-dm`, so the copy that shows secret doors is never
  * mistaken for the one to hand to players.
  */
-export function exportFileName(g: Grid, sceneName: string, bounds: { w: number; h: number }, pxPerCell: number, view: "player" | "dm"): string {
-  const slug = sceneName
+export function exportFileName(g: Grid, sceneName: string, bounds: { w: number; h: number }, pxPerCell: number, view: "player" | "dm", floorName?: string): string {
+  const slug = slugOf(sceneName);
+  // A floor's image says which floor it is, after the scene's name (docs/design/design-v1-floors.md 7.8).
+  const floor = floorName === undefined ? "" : slugOf(floorName);
+  const cells = g.shape === "hex" ? "hex" : `${bounds.w}x${bounds.h}`;
+  return `${slug || "map"}${floor ? `-${floor}` : ""}-${cells}-${pxPerCell}px${view === "dm" ? "-dm" : ""}.png`;
+}
+
+function slugOf(name: string): string {
+  return name
     .normalize("NFKD")
     .replace(/\p{M}+/gu, "")
     .toLowerCase()
@@ -26,6 +37,4 @@ export function exportFileName(g: Grid, sceneName: string, bounds: { w: number; 
     .replace(/(\d)x(?=\d)/g, "$1-x-")
     .slice(0, 48)
     .replace(/^-+|-+$/g, "");
-  const cells = g.shape === "hex" ? "hex" : `${bounds.w}x${bounds.h}`;
-  return `${slug || "map"}-${cells}-${pxPerCell}px${view === "dm" ? "-dm" : ""}.png`;
 }

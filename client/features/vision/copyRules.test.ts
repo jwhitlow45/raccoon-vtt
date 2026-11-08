@@ -46,14 +46,14 @@ describe("using a scene's vision settings on others", () => {
   test("a scene's line says where the players are, a reset of remembered maps, and per-player maps joining", () => {
     const whole = copyPatch(scene("s0", { fogEnabled: true }));
     const explore = scene("s2", { name: "Hall", fogEnabled: true, vision: { on: true, light: "bright", perPlayer: true } });
-    assert.deepEqual(copyNotes(explore, whole, "s2"), [PLAYERS_HERE, MAPS_RESET, MAPS_JOIN]);
-    assert.deepEqual(copyNotes(explore, whole, "s1"), [MAPS_RESET, MAPS_JOIN]);
-    assert.deepEqual(copyNotes(scene("s2", { fogEnabled: true }), copyPatch(crypt), null), [], "Reveal by hand to Explore forgets nothing");
-    assert.deepEqual(copyNotes(scene("s2", { fogEnabled: true }), whole, "s2"), [], "a scene the copy leaves as it is says nothing, the players' scene included");
+    assert.deepEqual(copyNotes(explore, whole, true), [PLAYERS_HERE, MAPS_RESET, MAPS_JOIN]);
+    assert.deepEqual(copyNotes(explore, whole, false), [MAPS_RESET, MAPS_JOIN]);
+    assert.deepEqual(copyNotes(scene("s2", { fogEnabled: true }), copyPatch(crypt), false), [], "Reveal by hand to Explore forgets nothing");
+    assert.deepEqual(copyNotes(scene("s2", { fogEnabled: true }), whole, true), [], "a scene the copy leaves as it is says nothing, the players' scene included");
     // Explore to Custom drops memory too, since fog goes off.
-    assert.deepEqual(copyNotes(scene("s2", { fogEnabled: true, vision: { on: true, light: "bright" } }), copyPatch(scene("s0", { fogEnabled: false, vision: { on: true, light: "bright" } })), null), [MAPS_RESET]);
-    assert.equal(copyLine(explore, whole, "s2"), `Explore. ${PLAYERS_HERE} ${MAPS_RESET} ${MAPS_JOIN}`);
-    assert.equal(copyLine(scene("s2", { fogEnabled: false }), whole, null), "Everything.");
+    assert.deepEqual(copyNotes(scene("s2", { fogEnabled: true, vision: { on: true, light: "bright" } }), copyPatch(scene("s0", { fogEnabled: false, vision: { on: true, light: "bright" } })), false), [MAPS_RESET]);
+    assert.equal(copyLine(explore, whole, true), `Explore. ${PLAYERS_HERE} ${MAPS_RESET} ${MAPS_JOIN}`);
+    assert.equal(copyLine(scene("s2", { fogEnabled: false }), whole, false), "Everything.");
   });
 
   test("the button's and the sheet's words", () => {

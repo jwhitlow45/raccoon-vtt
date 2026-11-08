@@ -1,4 +1,5 @@
 import type { RoomState, Scene } from "#shared/model.ts";
+import { sameScene } from "#shared/rules/floors.ts";
 import type { OpAnswer, RoomView } from "../../state/types.ts";
 import type { RoomViewStore } from "../../state/view.ts";
 import { NOT_SAME_SHAPE, phaseProblem, referenceGrid } from "../phases/rules.ts";
@@ -121,9 +122,11 @@ export function outcomeText(outcome: ImportOutcome, name: string, opened: boolea
  * scene shown, or asked for, is neither the one shown when the walls began
  * nor the new one.
  */
-export function movedOn(start: string | null, now: Pick<RoomView, "sceneId" | "sceneLoad">, sceneId: string): boolean {
+export function movedOn(start: string | null, now: Pick<RoomView, "sceneId" | "sceneLoad"> & Partial<Pick<RoomView, "view">>, sceneId: string): boolean {
   const showing = now.sceneLoad?.requested ?? now.sceneId;
-  return showing !== start && showing !== sceneId;
+  // A switch to another floor of the scene the import began on is no move away from it (docs/design/design-v1-floors.md 10).
+  const sameStart = showing === start || (start !== null && showing !== null && now.view != null && sameScene(now.view, showing, start));
+  return !sameStart && showing !== sceneId;
 }
 
 /** How long the dialog waits for the new scene's contents before it says it could not confirm them. */

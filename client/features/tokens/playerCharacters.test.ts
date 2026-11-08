@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Scene } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
-import { P1, apply, character, room, token } from "#shared/testutil.ts";
-import { newCharacterState, onScene, playerToken } from "./playerCharacters.ts";
+import { P1, apply, character, room, scene, token } from "#shared/testutil.ts";
+import { newCharacterState, onScene, onSceneFloors, placementScene, playerToken } from "./playerCharacters.ts";
 
 describe("a player's own characters", () => {
   const setup = () => {
@@ -61,5 +61,45 @@ describe("a player's own characters", () => {
     assert.equal(playerToken({ view: state, scene: state.scenes.s2!, character: state.characters.c1!, memberId: "p1", center: { x: 1, y: 1 }, id: "t" }), null);
     state.meta.settings.playersCreateCharacters = false;
     assert.equal(playerToken({ view: state, scene, character: state.characters.c1!, memberId: "p1", center: { x: 1, y: 1 }, id: "t" }), null);
+  });
+});
+
+describe("a player's new token on a scene with floors (docs/design/design-v1-floors.md 8.3)", () => {
+  /** Tower: Ground and Upper, the players starting on Ground, a player's copy of both. */
+  function tower() {
+    const state = room();
+    state.meta.settings.playersCreateCharacters = true;
+    state.characters.c1 = character("c1", { ownerIds: ["p1"] });
+    state.scenes = {
+      g: scene("g", { floor: { level: 0, name: "Ground floor" } }),
+      u: scene("u", { floor: { level: 1, name: "Upper floor" } }),
+      other: scene("other"),
+    };
+    state.meta = { ...state.meta, playerSceneId: "g" };
+    return state;
+  }
+
+  test("the floor the player shows takes the token, when it is a floor of the players' scene", () => {
+    const state = tower();
+    assert.equal(placementScene(state, "u")?.id, "u");
+    assert.equal(placementScene(state, "g")?.id, "g");
+    assert.equal(placementScene(state, "other")?.id, "g", "a scene the players are not on is never the place");
+    assert.equal(placementScene(state, null)?.id, "g");
+    assert.equal(placementScene(state, "u", true)?.id, "g", "a DM places a player's token on the start floor");
+  });
+
+  test("a token for the floor shown is accepted, and one for another scene is not", () => {
+    const state = tower();
+    const upper = playerToken({ view: state, scene: state.scenes.u!, character: state.characters.c1!, memberId: "p1", center: { x: 5, y: 4 }, id: "t1" });
+    assert.ok(upper);
+    assert.equal(upper.sceneId, "u");
+    assert.equal(playerToken({ view: state, scene: state.scenes.other!, character: state.characters.c1!, memberId: "p1", center: { x: 5, y: 4 }, id: "t2" }), null);
+  });
+
+  test("a character with a token on any floor is on the map already", () => {
+    const state = tower();
+    state.tokens.t1 = token("t1", { sceneId: "g", kind: "pc", actor: { ref: "c1" }, x: 5, y: 4 });
+    assert.equal(onSceneFloors(state, "c1", "u"), true);
+    assert.equal(playerToken({ view: state, scene: state.scenes.u!, character: state.characters.c1!, memberId: "p1", center: { x: 5, y: 4 }, id: "t3" }), null);
   });
 });

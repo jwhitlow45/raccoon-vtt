@@ -33,7 +33,7 @@ import { CREATURE_HEADING } from "./CreatureHeader.tsx";
 import { EffectIcon } from "./EffectIcon.tsx";
 import { newCharacter } from "./factory.ts";
 import { PLACE_TOOL_ID, setPending } from "./placement.ts";
-import { newCharacterState } from "./playerCharacters.ts";
+import { newCharacterState, placementScene } from "./playerCharacters.ts";
 import { NumberField } from "./ui.tsx";
 
 /**
@@ -400,6 +400,8 @@ function NewCharacter(props: { formId: string; since: number; onDone(id: string 
   const ui = useRoomUi();
   const scope = useRoomScope();
   const view = useRoomView((s) => s.view);
+  const shownId = useRoomView((s) => s.sceneId);
+  const role = useRoomView((s) => s.you?.role);
   const members = useRoomView((s) => s.view?.members);
   const players = Object.values(members ?? {}).filter((m): m is Member => !!m && m.kind === "player");
   const { initial, start } = useKeptDraft<NewCharacterDraft>(props.formId, () => ({
@@ -451,7 +453,7 @@ function NewCharacter(props: { formId: string; since: number; onDone(id: string 
     });
     if (actions.dispatch({ t: "character.create", character }) === null) return;
     if (placeAfter && props.owner) {
-      const scene = view?.meta.playerSceneId ? view.scenes[view.meta.playerSceneId] : undefined;
+      const scene = view ? placementScene(view, shownId, role === "dm") : undefined;
       // The view already holds the new character, as the op is applied at once on this device.
       const latest = view && scene ? { ...view, characters: { ...view.characters, [id]: { ...character, rev: 0 } } } : null;
       const token = latest && scene ? myToken(scope, { view: latest, scene, character, memberId: props.owner, id: actions.newId() }) : null;

@@ -1,5 +1,6 @@
 import { useId, useMemo, useRef, useState, type RefObject } from "react";
-import type { Scene } from "#shared/model.ts";
+import type { RoomState, Scene } from "#shared/model.ts";
+import { floorsOf, playersSee } from "#shared/rules/floors.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
@@ -21,24 +22,38 @@ import { COPY_BUTTON, COPY_BUTTON_HELP, COPY_HELP, COPY_UNDO, copiedAll, copiesN
  */
 export function CopySettingsButton(props: { scene: Scene }) {
   const scenes = useRoomView((s) => s.view?.scenes);
-  const others = useMemo(
+  /*
+   * The scene's other floors first, top first, then the other scenes by
+   * their main floors (docs/design/design-v1-floors.md 7.1): a scene with
+   * floors is one scene to copy to, and its own floors are the likeliest
+   * targets, since a tower's floors share most of their setup.
+   */
+  const floors = useMemo(
     () =>
-      Object.values(scenes ?? {})
-        .filter((s): s is Scene => s !== undefined && s.id !== props.scene.id)
-        .sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : 1)),
+      scenes
+        ? floorsOf({ scenes }, props.scene.id)
+            .filter((s) => s.id !== props.scene.id)
+            .reverse()
+        : [],
     [scenes, props.scene.id],
   );
+  const others = useMemo(() => {
+    const own = new Set([props.scene.id, ...floors.map((f) => f.id)]);
+    return Object.values(scenes ?? {})
+      .filter((s): s is Scene => s !== undefined && !own.has(s.id) && (s.floor === undefined || s.floor.of === s.id))
+      .sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : 1));
+  }, [scenes, props.scene.id, floors]);
   const [open, setOpen] = useState(false);
   const opener = useRef<HTMLButtonElement>(null);
   const helpId = useId();
-  if (others.length === 0) return null;
+  if (others.length === 0 && floors.length === 0) return null;
   return (
     <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start", minWidth: 0 }}>
       <Button ref={opener} size="sm" aria-describedby={helpId} onClick={() => setOpen(true)}>
         {COPY_BUTTON}
       </Button>
       <Help id={helpId}>{COPY_BUTTON_HELP}</Help>
-      {open ? <CopySheet source={props.scene} scenes={others} opener={opener} onClose={() => setOpen(false)} /> : null}
+      {open ? <CopySheet source={props.scene} floors={floors} scenes={others} opener={opener} onClose={() => setOpen(false)} /> : null}
     </div>
   );
 }
@@ -52,17 +67,20 @@ export function CopySettingsButton(props: { scene: Scene }) {
  * leaves with nothing to do, moves to Close. Escape and Close answer no,
  * and focus goes back to the button.
  */
-function CopySheet(props: { source: Scene; scenes: Scene[]; opener: RefObject<HTMLButtonElement | null>; onClose(): void }) {
-  const { source, scenes } = props;
+function CopySheet(props: { source: Scene; floors: Scene[]; scenes: Scene[]; opener: RefObject<HTMLButtonElement | null>; onClose(): void }) {
+  const { source, floors } = props;
   const actions = useRoomActions();
-  const playerSceneId = useRoomView((s) => s.view?.meta.playerSceneId ?? null);
+  const view = useRoomView((s) => s.view);
+  const seen = (id: string) => (view ? playersSee(view as RoomState, id) : false);
+  // The scene's own floors lead the sheet's list, apart from the folders, and every pick counts alike below.
+  const scenes = useMemo(() => [...floors, ...props.scenes], [floors, props.scenes]);
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const copyButton = useRef<HTMLButtonElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const patch = copyPatch(source);
-  const groups = groupScenes(scenes);
+  const groups = groupScenes(props.scenes);
   const chosen = scenes.filter((s) => picked.has(s.id));
 
   const toggle = (id: string, on: boolean) => {
@@ -131,6 +149,21 @@ function CopySheet(props: { source: Scene; scenes: Scene[]; opener: RefObject<HT
             Select all
           </Button>
         </div>
+        {floors.length > 0 ? (
+          <div role="group" aria-label={`Floors of ${source.name}`} style={{ display: "grid", minWidth: 0 }}>
+            <span style={{ ...sectionLabelLook(), overflowWrap: "anywhere", padding: `${theme.space(1)}px 0` }}>Floors of {source.name}</span>
+            {floors.map((floor) => (
+              <Checkbox
+                key={floor.id}
+                label={<span style={{ overflowWrap: "anywhere" }}>{floor.floor?.name ?? floor.name}</span>}
+                help={copyLine(floor, patch, seen(floor.id))}
+                checked={picked.has(floor.id)}
+                disabled={busy}
+                onChange={(on) => toggle(floor.id, on)}
+              />
+            ))}
+          </div>
+        ) : null}
         {groups.map((g) => (
           <div key={g.folder ?? ""} role="group" aria-label={g.folder ?? "Scenes in no folder"} style={{ display: "grid", minWidth: 0 }}>
             {g.folder !== null ? <span style={{ ...sectionLabelLook(), overflowWrap: "anywhere", padding: `${theme.space(1)}px 0` }}>{g.folder}</span> : null}
@@ -138,7 +171,7 @@ function CopySheet(props: { source: Scene; scenes: Scene[]; opener: RefObject<HT
               <Checkbox
                 key={scene.id}
                 label={<span style={{ overflowWrap: "anywhere" }}>{scene.name}</span>}
-                help={copyLine(scene, patch, playerSceneId)}
+                help={copyLine(scene, patch, seen(scene.id))}
                 checked={picked.has(scene.id)}
                 disabled={busy}
                 onChange={(on) => toggle(scene.id, on)}
