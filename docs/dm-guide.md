@@ -160,7 +160,7 @@ These steps run a first session with one map, a few monsters and one fight, and 
 1. Put the party on the map. In **Characters**, open a character, press **Place a token**, and tap the map. Players can also place their own tokens on the scene they are on.
 2. A map image starts covered in fog, so at first your players see nothing. Pick the **Fog** tool and reveal what the party can see (see [Fog](#fog)).
 3. In **Scenes**, press **Move players** on your scene if the players aren't there already. The scene the players are on is marked **Players here**.
-4. When the fight begins, open **Initiative** and, under **New fight**, press **Everyone here**. Players set their own Initiative. Press **Auto Initiative** to roll for the monsters, then press **Start**.
+4. When the fight begins, open **Initiative** and, under **New fight**, press **Everyone here**. The monsters roll their Initiative as the fight starts, and players set their own. Then press **Start**.
 5. Press **Next** (or the `N` key) at the end of each turn. When a creature takes damage, tap its token to open its action bar, type the damage with a minus sign, such as `-7`, in its HP entry, and press **Apply**. **Conditions**, in the same bar, adds Prone, Frightened and the rest.
 6. You can reveal a hidden monster yourself with **Hidden** in its action bar. Or you can leave it to the app: the room setting "Reveal hidden combatants on their turn", which is on by default, makes a hidden monster appear on its own when its turn comes.
 7. When the fight is over, press **End the fight** in Initiative, and tap it again to confirm.
@@ -834,7 +834,7 @@ Press **Expand** (a chevron pointing up, with its name beside it where there is 
 
 The fight's alert cards and the app's toasts stay above the strip and leave a band of map clear over it, and the cards fold into their one row when they would leave no band. Where the map above the strip is short, a new toast shows as one line over the top bar, and the alerts' row moves into the strip's header until the toast goes. Tap the toast's words to read the whole message.
 
-![A goblin's action bar: AC, HP, Speed and PP, the HP entry with a Fireball damage slip, its saves, Stat block, Details and elevation, then Conditions, Hidden, Multi-select, All 4 Goblin Warriors, Roll, Attach and Place freely.](dm-guide/action-bar.webp)
+![A goblin's action bar: AC, HP, Speed and PP, the HP entry with a Fireball damage slip, its saves, Stat block, Details and elevation, then Conditions, Hidden, Multi-select, All 4 Goblin Warriors, Roll, Attach and Place freely, with the Fireball's area still drawn on the map behind it.](dm-guide/action-bar.webp)
 
 The whole bar, as the window on a wider screen or the expanded bar on a phone, holds, from top to bottom:
 
@@ -886,7 +886,7 @@ When you want to move, damage or hide a whole group, select them all first. Ther
 
 Drag any one of the selected tokens to move them all. The group gets an action bar of its own with one **HP entry** for all of them, **Conditions** and elevation, and for you, **Roll**, **Request a roll**, **Hidden**, **Locked**, **Start a fight** or **Add to the fight**, **More** (three dots, which hold the ring, size, layer, image, what players see, and owners), **Delete**, and **Clear** (a cross, which lets go of the group without changing anything). Each change to the group is one undo step. On a phone held upright, the group's bar rests as a strip at the foot of the map, like a single token's, with "4 selected" in its header. Press **Done** in the Multi-select bar when you are finished.
 
-For a pack of monsters of one kind, a monster's action bar offers **All 4 Goblin Warriors** while more than one of them is still alive on the scene, and one tap selects the living pack, hidden ones included, so the fallen are left out of whatever the group does next. The group's **Save** then opens the group save for the pack, with its own ability picker.
+For a pack of monsters of one kind, a monster's action bar offers **All 4 Goblin Warriors** while more than one of them is still alive on the scene, and one tap selects the living pack, hidden ones included (on a phone, the button is in the expanded bar), so the fallen are left out of whatever the group does next. The group's **Save** then opens the group save for the pack, with its own ability picker.
 
 ## HP, damage and conditions
 
@@ -1171,7 +1171,7 @@ Each player gets a card with the question and rolls it with their bonus (conditi
 - Answer a player's ask, such as "Asks to reroll (Heroic Inspiration)", with **Allow** or **Keep**.
 - **Reopen for one more answer**, **Close**, or **Close all answered**.
 
-![The DM's card for a Dexterity save: Mara's and Thorn's answers, each with its roll and its pass or fail, and Bree and Ivo still waiting with Roll +0 and Roll +2.](dm-guide/roll-card.webp)
+![The DM's card for a Dexterity save: Mara's and Thorn's answers, each with its roll and its pass or fail, and Bree and Ivo still waiting with Roll +0 and Roll +2, over the map with the Fireball's area that asked for it.](dm-guide/roll-card.webp)
 
 Only you and the creature's player see an answer. Up to 20 requests can be open at once.
 
@@ -1844,7 +1844,7 @@ A companion is a token that belongs to a character: a familiar, a summoned spiri
 
 **Add and place** puts the companion next to the character's token. Players add their own companions the same way. The form's chevron at the top (**Back to Ivo**, named for the character) or **Cancel** at its foot returns to the character's page, and asks "Discard changes?" first if you typed anything. To turn a token that is already on the map into a companion, use **Make a companion** in its **Token settings**.
 
-![Add a companion for Ivo, a page of its own with Back to Ivo at the top: Hoot, a creature with the SRD Owl's stat block, taking its own turn.](dm-guide/companion.webp)
+![Add a companion for Ivo, a page of its own with Back to Ivo at the top: Hoot, a creature with the SRD Owl's stat block, taking its own turn, with the Fireball's area from the fight still drawn on the map behind it.](dm-guide/companion.webp)
 
 **Stat blocks (N)**, on the character's page, opens a page of its own that keeps the character's own companion stat blocks, pasted or typed, up to 100 of them. That way a creature summoned again starts from the same block. An SRD creature doesn't need keeping, since you can pick it again.
 
@@ -2174,7 +2174,7 @@ Goblins and wolves wait in the trees beside a road, and the party is about to wa
 
 1. If the party is surprised, select the four characters (with **Multi-select**), open **Conditions** in the group's bar, and tap **Surprised**. Their Initiative rolls then have Disadvantage, and their rows show **Dis**.
 2. In **Initiative**, under **New fight**, press **Everyone here**. Use this rather than "Visible to players", which would leave the hidden goblins out.
-3. The players roll their own Initiative. Press **Auto Initiative**: the four goblin warriors share one roll ("By creature"), and so do the two wolves. Then press **Start**.
+3. The players roll their own Initiative. The monsters roll as the fight starts, so the four goblin warriors share one roll ("By creature"), and so do the two wolves. Then press **Start**.
 4. The hidden goblins appear on their first turn, thanks to "Reveal hidden combatants on their turn". If you would rather spring them all at once, select them and press **Hidden** in the group's bar, and their tokens appear together. If one of them has already appeared on its own turn, the first press hides that one again along with the rest, so press **Hidden** a second time to bring them all out. Their rows still join the players' order one by one, on each goblin's first turn, unless you set **Initiative order players see** to **Everyone** in Room settings before the fight (see [What players see of the order](#what-players-see-of-the-order)).
 5. On a goblin's turn, its turn card lists its attacks (see [A creature's turn](#a-creatures-turn)), as do its roll options when you tap it and press **Roll** in its bar. On its Scimitar line ("+4 to hit"), press **Attack** to roll against Thorn's AC, then **Damage**, and tap **Apply to Thorn** under the damage. Or tap Thorn, use the **Use 5** chip in his HP entry, and press **Apply**.
 6. A wolf hits Mara and knocks her down: open **Conditions** on her token and tap **Prone**.
