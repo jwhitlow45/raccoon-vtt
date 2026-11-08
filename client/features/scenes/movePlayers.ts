@@ -3,7 +3,7 @@ import type { ClientOp } from "#shared/protocol.ts";
 import type { OnAnswer, OpRefusal, RoomActions } from "../../state/types.ts";
 import type { ServerSound } from "../sound/engine/store.ts";
 import type { Playlists, Sounds } from "../sound/panel/state.ts";
-import { placeName } from "../floors/words.ts";
+import { playersPlace } from "../floors/words.ts";
 import { moveWarning } from "../vision/moveWarning.ts";
 import { moveSoundOp } from "./moveSound.ts";
 
@@ -111,8 +111,8 @@ function lostMove(sceneId: string, confirmed: ConfirmedRoom | null | undefined):
   if (!confirmed) return null;
   const on = confirmed.meta.playerSceneId;
   if (on === sceneId) return { t: "moved" };
-  // The helper reads only a scene's name and its floor's name, which the narrower record holds.
-  const place = on === null ? "" : placeName({ scenes: confirmed.scenes as RoomState["scenes"] }, on);
+  // The helper reads only a scene's name and its floor's name, which the narrower record holds. "Another floor" when they are on one of this scene's floors.
+  const place = on === null ? "" : playersPlace({ scenes: confirmed.scenes as RoomState["scenes"] }, on, sceneId);
   return { t: "notMoved", sceneGone: confirmed.scenes[sceneId] === undefined, playersOn: place === "" ? null : place };
 }
 

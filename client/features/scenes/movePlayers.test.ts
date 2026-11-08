@@ -163,6 +163,29 @@ function held(on: string | null, scenes: Record<string, string>): ConfirmedRoom 
   return { meta: { playerSceneId: on }, scenes: Object.fromEntries(Object.entries(scenes).map(([id, name]) => [id, { name }])) };
 }
 
+describe("a lost move between floors (docs/design/design-v1-floors.md 18.6)", () => {
+  test("names the players' place in full, or says another floor within the move's scene", async () => {
+    const floors = (on: string): ConfirmedRoom => ({
+      meta: { playerSceneId: on },
+      scenes: {
+        g: { name: "Tower", floor: { of: "g", level: 0, name: "Ground floor" } },
+        u: { name: "Tower", floor: { of: "g", level: 1, name: "Upper floor" } },
+        crypt: { name: "Crypt" },
+      },
+    });
+    for (const [snapshot, expected] of [
+      [floors("u"), "another floor"],
+      [floors("crypt"), "Crypt"],
+    ] as const) {
+      const actions = fakeActions();
+      const step = movePlayers(actions, { ...fogged, id: "g" }, { ...room, confirmed: () => snapshot });
+      if (step.t !== "sent") return assert.fail("sent");
+      actions.sent[0]!.onAnswer!("unknown", undefined, "snapshot");
+      assert.deepEqual(await step.answer, { t: "notMoved", sceneGone: false, playersOn: expected });
+    }
+  });
+});
+
 describe("a move whose answer a snapshot lost (a reconnect, or the resync a co-DM's delete of the DM's scene sends)", () => {
   test("reads where the snapshot has the players: not moved, the scene deleted or not and where they are, or taken where they are on it", async () => {
     for (const [snapshot, expected] of [

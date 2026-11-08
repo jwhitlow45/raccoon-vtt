@@ -8005,9 +8005,10 @@ export function sceneSettingsTests(): void {
  * (client/features/floors/ids.ts): the Floors group folded and open, a
  * floor's page on the top floor and on the lowest, which has no height row,
  * the top bar's Floor button with its Floors menu or the Menu panel's Floor
- * row where the bar folds it, and Move to floor's list in a token's bar. The
+ * row where the bar folds it, Move to floor's list in a token's bar, and the
+ * DM menu on a floor of the players' scene they have not reached. The
  * Viewing notice is a player's, so it is measured in the lane that draws
- * it (floors-view.e2e.ts), and so is the DM menu on a floor (floors-menus.e2e.ts).
+ * it (floors-view.e2e.ts).
  * Tower is a scene of its own, deleted at the end, so no other step of the
  * file sees the Floor button.
  */
@@ -8021,6 +8022,11 @@ function floorsRootTests(): void {
     await ops.send({ t: "scene.create", scene: { id: upper, name: "Tower", bounds: BOUNDS }, floor: { beside: tower, side: "above" } });
     await ops.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor" } } });
     await ops.send({ t: "token.create", token: { id: scout, sceneId: tower, kind: "npc", name: "Scout", size: "medium", x: 5, y: 5, visibility: "all", actor: { inline: actor() } } });
+    // Attic is a floor of the players' scene they have not reached, which the DM menu on it must say.
+    const attic = randomUUID();
+    await ops.send({ t: "scene.create", scene: { id: attic, name: "Tower", bounds: BOUNDS }, floor: { beside: upper, side: "above" } });
+    await ops.send({ t: "scene.update", sceneId: attic, patch: { floor: { name: "Attic" } } });
+    await ops.send({ t: "room.setPlayerScene", sceneId: tower });
     const lines: string[] = [];
     try {
       for (const at of FU30_AT) {
@@ -8080,6 +8086,29 @@ function floorsRootTests(): void {
           await sweep.measure(page, "floors-move-list", bar.locator(floorRoot("move-list")));
           await shots.take(page, `alignment-${sweep.at}-floors-move-list`);
           await escapeAll(page);
+
+          // The DM menu on Attic, a floor of the players' scene they have not reached: Bring everyone here off, with its line.
+          const showFloor = async (name: string) => {
+            const scenes = await openDmPanel(page, "Scenes");
+            await openSceneGroup(scenes, "Floors");
+            const back = scenes.locator(floorRoot("page")).getByRole("button", { name: "Back to Floors" });
+            if ((await back.count()) > 0) await back.click();
+            await scenes.locator(floorRoot("group")).getByRole("button", { name: new RegExp(`^${name},`) }).click();
+            await scenes.locator(floorRoot("page")).getByRole("button", { name: "Show this floor" }).click();
+            await scenes.locator(floorRoot("page")).getByRole("button", { name: "Back to Floors" }).click();
+            await closeSheets(page);
+          };
+          await showFloor("Attic");
+          const dmMenu = await openChipMenu(page, "dm", "dm");
+          if (!dmMenu) await sweep.missing(page, "floors-dm-menu", "the DM chip opened no menu");
+          else {
+            await sweep.measure(page, "floors-dm-menu", dmMenu);
+            const bring = chipItem(dmMenu, "bringEveryone");
+            if (!(await bring.innerText()).includes("Players haven't reached Attic")) sweep.lines.push(`${sweep.at} floors-dm-menu: Bring everyone here does not say the players haven't reached Attic`);
+            await shots.take(page, `alignment-${sweep.at}-floors-dm-menu`);
+          }
+          await escapeAll(page);
+          await showFloor("Ground floor");
         } finally {
           await escapeAll(page);
         }
@@ -8087,6 +8116,7 @@ function floorsRootTests(): void {
         lines.push(...sweep.lines);
       }
     } finally {
+      await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId }).catch(() => {});
       await ops.send({ t: "scene.delete", sceneId: tower }).catch(() => {});
       // Later steps start on the players' scene.
       const page = await dmPageFor(FU30_AT.at(-1)!.size);
