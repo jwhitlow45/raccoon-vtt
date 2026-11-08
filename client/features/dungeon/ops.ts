@@ -26,13 +26,12 @@ import type { DungeonPlan, PlanTrap } from "./plan.ts";
 export const MAX_OPS = 100;
 
 /**
- * Secret doors wait for drules lane B's automatic cover (phase 2, section
- * 7): until a hidden door reaches every fog class as the rock wall beside
- * it, a player could tell it from plain wall, so the preview plans every
- * dungeon with none (scratch.ts `previewOf`). The landing's commit on lane
- * B writes the cover and lifts this.
+ * Whether secret doors wait for drules lane B's automatic cover (phase 2,
+ * section 7), the preview planning every dungeon with none (scratch.ts
+ * `planned`). Lane B's cover now reaches every fog class as the rock wall
+ * beside a hidden door, so they no longer wait.
  */
-export const SECRET_DOORS_HELD = true;
+export const SECRET_DOORS_HELD = false;
 
 /** The scene's id while the dungeon is only a preview. */
 export const SCENE_PLACEHOLDER = "dungeon-scene";
@@ -73,8 +72,14 @@ export function blockPlaceholder(i: number): string {
  */
 const TERRAIN_ORDER: readonly TerrainId[] = ["stone", "wood", "grass", "dirt", "cave", "water", "difficult", "rubble", "pit", "pillar", "stairs"];
 
+/**
+ * A planned door as `build.edge` writes it. A secret door names its cover
+ * itself (lane B's SB1), so while hidden it reaches every fog class as an
+ * automatic wall bit beside the room's automatic walls, never as a drawn
+ * wall that would mark it out, whatever kind lane B would read off its line.
+ */
 function door(state: DungeonPlan["doors"][number]["state"]): EdgeFeature {
-  if (state === "secret") return { kind: "door", state: "closed", secret: true, discovered: false };
+  if (state === "secret") return { kind: "door", state: "closed", secret: true, discovered: false, cover: "auto" };
   return { kind: "door", state, secret: false, discovered: false };
 }
 

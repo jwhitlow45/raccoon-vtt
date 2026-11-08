@@ -283,9 +283,14 @@ test("DG2B: a trap's planned hits replace the zone's squares, and a cone takes t
   assert.throws(() => trapInputOf({ preset: "hidden-pit", zone: { cells: [{ x: 17, y: 4, w: 2, h: 2 }] }, cone: { origin: [1, 1], yaw: 0 } }, "t", chunks, "1-4", SCENE_PLACEHOLDER), /no cone/);
 });
 
-test("DG2B: a secret door is written closed, hidden and unfound until drules lane B's cover lands", () => {
+test("DG2B: every secret door, both edges of a Wide doorway too, is written closed, hidden and unfound with cover auto named explicitly", () => {
   const plan = twoRooms();
-  plan.doors = [...plan.doors, { edge: "8,6,w", state: "secret" }];
-  const edges = buildOps(plan, { ...dialogScene(plan), id: SCENE_PLACEHOLDER }).flatMap((op) => (op.t === "build.edge" ? op.edges : []));
-  assert.deepEqual(edges.at(-1), { key: "8,6,w", feature: { kind: "door", state: "closed", secret: true, discovered: false } });
+  plan.doors = [...plan.doors, { edge: "8,6,w", state: "secret" }, { edge: "17,9,n", state: "secret" }, { edge: "18,9,n", state: "secret" }];
+  const ops = buildOps(plan, { ...dialogScene(plan), id: SCENE_PLACEHOLDER });
+  const edges = ops.flatMap((op) => (op.t === "build.edge" ? op.edges : []));
+  const secret = edges.filter((e) => e.feature?.kind === "door" && e.feature.secret);
+  assert.deepEqual(secret.map((e) => e.key), ["8,6,w", "17,9,n", "18,9,n"]);
+  for (const e of secret) assert.deepEqual(e.feature, { kind: "door", state: "closed", secret: true, discovered: false, cover: "auto" }, e.key);
+  for (const e of edges.filter((x) => !(x.feature?.kind === "door" && x.feature.secret))) assert.equal(e.feature && "cover" in e.feature, false, `${e.key}: only a secret door names a cover`);
+  for (const op of ops) assert.ok(clientOpSchema.safeParse(op).success, op.t);
 });

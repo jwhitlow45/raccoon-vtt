@@ -155,16 +155,15 @@ test("DG2B: a dungeon past MAX_OPS is refused as a bug, never sent past the cap"
   assert.deepEqual(refused, { ok: false, why: `${MAX_OPS + 1} ops, past ${MAX_OPS}` });
 });
 
-test("DG2B: while secret doors are held, the preview plans with Secret doors at None and the key says so", () => {
-  assert.equal(SECRET_DOORS_HELD, true, "lifted only by the commit on drules lane B");
+test("DG2B: with lane B's cover in, the preview plans the DM's Secret doors as chosen", () => {
+  assert.equal(SECRET_DOORS_HELD, false);
   const chosen: DungeonSettings = { ...DEFAULT_SETTINGS, secrets: SECRET_PRESETS.Many };
-  assert.equal(planned(chosen).secrets, 0);
-  assert.equal(chosen.secrets, SECRET_PRESETS.Many, "the DM's pick is left as it was");
+  assert.equal(planned(chosen), chosen);
   const asked: number[] = [];
   const plan = dressedRooms();
   const made = previewOf(chosen, SEED, dialogScene(plan), DEFAULT_CONTEXT, handKey(), (s) => (asked.push(s.secrets), plan));
-  assert.deepEqual(asked, [0]);
+  assert.deepEqual(asked, [SECRET_PRESETS.Many]);
   assert.ok(made.ok);
   const page = made.ops.find((op) => op.t === "journal.create");
-  assert.ok(page?.t === "journal.create" && page.page.blocks[0]!.text.includes("Secret doors None"));
+  assert.ok(page?.t === "journal.create" && page.page.blocks[0]!.text.includes("Secret doors Many"));
 });
