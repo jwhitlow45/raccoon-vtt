@@ -1,13 +1,14 @@
 import { cellIndex, decodeHeights, decodeRough, decodeStairs, encodeHeights, encodeRough, encodeStairs } from "../heightCodec.ts";
 import { cellOf, chunkKey, doorChunk, holderTileKey, keys, tileKey, wallChunk, wallMidpoint } from "../keys.ts";
-import { CHUNK_CELLS, type BuildChunk, type ExploredTile, type FogDraft, type FogOp, type FogTile, type FreeWall, type Label, type Light, type RoomState, type Scene, type SightHolders, type Stamp, type TerrainId, type Token, type WallFeature } from "../model.ts";
+import { CHUNK_CELLS, type BuildChunk, type EdgeFeature, type ExploredTile, type FogDraft, type FogOp, type FogTile, type FreeWall, type Label, type Light, type RoomState, type Scene, type SightHolders, type Stamp, type TerrainId, type Token, type WallFeature } from "../model.ts";
 import { MOST_SIGHT_HOLDERS, SIGHT_HOLDERS_FULL } from "../limits.ts";
 import { MAX_BUILD_CELLS, MAX_FOG_DRAFT_OPS, type OpOf } from "../protocol.ts";
 import { allRevealedTiles, decodeTile, encodeTile, isEmptyBits, pointInPolygonFixed, rasterizeFogOps, tilesAcross } from "../rules/fog.ts";
 import { occupiedCells, occupiedHexes } from "../rules/footprint.ts";
 import { footprintGround } from "../rules/heights.ts";
 import { boxTouchesCell, labelBox } from "../rules/labels.ts";
-import { attaches, discoversMap, guardsHolderPick } from "../migrate.ts";
+import { attaches, discoversMap, guardsHolderPick, writesDoorCover } from "../migrate.ts";
+import { autoWallsOf, coverOfLine } from "../rules/autoWalls.ts";
 import { carriedIndex, holderOf, onHolder } from "../rules/attach.ts";
 import { ridingGroup } from "../rules/moveLeg.ts";
 import { sortedById } from "./tokens.ts";
@@ -903,6 +904,10 @@ export function buildPoly(tx: Tx, op: OpOf<"build.poly">): void {
 
 export function buildEdge(tx: Tx, op: OpOf<"build.edge">): void {
   const scene = tx.scene(op.sceneId);
+  // Every edge op is on squares: the permissions refuse one on a hex scene.
+  const covers = writesDoorCover(tx.env.opVersion);
+  const written = new Map<string, BuildChunk>();
+  const uncovered: string[] = [];
   const byChunk = new Map<string, OpOf<"build.edge">["edges"]>();
   for (const edge of op.edges) {
     if (!edgeInBounds(scene, edge.key)) throw invalid("edge outside the scene");
@@ -922,11 +927,42 @@ export function buildEdge(tx: Tx, op: OpOf<"build.edge">): void {
     const edges = { ...chunk.edges };
     for (const edge of group) {
       if (edge.feature === null) delete edges[edge.key];
-      else edges[edge.key] = edge.feature;
+      else if (!covers) edges[edge.key] = edge.feature;
+      else {
+        const feature = coveredDoor(edge.feature, chunk.edges[edge.key]);
+        edges[edge.key] = feature;
+        if (feature.kind === "door" && feature.secret && !feature.discovered && feature.cover === undefined) uncovered.push(edge.key);
+      }
     }
-    writeChunk(tx, { ...chunk, edges });
+    written.set(key, { ...chunk, edges });
   }
+  if (uncovered.length > 0) {
+    // Read from the build the op leaves, so a door drawn in one op with the walls of its line takes their kind.
+    const after: Record<string, BuildChunk> = { ...tx.state.buildChunks, ...Object.fromEntries(written) };
+    const rule = autoWallsOf(scene);
+    const found = uncovered.map((edgeKey) => [edgeKey, coverOfLine(after, scene.id, rule, edgeKey)] as const);
+    for (const [edgeKey, cover] of found) {
+      const cell = parseCell(edgeKey);
+      const edges = written.get(chunkKey(scene.id, Math.floor(cell.x / CHUNK_CELLS), Math.floor(cell.y / CHUNK_CELLS)))!.edges;
+      edges[edgeKey] = { ...(edges[edgeKey] as Extract<EdgeFeature, { kind: "door" }>), cover };
+    }
+  }
+  for (const chunk of written.values()) writeChunk(tx, chunk);
   bumpWalls(tx, scene.id);
+}
+
+/**
+ * A feature as `build.edge` writes it from DOOR_COVER_OP_VERSION
+ * (docs/design/design-v1-maps-vision.md 2.1): a secret door keeps the op's
+ * own cover, else the cover of the door it replaces, so a tap that steps a
+ * found door's state, or hides it again, keeps it. Any other door carries
+ * none. A hidden door left with none takes its line's (coverOfLine).
+ */
+function coveredDoor(feature: EdgeFeature, replaced: EdgeFeature | undefined): EdgeFeature {
+  if (feature.kind !== "door") return feature;
+  const { cover: own, ...door } = feature;
+  const cover = own ?? (replaced?.kind === "door" ? replaced.cover : undefined);
+  return door.secret && cover !== undefined ? { ...door, cover } : door;
 }
 
 export function buildLabel(tx: Tx, op: OpOf<"build.label">): void {

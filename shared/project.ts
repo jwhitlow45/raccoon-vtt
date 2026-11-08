@@ -1496,9 +1496,11 @@ function projectChunksCtx(ctx: Ctx): Record<string, BuildChunk> {
   return projectMap(ctx.state.buildChunks, (c) => projectChunkAtCtx(ctx, c.sceneId, c.cx, c.cy));
 }
 
-/** A door as players see it, when it is not a hidden secret one: a locked door arrives closed. */
+/** A door as players see it, when it is not a hidden secret one: a locked door arrives closed, and without its cover. */
 function unlocked(door: Extract<WallFeature, { kind: "door" }>): WallFeature {
-  return door.state === "locked" ? { ...door, state: "closed" } : door;
+  const { cover, ...shown } = door;
+  if (door.state === "locked") return { ...shown, state: "closed" };
+  return cover === undefined ? door : shown;
 }
 
 function hiddenDoor(feature: WallFeature): boolean {
@@ -1518,7 +1520,10 @@ function byCoordinates(a: FreeWall, b: FreeWall): number {
  *   puts a wall goes away, since automatic walls are never sent. Anywhere
  *   else it becomes a plain wall, the same as one the DM drew, so players
  *   never see a gap where a hidden door is (docs/design/design-v1-maps-vision.md
- *   2.1). `autoWalls` is the scene's rule, absent read as "all".
+ *   2.1). `autoWalls` is the scene's rule, absent read as "all". One whose
+ *   cover is "drawn" is a plain wall whatever the cells, as the drawn wall
+ *   it looks like is: a device derives automatic walls from the cells it
+ *   gets here, and a sent wall wins over a derived one.
  * - A free wall is never automatic, so a hidden secret free door always
  *   arrives as a plain wall. Free walls arrive sorted by their coordinates.
  * - A locked door arrives closed. The lock is the DM's note, players learn
@@ -1561,7 +1566,7 @@ export const CHUNK_FOR_PLAYERS = {
   cy: "copied",
   rev: "zeroed",
   cells: "copied",
-  edges: "changed: a hidden secret door reads as a wall or goes, and a lock reads closed",
+  edges: "changed: a hidden secret door reads as a wall or goes, a lock reads closed, and a door's cover goes",
   walls: "changed: a hidden secret free door reads as a wall, a lock reads closed, sorted by their ends",
   // Heights and stair marks are map data, like the floor, and not secret (docs/design/design-v1-maps-vision.md 4.2).
   heights: "copied",
@@ -1582,6 +1587,8 @@ function playerChunkOf(all: Readonly<Record<string, BuildChunk>>, chunk: BuildCh
       edges[key] = edge;
     } else if (!hiddenDoor(edge)) {
       edges[key] = unlocked(edge);
+    } else if (edge.cover === "drawn") {
+      edges[key] = { kind: "wall" };
     } else {
       const [xs, ys, side] = key.split(",");
       const x = Number(xs);
@@ -1697,6 +1704,14 @@ export type ShownEdge = WallFeature | "auto" | null;
  * automatic wall (MD-O-1), and a drawn "none" as nothing. The map step on
  * the server compares edges by this too, so memory and the projection read
  * one value.
+ *
+ * A hidden door's cover decides first (docs/design/design-v1-maps-vision.md
+ * 2.1): "drawn" is a drawn wall under every rule, and "auto" the automatic
+ * wall under any rule but "off", where no automatic wall stands and one
+ * would be the tell. A door with no cover, from before covers, keeps the
+ * look by its cells. The look reads only the door, its two real cells and
+ * the rule, never what a fog class holds, so every class is sent one value
+ * and the caches keyed by those stand.
  */
 export function shownEdge(chunks: Readonly<Record<string, BuildChunk>>, sceneId: string, rule: AutoWalls, key: string): ShownEdge {
   const [xs, ys, side] = key.split(",");
@@ -1709,6 +1724,8 @@ export function shownEdge(chunks: Readonly<Record<string, BuildChunk>>, sceneId:
   if (drawn.kind === "none") return null;
   if (drawn.kind !== "door") return drawn;
   if (!hiddenDoor(drawn)) return unlocked(drawn);
+  if (drawn.cover === "drawn") return { kind: "wall" };
+  if (drawn.cover === "auto" && rule !== "off") return "auto";
   return automatic() ? "auto" : { kind: "wall" };
 }
 

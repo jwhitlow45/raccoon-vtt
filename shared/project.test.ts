@@ -30,6 +30,7 @@ import { autoWallBetween, paintedOf } from "./rules/autoWalls.ts";
 import { decodeTile, encodeTile, isCellFullyFogged, isTokenFullyFogged, labelCells } from "./rules/fog.ts";
 import { footprintRect } from "./rules/footprint.ts";
 import { compareEntries } from "./rules/initiative.ts";
+import { DOOR_COVER_OP_VERSION } from "./migrate.ts";
 import { applyOp } from "./reducer.ts";
 import { visionRules, type PartySight, type VisionRules } from "./ruleHooks.ts";
 import { derivedId } from "./reducer/duplicate.ts";
@@ -1330,14 +1331,21 @@ describe("specific rules", () => {
     assert.ok(past?.auto);
     // Floor painted in the chunk above, across the border, makes the door a wall between two floors. That
     // changes the chunk below for players though the op never touched it, so the fan-out re-projects it.
+    // A door from before covers does (docs/design/design-v1-maps-vision.md 2.1), so an op stored before them makes it.
     const below = apply(held(), { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["3,16"] });
-    const door = apply(below, { t: "build.edge", sceneId: "s1", edges: [{ key: "3,16,n", feature: hidden }] });
+    const made = applyOp(below, { t: "build.edge", sceneId: "s1", edges: [{ key: "3,16,n", feature: hidden }] }, DM, { ...env(2), opVersion: DOOR_COVER_OP_VERSION - 1 });
+    assert.ok(made.ok);
+    const door = made.state;
     assert.deepEqual(projectState(door, P1, { sceneId: "s1" }).buildChunks["s1:0,1"]!.edges, {});
     const r = applyOp(door, { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["3,15"] }, DM, env(50));
     assert.ok(r.ok);
     assert.deepEqual(projectState(r.state, P1, { sceneId: "s1" }).buildChunks["s1:0,1"]!.edges, { "3,16,n": { kind: "wall" } });
     assert.ok(!r.touched.includes(keys.chunk("s1", 0, 1)));
     assert.ok(dependents(r.state, r.touched).includes(keys.chunk("s1", 0, 1)));
+    // A door made today takes its line's cover, automatic here, so between the two floors it stays the automatic wall it was.
+    const today = apply(below, { t: "build.edge", sceneId: "s1", edges: [{ key: "3,16,n", feature: hidden }] });
+    const both = apply(today, { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["3,15"] });
+    assert.equal(stableStringify(projectState(both, P1, { sceneId: "s1" }).buildChunks["s1:0,1"]), stableStringify(projectState(today, P1, { sceneId: "s1" }).buildChunks["s1:0,1"]));
   });
 
   test("an edit of a hidden secret door or a lock changes no scene or chunk a player receives", () => {

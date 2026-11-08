@@ -1,4 +1,4 @@
-import { CHUNK_CELLS, type AutoWalls, type BuildChunk, type Scene, type SceneId, type TerrainId } from "../model.ts";
+import { CHUNK_CELLS, type AutoWalls, type BuildChunk, type DoorCover, type Scene, type SceneId, type TerrainId } from "../model.ts";
 import { markIn } from "./heights.ts";
 
 /**
@@ -64,4 +64,37 @@ export function autoWallBetween(rule: AutoWalls, a: Painted, b: Painted): boolea
     case "off":
       return false;
   }
+}
+
+/** How far along its line a new secret door looks for the wall it stands in (coverOfLine). */
+export const COVER_REACH = 16;
+
+/**
+ * The cover a hidden secret door takes from its line when `build.edge` makes
+ * it (docs/design/design-v1-maps-vision.md 2.1), read from the real build:
+ * "auto" where the real cells already give the edge an automatic wall, else
+ * "drawn" where the nearest wall along its line on either side is a drawn
+ * one, past doors, windows and openings, within COVER_REACH edges, else
+ * "auto". So a door in a drawn line looks drawn and one in an automatic line
+ * looks automatic, whichever tool or page made it.
+ */
+export function coverOfLine(chunks: Readonly<Record<string, BuildChunk>>, sceneId: SceneId, rule: AutoWalls, key: string): DoorCover {
+  const [xs, ys, side] = key.split(",");
+  const x = Number(xs);
+  const y = Number(ys);
+  const north = side === "n";
+  const automatic = (ex: number, ey: number) =>
+    autoWallBetween(rule, paintedAt(chunks, sceneId, ex, ey), north ? paintedAt(chunks, sceneId, ex, ey - 1) : paintedAt(chunks, sceneId, ex - 1, ey));
+  if (automatic(x, y)) return "auto";
+  for (const step of [-1, 1]) {
+    for (let i = 1; i <= COVER_REACH; i++) {
+      const ex = north ? x + step * i : x;
+      const ey = north ? y : y + step * i;
+      if (ex < 0 || ey < 0) break;
+      const drawn = chunks[`${sceneId}:${Math.floor(ex / CHUNK_CELLS)},${Math.floor(ey / CHUNK_CELLS)}`]?.edges[`${ex},${ey},${side}`];
+      if (drawn?.kind === "wall") return "drawn";
+      if (drawn === undefined && automatic(ex, ey)) break;
+    }
+  }
+  return "auto";
 }

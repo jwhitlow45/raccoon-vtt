@@ -59,7 +59,8 @@ describe("exportContent", () => {
     const state = built(true);
     const dm = content(state, "dm");
     assert.equal(dm.role, "dm");
-    assert.deepEqual(edgesOf(dm.chunks)["5,0,n"], SECRET);
+    // The DM's own door, with the cover the edge op gave it from its line (docs/design/design-v1-maps-vision.md 2.1).
+    assert.deepEqual(edgesOf(dm.chunks)["5,0,n"], { ...SECRET, cover: "auto" });
     assert.deepEqual(sortedLabels(dm.labels), ["Hall", "Trap"]);
     assert.ok(dm.chunks.every((c) => c.sceneId === "s1"));
     assert.deepEqual([dm.secretDoors, dm.hiddenLabels], [0, 0]);

@@ -3,10 +3,11 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { lineAudience } from "./logRings.ts";
 import type { RoomState, Viewer } from "./model.ts";
-import { opSchema } from "./protocol.ts";
+import { opSchema, type Op } from "./protocol.ts";
 import { hash128, projectState, stableStringify, type ProjectedState } from "./project.ts";
-import { applyOp } from "./reducer.ts";
+import { applyOp, type Env } from "./reducer.ts";
 import { seenWhole } from "./rules/path.ts";
+import { DOOR_COVER_OP_VERSION } from "./migrate.ts";
 import { DM, P1, P2, env, randomOp, randomState, rng } from "./testutil.ts";
 
 /**
@@ -162,6 +163,14 @@ function touchedBefore(touched: readonly string[], before: RoomState, after: Roo
   return touched.filter((key) => !key.startsWith("played:") && !(key.startsWith("log:") && (area.has(key) || !held.has(key)))).join(",");
 }
 
+/**
+ * Secret door covers came after this fixture (docs/design/design-v1-maps-vision.md 2.1), and only an edge op writes
+ * one, so an edge op goes in as one stored just before them: it writes none, and the room reads as the build before.
+ */
+function beforeCovers(op: Op, at: Env): Env {
+  return op.t === "build.edge" ? { ...at, opVersion: DOOR_COVER_OP_VERSION - 1 } : at;
+}
+
 function run(seed: number): { input: string; output: string } {
   const r = rng(seed);
   let state = randomState(r);
@@ -171,7 +180,7 @@ function run(seed: number): { input: string; output: string } {
     const who = i % 5 === 4 ? (i % 2 === 0 ? P1 : P2) : DM;
     const op = opSchema.parse(randomOp(r, state, who));
     inputs.push(stableStringify(op));
-    const result = applyOp(state, op, who, env(100 + i));
+    const result = applyOp(state, op, who, beforeCovers(op, env(100 + i)));
     if (!result.ok) {
       outputs.push(`refused ${result.code}: ${result.message}`);
       continue;

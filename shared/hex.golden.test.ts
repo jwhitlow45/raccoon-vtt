@@ -6,8 +6,9 @@ import type { RoomState, Viewer } from "./model.ts";
 import { canApply } from "./permissions.ts";
 import { opSchema, type Op } from "./protocol.ts";
 import { hash128, projectState, stableStringify, type ProjectedState } from "./project.ts";
-import { applyOp } from "./reducer.ts";
+import { applyOp, type Env } from "./reducer.ts";
 import { seenWhole } from "./rules/path.ts";
+import { DOOR_COVER_OP_VERSION } from "./migrate.ts";
 import { DM, P1, P2, env, randomOp, randomState, rng } from "./testutil.ts";
 
 /**
@@ -215,6 +216,14 @@ function answer(before: RoomState, result: ReturnType<typeof applyOp>): string[]
   return out;
 }
 
+/**
+ * Secret door covers came after this fixture (docs/design/design-v1-maps-vision.md 2.1), and only an edge op writes
+ * one, so an edge op goes in as one stored just before them: it writes none, and the room reads as the build before.
+ */
+function beforeCovers(op: Op, at: Env): Env {
+  return op.t === "build.edge" ? { ...at, opVersion: DOOR_COVER_OP_VERSION - 1 } : at;
+}
+
 function run(seed: number): { input: string; output: string } {
   const r = rng(seed);
   let state: RoomState = randomState(r);
@@ -227,7 +236,7 @@ function run(seed: number): { input: string; output: string } {
     inputs.push(stableStringify(op));
     const decision = canApply(op, who, state, deps);
     outputs.push(decision.ok ? "allowed" : touchBlind(state, who, op, decision.code, decision.message));
-    const result = applyOp(state, op, who, env(100 + i));
+    const result = applyOp(state, op, who, beforeCovers(op, env(100 + i)));
     outputs.push(...answer(state, result));
     if (!result.ok) continue;
     const inverse = result.inverse;

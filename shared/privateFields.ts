@@ -5,8 +5,11 @@
  * `seen: true` and holds no list. Tests walk a parsed frame or state with
  * it, so a snapshot's properties, an event's entity keys and an ephemeral
  * frame's payload are all read, whatever their spelling in the raw text.
+ * A secret door's `cover` is the DM's too (docs/design/design-v1-maps-vision.md
+ * 2.1): it names a door, so it never reaches a player, found or not, nor
+ * memory, whose entries reach them.
  */
-const PRIVATE_KEYS = new Set(["holders", "exploredBy", "exploredAny", "seenBy", "toSeenBy"]);
+const PRIVATE_KEYS = new Set(["holders", "exploredBy", "exploredAny", "seenBy", "toSeenBy", "cover"]);
 /** Entity keys an `ev` names these by (shared/keys.ts). */
 const PRIVATE_ENTITY_PREFIXES = ["holders:", "exploredBy:", "exploredAny:"];
 
