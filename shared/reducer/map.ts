@@ -944,7 +944,9 @@ export function buildEdge(tx: Tx, op: OpOf<"build.edge">): void {
     for (const [edgeKey, cover] of found) {
       const cell = parseCell(edgeKey);
       const edges = written.get(chunkKey(scene.id, Math.floor(cell.x / CHUNK_CELLS), Math.floor(cell.y / CHUNK_CELLS)))!.edges;
-      edges[edgeKey] = { ...(edges[edgeKey] as Extract<EdgeFeature, { kind: "door" }>), cover };
+      // A key an op names twice may hold something else by now. Only a hidden door still without a cover takes one.
+      const door = edges[edgeKey];
+      if (door?.kind === "door" && door.secret && !door.discovered && door.cover === undefined) edges[edgeKey] = { ...door, cover };
     }
   }
   for (const chunk of written.values()) writeChunk(tx, chunk);

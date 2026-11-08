@@ -17,6 +17,7 @@ import { guardMatches } from "./reducer/misc.ts";
 import { guardHash } from "./reducer/tx.ts";
 import { COVER_REACH, coverOfLine } from "./rules/autoWalls.ts";
 import { HIDDEN_DOOR, twins, withoutRevs } from "./secretDoorTestutil.ts";
+import { parseRoomState } from "#server/rooms/stateSchema.ts";
 import { DM, P1, apply, env, room } from "./testutil.ts";
 
 /**
@@ -146,6 +147,25 @@ describe("build.edge writes the cover (SB1)", () => {
       { key: "5,5,w", feature: WALL },
     ]);
     assert.equal((edgeOf(after, "5,4,w") as { cover?: string }).cover, "drawn");
+  });
+
+  test("a key named twice gives its cover only to a hidden door still standing after the loop (RULES-OPUS-1)", () => {
+    for (const second of [null, WALL]) {
+      const state = walled();
+      const after = build(state, [
+        { key: "4,2,n", feature: door() },
+        { key: "4,2,n", feature: second },
+      ]);
+      assert.deepEqual(edgeOf(after, "4,2,n"), second ?? undefined, "no cover on what the second entry left");
+      assert.ok(parseRoomState(JSON.parse(JSON.stringify(after))).ok, "the stored edge passes the state schema");
+      const sent = JSON.stringify(chunksOf(after, P1));
+      assert.ok(!sent.includes("cover"), "no player chunk carries a cover");
+    }
+    const again = build(walled(), [
+      { key: "4,2,n", feature: WALL },
+      { key: "4,2,n", feature: door() },
+    ]);
+    assert.equal((edgeOf(again, "4,2,n") as { cover?: string }).cover, "auto", "a hidden door last still takes its line's cover");
   });
 
   test("an op stored below the step writes none, so a door it made keeps the look it had (writesDoorCover)", () => {
