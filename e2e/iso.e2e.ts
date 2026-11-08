@@ -1297,6 +1297,15 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       return m && m.overlay.rings === 0 && m.drag.rings === 0 && m.ground.rings >= 2 ? true : null;
     });
     assert.notEqual(await parentOf(pat, hall.bree), "dragGround", "her standee back among the relief's");
+    // FU43B-WIRING-GAPS: the same wheel and key zoom the board once nothing is dragged, so the mid-drag check above is not a handler that never zooms.
+    const idleCamera = await isoCamera(pat);
+    await pat.mouse.wheel(0, -120);
+    const wheeled = await waitFor("the wheel zooming the idle board", async () => {
+      const now = await isoCamera(pat);
+      return JSON.stringify(now) !== JSON.stringify(idleCamera) ? now : null;
+    });
+    await pat.keyboard.press("+");
+    await waitFor("the plus key zooming the idle board", async () => (JSON.stringify(await isoCamera(pat)) !== JSON.stringify(wheeled) ? true : null));
   });
 
   test("ISO-32. Pat measures in Isometric: the ruler's line and its distance draw in the drag layer, the distance standing upright", async () => {
