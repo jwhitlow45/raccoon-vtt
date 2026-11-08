@@ -18,7 +18,7 @@ import type { Bounds } from "./geom.ts";
  * times 64, an exact scaling) they are whole numbers below 2^16, and their
  * cross products are exact in plain doubles. Points off the lattice, such
  * as an eye or a token's center, go through `orient`, which is exact for
- * any doubles.
+ * any doubles whose products stay above the subnormal range (see orient).
  */
 
 /** What a segment blocks. A segment carries any mix of these bits. */
@@ -60,8 +60,10 @@ export const WALL_MARGIN = 1 / 4096;
 // The exact predicate
 
 /**
- * The exact sign of the cross product (b - a) x (c - a), for any doubles:
- * 1 when c lies clockwise of a to b on the y-down map (counterclockwise in
+ * The exact sign of the cross product (b - a) x (c - a), as long as no
+ * product of differences underflows into the subnormal range (below about
+ * 2.2e-308). Past that it can break the turn rule, which
+ * segments.prop.test.ts pins. Play never gets near it. 1 when c lies clockwise of a to b on the y-down map (counterclockwise in
  * y-up axes), -1 the other way, 0 exactly on the line. Shewchuk's adaptive
  * arithmetic (robust-predicates), which uses only +, - and *. Its own sign
  * convention is the opposite one, hence the flip.
