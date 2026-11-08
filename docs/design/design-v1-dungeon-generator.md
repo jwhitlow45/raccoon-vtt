@@ -55,7 +55,7 @@ Scenes, New scene, Kind of scene **Builder** shows, after its Create row, "Or st
 - **The preview** (4.3), with **Reroll** under its right corner.
 - **Theme**: Dungeon ("Stone and wood rooms, closed and locked doors, rubble and pits."), Crypt ("Stone halls with pillars, more locked doors.").
 - **Size**: Small, Medium, Large, Custom, with "30 × 30 squares (150 by 150 ft)" under it in the room's feet per square. Custom adds Across and Down (20 to 100), starting at the form's size, clamped.
-- **Rooms**: a number field, "2 to 10 on this size" under it.
+- **Rooms**: a number field, "2 to 10 on this size. Fewer fit when the layout is tight." under it.
 - **Density**: Sparse, Normal, Dense ("How much of the map the rooms fill.").
 - **Corridors**: Straight, Bending, Winding (as built, each holds its own shape at every size: see The options pass, D-261102-830). **Corridor width**: Narrow, Wide ("Wide corridors and their doorways are 2 squares across, with double doors, so Large creatures walk them without squeezing once the doors are open.").
 - **Extra ways around**: a switch, on ("Adds loops, so the way back is not always the way in.").
