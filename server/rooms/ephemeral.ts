@@ -1,13 +1,14 @@
 import { keys, partsKey } from "#shared/keys.ts";
 import type { RoomState, Token, Viewer } from "#shared/model.ts";
 import { mayMoveToken } from "#shared/permissions.ts";
-import { ownsToken, perPlayerScene, projectEntity, viewerSceneId, withheldFromViewer } from "#shared/project.ts";
+import { ownsToken, perPlayerScene, projectEntity, withheldFromViewer } from "#shared/project.ts";
+import { startFloor } from "#shared/rules/floors.ts";
 import { canSqueeze } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import type { EphEvent } from "#shared/protocol.ts";
 import type { PartySight } from "#shared/ruleHooks.ts";
 import type { Connection, PreviewKind, SentPreview } from "./connection.ts";
-import { perPlayerClasses } from "./fanout.ts";
+import { heldBy, perPlayerClasses } from "./fanout.ts";
 
 /**
  * The ephemeral channel (design 7.6). Nothing here is stored: an event is
@@ -19,6 +20,10 @@ import { perPlayerClasses } from "./fanout.ts";
  * preview disappears rather than freezing. On a per-player scene each
  * player is judged by their own sight and fog
  * (docs/design/design-v1-per-player-vision.md 7.5).
+ *
+ * An event happens on one floor, which the client names (`sceneId`), and
+ * reaches only receivers holding that floor, with its `sceneId`, so a
+ * device keeps it with that floor (docs/design/design-v1-floors.md 8.2).
  */
 
 function previewOf(e: EphEvent): { kind: PreviewKind; id: string; ends: boolean } | null {
@@ -40,6 +45,33 @@ function previewOf(e: EphEvent): { kind: PreviewKind; id: string; ends: boolean 
     default:
       return null;
   }
+}
+
+/**
+ * Whether every token the event names stands on its floor now
+ * (docs/design/design-v1-floors.md 8.2, FLR-SOL-3): a drag's token and a
+ * ruler's anchors. A frame from before its token moved to another floor, or
+ * a ruler anchored on two floors, fails, and goes nowhere: a receiver
+ * holding both floors would otherwise see Ground's drag land on Roof. A
+ * token gone fails as well, as projection would withhold it.
+ */
+function onItsFloor(state: RoomState, sceneId: string, e: EphEvent): boolean {
+  const here = (tokenId: string) => state.tokens[tokenId]?.sceneId === sceneId;
+  switch (e.k) {
+    case "dragStart":
+    case "dragMove":
+    case "dragEnd":
+      return here(e.tokenId);
+    case "ruler":
+      return e.points.every((p) => p.tokenId === undefined || here(p.tokenId));
+    default:
+      return true;
+  }
+}
+
+/** Whether the receiver holds the event's floor (heldBy): a player the floors they hold, a DM every floor of their scene. */
+function holds(state: RoomState, receiver: Connection, sceneId: string): boolean {
+  return heldBy(state, receiver).has(sceneId);
 }
 
 /*
@@ -189,7 +221,8 @@ function allowed(state: RoomState, receiver: Connection, e: EphEvent, withheld: 
     case "focus":
       return receiver.role === "player";
     // A DM device's camera, for table displays only (docs/design/design-v1-dm-tools.md 3.1). Like every event it goes only to
-    // receivers on its scene, and a display is on the player scene, so the TV never moves to a scene players cannot see.
+    // receivers holding its floor, and a display holds only floors players have reached, so the TV never moves to a scene
+    // or floor players cannot see.
     case "view":
       return receiver.display;
     default:
@@ -199,8 +232,9 @@ function allowed(state: RoomState, receiver: Connection, e: EphEvent, withheld: 
 
 export function routeEphemeral(state: RoomState, sender: Connection, sceneId: string, e: EphEvent, receivers: Iterable<Connection>): void {
   if (!state.scenes[sceneId]) return;
-  // A player previews only on the scene they are on. The DM may be anywhere.
-  if (sender.role === "player" && state.meta.playerSceneId !== sceneId) return;
+  // A player previews only on a floor they hold, or the start floor as before floors, which reaches nobody behind a
+  // blackout but the DM. The DM may be anywhere.
+  if (sender.role === "player" && startFloor(state) !== sceneId && !holds(state, sender, sceneId)) return;
   const all = [...receivers];
   expireStale(sender, all);
   const preview = previewOf(e);
@@ -208,7 +242,7 @@ export function routeEphemeral(state: RoomState, sender: Connection, sceneId: st
   if (!shared(sender, e)) return;
   // A drag the sender may not make is withheld from everyone, and one
   // already showing (the token was locked mid-drag, say) is cancelled.
-  const senderMay = !(e.k === "dragStart" || e.k === "dragMove" || e.k === "dragEnd") || mayMove(state, sender, e.tokenId);
+  const senderMay = (!(e.k === "dragStart" || e.k === "dragMove" || e.k === "dragEnd") || mayMove(state, sender, e.tokenId)) && onItsFloor(state, sceneId, e);
   const heldKey = preview ? `${sender.memberId}|${preview.kind}:${preview.id}` : null;
   const withheld = withheldFor(state, sceneId, e);
   // A bare end names only what stopped, so it goes to those showing that preview. Sent to
@@ -216,7 +250,7 @@ export function routeEphemeral(state: RoomState, sender: Connection, sceneId: st
   const bareEnd = e.k === "dragCancel" || e.k === "rulerEnd" || e.k === "aoeEnd";
   for (const receiver of all) {
     if (receiver === sender || receiver.closed || receiver.held === null) continue;
-    if (viewerSceneId(state, receiver.viewer, { sceneId: receiver.sceneId }) !== sceneId) continue;
+    if (!holds(state, receiver, sceneId)) continue;
     if (bareEnd) {
       if (heldKey && receiver.previewsHeld.delete(heldKey)) receiver.send({ t: "eph", from: sender.memberId, sceneId, e });
       continue;
@@ -303,11 +337,14 @@ function withheldFor(state: RoomState, sceneId: string, e: EphEvent): (receiver:
 
 /**
  * Previews held on other screens, judged again after a batch that set
- * `global` (docs/design/design-v1-per-player-vision.md 7.2): a switch to or from
- * Per player, a holder pick or any other change that re-projects
- * everything can leave a receiver showing a drag or a live ruler it may no
- * longer see. Each is judged by its last frame, as it would be routed now,
- * and a receiver that may no longer have it gets its bare cancel.
+ * `global` (docs/design/design-v1-per-player-vision.md 7.2), or changed the
+ * floors some receiver holds (docs/design/design-v1-floors.md 8.1): a switch to
+ * or from Per player, a holder pick, Hide, a creature moved to another
+ * floor or any other change that re-projects everything can leave a
+ * receiver showing a drag or a live ruler it may no longer see. Each is
+ * judged by its last frame, as it would be routed now, so one whose token
+ * left its floor ends, and a receiver that may no longer have it gets its
+ * bare cancel.
  */
 export function rejudgePreviews(state: RoomState, connections: Iterable<Connection>): void {
   const all = [...connections];
@@ -316,12 +353,12 @@ export function rejudgePreviews(state: RoomState, connections: Iterable<Connecti
     for (const [key, { kind, id, sceneId, last }] of [...sender.previewsSent]) {
       const heldKey = `${sender.memberId}|${kind}:${id}`;
       const judged = state.scenes[sceneId] !== undefined;
-      const senderMay = !(last.k === "dragStart" || last.k === "dragMove" || last.k === "dragEnd") || mayMove(state, sender, last.tokenId);
+      const senderMay = (!(last.k === "dragStart" || last.k === "dragMove" || last.k === "dragEnd") || mayMove(state, sender, last.tokenId)) && onItsFloor(state, sceneId, last);
       const withheld = withheldFor(state, sceneId, last);
       for (const receiver of all) {
         // Only the screens showing this socket's frame are judged by it.
         if (receiver === sender || receiver.closed || receiver.previewsHeld.get(heldKey) !== sender.id) continue;
-        const here = judged && viewerSceneId(state, receiver.viewer, { sceneId: receiver.sceneId }) === sceneId;
+        const here = judged && holds(state, receiver, sceneId);
         if (here && senderMay && allowed(state, receiver, last, withheld)) continue;
         release(receiver, heldKey, sender);
         receiver.send({ t: "eph", from: sender.memberId, sceneId, e: cancelEvent(kind, id) });
