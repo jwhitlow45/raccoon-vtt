@@ -361,6 +361,22 @@ describe("the frame rate is measured over every frame (AM-ASTRA-06, AMN-13)", ()
     assert.equal((await checkVideoBytes(bytes)).facts.fps, 30);
   });
 
+  test("hidden blocks are counted apart from the frame header cap, so a long VP8 with alt-refs is not video_fps (AMBUILD-OPUS-R5-01)", async () => {
+    // 583 s at 60 fps, within the 10 minute cap, with enough hidden blocks that all together pass the header cap.
+    const shown = 35_000;
+    const bytes = tree({ frameMs: Array.from({ length: shown }, (_, i) => Math.floor((i * 1000) / 60)), clusterMs: 30_000 }, (t) => {
+      const cluster = findEbml(segmentOf(t), I.Cluster);
+      for (let k = 0; k < 2000; k++) cluster.kids!.push({ id: I.SimpleBlock, data: Buffer.from([0x81, 0x00, 0x10, 0x08, 0x86, 0]) });
+    });
+    assert.equal((await checkVideoBytes(bytes)).facts.fps, 60);
+    // Hidden blocks past their own cap are malformed, not a fast video.
+    const flood = tree({ frameMs: at(30, 2) }, (t) => {
+      const cluster = findEbml(segmentOf(t), I.Cluster);
+      for (let k = 0; k <= VIDEO_LIMITS.parseVideoFrameHeaders; k++) cluster.kids!.push({ id: I.SimpleBlock, data: Buffer.from([0x81, 0x00, 0x10, 0x08, 0x86, 0]) });
+    });
+    await refused(flood, "bad_video");
+  });
+
   test("more than 36,600 frames in all is video_fps", async () => {
     await refused(webmFile({ frameMs: Array.from({ length: VIDEO_LIMITS.maxFrames + 1 }, (_, i) => i * 17), clusterMs: 30_000 }), "video_fps");
   });

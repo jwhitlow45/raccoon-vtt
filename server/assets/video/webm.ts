@@ -377,6 +377,8 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
   let sawCues = false;
   let seekHeads = 0;
   const videoFrames = new Tally(VIDEO_LIMITS.parseVideoFrameHeaders, "video_fps");
+  // Hidden blocks (a VP8 alt-ref, an invisible flag) are no frame and no part of the rate, so they bear their own cap and a file of them is malformed, not too fast (AMBUILD-OPUS-R5-01).
+  const hiddenFrames = new Tally(VIDEO_LIMITS.parseVideoFrameHeaders, "bad_video");
   const soundFrames = new Tally(VIDEO_LIMITS.parseSoundFrameHeaders);
   /** The shown frames, each with its own BlockDuration where it has one, in ns (AMBUILD-ASTRA-08): a duration belongs to its block, not to its time. */
   const frames: Frame[] = [];
@@ -430,12 +432,13 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
         lastTicks = Math.max(lastTicks, timestamp + read.relative);
         const time = (timestamp + read.relative) * known.scale;
         if (read.track.type === 1) {
-          videoFrames.add();
           if (read.lacing !== 0) throw refuse("bad_video");
           if (read.invisible || (read.track.codecId === "V_VP8" && !(await vp8Shown(walk, b, read.payloadStart)))) {
+            hiddenFrames.add();
             invisibleEnd = Math.max(invisibleEnd, time);
             return;
           }
+          videoFrames.add();
           frames.push({ time, own: timing.duration === undefined ? undefined : timing.duration * known.scale });
           if (!firstVideoHead) firstVideoHead = await walk.src.read(read.payloadStart, Math.min(16, b.end - read.payloadStart));
         } else {
