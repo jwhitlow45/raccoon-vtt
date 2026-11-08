@@ -39,6 +39,7 @@ import {
   musicQueues,
   musicSetReveals,
   timedEnds,
+  followsDaylight,
   seatsApart,
   hiddenTowStands,
   stopsStandClear,
@@ -1961,6 +1962,48 @@ describe("op version 54 and snapshot 41, time spans (docs/design/design-v1-calen
     const op = { t: "actor.effect.add", target: { characterId: "bree" }, effect: { id: "x", key: "blessed", duration: { mode: "span", seconds: 600 } } };
     assert.throws(() => runMigrations(op, 54, 53, opMigrations), /down/);
     assert.throws(() => runMigrations(clocked(), 41, 40, snapshotMigrations), /down/);
+  });
+});
+
+describe("op version 55 and snapshot 42, time of day light (docs/design/design-v1-calendar-c2c3.md 6.6)", () => {
+  const H = 3_600;
+  const daylit = (): RoomState => {
+    const state = room({ clock: { id: "c1", rev: 1, t: 17 * H + 30 * 60, shown: false, calendar: { kind: "days" }, daylight: { dawn: 5 * H, dusk: 18 * H } } });
+    state.scenes.s1 = scene("s1", { vision: { on: false, light: "bright", byClock: true } });
+    return state;
+  };
+
+  test("keeps stored operations and snapshots unchanged through the identity steps", () => {
+    assert.ok(OP_VERSION >= 55);
+    assert.ok(SNAPSHOT_VERSION >= 42);
+    for (const op of [{ t: "clock.advance", by: 60 }, { t: "scene.update", sceneId: "s1", patch: { vision: { on: true, light: "dim" } } }, { t: "sys.restore", entries: [], from: "undo" }]) {
+      assert.equal(runMigrations(op, 54, 55, opMigrations), op);
+      assert.equal(migrateOp(op, 54), op);
+    }
+    for (const op of [{ t: "clock.update", daylight: { dawn: 5 * H, dusk: 19 * H } }, { t: "scene.update", sceneId: "s1", patch: { vision: { on: true, light: "dim", byClock: true } } }]) {
+      assert.equal(migrateOp(op, 55), op);
+      assert.ok(opSchema.safeParse(op).success);
+    }
+    const state = daylit();
+    assert.equal(runMigrations(state, 41, 42, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 41), state);
+  });
+
+  test("gates the pass at 55", () => {
+    assert.deepEqual([followsDaylight(1), followsDaylight(54), followsDaylight(55), followsDaylight(undefined)], [false, false, true, true]);
+    // An older replay of a step relights nothing, so a hand-made room with the flag replays as stored.
+    const old = applyOp(daylit(), { t: "clock.advance", by: H }, DM, { ...env(3), opVersion: 54 });
+    assert.ok(old.ok);
+    assert.equal(old.state.scenes.s1!.vision!.light, "bright");
+    const now = applyOp(daylit(), { t: "clock.advance", by: H }, DM, { ...env(3), opVersion: 55 });
+    assert.ok(now.ok);
+    assert.equal(now.state.scenes.s1!.vision!.light, "dim");
+  });
+
+  test("a build at 54 and 41 refuses a room from this one, so it never tells players a scene follows the clock", () => {
+    const op = { t: "clock.update", daylight: { dawn: 5 * H, dusk: 19 * H } };
+    assert.throws(() => runMigrations(op, 55, 54, opMigrations), /down/);
+    assert.throws(() => runMigrations(daylit(), 42, 41, snapshotMigrations), /down/);
   });
 });
 

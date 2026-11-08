@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 41;
-export const OP_VERSION = 54;
+export const SNAPSHOT_VERSION = 42;
+export const OP_VERSION = 55;
 
 export type MigrationStep = {
   from: number;
@@ -259,6 +259,11 @@ export const snapshotMigrations: MigrationStep[] = [
   // loads stored state without the import's check and would send an effect's `ends` whole to players, a hidden clock's
   // time included, refuses a v41 snapshot instead of loading it.
   { from: 40, to: 41, apply: (state) => state },
+  // Time of day light (docs/design/design-v1-calendar-c2c3.md 6.6): a scene's `byClock` and the clock's `daylight` are
+  // optional, and absent reads as before, so a v41 room is a v42 room as it is. The number moves so that an older build,
+  // which loads stored state without the import's check and sends a scene's vision whole to players, refuses a v42
+  // snapshot instead of loading it and telling them a clock exists.
+  { from: 41, to: 42, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1315,6 +1320,22 @@ export const opMigrations: MigrationStep[] = [
     // older build refuses.
     from: 53,
     to: 54,
+    apply: (op) => op,
+  },
+  {
+    // Time of day light (docs/design/design-v1-calendar-c2c3.md 6.6): a
+    // scene's vision may carry `byClock` and a clock update `daylight`, new
+    // fields an older strict schema refuses, so no stored op changes shape
+    // and the step is the identity. From this version a real change of the
+    // clock, or of a scene's own light settings, relights every scene on
+    // Time of day it reaches (`followsDaylight`). No scene followed the
+    // clock before, so the gate changes no replay today.
+    // Deploy: back up the database just before, and reload open pages, DM
+    // pages first, table displays included. Rollback needs the backup for a
+    // room with version 55 ops after its last snapshot or a v42 snapshot,
+    // which an older build refuses.
+    from: 54,
+    to: 55,
     apply: (op) => op,
   },
 ];
