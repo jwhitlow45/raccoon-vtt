@@ -53,7 +53,10 @@
  * Area tool (each move, then each frame once the finger rests), each frame
  * of a first view and a pan at the cap, a turn there, and each frame while
  * the 500 ft emanation builds. `--only`
- * times just the rows named. The page stores Isometric as its pick before
+ * times just the rows named. `--profile <dir>` adds to each pan row and
+ * each cube a round under Chrome's CPU profiler and one under a trace,
+ * counted in no row, with each move's or frame's window on their clock,
+ * so a slow one can be read by what it ran. The page stores Isometric as its pick before
  * it loads, and sets the test flag (client/features/view/choice.ts
  * ISO_TEST_FLAG) for the hook that turns without the menu.
  *
@@ -574,6 +577,23 @@ export async function timedUntil(page: Page, cdp: CDPSession, act: () => Promise
   throw new Error(`still building after ${max} frames`);
 }
 
+/** Runs `act` under a Chrome trace of the timeline's categories and returns its events (`--profile`). */
+async function traceOf<T>(cdp: CDPSession, act: () => Promise<T>): Promise<unknown[]> {
+  const events: unknown[] = [];
+  const collect = (e: { value: unknown[] }) => void events.push(...e.value);
+  cdp.on("Tracing.dataCollected", collect);
+  await cdp.send("Tracing.start", { categories: "devtools.timeline,disabled-by-default-devtools.timeline,v8,blink,cc,gpu,toplevel", transferMode: "ReportEvents" });
+  try {
+    await act();
+  } finally {
+    const done = new Promise<void>((resolve) => cdp.once("Tracing.tracingComplete", () => resolve()));
+    await cdp.send("Tracing.end");
+    await done;
+    cdp.off("Tracing.dataCollected", collect);
+  }
+  return events;
+}
+
 /** The main thread's busy time so far in ms, and the time now in µs on the clock CPU profiles use (`--profile`). */
 async function busyAt(cdp: CDPSession): Promise<{ busy: number; at: number }> {
   const { metrics } = (await cdp.send("Performance.getMetrics")) as { metrics: { name: string; value: number }[] };
@@ -1057,6 +1077,10 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       const name = `${view}-${row.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")}`;
       writeFileSync(path.join(dir, `${name}.cpuprofile`), JSON.stringify(profile));
       writeFileSync(path.join(dir, `${name}.moves.json`), JSON.stringify({ row, view, busy: busyMs, windows }));
+      // And one more under a trace, which names the browser's own work a CPU profile shows only as "(program)": paint, raster, commit, garbage collection.
+      const traced: [number, number][] = [];
+      const trace = await traceOf(cdp, () => throttled(() => run(windowed(traced))));
+      writeFileSync(path.join(dir, `${name}.trace.json`), JSON.stringify({ windows: traced, events: trace }));
     };
     const throttled = async <T>(run: () => Promise<T>) => {
       await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_SLOWDOWN });
@@ -1367,6 +1391,11 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
           mkdirSync(opts.profile, { recursive: true });
           writeFileSync(path.join(opts.profile, `${name}.cpuprofile`), JSON.stringify(profile));
           writeFileSync(path.join(opts.profile, `${name}.moves.json`), JSON.stringify({ row: `cube ${orient}`, view, busy: [arrival, ...busyMs], windows }));
+          const traced: [number, number][] = [];
+          const trace = await traceOf(cdp, () => throttled(() => cubeRound(traced)));
+          arrivals.pop();
+          builds.pop();
+          writeFileSync(path.join(opts.profile, `${name}.trace.json`), JSON.stringify({ windows: traced, events: trace }));
         }
         rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, the frame it lands in, 40 px"), view, ms: stats(arrivals.slice(1)) });
         rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, each frame while it builds, 40 px"), view, ms: frameStats(frames2) });
@@ -1894,7 +1923,7 @@ if (argv[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts
     const shots = arg("--shots");
     // `--only a,b` times just the rows whose names hold one of those words, for a quick look at a change.
     const only = arg("--only")?.split(",");
-    // `--profile <dir>` adds a profiled round to each pan row timed (runBench `profiled`).
+    // `--profile <dir>` adds a profiled and a traced round to each pan row and cube timed (runBench `profiled`).
     const profile = arg("--profile");
     const rows = await runBench(view, parity ? { parity, ...(shots ? { shots } : {}) } : { ...(only ? { only } : {}), ...(profile ? { profile } : {}) });
     const out = arg("--out");
