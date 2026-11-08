@@ -176,7 +176,7 @@ jobs:
   e2e:
     needs: build
     runs-on: ubuntu-24.04
-    # 14 shards (scripts/ci-scope.ts SHARDS) of about 8 minutes each,
+    # 14 shards (scripts/ci-scope.ts SHARDS) of about 15 minutes each,
     # balanced by scripts/e2e-shard.ts from e2e/durations.json, which holds
     # the seconds a file took in CI.
     # The shard's deadline keeps it inside this limit even when a file hangs.
