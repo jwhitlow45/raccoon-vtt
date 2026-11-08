@@ -643,6 +643,11 @@ newest first.
 
 **Since v0.3.1**
 
+- **Secret doors that look like their wall**
+  ([design](design/design-v1-maps-vision.md)): room format 40, change format
+  53. Until it reloads, an old page draws nothing in Isometric at a hidden
+  secret door between a corridor and a raised room. A secret door drawn before
+  the update keeps its old look until the DM draws it again.
 - **Trap stops beside dark ground and in single file**
   ([design](design/design-v1-traps.md)): change format 52. Until it reloads,
   an old DM page predicts its own trap stops by the old rule, and the
