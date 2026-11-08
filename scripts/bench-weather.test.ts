@@ -91,12 +91,13 @@ describe("the weather bench's gates", () => {
 });
 
 describe("when the bench reads a kind's rest", () => {
-  const two = WARMUP_MS + 2 * WINDOW_MS + 500;
-  test("two windows after the warm-up with no step, or after the warm-up that follows a halving, or once still", () => {
+  const two = WARMUP_MS + 3 * WINDOW_MS + 500;
+  test("three windows after the warm-up with no step, or after the warm-up that follows a halving, or once still", () => {
     assert.equal(stepDownSettled([], 0), false);
-    assert.equal(stepDownSettled([{ at: 0, level: 0 }, { at: 8000, level: 0 }], 8000), false);
+    // The busy time can step down at the third window, about 11 s in (mode.ts BUSY_MS_PER_S).
+    assert.equal(stepDownSettled([{ at: 0, level: 0 }, { at: 11_000, level: 0 }], 11_000), false);
     assert.equal(stepDownSettled([{ at: 0, level: 0 }, { at: two, level: 0 }], two), true);
-    // A halving at 5 s restarts the warm-up, so the rest waits two windows past it.
+    // A halving at 5 s restarts the warm-up, so the rest waits three windows past it.
     const halved = [{ at: 0, level: 0 }, { at: 5000, level: 1 }, { at: two + 1000, level: 1 }];
     assert.equal(stepDownSettled(halved, two + 1000), false);
     assert.equal(stepDownSettled([...halved, { at: 5000 + two, level: 1 }], 5000 + two), true);

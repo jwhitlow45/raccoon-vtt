@@ -326,10 +326,14 @@ export class WeatherRoom {
     this.#recent.push(seen);
     if (this.#recent.length > RECENT_FRAMES) this.#recent.shift();
     this.#settle();
+    // A tick's own callback is in its cost. Any other is the loop's own work, which the busy time counts (mode.ts spent).
+    if (!ticked) this.mode.spent(this.#now() - start, time);
     this.#afterFrame(() => {
       if (seen.settled) return;
-      seen.spent = this.#now() - start;
+      const measuring = this.#now();
+      seen.spent = measuring - start;
       this.#measured(seen);
+      this.mode.spent(this.#now() - measuring, time);
     });
   };
 
@@ -413,8 +417,10 @@ export class WeatherRoom {
     tick.judged = true;
     this.#unmatched = 0;
     this.#barren = 0;
-    const cost = Math.max(0, tick.spent - beside.reduce((sum, f) => sum + f.spent!, 0) / beside.length);
-    this.mode.added(cost, tick.at);
+    const raw = tick.spent - beside.reduce((sum, f) => sum + f.spent!, 0) / beside.length;
+    // The mode reads the busy time from the mean, which the cost as measured keeps unbiased where the board's noise falls either way. The test hooks read it at 0 or more.
+    this.mode.added(raw, tick.at);
+    const cost = Math.max(0, raw);
     this.#added.push(cost);
     if (this.#added.length > COST_TICKS) this.#added.shift();
     if (this.#added.length >= MIN_TICKS) this.frameCost = median(this.#added);

@@ -207,7 +207,8 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
   function run(input: {
     hz: number;
     seconds: number;
-    tick: number;
+    /** What each tick adds, or what the `n`th does. */
+    tick: number | ((n: number) => number);
     board: Board;
     strayEvery?: number;
     late?: (frame: number) => boolean;
@@ -219,6 +220,8 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
     elsewhere?: boolean;
     /** The animated map draws in the frame's rendering. */
     map?: (frame: number) => boolean;
+    /** What the measure's own work takes for each tick it judges, ms. */
+    measureMs?: number;
   }) {
     const period = 1000 / input.hz;
     const frames = new HandFrames();
@@ -255,6 +258,7 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
     const added = room.mode.added.bind(room.mode);
     room.mode.added = (ms, at) => {
       samples.push(ms);
+      now += input.measureMs ?? 0;
       added(ms, at);
     };
     let ticks = 0;
@@ -265,7 +269,7 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
         ticks++;
         moved += ms;
         ticked = true;
-        now += input.tick;
+        now += typeof input.tick === "number" ? input.tick : input.tick(ticks);
         most = Math.max(most, room.frameCost);
         room.mode.drew(0.1);
       },
@@ -560,7 +564,10 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
       const jitter: Board = () => 1 + r0() * 3;
       const wide: Board = () => 0.5 + r0() * 7;
       for (const hz of RATES) {
-        assert.equal(run({ hz, seconds: 120, tick: 0.3, board: jitter }).level, "full", `seed ${seed} at ${hz} Hz`);
+        const healthy = run({ hz, seconds: 120, tick: 0.3, board: jitter });
+        assert.equal(healthy.level, "full", `seed ${seed} at ${hz} Hz`);
+        // The mode hears a tick whose neighbors cost more as it read, below 0, so the busy time's mean stays the weather's (mode.ts BUSY_MS_PER_S).
+        assert.ok(healthy.samples.some((ms) => ms < 0), `seed ${seed} at ${hz} Hz: no cost below 0`);
         assert.equal(run({ hz, seconds: 14, tick: 3, board: jitter }).level, "still", `seed ${seed} at ${hz} Hz, no GPU`);
       }
       for (const hz of [60, 120]) assert.equal(run({ hz, seconds: 120, tick: 0.3, board: wide }).level, "full", `seed ${seed} at ${hz} Hz, wide`);
@@ -613,6 +620,32 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
     assert.ok(r.frameCost > 2.5 && r.frameCost < 3.5, `${r.frameCost}`);
   });
 
+  test("a canvas with no GPU whose ticks read under 2 ms by the median but add over 60 ms a second steps down, at 60 and 120 Hz, at rest and panned, and one adding 47 to 56 ms a second keeps moving on a noisy board, at 30 Hz too (WX-SOFTWARE-REST)", () => {
+    // A 30 Hz screen holds one tick in four while its windows sample, so its ticks come 22.5 a second and these read 54 to 64 ms there: near the line, either way.
+    for (const seed of [1, 2, 3]) {
+      const r0 = rng(seed);
+      // A third of the ticks add 3.8 ms and the rest 1.6 to 2: a median of about 1.9, and with the clip 2.2 ms by the mean, 75 ms a second with the loop's unseen work.
+      const skewed = () => (r0() < 1 / 3 ? 3.8 : 1.6 + r0() * 0.4);
+      for (const hz of [60, 120]) {
+        for (const board of [steady, pans]) {
+          const r = run({ hz, seconds: 20, tick: skewed, board });
+          assert.ok(median(r.samples) < 2, `${hz} Hz, seed ${seed}: a median of ${median(r.samples)}`);
+          assert.equal(r.level, "still", `${hz} Hz seed ${seed} ${board === pans ? "panned" : "at rest"}`);
+        }
+      }
+      // A quarter add 2 ms and the rest 0.8 to 1.2: a mean of 1.25, 47 ms a second with the loop's unseen work at 60 Hz and 56 at 120 Hz, on a board whose frames vary by 2 ms.
+      const r1 = rng(seed + 100);
+      const within = () => (r1() < 1 / 4 ? 2 : 0.8 + r1() * 0.4);
+      for (const hz of RATES) assert.equal(run({ hz, seconds: 120, tick: within, board: () => 1 + r0() * 2 }).level, "full", `${hz} Hz seed ${seed}, within`);
+    }
+  });
+
+  test("the loop's own work counts toward the busy time: ticks adding 1.5 ms keep moving at 60 Hz, and step down where the measure takes 0.3 ms a tick", () => {
+    // 45 ms a second of ticks and 9 of the loop's unseen work, then 9 more of the measure's.
+    assert.equal(run({ hz: 60, seconds: 20, tick: 1.5, board: steady }).level, "full");
+    assert.equal(run({ hz: 60, seconds: 20, tick: 1.5, board: steady, measureMs: 0.3 }).level, "still");
+  });
+
   test("a GPU canvas whose ticks add half a millisecond keeps moving, however busy the board is in every frame and however often something else's long task runs", () => {
     for (const board of [0.5, 9]) {
       const { level, most } = run({ hz: 60, tick: 0.5, seconds: 12, board: () => board });
@@ -649,3 +682,8 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
     assert.equal(r.level, "full");
   });
 });
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)] ?? 0;
+}

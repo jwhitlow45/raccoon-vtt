@@ -65,6 +65,38 @@ export const SLOW_FRAME_MS = 2;
 /** A window with fewer frame costs than this says nothing by them, as a 30 Hz screen's first window may. */
 export const MIN_FRAME_COSTS = 5;
 /**
+ * Two windows in a row whose weather adds more than this to the main
+ * thread's busy time a second step down too: 6.1's budget, read as the
+ * mean of a window's frame costs, each clipped to BUSY_CLIP_MS, times its
+ * ticks, with the loop's own work beside them, the timed (`spent`) and the
+ * unseen (LOOP_UNSEEN_MS), over its length (WX-SOFTWARE-REST). The median
+ * alone let a canvas with no GPU whose ticks read just under SLOW_FRAME_MS
+ * keep moving at 64 to 73 ms a second over no weather, since the loop's
+ * own work, which no tick's cost holds, made up the rest (D-261102-535).
+ */
+export const BUSY_MS_PER_S = 60;
+/**
+ * A frame cost counts toward the busy time up to this, and down to its
+ * negative. A board's noise lands on a tick's frame or its neighbor's at
+ * random, and other work can land on every tick's frame in step with the
+ * ticks (mode.test.ts's spiky window), so an unclipped mean would read a
+ * noisy healthy board as slow. Clipped, a few slow ticks weigh no more than
+ * one and a half times the limit, and only costs near the limit throughout
+ * can carry the mean past it.
+ */
+export const BUSY_CLIP_MS = 1.5 * SLOW_FRAME_MS;
+/**
+ * What the loop costs the main thread each frame beyond what it times
+ * itself (`spent`): its frame callback's and its measure's own tasks, and
+ * the browser's work for them past the measure. Read as the busy time over
+ * no weather less the ticks' costs and the loop's timed work, the bench
+ * found 0.09 to 0.35 ms a frame, with a GPU and without, slowed 3, 4 and 6
+ * times (WX-NOGPU-CAL). This is the most that steps down none of those
+ * runs whose busy time was within 60 ms a second: 0.2 stepped down one at
+ * 58.2.
+ */
+export const LOOP_UNSEEN_MS = 0.15;
+/**
  * A window wants frame costs (`wantsCosts`) until it has this many, and
  * after that while their median is SAMPLE_WHILE_MS or more. Fifteen keep
  * WXB-R2-1's results over 120 sessions of 300 s at 30 Hz (a noisy healthy
@@ -88,6 +120,13 @@ function median(values: readonly number[]): number {
   return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
 }
 
+/** The mean of `values`, each clipped to within `clip` of 0 (BUSY_CLIP_MS). */
+function clippedMean(values: readonly number[], clip: number): number {
+  let sum = 0;
+  for (const v of values) sum += Math.max(-clip, Math.min(clip, v));
+  return values.length === 0 ? 0 : sum / values.length;
+}
+
 function p95(values: readonly number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)]!;
@@ -100,15 +139,20 @@ export class WeatherMode {
   #lastTick: number | null = null;
   /** No window opens before this. */
   #warmUntil = 0;
-  /** When the window being judged opened, or null while none is open. */
+  /** When the window being judged opened, or null while none is open, and the tick count then. */
   #windowAt: number | null = null;
+  #windowTicks = 0;
+  /** The window's loop frames, and the loop's own work it timed in them outside the ticks' costs (`spent`). */
+  #windowFrames = 0;
+  #spent = 0;
   #gaps: number[] = [];
   #draws: number[] = [];
   #costs: number[] = [];
   /** The loop held a tick in the window being judged (`frame`'s hold), so its frame costs were measured two ticks to each held frame. */
   #held = false;
-  /** The window before the one being judged read slow by its frame costs. */
+  /** The window before the one being judged read slow by its frame costs' median, and by their busy time. */
   #slowCostBefore = false;
+  #busyBefore = false;
   /** The frame before this one was held, so the next tick steps the whole gap since the last (HELD_STEP_MS). */
   #heldGap = false;
   /** The next draw is the tick's: set by a ticking frame, spent by `drew`, cleared by the next frame. */
@@ -163,6 +207,7 @@ export class WeatherMode {
   frame(now: number, hold = false): number | null {
     this.#tickDraw = false;
     if (!this.#looping) return null;
+    if (this.#windowAt !== null) this.#windowFrames++;
     const last = this.#lastTick;
     if (last !== null && now - last < TICK_MS) return null;
     if (hold) {
@@ -214,9 +259,20 @@ export class WeatherMode {
    * What the tick at `tickAt` added to its whole frame, in ms, measured
    * after its paint (store.ts). It counts in the window open at that tick,
    * so a measure that comes back after a pause or a remount counts nowhere.
+   * It may be below 0, where the frames beside the tick happened to cost
+   * more: the busy time's mean needs those as they are.
    */
   added(ms: number, tickAt: number): void {
     if (this.#windowAt !== null && tickAt >= this.#windowAt) this.#costs.push(ms);
+  }
+
+  /**
+   * The loop's own work in the frame at `at` that no tick's cost holds, in
+   * ms: a frame callback with no tick, and every frame's measure (store.ts).
+   * It counts toward the busy time of the window open then.
+   */
+  spent(ms: number, at: number): void {
+    if (this.#windowAt !== null && at >= this.#windowAt) this.#spent += ms;
   }
 
   /** The step-down so far: it only goes down, until the page reloads. */
@@ -282,12 +338,16 @@ export class WeatherMode {
   #restart(now: number): void {
     this.#warmUntil = now + WARMUP_MS;
     this.#slowCostBefore = false;
+    this.#busyBefore = false;
     this.#heldGap = false;
     this.#close();
   }
 
   #open(now: number): void {
     this.#windowAt = now;
+    this.#windowTicks = this.ticks;
+    this.#windowFrames = 0;
+    this.#spent = 0;
     this.#gaps = [];
     this.#draws = [];
     this.#costs = [];
@@ -305,26 +365,35 @@ export class WeatherMode {
   /**
    * A full window: too slow steps down once, and the next window opens here either way.
    *
-   * The frame costs count by their median, since each holds whatever else that frame and its neighbours did (store.ts), and a median sees through it.
+   * The frame costs count by their median, since each holds whatever else that frame and its neighbours did (store.ts), and a median sees through it,
+   * and by the busy time a second the weather adds (BUSY_MS_PER_S), their clipped mean with the loop's own work, which a median a little under
+   * the line leaves out.
    * Where the loop held ticks, at 33 frames a second or fewer, every two ticks were measured against one held frame, so a board whose frames
    * vary by several ms can read one window slow by chance (WXB-R2-1). There it takes two windows in a row, so a slow canvas halves a window
-   * later. A step's own slow window counts toward the next level's two, so it holds still the usual 5 s after it halves.
+   * later. A mean moves with a board's noise more than a median does, so the busy time takes two windows in a row at every rate. A step's own
+   * slow window counts toward the next level's two, so it holds still the usual 5 s after it halves.
    */
   #judge(now: number): void {
-    const slowCost = this.#costs.length >= MIN_FRAME_COSTS && median(this.#costs) > SLOW_FRAME_MS;
+    const enough = this.#costs.length >= MIN_FRAME_COSTS;
+    const slowCost = enough && median(this.#costs) > SLOW_FRAME_MS;
+    const seconds = (now - this.#windowAt!) / 1000;
+    const busy = enough && (clippedMean(this.#costs, BUSY_CLIP_MS) * (this.ticks - this.#windowTicks) + this.#spent + LOOP_UNSEEN_MS * this.#windowFrames) / seconds > BUSY_MS_PER_S;
     const slow =
       (this.#gaps.length > 0 && median(this.#gaps) > SLOW_GAP_MS) ||
       (this.#draws.length > 0 && p95(this.#draws) > SLOW_DRAW_MS) ||
-      (slowCost && (!this.#held || this.#slowCostBefore));
+      (slowCost && (!this.#held || this.#slowCostBefore)) ||
+      (busy && this.#busyBefore);
     if (slow) {
       const next = this.#input.particles && this.#level === "full" ? "half" : "still";
       this.#level = LEVELS[Math.max(LEVELS.indexOf(this.#level), LEVELS.indexOf(next))]!;
       this.#restart(now);
       this.#slowCostBefore = slowCost;
+      this.#busyBefore = busy;
       this.#settle(now);
       return;
     }
     this.#slowCostBefore = slowCost;
+    this.#busyBefore = busy;
     this.#open(now);
   }
 }

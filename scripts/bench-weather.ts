@@ -13,8 +13,8 @@
  * - rest: busy ms a second over 4 s with no weather, then with each kind
  *   heavy and its strongest wind (fog takes a moderate one, which is its
  *   most), moving, each on a page loaded afresh, measured once the
- *   step-down has settled: held still, or two of its windows after the
- *   warm-up that follows its last step (about 8.5 s with no step, 13.5 s
+ *   step-down has settled: held still, or three of its windows after the
+ *   warm-up that follows its last step (about 11.5 s with no step, 16.5 s
  *   after a halving), with the level it reached and what a tick adds to its
  *   frame. Still and Off with heavy rain too.
  * - pan and drag: each frame's gap while a finger pans the map and drags a
@@ -99,15 +99,17 @@ export function p95(values: readonly number[]): number {
 
 /**
  * Whether the step-down has settled, from the levels read since the page
- * loaded, oldest first: held still, or two windows after the warm-up that
- * follows the last change, so no window it could still judge is left.
+ * loaded, oldest first: held still, or three windows after the warm-up
+ * that follows the last change. The busy time steps down on two windows
+ * in a row (mode.ts BUSY_MS_PER_S), so a kind whose first window read just
+ * under it can still step at the third.
  */
 export function stepDownSettled(levels: readonly { at: number; level: number }[], now: number): boolean {
   const last = levels.at(-1);
   if (!last) return false;
   if (last.level === LEVELS.indexOf("still")) return true;
   const changed = levels.findLast((l, i) => i === 0 || l.level !== levels[i - 1]!.level)!.at;
-  return now - changed >= WARMUP_MS + 2 * WINDOW_MS + 500;
+  return now - changed >= WARMUP_MS + 3 * WINDOW_MS + 500;
 }
 
 const VIEWS = ["topDown", "isometric"] as const;

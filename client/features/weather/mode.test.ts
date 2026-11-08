@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { HELD_STEP_MS, MIN_FRAME_COSTS, SAMPLE_WHILE_MS, SLOW_DRAW_MS, SLOW_FRAME_MS, TICK_CLAMP_MS, WANTED_COSTS, WARMUP_MS, WINDOW_MS, WeatherMode, type ModeInput } from "./mode.ts";
+import { BUSY_CLIP_MS, BUSY_MS_PER_S, HELD_STEP_MS, LOOP_UNSEEN_MS, MIN_FRAME_COSTS, SAMPLE_WHILE_MS, SLOW_DRAW_MS, SLOW_FRAME_MS, TICK_CLAMP_MS, WANTED_COSTS, WARMUP_MS, WINDOW_MS, WeatherMode, type ModeInput } from "./mode.ts";
 
 const SHOWN: ModeInput = {
   setting: "moving",
@@ -198,6 +198,72 @@ test("a window whose ticks add more than 2 ms to their frames by the median step
   // Four ticks in ten add 9 ms, the rest 0.3: its median is the weather's.
   runCosts(spiky, 0, 4 * (WARMUP_MS + WINDOW_MS), 1000 / 60, (at) => (Math.round(at / (1000 / 60)) % 10 < 4 ? 9 : 0.3));
   assert.equal(spiky.level, "full");
+});
+
+test("two windows in a row whose ticks read under 2 ms by the median but whose weather adds more than 60 ms a second step down, and windows at 57 ms a second do not (WX-SOFTWARE-REST)", () => {
+  /** Ticks at 60 Hz, 30 a second, adding `low` ms but one in three, which adds `high`: the level after one window, and after two. */
+  const windows = (low: number, high: number) => {
+    const mode = new WeatherMode(SHOWN, 0);
+    let n = 0;
+    const cost = () => (++n % 3 === 0 ? high : low);
+    runCosts(mode, 0, WARMUP_MS + WINDOW_MS + 100, 1000 / 60, cost);
+    const one = mode.level;
+    runCosts(mode, WARMUP_MS + WINDOW_MS + 100, WARMUP_MS + 2 * WINDOW_MS + 100, 1000 / 60, cost);
+    return [one, mode.level];
+  };
+  const window = (low: number, high: number) => {
+    const [one, two] = windows(low, high);
+    assert.equal(one, "full", "one window says nothing by its busy time");
+    return two;
+  };
+  /** The busy time a second of such ticks at 60 Hz: their clipped mean 30 times a second, and the loop's unseen work 60 times. */
+  const busy = (low: number, high: number) => ((2 * low + Math.min(high, BUSY_CLIP_MS)) / 3) * 30 + 60 * LOOP_UNSEEN_MS;
+  // A median of 1.6 and 71 ms a second: a canvas with no GPU near the line, as the bench's wind and ash read slowed 3 times (D-261102-535).
+  assert.ok(1.6 < SLOW_FRAME_MS && busy(1.6, 3) > BUSY_MS_PER_S);
+  assert.equal(window(1.6, 3), "half");
+  // 57 ms a second, within the budget.
+  assert.ok(busy(1.2, 2.4) < BUSY_MS_PER_S);
+  assert.equal(window(1.2, 2.4), "full");
+  // A slow tick counts no more than the clip: one in three adding 20 ms beside ticks of 1.6 reads as above, and beside ticks of 0.3 within the budget, as the spiky window does.
+  assert.equal(window(1.6, 20), "half");
+  assert.ok(busy(0.3, 20) < BUSY_MS_PER_S);
+  assert.equal(window(0.3, 20), "full");
+});
+
+test("the busy time counts the window's ticks, the loop's work in each frame, timed and unseen, and a tick that read below 0, and a window within the budget starts the two again", () => {
+  /** Two windows at a rate whose ticks add the costs of `cycle` in turn, with `spent` ms of the loop's own timed work each frame. */
+  const level = (every: number, cycle: readonly number[], spent = 0) => {
+    const mode = new WeatherMode(SHOWN, 0);
+    let n = 0;
+    for (let now = 0; now < WARMUP_MS + 2 * WINDOW_MS + 100; now += every) {
+      if (spent > 0) mode.spent(spent, now);
+      if (mode.frame(now) === null) continue;
+      mode.drew(0.1);
+      mode.added(cycle[n++ % cycle.length]!, now);
+    }
+    return mode.level;
+  };
+  // 1.5 ms 30 times a second is 45 ms, and the loop's unseen work 9 more at 60 Hz, 18 more at 120 Hz, where it runs twice as often.
+  assert.equal(level(1000 / 60, [1.5]), "full");
+  assert.equal(level(1000 / 120, [1.5]), "half");
+  // 0.2 ms of the loop's own timed work each frame at 60 Hz is 12 ms more.
+  assert.equal(level(1000 / 60, [1.5], 0.2), "half");
+  // A 30 Hz screen holding one frame in four ticks 22.5 times a second: 1.9 ms ticks are 47 ms a second there.
+  const held = new WeatherMode(SHOWN, 0);
+  let k = 0;
+  for (let now = 0; now < WARMUP_MS + 4 * WINDOW_MS + 100; now += 1000 / 30) {
+    if (held.frame(now, ++k % 4 === 0) === null) continue;
+    held.drew(0.1);
+    held.added(1.9, now);
+  }
+  assert.equal(held.level, "full");
+  // A median of 1.6 with a tick that read -4, as a noisy board's neighbor can make it: 55 ms a second. Read at 0, it would be 68.
+  assert.equal(level(1000 / 60, [4, 4, 4, 1.6, 1.6, 1.6, -4]), "full");
+  // Busy windows (a median of 1.6 and 71 ms a second) with one at 39 between them, by turns, never step down.
+  const turns = new WeatherMode(SHOWN, 0);
+  let n = 0;
+  for (let w = 0; w < 8; w++) runCosts(turns, w === 0 ? 0 : WARMUP_MS + w * WINDOW_MS + 100, WARMUP_MS + (w + 1) * WINDOW_MS + 100, 1000 / 60, () => (w % 2 === 0 ? [1.6, 1.6, 3][n++ % 3]! : 1));
+  assert.equal(turns.level, "full");
 });
 
 test("where the loop holds ticks, a window slow by its frame costs steps down only with the one before it slow too, and a step's window counts toward the next level", () => {
