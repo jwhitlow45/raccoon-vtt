@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -78,13 +77,11 @@ describe("the dice folds' keys (6.3)", () => {
     assert.equal(DICE_FOLDS_KEY, "rvtt.diceFolds");
   });
 
-  test("the e2e harness stores every one of them open", () => {
-    const harness = readFileSync(new URL("../../../e2e/harness.ts", import.meta.url), "utf8");
-    const list = /const DICE_FOLD_KEYS = \[([^\]]*)\]/.exec(harness);
-    assert.ok(list, "the harness lists the keys");
-    const listed = [...list[1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
-    assert.deepEqual([...listed].sort(), [...DICE_FOLD_KEYS].sort());
-    assert.match(harness, new RegExp(`"${DICE_FOLDS_KEY.replace(".", "\\.")}"`), "under the folds' storage key");
+  test("the e2e harness stores every one of them open", async () => {
+    // The harness imports no module that reads the window, so it loads here and its own list is compared.
+    const harness = await import("../../../e2e/harness.ts");
+    assert.deepEqual([...harness.DICE_FOLD_KEYS].sort(), [...DICE_FOLD_KEYS].sort());
+    assert.equal(harness.DICE_FOLDS_STORAGE_KEY, DICE_FOLDS_KEY, "under the folds' storage key");
   });
 });
 

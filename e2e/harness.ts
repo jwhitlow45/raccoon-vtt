@@ -235,13 +235,15 @@ export async function openPage(page: Page, url: string): Promise<void> {
  * module reads the window, which the e2e files are built without, so the
  * keys are listed here and diceFolds.test.ts checks the two lists match.
  */
-const DICE_FOLD_KEYS = [
+export const DICE_FOLD_KEYS = [
   "pc.saves", "pc.skills", "pc.traits", "pc.actions", "pc.bonusActions", "pc.reactions", "pc.legendaryActions", "pc.spells",
   "companion.saves", "companion.skills", "companion.traits", "companion.actions", "companion.bonusActions", "companion.reactions", "companion.legendaryActions", "companion.spells",
   "monster.saves", "monster.skills", "monster.traits", "monster.actions", "monster.bonusActions", "monster.reactions", "monster.legendaryActions", "monster.spells",
   "group.saves", "group.skills", "group.sharedAttacks",
   "recent",
 ] as const;
+/** The localStorage key the Dice panel keeps its folds under, listed here for the same reason as the folds. */
+export const DICE_FOLDS_STORAGE_KEY = "rvtt.diceFolds";
 
 /**
  * Stores every Dice panel fold open on each page the context opens, before
@@ -260,7 +262,7 @@ export async function diceFoldsOpen(context: BrowserContext): Promise<void> {
         // A page with no storage, such as about:blank, has no folds to open.
       }
     },
-    { key: "rvtt.diceFolds", value },
+    { key: DICE_FOLDS_STORAGE_KEY, value },
   );
 }
 
