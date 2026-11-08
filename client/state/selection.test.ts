@@ -318,6 +318,15 @@ describe("all of a kind (docs/design/design-v1-qol.md 3, Q7)", () => {
     assert.deepEqual(sameKind(room, goblin("g2", 2)), ["g1", "g2", "g3", "hid", "npc"]);
   });
 
+  test("the dead are left out: the living alone are counted and selected, so a group's HP entry and Conditions never act on a corpse (LP32-B-ALL-1)", () => {
+    const fallen = [...room.slice(0, 4), goblin("dead", 10, {}, { srdId: "goblin-warrior", life: "dead" }), goblin("dying", 11, {}, { srdId: "goblin-warrior", life: "dying" })];
+    assert.deepEqual(sameKind(fallen, fallen[0]!), ["g1", "g2", "g3", "hid", "dying"]);
+    // From a dead one's own bar, the button stands for the living.
+    assert.deepEqual(sameKind(fallen, fallen[4]!), ["g1", "g2", "g3", "hid", "dying"]);
+    const last = [goblin("one", 1), goblin("two", 2, {}, { srdId: "goblin-warrior", life: "dead" })];
+    assert.deepEqual(sameKind(last, last[0]!), ["one"], "one left alive: no button");
+  });
+
   test("a renamed token, another block, one with no block and a player character are kinds of their own, or none", () => {
     assert.deepEqual(sameKind(room, room[5]!), ["boss"], "Snarl alone: no button");
     assert.deepEqual(sameKind(room, room[6]!), ["custom"], "the room's own monster is not the SRD's");

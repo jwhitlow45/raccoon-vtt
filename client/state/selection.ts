@@ -212,17 +212,23 @@ export function kindOf(token: KindToken): string | null {
   return block === null ? null : `${block}\n${token.name}`;
 }
 
+/** Whether a token of a kind still fights: the dead lie on the map, but a group's HP entry and Conditions are for the living. */
+function living(token: KindToken): boolean {
+  return !("inline" in token.actor) || token.actor.inline.life !== "dead";
+}
+
 /**
- * Every token of this one's kind on its scene, itself included, by number
- * as their names count them (Goblin Warrior 1, 2, 3), then by id: what
- * "All N" selects. The DM's map holds the hidden ones too, and the button
- * is the DM's alone. Only the token itself, or nothing, for one with no
- * kind, so a lone creature shows no button.
+ * Every living token of this one's kind on its scene, by number as their
+ * names count them (Goblin Warrior 1, 2, 3), then by id: what "All N"
+ * selects. The DM's map holds the hidden ones too, and the button is the
+ * DM's alone. It holds the token itself unless that one is dead, and is
+ * empty for one with no kind, so a lone creature, or the last one alive,
+ * shows no button.
  */
 export function sameKind(tokens: Iterable<KindToken>, token: KindToken): string[] {
   const kind = kindOf(token);
   if (kind === null) return [];
-  const kin = [...tokens].filter((t) => t.sceneId === token.sceneId && kindOf(t) === kind);
+  const kin = [...tokens].filter((t) => t.sceneId === token.sceneId && kindOf(t) === kind && living(t));
   kin.sort((a, b) => (a.number ?? Number.MAX_SAFE_INTEGER) - (b.number ?? Number.MAX_SAFE_INTEGER) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return kin.map((t) => t.id);
 }

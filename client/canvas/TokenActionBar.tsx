@@ -326,7 +326,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
   const undoIds = barTokenIds(tokens, token);
   const yourTurn = useYourTurn();
   const endTurn = useEndTurn();
-  // The DM's "All 4 Goblin Warriors" (docs/design/design-v1-qol.md 3, Q7): every token of this one's kind on its scene, hidden ones too.
+  // The DM's "All 4 Goblin Warriors" (docs/design/design-v1-qol.md 3, Q7): every living token of this one's kind on its scene, hidden ones too.
   const kin = useMemo(() => (access.dm && tokens ? sameKind(Object.values(tokens), token) : []), [access.dm, tokens, token]);
   // Its combat uses (docs/design/design-v1-combat-controls.md 6), for the DM on any creature with one and for owners on theirs.
   const usesPresence = useUsesPresence(access.dm || access.owner ? target : null);

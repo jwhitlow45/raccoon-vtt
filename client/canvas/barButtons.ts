@@ -60,7 +60,7 @@ export type BarButtonInput = {
   placeFreely?: boolean;
   /** The token is drawn between squares, and the viewer is the DM or an owner who may move it. Left out, no. */
   snapToGrid?: boolean;
-  /** More than one token of this one's kind stands on its scene (state/selection.ts sameKind), for the DM's "All 4 Goblin Warriors". Left out, no. */
+  /** More than one living token of this one's kind stands on its scene (state/selection.ts sameKind), for the DM's "All 4 Goblin Warriors". Left out, no. */
   allOfKind?: boolean;
   /** An upright phone's bar, on the viewer's own turn or while their End turn waits, for a player's own token (docs/design/design-v1-qol.md 3, Q6). Left out, no. */
   endTurn?: boolean;
