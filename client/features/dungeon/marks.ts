@@ -12,9 +12,9 @@ import type { DungeonPlan } from "./plan.ts";
  * the canvas draw the same places.
  */
 
-/** Warm yellow with a dark outline: 3:1 over floor and rock alike (section 13). */
-export const LIGHT_RING = "#f2c14e";
-export const RING_OUTLINE = "#14110d";
+/** The crest yellow with a black outline: 3:1 over floor and rock alike (section 13). Tokens, so the drift test keeps them. */
+export const LIGHT_RING = boardTheme.color.crest;
+export const RING_OUTLINE = boardTheme.color.textHalo;
 
 export type LightMark = { x: number; y: number };
 export type NumberMark = { n: number; x: number; y: number };
