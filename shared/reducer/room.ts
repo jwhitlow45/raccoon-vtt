@@ -11,7 +11,8 @@ import { deleteToken, sortedById } from "./tokens.ts";
 import { ownEntry } from "../records.ts";
 import { normalWeather } from "../weather.ts";
 import { checkedSceneSound } from "./sound.ts";
-import { FLOORS_NOT_YET } from "./floors.ts";
+import { afterRemoval, floorAdd, ONE_FLOOR } from "./floors.ts";
+import { deleteSet, FLOOR_WORDS, floorsOf } from "../rules/floors.ts";
 
 export function roomUpdate(tx: Tx, op: OpOf<"room.update">): void {
   const meta = tx.state.meta;
@@ -221,8 +222,8 @@ const DEFAULT_BACKGROUND = "#2b2b31";
 export function sceneCreate(tx: Tx, op: OpOf<"scene.create">): void {
   const input = op.scene;
   if (ownEntry(tx.state.scenes, input.id)) throw invalid("scene already exists");
-  // The contract's stand-in until the floors reducer lands: an add never makes a plain scene by mistake.
-  if (op.floor !== undefined) throw invalid(FLOORS_NOT_YET);
+  // A new floor copies the floor beside it (docs/design/design-v1-floors.md 6), so it reads nothing else of the op.
+  if (op.floor !== undefined) return floorAdd(tx, op);
   const order = Object.values(tx.state.scenes).reduce((max, s) => Math.max(max, s.order + 1), 0);
   const scene: Scene = {
     id: input.id,
@@ -269,9 +270,10 @@ function onHexGrid(scene: Scene): Scene {
 
 export function sceneUpdate(tx: Tx, op: OpOf<"scene.update">): void {
   const scene = tx.scene(op.sceneId);
-  if (op.patch.floor !== undefined) throw invalid(FLOORS_NOT_YET);
   const next: Scene = { ...scene };
   const p = op.patch;
+  if (scene.floor !== undefined) floorPatch(tx, scene, next, p);
+  else if (p.floor !== undefined) throw invalid(ONE_FLOOR);
   if (p.name !== undefined) next.name = p.name;
   if (p.bounds !== undefined) next.bounds = p.bounds;
   if (p.grid !== undefined) next.grid = p.grid;
@@ -316,10 +318,52 @@ export function sceneUpdate(tx: Tx, op: OpOf<"scene.update">): void {
   tx.write(keys.scene(scene.id), p.phases !== undefined ? onHexGrid(withPhases(next, p.phases)) : next);
 }
 
-/** Removes a scene and everything on it. The last scene stays, so a room is never empty. */
+/**
+ * A floor's part of `scene.update` (docs/design/design-v1-floors.md 9): its
+ * own name and height, the scene's name written onto every floor, since
+ * they rename together, and no folder, thumbnail or grid shape of its own,
+ * which are the main floor's and the scene's.
+ */
+function floorPatch(tx: Tx, scene: Scene, next: Scene, p: OpOf<"scene.update">["patch"]): void {
+  const floor = scene.floor!;
+  const main = floor.of === scene.id;
+  if (!main && (p.folder !== undefined || p.thumb !== undefined)) throw invalid("a scene's folder and thumbnail are its main floor's");
+  if (p.gridShape !== undefined && storedShape(p.gridShape) !== scene.gridShape) throw invalid(FLOOR_WORDS.oneShape(scene.name));
+  if (p.floor !== undefined) {
+    const name = p.floor.name ?? floor.name;
+    if (name !== floor.name && floorsOf(tx.state, scene.id).some((s) => s.id !== scene.id && s.floor?.name === name)) throw invalid(FLOOR_WORDS.sameName(scene.name, name));
+    next.floor = { ...floor, name, ...(p.floor.height !== undefined ? { height: p.floor.height } : {}) };
+  }
+  if (p.name === undefined || p.name === scene.name) return;
+  for (const other of floorsOf(tx.state, scene.id)) if (other.id !== scene.id) tx.write(keys.scene(other.id), { ...other, name: p.name });
+}
+
+/**
+ * Removes a scene and everything on it (D-261102-493): of a main floor every
+ * floor of its scene, of another floor only that floor, whose scene keeps
+ * its other floors renumbered, a last one a plain scene again. The last
+ * scene stays, so a room is never empty.
+ */
 export function sceneDelete(tx: Tx, op: OpOf<"scene.delete">): void {
-  const scene = tx.scene(op.sceneId);
-  if (Object.keys(tx.state.scenes).length <= 1) throw invalid("a room needs at least one scene");
+  const target = tx.scene(op.sceneId);
+  const set = deleteSet(tx.state, target);
+  if (Object.keys(tx.state.scenes).length - set.length < 1) throw invalid("a room needs at least one scene");
+  const start = tx.state.meta.playerSceneId;
+  for (const scene of set) removeScene(tx, scene);
+  if (target.floor !== undefined && target.floor.of !== target.id && target.floor.of !== undefined) afterRemoval(tx, target.floor.of);
+  // On the server, only a delete stored before canApply refused the players' scene (permissions.ts MOVE_PLAYERS_FIRST) reaches this, and replays as it did.
+  // A DM's pending delete, replayed with no canApply over a view where the players have since moved here (client/state/store.ts replayPending), reaches it too until the server refuses it.
+  // The players go to a main floor, the first scene left in the Scenes panel (docs/design/design-v1-floors.md 8.3).
+  if (start !== null && set.some((scene) => scene.id === start)) {
+    const remaining = Object.values(tx.state.scenes)
+      .filter((s) => s.floor?.of === undefined || s.floor.of === s.id)
+      .sort((a, b) => a.order - b.order);
+    tx.write(keys.meta, { ...tx.state.meta, playerSceneId: remaining[0]?.id ?? null });
+  }
+}
+
+/** One scene record and everything on it, its opened mark included, which an undo puts back with it. */
+function removeScene(tx: Tx, scene: Scene): void {
   const s = tx.state;
   // By id: removing a token can pause durations, and those log entries must be numbered the same on replay.
   for (const token of sortedById(Object.values(s.tokens))) if (token.sceneId === scene.id) deleteToken(tx, token.id);
@@ -334,22 +378,26 @@ export function sceneDelete(tx: Tx, op: OpOf<"scene.delete">): void {
   for (const l of Object.values(s.lights)) if (l.sceneId === scene.id) tx.remove(keys.light(l.id));
   for (const p of Object.values(s.pins)) if (p.sceneId === scene.id) tx.remove(keys.pin(p.id));
   for (const t of Object.values(s.traps ?? {})) if (t.sceneId === scene.id) tx.remove(keys.trap(t.id));
+  if (ownEntry(s.openFloors, scene.id) !== undefined) tx.remove(keys.opened(scene.id));
   tx.remove(keys.scene(scene.id));
-  // On the server, only a delete stored before canApply refused the players' scene (permissions.ts MOVE_PLAYERS_FIRST) reaches this, and replays as it did.
-  // A DM's pending delete, replayed with no canApply over a view where the players have since moved here (client/state/store.ts replayPending), reaches it too until the server refuses it.
-  if (s.meta.playerSceneId === scene.id) {
-    const remaining = Object.values(tx.state.scenes).sort((a, b) => a.order - b.order);
-    tx.write(keys.meta, { ...tx.state.meta, playerSceneId: remaining[0]?.id ?? null });
-  }
 }
 
+/**
+ * The Scenes panel's order. A scene with floors is listed by its main floor,
+ * whose order every floor of it carries (docs/design/design-v1-floors.md 6).
+ */
 export function sceneReorder(tx: Tx, op: OpOf<"scene.reorder">): void {
   const seen = new Set<string>();
   op.order.forEach((id, index) => {
     if (seen.has(id)) throw invalid("duplicate scene in order");
     seen.add(id);
     const scene = tx.scene(id);
-    if (scene.order !== index) tx.write(keys.scene(id), { ...scene, order: index });
+    if (scene.floor === undefined) {
+      if (scene.order !== index) tx.write(keys.scene(id), { ...scene, order: index });
+      return;
+    }
+    if (scene.floor.of !== scene.id) throw invalid("a scene with floors is listed by its main floor");
+    for (const floor of floorsOf(tx.state, id)) if (floor.order !== index) tx.write(keys.scene(floor.id), { ...floor, order: index });
   });
 }
 
@@ -372,6 +420,8 @@ export function sceneSetGrid(tx: Tx, op: OpOf<"scene.setGrid">): void {
   if (op.gridShape !== undefined) {
     // Use default must recheck against the server's current cell data before any part of the restoration lands.
     const shape = storedShape(op.gridShape);
+    // A scene's floors share one grid shape (docs/design/design-v1-floors.md 9).
+    if (scene.floor !== undefined && shape !== scene.gridShape) throw invalid(FLOOR_WORDS.oneShape(scene.name));
     const refusal = switchRefusal(tx.state, scene, gridOfShape(shape));
     if (refusal !== null) throw invalid(refusal);
     if (shape === undefined) delete next.gridShape;

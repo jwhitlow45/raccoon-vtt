@@ -8,6 +8,7 @@ import { copyMemory } from "./memory.ts";
 import { invalid, type Env, type Tx } from "./tx.ts";
 import { withoutTurnScoped } from "./uses.ts";
 import { ownEntry } from "../records.ts";
+import { floorsOf } from "../rules/floors.ts";
 
 /**
  * Duplicate a scene (docs/design/design-v1-maps-vision.md section 3.2), in one op.
@@ -34,6 +35,8 @@ import { ownEntry } from "../records.ts";
  */
 export function sceneDuplicate(tx: Tx, op: OpOf<"scene.duplicate">): void {
   const original = tx.scene(op.sceneId);
+  // A scene with floors is copied whole, by its main floor (docs/design/design-v1-floors.md 9, D-261102-494).
+  if (original.floor !== undefined && original.floor.of !== original.id) throw invalid("a scene with floors is copied by its main floor");
   if (ownEntry(tx.state.scenes, op.newSceneId)) throw invalid("scene already exists");
   const s = tx.state;
   const to = op.newSceneId;
@@ -42,12 +45,41 @@ export function sceneDuplicate(tx: Tx, op: OpOf<"scene.duplicate">): void {
     if (collection[id] !== undefined) throw invalid("a copied id is taken");
     return id;
   };
+  // Each floor's copy: the main floor's is the op's new id, every other floor's derived from it, as every copied record's is.
+  // A scene without floors is copied as the record the op found, as an op stored before own-key reads found it (records.ts).
+  const floors =
+    original.floor === undefined
+      ? [{ from: original, id: original.id, to }]
+      : floorsOf(s, original.id).map((from) => ({ from, id: from.id, to: from.id === original.id ? to : fresh(s.scenes, copyId(from.id)) }));
 
   for (const scene of sortedById(Object.values(s.scenes))) {
     if (scene.order > original.order) tx.write(keys.scene(scene.id), { ...scene, order: scene.order + 1 });
   }
-  const copy: Scene = { ...original, id: to, rev: 0, name: op.name, order: original.order + 1, wallsVersion: 0, fogEnabled: copyFogEnabled(original, op.include.fog) };
-  tx.write(keys.scene(to), copy);
+  for (const floor of floors) {
+    const copy: Scene = { ...floor.from, id: floor.to, rev: 0, name: op.name, order: original.order + 1, wallsVersion: 0, fogEnabled: copyFogEnabled(floor.from, op.include.fog) };
+    if (floor.from.floor !== undefined) copy.floor = { ...floor.from.floor, of: to };
+    tx.write(keys.scene(floor.to), copy);
+  }
+
+  const copied = new Map<string, string>();
+  for (const floor of floors) {
+    for (const token of sortedById(Object.values(s.tokens).filter((t) => t.sceneId === floor.id))) {
+      if (!(token.kind === "pc" ? op.include.characters : op.include.creatures)) continue;
+      copied.set(token.id, fresh(s.tokens, copyId(token.id)));
+    }
+  }
+  for (const floor of floors) copyFloor(tx, op, floor.id, floor.to, copied);
+}
+
+/** One floor's contents onto its copy: the build and the records on it, the tokens `copied` names, and the fog and drawings the op asks for. */
+function copyFloor(tx: Tx, op: OpOf<"scene.duplicate">, from: string, to: string, copied: ReadonlyMap<string, string>): void {
+  const s = tx.state;
+  const copyId = (id: string) => derivedId(op.newSceneId, id);
+  const fresh = (collection: Record<string, unknown>, id: string) => {
+    if (collection[id] !== undefined) throw invalid("a copied id is taken");
+    return id;
+  };
+  const original = { id: from };
 
   for (const chunk of Object.values(s.buildChunks).filter((c) => c.sceneId === original.id)) {
     tx.write(keys.chunk(to, chunk.cx, chunk.cy), { ...chunk, sceneId: to });
@@ -69,14 +101,9 @@ export function sceneDuplicate(tx: Tx, op: OpOf<"scene.duplicate">): void {
     tx.write(keys.pin(id), { ...pin, id, sceneId: to } satisfies Pin);
   }
 
-  const copied = new Map<string, string>();
-  for (const token of sortedById(Object.values(s.tokens).filter((t) => t.sceneId === original.id))) {
-    if (!(token.kind === "pc" ? op.include.characters : op.include.creatures)) continue;
-    copied.set(token.id, fresh(s.tokens, copyId(token.id)));
-  }
   for (const token of sortedById(Object.values(s.tokens))) {
     const id = copied.get(token.id);
-    if (id === undefined) continue;
+    if (id === undefined || token.sceneId !== original.id) continue;
     const { path: _path, attached, ...kept } = token;
     const next: Token = { ...kept, id, sceneId: to, fogExemptAuto: false };
     // A link joins the copies of the two tokens, and goes when the holder was not copied (docs/design/design-v1-attach.md 5.2).
@@ -133,7 +160,7 @@ export function sceneDuplicate(tx: Tx, op: OpOf<"scene.duplicate">): void {
       tx.writeBookkeeping(keys.exploredBy(to, tile.memberId, tile.tx, tile.ty), { ...tile, sceneId: to });
     }
     // And so does what each layer remembers (docs/design/design-v1-map-discovery.md 5.4), the same way, with the played mark
-    // that reserves room for it (5.5).
+    // that reserves room for it (5.5). No opened mark comes with a floor (docs/design/design-v1-floors.md 9).
     copyMemory(tx, original.id, to, copyId);
     if (ownEntry(s.playedScenes, original.id)) tx.writeBookkeeping(keys.played(to), { sceneId: to, rev: 0 });
   }
