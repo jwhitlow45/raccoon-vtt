@@ -9722,14 +9722,18 @@ async function qolRestScreens(sweep: Sweep, page: Page, at: { size: Size; scale:
     await region.waitFor({ state: "detached" });
   }
 
-  // Members' Your color: its name and the swatches, which stand flush with the picker's edge (PE1, Swatches flush). The help and Done under them are not this root's.
+  // Members' Your color: its name and the swatches, which stand flush with the picker's edge (PE1, Swatches flush), and the whole picker down to its help and Done (QE2-OLD).
   const members = await menuHome(page);
   await members.getByRole("button", { name: /^Members/ }).click();
-  await members.getByRole("button", { name: "Change your color", exact: true }).click();
+  const change = members.getByRole("button", { name: "Change your color", exact: true });
+  await change.click();
   const swatches = members.getByRole("radiogroup", { name: "Your color" });
   if (await showsWithin(swatches, 3_000)) {
     await swatches.scrollIntoViewIfNeeded();
     await sweep.measure(page, "qe-your-color", swatches.locator("xpath=ancestor::div[span[normalize-space()='Your color']][1]"));
+    const picker = members.locator(`[id="${await change.getAttribute("aria-controls")}"]`);
+    await picker.getByRole("button", { name: "Done", exact: true }).scrollIntoViewIfNeeded();
+    await sweep.measure(page, "qe-color-picker", picker);
     await members.getByRole("button", { name: "Done", exact: true }).click();
   } else await sweep.missing(page, "qe-your-color", "Change your color opened no swatches");
   await menuHome(page);

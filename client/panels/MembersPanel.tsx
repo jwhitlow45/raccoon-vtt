@@ -198,8 +198,9 @@ function ColorPicker(props: { id: string; member: Member; others: readonly Membe
         />
       </div>
       <ColorPreview color={color} scheme={scheme} />
-      <div style={{ display: "flex", alignItems: "flex-end", gap: theme.space(3) }}>
-        <Help style={{ flex: 1, minWidth: 0 }}>Your pings, laser, rulers and buttons change now. Drawings, pins and areas you already made keep their color.</Help>
+      {/* Done under the help, at the end: beside it the help wrapped to six lines on a phone at 130%, with Done 78 px off its middle (QE2-OLD). */}
+      <Help>Your pings, laser, rulers and buttons change now. Drawings, pins and areas you already made keep their color.</Help>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <Button size="sm" onClick={props.onDone}>
           Done
         </Button>
