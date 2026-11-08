@@ -2,6 +2,7 @@ import type { BuildChunk, EdgeFeature, TerrainId } from "#shared/model.ts";
 import { MAX_BUILD_CELLS, MAX_BUILD_EDGES, type ClientOp, type OpOf } from "#shared/protocol.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 import type { LevelBand } from "#shared/srd/traps.ts";
+import { newBlockId } from "../journal/draft.ts";
 import type { SceneInput } from "../scenes/create.ts";
 import { newTrapInput } from "../traps/rules.ts";
 import { batchByBytes, OP_BYTES } from "../uvtt/batch.ts";
@@ -9,11 +10,11 @@ import type { DungeonPlan } from "./plan.ts";
 
 /*
  * A plan as the ops Make sends (docs/design/design-v1-dungeon-generator.md
- * 5.5): ordinary bounded builder ops, which the server checks as it checks
- * any DM's, so the stored ops hold the whole dungeon and replay never runs
- * the generator. The worker writes them with placeholder ids, and Make
- * gives every id a fresh one (`withIds`), so no id comes from the seed's
- * stream and a second Make never resends one.
+ * 5.5, phase 2 section 6): ordinary bounded DM ops, which the server checks
+ * as it checks any DM's, so the stored ops hold the whole dungeon and
+ * replay never runs the generator. The worker writes them with placeholder
+ * ids, and Make gives every id a fresh one (`withIds`), so no id comes from
+ * the seed's stream and a second Make never resends one.
  */
 
 /** Ops one Make sends at most (phase 2, section 6): past the server's burst of 60, paced by the store's busy retry. */
@@ -21,10 +22,34 @@ export const MAX_OPS = 100;
 
 /** The scene's id while the dungeon is only a preview. */
 export const SCENE_PLACEHOLDER = "dungeon-scene";
+/** The key's page while the dungeon is only a preview. */
+export const PAGE_PLACEHOLDER = "dungeon-key";
 
 /** A trap's id while the dungeon is only a preview, by its place in the plan. */
 export function trapPlaceholder(i: number): string {
   return `dungeon-trap-${i}`;
+}
+
+export function stampPlaceholder(i: number): string {
+  return `dungeon-stamp-${i}`;
+}
+
+export function lightPlaceholder(i: number): string {
+  return `dungeon-light-${i}`;
+}
+
+/** A Rolling Stone's token, by its place in the plan's `stones`. */
+export function stonePlaceholder(i: number): string {
+  return `dungeon-stone-${i}`;
+}
+
+export function pinPlaceholder(i: number): string {
+  return `dungeon-pin-${i}`;
+}
+
+/** A key block's id while the dungeon is only a preview: 12 characters, as a journal block id must be. */
+export function blockPlaceholder(i: number): string {
+  return `dungeonblk${String(i).padStart(2, "0")}`;
 }
 
 /**
@@ -45,9 +70,9 @@ function cellOps(cells: readonly string[], wrap: (cells: string[]) => ClientOp):
 }
 
 /**
- * Every op but the traps, in the order they apply: the scene, a paint per
- * terrain, the doors, a height per value and a stair mark per facing. The
- * scene never carries a starting view, which would tell players where the
+ * The ground ops, in the order they apply: the scene, a paint per terrain,
+ * the doors, a height per value and a stair mark per facing. The scene
+ * never carries a starting view, which would tell players where the
  * entrance is through the fog (D-261102-387), and no op draws a wall, since
  * every wall is automatic (D-261102-022).
  */
@@ -95,21 +120,35 @@ export function dressOps(plan: DungeonPlan, sceneId: string): ClientOp[] {
 }
 
 /**
- * The ops with every id fresh: the scene's and each trap's. Every op must
- * name the one scene the first op makes, since an op naming any other
- * would land on a scene the DM never meant. `ids` maps each placeholder to
- * its fresh id, so the outcome's check follows a reference through it
- * (phase 2, section 6).
+ * The ops with every id fresh: the scene's, each stamp's, light's,
+ * token's and trap's, the key page's and each of its blocks', and each
+ * pin's. A trap's show action and a pin's page follow their targets. Every
+ * op must name the one scene the first op makes, since an op naming any
+ * other would land on a scene the DM never meant, and a reference must name
+ * an id made before it here, as the server would refuse one it cannot
+ * find. `ids` maps each placeholder to its fresh id, so the outcome's check
+ * follows a reference through it (phase 2, section 6). A block's id is 12
+ * characters, unique in its page, as the journal's own are.
  */
-export function withIds(ops: ClientOp[], newId: () => string): { ops: ClientOp[]; sceneId: string; ids: ReadonlyMap<string, string> } {
+export function withIds(
+  ops: ClientOp[],
+  newId: () => string,
+  newBlock: () => string = () => newBlockId(),
+): { ops: ClientOp[]; sceneId: string; ids: ReadonlyMap<string, string> } {
   const create = ops[0];
   if (create?.t !== "scene.create") throw new Error("a dungeon's ops start with its scene");
   const was = create.scene.id;
   const sceneId = newId();
   const ids = new Map<string, string>([[was, sceneId]]);
   const fresh = (placeholder: string): string => {
+    if (ids.has(placeholder)) throw new Error(`a dungeon makes ${placeholder} twice`);
     const id = newId();
     ids.set(placeholder, id);
+    return id;
+  };
+  const made = (placeholder: string): string => {
+    const id = ids.get(placeholder);
+    if (id === undefined || placeholder === was) throw new Error(`a dungeon op names ${placeholder}, which it has not made`);
     return id;
   };
   const onScene = (id: string): string => {
@@ -126,8 +165,37 @@ export function withIds(ops: ClientOp[], newId: () => string): { ops: ClientOp[]
       case "build.height":
       case "build.stairs":
         return { ...op, sceneId: onScene(op.sceneId) };
-      case "trap.create":
-        return { ...op, trap: { ...op.trap, id: fresh(op.trap.id), sceneId: onScene(op.trap.sceneId) } };
+      case "build.stamps":
+        if (op.remove !== undefined) throw new Error("a dungeon removes no stamp");
+        return { ...op, sceneId: onScene(op.sceneId), put: (op.put ?? []).map((s) => ({ ...s, id: fresh(s.id) })) };
+      case "build.lights":
+        if (op.remove !== undefined) throw new Error("a dungeon removes no light");
+        return { ...op, sceneId: onScene(op.sceneId), put: (op.put ?? []).map((l) => ({ ...l, id: fresh(l.id) })) };
+      case "token.create":
+        return { ...op, token: { ...op.token, id: fresh(op.token.id), sceneId: onScene(op.token.sceneId) } };
+      case "trap.create": {
+        const actions = op.trap.rig.actions.map((a) => {
+          if ("show" in a && "tokenId" in a.show) return { show: { tokenId: made(a.show.tokenId) } };
+          throw new Error("a dungeon's trap only shows a token it made");
+        });
+        return { ...op, trap: { ...op.trap, id: fresh(op.trap.id), sceneId: onScene(op.trap.sceneId), rig: { ...op.trap.rig, actions } } };
+      }
+      case "journal.create": {
+        const taken = new Set<string>();
+        const blocks = op.page.blocks.map((b) => {
+          let id = newBlock();
+          while (taken.has(id)) id = newBlock();
+          taken.add(id);
+          if (ids.has(b.id)) throw new Error(`a dungeon makes ${b.id} twice`);
+          ids.set(b.id, id);
+          return { ...b, id };
+        });
+        return { ...op, page: { ...op.page, id: fresh(op.page.id), blocks } };
+      }
+      case "pin.put": {
+        const { pageId, ...pin } = op.pin;
+        return { ...op, pin: { ...pin, id: fresh(pin.id), sceneId: onScene(pin.sceneId), ...(pageId !== undefined ? { pageId: made(pageId) } : {}) } };
+      }
       default:
         throw new Error(`a dungeon sends no ${op.t}`);
     }

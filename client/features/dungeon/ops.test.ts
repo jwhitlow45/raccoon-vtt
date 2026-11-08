@@ -3,8 +3,8 @@ import { test } from "node:test";
 import { serializedBytes } from "#shared/limits.ts";
 import { clientOpSchema, MAX_BUILD_CELLS, type ClientOp } from "#shared/protocol.ts";
 import { trapPreset } from "#shared/srd/traps.ts";
-import { dialogScene, twoRooms, widestDoors } from "./handPlans.ts";
-import { buildOps, SCENE_PLACEHOLDER, trapOps, trapPlaceholder, withIds } from "./ops.ts";
+import { dialogScene, hundredOps, hundredPlan, twoRooms, widestDoors } from "./handPlans.ts";
+import { buildOps, MAX_OPS, PAGE_PLACEHOLDER, SCENE_PLACEHOLDER, trapOps, trapPlaceholder, withIds } from "./ops.ts";
 import { landAll, scratchRoom, summarize } from "./scratch.ts";
 import { OP_BYTES } from "../uvtt/batch.ts";
 
@@ -125,4 +125,84 @@ test("DG-B: nothing of the seed is in the ops", () => {
   const seed = "1K7QH2MXA9F3TWQ5";
   const text = JSON.stringify(opsOf());
   for (const part of [seed, seed.slice(1), "1K7Q", "H2MX", "A9F3", "TWQ5"]) assert.ok(!text.includes(part), part);
+});
+
+/** The 100-op hand plan's ops, as the worker writes them. */
+function hundred(): ClientOp[] {
+  const plan = hundredPlan();
+  return hundredOps({ ...dialogScene(plan), id: SCENE_PLACEHOLDER });
+}
+
+test("DG2B: the 100-op hand plan lands exactly MAX_OPS ops through the scratch room, each a valid op within its bytes", () => {
+  const ops = hundred();
+  assert.equal(ops.length, MAX_OPS);
+  const landed = landAll(scratchRoom(), ops);
+  assert.ok(landed.ok, landed.ok ? "" : landed.why);
+  for (const op of ops) assert.ok(clientOpSchema.safeParse(op).success, `${op.t} parses`);
+  for (const op of ops) assert.ok(serializedBytes(op) <= OP_BYTES, `${op.t} within an op's bytes`);
+});
+
+test("DG2B: Make's ids are fresh for every stamp, light, stone, trap, the key page, its blocks and every pin, and references follow them", () => {
+  const ops = hundred();
+  let n = 0;
+  let b = 0;
+  const made = withIds(ops, () => `fresh-${++n}`, () => `block${String(++b).padStart(7, "0")}`);
+  const text = JSON.stringify(made.ops);
+  for (const placeholder of made.ids.keys()) assert.ok(!text.includes(JSON.stringify(placeholder)), `${placeholder} replaced`);
+  const fresh = [...made.ids.values()];
+  assert.equal(new Set(fresh).size, fresh.length, "every id once");
+  const of = <T extends ClientOp["t"]>(t: T) => made.ops.filter((op): op is Extract<ClientOp, { t: T }> => op.t === t);
+  const stamps = of("build.stamps").flatMap((op) => op.put ?? []);
+  const lights = of("build.lights").flatMap((op) => op.put ?? []);
+  const tokens = of("token.create").map((op) => op.token);
+  const page = of("journal.create")[0]!.page;
+  const pins = of("pin.put").map((op) => op.pin);
+  assert.deepEqual([stamps.length, lights.length, tokens.length, pins.length, page.blocks.length], [160, 40, 2, 40, 41]);
+  for (const id of [...stamps, ...lights, ...tokens, page, ...pins].map((x) => x.id)) assert.match(id, /^fresh-\d+$/);
+  for (const block of page.blocks) assert.match(block.id, /^[A-Za-z0-9_-]{12}$/, "a block id is 12 characters");
+  assert.equal(made.ids.get(PAGE_PLACEHOLDER), page.id);
+  for (const pin of pins) {
+    assert.equal(pin.pageId, page.id, "each pin links the page this send made");
+    assert.equal(pin.sceneId, made.sceneId);
+  }
+  const shows = of("trap.create").flatMap((op) => op.trap.rig.actions.flatMap((a) => ("show" in a && "tokenId" in a.show ? [a.show.tokenId] : [])));
+  for (const id of shows) assert.ok(tokens.some((t) => t.id === id), "a show action names a stone this send made");
+  const again = withIds(ops, () => `again-${++n}`);
+  assert.equal([...again.ids.values()].filter((id) => made.ids.has(id) || fresh.includes(id)).length, 0, "a second Make repeats no id");
+  assert.ok(landAll(scratchRoom(), made.ops).ok, "the fresh ops land as the preview's did");
+});
+
+test("DG2B: a block id drawn twice in one page is drawn again", () => {
+  const ops = hundred();
+  const draws = ["AAAAAAAAAAAA", "AAAAAAAAAAAA", "BBBBBBBBBBBB"];
+  let k = 0;
+  const made = withIds(ops, () => `id-${k++}`, () => draws.shift() ?? `C${String(k++).padStart(11, "0")}`);
+  const blocks = made.ops.flatMap((op) => (op.t === "journal.create" ? op.page.blocks.map((x) => x.id) : []));
+  assert.deepEqual(blocks.slice(0, 2), ["AAAAAAAAAAAA", "BBBBBBBBBBBB"]);
+  assert.equal(new Set(blocks).size, blocks.length);
+});
+
+test("DG2B: withIds refuses a reference to anything this send did not make before it, an id made twice, and a removal", () => {
+  const ops = hundred();
+  const id = (() => {
+    let n = 0;
+    return () => `x${++n}`;
+  })();
+  const at = (t: ClientOp["t"]) => ops.findIndex((op) => op.t === t);
+  const pinFirst = [...ops];
+  const [pin] = pinFirst.splice(at("pin.put"), 1);
+  pinFirst.splice(1, 0, pin!);
+  assert.throws(() => withIds(pinFirst, id), /names dungeon-key, which it has not made/);
+  const stray = ops.map((op) => (op.t === "pin.put" ? { ...op, pin: { ...op.pin, pageId: "someone-elses-page" } } : op));
+  assert.throws(() => withIds(stray, id), /names someone-elses-page/);
+  const showFirst = ops.filter((op) => op.t !== "token.create");
+  assert.throws(() => withIds(showFirst, id), /names dungeon-stone-0/);
+  const showsScene = ops.map((op) => (op.t === "trap.create" && op.trap.rig.actions.length > 0 ? { ...op, trap: { ...op.trap, rig: { ...op.trap.rig, actions: [{ show: { tokenId: SCENE_PLACEHOLDER } }] } } } : op));
+  assert.throws(() => withIds(showsScene, id), /which it has not made/);
+  const twice = [...ops, ops.find((op) => op.t === "token.create")!];
+  assert.throws(() => withIds(twice, id), /makes dungeon-stone-0 twice/);
+  const removes = ops.map((op) => (op.t === "build.stamps" ? { ...op, remove: ["old"] } : op));
+  assert.throws(() => withIds(removes, id), /removes no stamp/);
+  const pinElsewhere = ops.map((op) => (op.t === "pin.put" ? { ...op, pin: { ...op.pin, sceneId: "elsewhere" } } : op));
+  assert.throws(() => withIds(pinElsewhere, id), /another scene/);
 });

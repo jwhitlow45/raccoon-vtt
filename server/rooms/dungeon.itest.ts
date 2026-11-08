@@ -144,10 +144,10 @@ describe("a generated dungeon on the server", () => {
   });
   after(() => t.close());
 
-  test("DG-B: the fixture's version is the generator's, and both dungeons fit the server's burst of 60", () => {
+  test("DG-B: the fixture's version is the generator's, and every dungeon fits Make's 100 ops", () => {
     assert.equal(typeof FIXTURE.generatorVersion, "number");
     for (const d of FIXTURE.dungeons) {
-      assert.ok(d.ops.length <= 60, `${d.name}: ${d.ops.length} ops`);
+      assert.ok(d.ops.length <= 100, `${d.name}: ${d.ops.length} ops`);
       assert.equal(d.ops[0]?.t, "scene.create");
       assert.ok(!JSON.stringify(d.ops).includes("defaultView"), "no starting view");
     }
