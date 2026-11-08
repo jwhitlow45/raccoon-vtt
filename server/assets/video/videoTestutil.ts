@@ -1029,6 +1029,50 @@ export function mp4WithSecretsFrom(bytes: Buffer): Buffer {
  * every mdat) 64 times. 20 leaves room for noise either way.
  */
 export const GROWTH_SCALE = 8;
+
+/**
+ * The reference task's CPU time on a quiet computer of the kind the heavy
+ * tests were set on. A slower or shared machine stretches the reference and
+ * the check alike, so the backstop grows with it and never shrinks below
+ * production's own budget.
+ */
+const REFERENCE_QUIET_MS = 40;
+
+/**
+ * A fixed piece of work shaped like the check's (a long sort, a pass over
+ * bytes, a Map), timed in CPU. It runs neither the parser nor any edit, so a
+ * slowdown in either cannot stretch it and hide itself. The least of five,
+ * since a busy machine only ever adds.
+ */
+export function referenceTaskMs(): number {
+  let least = Infinity;
+  for (let k = 0; k < 5; k++) {
+    const since = process.cpuUsage();
+    const ranges: Array<{ start: number; end: number }> = [];
+    for (let i = 0; i < 200_000; i++) ranges.push({ start: (i * 7919) % 1_000_003, end: i });
+    ranges.sort((a, b) => a.start - b.start);
+    const bytes = Buffer.alloc(4 * 1024 * 1024, 0x55);
+    let sum = 0;
+    for (let i = 0; i + 4 <= bytes.length; i += 4) sum += bytes.readUInt32BE(i) & 0xff;
+    const byStart = new Map<number, number>();
+    for (const r of ranges) byStart.set(r.start, r.end);
+    if (byStart.size === 0 || sum === 0) throw new Error("the reference task lost its work");
+    const used = process.cpuUsage(since);
+    least = Math.min(least, (used.user + used.system) / 1000);
+  }
+  return least;
+}
+
+/**
+ * The CPU time a check may take, in ms: production's 5 s budget, scaled by how
+ * much slower this machine runs the reference task than the quiet one. A scaled
+ * CPU limit does not guarantee production's 5 s wall-clock deadline (the worker
+ * is ended at that deadline whatever the CPU did), it only fails a slowdown of
+ * the work itself that the machine does not explain.
+ */
+export function cpuBackstopMs(productionMs: number): number {
+  return Math.round(productionMs * Math.max(1, referenceTaskMs() / REFERENCE_QUIET_MS));
+}
 export const NEAR_LINEAR_GROWTH = 20;
 
 /**
@@ -1045,6 +1089,8 @@ export async function assertNearLinear(what: string, cpuMsAt: (scale: number) =>
   const whole = await cpuMsAt(1);
   const growth = whole / Math.max(eighth, 0.1);
   const read = `${what} took ${whole.toFixed(1)} ms of CPU at the caps and ${eighth.toFixed(1)} ms at an eighth`;
+  // Logged on success too, so a creeping ratio shows in the run's output before it fails (CIFIX-F5).
+  console.log(`growth: ${read}, ${growth.toFixed(1)} times (limit ${NEAR_LINEAR_GROWTH}), backstop ${backstopMs} ms`);
   assert.ok(growth < NEAR_LINEAR_GROWTH, `${read}, ${growth.toFixed(1)} times: not near linear`);
   assert.ok(whole < backstopMs, `${read}, over the ${backstopMs} ms backstop`);
 }

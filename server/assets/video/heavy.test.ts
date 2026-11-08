@@ -6,7 +6,7 @@ import { after, describe, test } from "node:test";
 import { VIDEO_LIMITS } from "#shared/limits.ts";
 import { checkVideo, checkVideoBytes } from "./check.ts";
 import { Budget } from "./window.ts";
-import { allEbml, assertNearLinear, bx, defaultVideoTrack, encodeWebm, GROWTH_SCALE, mp4File, segmentOf, webmTree, type Ebml } from "./videoTestutil.ts";
+import { allEbml, assertNearLinear, bx, cpuBackstopMs, defaultVideoTrack, encodeWebm, GROWTH_SCALE, mp4File, segmentOf, webmTree, type Ebml } from "./videoTestutil.ts";
 import { EBML_ID as I } from "./webm.ts";
 
 /**
@@ -18,8 +18,8 @@ import { EBML_ID as I } from "./webm.ts";
  * meanwhile.
  */
 
-/** Twice the budget, in CPU time: only a backstop, since a CI runner took 2.9 s for a file a quick computer checks in 1. */
-const BACKSTOP_MS = VIDEO_LIMITS.parseBudgetMs * 2;
+/** Production's budget, scaled by this machine's reference task (videoTestutil.ts): a backstop only, since the growth is the check. */
+const BACKSTOP_MS = cpuBackstopMs(VIDEO_LIMITS.parseBudgetMs);
 
 /**
  * Each check runs with a wall-clock budget no busy machine reaches, and is

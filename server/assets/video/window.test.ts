@@ -4,10 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import fc from "fast-check";
+import { VIDEO_LIMITS } from "#shared/limits.ts";
 import { runSettings } from "#shared/propertyTestutil.ts";
 import { AssetError } from "../errors.ts";
 import { checkVideoBytes } from "./check.ts";
-import { assertNearLinear, bx, GROWTH_SCALE, mp4File } from "./videoTestutil.ts";
+import { assertNearLinear, bx, cpuBackstopMs, GROWTH_SCALE, mp4File } from "./videoTestutil.ts";
 import { Budget, BufferSource, EditIntoMediaError, Edits, FileWindow, Tally, WINDOW_BYTES } from "./window.ts";
 
 /** The header check's reads and edits (docs/design/design-v1-animated-maps.md 10). */
@@ -201,11 +202,11 @@ test("180,002 edits between 96,000 media ranges check and land in near-linear ti
   try {
     const path = (scale: number) => join(dir, `v${scale}`);
     const original = (scale: number) => Buffer.alloc(at(scale).length, 0x55);
-    // Only a backstop, at twice what a CI runner took (3.6 s): the growth is the check.
+    // Only a backstop, production's budget scaled by this machine's reference task: the growth is the check.
     await assertNearLinear("the writes", async (scale) => {
       await writeFile(path(scale), original(scale));
       return cpuMs(() => at(scale).edits.applyToFile(path(scale), roomy()));
-    }, 7_500);
+    }, cpuBackstopMs(VIDEO_LIMITS.parseBudgetMs));
     assert.ok((await readFile(path(1))).equals(at(1).edits.applyTo(original(1))));
   } finally {
     await rm(dir, { recursive: true, force: true });
