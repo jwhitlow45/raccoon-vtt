@@ -748,7 +748,7 @@ describe("the Sound panel", { concurrency: false }, () => {
       const panel = await soundPanel();
       const stopAll = panel.getByRole("button", { name: "Stop all sound", exact: true });
       assert.equal(await stopAll.count(), 0, "nothing sounds yet");
-      await panel.getByRole("button", { name: "Play Gong for everyone", exact: true }).click();
+      await panel.getByRole("button", { name: "Play Gong", exact: true }).click();
       await until("Gong in the DM's own list", () => playing()?.dmEffects?.some((e) => e.soundId === run.sounds.Gong));
       assert.ok(playing()?.music === null && Object.keys(playing()?.loops ?? {}).length === 0 && playing()?.effects.length === 0, "nothing else");
       await stopAll.waitFor();
@@ -857,7 +857,7 @@ describe("the Sound panel", { concurrency: false }, () => {
       await table.scrollIntoViewIfNeeded();
       await shots.take(page, "dmb-sp-9-dm-switch-off-dmonly");
       // A built-in fired now stays on the DM's devices.
-      await panel.getByRole("button", { name: "Play Click for everyone", exact: true }).click();
+      await panel.getByRole("button", { name: "Play Click", exact: true }).click();
       await waitFor("the click in the DM's own list", () => (watch.state?.playing?.dmEffects?.some((e) => e.builtin === "click") ? true : null));
       assert.deepEqual(watch.state?.playing?.effects ?? [], [], "none in the players' list");
       await dmOnly.click();
