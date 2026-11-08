@@ -9,6 +9,8 @@ import { framesFor, silentFrames } from "#shared/audio/mp3Testutil.ts";
 import type { SoundUse } from "#shared/sound.ts";
 import { ConsoleWatch, openSceneGroup, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { openGroup } from "./helpers/groups.ts";
+import { setupHistory } from "./helpers/undoScope.ts";
 import { addSound } from "./soundRoom.ts";
 
 /**
@@ -40,9 +42,16 @@ import { addSound } from "./soundRoom.ts";
  *   scene's line following each, with no row that only opens Scenes.
  * - sp-7: Players see what is playing: Pat's card by name and with the
  *   names kept, the background by name and by count, the one switch.
+ * - dmb-1: Only DM devices play (docs/design/design-v1-sound-dm-only.md 4
+ *   and 5): the switch last in Table sound, its reminder under the player
+ *   and in the chip's player, Pat's open panel and This device saying the
+ *   DM plays it, the search's row with its value, and Undo setup turning
+ *   it off.
  * - sp-8: the X-card's Stop the sound.
  * - sp-9: a second server with the switch off: the one line, Built in, no
- *   Add buttons and no view row, and a sound upload refused.
+ *   Add buttons and no view row, Table sound with Only DM devices play
+ *   alone, a built-in fired with it on kept to the DM's devices, and a
+ *   sound upload refused.
  * - sp-10: an effect deleted from its page on a second tap, its file with
  *   it.
  * - mfa-1: an effect fired behind a blackout, with nothing else playing:
@@ -611,6 +620,93 @@ describe("the Sound panel", { concurrency: false }, () => {
     assert.equal(await names.getAttribute("aria-checked"), "false");
   });
 
+  test("dmb-1. Only DM devices play: the switch last in Table sound, its reminder under the player and in the chip's player, Pat's open panel and This device saying the DM plays it, the search's row with its value, and Undo setup turning it off", async () => {
+    const REMINDER = "Only DM devices play the sound.";
+    const DM_PLAYS = "The DM plays the sound on their own device.";
+    const panel = await soundPanel();
+    const table = panel.locator("[data-sound-table]");
+    const names = table.getByRole("switch", { name: "Players see what is playing" });
+    const dmOnly = table.getByRole("switch", { name: "Only DM devices play" });
+    assert.equal(await dmOnly.getAttribute("aria-checked"), "false", "off in a room that never set it");
+    assert.ok((await dmOnly.boundingBox())!.y > (await names.boundingBox())!.y, "after the names switch");
+    await until("music plays for Pat", () => patSocket.state?.playing?.music);
+    const sheet = await patPanel();
+    await sheet.locator("[data-sound-player-card]").waitFor();
+    await dmOnly.click();
+    await until("the room keeps it", () => dmSocket.state?.meta.settings.soundDmOnly === true);
+    assert.equal(await dmOnly.getAttribute("aria-checked"), "true");
+    assert.equal(await names.isEnabled(), true, "Players see what is playing stays enabled (D-261107-245)");
+    const player = panel.locator("[data-sound-player]");
+    await player.getByText(REMINDER, { exact: true }).waitFor();
+    assert.ok(playing()?.music, "the DM's own devices keep everything");
+    assert.deepEqual(alignmentLines(await measureAlignment(player), "Now playing with Only DM devices play's reminder, 1440x900"), []);
+    await dmOnly.scrollIntoViewIfNeeded();
+    assert.deepEqual(alignmentLines(await measureAlignment(table), "Table sound with Only DM devices play on, 1440x900"), []);
+    await shots.take(dm, "dmb-1-dm-table-sound-on");
+    await player.scrollIntoViewIfNeeded();
+    await shots.take(dm, "dmb-1-dm-reminder");
+
+    // Pat's panel, left open, says the DM plays it in place of the card, and Pat's socket holds nothing about sound.
+    await sheet.getByText(DM_PLAYS, { exact: true }).waitFor();
+    await until("Pat's projection without the sound", () => patSocket.state?.meta.settings.soundDmOnly === true && patSocket.state.playing === undefined);
+    assert.deepEqual(patSocket.state?.sounds ?? {}, {});
+    assert.equal(await sheet.locator("[data-sound-player-card]").count(), 0);
+    assert.deepEqual(alignmentLines(await measureAlignment(sheet), "Pat's Sound with Only DM devices play on, 390x844"), []);
+    await shots.take(pat, "dmb-1-pat-panel");
+    // This device's Sounds says it once, above Room sound.
+    await pat.keyboard.press("Escape");
+    await sheet.waitFor({ state: "hidden" });
+    await pat.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+    await pat.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).click();
+    const menu = pat.locator('dialog[data-rvtt-sheet][aria-label="Menu"]');
+    await menu.getByRole("button", { name: /^This device/ }).click();
+    await openGroup(menu, "Sounds");
+    const sounds = menu.locator("[data-panel-group]").filter({ has: pat.getByRole("heading", { name: "Sounds", exact: true }) }).last();
+    const note = sounds.getByText(DM_PLAYS, { exact: true });
+    await note.waitFor();
+    assert.ok((await note.boundingBox())!.y < (await sounds.getByRole("switch", { name: "Room sound" }).boundingBox())!.y, "above Room sound");
+    await sounds.getByText(/the DM can turn on Only DM devices play in Sound\./).waitFor();
+    await sounds.scrollIntoViewIfNeeded();
+    assert.deepEqual(alignmentLines(await measureAlignment(sounds), "Pat's This device Sounds with Only DM devices play on, 390x844"), []);
+    await shots.take(pat, "dmb-1-pat-this-device");
+    await pat.keyboard.press("Escape");
+
+    // The chip's player says it under the player.
+    const chip = dm.locator('header[data-rvtt-topbar] [data-chip="nowPlaying"]');
+    await chip.waitFor();
+    await ((await chip.getAttribute("data-chip-form")) === "full" ? chip.locator("[data-now-open]") : chip).click();
+    const now = dm.getByRole("dialog", { name: "Now playing", exact: true });
+    await now.locator("[data-now-player]").getByText(REMINDER, { exact: true }).waitFor();
+    assert.deepEqual(alignmentLines(await measureAlignment(now), "the chip's player with Only DM devices play on, 1440x900"), []);
+    await shots.take(dm, "dmb-1-dm-chip-player");
+    await dm.keyboard.press("Escape");
+    await now.waitFor({ state: "detached" });
+
+    // The search finds it by the owner's words, with its value now, and lands on the switch.
+    await dm.locator('[data-search-open="bar"]').click();
+    const search = dm.locator("dialog[data-search-sheet]");
+    await search.waitFor();
+    await search.locator("[data-search-field]").fill("only play for me");
+    const result = search.locator('[data-search-row="setting:sound.table.dmonly"]');
+    await result.waitFor();
+    assert.match((await result.innerText()).replace(/\s+/g, " "), /Only DM devices play.*On/);
+    await shots.take(dm, "dmb-1-dm-search");
+    await result.click();
+    await waitFor("focus on the switch", async () => ((await dm.evaluate(() => (globalThis as unknown as { document: { activeElement: { getAttribute(n: string): string | null } | null } }).document.activeElement?.getAttribute("data-search"))) === "sound.table.dmonly" ? true : null), 8_000);
+
+    // Undo setup names the step and turns it off, and Pat's card comes back.
+    const { sheet: history } = await setupHistory(dm);
+    await history.locator("#history-setup-undo").getByText(/^turning on Only DM devices play$/i).waitFor();
+    await history.getByRole("button", { name: "Undo setup", exact: true }).click();
+    await history.locator("[data-history-result]").filter({ hasText: /^Undid setup: /i }).waitFor();
+    await dm.keyboard.press("Escape");
+    await history.waitFor({ state: "detached" });
+    await until("off again", () => dmSocket.state?.meta.settings.soundDmOnly === undefined);
+    await until("Pat's music back", () => patSocket.state?.playing?.music);
+    assert.equal(await (await soundPanel()).locator("[data-sound-table]").getByRole("switch", { name: "Only DM devices play" }).getAttribute("aria-checked"), "false");
+    await (await patPanel()).locator("[data-sound-player-card]").getByText("Music is playing", { exact: true }).waitFor();
+  });
+
   test("sp-8. the X-card's Stop the sound stops it all", async () => {
     const sent = await patContext.request.post(`${server.origin}/api/rooms/${run.roomId}/xcard`, { headers: { Origin: server.origin } });
     assert.ok(sent.ok(), `the X-card answered ${sent.status()}`);
@@ -734,6 +830,8 @@ describe("the Sound panel", { concurrency: false }, () => {
     const off = await startServer({ port: OFF_PORT, assetDir: offAssets, databaseUrl: DATABASE_URL });
     const context = await browser.newContext({ viewport: DESK });
     const page = await context.newPage();
+    const watch = new SocketWatch("off");
+    await watch.attach(context, page);
     let roomId = "";
     let socket: OpSocket | null = null;
     try {
@@ -747,6 +845,23 @@ describe("the Sound panel", { concurrency: false }, () => {
       assert.equal(await panel.getByRole("radiogroup", { name: "Sound", exact: true }).count(), 0, "nothing can play a file, so no Now playing and no Library");
       assert.equal(await panel.getByRole("searchbox", { name: "Search music" }).count(), 0);
       await shots.take(page, "sp-9-dm-switch-off");
+      // Table sound after Effects, with Only DM devices play alone, so a room that kept it can turn it off (docs/design/design-v1-sound-dm-only.md 4).
+      const sections = panel.locator("section > h3, section > [data-section-label] > h3");
+      assert.deepEqual(await sections.allTextContents(), ["Effects", "Table sound", "On this device"]);
+      const table = panel.getByRole("heading", { name: "Table sound", exact: true }).locator("xpath=ancestor::section[1]");
+      assert.equal(await table.getByRole("switch").count(), 1, "the one switch");
+      const dmOnly = table.getByRole("switch", { name: "Only DM devices play" });
+      await dmOnly.click();
+      await waitFor("the room keeps it", () => (watch.state?.meta.settings.soundDmOnly === true ? true : null));
+      assert.deepEqual(alignmentLines(await measureAlignment(panel), "the switch-off page with Only DM devices play on, 1440x900"), []);
+      await table.scrollIntoViewIfNeeded();
+      await shots.take(page, "dmb-sp-9-dm-switch-off-dmonly");
+      // A built-in fired now stays on the DM's devices.
+      await panel.getByRole("button", { name: "Play Click for everyone", exact: true }).click();
+      await waitFor("the click in the DM's own list", () => (watch.state?.playing?.dmEffects?.some((e) => e.builtin === "click") ? true : null));
+      assert.deepEqual(watch.state?.playing?.effects ?? [], [], "none in the players' list");
+      await dmOnly.click();
+      await waitFor("off again", () => (watch.state?.meta.settings.soundDmOnly === undefined ? true : null));
       const res = await context.request.put(`${off.origin}/api/rooms/${roomId}/assets?kind=sound`, { headers: { Origin: off.origin, "content-type": "audio/mpeg" }, data: Buffer.from(silentFrames(framesFor(1_000))) });
       assert.equal(res.ok(), false);
       assert.deepEqual(await res.json(), { error: "sound_off" });

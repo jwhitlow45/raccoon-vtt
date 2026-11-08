@@ -15,7 +15,8 @@ import { addSound, errors, inStep, IPHONE_AUDIO, musicVoice, readTap, roomSoundS
  * ask, a crossfade and a pause, what a player's socket carries, a blackout,
  * effects and Stop all, a touch phone's ask and its tap after a reload, and
  * one page per browser with the table display, and without Web Locks with
- * a hidden page. lp30fix-1 restarts the
+ * a hidden page. sn-10 turns on Only DM devices play
+ * (docs/design/design-v1-sound-dm-only.md 5) and off. lp30fix-1 restarts the
  * server while an iPhone's files still load. The sounds are silence
  * built frame by frame (soundRoom.ts), uploaded through the asset route.
  * sndglitch-1, sndfade-1 and sndfade-2 play a tone into a tap, each in the
@@ -809,6 +810,114 @@ describe("synced music and sound", { concurrency: false }, () => {
       }
     }
     assert.deepEqual(lines, [], "out of line");
+  });
+
+  test("sn-10. Only DM devices play: Pat's phone and the table display in the DM's browser fall quiet and get no frame about sound, Hal's open ask leaves unpassed and Ivy joining is not asked, the DM's page plays, and turned off everyone joins in place and is asked, as after a blackout", async () => {
+    type Post = { kind: string; eligible: boolean; owns: boolean; sentAt: number };
+    const askOf = (p: Page) => p.getByRole("status").filter({ hasText: "The DM is playing sound for the room." });
+    const evs = (watch: SocketWatch, from: number) => watch.received.slice(from).filter((f) => (JSON.parse(f) as { t: string }).t === "ev");
+    await playTrack(run.ids.tavern, 0, "all");
+    await soundSays(pat, /^playing music/, 5_000);
+    const tavern = run.assets[run.ids.tavern]!;
+    assert.equal((await patContext.request.get(`${server.origin}/api/assets/${tavern}/full`)).status(), 200, "Pat may load the track playing");
+    const phone = async () => {
+      const c = await browser.newContext({ viewport: PHONE });
+      await c.addInitScript(SOUND_TEST_FLAG);
+      return c;
+    };
+    const halContext = await phone();
+    const ivyContext = await phone();
+    const tvSocket = new SocketWatch("tv");
+    let tv: Page | null = null;
+    try {
+      // Hal has no choice yet and is asked.
+      await join(halContext, "Hal", "#84cc16");
+      const hal = await halContext.newPage();
+      await openRoom(hal);
+      await askOf(hal).waitFor();
+      // The table display in the DM's own browser owns its sound, as sn-7 showed.
+      const res = await dmContext.request.post(`${server.origin}/api/rooms/${run.roomId}/display/code`, { headers: { Origin: server.origin } });
+      assert.equal(res.status(), 201, await res.text());
+      const { code } = (await res.json()) as { code: string };
+      tv = await dmContext.newPage();
+      await tv.setViewportSize(TV);
+      await tv.addInitScript(heardScript(run.roomId));
+      await tvSocket.attach(dmContext, tv);
+      await tv.goto(`${server.origin}/display`);
+      await tv.getByLabel("Code from the DM's screen").fill(code);
+      await tv.getByRole("button", { name: "Connect" }).click();
+      const display = tv;
+      await waitFor("the display to own this browser's sound", async () => ((await soundProbe(display)).state?.owns && !(await soundProbe(dm)).state?.owns ? true : null), 10_000);
+
+      // On: one batch takes the sound from Pat and the display.
+      const on = Date.now();
+      await ops.send({ t: "room.update", settings: { soundDmOnly: true } });
+      for (const [who, watch] of [["Pat", patSocket], ["the display", tvSocket]] as const) {
+        await waitFor(`${who}'s projection without the sound`, () => (watch.state?.meta.settings.soundDmOnly === true && watch.state.playing === undefined ? true : null), 5_000);
+        assert.deepEqual(watch.state?.sounds ?? {}, {}, `${who} holds no sound`);
+      }
+      await askOf(hal).waitFor({ state: "detached", timeout: 3_000 });
+      await waitFor("Pat's music to fade out", async () => ((await soundProbe(pat)).data === "playing" ? true : null), 3_000);
+      console.log(`sn-10: Pat's music gone ${Date.now() - on} ms after the switch`);
+      // The display is no longer eligible, so the DM's page takes the sound and the display shows no card.
+      await waitFor("the DM's page to play", async () => ((await soundProbe(dm)).state?.owns && !(await soundProbe(display)).state?.owns ? true : null), 10_000);
+      await soundSays(dm, /^playing music/, 5_000);
+      const posts = (await display.evaluate(() => (globalThis as unknown as { __rvttHeard: Post[] }).__rvttHeard)).filter((p) => p.kind === "display");
+      assert.equal(posts.at(-1)?.eligible, false, "the display's last post says it is not eligible");
+      assert.equal(await display.locator("[data-display-sound-card]").count(), 0, "no card on the display");
+      assert.equal((await patContext.request.get(`${server.origin}/api/assets/${tavern}/full`)).status(), 404, "the track playing is no longer Pat's to load");
+      await shots.take(display, "sn-10-display-quiet");
+
+      // Ivy joins with music playing and is not asked.
+      await join(ivyContext, "Ivy", "#06b6d4");
+      const ivy = await ivyContext.newPage();
+      await openRoom(ivy);
+      await sleep(3_000);
+      assert.equal(await askOf(ivy).count(), 0, "no ask while only DM devices play");
+
+      // A play, a tick, a skip, a loop and an effect send Pat and the display no frame at all.
+      const from = { pat: patSocket.received.length, tv: tvSocket.received.length };
+      const started = Date.now();
+      await ops.send({ t: "music.play", run: runId(), playlistId: "pl-crypt", order: [run.ids.road, run.ids.crypt], index: 0, repeat: "all", fade: 0 });
+      // Forest road is 31 s, so the tick reveals the Crypt hymn to the DM 11 s in.
+      await waitFor("the tick's reveal", () => (dmSocket.state?.playing?.music?.next?.soundId === run.ids.crypt ? true : null), 15_000);
+      console.log(`sn-10: the reveal ${Date.now() - started} ms in`);
+      await ops.send({ t: "music.skip", run: dmSocket.state!.playing!.music!.run });
+      await ops.send({ t: "loop.start", id: "loop-dmonly", soundId: run.ids.rain, volume: 70 });
+      await ops.send({ t: "effect.fire", id: "fx-dmonly", soundId: run.ids.bell });
+      await waitFor("the DM's page to start the bell", async () => ((await soundProbe(dm)).effects.started.some((e) => e.id === "fx-dmonly") ? true : null), 5_000);
+      await sleep(1_500);
+      assert.deepEqual(evs(patSocket, from.pat), [], "no frame for Pat");
+      assert.deepEqual(evs(tvSocket, from.tv), [], "no frame for the display");
+      assert.ok(dmSocket.state?.playing?.dmEffects?.some((e) => e.id === "fx-dmonly"), "the effect stays the DM's");
+
+      // Off: Pat joins the music and the loop in place, the display takes this browser's sound back, and Hal and Ivy are asked.
+      await ops.send({ t: "room.update", settings: { soundDmOnly: false } });
+      await soundSays(pat, /^playing music loops:1/, 6_000);
+      await inStep(pat, START_MS, 6_000);
+      await waitFor("the display to own this browser's sound again", async () => ((await soundProbe(display)).state?.owns ? true : null), 10_000);
+      await inStep(display, START_MS, 6_000);
+      const { gap } = await placesTogether(display, pat);
+      assert.ok(gap <= START_MS, `Pat in place with the display (${gap.toFixed(0)} ms)`);
+      await askOf(hal).waitFor({ timeout: 5_000 });
+      await askOf(ivy).waitFor({ timeout: 5_000 });
+      assert.ok(!(await soundProbe(pat)).effects.started.some((e) => e.id === "fx-dmonly"), "the effect fired while it was on never sounds on Pat's phone");
+      assert.ok(!patSocket.state?.playing?.effects.some((e) => e.id === "fx-dmonly"), "nor reaches it");
+      await shots.take(hal, "sn-10-hal-asked-again");
+
+      // The same open ask behind a blackout: it leaves unpassed and comes back once the blackout ends.
+      await ops.send({ t: "view.blackout", blackout: true });
+      await askOf(hal).waitFor({ state: "detached", timeout: 3_000 });
+      await ops.send({ t: "view.blackout", blackout: false });
+      await askOf(hal).waitFor({ timeout: 5_000 });
+    } finally {
+      await ops.send({ t: "room.update", settings: { soundDmOnly: false } }).catch(() => {});
+      await ops.send({ t: "view.blackout", blackout: false }).catch(() => {});
+      await ops.send({ t: "loop.stop", id: "loop-dmonly" }).catch(() => {});
+      await tv?.close();
+      await halContext.close();
+      await ivyContext.close();
+    }
   });
 
   test("lp30fix-1. the server restarts while an iPhone's tap has its music and background sound still loading, and once back both play in step with no tap", async () => {

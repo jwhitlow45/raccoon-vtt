@@ -1618,6 +1618,17 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
     await sweep.measure(page, "sound-panel-playing", panel);
     await shots.take(page, `alignment-${sweep.at}-sound-panel-playing`);
 
+    // Only DM devices play (docs/design/design-v1-sound-dm-only.md 11): its reminder under the player, and Table sound with the switch on.
+    await ops.send({ t: "room.update", settings: { soundDmOnly: true } });
+    const player = panel.locator("[data-sound-player]");
+    await player.getByText("Only DM devices play the sound.", { exact: true }).waitFor();
+    await player.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "sound-dmonly-player", player);
+    const table = soundSection(panel, "Table sound");
+    await table.getByRole("switch", { name: "Only DM devices play" }).scrollIntoViewIfNeeded();
+    await sweep.measure(page, "sound-dmonly-table", table);
+    await shots.take(page, `alignment-${sweep.at}-sound-dmonly-table`);
+
     const effects = soundSection(panel, "Effects");
     await effects.getByRole("button", { name: "Edit", exact: true }).click();
     await effects.getByRole("button", { name: /^Thunder/ }).waitFor();
@@ -1676,7 +1687,20 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
     await roomSound.click();
     await waitFor("Room sound off", async () => ((await roomSound.getAttribute("aria-checked")) === "false" ? true : null));
     await sweep.measure(page, "sound-this-device-off", sounds);
-    await roomSound.click();
+    // With this device's Room sound off, the device line under Only DM devices play's reminder.
+    const quietPlayer = (await openPanelOf(page, "Sound")).locator("[data-sound-player]");
+    await quietPlayer.getByText("This device plays no sound. Turn on Room sound under On this device.", { exact: true }).waitFor();
+    await quietPlayer.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "sound-dmonly-device-line", quietPlayer);
+    await ops.send({ t: "room.update", settings: { soundDmOnly: false } });
+    await openMenu(page);
+    if (!(await visible(sounds))) {
+      if (await visible(menuBack)) await menuBack.click();
+      await menu.getByRole("button", { name: /^This device/ }).click();
+      await openGroup(menu, "Sounds");
+    }
+    await sounds.getByRole("switch", { name: "Room sound" }).click();
+    await waitFor("Room sound on", async () => ((await sounds.getByRole("switch", { name: "Room sound" }).getAttribute("aria-checked")) === "true" ? true : null));
     if (await visible(menuBack)) await menuBack.click();
 
     // Room settings' Backup with Include sounds, which shows once the room's storage names its sounds (settings/ExportSection.tsx).
@@ -1729,12 +1753,18 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
       await openAt(page, size, scale);
     }
   } finally {
+    await ops.send({ t: "room.update", settings: { soundDmOnly: false } });
     await ops.send({ t: "sound.stopAll" });
     await escapeAll(page);
   }
 }
 
-/** sn-d: a player's Sound with music and two background sounds, with names and without (docs/design/design-v1-sound-layout.md 7). */
+/**
+ * sn-d: a player's Sound with music and two background sounds, with names
+ * and without (docs/design/design-v1-sound-layout.md 7), then while Only DM
+ * devices play, the open panel's line and This device's Sounds with its
+ * note (docs/design/design-v1-sound-dm-only.md 11).
+ */
 async function patSoundScreens(sweep: Sweep, page: Page): Promise<void> {
   await soundPlaying();
   try {
@@ -1749,7 +1779,21 @@ async function patSoundScreens(sweep: Sweep, page: Page): Promise<void> {
     await ops.send({ t: "room.update", settings: { soundNames: true } });
     await panel.locator("[data-sound-player-music]").filter({ hasNotText: /^Music is playing$/ }).waitFor();
     await sweep.measure(page, "sound-player-named", panel);
+    await ops.send({ t: "room.update", settings: { soundDmOnly: true } });
+    await panel.getByText("The DM plays the sound on their own device.", { exact: true }).waitFor();
+    await sweep.measure(page, "sound-player-dmonly", panel);
+    const menu = await openMenu(page);
+    const back = page.getByRole("button", { name: /^Back to Menu/ });
+    if (await visible(back)) await back.click();
+    await menu.getByRole("button", { name: /^This device/ }).click();
+    await openGroup(menu, "Sounds");
+    const sounds = soundSection(menu, "Sounds");
+    await sounds.getByText("The DM plays the sound on their own device.", { exact: true }).waitFor();
+    await sounds.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "sound-this-device-dmonly", sounds);
+    if (await visible(back)) await back.click();
   } finally {
+    await ops.send({ t: "room.update", settings: { soundDmOnly: false } });
     await ops.send({ t: "room.update", settings: { soundNames: false } });
     await ops.send({ t: "sound.stopAll" });
     await escapeAll(page);
@@ -9440,6 +9484,17 @@ export function musicPlayerAlignmentTests(): void {
           if (player) await both(sweep, page, shown ? player.screen : "qe-now-menu-sheet", player.root);
           else await sweep.missing(page, "qe-now-popover", "the chip opened no player");
           await shutPlayer(page);
+          // Only DM devices play's reminder under the player (docs/design/design-v1-sound-dm-only.md 11).
+          await ops.send({ t: "room.update", settings: { soundDmOnly: true } });
+          await waitFor("the room keeps Only DM devices play", () => (dmSocket.state?.meta.settings.soundDmOnly === true ? true : null));
+          await openNowPlayer(page, chip);
+          const reminded = await nowPlayer(page);
+          if (reminded) {
+            await reminded.root.getByText("Only DM devices play the sound.", { exact: true }).waitFor();
+            await both(sweep, page, `${shown ? reminded.screen : "qe-now-menu-sheet"}-dmonly`, reminded.root);
+          } else await sweep.missing(page, "qe-now-popover-dmonly", "the chip opened no player with Only DM devices play on");
+          await shutPlayer(page);
+          await ops.send({ t: "room.update", settings: { soundDmOnly: false } });
 
           if (shown) {
             await ops.send({ t: "music.pause" });
@@ -9464,6 +9519,7 @@ export function musicPlayerAlignmentTests(): void {
           }
           await shutPlayer(page);
         } finally {
+          await ops.send({ t: "room.update", settings: { soundDmOnly: false } }).catch(() => {});
           await ops.send({ t: "sound.stopAll" }).catch(() => {});
           await putAway(page);
         }
