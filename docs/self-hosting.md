@@ -494,18 +494,18 @@ docker compose pull
 docker compose up -d
 ```
 
-`pull` brings the newest image of the release in `RACCOON_VERSION`. Left
-unset, that is the newest patch of the file's minor release. Set an exact
-release such as `RACCOON_VERSION=0.1.2` to change versions only when you
-edit that line.
+`pull` brings the newest image of the release in `RACCOON_VERSION`, which
+step 2 describes. Set an exact release such as `RACCOON_VERSION=0.1.2` to
+change versions only when you edit that line.
 
 A new minor or major release can come with a new `compose.yml`. Download
-the one at its tag, as in step 1, but keep your `.env`. Then run the three
+the one at its tag, as in step 1, but keep your `.env`, then run the three
 commands above. When the new file changes the proxy's rules or the backup
 script, `up -d` restarts `egress` and `backup` with them on its own. Read
-[Updating](#updating) for the release you move to: some updates change how
-rooms are saved, and older releases cannot read them. Going back to one is
-a restore.
+the [update notes](#update-notes) for the release you move to, since some
+updates change how rooms are saved and older releases cannot read them.
+[Going back to an older build](#going-back-to-an-older-build) says what
+returning to one takes.
 
 ### Back up and restore
 
@@ -562,209 +562,16 @@ container, so without it an update that allows a new host leaves the old
 list in force. Image search and imports fail for the second or two squid
 takes to start again.
 
-After the update that stands ruler stops on raised ground
-(docs/design/design-v1-heights-readout.md section 3), reload every page left open
-across it, table displays included. Until it reloads, an old page does not
-show live rulers that carry heights, and reads kept ones as if on flat
-ground, so its numbers differ from everyone else's.
-
-The update that adds PDF handouts (docs/design/design-v1-pdf-handouts.md) saves
-rooms in a format the builds before it cannot read: they answer "Something
-went wrong" for every room. To go back, check out the commit you ran before
-(`git log` lists it), rebuild with
-`docker compose -f docker-compose.server.yml up -d --build`, then follow
-Restore under Backups with the backup taken just before the update. Every
-room loses what changed after that backup. Reload every page left open
-across the update, table displays included. Until it reloads, an old page
-shows only the first page of a handout of several pages, and an old DM page
-cannot upload a PDF.
-
-The update that adds companion stat blocks
-(docs/design/design-v1-companion-stat-blocks.md) saves rooms at snapshot version 10
-and stores changes at op version 6, which the builds before it cannot read:
-they answer "Something went wrong" for every room. Going back is the same
-restore: check out the commit you ran before (`git log` lists it), rebuild
-with `docker compose -f docker-compose.server.yml up -d --build`, then follow
-Restore under Backups with the backup taken just before the update. Every
-room loses what changed after that backup. Reload every page left open
-across the update, table displays included. Until it reloads, an old page
-fails on the first change to a companion's stat block it receives, and DM
-pages and the pages of that companion's players receive them. A DM's room
-snapshot can now be up to 6 MiB, 3 MiB more than before for the stat blocks,
-so a DM's page may take a few seconds longer to load a room that holds many.
-
-The update that adds dice rolled on the server (docs/design/design-v1-dice.md), the
-first of wave 7, saves rooms at snapshot version 11 and stores changes at op
-version 7, which the builds before it cannot read: they answer "Something
-went wrong" for every room. It also adds the `roll_receipts` table, which
-the app creates on its own at start, and which older builds leave alone.
-The wave also adds `character-service.dndbeyond.com` to docker/squid.conf
-for the D&D Beyond import, which the recipe's `restart egress` puts in force.
-Going back is the same restore: check out the commit you ran before (`git
-log` lists it), rebuild with
-`docker compose -f docker-compose.server.yml up -d --build`, run
-`docker compose -f docker-compose.server.yml restart egress` so squid drops
-the host again, then follow Restore under Backups with the backup taken just
-before the update. Every room loses what changed after that backup. Reload
-every page left open across the update, table displays included. Until it
-reloads, an old page has no Dice panel and shows each roll as an empty line
-in the Log.
-
-The update that fixes the dragon turtle's SRD id (`dragon-tur-t-le` became
-`dragon-turtle`) saves rooms at snapshot version 14 and stores changes at op
-version 10, which the builds before it cannot read: they answer "Something
-went wrong" for every room. Rooms, backups and stored changes from before it
-take the new id as they load. Going back is the same restore: check out the
-commit you ran before (`git log` lists it), rebuild with
-`docker compose -f docker-compose.server.yml up -d --build`, then follow
-Restore under Backups with the backup taken just before the update. Every
-room loses what changed after that backup. Reload every page left open
-across the update, table displays included. Until it reloads, an old page
-finds no stat block for a dragon turtle. A dragon turtle an old DM page
-places, saves in an encounter or gives an image is stored under the new id,
-so it has its stat block once the page reloads.
-
-Hex grids, phase H1 (docs/design/design-v1-hex-grids.md), came in two updates.
-The first, just before the isometric view, saves rooms at snapshot version 25
-and stores changes at op version 24, which the builds before it cannot read:
-they answer "Something went wrong" for every room. Back up first. Going back
-is the same restore: check out the commit you ran before (`git log` lists
-it), rebuild with `docker compose -f docker-compose.server.yml up -d --build`,
-then follow Restore under Backups with the backup taken just before the
-update. Every room loses what changed after that backup. The second adds the
-settings that make a hex scene (Grid on new scenes, the new scene form's Grid
-row and a scene's Grid shape) and changes no version. Reload every page left
-open across either update, table displays included, since there is no client
-version check and no version step makes an open page reload. Until it
-reloads, an old page treats a hex scene as squares: it draws and snaps to the
-wrong grid and counts distances wrongly. Scenes made before the update stay
-squares.
-
-The update that adds the isometric view (docs/design/design-v1-isometric-view.md)
-saves rooms at snapshot version 26 and stores changes at op version 25,
-which the builds before it cannot read: they answer "Something went wrong"
-for every room. Going back is the same restore: check out the commit you ran
-before (`git log` lists it), rebuild with
-`docker compose -f docker-compose.server.yml up -d --build`, then follow
-Restore under Backups with the backup taken just before the update. Every
-room loses what changed after that backup. Reload every page left open
-across the update, table displays included, since no version step makes an
-open page reload. Until it reloads, an old page has no View button, and an
-old table display drops what a DM in Isometric shows it, so Follow the DM
-stands still there.
-
-The update that splits Undo into Play and Setup history
-(docs/design/design-v1-undo-scope.md, batch A) saves rooms at snapshot version 30
-and stores changes at op version 34, which the builds before it cannot read:
-they answer "Something went wrong" for every room, even a room whose stored
-changes hold none of the new ones. Back up first. Rooms, backups and stored
-changes from before it take the new versions as they load, through identity
-migration steps (33 to 34 for changes, 29 to 30 for rooms). There is no
-database table migration and no manual conversion of rooms. The restart that
-deploys it clears every DM's and player's in-memory undo history, since those
-histories are never stored, so nothing that was undoable before the update
-can be undone after it. Going back is the same restore: check out the commit
-you ran before (`git log` lists it), rebuild with
-`docker compose -f docker-compose.server.yml up -d --build`, then follow
-Restore under Backups with the backup taken just before the update. Only that
-backup works: a build before this update refuses a room saved after it, so
-the restore cannot be skipped. Every room loses what changed after that
-backup. Reload every page left open across the update, table displays
-included, since there is no client version check and no version step makes an
-open page reload. Until it reloads, an old page's Undo or Redo gets a
-terminal "Reload to use Undo" refusal and takes nothing back, and its other
-queued changes that this build still accepts may still arrive. An old page
-shows no Setup history.
-
-The update that lets an undone group save open again
-(docs/design/design-v1-undo-scope.md, batch B) saves rooms at snapshot version 31
-and stores changes at op version 35, which the builds before it, batch A's
-included, cannot read: they answer "Something went wrong" for every room,
-even a room that holds no group save yet. Back up first. Rooms, backups and
-stored changes from before it take the new versions as they load, through
-identity migration steps (34 to 35 for changes, 30 to 31 for rooms), and an
-older room gains no group save records it never had. There is no database
-table migration and no manual conversion of rooms. The restart that deploys
-it clears every in-memory undo history again. Going back is the same
-restore, and each of the two Undo updates is its own boundary: to return to
-batch A's build, restore the backup taken just before this update, and to
-go back past batch A as well, restore the one taken just before batch A.
-Every room loses what changed after the backup you restore. Reload every
-page left open across the update, table displays included, since no version
-step makes an open page reload. Until it reloads, an old DM page applies a
-group save as before, once, but untracked: its page stays locked, and Undo
-takes the outcome back without ever opening that page again.
-
-The update that keeps riders' seats and trap stops off the walls between a
-walk's ends, and lets a square trip wire with older, finer end points be
-renamed or edited again, stores changes at op version 36, which the builds
-before it cannot read. Snapshots keep their version, so a room whose saved
-snapshot holds all its changes still opens in an older build. Back up first,
-and reload every page left open across the update, table displays included.
-Until it reloads, an old page plans a drag for what a rider pulls by the old
-seat.
-
-Going back needs the backup only for a room with changes stored since its last
-snapshot. An older build refuses to open such a room, and refuses a rename or
-an edit of a trip wire with older, finer end points that sits in those
-changes. To avoid that, stop the server cleanly first, with
-`docker compose -f docker-compose.server.yml stop raccoon`
-(`docker compose stop raccoon` for the published image) or an ordinary update,
-because that saves a snapshot of every room. Then check out the commit you ran
-before (`git log` lists it), rebuild with
-`docker compose -f docker-compose.server.yml up -d --build`, and every room
-loads in the older build. A server that crashed or was killed before it saved
-can leave such changes. In that case follow Restore under Backups with the
-backup taken just before the update. Every room loses what changed after that
-backup.
-
-Two later updates each step the op version again, and the builds before each
-cannot read what it stores. The update that has a trap stop a creature between
-a walk's ends by the ground every player sees, and clips a creature on hexes by
-the walls the viewer holds, stores changes at op version 37. The update that
-has dragged creatures follow a squeezing holder in single file, seats its
-passengers apart, and stands a hidden creature in tow clear of walls stores
-changes at op version 38. Snapshots keep their version for both. Back up
-first, and reload every page left open across each update, table displays
-included. Until it reloads, an old page plans a drag by the old rules, and the
-server's answer moves the tokens where they go. Going back is the same as for
-op version 36 above: stop the server cleanly first so every room saves a
-snapshot, then rebuild the commit you ran before, or restore the backup taken
-just before the update if the server stopped without saving.
-
-The update that adds join requests (docs/design/design-v1-join-requests.md)
-changes no op or snapshot version. It adds two columns to `rooms`
-(`join_mode` and `player_pw_hash_held`) and the `ask_sessions` table, which
-the app creates on its own at start, and which older builds leave alone. A
-newcomer's page holds its wait open for up to 25 seconds, so a reverse proxy's
-response (read) timeout must be longer than that. Cloudflare allows 125
-seconds, and nginx 60 by default. Going back needs no restore. An older build
-checks player passwords against the room's usual column, which in a room set
-to Only by asking holds a marker that no password matches, so in such a room
-nobody new joins by password, and nobody can ask either. Devices already in
-stay in. The DM can open password joins again on the older build by changing
-the player password there. Coming forward again closes them at start and keeps
-that new password for when the room leaves Only by asking. A newcomer's ask
-cookie is an unknown cookie to an older build, so it gains nothing there.
-This build writes a new player's member before signing the device in, so a
-server stopped between the two leaves a member nobody plays, which the DM can
-remove.
-
-The update that lets a token be drawn between squares
-(docs/design/design-v1-snap-off.md) saves rooms at snapshot version 34 and
-stores changes at op version 44, which the builds before it cannot read. Back
-up the database just before the update, and reload every page left open across
-it, table displays included, since no version step makes an open page reload.
-Rooms, backups and stored changes from before it take the new versions as they
-load, through identity migration steps, and there is no database table
-migration. An older build refuses a version 34 snapshot or a version 44 op, so
-going back needs that backup: follow Restore under Backups with the backup
-taken just before the update. Every room loses what changed after that backup.
-
 Compose rebuilds the image and replaces only the containers that changed. On
 the way down the app closes every WebSocket with code 1012, finishes each
 room's current write and saves a snapshot, so phones reconnect on their own
-within a few seconds and lose nothing (design section 15.4).
+within a few seconds and lose nothing. The restart clears every DM's and
+player's undo history, which is never stored, so nothing that was undoable
+before an update can be undone after it.
+
+After any update, reload every page left open across it, table displays
+included. No version check makes an open page reload, so until it does, it
+works by the old rules.
 
 Images are pinned by digest: the Node base in `Dockerfile`, and postgres and
 squid in `docker-compose.server.yml`. They do not update on their own. To
@@ -778,6 +585,160 @@ docker buildx imagetools inspect ubuntu/squid:latest
 
 Keep postgres on major version 17. Moving to 18 needs a dump and restore,
 not just a new tag.
+
+### Going back to an older build
+
+Updates step two formats: the room format, `schema_version` in
+`room_snapshots`, and the change format, `op_version` in `room_ops`. Rooms,
+backups and stored changes from before an update take its formats as they
+load, with no conversion by hand. A build cannot read a format newer than
+its own, whatever the room holds, and its log gives the format by number in
+a line such as "cannot migrate from version 34 down to 31". What going back
+takes depends on which of the two changed, as the
+[update notes](#update-notes) say.
+
+**The room format.** A build from before the step answers "Something went
+wrong" for every room the newer build has saved, so going back needs the
+backup taken just before the update. Check out the commit you ran before
+(`git log` lists it), rebuild with
+`docker compose -f docker-compose.server.yml up -d --build`, then follow
+[Restore](#restore) with that backup. Every room loses what changed after
+it. Each such update is its own boundary: to go back past two, restore the
+backup taken before the earlier one.
+
+**The change format only.** Snapshots keep their version, so a room whose
+saved snapshot holds all its changes still opens in an older build. Stop the
+server cleanly first, with
+`docker compose -f docker-compose.server.yml stop raccoon` or an ordinary
+update, because that saves a snapshot of every room. Then rebuild the commit
+you ran before, and every room loads. A server that crashed or was killed
+before it saved can leave changes an older build refuses, and it then
+refuses to open those rooms. Restore the backup taken just before the update
+instead, and every room loses what changed after it.
+
+**The published image.** The release you ran before takes the place of the
+commit. Set `RACCOON_VERSION` in `.env` to it, download its `compose.yml` as
+in [step 1](#1-download-the-files) when its minor release differs from
+yours, then run `docker compose pull` and `docker compose up -d` in place of
+the rebuild. Every other command runs without
+`-f docker-compose.server.yml`, as `docker compose stop raccoon` does for
+the clean stop.
+
+### Update notes
+
+Each release's formats, from `shared/migrate.ts` at its tag:
+
+| Release | Room format | Change format |
+| --- | --- | --- |
+| v0.3.1 | 31 | 40 |
+| v0.3.0 | 31 | 40 |
+| v0.2.0 | 26 | 25 |
+| v0.1.0 | 23 | 22 |
+
+Compare the rows of the release you run and the one you go back to, since
+not every format step has a note below. A build between releases has its
+formats at the top of `shared/migrate.ts`, as `SNAPSHOT_VERSION` and
+`OP_VERSION`. Each note sits under the first release that has its update,
+newest first.
+
+**Since v0.3.1**
+
+- **Placing a token between squares**
+  ([design](design/design-v1-snap-off.md)): room format 34,
+  change format 44.
+- **Join requests** ([design](design/design-v1-join-requests.md)): no format
+  step. The app adds two columns to `rooms` (`join_mode` and
+  `player_pw_hash_held`) and the `ask_sessions` table at start, which older
+  builds leave alone. A newcomer's page holds its wait open for up to 25
+  seconds, so the proxy's read timeout must allow a response at least 30
+  seconds, as [step 5](#5-put-https-in-front-of-it) says. Going back needs
+  no restore. An older build checks player passwords against the room's
+  usual column, which in a room set to Only by asking holds a marker no
+  password matches. So in such a room nobody new joins by password and
+  nobody can ask, while devices already in stay in. The DM opens password
+  joins again on the older build by changing the player password, and coming
+  forward again closes them at start and keeps that password for when the
+  room leaves Only by asking. An older build does not know a newcomer's ask
+  cookie, so it gains nothing there. A server stopped between writing a new
+  player's member and signing the device in leaves a member nobody plays,
+  which the DM can remove.
+
+**v0.3.0**
+
+- **Dragging in single file**: change format 38. Dragged creatures follow a
+  squeezing holder in single file, its passengers sit apart, and a hidden
+  creature in tow stands clear of walls. Until it reloads, an old page plans
+  a drag by the old rules, and the server's answer moves the tokens where
+  they go.
+- **Trap stops on seen ground**: change format 37. A trap stops a creature
+  between a walk's ends by the ground every player sees, and a creature on
+  hexes clips by the walls the viewer holds. An old page plans a drag by the
+  old rules until it reloads, as for change format 38.
+- **Riders' seats and trip wires**: change format 36. Riders' seats and trap
+  stops keep off the walls between a walk's ends, and a square trip wire
+  with older, finer end points can be renamed or edited again. Until it
+  reloads, an old page plans a drag for what a rider pulls by the old seat.
+  Going back without a clean stop, an older build also refuses a rename or
+  an edit of such a trip wire in the stored changes.
+- **Reopening an undone group save**
+  ([design](design/design-v1-undo-scope.md)): room format 31,
+  change format 35. A room from before it gains no group save records. Until
+  it reloads, an old DM page applies a group save as before, once, but
+  untracked: its page stays locked, and Undo takes the outcome back without
+  ever opening that page again.
+- **Play and Setup history** ([design](design/design-v1-undo-scope.md)):
+  room format 30, change format 34. Until it reloads, an old page's Undo or
+  Redo gets a "Reload to use Undo" refusal that takes nothing back, and its
+  other queued changes that this build still accepts may still arrive. An
+  old page shows no Setup history.
+- **Hex scenes** ([design](design/design-v1-hex-grids.md)): no format step.
+  The update adds the settings that make a hex scene (Grid on new scenes,
+  the new scene form's Grid row and a scene's Grid shape). Until it reloads,
+  an old page treats a hex scene as squares: it draws and snaps to the wrong
+  grid and counts distances wrongly. Scenes made before the update stay
+  squares.
+
+**v0.2.0**
+
+- **The isometric view** ([design](design/design-v1-isometric-view.md)):
+  room format 26, change format 25. Until it reloads, an old page has no
+  View button, and an old table display drops what a DM in Isometric shows
+  it, so Follow the DM stands still there.
+- **Hex grids, first part** ([design](design/design-v1-hex-grids.md)):
+  room format 25, change format 24. The settings that make a hex scene came
+  later, in v0.3.0.
+
+**Before v0.1.0**
+
+- **The dragon turtle's id**: room format 14, change format 10. Its SRD id
+  `dragon-tur-t-le` became `dragon-turtle`, and rooms, backups and stored
+  changes from before it take the new id as they load. Until it reloads, an
+  old page finds no stat block for a dragon turtle. A dragon turtle an old
+  DM page places, saves in an encounter or gives an image is stored under
+  the new id, so it has its stat block once the page reloads.
+- **The D&D Beyond import**: no format step. The update adds
+  `character-service.dndbeyond.com` to docker/squid.conf, which the recipe's
+  `restart egress` puts in force. Going back past it, run
+  `docker compose -f docker-compose.server.yml restart egress` after the
+  rebuild, so squid drops the host again.
+- **Dice rolled on the server** ([design](design/design-v1-dice.md)):
+  room format 11, change format 7. The app adds the `roll_receipts` table at
+  start, which older builds leave alone. Until it reloads, an old page has
+  no Dice panel and shows each roll as an empty line in the Log.
+- **Companion stat blocks**
+  ([design](design/design-v1-companion-stat-blocks.md)): room format 10,
+  change format 6. Until it reloads, an old page fails on the first change
+  to a companion's stat block it receives, and DM pages and the pages of
+  that companion's players receive them. A DM's room snapshot can now be up
+  to 6 MiB, 3 MiB more than before for the stat blocks, so a DM's page may
+  take a few seconds longer to load a room that holds many.
+- **PDF handouts** ([design](design/design-v1-pdf-handouts.md)):
+  room format 9. Until it reloads, an old page shows only the first page of
+  a handout of several pages, and an old DM page cannot upload a PDF.
+- **Heights on rulers** ([design](design/design-v1-heights-readout.md)): no
+  format step. Ruler stops stand on raised ground. Until it reloads, an old
+  page does not show live rulers that carry heights, and reads kept ones as
+  if on flat ground, so its numbers differ from everyone else's.
 
 ## Backups
 
