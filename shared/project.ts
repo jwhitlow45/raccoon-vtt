@@ -79,6 +79,7 @@ import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
 import { compareEntries, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
 import { legOnGround, pathThisTurn, seenWhole, stopsForNonOwners, stopsForOwners } from "./rules/path.ts";
 import { zoneFogged, zoneRanges } from "./rules/traps.ts";
+import { heldFloors, playersSee, sameScene, unhiddenPartyMember } from "./rules/floors.ts";
 import { clipFootprint, seesCreature, sightClipOf, sightRect } from "./rules/vision.ts";
 import type { SegmentIndex } from "./rules/segments.ts";
 import { deriveWalls, indexBuild, sceneWalls, type WallSet } from "./rules/walls.ts";
@@ -97,7 +98,11 @@ import { ownEntry } from "./records.ts";
  */
 
 export type ProjectOpts = {
-  /** The scene the viewer holds: a DM's choice from `hello`. Players always get the player scene. */
+  /**
+   * The scene a DM views, their choice from `hello`, by any of its floors: a
+   * DM holds every floor of it (rules/floors.ts heldFloors). Players never
+   * choose: the room decides what they hold.
+   */
   sceneId: string | null;
 };
 
@@ -203,10 +208,13 @@ export type ProjectedState = Omit<RoomState, "meta" | "tokens" | "characters" | 
 export type HpAccess = "exact" | "bar" | "label" | "none";
 
 /**
- * The scene a viewer's projection covers. Players never choose: the room
- * decides for them. During a blackout a player covers no scene at all, so
- * nothing the DM sets up behind the pause screen is in a player's data,
- * however it is read (design 13.3).
+ * The scene a viewer's projection starts from: the DM's choice, and for a
+ * player the start floor (docs/design/design-v1-floors.md 8.3). Players never
+ * choose: the room decides for them. During a blackout a player covers no
+ * scene at all, so nothing the DM sets up behind the pause screen is in a
+ * player's data, however it is read (design 13.3). What a projection
+ * covers is the viewer's held floors (heldFloors), which on a scene
+ * without floors is this scene alone.
  */
 export function viewerSceneId(state: RoomState, viewer: Viewer, opts: ProjectOpts): string | null {
   if (viewer.role === "dm") return opts.sceneId;
@@ -626,8 +634,13 @@ function holderLayer(state: RoomState, sceneId: string, memberId: string): Recor
 }
 
 /**
- * One projection's inputs. `paused` is a player behind a blackout, whose
- * `sceneId` is null as well (viewerSceneId), so every scene's contents
+ * One projection's inputs. `floors` is what the viewer holds
+ * (docs/design/design-v1-floors.md 8, rules/floors.ts heldFloors): every
+ * floor of a DM's scene, a player's open floors of the players' scene and
+ * those there where a creature they own stands, and on a scene without
+ * floors that scene alone. A record on any other scene projects to nothing,
+ * so a floor not held sends no record, name, count or id. `paused` is a
+ * player behind a blackout, who holds no floor, so every scene's contents
  * project to nothing. The room-level parts of the table go with them: the
  * initiative tracker, which can name what is coming in a row of its own,
  * and handouts. `member` is a viewer on the roster, which a table display
@@ -642,7 +655,7 @@ function holderLayer(state: RoomState, sceneId: string, memberId: string): Recor
 type Ctx = {
   state: RoomState;
   viewer: Viewer;
-  sceneId: string | null;
+  floors: ReadonlySet<string>;
   paused: boolean;
   member: boolean;
   fogged: FogReader;
@@ -658,7 +671,7 @@ function ctxOf(state: RoomState, viewer: Viewer, opts: ProjectOpts, held = true)
   return {
     state,
     viewer,
-    sceneId: viewerSceneId(state, viewer, opts),
+    floors: viewerFloors(state, viewer, opts),
     paused: paused(state, viewer),
     member: Object.hasOwn(state.members, viewer.memberId),
     fogged: fogReader(state, own),
@@ -668,6 +681,22 @@ function ctxOf(state: RoomState, viewer: Viewer, opts: ProjectOpts, held = true)
     grounds: new Map(),
   };
 }
+
+/**
+ * The floors a projection covers (Ctx `floors`), rules/floors.ts heldFloors.
+ * A scene without floors holds itself alone, the very scene every
+ * projection covered before floors, so a room with none projects as it
+ * always did and never asks who owns what. A player behind a blackout,
+ * and a DM who views no scene, hold nothing.
+ */
+function viewerFloors(state: RoomState, viewer: Viewer, opts: ProjectOpts): ReadonlySet<string> {
+  const from = viewerSceneId(state, viewer, opts);
+  if (from === null) return NO_FLOORS;
+  if (ownEntry(state.scenes, from)?.floor === undefined) return new Set([from]);
+  return heldFloors(state, viewer, opts);
+}
+
+const NO_FLOORS: ReadonlySet<string> = new Set();
 
 function sightReader(read: (sceneId: string) => PartySight): (sceneId: string) => PartySight {
   const cache = new Map<string, PartySight>();
@@ -687,12 +716,13 @@ function sharedOf(state: RoomState): Shared {
 
 /**
  * The one rule for tokens a player may know about (design 7.3 and 13.4): on
- * the viewer's scene, not hidden unless owned, and not withheld where it
- * stands (withheldFromPlayers, which says what `revealedSeen` is for).
+ * a floor the viewer holds, not hidden unless owned, and not withheld where
+ * it stands (withheldFromPlayers, which says what `revealedSeen` is for).
+ * Each floor's creatures are judged by that floor's own sight and fog.
  */
 function tokenVisibleTo(ctx: Ctx, token: Token, revealedSeen = false): boolean {
-  if (ctx.viewer.role === "dm") return token.sceneId === ctx.sceneId;
-  if (token.sceneId !== ctx.sceneId) return false;
+  if (!ctx.floors.has(token.sceneId)) return false;
+  if (ctx.viewer.role === "dm") return true;
   if (token.visibility === "dm" && !ownsToken(ctx.state, ctx.viewer, token)) return false;
   return !withheldOnScreen(ctx, token, revealedSeen);
 }
@@ -963,9 +993,23 @@ function behindBlackout(state: RoomState): boolean {
 }
 
 /**
+ * Whether a token stands on a floor of a scene with floors that players do
+ * not see now (docs/design/design-v1-floors.md 8.3): an unopened floor, or
+ * any floor of a scene players are not on. A token there is seen by no
+ * player, wherever the question asks. On a scene without floors this is
+ * never so, and each question keeps the rule stored ops were marked by
+ * (FLR-ASTRA-20, OPUS-29).
+ */
+function onUnseenFloor(state: RoomState, token: Pick<Token, "sceneId">): boolean {
+  return ownEntry(state.scenes, token.sceneId)?.floor !== undefined && !playersSee(state, token.sceneId);
+}
+
+/**
  * Whether a player who does not own the token can see it now: the same rule
  * for every non-owner, so one answer covers them all. The reducer records it
- * on log events about the token (`seen` in the model). On a per-player scene
+ * on log events about the token (`seen` in the model). Only a token on a
+ * floor players see counts (rules/floors.ts playersSee), which on a scene
+ * without floors is the players' scene. On a per-player scene
  * it is "seen by all", the shared sight and fog (docs/design/design-v1-per-player-vision.md
  * decision 10), and `seenMark` records which sight holders saw it besides.
  *
@@ -976,7 +1020,7 @@ function behindBlackout(state: RoomState): boolean {
  * (clipsByHeldWalls), so each replays to the same state.
  */
 export function seenByNonOwners(state: RoomState, token: Token, env: Pick<Env, "opVersion">): boolean {
-  if (behindBlackout(state) || token.sceneId !== state.meta.playerSceneId || token.visibility === "dm") return false;
+  if (behindBlackout(state) || !playersSee(state, token.sceneId) || token.visibility === "dm") return false;
   const shared = sharedOf(state);
   return !withheldFromPlayers(state, shared.fogged, shared.sight, token, revealSeenAnywhere(env.opVersion), sharedClip(env));
 }
@@ -985,11 +1029,12 @@ export function seenByNonOwners(state: RoomState, token: Token, env: Pick<Env, "
  * Whether players who do not own the token could see it where it stands,
  * whichever scene they are on. The reducer records it on a turn's starting
  * spot (`TurnStart.seen`) and on the stops of a path, which players get
- * only while they see the token on their own scene anyway. On a per-player
- * scene, "seen by all" as `seenByNonOwners` reads it.
+ * only while they see the token on a floor they hold anyway. On a scene
+ * with floors only a floor players see counts (onUnseenFloor). On a
+ * per-player scene, "seen by all" as `seenByNonOwners` reads it.
  */
 export function inSightOfNonOwners(state: RoomState, token: Token, env: Pick<Env, "opVersion">): boolean {
-  if (behindBlackout(state) || token.visibility === "dm") return false;
+  if (behindBlackout(state) || token.visibility === "dm" || onUnseenFloor(state, token)) return false;
   const shared = sharedOf(state);
   return !withheldFromPlayers(state, shared.fogged, shared.sight, token, revealSeenAnywhere(env.opVersion), sharedClip(env));
 }
@@ -1001,10 +1046,11 @@ export function inSightOfNonOwners(state: RoomState, token: Token, env: Pick<Env
  * with the fog and sight read once for the whole walk. On a per-player
  * scene every spot must also lie on the ground every player shares
  * (docs/design/design-v1-per-player-vision.md 6.5), so a route's corners never
- * draw ground only some players remember for anyone else.
+ * draw ground only some players remember for anyone else. On a scene with
+ * floors only a floor players see counts (onUnseenFloor).
  */
 export function seenAtEvery(state: RoomState, token: Token, spots: readonly { x: number; y: number; elevation: number; squeezed?: boolean }[], env: Pick<Env, "opVersion">): boolean {
-  if (behindBlackout(state) || token.visibility === "dm") return false;
+  if (behindBlackout(state) || token.visibility === "dm" || onUnseenFloor(state, token)) return false;
   const shared = sharedOf(state);
   const revealed = revealSeenAnywhere(env.opVersion);
   const { squeeze: _squeeze, ...rest } = token;
@@ -1038,17 +1084,19 @@ export function rowSeenByNonOwners(state: RoomState, entry: InitEntry, env: Pick
  * for log lines) or `inSightOfNonOwners` ("anywhere", for stops and a
  * turn's start). On a per-player scene otherwise, `seenBy`: the sight
  * holders who do not own the token and whose projection shows it, sorted,
- * present even when empty. Behind a blackout, for a token the DM hid, and
- * under "here" off the player scene there is no mark, and a list under
- * "anywhere" off the player scene is empty, since a player's projection
- * covers only the player scene. A device's marks are predictions and hold
- * no list: only the server writes lists.
+ * present even when empty. There is no mark behind a blackout, for a
+ * token the DM hid, on a floor of a scene with floors that players do not
+ * see (onUnseenFloor), and under "here" off a floor players see
+ * (playersSee, the player scene on a scene without floors). Under
+ * "anywhere" off the player scene a list is empty, since only that
+ * scene's floors reach a sight holder. A device's marks are predictions
+ * and hold no list: only the server writes lists.
  */
 export type SeenMark = { seen?: true; seenBy?: string[] };
 
 export function seenMark(state: RoomState, token: Token, env: Pick<Env, "opVersion">, scope: "here" | "anywhere"): SeenMark {
-  if (behindBlackout(state) || token.visibility === "dm") return {};
-  const here = token.sceneId === state.meta.playerSceneId;
+  if (behindBlackout(state) || token.visibility === "dm" || onUnseenFloor(state, token)) return {};
+  const here = playersSee(state, token.sceneId);
   if (scope === "here" && !here) return {};
   const revealed = revealSeenAnywhere(env.opVersion);
   const shared = sharedOf(state);
@@ -1072,14 +1120,14 @@ function holdersWho(state: RoomState, sceneId: string, test: (memberId: string) 
 /**
  * A turn line's mark for its row (docs/design/design-v1-per-player-vision.md 6.5):
  * `seen` when every viewer's tracker shows it (rowSeenByNonOwners), and on
- * a per-player player scene otherwise the sight holders who do not own the
- * row's creature and whose tracker shows it.
+ * a per-player floor players see otherwise the sight holders of that floor
+ * who do not own the row's creature and whose tracker shows it.
  */
 export function rowSeenMark(state: RoomState, entry: InitEntry, env: Pick<Env, "opVersion">): SeenMark {
   if (rowSeenByNonOwners(state, entry, env)) return { seen: true };
   const token = entry.tokenId !== undefined ? ownEntry(state.tokens, entry.tokenId) : undefined;
-  const sceneId = state.meta.playerSceneId;
-  if (entry.hidden || behindBlackout(state) || !token || sceneId === null || token.sceneId !== sceneId || !perPlayerScene(ownEntry(state.scenes, sceneId)) || sightOf(state) !== undefined) return {};
+  if (entry.hidden || behindBlackout(state) || !token || !playersSee(state, token.sceneId) || !perPlayerScene(ownEntry(state.scenes, token.sceneId)) || sightOf(state) !== undefined) return {};
+  const sceneId = token.sceneId;
   const owners = new Set([...ownersOf(state, token), ...(entry.characterId !== undefined ? (ownEntry(state.characters, entry.characterId)?.ownerIds ?? []) : [])]);
   const revealed = revealSeenAnywhere(env.opVersion);
   const held = clipsByHeldWalls(env.opVersion);
@@ -1106,7 +1154,7 @@ export function areaSeenMark(at: RoomState, template: AreaTemplate, token: Token
   const attached = template.attachedTo !== undefined ? ownEntry(at.tokens, template.attachedTo) : undefined;
   const seesAttached = attached === undefined || seenByNonOwners(at, attached, env) || (seenMark(at, attached, env, "here").seenBy ?? []).length > 0;
   if (template.visibility === "dm" || !seesAttached) return { hidden: true };
-  if (behindBlackout(at) || token.sceneId !== at.meta.playerSceneId) return {};
+  if (behindBlackout(at) || !playersSee(at, token.sceneId)) return {};
   const witnessed = (ctx: Ctx) => tokenVisibleTo(ctx, token, revealSeenAnywhere(env.opVersion)) && projectTemplateCtx(ctx, template) !== null;
   const sceneId = token.sceneId;
   const held = clipsByHeldWalls(env.opVersion);
@@ -1452,7 +1500,7 @@ export function projectCharacter(state: RoomState, viewer: Viewer, character: Ch
 }
 
 function projectTemplateCtx(ctx: Ctx, template: AreaTemplate): ProjectedTemplate | null {
-  if (template.sceneId !== ctx.sceneId) return null;
+  if (!ctx.floors.has(template.sceneId)) return null;
   if (ctx.viewer.role === "dm") return template;
   if (template.visibility === "dm") return null;
   if (template.attachedTo !== undefined && !tokenVisibleById(ctx, template.attachedTo)) return null;
@@ -1476,7 +1524,7 @@ function projectTemplateCtx(ctx: Ctx, template: AreaTemplate): ProjectedTemplate
  * token where they see it now in its place (the ruler tool's tokenStop).
  */
 function projectDrawingCtx(ctx: Ctx, drawing: Drawing): Drawing | null {
-  if (drawing.sceneId !== ctx.sceneId) return null;
+  if (!ctx.floors.has(drawing.sceneId)) return null;
   if (ctx.viewer.role === "dm") return drawing;
   if (drawing.visibility === "dm") return null;
   if (!drawing.anchors?.some((id) => id !== null)) return drawing;
@@ -1493,13 +1541,13 @@ function projectDrawingCtx(ctx: Ctx, drawing: Drawing): Drawing | null {
 }
 
 /**
- * A chunk position of the viewer's scene. The DM gets the stored chunk. A
- * player on a scene with fog on gets what their fog class holds there, a
- * stub where no chunk is stored (playerChunk), and on a scene with fog off
- * the whole build as before (projectChunkForPlayer).
+ * A chunk position of a floor the viewer holds. The DM gets the stored
+ * chunk. A player on a scene with fog on gets what their fog class holds
+ * there, a stub where no chunk is stored (playerChunk), and on a scene with
+ * fog off the whole build as before (projectChunkForPlayer).
  */
 function projectChunkAtCtx(ctx: Ctx, sceneId: string, cx: number, cy: number): BuildChunk | null {
-  if (sceneId !== ctx.sceneId) return null;
+  if (!ctx.floors.has(sceneId)) return null;
   const chunk = ownEntry(ctx.state.buildChunks, chunkKey(sceneId, cx, cy));
   if (ctx.viewer.role === "dm") return chunk ?? null;
   const scene = ownEntry(ctx.state.scenes, sceneId);
@@ -1507,13 +1555,28 @@ function projectChunkAtCtx(ctx: Ctx, sceneId: string, cx: number, cy: number): B
   return chunk ? projectChunkForPlayer(ctx.state.buildChunks, chunk, scene?.autoWalls) : null;
 }
 
-/** The viewer's scene's chunks, by chunk key, as a snapshot holds them (projectChunkAtCtx). */
+/**
+ * The chunks of the floors the viewer holds, by chunk key, as a snapshot
+ * holds them (projectChunkAtCtx): a player's floor with fog on as their
+ * fog class holds it, and every other held floor's stored chunks in one
+ * pass over the build.
+ */
 function projectChunksCtx(ctx: Ctx): Record<string, BuildChunk> {
-  const sceneId = ctx.sceneId;
-  const scene = sceneId === null ? undefined : ownEntry(ctx.state.scenes, sceneId);
-  if (sceneId === null || !scene) return {};
-  if (ctx.viewer.role !== "dm" && scene.fogEnabled) return heldChunks(ctx.state, sceneId, fogClassOf(ctx.state, sceneId, ctx.viewer.memberId));
-  return projectMap(ctx.state.buildChunks, (c) => projectChunkAtCtx(ctx, c.sceneId, c.cx, c.cy));
+  const out: Record<string, BuildChunk> = {};
+  const stored = new Set<string>();
+  for (const sceneId of ctx.floors) {
+    const scene = ownEntry(ctx.state.scenes, sceneId);
+    if (!scene) continue;
+    if (ctx.viewer.role !== "dm" && scene.fogEnabled) Object.assign(out, heldChunks(ctx.state, sceneId, fogClassOf(ctx.state, sceneId, ctx.viewer.memberId)));
+    else stored.add(sceneId);
+  }
+  if (stored.size === 0) return out;
+  for (const [key, chunk] of Object.entries(ctx.state.buildChunks)) {
+    if (!stored.has(chunk.sceneId)) continue;
+    const projected = projectChunkAtCtx(ctx, chunk.sceneId, chunk.cx, chunk.cy);
+    if (projected !== null) out[key] = projected;
+  }
+  return out;
 }
 
 /** A door as players see it, when it is not a hidden secret one: a locked door arrives closed, and without its cover. */
@@ -2506,7 +2569,7 @@ function sceneChunkList(all: Readonly<Record<string, BuildChunk>>, sceneId: stri
  * (docs/design/design-v1-per-player-vision.md 6.3).
  */
 function projectFogCtx(ctx: Ctx, sceneId: string, tx: number, ty: number): FogTile | null {
-  if (sceneId !== ctx.sceneId) return null;
+  if (!ctx.floors.has(sceneId)) return null;
   if (ctx.viewer.role === "dm") return ownEntry(ctx.state.fogTiles, tileKey(sceneId, tx, ty)) ?? null;
   const own = perPlayerScene(ownEntry(ctx.state.scenes, sceneId)) && holdsSight(ctx.state, sceneId, ctx.viewer.memberId) ? ownEntry(ctx.state.exploredBy, holderTileKey(sceneId, ctx.viewer.memberId, tx, ty)) : undefined;
   return own ? holderFogTile(ctx.state, sceneId, tx, ty, own) : sharedFogTile(ctx.state, sceneId, tx, ty);
@@ -2547,7 +2610,7 @@ function playerTile(tile: FogTile, make: () => FogTile): FogTile {
 
 /** The party's explored layer is the DM's to see beside the fog. Players get it only merged into theirs. */
 function projectExploredCtx(ctx: Ctx, tile: FogTile): FogTile | null {
-  return ctx.viewer.role === "dm" && tile.sceneId === ctx.sceneId ? tile : null;
+  return ctx.viewer.role === "dm" && ctx.floors.has(tile.sceneId) ? tile : null;
 }
 
 /**
@@ -2558,7 +2621,7 @@ function projectExploredCtx(ctx: Ctx, tile: FogTile): FogTile | null {
  * And for the DM every sight holder's layer joined, beside the party's.
  */
 function viewersPerPlayerScene(ctx: Ctx, sceneId: string): boolean {
-  return sceneId === ctx.sceneId && perPlayerScene(ownEntry(ctx.state.scenes, sceneId));
+  return ctx.floors.has(sceneId) && perPlayerScene(ownEntry(ctx.state.scenes, sceneId));
 }
 
 function projectSightAllCtx(ctx: Ctx, sceneId: string, tx: number, ty: number): SightTile | null {
@@ -2603,7 +2666,7 @@ function holderTiles(state: RoomState, sceneId: string, tx: number, ty: number):
  * but a restored room might hold one (review PV1-O9).
  */
 function projectHoldersCtx(ctx: Ctx, list: SightHolders): SightHolders | null {
-  return ctx.viewer.role === "dm" && list.sceneId === ctx.sceneId && perPlayerScene(ownEntry(ctx.state.scenes, list.sceneId)) ? list : null;
+  return ctx.viewer.role === "dm" && ctx.floors.has(list.sceneId) && perPlayerScene(ownEntry(ctx.state.scenes, list.sceneId)) ? list : null;
 }
 
 /**
@@ -2612,22 +2675,23 @@ function projectHoldersCtx(ctx: Ctx, list: SightHolders): SightHolders | null {
  * Sight is derived, never stored, and the same for every player.
  */
 function projectSightCtx(ctx: Ctx, sceneId: string, tx: number, ty: number): unknown {
-  if (sceneId !== ctx.sceneId || !visionOn(ownEntry(ctx.state.scenes, sceneId))) return null;
+  if (!ctx.floors.has(sceneId) || !visionOn(ownEntry(ctx.state.scenes, sceneId))) return null;
   return ctx.sight(sceneId).tiles.get(`${tx},${ty}`) ?? null;
 }
 
-/** Every sight tile of the viewer's scene, keyed as a projected state holds them. */
+/** Every sight tile of the floors the viewer holds, each floor's own, keyed as a projected state holds them. */
 function sightTilesCtx(ctx: Ctx): SightMap {
   const out: SightMap = {};
-  const sceneId = ctx.sceneId;
-  if (sceneId === null || !visionOn(ownEntry(ctx.state.scenes, sceneId))) return out;
-  for (const [at, tile] of ctx.sight(sceneId).tiles) out[`${sceneId}:${at}`] = tile;
+  for (const sceneId of ctx.floors) {
+    if (!visionOn(ownEntry(ctx.state.scenes, sceneId))) continue;
+    for (const [at, tile] of ctx.sight(sceneId).tiles) out[`${sceneId}:${at}`] = tile;
+  }
   return out;
 }
 
 function projectFogDraftCtx(ctx: Ctx, draft: FogDraft): FogDraft | null {
   if (ctx.viewer.role !== "dm") return null;
-  return draft.sceneId === ctx.sceneId ? draft : null;
+  return ctx.floors.has(draft.sceneId) ? draft : null;
 }
 
 /**
@@ -2637,11 +2701,11 @@ function projectFogDraftCtx(ctx: Ctx, draft: FogDraft): FogDraft | null {
  * (shownByMemory).
  */
 function projectLabelCtx(ctx: Ctx, label: Label): Label | null {
-  if (label.sceneId !== ctx.sceneId) return null;
+  if (!ctx.floors.has(label.sceneId)) return null;
   if (ctx.viewer.role === "dm") return label;
   const scene = ownEntry(ctx.state.scenes, label.sceneId);
   if (!scene || !scene.fogEnabled) return label;
-  return shownByMemory(ctx, "labels", label.id, label);
+  return shownByMemory(ctx, label.sceneId, "labels", label.id, label);
 }
 
 /** The cells a label or stamp is judged by: its box (labelCells, stampCells). */
@@ -2650,8 +2714,8 @@ function boxOf(field: "labels" | "stamps", value: Label | Stamp): CellRange {
 }
 
 /**
- * A label or stamp as a player of the viewer's class sees it on a scene
- * with fog on (docs/design/design-v1-map-discovery.md 5.3, decision 5): live where
+ * A label or stamp as a player of the viewer's class sees it on a held
+ * floor with fog on (docs/design/design-v1-map-discovery.md 5.3, decision 5): live where
  * its box touches their live ground, else as the memory it reads
  * remembers it (decision 6), where their own layer holds a cell of a box
  * their own and the party's elsewhere. A remembered absence hides it. A
@@ -2660,9 +2724,7 @@ function boxOf(field: "labels" | "stamps", value: Label | Stamp): CellRange {
  * today's rule: shown unless its box is fully under their fog. A stamp the
  * DM keeps to themselves never shows, remembered or not.
  */
-function shownByMemory<T extends Label | Stamp>(ctx: Ctx, field: "labels" | "stamps", id: string, live: T | null): T | null {
-  const sceneId = ctx.sceneId;
-  if (sceneId === null) return null;
+function shownByMemory<T extends Label | Stamp>(ctx: Ctx, sceneId: string, field: "labels" | "stamps", id: string, live: T | null): T | null {
   const now = live && live.sceneId === sceneId ? live : null;
   if (field === "stamps" && (now as Stamp | null)?.visibility === "dm") return null;
   const held = (r: CellRange) => !isRangeFullyFogged(ctx.presence(sceneId), sceneId, r, (x, y) => ctx.fogged(sceneId, x, y));
@@ -2762,21 +2824,37 @@ function rememberedOnly(state: RoomState, sceneId: string, field: "labels" | "st
   return [...out].sort();
 }
 
-/** A label or stamp by key for the viewer: the live one, or one only their memory holds. */
+/**
+ * A label or stamp by key for the viewer that only memory names: as the
+ * memory of the held floor that names it shows it. A label lies on one
+ * floor, so one held floor's memory at most names it.
+ */
 function projectRememberedCtx(ctx: Ctx, field: "labels" | "stamps", id: string): Label | Stamp | null {
-  if (ctx.viewer.role === "dm" || ctx.sceneId === null) return null;
-  const scene = ownEntry(ctx.state.scenes, ctx.sceneId);
-  if (!scene || !scene.fogEnabled) return null;
-  return shownByMemory<Label | Stamp>(ctx, field, id, null);
+  if (ctx.viewer.role === "dm") return null;
+  for (const sceneId of ctx.floors) {
+    if (!namedByMemory(ctx.state, sceneId, field, id)) continue;
+    const shown = rememberedOnFloorCtx(ctx, sceneId, field, id);
+    if (shown) return shown;
+  }
+  return null;
 }
 
-/** The viewer's labels or stamps, as a snapshot holds them: the live ones and those only memory names. */
+/** A label or stamp only memory names, as one held floor's memory shows it to the viewer, on a floor with fog on. */
+function rememberedOnFloorCtx(ctx: Ctx, sceneId: string, field: "labels" | "stamps", id: string): Label | Stamp | null {
+  const scene = ownEntry(ctx.state.scenes, sceneId);
+  if (!scene || !scene.fogEnabled) return null;
+  return shownByMemory<Label | Stamp>(ctx, sceneId, field, id, null);
+}
+
+/** The viewer's labels or stamps, as a snapshot holds them: the live ones and those only memory names on each held floor. */
 function projectByMemoryCtx<T extends Label | Stamp>(ctx: Ctx, field: "labels" | "stamps", live: Record<string, T>, project: (value: T) => T | null): Record<string, T> {
   const out = projectMap(live, project);
-  if (ctx.viewer.role === "dm" || ctx.sceneId === null) return out;
-  for (const id of rememberedOnly(ctx.state, ctx.sceneId, field)) {
-    const value = projectRememberedCtx(ctx, field, id);
-    if (value) out[id] = value as T;
+  if (ctx.viewer.role === "dm") return out;
+  for (const sceneId of ctx.floors) {
+    for (const id of rememberedOnly(ctx.state, sceneId, field)) {
+      const value = rememberedOnFloorCtx(ctx, sceneId, field, id);
+      if (value) out[id] = value as T;
+    }
   }
   return out;
 }
@@ -2798,22 +2876,22 @@ export function stampCells(stamp: Pick<Stamp, "x" | "y" | "w" | "h" | "rotation"
 }
 
 /**
- * Stamps on the viewer's scene (docs/design/design-v1-maps-vision.md 3.5). A
+ * Stamps on the floors the viewer holds (docs/design/design-v1-maps-vision.md 3.5). A
  * player gets none the DM hid, and none whose box is fully under enabled
  * fog, as labels go, so a chest in an unexplored room is not in their data.
  */
 function projectStampCtx(ctx: Ctx, stamp: Stamp): Stamp | null {
-  if (stamp.sceneId !== ctx.sceneId) return null;
+  if (!ctx.floors.has(stamp.sceneId)) return null;
   if (ctx.viewer.role === "dm") return stamp;
   if (stamp.visibility === "dm") return null;
   const scene = ownEntry(ctx.state.scenes, stamp.sceneId);
   if (!scene || !scene.fogEnabled) return stamp;
-  return shownByMemory(ctx, "stamps", stamp.id, stamp);
+  return shownByMemory(ctx, stamp.sceneId, "stamps", stamp.id, stamp);
 }
 
 /**
  * Traps (docs/design/design-v1-traps.md 6.4). The DM gets every trap on its scene.
- * A player gets one only once it is found, on the player scene outside a
+ * A player gets one only once it is found, on a floor they hold outside a
  * blackout, not under full fog over its cells by the labels' rule (a wire's
  * cells, a door's two cells), and for a door zone only while its door is
  * not a secret one still hidden: its name, its zone, and whether the DM
@@ -2821,7 +2899,7 @@ function projectStampCtx(ctx: Ctx, stamp: Stamp): Stamp | null {
  * nothing, and a trap nobody found is in no player's data at all.
  */
 function projectTrapCtx(ctx: Ctx, trap: Trap): ProjectedTrap | null {
-  if (trap.sceneId !== ctx.sceneId) return null;
+  if (!ctx.floors.has(trap.sceneId)) return null;
   if (ctx.viewer.role === "dm") return trap;
   if (!trap.found) return null;
   const zone = trap.zone;
@@ -2880,7 +2958,7 @@ function projectTrapSeenCtx(ctx: Ctx, entry: LogEntry): LogEntry | null {
 /** Lights are the DM's in every wave. Players will only ever see their effect (section 3.6). */
 function projectLightCtx(ctx: Ctx, light: Light): Light | null {
   if (ctx.viewer.role !== "dm") return null;
-  return light.sceneId === ctx.sceneId ? light : null;
+  return ctx.floors.has(light.sceneId) ? light : null;
 }
 
 /**
@@ -2899,7 +2977,8 @@ export type PlayerField = "copied" | "zeroed" | `changed: ${string}` | `dm: ${st
  * changes nothing players receive. The walls version moves with every
  * build op, a hidden secret door's or a lock's edit too, which players
  * cannot see. No client reads it: the rules caches follow the derived wall
- * set.
+ * set. A player gets the record of a floor they hold and of no other
+ * (docs/design/design-v1-floors.md 8).
  */
 export const SCENE_FOR_PLAYERS = {
   id: "copied",
@@ -2907,7 +2986,7 @@ export const SCENE_FOR_PLAYERS = {
   name: "copied",
   order: "zeroed",
   bounds: "copied",
-  // With its video, which every op keeps the showing phase's, the only one players receive (docs/design/design-v1-animated-maps.md 7).
+  // With its video, which every op keeps the showing phase's, the only one players receive of each floor they hold (docs/design/design-v1-animated-maps.md 7).
   map: "copied",
   grid: "copied",
   background: "copied",
@@ -2935,10 +3014,10 @@ export const SCENE_FOR_PLAYERS = {
   floor: "changed: { level, name }, levels renumbered among the floors held, and only while two or more are held",
 } as const satisfies Record<keyof Scene, PlayerField>;
 
-/** A scene as a player gets it: an allowlist, field by field as SCENE_FOR_PLAYERS rules. */
+/** A scene as a player gets it: an allowlist, field by field as SCENE_FOR_PLAYERS rules, and only a floor they hold. */
 function projectSceneCtx(ctx: Ctx, scene: Scene): Scene | null {
   if (ctx.viewer.role === "dm") return scene;
-  if (scene.id !== ctx.sceneId) return null;
+  if (!ctx.floors.has(scene.id)) return null;
   const out: Scene = {
     id: scene.id,
     rev: 0,
@@ -2965,9 +3044,30 @@ function projectSceneCtx(ctx: Ctx, scene: Scene): Scene | null {
   if (scene.gridShape !== undefined) out.gridShape = scene.gridShape;
   // A following player's device shows it (docs/design/design-v1-isometric-view.md 7). It names a view, nothing of the map.
   if (scene.suggestedView !== undefined) out.suggestedView = scene.suggestedView;
-  // Only the players' scene comes this far, so weather the DM sets up on another scene never leaves the DM's devices.
+  // Only a floor the player holds comes this far, so weather the DM sets up on another scene or floor never leaves the DM's devices.
   if (scene.weather !== undefined) out.weather = scene.weather;
+  const floor = heldFloorOf(ctx, scene);
+  if (floor) out.floor = floor;
   return out;
+}
+
+/**
+ * A floor's place as a player gets it (docs/design/design-v1-floors.md 8,
+ * D-261102-492): its name and its level among the floors of its scene they
+ * hold, counted up from 0, so an unopened floor below or between leaves no
+ * gap. Only while they hold two or more floors of the scene: one floor held
+ * reads as a scene without floors. Never which floor is main, nor its height.
+ */
+function heldFloorOf(ctx: Ctx, scene: Scene): Scene["floor"] | null {
+  if (scene.floor === undefined) return null;
+  const levels: number[] = [];
+  for (const id of ctx.floors) {
+    const level = ownEntry(ctx.state.scenes, id)?.floor?.level;
+    if (level !== undefined && sameScene(ctx.state, id, scene.id)) levels.push(level);
+  }
+  if (levels.length < 2) return null;
+  const own = scene.floor.level;
+  return { level: levels.filter((level) => level < own).length, name: scene.floor.name };
 }
 
 function projectHandoutCtx(ctx: Ctx, handout: Handout): Handout | null {
@@ -3087,13 +3187,13 @@ export function pinCells(pin: Pick<Pin, "x" | "y">): CellRange {
 
 /**
  * Map pins (docs/design/design-v1-dm-tools.md 3.8), by the labels' rule and two
- * more: a player gets a pin on their scene that is not DM only, not on a
+ * more: a player gets a pin on a floor they hold that is not DM only, not on a
  * fully fogged cell (the two fog layers merged), and whose page, if it has
  * one, they may read. A pin linked to a DM-only page is the DM's, so players
  * never learn that a note exists there.
  */
 function projectPinCtx(ctx: Ctx, pin: Pin): Pin | null {
-  if (pin.sceneId !== ctx.sceneId) return null;
+  if (!ctx.floors.has(pin.sceneId)) return null;
   if (ctx.viewer.role === "dm") return pin;
   if (pin.visibility === "dm") return null;
   if (pin.pageId !== undefined) {
@@ -3963,14 +4063,36 @@ function projectMemberCtx(_ctx: Ctx, member: Member): Member {
 function projectMetaCtx(ctx: Ctx): ProjectedState["meta"] {
   if (ctx.viewer.role !== "dm") {
     // Preview can start from the DM's view, so discard its private derived metadata.
-    const { hpUndoLogIds: _undo, ...meta } = ctx.state.meta as ProjectedState["meta"];
-    return meta;
+    const { hpUndoLogIds: _undo, partyFloors: _party, ...meta } = ctx.state.meta as ProjectedState["meta"];
+    const party = ctx.member ? null : partyFloorsCtx(ctx);
+    return party ? { ...meta, partyFloors: party } : meta;
   }
   // Archive pages can outlive the server's undo records. Send their current
   // eligibility with live updates, independently of the DM's shorter tail.
   const reverted = new Set(ctx.state.log.flatMap((e) => e.data?.type === "hp" && e.data.back && e.data.of ? [e.data.of] : []));
   const hpUndoLogIds = ctx.state.log.filter((e) => e.data?.type === "hp" && e.data.revert && !e.data.back && !reverted.has(e.id)).map((e) => e.id);
   return { ...ctx.state.meta, hpUndoLogIds };
+}
+
+/**
+ * The floors a table display follows (docs/design/design-v1-floors.md 7.3,
+ * D-261102-491): of the floors it holds, those with the most unhidden
+ * party members, bottom first, worked out here, since a display's copy
+ * cannot tell a creature that lends sight from one that does not. Only a
+ * viewer who is no member gets it, a display or the player view export, and
+ * only while it holds two or more floors, so it names nothing a held
+ * floor's own record does not. Null when no party member stands on any.
+ */
+function partyFloorsCtx(ctx: Ctx): string[] | null {
+  if (ctx.floors.size < 2) return null;
+  const counts = new Map<string, number>();
+  for (const token of Object.values(ctx.state.tokens)) {
+    if (ctx.floors.has(token.sceneId) && unhiddenPartyMember(ctx.state, token)) counts.set(token.sceneId, (counts.get(token.sceneId) ?? 0) + 1);
+  }
+  const most = Math.max(0, ...counts.values());
+  if (most === 0) return null;
+  const level = (id: string) => ownEntry(ctx.state.scenes, id)?.floor?.level ?? 0;
+  return [...counts.keys()].filter((id) => counts.get(id) === most).sort((a, b) => level(a) - level(b) || (a < b ? -1 : a > b ? 1 : 0));
 }
 
 /** One entity as the viewer may see it, or null when the viewer may not know it exists. */
@@ -4054,9 +4176,9 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
     case "played":
     case "memoryShared":
       return null;
-    // A floor's opened mark reaches DM projections only (docs/design/design-v1-floors.md 8): FLR-B projects it.
+    // Which floors players have reached is the DM's, whose Floors menu and warnings read it (docs/design/design-v1-floors.md 8).
     case "opened":
-      return null;
+      return ctx.viewer.role === "dm" ? value : null;
     case "holders":
       return value ? projectHoldersCtx(ctx, value as SightHolders) : null;
     case "fogDraft":
@@ -4251,7 +4373,7 @@ function projectMap<T, P>(map: Record<string, T>, project: (value: T) => P | nul
   return out;
 }
 
-/** The full snapshot for a viewer: one scene's contents and the room-level data the viewer may see. */
+/** The full snapshot for a viewer: the contents of the floors they hold, one scene's, and the room-level data the viewer may see. */
 export function projectState(state: RoomState, viewer: Viewer, opts: ProjectOpts): ProjectedState {
   return projectStateCtx(ctxOf(state, viewer, opts));
 }
@@ -4294,7 +4416,14 @@ function projectStateCtx(ctx: Ctx): ProjectedState {
     ...perPlayerMapsCtx(ctx),
     ...clockField(ctx),
     ...soundFields(ctx),
+    ...openedField(ctx),
   };
+}
+
+/** The floors players have reached, the DM's alone, as a field only while it holds a mark, as keys.ts writeEntity keeps it. */
+function openedField(ctx: Ctx): Pick<ProjectedState, "openFloors"> {
+  const marks = ctx.state.openFloors;
+  return ctx.viewer.role === "dm" && marks !== undefined && Object.keys(marks).length > 0 ? { openFloors: marks } : {};
 }
 
 /** The clock as a field only while the viewer gets one, so a room without it projects as it always did (keys.ts writeEntity). */
@@ -4305,50 +4434,55 @@ function clockField(ctx: Ctx): Pick<ProjectedState, "clock"> {
 
 /**
  * The maps only a projection of a per-player scene holds
- * (docs/design/design-v1-per-player-vision.md 6.2), each only while it holds
- * anything, so a whole-party scene projects as it always did and a change
- * that empties one takes it away (keys.ts writeEntity): `sightAll` with
- * vision on, `fogAll`, and the DM's `exploredAny` and holder list. Every
- * viewer gets `fogAll`, the DM too, so a device reads what every viewer
- * shares from it alone, and one that holds no tile there finds it fully
- * fogged.
+ * (docs/design/design-v1-per-player-vision.md 6.2), for each held floor that is
+ * one, each only while it holds anything, so a whole-party scene projects
+ * as it always did and a change that empties one takes it away (keys.ts
+ * writeEntity): `sightAll` with vision on, `fogAll`, and the DM's
+ * `exploredAny` and holder lists. Every viewer gets `fogAll`, the DM too,
+ * so a device reads what every viewer shares from it alone, and one that
+ * holds no tile there finds it fully fogged.
  */
 function perPlayerMapsCtx(ctx: Ctx): Pick<ProjectedState, "sightAll" | "fogAll" | "exploredAny" | "holders"> {
-  const sceneId = ctx.sceneId;
-  const scene = sceneId === null ? undefined : ownEntry(ctx.state.scenes, sceneId);
-  if (sceneId === null || !scene || !perPlayerScene(scene)) return {};
+  const floors = new Set([...ctx.floors].filter((id) => perPlayerScene(ownEntry(ctx.state.scenes, id))));
+  if (floors.size === 0) return {};
   const out: Pick<ProjectedState, "sightAll" | "fogAll" | "exploredAny" | "holders"> = {};
-  if (visionOn(scene)) {
-    const sightAll: SightMap = {};
+  const sightAll: SightMap = {};
+  for (const sceneId of floors) {
+    if (!visionOn(ownEntry(ctx.state.scenes, sceneId))) continue;
     for (const [at, tile] of visionRules.holderSight(ctx.state, sceneId, null).tiles) sightAll[`${sceneId}:${at}`] = tile;
-    if (Object.keys(sightAll).length > 0) out.sightAll = sightAll;
   }
-  const tiles = (each: (tx: number, ty: number) => FogTile | null, keyed: Iterable<{ sceneId: string; tx: number; ty: number }>) => {
+  if (Object.keys(sightAll).length > 0) out.sightAll = sightAll;
+  const tiles = (each: (sceneId: string, tx: number, ty: number) => FogTile | null, keyed: Iterable<{ sceneId: string; tx: number; ty: number }>) => {
     const map: Record<string, FogTile> = {};
     for (const t of keyed) {
-      if (t.sceneId !== sceneId) continue;
-      const key = tileKey(sceneId, t.tx, t.ty);
+      if (!floors.has(t.sceneId)) continue;
+      const key = tileKey(t.sceneId, t.tx, t.ty);
       if (key in map) continue;
-      const tile = each(t.tx, t.ty);
+      const tile = each(t.sceneId, t.tx, t.ty);
       if (tile) map[key] = tile;
     }
     return map;
   };
-  const fogAll = tiles((tx, ty) => projectFogAllCtx(ctx, sceneId, tx, ty), [...Object.values(ctx.state.fogTiles), ...Object.values(ctx.state.exploredTiles ?? {})]);
+  const fogAll = tiles((sceneId, tx, ty) => projectFogAllCtx(ctx, sceneId, tx, ty), [...Object.values(ctx.state.fogTiles), ...Object.values(ctx.state.exploredTiles ?? {})]);
   if (Object.keys(fogAll).length > 0) out.fogAll = fogAll;
   if (ctx.viewer.role === "dm") {
-    const exploredAny = tiles((tx, ty) => projectExploredAnyCtx(ctx, sceneId, tx, ty), Object.values(ctx.state.exploredBy ?? {}));
+    const exploredAny = tiles((sceneId, tx, ty) => projectExploredAnyCtx(ctx, sceneId, tx, ty), Object.values(ctx.state.exploredBy ?? {}));
     if (Object.keys(exploredAny).length > 0) out.exploredAny = exploredAny;
-    const list = ownEntry(ctx.state.holders, sceneId);
-    if (list) out.holders = { [sceneId]: list };
+    const holders: Record<string, SightHolders> = {};
+    for (const sceneId of floors) {
+      const list = ownEntry(ctx.state.holders, sceneId);
+      if (list) holders[sceneId] = list;
+    }
+    if (Object.keys(holders).length > 0) out.holders = holders;
   }
   return out;
 }
 
-/** The viewer's scene's fog tiles, each key any layer they read holds (projectFogCtx): a holder's own layer too. */
+/** The fog tiles of the floors the viewer holds, each key any layer they read holds (projectFogCtx): a holder's own layer too. */
 function projectFogTilesCtx(ctx: Ctx): Record<string, FogTile> {
   const out: Record<string, FogTile> = {};
-  const own = ctx.viewer.role === "player" && ctx.sceneId !== null ? holderLayer(ctx.state, ctx.sceneId, ctx.viewer.memberId) : {};
+  const own: Record<string, ExploredTile> = {};
+  if (ctx.viewer.role === "player") for (const sceneId of ctx.floors) Object.assign(own, holderLayer(ctx.state, sceneId, ctx.viewer.memberId));
   for (const layer of [ctx.state.fogTiles, ctx.state.exploredTiles ?? {}, own]) {
     for (const [key, tile] of Object.entries(layer)) {
       if (key in out) continue;
@@ -4366,6 +4500,7 @@ export function allKeys(state: RoomState): EntityKey[] {
   for (const id of Object.keys(state.playlists ?? {})) out.push(keys.playlist(id));
   for (const id of Object.keys(state.members)) out.push(keys.member(id));
   for (const id of Object.keys(state.scenes)) out.push(keys.scene(id));
+  for (const id of Object.keys(state.openFloors ?? {})) out.push(keys.opened(id));
   for (const c of Object.values(state.buildChunks)) out.push(keys.chunk(c.sceneId, c.cx, c.cy));
   // On a scene with fog on every position may hold a stub (docs/design/design-v1-map-discovery.md 5.6), and memory can name labels and stamps the build no longer has.
   const chunkKeys = new Set(Object.values(state.buildChunks).map((c) => keys.chunk(c.sceneId, c.cx, c.cy)));
@@ -4520,6 +4655,7 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
   // The DM's projected meta carries retained HP undo ids, which can change
   // when a log line is added or dropped without changing the stored meta.
   if (touched.some((key) => key.startsWith("log:"))) add(keys.meta);
+  if (partyFloorsMoved(state, touched, other)) add(keys.meta);
   const tokenIds = new Set<string>();
   const characterIds = new Set<string>();
   const handoutIds = new Set<string>();
@@ -4763,6 +4899,31 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
 }
 
 /**
+ * Whether a touched token may change which floors a table display follows
+ * (meta's `partyFloors`, docs/design/design-v1-floors.md 7.3, FLR-OPUS-36):
+ * one on a scene with floors that came or went, or whose floor or standing
+ * as an unhidden party member differs between the batch's two states. A
+ * change of a character's owners re-projects everything anyway (Tx
+ * global). With one state alone, any touched token on a scene with floors.
+ */
+function partyFloorsMoved(state: RoomState, touched: readonly EntityKey[], other: RoomState | undefined): boolean {
+  const floored = (s: RoomState, token: Token | undefined) => token !== undefined && ownEntry(s.scenes, token.sceneId)?.floor !== undefined;
+  for (const key of touched) {
+    if (!key.startsWith("token:")) continue;
+    const id = key.slice("token:".length);
+    const now = ownEntry(state.tokens, id);
+    if (other === undefined) {
+      if (floored(state, now)) return true;
+      continue;
+    }
+    const was = ownEntry(other.tokens, id);
+    if (!floored(state, now) && !floored(other, was)) continue;
+    if (now === undefined || was === undefined || now.sceneId !== was.sceneId || unhiddenPartyMember(state, now) !== unhiddenPartyMember(other, was)) return true;
+  }
+  return false;
+}
+
+/**
  * What a change of sound re-projects for players (docs/design/design-v1-music.md
  * 6.5). The fan-out asks with each side of a batch, so the sounds a write
  * of `playing` names before and after both go again: a newly named sound
@@ -4965,7 +5126,8 @@ export function visibleAssetIds(state: RoomState, viewer: Viewer, opts: ProjectO
     if (id !== undefined) ids.add(id);
   };
   const projected = projectState(state, viewer, opts);
-  // A player's scene carries only the showing phase's video, on its map (docs/design/design-v1-animated-maps.md 7).
+  // A player gets only the floors they hold, each carrying only the showing phase's video, on its map
+  // (docs/design/design-v1-animated-maps.md 7), so an unheld floor's still and video stay the DM's (docs/design/design-v1-floors.md 18.3).
   for (const scene of Object.values(projected.scenes)) {
     if (scene.map) ids.add(scene.map.assetId);
     if (scene.map?.video) ids.add(scene.map.video.assetId);
