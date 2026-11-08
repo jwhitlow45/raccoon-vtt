@@ -334,7 +334,7 @@ All of this is the DM's.
     - A Fire-Casting Statue stands against the wall of a Dungeon or Crypt room 5 by 5 or larger. It is placed only where its fire reaches its plate under every area rule, so changing the room's area rules later never leaves it harmless.
     - A Rolling Stone comes only at Party level 11 to 16 or 17 to 20, on Wide corridors, at most 2. Its stone is a hidden Large object token (Initiative +8, Speed 60 ft, AC 17, HP 100) that the trap shows when it goes off.
   - **Secret doors** (a slider with the marks None, Few, Some and Many, read as a count such as "About 2 secret doors") puts secret doors on extra ways around and on the only door of some rooms, which become secret rooms.
-    - Every room can still be reached without finding one, and a secret door is never locked or at the top of stairs.
+    - Every room but a secret room can still be reached without finding one, and a secret door is never locked or at the top of stairs.
     - Players see plain wall there until the DM marks it found (see Walls and doors).
     - Cave holds it at None, "Caves have no doors, so none are secret.", and the DM's pick comes back with the next theme.
   - **Lit rooms** (a slider with the marks None, Few, Half and All, read as "About 3 of 12 rooms lit") lights a share of the rooms with the theme's light: a fire pit (Dungeon), a candelabra (Crypt), a campfire (Cave) or a lantern (Mine and Sewer), each with its SRD light.
