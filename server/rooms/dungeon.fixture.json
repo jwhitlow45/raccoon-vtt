@@ -14698,7 +14698,7 @@
       "blocks": [
        {
         "id": "dungeonblk00",
-        "text": "A generated Cave of 12 rooms on 50 × 50 squares (250 by 250 ft). Room 1 is the way in. Each room's pin carries its number.\n\nMade with: Cave, Medium, Normal, Bending, Narrow, extra ways around, dead ends, Heights Some, Traps Few at levels 1–4, Secret doors Few, Lit rooms Few, Dressing Some, 5 ft squares."
+        "text": "A generated Cave of 12 rooms on 50 × 50 squares (250 by 250 ft). Room 1 is the way in. Each room's pin carries its number.\n\nMade with: Cave, Medium, Normal, Bending, Narrow, extra ways around, dead ends, Heights Some, Traps Few at levels 1–4, Secret doors None, Lit rooms Few, Dressing Some, 5 ft squares."
        },
        {
         "id": "dungeonblk01",
