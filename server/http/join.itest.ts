@@ -296,10 +296,17 @@ describe("joining as a player", () => {
 
 describe("join/complete through admitPlayer: the member first, the grant second", () => {
   let t: TestApp;
+  // A short answer bound, for the tests that hold a member op past it. Any real op on this app races the
+  // bound, and a loaded machine loses that race, so every answer the other tests wait for comes from `t`.
+  let bounded: TestApp;
   before(async () => {
-    t = await startTestApp({ access: { admissions: { memberMs: 100 } } });
+    t = await startTestApp();
+    bounded = await startTestApp({ access: { admissions: { memberMs: 100 } } });
   });
-  after(() => t.close());
+  after(async () => {
+    await t.close();
+    await bounded.close();
+  });
 
   async function ticketFor(c: TestClient, roomId: string): Promise<string> {
     const res = await c.post(`/api/rooms/${roomId}/join`, { password: PASSWORD });
@@ -310,6 +317,11 @@ describe("join/complete through admitPlayer: the member first, the grant second"
   async function memberNames(roomId: string): Promise<string[]> {
     const { rows } = await t.pool.query<{ state: RoomState }>("select state from room_snapshots where room_id = $1", [roomId]);
     return Object.values(rows[0]?.state.members ?? {}).map((m) => m.name).sort();
+  }
+
+  /** Asks GET /me until the device is in, as the join page does after a busy answer. */
+  async function untilIn(phone: TestClient, roomId: string): Promise<void> {
+    for (let i = 0; i < 250 && (await phone.me(roomId)).status !== 200; i++) await new Promise((r) => setTimeout(r, 20));
   }
 
   test("between the steps the member is in the roster and no grant exists yet", async () => {
@@ -334,15 +346,15 @@ describe("join/complete through admitPlayer: the member first, the grant second"
   });
 
   test("a member that has not landed within the bound answers busy with its ticket reserved, then GET /me enters", async () => {
-    const { roomId } = await t.client().createRoom();
-    const phone = t.client();
+    const { roomId } = await bounded.client().createRoom();
+    const phone = bounded.client();
     const ticket = await ticketFor(phone, roomId);
-    const addMember = t.gateway.addMember;
+    const addMember = bounded.gateway.addMember;
     let land!: () => void;
     const landed = new Promise<void>((r) => (land = r));
-    t.gateway.addMember = async (room, member) => {
+    bounded.gateway.addMember = async (room, member) => {
       await landed;
-      await addMember.call(t.gateway, room, member);
+      await addMember.call(bounded.gateway, room, member);
     };
     try {
       const first = await phone.post(`/api/rooms/${roomId}/join/complete`, { ticket, name: "Quinn", color: "#112233" });
@@ -353,9 +365,9 @@ describe("join/complete through admitPlayer: the member first, the grant second"
       assert.equal(retry.statusCode, 503);
       assert.equal((await phone.me(roomId)).status, 403);
       land();
-      for (let i = 0; i < 50 && (await phone.me(roomId)).status !== 200; i++) await new Promise((r) => setTimeout(r, 20));
+      await untilIn(phone, roomId);
     } finally {
-      t.gateway.addMember = addMember;
+      bounded.gateway.addMember = addMember;
     }
     assert.equal((await phone.me(roomId)).role, "player");
     assert.deepEqual(await memberNames(roomId), ["Dungeon Master", "Quinn"]);
@@ -365,13 +377,13 @@ describe("join/complete through admitPlayer: the member first, the grant second"
   });
 
   test("a member op that fails after the bound gives the ticket back, and the retry joins", async () => {
-    const { roomId } = await t.client().createRoom();
-    const phone = t.client();
+    const { roomId } = await bounded.client().createRoom();
+    const phone = bounded.client();
     const ticket = await ticketFor(phone, roomId);
-    const addMember = t.gateway.addMember;
+    const addMember = bounded.gateway.addMember;
     let fail!: () => void;
     const failed = new Promise<void>((r) => (fail = r));
-    t.gateway.addMember = async () => {
+    bounded.gateway.addMember = async () => {
       await failed;
       throw new RoomFullError();
     };
@@ -380,10 +392,16 @@ describe("join/complete through admitPlayer: the member first, the grant second"
       fail();
       await new Promise((r) => setTimeout(r, 20));
     } finally {
-      t.gateway.addMember = addMember;
+      bounded.gateway.addMember = addMember;
     }
     const retry = await phone.post(`/api/rooms/${roomId}/join/complete`, { ticket, name: "Quinn", color: "#112233" });
-    assert.equal(retry.statusCode, 200, retry.body);
+    // The retry's real member op races the short bound too, so it may answer pending and land after, as the
+    // join page's GET /me then finds. A ticket still held answers busy too, but asks for a retry in 1 s, not 2.
+    if (retry.statusCode !== 200) {
+      assert.deepEqual([retry.statusCode, retry.headers["retry-after"]], [503, "2"], retry.body);
+      await untilIn(phone, roomId);
+    }
+    assert.equal((await phone.me(roomId)).role, "player");
     assert.deepEqual(await memberNames(roomId), ["Dungeon Master", "Quinn"]);
   });
 
@@ -404,7 +422,7 @@ describe("join/complete through admitPlayer: the member first, the grant second"
     } finally {
       t.gateway.addMember = addMember;
     }
-    for (let i = 0; i < 50 && (await memberNames(roomId)).length > 1; i++) await new Promise((r) => setTimeout(r, 20));
+    for (let i = 0; i < 250 && (await memberNames(roomId)).length > 1; i++) await new Promise((r) => setTimeout(r, 20));
     assert.deepEqual(await memberNames(roomId), ["Dungeon Master"]);
     assert.equal((await phone.me(roomId)).status, 403);
   });

@@ -954,7 +954,9 @@ describe("archive scans and what happens around them", () => {
     await g.release;
   };
   before(async () => {
-    t = await startEngine({ log: { budget, history: { batchRows: 2, onBatch } } });
+    // The session cache keys a list on the loaded room's state, so a reload between two requests is a miss by design.
+    // The engine's 200 ms idle unload can pass between them on a loaded machine, so here a room stays loaded.
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000 }, log: { budget, history: { batchRows: 2, onBatch } } });
   });
   after(() => t.close());
 
