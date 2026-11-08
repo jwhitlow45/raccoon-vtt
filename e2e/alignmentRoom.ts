@@ -1033,7 +1033,13 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     await sweep.measure(page, "alerts-column", column);
     const fold = column.locator("[data-alert] button[aria-expanded=false]").first();
     if (await visible(fold)) {
-      await fold.click();
+      // The tapped card itself, held across the tap: once open it no longer matches the locator, and another card
+      // may stand open already, so neither tells this tap's card drew open (R6-01). It may leave the page as the
+      // cards go over the screen.
+      const tapped = (await fold.elementHandle())!;
+      await tapped.click();
+      await waitFor("the tapped card to draw open", async () => ((await tapped.evaluate((el) => !el.isConnected || el.getAttribute("aria-expanded") === "true")) ? true : null), 3_000);
+      await tapped.dispose();
       // The open card's height is read on the frame after the tap. Where it leaves the first card no room above the tool's options, the cards are asked for as the summary row's tap asks for them. A measure taken sooner read a column still moving, which on a slow CI page folded into its row mid-measure.
       await columnSettled(page);
       const open = await markColumn(page);

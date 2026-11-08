@@ -169,6 +169,12 @@ async function rowStandsForOpenCard(page: Page): Promise<void> {
   await page.getByRole("button", { name: /went off.*Tap to answer\.$/ }).waitFor();
 }
 
+/** Opens a card that must start folded: only the tap that opens it asks to show the cards over the screen. */
+async function opensFolded(toggle: Locator): Promise<void> {
+  assert.equal(await toggle.getAttribute("aria-expanded"), "false", "the card starts folded, or no tap here opens it and nothing shows the cards over the screen");
+  await toggle.click();
+}
+
 async function rectOf(locator: Locator): Promise<Rect> {
   const b = await locator.boundingBox();
   assert.ok(b, "nothing on screen to measure");
@@ -595,7 +601,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     // A phone's card starts folded to its first line. Open, it leaves the column above the Ruler's options too short for it, so the cards show over the screen at once, as the column's row would show them (D-261106-391).
     const card = dm.getByRole("group", { name: "Hidden Pit went off" }).first();
     const toggle = card.getByRole("button", { name: "Hidden Pit went off", exact: true });
-    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    await opensFolded(toggle);
     const alerts = dm.getByRole("dialog", { name: "Alerts" });
     await alerts.waitFor();
     const inAlerts = alerts.getByRole("group", { name: "Hidden Pit went off" }).first();
@@ -634,7 +640,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     // Opened, the card leaves the column too short for it, so the column's own row stands for the cards.
     const card = dm.getByRole("group", { name: "Hidden Pit went off" }).first();
     const toggle = card.getByRole("button", { name: "Hidden Pit went off", exact: true });
-    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    await opensFolded(toggle);
     await rowStandsForOpenCard(dm);
     await tapCell(dm, BOUNDS, { x: 6, y: 5 });
     await pane(dm).waitFor();
@@ -664,7 +670,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await waitFor("springings waiting", () => ((trap(dmSocket)?.rig?.due?.length ?? 0) >= 1 ? true : null));
     const card = dm.getByRole("group", { name: "Hidden Pit went off" }).first();
     const toggle = card.getByRole("button", { name: "Hidden Pit went off", exact: true });
-    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    await opensFolded(toggle);
     await rowStandsForOpenCard(dm);
     await dm.getByRole("button", { name: "Panels", exact: true }).click();
     const panels = dm.getByRole("region", { name: "Panels" });
