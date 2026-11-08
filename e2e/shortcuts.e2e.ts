@@ -21,7 +21,9 @@ import { openGroup } from "./helpers/groups.ts";
  * (state/keyBindings.ts). In a 390 px window at 130%, Change and Reset
  * keep clear of every row's words. Then a second press of a tool's key
  * moves through its main choice (docs/design/design-v1-tool-cycle.md 8), on the
- * computer and on the phone with a keyboard.
+ * computer and on the phone with a keyboard. On a scene of several floors,
+ * `[` and `]` show the floor below and the floor above
+ * (docs/design/design-v1-floors.md 7.2).
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus fourteen.
  * The other environment variables are the smoke run's (smoke.e2e.ts).
@@ -1277,6 +1279,52 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await waitFor("I on the phone's View button", async () => ((await phoneView.getAttribute("aria-keyshortcuts")) === "I" ? true : null));
     assert.deepEqual({ keys: await select.getAttribute("aria-keyshortcuts"), title: await select.getAttribute("title") }, { keys: "V", title: "Select (V)" });
     assert.equal(await player.locator("[data-fl1-mark]").count(), 2, "the same View and Select buttons");
+  });
+
+  test("flr-k. on a scene of several floors, the DM's Floor names [ and ] in its tooltip and aria-keyshortcuts, the sheet lists both, ] and [ show the floor above and below and say when there is none, and the player, who holds one floor, has no Floor", async () => {
+    const tipOf = (button: Locator) =>
+      button.evaluate((el) => {
+        const doc = (globalThis as unknown as { document: { getElementById(id: string): { getAttribute(name: string): string | null; textContent: string | null } | null } }).document;
+        for (const id of (el.getAttribute("aria-describedby") ?? "").split(" ")) {
+          const tip = doc.getElementById(id);
+          if (tip?.getAttribute("role") === "tooltip") return tip.textContent;
+        }
+        return null;
+      });
+    const ground = cycle.sceneId;
+    const upper = randomUUID();
+    const name = dmSocket.state!.scenes[ground]!.name;
+    await cycle.ops!.send({ t: "scene.create", scene: { id: upper, name, bounds: cycle.bounds }, floor: { beside: ground, side: "above", besideName: "Ground floor" } });
+    await cycle.ops!.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor" } } });
+    try {
+      const floor = dm.locator('header[data-rvtt-topbar] [data-floors="button"]');
+      await floor.waitFor();
+      assert.deepEqual(
+        { name: await floor.getAttribute("aria-label"), keys: await floor.getAttribute("aria-keyshortcuts"), tip: await tipOf(floor) },
+        { name: "Floor: Ground floor. Show another floor", keys: "[ ]", tip: "Show another floor ([ and ])" },
+      );
+      await keyOn(dm, "]");
+      await waitFor("] shows Upper floor", async () => ((await floor.getAttribute("aria-label")) === "Floor: Upper floor. Show another floor" ? true : null));
+      await keyOn(dm, "]");
+      await dm.locator("[data-toast]").filter({ hasText: "No floor above Upper floor." }).first().waitFor();
+      await keyOn(dm, "[");
+      await waitFor("[ shows Ground floor", async () => ((await floor.getAttribute("aria-label")) === "Floor: Ground floor. Show another floor" ? true : null));
+
+      await keyOn(dm, "?");
+      const sheet = dm.getByRole("dialog", { name: "Shortcuts" });
+      await sheet.waitFor();
+      const keys = await inputs(sheet, "Keys");
+      for (const k of ["[", "]"]) assert.ok(keys.includes(k), `${k} in ${keys.join(", ")}`);
+      await sheet.getByRole("row").filter({ hasText: "Show the floor below" }).first().waitFor();
+      await sheet.getByRole("row").filter({ hasText: "Show the floor above" }).first().waitFor();
+      await dm.keyboard.press("Escape");
+      await sheet.waitFor({ state: "detached" });
+
+      assert.equal(await player.locator('[data-floors="button"]').count(), 0, "the player holds Ground alone");
+    } finally {
+      await cycle.ops!.send({ t: "scene.delete", sceneId: upper });
+    }
+    await waitFor("the DM's Floor gone with Upper", async () => ((await dm.locator('[data-floors="button"]').count()) === 0 ? true : null));
   });
 
   test("4. neither page logged an error", () => {

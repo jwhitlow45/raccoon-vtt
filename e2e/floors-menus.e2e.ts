@@ -159,11 +159,18 @@ async function pickRow(page: Page, text: string, id: string): Promise<void> {
   await sheet(page).waitFor({ state: "detached" });
 }
 
+/** Whether the DM's board shows a floor, by the top bar's Floor: a switch among the floors of the scene projected sends nothing (design-v1-floors.md 7.3). */
+async function dmOn(floorId: string): Promise<boolean> {
+  const name = dmSocket.state?.scenes[floorId]?.floor?.name;
+  const label = await topBar(dm).locator('[data-floors="button"]').getAttribute("aria-label", { timeout: 1_000 }).catch(() => null);
+  return name !== undefined && label === `Floor: ${name}. Show another floor`;
+}
+
 /** The DM looks at a floor, by its Floor row in the search. */
 async function dmShows(floorId: string, typed: string): Promise<void> {
-  if (dmSocket.you?.sceneId === floorId) return;
+  if (await dmOn(floorId)) return;
   await pickRow(dm, typed, `floor:${floorId}`);
-  await waitFor(`the DM on ${typed}`, () => (dmSocket.you?.sceneId === floorId ? true : null), 20_000);
+  await waitFor(`the DM on ${typed}`, async () => ((await dmOn(floorId)) ? true : null), 20_000);
 }
 
 async function playersOn(sceneId: string, blackout: boolean): Promise<void> {
@@ -308,6 +315,8 @@ describe("The DM menu and the search on a scene of several floors", { concurrenc
     assert.match(await show.innerText(), /Show players Tower · Upper floor/);
     try {
       await show.click();
+      // Upper has no fog, so the reveal asks first, as on a plain scene without fog.
+      await menu.getByText("Show players anyway", { exact: true }).click();
       await playersOn(run.upper, true);
       await coOps.send({ t: "room.setPlayerScene", sceneId: run.ground });
       await playersOn(run.ground, true);
@@ -332,7 +341,7 @@ describe("The DM menu and the search on a scene of several floors", { concurrenc
     await field(dm).fill("goblin");
     await row(dm, `token:${run.goblin}`).click();
     await sheet(dm).waitFor({ state: "detached" });
-    await waitFor("the DM on Upper", () => (dmSocket.you?.sceneId === run.upper ? true : null), 20_000);
+    await waitFor("the DM on Upper", async () => ((await dmOn(run.upper)) ? true : null), 20_000);
     await dm.locator("[data-token-bar], [data-action-bar]").first().waitFor({ timeout: 8_000 }).catch(() => undefined);
     await shots.take(dm, "flrm-5-token-on-another-floor");
   });
