@@ -11,6 +11,8 @@ import { footprintGround } from "#shared/rules/heights.ts";
 import { landedElevation } from "#shared/rules/movement.ts";
 import { gridOfToken, hashValue, inSightOfNonOwners, projectEntity, visibleAssetIds } from "#shared/project.ts";
 import { ASK_LOST, clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
+import { addsReservedEntryId } from "#shared/reservedIds.ts";
+import { RESERVED_ID } from "#shared/reducer/tx.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { restoreAddedAssets } from "#shared/referencedAssets.ts";
 import { hpUndoRestore } from "#shared/reducer/hpUndo.ts";
@@ -1441,6 +1443,11 @@ export class RoomActor {
      */
     if (viewer.role === "player" && isBlockOp(op) && !this.#blockSaveBudget(viewer.memberId).take()) {
       this.#refuse(key, wm, n, "quota", BLOCK_SAVES_TOO_FAST, admitted);
+      return;
+    }
+    // A live op only: a restore replays what was stored, and stored ops apply as stored.
+    if (!restoredFrom && addsReservedEntryId(clientOp)) {
+      this.#refuse(key, wm, n, "invalid", RESERVED_ID, admitted);
       return;
     }
     op = withAssetSizes(op, facts);

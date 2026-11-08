@@ -1082,6 +1082,22 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     await reopen(ana, DESKTOP, 1);
   });
 
+  test("rulesd-1. an effect and an initiative entry named __proto__ or constructor are refused, and Ana's and Cy's pages keep Bree's page and the tracker as they were", async () => {
+    const breeEffects = () => (dmSocket.state as { characters: Record<string, { actor: { effects: unknown[] } }> }).characters[run.bree.characterId]!.actor.effects.length;
+    const before = { effects: breeEffects(), ana: consoles.ana.errors.length, cy: consoles.cy.errors.length, dm: consoles.dm.errors.length };
+    for (const name of ["__proto__", "constructor"]) {
+      await assert.rejects(ops.send({ t: "actor.effect.add", target: { tokenId: run.bree.tokenId }, effect: { id: name, key: "blessed" } }), /that id is reserved/, `an effect named ${name}`);
+      await assert.rejects(ops.send({ t: "encounter.start", entries: [{ id: name, tokenId: run.bree.tokenId, value: 12 }] }), /that id is reserved/, `an entry named ${name}`);
+    }
+    // An ordinary id still goes through, so the refusal is the id's and not the op's.
+    await ops.send({ t: "encounter.start", entries: [{ id: "pid-entry", tokenId: run.bree.tokenId, value: 12 }] });
+    await ana.getByText("The fight has not started yet").first().waitFor();
+    await cy.getByText("The fight has not started yet").first().waitFor();
+    await ops.send({ t: "encounter.end" });
+    assert.equal(breeEffects(), before.effects, "no effect was added");
+    assert.deepEqual({ ana: consoles.ana.errors.length, cy: consoles.cy.errors.length, dm: consoles.dm.errors.length }, { ana: before.ana, cy: before.cy, dm: before.dm }, "no page logged an error");
+  });
+
   test("rs-12. no page logged an error, and every import request was planned", () => {
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     assert.deepEqual(consoles.ana.errors, [], "Ana's page logged errors");
