@@ -287,6 +287,10 @@ describe("what players see on a new scene (docs/design/design-v1-map-discovery.m
     // The import's own light pick stands over the copy's.
     assert.deepEqual(playersSeeFields({ like: crypt }, "bright").vision, { on: true, light: "bright", perPlayer: true });
     assert.deepEqual(playersSeeFields({ like: { fogEnabled: true } }, "dim").vision, { on: false, light: "dim" });
+    // Like a Time of day scene follows the clock too, unless the import dialog picked a light by hand.
+    const dusk = { fogEnabled: true, vision: { on: true, light: "dim", byClock: true } } as const;
+    assert.deepEqual(playersSeeFields({ like: dusk }).vision, { on: true, light: "dim", byClock: true });
+    assert.deepEqual(playersSeeFields({ like: dusk }, "dark").vision, { on: true, light: "dark" });
   });
 
   test("Like with the scene on screen gone makes the kind's start instead", () => {

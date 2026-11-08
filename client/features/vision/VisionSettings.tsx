@@ -25,6 +25,9 @@ import {
   carriedLightsNote,
   fogNote,
   LIGHT_LEVELS,
+  lightChoiceOf,
+  lightChoices,
+  lightHelp,
   lightOf,
   lightPatch,
   phaseWithLight,
@@ -33,8 +36,10 @@ import {
   sightPatch,
   sightShown,
   sightWorkingText,
+  timeOfDayPatch,
   visionOnHelp,
   visionPending,
+  type LightChoice,
   type SightChoice,
 } from "./settings.ts";
 import { noSightText } from "./sources.ts";
@@ -44,6 +49,9 @@ const PHASE_LIGHTS: readonly { value: LightLevel | "keep"; label: string }[] = [
   { value: "keep", label: "Leave the light" },
   ...LIGHT_LEVELS.map((l) => ({ value: l.value, label: l.label })),
 ];
+
+const PHASE_LIGHT_HELP =
+  "A phase's light becomes the scene's light when the map switches to it, and at once for the phase showing now, so Night can make the scene dark. A phase with its own light turns Time of day off.";
 
 type Patch = OpOf<"scene.update">["patch"];
 
@@ -63,19 +71,29 @@ export function LightSettings(props: { scene: Scene }) {
   const on = scene.vision?.on === true;
   const light = lightOf(scene);
   const phases = scene.phases && scene.phases.length >= 2 ? scene.phases : null;
+  // Only whether a clock exists and whether players see it, so a step of the clock re-renders nothing here.
+  const hasClock = useRoomView((s) => s.view?.clock != null);
+  const clockShown = useRoomView((s) => s.view?.clock?.shown);
+  const clock = hasClock ? { shown: clockShown === true } : null;
   const tokens = useRoomView((s) => (on && light !== "bright" ? s.view?.tokens : undefined));
   const unlit = useMemo(() => (tokens ? carriedLightsNote(tokens, scene.id, light) : null), [tokens, scene.id, light]);
   return (
     <>
-      <SettingRow name="Light" search="scenes.light.level" help={on ? LIGHT_LEVELS.find((l) => l.value === light)?.note : LIGHT_NEEDS_VISION} wide>
-        <Segmented<LightLevel> label="Light level" value={light} options={LIGHT_LEVELS} onChange={(level) => update({ vision: lightPatch(scene, level) })} />
+      <SettingRow name="Light" search="scenes.light.level" help={on ? lightHelp(scene, clock) : LIGHT_NEEDS_VISION} wide>
+        <Segmented<LightChoice>
+          label="Light level"
+          value={lightChoiceOf(scene)}
+          options={lightChoices(scene, hasClock)}
+          even
+          onChange={(choice) => update({ vision: choice === "clock" ? timeOfDayPatch(scene) : lightPatch(scene, choice) })}
+        />
       </SettingRow>
       {unlit ? <Note>{unlit}</Note> : null}
 
       {phases ? (
         <SettingRow
           name="Light per phase"
-          help={on ? "A phase's light becomes the scene's light when the map switches to it, and at once for the phase showing now, so Night can make the scene dark." : LIGHT_NEEDS_VISION}
+          help={on ? PHASE_LIGHT_HELP : LIGHT_NEEDS_VISION}
           wide
         >
           <div style={{ display: "grid", gap: theme.space(1), width: "100%", minWidth: 0 }}>

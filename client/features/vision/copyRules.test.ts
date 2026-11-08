@@ -12,7 +12,7 @@ const crypt = scene("s1", { name: "Crypt", fogEnabled: true, vision: { on: true,
 describe("using a scene's vision settings on others", () => {
   test("the copy sets Players see, the light and Sight, and leaves movement and walls as they are", () => {
     const patch = copyPatch(crypt);
-    assert.deepEqual(patch, { fogEnabled: true, vision: { on: true, light: "dark", perPlayer: true } });
+    assert.deepEqual(patch, { fogEnabled: true, vision: { on: true, light: "dark", perPlayer: true, byClock: false } });
     const hall = scene("s2", { name: "Hall", fogEnabled: false, blockMovement: false, autoWalls: "off" });
     const op = { t: "scene.update" as const, sceneId: "s2", patch };
     assert.ok(clientOpSchema.safeParse(op).success);
@@ -22,7 +22,17 @@ describe("using a scene's vision settings on others", () => {
     assert.equal(after.blockMovement, false);
     assert.equal(after.autoWalls, "off");
     // A whole-party source folds a per-player scene back, and one from before vision copies as Reveal by hand in Bright.
-    assert.deepEqual(copyPatch(scene("s3", { fogEnabled: true })), { fogEnabled: true, vision: { on: false, light: "bright", perPlayer: false } });
+    assert.deepEqual(copyPatch(scene("s3", { fogEnabled: true })), { fogEnabled: true, vision: { on: false, light: "bright", perPlayer: false, byClock: false } });
+  });
+
+  test("a Time of day scene copies the flag, and any other turns it off on the scene it lands on", () => {
+    const dusk = scene("s4", { fogEnabled: true, vision: { on: true, light: "dim", byClock: true } });
+    const patch = copyPatch(dusk);
+    assert.deepEqual(patch.vision, { on: true, light: "dim", perPlayer: false, byClock: true });
+    assert.ok(clientOpSchema.safeParse({ t: "scene.update", sceneId: "s2", patch }).success);
+    assert.equal(copiesNothing(scene("s2", { fogEnabled: true, vision: { on: true, light: "dim" } }), patch), false, "same level, but not following");
+    assert.equal(copiesNothing(scene("s2", { fogEnabled: true, vision: { on: true, light: "dim", byClock: true } }), patch), true);
+    assert.equal(copyPatch(scene("s5", { fogEnabled: true, vision: { on: true, light: "dim" } })).vision.byClock, false);
   });
 
   test("a scene that already has the settings needs nothing sent", () => {

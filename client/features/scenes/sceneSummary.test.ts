@@ -11,6 +11,10 @@ describe("sceneGroupSummary", () => {
     assert.equal(sceneGroupSummary(scene("s", { fogEnabled: false, vision: { on: true, light: "dark" }, weather: { kind: "clear", wind: "strong" } }), "light"), "Dark · Strong wind", "Custom has party vision on");
   });
 
+  test("Light and weather names Time of day with the level it holds", () => {
+    assert.equal(sceneGroupSummary(scene("s", { fogEnabled: true, vision: { on: true, light: "dim", byClock: true }, weather: { kind: "rain", heavy: true, wind: "strong" } }), "light"), "Time of day, Dim · Heavy rain · Strong wind");
+  });
+
   test("Light and weather leaves the light out while party vision is off, since it does nothing then (D-261102-933)", () => {
     assert.equal(sceneGroupSummary(scene("s", { fogEnabled: true, vision: { on: false, light: "dark" }, weather: { kind: "rain", heavy: true, wind: "strong" } }), "light"), "Heavy rain · Strong wind");
     assert.equal(sceneGroupSummary(scene("s", { fogEnabled: true }), "light"), "Clear");

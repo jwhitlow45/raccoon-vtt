@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { MapPhase, RoomState } from "#shared/model.ts";
 import { token } from "#shared/testutil.ts";
-import { carriedLightsNote, fogNote, lightOf, lightPatch, phaseWithLight, SIGHT_CHOICES, sightOf, sightPatch, sightShown, sightWorkingText, visionOnHelp, visionPatch, visionPending } from "./settings.ts";
+import { carriedLightsNote, fogNote, LIGHT_LEVELS, lightChoiceOf, lightChoices, lightHelp, lightOf, lightPatch, lightWords, phaseWithLight, SIGHT_CHOICES, sightOf, sightPatch, sightShown, sightWorkingText, timeOfDayPatch, visionOnHelp, visionPatch, visionPending } from "./settings.ts";
 
 const phase = (id: string, patch: Partial<MapPhase> = {}): MapPhase => ({ id, name: id, assetId: `a-${id}`, widthPx: 800, heightPx: 600, ...patch });
 
@@ -14,8 +14,41 @@ describe("a scene's Fog and vision and Light settings", () => {
   });
 
   test("the light level changes without turning vision on", () => {
-    assert.deepEqual(lightPatch({}, "dim"), { on: false, light: "dim" });
-    assert.deepEqual(lightPatch({ vision: { on: true, light: "bright" } }, "dark"), { on: true, light: "dark" });
+    assert.deepEqual(lightPatch({}, "dim"), { on: false, light: "dim", byClock: false });
+    assert.deepEqual(lightPatch({ vision: { on: true, light: "bright" } }, "dark"), { on: true, light: "dark", byClock: false });
+  });
+
+  test("a hand pick names byClock false and Time of day names true, so Bright, Dim and Dark turn it off", () => {
+    const following = { vision: { on: true, light: "dim", byClock: true } } as const;
+    assert.equal(lightPatch(following, "bright").byClock, false);
+    assert.deepEqual(timeOfDayPatch(following), { on: true, light: "dim", byClock: true });
+    assert.equal("byClock" in visionPatch(following, false), false, "the party vision switch names none, so the flag stays");
+    assert.equal("byClock" in sightPatch(following, true), false, "Sight names none either");
+  });
+
+  test("Time of day is offered while a clock runs or the scene already follows it", () => {
+    const labels = (scene: Parameters<typeof lightChoices>[0], clock: boolean) => lightChoices(scene, clock).map((c) => c.label);
+    assert.deepEqual(labels({}, false), ["Bright", "Dim", "Dark"]);
+    assert.deepEqual(labels({}, true), ["Bright", "Dim", "Dark", "Time of day"]);
+    assert.deepEqual(labels({ vision: { on: true, light: "dim", byClock: true } }, false), ["Bright", "Dim", "Dark", "Time of day"]);
+    assert.equal(lightChoiceOf({ vision: { on: true, light: "dim", byClock: true } }), "clock");
+    assert.equal(lightChoiceOf({ vision: { on: true, light: "dim" } }), "dim");
+  });
+
+  test("Time of day's help names the level now, the hidden clock and the stopped clock", () => {
+    const scene = { vision: { on: true, light: "dim", byClock: true } } as const;
+    assert.equal(lightHelp(scene, { shown: true }), "Follows the time of day: Bright by day, Dim at dawn and dusk, Dark at night. It is Dim now.");
+    assert.equal(
+      lightHelp(scene, { shown: false }),
+      "Follows the time of day: Bright by day, Dim at dawn and dusk, Dark at night. It is Dim now. Players don't see the date and time, but they see the light change.",
+    );
+    assert.equal(
+      lightHelp(scene, null),
+      "Follows the time of day: Bright by day, Dim at dawn and dusk, Dark at night. The clock is stopped, so the light stays Dim until it starts again.",
+    );
+    assert.equal(lightHelp({ vision: { on: true, light: "dark" } }, { shown: false }), LIGHT_LEVELS.find((l) => l.value === "dark")!.note);
+    assert.equal(lightWords(scene), "Time of day, Dim");
+    assert.equal(lightWords({ vision: { on: true, light: "dark" } }), "Dark");
   });
 
   test("a phase's light is set or taken off, and the rest of the list is untouched", () => {

@@ -1,7 +1,7 @@
 import type { LightLevel, Scene } from "#shared/model.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { playersSeeLabel, playersSeeOf } from "./playersSeeRules.ts";
-import { lightOf } from "./settings.ts";
+import { followsClock, lightOf } from "./settings.ts";
 
 /**
  * "Copy to other scenes…" (docs/design/design-v1-map-discovery.md 8.3), as
@@ -13,18 +13,20 @@ import { lightOf } from "./settings.ts";
  * What the copy sends to each scene: Players see (fog and party vision),
  * the light and Sight, in one `scene.update`. `perPlayer` is always named,
  * so a per-player copy makes the scene per player and a whole-party one
- * folds it back. Movement and automatic walls stay as they are.
+ * folds it back. `byClock` is named the same way: a Time of day scene makes
+ * its copies follow the clock (the reducer reads their level from it), and
+ * any other turns it off there. Movement and automatic walls stay as they are.
  */
-export type CopyPatch = { fogEnabled: boolean; vision: { on: boolean; light: LightLevel; perPlayer: boolean } };
+export type CopyPatch = { fogEnabled: boolean; vision: { on: boolean; light: LightLevel; perPlayer: boolean; byClock: boolean } };
 
 export function copyPatch(source: Pick<Scene, "fogEnabled" | "vision">): CopyPatch {
-  return { fogEnabled: source.fogEnabled, vision: { on: source.vision?.on === true, light: lightOf(source), perPlayer: source.vision?.perPlayer === true } };
+  return { fogEnabled: source.fogEnabled, vision: { on: source.vision?.on === true, light: lightOf(source), perPlayer: source.vision?.perPlayer === true, byClock: followsClock(source) } };
 }
 
 /** Whether a scene already has every setting the copy sets, so nothing need be sent there. */
 export function copiesNothing(scene: Pick<Scene, "fogEnabled" | "vision">, patch: CopyPatch): boolean {
   const now = copyPatch(scene);
-  return now.fogEnabled === patch.fogEnabled && now.vision.on === patch.vision.on && now.vision.light === patch.vision.light && now.vision.perPlayer === patch.vision.perPlayer;
+  return now.fogEnabled === patch.fogEnabled && now.vision.on === patch.vision.on && now.vision.light === patch.vision.light && now.vision.perPlayer === patch.vision.perPlayer && now.vision.byClock === patch.vision.byClock;
 }
 
 export const COPY_BUTTON = "Copy to other scenes…";

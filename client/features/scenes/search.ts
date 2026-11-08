@@ -2,7 +2,7 @@ import type { Scene } from "#shared/model.ts";
 import { action, inside, section, setting, type Place } from "../search/catalog/write.ts";
 import type { CatalogEntry, SearchContext } from "../search/catalog/types.ts";
 import { serverSound } from "../sound/engine/store.ts";
-import { LIGHT_LEVELS, lightOf } from "../vision/settings.ts";
+import { lightChoiceOf, lightChoices } from "../vision/settings.ts";
 import { SCENE_GROUP_LABELS } from "./settingsFolds.ts";
 
 /*
@@ -40,12 +40,12 @@ export const SCENES_ENTRIES: readonly CatalogEntry[] = [
   setting(SCENES, "scenes.name", "Scene name", { names: ["rename the scene"], when: shown }),
   section(at(LIGHT), "scenes.light", SCENE_GROUP_LABELS.light, { when: shown }),
   setting(LIGHT, "scenes.light.level", "Light level", {
-    names: ["bright", "dim", "darkness"],
+    names: ["bright", "dim", "darkness", "time of day", "daylight", "night"],
     bets: ["dark"],
     when: shown,
     valueNow: (ctx) => {
       const scene = viewing(ctx);
-      return scene ? LIGHT_LEVELS.find((l) => l.value === lightOf(scene))?.label : undefined;
+      return scene ? lightChoices(scene, true).find((l) => l.value === lightChoiceOf(scene))?.label : undefined;
     },
   }),
   setting(LIGHT, "scenes.light.weather", "Weather", { names: ["rain", "snow", "wind", "storm"], when: shown }),

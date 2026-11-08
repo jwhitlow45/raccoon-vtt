@@ -1,7 +1,7 @@
 import { viewMapsOf } from "#shared/keys.ts";
 import type { LightLevel, RoomState, Scene, ScenePreset } from "#shared/model.ts";
 import { PLAYERS_SEE_WORDS, playersSeeOf, type PlayersSee } from "#shared/playersSee.ts";
-import { LIGHT_LEVELS, lightOf, SIGHT_CHOICES, sightOf, visionPatch } from "./settings.ts";
+import { followsClock, LIGHT_LEVELS, lightOf, SIGHT_CHOICES, sightOf, TIME_OF_DAY_LABEL, visionPatch } from "./settings.ts";
 
 /**
  * "Players see", one choice of what players get of a scene
@@ -131,7 +131,7 @@ export function sightQuestion(scene: Pick<Scene, "vision">, toPerPlayer: boolean
  * players' moves blocked". Each part is the word its own control shows.
  */
 export function likeSummary(scene: Pick<Scene, "fogEnabled" | "vision" | "blockMovement">): string {
-  const light = LIGHT_LEVELS.find((l) => l.value === lightOf(scene))!.label;
+  const light = followsClock(scene) ? TIME_OF_DAY_LABEL : LIGHT_LEVELS.find((l) => l.value === lightOf(scene))!.label;
   const sight = SIGHT_CHOICES.find((c) => c.value === sightOf(scene))!.label;
   const moves = scene.blockMovement === true ? "players' moves blocked" : "players' moves not blocked";
   return `${playersSeeLabel(playersSeeOf(scene))}, ${light}, ${sight}, ${moves}`;

@@ -238,7 +238,7 @@ export function playersSeeFields(pick: NewScenePick, light?: LightLevel): Player
   if ("like" in pick) {
     const source = pick.like;
     const fields: PlayersSeeFields = { fogEnabled: source.fogEnabled, blockMovement: source.blockMovement === true };
-    if (source.vision || light) fields.vision = { on: source.vision?.on === true, light: light ?? lightOf(source), ...(source.vision?.perPlayer ? { perPlayer: true as const } : {}) };
+    if (source.vision || light) fields.vision = { on: source.vision?.on === true, light: light ?? lightOf(source), ...(source.vision?.perPlayer ? { perPlayer: true as const } : {}), ...(source.vision?.byClock && !light ? { byClock: true as const } : {}) };
     return fields;
   }
   const { preset } = pick;

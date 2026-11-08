@@ -5,7 +5,7 @@ import { sceneHexSpan } from "#shared/rules/hex.ts";
 import { weatherParts } from "#shared/weather.ts";
 import { SHAPE_CHOICES, shapeChoice } from "../grid/words.ts";
 import { VIEW_NAMES, suggestedKind } from "../view/choice.ts";
-import { LIGHT_LEVELS, lightOf, SIGHT_CHOICES, sightOf } from "../vision/settings.ts";
+import { lightWords, SIGHT_CHOICES, sightOf } from "../vision/settings.ts";
 import type { SceneGroup } from "./settingsFolds.ts";
 
 /*
@@ -26,7 +26,7 @@ export function sceneGroupSummary(scene: Scene, group: Exclude<SceneGroup, "soun
     case "light": {
       // The light does nothing while party vision is off (D-261102-933), so the summary leaves it out rather than name a level that plays no part.
       const weather = weatherParts(scene.weather);
-      return join([scene.vision?.on === true ? (LIGHT_LEVELS.find((l) => l.value === lightOf(scene))?.label ?? null) : null, ...(weather.length > 0 ? weather : ["Clear"])]);
+      return join([scene.vision?.on === true ? lightWords(scene) : null, ...(weather.length > 0 ? weather : ["Clear"])]);
     }
     case "players":
       return join([PLAYERS_SEE_WORDS[playersSeeOf(scene)], sightOf(scene) === "player" ? (SIGHT_CHOICES.find((c) => c.value === "player")?.label ?? null) : null]);

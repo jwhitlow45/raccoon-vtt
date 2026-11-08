@@ -13,6 +13,13 @@ export const LIGHT_LEVELS: readonly { value: LightLevel; label: string; note: st
   { value: "dark", label: "Dark", note: "Dark where no light reaches: the party sees only by light and Darkvision." },
 ];
 
+/** Light's fourth choice (docs/design/design-v1-calendar-c2c3.md 5.1). It is no level: `vision.byClock` makes the reducer write the level from the clock. */
+export type LightChoice = LightLevel | "clock";
+
+export const TIME_OF_DAY_LABEL = "Time of day";
+export const TIME_OF_DAY_NOTE = "Follows the time of day: Bright by day, Dim at dawn and dusk, Dark at night.";
+export const HIDDEN_CLOCK_LIGHT_NOTE = "Players don't see the date and time, but they see the light change.";
+
 /** The scene's light level, Bright until the DM picks one. */
 export function lightOf(scene: Pick<Scene, "vision">): LightLevel {
   const light = scene.vision?.light;
@@ -24,9 +31,53 @@ export function visionPatch(scene: Pick<Scene, "vision">, on: boolean): SceneVis
   return { on, light: lightOf(scene) };
 }
 
-/** The `vision` patch that sets the light level, leaving party vision as it is. */
-export function lightPatch(scene: Pick<Scene, "vision">, light: LightLevel): SceneVision {
-  return { on: scene.vision?.on === true, light };
+/** Whether the scene's level follows the clock (Time of day). */
+export function followsClock(scene: Pick<Scene, "vision">): boolean {
+  return scene.vision?.byClock === true;
+}
+
+/** The choice Light shows: Time of day while the scene follows the clock, else its level. */
+export function lightChoiceOf(scene: Pick<Scene, "vision">): LightChoice {
+  return followsClock(scene) ? "clock" : lightOf(scene);
+}
+
+/**
+ * Light's choices for a scene: the three levels, and Time of day after
+ * them while a clock exists or the scene already follows it (5.1), so a
+ * room with no clock never offers a choice that would do nothing.
+ */
+export function lightChoices(scene: Pick<Scene, "vision">, hasClock: boolean): readonly { value: LightChoice; label: string }[] {
+  const levels = LIGHT_LEVELS.map((l) => ({ value: l.value as LightChoice, label: l.label }));
+  return hasClock || followsClock(scene) ? [...levels, { value: "clock", label: TIME_OF_DAY_LABEL }] : levels;
+}
+
+/** The group's words for a scene's light: "Dim", or "Time of day, Dim" while it follows the clock. */
+export function lightWords(scene: Pick<Scene, "vision">): string {
+  const level = LIGHT_LEVELS.find((l) => l.value === lightOf(scene))!.label;
+  return followsClock(scene) ? `${TIME_OF_DAY_LABEL}, ${level}` : level;
+}
+
+/**
+ * Light's help under the choice while party vision is on. A level has its
+ * own note. Time of day adds the level it holds now, that players still
+ * see the light change while the clock is hidden, and that a stopped
+ * clock leaves the light where it is.
+ */
+export function lightHelp(scene: Pick<Scene, "vision">, clock: { shown: boolean } | null): string {
+  if (!followsClock(scene)) return LIGHT_LEVELS.find((l) => l.value === lightOf(scene))!.note;
+  const level = LIGHT_LEVELS.find((l) => l.value === lightOf(scene))!.label;
+  if (clock === null) return `${TIME_OF_DAY_NOTE} The clock is stopped, so the light stays ${level} until it starts again.`;
+  return `${TIME_OF_DAY_NOTE} It is ${level} now.${clock.shown ? "" : ` ${HIDDEN_CLOCK_LIGHT_NOTE}`}`;
+}
+
+/** The `vision` patch that sets the light level by hand, leaving party vision as it is. It names `byClock: false`, since a hand pick turns Time of day off. */
+export function lightPatch(scene: Pick<Scene, "vision">, light: LightLevel): VisionPatch {
+  return { on: scene.vision?.on === true, light, byClock: false };
+}
+
+/** The `vision` patch of Time of day. The level it names is the one held now, which the reducer rewrites from the clock. */
+export function timeOfDayPatch(scene: Pick<Scene, "vision">): VisionPatch {
+  return { on: scene.vision?.on === true, light: lightOf(scene), byClock: true };
 }
 
 /** A `vision` patch as the protocol takes it, which may name `perPlayer` (docs/design/design-v1-per-player-vision.md 6.7). */
