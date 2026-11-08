@@ -28,7 +28,8 @@ import { env } from "./testutil.ts";
  * along. Its route's geometry, the op it sends, the answer, the drag frame
  * as each player receives it, and each player's copy of the room
  * afterward, its log included, must be the same in both rooms for every
- * player whose copy was the same before.
+ * player whose copy was the same before, or for those the pair names, each
+ * checked to start equal (docs/design/design-v1-floors.md 15).
  */
 
 export type Drag = { who: Viewer; tokenId: string; to: { x: number; y: number; squeeze?: true } };
@@ -53,7 +54,27 @@ export type Pair = {
    * other viewer must observe the same of it.
    */
   ownSightDiffers?: true;
+  /**
+   * The recipients the pair means to compare (docs/design/design-v1-floors.md
+   * 15): when named, each must start equal in both rooms and only they
+   * are compared, so a pair that silently tests fewer viewers than it
+   * means fails. Left out, every player and display whose copies start
+   * equal is compared.
+   */
+  equal?: readonly Viewer[];
+  /**
+   * Recipients whose copies are expected to differ in known parts only,
+   * such as a creature's owner who holds a floor only one room has: each is
+   * compared with its `strip` taking those parts out of both rooms' copies.
+   */
+  apart?: readonly Apart[];
 };
+
+/** A recipient compared apart from what the pair expects to differ: `strip` gets each room's copy, and which room it is. */
+export type Apart = { who: Viewer; strip: (copy: Record<string, unknown>, room: "a" | "b") => object };
+
+/** A recipient a pair compares, by what it observes of each room. */
+type Observer = { who: Viewer; observe: (state: RoomState, room: "a" | "b") => object };
 
 /** A table display, which holds what every viewer shares (docs/design/design-v1-per-player-vision.md 6.2). */
 const DISPLAY: Viewer = { memberId: "display:abcdefghijkl", role: "player" };
@@ -61,6 +82,21 @@ const DISPLAY: Viewer = { memberId: "display:abcdefghijkl", role: "player" };
 /** The viewers a pair is judged for: every player member and a table display. */
 function players(state: RoomState): Viewer[] {
   return [...Object.values(state.members).flatMap((m) => (m && m.kind === "player" ? [{ memberId: m.id, role: "player" as const }] : [])), DISPLAY];
+}
+
+/**
+ * The recipients a pair compares, each checked to start equal: those it
+ * names (`equal`), else every player and display whose copies start equal,
+ * and those it compares apart.
+ */
+function observers(pair: Pick<Pair, "a" | "b" | "equal" | "apart">, seen: (state: RoomState, p: Viewer) => object, where: string): Observer[] {
+  const plain = (who: Viewer): Observer => ({ who, observe: (state) => seen(state, who) });
+  const named = pair.equal ? pair.equal.map(plain) : players(pair.a).filter((p) => isDeepEqual(seen(pair.a, p), seen(pair.b, p))).map(plain);
+  const apart = (pair.apart ?? []).map(({ who, strip }): Observer => ({ who, observe: (state, room) => strip(seen(state, who) as Record<string, unknown>, room) }));
+  const out = [...named, ...apart];
+  assert.ok(out.length > 0, `${where}: the rooms differ for every player, so the pair tests nothing`);
+  for (const o of out) assert.deepEqual(o.observe(pair.a, "a"), o.observe(pair.b, "b"), `${where}: ${o.who.memberId}'s copies do not start equal, though the pair compares them`);
+  return out;
 }
 
 /**
@@ -145,8 +181,8 @@ export function checkPair(pair: Pair, seq = 3): void {
     const where = `${pair.name}, drag ${i + 1} by ${drag.who.role}`;
     const sceneId = pair.a.tokens[drag.tokenId]?.sceneId ?? "s1";
     const seen = (state: RoomState, p: Viewer) => shown(projectState(state, p, { sceneId }), pair.unshown);
-    const same = players(pair.a).filter((p) => isDeepEqual(seen(pair.a, p), seen(pair.b, p)));
-    assert.ok(same.length > 0, `${where}: the rooms differ for every player, so the pair tests nothing`);
+    const watch = observers(pair, seen, where);
+    const same = watch.map((o) => o.who);
     if (drag.who.role === "player") assert.ok(actorTested(pair, same, drag.who, sceneId), `${where}: the acting player's copies differ, so the pair tests nothing`);
     const da = dragged(pair.a, drag);
     const db = dragged(pair.b, drag);
@@ -159,9 +195,7 @@ export function checkPair(pair: Pair, seq = 3): void {
     const rb = applyOp(pair.b, db.op, drag.who, env(seq));
     assert.deepEqual(ra.ok ? "ok" : `${ra.code}: ${ra.message}`, rb.ok ? "ok" : `${rb.code}: ${rb.message}`, `${where}: the answer differs`);
     if (!ra.ok || !rb.ok) continue;
-    for (const p of same) {
-      assert.deepEqual(seen(ra.state, p), seen(rb.state, p), `${where}: ${p.memberId} sees the rooms differ after it`);
-    }
+    for (const o of watch) assert.deepEqual(o.observe(ra.state, "a"), o.observe(rb.state, "b"), `${where}: ${o.who.memberId} sees the rooms differ after it`);
   }
 }
 
@@ -210,8 +244,8 @@ export const serverApply: Applier = (state, op, who, seq) => {
 export function checkOps(pair: OpPair, applier: Applier = serverApply, firstSeq = 3): { a: RoomState; b: RoomState } {
   const sceneId = pair.a.meta.playerSceneId ?? "s1";
   const seen = (state: RoomState, p: Viewer) => shown(projectState(state, p, { sceneId }), pair.unshown);
-  const same = players(pair.a).filter((p) => isDeepEqual(seen(pair.a, p), seen(pair.b, p)));
-  assert.ok(same.length > 0, `${pair.name}: the rooms differ for every player, so the pair tests nothing`);
+  const watch = observers(pair, seen, pair.name);
+  const same = watch.map((o) => o.who);
   let a = pair.a;
   let b = pair.b;
   for (const [i, step] of pair.steps.entries()) {
@@ -234,7 +268,7 @@ export function checkOps(pair: OpPair, applier: Applier = serverApply, firstSeq 
       a = ra.state;
       b = rb.state;
     }
-    for (const p of same) assert.deepEqual(seen(a, p), seen(b, p), `${where}: ${p.memberId} sees the rooms differ after it`);
+    for (const o of watch) assert.deepEqual(o.observe(a, "a"), o.observe(b, "b"), `${where}: ${o.who.memberId} sees the rooms differ after it`);
   }
   return { a, b };
 }
