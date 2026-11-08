@@ -643,6 +643,11 @@ newest first.
 
 **Since v0.3.1**
 
+- **Only DM devices play** ([design](design/design-v1-sound-dm-only.md)):
+  room format 39, change format 50. Until it reloads, an old DM page shows
+  neither the switch nor its reminder. An old player page or table display
+  plays nothing while the switch is on, since the server sends it nothing
+  about sound.
 - **Showing players a scene during a blackout**
   ([design](design/design-v1-qol.md)): change format 49. Lifting a blackout can
   name the scene the players must still be on, so the DM menu's show-scene
