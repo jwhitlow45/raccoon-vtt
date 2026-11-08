@@ -21,7 +21,7 @@ import { counted, drawable, flowStep, readiness, startFlow, type Flow, type Flow
 import { journalFull } from "./keyHold.ts";
 import { keyOps, type KeyInput } from "./keyPage.ts";
 import { LookCloser } from "./LookCloser.tsx";
-import { SCENE_PLACEHOLDER, withIds } from "./ops.ts";
+import { SCENE_PLACEHOLDER, SECRET_DOORS_HELD, withIds } from "./ops.ts";
 import { DungeonPreview, type Drawn } from "./Preview.tsx";
 import { loadChoices, saveChoices, settingsOf, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
 import { formatSeed, newSeed, parseSeed, type Seed } from "./seed.ts";
@@ -47,6 +47,7 @@ import {
   TRAPS_MAX,
   type SizeChoice,
 } from "./settings.ts";
+import { planned } from "./scratch.ts";
 import { sendDungeon } from "./send.ts";
 import {
   DEAD_ENDS_HELP,
@@ -73,6 +74,7 @@ import {
   roomsHint,
   SECRETS_CAVE,
   SECRETS_HELP,
+  SECRETS_LATER,
   secretsWords,
   SEED_BAD,
   SEED_HELP,
@@ -234,7 +236,7 @@ export function GenerateDialog(props: {
     }
     let held = false;
     try {
-      held = journalFull(room, keyOps(plan, settings, { name: sceneName, color: myColor, feetPerCell }, SCENE_PLACEHOLDER), store.getState().you?.memberId ?? "");
+      held = journalFull(room, keyOps(plan, planned(settings), { name: sceneName, color: myColor, feetPerCell }, SCENE_PLACEHOLDER), store.getState().you?.memberId ?? "");
     } catch {
       // The key page is not built or the room cannot be read: nothing to hold.
     }
@@ -263,7 +265,7 @@ export function GenerateDialog(props: {
     sceneMayExist.current = true;
     // The send opens the scene once complete, or to compare it when answers were lost, unless a hidden dialog's DM went elsewhere.
     const outcome = await sendDungeon(
-      { ops, sceneId: made.sceneId, room: current.room },
+      { ops, sceneId: made.sceneId, room: current.room, ids: made.ids },
       actions,
       (answered, total) => {
         if (mounted.current) setSending({ answered, total });
@@ -319,6 +321,8 @@ export function GenerateDialog(props: {
   );
 
   const cave = choices.theme === "cave";
+  // Caves have no doors, and every theme's are held at None while the landing holds them. The DM's own pick stays in the choices for when neither holds.
+  const secretsHeld = cave || SECRET_DOORS_HELD;
   const roomsLimit = roomCap(w, h);
   const rooms = clampRooms(choices.rooms, w, h);
   const fit = current ? fitLine(current.summary) : null;
@@ -431,17 +435,16 @@ export function GenerateDialog(props: {
             help={PARTY_LEVEL_HELP}
           />
         )}
-        {/* Caves have no doors. The DM's own pick stays in the choices and comes back with the next theme. */}
-        <Held held={cave} style={{ display: "grid", minWidth: 0 }}>
+        <Held held={secretsHeld} style={{ display: "grid", minWidth: 0 }}>
           <PresetSlider
             name="Secret doors"
-            value={cave ? 0 : choices.secrets}
+            value={secretsHeld ? 0 : choices.secrets}
             min={0}
             max={SECRETS_MAX}
             step={1}
             presets={SECRET_MARKS}
-            words={secretsWords(cave ? 0 : choices.secrets, rooms)}
-            help={cave ? SECRETS_CAVE : choices.secrets === 0 ? undefined : SECRETS_HELP}
+            words={secretsWords(secretsHeld ? 0 : choices.secrets, rooms)}
+            help={cave ? SECRETS_CAVE : SECRET_DOORS_HELD ? SECRETS_LATER : choices.secrets === 0 ? undefined : SECRETS_HELP}
             onChange={(secrets) => set({ secrets })}
           />
         </Held>
