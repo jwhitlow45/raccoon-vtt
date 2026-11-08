@@ -3887,7 +3887,10 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       const table = connect(actor, dm);
       await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
       await actor.op(table.conn, 1, { t: "dice.roll", tag, to: "all", rolls: [{ formula: "1d20" }] });
-      assert.ok(table.conn.closed, "the sender's socket closes");
+      // Thrown before the op was staged, so it is refused and the socket stays (THROW-REFUSE).
+      assert.equal(table.conn.closed, false, "the sender's socket stays open");
+      const answer = await answerTo(table.sent, 1);
+      assert.ok(answer !== "stuck" && answer.rejects?.[0]?.code === "invalid", "the op is refused");
       assert.equal(errors.length, 1);
       const [line] = errors;
       assert.equal(line!.what, "room command failed");
