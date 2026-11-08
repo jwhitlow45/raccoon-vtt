@@ -643,6 +643,10 @@ newest first.
 
 **Since v0.3.1**
 
+- **Trap stops beside dark ground and in single file**
+  ([design](design/design-v1-traps.md)): change format 52. Until it reloads,
+  an old DM page predicts its own trap stops by the old rule, and the
+  server's answer moves the tokens where they stop.
 - **Single file and seats apart on hexes**
   ([design](design/design-v1-attach.md)): change format 51. Until it reloads,
   an old page plans a drag into a corridor one hex wide with creatures in tow
