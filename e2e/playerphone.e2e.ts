@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
+import { loadMonsters, monsterActor } from "#shared/srd/monsters.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { barControl, ConsoleWatch, expandBar, OpSocket, pagePoint, readCamera, reopenRoom, Shots, SocketWatch, startServer, tapCell, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
@@ -54,6 +56,18 @@ const PORTRAIT = { width: 390, height: 844 };
 const BAND_NAME_MIN_PX = 36;
 const LANDSCAPE = { width: 844, height: 390 };
 const CARD = "The DM asks for a roll";
+/** Thorn's two weapons, so his turn card lists two attacks whose damage rows each show a result with Fill chips (LP32-B-CARD-1). */
+const THORN_WEAPONS = {
+  abilities: { str: 16, dex: 14, con: 12, int: 10, wis: 12, cha: 10 },
+  saves: [],
+  skills: {},
+  adjust: {},
+  defenses: {},
+  rolls: [
+    { id: "r-longsword", name: "Longsword", kind: "weapon", ability: "str", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d8", type: "slashing", mod: true }] },
+    { id: "r-handaxe", name: "Handaxe", kind: "weapon", ability: "str", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d6", type: "slashing", mod: true }] },
+  ],
+};
 /** A plain stat block for Thorn, so a card knows its bonus and draws no bonus field (docs/design/design-v1-roll-request.md 5.2). */
 const THORN_STATS = { abilities: { str: 10, dex: 14, con: 12, int: 10, wis: 12, cha: 10 }, saves: [], skills: {}, adjust: {}, defenses: {}, rolls: [] };
 
@@ -113,6 +127,26 @@ function actor(hp = 20) {
     notes: "",
     dmNotes: "",
   };
+}
+
+/**
+ * How far an alert card shows over the bar, in CSS px, 0 where it keeps
+ * above it: the card's bottom as its column clips it, less the bar's top.
+ */
+async function overBar(card: Locator, bar: Locator): Promise<number> {
+  const barTop = (await bar.boundingBox())!.y;
+  const bottom = await card.evaluate((el) => {
+    type Box = { bottom: number };
+    type Node = { getBoundingClientRect(): Box; parentElement: Node | null };
+    const g = globalThis as unknown as { getComputedStyle(n: Node): { overflowY: string; paddingBottom: string } };
+    let shown = (el as unknown as Node).getBoundingClientRect().bottom;
+    for (let box = (el as unknown as Node).parentElement; box; box = box.parentElement) {
+      const style = g.getComputedStyle(box);
+      if (style.overflowY === "auto" || style.overflowY === "scroll") shown = Math.min(shown, box.getBoundingClientRect().bottom - (parseFloat(style.paddingBottom) || 0));
+    }
+    return shown;
+  });
+  return Math.max(0, Math.round((bottom - barTop) * 10) / 10);
 }
 
 /** Sets the window and the interface size, then loads the room again. */
@@ -1795,6 +1829,87 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     }
     await barFrame(player).getByRole("button", { name: "Close", exact: true }).first().tap().catch(() => {});
     await setUp({ ...PORTRAIT, scale: 1 });
+  });
+
+  test("lp32-1. an opened turn card on an upright phone stops above the bar a Fill chip opened, so the bar's Apply and End turn take a tap: Pat's own card at 390 x 844 and 320 x 568 at 100% and 130%, and a monster's card on the DM's phone over a token's bar (LP32-B-CARD-1)", async () => {
+    const warrior = { id: randomUUID(), entryId: randomUUID() };
+    const block = monsterActor((await loadMonsters()).find((m) => m.srdId === "goblin-warrior")!);
+    await ops.send({ t: "character.update", characterId: run.thorn.characterId, patch: { level: 5, stats: THORN_WEAPONS } });
+    await ops.send({ t: "token.create", token: { id: warrior.id, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", size: "small", x: 9, y: 6, visibility: "all", disposition: "hostile", actor: { inline: block } } });
+    await ops.send({ t: "room.update", settings: { playersApplyDamage: true } });
+    await ops.send({ t: "encounter.start", entries: [{ id: run.thorn.entryId, tokenId: run.thorn.id, value: 18 }, { id: warrior.entryId, tokenId: warrior.id, value: 10 }] });
+    await ops.send({ t: "encounter.next" });
+    await waitFor("Thorn's turn on Pat's page", () => playerSocket.state?.encounter?.activeEntryId === run.thorn.entryId || null);
+    const off: string[] = [];
+    let phone: BrowserContext | null = null;
+    try {
+      for (const view of [{ ...PORTRAIT, scale: 1 }, { ...PORTRAIT, scale: 1.3 }, { width: 320, height: 568, scale: 1 }, { width: 320, height: 568, scale: 1.3 }]) {
+        const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+        await setUp(view);
+        const card = player.locator('[data-alert="turn"]');
+        await card.getByRole("button", { name: "Show Thorn's turn" }).tap();
+        const attacks = card.getByRole("group", { name: "Thorn's attacks" });
+        for (const weapon of ["Handaxe", "Longsword"]) {
+          const lines = (playerSocket.state?.log ?? []).length;
+          await attacks.getByRole("button", { name: new RegExp(`^${weapon} damage`) }).tap();
+          await waitFor(`${weapon} damage in the log`, () => ((playerSocket.state?.log ?? []).slice(lines).some((l) => l.data?.type === "dice" && l.data.by === run.patId) ? true : null));
+        }
+        const chip = attacks.getByRole("button", { name: /^Fill \d+ Slashing damage for Goblin Warrior$/ }).first();
+        await chip.waitFor();
+        await shots.take(player, `lp32-1-pat-card-rolled-${view.width}-${Math.round(view.scale * 100)}`);
+        await chip.tap();
+        const bar = player.getByRole("dialog", { name: "Goblin Warrior actions" });
+        await bar.waitFor();
+        await waitFor(`the entry filled at ${at}`, async () => (/^\d+$/.test(await bar.getByLabel("HP change", { exact: true }).first().inputValue()) ? true : null));
+        await shots.take(player, `lp32-1-pat-bar-filled-${view.width}-${Math.round(view.scale * 100)}`);
+        const pat = await overBar(card, bar);
+        if (pat > 0.5) off.push(`${at}: the open card stands ${pat} px over the bar`);
+        if (!(await wholeInReach(bar.getByRole("button", { name: "Apply", exact: true })))) off.push(`${at}: the bar's Apply is under the card`);
+        const end = bar.getByRole("button", { name: /End turn$/ });
+        if ((await end.count()) > 0 && !(await wholeInReach(end))) off.push(`${at}: the bar's End turn is under the card`);
+        off.push(...alignmentLines(await measureAlignment(card), `Pat's open turn card over the bar at ${at}`));
+        off.push(...alignmentLines(await measureAlignment(bar), `the bar a Fill opened at ${at}`));
+        // A click from script: before the fix the card stood over the Close too.
+        await bar.getByRole("button", { name: "Close", exact: true }).first().dispatchEvent("click");
+      }
+
+      // The DM's phone, on the warrior's turn: its card opened and rolled, and Thorn's bar opened from the map.
+      await ops.send({ t: "encounter.next" });
+      phone = await browser.newContext({ viewport: PORTRAIT, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+      await phone.addCookies(await dmContext.cookies(server.origin));
+      const page = await phone.newPage();
+      const phoneConsole = new ConsoleWatch("dm-phone");
+      phoneConsole.attach(page);
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      // Thorn's bar first, while the card is still folded to its row and leaves his cell clear.
+      await tapCell(page, dmSocket.state!.scenes[run.sceneId]!.bounds, { x: 8, y: 6 });
+      const bar = page.getByRole("dialog", { name: "Thorn actions" });
+      await bar.waitFor();
+      const card = page.locator('[data-alert="turn"]');
+      await card.getByRole("button", { name: "Show Goblin Warrior's turn" }).tap();
+      const attacks = card.getByRole("group", { name: "Goblin Warrior's attacks" });
+      for (const weapon of ["Scimitar", "Shortbow"]) {
+        await attacks.getByRole("button", { name: new RegExp(`^${weapon} damage`) }).tap();
+        await attacks.locator("[data-card-result]").nth(weapon === "Scimitar" ? 0 : 1).waitFor();
+      }
+      await bar.waitFor();
+      await shots.take(page, "lp32-1-dm-card-over-bar-390-100");
+      const over = await overBar(card, bar);
+      if (over > 0.5) off.push(`the DM's phone: the warrior's open card stands ${over} px over Thorn's bar`);
+      for (const control of [bar.getByLabel("HP change", { exact: true }).first(), bar.getByRole("button", { name: "Conditions" }).first()]) {
+        if (!(await wholeInReach(control))) off.push(`the DM's phone: Thorn's bar's ${await control.getAttribute("aria-label") ?? "control"} is under the warrior's card`);
+      }
+      off.push(...alignmentLines(await measureAlignment(card), "the DM's open turn card over a bar at 390 x 844 at 100%"));
+      assert.deepEqual(phoneConsole.errors, [], "the DM's phone logged errors");
+    } finally {
+      await phone?.close();
+      await ops.send({ t: "encounter.end" }).catch(() => {});
+      await ops.send({ t: "room.update", settings: { playersApplyDamage: false } }).catch(() => {});
+      await ops.send({ t: "token.delete", tokenId: warrior.id }).catch(() => {});
+      await setUp({ ...PORTRAIT, scale: 1 });
+    }
+    assert.deepEqual(off, [], "a control of the bar under the card, or out of line by more than 1 px");
   });
 
   test("20. nothing went wrong in the browsers", () => {

@@ -760,7 +760,27 @@ function FightAlerts() {
     if (dock.getState().alertsOverlay !== overlay) dock.setState({ alertsOverlay: overlay });
   }, [dock, overlay]);
   useLayoutEffect(() => () => dock.setState({ alertsOverlay: false }), [dock]);
-  const stacked = bar?.lane === "stacked" && colTop !== null ? columnRoom({ lane: "stacked", columnTop: colTop, bar: bar.box }) : null;
+  /*
+   * A turn card alone gives the lane no first card (barDock.ts ColumnFacts),
+   * so the lane stays "none" and the column ran down to the toolbar, over a
+   * bar that crosses it: a player's card opened with Show stood over their
+   * own bar, whose Apply and End turn then took no tap (LP32-B-CARD-1). Open
+   * and over a bar, it stops 8 px above it as a stacked column does and
+   * scrolls with "Scroll for more". Folding it would undo the viewer's own
+   * Show. The cards' height is their own, not the column's, so the cap
+   * never feeds back on what it reads.
+   */
+  const facts = useStore(dock, (s) => s.column);
+  const turnOverBar =
+    bar?.lane === "none" &&
+    colTop !== null &&
+    combat.turn !== null &&
+    !turnFolded &&
+    !turnHidden &&
+    bar.box.left + bar.box.width > bar.laneLeft &&
+    bar.box.top > colTop &&
+    colTop + EDGE + (facts?.cover ?? facts?.content ?? Infinity) + EDGE > bar.box.top;
+  const stacked = (bar?.lane === "stacked" || turnOverBar) && bar && colTop !== null ? columnRoom({ lane: "stacked", columnTop: colTop, bar: bar.box }) : null;
   const boxRef = useRef<HTMLDivElement | null>(null);
   const cardsRef = useRef<HTMLDivElement>(null);
   /*
