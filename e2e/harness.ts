@@ -10,6 +10,7 @@ import type { RoomState } from "#shared/model.ts";
 import { applyChanges, type ProjectedState } from "#shared/project.ts";
 import type { HistoryMessage } from "#shared/undoContract.ts";
 import { UNDO_NOTICE_KEY } from "../client/state/historyNotice.ts";
+import { coverBrowser, coverContext } from "./coverage.ts";
 
 /**
  * Plumbing for the end-to-end smoke run (design section 18, Stage 3): the
@@ -287,10 +288,14 @@ async function undoNoticeSeen(context: BrowserContext): Promise<void> {
 
 const unmarkedContext = new WeakMap<Browser, Browser["newContext"]>();
 
+/** Set, the browser's JavaScript coverage is saved into this folder for `pnpm coverage --e2e` (e2e/coverage.ts). */
+const COVERAGE_DIR = process.env.E2E_COVERAGE_DIR;
+
 // Every e2e file imports this module before it launches a browser, and shares this one `chromium`.
 const launch = chromium.launch.bind(chromium);
 chromium.launch = async (...args: Parameters<typeof chromium.launch>) => {
   const browser = await launch(...args);
+  if (COVERAGE_DIR) coverBrowser(browser, COVERAGE_DIR);
   const newContext = browser.newContext.bind(browser);
   unmarkedContext.set(browser, newContext);
   // Browser.newPage opens its context through newContext, so it is marked too.
@@ -304,6 +309,7 @@ chromium.launch = async (...args: Parameters<typeof chromium.launch>) => {
 const launchPersistent = chromium.launchPersistentContext.bind(chromium);
 chromium.launchPersistentContext = async (...args: Parameters<typeof chromium.launchPersistentContext>) => {
   const context = await launchPersistent(...args);
+  if (COVERAGE_DIR) await coverContext(context, COVERAGE_DIR);
   await undoNoticeSeen(context);
   return context;
 };
