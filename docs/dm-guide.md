@@ -1398,7 +1398,7 @@ At the start of a creature's turn, whoever answers for it, its player or you for
 
 - **Attacks**, for a creature that has them: its turn card lists them as the Dice panel's rows, with this turn's results under each and the **Apply to** chips under a damage result, so a goblin's turn can run from the card alone. The card counts them with its uses, such as "2 attacks, 3 uses".
 
-![The troll's turn after Ivo's Fire Bolt: its Regeneration card, "Troll regenerates 15 HP.", with "Recorded Fire damage may stop Regeneration.", a note that a plain typed number is not counted, and Apply, Skip and Dismiss, over its turn card with Rend's Attack, Damage and Critical and Loathsome Limbs, and its row in the tracker.](dm-guide/regeneration.webp)
+![The troll's turn after Ivo's Fire Bolt: its Regeneration card, "Troll regenerates 15 HP.", with "Recorded Fire damage may stop Regeneration.", a note that a plain typed number is not counted, and Apply, Skip and Dismiss, over its turn card with Rend's Attack, Damage and Critical and Loathsome Limbs.](dm-guide/regeneration.webp)
 
 **Dismiss** (the x on the turn card) hides a card on this device only, for this turn, so tidying your phone never answers the player's card. **Skip** answers for everyone. Nothing on these cards happens by itself: the next **Next** puts away whatever is left, and **Previous** brings the cards back as they were.
 
