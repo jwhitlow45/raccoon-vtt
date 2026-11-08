@@ -33,7 +33,11 @@ export function floorRoot(root: FloorRoot): string {
   return `[${FLOOR_ROOT_ATTR}="${root}"]`;
 }
 
-/** The `search=` anchors of the floors controls, beside the scene settings' own `scenes.*` ones. */
+/**
+ * The `search=` anchors of the floors controls, beside the scene settings'
+ * own `scenes.*` ones. Move to floor has none (D-261108-350): it lives on the
+ * token's action bar and More sheet, which carry no anchors.
+ */
 export const FLOOR_SEARCH = {
   group: "scenes.floors",
   addAbove: "scenes.floors.add-above",
@@ -44,5 +48,4 @@ export const FLOOR_SEARCH = {
   order: "scenes.floor.order",
   show: "scenes.floor.show",
   remove: "scenes.floor.remove",
-  moveTo: "token.move-to-floor",
 } as const;

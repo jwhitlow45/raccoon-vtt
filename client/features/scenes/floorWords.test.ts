@@ -119,7 +119,6 @@ describe("the search anchors", () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const source = ["FloorsGroup.tsx", "FloorPage.tsx"].map((f) => readFileSync(resolve(here, f), "utf8")).join("\n");
     for (const [name, id] of Object.entries(FLOOR_SEARCH)) {
-      if (name === "moveTo") continue;
       assert.equal((source.match(new RegExp(`search="${id.replaceAll(".", "\\.")}"`, "g")) ?? []).length, 1, `${name}: ${id}`);
     }
   });
