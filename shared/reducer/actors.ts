@@ -1,10 +1,11 @@
 import { clockTicks, combatUses, healRevivesDead, reviveToOne } from "../migrate.ts";
 import { CLOCK_TOO_FAR, clockNow } from "../calendar.ts";
 import { LIMITS } from "../limits.ts";
-import type { Effect, EffectEnds } from "../model.ts";
+import type { Effect, EffectEnds, RoomState } from "../model.ts";
 import { heldClock } from "../project.ts";
-import { MAX_EFFECTS, type OpOf, type OutcomeDamage, type TurnDurationInput } from "../protocol.ts";
-import { SPAN_CLOCK_UNSHARED, SPAN_NEEDS_CLOCK, resolveDuration } from "../rules/durations.ts";
+import { MAX_EFFECTS, type Op, type OpOf, type OutcomeDamage, type TurnDurationInput } from "../protocol.ts";
+import { SPAN_CLOCK_UNSHARED, SPAN_NEEDS_CLOCK, endsDue, resolveDuration } from "../rules/durations.ts";
+import { ownEntry } from "../records.ts";
 import {
   INCAPACITATING_KEYS,
   applyDamage,
@@ -20,8 +21,8 @@ import {
 } from "../rules/hp.ts";
 import { applyRest, restedResources } from "../rules/rest.ts";
 import { hpRevertOf } from "./hpUndo.ts";
-import { keys } from "../keys.ts";
-import { Refuse, gone, invalid, type Tx } from "./tx.ts";
+import { keys, parseKey } from "../keys.ts";
+import { Refuse, gone, invalid, type ResolvedActor, type Tx } from "./tx.ts";
 import { typeUnion } from "./uses.ts";
 import { damageDefenses } from "../rules/damageDefenses.ts";
 import { dealtTypes, rowDamage } from "../rules/typedDamage.ts";
@@ -209,6 +210,47 @@ export function effectUpdate(tx: Tx, op: OpOf<"actor.effect.update">): void {
   const effects = [...resolved.actor.effects];
   effects[index] = next;
   tx.putActor(resolved, { ...resolved.actor, effects });
+}
+
+/**
+ * Ends every time span the current time has reached, in the op that got it
+ * there (docs/design/design-v1-calendar-c2c3.md 4.3, D-261108-092). When the
+ * clock appeared, changed id or its current time changed (`clockNow`, so a
+ * restore of the fight's rounds alone counts too), every actor in the room
+ * is read, since the clock and its spans are the room's. Any other restore
+ * reads the actors it brought back, which catches an ended effect put back
+ * past its end. Every other op leaves the spans as they were. After a Next
+ * or a Previous the tick and the filter have already ended or left out what
+ * is due, so nothing ends twice.
+ */
+export function endDueSpans(tx: Tx, before: Pick<RoomState, "clock" | "encounter">, op: Op): void {
+  const clock = tx.state.clock;
+  if (!clock) return;
+  const now = clockNow(clock, tx.state.encounter);
+  const was = before.clock;
+  const moved = !was || was.id !== clock.id || clockNow(was, before.encounter) !== now;
+  const actors = moved ? tx.actors() : op.t === "sys.restore" ? restoredActors(tx) : [];
+  for (const resolved of actors) {
+    const ending = resolved.actor.effects.filter((e) => endsDue(e, clock, now));
+    if (ending.length === 0) continue;
+    tx.putActor(resolved, { ...resolved.actor, effects: resolved.actor.effects.filter((e) => !ending.includes(e)) });
+    tx.addActorEvents(resolved, ending.map((e) => effectEvent(e, "expire")));
+  }
+}
+
+/** The actors a restore wrote, each once: its characters and its tokens' own actors, by id as Tx.actors orders them. */
+function restoredActors(tx: Tx): ResolvedActor[] {
+  const out: ResolvedActor[] = [];
+  for (const key of tx.touched()) {
+    const parsed = parseKey(key);
+    if (parsed?.kind === "character") {
+      if (ownEntry(tx.state.characters, parsed.id)) out.push(tx.resolveActor({ characterId: parsed.id }));
+    } else if (parsed?.kind === "token") {
+      const token = ownEntry(tx.state.tokens, parsed.id);
+      if (token && "inline" in token.actor) out.push(tx.resolveActor({ tokenId: parsed.id }));
+    }
+  }
+  return out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
 export function effectRemove(tx: Tx, op: OpOf<"actor.effect.remove">): void {

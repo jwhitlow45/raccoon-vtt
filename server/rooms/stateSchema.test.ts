@@ -786,6 +786,53 @@ describe("the room's clock in a backup (docs/design/design-v1-calendar.md 6.6)",
   });
 });
 
+describe("time spans in a backup (docs/design/design-v1-calendar-c2c3.md 4.7)", () => {
+  const H = 3_600;
+  function timed(): ReturnType<typeof room> {
+    let state = room({ characters: { bree: character("bree", { name: "Bree" }) }, tokens: { gob: token("gob") } });
+    state = apply(state, { t: "clock.start", id: "clock-1", at: 8 * H, shown: false, calendar: { kind: "days" } }, DM, 1);
+    state = apply(state, { t: "actor.effect.add", target: { characterId: "bree" }, effect: { id: "ma", key: "custom", label: "Mage Armor", duration: { mode: "span", seconds: 8 * H } } }, DM, 2);
+    state = apply(state, { t: "actor.effect.add", target: { tokenId: "gob" }, effect: { id: "b", key: "blessed", duration: { mode: "span", seconds: 60 } } }, DM, 3);
+    state = apply(state, { t: "actor.effect.add", target: { tokenId: "gob" }, effect: { id: "h", key: "hasted", duration: { mode: "rounds", rounds: 3, of: { tokenId: "gob" } } } }, DM, 4);
+    state = apply(state, { t: "encounter.start", entries: [{ id: "e1", tokenId: "gob", value: 12 }] }, DM, 5);
+    // The Next counts Haste down, so its saved step keeps the goblin's list, its span with it.
+    state = apply(state, { t: "encounter.next" }, DM, 6);
+    return state;
+  }
+
+  test("export and import bring back every end whole, on actors and in the fight's saved steps", () => {
+    const state = timed();
+    assert.ok(state.encounterHistory.length > 0);
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    const out = remapState(parsed.state, { assets: new Map() });
+    const [bree] = Object.values(out.characters);
+    assert.deepEqual(bree!.actor.effects[0]!.ends, { span: 8 * H, at: 16 * H, clock: "clock-1" });
+    const [gob] = Object.values(out.tokens);
+    assert.deepEqual("inline" in gob!.actor ? gob!.actor.inline.effects[0]!.ends : null, { span: 60, at: 8 * H + 60, clock: "clock-1" });
+    assert.deepEqual(Object.values(out.encounterHistory[0]!.effects).flat().find((e) => e.id === "b")?.ends, { span: 60, at: 8 * H + 60, clock: "clock-1" });
+  });
+
+  test("an end is held to its bounds, with its time and clock both, and never beside a count of turns", () => {
+    const good = JSON.parse(JSON.stringify(timed()));
+    const broken = (edit: (ends: Record<string, unknown>, effect: Record<string, unknown>) => void) => {
+      const s = JSON.parse(JSON.stringify(good));
+      const effect = s.characters.bree.actor.effects[0];
+      edit(effect.ends, effect);
+      return parseRoomState(s).ok;
+    };
+    assert.equal(broken(() => {}), true);
+    assert.equal(broken((ends) => delete ends.at), false);
+    assert.equal(broken((ends) => delete ends.clock), false);
+    assert.equal(broken((ends) => (ends.span = 59)), false);
+    assert.equal(broken((ends) => (ends.span = 90)), false);
+    assert.equal(broken((ends) => (ends.span = LIMITS.effectSpanMax + 60)), false);
+    assert.equal(broken((ends) => (ends.at = LIMITS.clockSecondsMax + 1)), false);
+    assert.equal(broken((ends) => (ends.extra = 1)), false);
+    assert.equal(broken((_ends, effect) => (effect.duration = { remaining: 2, boundary: "turnStart", anchor: { characterId: "bree" } })), false);
+  });
+});
+
 describe("placements between squares in a backup (docs/design/design-v1-snap-off.md 5.7)", () => {
   function placed(): ReturnType<typeof room> {
     return room({

@@ -120,13 +120,26 @@ export function endsDue(effect: Effect, clock: Pick<RoomClock, "id">, now: numbe
 
 export type TickResult = { effects: Effect[]; expired: Effect[]; changed: boolean };
 
-/** Counts the given boundary crossings against every anchored duration and drops the ones that reach 0. */
-export function tickEffects(effects: Effect[], crossings: Crossing[]): TickResult {
-  if (crossings.length === 0) return { effects, expired: [], changed: false };
+/** The clock a Next's tick reads time spans against, and the current time as the turn it starts begins. */
+export type DueAt = { clock: Pick<RoomClock, "id">; now: number };
+
+/**
+ * Counts the given boundary crossings against every anchored duration and
+ * drops the ones that reach 0. With `due`, it also drops every time span
+ * that time has reached, so a Next ends them in its own tick and Previous
+ * puts them back with the round (docs/design/design-v1-calendar-c2c3.md 4.3).
+ */
+export function tickEffects(effects: Effect[], crossings: Crossing[], due?: DueAt): TickResult {
+  if (crossings.length === 0 && !due) return { effects, expired: [], changed: false };
   const expired: Effect[] = [];
   let changed = false;
   const next: Effect[] = [];
   for (const effect of effects) {
+    if (due && endsDue(effect, due.clock, due.now)) {
+      changed = true;
+      expired.push(effect);
+      continue;
+    }
     const d = effect.duration;
     if (!d || !("entryId" in d.anchor)) {
       next.push(effect);

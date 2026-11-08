@@ -88,6 +88,39 @@ describe("the room's clock on the server", () => {
     assert.deepEqual(lines.map((l) => l.id), [line.key.slice("log:".length)], "the one line written while shown, and none of the hidden ones");
   });
 
+  test("a time span's end crosses a player's socket only while the clock is shared, and arrives in the batch that shares it (docs/design/design-v1-calendar-c2c3.md 4.4)", async () => {
+    const dmClient = t.client();
+    const { roomId } = await dmClient.createRoom("Timed");
+    const playerClient = t.client();
+    const pip = await playerClient.join(roomId, "Pip");
+    const dm = await t.connect(roomId, dmClient);
+    const player = await t.connect(roomId, playerClient);
+    await dm.snapshot("dm");
+    await player.snapshot("p");
+    const clockId = uuidv7();
+    const characterId = uuidv7();
+    await dm.apply({ t: "character.create", character: { id: characterId, name: "Bree", size: "medium", ownerIds: [pip], actor: { hp: { cur: 5, max: 20, temp: 0 }, life: "alive", ac: 14, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" } } } as Op);
+    const frames = wire(player);
+    await dm.apply({ t: "clock.start", id: clockId, at: 8 * 3_600, shown: false, calendar: MONTHS });
+    await dm.apply({ t: "actor.effect.add", target: { characterId }, effect: { id: uuidv7(), key: "blessed", duration: { mode: "span", seconds: 3_600 } } });
+    await dm.apply({ t: "clock.advance", by: 600 });
+    await dm.apply({ t: "log.chat", text: "fence" });
+    await player.next("ev", (m) => m.changes.some((c) => "value" in c && (c.value as LogEntry | null)?.text === "fence"));
+    assert.ok(frames.some((frame) => frame.includes('"ends":{"span":3600}')), "the player's copy holds the length");
+    assert.deepEqual(frames.filter((frame) => frame.includes(clockId) || frame.includes(`"at":${9 * 3_600}`)), [], "and neither the clock's id nor the end");
+
+    await dm.apply({ t: "clock.update", shown: true });
+    const shared = await player.next("ev", (m) => m.changes.some((c) => c.key === "clock"));
+    const bree = shared.changes.find((c) => c.key === `character:${characterId}`);
+    assert.ok(bree && "value" in bree, "the character comes in the batch that shares the clock");
+    assert.deepEqual((bree.value as { actor: { effects: { ends?: unknown }[] } }).actor.effects[0]!.ends, { span: 3_600, at: 9 * 3_600, clock: clockId });
+
+    await dm.apply({ t: "clock.update", shown: false });
+    const hidden = await player.next("ev", (m) => m.changes.some((c) => c.key === "clock" && "deleted" in c));
+    const again = hidden.changes.find((c) => c.key === `character:${characterId}`);
+    assert.deepEqual(again && "value" in again ? (again.value as { actor: { effects: { ends?: unknown }[] } }).actor.effects[0]!.ends : null, { span: 3_600 });
+  });
+
   test("behind a blackout a shown clock and its lines never cross a player's or a display's socket, and come back when it ends (ASTRA-06)", async () => {
     const dmClient = t.client();
     const { roomId } = await dmClient.createRoom("Blackout clock");

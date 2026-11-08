@@ -20,6 +20,7 @@ import {
   anchorsForEntry,
   bindToEntry,
   crossingsForNext,
+  endsDue,
   entryMatchesAnchor,
   pausedAnchorForEntry,
   sameAnchor,
@@ -27,8 +28,8 @@ import {
   unbindFromEntry,
   type StoredDuration,
 } from "../rules/durations.ts";
-import { attaches, clockTicks, combatUses, hiddenRowsShareNoMount, keepsLairTick, logsByAudience, marksHadTurn, mountsOnPlayerScene, revealsRowAnew, takesBackTurnOnly } from "../migrate.ts";
-import { fightSeconds } from "../calendar.ts";
+import { attaches, clockTicks, combatUses, hiddenRowsShareNoMount, keepsLairTick, logsByAudience, marksHadTurn, mountsOnPlayerScene, revealsRowAnew, takesBackTurnOnly, timedEnds } from "../migrate.ts";
+import { clockNow, fightSeconds } from "../calendar.ts";
 import { LIMITS } from "../limits.ts";
 import { holderOf } from "../rules/attach.ts";
 import { activeRowShownTo, inSightOfNonOwners, rowSeenByNonOwners, rowSeenMark, seenByNonOwners, seenMark, stableStringify } from "../project.ts";
@@ -484,8 +485,12 @@ export function encounterNext(tx: Tx, op: OpOf<"encounter.next">): void {
   clearCompanionReactions(tx, landing, snapshot);
 
   const crossings = crossingsForNext(encounter, step.skipped, step.landing);
+  // A time span ends at the Next that starts the round its end falls in, inside the tick, so Previous brings it back
+  // with the round (docs/design/design-v1-calendar-c2c3.md 4.3).
+  const clock = tx.state.clock;
+  const due = clock && timedEnds(tx.env.opVersion) ? { clock, now: clockNow(clock, { round, activeEntryId: step.landing }) } : undefined;
   for (const resolved of tx.actors()) {
-    const r = tickEffects(resolved.actor.effects, crossings);
+    const r = tickEffects(resolved.actor.effects, crossings, due);
     if (!r.changed) continue;
     snapshot.effects[holderId(resolved)] = resolved.actor.effects;
     tx.putActor(resolved, { ...resolved.actor, effects: r.effects });
@@ -797,10 +802,14 @@ function undoEffects(tx: Tx, change: EffectChange, before: readonly Effect[], kn
     }
     return out;
   });
+  // A time span the clock has since moved past stays ended, with no second line (docs/design/design-v1-calendar-c2c3.md 4.3).
+  const clock = tx.state.clock;
+  const now = clock && timedEnds(tx.env.opVersion) ? clockNow(clock, tx.state.encounter) : undefined;
   for (const { at, effect: ended } of [...(change.ended ?? [])].sort((a, b) => a.at - b.at)) {
     if (next.length >= MAX_EFFECTS || next.some((e) => e.id === ended.id)) continue;
     // The step's own copy, which every rewrite of the history keeps counting a row of the step (companions.ts stepWithout, the import).
     const effect = before.find((e) => e.id === ended.id) ?? ended;
+    if (clock && now !== undefined && endsDue(effect, clock, now)) continue;
     const was = before.findIndex((e) => e.id === effect.id);
     let place = was < 0 ? Math.min(at, next.length) : 0;
     for (let j = was - 1; j >= 0; j--) {

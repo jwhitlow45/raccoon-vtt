@@ -787,6 +787,87 @@ describe("the party's Long Rest and the clock (docs/design/design-v1-calendar.md
   });
 });
 
+describe("time spans on undo and redo (docs/design/design-v1-calendar-c2c3.md 4.5)", () => {
+  const H = 3_600;
+  const CO_DM: Viewer = { memberId: "dm2", role: "dm" };
+  const span = (characterId: string, id: string, seconds: number): Op => ({ t: "actor.effect.add", target: { characterId }, effect: { id, key: "blessed", duration: { mode: "span", seconds } } });
+  const fx = (table: UndoTable, id: string) => table.state.characters[id]!.actor.effects.map((e) => e.id);
+  const expiries = (table: UndoTable) => (table.last?.applied.log ?? []).filter((l) => l.data?.type === "effect" && l.data.action === "expire").length;
+  function party(): UndoTable {
+    return new UndoTable(
+      room({
+        members: { dm1: member("dm1", "dm"), dm2: member("dm2", "dm"), p1: member("p1") },
+        clock: { id: "c1", rev: 1, t: H, shown: true, calendar: { kind: "days" } },
+        characters: { bree: character("bree", { name: "Bree" }), thorn: character("thorn", { name: "Thorn", ownerIds: [] }) },
+        tokens: { gob: token("gob"), "bree-t": token("bree-t", { kind: "pc", actor: { ref: "bree" }, ownerIds: ["p1"] }) },
+      }),
+    );
+  }
+  /** A fight of the goblin (e1) and Bree (e2), turned on to `round` with e1 acting. */
+  function fightTo(table: UndoTable, round: number): void {
+    assert.equal(table.play(DM, { t: "encounter.start", entries: [{ id: "e1", tokenId: "gob", value: 15 }, { id: "e2", tokenId: "bree-t", value: 5 }] }), "ok");
+    for (let i = 0; i < 1 + 2 * (round - 1); i++) assert.equal(table.play(DM, { t: "encounter.next" }), "ok");
+  }
+
+  test("a step's undo brings back the effects it ended with the clock, and its redo ends them again with no new line", () => {
+    const table = party();
+    assert.equal(table.play(DM, span("bree", "x", H)), "ok");
+    assert.equal(table.play(DM, { t: "clock.advance", by: 2 * H }), "ok");
+    assert.deepEqual(fx(table, "bree"), []);
+    assert.equal(table.undo(DM), "ok");
+    assert.deepEqual(fx(table, "bree"), ["x"]);
+    assert.equal(table.state.clock!.t, H);
+    assert.equal(expiries(table), 0);
+    assert.equal(table.redo(DM), "ok");
+    assert.deepEqual(fx(table, "bree"), []);
+    assert.equal(expiries(table), 0);
+  });
+
+  test("a Calendar save that ends an effect guards its creature across scopes: an earlier play step on it is refused until it is undone", () => {
+    const table = party();
+    assert.equal(table.play(DM, span("bree", "x", H)), "ok");
+    assert.equal(table.play(DM, { t: "actor.hp", target: { characterId: "bree" }, change: { kind: "damage", amount: 3 } }), "ok");
+    assert.equal(table.play(DM, { t: "clock.update", at: 3 * H }), "ok");
+    assert.deepEqual(fx(table, "bree"), []);
+    assert.notEqual(table.undo(DM), "ok", "the damage's undo meets the save's end");
+    assert.equal(table.state.characters.bree!.actor.hp.cur, 17);
+    assert.equal(table.undo(DM, "setup"), "ok");
+    assert.deepEqual(fx(table, "bree"), ["x"]);
+    assert.equal(table.undo(DM), "ok");
+    assert.equal(table.state.characters.bree!.actor.hp.cur, 20);
+  });
+
+  test("rows replaced, Previous back to round 1, a co-DM's 1 minute effect on Thorn, then Undo of the Previous ends it", () => {
+    const table = party();
+    fightTo(table, 11);
+    assert.equal(table.play(DM, { t: "encounter.remove", entryIds: ["e1", "e2"] }), "ok");
+    assert.equal(table.play(DM, { t: "encounter.add", entries: [{ id: "f1", tokenId: "gob", value: 12 }] }), "ok");
+    assert.equal(table.play(DM, { t: "encounter.prev" }), "ok");
+    assert.equal(table.state.encounter!.round, 1);
+    assert.equal(table.play(CO_DM, span("thorn", "b", 60)), "ok");
+    assert.equal(table.undo(DM), "ok");
+    assert.equal(table.state.encounter!.round, 11);
+    assert.deepEqual(fx(table, "thorn"), []);
+    assert.equal(expiries(table), 1);
+  });
+
+  test("10 minutes cast in round 1, Next to round 11, Undo, a Calendar save 9 minutes on, then Redo of the Next ends it", () => {
+    const table = party();
+    fightTo(table, 1);
+    assert.equal(table.play(DM, span("bree", "b", 600)), "ok");
+    for (let i = 0; i < 19; i++) assert.equal(table.play(DM, { t: "encounter.next" }), "ok");
+    assert.equal(table.play(DM, { t: "encounter.next" }), "ok");
+    assert.equal(table.last!.applied.touched.includes(keys.character("bree")), false, "the Next leaves Bree untouched");
+    assert.equal(table.undo(DM), "ok");
+    assert.equal(table.play(DM, { t: "clock.update", at: H + 54 + 540 }), "ok");
+    assert.deepEqual(fx(table, "bree"), ["b"]);
+    assert.equal(table.redo(DM), "ok");
+    assert.equal(table.state.encounter!.round, 11);
+    assert.deepEqual(fx(table, "bree"), []);
+    assert.equal(expiries(table), 1);
+  });
+});
+
 describe("placements between squares on undo and redo (docs/design/design-v1-snap-off.md 5.5)", () => {
   const owl = (over: Partial<Token> = {}) => token("owl", { kind: "npc", name: "Owl", ownerIds: ["p1"], x: 3, y: 3, ...over });
   const table = (over: Partial<Token> = {}) => new UndoTable(room({ members: { dm1: member("dm1", "dm"), p1: member("p1") }, tokens: { owl: owl(over) } }));

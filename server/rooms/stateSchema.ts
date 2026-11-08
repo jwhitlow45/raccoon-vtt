@@ -358,9 +358,12 @@ const feet = z.number().int().min(-100_000).max(100_000);
  * take it, but Exhaustion's is the condition's level, 1 to 6, the rule new
  * ops are held to (shared/permissions.ts). A room from before the rule may
  * hold any counter there, so the import brings it within 1 to 6 rather
- * than refusing the backup.
+ * than refusing the backup. It lasts a count of turns or a length of time,
+ * never both (docs/design/design-v1-calendar-c2c3.md 4.7).
  */
-const effectSchema = actorSchemaForImport.shape.effects.element.transform(withLevelInRange);
+const effectSchema = actorSchemaForImport.shape.effects.element
+  .refine((e) => e.duration === undefined || e.ends === undefined, { message: "an effect lasts turns or a length of time, not both" })
+  .transform(withLevelInRange);
 const actorStored = actorSchemaForImport.extend({ effects: z.array(effectSchema).max(MAX_EFFECTS) });
 
 const pathStop = z.strictObject({

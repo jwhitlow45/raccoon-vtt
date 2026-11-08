@@ -5,6 +5,7 @@ import {
   anchorsForEntry,
   bindToEntry,
   crossingsForNext,
+  endsDue,
   findEntryFor,
   isPaused,
   resolveDuration,
@@ -150,5 +151,31 @@ describe("companions acting on their character's turn (docs/design/design-v1-com
     state.characters.c2 = character("c2");
     state.encounter!.entries = [entry("mixed", { tokenId: "t1", characterId: "c2" })];
     assert.ok(anchorsForEntry(state, state.encounter!.entries[0]!).some((a) => "tokenId" in a && a.tokenId === "ws"), "the row's token is Bree's");
+  });
+});
+
+describe("time spans (docs/design/design-v1-calendar-c2c3.md 4.3)", () => {
+  const span = (at: number | undefined, clock: string | undefined = "c1") => effect("s", { ends: { span: 60, ...(at === undefined ? {} : { at }), ...(clock === undefined ? {} : { clock }) } });
+
+  test("endsDue holds once the current time reaches the end on that very clock", () => {
+    assert.equal(endsDue(span(100), { id: "c1" }, 99), false);
+    assert.equal(endsDue(span(100), { id: "c1" }, 100), true);
+    assert.equal(endsDue(span(100), { id: "c1" }, 101), true);
+    assert.equal(endsDue(span(100, "c0"), { id: "c1" }, 500), false);
+    assert.equal(endsDue(span(undefined, undefined), { id: "c1" }, 500), false);
+    assert.equal(endsDue(effect("x"), { id: "c1" }, 500), false);
+  });
+
+  test("a tick with `due` ends the spans that time reaches, beside the turns it counts", () => {
+    const effects = [span(100), effect("r", { duration: { remaining: 1, boundary: "turnStart", anchor: { entryId: "n2" } } }), effect("later", { ends: { span: 60, at: 200, clock: "c1" } })];
+    const r = tickEffects(effects, [{ entryId: "n2", boundary: "turnStart" }], { clock: { id: "c1" }, now: 100 });
+    assert.deepEqual(r.expired.map((e) => e.id), ["s", "r"]);
+    assert.deepEqual(r.effects.map((e) => e.id), ["later"]);
+    assert.equal(r.changed, true);
+  });
+
+  test("a tick with `due` and no crossings still ends what is due, and one without leaves spans alone", () => {
+    assert.deepEqual(tickEffects([span(100)], [], { clock: { id: "c1" }, now: 100 }).expired.map((e) => e.id), ["s"]);
+    assert.equal(tickEffects([span(100)], [{ entryId: "n1", boundary: "turnEnd" }]).changed, false);
   });
 });

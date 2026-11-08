@@ -1344,6 +1344,18 @@ export function writesDoorCover(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < DOOR_COVER_OP_VERSION);
 }
 
+/**
+ * Whether time spans run out with the clock (docs/design/design-v1-calendar-c2c3.md
+ * 4.3, 4.5): the scan after an op that moves the current time or restores,
+ * the tick inside Next, and Previous leaving out a span the time after it
+ * still reaches. No op stored before version 54 met a time span, so the
+ * gate changes no replay today. Live ops carry no stored version and take
+ * today's rule.
+ */
+export function timedEnds(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 54);
+}
+
 /** Historical restores keep their original log entries and numbering. */
 export function writesUndoCorrections(opVersion: number | undefined): boolean {
   return opVersion === undefined || opVersion >= 34;

@@ -394,4 +394,19 @@ describe("the room's clock (docs/design/design-v1-calendar.md 6.3, CAL-1)", () =
     const calm = { ...timed, encounter: null };
     assert.deepEqual(reads({ t: "clock.set", at: 0 }, calm), { keys: [{ key: "clock" }], complete: [] });
   });
+
+  test("a time span reads the clock where the view holds one, and predicts where it does not (docs/design/design-v1-calendar-c2c3.md 4.3)", () => {
+    const duration = { mode: "span" as const, seconds: 600 };
+    const ops = [
+      { t: "actor.effect.add" as const, target: { characterId: "c1" }, effect: { id: "x", key: "blessed" as const, duration } },
+      { t: "actor.effects" as const, add: [{ target: { characterId: "c1" }, effect: { id: "x", key: "blessed" as const, duration } }] },
+    ];
+    for (const op of ops) {
+      assert.ok(readsClock(op, { ...setup(), clock: clock(true) }), op.t);
+      assert.ok(!readsClock(op, setup()), op.t);
+      assert.ok(predicts(op, setup(), P1), `${op.t} with no clock`);
+      assert.ok(predicts(op, { ...setup(), clock: clock(false) }, P1), `${op.t} hidden`);
+      assert.ok(predicts(op, { ...setup(), clock: clock(true) }, P1), `${op.t} shared`);
+    }
+  });
 });

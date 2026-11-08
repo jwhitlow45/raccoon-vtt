@@ -401,6 +401,24 @@ describe("HP and effects", () => {
     assert.equal(code({ t: "actor.effect.remove", target: { tokenId: "hidden" }, effectId: "e" }), "gone");
   });
 
+  test("a time span names no anchor, and keeps the ownership and hidden-effect tests, single, update and bulk (docs/design/design-v1-calendar-c2c3.md 4.2)", () => {
+    const span = { mode: "span" as const, seconds: 600 };
+    const state = setup();
+    state.characters.c1!.actor.effects = [{ id: "secret", key: "poisoned", hiddenFromPlayers: true }, { id: "seen", key: "blessed" }];
+    // The clock's state is the reducer's to refuse in one wording, so permissions answer alike with none, hidden or shown.
+    for (const clock of [undefined, { id: "c1", rev: 1, t: 0, shown: false, calendar: { kind: "days" as const } }, { id: "c1", rev: 1, t: 0, shown: true, calendar: { kind: "days" as const } }]) {
+      const s = { ...state, ...(clock ? { clock } : {}) };
+      assert.equal(code({ t: "actor.effect.add", target: { tokenId: "own" }, effect: { id: "e", key: "blessed", duration: span } }, P1, s), "ok");
+      assert.equal(code({ t: "actor.effect.update", target: { characterId: "c1" }, effectId: "seen", patch: { duration: span } }, P1, s), "ok");
+      assert.equal(code({ t: "actor.effects", add: [{ target: { characterId: "c1" }, effect: { id: "e", key: "blessed", duration: span } }] }, P1, s), "ok");
+      assert.equal(code({ t: "actor.effect.add", target: { tokenId: "gob" }, effect: { id: "e", key: "blessed", duration: span } }, P1, s), "forbidden");
+      assert.equal(code({ t: "actor.effects", add: [{ target: { tokenId: "gob" }, effect: { id: "e", key: "blessed", duration: span } }] }, P1, s), "forbidden");
+      assert.equal(code({ t: "actor.effect.add", target: { characterId: "c1" }, effect: { id: "e", key: "blessed", duration: span } }, P2, s), "forbidden");
+      assert.equal(code({ t: "actor.effect.update", target: { characterId: "c1" }, effectId: "secret", patch: { duration: span } }, P1, s), "gone");
+      assert.equal(code({ t: "actor.effect.add", target: { characterId: "c1" }, effect: { id: "secret", key: "blessed", duration: span } }, P1, s), "gone");
+    }
+  });
+
   test("a condition the DM hid is not there for the creature's owner, and only the DM hides one", () => {
     const state = setup();
     const hidden = { id: "secret", key: "poisoned" as const, hiddenFromPlayers: true };

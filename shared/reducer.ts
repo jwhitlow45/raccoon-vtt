@@ -10,10 +10,11 @@ import {
   effectAdd,
   effectRemove,
   effectUpdate,
+  endDueSpans,
 } from "./reducer/actors.ts";
 import { remindAfter, remindTurnEnd } from "./reducer/areaTriggers.ts";
 import { linkPass, settleMounts, tokenAttach, tokenDetach } from "./reducer/attach.ts";
-import { attaches, trapsGoOff, writesUndoCorrections } from "./migrate.ts";
+import { attaches, timedEnds, trapsGoOff, writesUndoCorrections } from "./migrate.ts";
 import { clockCorrection, correctionViews } from "./undoCorrection.ts";
 import { clockAdvance, clockSet, clockStart, clockStop, clockUpdate } from "./reducer/clock.ts";
 import {
@@ -196,6 +197,8 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
       linkPass(tx);
       settleMounts(tx);
     }
+    // Before endSaves, so a "save ends" effect that time ends closes its waiting request in the same op (docs/design/design-v1-calendar-c2c3.md 4.3).
+    if (timedEnds(env.opVersion)) endDueSpans(tx, state, op);
     endSaves(tx);
     const dispatched = plan ? new Set(tx.touched()) : null;
     if (plan) traps = trapStep(tx, op, state, plan);

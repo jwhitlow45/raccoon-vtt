@@ -1153,15 +1153,26 @@ function effectCompanion(token: Pick<Token, "kind" | "companion">): boolean {
  * trigger was typed by its player and is the table's. `triggers` is asked
  * only of an actor that holds such a trigger, since it can scan the tokens.
  */
-function publicEffects(effects: Effect[], triggers: () => boolean): Effect[] {
+function publicEffects(effects: Effect[], triggers: () => boolean, clockId: string | undefined): Effect[] {
   let shown: boolean | undefined;
   return effects.flatMap((e) => {
     if (e.hiddenFromPlayers) return [];
-    const seen = playerSave(e);
+    const seen = playerEnds(playerSave(e), clockId);
     if (seen.key !== "readied" || seen.label === undefined || seen.triggerShown === true || (shown ??= triggers())) return [seen];
     const { label: _trigger, ...rest } = seen;
     return [rest];
   });
+}
+
+/**
+ * A time span as every player and table display gets it, owners included
+ * (docs/design/design-v1-calendar-c2c3.md 4.4): its end and clock only while
+ * their view holds that very clock (`clockId`, heldClock), its length alone
+ * otherwise, so an effect added while the clock is hidden never reads it out.
+ */
+function playerEnds(e: Effect, clockId: string | undefined): Effect {
+  if (e.ends === undefined || (e.ends.clock === clockId && clockId !== undefined)) return e;
+  return { ...e, ends: { span: e.ends.span } };
 }
 
 /**
@@ -1214,8 +1225,8 @@ export function playersToken(state: Pick<RoomState, "members" | "characters">, t
   return character !== undefined && anyPlayer(state, character.ownerIds);
 }
 
-function projectActorPublic(actor: Actor, access: HpAccess, triggers: () => boolean, shownAlive = false): ProjectedActor {
-  const out: ProjectedActor = { life: shownAlive ? "alive" : actor.life, effects: publicEffects(actor.effects, triggers) };
+function projectActorPublic(actor: Actor, access: HpAccess, triggers: () => boolean, clockId: string | undefined, shownAlive = false): ProjectedActor {
+  const out: ProjectedActor = { life: shownAlive ? "alive" : actor.life, effects: publicEffects(actor.effects, triggers, clockId) };
   if (access === "exact") out.hp = actor.hp;
   else if (access === "label") out.hpLabel = hpLabel(actor);
   else if (access === "bar") out.hpBar = hpBar(actor);
@@ -1229,9 +1240,9 @@ function projectActorPublic(actor: Actor, access: HpAccess, triggers: () => bool
  * lair, which its row shows only once it joins a fight. A condition hidden
  * from players stays hidden from its owner too.
  */
-function projectActorOwner(actor: Actor): ProjectedActor {
+function projectActorOwner(actor: Actor, clockId: string | undefined): ProjectedActor {
   const { dmNotes: _dmNotes, monsterId: _monsterId, inLair: _inLair, ...rest } = actor;
-  return { ...rest, effects: publicEffects(actor.effects, () => true) };
+  return { ...rest, effects: publicEffects(actor.effects, () => true, clockId) };
 }
 
 export function projectToken(state: RoomState, viewer: Viewer, token: Token, opts: ProjectOpts): ProjectedToken | null {
@@ -1288,7 +1299,7 @@ function markedCopy(token: Token): ProjectedToken {
 function projectPlayerToken(ctx: Ctx, token: Token): ProjectedToken {
   const aboveFog = isAboveFog(token, isPartyMember(ctx.state, token));
   if (ownsToken(ctx.state, ctx.viewer, token)) {
-    const actor = "inline" in token.actor ? { inline: projectActorOwner(token.actor.inline) } : token.actor;
+    const actor = "inline" in token.actor ? { inline: projectActorOwner(token.actor.inline, heldClock(ctx.state, ctx.viewer)?.id) } : token.actor;
     // Owners get their token's light to change it. Party membership is the DM's mark (docs/design/design-v1-maps-vision.md 4.3.5).
     const { partyVision: _partyVision, attached: _attached, ...own } = token;
     const out: ProjectedToken = { ...own, rev: 0, actor, aboveFog };
@@ -1317,7 +1328,7 @@ function projectPlayerToken(ctx: Ctx, token: Token): ProjectedToken {
     actor:
       "ref" in token.actor
         ? token.actor
-        : { inline: projectActorPublic(token.actor.inline, hpAccess(ctx.state, ctx.viewer, { token }), () => playerPlays(ctx.state, { token }), effectCompanion(token)) },
+        : { inline: projectActorPublic(token.actor.inline, hpAccess(ctx.state, ctx.viewer, { token }), () => playerPlays(ctx.state, { token }), heldClock(ctx.state, ctx.viewer)?.id, effectCompanion(token)) },
     aboveFog,
   };
   if (token.image !== undefined) out.image = token.image;
@@ -1418,14 +1429,14 @@ export function projectCharacter(state: RoomState, viewer: Viewer, character: Ch
   // included, so no clock change ever re-projects a character (docs/design/design-v1-calendar.md 6.4).
   if (ownsCharacter(viewer, character)) {
     const { longRest: _longRest, ...owned } = character;
-    return { ...owned, rev: 0, actor: projectActorOwner(character.actor) };
+    return { ...owned, rev: 0, actor: projectActorOwner(character.actor, heldClock(state, viewer)?.id) };
   }
   const out: ProjectedCharacter = {
     id: character.id,
     rev: 0,
     name: character.name,
     size: character.size,
-    actor: projectActorPublic(character.actor, hpAccess(state, viewer, { character }), () => playerPlays(state, { character })),
+    actor: projectActorPublic(character.actor, hpAccess(state, viewer, { character }), () => playerPlays(state, { character }), heldClock(state, viewer)?.id),
   };
   if (character.defaultImage !== undefined) out.defaultImage = character.defaultImage;
   return out;
@@ -4436,6 +4447,22 @@ function perPlayerKeys(state: RoomState): EntityKey[] {
 }
 
 /**
+ * A player's copy of a time span keeps its end only while their view holds
+ * that clock (playerEnds), so a clock that appeared, went, changed id or
+ * flipped its sharing re-projects every creature holding one
+ * (docs/design/design-v1-calendar-c2c3.md 4.4). A step changes no copy, since
+ * the end is absolute. With one state alone, every such creature goes.
+ */
+function spanDependents(state: RoomState, other: RoomState | undefined, add: (key: EntityKey) => void): void {
+  const now = state.clock ?? null;
+  const was = other === undefined ? undefined : (other.clock ?? null);
+  if (was !== undefined && now?.id === was?.id && now?.shown === was?.shown) return;
+  const timed = (actor: Actor) => actor.effects.some((e) => e.ends !== undefined);
+  for (const character of Object.values(state.characters)) if (timed(character.actor)) add(keys.character(character.id));
+  for (const token of Object.values(state.tokens)) if ("inline" in token.actor && timed(token.actor.inline)) add(keys.token(token.id));
+}
+
+/**
  * Entities whose projection can change when the touched ones do (design
  * 7.3, fan-out): templates on a touched token, kept rulers on one, tokens
  * of a touched character, the encounter when a row's creature changed,
@@ -4535,6 +4562,7 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
     if (scene && heldHex(sceneId)) for (const { cx, cy } of readingTile(scene, tx, ty)) wallChunks.push({ sceneId, cx, cy });
   };
   soundDependents(state, touched, add);
+  if (touched.includes(keys.clock)) spanDependents(state, other, add);
   for (const key of touched) {
     const parsed = parseKey(key);
     if (!parsed) continue;
