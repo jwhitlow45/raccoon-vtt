@@ -1,6 +1,9 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { loadedMonsters, loadMonsters, onMonstersLoaded, type SrdMonster } from "#shared/srd/monsters.ts";
 
+/** A failure for every view, set by a test: a server render runs no effect, so it never meets a failed load otherwise. */
+let failedForTests = false;
+
 /**
  * The SRD's 330 stat blocks for a view, one rule for every view that shows
  * them: the Monsters panel, the token panel's stat block and summary, the
@@ -29,7 +32,15 @@ export function useSrdBlocks(active = true, attempt = ""): { list: readonly SrdM
       live = false;
     };
   }, [active, list, attempt]);
-  return { list, failed: blocksFailed(list, failedFor, attempt) };
+  return { list, failed: (failedForTests && list === null) || blocksFailed(list, failedFor, attempt) };
+}
+
+/** Leaves the stat blocks failed for every view that waits on them, as a load that did not land does, until the returned undo. For tests. */
+export function failSrdBlocksForTests(): () => void {
+  failedForTests = true;
+  return () => {
+    failedForTests = false;
+  };
 }
 
 /** A failed load counts for the attempt it came from, and never once the blocks have loaded, whichever view loaded them. */
