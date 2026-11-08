@@ -7294,6 +7294,8 @@ export function panelGroupTests(): void {
         if ((await picker.getByRole("tab", { name: "Icons", exact: true }).getAttribute("aria-selected")) !== "true") sweep.lines.push(`${sweep.at} pg-icons-tab: the picker opens on another tab than Icons`);
         // The tab's own panel: the source tabs above it are the picker's, not the polish pass's.
         await groups(sweep, page, "pg-icons-tab", picker, picker.getByRole("tabpanel"), false);
+        // The source tabs on their own: on a phone they stand in rows of three, where Search the web wraps at 130% (IMGPICK-TABS-1).
+        await sweep.measure(page, "pg-picker-tabs", picker.getByRole("tablist", { name: "Where the image comes from" }));
         await shots.take(page, `alignment-${sweep.at}-pg-icons-tab`);
         await page.keyboard.press("Escape");
         await picker.waitFor({ state: "detached" });

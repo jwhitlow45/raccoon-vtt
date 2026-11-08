@@ -170,7 +170,8 @@ export function ImagePicker(props: {
     { id: "library", label: "Library" },
   ];
 
-  // The dialog fills a phone, where the sources sit in even rows of three. Each as wide as its word, six wrapped four over two.
+  // The dialog fills a phone, where the sources sit in even rows of three, each row as tall as the tallest, since "Search the web" takes two lines at 130% (IMGPICK-TABS-1).
+  // Wider, each is as wide as its word, six wrapped four over two.
   const sourceRows = useLayoutSize().width < DIALOG_PHONE_MAX;
 
   return (
@@ -188,7 +189,7 @@ export function ImagePicker(props: {
           role="tablist"
           aria-label="Where the image comes from"
           style={{
-            ...(sourceRows ? { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))" } : { display: "flex", flexWrap: "wrap" }),
+            ...(sourceRows ? { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gridAutoRows: "1fr" } : { display: "flex", flexWrap: "wrap" }),
             gap: theme.space(1),
             marginBottom: theme.space(3),
           }}
