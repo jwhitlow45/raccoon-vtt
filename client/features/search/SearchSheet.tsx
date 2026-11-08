@@ -27,6 +27,7 @@ import { useUiScale } from "../device/settings.ts";
 import { fillDiceField } from "../dice/fill.ts";
 import { useDicePanel } from "../dice/useDicePanel.ts";
 import { useSrdBlocks } from "../monsters/srdBlocks.ts";
+import { useServerRoomSound } from "../sound/engine/store.ts";
 import { focusOutlineRow } from "../outliner/focus.ts";
 import type { OutlineRow } from "../outliner/rows.ts";
 import type { PanelsForOptions } from "../panels.ts";
@@ -446,7 +447,7 @@ function useDmCatalog(role: "dm" | "player"): DmCatalogState {
  * the DM menu's view does, which `dmMenu` carries for a DM's search, never on
  * each key.
  */
-export function useSheetIndex(input: Omit<IndexInput, "state" | "dmMenu"> & { dmMenu?: DmMenuView | undefined }): SearchIndex {
+export function useSheetIndex(input: Omit<IndexInput, "state" | "dmMenu" | "soundFiles"> & { dmMenu?: DmMenuView | undefined }): SearchIndex {
   const store = useRoomStore();
   const view = useRoomView((s) => s.view);
   const sceneId = useRoomView((s) => s.sceneId);
@@ -454,11 +455,12 @@ export function useSheetIndex(input: Omit<IndexInput, "state" | "dmMenu"> & { dm
   // The Dice panel's creature rows hang on the whole selection (dice/search.ts).
   const selectedIds = useRoomView((s) => s.local.selectedIds);
   const you = useRoomView((s) => s.you);
+  const soundFiles = useServerRoomSound();
   const { wide, panelOptions, keys, catalogs, monsters, dmMenu } = input;
   return useMemo(
-    () => buildIndex({ state: store.getState(), wide, ...(panelOptions ? { panelOptions } : null), keys, catalogs, monsters, ...(dmMenu ? { dmMenu } : null) }),
+    () => buildIndex({ state: store.getState(), wide, ...(panelOptions ? { panelOptions } : null), keys, catalogs, monsters, ...(dmMenu ? { dmMenu } : null), soundFiles }),
     // The store is read whole, so its parts the index reads are the deps.
-    [store, view, sceneId, selectedId, selectedIds, you, wide, panelOptions, keys, catalogs, monsters, dmMenu],
+    [store, view, sceneId, selectedId, selectedIds, you, wide, panelOptions, keys, catalogs, monsters, dmMenu, soundFiles],
   );
 }
 

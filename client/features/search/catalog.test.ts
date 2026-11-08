@@ -220,12 +220,12 @@ describe("the DM menu's items (design-v1-qol.md 5, Acting and 6)", () => {
   });
 
   test("without the menu's own view the DM's index reads the room's, and a player's never draws an item", () => {
-    const dm = buildIndex({ state: DM_VIEW(), wide: true, keys: keysOf(DM_VIEW()), catalogs: [EVERYONE, DM_CATALOG], monsters: null });
+    const dm = buildIndex({ state: DM_VIEW(), wide: true, keys: keysOf(DM_VIEW()), catalogs: [EVERYONE, DM_CATALOG], monsters: null, soundFiles: true });
     const items = dm.items.filter((i) => i.entry.act.t === "item").map((i) => i.entry.id);
     assert.deepEqual(items.sort(), ["item:blackout", "item:bringEveryone", "item:follow", "item:showHandout", "item:viewAs:p1", "item:viewAs:p2"].sort());
-    const fromMenu = buildIndex({ state: DM_VIEW(), wide: true, keys: keysOf(DM_VIEW()), catalogs: [EVERYONE, DM_CATALOG], monsters: null, dmMenu: { ...dmMenuViewOf(DM_VIEW()), recent: [{ ...toPat, to: "all" } as RecentHandout] } });
+    const fromMenu = buildIndex({ state: DM_VIEW(), wide: true, keys: keysOf(DM_VIEW()), catalogs: [EVERYONE, DM_CATALOG], monsters: null, soundFiles: true, dmMenu: { ...dmMenuViewOf(DM_VIEW()), recent: [{ ...toPat, to: "all" } as RecentHandout] } });
     assert.ok(fromMenu.byId.has("item:recent:doc:letter"), "this device's recent showing comes with the menu's view");
-    const pat = buildIndex({ state: PAT_VIEW(), wide: true, keys: keysOf(PAT_VIEW()), catalogs: [EVERYONE, DM_CATALOG], monsters: null });
+    const pat = buildIndex({ state: PAT_VIEW(), wide: true, keys: keysOf(PAT_VIEW()), catalogs: [EVERYONE, DM_CATALOG], monsters: null, soundFiles: true });
     assert.deepEqual(
       pat.items.filter((i) => i.entry.act.t === "item").map((i) => i.entry.id),
       ["item:xcard"],

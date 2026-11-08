@@ -136,9 +136,9 @@ export const DM_CATALOGS: readonly Catalog[] = [EVERYONE, DM_CATALOG];
 export const PLAYER_CATALOGS: readonly Catalog[] = [EVERYONE];
 
 /** A viewer's index of the room, from the fixture catalogs their role holds. */
-export function indexOf(state: RoomView, options: { wide?: boolean; monsters?: readonly SrdMonster[] | null } = {}): SearchIndex {
+export function indexOf(state: RoomView, options: { wide?: boolean; monsters?: readonly SrdMonster[] | null; soundFiles?: boolean } = {}): SearchIndex {
   const dm = searchRole(state) === "dm";
-  return buildIndex({ state, wide: options.wide ?? true, keys: keysOf(state), catalogs: dm ? DM_CATALOGS : PLAYER_CATALOGS, monsters: options.monsters === undefined ? (dm ? SRD : null) : options.monsters });
+  return buildIndex({ state, wide: options.wide ?? true, keys: keysOf(state), catalogs: dm ? DM_CATALOGS : PLAYER_CATALOGS, monsters: options.monsters === undefined ? (dm ? SRD : null) : options.monsters, soundFiles: options.soundFiles ?? true });
 }
 
 /** The typed list's rows for a query. */

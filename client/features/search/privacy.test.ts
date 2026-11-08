@@ -144,7 +144,7 @@ describe("a player's search holds only what that player may see and do (design-v
         const loads: unknown[] = [];
         const { catalogs } = catalogsFor(view, { request: (role) => (loads.push(role), { status: "ready", catalog: dm.catalog }) });
         // The real catalogs as catalogsFor gives them. The sheet passes the SRD list it has to any role: a player's index must build no monster of it.
-        const index = buildIndex({ state: view, wide, keys: keysOf(view), catalogs, monsters: SRD });
+        const index = buildIndex({ state: view, wide, keys: keysOf(view), catalogs, monsters: SRD, soundFiles: true });
 
         assert.deepEqual(loads, [], "invariant 5: the DM catalog's loader was called");
         const memberId = view.you?.memberId ?? null;

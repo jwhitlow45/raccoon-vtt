@@ -88,6 +88,12 @@ export type IndexInput = {
   monsters: readonly SrdMonster[] | null;
   /** The DM menu's view for a DM's search (catalog/types.ts SearchContext). */
   dmMenu?: DmMenuView;
+  /**
+   * The server has sound files on (ROOM_SOUND). Sound draws its Library only
+   * then (sound/search.ts filesOn), so a room's playlists and tracks, kept
+   * from a server or a backup that had them, are offered only then.
+   */
+  soundFiles: boolean;
 };
 
 export type SearchIndex = {
@@ -342,7 +348,7 @@ export function buildIndex(input: IndexInput): SearchIndex {
       });
     }
     const music = view.playing?.music ?? null;
-    for (const pl of Object.values(view.playlists ?? {})) {
+    for (const pl of input.soundFiles ? Object.values(view.playlists ?? {}) : []) {
       const page = recordPage("playlist", pl.id);
       b.entry({ id: `playlist:${pl.id}`, kind: "playlist", title: pl.name, where: ROW_WORDS.tracks(pl.sounds.length), icon: "music", act: { t: "open", route: { panel: SOUND_PANEL, page, anchor: PLAYLIST_ANCHOR } } });
       // Playing, its row's button is Pause, which Play would press.
@@ -356,7 +362,7 @@ export function buildIndex(input: IndexInput): SearchIndex {
         act: { t: "open", route: { panel: SOUND_PANEL, page, anchor: PLAY_PLAYLIST_ANCHOR, press: true } },
       });
     }
-    for (const so of Object.values(view.sounds ?? {})) {
+    for (const so of input.soundFiles ? Object.values(view.sounds ?? {}) : []) {
       if (so.use !== "music" || !so.name) continue;
       b.entry({ id: `track:${so.id}`, kind: "track", title: so.name, where: ROW_WORDS.library, icon: "music", act: { t: "open", route: { panel: SOUND_PANEL, page: recordPage("track", so.id), anchor: TRACK_ANCHOR } } });
     }

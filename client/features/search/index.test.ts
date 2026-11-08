@@ -28,19 +28,19 @@ describe("the panels and keys (design-v1-qol.md 5, What keeps it current)", () =
   test("every key a role has is in its index while it applies, but the arrows and Page keys", () => {
     for (const view of [DM_VIEW(), PAT_VIEW()]) {
       const role = view.you!.role;
-      const all = buildIndex({ state: view, wide: true, keys: { applies: () => true, text: () => "K" }, catalogs: [], monsters: null });
+      const all = buildIndex({ state: view, wide: true, keys: { applies: () => true, text: () => "K" }, catalogs: [], monsters: null, soundFiles: true });
       const found = new Set(all.items.map((i) => i.entry.id));
       for (const s of SHORTCUTS) {
         const expected = s.roles.includes(role) && !s.navigation;
         assert.equal(found.has(`key:${s.id}`), expected, `${role} ${s.id}`);
       }
-      const none = buildIndex({ state: view, wide: true, keys: { applies: () => false, text: () => "K" }, catalogs: [], monsters: null });
+      const none = buildIndex({ state: view, wide: true, keys: { applies: () => false, text: () => "K" }, catalogs: [], monsters: null, soundFiles: true });
       assert.ok(!none.items.some((i) => i.entry.kind === "key"));
     }
   });
 
   test("the digits that start an HP change read Change HP, with this device's digits, and their press goes to the HP field", () => {
-    const row = (keys: KeyMap) => buildIndex({ state: DM_VIEW(), wide: true, keys: { applies: (s) => s.id === "hpDigit", text: (id) => keyText(id, keys) }, catalogs: [], monsters: null }).byId.get("key:hpDigit")?.entry;
+    const row = (keys: KeyMap) => buildIndex({ state: DM_VIEW(), wide: true, keys: { applies: (s) => s.id === "hpDigit", text: (id) => keyText(id, keys) }, catalogs: [], monsters: null, soundFiles: true }).byId.get("key:hpDigit")?.entry;
     const plain = row(DEFAULT_KEYS)!;
     assert.deepEqual([plain.title, plain.keys], ["Change HP", "1 to 9"]);
     assert.deepEqual(plain.act, { t: "key", shortcut: "hpDigit" });
@@ -141,6 +141,14 @@ describe("the room's things (design-v1-qol.md 5, What it finds)", () => {
     assert.ok(!pat.byId.has("handout:doc:letter"));
   });
 
+  test("with sound files off, a DM's room that holds a playlist and a track offers none of their rows, as Sound draws no Library (LP32-A-SRCH-2)", () => {
+    const off = ids(DM_VIEW(), { soundFiles: false });
+    for (const id of ["playlist:drums", "action:play:drums", "track:song"]) assert.ok(!off.has(id), id);
+    assert.ok(off.has("scene:s1") && off.has("handout:doc:letter"), "the other records stay");
+    const on = ids(DM_VIEW(), { soundFiles: true });
+    for (const id of ["playlist:drums", "action:play:drums", "track:song"]) assert.ok(on.has(id), id);
+  });
+
   test("a scene's where says who is on it", () => {
     const dm = DM_VIEW();
     assert.equal(entryOf(dm, "scene:s1")?.where, "You are here · Players are here");
@@ -187,14 +195,14 @@ describe("the room's things (design-v1-qol.md 5, What it finds)", () => {
 
   test("no view yet: only the panels, keys and catalogs", () => {
     const view = { ...DM_VIEW(), view: null } as RoomView;
-    const index = buildIndex({ state: view, wide: true, keys: keysOf(view), catalogs: [EVERYONE_FIXTURE], monsters: null });
+    const index = buildIndex({ state: view, wide: true, keys: keysOf(view), catalogs: [EVERYONE_FIXTURE], monsters: null, soundFiles: true });
     assert.ok(index.items.every((i) => ["panel", "key", "section", "setting"].includes(i.entry.kind)));
   });
 
   test("ids are unique in an index, the first source winning", () => {
     const twice: Catalog = { entries: [...EVERYONE_FIXTURE.entries, { ...EVERYONE_FIXTURE.entries[0]!, title: "Again" }], fields: [], panels: {} };
     const view = DM_VIEW();
-    const index = buildIndex({ state: view, wide: true, keys: keysOf(view), catalogs: [twice], monsters: null });
+    const index = buildIndex({ state: view, wide: true, keys: keysOf(view), catalogs: [twice], monsters: null, soundFiles: true });
     const all = index.items.map((i) => i.entry.id);
     assert.equal(new Set(all).size, all.length);
     assert.equal(index.byId.get(EVERYONE_FIXTURE.entries[0]!.id)?.entry.title, "Sounds");
@@ -210,7 +218,7 @@ describe("the catalogs", () => {
       panels: { tracker: { names: ["turn order"], bets: ["init"] } },
     };
     const view = DM_VIEW();
-    const build = () => buildIndex({ state: view, wide: true, keys: keysOf(view), catalogs: [catalog], monsters: null });
+    const build = () => buildIndex({ state: view, wide: true, keys: keysOf(view), catalogs: [catalog], monsters: null, soundFiles: true });
     assert.ok(!build().byId.has("setting:x.y"));
     on = true;
     assert.equal(build().byId.get("setting:x.y")?.entry.value, "On");
@@ -259,7 +267,7 @@ describe("a typed dice formula", () => {
   test("its row comes first, above the entries the words match", () => {
     const view = DM_VIEW();
     const catalog: Catalog = { entries: [{ id: "action:loot", kind: "action", title: "Roll 2d6 for loot", where: "", icon: "dice", act: { t: "open", route: { panel: "dice" } } }], fields: [], panels: {} };
-    const index = buildIndex({ state: view, wide: true, keys: keysOf(view), catalogs: [catalog], monsters: null });
+    const index = buildIndex({ state: view, wide: true, keys: keysOf(view), catalogs: [catalog], monsters: null, soundFiles: true });
     const out = searchResults(index, "2d6", []);
     assert.deepEqual(out.t === "typed" && out.rows.map((e) => e.id), ["dice:2d6", "action:loot"]);
   });
