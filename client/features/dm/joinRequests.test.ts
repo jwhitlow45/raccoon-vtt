@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { REFUSAL_SHOWN_MS } from "../../../server/auth/joinRequests.ts";
 import { FakeClock } from "../../state/testing.ts";
 import {
   answerErrorText,
@@ -397,5 +396,6 @@ describe("the list's fetches", () => {
 });
 
 test("the tapping device keeps its own refusal words as long as the list does", () => {
-  assert.equal(OWN_ERROR_SHOWN_MS, REFUSAL_SHOWN_MS);
+  // The client cannot import the server's REFUSAL_SHOWN_MS (60 s, server/auth/joinRequests.ts), so both are pinned.
+  assert.equal(OWN_ERROR_SHOWN_MS, 60_000);
 });

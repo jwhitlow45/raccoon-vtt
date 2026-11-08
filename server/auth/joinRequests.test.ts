@@ -314,6 +314,8 @@ describe("join requests: waiting", () => {
     store.take(ROOM, r.id);
     assert.equal(store.refusal(r), null, "a let-in running again says nothing old");
     store.settle(r.id, "failed", "busy");
+    // The DM client drops its own copy of these words after OWN_ERROR_SHOWN_MS, which must stay equal.
+    assert.equal(REFUSAL_SHOWN_MS, 60_000);
     time.advance(REFUSAL_SHOWN_MS - 1);
     assert.equal(store.refusal(r), "busy");
     time.advance(1);
