@@ -900,7 +900,10 @@ describe("The top bar's chips and their menus", { concurrency: false }, () => {
     assert.equal(await popover.isVisible(), true, "the popover stays open for another step");
     await popover.getByRole("button", { name: "Move the clock on 10 minutes" }).click();
     await waitFor("two steps sent", () => (sentOps(from, "clock.advance").length === 2 ? true : null));
-    assert.deepEqual(sentOps(from, "clock.advance"), [{ t: "clock.advance", by: 3_600 }, { t: "clock.advance", by: 600 }]);
+    const steps = sentOps(from, "clock.advance") as { t: string; by: number; claim?: unknown }[];
+    // Each step names its own clock line by a fresh claim (calendar C2), so the device knows its lines.
+    assert.deepEqual(steps.map(({ claim: _, ...op }) => op), [{ t: "clock.advance", by: 3_600 }, { t: "clock.advance", by: 600 }]);
+    assert.ok(steps.every((op) => typeof op.claim === "string") && steps[0]!.claim !== steps[1]!.claim, "each step carries a claim of its own");
     assert.equal(await selected(), tab, "the side panel kept its tab");
     await popover.getByRole("button", { name: "Open Time", exact: true }).click();
     await popover.waitFor({ state: "detached" });
