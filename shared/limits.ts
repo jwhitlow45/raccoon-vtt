@@ -1,7 +1,8 @@
 import { roomHandoutPages } from "./handouts.ts";
 import { isWritable } from "./writable.ts";
-import { CHUNK_CELLS, HEIGHTS_CHARS, type BuildChunk, type CompanionBlock, type CustomMonster, type JournalPage, type RoomState, type Token } from "./model.ts";
+import { CHUNK_CELLS, HEIGHTS_CHARS, type BuildChunk, type CompanionBlock, type CustomMonster, type JournalPage, type RoomState, type Scene, type Token } from "./model.ts";
 import { ownEntry } from "./records.ts";
+import { floorsOf, openFloor } from "./rules/floors.ts";
 import type { SoundUse } from "./sound.ts";
 import { drawnSize, type VideoGeometry, type VideoShape } from "./videoGeometry.ts";
 
@@ -803,8 +804,10 @@ export function checkLimits(state: RoomState, sceneId?: string | null, before?: 
   let drawings = 0;
   let points = 0;
   let labels = 0;
-  for (const t of Object.values(state.tokens)) if (t.sceneId === sceneId) tokens++;
-  for (const t of Object.values(state.templates)) if (t.sceneId === sceneId) templates++;
+  // A scene's floors share its token and area caps (docs/design/design-v1-floors.md 9, D-261102-485), so no move between floors meets one.
+  const group = new Set(floorsOf(state, sceneId).map((s) => s.id)).add(sceneId);
+  for (const t of Object.values(state.tokens)) if (group.has(t.sceneId)) tokens++;
+  for (const t of Object.values(state.templates)) if (group.has(t.sceneId)) templates++;
   for (const d of Object.values(state.drawings)) {
     if (d.sceneId !== sceneId) continue;
     drawings++;
@@ -1150,7 +1153,39 @@ const FULL_BITS = "A".repeat(HEIGHTS_CHARS);
 export function exploringSceneId(state: Pick<RoomState, "meta" | "scenes">): string | null {
   const id = state.meta.playerSceneId;
   const scene = id === null ? undefined : ownEntry(state.scenes, id);
-  return scene && scene.vision?.on === true && scene.vision.perPlayer !== true && scene.fogEnabled ? scene.id : null;
+  return scene && explores(scene) ? scene.id : null;
+}
+
+function explores(scene: Scene): boolean {
+  return scene.vision?.on === true && scene.vision.perPlayer !== true && scene.fogEnabled;
+}
+
+/**
+ * The floors whose explored layer can grow (docs/design/design-v1-floors.md
+ * 8.3): every open floor of the players' scene with vision and fog on, as
+ * `exploringSceneId` asks of one scene, each explored on its own. On a
+ * scene without floors, exactly `exploringSceneId`.
+ */
+export function exploringFloors(state: RoomState): string[] {
+  const start = state.meta.playerSceneId;
+  if (start === null) return [];
+  return floorsOf(state, start)
+    .filter((floor) => explores(floor) && openFloor(state, floor.id))
+    .map((floor) => floor.id);
+}
+
+/**
+ * The floors the size guard reserves explored room for (9, D-261102-485):
+ * every floor of the players' scene with vision and fog on, whatever is
+ * open, so a floor the party reaches never finds the room full. On a scene
+ * without floors, exactly `exploringSceneId`.
+ */
+export function reservedExploreFloors(state: Pick<RoomState, "meta" | "scenes">): string[] {
+  const start = state.meta.playerSceneId;
+  if (start === null) return [];
+  return floorsOf(state, start)
+    .filter(explores)
+    .map((floor) => floor.id);
 }
 
 /**
@@ -1165,10 +1200,20 @@ export function exploringSceneId(state: Pick<RoomState, "meta" | "scenes">): str
  * size does not depend on which bits are set, so exploring adds exactly what
  * it takes off this, and stored size plus reserve never grows by it. A held
  * tile outside the bounds counts only in the measured state.
+ *
+ * On a scene with floors every floor `reservedExploreFloors` names has its
+ * reserve, and `sceneId` asks for one floor's alone, none for a floor it
+ * does not name.
  */
-export function exploredReserve(state: Pick<RoomState, "meta" | "scenes" | "exploredTiles">): number {
-  const sceneId = exploringSceneId(state);
-  if (sceneId === null) return 0;
+export function exploredReserve(state: Pick<RoomState, "meta" | "scenes" | "exploredTiles">, sceneId?: string): number {
+  const floors = reservedExploreFloors(state);
+  if (sceneId !== undefined) return floors.includes(sceneId) ? floorExploredReserve(state, sceneId) : 0;
+  let reserve = 0;
+  for (const floor of floors) reserve += floorExploredReserve(state, floor);
+  return reserve;
+}
+
+function floorExploredReserve(state: Pick<RoomState, "scenes" | "exploredTiles">, sceneId: string): number {
   const scene = ownEntry(state.scenes, sceneId)!;
   // Every op's size check adds this, so it is arithmetic on two measured lengths rather than a serialization per tile.
   const id = utf8Bytes(JSON.stringify(sceneId));

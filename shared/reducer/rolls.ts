@@ -12,6 +12,7 @@ import { Refuse, gone, guardHash, invalid, type Tx } from "./tx.ts";
 import { savePageAskFieldsSchema } from "../saveOutcomeContract.ts";
 import { tracksSaveOutcomes } from "../saveOutcomes.ts";
 import { ownEntry } from "../records.ts";
+import { onPlayersScene } from "../rules/floors.ts";
 
 /**
  * Roll requests (docs/design/design-v1-dm-tools.md 3.3 and docs/design/design-v1-roll-request.md).
@@ -54,11 +55,11 @@ export function rollAsk(tx: Tx, op: OpOf<"roll.ask">): void {
     for (const replacement of op.replaces) tx.writeBookkeeping(keys.roll(replacement.id), null);
     if (Object.keys(tx.state.rolls).length >= LIMITS.openRollsPerRoom) throw new Refuse("quota", "too many open roll requests");
   }
-  const playerScene = tx.state.meta.playerSceneId;
   for (const target of input.targets) {
     if ("tokenId" in target) {
       const token = tx.token(target.tokenId);
-      if (token.sceneId !== playerScene) throw invalid("a token asked to roll must be on the players' scene");
+      // Any floor of the players' scene, reached or not (docs/design/design-v1-floors.md 8.3).
+      if (!onPlayersScene(tx.state, token.sceneId)) throw invalid("a token asked to roll must be on the players' scene");
       if (!playersToken(tx.state, token)) throw invalid(NOT_PLAYED);
     } else if (!anyPlayer(tx.state, tx.character(target.characterId).ownerIds)) {
       throw invalid(NOT_PLAYED);

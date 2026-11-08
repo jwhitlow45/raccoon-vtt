@@ -9,6 +9,7 @@ import { isHex, sceneGrid, type Grid } from "./grid.ts";
 import { cornerAt, hexAt, hexCorners, hexInScene, hexKey, hexNeighbors, hexSubcells, parseHexKey, type Hex, type HexGrid } from "./hex.ts";
 import { seenFogBits } from "./vision.ts";
 import { ownEntry } from "../records.ts";
+import { playersSee } from "./floors.ts";
 
 /*
  * What a player holds of a scene's build (docs/design/design-v1-map-discovery.md
@@ -184,13 +185,14 @@ function cached(read: Layer): Layer {
 const NONE: Layer = () => null;
 
 /**
- * The sight a class reads on a scene, where sight makes ground live: the
- * players' scene with party vision on, outside a blackout. A holder's own
+ * The sight a class reads on a scene, where sight makes ground live: a
+ * floor players see (docs/design/design-v1-floors.md 8.3), on a scene
+ * without floors the players', with party vision on. A holder's own
  * on a per-player scene, the shared sight for everyone else there, and the
  * party's on a whole-party scene.
  */
 export function classSight(state: RoomState, scene: Scene, holder: string | null): PartySight | null {
-  if (scene.vision?.on !== true || state.meta.playerSceneId !== scene.id || state.meta.view?.blackout === true) return null;
+  if (scene.vision?.on !== true || !playersSee(state, scene.id)) return null;
   if (scene.vision.perPlayer === true) return visionRules.holderSight(state, scene.id, holder);
   return visionRules.partySight(state, scene.id);
 }

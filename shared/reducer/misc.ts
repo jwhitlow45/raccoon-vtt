@@ -17,6 +17,7 @@ import { gone, guardHash, invalid, type Tx } from "./tx.ts";
 import { prepareSaveOutcomeRestore, pruneSaveOutcomes, writeSaveOutcome } from "./saveOutcomes.ts";
 import { playingAsRefusal, playingOf } from "./sound.ts";
 import { ownEntry } from "../records.ts";
+import { startFloor } from "../rules/floors.ts";
 import type { Playing, Playlist, Sound, SoundId, SoundUse } from "../sound.ts";
 
 export function logChat(tx: Tx, op: OpOf<"log.chat">): void {
@@ -352,7 +353,8 @@ function checkReferences(tx: Tx, entries: RestoreEntry[], before: Map<EntityKey,
   const tokens = new Set(removed.flatMap((p) => (p.kind === "token" ? [p.id] : [])));
   if (scenes.size > 0) {
     // The players' scene says what a delete of it says. Once they move, other work on the scene still refuses it below.
-    if (s.meta.playerSceneId !== null && scenes.has(s.meta.playerSceneId)) throw invalid(MOVE_PLAYERS_FIRST_BACK);
+    const start = startFloor(s);
+    if (start !== null && scenes.has(start)) throw invalid(MOVE_PLAYERS_FIRST_BACK);
     const named = (x: { sceneId: string }) => scenes.has(x.sceneId);
     if (
       Object.values(s.buildChunks).some(named) ||

@@ -38,6 +38,7 @@ import { actorOfEntry, groupKeyFor, nextTurn, placeEntry, renumber, rowCharacter
 import { gone, invalid, type Env, type ResolvedActor, type Tx } from "./tx.ts";
 import { restoreTurnUses, savedHolder, startTurnUses, withoutTurnScoped } from "./uses.ts";
 import { ownEntry } from "../records.ts";
+import { openFloor } from "../rules/floors.ts";
 
 /** How many `next` steps `prev` can walk back. */
 export const MAX_HISTORY = 20;
@@ -631,10 +632,12 @@ function clearCompanionReactions(tx: Tx, landing: InitEntry, snapshot: Encounter
 function sharedCompanions(tx: Tx, landing: InitEntry): Token[] {
   const characterId = rowCharacter(tx.state, landing);
   if (characterId === undefined) return [];
-  const sceneId = landing.tokenId !== undefined ? ownEntry(tx.state.tokens, landing.tokenId)?.sceneId : tx.state.meta.playerSceneId;
+  // A row with no token clears its companions on every floor players have reached (docs/design/design-v1-floors.md 8.3).
+  const tokenScene = landing.tokenId !== undefined ? (ownEntry(tx.state.tokens, landing.tokenId)?.sceneId ?? null) : undefined;
+  const here = (sceneId: string) => (tokenScene === undefined ? openFloor(tx.state, sceneId) : sceneId === tokenScene);
   return Object.values(tx.state.tokens)
     .sort((a, b) => (a.id < b.id ? -1 : 1))
-    .filter((token) => token.companion?.of === characterId && token.companion.turn === "shared" && token.sceneId === sceneId);
+    .filter((token) => token.companion?.of === characterId && token.companion.turn === "shared" && here(token.sceneId));
 }
 
 /**

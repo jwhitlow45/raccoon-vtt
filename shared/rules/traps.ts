@@ -18,6 +18,7 @@ import { sceneWalls } from "./walls.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
 import { cornerAt, hexAt, hexCorners, hexInScene, hexKey, hexNeighbors, hexSubcells, sceneHexSpan, type Hex, type HexGrid } from "./hex.ts";
 import { ownEntry } from "../records.ts";
+import { playersSee } from "./floors.ts";
 
 /**
  * Triggers and traps (docs/design/design-v1-traps.md section 5): which creatures
@@ -42,9 +43,37 @@ export function isPlainId(id: string): boolean {
   return PLAIN_ID.test(id);
 }
 
-/** The scene where traps go off by themselves (5.1): the players', while no blackout is on. */
+/** The scene where traps go off by themselves (5.1): the players', while no blackout is on. On a scene with floors, its start floor. */
 export function liveTrapScene(state: Pick<RoomState, "meta">): string | null {
   return state.meta.view.blackout ? null : state.meta.playerSceneId;
+}
+
+/**
+ * Whether traps go off by themselves on a floor (5.1,
+ * docs/design/design-v1-floors.md 7.7, D-261102-490): one players see now,
+ * an open floor outside a blackout, so a floor not reached is a safe place
+ * to prepare. On a scene without floors, the players' scene.
+ */
+export function trapsLiveOn(state: RoomState, sceneId: string): boolean {
+  return playersSee(state, sceneId);
+}
+
+/**
+ * The floor a walk op's traps go off on: on a players' scene without
+ * floors exactly `liveTrapScene`, so stored walks replay as they were
+ * made, and on one with floors the floor of the first token the op names
+ * that stands on a live floor. A board shows one floor, so a gesture
+ * walks one.
+ */
+function walkScene(op: Op, state: TrapRoom): string | null {
+  const today = liveTrapScene(state);
+  if (today === null || ownEntry(state.scenes, today)?.floor === undefined) return today;
+  const named = op.t === "token.moveMany" ? op.moves.map((m) => m.tokenId) : "tokenId" in op ? [op.tokenId] : [];
+  for (const id of named) {
+    const sceneId = ownEntry(state.tokens, id)?.sceneId;
+    if (sceneId !== undefined && trapsLiveOn(state, sceneId)) return sceneId;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1299,7 +1328,7 @@ export function trapLandings(op: Op, before: TrapRoom, actor: Viewer, env: { opV
 
 /** The trap step's plan of a move with the walks it read and its stops, or null where it reads none. `rest` is null with no private pass. */
 function trapMoveParts(op: Op, before: TrapRoom, actor: Viewer, env: { opVersion?: number }, pitOpens?: (trap: Trap) => boolean): { springings: Springing[]; op: Op; walks: Walks; stops: Map<string, Stop>; rest: Walks | null } | null {
-  const sceneId = liveTrapScene(before);
+  const sceneId = walkScene(op, before);
   if (sceneId === null || !walkOp(op)) return null;
   const index = trapIndex(before, sceneId);
   if (index.traps.length === 0) return null;
@@ -1381,7 +1410,7 @@ function trapPlan(op: Op, before: RoomState, actor: Viewer, env: { opVersion?: n
  * its own (client/features/traps/rules.ts crossedTraps).
  */
 export function trapWalks(op: Op, before: TrapRoom, actor: Viewer, env: { opVersion?: number }): { tokenId: string; group: string; isPublic: boolean; walker: boolean; step: number; spots: { x: number; y: number; progress: Progress }[] }[] {
-  const sceneId = liveTrapScene(before);
+  const sceneId = walkScene(op, before);
   if (sceneId === null || !walkOp(op)) return [];
   const entries = trapPlan(op, before, actor, env).filter((e) => e.from.sceneId === sceneId && e.to.sceneId === sceneId);
   const walks = walksOf(op, before, entries, seenByAll(before, env), env.opVersion);
@@ -2216,9 +2245,9 @@ function carriedSeen(state: Pick<RoomState, "tokens" | "scenes">, token: Token, 
  * room after the turn started for the one that starts.
  */
 export function planTurn(room: TrapRoom, tokenId: string, how: "turnStart" | "turnEnd", env: { opVersion?: number }, spent: ReadonlySet<string> = new Set()): Springing[] {
-  const sceneId = liveTrapScene(room);
   const token = ownEntry(room.tokens, tokenId);
-  if (sceneId === null || !token || token.sceneId !== sceneId) return [];
+  if (!token || !trapsLiveOn(room, token.sceneId)) return [];
+  const sceneId = token.sceneId;
   const index = trapIndex(room, sceneId);
   if (index.turns.length === 0) return [];
   const seen = seenByAll(room, env);
@@ -2238,7 +2267,7 @@ export function planTurn(room: TrapRoom, tokenId: string, how: "turnStart" | "tu
  * every player sees, are read on `before`, as for a walk (5.5).
  */
 export function planDoor(before: RoomState, room: TrapRoom, sceneId: string, door: TrapDoorRef, by: string, env: { opVersion?: number }): Springing[] {
-  if (liveTrapScene(room) !== sceneId) return [];
+  if (!trapsLiveOn(room, sceneId)) return [];
   const token = ownEntry(before.tokens, by);
   if (!token || token.sceneId !== sceneId) return [];
   const index = trapIndex(room, sceneId);

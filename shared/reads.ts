@@ -7,6 +7,7 @@ import { moveGroups } from "./rules/attach.ts";
 import { stepsTakenBack } from "./reducer/encounter.ts";
 import { nextTurn } from "./rules/initiative.ts";
 import { ownEntry } from "./records.ts";
+import { floorsOf, openFloor, sameScene, startFloor } from "./rules/floors.ts";
 
 /**
  * What an op reads (design 7.4), so the client knows whether its redacted
@@ -551,9 +552,10 @@ function groupReads(state: RoomState, named: readonly string[]): Read[] {
 
 /**
  * The scene whose `shared` companions a Next clears (docs/design/design-v1-combat-flow.md
- * 3.6.8 and 4.6): the landing row token's scene, or the players' scene for
- * a row with no token. A DM's view that holds every row's token holds the
- * token's scene whole, so the DM's Next stays predicted there.
+ * 3.6.8 and 4.6): the landing row token's scene, or for a row with no token
+ * every floor of the players' scene they have reached
+ * (docs/design/design-v1-floors.md 8.3). A DM's view that holds every row's
+ * token holds the token's scene whole, so the DM's Next stays predicted there.
  */
 function companionScene(state: RoomState): Collection[] {
   const encounter = state.encounter;
@@ -565,7 +567,12 @@ function companionScene(state: RoomState): Collection[] {
     const token = ownEntry(state.tokens, landing.tokenId);
     return token ? [`scene:${token.sceneId}`] : [];
   }
-  return state.meta.playerSceneId !== null ? [`scene:${state.meta.playerSceneId}`] : [];
+  const start = startFloor(state);
+  if (start === null) return [];
+  if (ownEntry(state.scenes, start)?.floor === undefined) return [`scene:${start}`];
+  return floorsOf(state, start)
+    .filter((floor) => openFloor(state, floor.id))
+    .map((floor): Collection => `scene:${floor.id}`);
 }
 
 function fieldPresent(entity: unknown, path: string): boolean {
@@ -602,7 +609,8 @@ export function satisfies(reads_: Reads, view: ProjectedState, viewer: Viewer, o
       continue;
     }
     if (collection.startsWith("scene:")) {
-      if (collection.slice("scene:".length) !== opts.sceneId) return false;
+      // A DM's view holds every floor of the scene it projects whole (docs/design/design-v1-floors.md 8.3, FLR32-OPUS-04).
+      if (opts.sceneId === null || !sameScene(state, collection.slice("scene:".length), opts.sceneId)) return false;
       continue;
     }
     const encounter = state.encounter;
