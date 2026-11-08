@@ -618,7 +618,18 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
   - On a phone, C grows a resting bar with the grid open, and Escape rests the bar again with focus on its Conditions. Where the resting bar has no room for Conditions, as on the creature's own turn, Escape leaves the bar grown instead, focus on its Conditions.
 - **Recent conditions**: the grid, and the Token panel's condition picker, start with a **Recent** row of the three conditions this device added last. The row is the same for every token on this device, and it holds still while the grid is open.
 - A status can carry a counter, such as rounds or charges left, that a tap counts up or down. Where its row has no room for its − and + beside its name, they stand under the row.
-- Durations: a number of rounds, or until the start or end of a chosen creature's turn. They count down with Initiative, and everyone is told when one ends.
+- Durations: a number of rounds, until the start or end of a chosen creature's turn, or a length of time on the room's clock. A count of turns goes down with Initiative, and everyone is told when any duration ends.
+  - **Length of time**: the Duration select lists 1 minute, 10 minutes, 1 hour, 8 hours, 24 hours and **Other length of time**, a number of minutes, hours or days from 1 minute to 365 days ("Pick a length from 1 minute to 365 days."). It counts the clock, so it has no "X is" field.
+  - The choices show while the viewer's view holds a clock. A DM sees them while a clock runs, and a player only while the DM shares it and no blackout is on. With no clock the DM's Duration help says "Start the clock in Time to count minutes and hours."
+  - A row reads "Lasts 1 hour, to 7:00 AM (48 minutes left)", with the short date when the end is on another day ("Lasts 8 hours, to Day 5, 2:00 AM (7 hours left)"), and in a started fight "Lasts 1 minute, to the start of round 11". During a fight the Duration help adds "A length of time ends at the start of the round it reaches. N rounds ends on a creature's turn."
+  - A length of time ends on the change of the clock that reaches its end: a step, Set, a Calendar save that moves the time, the party's Long Rest, End the fight or an Undo. In a fight it ends at the Next that starts the round its end falls in, so a 1 minute spell cast in round 1 ends as round 11 starts.
+    - Previous brings it back with the round, unless the clock has moved past its end since. An Undo brings back what its step ended, and one that moves the clock forward ends what the new time reaches.
+    - Setting the clock back gives a running effect more time, and one that already ended stays ended.
+    - Stopping the clock ends nothing. On the DM's copy an effect on a stopped or replaced clock reads "Lasts 1 hour, on a clock that stopped" and never ends by itself, and Undo setup of the Stop starts it counting again.
+  - Each end writes the effect's usual expiry line, with its usual audience, and shows its notice on every device that gets the line. A "save ends" effect that time ends closes its waiting roll request, and a Long Rest that ends six effects writes six lines.
+  - While the DM hides the clock, players see how long an effect lasts ("Lasts 1 hour") but not when it ends, and the DM's help says "Players don't see the date and time, but they see how long this lasts and when it ends." A player who sends a length of time with the clock hidden, stopped or behind a blackout is refused with "The DM isn't sharing the date and time."
+  - Editing keeps an effect's end unless the DM or owner touches Duration ("Leave as is to keep its end."), and No duration takes the end away. Group saves and trap rigs keep their rounds and turns choices.
+  - Layout: in a narrow sheet, under 300 px of content, the unit of Other length of time goes under its number.
 - A concentrating creature that takes damage gets a prompt with the DC (the higher of 10 and half the damage, at most 30). Its player reports pass or fail, or taps Roll. For a creature with no stat block, Roll d20 opens a bonus field on the card, beside Adv and Dis, and rolls with the bonus typed there.
 - A condition can end on a save at the end of each of its turns. The DM's reminder rolls it, for a creature with no stat block by Roll d20 and a bonus typed on the card, or asks a player, whose passing answer ends it. A failed one stays open for a corrected total or an allowed reroll. Players see which save ends it, never its DC.
 - The DM can hide a condition from players, the creature's owner included. The log hides it too.
@@ -755,6 +766,13 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
   - The DM's own map stays fully lit. The "Party sight" switch shades what the party cannot see.
   - Moving players to a scene where no party creature can see warns first.
   - A creature a player drags out of the party's sight vanishes for them too, with a note saying so once the server answers the move, since a light it carries can keep it in sight.
+- **Time of day light.** A scene's Light has a fourth choice after Bright, Dim and Dark, **Time of day**, listed while a clock runs or the scene already follows it. The scene is Bright by day, Dim in the hour from dawn and the hour from dusk, and Dark at night, with dawn and dusk as the DM set them in Time (see Date and time).
+  - Its level changes with each change of the clock: a step, Set, a Long Rest, Start, the end of a fight, or an Undo that moves the clock. It also reads the time when the DM picks Time of day, switches a map phase, changes Players see or copies settings onto the scene.
+  - During a fight rounds alone never change it, so a dusk the rounds reach darkens the map when the fight ends. Opening a door, building and changing another scene never change it.
+  - Picking Bright, Dim or Dark, or switching to a phase with its own light, turns Time of day off. A phase that leaves the light keeps it on, and Light per phase says "A phase with its own light turns Time of day off."
+  - Light's help reads "Follows the time of day: Bright by day, Dim at dawn and dusk, Dark at night. It is Dim now." With the clock hidden it adds "Players don't see the date and time, but they see the light change." With the clock stopped it reads "The clock is stopped, so the light stays Dim until it starts again." Stopping the clock keeps the choice.
+  - The folded group reads "Time of day, Dim", and Copy to other scenes… and "Like <scene>" copy the choice.
+  - The change writes no Log line, and Undo takes it back with the step that made it. Players get the level, never whether the scene follows the clock.
 - **Discovering the map.** On a scene with fog, players' devices hold the build only where the party has seen it or the DM revealed it. A room nobody has seen never reaches them, not its floor, walls, doors, heights, labels or stamps, and a corridor running on into the dark ends on their map with no wall across it. On a fog-only scene revealed ground always shows as it is now.
   - What the DM builds where the party can see shows to them as it is built, and the inside of a room built around them stays empty on their map until someone looks in. While a builder stroke touches ground the party sees, the builder's row says "The party can see where you are building, so they see it as you build. Build before players come here, or tap Fog all when done."
   - Each player's map keeps only so much that changed out of their sight.
@@ -1351,6 +1369,13 @@ The DM asks players for a saving throw or an ability check, and each player roll
   - Today in the Calendar dialog keeps its month by its row in the list, so renaming the month leaves it picked and removing the row clears it.
   - Cancel or Escape with changes asks "Discard changes?", and a screen reader hears "Throw away your changes?".
   - A step that would take the clock past about 317,000 years is refused with "The clock can't go that far."
+- **Dawn and dusk**: the DM's Time panel has a row after Calendar… that reads "6:00 AM and 6:00 PM", with **Change**. Change opens a Dawn and a Dusk time field in place, with Save and Cancel.
+  - Dawn can start from 12:00 AM to 11:00 AM ("Pick a dawn from 12:00 AM to 11:00 AM.") and dusk from 12:00 PM to 11:00 PM ("Pick a dusk from 12:00 PM to 11:00 PM."), in whole minutes. Each lasts an hour.
+  - They set the part of the day (Dawn the hour from dawn, Morning until noon, Afternoon until dusk, Dusk the hour from dusk and Night until dawn), the next dawn To dawn moves to, which its name says ("Move the clock on to dawn, 5:30 AM"), and the light of scenes on Time of day.
+  - A new clock starts with 6:00 AM and 6:00 PM, and players read the part of the day through the same times while they share the clock.
+  - Saving is a Setup step, "changing dawn and dusk", and writes no Log line. Saving what is already set sends nothing.
+  - Change puts focus in Dawn, Enter saves, Escape closes the row, and Save and Cancel give focus back to Change.
+  - Layout: Dawn and Dusk stand side by side from 360 px of content and stack below it.
 - **Calendars**: **Day count** reads "Day 4" and on.
   - **Months** has up to 24 named months of 1 to 400 days (a year of at most 1,000 days), an optional week of up to 14 named days and words after the year, such as an era's initials. It reads "Tuesday, Deepwinter 3, 1204 AF", and a 1-day month, such as a festival day, reads by its name alone.
   - The app ships no calendar. There are no leap days.
@@ -1381,7 +1406,7 @@ The DM asks players for a saving throw or an ability check, and each player roll
   - A line written while shared reaches them then even if sharing went off in between.
 - **Journal**: **Add the date**, beside Add a secret while a clock runs, adds a heading with the date and time, such as `### Day 4, 6:00 AM`.
 - A clock and its stamps are carried by a room's export, its backup and its import.
-- The table display shows no date or time yet. Spells that run out as the clock moves, and scene light that follows the time of day, are not built yet.
+- Effects that last a length of time are under Conditions and statuses (Durations), scene light that follows the clock is under Fog and vision (Time of day light), and the table display can show the date and time (see The table display).
 
 ## Journal and map pins
 
@@ -1453,9 +1478,11 @@ Show the players' view of the map on a TV at the table, with nothing else on scr
 - The display shows the players' scene as players see it: the map, the fog, party vision (on a scene where each player sees for themselves, only what creatures that share sight see), tokens, shared areas, drawings, pins (except those linked to a page not every player can read), and pings and rulers. It shows no bars, panels, chat or log, roll requests or Initiative strip, and the room sends it no log lines at all.
 - It also shows the pause screen during a blackout, handouts shown to everyone, the X-card, and "Waiting for the DM to choose a scene" when there is none.
 - A handout of several pages shows one page at a time, with its page number. The arrow and page keys step through it, and a tap shows Previous page, Next page and Close.
-- A tap, a click or any key shows a menu for 5 seconds: Follow the DM, Fit the map, "Show whose turn it is" (off at first), Text size (85% to 130% for the names, chips and badges on the map), Weather (Moving, Still or Off, for this display only), Animated maps (Moving or Still, for this display only), Sound (On or Off, for this display only, silent while Only DM devices play is on, and a display waiting for a tap says "Tap or press a key for sound."), View (Follow the scene, Top-down or Isometric, and Turn left and Turn right in Isometric), Full screen, and Leave.
+- A tap, a click or any key shows a menu for 5 seconds: Follow the DM, Fit the map, "Show whose turn it is" (off at first), "Show the date and time" (off at first), Text size (85% to 130% for the names, chips and badges on the map), Weather (Moving, Still or Off, for this display only), Animated maps (Moving or Still, for this display only), Sound (On or Off, for this display only, silent while Only DM devices play is on, and a display waiting for a tap says "Tap or press a key for sound."), View (Follow the scene, Top-down or Isometric, and Turn left and Turn right in Isometric), Full screen, and Leave.
   - The display remembers these choices, its view apart from a member's in the same browser.
   - While the X-card or a one-page handout is open, a tap closes it instead.
+- **Show the date and time** puts a pill like "Day 4, 6:00 AM, Dawn" under the turn pill, the clock chip's text with the part of the day, while the display's view holds a clock. It does so only while the DM shares the clock and no blackout is on. A screen reader hears "Time: Day 4, 6:00 AM, Dawn".
+  - Layout: the pill stands at the top middle, under the turn pill where both are on, at the display's text size.
 - Full screen works on the display as in the room: in Chrome and Edge, Escape still closes the menu or a handout, and holding Escape leaves full screen.
 - **Follow the DM** shows the part of the map a DM device shows, scaled to the TV, in whichever view the display shows. A DM in Isometric is followed by the ground under their view, raised ground included. Turn on "Show my view on the table display" on that DM device. It follows only while the DM views the players' scene. Follow me, Bring everyone here and Look here move it too.
 - **Fit the map** fits what players can see, the revealed ground and the party's tokens, and fits again when a reveal adds more.
