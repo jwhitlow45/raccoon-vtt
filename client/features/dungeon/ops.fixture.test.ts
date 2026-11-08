@@ -42,7 +42,7 @@ const LARGEST: DungeonSettings = {
   traps: TRAPS_MAX,
   band: "5-10",
   deadEnds: true,
-  secrets: 0,
+  secrets: SECRETS_MAX,
   lit: LIT_MAX,
   dressing: "full",
   key: true,
@@ -52,12 +52,9 @@ const LARGEST: DungeonSettings = {
  * Phase 1's two without the key, so their ops stay the six kinds the
  * server's phase 1 tests read, then phase 2's (section 16): a Cave, a Sewer
  * on Wide and a Dungeon with secret doors, each with the key.
- * Phase 1's two keep Secret doors at None until drules lane B's `cover`
- * lands (phase 2 section 7): before it, a hidden secret door reaches
- * players as a drawn wall.
  */
 const CASES: { name: string; seed: string; settings: DungeonSettings; key: boolean }[] = [
-  { name: "medium", seed: `${versionChar()}K7Q-H2MX-A9F3-TWQ5`, settings: { ...DEFAULT_SETTINGS, secrets: 0 }, key: false },
+  { name: "medium", seed: `${versionChar()}K7Q-H2MX-A9F3-TWQ5`, settings: DEFAULT_SETTINGS, key: false },
   { name: "largest", seed: `${versionChar()}G3N-ERAT-0R5E-ED00`, settings: LARGEST, key: false },
   { name: "cave", seed: `${versionChar()}C4V-R0CK-5H4D-0W00`, settings: { ...DEFAULT_SETTINGS, theme: "cave" }, key: true },
   { name: "sewer-wide", seed: `${versionChar()}5EW-RW1D-E0CH-ANE1`, settings: { ...DEFAULT_SETTINGS, theme: "sewer", wide: true, band: "11-16" }, key: true },

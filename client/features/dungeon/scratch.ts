@@ -11,7 +11,7 @@ import { boardTheme } from "../../lib/theme.ts";
 import type { SceneInput } from "../scenes/create.ts";
 import type { Preview, Summary } from "./client.ts";
 import { keyOps, type KeyInput } from "./keyPage.ts";
-import { buildOps, dressOps, MAX_OPS, SCENE_PLACEHOLDER, SECRET_DOORS_HELD, trapOps } from "./ops.ts";
+import { buildOps, dressOps, MAX_OPS, SCENE_PLACEHOLDER, trapOps } from "./ops.ts";
 import { generate, type DungeonPlan } from "./plan.ts";
 import type { Seed } from "./seed.ts";
 import { MIN_ROOMS, type DungeonSettings, type PlanContext } from "./settings.ts";
@@ -132,11 +132,6 @@ export function landDungeon(plan: DungeonPlan, scene: SceneInput, band: LevelBan
   return { ok: true, ops, room: landed.room };
 }
 
-/** The choices a preview plans with: as chosen, but with Secret doors at None while they are held (ops.ts `SECRET_DOORS_HELD`). */
-export function planned(settings: DungeonSettings): DungeonSettings {
-  return SECRET_DOORS_HELD ? { ...settings, secrets: 0 } : settings;
-}
-
 /**
  * The scene a preview lands: the dialog's, as a square scene on the plan's
  * own size under a placeholder id. Bounds are the chosen size, never
@@ -185,14 +180,13 @@ export function summarize(plan: Pick<DungeonPlan, "rooms" | "asked" | "doors" | 
  * "fit" error, and anything thrown or refused is a generator bug.
  */
 export function previewOf(
-  chosen: DungeonSettings,
+  settings: DungeonSettings,
   seed: Seed,
   scene: SceneInput,
   context: PlanContext,
   key: KeyInput | null,
   make: (settings: DungeonSettings, seed: Seed, context: PlanContext) => DungeonPlan = generate,
 ): Preview {
-  const settings = planned(chosen);
   let plan: DungeonPlan;
   try {
     plan = make(settings, seed, context);

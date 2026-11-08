@@ -3,8 +3,8 @@ import { test } from "node:test";
 import { groundAt } from "#shared/rules/heights.ts";
 import { markIn } from "#shared/rules/heights.ts";
 import { dialogScene, dressedRooms, HAND_SETTINGS, handKey, hundredPlan, twoRooms } from "./handPlans.ts";
-import { buildOps, MAX_OPS, SCENE_PLACEHOLDER, SECRET_DOORS_HELD } from "./ops.ts";
-import { landAll, landDungeon, planned, previewOf, previewScene, scratchRoom } from "./scratch.ts";
+import { buildOps, MAX_OPS, SCENE_PLACEHOLDER } from "./ops.ts";
+import { landAll, landDungeon, previewOf, previewScene, scratchRoom } from "./scratch.ts";
 import { DEFAULT_CONTEXT, DEFAULT_SETTINGS, SECRET_PRESETS, type DungeonSettings } from "./settings.ts";
 import type { DungeonPlan } from "./plan.ts";
 
@@ -155,10 +155,8 @@ test("DG2B: a dungeon past MAX_OPS is refused as a bug, never sent past the cap"
   assert.deepEqual(refused, { ok: false, why: `${MAX_OPS + 1} ops, past ${MAX_OPS}` });
 });
 
-test("DG2B: with lane B's cover in, the preview plans the DM's Secret doors as chosen", () => {
-  assert.equal(SECRET_DOORS_HELD, false);
+test("DG2B: the preview plans the DM's Secret doors as chosen, and the key says so", () => {
   const chosen: DungeonSettings = { ...DEFAULT_SETTINGS, secrets: SECRET_PRESETS.Many };
-  assert.equal(planned(chosen), chosen);
   const asked: number[] = [];
   const plan = dressedRooms();
   const made = previewOf(chosen, SEED, dialogScene(plan), DEFAULT_CONTEXT, handKey(), (s) => (asked.push(s.secrets), plan));

@@ -25,14 +25,6 @@ import type { DungeonPlan, PlanTrap } from "./plan.ts";
 /** Ops one Make sends at most (phase 2, section 6): past the server's burst of 60, paced by the store's busy retry. */
 export const MAX_OPS = 100;
 
-/**
- * Whether secret doors wait for drules lane B's automatic cover (phase 2,
- * section 7), the preview planning every dungeon with none (scratch.ts
- * `planned`). Lane B's cover now reaches every fog class as the rock wall
- * beside a hidden door, so they no longer wait.
- */
-export const SECRET_DOORS_HELD = false;
-
 /** The scene's id while the dungeon is only a preview. */
 export const SCENE_PLACEHOLDER = "dungeon-scene";
 /** The key's page while the dungeon is only a preview. */

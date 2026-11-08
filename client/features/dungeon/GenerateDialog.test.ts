@@ -57,8 +57,7 @@ test("DGFIX-FU-1: the errors share the pinned foot with the fog warning, and the
 
 /*
  * Phase 2 (design-phase2 4.1, 15): Theme offers all five, Secret doors is
- * held at None on Cave, and on every theme while the landing holds them,
- * without touching the DM's pick, Look closer sits in
+ * held at None on Cave without touching the DM's pick, Look closer sits in
  * the preview's bottom left corner, and the light line stays in the tree
  * through a Lit rooms change.
  */
@@ -67,19 +66,16 @@ test("DG2C: Theme offers every theme, and a theme change touches no other choice
   assert.match(source, /onChange=\{\(theme\) => set\(\{ theme \}\)\}/);
 });
 
-test("DG2C: Cave and the landing's hold keep Secret doors at None for display and keep the DM's pick in the choices", () => {
-  assert.match(source, /const secretsHeld = cave \|\| SECRET_DOORS_HELD;/);
-  assert.match(source, /<Held held=\{secretsHeld\}/);
-  assert.match(source, /value=\{secretsHeld \? 0 : choices\.secrets\}/);
-  assert.match(source, /words=\{secretsWords\(secretsHeld \? 0 : choices\.secrets, rooms\)\}/);
-  assert.match(source, /help=\{cave \? SECRETS_CAVE : SECRET_DOORS_HELD \? SECRETS_LATER : /);
+test("DG2C: Cave holds Secret doors at None for display and keeps the DM's pick in the choices", () => {
+  assert.match(source, /<Held held=\{cave\}/);
+  assert.match(source, /value=\{cave \? 0 : choices\.secrets\}/);
+  assert.match(source, /words=\{secretsWords\(cave \? 0 : choices\.secrets, rooms\)\}/);
   assert.doesNotMatch(source, /set\(\{ secrets: 0 \}\)/);
 });
 
-// The lanes meet here (phase 2 section 6): a send compares references through withIds' map, and the key's hold check builds the page the preview would, from the choices it plans with.
-test("DG2M: Make sends withIds' map with the ops, and the key hold reads the planned choices", () => {
+// The lanes meet here (phase 2 section 6): a send compares references through withIds' map.
+test("DG2M: Make sends withIds' map with the ops", () => {
   assert.match(source, /sendDungeon\(\s*\{ ops, sceneId: made\.sceneId, room: current\.room, ids: made\.ids \}/);
-  assert.match(source, /keyOps\(plan, planned\(settings\), /);
 });
 
 test("DG2C: the light line shows while Lit rooms is above None, and its tap lives in the dialog", () => {

@@ -31,8 +31,6 @@ export const PARTY_LEVEL_HELP = "How strong the traps are: their save DCs, damag
 export const DEAD_ENDS_HELP = "Adds corridors that end in rock, so not every dead end hides a secret door.";
 export const SECRETS_HELP = "Some lead to a secret room. Players see plain wall there until it is found.";
 export const SECRETS_CAVE = "Caves have no doors, so none are secret.";
-/** While the landing holds secret doors at None (ops.ts `SECRET_DOORS_HELD`), until drules lane B lets a hidden one reach players as plain wall. */
-export const SECRETS_LATER = "Secret doors come in a later version of the app.";
 export const DRESSING_HELP = "Furniture, bones and clutter from the shipped stamps, kept off the ways through each room.";
 export const KEY_HELP = "A DM-only journal page describing each room by number, and a DM-only numbered pin in each room.";
 export const KEY_FULL = "The journal is full, so there is no room for a key.";

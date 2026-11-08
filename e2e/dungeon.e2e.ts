@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -11,9 +11,6 @@ import { CHUNK_CELLS, type BuildChunk, type RoomState } from "../shared/model.ts
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { undoSetup } from "./helpers/undoScope.ts";
 import { ConsoleWatch, openSceneGroup, openSideTab, OpSocket, pagePoint, pickTool, readCamera, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
-
-// The landing's hold on secret doors (ops.ts `SECRET_DOORS_HELD`), read from its source: importing ops.ts would pull the client's interface modules into the server's typecheck.
-const SECRET_DOORS_HELD = /^export const SECRET_DOORS_HELD = true;$/m.test(readFileSync(new URL("../client/features/dungeon/ops.ts", import.meta.url), "utf8"));
 
 /**
  * The dungeon generator end to end (docs/design/design-v1-dungeon-generator.md
@@ -405,7 +402,8 @@ describe("dungeon generator", { concurrency: false }, () => {
     const make = dialog.getByRole("button", { name: "Make the scene", exact: true });
     await seed.fill(SEED);
     const first = await statusText(dialog);
-    assert.match(first, /^\d+ rooms, \d+ doors?( \(\d+ locked\))?, (no traps|\d+ traps?)\.$/);
+    // Phase 2's line (words.ts statusLine): secret rooms and secret doors counted where the plan has them.
+    assert.match(first, /^\d+ rooms( \(\d+ secret\))?, (no doors|\d+ doors?( \((\d+ locked, \d+ secret|\d+ locked|\d+ secret)\))?), (no traps|\d+ traps?)\.$/);
     const name = await (await previewImg(dialog)).getAttribute("alt");
     await dialog.getByRole("button", { name: "Reroll", exact: true }).click();
     await waitFor("a new seed", async () => ((await seed.inputValue()) !== SEED ? true : null));
@@ -542,19 +540,9 @@ describe("dungeon generator", { concurrency: false }, () => {
     assert.equal(await dialog.getByRole("radio", { name: "Some", exact: true }).first().isVisible(), true, "Dressing");
 
     // Secret doors: a mark sets it, Cave holds it at None with its line, and the DM's pick comes back with the next theme.
-    // While the landing holds secret doors (ops.ts `SECRET_DOORS_HELD`), every theme holds the row at None with its own line.
     const secrets = dialog.getByRole("slider", { name: "Secret doors", exact: true });
-    if (SECRET_DOORS_HELD) {
-      assert.equal(await secrets.isDisabled(), true, "held while the landing holds them");
-      assert.equal(await secrets.inputValue(), "0");
-      await dialog.getByText("Secret doors come in a later version of the app.", { exact: true }).waitFor();
-      await statusText(dialog);
-      await secrets.scrollIntoViewIfNeeded();
-      await shots.take(dm, "DG2M-secrets-held");
-    } else {
-      await mark(dialog, "Secret doors", "Many").click();
-      assert.equal(await secrets.inputValue(), "4");
-    }
+    await mark(dialog, "Secret doors", "Many").click();
+    assert.equal(await secrets.inputValue(), "4");
     await dialog.getByRole("radio", { name: "Cave", exact: true }).check();
     assert.equal(await secrets.isDisabled(), true, "held on Cave");
     assert.equal(await secrets.inputValue(), "0");
@@ -563,14 +551,9 @@ describe("dungeon generator", { concurrency: false }, () => {
     await statusText(dialog);
     await shots.take(dm, "DG2C-1-cave-secrets-held");
     await dialog.getByRole("radio", { name: "Mine", exact: true }).check();
-    if (SECRET_DOORS_HELD) {
-      assert.equal(await secrets.isDisabled(), true, "still held off Cave");
-      await dialog.getByText("Secret doors come in a later version of the app.", { exact: true }).waitFor();
-    } else {
-      assert.equal(await secrets.isDisabled(), false, "free again off Cave");
-      assert.equal(await secrets.inputValue(), "4", "the DM's pick came back");
-      await mark(dialog, "Secret doors", "Few").click();
-    }
+    assert.equal(await secrets.isDisabled(), false, "free again off Cave");
+    assert.equal(await secrets.inputValue(), "4", "the DM's pick came back");
+    await mark(dialog, "Secret doors", "Few").click();
 
     // Lit rooms: Page Up jumps to the next mark, and its words and help follow the theme.
     const lit = dialog.getByRole("slider", { name: "Lit rooms", exact: true });

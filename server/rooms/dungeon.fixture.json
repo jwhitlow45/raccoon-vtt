@@ -1060,8 +1060,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -1403,8 +1404,8 @@
        "art": {
         "key": "gb-pot"
        },
-       "x": 36.5,
-       "y": 40.5,
+       "x": 34.5,
+       "y": 41.5,
        "w": 1,
        "h": 1,
        "rotation": 0,
@@ -1417,7 +1418,7 @@
         "key": "gb-sack"
        },
        "x": 32.5,
-       "y": 39.5,
+       "y": 44.5,
        "w": 1,
        "h": 1,
        "rotation": 180,
@@ -1654,7 +1655,7 @@
     "traps": 2,
     "band": "1-4",
     "deadEnds": true,
-    "secrets": 0,
+    "secrets": 1,
     "lit": 25,
     "dressing": "some",
     "key": true
@@ -1834,6 +1835,7 @@
     "dungeon-stamp-145",
     "dungeon-stamp-146",
     "dungeon-stamp-147",
+    "dungeon-stamp-148",
     "dungeon-light-0",
     "dungeon-light-1",
     "dungeon-light-2",
@@ -6657,8 +6659,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -6666,8 +6669,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -6909,8 +6913,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -6918,8 +6923,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -7305,8 +7311,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -7314,8 +7321,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -7359,8 +7367,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -7368,8 +7377,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -7395,8 +7405,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -7404,8 +7415,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -8043,8 +8055,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -8052,8 +8065,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -8097,8 +8111,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -8106,8 +8121,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -8133,8 +8149,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -8142,8 +8159,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -8169,8 +8187,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -8178,8 +8197,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -8205,8 +8225,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -8214,8 +8235,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -9710,6 +9732,7 @@
       "15,23",
       "14,24",
       "15,24",
+      "49,36",
       "87,39",
       "88,39",
       "59,58",
@@ -9743,7 +9766,6 @@
       "40,19",
       "82,33",
       "82,34",
-      "51,38",
       "56,43",
       "57,43",
       "56,44",
@@ -9766,11 +9788,11 @@
        "art": {
         "key": "ph-statue"
        },
-       "x": 31.5,
-       "y": 16,
+       "x": 17.5,
+       "y": 52,
        "w": 1,
        "h": 1.25,
-       "rotation": 0,
+       "rotation": 180,
        "z": 0,
        "visibility": "all"
       },
@@ -9779,11 +9801,11 @@
        "art": {
         "key": "ph-statue"
        },
-       "x": 23.5,
-       "y": 31,
+       "x": 61,
+       "y": 80.5,
        "w": 1,
        "h": 1.25,
-       "rotation": 0,
+       "rotation": 90,
        "z": 1,
        "visibility": "all"
       },
@@ -9792,11 +9814,11 @@
        "art": {
         "key": "ph-statue"
        },
-       "x": 40.5,
-       "y": 94,
+       "x": 79,
+       "y": 76.5,
        "w": 1,
        "h": 1.25,
-       "rotation": 0,
+       "rotation": 270,
        "z": 2,
        "visibility": "all"
       },
@@ -9805,8 +9827,8 @@
        "art": {
         "key": "ph-statue"
        },
-       "x": 17.5,
-       "y": 21,
+       "x": 60.5,
+       "y": 28,
        "w": 1,
        "h": 1.25,
        "rotation": 180,
@@ -9818,8 +9840,8 @@
        "art": {
         "key": "ph-statue"
        },
-       "x": 27.5,
-       "y": 3,
+       "x": 48.5,
+       "y": 59,
        "w": 1,
        "h": 1.25,
        "rotation": 0,
@@ -9831,8 +9853,8 @@
        "art": {
         "key": "ph-statue"
        },
-       "x": 50,
-       "y": 17.5,
+       "x": 86,
+       "y": 58.5,
        "w": 1,
        "h": 1.25,
        "rotation": 90,
@@ -9844,11 +9866,11 @@
        "art": {
         "key": "ph-statue"
        },
-       "x": 37,
-       "y": 33.5,
+       "x": 53,
+       "y": 34.5,
        "w": 1,
        "h": 1.25,
-       "rotation": 270,
+       "rotation": 90,
        "z": 6,
        "visibility": "all"
       },
@@ -9987,8 +10009,8 @@
        "art": {
         "key": "fire-pit"
        },
-       "x": 10.5,
-       "y": 10.5,
+       "x": 17.5,
+       "y": 21.5,
        "w": 1,
        "h": 1,
        "rotation": 0,
@@ -10455,7 +10477,7 @@
        "art": {
         "key": "gb-pot"
        },
-       "x": 12.5,
+       "x": 10.5,
        "y": 20.5,
        "w": 1,
        "h": 1,
@@ -10468,7 +10490,7 @@
        "art": {
         "key": "gb-chest"
        },
-       "x": 13.5,
+       "x": 16.5,
        "y": 11.5,
        "w": 1,
        "h": 1,
@@ -10479,13 +10501,13 @@
       {
        "id": "dungeon-stamp-55",
        "art": {
-        "key": "ph-statue"
+        "key": "barrel"
        },
-       "x": 61.5,
-       "y": 86,
-       "w": 1,
-       "h": 1.25,
-       "rotation": 0,
+       "x": 15.5,
+       "y": 13.5,
+       "w": 0.5,
+       "h": 0.5,
+       "rotation": 270,
        "z": 55,
        "visibility": "all"
       },
@@ -10508,7 +10530,7 @@
         "key": "ph-statue"
        },
        "x": 56.5,
-       "y": 82,
+       "y": 87,
        "w": 1,
        "h": 1.25,
        "rotation": 180,
@@ -10520,7 +10542,7 @@
        "art": {
         "key": "gb-pot"
        },
-       "x": 31.5,
+       "x": 29.5,
        "y": 46.5,
        "w": 1,
        "h": 1,
@@ -10534,7 +10556,7 @@
         "key": "gb-chest"
        },
        "x": 28.5,
-       "y": 40.5,
+       "y": 47.5,
        "w": 1,
        "h": 1,
        "rotation": 0,
@@ -10546,8 +10568,8 @@
        "art": {
         "key": "gb-crate"
        },
-       "x": 30.5,
-       "y": 45.5,
+       "x": 28.5,
+       "y": 46.5,
        "w": 1,
        "h": 1,
        "rotation": 90,
@@ -10559,8 +10581,8 @@
        "art": {
         "key": "chest"
        },
-       "x": 42.5,
-       "y": 47.5,
+       "x": 43.5,
+       "y": 46.5,
        "w": 0.75,
        "h": 0.5,
        "rotation": 0,
@@ -10572,7 +10594,7 @@
        "art": {
         "key": "gb-long-table"
        },
-       "x": 39,
+       "x": 38,
        "y": 46.5,
        "w": 1,
        "h": 2,
@@ -10586,7 +10608,7 @@
         "key": "chest"
        },
        "x": 44.5,
-       "y": 52.5,
+       "y": 49.5,
        "w": 0.75,
        "h": 0.5,
        "rotation": 270,
@@ -10598,7 +10620,7 @@
        "art": {
         "key": "gb-sack"
        },
-       "x": 17.5,
+       "x": 13.5,
        "y": 51.5,
        "w": 1,
        "h": 1,
@@ -10611,8 +10633,8 @@
        "art": {
         "key": "barrel"
        },
-       "x": 15.5,
-       "y": 51.5,
+       "x": 14.5,
+       "y": 52.5,
        "w": 0.5,
        "h": 0.5,
        "rotation": 180,
@@ -10624,8 +10646,8 @@
        "art": {
         "key": "wg-scattered-bones"
        },
-       "x": 33,
-       "y": 22,
+       "x": 37,
+       "y": 21,
        "w": 1.5,
        "h": 1.5,
        "rotation": 180,
@@ -10637,8 +10659,8 @@
        "art": {
         "key": "gb-crate"
        },
-       "x": 36.5,
-       "y": 17.5,
+       "x": 35.5,
+       "y": 25.5,
        "w": 1,
        "h": 1,
        "rotation": 270,
@@ -10648,13 +10670,13 @@
       {
        "id": "dungeon-stamp-68",
        "art": {
-        "key": "gb-table"
+        "key": "wg-scattered-bones"
        },
-       "x": 79.5,
-       "y": 10.5,
-       "w": 1,
-       "h": 1,
-       "rotation": 0,
+       "x": 36,
+       "y": 17,
+       "w": 1.5,
+       "h": 1.5,
+       "rotation": 180,
        "z": 68,
        "visibility": "all"
       },
@@ -10674,25 +10696,25 @@
       {
        "id": "dungeon-stamp-70",
        "art": {
-        "key": "gb-pot"
+        "key": "gb-dresser"
        },
-       "x": 88.5,
-       "y": 87.5,
+       "x": 79.5,
+       "y": 8.5,
        "w": 1,
        "h": 1,
-       "rotation": 270,
+       "rotation": 90,
        "z": 70,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-71",
        "art": {
-        "key": "ph-statue"
+        "key": "gb-bed"
        },
-       "x": 84.5,
-       "y": 91,
+       "x": 79.5,
+       "y": 10,
        "w": 1,
-       "h": 1.25,
+       "h": 2,
        "rotation": 0,
        "z": 71,
        "visibility": "all"
@@ -10702,8 +10724,8 @@
        "art": {
         "key": "gb-crate"
        },
-       "x": 84.5,
-       "y": 88.5,
+       "x": 88.5,
+       "y": 84.5,
        "w": 1,
        "h": 1,
        "rotation": 0,
@@ -10713,51 +10735,51 @@
       {
        "id": "dungeon-stamp-73",
        "art": {
-        "key": "gb-chest"
+        "key": "wg-scattered-bones"
        },
-       "x": 86.5,
-       "y": 47.5,
-       "w": 1,
-       "h": 1,
-       "rotation": 180,
+       "x": 85,
+       "y": 92,
+       "w": 1.5,
+       "h": 1.5,
+       "rotation": 0,
        "z": 73,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-74",
        "art": {
-        "key": "gb-chest"
+        "key": "crate"
        },
-       "x": 84.5,
-       "y": 47.5,
-       "w": 1,
-       "h": 1,
-       "rotation": 270,
+       "x": 86.5,
+       "y": 92.5,
+       "w": 0.75,
+       "h": 0.5,
+       "rotation": 0,
        "z": 74,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-75",
        "art": {
-        "key": "barrel"
+        "key": "gb-crate"
        },
-       "x": 79.5,
-       "y": 77.5,
-       "w": 0.5,
-       "h": 0.5,
-       "rotation": 270,
+       "x": 85.5,
+       "y": 47.5,
+       "w": 1,
+       "h": 1,
+       "rotation": 90,
        "z": 75,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-76",
        "art": {
-        "key": "gb-crate"
+        "key": "crate"
        },
-       "x": 85.5,
-       "y": 74.5,
-       "w": 1,
-       "h": 1,
+       "x": 82.5,
+       "y": 44.5,
+       "w": 0.75,
+       "h": 0.5,
        "rotation": 270,
        "z": 76,
        "visibility": "all"
@@ -10767,11 +10789,11 @@
        "art": {
         "key": "gb-pot"
        },
-       "x": 59.5,
-       "y": 2.5,
+       "x": 80.5,
+       "y": 75.5,
        "w": 1,
        "h": 1,
-       "rotation": 180,
+       "rotation": 90,
        "z": 77,
        "visibility": "all"
       },
@@ -10780,8 +10802,8 @@
        "art": {
         "key": "crate"
        },
-       "x": 60.5,
-       "y": 4.5,
+       "x": 80.5,
+       "y": 76.5,
        "w": 0.75,
        "h": 0.5,
        "rotation": 0,
@@ -10791,12 +10813,12 @@
       {
        "id": "dungeon-stamp-79",
        "art": {
-        "key": "gb-woven-rug"
+        "key": "wg-scattered-bones"
        },
-       "x": 72,
-       "y": 26,
-       "w": 2,
-       "h": 2,
+       "x": 65,
+       "y": 5,
+       "w": 1.5,
+       "h": 1.5,
        "rotation": 180,
        "z": 79,
        "visibility": "all"
@@ -10804,25 +10826,25 @@
       {
        "id": "dungeon-stamp-80",
        "art": {
-        "key": "barrel"
+        "key": "gb-crate"
        },
-       "x": 75.5,
-       "y": 25.5,
-       "w": 0.5,
-       "h": 0.5,
-       "rotation": 90,
+       "x": 60.5,
+       "y": 2.5,
+       "w": 1,
+       "h": 1,
+       "rotation": 270,
        "z": 80,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-81",
        "art": {
-        "key": "gb-dresser"
+        "key": "chest"
        },
-       "x": 6.5,
-       "y": 62.5,
-       "w": 1,
-       "h": 1,
+       "x": 73.5,
+       "y": 26.5,
+       "w": 0.75,
+       "h": 0.5,
        "rotation": 270,
        "z": 81,
        "visibility": "all"
@@ -10830,13 +10852,13 @@
       {
        "id": "dungeon-stamp-82",
        "art": {
-        "key": "gb-long-table"
+        "key": "gb-table"
        },
-       "x": 10,
-       "y": 60.5,
+       "x": 74.5,
+       "y": 21.5,
        "w": 1,
-       "h": 2,
-       "rotation": 90,
+       "h": 1,
+       "rotation": 180,
        "z": 82,
        "visibility": "all"
       },
@@ -10845,23 +10867,23 @@
        "art": {
         "key": "gb-bookcase"
        },
-       "x": 8.5,
-       "y": 60.5,
+       "x": 9.5,
+       "y": 68.5,
        "w": 1,
        "h": 1,
-       "rotation": 0,
+       "rotation": 180,
        "z": 83,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-84",
        "art": {
-        "key": "wg-scattered-bones"
+        "key": "gb-woven-rug"
        },
-       "x": 88,
-       "y": 18,
-       "w": 1.5,
-       "h": 1.5,
+       "x": 5,
+       "y": 67,
+       "w": 2,
+       "h": 2,
        "rotation": 180,
        "z": 84,
        "visibility": "all"
@@ -10869,10 +10891,10 @@
       {
        "id": "dungeon-stamp-85",
        "art": {
-        "key": "gb-crate"
+        "key": "gb-bookcase"
        },
-       "x": 88.5,
-       "y": 21.5,
+       "x": 4.5,
+       "y": 68.5,
        "w": 1,
        "h": 1,
        "rotation": 180,
@@ -10884,8 +10906,8 @@
        "art": {
         "key": "gb-pot"
        },
-       "x": 24.5,
-       "y": 64.5,
+       "x": 87.5,
+       "y": 19.5,
        "w": 1,
        "h": 1,
        "rotation": 90,
@@ -10895,12 +10917,12 @@
       {
        "id": "dungeon-stamp-87",
        "art": {
-        "key": "gb-crate"
+        "key": "barrel"
        },
-       "x": 24.5,
-       "y": 63.5,
-       "w": 1,
-       "h": 1,
+       "x": 88.5,
+       "y": 20.5,
+       "w": 0.5,
+       "h": 0.5,
        "rotation": 90,
        "z": 87,
        "visibility": "all"
@@ -10908,26 +10930,26 @@
       {
        "id": "dungeon-stamp-88",
        "art": {
-        "key": "wg-scattered-bones"
+        "key": "barrel"
        },
-       "x": 25,
-       "y": 62,
-       "w": 1.5,
-       "h": 1.5,
-       "rotation": 90,
+       "x": 83.5,
+       "y": 18.5,
+       "w": 0.5,
+       "h": 0.5,
+       "rotation": 180,
        "z": 88,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-89",
        "art": {
-        "key": "ph-statue"
+        "key": "gb-crate"
        },
-       "x": 68,
-       "y": 92.5,
+       "x": 26.5,
+       "y": 64.5,
        "w": 1,
-       "h": 1.25,
-       "rotation": 270,
+       "h": 1,
+       "rotation": 180,
        "z": 89,
        "visibility": "all"
       },
@@ -10936,11 +10958,11 @@
        "art": {
         "key": "gb-crate"
        },
-       "x": 72.5,
-       "y": 94.5,
+       "x": 25.5,
+       "y": 60.5,
        "w": 1,
        "h": 1,
-       "rotation": 270,
+       "rotation": 180,
        "z": 90,
        "visibility": "all"
       },
@@ -10949,8 +10971,8 @@
        "art": {
         "key": "ph-statue"
        },
-       "x": 78.5,
-       "y": 57,
+       "x": 28.5,
+       "y": 61,
        "w": 1,
        "h": 1.25,
        "rotation": 180,
@@ -10960,26 +10982,26 @@
       {
        "id": "dungeon-stamp-92",
        "art": {
-        "key": "barrel"
+        "key": "gb-pot"
        },
-       "x": 80.5,
-       "y": 53.5,
-       "w": 0.5,
-       "h": 0.5,
-       "rotation": 90,
+       "x": 72.5,
+       "y": 92.5,
+       "w": 1,
+       "h": 1,
+       "rotation": 0,
        "z": 92,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-93",
        "art": {
-        "key": "ph-statue"
+        "key": "gb-sack"
        },
-       "x": 81.5,
-       "y": 60,
+       "x": 73.5,
+       "y": 95.5,
        "w": 1,
-       "h": 1.25,
-       "rotation": 180,
+       "h": 1,
+       "rotation": 90,
        "z": 93,
        "visibility": "all"
       },
@@ -10988,8 +11010,8 @@
        "art": {
         "key": "barrel"
        },
-       "x": 10.5,
-       "y": 37.5,
+       "x": 71.5,
+       "y": 92.5,
        "w": 0.5,
        "h": 0.5,
        "rotation": 0,
@@ -10999,63 +11021,63 @@
       {
        "id": "dungeon-stamp-95",
        "art": {
-        "key": "barrel"
+        "key": "gb-sack"
        },
-       "x": 14.5,
-       "y": 32.5,
-       "w": 0.5,
-       "h": 0.5,
-       "rotation": 180,
+       "x": 81.5,
+       "y": 59.5,
+       "w": 1,
+       "h": 1,
+       "rotation": 90,
        "z": 95,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-96",
        "art": {
-        "key": "gb-chest"
+        "key": "gb-sack"
        },
-       "x": 9.5,
-       "y": 32.5,
+       "x": 78.5,
+       "y": 55.5,
        "w": 1,
        "h": 1,
-       "rotation": 180,
+       "rotation": 270,
        "z": 96,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-97",
        "art": {
-        "key": "barrel"
+        "key": "crate"
        },
-       "x": 67.5,
-       "y": 38.5,
-       "w": 0.5,
+       "x": 10.5,
+       "y": 36.5,
+       "w": 0.75,
        "h": 0.5,
-       "rotation": 0,
+       "rotation": 90,
        "z": 97,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-98",
        "art": {
-        "key": "ph-statue"
+        "key": "gb-chest"
        },
-       "x": 68.5,
-       "y": 45,
+       "x": 9.5,
+       "y": 38.5,
        "w": 1,
-       "h": 1.25,
-       "rotation": 0,
+       "h": 1,
+       "rotation": 90,
        "z": 98,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-99",
        "art": {
-        "key": "ph-bench"
+        "key": "crate"
        },
-       "x": 13.5,
-       "y": 75.5,
-       "w": 1,
+       "x": 11.5,
+       "y": 43.5,
+       "w": 0.75,
        "h": 0.5,
        "rotation": 0,
        "z": 99,
@@ -11070,12 +11092,12 @@
       {
        "id": "dungeon-stamp-100",
        "art": {
-        "key": "barrel"
+        "key": "gb-chest"
        },
-       "x": 15.5,
-       "y": 75.5,
-       "w": 0.5,
-       "h": 0.5,
+       "x": 65.5,
+       "y": 44.5,
+       "w": 1,
+       "h": 1,
        "rotation": 0,
        "z": 100,
        "visibility": "all"
@@ -11083,39 +11105,39 @@
       {
        "id": "dungeon-stamp-101",
        "art": {
-        "key": "gb-dresser"
+        "key": "gb-pot"
        },
-       "x": 9.5,
-       "y": 81.5,
+       "x": 62.5,
+       "y": 42.5,
        "w": 1,
        "h": 1,
-       "rotation": 90,
+       "rotation": 270,
        "z": 101,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-102",
        "art": {
-        "key": "gb-long-table"
+        "key": "ph-statue"
        },
-       "x": 26,
-       "y": 76.5,
+       "x": 60.5,
+       "y": 40,
        "w": 1,
-       "h": 2,
-       "rotation": 270,
+       "h": 1.25,
+       "rotation": 180,
        "z": 102,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-103",
        "art": {
-        "key": "gb-woven-rug"
+        "key": "gb-long-table"
        },
-       "x": 28,
-       "y": 76,
-       "w": 2,
+       "x": 17.5,
+       "y": 77,
+       "w": 1,
        "h": 2,
-       "rotation": 270,
+       "rotation": 180,
        "z": 103,
        "visibility": "all"
       },
@@ -11124,62 +11146,62 @@
        "art": {
         "key": "gb-long-table"
        },
-       "x": 33.5,
-       "y": 74,
+       "x": 13,
+       "y": 75.5,
        "w": 1,
        "h": 2,
-       "rotation": 180,
+       "rotation": 90,
        "z": 104,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-105",
        "art": {
-        "key": "gb-bookcase"
+        "key": "gb-table"
        },
-       "x": 61.5,
-       "y": 52.5,
+       "x": 29.5,
+       "y": 72.5,
        "w": 1,
        "h": 1,
-       "rotation": 0,
+       "rotation": 270,
        "z": 105,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-106",
        "art": {
-        "key": "ph-bench"
+        "key": "barrel"
        },
-       "x": 56.5,
-       "y": 54.5,
-       "w": 1,
+       "x": 25.5,
+       "y": 75.5,
+       "w": 0.5,
        "h": 0.5,
-       "rotation": 270,
+       "rotation": 90,
        "z": 106,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-107",
        "art": {
-        "key": "gb-woven-rug"
+        "key": "gb-long-table"
        },
-       "x": 57,
-       "y": 56,
-       "w": 2,
+       "x": 33.5,
+       "y": 73,
+       "w": 1,
        "h": 2,
-       "rotation": 90,
+       "rotation": 180,
        "z": 107,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-108",
        "art": {
-        "key": "gb-sack"
+        "key": "barrel"
        },
-       "x": 50.5,
-       "y": 18.5,
-       "w": 1,
-       "h": 1,
+       "x": 57.5,
+       "y": 56.5,
+       "w": 0.5,
+       "h": 0.5,
        "rotation": 90,
        "z": 108,
        "visibility": "all"
@@ -11187,23 +11209,23 @@
       {
        "id": "dungeon-stamp-109",
        "art": {
-        "key": "barrel"
+        "key": "ph-bench"
        },
-       "x": 50.5,
-       "y": 14.5,
-       "w": 0.5,
+       "x": 65.5,
+       "y": 55.5,
+       "w": 1,
        "h": 0.5,
-       "rotation": 0,
+       "rotation": 90,
        "z": 109,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-110",
        "art": {
-        "key": "gb-crate"
+        "key": "gb-dresser"
        },
-       "x": 59.5,
-       "y": 71.5,
+       "x": 57.5,
+       "y": 52.5,
        "w": 1,
        "h": 1,
        "rotation": 270,
@@ -11213,26 +11235,26 @@
       {
        "id": "dungeon-stamp-111",
        "art": {
-        "key": "wg-scattered-bones"
+        "key": "gb-chest"
        },
-       "x": 59,
-       "y": 68,
-       "w": 1.5,
-       "h": 1.5,
-       "rotation": 0,
+       "x": 46.5,
+       "y": 18.5,
+       "w": 1,
+       "h": 1,
+       "rotation": 180,
        "z": 111,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-112",
        "art": {
-        "key": "gb-pot"
+        "key": "gb-sack"
        },
-       "x": 64.5,
-       "y": 70.5,
+       "x": 50.5,
+       "y": 22.5,
        "w": 1,
        "h": 1,
-       "rotation": 180,
+       "rotation": 0,
        "z": 112,
        "visibility": "all"
       },
@@ -11241,8 +11263,8 @@
        "art": {
         "key": "gb-chest"
        },
-       "x": 40.5,
-       "y": 84.5,
+       "x": 48.5,
+       "y": 24.5,
        "w": 1,
        "h": 1,
        "rotation": 270,
@@ -11252,12 +11274,12 @@
       {
        "id": "dungeon-stamp-114",
        "art": {
-        "key": "wg-scattered-bones"
+        "key": "gb-crate"
        },
-       "x": 47,
-       "y": 88,
-       "w": 1.5,
-       "h": 1.5,
+       "x": 60.5,
+       "y": 71.5,
+       "w": 1,
+       "h": 1,
        "rotation": 270,
        "z": 114,
        "visibility": "all"
@@ -11267,8 +11289,8 @@
        "art": {
         "key": "gb-sack"
        },
-       "x": 47.5,
-       "y": 37.5,
+       "x": 60.5,
+       "y": 68.5,
        "w": 1,
        "h": 1,
        "rotation": 90,
@@ -11278,77 +11300,77 @@
       {
        "id": "dungeon-stamp-116",
        "art": {
-        "key": "gb-chest"
+        "key": "ph-statue"
        },
-       "x": 51.5,
-       "y": 31.5,
+       "x": 48,
+       "y": 88.5,
        "w": 1,
-       "h": 1,
-       "rotation": 270,
+       "h": 1.25,
+       "rotation": 90,
        "z": 116,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-117",
        "art": {
-        "key": "gb-sack"
+        "key": "gb-crate"
        },
-       "x": 49.5,
-       "y": 40.5,
+       "x": 41.5,
+       "y": 84.5,
        "w": 1,
        "h": 1,
-       "rotation": 270,
+       "rotation": 0,
        "z": 117,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-118",
        "art": {
-        "key": "barrel"
+        "key": "gb-sack"
        },
-       "x": 59.5,
-       "y": 27.5,
-       "w": 0.5,
-       "h": 0.5,
-       "rotation": 180,
+       "x": 53.5,
+       "y": 39.5,
+       "w": 1,
+       "h": 1,
+       "rotation": 90,
        "z": 118,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-119",
        "art": {
-        "key": "barrel"
+        "key": "ph-statue"
        },
-       "x": 63.5,
-       "y": 22.5,
-       "w": 0.5,
-       "h": 0.5,
-       "rotation": 270,
+       "x": 53.5,
+       "y": 33,
+       "w": 1,
+       "h": 1.25,
+       "rotation": 0,
        "z": 119,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-120",
        "art": {
-        "key": "ph-statue"
+        "key": "barrel"
        },
-       "x": 64,
-       "y": 21.5,
-       "w": 1,
-       "h": 1.25,
-       "rotation": 90,
+       "x": 60.5,
+       "y": 24.5,
+       "w": 0.5,
+       "h": 0.5,
+       "rotation": 0,
        "z": 120,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-121",
        "art": {
-        "key": "chest"
+        "key": "gb-sack"
        },
-       "x": 84.5,
-       "y": 36.5,
-       "w": 0.75,
-       "h": 0.5,
+       "x": 63.5,
+       "y": 18.5,
+       "w": 1,
+       "h": 1,
        "rotation": 180,
        "z": 121,
        "visibility": "all"
@@ -11356,13 +11378,13 @@
       {
        "id": "dungeon-stamp-122",
        "art": {
-        "key": "ph-bench"
+        "key": "gb-dresser"
        },
-       "x": 84.5,
-       "y": 37.5,
+       "x": 89.5,
+       "y": 35.5,
        "w": 1,
-       "h": 0.5,
-       "rotation": 270,
+       "h": 1,
+       "rotation": 90,
        "z": 122,
        "visibility": "all"
       },
@@ -11371,8 +11393,8 @@
        "art": {
         "key": "gb-table"
        },
-       "x": 90.5,
-       "y": 34.5,
+       "x": 85.5,
+       "y": 37.5,
        "w": 1,
        "h": 1,
        "rotation": 270,
@@ -11385,7 +11407,7 @@
         "key": "barrel"
        },
        "x": 48.5,
-       "y": 74.5,
+       "y": 69.5,
        "w": 0.5,
        "h": 0.5,
        "rotation": 0,
@@ -11397,8 +11419,8 @@
        "art": {
         "key": "chest"
        },
-       "x": 49.5,
-       "y": 68.5,
+       "x": 43.5,
+       "y": 74.5,
        "w": 0.75,
        "h": 0.5,
        "rotation": 270,
@@ -11410,7 +11432,7 @@
        "art": {
         "key": "gb-bordered-rug"
        },
-       "x": 42,
+       "x": 45,
        "y": 69,
        "w": 2,
        "h": 2,
@@ -11501,8 +11523,8 @@
        "art": {
         "key": "gb-pot"
        },
-       "x": 48.5,
-       "y": 62.5,
+       "x": 50.5,
+       "y": 59.5,
        "w": 1,
        "h": 1,
        "rotation": 0,
@@ -11512,10 +11534,10 @@
       {
        "id": "dungeon-stamp-134",
        "art": {
-        "key": "gb-crate"
+        "key": "gb-chest"
        },
-       "x": 45.5,
-       "y": 61.5,
+       "x": 94.5,
+       "y": 72.5,
        "w": 1,
        "h": 1,
        "rotation": 0,
@@ -11527,8 +11549,8 @@
        "art": {
         "key": "gb-crate"
        },
-       "x": 94.5,
-       "y": 77.5,
+       "x": 96.5,
+       "y": 67.5,
        "w": 1,
        "h": 1,
        "rotation": 90,
@@ -11538,12 +11560,12 @@
       {
        "id": "dungeon-stamp-136",
        "art": {
-        "key": "gb-chest"
+        "key": "crate"
        },
-       "x": 92.5,
-       "y": 73.5,
-       "w": 1,
-       "h": 1,
+       "x": 41.5,
+       "y": 35.5,
+       "w": 0.75,
+       "h": 0.5,
        "rotation": 0,
        "z": 136,
        "visibility": "all"
@@ -11553,8 +11575,8 @@
        "art": {
         "key": "gb-chest"
        },
-       "x": 41.5,
-       "y": 39.5,
+       "x": 37.5,
+       "y": 41.5,
        "w": 1,
        "h": 1,
        "rotation": 180,
@@ -11564,13 +11586,13 @@
       {
        "id": "dungeon-stamp-138",
        "art": {
-        "key": "gb-crate"
+        "key": "barrel"
        },
-       "x": 36.5,
-       "y": 38.5,
-       "w": 1,
-       "h": 1,
-       "rotation": 90,
+       "x": 24.5,
+       "y": 3.5,
+       "w": 0.5,
+       "h": 0.5,
+       "rotation": 180,
        "z": 138,
        "visibility": "all"
       },
@@ -11579,8 +11601,8 @@
        "art": {
         "key": "barrel"
        },
-       "x": 23.5,
-       "y": 5.5,
+       "x": 27.5,
+       "y": 3.5,
        "w": 0.5,
        "h": 0.5,
        "rotation": 270,
@@ -11592,8 +11614,8 @@
        "art": {
         "key": "ph-statue"
        },
-       "x": 24,
-       "y": 6.5,
+       "x": 29,
+       "y": 7.5,
        "w": 1,
        "h": 1.25,
        "rotation": 90,
@@ -11605,8 +11627,8 @@
        "art": {
         "key": "gb-pot"
        },
-       "x": 41.5,
-       "y": 96.5,
+       "x": 40.5,
+       "y": 94.5,
        "w": 1,
        "h": 1,
        "rotation": 90,
@@ -11618,8 +11640,8 @@
        "art": {
         "key": "barrel"
        },
-       "x": 39.5,
-       "y": 93.5,
+       "x": 38.5,
+       "y": 94.5,
        "w": 0.5,
        "h": 0.5,
        "rotation": 180,
@@ -11629,13 +11651,13 @@
       {
        "id": "dungeon-stamp-143",
        "art": {
-        "key": "gb-pot"
+        "key": "gb-sack"
        },
-       "x": 52.5,
-       "y": 8.5,
+       "x": 44.5,
+       "y": 95.5,
        "w": 1,
        "h": 1,
-       "rotation": 270,
+       "rotation": 90,
        "z": 143,
        "visibility": "all"
       },
@@ -11644,7 +11666,7 @@
        "art": {
         "key": "gb-sack"
        },
-       "x": 47.5,
+       "x": 48.5,
        "y": 3.5,
        "w": 1,
        "h": 1,
@@ -11657,8 +11679,8 @@
        "art": {
         "key": "gb-pot"
        },
-       "x": 52.5,
-       "y": 2.5,
+       "x": 53.5,
+       "y": 4.5,
        "w": 1,
        "h": 1,
        "rotation": 270,
@@ -11668,13 +11690,13 @@
       {
        "id": "dungeon-stamp-146",
        "art": {
-        "key": "gb-pot"
+        "key": "wg-scattered-bones"
        },
-       "x": 22.5,
-       "y": 31.5,
-       "w": 1,
-       "h": 1,
-       "rotation": 180,
+       "x": 52,
+       "y": 9,
+       "w": 1.5,
+       "h": 1.5,
+       "rotation": 90,
        "z": 146,
        "visibility": "all"
       },
@@ -11683,12 +11705,25 @@
        "art": {
         "key": "barrel"
        },
-       "x": 28.5,
-       "y": 35.5,
+       "x": 25.5,
+       "y": 34.5,
        "w": 0.5,
        "h": 0.5,
        "rotation": 90,
        "z": 147,
+       "visibility": "all"
+      },
+      {
+       "id": "dungeon-stamp-148",
+       "art": {
+        "key": "gb-crate"
+       },
+       "x": 27.5,
+       "y": 30.5,
+       "w": 1,
+       "h": 1,
+       "rotation": 270,
+       "z": 148,
        "visibility": "all"
       }
      ]
@@ -11799,8 +11834,8 @@
       },
       {
        "id": "dungeon-light-10",
-       "x": 10.5,
-       "y": 10.5,
+       "x": 17.5,
+       "y": 21.5,
        "bright": 20,
        "dim": 20,
        "on": true,
@@ -12107,8 +12142,8 @@
       "zone": {
        "cells": [
         {
-         "x": 82,
-         "y": 45,
+         "x": 16,
+         "y": 84,
          "w": 2,
          "h": 2
         }
@@ -12153,7 +12188,7 @@
        ],
        "hits": "trigger",
        "pit": {
-        "floor": -35
+        "floor": -30
        }
       }
      }
@@ -12166,8 +12201,8 @@
       "zone": {
        "cells": [
         {
-         "x": 33,
-         "y": 18,
+         "x": 15,
+         "y": 49,
          "w": 1,
          "h": 1
         }
@@ -12223,11 +12258,11 @@
          "shape": "cone",
          "size": 30,
          "origin": {
-          "x": 31.5,
-          "y": 16,
-          "z": 10
+          "x": 17.5,
+          "y": 52,
+          "z": 5
          },
-         "yaw": 45,
+         "yaw": 225,
          "includeOrigin": false
         }
        }
@@ -12242,12 +12277,12 @@
       "zone": {
        "wire": {
         "a": [
-         3,
-         82.5
+         79,
+         36.5
         ],
         "b": [
-         5,
-         82.5
+         81,
+         36.5
         ]
        }
       },
@@ -12290,8 +12325,8 @@
        "hits": {
         "cells": [
          {
-          "x": 3,
-          "y": 81,
+          "x": 79,
+          "y": 35,
           "w": 2,
           "h": 3
          }
@@ -12308,8 +12343,8 @@
       "zone": {
        "cells": [
         {
-         "x": 23,
-         "y": 32,
+         "x": 58,
+         "y": 80,
          "w": 1,
          "h": 1
         }
@@ -12365,11 +12400,11 @@
          "shape": "cone",
          "size": 30,
          "origin": {
-          "x": 23.5,
-          "y": 31,
-          "z": 0
+          "x": 61,
+          "y": 80.5,
+          "z": -5
          },
-         "yaw": 90,
+         "yaw": 180,
          "includeOrigin": false
         }
        }
@@ -12499,7 +12534,7 @@
       "sceneId": "dungeon-scene",
       "zone": {
        "door": {
-        "edge": "36,9,n"
+        "edge": "32,41,w"
        }
       },
       "name": "Poisoned Needle",
@@ -12558,8 +12593,8 @@
       "zone": {
        "cells": [
         {
-         "x": 41,
-         "y": 95,
+         "x": 81,
+         "y": 74,
          "w": 1,
          "h": 1
         }
@@ -12615,11 +12650,11 @@
          "shape": "cone",
          "size": 30,
          "origin": {
-          "x": 40.5,
-          "y": 94,
+          "x": 79,
+          "y": 76.5,
           "z": 0
          },
-         "yaw": 45,
+         "yaw": 315,
          "includeOrigin": false
         }
        }
@@ -12634,8 +12669,341 @@
       "zone": {
        "cells": [
         {
-         "x": 24,
-         "y": 56,
+         "x": 85,
+         "y": 87,
+         "w": 2,
+         "h": 2
+        }
+       ]
+      },
+      "name": "Spiked Pit",
+      "rig": {
+       "who": "party",
+       "floor": true,
+       "resets": "never",
+       "stops": true,
+       "foundOnSpring": true,
+       "damage": [
+        {
+         "formula": "3d6",
+         "type": "bludgeoning"
+        },
+        {
+         "formula": "3d8",
+         "type": "piercing"
+        }
+       ],
+       "message": "The floor gives way onto spikes!",
+       "sound": "crash",
+       "actions": [],
+       "find": [
+        {
+         "ability": "int",
+         "skill": "investigation",
+         "dc": 15,
+         "what": "the pit's lid"
+        }
+       ],
+       "notice": false,
+       "disarm": {
+        "text": "Wedge an Iron Spike between the lid and the floor, or hold it shut with Arcane Lock."
+       },
+       "note": "A 30-foot pit with spikes at the bottom. The lid stays open once it opens. Climbing out needs a Climb Speed, climbing gear, or magic such as Spider Climb.",
+       "preset": "spiked-pit",
+       "on": [
+        "enter"
+       ],
+       "hits": "trigger",
+       "pit": {
+        "floor": -40
+       }
+      }
+     }
+    },
+    {
+     "t": "trap.create",
+     "trap": {
+      "id": "dungeon-trap-9",
+      "sceneId": "dungeon-scene",
+      "zone": {
+       "wire": {
+        "a": [
+         80,
+         25.5
+        ],
+        "b": [
+         82,
+         25.5
+        ]
+       }
+      },
+      "name": "Collapsing Roof",
+      "rig": {
+       "who": "party",
+       "floor": true,
+       "resets": "never",
+       "stops": true,
+       "foundOnSpring": true,
+       "save": {
+        "ability": "dex",
+        "dc": 15,
+        "onPass": "half"
+       },
+       "damage": [
+        {
+         "formula": "4d10",
+         "type": "bludgeoning"
+        }
+       ],
+       "message": "The ceiling comes crashing down!",
+       "sound": "crash",
+       "actions": [],
+       "find": [
+        {
+         "ability": "wis",
+         "skill": "perception",
+         "dc": 11,
+         "what": "the trip wire and the unstable ceiling"
+        }
+       ],
+       "notice": true,
+       "disarm": {
+        "text": "Once found, the trip wire can be cut or avoided, no check needed."
+       },
+       "note": "Draw the squares under the unstable ceiling: everyone there is hit. Rubble from the collapse turns the trapped area into Difficult Terrain.",
+       "preset": "collapsing-roof",
+       "on": [],
+       "hits": {
+        "cells": [
+         {
+          "x": 80,
+          "y": 24,
+          "w": 2,
+          "h": 3
+         }
+        ]
+       }
+      }
+     }
+    },
+    {
+     "t": "trap.create",
+     "trap": {
+      "id": "dungeon-trap-10",
+      "sceneId": "dungeon-scene",
+      "zone": {
+       "wire": {
+        "a": [
+         33,
+         34.5
+        ],
+        "b": [
+         35,
+         34.5
+        ]
+       }
+      },
+      "name": "Collapsing Roof",
+      "rig": {
+       "who": "party",
+       "floor": true,
+       "resets": "never",
+       "stops": true,
+       "foundOnSpring": true,
+       "save": {
+        "ability": "dex",
+        "dc": 15,
+        "onPass": "half"
+       },
+       "damage": [
+        {
+         "formula": "4d10",
+         "type": "bludgeoning"
+        }
+       ],
+       "message": "The ceiling comes crashing down!",
+       "sound": "crash",
+       "actions": [],
+       "find": [
+        {
+         "ability": "wis",
+         "skill": "perception",
+         "dc": 11,
+         "what": "the trip wire and the unstable ceiling"
+        }
+       ],
+       "notice": true,
+       "disarm": {
+        "text": "Once found, the trip wire can be cut or avoided, no check needed."
+       },
+       "note": "Draw the squares under the unstable ceiling: everyone there is hit. Rubble from the collapse turns the trapped area into Difficult Terrain.",
+       "preset": "collapsing-roof",
+       "on": [],
+       "hits": {
+        "cells": [
+         {
+          "x": 33,
+          "y": 33,
+          "w": 2,
+          "h": 3
+         }
+        ]
+       }
+      }
+     }
+    },
+    {
+     "t": "trap.create",
+     "trap": {
+      "id": "dungeon-trap-11",
+      "sceneId": "dungeon-scene",
+      "zone": {
+       "cells": [
+        {
+         "x": 61,
+         "y": 26,
+         "w": 1,
+         "h": 1
+        }
+       ]
+      },
+      "name": "Fire-Casting Statue",
+      "rig": {
+       "who": "party",
+       "floor": true,
+       "resets": "nextTurn",
+       "stops": true,
+       "foundOnSpring": true,
+       "save": {
+        "ability": "dex",
+        "dc": 15,
+        "onPass": "half"
+       },
+       "damage": [
+        {
+         "formula": "4d10",
+         "type": "fire"
+        }
+       ],
+       "message": "The statue breathes a cone of fire!",
+       "sound": "whoosh",
+       "actions": [],
+       "find": [
+        {
+         "ability": "wis",
+         "skill": "perception",
+         "dc": 15,
+         "what": "the pressure plate"
+        },
+        {
+         "ability": "wis",
+         "skill": "perception",
+         "dc": 10,
+         "what": "the glyph on the statue"
+        }
+       ],
+       "notice": true,
+       "disarm": {
+        "text": "Wedge an Iron Spike under the pressure plate, or deface the glyph with a sharp tool."
+       },
+       "note": "Place the 30-foot cone from the statue. It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
+       "preset": "fire-casting-statue",
+       "on": [
+        "enter",
+        "turnStart"
+       ],
+       "hits": {
+        "area": {
+         "shape": "cone",
+         "size": 30,
+         "origin": {
+          "x": 60.5,
+          "y": 28,
+          "z": 0
+         },
+         "yaw": 315,
+         "includeOrigin": false
+        }
+       }
+      }
+     }
+    },
+    {
+     "t": "trap.create",
+     "trap": {
+      "id": "dungeon-trap-12",
+      "sceneId": "dungeon-scene",
+      "zone": {
+       "wire": {
+        "a": [
+         38.5,
+         57
+        ],
+        "b": [
+         38.5,
+         59
+        ]
+       }
+      },
+      "name": "Collapsing Roof",
+      "rig": {
+       "who": "party",
+       "floor": true,
+       "resets": "never",
+       "stops": true,
+       "foundOnSpring": true,
+       "save": {
+        "ability": "dex",
+        "dc": 15,
+        "onPass": "half"
+       },
+       "damage": [
+        {
+         "formula": "4d10",
+         "type": "bludgeoning"
+        }
+       ],
+       "message": "The ceiling comes crashing down!",
+       "sound": "crash",
+       "actions": [],
+       "find": [
+        {
+         "ability": "wis",
+         "skill": "perception",
+         "dc": 11,
+         "what": "the trip wire and the unstable ceiling"
+        }
+       ],
+       "notice": true,
+       "disarm": {
+        "text": "Once found, the trip wire can be cut or avoided, no check needed."
+       },
+       "note": "Draw the squares under the unstable ceiling: everyone there is hit. Rubble from the collapse turns the trapped area into Difficult Terrain.",
+       "preset": "collapsing-roof",
+       "on": [],
+       "hits": {
+        "cells": [
+         {
+          "x": 37,
+          "y": 57,
+          "w": 3,
+          "h": 2
+         }
+        ]
+       }
+      }
+     }
+    },
+    {
+     "t": "trap.create",
+     "trap": {
+      "id": "dungeon-trap-13",
+      "sceneId": "dungeon-scene",
+      "zone": {
+       "cells": [
+        {
+         "x": 91,
+         "y": 22,
          "w": 2,
          "h": 2
         }
@@ -12688,346 +13056,13 @@
     {
      "t": "trap.create",
      "trap": {
-      "id": "dungeon-trap-9",
-      "sceneId": "dungeon-scene",
-      "zone": {
-       "wire": {
-        "a": [
-         21,
-         47.5
-        ],
-        "b": [
-         23,
-         47.5
-        ]
-       }
-      },
-      "name": "Collapsing Roof",
-      "rig": {
-       "who": "party",
-       "floor": true,
-       "resets": "never",
-       "stops": true,
-       "foundOnSpring": true,
-       "save": {
-        "ability": "dex",
-        "dc": 15,
-        "onPass": "half"
-       },
-       "damage": [
-        {
-         "formula": "4d10",
-         "type": "bludgeoning"
-        }
-       ],
-       "message": "The ceiling comes crashing down!",
-       "sound": "crash",
-       "actions": [],
-       "find": [
-        {
-         "ability": "wis",
-         "skill": "perception",
-         "dc": 11,
-         "what": "the trip wire and the unstable ceiling"
-        }
-       ],
-       "notice": true,
-       "disarm": {
-        "text": "Once found, the trip wire can be cut or avoided, no check needed."
-       },
-       "note": "Draw the squares under the unstable ceiling: everyone there is hit. Rubble from the collapse turns the trapped area into Difficult Terrain.",
-       "preset": "collapsing-roof",
-       "on": [],
-       "hits": {
-        "cells": [
-         {
-          "x": 21,
-          "y": 46,
-          "w": 2,
-          "h": 3
-         }
-        ]
-       }
-      }
-     }
-    },
-    {
-     "t": "trap.create",
-     "trap": {
-      "id": "dungeon-trap-10",
-      "sceneId": "dungeon-scene",
-      "zone": {
-       "wire": {
-        "a": [
-         86,
-         11.5
-        ],
-        "b": [
-         88,
-         11.5
-        ]
-       }
-      },
-      "name": "Collapsing Roof",
-      "rig": {
-       "who": "party",
-       "floor": true,
-       "resets": "never",
-       "stops": true,
-       "foundOnSpring": true,
-       "save": {
-        "ability": "dex",
-        "dc": 15,
-        "onPass": "half"
-       },
-       "damage": [
-        {
-         "formula": "4d10",
-         "type": "bludgeoning"
-        }
-       ],
-       "message": "The ceiling comes crashing down!",
-       "sound": "crash",
-       "actions": [],
-       "find": [
-        {
-         "ability": "wis",
-         "skill": "perception",
-         "dc": 11,
-         "what": "the trip wire and the unstable ceiling"
-        }
-       ],
-       "notice": true,
-       "disarm": {
-        "text": "Once found, the trip wire can be cut or avoided, no check needed."
-       },
-       "note": "Draw the squares under the unstable ceiling: everyone there is hit. Rubble from the collapse turns the trapped area into Difficult Terrain.",
-       "preset": "collapsing-roof",
-       "on": [],
-       "hits": {
-        "cells": [
-         {
-          "x": 86,
-          "y": 10,
-          "w": 2,
-          "h": 3
-         }
-        ]
-       }
-      }
-     }
-    },
-    {
-     "t": "trap.create",
-     "trap": {
-      "id": "dungeon-trap-11",
-      "sceneId": "dungeon-scene",
-      "zone": {
-       "cells": [
-        {
-         "x": 15,
-         "y": 18,
-         "w": 1,
-         "h": 1
-        }
-       ]
-      },
-      "name": "Fire-Casting Statue",
-      "rig": {
-       "who": "party",
-       "floor": true,
-       "resets": "nextTurn",
-       "stops": true,
-       "foundOnSpring": true,
-       "save": {
-        "ability": "dex",
-        "dc": 15,
-        "onPass": "half"
-       },
-       "damage": [
-        {
-         "formula": "4d10",
-         "type": "fire"
-        }
-       ],
-       "message": "The statue breathes a cone of fire!",
-       "sound": "whoosh",
-       "actions": [],
-       "find": [
-        {
-         "ability": "wis",
-         "skill": "perception",
-         "dc": 15,
-         "what": "the pressure plate"
-        },
-        {
-         "ability": "wis",
-         "skill": "perception",
-         "dc": 10,
-         "what": "the glyph on the statue"
-        }
-       ],
-       "notice": true,
-       "disarm": {
-        "text": "Wedge an Iron Spike under the pressure plate, or deface the glyph with a sharp tool."
-       },
-       "note": "Place the 30-foot cone from the statue. It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
-       "preset": "fire-casting-statue",
-       "on": [
-        "enter",
-        "turnStart"
-       ],
-       "hits": {
-        "area": {
-         "shape": "cone",
-         "size": 30,
-         "origin": {
-          "x": 17.5,
-          "y": 21,
-          "z": -10
-         },
-         "yaw": 225,
-         "includeOrigin": false
-        }
-       }
-      }
-     }
-    },
-    {
-     "t": "trap.create",
-     "trap": {
-      "id": "dungeon-trap-12",
-      "sceneId": "dungeon-scene",
-      "zone": {
-       "wire": {
-        "a": [
-         19.5,
-         66
-        ],
-        "b": [
-         19.5,
-         68
-        ]
-       }
-      },
-      "name": "Collapsing Roof",
-      "rig": {
-       "who": "party",
-       "floor": true,
-       "resets": "never",
-       "stops": true,
-       "foundOnSpring": true,
-       "save": {
-        "ability": "dex",
-        "dc": 15,
-        "onPass": "half"
-       },
-       "damage": [
-        {
-         "formula": "4d10",
-         "type": "bludgeoning"
-        }
-       ],
-       "message": "The ceiling comes crashing down!",
-       "sound": "crash",
-       "actions": [],
-       "find": [
-        {
-         "ability": "wis",
-         "skill": "perception",
-         "dc": 11,
-         "what": "the trip wire and the unstable ceiling"
-        }
-       ],
-       "notice": true,
-       "disarm": {
-        "text": "Once found, the trip wire can be cut or avoided, no check needed."
-       },
-       "note": "Draw the squares under the unstable ceiling: everyone there is hit. Rubble from the collapse turns the trapped area into Difficult Terrain.",
-       "preset": "collapsing-roof",
-       "on": [],
-       "hits": {
-        "cells": [
-         {
-          "x": 18,
-          "y": 66,
-          "w": 3,
-          "h": 2
-         }
-        ]
-       }
-      }
-     }
-    },
-    {
-     "t": "trap.create",
-     "trap": {
-      "id": "dungeon-trap-13",
-      "sceneId": "dungeon-scene",
-      "zone": {
-       "cells": [
-        {
-         "x": 83,
-         "y": 59,
-         "w": 2,
-         "h": 2
-        }
-       ]
-      },
-      "name": "Spiked Pit",
-      "rig": {
-       "who": "party",
-       "floor": true,
-       "resets": "never",
-       "stops": true,
-       "foundOnSpring": true,
-       "damage": [
-        {
-         "formula": "3d6",
-         "type": "bludgeoning"
-        },
-        {
-         "formula": "3d8",
-         "type": "piercing"
-        }
-       ],
-       "message": "The floor gives way onto spikes!",
-       "sound": "crash",
-       "actions": [],
-       "find": [
-        {
-         "ability": "int",
-         "skill": "investigation",
-         "dc": 15,
-         "what": "the pit's lid"
-        }
-       ],
-       "notice": false,
-       "disarm": {
-        "text": "Wedge an Iron Spike between the lid and the floor, or hold it shut with Arcane Lock."
-       },
-       "note": "A 30-foot pit with spikes at the bottom. The lid stays open once it opens. Climbing out needs a Climb Speed, climbing gear, or magic such as Spider Climb.",
-       "preset": "spiked-pit",
-       "on": [
-        "enter"
-       ],
-       "hits": "trigger",
-       "pit": {
-        "floor": -35
-       }
-      }
-     }
-    },
-    {
-     "t": "trap.create",
-     "trap": {
       "id": "dungeon-trap-14",
       "sceneId": "dungeon-scene",
       "zone": {
        "cells": [
         {
-         "x": 8,
-         "y": 49,
+         "x": 51,
+         "y": 75,
          "w": 2,
          "h": 2
         }
@@ -13085,8 +13120,8 @@
       "zone": {
        "cells": [
         {
-         "x": 27,
-         "y": 5,
+         "x": 46,
+         "y": 61,
          "w": 1,
          "h": 1
         }
@@ -13142,11 +13177,11 @@
          "shape": "cone",
          "size": 30,
          "origin": {
-          "x": 27.5,
-          "y": 3,
+          "x": 48.5,
+          "y": 59,
           "z": 0
          },
-         "yaw": 90,
+         "yaw": 135,
          "includeOrigin": false
         }
        }
@@ -13161,8 +13196,8 @@
       "zone": {
        "cells": [
         {
-         "x": 47,
-         "y": 15,
+         "x": 83,
+         "y": 56,
          "w": 1,
          "h": 1
         }
@@ -13218,9 +13253,9 @@
          "shape": "cone",
          "size": 30,
          "origin": {
-          "x": 50,
-          "y": 17.5,
-          "z": 0
+          "x": 86,
+          "y": 58.5,
+          "z": -5
          },
          "yaw": 225,
          "includeOrigin": false
@@ -13237,8 +13272,8 @@
       "zone": {
        "cells": [
         {
-         "x": 48,
-         "y": 35,
+         "x": 92,
+         "y": 29,
          "w": 2,
          "h": 2
         }
@@ -13292,8 +13327,8 @@
       "zone": {
        "cells": [
         {
-         "x": 39,
-         "y": 31,
+         "x": 50,
+         "y": 34,
          "w": 1,
          "h": 1
         }
@@ -13349,11 +13384,11 @@
          "shape": "cone",
          "size": 30,
          "origin": {
-          "x": 37,
-          "y": 33.5,
+          "x": 53,
+          "y": 34.5,
           "z": 0
          },
-         "yaw": 315,
+         "yaw": 180,
          "includeOrigin": false
         }
        }
@@ -13367,7 +13402,7 @@
       "sceneId": "dungeon-scene",
       "zone": {
        "door": {
-        "edge": "60,18,n"
+        "edge": "7,76,w"
        }
       },
       "name": "Poisoned Needle",
@@ -13433,7 +13468,7 @@
     "traps": 6,
     "band": "5-10",
     "deadEnds": true,
-    "secrets": 0,
+    "secrets": 6,
     "lit": 100,
     "dressing": "full",
     "key": true
@@ -14663,7 +14698,7 @@
       "blocks": [
        {
         "id": "dungeonblk00",
-        "text": "A generated Cave of 12 rooms on 50 × 50 squares (250 by 250 ft). Room 1 is the way in. Each room's pin carries its number.\n\nMade with: Cave, Medium, Normal, Bending, Narrow, extra ways around, dead ends, Heights Some, Traps Few at levels 1–4, Secret doors None, Lit rooms Few, Dressing Some, 5 ft squares."
+        "text": "A generated Cave of 12 rooms on 50 × 50 squares (250 by 250 ft). Room 1 is the way in. Each room's pin carries its number.\n\nMade with: Cave, Medium, Normal, Bending, Narrow, extra ways around, dead ends, Heights Some, Traps Few at levels 1–4, Secret doors Few, Lit rooms Few, Dressing Some, 5 ft squares."
        },
        {
         "id": "dungeonblk01",
@@ -16324,8 +16359,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -16333,8 +16369,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -16935,7 +16972,7 @@
       "blocks": [
        {
         "id": "dungeonblk00",
-        "text": "A generated Sewer of 12 rooms on 50 × 50 squares (250 by 250 ft). Room 1 is the way in. Each room's pin carries its number.\n\nMade with: Sewer, Medium, Normal, Bending, Wide, extra ways around, dead ends, Heights Some, Traps Few at levels 11–16, Secret doors None, Lit rooms Few, Dressing Some, 5 ft squares."
+        "text": "A generated Sewer of 12 rooms on 50 × 50 squares (250 by 250 ft). Room 1 is the way in. Each room's pin carries its number.\n\nPlayers see a secret door as plain wall until you mark it found: tap it with the Select tool. The Search action finds one with a DC 15 (Medium) Wisdom (Perception) check.\n\nMade with: Sewer, Medium, Normal, Bending, Wide, extra ways around, dead ends, Heights Some, Traps Few at levels 11–16, Secret doors Few, Lit rooms Few, Dressing Some, 5 ft squares."
        },
        {
         "id": "dungeonblk01",
@@ -16971,7 +17008,7 @@
        },
        {
         "id": "dungeonblk09",
-        "text": "**9.** 8 × 6 squares (40 by 30 ft). Doors: north to 11, south to 8, south to 6, west to 7. Trinket: A glass orb filled with water, in which swims a clockwork goldfish."
+        "text": "**9.** 8 × 6 squares (40 by 30 ft). Doors: north to 11, south to 8 (secret), south to 6, west to 7. Trinket: A glass orb filled with water, in which swims a clockwork goldfish."
        },
        {
         "id": "dungeonblk10",
@@ -17214,6 +17251,9 @@
     "dungeon-stamp-38",
     "dungeon-stamp-39",
     "dungeon-stamp-40",
+    "dungeon-stamp-41",
+    "dungeon-stamp-42",
+    "dungeon-stamp-43",
     "dungeon-light-0",
     "dungeon-light-1",
     "dungeon-light-2",
@@ -18257,8 +18297,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -18320,8 +18361,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -18329,8 +18371,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -18338,8 +18381,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -18356,8 +18400,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       },
       {
@@ -18365,8 +18410,9 @@
        "feature": {
         "kind": "door",
         "state": "closed",
-        "secret": false,
-        "discovered": false
+        "secret": true,
+        "discovered": false,
+        "cover": "auto"
        }
       }
      ]
@@ -18609,8 +18655,8 @@
        "art": {
         "key": "ph-statue"
        },
-       "x": 23.5,
-       "y": 39,
+       "x": 19.5,
+       "y": 6,
        "w": 1,
        "h": 1.25,
        "rotation": 0,
@@ -18778,8 +18824,8 @@
        "art": {
         "key": "gb-chest"
        },
-       "x": 34.5,
-       "y": 16.5,
+       "x": 38.5,
+       "y": 19.5,
        "w": 1,
        "h": 1,
        "rotation": 180,
@@ -18792,7 +18838,7 @@
         "key": "gb-chest"
        },
        "x": 35.5,
-       "y": 18.5,
+       "y": 17.5,
        "w": 1,
        "h": 1,
        "rotation": 90,
@@ -18934,7 +18980,7 @@
        "art": {
         "key": "ph-statue"
        },
-       "x": 23.5,
+       "x": 24.5,
        "y": 9,
        "w": 1,
        "h": 1.25,
@@ -18947,8 +18993,8 @@
        "art": {
         "key": "wg-scattered-bones"
        },
-       "x": 18,
-       "y": 9,
+       "x": 22,
+       "y": 6,
        "w": 1.5,
        "h": 1.5,
        "rotation": 270,
@@ -18958,12 +19004,12 @@
       {
        "id": "dungeon-stamp-27",
        "art": {
-        "key": "crate"
+        "key": "ph-statue"
        },
-       "x": 19.5,
-       "y": 11.5,
-       "w": 0.75,
-       "h": 0.5,
+       "x": 38,
+       "y": 8.5,
+       "w": 1,
+       "h": 1.25,
        "rotation": 270,
        "z": 27,
        "visibility": "all"
@@ -18973,8 +19019,8 @@
        "art": {
         "key": "barrel"
        },
-       "x": 34.5,
-       "y": 4.5,
+       "x": 37.5,
+       "y": 3.5,
        "w": 0.5,
        "h": 0.5,
        "rotation": 270,
@@ -18986,8 +19032,8 @@
        "art": {
         "key": "wg-scattered-bones"
        },
-       "x": 35,
-       "y": 7,
+       "x": 39,
+       "y": 10,
        "w": 1.5,
        "h": 1.5,
        "rotation": 0,
@@ -18999,8 +19045,8 @@
        "art": {
         "key": "wg-scattered-bones"
        },
-       "x": 39,
-       "y": 43,
+       "x": 40,
+       "y": 44,
        "w": 1.5,
        "h": 1.5,
        "rotation": 270,
@@ -19012,8 +19058,8 @@
        "art": {
         "key": "crate"
        },
-       "x": 41.5,
-       "y": 45.5,
+       "x": 38.5,
+       "y": 46.5,
        "w": 0.75,
        "h": 0.5,
        "rotation": 270,
@@ -19025,8 +19071,8 @@
        "art": {
         "key": "gb-sack"
        },
-       "x": 22.5,
-       "y": 38.5,
+       "x": 23.5,
+       "y": 43.5,
        "w": 1,
        "h": 1,
        "rotation": 90,
@@ -19039,7 +19085,7 @@
         "key": "crate"
        },
        "x": 23.5,
-       "y": 44.5,
+       "y": 41.5,
        "w": 0.75,
        "h": 0.5,
        "rotation": 0,
@@ -19049,13 +19095,13 @@
       {
        "id": "dungeon-stamp-34",
        "art": {
-        "key": "gb-crate"
+        "key": "gb-sack"
        },
-       "x": 4.5,
-       "y": 20.5,
+       "x": 21.5,
+       "y": 38.5,
        "w": 1,
        "h": 1,
-       "rotation": 180,
+       "rotation": 270,
        "z": 34,
        "visibility": "all"
       },
@@ -19064,8 +19110,8 @@
        "art": {
         "key": "gb-pot"
        },
-       "x": 3.5,
-       "y": 17.5,
+       "x": 4.5,
+       "y": 20.5,
        "w": 1,
        "h": 1,
        "rotation": 90,
@@ -19077,7 +19123,7 @@
        "art": {
         "key": "gb-crate"
        },
-       "x": 4.5,
+       "x": 5.5,
        "y": 21.5,
        "w": 1,
        "h": 1,
@@ -19088,13 +19134,13 @@
       {
        "id": "dungeon-stamp-37",
        "art": {
-        "key": "gb-chest"
+        "key": "gb-crate"
        },
-       "x": 16.5,
-       "y": 17.5,
+       "x": 5.5,
+       "y": 18.5,
        "w": 1,
        "h": 1,
-       "rotation": 90,
+       "rotation": 0,
        "z": 37,
        "visibility": "all"
       },
@@ -19114,27 +19160,66 @@
       {
        "id": "dungeon-stamp-39",
        "art": {
-        "key": "gb-bookcase"
+        "key": "gb-crate"
        },
-       "x": 30.5,
-       "y": 31.5,
+       "x": 22.5,
+       "y": 20.5,
        "w": 1,
        "h": 1,
-       "rotation": 90,
+       "rotation": 0,
        "z": 39,
        "visibility": "all"
       },
       {
        "id": "dungeon-stamp-40",
        "art": {
-        "key": "chest"
+        "key": "gb-sack"
        },
-       "x": 30.5,
-       "y": 33.5,
-       "w": 0.75,
-       "h": 0.5,
+       "x": 16.5,
+       "y": 18.5,
+       "w": 1,
+       "h": 1,
        "rotation": 180,
        "z": 40,
+       "visibility": "all"
+      },
+      {
+       "id": "dungeon-stamp-41",
+       "art": {
+        "key": "gb-long-table"
+       },
+       "x": 30,
+       "y": 33.5,
+       "w": 1,
+       "h": 2,
+       "rotation": 270,
+       "z": 41,
+       "visibility": "all"
+      },
+      {
+       "id": "dungeon-stamp-42",
+       "art": {
+        "key": "ph-bench"
+       },
+       "x": 25.5,
+       "y": 31.5,
+       "w": 1,
+       "h": 0.5,
+       "rotation": 270,
+       "z": 42,
+       "visibility": "all"
+      },
+      {
+       "id": "dungeon-stamp-43",
+       "art": {
+        "key": "gb-bed"
+       },
+       "x": 30.5,
+       "y": 31,
+       "w": 1,
+       "h": 2,
+       "rotation": 180,
+       "z": 43,
        "visibility": "all"
       }
      ]
@@ -19273,8 +19358,8 @@
       "zone": {
        "cells": [
         {
-         "x": 24,
-         "y": 39,
+         "x": 18,
+         "y": 7,
          "w": 1,
          "h": 1
         }
@@ -19330,11 +19415,11 @@
          "shape": "cone",
          "size": 15,
          "origin": {
-          "x": 23.5,
-          "y": 39,
+          "x": 19.5,
+          "y": 6,
           "z": -5
          },
-         "yaw": 45,
+         "yaw": 135,
          "includeOrigin": false
         }
        }
@@ -19349,8 +19434,8 @@
       "zone": {
        "cells": [
         {
-         "x": 8,
-         "y": 7,
+         "x": 37,
+         "y": 17,
          "w": 2,
          "h": 2
         }
@@ -19406,23 +19491,23 @@
       "blocks": [
        {
         "id": "dungeonblk00",
-        "text": "A generated Dungeon of 12 rooms on 50 × 50 squares (250 by 250 ft). Room 1 is the way in. Each room's pin carries its number.\n\nMade with: Dungeon, Medium, Normal, Bending, Narrow, extra ways around, dead ends, Heights Some, Traps Few at levels 1–4, Secret doors None, Lit rooms All, Dressing Full, 5 ft squares."
+        "text": "A generated Dungeon of 12 rooms on 50 × 50 squares (250 by 250 ft). Room 1 is the way in. Each room's pin carries its number.\n\nPlayers see a secret door as plain wall until you mark it found: tap it with the Select tool. The Search action finds one with a DC 15 (Medium) Wisdom (Perception) check.\n\nMade with: Dungeon, Medium, Normal, Bending, Narrow, extra ways around, dead ends, Heights Some, Traps Few at levels 1–4, Secret doors 6 in 12 rooms, Lit rooms All, Dressing Full, 5 ft squares."
        },
        {
         "id": "dungeonblk01",
-        "text": "**1.** The way in, 4 × 5 squares (20 by 25 ft). Doors: north to 2, east to 4, west to the stairs at the map's edge. Lit by a fire pit. Trinket: A metal can that has no opening but sounds as if it is filled with liquid, sand, spiders, or broken glass (your choice)."
+        "text": "**1.** The way in, 4 × 5 squares (20 by 25 ft). Doors: north to 2, east to 4 (secret), west to the stairs at the map's edge. Lit by a fire pit. Trinket: A metal can that has no opening but sounds as if it is filled with liquid, sand, spiders, or broken glass (your choice)."
        },
        {
         "id": "dungeonblk02",
-        "text": "**2.** 7 × 9 squares (35 by 45 ft). Doors: east to 3, south to 1. Lit by a fire pit. Trap: Hidden Pit. Trinket: A bronze pentacle with an etching of a rat’s head in its center."
+        "text": "**2.** 7 × 9 squares (35 by 45 ft). Doors: east to 3, south to 1. Lit by a fire pit. Trinket: A bronze pentacle with an etching of a rat’s head in its center."
        },
        {
         "id": "dungeonblk03",
-        "text": "**3.** 8 × 8 squares (40 by 40 ft), 5 ft down. Doors: south to 4 (locked), west to 2. A pit. Lit by a fire pit. Trinket: A white, sequined glove sized for a human."
+        "text": "**3.** 8 × 8 squares (40 by 40 ft), 5 ft down. Doors: south to 4 (locked), west to 2. A pit. Lit by a fire pit. Trap: Fire-Casting Statue. Trinket: A white, sequined glove sized for a human."
        },
        {
         "id": "dungeonblk04",
-        "text": "**4.** 8 × 4 squares (40 by 20 ft). Doors: north to 3, east to 9, south to 5, west to 1. Lit by a fire pit. Trinket: A brass orb etched with strange runes."
+        "text": "**4.** 8 × 4 squares (40 by 20 ft). Doors: north to 3, east to 9 (secret), south to 5, west to 1 (secret). Lit by a fire pit. Trinket: A brass orb etched with strange runes."
        },
        {
         "id": "dungeonblk05",
@@ -19438,15 +19523,15 @@
        },
        {
         "id": "dungeonblk08",
-        "text": "**8.** 7 × 8 squares (35 by 40 ft), 5 ft down. Doors: north to 6, east to 10, west to 11. A dais 5 ft up. Lit by a fire pit. Trap: Fire-Casting Statue. Trinket: A 1-ounce block made from an unknown material."
+        "text": "**8.** 7 × 8 squares (35 by 40 ft), 5 ft down. Doors: north to 6, east to 10, west to 11. A dais 5 ft up. Lit by a fire pit. Trinket: A 1-ounce block made from an unknown material."
        },
        {
         "id": "dungeonblk09",
-        "text": "**9.** 7 × 5 squares (35 by 25 ft). Doors: north to 12, south to 7, west to 4. Lit by a fire pit. Trinket: An old divination card bearing your likeness."
+        "text": "**9.** 7 × 5 squares (35 by 25 ft). Doors: north to 12, south to 7, west to 4 (secret). Lit by a fire pit. Trap: Hidden Pit. Trinket: An old divination card bearing your likeness."
        },
        {
         "id": "dungeonblk10",
-        "text": "**10.** 7 × 5 squares (35 by 25 ft). Doors: north to 7, west to 8. A pit. Lit by a fire pit. Trinket: A scrap of cloth from an old banner."
+        "text": "**10.** 7 × 5 squares (35 by 25 ft). Doors: north to 7, west to 8 (secret). A pit. Lit by a fire pit. Trinket: A scrap of cloth from an old banner."
        },
        {
         "id": "dungeonblk11",
@@ -19454,7 +19539,7 @@
        },
        {
         "id": "dungeonblk12",
-        "text": "**12.** 8 × 8 squares (40 by 40 ft). Doors: south to 9. A pit. Lit by a fire pit. Trinket: A packet filled with pink dust."
+        "text": "**12.** A secret room, 8 × 8 squares (40 by 40 ft). Doors: south to 9 (secret). A pit. Lit by a fire pit. Trinket: A packet filled with pink dust."
        }
       ]
      }
