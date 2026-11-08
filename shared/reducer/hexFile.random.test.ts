@@ -462,5 +462,52 @@ for (const [name, g] of [
       assert.ok(checked >= 350, `cases: ${checked}`);
       assert.ok(apartNow >= 6, `cases a live move seats apart: ${apartNow}`);
     });
+
+    test("an op stored at version 50 seats each rider on a squeezed holder by its own seat, never apart from the others", () => {
+      let squeezedRiders = 0;
+      for (let seed = 1; seed <= 1000; seed++) {
+        const made = caseOf(seed, g);
+        if (!made) continue;
+        const { state: s, op } = made;
+        const walks = planWalks(op, s, P1, { opVersion: 50 });
+        const horse = walks.find((m) => m.tokenId === "horse")!;
+        const riders = walks.filter((m) => m.carriedBy === "horse" && onHolder(s.tokens[m.tokenId]!.attached!.kind));
+        if (riders.length < 2) continue;
+        for (let i = 1; i < horse.route.length; i++) {
+          const squeezed = i === horse.route.length - 1 ? op.squeeze === true : onSqueezedLattice(g, s.tokens.horse!, horse.route[i]!);
+          if (!squeezed) continue;
+          for (const m of riders) {
+            const own = seatedAt(g, s.tokens[m.tokenId]!, s.tokens.horse!, horse.route[i]!, true, 50);
+            const got = m.route[i]!;
+            assert.ok(Math.abs(own.x - got.x) < 1e-9 && Math.abs(own.y - got.y) < 1e-9, `seed ${seed}: ${m.tokenId} at point ${i} is on its own seat`);
+            squeezedRiders++;
+          }
+        }
+      }
+      assert.ok(squeezedRiders >= 60, `riders checked on a squeezed holder: ${squeezedRiders}`);
+    });
+
+    // seated.length < 2 in moveLeg.ts endSeatsApart counts every rider, hidden or not, so one shown rider is seated apart only when a
+    // hidden one rides beside it. The seat the shown rider takes must not tell a player that the hidden one is there.
+    test("one rider every player sees sits alike with and without one hidden rider beside it", () => {
+      let compared = 0;
+      for (let seed = 1; seed <= 8000; seed++) {
+        const made = caseOf(seed, g);
+        if (!made) continue;
+        const { state: base, op } = made;
+        const riding = Object.values(base.tokens).filter((t): t is Token => !!t && t.attached?.to === "horse" && onHolder(t.attached.kind));
+        const shown = riding.filter((t) => t.visibility !== "dm");
+        const unseen = riding.filter((t) => t.visibility === "dm");
+        if (shown.length !== 1 || unseen.length !== 1) continue;
+        const gone = unseen[0]!.id;
+        if (Object.values(base.tokens).some((t) => t?.attached?.to === gone)) continue;
+        const alone = structuredClone(base);
+        delete alone.tokens[gone];
+        assert.equal(canApply(op, P1, alone, { canUseAsset: () => true }).ok, canApply(op, P1, base, { canUseAsset: () => true }).ok, `seed ${seed}: the answer`);
+        assert.equal(publicSeats(alone, op), publicSeats(base, op), `seed ${seed}: the shown rider's seats`);
+        compared++;
+      }
+      assert.ok(compared >= 10, `pairs compared: ${compared}`);
+    });
   });
 }
