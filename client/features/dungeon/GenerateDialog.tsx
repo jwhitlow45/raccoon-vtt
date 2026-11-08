@@ -17,7 +17,7 @@ import { BAND_NAMES } from "../traps/rules.ts";
 import { builderScene, cleanName, pickNow, withPlayersSee, type NewSceneIntent, type SceneInput } from "../scenes/create.ts";
 import { NumberInput } from "../scenes/controls.tsx";
 import { closePreviews, preview, warmPreviews, type Preview } from "./client.ts";
-import { flowStep, readiness, startFlow, type Flow, type FlowEvent } from "./flow.ts";
+import { drawable, flowStep, readiness, startFlow, type Flow, type FlowEvent } from "./flow.ts";
 import { SCENE_PLACEHOLDER, withIds } from "./ops.ts";
 import { DungeonPreview, type Drawn } from "./Preview.tsx";
 import { loadChoices, saveChoices, settingsOf, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
@@ -225,7 +225,7 @@ export function GenerateDialog(props: {
   // Reroll stands in the preview's corner, so the preview and the choices each keep one left edge. Its ring can fall on the picture's stone, so it is the board's two-tone ring (Preview.tsx CORNER_SLOT).
   const previewBox = (
     <DungeonPreview
-      drawn={flow.shown?.drawn ?? null}
+      drawn={drawable(flow)}
       width={layout.width}
       height={layout.height}
       drawing={ready.drawing}

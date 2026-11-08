@@ -78,3 +78,12 @@ export function readiness<T extends { drawn: object }>(f: Flow<T>): Readiness<T>
     pictureFailed: failed,
   };
 }
+
+/**
+ * The drawing the box should be rendering, or null for none. A seed that
+ * stopped reading cancels a render in flight, so a picture made after it
+ * never replaces the one kept, and a failed encode never clears it.
+ */
+export function drawable<T extends { drawn: object }>(f: Flow<T>): T["drawn"] | null {
+  return f.seedOk ? (f.shown?.drawn ?? null) : null;
+}

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import fc from "fast-check";
 import { holds } from "#shared/propertyTestutil.ts";
-import { flowStep, readiness, startFlow, type Flow, type FlowEvent } from "./flow.ts";
+import { drawable, flowStep, readiness, startFlow, type Flow, type FlowEvent } from "./flow.ts";
 
 /** A worker's answer as the dialog holds it: the dungeon and the drawing its picture is made from. */
 type Shown = { n: number; drawn: { n: number } };
@@ -55,6 +55,19 @@ test("DGBUILD-ASTRA-2: a seed made invalid while a request draws drops its answe
   f = run([answered(2, dungeon(2)), { k: "answer", id: 2, answer: { ok: false, error: "bug" } }], f);
   assert.equal(f, kept, "neither B's late answer nor a late failure moves anything");
   assert.equal(f.shown, a);
+});
+
+test("DGBUILD-ASTRA-2-RESIDUAL: a seed made invalid between the worker's answer and its encode cancels the render, and the kept picture stands", () => {
+  const a = dungeon(1);
+  const b = dungeon(2);
+  let f = run([{ k: "ask", id: 1 }, answered(1, a), { k: "pictured", drawn: a.drawn }, { k: "ask", id: 2 }, answered(2, b)]);
+  assert.equal(drawable(f), b.drawn, "B is answered and its picture is being made");
+  f = flowStep(f, { k: "invalid", id: 3 });
+  assert.equal(drawable(f), null, "nothing is asked to render once the seed is invalid");
+  assert.equal(f.pictured, a.drawn, "A's picture is still the one shown");
+  assert.equal(readiness(f).current, null);
+  // The seed reads again: a request is out, and B's answer is again the newest shown.
+  assert.equal(drawable(flowStep(f, { k: "ask", id: 4 })), b.drawn);
 });
 
 /** One thing that can happen to the dialog's preview, with ids and answers picked from what came before. */
