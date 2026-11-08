@@ -5,11 +5,13 @@ import type { DurationInput } from "#shared/protocol.ts";
 import { displayName } from "../../lib/scene.ts";
 
 /**
- * The duration form for effects (design section 9.5): "until the start of
- * X's next turn", "until the end of X's next turn", or "N rounds", with X
- * picked from the encounter or the creature itself. The reducer turns the
- * choice into boundary crossings (shared/rules/durations.ts), so the client
- * only builds the input and later describes what was stored.
+ * The duration form for effects (design section 9.5): "Start of X's next
+ * turn", "End of X's next turn", or "N rounds", with X picked from the
+ * encounter or the creature itself, or a time span, which counts the room's
+ * clock and names no creature (docs/design/design-v1-calendar-c2c3.md 3.1).
+ * The reducer turns a turn choice into boundary crossings
+ * (shared/rules/durations.ts) and a span into an end on the clock, so the
+ * client only builds the input and later describes what was stored.
  */
 
 /** The fixed time spans are modes of their own, named by their seconds, so the Duration select lists them in one run (docs/design/design-v1-calendar-c2c3.md 3.1). */

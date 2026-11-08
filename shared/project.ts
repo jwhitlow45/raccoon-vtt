@@ -4198,16 +4198,6 @@ function soundFields(ctx: Ctx): Pick<ProjectedState, "sounds" | "playlists" | "p
 }
 
 /**
- * The room's clock (docs/design/design-v1-calendar.md 6.4): the DM's whole. A
- * player and a table display get its id, time and calendar while it is
- * shown, and nothing of it otherwise. Rev 0, so its number never tells how
- * often a hidden clock moved. A running fight's seconds come from the
- * round, which every player already gets, so a shown clock read with them
- * tells nothing more. Behind a blackout a player gets none, as they get no
- * encounter: the clock read without the fight's rounds would show the wrong
- * time, and a blackout's global re-projection brings both back together.
- */
-/**
  * The clock a viewer's view holds, as projectClockCtx sends it: the DM's
  * always, a player's and a table display's only while it is shown and no
  * blackout is on. A player's own copy carries no `shown`, since it holds a
@@ -4221,6 +4211,16 @@ export function heldClock(state: Pick<RoomState, "clock" | "meta">, viewer: View
   return clock.shown !== false && !paused(state, viewer) ? clock : null;
 }
 
+/**
+ * The room's clock (docs/design/design-v1-calendar.md 6.4): the DM's whole. A
+ * player and a table display get its id, time and calendar while it is
+ * shown, and nothing of it otherwise. Rev 0, so its number never tells how
+ * often a hidden clock moved. A running fight's seconds come from the
+ * round, which every player already gets, so a shown clock read with them
+ * tells nothing more. Behind a blackout a player gets none, as they get no
+ * encounter: the clock read without the fight's rounds would show the wrong
+ * time, and a blackout's global re-projection brings both back together.
+ */
 function projectClockCtx(ctx: Ctx): ProjectedClock | null {
   const clock = ctx.state.clock;
   if (!clock) return null;
