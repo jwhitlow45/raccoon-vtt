@@ -1234,6 +1234,43 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await ask.waitFor({ state: "detached" });
   });
 
+  test("lp32-6. at 1440 x 900, a DC the group save just rolled is offered under Recent by the next group save page in the same Dice tab, without leaving it (LP32-B-DC-1)", async () => {
+    const NEW_DC = 17;
+    await dm.setViewportSize({ width: 1440, height: 900 });
+    try {
+      await dm.getByRole("tablist", { name: "Panels" }).waitFor();
+      const panel = dm.getByRole("tabpanel", { name: /^Dice/ });
+      const group = dm.locator('[role="dialog"][data-bar-mode]');
+      /** The group bar's Save, discarding the page that holds rolls, then the fresh page for the three goblins in the Dice tab, which stays drawn. */
+      const save = async () => {
+        await selectGoblins([0, 1, 2]);
+        await group.getByText("3 selected").waitFor();
+        await (await barControl(group, "Save")).click();
+        const ask = group.getByRole("alert").filter({ hasText: "Discard the Dexterity save for 3?" });
+        await ask.getByRole("button", { name: "Discard", exact: true }).click();
+        await ask.waitFor({ state: "detached" });
+        await panel.getByRole("button", { name: /^Roll 3 saves/ }).first().waitFor();
+      };
+      await save();
+      const dc = panel.getByLabel("DC", { exact: true });
+      await dc.fill(String(NEW_DC));
+      await dc.press("Enter");
+      const before = diceLines(dmSocket.state?.log).length;
+      await panel.getByRole("button", { name: /^Roll 3 saves/ }).first().click();
+      const line = await waitFor("the saves at the new DC", () => diceLines(dmSocket.state?.log).slice(before).find((l) => l.rolls.length === 3) ?? null);
+      assert.equal(line.dc, NEW_DC);
+      await waitFor("the DC kept on this device", () => dm.evaluate((key) => localStorage.getItem(key)?.includes(String(17)) || null, `rvtt.saveDcs.${run.roomId}`));
+      // The next page in the same tab reads the list again as it opens.
+      await save();
+      const recent = panel.getByRole("group", { name: "Recent DCs", exact: true });
+      await recent.getByRole("button", { name: `DC ${DC}`, exact: true }).waitFor();
+      await shots.take(dm, "lp32-6-recent-dcs");
+      assert.equal(await recent.getByRole("button", { name: `DC ${NEW_DC}`, exact: true }).count(), 1, "the DC just rolled is not under Recent");
+    } finally {
+      await dm.setViewportSize(PHONE);
+    }
+  });
+
   test("8. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, []);
     assert.deepEqual(playerConsole.errors, []);

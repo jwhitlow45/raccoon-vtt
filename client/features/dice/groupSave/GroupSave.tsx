@@ -239,8 +239,13 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   const [seenOpen, setSeenOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [outcomeOpen, setOutcomeOpen] = useState(page.phase === "setup");
-  // The request sheet's recent save DCs, read once as the page opens so a chip never moves under the DM's finger (docs/design/design-v1-qol.md 3, Q9).
-  const [recentDcs] = useState(() => readRecentDcs(roomId));
+  /*
+   * The recent save DCs, read once as each page opens so a chip never moves
+   * under the DM's finger (docs/design/design-v1-qol.md 3, Q9). Per page, not
+   * per mount: a Dice panel that stays drawn opens the next page in this one,
+   * which must offer the DC the last page just rolled (LP32-B-DC-1).
+   */
+  const recentDcs = useMemo(() => readRecentDcs(roomId), [roomId, page.id]);
   const pageRef = useRef(page);
   pageRef.current = page;
   const update = (next: Page) => {
