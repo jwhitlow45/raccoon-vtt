@@ -13,7 +13,9 @@ const NONE: readonly never[] = [];
  */
 export function useCharacterRollNumbers(characterId: string | null): { numbers: RollNumbers | null; loading: boolean; failed: boolean } {
   const creatures = useMemo(() => (characterId === null ? NONE : [{ characterId }]), [characterId]);
-  const { dice, failed } = useDiceView(creatures);
+  const { dice, chunkFailed } = useDiceView(creatures);
+  // The numbers wait on the rolls table alone, so a stat block that did not load never says they failed.
+  const failed = chunkFailed.rolls;
   return useMemo(() => {
     if (characterId === null || !dice) return { numbers: null, loading: false, failed: false };
     const character = dice.view.characters[characterId];

@@ -58,9 +58,16 @@ function targetKey(creature: ActorTarget): string {
  * A DiceView for these creatures, null until the room's first snapshot.
  * creatureRolls is null for one of them while a chunk it needs loads, which
  * `loading` says, and `failed` says a chunk did not load, for
- * SrdLoadFailed's reload.
+ * SrdLoadFailed's reload. `chunkFailed` says each chunk's own, for a reader
+ * that waits on one of them alone: the rolls table failing never stops a
+ * read of the stat blocks still loading, nor the other way round.
  */
-export function useDiceView(creatures: readonly ActorTarget[]): { dice: DiceView | null; loading: boolean; failed: boolean } {
+export function useDiceView(creatures: readonly ActorTarget[]): {
+  dice: DiceView | null;
+  loading: boolean;
+  failed: boolean;
+  chunkFailed: { monsters: boolean; rolls: boolean };
+} {
   const you = useRoomView((s) => s.you);
   const view = useRoomView((s) => s.view);
   const sceneId = useRoomView((s) => s.sceneId);
@@ -83,5 +90,14 @@ export function useDiceView(creatures: readonly ActorTarget[]): { dice: DiceView
   const rolls = useRollsChunk(needs.rolls);
   const dice = useMemo(() => (you && view ? { you, view, sceneId, srd: { monsters: monsters.value, rolls: rolls.value } } : null), [you, view, sceneId, monsters.value, rolls.value]);
   const waits = (need: boolean, chunk: { value: unknown; failed: boolean }) => need && chunk.value === null && !chunk.failed;
-  return { dice, loading: waits(needs.monsters, monsters) || waits(needs.rolls, rolls), failed: (needs.monsters && monsters.failed) || (needs.rolls && rolls.failed) };
+  const chunkFailed = { monsters: needs.monsters && monsters.failed, rolls: needs.rolls && rolls.failed };
+  return { dice, loading: waits(needs.monsters, monsters) || waits(needs.rolls, rolls), failed: chunkFailed.monsters || chunkFailed.rolls, chunkFailed };
+}
+
+/** Leaves the rolls table failed, as a load that did not land does, until the returned undo. For tests. */
+export function failSrdRollsForTests(): () => void {
+  rollsChunk.failed = true;
+  return () => {
+    rollsChunk.failed = false;
+  };
 }

@@ -103,7 +103,9 @@ export function useDismissed(): { dismissed: ReadonlySet<string>; dismiss(id: st
  * after they failed, an empty list for a creature with no block.
  */
 export function useCreaturesUses(targets: readonly ActorTarget[]): { uses: (readonly LimitedUse[] | null)[]; loading: boolean; failed: boolean } {
-  const { dice, failed } = useDiceView(targets);
+  // The uses read the stat blocks alone, so the rolls table failing leaves them loading, not failed (R2-01).
+  const { dice, chunkFailed } = useDiceView(targets);
+  const failed = chunkFailed.monsters;
   if (!dice) return { uses: targets.map(() => null), loading: targets.length > 0 && !failed, failed };
   let loading = false;
   const uses = targets.map((target) => {
@@ -168,10 +170,10 @@ export const WAITS_FOR_REGENERATION = "Waiting for Regeneration";
  */
 export function useLairCounts(target: ActorTarget | null): { state: JoinState; has: boolean; counts(inLair: boolean): { actionsMax: number; resistMax: number; xp: number } | undefined } {
   const creatures = useMemo(() => (target ? [target] : []), [target]);
-  const { dice, failed } = useDiceView(creatures);
+  const { dice, chunkFailed } = useDiceView(creatures);
   const block = dice && target ? creatureBlock(dice, target) : null;
   return {
-    state: lairState(dice, failed, target),
+    state: lairState(dice, chunkFailed.monsters, target),
     has: block !== null && blockHasLair(block),
     counts: (inLair) => (block && hasLair(block) ? lairCounts(block, inLair) : undefined),
   };
@@ -235,9 +237,9 @@ export function joinState(dice: DiceView | null, failed: boolean, tokens: readon
  */
 export function useFightJoin(candidates: readonly Token[]): { stateOf(tokens: readonly Token[]): JoinState; mark(entry: EntryInput): EntryInput } {
   const targets = useMemo(() => candidates.filter(lairCandidate).map((t) => ({ tokenId: t.id })), [candidates]);
-  const { dice, failed } = useDiceView(targets);
+  const { dice, chunkFailed } = useDiceView(targets);
   return {
-    stateOf: (tokens) => joinState(dice, failed, tokens),
+    stateOf: (tokens) => joinState(dice, chunkFailed.monsters, tokens),
     mark: (entry) => {
       const token = entry.tokenId !== undefined ? candidates.find((t) => t.id === entry.tokenId) : undefined;
       if (!dice || !token || !("inline" in token.actor)) return entry;
