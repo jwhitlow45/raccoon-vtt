@@ -1,7 +1,7 @@
 import { sightOf } from "../keys.ts";
 import { LIMITS } from "../limits.ts";
 import type { RoomState, Scene, SceneId, Token, Viewer } from "../model.ts";
-import { isPartyMember, ownsToken, type ProjectOpts } from "../project.ts";
+import type { ProjectOpts } from "../project.ts";
 import { ownEntry } from "../records.ts";
 import { isWritable } from "../writable.ts";
 
@@ -24,6 +24,16 @@ export function floorsOf(state: Pick<RoomState, "scenes">, sceneId: SceneId): Sc
   if (scene === undefined) return [];
   if (scene.floor === undefined) return [scene];
   return groupsOf(state.scenes).get(groupKey(scene)) ?? [scene];
+}
+
+/**
+ * The floors a `scene.delete` takes (D-261102-493): a main floor takes every
+ * floor of its scene, any other floor only itself, and a scene without
+ * floors itself. Bottom first.
+ */
+export function deleteSet(state: Pick<RoomState, "scenes">, scene: Scene): Scene[] {
+  if (scene.floor === undefined || scene.floor.of !== scene.id) return [scene];
+  return floorsOf(state, scene.id);
 }
 
 /**
@@ -86,8 +96,12 @@ export function playersSee(state: RoomState, sceneId: SceneId): boolean {
  * scene it projects.
  */
 export function heldFloors(state: RoomState, viewer: Viewer, opts: ProjectOpts): ReadonlySet<SceneId> {
-  const key = `${viewer.role}\u0000${viewer.memberId}\u0000${opts.sceneId ?? ""}`;
-  const cache = isWritable(state) ? undefined : heldCache(state);
+  if (viewer.role === "player" && sightOf(state) !== undefined) return new Set(Object.keys(state.scenes));
+  const plain = plainHeld(state, viewer, opts);
+  if (plain !== undefined) return plain;
+  // A floor's answer reads the tokens, so it is kept for each finished state, under what a test may still set in place.
+  const key = `${viewer.role}\u0000${viewer.memberId}\u0000${opts.sceneId ?? ""}\u0000${state.meta.playerSceneId ?? ""}\u0000${state.meta.view?.blackout === true}`;
+  const cache = finished(state) ? heldCache(state) : undefined;
   const known = cache?.get(key);
   if (known !== undefined) return known;
   const held = new Set(heldNow(state, viewer, opts));
@@ -95,13 +109,23 @@ export function heldFloors(state: RoomState, viewer: Viewer, opts: ProjectOpts):
   return held;
 }
 
+const NONE: ReadonlySet<SceneId> = new Set();
+
+/** The held set where the scene in question has no floors, the one scene as before floors, or undefined where it has floors. */
+function plainHeld(state: RoomState, viewer: Viewer, opts: ProjectOpts): ReadonlySet<SceneId> | undefined {
+  const sceneId = viewer.role === "dm" ? opts.sceneId : state.meta.view?.blackout === true ? null : startFloor(state);
+  if (sceneId === null) return NONE;
+  const scene = ownEntry(state.scenes, sceneId);
+  if (scene === undefined) return NONE;
+  return scene.floor === undefined ? new Set([sceneId]) : undefined;
+}
+
 function heldNow(state: RoomState, viewer: Viewer, opts: ProjectOpts): SceneId[] {
   if (viewer.role === "dm") return opts.sceneId === null ? [] : floorsOf(state, opts.sceneId).map((s) => s.id);
-  if (sightOf(state) !== undefined) return Object.keys(state.scenes);
-  const start = startFloor(state);
-  if (start === null || state.meta.view?.blackout === true) return [];
+  // plainHeld answered a blackout and a room without a start floor already.
+  const start = startFloor(state)!;
   const owned = new Set<SceneId>();
-  for (const token of Object.values(state.tokens)) if (ownsToken(state, viewer, token)) owned.add(token.sceneId);
+  for (const token of Object.values(state.tokens)) if (ownedBy(state, viewer.memberId, token)) owned.add(token.sceneId);
   return floorsOf(state, start)
     .filter((floor) => owned.has(floor.id) || openFloor(state, floor.id))
     .map((floor) => floor.id);
@@ -185,17 +209,46 @@ const partyCache = new WeakMap<object, ReadonlySet<SceneId>>();
 
 /** The floors an unhidden party member stands on, worked out once for each finished state. */
 function partyFloorsOf(state: RoomState): ReadonlySet<SceneId> {
-  const known = isWritable(state) ? undefined : partyCache.get(state);
+  const keep = finished(state);
+  const known = keep ? partyCache.get(state) : undefined;
   if (known !== undefined) return known;
   const floors = new Set<SceneId>();
   for (const token of Object.values(state.tokens)) if (unhiddenPartyMember(state, token)) floors.add(token.sceneId);
-  if (!isWritable(state)) partyCache.set(state, floors);
+  if (keep) partyCache.set(state, floors);
   return floors;
 }
 
+/*
+ * The two ownership rules below are project.ts's `isPartyMember` and
+ * `ownsToken`, restated here so the limits, which sight's arithmetic check
+ * reads with everything they import (segments.test.ts), can ask these
+ * questions without importing the projection. floors.test.ts holds them
+ * to project.ts's over random rooms.
+ */
+
 /** A party member the DM has not hidden: only such a creature opens a floor (D-261102-482). */
-export function unhiddenPartyMember(state: RoomState, token: Token): boolean {
-  return token.visibility !== "dm" && isPartyMember(state, token);
+export function unhiddenPartyMember(state: Pick<RoomState, "characters">, token: Token): boolean {
+  if (token.visibility === "dm") return false;
+  if (token.partyVision === true || (token.ownerIds?.length ?? 0) > 0) return true;
+  const character = "ref" in token.actor ? ownEntry(state.characters, token.actor.ref) : undefined;
+  return character !== undefined && (character.ownerIds?.length ?? 0) > 0;
+}
+
+/** Whether the member owns the token, directly or through its character. */
+export function ownedBy(state: Pick<RoomState, "characters">, memberId: string, token: Token): boolean {
+  if (token.ownerIds.includes(memberId)) return true;
+  const character = "ref" in token.actor ? ownEntry(state.characters, token.actor.ref) : undefined;
+  return character !== undefined && character.ownerIds.includes(memberId);
+}
+
+/**
+ * Whether no transaction writes into the state or a collection these
+ * answers read any more (writable.ts), so an answer kept for it holds. A
+ * room spread from a transaction's state shares its collections, so they
+ * are asked too.
+ */
+function finished(state: RoomState): boolean {
+  return !isWritable(state) && !isWritable(state.scenes) && !isWritable(state.tokens) && !isWritable(state.characters) && !isWritable(state.openFloors) && !isWritable(state.meta);
 }
 
 const heldCaches = new WeakMap<object, Map<string, ReadonlySet<SceneId>>>();
