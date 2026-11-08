@@ -8,6 +8,7 @@ import yazl from "yazl";
 import { SOUND_LIMITS } from "#shared/limits.ts";
 import type { RoomState, SoundFacts } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
+import type { Op } from "#shared/protocol.ts";
 import { concat, framesFor, id3v1, id3v2, silentFrames, withTagFrame } from "#shared/audio/mp3Testutil.ts";
 import { formatDisplayCode } from "../auth/displaySessions.ts";
 import type { ExportManifest } from "../rooms/exportRoom.ts";
@@ -87,6 +88,19 @@ async function exists(path: string): Promise<boolean> {
 /** A distinct sound of `ms`, its bytes told apart by which frames carry the private bit. */
 function sound(ms = 3_000, seed = Math.floor(Math.random() * 1e9), shape: Parameters<typeof silentFrames>[1] = {}): Uint8Array {
   return silentFrames(framesFor(ms, shape.rateHz), { ...shape, bits: (i) => ({ private: ((seed >> i % 30) & 1) === 1 }) });
+}
+
+/** Turns on Only DM devices play in a room through its DM's socket, then sends these ops too. */
+async function dmOnly(t: Engine, dm: TestClient, roomId: string, ...ops: Op[]): Promise<void> {
+  const socket = await t.connect(roomId, dm);
+  await socket.snapshot("dm");
+  for (const op of [{ t: "room.update", settings: { soundDmOnly: true } } as Op, ...ops]) assert.equal((await socket.apply(op)).rejects, undefined, op.t);
+  socket.close();
+}
+
+async function storedState(t: Engine, roomId: string): Promise<RoomState> {
+  const { rows } = await t.pool.query<{ state: RoomState }>("select state from room_snapshots where room_id = $1", [roomId]);
+  return rows[0]!.state;
 }
 
 describe("sound files with the switch on", () => {
@@ -402,11 +416,12 @@ describe("sound files with the switch on", () => {
     assert.equal(state.playing, null, "the room starts silent");
   });
 
-  test("Include sounds off, the backup holds no sound file and nothing about sound, and its images still go", async () => {
+  test("Include sounds off, the backup holds no sound file and nothing about sound but Only DM devices play, and its images still go", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom();
     const bytes = sound(3_000, 41);
     await uploaded(dm, roomId, bytes);
+    await dmOnly(t, dm, roomId);
     assert.equal((await dm.request("PUT", `/api/rooms/${roomId}/assets?kind=token`, undefined, { "content-type": "image/png" }, await solid(64, 64).png().toBuffer())).statusCode, 200);
     const head = await dm.request("HEAD", `/api/rooms/${roomId}/export?sounds=0`);
     assert.equal(head.statusCode, 200);
@@ -420,6 +435,21 @@ describe("sound files with the switch on", () => {
     assert.deepEqual(manifest.assets.map((a) => a.kind), ["token"]);
     const into = await imported(t, exported.rawPayload);
     assert.equal((await t.pool.query("select 1 from assets where room_id = $1 and kind = 'sound'", [into.roomId])).rowCount, 0);
+    assert.equal((await storedState(t, into.roomId)).meta.settings.soundDmOnly, true, "the DM's choice comes back");
+  });
+
+  test("a backup of a room with only built-in effects keeps Only DM devices play through its import (docs/design/design-v1-sound-dm-only.md 7)", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    await dmOnly(t, dm, roomId, { t: "effect.fire", id: "fx1", builtin: "click" });
+    const exported = await dm.get(`/api/rooms/${roomId}/export`);
+    assert.equal(exported.statusCode, 200, exported.body);
+    const manifest = JSON.parse((await unzip(exported.rawPayload)).get("assets.json")!.toString()) as ExportManifest;
+    assert.equal(manifest.assets.some((a) => a.kind === "sound"), false, "no sound file, so the import keeps no sound");
+    const into = await imported(t, exported.rawPayload);
+    const state = await storedState(t, into.roomId);
+    assert.equal(state.meta.settings.soundDmOnly, true);
+    assert.equal(state.playing ?? null, null, "the room starts silent");
   });
 
   test("an import skips a sound entry that fails the walk, and one whose entry is missing", async () => {
@@ -500,7 +530,7 @@ describe("sound files with the switch off (D-261102-513)", () => {
     await on.close();
   });
 
-  test("an import skips every sound unread, and a backup made here leaves the room's sounds out", async () => {
+  test("an import skips every sound unread but keeps Only DM devices play, and a backup made here leaves the room's sounds out", async () => {
     const dm = on.client();
     const { roomId } = await dm.createRoom();
     const bytes = sound(3_000, 61);
@@ -509,6 +539,10 @@ describe("sound files with the switch off (D-261102-513)", () => {
     assert.ok((await unzip(zip)).has(`assets/${sha(bytes)}-sound-full.mp3`));
     const into = await imported(off, zip);
     assert.equal((await off.pool.query("select 1 from assets where room_id = $1 and kind = 'sound'", [into.roomId])).rowCount, 0);
+    assert.equal("soundDmOnly" in (await storedState(off, into.roomId)).meta.settings, false, "a room without it imports without it");
+    await dmOnly(on, dm, roomId);
+    const kept = await imported(off, (await dm.get(`/api/rooms/${roomId}/export`)).rawPayload);
+    assert.equal((await storedState(off, kept.roomId)).meta.settings.soundDmOnly, true, "Only DM devices play survives the import here (docs/design/design-v1-sound-dm-only.md 7)");
     // Unread, not read and then refused: nothing is skipped as a refused file.
     const zipPath = join(off.assetDir, "import", `${randomUUID()}.zip`);
     await mkdir(join(off.assetDir, "import"), { recursive: true });

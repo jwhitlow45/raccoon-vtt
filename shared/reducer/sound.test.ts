@@ -712,4 +712,26 @@ describe("Only DM devices play (docs/design/design-v1-sound-dm-only.md 8)", () =
     assert.equal("soundDmOnly" in off.state.meta.settings, false);
     assert.deepEqual(step(soundRoom(), dmOnly(false)).state.meta.settings, soundRoom().meta.settings, "off on a room without it adds nothing");
   });
+
+  test("an effect fired while it is on is the DM's for good, a room effect and a built-in alike, and one fired after it is everyone's", () => {
+    let state = step(soundRoom(), dmOnly(true)).state;
+    state = step(state, { t: "effect.fire", id: "e1", soundId: "door" }, 1_000).state;
+    state = step(state, { t: "effect.fire", id: "e2", builtin: "click" }, 2_000).state;
+    assert.deepEqual(playing(state).dmEffects, [
+      { id: "e1", soundId: "door", at: startAt(1_000) },
+      { id: "e2", builtin: "click", at: startAt(2_000) },
+    ]);
+    assert.deepEqual(playing(state).effects, []);
+    state = step(state, dmOnly(false), 3_000).state;
+    assert.deepEqual(playing(state).dmEffects?.map((e) => e.id), ["e1", "e2"], "turning it off moves nothing into the open");
+    state = step(state, { t: "effect.fire", id: "e3", soundId: "door" }, 4_000).state;
+    assert.deepEqual(playing(state).effects.map((e) => e.id), ["e3"]);
+    assert.equal(refusal(state, { t: "effect.fire", id: "e1", soundId: "door" }, 5_000), SOUND_WORDS.firedTwice, "an id is once across both lists");
+  });
+
+  test("music, background sounds and a scene's sound play for the DM as without it", () => {
+    const plain = step(step(soundRoom(), playTavern).state, { t: "loop.start", id: "l1", soundId: "rain", volume: 70 }, 1_000).state;
+    const on = step(step(step(soundRoom(), dmOnly(true)).state, playTavern).state, { t: "loop.start", id: "l1", soundId: "rain", volume: 70 }, 1_000).state;
+    assert.deepEqual(on.playing, plain.playing);
+  });
 });

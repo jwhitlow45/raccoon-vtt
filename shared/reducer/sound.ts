@@ -492,7 +492,12 @@ export function keptEffects(list: readonly FiredEffect[], sounds: Record<SoundId
   return list.filter((e, i) => i >= newest || e.at + effectLengthMs(e, sounds) > t).slice(-SOUND_LIMITS.effectsListed);
 }
 
-/** A room effect or a built-in for everyone, or behind a blackout for the DM alone, for good (4.6). */
+/**
+ * A room effect or a built-in for everyone, or for the DM alone, for good,
+ * behind a blackout (4.6) and while Only DM devices play
+ * (docs/design/design-v1-sound-dm-only.md 8), so turning either off never
+ * shows players an effect fired meanwhile.
+ */
 export function effectFire(tx: Tx, op: OpOf<"effect.fire">): void {
   const playing = playingOf(tx.state);
   const sounds = soundsOf(tx.state);
@@ -501,7 +506,7 @@ export function effectFire(tx: Tx, op: OpOf<"effect.fire">): void {
   if (playing.effects.some((e) => e.id === op.id) || dmEffects.some((e) => e.id === op.id)) throw invalid(SOUND_WORDS.firedTwice);
   const t = startOf(tx);
   const entry: FiredEffect = { id: op.id, ...(op.soundId !== undefined ? { soundId: op.soundId } : { builtin: op.builtin! }), at: t };
-  if (tx.state.meta.view?.blackout === true) play(tx, playing, withLists(playing, playing.effects, keptEffects([...dmEffects, entry], sounds, t)));
+  if (tx.state.meta.view?.blackout === true || tx.state.meta.settings.soundDmOnly === true) play(tx, playing, withLists(playing, playing.effects, keptEffects([...dmEffects, entry], sounds, t)));
   else play(tx, playing, withLists(playing, keptEffects([...playing.effects, entry], sounds, t), dmEffects));
 }
 

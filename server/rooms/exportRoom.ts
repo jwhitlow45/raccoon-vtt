@@ -92,7 +92,11 @@ export function assetFileName(sha256: string, kind: AssetKind, variant: Variant,
  * The state with no part about sound (docs/design/design-v1-music.md 6.7):
  * an empty library, no playlist, silence, no scene's sound and the names
  * switch off. A collection the state does not hold stays absent, as it is
- * in a room from before sound, so this never adds one.
+ * in a room from before sound, so this never adds one. Only DM devices play
+ * stays as it was (docs/design/design-v1-sound-dm-only.md 7): it holds no
+ * file and nothing hidden, and it still keeps the built-in effects off
+ * players' devices in a room without sound files, so no backup or import
+ * drops the DM's choice.
  */
 export function withoutSound(state: RoomState): RoomState {
   const { soundNames: _names, ...settings } = state.meta.settings;

@@ -4,7 +4,7 @@ import fc from "fast-check";
 import type { EntityKey } from "./keys.ts";
 import type { RoomState, Viewer } from "./model.ts";
 import { TRAP_SOUNDS, opSchema, type Op, type OpOf, type RestoreEntry } from "./protocol.ts";
-import { allKeys, applyChanges, dependents, diffProjection, heldOf, projectEntity, projectState, stableStringify, type HeldEntry, type ProjectedState } from "./project.ts";
+import { allKeys, applyChanges, dependents, diffProjection, heldOf, projectEntity, projectState, stableStringify, visibleAssetIds, type HeldEntry, type ProjectedState } from "./project.ts";
 import { applyOp, type Applied } from "./reducer.ts";
 import { FADES, LEAD_MS, REPEATS, SOUND_USES, musicAt, soundDue, soundStep, type Fade, type Playing, type Repeat, type Sound, type SoundUse } from "./sound.ts";
 import { AT, DM, P1, room } from "./testutil.ts";
@@ -19,8 +19,10 @@ import { AT, DM, P1, room } from "./testutil.ts";
  *    `dmEffects`, no order, index, label or pause of the run, no scene's
  *    sound, no name for the next track or an effect, no name while the
  *    switch is off, no sound but those of now, next, the loops and the
- *    effects still Effects, and nothing at all behind a blackout. An
- *    effect fired behind a blackout never reaches them, even after it.
+ *    effects still Effects, and nothing at all behind a blackout or while
+ *    Only DM devices play (docs/design/design-v1-sound-dm-only.md 8). An
+ *    effect fired behind a blackout or while Only DM devices play never
+ *    reaches them, even after it.
  * 2. It is what the table of 6.5 says, read here from the state alone.
  * 3. Each viewer's copy, built by applying every batch's fan-out changes to
  *    their first snapshot, is the fresh projection of the room: the
@@ -59,6 +61,7 @@ type Act = { gap: number } & (
   | { k: "delete"; which: number }
   | { k: "names"; on: boolean }
   | { k: "blackout"; on: boolean }
+  | { k: "dmOnly"; on: boolean }
   | { k: "sceneSound"; which: number; loop: number; music: boolean }
   | { k: "sceneStart" }
   | { k: "undo" }
@@ -99,6 +102,7 @@ const ACT: fc.Arbitrary<Act> = fc.oneof(
   { weight: 1, arbitrary: act("delete", { which: n }) },
   { weight: 2, arbitrary: act("names", { on: fc.boolean() }) },
   { weight: 2, arbitrary: act("blackout", { on: fc.boolean() }) },
+  { weight: 2, arbitrary: act("dmOnly", { on: fc.boolean() }) },
   { weight: 1, arbitrary: act("sceneSound", { which: n, loop: n, music: fc.boolean() }) },
   { weight: 1, arbitrary: act("sceneStart") },
   { weight: 2, arbitrary: act("undo") },
@@ -205,6 +209,8 @@ function opFor(w: World, a: Act): { op: Op; at: number } | null {
         return { t: "room.update", settings: { soundNames: a.on } };
       case "blackout":
         return { t: "view.blackout", blackout: a.on };
+      case "dmOnly":
+        return { t: "room.update", settings: { soundDmOnly: a.on } };
       case "sceneSound": {
         const list = chosen(playlists, a.which);
         const loop = chosen(idsOf(s, "loop"), a.loop);
@@ -264,7 +270,7 @@ const MUSIC_FIELDS = new Set(["run", "repeat", "fade", "now", "next"]);
 
 function expectedFor(state: RoomState): { playing: Playing | null; sounds: Record<string, Sound> } {
   const playing = state.playing;
-  if (!playing || state.meta.view?.blackout === true) return { playing: null, sounds: {} };
+  if (!playing || state.meta.view?.blackout === true || state.meta.settings.soundDmOnly === true) return { playing: null, sounds: {} };
   const library = state.sounds ?? {};
   const isA = (id: string | undefined, use: SoundUse) => id !== undefined && Object.hasOwn(library, id) && library[id]!.use === use;
   const m = playing.music;
@@ -292,10 +298,11 @@ function expectedFor(state: RoomState): { playing: Playing | null; sounds: Recor
 function checkPlayer(state: RoomState, view: ProjectedState, hidden: ReadonlySet<string>, where: string): void {
   assert.ok(!("playlists" in view), `${where}: a playlist`);
   for (const scene of Object.values(view.scenes)) assert.ok(!("sound" in scene), `${where}: a scene's sound`);
-  if (state.meta.view?.blackout === true) {
+  assert.equal(view.meta.settings.soundDmOnly, state.meta.settings.soundDmOnly, `${where}: the setting reaches them`);
+  if (state.meta.view?.blackout === true || state.meta.settings.soundDmOnly === true) {
     // A copy built from changes holds `playing: null` and `sounds: {}` where a snapshot has neither (normalized).
-    assert.equal(view.playing ?? null, null, `${where}: playing behind a blackout`);
-    assert.deepEqual(Object.keys(view.sounds ?? {}), [], `${where}: a sound behind a blackout`);
+    assert.equal(view.playing ?? null, null, `${where}: playing behind a blackout or while Only DM devices play`);
+    assert.deepEqual(Object.keys(view.sounds ?? {}), [], `${where}: a sound behind a blackout or while Only DM devices play`);
     return;
   }
   const p = view.playing;
@@ -304,7 +311,7 @@ function checkPlayer(state: RoomState, view: ProjectedState, hidden: ReadonlySet
     assert.equal(p.rev, 0, `${where}: a rev`);
     for (const k of Object.keys(p.music ?? {})) assert.ok(MUSIC_FIELDS.has(k), `${where}: the run's ${k}`);
     if (state.playing?.music?.paused !== undefined) assert.equal(p.music, null, `${where}: a paused run`);
-    for (const e of p.effects) assert.ok(!hidden.has(e.id), `${where}: ${e.id}, fired behind a blackout`);
+    for (const e of p.effects) assert.ok(!hidden.has(e.id), `${where}: ${e.id}, fired behind a blackout or while Only DM devices play`);
   }
   const shared = state.meta.settings.soundNames === true;
   const now = p?.music?.now.soundId;
@@ -371,6 +378,8 @@ test("a player's projection and the fan-out keep every sound rule of 6.5 over ra
   let ticks = 0;
   let reveals = 0;
   let hiddenFires = 0;
+  let dmOnlyFires = 0;
+  let dmOnlyLifted = 0;
   let reclassified = 0;
   let undone = 0;
   let queued = 0;
@@ -381,7 +390,7 @@ test("a player's projection and the fan-out keep every sound rule of 6.5 over ra
         const view = projectState(w.state, viewer, OPTS);
         return { viewer, held: heldOf(view), view };
       });
-      // Effects fired behind a blackout: they stay the DM's for good (4.6).
+      // Effects fired behind a blackout or while Only DM devices play: they stay the DM's for good (4.6).
       const hidden = new Set<string>();
       for (const [i, a] of acts.entries()) {
         const made = opFor(w, a);
@@ -401,6 +410,11 @@ test("a player's projection and the fan-out keep every sound rule of 6.5 over ra
           hidden.add(made.op.id);
           hiddenFires++;
         }
+        if (made.op.t === "effect.fire" && before.meta.settings.soundDmOnly === true) {
+          hidden.add(made.op.id);
+          dmOnlyFires++;
+        }
+        if (before.meta.settings.soundDmOnly === true && r.state.meta.settings.soundDmOnly !== true && r.state.playing) dmOnlyLifted++;
         const op = made.op;
         if (op.t === "sound.update" && op.use !== undefined && before.playing?.effects.some((e) => e.soundId === op.id)) reclassified++;
         if (op.t === "sys.restore") undone++;
@@ -439,7 +453,60 @@ test("a player's projection and the fan-out keep every sound rule of 6.5 over ra
   assert.ok(applied > 3_000, `only ${applied} ops applied`);
   assert.ok(ticks > 250 && reveals > 50, `${ticks} ticks, ${reveals} reveals`);
   assert.ok(hiddenFires > 50, `${hiddenFires} effects fired behind a blackout`);
+  assert.ok(dmOnlyFires > 50 && dmOnlyLifted > 50, `${dmOnlyFires} effects fired while Only DM devices play, ${dmOnlyLifted} times it turned off with something playing`);
   // Reclassified effects ran 28 to 72 over 16 runs once the queue's ops joined the mix, so the floor sits well under that spread.
   assert.ok(reclassified > 10 && undone > 100, `${reclassified} fired effects given another use, ${undone} undos`);
   assert.ok(queued > 600, `${queued} queue edits and jumps`);
+});
+
+/**
+ * Twins for Only DM devices play (docs/design/design-v1-sound-dm-only.md 8):
+ * two rooms alike but for the library, the playlists, the scenes' sound and
+ * what plays, each reached by random ops, project the same to a player and
+ * a display while the switch is on, entity by entity and whole, so nothing
+ * about the room's sound reaches them, and no sound file is visible.
+ */
+test("while Only DM devices play, rooms that differ only in their sound project the same to a player and a display", () => {
+  const worldAfter = (start: { music: number[]; loop: number[]; effect: number[] }, acts: Act[]): RoomState => {
+    const w = library(start);
+    for (const a of acts) {
+      const made = opFor(w, a);
+      if (made === null) continue;
+      const parsed = opSchema.safeParse(made.op);
+      if (!parsed.success) continue;
+      const r = applyOp(w.state, parsed.data, DM, { seq: ++w.seq, at: new Date(made.at).toISOString() });
+      w.clock = made.at;
+      if (r.ok) w.state = r.state;
+    }
+    return w.state;
+  };
+  let differed = 0;
+  let audible = 0;
+  fc.assert(
+    fc.property(START, START, fc.array(ACT, { maxLength: 40, size: "max" }), fc.array(ACT, { maxLength: 40, size: "max" }), fc.boolean(), (startA, startB, actsA, actsB, names) => {
+      const a = worldAfter(startA, actsA);
+      const b = worldAfter(startB, actsB);
+      const twin = (from: RoomState): RoomState => ({ ...from, meta: { ...a.meta, settings: { ...a.meta.settings, soundDmOnly: true, ...(names ? { soundNames: true } : {}) } } });
+      const one = twin(a);
+      const scenes = Object.fromEntries(
+        Object.entries(one.scenes).map(([id, scene]) => {
+          const { sound: _mine, ...rest } = scene;
+          const theirs = b.scenes[id]?.sound;
+          return [id, theirs === undefined ? rest : { ...rest, sound: theirs }];
+        }),
+      );
+      const other: RoomState = { ...one, sounds: b.sounds, playlists: b.playlists, playing: b.playing, scenes };
+      if (stableStringify(one) !== stableStringify(other)) differed++;
+      if (one.playing?.music || other.playing?.music || (one.playing?.effects.length ?? 0) > 0) audible++;
+      for (const viewer of [P1, DISPLAY]) {
+        assert.equal(stableStringify(projectState(one, viewer, OPTS)), stableStringify(projectState(other, viewer, OPTS)), `${viewer.memberId}: the whole projection`);
+        for (const key of new Set([...allKeys(one), ...allKeys(other)])) {
+          assert.deepEqual(projectEntity(key, one, viewer, OPTS), projectEntity(key, other, viewer, OPTS), `${viewer.memberId}: ${key}`);
+        }
+        for (const state of [one, other]) assert.deepEqual([...visibleAssetIds(state, viewer, OPTS)].filter((id) => id.startsWith("file-")), [], `${viewer.memberId}: a sound file`);
+      }
+    }),
+    { numRuns: 300 },
+  );
+  assert.ok(differed > 250 && audible > 150, `${differed} twins differed, ${audible} with music or an effect playing`);
 });

@@ -50,4 +50,11 @@ describe("sound undo labels", () => {
     assert.equal(describeOp({ t: "room.update", settings: { soundNames: false } }, s), "turning off Players see what is playing");
     assert.equal(describeOp({ t: "room.update", settings: { soundNames: true, playersSeeOrder: "all" } }, s), "changing room settings");
   });
+
+  test("turning on and off Only DM devices play, the switch sent alone (docs/design/design-v1-sound-dm-only.md 4)", () => {
+    assert.equal(describeOp({ t: "room.update", settings: { soundDmOnly: true } }, s), "turning on Only DM devices play");
+    assert.equal(describeOp({ t: "room.update", settings: { soundDmOnly: false } }, s), "turning off Only DM devices play");
+    assert.equal(describeOp({ t: "room.update", settings: { soundDmOnly: true, soundNames: true } }, s), "changing room settings");
+    assert.equal(describeOp({ t: "room.update", name: "Keep", settings: { soundDmOnly: true } }, s), "changing room settings");
+  });
 });

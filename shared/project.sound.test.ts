@@ -386,6 +386,79 @@ describe("behind a blackout players get nothing of the sound (6.5, 4.6, section 
   });
 });
 
+describe("while Only DM devices play players get the setting and nothing of the sound (docs/design/design-v1-sound-dm-only.md 5, 8)", () => {
+  const dmOnly = (on: boolean): Op => ({ t: "room.update", settings: { soundDmOnly: on } });
+  const soundKeys = (changes: readonly Change[]) => changes.filter((c) => c.key === keys.playing || c.key.startsWith("sound:")).sort((a, b) => a.key.localeCompare(b.key));
+
+  test("the snapshot, each entity, the held map and the visible set hold none of it but the setting, and the DM's hold all of it", () => {
+    const state = run(live(), dmOnly(true), 36_000).state;
+    for (const viewer of PLAYERS) {
+      const view = projectState(state, viewer, OPTS);
+      assert.equal(view.meta.settings.soundDmOnly, true, "the setting reaches them");
+      assert.equal(view.playing, undefined);
+      assert.equal(view.sounds, undefined);
+      assert.equal(projectEntity(keys.playing, state, viewer, OPTS), null);
+      for (const id of ALL_IDS) assert.equal(projectEntity(keys.sound(id), state, viewer, OPTS), null, id);
+      assert.deepEqual([...heldOf(view).keys()].filter((k) => k === keys.playing || k.startsWith("sound:")), []);
+      assert.deepEqual([...visibleAssetIds(state, viewer, OPTS)], []);
+    }
+    assert.deepEqual(projectState(state, DM, OPTS).playing, state.playing);
+    assert.deepEqual([...visibleAssetIds(state, DM, OPTS)].filter((id) => id.startsWith("file-")).sort(), ALL_IDS.map((id) => `file-${id}`).sort());
+  });
+
+  test("the switch's batch withdraws everything, then a play, a loop, an effect, a tick and a skip send players nothing", () => {
+    const start = run(library(), PLAY).state;
+    const t = table(start);
+    let state = batch(start, { t: "loop.start", id: "l1", soundId: "rain", volume: 70 }, 1_000, t.all).state;
+    const on = batch(state, dmOnly(true), 2_000, t.all);
+    for (const conn of [t.p1, t.display]) {
+      assert.deepEqual(soundKeys(on.sent.get(conn)!), [
+        { key: keys.playing, deleted: true },
+        { key: keys.sound("m1"), deleted: true },
+        { key: keys.sound("rain"), deleted: true },
+      ]);
+      assert.equal(conn.view.meta.settings.soundDmOnly, true);
+    }
+    state = on.state;
+    const quiet: [Op, number][] = [
+      [{ ...PLAY, run: "r2" } as Op, 3_000],
+      [{ t: "loop.start", id: "l2", soundId: "crowd", volume: 40 }, 4_000],
+      [{ t: "effect.fire", id: "e1", soundId: "door" }, 5_000],
+      [{ t: "effect.fire", id: "e2", builtin: "click" }, 6_000],
+    ];
+    for (const [op, ms] of quiet) {
+      const r = batch(state, op, ms, t.all);
+      for (const conn of [t.p1, t.display]) assert.deepEqual(r.sent.get(conn), [], `${op.t} sends players nothing`);
+      assert.ok(changeOf(r.sent.get(t.dm)!, keys.playing), `${op.t}: the DM hears it`);
+      state = r.state;
+    }
+    assert.deepEqual(state.playing?.dmEffects?.map((e) => e.id), ["e1", "e2"], "each effect is the DM's, the built-in too");
+    assert.deepEqual(state.playing?.effects, []);
+    const revealed = tickBatch(state, t.all);
+    assert.ok(revealed.state.playing?.music?.next, "the tick reveals the next track to the DM");
+    const skipped = batch(revealed.state, { t: "music.skip", run: "r2" }, 50_000, t.all);
+    for (const r of [revealed, skipped]) for (const conn of [t.p1, t.display]) assert.deepEqual(r.sent.get(conn), [], "nothing for players");
+  });
+
+  test("turning it off brings back what plays in place, and never an effect fired while it was on", () => {
+    const start = run(run(library(), PLAY).state, { t: "loop.start", id: "l1", soundId: "rain", volume: 70 }, 1_000).state;
+    const t = table(start);
+    let state = batch(start, dmOnly(true), 2_000, t.all).state;
+    state = batch(state, { t: "effect.fire", id: "e1", soundId: "thunder" }, 3_000, t.all).state;
+    const off = batch(state, dmOnly(false), 4_000, t.all);
+    for (const conn of [t.p1, t.display]) {
+      assert.deepEqual(soundKeys(off.sent.get(conn)!).map((c) => c.key), [keys.playing, keys.sound("m1"), keys.sound("rain")]);
+      assert.deepEqual(conn.view.playing?.music?.now, { soundId: "m1", at: S0 }, "the music joins in place");
+      assert.deepEqual(conn.view.playing?.loops, { l1: RAIN });
+      assert.deepEqual(conn.view.playing?.effects, [], "Thunder, fired while it was on, stays the DM's");
+      assert.ok(!conn.held.has(keys.sound("thunder")));
+      assert.ok(!stableStringify(conn.view).includes('"e1"'));
+      assert.equal("soundDmOnly" in conn.view.meta.settings, false);
+    }
+    assert.deepEqual(off.state.playing?.dmEffects?.map((e) => e.id), ["e1"]);
+  });
+});
+
 describe("the fan-out sends what the projection changed, in the same batch (6.5)", () => {
   test("no frame names the next track before its reveal, and the reveal sends it without its name", () => {
     let state = run(library(), { t: "room.update", settings: { soundNames: true } }).state;

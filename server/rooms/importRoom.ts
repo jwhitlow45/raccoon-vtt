@@ -269,7 +269,8 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       if (!raw.success) throw new HttpError(400, "bad_manifest");
       manifest = raw.data;
     }
-    // A zip without sounds, or this server's switch off: the room keeps nothing about sound. It starts silent either way.
+    // A zip without sounds, or this server's switch off: the room keeps nothing about sound but Only DM devices play. It
+    // starts silent either way.
     const keepsSounds = roomSoundOn(deps.assets.config) && manifest.assets.some((a) => a.kind === "sound");
     const incoming = silenced(keepsSounds ? parsed.state : withoutSound(parsed.state));
 

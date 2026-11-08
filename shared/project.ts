@@ -4072,10 +4072,12 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
  * it needs, and a name only for `now` and the loops while the DM turns on
  * Players see what is playing. Never the library, a playlist, the run's
  * order, its place in it or a pause's position, a scene's sound, an effect
- * fired behind a blackout, an effect's name, or the next track's name.
- * Behind a blackout, nothing. Each revision is 0, so a count of the DM's
- * changes never shows. The projection reads no clock: the server's ticks
- * write what plays.
+ * fired behind a blackout or while Only DM devices play, an effect's name,
+ * or the next track's name. Behind a blackout, and while the DM turns on
+ * Only DM devices play (docs/design/design-v1-sound-dm-only.md 8), nothing:
+ * the setting reaches them, and no sound entry or file does. Each revision
+ * is 0, so a count of the DM's changes never shows. The projection reads no
+ * clock: the server's ticks write what plays.
  */
 
 /** The run as players get it: what plays and how, with no order, place or label, and nothing while paused. */
@@ -4087,10 +4089,10 @@ function playersMusic(state: RoomState, music: MusicRun | null): MusicRun | null
   return { run: music.run, repeat: music.repeat, fade: music.fade, now: music.now, ...(next ? { next } : {}) };
 }
 
-/** What plays as players get it, or null behind a blackout and when nothing does. */
+/** What plays as players get it, or null behind a blackout, while Only DM devices play, and when nothing does. */
 function playersPlaying(ctx: Ctx): Playing | null {
   const playing = ctx.state.playing;
-  if (!playing || ctx.paused) return null;
+  if (!playing || ctx.paused || ctx.state.meta.settings.soundDmOnly === true) return null;
   const sounds = ctx.state.sounds;
   const loops: Playing["loops"] = {};
   for (const [id, loop] of Object.entries(playing.loops)) if (lengthAs(sounds, loop.soundId, "loop") !== undefined) loops[id] = loop;

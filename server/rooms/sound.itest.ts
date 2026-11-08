@@ -547,3 +547,124 @@ describe("the queue in a live room", () => {
     assert.deepEqual(loaded.state.playing, live.playing);
   });
 });
+
+/**
+ * Only DM devices play in a live room (docs/design/design-v1-sound-dm-only.md
+ * 5 and 12): the switch's batch withdraws everything from Pat's and the
+ * display's sockets, the ops after it send them no frame, every sound file
+ * answers 404 to both, and turning it off brings the sound back in place.
+ */
+describe("only DM devices play in a live room", () => {
+  const dclock = { now: Date.now() };
+  let t: Engine;
+  before(async () => {
+    t = await startEngine({ env: { ROOM_SOUND: "1" }, rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, now: () => dclock.now } } });
+  });
+  after(() => t.close());
+
+  test("the switch withdraws every sound from Pat and the display in one batch, then a play, a skip, a tick, a loop and an effect send them nothing, and every file 404s", async () => {
+    const dmClient = t.client();
+    const { roomId } = await dmClient.createRoom("Speaker");
+    const files: Record<string, { id: string; audio: { ms: number } }> = {};
+    // One upload at a time, as the server takes them.
+    for (const [name, ms, seed] of [["a", 60_000, 21], ["b", 60_000, 22], ["rain", 20_000, 23], ["boom", 3_000, 24]] as const) {
+      const body = silentFrames(framesFor(ms), { bits: (i) => ({ private: ((seed >> i % 30) & 1) === 1 }) });
+      const res = await dmClient.request("PUT", `/api/rooms/${roomId}/assets?kind=sound`, undefined, { "content-type": "audio/mpeg" }, Buffer.from(body));
+      assert.equal(res.statusCode, 200, res.body);
+      files[name] = res.json<{ id: string; audio: { ms: number } }>();
+    }
+    const playerClient = t.client();
+    await playerClient.join(roomId, "Pat");
+    const dm = await t.connect(roomId, dmClient);
+    await dm.snapshot("dm");
+    const applied = async (op: Op) => {
+      const ev = await dm.apply(op);
+      assert.equal(ev.rejects, undefined, op.t);
+      return ev;
+    };
+    const uses = { a: "music", b: "music", rain: "loop", boom: "effect" } as const;
+    for (const [id, use] of Object.entries(uses)) await applied({ t: "sound.create", id, assetId: files[id]!.id, name: `Secret ${id}`, use, ms: files[id]!.audio.ms });
+    await applied({ t: "playlist.create", id: "night", name: "Night", sounds: ["a", "b"], repeat: "all", fade: 5 });
+    const player = await t.connect(roomId, playerClient);
+    await player.snapshot("pat");
+    const pat = recorder(player);
+    const tv = t.client();
+    const code = (await dmClient.post(`/api/rooms/${roomId}/display/code`)).json<{ code: string }>().code;
+    assert.equal((await tv.post("/api/display/redeem", { code: formatDisplayCode(code) })).statusCode, 200);
+    const display = await t.connectDisplay(roomId, tv);
+    await display.snapshot("tv");
+    const screen = recorder(display);
+    const readers = [
+      ["Pat", (id: string) => playerClient.request("GET", `/api/assets/${id}/full`, undefined, { range: "bytes=0-99" })],
+      ["the display", (id: string) => tv.request("GET", `/api/rooms/${roomId}/display/assets/${id}/full`, undefined, { range: "bytes=0-99" })],
+    ] as const;
+
+    const start = dclock.now;
+    await applied({ t: "music.play", run: "d1", playlistId: "night", order: ["a", "b"], repeat: "all", fade: 5 });
+    await applied({ t: "loop.start", id: "loop1", soundId: "rain", volume: 70 });
+    for (const rec of [pat, screen]) await rec.until((f) => (latest(f, "sound:rain") && "value" in latest(f, "sound:rain")! ? true : undefined), "the loop");
+    for (const [who, read] of readers) assert.equal((await read(files.a!.id)).statusCode, 206, `${who} reads the track that plays`);
+
+    const on = await applied({ t: "room.update", settings: { soundDmOnly: true } });
+    for (const [who, sock, rec] of [["Pat", player, pat], ["the display", display, screen]] as const) {
+      const frame = await rec.until((f) => f.find((m) => m.t === "ev" && m.seq === on.seq), `${who}'s frame for the switch`);
+      assert.ok(frame.t === "ev");
+      const sound = frame.changes.filter((c) => c.key === "playing" || c.key.startsWith("sound:")).sort((x, y) => x.key.localeCompare(y.key));
+      assert.deepEqual(sound, [{ key: "playing", deleted: true }, { key: "sound:a", deleted: true }, { key: "sound:rain", deleted: true }], `${who}: one batch withdraws everything`);
+      const meta = frame.changes.find((c) => c.key === "meta");
+      assert.ok(meta && "value" in meta && (meta.value as ProjectedState["meta"]).settings.soundDmOnly === true, `${who} gets the setting`);
+      void sock;
+    }
+    const after = { pat: pat.all.length, screen: screen.all.length };
+
+    // While it is on, nothing the DM plays sends Pat or the display a frame: a play, a skip, the tick's reveal, a loop, effects.
+    const seqs: number[] = [];
+    seqs.push((await applied({ t: "music.play", run: "d2", playlistId: "night", order: ["a", "b"], repeat: "all", fade: 5 })).seq);
+    seqs.push((await applied({ t: "music.skip", run: "d3" })).seq);
+    dclock.now = start + 60_000 - 5_000 - 20_000 + 2_000;
+    await applied({ t: "sound.mix", music: 70 });
+    seqs.push((await applied({ t: "loop.stop", id: "loop1" })).seq);
+    seqs.push((await applied({ t: "loop.start", id: "loop2", soundId: "rain", volume: 30 })).seq);
+    seqs.push((await applied({ t: "effect.fire", id: "fx1", soundId: "boom" })).seq);
+    seqs.push((await applied({ t: "effect.fire", id: "fx2", builtin: "click" })).seq);
+    const deadline = Date.now() + 5_000;
+    while (!t.manager.get(roomId)!.committed.state.playing?.music?.next && Date.now() < deadline) await delay(10);
+    assert.ok(t.manager.get(roomId)!.committed.state.playing?.music?.next, "the tick revealed the next track to the DM");
+    assert.deepEqual(t.manager.get(roomId)!.committed.state.playing?.dmEffects?.map((e) => e.id), ["fx1", "fx2"]);
+    for (const seq of seqs) {
+      assert.equal(await player.maybe("ev", (m) => m.seq === seq, 100), null, `no ev for Pat at ${seq}`);
+      assert.equal(await display.maybe("ev", (m) => m.seq === seq, 100), null, `no ev for the display at ${seq}`);
+    }
+    await delay(150);
+    pat.take();
+    screen.take();
+    for (const [who, frames] of [["Pat", pat.all.slice(after.pat)], ["the display", screen.all.slice(after.screen)]] as const) {
+      assert.deepEqual(frames.filter((m) => m.t === "ev"), [], `${who} gets no frame while it is on`);
+    }
+    for (const [who, read] of readers) for (const [name, f] of Object.entries(files)) assert.equal((await read(f.id)).statusCode, 404, `${who}: ${name}'s file`);
+
+    // Off: what plays comes back in one batch, in place, and the effects fired meanwhile stay the DM's.
+    const off = await applied({ t: "room.update", settings: { soundDmOnly: false } });
+    const back = await pat.until((f) => {
+      const m = f.find((x) => x.t === "ev" && x.seq === off.seq);
+      return m && m.t === "ev" ? m : undefined;
+    }, "Pat's frame for turning it off");
+    const playing = back.changes.find((c) => c.key === "playing");
+    assert.ok(playing && "value" in playing);
+    const heard = playing.value as Playing;
+    assert.deepEqual(heard.music?.now, t.manager.get(roomId)!.committed.state.playing?.music?.now, "the music in place");
+    assert.deepEqual(heard.effects, [], "no effect fired while it was on");
+    assert.equal((await readers[0][1](files.boom!.id)).statusCode, 404, "Boom, fired while it was on, stays the DM's");
+
+    await delay(150);
+    pat.take();
+    screen.take();
+    for (const [who, frames] of [["Pat", pat.all], ["the display", screen.all]] as const) {
+      const text = JSON.stringify(frames);
+      for (const word of ["Secret", "Night", '"fx1"', '"fx2"', '"dmEffects"']) assert.ok(!text.includes(word), `${who} never receives ${word}`);
+    }
+    dm.close();
+    player.close();
+    display.close();
+  });
+});

@@ -33,6 +33,10 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       if (op.name === undefined && op.settings?.soundNames !== undefined && Object.keys(op.settings).length === 1) {
         return op.settings.soundNames ? "turning on Players see what is playing" : "turning off Players see what is playing";
       }
+      // As does its Only DM devices play switch (docs/design/design-v1-sound-dm-only.md 4).
+      if (op.name === undefined && op.settings?.soundDmOnly !== undefined && Object.keys(op.settings).length === 1) {
+        return op.settings.soundDmOnly ? "turning on Only DM devices play" : "turning off Only DM devices play";
+      }
       return op.settings ? "changing room settings" : "renaming the room";
     case "room.setPlayerScene":
       return `moving players to ${scene(op.sceneId)}`;
