@@ -406,6 +406,7 @@ Where the build went its own way, by part.
 - Every imported video is checked before the reuse, a plain `{}` geometry included, so its key follows the check (D-261102-908). The geometry key is SHA-256 over the domain string, a zero byte, the entry's digest, the turn as 16 bits, the mirror as 8 and the stretched width as 32.
 - `qt  ` as a compatible brand is kept only in a MOV, and zeroed in an ISO file as before (D-261102-906). A version 1 sound entry keeps its version and its compression ID (0 or −2 only), and its packet size is zeroed (D-261102-905).
 - A malformed `tapt`, or one with a size missing, counts as uneven and is refused after the codec, as an uneven one is (D-261102-907).
+- A second picture or sound trak, or a ninth metadata trak, is refused at its `hdlr` with `video_tracks`, before its sample entry is read. So an extra sound trak ahead of an HEVC video answers `video_tracks`, not `video_hevc` (AMROT-O-08).
 - A MOV goes up as `video/mp4`: the route still answers 415 to `video/quicktime`, and the server sniffs the bytes. scripts/editorconfig.test.ts lists `.mov` as a binary type.
 
 **The client.**
