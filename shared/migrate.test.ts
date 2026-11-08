@@ -38,6 +38,7 @@ import {
   clockTicks,
   musicQueues,
   musicSetReveals,
+  timedEnds,
   seatsApart,
   hiddenTowStands,
   stopsStandClear,
@@ -1919,6 +1920,47 @@ describe("op version 50 and snapshot 39, only DM devices play (docs/design/desig
     const state = room();
     state.meta.settings = { ...state.meta.settings, soundDmOnly: true };
     assert.throws(() => runMigrations(state, 39, 38, snapshotMigrations), /down/);
+  });
+});
+
+describe("op version 54 and snapshot 41, time spans (docs/design/design-v1-calendar-c2c3.md 4.7)", () => {
+  const H = 3_600;
+  const clocked = (): RoomState => room({ characters: { bree: character("bree") }, clock: { id: "c1", rev: 1, t: 0, shown: true, calendar: { kind: "days" } } });
+
+  test("keeps stored operations and snapshots unchanged through the identity steps", () => {
+    assert.ok(OP_VERSION >= 54);
+    assert.ok(SNAPSHOT_VERSION >= 41);
+    for (const op of [{ t: "encounter.next" }, { t: "encounter.prev" }, { t: "encounter.end" }, { t: "clock.advance", by: 60 }, { t: "sys.restore", entries: [], from: "undo", saveOutcome: undefined }]) {
+      assert.equal(runMigrations(op, 53, 54, opMigrations), op);
+      assert.equal(migrateOp(op, 53), op);
+    }
+    const span = { t: "actor.effect.add", target: { characterId: "bree" }, effect: { id: "x", key: "blessed", duration: { mode: "span", seconds: 600 } } };
+    assert.equal(migrateOp(span, 54), span);
+    assert.ok(opSchema.safeParse(span).success);
+    const state = clocked();
+    assert.equal(runMigrations(state, 40, 41, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 40), state);
+  });
+
+  test("gates the scan, the Next tick and the Previous filter at 54", () => {
+    assert.deepEqual([timedEnds(1), timedEnds(53), timedEnds(54), timedEnds(undefined)], [false, false, true, true]);
+    // An older replay of a clock step, a Next, an End and a restore ends nothing, so a hand-made room with a span replays as stored.
+    const timed = clocked();
+    timed.characters.bree!.actor.effects = [{ id: "x", key: "blessed", ends: { span: 60, at: 60, clock: "c1" } }];
+    for (const [op, v] of [[{ t: "clock.advance", by: H }, 53], [{ t: "clock.set", at: H }, 53]] as [Op, number][]) {
+      const old = applyOp(timed, op, DM, { ...env(3), opVersion: v });
+      assert.ok(old.ok);
+      assert.equal(old.state.characters.bree!.actor.effects.length, 1, `${op.t} at ${v}`);
+      const now = applyOp(timed, op, DM, { ...env(3), opVersion: 54 });
+      assert.ok(now.ok);
+      assert.equal(now.state.characters.bree!.actor.effects.length, 0, `${op.t} at 54`);
+    }
+  });
+
+  test("a build at 53 and 40 refuses a room from this one, so it never sends players a hidden clock's time", () => {
+    const op = { t: "actor.effect.add", target: { characterId: "bree" }, effect: { id: "x", key: "blessed", duration: { mode: "span", seconds: 600 } } };
+    assert.throws(() => runMigrations(op, 54, 53, opMigrations), /down/);
+    assert.throws(() => runMigrations(clocked(), 41, 40, snapshotMigrations), /down/);
   });
 });
 

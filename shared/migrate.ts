@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 40;
-export const OP_VERSION = 53;
+export const SNAPSHOT_VERSION = 41;
+export const OP_VERSION = 54;
 
 export type MigrationStep = {
   from: number;
@@ -254,6 +254,11 @@ export const snapshotMigrations: MigrationStep[] = [
   // instead of loading it: its `unlocked` would send a found door's cover to players, and its map step would write the
   // cover into memory, fail its own check of that op and fall back to the forget that fails closed.
   { from: 39, to: 40, apply: (state) => state },
+  // Time spans (docs/design/design-v1-calendar-c2c3.md 4.7): an effect's `ends` and a clock line's `claim` are optional,
+  // and absent reads as before, so a v40 room is a v41 room as it is. The number moves so that an older build, which
+  // loads stored state without the import's check and would send an effect's `ends` whole to players, a hidden clock's
+  // time included, refuses a v41 snapshot instead of loading it.
+  { from: 40, to: 41, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1293,6 +1298,23 @@ export const opMigrations: MigrationStep[] = [
     // last snapshot or a v40 snapshot, which an older build refuses.
     from: 52,
     to: 53,
+    apply: (op) => op,
+  },
+  {
+    // Time spans (docs/design/design-v1-calendar-c2c3.md 4.7): an effect's
+    // duration may be a `span`, and the clock ops and `sys.restore` may
+    // carry a `claim`, new fields an older strict schema refuses, so no
+    // stored op changes shape and the step is the identity. From this
+    // version an op that moves the current time, or a restore, ends the
+    // spans it reaches, a Next in its own tick, and Previous leaves out a
+    // span the time after it still reaches (`timedEnds`). No op stored
+    // before met a span, so the gate changes no replay today.
+    // Deploy: back up the database just before, and reload open pages,
+    // table displays included. Rollback needs the backup for a room with
+    // version 54 ops after its last snapshot or a v41 snapshot, which an
+    // older build refuses.
+    from: 53,
+    to: 54,
     apply: (op) => op,
   },
 ];
