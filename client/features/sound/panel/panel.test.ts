@@ -105,6 +105,20 @@ describe("Table sound (docs/design/design-v1-sound-layout.md 4.2 and 7)", () => 
     assert.doesNotMatch(html.replace(/aria-label="[^"]*"/g, ""), /for everyone/, "no visible label says for everyone");
   });
 
+  test("while Only DM devices play or a blackout holds the sound back, no accessible name says for everyone", () => {
+    const base = room().meta;
+    const dmOnly = draw({ meta: { ...base, settings: { ...base.settings, soundDmOnly: true } } });
+    const dark = draw({ meta: { ...base, view: { ...base.view, blackout: true } } });
+    for (const html of [dmOnly, dark]) {
+      assert.deepEqual(labels(html), [
+        { text: "Music", name: "Music volume" },
+        { text: "Rain on the cobblestones", name: "Rain on the cobblestones volume" },
+        { text: "Effects", name: "Effects volume" },
+      ]);
+      assert.doesNotMatch(html.replace(/What everyone at the table hears[^<]*/, ""), /for everyone/);
+    }
+  });
+
   test("then the scene's line with Use what's playing, and the names switch last", () => {
     const html = draw();
     const line = html.indexOf("Goblin cave has no sound of its own.");
@@ -196,6 +210,13 @@ describe("the effects board", () => {
     for (const name of ["Click", "Rumble", "Crash", "Whoosh", "Hiss"]) assert.match(html, new RegExp(`aria-label="Play ${name} for everyone"`));
     assert.ok(html.indexOf("Play Hiss for everyone") < html.indexOf("Play Thunder for everyone"));
     assert.match(html, /aria-pressed="true"[^>]*aria-label="Play Thunder for everyone"/);
+  });
+
+  test("while only the DM's devices sound, a tap no longer says for everyone", () => {
+    const html = board({ hearers: "dm" });
+    assert.match(html, /aria-label="Play Click"/);
+    assert.match(html, /aria-label="Play Thunder"/);
+    assert.doesNotMatch(html, /for everyone/);
   });
 
   test("Edit turns the room's effects into rows that open their pages, the built-ins staying a board", () => {

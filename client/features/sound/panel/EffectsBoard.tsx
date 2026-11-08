@@ -6,21 +6,21 @@ import { theme } from "../../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../../state/view.ts";
 import type { BuiltinSound, Sound } from "#shared/sound.ts";
 import { AddSounds } from "../upload/AddSounds.tsx";
-import { Actions, Subhead, useTicking, useWakeAt } from "./controls.tsx";
+import { Actions, Subhead, useHearers, useTicking, useWakeAt } from "./controls.tsx";
 import { send } from "./ops.ts";
 import { effectsSounding, nameOf, serverNow, soundsByUse, soundsOf } from "./state.ts";
-import { BUILT_IN, BUILTINS, fireName, lengthText, NO_EFFECTS } from "./words.ts";
+import { BUILT_IN, BUILTINS, fireName, type Hearers, lengthText, NO_EFFECTS } from "./words.ts";
 
 /** The board's grid (4.1 item 4, 4.7): two columns on a 390 px phone, one at 320 px and 130%. */
 const BOARD = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(112px, 1fr))", gap: theme.space(2) } as const;
 
-function EffectButton(props: { name: string; pressed: boolean; onFire(): void; opener?: string }) {
+function EffectButton(props: { name: string; pressed: boolean; hearers: Hearers; onFire(): void; opener?: string }) {
   return (
     <div role="listitem" style={{ display: "grid", minWidth: 0 }}>
       <Button
         size="sm"
         pressed={props.pressed}
-        aria-label={fireName(props.name)}
+        aria-label={fireName(props.name, props.hearers)}
         data-opener={props.opener}
         onClick={props.onFire}
         style={{ width: "100%", minWidth: 0, height: "auto", minHeight: theme.touch, whiteSpace: "normal" }}
@@ -42,6 +42,7 @@ export function Board(props: {
   sounding: ReadonlySet<string>;
   editing: boolean;
   builtInOnly: boolean;
+  hearers?: Hearers;
   onFireBuiltin(b: BuiltinSound): void;
   onFire(sound: Sound): void;
   onEdit(sound: Sound): void;
@@ -52,7 +53,7 @@ export function Board(props: {
         <Subhead>{BUILT_IN}</Subhead>
         <div role="list" aria-label={BUILT_IN} style={BOARD}>
           {BUILTINS.map((b) => (
-            <EffectButton key={b.id} name={b.name} pressed={props.sounding.has(`builtin:${b.id}`)} onFire={() => props.onFireBuiltin(b.id)} />
+            <EffectButton key={b.id} name={b.name} hearers={props.hearers ?? "everyone"} pressed={props.sounding.has(`builtin:${b.id}`)} onFire={() => props.onFireBuiltin(b.id)} />
           ))}
         </div>
       </div>
@@ -70,7 +71,7 @@ export function Board(props: {
           ) : (
             <div role="list" aria-label="The room's effects" style={BOARD}>
               {props.effects.map((s) => (
-                <EffectButton key={s.id} name={nameOf(s)} opener={`sound-${s.id}`} pressed={props.sounding.has(`sound:${s.id}`)} onFire={() => props.onFire(s)} />
+                <EffectButton key={s.id} name={nameOf(s)} hearers={props.hearers ?? "everyone"} opener={`sound-${s.id}`} pressed={props.sounding.has(`sound:${s.id}`)} onFire={() => props.onFire(s)} />
               ))}
             </div>
           )}
@@ -86,6 +87,7 @@ export function EffectsBoard(props: { serverOn: boolean; editing: boolean; onEdi
   const playing = useRoomView((s) => s.view?.playing ?? null);
   const serverOffset = useRoomView((s) => s.serverOffset);
   const { editing } = props;
+  const hearers = useHearers();
   const effects = soundsByUse(sounds, "effect");
   const t = useTicking(() => serverNow({ serverOffset }), false);
   const { keys, nextEnd } = effectsSounding(playing, sounds, t);
@@ -115,6 +117,7 @@ export function EffectsBoard(props: { serverOn: boolean; editing: boolean; onEdi
         sounding={keys}
         editing={editing && canEdit}
         builtInOnly={!props.serverOn}
+        hearers={hearers}
         onFireBuiltin={(builtin) => send(actions, { t: "effect.fire", id: actions.newId(), builtin })}
         onFire={(s) => send(actions, { t: "effect.fire", id: actions.newId(), soundId: s.id })}
         onEdit={(s) => props.onOpenSound(s.id)}

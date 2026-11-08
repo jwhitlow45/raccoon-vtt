@@ -21,8 +21,24 @@ export const SERVER_FAILED = "Couldn't check whether this server offers sound fi
 export const STOP_ALL = "Stop all sound";
 export const SKIP_NEXT = "Skip to the next track";
 export const STOP_MUSIC = "Stop the music";
+/**
+ * Who hears what the DM sets or fires. "everyone" is the usual room. "dm" is
+ * Only DM devices play, or a blackout, when only the DM's devices sound it,
+ * so a name saying "for everyone" would be false.
+ */
+export type Hearers = "everyone" | "dm";
+const FOR_EVERYONE = " for everyone";
+function hearersTail(h: Hearers): string {
+  return h === "everyone" ? FOR_EVERYONE : "";
+}
 export const MUSIC_VOLUME = "Music volume for everyone";
 export const EFFECTS_VOLUME = "Effects volume for everyone";
+export function musicVolume(h: Hearers = "everyone"): string {
+  return `Music volume${hearersTail(h)}`;
+}
+export function effectsVolume(h: Hearers = "everyone"): string {
+  return `Effects volume${hearersTail(h)}`;
+}
 export const SCENE_HELP = "It plays when you move the players to this scene.";
 export const PLAY_FIRST = "Play something first.";
 export const USE_PLAYING = "Use what's playing";
@@ -184,12 +200,12 @@ export function stopName(name: string): string {
   return `Stop ${name}`;
 }
 
-export function loopVolumeName(name: string): string {
-  return `${name} volume for everyone`;
+export function loopVolumeName(name: string, h: Hearers = "everyone"): string {
+  return `${name} volume${hearersTail(h)}`;
 }
 
-export function fireName(name: string): string {
-  return `Play ${name} for everyone`;
+export function fireName(name: string, h: Hearers = "everyone"): string {
+  return `Play ${name}${hearersTail(h)}`;
 }
 
 /** The scene's sound line (4.1), for the scene on the DM's screen. */

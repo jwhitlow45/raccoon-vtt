@@ -79,6 +79,11 @@ describe("the words of the Sound panel's views and the Now playing chip (docs/de
     assert.ok(words.MUSIC_VOLUME.startsWith(words.MUSIC_LABEL), "and holds the visible word");
   });
 
+  test("the names that say for everyone drop it when only the DM's devices sound", () => {
+    assert.deepEqual([words.musicVolume(), words.effectsVolume(), words.loopVolumeName("Rain"), words.fireName("Click")], ["Music volume for everyone", "Effects volume for everyone", "Rain volume for everyone", "Play Click for everyone"]);
+    assert.deepEqual([words.musicVolume("dm"), words.effectsVolume("dm"), words.loopVolumeName("Rain", "dm"), words.fireName("Click", "dm")], ["Music volume", "Effects volume", "Rain volume", "Play Click"]);
+  });
+
   test("Only DM devices play: the switch, its help, the DM's reminder and the players' line, word for word (docs/design/design-v1-sound-dm-only.md 11)", () => {
     assert.equal(words.DM_ONLY_SWITCH, "Only DM devices play");
     assert.equal(words.DM_ONLY_HELP, "For a table that hears the sound from one speaker. Players' devices and the table display play nothing and don't ask. Each DM device still plays while its Room sound is on.");

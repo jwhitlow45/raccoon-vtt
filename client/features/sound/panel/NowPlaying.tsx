@@ -7,7 +7,7 @@ import { useRoomActions, useRoomView } from "../../../state/view.ts";
 import type { Playing } from "#shared/sound.ts";
 import type { ComingNext } from "../music/dragOrder.ts";
 import { LAST_TRACK, NEXT_AGAIN, nextLine } from "../music/words.ts";
-import { Actions, VolumeSlider } from "./controls.tsx";
+import { Actions, useHearers, VolumeSlider } from "./controls.tsx";
 import { useSoundHere } from "./engine.ts";
 import { send } from "./ops.ts";
 import { nameOf, playlistsOf, sceneSoundFrom, sceneSoundNames, somethingPlays, soundsOf, type Sounds } from "./state.ts";
@@ -19,10 +19,10 @@ import {
   DM_ONLY_ON,
   DM_ONLY_SWITCH,
   EFFECTS_LABEL,
-  EFFECTS_VOLUME,
+  effectsVolume,
   loopVolumeName,
   MUSIC_LABEL,
-  MUSIC_VOLUME,
+  musicVolume,
   NAMES_HELP,
   NAMES_SWITCH,
   PLAY_FIRST,
@@ -140,6 +140,7 @@ export function TableSound() {
   const actions = useRoomActions();
   const playing = useRoomView((s) => s.view?.playing ?? null);
   const sounds = useRoomView((s) => soundsOf(s.view));
+  const hearers = useHearers();
   const loops = playing ? Object.entries(playing.loops) : [];
   return (
     <div data-sound-table="" style={{ display: "grid", gap: theme.space(4), minWidth: 0 }}>
@@ -151,14 +152,14 @@ export function TableSound() {
           <VolumeSlider
             key={id}
             label={name}
-            name={loopVolumeName(name)}
+            name={loopVolumeName(name, hearers)}
             value={loop.volume}
             onChange={(v) => send(actions, { t: "loop.set", id, volume: v })}
             trailing={<IconButton icon="stop" label={stopName(name)} onClick={() => send(actions, { t: "loop.stop", id })} />}
           />
         );
       })}
-      <VolumeSlider label={EFFECTS_LABEL} name={EFFECTS_VOLUME} value={playing?.volume.effects ?? 100} onChange={(v) => send(actions, { t: "sound.mix", effects: v })} />
+      <VolumeSlider label={EFFECTS_LABEL} name={effectsVolume(hearers)} value={playing?.volume.effects ?? 100} onChange={(v) => send(actions, { t: "sound.mix", effects: v })} />
       <SceneSoundUse playing={playing} />
       <NamesSwitch />
       <DmOnlySwitch />
@@ -219,8 +220,9 @@ export function MusicVolume(props: { label?: string } = {}) {
   const actions = useRoomActions();
   const music = useRoomView((s) => s.view?.playing?.music ?? null);
   const volume = useRoomView((s) => s.view?.playing?.volume.music ?? 100);
+  const hearers = useHearers();
   if (!music) return null;
-  return <VolumeSlider label={props.label ?? MUSIC_VOLUME} name={MUSIC_VOLUME} value={volume} onChange={(v) => send(actions, { t: "sound.mix", music: v })} />;
+  return <VolumeSlider label={props.label ?? musicVolume(hearers)} name={musicVolume(hearers)} value={volume} onChange={(v) => send(actions, { t: "sound.mix", music: v })} />;
 }
 
 /** Players see what is playing, one setting, in Table sound. */

@@ -6,6 +6,7 @@ import { useRoomView } from "../../../state/view.ts";
 import { usePanelShown } from "../../panels.ts";
 import { useDebounced } from "../../scenes/controls.tsx";
 import { serverNow, soundsOf, soundToStop, type SoundToStopOptions } from "./state.ts";
+import type { Hearers } from "./words.ts";
 
 /**
  * A volume for everyone (docs/design/design-v1-music.md 4.1), 0 to 100%:
@@ -117,4 +118,12 @@ export function RowWithAction(props: { row: ReactNode; action: ReactNode }) {
       {props.action}
     </div>
   );
+}
+
+/**
+ * Who hears what the DM sets or fires now: only the DM's devices while Only
+ * DM devices play is on or the scene is blacked out, otherwise everyone.
+ */
+export function useHearers(): Hearers {
+  return useRoomView((s) => (s.view?.meta.settings.soundDmOnly === true || s.view?.meta.view.blackout === true ? "dm" : "everyone"));
 }
