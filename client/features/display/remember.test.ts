@@ -67,3 +67,14 @@ test("a display's sound is its own, on at first, apart from a member's Room soun
   for (const raw of [null, "", "on", "sideways"]) assert.equal(parseDisplaySound(raw), true, String(raw));
   assert.equal(parseDisplaySound("off"), false);
 });
+
+test("a display's Show the date and time is off at first and kept apart from whose turn it is", async () => {
+  const { readDisplayDate, readDisplayTurn, saveDisplayChoices } = await import("./remember.ts");
+  assert.equal(readDisplayDate(), false);
+  saveDisplayChoices({ mode: "fit", turn: false, date: true });
+  assert.equal(readDisplayDate(), true);
+  assert.equal(readDisplayTurn(), false);
+  saveDisplayChoices({ mode: "fit", turn: true, date: false });
+  assert.equal(readDisplayDate(), false);
+  assert.equal(readDisplayTurn(), true);
+});

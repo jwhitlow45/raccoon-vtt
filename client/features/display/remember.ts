@@ -53,9 +53,10 @@ export function forgetDisplayRoom(roomId: string): void {
   }
 }
 
-/** The display's own choices on this device: its camera mode and whether it shows whose turn it is. */
+/** The display's own choices on this device: its camera mode, and whether it shows whose turn it is and the date and time. */
 const MODE_KEY = "rvtt.display.mode";
 const TURN_KEY = "rvtt.display.turn";
+const DATE_KEY = "rvtt.display.date";
 
 export function readDisplayMode(): "follow" | "fit" {
   try {
@@ -68,6 +69,14 @@ export function readDisplayMode(): "follow" | "fit" {
 export function readDisplayTurn(): boolean {
   try {
     return localStorage.getItem(TURN_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+export function readDisplayDate(): boolean {
+  try {
+    return localStorage.getItem(DATE_KEY) === "on";
   } catch {
     return false;
   }
@@ -182,10 +191,11 @@ export function useDisplayAnimatedMaps(): void {
   }, []);
 }
 
-export function saveDisplayChoices(choices: { mode: "follow" | "fit"; turn: boolean }): void {
+export function saveDisplayChoices(choices: { mode: "follow" | "fit"; turn: boolean; date: boolean }): void {
   try {
     localStorage.setItem(MODE_KEY, choices.mode);
     localStorage.setItem(TURN_KEY, choices.turn ? "on" : "off");
+    localStorage.setItem(DATE_KEY, choices.date ? "on" : "off");
   } catch {
     // The choices last until the page closes.
   }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useStore } from "zustand";
+import { clockNow } from "#shared/calendar.ts";
 import { handoutPages } from "#shared/handouts.ts";
 import type { Handout } from "#shared/model.ts";
 import { MapStage } from "../../canvas/Stage.tsx";
@@ -29,6 +30,7 @@ import { browserEnv, createRoomSocket, roomSocketUrl } from "../../state/socket.
 import { createRoomStore, type RoomStore } from "../../state/store.ts";
 import type { Ended, RoomActions, You } from "../../state/types.ts";
 import { RoomProvider, useAssets, useRoomView, type AssetSource } from "../../state/view.ts";
+import { chipName } from "../clock/words.ts";
 import { closedSlot, closedStorageKey, closeHandout, loadClosed } from "../handouts/closed.ts";
 import { nextPopup, pageName, showingKey } from "../handouts/handouts.ts";
 import { useXCard, XCardHost } from "../xcard/XCardHost.tsx";
@@ -69,6 +71,7 @@ import {
   chooseDisplayWeather,
   forgetDisplayRoom,
   readDisplayMode,
+  readDisplayDate,
   readDisplayTurn,
   rememberedDisplayRoom,
   saveDisplayChoices,
@@ -152,7 +155,8 @@ function DisplayTable(props: { roomId: string }) {
   const gate = useMemo(() => sceneGate({ view, sceneId, role: "player" }), [view, sceneId]);
   const [mode, setMode] = useState<DisplayMode>(readDisplayMode);
   const [showTurn, setShowTurn] = useState(readDisplayTurn);
-  useEffect(() => saveDisplayChoices({ mode, turn: showTurn }), [mode, showTurn]);
+  const [showDate, setShowDate] = useState(readDisplayDate);
+  useEffect(() => saveDisplayChoices({ mode, turn: showTurn, date: showDate }), [mode, showTurn, showDate]);
 
   const handout = useDisplayHandout(props.roomId, memberId);
   const paging = useHandoutPaging(handout.current);
@@ -285,7 +289,12 @@ function DisplayTable(props: { roomId: string }) {
         }}
         style={{ position: "absolute", inset: 0, zIndex: 10, touchAction: "none", cursor: cursorHidden ? "none" : "default" }}
       />
-      {turn && gate.kind === "ready" ? <TurnPill text={turn} /> : null}
+      {gate.kind === "ready" ? (
+        <TopPills>
+          {turn ? <Pill text={turn} /> : null}
+          {showDate ? <DatePill /> : null}
+        </TopPills>
+      ) : null}
       <DisplayBanner state={connection} />
       <DisplaySoundCard />
       {handout.current ? (
@@ -304,12 +313,17 @@ function DisplayTable(props: { roomId: string }) {
           mode={mode}
           view={viewChoice}
           showTurn={showTurn}
+          showDate={showDate}
           onMode={(m) => {
             setMode(m);
             menu.touch();
           }}
           onTurn={(on) => {
             setShowTurn(on);
+            menu.touch();
+          }}
+          onDate={(on) => {
+            setShowDate(on);
             menu.touch();
           }}
           onTouch={menu.touch}
@@ -795,10 +809,10 @@ function HandoutBar(props: {
   );
 }
 
-function TurnPill(props: { text: string }) {
+/** The corner of the map the turn and the date and time share, one under the other where both are on. */
+function TopPills(props: { children: ReactNode }) {
   return (
     <div
-      role="status"
       style={{
         position: "absolute",
         top: `calc(${theme.safe.top} + ${theme.space(3)}px)`,
@@ -806,6 +820,34 @@ function TurnPill(props: { text: string }) {
         transform: "translateX(-50%)",
         zIndex: 12,
         maxWidth: "80%",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: theme.space(2),
+        pointerEvents: "none",
+      }}
+    >
+      {props.children}
+    </div>
+  );
+}
+
+/** "Day 4, 6:00 AM, Dawn" while the display's view holds a clock, which it holds only while the DM shares it (docs/design/design-v1-calendar-c2c3.md 3.5). */
+function DatePill() {
+  const text = useRoomView((s) => {
+    const clock = s.view?.clock;
+    return clock ? chipName(clockNow(clock, s.view?.encounter), clock.calendar).replace(/^Time: /, "") : null;
+  });
+  return text ? <Pill text={text} label={`Time: ${text}`} /> : null;
+}
+
+function Pill(props: { text: string; label?: string }) {
+  return (
+    <div
+      role="status"
+      aria-label={props.label}
+      style={{
+        maxWidth: "100%",
         padding: `${theme.space(2)}px ${theme.space(4)}px`,
         borderRadius: theme.radius.pill,
         background: theme.color.overlay,
@@ -877,8 +919,10 @@ function DisplayMenu(props: {
   mode: DisplayMode;
   view: ViewChoiceState;
   showTurn: boolean;
+  showDate: boolean;
   onMode(mode: DisplayMode): void;
   onTurn(on: boolean): void;
+  onDate(on: boolean): void;
   onTouch(): void;
   onClose(): void;
 }) {
@@ -935,6 +979,9 @@ function DisplayMenu(props: {
       {isoOffered ? <DisplayView choice={props.view} onTouch={props.onTouch} /> : null}
       <MenuButton role="menuitemcheckbox" checked={props.showTurn} onClick={() => props.onTurn(!props.showTurn)}>
         Show whose turn it is: {props.showTurn ? "on" : "off"}
+      </MenuButton>
+      <MenuButton role="menuitemcheckbox" checked={props.showDate} onClick={() => props.onDate(!props.showDate)}>
+        Show the date and time: {props.showDate ? "on" : "off"}
       </MenuButton>
       <TextSize onTouch={props.onTouch} />
       <WeatherRow onTouch={props.onTouch} />
