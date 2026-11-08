@@ -69,6 +69,10 @@ describe("the check in a worker thread", () => {
 
   test("a disk's error reaches the caller as itself, not as an unreadable video (AM-R1-06)", async () => {
     await assert.rejects(checkVideo(join(dir, "missing.webm")), (err: unknown) => !(err instanceof AssetError) && (err as NodeJS.ErrnoException).code === "ENOENT");
+  });
+
+  // Root reads and writes through a 0o000 or 0o444 mode, so these two cases cannot fail as asked (AMBUILD-OPUS-R2-01).
+  test("a file the check may not open or write fails as its own error, not as an unreadable video (AM-R1-06)", { skip: process.getuid?.() === 0 }, async () => {
     // A file the sniff may not open fails inside the guard that turns a parse's errors into bad_video, and still passes as itself.
     const unreadable = join(dir, "unreadable.webm");
     await writeFile(unreadable, webmFile());
