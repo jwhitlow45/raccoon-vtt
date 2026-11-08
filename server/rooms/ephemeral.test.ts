@@ -752,3 +752,146 @@ describe("drag previews to sight holders who read one sight but hold different w
     }
   });
 });
+
+describe("events on a scene with floors (docs/design/design-v1-floors.md 8.2)", () => {
+  /*
+   * Tower: Ground (s1, the start floor and main floor) and Roof (roof). Ana
+   * (p1) has a hidden creature on Roof, so she holds Roof and Bree (p2), who
+   * owns nothing there, does not: a hidden party member opens nothing.
+   */
+  function tower(): RoomState {
+    const state = room();
+    state.scenes.s1 = scene("s1", { name: "Tower", floor: { of: "s1", level: 0, name: "Ground floor", height: 10 } });
+    state.scenes.roof = scene("roof", { name: "Tower", floor: { of: "s1", level: 1, name: "Roof", height: 10 } });
+    state.tokens.scout = token("scout", { sceneId: "roof", kind: "pc", ownerIds: ["p1"], visibility: "dm", x: 4, y: 4 });
+    state.tokens.gob = token("gob", { sceneId: "s1", x: 6, y: 6 });
+    return state;
+  }
+
+  /** A socket keeping every `eph` it is sent with its floor. */
+  function seat(who: Viewer, sceneId = "s1"): { conn: Connection; got: { sceneId: string; e: EphEvent }[] } {
+    const got: { sceneId: string; e: EphEvent }[] = [];
+    const socket = {
+      readyState: 1,
+      OPEN: 1,
+      CONNECTING: 0,
+      send: (text: string) => {
+        const msg = JSON.parse(text) as ServerMessage;
+        if (msg.t === "eph") got.push({ sceneId: msg.sceneId, e: msg.e });
+      },
+      close: () => undefined,
+      terminate: () => undefined,
+    };
+    const conn = new Connection(socket as never, { sessionId: `s-${who.memberId}`, roomId: "ROOM0000", memberId: who.memberId, role: who.role }, "203.0.113.1");
+    conn.held = new Map();
+    conn.sceneId = sceneId;
+    return { conn, got };
+  }
+
+  function seats() {
+    const dm = seat(DM);
+    const ana = seat(P1);
+    const bree = seat(P2);
+    return { dm, ana, bree, all: [dm.conn, ana.conn, bree.conn] };
+  }
+
+  test("a ping, a ruler and a Look here on Roof reach the DM and Ana, who hold Roof, with Roof's id, and never Bree", () => {
+    const state = tower();
+    const t = seats();
+    routeEphemeral(state, t.dm.conn, "roof", { k: "ping", x: 2, y: 2 }, t.all);
+    routeEphemeral(state, t.ana.conn, "roof", { k: "ruler", id: "r1", points: [{ x: 1.5, y: 1.5 }, { x: 4.5, y: 1.5 }] }, t.all);
+    routeEphemeral(state, t.dm.conn, "roof", { k: "focus", x: 2, y: 2, zoom: 1 }, t.all);
+    assert.deepEqual(t.dm.got.map((g) => [g.sceneId, g.e.k]), [["roof", "ruler"]], "the DM on Ground's main floor holds every floor of the scene");
+    assert.deepEqual(t.ana.got.map((g) => [g.sceneId, g.e.k]), [["roof", "ping"], ["roof", "focus"]]);
+    assert.deepEqual(t.bree.got, [], "Bree holds Ground alone");
+    // On Ground everyone holds it, each event with Ground's id.
+    routeEphemeral(state, t.dm.conn, "s1", { k: "ping", x: 2, y: 2 }, t.all);
+    assert.deepEqual(t.bree.got, [{ sceneId: "s1", e: { k: "ping", x: 2, y: 2 } }]);
+    assert.deepEqual(t.ana.got.at(-1), { sceneId: "s1", e: { k: "ping", x: 2, y: 2 } });
+  });
+
+  test("a drag on Roof reaches the DM and Ana, who hold Roof and see the creature there, with Roof's id, and never Bree", () => {
+    const state = tower();
+    const t = seats();
+    routeEphemeral(state, t.ana.conn, "roof", { k: "dragStart", tokenId: "scout", x: 4, y: 4 }, t.all);
+    assert.deepEqual(t.dm.got, [{ sceneId: "roof", e: { k: "dragStart", tokenId: "scout", x: 4, y: 4 } }]);
+    routeEphemeral(state, t.dm.conn, "roof", { k: "dragMove", tokenId: "scout", x: 5, y: 4 }, t.all);
+    assert.deepEqual(t.ana.got, [{ sceneId: "roof", e: { k: "dragMove", tokenId: "scout", x: 5, y: 4 } }]);
+    assert.deepEqual(t.bree.got, []);
+  });
+
+  test("a player's event on a floor they do not hold goes nowhere", () => {
+    const state = tower();
+    const t = seats();
+    routeEphemeral(state, t.bree.conn, "roof", { k: "ping", x: 2, y: 2 }, t.all);
+    assert.deepEqual([...t.dm.got, ...t.ana.got], []);
+    // Once an unhidden party member stands there, Roof is open, Bree holds it and her ping goes.
+    // A new state, as every batch's is: held floors are worked out once for each.
+    const opened: RoomState = { ...state, tokens: { ...state.tokens, bree: token("bree", { sceneId: "roof", kind: "pc", ownerIds: ["p2"], x: 8, y: 8 }) } };
+    routeEphemeral(opened, t.bree.conn, "roof", { k: "ping", x: 2, y: 2 }, t.all);
+    assert.deepEqual(t.dm.got.map((g) => g.sceneId), ["roof"]);
+    assert.deepEqual(t.ana.got.map((g) => g.sceneId), ["roof"]);
+  });
+
+  test("a DM viewing another scene gets nothing of Tower's floors, and one viewing any floor's main floor gets them all", () => {
+    const state = tower();
+    const t = seats();
+    const away = seat(DM, "s2");
+    routeEphemeral(state, t.ana.conn, "roof", { k: "ping", x: 2, y: 2 }, [...t.all, away.conn]);
+    assert.deepEqual(away.got, []);
+    assert.equal(t.dm.got.length, 1);
+  });
+
+  test("a frame whose token stands on another floor now, and a ruler anchored on two floors, go nowhere, and only a preview already shown is cancelled", () => {
+    const state = tower();
+    const t = seats();
+    // The DM drags the goblin on Ground: everyone holding Ground shows it.
+    routeEphemeral(state, t.dm.conn, "s1", { k: "dragStart", tokenId: "gob", x: 6, y: 6 }, t.all);
+    assert.deepEqual(t.bree.got.map((g) => g.e.k), ["dragStart"]);
+    // The goblin moves to Roof, and a late frame from Ground arrives: dropped, and the shown preview ends.
+    state.tokens.gob = { ...state.tokens.gob!, sceneId: "roof" };
+    routeEphemeral(state, t.dm.conn, "s1", { k: "dragMove", tokenId: "gob", x: 7, y: 6 }, t.all);
+    assert.deepEqual(t.bree.got.map((g) => [g.sceneId, g.e]), [
+      ["s1", { k: "dragStart", tokenId: "gob", x: 6, y: 6 }],
+      ["s1", { k: "dragCancel", tokenId: "gob" }],
+    ]);
+    // A frame naming Ground for a token on Roof starts nothing anywhere: nobody showed it, so nobody gets a cancel.
+    const before = t.ana.got.length;
+    routeEphemeral(state, t.dm.conn, "s1", { k: "dragStart", tokenId: "gob", x: 7, y: 6 }, t.all);
+    assert.equal(t.ana.got.length, before);
+    // A ruler from a token on Ground to one on Roof is on no one floor.
+    state.tokens.gob = { ...state.tokens.gob!, sceneId: "s1" };
+    routeEphemeral(state, t.dm.conn, "s1", { k: "ruler", id: "r2", shared: true, points: [{ x: 6, y: 6, tokenId: "gob" }, { x: 4, y: 4, tokenId: "scout" }] }, t.all);
+    assert.equal(t.ana.got.filter((g) => g.e.k === "ruler").length, 0);
+    assert.equal(t.bree.got.filter((g) => g.e.k === "ruler").length, 0);
+  });
+
+  test("a preview shown on a floor ends at the next judgement once its token leaves the floor, or the receiver stops holding it", () => {
+    const state = tower();
+    const t = seats();
+    routeEphemeral(state, t.dm.conn, "s1", { k: "ruler", id: "r3", shared: true, points: [{ x: 6, y: 6, tokenId: "gob" }, { x: 9, y: 9 }] }, t.all);
+    assert.equal(t.bree.got.length, 1);
+    const moved: RoomState = { ...state, tokens: { ...state.tokens, gob: { ...state.tokens.gob!, sceneId: "roof" } } };
+    rejudgePreviews(moved, t.all);
+    assert.deepEqual(t.bree.got.at(-1), { sceneId: "s1", e: { k: "rulerEnd", id: "r3" } });
+    assert.deepEqual(t.ana.got.at(-1), { sceneId: "s1", e: { k: "rulerEnd", id: "r3" } });
+    // A ruler Ana shows on Roof ends for her once her creature leaves Roof and she no longer holds it.
+    routeEphemeral(state, t.dm.conn, "roof", { k: "ruler", id: "r4", shared: true, points: [{ x: 1.5, y: 1.5 }, { x: 3.5, y: 1.5 }] }, t.all);
+    assert.deepEqual(t.ana.got.at(-1)?.e.k, "ruler");
+    // Judged again while she still holds Roof, it stays.
+    rejudgePreviews(state, t.all);
+    assert.deepEqual(t.ana.got.at(-1)?.e.k, "ruler");
+    const left: RoomState = { ...state, tokens: { ...state.tokens, scout: { ...state.tokens.scout!, sceneId: "s1" } } };
+    rejudgePreviews(left, t.all);
+    assert.deepEqual(t.ana.got.at(-1), { sceneId: "roof", e: { k: "rulerEnd", id: "r4" } });
+  });
+
+  test("on a scene without floors a player's event behind a blackout still reaches the DM alone, as before floors", () => {
+    const state = room();
+    state.meta = { ...state.meta, view: { follow: false, blackout: true } };
+    const t = seats();
+    routeEphemeral(state, t.ana.conn, "s1", { k: "ping", x: 2, y: 2 }, t.all);
+    assert.equal(t.dm.got.length, 1);
+    assert.deepEqual(t.bree.got, []);
+  });
+});
