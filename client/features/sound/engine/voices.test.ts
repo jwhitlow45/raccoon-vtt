@@ -874,6 +874,96 @@ describe("the voices on the pool", () => {
     voices.dispose();
   });
 
+  test("a decode error in a file that played, as Chrome's after a seek into a steady tone, loads it again and plays on from its place, three times a minute before it fails", () => {
+    const clock = { ms: 0 };
+    const now = mock.method(performance, "now", () => clock.ms);
+    try {
+      const t = { now: T };
+      const states: MusicState[] = [];
+      const { voices, pool } = rig(t, { gestures: new EventTarget(), onMusic: (s) => states.push(s) });
+      voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+      const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+      const decodeError = () => {
+        el.error = { code: 3 };
+        el.paused = true;
+        el.onerror?.();
+      };
+      for (let i = 1; i <= 3; i++) {
+        t.now += 5_000;
+        clock.ms += 5_000;
+        const { loads, plays } = el;
+        decodeError();
+        assert.equal(el.loads, loads + 1, `error ${i}: the file loads again`);
+        assert.equal(el.error, null);
+        assert.equal(el.currentTime, (t.now - (T - 10_000)) / 1000, `error ${i}: placed where the track is due, not where it broke`);
+        assert.equal(el.plays, plays + 1);
+        assert.ok(!el.paused);
+        assert.ok(!states.includes("failed"), `error ${i}: the line never says it failed`);
+      }
+      // A fourth within the minute: a file that truly will not decode fails as before, for Try again.
+      clock.ms += 1_000;
+      const loads = el.loads;
+      decodeError();
+      assert.equal(el.loads, loads, "no fourth load in a minute");
+      assert.equal(states.at(-1), "failed");
+      voices.retry();
+      assert.equal(states.at(-1), "playing", "Try again still loads it");
+      // A minute after the first, one more error is tried again on its own.
+      clock.ms = 65_000;
+      decodeError();
+      assert.equal(el.loads, loads + 2);
+      assert.equal(states.at(-1), "playing");
+      voices.dispose();
+    } finally {
+      now.mock.restore();
+    }
+  });
+
+  test("a decode error in a track loaded ahead loads it again paused at 0 for its start, and one in a voice waiting for a gesture is neither played nor sought", async () => {
+    const t = { now: T };
+    let allowed = true;
+    const gestures = new EventTarget();
+    const { voices, pool } = rig(t, { refuse: () => (allowed ? null : "NotAllowedError"), gestures });
+    const ahead: Playing = { ...quiet, music: { run: "r1", repeat: "all", fade: 5, now: { soundId: "tavern", at: T + 2_000 } } };
+    voices.update(planVoices(ahead, SOUNDS, t.now), () => SHORT_FADE_MS);
+    const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+    el.error = { code: 3 };
+    const loads = el.loads;
+    el.onerror?.();
+    assert.equal(el.loads, loads + 1);
+    assert.deepEqual([el.paused, el.currentTime, el.plays], [true, 0, 0], "paused at 0 until its start");
+    await wait(2_050);
+    assert.ok(!el.paused, "its start timer still plays it");
+    voices.dispose();
+
+    const refused = rig(t, { refuse: () => (allowed ? null : "NotAllowedError"), gestures });
+    allowed = false;
+    refused.voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+    await wait(10);
+    const waiting = refused.pool.find((e) => e.src === "/api/assets/a-tavern")!;
+    const tried = { plays: waiting.plays, seeks: waiting.seeks, loads: waiting.loads };
+    waiting.error = { code: 3 };
+    waiting.onerror?.();
+    assert.deepEqual({ plays: waiting.plays, seeks: waiting.seeks, loads: waiting.loads }, { ...tried, loads: tried.loads + 1 }, "loaded again, and still waiting for the gesture");
+    allowed = true;
+    gestures.dispatchEvent(new Event("click"));
+    assert.equal(waiting.plays, tried.plays + 1, "the gesture plays it");
+    refused.voices.dispose();
+  });
+
+  test("a decode error in a voice fading out loads nothing", () => {
+    const t = { now: T };
+    const { voices, pool } = rig(t, { gestures: new EventTarget() });
+    voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+    const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+    voices.stopAll(STOP_FADE_MS);
+    const loads = el.loads;
+    el.error = { code: 3 };
+    el.onerror?.();
+    assert.equal(el.loads, loads);
+    voices.dispose();
+  });
+
   test("a voice released late, as a throttled tab's timer runs it, leaves the handlers of a newer voice that took its element", async () => {
     const clock = { ms: 0 };
     const now = mock.method(performance, "now", () => clock.ms);

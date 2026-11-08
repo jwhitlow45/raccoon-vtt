@@ -39,6 +39,11 @@ export const BLACKOUT_FADE_MS = 1_000;
 const HORIZON_MS = 2_500;
 /** An element that stops this close to its voice's end is ending, not stopped short. */
 const HEAL_END_MS = 500;
+/** `MediaError.MEDIA_ERR_DECODE`, written out since tests run without the DOM. */
+const MEDIA_ERR_DECODE = 3;
+/** A voice's decode errors are each tried again, up to this many in DECODE_RETRY_WINDOW_MS. */
+const DECODE_RETRIES = 3;
+const DECODE_RETRY_WINDOW_MS = 60_000;
 
 export type Channel = "music" | "loop";
 
@@ -242,6 +247,8 @@ type Live = {
   url: string;
   /** For a `fadeIn` placement: the audio clock time its fade starts, until the element first sounds, then null. */
   fadeFrom: number | null;
+  /** When its decode errors of the last minute were tried again, by `performance.now()`. */
+  decodeRetries: number[];
 };
 
 /** One `MediaElementAudioSourceNode` per element, made once: an element can have only one. */
@@ -422,11 +429,12 @@ export class Voices {
     mix.gain.value = mixGain(plan);
     source.connect(fade).connect(env).connect(mix).connect(this.#env.output[plan.channel]);
     const url = this.#env.url(plan.assetId, plan.channel);
-    const v: Live = { plan, index, el, fade, env, mix, settle: new Settle(), playing: false, startTimer: null, leaving: false, failed: false, dueSince: null, refused: false, plays: 0, asking: false, places: 0, url, smoothUntil: 0, fadeFrom: null };
+    const v: Live = { plan, index, el, fade, env, mix, settle: new Settle(), playing: false, startTimer: null, leaving: false, failed: false, dueSince: null, refused: false, plays: 0, asking: false, places: 0, url, smoothUntil: 0, fadeFrom: null, decodeRetries: [] };
     this.#live.set(plan.key, v);
     el.onerror = () => {
       // Only a failure of the voice's own file fails it. One of a source swapped in, as a bless's silence, is the check's to put back.
       if (!el.src.endsWith(v.url)) return;
+      if (this.#retryDecode(v)) return;
       v.failed = true;
       this.#reportMusic();
     };
@@ -457,6 +465,26 @@ export class Voices {
     if (!swapped && !stopped) return false;
     if (swapped) v.el.src = v.url;
     this.#place(v, v.dueSince ?? performance.now());
+    return true;
+  }
+
+  /**
+   * Chrome can fail a file it was decoding well (PIPELINE_ERROR_DECODE),
+   * seen after seeks into long runs of near-identical frames, a steady tone
+   * or digital silence. The file is sound and an element in error stays
+   * there, so the element loads it again and the voice is placed where it
+   * is due now. Only a few times a minute: a file that truly will not
+   * decode still fails, for Try again. A voice waiting for a gesture only
+   * loads, and its gesture places it.
+   */
+  #retryDecode(v: Live): boolean {
+    if (v.leaving || v.el.error?.code !== MEDIA_ERR_DECODE) return false;
+    const now = performance.now();
+    v.decodeRetries = v.decodeRetries.filter((at) => now - at < DECODE_RETRY_WINDOW_MS);
+    if (v.decodeRetries.length >= DECODE_RETRIES) return false;
+    v.decodeRetries.push(now);
+    v.el.src = v.url;
+    if (!v.refused) this.#place(v, v.dueSince ?? now);
     return true;
   }
 

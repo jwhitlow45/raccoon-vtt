@@ -11,12 +11,13 @@ import { leaveMs, planVoices, Voices, type MusicState } from "./voices.ts";
  * change, the engine's ticks, stops and starts as Room sound goes off and
  * on or another page takes the sound, a Skip during a crossfade that
  * leaves a track waiting for an element, plays the browser refuses until
- * a gesture, gestures, and an element the browser stops short. Timers and
- * the page's clock are mocked, so a run takes no real time.
+ * a gesture, gestures, an element the browser stops short, and decode
+ * errors in a file, as Chrome's PIPELINE_ERROR_DECODE. Timers and the
+ * page's clock are mocked, so a run takes no real time.
  *
  * Invariants:
- * - A page that stopped plays and seeks nothing until it plays again, a
- *   start that waited for an element included.
+ * - A page that stopped plays, seeks and loads nothing until it plays
+ *   again, a start that waited for an element included.
  * - After a play the browser refused for want of a gesture, that voice's
  *   element is neither played nor sought again until the next gesture.
  * - While plays are refused and nothing else changes, the music line never
@@ -26,6 +27,8 @@ import { leaveMs, planVoices, Voices, type MusicState } from "./voices.ts";
  *   the longest a stop's 2 s for a voice that was leaving already.
  * - Every voice's element keeps its handlers, its error's and its start's,
  *   though the voice it took the element from is released after it.
+ * - A voice's decode error loads its file again, at most 3 times in any
+ *   minute, and the music line says failed only past that.
  */
 
 const T = 1_000_000;
@@ -51,9 +54,21 @@ let current: World | null = null;
 
 function element(world: World, index: number) {
   let at = 0;
+  let src = "";
   let onplaying: (() => void) | null = null;
   const el = {
-    src: "",
+    get src() {
+      return src;
+    },
+    set src(value: string) {
+      if (!world.active) world.failures.push(`${world.step}: element ${index} loaded while the page is stopped`);
+      src = value;
+      el.error = null;
+      el.loads.push(world.clock);
+    },
+    /** When it loaded, by the page's clock. */
+    loads: [] as number[],
+    error: null as { code: number } | null,
     muted: false,
     paused: true,
     loop: false,
@@ -63,12 +78,17 @@ function element(world: World, index: number) {
     onwaiting: null as (() => void) | null,
     /** Each voice that takes the element sets its handler: a new one is a new voice. */
     epoch: 0,
+    /** When its voice's decode errors were tried again, by the page's clock: cleared with each new voice. */
+    decodeRetries: [] as number[],
     refused: null as { epoch: number; gestures: number } | null,
     get onplaying() {
       return onplaying;
     },
     set onplaying(fn: (() => void) | null) {
-      if (fn) el.epoch++;
+      if (fn) {
+        el.epoch++;
+        el.decodeRetries = [];
+      }
       onplaying = fn;
     },
     get currentTime() {
@@ -139,6 +159,8 @@ async function walk(seed: number): Promise<string[]> {
   // A play's refusal is a promise's, answered before the next task: no check comes between.
   await flush();
   let stoppedAt: number | null = null;
+  // Music elements whose voice failed past its tries, with that voice's epoch: the line may say failed only for one still there.
+  const failedTracks = new Map<number, number>();
   for (let i = 0; i < 40; i++) {
     const roll = r();
     if (roll < 0.15) {
@@ -177,6 +199,28 @@ async function walk(seed: number): Promise<string[]> {
       world.allowed = !world.allowed;
       world.step = `${i} plays ${world.allowed ? "allowed" : "refused"}`;
       still = !world.allowed;
+    } else if (roll < 0.9) {
+      // A decode error in a voice's own file, sounding or loaded ahead: the browser may leave it paused or not.
+      const el = pick(r, pool.filter((e) => e.onerror && e.src.startsWith("/api/assets/")));
+      world.step = `${i} a decode error`;
+      if (el) {
+        el.error = { code: 3 };
+        if (r() < 0.5) el.paused = true;
+        const loads = el.loads.length;
+        // Its tries of the minute before this one: its fourth is the one that fails.
+        const tried = el.decodeRetries.filter((at) => world.clock - at < 60_000).length;
+        const music = pool.indexOf(el) < 2;
+        // A voice fading out is let go, not tried again: only where every element holding the file has a voice staying is a try owed.
+        const sound = el.src.slice("/api/assets/a-".length);
+        const holding = pool.filter((e) => e.onerror && e.src === el.src).length;
+        const staying = voices.snapshot().filter((v) => v.sound === sound).length === holding;
+        el.onerror!();
+        const retried = el.loads.length > loads;
+        if (retried) el.decodeRetries.push(world.clock);
+        if (retried && tried >= 3) world.failures.push(`${world.step}: a fourth load in a minute`);
+        if (!retried && tried < 3 && staying) world.failures.push(`${world.step}: not tried again with ${tried} tries this minute`);
+        if (music && !retried && staying) failedTracks.set(pool.indexOf(el), el.epoch);
+      }
     } else if (roll < 0.95) {
       const el = pick(r, pool.filter((e) => !e.paused));
       world.step = `${i} the browser stops an element`;
@@ -190,6 +234,8 @@ async function walk(seed: number): Promise<string[]> {
       voices.check();
     }
     await flush();
+    const trackFailed = [...failedTracks].some(([i, epoch]) => pool[i]!.epoch === epoch && pool[i]!.onerror);
+    if ((state as MusicState) === "failed" && !trackFailed) world.failures.push(`${world.step}: the line says failed with no track past its tries`);
     const live = voices.snapshot();
     for (const sound of new Set(live.map((v) => v.sound))) {
       const handled = pool.filter((e) => e.onerror && e.onplaying && e.src === `/api/assets/a-${sound}`).length;
