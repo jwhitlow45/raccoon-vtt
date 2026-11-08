@@ -26,6 +26,7 @@ import {
   anchorOptions,
   describeDuration,
   describeEnds,
+  durationChange,
   durationInput,
   emptyForm,
   isSpanMode,
@@ -395,8 +396,8 @@ function EffectDetail(props: {
         if (color !== existing.color) patch.color = color;
       }
       if (durationTouched) {
-        if (duration) patch.duration = duration;
-        else if (existing.duration || existing.ends) patch.duration = null;
+        const change = durationChange(existing, duration);
+        if (change !== undefined) patch.duration = change;
       }
       if (dm && hidden !== (existing.hiddenFromPlayers ?? false)) patch.hiddenFromPlayers = hidden;
       if (dm && key === "readied" && triggerShown !== (existing.triggerShown ?? false)) patch.triggerShown = triggerShown;

@@ -10,6 +10,7 @@ import {
   defaultAnchorKey,
   describeDuration,
   describeEnds,
+  durationChange,
   durationInput,
   emptyForm,
   spanLength,
@@ -249,6 +250,14 @@ describe("time spans", () => {
     // Round 3 is 12 s in, so a clock at t = 0 reads 12 and a 60 s span set then ends at 72 s, the start of round 13.
     assert.equal(describeEnds({ clock: { id: "c1", t: 0, calendar }, encounter }, { span: 60, at: 72, clock: "c1" }), "Lasts 1 minute, to the start of round 13");
     assert.equal(describeEnds({ clock: { id: "c1", t: 0, calendar }, encounter }, { span: 60, at: 73, clock: "c1" }), "Lasts 1 minute, to the start of round 14");
+  });
+
+  test("No duration takes away a time span's end as it takes away a count of turns, and has nothing to take from a plain effect", () => {
+    const span = { mode: "span", seconds: 60 } as const;
+    assert.equal(durationChange({ ends: { span: 60, at: 60, clock: "c1" } }, null), null);
+    assert.equal(durationChange({ duration: { remaining: 2, boundary: "turnStart", anchor: { tokenId: "pc" } } }, null), null);
+    assert.equal(durationChange({}, null), undefined);
+    assert.deepEqual(durationChange({ ends: { span: 60, at: 60, clock: "c1" } }, span), span, "a new choice replaces it");
   });
 
   test("a copy with no end reads the length alone, and a clock that stopped or was replaced says so", () => {

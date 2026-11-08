@@ -196,6 +196,17 @@ export function durationInput(form: DurationForm, options: AnchorOption[]): Dura
   return null;
 }
 
+/**
+ * What the update patch's `duration` holds once the DM or owner touched
+ * Duration: the new input, `null` to take away a count of turns or a time
+ * span's end (No duration on a timed effect included), or undefined when
+ * there was nothing to take away.
+ */
+export function durationChange(existing: Pick<Effect, "duration" | "ends">, input: DurationInput | null): DurationInput | null | undefined {
+  if (input) return input;
+  return existing.duration || existing.ends ? null : undefined;
+}
+
 export function isPaused(duration: NonNullable<Effect["duration"]>): boolean {
   return !("entryId" in duration.anchor);
 }
