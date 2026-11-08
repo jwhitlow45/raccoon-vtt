@@ -164,4 +164,15 @@ describe("the polite status holds one line (docs/design/design-v1-weather.md 4.2
     assert.equal(said(twice).text, "Top-down view.");
     assert.deepEqual(joinedVoice({ view: null, weather: null, at: 0 }, "weather", "Weather here: Fog.", 0).text, "Weather here: Fog.");
   });
+
+  test("a switch of floors speaks first, joined by the floor's weather, as a display's status says it (docs/design/design-v1-floors.md 7.3)", () => {
+    const scope = new RoomScope();
+    sayJoined(scope, "weather", "Weather here: Heavy rain, Strong wind.", 2_000);
+    sayJoined(scope, "floor", "Showing Roof.", 2_100);
+    assert.equal(said(scope).text, "Showing Roof. Weather here: Heavy rain, Strong wind.");
+    sayJoined(scope, "view", "Isometric view.", 2_200);
+    assert.equal(said(scope).text, "Showing Roof. Isometric view. Weather here: Heavy rain, Strong wind.");
+    sayJoined(scope, "floor", "Showing Attic.", 4_000);
+    assert.equal(said(scope).text, "Showing Attic.", "a later switch stands alone");
+  });
 });

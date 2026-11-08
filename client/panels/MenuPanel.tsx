@@ -11,7 +11,12 @@ import { joinLinkToShare } from "../features/dm/shareLink.ts";
 import { XCardButton } from "../features/xcard/XCardButton.tsx";
 import { usePanelHeader, type PanelProps } from "../features/panels.ts";
 import { MENU_PAGES, pageAfter, useRouteRequest, type MenuPage } from "../features/search/route.ts";
-import { viewFoldSlot } from "../features/view/choice.ts";
+import { floorFoldSlot, viewFoldSlot } from "../features/view/choice.ts";
+import { FLOOR_ROOT_ATTR, FLOOR_ROOTS } from "../features/floors/ids.ts";
+import { FloorsSheetDialog } from "../features/floors/FloorsMenu.tsx";
+import { useFloorKeys } from "../features/floors/FloorButton.tsx";
+import { useShownFloor } from "../features/floors/useFloors.ts";
+import { FLOOR_ROW, floorKeys, floorRowDetail } from "../features/floors/words.ts";
 import { useRoomViewChoice, ViewName, ViewSheetDialog } from "../features/view/ViewMenu.tsx";
 import { api } from "../lib/api.ts";
 import { fullscreenSupported } from "../lib/fullscreen.ts";
@@ -93,6 +98,7 @@ export default function MenuPanel(props: PanelProps) {
           {copied ? (share.withPassword ? "Copied, with the password" : "Copied") : share.label}
         </Button>
       </div>
+      <FloorRow />
       <ViewRow />
       {role === "dm" && !preview ? <MenuItem icon="undo" title="Setup history" detail="Undo or redo your saved definitions and configuration." onClick={() => ui.openHistory?.({ scope: "setup" })} /> : null}
       <MenuItem icon="group" title="Members" detail={role === "dm" ? "Who is here, kicking, the player password and DM devices." : "Who is here and who is online."} page="members" onClick={() => setPage("members")} />
@@ -239,6 +245,52 @@ function ViewRow() {
             onClick={() => setOpen(true)}
           />
           {open ? <ViewSheetDialog choice={choice} onClose={() => setOpen(false)} /> : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The Floor row (docs/design/design-v1-floors.md 18.6, D-261107-215), above
+ * View, while the top bar folded its Floor button with View: it opens the
+ * same Floors sheet, over the menu, and focus comes back to it when that
+ * closes. Its place stays, empty while the bar holds the button, as View's.
+ */
+function FloorRow() {
+  const folded = useStore(useScoped(floorFoldSlot), (s) => s.folded);
+  const floor = useShownFloor();
+  const keys = useFloorKeys();
+  const [open, setOpen] = useState(false);
+  const place = useRef<HTMLDivElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (folded || !open) return;
+    // A widening that unfolds the row closes its sheet, as View's does, with focus where a subpage hands it.
+    setOpen(false);
+    const active = document.activeElement;
+    const target = menuFallback(place.current);
+    if (target && (active === null || active === document.body)) target.focus({ preventScroll: true });
+  }, [folded, open]);
+  const shown = folded && floor !== null;
+  return (
+    <div ref={place} style={{ display: "contents" }}>
+      {shown ? (
+        <>
+          <div
+            {...{ [FLOOR_ROOT_ATTR]: FLOOR_ROOTS.menuRow }}
+            ref={(el) => void (opener.current = el?.querySelector<HTMLElement>("button") ?? null)}
+            style={{ display: "grid" }}
+          >
+            <MenuItem
+              icon="floors"
+              title={FLOOR_ROW}
+              keys={keys.aria ? { title: FLOOR_ROW + floorKeys(keys.keys), aria: keys.aria } : undefined}
+              detail={floorRowDetail(floor.floor?.name ?? floor.name, floor.name)}
+              onClick={() => setOpen(true)}
+            />
+          </div>
+          {open ? <FloorsSheetDialog opener={opener} onClose={() => setOpen(false)} /> : null}
         </>
       ) : null}
     </div>

@@ -134,3 +134,31 @@ test("DG-C DG-OPUS-27: View as a player, its own scope, opens the same scene on 
   own.open(SIZE, crypt);
   assert.deepEqual(own.framed, [ENTRANCE]);
 });
+
+test("a switch to another floor of the same scene keeps the camera, and another scene or a scene of one floor opens anew (docs/design/design-v1-floors.md 7.3)", () => {
+  const size = { width: 920, height: 800 };
+  const panned: Camera = { x: -300, y: -120, scale: 55 };
+  const floor = (id: string, level: number, of?: string) => scene(id, { name: "Tower", bounds: { w: 24, h: 20 }, defaultView: { x: 4, y: 4, zoom: 30 }, floor: { ...(of ? { of } : {}), level, name: id } });
+  const run = (shown: ReturnType<typeof scene>[]) => {
+    const cameraScene = { current: null as string | null };
+    const cam = { current: null as Camera | null };
+    const opened: Camera[] = [];
+    for (const s of shown) {
+      openSceneCamera({
+        size, scene: s, shown: { current: TOP_DOWN }, viewSeen: { current: TOP_DOWN }, cameraScene, pendingCam: { current: null }, fitted: { current: null }, cam,
+        groundUnder: () => 0,
+        fit: () => ({ cam: { x: 0, y: 0, scale: 10 } }),
+        setCam: (c) => opened.push(c),
+      });
+      // The viewer pans after each opening.
+      cam.current = panned;
+    }
+    return { opened: opened.length, cam: cam.current, at: cameraScene.current };
+  };
+  // A DM's floors name their main floor, a player's carry none and share the scene's name.
+  assert.deepEqual(run([floor("ground", 0, "ground"), floor("upper", 1, "ground"), floor("ground", 0, "ground")]), { opened: 1, cam: panned, at: "ground" });
+  assert.deepEqual(run([floor("ground", 0), floor("upper", 1)]), { opened: 1, cam: panned, at: "upper" });
+  assert.equal(run([floor("ground", 0, "ground"), floor("keep", 1, "keep")]).opened, 2, "floors of another scene open on their own view");
+  assert.equal(run([scene("cave"), scene("crypt")]).opened, 2, "scenes of one floor each open on their own view");
+  assert.equal(run([floor("ground", 0, "ground"), scene("cave")]).opened, 2);
+});

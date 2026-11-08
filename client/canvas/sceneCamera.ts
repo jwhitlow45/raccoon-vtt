@@ -7,14 +7,32 @@ type Ref<T> = { current: T };
 type Selected = Parameters<typeof heldPoint>[2];
 
 /**
+ * The floors' scene a scene record belongs to (docs/design/design-v1-floors.md
+ * 7.3): its main floor on a DM's copy, and on a player's, which carries no
+ * main floor, the delivered floors of the scene by its name, since every
+ * floor's record carries the scene's. Null on a scene of one floor.
+ */
+function floorGroup(scene: Pick<Scene, "name" | "floor">): string | null {
+  if (!scene.floor) return null;
+  return scene.floor.of ?? `\u0000${scene.name}`;
+}
+
+/** The floors' scene of the scene each canvas's camera stands on, by the canvas's camera-scene ref. */
+const cameraGroups = new WeakMap<object, string | null>();
+
+/**
  * The camera a newly shown scene opens on: its saved view, else a fit. It is
  * already in the view being shown, so `viewSeen` moves up with it and a turn
  * in the same commit must not convert it again from the previous scene's view.
  * Written as a plain function so the commit order can be driven without React.
+ *
+ * A switch to another floor of the same scene keeps the camera: floors line
+ * up square for square, so the view stays on the same squares
+ * (docs/design/design-v1-floors.md 7.3).
  */
 export function openSceneCamera<Fit extends { cam: Camera }>(a: {
   size: Size | null;
-  scene: Pick<Scene, "id" | "defaultView">;
+  scene: Pick<Scene, "id" | "defaultView"> & Partial<Pick<Scene, "name" | "floor">>;
   shown: Ref<View>;
   viewSeen: Ref<View>;
   cameraScene: Ref<string | null>;
@@ -27,7 +45,12 @@ export function openSceneCamera<Fit extends { cam: Camera }>(a: {
 }): void {
   const { size, scene } = a;
   if (!size || a.cameraScene.current === scene.id) return;
+  const group = floorGroup({ name: scene.name ?? "", floor: scene.floor });
+  const was = cameraGroups.get(a.cameraScene);
+  cameraGroups.set(a.cameraScene, group);
+  const floorSwitch = a.cameraScene.current !== null && group !== null && was === group && a.cam.current !== null;
   a.cameraScene.current = scene.id;
+  if (floorSwitch) return;
   a.viewSeen.current = a.shown.current;
   a.pendingCam.current = null;
   let next: Camera;

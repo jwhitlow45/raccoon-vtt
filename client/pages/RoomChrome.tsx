@@ -484,6 +484,7 @@ export function FindButton(props: { openSheet(): OpenSheet | null }) {
   const slot = useScoped(fitSlot);
   const store = useRoomStore();
   const ui = useRoomUi();
+  const actions = useRoomActions();
   const lastRef = useRef<string | null>(null);
   const find = () => {
     const { view, you, sceneId } = store.getState();
@@ -494,6 +495,8 @@ export function FindButton(props: { openSheet(): OpenSheet | null }) {
       return;
     }
     lastRef.current = token.id;
+    // A token on another floor this device holds: that floor shows first, and the camera stays, since floors line up square for square (docs/design/design-v1-floors.md 7.3, D-261107-222).
+    if (token.sceneId !== sceneId) actions.showFloor(token.sceneId);
     // A tap on the token, as the tracker row does, but one that never takes it out of a Multi-select group. Before the camera: the store shows the bar at once, and the camera keeps the token clear of the bar that is about to open (Stage.tsx show).
     ui.bring(token.id);
     const target = findRect(token);

@@ -15,6 +15,8 @@ import { shownRowOps } from "../features/tokens/groupEdit.ts";
 import { PLACE_TOOL_ID } from "../features/tokens/placement.ts";
 import { cycleStep, type ToolCycle } from "../features/toolChoices.ts";
 import { isoOffered, kindSaid, otherViewPress, sayView, topDownTool, turnRefused } from "../features/view/choice.ts";
+import { floorBeside, heldHere } from "../features/floors/follow.ts";
+import { noFloorAbove, noFloorBelow } from "../features/floors/words.ts";
 import { pickView, readView, shownView, turnView, viewKey } from "../features/view/store.ts";
 import { hasKeyboard, isAppleDevice, noteKeyboard, subscribeKeyboard } from "../lib/device.ts";
 import { fullscreenSupported, toggleFullscreen } from "../lib/fullscreen.ts";
@@ -450,6 +452,51 @@ export const VIEW_SHORTCUTS: readonly Shortcut[] = [
   },
 ];
 
+/**
+ * `[` and `]` (docs/design/design-v1-floors.md 7.2, D-261102-488): the floor
+ * below and the floor above among those this device holds, for everyone,
+ * while it holds more than one. They send nothing (RoomActions.showFloor).
+ * Page Up and Page Down stay the tokens' height. At the bottom or the top
+ * they say so, since nothing on the map would.
+ */
+function floorKey(env: ShortcutEnv, by: 1 | -1): void {
+  const s = env.getState();
+  const held = heldHere(s.view, s.projectedSceneId);
+  const next = floorBeside(held, s.sceneId, by);
+  if (next !== null) env.actions.showFloor(next);
+  else env.ui.notify(by === 1 ? noFloorAbove(floorNameOf(held, s.sceneId)) : noFloorBelow(floorNameOf(held, s.sceneId)));
+}
+
+function floorNameOf(held: ReturnType<typeof heldHere>, sceneId: string | null): string {
+  return held.find((f) => f.id === sceneId)?.floor?.name ?? "";
+}
+
+const holdsFloors = (env: ShortcutEnv) => {
+  const s = env.getState();
+  return heldHere(s.view, s.projectedSceneId).length > 1;
+};
+
+export const FLOOR_SHORTCUTS: readonly Shortcut[] = [
+  {
+    id: "floorBelow",
+    ...single("["),
+    name: "Floor below",
+    does: "Show the floor below",
+    roles: ["dm", "player"],
+    when: holdsFloors,
+    run: (env) => floorKey(env, -1),
+  },
+  {
+    id: "floorAbove",
+    ...single("]"),
+    name: "Floor above",
+    does: "Show the floor above",
+    roles: ["dm", "player"],
+    when: holdsFloors,
+    run: (env) => floorKey(env, 1),
+  },
+];
+
 /** Every shortcut, one per line, in the order the sheet lists them. */
 export const SHORTCUTS: readonly Shortcut[] = [
   {
@@ -632,6 +679,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
     run: (env) => env.scope.get(fitSlot).fit?.(),
   },
   ...(isoOffered ? VIEW_SHORTCUTS : []),
+  ...FLOOR_SHORTCUTS,
   {
     id: "outliner",
     ...single("/"),

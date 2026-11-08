@@ -1,5 +1,9 @@
-import type { RoomState } from "#shared/model.ts";
-import { sameScene } from "#shared/rules/floors.ts";
+import type { RoomState, Scene, Token } from "#shared/model.ts";
+import { isPartyMember } from "#shared/project.ts";
+import { displayName } from "../../lib/scene.ts";
+import { initials } from "../../lib/tokenView.ts";
+import { ownsToken } from "../tokens/access.ts";
+import { sameScene, unhiddenPartyMember } from "#shared/rules/floors.ts";
 import { ownEntry } from "#shared/records.ts";
 
 /*
@@ -30,4 +34,94 @@ export function playersPlace(state: Scenes, playersId: string, viewingId: string
 /** "floor" when the two ids name floors of one scene, else "scene", for words such as "the players are on another scene now". */
 export function placeKind(state: Scenes, a: string, b: string): "floor" | "scene" {
   return a !== b && sameScene(state, a, b) ? "floor" : "scene";
+}
+
+/** "Showing Upper floor.", the polite status's line for a switch of floors (7.3). */
+export function showingLine(floor: string): string {
+  return `Showing ${floor}.`;
+}
+
+/** "Thorn is on Upper floor. Showing Upper floor.", for a switch that follows a creature's move (7.3). */
+export function followedLine(creature: string, floor: string): string {
+  return `${creature} is on ${floor}. ${showingLine(floor)}`;
+}
+
+/** "Viewing Upper floor.", the Viewing notice's words while a player shows a floor they picked (7.3). */
+export function viewingLine(floor: string): string {
+  return `Viewing ${floor}.`;
+}
+
+/** "Floor: Upper floor. Show another floor", the top bar's Floor button's name (7.2). */
+export function floorButtonLabel(floor: string): string {
+  return `Floor: ${floor}. Show another floor`;
+}
+
+/** What `]` says on the top floor, where it shows nothing new. */
+export function noFloorAbove(floor: string): string {
+  return floor ? `No floor above ${floor}.` : "No floor above this one.";
+}
+
+/** What `[` says on the lowest floor. */
+export function noFloorBelow(floor: string): string {
+  return floor ? `No floor below ${floor}.` : "No floor below this one.";
+}
+
+/** The Floors menu's name, the Floor button's pop-up and sheet (7.2). */
+export const FLOORS_GROUP = "Floors";
+
+/** The DM's way from the Floors menu to the Floors settings group. */
+export const FLOORS_SETTINGS = "Floors…";
+
+/** A player's mark on their own creature's floor in the Floors menu. */
+export const YOU_ARE_HERE = "You are here";
+
+/** The Floor row's title in the Menu panel, where the bar folded the button with View. */
+export const FLOOR_ROW = "Floor";
+
+/** " ([ and ])", this device's two keys after a control's words, or nothing where it has no keyboard. */
+export function floorKeys(keys: { below: string; above: string } | null): string {
+  return keys ? ` (${keys.below} and ${keys.above})` : "";
+}
+
+/** The Floor button's tooltip, with this device's two keys where it has a keyboard: "Show another floor ([ and ])". */
+export function floorTip(keys: { below: string; above: string } | null): string {
+  return `Show another floor${floorKeys(keys)}`;
+}
+
+/**
+ * The DM's mark of a floor in the Floors menu (7.2): "Players here" on the
+ * start floor and where an unhidden party member stands, "Reached" on a
+ * floor with an opened mark, "Not reached yet" on the rest. A mark records
+ * only that a floor is open, whether players reached it or the DM showed
+ * it, so both read "Reached".
+ */
+export function floorStatus(state: Pick<RoomState, "meta" | "tokens" | "scenes" | "openFloors" | "characters">, floorId: string): "Players here" | "Reached" | "Not reached yet" {
+  if (state.meta.playerSceneId === floorId) return "Players here";
+  if (Object.values(state.tokens).some((t) => t.sceneId === floorId && unhiddenPartyMember(state as RoomState, t))) return "Players here";
+  return ownEntry(state.openFloors, floorId) !== undefined ? "Reached" : "Not reached yet";
+}
+
+/** The Viewing notice's button: "Back to Thorn", or the start floor's name where the player has no creature there. */
+export function backLabel(to: string): string {
+  return `Back to ${to}`;
+}
+
+/** The Menu panel's Floor row's detail: "Showing Upper floor. Show another floor of Tower." */
+export function floorRowDetail(floor: string, scene: string): string {
+  return `Showing ${floor}. Show another floor of ${scene}.`;
+}
+
+/** The words under a floor's name, each a mark the row's name carries too. */
+export function floorMarks(view: RoomState, floor: Scene, you: { memberId: string; role: "dm" | "player" }, followed: string | null): string[] {
+  // By name, so a row reads the same however the tokens were made.
+  const here = Object.values(view.tokens)
+    .filter((t): t is Token => t !== undefined && t.sceneId === floor.id && t.kind !== "object")
+    .sort((a, b) => displayName(a).localeCompare(displayName(b)));
+  if (you.role === "dm") {
+    const party = here.filter((t) => unhiddenPartyMember(view, t)).map((t) => initials(displayName(t)));
+    return [floorStatus(view, floor.id), ...(party.length > 0 ? [party.join(" ")] : [])];
+  }
+  // A player's copy holds only what they see, and the party's creatures are the player characters and what players own.
+  const party = here.filter((t) => t.kind === "pc" || isPartyMember(view, t) || ownsToken(view, you.memberId, t)).map((t) => displayName(t));
+  return [...(followed === floor.id ? [YOU_ARE_HERE] : []), ...(party.length > 0 ? [party.join(", ")] : [])];
 }

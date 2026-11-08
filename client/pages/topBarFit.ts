@@ -28,11 +28,12 @@ export type TopBarPart =
   | "phase"
   | "turn"
   | "find"
+  | "floor"
   | "view"
   | "fit"
   | "fullscreen";
 
-export const TOP_BAR_ORDER: readonly TopBarPart[] = ["dot", "name", "you", "blackout", "search", "gap", "nowPlaying", "clock", "undo", "redo", "phase", "turn", "find", "view", "fit", "fullscreen"];
+export const TOP_BAR_ORDER: readonly TopBarPart[] = ["dot", "name", "you", "blackout", "search", "gap", "nowPlaying", "clock", "undo", "redo", "phase", "turn", "find", "floor", "view", "fit", "fullscreen"];
 
 /**
  * Search's forms (design-v1-qol.md 5, Opening): the field-like button with its words and
@@ -51,9 +52,19 @@ export type SearchForm = "field" | "icon" | "panels";
 export type NowPlayingForm = "full" | "compact" | "off";
 
 /**
+ * Floor's forms (docs/design/design-v1-floors.md 18.6, D-261107-215): the
+ * icon with the floor's name, the icon alone (a phone's from the start,
+ * as Search's and Now playing's), or folded with View into the Menu
+ * panel's Floor row.
+ */
+export type FloorForm = "name" | "icon" | "menu";
+
+/**
  * The steps from 900 px up, in the order the bar takes them (design-v1-qol.md
  * 4, The give-way, 0 to 12, with step 10's two halves apart). Each but
- * Search's puts what left the bar into the DM menu. After step 12 a player's
+ * Search's puts what left the bar into the DM menu. Floor's name leaves
+ * right after the Phase menu (`floorIcon`, docs/design/design-v1-floors.md
+ * 18.6), its icon staying, and Floor folds with View. After step 12 a player's
  * inline "Your turn" drops while End turn shows, its live region kept, unseen
  * (design-v1-qol.md 4, The give-way, QD-OPUS-24 and 30). Last, where a blackout's crossed eye
  * stands in the DM chip's place, it slims to the dot's width (`eyeSlim`):
@@ -69,6 +80,7 @@ export type WideStep =
   | "nowPlayingOff"
   | "fullscreenOff"
   | "phaseOff"
+  | "floorIcon"
   | "facesNone"
   | "tightGaps"
   | "viewFold"
@@ -87,6 +99,7 @@ export const WIDE_STEPS: readonly WideStep[] = [
   "nowPlayingOff",
   "fullscreenOff",
   "phaseOff",
+  "floorIcon",
   "facesNone",
   "tightGaps",
   "viewFold",
@@ -135,6 +148,8 @@ export type BarContent = {
   gaps: boolean;
   /** The View button. */
   view: boolean;
+  /** Floor: this device holds more than one floor of its scene (docs/design/design-v1-floors.md 7.2). */
+  floor: boolean;
   /**
    * The turn strip in the row: none (no fight, or a portrait phone's
    * band), in the row from 900 px up, or on a short landscape phone in
@@ -167,7 +182,8 @@ export function stepsFor(c: BarContent): BarStep[] {
       searchPanels: c.search,
       nowPlayingOff: dm && c.nowPlaying,
       tightGaps: c.gaps,
-      viewFold: c.view,
+      // Floor folds with View, one step for one idea (D-261107-215).
+      viewFold: c.view || c.floor,
       eyeSlim: dm && c.blackout,
     };
     return NARROW_STEPS.filter((step) => narrow[step]);
@@ -183,9 +199,10 @@ export function stepsFor(c: BarContent): BarStep[] {
     nowPlayingOff: dm && c.nowPlaying,
     fullscreenOff: c.fullscreen,
     phaseOff: dm && c.phase,
+    floorIcon: c.floor,
     facesNone: strip && c.faces > 0,
     tightGaps: c.gaps,
-    viewFold: c.view,
+    viewFold: c.view || c.floor,
     turnName: strip,
     timerShort: strip && c.timerOver,
     yourTurnOff: strip && c.yourTurn,
@@ -279,7 +296,9 @@ export type BarShape = {
   /** The next faces the turn chip shows. */
   faces: number;
   tight: boolean;
+  /** View, and Floor with it, folded into the Menu panel's rows. */
   viewFold: boolean;
+  floor: FloorForm | null;
   /** The turn chip's name's cap, 0 once it has left, null before step 11. */
   nameCap: number | null;
   /** An overrun timer's short form, "+1:25". */
@@ -310,6 +329,7 @@ export function shapeOf(c: BarContent, key: string, record: FitRecord | null): B
     faces,
     tight: has("tightGaps"),
     viewFold: has("viewFold"),
+    floor: !c.floor ? null : has("viewFold") ? "menu" : c.phone || has("floorIcon") ? "icon" : "name",
     nameCap: has("turnName") ? (drawn?.nameCap ?? 0) : null,
     timerShort: has("timerShort"),
     yourTurn: c.yourTurn && !has("yourTurnOff"),

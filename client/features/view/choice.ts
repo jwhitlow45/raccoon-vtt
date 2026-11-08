@@ -189,30 +189,37 @@ export function turnRefused(stored: StoredView, suggested: Scene["suggestedView"
  * The status's words, per Room page. A slot of its own, so a change
  * re-renders the status alone. `key` is new each time, so words that
  * repeat are said again. The status holds one line (docs/design/design-v1-weather.md
- * 4.2), so the view's words and the weather's join when they come close
- * together, and `view`, `weather` and `at` remember what each said.
+ * 4.2), so the floor's words (docs/design/design-v1-floors.md 7.3), the
+ * view's and the weather's join when they come close together, and
+ * `floor`, `view`, `weather` and `at` remember what each said.
  */
-export type VoiceState = { key: number; text: string; view: string | null; weather: string | null; at: number };
+export type VoiceState = { key: number; text: string; floor?: string | null; view: string | null; weather: string | null; at: number };
 
-export const viewVoiceSlot = scopeSlot<StoreApi<VoiceState>>(() => createStore<VoiceState>(() => ({ key: 0, text: "", view: null, weather: null, at: 0 })));
+/** Who speaks in the status: a switch of floors, the view, and the weather. */
+export type VoiceSource = "floor" | "view" | "weather";
+
+export const viewVoiceSlot = scopeSlot<StoreApi<VoiceState>>(() => createStore<VoiceState>(() => ({ key: 0, text: "", floor: null, view: null, weather: null, at: 0 })));
 
 /** Lines from the view and the weather that come within this long of each other are one announcement. */
 export const JOIN_WITHIN_MS = 500;
 
 /**
- * The status after a source speaks: its line, joined with the other
- * source's if that spoke within JOIN_WITHIN_MS, the view's line first
- * whichever came first. A source never carries its own earlier line, so a
- * second view change replaces the first.
+ * The status after a source speaks: its line, joined with the others' if
+ * they spoke within JOIN_WITHIN_MS, the floor's line first and then the
+ * view's, whichever came first, so a switch of floors reads "Showing Roof.
+ * Weather here: Heavy rain." A source never carries its own earlier line,
+ * so a second view change replaces the first.
  */
-export function joinedVoice(prev: Pick<VoiceState, "view" | "weather" | "at">, source: "view" | "weather", text: string, now: number): Pick<VoiceState, "text" | "view" | "weather" | "at"> {
+export function joinedVoice(prev: Pick<VoiceState, "floor" | "view" | "weather" | "at">, source: VoiceSource, text: string, now: number): Pick<VoiceState, "text" | "floor" | "view" | "weather" | "at"> {
   const recent = now - prev.at <= JOIN_WITHIN_MS;
-  const view = source === "view" ? text : recent ? prev.view : null;
-  const weather = source === "weather" ? text : recent ? prev.weather : null;
-  return { view, weather, at: now, text: [view, weather].filter((line) => line !== null).join(" ") };
+  const line = (own: VoiceSource, was: string | null | undefined) => (source === own ? text : recent ? (was ?? null) : null);
+  const floor = line("floor", prev.floor);
+  const view = line("view", prev.view);
+  const weather = line("weather", prev.weather);
+  return { floor, view, weather, at: now, text: [floor, view, weather].filter((l) => l !== null).join(" ") };
 }
 
-export function sayJoined(scope: RoomScope, source: "view" | "weather", text: string, now: number = Date.now()): void {
+export function sayJoined(scope: RoomScope, source: VoiceSource, text: string, now: number = Date.now()): void {
   const voice = scope.get(viewVoiceSlot);
   const prev = voice.getState();
   voice.setState({ key: prev.key + 1, ...joinedVoice(prev, source, text, now) });
@@ -228,6 +235,13 @@ export function sayView(scope: RoomScope, text: string): void {
  * "View" row that opens the same sheet (panels/MenuPanel.tsx).
  */
 export const viewFoldSlot = scopeSlot<StoreApi<{ folded: boolean }>>(() => createStore(() => ({ folded: false })));
+
+/**
+ * Whether the top bar folded its Floor button into the room's menu with
+ * View (pages/topBarFit.ts viewFold, D-261107-215), so the menu shows a
+ * Floor row above View that opens the same Floors sheet (panels/MenuPanel.tsx).
+ */
+export const floorFoldSlot = scopeSlot<StoreApi<{ folded: boolean }>>(() => createStore(() => ({ folded: false })));
 
 /**
  * "View as a player" keeps a view of its own, never saved, as nothing in

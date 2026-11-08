@@ -82,7 +82,10 @@ import { panelFoldsSlot } from "../features/tokens/panelFolds.ts";
 import { SEARCH_ATTR } from "../features/search/entry.ts";
 import { landing, landOn, routeSlot, type RouteRequest } from "../features/search/route.ts";
 import { PanelsSearchField, SearchButton, SearchSheetHost } from "../features/search/SearchSheet.tsx";
-import { isoOffered, viewFoldSlot } from "../features/view/choice.ts";
+import { floorFoldSlot, isoOffered, viewFoldSlot } from "../features/view/choice.ts";
+import { FloorButton } from "../features/floors/FloorButton.tsx";
+import { useFloorVoice, useHeldFloors, useShownFloor } from "../features/floors/useFloors.ts";
+import { ViewingNotice } from "../features/floors/ViewingNotice.tsx";
 import { fitKey, fitStep, sameRecord, shapeOf, stepsFor, type BarContent, type FitRecord } from "./topBarFit.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { useBackClose } from "../lib/backClose.ts";
@@ -1178,6 +1181,7 @@ function RoomPage() {
             <Banner />
             {role === "dm" ? <FrameViewBar /> : null}
             <QuietLoadNotice />
+            <ViewingNotice />
             <SoundAskNotice />
             <HistoryLoading />
           </div>
@@ -1562,8 +1566,13 @@ function TopBar(props: {
   const alertsOverlay = useStore(useScoped(barDockSlot), (s) => s.alertsOverlay);
   const fight = useRoomView((s) => !!s.view?.encounter);
   const notice = useYourTurnNotice();
-  // While the View menu's popover is open, the bar holding it stands over the notices with it (docs/design/design-v1-tool-options.md 7.6).
+  // While the View menu's popover is open, the bar holding it stands over the notices with it (docs/design/design-v1-tool-options.md 7.6). Floors' too.
   const [viewOpen, setViewOpen] = useState(false);
+  const [floorOpen, setFloorOpen] = useState(false);
+  // Floor shows while this device holds more than one floor of its scene (docs/design/design-v1-floors.md 7.2), and says each switch in the status.
+  const heldFloors = useHeldFloors();
+  const shownFloor = useShownFloor();
+  useFloorVoice();
   // The same for the chips' menus and the clock's popover, each by its own key, so one closing as another opens never lowers the bar.
   const [chipsOpen, setChipsOpen] = useState<Readonly<Record<string, boolean>>>({});
   const raiseFor = useMemo(() => {
@@ -1605,6 +1614,7 @@ function TopBar(props: {
     phase: !props.compact && dm && phaseNames !== null,
     gaps: isoOffered,
     view: isoOffered && props.canFit,
+    floor: props.canFit && heldFloors.length > 1,
     strip: stripIn,
     faces: stripIn !== "none" ? (turn?.faces ?? 0) : 0,
     timerOver: stripIn !== "none" && turn?.timerOver === true,
@@ -1618,6 +1628,8 @@ function TopBar(props: {
       dm ? (nowKey ?? "") : "",
       phaseNames ?? "",
       stripIn !== "none" ? (turn?.key ?? "") : "",
+      // A switch to a longer floor name, or a floor more or fewer, measures the bar again (D-261107-215).
+      `${shownFloor?.floor?.name ?? ""}:${heldFloors.length}`,
       String(fonts),
     ],
   };
@@ -1635,6 +1647,9 @@ function TopBar(props: {
   const fold = useScoped(viewFoldSlot);
   useLayoutEffect(() => fold.setState({ folded: shape.viewFold }), [fold, shape.viewFold]);
   useEffect(() => () => fold.setState({ folded: false }), [fold]);
+  const floorFold = useScoped(floorFoldSlot);
+  useLayoutEffect(() => floorFold.setState({ folded: shape.floor === "menu" }), [floorFold, shape.floor]);
+  useEffect(() => () => floorFold.setState({ folded: false }), [floorFold]);
   const check = useCallback(() => {
     const row = rowRef.current;
     if (!row) return;
@@ -1673,7 +1688,7 @@ function TopBar(props: {
         top: 0,
         left: 0,
         right: 0,
-        zIndex: alertsOverlay ? theme.z.alertsOverlay : viewOpen || chipOpen ? theme.z.popover : theme.z.bars,
+        zIndex: alertsOverlay ? theme.z.alertsOverlay : viewOpen || floorOpen || chipOpen ? theme.z.popover : theme.z.bars,
         padding: `${theme.safe.top} calc(${theme.safe.mapRight} + ${theme.space(3)}px) 0 calc(${theme.safe.left} + ${theme.space(3)}px)`,
         background: theme.color.overlay,
         borderBottom: `${theme.line.border}px solid ${theme.color.border}`,
@@ -1728,6 +1743,7 @@ function TopBar(props: {
         {shape.phase ? <PhaseMenu /> : null}
         {props.placement === "bar" ? <InitiativeStrip placement="bar" notice={notice} stripRef={setStrip} fit={stripFit} onTurn={onTurn} /> : null}
         {props.canFit && role === "player" ? <FindButton openSheet={props.openSheet} /> : null}
+        {shape.floor === "name" || shape.floor === "icon" ? <FloorButton form={shape.floor} onOpen={setFloorOpen} /> : null}
         {props.canFit && isoOffered ? <ViewButton onOpen={setViewOpen} folded={shape.viewFold} /> : null}
         {props.canFit ? <FitButton /> : null}
         {shape.fullscreen ? <FullscreenButton /> : null}

@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import fc from "fast-check";
 import { STRIP_FACES_FEW, STRIP_NAME_MIN_PX, STRIP_NAME_PX, STRIP_NAME_YOURS_PX } from "../features/encounter/band.ts";
 import { fitKey, fitStep, sameRecord, shapeOf, stepsFor, WIDE_STEPS, type BarContent, type BarShape, type FitRecord } from "./topBarFit.ts";
+import { FLOOR_NAME_MAX_PX } from "../features/floors/bar.ts";
 
 /*
  * The top bar's give-way (docs/design/design-v1-qol.md 4, C6 and The give-way): after
@@ -23,6 +24,8 @@ type Words = {
   turnName: number;
   nowPlaying: number;
   timer: number;
+  /** The shown floor's name on Floor (features/floors/FloorButton.tsx), before its cap. */
+  floor?: number;
 };
 
 type Bar = { content: BarContent; words: Words; fight: boolean };
@@ -63,6 +66,9 @@ function drawn(bar: Bar, shape: BarShape): { parts: { w: number; min: number }[]
     parts.push(fixed(chip + 8 + (dm ? 72 : yours ? 91 : 0)));
   }
   if (c.role === "player") parts.push(fixed(44));
+  // Floor: its icon and the floor's name up to FLOOR_NAME_MAX_PX, inside 8 px each side, or the 44 px icon.
+  if (shape.floor === "name") parts.push(fixed(16 + 20 + 6 + Math.min(words.floor ?? 0, FLOOR_NAME_MAX_PX)));
+  if (shape.floor === "icon") parts.push(fixed(44));
   if (c.view && !shape.viewFold) parts.push(fixed(44));
   parts.push(fixed(44));
   if (shape.fullscreen) parts.push(fixed(44));
@@ -101,6 +107,7 @@ const words: fc.Arbitrary<Words> = fc.record({
   turnName: fc.integer({ min: 20, max: 260 }),
   nowPlaying: fc.integer({ min: 140, max: 250 }),
   timer: fc.integer({ min: 30, max: 48 }),
+  floor: fc.integer({ min: 30, max: 220 }),
 });
 
 /** A bar's content as TopBar builds it, Search and Now playing among the parts. */
@@ -117,6 +124,7 @@ const bars: fc.Arbitrary<Bar> = fc
     phase: fc.boolean(),
     iso: fc.boolean(),
     canFit: fc.boolean(),
+    floors: fc.boolean(),
     fight: fc.boolean(),
     faces: fc.integer({ min: 0, max: 5 }),
     timer: fc.constantFrom("none", "running", "over"),
@@ -139,6 +147,7 @@ const bars: fc.Arbitrary<Bar> = fc
       phase: !r.phone && dm && r.phase,
       gaps: r.iso,
       view: r.iso && r.canFit,
+      floor: r.canFit && r.floors,
       strip,
       faces: strip !== "none" && dm ? r.faces : 0,
       timerOver: strip !== "none" && r.timer === "over",
@@ -220,6 +229,7 @@ describe("the top bar's give-way (topBarFit)", () => {
       phase: true,
       gaps: true,
       view: true,
+      floor: false,
       strip: fight ? "bar" : "none",
       faces: fight ? 5 : 0,
       timerOver: false,
@@ -254,6 +264,7 @@ describe("the top bar's give-way (topBarFit)", () => {
         phase: false,
         gaps: true,
         view: true,
+        floor: false,
         strip: "bar",
         faces: 0,
         timerOver: over,
@@ -286,7 +297,7 @@ describe("the top bar's give-way (topBarFit)", () => {
   });
 
   test("a DM's 320 x 568 phone at 130% in a blackout with a long room name fits: last, the crossed eye slims to the dot's width (QC-B)", () => {
-    const content: BarContent = { phone: true, role: "dm", search: true, nowPlaying: false, clock: false, blackout: true, fullscreen: false, phase: false, gaps: true, view: true, strip: "none", faces: 0, timerOver: false, yourTurn: false, words: ["The Sunless Citadel and the Gulthias Tree"] };
+    const content: BarContent = { phone: true, role: "dm", search: true, nowPlaying: false, clock: false, blackout: true, fullscreen: false, phase: false, gaps: true, view: true, floor: false, strip: "none", faces: 0, timerOver: false, yourTurn: false, words: ["The Sunless Citadel and the Gulthias Tree"] };
     const bar: Bar = { content, words: { room: 330, youName: 60, clock: 0, phase: 0, turnName: 0, nowPlaying: 0, timer: 0 }, fight: false };
     const key = fitKey(content);
     const steps = stepsFor(content);
@@ -305,7 +316,7 @@ describe("the top bar's give-way (topBarFit)", () => {
   });
 
   test("the next faces go from five to three, then none, the DM's alone", () => {
-    const base: BarContent = { phone: false, role: "dm", search: false, nowPlaying: false, clock: false, blackout: false, fullscreen: false, phase: false, gaps: false, view: false, strip: "bar", faces: 5, timerOver: false, yourTurn: false, words: [] };
+    const base: BarContent = { phone: false, role: "dm", search: false, nowPlaying: false, clock: false, blackout: false, fullscreen: false, phase: false, gaps: false, view: false, floor: false, strip: "bar", faces: 5, timerOver: false, yourTurn: false, words: [] };
     assert.deepEqual(stepsFor(base), ["facesThree", "dmDot", "facesNone", "turnName"]);
     const record = (taken: number): FitRecord => ({ key: fitKey(base), width: 500, taken, nameCap: null });
     assert.equal(shapeOf(base, fitKey(base), null).faces, 5);
@@ -326,6 +337,7 @@ describe("the top bar's give-way (topBarFit)", () => {
       "nowPlayingOff",
       "fullscreenOff",
       "phaseOff",
+      "floorIcon",
       "facesNone",
       "tightGaps",
       "viewFold",
@@ -334,7 +346,7 @@ describe("the top bar's give-way (topBarFit)", () => {
       "yourTurnOff",
       "eyeSlim",
     ]);
-    const phone: BarContent = { phone: true, role: "dm", search: true, nowPlaying: true, clock: false, blackout: true, fullscreen: false, phase: false, gaps: true, view: true, strip: "movable", faces: 4, timerOver: false, yourTurn: false, words: [] };
+    const phone: BarContent = { phone: true, role: "dm", search: true, nowPlaying: true, clock: false, blackout: true, fullscreen: false, phase: false, gaps: true, view: true, floor: false, strip: "movable", faces: 4, timerOver: false, yourTurn: false, words: [] };
     assert.deepEqual(stepsFor(phone), ["band", "blackoutFold", "searchPanels", "nowPlayingOff", "tightGaps", "viewFold", "eyeSlim"]);
     assert.deepEqual(stepsFor({ ...phone, blackout: false }), ["band", "dmDot", "searchPanels", "nowPlayingOff", "tightGaps", "viewFold"], "the dot is already its width");
     assert.ok(!stepsFor({ ...phone, role: "player", blackout: false }).includes("eyeSlim"), "a player has no eye");
@@ -343,8 +355,33 @@ describe("the top bar's give-way (topBarFit)", () => {
     assert.equal(shape.nowPlaying, "compact", "and Now playing as its compact form");
   });
 
+  test("Floor shows its name, then its icon right after the Phase menu leaves, then folds with View into the Menu panel, and a phone starts at its icon (docs/design/design-v1-floors.md 18.6)", () => {
+    const w: Words = { room: 150, youName: 60, clock: 135, phase: 130, turnName: 120, nowPlaying: 200, timer: 40, floor: 90 };
+    const dm: BarContent = { phone: false, role: "dm", search: true, nowPlaying: false, clock: true, blackout: false, fullscreen: true, phase: true, gaps: true, view: true, floor: true, strip: "none", faces: 0, timerOver: false, yourTurn: false, words: ["Tower", "Upper floor:3"] };
+    const steps = stepsFor(dm);
+    assert.deepEqual(steps, ["searchIcon", "clockOff", "dmDot", "fullscreenOff", "phaseOff", "floorIcon", "tightGaps", "viewFold"]);
+    const bar: Bar = { content: dm, words: w, fight: false };
+    assert.equal(settle(bar, 1440, null).shape.floor, "name", "a wide bar has room for the floor's name");
+    // Narrower and narrower, each form in its turn, never one with the next part's step taken first.
+    const forms = [1440, 900, 760, 700, 640, 600, 560, 520, 480, 440, 400, 360, 320, 280, 240].map((width) => settle(bar, width, null).shape);
+    const order = forms.map((f) => f.floor);
+    assert.deepEqual([...new Set(order)], ["name", "icon", "menu"]);
+    for (const f of forms) if (f.floor !== "name") assert.equal(f.phase, false, "the floor's name leaves only after the Phase menu");
+    for (const f of forms) if (f.phase) assert.equal(f.floor, "name", "and never before it");
+    for (const f of forms) assert.equal(f.floor === "menu", f.viewFold, "Floor folds with View, at one step");
+    const phone: BarContent = { ...dm, phone: true, clock: false, fullscreen: false, phase: false };
+    assert.deepEqual(stepsFor(phone), ["dmDot", "searchPanels", "tightGaps", "viewFold"], "a phone's list gains only the fold");
+    assert.equal(shapeOf(phone, fitKey(phone), null).floor, "icon", "a phone starts at the icon");
+    assert.equal(shapeOf({ ...dm, floor: false }, fitKey({ ...dm, floor: false }), null).floor, null, "one floor held, no Floor");
+    // Without View on the bar, Floor still folds into the Menu panel at the last step.
+    const alone: BarContent = { ...phone, view: false, gaps: false };
+    assert.deepEqual(stepsFor(alone), ["dmDot", "searchPanels", "viewFold"]);
+    // The floor's name is part of the bar's words, so a switch to a longer one is new content, measured again.
+    assert.notEqual(fitKey(dm), fitKey({ ...dm, words: ["Tower", "The long gallery above the hall:3"] }));
+  });
+
   test("a record for other content draws the first shape, and a wider row starts over before it measures", () => {
-    const c: BarContent = { phone: false, role: "dm", search: true, nowPlaying: false, clock: true, blackout: false, fullscreen: true, phase: false, gaps: false, view: false, strip: "none", faces: 0, timerOver: false, yourTurn: false, words: ["a"] };
+    const c: BarContent = { phone: false, role: "dm", search: true, nowPlaying: false, clock: true, blackout: false, fullscreen: true, phase: false, gaps: false, view: false, floor: false, strip: "none", faces: 0, timerOver: false, yourTurn: false, words: ["a"] };
     const stale: FitRecord = { key: "other", width: 600, taken: 3, nameCap: null };
     assert.equal(shapeOf(c, fitKey(c), stale).search, "field");
     const drawnRecord: FitRecord = { key: fitKey(c), width: 600, taken: 2, nameCap: null };
@@ -353,7 +390,7 @@ describe("the top bar's give-way (topBarFit)", () => {
   });
 
   test("a pixel's rounding left over cuts the name again, at the same width", () => {
-    const c: BarContent = { phone: false, role: "dm", search: false, nowPlaying: false, clock: false, blackout: false, fullscreen: false, phase: false, gaps: false, view: false, strip: "bar", faces: 0, timerOver: false, yourTurn: false, words: [] };
+    const c: BarContent = { phone: false, role: "dm", search: false, nowPlaying: false, clock: false, blackout: false, fullscreen: false, phase: false, gaps: false, view: false, floor: false, strip: "bar", faces: 0, timerOver: false, yourTurn: false, words: [] };
     const key = fitKey(c);
     const capped: FitRecord = { key, width: 500, taken: 2, nameCap: 90 };
     assert.deepEqual(stepsFor(c), ["dmDot", "turnName"]);
