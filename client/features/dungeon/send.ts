@@ -1,4 +1,4 @@
-import type { BuildChunk, RoomState, Trap } from "#shared/model.ts";
+import type { BuildChunk, JournalPage, Light, Pin, RoomState, Stamp, Token, Trap, TrapRig } from "#shared/model.ts";
 import { stableStringify } from "#shared/project.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { OpAnswer, RoomActions } from "../../state/types.ts";
@@ -23,23 +23,70 @@ export type DungeonOutcome = { k: "complete"; checked: boolean } | { k: "none"; 
  */
 export type SendRoom = { store: Pick<RoomViewStore, "getState" | "subscribe">; shown: () => boolean; checkMs?: number };
 
-type Contents = Pick<RoomState, "buildChunks"> & { traps: Readonly<Record<string, Pick<Trap, "sceneId" | "zone" | "state" | "rig"> | undefined>> };
+type Of<T> = Readonly<Record<string, T | undefined>>;
+type Contents = Pick<RoomState, "buildChunks"> & {
+  traps: Of<Pick<Trap, "sceneId" | "zone" | "state" | "rig">>;
+  stamps?: Of<Pick<Stamp, "sceneId" | "art" | "x" | "y" | "w" | "h" | "rotation">>;
+  lights?: Of<Pick<Light, "sceneId" | "x" | "y" | "bright" | "dim">>;
+  tokens?: Of<Pick<Token, "id" | "sceneId" | "kind" | "name" | "x" | "y" | "visibility">>;
+  pins?: Of<Pick<Pin, "sceneId" | "x" | "y" | "label" | "pageId" | "visibility">>;
+  journal?: Of<Pick<JournalPage, "title" | "folder" | "access" | "blocks">>;
+};
 
 /**
- * A scene's build as the outcome compares it: each chunk's cells, edges,
- * heights and stairs by its place, and its traps by zone, state and rig.
- * Revs, walls versions, ids and order are left out, since each grows from
- * its prior value or is fresh at Make.
+ * How the contents name an id that something else names: a stored room's
+ * as it holds it, and the scratch room's placeholders as Make made them
+ * fresh (ops.ts `withIds`). One the map does not hold names nothing Make
+ * made, so it never matches a stored id.
  */
-export function sceneContents(state: Contents, sceneId: string): string {
+export type IdOf = (id: string) => string;
+const AS_STORED: IdOf = (id) => id;
+
+/** The ids Make gave the scratch room's placeholders, as the contents read them. */
+export function madeIds(ids: ReadonlyMap<string, string> | undefined): IdOf {
+  return (id) => ids?.get(id) ?? `not made: ${id}`;
+}
+
+function sorted(items: Iterable<unknown>): string[] {
+  return [...items].map((x) => stableStringify(x)).sort();
+}
+
+/**
+ * A scene as the outcome compares it: each chunk's cells, edges, heights
+ * and stairs by its place, its traps by zone, state and rig, its stamps by
+ * art, place, size and turn, its lights by place and radii, its tokens by
+ * kind, name, place and visibility, its pins by place, label and
+ * visibility, and the journal pages its pins link by title, folder, access
+ * and block texts. Revs, walls versions, ids and order are left out, since
+ * each grows from its prior value or is fresh at Make. A reference is
+ * compared by what it names, through `idOf` (phase 2, section 6): a trap's
+ * show action by its token's id, which the token's own entry carries, and
+ * a pin's page by its id. So a wrong target never matches, and an older
+ * key page of the same title, which Delete leaves, is never taken for the
+ * one this send made.
+ */
+export function sceneContents(state: Contents, sceneId: string, idOf: IdOf = AS_STORED): string {
   const chunks: [string, Pick<BuildChunk, "cells" | "edges" | "heights" | "up">][] = [];
   for (const c of Object.values(state.buildChunks)) {
     if (c.sceneId === sceneId) chunks.push([`${c.cx},${c.cy}`, { cells: c.cells, edges: c.edges, heights: c.heights, up: c.up }]);
   }
   chunks.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  const traps: string[] = [];
-  for (const t of Object.values(state.traps)) if (t?.sceneId === sceneId) traps.push(stableStringify({ zone: t.zone, state: t.state, rig: t.rig }));
-  return stableStringify({ chunks, traps: traps.sort() });
+  const on = <T extends { sceneId: string }>(r: Of<T> | undefined): T[] => Object.values(r ?? {}).filter((x): x is T => x?.sceneId === sceneId);
+  const named = (rig: TrapRig | undefined): TrapRig | undefined =>
+    rig && { ...rig, actions: rig.actions.map((a) => ("show" in a && "tokenId" in a.show ? { show: { tokenId: idOf(a.show.tokenId) } } : a)) };
+  const traps = sorted(on(state.traps).map((t) => ({ zone: t.zone, state: t.state, rig: named(t.rig) })));
+  const stamps = sorted(on(state.stamps).map((s) => ({ art: s.art, x: s.x, y: s.y, w: s.w, h: s.h, rotation: s.rotation })));
+  const lights = sorted(on(state.lights).map((l) => ({ x: l.x, y: l.y, bright: l.bright, dim: l.dim })));
+  const tokens = sorted(on(state.tokens).map((t) => ({ id: idOf(t.id), kind: t.kind, name: t.name, x: t.x, y: t.y, visibility: t.visibility })));
+  const pins = on(state.pins);
+  const pages = sorted(
+    [...new Set(pins.flatMap((p) => (p.pageId !== undefined ? [p.pageId] : [])))].map((id) => {
+      const page = state.journal?.[id];
+      return { id: idOf(id), page: page ? { title: page.title, folder: page.folder, access: page.access, blocks: page.blocks.map((b) => b.text) } : null };
+    }),
+  );
+  const pinned = sorted(pins.map((p) => ({ x: p.x, y: p.y, label: p.label, visibility: p.visibility, page: p.pageId === undefined ? null : idOf(p.pageId) })));
+  return stableStringify({ chunks, traps, stamps, lights, tokens, pins: pinned, pages });
 }
 
 /** How it ended, from the answers and the room after: the import's rule, with the contents compared whole. */
@@ -59,10 +106,13 @@ export function dungeonOutcome(answers: Answers, created: OpAnswer, room: { exis
  * on its ask) counts as refused, and when the scene itself is refused so,
  * nothing after it is sent. `onAnswered` hears each
  * answer as it comes. The scene opens once complete, or to be compared
- * when answers were lost, unless a hidden dialog's DM moved on.
+ * when answers were lost, unless a hidden dialog's DM moved on. `ids` is
+ * `withIds`' map, which the comparison follows references through:
+ * without it a dungeon whose stones or pins name another of its ids is
+ * never confirmed after a lost answer.
  */
 export async function sendDungeon(
-  made: { ops: ClientOp[]; sceneId: string; room: RoomState },
+  made: { ops: ClientOp[]; sceneId: string; room: RoomState; ids?: ReadonlyMap<string, string> },
   actions: RoomActions,
   onAnswered: (n: number, of: number) => void,
   room: SendRoom,
@@ -111,7 +161,7 @@ export async function sendDungeon(
     if (await sceneShown(store, sceneId, room.checkMs ?? CHECK_MS)) {
       const view = store.getState().view;
       const scratchScene = Object.keys(made.room.scenes)[0] ?? "";
-      same = view !== null && sceneContents(view, sceneId) === sceneContents(made.room, scratchScene);
+      same = view !== null && sceneContents(view, sceneId) === sceneContents(made.room, scratchScene, madeIds(made.ids));
     }
   }
   const outcome = dungeonOutcome(answers, created, { exists: exists(), same });

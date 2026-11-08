@@ -5,26 +5,31 @@ import type { RoomState } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { holds } from "#shared/propertyTestutil.ts";
 import type { OnAnswer, OpAnswer, RoomActions, RoomView } from "../../state/types.ts";
-import { dialogScene, twoRooms } from "./handPlans.ts";
-import { withIds } from "./ops.ts";
+import { dialogScene, dressedRooms, HAND_SETTINGS, handKey, twoRooms } from "./handPlans.ts";
+import { PAGE_PLACEHOLDER, withIds } from "./ops.ts";
 import { landAll, previewOf, scratchRoom } from "./scratch.ts";
-import { dungeonOutcome, sceneContents, sendDungeon, type DungeonOutcome, type SendRoom } from "./send.ts";
+import { dungeonOutcome, madeIds, sceneContents, sendDungeon, type DungeonOutcome, type SendRoom } from "./send.ts";
 import { DEFAULT_CONTEXT, DEFAULT_SETTINGS } from "./settings.ts";
 import { NO_ANSWERS } from "../uvtt/rules.ts";
 
 type Sent = { op: ClientOp; group: string | undefined; groupScope: string | undefined; onAnswer: OnAnswer | undefined; n: number | null };
 type Shown = Pick<RoomView, "sceneId" | "sceneLoad" | "ended"> & { view: RoomState | null };
 
-/** A made dungeon, and the room the server would hold once every op of it is taken. */
-function made() {
-  const plan = twoRooms();
-  const preview = previewOf(DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", dialogScene(plan), DEFAULT_CONTEXT, null, () => plan);
+/**
+ * A made dungeon, and the room the server would hold once every op of it
+ * is taken: twoRooms, or dressed with a stone its trap shows and the key's
+ * page its pins link, whose check follows those references through
+ * `withIds`' map.
+ */
+function made(dressed = false) {
+  const plan = dressed ? dressedRooms() : twoRooms();
+  const preview = previewOf(dressed ? HAND_SETTINGS : DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", dialogScene(plan), DEFAULT_CONTEXT, dressed ? handKey() : null, () => plan);
   assert.ok(preview.ok);
   let id = 0;
   const fresh = withIds(preview.ops, () => `fresh-${++id}`);
   const stored = landAll(scratchRoom(), fresh.ops);
   assert.ok(stored.ok);
-  return { made: { ops: fresh.ops, sceneId: fresh.sceneId, room: preview.room }, stored: stored.room };
+  return { made: { ops: fresh.ops, sceneId: fresh.sceneId, room: preview.room, ids: fresh.ids }, stored: stored.room };
 }
 
 /**
@@ -87,8 +92,10 @@ function table(opts: { stored: RoomState | null; refuseAtInput?: (op: ClientOp, 
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-async function run(answers: (i: number, op: ClientOp) => OpAnswer, o: Omit<Parameters<typeof table>[0], "stored"> & { stored?: RoomState | null; exists?: boolean } = {}) {
-  const { made: m, stored } = made();
+async function run(answers: (i: number, op: ClientOp) => OpAnswer, o: Omit<Parameters<typeof table>[0], "stored"> & { stored?: RoomState | null; exists?: boolean; dressed?: boolean; noIds?: boolean } = {}) {
+  const { made: built, stored } = made(o.dressed);
+  const { ids: _ids, ...bare } = built;
+  const m = o.noIds ? bare : built;
   const t = table({ ...o, stored: o.stored === undefined ? stored : o.stored });
   const progress: [number, number][] = [];
   const done = sendDungeon(m, t.actions, (a, of) => progress.push([a, of]), t.room);
@@ -206,6 +213,77 @@ test("DG-B: the compared contents leave out revs, walls versions, ids and order"
   const stair = structuredClone(stored);
   for (const chunk of Object.values(stair.buildChunks)) delete chunk.up;
   assert.notEqual(sceneContents(stair, m.sceneId), sceneContents(m.room, scratchId));
+});
+
+test("DG2B: lost answers on a dungeon with a stone and pins are checked through the id map: whole is complete, checked", async () => {
+  const lost = await run((i) => (i % 3 === 1 ? "unknown" : "taken"), { dressed: true });
+  assert.deepEqual(lost.outcome, { k: "complete", checked: true });
+  assert.ok(lost.m.ops.some((op) => op.t === "pin.put") && lost.m.ops.some((op) => op.t === "token.create"));
+});
+
+test("DG2B: a show action naming another token, a pin linking another page, an older key page of the same title and a missing page never match", async () => {
+  const { made: m, stored } = made(true);
+  const scratchId = Object.keys(m.room.scenes)[0]!;
+  const ours = sceneContents(m.room, scratchId, madeIds(m.ids));
+  assert.equal(sceneContents(stored, m.sceneId), ours, "the whole stored scene matches");
+  const pageId = m.ids.get(PAGE_PLACEHOLDER)!;
+  const stoneId = Object.values(stored.tokens).find((t) => t.sceneId === m.sceneId)!.id;
+  // The same stone under another id, which the trap names: a token with the same look is not the one Make made.
+  const otherStone = structuredClone(stored);
+  const stone = otherStone.tokens[stoneId]!;
+  delete otherStone.tokens[stoneId];
+  otherStone.tokens["someone-elses"] = { ...stone, id: "someone-elses" };
+  for (const t of Object.values(otherStone.traps)) for (const a of t.rig?.actions ?? []) if ("show" in a && "tokenId" in a.show) a.show.tokenId = "someone-elses";
+  assert.notEqual(sceneContents(otherStone, m.sceneId), ours, "a wrong token");
+  // The stone gone and one like it in its place, the trap still naming the stone's id: the trap shows nothing.
+  const lookAlike = structuredClone(stored);
+  lookAlike.tokens["look-alike"] = { ...lookAlike.tokens[stoneId]!, id: "look-alike" };
+  delete lookAlike.tokens[stoneId];
+  assert.notEqual(sceneContents(lookAlike, m.sceneId), ours, "a token like the stone in its place");
+  // An older key page of the same title and words, which Delete left, linked by the pins in place of this send's.
+  const olderPage = structuredClone(stored);
+  olderPage.journal.older = { ...olderPage.journal[pageId]!, id: "older" };
+  for (const p of Object.values(olderPage.pins)) p.pageId = "older";
+  delete olderPage.journal[pageId];
+  assert.notEqual(sceneContents(olderPage, m.sceneId), ours, "an older page of the same title");
+  const both = structuredClone(stored);
+  both.journal.older = { ...both.journal[pageId]!, id: "older" };
+  assert.equal(sceneContents(both, m.sceneId), ours, "an older page beside this send's is left alone");
+  const unlinked = structuredClone(stored);
+  delete Object.values(unlinked.pins)[0]!.pageId;
+  assert.notEqual(sceneContents(unlinked, m.sceneId), ours, "a pin no longer linked while another still is");
+  const noPage = structuredClone(stored);
+  delete noPage.journal[pageId];
+  assert.notEqual(sceneContents(noPage, m.sceneId), ours, "a missing page");
+  const words = structuredClone(stored);
+  words.journal[pageId]!.blocks[1]!.text += " More.";
+  assert.notEqual(sceneContents(words, m.sceneId), ours, "a page whose words differ");
+  for (const [what, edit] of [
+    ["a stamp moved", (r: RoomState) => void (Object.values(r.stamps)[0]!.x += 1)],
+    ["a light's radius", (r: RoomState) => void (Object.values(r.lights)[0]!.dim = 5)],
+    ["a stone shown", (r: RoomState) => void (Object.values(r.tokens)[0]!.visibility = "all")],
+    ["a pin for players", (r: RoomState) => void (Object.values(r.pins)[0]!.visibility = "all")],
+    ["a pin's number", (r: RoomState) => void (Object.values(r.pins)[0]!.label = "9")],
+  ] as const) {
+    const changed = structuredClone(stored);
+    edit(changed);
+    assert.notEqual(sceneContents(changed, m.sceneId), ours, what);
+  }
+  const revs = structuredClone(stored);
+  for (const x of [...Object.values(revs.stamps), ...Object.values(revs.lights), ...Object.values(revs.tokens), ...Object.values(revs.pins), ...Object.values(revs.journal)]) x.rev += 5;
+  assert.equal(sceneContents(revs, m.sceneId), ours, "revs are left out");
+});
+
+test("DG2B: with a wrong token, an older page in place of this send's, or without the id map, lost answers end unconfirmed", async () => {
+  const { stored } = made(true);
+  const pageId = [...Object.keys(stored.journal)][0]!;
+  const older = structuredClone(stored);
+  older.journal.older = { ...older.journal[pageId]!, id: "older" };
+  delete older.journal[pageId];
+  for (const p of Object.values(older.pins)) p.pageId = "older";
+  assert.deepEqual((await run((i) => (i === 2 ? "unknown" : "taken"), { dressed: true, stored: older })).outcome, { k: "unconfirmed" });
+  const noIds = await run((i) => (i === 2 ? "unknown" : "taken"), { dressed: true, noIds: true });
+  assert.deepEqual(noIds.outcome, { k: "unconfirmed" }, "the stone's and pins' references cannot be followed");
 });
 
 /** The outcome rule, written out plainly, as the oracle for the randomized sends. */
