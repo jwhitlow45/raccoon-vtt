@@ -886,7 +886,7 @@ When you want to move, damage or hide a whole group, select them all first. Ther
 
 Drag any one of the selected tokens to move them all. The group gets an action bar of its own with one **HP entry** for all of them, **Conditions** and elevation, and for you, **Roll**, **Request a roll**, **Hidden**, **Locked**, **Start a fight** or **Add to the fight**, **More** (three dots, which hold the ring, size, layer, image, what players see, and owners), **Delete**, and **Clear** (a cross, which lets go of the group without changing anything). Each change to the group is one undo step. On a phone held upright, the group's bar rests as a strip at the foot of the map, like a single token's, with "4 selected" in its header. Press **Done** in the Multi-select bar when you are finished.
 
-For a pack of monsters of one kind, a monster's action bar offers **All 4 Goblin Warriors** when more than one stands on the scene, and one tap selects the whole pack, hidden ones included. The group's **Save** then opens the group save for the pack, with its own ability picker.
+For a pack of monsters of one kind, a monster's action bar offers **All 4 Goblin Warriors** while more than one of them is still alive on the scene, and one tap selects the living pack, hidden ones included, so the fallen are left out of whatever the group does next. The group's **Save** then opens the group save for the pack, with its own ability picker.
 
 ## HP, damage and conditions
 

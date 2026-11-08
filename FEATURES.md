@@ -131,6 +131,7 @@ The app's Docs page (/docs) lists every written doc. To learn the tools as a DM,
   - Where the top bar leaves the pane too little room, as on a small phone held sideways at 130%, the pane stands over the top bar, so its header and Close stay in sight and take a tap.
   - The action bar keeps clear of notices that last, such as Reconnecting or the Starting view bar.
   - A creature's turn card never puts the alerts into their one row or moves the bar: under 600 px wide, or where it would not fit above the bar, it folds to one row, "Adult Red Dragon's turn: 3 uses", with Show, and where even that row would meet the bar, it waits in the creature's tracker row and bar instead.
+  - A turn card opened with Show stays open over the bar: it stops above the bar and scrolls, with "Scroll for more", so the bar's Apply and End turn still take a tap.
   - Layout: Toasts keep 8 px left of a docked action bar, and the one line over the top bar, where the keyboard raises the bar there, keeps 12 px. On a phone, a toast that comes while the alerts show cards starts 8 px below all drawn cards, a creature's turn card included, so it clears their buttons. If less than 44 px remains below them, it stays above the cards, which reserve at least an 8 px gap below the toast.
 - A toast that has no room below the measured alerts stays above them.
   - Layout: The cards immediately clear its bottom by at least 8 px.
@@ -467,7 +468,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 - The DM also gets Roll, which opens the Dice panel's group rolls, Request a roll, Hidden, Locked, Start a fight or Add to the fight (objects stay out of the fight), Delete, and More: ring color, size, layer, image, how players see HP, hiding names from players, "Always visible, even under fog", and owners.
 - Each action shows only when you may use it on every selected token, except Request a roll and Start a fight or Add to the fight, which show when any of them can take part. A player who selected their own creatures gets conditions and elevation.
 - **Save**, for the DM, on the group's bar opens the group save for the selected creatures at once, with its own ability picker. A page that already holds rolls asks to replace them first, in the bar.
-- **All 4 Goblin Warriors**, for the DM, in a monster's action bar (on a phone, the expanded bar), selects every token of that monster on its scene as a group, hidden ones too, in number order. It shows when there is more than one, and not for a lone or renamed token. The group's HP entry, Conditions, Roll and Save then follow.
+- **All 4 Goblin Warriors**, for the DM, in a monster's action bar (on a phone, the expanded bar), selects every living token of that monster on its scene as a group, hidden ones too, in number order, and counts only those, so the dead are never in the group. It shows when two or more are alive, and not for a lone or renamed token. The group's HP entry, Conditions, Roll and Save then follow.
 - A change to the whole group undoes as one step.
 
 ### Riding, carrying and dragging
@@ -843,14 +844,15 @@ A scene can have weather over its map: rain, snow, fog, falling leaves, ash or s
 - Players type in their own Initiative, or tap Roll in their row's Initiative box.
   - With "Players may type their roll totals" off, they roll it, and the server refuses a typed one, whether set on their row or given as the row joins the fight.
   - The DM types in the monsters', taps Roll in a row's box, or uses **Auto Initiative**: by creature (identical monsters share a roll), one each, or all at once.
+  - **Type several values** opens a box for each row, the first one focused and in view, with identical monsters sharing a box until Split. Save values sends only the boxes the DM changed.
   - A row's Roll shows while it has no value and the row has room for it, and otherwise its options hold "Initiative, sets its row". The DM's Roll shows on rows no player plays. Once set, its options hold "Roll again, replaces 17", so a stray tap never reorders the fight.
   - Each roll is a d20 plus the creature's modifier, with Advantage or Disadvantage from its conditions. Its dice roll on the server and show in the DM's Recent rolls. Players see the totals, never the dice. It sits right after the order, with what it rolled.
   - A row's Roll has the one-roll options. Auto Initiative and a monster's Roll Initiative have them too, for Advantage, Disadvantage or Normal, their dice always the DM's alone, and Auto Initiative applies a pick before it groups the monsters.
 - "Use Initiative scores for monsters" in Room settings, or "Monsters use Initiative scores" in the Initiative panel, gives them 10 + their Dexterity modifier instead of a roll.
 - **Roll monsters' Initiative** (DM, Initiative panel): a switch under Start a fight with, on by default and kept on this device for each room. Help: "Auto Initiative rolls for every monster as the fight starts."
-  - With it on, Everyone here, Visible to players and Selected token start the fight and then roll for the monster rows that have no value, by the tracker's sharing mode. The pressed button reads "Rolling…" and every roll button waits until the totals land.
+  - With it on, Everyone here, Visible to players and Selected token start the fight and then roll for the monster rows that have no value, by the tracker's sharing mode. The fight shows at once, and Auto Initiative reads "Rolling…", with every roll button waiting, until the totals land.
   - Starting a fight of any size is one Undo step, and its rolls are another, so Undo takes back the totals first, then the start.
-  - Offline, the start waits with the rest and the result card says "Rolling needs a connection."
+  - Offline, the start waits with the rest, and the monsters roll once the server takes it.
   - With "Monsters use Initiative scores" on, the switch rolls only the monster rows still without a score, such as a custom monster, and with every row valued it rolls nothing.
 - The order runs high to low.
   - Dragging rows settles ties.
@@ -914,7 +916,7 @@ A scene can have weather over its map: rain, snow, fog, falling leaves, ash or s
 - **The turn card**: from a creature's turn start to its end, whoever answers for it gets its menu, "Adult Red Dragon's turn": Use Legendary Resistance, Legendary Actions with their pips and "After other creatures' turns" with no button on its own turn, its recharge and X/Day abilities, a character's class resources, and a block for each other creature of the turn they answer for, such as a controlled mount.
   - Its x, Dismiss, hides it on this device for the turn, and the chevron before its title, Collapse, folds it back where it was folded, to one line of its name and its count that opens again on a tap.
   - It stands last among the alerts, under the time-up line and notices, so on a phone held sideways those stay whole above a docked action bar.
-- **A creature's attacks on its turn card**: the card lists them as the Dice panel's rows (Attack, Damage, Critical and the rest), with this turn's results under each, the card's title counting "2 attacks, 3 uses". It says "Loading attacks…" while they load. Tapping Attack or Damage there rolls as in the Dice panel. A player's own turn card lists their creature's weapons. If the rolls table fails to load, an attacks-only turn card stays and says "The attacks did not load. Reload to try again."
+- **A creature's attacks on its turn card**: the card lists them as the Dice panel's rows (Attack, Damage, Critical and the rest), with this turn's results under each, the card's title counting "2 attacks, 3 uses". A reload during the turn shows those results again, read back from the log. It says "Loading attacks…" while they load. Tapping Attack or Damage there rolls as in the Dice panel. A player's own turn card lists their creature's weapons. If the rolls table fails to load, an attacks-only turn card stays and says "The attacks did not load. Reload to try again."
 - A Ready marker (Hold is the same thing) records the trigger and shows on the row and the token until the creature's next turn. Players learn only that a monster readied, not its trigger.
 - The combat log keeps each HP change ("Goblin 2 takes 7 damage, 3/7 left"). The DM can take any one back while the creature is still as that change left it.
 - An HP change whose take-back record is very large, such as one that removed many effects at once, can't be taken back.
@@ -1068,7 +1070,7 @@ Every roll happens on the server, with a secure random source, so everyone sees 
 The DM asks players for a saving throw or an ability check, and each player rolls it in the app or types the total they rolled.
 
 - "Request a roll" is in the action bar of several selected creatures that players play. For one creature, the bar's Roll opens its options, whose "Ask Bree to roll" switch asks its player. "Ask the party" is in the party bar, shortened to "Ask" while the bar is folded.
-- **Recent DCs** (DM): for a save, the DCs this device sent last stand beside the DC field under **Recent**, as "DC 15", and a tap fills the field. They are kept for each room, lowest first, and never offered for a check, which keeps the typical DCs. The group save offers the same ones, on a line of their own under its DC field.
+- **Recent DCs** (DM): for a save, the DCs this device sent or rolled last stand beside the DC field under **Recent**, as "DC 15", and a tap fills the field. They are kept for each room, lowest first, and never offered for a check, which keeps the typical DCs. The group save offers the same ones, on a line of their own under its DC field, and each new page offers the DC the last one rolled.
 - One tap picks the roll: a save or a check by ability, or a skill from a list, which starts at its usual ability and can go with another. Nothing is picked until the DM picks it, and a later tap replaces the whole roll. "Or a second choice" lets the creature pick between two, such as "Strength (Athletics) or Dexterity (Acrobatics)". Either can be removed.
 - The DC, or none, on one row with the typical DCs for a check as chips from 5 (Very easy) to 30 (Nearly impossible).
 - Creatures, as chips. "Ask the party" starts with the characters on the players' scene picked, or every character when the DM is looking at another scene.
@@ -1378,7 +1380,7 @@ The DM asks players for a saving throw or an ability check, and each player roll
   - A closed handout stays closed after a reload, and a reload of the same tab brings back the one that was open. Any handout showing opens again from the Library. Its picture there opens it too, at the page it was left on, and closing it comes back to the Library.
 - **Recent handouts** (DM panel, Handouts): under **Recent**, the list "Recent handouts" holds the last five handouts this device showed in this room, newest first, with one button each that names its audience: "Show to everyone", "Show to Pat", "Show to Pat and Ana" or "Show to Pat, Ana and Lee". A document reads "Document" and is shown with its pages as they are now, in their current order.
   - A handout showing now is left out, since the Showing list has it with Hide. A member who left is dropped from the audience, and an entry with no one left, a deleted image or a deleted document is not offered.
-  - A re-show is busy until the server answers. A refusal says "It may not have shown. Try again." or "That handout could not be shown." in the row.
+  - A re-show is busy until the server answers. A refusal says "That handout could not be shown." in the row, with the reason after it when the room is full, and a lost answer says "It may not have shown. Try again." The DM menu's and the search's re-show say the same in a toast.
   - The list is kept on this device alone, never in the room.
 
 ## Drawing, pings and the laser
@@ -1527,13 +1529,16 @@ Search finds a panel, a setting, an action, a key, or a thing in the room, and e
   - Ties go by kind, then by the shorter title, then A to Z. How often you picked a result never reorders a list.
   - "No match for “xyz”." says the same whatever was typed.
 - **Going and doing**: a verb does it and a noun goes to it. Up and Down move, **Enter** (or a tap) goes there or does it, and **Shift+Enter** only goes there. The list's keys act from the search field, so Enter on Cancel, Close, Try again or Reload presses that button.
+  - The highlight stays on its result while the list changes under it, as when another device deletes a scene. A result that leaves the list takes the highlight with it, so Enter does nothing until you type, or press Down for the first result or Up for the last.
   - A panel, section, setting or field opens at its place, unfolds what holds it for now, focuses the control and rings it for 1.5 seconds. A fold opened this way folds again when its panel closes, and nothing is saved.
   - An action presses the real control, so its confirm, its disabled state and its Undo are the control's own. A control that is off is focused instead, and its help says why.
   - A DM menu item does what the menu does, with its warning, "Moving players…" and refusal shown in the row. An item that opens a dialog closes the search first. The same action found in a panel is the item's twin, and Shift+Enter goes to it.
   - A key runs as the key would. A token is selected, framed on the map and its action bar opened, and Shift+Enter opens its panel. A condition is added to, or taken off, the selected token, and Shift+Enter opens its Conditions.
   - A formula such as 2d6+3 shows a **Roll** row that rolls it as the Dice panel does and opens Dice. Shift+Enter puts it in the Dice field without rolling.
   - A scene, playlist, track, monster, page or handout opens at its place and never moves the map or the players.
-- **What it finds**: panels, every key, settings (the room's, the scene's, this device's), actions (Start a fight, Long Rest for the party, Roll dice, Secret roll, Send a message, Whisper to someone, Roll monsters' Initiative and more), the tokens on the scene in view, characters and their fields with their values, the selection's conditions, scenes, monsters, playlists and tracks, journal pages and handouts, and the DM menu's items, with a recent showing as "Show Belak's letter to Pat".
+- **What it finds**: panels, keys, settings (the room's, the scene's, this device's), actions (Start a fight, Long Rest for the party, Roll dice, Secret roll, Send a message, Whisper to someone, Roll monsters' Initiative and more), the tokens on the scene in view, characters and their fields with their values, the selection's conditions, scenes, monsters, playlists and tracks, journal pages and handouts, and the DM menu's items, with a recent showing as "Show Belak's letter to Pat".
+  - A key is listed while it would act now: H, L, Delete, C and "Change HP" while a token is selected, and O while two panels show. The arrows and Page keys, which need a direction, are not listed.
+  - Playlists, Play <playlist> and tracks are listed while the server has sound files on, as Sound's Library is.
   - A creature's field is listed only where its panel or page shows it, so a player lent a character's token finds its HP and conditions and none of its card.
   - The digits that start an HP change are the row "Change HP", with this device's digits, and it goes to the selected token's HP field.
   - A token's and a character's groups are found too, and land on the group's heading: Position (with Elevation, Facing and Shares sight), Image, Stat block and Companions for anyone who sees them, and Owners and Players for the DM.
