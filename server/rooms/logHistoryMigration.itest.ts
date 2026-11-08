@@ -603,6 +603,11 @@ describe("the access table's plans", () => {
       [],
       "an index led by room_id is one a planner can take for a stream read and then sort the room",
     );
+    // The table's statistics, taken now over compact pages. Left to autovacuum they come from any moment, such as
+    // one just after earlier files deleted their rooms: a few live rows over the dead ones' pages, so the planner
+    // reads a nearly empty table, prices the key's index by its pages, and takes a seq scan and a sort. A plain
+    // vacuum keeps those pages when a live row sits past them, so this one is full.
+    await pool.query("vacuum (full, analyze) room_log_access");
     // A new room's rows, written after the table's last statistics.
     const roomId = await newRoom();
     await archiveLines(pool, roomId, lines(rng(81), 0, 3_000).rows);
