@@ -4,12 +4,27 @@ import { idle, type IdleHost } from "./idle.ts";
 
 /** idle(): the warm-up's wait for a quiet moment (docs/design/design-v1-roll-animation.md 6). */
 describe("idle", () => {
-  test("with no requestIdleCallback, as in Safari, it still calls back within its maxMs", async () => {
-    const host: IdleHost = { setTimeout: (cb, ms) => setTimeout(cb, ms), clearTimeout: (id) => clearTimeout(id as ReturnType<typeof setTimeout>) };
+  /** A host whose timers run only when the test fires them, so no wall time is involved. */
+  function fakeTimers() {
+    const timers = new Map<number, { cb: () => void; ms: number }>();
+    let next = 1;
+    const host: IdleHost = {
+      setTimeout: (cb, ms) => { timers.set(next, { cb, ms }); return next++; },
+      clearTimeout: (id) => void timers.delete(id as number),
+    };
+    return { host, timers };
+  }
+
+  test("with no requestIdleCallback, as in Safari, it still calls back within its maxMs", () => {
     for (const maxMs of [10, 200]) {
-      const start = performance.now();
-      const took = await new Promise<number>((done) => idle(() => done(performance.now() - start), maxMs, host));
-      assert.ok(took <= maxMs + 25, `${maxMs} ms asked, ${took.toFixed(0)} ms taken`);
+      const { host, timers } = fakeTimers();
+      let ran = 0;
+      idle(() => ran++, maxMs, host);
+      assert.equal(timers.size, 1);
+      const [timer] = [...timers.values()];
+      assert.ok(timer!.ms <= maxMs, `${maxMs} ms asked, a ${timer!.ms} ms timer set`);
+      timer!.cb();
+      assert.equal(ran, 1);
     }
   });
 
@@ -28,11 +43,11 @@ describe("idle", () => {
     assert.equal(cancelled, 1);
   });
 
-  test("a cancelled fallback never runs", async () => {
+  test("a cancelled fallback never runs", () => {
+    const { host, timers } = fakeTimers();
     let ran = false;
-    const host: IdleHost = { setTimeout: (cb, ms) => setTimeout(cb, ms), clearTimeout: (id) => clearTimeout(id as ReturnType<typeof setTimeout>) };
     idle(() => (ran = true), 5, host)();
-    await new Promise((done) => setTimeout(done, 30));
+    assert.equal(timers.size, 0, "the timer is cleared");
     assert.equal(ran, false);
   });
 });
