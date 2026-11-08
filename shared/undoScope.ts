@@ -171,7 +171,9 @@ const HP_FIELDS = new Set(["cur", "temp"]);
 const LEGENDARY_FIELDS = new Set(["actionsMax", "actionsUsed", "resistMax", "resistUsed"]);
 const SHAPE_FIELDS = new Set(["srdId", "wildShape", "ac", "speeds", "hp"] satisfies (keyof ActorPatch)[]);
 const SPEED_FIELDS = new Set(["walk", "fly", "swim", "climb", "burrow", "hover"] satisfies (keyof Actor["speeds"])[]);
-const VISION_FIELDS = new Set(["on", "light", "perPlayer"]);
+// Time of day is a Light choice, a play step as a level is. Bright, Dim and Dark send `byClock: false`, so without it a
+// level picked by hand would turn Setup (docs/design/design-v1-calendar-c2c3.md 6.2).
+const VISION_FIELDS = new Set(["on", "light", "perPlayer", "byClock"]);
 const TRAP_PLAY_FIELDS = new Set(["state", "found"]);
 
 function onlyFields(value: object, allowed: ReadonlySet<string>): boolean {

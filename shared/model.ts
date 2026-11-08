@@ -252,7 +252,21 @@ export type RoomClock = {
   /** Players receive the clock and its lines. */
   shown: boolean;
   calendar: Calendar;
+  /**
+   * When dawn and dusk start, as the DM set them in Time
+   * (docs/design/design-v1-calendar-c2c3.md 6.1). Absent reads as DAYLIGHT
+   * (shared/calendar.ts), 6:00 AM and 6:00 PM, so a clock from before it
+   * needs no migration. Players get it with the shown clock.
+   */
+  daylight?: Daylight;
 };
+
+/**
+ * Dawn and dusk (docs/design/design-v1-calendar-c2c3.md 6.1), each the start
+ * of an hour, in seconds since midnight, whole minutes. They set the part of
+ * the day, To dawn, and the light of every scene on Time of day.
+ */
+export type Daylight = { dawn: number; dusk: number };
 
 /**
  * When a character's last Long Rest ended (docs/design/design-v1-calendar.md
@@ -635,8 +649,14 @@ export type LightLevel = "bright" | "dim" | "dark";
  * creatures they own see and the shared sight, and remembers what they
  * explored in a layer of their own. Stored only while true, so a scene
  * from before it, and every whole-party scene, is as it was.
+ *
+ * `byClock` is Light's Time of day (docs/design/design-v1-calendar-c2c3.md
+ * 6.1): the reducer rewrites `light` from the clock's current time on each
+ * real change of the clock or of the scene's light settings, so sight and
+ * the fan-out keep reading the stored level. Stored only while true. The
+ * DM's alone, since it tells players a clock exists.
  */
-export type SceneVision = { on: boolean; light: LightLevel; perPlayer?: true };
+export type SceneVision = { on: boolean; light: LightLevel; perPlayer?: true; byClock?: true };
 
 /**
  * One entry of a per-player scene's sight holder list

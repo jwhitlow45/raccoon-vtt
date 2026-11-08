@@ -12,7 +12,7 @@ import { CLASS_IDS } from "./rules/classResources.ts";
 import { DAMAGE_TYPES } from "./rules/damage.ts";
 import { cellIndexMost } from "./rules/grid.ts";
 import { sceneHexSpan } from "./rules/hex.ts";
-import { yearDays } from "./calendar.ts";
+import { DAYLIGHT_BOUNDS, yearDays } from "./calendar.ts";
 import {
   ABILITY_KEYS,
   CHUNK_CELLS,
@@ -545,13 +545,19 @@ const lightFeet = z.number().min(0).max(MAX_LIGHT_FT);
 /** A creature's carried light (Token.light): each radius at most the SRD's largest, as for a free light. */
 const tokenLight = z.strictObject({ bright: lightFeet, dim: lightFeet });
 const lightLevel = z.enum(["bright", "dim", "dark"]);
-/** A scene's vision as it is stored and created: `perPlayer` only while true (docs/design/design-v1-per-player-vision.md 6.7). */
-const sceneVision = z.strictObject({ on: z.boolean(), light: lightLevel, perPlayer: z.literal(true).optional() });
+/**
+ * A scene's vision as it is stored and created: `perPlayer` only while true
+ * (docs/design/design-v1-per-player-vision.md 6.7), and `byClock` likewise
+ * (docs/design/design-v1-calendar-c2c3.md 6.2).
+ */
+const sceneVision = z.strictObject({ on: z.boolean(), light: lightLevel, perPlayer: z.literal(true).optional(), byClock: z.literal(true).optional() });
 /**
  * A scene's vision as a patch names it (6.7): without `perPlayer` the
  * scene keeps what it has, and false makes it a whole-party scene again.
+ * `byClock` the same way: Time of day sends true, Bright, Dim and Dark
+ * false, and Players see none (docs/design/design-v1-calendar-c2c3.md 6.2).
  */
-const sceneVisionPatch = z.strictObject({ on: z.boolean(), light: lightLevel, perPlayer: z.boolean().optional() });
+const sceneVisionPatch = z.strictObject({ on: z.boolean(), light: lightLevel, perPlayer: z.boolean().optional(), byClock: z.boolean().optional() });
 const lightFields = {
   id,
   x: latticeCoord,
@@ -2048,6 +2054,11 @@ const clockTime = z.number().int().min(-LIMITS.clockSecondsMax).max(LIMITS.clock
 const clockStep = z.number().int().min(1).max(LIMITS.clockStepMax);
 /** A clock line's stored date (shared/calendar.ts lineDate), made of the calendar's names and numbers alone. */
 const clockDate = z.string().min(1).max(LIMITS.clockDateChars).regex(NAME_CHARS, "names cannot hold control or text direction characters");
+/** Dawn and dusk (docs/design/design-v1-calendar-c2c3.md 6.2), whole minutes within DAYLIGHT_BOUNDS. */
+const daylight = z.strictObject({
+  dawn: z.number().int().min(DAYLIGHT_BOUNDS.dawn.min).max(DAYLIGHT_BOUNDS.dawn.max).multipleOf(60),
+  dusk: z.number().int().min(DAYLIGHT_BOUNDS.dusk.min).max(DAYLIGHT_BOUNDS.dusk.max).multipleOf(60),
+});
 
 /**
  * Synced music and sound (docs/design/design-v1-music.md 6.1 and 6.2). Every
@@ -2586,12 +2597,20 @@ const stateClientOps = [
    * Update are Setup history steps, Set and Advance play steps. `claim` is
    * a fresh id the sending device puts on an op that can write a line,
    * which the line carries, so the device knows it for its own
-   * (docs/design/design-v1-calendar-c2c3.md 4.6).
+   * (docs/design/design-v1-calendar-c2c3.md 4.6). Update's `daylight` sets
+   * dawn and dusk, from Time's own row with no claim, since it writes no
+   * line (6.2).
    */
   op("clock.start", { id, at: clockTime, shown: z.boolean(), calendar, claim: id.optional() }),
   op("clock.stop", {}),
-  op("clock.update", { calendar: calendar.optional(), shown: z.boolean().optional(), at: clockTime.optional(), claim: id.optional() }).refine(
-    (o) => o.calendar !== undefined || o.shown !== undefined || o.at !== undefined,
+  op("clock.update", {
+    calendar: calendar.optional(),
+    shown: z.boolean().optional(),
+    at: clockTime.optional(),
+    claim: id.optional(),
+    daylight: daylight.optional(),
+  }).refine(
+    (o) => o.calendar !== undefined || o.shown !== undefined || o.at !== undefined || o.daylight !== undefined,
     { message: "a clock update changes something" },
   ),
   op("clock.set", { at: clockTime, claim: id.optional() }),
@@ -3147,7 +3166,7 @@ export const rollAnswerSchemas = { rollChange };
 /** A player's ask for saves, so the stored-state schema checks imported asks by the same bounds (docs/design/design-v1-player-save-spell.md 5.7). */
 export const castSchemas = { castInput, castEnd, castRolled };
 /** The clock's shapes, so the stored-state schema checks imported clocks by the same bounds (docs/design/design-v1-calendar.md 6.6). */
-export const clockSchemas = { calendar, calendarName, clockTime, clockStep, clockDate };
+export const clockSchemas = { calendar, calendarName, clockTime, clockStep, clockDate, daylight };
 /** A trap's fields, so the stored-state schema checks imported traps by the same bounds (docs/design/design-v1-traps.md 6.2). */
 export const trapSchemas = { plainId, trapName, trapZone, trapRigInput, trapDue, cellRects, trapMessage: trapLine(LIMITS.trapMessageChars) };
 /** A handout's pages and audience, so the stored-state schema checks imports by the same bounds (docs/design/design-v1-pdf-handouts.md 3.3). */

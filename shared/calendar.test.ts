@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
   CLOCK_TOO_FAR,
+  DAYLIGHT,
+  DAYLIGHT_BOUNDS,
   DAY_SECONDS,
   clockNow,
   composeDate,
@@ -9,6 +11,7 @@ import {
   dateText,
   fightSeconds,
   fightStarted,
+  lightAt,
   lineDate,
   nextDawn,
   partOfDay,
@@ -96,6 +99,64 @@ describe("the time and the part of the day", () => {
     assert.equal(nextDawn(22 * H), DAY_SECONDS + 6 * H);
     assert.equal(nextDawn(-1), 6 * H);
     assert.equal(nextDawn(-DAY_SECONDS), -DAY_SECONDS + 6 * H);
+  });
+
+  test("absent dawn and dusk read as 6:00 AM and 6:00 PM", () => {
+    assert.deepEqual(DAYLIGHT, { dawn: 6 * H, dusk: 18 * H });
+    for (let t = -DAY_SECONDS; t < 2 * DAY_SECONDS; t += 60) {
+      assert.equal(partOfDay(t, DAYLIGHT), partOfDay(t));
+      assert.equal(nextDawn(t, DAYLIGHT), nextDawn(t));
+    }
+  });
+
+  test("dawn and dusk move every part of the day's edge, to the second", () => {
+    const daylight = { dawn: 5 * H + 30 * 60, dusk: 20 * H };
+    const at = (s: number) => partOfDay(DAY_SECONDS * 3 + s, daylight);
+    assert.deepEqual(
+      [daylight.dawn - 1, daylight.dawn, daylight.dawn + H - 1, daylight.dawn + H, 12 * H - 1, 12 * H, daylight.dusk - 1, daylight.dusk, daylight.dusk + H - 1, daylight.dusk + H, 0].map(at),
+      ["Night", "Dawn", "Dawn", "Morning", "Morning", "Afternoon", "Afternoon", "Dusk", "Dusk", "Night", "Night"],
+    );
+    assert.equal(partOfDay(daylight.dawn - DAY_SECONDS, daylight), "Dawn");
+  });
+
+  test("at the bounds no part overlaps and the empty ones read as none", () => {
+    const earliest = { dawn: DAYLIGHT_BOUNDS.dawn.min, dusk: DAYLIGHT_BOUNDS.dusk.min };
+    assert.deepEqual([0, H - 1, H, 12 * H - 1, 12 * H, 13 * H - 1, 13 * H, DAY_SECONDS - 1].map((t) => partOfDay(t, earliest)), [
+      "Dawn",
+      "Dawn",
+      "Morning",
+      "Morning",
+      "Dusk",
+      "Dusk",
+      "Night",
+      "Night",
+    ]);
+    const latest = { dawn: DAYLIGHT_BOUNDS.dawn.max, dusk: DAYLIGHT_BOUNDS.dusk.max };
+    assert.deepEqual([11 * H - 1, 11 * H, 12 * H - 1, 12 * H, 23 * H - 1, 23 * H, DAY_SECONDS - 1, 0].map((t) => partOfDay(t, latest)), [
+      "Night",
+      "Dawn",
+      "Dawn",
+      "Afternoon",
+      "Afternoon",
+      "Dusk",
+      "Dusk",
+      "Night",
+    ]);
+  });
+
+  test("Time of day light: Dim at dawn and dusk, Bright by day, Dark at night", () => {
+    const daylight = { dawn: 5 * H, dusk: 19 * H };
+    assert.deepEqual([4 * H, 5 * H, 6 * H, 13 * H, 19 * H, 20 * H].map((t) => lightAt(t, daylight)), ["dark", "dim", "bright", "bright", "dim", "dark"]);
+    assert.deepEqual([5 * H, 6 * H, 7 * H, 18 * H, 19 * H].map((t) => lightAt(t)), ["dark", "dim", "bright", "dim", "dark"]);
+  });
+
+  test("To dawn follows the dawn set, the next day's at dawn exactly", () => {
+    const daylight = { dawn: 5 * H + 30 * 60, dusk: 18 * H };
+    assert.equal(nextDawn(daylight.dawn, daylight), DAY_SECONDS + daylight.dawn);
+    assert.equal(nextDawn(daylight.dawn - 1, daylight), daylight.dawn);
+    assert.equal(nextDawn(6 * H, daylight), DAY_SECONDS + daylight.dawn);
+    assert.equal(nextDawn(-1, { dawn: 0, dusk: 12 * H }), 0);
+    assert.equal(nextDawn(0, { dawn: 0, dusk: 12 * H }), DAY_SECONDS);
   });
 });
 

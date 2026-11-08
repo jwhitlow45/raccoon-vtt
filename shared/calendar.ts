@@ -1,5 +1,5 @@
 import { LIMITS } from "./limits.ts";
-import type { Calendar, CalendarMonth, Encounter, RoomClock } from "./model.ts";
+import type { Calendar, CalendarMonth, Daylight, Encounter, LightLevel, RoomClock } from "./model.ts";
 
 /**
  * Calendar math for the room's clock (docs/design/design-v1-calendar.md 5),
@@ -20,7 +20,16 @@ export const DAY_SECONDS = 86_400;
  */
 export const ROUND_SECONDS = 6;
 const HOUR = 3_600;
-const DAWN = 6 * HOUR;
+const NOON = 12 * HOUR;
+
+/** Dawn and dusk where the DM has set none (docs/design/design-v1-calendar-c2c3.md 6.1): C1's fixed 6:00 AM and 6:00 PM. */
+export const DAYLIGHT: Readonly<Daylight> = { dawn: 6 * HOUR, dusk: 18 * HOUR };
+/**
+ * Where each may start (5.2): dawn from 12:00 AM to 11:00 AM and dusk from
+ * 12:00 PM to 11:00 PM, so each hour ends within its half of the day and
+ * the five parts of the day never overlap.
+ */
+export const DAYLIGHT_BOUNDS = { dawn: { min: 0, max: 11 * HOUR }, dusk: { min: NOON, max: 23 * HOUR } } as const;
 
 function floorMod(a: number, n: number): number {
   return ((a % n) + n) % n;
@@ -73,14 +82,31 @@ export function timeText(t: number): string {
 
 export type PartOfDay = "Dawn" | "Morning" | "Afternoon" | "Dusk" | "Night";
 
-/** Fixed in phase C1 (4.2): Dawn 6 to 7 AM, Morning to noon, Afternoon to 6 PM, Dusk to 7 PM, Night to 6 AM. */
-export function partOfDay(t: number): PartOfDay {
-  const hour = Math.floor(floorMod(Math.floor(t), DAY_SECONDS) / HOUR);
-  if (hour === 6) return "Dawn";
-  if (hour >= 7 && hour < 12) return "Morning";
-  if (hour >= 12 && hour < 18) return "Afternoon";
-  if (hour === 18) return "Dusk";
+/**
+ * The part of the day (docs/design/design-v1-calendar-c2c3.md 5.2): Dawn the
+ * hour from dawn, Morning to noon, Afternoon to dusk, Dusk the hour from
+ * dusk, Night until dawn. The reducer lights Time of day scenes by it
+ * (lightAt), so a change here changes replayed scenes and needs an op
+ * version gate (shared/migrate.ts).
+ */
+export function partOfDay(t: number, daylight: Daylight = DAYLIGHT): PartOfDay {
+  const time = floorMod(Math.floor(t), DAY_SECONDS);
+  if (time >= daylight.dawn && time < daylight.dawn + HOUR) return "Dawn";
+  if (time >= daylight.dawn + HOUR && time < NOON) return "Morning";
+  if (time >= NOON && time < daylight.dusk) return "Afternoon";
+  if (time >= daylight.dusk && time < daylight.dusk + HOUR) return "Dusk";
   return "Night";
+}
+
+/**
+ * A Time of day scene's light (6.2), after SRD 5.2.1 "Vision and Light":
+ * days give Bright Light, "the soft light of twilight and dawn" Dim Light,
+ * and nights outdoors Darkness.
+ */
+export function lightAt(t: number, daylight: Daylight = DAYLIGHT): LightLevel {
+  const part = partOfDay(t, daylight);
+  if (part === "Night") return "dark";
+  return part === "Dawn" || part === "Dusk" ? "dim" : "bright";
 }
 
 /**
@@ -164,9 +190,9 @@ export function composeDate(fields: DateFields, calendar: Calendar): ComposedDat
 /** The reducer's refusal for a time or step past `clockSecondsMax`, and composeDate's for a date past it. */
 export const CLOCK_TOO_FAR = "The clock can't go that far.";
 
-/** The next 6:00 AM after `t`. At 6:00 AM exactly, the next day's. */
-export function nextDawn(t: number): number {
-  const dawn = Math.floor(t / DAY_SECONDS) * DAY_SECONDS + DAWN;
+/** The next dawn after `t` (5.2). At dawn exactly, the next day's. */
+export function nextDawn(t: number, daylight: Daylight = DAYLIGHT): number {
+  const dawn = Math.floor(t / DAY_SECONDS) * DAY_SECONDS + daylight.dawn;
   return dawn > t ? dawn : dawn + DAY_SECONDS;
 }
 

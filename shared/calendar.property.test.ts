@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import fc from "fast-check";
-import { DAY_SECONDS, composeDate, dateOf, lineDate, yearDays } from "./calendar.ts";
+import { DAYLIGHT_BOUNDS, DAY_SECONDS, composeDate, dateOf, lightAt, lineDate, nextDawn, partOfDay, yearDays } from "./calendar.ts";
 import { LIMITS } from "./limits.ts";
 import type { Calendar } from "./model.ts";
 
@@ -32,6 +32,23 @@ const moment = fc.oneof(
   fc.integer({ min: -5 * 1_000 * DAY_SECONDS, max: 5 * 1_000 * DAY_SECONDS }),
   fc.constantFrom(-LIMITS.clockSecondsMax, LIMITS.clockSecondsMax, 0, -1, DAY_SECONDS - 1),
 );
+
+const minutes = (bounds: { min: number; max: number }) => fc.integer({ min: bounds.min / 60, max: bounds.max / 60 }).map((m) => m * 60);
+const daylight = fc.record({ dawn: minutes(DAYLIGHT_BOUNDS.dawn), dusk: minutes(DAYLIGHT_BOUNDS.dusk) });
+const LIGHT = { Dawn: "dim", Morning: "bright", Afternoon: "bright", Dusk: "dim", Night: "dark" } as const;
+
+test("with any dawn and dusk, the light agrees with the part of the day and To dawn lands on Dawn", () => {
+  fc.assert(
+    fc.property(daylight, fc.integer({ min: -5 * 1_000 * DAY_SECONDS, max: 5 * 1_000 * DAY_SECONDS }), (d, t) => {
+      assert.equal(lightAt(t, d), LIGHT[partOfDay(t, d)]);
+      const dawn = nextDawn(t, d);
+      assert.ok(dawn > t && dawn - t <= DAY_SECONDS);
+      assert.equal(partOfDay(dawn, d), "Dawn");
+      assert.notEqual(partOfDay(dawn - 1, d), "Dawn");
+    }),
+    { numRuns: 2_000 },
+  );
+});
 
 test("every date composes back to its moment, with its time of day", () => {
   fc.assert(

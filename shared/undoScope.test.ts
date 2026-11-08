@@ -154,6 +154,9 @@ describe("undo classifier inventory", () => {
     state.scenes.s1!.vision = { on: true, perPlayer: true, light: "bright" };
     assert.equal(scope(op({ vision: { on: true, perPlayer: true, light: "dim" } }), state), "play");
     assert.equal(scope(op({ vision: { on: true, perPlayer: false, light: "dim" } }), state), "setup");
+    // Time of day is a Light choice, and a level picked by hand sends it off (docs/design/design-v1-calendar-c2c3.md 6.2).
+    assert.equal(scope(op({ vision: { on: true, light: "dim", byClock: true } }), state), "play");
+    assert.equal(scope(op({ vision: { on: true, light: "bright", byClock: false } }), state), "play");
     assert.equal(scope(op({ weather: null }), state), "play");
     for (const patch of [{ vision: { on: true, light: "dim" }, name: "Dungeon" }, { suggestedView: "isometric", bounds: { w: 30, h: 30 } }, { weather: { kind: "snow" }, name: "Dungeon" }, { futureField: true }]) assert.equal(scope(op(patch), state), "setup");
   });

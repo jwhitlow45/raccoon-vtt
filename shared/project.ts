@@ -2946,7 +2946,12 @@ function projectSceneCtx(ctx: Ctx, scene: Scene): Scene | null {
   if (scene.fogEnabled) out.autoWalls = "off";
   else if (scene.autoWalls !== undefined) out.autoWalls = scene.autoWalls;
   if (scene.blockMovement !== undefined) out.blockMovement = scene.blockMovement;
-  if (scene.vision !== undefined) out.vision = scene.vision;
+  if (scene.vision !== undefined) {
+    // Whether the level follows the clock is the DM's alone, since it tells a clock exists. Players get the level
+    // the time gave it (docs/design/design-v1-calendar-c2c3.md 6.4).
+    const { byClock: _byClock, ...vision } = scene.vision;
+    out.vision = vision;
+  }
   if (scene.gridShape !== undefined) out.gridShape = scene.gridShape;
   // A following player's device shows it (docs/design/design-v1-isometric-view.md 7). It names a view, nothing of the map.
   if (scene.suggestedView !== undefined) out.suggestedView = scene.suggestedView;
