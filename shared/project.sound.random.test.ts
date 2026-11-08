@@ -453,7 +453,8 @@ test("a player's projection and the fan-out keep every sound rule of 6.5 over ra
   assert.ok(applied > 3_000, `only ${applied} ops applied`);
   assert.ok(ticks > 250 && reveals > 50, `${ticks} ticks, ${reveals} reveals`);
   assert.ok(hiddenFires > 50, `${hiddenFires} effects fired behind a blackout`);
-  assert.ok(dmOnlyFires > 50 && dmOnlyLifted > 50, `${dmOnlyFires} effects fired while Only DM devices play, ${dmOnlyLifted} times it turned off with something playing`);
+  // Over 12 runs fires ran 153 to 212 and lifts 54 to 77, so a lift floor of 50 sat under 2 standard deviations of its mean and failed now and then.
+  assert.ok(dmOnlyFires > 50 && dmOnlyLifted > 30, `${dmOnlyFires} effects fired while Only DM devices play, ${dmOnlyLifted} times it turned off with something playing`);
   // Reclassified effects ran 28 to 72 over 16 runs once the queue's ops joined the mix, so the floor sits well under that spread.
   assert.ok(reclassified > 10 && undone > 100, `${reclassified} fired effects given another use, ${undone} undos`);
   assert.ok(queued > 600, `${queued} queue edits and jumps`);
