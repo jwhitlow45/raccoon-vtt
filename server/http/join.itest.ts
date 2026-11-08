@@ -390,13 +390,19 @@ describe("join/complete through admitPlayer: the member first, the grant second"
     try {
       assert.equal((await phone.post(`/api/rooms/${roomId}/join/complete`, { ticket, name: "Quinn", color: "#112233" })).statusCode, 503);
       fail();
-      await new Promise((r) => setTimeout(r, 20));
     } finally {
       bounded.gateway.addMember = addMember;
     }
-    const retry = await phone.post(`/api/rooms/${roomId}/join/complete`, { ticket, name: "Quinn", color: "#112233" });
+    const complete = () => phone.post(`/api/rooms/${roomId}/join/complete`, { ticket, name: "Quinn", color: "#112233" });
+    // The ticket comes back once the failed op's answer lands, which a loaded machine delays, and until then a
+    // retry is told the ticket is held (retry-after 1). The device asks again, as the join page does.
+    let retry = await complete();
+    for (let i = 0; i < 250 && retry.statusCode === 503 && retry.headers["retry-after"] === "1"; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      retry = await complete();
+    }
     // The retry's real member op races the short bound too, so it may answer pending and land after, as the
-    // join page's GET /me then finds. A ticket still held answers busy too, but asks for a retry in 1 s, not 2.
+    // join page's GET /me then finds.
     if (retry.statusCode !== 200) {
       assert.deepEqual([retry.statusCode, retry.headers["retry-after"]], [503, "2"], retry.body);
       await untilIn(phone, roomId);
