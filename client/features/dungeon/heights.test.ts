@@ -217,4 +217,22 @@ describe("raised and sunk rooms' runs", () => {
     raiseRooms(zeros(), flat.board, 1, 0);
     assert.equal(flat.board.rooms[0]!.ground, 0);
   });
+
+  test("DGOPTS-O7: a room whose first drawn ground does not fit takes a later one that does (D-832)", () => {
+    // 4 squares of rock to the room north: a 10 ft run needs 4 and its far landing would touch that room, a 5 ft run needs 3 and clears it.
+    const north: Rect = { x: ROOM.x, y: ROOM.y - 4 - 5, w: 8, h: 5 };
+    const { board, doors } = fixture(1, [ROOM, north]);
+    const up = doors.find((d) => d.side === "n")!;
+    const mouths = mouthCounts(board);
+    assert.equal(runFits(board, up, runFor(board, up, 10), mouths), false, "the first ground, +10, does not fit");
+    assert.ok(runFits(board, up, runFor(board, up, -5), mouths), "the second, -5, does");
+    const zeros = new (class extends Stream {
+      override next32(): number {
+        return 0;
+      }
+    })(new Uint8Array(32), new Uint8Array(12));
+    raiseRooms(zeros, board, 1, 75);
+    assert.equal(board.rooms[0]!.ground, -5, "not left flat, and not +10");
+    assert.ok(board.doorways.filter((d) => d.room === 0).every((d) => d.run !== null));
+  });
 });
