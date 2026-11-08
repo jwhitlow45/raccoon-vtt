@@ -41,7 +41,7 @@ const validMessage = fc.oneof(
 );
 
 /** Numbers past every bound an op's numbers have, of the sizes a hostile client sends to make the server count. */
-const EXTREME = [1e300, -1e300, 2 ** 53, 2 ** 31, 1e9, -1, 0.5, -0.5] as const;
+const EXTREME = [1e300, -1e300, 2 ** 53, 2 ** 31, 1e9, -1, 0.5, -0.5, -0] as const;
 
 /** Where the numbers sit in a JSON value. */
 function numberSlots(value: unknown, out: { parent: Record<string, unknown>; key: string }[] = []): { parent: Record<string, unknown>; key: string }[] {
@@ -110,6 +110,10 @@ describe("the wire schemas, over hostile input (property)", () => {
         if (!decision.ok) return;
         const result = applyOp(state, op, viewer, env(2));
         if (result.ok) assert.ok(result.state !== state, "an applied op makes a new state");
+        // The room is stored as JSON, which writes -0 as 0 (NEG-ZERO-REPLAY): the op as sent and the op as replayed must leave the same stored room.
+        const replay = applyOp(state, replayed.data as Op, viewer, env(2));
+        assert.equal(replay.ok, result.ok, "an op applies or is refused alike when replayed");
+        if (result.ok && replay.ok) assert.equal(JSON.stringify(replay.state), JSON.stringify(result.state), `${op.t} leaves the same stored room when replayed`);
       }),
       4_000,
     );
