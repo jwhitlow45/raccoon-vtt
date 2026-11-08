@@ -24,6 +24,8 @@ export type Flow<T extends { drawn: object }> = {
   problem: "fit" | "bug" | null;
   /** The drawing whose picture the box shows, null while it shows none. */
   pictured: object | null;
+  /** The answer whose picture the box shows, null while it shows none or one whose answer a newer one replaced before it landed. */
+  onScreen: T | null;
   /** A drawing whose picture could not be made. */
   failed: object | null;
 };
@@ -37,7 +39,7 @@ export type FlowEvent<T> =
   | { k: "pictureFailed"; drawn: object };
 
 export function startFlow<T extends { drawn: object }>(): Flow<T> {
-  return { asked: 0, pending: false, seedOk: true, shown: null, problem: null, pictured: null, failed: null };
+  return { asked: 0, pending: false, seedOk: true, shown: null, problem: null, pictured: null, onScreen: null, failed: null };
 }
 
 export function flowStep<T extends { drawn: object }>(f: Flow<T>, e: FlowEvent<T>): Flow<T> {
@@ -52,10 +54,10 @@ export function flowStep<T extends { drawn: object }>(f: Flow<T>, e: FlowEvent<T
       return e.answer.ok ? { ...f, pending: false, shown: e.answer.value, problem: null } : { ...f, pending: false, problem: e.answer.error };
     case "pictured":
       // A picture of a drawing already overtaken still shows, but stands for nothing Make would send.
-      return { ...f, pictured: e.drawn, failed: f.failed === e.drawn ? null : f.failed };
+      return { ...f, pictured: e.drawn, onScreen: f.shown?.drawn === e.drawn ? f.shown : null, failed: f.failed === e.drawn ? null : f.failed };
     case "pictureFailed":
       // The box empties on a failure, so nothing is pictured.
-      return { ...f, pictured: null, failed: e.drawn };
+      return { ...f, pictured: null, onScreen: null, failed: e.drawn };
   }
 }
 
@@ -77,6 +79,16 @@ export function readiness<T extends { drawn: object }>(f: Flow<T>): Readiness<T>
     drawing: f.seedOk && (f.pending || (answered !== null && !pictured && !failed)),
     pictureFailed: failed,
   };
+}
+
+/**
+ * The answer the foot counts: the one on screen, kept while the next one
+ * draws and while the seed does not read, as its picture is, so the foot
+ * never loses its line between two pictures. Never one not on screen, and
+ * none beside a problem, whose words say why no dungeon follows it.
+ */
+export function counted<T extends { drawn: object }>(f: Flow<T>): T | null {
+  return f.problem === null ? f.onScreen : null;
 }
 
 /**

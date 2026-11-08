@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import fc from "fast-check";
 import { holds } from "#shared/propertyTestutil.ts";
-import { drawable, flowStep, readiness, startFlow, type Flow, type FlowEvent } from "./flow.ts";
+import { counted, drawable, flowStep, readiness, startFlow, type Flow, type FlowEvent } from "./flow.ts";
 
 /** A worker's answer as the dialog holds it: the dungeon and the drawing its picture is made from. */
 type Shown = { n: number; drawn: { n: number } };
@@ -70,6 +70,35 @@ test("DGBUILD-ASTRA-2-RESIDUAL: a seed made invalid between the worker's answer 
   assert.equal(drawable(flowStep(f, { k: "ask", id: 4 })), b.drawn);
 });
 
+test("dmfix2: the foot counts the dungeon on screen, kept while the next one draws or the seed does not read, never one not on screen, none beside a problem", () => {
+  const a = dungeon(1);
+  const b = dungeon(2);
+  const c = dungeon(3);
+  let f = run([{ k: "ask", id: 1 }, answered(1, a)]);
+  assert.equal(counted(f), null, "no picture yet");
+  f = flowStep(f, { k: "pictured", drawn: a.drawn });
+  assert.equal(counted(f), a);
+  f = run([{ k: "ask", id: 2 }], f);
+  assert.equal(counted(f), a, "B asked: A's picture and its counts stand");
+  f = run([answered(2, b)], f);
+  assert.equal(counted(f), a, "B answered, its picture not in");
+  f = run([{ k: "invalid", id: 3 }], f);
+  assert.equal(counted(f), a, "a seed that does not read keeps the picture and its counts");
+  f = run([{ k: "ask", id: 4 }, answered(4, c), { k: "pictured", drawn: b.drawn }], f);
+  assert.equal(counted(f), null, "B's picture landed after C replaced its answer: no counts for it");
+  f = flowStep(f, { k: "pictured", drawn: c.drawn });
+  assert.equal(counted(f), c);
+  assert.equal(readiness(f).current, c, "Make and the foot hold the same dungeon");
+  f = run([{ k: "ask", id: 5 }, { k: "answer", id: 5, answer: { ok: false, error: "fit" } }], f);
+  assert.equal(counted(f), null, "beside a problem, none");
+  f = run([{ k: "ask", id: 6 }], f);
+  assert.equal(counted(f), null, "asked again, the problem's words stand until the answer");
+  f = run([answered(6, a)], f);
+  assert.equal(counted(f), c, "answered, C's counts with its picture while A's draws");
+  f = flowStep(f, { k: "pictureFailed", drawn: a.drawn });
+  assert.equal(counted(f), null, "the box empties on a failed picture, and so does the foot");
+});
+
 /** One thing that can happen to the dialog's preview, with ids and answers picked from what came before. */
 type Act = { k: "ask" } | { k: "invalid" } | { k: "answer"; back: number; ok: boolean } | { k: "pictured"; back: number } | { k: "pictureFailed"; back: number };
 const act: fc.Arbitrary<Act> = fc.oneof(
@@ -117,6 +146,9 @@ test("DG-R1-01, DGBUILD-ASTRA-2: across random requests, late answers, bad seeds
         }
         const r = readiness(f);
         const mine = answers.get(newest);
+        const foot = counted(f);
+        if (foot !== null) assert.equal(foot.drawn, onScreen, "the foot counts only the dungeon on screen");
+        if (r.current !== null) assert.equal(foot, r.current, "and the one Make sends, when Make is on");
         if (r.current !== null) {
           assert.ok(seedOk, "Make is off for a bad seed");
           assert.equal(r.current, mine, "Make holds the newest request's answer");

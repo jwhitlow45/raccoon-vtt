@@ -17,7 +17,7 @@ import { BAND_NAMES } from "../traps/rules.ts";
 import { builderScene, cleanName, pickNow, withPlayersSee, type NewSceneIntent, type SceneInput } from "../scenes/create.ts";
 import { NumberInput } from "../scenes/controls.tsx";
 import { closePreviews, preview, warmPreviews, type Preview } from "./client.ts";
-import { drawable, flowStep, readiness, startFlow, type Flow, type FlowEvent } from "./flow.ts";
+import { counted, drawable, flowStep, readiness, startFlow, type Flow, type FlowEvent } from "./flow.ts";
 import { SCENE_PLACEHOLDER, withIds } from "./ops.ts";
 import { DungeonPreview, type Drawn } from "./Preview.tsx";
 import { loadChoices, saveChoices, settingsOf, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
@@ -216,10 +216,16 @@ export function GenerateDialog(props: {
     setFailed({ text: said.text, retry: outcome.k === "none" });
   };
 
+  // The foot counts the dungeon on screen, busy while the next one draws, and its words change with the picture.
+  // Gone meanwhile, they let Cancel and Make share a row, and the shorter foot grew a phone's preview, sized from
+  // the body's height, by about 24 px until the picture landed: Reroll jumped under the finger on every seed.
+  const counts = counted(flow)?.result.summary;
   const status = failed && !failed.retry ? null : busy ? (
     <Loading delay={0} text={offline ? WAITING : makingLine(sending.answered, sending.total)} />
-  ) : current ? (
-    <span aria-live="polite">{statusLine(current.summary)}</span>
+  ) : counts ? (
+    <span aria-live="polite" aria-busy={ready.drawing}>
+      {statusLine(counts)}
+    </span>
   ) : null;
 
   // Reroll stands in the preview's corner, so the preview and the choices each keep one left edge. Its ring can fall on the picture's stone, so it is the board's two-tone ring (Preview.tsx CORNER_SLOT).

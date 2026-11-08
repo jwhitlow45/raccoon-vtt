@@ -150,9 +150,9 @@ function dialogOf(page: Page): Locator {
   return page.getByRole("dialog", { name: "Generate a dungeon" });
 }
 
-/** The status line at the dialog's foot once a preview stands, read when it holds still. */
+/** The status line at the dialog's foot once a preview stands, read when it holds still. It keeps the old dungeon's counts, busy, while the next one draws. */
 async function statusText(dialog: Locator, timeout = 30_000): Promise<string> {
-  const line = dialog.locator("footer [aria-live=polite]");
+  const line = dialog.locator("footer [aria-live=polite]:not([aria-busy=true])");
   await line.waitFor({ timeout });
   let last = "";
   await waitFor("the status line to hold still", async () => {
@@ -442,7 +442,7 @@ describe("dungeon generator", { concurrency: false }, () => {
     const reroll = dialog.getByRole("button", { name: "Reroll", exact: true });
     const drawing = dialog.getByText("Drawing the dungeon…", { exact: true });
     const status = dialog.locator("footer [aria-live=polite]");
-    await statusText(dialog);
+    const counts = await statusText(dialog);
     const was = await (await previewImg(dialog)).getAttribute("alt");
     await encodes(dm, "hold");
     try {
@@ -450,7 +450,7 @@ describe("dungeon generator", { concurrency: false }, () => {
       await waitFor("the first answer's picture held", async () => ((await heldEncodes(dm)) >= 1 ? true : null));
       await drawing.waitFor();
       assert.equal(await make.isDisabled(), true, "answered, its picture not in: Make off");
-      assert.equal(await status.count(), 0, "no status line for a dungeon not shown");
+      assert.deepEqual([(await status.innerText()).trim(), await status.getAttribute("aria-busy")], [counts, "true"], "the counts of the dungeon still shown, busy, never of one not shown");
       assert.equal(await (await previewImg(dialog)).getAttribute("alt"), was, "the old picture stays while the new one draws");
       // A newer answer arrives while the first is still drawing.
       await reroll.click();
@@ -471,6 +471,7 @@ describe("dungeon generator", { concurrency: false }, () => {
       await dialog.getByText("This device could not draw the preview, so Make is off. Reroll or change a choice to try again.", { exact: true }).waitFor();
       assert.equal(await make.isDisabled(), true, "a failed picture: Make off");
       assert.equal(await dialog.getByRole("img", { name: /^Preview of the dungeon/ }).count(), 0, "no older picture stands for it");
+      assert.equal(await status.count(), 0, "nor its counts");
       assert.equal(await drawing.count(), 0, "nothing still drawing");
       await shots.take(dm, "DGFIX-1-picture-failed");
     } finally {
@@ -740,6 +741,42 @@ describe("dungeon generator", { concurrency: false }, () => {
       await phone.close();
     }
     assert.deepEqual(lines, []);
+  });
+
+  test("dmfix2-1. on a phone a dungeon drawing leaves the preview, Reroll and the foot where they stand, the foot counting the dungeon still shown until the next picture lands", async () => {
+    const phone = await dmContext.newPage();
+    try {
+      await phone.setViewportSize(PHONE);
+      await phone.goto(dm.url());
+      await phone.getByRole("status", { name: "Connected" }).first().waitFor();
+      const dialog = await openDialog(phone);
+      const counts = await statusText(dialog);
+      const reroll = dialog.getByRole("button", { name: "Reroll", exact: true });
+      const picture = dialog.getByRole("img", { name: /^Preview of the dungeon/ });
+      const where = async () => ({ reroll: await reroll.boundingBox(), picture: await picture.boundingBox(), foot: await dialog.locator("footer").boundingBox() });
+      const before = await where();
+      await encodes(phone, "hold");
+      try {
+        await reroll.click();
+        await waitFor("the answer's picture held", async () => ((await heldEncodes(phone)) >= 1 ? true : null));
+        await dialog.getByText("Drawing the dungeon…", { exact: true }).waitFor();
+        await shots.take(phone, "dmfix2-1-drawing");
+        // The preview's height follows the body's, so a foot that loses its status line grows it and moves Reroll under the finger.
+        assert.deepEqual(await where(), before, "drawing: Reroll, the picture and the foot hold still");
+        const line = dialog.locator("footer [aria-live=polite]");
+        assert.deepEqual([(await line.innerText()).trim(), await line.getAttribute("aria-busy")], [counts, "true"], "the foot counts the dungeon still shown, busy");
+        assert.deepEqual(alignmentLines(await measureAlignment(dialog.locator("footer")), "dmfix2-1 foot while drawing"), []);
+      } finally {
+        await releaseEncodes(phone);
+      }
+      await statusText(dialog);
+      await shots.take(phone, "dmfix2-1-drawn");
+      assert.deepEqual(await where(), before, "the picture in: all three where they stood");
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await dialog.waitFor({ state: "detached" });
+    } finally {
+      await phone.close();
+    }
   });
 
   test("DGOPTS-1. the Heights and Traps sliders whole within 1 px at 1440 x 900, 390 x 844 and 320 x 568 at 130%, dark and light: the marks on one row where they fit, else two shared evenly, no word cut", async () => {

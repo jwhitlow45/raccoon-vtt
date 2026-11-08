@@ -1217,6 +1217,7 @@ async function dungeonDialog(page: Page, at: string, kind: "computer" | "phone",
     // A dungeon with stone under the ring's line, where the accent alone would read under 3:1. The seeds are pinned, so a run draws the same dungeons each time (LTB-11).
     const seedBox = dialog.getByRole("textbox", { name: "Seed", exact: true });
     let points: { x: number; y: number }[] = [];
+    let box: Box | null = null;
     let drawn = 0;
     for (const body of RING_SEEDS) {
       await page.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur?(): void } | null } }).document.activeElement?.blur?.());
@@ -1224,7 +1225,8 @@ async function dungeonDialog(page: Page, at: string, kind: "computer" | "phone",
       await seedBox.fill(`${versionChar()}${body}`);
       await waitFor("the picture of the next seed", async () => ((await picture.getAttribute("src")) !== before && (await reroll.isEnabled()) ? true : null), 30_000);
       drawn++;
-      points = await ringPoints(reroll);
+      box = await stillBox(reroll);
+      points = ringPoints(box);
       const bare = await pagePixels(page, points);
       if (bare.some(tooLow)) break;
       points = [];
@@ -1242,6 +1244,8 @@ async function dungeonDialog(page: Page, at: string, kind: "computer" | "phone",
       const r = ratio(parseColor(ring.outlineColor), parseColor(`rgb(${p.join(", ")})`));
       if (r < least) [least, worst] = [r, `rgb(${p.join(", ")})`];
     }
+    // Points beside a ring that moved would read the ring itself, or the picture, and say nothing of its contrast.
+    assert.deepEqual(await reroll.boundingBox(), box, `${at}: Reroll moved while its ring was measured`);
     if (least < 3) {
       const line = `${at}: the dungeon preview's Reroll ring ${ring.outlineColor} reads ${least.toFixed(2)}:1 beside its line on the picture (${worst}), under 3:1`;
       found.failures.push(line);
@@ -1257,14 +1261,35 @@ async function dungeonDialog(page: Page, at: string, kind: "computer" | "phone",
   }
 }
 
+type Box = { x: number; y: number; width: number; height: number };
+
+/**
+ * A control's box once it holds still for two frames. A new picture can land
+ * a frame before the layout it brings, as the dungeon preview's once did on
+ * a phone, and points read in that frame lie beside a box the control has
+ * already left.
+ */
+async function stillBox(control: Locator): Promise<Box> {
+  let last: Box | null = null;
+  return await waitFor("the control to hold still", async () => {
+    await control.page().evaluate(() => {
+      const frames = globalThis as unknown as { requestAnimationFrame(cb: () => void): void };
+      return new Promise((done) => frames.requestAnimationFrame(() => frames.requestAnimationFrame(() => done(null))));
+    });
+    const now = await control.boundingBox();
+    const still = now !== null && last !== null && now.x === last.x && now.y === last.y && now.width === last.width && now.height === last.height;
+    last = now;
+    return still ? now : null;
+  });
+}
+
 /**
  * The points beside a control's ring line, where the ground its ring must
  * read on lies: 1 px out from its edge, inside the ring's 2 px offset, and
  * 5 px out, past the 2 px line (globals.css), along the middle half of each
  * side, clear of the rounded corners.
  */
-async function ringPoints(control: Locator): Promise<{ x: number; y: number }[]> {
-  const b = (await control.boundingBox())!;
+function ringPoints(b: Box): { x: number; y: number }[] {
   const points: { x: number; y: number }[] = [];
   for (const d of [1, 5]) {
     for (let t = 0.25; t <= 0.75; t += 0.05) {
