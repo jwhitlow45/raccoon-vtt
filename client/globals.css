@@ -232,13 +232,11 @@ summary::-webkit-details-marker {
 
 /* A field that is off draws its hint in theme.ts textDisabled, as it draws
    its value. The browser's own placeholder gray stays the same when a field
-   is off, and an inline style cannot reach the placeholder. The first rule
-   is dark's value, and the second reads the scheme once lib/scheme.ts has
-   marked the root, so a subtree that keeps the dark look keeps it too. */
+   is off, and an inline style cannot reach the placeholder. It reads the
+   scheme's variable, which lib/scheme.ts sets on the root and a subtree
+   that keeps the dark look (BOARD_SCOPE) sets on itself, with dark's value
+   for the boot page before either. */
 :is(input, textarea):is(:disabled, [aria-disabled="true"])::placeholder {
-  color: #7c7a84;
-}
-:root[data-rvtt-scheme] :is(input, textarea):is(:disabled, [aria-disabled="true"])::placeholder {
   color: var(--rvtt-text-disabled, #7c7a84);
 }
 

@@ -34,7 +34,7 @@ describe("globals.css reads the scheme", () => {
 
   test("the boot text and an off field's placeholder", () => {
     assert.match(rule(".rvtt-boot"), new RegExp(`color: ${escape(read("textMuted"))};`));
-    assert.match(rule(':root[data-rvtt-scheme] :is(input, textarea):is(:disabled, [aria-disabled="true"])::placeholder'), new RegExp(`color: ${escape(read("textDisabled"))};`));
+    assert.match(rule(':is(input, textarea):is(:disabled, [aria-disabled="true"])::placeholder'), new RegExp(`color: ${escape(read("textDisabled"))};`));
   });
 
   test("every focus ring takes a container's focus color, else the member's accent, else the scheme's crest accent", () => {
