@@ -1160,6 +1160,57 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     assert.equal(diceLines(dmSocket.state?.log).length, logged, "Discard rolled something");
   });
 
+  test("qfu1-gs-1. a mode picked from the menu of Roll 3 saves and damage reaches both rolls: Roll secretly hides the saves and the damage alike, and Advantage rolls each save with it beside the damage (QOL-JOINT-MENU-E2E)", async () => {
+    const sheet = diceSheet(dm);
+    const group = dm.locator('[role="dialog"][data-bar-mode]');
+    /** Fills the fresh page's Damage, picks `item` from the joint button's menu, and returns the two lines its one press rolled. */
+    const pick = async (item: string) => {
+      await sheet.getByText("Dexterity save for 3").first().waitFor();
+      if ((await sheet.getByRole("group", { name: "Outcome" }).count()) === 0) await sheet.getByRole("button", { name: "Edit", exact: true }).tap();
+      await sheet.getByLabel("Damage", { exact: true }).fill("2d6 fire");
+      // Shown to players, so a press hides the dice only where the menu says to.
+      const hide = sheet.getByRole("switch", { name: "Hide the monsters' rolls from players" });
+      if ((await hide.getAttribute("aria-checked")) !== "false") await hide.tap();
+      await waitFor("the monsters' rolls shown to players", async () => ((await hide.getAttribute("aria-checked")) === "false" ? true : null));
+      const both = sheet.getByRole("button", { name: "Roll 3 saves and damage", exact: true });
+      await both.waitFor();
+      const before = diceLines(dmSocket.state?.log).length;
+      await both.focus();
+      await dm.keyboard.press("ContextMenu");
+      await dm.getByRole("menu", { name: "Roll options for Roll 3 saves and damage" }).getByRole("menuitem", { name: item, exact: true }).tap();
+      const lines = await waitFor(`the saves and the damage from ${item}`, () => {
+        const fresh = diceLines(dmSocket.state?.log).slice(before);
+        const saves = fresh.find((l) => l.rolls.length === 3);
+        const damage = fresh.find((l) => l.rolls.length === 1 && l.rolls[0]!.formula === "2d6");
+        return saves && damage ? { saves, damage } : null;
+      });
+      await dm.waitForTimeout(300);
+      assert.equal(diceLines(dmSocket.state?.log).length - before, 2, `${item}: one press rolled once each`);
+      assert.deepEqual(new Set(lines.saves.rolls.map((r) => r.tokenId)), new Set(run.goblins.map((g) => g.id)));
+      return lines;
+    };
+    /** Discards the rolled page from the group bar's Save, which opens a fresh one for the same three. */
+    const fresh = async () => {
+      await sheet.getByRole("button", { name: "Close Dice" }).tap();
+      await sheet.waitFor({ state: "hidden" });
+      await (await barControl(group, "Save")).tap();
+      const ask = group.getByRole("alert").filter({ hasText: "Discard the Dexterity save for 3?" });
+      await ask.getByRole("button", { name: "Discard", exact: true }).tap();
+      await sheet.waitFor();
+    };
+
+    const secret = await pick("Roll secretly");
+    assert.deepEqual({ saves: secret.saves.to, damage: secret.damage.to }, { saves: "dm", damage: "dm" }, "Roll secretly hides the saves and the damage");
+    assert.ok(secret.saves.rolls.every((r) => r.mode === undefined), `the saves roll with no mode: ${JSON.stringify(secret.saves.rolls.map((r) => r.mode))}`);
+    await shots.take(dm, "qfu1-gs-1-joint-secret");
+
+    await fresh();
+    const adv = await pick("Roll with Advantage");
+    assert.ok(adv.saves.rolls.every((r) => r.mode === "adv"), `each save rolls with Advantage: ${JSON.stringify(adv.saves.rolls.map((r) => r.mode))}`);
+    assert.deepEqual({ saves: adv.saves.to, damage: adv.damage.to }, { saves: "all", damage: "all" }, "Advantage hides neither, as a plain press would not");
+    await shots.take(dm, "qfu1-gs-1-joint-advantage");
+  });
+
   test("qe-3. Request a roll offers the same recent DC beside a save's DC field, and a check keeps its typical DCs with no Recent", async () => {
     if (await diceSheet(dm).isVisible()) {
       await diceSheet(dm).getByRole("button", { name: "Close Dice" }).tap();
