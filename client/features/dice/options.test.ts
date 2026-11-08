@@ -731,6 +731,16 @@ describe("a turn card's results after a reload (LP32-B-CARD-2)", () => {
     assert.equal(loggedRowTag(log.slice(0, 1), row("damage")), null, "last turn's damage is not this turn's");
   });
 
+  test("damage with one kept d20 is still damage, and an attack's cut label is not damage", () => {
+    const blade = { by: "pat", creature: THORN, name: "Arcane Blade", kind: "damage" as const, after: 10 };
+    const d20damage = { formula: "1d20+3", faces: [9], total: 12, label: "Arcane Blade damage, Force", characterId: "thorn", type: "force" } as DiceRoll;
+    assert.equal(loggedRowTag([line(11, { tag: "blade", rolls: [d20damage] })], blade), "blade");
+    const long = "A".repeat(30) + " " + "B".repeat(40);
+    const cutAttack = attack(15, { label: cutLabel(long) });
+    assert.equal(loggedRowTag([line(11, { tag: "swing", rolls: [cutAttack] })], { ...blade, name: long }), null, "a cut attack label is no damage");
+    assert.equal(loggedRowTag([line(11, { tag: "d20cut", rolls: [{ ...d20damage, label: cutLabel(`${long} damage, Force`) }] })], { ...blade, name: long }), "d20cut", "a cut label with a damage type is damage");
+  });
+
   test("nothing another member rolled, nothing for another creature, no line without a tag, and no plain roll under the same name", () => {
     assert.equal(loggedRowTag([line(11, { tag: "dm", by: "dm", rolls: [damage(6)] })], row("damage")), null, "the DM's roll for Thorn");
     assert.equal(loggedRowTag([line(11, { tag: "wren", rolls: [damage(6, undefined, { characterId: "wren" })] })], row("damage")), null, "another creature's");

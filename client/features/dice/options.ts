@@ -397,6 +397,12 @@ export function loggedRowTag(log: readonly LogEntry[], row: { by: string; creatu
     const cut = label.endsWith("…") ? label.slice(0, -1) : null;
     return damage.some((head) => label === head || label.startsWith(`${head} `) || label.startsWith(`${head},`) || (cut !== null && head.startsWith(cut)));
   };
+  // A damage label ends in its type or a rider, so a whole label tells damage from an attack by its words, and a die like 1d20 in the formula proves nothing. Only a cut label is ambiguous, since an attack named like the row also starts it: the line's own damage type, or no kept d20, says it is damage.
+  const isDamage = (roll: DiceRoll): boolean => {
+    const label = roll.label ?? "";
+    if (!label.endsWith("…")) return true;
+    return roll.type !== undefined || keptD20(roll) === null;
+  };
   const own = (roll: DiceRoll): boolean => ("tokenId" in row.creature ? roll.tokenId === row.creature.tokenId : roll.characterId === row.creature.characterId);
   for (let i = log.length - 1; i >= 0; i--) {
     const line = log[i]!;
@@ -405,7 +411,7 @@ export function loggedRowTag(log: readonly LogEntry[], row: { by: string; creatu
     const data = line.data;
     if (line.kind !== "event" || data?.type !== "dice" || data.tag === undefined || data.by !== row.by || (data.part ?? 0) !== 0) continue;
     const first = data.rolls[0];
-    if (first && own(first) && named(first.label) && (keptD20(first) !== null) === (row.kind === "attack")) return data.tag;
+    if (first && own(first) && named(first.label) && (row.kind === "attack" ? keptD20(first) !== null : isDamage(first))) return data.tag;
   }
   return null;
 }
