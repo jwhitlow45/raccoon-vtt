@@ -1,4 +1,4 @@
-import type { MemberId } from "#shared/model.ts";
+import type { MemberId, SceneId } from "#shared/model.ts";
 import type { EphEvent } from "#shared/protocol.ts";
 import { EMPTY_EPHEMERAL, type DragPreview, type Ephemeral, type LaserTrail, type Ping, type ViewRequest } from "./types.ts";
 
@@ -179,6 +179,70 @@ export function keepLocal(eph: Ephemeral): Ephemeral {
   const lasers = filterMap(eph.lasers, local);
   if (Object.keys(rulers).length + Object.keys(aoes).length + Object.keys(lasers).length === 0) return EMPTY_EPHEMERAL;
   return { ...EMPTY_EPHEMERAL, rulers, aoes, lasers };
+}
+
+/**
+ * Each held floor's events (docs/design/design-v1-floors.md 8.2): an event
+ * lands on the floor it happened on, which the server's `eph` names and
+ * this device's own events take from the floor shown as they are made. The
+ * board draws the shown floor's, the store's `ephemeral`, and a switch of
+ * floors clears none of them.
+ */
+export type FloorEphemeral = Readonly<Record<SceneId, Ephemeral>>;
+
+export const NO_FLOOR_EPHEMERAL: FloorEphemeral = Object.freeze({});
+
+/** The floor's events, empty when it has none. */
+export function floorEph(floors: FloorEphemeral, sceneId: SceneId | null): Ephemeral {
+  return (sceneId !== null && Object.hasOwn(floors, sceneId) ? floors[sceneId] : undefined) ?? EMPTY_EPHEMERAL;
+}
+
+/** Whether a floor's events hold nothing to draw or follow, so the floor need not be kept. */
+function empty(eph: Ephemeral): boolean {
+  if (eph === EMPTY_EPHEMERAL) return true;
+  const none = (r: Readonly<Record<string, unknown>>) => Object.keys(r).length === 0;
+  return none(eph.drags) && none(eph.rulers) && none(eph.aoes) && eph.pings.length === 0 && none(eph.lasers) && eph.focus === null && (eph.view ?? null) === null;
+}
+
+/** One floor's events changed by `step`. The same map when they did not change, and none kept for a floor left empty. */
+export function onFloor(floors: FloorEphemeral, sceneId: SceneId, step: (eph: Ephemeral) => Ephemeral): FloorEphemeral {
+  const was = floorEph(floors, sceneId);
+  const now = step(was);
+  if (now === was) return floors;
+  const next = { ...floors };
+  if (empty(now)) delete next[sceneId];
+  else next[sceneId] = now;
+  return next;
+}
+
+/** Every floor's events changed by `step`, with the same rules as onFloor. */
+export function onEveryFloor(floors: FloorEphemeral, step: (eph: Ephemeral) => Ephemeral): FloorEphemeral {
+  let next: Record<SceneId, Ephemeral> | null = null;
+  for (const sceneId of Object.keys(floors)) {
+    const was = floors[sceneId]!;
+    const now = step(was);
+    if (now === was) continue;
+    next ??= { ...floors };
+    if (empty(now)) delete next[sceneId];
+    else next[sceneId] = now;
+  }
+  return next ?? floors;
+}
+
+/** Only the floors `keep` holds, so nothing of a floor this device no longer holds stays to draw. */
+export function keepFloors(floors: FloorEphemeral, keep: (sceneId: SceneId) => boolean): FloorEphemeral {
+  if (Object.keys(floors).every(keep)) return floors;
+  return Object.fromEntries(Object.entries(floors).filter(([sceneId]) => keep(sceneId)));
+}
+
+/** When the next entry on any floor times out, or null when nothing will. */
+export function nextFloorExpiry(floors: FloorEphemeral): number | null {
+  let next: number | null = null;
+  for (const eph of Object.values(floors)) {
+    const due = nextExpiry(eph);
+    if (due !== null && (next === null || due < next)) next = due;
+  }
+  return next;
 }
 
 /**

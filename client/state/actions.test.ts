@@ -28,8 +28,9 @@ function quietly<T>(fn: () => T): { result: T; errors: number } {
 }
 
 describe("ephemeral events are checked before they go out", () => {
-  test("a valid event is shown here and sent", () => {
+  test("a valid event is shown here, on the floor shown, and sent", () => {
     const s = setup();
+    s.room.applySnapshot({ t: "snapshot", seq: 0, state: projectState(testRoom(), DM, { sceneId: "s1" }), you: { ...DM, sceneId: "s1" }, watermark: 0 });
     s.actions.sendEph({ k: "ping", x: 3, y: 4 });
     assert.deepEqual(s.sent, [{ k: "ping", x: 3, y: 4 }]);
     assert.equal(s.room.store.getState().ephemeral.pings.length, 1);

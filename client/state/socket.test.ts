@@ -6,7 +6,8 @@ import type { RoomState, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { FORGET_ASK, type ClientMessage, type ClientOp, type ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { DM, P1, rng, room, token } from "#shared/testutil.ts";
+import { DM, P1, rng, room, scene, token } from "#shared/testutil.ts";
+import { TOWER, tower, UPPER } from "../features/floors/testing.ts";
 import { serverTime } from "../features/dice/groupSave/lifecycle.ts";
 import {
   createRoomSocket,
@@ -1142,5 +1143,71 @@ describe("refusals kept for a snapshot (RESYNC-REFUSAL-LOST)", () => {
     assert.deepEqual(now.forgetAsk?.asks, [{ n, op: paint, group: "g1" }]);
     assert.deepEqual(now.pending, []);
     assert.ok(!now.toasts.some((toast) => toast.text === FORGET_ASK), "the question is not a toast");
+  });
+});
+
+describe("floors on the socket (docs/design/design-v1-floors.md 8.2, 10)", () => {
+  // Tower's floors, and Keep's: Keep and its upper floor, each named by its main floor.
+  const floors = () => {
+    const state = tower({ tokens: { g1: token("g1", { sceneId: TOWER }) } });
+    state.scenes.keep = scene("keep", { name: "Keep", floor: { of: "keep", level: 0, name: "Hall", height: 10 } });
+    state.scenes.keepTop = scene("keepTop", { name: "Keep", floor: { of: "keep", level: 1, name: "Battlements", height: 10 } });
+    return state;
+  };
+
+  test("a DM's switch to another floor of the scene projected sends no scene message, and a reconnect's hello names the main floor", () => {
+    const s = setup({ state: floors() });
+    s.socket.start();
+    s.connect(TOWER);
+    s.last().take();
+    s.socket.switchScene(UPPER);
+    assert.deepEqual(s.last().take("scene"), [], "nothing sent");
+    assert.deepEqual([s.room.store.getState().sceneId, s.room.store.getState().projectedSceneId], [UPPER, TOWER]);
+    assert.equal(s.room.store.getState().sceneLoad.requested, null, "nothing to load");
+    s.last().drop(1006);
+    s.clock.advance(10_000);
+    s.last().open();
+    const [hello] = s.last().take("hello");
+    assert.equal(hello?.t === "hello" ? hello.sceneId : null, TOWER);
+  });
+
+  test("a switch to a floor of another scene asks for its main floor and shows the floor asked once the snapshot lands", () => {
+    const s = setup({ state: floors() });
+    s.socket.start();
+    s.connect(TOWER);
+    s.last().take();
+    s.socket.switchScene("keepTop");
+    const [asked] = s.last().take("scene");
+    assert.equal(asked?.t === "scene" ? asked.sceneId : null, "keep");
+    assert.equal(s.room.store.getState().sceneLoad.requested, "keep");
+    s.last().emit(s.snapshot("keep"));
+    assert.deepEqual([s.room.store.getState().sceneId, s.room.store.getState().projectedSceneId], ["keepTop", "keep"]);
+  });
+
+  test("an event keeps the floor it was made on, though the floor shown changes before it goes out", () => {
+    const s = setup({ state: floors() });
+    s.socket.start();
+    s.connect(TOWER);
+    s.last().take();
+    s.socket.sendEph({ k: "ping", x: 1, y: 1 });
+    s.room.showFloor(UPPER);
+    s.socket.sendEph({ k: "ping", x: 2, y: 2 });
+    s.runFrames();
+    assert.deepEqual(
+      s.last().take("eph").map((m) => (m.t === "eph" ? [m.sceneId, m.e.k === "ping" ? m.e.x : null] : null)),
+      [
+        [TOWER, 1],
+        [UPPER, 2],
+      ],
+    );
+  });
+
+  test("an event the server sends lands on the floor it names", () => {
+    const s = setup({ state: floors() });
+    s.socket.start();
+    s.connect(TOWER);
+    s.last().emit({ t: "eph", from: "p1", sceneId: UPPER, e: { k: "ping", x: 4, y: 4 } });
+    assert.equal(s.room.store.getState().ephemeral.pings.length, 0, "not on the floor shown");
+    assert.equal(s.room.store.getState().ephemeralFloors[UPPER]?.pings.length, 1);
   });
 });

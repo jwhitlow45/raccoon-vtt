@@ -36,6 +36,11 @@ export function useFollowTurn(): boolean {
   );
 }
 
+/** The setting as it stands, for the store's switch of floors with the turn (state/store.ts, docs/design/design-v1-floors.md 7.3). */
+export function followsTurn(): boolean {
+  return following;
+}
+
 export function setFollowTurn(on: boolean): void {
   following = on;
   try {

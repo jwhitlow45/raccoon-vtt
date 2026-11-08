@@ -1,5 +1,6 @@
 import { historyMessageSchema } from "#shared/undoContract.ts";
 import { serverMessageSchema, type ClientMessage, type EphEvent, type ServerMessage } from "#shared/protocol.ts";
+import { mainFloorId, sameScene } from "#shared/rules/floors.ts";
 import type { RoomStore } from "./store.ts";
 import { backoffDelay, BACKOFF_CAP_MS, realClock, Timer, type Clock } from "./timing.ts";
 import type { You } from "./types.ts";
@@ -314,10 +315,10 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
   let requestedScene: string | null = null;
   let sceneInFlight = false;
 
-  // Ephemeral sending.
-  const ephQueue = new Map<string, EphEvent>();
-  /** Previews in progress, by slot, with when each was last sent. */
-  const openPreviews = new Map<string, { e: EphEvent; sentAt: number }>();
+  // Ephemeral sending. Each event keeps the floor it was made on, the floor shown then, so a switch before the flush sends it on its own floor (docs/design/design-v1-floors.md 8.2).
+  const ephQueue = new Map<string, { e: EphEvent; sceneId: string | null }>();
+  /** Previews in progress, by slot, with their floor and when each was last sent. */
+  const openPreviews = new Map<string, { e: EphEvent; sceneId: string | null; sentAt: number }>();
   let ephFrameScheduled = false;
   const ephDelay = new Timer(clock);
   const keepAliveTimer = new Timer(clock);
@@ -583,7 +584,8 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
 
   function sendHello(): void {
     const { clientId, resumeFrom } = room.prepareHello();
-    const current = room.store.getState().sceneId;
+    // The scene projected, a main floor: a switch of floors within it asks for nothing.
+    const current = room.store.getState().projectedSceneId;
     const sceneId = role() === "dm" ? (wantedScene ?? current ?? undefined) : undefined;
     requestedScene = sceneId ?? null;
     if (sceneId && sceneId !== current) room.trackScene({ t: "request", sceneId });
@@ -692,17 +694,18 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
         room.trackScene({ t: "slow" });
         sceneRetryTimer.set(SCENE_RETRY_MS, () => {
           if (phase !== "open" || wantedScene === null) return;
-          if (wantedScene !== room.store.getState().sceneId) {
+          if (wantedScene !== room.store.getState().projectedSceneId) {
             sendScene();
             return;
           }
           // The DM went back to the scene on screen while the refusal waited.
           wantedScene = null;
+          room.wantFloor(null);
           room.trackScene({ t: "cancel" });
         });
         return;
       case "eph":
-        room.receiveEph(msg.from, msg.e);
+        room.receiveEph(msg.from, msg.sceneId, msg.e);
         return;
       case "presence":
         room.setPresence(msg.online, msg.displays);
@@ -759,8 +762,7 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
    */
   function flushEph(): void {
     if (ephQueue.size === 0) return;
-    const sceneId = room.store.getState().sceneId;
-    if (phase !== "open" || !sceneId) {
+    if (phase !== "open") {
       ephQueue.clear();
       return;
     }
@@ -776,10 +778,11 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
       return;
     }
     lastEphFlush = now;
-    for (const [slot, e] of ephQueue) {
+    for (const [slot, { e, sceneId }] of ephQueue) {
       if (ephSent.length >= rate) break;
       ephQueue.delete(slot);
-      if (!sendRaw({ t: "eph", sceneId, e })) continue;
+      // One made with no floor shown has nowhere to go.
+      if (sceneId === null || !sendRaw({ t: "eph", sceneId, e })) continue;
       ephSent.push(now);
       const open = openPreviews.get(slot);
       if (open) open.sentAt = now;
@@ -796,7 +799,7 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     keepAliveTimer.set(EPH_KEEPALIVE_MS, () => {
       const now = clock.now();
       for (const [slot, open] of openPreviews) {
-        if (now - open.sentAt >= EPH_KEEPALIVE_MS && !ephQueue.has(slot)) ephQueue.set(slot, open.e);
+        if (now - open.sentAt >= EPH_KEEPALIVE_MS && !ephQueue.has(slot)) ephQueue.set(slot, { e: open.e, sceneId: open.sceneId });
       }
       scheduleEphFlush();
       armKeepAlive();
@@ -844,8 +847,19 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
       }
     },
 
-    switchScene(sceneId) {
+    switchScene(asked) {
       if (role() !== "dm") return;
+      const state = room.store.getState();
+      const projected = state.projectedSceneId;
+      // Another floor of the scene projected is in the view already: shown at once, with nothing sent (docs/design/design-v1-floors.md 10).
+      const settled = wantedScene === null && !sceneInFlight && !sceneRetryTimer.pending;
+      if (state.view && projected !== null && settled && sameScene(state.view, asked, projected)) {
+        room.showFloor(asked);
+        return;
+      }
+      // The `scene` message names a main floor, and the floor asked shows once its snapshot lands.
+      const sceneId = state.view ? mainFloorId(state.view, asked) : asked;
+      room.wantFloor(asked === sceneId ? null : asked);
       wantedScene = sceneId;
       // A hello in flight, a scene in flight or a refused scene waiting out
       // its window all end in a snapshot or a timer that sends the latest pick.
@@ -853,9 +867,11 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
         room.trackScene({ t: "request", sceneId });
         return;
       }
-      if (sceneId === room.store.getState().sceneId) {
+      if (sceneId === projected) {
         wantedScene = null;
+        room.wantFloor(null);
         room.trackScene({ t: "cancel" });
+        room.showFloor(asked);
         return;
       }
       room.trackScene({ t: "request", sceneId });
@@ -864,16 +880,17 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
 
     sendEph(e) {
       const slot = ephSlot(e, () => ++pingSlot);
+      const sceneId = room.store.getState().sceneId;
       if (keepsAlive(e)) {
         const prev = openPreviews.get(slot);
-        openPreviews.set(slot, { e, sentAt: prev?.sentAt ?? Number.NEGATIVE_INFINITY });
+        openPreviews.set(slot, { e, sceneId, sentAt: prev?.sentAt ?? Number.NEGATIVE_INFINITY });
         armKeepAlive();
       } else {
         openPreviews.delete(slot);
         armKeepAlive();
       }
       if (phase !== "open") return;
-      ephQueue.set(slot, e);
+      ephQueue.set(slot, { e, sceneId });
       scheduleEphFlush();
     },
 

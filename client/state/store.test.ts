@@ -800,9 +800,9 @@ describe("drag previews", () => {
   test("start and move frames show, and 3 s without a frame clears", () => {
     const s = setup(room({ tokens: { g1: token("g1") } }));
     s.connect();
-    s.room.receiveEph("p2", { k: "dragStart", tokenId: "g1", x: 3, y: 3 });
+    s.room.receiveEph("p2", "s1", { k: "dragStart", tokenId: "g1", x: 3, y: 3 });
     s.clock.advance(2_000);
-    s.room.receiveEph("p2", { k: "dragMove", tokenId: "g1", x: 4.5, y: 3.2 });
+    s.room.receiveEph("p2", "s1", { k: "dragMove", tokenId: "g1", x: 4.5, y: 3.2 });
     assert.deepEqual({ x: preview(s)?.x, y: preview(s)?.y, ended: preview(s)?.ended }, { x: 4.5, y: 3.2, ended: false });
     s.clock.advance(PREVIEW_IDLE_MS - 1);
     assert.ok(preview(s));
@@ -814,16 +814,16 @@ describe("drag previews", () => {
   test("dragCancel clears at once", () => {
     const s = setup(room({ tokens: { g1: token("g1") } }));
     s.connect();
-    s.room.receiveEph("p2", { k: "dragMove", tokenId: "g1", x: 4, y: 4 });
-    s.room.receiveEph("p2", { k: "dragCancel", tokenId: "g1" });
+    s.room.receiveEph("p2", "s1", { k: "dragMove", tokenId: "g1", x: 4, y: 4 });
+    s.room.receiveEph("p2", "s1", { k: "dragCancel", tokenId: "g1" });
     assert.equal(preview(s), undefined);
   });
 
   test("dragEnd holds the drop point until the ev moves the token, so it never flashes back", () => {
     const s = setup(room({ tokens: { g1: token("g1") } }));
     s.connect();
-    s.room.receiveEph("p2", { k: "dragMove", tokenId: "g1", x: 6, y: 6 });
-    s.room.receiveEph("p2", { k: "dragEnd", tokenId: "g1", x: 6, y: 6 });
+    s.room.receiveEph("p2", "s1", { k: "dragMove", tokenId: "g1", x: 6, y: 6 });
+    s.room.receiveEph("p2", "s1", { k: "dragEnd", tokenId: "g1", x: 6, y: 6 });
     assert.equal(preview(s)?.ended, true);
     const ev = s.server.external(move("g1", 6, 6), P2)!;
     s.room.applyEv(ev);
@@ -834,7 +834,7 @@ describe("drag previews", () => {
   test("a drop that never commits lets go after 1 s", () => {
     const s = setup(room({ tokens: { g1: token("g1") } }));
     s.connect();
-    s.room.receiveEph("p2", { k: "dragEnd", tokenId: "g1", x: 6, y: 6 });
+    s.room.receiveEph("p2", "s1", { k: "dragEnd", tokenId: "g1", x: 6, y: 6 });
     s.clock.advance(DRAG_END_HOLD_MS);
     assert.equal(preview(s), undefined);
   });
@@ -842,16 +842,16 @@ describe("drag previews", () => {
   test("presence loss, a removed token and a new snapshot each clear previews", () => {
     const s = setup(room({ tokens: { g1: token("g1"), g2: token("g2") } }));
     s.connect();
-    s.room.receiveEph("p2", { k: "dragMove", tokenId: "g1", x: 4, y: 4 });
+    s.room.receiveEph("p2", "s1", { k: "dragMove", tokenId: "g1", x: 4, y: 4 });
     s.room.setPresence(["dm1", "p1"]);
     assert.equal(preview(s), undefined, "p2 went offline");
 
     s.room.setPresence(["dm1", "p1", "p2"]);
-    s.room.receiveEph("p2", { k: "dragMove", tokenId: "g2", x: 4, y: 4 });
+    s.room.receiveEph("p2", "s1", { k: "dragMove", tokenId: "g2", x: 4, y: 4 });
     s.room.applyEv(s.server.external({ t: "token.delete", tokenId: "g2" }, DM)!);
     assert.equal(s.state().ephemeral.drags["p2|g2"], undefined, "the token was removed");
 
-    s.room.receiveEph("p2", { k: "dragMove", tokenId: "g1", x: 4, y: 4 });
+    s.room.receiveEph("p2", "s1", { k: "dragMove", tokenId: "g1", x: 4, y: 4 });
     s.connect();
     assert.equal(preview(s), undefined, "a snapshot replaces the state");
   });
@@ -868,7 +868,7 @@ describe("drag previews", () => {
   test("a preview of a token this view does not hold is ignored", () => {
     const s = setup(room({ tokens: {} }));
     s.connect();
-    s.room.receiveEph("p2", { k: "dragMove", tokenId: "ghost", x: 4, y: 4 });
+    s.room.receiveEph("p2", "s1", { k: "dragMove", tokenId: "ghost", x: 4, y: 4 });
     assert.deepEqual(s.state().ephemeral.drags, {});
   });
 
@@ -876,10 +876,10 @@ describe("drag previews", () => {
     const s = setup(room({ tokens: { g1: token("g1") } }));
     s.connect();
     s.room.recordLocalEph({ k: "ruler", id: "r1", points: [{ x: 1, y: 1 }] });
-    s.room.receiveEph("p2", { k: "ruler", id: "r2", points: [{ x: 2, y: 2 }], shared: true });
+    s.room.receiveEph("p2", "s1", { k: "ruler", id: "r2", points: [{ x: 2, y: 2 }], shared: true });
     s.clock.advance(PREVIEW_IDLE_MS * 2);
     assert.deepEqual(Object.keys(s.state().ephemeral.rulers), ["dm1|r1"]);
-    s.room.receiveEph("p2", { k: "ruler", id: "r2", points: [{ x: 2, y: 2 }], shared: true });
+    s.room.receiveEph("p2", "s1", { k: "ruler", id: "r2", points: [{ x: 2, y: 2 }], shared: true });
     s.connect();
     assert.deepEqual(Object.keys(s.state().ephemeral.rulers), ["dm1|r1"]);
   });
@@ -887,11 +887,11 @@ describe("drag previews", () => {
   test("a look-here moves only players", () => {
     const dm = setup(room());
     dm.connect();
-    dm.room.receiveEph("dm2", { k: "focus", x: 1, y: 2, zoom: 40 });
+    dm.room.receiveEph("dm2", "s1", { k: "focus", x: 1, y: 2, zoom: 40 });
     assert.equal(dm.state().ephemeral.focus, null);
     const player = setup(room(), P1);
     player.connect();
-    player.room.receiveEph("dm1", { k: "focus", x: 1, y: 2, zoom: 40 });
+    player.room.receiveEph("dm1", "s1", { k: "focus", x: 1, y: 2, zoom: 40 });
     assert.equal(player.state().ephemeral.focus?.zoom, 40);
   });
 });

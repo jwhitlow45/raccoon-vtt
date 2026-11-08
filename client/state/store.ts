@@ -8,7 +8,8 @@ import { uuidv7 } from "#shared/ids.ts";
 import { parseKey } from "#shared/keys.ts";
 import { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
 import { endSentence } from "#shared/logText.ts";
-import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
+import type { LogEntry, RoomState, SceneId, Viewer } from "#shared/model.ts";
+import { mainFloorId } from "#shared/rules/floors.ts";
 import { applyChanges, projectLogEntry, type ProjectedState } from "#shared/project.ts";
 import {
   clientOpSchema,
@@ -22,9 +23,11 @@ import {
 import { reads, satisfies } from "#shared/reads.ts";
 import { applyOp } from "#shared/reducer.ts";
 import type { ConnectionState } from "../lib/connection.ts";
-import { applyEph, clearTokens, keepLocal, keepMembers, nextExpiry, sweepEph } from "./ephemeral.ts";
+import { applyEph, clearTokens, floorEph, keepFloors, keepLocal, keepMembers, nextFloorExpiry, NO_FLOOR_EPHEMERAL, onEveryFloor, onFloor, sweepEph, type FloorEphemeral } from "./ephemeral.ts";
 import { SCENE_LOAD_IDLE, sceneLoadFailureText, stepSceneLoad, type SceneLoad, type SceneLoadEvent } from "./sceneLoad.ts";
 import { floorViewOf } from "./floorView.ts";
+import { followsTurn } from "../features/encounter/followTurn.ts";
+import { heldHere, nextFloor, pickOf, type FloorPick } from "../features/floors/follow.ts";
 import { shareRecord, shareState } from "./share.ts";
 import { backoffDelay, realClock, Timer, type Clock } from "./timing.ts";
 import { addToSelection, bringToken, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
@@ -248,6 +251,8 @@ export type RoomStoreState = RoomView & {
   /** Ops sent or queued, oldest first. A refusal or an ack removes one in the same update that applies its batch. */
   pending: readonly PendingOp[];
   sceneLoad: SceneLoad;
+  /** Every held floor's ephemeral events (ephemeral.ts FloorEphemeral). `ephemeral` is the floor shown's. */
+  ephemeralFloors: FloorEphemeral;
 };
 
 type Snapshot = Extract<ServerMessage, { t: "snapshot" }>;
@@ -368,8 +373,23 @@ export type RoomStore = {
   holdBuild(cancel: () => void): () => void;
   /** Cancels the newest builder gesture waiting on its asks, as Undo does then. False when none waits. */
   cancelHeld(): boolean;
-  /** Shows one of this device's own ephemeral events, as if it had come back from the server. */
+  /** Shows one of this device's own ephemeral events, as if it had come back from the server. It happened on the floor shown. */
   recordLocalEph(e: EphEvent): void;
+  /**
+   * Shows another floor this device holds of the scene projected
+   * (RoomActions.showFloor, docs/design/design-v1-floors.md 7.3): a DM's
+   * pick, or a player's, which holds until their followed creature changes
+   * floor or their turn starts. Null is a player's Back. It sends nothing.
+   */
+  showFloor(sceneId: SceneId | null): void;
+  /**
+   * A DM's switch to a floor of another scene, which the socket asks for by
+   * its main floor (the `scene` message names a main floor): the floor to
+   * show once that scene's snapshot lands. Null forgets it.
+   */
+  wantFloor(sceneId: SceneId | null): void;
+  /** A table display in Follow the DM: it shows the floor of the DM's latest view while it holds that floor (features/floors/displayFloor.ts). */
+  followDm(on: boolean): void;
   pushToast(text: string, tone?: Toast["tone"]): void;
 
   // From the socket.
@@ -385,7 +405,8 @@ export type RoomStore = {
   applyEv(msg: Ev): void;
   /** `retry` for one op: `busy` or `gap` (design 7.4). Scene retries are the socket's. */
   retryOps(n: number): void;
-  receiveEph(from: string, e: EphEvent): void;
+  /** An event from `from` on the floor `sceneId`, which this device holds. */
+  receiveEph(from: string, sceneId: SceneId, e: EphEvent): void;
   /** `displays` is the number of table display sockets, which the server sends DM sockets only. */
   setPresence(online: string[], displays?: number): void;
   /** The server's `access` signal: what DM views show about getting in changed. */
@@ -571,6 +592,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     joinRequestsVersion: 0,
     snapshots: 0,
     ephemeral: EMPTY_EPHEMERAL,
+    ephemeralFloors: NO_FLOOR_EPHEMERAL,
     busy: EMPTY_BUSY,
     toasts: [],
     ended: null,
@@ -667,10 +689,15 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     notify: (text) => pushToast(text, "info"),
   }, clock);
 
-  /** Rebuilds the view from `confirmed` and `pending`, sharing every entity that did not change. */
-  function derive(next: Pick<RoomStoreState, "confirmed" | "seq" | "pending" | "you" | "sceneId">): Pick<RoomStoreState, "view" | "floorView" | "busy"> {
+  /**
+   * Rebuilds the view from `confirmed` and `pending`, sharing every entity
+   * that did not change. Prediction reads the scene projected, never the
+   * floor shown, so a switch of floors never un-predicts an op pending on
+   * another floor (docs/design/design-v1-floors.md 10, FLR32-OPUS-04).
+   */
+  function derive(next: Pick<RoomStoreState, "confirmed" | "seq" | "pending" | "you" | "projectedSceneId">): Pick<RoomStoreState, "view" | "busy"> {
     const prev = get();
-    if (!next.confirmed) return { view: null, floorView: null, busy: EMPTY_BUSY };
+    if (!next.confirmed) return { view: null, busy: EMPTY_BUSY };
     let state = next.confirmed as unknown as RoomState;
     let busy: Readonly<Record<string, true>> = EMPTY_BUSY;
     if (next.pending.length > 0) {
@@ -679,13 +706,79 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         seq: next.seq,
         pending: next.pending,
         viewer: next.you,
-        sceneId: next.sceneId,
+        sceneId: next.projectedSceneId,
       });
       state = replay.state;
       if (replay.waiting.length > 0) busy = shareRecord(prev.busy, Object.fromEntries(replay.waiting.map((k) => [k, true as const])));
     }
-    const view = shareState(prev.view, state);
-    return { view, floorView: floorViewOf(view, next.sceneId, prev.floorView), busy };
+    return { view: shareState(prev.view, state), busy };
+  }
+
+  /** A player's pick of floor, or a Look here's (follow.ts FloorPick). A DM's pick is the floor shown itself. */
+  let pick: FloorPick | null = null;
+  /** A table display's store: its snapshot's `you.role`. Its rules are a player's, and it follows the party's floors. */
+  let display = false;
+  /** A display in Follow the DM (followDm), and the floor of the DM's latest view. */
+  let followingDm = false;
+  let dmViewFloor: SceneId | null = null;
+  /** A DM's switch to a floor of another scene, shown once that scene's snapshot lands (wantFloor). */
+  let wanted: SceneId | null = null;
+
+  /**
+   * The floor shown after a change and everything that reads it
+   * (docs/design/design-v1-floors.md 7.3): the floor by the role's rule
+   * (features/floors/follow.ts), the board's cut of the view, the floor's
+   * own ephemeral events, and the switch for the polite status. `shown` is
+   * the floor shown before, or the one the change asks for.
+   */
+  function floorState(next: { view: RoomStoreState["view"]; before: RoomStoreState["view"]; you: You | null; anchor: SceneId | null; shown: SceneId | null; selected: readonly string[]; floors: FloorEphemeral }): Pick<RoomStoreState, "sceneId" | "floorView" | "floorFollow" | "floorShift" | "ephemeral" | "ephemeralFloors"> {
+    const s = get();
+    const out = nextFloor({
+      role: next.you?.role ?? "player",
+      display,
+      memberId: next.you?.memberId ?? "",
+      view: next.view,
+      before: next.before,
+      anchor: next.anchor,
+      shown: next.shown,
+      pick,
+      selected: next.selected,
+      dmFloor: followingDm ? dmViewFloor : null,
+      followsTurn: next.you?.role === "dm" && followsTurn(),
+    });
+    pick = out.pick;
+    const held = new Set(heldHere(next.view, next.anchor).map((f) => f.id));
+    // Nothing of a floor this device no longer holds stays to draw.
+    const floors = keepFloors(next.floors, (id) => held.has(id));
+    const within = s.sceneId !== null && out.sceneId !== null && s.sceneId !== out.sceneId && held.has(s.sceneId);
+    const shift = within ? { n: (s.floorShift?.n ?? 0) + 1, tokenId: out.movedBy } : s.floorShift;
+    const follow = out.follow === null ? null : s.floorFollow && s.floorFollow.sceneId === out.follow.sceneId && s.floorFollow.tokenId === out.follow.tokenId ? s.floorFollow : out.follow;
+    return {
+      sceneId: out.sceneId,
+      floorView: floorViewOf(next.view, out.sceneId, s.floorView),
+      floorFollow: follow,
+      floorShift: shift,
+      ephemeral: floorEph(floors, out.sceneId),
+      ephemeralFloors: floors,
+    };
+  }
+
+  /** The floor state again over the view as it stands, after a pick, the selection, or an event that names a floor. */
+  function refloor(over: { shown?: SceneId | null; floors?: FloorEphemeral; extra?: Partial<RoomStoreState> } = {}): void {
+    const s = get();
+    const local = over.extra?.local ?? s.local;
+    const next = floorState({
+      view: s.view,
+      before: s.view,
+      you: s.you,
+      anchor: s.projectedSceneId,
+      shown: over.shown !== undefined ? over.shown : s.sceneId,
+      selected: local.selectedIds,
+      floors: over.floors ?? s.ephemeralFloors,
+    });
+    const changed = (Object.keys(next) as (keyof typeof next)[]).some((k) => next[k] !== s[k]);
+    if (changed || over.extra) store.setState({ ...over.extra, ...next });
+    armSweep();
   }
 
   /** One store update with a fresh view. */
@@ -775,6 +868,12 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     return { forgetAsk: null };
   }
 
+  /**
+   * One store update with a fresh view, and the floor shown after it. A
+   * patch's `sceneId` is the floor it asks to show, which the role's rule
+   * may overrule (follow.ts), and its `ephemeralFloors` replace every
+   * floor's events.
+   */
   function commit(patch: Partial<RoomStoreState>): void {
     const s = get();
     const next = {
@@ -782,31 +881,42 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       seq: patch.seq ?? s.seq,
       pending: patch.pending ?? s.pending,
       you: patch.you !== undefined ? patch.you : s.you,
-      sceneId: patch.sceneId !== undefined ? patch.sceneId : s.sceneId,
+      projectedSceneId: patch.projectedSceneId !== undefined ? patch.projectedSceneId : s.projectedSceneId,
     };
-    // The contract keeps the projected scene beside the floor shown, as on a scene with one floor. FLR-D1 splits them.
-    const projected = patch.projectedSceneId === undefined && patch.sceneId !== undefined ? { projectedSceneId: patch.sceneId } : {};
-    store.setState({ ...patch, ...projected, ...derive(next) });
+    const derived = derive(next);
+    const floor = floorState({
+      view: derived.view,
+      before: s.view,
+      you: next.you,
+      anchor: next.projectedSceneId,
+      shown: patch.sceneId !== undefined ? patch.sceneId : s.sceneId,
+      selected: (patch.local ?? s.local).selectedIds,
+      floors: patch.ephemeralFloors ?? s.ephemeralFloors,
+    });
+    store.setState({ ...patch, projectedSceneId: next.projectedSceneId, ...derived, ...floor });
     history.refresh();
   }
 
-  function setEphemeral(ephemeral: RoomStoreState["ephemeral"], extra: Partial<RoomStoreState> = {}): void {
-    if (ephemeral !== get().ephemeral) store.setState({ ...extra, ephemeral });
+  /** Every floor's events, and the floor shown's as `ephemeral`. */
+  function setEphemeral(floors: FloorEphemeral, extra: Partial<RoomStoreState> = {}): void {
+    const s = get();
+    const ephemeral = floorEph(floors, s.sceneId);
+    if (floors !== s.ephemeralFloors || ephemeral !== s.ephemeral) store.setState({ ...extra, ephemeralFloors: floors, ephemeral });
     else if (Object.keys(extra).length > 0) store.setState(extra);
     armSweep();
   }
 
   function armSweep(): void {
     if (disposed) return;
-    const due = nextExpiry(get().ephemeral);
+    const due = nextFloorExpiry(get().ephemeralFloors);
     if (due === null) {
       sweepTimer.clear();
       return;
     }
     if (sweepTimer.pending && sweepTimer.due === due) return;
     sweepTimer.set(Math.max(0, due - clock.now()), () => {
-      const swept = sweepEph(get().ephemeral, clock.now());
-      setEphemeral(swept);
+      const now = clock.now();
+      setEphemeral(onEveryFloor(get().ephemeralFloors, (eph) => sweepEph(eph, now)));
     });
   }
 
@@ -881,7 +991,11 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   // ------------------------------------------------------------ the store object
 
   const setLocal = (local: LocalUi) => {
-    if (local !== get().local) store.setState({ local });
+    const was = get().local;
+    if (local === was) return;
+    // A player's device follows the creature they select (follow.ts), so a new selection can change the floor shown.
+    if (local.selectedIds !== was.selectedIds && get().view !== null) refloor({ extra: { local } });
+    else store.setState({ local });
   };
 
   const ui: RoomUi = {
@@ -1078,8 +1192,31 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
 
     recordLocalEph(e) {
       const s = get();
-      if (!s.you) return;
-      setEphemeral(applyEph(s.ephemeral, s.you.memberId, e, clock.now(), { local: true, role: s.you.role }));
+      const you = s.you;
+      if (!you || s.sceneId === null) return;
+      setEphemeral(onFloor(s.ephemeralFloors, s.sceneId, (eph) => applyEph(eph, you.memberId, e, clock.now(), { local: true, role: you.role })));
+    },
+
+    showFloor(sceneId) {
+      const s = get();
+      if (!s.view || !s.you || display) return;
+      const held = heldHere(s.view, s.projectedSceneId);
+      if (s.you.role === "dm") {
+        if (sceneId !== null && held.some((f) => f.id === sceneId)) refloor({ shown: sceneId });
+        return;
+      }
+      pick = pickOf(sceneId, s.floorFollow ?? null, held);
+      refloor({ shown: pick?.sceneId ?? s.floorFollow?.sceneId ?? s.sceneId });
+    },
+
+    wantFloor(sceneId) {
+      wanted = sceneId;
+    },
+
+    followDm(on) {
+      if (followingDm === on) return;
+      followingDm = on;
+      if (get().view !== null) refloor();
     },
 
     pushToast,
@@ -1117,7 +1254,15 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       corrections.snapshot((msg.state as ProjectedState).log);
       // A table display's projection is a player's who owns nothing (docs/design/design-v1-dm-tools.md 3.1), so its rules are a player's.
       const you: You = { memberId: msg.you.memberId, role: msg.you.role === "dm" ? "dm" : "player" };
-      const sceneId = msg.you.sceneId;
+      display = msg.you.role === "display";
+      // The scene the server projects: a DM's main floor, a player's or a display's start floor as sent, or null behind a blackout (D-261107-288).
+      const projectedSceneId = msg.you.sceneId;
+      // A DM keeps the floor shown while the new snapshot holds it, or shows the floor a switch asked for once it lands.
+      const view = msg.state as unknown as RoomState;
+      const asked = wanted !== null && projectedSceneId !== null && mainFloorId(view, wanted) === projectedSceneId ? wanted : null;
+      // Kept only while the DM's switch to its scene is still on its way behind this snapshot.
+      if (asked !== null || s.sceneLoad.requested === null || s.sceneLoad.requested === projectedSceneId) wanted = null;
+      const sceneId = asked ?? s.sceneId;
       // Everything up to the watermark is already in the snapshot. A higher
       // watermark than anything sent would mean a reused clientId: never
       // hand out an `n` the server already considers settled.
@@ -1135,7 +1280,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       retryAttempt = 0;
       history.snapshot();
       ready = true;
-      const ephemeral = sceneId === s.sceneId ? keepLocal(s.ephemeral) : EMPTY_EPHEMERAL;
+      // A reconnect to the same scene keeps this device's own previews on each of its floors. Anything else starts empty.
+      const ephemeralFloors = projectedSceneId === s.projectedSceneId ? onEveryFloor(s.ephemeralFloors, keepLocal) : NO_FLOOR_EPHEMERAL;
       // The server sends `access` only to a socket holding a snapshot, and
       // every snapshot ends a time without one: the first connection (the
       // room renders, and a DM view may fetch, before the first snapshot), a
@@ -1163,7 +1309,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         pending,
         you,
         sceneId,
-        ephemeral,
+        projectedSceneId,
+        ephemeralFloors,
         accessVersion,
         joinRequestsVersion,
         snapshots: (s.snapshots ?? 0) + 1,
@@ -1255,16 +1402,14 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         const parsed = parseKey(change.key);
         if (parsed?.kind === "token") touchedTokens.add(parsed.id);
       }
-      let ephemeral = clearTokens(s.ephemeral, touchedTokens);
-      // A player always sees the player scene, and the server moves players by
-      // sending the new scene's contents in an ordinary `ev` rather than a
-      // resync. So a player's scene follows the room's player scene here, or
-      // the page would keep pointing at a scene the view no longer holds.
-      let sceneId = s.sceneId;
-      if (s.you?.role === "player" && confirmed.meta.playerSceneId !== s.sceneId) {
-        sceneId = confirmed.meta.playerSceneId;
-        ephemeral = EMPTY_EPHEMERAL;
-      }
+      const ephemeralFloors = onEveryFloor(s.ephemeralFloors, (eph) => clearTokens(eph, touchedTokens));
+      // The server moves players by sending the new scene's contents in an
+      // ordinary `ev` rather than a resync, so a player's and a display's
+      // projected scene follows the room's start floor here, and none behind
+      // a blackout, which keeps the start floor in meta (FLR32-ASTRA-07).
+      // The floor shown then follows by its rule, so the page never points
+      // at a floor the view no longer holds.
+      const projectedSceneId = s.you?.role === "player" ? (confirmed.meta.view?.blackout === true ? null : confirmed.meta.playerSceneId) : s.projectedSceneId;
       if (asks.length > 0) forgetAsk = { asks: [...(forgetAsk && !forgetAsk.sending ? forgetAsk.asks : []), ...asks] };
       // A line this event brings was stamped by the server as it committed.
       let serverOffset = s.serverOffset;
@@ -1272,7 +1417,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         if (!("value" in change) || !change.key.startsWith("log:")) continue;
         serverOffset = withServerReading(serverOffset, (change.value as { at?: unknown } | null)?.at);
       }
-      commit({ confirmed, seq: msg.seq, pending, refused, trapped, toasts, ephemeral, sceneId, forgetAsk, ...(serverOffset === s.serverOffset ? {} : { serverOffset }) });
+      commit({ confirmed, seq: msg.seq, pending, refused, trapped, toasts, ephemeralFloors, projectedSceneId, forgetAsk, ...(serverOffset === s.serverOffset ? {} : { serverOffset }) });
       const refusedNow = new Map((msg.rejects ?? []).map((r) => [r.n, { code: r.code, message: r.message, text: refusalText(r.code, r.message) }]));
       tell(
         s.pending.filter((p) => settled.has(p.n)),
@@ -1282,7 +1427,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         new Map((msg.stamped ?? []).map((s) => [s.n, s.at])),
         new Set(msg.blocked ?? []),
       );
-      if (ephemeral !== s.ephemeral) armSweep();
+      if (get().ephemeralFloors !== s.ephemeralFloors) armSweep();
       armAnswerTimer();
     },
 
@@ -1294,18 +1439,35 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       retryTimer.set(backoffDelay(retryAttempt++, random), resendAll);
     },
 
-    receiveEph(from, e) {
+    receiveEph(from, sceneId, e) {
       const s = get();
       if (e.k === "dragStart" || e.k === "dragMove" || e.k === "dragEnd") {
         // A preview of a token this view cannot show has nothing to draw.
         if (!s.view?.tokens[e.tokenId]) return;
       }
-      setEphemeral(applyEph(s.ephemeral, from, e, clock.now(), { local: false, role: s.you?.role ?? "player" }));
+      const held = heldHere(s.view, s.projectedSceneId);
+      // The server sends only what this device holds. One that crossed a change of floors has nothing left to draw on.
+      if (!held.some((f) => f.id === sceneId)) return;
+      const role = s.you?.role ?? "player";
+      const floors = onFloor(s.ephemeralFloors, sceneId, (eph) => applyEph(eph, from, e, clock.now(), { local: false, role }));
+      // Look here, Bring everyone here and Follow me take a player's device to the DM's floor (7.3), and a display following the DM goes with its view.
+      if (e.k === "focus" && role === "player" && !display) {
+        if (sceneId !== s.sceneId) pick = pickOf(sceneId, s.floorFollow ?? null, held);
+        refloor({ shown: sceneId, floors });
+        return;
+      }
+      if (e.k === "view" && display) {
+        dmViewFloor = sceneId;
+        refloor({ floors });
+        return;
+      }
+      setEphemeral(floors);
     },
 
     setPresence(online, displays) {
       const s = get();
-      setEphemeral(keepMembers(s.ephemeral, new Set(online)), { online, displays: displays ?? 0 });
+      const members = new Set(online);
+      setEphemeral(onEveryFloor(s.ephemeralFloors, (eph) => keepMembers(eph, members)), { online, displays: displays ?? 0 });
     },
 
     accessChanged() {
@@ -1337,7 +1499,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       answerTimer.clear();
       const s = get();
       // Remote previews stop arriving with the socket. This device's own stay.
-      setEphemeral(keepLocal(s.ephemeral));
+      setEphemeral(onEveryFloor(s.ephemeralFloors, keepLocal));
     },
 
     setConnection(connection) {

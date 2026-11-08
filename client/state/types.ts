@@ -14,6 +14,9 @@ import type { SceneLoad } from "./sceneLoad.ts";
 /** Who this device is in the room, from its grant. Authority is the server's: this only shapes the UI. */
 export type You = { memberId: MemberId; role: "dm" | "player" };
 
+/** What a player's device follows on a scene with floors (RoomView.floorFollow): their creature and its floor, or the start floor alone. */
+export type FloorFollow = { sceneId: SceneId | null; tokenId: string | null };
+
 type AoeEvent = Extract<EphEvent, { k: "aoe" }>;
 type RulerEvent = Extract<EphEvent, { k: "ruler" }>;
 
@@ -542,6 +545,20 @@ export type RoomView = {
    * reads it, so a floor switch never un-predicts a pending op.
    */
   projectedSceneId: SceneId | null;
+  /**
+   * A player's device: what it follows while nothing is picked
+   * (docs/design/design-v1-floors.md 7.3), their creature and its floor, or
+   * with none the start floor alone. The Viewing notice's Back returns
+   * there. Absent for a DM and a table display, and in a player preview.
+   */
+  floorFollow?: FloorFollow | null;
+  /**
+   * Counts the switches of the floor shown within one scene, with the
+   * creature whose move made the switch, so the polite status says it once
+   * ("Thorn is on Upper floor. Showing Upper floor."). Absent until the
+   * first.
+   */
+  floorShift?: { n: number; tokenId: string | null };
   /** `open` only once the snapshot has arrived (section 7.5). */
   connection: ConnectionState;
   /** The scene this device asked for and is waiting on (sceneLoad.ts). A read-only player preview leaves it out. */
@@ -593,6 +610,7 @@ export type RoomView = {
    * the devices list fetch again.
    */
   joinRequestsVersion: number;
+  /** The floor shown's ephemeral events (state/ephemeral.ts FloorEphemeral holds every held floor's). */
   ephemeral: Ephemeral;
   /**
    * Entity keys (shared/keys.ts) that a pending op cannot predict and waits
