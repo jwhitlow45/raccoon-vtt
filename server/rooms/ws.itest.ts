@@ -7,9 +7,9 @@ import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
 import { character, companionBlock, customMonster, token } from "#shared/testutil.ts";
-import { serverMessageSchema, type Op } from "#shared/protocol.ts";
+import { MAX_KEPT_REFUSALS, serverMessageSchema, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { sha256 } from "../auth/tokens.ts";
-import { failCommits, startEngine, type Engine } from "./testing.ts";
+import { failCommits, Socket, startEngine, type Engine } from "./testing.ts";
 
 /**
  * The WebSocket flows of design section 18, against the real server on an
@@ -650,5 +650,201 @@ describe("websocket: the joinRequests signal (docs/design/design-v1-join-request
     // Apart from access: a burst of asks never makes the devices list fetch again.
     assert.equal(await dmSocket.maybe("access"), null);
     for (const s of [dmSocket, playerSocket, displaySocket, preview, early]) s.close();
+  });
+});
+
+/**
+ * A refusal committed while its client's socket waits on a snapshot
+ * (RESYNC-REFUSAL-LOST): the batch sends that socket no ev, and the snapshot
+ * settles the op with no answer, so the server keeps the refusal for that
+ * socket and sends it as `refusals` just ahead of the snapshot, on each path
+ * a snapshot takes: at once, delayed by the snapshot budget, or after the
+ * batch a hello waits on. Each test holds the window open by holding back
+ * the page's hello.
+ */
+describe("websocket: refusals kept for a snapshot (RESYNC-REFUSAL-LOST)", () => {
+  let t: Engine;
+  let budget: Engine;
+  before(async () => {
+    // A long batch window, so a hello can land while the refused op is still staged, on a loaded machine too.
+    t = await startEngine({ rooms: { actor: { batchMs: 1_000 } } });
+    // One snapshot a session for a while, so a resync's hello waits for its own.
+    budget = await startEngine({ rooms: { actor: { batchMs: 20 }, snapshotBudget: { sessionCount: 1, windowMs: 2_000 } } });
+  });
+  after(async () => {
+    await t.close();
+    await budget.close();
+  });
+
+  /** Every frame a socket receives from now on, in order, whether or not a test waits on it. */
+  function framesOf(s: Socket): ServerMessage[] {
+    const frames: ServerMessage[] = [];
+    s.ws.on("message", (data) => frames.push(JSON.parse(data.toString()) as ServerMessage));
+    return frames;
+  }
+
+  async function storedAt(e: Engine, roomId: string, clientId: string): Promise<number> {
+    const { rows } = await e.pool.query<{ n: string }>("select n::text from client_watermarks where room_id = $1 and client_id = $2", [roomId, clientId]);
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  /** Until the client's watermark is stored at `n`, as the commit of the batch that settles `n` stores it. */
+  async function committed(e: Engine, roomId: string, clientId: string, n: number): Promise<void> {
+    for (let i = 0; i < 500 && (await storedAt(e, roomId, clientId)) < n; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.ok((await storedAt(e, roomId, clientId)) >= n, `client ${clientId} stored ${n}`);
+  }
+
+  /** The frames just ahead of the socket's newest snapshot, and that snapshot. */
+  function ahead(frames: ServerMessage[]): { before: ServerMessage[]; snapshot: Extract<ServerMessage, { t: "snapshot" }> } {
+    const at = frames.findLastIndex((f) => f.t === "snapshot");
+    assert.ok(at >= 0, "a snapshot came");
+    return { before: frames.slice(0, at), snapshot: frames[at] as Extract<ServerMessage, { t: "snapshot" }> };
+  }
+
+  /** A chat line whose text is not a string: refused `invalid`, in words no other frame holds. */
+  const BAD: Record<string, unknown> = { t: "log.chat", text: 41 };
+
+  test("qfu2-int-1: an op refused while a DM's scene switch waits for its hello comes as refusals just ahead of the snapshot, to that socket alone", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Kept refusal");
+    const player = t.client();
+    const pipId = await player.join(roomId, "Pip");
+    const a = await t.connect(roomId, dm);
+    // Another page of the same browser: the same session, another client.
+    const tab = await t.connect(roomId, dm);
+    const pip = await t.connect(roomId, player);
+    const view = await Socket.open(`${t.url}/ws?room=${roomId}&as=${encodeURIComponent(pipId)}`, { origin: t.config.publicOrigin, cookie: `rvtt=${dm.token}`, "cf-connecting-ip": dm.ip, "user-agent": "refusals-itest" });
+    const frames = { a: framesOf(a), tab: framesOf(tab), pip: framesOf(pip), view: framesOf(view) };
+    const first = await a.snapshot("c1");
+    await tab.snapshot("c2");
+    await pip.snapshot("p1");
+    const sceneId = sceneOf(first.state as ProjectedState);
+
+    // The other page switches too, and the view as Pip has not said hello yet: neither holds a snapshot as the batch commits.
+    const n = a.op(BAD);
+    a.send({ t: "scene", sceneId });
+    tab.send({ t: "scene", sceneId });
+    await a.next("resync");
+    await tab.next("resync");
+    await committed(t, roomId, "c1", n);
+    assert.equal(await a.maybe("ev", () => true, 100), null, "the socket holds no snapshot, so the batch sends it nothing");
+    await tab.snapshot("c2", 1, sceneId);
+    await view.snapshot("v1");
+    // The page still holds the op, so it resumes from it.
+    a.hello("c1", n, sceneId);
+    await a.next("snapshot");
+    const { before, snapshot } = ahead(frames.a);
+    assert.ok(snapshot.watermark >= n, "the snapshot settles the op");
+    assert.deepEqual(before.slice(-2).map((f) => f.t), ["refusals", "clock"], "the refusals just ahead of the clock and the snapshot");
+    const kept = before.at(-2) as Extract<ServerMessage, { t: "refusals" }>;
+    assert.deepEqual(kept.rejects.map((r) => [r.n, r.code]), [[n, "invalid"]]);
+    const words = kept.rejects[0]!.message;
+    assert.ok(words.length > 0, "the refusal keeps its words");
+    assert.ok(!before.slice(before.findLastIndex((f) => f.t === "resync")).some((f) => f.t === "ev"), "no ev between the resync and the snapshot");
+    assert.ok(serverMessageSchema.safeParse(kept).success, "this build reads the frame");
+    // An older build's union is today's without this frame. Its page drops the frame and opens on the snapshot, as before.
+    const members = serverMessageSchema.options.filter((schema) => schema.shape.t.value !== "refusals");
+    const older = z.discriminatedUnion("t", members as unknown as [(typeof members)[number], ...(typeof members)[number][]]);
+    assert.ok(!older.safeParse(kept).success && older.safeParse(snapshot).success, "an older page drops only the refusals");
+
+    // The next snapshot of the same socket brings nothing kept again, once the scene rate lets the DM switch again.
+    await new Promise((r) => setTimeout(r, 2_100));
+    a.send({ t: "scene", sceneId });
+    await a.next("resync");
+    a.hello("c1", n + 1, sceneId);
+    await a.next("snapshot");
+    assert.ok(!ahead(frames.a.slice(frames.a.indexOf(snapshot) + 1)).before.some((f) => f.t === "refusals"), "taken once");
+    // Nothing of it reaches any other socket: the same DM's other page, the player, or the DM's view as the player.
+    for (const [name, got] of Object.entries({ tab: frames.tab, pip: frames.pip, view: frames.view })) {
+      assert.ok(got.some((f) => f.t === "snapshot"), `${name} is open`);
+      assert.ok(!got.some((f) => f.t === "refusals" || (f.t === "ev" && f.rejects !== undefined)), `${name} takes no refusal`);
+      assert.ok(!JSON.stringify(got).includes(words), `${name} never reads its words`);
+    }
+    for (const s of [a, tab, pip, view]) s.close();
+  });
+
+  test("qfu2-int-2: a hello on the same socket for another client takes nothing kept for the first", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Kept for its client");
+    const a = await t.connect(roomId, dm);
+    const first = await a.snapshot("c1");
+    const sceneId = sceneOf(first.state as ProjectedState);
+    const frames = framesOf(a);
+    const n = a.op(BAD);
+    a.send({ t: "scene", sceneId });
+    await a.next("resync");
+    await committed(t, roomId, "c1", n);
+    a.hello("c9", 1, sceneId);
+    await a.next("snapshot");
+    assert.ok(!ahead(frames).before.some((f) => f.t === "refusals"));
+    a.close();
+  });
+
+  test("qfu2-int-3: a hello that waits on a batch takes the batch's refusal ahead of its snapshot", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Kept for a waiting hello");
+    const a = await t.connect(roomId, dm);
+    const first = await a.snapshot("c1");
+    const sceneId = sceneOf(first.state as ProjectedState);
+    const frames = framesOf(a);
+    const n = a.op(BAD);
+    a.send({ t: "scene", sceneId });
+    await a.next("resync");
+    // The page says every op below n + 1 is settled while the batch holding n is still staged, so its hello waits on that batch.
+    assert.equal(await storedAt(t, roomId, "c1"), 0, "the batch has not committed");
+    a.hello("c1", n + 1, sceneId);
+    const snapshot = await a.next("snapshot");
+    assert.equal(snapshot.watermark, n);
+    const { before } = ahead(frames);
+    assert.deepEqual(before.slice(-2).map((f) => f.t), ["refusals", "clock"]);
+    assert.deepEqual((before.at(-2) as Extract<ServerMessage, { t: "refusals" }>).rejects.map((r) => [r.n, r.code]), [[n, "invalid"]]);
+    a.close();
+  });
+
+  test("qfu2-int-4: a snapshot the budget delays takes the refusal that committed while it waited", async () => {
+    const dm = budget.client();
+    const { roomId } = await dm.createRoom("Kept through a wait");
+    const a = await budget.connect(roomId, dm);
+    const first = await a.snapshot("c1");
+    const sceneId = sceneOf(first.state as ProjectedState);
+    const frames = framesOf(a);
+    const n = a.op(BAD);
+    a.send({ t: "scene", sceneId });
+    await a.next("resync");
+    a.hello("c1", n, sceneId);
+    // The session spent its one snapshot, so this one waits, and the batch commits meanwhile.
+    await a.next("wait");
+    await committed(budget, roomId, "c1", n);
+    const snapshot = await a.next("snapshot", () => true, 5_000);
+    assert.ok(snapshot.watermark >= n);
+    const { before } = ahead(frames);
+    assert.ok(before.findIndex((f) => f.t === "wait") < before.findIndex((f) => f.t === "refusals"), "kept through the wait");
+    assert.deepEqual(before.slice(-2).map((f) => f.t), ["refusals", "clock"]);
+    assert.deepEqual((before.at(-2) as Extract<ServerMessage, { t: "refusals" }>).rejects.map((r) => [r.n, r.code]), [[n, "invalid"]]);
+    a.close();
+  });
+
+  test("qfu2-int-5: a socket keeps its newest refusals up to the frame's cap, across the batches of its wait", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Kept to the cap");
+    const a = await t.connect(roomId, dm);
+    const first = await a.snapshot("c1");
+    const sceneId = sceneOf(first.state as ProjectedState);
+    const frames = framesOf(a);
+    a.send({ t: "scene", sceneId });
+    await a.next("resync");
+    // A full op burst, then more once the rate has refilled, so none is answered busy.
+    for (let i = 0; i < 60; i++) a.op(BAD);
+    await committed(t, roomId, "c1", 60);
+    await new Promise((r) => setTimeout(r, 600));
+    for (let i = 0; i < 10; i++) a.op(BAD);
+    await committed(t, roomId, "c1", 70);
+    a.hello("c1", 1, sceneId);
+    const snapshot = await a.next("snapshot");
+    assert.equal(snapshot.watermark, 70);
+    const kept = ahead(frames).before.findLast((f) => f.t === "refusals") as Extract<ServerMessage, { t: "refusals" }> | undefined;
+    assert.deepEqual(kept?.rejects.map((r) => r.n), Array.from({ length: MAX_KEPT_REFUSALS }, (_, i) => 70 - MAX_KEPT_REFUSALS + 1 + i));
+    assert.ok(serverMessageSchema.safeParse(kept).success, "a page reads it whole");
+    a.close();
   });
 });

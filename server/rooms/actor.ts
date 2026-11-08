@@ -29,7 +29,7 @@ import { CLOSE, clientKey, type ClientKey, type Connection } from "./connection.
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { cancelPreviews, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
 import { exploreOp } from "./explore.ts";
-import { buildSnapshot, publishBatch, type Reject, type Restored, type Stamped } from "./fanout.ts";
+import { buildSnapshot, publishBatch, takeKeptRejects, type Reject, type Restored, type Stamped } from "./fanout.ts";
 import type { SocketFilter } from "./gateway.ts";
 import {
   ARCHIVE_ALWAYS,
@@ -1896,6 +1896,8 @@ export class RoomActor {
       delayed.cancel();
       this.#delayed.delete(key);
     }
+    // What this socket kept is the client's it answered for until now, which a hello for another client never takes.
+    if (conn.clientId !== null && conn.clientId !== cmd.clientId) takeKeptRejects(conn);
     conn.clientId = cmd.clientId;
     conn.held = null;
     this.#clients.set(key, conn);
@@ -1974,6 +1976,9 @@ export class RoomActor {
     }
     const wm = this.#watermarks.get(key);
     const snapshot = buildSnapshot(this.#committed.state, this.#committed.seq, conn, wm?.committed ?? 0);
+    // Ahead of the snapshot, which settles the ops they name with no answer, so the page says why each was refused.
+    const refused = takeKeptRejects(conn);
+    if (refused.length > 0) conn.send({ t: "refusals", rejects: refused });
     // Ahead of the snapshot, so the page has re-anchored its reckoning of this server's time before anything the
     // snapshot sets off can mint a first Apply (D-261031-181). Read after the build, so the network is all it trails by.
     conn.send({ t: "clock", at: new Date(this.#opts.now()).toISOString() });

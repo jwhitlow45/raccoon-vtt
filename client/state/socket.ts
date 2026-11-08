@@ -719,6 +719,9 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
       case "clock":
         room.receiveClock(msg.at);
         return;
+      case "refusals":
+        room.keepRefusals(msg.rejects);
+        return;
       case "wait":
         // Only a request still waiting for its snapshot has a deadline to move.
         if (phase === "hello" || sceneInFlight) {

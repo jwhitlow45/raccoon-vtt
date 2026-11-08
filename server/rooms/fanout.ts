@@ -2,7 +2,7 @@ import { chunkKey, doorChunk, keys, parseKey, partsKey, readEntity, type EntityK
 import { linesPastStart } from "#shared/logRings.ts";
 import type { Label, LogEntry, RoomState, Stamp, Trap, Viewer } from "#shared/model.ts";
 import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, namedByMemory, perPlayerScene, playerChunkBatch, projectEntity, projectState, sightHolders, stampCells, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
-import type { Change, RefusalCode } from "#shared/protocol.ts";
+import { MAX_KEPT_REFUSALS, type Change, type RefusalCode } from "#shared/protocol.ts";
 import type { OpAcknowledgment } from "#shared/undoContract.ts";
 import { visionRules, type PartySight } from "#shared/ruleHooks.ts";
 import { labelCells, TILE_CELLS } from "#shared/rules/fog.ts";
@@ -300,10 +300,33 @@ class Projector {
   }
 }
 
+/*
+ * Refusals a client's current socket could not be sent, as it held no
+ * snapshot then, kept for the snapshot it waits on (RESYNC-REFUSAL-LOST).
+ * That snapshot settles every op up to its watermark with no answer, so
+ * without them the device could say only that it does not know what became
+ * of a refused op, never why. By socket, so they reach only the socket the
+ * batch would have sent them to, and die with it.
+ */
+const kept = new WeakMap<Connection, Reject[]>();
+
+/** The refusals kept for a socket since its last snapshot, oldest first, which it is sent ahead of its next one. Taking them clears them. */
+export function takeKeptRejects(conn: Connection): Reject[] {
+  const rejects = kept.get(conn) ?? [];
+  kept.delete(conn);
+  return rejects;
+}
+
+function keepRejects(conn: Connection, rejects: readonly Reject[]): void {
+  kept.set(conn, [...(kept.get(conn) ?? []), ...rejects].slice(-MAX_KEPT_REFUSALS));
+}
+
 /**
  * Sends each connection its `ev` for the batch. Acks and refusals go to the
  * client's current socket only (`current`), never by socket identity, so a
- * client that reconnected during the commit still gets them.
+ * client that reconnected during the commit still gets them. A current
+ * socket that holds no snapshot is sent nothing and keeps its refusals for
+ * the snapshot it waits on (takeKeptRejects).
  */
 export function publishBatch(batch: CommittedBatch, connections: Iterable<Connection>, current: (key: ClientKey) => Connection | undefined, history?: (conn: Connection, delivered: boolean) => void): void {
   const all = [...connections];
@@ -318,7 +341,13 @@ export function publishBatch(batch: CommittedBatch, connections: Iterable<Connec
   const projections = new Map<string, Map<EntityKey, unknown>>();
   const projector = new Projector(batch.after);
   for (const conn of all) {
-    if (conn.closed || conn.held === null) continue;
+    if (conn.closed) continue;
+    if (conn.held === null) {
+      const key = conn.key;
+      const rejects = key !== null && current(key) === conn ? batch.rejects.get(key) : undefined;
+      if (rejects?.length) keepRejects(conn, rejects);
+      continue;
+    }
     const cls = viewerClass(conn, batch.after);
     let next = projections.get(cls);
     if (!next) {

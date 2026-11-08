@@ -3241,6 +3241,16 @@ export type RefusalCode = (typeof refusalCodes)[number];
 /** The question a `forget` refusal asks the DM (docs/design/design-v1-map-discovery.md 5.3). */
 export const FORGET_ASK = "Players' remembered map here will be forgotten. Go ahead?";
 
+/** One of this client's ops the server refused, with its words, which only that client's device is sent. */
+const rejectSchema = z.strictObject({ n: z.number().int().min(1), code: z.enum(refusalCodes), message: z.string().max(200) });
+
+/**
+ * The most refusals a socket keeps while it holds no snapshot, the newest
+ * (server/rooms/fanout.ts publishBatch). Far more than a device sends in
+ * that time, and a socket that never says hello again keeps no more.
+ */
+export const MAX_KEPT_REFUSALS = 64;
+
 export const changeSchema = z.union([
   z.strictObject({ key: z.string().min(1).max(200), value: z.unknown() }),
   z.strictObject({ key: z.string().min(1).max(200), deleted: z.literal(true) }),
@@ -3267,9 +3277,7 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
     acks: z.array(z.number().int().min(1)).optional(),
     /** This client's accepted commands. Duplicate transport acknowledgments may lack their original details. */
     ackDetails: z.array(opAcknowledgmentSchema).optional(),
-    rejects: z
-      .array(z.strictObject({ n: z.number().int().min(1), code: z.enum(refusalCodes), message: z.string().max(200) }))
-      .optional(),
+    rejects: z.array(rejectSchema).optional(),
     /** This client's undos and redos in the batch, each with what it took back, for the toast (design 7.7). */
     restored: z.array(z.strictObject({ n: z.number().int().min(1), what: z.string().max(200) })).optional(),
     /** A player's ops in the batch whose trap step refuses their Undo move, so the bar stops offering it (docs/design/design-v1-traps.md 6.5). */
@@ -3303,6 +3311,16 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
    * drops this frame instead and opens as before.
    */
   z.strictObject({ t: z.literal("clock"), at: z.string().max(40) }),
+  /**
+   * This client's refusals that came while its socket held no snapshot (a
+   * resync, a delayed snapshot or a hello waiting on a batch), sent just
+   * ahead of the snapshot that ends that time, and only then. The snapshot
+   * settles every op up to its watermark with no answer, so the page reads
+   * these first and says why each was refused (RESYNC-REFUSAL-LOST). A
+   * frame of its own, as `clock` is: a page on an older build drops it and
+   * settles those ops as before.
+   */
+  z.strictObject({ t: z.literal("refusals"), rejects: z.array(rejectSchema).min(1).max(MAX_KEPT_REFUSALS) }),
   z.strictObject({ t: z.literal("pong"), k: z.number().int().min(0) }),
   /**
    * The answer to a `time` probe: `at` is the server's clock in ms since

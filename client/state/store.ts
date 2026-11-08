@@ -251,6 +251,9 @@ export type RoomStoreState = RoomView & {
 
 type Snapshot = Extract<ServerMessage, { t: "snapshot" }>;
 type Ev = Extract<ServerMessage, { t: "ev" }>;
+type Reject = Extract<ServerMessage, { t: "refusals" }>["rejects"][number];
+/** A builder op the server asked about (FORGET_ASK), with the gesture it belongs to. */
+type ForgetAskOp = { n: number; op: ClientOp; group?: string; groupScope?: "setup" };
 
 /** Where the store sends ops. `send` returns false when the socket is not open. */
 export type Outbox = { send(msg: ClientMessage): boolean };
@@ -369,6 +372,8 @@ export type RoomStore = {
   flushOutbox(): void;
   /** Drops ops too old to save and says where the server should resume. Call right before sending `hello`. */
   prepareHello(): { clientId: string; resumeFrom: number };
+  /** The server's `refusals`, just ahead of the snapshot that settles their ops (applySnapshot). */
+  keepRefusals(rejects: readonly Reject[]): void;
   applySnapshot(msg: Snapshot): void;
   applyEv(msg: Ev): void;
   /** `retry` for one op: `busy` or `gap` (design 7.4). Scene retries are the socket's. */
@@ -579,6 +584,12 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   let ready = false;
   /** When each op went out on the current socket. Kept out of the store, so sending causes no render. */
   const sentAt = new Map<number, number>();
+  /**
+   * The `refusals` that came ahead of the next snapshot, by `n`, which it
+   * settles (protocol.ts). Each is this page's own and final, as no `n` is
+   * settled twice, so one that came for a hello the socket lost still holds.
+   */
+  let keptRefusals = new Map<number, Reject>();
   let retryAttempt = 0;
   const retryTimer = new Timer(clock);
   const answerTimer = new Timer(clock);
@@ -682,6 +693,58 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       else if (at !== undefined) p.onAnswer?.(a, undefined, undefined, at);
       else p.onAnswer?.(a, refusal?.(p));
     }
+  }
+
+  /**
+   * What this device says of its own ops the server refused, in an `ev` or
+   * in the `refusals` ahead of a snapshot: a toast in the refusal's words,
+   * an Undo or Redo's answer, or the builder ops the forget question asks
+   * about, which it returns. A quiet op, or one no longer pending, says
+   * nothing.
+   */
+  function refusalNotices(rejects: readonly Reject[], pending: readonly PendingOp[], from: readonly Toast[]): { toasts: readonly Toast[]; asks: ForgetAskOp[] } {
+    let toasts = from;
+    const asks: ForgetAskOp[] = [];
+    // A second undo answer reads as the first, so it replaces the first as a new toast and each press visibly lands.
+    const renew = (text: string, tone: Toast["tone"]) => {
+      toasts = withToast(toasts.filter((t) => t.text !== text), { id: ++toastSeq, text, tone });
+      return toastSeq;
+    };
+    for (const r of rejects) {
+      const sent = pending.find((p) => p.n === r.n);
+      const op = sent?.op;
+      const historyKey = (op?.t === "undo" || op?.t === "redo") && op.head ? `${op.scope ?? "play"}:${op.t}` : null;
+      if (historyKey && op && "head" in op && op.head) historyRefusals.set(historyKey, { head: op.head, toast: null });
+      if (!op || sent.quiet) continue;
+      if (r.code === "forget" && (op.t === "undo" || op.t === "redo") && "head" in op && typeof op.head === "string") {
+        // The undo toast's confirm (docs/design/design-v1-map-discovery.md 5.3): a yes names the refused step's n, which the server checks still heads the stack.
+        const expected = op.head;
+        const scope = "scope" in op ? op.scope as "play" | "setup" | undefined : undefined;
+        // Pressed while a builder gesture waits on its asks, it does nothing and the toast stays, as the store would refuse its step (`overtakes`).
+        const action = { label: op.t === "undo" ? "Forget and undo" : "Forget and redo", run: () => { room.activateHistory(op.t, { expected, scope, forget: r.n, ...(op.t === "undo" && op.of !== undefined ? { of: op.of } : {}) }); }, ready: () => held.length === 0 && get().connection === "open" && !get().history?.pending };
+        toasts = withToast(toasts.filter((t) => t.text !== FORGET_ASK), { id: ++toastSeq, text: FORGET_ASK, tone: "info", action });
+        continue;
+      }
+      if (r.code === "forget") {
+        const group = sent.group !== undefined ? { group: sent.group, ...(sent.groupScope ? { groupScope: sent.groupScope } : {}) } : {};
+        // A gesture's ask stands for the ops it holds, which the question asks about and its yes sends.
+        if (op.t === "build.ask") for (const held of sent.holds?.() ?? []) asks.push({ n: r.n, op: held, ...group });
+        else asks.push({ n: r.n, op, ...group });
+        continue;
+      }
+      // An ask refused for any other reason says nothing: the gesture's own ops, refused the same, say it.
+      if (op.t === "build.ask") continue;
+      if (op.t === "undo" || op.t === "redo") {
+        const answer = undoAnswer(op.t, { refused: r.message });
+        const toast = renew(answer.text, answer.tone);
+        if (historyKey && op.head) historyRefusals.set(historyKey, { head: op.head, toast });
+        continue;
+      }
+      if (isRace(r.code)) continue;
+      const text = refusalText(r.code, r.message);
+      if (!toasts.some((t) => t.text === text)) toasts = withToast(toasts, { id: ++toastSeq, text, tone: "error" });
+    }
+    return { toasts, asks };
   }
 
   /**
@@ -1012,6 +1075,10 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       return { clientId, resumeFrom: fresh[0]?.n ?? nextN };
     },
 
+    keepRefusals(rejects) {
+      for (const r of rejects) keptRefusals.set(r.n, r);
+    },
+
     applySnapshot(msg) {
       const s = get();
       corrections.snapshot((msg.state as ProjectedState).log);
@@ -1024,8 +1091,12 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       nextN = Math.max(nextN, msg.watermark + 1);
       terminal = Math.max(terminal, msg.watermark);
       const pending = s.pending.filter((p) => p.n > msg.watermark);
-      // The snapshot holds what the server made of these, but not whether it refused one: its answer was lost with the socket.
-      const lost = s.pending.filter((p) => p.n <= msg.watermark);
+      // The snapshot holds what the server made of these, but not whether it refused one: an answer the server
+      // sent was lost with the socket. One it kept while this socket held no snapshot came just ahead.
+      const kept = keptRefusals;
+      keptRefusals = new Map();
+      const refusedNow = s.pending.filter((p) => p.n <= msg.watermark && kept.has(p.n));
+      const lost = s.pending.filter((p) => p.n <= msg.watermark && !kept.has(p.n));
       sentAt.clear();
       retryTimer.clear();
       retryAttempt = 0;
@@ -1040,6 +1111,18 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       // ask again.
       const accessVersion = s.accessVersion + 1;
       const joinRequestsVersion = s.joinRequestsVersion + 1;
+      const settledAsk = askSettled(lost, pending);
+      let answered: Pick<RoomStoreState, "toasts" | "refused"> & Partial<Pick<RoomStoreState, "forgetAsk">> | Record<string, never> = {};
+      if (refusedNow.length > 0) {
+        // Read after askSettled, whose closing toast the store holds by then.
+        const notices = refusalNotices(refusedNow.map((p) => kept.get(p.n)!), s.pending, get().toasts);
+        const ask = "forgetAsk" in settledAsk ? settledAsk.forgetAsk : (s.forgetAsk ?? null);
+        answered = {
+          toasts: notices.toasts,
+          refused: [...(s.refused ?? []), ...refusedNow.map((p) => p.n)].slice(-MAX_REFUSED),
+          ...(notices.asks.length > 0 ? { forgetAsk: { asks: [...(ask && !ask.sending ? ask.asks : []), ...notices.asks] } } : {}),
+        };
+      }
       commit({
         confirmed: msg.state as ProjectedState,
         confirmedReady: true,
@@ -1051,9 +1134,15 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         accessVersion,
         joinRequestsVersion,
         snapshots: (s.snapshots ?? 0) + 1,
-        ...askSettled(lost, pending),
+        ...settledAsk,
+        ...answered,
       });
-      // Told after the commit, so a sender that looks at the view finds this snapshot in it.
+      // Told after the commit, so a sender that looks at the view finds this snapshot in it, and the refused first,
+      // as an answer that came settles its op before the snapshot settles the rest with none.
+      tell(refusedNow, () => "refused", (p) => {
+        const r = kept.get(p.n)!;
+        return { code: r.code, message: r.message, text: refusalText(r.code, r.message) };
+      });
       tell(lost, () => "unknown", undefined, "snapshot");
       armSweep();
       flush();
@@ -1094,7 +1183,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         renew(SETUP_SAVED, "info");
       }
       // Builder ops the server asked about (FORGET_ASK), one question for all of them, and a question answered once its ops are.
-      const asks: { n: number; op: ClientOp; group?: string; groupScope?: "setup" }[] = [];
+      const asks: ForgetAskOp[] = [];
       let forgetAsk = s.forgetAsk ?? null;
       if (forgetAsk?.sending && forgetAsk.sending.every((n) => settled.has(n) || !pending.some((p) => p.n === n))) {
         if (forgetAsk.unsure) toast(FORGET_UNSURE, "info");
@@ -1115,39 +1204,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
           const answer = undoAnswer(op.t, { what: restored.get(n) }, "scope" in op && op.scope === "setup" ? "setup" : "play");
           renew("discard" in op && op.discard ? "Discarded this step. The game stays as it is." : answer.text, answer.tone);
         }
-        for (const r of msg.rejects ?? []) {
-          const sent = pending.find((p) => p.n === r.n);
-          const op = sent?.op;
-          const historyKey = (op?.t === "undo" || op?.t === "redo") && op.head ? `${op.scope ?? "play"}:${op.t}` : null;
-          if (historyKey && op && "head" in op && op.head) historyRefusals.set(historyKey, { head: op.head, toast: null });
-          if (!op || sent.quiet) continue;
-          if (r.code === "forget" && (op.t === "undo" || op.t === "redo") && "head" in op && typeof op.head === "string") {
-            // The undo toast's confirm (docs/design/design-v1-map-discovery.md 5.3): a yes names the refused step's n, which the server checks still heads the stack.
-            const expected = op.head;
-            const scope = "scope" in op ? op.scope as "play" | "setup" | undefined : undefined;
-            // Pressed while a builder gesture waits on its asks, it does nothing and the toast stays, as the store would refuse its step (`overtakes`).
-            const action = { label: op.t === "undo" ? "Forget and undo" : "Forget and redo", run: () => { room.activateHistory(op.t, { expected, scope, forget: r.n, ...(op.t === "undo" && op.of !== undefined ? { of: op.of } : {}) }); }, ready: () => held.length === 0 && get().connection === "open" && !get().history?.pending };
-            toasts = withToast(toasts.filter((t) => t.text !== FORGET_ASK), { id: ++toastSeq, text: FORGET_ASK, tone: "info", action });
-            continue;
-          }
-          if (r.code === "forget") {
-            const group = sent.group !== undefined ? { group: sent.group, ...(sent.groupScope ? { groupScope: sent.groupScope } : {}) } : {};
-            // A gesture's ask stands for the ops it holds, which the question asks about and its yes sends.
-            if (op.t === "build.ask") for (const held of sent.holds?.() ?? []) asks.push({ n: r.n, op: held, ...group });
-            else asks.push({ n: r.n, op, ...group });
-            continue;
-          }
-          // An ask refused for any other reason says nothing: the gesture's own ops, refused the same, say it.
-          if (op.t === "build.ask") continue;
-          if (op.t === "undo" || op.t === "redo") {
-            const answer = undoAnswer(op.t, { refused: r.message });
-            const toast = renew(answer.text, answer.tone);
-            if (historyKey && op.head) historyRefusals.set(historyKey, { head: op.head, toast });
-            continue;
-          }
-          if (isRace(r.code)) continue;
-          toast(refusalText(r.code, r.message), "error");
-        }
+        const notices = refusalNotices(msg.rejects ?? [], pending, toasts);
+        toasts = notices.toasts;
+        asks.push(...notices.asks);
         pending = pending.filter((p) => !settled.has(p.n));
         if (msg.rejects?.length) refused = [...(refused ?? []), ...msg.rejects.map((r) => r.n)].slice(-MAX_REFUSED);
         if (msg.trapped?.length) trapped = [...(trapped ?? []), ...msg.trapped].slice(-MAX_REFUSED);

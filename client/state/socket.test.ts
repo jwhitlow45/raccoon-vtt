@@ -4,7 +4,7 @@ import { FrameBudget } from "#server/rooms/budgets.ts";
 import { uuidv7 } from "#shared/ids.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import type { ClientMessage, ClientOp, ServerMessage } from "#shared/protocol.ts";
+import { FORGET_ASK, type ClientMessage, type ClientOp, type ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { DM, P1, rng, room, token } from "#shared/testutil.ts";
 import { serverTime } from "../features/dice/groupSave/lifecycle.ts";
@@ -24,10 +24,11 @@ import {
   type ConnectionEnv,
   type SocketLike,
 } from "./socket.ts";
-import { createRoomStore, OP_ANSWER_MS } from "./store.ts";
+import { LocalServer } from "../dev/localServer.ts";
+import { createRoomStore, OP_ANSWER_MS, refusalText } from "./store.ts";
 import { FakeClock } from "./testing.ts";
 import { backoffDelay, BACKOFF_CAP_MS } from "./timing.ts";
-import type { You } from "./types.ts";
+import type { OpAnswer, OpRefusal, UnknownCause, You } from "./types.ts";
 
 class FakeSocket implements SocketLike {
   readyState = 0;
@@ -1035,5 +1036,111 @@ describe("the server's clock across a sleep (D-261031-181)", () => {
     assert.equal(warn.mock.callCount(), 0, "this build knows the frame");
     s.socket.dispose();
     s.room.dispose();
+  });
+});
+
+/**
+ * A batch that commits while the page's socket waits on its snapshot,
+ * after a resync, a delayed snapshot or a hello that waits on a batch: the
+ * server sends that socket no `ev`, keeps its refusals and sends them as
+ * `refusals` just ahead of the snapshot, whose watermark covers every op
+ * of the batch (server/rooms/fanout.ts publishBatch). The real socket and
+ * store, over the dev room's server.
+ */
+describe("refusals kept for a snapshot (RESYNC-REFUSAL-LOST)", () => {
+  type Heard = { n: number; answer: OpAnswer; refusal: OpRefusal | undefined; cause: UnknownCause | undefined; ready: boolean; snapshots: number | undefined };
+
+  function table(viewer: Viewer, state: RoomState) {
+    const s = setup({ viewer, state });
+    const server = new LocalServer(structuredClone(state), viewer, "s1");
+    /** The newest socket's hello, answered with the server's snapshot, and the frames given to go just ahead of it. */
+    const answerHello = (ahead: ServerMessage[] = [], watermark?: number) => {
+      const [hello] = s.last().take("hello");
+      assert.ok(hello?.t === "hello", "the page said hello");
+      const snapshot = server.hello({ resumeFrom: hello.resumeFrom, sceneId: "s1" });
+      for (const frame of ahead) s.last().emit(frame);
+      s.last().emit(watermark === undefined ? snapshot : { ...snapshot, watermark });
+      return snapshot;
+    };
+    /** The ops the page sent, committed in one batch while its socket waits: what the server keeps of the batch's answers, its refusals alone. */
+    const commitWhileWaiting = (): ServerMessage[] => {
+      const ops = s.last().take("op").flatMap((m) => (m.t === "op" ? [{ n: m.n, op: m.op }] : []));
+      const rejects = server.batch(ops).flatMap((m) => (m.t === "ev" ? (m.rejects ?? []) : []));
+      return rejects.length > 0 ? [{ t: "refusals", rejects }] : [];
+    };
+    s.socket.start();
+    s.last().open();
+    answerHello();
+    const heard: Heard[] = [];
+    const listen = (n: () => number, quiet = false) => ({
+      quiet,
+      onAnswer: (answer: OpAnswer, refusal?: OpRefusal, cause?: UnknownCause) => {
+        const now = s.room.store.getState();
+        heard.push({ n: n(), answer, refusal, cause, ready: now.confirmedReady === true, snapshots: now.snapshots });
+      },
+    });
+    const toasts = () => s.room.store.getState().toasts.map((t) => t.text);
+    return { ...s, server, answerHello, commitWhileWaiting, heard, listen, toasts };
+  }
+
+  const move = (tokenId: string, x: number, y: number): ClientOp => ({ t: "token.move", tokenId, x, y });
+  const NOT_YOURS = { code: "forbidden" as const, message: "that is not yours", text: refusalText("forbidden", "that is not yours") };
+
+  test("qfu2-1: an op refused while the socket waited says why, in its toast's words, before the snapshot settles the rest as unknown", () => {
+    // P1 moves their own token, then one that is not theirs, and the server resyncs the socket before the batch commits.
+    const t = table(P1, room({ tokens: { mine: token("mine", { ownerIds: ["p1"] }), g1: token("g1") } }));
+    const before = t.room.store.getState().snapshots ?? 0;
+    const taken: number = t.room.dispatch(move("mine", 4, 4), t.listen(() => taken))!;
+    const refused: number = t.room.dispatch(move("g1", 3, 3), t.listen(() => refused))!;
+    t.last().emit({ t: "resync", reason: "scene" });
+    const kept = t.commitWhileWaiting();
+    assert.deepEqual(kept, [{ t: "refusals", rejects: [{ n: refused, code: "forbidden", message: "that is not yours" }] }]);
+    const snapshot = t.answerHello(kept);
+    assert.ok(snapshot.watermark >= refused, "the snapshot settles both");
+    assert.deepEqual(t.heard, [
+      { n: refused, answer: "refused", refusal: NOT_YOURS, cause: undefined, ready: true, snapshots: before + 1 },
+      { n: taken, answer: "unknown", refusal: undefined, cause: "snapshot", ready: true, snapshots: before + 1 },
+    ]);
+    const now = t.room.store.getState();
+    assert.deepEqual(now.pending, []);
+    assert.ok(now.toasts.some((toast) => toast.text === NOT_YOURS.text && toast.tone === "error"), "the refusal's toast");
+    assert.ok(now.refused?.includes(refused));
+    assert.equal(now.view?.tokens.g1?.x, token("g1").x, "the view is the snapshot's");
+    assert.deepEqual(t.last().take("op"), [], "nothing settled is sent again");
+  });
+
+  test("qfu2-2: a kept refusal speaks only for an op this page still waits on, and holds until a snapshot settles it", () => {
+    const t = table(P1, room({ tokens: { g1: token("g1") } }));
+    // Refusals naming no op of this page say nothing and settle nothing, as an ev's would.
+    t.last().emit({ t: "resync", reason: "scene" });
+    t.answerHello([{ t: "refusals", rejects: [{ n: 40, code: "forbidden", message: "not here" }] }]);
+    assert.deepEqual(t.toasts(), []);
+    assert.equal(t.room.store.getState().connection, "open");
+    // A quiet op's refusal shows no toast, and its sender still hears why. It comes for a hello whose socket is lost
+    // before its snapshot, and the next socket's snapshot settles the op with it.
+    const quiet: number = t.room.dispatch(move("g1", 2, 2), t.listen(() => quiet, true))!;
+    t.last().emit({ t: "resync", reason: "scene" });
+    t.last().take("hello");
+    for (const frame of t.commitWhileWaiting()) t.last().emit(frame);
+    t.last().drop(1006);
+    t.clock.advance(10_000);
+    t.last().open();
+    t.answerHello();
+    assert.deepEqual(t.heard, [{ n: quiet, answer: "refused", refusal: NOT_YOURS, cause: undefined, ready: true, snapshots: t.room.store.getState().snapshots }]);
+    assert.deepEqual(t.toasts(), []);
+  });
+
+  test("qfu2-3: a builder op kept with a forget refusal asks the forget question once the snapshot is in", () => {
+    const t = table(DM, room());
+    const paint: ClientOp = { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["1,0"] };
+    const n = t.room.dispatch(paint, { group: "g1" })!;
+    t.last().emit({ t: "resync", reason: "scene" });
+    t.last().take("op");
+    // The dev room's server asks nothing about memory, so the server's forget refusal is written out.
+    t.answerHello([{ t: "refusals", rejects: [{ n, code: "forget", message: FORGET_ASK }] }], n);
+    const now = t.room.store.getState();
+    assert.deepEqual(now.forgetAsk?.asks, [{ n, op: paint, group: "g1" }]);
+    assert.deepEqual(now.pending, []);
+    assert.ok(!now.toasts.some((toast) => toast.text === FORGET_ASK), "the question is not a toast");
   });
 });
