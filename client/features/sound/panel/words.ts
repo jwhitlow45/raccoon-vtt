@@ -13,7 +13,6 @@ import type { BuiltinSound, Repeat, SoundUse } from "#shared/sound.ts";
 export const NOTHING_PLAYING = SOUND_WORDS.nothingPlaying;
 export const NAMES_SWITCH = "Players see what is playing";
 export const NAMES_HELP = "Players see the names of the music and background sounds playing now. Off, they only hear them.";
-export const DEVICE_SILENT = "This device plays no sound. Turn on Room sound under On this device.";
 export const ANOTHER_WINDOW = "Another window on this device plays the sound.";
 export const SERVER_OFF = "This server doesn't offer sound files. Its owner can turn them on. The built-in effects still work.";
 export const SERVER_CHECKING = "Checking for sound files…";
@@ -83,8 +82,6 @@ export const TABLE_SOUND = "Table sound";
 export const TABLE_SOUND_HELP = "What everyone at the table hears, set here for every device. Each device sets its own volume from the speaker on its top bar.";
 export const MUSIC_LABEL = "Music";
 export const EFFECTS_LABEL = "Effects";
-/** How Room sound's help begins under On this device, so it reads apart from Table sound's (7). */
-export const THIS_DEVICE_ONLY = "This device only:";
 /** Only DM devices play (docs/design/design-v1-sound-dm-only.md 4), the last switch in Table sound. */
 export const DM_ONLY_SWITCH = "Only DM devices play";
 export const DM_ONLY_HELP = "For a table that hears the sound from one speaker. Players' devices and the table display play nothing and don't ask. Each DM device still plays unless it is muted.";

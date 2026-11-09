@@ -20,10 +20,10 @@ import { RoomScope } from "../../../state/scope.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { nextWords, SceneSoundLine, TableSound, UseWhatsPlaying } = await import("./NowPlaying.tsx");
+const { DeviceLineView, nextWords, SceneSoundLine, TableSound, UseWhatsPlaying } = await import("./NowPlaying.tsx");
 const { LoopToggles } = await import("./LoopsSection.tsx");
 const { Board } = await import("./EffectsBoard.tsx");
-const { PlayerNow } = await import("./PlayerSound.tsx");
+const { PlayerNow, PlayerSound } = await import("./PlayerSound.tsx");
 const { useReasons } = await import("./SoundPage.tsx");
 const { askStep, endViewIfClosed, ServerLine, soundOpen, upNextSummary, default: SoundPanel } = await import("./SoundPanel.tsx");
 const { soundViewSlot, soundAskSlot, openSoundNow } = await import("../music/open.ts");
@@ -264,7 +264,7 @@ describe("a player's panel", () => {
     effects: [{ id: "e1", soundId: "thunder", at: 0 }],
     volume: { music: 100, effects: 100 },
   };
-  const player = (sounds: Record<string, Sound>, here: "plays" | "tap" | "other" | "off" = "plays", musicHere: "playing" | "failed" = "playing") =>
+  const player = (sounds: Record<string, Sound>, here: "plays" | "tap" | "other" | "off" | "cannot" = "plays", musicHere: "playing" | "failed" = "playing") =>
     renderToStaticMarkup(createElement(PlayerNow, { playing: p, sounds, here, music: musicHere, dmOnly: false, onRetry: noop }));
 
   test("with names shared: a card with the tile and the track's name, the background by name under it, never an effect", () => {
@@ -307,13 +307,61 @@ describe("a player's panel", () => {
     }
   });
 
-  test("this device's state: a tap to start, another window, a track that failed", () => {
+  test("this device's state: a tap to start, another window, a browser that can't play, a track that failed", () => {
     const sounds = { pony: sound("pony", "music", 190_000) };
     assert.match(player(sounds, "tap"), /Tap anywhere to start the sound\./);
     assert.match(player(sounds, "other"), /Another window on this device plays the sound\./);
+    assert.match(player(sounds, "cannot"), /This browser can&#x27;t play the room&#x27;s sound\./);
     const failed = player(sounds, "plays", "failed");
     assert.match(failed, /The music didn&#x27;t load on this device\./);
     assert.match(failed, />Try again</);
+  });
+});
+
+/** The status lines a Sound panel may show for this device (docs/design/design-v1-volume.md 4, VOL-ASTRA-01), as a render escapes them. */
+const STATUS_LINES = [words.DM_PLAYS_IT, words.TAP_TO_START, words.ANOTHER_WINDOW, words.CANNOT_PLAY, words.DEVICE_MUTED].map((l) => l.replaceAll("'", "&#x27;"));
+const statusLines = (html: string) => STATUS_LINES.reduce((n, l) => n + (html.split(l).length - 1), 0);
+
+describe("one status line for this device in a player's Sound panel (docs/design/design-v1-volume.md 4, VOL-ASTRA-01)", () => {
+  const draw = (dmOnly: boolean) => {
+    const view = room();
+    if (dmOnly) view.meta.settings = { ...view.meta.settings, soundDmOnly: true };
+    const store = createStore(() => ({ view, you: { memberId: "p1", role: "player" }, roomId: "r1", sceneId: "s1", serverOffset: 0, connection: "open", pending: [], online: [], displays: 0, local: { selectedIds: [], multi: false } }));
+    return renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: { dispatch: () => 1, newId: () => "x", sendEph: noop } as never, ui: { notify: noop, openPanel: noop } as never, children: createElement(PlayerSound) }));
+  };
+
+  test("a tap, another window, a browser that can't, and Only DM devices play over each: exactly one line, Now playing's, and none from On this device", () => {
+    try {
+      for (const here of ["tap", "other", "cannot"] as const) {
+        engine.setSoundHere({ here, music: "none" });
+        const html = draw(false);
+        assert.equal(statusLines(html), 1, here);
+        const device = html.slice(html.indexOf("data-device-sound"));
+        assert.equal(statusLines(device), 0, `${here}: On this device draws no line of its own`);
+        const dmOnly = draw(true);
+        assert.equal(statusLines(dmOnly), 1, `${here} under Only DM devices play`);
+        assert.ok(dmOnly.includes(words.DM_PLAYS_IT), "the DM's line wins");
+      }
+      for (const here of ["plays", "off"] as const) {
+        engine.setSoundHere({ here, music: "none" });
+        assert.equal(statusLines(draw(false)), 0, `${here}: the toggle and the master show it`);
+      }
+    } finally {
+      engine.setSoundHere({ here: "off", music: "none" });
+    }
+  });
+});
+
+describe("the DM's device line (docs/design/design-v1-volume.md 6)", () => {
+  const line = (here: "off" | "tap" | "plays" | "other" | "cannot", onUnmute = noop) => renderToStaticMarkup(createElement(DeviceLineView, { here, onUnmute }));
+
+  test("muted with Unmute, a tap to start, a browser that can't play, another window, and nothing while it plays", () => {
+    assert.match(line("off"), /This device is muted\.(<!-- -->)? <button type="button" data-sound-unmute=""[^>]*>Unmute<\/button>/);
+    assert.match(line("tap"), />Tap anywhere to start the sound\.</);
+    assert.match(line("cannot"), />This browser can&#x27;t play the room&#x27;s sound\.</, "never the muted line");
+    assert.doesNotMatch(line("cannot"), /Unmute/);
+    assert.match(line("other"), />Another window on this device plays the sound\.</);
+    assert.equal(line("plays"), "");
   });
 });
 
@@ -451,11 +499,11 @@ describe("the DM's Sound panel (docs/design/design-v1-sound-layout.md 4.1 to 4.4
   test("Only DM devices play on: its reminder under the player, over the device line, with nothing playing too, and none while it is off", async () => {
     await serverSays(true);
     const REMINDER = ">Only DM devices play the sound.<";
-    const SILENT = ">This device plays no sound. Turn on Room sound under On this device.<";
+    const SILENT = ">This device is muted.";
     for (const playing of [run(), null]) {
       const html = draw(playing, new RoomScope(), true);
       const player = html.slice(html.indexOf("data-sound-player"), html.indexOf(">Effects<"));
-      // A page with no engine reads this device's Room sound as off, so the device line shows under the reminder.
+      // A page with no engine reads this device as muted, so the device line shows under the reminder.
       assert.ok(player.includes(REMINDER) && player.includes(SILENT), `both in the player's area, ${playing ? "playing" : "silent"}`);
       assert.ok(player.indexOf(REMINDER) < player.indexOf(SILENT), "the reminder first");
     }
@@ -470,6 +518,26 @@ describe("the DM's Sound panel (docs/design/design-v1-sound-layout.md 4.1 to 4.4
     const section = html.slice(table, html.indexOf(">On this device<"));
     assert.deepEqual([...section.matchAll(/<button[^>]*role="switch"[^>]*>/g)].map((m) => [/aria-checked="(\w+)"/.exec(m[0])?.[1], /data-search="([^"]+)"/.exec(m[0])?.[1]]), [["true", "sound.table.dmonly"]], "the one switch, on");
     assert.doesNotMatch(section, /Players see what is playing|volume for everyone|What everyone at the table hears|Only DM devices play the sound\./);
+  });
+
+  test("each page's status line for this device, once: Now playing's on the full page, the controls' own on the off page, whose line covers a switch not answered or failed too", async () => {
+    try {
+      for (const on of [true, false]) {
+        await serverSays(on);
+        for (const here of ["tap", "other", "cannot", ...(on ? (["off"] as const) : [])] as const) {
+          engine.setSoundHere({ here, music: "none" });
+          const html = draw(run());
+          assert.equal(statusLines(html), 1, `${on ? "on" : "off"}, ${here}`);
+          const device = html.slice(html.indexOf("data-device-sound"));
+          assert.equal(statusLines(device), on ? 0 : 1, `${on ? "on" : "off"}, ${here}: the controls' line ${on ? "off" : "on"}`);
+        }
+      }
+      engine.resetServerRoomSoundForTests();
+      engine.setSoundHere({ here: "other", music: "none" });
+      assert.equal(statusLines(draw(run())), 1, "the switch not answered yet: the off page, with the controls' line");
+    } finally {
+      engine.setSoundHere({ here: "off", music: "none" });
+    }
   });
 
   test("with the switch off a Library view left in the slot still draws the off page", async () => {

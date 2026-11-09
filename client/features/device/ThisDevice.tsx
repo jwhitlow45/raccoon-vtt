@@ -1,4 +1,4 @@
-import { Fragment, useId, useSyncExternalStore } from "react";
+import { useId, useSyncExternalStore } from "react";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Icon } from "../../components/Icon.tsx";
@@ -14,19 +14,17 @@ import { thisDeviceFoldsSlot, useFolds, type ThisDeviceSection } from "../../lib
 import { theme } from "../../lib/theme.ts";
 import { UNBOUND, type KeyMap } from "../../state/keyBindings.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { useRoomRoleIfAny, useRoomView } from "../../state/view.ts";
+import { useRoomRoleIfAny } from "../../state/view.ts";
 import { panelsFor, type PanelDef } from "../panels.ts";
 import { useLayoutSize } from "./layout.ts";
 import { keySuffix, keyText, setShortcutSheet, useKeyHint, useShortcutKeys } from "../../state/shortcuts.ts";
-import { setSoundOn, useSoundOn } from "../encounter/alerts.ts";
-import { setSoundEnabled, usePingSound } from "../pings/feedback.ts";
-import { setRoomSound, useRoomSoundOn } from "../sound/engine/store.ts";
+import { useDeviceVolume } from "../sound/engine/store.ts";
+import { DeviceSound } from "../sound/device/DeviceSound.tsx";
 import { diceLoader } from "../dice/throw/hooks.ts";
 import { useWeatherStillReason, WEATHER_CARDS } from "../weather/store.ts";
 import { useDeviceStillReason } from "../animmap/AnimMapController.tsx";
 import { useServerAnimatedMaps } from "../animmap/status.ts";
 import { ANIMATED_MAPS_CHOICES, ANIMATED_MAPS_HELP, ANIMATED_MAPS_LABEL, ANIMATED_MAPS_WORDS, deviceStillHelp, LOW_POWER_HELP, type AnimatedMapsChoice } from "../animmap/words.ts";
-import { DM_PLAYS_IT, THIS_DEVICE_ONLY } from "../sound/panel/words.ts";
 import { DiceSetPicker } from "./DiceSetPicker.tsx";
 import { MAP_IMAGE_WORDS, deviceSummaries } from "./summaries.ts";
 import {
@@ -41,9 +39,7 @@ import {
   useTabRow,
   withTabKept,
   type TabRowRole,
-  setSoundMix,
   setUiScale,
-  soundMix as soundMixNow,
   setThemeChoice,
   setWeatherMode,
   THEME_CHOICE_WORDS,
@@ -56,11 +52,9 @@ import {
   useRollAnimation,
   useRollToastsOn,
   useSheetHandle,
-  useSoundMix,
   useThemeChoice,
   useUiScale,
   useWeatherMode,
-  type SoundMix,
   type ThemeChoice,
   type UiScale,
 } from "./settings.ts";
@@ -97,8 +91,6 @@ export default function ThisDevice() {
   const scale = useUiScale();
   const lowPower = useLowPower();
   const variant = useMapVariant();
-  const turnSound = useSoundOn();
-  const pingSound = usePingSound();
   const rollToasts = useRollToastsOn();
   const rollAnimation = useRollAnimation();
   const dice = useSyncExternalStore(diceLoader.subscribe, diceLoader.state, diceLoader.state);
@@ -115,7 +107,7 @@ export default function ThisDevice() {
   const animatedMapsOn = useServerAnimatedMaps();
   const animatedMaps = useAnimatedMaps();
   const animatedStill = useDeviceStillReason();
-  const roomSound = useRoomSoundOn();
+  const volume = useDeviceVolume();
   const fold = useFolds(thisDeviceFoldsSlot);
   // The side panel has its row of tabs from 900 px up only, so a phone never sees a setting with nothing to change. A table display has no side panel.
   const wide = useLayoutSize().width >= theme.layout.wideMinWidth;
@@ -133,7 +125,7 @@ export default function ThisDevice() {
     weather,
     weatherHeld: weatherStill !== null,
     animatedHeld: animatedStill !== null,
-    roomSound,
+    volume,
     rollAnimation,
     handle,
     tabsLeftOut: tabPanels.filter((p) => leftOut.includes(p.id)).length,
@@ -223,16 +215,7 @@ export default function ThisDevice() {
         </div>
       </Group>
       <Group label="Sounds" {...group("sounds")} search="menu.this-device.sounds">
-        <DmPlaysNote />
-        <RoomSoundControls anchored />
-        <Switch label="Turn sound" search="menu.this-device.sounds.turn" help="A short chime on your turn. Android phones also vibrate." checked={turnSound} onChange={setSoundOn} />
-        <Switch
-          label="Ping sound"
-          search="menu.this-device.sounds.ping"
-          help="A short tone when someone pings the map."
-          checked={pingSound}
-          onChange={setSoundEnabled}
-        />
+        <DeviceSound line anchored />
       </Group>
       <Group label="Rolls" {...group("rolls")} search="menu.this-device.rolls">
         <Switch label="Show others' rolls as they happen" search="menu.this-device.rolls.toasts" help="A short note for each roll someone else makes, while the Dice panel is not on screen." checked={rollToasts} onChange={setRollToasts} />
@@ -308,84 +291,6 @@ function TabRowSection(props: { role: TabRowRole; panels: readonly PanelDef[]; l
         ))}
       </div>
     </Group>
-  );
-}
-
-/**
- * Room sound's help (docs/design/design-v1-music.md 4.4). For one table it
- * points at the DM's switch, not at one device, since Only DM devices play
- * keeps the table display quiet (docs/design/design-v1-sound-dm-only.md 5).
- */
-export const ROOM_SOUND_HELP = `${THIS_DEVICE_ONLY} Music, background sounds and effects the DM plays. If everyone sits at one table, the DM can turn on Only DM devices play in Sound. Music uses about 60 MB of data an hour. On an iPhone it pauses music from other apps and plays even with the ringer off.`;
-
-/**
- * A player's line above Room sound while the room keeps its sound to DM
- * devices (docs/design/design-v1-sound-dm-only.md 5), so a player who
- * turns Room sound on and hears nothing is told why. Outside
- * RoomSoundControls, since the Sound panel says it under Now playing and
- * would say it twice. Never on a DM's device or a table display, and
- * nothing outside a room.
- */
-export function DmPlaysNote() {
-  const room = useRoomRoleIfAny();
-  return room?.role === "player" && !room.display ? <DmPlaysLine /> : null;
-}
-
-function DmPlaysLine() {
-  const on = useRoomView((s) => s.view?.meta.settings.soundDmOnly === true);
-  return on ? <Help>{DM_PLAYS_IT}</Help> : null;
-}
-
-const MIX_PARTS: readonly { key: keyof SoundMix; label: string; search: string }[] = [
-  { key: "music", label: "Music", search: "menu.this-device.sounds.music" },
-  { key: "loops", label: "Background", search: "menu.this-device.sounds.loops" },
-  { key: "effects", label: "Effects", search: "menu.this-device.sounds.effects" },
-];
-
-/**
- * Room sound and, while it is on, this device's Music, Background and
- * Effects (docs/design/design-v1-music.md 4.4): in This device's Sounds,
- * and in the Sound panel, under On this device. Turning it on is a tap that
- * unlocks the audio. Each slider is 0 to 100%, squared into the gain.
- *
- * `anchored` gives the controls This device's search ids
- * (features/device/search.ts), which one panel alone may carry.
- */
-export function RoomSoundControls(props: { anchored?: boolean }) {
-  const on = useRoomSoundOn();
-  const mix = useSoundMix();
-  const id = useId();
-  return (
-    <>
-      <Switch label="Room sound" search={props.anchored ? "menu.this-device.sounds.room" : undefined} help={ROOM_SOUND_HELP} checked={on} onChange={setRoomSound} />
-      {on ? (
-        // One grid for the three, so their names share a column and the sliders start and end together.
-        <div style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr) 3.2em", alignItems: "center", columnGap: theme.space(3), padding: `${theme.space(1)}px 0` }}>
-          {MIX_PARTS.map((part) => (
-            <Fragment key={part.key}>
-              <label htmlFor={`${id}-${part.key}`} style={{ fontSize: theme.font.body14, color: theme.color.text }}>
-                {part.label}
-              </label>
-              <input
-                id={`${id}-${part.key}`}
-                data-search={props.anchored ? part.search : undefined}
-                type="range"
-                min={0}
-                max={100}
-                step={5}
-                value={mix[part.key]}
-                aria-valuetext={`${mix[part.key]}%`}
-                onChange={(e) => setSoundMix({ ...soundMixNow(), [part.key]: Number(e.target.value) })}
-                style={{ width: "100%", minWidth: 0, height: theme.touch, margin: 0, accentColor: theme.color.accent }}
-              />
-              <span aria-hidden style={{ fontSize: theme.font.small, color: theme.color.textMuted, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                {mix[part.key]}%
-              </span>
-            </Fragment>
-          ))}
-        </div>
-      ) : null}
-    </>
   );
 }
 

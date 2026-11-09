@@ -1,6 +1,7 @@
 import { grabberDesign, type GrabberId } from "../../components/grabberDesigns.ts";
 import type { ThisDeviceSection } from "../../lib/folds.ts";
 import { ANIMATED_MAPS_WORDS, type AnimatedMapsChoice } from "../animmap/words.ts";
+import { MUTED } from "../sound/panel/words.ts";
 import { THEME_CHOICE_WORDS, uiScaleLabel, WEATHER_MODE_WORDS, type ThemeChoice, type UiScale, type WeatherMode } from "./settings.ts";
 
 /*
@@ -26,7 +27,8 @@ export type DeviceValues = {
   weatherHeld: boolean;
   /** A reason keeps every animated map still though Moving is chosen (AnimMapController.tsx useDeviceStillReason). */
   animatedHeld: boolean;
-  roomSound: boolean;
+  /** This device's Volume and whether it is muted (sound/engine/store.ts useDeviceVolume). */
+  volume: { readonly muted: boolean; readonly volume: number };
   rollAnimation: boolean;
   handle: GrabberId;
   /** How many panels This device's Tab row keeps out of the side panel's row, for the viewer's role. */
@@ -47,7 +49,7 @@ export function deviceSummaries(v: DeviceValues): Readonly<Record<ThisDeviceSect
     mapDetail: join([MAP_IMAGE_WORDS[v.lowPower ? "mobile" : v.variant], v.animatedMaps ? ANIMATED_MAPS_WORDS[v.animatedMaps] : null, v.animatedMaps === "moving" && v.animatedHeld ? "Held still" : null]),
     // Held still only says something while Moving is chosen: Still and Off are still already.
     weather: join([WEATHER_MODE_WORDS[v.weather], v.weather === "moving" && v.weatherHeld ? "Held still" : null]),
-    sounds: onOff("Room sound", v.roomSound),
+    sounds: v.volume.muted ? MUTED : `Volume ${v.volume.volume}%`,
     rolls: onOff("Roll animation", v.rollAnimation),
     shortcuts: undefined,
     handle: grabberDesign(v.handle).name,

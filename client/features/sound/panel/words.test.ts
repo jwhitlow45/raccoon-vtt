@@ -70,11 +70,10 @@ describe("the words of the Sound panel's views and the Now playing chip (docs/de
     assert.equal(words.NO_MUSIC_PLAYING, "No music is playing.");
   });
 
-  test("Table sound says for everyone once, and the device's own help says this device", () => {
+  test("Table sound says for everyone once, and points each device at its own volume", () => {
     assert.equal(words.TABLE_SOUND, "Table sound");
     assert.equal(words.TABLE_SOUND_HELP, "What everyone at the table hears, set here for every device. Each device sets its own volume from the speaker on its top bar.");
     assert.deepEqual([words.MUSIC_LABEL, words.EFFECTS_LABEL], ["Music", "Effects"]);
-    assert.equal(words.THIS_DEVICE_ONLY, "This device only:");
     assert.equal(words.MUSIC_VOLUME, "Music volume for everyone", "the accessible name keeps whose volume it is");
     assert.ok(words.MUSIC_VOLUME.startsWith(words.MUSIC_LABEL), "and holds the visible word");
   });

@@ -21,7 +21,7 @@ import { lengthOf, UpNext } from "../music/UpNext.tsx";
 import { tracksDetail, UP_NEXT } from "../music/words.ts";
 import { useWakeAt } from "./controls.tsx";
 import { EffectsBoard } from "./EffectsBoard.tsx";
-import { RoomSoundControls, serverRoomSound, useServerRoomSoundState, type ServerSound } from "./engine.ts";
+import { DeviceSound, serverRoomSound, useServerRoomSoundState, type ServerSound } from "./engine.ts";
 import { LoopsSection } from "./LoopsSection.tsx";
 import { DeviceLine, DmOnlyLine, DmOnlySwitch, nextWords, TableSound } from "./NowPlaying.tsx";
 import { PlayerSound } from "./PlayerSound.tsx";
@@ -233,7 +233,7 @@ export function useDmSoundPages(parent: string): DmSoundPages {
  * server's switch off: no view row, its line, Effects, Table sound with
  * Only DM devices play alone (docs/design/design-v1-sound-dm-only.md 4),
  * since the built-in effects still play on players' devices, and On this
- * device, since nothing could play a file.
+ * device with its own status line, since nothing above says it.
  */
 export function DmSoundFirstPage(props: DmSoundFirst) {
   const server = useServerRoomSoundState();
@@ -259,7 +259,8 @@ export function DmSoundFirstPage(props: DmSoundFirst) {
           <DmOnlySwitch />
         </Section>
         <Section label="On this device">
-          <RoomSoundControls />
+          {/* With no Now playing above to say how this device is doing, the controls' own line says it (VOL-ASTRA-01). */}
+          <DeviceSound line />
         </Section>
       </div>
     );
@@ -337,7 +338,7 @@ function NowPlayingView(props: { first: DmSoundFirst; effects: ReactNode; onLibr
       </Section>
       <LoopsSection editing={first.editing.loops} onEditing={first.onEditLoops} onOpenSound={first.onOpenSound} onStorageChanged={first.onStorageChanged} />
       <Section label="On this device">
-        <RoomSoundControls />
+        <DeviceSound line={false} />
       </Section>
       <Section>
         <StorageLine roomId={roomId} version={`${first.storageVersion} ${soundCount}`} />

@@ -8,13 +8,14 @@ import type { Playing } from "#shared/sound.ts";
 import type { ComingNext } from "../music/dragOrder.ts";
 import { LAST_TRACK, NEXT_AGAIN, nextLine } from "../music/words.ts";
 import { Actions, useHearers, VolumeSlider } from "./controls.tsx";
-import { useSoundHere } from "./engine.ts";
+import { setRoomSound, useSoundHere, type SoundHere } from "./engine.ts";
 import { send } from "./ops.ts";
 import { nameOf, playlistsOf, sceneSoundFrom, sceneSoundNames, somethingPlays, soundsOf, type Sounds } from "./state.ts";
 import {
   ANOTHER_WINDOW,
+  CANNOT_PLAY,
   CLEAR,
-  DEVICE_SILENT,
+  DEVICE_MUTED,
   DM_ONLY_HELP,
   DM_ONLY_ON,
   DM_ONLY_SWITCH,
@@ -32,6 +33,8 @@ import {
   STOP_ALL,
   stopName,
   TABLE_SOUND_HELP,
+  TAP_TO_START,
+  UNMUTE,
   USE_PLAYING,
   USE_SILENCE,
 } from "./words.ts";
@@ -105,13 +108,36 @@ export function StopAllButton(props: { search?: string } = {}) {
   );
 }
 
-/** What this device's playback needs said: another window plays it, or this device plays nothing. */
+/**
+ * What the DM's Now playing says of this device's playback
+ * (docs/design/design-v1-volume.md 6): muted, with Unmute, waiting for a
+ * tap, a browser that can't play, or another window that plays it. Its one
+ * status line, since On this device's controls below draw none here, so
+ * the tap line is here too (VOL-OPUS-19), where it once said nothing.
+ */
 export function DeviceLine() {
   const { here } = useSoundHere();
-  if (here === "other") return <Help>{ANOTHER_WINDOW}</Help>;
-  if (here === "plays" || here === "tap") return null;
-  return <Help>{DEVICE_SILENT}</Help>;
+  return <DeviceLineView here={here} onUnmute={() => setRoomSound(true)} />;
 }
+
+/** DeviceLine, pure. Unmute is a link button in the line, as Library is in the idle line (music/NowFull.tsx IdleLine), which unmutes inside its click. */
+export function DeviceLineView(props: { here: SoundHere; onUnmute(): void }) {
+  if (props.here === "tap") return <Help>{TAP_TO_START}</Help>;
+  if (props.here === "other") return <Help>{ANOTHER_WINDOW}</Help>;
+  if (props.here === "cannot") return <Help>{CANNOT_PLAY}</Help>;
+  if (props.here !== "off") return null;
+  return (
+    <Help>
+      {DEVICE_MUTED}{" "}
+      <button type="button" data-sound-unmute="" onClick={props.onUnmute} style={LINK}>
+        {UNMUTE}
+      </button>
+    </Help>
+  );
+}
+
+/** The Guide link's look (features/guide/GuideLink.tsx), at the line's own size. */
+const LINK = { padding: 0, margin: 0, border: "none", background: "transparent", color: theme.color.accent, font: "inherit", textDecoration: "underline", cursor: "pointer" } as const;
 
 /**
  * Only DM devices play's reminder (docs/design/design-v1-sound-dm-only.md

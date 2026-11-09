@@ -5,9 +5,9 @@ import { theme } from "../../../lib/theme.ts";
 import { useRoomView } from "../../../state/view.ts";
 import type { Playing } from "#shared/sound.ts";
 import { Tile, TILE } from "../music/tile.ts";
-import { RoomSoundControls, retryMusic, useSoundHere, type MusicHere, type SoundHere } from "./engine.ts";
+import { DeviceSound, retryMusic, useSoundHere, type MusicHere, type SoundHere } from "./engine.ts";
 import { soundsOf, type Sounds } from "./state.ts";
-import { ANOTHER_WINDOW, DM_PLAYS_IT, LOADING_MUSIC, MUSIC_FAILED, MUSIC_IS_PLAYING, NOTHING_PLAYING, playerLoopsLine, TAP_TO_START } from "./words.ts";
+import { ANOTHER_WINDOW, CANNOT_PLAY, DM_PLAYS_IT, LOADING_MUSIC, MUSIC_FAILED, MUSIC_IS_PLAYING, NOTHING_PLAYING, playerLoopsLine, TAP_TO_START } from "./words.ts";
 
 /**
  * The name the tile takes its tint from while the DM keeps the names: one
@@ -26,8 +26,10 @@ const UNNAMED_TINT = "";
  * (D-261102-479). A name a player's projection lacks reads as not shared,
  * so nothing here can name what the DM keeps. While Only DM devices play
  * (docs/design/design-v1-sound-dm-only.md 5), one line says the DM plays
- * it, in place of all of that and of this device's tap and other-window
- * lines, so it reads the same whether or not anything plays.
+ * it, in place of all of that and of this device's tap, other-window and
+ * can't-play lines, so it reads the same whether or not anything plays.
+ * These are the panel's one status line: On this device's controls below
+ * draw none (docs/design/design-v1-volume.md 4).
  */
 export function PlayerNow(props: { playing: Playing | null; sounds: Sounds; here: SoundHere; music: MusicHere; dmOnly: boolean; onRetry(): void }) {
   if (props.dmOnly) return <p style={QUIET}>{DM_PLAYS_IT}</p>;
@@ -68,6 +70,7 @@ export function PlayerNow(props: { playing: Playing | null; sounds: Sounds; here
       ) : null}
       {props.here === "tap" ? <Help>{TAP_TO_START}</Help> : null}
       {props.here === "other" ? <Help>{ANOTHER_WINDOW}</Help> : null}
+      {props.here === "cannot" ? <Help>{CANNOT_PLAY}</Help> : null}
     </div>
   );
 }
@@ -84,7 +87,7 @@ export function PlayerSound() {
         <PlayerNow playing={playing} sounds={sounds} here={here} music={music} dmOnly={dmOnly} onRetry={retryMusic} />
       </Section>
       <Section label="On this device">
-        <RoomSoundControls />
+        <DeviceSound line={false} />
       </Section>
     </div>
   );

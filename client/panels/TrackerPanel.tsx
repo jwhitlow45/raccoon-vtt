@@ -50,6 +50,7 @@ import { useKeyHint, withKey } from "../state/shortcuts.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { layoutSize } from "../features/device/layout.ts";
 import { uiScale } from "../features/device/settings.ts";
+import { TURN_SOUND, TURN_SOUND_HELP } from "../features/sound/panel/words.ts";
 
 /**
  * The initiative tracker (features section 10, design 9.4). Players roll at
@@ -827,7 +828,7 @@ function SoundSwitch() {
   const follow = useFollowTurn();
   return (
     <Section label="This device" style={COLUMN}>
-      <Switch label="Turn sound" help="A short chime on your turn. Android phones also vibrate." checked={on} onChange={setSoundOn} />
+      <Switch label={TURN_SOUND} help={TURN_SOUND_HELP} checked={on} onChange={setSoundOn} />
       {dm ? (
         <Switch
           label="Camera follows the turn"

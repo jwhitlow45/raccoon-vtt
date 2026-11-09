@@ -17,7 +17,7 @@ const NEW_DEVICE: DeviceValues = {
   weather: "moving",
   weatherHeld: false,
   animatedHeld: false,
-  roomSound: false,
+  volume: { muted: true, volume: 100 },
   rollAnimation: true,
   handle: "tail",
   tabsLeftOut: 0,
@@ -34,7 +34,7 @@ describe("This device's folded summaries", () => {
       battery: "Low power off",
       mapDetail: "Phone size",
       weather: "Moving",
-      sounds: "Room sound off",
+      sounds: "Muted",
       rolls: "Roll animation on",
       shortcuts: undefined,
       handle: "Ringed tail",
@@ -43,14 +43,15 @@ describe("This device's folded summaries", () => {
   });
 
   test("each setting's other values", () => {
-    const s = deviceSummaries({ ...NEW_DEVICE, scale: 1.3, theme: "auto", fullscreen: true, lowPower: true, roomSound: true, rollAnimation: false, handle: "pill", tabsLeftOut: 3 });
+    const s = deviceSummaries({ ...NEW_DEVICE, scale: 1.3, theme: "auto", fullscreen: true, lowPower: true, volume: { muted: false, volume: 80 }, rollAnimation: false, handle: "pill", tabsLeftOut: 3 });
     assert.equal(s.tabRow, "3 only in More");
     assert.equal(s.size, "130%");
     assert.equal(s.theme, "Auto");
     assert.equal(deviceSummaries({ ...NEW_DEVICE, theme: "light" }).theme, "Light");
     assert.equal(s.screen, "Full screen on");
     assert.equal(s.battery, "Low power on");
-    assert.equal(s.sounds, "Room sound on");
+    assert.equal(s.sounds, "Volume 80%");
+    assert.equal(deviceSummaries({ ...NEW_DEVICE, volume: { muted: true, volume: 80 } }).sounds, "Muted", "never the level a muted device keeps");
     assert.equal(s.rolls, "Roll animation off");
     assert.equal(s.handle, "Plain pill");
   });
