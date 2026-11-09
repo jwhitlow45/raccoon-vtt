@@ -143,6 +143,33 @@ export function markOpened(tx: Tx, _before: RoomState): void {
 }
 
 /**
+ * The asks for saves on a floor that stopped being one in this op, after
+ * every op's dispatch beside `markOpened`: a floor removed, by Remove,
+ * Delete or a restore such as the undo of its add, and a record that lost
+ * its `floor`, as the floor left alone by a removal and the main floor
+ * after the undo of a scene's first add. An ask names its floor, which a
+ * player who never held it must never learn (rules/floors.ts holdsRecordOn),
+ * and a scene without floors sends its asks wherever their players went, so
+ * each goes, as an ordinary write in the op's undo step, and the undo brings
+ * it back with the floor (FLRBUILD-ASTRA-07, FLRBUILD-PRIV-04, FLRB-OPUS-09,
+ * D-261108-426). Asks made before a first add go with its undo too, and come
+ * back with its redo.
+ */
+export function dropFloorAsks(tx: Tx, before: RoomState): void {
+  const gone = new Set<string>();
+  for (const key of tx.touched()) {
+    if (!key.startsWith("scene:")) continue;
+    const id = key.slice("scene:".length);
+    if (ownEntry(before.scenes, id)?.floor !== undefined && ownEntry(tx.state.scenes, id)?.floor === undefined) gone.add(id);
+  }
+  if (gone.size === 0) return;
+  for (const ask of Object.values(tx.state.casts).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    if (gone.has(ask.sceneId)) tx.remove(keys.cast(ask.id));
+  }
+}
+
+/**
+ * What a removal of one floor leaves/**
  * What a removal of one floor leaves (`scene.delete` of a floor other than
  * the main one): the floors left renumbered, and a last floor a plain scene
  * again, its `floor` and its opened mark gone with ordinary writes inside

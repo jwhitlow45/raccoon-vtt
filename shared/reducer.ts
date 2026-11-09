@@ -77,7 +77,7 @@ import {
 } from "./reducer/map.ts";
 import { buildHeight, buildRough, buildStairs } from "./reducer/heights.ts";
 import { sceneDuplicate } from "./reducer/duplicate.ts";
-import { floorOpen, floorOrder, markOpened } from "./reducer/floors.ts";
+import { dropFloorAsks, floorOpen, floorOrder, markOpened } from "./reducer/floors.ts";
 import { journalCreate, journalDelete, journalReveal, journalUpdate } from "./reducer/journal.ts";
 import { actorEffects, tokenDeleteMany, tokenUpdateMany } from "./reducer/many.ts";
 import { pinPut, pinRemove } from "./reducer/pins.ts";
@@ -196,7 +196,10 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
     keepMemory(tx, state);
     markPlayed(tx, state);
     // The floors players reach, beside the scenes they played (docs/design/design-v1-floors.md 9).
-    if (floorsOps(env.opVersion)) markOpened(tx, state);
+    if (floorsOps(env.opVersion)) {
+      markOpened(tx, state);
+      dropFloorAsks(tx, state);
+    }
     // Every op's dispatch ends with the links that no longer hold coming loose (docs/design/design-v1-attach.md 5.2).
     if (attaches(env.opVersion)) {
       linkPass(tx);

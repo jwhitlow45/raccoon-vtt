@@ -378,10 +378,6 @@ function removeScene(tx: Tx, scene: Scene): void {
   for (const l of Object.values(s.lights)) if (l.sceneId === scene.id) tx.remove(keys.light(l.id));
   for (const p of Object.values(s.pins)) if (p.sceneId === scene.id) tx.remove(keys.pin(p.id));
   for (const t of Object.values(s.traps ?? {})) if (t.sceneId === scene.id) tx.remove(keys.trap(t.id));
-  // An ask for saves names its floor, which would outlive it on an ask whose caster moved off, so it goes with the floor
-  // (rules/floors.ts holdsRecordOn). Only a floor's: a scene without floors keeps its asks as it did before floors, and
-  // its stored deletes replay as they were made.
-  if (scene.floor !== undefined) for (const ask of sortedById(Object.values(s.casts))) if (ask.sceneId === scene.id) tx.remove(keys.cast(ask.id));
   if (ownEntry(s.openFloors, scene.id) !== undefined) tx.remove(keys.opened(scene.id));
   tx.remove(keys.scene(scene.id));
 }

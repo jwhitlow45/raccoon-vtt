@@ -20,8 +20,10 @@ import {
   visibleAssetIds,
   type ProjectedState,
 } from "./project.ts";
+import type { Op } from "./protocol.ts";
+import { applyOp, type Applied } from "./reducer.ts";
 import { unseenFloor } from "./rules/floors.ts";
-import { DM, FULL_TILE_BITS, P1, P2, character, drawing, entry, imageRef, member, reveal, room, scene, template, token, trap } from "./testutil.ts";
+import { DM, FULL_TILE_BITS, P1, P2, character, drawing, entry, env, imageRef, member, reveal, room, scene, template, token, trap } from "./testutil.ts";
 
 /**
  * The projection of a scene with floors (docs/design/design-v1-floors.md 8,
@@ -243,6 +245,76 @@ describe("a room-level record names only a floor the viewer holds (FLRBUILD-PRIV
     const state = handedDown();
     state.casts.k1 = { ...state.casts.k1!, sceneId: "ground" };
     assert.equal(projectState(state, P2, { sceneId: null }).casts.k1?.sceneId, "ground");
+  });
+});
+
+describe("an ask whose floor stops being one goes with it, and the undo brings it back (FLRBUILD-ASTRA-07, PRIV-04, FLRB-OPUS-09)", () => {
+  let seq = 100;
+  const run = (state: RoomState, op: Op): Applied => {
+    const r = applyOp(state, op, DM, env(seq++));
+    assert.ok(r.ok, `${op.t}: ${r.ok ? "" : `${r.code}: ${r.message}`}`);
+    return r;
+  };
+  const back = (r: Applied, from: "undo" | "redo" = "undo"): Op => ({ t: "sys.restore", entries: [...(r.inverse ?? [])], from, deps: true });
+  const ask = (sceneId: string) => ({ k1: { id: "k1", rev: 0, by: "p1", caster: "owl", sceneId, spell: "Fireball", targets: ["owl"], at: "2026-11-08T00:00:00Z" } });
+  /** Ana's owl, which the DM hid, asked on `floor`, then went to `to` as Bree's, as the DM's moves leave it. */
+  const handed = (state: RoomState, floor: string, to: string): RoomState => ({
+    ...state,
+    casts: ask(floor),
+    tokens: { ...state.tokens, owl: token("owl", { sceneId: to, kind: "npc", name: "Owl", ownerIds: ["p2"], visibility: "dm", x: 2, y: 2 }) },
+  });
+  /** Bree gets no ask and no trace of the floor, and the DM's ask is there or not as `dm` says. */
+  const check = (state: RoomState, floor: string, dm: boolean, where: string) => {
+    const bree = projectState(state, P2, { sceneId: null });
+    assert.equal(bree.casts.k1, undefined, `${where}: Bree's ask`);
+    assert.ok(!JSON.stringify(bree).includes(`"${floor}"`), `${where}: Bree's copy names the floor`);
+    assert.equal(state.casts.k1 !== undefined, dm, `${where}: the room's ask`);
+    agrees(state, P2, null, bree);
+  };
+
+  test("a floor removed, while a floor changed and still one keeps its asks", () => {
+    const state = handed(tower(), "attic", "ground");
+    assert.ok(run(state, { t: "scene.update", sceneId: "attic", patch: { floor: { name: "Loft" } } } as Op).state.casts.k1, "a renamed floor keeps its ask");
+    const removed = run(state, { t: "scene.delete", sceneId: "attic" });
+    check(removed.state, "attic", false, "removed");
+    check(run(removed.state, back(removed)).state, "attic", true, "its undo");
+  });
+
+  test("a floor's add undone, which removes it by a restore", () => {
+    const added = run(tower(), { t: "scene.create", scene: { id: "loft", name: "Tower", bounds: { w: 30, h: 20 } }, floor: { beside: "attic", side: "above" } } as Op);
+    const state = handed(added.state, "loft", "ground");
+    const undone = run(state, back(added));
+    assert.equal(undone.state.scenes.loft, undefined);
+    check(undone.state, "loft", false, "the add undone");
+    check(run(undone.state, back(undone, "redo")).state, "loft", true, "its redo");
+  });
+
+  test("a removal that leaves one floor, which makes the private main floor a plain scene (D-261108-426)", () => {
+    const base = room({ members: { dm1: member("dm1", "dm"), p1: member("p1"), p2: member("p2") } });
+    base.scenes = {
+      tower: scene("tower", { name: "Tower", floor: { of: "tower", level: 0, name: "Ground floor", height: 10 } }),
+      up: scene("up", { name: "Tower", floor: { of: "tower", level: 1, name: "Upstairs", height: 10 } }),
+      road: scene("road", { name: "Road", order: 1 }),
+    };
+    base.meta.playerSceneId = "road";
+    const state = handed(base, "tower", "road");
+    const removed = run(state, { t: "scene.delete", sceneId: "up" });
+    assert.equal(removed.state.scenes.tower?.floor, undefined, "Tower is a plain scene again");
+    check(removed.state, "tower", false, "collapsed");
+    check(run(removed.state, back(removed)).state, "tower", true, "its undo");
+  });
+
+  test("a scene's first floor add undone, which writes the main floor back without its floor", () => {
+    const base = room({ members: { dm1: member("dm1", "dm"), p1: member("p1"), p2: member("p2") } });
+    base.scenes = { tower: scene("tower", { name: "Tower" }), road: scene("road", { name: "Road", order: 1 }) };
+    base.meta.playerSceneId = "road";
+    const added = run(base, { t: "scene.create", scene: { id: "up", name: "Tower", bounds: { w: 30, h: 20 } }, floor: { beside: "tower", side: "above" } } as Op);
+    assert.ok(added.state.scenes.tower?.floor, "Tower's record now has its floor");
+    const state = handed(added.state, "tower", "road");
+    const undone = run(state, back(added));
+    assert.equal(undone.state.scenes.tower?.floor, undefined);
+    check(undone.state, "tower", false, "the add undone");
+    check(run(undone.state, back(undone, "redo")).state, "tower", true, "its redo");
   });
 });
 

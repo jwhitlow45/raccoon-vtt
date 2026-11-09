@@ -133,9 +133,10 @@ export function heldFloors(state: RoomState, viewer: Viewer, opts: ProjectOpts):
  * nothing, its id included (8, FLRBUILD-PRIV-01). Anything else keeps the
  * rule from before floors, which follows its player to another scene
  * (SSB-A-03): a scene without floors, and an id naming no scene, as ops
- * stored before own-key reads may (opVersion40.differential.test.ts). A
- * removed floor's asks go with it (reducer/room.ts removeScene), so no ask
- * names a floor that is gone.
+ * stored before own-key reads may (opVersion40.differential.test.ts). An
+ * ask goes when its floor stops being one, removed or made a plain scene,
+ * however that happens (reducer/floors.ts dropFloorAsks), so no ask names a
+ * floor that is gone, or a former floor as a scene without floors.
  */
 export function holdsRecordOn(state: Pick<RoomState, "scenes">, held: ReadonlySet<SceneId>, sceneId: SceneId): boolean {
   return ownEntry(state.scenes, sceneId)?.floor === undefined || held.has(sceneId);
