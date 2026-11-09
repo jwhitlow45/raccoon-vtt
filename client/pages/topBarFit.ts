@@ -11,8 +11,9 @@ import { STRIP_FACES, STRIP_FACES_FEW, STRIP_NAME_MIN_PX } from "../features/enc
 /**
  * Every part, in its place from left to right. `you` is the DM chip or a
  * player's chip, `blackout` the DM's Players see black, `gap` the room
- * the row keeps between its two ends, and `turn` the turn chip with Next
- * or End turn.
+ * the row keeps between its two ends, `volume` this device's speaker
+ * beside the room's Now playing (docs/design/design-v1-volume.md 3), and
+ * `turn` the turn chip with Next or End turn.
  */
 export type TopBarPart =
   | "dot"
@@ -22,6 +23,7 @@ export type TopBarPart =
   | "search"
   | "gap"
   | "nowPlaying"
+  | "volume"
   | "clock"
   | "undo"
   | "redo"
@@ -33,7 +35,7 @@ export type TopBarPart =
   | "fit"
   | "fullscreen";
 
-export const TOP_BAR_ORDER: readonly TopBarPart[] = ["dot", "name", "you", "blackout", "search", "gap", "nowPlaying", "clock", "undo", "redo", "phase", "turn", "find", "floor", "view", "fit", "fullscreen"];
+export const TOP_BAR_ORDER: readonly TopBarPart[] = ["dot", "name", "you", "blackout", "search", "gap", "nowPlaying", "volume", "clock", "undo", "redo", "phase", "turn", "find", "floor", "view", "fit", "fullscreen"];
 
 /**
  * Search's forms (design-v1-qol.md 5, Opening): the field-like button with its words and
@@ -66,9 +68,12 @@ export type FloorForm = "name" | "icon" | "menu";
  * right after the Phase menu (`floorIcon`, docs/design/design-v1-floors.md
  * 18.6), its icon staying, and Floor folds with View. After step 12 a player's
  * inline "Your turn" drops while End turn shows, its live region kept, unseen
- * (design-v1-qol.md 4, The give-way, QD-OPUS-24 and 30). Last, where a blackout's crossed eye
- * stands in the DM chip's place, it slims to the dot's width (`eyeSlim`):
- * it is 8 px wider, and no other step makes up for it.
+ * (design-v1-qol.md 4, The give-way, QD-OPUS-24 and 30). The speaker
+ * folds right after View (`volumeFold`, D-261108-362), into the DM menu's
+ * or the You menu's Volume, so View and Floor go before it and a fight's
+ * turn name only after it. Last, where a blackout's crossed eye stands in
+ * the DM chip's place, it slims to the dot's width (`eyeSlim`): it is 8 px
+ * wider, and no other step makes up for it.
  */
 export type WideStep =
   | "searchIcon"
@@ -84,6 +89,7 @@ export type WideStep =
   | "facesNone"
   | "tightGaps"
   | "viewFold"
+  | "volumeFold"
   | "turnName"
   | "timerShort"
   | "yourTurnOff"
@@ -103,6 +109,7 @@ export const WIDE_STEPS: readonly WideStep[] = [
   "facesNone",
   "tightGaps",
   "viewFold",
+  "volumeFold",
   "turnName",
   "timerShort",
   "yourTurnOff",
@@ -112,13 +119,15 @@ export const WIDE_STEPS: readonly WideStep[] = [
 /**
  * The steps below 900 px, in order (design-v1-qol.md 4, The give-way): the turn strip goes to the
  * band under the bar first. A phone's bar has no clock chip and no Phase
- * menu. The crossed eye's slimming comes last, as from 900 px up: a DM's
- * 320 px phone at 130% in a blackout with a long room name overflowed by
- * 1 px with every other step taken.
+ * menu. The speaker folds right after View, as from 900 px up, and only
+ * the DM's 320 px phone at 130% takes that step (docs/design/design-v1-volume.md
+ * 10). The crossed eye's slimming comes last: a DM's 320 px phone at 130%
+ * in a blackout with a long room name overflowed by 1 px with every other
+ * step taken.
  */
-export type NarrowStep = "band" | "blackoutFold" | "dmDot" | "searchPanels" | "nowPlayingOff" | "tightGaps" | "viewFold" | "eyeSlim";
+export type NarrowStep = "band" | "blackoutFold" | "dmDot" | "searchPanels" | "nowPlayingOff" | "tightGaps" | "viewFold" | "volumeFold" | "eyeSlim";
 
-export const NARROW_STEPS: readonly NarrowStep[] = ["band", "blackoutFold", "dmDot", "searchPanels", "nowPlayingOff", "tightGaps", "viewFold", "eyeSlim"];
+export const NARROW_STEPS: readonly NarrowStep[] = ["band", "blackoutFold", "dmDot", "searchPanels", "nowPlayingOff", "tightGaps", "viewFold", "volumeFold", "eyeSlim"];
 
 export type BarStep = WideStep | NarrowStep;
 
@@ -148,6 +157,12 @@ export type BarContent = {
   gaps: boolean;
   /** The View button. */
   view: boolean;
+  /**
+   * This device's speaker (features/sound/device/Speaker.tsx): a DM's or a
+   * player's bar once the role is known, not View as a player, whose
+   * preview plays nothing. Its 44 px never change, so it adds no words.
+   */
+  volume: boolean;
   /** Floor: this device holds more than one floor of its scene (docs/design/design-v1-floors.md 7.2). */
   floor: boolean;
   /**
@@ -184,6 +199,7 @@ export function stepsFor(c: BarContent): BarStep[] {
       tightGaps: c.gaps,
       // Floor folds with View, one step for one idea (D-261107-215).
       viewFold: c.view || c.floor,
+      volumeFold: c.volume,
       eyeSlim: dm && c.blackout,
     };
     return NARROW_STEPS.filter((step) => narrow[step]);
@@ -203,6 +219,7 @@ export function stepsFor(c: BarContent): BarStep[] {
     facesNone: strip && c.faces > 0,
     tightGaps: c.gaps,
     viewFold: c.view || c.floor,
+    volumeFold: c.volume,
     turnName: strip,
     timerShort: strip && c.timerOver,
     yourTurnOff: strip && c.yourTurn,
@@ -298,6 +315,8 @@ export type BarShape = {
   tight: boolean;
   /** View, and Floor with it, folded into the Menu panel's rows. */
   viewFold: boolean;
+  /** The speaker on the bar. Folded, the DM menu or the You menu holds its Volume. */
+  volume: boolean;
   floor: FloorForm | null;
   /** The turn chip's name's cap, 0 once it has left, null before step 11. */
   nameCap: number | null;
@@ -329,6 +348,7 @@ export function shapeOf(c: BarContent, key: string, record: FitRecord | null): B
     faces,
     tight: has("tightGaps"),
     viewFold: has("viewFold"),
+    volume: c.volume && !has("volumeFold"),
     floor: !c.floor ? null : has("viewFold") ? "menu" : c.phone || has("floorIcon") ? "icon" : "name",
     nameCap: has("turnName") ? (drawn?.nameCap ?? 0) : null,
     timerShort: has("timerShort"),

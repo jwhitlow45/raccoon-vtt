@@ -55,6 +55,7 @@ import { EditorHost } from "../features/monsters/EditorHost.tsx";
 import { PcStatsHost } from "../features/pcstats/PcStatsEditor.tsx";
 import { SoundHost } from "../features/sound/engine/SoundHost.tsx";
 import { NowChip } from "../features/sound/mini/NowChip.tsx";
+import { Speaker } from "../features/sound/device/Speaker.tsx";
 import { ASK_TEXT, useSoundAsk } from "../features/sound/engine/useSoundAsk.ts";
 import { somethingPlays } from "../features/sound/panel/state.ts";
 import { Notice } from "../components/Notice.tsx";
@@ -1168,6 +1169,8 @@ function RoomPage() {
           chipDot={wide ? width - (sideShown ? panelWidth - theme.layout.sidePanelWidth : 0) < theme.layout.chipNameMinWidth : placement === "bar" && fight}
           // Not in "view as a player" (D-261106-152). The table display has no Room page.
           search={!preview}
+          // Nor the speaker: the preview plays nothing (docs/design/design-v1-volume.md 3).
+          speaker={!preview}
           openSheet={openSheet}
           openTime={() => {
             focusNext.current = { kind: "panel", id: TIME_PANEL };
@@ -1573,6 +1576,8 @@ function TopBar(props: {
   chipDot: boolean;
   /** The search's Search, everywhere but in "view as a player". */
   search: boolean;
+  /** This device's speaker, everywhere but in "view as a player". */
+  speaker: boolean;
   openSheet(): OpenSheet | null;
   openTime(): void;
 }) {
@@ -1596,7 +1601,7 @@ function TopBar(props: {
   const [chipsOpen, setChipsOpen] = useState<Readonly<Record<string, boolean>>>({});
   const raiseFor = useMemo(() => {
     const raise = (key: string) => (open: boolean) => setChipsOpen((now) => (now[key] === open ? now : { ...now, [key]: open }));
-    return { dm: raise("dm"), blackout: raise("blackout"), you: raise("you"), clock: raise("clock"), nowPlaying: raise("nowPlaying") };
+    return { dm: raise("dm"), blackout: raise("blackout"), you: raise("you"), clock: raise("clock"), nowPlaying: raise("nowPlaying"), volume: raise("volume") };
   }, []);
   const chipOpen = Object.values(chipsOpen).some(Boolean);
   // Focus goes here when Players see black leaves with the blackout while its menu was open (design-v1-qol.md 4, C2's move).
@@ -1620,6 +1625,9 @@ function TopBar(props: {
   const dialogs = useScoped(chipDialogSlot);
   const nowDialogOpen = useStore(dialogs, (s) => s.open?.what.t === "nowPlaying");
   const openNowDialog = useCallback((from: HTMLElement | null) => dialogs.setState({ open: { what: { t: "nowPlaying" }, returnFocus: from } }), [dialogs]);
+  // The speaker's card or sheet is a chip dialog too, so the DM menu's and the You menu's Volume open the very same (docs/design/design-v1-volume.md 3).
+  const volumeDialogOpen = useStore(dialogs, (s) => s.open?.what.t === "volume");
+  const openVolumeDialog = useCallback((from: HTMLElement | null) => dialogs.setState({ open: { what: { t: "volume" }, returnFocus: from } }), [dialogs]);
   const stripIn = !fight ? "none" : places === "bar" ? "bar" : places === "either" ? "movable" : "none";
   const content: BarContent = {
     phone: props.compact,
@@ -1633,6 +1641,7 @@ function TopBar(props: {
     phase: !props.compact && dm && phaseNames !== null,
     gaps: isoOffered,
     view: isoOffered && props.canFit,
+    volume: props.speaker && (role === "dm" || role === "player"),
     floor: props.canFit && heldFloors.length > 1,
     strip: stripIn,
     faces: stripIn !== "none" ? (turn?.faces ?? 0) : 0,
@@ -1747,15 +1756,17 @@ function TopBar(props: {
         </h1>
         {/* The chips open menus (docs/design/design-v1-qol.md 4, C1, C2 and C7). In its short form the blackout's crossed eye is the DM chip, whose menu leads with the blackout's items. */}
         {role === "dm" ? (
-          <DmChip dot={shape.dmDot} eye={shape.eye} eyeSlim={shape.eyeSlim} timeGaveWay={clockText !== null && !shape.clock} nowPlayingGaveWay={shape.nowPlaying === "off"} chipRef={dmChipRef} onOpen={raiseFor.dm} />
+          <DmChip dot={shape.dmDot} eye={shape.eye} eyeSlim={shape.eyeSlim} timeGaveWay={clockText !== null && !shape.clock} nowPlayingGaveWay={shape.nowPlaying === "off"} volumeGaveWay={content.volume && !shape.volume} chipRef={dmChipRef} onOpen={raiseFor.dm} />
         ) : role === "player" ? (
-          <YouChip dot={props.chipDot} onOpen={raiseFor.you} />
+          <YouChip dot={props.chipDot} volumeGaveWay={content.volume && !shape.volume} onOpen={raiseFor.you} />
         ) : null}
         {shape.blackout ? <BlackoutChip fallbackFocus={() => dmChipRef.current} onOpen={raiseFor.blackout} /> : null}
         {/* Below 900 px a step folds it into the Panels list's field, which is always there (topBarFit.ts searchPanels). */}
         {shape.search === "field" || shape.search === "icon" ? <SearchButton form={shape.search} /> : null}
         <div style={{ flex: 1 }} />
         {dm ? <NowChip form={shape.nowPlaying} popover={!props.compact} dialogOpen={nowDialogOpen} onShows={setNowKey} onOpen={raiseFor.nowPlaying} openDialog={openNowDialog} /> : null}
+        {/* This device's sound beside the room's, at the bar's own gap (docs/design/design-v1-volume.md 3). */}
+        {shape.volume ? <Speaker popover={!props.compact} dialogOpen={volumeDialogOpen} onOpen={raiseFor.volume} openDialog={openVolumeDialog} /> : null}
         {shape.clock ? role === "dm" ? <DmClockChip onOpenTime={props.openTime} onOpen={raiseFor.clock} /> : <ClockChip onOpen={props.openTime} /> : null}
         {/* Once Isometric is offered, View or Fit always follows them on a scene, so they keep their whole width. */}
         {props.undo ? <UndoButtons tuck={!(isoOffered && props.canFit)} /> : null}
