@@ -369,6 +369,29 @@ describe("the room sound's unlock", () => {
     }
   });
 
+  test("Listen here plays on a muted device, the DM's own tap to hear a file (D-261108-383)", async () => {
+    const g = globalThis as Record<string, unknown>;
+    const before = g.Audio;
+    g.Audio = function Audio() {
+      return element();
+    };
+    try {
+      const { soundUnlock } = await import("./context.ts");
+      const { listenHere, stopListening } = await import("./store.ts");
+      const { setRoomSoundChoice } = await import("../../device/settings.ts");
+      setRoomSoundChoice("off");
+      const listening = (soundUnlock().pool() as Fake[])[LISTEN_ELEMENT]!;
+      const plays = listening.plays;
+      listenHere({ soundId: "rain", url: "/api/assets/a-rain" });
+      assert.equal(listening.plays, plays + 1, "it plays while muted");
+      assert.equal(listening.src, "/api/assets/a-rain");
+      stopListening();
+      setRoomSoundChoice(null);
+    } finally {
+      g.Audio = before;
+    }
+  });
+
   test("the first tap's race: music that takes an element before its silence loads leaves the pool blessed, and the next tap touches nothing", async () => {
     const h = specHarness();
     h.unlock.arm(() => true);
