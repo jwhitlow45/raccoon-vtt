@@ -701,3 +701,27 @@ test("toasts that waited undrawn in the very short sheet outlive it and are plac
   // The sheet closing for a toast with a button: it waits behind a whisper and is never lost.
   assert.deepEqual(sheetToastsToDismiss(false, new Map([[1, "sheet"], [2, "sheet"]]), new Set()), [], "nothing drawn, nothing dismissed");
 });
+
+test("the alerts' summary row rises over the room's name on a phone held sideways at 130%, its shadow held by the notch's inset rather than past it", () => {
+  // 480 x 320 at 130% with a 47 px notch, reconnecting, as reach-player-130 measured it in screen px: the player's chip showing its name starts at 151 px.
+  const zoom = 1.3;
+  const header = [
+    { left: 151.05, right: 242.16 },
+    { left: 247.34, right: 304.53 },
+    { left: 307.13, right: 364.31 },
+    { left: 356.52, right: 413.7 },
+  ].map((b) => ({ ...b, top: 5.2, bottom: 62.39 }));
+  const rules = summaryRowRules({
+    usual: { left: 71.49, right: 408.5, top: 156.95, height: 57.19 },
+    chrome: { safe: { left: 47 }, top: 52.76, controls: 129.46 },
+    zoom, height: 246.15, ceiling: 0,
+    lasting: 113.51, mapToasts: null, toastRow: null, controls: header,
+  });
+  assert.equal(rules.minLeft, 47 * zoom, "the row keeps out of the notch, which already gives its shadow room");
+  const spot = raisedRow(rules);
+  assert.ok(spot, "a spot over the room's name");
+  assert.ok(spot.top + rules.row.height <= 52.76 * zoom, `over the top bar's row, clear of the Reconnecting notice: ${JSON.stringify(spot)}`);
+  assert.ok(spot.right <= 151.05 - EDGE * zoom && spot.left >= 47 * zoom && spot.right - spot.left >= theme.touch * zoom);
+  // Where the window has no inset, the shadow keeps its own room from the edge.
+  assert.equal(summaryRowRules({ usual: rules.row, chrome: { safe: { left: 0 }, top: 52.76, controls: 60 }, zoom, height: 246.15, ceiling: 0, lasting: null, mapToasts: null, toastRow: null, controls: [] }).minLeft, SHADOW_ROOM * zoom);
+});

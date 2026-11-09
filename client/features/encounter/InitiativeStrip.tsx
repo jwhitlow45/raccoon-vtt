@@ -1475,7 +1475,8 @@ export function summaryRowRules(a: {
   const { zoom, chrome, lasting, mapToasts, toastRow } = a;
   return {
     row: a.usual,
-    minLeft: (chrome.safe.left + SHADOW_ROOM) * zoom,
+    // The row keeps out of the safe area and its shadow inside the window. A notch's inset already holds the shadow's room, so the two do not add up: summed, they cost a phone held sideways at 130% its one gap over the room's name.
+    minLeft: Math.max(chrome.safe.left, SHADOW_ROOM) * zoom,
     ceiling: a.ceiling,
     floor: (a.height - chrome.controls - theme.space(1)) * zoom,
     taken: [...(lasting === null ? [] : [{ top: chrome.top * zoom, bottom: (lasting + theme.space(1)) * zoom }]), ...(mapToasts === null ? [] : [{ top: (mapToasts.top - EDGE) * zoom, bottom: (mapToasts.bottom + EDGE) * zoom }]), ...(toastRow === null ? [] : [{ top: toastRow.top - EDGE * zoom, bottom: toastRow.bottom + EDGE * zoom }])],
