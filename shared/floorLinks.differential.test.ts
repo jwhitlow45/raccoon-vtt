@@ -406,7 +406,7 @@ function play(state: RoomState, steps: readonly { who: Viewer; op: Op }[], viewe
   for (const [i, step] of steps.entries()) {
     const r = applyOp(s, step.op, step.who, env(200 + i));
     assert.ok(r.ok, `${step.op.t}: ${r.ok ? "" : r.message}`);
-    const batch: CommittedBatch = { seq: 200 + i, before: s, after: r.state, touched: r.touched, global: r.global, acks: new Map(), rejects: new Map(), restored: new Map() };
+    const batch: CommittedBatch = { seq: 200 + i, pub: 200 + i, before: s, after: r.state, touched: r.touched, global: r.global, acks: new Map(), rejects: new Map(), restored: new Map() };
     publishBatch(
       batch,
       sockets.map(([, sk]) => sk.conn),
