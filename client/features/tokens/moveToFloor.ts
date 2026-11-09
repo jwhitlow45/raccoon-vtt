@@ -102,14 +102,23 @@ function linkDepth(tokens: RoomState["tokens"], token: Token): number {
  *
  * The server takes each op alone, and each ends with the link pass, so a rider sent before its mount would stand on
  * the floor alone and come loose. Holders go first, down every chain of links: the mount takes its rider along, and
- * the rider's own op then drops the rider's nudge, as for every creature the move names (7.4).
+ * the rider's own op then drops the rider's nudge, as for every creature the move names (7.4). Each op is planned
+ * from the room as the ops before it leave it, so a creature an earlier op took along keeps the place and height it
+ * was given there, a rider its mount's, and its own op names only the floor (FLRBUILD-ASTRA-06).
  */
 export function moveToFloorOps(view: Pick<RoomState, "buildChunks" | "tokens">, named: readonly Token[], target: Scene): ClientOp[] {
   const ops: ClientOp[] = [];
   const depth = new Map(named.map((t) => [t.id, linkDepth(view.tokens, t)]));
   const holdersFirst = [...named].sort((a, b) => depth.get(a.id)! - depth.get(b.id)!);
+  // What the ops so far took to the floor: a scene change takes a holder's whole group (shared/rules/moveLeg.ts planMove).
+  const along = new Set<string>();
   for (const token of holdersFirst) {
     if (token.sceneId === target.id) continue;
+    if (along.has(token.id)) {
+      ops.push({ t: "token.update", tokenId: token.id, patch: { sceneId: target.id } });
+      continue;
+    }
+    for (const id of carriedGroup(view.tokens, token.id, new Set([token.id]))) along.add(id);
     // Whether it stands on the ground reads the space it stands in now, squeezed or not. It lands full size, since the
     // change of floor drops the squeeze (FLRBUILD-ASTRA-02), so its landing reads the ground under its full space.
     const { squeeze: _squeeze, ...landing } = token;

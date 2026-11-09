@@ -158,6 +158,26 @@ describe("the ops of the move", () => {
     }
   });
 
+  test("a rider named with its mount on uneven ground keeps the height the mount carries it to, in either selection order (FLRBUILD-ASTRA-06)", () => {
+    // Upper's ground is 5 ft under Thorn's square and 10 ft under another of the horse's.
+    const heights = new Int16Array(CHUNK_CELLS * CHUNK_CELLS);
+    heights[4 * CHUNK_CELLS + 4] = 5;
+    heights[5 * CHUNK_CELLS + 5] = 10;
+    for (const order of [["horse", "thorn"], ["thorn", "horse"]]) {
+      const state = stable();
+      state.buildChunks["u:0,0"] = { sceneId: "u", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, heights: encodeHeights(heights) };
+      const ops = moveToFloorOps(state, order.map((id) => state.tokens[id]!), state.scenes.u!);
+      assert.deepEqual(ops.slice(0, 2), [
+        { t: "token.update", tokenId: "horse", patch: { sceneId: "u", elevation: 10 } },
+        { t: "token.update", tokenId: "thorn", patch: { sceneId: "u" } },
+      ], `${order}: the rider's own op only drops its nudge`);
+      const s = applied(state, ops);
+      assert.deepEqual([s.tokens.horse!.elevation, s.tokens.thorn!.elevation, s.tokens.pip!.elevation], [10, 10, 10], `${order}: all ride at the horse's height`);
+      assert.deepEqual(s.tokens.thorn!.attached, { to: "horse", kind: "ride" }, `${order}: still riding`);
+      assert.equal(s.tokens.thorn!.nudge, undefined, `${order}: and its nudge is gone`);
+    }
+  });
+
   test("a creature already on the floor is left out", () => {
     const state = tower((s) => void (s.tokens.thorn = thorn({ sceneId: "u" })));
     assert.deepEqual(moveToFloorOps(state, [state.tokens.thorn!], state.scenes.u!), []);
