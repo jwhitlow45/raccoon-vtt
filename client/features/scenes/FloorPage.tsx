@@ -7,7 +7,6 @@ import { Button } from "../../components/Button.tsx";
 import { FieldRow, Input } from "../../components/Field.tsx";
 import { Help, Note } from "../../components/Panel.tsx";
 import { SettingRow } from "../../components/SettingRow.tsx";
-import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { FLOOR_ROOT_ATTR, FLOOR_ROOTS } from "../floors/ids.ts";
@@ -60,11 +59,11 @@ export function FloorPage(props: { floor: Scene; selectName: boolean; onBack(): 
 
   return (
     <div {...{ [FLOOR_ROOT_ATTR]: FLOOR_ROOTS.page }} style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2) }}>
+      {/* Back stands alone: Show this floor, pressed, below says which floor is on screen, and a tag beside Back would set a 20 px pill against a 44 px button. */}
+      <div style={{ justifySelf: "start" }}>
         <Button size="sm" icon="back" onClick={props.onBack}>
           Back to Floors
         </Button>
-        {shown ? <Tag tone="muted">Shown</Tag> : null}
       </div>
       <FloorName key={floor.id} floor={floor} others={floors} select={props.selectName} inputId={nameId} />
       {level === 0 ? null : (
@@ -88,6 +87,7 @@ export function FloorPage(props: { floor: Scene; selectName: boolean; onBack(): 
         </div>
         <Help id={open && hide !== null ? reasonId : undefined}>{open && hide !== null ? hide : SHOW_HELP}</Help>
       </div>
+      {/* Show this floor moves the DM's view, not the floor, so it has a row apart from the stack's two moves, where it never wraps alone under them. */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
         <Button size="sm" icon="arrowUp" search="scenes.floor.order" disabled={level >= floors.length - 1} onClick={() => order(true)}>
           Move up
@@ -95,6 +95,8 @@ export function FloorPage(props: { floor: Scene; selectName: boolean; onBack(): 
         <Button size="sm" icon="arrowDown" disabled={level === 0} onClick={() => order(false)}>
           Move down
         </Button>
+      </div>
+      <div style={{ justifySelf: "start" }}>
         <Button size="sm" search="scenes.floor.show" pressed={shown} onClick={() => actions.showFloor(floor.id)}>
           Show this floor
         </Button>
