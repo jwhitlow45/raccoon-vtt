@@ -10435,14 +10435,17 @@ async function qolFightScreens(sweep: Sweep, page: Page, at: { size: Size; scale
  */
 async function cutWords(scope: Locator): Promise<string[]> {
   return scope.evaluate((root) => {
+    type Box = { left: number; right: number };
+    type El = { children: { length: number }; textContent: string | null; scrollWidth: number; clientWidth: number; parentElement: El | null; getBoundingClientRect(): Box; querySelectorAll(s: string): ArrayLike<El> };
+    const g = globalThis as unknown as { getComputedStyle(e: El): { textOverflow: string; overflowX: string } };
+    const top = root as unknown as El;
     const cut: string[] = [];
-    for (const el of Array.from(root.querySelectorAll<HTMLElement>("*"))) {
-      if (el.children.length > 0 || !(el.textContent ?? "").trim() || el.closest("[aria-hidden='true'][data-rvtt-ghost]")) continue;
-      const own = getComputedStyle(el);
-      if (own.textOverflow === "ellipsis" && el.scrollWidth > el.clientWidth + 1) cut.push(`${el.textContent} (ellipsis)`);
+    for (const el of Array.from(top.querySelectorAll("*"))) {
+      if (el.children.length > 0 || !(el.textContent ?? "").trim()) continue;
+      if (g.getComputedStyle(el).textOverflow === "ellipsis" && el.scrollWidth > el.clientWidth + 1) cut.push(`${el.textContent} (ellipsis)`);
       const box = el.getBoundingClientRect();
-      for (let up = el.parentElement; up && up !== root.parentElement; up = up.parentElement) {
-        const x = getComputedStyle(up).overflowX;
+      for (let up = el.parentElement; up && up !== top.parentElement; up = up.parentElement) {
+        const x = g.getComputedStyle(up).overflowX;
         if (x !== "hidden" && x !== "clip") continue;
         const edge = up.getBoundingClientRect();
         if (box.right > edge.right + 1 || box.left < edge.left - 1) cut.push(`${el.textContent} (past its box)`);
@@ -11020,6 +11023,20 @@ export function patCardTests(): void {
           if (!(await wholeInReach(row))) lines.push(`${sweep.at} fu52-card: ${weapon}'s result is under the card's fold after its Damage`);
           if (!(await wholeInReach(chip))) lines.push(`${sweep.at} fu52-card: ${weapon}'s first Apply to chip is under the card's fold after its Damage`);
         }
+        // The card with both results and their chips (j), then the bar a Fill opens, and the chip's leaving once that fill was applied (g).
+        await sweep.measure(pat, "fu52-card-rolled", card);
+        const chips = attacks.locator("[data-card-result]").nth(1).locator("xpath=following-sibling::*[1][@data-apply-to]");
+        const chip = chips.getByRole("button", { name: /^Fill \d+ Slashing damage for / }).first();
+        const target = /for (.+)$/.exec((await chip.getAttribute("aria-label")) ?? "")?.[1] ?? "";
+        await chip.tap();
+        const bar = pat.getByRole("dialog", { name: `${target} actions` });
+        await bar.waitFor();
+        await waitFor(`the entry filled at ${at.size.name}`, async () => (/^\d+$/.test(await bar.getByLabel("HP change", { exact: true }).first().inputValue()) ? true : null));
+        await sweep.measure(pat, "fu52-fill-bar", bar);
+        await bar.getByRole("button", { name: "Apply", exact: true }).tap();
+        await waitFor(`${target} to leave the chips`, async () => ((await chips.getByRole("button", { name: new RegExp(`for ${target}$`) }).count()) === 0 ? true : null));
+        if (!(await chips.getByText(`Applied to ${target}.`).count())) lines.push(`${sweep.at} fu52-card: the row does not say it applied to ${target}`);
+        await bar.getByRole("button", { name: "Close", exact: true }).first().dispatchEvent("click");
         lines.push(...sweep.lines);
         await escapeAll(pat);
       }

@@ -56,6 +56,20 @@ function setRoll(applies: StoreApi<Applies>, key: string, next: RollApplied): vo
 }
 
 /**
+ * A roll applied through an HP entry's filled amount, which a player's chip
+ * asks for: the creatures it went to join the roll's applied ones, so the
+ * chip leaves its row and the row says "Applied to Thorn." as it does after
+ * the DM's chip (LP32-POLISH g). The entry goes out with no answer to wait
+ * for, so it counts at once, as its own chip's mark does (hpChips.ts).
+ */
+export function recordApplied(applies: StoreApi<Applies>, lineId: string, to: readonly { holder: string; name: string }[]): void {
+  const was = applies.getState().rolls[lineId] ?? NOTHING_YET;
+  const fresh = to.filter((t) => !was.applied.some((a) => a.holder === t.holder));
+  if (fresh.length === 0) return;
+  setRoll(applies, lineId, { ...was, applied: [...was.applied, ...fresh.map(({ holder, name }) => ({ holder, name }))] });
+}
+
+/**
  * The DM's chip: the roll's damage to one creature at once, through the HP
  * entry's own path (groupHp.ts sendHpEntry), so its defenses count as in
  * the entry and a critical hit on a creature at 0 HP counts as the entry's

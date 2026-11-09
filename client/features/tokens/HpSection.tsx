@@ -16,7 +16,9 @@ import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { handFocusOn } from "../../lib/handFocus.ts";
 import { hpDisplay, hpLabel, hpText, type HpView } from "../../lib/tokenView.ts";
 import { theme } from "../../lib/theme.ts";
+import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
+import { applySlot, recordApplied } from "../dice/apply.ts";
 import { useHpChips, useMarkChipApplied } from "../dice/hpChips.ts";
 import { defenseSummaryText } from "../dice/damageSummaryLines.ts";
 import { DamageSummary } from "../dice/DamageSummary.tsx";
@@ -129,6 +131,7 @@ export function HpEntry(props: {
   // The newest rolled damage or healing, offered under Damage and Heal (docs/design/design-v1-roll-options.md 4.3).
   const chips = useHpChips(mode === "damage" || mode === "heal" ? mode : null);
   const markApplied = useMarkChipApplied();
+  const applies = useScoped(applySlot);
   const rest = props.rest;
   const resting = rest?.resting === true;
   const descriptionId = useId();
@@ -176,7 +179,10 @@ export function HpEntry(props: {
       return;
     }
     sendHpEntry(actions, props.targets, parsed.change, sendsCrit);
-    if (filled) markApplied(filled.lineIds);
+    if (filled) {
+      markApplied(filled.lineIds);
+      recordApplied(applies, filled.lineId, props.targets.map((t) => ({ holder: t.holder, name: t.name })));
+    }
     setFilled(null);
     setMode(modeAfterApply(mode));
     setText("");

@@ -19,7 +19,7 @@ const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
 const { ApplyTo } = await import("./ApplyTo.tsx");
-const { applyNow, applySlot, APPLY_BUSY, APPLY_GONE, APPLY_UNKNOWN, toastChips } = await import("./apply.ts");
+const { applyNow, applySlot, APPLY_BUSY, APPLY_GONE, APPLY_UNKNOWN, recordApplied, toastChips } = await import("./apply.ts");
 const { createRoomStore } = await import("../../state/store.ts");
 const { rollChip } = await import("./targets.ts");
 
@@ -52,6 +52,15 @@ function harness(view: RoomState, you = { memberId: "dm1", role: "dm" as const }
 }
 
 const thorn = { tokenId: "thorn", holder: "character:c-thorn", name: "Thorn" };
+
+describe("recordApplied, a filled entry's apply (LP32-POLISH g)", () => {
+  test("the creatures it went to join the roll's applied ones once, so a player's chip leaves its row", () => {
+    const applies = applySlot.create();
+    recordApplied(applies, "9:0", [{ holder: "character:c-thorn", name: "Thorn" }]);
+    recordApplied(applies, "9:0", [{ holder: "character:c-thorn", name: "Thorn" }, { holder: "token:g1", name: "Goblin Warrior 1" }]);
+    assert.deepEqual(applies.getState().rolls["9:0"], { busy: null, said: null, applied: [{ holder: "character:c-thorn", name: "Thorn" }, { holder: "token:g1", name: "Goblin Warrior 1" }] });
+  });
+});
 
 describe("applyNow, the DM's chip", () => {
   test("one quiet actor.hp with the roll's parts, busy until taken, then the creature is applied and Use's chip for the roll goes", async () => {
@@ -179,5 +188,13 @@ describe("the ApplyTo row", () => {
     assert.match(render(table(true), { memberId: "p1", role: "player" }, [own]), /aria-label="Fill 6 Slashing damage for Goblin Warrior 1"/);
     assert.equal(render(table(false), { memberId: "p1", role: "player" }, [own]), "");
     assert.equal(render(table(true), { memberId: "p1", role: "player" }, [slash("p2", { tokenId: "thorn" })]), "");
+  });
+
+  test("a player's chip leaves its row once its fill was applied, and the row says so (LP32-POLISH g)", () => {
+    const own = slash("p1", { tokenId: "thorn" });
+    const html = render(table(true), { memberId: "p1", role: "player" }, [own], [{ holder: "token:g1", name: "Goblin Warrior 1" }]);
+    assert.doesNotMatch(html, /for Goblin Warrior 1"/);
+    assert.match(html, /for Goblin Warrior 2"/);
+    assert.match(html, /Applied to Goblin Warrior 1\./);
   });
 });
