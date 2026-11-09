@@ -29,7 +29,7 @@ export type TurnPlacement = "bar" | "band";
  * - A short landscape phone (wider than tall, under 500 px tall) may put
  *   it in either: in the bar while the bar's row has room for it, else in
  *   the band (docs/design/design-v1-visual.md F22). The top bar's give-way
- *   decides, as its first step on a phone (pages/topBarFit.ts, "band").
+ *   decides, by its band step on a phone (pages/topBarFit.ts, "band").
  * - Anything else, a portrait phone above all, takes the band.
  *
  * No fixed threshold decides it, since what the bar holds varies: a long

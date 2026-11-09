@@ -117,17 +117,21 @@ export const WIDE_STEPS: readonly WideStep[] = [
 ];
 
 /**
- * The steps below 900 px, in order (design-v1-qol.md 4, The give-way): the turn strip goes to the
- * band under the bar first. A phone's bar has no clock chip and no Phase
- * menu. The speaker folds right after View, as from 900 px up, and only
- * the DM's 320 px phone at 130% takes that step (docs/design/design-v1-volume.md
- * 10). The crossed eye's slimming comes last: a DM's 320 px phone at 130%
- * in a blackout with a long room name overflowed by 1 px with every other
- * step taken.
+ * The steps below 900 px, in order (design-v1-qol.md 4, The give-way). A
+ * phone's bar has no clock chip and no Phase menu. On a short landscape
+ * phone in a fight the turn strip keeps the row while the DM chip can
+ * take its dot or the crossed eye and Search can go to the Panels field,
+ * and only then goes to the band under the bar (D-261108-442): the band
+ * takes 48 px of a screen about 300 px tall (F22), and the speaker's 50 px
+ * alone sent the strip there at 844 x 390. The speaker folds right after
+ * View, as from 900 px up, and only the DM's 320 px phone at 130% takes
+ * that step (docs/design/design-v1-volume.md 10). The crossed eye's
+ * slimming comes last: a DM's 320 px phone at 130% in a blackout with a
+ * long room name overflowed by 1 px with every other step taken.
  */
-export type NarrowStep = "band" | "blackoutFold" | "dmDot" | "searchPanels" | "nowPlayingOff" | "tightGaps" | "viewFold" | "volumeFold" | "eyeSlim";
+export type NarrowStep = "blackoutFold" | "dmDot" | "searchPanels" | "band" | "nowPlayingOff" | "tightGaps" | "viewFold" | "volumeFold" | "eyeSlim";
 
-export const NARROW_STEPS: readonly NarrowStep[] = ["band", "blackoutFold", "dmDot", "searchPanels", "nowPlayingOff", "tightGaps", "viewFold", "volumeFold", "eyeSlim"];
+export const NARROW_STEPS: readonly NarrowStep[] = ["blackoutFold", "dmDot", "searchPanels", "band", "nowPlayingOff", "tightGaps", "viewFold", "volumeFold", "eyeSlim"];
 
 export type BarStep = WideStep | NarrowStep;
 

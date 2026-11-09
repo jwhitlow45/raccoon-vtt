@@ -274,6 +274,24 @@ describe("the top bar's give-way (topBarFit)", () => {
     assert.ok(!stepsFor(preview).includes("volumeFold"));
   });
 
+  test("on a short landscape phone in a fight the speaker alone never sends the turn strip to the band: the DM chip's dot and Search's move to the Panels field give its 50 px first (D-261108-442)", () => {
+    fc.assert(
+      fc.property(
+        bars.filter((b) => b.content.strip === "movable" && b.content.search && b.content.volume),
+        fc.integer({ min: 240, max: 899 }),
+        (bar, width) => {
+          // Only rows that held the strip with nothing given way before the speaker came.
+          const without = settle({ ...bar, content: { ...bar.content, volume: false } }, width, null);
+          fc.pre((without.record?.taken ?? 0) === 0);
+          const { shape } = settle(bar, width, null);
+          assert.equal(shape.band, false, "the strip keeps the row");
+          assert.equal(shape.volume, true);
+        },
+      ),
+      { numRuns: 3000 },
+    );
+  });
+
   test("a fight in a blackout at 1440 takes the clock, and both ending, or a narrowing to 900 and back, brings it back (CHIPS-GIVEWAY-1)", () => {
     const content = (fight: boolean, blackout: boolean): BarContent => ({
       phone: false,
@@ -407,8 +425,8 @@ describe("the top bar's give-way (topBarFit)", () => {
       "eyeSlim",
     ]);
     const phone: BarContent = { phone: true, role: "dm", search: true, nowPlaying: true, clock: false, blackout: true, fullscreen: false, phase: false, gaps: true, view: true, volume: true, floor: false, strip: "movable", faces: 4, timerOver: false, yourTurn: false, words: [] };
-    assert.deepEqual(stepsFor(phone), ["band", "blackoutFold", "searchPanels", "nowPlayingOff", "tightGaps", "viewFold", "volumeFold", "eyeSlim"]);
-    assert.deepEqual(stepsFor({ ...phone, blackout: false }), ["band", "dmDot", "searchPanels", "nowPlayingOff", "tightGaps", "viewFold", "volumeFold"], "the dot is already its width");
+    assert.deepEqual(stepsFor(phone), ["blackoutFold", "searchPanels", "band", "nowPlayingOff", "tightGaps", "viewFold", "volumeFold", "eyeSlim"]);
+    assert.deepEqual(stepsFor({ ...phone, blackout: false }), ["dmDot", "searchPanels", "band", "nowPlayingOff", "tightGaps", "viewFold", "volumeFold"], "the dot is already its width");
     assert.ok(!stepsFor({ ...phone, role: "player", blackout: false }).includes("eyeSlim"), "a player has no eye");
     const shape = shapeOf(phone, fitKey(phone), null);
     assert.equal(shape.search, "icon", "a phone's Search starts as its icon");
