@@ -308,7 +308,8 @@ describe("idle unload, snapshots and recovery", () => {
     await t.pool.query("update room_ops set op = '{\"t\":\"token.delete\",\"tokenId\":\"missing\"}'::jsonb where room_id = $1 and seq = 1", [roomId]);
     const back = await t.connect(roomId, owner);
     const snap = await back.snapshot("c1", 2);
-    assert.equal(snap.seq, 0);
+    // The room count stored with the chat's commit, not the seq the replay stopped at (counted.ts).
+    assert.equal(snap.seq, 1);
     back.n = 1;
     const refused = await back.apply({ t: "log.chat", text: "nope" });
     assert.equal(refused.rejects?.[0]?.code, "quota");

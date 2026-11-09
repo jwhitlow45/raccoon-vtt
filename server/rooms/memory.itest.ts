@@ -98,9 +98,9 @@ describe("players' maps over the socket and the store", () => {
     await dmSocket.apply({ t: "build.edge", sceneId, edges: [{ key: "15,5,w", feature: { kind: "wall" } }] });
     await sync();
 
-    // The ev names its batch's last seq: the map step's, right after the paint and any explore.
-    const ops = await t.pool.query<{ t: string }>("select op->>'t' as t from room_ops where room_id = $1 and seq <= $2 order by seq desc limit 2", [roomId, paint.seq]);
-    assert.deepEqual(ops.rows.map((r) => r.t), ["sys.remember", "build.paint"], "the map step ends the edit's own batch");
+    // The ev names the paint's number, the room count (counted.ts), which the map step's row right after it carries too.
+    const ops = await t.pool.query<{ t: string }>("select op->>'t' as t from room_ops where room_id = $1 and pub = $2 order by seq", [roomId, paint.seq]);
+    assert.deepEqual(ops.rows.map((r) => r.t), ["build.paint", "sys.remember"], "the map step ends the edit's own batch");
     const live = t.manager.get(roomId)!.committed.state;
     assert.equal(live.memory?.[chunkKey(sceneId, 0, 0)]?.cells?.["14,5"], "stone");
     assert.equal(live.memory?.[chunkKey(sceneId, 0, 0)]?.edges?.["15,5,w"], null, "the wall was not there when they looked");
