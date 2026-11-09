@@ -754,13 +754,15 @@ describe("raccoon-vtt: a side panel that resizes, and a sheet with a mouse", { t
     });
 
     test("pa-6. a crowded DM bar gives way as the panel widens and comes back after Reset width, a double-click and S, and a player's chip keys on the bar's width (pw-6)", async () => {
-      // At 1440 the clock's chip and the DM chip's name give way at 640, in that order. At 1280, where the chip has already gone at 360, Full screen and the Phase menu go too.
+      // The speaker's 56 px already took a part at 360, as the give-way orders it (docs/design/design-v1-volume.md 10b): the clock's chip at 1440, the DM chip's name and Full screen at 1280.
+      // At 1440 the DM chip's name gives way at 640, and at 1280 the Phase menu.
       for (const view of [DESK, { width: 1280, height: 900 }]) {
+        const speakerTook = view.width === 1440 ? "clock" : "fullscreen";
         await size(wideDm, view);
         await reloadAt(wideDm, { width: null });
         const wide = await barParts(wideDm);
-        if (view.width === 1440) assert.deepEqual(wide, ["clock", "dm-name", "fullscreen", "phase"], "the whole bar at 1440 and 360");
-        else assert.ok(wide.includes("fullscreen") && wide.includes("phase"), `1280 at 360 keeps Full screen and the Phase menu: ${wide.join(", ")}`);
+        if (view.width === 1440) assert.deepEqual(wide, ["dm-name", "fullscreen", "phase"], "the whole bar at 1440 and 360");
+        else assert.deepEqual(wide, ["phase"], "1280 at 360 keeps the Phase menu");
         await shots.take(wideDm, `pa-6-crowded-${view.width}-360`);
         await dragEdge(wideDm, -400, 12);
         assert.equal(await drawn(wideDm), 640);
@@ -779,7 +781,8 @@ describe("raccoon-vtt: a side panel that resizes, and a sheet with a mouse", { t
         await aside(wideDm).waitFor({ state: "hidden" });
         await waitFor("each part with the panel hidden", async () => {
           const parts = await barParts(wideDm);
-          return wide.every((p) => parts.includes(p)) ? true : null;
+          // The whole window gives back what the speaker took at 360 too.
+          return wide.every((p) => parts.includes(p)) && parts.includes(speakerTook) ? true : null;
         }, 5_000);
         await wideDm.keyboard.press("s");
         await aside(wideDm).waitFor();
