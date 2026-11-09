@@ -8071,7 +8071,10 @@ function floorsRootTests(): void {
             await escapeAll(page);
           } else {
             const menu = await openMenu(page);
-            await sweep.measure(page, "floors-menu-row", menu.locator(floorRoot("menu-row")));
+            // The Menu panel loads its body on first open, so its Floor row comes a moment after the panel does.
+            const row = menu.locator(floorRoot("menu-row"));
+            await showsWithin(row.first(), 5_000);
+            await sweep.measure(page, "floors-menu-row", row);
             await closeSheets(page);
           }
 
