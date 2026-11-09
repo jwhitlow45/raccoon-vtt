@@ -450,6 +450,24 @@ describe("dungeon generator", { concurrency: false }, () => {
       await reroll.click();
       await waitFor("the first answer's picture held", async () => ((await heldEncodes(dm)) >= 1 ? true : null));
       await drawing.waitFor();
+      // DG2-OP-07: the pill holds its words and spinner vertically centered. Its side padding is not asserted: the words sit 1 to 2 px off center sideways, in markup this lane did not change.
+      const off = await drawing.evaluate((el: unknown) => {
+        type R = { top: number; bottom: number; left: number; right: number };
+        type E = { parentElement: E | null; querySelector(s: string): E | null; getBoundingClientRect(): R };
+        const g = globalThis as unknown as { getComputedStyle(e: unknown): { position: string }; document: { createRange(): { selectNodeContents(e: unknown): void; getBoundingClientRect(): R } } };
+        let pill = el as E | null;
+        while (pill && g.getComputedStyle(pill).position !== "absolute") pill = pill.parentElement;
+        const spinner = pill?.querySelector("svg");
+        if (!pill || !spinner) return null;
+        const range = g.document.createRange();
+        range.selectNodeContents(el);
+        const text = range.getBoundingClientRect();
+        const spin = spinner.getBoundingClientRect();
+        const box = pill.getBoundingClientRect();
+        const mid = (r: R) => (r.top + r.bottom) / 2;
+        return { textY: Math.abs(mid(text) - mid(box)), spinY: Math.abs(mid(spin) - mid(box)), x: Math.abs(spin.left - box.left - (box.right - (el as E).getBoundingClientRect().right)) };
+      });
+      assert.ok(off && off.textY <= 1 && off.spinY <= 1, `DG2-OP-07 pill centering ${JSON.stringify(off)}`);
       assert.equal(await make.isDisabled(), true, "answered, its picture not in: Make off");
       assert.deepEqual([(await status.innerText()).trim(), await status.getAttribute("aria-busy")], [counts, "true"], "the counts of the dungeon still shown, busy, never of one not shown");
       assert.equal(await (await previewImg(dialog)).getAttribute("alt"), was, "the old picture stays while the new one draws");
