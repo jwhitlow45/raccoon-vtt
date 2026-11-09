@@ -21,7 +21,7 @@ const GONE = "gone: that is not here";
 const floor = (id: string, level: number, name: string, over: Partial<Scene> = {}): Scene =>
   scene(id, { name: "Tower", floor: { of: "g", level, name, height: 10 }, ...over });
 
-/** Tower: Ground (g, the start floor), Upper (u) and Attic (a), and a plain scene; Ana (p1) plays Thorn. */
+/** Tower: Ground (g, the start floor), Upper (u) and Attic (a), and a plain scene. Ana (p1) plays Thorn. */
 function tower(over: Partial<RoomState> = {}): RoomState {
   return room({
     meta: { ...room().meta, playerSceneId: "g" },
