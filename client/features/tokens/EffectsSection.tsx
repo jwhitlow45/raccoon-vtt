@@ -339,7 +339,8 @@ function EffectDetail(props: {
     key === "readied" && !existing ? { ...emptyForm(view, options), mode: "turnStart", anchorKey: SELF_KEY } : openingForm(existing, view, options),
   );
   /** An existing duration is only re-resolved once Duration leaves Keep current duration, because resolving restarts its count. */
-  const durationTouched = form.mode !== "keep";
+  const [edited, setEdited] = useState(!existing);
+  const durationTouched = edited && form.mode !== "keep";
   const [rulesOpen, setRulesOpen] = useState(!canEdit);
   const [error, setError] = useState<string | null>(null);
   /** Under Other length of time's fields, so a screen reader reads it with them. */
@@ -396,7 +397,7 @@ function EffectDetail(props: {
         if (glyph.trim() !== (existing.glyph ?? "")) patch.glyph = glyph.trim() || null;
         if (color !== existing.color) patch.color = color;
       }
-      const change = durationEdit(existing, form, options);
+      const change = durationEdit(existing, form, options, edited);
       if (change !== undefined) patch.duration = change;
       if (dm && hidden !== (existing.hiddenFromPlayers ?? false)) patch.hiddenFromPlayers = hidden;
       if (dm && key === "readied" && triggerShown !== (existing.triggerShown ?? false)) patch.triggerShown = triggerShown;
@@ -544,6 +545,7 @@ function EffectDetail(props: {
             options={options}
             onChange={(f) => {
               setForm(f);
+              setEdited(true);
               setSpanError(null);
             }}
             spans={!!view?.clock}

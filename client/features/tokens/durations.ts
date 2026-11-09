@@ -179,9 +179,13 @@ export function openingForm(existing: Pick<Effect, "duration" | "ends"> | undefi
   return existing && (existing.duration || existing.ends) ? { ...form, mode: "keep" } : form;
 }
 
-/** What an existing effect's update patch holds for `duration`: nothing while the form still says Keep, else `durationChange`. */
-export function durationEdit(existing: Pick<Effect, "duration" | "ends">, form: DurationForm, options: AnchorOption[]): DurationInput | null | undefined {
-  return form.mode === "keep" ? undefined : durationChange(existing, durationInput(form, options));
+/**
+ * What an existing effect's update patch holds for `duration`: nothing until the user changed Duration, and nothing
+ * while the form says Keep. The touch is tracked apart from the mode because an effect opened with no duration has no
+ * Keep to rest on, and another device may add one while the editor is open.
+ */
+export function durationEdit(existing: Pick<Effect, "duration" | "ends">, form: DurationForm, options: AnchorOption[], touched: boolean): DurationInput | null | undefined {
+  return !touched || form.mode === "keep" ? undefined : durationChange(existing, durationInput(form, options));
 }
 
 /**

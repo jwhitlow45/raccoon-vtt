@@ -393,6 +393,17 @@ describe("time spans on effects", () => {
     assert.deepEqual(find(timed)?.ends, before, "an untouched Save keeps the end");
     assert.deepEqual(find(counted)?.duration, beforeCount, "an untouched Save keeps the count of turns");
 
+    // An untouched Save never erases a duration another device added while the editor stayed open.
+    const plain = randomUUID();
+    await ops.send({ t: "actor.effect.add", target: bree, effect: { id: plain, key: "blessed" } });
+    await waitFor("a plain Blessed", () => (find(plain) ? true : null));
+    await open(plain);
+    await ops.send({ t: "actor.effect.update", target: bree, effectId: plain, patch: { duration: span } });
+    await waitFor("the remote span", () => (find(plain)?.ends ? true : null));
+    await save();
+    assert.ok(find(plain)?.ends, "an untouched Save keeps what another device added");
+    await ops.send({ t: "actor.effect.remove", target: bree, effectId: plain });
+
     // No duration straight after opening is a change, with no other choice picked first.
     for (const id of [timed, counted]) {
       const duration = await open(id);

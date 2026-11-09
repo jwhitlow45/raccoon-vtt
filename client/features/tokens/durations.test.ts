@@ -269,11 +269,19 @@ describe("time spans", () => {
     for (const existing of [turns, timed]) {
       const form = openingForm(existing, null, options);
       assert.equal(form.mode, "keep");
-      assert.equal(durationEdit(existing, form, options), undefined, "saved untouched, it sends nothing");
-      assert.equal(durationEdit(existing, { ...form, mode: "none" }, options), null, "No duration takes it away");
-      assert.equal(durationEdit(existing, { ...form, mode: "span60" }, options)?.mode, "span", "a new choice replaces it");
+      assert.equal(durationEdit(existing, form, options, true), undefined, "saved untouched, it sends nothing");
+      assert.equal(durationEdit(existing, { ...form, mode: "none" }, options, true), null, "No duration takes it away");
+      assert.equal(durationEdit(existing, { ...form, mode: "span60" }, options, true)?.mode, "span", "a new choice replaces it");
     }
     assert.equal(openingForm({}, null, options).mode, "none", "a plain effect has nothing to keep");
+  });
+
+  test("a Save that never touched Duration sends no duration, so one another device added meanwhile survives", () => {
+    const options = anchorOptions(null, { tokenId: "pc" }, "Thorn");
+    const form = openingForm({}, null, options);
+    const remote = { ends: { span: 60, at: 60, clock: "c1" } } as const;
+    assert.equal(durationEdit(remote, form, options, false), undefined);
+    assert.equal(durationEdit(remote, form, options, true), null, "touched, No duration takes it away");
   });
 
   test("a copy with no end reads the length alone, and a clock that stopped or was replaced says so", () => {
