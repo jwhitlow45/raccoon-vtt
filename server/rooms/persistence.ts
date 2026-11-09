@@ -254,6 +254,13 @@ export type BatchWrite = {
   archive?: boolean;
   /** The room count (counted.ts) after this batch, written as `rooms.pub` when the batch holds ops or watermarks. */
   pub?: number;
+  /**
+   * The room's snapshot at the batch's seq, built before the commit
+   * (snapshotJson), written with the prune of the rows it covers in the
+   * batch's own transaction. The actor gives one only to a batch that holds
+   * ops or watermarks, which batchCommitted can find.
+   */
+  snapshot?: { seq: number; json: string };
 };
 
 // One class for every commit whose answer was lost, the room's batches and
@@ -268,8 +275,9 @@ export { CommitOutcomeUnknown };
  * it settles, and the client watermarks. Watermarks only ever move up.
  *
  * A batch that holds ops or watermarks writes the room count too, so a
- * restart resumes from it as it was when its answers went out. One that
- * holds neither answered nothing, and its count is the one stored already.
+ * restart resumes from it as it was when its answers went out, and so does
+ * the snapshot a batch carries. One that holds neither answered nothing, and
+ * its count is the one stored already.
  *
  * An error before COMMIT is a clean failure and is rethrown as it is. An
  * error from the COMMIT statement is wrapped, because the connection may
@@ -309,6 +317,7 @@ export async function commitBatch(pool: Pool, roomId: string, batch: BatchWrite)
     } else if (batch.watermarks.length > 0 && batch.pub !== undefined) {
       await client.query("update rooms set pub = $2 where id = $1", [roomId, batch.pub]);
     }
+    if (batch.snapshot) await storeSnapshot(client, roomId, batch.snapshot.seq, batch.snapshot.json);
     const receipts = batch.receipts ?? [];
     if (receipts.length > 0) {
       // A tag used again after its 24 hours of memory replaces its old row, which keeps the newest outcome.

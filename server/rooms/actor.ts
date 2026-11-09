@@ -2,7 +2,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, checkLimits, LIMITS, ROLLING_TOO_FAST, SOUND_LIMITS, type LimitCheck } from "#shared/limits.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
-import { OP_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
+import { COUNT_SNAPSHOT_VERSION, OP_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { HandoutPage, LogEntry, MapVideo, RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply, doorReachPassed, touchLanding, MOVE_PLAYERS_FIRST_BACK, type PermissionDeps } from "#shared/permissions.ts";
@@ -47,6 +47,7 @@ import {
   loadRoom,
   readWatermark,
   setReadOnly,
+  snapshotJson,
   writeSnapshot,
   type ArchiveGuard,
   type AssetFact,
@@ -109,6 +110,8 @@ export type ActorOptions = {
   mapStep: typeof mapStepOps;
   /** The memory estimate's scan (remember.ts), which only tests wrap, to see which scan each estimate asks for. */
   memoryGrowth: typeof memoryGrowth;
+  /** The build of the snapshot a room's first commit here carries (#countSnapshot), which only tests replace, to make it throw. */
+  snapshotJson: typeof snapshotJson;
   /** Asked before each write to the log archive (persistence.ts ArchiveGuard). The app passes the asset volume's free-disk check. */
   archiveGuard: ArchiveGuard;
   /**
@@ -143,6 +146,7 @@ export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   receiptCaps: {},
   mapStep: mapStepOps,
   memoryGrowth,
+  snapshotJson,
   archiveGuard: ARCHIVE_ALWAYS,
   animatedMaps: false,
   roomSound: false,
@@ -422,6 +426,14 @@ export class RoomActor {
    * runs ahead of `seq` by refusals and behind it by bookkeeping rows.
    */
   #pub: number;
+  /**
+   * Whether the room was loaded from a snapshot below COUNT_SNAPSHOT_VERSION
+   * and still needs one at today's version, which its next commit carries
+   * (#countSnapshot), and when a build of it that threw lets it try again.
+   */
+  #countSnapshotDue: boolean;
+  #countSnapshotAfter = 0;
+  #countSnapshotLogged = false;
   #snapshotSeq: number;
   #opsSinceSnapshot = 0;
   #snapshotTimer: NodeJS.Timeout | null = null;
@@ -520,7 +532,7 @@ export class RoomActor {
   /** The run whose refused step was logged last, so a step that keeps failing logs once a run. */
   #soundRefusedRun: string | null | undefined = undefined;
 
-  private constructor(deps: ActorDeps, loaded: Pick<LoadedRoom, "state" | "seq" | "pub" | "snapshotSeq" | "replayFailed" | "stateBytes">, receipts: readonly ReceiptRow[]) {
+  private constructor(deps: ActorDeps, loaded: Pick<LoadedRoom, "state" | "seq" | "pub" | "snapshotSeq" | "snapshotVersion" | "replayFailed" | "stateBytes">, receipts: readonly ReceiptRow[]) {
     this.roomId = deps.info.roomId;
     this.pinned = deps.info.pinned;
     this.createdIp = deps.info.createdIp;
@@ -539,6 +551,8 @@ export class RoomActor {
     this.#committed = { state: loaded.state, seq: loaded.seq, pub: loaded.pub };
     this.#staged = this.#committed;
     this.#pub = loaded.pub;
+    // A room whose replay failed writes no snapshot at all, so a fixed build can still rebuild it from its rows.
+    this.#countSnapshotDue = !loaded.replayFailed && loaded.snapshotVersion < COUNT_SNAPSHOT_VERSION;
     this.#snapshotSeq = loaded.snapshotSeq;
     this.#opsSinceSnapshot = loaded.seq - loaded.snapshotSeq;
     this.#sizes = new SizeGuard(this.#opts.sizeLimits);
@@ -2459,6 +2473,7 @@ export class RoomActor {
       })),
       pub: batch.pub,
     };
+    const release = await this.#countSnapshot(batch, write);
     const lines = batch.ops.some((r) => r.log.length > 0);
     let attempt = 0;
     // Once a COMMIT's answer is lost, the batch may be durable, so nothing is
@@ -2483,6 +2498,7 @@ export class RoomActor {
       } catch (err) {
         if (err instanceof CommitOutcomeUnknown) outcomeUnknown = true;
         if (this.#closed) {
+          release?.();
           this.#abandon(batch, err);
           return;
         }
@@ -2501,6 +2517,8 @@ export class RoomActor {
       if (wm && wm.committed < n) wm.committed = n;
     }
     if (batch.ops.length > 0) this.#opsSinceSnapshot += batch.ops.length;
+    if (write.snapshot) this.#snapshotWritten(write.snapshot.seq, write.snapshot.json, batch.state);
+    release?.();
     // Nothing from here on throws out of the commit: no one awaits it, and the queue waits until its end. The publish is
     // caught here, each owed snapshot and resync on its own socket, and the rest sets timers or drains the queue, which
     // catches per command (#drain) and whose flush cannot throw (#commitNow).
@@ -2556,6 +2574,55 @@ export class RoomActor {
     this.#drain();
     // A batch begun while it committed, outside the queue, which nothing could schedule then: an ask read meanwhile (MD4-ASTRA-10).
     this.#scheduleCommit();
+  }
+
+  /**
+   * The snapshot a room loaded from one below COUNT_SNAPSHOT_VERSION writes
+   * in the transaction of its first commit here that answered something
+   * (persistence.ts commitBatch), refusals and watermarks alone included, so
+   * an older build refuses the room as soon as a number past its own
+   * sequence could reach a device. It is the batch's state at the batch's
+   * seq, built once here, before any attempt, so every retry sends the same
+   * bytes. A build that throws, a bug, logs once a run and lets the batch
+   * commit without it, and the snapshot is tried again by a commit past
+   * `snapshotIdleMs` or by the next snapshot write. A running snapshot write
+   * finishes first, and this one holds `#snapshotting` until its commit
+   * ends, so the two never write the row at once. The release it returns
+   * lets go of that hold, and the room records the write (#snapshotWritten)
+   * only once the commit is confirmed.
+   */
+  async #countSnapshot(batch: Batch, write: BatchWrite): Promise<(() => void) | null> {
+    if (!this.#countSnapshotDue || this.replayFailed || (write.ops.length === 0 && write.watermarks.length === 0)) return null;
+    if (this.#opts.now() < this.#countSnapshotAfter) return null;
+    let json: string;
+    try {
+      json = this.#opts.snapshotJson(batch.state);
+    } catch (err) {
+      this.#countSnapshotAfter = this.#opts.now() + this.#opts.snapshotIdleMs;
+      if (!this.#countSnapshotLogged) this.#log.error({ err, roomId: this.roomId, seq: batch.seq }, "snapshot build failed, the batch commits without it");
+      this.#countSnapshotLogged = true;
+      return null;
+    }
+    while (this.#snapshotting) await this.#snapshotting;
+    // A snapshot write that landed meanwhile was at today's version.
+    if (!this.#countSnapshotDue) return null;
+    write.snapshot = { seq: batch.seq, json };
+    let done!: () => void;
+    const held = new Promise<void>((resolve) => (done = resolve));
+    this.#snapshotting = held;
+    return () => {
+      if (this.#snapshotting === held) this.#snapshotting = null;
+      done();
+    };
+  }
+
+  /** What a stored snapshot changes in the room, written by #writeSnapshot or with a commit: it is at today's version. */
+  #snapshotWritten(seq: number, json: string, state: RoomState): void {
+    this.#countSnapshotDue = false;
+    this.#snapshotSeq = seq;
+    this.#opsSinceSnapshot = this.#committed.seq - seq;
+    this.#sizes.stateMeasured(measuredFromStored(Buffer.byteLength(json), state), state);
+    void this.#checkQuota().catch((err: unknown) => this.#log.warn({ err, roomId: this.roomId }, "quota recheck failed"));
   }
 
   /** Histories are frozen with the commit, so a delayed snapshot never pairs an old view with staged heads. */
@@ -2623,6 +2690,7 @@ export class RoomActor {
     this.#snapshotting = (async () => {
       try {
         const bytes = await writeSnapshot(this.#pool, this.roomId, seq, state);
+        this.#countSnapshotDue = false;
         this.#snapshotSeq = seq;
         this.#opsSinceSnapshot = this.#committed.seq - seq;
         this.#sizes.stateMeasured(measuredFromStored(bytes, state), state);
