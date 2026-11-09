@@ -19,6 +19,12 @@ type Closer = { src: string; width: number; height: number };
 /** A frame's callback runs before that frame paints, so a task after it is the first moment the page has painted what came before. */
 export const afterPaint = () => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
 
+/** A picture ready after the dialog unmounted has no viewer to revoke its URL, so it is revoked here (DG2-SOL-02). */
+export function settlePicture(picture: Closer, mounted: boolean, keep: (picture: Closer) => void) {
+  if (mounted) keep(picture);
+  else URL.revokeObjectURL(picture.src);
+}
+
 /**
  * Look closer (phase 2, 4.2): the preview's DM view at 40 px a square with
  * its marks drawn in, opened in the handout viewer for pinch and wheel zoom.
@@ -50,7 +56,7 @@ export function LookCloser(props: { drawn: Drawn | null; name: string; disabled:
     try {
       await afterPaint();
       const picture = await renderCloser(drawn, phone);
-      if (mounted.current) setCloser(picture);
+      settlePicture(picture, mounted.current, setCloser);
     } catch {
       if (mounted.current) props.onFailed(LOOK_CLOSER_FAILED);
     } finally {

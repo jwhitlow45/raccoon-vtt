@@ -33,3 +33,22 @@ test("afterPaint waits for the frame's callback and then a task, never the callb
     g.requestAnimationFrame = saved;
   }
 });
+
+test("a picture that finishes after the dialog closed is revoked, never kept (DG2-SOL-02)", async () => {
+  const { settlePicture } = await import("./LookCloser.tsx");
+  const picture = { src: "blob:x", width: 1, height: 1 };
+  const revoked: string[] = [];
+  const kept: unknown[] = [];
+  const saved = URL.revokeObjectURL;
+  URL.revokeObjectURL = (u) => void revoked.push(u);
+  try {
+    settlePicture(picture, false, (p) => kept.push(p));
+    assert.deepEqual(revoked, ["blob:x"]);
+    assert.equal(kept.length, 0);
+    settlePicture(picture, true, (p) => kept.push(p));
+    assert.deepEqual(revoked, ["blob:x"], "a mounted dialog keeps it and revokes it with the viewer");
+    assert.equal(kept.length, 1);
+  } finally {
+    URL.revokeObjectURL = saved;
+  }
+});
