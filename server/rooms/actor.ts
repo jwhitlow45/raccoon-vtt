@@ -266,6 +266,8 @@ type Batch = {
   estimate: Map<string, number>;
   watermarks: Map<ClientKey, number>;
   hellos: Array<{ conn: Connection; key: ClientKey }>;
+  /** Sockets that close once this batch is published to them, each with its refusal of its third fault (#closeOnPublish). */
+  closing: Connection[];
   sys: Array<{ resolve: () => void; reject: (err: Error) => void }>;
   /** The receipts of the tagged ops this batch settles (docs/design/design-v1-dice.md 1.2), durable with it. */
   receipts: Receipt[];
@@ -1071,7 +1073,7 @@ export class RoomActor {
       const wm = key === null ? undefined : this.#watermarks.get(key);
       // A requeued op's fault came from the commit that cleared the way for it, not from the op, so its device reconnects and resends.
       if (!joined && !cmd.requeued && key !== null && wm && wm.staged < cmd.n) {
-        keepOpen = this.#refuseFault(key, wm, cmd.n, cmd.admitted ?? null);
+        keepOpen = this.#refuseFault(cmd.conn, key, wm, cmd.n, cmd.admitted ?? null);
       }
     }
     const conn = cmd.t === "op" || cmd.t === "hello" || cmd.t === "snapshot" ? cmd.conn : null;
@@ -1081,17 +1083,40 @@ export class RoomActor {
   }
 
   /**
-   * Refuses an op that threw before it was staged. True when its socket may
-   * stay open: not when the refusal itself failed, and not for the third in
-   * a window (#faultsPastLimit).
+   * Refuses an op that threw before it was staged. False when the refusal
+   * itself failed, and its socket then closes at once. The third in a window
+   * (#faultsPastLimit) closes `conn` too, but only once it was sent the
+   * batch that carries the refusal (#closeOnPublish): a socket closed at
+   * once would never learn why, since a batch that commits before its device
+   * is back reaches no socket of that device.
    */
-  #refuseFault(key: ClientKey, wm: Watermark, n: number, admitted: Admitted | null): boolean {
+  #refuseFault(conn: Connection | null, key: ClientKey, wm: Watermark, n: number, admitted: Admitted | null): boolean {
+    let batch: Batch;
     try {
-      this.#refuse(key, wm, n, "invalid", OP_FAULT_WORDS, admitted);
+      batch = this.#refuse(key, wm, n, "invalid", OP_FAULT_WORDS, admitted);
     } catch {
       return false;
     }
-    return !this.#faultsPastLimit(sessionOfKey(key));
+    if (this.#faultsPastLimit(sessionOfKey(key)) && conn) this.#closeOnPublish(conn, batch);
+    return true;
+  }
+
+  /**
+   * Closes a socket with 1011 once `batch` is published to it (#runCommit),
+   * so the refusal the batch carries for it arrives first, in its place
+   * among the client's other answers. Meanwhile it reads nothing
+   * (Connection.closing), so a client cannot fault again while it waits.
+   * A batch can only be abandoned at shutdown, which closes every socket
+   * first, and a socket that goes first needs nothing more. A socket that
+   * holds no snapshot then keeps its refusals for one (fanout.ts
+   * takeKeptRejects): it gets them with a snapshot the batch owed it, and
+   * else they go with it, since the app's client sends ops only once it
+   * holds a snapshot.
+   */
+  #closeOnPublish(conn: Connection, batch: Batch): void {
+    if (conn.closed) return;
+    conn.closing = true;
+    batch.closing.push(conn);
   }
 
   /**
@@ -1194,7 +1219,7 @@ export class RoomActor {
   #processOp(cmd: Extract<Command, { t: "op" }>, facts: Map<string, AssetFact>): void {
     const conn = cmd.conn;
     cmd.requeued = false;
-    if (conn.closed) return;
+    if (conn.closed || conn.closing) return;
     const key = conn.key;
     const wm = key === null ? undefined : this.#watermarks.get(key);
     if (key === null || !wm) {
@@ -1600,7 +1625,7 @@ export class RoomActor {
    * A refusal. One after admission (`admitted`) writes the op's receipt with
    * the same words, so the same tag sent again is refused again.
    */
-  #refuse(key: ClientKey, wm: Watermark, n: number, code: RefusalCode, message: string, admitted: Admitted | null = null): void {
+  #refuse(key: ClientKey, wm: Watermark, n: number, code: RefusalCode, message: string, admitted: Admitted | null = null): Batch {
     // Any refusal ends the client's gesture still asking: a later part then finds no chain and is refused, so none is read on a guess.
     this.#asking.delete(key);
     wm.staged = n;
@@ -1610,6 +1635,7 @@ export class RoomActor {
     batch.watermarks.set(key, n);
     if (admitted) this.#stageReceipt(batch, admitted, { state: "refused", code, message: words });
     this.#scheduleCommit();
+    return batch;
   }
 
   #stageReceipt(batch: Batch, admitted: Admitted, outcome: Pick<Receipt, "state" | "seq" | "code" | "message">): void {
@@ -1781,7 +1807,7 @@ export class RoomActor {
       const conn = this.#clients.get(read.key) ?? null;
       let keepOpen = false;
       if (read.wm.staged < read.n) {
-        keepOpen = this.#refuseFault(read.key, read.wm, read.n, null);
+        keepOpen = this.#refuseFault(conn, read.key, read.wm, read.n, null);
       } else {
         // Past staging its number is settled with it, so the resend after the reconnect is answered from the watermark.
         const batch = this.#batch;
@@ -1959,7 +1985,7 @@ export class RoomActor {
 
   #processHello(cmd: Extract<Command, { t: "hello" }>): void {
     const conn = cmd.conn;
-    if (conn.closed) return;
+    if (conn.closed || conn.closing) return;
     conn.ackDetails = cmd.ackDetails;
     if (conn.previewBy !== null) {
       this.#previewHello(conn, cmd);
@@ -2131,6 +2157,7 @@ export class RoomActor {
         estimate: new Map(),
         watermarks: new Map(),
         hellos: [],
+        closing: [],
         sys: [],
         receipts: [],
         timer: null,
@@ -2387,6 +2414,8 @@ export class RoomActor {
         this.#fault("snapshot failed", err, h.conn, "hello");
       }
     }
+    // After the batch and any snapshot it owed them, so each of these sockets was sent its last refusal (#closeOnPublish).
+    for (const conn of batch.closing) conn.close(1011, "internal error");
     // After the owed snapshots, so a device that just took one on a scene this batch deleted is sent back too.
     this.#resyncOrphanedDms();
     // Every commit places the next tick (6.4). One that changed what plays moved its rev, which lifts a refused step's back-off.

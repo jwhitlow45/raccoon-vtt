@@ -3908,6 +3908,63 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     }
   });
 
+  test("the third fault refusal in a minute reaches its socket before the socket closes, though the batch commits before the device reconnects", async () => {
+    const dm = member("DM", "dm");
+    const db = new FakeDb({ state: createInitialState({ roomName: "Third fault", dm }), dmGrants: [dm.id] });
+    const base = deps(db);
+    const errors: string[] = [];
+    const log = { ...quiet, error: (_fields: unknown, what: string) => errors.push(what) };
+    const draw = () => {
+      throw new Error("scripted draw fault");
+    };
+    const actor = await RoomActor.load({ ...base, log: log as unknown as ActorDeps["log"], options: { ...base.options, draw } });
+    assert.ok(actor);
+    const sessionId = uuidv7();
+    /** A socket of the one device, which notes how much it was sent when it was closed. */
+    const open = () => {
+      const sent: ServerMessage[] = [];
+      const at = { close: -1 };
+      const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => sent.push(JSON.parse(text) as ServerMessage), close: () => (at.close = sent.length), terminate: () => undefined };
+      const conn = new Connection(socket as never, { sessionId, roomId: ROOM, memberId: dm.id, role: "dm" }, "203.0.113.9");
+      actor.attach(conn);
+      return { conn, sent, at };
+    };
+    const roll = () => ({ t: "dice.roll", tag: uuidv7(), to: "all", rolls: [{ formula: "1d20" }] });
+    const words = (ev: Awaited<ReturnType<typeof answerTo>>, n: number) => (ev === "stuck" ? "stuck" : ev.rejects?.find((r) => r.n === n)?.message);
+    const FAULT_WORDS = "That change could not be made: something went wrong on the server.";
+    try {
+      const first = open();
+      await actor.hello(first.conn, { clientId: "c1", resumeFrom: 1 });
+      for (const n of [1, 2]) {
+        await actor.op(first.conn, n, roll());
+        assert.equal(words(await answerTo(first.sent, n), n), FAULT_WORDS, `fault ${n} is refused with the server's words`);
+        assert.equal(first.conn.closed, false, `fault ${n} keeps the socket`);
+      }
+      await actor.op(first.conn, 3, roll());
+      // Sent before the refusal's batch commits: a socket the server is closing reads nothing more, as one closed at once would.
+      await actor.op(first.conn, 4, { t: "log.chat", text: "sent while closing" });
+      const third = await answerTo(first.sent, 3);
+      assert.equal(words(third, 3), FAULT_WORDS, "the third fault's refusal reaches its own socket");
+      assert.equal(first.conn.closedWith, 1011, "and the socket closes after it");
+      assert.ok(third !== "stuck" && first.sent.indexOf(third) < first.at.close, "the refusal came before the close");
+      // Read, it would have been answered with the third, in the same batch.
+      const answers4 = first.sent.filter((m) => m.t === "ev" && ((m.acks ?? []).includes(4) || (m.rejects ?? []).some((r) => r.n === 4)));
+      assert.deepEqual(answers4, [], "the op sent while closing is not answered there");
+      assert.equal(errors.length, 3, "nor read, so it logs no fault");
+      assert.ok(!JSON.stringify(actor.committed.state).includes("sent while closing"), "nor applied");
+      // The batch committed before the device came back, so its next socket starts after the refusal.
+      const back = open();
+      await actor.hello(back.conn, { clientId: "c1", resumeFrom: 4 });
+      await actor.op(back.conn, 4, { t: "log.chat", text: "sent while closing" });
+      const resent = await answerTo(back.sent, 4);
+      assert.ok(resent !== "stuck" && resent.acks?.includes(4), "the resend is taken");
+      assert.equal(JSON.stringify(actor.committed.state).split("sent while closing").length - 1, 1, "and applied once");
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
   test("ground a reminder rests on is explored, though a later op in its batch looks away (MD2's review, pendingGround)", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");

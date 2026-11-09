@@ -92,6 +92,12 @@ export class Connection {
   closed = false;
   /** The code the server closed this socket with, if it did. A table display's session is renewed on close unless it was 4001. */
   closedWith: number | null = null;
+  /**
+   * The server will close this socket once it is sent the batch it waits
+   * on (RoomActor #closeOnPublish). Until then nothing the socket sends is
+   * read, as if it had closed, while what the room sends still reaches it.
+   */
+  closing = false;
   alive = true;
   bytesSent = 0;
   readonly frames: FrameBudget;

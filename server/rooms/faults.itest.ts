@@ -236,9 +236,10 @@ describe("a fault in the room engine", () => {
     await contained(other);
   });
 
-  test("the third fault refusal within a minute closes the socket, counted across a reconnect", async () => {
+  test("the third fault refusal within a minute reaches its socket, which then closes, counted across a reconnect", async () => {
     const r = await room(t, "Throttled");
     const other = await room(t, "Elsewhere");
+    const actor = t.manager.get(r.roomId)!;
     const clientId = uuidv7();
     let last = 0;
     const reconnect = async (): Promise<Socket> => {
@@ -257,11 +258,31 @@ describe("a fault in the room engine", () => {
     faults.draw = true;
     last = socket.op(roll());
     await refusedForFault(socket, last);
-    faults.draw = true;
-    last = socket.op(roll());
-    assert.equal((await socket.waitClosed()).code, 1011);
+    // The third's batch is held in its commit's retries, so the socket waits on it to close.
+    const failing = failCommits(t.pool, Array.from({ length: 1000 }, () => "before" as const));
+    let unread: number;
+    try {
+      faults.draw = true;
+      last = socket.op(roll());
+      await until(() => actor.retrying, "the commit to retry");
+      // What a closing socket sends is not read, as on a socket closed at once, so its device sends it again.
+      unread = socket.op({ t: "log.chat", text: "sent while closing" });
+      socket.send({ t: "ping", k: 7 });
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      failing.restore();
+    }
+    const third = await socket.next("ev", (m) => (m.rejects ?? []).some((r) => r.n === last));
+    const refusal = third.rejects?.find((r) => r.n === last);
+    assert.deepEqual([refusal?.code, refusal?.message], ["invalid", FAULT_WORDS], "the third fault's refusal reaches its socket");
+    assert.equal((await socket.waitClosed()).code, 1011, "and then the socket closes");
+    assert.equal(await socket.maybe("ev", (m) => [...(m.acks ?? []), ...(m.rejects ?? []).map((x) => x.n)].includes(unread), 0), null, "the op sent while closing is not answered there");
+    assert.equal(await socket.maybe("pong", () => true, 0), null, "nor its ping");
+    // The commit landed before the device came back, and its resend applies once.
     const back = await reconnect();
-    await taken(back, back.op({ t: "log.chat", text: "after the third" }));
+    await taken(back, back.op({ t: "log.chat", text: "sent while closing" }));
+    assert.equal(back.n, unread, "the resend has the number the closing socket did not read");
+    assert.equal(copies(actor.committed.state, "sent while closing"), 1);
     await contained(other);
   });
 

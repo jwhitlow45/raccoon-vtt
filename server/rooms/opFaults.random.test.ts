@@ -21,7 +21,8 @@ import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
  * Invariants: each op number is answered at most once on a socket, no op is
  * applied twice, a socket closes only for a throw after staging or for the
  * third fault refusal within 60 s of one session (a fresh client id keeps the count), an op that threw before staging is
- * refused with the server's words, and nothing is left staged at the end.
+ * refused with the server's words on the socket that sent it, the third too, ahead of its close, where that socket
+ * holds its snapshot (the app's client sends only then), and nothing is left staged at the end.
  */
 
 const FAULT_WORDS = "That change could not be made: something went wrong on the server.";
@@ -91,12 +92,12 @@ type Device = {
   faultTimes: number[];
   /** When its client id last changed, for counting the throttles a fresh id would have reset. */
   idChangedAt: number;
-  /** Every socket it has had, with what the model expects of it. */
-  sockets: Array<{ conn: Connection; sent: ServerMessage[]; mayClose: boolean }>;
+  /** Every socket it has had, with what the model expects of it and how much it was sent when the server closed it. */
+  sockets: Array<{ conn: Connection; sent: ServerMessage[]; mayClose: boolean; closedAt: number | null }>;
 };
 
 /** What the sequences reached, so a generator that stops reaching a case fails. */
-const reached = { refusals: 0, throttled: 0, afterStaging: 0, newIds: 0, throttledAcrossIds: 0 };
+const reached = { refusals: 0, throttled: 0, afterStaging: 0, newIds: 0, throttledAcrossIds: 0, closingWords: 0 };
 
 /** The room being run, so a failed sequence still stops its timers. */
 let live: RoomActor | null = null;
@@ -154,12 +155,14 @@ async function run(seed: number, steps: number, script?: readonly Action[]): Pro
 
   async function open(device: Device, resumeFrom: number): Promise<void> {
     const sent: ServerMessage[] = [];
-    const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => sent.push(JSON.parse(text) as ServerMessage), close: () => undefined, terminate: () => undefined };
+    const entry: Device["sockets"][number] = { conn: null as never, sent, mayClose: false, closedAt: null };
+    const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => sent.push(JSON.parse(text) as ServerMessage), close: () => (entry.closedAt = sent.length), terminate: () => undefined };
     const conn = new Connection(socket as never, { sessionId: device.sessionId, roomId: ROOM, memberId: device.who.id, role: device.who.kind === "dm" ? "dm" : "player" }, "203.0.113.9", { now: () => clock.t });
+    entry.conn = conn;
     actor!.attach(conn);
     device.conn = conn;
     device.sent = sent;
-    device.sockets.push({ conn, sent, mayClose: false });
+    device.sockets.push(entry);
     await actor!.hello(conn, { clientId: device.clientId, resumeFrom });
   }
 
@@ -211,6 +214,26 @@ async function run(seed: number, steps: number, script?: readonly Action[]): Pro
     return closes;
   }
 
+  /**
+   * Op `n` was refused for its fault with the server's words on the socket that sent it, ahead of the close the third earns.
+   * Only where the socket held its snapshot as the op was sent, as the app's client sends only then: one still waiting on a
+   * delayed snapshot keeps its refusals for that snapshot, which a socket closed for its third fault never gets.
+   */
+  function refusedOnItsSocket(d: Device, n: number, held: boolean, why: string): void {
+    const s = d.sockets[d.sockets.length - 1]!;
+    const closes = refusedForFault(d);
+    if (!held) return;
+    const at = s.sent.findIndex((m) => m.t === "ev" && (m.rejects ?? []).some((r) => r.n === n));
+    const refusal = at < 0 ? undefined : (s.sent[at] as Extract<ServerMessage, { t: "ev" }>).rejects!.find((r) => r.n === n);
+    assert.deepEqual([refusal?.code, refusal?.message], ["invalid", FAULT_WORDS], why);
+    if (!closes) return;
+    assert.ok(s.closedAt !== null && at < s.closedAt, `${why}, and only then its socket closes`);
+    reached.closingWords++;
+  }
+
+  /** Whether the device's socket holds its snapshot now. */
+  const holds = (d: Device) => d.sent.some((m) => m.t === "snapshot");
+
   for (let step = 0; step < steps; step++) {
     clock.t += 300 + Math.floor(rand() * 20_000);
     const action = script ? script[step % script.length]! : ACTIONS[Math.floor(rand() * ACTIONS.length)]!;
@@ -228,14 +251,12 @@ async function run(seed: number, steps: number, script?: readonly Action[]): Pro
       }
       case "beforeStaging": {
         armed.draw = true;
+        const held = holds(d);
         const n = await send(d, { t: "dice.roll", tag: uuidv7(), to: "all", rolls: [{ formula: "1d20" }] }, null);
         await settle();
         armed.draw = false;
-        // The refusal that closes the socket reaches the device with its next snapshot, not on this socket.
-        if (!refusedForFault(d)) {
-          const refusal = answers(d, n).flatMap((m) => m.rejects ?? []).find((r) => r.n === n);
-          assert.deepEqual([refusal?.code, refusal?.message], ["invalid", FAULT_WORDS], `seed ${seed} step ${step}: a throw before staging is refused`);
-        }
+        // The refusal that closes the socket reaches it too, since the socket stays until its batch is published.
+        refusedOnItsSocket(d, n, held, `seed ${seed} step ${step}: a throw before staging is refused`);
         break;
       }
       case "afterStaging": {
@@ -253,14 +274,12 @@ async function run(seed: number, steps: number, script?: readonly Action[]): Pro
       }
       case "askRead": {
         armed.growth = true;
+        const held = holds(d);
         const n = await send(d, { t: "build.ask", sceneId, ops: [{ t: "build.paint", sceneId, terrain: "wood", cells: ["1,1"] }], part: 0 }, null, uuidv7());
         await settle();
         const spent = !armed.growth;
         armed.growth = false;
-        if (spent && !refusedForFault(d)) {
-          const refusal = answers(d, n).flatMap((m) => m.rejects ?? []).find((r) => r.n === n);
-          assert.deepEqual([refusal?.code, refusal?.message], ["invalid", FAULT_WORDS], `seed ${seed} step ${step}: an ask read that threw is refused`);
-        }
+        if (spent) refusedOnItsSocket(d, n, held, `seed ${seed} step ${step}: an ask read that threw is refused`);
         break;
       }
       case "reconnect": {
@@ -328,7 +347,7 @@ describe("ops that throw", () => {
       for (let seed = 1; seed <= 8; seed++) await run(seed, 30);
       // Faults with a fresh client id between them, so the third has to count across ids.
       for (let seed = 101; seed <= 108; seed++) await run(seed, 30, ["beforeStaging", "newId", "beforeStaging", "newId", "beforeStaging", "newId"]);
-      assert.ok(reached.refusals > 0 && reached.throttled > 0 && reached.afterStaging > 0 && reached.newIds > 0 && reached.throttledAcrossIds > 0, `the sequences reached ${JSON.stringify(reached)}`);
+      assert.ok(reached.refusals > 0 && reached.throttled > 0 && reached.afterStaging > 0 && reached.newIds > 0 && reached.throttledAcrossIds > 0 && reached.closingWords > 0, `the sequences reached ${JSON.stringify(reached)}`);
     } finally {
       await live?.shutdown({ code: 1012, snapshot: false });
     }

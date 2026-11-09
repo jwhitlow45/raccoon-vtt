@@ -264,7 +264,7 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
 
       socket.on("message", (data: RawData, isBinary: boolean) => {
         try {
-          if (conn.closed) return;
+          if (conn.closed || conn.closing) return;
           const verdict = conn.frames.accept(rawLength(data));
           if (verdict === "abuse") {
             conn.close(CLOSE.abuse, "frame budget");
