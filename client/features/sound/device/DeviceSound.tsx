@@ -81,18 +81,19 @@ const MIX_PARTS: Readonly<Record<MixKey, { label: string; search: string }>> = {
   effects: { label: "Effects", search: "menu.this-device.sounds.effects" },
 };
 
-/**
- * The controls. `line` draws the status line, where nothing above already
- * says it: the Sound panel's Now playing does, except on the DM's first
- * page while the server's switch is not on. `anchored` gives them This
- * device's search ids (features/device/search.ts), which one place alone
- * may carry.
- */
 /** The events that take the kept level: a gesture's start (press, focus) and its end (release). */
 export function takeOn(take: () => void) {
   return { onPointerDown: take, onPointerUp: take, onFocus: take };
 }
 
+/**
+ * The controls. `line` draws the status line, where nothing above already
+ * says it: the Sound panel's Now playing does, except on the DM's first
+ * page while the server's switch is not on. `anchored` gives them This
+ * device's search ids (features/device/search.ts), which one place alone
+ * may carry. `keyHint={false}` drops U from the mute toggle under a modal
+ * dialog, where every key stops.
+ */
 export function DeviceSound(props: { line: boolean; anchored?: boolean; keyHint?: boolean }) {
   const room = useRoomRoleIfAny();
   const volume = useDeviceVolume();
