@@ -359,12 +359,12 @@ function RecentRows(props: RecentListProps & { library: readonly AssetRow[] | nu
                 borderTop: i === 0 ? undefined : `${theme.line.border}px solid ${theme.color.border}`,
               }}
             >
-              {/* The button goes under the title wherever the whole title and the button do not fit on one line, so a short title is never cut for the button's sake. */}
-              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(3), rowGap: theme.space(2) }}>
-                <span style={{ flex: "1 1 auto", minWidth: 0, display: "flex", alignItems: "center", gap: theme.space(3) }}>
+              {/* The button always goes under the title, so every row is one height for its kind and a long title wraps whole where it once was cut. */}
+              <div style={{ display: "grid", justifyItems: "start", rowGap: theme.space(2) }}>
+                <span style={{ display: "flex", alignItems: "center", gap: theme.space(3), minWidth: 0, maxWidth: "100%" }}>
                   <img src={thumb ? assets.url(thumb, "thumb") : undefined} alt="" width={THUMB_PX} height={THUMB_PX} style={{ flex: "none", display: "block", objectFit: "cover", borderRadius: theme.radius.sm, background: theme.color.bg }} />
                   <span style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5) }}>
-                    <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.title}</span>
+                    <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>{entry.title}</span>
                     {words.detail ? <span style={{ fontSize: theme.font.small, lineHeight: theme.leading.tight, color: theme.color.textMuted }}>{words.detail}</span> : null}
                   </span>
                 </span>
@@ -611,23 +611,24 @@ export function ShowHandoutForm(props: {
               height={72}
               style={{ objectFit: "cover", borderRadius: theme.radius.sm }}
             />
-            {pick.kind === "doc" && picked ? (
-              <>
-                <span style={{ fontSize: theme.font.body14 }}>{pageCountText(picked.pages.length)}</span>
+            {pick.kind === "doc" && picked ? <span style={{ fontSize: theme.font.body14 }}>{pageCountText(picked.pages.length)}</span> : null}
+            {/* View and Change wrap as one group, so a narrow dialog never leaves Change alone on a line. */}
+            <span style={{ display: "flex", gap: theme.space(2), flexWrap: "nowrap" }}>
+              {pick.kind === "doc" && picked ? (
                 <Button size="sm" onClick={(e) => props.onViewDoc(picked.id, e.currentTarget)}>
                   View
                 </Button>
-              </>
-            ) : null}
-            {pick.kind === "image" ? (
-              // A picked image opens too, as a picked document does (the project owner, 2026-10-16).
-              <Button size="sm" onClick={(e) => props.onViewImage(pick.asset, title.trim() || "Handout", e.currentTarget)}>
-                View
+              ) : null}
+              {pick.kind === "image" ? (
+                // A picked image opens too, as a picked document does (the project owner, 2026-10-16).
+                <Button size="sm" onClick={(e) => props.onViewImage(pick.asset, title.trim() || "Handout", e.currentTarget)}>
+                  View
+                </Button>
+              ) : null}
+              <Button size="sm" onClick={() => set({ pick: null })}>
+                Change
               </Button>
-            ) : null}
-            <Button size="sm" onClick={() => set({ pick: null })}>
-              Change
-            </Button>
+            </span>
           </div>
         ) : (
           <>

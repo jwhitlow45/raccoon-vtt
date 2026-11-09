@@ -10688,10 +10688,10 @@ const QOL_WARRIORS = [
   { id: randomUUID(), number: 2, name: "Goblin Warrior 2", at: { x: 9, y: 5 } },
 ] as const;
 
-/** Two handout pictures for Handouts' Recent, uploaded once for the run: Recent keeps one entry for each picture. */
-let qolHandouts: [string, string] | null = null;
+/** Three handout pictures for Handouts' Recent, uploaded once for the run: Recent keeps one entry for each picture. */
+let qolHandouts: [string, string, string] | null = null;
 
-async function qolHandoutPictures(): Promise<[string, string]> {
+async function qolHandoutPictures(): Promise<[string, string, string]> {
   if (qolHandouts) return qolHandouts;
   const upload = async (rgb: [number, number, number]) => {
     const data = await sharp({ create: { width: 400, height: 300, channels: 3, background: { r: rgb[0], g: rgb[1], b: rgb[2] } } }).png().toBuffer();
@@ -10699,18 +10699,20 @@ async function qolHandoutPictures(): Promise<[string, string]> {
     assert.ok(res.ok(), `the handout upload answered ${res.status()}`);
     return ((await res.json()) as { id: string }).id;
   };
-  qolHandouts = [await upload([120, 90, 60]), await upload([60, 90, 120])];
+  qolHandouts = [await upload([120, 90, 60]), await upload([60, 90, 120]), await upload([90, 120, 60])];
   return qolHandouts;
 }
 
-/** What this device remembers as the DM's recent picks: three save DCs, three conditions and two handouts, one to Pat alone and one to everyone. */
-function qolStore(pictures: [string, string]): Record<string, string> {
+/** What this device remembers as the DM's recent picks: three save DCs, three conditions and three handouts, one to Pat alone and two to everyone. */
+function qolStore(pictures: [string, string, string]): Record<string, string> {
   return {
     [`rvtt.saveDcs.${run.roomId}`]: JSON.stringify([13, 15, 17]),
     "rvtt.recentConditions": JSON.stringify(["prone", "poisoned", "frightened"]),
     [`rvtt.handoutsRecent.${run.roomId}`]: JSON.stringify([
       { kind: "image", assetId: pictures[0], title: "The map of the Sunless Citadel's lower halls", to: [run.patId], at: 2 },
       { kind: "image", assetId: pictures[1], title: "Belak's letter", to: "all", at: 1 },
+      // A short title beside long ones, which once put its button on the title's line and made its row shorter (LP32-POLISH b).
+      { kind: "image", assetId: pictures[2], title: "Map", to: "all", at: 0 },
     ]),
   };
 }
@@ -10872,6 +10874,18 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
     await recentList.scrollIntoViewIfNeeded();
     await sweep.measure(page, "qe-recent-handouts", recentList.locator("xpath=ancestor::*[@data-panel-group][1]"));
   } else await sweep.missing(page, "qe-recent-handouts", "Handouts lists no Recent");
+  // A picked image: View and Change stay one group beside the thumbnail, or go down together (LP32-POLISH a).
+  const showForm = dmPanel.getByRole("group", { name: "Show a handout" });
+  if (!(await visible(showForm))) await dmPanel.getByRole("button", { name: "Show a handout" }).click();
+  await showForm.getByRole("button", { name: "From the library" }).click();
+  const tile = showForm.getByRole("button", { name: "Use this image" }).first();
+  if (await showsWithin(tile, 5_000)) {
+    await tile.click();
+    await showForm.getByRole("button", { name: "Change", exact: true }).scrollIntoViewIfNeeded();
+    await sweep.measure(page, "qe-handout-picked", showForm);
+    await showForm.getByRole("button", { name: "Change", exact: true }).click();
+    await showForm.getByRole("button", { name: "Cancel", exact: true }).click();
+  } else await sweep.missing(page, "qe-handout-picked", "the library offered no image to pick");
   await closeSheets(page);
   await escapeAll(page);
 
