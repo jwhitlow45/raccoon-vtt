@@ -470,6 +470,9 @@ Phase 2 is built: five themes, dead ends, secret doors and secret rooms, four mo
 - **The key's words (D-261108-186, D-261108-187).** "Traps 3 in 12 rooms" off the marks, the size's name from the sides, "A pit." and "A cistern.". The Rolling Stone's note "Damage Threshold 10. A Large object." is read once the trap shows the stone.
 - **The held row is gone.** A first stack held Secret doors at None until the cover landed (D-261108-183, D-261108-223 to D-261108-226). That hold, its line "Secret doors come in a later version of the app.", and its e2e steps were removed once the cover shipped, and the server fixture holds eight dungeons, two of them with secret doors.
 
+- **Pins and the trap zones (DG2-PIN-TRAP, GENERATOR_VERSION 9).** A Hidden or Spiked Pit zone could cover a room's pin square, the DM's shared tap target. Trap placement now keeps off every pin, which moved plans, so the version stepped to 9 with the golden and server fixtures. The server fixture's Secret doors seed changed its last character to 1, since the first seed at version 9 had no loop doorway for the secret door gate.
+- **Seeds across engines (DG2-SEED-ENGINES).** The statue's reach check (`statueReaches`, run by `trapHits`) takes its cone from `Math.cos` and `Math.sin`, which engines do not promise to compute bit for bit. So section 5's claim that a seed makes the same plan on every device holds exactly except for a statue whose cone reaches its plate at the very edge of its range: another browser could place that one statue differently. Replay is not affected, since it reads the stored ops and never runs the generator. Nothing is changed in the app, and the seed's promise in FEATURES.md stays as written.
+
 ### The dialog
 
 - **Look closer and "Drawing the dungeon…".** The message moved from the preview's bottom left to its top left, since Look closer took the bottom left corner. Its picture comes after a frame paints, as the design says.
