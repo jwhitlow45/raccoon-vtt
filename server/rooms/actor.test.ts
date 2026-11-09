@@ -22,12 +22,13 @@ import { groundAt } from "#shared/rules/heights.ts";
 import { sceneWalls, splitCheck, splitRefusal } from "#shared/rules/walls.ts";
 import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { MOVE_PLAYERS_FIRST, SOMETHING_BLOCKS_BACK } from "#shared/permissions.ts";
-import type { Actor, FreeWall, Member, RoomState, Trap } from "#shared/model.ts";
+import type { Actor, ClassResource, FreeWall, MapPhase, Member, PcStats, RoomState, Trap } from "#shared/model.ts";
 import { ASK_LOST, FORGET_ASK, type Op, type OpOf, type ServerMessage } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor as testActor, character as testCharacter, companionBlock as testBlock, entry as testEntry, template as testTemplate, token as testToken } from "#shared/testutil.ts";
 import { ASK_CHAIN_MS, RoomActor, RoomReplayFailed, SysOpRefused, type ActorDeps } from "./actor.ts";
+import { RESERVED_ID } from "#shared/reducer/tx.ts";
 import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
 import { mapStepOps, memoryGrowth } from "./remember.ts";
 import { layerHeld } from "#shared/reducer/memory.ts";
@@ -4076,6 +4077,49 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
         db.freeze();
         void actor.shutdown({ code: 1012, snapshot: false });
       }
+    }
+  });
+
+  test("a player's whole list they may not edit is refused alike whether or not the stored list holds a legacy reserved id (RULES-PRIV-04)", async () => {
+    // Each list as stored before ids were checked, with an entry named for a member, and the same entry in a player's op.
+    const resource = { id: "constructor", name: "Old", max: 2, used: 0, reset: "long" as const };
+    const roll = { id: "constructor", name: "Old", kind: "other" as const, dice: [{ formula: "1d6" }] };
+    const phase = { id: "constructor", name: "Old", assetId: uuidv7(), widthPx: 100, heightPx: 100 };
+    const stats = (rolls: unknown[]) => ({ abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }, saves: [], skills: {}, adjust: {}, defenses: {}, rolls }) as unknown as PcStats;
+    const cases: { what: string; store: (s: RoomState, sceneId: string) => void; op: (sceneId: string) => unknown }[] = [
+      { what: "a class resource", store: (s) => (s.characters.c1 = { ...s.characters.c1!, resources: [resource] as ClassResource[] }), op: () => ({ t: "character.update", characterId: "c1", patch: { resources: [resource] } }) },
+      { what: "a stat block roll", store: (s) => (s.characters.c1 = { ...s.characters.c1!, stats: stats([roll]) }), op: () => ({ t: "character.update", characterId: "c1", patch: { stats: { rolls: [roll] } } }) },
+      { what: "a map phase", store: (s, sceneId) => (s.scenes[sceneId] = { ...s.scenes[sceneId]!, phases: [phase] as MapPhase[] }), op: (sceneId) => ({ t: "scene.update", sceneId, patch: { phases: [phase] } }) },
+    ];
+    for (const { what, store, op } of cases) {
+      const answers: string[] = [];
+      for (const legacy of [false, true]) {
+        const dm = member("DM", "dm");
+        const pat = member("Pat", "player");
+        const bree = member("Bree", "player");
+        const state = createInitialState({ roomName: "Lists", dm });
+        state.members[pat.id] = pat;
+        state.members[bree.id] = bree;
+        state.characters.c1 = testCharacter("c1", { name: "Bree's", ownerIds: [bree.id], stats: stats([]) });
+        const sceneId = state.meta.playerSceneId!;
+        if (legacy) store(state, sceneId);
+        const db = new FakeDb({ state, dmGrants: [dm.id] });
+        const actor = await RoomActor.load(deps(db));
+        assert.ok(actor);
+        try {
+          const table = connect(actor, pat, "player");
+          await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+          await actor.op(table.conn, 1, op(sceneId));
+          const ev = await answerTo(table.sent, 1);
+          assert.ok(ev !== "stuck" && ev.rejects?.[0], `${what}: refused`);
+          answers.push(JSON.stringify([ev.rejects[0].code, ev.rejects[0].message]));
+        } finally {
+          db.freeze();
+          void actor.shutdown({ code: 1012, snapshot: false });
+        }
+      }
+      assert.equal(answers[1], answers[0], `${what}: the refusal says nothing of what the list stores`);
+      assert.ok(!answers[0]!.includes(RESERVED_ID), `${what}: refused for the permission, which comes first`);
     }
   });
 

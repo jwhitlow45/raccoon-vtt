@@ -1492,11 +1492,6 @@ export class RoomActor {
       this.#refuse(key, wm, n, "quota", BLOCK_SAVES_TOO_FAST, admitted);
       return;
     }
-    // A live op only: a restore replays what was stored, and stored ops apply as stored.
-    if (!restoredFrom && addsReservedEntryId(clientOp, this.#staged.state)) {
-      this.#refuse(key, wm, n, "invalid", RESERVED_ID, admitted);
-      return;
-    }
     op = withAssetSizes(op, facts);
     // A player's copy may lack the ground their creatures land on (docs/design/design-v1-map-discovery.md 6), so the real build sets their heights.
     if (viewer.role === "player") op = landedOp(op, this.#staged.state);
@@ -1523,6 +1518,13 @@ export class RoomActor {
       const reason = restoredFrom && step && !fromLog ? this.#failedHistory(viewer, restoredFrom, historyScope, step, decision.code, decision.message) : decision.message;
       const message = restoredFrom && step ? `could not ${restoredFrom} ${step.label}: ${reason}` : reason;
       this.#refuse(key, wm, n, decision.code, message, admitted);
+      return;
+    }
+    // A live op only: a restore replays what was stored, and stored ops apply as stored. Only once the op is permitted, since
+    // it reads the stored list the op replaces, which its sender may not see: an earlier refusal would tell them what the list
+    // holds (RULES-PRIV-04).
+    if (!restoredFrom && addsReservedEntryId(clientOp, this.#staged.state)) {
+      this.#refuse(key, wm, n, "invalid", RESERVED_ID, admitted);
       return;
     }
     // The server rolls, only now that the op is permitted, so no refusal depends on the dice (docs/design/design-v1-dice.md 4.2).
