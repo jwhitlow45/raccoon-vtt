@@ -9951,6 +9951,106 @@ export function musicPlayerAlignmentTests(): void {
     assert.deepEqual(lines, [], "the Now playing chip or its player out of line");
     withinSnapshotBudget("qe-n");
   });
+
+  /** The speaker's Volume as it opened: the popover under it from 900 px up, else a card or a bottom sheet, whose own box is measured. Null where none opened. */
+  async function volumeOpened(page: Page): Promise<{ root: Locator; form: "popover" | "card" | "sheet" } | null> {
+    const dialog = page.getByRole("dialog", { name: "Volume", exact: true });
+    if (!(await showsWithin(dialog.locator("[data-device-sound]"), 5_000))) return null;
+    if ((await dialog.getAttribute("data-rvtt-popover")) !== null) return { root: dialog, form: "popover" };
+    const box = dialogBox(dialog);
+    const width = (await box.boundingBox())?.width ?? 0;
+    return { root: box, form: width < (page.viewportSize()?.width ?? 0) - 1 ? "card" : "sheet" };
+  }
+
+  async function shutVolume(page: Page): Promise<void> {
+    const dialog = page.getByRole("dialog", { name: "Volume", exact: true });
+    if ((await dialog.count()) === 0) return;
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "detached" });
+  }
+
+  /**
+   * vol-b1's screens at one size (docs/design/design-v1-volume.md 11 and
+   * 12): Volume as the speaker opens it there, as it stands and with its
+   * mute toggle turned, which holds the pressed fill while muted. Where
+   * the speaker left the bar, the DM menu with This device's Volume first,
+   * and the sheet that row opens.
+   */
+  async function volumeScreens(sweep: Sweep, page: Page, who: "dm" | "pat"): Promise<void> {
+    const speaker = page.locator("header[data-rvtt-topbar] [data-volume-button]");
+    const prefix = who === "pat" ? "vol-pat" : "vol";
+    const onBar = await visible(speaker);
+    if (onBar) await speaker.click();
+    else if (who === "dm") {
+      const menu = await openChipMenu(page, "dm", "dm");
+      if (!menu) return sweep.missing(page, "vol-dm-menu", "the speaker left the bar and the DM chip opened no menu");
+      if ((await menu.locator("[data-chip-item]").first().getAttribute("data-chip-item")) !== "volume") sweep.lines.push(`${sweep.at} vol-dm-menu: Volume is not the menu's first row`);
+      await both(sweep, page, "vol-dm-menu", menu);
+      await chipItem(menu, "volume").click();
+    } else return sweep.missing(page, `${prefix}-popover`, "Pat's bar has no speaker");
+    const opened = await volumeOpened(page);
+    if (!opened) return sweep.missing(page, `${prefix}-popover`, "the speaker opened no Volume");
+    const screen = onBar ? `${prefix}-${opened.form}` : "vol-dm-sheet";
+    const toggle = opened.root.getByRole("button", { name: "Mute", exact: true });
+    const pressed = async () => (await toggle.getAttribute("aria-pressed")) === "true";
+    const flip = async () => {
+      const was = await pressed();
+      await toggle.click();
+      await waitFor("the mute toggle turned", async () => ((await pressed()) !== was ? true : null), 3_000);
+    };
+    // A player's device not asked yet starts muted: each state is measured under its own name either way, and the stored choice is put back, so a later step's ask still comes.
+    const choice = await page.evaluate(() => localStorage.getItem("rvtt.roomSound"));
+    try {
+      const mutedFirst = await pressed();
+      await both(sweep, page, mutedFirst ? `${screen}-muted` : screen, opened.root);
+      await flip();
+      await both(sweep, page, mutedFirst ? screen : `${screen}-muted`, opened.root);
+      await flip();
+    } finally {
+      await shutVolume(page);
+      await page.evaluate((v) => (v === null ? localStorage.removeItem("rvtt.roomSound") : localStorage.setItem("rvtt.roomSound", v)), choice);
+    }
+  }
+
+  test(`vol-b1. this device's Volume from the top bar's speaker, as the popover from 900 px up, the 700 px card and the phone's sheet, muted and not, and on the DM's 320 x 568 phone at 130% the DM menu with This device first and its sheet, at 1440 x 900, 1280 x 720, 700 x 900, 390 x 844 and 320 x 568 at 100% and 130%, and Pat's at 1440 x 900 and 390 x 844 with Only DM devices play off and on, dark and light, within ${LIMIT_PX} px (docs/design/design-v1-volume.md 11)`, async () => {
+    await newDmSession();
+    const lines: string[] = [];
+    try {
+      for (const at of NOW_AT) {
+        const sweep = new Sweep(`vol-${atName(at)}`);
+        const page = await sizePage(at);
+        try {
+          await volumeScreens(sweep, page, "dm");
+        } finally {
+          await putAway(page);
+        }
+        console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+        lines.push(...sweep.lines);
+      }
+      for (const at of FU30_AT.filter((a) => a.scale === 1 && (a.size.width === 1440 || a.size.width === 390))) {
+        for (const dmOnly of [false, true]) {
+          // A room that never set it reads it as off.
+          if ((dmSocket.state?.meta.settings.soundDmOnly === true) !== dmOnly) await ops.send({ t: "room.update", settings: { soundDmOnly: dmOnly } });
+          await waitFor(`Only DM devices play ${dmOnly ? "on" : "off"}`, () => ((dmSocket.state?.meta.settings.soundDmOnly === true) === dmOnly ? true : null));
+          const sweep = new Sweep(`vol-pat-${atName(at)}${dmOnly ? "-dmonly" : ""}`);
+          await openAt(pat, at.size, at.scale, { "rvtt.theme": "dark" });
+          try {
+            await volumeScreens(sweep, pat, "pat");
+          } finally {
+            await closeSheets(pat);
+            await escapeAll(pat);
+          }
+          console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+          lines.push(...sweep.lines);
+        }
+      }
+    } finally {
+      await ops.send({ t: "room.update", settings: { soundDmOnly: false } }).catch(() => {});
+      for (const page of [dm, pat]) if (page && !page.isClosed()) await page.evaluate(() => localStorage.setItem("rvtt.theme", "dark")).catch(() => {});
+    }
+    assert.deepEqual(lines, [], "this device's Volume, its menu row or its sheet out of line");
+    withinSnapshotBudget("vol-b1");
+  });
 }
 
 /*
