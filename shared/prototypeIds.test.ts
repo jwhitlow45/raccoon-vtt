@@ -58,6 +58,10 @@ function handMade(state: RoomState): Case[] {
   both({ t: "scene.reorder", order: ["s2", "s1"] });
   both({ t: "floor.order", sceneId: "s1", floors: ["s2", "s1"] });
   both({ t: "floor.open", sceneId: "s2", open: true });
+  both({ t: "floorLink.put", link: { id: "l1", pairId: "l2", sceneId: "s1", to: "s2", rect: { x: 1, y: 1, w: 2, h: 1 }, kind: "stairs" } });
+  both({ t: "floorLink.update", linkId: "l1", patch: { locked: true } });
+  both({ t: "floorLink.delete", linkId: "l1" });
+  both({ t: "token.climb", tokenId: t0, linkId: "l1" });
   both({ t: "token.moveMany", moves: [{ tokenId: t0, x: 3, y: 3 }, { tokenId: t1, x: 4, y: 4 }] });
   both({ t: "actor.deathSave", target: { characterId: c0 }, ok: 1, fail: 0 });
   both({ t: "actor.effect.update", ...effect, patch: { label: "x" } });

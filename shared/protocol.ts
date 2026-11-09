@@ -1860,6 +1860,9 @@ function rectCells(rects: readonly { x: number; y: number; w: number; h: number 
   for (const r of rects) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) seen.add(`${x},${y}`);
   return seen.size;
 }
+/** Stairs' or a ladder's squares (docs/design/design-v1-floors.md phase 2, 2): 1 to LIMITS.floorLinkSide a side. */
+const floorLinkRect = z.strictObject({ x: sceneCell, y: sceneCell, w: z.number().int().min(1).max(LIMITS.floorLinkSide), h: z.number().int().min(1).max(LIMITS.floorLinkSide) });
+const floorLinkKind = z.enum(["stairs", "ladder"]);
 const cellRects = z
   .array(cellRect)
   .min(1)
@@ -2313,6 +2316,25 @@ const stateClientOps = [
    * mark in RoomState.openFloors. Play, as fog is.
    */
   op("floor.open", { sceneId: id, open: z.boolean() }),
+  /**
+   * Places stairs or a ladder between a floor and the floor just above or
+   * below it (docs/design/design-v1-floors.md phase 2, 3): both ends, `id`
+   * on `sceneId` and `pairId` on `to`, on the same squares. The reducer
+   * sets each end's `ground`, `made` and `grid`. Setup.
+   */
+  op("floorLink.put", {
+    link: z
+      .strictObject({ id: plainId, pairId: plainId, sceneId: id, to: id, rect: floorLinkRect, kind: floorLinkKind })
+      .refine((l) => l.id !== l.pairId, { message: "the two ends need their own ids" })
+      .refine((l) => l.sceneId !== l.to, { message: "stairs join two floors" }),
+  }),
+  /** Changes both ends' kind or lock (3): Play when it changes `locked` alone, else Setup. `to` and the squares never change. */
+  op("floorLink.update", {
+    linkId: plainId,
+    patch: z.strictObject({ kind: floorLinkKind.optional(), locked: z.boolean().optional() }).refine((p) => p.kind !== undefined || p.locked !== undefined, { message: "nothing to change" }),
+  }),
+  /** Removes both ends of stairs or a ladder (3). Setup. */
+  op("floorLink.delete", { linkId: plainId }),
   op("scene.setMap", { sceneId: id, map: sceneMap.nullable() }),
   op("scene.setGrid", {
     sceneId: id,
@@ -2359,6 +2381,13 @@ const stateClientOps = [
    * counting again (features section 4). The token stays where it is.
    */
   op("token.countLeg", { tokenId: id, counts: z.boolean() }),
+  /**
+   * Go up or Go down (docs/design/design-v1-floors.md phase 2, 3): the
+   * creature takes the stairs or ladder it stands on, by the end on its
+   * floor, to the same squares of the other floor, with what it carries.
+   * The reducer plans the whole climb, so a device names no landing.
+   */
+  op("token.climb", { tokenId: id, linkId: plainId }),
   /**
    * Attaches a token to a holder (docs/design/design-v1-attach.md 8.1): a ride, a
    * perch, a carry or a drag, `steer` on a controlled ride alone. `x`, `y`
@@ -2914,6 +2943,15 @@ export const serverOnlyOps = [
      * permissions read it, and only the server builds a restore.
      */
     quiet: z.array(id).min(1).max(MAX_RESTORE_ENTRIES).optional(),
+    /**
+     * The climb the step made (docs/design/design-v1-floors.md phase 2, 8):
+     * the climber, the end it took by id, rev and `made`, and the floors
+     * from and to. Under it the restore may move the climber, its
+     * passengers and their areas between those two floors and no others.
+     * Only permissions read it, and only the server builds a restore, from
+     * its own history.
+     */
+    climb: z.strictObject({ tokenId: id, linkId: plainId, rev: z.number().int().min(0), made: z.number().int().min(0), from: id, to: id }).optional(),
   }).refine((o) => o.entries.length > 0 || o.saveOutcome !== undefined, { message: "an empty restore requires a save outcome transition" }),
   /**
    * What the party saw this batch that the scene's explored layer lacked
@@ -3025,9 +3063,11 @@ export type OpOf<T extends OpType> = Extract<Op, { t: T }>;
  * bar offers to take it back after one, so an owner's own height or facing
  * change after a drag never reads as someone else moving the token.
  */
-export function isPoseOp(op: Op): op is OpOf<"token.move" | "token.moveMany" | "token.update" | "token.countLeg" | "token.attach" | "token.detach"> {
+export function isPoseOp(op: Op): op is OpOf<"token.move" | "token.moveMany" | "token.update" | "token.countLeg" | "token.attach" | "token.detach" | "token.climb"> {
   // A mistaken Ride should not cost a Get off at half Speed, so attaching and detaching undo as moves (docs/design/design-v1-attach.md 8.3).
   if (op.t === "token.move" || op.t === "token.moveMany" || op.t === "token.countLeg" || op.t === "token.attach" || op.t === "token.detach") return true;
+  // A climb is a leg of the turn, and a player's Undo takes it back down the same stairs (docs/design/design-v1-floors.md phase 2, 8).
+  if (op.t === "token.climb") return true;
   if (op.t !== "token.update") return false;
   const fields = Object.keys(op.patch);
   // A drop between squares on the token's own box, or Snap to grid, is where it stands as a move leaves it (docs/design/design-v1-snap-off.md 5.2).

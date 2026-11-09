@@ -8,7 +8,7 @@ import { UNDO_SCOPE_BY_OP, undoScope } from "./undoScope.ts";
 
 const inventory = {
   play: [
-    "token.move", "token.moveMany", "token.countLeg", "token.attach", "token.detach", "token.create", "token.delete", "token.deleteMany", "floor.open",
+    "token.move", "token.moveMany", "token.countLeg", "token.attach", "token.detach", "token.create", "token.delete", "token.deleteMany", "floor.open", "token.climb",
     "actor.hp", "actor.damageMany", "actor.deathSave", "actor.life", "actor.rest", "actor.effect.add", "actor.effect.update", "actor.effect.remove", "actor.effects", "actor.saveDue", "actor.use", "actor.prompt", "actor.outcome",
     "encounter.start", "encounter.end", "encounter.add", "encounter.remove", "encounter.setValue", "encounter.setValues", "encounter.reorder", "encounter.next", "encounter.prev", "encounter.update",
     "roll.ask", "roll.answer", "roll.reopen", "roll.close", "template.create", "template.update", "template.delete", "drawing.create", "drawing.delete", "drawing.clear",
@@ -18,7 +18,7 @@ const inventory = {
   ],
   setup: [
     "trap.create", "trap.delete", "character.create", "character.delete", "monster.create", "monster.update", "monster.delete", "monster.setSrdImage", "companionBlock.create", "companionBlock.update", "companionBlock.delete",
-    "savedEncounter.create", "savedEncounter.update", "savedEncounter.delete", "scene.create", "scene.delete", "scene.duplicate", "scene.reorder", "scene.setMap", "scene.setGrid", "vision.holders", "room.update", "floor.order",
+    "savedEncounter.create", "savedEncounter.update", "savedEncounter.delete", "scene.create", "scene.delete", "scene.duplicate", "scene.reorder", "scene.setMap", "scene.setGrid", "vision.holders", "room.update", "floor.order", "floorLink.put", "floorLink.delete",
     "journal.create", "journal.update", "journal.delete", "pin.put", "pin.remove", "handoutDoc.create", "handoutDoc.delete",
     "clock.start", "clock.stop", "clock.update",
     "sound.update", "playlist.create", "playlist.update", "playlist.delete", "playlist.add",
@@ -28,7 +28,7 @@ const inventory = {
     "sound.create", "sound.delete", "music.play", "music.pause", "music.resume", "music.skip", "music.stop", "music.set", "music.queue", "music.jump", "loop.start", "loop.set", "loop.stop", "effect.fire", "sound.mix", "sound.scene", "sound.stopAll",
   ],
 } satisfies Record<UndoScope, string[]>;
-const fieldSensitive = ["token.update", "token.updateMany", "character.update", "scene.update", "trap.update"];
+const fieldSensitive = ["token.update", "token.updateMany", "character.update", "scene.update", "trap.update", "floorLink.update"];
 
 function before(): RoomState {
   return room({ characters: { bree: character("bree") }, tokens: { goblin: token("goblin"), pc: token("pc", { kind: "pc", actor: { ref: "bree" } }) } });
@@ -164,5 +164,10 @@ describe("undo classifier inventory", () => {
   test("trap runtime state is Play, definitions and mixed edits are Setup", () => {
     for (const patch of [{ state: "disarmed" }, { found: true }, { state: "armed", found: false }]) assert.equal(scope({ t: "trap.update", trapId: "trap", patch }), "play");
     for (const patch of [{ name: "Pit" }, { rig: {} }, { zone: {} }, { state: "disarmed", name: "Pit" }, { futureField: true }]) assert.equal(scope({ t: "trap.update", trapId: "trap", patch }), "setup");
+  });
+
+  test("locking stairs is Play, changing their kind is Setup (docs/design/design-v1-floors.md phase 2, 3)", () => {
+    for (const locked of [true, false]) assert.equal(scope({ t: "floorLink.update", linkId: "l1", patch: { locked } }), "play");
+    for (const patch of [{ kind: "ladder" }, { kind: "stairs", locked: true }]) assert.equal(scope({ t: "floorLink.update", linkId: "l1", patch }), "setup");
   });
 });

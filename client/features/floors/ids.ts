@@ -49,3 +49,16 @@ export const FLOOR_SEARCH = {
   show: "scenes.floor.show",
   remove: "scenes.floor.remove",
 } as const;
+
+/*
+ * The test ids of stairs and ladders (docs/design/design-v1-floors.md phase
+ * 2, 13), which the floors-links e2e files and the alignment sweep find each
+ * surface by.
+ */
+
+/** An end drawn on the board, its value the end's id: `[data-floor-link="l1"]` (LinkLayer.tsx). */
+export const FLOOR_LINK_ATTR = "data-floor-link";
+/** Go up or Go down on the bar and the strip, its value "up" or "down": `[data-climb="up"]` (ClimbButton.tsx). */
+export const CLIMB_ATTR = "data-climb";
+/** An end's pane in the builder's Between floors mode (LinkPane.tsx). */
+export const LINK_PANE_ATTR = "data-link-pane";

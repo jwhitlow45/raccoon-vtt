@@ -143,7 +143,8 @@ export type IconName =
   | "previous"
   | "queue"
   | "search"
-  | "floors";
+  | "floors"
+  | "stairwell";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -771,6 +772,8 @@ const SHAPES: Record<IconName, ReactNode> = {
   ),
   // Lucide layers: a scene's floors (docs/design/design-v1-floors.md 12), on the top bar's Floor, the Floors menu, the Floors group and Move to floor. Never the board's layers, which have no icon.
   floors: <path {...STROKE} d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83zM2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17" />,
+  // Lucide door-stairwell: stairs and ladders between floors (docs/design/design-v1-floors.md phase 2, 6.2, 7.1), on Go up, Go down and the builder's Between floors. Never the Stairs terrain or Heights/stairs, which draw their own.
+  stairwell: <path {...STROKE} d="M12 17v-3a1 1 0 0 1 1-1h6M19 17h-9a1 1 0 0 0-1 1v3M19 21V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v16M19 9h-3a1 1 0 0 0-1 1v3M22 21H2" />,
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];

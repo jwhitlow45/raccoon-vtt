@@ -40,6 +40,8 @@ export type PinId = string;
 export type RollId = string;
 export type CastId = string;
 export type TrapId = string;
+/** A stairs or ladder end's plain id (`/^[A-Za-z0-9_-]{1,64}$/`), as a trap's. */
+export type FloorLinkId = string;
 /**
  * A shipped game-icons.net icon (docs/design/design-v1-dm-tools.md 3.12):
  * `"<author>/<name>"`, such as "lorc/wolf-head". The author is part of the
@@ -237,6 +239,15 @@ export type RoomState = {
    * rooms from before floors need no migration. Only DM projections hold it.
    */
   openFloors?: Record<SceneId, SceneMark>;
+  /**
+   * The ends of stairs and ladders between floors next to each other
+   * (docs/design/design-v1-floors.md phase 2), `keys.floorLink(id)`, each
+   * scene-scoped by the floor it lies on and written and removed in pairs.
+   * A player gets an end only on a floor they hold, on revealed ground, cut
+   * to ProjectedFloorLink. Absent reads as none, so rooms from before them
+   * need no migration.
+   */
+  floorLinks?: Record<FloorLinkId, FloorLink>;
 };
 
 /** One month of a Months calendar: its name and its length in days. */
@@ -674,6 +685,49 @@ export type SceneFloor = {
    */
   unseen?: true;
 };
+
+/**
+ * One end of stairs or a ladder between two floors next to each other in
+ * one scene (docs/design/design-v1-floors.md phase 2). Written and removed
+ * in pairs: each end lies on its own floor, on the same squares as its
+ * pair, since floors line up from the top left.
+ */
+export type FloorLink = {
+  id: FloorLinkId;
+  rev: number;
+  /** The floor this end lies on. */
+  sceneId: SceneId;
+  /** The floor just above or below, of the same scene. */
+  to: SceneId;
+  /** The other end. */
+  pair: FloorLinkId;
+  /** `w` and `h` 1 to LIMITS.floorLinkSide, the same on both ends. */
+  rect: CellRect;
+  kind: "stairs" | "ladder";
+  /** Go up and Go down are off while it is set. */
+  locked?: true;
+  /** The hex shape `rect` was written under, absent for squares, held to both floors' shape as Trap.grid is. */
+  grid?: GridShape;
+  /**
+   * DM only. Feet: the one ground height of `rect` on this end's floor,
+   * fixed while the link exists (D-261109-106), so a climb's undo lands
+   * where the creature stood.
+   */
+  ground: number;
+  /**
+   * DM only. The seq of the op that placed the pair, set by the reducer,
+   * the same on both ends and never reused, so a climb's undo tells the
+   * stairs it took from stairs placed again with the same ids.
+   */
+  made: number;
+};
+
+/**
+ * An end as a player gets it (docs/design/design-v1-floors.md 4): no pair,
+ * ground or seq, `to` only while the player holds that floor, and the way
+ * it leads, worked out from the floors' levels.
+ */
+export type ProjectedFloorLink = Omit<FloorLink, "pair" | "to" | "ground" | "made"> & { to?: SceneId; dir: "up" | "down" };
 
 /**
  * A hex grid's orientation (docs/design/design-v1-hex-grids.md 4.1): hex rows have
@@ -1255,15 +1309,38 @@ export type Companion = { of: CharacterId; turn: CompanionTurn; reactionUsed?: t
 export type TokenLight = { bright: number; dim: number };
 
 /**
- * One turn's movement, as stops in the order the creature reached them.
- * The first is where the turn began. Each later stop ends a leg, the
- * straight line from the stop before it, so a later rule (walls blocking a
- * move) can judge each leg on its own.
+ * One turn's movement on the floor the creature stands on, as stops in the
+ * order the creature reached them. The first is where its moves on this
+ * floor began: where the turn began, or where it landed on this floor.
+ * Each later stop ends a leg, the straight line from the stop before it, so
+ * a later rule (walls blocking a move) can judge each leg on its own.
  */
 export type TokenPath = {
   /** The turn these moves belong to: its `TurnStart.seq`. */
   turn: number;
+  /**
+   * What the turn took on floors the creature has left
+   * (docs/design/design-v1-floors.md 5), absent before its first change of
+   * floor. Owners get it whole, other players `seenDiag` alone.
+   */
+  prior?: PathPrior;
   stops: PathStop[];
+};
+
+/**
+ * The legs of a turn before its creature's last change of floor, summed
+ * (docs/design/design-v1-floors.md 5.3): stored whole, each total this
+ * floor's legs then add to.
+ */
+export type PathPrior = {
+  /** Feet walked. */
+  moved?: number;
+  /** Feet taken off the creature's speed. */
+  cost?: number;
+  /** The 5-10-5 diagonals counted, as PathStop.diag, so the next leg's count runs on. */
+  diag?: [number, number];
+  /** The diagonals players who do not own it could count, as the server's public counters read them. */
+  seenDiag: [number, number];
 };
 
 export type PathStop = {

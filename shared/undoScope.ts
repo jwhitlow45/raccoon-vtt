@@ -21,6 +21,10 @@ export const UNDO_SCOPE_BY_OP = {
   // A scene's floors are built in Setup, and Show and Hide are play, as fog is (docs/design/design-v1-floors.md 9).
   "floor.order": "setup",
   "floor.open": "play",
+  // Stairs are built in Setup, and Locked is a play step alone (docs/design/design-v1-floors.md phase 2, 3).
+  "floorLink.put": "setup",
+  "floorLink.update": "fields",
+  "floorLink.delete": "setup",
   "vision.holders": "setup",
   "token.create": "play",
   "token.update": "fields",
@@ -30,6 +34,7 @@ export const UNDO_SCOPE_BY_OP = {
   "token.move": "play",
   "token.moveMany": "play",
   "token.countLeg": "play",
+  "token.climb": "play",
   "token.attach": "play",
   "token.detach": "play",
   "actor.hp": "play",
@@ -226,6 +231,8 @@ export function undoScope(op: Op, before: RoomState): UndoScope {
         : "setup";
     case "trap.update":
       return onlyFields(op.patch, TRAP_PLAY_FIELDS) ? "play" : "setup";
+    case "floorLink.update":
+      return onlyField(op.patch, "locked") ? "play" : "setup";
     case "scene.update": {
       if (onlyField(op.patch, "thumb")) return "none";
       if (onlyField(op.patch, "suggestedView")) return "play";

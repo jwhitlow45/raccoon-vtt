@@ -6,6 +6,7 @@ import { gridOfScene, gridOfToken, projectEntity, type ProjectedToken } from "#s
 import { isResizeOp, type ActorTarget, type ClientOp, type OpOf, type TokenPatch } from "#shared/protocol.ts";
 import { ownEntry } from "#shared/records.ts";
 import { testText } from "#shared/rules/skills.ts";
+import { LINK_LABELS, climbLabel, linkDir } from "#shared/rules/floorLinks.ts";
 import { sizeCategory } from "#shared/rules/footprint.ts";
 import { cellWord, SQUARES, type Grid } from "#shared/rules/grid.ts";
 
@@ -108,6 +109,18 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `reordering the floors of ${the("scene", before.scenes[op.sceneId]?.name)}`;
     case "floor.open":
       return op.open ? `showing ${floor(before, op.sceneId)} to players` : `hiding ${floor(before, op.sceneId)} from players`;
+    // Stairs and ladders by their far floor (docs/design/design-v1-floors.md phase 2, 7.2).
+    case "floorLink.put":
+      return LINK_LABELS.placed(op.link?.kind ?? "stairs", (op.link && before.scenes[op.link.to]?.floor?.name) ?? "a floor");
+    case "floorLink.update": {
+      const link = before.floorLinks?.[op.linkId];
+      if (op.patch.locked !== undefined && op.patch.kind === undefined) return LINK_LABELS.lock(link?.kind ?? "stairs", op.patch.locked);
+      return LINK_LABELS.kind(link?.kind ?? "stairs");
+    }
+    case "floorLink.delete": {
+      const link = before.floorLinks?.[op.linkId];
+      return LINK_LABELS.removed(link?.kind ?? "stairs", (link && before.scenes[link.to]?.floor?.name) ?? "a floor");
+    }
     case "token.create":
       return `adding ${tokenName(op.token)}`;
     case "token.update": {
@@ -133,6 +146,10 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `deleting ${token(op.tokenId)}`;
     case "token.move":
       return op.teleport ? `teleporting ${token(op.tokenId)}` : `moving ${token(op.tokenId)}`;
+    case "token.climb": {
+      const link = before.floorLinks?.[op.linkId];
+      return climbLabel(token(op.tokenId), (link && linkDir(before, link)) ?? "up", link?.kind ?? "stairs");
+    }
     case "token.countLeg":
       return op.counts ? `counting the last move of ${token(op.tokenId)} again` : `not counting the last move of ${token(op.tokenId)}`;
     // Attached tokens (docs/design/design-v1-attach.md 8.3): "putting Bree on Warhorse", "letting go of Goblin 2".

@@ -42,6 +42,9 @@ import {
   musicSetReveals,
   timedEnds,
   followsDaylight,
+  floorLinksOps,
+  FLOOR_LINKS_OP_VERSION,
+  FLOOR_LINKS_SNAPSHOT_VERSION,
   seatsApart,
   hiddenTowStands,
   stopsStandClear,
@@ -2024,6 +2027,51 @@ describe("op version 57 and snapshot 44, the room count (server/rooms/counted.ts
   test("a build at 56 and 43 refuses the rows and the snapshot this one writes", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hello" }, 57, 56, opMigrations), /down/);
     assert.throws(() => runMigrations(room(), 44, 43, snapshotMigrations), /down/);
+  });
+});
+
+describe("op version 58 and snapshot 45, stairs and ladders between floors (docs/design/design-v1-floors.md phase 2, 12)", () => {
+  const ops = [
+    { t: "floorLink.put", link: { id: "l1", pairId: "l2", sceneId: "s1", to: "s2", rect: { x: 1, y: 1, w: 2, h: 2 }, kind: "stairs" } },
+    { t: "floorLink.update", linkId: "l1", patch: { locked: true } },
+    { t: "floorLink.delete", linkId: "l1" },
+    { t: "token.climb", tokenId: "t1", linkId: "l1" },
+  ];
+
+  test("keeps stored operations and snapshots unchanged through the identity steps", () => {
+    assert.equal(FLOOR_LINKS_OP_VERSION, 58);
+    assert.equal(FLOOR_LINKS_SNAPSHOT_VERSION, 45);
+    assert.ok(OP_VERSION >= FLOOR_LINKS_OP_VERSION);
+    assert.ok(SNAPSHOT_VERSION >= FLOOR_LINKS_SNAPSHOT_VERSION);
+    for (const op of [{ t: "floor.order", sceneId: "s1", floors: ["s2", "s1"] }, { t: "token.update", tokenId: "t1", patch: { sceneId: "s2" } }]) {
+      assert.equal(runMigrations(op, 57, 58, opMigrations), op);
+      assert.equal(migrateOp(op, 57), op);
+    }
+    for (const op of ops) {
+      assert.equal(migrateOp(op, 58), op);
+      assert.ok(opSchema.safeParse(op).success, op.t);
+    }
+    const state = room({ floorLinks: {} });
+    assert.equal(runMigrations(state, 44, 45, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 44), state);
+  });
+
+  test("the ops refuse a side past 4, two ends with one id, and stairs from a floor to itself", () => {
+    const put = (link: object) => ({ t: "floorLink.put", link: { id: "l1", pairId: "l2", sceneId: "s1", to: "s2", rect: { x: 1, y: 1, w: 2, h: 2 }, kind: "stairs", ...link } });
+    for (const link of [{ rect: { x: 1, y: 1, w: 5, h: 1 } }, { rect: { x: 1, y: 1, w: 1, h: 0 } }, { pairId: "l1" }, { to: "s1" }, { id: "a b" }, { kind: "lift" }]) {
+      assert.equal(opSchema.safeParse(put(link)).success, false, JSON.stringify(link));
+    }
+    assert.equal(opSchema.safeParse({ t: "floorLink.update", linkId: "l1", patch: {} }).success, false);
+    assert.equal(opSchema.safeParse({ t: "floorLink.update", linkId: "l1", patch: { to: "s3" } }).success, false);
+  });
+
+  test("gates the fold and the stairs' removal at 58", () => {
+    assert.deepEqual([floorLinksOps(1), floorLinksOps(57), floorLinksOps(58), floorLinksOps(undefined)], [false, false, true, true]);
+  });
+
+  test("a build at 57 and 44 refuses a room from this one, so it never keeps creatures only stairs let reach a floor", () => {
+    assert.throws(() => runMigrations(ops[0], 58, 57, opMigrations), /down/);
+    assert.throws(() => runMigrations(room({ floorLinks: {} }), 45, 44, snapshotMigrations), /down/);
   });
 });
 

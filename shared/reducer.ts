@@ -14,7 +14,7 @@ import {
 } from "./reducer/actors.ts";
 import { remindAfter, remindTurnEnd } from "./reducer/areaTriggers.ts";
 import { linkPass, settleMounts, tokenAttach, tokenDetach } from "./reducer/attach.ts";
-import { attaches, floorsOps, followsDaylight, timedEnds, trapsGoOff, writesUndoCorrections } from "./migrate.ts";
+import { attaches, floorLinksOps, floorsOps, followsDaylight, timedEnds, trapsGoOff, writesUndoCorrections } from "./migrate.ts";
 import { clockCorrection, correctionViews } from "./undoCorrection.ts";
 import { clockAdvance, clockSet, clockStart, clockStop, clockUpdate, followDaylight } from "./reducer/clock.ts";
 import {
@@ -78,6 +78,7 @@ import {
 import { buildHeight, buildRough, buildStairs } from "./reducer/heights.ts";
 import { sceneDuplicate } from "./reducer/duplicate.ts";
 import { dropFloorAsks, floorOpen, floorOrder, markOpened } from "./reducer/floors.ts";
+import { dropFloorLinks, floorLinkDelete, floorLinkPut, floorLinkUpdate, tokenClimb } from "./reducer/floorLinks.ts";
 import { journalCreate, journalDelete, journalReveal, journalUpdate } from "./reducer/journal.ts";
 import { actorEffects, tokenDeleteMany, tokenUpdateMany } from "./reducer/many.ts";
 import { pinPut, pinRemove } from "./reducer/pins.ts";
@@ -199,6 +200,8 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
     if (floorsOps(env.opVersion)) {
       markOpened(tx, state);
       dropFloorAsks(tx, state);
+      // Stairs go with a floor they join, inside the op's undo step (docs/design/design-v1-floors.md phase 2, 3).
+      if (floorLinksOps(env.opVersion)) dropFloorLinks(tx, state);
     }
     // Every op's dispatch ends with the links that no longer hold coming loose (docs/design/design-v1-attach.md 5.2).
     if (attaches(env.opVersion)) {
@@ -304,6 +307,12 @@ function dispatch(tx: Tx, op: Op): void {
       return floorOrder(tx, op);
     case "floor.open":
       return floorOpen(tx, op);
+    case "floorLink.put":
+      return floorLinkPut(tx, op);
+    case "floorLink.update":
+      return floorLinkUpdate(tx, op);
+    case "floorLink.delete":
+      return floorLinkDelete(tx, op);
     case "token.create":
       return tokenCreate(tx, op);
     case "token.update":
@@ -316,6 +325,8 @@ function dispatch(tx: Tx, op: Op): void {
       return tokenMoveMany(tx, op);
     case "token.countLeg":
       return tokenCountLeg(tx, op);
+    case "token.climb":
+      return tokenClimb(tx, op);
     case "token.attach":
       return tokenAttach(tx, op);
     case "token.detach":

@@ -191,6 +191,12 @@ export function reads(op: Op, state: RoomState): Reads {
       return of(op.floors.map((id) => ({ key: keys.scene(id) })), ["scenes"]);
     case "floor.open":
       return of([{ key: keys.scene(op.sceneId) }, { key: keys.opened(op.sceneId) }]);
+    // Stairs read both floors' walls, ground, traps and ends, which a DM's view of their scene holds whole (docs/design/design-v1-floors.md phase 2, 3).
+    case "floorLink.put":
+      return of([{ key: keys.scene(op.link.sceneId) }, { key: keys.scene(op.link.to) }], [`scene:${op.link.sceneId}`, `scene:${op.link.to}`]);
+    case "floorLink.update":
+    case "floorLink.delete":
+      return of(pairReads(state, op.linkId));
 
     case "token.create": {
       // A companion's checks read its character's tokens and the walls, and a player's writes the DM's line, so its
@@ -233,6 +239,8 @@ export function reads(op: Op, state: RoomState): Reads {
     }
     case "token.countLeg":
       return of([{ key: keys.token(op.tokenId), fields: ["path"] }, { key: keys.encounter }]);
+    case "token.climb":
+      return climbReads(state, op.tokenId, op.linkId);
 
     case "actor.hp":
       // Even an owner's projection can omit a defense from a hidden effect or room monster.
@@ -542,6 +550,30 @@ export function reads(op: Op, state: RoomState): Reads {
 }
 
 /** The tokens an op names and everything their groups carry, as this copy holds them. */
+/** Both ends of a pair, the second only where the view holds the first. */
+function pairReads(state: RoomState, linkId: string): Read[] {
+  const link = ownEntry(state.floorLinks, linkId);
+  return [{ key: keys.floorLink(linkId), fields: ["pair"] }, ...(link ? [{ key: keys.floorLink(link.pair) }] : [])];
+}
+
+/**
+ * A climb's reads (docs/design/design-v1-floors.md phase 2, 6.4): the
+ * climber's group, the end with its far floor and squares, the upper of
+ * the two floors, whose height prices the climb (10 ft where it stores
+ * none), and the far floor whole, which only a DM viewing that scene's
+ * floors holds. So a player's device never predicts a climb, even holding
+ * both ends, since it holds no heights (D-261109-102).
+ */
+function climbReads(state: RoomState, tokenId: string, linkId: string): Reads {
+  const link = ownEntry(state.floorLinks, linkId);
+  const r: Read[] = [...groupReads(state, [tokenId]), { key: keys.floorLink(linkId), fields: ["to", "rect"] }];
+  if (link === undefined || link.to === undefined) return of(r);
+  const here = ownEntry(state.scenes, link.sceneId)?.floor?.level ?? 0;
+  const there = ownEntry(state.scenes, link.to)?.floor?.level ?? 0;
+  r.push({ key: keys.scene(there > here ? link.to : link.sceneId), fields: ["floor"] });
+  return of(r, [`scene:${link.to}`]);
+}
+
 function groupReads(state: RoomState, named: readonly string[]): Read[] {
   const out: Read[] = [];
   for (const ids of moveGroups(state.tokens, named).values()) for (const id of ids) out.push({ key: keys.token(id) });

@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 44;
-export const OP_VERSION = 57;
+export const SNAPSHOT_VERSION = 45;
+export const OP_VERSION = 58;
 
 export type MigrationStep = {
   from: number;
@@ -276,6 +276,12 @@ export const snapshotMigrations: MigrationStep[] = [
   // one saved. The count can run ahead of that sequence, so the older build would number a line with an id one already
   // holds.
   { from: 43, to: 44, apply: (state) => state },
+  // Stairs and ladders between floors (docs/design/design-v1-floors.md phase 2, FLOOR_LINKS_SNAPSHOT_VERSION): the
+  // room's `floorLinks` and a path's `prior` are optional, and absent reads as none, so a v44 room is a v45 room as it
+  // is. The number moves so that an older build refuses a v45 snapshot instead of loading it: it would keep creatures
+  // on floors only stairs let them reach, drop the feet a turn took on floors left, and leave ends naming a floor it
+  // removed.
+  { from: 44, to: 45, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1382,6 +1388,23 @@ export const opMigrations: MigrationStep[] = [
     to: 57,
     apply: (op) => op,
   },
+  {
+    // Stairs and ladders between floors (docs/design/design-v1-floors.md
+    // phase 2, FLOOR_LINKS_OP_VERSION): `floorLink.put`, `.update`,
+    // `.delete` and `token.climb` are new ops, and `sys.restore` may carry
+    // `climb`, all of which an older strict schema refuses, so no stored op
+    // changes shape and the step is the identity. From this version a
+    // change of floor within one scene keeps the turn's earlier legs in
+    // the path's `prior`, and every op ends by taking away the stairs
+    // whose floors went (`floorLinksOps`). Ops stored before replay as
+    // they did: a change of floor drops the path.
+    // Deploy: back up the database just before, and reload open pages.
+    // Rollback needs the backup for a room with version 58 ops after its
+    // last snapshot or a v45 snapshot, which an older build refuses.
+    from: 57,
+    to: 58,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -1465,6 +1488,22 @@ export function followsDaylight(opVersion: number | undefined): boolean {
  */
 export const COUNT_OP_VERSION = 57;
 export const COUNT_SNAPSHOT_VERSION = 44;
+
+/** The first op version and snapshot version of stairs and ladders between floors (floorLinksOps). */
+export const FLOOR_LINKS_OP_VERSION = 58;
+export const FLOOR_LINKS_SNAPSHOT_VERSION = 45;
+
+/**
+ * Whether the op knows stairs and ladders (docs/design/design-v1-floors.md
+ * phase 2, 12): a change of floor within one scene folds the turn's path
+ * into `prior` in place of dropping it, and the op ends with
+ * `dropFloorLinks`. Ops stored before version 58 met no stairs and keep
+ * their dropped paths. Live ops carry no stored version and take today's
+ * rule.
+ */
+export function floorLinksOps(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < FLOOR_LINKS_OP_VERSION);
+}
 
 /** The first op version of several floors in one scene (floorsOps). */
 export const FLOORS_OP_VERSION = 56;

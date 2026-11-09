@@ -66,6 +66,7 @@ export const ENTITY_ID_PATHS: Readonly<Record<string, readonly string[]>> = {
   "character.create": ["character"],
   "companionBlock.create": ["block"],
   "drawing.create": ["drawing"],
+  "floorLink.put": ["link"],
   "handout.show": ["handout"],
   "handoutDoc.create": ["doc"],
   "journal.create": ["page"],

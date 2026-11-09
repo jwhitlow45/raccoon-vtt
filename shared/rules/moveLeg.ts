@@ -33,7 +33,8 @@ import { ownEntry } from "../records.ts";
 
 export type Pose = { sceneId: string; x: number; y: number; elevation: number };
 
-export type MoveHow = "walk" | "teleport" | "scene" | "reshape";
+/** How a token moved: walked, teleported, moved to another scene or floor by the DM, reshaped in place, or up or down stairs (docs/design/design-v1-floors.md phase 2). */
+export type MoveHow = "walk" | "teleport" | "scene" | "reshape" | "climb";
 
 export type MovedToken = {
   tokenId: string;

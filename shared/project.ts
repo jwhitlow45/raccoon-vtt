@@ -4194,6 +4194,9 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
     // Which floors players have reached is the DM's, whose Floors menu and warnings read it (docs/design/design-v1-floors.md 8).
     case "opened":
       return ctx.viewer.role === "dm" ? value : null;
+    // The DM gets every end as stored. FL2-B projects a player's (docs/design/design-v1-floors.md phase 2, 4).
+    case "floorLink":
+      return ctx.viewer.role === "dm" ? value : null;
     case "holders":
       return value ? projectHoldersCtx(ctx, value as SightHolders) : null;
     case "fogDraft":

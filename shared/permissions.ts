@@ -1000,6 +1000,10 @@ function forPlayer(op: Op, c: Check): Decision {
     case "trap.update":
     case "trap.delete":
     case "trap.spring":
+    // Stairs and ladders are the DM's to place, change and remove (docs/design/design-v1-floors.md phase 2, 3).
+    case "floorLink.put":
+    case "floorLink.update":
+    case "floorLink.delete":
     case "trap.act":
     case "trap.settle":
     // The room's clock is the DM's to keep (docs/design/design-v1-calendar.md 6.2).
@@ -1131,6 +1135,9 @@ function forPlayer(op: Op, c: Check): Decision {
       return attachCheck(c, op);
     case "token.detach":
       return detachCheck(c, op);
+
+    case "token.climb":
+      return climbCheck(c, op, held);
 
     case "token.countLeg": {
       // An owner says how their creature moved, on a locked token too, as with its elevation and facing.
@@ -1750,6 +1757,11 @@ function castCloseCheck(c: Check, op: OpOf<"cast.close">, held: ReadonlySet<stri
 }
 
 /** Movement (design 8.1): owners, or the players the room lets move any token, and never a locked token. */
+/** A player's Go up or Go down (docs/design/design-v1-floors.md phase 2, 4, 6.1). FL2-A's permissions commit builds it. */
+function climbCheck(_c: Check, _op: OpOf<"token.climb">, _held: ReadonlySet<string>): Decision {
+  return refuse("invalid", "stairs and ladders are not built yet");
+}
+
 function moveCheck(c: Check, tokenId: string): Decision {
   const token = c.visibleToken(tokenId);
   if (!token) return GONE;
