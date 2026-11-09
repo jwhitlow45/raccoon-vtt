@@ -589,13 +589,13 @@ describe("synced music and sound", { concurrency: false }, () => {
     await waitFor("the DM's tabs to go quiet", async () => (!(await soundProbe(dm)).state?.owns && !(await soundProbe(second)).state?.owns ? true : null), 5_000);
     await inStep(tv, START_MS, 6_000);
     await shots.take(tv, "sn-7-display-plays");
-    // The display's menu: its Sound row.
+    // The display's menu: its Volume row, 100% at first.
     await tv.mouse.click(TV.width / 2, TV.height / 2);
     const menu = tv.getByRole("menu", { name: "Table display" });
-    const row = menu.getByRole("group", { name: "Sound" });
+    const row = menu.getByRole("group", { name: "Volume" });
     await row.waitFor();
-    assert.equal(await row.getByRole("menuitemradio", { name: "On" }).getAttribute("aria-checked"), "true");
-    assert.deepEqual(alignmentLines(await measureAlignment(row), "the display's Sound row 1280x720"), []);
+    assert.equal(await row.getByRole("menuitemradio", { name: "100%" }).getAttribute("aria-checked"), "true");
+    assert.deepEqual(alignmentLines(await measureAlignment(row), "the display's Volume row 1280x720"), []);
     await shots.take(tv, "sn-7-display-menu-sound");
     await tv.keyboard.press("Escape");
     // Its window locked: a frozen page lets the lock go (MUS-OPUS-76), and a DM's tab plays. Headless Chrome's
@@ -733,7 +733,7 @@ describe("synced music and sound", { concurrency: false }, () => {
     assert.deepEqual(lines, [], "This device's Sounds out of line");
   });
 
-  test("sn-9. the ask, the display's two cards and its Sound row at three sizes and two scales, within 1 px", async () => {
+  test("sn-9. the ask, the display's two cards and its Volume row at three sizes and two scales, within 1 px", async () => {
     await playTrack(run.ids.tavern, 0, "all");
     await soundSays(dm, /^playing music/, 5_000);
     const lines: string[] = [];
@@ -800,9 +800,9 @@ describe("synced music and sound", { concurrency: false }, () => {
           await waiting.tv.mouse.click(size.width / 2, size.height / 3);
           await soundSays(waiting.tv, /^playing music/, 8_000);
           assert.equal(await tapCard.count(), 0, `the tap card goes once the sound plays, ${where}`);
-          const row = waiting.tv.getByRole("menu", { name: "Table display" }).getByRole("group", { name: "Sound" });
+          const row = waiting.tv.getByRole("menu", { name: "Table display" }).getByRole("group", { name: "Volume" });
           await row.waitFor();
-          lines.push(...alignmentLines(await measureAlignment(row), `the display's Sound row ${where}`));
+          lines.push(...alignmentLines(await measureAlignment(row), `the display's Volume row ${where}`));
         }
       }
     } finally {
