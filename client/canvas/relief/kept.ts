@@ -1,6 +1,6 @@
 import { screenToView, type Camera, type Size } from "../../lib/camera.ts";
 import { meets, type Item } from "./buckets.ts";
-import { tonedBoxes, type DrawContext, type TonedBox } from "./drawRelief.ts";
+import { ToneIndex, type DrawContext, type TonedBox } from "./drawRelief.ts";
 import type { VBox } from "./pieces.ts";
 import type { KeptHost, KeptLayer } from "./scheduler.ts";
 
@@ -426,6 +426,8 @@ export type KeptBoard<T> = {
  * the view on screen (docs/design/design-v1-relief-pan.md 5.2).
  */
 export function keptHost<T>(b: KeptBoard<T>): KeptHost {
+  // The layout's cells that can tone, sorted once a layout and turn.
+  let tones: ToneIndex | null = null;
   return {
     layer: b.layer,
     at: (c) => ({ ...b.camera(), turn: b.turn(), width: c.width, height: c.height, ratio: c.ratio, key: b.key() }),
@@ -442,7 +444,10 @@ export function keptHost<T>(b: KeptBoard<T>): KeptHost {
     tonedNow: () => {
       const out: TonedBox[] = [];
       const d = b.dc();
-      if (d) for (const item of b.items()) if (item.kind === "run") tonedBoxes(item.pieces, d, out);
+      if (!d) return out;
+      const items = b.items();
+      if (!tones || tones.items !== items || tones.turn !== d.turn) tones = new ToneIndex(items, d.turn);
+      tones.boxes(d, out);
       return out;
     },
     drawChildren: (canvas, regions) => {

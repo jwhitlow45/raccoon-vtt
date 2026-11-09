@@ -12,7 +12,7 @@ import { viewToScreen } from "../../lib/camera.ts";
 import { stairRuns, type StairStep } from "../../lib/stairRuns.ts";
 import { drawnHeights, isometric, pickWalk, standSurface, toView, type DrawnHeights, type DrawnSource, type Turn } from "../../lib/view.ts";
 import { groupWalls, ReliefIndex } from "./buckets.ts";
-import { drawRun, tonedBoxes, type DrawContext } from "./drawRelief.ts";
+import { drawRun, tonedBoxes, ToneIndex, type DrawContext, type TonedBox } from "./drawRelief.ts";
 import { boundsOf, cellPieces, facesOf, risersOf, type CellPiece, type Face, type PieceSource, type VBox } from "./pieces.ts";
 import { standeeShape } from "./standee.ts";
 
@@ -623,5 +623,94 @@ describe("the detail flag reaches every reader together (7, D-261102-883)", () =
       const hit = pickWalk({ camera, view: isometric(0), grid: { shape: "squares" }, heights: d.heights }, viewToScreen(camera, toView(isometric(0), { x: 9.5, y: 6.5 }, 1.4)));
       assert.equal(Math.abs(hit.z - 1.4) < 1e-9, detail, `pick at detail ${detail}: ${hit.z}`);
     }
+  });
+});
+
+describe("the toned cells a scroll reads, sorted by where their ground at 0 lies (SUNKEN-PAN)", () => {
+  /** Stairs raised and sunk, platforms and pits around them, at every turn. */
+  const state = built([...RUNS, { t: "build.height", sceneId: "s1", cells: cellsOf(13, 9, 18, 15), height: 15 }, { t: "build.height", sceneId: "s1", cells: cellsOf(0, 0, 5, 4), height: -20 }] as Op[]);
+  const relief = index(state);
+  const key = (b: TonedBox) => `${b.x0},${b.y0},${b.x1},${b.y1},${b.past},${b.side}`;
+
+  test("at any camera and ground canvas it gives the boxes a pass over every cell gives", () => {
+    let some = 0;
+    let stairs = 0;
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...TURNS),
+        fc.double({ min: 2, max: 40, noNaN: true }),
+        fc.double({ min: -800, max: 800, noNaN: true }),
+        fc.double({ min: -800, max: 800, noNaN: true }),
+        fc.double({ min: 0, max: 900, noNaN: true }),
+        fc.constantFrom(1, 1.5, 2),
+        (turn, scale, x, y, height, ratio) => {
+          const items = relief.layout(turn, { x0: -1e6, y0: -1e6, x1: 1e6, y1: 1e6 }, []);
+          const ground = { width: 780, height } as HTMLCanvasElement;
+          const view = { x0: -x / scale, y0: -y / scale, x1: (390 - x) / scale, y1: (Math.max(1, height - 40) - y) / scale };
+          const dc: DrawContext = { turn, camera: { x, y, scale }, pixelRatio: ratio, ground: height < 1 ? null : ground, textures: {}, view };
+          const all: TonedBox[] = [];
+          for (const item of items) if (item.kind === "run") tonedBoxes(item.pieces, dc, all);
+          const sorted: TonedBox[] = [];
+          new ToneIndex(items, turn).boxes(dc, sorted);
+          assert.deepEqual(new Set(sorted.map(key)), new Set(all.map(key)));
+          if (all.length > 0 && all.length < 200) some++;
+          if (all.some((b) => b.past === undefined && b.y1 - b.y0 > 30 * ratio)) stairs++;
+        },
+      ),
+      { numRuns: 400, seed: 52 },
+    );
+    assert.ok(some > 40 && stairs > 0, `${some} cameras toned some cells, ${stairs} a stair`);
+  });
+
+  test("with a platform, a pit or a stair by the ground canvas's top or bottom it gives the boxes a pass over every cell gives", () => {
+    // The raised platform, the stair up to the 10 ft platform, the sunk room and the stair down to it.
+    const targets = [
+      { x: 15.5, y: 12 },
+      { x: 9.5, y: 7 },
+      { x: 3, y: 12 },
+      { x: 7, y: 11.5 },
+      { x: 2.5, y: 2 },
+    ];
+    let bottom = 0;
+    let top = 0;
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...TURNS),
+        fc.double({ min: 8, max: 60, noNaN: true }),
+        fc.constantFrom(...targets),
+        fc.boolean(),
+        fc.double({ min: -80, max: 80, noNaN: true }),
+        fc.double({ min: 120, max: 900, noNaN: true }),
+        fc.constantFrom(1, 1.5, 2),
+        (turn, scale, target, atTop, delta, height, ratio) => {
+          const v = toView(isometric(turn), target, 0);
+          const x = 195 - v.x * scale;
+          const y = (atTop ? 0 : height / ratio) + delta - v.y * scale;
+          const items = relief.layout(turn, { x0: -1e6, y0: -1e6, x1: 1e6, y1: 1e6 }, []);
+          const view = { x0: -x / scale, y0: -y / scale, x1: (390 - x) / scale, y1: (height / ratio - 20 - y) / scale };
+          const dc: DrawContext = { turn, camera: { x, y, scale }, pixelRatio: ratio, ground: { width: 780, height } as HTMLCanvasElement, textures: {}, view };
+          const all: TonedBox[] = [];
+          for (const item of items) if (item.kind === "run") tonedBoxes(item.pieces, dc, all);
+          const sorted: TonedBox[] = [];
+          new ToneIndex(items, turn).boxes(dc, sorted);
+          assert.deepEqual(new Set(sorted.map(key)), new Set(all.map(key)));
+          if (all.length > 0) {
+            if (atTop) top++;
+            else bottom++;
+          }
+        },
+      ),
+      { numRuns: 600, seed: 53 },
+    );
+    assert.ok(top > 50 && bottom > 50, `toned by the top ${top} times, by the bottom ${bottom}`);
+  });
+
+  test("with the scene well inside the ground canvas it reads no cell", () => {
+    const items = relief.layout(0, { x0: -1e6, y0: -1e6, x1: 1e6, y1: 1e6 }, []);
+    const tones = new ToneIndex(items, 0);
+    const out: TonedBox[] = [];
+    tones.boxes({ turn: 0, camera: { x: 400, y: 600, scale: 10 }, pixelRatio: 1, ground: { width: 2000, height: 4000 } as HTMLCanvasElement, textures: {}, view: { x0: -40, y0: -60, x1: 160, y1: 340 } }, out);
+    assert.equal(out.length, 0);
+    assert.equal(tones.read, 0, "a pass over every cell read each of them");
   });
 });

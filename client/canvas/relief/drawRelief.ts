@@ -4,7 +4,7 @@ import type { Camera } from "../../lib/camera.ts";
 import { theme } from "../../lib/theme.ts";
 import { depth, isometric, K, toView, turnAxes, type Turn } from "../../lib/view.ts";
 import type { BandPart } from "../../features/areas/volume.ts";
-import { meets, type DrawPiece, type VolumePiece } from "./buckets.ts";
+import { meets, type DrawPiece, type Item, type VolumePiece } from "./buckets.ts";
 import { patternOf, tintedPatternOf } from "./looks.ts";
 import { treadHeight } from "../../lib/stairRuns.ts";
 import { boundsOf, edgeLow, facesOf, frameParts, isOpening, partCorners, risersOf, slabCorners, sortKey, treadOrder, treadPolygon, WALL_THICK, type CellPiece, type Face, type FramePart, type PitRegion, type SideLook, type StaticPiece, type VBox, type WallItem } from "./pieces.ts";
@@ -214,16 +214,87 @@ function deviceView(dc: DrawContext): VBox {
 }
 
 /**
- * The painted boxes, in device pixels, of every cell of `pieces` on the
- * canvas whose top or floor takes the face tone at this camera: the cells
- * a scroll repaints, as they may gain or lose the ground (5.3).
+ * The boxes of every cell of `pieces` on the canvas whose top or floor
+ * takes the face tone at this camera: the cells a scroll repaints, as they
+ * may gain or lose the ground (5.3). A pass over every cell, which
+ * `ToneIndex` matches reading only the cells that can.
  */
 export function tonedBoxes(pieces: readonly DrawPiece[], dc: DrawContext, out: TonedBox[]): void {
   const view = deviceView(dc);
   for (const p of pieces) {
     if (p.kind !== "column" && p.kind !== "pit" && p.kind !== "steps") continue;
-    const box = paintedBox(p, dc);
-    if (meets(box, view) && tonedCell(p, dc, view)) out.push(tonedBox(p, dc));
+    tonedInto(p, dc, view, out);
+  }
+}
+
+function tonedInto(p: CellPiece, dc: DrawContext, view: VBox, out: TonedBox[]): void {
+  if (meets(paintedBox(p, dc), view) && tonedCell(p, dc, view)) out.push(tonedBox(p, dc));
+}
+
+/** A cell that can take the face tone, with the top and bottom of its ground at 0 in view units. */
+type ToneEntry = { p: CellPiece; y0: number; y1: number };
+
+/**
+ * A layout's cells that can take the face tone, sorted by where their
+ * ground at 0 lies, by its top and by its bottom. A cell tones only where
+ * its ground at 0 reaches past the ground canvas's top or bottom
+ * (tonedAt), so a pass at a camera reads the cells from each end and stops
+ * at the first that cannot. A pass over every cell of the layout, on each
+ * scroll, cost a sunk scene a fifth of its frame and a raised scene at
+ * 12 px a tenth (SUNKEN-PAN).
+ */
+export class ToneIndex {
+  readonly items: readonly Item[];
+  readonly turn: Turn;
+  readonly #byTop: ToneEntry[] = [];
+  readonly #byBottom: ToneEntry[];
+  /** How many cells the last pass read, for the tests. */
+  read = 0;
+
+  constructor(items: readonly Item[], turn: Turn) {
+    this.items = items;
+    this.turn = turn;
+    // A cell drawn again over a standee comes once.
+    const seen = new Set<CellPiece>();
+    for (const item of items) {
+      if (item.kind !== "run") continue;
+      for (const p of item.pieces) {
+        if ((p.kind !== "column" && p.kind !== "pit" && p.kind !== "steps") || seen.has(p)) continue;
+        seen.add(p);
+        // A stair's treads each read the ground at 0 under their own polygon: together they reach as far as any.
+        const sources = p.kind === "steps" ? stepsShapeOf(p, turn).treads.map((t) => t.source) : [shapeOf(p, turn).source];
+        this.#byTop.push({ p, y0: Math.min(...sources.map((b) => b.y0)), y1: Math.max(...sources.map((b) => b.y1)) });
+      }
+    }
+    this.#byBottom = [...this.#byTop].sort((a, b) => b.y1 - a.y1);
+    this.#byTop.sort((a, b) => a.y0 - b.y0);
+  }
+
+  /** Adds the toned cells' boxes at this camera, as `tonedBoxes` over the layout gives them, in another order. */
+  boxes(dc: DrawContext, out: TonedBox[]): void {
+    const view = deviceView(dc);
+    const ground = dc.ground;
+    this.read = 0;
+    const take = (p: CellPiece) => {
+      this.read++;
+      tonedInto(p, dc, view, out);
+    };
+    // With no ground every cell on the canvas takes its tone.
+    if (!ground || ground.width === 0 || ground.height === 0) {
+      for (const e of this.#byTop) take(e.p);
+      return;
+    }
+    const k = dc.pixelRatio * dc.camera.scale;
+    const ey = dc.pixelRatio * dc.camera.y;
+    const pastTop = (e: ToneEntry) => e.y0 * k + ey - EDGE_PX < 0;
+    for (const e of this.#byTop) {
+      if (!pastTop(e)) break;
+      take(e.p);
+    }
+    for (const e of this.#byBottom) {
+      if (e.y1 * k + ey + EDGE_PX <= ground.height) break;
+      if (!pastTop(e)) take(e.p);
+    }
   }
 }
 
