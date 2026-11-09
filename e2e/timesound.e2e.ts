@@ -80,6 +80,8 @@ const run = {
 const DESK = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
+/** A large phone, whose bar keeps the compact chip beside this device's speaker: at 390 px the speaker takes its room (docs/design/design-v1-volume.md 3). */
+const LARGE_PHONE = { width: 430, height: 932 };
 /** Between 600 and 899 px, where the chip opens its player as a centered card (5.3). */
 const CARD = { width: 700, height: 900 };
 /** Under 900 px, so the side panel's Sound becomes the phone's sheet. */
@@ -1062,7 +1064,7 @@ describe("Time and Sound as panels", { concurrency: false }, () => {
       await reload(dm);
     });
     await playTavern();
-    await dm.setViewportSize(PHONE);
+    await dm.setViewportSize(LARGE_PHONE);
     await reload(dm);
     await closeSheets();
     const log = await sheet(dm, "Log");
@@ -1070,9 +1072,9 @@ describe("Time and Sound as panels", { concurrency: false }, () => {
     await waitFor("the compact chip", async () => ((await chip.getAttribute("data-chip-form").catch(() => null)) === "compact" ? true : null), 5_000);
     let player = await openNowPlayer();
     const box = await player.locator(":scope > section").boundingBox();
-    assert.ok(box && Math.abs(box.y + box.height - PHONE.height) <= 1, `a sheet from the screen's foot (${JSON.stringify(box)})`);
+    assert.ok(box && Math.abs(box.y + box.height - LARGE_PHONE.height) <= 1, `a sheet from the screen's foot (${JSON.stringify(box)})`);
     assert.equal(await log.count(), 1, "the Log's sheet stays behind it");
-    assert.deepEqual(alignmentLines(await measureAlignment(player.locator(":scope > section")), "the chip's sheet, 390x844"), []);
+    assert.deepEqual(alignmentLines(await measureAlignment(player.locator(":scope > section")), "the chip's sheet, 430x932"), []);
     await shots.take(dm, "sl-7c-sheet");
     await player.getByRole("button", { name: /^Close/ }).first().click();
     await player.waitFor({ state: "detached" });
