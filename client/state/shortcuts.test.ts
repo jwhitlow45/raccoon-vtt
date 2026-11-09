@@ -1385,6 +1385,7 @@ describe("a control shows the key of the shortcut it does (D-261028-09)", () => 
     ["sidePanel", "client/pages/Room.tsx", "Panels, while the side panel is hidden"],
     ["fullscreen", "client/pages/RoomChrome.tsx", "the top bar's Full screen"],
     ["mute", "client/features/sound/device/DeviceSound.tsx", "this device's volume controls' mute toggle"],
+    ["mute", "client/features/sound/device/Speaker.tsx", "the top bar's speaker, whose tooltip names it"],
     ["sheet", "client/features/device/ThisDevice.tsx", "Menu, This device's Show the shortcuts"],
     // One hook names both keys for the top bar's Floor and the room menu's Floor row (useFloorKeys).
     ["floorBelow", "client/features/floors/FloorButton.tsx", "the top bar's Floor, and the room menu's Floor row where the bar folds it with View"],
