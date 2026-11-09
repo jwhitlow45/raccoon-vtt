@@ -21,7 +21,7 @@ import { MoveLayer } from "./movement/MoveLayer.tsx";
 import { FlashLayer } from "./outliner/FlashLayer.tsx";
 import { PinLayer } from "./pins/PinLayer.tsx";
 import { TetherLayer } from "./attach/TetherLayer.tsx";
-import { TrapLayer } from "./traps/TrapLayer.tsx";
+import { TrapLayer, TrapNameLayer } from "./traps/TrapLayer.tsx";
 import { TrapAlerts } from "./traps/useTrapAlerts.ts";
 import { TeleportToasts } from "./movement/toasts.ts";
 import { PingController } from "./pings/PingController.ts";
@@ -172,6 +172,7 @@ export const LAYERS: readonly LayerDef[] = [
   { id: "pins", layer: "overlay", order: 15, iso: "upright", Component: PinLayer },
   { id: "tethers", layer: "board", order: 40, iso: "ground", Component: TetherLayer },
   { id: "traps", layer: "board", order: 35, iso: ["ground", "upright"], Component: TrapLayer },
+  { id: "trapNames", layer: "overlay", order: 36, iso: "off", Component: TrapNameLayer },
 ];
 
 /** Everything that runs effects for the board and draws nothing, mounted once outside both drawing trees. */

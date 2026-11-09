@@ -533,6 +533,17 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     assert.deepEqual(seen.zone, { cells: [{ x: 6, y: 4, w: 2, h: 2 }] });
     assert.equal(seen.rig, undefined, "no rig reaches a player");
     await waitFor("the pit's name on Pat's map", async () => ((await boardTexts(pat)).includes("Hidden Pit") ? true : null));
+    // The name stands in the overlay, the top layer, with the fog drawn before it, so fog over unseen ground never cuts it (LP33-B polish note).
+    const nameLayer = await pat.evaluate(() => {
+      type Layer = { getChildren?(): unknown[] };
+      type Node = { text(): string; getLayer(): Layer | null };
+      type Stage = { find(selector: string): Node[]; getLayers(): Layer[] };
+      const stage = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva.stages[0]!;
+      const layer = stage.find("Text").find((t) => t.text() === "Hidden Pit")?.getLayer();
+      const layers = stage.getLayers();
+      return { fromTop: layer ? layers.length - 1 - layers.indexOf(layer) : -1 };
+    });
+    assert.equal(nameLayer.fromTop, 0, "the found trap's name is on the overlay, the board's top layer");
     await shots.take(pat, "traps-pat-found");
     await pane(dm).getByRole("button", { name: "Done", exact: true }).click();
   });

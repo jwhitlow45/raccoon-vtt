@@ -83,6 +83,35 @@ export const TrapLayer = memo(function TrapLayer(props: LayerProps) {
   );
 });
 
+/**
+ * The found traps' names on the overlay layer, above the fog and the dark
+ * (LP33-B polish note), in Top-down: a trap's zone and badge lie under the
+ * fog as the traps layer says, but its name over unseen ground was cut. A
+ * player's copy holds only the traps they found, and the DM's every trap, so
+ * this draws nothing a viewer may not see. Isometric draws its names with
+ * the traps layer, by the stand rule.
+ */
+export const TrapNameLayer = memo(function TrapNameLayer(props: LayerProps) {
+  const traps = useTreeShownView((s) => s.floorView?.traps ?? NO_TRAPS);
+  const chunks = useTreeShownView((s) => s.floorView?.buildChunks ?? NO_CHUNKS);
+  const dm = props.role === "dm";
+  const grid = useMemo(() => sceneGrid(props.scene), [props.scene.gridShape]);
+  const list = useMemo(() => Object.values(traps).filter((t) => t.sceneId === props.scene.id), [traps, props.scene.id]);
+  return (
+    <Group listening={false}>
+      {list.map((trap) => {
+        const name = trapNamePill(grid, trap, chunks, props.scale, dm);
+        if (!name) return null;
+        return (
+          <Group key={trap.id} opacity={dm && trap.state === "sprung" ? 0.8 : 1}>
+            <MarkPill {...name} scale={props.scale} color={lookOf(trap as SeenTrap, dm).color} />
+          </Group>
+        );
+      })}
+    </Group>
+  );
+});
+
 type Look = { color: string; fill: number; hatch: number; dash: number[] | undefined; width: number };
 
 /** How a trap reads (4.1, 4.5): by its state for the DM, and for players only found and whether it is disarmed. */
@@ -245,7 +274,8 @@ const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Re
   const iso = props.iso;
   // Top-down draws the badge and name under the fog, so each stands only where every sub-cell under it is revealed (5.2).
   const badgeHere = drawsHere(iso, iso ? markStands(iso.fog, trapBadgeBox(badge, scale, found)) : true);
-  const nameHere = name !== null && drawsHere(iso, iso ? pillStands(iso.fog, { ...name, scale }) : true);
+  // Top-down draws the name above the fog (TrapNameLayer), so a found trap's name is never cut by fog over ground its zone lies on.
+  const nameHere = name !== null && iso !== null && drawsHere(iso, pillStands(iso.fog, { ...name, scale }));
   const badgeAt = iso?.place === "upright" ? viewPointOf(iso, badge) : badge;
   return (
     <Group opacity={dm && trap.state === "sprung" ? 0.8 : 1}>
