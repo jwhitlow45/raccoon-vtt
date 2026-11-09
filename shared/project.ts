@@ -37,6 +37,7 @@ import {
   type MemoryChunk,
   type Pin,
   type PlayerChunk,
+  type ProjectedFloorLink,
   type RememberedWall,
   type RollRequest,
   type RollTarget,
@@ -167,7 +168,7 @@ export type ProjectedTrap = Omit<Trap, "state" | "found"> & Partial<Pick<Trap, "
  */
 export type ProjectedClock = Omit<RoomClock, "shown"> & { shown?: boolean };
 
-export type ProjectedState = Omit<RoomState, "meta" | "tokens" | "characters" | "templates" | "encounter" | "traps" | "holders" | "exploredBy" | "clock"> & {
+export type ProjectedState = Omit<RoomState, "meta" | "tokens" | "characters" | "templates" | "encounter" | "traps" | "holders" | "exploredBy" | "clock" | "floorLinks"> & {
   meta: RoomMeta & {
     /** DM only, never stored. Retained HP undo records, including lines outside the live projection. */
     hpUndoLogIds?: string[];
@@ -180,6 +181,8 @@ export type ProjectedState = Omit<RoomState, "meta" | "tokens" | "characters" | 
   };
   tokens: Record<string, ProjectedToken>;
   traps: Record<string, ProjectedTrap>;
+  /** The ends of stairs and ladders, each as stored for the DM and cut for a player (projectFloorLinkCtx), only while the copy holds one. */
+  floorLinks?: Record<string, FloorLink | ProjectedFloorLink>;
   characters: Record<string, ProjectedCharacter>;
   templates: Record<string, ProjectedTemplate>;
   encounter: ProjectedEncounter | null;
@@ -2895,25 +2898,18 @@ function projectStampCtx(ctx: Ctx, stamp: Stamp): Stamp | null {
 }
 
 /**
- * Traps (docs/design/design-v1-traps.md 6.4). The DM gets every trap on its scene.
- * A player gets one only once it is found, on a floor they hold outside a
- * blackout, not under full fog over its cells by the labels' rule (a wire's
- * cells, a door's two cells), and for a door zone only while its door is
- * not a secret one still hidden: its name, its zone, and whether the DM
- * disarmed it. So a springing, re-arming, uses and rig edits send players
- * nothing, and a trap nobody found is in no player's data at all.
+ * An end of stairs or a ladder as a viewer gets it
+ * (docs/design/design-v1-floors.md phase 2, 4), on a floor they hold: the
+ * DM every end as stored, a player one on revealed ground by the labels'
+ * rule, as a found trap's zone, and never remembered. A player's is cut to
+ * LINK_FOR_PLAYERS, with the way it leads worked out from the levels the
+ * copy never gets. Permissions read the same answer (permissions.ts
+ * climbCheck), so a climb on an end a player does not get answers as one
+ * on no stairs. Nothing is kept between projections: `to` reads the
+ * viewer's held floors, so a copy made for one viewer must never reach
+ * another.
  */
-/**
- * An end of stairs or a ladder as a viewer gets it (docs/design/design-v1-floors.md
- * phase 2, 4), on a floor they hold: the DM every end as stored, a player
- * one on revealed ground, as a found trap's zone, cut to ProjectedFloorLink:
- * no pair, ground or seq, `to` only while they hold that floor, the way it
- * leads from the levels, and rev 0. Permissions read the same answer
- * (permissions.ts climbCheck), so a climb on an end a player does not get
- * answers as one on no stairs. FL2-B owns its projection kind: what
- * re-projects it and the snapshot's field.
- */
-function projectFloorLinkCtx(ctx: Ctx, link: FloorLink): unknown {
+function projectFloorLinkCtx(ctx: Ctx, link: FloorLink): FloorLink | ProjectedFloorLink | null {
   if (!ctx.floors.has(link.sceneId)) return null;
   if (ctx.viewer.role === "dm") return link;
   const scene = ownEntry(ctx.state.scenes, link.sceneId);
@@ -2924,10 +2920,38 @@ function projectFloorLinkCtx(ctx: Ctx, link: FloorLink): unknown {
   }
   const dir = linkDir(ctx.state, link);
   if (dir === null) return null;
-  const { pair: _pair, to, ground: _ground, made: _made, ...kept } = link;
-  return { ...kept, rev: 0, ...(ctx.floors.has(to) ? { to } : {}), dir };
+  const out: ProjectedFloorLink = { id: link.id, rev: 0, sceneId: link.sceneId, rect: link.rect, kind: link.kind, dir };
+  if (link.locked) out.locked = true;
+  if (link.grid !== undefined) out.grid = link.grid;
+  if (ctx.floors.has(link.to)) out.to = link.to;
+  return out;
 }
 
+/** An end's fields for players (docs/design/design-v1-floors.md phase 2, 4), held to every key of FloorLink as TRAP_FOR_PLAYERS is. */
+export const LINK_FOR_PLAYERS = {
+  id: "copied",
+  rev: "zeroed",
+  sceneId: "copied",
+  to: "changed: only while the viewer holds that floor, since a floor not held sends no id",
+  pair: "dm: a record of the far floor",
+  rect: "copied",
+  kind: "copied",
+  locked: "copied",
+  // The shape its squares were written under, as public as the scene's shape, as a trap's.
+  grid: "copied",
+  ground: "dm: the check that the ground under it stays put. A device reads ground from its own build chunks",
+  made: "dm: the seq that tells stairs placed again from the stairs a climb took",
+} as const satisfies Record<keyof FloorLink, PlayerField>;
+
+/**
+ * Traps (docs/design/design-v1-traps.md 6.4). The DM gets every trap on its scene.
+ * A player gets one only once it is found, on a floor they hold outside a
+ * blackout, not under full fog over its cells by the labels' rule (a wire's
+ * cells, a door's two cells), and for a door zone only while its door is
+ * not a secret one still hidden: its name, its zone, and whether the DM
+ * disarmed it. So a springing, re-arming, uses and rig edits send players
+ * nothing, and a trap nobody found is in no player's data at all.
+ */
 function projectTrapCtx(ctx: Ctx, trap: Trap): ProjectedTrap | null {
   if (!ctx.floors.has(trap.sceneId)) return null;
   if (ctx.viewer.role === "dm") return trap;
@@ -4461,7 +4485,14 @@ function projectStateCtx(ctx: Ctx): ProjectedState {
     ...clockField(ctx),
     ...soundFields(ctx),
     ...openedField(ctx),
+    ...floorLinksField(ctx),
   };
+}
+
+/** The ends of stairs and ladders the viewer gets, as a field only while it holds one, as keys.ts writeEntity keeps it. */
+function floorLinksField(ctx: Ctx): Pick<ProjectedState, "floorLinks"> {
+  const links = projectMap(ctx.state.floorLinks ?? {}, (link) => projectFloorLinkCtx(ctx, link));
+  return Object.keys(links).length > 0 ? { floorLinks: links } : {};
 }
 
 /** The floors players have reached, the DM's alone, as a field only while it holds a mark, as keys.ts writeEntity keeps it. */
@@ -4545,6 +4576,7 @@ export function allKeys(state: RoomState): EntityKey[] {
   for (const id of Object.keys(state.members)) out.push(keys.member(id));
   for (const id of Object.keys(state.scenes)) out.push(keys.scene(id));
   for (const id of Object.keys(state.openFloors ?? {})) out.push(keys.opened(id));
+  for (const id of Object.keys(state.floorLinks ?? {})) out.push(keys.floorLink(id));
   for (const c of Object.values(state.buildChunks)) out.push(keys.chunk(c.sceneId, c.cx, c.cy));
   // On a scene with fog on every position may hold a stub (docs/design/design-v1-map-discovery.md 5.6), and memory can name labels and stamps the build no longer has.
   const chunkKeys = new Set(Object.values(state.buildChunks).map((c) => keys.chunk(c.sceneId, c.cx, c.cy)));
@@ -5048,6 +5080,8 @@ function tileDependents(state: RoomState, tiles: ReadonlyMap<string, ReadonlySet
   }
   for (const pin of Object.values(state.pins)) if (on(pin.sceneId, pinCells(pin))) add(keys.pin(pin.id));
   for (const trap of Object.values(state.traps ?? {})) if (zoneRanges(state, trap.sceneId, trap.zone).some((r) => on(trap.sceneId, r))) add(keys.trap(trap.id));
+  // An end reaches players by the fog over its squares, read as a found trap's (projectFloorLinkCtx).
+  for (const link of Object.values(state.floorLinks ?? {})) if (zoneRanges(state, link.sceneId, { cells: [link.rect] }).some((r) => on(link.sceneId, r))) add(keys.floorLink(link.id));
 }
 
 /**

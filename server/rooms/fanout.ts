@@ -134,7 +134,8 @@ export function floorOfKey(state: RoomState, key: EntityKey): SceneId | null {
     case "stamp":
     case "light":
     case "pin":
-    case "trap": {
+    case "trap":
+    case "floorLink": {
       const sceneId = (readEntity(state, key) as { sceneId?: unknown } | null)?.sceneId;
       return typeof sceneId === "string" ? sceneId : null;
     }
@@ -180,7 +181,10 @@ function hashOf(projected: unknown): string {
  *
  * Everything else reads who the player is or what they own, and is
  * projected per member. On a whole-party scene each of the three is the
- * same for every player, as it always was.
+ * same for every player, as it always was. An end of stairs or a ladder
+ * reads the fog as a found trap does, but names its far floor only to a
+ * viewer who holds that floor (docs/design/design-v1-floors.md phase 2, 4),
+ * so it is one of these.
  */
 const SCENE_KINDS = new Set(["scene", "light", "explored", "fogDraft", "sightAll", "fogAll", "exploredAny", "exploredBy", "holders"]);
 const FOG_KINDS = new Set(["fog", "label", "stamp", "trap"]);
