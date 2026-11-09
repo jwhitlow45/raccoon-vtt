@@ -60,7 +60,7 @@ const CASES: { name: string; seed: string; settings: DungeonSettings; key: boole
   { name: "largest", seed: `${versionChar()}G3N-ERAT-0R5E-ED00`, settings: LARGEST, key: false },
   { name: "cave", seed: `${versionChar()}C4V-R0CK-5H4D-0W00`, settings: { ...DEFAULT_SETTINGS, theme: "cave" }, key: true },
   { name: "sewer-wide", seed: `${versionChar()}5EW-RW1D-E0CH-ANE1`, settings: { ...DEFAULT_SETTINGS, theme: "sewer", wide: true, band: "11-16" }, key: true },
-  { name: "secrets", seed: `${versionChar()}5EC-RE7D-00R5-KEY0`, settings: { ...DEFAULT_SETTINGS, secrets: SECRETS_MAX, lit: LIT_MAX, dressing: "full" }, key: true },
+  { name: "secrets", seed: `${versionChar()}5EC-RE7D-00R5-KEY1`, settings: { ...DEFAULT_SETTINGS, secrets: SECRETS_MAX, lit: LIT_MAX, dressing: "full" }, key: true },
   { name: "secrets-wide", seed: `${versionChar()}0DT-7M1E-V8N2-FW9P`, settings: { ...DEFAULT_SETTINGS, wide: true, secrets: SECRETS_MAX }, key: false },
 ];
 

@@ -443,6 +443,8 @@ export function planProblems(planned: Planned, s: DungeonSettings): string[] {
           if (raisedRun.has(k) || g.up[k] !== undefined) say(`trap on a run or stair at ${at(k)}`);
           if (doorMouths.has(k)) say(`trap on a doorway's outside square at ${at(k)}`);
           if (g.room[k]! >= 0 && plan.rooms[g.room[k]!]!.entrance) say("trap in the entrance room");
+          // The pin is the DM's shared tap target, so no zone may cover it.
+          if (g.room[k]! >= 0 && plan.rooms[g.room[k]!]!.pin.join() === `${x},${y}`) say(`${t.preset} covers the pin at ${at(k)}`);
           if (g.room[k]! >= 0 && g.ground[k] !== plan.rooms[g.room[k]!]!.ground) say(`trap on a dais at ${at(k)}`);
           if (g.room[k]! < 0 && !s.wide && !plate) say(`pit trap in a Narrow corridor at ${at(k)}`);
           if (t.preset === "fire-casting-statue" && g.room[k]! < 0) say(`a statue's plate in a corridor at ${at(k)}`);

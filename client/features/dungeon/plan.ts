@@ -422,8 +422,10 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   const inside = new Set(doorways.filter((d) => !isSecret(d)).flatMap((d) => d.inside));
   const secretMouths = new Set(secret.flatMap((c) => c.doorway.outside));
   const painted = (k: number) => inRoom(k) || corridor.has(k);
+  // The pin is the DM's tap target for the room, so a trap zone must not cover it.
+  const onPin = (k: number) => board.roomAt[k] !== 0 && k === pins.get(board.roomAt[k]! - 1);
   const floorFree = (k: number) =>
-    painted(k) && !overlay.has(k) && !daisSquares.has(k) && !clear.has(k) && !inside.has(k) && !secretMouths.has(k) && (board.roomAt[k] !== 0 || plainCorridor(k));
+    painted(k) && !onPin(k) && !overlay.has(k) && !daisSquares.has(k) && !clear.has(k) && !inside.has(k) && !secretMouths.has(k) && (board.roomAt[k] !== 0 || plainCorridor(k));
   const ownFloor = (i: number, k: number) => board.roomAt[k] === i + 1 && inRoom(k) && k !== pins.get(i);
   const roomTerrain = (i: number) => {
     const r = board.rooms[i]!;
