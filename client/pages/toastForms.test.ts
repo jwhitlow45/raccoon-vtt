@@ -153,6 +153,16 @@ test("FU39 confer: sheet toasts stay assigned to the sheet and are dismissed whe
   assert.deepEqual(sheetToastsToDismiss(false, closed.places, new Set([1])), [1]);
 });
 
+test("LP32-POLISH d: the first of a toast's chips is the primary one, as the first chip under a roll is", async () => {
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const send = (label: string) => ({ label, name: `Apply to ${label}`, send: async () => null });
+  const toast: Toast = { id: 4, text: "Bree rolled 9.", tone: "info", actions: [send("Goblin 1"), send("Goblin 2"), send("Goblin 3")], actionsLabel: "Apply to" };
+  const markup = renderToStaticMarkup(React.createElement(ToastNote, { toast, onDismiss() {} }));
+  const background = (name: string) => /style="([^"]*)"/.exec(new RegExp(`<button[^>]*aria-label="Apply to ${name}"[^>]*>`).exec(markup)![0])![1]!.match(/background(?:-color)?:[^;]*/)![0];
+  assert.notEqual(background("Goblin 1"), background("Goblin 2"), "the first stands apart from the rest");
+  assert.equal(background("Goblin 2"), background("Goblin 3"), "and the rest read alike");
+});
+
 test("QOL L1: a toast's buttons that wait on the server follow their label, the busy one says so, and the one row keeps them mounted and hidden", async () => {
   const { renderToStaticMarkup } = await import("react-dom/server");
   const send = (label: string) => ({ label, name: `Apply 9 Slashing damage to ${label}`, send: async () => null });

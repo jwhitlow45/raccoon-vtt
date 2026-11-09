@@ -200,6 +200,8 @@ export function ToastNote(props: { toast: Toast; onDismiss(): void; form?: "stac
               <Button
                 key={i}
                 size="sm"
+                // The first is the likeliest, as ApplyTo's first chip is, so the two lists of chips read alike.
+                variant={i === 0 ? "primary" : "secondary"}
                 busy={t.busy === i}
                 disabled={waits && t.busy !== i}
                 aria-label={send.name}
