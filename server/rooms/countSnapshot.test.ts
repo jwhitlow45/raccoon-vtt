@@ -129,6 +129,20 @@ describe("the first commit of a room saved before the count", () => {
   });
 });
 
+describe("numbers an older build made", () => {
+  test("a count stored here never falls below the rows and snapshot an older build wrote after it", async (t) => {
+    // A room this build counted to 3, then loaded by an older build, which went on numbering by its seq.
+    const f = scopeFixture();
+    const snapshotted = new StoredRoomDb(f.state, { version: OLD, seq: 9, pub: 3 });
+    const chat = await (await (await storedActor(t, snapshotted)).connect(f.dm)).apply({ t: "log.chat", text: "back here" });
+    assert.equal(chat.seq, 10, "past the older build's snapshot at 9");
+    const g = scopeFixture();
+    const rowed = new StoredRoomDb(g.state, { version: OLD, seq: 2, pub: 3, rows: [oldChat(3, g.dm), oldChat(4, g.dm), oldChat(5, g.dm)] });
+    const next = await (await (await storedActor(t, rowed)).connect(g.dm)).apply({ t: "log.chat", text: "back here" });
+    assert.equal(next.seq, 6, "past the older build's rows to 5");
+  });
+});
+
 describe("the build and the write of that snapshot", () => {
   test("a build that throws commits the batch without it and logs once, and a commit past the wait stores it", async (t) => {
     const f = scopeFixture();

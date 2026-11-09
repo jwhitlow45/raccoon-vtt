@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { dmNumbered, logsInIdOrder, whisperParties } from "#shared/logRings.ts";
-import { COUNT_OP_VERSION, MAP_DISCOVERY_OP_VERSION, OP_VERSION, SNAPSHOT_VERSION, mapDiscoveryUpgrade, migrateOp, migrateSnapshot, needsMapDiscoveryUpgrade, opMigrations, type MigrationStep } from "#shared/migrate.ts";
+import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, MAP_DISCOVERY_OP_VERSION, OP_VERSION, SNAPSHOT_VERSION, mapDiscoveryUpgrade, migrateOp, migrateSnapshot, needsMapDiscoveryUpgrade, opMigrations, type MigrationStep } from "#shared/migrate.ts";
 import type { LogEntry, RoomState, SoundFacts, VideoFacts, Viewer } from "#shared/model.ts";
 import { checkedVideoFacts, opSchema, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -117,12 +117,15 @@ function rowNumber(r: OpRow): number | null {
  * Each row replays with the number its envelope took (rowNumber) and
  * whether it moved the count (counted.ts), never one worked out again. The
  * room's count is `rooms.pub`, written in the transaction of every commit
- * since the count began, so no stored number is above it, and the
- * snapshot's seq, which counts the server's own ops too, never stands in
- * for it. A room without one, never committed by a build with the count,
- * counts on from its snapshot's seq and takes every number its stored rows
- * hold, those past a replay failure included, so its next line never takes
- * an id one of them holds.
+ * since the count began, and a snapshot this build wrote, whose seq counts
+ * the server's own ops too, never stands in for it. A room without one,
+ * never committed by a build with the count, counts on from its snapshot's
+ * seq. Either way the count takes every number the stored rows hold, those
+ * past a replay failure included, and the seq of a snapshot an older build
+ * wrote, whose lines and turns that seq numbered, so the next line never
+ * takes an id one of them holds, even after an older build wrote to a room
+ * it could still load (a room whose replay failed here, or whose snapshot
+ * here could not be written yet).
  */
 export async function loadRoom(
   pool: Pool,
@@ -200,11 +203,9 @@ export async function loadRoom(
     }
   }
   if (upgrade) state = mapDiscoveryUpgrade(state);
-  let pub = row.pub === null || row.pub === undefined ? null : Number(row.pub);
-  if (pub === null) {
-    pub = snapshotSeq;
-    for (const r of ops.rows) pub = Math.max(pub, rowNumber(r) ?? 0);
-  }
+  let pub = row.pub === null || row.pub === undefined ? snapshotSeq : Number(row.pub);
+  if (row.schema_version < COUNT_SNAPSHOT_VERSION) pub = Math.max(pub, snapshotSeq);
+  for (const r of ops.rows) pub = Math.max(pub, rowNumber(r) ?? 0);
   return { state, seq, pub, snapshotSeq, snapshotVersion: row.schema_version, replayFailed, replayed, stateBytes: serializedBytes(state) };
 }
 
