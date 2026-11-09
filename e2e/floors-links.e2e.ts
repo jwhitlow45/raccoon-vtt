@@ -176,6 +176,20 @@ function climbsSent(socket: SocketWatch): number {
 
 const thornAt = (socket: SocketWatch) => socket.state?.tokens[run.tThorn];
 
+/** A creature's bar after a reload: the page may bring the selection back by itself, and a tap then would let go of it. */
+async function barAfterReload(page: Page, name: string, cell: { x: number; y: number }): Promise<Locator> {
+  const bar = barOf(page, name);
+  const back = await bar.waitFor({ timeout: 3_000 }).then(
+    () => true,
+    () => false,
+  );
+  if (!back) {
+    await tapCell(page, BOUNDS, cell);
+    await bar.waitFor();
+  }
+  return bar;
+}
+
 /** Lets go of whatever a page has selected, by Escape on the map. */
 async function deselect(page: Page): Promise<void> {
   for (let i = 0; i < 3 && (await page.getByRole("dialog", { name: /actions$/ }).count()) > 0; i++) await keyOn(page, "Escape");
@@ -293,7 +307,7 @@ describe("Go up and Go down, and the stairs on the board", { concurrency: false 
       await dm.reload();
       await dm.getByRole("status", { name: "Connected" }).first().waitFor();
       await sleep(600);
-      if (!(await bar.isVisible())) await tapCell(dm, BOUNDS, STAIRS);
+      await barAfterReload(dm, "Thorn", STAIRS);
       await climbButton(bar, "up").waitFor();
       lines.push(...alignmentLines(await measureAlignment(passing), `DM bar 1440 at ${scale * 100}%`));
       await shots.take(dm, `flrl-2-dm-bar-go-up-${scale * 100}`);
@@ -444,9 +458,7 @@ describe("Go up and Go down, and the stairs on the board", { concurrency: false 
           await ana.reload();
           await ana.getByRole("status", { name: "Connected" }).first().waitFor();
           await sleep(800);
-          await tapCell(ana, BOUNDS, STAIRS);
-          const bar = barOf(ana, "Thorn");
-          await bar.waitFor();
+          const bar = await barAfterReload(ana, "Thorn", STAIRS);
           await sleep(300);
           let up = climbButton(bar, "up");
           if ((await up.count()) === 0) {
