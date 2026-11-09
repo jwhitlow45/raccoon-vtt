@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
+import { useShallow } from "zustand/react/shallow";
 import type { Scene } from "#shared/model.ts";
 import { sayJoined } from "../view/choice.ts";
 import { displayName } from "../../lib/scene.ts";
@@ -15,9 +16,8 @@ import { followedLine, showingLine } from "./words.ts";
 
 /** The floors this device holds of the scene projected, bottom first: one or none on a scene of one floor. */
 export function useHeldFloors(): readonly Scene[] {
-  const scenes = useRoomView((s) => s.view?.scenes);
-  const anchor = useRoomView((s) => s.projectedSceneId);
-  return useMemo(() => (scenes ? heldHere({ scenes }, anchor) : []), [scenes, anchor]);
+  // Read whole and kept while it holds the same floors, so a scene added or changed elsewhere draws nothing that reads them.
+  return useRoomView(useShallow((s) => heldHere(s.view, s.projectedSceneId)));
 }
 
 /** The floor shown, while this device holds more than one, else null. */
