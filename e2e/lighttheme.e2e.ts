@@ -1334,6 +1334,10 @@ async function whiteArtHalo(): Promise<string[]> {
   await sleep(400);
   const halo = (p: [number, number, number]) => p.every((v) => v <= 50);
   const white = (p: [number, number, number]) => p.every((v) => v >= 235);
+  // The picture loads and decodes after the map is set, and under load that takes longer than the pauses above (LT3-HALO-FLAKE).
+  // Until it is drawn the board's own color shows, which reads as a white check failing, so wait on the art itself.
+  const centreOfMap = { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2), width: 1, height: 1 };
+  await waitFor("the white map drawn", async () => (white((await pixels(dm, centreOfMap)).at(0, 0)) ? true : null), 10_000);
 
   // A floating tool, focused by keys: Tab on from the map's focus target.
   const map = dm.locator('[role="img"][aria-label="Map"][data-rvtt-ring]');
