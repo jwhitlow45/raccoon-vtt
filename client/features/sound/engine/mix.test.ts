@@ -16,7 +16,8 @@ Object.assign(globalThis, {
     removeItem: (k: string) => void stored.delete(k),
   },
 });
-const { channelGains, deviceMix, subscribeDeviceMix } = await import("./engine.ts");
+const { SHORT_FADE_MS } = await import("#shared/sound.ts");
+const { channelGains, deviceMix, moveGain, subscribeDeviceMix } = await import("./engine.ts");
 const { setSoundMix } = await import("../../device/settings.ts");
 const { chooseDisplayVolume } = await import("../../display/remember.ts");
 
@@ -52,4 +53,24 @@ test("the engine hears a display's level as it changes, and a member's mix, each
   offMember();
   chooseDisplayVolume(100);
   assert.deepEqual([display, member], [1, 1]);
+});
+
+function fakeParam(value: number) {
+  const calls: string[] = [];
+  return {
+    calls,
+    value,
+    cancelScheduledValues: () => void calls.push("cancel"),
+    setValueAtTime: (v: number, t: number) => void calls.push(`set ${v} @${t}`),
+    linearRampToValueAtTime: (v: number, t: number) => void calls.push(`ramp ${v} @${t}`),
+  };
+}
+
+test("a gain ramps over the short fade while the engine plays, and is set at once while it does not", () => {
+  const playing = fakeParam(0.49);
+  moveGain(playing, 0.0025, 10, true);
+  assert.deepEqual(playing.calls, ["cancel", "set 0.49 @10", `ramp 0.0025 @${10 + SHORT_FADE_MS / 1000}`]);
+  const held = fakeParam(0.49);
+  moveGain(held, 0.0025, 10, false);
+  assert.deepEqual(held.calls, ["cancel", "set 0.0025 @10"], "no ramp is left running when the engine goes active");
 });

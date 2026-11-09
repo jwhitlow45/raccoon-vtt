@@ -70,6 +70,22 @@ export function subscribeDeviceMix(kind: PageKind, listener: () => void): () => 
 
 export type ChannelGains = { readonly music: number; readonly loop: number; readonly effects: number };
 
+/**
+ * Takes a channel gain to `v`. While the engine plays it ramps over the short
+ * fade. While it does not, the lease holds the output at 0, so the target is
+ * set at once: a ramp started then would still be running when the engine
+ * goes active, and an effect joining inside it would play far above the level.
+ */
+export function moveGain(p: { value: number; cancelScheduledValues(t: number): unknown; setValueAtTime(v: number, t: number): unknown; linearRampToValueAtTime(v: number, t: number): unknown }, v: number, now: number, active: boolean): void {
+  p.cancelScheduledValues(now);
+  if (!active) {
+    p.setValueAtTime(v, now);
+    return;
+  }
+  p.setValueAtTime(p.value, now);
+  p.linearRampToValueAtTime(v, now + SHORT_FADE_MS / 1000);
+}
+
 /** The channels' gains: each level squared, Volume over every channel, the room's volumes over music and effects. Pure. */
 export function channelGains(device: SoundMix, room: { music: number; effects: number }): ChannelGains {
   const sq = (n: number) => (n / 100) ** 2;
@@ -375,12 +391,7 @@ export class SoundEngine {
     const ctx = this.#ctx;
     if (!g || !ctx) return;
     const gains = channelGains(deviceMix(this.#deps.kind), this.#input.playing?.volume ?? { music: 100, effects: 100 });
-    const set = (p: AudioParam, v: number) => {
-      const now = ctx.currentTime;
-      p.cancelScheduledValues(now);
-      p.setValueAtTime(p.value, now);
-      p.linearRampToValueAtTime(v, now + SHORT_FADE_MS / 1000);
-    };
+    const set = (p: AudioParam, v: number) => moveGain(p, v, ctx.currentTime, this.#active);
     set(g.music.gain, gains.music);
     set(g.loop.gain, gains.loop);
     set(g.effects.gain, gains.effects);
