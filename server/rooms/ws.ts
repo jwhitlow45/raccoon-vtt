@@ -264,13 +264,14 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
 
       socket.on("message", (data: RawData, isBinary: boolean) => {
         try {
-          if (conn.closed || conn.closing) return;
+          if (conn.closed) return;
           const verdict = conn.frames.accept(rawLength(data));
           if (verdict === "abuse") {
             conn.close(CLOSE.abuse, "frame budget");
             return;
           }
-          if (verdict === "drop") return;
+          // Counted first: a socket the room is closing reads nothing more, but its frames still spend its budget (RULES-OPUS-9).
+          if (verdict === "drop" || conn.closing) return;
           if (!actor) {
             if (pending.length < pendingFrames) pending.push({ data, isBinary });
             return;

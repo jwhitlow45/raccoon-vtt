@@ -37,6 +37,9 @@ const faults: {
   send: ((conn: Connection, msg: ServerMessage) => boolean) | null;
 } = { draw: false, growth: "none", mapStep: false, staged: false, summaries: false, send: null };
 
+/** The sockets' clock, which their frame budgets read, held where a test steps it. */
+let wsClock: number | null = null;
+
 /** Whatever reached the process: an uncaught exception or an unhandled rejection. */
 const escaped: unknown[] = [];
 const record = (err: unknown) => escaped.push(err);
@@ -208,7 +211,7 @@ async function contained(other: Room): Promise<void> {
 describe("a fault in the room engine", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ rooms: { actor: actorOptions } });
+    t = await startEngine({ rooms: { actor: actorOptions }, ws: { now: () => wsClock ?? Date.now() } });
   });
   after(() => t.close());
 
@@ -283,6 +286,38 @@ describe("a fault in the room engine", () => {
     await taken(back, back.op({ t: "log.chat", text: "sent while closing" }));
     assert.equal(back.n, unread, "the resend has the number the closing socket did not read");
     assert.equal(copies(actor.committed.state, "sent while closing"), 1);
+    await contained(other);
+  });
+
+  test("a socket that waits to close for its third fault still spends its frame budget, so a flood closes it as abuse (RULES-OPUS-9)", async () => {
+    const r = await room(t, "Flooding");
+    const other = await room(t, "Elsewhere");
+    const actor = t.manager.get(r.roomId)!;
+    const socket = await t.connect(r.roomId, r.playerClient);
+    await socket.snapshot(uuidv7(), 1);
+    for (let i = 0; i < 2; i++) {
+      faults.draw = true;
+      await refusedForFault(socket, socket.op(roll()));
+    }
+    // The third's batch is held in its commit's retries, so the socket waits on it to close.
+    const failing = failCommits(t.pool, Array.from({ length: 1000 }, () => "before" as const));
+    try {
+      faults.draw = true;
+      socket.op(roll());
+      await until(() => actor.retrying, "the commit to retry");
+      // The socket's clock steps 0.9 s at a time, so each step's frames overrun what its budget refills, and the streak of
+      // frames over budget runs past the 10 s that closes a socket as abuse.
+      const from = Date.now();
+      for (let step = 0; step <= 12 && socket.closeCode === null; step++) {
+        wsClock = from + step * 900;
+        for (let i = 0; i < 300; i++) socket.send({ t: "ping", k: i });
+        await new Promise((done) => setTimeout(done, 100));
+      }
+      assert.equal((await socket.waitClosed()).code, 4008, "a flood past the frame budget closes it as abuse");
+    } finally {
+      failing.restore();
+      wsClock = null;
+    }
     await contained(other);
   });
 
