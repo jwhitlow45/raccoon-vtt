@@ -1069,7 +1069,8 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       await onCheckedRadio(phone, sheet);
       await shots.take(phone, "iso-dm-320-130-view-sheet-from-menu");
 
-      await phone.setViewportSize({ width: 390, height: 844 });
+      // A 440 px phone: at 390 and 130% the speaker leaves the DM's View folded, since View folds before it (D-261108-362).
+      await phone.setViewportSize({ width: 440, height: 956 });
       await viewButton(phone).waitFor();
       await sheet.waitFor({ state: "detached" });
       // Focus, which was in the sheet, goes to the menu's title, never to the page under the menu (ISO5-FOCUS-UNFOLD).
