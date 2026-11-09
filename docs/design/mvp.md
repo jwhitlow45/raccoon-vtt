@@ -150,6 +150,7 @@ Tiers:
 **Later**
 
 - Several floors in one scene.
+  - Phase 1 is built (docs/design/design-v1-floors.md). A scene holds up to 8 floors, built from the Floors group in its settings, each with its own map, build, fog, light, weather, tokens and traps. A Floor button and menu, and the `[` and `]` keys, pick the floor on screen. A player's screen follows their character between floors, and their device holds only the floors the party has reached. The DM moves creatures between floors with Move to floor, and a table display shows the floor where most of the party stands. Stairs and ladders that players take themselves (phase 2) are still to come.
 - Animated maps (webm).
   - Built in the animated maps run (docs/design/design-v1-animated-maps.md), behind a switch the server's owner turns on, since Cloudflare's terms limit serving video. A map or a phase may be a WebM or MP4 loop over its still, drawn in the map layer under the fog and tokens, and each device plays it or shows the still by its own settings.
 - Dungeon generator.

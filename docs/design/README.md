@@ -167,6 +167,10 @@ and for how to use it, the [DM guide](../dm-guide.md).
   last a length of time and run out with the clock, the table display's date
   and time, and scene light that follows the time of day, with dawn and dusk
   set in the Time panel.
+- [design-v1-floors.md](design-v1-floors.md): several floors in one scene,
+  with a Floors group in the scene's settings, a Floor button and menu, a
+  player's screen that follows their character between floors, and Move to
+  floor for the DM.
 
 ## The look
 
