@@ -104,7 +104,9 @@ function linkDepth(tokens: RoomState["tokens"], token: Token): number {
  * the floor alone and come loose. Holders go first, down every chain of links: the mount takes its rider along, and
  * the rider's own op then drops the rider's nudge, as for every creature the move names (7.4). Each op is planned
  * from the room as the ops before it leave it, so a creature an earlier op took along keeps the place and height it
- * was given there, a rider its mount's, and its own op names only the floor (FLRBUILD-ASTRA-06).
+ * was given there, and its own op names only the floor (FLRBUILD-ASTRA-06). The reducer's plan gives that height: a
+ * rider keeps its mount's, and a dragged creature on the ground lands on the ground under its own new space
+ * (shared/rules/moveLeg.ts, FLRBUILD-ASTRA-08).
  */
 export function moveToFloorOps(view: Pick<RoomState, "buildChunks" | "tokens">, named: readonly Token[], target: Scene): ClientOp[] {
   const ops: ClientOp[] = [];

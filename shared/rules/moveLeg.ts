@@ -1,4 +1,4 @@
-import { attaches, draggedWalkFull, followsInSingleFile, followsInSingleFileOnHexes, hiddenTowStands, seatsApart, seatsApartOnHexes, seatsFromSnappedFull, seatsOnSqueeze, walksRoutes } from "../migrate.ts";
+import { attaches, draggedWalkFull, floorsOps, followsInSingleFile, followsInSingleFileOnHexes, hiddenTowStands, seatsApart, seatsApartOnHexes, seatsFromSnappedFull, seatsOnSqueeze, walksRoutes } from "../migrate.ts";
 import type { RoomState, Token, Viewer } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
@@ -8,7 +8,8 @@ import { footprintRect, placedOnHex, tokenRefHex } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
 import { hexDistance, hexLine } from "./hex.ts";
-import { footing } from "./heights.ts";
+import { sameScene } from "./floors.ts";
+import { footing, footprintGround } from "./heights.ts";
 import { groundUnder, hexFullStop, landing, legSpots, legStop, offGridWallThrough, storedBuild, walkEnd, type MovingToken } from "./movement.ts";
 import { fileRoutes, followerTrace, hexFileClasses, hexFileRoutes, pieceReach, routeWalkers, walkSqueezes, type RoutePoint, type WalkTrace } from "./route.ts";
 import { ownEntry } from "../records.ts";
@@ -419,6 +420,7 @@ function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: 
       const kept = i > 0 ? own?.[i] : undefined;
       return kept ? { x: kept.x, y: kept.y, elevation: kept.elevation ?? p.elevation + oz } : { ...(seats?.[i] ?? { x: p.x + ox, y: p.y + oy }), elevation: p.elevation + oz };
     });
+    if (!onHolder(kind) && floorChange(before, member, holder, env)) route[route.length - 1] = draggedOntoFloor(before.buildChunks, member, route[route.length - 1]!, holder.to.sceneId);
     const last = route[route.length - 1]!;
     return { tokenId: member.id, from, to: { sceneId: holder.to.sceneId, ...last }, route, trace: followerTrace(member, route), how: holder.how, carriedBy: holder.tokenId, pass };
   }
@@ -444,6 +446,26 @@ function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: 
   if (!isPublic && byPlayer && holder.how === "walk") route = stoppedAtWalls(before, member, route, along, elevationAt, env, how.stands === true);
   const last = route[route.length - 1]!;
   return { tokenId: member.id, from, to: { sceneId: member.sceneId, ...last }, route, trace: followerTrace(member, route), how: holder.how, carriedBy: holder.tokenId, pass, ...(how.file ? { file: true as const } : {}) };
+}
+
+/** A holder's move to another floor of the member's scene, by an op of the floors' version (migrate.ts floorsOps). */
+function floorChange(before: RoomState, member: Token, holder: MovedToken, env: Versioned): boolean {
+  return holder.how === "scene" && floorsOps(env.opVersion) && sameScene(before, member.sceneId, holder.to.sceneId) && member.sceneId !== holder.to.sceneId;
+}
+
+/**
+ * Where a dragged creature lands when its holder moves to another floor
+ * (docs/design/design-v1-floors.md 7.4, FLRBUILD-ASTRA-08): one that stood on
+ * its ground lands on the ground under its own full space there, since the
+ * floors' ground differs square by square, and one in the air keeps its
+ * height over its holder, never below the ground there. What sits on its
+ * holder keeps its carried height. Moves to another scene keep the rule
+ * stored moves were made under: the holder's change of height for all.
+ */
+function draggedOntoFloor(chunks: RoomState["buildChunks"], member: Token, landed: RoutePoint, sceneId: string): RoutePoint {
+  const { squeeze: _squeeze, ...full } = member;
+  const ground = footprintGround(chunks, { ...full, x: landed.x, y: landed.y, sceneId });
+  return { ...landed, elevation: member.elevation === footprintGround(chunks, member) ? ground : Math.max(landed.elevation, ground) };
 }
 
 /**

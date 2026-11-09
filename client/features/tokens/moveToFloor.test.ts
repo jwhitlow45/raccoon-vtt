@@ -178,6 +178,35 @@ describe("the ops of the move", () => {
     }
   });
 
+  test("a dragged creature lands on the ground under its own space, its holder selected alone or with it in either order, and one in the air keeps its height over its holder (FLRBUILD-ASTRA-08)", () => {
+    // Upper's ground is 5 ft under Thorn's square and 10 ft under the goblin's beside it.
+    const heights = new Int16Array(CHUNK_CELLS * CHUNK_CELLS);
+    heights[4 * CHUNK_CELLS + 4] = 5;
+    heights[4 * CHUNK_CELLS + 5] = 10;
+    const dragging = (goblin: number) =>
+      tower((s) => {
+        s.buildChunks["u:0,0"] = { sceneId: "u", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, heights: encodeHeights(heights) };
+        s.tokens.thorn = thorn({ x: 4, y: 4, elevation: 0 });
+        s.tokens.goblin = token("goblin", { sceneId: "g", name: "Goblin", x: 5, y: 4, elevation: goblin, attached: { to: "thorn", kind: "drag" } });
+      });
+    for (const order of [["thorn"], ["thorn", "goblin"], ["goblin", "thorn"]]) {
+      const state = dragging(0);
+      const ops = moveToFloorOps(state, order.map((id) => state.tokens[id]!), state.scenes.u!);
+      const s = applied(state, ops);
+      assert.deepEqual([s.tokens.thorn!.elevation, s.tokens.goblin!.elevation], [5, 10], `${order}: each on its own ground`);
+      assert.deepEqual([s.tokens.goblin!.sceneId, s.tokens.goblin!.attached], ["u", { to: "thorn", kind: "drag" }], `${order}: still dragged`);
+    }
+    const air = dragging(15);
+    const s = applied(air, moveToFloorOps(air, [air.tokens.thorn!], air.scenes.u!));
+    assert.deepEqual([s.tokens.thorn!.elevation, s.tokens.goblin!.elevation], [5, 20], "the one in the air rises with its holder");
+    // A move to another scene keeps the rule stored moves were made under: the holder's change of height for all.
+    const road = dragging(0);
+    road.scenes.r = scene("r", { name: "Road", bounds: { w: 30, h: 20 }, order: 1 });
+    road.buildChunks["r:0,0"] = { ...road.buildChunks["u:0,0"]!, sceneId: "r" };
+    const away = applied(road, [{ t: "token.update", tokenId: "thorn", patch: { sceneId: "r" } }]);
+    assert.deepEqual([away.tokens.goblin!.sceneId, away.tokens.goblin!.elevation], ["r", 0], "to another scene, as before floors");
+  });
+
   test("a creature already on the floor is left out", () => {
     const state = tower((s) => void (s.tokens.thorn = thorn({ sceneId: "u" })));
     assert.deepEqual(moveToFloorOps(state, [state.tokens.thorn!], state.scenes.u!), []);
