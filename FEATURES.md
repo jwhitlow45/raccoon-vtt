@@ -1692,6 +1692,7 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 | S | Hide or show the side panel, on a screen 900 px or wider | everyone |
 | O | Go to the other panel, with two in the side panel | everyone |
 | W | Enter or leave full screen, where the browser can | everyone |
+| U | Mute or unmute this device's sound | everyone |
 | ? | Show the shortcuts | everyone |
 | Escape | Close an open pop-up first, then a sheet, else the token's action bar, else let go of the selection and end Multi-select. With focus in the bar's Conditions, close them first, back on their button. While the token's panel shows one token, the bar closes and keeps it. While the panel is open, a group whose bar is hidden stays until Done. A field outside the pop-up keeps its Escape | everyone |
 | Ctrl+V (Cmd+V on a Mac) | Use a copied image as a new scene, the selected token's picture, a stamp or a handout | DM, with nothing open that takes it |

@@ -19,6 +19,8 @@ setRoomSoundChoice("on");
 
 const row = (e: SearchEntry) => `${e.kind}:${e.title}${e.mark ? ` (${e.mark})` : ""}${e.where ? ` · ${e.where}` : ""}${e.value ? `: ${e.value}` : ""}`;
 const first = (rows: SearchEntry[], n: number) => rows.slice(0, n).map(row);
+/** U's row in the search, which mutes or unmutes as the key does. */
+const MUTE_KEY = "key:Mute or unmute this device's sound · Shortcuts";
 
 describe("golden queries, the DM", () => {
   const dm = indexOf(DM_VIEW());
@@ -125,17 +127,18 @@ describe("golden queries, a player (Pat, who plays Bree)", () => {
     assert.deepEqual(rowsOf(pat, "goblin").map(row), ["token:Goblin 1 · Monster on Battle mat", "token:Goblin 2 · Monster on Battle mat"]);
   });
 
-  test("music: This device's sound settings, nothing of the library", () => {
+  test("music: This device's sound settings and U's row, which mutes it, nothing of the library", () => {
     const rows = rowsOf(pat, "music");
     assert.equal(row(rows[0]!), "setting:Music volume · Menu · This device · Sounds");
-    assert.ok(rows.every((e) => e.where.startsWith("Menu · This device")), rows.map(row).join("\n"));
+    assert.ok(rows.every((e) => e.where.startsWith("Menu · This device") || row(e) === MUTE_KEY), rows.map(row).join("\n"));
   });
 
-  test("mute: This device's Volume first, with its level, or Muted while muted, and the volumes still there to set (docs/design/design-v1-volume.md 9)", () => {
-    assert.equal(row(rowsOf(indexOf(PAT_VIEW()), "mute")[0]!), "setting:Volume · Menu · This device · Sounds: 100%");
+  test("mute: U's row, which mutes at once, then This device's Volume with its level, or Muted while muted, and the volumes still there to set (docs/design/design-v1-volume.md 9)", () => {
+    assert.deepEqual(first(rowsOf(indexOf(PAT_VIEW()), "mute"), 2), [MUTE_KEY, "setting:Volume · Menu · This device · Sounds: 100%"]);
     setRoomSoundChoice("off");
     try {
-      for (const q of ["mute", "unmute", "room sound"]) assert.equal(row(rowsOf(indexOf(PAT_VIEW()), q)[0]!), "setting:Volume · Menu · This device · Sounds: Muted", q);
+      assert.deepEqual(first(rowsOf(indexOf(PAT_VIEW()), "mute"), 2), [MUTE_KEY, "setting:Volume · Menu · This device · Sounds: Muted"]);
+      for (const q of ["unmute", "room sound"]) assert.equal(row(rowsOf(indexOf(PAT_VIEW()), q)[0]!), "setting:Volume · Menu · This device · Sounds: Muted", q);
       assert.equal(row(rowsOf(indexOf(PAT_VIEW()), "music")[0]!), "setting:Music volume · Menu · This device · Sounds");
     } finally {
       setRoomSoundChoice("on");

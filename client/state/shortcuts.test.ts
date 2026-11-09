@@ -587,6 +587,34 @@ describe("the shortcut table", () => {
     }
   });
 
+  test("U mutes and unmutes this device for the DM and players, never while typing or under a dialog (docs/design/design-v1-volume.md 8)", async () => {
+    const { roomSoundChoice, setRoomSoundChoice } = await import("../features/device/settings.ts");
+    const { soundUnlock } = await import("../features/sound/engine/context.ts");
+    // Node has no audio elements to bless: unlock.test holds that unmuting blesses them in the press.
+    const unlock = soundUnlock();
+    const bless = unlock.blessPool;
+    unlock.blessPool = () => Promise.resolve(true);
+    try {
+      for (const role of ["dm", "player"] as const) {
+        setRoomSoundChoice("on");
+        const { env: e } = env({ role });
+        assert.equal(run(e, press({ key: "u", code: "KeyU" })), "mute");
+        assert.equal(roomSoundChoice(), "off");
+        assert.equal(run(e, press({ key: "U", code: "KeyU", shiftKey: true })), "mute", "with Shift, as every letter");
+        assert.equal(roomSoundChoice(), "on");
+        assert.equal(run(e, press({ key: "u", code: "KeyU", target: { tagName: "INPUT", type: "text" } })), null, "U in a text field types");
+        assert.equal(run(e, press({ key: "u", code: "KeyU" }), { dialogOpen: true, preview: false }), null, "under a dialog");
+        assert.equal(roomSoundChoice(), "on");
+      }
+      setRoomSoundChoice(null);
+      assert.equal(run(env({ role: "player" }).env, press({ key: "u", code: "KeyU" })), "mute");
+      assert.equal(roomSoundChoice(), "on", "a player's device not yet asked is muted, so U unmutes it");
+    } finally {
+      unlock.blessPool = bless;
+      setRoomSoundChoice(null);
+    }
+  });
+
   test("the split's grip, a separator, keeps the arrow and Page keys, so no token moves", () => {
     const { env: e } = env({ selected: ["t1"] });
     const grip = { tagName: "DIV", closest: (selector: string) => (selector.includes('[role="separator"]') ? {} : null) };
@@ -602,6 +630,7 @@ describe("the shortcut table", () => {
       "fullscreen",
       "hide",
       "lock",
+      "mute",
       "otherPanel",
       "outliner",
       "sheet",
@@ -1355,6 +1384,7 @@ describe("a control shows the key of the shortcut it does (D-261028-09)", () => 
     ["sidePanel", "client/pages/SideTabs.tsx", "Hide panels"],
     ["sidePanel", "client/pages/Room.tsx", "Panels, while the side panel is hidden"],
     ["fullscreen", "client/pages/RoomChrome.tsx", "the top bar's Full screen"],
+    ["mute", "client/features/sound/device/DeviceSound.tsx", "this device's volume controls' mute toggle"],
     ["sheet", "client/features/device/ThisDevice.tsx", "Menu, This device's Show the shortcuts"],
     // One hook names both keys for the top bar's Floor and the room menu's Floor row (useFloorKeys).
     ["floorBelow", "client/features/floors/FloorButton.tsx", "the top bar's Floor, and the room menu's Floor row where the bar folds it with View"],

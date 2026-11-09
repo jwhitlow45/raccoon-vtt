@@ -18,6 +18,7 @@ import { isoOffered, kindSaid, otherViewPress, sayView, topDownTool, turnRefused
 import { floorBeside, heldHere } from "../features/floors/follow.ts";
 import { noFloorAbove, noFloorBelow } from "../features/floors/words.ts";
 import { pickView, readView, shownView, turnView, viewKey } from "../features/view/store.ts";
+import { toggleMute } from "../features/sound/engine/store.ts";
 import { hasKeyboard, isAppleDevice, noteKeyboard, subscribeKeyboard } from "../lib/device.ts";
 import { fullscreenSupported, toggleFullscreen } from "../lib/fullscreen.ts";
 import { displayName } from "../lib/scene.ts";
@@ -720,6 +721,15 @@ export const SHORTCUTS: readonly Shortcut[] = [
     roles: ["dm", "player"],
     when: () => fullscreenSupported(),
     run: () => void toggleFullscreen(),
+  },
+  {
+    // M, the usual mute key, is the DM's Pin, and Shift+M too, since a letter matches with Shift. A keydown is a gesture, so unmuting unlocks the audio in the same press (docs/design/design-v1-volume.md 8).
+    id: "mute",
+    ...single("u"),
+    name: "Mute",
+    does: "Mute or unmute this device's sound",
+    roles: ["dm", "player"],
+    run: (env) => toggleMute(env.role),
   },
   {
     id: "sheet",

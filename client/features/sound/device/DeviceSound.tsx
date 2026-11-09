@@ -4,6 +4,7 @@ import { IconButton } from "../../../components/IconButton.tsx";
 import { Help } from "../../../components/Panel.tsx";
 import { Switch } from "../../../components/Switch.tsx";
 import { theme } from "../../../lib/theme.ts";
+import { useKeyHint, withKey } from "../../../state/shortcuts.ts";
 import { useRoomRoleIfAny, useRoomView } from "../../../state/view.ts";
 import { SOUND_MIX_DEFAULT, setSoundMix, soundMix as soundMixNow, useSoundMix, type SoundMix } from "../../device/settings.ts";
 import { setSoundOn, useSoundOn } from "../../encounter/alerts.ts";
@@ -96,6 +97,8 @@ export function DeviceSound(props: { line: boolean; anchored?: boolean }) {
   const pingSound = usePingSound();
   const dmOnly = useRoomView((s) => s.view?.meta.settings.soundDmOnly === true);
   const { here } = useSoundHere();
+  // U does what the toggle does, so its tooltip names the key as this device has it.
+  const muteKey = useKeyHint("mute");
   const id = useId();
   // The level a drag or a key press started from, read from storage as it is taken.
   const kept = useRef<number | null>(null);
@@ -120,7 +123,8 @@ export function DeviceSound(props: { line: boolean; anchored?: boolean }) {
         <IconButton
           icon={volumeIcon(volume)}
           label={MUTE}
-          title={volume.muted ? UNMUTE : MUTE}
+          title={withKey(volume.muted ? UNMUTE : MUTE, muteKey)}
+          aria-keyshortcuts={muteKey?.aria}
           pressed={volume.muted}
           data-volume-mute=""
           onClick={() => setRoomSound(volume.muted)}
