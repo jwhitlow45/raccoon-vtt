@@ -68,6 +68,10 @@ class TestPath2D {
   closePath(): void {
     this.#cur = null;
   }
+  addPath(p: TestPath2D): void {
+    for (const sub of p.subs) this.subs.push([...sub]);
+    this.#cur = null;
+  }
 }
 // The drawing makes its kept paths with the browser's Path2D, which node lacks.
 (globalThis as { Path2D?: unknown }).Path2D = TestPath2D;

@@ -187,9 +187,24 @@ function lifted(turn: Turn, poly: readonly Pt[], z: number): Pt[] {
 
 /** Adds a closed polygon to the path. */
 function addPoly(g: CanvasRenderingContext2D, pts: readonly Pt[]): void {
+  addArea(g, pts);
+  g.closePath();
+}
+
+/*
+ * Chrome's closePath costs as much as the path it closes already holds, so
+ * a path of many polygons closed one by one costs the square of their
+ * count: the clip of a sunk scene's openings, thousands of them, took most
+ * of each draw (SUNKEN-PAN). A fill and a clip close every subpath
+ * themselves, so their polygons go in unclosed (addArea). A path that is
+ * also stroked is made of each polygon's own closed path (topsPath), which
+ * costs only that polygon's corners to close and to add.
+ */
+
+/** Adds a polygon a fill or a clip takes, unclosed: both close it themselves, at no cost per polygon. */
+function addArea(g: CanvasRenderingContext2D, pts: readonly Pt[]): void {
   g.moveTo(pts[0]!.x, pts[0]!.y);
   for (let i = 1; i < pts.length; i++) g.lineTo(pts[i]!.x, pts[i]!.y);
-  g.closePath();
 }
 
 /**
@@ -554,11 +569,24 @@ function drawSides(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext): 
   outline(g, dc, true, shape.outline);
 }
 
-/** The path of cells' tops: the one piece's own when it is alone, else the context's path, built here. */
+/**
+ * The path of cells' tops, which fills and strokes: the one piece's own
+ * when it is alone, else each top's own closed path added in turn, or
+ * where the canvas has no paths (the tests' fakes) the context's path,
+ * built here.
+ */
 function topsPath(g: CanvasRenderingContext2D, cells: readonly CellPiece[], turn: Turn): Path2D | null {
   if (cells.length === 1) {
     const own = shapeOf(cells[0]!, turn).topPath;
     if (own) return own;
+  }
+  if (typeof Path2D === "function") {
+    const path = new Path2D();
+    for (const c of cells) {
+      const shape = shapeOf(c, turn);
+      path.addPath(shape.topPath ?? polyPath(new Path2D(), shape.top));
+    }
+    return path;
   }
   g.beginPath();
   for (const c of cells) addPoly(g, shapeOf(c, turn).top);
@@ -571,7 +599,7 @@ function topsPath(g: CanvasRenderingContext2D, cells: readonly CellPiece[], turn
  * path of those polygons in view units, filled with the ground's pixels
  * shifted by the lift.
  */
-function copyGround(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc: DrawContext, tone: string, view: VBox): void {
+function copyGround(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc: DrawContext, tone: string, view: VBox, tops: Path2D | null = null): void {
   const shift = K * cells[0]!.z * dc.camera.scale * dc.pixelRatio;
   // Past the ground stage's margin there is nothing to copy: the face tone fills the rest until the map pans up. Each cell tones by its own copy, never its batch's.
   let toned: CellPiece[] | null = null;
@@ -586,7 +614,7 @@ function copyGround(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc
   }
   const pattern = groundPattern(g, dc);
   if (!pattern) return;
-  const path = topsPath(g, cells, dc.turn);
+  const path = tops ?? topsPath(g, cells, dc.turn);
   // Pattern space is the ground's device pixels, moved up by the lift: undo the run's view transform, then shift.
   const k = dc.pixelRatio * dc.camera.scale;
   const ex = dc.pixelRatio * dc.camera.x;
@@ -621,8 +649,8 @@ function groundPattern(g: CanvasRenderingContext2D, dc: DrawContext): CanvasPatt
  * their rims take the edge's line, so raised ground reads as one surface. A
  * hex's top keeps its whole outline in the edge's line.
  */
-function outlineTops(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc: DrawContext): void {
-  const path = topsPath(g, cells, dc.turn);
+function outlineTops(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc: DrawContext, tops: Path2D | null = null): void {
+  const path = tops ?? topsPath(g, cells, dc.turn);
   const hex = cells[0]!.poly.length !== 4;
   g.strokeStyle = hex ? theme.relief.edge : theme.relief.squareLine;
   g.lineWidth = 1 / (dc.camera.scale * dc.pixelRatio);
@@ -677,7 +705,7 @@ function drawPit(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext, vie
 function drawPits(g: CanvasRenderingContext2D, pits: readonly CellPiece[], dc: DrawContext, view: VBox): void {
   g.save();
   g.beginPath();
-  for (const o of pitOpenings(pits, dc)) addPoly(g, shapeOf(o, dc.turn).atZero);
+  for (const o of pitOpenings(pits, dc)) addArea(g, shapeOf(o, dc.turn).atZero);
   g.clip("nonzero");
   for (const p of pits) drawPit(g, p, dc, view);
   g.restore();
@@ -722,7 +750,7 @@ function drawSteps(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext, v
     }
     g.save();
     g.beginPath();
-    for (const o of openingsOf(p, dc)) addPoly(g, shapeOf(o, dc.turn).atZero);
+    for (const o of openingsOf(p, dc)) addArea(g, shapeOf(o, dc.turn).atZero);
     g.clip("nonzero");
   };
   const shape = stepsShapeOf(p, dc.turn);
@@ -1051,8 +1079,10 @@ export function drawRun(g: CanvasRenderingContext2D, pieces: readonly DrawPiece[
   const flush = () => {
     lift = null;
     if (batch.length === 0) return;
-    copyGround(g, batch, dc, batch[0]!.look.color, view);
-    outlineTops(g, batch, dc);
+    // One path of the batch's tops for its copy and its outline, where the canvas has paths: the context's own is built again for each.
+    const tops = batch.length > 1 && typeof Path2D === "function" ? topsPath(g, batch, dc.turn) : null;
+    copyGround(g, batch, dc, batch[0]!.look.color, view, tops);
+    outlineTops(g, batch, dc, tops);
     batch = [];
   };
   for (let i = 0; i < pieces.length; i++) {
@@ -1130,12 +1160,11 @@ export type VolumeLook = {
 
 type Pts = ArrayLike<number>;
 
-/** Adds closed loops `[x, y, z, ...]` in world cells to the path, in view units at a turn. */
+/** Adds loops `[x, y, z, ...]` in world cells to the path, in view units at a turn, unclosed: only a fill takes them, which closes each (addArea). */
 function addLoops(g: CanvasRenderingContext2D, loops: readonly Pts[], c: number, s: number): void {
   for (const q of loops) {
     g.moveTo(c * q[0]! - s * q[1]!, (s * q[0]! + c * q[1]!) / 2 - K * q[2]!);
     for (let i = 3; i + 2 < q.length; i += 3) g.lineTo(c * q[i]! - s * q[i + 1]!, (s * q[i]! + c * q[i + 1]!) / 2 - K * q[i + 2]!);
-    g.closePath();
   }
 }
 
@@ -1193,7 +1222,7 @@ export function pitSweep(turn: Turn, poly: readonly Pt[]): Pt[] {
  */
 export function clipToPits(g: CanvasRenderingContext2D, pits: readonly (readonly Pt[])[], turn: Turn): void {
   g.beginPath();
-  for (const poly of pits) addPoly(g, pitSweep(turn, poly));
+  for (const poly of pits) addArea(g, pitSweep(turn, poly));
   g.clip("nonzero");
 }
 

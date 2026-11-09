@@ -46,6 +46,10 @@ export class TestPath2D {
     if (this.#cur) this.#cur.closed = true;
     this.#cur = null;
   }
+  addPath(p: TestPath2D): void {
+    for (const sub of p.subs) this.subs.push({ pts: [...sub.pts], closed: sub.closed });
+    this.#cur = null;
+  }
 }
 
 export function installPath2D(): void {
