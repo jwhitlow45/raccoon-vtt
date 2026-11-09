@@ -43,7 +43,7 @@ The effect form (EffectsSection.tsx `EffectDetail`, the Token panel's and a char
 - For the DM while the clock is hidden: "Players don't see the date and time, but they see how long this lasts and when it ends."
 - For the DM with no clock, the time choices are not listed and the help reads: "Start the clock in Time to count minutes and hours."
 - A player gets the time choices only while the DM shares the clock and no blackout is on. Otherwise their picker is today's.
-- Editing a timed effect keeps its end unless the DM or owner touches Duration ("Leave as is to keep its end."). Picking a span again counts it from now. Picking **No duration** on a timed effect removes its end: the form sends `duration: null` when the effect has a `duration` or an `ends` (EffectsSection.tsx:380-383 checks only `duration` today).
+- Editing a timed effect keeps its end unless the DM or owner touches Duration ("Leave as is to keep its end."). Picking a span again counts it from now. Picking **No duration** on a timed effect removes its end: the form sends `duration: null` when the effect has a `duration` or an `ends`.
 - Group saves and trap rigs keep their rounds and turns choices (D-261107-186).
 
 ### 3.2 How it reads
@@ -389,7 +389,9 @@ Built in five parts: the timed model (C2a), the time span client (C2b), the dayl
 
 **Not covered.** The Night phase case has no browser test. When ck-a, ck-b and ck-d run alone through the name filter, the clock chip is missing at 1440 x 900 and 130%. They pass in the file's order, and this was so before the calendar's C2 and C3.
 
-**Docs.** FEATURES.md (Conditions and statuses, Fog and vision, Date and time, The table display) and the DM guide (Time of day light, Dawn and dusk, Timed effects, and the table display's paragraph) carry the feature. The guide has three new pictures. The table display's pill and the Other length row have none: the pill is a line of text, and the Other row's select shows its label cut off at the side panel's width, which a picture would show as a fault.
+**Docs.** FEATURES.md (Conditions and statuses, Fog and vision, Date and time, The table display) and the DM guide (Time of day light, Dawn and dusk, Timed effects, and the table display's paragraph) carry the feature. The guide has three new pictures. The table display's pill and the Other length row have none: the pill is a line of text, and the Other row adds only the Length and Unit line under a select that now stands in full width. That select was cut off at the side panel's width until FieldRow's `stack` put the Duration label on a line of its own over the select, as it does for "Counted on" and "X is". The alignment check measures the select's name for it.
+
+**Keeping a duration.** An effect with a count of turns or an end opens Duration on a first choice, "Keep current duration", which sends nothing. A native select fires no change when its shown option is picked again, so opening on "No duration" made that choice impossible to make first. `openingForm` and `durationEdit` (durations.ts) build the opening form and the patch, and e2e/timed.e2e.ts tm-6 covers saving untouched and clearing at once for an end and for a count.
 
 ## Round 1
 
