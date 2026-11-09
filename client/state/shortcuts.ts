@@ -17,6 +17,7 @@ import { cycleStep, type ToolCycle } from "../features/toolChoices.ts";
 import { isoOffered, kindSaid, otherViewPress, sayView, topDownTool, turnRefused } from "../features/view/choice.ts";
 import { floorBeside, heldHere } from "../features/floors/follow.ts";
 import { noFloorAbove, noFloorBelow } from "../features/floors/words.ts";
+import { climbKey, climbWaitSlot, sendClimb } from "../features/floors/climb.ts";
 import { pickView, readView, shownView, turnView, viewKey } from "../features/view/store.ts";
 import { toggleMute } from "../features/sound/engine/store.ts";
 import { hasKeyboard, isAppleDevice, noteKeyboard, subscribeKeyboard } from "../lib/device.ts";
@@ -498,6 +499,46 @@ export const FLOOR_SHORTCUTS: readonly Shortcut[] = [
   },
 ];
 
+/**
+ * `}` and `{` (docs/design/design-v1-floors.md phase 2, 6.2, D-261109-020):
+ * Go up and Go down for the one selected creature, as its bar's button
+ * does, through the same wait, so a key never sends a second climb while
+ * one is out. Shift with the floor keys. Elsewhere a note says why: no
+ * stairs that way, locked, too big, or its holder takes them.
+ */
+function climbByKey(env: ShortcutEnv, dir: "up" | "down"): void {
+  const s = env.getState();
+  const [token] = selectedTokens(env);
+  if (!token || !s.floorView || !s.you) return;
+  const out = climbKey(s.floorView, { role: s.you.role, memberId: s.you.memberId }, token, dir, displayName(token));
+  if ("say" in out) env.ui.notify(out.say);
+  else sendClimb({ wait: env.scope.get(climbWaitSlot), pending: s.pending, dispatch: env.actions.dispatch }, token.id, out.climb.link.id);
+}
+
+/** One creature selected on the floor shown: two or none, and the keys do nothing. */
+const oneSelected = (env: ShortcutEnv) => env.getState().local.selectedIds.length === 1 && selectedTokens(env).length === 1;
+
+export const CLIMB_SHORTCUTS: readonly Shortcut[] = [
+  {
+    id: "goUp",
+    ...single("}"),
+    name: "Go up",
+    does: "Go up the stairs or ladder the selected creature stands on",
+    roles: ["dm", "player"],
+    when: oneSelected,
+    run: (env) => climbByKey(env, "up"),
+  },
+  {
+    id: "goDown",
+    ...single("{"),
+    name: "Go down",
+    does: "Go down the stairs or ladder the selected creature stands on",
+    roles: ["dm", "player"],
+    when: oneSelected,
+    run: (env) => climbByKey(env, "down"),
+  },
+];
+
 /** Every shortcut, one per line, in the order the sheet lists them. */
 export const SHORTCUTS: readonly Shortcut[] = [
   {
@@ -681,6 +722,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   },
   ...(isoOffered ? VIEW_SHORTCUTS : []),
   ...FLOOR_SHORTCUTS,
+  ...CLIMB_SHORTCUTS,
   {
     id: "outliner",
     ...single("/"),

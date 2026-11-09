@@ -628,6 +628,8 @@ describe("the shortcut table", () => {
       "floorAbove",
       "floorBelow",
       "fullscreen",
+      "goDown",
+      "goUp",
       "hide",
       "lock",
       "mute",
@@ -1390,6 +1392,9 @@ describe("a control shows the key of the shortcut it does (D-261028-09)", () => 
     // One hook names both keys for the top bar's Floor and the room menu's Floor row (useFloorKeys).
     ["floorBelow", "client/features/floors/FloorButton.tsx", "the top bar's Floor, and the room menu's Floor row where the bar folds it with View"],
     ["floorAbove", "client/features/floors/FloorButton.tsx", "the top bar's Floor, and the room menu's Floor row where the bar folds it with View"],
+    // One button takes either way's key, by the way its end leads (docs/design/design-v1-floors.md phase 2, 6.2).
+    ["goUp", "client/features/floors/ClimbButton.tsx", "a creature's Go up, in the bar's passing row and as the strip's icon"],
+    ["goDown", "client/features/floors/ClimbButton.tsx", "a creature's Go down, in the bar's passing row and as the strip's icon"],
   ];
   /** The shortcuts no control does, and why. */
   const NO_CONTROL: Readonly<Record<string, string>> = {
