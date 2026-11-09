@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Scene, Viewer } from "./model.ts";
-import { ASK_CLOSED, ASKS_WAITING, FLOOR_REFUSALS, MOVE_PLAYERS_FIRST, canApply } from "./permissions.ts";
+import { ASK_CLOSED, ASKS_WAITING, FLOOR_REFUSALS, MOVE_PLAYERS_FIRST, ONE_FLOOR_MOVE, canApply } from "./permissions.ts";
 import type { Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { DM, P1, P2, character, env, room, scene, template, token } from "./testutil.ts";
@@ -130,5 +130,27 @@ describe("a player's access follows the floors they hold (8.3)", () => {
     const place = (sceneId: string): Op => ({ t: "token.create", token: { id: "t-thorn", sceneId, kind: "pc", name: "Thorn", size: "medium", x: 1, y: 1, actor: { ref: "thorn" }, ownerIds: ["p1"] } });
     assert.equal(decide(state, place("u"), P1), "ok");
     assert.equal(decide(state, place("a"), P1), GONE);
+  });
+});
+
+describe("a group move stays on one floor (FLRBUILD-ASTRA-03)", () => {
+  // Ana plays Thorn on Ground and her owl on Upper, both reached, so traps go off on both.
+  const state = tower({
+    openFloors: { u: { sceneId: "u", rev: 0 } },
+    tokens: { thorn: thornOn("g", { x: 2, y: 2 }), owl: token("owl", { sceneId: "u", kind: "npc", name: "Owl", ownerIds: ["p1"], x: 2, y: 2 }), gob: token("gob", { sceneId: "g", x: 6, y: 6 }) },
+  });
+  const many = (...ids: string[]): Op => ({ t: "token.moveMany", moves: ids.map((tokenId) => ({ tokenId, x: 3, y: 2 })) });
+
+  test("a hand-made group move across floors is refused, for a player and the DM alike, and one on a floor goes", () => {
+    assert.equal(decide(state, many("thorn", "owl"), P1), `invalid: ${ONE_FLOOR_MOVE}`);
+    assert.equal(decide(state, many("owl", "thorn"), P1), `invalid: ${ONE_FLOOR_MOVE}`, "in either order");
+    assert.equal(decide(state, many("thorn", "owl")), `invalid: ${ONE_FLOOR_MOVE}`);
+    assert.equal(decide(state, many("thorn", "gob")), "ok", "the DM's group on Ground");
+    assert.equal(decide(state, many("thorn"), P1), "ok");
+  });
+
+  test("a player's group naming a creature they cannot see answers as before, so the refusal never says where it stands", () => {
+    const hidden = { ...state, tokens: { ...state.tokens, imp: token("imp", { sceneId: "u", visibility: "dm", x: 4, y: 4 }) } };
+    assert.equal(decide(hidden, many("thorn", "imp"), P1), GONE);
   });
 });

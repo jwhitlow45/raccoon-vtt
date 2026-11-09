@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
+import { ONE_FLOOR_MOVE } from "#shared/permissions.ts";
 import { applyChanges, stableStringify, type ProjectedState } from "#shared/project.ts";
 import type { Change, EphEvent, Op, ServerMessage } from "#shared/protocol.ts";
 import { solid } from "../assets/testImages.ts";
@@ -457,6 +458,34 @@ describe("several floors over the wire (docs/design/design-v1-floors.md 8, the s
     await m.apply({ t: "token.move", tokenId: gargoyle, x: 3, y: 5 }, "the gargoyle back over the plate");
     assert.equal(stateOf(above), "sprung", "once Upper is shown, its plate goes off");
     for (const x of all) x.socket.close();
+  });
+
+  test("a hand-made group move of Ana's creatures on Ground and Upper, both reached, is refused whole, so neither plate is walked past, and the walks one at a time set off both (FLRBUILD-ASTRA-03)", async () => {
+    const r = await newRoom(t, "Two plates");
+    await ok(r.dmSocket, { t: "scene.update", sceneId: r.ground, patch: { name: "Tower" } });
+    const upper = await addFloor(r, r.ground, "above", "Upper floor");
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false };
+    const plate = async (sceneId: string) => {
+      const id = `plate-${uuidv7()}`;
+      await ok(r.dmSocket, { t: "trap.create", trap: { id, sceneId, name: "Plate", zone: { cells: [{ x: 5, y: 5, w: 1, h: 1 }] }, rig } } as Op);
+      return id;
+    };
+    const below = await plate(r.ground);
+    const above = await plate(upper);
+    const thorn = await create(r, r.ground, { kind: "pc", name: "Thorn", disposition: "ally", ownerIds: [r.anaId], x: 3, y: 5 });
+    const owl = await create(r, upper, { kind: "npc", name: "Owl", disposition: "ally", ownerIds: [r.anaId], x: 3, y: 5 });
+    const ana = await t.connect(r.roomId, r.ana);
+    await ana.snapshot("ana-plates");
+    const stateOf = (id: string) => t.manager.get(r.roomId)!.committed.state.traps[id]?.state;
+    const across = await ana.apply({ t: "token.moveMany", moves: [{ tokenId: thorn, x: 7, y: 5 }, { tokenId: owl, x: 7, y: 5 }] } as Op);
+    assert.deepEqual(across.rejects?.map((x) => x.message), [ONE_FLOOR_MOVE], "refused whole");
+    assert.deepEqual([stateOf(below), stateOf(above)], ["armed", "armed"]);
+    const tokens = t.manager.get(r.roomId)!.committed.state.tokens;
+    assert.deepEqual([tokens[thorn]?.x, tokens[owl]?.x], [3, 3], "neither moved");
+    await ok(ana, { t: "token.move", tokenId: thorn, x: 7, y: 5 } as Op);
+    await ok(ana, { t: "token.move", tokenId: owl, x: 7, y: 5 } as Op);
+    assert.deepEqual([stateOf(below), stateOf(above)], ["sprung", "sprung"], "each floor's walk sets off its own plate");
+    ana.close();
   });
 
   test("Ana holds Roof with rain and a phase video, Bree Ground alone: Bree's copy has no Roof, and the asset route answers 404 for Roof's video and still to her and the TV", async () => {

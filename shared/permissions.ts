@@ -279,6 +279,8 @@ function decide(op: Op, actor: Viewer, state: RoomState, deps: PermissionDeps, s
   if (!levels.ok) return levels;
   const squeezed = squeezeFits(op, check);
   if (!squeezed.ok) return squeezed;
+  const together = oneFloorFits(op, check);
+  if (!together.ok) return together;
   const routed = routeFits(op, check);
   if (!routed.ok) return routed;
   const stamped = stampFits(op, check);
@@ -633,6 +635,27 @@ function squeezeFits(op: Op, c: Check): Decision {
   const ground = c.liveGround(token.sceneId);
   const { squeeze: _squeeze, ...full } = token;
   return refuse("invalid", ground && !footprintLive(ground, { ...full, x: op.x, y: op.y }) ? SOMETHING_BLOCKS : NOT_A_SQUEEZE);
+}
+
+/** The refusal of a group move whose creatures stand on more than one floor or scene. */
+export const ONE_FLOOR_MOVE = "a group move takes creatures on one floor";
+
+/**
+ * A group move names the creatures of one floor, by anyone, the DM
+ * included (FLRBUILD-ASTRA-03): a board shows one floor, so a gesture
+ * moves one, and a walk's traps go off on the floor of its first named
+ * token (rules/traps.ts walkScene), so a move across floors would walk past
+ * every plate on the others. Here, where ops arrive, never in the reducer,
+ * so a stored group move replays as it was made. After the role's checks,
+ * so a player who names a creature they cannot see hears that it is not
+ * there, never where it stands. It is the only op that walks several named
+ * tokens: an attach, a detach and a move each walk one, with what it
+ * carries on its floor.
+ */
+function oneFloorFits(op: Op, c: Check): Decision {
+  if (op.t !== "token.moveMany") return OK;
+  const floors = new Set(op.moves.map((move) => ownEntry(c.state.tokens, move.tokenId)?.sceneId));
+  return floors.size > 1 ? refuse("invalid", ONE_FLOOR_MOVE) : OK;
 }
 
 const LEVEL_DOES_NOT_FIT = refuse("invalid", `Exhaustion is level 1 to ${EXHAUSTION_MAX_LEVEL}`);
