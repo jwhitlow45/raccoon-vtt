@@ -1,6 +1,6 @@
 # raccoon-vtt: volume on the top bar
 
-Status: built (2026-11-08), from design draft 2 at review consensus (round 1, and the build notes of rounds 2 and 3 below), in lanes VOL-A (vola, the controls, storage and engine), VOL-B (volb, the speaker on the bar) and VOL-C (volc, the table display). Device only: no OP_VERSION or SNAPSHOT_VERSION step. Decisions D-261108-361 to 370 and 381 to 386, and the builders' D-261108-397 to 402, 405 to 411, 417 to 420 and 438 to 441. Code is cited from `floors` (szxxtuyl, ff96039a). "As built" says where the build went its own way. The throwaway prototype behind every picture and number was bookmark `vol-proto`. Pictures: `screenshots/volume/` (001 to 015, 015 replacing 006).
+Status: built (2026-11-08), from design draft 2 at review consensus (round 1, and the build notes of rounds 2 and 3 below), in lanes VOL-A (vola, the controls, storage and engine), VOL-B (volb, the speaker on the bar) and VOL-C (volc, the table display). Device only: no OP_VERSION or SNAPSHOT_VERSION step. Decisions D-261108-361 to 370 and 381 to 386, and the builders' D-261108-397 to 402, 405 to 411, 417 to 420 and 438 to 444. Code is cited from `floors` (szxxtuyl, ff96039a). "As built" says where the build went its own way. The throwaway prototype behind every picture and number was bookmark `vol-proto`. Pictures: `screenshots/volume/` (001 to 015, 015 replacing 006).
 
 ## The owner's words
 
@@ -248,9 +248,12 @@ Reply volume-opus, every finding adopted with the reviewer's pick. 01 the `line`
 - **vol-d** (D-261108-420). display.e2e.ts sets `ROOM_SOUND=1`, Chrome's autoplay flag and the sound test hook on the TV's context, since the upload needs the server's switch. It plays music and reads the gains from the hook's `mix` (100 gives 1, 75 gives 0.5625, Off keeps 75, 50 gives 0.25 with sound on). The display menu has no sweep root, so vol-d runs `measureAlignment` on it at 1920 x 1080, 390 x 844 and 300 x 649 (390 at 130%), and checks that no radio is cut.
 - **Mutation checks.** Each failed a test: `volumeChecked` without the sound-on guard, and the Volume label's padding put back.
 
-### Review fixes (volbuild rounds 1 and 2)
+### Review fixes (volbuild rounds 1 to 3)
 
 - **The key hint** (D-261108-438). Every key stops under a modal dialog, so the Volume card and sheet show the mute toggle without "(U)" and without `aria-keyshortcuts`. The popover is not modal, so U works there and its toggle names it, as This device's does. The speaker itself names no shortcut to a screen reader, since U mutes and does not open it.
 - **The kept level** (D-261108-439). D-261108-363's rule holds for each gesture: the level is taken at a press, a focus and a release, so a click at 40 and then Home keeps 40.
 - **The engine's gains** (D-261108-440). While the engine is not active, `moveGain` sets a channel's gain at once and ramps only while it is active, so an effect that starts just after an unmute plays at the chosen level.
 - **The display's Volume row** (D-261108-441). The row wraps: the name sits beside the five radios where they fit and above them on a 390 x 844 display, and at 130% the radios wrap four then one. Measured before: "100%" cut by 3 px at 390, and up to 21 px at 130%.
+- **A phone held sideways in a fight** (D-261108-442). The design did not measure it. At 844 x 390 the speaker's 50 px sent the turn strip to the band, where 48 px of a 300 px screen moved the token window beside the alerts and turned the Token sheet modal under the keyboard. The band now comes after the DM chip's dot and Search's move to the Panels field, so the phone's order is blackout fold, DM dot, Search to Panels, band, Now playing off, tight gaps, View fold, speaker fold, slim eye. The speaker's own place in it is unchanged.
+- **A player's cut name** (D-261108-443). The chip shrinks before the row overflows, so on a 390 px phone with a long room name no step ran and "Pat" was cut to "P.". A cut name now moves Search to the Panels field and tightens the gaps, and never folds View, Floor or the speaker.
+- **CI's halved weather** (D-261108-444). Runners without a GPU halve the weather, and at half the fixed seed's Isometric marks ran over wz-4's 10% on main's own CI too. wz-4 measures at the full step. The stack touches no weather code.
