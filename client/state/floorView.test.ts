@@ -44,6 +44,27 @@ describe("the board's cut (floorView)", () => {
     assert.equal(floorViewOf(null, "s1"), null);
   });
 
+  test("a scene of one floor is cut while the view holds another scene's records, as a DM's predicted ops on a scene not shown add them", () => {
+    const shown = asView(room({ tokens: { g1: token("g1") } }));
+    const sent = shareState(shown as unknown as RoomState, {
+      ...(shown as unknown as RoomState),
+      tokens: { ...shown.tokens, d1: token("d1", { sceneId: "s2" }) },
+      traps: { x1: trap("x1", { sceneId: "s2" }) },
+      buildChunks: { "s2:0,0": { sceneId: "s2", cx: 0, cy: 0 } as never },
+    }) as unknown as View;
+    const cut = floorViewOf(sent, "s1", shown)!;
+    assert.notEqual(cut, sent);
+    assert.deepEqual(Object.keys(cut.tokens), ["g1"]);
+    assert.deepEqual(cut.traps, {});
+    assert.deepEqual(cut.buildChunks, {});
+    assert.equal(cut.tokens.g1, shown.tokens.g1);
+    // More of the scene not shown changes nothing the board reads.
+    const more = shareState(sent as unknown as RoomState, { ...(sent as unknown as RoomState), tokens: { ...sent.tokens, d2: token("d2", { sceneId: "s2" }) } }) as unknown as View;
+    assert.equal(floorViewOf(more, "s1", cut), cut);
+    // Once the server's answers take them away, the view is its own cut again.
+    assert.equal(floorViewOf(shown, "s1", cut), shown);
+  });
+
   test("every floor-scoped collection holds the floor shown's alone, and the rest of the view is whole", () => {
     const view = filled();
     const cut = floorViewOf(view, UPPER)! as unknown as Record<string, Record<string, { sceneId?: string }>>;

@@ -35,20 +35,32 @@ function cutOf(kind: Cut, all: Entries, sceneId: SceneId, prev: Entries | undefi
   const known = floors?.get(sceneId);
   if (known !== undefined) return known;
   const out: Record<string, unknown> = {};
+  let kept = 0;
+  let total = 0;
   if ((BY_FLOOR as readonly string[]).includes(kind)) {
     const own = ownEntry(all, sceneId);
     if (own !== undefined) out[sceneId] = own;
+    kept = own !== undefined ? 1 : 0;
+    total = Object.keys(all).length;
   } else if ((BY_KEY as readonly string[]).includes(kind)) {
     const prefix = `${sceneId}:`;
-    for (const key in all) if (key.startsWith(prefix)) out[key] = all[key];
+    for (const key in all) {
+      total++;
+      if (!key.startsWith(prefix)) continue;
+      out[key] = all[key];
+      kept++;
+    }
   } else {
     for (const key in all) {
+      total++;
       const entry = all[key] as { sceneId?: unknown } | undefined;
-      if (entry?.sceneId === sceneId) out[key] = entry;
+      if (entry?.sceneId !== sceneId) continue;
+      out[key] = entry;
+      kept++;
     }
   }
-  // Each entry already keeps its identity across rebuilds, so the cut keeps its own while it holds the same ones.
-  const shared = shareRecord(prev, out) as Entries;
+  // A collection with nothing on another floor is its own cut. Each entry already keeps its identity across rebuilds, so the cut keeps its own while it holds the same ones.
+  const shared = kept === total ? all : (shareRecord(prev, out) as Entries);
   if (floors === undefined) cuts.set(all, (floors = new Map()));
   floors.set(sceneId, shared);
   return shared;
@@ -63,19 +75,27 @@ function cutOf(kind: Cut, all: Entries, sceneId: SceneId, prev: Entries | undefi
  * cut, whose collections it shares while they hold the same entries, so a
  * layer that reads one renders only when it changes.
  *
- * A scene of one floor is its own cut: the view then holds that one scene's
- * records, as it did before floors, so `view` itself comes back.
+ * A view that holds nothing of another floor is its own cut: a scene of one
+ * floor's, which holds that one scene's records as it did before floors, so
+ * `view` itself comes back. A DM's ops on a scene not shown, predicted
+ * until the server answers (a dungeon's Make sends a hundred), add that
+ * scene's records, and the cut keeps them off the board then too.
  */
 export function floorViewOf(view: RoomView["view"], sceneId: SceneId | null, prev?: RoomView["view"]): RoomView["view"] {
   if (view === null) return null;
-  if (sceneId === null || ownEntry(view.scenes, sceneId)?.floor === undefined) return view;
+  if (sceneId === null || ownEntry(view.scenes, sceneId) === undefined) return view;
   const from = prev !== null && prev !== undefined && prev !== view ? (prev as unknown as Record<string, unknown>) : undefined;
   const source = view as unknown as Record<string, unknown>;
-  const out: Record<string, unknown> = { ...source };
+  let out: Record<string, unknown> | null = null;
   for (const kind of CUT_COLLECTIONS as readonly Cut[]) {
     const all = source[kind] as Entries | undefined;
-    if (all !== undefined) out[kind] = cutOf(kind, all, sceneId, from?.[kind] as Entries | undefined);
+    if (all === undefined) continue;
+    const cut = cutOf(kind, all, sceneId, from?.[kind] as Entries | undefined);
+    if (cut === all) continue;
+    out ??= { ...source };
+    out[kind] = cut;
   }
+  if (out === null) return view;
   if (from !== undefined && Object.keys(from).length === Object.keys(out).length && Object.keys(out).every((key) => out[key] === from[key])) return prev!;
   return out as unknown as RoomViewState;
 }
