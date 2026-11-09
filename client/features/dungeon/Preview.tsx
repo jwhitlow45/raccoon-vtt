@@ -1,6 +1,6 @@
 import { useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
 import type { RoomState, Trap } from "#shared/model.ts";
-import { Loading } from "../../components/Loading.tsx";
+import { Loading, SHOW_DELAY_MS, useDelayed } from "../../components/Loading.tsx";
 import { BOARD_SCOPE, boardTheme, theme } from "../../lib/theme.ts";
 import { findDoor } from "../doors/doors.ts";
 import { exportContent } from "../mapexport/content.ts";
@@ -135,11 +135,18 @@ export function DungeonPreview(props: {
       ) : null}
       {props.children ? <div style={CORNER_SLOT}>{props.children}</div> : null}
       {props.leftCorner ? <div style={{ ...CORNER_SLOT, right: "auto", left: theme.space(2) }}>{props.leftCorner}</div> : null}
-      {props.drawing ? (
-        <div style={{ position: "absolute", left: theme.space(2), top: theme.space(2), padding: `${theme.space(1)}px ${theme.space(2)}px`, borderRadius: theme.radius.sm, background: theme.color.surface }}>
-          <Loading text={DRAWING} delay={props.drawingNow ? 0 : undefined} />
-        </div>
-      ) : null}
+      {props.drawing ? <DrawingPill now={props.drawingNow ?? false} /> : null}
+    </div>
+  );
+}
+
+/** The pill waits the shared delay itself, so a quick redraw never shows an empty one before its words. */
+function DrawingPill(props: { now: boolean }) {
+  const shown = useDelayed(true, props.now ? 0 : SHOW_DELAY_MS);
+  if (!shown) return null;
+  return (
+    <div style={{ position: "absolute", left: theme.space(2), top: theme.space(2), padding: `${theme.space(1)}px ${theme.space(2)}px`, borderRadius: theme.radius.sm, background: theme.color.surface }}>
+      <Loading text={DRAWING} delay={0} />
     </div>
   );
 }

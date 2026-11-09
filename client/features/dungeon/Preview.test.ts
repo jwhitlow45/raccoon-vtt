@@ -51,3 +51,8 @@ test("Look closer's status words are in the markup at once, before its render st
   const dialog = readFileSync(new URL("./GenerateDialog.tsx", import.meta.url), "utf8");
   assert.match(dialog, /drawingNow=\{looking\}/);
 });
+
+test("no empty pill is drawn before the drawing words show (DG2-OP-07)", () => {
+  assert.equal(previewMarkup(true), previewMarkup(false));
+  assert.notEqual(previewMarkup(true, true), previewMarkup(false));
+});
