@@ -110,8 +110,11 @@ export function moveToFloorOps(view: Pick<RoomState, "buildChunks" | "tokens">, 
   const holdersFirst = [...named].sort((a, b) => depth.get(a.id)! - depth.get(b.id)!);
   for (const token of holdersFirst) {
     if (token.sceneId === target.id) continue;
+    // Whether it stands on the ground reads the space it stands in now, squeezed or not. It lands full size, since the
+    // change of floor drops the squeeze (FLRBUILD-ASTRA-02), so its landing reads the ground under its full space.
+    const { squeeze: _squeeze, ...landing } = token;
     const here = footprintGround(view.buildChunks, token);
-    const there = footprintGround(view.buildChunks, { ...token, sceneId: target.id });
+    const there = footprintGround(view.buildChunks, { ...landing, sceneId: target.id });
     const elevation = token.elevation === here ? there : token.elevation;
     ops.push({ t: "token.update", tokenId: token.id, patch: { sceneId: target.id, ...(elevation !== token.elevation ? { elevation } : {}) } });
   }

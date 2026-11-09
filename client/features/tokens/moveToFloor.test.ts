@@ -174,4 +174,23 @@ describe("the ops of the move", () => {
     const [bird] = moveToFloorOps(state, [state.tokens.bird!], state.scenes.u!);
     assert.deepEqual(bird, { t: "token.update", tokenId: "bird", patch: { sceneId: "u" } });
   });
+
+  test("a squeezed creature on uneven ground stood on the ground of its squeezed space, and lands on the ground of its full space (FLRBUILD-ASTRA-02)", () => {
+    // A Large ogre squeezed into (5, 5) alone. Its full space also covers (6, 5), (5, 6) and (6, 6), where the ground is higher on both floors.
+    const raised = (sceneId: string, feet: number): BuildChunk => {
+      const heights = new Int16Array(CHUNK_CELLS * CHUNK_CELLS);
+      heights[6 * CHUNK_CELLS + 6] = feet;
+      return { sceneId, cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, heights: encodeHeights(heights) };
+    };
+    const state = tower((s) => {
+      s.buildChunks["g:0,0"] = raised("g", 5);
+      s.buildChunks["u:0,0"] = raised("u", 10);
+      s.tokens.ogre = token("ogre", { sceneId: "g", name: "Ogre", size: "large", x: 4.5, y: 4.5, elevation: 0, squeeze: true });
+    });
+    const ops = moveToFloorOps(state, [state.tokens.ogre!], state.scenes.u!);
+    assert.deepEqual(ops, [{ t: "token.update", tokenId: "ogre", patch: { sceneId: "u", elevation: 10 } }], "on the ground at 0 under its squeeze, so it lands on the 10 ft its full space stands on");
+    const r = applyOp(state, ops[0]!, DM, env(1));
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    assert.deepEqual([r.state.tokens.ogre!.squeeze, r.state.tokens.ogre!.elevation], [undefined, 10], "the move drops the squeeze, and the ogre stands on the ground");
+  });
 });
