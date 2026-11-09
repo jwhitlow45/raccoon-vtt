@@ -1160,6 +1160,55 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await ops.send({ t: "scene.delete", sceneId: keep.scene });
   });
 
+  /*
+   * Lane LP33-FIX's step (lp33fix-): the hex twin of fu44b-1. A second
+   * creature in tow that cannot fall in behind the warhorse held the drag
+   * at its start on hexes, and the ruler read 0 ft (LP33-B-HEX-1).
+   */
+  test("lp33fix-1. Pat drags the warhorse, which drags a goblin and a hobgoblin, into a corridor one hex wide on hex rows: one cannot follow, so the warhorse moves to the corridor's mouth, off its start and clear of the rock, the note names a follower (LP33-B-HEX-1)", async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    const G: HexGrid = { shape: "hex", orient: "rows" };
+    const field = { w: 20, h: 12 };
+    const keep = { scene: randomUUID(), horse: randomUUID(), gob: randomUUID(), hob: randomUUID() };
+    await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "LP33 fix hex rows", bounds: field, fogEnabled: false, gridShape: "hexRows" } });
+    await ops.send({ t: "scene.update", sceneId: keep.scene, patch: { blockMovement: true } });
+    const solid = (h: Hex) => h.col >= 7 && h.col <= 12 && h.row !== 6;
+    const walls = wallsRound(G, field, solid);
+    for (let i = 0; i < walls.length; i += 100) await ops.send({ t: "build.walls", sceneId: keep.scene, put: walls.slice(i, i + 100) });
+    const horseAt = placedOnHex(G, { size: "large", x: 0, y: 0 }, { col: 3, row: 6 });
+    await ops.send({ t: "token.create", token: { id: keep.horse, sceneId: keep.scene, kind: "npc", name: "Warhorse", size: "large", ...horseAt, disposition: "ally", visibility: "all", ownerIds: [run.patId], actor: { inline: actor({ speeds: { walk: 60 } }) } } });
+    const own = occupiedHexes(G, { size: "large", ...horseAt });
+    const beside = own.flatMap((h) => hexNeighbors(G, h)).find((h) => h.row === 5 && !own.some((o) => hexKey(o) === hexKey(h)))!;
+    const gobAt = placedOnHex(G, { size: "medium", x: 0, y: 0 }, beside);
+    const hobAt = placedOnHex(G, { size: "medium", x: 0, y: 0 }, { col: 4, row: 7 });
+    for (const [id, name, at] of [[keep.gob, "Goblin", gobAt], [keep.hob, "Hobgoblin", hobAt]] as const) {
+      await ops.send({ t: "token.create", token: { id, sceneId: keep.scene, kind: "monster", name, size: "medium", ...at, disposition: "hostile", visibility: "all", actor: { inline: actor() } } });
+      await ops.send({ t: "token.attach", tokenId: id, to: keep.horse, kind: "drag", ...at, elevation: 0 });
+    }
+    await ops.send({ t: "room.setPlayerScene", sceneId: keep.scene });
+    await waitFor("both in tow in Pat's copy", () => (token(patSocket, keep.gob)?.attached && token(patSocket, keep.hob)?.attached ? true : null));
+    await waitFor("the corridor's walls in Pat's copy", () => (Object.values((patSocket.state as RoomState | null)?.buildChunks ?? {}).reduce((n, c) => n + (c?.sceneId === keep.scene ? (c.walls?.length ?? 0) : 0), 0) === walls.length ? true : null));
+    await pat.locator(".konvajs-content").first().waitFor();
+    const from = await pagePoint(pat, field, { x: horseAt.x + 1, y: horseAt.y + 1 });
+    const to = await pagePoint(pat, field, hexCenter(G, { col: 10, row: 6 }));
+    await touchSwipe(patCdp, from, to, { steps: 16, everyMs: 20 });
+    const note = pat.getByRole("status").filter({ hasText: /can't follow through there/ });
+    await note.first().waitFor();
+    const horse = await waitFor("the warhorse off its start", () => {
+      const t = token(patSocket, keep.horse);
+      return t && (t.x !== horseAt.x || t.y !== horseAt.y) ? t : null;
+    });
+    assert.ok(!occupiedHexes(G, horse).some(solid), "clear of the rock");
+    assert.ok(occupiedHexes(G, horse).every((h) => h.col < 7), "short of the corridor");
+    assert.equal(token(patSocket, keep.gob)?.attached?.to, keep.horse, "the goblin still in tow");
+    assert.equal(token(patSocket, keep.hob)?.attached?.to, keep.horse, "the hobgoblin still in tow");
+    await shots.take(pat, "lp33fix-hex-drag-stops-at-the-mouth");
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
+    await waitFor("Pat back on the party's scene", () => ((patSocket.state as RoomState | null)?.meta.playerSceneId === run.sceneId ? true : null));
+    for (const id of [keep.gob, keep.hob, keep.horse]) await ops.send({ t: "token.delete", tokenId: id });
+    await ops.send({ t: "scene.delete", sceneId: keep.scene });
+  });
+
   test("fu48m-1. Pat drags Brom on the warhorse, which drags a goblin, toward a corridor one square wide over a net at its mouth: the net stops the warhorse squeezed at the mouth, and the goblin stops on the square behind it, not on the warhorse's (TRAP-STOP-STACK)", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const field = { w: 20, h: 12 };
