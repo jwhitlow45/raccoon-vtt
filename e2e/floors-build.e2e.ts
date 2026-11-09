@@ -8,6 +8,7 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page } 
 import type { RoomState, Scene } from "#shared/model.ts";
 import { floorRoot } from "../client/features/floors/ids.ts";
 import { ConsoleWatch, OpSocket, openSceneGroup, openSideTab, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { undoSetup } from "./helpers/undoScope.ts";
 
 /**
  * Several floors, the DM's building side (docs/design/design-v1-floors.md
@@ -17,14 +18,16 @@ import { ConsoleWatch, OpSocket, openSceneGroup, openSideTab, Shots, sideTabName
  *   Add a floor above names the scene's first floor "Ground floor" and the new
  *   one "New floor", shows it, and opens its page on the name, selected. The
  *   name, the height, Move up and Move down and Back to Floors each change
- *   the scene's floors, and the group lists them top first.
+ *   the scene's floors, and the group lists them top first. Two more adds
+ *   go beside the floor shown, below Ground and above Upper floor.
  * - FLRB-2: Move to floor lists the other floors of a creature's scene,
  *   warns that moving a party member opens a floor players have not
  *   reached, is off where the creature's full space lies outside the floor,
  *   lands the creature on the floor, opens it and is one undo step.
  * - FLRB-3: a floor's page says where the players stand, shows or hides the
  *   floor, refuses to hide the start floor and to remove the main floor with
- *   its reasons, removes a floor on a second tap and Undo brings it back.
+ *   its reasons, removes a floor on a second tap and Setup history's Undo
+ *   setup brings it back.
  * - FLRB-4: Delete from the scene's menu says how many floors go with the
  *   scene, and is refused while the players start on one of them.
  *
@@ -228,14 +231,16 @@ describe("raccoon-vtt several floors: the DM's building side", { timeout: 900_00
     assert.deepEqual(rows, ["Upper floor, Not reached yet, shown. Open its page", "Ground floor, Not reached yet. Open its page"]);
     await shots.take(dm, "flrb-1-floors-group");
 
-    // A second add below Ground, and one more above: the reducer names them without a clash.
-    await group.getByRole("button", { name: "Add a floor below" }).click();
+    // A second add below Ground, and one more above Upper floor: each goes beside the floor on screen, and the reducer names them without a clash.
+    await showFloorNamed("Ground floor");
+    await (await floorsGroup(dm)).getByRole("button", { name: "Add a floor below" }).click();
     await waitFor("three floors", () => (floorsOf("Tower").length === 3 ? true : null));
     await dm.locator(floorRoot("page")).getByRole("button", { name: "Back to Floors" }).click();
+    await showFloorNamed("Upper floor");
     await (await floorsGroup(dm)).getByRole("button", { name: "Add a floor above" }).click();
     await waitFor("four floors", () => (floorsOf("Tower").length === 4 ? true : null));
     assert.deepEqual(floorsOf("Tower").map((s) => s.floor?.level), [0, 1, 2, 3]);
-    assert.equal(new Set(floorsOf("Tower").map((s) => s.floor?.name)).size, 4, "four names, none twice");
+    assert.deepEqual(floorsOf("Tower").map((s) => s.floor?.name), ["New floor", "Ground floor", "Upper floor", "New floor 2"], "bottom first, each add beside the floor shown");
   });
 
   test("FLRB-2. Move to floor lists the other floors, warns before it opens one to the players, is off where a creature does not fit, and is one undo step", async () => {
@@ -322,7 +327,8 @@ describe("raccoon-vtt several floors: the DM's building side", { timeout: 900_00
     assert.equal(floorsOf("Tower").length, 4, "one tap removes nothing");
     await page.getByRole("button", { name: "Tap again to remove" }).click();
     await waitFor("three floors", () => (floorsOf("Tower").length === 3 ? true : null));
-    await dm.getByRole("button", { name: "Undo", exact: true }).click();
+    // Removing a floor is setup, so Setup history takes it back. The top bar's Undo takes back play.
+    await undoSetup(dm);
     await waitFor("four floors again", () => (floorsOf("Tower").length === 4 ? true : null));
     assert.ok(floorNamed("Attic"), "Attic is back");
     assert.equal(floorNamed("Ground floor")!.id, ground.id);
