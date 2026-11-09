@@ -190,6 +190,14 @@ async function barAfterReload(page: Page, name: string, cell: { x: number; y: nu
   return bar;
 }
 
+/** Thorn on the stairs on Ground, unlocked, whatever a step before left, so each later step stands on its own. */
+async function onGroundStairs(): Promise<void> {
+  await ops.send({ t: "floorLink.update", linkId: run.stairsDown, patch: { locked: false } });
+  const t = thornAt(dmSocket);
+  if (t?.sceneId !== run.ground || t.x !== STAIRS.x || t.y !== STAIRS.y) await ops.send({ t: "token.update", tokenId: run.tThorn, patch: { sceneId: run.ground, ...STAIRS } });
+  await waitFor("Thorn on Ground's stairs in Ana's copy", () => (thornAt(anaSocket)?.sceneId === run.ground && thornAt(anaSocket)?.x === STAIRS.x ? true : null));
+}
+
 /** Lets go of whatever a page has selected, by Escape on the map. */
 async function deselect(page: Page): Promise<void> {
   for (let i = 0; i < 3 && (await page.getByRole("dialog", { name: /actions$/ }).count()) > 0; i++) await keyOn(page, "Escape");
@@ -418,7 +426,8 @@ describe("Go up and Go down, and the stairs on the board", { concurrency: false 
     assert.deepEqual(lines, [], "the locked Go up out of line or not dim");
     await shots.take(dm, "flrl-7-dm-locked");
     const before = climbsSent(dmSocket);
-    await up.click();
+    // Off by aria-disabled, so it keeps its focus and names its reason, and a press still reaches it: Playwright's click waits for an enabled button.
+    await up.evaluate((el) => (el as unknown as { click(): void }).click());
     await toast(dm, "It's locked.").waitFor();
     assert.equal(climbsSent(dmSocket), before, "a press sends nothing");
     await ops.send({ t: "floorLink.update", linkId: run.stairsDown, patch: { locked: false } });
@@ -426,6 +435,7 @@ describe("Go up and Go down, and the stairs on the board", { concurrency: false 
   });
 
   test("flrl-8. Ana's Undo takes the climb back down the stairs and her Redo up again, twice, the marker as it was each time", async () => {
+    await onGroundStairs();
     await deselect(ana);
     await tapCell(ana, BOUNDS, STAIRS);
     const bar = barOf(ana, "Thorn");
@@ -433,9 +443,11 @@ describe("Go up and Go down, and the stairs on the board", { concurrency: false 
     await waitFor("Thorn upstairs", () => (thornAt(anaSocket)?.sceneId === run.upper ? true : null));
     const moved = await waitFor("the marker upstairs", async () => (await boardTexts(ana)).find((t) => t.startsWith("Moved ")));
     for (let i = 0; i < 2; i++) {
-      await anaOps.step("undo");
+      const sent = anaSocket.sent.length;
+      await keyOn(ana, "Control+z");
+      await waitFor(`undo ${i + 1} sent`, () => (anaSocket.sent.slice(sent).some((f) => f.includes('"t":"undo"')) ? true : null), 5_000);
       await waitFor(`undo ${i + 1}: Thorn back on Ground`, () => (thornAt(anaSocket)?.sceneId === run.ground ? true : null));
-      await anaOps.step("redo");
+      await keyOn(ana, "Control+Shift+z");
       await waitFor(`redo ${i + 1}: Thorn upstairs`, () => (thornAt(anaSocket)?.sceneId === run.upper ? true : null));
       await showsFloor(ana, "Upper floor");
       await waitFor(`redo ${i + 1}: the marker as it was`, async () => ((await boardTexts(ana)).includes(moved) ? true : null));
@@ -447,8 +459,10 @@ describe("Go up and Go down, and the stairs on the board", { concurrency: false 
   });
 
   test("flrl-9. Ana's Go up in line at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%: words, the icon, and behind Expand at 320 x 568 at 130%", async () => {
+    await onGroundStairs();
     const lines: string[] = [];
     const forms: string[] = [];
+    const sizes: string[] = [];
     try {
       for (const size of [DESK, PHONE, { width: 320, height: 568 }]) {
         for (const scale of [1, 1.3]) {
@@ -460,14 +474,21 @@ describe("Go up and Go down, and the stairs on the board", { concurrency: false 
           await sleep(800);
           const bar = await barAfterReload(ana, "Thorn", STAIRS);
           await sleep(300);
+          // In the strip's quick row as its words or its icon, else behind Expand, or under the quick row where the strip scrolls.
           let up = climbButton(bar, "up");
-          if ((await up.count()) === 0) {
+          const quick = (await up.count()) > 0 && (await up.evaluate((el) => (el as unknown as { closest(s: string): unknown }).closest("[data-rest-item]") !== null));
+          if ((await bar.getAttribute("data-bar-state")) === "rest" && !quick) {
             forms.push(`${at}: behind Expand`);
             await expandBar(bar);
             up = climbButton(bar, "up");
-          } else forms.push(`${at}: ${(await up.innerText()).trim() === "" ? "icon" : "words"}`);
+          } else if (!quick) forms.push(`${at}: ${(await bar.getAttribute("data-bar-state")) === "scrolls" ? "under the quick row" : "in the bar"}`);
+          else forms.push(`${at}: ${(await up.innerText()).trim() === "" ? "icon" : "words"} in the quick row`);
           await up.waitFor();
-          lines.push(...alignmentLines(await measureAlignment(bar), `${at} Thorn's bar`));
+          const found = await measureAlignment(bar);
+          lines.push(...alignmentLines(found, `${at} Thorn's bar`));
+          const box = await up.boundingBox();
+          const worst = Math.max(0, ...found.filter((f) => f.name.startsWith("Go up")).map((f) => Math.abs(f.offset)));
+          sizes.push(`${at} ${box ? `${Math.round(box.width * 10) / 10} by ${Math.round(box.height * 10) / 10}` : "?"}, worst ${worst} px`);
           await shots.take(ana, `flrl-9-ana-go-up-${at}`);
           await deselect(ana);
         }
@@ -479,8 +500,9 @@ describe("Go up and Go down, and the stairs on the board", { concurrency: false 
       await ana.getByRole("status", { name: "Connected" }).first().waitFor();
     }
     console.log(`flrl-9: ${forms.join(", ")}`);
-    assert.ok(forms.includes("390x844: icon"), `390 x 844 draws the icon: ${forms.join(", ")}`);
-    assert.ok(forms.includes("320x568-130: behind Expand"), `320 x 568 at 130% keeps it behind Expand: ${forms.join(", ")}`);
+    console.log(`flrl-9: Go up as drawn: ${sizes.join("; ")}`);
+    assert.ok(forms.includes("390x844: icon in the quick row"), `390 x 844 draws the icon in Roll's place: ${forms.join(", ")}`);
+    for (const small of ["320x568", "320x568-130"]) assert.ok(!forms.some((f) => f.startsWith(`${small}: `) && f.endsWith("in the quick row")), `${small} keeps it out of the quick row: ${forms.join(", ")}`);
     assert.deepEqual(lines, [], "Go up out of line");
   });
 
