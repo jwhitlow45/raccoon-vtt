@@ -79,7 +79,6 @@ export function Speaker(props: { popover: boolean; dialogOpen: boolean; onOpen?(
         data-volume-button=""
         data-volume-icon={icon}
         aria-label={name}
-        aria-keyshortcuts={keys?.aria}
         {...tip.anchor()}
         {...opens}
         style={{
