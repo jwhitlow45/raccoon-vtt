@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Token } from "#shared/model.ts";
 import { Spinner } from "../../components/Loading.tsx";
 import { theme } from "../../lib/theme.ts";
@@ -27,8 +27,13 @@ export function useOffersMoveToFloor(tokens: readonly Pick<Token, "sceneId">[]):
  * to players. A move is one undo step and shows the floor it went to. While
  * it waits for the server every row is busy and refuses another tap.
  */
-export function MoveToFloorList(props: { tokens: readonly Token[]; onMoved?(): void }) {
+export function MoveToFloorList(props: { tokens: readonly Token[]; onMoved?(): void; /** The action bar opens this list at its foot, past a phone's fold, so it scrolls itself into view. A sheet that holds it always does not. */ reveal?: boolean }) {
   const actions = useRoomActions();
+  const root = useRef<HTMLDivElement>(null);
+  const { reveal } = props;
+  useLayoutEffect(() => {
+    if (reveal) root.current?.scrollIntoView({ block: "nearest" });
+  }, [reveal]);
   const view = useRoomView((s) => s.view);
   const [moving, setMoving] = useState<string | null>(null);
   const listId = useId();
@@ -57,7 +62,7 @@ export function MoveToFloorList(props: { tokens: readonly Token[]; onMoved?(): v
   };
 
   return (
-    <div {...{ [FLOOR_ROOT_ATTR]: FLOOR_ROOTS.moveList }} role="group" aria-label={MOVE_TO_FLOOR.replace("…", "")} style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
+    <div ref={root} {...{ [FLOOR_ROOT_ATTR]: FLOOR_ROOTS.moveList }} role="group" aria-label={MOVE_TO_FLOOR.replace("…", "")} style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
       {choices.length === 0 ? <p style={{ margin: 0, fontSize: theme.font.small, color: theme.color.textMuted }}>No other floor to move to.</p> : null}
       {choices.map((c) => {
         const line = c.off ?? c.warning;

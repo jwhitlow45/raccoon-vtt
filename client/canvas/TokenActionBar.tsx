@@ -648,7 +648,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
           {rows.less.length > 0 ? (
             <ButtonRow row="less">{rows.less.map(button)}</ButtonRow>
           ) : null}
-          {drawer === "floor" ? <MoveToFloorList tokens={[token]} onMoved={() => setDrawer(null)} /> : null}
+          {drawer === "floor" ? <MoveToFloorList tokens={[token]} onMoved={() => setDrawer(null)} reveal /> : null}
         </>
       )}
     </>

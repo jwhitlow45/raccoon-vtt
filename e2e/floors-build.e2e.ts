@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { RoomState, Scene } from "#shared/model.ts";
 import { floorRoot } from "../client/features/floors/ids.ts";
-import { ConsoleWatch, OpSocket, openSceneGroup, openSideTab, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, expandBar, OpSocket, openSceneGroup, openSideTab, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { undoSetup } from "./helpers/undoScope.ts";
 
 /**
@@ -283,6 +283,40 @@ describe("raccoon-vtt several floors: the DM's building side", { timeout: 900_00
     const goblinUpper = list.getByRole("button", { name: /^Upper floor/ });
     assert.equal((await goblinUpper.innerText()).includes("Players haven't reached"), false, "a monster opens nothing");
     await shots.take(dm, "flrb-2-outside-attic");
+  });
+
+  test("FLRB-2b. on a phone the expanded bar's Move to floor… brings its rows into view, at 390 x 844 and at 320 x 568 at 130% (LP33-A-FLR-1)", async () => {
+    const off: string[] = [];
+    try {
+      for (const view of [{ width: 390, height: 844, scale: 1 }, { width: 320, height: 568, scale: 1.3 }]) {
+        const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+        await dm.setViewportSize({ width: view.width, height: view.height });
+        await dm.evaluate((scale) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", String(scale)), view.scale);
+        await reopenRoom(dm);
+        await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+        await dm.locator(".konvajs-content").first().waitFor();
+        const bar = await selectToken("Thorn", { x: 4, y: 4 });
+        await expandBar(bar);
+        const open = bar.getByRole("button", { name: /^(Move to floor…|Floor…)$/ });
+        await open.scrollIntoViewIfNeeded();
+        await open.click();
+        const list = bar.locator(floorRoot("move-list"));
+        await list.waitFor();
+        // A moment for the scroll the list asks for to settle, then the first row must take a tap where it stands.
+        await dm.waitForTimeout(300);
+        if (!(await wholeInReach(list.getByRole("button").first()))) off.push(`${at}: the first floor row is out of sight or covered after Move to floor…`);
+        await shots.take(dm, `flrb-2b-move-to-floor-${view.width}-${Math.round(view.scale * 100)}`);
+        await dm.keyboard.press("Escape");
+      }
+    } finally {
+      await dm.setViewportSize(WIDE);
+      await dm.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", "1"));
+      await reopenRoom(dm);
+      await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+      await dm.locator(".konvajs-content").first().waitFor();
+      await showFloorNamed("Ground floor");
+    }
+    assert.deepEqual(off, []);
   });
 
   test("FLRB-3. a floor's page says where the players stand, shows and hides the floor, gives reasons where Hide and Remove are off, and Remove takes a second tap that Undo reverses", async () => {
