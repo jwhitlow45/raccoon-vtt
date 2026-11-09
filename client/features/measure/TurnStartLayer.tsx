@@ -20,9 +20,11 @@ import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 
 /**
  * Where the active creature has been this turn (features sections 4 and
- * 10), on the overlay layer: a ring where its turn began, a dashed line
- * through every stop with a dot at each corner, and how far it has moved
- * with what is left of its speeds. The table reads off it which squares
+ * 10), on the overlay layer: a ring where its moves on this floor began,
+ * which is where its turn began or where it landed on this floor
+ * (docs/design/design-v1-floors.md phase 2, 5), a dashed line through
+ * every stop with a dot at each corner, and how far it has moved this
+ * turn, the floors it left included, with what is left of its speeds. The table reads off it which squares
  * the creature crossed, for opportunity attacks.
  *
  * The path comes from the shared state, so every device and a reload draw
@@ -114,7 +116,7 @@ export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
 });
 
 /**
- * The move marker hangs under the ring where the turn began, or over it
+ * The move marker hangs under the ring where its moves on this floor began, or over it
  * when that would cover the creature or the band its name hangs in, as
  * when it has moved one square down. The name's band is estimated from
  * the token alone, never from where its label went, since the label keeps
@@ -138,7 +140,7 @@ function markerPlace(input: { from: { x: number; y: number; w: number; h: number
 }
 
 /**
- * A ring where the turn began, the legs (movement.ts trailSegments) and a
+ * A ring where its moves on this floor began, the legs (movement.ts trailSegments) and a
  * dot at each stop, never at a route's corners.
  */
 function TrailLines(props: { trail: TurnTrail; color: string; scale: number }) {

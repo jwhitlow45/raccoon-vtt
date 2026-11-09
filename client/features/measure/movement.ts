@@ -3,7 +3,7 @@ import type { BuildState } from "#shared/ruleHooks.ts";
 import type { DiagonalCounter } from "#shared/rules/distance.ts";
 import { canSqueeze, footprintRect, snapStep, type PlacedToken } from "#shared/rules/footprint.ts";
 import type { Rect } from "#shared/rules/geom.ts";
-import { legGeometry, legTaken, pathThisTurn, sameSpot } from "#shared/rules/path.ts";
+import { legGeometry, legTaken, pathThisTurn, priorDiag, priorSeenDiag, sameSpot } from "#shared/rules/path.ts";
 import { dismountCost } from "#shared/rules/dismount.ts";
 import { onSqueezedLattice, ownWalk, previewSqueezed, walkEnds, type Walker } from "#shared/rules/movement.ts";
 import { alongStraightLeg, hexRouteFeet, legSteps, plainLegCost, routeFeet, routeLattice, routeWalk, spotRect, straightCost, walkSqueezes, walkTrace, type LegCost, type RoutePiece, type RoutePoint, type SizedSpot, type WalkSpot, type WalkTrace } from "#shared/rules/route.ts";
@@ -76,13 +76,17 @@ export function pathNow(encounter: TurnView | null | undefined, token: Pick<Movi
 export type TrailLeg = { from: Spot; to: Spot; counted: boolean; carried: boolean; via: Point[] };
 
 export type TurnTrail = {
-  /** Where the turn began, each stop since, and where the creature stands now, in order. */
+  /**
+   * Where its moves on this floor began, each stop since, and where the
+   * creature stands now, in order. The first is where the turn began,
+   * or where it landed on this floor (docs/design/design-v1-floors.md phase 2, 5).
+   */
   spots: Spot[];
   /** The footprint at each spot, in cells, at the size the creature had there. */
   rects: Rect[];
   /** `legs[i]` joins `spots[i]` and `spots[i + 1]`. */
   legs: TrailLeg[];
-  /** The counted legs' feet. */
+  /** The counted legs' feet, with what the turn took on floors the creature has left, as this viewer's copy holds it. */
   movedFt: number;
   /**
    * What the counted legs took off the speed (docs/design/design-v1-movement.md
@@ -90,9 +94,9 @@ export type TurnTrail = {
    * copies hold them, and their feet for everyone else.
    */
   usedFt: number;
-  /** The diagonals the counted legs took, for a drag to count on from under the 5-10-5 rule. */
+  /** The diagonals the counted legs took, from the floors left too, for a drag to count on from under the 5-10-5 rule. */
   diagonals: DiagonalCounter;
-  /** The footprints where the turn began, at the size it began at, and where the creature stands now, in cells. */
+  /** The footprints where its moves on this floor began, at the size it had there, and where the creature stands now, in cells. */
   from: Rect;
   to: Rect;
 };
@@ -101,6 +105,14 @@ export type TurnTrail = {
  * The trail of the active creature on this scene, or null when there is
  * none to draw: no turn has started, the creature is not the active one,
  * it is on another scene, or it has not moved yet.
+ *
+ * Its legs are those on the floor it stands on. What the turn took on
+ * floors it has left (`prior`, docs/design/design-v1-floors.md phase 2,
+ * 5.4) is added once, with the 5-10-5 count running on from it, so a
+ * creature that climbed reads "Moved 35 ft" upstairs from its first stop
+ * there. The DM's and the owners' copies hold it whole. Everyone else's
+ * holds only the diagonals they could count, and so reads this floor's
+ * feet alone.
  *
  * A player who does not own the creature holds only the stops they saw,
  * and a spot where it stands now that they see may not be one of them
@@ -121,18 +133,23 @@ export function turnTrail(input: {
   const path = pathNow(encounter, token, input.role);
   const start = encounter.turnStart;
   let stops: (SizedSpot & Omit<PathStop, "x" | "y" | "elevation" | "footprint">)[];
+  const prior = path?.prior;
   if (path) stops = [...path.stops];
   else if (start && start.entryId === encounter.activeEntryId && start.tokenId === token.id && start.sceneId === token.sceneId) stops = [start];
   else return null;
-  const last = stops[stops.length - 1]!;
-  if (!sameSpot(last, token)) stops.push({ x: token.x, y: token.y, elevation: token.elevation });
-  if (stops.length < 2) return null;
+  // A copy may hold a path with no stop it saw on this floor, only what it could count on the floors before.
+  const last = stops[stops.length - 1];
+  if (!last || !sameSpot(last, token)) stops.push({ x: token.x, y: token.y, elevation: token.elevation });
+  // Landed on this floor and not moved since: no leg here, but the floors before still count.
+  if (stops.length < 2 && prior === undefined) return null;
   const spots = stops.map((s): Spot => ({ x: s.x, y: s.y, elevation: s.elevation }));
   const legs = spots.slice(1).map((to, i): TrailLeg => ({ from: spots[i]!, to, counted: stops[i + 1]!.uncounted !== true, carried: stops[i + 1]!.carried === true, via: corners(stops[i + 1]!) }));
   // A leg that does not count takes no diagonals either, so the 5-10-5 count runs on across it, a resize's leg included.
-  const diagonals: DiagonalCounter = { h: 0, v: 0 };
-  let movedFt = 0;
-  let usedFt = 0;
+  // A copy that holds what the floors left took counts on from their true diagonals, any other from those players could count.
+  const whole = prior?.moved !== undefined || prior?.cost !== undefined;
+  const diagonals: DiagonalCounter = whole ? priorDiag(path) : priorSeenDiag(path);
+  let movedFt = prior?.moved ?? 0;
+  let usedFt = prior?.cost ?? prior?.moved ?? 0;
   for (const [i, leg] of legs.entries()) {
     if (!leg.counted) continue;
     const taken = legRead(grid, token, stops[i]!, stops[i + 1]!, input.rules, diagonals);

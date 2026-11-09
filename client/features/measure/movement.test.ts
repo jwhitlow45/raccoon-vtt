@@ -7,6 +7,7 @@ import { applyOp } from "#shared/reducer.ts";
 import { RESHAPE_NOT_A_MOVE } from "#shared/reducer/tokens.ts";
 import { apply, DM, P1, P2, room, scene, token } from "#shared/testutil.ts";
 import { resizeGroup } from "../tokens/resize.ts";
+import { worldFor } from "../movement/press.ts";
 import { dragLabel, dragReading, ellipseExit, extraWords, halvedSpeeds, leftText, movedFeet, movementText, pathNow, remoteWalk, speedsLeft, trailSegments, turnTrail, type DragWalk, type MovingToken, type PieceWalk, type TurnView } from "./movement.ts";
 import { measureWalk, walkText } from "./walkRuler.ts";
 import { wall } from "#shared/discoveryTestutil.ts";
@@ -16,6 +17,7 @@ import { chunkKey } from "#shared/keys.ts";
 import { ownWalk, type Walker } from "#shared/rules/movement.ts";
 import { walkTrace } from "#shared/rules/route.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
+import { ANA, GROUND, UPPER, onThornsTurn, run as runOp, tower, withStairs } from "#shared/floorLinksTestutil.ts";
 
 const five = { feetPerCell: 5, diagonal: "five" as const };
 const fiveTen = { feetPerCell: 5, diagonal: "fiveTen" as const };
@@ -672,5 +674,83 @@ describe("the label names a squeeze as squeezing", () => {
         assert.equal(ruled(h, horse, hexCenter(g, ref(11, 6))), "Walking 20 ft\n+10 ft for squeezing", `${shape}, walls ${blockMovement ? "stopping" : "stopping no"} moves`);
       }
     }
+  });
+});
+
+describe("the turn's feet across floors (docs/design/design-v1-floors.md phase 2, 5.4)", () => {
+  const thorn = (s: RoomState) => s.tokens.thorn!;
+  const trailOn = (s: RoomState, sceneId: string, role: "dm" | "player" = "dm", token: MovingToken = thorn(s)) => turnTrail({ encounter: s.encounter, sceneId, grid: SQUARES, token, rules: { feetPerCell: 5, diagonal: s.meta.settings.diagonal }, role });
+  const walk = (x: number, y: number): Op => ({ t: "token.move", tokenId: "thorn", x, y });
+  const climb = (linkId = "l1"): Op => ({ t: "token.climb", tokenId: "thorn", linkId });
+
+  test("25 ft onto the stairs, then Go up to Upper floor 10 ft above: the ring on the landing reads Moved 35 ft, 25 ft left with Dash, with no line", () => {
+    let s = onThornsTurn(withStairs(tower(), { rect: { x: 3, y: 8, w: 1, h: 1 } }));
+    s = runOp(s, walk(3, 8), ANA);
+    s = runOp(s, climb(), ANA);
+    const trail = trailOn(s, UPPER)!;
+    assert.equal(trail.movedFt, 35);
+    assert.equal(trail.usedFt, 35);
+    assert.deepEqual(trail.from, { x: 3, y: 8, w: 1, h: 1 }, "its ring at the first stop on this floor, the landing");
+    assert.deepEqual(trailSegments(trail), [], "the climb draws no line");
+    assert.equal(leftText(speedsLeft({ walk: 30 }, 0, trail.usedFt)[0]!), "25 ft left with Dash");
+    assert.equal(trailOn(s, GROUND), null, "nothing on the floor it left");
+  });
+
+  test("up then down in one turn reads both climbs, and a walk after adds on", () => {
+    let s = onThornsTurn(withStairs(tower(), { rect: { x: 3, y: 8, w: 1, h: 1 } }));
+    s = runOp(s, walk(3, 8), ANA);
+    s = runOp(s, climb(), ANA);
+    s = runOp(s, climb("l2"), ANA);
+    assert.equal(trailOn(s, GROUND)!.movedFt, 45);
+    s = runOp(s, walk(3, 6), ANA);
+    assert.equal(trailOn(s, GROUND)!.movedFt, 55);
+  });
+
+  test("under 5-10-5, one diagonal, two climbs, then a diagonal costs 10 ft, each counted once, on the marker and a drag", () => {
+    const base = tower();
+    base.meta = { ...base.meta, settings: { ...base.meta.settings, diagonal: "fiveTen" } };
+    let s = onThornsTurn(withStairs(base, { rect: { x: 4, y: 4, w: 1, h: 1 } }));
+    s = runOp(s, walk(4, 4), ANA);
+    s = runOp(s, climb(), ANA);
+    s = runOp(s, climb("l2"), ANA);
+    const before = trailOn(s, GROUND)!;
+    assert.equal(before.movedFt, 25);
+    assert.deepEqual(before.diagonals, { h: 1, v: 0 }, "the first diagonal runs on across both climbs");
+    // A drag reads its diagonal at 10 ft, as the reducer stores it.
+    const read = dragReading({ token: ownWalk(thorn(s)), grid: SQUARES, to: { x: 5, y: 5 }, encounter: s.encounter, activeTokenId: "thorn", speeds: { walk: 30 }, rules: fiveTen, role: "dm" });
+    assert.equal(read.dragFt, 10);
+    s = runOp(s, walk(5, 5), ANA);
+    assert.equal(trailOn(s, GROUND)!.movedFt, 35);
+  });
+
+  test("a drag's route search after a climb starts its 5-10-5 count from what players could count before it (movement/press.ts worldFor)", () => {
+    const base = tower();
+    base.meta = { ...base.meta, settings: { ...base.meta.settings, diagonal: "fiveTen" } };
+    let s = onThornsTurn(withStairs(base, { rect: { x: 4, y: 4, w: 1, h: 1 } }));
+    s = runOp(s, walk(4, 4), ANA);
+    s = runOp(s, climb(), ANA);
+    assert.deepEqual(worldFor(s, thorn(s), "dm").input.counter, { h: 1, v: 0 });
+  });
+
+  test("Move to floor mid-turn: the marker shows the walk before with one stop", () => {
+    let s = onThornsTurn(tower());
+    s = runOp(s, walk(3, 8), ANA);
+    s = runOp(s, { t: "token.update", tokenId: "thorn", patch: { sceneId: UPPER } });
+    const trail = trailOn(s, UPPER)!;
+    assert.deepEqual([trail.movedFt, trail.spots.length, trail.legs.length], [25, 1, 0]);
+  });
+
+  test("a copy with only the diagonals players could count reads this floor's feet alone, its count running on from them", () => {
+    const path = { turn: 7, prior: { seenDiag: [1, 0] as [number, number] }, stops: [stop(2, 2), stop(2, 2)] };
+    const t = { ...tok({ x: 2, y: 2 }), path };
+    const seen = turnTrail({ encounter: { ...fight, turnStart: undefined }, sceneId: "s1", grid: SQUARES, token: t, rules: fiveTen, role: "player" })!;
+    assert.equal(seen.movedFt, 0, "no height and no earlier feet");
+    assert.deepEqual(seen.diagonals, { h: 1, v: 0 });
+    // A stop list emptied for them still draws the ring where the creature stands, and reads nothing.
+    const bare = turnTrail({ encounter: { ...fight, turnStart: undefined }, sceneId: "s1", grid: SQUARES, token: { ...t, path: { ...path, stops: [] } }, rules: fiveTen, role: "player" })!;
+    assert.deepEqual([bare.movedFt, bare.spots.length], [0, 1]);
+    // The owner's copy holds prior whole, and counts from its true diagonals.
+    const owner = turnTrail({ encounter: { ...fight, turnStart: undefined }, sceneId: "s1", grid: SQUARES, token: { ...t, path: { ...path, prior: { moved: 15, cost: 20, diag: [2, 0], seenDiag: [1, 0] } } }, rules: fiveTen, role: "player" })!;
+    assert.deepEqual([owner.movedFt, owner.usedFt, owner.diagonals], [15, 20, { h: 2, v: 0 }]);
   });
 });
