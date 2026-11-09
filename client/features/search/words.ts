@@ -83,7 +83,7 @@ export const SYNONYMS: Readonly<Record<string, readonly string[]>> = {
   bigger: ["interface size"],
   zoom: ["interface size"],
   volume: ["music", "effects"],
-  mute: ["room sound"],
+  mute: ["volume"],
   hide: ["hidden"],
   invisible: ["hidden"],
   picture: ["image"],

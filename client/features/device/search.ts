@@ -5,7 +5,9 @@ import { serverAnimatedMapsNow } from "../animmap/status.ts";
 import { ANIMATED_MAPS_LABEL } from "../animmap/words.ts";
 import { inside, onOff, section, setting, type Place } from "../search/catalog/write.ts";
 import type { CatalogEntry } from "../search/catalog/types.ts";
-import { lowPower, rollAnimation, roomSoundChoice, roomSoundOnFor, themeChoice, THEME_CHOICE_WORDS, uiScale, uiScaleLabel } from "./settings.ts";
+import { serverSound } from "../sound/engine/store.ts";
+import { volumeNote } from "../sound/panel/words.ts";
+import { lowPower, rollAnimation, roomSoundChoice, roomSoundOnFor, soundMix, themeChoice, THEME_CHOICE_WORDS, uiScale, uiScaleLabel } from "./settings.ts";
 
 /*
  * This device's part of the room search (docs/design/design-v1-qol.md 5, What
@@ -30,8 +32,11 @@ const SHORTCUTS = inside(DEVICE, "Shortcuts", "shortcuts");
 const HANDLE = inside(DEVICE, "Sheet handle", "handle");
 const TAB_ROW = inside(DEVICE, "Tab row", "tabRow");
 
-/** Music, Background and Effects stand under Room sound only while it is on (ThisDevice.tsx RoomSoundControls). */
-const roomSoundOn = (role: "dm" | "player") => roomSoundOnFor(roomSoundChoice(), role);
+/** Volume's value as its slider says it: the level, or Muted. */
+const volumeNow = (role: "dm" | "player") => volumeNote({ muted: !roomSoundOnFor(roomSoundChoice(), role), volume: soundMix().volume });
+
+/** Music and Background stand in the controls unless the server says it offers no sound files (sound/device/DeviceSound.tsx mixShown), muted too. */
+const filesOffered = () => serverSound() !== "off";
 
 /** The section's own place is the page with its fold: a group's where is the page's, its settings' the group's. */
 const at = (group: Place): Place => ({ ...group, where: DEVICE.where });
@@ -51,10 +56,10 @@ export const DEVICE_ENTRIES: readonly CatalogEntry[] = [
   section(at(WEATHER), "menu.this-device.weather", "Weather"),
   setting(WEATHER, "menu.this-device.weather.mode", "Weather on the map", { names: ["weather effects"] }),
   section(at(SOUNDS), "menu.this-device.sounds", "Sounds"),
-  setting(SOUNDS, "menu.this-device.sounds.room", "Room sound", { names: ["music on this device", "mute"], valueNow: (ctx) => onOff(roomSoundOn(ctx.role)) }),
-  setting(SOUNDS, "menu.this-device.sounds.music", "Music volume", { when: (ctx) => roomSoundOn(ctx.role) }),
-  setting(SOUNDS, "menu.this-device.sounds.loops", "Background volume", { names: ["background sounds", "ambience"], when: (ctx) => roomSoundOn(ctx.role) }),
-  setting(SOUNDS, "menu.this-device.sounds.effects", "Effects volume", { names: ["sound effects"], when: (ctx) => roomSoundOn(ctx.role) }),
+  setting(SOUNDS, "menu.this-device.sounds.volume", "Volume", { names: ["mute", "unmute", "room sound", "sound on this device"], valueNow: (ctx) => volumeNow(ctx.role) }),
+  setting(SOUNDS, "menu.this-device.sounds.music", "Music volume", { when: filesOffered }),
+  setting(SOUNDS, "menu.this-device.sounds.loops", "Background volume", { names: ["background sounds", "ambience"], when: filesOffered }),
+  setting(SOUNDS, "menu.this-device.sounds.effects", "Effects volume", { names: ["sound effects"] }),
   setting(SOUNDS, "menu.this-device.sounds.turn", "Turn sound", { names: ["chime"], valueNow: () => onOff(isSoundOn()) }),
   setting(SOUNDS, "menu.this-device.sounds.ping", "Ping sound", { valueNow: () => onOff(soundEnabled()) }),
   section(at(ROLLS), "menu.this-device.rolls", "Rolls"),

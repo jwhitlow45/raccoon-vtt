@@ -28,7 +28,7 @@ export const EVERYONE_FIXTURE: Catalog = {
   entries: [
     { id: "section:menu.this-device.sounds", kind: "section", title: "Sounds", where: "Menu · This device", icon: "volume", act: { ...OPEN, route: { panel: "menu", page: "this-device", section: "sounds", anchor: "menu.this-device.sounds" } } },
     { id: "setting:menu.this-device.sounds.music", kind: "setting", title: "Music volume", where: "Menu · This device · Sounds", icon: "volume", act: { ...OPEN, route: { panel: "menu", page: "this-device", section: "sounds", anchor: "menu.this-device.sounds.music" } } },
-    { id: "setting:menu.this-device.sounds.room", kind: "setting", title: "Room sound", names: ["music on this device", "mute"], where: "Menu · This device · Sounds", icon: "volume", act: { ...OPEN, route: { panel: "menu", page: "this-device", section: "sounds", anchor: "menu.this-device.sounds.room" } } },
+    { id: "setting:menu.this-device.sounds.volume", kind: "setting", title: "Volume", names: ["mute", "unmute", "room sound", "sound on this device"], where: "Menu · This device · Sounds", icon: "volume", act: { ...OPEN, route: { panel: "menu", page: "this-device", section: "sounds", anchor: "menu.this-device.sounds.volume" } } },
     { id: "setting:menu.this-device.sounds.turn", kind: "setting", title: "Turn sound", names: ["chime"], where: "Menu · This device · Sounds", icon: "volume", act: { ...OPEN, route: { panel: "menu", page: "this-device", section: "sounds", anchor: "menu.this-device.sounds.turn" } } },
   ],
   fields: [

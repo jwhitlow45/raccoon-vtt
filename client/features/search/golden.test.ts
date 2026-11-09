@@ -11,8 +11,8 @@ import { DM_VIEW, indexOf, PAT_VIEW, rowsOf, seededRoom, viewOf } from "./search
  * The golden queries (docs/design/design-v1-qol.md 5, What keeps it current, and 8):
  * each query of the case table, by role, with what it must list first, on
  * the seeded room, through the real catalogs, so the best bets on their
- * entries are held here too. Pat's device has Room sound on, as one that
- * hears the music does: Music volume shows only then.
+ * entries are held here too. Pat's device is unmuted, as one that hears
+ * the music is. Its volumes show muted too.
  */
 
 setRoomSoundChoice("on");
@@ -131,13 +131,12 @@ describe("golden queries, a player (Pat, who plays Bree)", () => {
     assert.ok(rows.every((e) => e.where.startsWith("Menu · This device")), rows.map(row).join("\n"));
   });
 
-  test("music with Room sound off on this device: Sounds first, Room sound among the rows, and no volume to set", () => {
+  test("mute: This device's Volume first, with its level, or Muted while muted, and the volumes still there to set (docs/design/design-v1-volume.md 9)", () => {
+    assert.equal(row(rowsOf(indexOf(PAT_VIEW()), "mute")[0]!), "setting:Volume · Menu · This device · Sounds: 100%");
     setRoomSoundChoice("off");
     try {
-      const rows = rowsOf(indexOf(PAT_VIEW()), "music");
-      assert.equal(row(rows[0]!), "section:Sounds · Menu · This device");
-      assert.ok(rows.map(row).includes("setting:Room sound · Menu · This device · Sounds: Off"), rows.map(row).join("\n"));
-      assert.ok(!rows.some((e) => e.title.endsWith("volume")), rows.map(row).join("\n"));
+      for (const q of ["mute", "unmute", "room sound"]) assert.equal(row(rowsOf(indexOf(PAT_VIEW()), q)[0]!), "setting:Volume · Menu · This device · Sounds: Muted", q);
+      assert.equal(row(rowsOf(indexOf(PAT_VIEW()), "music")[0]!), "setting:Music volume · Menu · This device · Sounds");
     } finally {
       setRoomSoundChoice("on");
     }

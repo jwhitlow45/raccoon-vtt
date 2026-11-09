@@ -398,19 +398,30 @@ describe("every anchor is drawn by exactly one search= in client/**/*.tsx, and t
 describe("what an entry offers and says now (design-v1-qol.md 5, The results)", () => {
   const offered = (catalog: Catalog, ctx: SearchContext) => new Set(catalog.entries.filter((e) => !e.when || e.when(ctx)).map((e) => e.id));
 
-  test("This device offers what this device draws: the Tab row on a wide screen, the volumes while Room sound is on, Full screen where the browser has it", () => {
+  test("This device offers what this device draws: the Tab row on a wide screen, the volumes muted or not but Music and Background with no sound files, Full screen where the browser has it", async () => {
     const pat = PAT_VIEW();
     assert.ok(offered(EVERYONE, ctxOf(pat, { wide: true })).has("setting:menu.this-device.tab-row.panels"));
     for (const id of ["section:menu.this-device.tab-row", "setting:menu.this-device.tab-row.panels"]) assert.ok(!offered(EVERYONE, ctxOf(pat, { wide: false })).has(id), id);
+    const volumes = ["volume", "music", "loops", "effects"].map((k) => `setting:menu.this-device.sounds.${k}`);
     try {
-      setRoomSoundChoice("off");
-      assert.ok(!offered(EVERYONE, ctxOf(pat)).has("setting:menu.this-device.sounds.music"));
-      assert.ok(offered(EVERYONE, ctxOf(pat)).has("setting:menu.this-device.sounds.room"));
-      setRoomSoundChoice(null);
-      assert.ok(offered(EVERYONE, ctxOf(DM_VIEW())).has("setting:menu.this-device.sounds.effects"), "a DM's device plays the room's sound until told not to");
-      assert.ok(!offered(EVERYONE, ctxOf(pat)).has("setting:menu.this-device.sounds.effects"), "a player's waits to be asked");
-      setRoomSoundChoice("on");
-      assert.ok(offered(EVERYONE, ctxOf(pat)).has("setting:menu.this-device.sounds.loops"));
+      for (const choice of ["off", null, "on"] as const) {
+        setRoomSoundChoice(choice);
+        for (const ctx of [ctxOf(pat), ctxOf(DM_VIEW())]) for (const id of volumes) assert.ok(offered(EVERYONE, ctx).has(id), `${id}, ${String(choice)}`);
+      }
+      assert.ok(!offered(EVERYONE, ctxOf(pat)).has("setting:menu.this-device.sounds.room"), "no Room sound");
+      const { api } = await import("../../lib/api.ts");
+      const { resetServerRoomSoundForTests, serverRoomSound } = await import("../sound/engine/store.ts");
+      const real = api.getConfig;
+      api.getConfig = (async () => ({ roomSound: false })) as unknown as typeof api.getConfig;
+      try {
+        resetServerRoomSoundForTests();
+        await serverRoomSound();
+        const now = offered(EVERYONE, ctxOf(pat));
+        assert.deepEqual(volumes.filter((id) => now.has(id)), ["setting:menu.this-device.sounds.volume", "setting:menu.this-device.sounds.effects"], "only the built-in effects play");
+      } finally {
+        api.getConfig = real;
+        resetServerRoomSoundForTests();
+      }
     } finally {
       setRoomSoundChoice(null);
     }
