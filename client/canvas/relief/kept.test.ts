@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { sceneGrid } from "#shared/rules/grid.ts";
 import { bandsOf, drawChildrenMeeting, keepsTone, KeptRelief, MAX_REPAIR_BOXES, onCanvas, onDeviceGrid, planDraw, probeSelfCopy, repairRegions, TONE_PAST_PX, unionArea, type KeptAt, type ProbeMemo } from "./kept.ts";
-import type { VBox } from "./pieces.ts";
+import { cellPieces, type VBox } from "./pieces.ts";
+import { paintedBox, type DrawContext } from "./drawRelief.ts";
 import { installPath2D, KeptRig, TestCanvas, type RigScene } from "./keptTesting.ts";
 
 /*
@@ -342,6 +343,18 @@ describe("ground copies near the ground canvas's edges (5.3)", () => {
       if (Math.abs(dy) < 3) assert.ok(r.scheduler.kept!.stats.repair - before < everyTone, `a pan by ${dx},${dy} repaired ${r.scheduler.kept!.stats.repair - before} of the canvas, every toned cell ${everyTone}`);
     }
     assert.ok(r.scheduler.kept!.stats.scrolls >= 4, "the pans scrolled");
+  });
+
+  test("a pit inside a sunk room paints its floor alone and one by its edge its far sides too, so a scroll's strip meets few of them", () => {
+    const pits = cellPieces({ ground: (x, y) => (x >= 2 && y >= 2 && x < 12 && y < 12 ? -6 : 0), terrain: () => null, look: () => ({ texture: null, color: "#777777" }), bounds: { w: 16, h: 16 } }, 0, 0, undefined);
+    const dc: DrawContext = { turn: 0, camera: { x: 0, y: 0, scale: 10 }, pixelRatio: 2, ground: null, textures: {}, view: { x0: -1e6, y0: -1e6, x1: 1e6, y1: 1e6 } };
+    const height = (x: number, y: number) => {
+      const b = paintedBox(pits.find((p) => p.x === x && p.y === y)!, dc);
+      return b.y1 - b.y0;
+    };
+    // A square's diamond is 0.71 view units tall, 14 device pixels here, and a pit 6 cells deep reaches 6·K view units further.
+    assert.ok(height(5, 5) < 14.2 + 4, `the inner pit's box is ${height(5, 5)} tall`);
+    assert.ok(height(2, 5) > 14.2 + 6 * 0.866 * 20 - 1, `the pit by the room's far edge reaches up its side: ${height(2, 5)}`);
   });
 
   test("a batch of tops straddling the ground canvas's bottom tones only its own cells past it", () => {

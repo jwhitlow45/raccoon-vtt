@@ -94,7 +94,19 @@ export function deviceBox(dc: Pick<DrawContext, "camera" | "pixelRatio">, b: VBo
 
 /** A relief piece's painted bounds in device pixels: what its fills, outlines and their antialiasing can touch. */
 export function paintedBox(p: StaticPiece, dc: DrawContext): VBox {
-  return deviceBox(dc, boundsAt(p, dc.turn), PIECE_REACH_PX);
+  return deviceBox(dc, paintBoundsAt(p, dc.turn), PIECE_REACH_PX);
+}
+
+/**
+ * What a piece paints at a turn, in view units: a column's or a pit's top
+ * and the sides it draws, which reach down or up only as far as the
+ * neighbors they face, else the piece's whole bounds. A pit inside a sunk
+ * room draws its floor alone, and its bounds reach up to its opening at 0:
+ * on a scene sunk 100 ft each strip of a scroll met the bounds of half the
+ * pits on the screen (SUNKEN-PAN).
+ */
+function paintBoundsAt(p: StaticPiece, turn: Turn): VBox {
+  return p.kind === "wall" || p.kind === "steps" ? boundsAt(p, turn) : shapeOf(p, turn).paint;
 }
 
 /** A standee's painted bounds in device pixels: its StandeeShape bounds, which hold its ring, shadow, outlines, caught rings and facing tick with its decor's reach, and its antialiasing. */
@@ -120,7 +132,7 @@ export function runPaintedBox(pieces: readonly DrawPiece[], dc: DrawContext): VB
   if (!kept || kept.turn !== dc.turn) {
     const box: VBox = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
     for (const p of pieces) {
-      const b = p.kind === "volume" ? p.bounds : boundsAt(p, dc.turn);
+      const b = p.kind === "volume" ? p.bounds : paintBoundsAt(p, dc.turn);
       box.x0 = Math.min(box.x0, b.x0);
       box.y0 = Math.min(box.y0, b.y0);
       box.x1 = Math.max(box.x1, b.x1);
@@ -343,6 +355,8 @@ type CellShape = {
   source: VBox;
   /** The box of its top at its height: all a ground copy paints. */
   topBox: VBox;
+  /** The box of its top and its sides: all it paints (paintBoundsAt). */
+  paint: VBox;
   /** Its top, and every side's outline together, as paths made once, where the canvas has them (tests' fakes may not). */
   topPath: Path2D | null;
   outline: Path2D | null;
@@ -392,6 +406,7 @@ function shapeOf(p: CellPiece, turn: Turn): CellShape {
     atZero,
     source,
     topBox: boxOfPoints(top),
+    paint: boxOfPoints([...top, ...sides.flatMap((f) => [f.a, f.b, { x: f.a.x, y: f.a.y + f.h }, { x: f.b.x, y: f.b.y + f.h }])]),
     topPath: paths ? polyPath(new Path2D(), top) : null,
     outline: paths && outlineLines.length > 0 ? linesPath(new Path2D(), outlineLines) : null,
     outlineLines,
