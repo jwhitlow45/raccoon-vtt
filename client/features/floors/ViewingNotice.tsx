@@ -2,6 +2,8 @@ import { Button } from "../../components/Button.tsx";
 import { Notice } from "../../components/Notice.tsx";
 import { displayName } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
+import { focusMap, mapFocusSlot } from "../../pages/mapFocus.ts";
+import { useRoomScope } from "../../state/scope.ts";
 import { useIsDisplay, useRoomActions, useRoomView } from "../../state/view.ts";
 import { usePreview } from "../dm/previewContext.ts";
 import { floorRoot, FLOOR_ROOT_ATTR, FLOOR_ROOTS } from "./ids.ts";
@@ -14,14 +16,16 @@ import { backLabel, viewingLine } from "./words.ts";
  * notices under the top bar. Back shows their creature's floor again, or
  * the start floor where they have no creature there. Focus goes to the
  * Floor button, the control that picks floors, since the notice leaves
- * with the switch. A DM picks every floor they see and a display follows
- * the party, so neither has one.
+ * with the switch, or to the map where the bar has folded Floor into the
+ * Menu panel, which is closed. A DM picks every floor they see and a
+ * display follows the party, so neither has one.
  */
 export function ViewingNotice() {
   const role = useRoomView((s) => s.you?.role);
   const display = useIsDisplay();
   const preview = usePreview() !== null;
   const actions = useRoomActions();
+  const scope = useRoomScope();
   const shown = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId] : undefined));
   const follow = useRoomView((s) => s.floorFollow ?? null);
   const back = useRoomView((s) => {
@@ -41,8 +45,10 @@ export function ViewingNotice() {
           <Button
             size="sm"
             onClick={() => {
-              // The notice goes with the switch, so focus waits on the control that picks floors.
-              document.querySelector<HTMLElement>(`[data-rvtt-topbar] ${floorRoot(FLOOR_ROOTS.button)}`)?.focus({ preventScroll: true });
+              // The notice goes with the switch, so focus waits on the control that picks floors. Folded into the closed Menu panel, it has none on screen, and focus left on the page would send the next Tab to the page's start.
+              const floor = document.querySelector<HTMLElement>(`[data-rvtt-topbar] ${floorRoot(FLOOR_ROOTS.button)}`);
+              floor?.focus({ preventScroll: true });
+              if (!floor || document.activeElement !== floor) focusMap(scope.get(mapFocusSlot));
               actions.showFloor(null);
             }}
           >

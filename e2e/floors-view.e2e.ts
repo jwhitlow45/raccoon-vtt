@@ -155,6 +155,22 @@ function focusOnFloor(page: Page): Promise<boolean> {
   });
 }
 
+/** Whether focus is on the map's focus target (pages/mapFocus.ts), where it goes when the control that had it leaves with nothing near. */
+function focusOnMap(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const doc = (globalThis as unknown as { document: { activeElement: DomNode | null } }).document;
+    return doc.activeElement?.getAttribute("role") === "img" && doc.activeElement.getAttribute("aria-label") === "Map";
+  });
+}
+
+/** What has focus, for a failure line. */
+function focusedName(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const el = (globalThis as unknown as { document: { activeElement: (DomNode & { tagName: string; textContent: string | null }) | null } }).document.activeElement;
+    return el ? `${el.tagName.toLowerCase()} "${el.getAttribute("aria-label") ?? el.textContent?.trim().slice(0, 40) ?? ""}"` : "nothing";
+  });
+}
+
 /** The rows of the Floors menu, top first, by floor id. */
 function rowIds(menu: Locator): Promise<string[]> {
   return menu.locator("[data-floor-row]").evaluateAll((els) => els.map((e) => (e as unknown as DomNode).getAttribute("data-floor-row") ?? ""));
@@ -381,8 +397,12 @@ describe("Which floor each device shows on a scene of several floors", { concurr
           await notice(ana).waitFor();
           lines.push(...alignmentLines(await measureAlignment(notice(ana)), `${at} viewing notice`));
           await shots.take(ana, `flrv-5-ana-viewing-${at}`);
+          const folded = !(await floorButton(ana).isVisible());
           await notice(ana).getByRole("button", { name: "Back to Thorn" }).click();
           await notice(ana).waitFor({ state: "detached" });
+          // Where the bar folded Floor into the Menu panel, Back has no Floor to focus, and focus goes to the map rather than the page.
+          if (folded && !(await focusOnMap(ana))) lines.push(`${at} Back to Thorn left focus on ${await focusedName(ana)}, not the map, with Floor folded`);
+          if (!folded && !(await focusOnFloor(ana))) lines.push(`${at} Back to Thorn left focus on ${await focusedName(ana)}, not Floor`);
         }
       }
     } finally {
