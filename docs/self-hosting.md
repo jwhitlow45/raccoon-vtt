@@ -643,6 +643,14 @@ newest first.
 
 **Since v0.3.1**
 
+- **Several floors in one scene** ([design](design/design-v1-floors.md)): room
+  format 43, change format 56. No data migrates, since a scene without floors
+  reads as before. Until it reloads, an old page refuses the server's pings,
+  rulers and other marks, which now name the floor they are on, and lists each
+  floor of a scene as a scene of its own. Reload DM pages first, then
+  every other open page, table displays included. An older build refuses a
+  backup that holds floors, so going back needs the backup taken just before
+  the update for any room that got a floor since.
 - **Time of day light** ([design](design/design-v1-calendar-c2c3.md)): room
   format 42, change format 55. Until it reloads, an old page reads dawn and
   dusk as 6:00 AM and 6:00 PM, and an old DM page shows a scene on Time of
