@@ -358,3 +358,12 @@ export function endedText(kind: Ended["kind"], movedTo: string | null): { title:
   }
   return { title: "This display was signed out", body: "The DM signed it out, or the player password changed. Set it up again with a new code from the DM." };
 }
+
+/** The display menu's Volume choices: Off, then the levels (docs/design/design-v1-volume.md 7). */
+export const VOLUME_CHOICES = ["off", 25, 50, 75, 100] as const;
+export type VolumeChoice = (typeof VOLUME_CHOICES)[number];
+
+/** Which choice is on: Off while the display is muted, else the kept level. Never both, so exactly one radio is checked. */
+export function volumeChecked(soundOn: boolean, level: number, choice: VolumeChoice): boolean {
+  return choice === "off" ? !soundOn : soundOn && choice === level;
+}

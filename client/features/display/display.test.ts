@@ -29,6 +29,8 @@ import {
   REFIT_MS,
   stepPage,
   turnText,
+  VOLUME_CHOICES,
+  volumeChecked,
 } from "./logic.ts";
 
 describe("display codes", () => {
@@ -302,5 +304,22 @@ describe("following an Isometric DM (docs/design/design-v1-isometric-view.md 4.2
       });
       assert.deepEqual(fits[0], fits[1], `round ${round}`);
     }
+  });
+});
+
+describe("the display menu's Volume", () => {
+  test("exactly one choice is checked, Off while muted and the level otherwise", () => {
+    for (const level of [25, 50, 75, 100]) {
+      const on = VOLUME_CHOICES.filter((c) => volumeChecked(true, level, c));
+      assert.deepEqual(on, [level]);
+      assert.deepEqual(
+        VOLUME_CHOICES.filter((c) => volumeChecked(false, level, c)),
+        ["off"],
+        "Off keeps the level but shows only itself",
+      );
+    }
+  });
+  test("the choices are Off then 25, 50, 75 and 100", () => {
+    assert.deepEqual([...VOLUME_CHOICES], ["off", 25, 50, 75, 100]);
   });
 });

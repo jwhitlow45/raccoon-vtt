@@ -60,6 +60,8 @@ import {
   refitAt,
   stepPage,
   turnText,
+  VOLUME_CHOICES,
+  volumeChecked,
   type BarButton,
   type DisplayMode,
   type DisplayPaging,
@@ -69,6 +71,7 @@ import {
   chooseDisplayAnimatedMaps,
   chooseDisplaySound,
   chooseDisplayUiScale,
+  chooseDisplayVolume,
   chooseDisplayWeather,
   forgetDisplayRoom,
   readDisplayMode,
@@ -79,6 +82,7 @@ import {
   useDisplayAnimatedMaps,
   useDisplaySound,
   useDisplayTextSize,
+  useDisplayVolume,
   useDisplayWeather,
 } from "./remember.ts";
 import { TV_BUTTON_HEIGHT, TV_HANDOUT_SCRIM, TV_TEXT } from "./tvType.ts";
@@ -1095,7 +1099,7 @@ function TextSize(props: { onTouch(): void }) {
   const scale = useUiScale();
   return (
     <div role="group" aria-label="Text size" style={{ display: "grid", gridTemplateColumns: "auto repeat(4, minmax(0, 1fr))", alignItems: "center", gap: theme.space(2) }}>
-      <span style={{ padding: `0 ${theme.space(1)}px`, fontSize: TV_TEXT.small, fontWeight: theme.weight.bold }}>Text size</span>
+      <span style={{ fontSize: TV_TEXT.small, fontWeight: theme.weight.bold }}>Text size</span>
       {UI_SCALES.map((s) => (
         <MenuButton
           key={s}
@@ -1119,7 +1123,7 @@ function WeatherRow(props: { onTouch(): void }) {
   const mode = useWeatherMode();
   return (
     <div role="group" aria-label="Weather" style={{ display: "grid", gridTemplateColumns: "auto repeat(3, minmax(0, 1fr))", alignItems: "center", gap: theme.space(2) }}>
-      <span style={{ padding: `0 ${theme.space(1)}px`, fontSize: TV_TEXT.small, fontWeight: theme.weight.bold }}>Weather</span>
+      <span style={{ fontSize: TV_TEXT.small, fontWeight: theme.weight.bold }}>Weather</span>
       {WEATHER_MODES.map((m) => (
         <MenuButton
           key={m}
@@ -1144,7 +1148,7 @@ function AnimatedMapsRow(props: { onTouch(): void }) {
   if (!useServerAnimatedMaps()) return null;
   return (
     <div role="group" aria-label={ANIMATED_MAPS_LABEL} style={{ display: "grid", gridTemplateColumns: "auto repeat(2, minmax(0, 1fr))", alignItems: "center", gap: theme.space(2) }}>
-      <span style={{ padding: `0 ${theme.space(1)}px`, fontSize: TV_TEXT.small, fontWeight: theme.weight.bold }}>{ANIMATED_MAPS_LABEL}</span>
+      <span style={{ fontSize: TV_TEXT.small, fontWeight: theme.weight.bold }}>{ANIMATED_MAPS_LABEL}</span>
       {ANIMATED_MAPS_CHOICES.map((c) => (
         <MenuButton
           key={c}
@@ -1163,24 +1167,27 @@ function AnimatedMapsRow(props: { onTouch(): void }) {
   );
 }
 
-/** One row: the room's sound on this display, On or Off (docs/design/design-v1-music.md 4.5), kept for this display alone. */
+/** One row: the room's volume on this display, Off or a level, kept for this display alone (docs/design/design-v1-volume.md 7). */
 function SoundRow(props: { onTouch(): void }) {
   const on = useDisplaySound();
+  const volume = useDisplayVolume();
   return (
-    <div role="group" aria-label="Sound" style={{ display: "grid", gridTemplateColumns: "auto repeat(2, minmax(0, 1fr))", alignItems: "center", gap: theme.space(2) }}>
-      <span style={{ padding: `0 ${theme.space(1)}px`, fontSize: TV_TEXT.small, fontWeight: theme.weight.bold }}>Sound</span>
-      {[true, false].map((value) => (
+    <div role="group" aria-label="Volume" style={{ display: "grid", gridTemplateColumns: "auto repeat(5, minmax(0, 1fr))", alignItems: "center", gap: theme.space(2) }}>
+      <span style={{ fontSize: TV_TEXT.small, fontWeight: theme.weight.bold }}>Volume</span>
+      {VOLUME_CHOICES.map((value) => (
         <MenuButton
-          key={String(value)}
+          key={value}
           role="menuitemradio"
-          checked={on === value}
+          checked={volumeChecked(on, volume, value)}
           compact
           onClick={() => {
-            chooseDisplaySound(value);
+            // Off keeps the level for the next choice. A level is set before sound turns on, so the engine never plays the old one.
+            if (value !== "off") chooseDisplayVolume(value);
+            chooseDisplaySound(value !== "off");
             props.onTouch();
           }}
         >
-          {value ? "On" : "Off"}
+          {value === "off" ? "Off" : `${value}%`}
         </MenuButton>
       ))}
     </div>
