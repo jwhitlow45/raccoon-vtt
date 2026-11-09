@@ -17,8 +17,9 @@ import { cutForWalkers, dropGrid, dropMode, dropView, planGroup, planOne, planPr
  * review AT-ASTRA-13).
  */
 export function worldFor(view: RoomState, token: Token, role: Role): PublicWorld {
-  const stops = pathNow(view.encounter, token, role)?.stops ?? [];
-  return groupWalkWorld(view, walkerFor(view, token, dropView(view, role).seen), { role }, stops);
+  // The path whole, whose `prior` holds the diagonals players could count on floors the creature left this turn (docs/design/design-v1-floors.md phase 2, 5.4).
+  const path = pathNow(view.encounter, token, role) ?? [];
+  return groupWalkWorld(view, walkerFor(view, token, dropView(view, role).seen), { role }, path);
 }
 
 /**
