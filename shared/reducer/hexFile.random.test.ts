@@ -7,7 +7,7 @@ import { projectState, stableStringify } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { movementRules } from "../ruleHooks.ts";
-import { hexPlacements, linkHolds, onHolder } from "../rules/attach.ts";
+import { hexPlacements, linkHolds, onHolder, seatedAt } from "../rules/attach.ts";
 import { occupiedHexes, placedOnHex } from "../rules/footprint.ts";
 import { hexKey, hexNeighbors, type Hex, type HexGrid } from "../rules/hex.ts";
 import { findRouteOn } from "../rules/hexWalk.ts";
@@ -33,9 +33,11 @@ import { chance, env, int, member, P1, P2, pick, rng, trap } from "../testutil.t
  * of reach is the link pass's own. At every point where the holder stands
  * squeezed no two passengers share a hex while one of them has a placement
  * free of the others. Twins that differ only in a hidden creature in tow
- * (added, removed or resized) or in short walls no player sees, the room
- * fogged, give every player the same copy, log and undo mark, and the
- * same seats to the passengers they see.
+ * (added, removed or resized), in short walls no player sees, or in a
+ * hidden rider beside the one rider players see, the room fogged, give
+ * every player the same copy, log and undo mark, and the same seats to the
+ * passengers they see. An op stored at version 50 walks none in single
+ * file and seats each passenger on its nearest seat alone.
  */
 
 type Case = { state: RoomState; op: OpOf<"token.move">; g: HexGrid };
@@ -228,6 +230,35 @@ function fogged(s: RoomState): RoomState {
   return out;
 }
 
+/** The tokens sitting on the holder. */
+function passengers(s: RoomState): Token[] {
+  return Object.values(s.tokens).filter((t): t is Token => t?.attached?.to === "horse" && onHolder(t.attached.kind));
+}
+
+/**
+ * The room with only the one rider players see on the holder, and its twin with a hidden rider beside it, so the holder's
+ * passengers number one and two (moveLeg.ts endSeatsApart seats them apart only from two). Null where the room has no such rider,
+ * a hidden one holds something, or no hex of the holder is free for the hidden one.
+ */
+function riderTwins(g: HexGrid, s: RoomState): { alone: RoomState; beside: RoomState } | null {
+  const on = passengers(s);
+  const shown = on.filter((t) => t.visibility !== "dm");
+  if (shown.length !== 1 || on.some((t) => t.visibility === "dm" && Object.values(s.tokens).some((o) => o?.attached?.to === t.id))) return null;
+  const alone = structuredClone(s);
+  for (const t of on) if (t.visibility === "dm") delete alone.tokens[t.id];
+  const horse = alone.tokens.horse!;
+  const used = new Set(occupiedHexes(g, shown[0]!).map(hexKey));
+  for (const hex of occupiedHexes(g, horse)) {
+    if (used.has(hexKey(hex))) continue;
+    const spy = onHex(g, "spy", "medium", hex, { name: "Spy", kind: "npc", visibility: "dm", attached: { to: "horse", kind: "ride" } });
+    if (!linkHolds(g, alone.meta.settings, "ride", spy, horse)) continue;
+    const beside = structuredClone(alone);
+    beside.tokens.spy = spy;
+    return { alone, beside };
+  }
+  return null;
+}
+
 /** A twin that differs only in a hidden creature in tow with nothing on it or behind it: one added, one removed or one resized. */
 function hiddenTwin(g: HexGrid, s: RoomState, r: () => number): RoomState | null {
   const twin = structuredClone(s);
@@ -381,16 +412,55 @@ for (const [name, g] of [
       assert.ok(walled >= 55, `walled twins compared: ${walled}`);
     });
 
-    test("an op stored at version 50 takes every creature in tow by its place", () => {
-      let checked = 0;
-      for (let seed = 1; seed <= 200; seed++) {
+    test("the one rider players see sits alike with and without a hidden rider beside it, one passenger or two (RULES-OPUS-4)", () => {
+      let compared = 0;
+      for (let seed = 1; seed <= 1000; seed++) {
         const made = caseOf(seed, g);
         if (!made) continue;
-        const walks = planWalks(made.op, made.state, P1, { opVersion: 50 });
+        const twins = riderTwins(g, fogged(made.state));
+        if (!twins) continue;
+        const { alone, beside } = twins;
+        const { op } = made;
+        const at = `${name} seed ${seed}`;
+        const ok = canApply(op, P1, alone, { canUseAsset: () => true }).ok;
+        assert.equal(canApply(op, P1, beside, { canUseAsset: () => true }).ok, ok, `${at}: the answer with the hidden rider`);
+        assert.equal(publicSeats(beside, op), publicSeats(alone, op), `${at}: the rider players see sits alike`);
+        if (!ok) continue;
+        const a = applyOp(structuredClone(alone), op, P1, env(5));
+        const b = applyOp(structuredClone(beside), op, P1, env(5));
+        assert.ok(a.ok && b.ok, at);
+        assert.deepEqual(copies(b.state, alone), copies(a.state, alone), `${at}: every player's copy with the hidden rider`);
+        compared++;
+      }
+      assert.ok(compared >= 50, `rider twins compared: ${compared}`);
+    });
+
+    test("an op stored at version 50 takes every creature in tow by its place and seats each passenger on its nearest seat alone", () => {
+      let checked = 0;
+      let apartNow = 0;
+      for (let seed = 1; seed <= 1000; seed++) {
+        const made = caseOf(seed, g);
+        if (!made) continue;
+        const { state: s, op } = made;
+        const walks = planWalks(op, s, P1, { opVersion: 50 });
         assert.deepEqual(walks.filter((m) => m.file === true).map((m) => m.tokenId), [], `seed ${seed}`);
+        const horse = walks.find((m) => m.tokenId === "horse")!;
+        const last = horse.route.length - 1;
+        const seated = walks.filter((m) => m.carriedBy === "horse" && onHolder(s.tokens[m.tokenId]!.attached!.kind));
+        for (const m of seated) {
+          for (let i = 1; i <= last; i++) {
+            const squeezed = i === last ? op.squeeze === true : onSqueezedLattice(g, s.tokens.horse!, horse.route[i]!);
+            const seat = seatedAt(g, s.tokens[m.tokenId]!, s.tokens.horse!, horse.route[i]!, squeezed, 50);
+            assert.deepEqual([m.route[i]!.x, m.route[i]!.y], [seat.x, seat.y], `seed ${seed}: ${m.tokenId} at point ${i} sits on its nearest seat`);
+          }
+        }
+        // Where a live move seats the passengers apart, the stored one's nearest seats are what tell the versions apart.
+        const live = new Map(planWalks(op, s, P1, {}).map((m) => [m.tokenId, JSON.stringify(m.route)]));
+        if (seated.some((m) => live.get(m.tokenId) !== JSON.stringify(m.route))) apartNow++;
         checked++;
       }
-      assert.ok(checked >= 60, `cases: ${checked}`);
+      assert.ok(checked >= 350, `cases: ${checked}`);
+      assert.ok(apartNow >= 6, `cases a live move seats apart: ${apartNow}`);
     });
   });
 }
