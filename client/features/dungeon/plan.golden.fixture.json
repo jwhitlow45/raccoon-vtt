@@ -22,7 +22,7 @@
         "key": true
       },
       "seed": "1K7QH2MXA9F3TWQ5",
-      "sha256": "ea9f756469b66f9c98ee7fe8a23b45d943a8ce92eb282057304313b376598272"
+      "sha256": "8156f1863c81e31ea4209550a99229b756beb99aab112d7b39c8556b64dcf26a"
     },
     {
       "name": "Small",
@@ -45,7 +45,7 @@
         "key": true
       },
       "seed": "1Q8V2DR4HJ0Y7ZB3",
-      "sha256": "646bceda96c8ada7a46c7c36bf65744eccc14c14851ca5cf70e0bf6fe0298c16"
+      "sha256": "95f2fa6dbbc949716b1ac684e9ca880fef8643df645c10043f9db42f01382c4a"
     },
     {
       "name": "Large",
@@ -68,7 +68,7 @@
         "key": true
       },
       "seed": "1M3T9WCEX5PK2AGN",
-      "sha256": "c7280a005604d274eca991f23d9498d8cf079683f9852edda2f72d969b7762a3"
+      "sha256": "4dd78c361b44bf317b444417ec6322727f44191ce4423526f754b7430c39d705"
     },
     {
       "name": "a Crypt, Dense, Winding and Wide",
@@ -91,7 +91,7 @@
         "key": true
       },
       "seed": "1A0B1C2D3E4F5G6H",
-      "sha256": "3a4b22f57c4df4a84d3eb90134dfdbb0dac9377cb3b9e9af5546e261e78d9cd2"
+      "sha256": "06ab9f71b51d3b93d679882f99ac1b538e7877defd42baa90765c3ab8553f48d"
     },
     {
       "name": "Sparse and Straight, flat, no loops or traps",
@@ -137,7 +137,7 @@
         "key": true
       },
       "seed": "1000000000000001",
-      "sha256": "d4ded79a12e4af8ce71c42f057c696df1a86187ff178fa7047b9fc78841eec7b"
+      "sha256": "0540e023fd9d8fc43d5eab9a04f25a51d93f7422008171dff0e1ab7cb51ac96f"
     },
     {
       "name": "the largest Wide",
@@ -160,7 +160,7 @@
         "key": true
       },
       "seed": "1VVVVWWWWXXXXYYY",
-      "sha256": "9d02af9b07d64d5d62672da3ccdda6a4c5f5d7b891f909e0563dffca8086cf9b"
+      "sha256": "593836d2d0833560ac0a799a7d0f50a77f2277c9356809579bbf94e48ce7c951"
     },
     {
       "name": "the largest Narrow",
@@ -183,7 +183,7 @@
         "key": true
       },
       "seed": "1RS7TV8WX9YZ0123",
-      "sha256": "a06f5032c4384d5fe401b12f86eb8e89d06da152f5acdd3ac09b85e8a6ba968e"
+      "sha256": "db3ff635c56a101228a4e27e1bdec5cd6baba0cfea435392004ec66164752945"
     },
     {
       "name": "the smallest",
@@ -275,7 +275,7 @@
         "key": true
       },
       "seed": "1X0Y1Z2A3B4C5D6E",
-      "sha256": "66f668e918a0c6c6b46de33bcda8e92713468c2f4ea7d458c80bc6a81f531242"
+      "sha256": "3ff258cb21f9d23e151b36493c0653cfe8330386ef920ab34d1ae160fb6798b6"
     },
     {
       "name": "a Cave with dead ends",
@@ -298,7 +298,7 @@
         "key": true
       },
       "seed": "1C4V3D3AD3ND5000",
-      "sha256": "b2e82e019793e58e2e9b22eefd09ebd6c324162a459b5f41ec104b2226494dce"
+      "sha256": "2f078655b173000a45b2eb2a9ac61679a8a93fc647bb768d2e936a073d977020"
     },
     {
       "name": "a Wide Mine with secret doors",
@@ -321,7 +321,7 @@
         "key": true
       },
       "seed": "1M1N3S7AF7Y0DEEP",
-      "sha256": "ff0ac0d8263b8ef90eafcf018305e8afa5c662d74fa069d74aaf1f7b188d648c"
+      "sha256": "259d039512799e77bd828dbce5e6e8fd2d69f6d02cee28ddb1c04085fa34d625"
     },
     {
       "name": "a Narrow Sewer with secret doors and no dead ends",

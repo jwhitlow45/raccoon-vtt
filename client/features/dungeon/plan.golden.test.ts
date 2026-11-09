@@ -51,14 +51,8 @@ export function rewriteRefused(old: Golden | null, now: Golden): string | null {
   return moved.length === 0 ? null : `${moved.map((p) => p.name).join(", ")} moved at version ${now.version}: bump GENERATOR_VERSION, then rerun with UPDATE_FIXTURES=1`;
 }
 
-/**
- * The key's closing line for traps in corridors (LP33-B-KEY-1) is words over the same dungeon, so the pin leaves it out: the
- * generator's streams, and so every plan's rooms, corridors and traps, are the version's.
- */
-const hash = (plan: ReturnType<typeof generate>) => {
-  const { corridorTraps: _words, ...pinned } = plan;
-  return createHash("sha256").update(JSON.stringify(pinned)).digest("hex");
-};
+/** The whole plan, the key's traps in corridors (LP33-B-KEY-1) too, as the rooms' traps are (D-261109-157). */
+const hash = (plan: ReturnType<typeof generate>) => createHash("sha256").update(JSON.stringify(plan)).digest("hex");
 
 function today(): Golden {
   return {
