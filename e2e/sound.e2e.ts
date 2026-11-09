@@ -1295,6 +1295,8 @@ describe("synced music and sound", { concurrency: false }, () => {
     await icon(dm, "volumeLow", "Volume on this device: 40%");
     assert.equal(await stored(dm), 40, "the level is this device's stored mix");
     await shots.take(dm, "vol-2-popover-1280");
+    // The popover is not modal, so U works there and its toggle names it.
+    assert.equal(await pop.getByRole("button", { name: "Mute", exact: true }).getAttribute("aria-keyshortcuts"), "U", "the popover's toggle names U");
     // Mute stops the room's sound here and keeps the level, and unmute plays it again at that level.
     await pop.getByRole("button", { name: "Mute", exact: true }).click();
     await icon(dm, "muted", "Volume on this device: muted");
@@ -1319,6 +1321,8 @@ describe("synced music and sound", { concurrency: false }, () => {
     assert.equal(await card.getAttribute("data-rvtt-popover"), null, "no popover under 900 px");
     const cardBox = await card.locator(":scope > *").first().boundingBox();
     assert.ok(cardBox && cardBox.width < 900 - 1, `a card, ${cardBox?.width} px wide`);
+    // Every key stops under the card, so its toggle names none.
+    assert.equal(await card.getByRole("button", { name: "Mute", exact: true }).getAttribute("aria-keyshortcuts"), null, "the card's toggle names no key");
     await shots.take(dm, "vol-2-card-900x900-130");
     await dm.keyboard.press("Escape");
     await card.waitFor({ state: "detached" });

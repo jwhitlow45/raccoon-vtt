@@ -101,7 +101,7 @@ export function Speaker(props: { popover: boolean; dialogOpen: boolean; onOpen?(
       {props.popover ? (
         <Popover handle={pop} side="below" flip bound={viewportBound} title={VOLUME} contentKey={shape}>
           <div style={{ width: POPOVER_BODY_PX, maxWidth: "100%", minWidth: 0 }}>
-            <DeviceSound line keyHint={false} />
+            <DeviceSound line />
           </div>
         </Popover>
       ) : null}
