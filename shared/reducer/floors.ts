@@ -169,7 +169,6 @@ export function dropFloorAsks(tx: Tx, before: RoomState): void {
 }
 
 /**
- * What a removal of one floor leaves/**
  * What a removal of one floor leaves (`scene.delete` of a floor other than
  * the main one): the floors left renumbered, and a last floor a plain scene
  * again, its `floor` and its opened mark gone with ordinary writes inside
