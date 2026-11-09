@@ -1,0 +1,76 @@
+import type { FloorLink, RoomState, Token } from "#shared/model.ts";
+import { ownEntry } from "#shared/records.ts";
+import { linkDir, rectKeys, rectsOverlap, type LinkEnd } from "#shared/rules/floorLinks.ts";
+import { footprintRect, occupiedHexes, type PlacedToken } from "#shared/rules/footprint.ts";
+import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
+import { hexKey } from "#shared/rules/hex.ts";
+import { turnMoverId } from "../attach/turns.ts";
+import { pathNow } from "../measure/movement.ts";
+import { FLOOR_MARKS } from "../scenes/floorWords.ts";
+import { floorStatus } from "./words.ts";
+import { linkName } from "./linkWords.ts";
+
+/*
+ * What the board draws for each stairs or ladder end on the floor shown
+ * (docs/design/design-v1-floors.md phase 2, 10, 11), as plain functions
+ * for node --test: its name, the DM's mark of a far floor players have not
+ * reached, and which names give way to the turn's marker.
+ */
+
+/**
+ * An end's name pill (11): "Up to Upper floor" where the viewer's copy
+ * holds that floor, else "Stairs up" or "Ladder down", which names none.
+ * Null where the copy cannot tell the way.
+ */
+export function linkLabel(view: Pick<RoomState, "scenes">, link: LinkEnd): string | null {
+  const dir = linkDir(view, link);
+  if (dir === null) return null;
+  const far = link.to === undefined ? undefined : ownEntry(view.scenes, link.to)?.floor?.name;
+  return linkName(dir, link.kind, far ?? null);
+}
+
+/**
+ * The ends on a floor whose far floor players have not reached, by id, as
+ * the DM's Floors menu marks a floor (words.ts floorStatus): the DM's pill
+ * adds "Not reached yet" there (10, picture 08). Only the DM's copy holds
+ * the marks, so a player's reads none.
+ */
+export function notReachedLinks(view: Pick<RoomState, "meta" | "tokens" | "scenes" | "openFloors" | "characters" | "floorLinks">, sceneId: string): string[] {
+  return Object.values(view.floorLinks ?? {})
+    .filter((l) => l.sceneId === sceneId && l.to !== undefined && ownEntry(view.scenes, l.to) !== undefined && floorStatus(view, l.to) === FLOOR_MARKS.not)
+    .map((l) => l.id)
+    .sort();
+}
+
+/** Whether a creature placed so has any of its space on the squares: its hexes on a hex floor, its box on squares. */
+function touches(g: Grid, placed: PlacedToken, rect: FloorLink["rect"]): boolean {
+  if (isHex(g)) {
+    const held = new Set(rectKeys(rect));
+    return occupiedHexes(g, placed).some((h) => held.has(hexKey(h)));
+  }
+  const r = footprintRect(g, placed);
+  const E = 1e-9;
+  return rectsOverlap({ x: r.x + E, y: r.y + E, w: r.w - 2 * E, h: r.h - 2 * E }, rect);
+}
+
+/**
+ * The ends whose names give way to the turn's marker (6.4, picture 07):
+ * the turn's mover stands on the end, and its moves on this floor began
+ * there, where the marker's ring hangs, as after it climbed onto it. Read
+ * on the board's copy of the floor shown, as the marker reads it.
+ */
+export function quietLinks(view: Pick<RoomState, "tokens" | "encounter" | "scenes" | "floorLinks"> | null | undefined, sceneId: string, role: "dm" | "player"): string[] {
+  if (!view) return [];
+  const moverId = turnMoverId(view);
+  const mover: Token | undefined = moverId === undefined ? undefined : ownEntry(view.tokens, moverId);
+  const scene = ownEntry(view.scenes, sceneId);
+  if (!mover || mover.sceneId !== sceneId || !scene) return [];
+  const first = pathNow(view.encounter, mover, role)?.stops[0];
+  if (!first) return [];
+  const g = sceneGrid(scene);
+  const began = { ...mover, x: first.x, y: first.y };
+  return Object.values(view.floorLinks ?? {})
+    .filter((l) => l.sceneId === sceneId && touches(g, mover, l.rect) && touches(g, began, l.rect))
+    .map((l) => l.id)
+    .sort();
+}
