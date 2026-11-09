@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, type RefObject } from "react";
 import { Icon } from "../../../components/Icon.tsx";
 import { Popover, usePopover, type Rect } from "../../../components/Popover.tsx";
-import { useTooltip } from "../../../components/Tooltip.tsx";
+import { addsWords, useTooltip } from "../../../components/Tooltip.tsx";
 import { theme } from "../../../lib/theme.ts";
+import { useKeyHint, withKey } from "../../../state/shortcuts.ts";
 import { useRoomView } from "../../../state/view.ts";
 import { uiScale } from "../../device/settings.ts";
 import { SheetDialog } from "../../tokens/SheetDialog.tsx";
@@ -45,7 +46,8 @@ function useControlsShape(): string {
 
 /**
  * The speaker: a 44 px icon button in the bar's own IconButton shape
- * (pages/RoomChrome.tsx), in the text color, muted text while muted. From
+ * (pages/RoomChrome.tsx), in the text color, muted text while muted. Its
+ * tooltip names U, the key that mutes and unmutes here (state/shortcuts.ts). From
  * 900 px up (`popover`) it anchors a dialog popover, below it hands
  * itself to `openDialog` as the card's or sheet's return focus. `onOpen`
  * hears the popover, so the bar stands over the notices while it is open.
@@ -53,7 +55,11 @@ function useControlsShape(): string {
 export function Speaker(props: { popover: boolean; dialogOpen: boolean; onOpen?(open: boolean): void; openDialog(from: HTMLElement | null): void }) {
   const volume = useDeviceVolume();
   const pop = usePopover({ kind: "dialog" });
-  const tip = useTooltip(VOLUME);
+  const keys = useKeyHint("mute");
+  const name = speakerName(volume);
+  // The name carries the level for a reader, and the tooltip the key, said only where it adds to the name (as the bar's IconButton does).
+  const tipText = withKey(VOLUME, keys);
+  const tip = useTooltip(tipText, { describes: addsWords(tipText, name) });
   const shape = useControlsShape();
   const { onOpen } = props;
   // In a layout effect, so the bar stands over the notices in the commit that shows the popover (VA3-NOTICE-FLAKE).
@@ -72,7 +78,8 @@ export function Speaker(props: { popover: boolean; dialogOpen: boolean; onOpen?(
         type="button"
         data-volume-button=""
         data-volume-icon={icon}
-        aria-label={speakerName(volume)}
+        aria-label={name}
+        aria-keyshortcuts={keys?.aria}
         {...tip.anchor()}
         {...opens}
         style={{
