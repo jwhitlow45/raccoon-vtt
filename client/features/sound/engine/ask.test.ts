@@ -129,10 +129,27 @@ describe("a page's sound and the table display (docs/design/design-v1-sound-dm-o
     assert.equal(soundEnabled(false, true, false, false), false);
   });
 
-  test("a member's page follows its own Room sound alone, so a DM's plays on through both", () => {
+  test("a member's page follows its own mute alone, so a DM's plays on through both", () => {
     for (const blackout of [false, true]) for (const dmOnly of [false, true]) {
       assert.equal(soundEnabled(true, false, blackout, dmOnly), true);
       assert.equal(soundEnabled(false, false, blackout, dmOnly), false);
+    }
+  });
+});
+
+describe("the ask's answers (docs/design/design-v1-volume.md 5)", () => {
+  test("Stay muted stores the mute, a choice made, so the ask never shows again, and keeps the level for an unmute", async () => {
+    const { stayMuted } = await import("./useSoundAsk.ts");
+    const { roomSoundChoice, setRoomSoundChoice, setSoundMix, soundMix } = await import("../../device/settings.ts");
+    try {
+      setSoundMix({ ...soundMix(), volume: 60 });
+      setRoomSoundChoice(null);
+      stayMuted();
+      assert.equal(roomSoundChoice(), "off");
+      assert.equal(soundMix().volume, 60);
+      assert.equal(askShows(true, { eligible: false, passed: false, playing: quiet, worthy: true }), false, "a choice made is no longer eligible, which closes the ask");
+    } finally {
+      setRoomSoundChoice(null);
     }
   });
 });

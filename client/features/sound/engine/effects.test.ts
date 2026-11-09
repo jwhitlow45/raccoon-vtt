@@ -290,7 +290,7 @@ describe("effects on a page", () => {
     player.see([fired("t", "thunder", at)], SOUNDS);
     const pending = w.decodes.find((d) => d.assetId === "a-thunder")!;
     player.stopAll();
-    // The list still holds the entry, as when Room sound went off here while the DM's list goes on.
+    // The list still holds the entry, as when this device was muted while the DM's list goes on.
     pending.resolve({ buffer: "a-thunder", bytes: MB });
     await new Promise((r) => setImmediate(r));
     assert.equal(w.started.length, 0);

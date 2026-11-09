@@ -28,14 +28,14 @@ export function SoundHost() {
 const NO_SOUNDS: Readonly<Record<SoundId, Sound>> = Object.freeze({});
 
 /**
- * Whether this page may play the room's sound: its own setting on, and,
+ * Whether this page may play the room's sound: unmuted, and,
  * for a table display, no blackout and Only DM devices play off
  * (docs/design/design-v1-sound-dm-only.md 5). Its projection holds no
  * sound then anyway, but a display that stayed enabled would still be
  * eligible in the one-page handoff (handoff.ts) and could win it over a
  * DM's page in the same browser, as a display window on the DM's laptop
  * would, leaving the DM's page silent. A member's page follows its own
- * setting alone: a DM's plays on through both, and a player's has nothing
+ * mute alone: a DM's plays on through both, and a player's has nothing
  * to play. Pure.
  */
 export function soundEnabled(on: boolean, display: boolean, blackout: boolean, dmOnly: boolean): boolean {
@@ -102,6 +102,7 @@ function Host() {
           url: (assetId) => assets.url(assetId, "full"),
           time: soundTimeLink(store),
           fallbackOffset: () => store.getState().serverOffset,
+          // The media session's pause and play: a mute and an unmute, each keeping the level.
           setOn: (next) => (display ? chooseDisplaySound(next) : setRoomSoundChoice(next ? "on" : "off")),
           loadAt: () => loadAt.current,
         });

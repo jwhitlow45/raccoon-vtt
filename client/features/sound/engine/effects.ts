@@ -21,7 +21,7 @@ import { firedAfter } from "./store.ts";
  * Each load and each voice belongs to its entry, and is cancelled when that
  * entry leaves the list (stopped, or past the list's cap) or its sound
  * stops being an Effect (deleted, or given another use), which a DM's list
- * keeps as history. Stop all, Room sound off, a blackout and disposal cancel
+ * keeps as history. Stop all, a mute, a blackout and disposal cancel
  * every load and voice at once, the design's engine-wide generation: each
  * waiting entry is done for good and the decode in flight is aborted, so a
  * fetch or a decode that finishes late never starts a sound. Decoded
@@ -149,7 +149,7 @@ export class EffectPlayer {
   }
 
   /**
-   * This page plays or stops playing (owner, Room sound, unlocked). Turning
+   * This page plays or stops playing (owner, unmuted, unlocked). Turning
    * on is a join: what still sounds 3 s or more starts partway. Turning off
    * cancels everything, as Stop all does.
    */
@@ -165,7 +165,7 @@ export class EffectPlayer {
     this.#admit();
   }
 
-  /** Stop all, Room sound off, a blackout, disposal: every load and voice goes, and a late decode starts nothing. */
+  /** Stop all, a mute, a blackout, disposal: every load and voice goes, and a late decode starts nothing. */
   stopAll(): void {
     this.#decodeAbort?.abort();
     this.#decodeAbort = null;

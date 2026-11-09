@@ -8,17 +8,22 @@ import { firedAfter, setRoomSound } from "./store.ts";
 /**
  * The ask (docs/design/design-v1-music.md 4.4, D-261102-469). On a player's
  * device with no choice, the first confirmed state with something to hear
- * raises "The DM is playing sound for the room." with Play here and Not on
- * this device: at load when something already plays (a late joiner), when
- * music or a loop starts, or when an effect is fired after the page
- * loaded. Passed unanswered, the device stays quiet and does not ask again
- * in that page load: Room sound in the Sound panel or This device turns
- * it on. A state with nothing about sound, while Only DM devices play or
+ * raises "The DM is playing sound for the room." with Play here, which
+ * unmutes, and Stay muted (docs/design/design-v1-volume.md 5): at load when
+ * something already plays (a late joiner), when music or a loop starts, or
+ * when an effect is fired after the page loaded. Passed unanswered, the
+ * device stays muted and does not ask again in that page load: the top
+ * bar's speaker, This device or the Sound panel unmutes it. A state with nothing about sound, while Only DM devices play or
  * behind a blackout, closes an open ask without passing it
  * (docs/design/design-v1-sound-dm-only.md 5), so the device is asked again
  * at the first state after with something to hear, as a late joiner is:
  * music, a loop, or an effect fired after the close.
  */
+
+/** The ask's Stay muted: a choice made, so it never asks again, and the level kept for an unmute later. */
+export function stayMuted(): void {
+  setRoomSoundChoice("off");
+}
 
 /** An ask nobody answers passes after this. */
 export const ASK_MS = 30_000;
@@ -130,7 +135,7 @@ export function useSoundAsk(): SoundAsk {
   }, []);
 
   const notHere = useCallback(() => {
-    setRoomSoundChoice("off");
+    stayMuted();
     setAsking(false);
   }, []);
 

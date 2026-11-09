@@ -2,8 +2,8 @@
  * The Media Session while this page plays the room's sound
  * (docs/design/design-v1-music.md 4.4): the lock screen and the headset's
  * buttons. Its title is "RaccoonVTT · <room name>", never a track, so the
- * lock screen tells no one what plays. Its pause turns Room sound off on
- * this device and its play turns it on.
+ * lock screen tells no one what plays. Its pause mutes this device and its
+ * play unmutes it, at the level it kept (docs/design/design-v1-volume.md 5).
  */
 
 export type MediaSessionDeps = { roomName(): string; setOn(on: boolean): void };
