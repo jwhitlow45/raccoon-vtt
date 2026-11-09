@@ -1,5 +1,5 @@
 import type { RoomState, Scene, Token } from "#shared/model.ts";
-import { isPartyMember } from "#shared/project.ts";
+import type { ProjectedToken } from "#shared/project.ts";
 import { displayName } from "../../lib/scene.ts";
 import { initials } from "../../lib/tokenView.ts";
 import { FLOOR_MARKS, playersAt } from "../scenes/floorWords.ts";
@@ -132,7 +132,7 @@ export function floorMarks(view: RoomState, floor: Scene, you: { memberId: strin
     const party = here.filter((t) => unhiddenPartyMember(view, t)).map((t) => initials(displayName(t)));
     return [floorStatus(view, floor.id), ...(party.length > 0 ? [party.join(" ")] : [])];
   }
-  // A player's copy holds only what they see, and the party's creatures are the player characters and what players own.
-  const party = here.filter((t) => t.kind === "pc" || isPartyMember(view, t) || ownsToken(view, you.memberId, t)).map((t) => displayName(t));
+  // A player's copy holds only what they see, and the party's creatures are the player characters and what players own. Another player's token has no owners there, so the projected party mark stands in for them.
+  const party = here.filter((t) => t.kind === "pc" || (t as ProjectedToken).party === true || ownsToken(view, you.memberId, t)).map((t) => displayName(t));
   return [...(followed === floor.id ? [YOU_ARE_HERE] : []), ...(party.length > 0 ? [party.join(", ")] : [])];
 }

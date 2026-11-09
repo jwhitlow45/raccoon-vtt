@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { room } from "#shared/testutil.ts";
+import { room, token } from "#shared/testutil.ts";
 import { ATTIC, CAVE, playerCopy, TOWER, tower, UPPER } from "./testing.ts";
 import { backLabel, floorButtonLabel, floorMarks, floorRowDetail, floorStatus, floorTip, followedLine, noFloorAbove, noFloorBelow, placeKind, placeName, playersPlace, showingLine, viewingLine } from "./words.ts";
 
@@ -68,5 +68,15 @@ describe("the floors' own words", () => {
     const p1 = { memberId: "p1", role: "player" as const };
     assert.deepEqual(floorMarks(copy, copy.scenes[TOWER]!, p1, TOWER), ["You are here", "Bree, Thorn"]);
     assert.deepEqual(floorMarks(copy, copy.scenes[UPPER]!, p1, TOWER), []);
+  });
+
+  test("a player's row names another player's companion by the projected party mark", () => {
+    const state = tower();
+    const copy = playerCopy(state, [TOWER]);
+    // On a player's copy another player's token carries no owners, only the mark.
+    copy.tokens["wolf"] = token("wolf", { sceneId: TOWER, kind: "npc", name: "Wolf companion", disposition: "ally", party: true } as never);
+    copy.tokens["goblin"] = token("goblin", { sceneId: TOWER, kind: "npc", name: "Goblin", disposition: "hostile" });
+    const p1 = { memberId: "p1", role: "player" as const };
+    assert.deepEqual(floorMarks(copy, copy.scenes[TOWER]!, p1, TOWER), ["You are here", "Bree, Thorn, Wolf companion"]);
   });
 });
