@@ -43,7 +43,7 @@ export function BuilderLayer(props: LayerProps) {
       {props.role === "dm" ? <LightMarks sceneId={props.scene.id} scale={props.scale} /> : null}
       {props.role === "dm" ? <BuildPreview scene={props.scene} scale={props.scale} /> : null}
       {props.role === "dm" ? <LabelMarks /> : null}
-      {props.role === "dm" ? <LinkMarks scene={props.scene} /> : null}
+      {props.role === "dm" ? <LinkMarks scene={props.scene} scale={props.scale} /> : null}
     </>
   );
 }
@@ -389,8 +389,8 @@ function LabelMarks() {
  * and a dashed outline around the end whose pane is open. The ends
  * themselves are the link layer's.
  */
-function LinkMarks(props: { scene: Scene }) {
-  const { scene } = props;
+function LinkMarks(props: { scene: Scene; scale: number }) {
+  const { scene, scale } = props;
   const building = useRoomView((s) => s.local.tool === "build");
   const linking = useStore(useBuilderStore(), (b) => b.mode === "link");
   const draft = useStore(useBuilderStore(), (b) => b.linkDraft);
@@ -402,14 +402,14 @@ function LinkMarks(props: { scene: Scene }) {
   const outlined = open && open.sceneId === scene.id ? open.rect : null;
   return (
     <>
-      {draft ? <LinkRect rect={draft.rect} grid={grid} color={draft.problem === null ? accent : boardTheme.color.danger} fill={0.25} /> : null}
-      {outlined ? <LinkRect rect={outlined} grid={grid} color={accent} fill={0} /> : null}
+      {draft ? <LinkRect rect={draft.rect} grid={grid} scale={scale} color={draft.problem === null ? accent : boardTheme.color.danger} fill={0.25} /> : null}
+      {outlined ? <LinkRect rect={outlined} grid={grid} scale={scale} color={accent} fill={0} /> : null}
     </>
   );
 }
 
-function LinkRect(props: { rect: CellRect; grid: Grid; color: string; fill: number }) {
-  const { rect, grid, color, fill } = props;
+function LinkRect(props: { rect: CellRect; grid: Grid; scale: number; color: string; fill: number }) {
+  const { rect, grid, scale, color, fill } = props;
   return (
     <Shape
       listening={false}
@@ -419,21 +419,30 @@ function LinkRect(props: { rect: CellRect; grid: Grid; color: string; fill: numb
         c.save();
         c.strokeStyle = color;
         c.fillStyle = color;
-        c.lineWidth = 2;
-        c.setLineDash([6, 4]);
-        // A hex scene's rectangle is of hex keys: each hex is outlined, since the whole is no rectangle on the map.
-        for (let row = rect.y; row < (isHex(grid) ? rect.y + rect.h : rect.y + 1); row++) {
-          for (let col = rect.x; col < (isHex(grid) ? rect.x + rect.w : rect.x + 1); col++) {
-            c.beginPath();
-            if (isHex(grid)) hexOutline(grid, hexKey({ col, row })).forEach((p, i) => (i === 0 ? c.moveTo(p.x, p.y) : c.lineTo(p.x, p.y)));
-            else c.rect(rect.x, rect.y, rect.w, rect.h);
-            c.closePath();
-            if (fill > 0) {
-              c.globalAlpha = fill;
-              c.fill();
-              c.globalAlpha = 1;
+        // The context is in cells, so a screen-sized stroke is divided by the scale.
+        c.lineWidth = 2 / scale;
+        c.setLineDash([6 / scale, 4 / scale]);
+        const paint = () => {
+          c.closePath();
+          if (fill > 0) {
+            c.globalAlpha = fill;
+            c.fill();
+            c.globalAlpha = 1;
+          }
+          c.stroke();
+        };
+        if (!isHex(grid)) {
+          c.beginPath();
+          c.rect(rect.x, rect.y, rect.w, rect.h);
+          paint();
+        } else {
+          // A hex scene's rectangle is of hex keys, so each hex is outlined: the whole is no rectangle on the map.
+          for (let row = rect.y; row < rect.y + rect.h; row++) {
+            for (let col = rect.x; col < rect.x + rect.w; col++) {
+              c.beginPath();
+              hexOutline(grid, hexKey({ col, row })).forEach((p, i) => (i === 0 ? c.moveTo(p.x, p.y) : c.lineTo(p.x, p.y)));
+              paint();
             }
-            c.stroke();
           }
         }
         c.restore();

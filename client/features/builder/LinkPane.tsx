@@ -148,7 +148,7 @@ function LinkEditor(props: { link: FloorLink; sheet: boolean; onClose(): void; c
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
-      <PaneHeader title={paneTitle(dir, link.kind, farName)} closeLabel="Close" onClose={props.onClose} grab={props.sheet} controls={props.controls} />
+      <PaneHeader title={<span role="heading" aria-level={2}>{paneTitle(dir, link.kind, farName)}</span>} closeLabel="Close" onClose={props.onClose} grab={props.sheet} controls={props.controls} />
       <div ref={kindRef} style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
         <span style={{ flex: 1, color: theme.color.textMuted }}>{KIND_GROUP}</span>
         <Segmented<FloorLink["kind"]> label={KIND_GROUP} value={link.kind} options={KINDS} onChange={(kind) => update({ kind })} />
