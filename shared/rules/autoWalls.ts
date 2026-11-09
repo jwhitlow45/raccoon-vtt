@@ -74,9 +74,12 @@ export const COVER_REACH = 16;
  * it (docs/design/design-v1-maps-vision.md 2.1), read from the real build:
  * "auto" where the real cells already give the edge an automatic wall, else
  * "drawn" where the nearest wall along its line on either side is a drawn
- * one, past doors, windows and openings, within COVER_REACH edges, else
- * "auto". So a door in a drawn line looks drawn and one in an automatic line
- * looks automatic, whichever tool or page made it.
+ * one, past doors and windows only, within COVER_REACH edges, else "auto".
+ * So a door in a drawn line looks drawn and one in an automatic line looks
+ * automatic, whichever tool or page made it. The walk ends at the first edge
+ * with no wall, an opening or open ground, so only the wall line the door
+ * stands in sets its cover, never a wall out across ground players may not
+ * hold (RULES-PRIV-02).
  */
 export function coverOfLine(chunks: Readonly<Record<string, BuildChunk>>, sceneId: SceneId, rule: AutoWalls, key: string): DoorCover {
   const [xs, ys, side] = key.split(",");
@@ -93,7 +96,7 @@ export function coverOfLine(chunks: Readonly<Record<string, BuildChunk>>, sceneI
       if (ex < 0 || ey < 0) break;
       const drawn = chunks[`${sceneId}:${Math.floor(ex / CHUNK_CELLS)},${Math.floor(ey / CHUNK_CELLS)}`]?.edges[`${ex},${ey},${side}`];
       if (drawn?.kind === "wall") return "drawn";
-      if (drawn === undefined && automatic(ex, ey)) break;
+      if (drawn?.kind !== "door" && drawn?.kind !== "window") break;
     }
   }
   return "auto";

@@ -59,17 +59,40 @@ describe("a new secret door's cover from its line (coverOfLine)", () => {
     assert.equal(coverOfLine(state.buildChunks, "s1", "all", "4,2,n"), "auto");
   });
 
-  test("drawn where the nearest wall along the line on either side is drawn, past doors, windows and openings", () => {
+  test("drawn where the nearest wall along the line on either side is drawn, past doors and windows", () => {
     const state = walled();
-    // A drawn wall across the room on x 5, west edges, with a door, a window and an opening between it and the door at 5,3.
+    // A drawn wall across the room on x 5, west edges, with a door and a window between it and the door at 5,3.
     edge(state, "5,4,w", { kind: "door", state: "open", secret: false, discovered: false });
     edge(state, "5,5,w", { kind: "window" });
-    edge(state, "5,6,w", { kind: "none" });
-    edge(state, "5,7,w", WALL);
-    assert.equal(coverOfLine(state.buildChunks, "s1", "all", "5,3,w"), "drawn", "south, past the door, window and opening");
+    edge(state, "5,6,w", WALL);
+    assert.equal(coverOfLine(state.buildChunks, "s1", "all", "5,3,w"), "drawn", "south, past the door and window");
     const north = walled();
     edge(north, "5,2,w", WALL);
     assert.equal(coverOfLine(north.buildChunks, "s1", "all", "5,3,w"), "drawn", "north, one edge away");
+  });
+
+  test("the line ends at an edge with no wall, an opening or open ground, so a drawn wall past it is not the door's (RULES-OPUS-6)", () => {
+    for (const gap of [{ kind: "none" } as const, null]) {
+      const state = walled();
+      edge(state, "5,4,w", { kind: "window" });
+      if (gap) edge(state, "5,5,w", gap);
+      edge(state, "5,6,w", WALL);
+      assert.equal(coverOfLine(state.buildChunks, "s1", "all", "5,3,w"), "auto", gap ? "an opening" : "open ground");
+    }
+  });
+
+  test("a wall players do not hold, across open ground, does not change a new door's look to them (RULES-PRIV-02)", () => {
+    // Two rooms alike but for a drawn wall far down x 5, out in the rock, and a player who holds only the square 4,5.
+    const views = [false, true].map((far) => {
+      const state = walled();
+      if (far) edge(state, "5,10,w", WALL);
+      reveal(state, { x: 4, y: 5, w: 1, h: 1 });
+      const before = stableStringify(withoutRevs(projectState(state, P1, { sceneId: "s1" })));
+      const after = build(state, [{ key: "5,5,w", feature: door() }]);
+      return { before, after: stableStringify(withoutRevs(projectState(after, P1, { sceneId: "s1" }))) };
+    });
+    assert.equal(views[0]!.before, views[1]!.before, "the rooms look alike to the player before the door");
+    assert.equal(views[0]!.after, views[1]!.after, "and after it");
   });
 
   test("automatic where the nearest wall each way is automatic, even with a drawn one past it", () => {
@@ -83,6 +106,8 @@ describe("a new secret door's cover from its line (coverOfLine)", () => {
   test("a drawn wall past COVER_REACH edges is not the line's", () => {
     const state = fogRoom({ bounds: { w: 60, h: 24 }, scene: { autoWalls: "all" } });
     paint(state, { x: 2, y: 4, w: 40, h: 2 });
+    // A row of windows carries the line on as far as the reach.
+    for (let x = 21; x <= 20 + COVER_REACH; x++) edge(state, `${x},5,n`, { kind: "window" });
     edge(state, `${20 + COVER_REACH + 1},5,n`, WALL);
     assert.equal(coverOfLine(state.buildChunks, "s1", "all", "20,5,n"), "auto");
     edge(state, `${20 + COVER_REACH},5,n`, WALL);
@@ -93,15 +118,18 @@ describe("a new secret door's cover from its line (coverOfLine)", () => {
     const state = fogRoom({ bounds: { w: 40, h: 24 }, scene: { autoWalls: "all" } });
     paint(state, { x: 10, y: 4, w: 12, h: 2 });
     edge(state, "15,5,n", door("auto"));
-    edge(state, "13,5,n", WALL);
+    edge(state, "16,5,n", door("auto"));
+    edge(state, "14,5,n", WALL);
     assert.equal(coverOfLine(state.buildChunks, "s1", "all", "16,5,n"), "drawn");
     assert.equal(coverOfLine(state.buildChunks, "s1", "all", "17,5,n"), "drawn");
   });
 
-  test("on an \"off\" scene only drawn walls count, and with none near the cover is automatic", () => {
+  test("on an \"off\" scene only drawn walls count, and with none beside it the cover is automatic", () => {
     const state = walled("off");
     assert.equal(coverOfLine(state.buildChunks, "s1", "off", "2,4,w"), "auto");
     edge(state, "2,6,w", WALL);
+    assert.equal(coverOfLine(state.buildChunks, "s1", "off", "2,4,w"), "auto", "the edge between has no wall under \"off\"");
+    edge(state, "2,5,w", WALL);
     assert.equal(coverOfLine(state.buildChunks, "s1", "off", "2,4,w"), "drawn");
   });
 });
