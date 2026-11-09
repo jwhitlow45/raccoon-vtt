@@ -110,7 +110,8 @@ export type SoundProbe = {
   data: string;
   voices: Voice[];
   effects: { playing: number; started: { id: string; at: number; offsetMs: number }[] };
-  state: { owns: boolean; offset: number | null; lease: number; context: string; now: number | null } | null;
+  /** `mix`: the channels' gains, this device's levels times the room's (engine.ts channelGains). */
+  state: { owns: boolean; offset: number | null; lease: number; context: string; now: number | null; mix: { music: number; loop: number; effects: number } } | null;
 };
 
 /** What a page's engine says now: `data-sound`, and the test hook's voices, effects and state. */

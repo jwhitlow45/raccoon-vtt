@@ -290,7 +290,7 @@ describe("the Sound panel", { concurrency: false }, () => {
     // The section labels, in D-261106-091's order. Up next has no fold with no music, and the player has no label of its own.
     const sections = panel.locator("section > h3, section > [data-section-label] > h3");
     assert.deepEqual(await sections.allTextContents(), ["Effects", "Table sound", "Background", "On this device"]);
-    await panel.getByText("What everyone at the table hears, set here for every device. Each device can turn itself down under On this device.", { exact: true }).waitFor();
+    await panel.getByText("What everyone at the table hears, set here for every device. Each device sets its own volume from the speaker on its top bar.", { exact: true }).waitFor();
     // Music's playlists and tracks are Library's, the second view (4.4).
     assert.equal(await panel.getByRole("list", { name: "Tracks" }).count(), 0, "Library's lists are not on Now playing");
     await panel.getByText(/^Sounds use .+\. Images and sounds share the room's .+, and .+ is free\.$/).waitFor({ timeout: 15_000 });
@@ -646,14 +646,15 @@ describe("the Sound panel", { concurrency: false }, () => {
     await player.scrollIntoViewIfNeeded();
     await shots.take(dm, "dmb-1-dm-reminder");
 
-    // Pat's panel, left open, says the DM plays it in place of the card, and Pat's socket holds nothing about sound.
+    // Pat's panel, left open, says the DM plays it in place of the card, once, and Pat's socket holds nothing about sound.
     await sheet.getByText(DM_PLAYS, { exact: true }).waitFor();
+    assert.equal(await sheet.getByText(DM_PLAYS, { exact: true }).count(), 1, "once: On this device's controls draw no line of their own in Sound");
     await until("Pat's projection without the sound", () => patSocket.state?.meta.settings.soundDmOnly === true && patSocket.state.playing === undefined);
     assert.deepEqual(patSocket.state?.sounds ?? {}, {});
     assert.equal(await sheet.locator("[data-sound-player-card]").count(), 0);
     assert.deepEqual(alignmentLines(await measureAlignment(sheet), "Pat's Sound with Only DM devices play on, 390x844"), []);
     await shots.take(pat, "dmb-1-pat-panel");
-    // This device's Sounds says it once, above Room sound.
+    // This device's Sounds says it once, above the volume's mute toggle.
     await pat.keyboard.press("Escape");
     await sheet.waitFor({ state: "hidden" });
     await pat.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
@@ -664,7 +665,8 @@ describe("the Sound panel", { concurrency: false }, () => {
     const sounds = menu.locator("[data-panel-group]").filter({ has: pat.getByRole("heading", { name: "Sounds", exact: true }) }).last();
     const note = sounds.getByText(DM_PLAYS, { exact: true });
     await note.waitFor();
-    assert.ok((await note.boundingBox())!.y < (await sounds.getByRole("switch", { name: "Room sound" }).boundingBox())!.y, "above Room sound");
+    assert.equal(await sounds.getByText(DM_PLAYS, { exact: true }).count(), 1, "once");
+    assert.ok((await note.boundingBox())!.y < (await sounds.getByRole("button", { name: "Mute", exact: true }).boundingBox())!.y, "above the mute toggle");
     await sounds.getByText(/the DM can turn on Only DM devices play in Sound\./).waitFor();
     await sounds.scrollIntoViewIfNeeded();
     assert.deepEqual(alignmentLines(await measureAlignment(sounds), "Pat's This device Sounds with Only DM devices play on, 390x844"), []);
@@ -705,6 +707,27 @@ describe("the Sound panel", { concurrency: false }, () => {
     await until("Pat's music back", () => patSocket.state?.playing?.music);
     assert.equal(await (await soundPanel()).locator("[data-sound-table]").getByRole("switch", { name: "Only DM devices play" }).getAttribute("aria-checked"), "false");
     await (await patPanel()).locator("[data-sound-player-card]").getByText("Music is playing", { exact: true }).waitFor();
+  });
+
+  test("vol-p1. a muted DM device: Now playing says so once, with Unmute, which unmutes in place, and On this device draws no line of its own", async () => {
+    const panel = await soundPanel();
+    const player = panel.locator("[data-sound-player]");
+    // U mutes this device from the panel.
+    await dm.keyboard.press("u");
+    const line = player.getByText("This device is muted.");
+    await line.waitFor();
+    assert.equal(await dm.evaluate(() => localStorage.getItem("rvtt.roomSound")), "off");
+    assert.equal(await panel.getByText("This device is muted.").count(), 1, "once in the panel");
+    const device = panel.locator("[data-device-sound]");
+    for (const other of ["Tap anywhere to start the sound.", "Another window on this device plays the sound.", "This browser can't play the room's sound."]) assert.equal(await panel.getByText(other).count(), 0, other);
+    assert.equal(await device.getByRole("button", { name: "Mute", exact: true }).getAttribute("aria-pressed"), "true", "the toggle shows it below");
+    await player.scrollIntoViewIfNeeded();
+    assert.deepEqual(alignmentLines(await measureAlignment(player), "Now playing on a muted device, 1440x900"), []);
+    await shots.take(dm, "vol-p1-dm-muted-line");
+    await player.getByRole("button", { name: "Unmute", exact: true }).click();
+    await line.waitFor({ state: "detached" });
+    assert.equal(await dm.evaluate(() => localStorage.getItem("rvtt.roomSound")), "on");
+    assert.equal(await device.getByRole("button", { name: "Mute", exact: true }).getAttribute("aria-pressed"), "false");
   });
 
   test("sp-8. the X-card's Stop the sound stops it all", async () => {
@@ -848,6 +871,13 @@ describe("the Sound panel", { concurrency: false }, () => {
       // Table sound after Effects, with Only DM devices play alone, so a room that kept it can turn it off (docs/design/design-v1-sound-dm-only.md 4).
       const sections = panel.locator("section > h3, section > [data-section-label] > h3");
       assert.deepEqual(await sections.allTextContents(), ["Effects", "Table sound", "On this device"]);
+      // Only the built-in effects play, so On this device holds Volume and Effects alone (docs/design/design-v1-volume.md 4).
+      const device = panel.locator("[data-device-sound]");
+      await device.getByRole("slider", { name: "Volume", exact: true }).waitFor();
+      assert.equal(await device.getByRole("slider").count(), 2, "Volume and Effects");
+      assert.deepEqual(await device.locator("label").allTextContents(), ["Effects"]);
+      // With no Now playing above, the controls draw their own line, and a page that plays has none to draw.
+      assert.equal(await panel.getByText(/^(Tap anywhere to start the sound|Another window on this device plays the sound|This browser can't play the room's sound)\.$/).count(), 0);
       const table = panel.getByRole("heading", { name: "Table sound", exact: true }).locator("xpath=ancestor::section[1]");
       assert.equal(await table.getByRole("switch").count(), 1, "the one switch");
       const dmOnly = table.getByRole("switch", { name: "Only DM devices play" });

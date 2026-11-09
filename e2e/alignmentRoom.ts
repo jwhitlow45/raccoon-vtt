@@ -1702,7 +1702,7 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
     await sweep.measure(page, "sound-upload-refused", adds);
     await refused.getByRole("button", { name: /^Dismiss/ }).click();
 
-    // This device's Sounds, Room sound on and off (device/ThisDevice.tsx's controls).
+    // This device's Sounds, unmuted and muted (sound/device/DeviceSound.tsx's controls).
     const menu = await openMenu(page);
     const menuBack = page.getByRole("button", { name: /^Back to Menu/ });
     if (await visible(menuBack)) await menuBack.click();
@@ -1711,24 +1711,19 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
     const sounds = soundSection(menu, "Sounds");
     await sounds.scrollIntoViewIfNeeded();
     await sweep.measure(page, "sound-this-device-on", sounds);
-    const roomSound = sounds.getByRole("switch", { name: "Room sound" });
-    await roomSound.click();
-    await waitFor("Room sound off", async () => ((await roomSound.getAttribute("aria-checked")) === "false" ? true : null));
+    const mute = sounds.getByRole("button", { name: "Mute", exact: true });
+    await mute.click();
+    await waitFor("muted", async () => ((await mute.getAttribute("aria-pressed")) === "true" ? true : null));
     await sweep.measure(page, "sound-this-device-off", sounds);
-    // With this device's Room sound off, the device line under Only DM devices play's reminder.
+    // Muted, the device line with its Unmute under Only DM devices play's reminder, which unmutes in place.
     const quietPlayer = (await openPanelOf(page, "Sound")).locator("[data-sound-player]");
-    await quietPlayer.getByText("This device plays no sound. Turn on Room sound under On this device.", { exact: true }).waitFor();
+    await quietPlayer.getByText("This device is muted.").waitFor();
     await quietPlayer.scrollIntoViewIfNeeded();
     await sweep.measure(page, "sound-dmonly-device-line", quietPlayer);
     await ops.send({ t: "room.update", settings: { soundDmOnly: false } });
+    await quietPlayer.getByRole("button", { name: "Unmute", exact: true }).click();
+    await quietPlayer.getByText("This device is muted.").waitFor({ state: "detached" });
     await openMenu(page);
-    if (!(await visible(sounds))) {
-      if (await visible(menuBack)) await menuBack.click();
-      await menu.getByRole("button", { name: /^This device/ }).click();
-      await openGroup(menu, "Sounds");
-    }
-    await sounds.getByRole("switch", { name: "Room sound" }).click();
-    await waitFor("Room sound on", async () => ((await sounds.getByRole("switch", { name: "Room sound" }).getAttribute("aria-checked")) === "true" ? true : null));
     if (await visible(menuBack)) await menuBack.click();
 
     // Room settings' Backup with Include sounds, which shows once the room's storage names its sounds (settings/ExportSection.tsx).

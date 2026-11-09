@@ -979,6 +979,33 @@ describe("the room search", { concurrency: false }, () => {
     await themeFold.click();
   });
 
+  test("vol-s1. mute: U's row and This device's Volume with its level, or Muted while muted, and Enter on Volume lands on its slider unchanged (docs/design/design-v1-volume.md 9)", async () => {
+    await fresh();
+    const choice = () => dm.evaluate(() => localStorage.getItem("rvtt.roomSound"));
+    const before = await choice();
+    await openSearch(dm);
+    const at = await typeFor(dm, "mute", "setting:menu.this-device.sounds.volume");
+    assert.ok(at <= 1, `Volume among the first two rows, at ${at}`);
+    assert.ok((await rowIds(dm)).slice(0, 2).includes("key:mute"), "U's row, which mutes as the key does");
+    const volume = row(dm, "setting:menu.this-device.sounds.volume");
+    assert.match((await volume.innerText()).replace(/\s+/g, " "), /Volume.*\d+%/);
+    await dm.keyboard.press("Escape");
+    await sheet(dm).waitFor({ state: "detached" });
+    // Muted by U, the row says so.
+    await dm.keyboard.press("u");
+    await waitFor("muted", async () => ((await choice()) === "off" ? true : null));
+    await openSearch(dm);
+    await typeFor(dm, "mute", "setting:menu.this-device.sounds.volume");
+    assert.match((await volume.innerText()).replace(/\s+/g, " "), /Volume.*Muted/);
+    await pick(dm, "unmute", "setting:menu.this-device.sounds.volume");
+    const f = await landedOn(dm, "menu.this-device.sounds.volume");
+    assert.equal(f.pane, "menu");
+    assert.equal(await choice(), "off", "landing changes nothing");
+    await dm.keyboard.press("u");
+    await waitFor("unmuted", async () => ((await choice()) === "on" ? true : null));
+    if (before === null) await dm.evaluate(() => localStorage.removeItem("rvtt.roomSound"));
+  });
+
   test("se-10. Enter presses an action's control, so its own picker, confirm or code shows, and an action whose control is off lands on the field that turns it on, ringed and not pressed", async () => {
     await fresh();
     await pick(dm, "change your color", "action:menu.members.color");
@@ -1436,8 +1463,8 @@ describe("the room search", { concurrency: false }, () => {
     }
     await field(page).fill("music");
     await waitFor("music's rows", async () => ((await rowIds(page)).length > 0 ? true : null));
-    // Pat's own Sound panel, where the room plays, is this device's sound too.
-    for (const id of await rowIds(page)) assert.match(id, /^((setting|section):menu\.this-device\.|panel:sound$)/, `music finds only This device's sound for Pat, not ${id}`);
+    // Pat's own Sound panel, where the room plays, is this device's sound too, and so is U's row, which mutes it.
+    for (const id of await rowIds(page)) assert.match(id, /^((setting|section):menu\.this-device\.|panel:sound$|key:mute$)/, `music finds only This device's sound for Pat, not ${id}`);
     // The true name is never typed into a match: the hooded figure by the name Pat's map gives it.
     await typeFor(page, "hooded", `token:${run.varo}`);
     assert.match((await row(page, `token:${run.varo}`).textContent()) ?? "", /Hooded figure/);

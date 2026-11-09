@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { openGroup } from "./helpers/groups.ts";
 
@@ -161,7 +161,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     assert.equal(await sheet.getByRole("region").count(), 0, "headings, not landmarks");
 
     const keys = await inputs(sheet, "Keys");
-    for (const k of ["Ctrl+Z", "T", "H", "/", "?", "Escape", "Ctrl+V (Cmd+V on a Mac)"]) assert.ok(keys.includes(k), `${k} in ${keys.join(", ")}`);
+    for (const k of ["Ctrl+Z", "T", "H", "/", "?", "U", "Escape", "Ctrl+V (Cmd+V on a Mac)"]) assert.ok(keys.includes(k), `${k} in ${keys.join(", ")}`);
     assert.deepEqual(await inputs(sheet, "Mouse with keys"), [
       "Shift or Ctrl+click a token (Cmd on a Mac)",
       "Shift or Ctrl+drag on empty map (Cmd on a Mac)",
@@ -227,7 +227,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     assert.equal(summaries.Battery, "Low power off");
     assert.match(summaries["Map detail"] ?? "", /^Phone size/);
     assert.match(summaries.Weather ?? "", /^Moving/);
-    assert.match(summaries.Sounds ?? "", /^Room sound (on|off)$/);
+    assert.match(summaries.Sounds ?? "", /^(Volume \d+%|Muted)$/);
     assert.equal(summaries.Rolls, "Roll animation on");
     assert.equal(summaries.Shortcuts, null, "Shortcuts holds no setting to sum up");
     assert.equal(summaries["Sheet handle"], "Ringed tail");
@@ -263,7 +263,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     assert.deepEqual(await inputs(sheet, "Roll requests"), ["Enter", "Enter", "ContextMenu, Shift+F10", "Up, Down, Home, End"]);
 
     const keys = await inputs(sheet, "Keys");
-    for (const k of ["Ctrl+Z", "V", "N", "Escape"]) assert.ok(keys.includes(k), `${k} in ${keys.join(", ")}`);
+    for (const k of ["Ctrl+Z", "V", "N", "U", "Escape"]) assert.ok(keys.includes(k), `${k} in ${keys.join(", ")}`);
     for (const k of ["T", "H", "/", "Ctrl+V (Cmd+V on a Mac)"]) assert.ok(!keys.includes(k), `the DM's ${k} is not a player's`);
     assert.deepEqual(await inputs(sheet, "Android"), ["Back button"]);
     // dpf1: a phone's hold and a reader's double-tap and hold open a roll's one-roll options, and its keys are listed too.
@@ -281,6 +281,42 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await shots.take(player, "shortcuts-player-android-back");
     await player.keyboard.press("Escape");
     await sheet.waitFor({ state: "detached" });
+  });
+
+  test("vol-k. U mutes and unmutes this device, the sheet says so for both roles, and This device's mute toggle names U in its tooltip and aria-keyshortcuts", async () => {
+    await dm.keyboard.press("?");
+    const sheet = dm.getByRole("dialog", { name: "Shortcuts" });
+    await sheet.waitFor();
+    await sheet.getByText("Mute or unmute this device's sound", { exact: true }).waitFor();
+    await dm.keyboard.press("Escape");
+    await sheet.waitFor({ state: "detached" });
+    const choice = () => dm.evaluate(() => localStorage.getItem("rvtt.roomSound"));
+    const before = await choice();
+    await dm.keyboard.press("u");
+    await waitFor("U mutes", async () => ((await choice()) === "off" ? true : null));
+    await dm.keyboard.press("u");
+    await waitFor("U unmutes", async () => ((await choice()) === "on" ? true : null));
+    // The toggle does what U does, so it names the key.
+    await openSideTab(dm, "Menu");
+    const menu = dm.getByRole("tabpanel", { name: sideTabName("Menu") });
+    // The page's back sits in the side panel's header, outside the tab panel.
+    const back = dm.getByRole("button", { name: /^Back to Menu/ });
+    if (await back.isVisible()) await back.click();
+    await menu.getByRole("button", { name: /^This device/ }).click();
+    await openGroup(menu, "Sounds");
+    const toggle = menu.getByRole("button", { name: "Mute", exact: true });
+    assert.equal(await toggle.getAttribute("aria-keyshortcuts"), "U");
+    const tip = await toggle.evaluate((el) => {
+      const doc = (globalThis as unknown as { document: { getElementById(id: string): { getAttribute(name: string): string | null; textContent: string | null } | null } }).document;
+      for (const id of (el.getAttribute("aria-describedby") ?? "").split(" ")) {
+        const t = doc.getElementById(id);
+        if (t?.getAttribute("role") === "tooltip") return t.textContent;
+      }
+      return null;
+    });
+    assert.equal(tip, "Mute (U)");
+    if (before === null) await dm.evaluate(() => localStorage.removeItem("rvtt.roomSound"));
+    await back.click();
   });
 
   test("3b. on a 320 px phone at 130%, the sheet scrolls only down: a key's note wraps under its keycap", async () => {

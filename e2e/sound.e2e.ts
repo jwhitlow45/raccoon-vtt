@@ -307,7 +307,7 @@ describe("synced music and sound", { concurrency: false }, () => {
     rmSync(work, { recursive: true, force: true });
   });
 
-  test("sn-0. the DM's room on a computer with music, a background sound and effects, and Pat on a phone with Room sound on", async () => {
+  test("sn-0. the DM's room on a computer with music, a background sound and effects, and Pat on a phone, unmuted", async () => {
     await createRoom(dm, dmContext);
     run.patId = await join(patContext, "Pat", "#3b82f6");
     const add = (id: string, name: string, use: "music" | "loop" | "effect", ms: number) => addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id, name, use, ms });
@@ -320,7 +320,7 @@ describe("synced music and sound", { concurrency: false }, () => {
     await openRoom(pat);
     await waitFor("the DM's snapshot holds the sounds", () => (Object.keys(dmSocket.state?.sounds ?? {}).length === 6 ? true : null));
     for (const s of Object.values(dmSocket.state?.sounds ?? {})) run.assets[s.id] = s.assetId;
-    // Nothing plays yet: the engine has not loaded, and the page says only that Room sound is on.
+    // Nothing plays yet: the engine has not loaded, and the page says only that it is unmuted.
     assert.equal((await soundProbe(pat)).data, "", "no engine before anything plays");
   });
 
@@ -352,7 +352,7 @@ describe("synced music and sound", { concurrency: false }, () => {
       const tapped = Date.now();
       await ask.getByRole("button", { name: "Play here" }).click();
       await ask.waitFor({ state: "detached" });
-      assert.equal(await ana.evaluate(() => localStorage.getItem("rvtt.roomSound")), "on", "Play here turns Room sound on");
+      assert.equal(await ana.evaluate(() => localStorage.getItem("rvtt.roomSound")), "on", "Play here unmutes");
       await soundSays(ana, /^playing music/, 5_000);
       await inStep(ana, START_MS, 6_000);
       assert.ok(Date.now() - tapped < 6_500, `in place within 6 s of the tap (${Date.now() - tapped} ms)`);
@@ -705,7 +705,7 @@ describe("synced music and sound", { concurrency: false }, () => {
     }
   });
 
-  test("sn-8. This device's Sounds: Room sound and, while on, the three sliders, at three sizes and two scales, dark then light, within 1 px", async () => {
+  test("sn-8. This device's Sounds: Volume with its mute toggle, the three sliders, Turn sound and Ping sound, at three sizes and two scales, dark then light, within 1 px", async () => {
     const lines: string[] = [];
     for (const scheme of ["dark", "light"] as const) {
       for (const size of SIZES) {
@@ -717,7 +717,7 @@ describe("synced music and sound", { concurrency: false }, () => {
           }, [scheme, scale] as const);
           await openRoom(dm);
           const section = await thisDeviceSounds(dm);
-          await section.getByRole("switch", { name: "Room sound" }).or(section.getByRole("checkbox", { name: "Room sound" })).first().waitFor();
+          await section.getByRole("button", { name: "Mute", exact: true }).waitFor();
           lines.push(...alignmentLines(await measureAlignment(section), `This device's Sounds ${size.name} ${scale * 100}% ${scheme}`));
           await shots.take(dm, `sn-8-this-device-sounds-${size.name}-${scale * 100}-${scheme}`);
           await closeSheets(dm);
@@ -1146,9 +1146,142 @@ describe("synced music and sound", { concurrency: false }, () => {
       via.close();
     }
   });
+  test("vol-1. This device's Volume on the DM's page: a level scales the engine's gains, the toggle mutes and unmutes at the kept level, a drag to 0 mutes keeping it, raising it unmutes, and U and the media session's pause and play do the same, the toggle's row within 1 px", async () => {
+    // The media session's handlers, kept where the step can call them as the lock screen would.
+    await dmContext.addInitScript(MEDIA_HANDLERS);
+    await dm.setViewportSize({ width: 1280, height: 800 });
+    await dm.evaluate(() => {
+      localStorage.setItem("rvtt.roomSound", "on");
+      localStorage.removeItem("rvtt.soundMix");
+    });
+    await openRoom(dm);
+    await playTrack(run.ids.tavern, 0, "all");
+    await soundSays(dm, /^playing music/, 8_000);
+    const sounds = await thisDeviceSounds(dm);
+    const mute = sounds.getByRole("button", { name: "Mute", exact: true });
+    const volume = sounds.getByRole("slider", { name: "Volume", exact: true });
+    const stored = () => dm.evaluate(() => ({ choice: localStorage.getItem("rvtt.roomSound"), volume: (JSON.parse(localStorage.getItem("rvtt.soundMix") ?? "{}") as { volume?: number }).volume ?? null }));
+    const gains = async () => {
+      const mix = (await soundProbe(dm)).state?.mix;
+      assert.ok(mix, "the test hook's mix");
+      return mix;
+    };
+    const shows = async (value: string, text: string, pressed: string) => {
+      await waitFor(`the master at ${text}`, async () => ((await volume.inputValue()) === value && (await volume.getAttribute("aria-valuetext")) === text && (await mute.getAttribute("aria-pressed")) === pressed ? true : null));
+    };
+    await shows("100", "100%", "false");
+    const full = await gains();
+
+    // 70% by the keys: each channel's gain at 0.49 of its full one.
+    await volume.focus();
+    for (let i = 0; i < 6; i++) await dm.keyboard.press("ArrowLeft");
+    await shows("70", "70%", "false");
+    assert.deepEqual(await stored(), { choice: "on", volume: 70 });
+    await waitFor("the gains at 70%", async () => {
+      const now = await gains();
+      return (["music", "loop", "effects"] as const).every((k) => Math.abs(now[k] - full[k] * 0.49) < 1e-6) ? now : null;
+    });
+    const row = await toggleRow(sounds);
+    assert.ok(Math.abs(row.toggle - row.slider) <= 1 && Math.abs(row.percent - row.slider) <= 1, `the toggle's, slider's and percent's centers: ${JSON.stringify(row)}`);
+    assert.ok(Math.abs(row.toggleLeft - row.labelLeft) <= 1, `the toggle's box on the labels' edge: ${JSON.stringify(row)}`);
+    assert.deepEqual(alignmentLines(await measureAlignment(sounds), "This device's Sounds at 70%, 1280x800"), []);
+    await shots.take(dm, "vol-1-this-device-70");
+
+    // The toggle mutes: the engine stops, the master shows 0, Muted to a reader, and the level is kept.
+    await mute.click();
+    await soundSays(dm, /^off/, 5_000);
+    await shows("0", "Muted", "true");
+    assert.deepEqual(await stored(), { choice: "off", volume: 70 });
+    assert.deepEqual(alignmentLines(await measureAlignment(sounds), "This device's Sounds muted, 1280x800"), []);
+    await shots.take(dm, "vol-1-this-device-muted");
+    await mute.click();
+    await soundSays(dm, /^playing music/, 5_000);
+    await shows("70", "70%", "false");
+
+    // A drag to 0 mutes and keeps the level from the press, after passing lower levels on the way.
+    const box = (await volume.boundingBox())!;
+    const y = box.y + box.height / 2;
+    await dm.mouse.move(box.x + box.width * 0.7, y);
+    await dm.mouse.down();
+    await dm.mouse.move(box.x + box.width * 0.35, y, { steps: 5 });
+    await dm.mouse.move(box.x - 20, y, { steps: 5 });
+    await dm.mouse.up();
+    await soundSays(dm, /^off/, 5_000);
+    await shows("0", "Muted", "true");
+    assert.deepEqual(await stored(), { choice: "off", volume: 70 }, "the level from the press, never one on the way or a 0");
+
+    // Raised by a key while muted it unmutes and plays at the new level, and back to 0 it keeps the level it was focused at.
+    await volume.blur();
+    await volume.focus();
+    await dm.keyboard.press("ArrowRight");
+    await soundSays(dm, /^playing music/, 5_000);
+    await shows("5", "5%", "false");
+    await dm.keyboard.press("ArrowLeft");
+    await soundSays(dm, /^off/, 5_000);
+    assert.deepEqual(await stored(), { choice: "off", volume: 70 }, "the level at the focus, not the 0 a muted slider shows");
+    await mute.click();
+    await shows("70", "70%", "false");
+
+    // Raised by a click while muted: unmuted at the level clicked.
+    await mute.click();
+    await soundSays(dm, /^off/, 5_000);
+    await dm.mouse.click(box.x + box.width / 2, y);
+    await soundSays(dm, /^playing music/, 5_000);
+    const clicked = (await stored()).volume!;
+    assert.ok(clicked >= 40 && clicked <= 60 && (await stored()).choice === "on", `unmuted at the level clicked: ${clicked}`);
+
+    // U mutes and unmutes, with focus on the slider too.
+    await dm.keyboard.press("u");
+    await soundSays(dm, /^off/, 5_000);
+    await shows("0", "Muted", "true");
+    await dm.keyboard.press("u");
+    await soundSays(dm, /^playing music/, 5_000);
+    await shows(String(clicked), `${clicked}%`, "false");
+
+    // The lock screen's pause mutes, and its play unmutes at the kept level.
+    const media = (action: "pause" | "play") => dm.evaluate((a) => (globalThis as unknown as { __rvttMedia: Record<string, () => void> }).__rvttMedia[a]!(), action);
+    await media("pause");
+    await soundSays(dm, /^off/, 5_000);
+    assert.deepEqual(await stored(), { choice: "off", volume: clicked });
+    await media("play");
+    await soundSays(dm, /^playing music/, 5_000);
+    await shows(String(clicked), `${clicked}%`, "false");
+
+    // Back to the first level for the steps after.
+    await volume.focus();
+    await dm.keyboard.press("End");
+    await shows("100", "100%", "false");
+    await ops.send({ t: "sound.stopAll" });
+  });
 });
 
 type Ramp = { rising: boolean; at: number; ms: number };
+
+/** The media session's action handlers as the page sets them, on `__rvttMedia`, so a step can press the lock screen's pause and play. */
+const MEDIA_HANDLERS = `(() => {
+  const session = navigator.mediaSession;
+  if (!session) return;
+  const set = session.setActionHandler.bind(session);
+  globalThis.__rvttMedia = {};
+  session.setActionHandler = (action, handler) => {
+    globalThis.__rvttMedia[action] = handler;
+    return set(action, handler);
+  };
+})();`;
+
+/** The master row of This device's volume controls: the vertical centers of the mute toggle, the slider and its percent, and the toggle's and the labels' left edges. */
+async function toggleRow(sounds: Locator): Promise<{ toggle: number; slider: number; percent: number; toggleLeft: number; labelLeft: number }> {
+  return sounds.locator("[data-device-sound]").evaluate((root) => {
+    type El = { getBoundingClientRect(): { top: number; height: number; left: number }; nextElementSibling: El | null; querySelector(s: string): El | null };
+    const r = root as unknown as El;
+    const mid = (el: El) => el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2;
+    const toggle = r.querySelector("[data-volume-mute]")!;
+    const slider = r.querySelector('input[aria-label="Volume"]')!;
+    const percent = slider.nextElementSibling!;
+    const label = r.querySelector("label")!;
+    return { toggle: mid(toggle), slider: mid(slider), percent: mid(percent), toggleLeft: toggle.getBoundingClientRect().left, labelLeft: label.getBoundingClientRect().left };
+  });
+}
 
 /**
  * Each passage of the tap's level from under a tenth of the tone's full

@@ -579,7 +579,7 @@ const NOT_ANCHORED: readonly { surface: string; line: RegExp; why: string }[] = 
   { surface: "Sound's Library", line: /^radio group "Sound"/, why: "Sound's view row, whose two views are the Now playing and Library entries" },
   { surface: "Sound's Library", line: /^field "Search music"/, why: "Library's own search, over the room's tracks" },
   { surface: "Sound's Now playing", line: /^slider "Seek"/, why: "the playing track's place, the room's own" },
-  { surface: "Sound's Now playing", line: /^(switch "Room sound|slider "(Music|Background|Effects)")/, why: "this device's room sound, whose rows are This device's Sounds (S2a)" },
+  { surface: "Sound's Now playing", line: /^(slider "(Volume|Music|Background|Effects)"|switch "(Turn sound|Ping sound))/, why: "this device's volume controls, whose rows are This device's Sounds (S2a)" },
   { surface: "Initiative", line: /^switch "Turn sound/, why: "This device's Turn sound is its one row (D-261106-330)" },
   { surface: "Dice", line: /^field "Bonus"/, why: "the shown creature's card, where one with no stat block types its bonus" },
 ];
@@ -794,7 +794,7 @@ describe("the room search's sweep", { concurrency: false }, () => {
     ] as const) {
       const context = await browser.newContext(options);
       await context.addInitScript(WINDOWS);
-      // Room sound on, so This device's three volumes show for Pat too.
+      // Unmuted, as a player who answered Play here is.
       await context.addInitScript(roomSoundScript("on"));
       await context.addCookies(await patContext.cookies(server.origin));
       sessions.set(context, "pat");
