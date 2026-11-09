@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { CHUNK_CELLS, type BuildChunk, type RoomState } from "#shared/model.ts";
+import type { ClientOp } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { DM, env, room, scene, token } from "#shared/testutil.ts";
@@ -110,6 +111,51 @@ describe("the ops of the move", () => {
     assert.ok(r.ok);
     assert.equal(r.state.tokens.horse!.sceneId, "u");
     assert.equal(r.state.tokens.thorn!.sceneId, "u", "the rider goes with the mount");
+  });
+
+  /** The ops one after another, as the server takes them, each op ending with its own link pass. */
+  function applied(state: RoomState, ops: readonly ClientOp[]): RoomState {
+    return ops.reduce((s, op, i) => {
+      const r = applyOp(s, op, DM, env(i + 1));
+      assert.ok(r.ok, r.ok ? "" : r.message);
+      return r.state;
+    }, state);
+  }
+
+  /** Pip perches on Thorn, who rides the horse with a nudge, on the ground floor. */
+  const stable = () =>
+    tower((s) => {
+      s.tokens.horse = token("horse", { sceneId: "g", name: "Horse", size: "large", x: 4, y: 4 });
+      s.tokens.thorn = thorn({ attached: { to: "horse", kind: "ride" }, nudge: { x: 2, y: 2 } });
+      s.tokens.pip = token("pip", { sceneId: "g", name: "Pip", size: "tiny", x: 4.5, y: 4.5, attached: { to: "thorn", kind: "perch" } });
+    });
+  const tokenIds = (ops: readonly ClientOp[]) => ops.map((op) => (op.t === "token.update" ? op.tokenId : op.t));
+
+  test("a rider named with its mount stays on it in either selection order, and drops its own nudge", () => {
+    for (const order of [["horse", "thorn"], ["thorn", "horse"]]) {
+      const state = stable();
+      const ops = moveToFloorOps(state, order.map((id) => state.tokens[id]!), state.scenes.u!);
+      assert.deepEqual(tokenIds(ops), ["horse", "thorn"], `${order}: the holder first`);
+      const s = applied(state, ops);
+      assert.deepEqual([s.tokens.horse!.sceneId, s.tokens.thorn!.sceneId, s.tokens.pip!.sceneId], ["u", "u", "u"], `${order}`);
+      assert.deepEqual(s.tokens.thorn!.attached, { to: "horse", kind: "ride" }, `${order}: still riding`);
+      assert.deepEqual(s.tokens.pip!.attached, { to: "thorn", kind: "perch" }, `${order}: the passenger still perches`);
+      assert.equal(s.tokens.thorn!.nudge, undefined, `${order}: a creature the move names drops its nudge (7.4)`);
+    }
+  });
+
+  test("a chain of three named in any order moves holder first down the chain, every link holding", () => {
+    const ids = ["horse", "thorn", "pip"];
+    const orders = ids.flatMap((a) => ids.filter((b) => b !== a).map((b) => [a, b, ids.find((c) => c !== a && c !== b)!]));
+    assert.equal(orders.length, 6);
+    for (const order of orders) {
+      const state = stable();
+      const ops = moveToFloorOps(state, order.map((id) => state.tokens[id]!), state.scenes.u!);
+      assert.deepEqual(tokenIds(ops), ids, `${order}`);
+      const s = applied(state, ops);
+      assert.deepEqual(ids.map((id) => s.tokens[id]!.sceneId), ["u", "u", "u"], `${order}`);
+      assert.deepEqual([s.tokens.thorn!.attached?.to, s.tokens.pip!.attached?.to], ["horse", "thorn"], `${order}: every link holds`);
+    }
   });
 
   test("a creature already on the floor is left out", () => {

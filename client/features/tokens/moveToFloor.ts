@@ -6,6 +6,7 @@ import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { hexInScene } from "#shared/rules/hex.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { carriedGroup } from "#shared/rules/attach.ts";
+import { ownEntry } from "#shared/records.ts";
 import { displayName } from "../../lib/scene.ts";
 
 /*
@@ -84,13 +85,30 @@ export function floorChoices(view: View, named: readonly Token[]): FloorChoice[]
   return choices;
 }
 
+/** How many links up `attached.to` a token stands from one that sits on nothing, each token counted once on a loop. */
+function linkDepth(tokens: RoomState["tokens"], token: Token): number {
+  const seen = new Set([token.id]);
+  let depth = 0;
+  for (let to = token.attached?.to; to !== undefined && !seen.has(to); to = ownEntry(tokens, to)?.attached?.to) {
+    seen.add(to);
+    depth += 1;
+  }
+  return depth;
+}
+
 /**
  * The ops of the move: one `token.update` for each creature named. A creature standing on the ground lands on the
  * ground of its place on the floor, one flying keeps its height, and one already on the floor is left.
+ *
+ * The server takes each op alone, and each ends with the link pass, so a rider sent before its mount would stand on
+ * the floor alone and come loose. Holders go first, down every chain of links: the mount takes its rider along, and
+ * the rider's own op then drops the rider's nudge, as for every creature the move names (7.4).
  */
-export function moveToFloorOps(view: Pick<RoomState, "buildChunks">, named: readonly Token[], target: Scene): ClientOp[] {
+export function moveToFloorOps(view: Pick<RoomState, "buildChunks" | "tokens">, named: readonly Token[], target: Scene): ClientOp[] {
   const ops: ClientOp[] = [];
-  for (const token of named) {
+  const depth = new Map(named.map((t) => [t.id, linkDepth(view.tokens, t)]));
+  const holdersFirst = [...named].sort((a, b) => depth.get(a.id)! - depth.get(b.id)!);
+  for (const token of holdersFirst) {
     if (token.sceneId === target.id) continue;
     const here = footprintGround(view.buildChunks, token);
     const there = footprintGround(view.buildChunks, { ...token, sceneId: target.id });
