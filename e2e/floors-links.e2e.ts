@@ -432,6 +432,16 @@ describe("Go up and Go down, and the stairs on the board", { concurrency: false 
     assert.equal(climbsSent(dmSocket), before, "a press sends nothing");
     await ops.send({ t: "floorLink.update", linkId: run.stairsDown, patch: { locked: false } });
     await deselect(dm);
+    // A locked ladder with no creature on it, for the board's dashed outline and lock.
+    await ops.send({ t: "floorLink.update", linkId: run.ladderDown, patch: { locked: true } });
+    await keyOn(dm, "]");
+    await showsFloor(dm, "Upper floor");
+    await waitFor("the locked ladder on Upper", () => (dmSocket.state?.floorLinks?.[run.ladderDown]?.locked === true ? true : null));
+    await dm.waitForTimeout(400);
+    await shots.take(dm, "flrl-7-dm-locked-ladder-on-board");
+    await ops.send({ t: "floorLink.update", linkId: run.ladderDown, patch: { locked: false } });
+    await keyOn(dm, "[");
+    await showsFloor(dm, "Ground floor");
   });
 
   test("flrl-8. Ana's Undo takes the climb back down the stairs and her Redo up again, twice, the marker as it was each time", async () => {
