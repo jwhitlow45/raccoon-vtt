@@ -13806,6 +13806,7 @@
     "dungeonblk10",
     "dungeonblk11",
     "dungeonblk12",
+    "dungeonblk13",
     "dungeon-key",
     "dungeon-pin-0",
     "dungeon-pin-1",
@@ -15181,6 +15182,10 @@
        {
         "id": "dungeonblk12",
         "text": "**12.** 4 × 8 squares (20 by 40 ft), 5 ft up. Openings: east to 10, south to 5, west to 2. Trinket: A needle that never bends."
+       },
+       {
+        "id": "dungeonblk13",
+        "text": "**In the corridors.** Falling Net between 2 and 4, Falling Net between 5 and 12."
        }
       ]
      }
@@ -17645,6 +17650,7 @@
     "dungeonblk10",
     "dungeonblk11",
     "dungeonblk12",
+    "dungeonblk13",
     "dungeon-key",
     "dungeon-pin-0",
     "dungeon-pin-1",
@@ -19914,6 +19920,10 @@
        {
         "id": "dungeonblk12",
         "text": "**12.** A secret room, 9 × 4 squares (45 by 20 ft). Doors: north to 9 (secret). A pit. Lit by a fire pit. Trinket: A mummified goblin hand."
+       },
+       {
+        "id": "dungeonblk13",
+        "text": "**In the corridors.** Poisoned Darts between 6 and 10."
        }
       ]
      }

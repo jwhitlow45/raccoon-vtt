@@ -3,7 +3,7 @@ import { TRINKETS } from "#shared/srd/trinkets.ts";
 import { BAND_NAMES } from "../traps/rules.ts";
 import { DAIS_RISE } from "./heights.ts";
 import { blockPlaceholder, PAGE_PLACEHOLDER, pinPlaceholder } from "./ops.ts";
-import type { DungeonPlan, KeyDoor, KeyRoom } from "./plan.ts";
+import type { DungeonPlan, KeyCorridorTrap, KeyDoor, KeyRoom } from "./plan.ts";
 import { CHOICE_NAMES, HEIGHT_PRESETS, LIT_PRESETS, SECRET_PRESETS, SIZE_SIDES, TRAP_PRESETS, type DungeonSettings } from "./settings.ts";
 import { THEME_SPECS } from "./themes.ts";
 import { sizeLine } from "./words.ts";
@@ -138,6 +138,23 @@ export function roomLine(plan: DungeonPlan, k: KeyRoom, feetPerCell: number): st
 }
 
 /**
+ * The key's closing part for the traps no room holds: "**In the corridors.**
+ * Collapsing Roof between 5 and 6, Poisoned Darts between 1 and the stairs at
+ * the map's edge." Left out when the plan has none (LP33-B-KEY-1).
+ */
+export function corridorLine(plan: DungeonPlan): string | null {
+  const traps = plan.corridorTraps ?? [];
+  if (traps.length === 0) return null;
+  const where = (t: KeyCorridorTrap) => {
+    if (t.between === "deadEnd") return " in a dead end";
+    if (t.between === null) return "";
+    const [a, b] = t.between;
+    return ` between ${a} and ${b === "edge" ? "the stairs at the map's edge" : b}`;
+  };
+  return `**In the corridors.** ${traps.map((t) => `${t.name}${where(t)}`).join(", ")}.`;
+}
+
+/**
  * The key's `journal.create` and one `pin.put` per room, or none with DM
  * key off. The page is the DM's alone and so is every pin, which stands in
  * the middle of its room's pin square in the DM's color, labeled with the
@@ -146,7 +163,8 @@ export function roomLine(plan: DungeonPlan, k: KeyRoom, feetPerCell: number): st
 export function keyOps(plan: DungeonPlan, settings: DungeonSettings, key: KeyInput, sceneId: string): ClientOp[] {
   if (!settings.key || plan.key === null) return [];
   const rooms = plan.key;
-  const blocks = [keyIntro(plan, settings, key.feetPerCell), ...rooms.map((k) => roomLine(plan, k, key.feetPerCell))].map((text, i) => ({ id: blockPlaceholder(i), text }));
+  const closing = corridorLine(plan);
+  const blocks = [keyIntro(plan, settings, key.feetPerCell), ...rooms.map((k) => roomLine(plan, k, key.feetPerCell)), ...(closing ? [closing] : [])].map((text, i) => ({ id: blockPlaceholder(i), text }));
   const page: ClientOp = { t: "journal.create", page: { id: PAGE_PLACEHOLDER, title: keyTitle(key.name), folder: KEY_FOLDER, access: "dm", blocks } };
   const pins = rooms.map((k, i): ClientOp => {
     const [x, y] = plan.rooms[k.room]!.pin;

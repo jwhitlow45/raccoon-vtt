@@ -9,7 +9,7 @@ import type { Seed } from "./seed.ts";
 import { besideDoorway, bulgeTunnels, erodeRoom, placeColumns } from "./cave.ts";
 import { deadEndCount, placeDeadEnds, type Spur } from "./deadEnds.ts";
 import { furnish } from "./furnish.ts";
-import { keyRooms, pinSquare } from "./keyRooms.ts";
+import { corridorTraps, keyRooms, numberRooms, pinSquare } from "./keyRooms.ts";
 import { placeLights } from "./lightSpots.ts";
 import { chooseSecrets, secretCandidates, stillWhole, type Candidate } from "./secrets.ts";
 import { clampContext, clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, MAX_DOOR_EDGES, SEARCH_BUDGET, litCount, secretCount, trapCount, type DungeonSettings, type PlanContext, type Theme } from "./settings.ts";
@@ -65,6 +65,13 @@ export type KeyDoor = { side: "n" | "e" | "s" | "w"; to: number | "edge"; state:
  */
 export type KeyRoom = { n: number; room: number; doors: KeyDoor[]; light?: string; traps: string[]; trinket: number; secret?: true; dais?: true; pit?: true; cistern?: true };
 
+/**
+ * A trap in the corridors as the key reads it (LP33-B-KEY-1): its name, and
+ * where it lies: between two rooms' numbers (the second "edge" on the way in's
+ * stub), in a dead end, or null on no built way.
+ */
+export type KeyCorridorTrap = { name: string; between: readonly [number, number | "edge"] | "deadEnd" | null };
+
 export type DungeonPlan = {
   version: number;
   theme: Theme;
@@ -90,6 +97,8 @@ export type DungeonPlan = {
   entrance: { x: number; y: number; w: number; h: number };
   /** The DM key's rooms in number order, or null with DM key off. Never a seed (D-261102-023). */
   key: KeyRoom[] | null;
+  /** The traps no room holds, for the key's closing part: present only with DM key on and a trap in a corridor. */
+  corridorTraps?: KeyCorridorTrap[];
 };
 
 /**
@@ -504,11 +513,26 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   const roomTraps = new Map<number, string[]>();
   const doorRoom = new Map<string, number>();
   for (const d of doorways) d.inside.forEach((_, j) => doorRoom.set(doorEdgeOf(board, d, j), d.room));
-  picked.traps.forEach((t) => {
+  const inRoomTrap = new Set<number>();
+  picked.traps.forEach((t, ti) => {
     const z = t.zone;
     const i = "door" in z ? ("edge" in z.door ? (doorRoom.get(z.door.edge) ?? -1) : -1) : "cells" in z ? roomOf(board.cell(z.cells[0]!.x, z.cells[0]!.y)) : -1;
-    if (i >= 0) roomTraps.set(i, [...(roomTraps.get(i) ?? []), trapPreset(t.preset, s.band)?.name ?? t.preset]);
+    if (i >= 0) {
+      roomTraps.set(i, [...(roomTraps.get(i) ?? []), trapPreset(t.preset, s.band)?.name ?? t.preset]);
+      inRoomTrap.add(ti);
+    }
   });
+  const inCorridors = s.key
+    ? corridorTraps({
+        traps: picked.traps.map((t, ti) => ({ name: trapPreset(t.preset, s.band)?.name ?? t.preset, squares: picked.squares[ti] ?? [], inRoom: inRoomTrap.has(ti) })),
+        links,
+        paths,
+        stubPath,
+        entrance: entrance.room,
+        spurPaths,
+        numbers: numberRooms(links, kept, entrance.room),
+      })
+    : [];
   const lights = new Map(lit.map((l) => [l.room, l.light.label]));
   const pitRooms = new Set([...overlay].flatMap(([k, t]) => (t === "pit" && board.roomAt[k] !== 0 ? [roomOf(k)] : [])));
   const keyed = s.key
@@ -596,6 +620,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     traps,
     entrance: entrance.room >= 0 ? { x: rects[entrance.room]!.x, y: rects[entrance.room]!.y, w: rects[entrance.room]!.w, h: rects[entrance.room]!.h } : { x: 0, y: 0, w: 0, h: 0 },
     key: keyed,
+    ...(inCorridors.length > 0 ? { corridorTraps: inCorridors } : {}),
   };
   return {
     plan,

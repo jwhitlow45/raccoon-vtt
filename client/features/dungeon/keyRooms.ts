@@ -1,5 +1,5 @@
 import type { Board, Doorway, Link, Side } from "./layout.ts";
-import type { KeyDoor, KeyRoom } from "./plan.ts";
+import type { KeyCorridorTrap, KeyDoor, KeyRoom } from "./plan.ts";
 import type { Stream } from "./random.ts";
 
 /*
@@ -108,4 +108,41 @@ export function keyRooms(rng: Stream, input: KeyInputs): KeyRoom[] {
     if (input.cistern(i)) room.cistern = true;
     return room;
   });
+}
+
+/**
+ * The traps no room holds, which stand in the corridors (Collapsing Roof,
+ * Poisoned Darts, a Net), each by where it lies: between the two rooms the
+ * corridor joins (by their numbers, the lower first), between the way in
+ * and the map's edge on the stub, or in a dead end. One on no built way
+ * reads null. Ordered by the rooms they lie between, then by name, so the
+ * line never depends on the order the generator picked them in (LP33-B-KEY-1).
+ * `squares` are the cells each trap lies on, as the picker holds them.
+ */
+export function corridorTraps(input: {
+  traps: readonly { name: string; squares: readonly number[]; inRoom: boolean }[];
+  links: readonly Link[];
+  paths: readonly (readonly number[] | null)[];
+  stubPath: readonly number[] | null;
+  entrance: number;
+  spurPaths: readonly (readonly number[])[];
+  numbers: ReadonlyMap<number, number>;
+}): KeyCorridorTrap[] {
+  const where = (squares: readonly number[]): KeyCorridorTrap["between"] => {
+    const on = (path: readonly number[] | null) => path !== null && squares.some((k) => path.includes(k));
+    const li = input.paths.findIndex(on);
+    if (li >= 0) {
+      const link = input.links[li]!;
+      const a = input.numbers.get(link.a);
+      const b = input.numbers.get(link.b);
+      return a === undefined || b === undefined ? null : [Math.min(a, b), Math.max(a, b)];
+    }
+    if (on(input.stubPath)) return [input.numbers.get(input.entrance) ?? 1, "edge"];
+    return input.spurPaths.some(on) ? "deadEnd" : null;
+  };
+  const rank = (t: KeyCorridorTrap) => (Array.isArray(t.between) ? t.between[0] * 1000 + (t.between[1] === "edge" ? 999 : t.between[1]) : t.between === "deadEnd" ? 1_000_000 : 2_000_000);
+  return input.traps
+    .filter((t) => !t.inRoom)
+    .map((t): KeyCorridorTrap => ({ name: t.name, between: where(t.squares) }))
+    .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 }

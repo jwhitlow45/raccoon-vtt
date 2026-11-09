@@ -4,7 +4,7 @@ import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { TRINKETS } from "#shared/srd/trinkets.ts";
 import { dressedRooms, handKey, HAND_SETTINGS, hundredPlan, twoRooms } from "./handPlans.ts";
-import { KEY_FOLDER, keyIntro, keyOps, keyTitle, madeWith, roomLine } from "./keyPage.ts";
+import { corridorLine, KEY_FOLDER, keyIntro, keyOps, keyTitle, madeWith, roomLine } from "./keyPage.ts";
 import { PAGE_PLACEHOLDER, SCENE_PLACEHOLDER } from "./ops.ts";
 import type { DungeonPlan, KeyRoom } from "./plan.ts";
 import { DEFAULT_SETTINGS, type DungeonSettings } from "./settings.ts";
@@ -154,4 +154,24 @@ test("DG2B: forty rooms with the longest trinkets make 41 blocks well under a pa
   assert.ok(clientOpSchema.safeParse(page).success);
   const seed = "1K7QH2MXA9F3TWQ5";
   assert.ok(!JSON.stringify(ops).includes(seed) && !/seed/i.test(JSON.stringify(ops)));
+});
+
+test("LP33-B-KEY-1: a closing part lists the traps in the corridors by the rooms they lie between, and is left out when there are none", () => {
+  const plan: DungeonPlan = { ...twoRooms(), theme: "crypt", w: 50, h: 50 };
+  plan.key = dressedRooms().key;
+  assert.equal(corridorLine(plan), null);
+  plan.corridorTraps = [
+    { name: "Net", between: [1, 2] },
+    { name: "Poisoned Darts", between: [1, "edge"] },
+    { name: "Rolling Stone", between: "deadEnd" },
+    { name: "Collapsing Roof", between: null },
+  ];
+  assert.equal(corridorLine(plan), "**In the corridors.** Net between 1 and 2, Poisoned Darts between 1 and the stairs at the map's edge, Rolling Stone in a dead end, Collapsing Roof.");
+  const ops = keyOps(plan, { ...HAND_SETTINGS }, { name: "Crypt", color: "#fff", feetPerCell: 5 }, SCENE_PLACEHOLDER);
+  const page = ops[0] as Extract<(typeof ops)[number], { t: "journal.create" }>;
+  assert.equal(page.page.blocks.at(-1)!.text, corridorLine(plan));
+  assert.equal(page.page.blocks.length, 1 + plan.key!.length + 1, "the intro, each room, then the corridors");
+  delete plan.corridorTraps;
+  const bare = keyOps(plan, { ...HAND_SETTINGS }, { name: "Crypt", color: "#fff", feetPerCell: 5 }, SCENE_PLACEHOLDER)[0] as typeof page;
+  assert.equal(bare.page.blocks.length, 1 + plan.key!.length);
 });
