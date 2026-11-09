@@ -9891,9 +9891,9 @@ export function musicPlayerAlignmentTests(): void {
           await ops.send({ t: "music.play", run: runId, playlistId: night.playlist, order: night.order, index: 2, repeat: "all", fade: 5 });
           for (const soundId of lib.loops) await ops.send({ t: "loop.start", id: randomUUID(), soundId, volume: 70 });
           await waitFor("music and two loops playing", () => (dmSocket.state?.playing?.music?.run === runId && Object.keys(dmSocket.state.playing.loops ?? {}).length === lib.loops.length ? true : null));
-          // At 100% the chip has room from 700 px and on an upright phone. At 130% a bar holding the room's fight may give it way into the DM menu, as at the smallest bars (SL-C, design-v1-qol.md 4, The give-way, step 6).
+          // At 100% the chip has room from 700 px. On an upright phone the speaker beside it takes its room, since a phone's chip leaves before the gaps tighten (docs/design/design-v1-volume.md 3), and at 130% a bar holding the room's fight may give it way into the DM menu, as at the smallest bars (SL-C, design-v1-qol.md 4, The give-way, step 6).
           const shown = await showsWithin(chip, 5_000);
-          if (!shown && at.scale === 1 && (at.size.width >= 700 || at.size.width === 390)) sweep.lines.push(`${sweep.at} qe-now-chip: no Now playing chip while music plays`);
+          if (!shown && at.scale === 1 && at.size.width >= 700) sweep.lines.push(`${sweep.at} qe-now-chip: no Now playing chip while music plays`);
           if (shown) {
             await both(sweep, page, "qe-now-chip", chip);
             await both(sweep, page, "qe-now-bar", barRow(page));
@@ -10172,7 +10172,8 @@ async function qolRestScreens(sweep: Sweep, page: Page, at: { size: Size; scale:
   await sweep.measure(page, "qe-chip-dm", barChip(page, "dm"));
   // Search stands after the chips: its field, its icon where the row is short, and the Panels list's field once even that has no room (design-v1-qol.md 4, The top bar's order). It never leaves a bar 900 px wide, and an upright phone at 100% still has room for its icon (S3).
   const search = page.locator('header[data-rvtt-topbar] [data-search-open="bar"]');
-  const iconAt390 = at.size.width === 390 && at.scale === 1;
+  // The speaker's 44 px came after S3: with it on the bar, a phone's Search gives way to the Panels list's field first, as the give-way's order has it (docs/design/design-v1-volume.md 3).
+  const iconAt390 = at.size.width === 390 && at.scale === 1 && !(await visible(page.locator("header[data-rvtt-topbar] [data-volume-button]")));
   if (await visible(search)) {
     await sweep.measure(page, "qe-search-bar", search);
     if (iconAt390 && (await search.getAttribute("data-search-form")) !== "icon") sweep.lines.push(`${sweep.at} qe-search-bar: Search is not its icon on an upright phone at 100%`);
