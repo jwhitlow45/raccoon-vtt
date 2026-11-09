@@ -58,6 +58,26 @@ describe("where the players stand with a floor", () => {
     });
     assert.equal(playersAt(state, state.scenes.cave2!), "not");
   });
+
+  test("a party member on a floor of a scene the DM prepares in private is no player there, while Hide and Remove still wait for them, as the server does", () => {
+    const state = tower((s) => {
+      s.scenes.cave = scene("cave", { name: "Cave", floor: { of: "cave", level: 0, name: "Ground floor" } });
+      s.scenes.cave2 = scene("cave2", { name: "Cave", floor: { of: "cave", level: 1, name: "Deep", height: 10 } });
+      s.tokens.t1 = party("t1", "cave2");
+    });
+    assert.equal(playersAt(state, state.scenes.cave2!), "not");
+    assert.equal(hideRefusal(state, state.scenes.cave2!), "Players are on Deep.");
+    assert.equal(removeRefusal(state, state.scenes.cave2!), "Move the party off Deep first.");
+  });
+
+  test("a floor reached before stays reached while the players are on another scene", () => {
+    const state = tower((s) => {
+      s.scenes.cave = scene("cave", { name: "Cave", floor: { of: "cave", level: 0, name: "Ground floor" } });
+      s.scenes.cave2 = scene("cave2", { name: "Cave", floor: { of: "cave", level: 1, name: "Deep", height: 10 } });
+      s.openFloors = { cave2: { sceneId: "cave2", rev: 0 } };
+    });
+    assert.equal(playersAt(state, state.scenes.cave2!), "reached");
+  });
 });
 
 describe("the group's lines", () => {

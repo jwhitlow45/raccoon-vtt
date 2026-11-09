@@ -1,7 +1,8 @@
 import type { RoomState, Scene } from "#shared/model.ts";
 import { FLOOR_HEIGHT } from "#shared/protocol.ts";
 import { LIMITS } from "#shared/limits.ts";
-import { FLOOR_WORDS, floorsOf, openFloor, startFloor, unhiddenPartyMember } from "#shared/rules/floors.ts";
+import { FLOOR_WORDS, floorsOf, onPlayersScene, startFloor, unhiddenPartyMember } from "#shared/rules/floors.ts";
+import { ownEntry } from "#shared/records.ts";
 
 /*
  * The words and rules of the Floors group and a floor's page
@@ -16,22 +17,30 @@ type View = Pick<RoomState, "scenes" | "tokens" | "meta" | "characters" | "openF
 export type PlayersAt = "here" | "reached" | "not";
 
 /**
- * Whether the players are on the floor: it is the start floor, or a party
- * member the DM has not hidden stands on it (the two things D-261102-482
- * lets open a floor by themselves).
+ * Whether the players are on the floor: it is the start floor, or a floor
+ * of the players' scene where a party member the DM has not hidden stands
+ * (the two things D-261102-482 lets open a floor by themselves). A party
+ * member on a floor of a scene the DM prepares in private opens nothing,
+ * so the players are not there.
  */
 export function playersHere(view: View, floor: Pick<Scene, "id">): boolean {
   if (startFloor(view) === floor.id) return true;
+  return onPlayersScene(view, floor.id) && partyOn(view, floor);
+}
+
+/** Whether a party member the DM has not hidden stands on the floor, on any scene, as the server's Hide and Remove refusals read it (shared/permissions.ts partyOn). */
+function partyOn(view: View, floor: Pick<Scene, "id">): boolean {
   return Object.values(view.tokens).some((t) => t !== undefined && t.sceneId === floor.id && unhiddenPartyMember(view as RoomState, t));
 }
 
 export function playersAt(view: View, floor: Pick<Scene, "id">): PlayersAt {
   if (playersHere(view, floor)) return "here";
-  return openFloor(view as RoomState, floor.id) ? "reached" : "not";
+  // By its opened mark, which stays while the players are on another scene, so the floor is open again when they come back and Hide from players still closes it.
+  return ownEntry(view.openFloors, floor.id) !== undefined ? "reached" : "not";
 }
 
 /** A floor row's mark. "Reached" stands for a floor the players were on or the DM showed: one opened mark says both. */
-export const FLOOR_MARKS: Readonly<Record<PlayersAt, string>> = { here: "Players here", reached: "Reached", not: "Not reached yet" };
+export const FLOOR_MARKS = { here: "Players here", reached: "Reached", not: "Not reached yet" } as const satisfies Readonly<Record<PlayersAt, string>>;
 
 /** The floors of a scene, top first, as the group lists them. */
 export function floorsTopFirst(view: Pick<View, "scenes">, sceneId: string): Scene[] {
@@ -62,7 +71,7 @@ export const PLAYERS_LINES: Readonly<Record<PlayersAt, string>> = {
 /** Why Hide from players is off, or null. Hide closes a floor opened by mistake, and never one the players stand on. */
 export function hideRefusal(view: View, floor: Scene): string | null {
   if (startFloor(view) === floor.id) return "The players start here.";
-  if (playersHere(view, floor)) return `Players are on ${floor.floor?.name ?? floor.name}.`;
+  if (partyOn(view, floor)) return `Players are on ${floor.floor?.name ?? floor.name}.`;
   return null;
 }
 
@@ -71,7 +80,7 @@ export function removeRefusal(view: View, floor: Scene): string | null {
   const name = floor.floor?.name ?? floor.name;
   if (floor.floor?.of === floor.id) return `${floor.name} was made with this floor. Delete ${floor.name} from its menu to remove every floor.`;
   if (startFloor(view) === floor.id) return "The players start here. Move the players to another floor first.";
-  if (playersHere(view, floor)) return `Move the party off ${name} first.`;
+  if (partyOn(view, floor)) return `Move the party off ${name} first.`;
   return null;
 }
 

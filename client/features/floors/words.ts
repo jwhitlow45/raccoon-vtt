@@ -2,6 +2,7 @@ import type { RoomState, Scene, Token } from "#shared/model.ts";
 import { isPartyMember } from "#shared/project.ts";
 import { displayName } from "../../lib/scene.ts";
 import { initials } from "../../lib/tokenView.ts";
+import { FLOOR_MARKS, playersAt } from "../scenes/floorWords.ts";
 import { ownsToken } from "../tokens/access.ts";
 import { sameScene, unhiddenPartyMember } from "#shared/rules/floors.ts";
 import { ownEntry } from "#shared/records.ts";
@@ -89,16 +90,15 @@ export function floorTip(keys: { below: string; above: string } | null): string 
 }
 
 /**
- * The DM's mark of a floor in the Floors menu (7.2): "Players here" on the
- * start floor and where an unhidden party member stands, "Reached" on a
- * floor with an opened mark, "Not reached yet" on the rest. A mark records
- * only that a floor is open, whether players reached it or the DM showed
- * it, so both read "Reached".
+ * The DM's mark of a floor in the Floors menu (7.2), the Floors group's own
+ * (scenes/floorWords.ts playersAt), so the menu and the settings never
+ * disagree: "Players here" on the start floor and where an unhidden party
+ * member stands on the players' scene, "Reached" on another open floor,
+ * "Not reached yet" on the rest. A mark records only that a floor is open,
+ * whether players reached it or the DM showed it, so both read "Reached".
  */
-export function floorStatus(state: Pick<RoomState, "meta" | "tokens" | "scenes" | "openFloors" | "characters">, floorId: string): "Players here" | "Reached" | "Not reached yet" {
-  if (state.meta.playerSceneId === floorId) return "Players here";
-  if (Object.values(state.tokens).some((t) => t.sceneId === floorId && unhiddenPartyMember(state as RoomState, t))) return "Players here";
-  return ownEntry(state.openFloors, floorId) !== undefined ? "Reached" : "Not reached yet";
+export function floorStatus(state: Pick<RoomState, "meta" | "tokens" | "scenes" | "openFloors" | "characters">, floorId: string): (typeof FLOOR_MARKS)[keyof typeof FLOOR_MARKS] {
+  return FLOOR_MARKS[playersAt(state, { id: floorId })];
 }
 
 /** The Viewing notice's button: "Back to Thorn", or the start floor's name where the player has no creature there. */

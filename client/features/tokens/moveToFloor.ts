@@ -1,6 +1,6 @@
 import type { RoomState, Scene, Token } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
-import { floorsOf, openFloor, unhiddenPartyMember } from "#shared/rules/floors.ts";
+import { floorsOf, onPlayersScene, openFloor, unhiddenPartyMember } from "#shared/rules/floors.ts";
 import { footprintSize, occupiedHexes } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { hexInScene } from "#shared/rules/hex.ts";
@@ -72,7 +72,8 @@ export function floorChoices(view: View, named: readonly Token[]): FloorChoice[]
     if (named.every((t) => t.sceneId === floor.id)) continue;
     const name = floor.floor?.name ?? floor.name;
     const outside = moved.some((t) => !fitsOn(floor, t));
-    const warns = party.length > 0 && !openFloor(view as RoomState, floor.id);
+    // Only the players' scene opens by a party member's arrival (markOpened), so a move on a scene the DM prepares in private opens nothing and warns of nothing.
+    const warns = party.length > 0 && onPlayersScene(view, floor.id) && !openFloor(view as RoomState, floor.id);
     choices.push({
       floor,
       name,

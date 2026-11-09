@@ -54,6 +54,9 @@ describe("the floors' own words", () => {
     assert.equal(floorStatus(up, UPPER), "Players here");
     const hidden = tower({ tokens: { ...tower().tokens, bree: { ...tower().tokens.bree!, sceneId: UPPER, visibility: "dm" } } });
     assert.equal(floorStatus(hidden, UPPER), "Not reached yet", "a party member the DM hid opens nothing");
+    const elsewhere = tower({ meta: { ...tower().meta, playerSceneId: CAVE }, tokens: { ...tower().tokens, bree: { ...tower().tokens.bree!, sceneId: UPPER } } });
+    assert.equal(floorStatus(elsewhere, UPPER), "Not reached yet", "on a scene the players are not on, a party member there is no player there");
+    assert.equal(floorStatus(elsewhere, TOWER), "Not reached yet");
     const dm = { memberId: "dm1", role: "dm" as const };
     assert.deepEqual(floorMarks(state, state.scenes[TOWER]!, dm, null), ["Players here", "Br Th"]);
     assert.deepEqual(floorMarks(state, state.scenes[UPPER]!, dm, null), ["Not reached yet"]);

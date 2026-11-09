@@ -74,6 +74,11 @@ describe("the floors a move can go to", () => {
     assert.deepEqual(floorChoices(goblin, [goblin.tokens.gob!]).map((c) => c.warning), [null, null]);
     const hidden = tower((s) => void (s.tokens.thorn = thorn({ visibility: "dm" })));
     assert.deepEqual(floorChoices(hidden, [hidden.tokens.thorn!]).map((c) => c.warning), [null, null]);
+    const prepared = tower((s) => {
+      s.tokens.thorn = thorn();
+      s.meta = { ...s.meta, playerSceneId: "elsewhere" };
+    });
+    assert.deepEqual(floorChoices(prepared, [prepared.tokens.thorn!]).map((c) => c.warning), [null, null], "a scene the players are not on opens nothing");
   });
 
   test("a mount's rider is part of the move: the warning names the rider and the mount that carries them", () => {
