@@ -500,7 +500,7 @@ describe("synced music and sound", { concurrency: false }, () => {
     }
   });
 
-  test("sn-6. on a touch phone with an iPhone's autoplay rules: the ask, Play here plays, Not on this device stays quiet, and opened again the sound waits for a tap", async () => {
+  test("sn-6. on a touch phone with an iPhone's autoplay rules: the ask, Play here plays, Stay muted stays quiet, and opened again the sound waits for a tap", async () => {
     const phone = async () => {
       const c = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
       await c.addInitScript(SOUND_TEST_FLAG);
@@ -523,7 +523,7 @@ describe("synced music and sound", { concurrency: false }, () => {
       await askOf(bo).getByRole("button", { name: "Play here" }).tap();
       await soundSays(bo, /^playing music/, 6_000);
       await inStep(bo, START_MS, 6_000);
-      await askOf(cy).getByRole("button", { name: "Not on this device" }).tap();
+      await askOf(cy).getByRole("button", { name: "Stay muted" }).tap();
       await askOf(cy).waitFor({ state: "detached" });
       await sleep(1_500);
       const quiet = await soundProbe(cy);

@@ -3318,10 +3318,11 @@ function SidePane(props: {
 /**
  * The ask (docs/design/design-v1-music.md 4.4): on a player's device with
  * no choice, the first time there is something to hear. Play here's own
- * click turns Room sound on and unlocks the audio inside that click.
- * Unanswered, it passes after a while and is not asked again in this page
- * load. Inside a very short sheet while one shows (pages/modalSlot.tsx),
- * with the room's other lasting notices.
+ * click unmutes and unlocks the audio inside that click, and Stay muted
+ * keeps the device muted (docs/design/design-v1-volume.md 5), now that the
+ * top bar's speaker says it is. Unanswered, it passes after a while and is
+ * not asked again in this page load. Inside a very short sheet while one
+ * shows (pages/modalSlot.tsx), with the room's other lasting notices.
  */
 function SoundAskNotice() {
   const ask = useSoundAsk();
@@ -3337,7 +3338,7 @@ function SoundAskNotice() {
             Play here
           </Button>
           <Button size="sm" onClick={ask.notHere}>
-            Not on this device
+            Stay muted
           </Button>
         </span>
       </div>
