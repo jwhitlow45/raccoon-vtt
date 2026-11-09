@@ -13206,7 +13206,7 @@
        "disarm": {
         "text": "Wedge an Iron Spike under the pressure plate, or deface the glyph with a sharp tool."
        },
-       "note": "Place the 30-foot cone from the statue. It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
+       "note": "It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
        "preset": "fire-casting-statue",
        "on": [
         "enter",
@@ -13340,7 +13340,7 @@
        "disarm": {
         "text": "Wedge an Iron Spike under the pressure plate, or deface the glyph with a sharp tool."
        },
-       "note": "Place the 30-foot cone from the statue. It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
+       "note": "It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
        "preset": "fire-casting-statue",
        "on": [
         "enter",
@@ -13532,7 +13532,7 @@
        "disarm": {
         "text": "Wedge an Iron Spike under the pressure plate, or deface the glyph with a sharp tool."
        },
-       "note": "Place the 30-foot cone from the statue. It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
+       "note": "It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
        "preset": "fire-casting-statue",
        "on": [
         "enter",
@@ -22844,7 +22844,7 @@
        "disarm": {
         "text": "Wedge an Iron Spike under the pressure plate, or deface the glyph with a sharp tool."
        },
-       "note": "Place the 60-foot cone from the statue. It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
+       "note": "It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
        "preset": "fire-casting-statue",
        "on": [
         "enter",
@@ -32006,7 +32006,7 @@
        "disarm": {
         "text": "Wedge an Iron Spike under the pressure plate, or deface the glyph with a sharp tool."
        },
-       "note": "Place the 60-foot cone from the statue. It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
+       "note": "It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
        "preset": "fire-casting-statue",
        "on": [
         "enter",
@@ -32313,7 +32313,7 @@
        "disarm": {
         "text": "Wedge an Iron Spike under the pressure plate, or deface the glyph with a sharp tool."
        },
-       "note": "Place the 60-foot cone from the statue. It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
+       "note": "It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
        "preset": "fire-casting-statue",
        "on": [
         "enter",
@@ -32620,7 +32620,7 @@
        "disarm": {
         "text": "Wedge an Iron Spike under the pressure plate, or deface the glyph with a sharp tool."
        },
-       "note": "Place the 60-foot cone from the statue. It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
+       "note": "It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
        "preset": "fire-casting-statue",
        "on": [
         "enter",
@@ -32948,7 +32948,7 @@
        "disarm": {
         "text": "Wedge an Iron Spike under the pressure plate, or deface the glyph with a sharp tool."
        },
-       "note": "Place the 60-foot cone from the statue. It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
+       "note": "It goes off when a creature moves onto the plate for the first time on a turn, or starts its turn there. Detect Magic shows an aura of Evocation around the statue, and a DC 15 Intelligence (Arcana) check reads the glyph as \"fire\".",
        "preset": "fire-casting-statue",
        "on": [
         "enter",

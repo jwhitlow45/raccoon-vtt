@@ -152,6 +152,9 @@ export function dressOps(plan: DungeonPlan, sceneId: string): ClientOp[] {
   return ops;
 }
 
+/** The sentence the Fire-Casting Statue's preset opens its note with (shared/srd/traps.ts). */
+const PLACE_THE_CONE = /^Place the \d+-foot cone from the statue\. /;
+
 /**
  * One planned trap as the Trap tool makes it (traps/rules.ts
  * `newTrapInput`), then what the generator set: its squares in place of
@@ -169,6 +172,8 @@ export function trapInputOf(trap: PlanTrap, id: string, chunks: Readonly<Record<
     if (typeof hits !== "object" || !("area" in hits)) throw new Error(`${trap.preset} has no cone to place`);
     const [x, y] = trap.cone.origin;
     rig.hits = { area: { ...hits.area, origin: { x, y, z: groundAt(chunks, sceneId, Math.floor(x), Math.floor(y)) }, yaw: trap.cone.yaw } };
+    // The preset's note tells the DM to place the cone, which the generator just did.
+    if (rig.note) rig.note = rig.note.replace(PLACE_THE_CONE, "");
   }
   if (trap.stone !== undefined) rig.actions = [...rig.actions, { show: { tokenId: stonePlaceholder(trap.stone) } }];
   return { ...input, rig };

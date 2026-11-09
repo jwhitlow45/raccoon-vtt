@@ -8,6 +8,8 @@ import { dialogScene, dressedRooms, hundredOps, hundredPlan, twoRooms, widestDoo
 import { buildOps, dressOps, MAX_OPS, PAGE_PLACEHOLDER, SCENE_PLACEHOLDER, stonePlaceholder, trapInputOf, trapOps, trapPlaceholder, withIds } from "./ops.ts";
 import { landAll, scratchRoom, summarize } from "./scratch.ts";
 import { OP_BYTES } from "../uvtt/batch.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
+import { newTrapInput } from "../traps/rules.ts";
 
 /** The socket's frame bound (server/rooms/ws.ts), with room for the op message round an op. */
 const FRAME_BYTES = 64 * 1024;
@@ -277,6 +279,10 @@ test("DG2B: a trap's planned hits replace the zone's squares, and a cone takes t
   assert.ok(typeof hits === "object" && "area" in hits);
   assert.equal(groundAt(chunks, SCENE_PLACEHOLDER, 20, 8), 5, "the statue stands in the raised room");
   assert.deepEqual({ origin: hits.area.origin, yaw: hits.area.yaw, shape: hits.area.shape, size: hits.area.size }, { origin: { x: 20.5, y: 8.5, z: 5 }, yaw: 225, shape: "cone", size: 30 });
+  // The generator placed the cone, so the preset's "Place the cone" advice goes and the rest of the note stays (LP33-B polish note).
+  assert.doesNotMatch(statue.rig.note ?? "", /Place the/);
+  assert.match(statue.rig.note ?? "", /^It goes off when a creature moves onto the plate/);
+  assert.match(newTrapInput({ grid: SQUARES, id: "t", sceneId: SCENE_PLACEHOLDER, start: "fire-casting-statue", band: "5-10", zone: plan.traps[4]!.zone, chunks }).rig.note ?? "", /^Place the 30-foot cone from the statue\./, "the Trap tool's preset keeps it");
   const plain = trapInputOf({ preset: "hidden-pit", zone: { cells: [{ x: 17, y: 4, w: 2, h: 2 }] } }, "t", chunks, "1-4", SCENE_PLACEHOLDER);
   assert.equal(plain.rig.hits, "trigger", "a trap without planned hits keeps the preset's");
   assert.deepEqual(plain.rig.actions, []);
