@@ -67,6 +67,12 @@ describe("removing, deleting and hiding floors in 7.1's words", () => {
     assert.equal(decide(state, { t: "floor.open", sceneId: "a", open: false }), "ok");
     assert.equal(decide(state, { t: "floor.open", sceneId: "u", open: true }), "ok", "Show is never refused");
   });
+
+  test("on a scene the players are not on, Hide goes with a party member there, and Remove still waits for them", () => {
+    const state = tower({ meta: { ...room().meta, playerSceneId: "s2" }, tokens: { thorn: thornOn("u") } });
+    assert.equal(decide(state, { t: "floor.open", sceneId: "u", open: false }), "ok", "nothing opens there, so Hide guards nothing");
+    assert.equal(decide(state, { t: "scene.delete", sceneId: "u" }), `invalid: ${FLOOR_REFUSALS.removeParty("Upper floor")}`, "a removal would delete them");
+  });
 });
 
 describe("a player's access follows the floors they hold (8.3)", () => {

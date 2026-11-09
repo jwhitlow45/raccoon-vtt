@@ -28,7 +28,7 @@ export function playersHere(view: View, floor: Pick<Scene, "id">): boolean {
   return onPlayersScene(view, floor.id) && partyOn(view, floor);
 }
 
-/** Whether a party member the DM has not hidden stands on the floor, on any scene, as the server's Hide and Remove refusals read it (shared/permissions.ts partyOn). */
+/** Whether a party member the DM has not hidden stands on the floor, on any scene, as the server's Remove refusal reads it (shared/permissions.ts partyOn). */
 function partyOn(view: View, floor: Pick<Scene, "id">): boolean {
   return Object.values(view.tokens).some((t) => t !== undefined && t.sceneId === floor.id && unhiddenPartyMember(view as RoomState, t));
 }
@@ -68,10 +68,13 @@ export const PLAYERS_LINES: Readonly<Record<PlayersAt, string>> = {
   not: "Players have not reached this floor.",
 };
 
-/** Why Hide from players is off, or null. Hide closes a floor opened by mistake, and never one the players stand on. */
+/**
+ * Why Hide from players is off, or null. Hide closes a floor opened by mistake, and never one the players stand on,
+ * read as the floor's mark reads it: on a scene the DM prepares in private a party member opens nothing, so Hide goes.
+ */
 export function hideRefusal(view: View, floor: Scene): string | null {
   if (startFloor(view) === floor.id) return "The players start here.";
-  if (partyOn(view, floor)) return `Players are on ${floor.floor?.name ?? floor.name}.`;
+  if (playersHere(view, floor)) return `Players are on ${floor.floor?.name ?? floor.name}.`;
   return null;
 }
 

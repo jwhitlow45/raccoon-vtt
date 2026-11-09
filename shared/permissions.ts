@@ -18,7 +18,7 @@ import { groundAt } from "./rules/heights.ts";
 import { convexHull } from "./rules/aoe.ts";
 import type { Point } from "./rules/geom.ts";
 import { convexLive, fogClassOf, groundOf, partLive, type Ground } from "./rules/held.ts";
-import { deleteSet, heldFloors, startFloor, unhiddenPartyMember } from "./rules/floors.ts";
+import { deleteSet, heldFloors, onPlayersScene, startFloor, unhiddenPartyMember } from "./rules/floors.ts";
 import {
   LEDGE_IN_THE_WAY,
   WALL_IN_THE_WAY,
@@ -880,12 +880,16 @@ function deleteCheck(c: Check, sceneId: string): Decision {
   return OK;
 }
 
-/** Hide from players (7.1): never the start floor, nor a floor an unhidden party member stands on, which stays open anyway. */
+/**
+ * Hide from players (7.1): never the start floor, nor a floor of the players' scene an unhidden party member stands
+ * on, which stays open anyway. On a scene the DM prepares in private a party member opens nothing (D-261108-357), so
+ * there Hide guards nothing and goes.
+ */
 function hideCheck(c: Check, sceneId: string): Decision {
   const scene = ownEntry(c.state.scenes, sceneId);
   if (!scene?.floor) return OK;
   if (sceneId === startFloor(c.state)) return refuse("invalid", FLOOR_REFUSALS.hideStart);
-  if (partyOn(c.state, sceneId)) return refuse("invalid", FLOOR_REFUSALS.hideParty(scene.floor.name));
+  if (onPlayersScene(c.state, sceneId) && partyOn(c.state, sceneId)) return refuse("invalid", FLOOR_REFUSALS.hideParty(scene.floor.name));
   return OK;
 }
 
