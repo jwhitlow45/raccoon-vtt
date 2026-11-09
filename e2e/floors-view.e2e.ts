@@ -19,14 +19,16 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * - flrv-0: the room, and the top bars before Tower has floors.
  * - flrv-1: Tower's floors. Bree's page was sent nothing of Upper or Attic.
  * - flrv-2: the DM's [ and ] step through the floors and say when there is
- *   none, and a switch sends nothing.
+ *   none, and a switch sends nothing. On Upper, the party panel names
+ *   Ground floor for the party, in line.
  * - flrv-3: the DM's Floors menu: the rows top first with their marks, a
  *   pick by a key or a click that closes it, and focus back on Floor.
  * - flrv-4: the DM moves Thorn to Upper. Ana's phone follows and says so,
  *   and Bree's desk stays on Ground.
  * - flrv-5: Ana picks Ground: the Viewing notice, its Back to Thorn, and
  *   Floor, its menu and the notice in line at 1440 x 900, 390 x 844 and
- *   320 x 568 at 100% and 130%.
+ *   320 x 568 at 100% and 130%. Back puts focus on Floor, or on the map
+ *   where Floor folded into the Menu panel.
  * - flrv-6: Thorn's turn while the DM shows Ground: the turn chip's name
  *   ends "on Upper floor", and Thorn's tracker row names Upper floor and
  *   shows it on a tap.
@@ -306,12 +308,17 @@ describe("Which floor each device shows on a scene of several floors", { concurr
     for (const secret of [run.upper, run.attic, run.upperMap, "Upper floor", "Attic"]) assert.ok(!seen.includes(secret), `a frame Bree received holds ${secret}`);
   });
 
-  test("flrv-2. the DM's ] and [ step through the floors with nothing sent, and say there is no floor above Attic or below Ground", async () => {
+  test("flrv-2. the DM's ] and [ step through the floors with nothing sent, and say there is no floor above Attic or below Ground, and the party panel names the party's floor", async () => {
     const from = dmSocket.sent.length;
     await keyOn(dm, "]");
     await showsFloor(dm, "Upper floor");
     await dm.waitForTimeout(500);
     await shots.take(dm, "flrv-2-dm-upper-floor");
+    // The party panel names the floor each member stands on rather than "Not on this scene" (7.6), in line.
+    const party = dm.locator('section[aria-label="Party"]').first();
+    for (const name of ["Thorn", "Bree"]) await party.getByRole("button", { name: new RegExp(`^${name}[:,] .*on Ground floor\\. Show it on the map$`) }).waitFor();
+    assert.doesNotMatch(await party.innerText(), /Not on this scene/);
+    assert.deepEqual(alignmentLines(await measureAlignment(party), "the party on Upper floor"), [], "the party panel out of line");
     await keyOn(dm, "]");
     await showsFloor(dm, "Attic");
     await keyOn(dm, "]");
@@ -429,6 +436,7 @@ describe("Which floor each device shows on a scene of several floors", { concurr
     assert.match(await row.innerText(), /Upper floor/, "Thorn's row names his floor");
     assert.doesNotMatch(await dm.locator("[data-entry-row]").filter({ has: dm.locator("[data-row-name]", { hasText: /^Bree$/ }) }).innerText(), /Ground floor/, "Bree's row is on the floor shown");
     await shots.take(dm, "flrv-6-dm-tracker-floor-tag");
+    assert.deepEqual(alignmentLines(await measureAlignment(row), "Thorn's row on Upper floor"), [], "the tracker row out of line");
     await row.locator("[data-row-button]").click();
     await showsFloor(dm, "Upper floor", "a tap on Thorn's row shows Upper floor");
     const menu = await openFloors(dm);
