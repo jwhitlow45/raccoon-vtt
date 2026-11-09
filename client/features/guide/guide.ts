@@ -20,7 +20,7 @@ export function guideHref(section?: string): string {
 const DEFAULT_SIZE = { width: 1280, height: 800 };
 const PHONE_SIZE = { width: 390, height: 844 };
 const TABLE_DISPLAY_SIZE = { width: 1280, height: 491 };
-const PHONE_SHOTS = new Set(["screen-phone.webp", "reveal-blackout.webp", "phone-strip.webp", "discovery-player.webp", "sheet-handle.webp", "ask-to-join.webp", "sheet-arrows.webp", "music-up-next.webp"]);
+const PHONE_SHOTS = new Set(["screen-phone.webp", "reveal-blackout.webp", "phone-strip.webp", "discovery-player.webp", "sheet-handle.webp", "ask-to-join.webp", "sheet-arrows.webp", "music-up-next.webp", "floors-viewing.webp"]);
 
 export function guideImageSize(fileName: string): { width: number; height: number } {
   if (fileName === "table-display.webp") return TABLE_DISPLAY_SIZE;

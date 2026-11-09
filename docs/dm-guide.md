@@ -13,6 +13,7 @@ You don't need most of the app on day one. Read the [Quick start](#quick-start),
 - [Use what helps your table](#use-what-helps-your-table)
 - Making maps
   - [Scenes](#scenes)
+  - [Several floors](#several-floors)
   - [Starter art](#starter-art)
   - [Pasting a picture](#pasting-a-picture)
   - [Lining up the grid](#lining-up-the-grid)
@@ -253,6 +254,47 @@ If you replace the map image of the scene the players are on, they see the new i
 Delete asks you to tap twice: the first tap turns the row red and reads "Tap again to delete", and tapping anywhere else cancels it. It takes the scene's tokens, drawings, build and fog with it, and a room's last scene cannot be deleted. You can't delete the scene your players are on, either, so move them somewhere else first. Until then, its Delete reads "Move the players to another scene first." An **Undo setup** or **Redo setup** that would take the scene away says the same.
 
 Feet per square and the rule for diagonals aren't scene settings: they apply to the whole room. You'll find them under **Menu**, **Room settings**, **Grid and distance**.
+
+## Several floors
+
+A tower, a keep or a cellar under an inn is one place on several levels, and a scene can hold it as several floors. Each floor has its own map, build, fog, light, weather, tokens and traps, and all of them share one place in the Scenes list, one grid and one budget of 500 tokens and 200 areas. A scene holds up to 8 floors. Reach for floors when the party splits between levels, or when a fight crosses a staircase and everyone should stay in one tracker. A party that always moves together is simpler as separate scenes.
+
+![The Floors menu open on the DM's screen, on a scene named Tower: Attic and Upper floor not reached yet, Ground floor with the players there, Upper floor checked as the floor on screen, and Floors… under the list. The party panel says On Ground floor for both characters.](dm-guide/floors-menu.webp)
+
+### Building floors
+
+**Floors** is the first group in the scene's settings, under **This scene**. It lists the floors top first, and each row says where the players stand: **Players here** on the floor they start on and on any floor an unhidden party member stands on, **Reached** on a floor they have been on or you have shown them, and **Not reached yet** on the rest. **Add a floor above** and **Add a floor below** put a new floor beside the floor on your screen. The new floor copies that floor's size, background, grid, light and what players see, and starts with no map, weather or scene sound, so you can build it from nothing. The first floor you add also names the scene's own floor **Ground floor**.
+
+![The Floors group open on the Tower: Attic, Upper floor with its Shown mark, and Ground floor with the players, then Add a floor above and Add a floor below, and Light and weather under them.](dm-guide/floors-settings.webp)
+
+Tap a floor to open its page. It sets the floor's **Floor name**, its **Height above the floor below** (5 to 50 ft in steps of 5, and 10 by default, which the stairs and ladders to come will read), **Show to players** or **Hide from players**, **Move up** and **Move down** in the stack, **Show this floor** on your own screen and **Remove floor**, which asks for a second tap and takes everything on that floor with it. Every other group in the settings, Light and weather, Fog and vision, Map and grid and the rest, sets the floor on your screen, and a line under **This scene** says which: "The groups below set Upper floor."
+
+Some buttons stay off, with the reason under them. **Remove floor** is off on the floor the scene was made with ("Delete Tower from its menu to remove every floor"), on the floor the players start on and while a party member stands on the floor. **Hide from players** is off there too, since it only exists to close a floor you opened by mistake. The scene's grid shape is fixed while it has more than one floor, so every floor stays square for square with the others.
+
+In the Scenes list the tower is one row, "Tower · 3 floors". **Delete** reads "Delete Tower and its 3 floors", **Duplicate** copies them all, and **Move players here** starts the players on the floor you are looking at.
+
+### Which floor each screen shows
+
+**Floor** appears in the top bar once a device holds more than one floor, with the name of the floor on screen. It opens the **Floors** menu, where a tap picks a floor. On a keyboard, `[` shows the floor below and `]` the floor above, and a note says so when there is none. Your screen shows the floor you pick. Each player's screen follows their character. When you move Thorn to the upper floor, Ana's screen goes with him and says "Thorn is on Upper floor. Showing Upper floor.", while Bree's stays downstairs with Bree. A player who picks another floor to look at sees **Viewing Ground floor**, with a button, **Back to Thorn**, that takes them back to their character. A table display shows the floor where most of the party stands, the lower one on a tie, or yours while it follows you.
+
+![Ana's phone while she looks at the ground floor: the notice Viewing Ground floor. with its Back to Thorn button under the top bar, and the Floor button in the bar.](dm-guide/floors-viewing.webp)
+
+In a fight, the tracker keeps every creature the players may see, whatever floor it stands on, and a creature off the floor on screen carries its floor's name as a tag. A tap on its row shows that floor. The party panel says "On Upper floor" for a party member who stands there, and the turn chip names the floor of whoever is acting when it is another one. The map's **Find my token** goes through your tokens on every floor.
+
+### Moving between floors
+
+Players cannot take stairs themselves yet, so a character who climbs asks you. Select the token and press **Move to floor…** in its action bar (**Floor…** where the row is short), or in the **More** sheet for a group. Pick the floor, and the creatures move to the same squares there, standing on that floor's ground, with what they carry, drag and their areas. It is one Undo step. A creature's **Moved** count starts again on the new floor, as it does when you move it to another scene.
+
+If the move would bring a party member onto a floor the players have not reached, the floor's row warns you first: "Players haven't reached Attic. Moving Thorn there opens it to them." Nothing asks for confirmation, so look before you tap. A floor the players have reached stays reached, and **Hide from players** closes it again if you opened it by mistake.
+
+### What players are sent
+
+A player's device receives only the floors it holds: the floors of the players' scene that the party has reached, and any floor where a creature the player owns stands. A floor the players have not reached sends nothing, not its name, its map or what stands on it, so an attic you are still building is safe to prepare while the party fights downstairs. The players see their floors numbered among themselves, so an unreached floor leaves no gap. Traps go off by themselves only on floors the players have reached.
+
+The DM menu knows floors too. **Move players here** and **Show players** name the floor on your screen, such as "Tower · Upper floor". On another floor of the players' scene, **Bring everyone here** sits beside **Move players here**. It is off while the players hold no such floor, with "Players haven't reached Attic, so their maps stay." under it. Each floor has its own fog, so the fog tools work on the floor on your screen. In the isometric view, the floor on screen shows alone, and **Export as image** names the file for it, such as `tower-upper-floor-30x20-70px.png`.
+
+> [!NOTE]
+> Sight and light stay on their floor. A party cannot see down a stairwell, and a light on one floor does not reach the floor above it.
 
 ## Starter art
 
@@ -2404,6 +2446,7 @@ These are the keys a DM uses most:
 - `Ctrl+Z` is Undo, and `Ctrl+Shift+Z` is Redo, for play and board changes (Cmd in place of Ctrl on a Mac). Inside the **Setup history** sheet the same two keys are **Undo setup** and **Redo setup**.
 - `0` fits the map to the screen, `+` zooms in and `-` zooms out. `S` hides or shows the side panel, and `O` switches to the other of two panels.
 - `I` switches between Top-down and Isometric, `Q` turns the isometric view left and `E` turns it right.
+- `[` shows the floor below and `]` the floor above, on a scene of several floors.
 - `W` turns full screen on or off, where the browser allows it.
 - Escape closes the newest pop-up, sheet or action bar.
 - `Shift+F10` or the `ContextMenu` key, on a focused roll button, opens its one-roll menu. With a mouse, right-click the button, and on a phone hold it.
