@@ -26,9 +26,10 @@ import {
   anchorOptions,
   describeDuration,
   describeEnds,
-  durationChange,
   durationInput,
   emptyForm,
+  openingForm,
+  durationEdit,
   isSpanMode,
   spanSeconds,
   type DurationForm,
@@ -335,10 +336,10 @@ function EffectDetail(props: {
   const [saveForm, setSaveForm] = useState(() => saveEndsForm(existing?.save));
   // A Ready action holds until the start of the creature's own next turn (SRD 5.2.1, "Ready").
   const [form, setForm] = useState<DurationForm>(() =>
-    key === "readied" && !existing ? { ...emptyForm(view, options), mode: "turnStart", anchorKey: SELF_KEY } : emptyForm(view, options),
+    key === "readied" && !existing ? { ...emptyForm(view, options), mode: "turnStart", anchorKey: SELF_KEY } : openingForm(existing, view, options),
   );
-  /** An existing duration is only re-resolved when the form is touched, because resolving restarts its count. */
-  const [durationTouched, setDurationTouched] = useState(!existing);
+  /** An existing duration is only re-resolved once Duration leaves Keep current duration, because resolving restarts its count. */
+  const durationTouched = form.mode !== "keep";
   const [rulesOpen, setRulesOpen] = useState(!canEdit);
   const [error, setError] = useState<string | null>(null);
   /** Under Other length of time's fields, so a screen reader reads it with them. */
@@ -395,10 +396,8 @@ function EffectDetail(props: {
         if (glyph.trim() !== (existing.glyph ?? "")) patch.glyph = glyph.trim() || null;
         if (color !== existing.color) patch.color = color;
       }
-      if (durationTouched) {
-        const change = durationChange(existing, duration);
-        if (change !== undefined) patch.duration = change;
-      }
+      const change = durationEdit(existing, form, options);
+      if (change !== undefined) patch.duration = change;
       if (dm && hidden !== (existing.hiddenFromPlayers ?? false)) patch.hiddenFromPlayers = hidden;
       if (dm && key === "readied" && triggerShown !== (existing.triggerShown ?? false)) patch.triggerShown = triggerShown;
       if (dm && !sameSave(saveValue, existing.save)) patch.save = saveValue;
@@ -545,10 +544,10 @@ function EffectDetail(props: {
             options={options}
             onChange={(f) => {
               setForm(f);
-              setDurationTouched(true);
               setSpanError(null);
             }}
             spans={!!view?.clock}
+            keep={!!existing && !!(existing.duration || existing.ends)}
             hint={durationHint({ existing, touched: durationTouched, dm, clock: view?.clock, encounter: view?.encounter })}
             spanError={spanError}
           />
@@ -571,6 +570,7 @@ function EffectDetail(props: {
 }
 
 const MODE_OPTIONS = DURATION_MODES.map((m) => ({ value: m.mode, label: m.label }));
+const KEEP_OPTION = { value: "keep" as DurationMode, label: "Keep current duration" };
 const SPAN_OPTIONS = SPAN_MODES.map((m) => ({ value: m.mode as DurationMode, label: m.label }));
 
 /** The help under Duration: what keeping a count does, and what the clock means for a time span (docs/design/design-v1-calendar-c2c3.md 3.1). */
@@ -602,12 +602,15 @@ export function DurationFields(props: {
   hint?: string;
   /** Whether the viewer's room view holds a clock, so the time spans are listed. */
   spans?: boolean;
+  /** Whether the effect has a count or an end to keep, so Keep current duration is the first choice. */
+  keep?: boolean;
   /** Why Other length of time's fields hold no time span, linked to them. */
   spanError?: string | null;
 }) {
   const { form } = props;
   const errorId = useId();
-  const modes = props.spans || isSpanMode(form.mode) ? [...MODE_OPTIONS, ...SPAN_OPTIONS] : MODE_OPTIONS;
+  const listed = props.spans || isSpanMode(form.mode) ? [...MODE_OPTIONS, ...SPAN_OPTIONS] : MODE_OPTIONS;
+  const modes = props.keep ? [KEEP_OPTION, ...listed] : listed;
   return (
     <div style={{ display: "grid", gap: theme.space(1) }}>
       <FieldRow label="Duration" stack hint={props.hint}>

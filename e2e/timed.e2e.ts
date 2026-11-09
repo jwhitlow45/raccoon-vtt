@@ -6,6 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { Effect } from "#shared/model.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
@@ -24,6 +25,8 @@ import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, s
  *   picker lists no time span, and sharing the clock gives him its end.
  * - tm-5: the table display's Show the date and time, kept by the display,
  *   going with a hidden clock.
+ * - tm-6: an effect with an end or a count of turns opens on Keep current
+ *   duration, so Save leaves it, and No duration takes it away at once.
  *
  * It needs the timed model (the reducer that ends a span and the
  * projection that hides its end), so steps tm-2 to tm-4 read as failures
@@ -337,6 +340,69 @@ describe("time spans on effects", () => {
     await ops.send({ t: "clock.update", shown: true });
     await waitFor("the end in Pat's copy", () => (effectsOf(patSocket, run.thorn).find((e) => e.key === "blessed")?.ends?.clock === run.clockId ? true : null));
     await ops.send({ t: "actor.effect.remove", target: { characterId: run.thorn }, effectId: effectsOf(dmSocket, run.thorn)[0]!.id });
+  });
+
+  test("tm-6. an effect with an end or a count of turns opens on Keep current duration: Save leaves it, and No duration takes it away at once", async () => {
+    const bree = { characterId: run.bree };
+    const span = { mode: "span", seconds: HOUR } as const;
+    const turns = { mode: "rounds", rounds: 3, of: bree } as const;
+    const add = async (key: "blessed" | "hasted", duration: typeof span | typeof turns): Promise<string> => {
+      const id = randomUUID();
+      await ops.send({ t: "actor.effect.add", target: bree, effect: { id, key, duration } });
+      await waitFor(`${key} on Bree`, () => (effectsOf(dmSocket, run.bree).some((e) => e.id === id) ? true : null));
+      return id;
+    };
+    const find = (id: string): Effect | undefined => effectsOf(dmSocket, run.bree).find((e) => e.id === id);
+    const panel = await openCard(dm, run.bree);
+    const section = conditions(panel);
+    const open = async (id: string): Promise<Locator> => {
+      await section.locator(`[data-effect-row="${id}"]`).click();
+      return section.getByRole("combobox", { name: "Duration", exact: true });
+    };
+    const save = async (): Promise<void> => {
+      await section.getByRole("button", { name: "Save", exact: true }).click();
+      await section.getByRole("button", { name: "Back", exact: true }).waitFor({ state: "detached" });
+    };
+
+    const timed = await add("blessed", span);
+    const counted = await add("hasted", turns);
+    const before = find(timed)?.ends;
+    const beforeCount = find(counted)?.duration;
+    assert.ok(before?.at !== undefined, "the span has an end on the clock");
+
+    // Saved untouched, an end and a count both stay.
+    for (const id of [timed, counted]) {
+      const duration = await open(id);
+      assert.equal(await duration.locator("option").first().innerText(), "Keep current duration");
+      assert.equal(await duration.inputValue(), "keep", "it opens on Keep current duration");
+      if (id === timed) {
+        await section.getByText("Leave as is to keep its end.", { exact: true }).waitFor();
+        for (const size of [DESK, { width: 320, height: 568 }]) {
+          await dm.setViewportSize(size);
+          const lines = alignmentLines(await measureAlignment(section), `Duration row on an effect, ${size.width} x ${size.height}`);
+          assert.deepEqual(lines, [], "the Duration select's row is aligned");
+        }
+        await dm.setViewportSize(DESK);
+        // A resize may lay the panel out again and close the form, so reopen it if it did.
+        await openCard(dm, run.bree);
+        if (!(await duration.isVisible())) await open(id);
+        await shots.take(dm, "tm-6-keep-current");
+      }
+      await save();
+    }
+    assert.deepEqual(find(timed)?.ends, before, "an untouched Save keeps the end");
+    assert.deepEqual(find(counted)?.duration, beforeCount, "an untouched Save keeps the count of turns");
+
+    // No duration straight after opening is a change, with no other choice picked first.
+    for (const id of [timed, counted]) {
+      const duration = await open(id);
+      await duration.selectOption({ label: "No duration" });
+      await save();
+      await waitFor("the end taken away", () => {
+        const e = find(id);
+        return e && !e.ends && !e.duration ? true : null;
+      });
+    }
   });
 
   test("tm-5. the table display's Show the date and time is off at first, kept, and goes with a hidden clock", async () => {

@@ -16,7 +16,8 @@ import { displayName } from "../../lib/scene.ts";
 
 /** The fixed time spans are modes of their own, named by their seconds, so the Duration select lists them in one run (docs/design/design-v1-calendar-c2c3.md 3.1). */
 export type SpanMode = "span60" | "span600" | "span3600" | "span28800" | "span86400" | "spanOther";
-export type DurationMode = "none" | "turnStart" | "turnEnd" | "rounds" | SpanMode;
+/** "keep" is only offered on an effect that already has a count or an end: it leaves that alone, so No duration is a real change away from it. */
+export type DurationMode = "keep" | "none" | "turnStart" | "turnEnd" | "rounds" | SpanMode;
 export type SpanUnit = "minutes" | "hours" | "days";
 
 export type DurationForm = {
@@ -170,6 +171,17 @@ export function defaultAnchorKey(view: View | null | undefined, options: AnchorO
 
 export function emptyForm(view: View | null | undefined, options: AnchorOption[]): DurationForm {
   return { mode: "none", rounds: 10, anchorKey: defaultAnchorKey(view, options), length: "", unit: "hours" };
+}
+
+/** The form an editor opens on: Keep current duration while the effect has a count or an end to keep. */
+export function openingForm(existing: Pick<Effect, "duration" | "ends"> | undefined, view: View | null | undefined, options: AnchorOption[]): DurationForm {
+  const form = emptyForm(view, options);
+  return existing && (existing.duration || existing.ends) ? { ...form, mode: "keep" } : form;
+}
+
+/** What an existing effect's update patch holds for `duration`: nothing while the form still says Keep, else `durationChange`. */
+export function durationEdit(existing: Pick<Effect, "duration" | "ends">, form: DurationForm, options: AnchorOption[]): DurationInput | null | undefined {
+  return form.mode === "keep" ? undefined : durationChange(existing, durationInput(form, options));
 }
 
 /**
