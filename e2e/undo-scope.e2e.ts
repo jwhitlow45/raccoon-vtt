@@ -56,12 +56,25 @@ function viewSeq(watch: SocketWatch): number {
   }
   return -1;
 }
+/** The seq of the newest snapshot, or event with changes, among frames: every DM socket gets those, unlike another device's refusal. */
+function changeSeq(frames: readonly { t?: string; seq?: number; changes?: readonly unknown[] }[]): number {
+  for (const frame of [...frames].reverse()) {
+    if (typeof frame.seq === "number" && (frame.t === "snapshot" || (frame.t === "ev" && (frame.changes?.length ?? 0) > 0))) return frame.seq;
+  }
+  return -1;
+}
+const parsed = (watch: SocketWatch) => watch.received.map((raw) => JSON.parse(raw) as { t?: string; seq?: number; changes?: unknown[] });
 async function settle(): Promise<HistoryMessage> {
   const latest = await dmWire.history();
-  const seq = Math.max(latest.seq, historyOf(dm().watch)?.seq ?? 0);
-  // DM pages see every committed change. A player's page gets no event, and so no summary, for a change it cannot see,
-  // so it has caught up once its summary covers its own newest event. The DM pages arrive first, so a player's event is not still on its way.
-  await waitFor("DM pages cover the committed change", () => clients.slice(0, 3).every((client) => (historyOf(client.watch)?.seq ?? -1) >= seq));
+  const seq = Math.max(changeSeq(dmWire.received), ...clients.slice(0, 3).map((client) => changeSeq(parsed(client.watch))));
+  // DM pages see every committed change. A refusal moves the room count too, but only its sender gets a frame for it, so
+  // a DM page has caught up once its summary covers the newest change and its own newest event. A player's page gets no
+  // event, and so no summary, for a change it cannot see, so it has caught up once its summary covers its own newest
+  // event. The DM pages arrive first, so a player's event is not still on its way.
+  await waitFor("DM pages cover the committed change", () => clients.slice(0, 3).every((client) => {
+    const covered = historyOf(client.watch)?.seq ?? -1;
+    return covered >= seq && covered >= viewSeq(client.watch);
+  }));
   await waitFor("player pages cover their own view", () => clients.slice(3).every((client) => (historyOf(client.watch)?.seq ?? -1) >= viewSeq(client.watch)));
   return latest;
 }
