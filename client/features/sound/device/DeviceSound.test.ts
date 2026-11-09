@@ -13,7 +13,7 @@ const { renderToStaticMarkup } = await import("react-dom/server");
 const { createStore } = await import("zustand/vanilla");
 const { room } = await import("#shared/testutil.ts");
 const { RoomProvider } = await import("../../../state/view.ts");
-const { DeviceSound, deviceSoundLine, mixShown, volumeIcon, volumeStep } = await import("./DeviceSound.tsx");
+const { DeviceSound, deviceSoundLine, takeOn, mixShown, volumeIcon, volumeStep } = await import("./DeviceSound.tsx");
 const { setSoundHere } = await import("../engine/store.ts");
 const { setRoomSoundChoice, setSoundMix, soundMix } = await import("../../device/settings.ts");
 const words = await import("../panel/words.ts");
@@ -59,6 +59,27 @@ describe("this device's volume", () => {
     assert.match(shown(), /\(U\)/);
     assert.doesNotMatch(shown(false), /aria-keyshortcuts/);
     assert.doesNotMatch(shown(false), /\(U\)/);
+  });
+
+  test("the kept level is taken at press, release and focus, so a click then a key press to 0 keeps the click's level", () => {
+    let stored = 70;
+    let kept: number | null = null;
+    const gestures = takeOn(() => {
+      kept = stored;
+    });
+    assert.deepEqual(Object.keys(gestures).sort(), ["onFocus", "onPointerDown", "onPointerUp"]);
+    // Unmuted at 70, a click at 40: the press keeps 70 and 40 is stored, then the release keeps 40.
+    gestures.onPointerDown();
+    stored = volumeStep(kept ?? stored, 40).volume;
+    gestures.onPointerUp();
+    assert.equal(kept, 40);
+    // Home with the slider still focused: 0 mutes keeping the 40 just set.
+    assert.deepEqual(volumeStep(kept ?? stored, 0), { muted: true, volume: 40 });
+    // A drag through 30 to 0 still keeps the level it began at, since the release comes after the 0.
+    stored = 70;
+    gestures.onPointerDown();
+    stored = volumeStep(kept ?? stored, 30).volume;
+    assert.deepEqual(volumeStep(kept ?? stored, 0), { muted: true, volume: 70 });
   });
 
   test("one status line: a player's Only DM devices play wins, then a tap, another window, a browser that can't, and nothing for muted or playing", () => {

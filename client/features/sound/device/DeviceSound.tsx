@@ -88,6 +88,11 @@ const MIX_PARTS: Readonly<Record<MixKey, { label: string; search: string }>> = {
  * device's search ids (features/device/search.ts), which one place alone
  * may carry.
  */
+/** The events that take the kept level: a gesture's start (press, focus) and its end (release). */
+export function takeOn(take: () => void) {
+  return { onPointerDown: take, onPointerUp: take, onFocus: take };
+}
+
 export function DeviceSound(props: { line: boolean; anchored?: boolean; keyHint?: boolean }) {
   const room = useRoomRoleIfAny();
   const volume = useDeviceVolume();
@@ -102,7 +107,7 @@ export function DeviceSound(props: { line: boolean; anchored?: boolean; keyHint?
   // Under a dialog every key stops, so the Volume card and sheet name no key (D-261108-438).
   const muteKey = props.keyHint === false ? null : hint;
   const id = useId();
-  // The level a drag or a key press started from, read from storage as it is taken.
+  // The level at the start of each gesture (D-261108-363). A pointer press or focus takes it before the slider moves, so a drag through 30 to 0 keeps the level it began at. A release takes it again for the key press that may follow, so a click that set a level and then a key press to 0 keeps that level, not the one before the click. A key press takes nothing: it starts from what the press, focus or release took.
   const kept = useRef<number | null>(null);
   const take = () => {
     kept.current = soundMixNow().volume;
@@ -144,8 +149,7 @@ export function DeviceSound(props: { line: boolean; anchored?: boolean; keyHint?
           step={5}
           value={shown}
           aria-valuetext={volumeNote({ muted: volume.muted, volume: shown })}
-          onPointerDown={take}
-          onFocus={take}
+          {...takeOn(take)}
           onChange={(e) => onVolume(Number(e.target.value))}
           style={RANGE}
         />
