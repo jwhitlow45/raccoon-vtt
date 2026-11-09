@@ -98,7 +98,10 @@ export function ValueEntry(props: { entries: InitEntry[]; onDone(): void }) {
       <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
         {fields.map((field) => (
           <li key={field.key} style={{ display: "flex", alignItems: "center", gap: theme.space(2), minHeight: 52 }}>
-            <Portrait entry={field.first} size={32} />
+            {/* As tall as the controls beside it, the face centered in it, so the row's boxes agree in height (TYPE-SEVERAL-ALIGN). */}
+            <span style={{ flex: "none", display: "grid", placeItems: "center", width: 32, height: theme.touch }}>
+              <Portrait entry={field.first} size={32} />
+            </span>
             <span style={{ flex: 1, minWidth: 0 }}>
               <span style={{ display: "block", fontWeight: theme.weight.strong, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {field.label}

@@ -10997,7 +10997,41 @@ const FU52_WEAPONS = {
  * the card, rolls both weapons' damage, and the newest result and its chips
  * stand whole where a tap lands, not under the card's fold.
  */
-export function patCardTests(): void {
+export function fu52Tests(): void {
+  test(`fu52-values. Type several values in the Initiative panel, its rows with a portrait, Split, the sign and the box, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+    const lines: string[] = [];
+    await freshDm();
+    const twins = [randomUUID(), randomUUID()];
+    for (const [i, id] of twins.entries()) await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", number: i + 1, size: "medium", x: 8 + i, y: 6, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
+    try {
+      if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+      await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.ids.thorn, value: 12 }, ...twins.map((id) => ({ id: randomUUID(), tokenId: id, value: 7 }))] });
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(`fu52-${atName(at)}`);
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, at.size, at.scale);
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        await closeSheets(page);
+        await escapeAll(page);
+        const tracker = await openPanel(page, "Initiative");
+        await tracker.getByRole("button", { name: "Type several values" }).click();
+        const form = tracker.locator("form").filter({ hasText: "Type each roll as rolled" });
+        await form.waitFor();
+        await form.scrollIntoViewIfNeeded();
+        await sweep.measure(page, "fu52-values", form);
+        await form.getByRole("button", { name: "Cancel", exact: true }).click();
+        await closeSheets(page);
+        await escapeAll(page);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      for (const id of twins) await ops.send({ t: "token.delete", tokenId: id }).catch(() => {});
+      await restartFight();
+    }
+    assert.deepEqual(lines, [], "Type several values out of line");
+  });
+
   test(`fu52-card. Pat's own turn card with its results and Fill chips, and the bar a Fill opens, at 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
     const lines: string[] = [];
     await freshDm();
@@ -11055,7 +11089,7 @@ export function patCardTests(): void {
 }
 
 export function qolPanelTests(): void {
-  patCardTests();
+  fu52Tests();
   test(`qe-f. the audit's surfaces on the DM's page in a fight on a Goblin Warrior's turn: its turn card's attacks with results and Apply to, the Dice panel's newest roll and Pat's damage toast with their chips, All of a kind, Conditions' Recent, the group bar's Save, its Recent DCs and its ask, Request a roll's Recent DCs, Handouts' Recent and the Tab row, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
     await freshDm();
     await playersHome();
