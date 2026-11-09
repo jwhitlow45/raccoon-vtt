@@ -806,49 +806,35 @@ describe("weather over the map", { concurrency: false }, () => {
     await setWeather(run.sceneId, { kind: "rain", heavy: true, wind: "strong" });
     const look = lookOf({ kind: "rain", heavy: true, wind: "strong" })!;
     const lines = await heldStill(async () => {
-      // A runner whose canvas has no GPU has halved the weather by now (moving). Half the fixed seed's marks ran 5 to 10% over in Isometric on CI, past the sum's 10% on some runs, so this measures at the full step, as a machine with a GPU does, held still so it stays there.
+      // A runner whose canvas has no GPU has halved the weather by now (moving). That step has its own check, wz-4b, so this measures at the full step, as a machine with a GPU does, held still so it stays there.
       await moving(pat);
       const out: string[] = [];
-      for (const view of ["topDown", "isometric"] as const) {
-        await viewAs(pat, view, 1);
-        await shown(pat, "rain heavy strong");
-        const stops: { scale: number; got: number; want: number }[] = [];
-        const seen = new Set<string>();
-        const read = async () => {
-          const s = await settledSpots(pat);
-          // A notch past the floor or the top leaves the camera where it was: that stop counts once.
-          if (!seen.has(s.camera.join())) stops.push({ scale: s.camera[2], got: s.marks, want: expectedMarks(look, s) });
-          seen.add(s.camera.join());
-          return { s };
-        };
-        // Out to the floor, where the scene stops shrinking.
-        let last = (await read()).s.camera[2];
-        for (let i = 0; i < 30; i++) {
-          await wheelAt(pat, null, 360);
-          const now = (await read()).s.camera[2];
-          if (Math.abs(now - last) < 1e-6) break;
-          last = now;
-        }
-        // Then in to 400 px a square.
-        for (let i = 0; i < 40 && last < 399; i++) {
-          await wheelAt(pat, null, -360);
-          last = (await read()).s.camera[2];
-        }
-        console.log(`wz-4 ${view} stops: ${stops.map((x) => `${x.scale.toFixed(1)}:${x.got.toFixed(0)}/${x.want.toFixed(0)}`).join(" ")}`);
-        // A count of marks spreads by about its root, so each stop, the floor's among them, holds within four of those, and the sum over every stop within 10%.
-        for (const stop of stops) assert.ok(Math.abs(stop.got - stop.want) <= 4 * Math.sqrt(stop.want) + 1, `${view} at ${stop.scale.toFixed(1)} px a square: ${stop.got.toFixed(1)} marks seen, ${stop.want.toFixed(1)} wanted`);
-        const got = stops.reduce((a, x) => a + x.got, 0);
-        const want = stops.reduce((a, x) => a + x.want, 0);
-        assert.ok(Math.abs(got / want - 1) < 0.1, `${view}: ${got.toFixed(0)} marks over every stop, ${want.toFixed(0)} wanted`);
-        const lo = Math.min(...stops.map((x) => x.scale));
-        const hi = Math.max(...stops.map((x) => x.scale));
-        assert.ok(lo < 6 && hi > 399, `${view}: from ${lo} to ${hi} px a square`);
-        const floor = stops.find((x) => x.scale === lo)!;
-        out.push(`${view}: ${stops.length} stops from ${lo.toFixed(2)} to ${hi.toFixed(0)} px a square, ${got.toFixed(0)} of ${want.toFixed(0)} marks, the floor ${floor.got.toFixed(1)} of ${floor.want.toFixed(1)}`);
-      }
+      for (const view of ["topDown", "isometric"] as const) out.push(await densityStops(pat, look, view, SUM_LIMIT.full));
       return out;
     }, [pat]);
     console.log(`wz-4\n${lines.join("\n")}`);
+  });
+
+  test("wz-4b. at the half step a GPU-less canvas steps down to, held there by reduced motion, the marks seen in Isometric are half as dense as the full step's, within the limit its own counts set", async () => {
+    await setWeather(run.sceneId, { kind: "rain", heavy: true, wind: "strong" });
+    const look = lookOf({ kind: "rain", heavy: true, wind: "strong" })!;
+    // A page of Pat's own whose ticks cost 6 ms each (WeatherLayer.tsx WEATHER_TEST_COST), so it halves on any machine, as fu49perfc-1 does.
+    const page = await patContext.newPage();
+    consoles.pat.attach(page);
+    try {
+      await page.addInitScript(() => void ((globalThis as Record<string, unknown>).__rvttWeatherCost = { ms: 6 }));
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.locator(".konvajs-content").first().waitFor();
+      await shown(page, "rain heavy strong");
+      // Held the moment it halves: about 5 s later it would hold still, and a page held still draws no marks to count.
+      await waitFor("the half step", async () => (((await probe(page))?.level ?? "") === "half" ? true : null), 20_000);
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await sleep(300);
+      const line = await densityStops(page, look, "isometric", SUM_LIMIT.half);
+      console.log(`wz-4b\n${line}`);
+    } finally {
+      await page.close();
+    }
   });
 
   test("wx-12. no console errors on any page", () => {
@@ -992,6 +978,53 @@ async function pinch(touches: Touches, page: Page, way: 1 | -1, span = 60): Prom
   for (let i = 1; i <= 15; i++) await touches.move(at(from + (way * i * span) / 15), 16);
   await touches.end([], 16);
   await sleep(200);
+}
+
+/**
+ * How far the sum of marks seen over every zoom stop may stray from the sum wanted. A count of marks spreads by about
+ * its root, so each stop holds within four of those, and the sum within these fractions. The full step ran within 10%.
+ * At the half step the fixed seed's Isometric marks ran 2.1% to 2.5% over in three local runs and 4.9% to 9.2% over on CI, so its limit
+ * is 12%: past the CI counts, and far under the 50% a step that halved twice or not at all would miss by.
+ */
+const SUM_LIMIT = { full: 0.1, half: 0.12 };
+
+/** Zooms Pat's page out to the scene's floor and in to 400 px a square in one view, and checks the marks seen at each stop against the marks wanted. */
+async function densityStops(page: Page, look: NonNullable<ReturnType<typeof lookOf>>, view: "topDown" | "isometric", sumLimit: number): Promise<string> {
+  await viewAs(page, view, 1);
+  await shown(page, "rain heavy strong");
+  const stops: { scale: number; got: number; want: number }[] = [];
+  const seen = new Set<string>();
+  const read = async () => {
+    const s = await settledSpots(page);
+    // A notch past the floor or the top leaves the camera where it was: that stop counts once.
+    if (!seen.has(s.camera.join())) stops.push({ scale: s.camera[2], got: s.marks, want: expectedMarks(look, s) });
+    seen.add(s.camera.join());
+    return { s };
+  };
+  // Out to the floor, where the scene stops shrinking.
+  let last = (await read()).s.camera[2];
+  for (let i = 0; i < 30; i++) {
+    await wheelAt(page, null, 360);
+    const now = (await read()).s.camera[2];
+    if (Math.abs(now - last) < 1e-6) break;
+    last = now;
+  }
+  // Then in to 400 px a square.
+  for (let i = 0; i < 40 && last < 399; i++) {
+    await wheelAt(page, null, -360);
+    last = (await read()).s.camera[2];
+  }
+  console.log(`wz-4 ${view} stops: ${stops.map((x) => `${x.scale.toFixed(1)}:${x.got.toFixed(0)}/${x.want.toFixed(0)}`).join(" ")}`);
+  for (const stop of stops) assert.ok(Math.abs(stop.got - stop.want) <= 4 * Math.sqrt(stop.want) + 1, `${view} at ${stop.scale.toFixed(1)} px a square: ${stop.got.toFixed(1)} marks seen, ${stop.want.toFixed(1)} wanted`);
+  const got = stops.reduce((a, x) => a + x.got, 0);
+  const want = stops.reduce((a, x) => a + x.want, 0);
+  console.log(`wz-4 ${view} sum over ${((got / want - 1) * 100).toFixed(1)}%`);
+  assert.ok(Math.abs(got / want - 1) < sumLimit, `${view}: ${got.toFixed(0)} marks over every stop, ${want.toFixed(0)} wanted`);
+  const lo = Math.min(...stops.map((x) => x.scale));
+  const hi = Math.max(...stops.map((x) => x.scale));
+  assert.ok(lo < 6 && hi > 399, `${view}: from ${lo} to ${hi} px a square`);
+  const floor = stops.find((x) => x.scale === lo)!;
+  return `${view}: ${stops.length} stops from ${lo.toFixed(2)} to ${hi.toFixed(0)} px a square, ${got.toFixed(0)} of ${want.toFixed(0)} marks, the floor ${floor.got.toFixed(1)} of ${floor.want.toFixed(1)}`;
 }
 
 /** Runs `check` with the weather held still by reduced motion, so each zoom is camera draws alone, and moving again after. */
