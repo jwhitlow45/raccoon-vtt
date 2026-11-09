@@ -188,6 +188,11 @@ export function durationEdit(existing: Pick<Effect, "duration" | "ends">, form: 
   return !touched || form.mode === "keep" ? undefined : durationChange(existing, durationInput(form, options));
 }
 
+/** Whether the mode counts turns of a creature, so the form asks whose. */
+export function namesCreature(mode: DurationMode): boolean {
+  return mode === "turnStart" || mode === "turnEnd" || mode === "rounds";
+}
+
 /**
  * The op's duration input, or null for "No duration". An unknown anchor
  * falls back to the creature itself. An Other length that is not a time

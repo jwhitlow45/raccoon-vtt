@@ -14,10 +14,12 @@ import {
   durationEdit,
   durationInput,
   emptyForm,
+  namesCreature,
   openingForm,
   spanLength,
   spanWords,
   type DurationForm,
+  type DurationMode,
 } from "./durations.ts";
 
 function fixture(withEncounter: boolean): RoomState {
@@ -282,6 +284,11 @@ describe("time spans", () => {
     const remote = { ends: { span: 60, at: 60, clock: "c1" } } as const;
     assert.equal(durationEdit(remote, form, options, false), undefined);
     assert.equal(durationEdit(remote, form, options, true), null, "touched, No duration takes it away");
+  });
+
+  test("only a turn choice names a creature, so Keep and the time spans list no creature select", () => {
+    const modes: DurationMode[] = ["keep", "none", "turnStart", "turnEnd", "rounds", "span60", "span600", "span3600", "span28800", "span86400", "spanOther"];
+    assert.deepEqual(modes.filter(namesCreature), ["turnStart", "turnEnd", "rounds"]);
   });
 
   test("a copy with no end reads the length alone, and a clock that stopped or was replaced says so", () => {

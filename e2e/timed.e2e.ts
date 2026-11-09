@@ -375,6 +375,7 @@ describe("time spans on effects", () => {
       const duration = await open(id);
       assert.equal(await duration.locator("option").first().innerText(), "Keep current duration");
       assert.equal(await duration.inputValue(), "keep", "it opens on Keep current duration");
+      assert.equal(await section.getByLabel("Whose turn", { exact: true }).count(), 0, "Keep names no creature");
       if (id === timed) {
         await section.getByText("Leave as is to keep its end.", { exact: true }).waitFor();
         for (const size of [DESK, { width: 320, height: 568 }]) {

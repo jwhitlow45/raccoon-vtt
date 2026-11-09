@@ -30,6 +30,7 @@ import {
   emptyForm,
   openingForm,
   durationEdit,
+  namesCreature,
   isSpanMode,
   spanSeconds,
   type DurationForm,
@@ -618,7 +619,7 @@ export function DurationFields(props: {
       <FieldRow label="Duration" stack hint={props.hint}>
         <Select<DurationMode> label="Duration" value={form.mode} options={modes} onChange={(mode) => props.onChange({ ...form, mode })} />
       </FieldRow>
-      {form.mode !== "none" && !isSpanMode(form.mode) ? (
+      {namesCreature(form.mode) ? (
         <FieldRow label={form.mode === "rounds" ? "Counted on" : "X is"} stack>
           <Select<string>
             label={form.mode === "rounds" ? "Counted on whose turns" : "Whose turn"}
