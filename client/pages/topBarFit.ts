@@ -238,15 +238,16 @@ export function stepsFor(c: BarContent): BarStep[] {
  * chip's name's measured cap once step 11 is taken, 0 once the name has
  * left.
  */
-export type FitRecord = { key: string; width: number; taken: number; nameCap: number | null };
+export type FitRecord = { key: string; width: number; taken: number; nameCap: number | null; chipDot?: boolean };
 
 /**
  * The row as measured, in layout px: its own width (clientWidth), what its
  * content overflows it by, and the turn chip's name as drawn, null while
  * it draws none. `chipCut` is what a phone's row cuts off the player's own
  * name in their chip, which shrinks rather than overflow the row.
+ * `chipSliver` is that name drawn narrower than a letter and its ellipsis.
  */
-export type FitMeasure = { width: number; overflow: number; name: number | null; chipCut?: number };
+export type FitMeasure = { width: number; overflow: number; name: number | null; chipCut?: number; chipSliver?: boolean };
 
 /** A record for another content is no record: the bar draws the content's first shape then. */
 function drawnFor(record: FitRecord | null, key: string): FitRecord | null {
@@ -285,7 +286,11 @@ export function fitStep(record: FitRecord | null, key: string, m: FitMeasure, st
 }
 
 function giveWay(r: FitRecord, m: FitMeasure, steps: readonly BarStep[]): FitRecord {
-  if (m.overflow <= 0) return nameNeedsStep(r, m, steps) ? { ...r, taken: r.taken + 1 } : r;
+  if (m.overflow <= 0) {
+    if (nameNeedsStep(r, m, steps)) return { ...r, taken: r.taken + 1 };
+    // The name steps are all taken and the name is still a sliver: the chip draws as its dot (LP33-B-CHIP-1).
+    return m.chipSliver === true && !r.chipDot ? { ...r, chipDot: true } : r;
+  }
   // The name gives way by what the row lacks, and again where a pixel's rounding left the row short, until it fits or leaves.
   if (steps[r.taken - 1] === "turnName" && r.nameCap !== null && r.nameCap > 0) return { ...r, nameCap: nameCapFor(m) };
   const step = steps[r.taken];
@@ -313,7 +318,7 @@ function nameNeedsStep(r: FitRecord, m: FitMeasure, steps: readonly BarStep[]): 
 
 /** Two records alike, so a check that changes nothing draws nothing again. */
 export function sameRecord(a: FitRecord | null, b: FitRecord | null): boolean {
-  return a === b || (a !== null && b !== null && a.key === b.key && a.width === b.width && a.taken === b.taken && a.nameCap === b.nameCap);
+  return a === b || (a !== null && b !== null && a.key === b.key && a.width === b.width && a.taken === b.taken && a.nameCap === b.nameCap && (a.chipDot ?? false) === (b.chipDot ?? false));
 }
 
 /** What the bar draws: each part's form after the steps taken. */
@@ -347,6 +352,8 @@ export type BarShape = {
   timerShort: boolean;
   /** A player's inline "Your turn" shows. */
   yourTurn: boolean;
+  /** A phone's player chip as its dot alone, since its cut name would be less than a letter (D-261109-086). */
+  chipDot: boolean;
 };
 
 /** The bar's shape for its content, with the steps `record` has taken when it is this content's. */
@@ -376,5 +383,6 @@ export function shapeOf(c: BarContent, key: string, record: FitRecord | null): B
     nameCap: has("turnName") ? (drawn?.nameCap ?? 0) : null,
     timerShort: has("timerShort"),
     yourTurn: c.yourTurn && !has("yourTurnOff"),
+    chipDot: drawn?.chipDot === true,
   };
 }

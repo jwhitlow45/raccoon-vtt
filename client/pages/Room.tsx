@@ -1692,7 +1692,9 @@ function TopBar(props: {
     // A phone's player chip shrinks before the row overflows, so what it cuts off the player's own name counts too (topBarFit.ts nameNeedsStep).
     const chipName = props.compact ? row.querySelector<HTMLElement>("[data-chip-name]") : null;
     const chipCut = chipName ? chipName.scrollWidth - chipName.clientWidth : 0;
-    const next = fitStep(record, key, { width: row.clientWidth, overflow, name: turnName, chipCut }, steps);
+    // Less than a letter and its ellipsis (about 1.5 em) reads as a stray stroke, not a name, so the chip draws its dot alone instead (LP33-B-CHIP-1).
+    const chipSliver = chipName !== null && chipCut > 0 && chipName.clientWidth < 1.5 * (parseFloat(getComputedStyle(chipName).fontSize) || 0);
+    const next = fitStep(record, key, { width: row.clientWidth, overflow, name: turnName, chipCut, chipSliver }, steps);
     if (!sameRecord(next, record)) setRecord(next);
   }, [content.strip, shape.band, props.placement, props.compact, strip, record, key, steps]);
   const checkRef = useRef(check);
@@ -1761,7 +1763,7 @@ function TopBar(props: {
         {role === "dm" ? (
           <DmChip dot={shape.dmDot} eye={shape.eye} eyeSlim={shape.eyeSlim} timeGaveWay={clockText !== null && !shape.clock} nowPlayingGaveWay={shape.nowPlaying === "off"} volumeGaveWay={content.volume && !shape.volume} chipRef={dmChipRef} onOpen={raiseFor.dm} />
         ) : role === "player" ? (
-          <YouChip dot={props.chipDot} volumeGaveWay={content.volume && !shape.volume} onOpen={raiseFor.you} />
+          <YouChip dot={props.chipDot || shape.chipDot} volumeGaveWay={content.volume && !shape.volume} onOpen={raiseFor.you} />
         ) : null}
         {shape.blackout ? <BlackoutChip fallbackFocus={() => dmChipRef.current} onOpen={raiseFor.blackout} /> : null}
         {/* Below 900 px a step folds it into the Panels list's field, which is always there (topBarFit.ts searchPanels). */}

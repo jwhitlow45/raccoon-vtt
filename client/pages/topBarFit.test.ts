@@ -33,6 +33,10 @@ type Words = {
 
 type Bar = { content: BarContent; words: Words; fight: boolean };
 
+/** What a player's chip draws besides its name, and the least a name may be cut to (a letter and its ellipsis, about 1.5 em at 13 px). */
+const CHIP_CHROME = 36;
+const LETTER_AND_ELLIPSIS = 20;
+
 const GAP = { wide: 12, wideTight: 6, phone: 6, phoneTight: 2 };
 
 /** The row as TopBar draws `shape`: its parts' widths, those that shrink with their least, and the turn chip's name as drawn. */
@@ -45,7 +49,7 @@ function drawn(bar: Bar, shape: BarShape): { parts: { w: number; min: number }[]
   if (dm) parts.push(fixed(shape.eye ? (shape.eyeSlim ? 32 : 40) : shape.dmDot ? 32 : 72));
   else if (c.role === "player") {
     // A phone's player chip keeps its dot while the strip is in the row (Room.tsx chipDot).
-    const dot = c.phone ? stripInRow : c.words[2]!.endsWith("true");
+    const dot = c.phone ? stripInRow || shape.chipDot : c.words[2]!.endsWith("true");
     parts.push(dot ? fixed(32) : { w: words.youName, min: 32 });
   }
   if (shape.blackout) parts.push(fixed(149));
@@ -92,7 +96,10 @@ function measure(bar: Bar, shape: BarShape, width: number): FitMeasure {
   const least = parts.reduce((a, p) => a + p.min, 0) + gaps;
   const [, room, chip] = parts;
   const chipCut = bar.content.phone && bar.content.role === "player" && chip ? Math.max(0, Math.min(chip.w - chip.min, natural - width - (room!.w - room!.min))) : 0;
-  return { width, overflow: natural <= width ? 0 : Math.max(0, least - width), name, chipCut };
+  // The chip's name is what its drawn width leaves after its dot, gaps and caret.
+  const chipRoom = chip ? chip.w - chipCut - CHIP_CHROME : 0;
+  const chipSliver = chipCut > 0 && chipRoom < LETTER_AND_ELLIPSIS;
+  return { width, overflow: natural <= width ? 0 : Math.max(0, least - width), name, chipCut, chipSliver };
 }
 
 /** Measures and steps until the record stops changing, as TopBar's layout effects do, and how many renders that took. */
@@ -340,7 +347,42 @@ describe("the top bar's give-way (topBarFit)", () => {
     // 320 px at 130%, a 222 px row and the 8 px Fit tucks into the bar's padding, which the model leaves out: View folded for the row's own lack of room, the chip down to its dot and caret, and the speaker kept.
     const small = settle(bar, 230, null);
     assert.deepEqual([small.shape.search, small.shape.tight, small.shape.viewFold, small.shape.volume], ["panels", true, true, true]);
-    assert.ok((measure(bar, small.shape, 230).chipCut ?? 0) > 0);
+    // Its name would be under a letter, so the chip is its dot (LP33-B-CHIP-1), which needs no shrinking.
+    assert.equal(small.shape.chipDot, true);
+    assert.equal(measure(bar, small.shape, 230).chipCut, 0);
+  });
+
+  test("a phone's player chip whose cut name would be under a letter and its ellipsis draws as its dot, after the name steps and never before (LP33-B-CHIP-1)", () => {
+    fc.assert(
+      fc.property(
+        bars.filter((b) => b.content.phone && b.content.role === "player"),
+        fc.integer({ min: 240, max: 899 }),
+        (bar, width) => {
+          const key = fitKey(bar.content);
+          const steps = stepsFor(bar.content);
+          const { record, shape } = settle(bar, width, null);
+          if (!shape.chipDot) return;
+          // The dot was drawn for a sliver: the same bar without it still cut the name below a letter, with no name step left to take.
+          const before = measure(bar, shapeOf(bar.content, key, { ...record!, chipDot: false }), width);
+          assert.equal(before.chipSliver, true, "the dot with no sliver to answer");
+          const next = steps[record!.taken];
+          assert.ok(next === undefined || !NAME_STEPS.includes(next), `the dot came with ${next} still to take`);
+        },
+      ),
+      { numRuns: 3000 },
+    );
+  });
+
+  test("Pat on a 390 px phone at 130% with an 80 character room name: Search is in the Panels field, the gaps are tight, and the chip is its dot instead of a stroke of its name", () => {
+    const content: BarContent = { phone: true, role: "player", search: true, nowPlaying: false, clock: false, blackout: false, fullscreen: false, phase: false, gaps: true, view: true, volume: true, floor: false, strip: "none", faces: 0, timerOver: false, yourTurn: false, words: ["The Sunken Halls of the Long-Forgotten Raccoon King and His Seven Hungry Cousins"] };
+    const bar: Bar = { content, words: { room: 600, youName: 60, clock: 0, phase: 0, turnName: 0, nowPlaying: 0, timer: 0 }, fight: false };
+    // 390 px at 130% is 300 layout px, less the bar's 12 px each side.
+    const { shape } = settle(bar, 276, null);
+    assert.deepEqual([shape.search, shape.tight, shape.chipDot], ["panels", true, true]);
+    assert.equal(shape.viewFold, false, "View stays on the bar");
+    assert.equal(shape.volume, true, "the speaker stays");
+    // A wider bar keeps the name whole.
+    assert.equal(settle(bar, 366, null).shape.chipDot, false);
   });
 
   test("a fight in a blackout at 1440 takes the clock, and both ending, or a narrowing to 900 and back, brings it back (CHIPS-GIVEWAY-1)", () => {

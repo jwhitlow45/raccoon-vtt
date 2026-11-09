@@ -624,6 +624,36 @@ describe("The top bar's give-way and Next", { concurrency: false }, () => {
     }
   });
 
+  /**
+   * Lane LP33-FIX (LP33-B-CHIP-1): Pat's chip on a 390 x 844 phone at 130% with
+   * an 80 character room name drew her name as a 3 px stroke. Its dot form
+   * takes over where less than a letter and its ellipsis would show.
+   */
+  test("lp33fix-3. Pat on a 390 x 844 phone at 130% with an 80 character room name: her chip is its dot alone, never a sliver of her name, and the bar keeps View and the speaker and does not overflow", async (t) => {
+    const long = "The Sunken Halls of the Long-Forgotten Raccoon King and His Seven Hungry Cousins";
+    assert.equal(long.length, 80);
+    t.after(async () => {
+      await ops.send({ t: "room.update", name: run.roomName });
+      await openAt(pat, PHONE, 1);
+    });
+    await ops.send({ t: "room.update", name: long });
+    await openAt(pat, PHONE, 1.3);
+    const fit = await partsHold(pat, ["chip:you:dot", "volume", "view"], [], "Pat's chip as its dot with View and the speaker kept");
+    assert.ok(fit.overflow <= 1, `the row overflows by ${fit.overflow} px (${fit.parts.join(", ")})`);
+    // No name span is left to show a stroke of her name, and the chip's own width is the dot form's.
+    const chip = topBar(pat).locator('[data-chip="you"]');
+    assert.equal(await chip.locator("[data-chip-name]").count(), 0, "no name span");
+    const box = await chip.evaluate((el) => (el as unknown as DomNode).getBoundingClientRect().width);
+    assert.ok(box > 0 && box <= 48, `the chip is ${box} px wide`);
+    await shots.take(pat, "lp33fix-3-pat-chip-dot-390-130");
+    // A wider row keeps her name whole: the same room at 100% shows "Pat".
+    await openAt(pat, PHONE, 1);
+    const wide = await partsHold(pat, ["chip:you"], ["chip:you:dot"], "Pat's chip with her name at 100%");
+    assert.ok(wide.overflow <= 1, `at 100% the row overflows by ${wide.overflow} px`);
+    assert.equal(await topBar(pat).locator('[data-chip="you"] [data-chip-name]').textContent(), "Pat");
+    await shots.take(pat, "lp33fix-3-pat-chip-name-390-100");
+  });
+
   test("qcb-end. no page logged an error", () => {
     assert.deepEqual(dmConsole.errors, []);
     assert.deepEqual(patConsole.errors, []);
