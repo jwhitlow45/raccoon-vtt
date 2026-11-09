@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import type { RoomState, Scene } from "#shared/model.ts";
-import { member, room, scene } from "#shared/testutil.ts";
+import { member, room, scene, token } from "#shared/testutil.ts";
 import { api } from "../../lib/api.ts";
 import { scenesFoldsSlot, type ScenesSection } from "../../lib/folds.ts";
 import { RoomScope } from "../../state/scope.ts";
@@ -307,6 +307,17 @@ describe("Map and grid's Map image row: Use the still only last on the picker's 
     assert.deepEqual(drawnLines(html), ["Replace map image + Use the still only", "Remove map image"]);
     assert.match(html, /<button type="button"[^>]*style="[^"]*white-space:normal;overflow-wrap:anywhere;text-align:center[^"]*"[^>]*>Remove map image<\/button>/);
     assert.deepEqual(drawnLines(page(ALL_OPEN, { map: MAP })), ["Replace map image", "Remove map image"], "a still image: no Use the still only, and no empty cell");
+  });
+
+  test("on a floor of the players' scene, the ask comes where players have the floor, and not on a floor they have not reached (design-v1-floors.md 8.3)", () => {
+    const upper = { map: VIDEO_MAP, name: "Tower", floor: { of: "g", level: 1, name: "Upper floor", height: 10 } };
+    const tower = (party: boolean) => (s: RoomState) => {
+      s.scenes.g = scene("g", { name: "Tower", floor: { of: "g", level: 0, name: "Ground floor" } });
+      s.meta.playerSceneId = "g";
+      if (party) s.tokens.t1 = token("t1", { sceneId: "s1", kind: "pc", partyVision: true });
+    };
+    assert.deepEqual(drawnLines(page(ALL_OPEN, upper, tower(true))), ["Replace map image + Use the still only", "Remove map image"], "a party member upstairs: players see Upper floor");
+    assert.deepEqual(drawnLines(page(ALL_OPEN, upper, tower(false))), ["Replace map image + Paste an image + Use the still only", "Remove map image"], "not reached: the DM prepares it in private");
   });
 });
 

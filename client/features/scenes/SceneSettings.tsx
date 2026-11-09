@@ -1,8 +1,8 @@
 import { Children, Fragment, isValidElement, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import type { AutoWalls, Scene } from "#shared/model.ts";
+import type { AutoWalls, RoomState, Scene } from "#shared/model.ts";
 import { MAX_SCENE_CELLS, type OpOf } from "#shared/protocol.ts";
 import { autoWallsOf } from "#shared/rules/autoWalls.ts";
-import { FLOOR_WORDS, floorsOf } from "#shared/rules/floors.ts";
+import { FLOOR_WORDS, floorsOf, openFloor } from "#shared/rules/floors.ts";
 import { gridOfShape, isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -477,7 +477,8 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
   const roomId = useRoomView((s) => s.roomId);
-  const playersHere = useRoomView((s) => s.view?.meta.playerSceneId === scene.id);
+  // An open floor of the players' scene shows its new image to players as the players' own floor does (design-v1-floors.md 8.3). Blackout-blind, as the start floor's test was: a blackout lifts onto the new image.
+  const playersHere = useRoomView((s) => (s.view ? openFloor(s.view as RoomState, scene.id) : false));
   const hasBuild = useRoomView((s) =>
     Object.values(s.view?.buildChunks ?? {}).some((c) => c?.sceneId === scene.id && (Object.keys(c.cells).length > 0 || Object.keys(c.edges).length > 0)),
   );
