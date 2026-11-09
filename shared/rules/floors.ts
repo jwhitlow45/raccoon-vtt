@@ -126,20 +126,21 @@ export function heldFloors(state: RoomState, viewer: Viewer, opts: ProjectOpts):
 }
 
 /**
- * Whether a viewer who holds `held` holds a record that names `sceneId` and
+ * Whether a viewer who holds `held` holds a record that names its scene and
  * outlives a move of the players, as an ask for saves does
- * (docs/design/design-v1-player-save-spell.md 5.5): on a floor of a scene
- * with floors only while they hold that floor, since a floor not held sends
- * nothing, its id included (8, FLRBUILD-PRIV-01). Anything else keeps the
- * rule from before floors, which follows its player to another scene
- * (SSB-A-03): a scene without floors, and an id naming no scene, as ops
- * stored before own-key reads may (opVersion40.differential.test.ts). An
- * ask goes when its floor stops being one, removed or made a plain scene,
- * however that happens (reducer/floors.ts dropFloorAsks), so no ask names a
- * floor that is gone, or a former floor as a scene without floors.
+ * (docs/design/design-v1-player-save-spell.md 5.5): one made on a floor
+ * (`onFloor`, which the reducer marks) or naming a floor now only while
+ * they hold that floor, since a floor not held sends nothing, its id
+ * included (8, FLRBUILD-PRIV-01). The mark keeps that however the floor
+ * went since, an undo bringing an ask back after its floor's removal
+ * included (FLRBUILD-PRIV-05). Anything else keeps the rule from before
+ * floors, which follows its player to another scene (SSB-A-03): an ask on a
+ * scene without floors, and one naming no scene, as ops stored before
+ * own-key reads may (opVersion40.differential.test.ts).
  */
-export function holdsRecordOn(state: Pick<RoomState, "scenes">, held: ReadonlySet<SceneId>, sceneId: SceneId): boolean {
-  return ownEntry(state.scenes, sceneId)?.floor === undefined || held.has(sceneId);
+export function holdsRecordOn(state: Pick<RoomState, "scenes">, held: ReadonlySet<SceneId>, record: { sceneId: SceneId; onFloor?: true }): boolean {
+  if (record.onFloor === true || ownEntry(state.scenes, record.sceneId)?.floor !== undefined) return held.has(record.sceneId);
+  return true;
 }
 
 const NONE: ReadonlySet<SceneId> = new Set();

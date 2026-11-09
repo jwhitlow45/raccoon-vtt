@@ -734,6 +734,13 @@ describe("roomStateSchema, a player's asks for saves (docs/design/design-v1-play
     assert.equal(parseRoomState(room({ log: [line({ end: "applied" }) as never] })).ok, false);
     assert.equal(parseRoomState(room({ log: [line({ spell: "" }) as never] })).ok, false);
   });
+
+  test("an ask made on a floor keeps that mark through a backup, and the mark is only ever true (FLRBUILD-PRIV-05)", () => {
+    const parsed = parseRoomState(room({ casts: { k1: { ...castAsk("k1"), onFloor: true } as never } }));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assert.equal(parsed.ok && parsed.state.casts.k1?.onFloor, true);
+    assert.equal(parseRoomState(room({ casts: { k1: { ...castAsk("k1"), onFloor: false } as never } })).ok, false);
+  });
 });
 
 describe("the room's clock in a backup (docs/design/design-v1-calendar.md 6.6)", () => {

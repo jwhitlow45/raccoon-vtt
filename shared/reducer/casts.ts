@@ -1,7 +1,7 @@
 import { parseFormula } from "../dice/formula.ts";
-import { keys } from "../keys.ts";
+import { keys, sightOf } from "../keys.ts";
 import { eventLines } from "../logRings.ts";
-import { logsByAudience } from "../migrate.ts";
+import { floorsOps, logsByAudience } from "../migrate.ts";
 import type { CastAsk, CastEnd, CastRolled, LogEvent, Token } from "../model.ts";
 import { ASK_CLOSED } from "../permissions.ts";
 import type { OpOf } from "../protocol.ts";
@@ -33,6 +33,9 @@ export function castAsk(tx: Tx, op: OpOf<"cast.ask">): void {
   if (input.slot !== undefined) ask.slot = input.slot;
   if (input.area !== undefined) ask.area = input.area;
   if (input.targets !== undefined) ask.targets = [...input.targets];
+  // Where it was made, which a player who never held that floor must never learn, whatever becomes of the floor
+  // (rules/floors.ts holdsRecordOn). Only the server's state marks: a device replays its own ask as the projection sends it.
+  if (floorsOps(tx.env.opVersion) && sightOf(tx.state) === undefined && ownEntry(tx.state.scenes, ask.sceneId)?.floor !== undefined) ask.onFloor = true;
   if (input.damage !== undefined) {
     ask.damage = { tag: input.damage.tag, parts: input.damage.parts };
     const rolled = rolledOf(tx, ask, ownEntry(tx.state.tokens, ask.caster));

@@ -735,6 +735,7 @@ const castAsk = z
     by: id,
     rolled: z.array(castSchemas.castRolled).min(1).max(LIMITS.diceBatchesPerTag * LIMITS.diceRollsPerOp).optional(),
     at: iso,
+    onFloor: z.literal(true).optional(),
   })
   .refine((c) => (c.area === undefined) !== (c.targets === undefined), { message: "an ask names an area or its targets, one of the two" });
 

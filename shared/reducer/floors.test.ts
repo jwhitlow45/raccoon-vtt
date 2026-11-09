@@ -260,7 +260,8 @@ describe("removing and deleting floors (7.1, 9, D-261102-493)", () => {
 
   test("an ask for saves made on a removed floor goes with it, though its caster stands elsewhere, and its undo brings the ask back (FLRBUILD-PRIV-01)", () => {
     let state = towerOf(3);
-    const ask = (id: string, sceneId: string) => ({ id, rev: 0, by: "p1", caster: "owl", sceneId, spell: "Fireball", targets: ["owl"], at: "2026-11-08T00:00:00Z" });
+    // As the reducer writes them: an ask made on a floor is marked so (FLRBUILD-PRIV-05), and one on a scene without floors is not.
+    const ask = (id: string, sceneId: string) => ({ id, rev: 0, by: "p1", caster: "owl", sceneId, spell: "Fireball", targets: ["owl"], at: "2026-11-08T00:00:00Z", ...(sceneId === "s2" ? {} : { onFloor: true as const }) });
     state = { ...state, tokens: { ...state.tokens, owl: token("owl", { sceneId: "s1", ownerIds: ["p2"] }) }, casts: { k1: ask("k1", "f2"), k2: ask("k2", "s1"), k3: ask("k3", "s2") } };
     const removed = applied(state, { t: "scene.delete", sceneId: "f2" });
     assert.deepEqual(Object.keys(removed.state.casts).sort(), ["k2", "k3"], "the ask on Upper goes, the others stay");

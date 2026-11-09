@@ -2430,6 +2430,13 @@ export type CastAsk = {
   rolled?: CastRolled[];
   /** The envelope time. */
   at: string;
+  /**
+   * The DM's alone, never sent to a player: the ask was made on a floor of
+   * a scene with floors (from op version 56), so it reaches only a player
+   * who holds that floor, whatever becomes of the floor since
+   * (rules/floors.ts holdsRecordOn, FLRBUILD-PRIV-05).
+   */
+  onFloor?: true;
 };
 
 /** One roll of the caster's damage: its formula as rolled, its total, and the damage type its label names. */

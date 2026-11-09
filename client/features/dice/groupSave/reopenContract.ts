@@ -206,6 +206,8 @@ const castAsk = z.strictObject({
   by: id,
   rolled: z.array(castSchemas.castRolled).min(1).max(LIMITS.diceBatchesPerTag * LIMITS.diceRollsPerOp).optional(),
   at: iso,
+  // The DM's ask carries where it was made (CastAsk `onFloor`), so a page reopened on one keeps it.
+  onFloor: z.literal(true).optional(),
 }).refine((value) => (value.area === undefined) !== (value.targets === undefined), {
   message: "an ask names an area or its targets, one of the two",
 }) satisfies z.ZodType<PageCast["ask"]>;

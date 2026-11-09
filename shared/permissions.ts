@@ -1737,7 +1737,7 @@ function castAskCheck(c: Check, op: OpOf<"cast.ask">, held: ReadonlySet<string>)
   const tag = input.damage?.tag;
   if (tag !== undefined && Object.values(c.state.casts).some((ask) => ask.damage?.tag === tag)) return refuse("invalid", ROLL_ASKED_ALREADY);
   // Only the asks the player holds count, as their block counts them, since one left on a floor they no longer hold is not theirs to withdraw.
-  if (waitingAsks(c.state, c.actor).filter((ask) => holdsRecordOn(c.state, held, ask.sceneId)).length >= LIMITS.castsPerMember) return refuse("quota", ASKS_WAITING);
+  if (waitingAsks(c.state, c.actor).filter((ask) => holdsRecordOn(c.state, held, ask)).length >= LIMITS.castsPerMember) return refuse("quota", ASKS_WAITING);
   return OK;
 }
 
@@ -1745,7 +1745,7 @@ function castAskCheck(c: Check, op: OpOf<"cast.ask">, held: ReadonlySet<string>)
 function castCloseCheck(c: Check, op: OpOf<"cast.close">, held: ReadonlySet<string>): Decision {
   const ask = ownEntry(c.state.casts, op.castId);
   // A player holds no ask behind a pause, nor one asked on a floor they do not hold (shared/project.ts projectCastCtx), so none is there to withdraw.
-  if (!ask || held.size === 0 || !holdsRecordOn(c.state, held, ask.sceneId) || !c.ownsTokenId(ask.caster)) return refuse("gone", ASK_CLOSED);
+  if (!ask || held.size === 0 || !holdsRecordOn(c.state, held, ask) || !c.ownsTokenId(ask.caster)) return refuse("gone", ASK_CLOSED);
   return op.end === "withdrawn" ? OK : FORBIDDEN;
 }
 

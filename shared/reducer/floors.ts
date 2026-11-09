@@ -143,17 +143,17 @@ export function markOpened(tx: Tx, _before: RoomState): void {
 }
 
 /**
- * The asks for saves on a floor that stopped being one in this op, after
- * every op's dispatch beside `markOpened`: a floor removed, by Remove,
- * Delete or a restore such as the undo of its add, and a record that lost
- * its `floor`, as the floor left alone by a removal and the main floor
- * after the undo of a scene's first add. An ask names its floor, which a
- * player who never held it must never learn (rules/floors.ts holdsRecordOn),
- * and a scene without floors sends its asks wherever their players went, so
- * each goes, as an ordinary write in the op's undo step, and the undo brings
- * it back with the floor (FLRBUILD-ASTRA-07, FLRBUILD-PRIV-04, FLRB-OPUS-09,
- * D-261108-426). Asks made before a first add go with its undo too, and come
- * back with its redo.
+ * The asks for saves made on a floor (`onFloor`) that stopped being one in
+ * this op, after every op's dispatch beside `markOpened`: a floor removed,
+ * by Remove, Delete or a restore such as the undo of its add, and a record
+ * that lost its `floor`, as the floor left alone by a removal and the main
+ * floor after the undo of a scene's first add. Each goes as an ordinary
+ * write in the op's undo step, and the undo brings it back with the floor
+ * (FLRBUILD-ASTRA-07, FLRBUILD-PRIV-04, FLRB-OPUS-09, D-261108-426). Its
+ * mark keeps it from any player who never held that floor whatever becomes
+ * of it (rules/floors.ts holdsRecordOn), so this keeps the room free of asks
+ * on floors that are gone. An ask made on the scene before its first add
+ * is unmarked and stays through that add's undo (D-261108-431).
  */
 export function dropFloorAsks(tx: Tx, before: RoomState): void {
   const gone = new Set<string>();
@@ -164,7 +164,7 @@ export function dropFloorAsks(tx: Tx, before: RoomState): void {
   }
   if (gone.size === 0) return;
   for (const ask of Object.values(tx.state.casts).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
-    if (gone.has(ask.sceneId)) tx.remove(keys.cast(ask.id));
+    if (ask.onFloor === true && gone.has(ask.sceneId)) tx.remove(keys.cast(ask.id));
   }
 }
 

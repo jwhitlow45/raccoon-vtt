@@ -239,6 +239,11 @@ test("a final Close the ask after Undo is its own step: pending, closed and refu
   assert.equal(back.reopen?.check, "undone");
 });
 
+test("a page reopened on an ask made on a floor keeps its mark through a reload (FLRBUILD-PRIV-05)", () => {
+  const asked = { ...start(), page: { ...start().page, cast: { ask: { ...castAsk("ask"), onFloor: true as const }, who: "Thorn" } } };
+  assert.equal(sessionOfDraft(saveDraftSchema.parse(draftOf(asked))).page.cast?.ask.onFloor, true);
+});
+
 describe("Outcome restored once no Play step for it remains (LP27-A-GS-2, D-261101-051)", () => {
   const E1 = "epoch-before-restart";
   const E2 = "epoch-after-restart";

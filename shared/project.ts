@@ -3127,7 +3127,7 @@ function projectHandoutDocCtx(ctx: Ctx, doc: HandoutDoc): HandoutDoc | null {
  */
 function projectCastCtx(ctx: Ctx, ask: CastAsk): CastAsk | null {
   if (ctx.viewer.role === "dm") return ask;
-  if (ctx.paused || !holdsRecordOn(ctx.state, ctx.floors, ask.sceneId) || !ownsRollCreature(ctx, { tokenId: ask.caster })) return null;
+  if (ctx.paused || !holdsRecordOn(ctx.state, ctx.floors, ask) || !ownsRollCreature(ctx, { tokenId: ask.caster })) return null;
   const out: CastAsk = { id: ask.id, rev: ask.rev, by: ask.by, caster: ask.caster, sceneId: ask.sceneId, spell: ask.spell, at: ask.at };
   if (ask.roll !== undefined) out.roll = ask.roll;
   if (ask.slot !== undefined) out.slot = ask.slot;
