@@ -638,4 +638,16 @@ describe("a shared attack in weather (docs/design/design-v1-weather.md 2.1)", ()
     assert.equal(sharedAttackNote(bows([javelin, javelin]), goblins({ kind: "clear", wind: "strong" })), "Strong wind: Disadvantage on ranged attack rolls with weapons.");
     assert.equal(sharedAttackNote(bows([shortbow, shortbow]), goblins(undefined)), "");
   });
+
+  test("words that bear on only some of the attackers name them, and on all of them name no one (GS-MIXED-NOTE)", () => {
+    const view = goblins(undefined);
+    const attackers = [1, 2, 3].map((n) => ({ creature: { tokenId: `g${n}` }, named: named("Scimitar", { range: "melee", weapon: true }) }));
+    for (const [id, number] of [["g1", 1], ["g2", 2], ["g3", 3]] as const) {
+      view.view.tokens[id] = token(id, { kind: "monster", name: "Goblin Warrior", number, actor: { inline: actor(id === "g3" ? {} : { effects: [{ id: `e-${id}`, key: "poisoned" }] }) } });
+    }
+    assert.equal(sharedAttackNote(attackers, view), "Dis: Poisoned for Goblin Warrior 1 and Goblin Warrior 2");
+    assert.equal(sharedAttackNote(attackers.slice(0, 2), view), "Dis: Poisoned", "both of two carry it, so it is said of the attack");
+    view.view.tokens.g3 = token("g3", { kind: "monster", name: "Goblin Warrior", number: 3, actor: { inline: actor({ effects: [{ id: "e-g3", key: "poisoned" }] }) } });
+    assert.equal(sharedAttackNote(attackers, view), "Dis: Poisoned");
+  });
 });

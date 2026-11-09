@@ -22,9 +22,10 @@ import { creatureLook } from "../creatureLook.ts";
 import { creatureRolls, type DiceView } from "../creature.ts";
 import { severalKey, useDiceFolds } from "../diceFolds.ts";
 import { rollsOf } from "../logic.ts";
-import { cutLabel, damageRolls, groupNote, joinSentences, presetNotes, withExtra } from "../options.ts";
+import { cutLabel, damageRolls, joinSentences, presetLine, presetNotes, withExtra } from "../options.ts";
 import { presetFor } from "../presets.ts";
 import { secretStartIn, useDicePanel, useRollPresses, type PanelRoll } from "../useDicePanel.ts";
+import { joinNames } from "../../clock/words.ts";
 import { loadedSrdRolls, useDiceView } from "../useDiceView.ts";
 import { useReceipt, useReceipts, type ReceiptState } from "../useReceipt.ts";
 import { useRollBlocked } from "../useRollOption.ts";
@@ -253,11 +254,29 @@ export function attackPanelRolls(each: readonly Attacker[], dice: DiceView): Pan
 /**
  * What bears on a shared attack, said once under it: each attacker's
  * preset words ("Dis: Strong wind" for three Shortbows in strong wind) and
- * their reminders, each once. Empty when nothing does.
+ * their reminders, each once. Words that bear on only some of the attackers
+ * name them ("Dis: Poisoned for Goblin 1 and Goblin 2"), so the note never
+ * says of the whole attack what one creature's roll does not take
+ * (GS-MIXED-NOTE). Empty when nothing does.
  */
 export function sharedAttackNote(each: readonly Attacker[], dice: DiceView): string {
   const presets = each.map(({ creature, named }) => presetFor(dice, creature, attackTest(named)));
-  return joinSentences([groupNote(presets), ...presetNotes(presets)]);
+  const lines = presets.map((p) => presetLine(p).split(". ").filter(Boolean));
+  const parts = [...new Set(lines.flat())];
+  const words = parts.map((part) => {
+    const owners = each.flatMap((e, i) => (lines[i]!.includes(part) ? [attackerName(e.creature, dice)] : []));
+    return owners.length === each.length ? part : `${part} for ${joinNames(owners)}`;
+  });
+  return joinSentences([words.join(". "), ...presetNotes(presets)]);
+}
+
+/** An attacker's name as the group's other lines say it: its token's, or its character's. */
+function attackerName(creature: ActorTarget, dice: DiceView): string {
+  if ("tokenId" in creature) {
+    const token = dice.view.tokens[creature.tokenId];
+    return token ? displayName(token) : "a creature";
+  }
+  return dice.view.characters[creature.characterId]?.name ?? "a character";
 }
 
 /** An attack every selected block has by name, with each creature's own roll of it. */
