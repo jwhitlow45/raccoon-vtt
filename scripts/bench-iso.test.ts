@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { CDPSession, Page } from "playwright-core";
-import { CAP_FIRST_ROW, gate, generatedDungeon, hexRelief, largestGate, partsPast, tetherWork, timedUntil } from "./bench-iso.ts";
+import { CAP_FIRST_ROW, gate, generatedDungeon, hexRelief, largestGate, onlyOf, partsPast, tetherWork, timedUntil } from "./bench-iso.ts";
 
 /*
  * The isometric bench's build rows (docs/design/design-v1-iso-area-shapes.md 6
@@ -118,5 +118,13 @@ describe("the parts of a pan's slow frames among building areas (docs/design/des
     const f = (ms: number, whole = false, sliced = false, rendered = false) => ({ ms, whole, sliced, rendered });
     const parts = [f(8, false, true), f(16), f(17, true, false, true), f(21, false, true), f(30, true, true, true)];
     assert.deepEqual(partsPast(parts, 16), { frames: 3, whole: 2, sliced: 2, rendered: 2, slicedAll: 3 });
+  });
+});
+
+describe("the rows `--only` names", () => {
+  test("words split on commas, or on semicolons when there are any, so a whole row name with its commas can be named", () => {
+    assert.deepEqual(onlyOf("hex relief,sunk 100 ft"), ["hex relief", "sunk 100 ft"]);
+    assert.deepEqual(onlyOf("pan, 12 px, hex relief rows; sunk 100 ft"), ["pan, 12 px, hex relief rows", "sunk 100 ft"]);
+    assert.equal(onlyOf(undefined), undefined);
   });
 });
