@@ -568,6 +568,14 @@ function IsoBoardImpl(props: IsoBoardProps) {
   // a prop only when it changes: a render never writes an older camera back, and one that changes nothing moves nothing. The applier goes to
   // the room only while this board shows.
   useLayoutEffect(() => {
+    /*
+     * A cull step repaints the relief whole (D-261030-538). A layout that
+     * keeps every run commits no node that would ask for it, and the kept
+     * picture then carries its strips from step to step: on a canvas drawn
+     * in software, where a clipped strip's edges differ a little from a
+     * whole draw's, they added up past HXPERF2-1's budget on CI.
+     */
+    if (renderedCull.current.key !== cullKey) reliefLayerRef.current?.batchDraw();
     renderedCull.current = { key: cullKey, box: cull };
     const want = live.camera ?? cam;
     if (needsApply(lastApplied.current, want, mainRef.current, reliefLayerRef.current?.getCanvas().getPixelRatio() ?? 0)) applyCamera(want);
