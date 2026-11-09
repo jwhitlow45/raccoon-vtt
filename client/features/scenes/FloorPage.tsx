@@ -11,7 +11,7 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { FLOOR_ROOT_ATTR, FLOOR_ROOTS } from "../floors/ids.ts";
 import { ConfirmButton } from "./controls.tsx";
-import { floorsTopFirst, GO_TO_FLOOR, heightOf, hideRefusal, orderAfterMove, PLAYERS_LINES, playersAt, removeRefusal, SHOW_HELP, stepHeight } from "./floorWords.ts";
+import { floorsTopFirst, GO_TO_FLOOR, heightOf, hideRefusal, moveBetweenRefusal, orderAfterMove, PLAYERS_LINES, playersAt, removeRefusal, SHOW_HELP, stepHeight } from "./floorWords.ts";
 
 /**
  * One floor's page inside the Floors group (docs/design/design-v1-floors.md
@@ -28,6 +28,7 @@ export function FloorPage(props: { floor: Scene; selectName: boolean; onBack(): 
   const shownId = useRoomView((s) => s.sceneId);
   const nameId = useId();
   const reasonId = useId();
+  const moveReasonId = useId();
   if (!view || !floor.floor) return null;
   const floors = floorsTopFirst(view, floor.id);
   const bottomFirst = floors.slice().reverse();
@@ -38,6 +39,10 @@ export function FloorPage(props: { floor: Scene; selectName: boolean; onBack(): 
   const remove = removeRefusal(view, floor);
   const open = at !== "not";
   const height = heightOf(floor);
+  // Stairs join floors next to each other, so a move that would put a floor between them is off, with the reason under the row.
+  const moveUp = moveBetweenRefusal(view, bottomFirst, floor.id, true);
+  const moveDown = moveBetweenRefusal(view, bottomFirst, floor.id, false);
+  const moveReason = moveUp ?? moveDown;
 
   const order = (up: boolean) => {
     const next = orderAfterMove(bottomFirst, floor.id, up);
@@ -89,13 +94,14 @@ export function FloorPage(props: { floor: Scene; selectName: boolean; onBack(): 
       </div>
       {/* Go to this floor moves the DM's view, not the floor, so it has a row apart from the stack's two moves, where it never wraps alone under them. */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-        <Button size="sm" icon="arrowUp" search="scenes.floor.order" disabled={level >= floors.length - 1} onClick={() => order(true)}>
+        <Button size="sm" icon="arrowUp" search="scenes.floor.order" disabled={level >= floors.length - 1 || moveUp !== null} aria-describedby={moveUp !== null ? moveReasonId : undefined} onClick={() => order(true)}>
           Move up
         </Button>
-        <Button size="sm" icon="arrowDown" disabled={level === 0} onClick={() => order(false)}>
+        <Button size="sm" icon="arrowDown" disabled={level === 0 || moveDown !== null} aria-describedby={moveDown !== null ? moveReasonId : undefined} onClick={() => order(false)}>
           Move down
         </Button>
       </div>
+      {moveReason !== null ? <Help id={moveReasonId}>{moveReason}</Help> : null}
       <div style={{ justifySelf: "start" }}>
         <Button size="sm" search="scenes.floor.show" pressed={shown} onClick={() => actions.showFloor(floor.id)}>
           {GO_TO_FLOOR}

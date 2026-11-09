@@ -3,6 +3,7 @@ import { FLOOR_HEIGHT } from "#shared/protocol.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { FLOOR_WORDS, floorsOf, onPlayersScene, startFloor, unhiddenPartyMember } from "#shared/rules/floors.ts";
 import { ownEntry } from "#shared/records.ts";
+import { LINK_WORDS } from "#shared/rules/floorLinks.ts";
 
 /*
  * The words and rules of the Floors group and a floor's page
@@ -12,6 +13,9 @@ import { ownEntry } from "#shared/records.ts";
  */
 
 type View = Pick<RoomState, "scenes" | "tokens" | "meta" | "characters" | "openFloors">;
+
+/** The marker an add puts in a candidate order for the floor it would make. */
+const NEW_FLOOR = "\u0000new";
 
 /** Where the players stand with a floor, for its row and its page. */
 export type PlayersAt = "here" | "reached" | "not";
@@ -126,4 +130,45 @@ export function heightOf(floor: Pick<Scene, "floor">): number {
 /** Why the scene cannot take another floor, or null. */
 export function addRefusal(count: number, sceneName: string): string | null {
   return count >= LIMITS.floorsPerScene ? FLOOR_WORDS.tooMany(sceneName) : null;
+}
+
+/**
+ * Why a change of the floors' order is off, or null: stairs join two floors
+ * that are next to each other, so a floor put between them (an add, Move up or
+ * Move down) is refused, in the words of 7.3 (docs/design/design-v1-floors.md
+ * phase 2). `order` is the order the change would make, bottom first. The
+ * server refuses for real (floorProblem), so this keeps the buttons honest.
+ */
+export function stairsBetweenRefusal(view: Pick<RoomState, "scenes" | "floorLinks">, order: readonly string[]): string | null {
+  const at = new Map(order.map((id, i) => [id, i]));
+  const links = Object.values(view.floorLinks ?? {}).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const link of links) {
+    // One end speaks for the pair.
+    if (link.id > link.pair) continue;
+    const here = at.get(link.sceneId);
+    const there = at.get(link.to);
+    if (here === undefined || there === undefined || Math.abs(here - there) === 1) continue;
+    const [lower, upper] = [link.sceneId, link.to].sort((a, b) => (ownEntry(view.scenes, a)?.floor?.level ?? 0) - (ownEntry(view.scenes, b)?.floor?.level ?? 0));
+    const name = (id: string | undefined) => {
+      const scene = id === undefined ? undefined : ownEntry(view.scenes, id);
+      return scene?.floor?.name ?? scene?.name ?? "";
+    };
+    return LINK_WORDS.between(link.kind, name(lower), name(upper));
+  }
+  return null;
+}
+
+/** Why Add a floor above or below the floor shown is off for its stairs, or null. `floors` is bottom first. */
+export function addBetweenRefusal(view: Pick<RoomState, "scenes" | "floorLinks">, floors: readonly Pick<Scene, "id">[], besideId: string, side: "above" | "below"): string | null {
+  const ids = floors.map((f) => f.id);
+  const at = ids.indexOf(besideId);
+  if (at < 0) return null;
+  ids.splice(side === "above" ? at + 1 : at, 0, NEW_FLOOR);
+  return stairsBetweenRefusal(view, ids);
+}
+
+/** Why Move up or Move down is off for its stairs, or null. `floors` is bottom first. */
+export function moveBetweenRefusal(view: Pick<RoomState, "scenes" | "floorLinks">, floors: readonly Pick<Scene, "id">[], id: string, up: boolean): string | null {
+  const next = orderAfterMove(floors, id, up);
+  return next === null ? null : stairsBetweenRefusal(view, next);
 }

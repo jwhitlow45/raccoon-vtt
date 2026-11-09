@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { RoomState, Scene } from "#shared/model.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
@@ -9,7 +9,7 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { FLOOR_ROOT_ATTR, FLOOR_ROOTS } from "../floors/ids.ts";
 import { FloorPage } from "./FloorPage.tsx";
-import { addRefusal, FLOOR_MARKS, floorRowLabel, floorsSummary, floorsTopFirst, ON_SCREEN, playersAt } from "./floorWords.ts";
+import { addBetweenRefusal, addRefusal, FLOOR_MARKS, floorRowLabel, floorsSummary, floorsTopFirst, ON_SCREEN, playersAt } from "./floorWords.ts";
 import { SCENE_GROUP_ICONS, SCENE_GROUP_LABELS } from "./settingsFolds.ts";
 
 type Side = "above" | "below";
@@ -30,6 +30,8 @@ export function FloorsGroup(props: { scene: Scene; fold: { open: boolean; onTogg
   const actions = useRoomActions();
   // The scenes alone, since the group stays mounted while folded and every op elsewhere in the room would draw it again.
   const scenes = useRoomView((s) => s.view?.scenes);
+  const floorLinks = useRoomView((s) => s.view?.floorLinks);
+  const reasonId = useId();
   const shownId = useRoomView((s) => s.sceneId);
   const [page, setPage] = useState<{ id: string; selectName: boolean } | null>(null);
   const [adding, setAdding] = useState<Side | null>(null);
@@ -44,9 +46,14 @@ export function FloorsGroup(props: { scene: Scene; fold: { open: boolean; onTogg
   const mainName = scene.name;
   const refusal = addRefusal(floors.length, mainName);
   const pageFloor = page ? scenes[page.id] : undefined;
+  // Stairs join floors next to each other, so an add that would put a floor between them is off, with its reason under the buttons.
+  const linkView = { scenes, ...(floorLinks ? { floorLinks } : {}) };
+  const above = refusal ?? addBetweenRefusal(linkView, floors, scene.id, "above");
+  const below = refusal ?? addBetweenRefusal(linkView, floors, scene.id, "below");
+  const reasons = [...new Set([above, below].filter((r): r is string => r !== null))];
 
   const add = (side: Side) => {
-    if (adding !== null || refusal !== null) return;
+    if (adding !== null || (side === "above" ? above : below) !== null) return;
     const id = actions.newId();
     setAdding(side);
     const n = actions.dispatch(
@@ -88,14 +95,14 @@ export function FloorsGroup(props: { scene: Scene; fold: { open: boolean; onTogg
               <Help>{mainName} has one floor. Add one above or below to build a tower, a cellar or a roof.</Help>
             )}
             <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-              <Button size="sm" icon="arrowUp" search="scenes.floors.add-above" busy={adding === "above"} disabled={refusal !== null || adding === "below"} onClick={() => add("above")}>
+              <Button size="sm" icon="arrowUp" search="scenes.floors.add-above" busy={adding === "above"} disabled={above !== null || adding === "below"} aria-describedby={above !== null ? reasonId : undefined} onClick={() => add("above")}>
                 Add a floor above
               </Button>
-              <Button size="sm" icon="arrowDown" search="scenes.floors.add-below" busy={adding === "below"} disabled={refusal !== null || adding === "above"} onClick={() => add("below")}>
+              <Button size="sm" icon="arrowDown" search="scenes.floors.add-below" busy={adding === "below"} disabled={below !== null || adding === "above"} aria-describedby={below !== null ? reasonId : undefined} onClick={() => add("below")}>
                 Add a floor below
               </Button>
             </div>
-            {refusal !== null ? <Help>{refusal}</Help> : null}
+            {reasons.length > 0 ? <Help id={reasonId}>{reasons.join(" ")}</Help> : null}
           </>
         )}
       </Group>

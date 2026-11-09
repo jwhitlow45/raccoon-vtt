@@ -7,8 +7,10 @@ import { LIMITS } from "#shared/limits.ts";
 import type { RoomState } from "#shared/model.ts";
 import { FLOOR_HEIGHT } from "#shared/protocol.ts";
 import { room, scene, token } from "#shared/testutil.ts";
+import { ATTIC, GROUND, UPPER, tower as linkedTower, withStairs } from "#shared/floorLinksTestutil.ts";
+import { LINK_WORDS } from "#shared/rules/floorLinks.ts";
 import { FLOOR_SEARCH } from "../floors/ids.ts";
-import { addRefusal, FLOOR_MARKS, floorRowLabel, floorSettingsLine, floorsSummary, floorsTopFirst, GO_TO_FLOOR, heightOf, hideRefusal, ON_SCREEN, orderAfterMove, playersAt, removeRefusal, stepHeight } from "./floorWords.ts";
+import { addBetweenRefusal, addRefusal, FLOOR_MARKS, floorRowLabel, floorSettingsLine, floorsSummary, floorsTopFirst, GO_TO_FLOOR, heightOf, hideRefusal, ON_SCREEN, moveBetweenRefusal, orderAfterMove, playersAt, removeRefusal, stepHeight } from "./floorWords.ts";
 
 /*
  * The Floors group's and a floor's page's words and rules
@@ -148,5 +150,37 @@ describe("the search anchors", () => {
     for (const [name, id] of Object.entries(FLOOR_SEARCH)) {
       assert.equal((source.match(new RegExp(`search="${id.replaceAll(".", "\\.")}"`, "g")) ?? []).length, 1, `${name}: ${id}`);
     }
+  });
+});
+
+describe("stairs between floors (docs/design/design-v1-floors.md phase 2, 7.3)", () => {
+  const floors = (state: RoomState) => floorsTopFirst(state, GROUND).reverse();
+  const joins = LINK_WORDS.between("stairs", "Ground floor", "Upper floor");
+
+  test("an add between two linked floors is off, with the stairs' words, and one beside them is not", () => {
+    const state = withStairs();
+    // Above Ground floor or below Upper floor puts a floor between them.
+    assert.equal(addBetweenRefusal(state, floors(state), GROUND, "above"), joins);
+    assert.equal(addBetweenRefusal(state, floors(state), UPPER, "below"), joins);
+    assert.equal(addBetweenRefusal(state, floors(state), GROUND, "below"), null);
+    assert.equal(addBetweenRefusal(state, floors(state), UPPER, "above"), null);
+    assert.equal(addBetweenRefusal(state, floors(state), ATTIC, "above"), null);
+  });
+
+  test("a move that takes a floor from beside its stairs is off, and a swap of the two they join is not", () => {
+    const state = withStairs();
+    // Moving Ground floor up swaps it with Upper floor: they stay next to each other.
+    assert.equal(moveBetweenRefusal(state, floors(state), GROUND, true), null);
+    // Moving Upper floor up swaps it with Attic, which leaves Ground floor two levels from it.
+    assert.equal(moveBetweenRefusal(state, floors(state), UPPER, true), joins);
+    assert.equal(moveBetweenRefusal(state, floors(state), ATTIC, false), joins);
+    assert.equal(moveBetweenRefusal(state, floors(state), ATTIC, true), null);
+  });
+
+  test("a ladder reads in its own words, and a room with no stairs refuses nothing", () => {
+    const ladder = withStairs(linkedTower(), { kind: "ladder" });
+    assert.equal(addBetweenRefusal(ladder, floors(ladder), GROUND, "above"), LINK_WORDS.between("ladder", "Ground floor", "Upper floor"));
+    const plain = linkedTower();
+    assert.equal(addBetweenRefusal(plain, floors(plain), GROUND, "above"), null);
   });
 });
