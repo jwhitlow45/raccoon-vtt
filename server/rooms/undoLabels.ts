@@ -111,15 +111,17 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return op.open ? `showing ${floor(before, op.sceneId)} to players` : `hiding ${floor(before, op.sceneId)} from players`;
     // Stairs and ladders by their far floor (docs/design/design-v1-floors.md phase 2, 7.2).
     case "floorLink.put":
-      return LINK_LABELS.placed(op.link?.kind ?? "stairs", (op.link && before.scenes[op.link.to]?.floor?.name) ?? "a floor");
+      return LINK_LABELS.placed(op.link?.kind ?? "stairs", (op.link && ownEntry(before.scenes, op.link.to)?.floor?.name) ?? "a floor");
     case "floorLink.update": {
-      const link = before.floorLinks?.[op.linkId];
-      if (op.patch.locked !== undefined && op.patch.kind === undefined) return LINK_LABELS.lock(link?.kind ?? "stairs", op.patch.locked);
-      return LINK_LABELS.kind(link?.kind ?? "stairs");
+      const kind = ownEntry(before.floorLinks, op.linkId)?.kind ?? "stairs";
+      // A new kind names the step, and a kind sent as it is leaves the lock to name it, as the pane sends the two apart.
+      if (op.patch?.kind !== undefined && op.patch.kind !== kind) return LINK_LABELS.kind(kind);
+      if (op.patch?.locked !== undefined) return LINK_LABELS.lock(kind, op.patch.locked);
+      return LINK_LABELS.kind(kind);
     }
     case "floorLink.delete": {
-      const link = before.floorLinks?.[op.linkId];
-      return LINK_LABELS.removed(link?.kind ?? "stairs", (link && before.scenes[link.to]?.floor?.name) ?? "a floor");
+      const link = ownEntry(before.floorLinks, op.linkId);
+      return LINK_LABELS.removed(link?.kind ?? "stairs", (link && ownEntry(before.scenes, link.to)?.floor?.name) ?? "a floor");
     }
     case "token.create":
       return `adding ${tokenName(op.token)}`;
@@ -146,8 +148,9 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `deleting ${token(op.tokenId)}`;
     case "token.move":
       return op.teleport ? `teleporting ${token(op.tokenId)}` : `moving ${token(op.tokenId)}`;
+    // A player's label names the way and the kind alone, never the far floor (6.3).
     case "token.climb": {
-      const link = before.floorLinks?.[op.linkId];
+      const link = ownEntry(before.floorLinks, op.linkId);
       return climbLabel(token(op.tokenId), (link && linkDir(before, link)) ?? "up", link?.kind ?? "stairs");
     }
     case "token.countLeg":
