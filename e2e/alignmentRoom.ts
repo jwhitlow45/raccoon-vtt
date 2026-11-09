@@ -9894,6 +9894,13 @@ export function musicPlayerAlignmentTests(): void {
           // At 100% the chip has room from 700 px. On an upright phone the speaker beside it takes its room, since a phone's chip leaves before the gaps tighten (docs/design/design-v1-volume.md 3), and at 130% a bar holding the room's fight may give it way into the DM menu, as at the smallest bars (SL-C, design-v1-qol.md 4, The give-way, step 6).
           const shown = await showsWithin(chip, 5_000);
           if (!shown && at.scale === 1 && at.size.width >= 700) sweep.lines.push(`${sweep.at} qe-now-chip: no Now playing chip while music plays`);
+          // With the speaker on the bar, an upright phone at 100% gives the chip to the DM menu, which holds Now playing (D-261108-409).
+          if (at.size.width === 390 && at.scale === 1 && (await visible(page.locator("header[data-rvtt-topbar] [data-volume-button]")))) {
+            if (shown) sweep.lines.push(`${sweep.at} qe-now-chip: the chip is on the bar of an upright phone at 100% with the speaker`);
+            const dmMenu = await openChipMenu(page, "dm", "dm");
+            if (!dmMenu || (await chipItem(dmMenu, "nowPlaying").count()) === 0) sweep.lines.push(`${sweep.at} qe-now-chip: the DM menu holds no Now playing while the chip is off the bar`);
+            if (dmMenu) await shutChipMenu(page, dmMenu);
+          }
           if (shown) {
             await both(sweep, page, "qe-now-chip", chip);
             await both(sweep, page, "qe-now-bar", barRow(page));
@@ -10170,14 +10177,14 @@ async function qolRestScreens(sweep: Sweep, page: Page, at: { size: Size; scale:
   await escapeAll(page);
   await sweep.measure(page, "qe-bar", barRow(page));
   await sweep.measure(page, "qe-chip-dm", barChip(page, "dm"));
-  // Search stands after the chips: its field, its icon where the row is short, and the Panels list's field once even that has no room (design-v1-qol.md 4, The top bar's order). It never leaves a bar 900 px wide, and an upright phone at 100% still has room for its icon (S3).
+  // Search stands after the chips: its field, its icon where the row is short, and the Panels list's field once even that has no room (design-v1-qol.md 4, The top bar's order). It never leaves a bar 900 px wide.
   const search = page.locator('header[data-rvtt-topbar] [data-search-open="bar"]');
-  // The speaker's 44 px came after S3: with it on the bar, a phone's Search gives way to the Panels list's field first, as the give-way's order has it (docs/design/design-v1-volume.md 3).
-  const iconAt390 = at.size.width === 390 && at.scale === 1 && !(await visible(page.locator("header[data-rvtt-topbar] [data-volume-button]")));
-  if (await visible(search)) {
-    await sweep.measure(page, "qe-search-bar", search);
-    if (iconAt390 && (await search.getAttribute("data-search-form")) !== "icon") sweep.lines.push(`${sweep.at} qe-search-bar: Search is not its icon on an upright phone at 100%`);
-  } else if (wide || iconAt390) sweep.lines.push(`${sweep.at} qe-search-bar: Search is not on the bar`);
+  // With the speaker on the bar, an upright phone at 100% gives Search to the Panels list's field, and the check below holds the field (D-261108-409, docs/design/design-v1-volume.md 3).
+  const phoneGivesSearch = at.size.width === 390 && at.scale === 1 && (await visible(page.locator("header[data-rvtt-topbar] [data-volume-button]")));
+  if (phoneGivesSearch) {
+    if (await visible(search)) sweep.lines.push(`${sweep.at} qe-search-bar: Search is on the bar of an upright phone at 100% with the speaker, not in the Panels field`);
+  } else if (await visible(search)) await sweep.measure(page, "qe-search-bar", search);
+  else if (wide) sweep.lines.push(`${sweep.at} qe-search-bar: Search is not on the bar`);
 
   let menu = await openChipMenu(page, "dm", "dm");
   if (!menu) return sweep.missing(page, "qe-dm-menu", "the DM chip opened no menu");
