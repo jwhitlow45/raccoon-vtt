@@ -62,7 +62,7 @@ export type HandoffPost = {
   v: 1;
   page: string;
   kind: PageKind;
-  /** Enabled (Room sound on, or a display's Sound on with no blackout and Only DM devices play off, SoundHost.tsx soundEnabled) and unlocked, its context running. */
+  /** Enabled (unmuted, or a display's Sound on with no blackout and Only DM devices play off, SoundHost.tsx soundEnabled) and unlocked, its context running. */
   eligible: boolean;
   /** It plays: the owner. A post with this false after it was true is its release. */
   owns: boolean;

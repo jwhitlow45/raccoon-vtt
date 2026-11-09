@@ -357,7 +357,7 @@ export class Voices {
   }
 
   /**
-   * Every voice at once, as for Room sound off, a handoff or the engine
+   * Every voice at once, as for a mute, a handoff or the engine
    * going: each fades over `ms`. The plan goes too, with the start that
    * waited for an element (a Skip in a crossfade): it would otherwise start
    * on a page that stopped, fetching and decoding under the lease's

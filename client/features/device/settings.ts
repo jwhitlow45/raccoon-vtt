@@ -486,7 +486,7 @@ export const adoptPanelWidth = panelWidthSetting.adopt;
 
 let followingPanelWidth = false;
 
-/** Another window of the app that changes the width, or clears storage, moves this one's panel too, from the first read, as room sound follows (followOtherWindows). */
+/** Another window of the app that changes the width, or clears storage, moves this one's panel too, from the first read, as the mute and the sound mix follow (followOtherWindows). */
 function followPanelWidth(): void {
   if (followingPanelWidth || typeof window === "undefined") return;
   followingPanelWidth = true;
