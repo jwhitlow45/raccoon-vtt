@@ -45,7 +45,7 @@ Status: draft 3, 2026-10-18, revised for review rounds 1 and 2 and the project o
   8. **Finding and disarming**: up to two checks to find it ("Wisdom (Perception) DC 15: the pressure plate"), "Hint when a creature's Passive Perception would notice it" (on with a Perception check), and how it is disarmed, a line with an optional check.
   9. **DM note**, up to 1,000 characters, shown on the card when it goes off.
 - The pane's foot: **Armed** and **Found** switches, **Ask to search**, **Ask to disarm**, **Set it off**, and Delete on a second tap. Each change sends `trap.update` with only the fields it changed, so two DM devices editing different fields never undo each other, and an edit never overwrites the server's own writes. Arming a trap with no uses left asks for its uses first. A pit that would take the scene past its wall limits is refused here, never when it opens (6.7).
-- **On the DM's map** (a `traps` entry in the layer registry, board layer, order 35, under the fog as areas are): squares hatched in the theme's danger color, a wire as a dashed line with a pin at each end, a door trap as a badge on the door, each with the wolf-trap icon and its name. Armed is strong, sprung grey, disarmed a grey dashed outline, found marked with an eye. The hits draw faintly while the pane is open. Redrawn on change only. Zoomed out to where a Medium creature's name hides (a square under 14 screen px, canvas/useBoardText.ts), a trap's name hides too and its badge stays, for the DM and players alike, so names on a crowded map never run into each other or the creatures' (`trapNameShown`).
+- **On the DM's map** (a `traps` entry in the layer registry, board layer, order 35, under the fog as areas are, and in Top-down a `trapNames` entry on the overlay, order 36, which draws each name above the fog): squares hatched in the theme's danger color, a wire as a dashed line with a pin at each end, a door trap as a badge on the door, each with the wolf-trap icon and its name. Armed is strong, sprung grey, disarmed a grey dashed outline, found marked with an eye. The hits draw faintly while the pane is open. Redrawn on change only. Zoomed out to where a Medium creature's name hides (a square under 14 screen px, canvas/useBoardText.ts), a trap's name hides too and its badge stays, for the DM and players alike, so names on a crowded map never run into each other or the creatures' (`trapNameShown`).
 
 ### 4.2 Arming, disarming and setting off
 
@@ -414,6 +414,8 @@ After round 2 the owner answered movement's Plant Growth question (the larger co
 - **The snapped spot's test** is op 35's whole stand test, squeezes included, so a creature that can squeeze stands squeezed there only where a real narrow space lets it, as on any spot.
 - **Tests that pinned op 51** in shared/reducer/ride.file.test.ts now pass op 51 for the stops they were written for, and two of them check the new stops as well.
 - **HEX-TRAP-SEAT-GAP** stays open: both rules run on squares only, and the gap is the hex seat rule for passengers on a holder a cut lands squeezed (moveLeg.ts `endSeatsApart`), which the trap step would have to read for its landing.
+
+**Live play 33.** In Top-down a found trap's name draws on the overlay layer, after the fog and the dark, for the DM and players alike, so fog over ground its zone lies on never cuts it (D-261109-090). The zone and the badge stay under the fog. So the name also draws over the art of a creature standing on its zone (D-261109-158).
 
 ## Appendix A. Presets (SRD 5.2.1, levels 1–4, then the "At Higher Levels" rows)
 

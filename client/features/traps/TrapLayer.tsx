@@ -35,7 +35,8 @@ const HATCH_PX = 7;
 
 /**
  * Traps on the board layer (docs/design/design-v1-traps.md 4.1 and 4.5), under the
- * fog as areas are, so a player's map never shows one through it.
+ * fog as areas are, so a player's map never shows one through it. In
+ * Top-down a trap's name draws above the fog instead (TrapNameLayer).
  *
  * The DM sees every trap on the scene: squares hatched in the danger
  * color, a wire as a dashed line with a pin at each end, a door trap as a
@@ -272,7 +273,7 @@ const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Re
   if (!badge) return null;
   const found = dm && trap.found;
   const iso = props.iso;
-  // Top-down draws the badge and name under the fog, so each stands only where every sub-cell under it is revealed (5.2).
+  // Top-down draws the badge under the fog, so it stands only where every sub-cell under it is revealed (5.2).
   const badgeHere = drawsHere(iso, iso ? markStands(iso.fog, trapBadgeBox(badge, scale, found)) : true);
   // Top-down draws the name above the fog (TrapNameLayer), so a found trap's name is never cut by fog over ground its zone lies on.
   const nameHere = name !== null && iso !== null && drawsHere(iso, pillStands(iso.fog, { ...name, scale }));
