@@ -96,6 +96,30 @@ describe("view as a player (docs/design/design-v1-per-player-vision.md 7.4)", ()
     assert.equal(previewNotice(undefined), "You are viewing as a player. Nothing you do here is saved. Whispers between players are not shown.");
   });
 
+  test("a floor pick goes to the preview socket's own store, which follows the player as their device does, and sends nothing (design-v1-floors.md 7.3)", () => {
+    const src = source();
+    const picked: (string | null)[] = [];
+    const preview = createPreview(src, thorn, {
+      name: "Thorn",
+      showFloor: (sceneId) => {
+        picked.push(sceneId);
+        src.setState({ sceneId: sceneId ?? cave, floorFollow: { sceneId: cave, tokenId: "t-thorn" }, floorShift: { n: 1, tokenId: null } });
+      },
+    });
+    try {
+      preview.actions.showFloor("upper");
+      preview.actions.showFloor(null);
+      assert.deepEqual(picked, ["upper", null]);
+      const state = preview.store.getState();
+      assert.equal(state.sceneId, cave);
+      assert.deepEqual(state.floorFollow, { sceneId: cave, tokenId: "t-thorn" }, "Floors marks the player's own floor by it");
+      assert.deepEqual(state.floorShift, { n: 1, tokenId: null });
+      assert.deepEqual(state.toasts, [], "a pick is not refused");
+    } finally {
+      preview.dispose();
+    }
+  });
+
   test("a dropped token snaps back, and the banner hears about it", async () => {
     const src = source();
     let refused = 0;

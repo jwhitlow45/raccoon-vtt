@@ -122,6 +122,7 @@ export function PlayerPreview(props: {
     socket.start();
     const preview = createPreview(room.store, memberId, {
       name: nameRef.current,
+      showFloor: (sceneId) => room.showFloor(sceneId),
       onRefuse: () => {
         setFlash(true);
         if (flashTimer.current) clearTimeout(flashTimer.current);

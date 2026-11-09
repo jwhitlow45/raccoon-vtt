@@ -1,5 +1,6 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { uuidv7 } from "#shared/ids.ts";
+import type { SceneId } from "#shared/model.ts";
 import { realClock, type Clock } from "../../state/timing.ts";
 import { drawnToasts, heldToasts, type RoomStore, type RoomUi } from "../../state/store.ts";
 import { addToSelection, bringToken, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "../../state/selection.ts";
@@ -131,18 +132,21 @@ const SNAP_BACK_MS = 250;
  * `onRefuse` lets the preview's own banner say so. Without it, a toast
  * does.
  */
-export function createPreview(source: PreviewSource, memberId: string, options: { name?: string; onRefuse?: () => void } = {}): Preview {
+export function createPreview(source: PreviewSource, memberId: string, options: { name?: string; onRefuse?: () => void; showFloor?(sceneId: SceneId | null): void } = {}): Preview {
   const notice = previewNotice(options.name);
   let toastSeq = 0;
   let snapTimer: ReturnType<typeof setTimeout> | null = null;
 
   // What the player's own room shows, as their socket holds it. The view keeps its identity until the server changes it.
-  const derive = (src: RoomView): Pick<RoomView, "view" | "floorView" | "sceneId" | "projectedSceneId" | "connection" | "online" | "roomId" | "ephemeral"> => ({
+  const derive = (src: RoomView): Pick<RoomView, "view" | "floorView" | "sceneId" | "projectedSceneId" | "floorFollow" | "floorShift" | "connection" | "online" | "roomId" | "ephemeral"> => ({
     roomId: src.roomId,
     view: src.view,
     floorView: src.floorView,
     sceneId: src.sceneId,
     projectedSceneId: src.projectedSceneId,
+    // The floor the player's device follows, so Floors marks the player's own floor here as there (docs/design/design-v1-floors.md 7.3). The Viewing notice stays off in a preview, whose banner holds that place.
+    floorFollow: src.floorFollow,
+    floorShift: src.floorShift,
     connection: src.connection,
     online: src.online,
     ephemeral: src.ephemeral,
@@ -165,7 +169,7 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
   const refresh = () => store.setState(derive(source.getState()));
 
   const unsubscribe = source.subscribe((s, prev) => {
-    if (s.view !== prev.view || s.sceneId !== prev.sceneId || s.connection !== prev.connection || s.online !== prev.online || s.ephemeral !== prev.ephemeral) refresh();
+    if (s.view !== prev.view || s.floorView !== prev.floorView || s.sceneId !== prev.sceneId || s.floorFollow !== prev.floorFollow || s.floorShift !== prev.floorShift || s.connection !== prev.connection || s.online !== prev.online || s.ephemeral !== prev.ephemeral) refresh();
   });
 
   const refuse = () => {
@@ -255,7 +259,10 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
     },
     sendEph() {},
     switchScene() {},
-    showFloor() {},
+    // A floor pick is the preview socket's store's own, as on the player's device: it sends nothing, and that store holds only the floors the player holds.
+    showFloor(sceneId) {
+      options.showFloor?.(sceneId);
+    },
     undo: refuse,
     redo: refuse,
     newId: () => uuidv7(),

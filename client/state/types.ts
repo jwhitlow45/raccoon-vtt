@@ -549,7 +549,8 @@ export type RoomView = {
    * A player's device: what it follows while nothing is picked
    * (docs/design/design-v1-floors.md 7.3), their creature and its floor, or
    * with none the start floor alone. The Viewing notice's Back returns
-   * there. Absent for a DM and a table display, and in a player preview.
+   * there. Absent for a DM and a table display. A player preview copies
+   * its socket store's, for the Floors menu's marks (features/dm/preview.ts).
    */
   floorFollow?: FloorFollow | null;
   /**
