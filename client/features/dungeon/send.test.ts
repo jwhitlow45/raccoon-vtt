@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import fc from "fast-check";
 import type { RoomState } from "#shared/model.ts";
-import type { ClientOp } from "#shared/protocol.ts";
+import { clientOpSchema, type ClientOp } from "#shared/protocol.ts";
 import { holds } from "#shared/propertyTestutil.ts";
 import type { OnAnswer, OpAnswer, RoomActions, RoomView } from "../../state/types.ts";
 import { dialogScene, dressedRooms, HAND_SETTINGS, handKey, twoRooms } from "./handPlans.ts";
 import { PAGE_PLACEHOLDER, withIds } from "./ops.ts";
 import { landAll, previewOf, scratchRoom } from "./scratch.ts";
-import { dungeonOutcome, madeIds, sceneContents, sendDungeon, type DungeonOutcome, type SendRoom } from "./send.ts";
+import { dungeonOutcome, madeIds, sceneContents, sendDungeon, warmOpChecks, type DungeonOutcome, type SendRoom } from "./send.ts";
 import { DEFAULT_CONTEXT, DEFAULT_SETTINGS } from "./settings.ts";
 import { NO_ANSWERS } from "../uvtt/rules.ts";
 
@@ -358,4 +358,16 @@ test("DG-B: the outcome rule by itself", () => {
   assert.deepEqual(dungeonOutcome({ ...taken, unknown: 2 }, "taken", { exists: true, same: true }), { k: "complete", checked: true });
   assert.deepEqual(dungeonOutcome({ ...taken, unknown: 2 }, "taken", { exists: true, same: false }), { k: "unconfirmed" });
   assert.deepEqual(dungeonOutcome({ ...taken, unknown: 2 }, "taken", { exists: true, same: null }), { k: "unconfirmed" });
+});
+
+test("warmOpChecks parses each of a preview's ops once and leaves them as they were", () => {
+  const { ops } = made(true).made;
+  const before = JSON.stringify(ops);
+  const parsed: ClientOp[] = [];
+  warmOpChecks(ops, (op) => parsed.push(op));
+  assert.equal(parsed.length, ops.length);
+  assert.ok(parsed.every((op, i) => op === ops[i]));
+  assert.equal(JSON.stringify(ops), before);
+  // The store's own check, which the press runs again, takes every one.
+  warmOpChecks(ops, (op) => assert.ok(clientOpSchema.safeParse(op).success, op.t));
 });

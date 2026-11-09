@@ -47,7 +47,7 @@ import {
   TRAPS_MAX,
   type SizeChoice,
 } from "./settings.ts";
-import { sendDungeon } from "./send.ts";
+import { sendDungeon, warmOpChecks } from "./send.ts";
 import {
   DEAD_ENDS_HELP,
   DENSITY_HELP,
@@ -242,6 +242,12 @@ export function GenerateDialog(props: {
     // The plan and the journal are what the check reads. `settings` and `sceneName` only reshape the page and come with a new plan.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [choices.key, plan, journal, myColor, feetPerCell]);
+  // The preview's ops parsed once as it lands, in a task of their own, so the press's parse finds zod's checks built (send.ts warmOpChecks).
+  useEffect(() => {
+    if (!current) return;
+    const timer = setTimeout(() => warmOpChecks(current.ops), 0);
+    return () => clearTimeout(timer);
+  }, [current]);
   const canMake = !locked && parsed.ok && current !== null && current.summary.rooms >= 2;
 
   const close = () => props.onClose(sceneMayExist.current);

@@ -1,6 +1,6 @@
 import type { BuildChunk, JournalPage, Light, Pin, RoomState, Stamp, Token, Trap, TrapRig } from "#shared/model.ts";
 import { stableStringify } from "#shared/project.ts";
-import type { ClientOp } from "#shared/protocol.ts";
+import { clientOpSchema, type ClientOp } from "#shared/protocol.ts";
 import type { OpAnswer, RoomActions } from "../../state/types.ts";
 import type { RoomViewStore } from "../../state/view.ts";
 import { addAnswer, CHECK_MS, movedOn, NO_ANSWERS, sceneShown, type Answers } from "../uvtt/rules.ts";
@@ -95,6 +95,17 @@ export function dungeonOutcome(answers: Answers, created: OpAnswer, room: { exis
   if (created === "refused" || !room.exists) return { k: "none", lost: created !== "refused" && answers.unknown > 0 };
   if (answers.refused > 0) return { k: "partial" };
   return room.same === true ? { k: "complete", checked: true } : { k: "unconfirmed" };
+}
+
+/**
+ * Parses a preview's ops once it lands, in a task of its own, so Make's
+ * press finds zod's checks for each kind of op already built and run: the
+ * first parse of a kind builds them, and the store parses every op again as
+ * it queues it, all in the press's one task (D-261107-263). What it answers
+ * is dropped.
+ */
+export function warmOpChecks(ops: readonly ClientOp[], parse: (op: ClientOp) => unknown = (op) => clientOpSchema.safeParse(op)): void {
+  for (const op of ops) parse(op);
 }
 
 /**
