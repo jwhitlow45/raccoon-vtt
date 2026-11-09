@@ -1220,18 +1220,22 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
 
   test("9b. past the saves budget Ana's editor keeps the draft and offers Save again after a few seconds, while her HP change goes through at once", async () => {
     // Deletes from another device of Ana's use her budget up, until one is refused for it: a delete counts, refused or not.
+    // A token comes back every 6 s, so the budget is spent again the moment before Save, never trusted from before the page's own steps (COMP-FLAKE).
     const cookie = (await anaContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     const anaOps = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
-    let spent = false;
-    for (let i = 0; i < 20 && !spent; i++) {
-      await anaOps.send({ t: "companionBlock.delete", blockId: randomUUID() }).catch((err: Error) => (spent = /Too many stat block saves/.test(err.message)));
-    }
-    assert.ok(spent, "the budget ran out");
+    const spendBudget = async () => {
+      let spent = false;
+      for (let i = 0; i < 20 && !spent; i++) {
+        await anaOps.send({ t: "companionBlock.delete", blockId: randomUUID() }).catch((err: Error) => (spent = /Too many stat block saves/.test(err.message)));
+      }
+      assert.ok(spent, "the budget ran out");
+    };
     await openSideTab(ana, "Characters");
     await ana.getByRole("button", { name: /^Stat blocks \(\d+\)$/ }).click();
     await ana.getByRole("button", { name: "New stat block" }).click();
     const editor = ana.getByRole("dialog", { name: "New stat block for Bree" });
     await editor.getByRole("textbox", { name: "Name", exact: true }).fill("Ember Spirit");
+    await spendBudget();
     await editor.getByRole("button", { name: "Save", exact: true }).click();
     await editor.getByText("Too many stat block saves at once. Wait a few seconds, then save again.").waitFor();
     await editor.getByText("You can save again in a few seconds.").waitFor();
