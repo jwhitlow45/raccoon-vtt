@@ -688,6 +688,56 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
     });
     assert.deepEqual(edges, [0, 0, 0], "the labels start at the row's edge");
     await shots.take(tv, "display-volume-menu-50");
+    // A phone used as a display is in scope: 390 x 844 at 100% and at 130%, which Chrome lays out as 300 x 649. No radio is cut or tight,
+    // and the name sits above the radios where the row is short. The TV keeps it beside them.
+    type Rect = { left: number; right: number; top: number; bottom: number; width: number };
+    type El = { getBoundingClientRect(): Rect; scrollWidth: number; clientWidth: number; querySelector(q: string): El | null; querySelectorAll(q: string): El[] };
+    const readVolume = () =>
+      menu.evaluate((m) => {
+        const group = (m as unknown as El).querySelector('[role="group"][aria-label="Volume"]')!;
+        const box = (el: El) => el.getBoundingClientRect();
+        return {
+          group: box(group),
+          label: box(group.querySelector("span")!),
+          radios: Array.from(group.querySelectorAll('[role="menuitemradio"]')).map((r) => ({ box: box(r), cut: r.scrollWidth - r.clientWidth })),
+        };
+      });
+    const sizes = [
+      { size: TV, name: "tv", labelAbove: false },
+      { size: { width: 390, height: 844 }, name: "390", labelAbove: true },
+      { size: { width: 300, height: 649 }, name: "390-130", labelAbove: true },
+    ] as const;
+    try {
+      for (const { size, name, labelAbove } of sizes) {
+        await tv.setViewportSize(size);
+        await menu.waitFor();
+        let last = "";
+        const read = await waitFor(`the menu settled at ${size.width} px`, async () => {
+          const now = await readVolume();
+          const same = JSON.stringify(now) === last;
+          last = JSON.stringify(now);
+          return same ? now : null;
+        });
+        const at = `at ${size.width} px`;
+        for (const r of read.radios) {
+          assert.ok(r.cut <= 0, `a Volume radio is cut ${at}: ${r.cut} px`);
+          assert.ok(r.box.left >= read.group.left - 0.5 && r.box.right <= read.group.right + 0.5, `a Volume radio runs past its row ${at}`);
+        }
+        const radioTop = Math.min(...read.radios.map((r) => r.box.top));
+        if (labelAbove) assert.ok(read.label.bottom <= radioTop + 0.5, `the Volume name is not above its radios ${at}`);
+        else assert.ok(read.label.top >= radioTop - 0.5 && read.label.bottom <= Math.max(...read.radios.map((r) => r.box.bottom)) + 0.5, `the Volume name is not beside its radios ${at}`);
+        if (name === "tv") assert.equal(new Set(read.radios.map((r) => Math.round(r.box.top))).size, 1, "the radios are on one row on the TV");
+        else {
+          const found = await measureAlignment(menu);
+          const lines = alignmentLines(found, `display menu ${at}`);
+          assert.deepEqual(lines, [], lines.join("\n"));
+          assert.equal(Math.round(read.label.left), Math.round(read.group.left), `the Volume name starts at the row's edge ${at}`);
+        }
+        await shots.take(tv, `display-volume-menu-${name}`);
+      }
+    } finally {
+      await tv.setViewportSize(TV);
+    }
     await tv.keyboard.press("Escape");
     await ops.send({ t: "music.pause" });
   });

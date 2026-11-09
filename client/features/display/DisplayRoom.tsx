@@ -1167,29 +1167,39 @@ function AnimatedMapsRow(props: { onTouch(): void }) {
   );
 }
 
-/** One row: the room's volume on this display, Off or a level, kept for this display alone (docs/design/design-v1-volume.md 7). */
+/** The least width of one Volume radio: "100%" in bold 16 px with its padding, and a little over. */
+const VOLUME_RADIO_MIN = 52;
+
+/**
+ * One row: the room's volume on this display, Off or a level, kept for this display alone (docs/design/design-v1-volume.md 7).
+ * Five radios are wider than the other rows' fit on a small screen, such as a phone used as a display. There the name sits above
+ * them, and on a narrower one the radios wrap, so "100%" is never cut.
+ */
 function SoundRow(props: { onTouch(): void }) {
   const on = useDisplaySound();
   const volume = useDisplayVolume();
+  const gap = theme.space(2);
   return (
-    <div role="group" aria-label="Volume" style={{ display: "grid", gridTemplateColumns: "auto repeat(5, minmax(0, 1fr))", alignItems: "center", gap: theme.space(2) }}>
-      <span style={{ fontSize: TV_TEXT.small, fontWeight: theme.weight.bold }}>Volume</span>
-      {VOLUME_CHOICES.map((value) => (
-        <MenuButton
-          key={value}
-          role="menuitemradio"
-          checked={volumeChecked(on, volume, value)}
-          compact
-          onClick={() => {
-            // Off keeps the level for the next choice. A level is set before sound turns on, so the engine never plays the old one.
-            if (value !== "off") chooseDisplayVolume(value);
-            chooseDisplaySound(value !== "off");
-            props.onTouch();
-          }}
-        >
-          {value === "off" ? "Off" : `${value}%`}
-        </MenuButton>
-      ))}
+    <div role="group" aria-label="Volume" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap }}>
+      <span style={{ flex: "none", fontSize: TV_TEXT.small, fontWeight: theme.weight.bold }}>Volume</span>
+      <div style={{ flex: `1 1 ${VOLUME_CHOICES.length * VOLUME_RADIO_MIN + (VOLUME_CHOICES.length - 1) * gap}px`, display: "grid", gridTemplateColumns: `repeat(auto-fit, minmax(${VOLUME_RADIO_MIN}px, 1fr))`, gap }}>
+        {VOLUME_CHOICES.map((value) => (
+          <MenuButton
+            key={value}
+            role="menuitemradio"
+            checked={volumeChecked(on, volume, value)}
+            compact
+            onClick={() => {
+              // Off keeps the level for the next choice. A level is set before sound turns on, so the engine never plays the old one.
+              if (value !== "off") chooseDisplayVolume(value);
+              chooseDisplaySound(value !== "off");
+              props.onTouch();
+            }}
+          >
+            {value === "off" ? "Off" : `${value}%`}
+          </MenuButton>
+        ))}
+      </div>
     </div>
   );
 }
