@@ -73,8 +73,8 @@ export const NO_MUSIC_PLAYING = "No music is playing.";
 /*
  * Table sound, once What players hear (7): visible labels without "for
  * everyone", since the help says so once. The accessible names keep it
- * (MUSIC_VOLUME, EFFECTS_VOLUME, loopVolumeName), so a reader still hears
- * whose volume it is.
+ * (musicVolume, effectsVolume, loopVolumeName), so a reader still hears
+ * whose volume it is, and drop it while only the DM's devices sound.
  */
 export const TABLE_SOUND = "Table sound";
 export const TABLE_SOUND_HELP = "What everyone at the table hears, set here for every device. Each device sets its own volume from the speaker on its top bar.";
