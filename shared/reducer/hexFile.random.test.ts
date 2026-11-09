@@ -438,6 +438,7 @@ for (const [name, g] of [
     test("an op stored at version 50 takes every creature in tow by its place and seats each passenger on its nearest seat alone", () => {
       let checked = 0;
       let apartNow = 0;
+      let squeezedRiders = 0;
       for (let seed = 1; seed <= 1000; seed++) {
         const made = caseOf(seed, g);
         if (!made) continue;
@@ -452,6 +453,7 @@ for (const [name, g] of [
             const squeezed = i === last ? op.squeeze === true : onSqueezedLattice(g, s.tokens.horse!, horse.route[i]!);
             const seat = seatedAt(g, s.tokens[m.tokenId]!, s.tokens.horse!, horse.route[i]!, squeezed, 50);
             assert.deepEqual([m.route[i]!.x, m.route[i]!.y], [seat.x, seat.y], `seed ${seed}: ${m.tokenId} at point ${i} sits on its nearest seat`);
+            if (squeezed && seated.length >= 2) squeezedRiders++;
           }
         }
         // Where a live move seats the passengers apart, the stored one's nearest seats are what tell the versions apart.
@@ -461,29 +463,6 @@ for (const [name, g] of [
       }
       assert.ok(checked >= 350, `cases: ${checked}`);
       assert.ok(apartNow >= 6, `cases a live move seats apart: ${apartNow}`);
-    });
-
-    test("an op stored at version 50 seats each rider on a squeezed holder by its own seat, never apart from the others", () => {
-      let squeezedRiders = 0;
-      for (let seed = 1; seed <= 1000; seed++) {
-        const made = caseOf(seed, g);
-        if (!made) continue;
-        const { state: s, op } = made;
-        const walks = planWalks(op, s, P1, { opVersion: 50 });
-        const horse = walks.find((m) => m.tokenId === "horse")!;
-        const riders = walks.filter((m) => m.carriedBy === "horse" && onHolder(s.tokens[m.tokenId]!.attached!.kind));
-        if (riders.length < 2) continue;
-        for (let i = 1; i < horse.route.length; i++) {
-          const squeezed = i === horse.route.length - 1 ? op.squeeze === true : onSqueezedLattice(g, s.tokens.horse!, horse.route[i]!);
-          if (!squeezed) continue;
-          for (const m of riders) {
-            const own = seatedAt(g, s.tokens[m.tokenId]!, s.tokens.horse!, horse.route[i]!, true, 50);
-            const got = m.route[i]!;
-            assert.ok(Math.abs(own.x - got.x) < 1e-9 && Math.abs(own.y - got.y) < 1e-9, `seed ${seed}: ${m.tokenId} at point ${i} is on its own seat`);
-            squeezedRiders++;
-          }
-        }
-      }
       assert.ok(squeezedRiders >= 60, `riders checked on a squeezed holder: ${squeezedRiders}`);
     });
 
