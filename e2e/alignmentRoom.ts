@@ -10971,7 +10971,70 @@ async function qolGroupSave(sweep: Sweep, page: Page, group: Locator): Promise<v
   }
 }
 
+/** Thorn's two weapons, so his turn card lists two attacks whose damage rows each show a result with Fill chips (as playerphone.e2e.ts LP32-B-CARD-1 does). */
+const FU52_WEAPONS = {
+  abilities: { str: 16, dex: 14, con: 12, int: 10, wis: 12, cha: 10 },
+  saves: [],
+  skills: {},
+  adjust: {},
+  defenses: {},
+  rolls: [
+    { id: "r-longsword", name: "Longsword", kind: "weapon", ability: "str", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d8", type: "slashing", mod: true }] },
+    { id: "r-handaxe", name: "Handaxe", kind: "weapon", ability: "str", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d6", type: "slashing", mod: true }] },
+  ],
+};
+
+/**
+ * Pat's own turn card with results and Fill chips, and the bar a Fill opened
+ * (LP32-POLISH e, f, g and j): at the phone sizes at 100% and 130% he opens
+ * the card, rolls both weapons' damage, and the newest result and its chips
+ * stand whole where a tap lands, not under the card's fold.
+ */
+export function patCardTests(): void {
+  test(`fu52-card. Pat's own turn card with its results and Fill chips, and the bar a Fill opens, at 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+    const lines: string[] = [];
+    await freshDm();
+    const warrior = QOL_WARRIORS[0];
+    await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { level: 5, stats: FU52_WEAPONS } });
+    await ops.send({ t: "token.create", token: { id: warrior.id, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", number: warrior.number, size: "medium", ...warrior.at, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
+    await ops.send({ t: "room.update", settings: { playersApplyDamage: true } });
+    try {
+      await restartFight();
+      for (const at of FU30_AT.filter((a) => a.size.touch)) {
+        const sweep = new Sweep(`fu52-card-${atName(at)}`);
+        pat.setDefaultTimeout(10_000);
+        await openAt(pat, at.size, at.scale);
+        await afterFlare(pat);
+        const card = pat.locator('[data-alert="turn"]');
+        const show = card.getByRole("button", { name: "Show Thorn's turn" });
+        if (await showsWithin(show, 3_000)) await show.tap();
+        const attacks = card.getByRole("group", { name: "Thorn's attacks" });
+        for (const weapon of ["Handaxe", "Longsword"]) {
+          const before = (dmSocket.state?.log ?? []).length;
+          await attacks.getByRole("button", { name: new RegExp(`^${weapon} damage`) }).tap();
+          await waitFor(`${weapon} damage in the log`, () => ((dmSocket.state?.log ?? []).slice(before).some((l) => l.data?.type === "dice" && l.data.by === run.patId) ? true : null));
+          await pat.waitForTimeout(400);
+          // The row's own result: the one under the weapon's damage press, then its Apply to chips, whole where a tap lands (LP32-POLISH f).
+          const row = attacks.locator("[data-card-result]").nth(weapon === "Handaxe" ? 0 : 1);
+          const chip = row.locator("xpath=following-sibling::*[1][@data-apply-to]").getByRole("button").first();
+          if (!(await wholeInReach(row))) lines.push(`${sweep.at} fu52-card: ${weapon}'s result is under the card's fold after its Damage`);
+          if (!(await wholeInReach(chip))) lines.push(`${sweep.at} fu52-card: ${weapon}'s first Apply to chip is under the card's fold after its Damage`);
+        }
+        lines.push(...sweep.lines);
+        await escapeAll(pat);
+      }
+    } finally {
+      await ops.send({ t: "encounter.end" }).catch(() => {});
+      await ops.send({ t: "room.update", settings: { playersApplyDamage: false } }).catch(() => {});
+      await ops.send({ t: "token.delete", tokenId: warrior.id }).catch(() => {});
+      await restartFight();
+    }
+    assert.deepEqual(lines, [], "Pat's turn card out of line");
+  });
+}
+
 export function qolPanelTests(): void {
+  patCardTests();
   test(`qe-f. the audit's surfaces on the DM's page in a fight on a Goblin Warrior's turn: its turn card's attacks with results and Apply to, the Dice panel's newest roll and Pat's damage toast with their chips, All of a kind, Conditions' Recent, the group bar's Save, its Recent DCs and its ask, Request a roll's Recent DCs, Handouts' Recent and the Tab row, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
     await freshDm();
     await playersHome();

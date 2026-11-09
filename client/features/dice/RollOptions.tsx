@@ -1450,10 +1450,23 @@ function CardResults(props: { attackRow: string | null; damageRow: string | null
   const damageLine = resultLine("damage", damage);
   const dm = useRoomView((s) => s.you?.role === "dm");
   const damageLines = damage.receipt?.state === "committed" && cardOffersApplyTo(damage.readBack, dm) ? damage.receipt.lines : null;
+  const result = useRef<HTMLDivElement>(null);
+  // A press on a row near the card's foot lands its result under the fold, where the card scrolls. The newest result, and the chips under it, come into view as they land. Only a roll this page sent moves anything: one read back after a reload stays where it was.
+  const sent = (attack.tag !== null && !attack.readBack ? attack.tag : "") + (damage.tag !== null && !damage.readBack ? damage.tag : "");
+  const landed = `${sent}|${attack.receipt?.state ?? ""}|${damage.receipt?.state ?? ""}|${damageLines !== null}`;
+  useEffect(() => {
+    if (sent === "") return;
+    const box = result.current;
+    if (!box) return;
+    const chips = box.nextElementSibling instanceof HTMLElement && box.nextElementSibling.matches("[data-apply-to]") ? box.nextElementSibling : null;
+    // The chips' end first, then the result's top, so the number stays in view whenever both fit.
+    (chips ?? box).scrollIntoView({ block: "nearest" });
+    box.scrollIntoView({ block: "nearest" });
+  }, [landed]);
   return (
     <>
       {attackLine || damageLine ? (
-        <div data-card-result="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(3), rowGap: 0, minHeight: theme.touch, fontSize: theme.font.body14, overflowWrap: "anywhere" }}>
+        <div ref={result} data-card-result="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(3), rowGap: 0, minHeight: theme.touch, fontSize: theme.font.body14, overflowWrap: "anywhere" }}>
           {attackLine}
           {damageLine}
         </div>
