@@ -21,6 +21,8 @@ import { cellPieces, type CellPiece, type PitRegion } from "./pieces.ts";
 
 /** How many polygons the path held at each closePath, the context's own path and every Path2D. */
 const closes: number[] = [];
+/** How many polygons the context's path held at each clip. */
+const clips: number[] = [];
 
 class CountingPath2D {
   polygons = 0;
@@ -44,6 +46,7 @@ function counting(): CanvasRenderingContext2D {
     beginPath: () => void (polygons = 0),
     moveTo: () => void polygons++,
     closePath: () => void closes.push(polygons),
+    clip: () => void clips.push(polygons),
     createPattern: () => ({ setTransform() {} }),
   };
   return new Proxy({} as Record<string, unknown>, {
@@ -109,6 +112,22 @@ describe("a path of many polygons closes each on its own (SUNKEN-PAN)", () => {
     const d = dc();
     d.openings = (region, box, asker) => relief.openingsMeeting(region, 0, box, asker);
     assert.ok(widest(() => drawRun(counting(), [stair], d)) <= 1);
+  });
+
+  test("a pit deep in a sunk room clips to the openings around its floor, not to every opening up to 0 over it", () => {
+    const bounds = { w: 32, h: 32 };
+    const relief = new ReliefIndex();
+    relief.sync({ sceneId: "s1", bounds, chunks: {}, tiles: null, walls: groupWalls([], null, bounds), global: null, src: { ground: () => -10, terrain: () => null, look: () => ({ texture: null, color: "#777777" }), bounds, grid: SQUARES } });
+    const pit = relief.cellAt(16, 16)!;
+    assert.ok(pit.region && pit.region.cells.length === 32 * 32);
+    const d = dc();
+    d.openings = (region, box, asker) => relief.openingsMeeting(region, 0, box, asker);
+    // Its floor shows through the few openings in front of it that cover it on screen. Its bounds up to 0 meet every opening between.
+    for (const run of [[pit], [pit, relief.cellAt(17, 16)!]]) {
+      clips.length = 0;
+      drawRun(counting(), run, d);
+      assert.ok(clips.length === 1 && clips[0]! <= 16, `${run.length} pits: the clip held ${clips[0]} openings`);
+    }
   });
 
   test("a clip to pit openings swept up, and an area's loops filled, close nothing in a path of many", () => {

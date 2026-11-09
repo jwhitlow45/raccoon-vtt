@@ -590,10 +590,10 @@ function boundsAt(p: StaticPiece, turn: Turn): VBox {
   return (byTurn[turn] ??= boundsOf(p, turn));
 }
 
-/** The openings at 0 a pit piece draws inside: its region's that meet its bounds, or its own. */
+/** The openings at 0 a pit piece draws inside: its region's that meet what it paints, or its own. */
 function openingsOf(p: CellPiece | WallItem, dc: DrawContext): readonly CellPiece[] {
   if (!p.region) return p.kind === "wall" ? [] : [p];
-  return dc.openings ? dc.openings(p.region, boundsAt(p, dc.turn), p) : p.region.cells;
+  return dc.openings ? dc.openings(p.region, paintBoundsAt(p, dc.turn), p) : p.region.cells;
 }
 
 /** Adds the parallelogram from `a` to `b` and `h` view units down to the path. */
@@ -844,13 +844,14 @@ function drawPit(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext, vie
 
 /**
  * Pits drawn one after another, each as `drawPit` draws it, inside one
- * clip: the openings of their region that meet any of their bounds. A pit's
+ * clip: the openings of their region that meet what any of them paints,
+ * its floor and its far sides (paintBoundsAt). A pit's
  * own clip held the openings meeting its bounds, and a pit as deep as its
  * region is wide on screen meets dozens, so a scene sunk 100 ft spent most
  * of each draw building clip paths, the same openings again for each pit
- * (SUNKEN-PAN). An opening that meets none of a pit's bounds adds nothing
- * inside them, so each pit keeps its pixels, but where its antialiased edge
- * reaches past its bounds. Only pits of one region share a clip: a pit
+ * (SUNKEN-PAN). An opening that meets none of what a pit paints adds
+ * nothing inside it, so each pit keeps its pixels, but where its
+ * antialiased edge reaches past. Only pits of one region share a clip: a pit
  * with none draws inside its own opening alone.
  */
 function drawPits(g: CanvasRenderingContext2D, pits: readonly CellPiece[], dc: DrawContext, view: VBox): void {
@@ -862,14 +863,14 @@ function drawPits(g: CanvasRenderingContext2D, pits: readonly CellPiece[], dc: D
   g.restore();
 }
 
-/** The openings at 0 a run of pits of one region draws inside: those meeting any of their bounds, or a lone pit's own (openingsOf). */
+/** The openings at 0 a run of pits of one region draws inside: those meeting what any of them paints, or a lone pit's own (openingsOf). */
 function pitOpenings(pits: readonly CellPiece[], dc: DrawContext): readonly CellPiece[] {
   const first = pits[0]!;
   if (pits.length === 1 || !first.region) return openingsOf(first, dc);
   if (!dc.openings) return first.region.cells;
   const box: VBox = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
   for (const p of pits) {
-    const b = boundsAt(p, dc.turn);
+    const b = paintBoundsAt(p, dc.turn);
     box.x0 = Math.min(box.x0, b.x0);
     box.y0 = Math.min(box.y0, b.y0);
     box.x1 = Math.max(box.x1, b.x1);
