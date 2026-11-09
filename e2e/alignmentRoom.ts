@@ -20,7 +20,7 @@ import { barControl, ConsoleWatch, dragCells, expandBar, multiSelect, OpSocket, 
 import { DEFAULT_SNAPSHOT_BUDGET } from "../server/rooms/budgets.ts";
 import { INTER_FILES } from "../client/lib/interFont.ts";
 import { PALETTES, theme } from "../client/lib/theme.ts";
-import { alignmentLines, badgeCrossLines, containmentLines, disabledLookLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, menuWordLines, pillLines, popoverScrollbarLines, proficiencyHeightLines, proficiencyLines, rollingGridLines, rollRowLines, saveOutlineLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
+import { alignmentLines, badgeCrossLines, badgeGapsInPage, containmentLines, disabledLookLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, menuWordLines, pillLines, popoverScrollbarLines, proficiencyHeightLines, proficiencyLines, rollingGridLines, rollRowLines, saveOutlineLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 import { measureSpacing, spacingLines, type SpacingFinding } from "./helpers/spacing.ts";
 import { moreMenuFixture } from "./helpers/menuFixture.ts";
 import { openGroup } from "./helpers/groups.ts";
@@ -3975,6 +3975,23 @@ export function helperTest(): void {
     await sweep.measure(page, "optional", vanished, { optional: true });
     assert.deepEqual(sweep.lines, []);
     await assert.rejects(() => sweep.measure(page, "required", vanished), /no roots matched/);
+  });
+  test("fu52-badge. a trap name with no words matches no pill, and a name matches the pills that start with it", () => {
+    const box = (x: number, y: number, w: number, h: number) => ({ x, y, width: w, height: h });
+    const node = (r: ReturnType<typeof box>) => ({ isVisible: () => true, getAbsoluteOpacity: () => 1, getClientRect: () => r });
+    const pill = (words: string) => ({ ...node(box(40, 0, 60, 20)), getTag: () => ({ ...node(box(40, 0, 60, 20)), pointerDirection: () => "down" }), getText: () => ({ ...node(box(40, 0, 60, 20)), text: () => words }) });
+    const stage = { container: () => ({ getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 400 }) }), find: (s: string) => (s === "Circle" ? [node(box(90, 5, 20, 20))] : [pill("Spike pit"), pill("Needle")]) };
+    const g = globalThis as unknown as { Konva?: unknown };
+    const was = g.Konva;
+    g.Konva = { stages: [stage] };
+    try {
+      assert.deepEqual(badgeGapsInPage([20, [""]]), [], "an empty name is no prefix of a pill");
+      assert.deepEqual(badgeGapsInPage([20, ["  "]]), []);
+      assert.deepEqual(badgeGapsInPage([20, ["Spike pit"]]).map((b) => b.text), ["Spike pit"]);
+      assert.deepEqual(badgeGapsInPage([20, ["", "Needle"]]).map((b) => b.text), ["Needle"], "an empty name beside a real one adds nothing");
+    } finally {
+      g.Konva = was;
+    }
   });
   test("pf-1. the scenes list's rule leaves out only the players' shorter row beside Move players rows of one height, and keeps unequal Move players rows or a taller Players here row as findings", () => {
     const row = (name: string, height: number) => `li "${name}" ${height} px`;

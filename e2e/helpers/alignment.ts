@@ -1910,10 +1910,10 @@ type BadgeGap = { text: string; gap: number; pill: Box; badge: Box };
 /**
  * Every pointed board pill whose words start with one of `names` (the
  * traps' names), with the trap badge disc (a Konva Circle 20 px across on
- * screen, TrapLayer.tsx BADGE_PX) nearest it. `gap` is the space between
+ * screen, features/traps/badge.ts BADGE_PX) nearest it. A name with no words matches no pill, as every pill starts with the empty string. `gap` is the space between
  * the two boxes along the axis they part on, and negative when they cross.
  */
-function badgeGapsInPage([badgePx, names]: [number, string[]]): BadgeGap[] {
+export function badgeGapsInPage([badgePx, names]: [number, string[]]): BadgeGap[] {
   type KRect = { x: number; y: number; width: number; height: number };
   type KNode = { isVisible(): boolean; getAbsoluteOpacity(): number; getClientRect(o?: { skipStroke?: boolean }): KRect };
   type KLabel = KNode & { getTag(): (KNode & { pointerDirection(): string }) | undefined; getText(): (KNode & { text(): string }) | undefined };
@@ -1936,7 +1936,7 @@ function badgeGapsInPage([badgePx, names]: [number, string[]]): BadgeGap[] {
       if (!tag || (direction !== "up" && direction !== "down")) continue;
       const text = (label.getText()?.text() ?? "").replace(/\n/g, " / ");
       // A long name is cut short in its pill, so only its start is compared.
-      if (!names.some((n) => text.startsWith(n.slice(0, 10)))) continue;
+      if (!names.some((n) => n.trim() !== "" && text.startsWith(n.slice(0, 10)))) continue;
       const pill = place(tag.getClientRect({ skipStroke: true }));
       let nearest: BadgeGap | null = null;
       for (const badge of discs) {
@@ -1949,8 +1949,8 @@ function badgeGapsInPage([badgePx, names]: [number, string[]]): BadgeGap[] {
   return out;
 }
 
-/** Each trap name's pill with the badge nearest it, for the sweep and for a look at the numbers. */
-export async function badgeGaps(page: Page, names: readonly string[]): Promise<BadgeGap[]> {
+/** Each trap name's pill with the badge nearest it, for the sweep's check below. */
+async function badgeGaps(page: Page, names: readonly string[]): Promise<BadgeGap[]> {
   return page.evaluate(badgeGapsInPage, [BADGE_PX, [...names]] as [number, string[]]);
 }
 
