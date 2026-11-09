@@ -9,9 +9,12 @@ import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import type { LayerProps } from "../layers.ts";
 import { parseCellKey, polygonCells, rectBetween, type Point } from "./cells.ts";
-import { isHex, sceneGrid } from "#shared/rules/grid.ts";
+import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import type { HexGrid } from "#shared/rules/hex.ts";
 import { hexesInRect, hexOutline } from "./hexBuild.ts";
+import { hexKey } from "#shared/rules/hex.ts";
+import type { CellRect } from "#shared/model.ts";
+import { paneEnd } from "./linkTap.ts";
 import { heightSlot } from "./heights/store.ts";
 import { buildPaths, CAPTION_PX, drawBuild, drawLabel, drawLightReach, drawSuns, measureLabel, openDoorPaths, pillarPaths, stairSymbols } from "./draw.ts";
 import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
@@ -19,7 +22,7 @@ import { boxStands } from "../../canvas/relief/stand.ts";
 import { isSymbolTerrain, type TexturedTerrain } from "./geometry.ts";
 import { labelBox } from "#shared/rules/labels.ts";
 import { lightCaption, lightCaptionSpot, lightReach, lightSlot, tokenBodies } from "./lightTap.ts";
-import { labelPaneSlot, useBuilderStore } from "./store.ts";
+import { labelPaneSlot, linkPaneSlot, useBuilderStore } from "./store.ts";
 import { useStampDrawing } from "./stamps/useStampDrawing.ts";
 import { TERRAIN_COLORS, useTextures } from "./textures.ts";
 
@@ -40,6 +43,7 @@ export function BuilderLayer(props: LayerProps) {
       {props.role === "dm" ? <LightMarks sceneId={props.scene.id} scale={props.scale} /> : null}
       {props.role === "dm" ? <BuildPreview scene={props.scene} scale={props.scale} /> : null}
       {props.role === "dm" ? <LabelMarks /> : null}
+      {props.role === "dm" ? <LinkMarks scene={props.scene} /> : null}
     </>
   );
 }
@@ -376,5 +380,64 @@ function LabelMarks() {
         );
       })}
     </>
+  );
+}
+
+/**
+ * Between floors' marks (docs/design/design-v1-floors.md phase 2, 7.2): the
+ * squares being dragged, in the danger color while the rules refuse them,
+ * and a dashed outline around the end whose pane is open. The ends
+ * themselves are the link layer's.
+ */
+function LinkMarks(props: { scene: Scene }) {
+  const { scene } = props;
+  const building = useRoomView((s) => s.local.tool === "build");
+  const linking = useStore(useBuilderStore(), (b) => b.mode === "link");
+  const draft = useStore(useBuilderStore(), (b) => b.linkDraft);
+  const paneId = useStore(useScoped(linkPaneSlot), (p) => p.linkId);
+  const open = useRoomView((s) => paneEnd(s.floorView, paneId));
+  const { accent } = useAccent();
+  if (!building || !linking) return null;
+  const grid = sceneGrid(scene);
+  const outlined = open && open.sceneId === scene.id ? open.rect : null;
+  return (
+    <>
+      {draft ? <LinkRect rect={draft.rect} grid={grid} color={draft.problem === null ? accent : boardTheme.color.danger} fill={0.25} /> : null}
+      {outlined ? <LinkRect rect={outlined} grid={grid} color={accent} fill={0} /> : null}
+    </>
+  );
+}
+
+function LinkRect(props: { rect: CellRect; grid: Grid; color: string; fill: number }) {
+  const { rect, grid, color, fill } = props;
+  return (
+    <Shape
+      listening={false}
+      perfectDrawEnabled={false}
+      sceneFunc={(ctx) => {
+        const c = ctx._context;
+        c.save();
+        c.strokeStyle = color;
+        c.fillStyle = color;
+        c.lineWidth = 2;
+        c.setLineDash([6, 4]);
+        // A hex scene's rectangle is of hex keys: each hex is outlined, since the whole is no rectangle on the map.
+        for (let row = rect.y; row < (isHex(grid) ? rect.y + rect.h : rect.y + 1); row++) {
+          for (let col = rect.x; col < (isHex(grid) ? rect.x + rect.w : rect.x + 1); col++) {
+            c.beginPath();
+            if (isHex(grid)) hexOutline(grid, hexKey({ col, row })).forEach((p, i) => (i === 0 ? c.moveTo(p.x, p.y) : c.lineTo(p.x, p.y)));
+            else c.rect(rect.x, rect.y, rect.w, rect.h);
+            c.closePath();
+            if (fill > 0) {
+              c.globalAlpha = fill;
+              c.fill();
+              c.globalAlpha = 1;
+            }
+            c.stroke();
+          }
+        }
+        c.restore();
+      }}
+    />
   );
 }

@@ -1,5 +1,5 @@
 import { usePreview } from "../dm/previewContext.ts";
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { TerrainId } from "#shared/model.ts";
@@ -24,6 +24,8 @@ import { useStampSlots } from "./stamps/StampOptions.tsx";
 import { HEX_SHAPES, useHeightHint, useHeightSlots } from "./heights/HeightOptions.tsx";
 import { LightChip } from "../lights/LightOptions.tsx";
 import { HEX_LIMITS } from "../grid/words.ts";
+import { KIND_GROUP, linkHint, KIND_NAMES, toChoice, TO_GROUP } from "../floors/linkWords.ts";
+import { chosenTarget, linkTargets } from "./linkTap.ts";
 
 const EDGES: readonly { value: EdgeKind; label: string }[] = [
   { value: "wall", label: "Wall" },
@@ -52,7 +54,7 @@ const HEX_HINTS = {
 } as const;
 
 
-const HINTS: Record<Exclude<BuildMode, "edge" | "light" | "height" | "rough">, string> = {
+const HINTS: Record<Exclude<BuildMode, "edge" | "light" | "height" | "rough" | "link">, string> = {
   paint: "Drag to paint. Two fingers or a right-drag move the map.",
   rect: "Drag from corner to corner.",
   poly: "Tap corners, then tap the first one to close.",
@@ -92,7 +94,7 @@ export function brushWords(n: number, g: Grid): string {
   return `${n} ${cellWord(g, n !== 1)}`;
 }
 
-function hint(mode: BuildMode, edge: EdgeKind, secretFound: boolean, hasLights: boolean, heightHint: string, terrain: TerrainId, g: Grid): string {
+function hint(mode: BuildMode, edge: EdgeKind, secretFound: boolean, hasLights: boolean, heightHint: string, terrain: TerrainId, g: Grid, kind: "stairs" | "ladder"): string {
   const limit = hexBuilderLine(mode, g);
   if (limit !== null) return limit;
   if (isHex(g) && mode === "edge") {
@@ -102,6 +104,7 @@ function hint(mode: BuildMode, edge: EdgeKind, secretFound: boolean, hasLights: 
   if (isHex(g) && (mode === "erase" || mode === "eraseRect")) return HEX_HINTS[mode];
   if (mode === "light") return lightModeHint(hasLights);
   if (mode === "height" || mode === "rough") return heightHint;
+  if (mode === "link") return linkHint(kind, isHex(g));
   const costs = terrain === "difficult" || terrain === "rubble" || terrain === "water";
   if ((mode === "paint" || mode === "rect" || mode === "poly") && costs) return `${HINTS[mode]} ${TERRAIN_COST}`;
   if (mode !== "edge") return HINTS[mode];
@@ -146,12 +149,15 @@ export default function BuilderOptions() {
       note: b.note,
       inSight: b.inSight,
       asking: b.asking > 0,
+      linkKind: b.linkKind,
+      linkTo: b.linkTo,
     })),
   );
   // A gesture waiting on its asks says so once the wait shows (Loading.tsx), so a quick answer never flashes it.
   const asking = useDelayed(s.asking);
   const sceneId = useRoomView((v) => v.sceneId);
   const scene = useRoomView((v) => (v.sceneId ? v.floorView?.scenes[v.sceneId] : undefined));
+  const scenes = useRoomView((v) => v.view?.scenes);
   const hasLights = useRoomView((v) => (v.sceneId ? sceneHasLights(v.floorView?.lights, v.sceneId) : false));
   const actions = useRoomActions();
   const historyUnavailable = useRoomView((s) => s.connection !== "open" || !!s.history?.pending);
@@ -167,6 +173,13 @@ export default function BuilderOptions() {
   const more = useCallback(() => row.current?.closest('[role="toolbar"]')?.querySelector<HTMLElement>("[data-rvtt-more] button") ?? null, []);
   const stamps = useStampSlots({ more });
   const hexRoughSlots = useHexRoughSlots();
+  // Between floors needs a floor next to this one: a scene of one floor has no such mode, and a mode left over from a floor that has gone steps back to Brush.
+  const targets = linkTargets(scenes ? { scenes } : null, sceneId);
+  const linking = targets.length > 0;
+  const stranded = s.mode === "link" && !linking && scenes !== undefined;
+  useEffect(() => {
+    if (stranded) pickBuildMode(scope, "paint");
+  }, [stranded, scope]);
   if (!sceneId || !scene) return null;
 
   const grid = sceneGrid(scene);
@@ -208,6 +221,7 @@ export default function BuilderOptions() {
       />
     ),
   });
+  const modes = linking ? BUILD_MODES : BUILD_MODES.filter((m) => m.value !== "link");
   const mode = BUILD_MODES.find((m) => m.value === s.mode);
   const modeName = mode?.spoken ?? mode?.label ?? s.mode;
 
@@ -225,10 +239,10 @@ export default function BuilderOptions() {
           kind="choice"
           value={s.mode}
           valueName={modeName}
-          options={BUILD_MODES.map((m) => ({ key: m.value, words: m.short, glyph: <Icon name={m.icon} /> }))}
+          options={modes.map((m) => ({ key: m.value, words: m.short, glyph: <Icon name={m.icon} /> }))}
         >
           <PickCloses>
-            <ChoiceTiles<BuildMode> label="Builder mode" even value={s.mode} options={BUILD_MODES.map((m) => ({ value: m.value, label: m.label, ...(m.spoken ? { spoken: m.spoken } : null), glyph: <Icon name={m.icon} /> }))} onChange={(mode) => pickBuildMode(scope, mode)} />
+            <ChoiceTiles<BuildMode> label="Builder mode" even value={s.mode} options={modes.map((m) => ({ value: m.value, label: m.label, ...(m.spoken ? { spoken: m.spoken } : null), glyph: <Icon name={m.icon} /> }))} onChange={(mode) => pickBuildMode(scope, mode)} />
           </PickCloses>
         </ValueChip>
       ),
@@ -363,6 +377,35 @@ export default function BuilderOptions() {
     );
   }
   if (s.mode === "light") slots.push({ id: "light", priority: 1, control: <LightChip /> });
+  if (s.mode === "link") {
+    const kinds = (["stairs", "ladder"] as const).map((k) => ({ value: k, label: KIND_NAMES[k] }));
+    const to = chosenTarget(targets, s.linkTo);
+    const tos = targets.map((t) => ({ value: t.id, label: toChoice(t.dir, t.name) }));
+    slots.push(
+      {
+        id: "linkKind",
+        priority: 1,
+        control: (
+          <ValueChip label={KIND_GROUP} kind="choice" value={s.linkKind} options={kinds.map((k) => ({ key: k.value, words: k.label }))}>
+            <PickCloses>
+              <ChoiceRows<"stairs" | "ladder"> label={KIND_GROUP} value={s.linkKind} options={kinds} onChange={(linkKind) => set({ linkKind })} />
+            </PickCloses>
+          </ValueChip>
+        ),
+      },
+      to !== null && {
+        id: "linkTo",
+        priority: 1,
+        control: (
+          <ValueChip label={TO_GROUP} kind="choice" value={to.id} options={tos.map((t) => ({ key: t.value, words: t.label }))}>
+            <PickCloses>
+              <ChoiceRows<string> label={TO_GROUP} value={to.id} options={tos} onChange={(linkTo) => set({ linkTo })} />
+            </PickCloses>
+          </ValueChip>
+        ),
+      },
+    );
+  }
   if (s.mode === "stamp") slots.push(...stamps.slots);
   slots.push({
     id: "clearBuild",
@@ -382,7 +425,7 @@ export default function BuilderOptions() {
 
   return (
     <div ref={row} style={{ display: "contents" }}>
-      <OptionsStrip tool="Map builder" task={corners || stamped} line={asking ? ASKING_LINE : { tone: s.note || s.inSight ? "warning" : "hint", content: s.note ?? (s.inSight ? BUILD_IN_SIGHT : hint(s.mode, s.edge, s.secretFound, hasLights, heightHint, s.terrain, grid)) }} slots={slots} />
+      <OptionsStrip tool="Map builder" task={corners || stamped} line={asking ? ASKING_LINE : { tone: s.note || s.inSight ? "warning" : "hint", content: s.note ?? (s.inSight ? BUILD_IN_SIGHT : hint(s.mode, s.edge, s.secretFound, hasLights, heightHint, s.terrain, grid, s.linkKind)) }} slots={slots} />
       {s.mode === "stamp" ? stamps.picker : null}
     </div>
   );

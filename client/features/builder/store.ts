@@ -1,6 +1,7 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
-import type { TerrainId } from "#shared/model.ts";
+import type { CellRect, TerrainId } from "#shared/model.ts";
 import type { IconName } from "../../components/Icon.tsx";
+import { LINK_MODE } from "../floors/linkWords.ts";
 import { scopeSlot, useScoped, type RoomScope } from "../../state/scope.ts";
 import type { BrushSize, Point } from "./cells.ts";
 
@@ -10,7 +11,7 @@ import type { BrushSize, Point } from "./cells.ts";
  * the unsent part of a gesture from here so it shows under the finger
  * before its op goes out.
  */
-export type BuildMode = "paint" | "rect" | "poly" | "erase" | "eraseRect" | "edge" | "label" | "light" | "stamp" | "height" | "rough";
+export type BuildMode = "paint" | "rect" | "poly" | "erase" | "eraseRect" | "edge" | "label" | "light" | "stamp" | "height" | "rough" | "link";
 export type EdgeKind = "wall" | "none" | "door" | "secret" | "window" | "clear";
 
 export type BuilderState = {
@@ -49,6 +50,11 @@ export type BuilderState = {
   lineDrag: { a: Point; b: Point } | null;
   /** Gestures whose ops wait on the server's answer to their asks (ask.ts), which the option bar says. */
   asking: number;
+  /** Between floors: the kind a new pair takes, and the floor next to this one it leads to (null: the floor above, else below). */
+  linkKind: "stairs" | "ladder";
+  linkTo: string | null;
+  /** The squares being dragged in Between floors and the rules' first refusal of them, which shows the draft red and fills the note. */
+  linkDraft: { rect: CellRect; problem: string | null } | null;
 };
 
 export const TERRAINS: readonly { value: TerrainId; label: string }[] = [
@@ -85,11 +91,13 @@ export const BUILD_MODES: readonly { value: BuildMode; label: string; spoken?: s
   { value: "label", label: "Label", short: "Label", icon: "mapLabel" },
   { value: "light", label: "Lights", short: "Lights", icon: "light" },
   { value: "stamp", label: "Stamp", short: "Stamp", icon: "stamp" },
+  // Last, and offered only while the scene has more than one floor (Options.tsx, toolChoices.ts).
+  { value: "link", label: LINK_MODE, short: LINK_MODE, icon: "stairwell" },
 ];
 
 /** A new mode, which drops a shape room's corners, a rectangle's start, a wall run, a Wall line and the note. A selected stamp stays selected. */
 export function pickBuildMode(scope: RoomScope, mode: BuildMode): void {
-  scope.get(builderSlot).store.setState({ mode, poly: [], rect: null, run: [], line: [], lineScene: null, lineAt: null, lineDrag: null, note: null });
+  scope.get(builderSlot).store.setState({ mode, poly: [], rect: null, run: [], line: [], lineScene: null, lineAt: null, lineDrag: null, linkDraft: null, note: null });
 }
 
 /** A gesture's bookkeeping that the canvas never draws. */
@@ -112,6 +120,8 @@ export type BuilderGesture = {
   asking: boolean;
   /** A stroke or a drag of the builder's hex gestures (hexPointer.ts): Erase, Difficult ground and Wall lines. */
   hex: HexGesture | null;
+  /** Where a Between floors press began, on screen and on the map (linkTap.ts). */
+  link: { screen: Point; world: Point } | null;
 };
 
 /** A hex gesture in progress: a brush stroke as `stroke` has it, or a drag from where it began. */
@@ -143,8 +153,11 @@ export const builderSlot = scopeSlot(
       lineScene: null,
       lineAt: null,
       lineDrag: null,
+      linkKind: "stairs",
+      linkTo: null,
+      linkDraft: null,
     })),
-    gesture: { stroke: null, downAt: null, labelGrab: null, asking: false, hex: null } as BuilderGesture,
+    gesture: { stroke: null, downAt: null, labelGrab: null, asking: false, hex: null, link: null } as BuilderGesture,
   }),
   (b) => {
     if (b.gesture.stroke) clearInterval(b.gesture.stroke.timer);
@@ -161,6 +174,14 @@ export const builderSlot = scopeSlot(
  */
 export const labelPaneSlot = scopeSlot(() => createStore<{ labelId: string | null }>(() => ({ labelId: null })));
 
+/**
+ * The end whose pane is open in Between floors (LinkPane.tsx), if any, by
+ * the id of the end on the floor shown. A slot of its own, as the label
+ * pane's is, since the pane is mounted beside the canvas and not in the
+ * option bar.
+ */
+export const linkPaneSlot = scopeSlot(() => createStore<{ linkId: string | null }>(() => ({ linkId: null })));
+
 /** This Room's builder store, for the option bar and the canvas preview. */
 export function useBuilderStore(): StoreApi<BuilderState> {
   return useScoped(builderSlot).store;
@@ -168,5 +189,5 @@ export function useBuilderStore(): StoreApi<BuilderState> {
 
 /** Ends whatever gesture was in progress, keeping the DM's choices. */
 export function resetGesture(store: StoreApi<BuilderState>): void {
-  store.setState({ unsent: [], rect: null, poly: [], run: [], labelMove: null, note: null, inSight: false, line: [], lineScene: null, lineAt: null, lineDrag: null });
+  store.setState({ unsent: [], rect: null, poly: [], run: [], labelMove: null, note: null, inSight: false, line: [], lineScene: null, lineAt: null, lineDrag: null, linkDraft: null });
 }

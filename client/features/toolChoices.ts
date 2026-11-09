@@ -2,6 +2,7 @@ import type { RoomScope } from "../state/scope.ts";
 import type { RoomActions, RoomView } from "../state/types.ts";
 import { SHAPES } from "./areas/labels.ts";
 import { areaSlot, pickAreaShape, type AreaEnv } from "./areas/store.ts";
+import { linkTargets } from "./builder/linkTap.ts";
 import { builderSlot, BUILD_MODES, labelPaneSlot, pickBuildMode } from "./builder/store.ts";
 import { accessOf, DRAW_MODES, drawSlot, pickDrawMode } from "./drawings/store.ts";
 import { fogSlot, FOG_MODES, pickFogMode } from "./fog/store.ts";
@@ -145,7 +146,10 @@ export const builderCycle: ToolCycle = {
     if (!shownScene(env.getState())) return null;
     const st = env.scope.get(builderSlot).store.getState();
     const held = st.mode === "poly" && st.poly.length > 0 ? ROOM_HELD : env.scope.get(labelPaneSlot).getState().labelId !== null ? LABEL_HELD : undefined;
-    return { options: BUILD_SAID, value: st.mode, ...(held ? { held } : {}) };
+    // Between floors needs a floor next to this one, as the builder's row offers it (builder/Options.tsx).
+    const view = env.getState().view;
+    const options = view && linkTargets(view, env.getState().sceneId).length > 0 ? BUILD_SAID : BUILD_SAID.filter((o) => o.value !== "link");
+    return { options, value: st.mode, ...(held ? { held } : {}) };
   },
   pick(env, value) {
     const mode = known(BUILD_MODES, value);

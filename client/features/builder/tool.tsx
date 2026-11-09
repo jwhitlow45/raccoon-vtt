@@ -35,6 +35,7 @@ import { withStampMode } from "./stamps/pointer.ts";
 import { withHeightMode } from "./heights/pointer.ts";
 import { withLightMode } from "../lights/pointer.ts";
 import { cancelHexGesture, withHexBuild } from "./hexPointer.ts";
+import { withLinkMode } from "./linkTap.ts";
 import { builderCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
@@ -186,7 +187,8 @@ const Options = retryableLazy(() => import("./Options.tsx"), { roles: ["dm"] });
  * rectangle, set walls, doors and windows on cell edges, and place and move
  * labels. Walls around floor come on their own, so a room is just cells.
  * Height mode (heights/pointer.ts) paints raised areas and stairs, and Stamp
- * mode (stamps/pointer.ts) places stamps, each in front of these handlers.
+ * mode (stamps/pointer.ts) places stamps, and Between floors (linkTap.ts)
+ * places stairs and ladders, each in front of these handlers.
  */
 export const builderTool: ToolDef = {
   id: "build",
@@ -205,10 +207,11 @@ export const builderTool: ToolDef = {
     cancelHexGesture(ctx);
     gesture.downAt = null;
     gesture.labelGrab = null;
+    gesture.link = null;
     resetGesture(store);
   },
   // On a hex scene Walls and doors, Erase, Erase area and Difficult ground build by hexes and Wall lines (hexPointer.ts).
-  pointer: whileAsking(withLightMode(withStampMode(withHexBuild(withHeightMode({
+  pointer: whileAsking(withLightMode(withStampMode(withLinkMode(withHexBuild(withHeightMode({
     down(p, ctx) {
       const { store: builderState, gesture } = ctx.scope.get(builderSlot);
       gesture.downAt = { screen: p.screen, world: p.world };
@@ -307,7 +310,7 @@ export const builderTool: ToolDef = {
       gesture.labelGrab = null;
       store.setState({ rect: null, run: [], labelMove: null });
     },
-  }))))),
+  })))))),
   Options: () => (
     <Suspense fallback={<Loading text="Loading the options…" />}>
       <Options />
