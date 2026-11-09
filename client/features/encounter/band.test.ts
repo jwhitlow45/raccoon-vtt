@@ -48,10 +48,16 @@ describe("turnPlacement", () => {
   });
 });
 
+/** The three fields most cases name: nameMin has its own cases. */
+function stripName(fit: ReturnType<typeof bandFit>) {
+  const { nameMin: _nameMin, ...rest } = fit;
+  return rest;
+}
+
 describe("bandFit (LPD-DMPHONE-2)", () => {
   // The DM's band has four creatures to come. A player's has none, and End turn on their own turn.
   const fit = (width: number, scale: number, more: { timer?: BandTimer; endTurn?: boolean; round?: number } = {}) =>
-    bandFit({ width: width / scale, round: more.round ?? 1, timer: more.timer ?? "none", endTurn: more.endTurn ?? false, next: more.endTurn ? 0 : 4 });
+    stripName(bandFit({ width: width / scale, round: more.round ?? 1, timer: more.timer ?? "none", endTurn: more.endTurn ?? false, next: more.endTurn ? 0 : 4 }));
 
   test("a phone at 100% shows the DM up to four Next disks, the round and the name", () => {
     assert.deepEqual(fit(390, 1), { disks: 4, round: true, stackEnd: false });
@@ -75,6 +81,14 @@ describe("bandFit (LPD-DMPHONE-2)", () => {
     assert.deepEqual(fit(390, 1, { timer: "over", endTurn: true }), { disks: 0, round: true, stackEnd: false });
   });
 
+  test("Your turn keeps its 60 px where End turn stacked still fits beside it, and gives way to a few letters where it does not (320 x 568 at 130% with the time up)", () => {
+    const at = (width: number, scale: number, timer: BandTimer) => bandFit({ width: width / scale, round: 1, timer, endTurn: true, next: 0 }).nameMin;
+    assert.equal(at(320, 1.3, "none"), 60);
+    assert.equal(at(390, 1.3, "over"), 60);
+    assert.equal(at(320, 1.3, "over"), 36, "a name column of 60 px would push End turn off the screen");
+    assert.equal(bandFit({ width: 320, round: 1, timer: "none", endTurn: false, next: 0 }).nameMin, 36, "never on another's turn");
+  });
+
   test("a running clock takes the room its text needs, not the room of 10:00 (P3R-4)", () => {
     assert.deepEqual(fit(320, 1.3, { timer: { clock: "10:00" } }), { disks: 0, round: true, stackEnd: false });
     assert.deepEqual(fit(320, 1.3, { timer: { clock: "0:30" } }), { disks: 1, round: true, stackEnd: false }, "a short clock leaves a disk room");
@@ -87,7 +101,7 @@ describe("bandFit (LPD-DMPHONE-2)", () => {
   });
 
   test("the DM's Next counts as End turn does: the disks give way for it, the round after them, never the name", () => {
-    const dm = (width: number, scale: number, timer: BandTimer = "none") => bandFit({ width: width / scale, round: 1, timer, endTurn: false, dmNext: true, next: 4 });
+    const dm = (width: number, scale: number, timer: BandTimer = "none") => stripName(bandFit({ width: width / scale, round: 1, timer, endTurn: false, dmNext: true, next: 4 }));
     assert.deepEqual(dm(390, 1), { disks: 4, round: true, stackEnd: false }, "a phone at 100% keeps all four faces");
     assert.deepEqual(dm(320, 1), { disks: 2, round: true, stackEnd: false });
     assert.deepEqual(dm(390, 1, "over"), { disks: 2, round: true, stackEnd: false });

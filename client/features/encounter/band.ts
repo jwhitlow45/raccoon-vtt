@@ -129,7 +129,7 @@ function clockWidth(text: string): number {
 }
 
 /** How the band's row fits its width: how many of the `next` disks it has show, whether the round shows, and whether End turn stacks its words on two lines. */
-export type BandFit = { disks: number; round: boolean; stackEnd: boolean };
+export type BandFit = { disks: number; round: boolean; stackEnd: boolean; /** The name column's least width in layout px: the words of "Your turn" where the row holds them, else a few letters (BAND_NAME_MIN_PX). */ nameMin: number };
 
 /**
  * How the phone's turn band fits a narrow layout (LPD-DMPHONE-2). The
@@ -142,20 +142,26 @@ export type BandFit = { disks: number; round: boolean; stackEnd: boolean };
  * still ran off the screen, and on a 320 px phone a player's End turn did.
  */
 export function bandFit(input: { width: number; round: number; timer: BandTimer; endTurn: boolean; dmNext?: boolean; next: number }): BandFit {
+  // "Your turn" stays whole while even End turn stacked fits beside it. A phone too narrow for that, 320 px at 130% with the time up, gives it up before End turn runs off the screen.
+  const whole = fitWith(input, input.endTurn ? BAND_YOUR_TURN_PX : BAND_NAME_MIN_PX);
+  if (!input.endTurn || whole.fits) return whole.fit;
+  return fitWith(input, BAND_NAME_MIN_PX).fit;
+}
+
+function fitWith(input: { width: number; round: number; timer: BandTimer; endTurn: boolean; dmNext?: boolean; next: number }, nameMin: number): { fit: BandFit; fits: boolean } {
   const { gap } = ROW;
   const round = gap + ROW.roundLetter + ROW.roundDigit * String(input.round).length;
   const timer = input.timer === "none" ? 0 : gap + (input.timer === "over" ? ROW.timeUp : clockWidth(input.timer.clock));
   // The DM's Next never gives way or stacks (one short word), so it counts as an End turn that is already stacked or not at all.
   const end = (stacked: boolean) => (input.endTurn ? gap + (stacked ? ROW.endTurnStacked : ROW.endTurn) : input.dmNext ? gap + ROW.dmNext : 0);
-  const nameLeast = input.endTurn ? BAND_YOUR_TURN_PX : BAND_NAME_MIN_PX;
-  const base = ROW.gutters + ROW.portrait + gap + ROW.nameFrame + nameLeast + timer + ROW.slack;
+  const base = ROW.gutters + ROW.portrait + gap + ROW.nameFrame + nameMin + timer + ROW.slack;
   const room = input.width - base - round - end(false);
   if (room >= 0) {
     const disks = Math.floor((room - gap - ROW.nextLabel) / (ROW.diskGap + ROW.disk));
-    return { disks: Math.max(0, Math.min(input.next, disks)), round: true, stackEnd: false };
+    return { fit: { disks: Math.max(0, Math.min(input.next, disks)), round: true, stackEnd: false, nameMin }, fits: true };
   }
-  if (room + round >= 0) return { disks: 0, round: false, stackEnd: false };
-  return { disks: 0, round: false, stackEnd: input.endTurn };
+  if (room + round >= 0) return { fit: { disks: 0, round: false, stackEnd: false, nameMin }, fits: true };
+  return { fit: { disks: 0, round: false, stackEnd: input.endTurn, nameMin }, fits: input.width - base - end(true) >= 0 };
 }
 
 /**
