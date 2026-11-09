@@ -75,8 +75,8 @@ export type ChipRunResult = { t: "done" } | { t: "ask"; warning: string; anyway:
 
 export type ChipRun = (env: ChipEnv, opts?: { confirmed?: boolean }) => ChipRunResult;
 
-/** A line under an item's words: a warning a move asks about, why it was refused, or that it waits. */
-export type ChipUnder = { text: string; tone: "warning" | "danger" | "busy" };
+/** A line under an item's words: a warning a move asks about, why it was refused, that it waits, or why it is off where a note at the row's end has no room. */
+export type ChipUnder = { text: string; tone: "warning" | "danger" | "busy" | "note" };
 
 export type ChipItem = {
   id: string;
@@ -298,7 +298,8 @@ export function dmMenuSections(view: DmMenuView): ChipSection[] {
   });
   if (scene && away) {
     screens.push({ id: "movePlayers", kind: "movePlayers", title: CHIP_WORDS.movePlayers, role: "action", note: onScene(placeOf(scene)), ...moving(view, moveOut(view)), run: moveRun(scene, false) });
-    if (sibling) screens.push({ id: "bringEveryone", kind: "bringEveryone", title: CHIP_WORDS.bringEveryone, role: "action", disabled: !view.playersHoldHere || !view.focusHere, ...(unreached !== null ? { description: unreached } : {}), run: bringRun(scene.id) });
+    // Off on a floor players have not reached, it says why on screen as an off item does, and not to a screen reader alone (design 7.3, ViewControls.tsx's notice).
+    if (sibling) screens.push({ id: "bringEveryone", kind: "bringEveryone", title: CHIP_WORDS.bringEveryone, role: "action", disabled: !view.playersHoldHere || !view.focusHere, ...(unreached !== null ? { description: unreached, under: { text: unreached, tone: "note" } } : {}), run: bringRun(scene.id) });
   } else if (scene) {
     screens.push({ id: "bringEveryone", kind: "bringEveryone", title: CHIP_WORDS.bringEveryone, role: "action", disabled: !view.focusHere, run: bringRun(scene.id) });
   }

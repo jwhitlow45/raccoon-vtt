@@ -352,7 +352,8 @@ export function itemLook(item: Pick<ChipItem, "id" | "busy" | "under" | "disable
   if (asked?.id === item.id && !item.busy) return { title: asked.anyway, under: { text: asked.warning, tone: "warning" }, inert: false };
   const refused = said.get(item.id);
   if (refused !== undefined && !item.busy) return { under: { text: refused, tone: "danger" }, inert: item.disabled === true };
-  return { ...(item.under ? { under: item.under } : {}), inert: item.busy === true || item.disabled === true };
+  // A note says why an item is off, which the row's detail line already says from the item's description.
+  return { ...(item.under && item.under.tone !== "note" ? { under: item.under } : {}), inert: item.busy === true || item.disabled === true };
 }
 
 /**

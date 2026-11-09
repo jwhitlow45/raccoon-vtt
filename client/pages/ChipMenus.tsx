@@ -509,12 +509,13 @@ function useChipHost(handle: PopoverHandle) {
 
 type ChipHost = ReturnType<typeof useChipHost>;
 
-/** An item's line under its words: the warning in the warning color, a refusal in red, or the shared wait. */
+/** An item's line under its words: the warning in the warning color, a refusal in red, the shared wait, or why an item is off, dim with it as a note is (Menu.tsx). */
 function underLine(item: ChipItem): ReactNode {
   const under = item.under;
   if (!under) return null;
   if (under.tone === "busy") return <Loading small delay={0} live={false} text={under.text} />;
-  return <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.regular, lineHeight: theme.leading.body, color: under.tone === "warning" ? theme.color.warning : theme.color.dangerText }}>{under.text}</span>;
+  const color = under.tone === "warning" ? theme.color.warning : under.tone === "danger" ? theme.color.dangerText : item.disabled ? theme.color.textDisabled : theme.color.textMuted;
+  return <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.regular, lineHeight: theme.leading.body, color }}>{under.text}</span>;
 }
 
 /** The shared Menu's items for chipMenus.ts's: a line under the words goes in the item's content, named by its title, its words heard as its description. */

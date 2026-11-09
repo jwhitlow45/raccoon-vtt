@@ -320,6 +320,8 @@ describe("what a pick does (design-v1-qol.md 5, Acting, D-261106-144)", () => {
     const busy = { ...item, busy: true, under: { text: "Moving players…", tone: "busy" as const } };
     assert.deepEqual(itemLook(busy, asked, new Map([["movePlayers", "no"]])), { under: { text: "Moving players…", tone: "busy" }, inert: true }, "a second Enter is refused while it waits");
     assert.deepEqual(itemLook({ ...item, disabled: true }, null, new Map()), { inert: true }, "an item that is off is not pressed");
+    const off = { ...item, disabled: true, under: { text: "Players haven't reached Attic, so their maps stay.", tone: "note" as const } };
+    assert.deepEqual(itemLook(off, null, new Map()), { inert: true }, "why it is off is the row's detail line, not a second line under it");
   });
 });
 

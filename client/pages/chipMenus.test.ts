@@ -491,15 +491,16 @@ describe("the DM menu on a floor (design-v1-floors.md 18.6, 7.3)", () => {
     assert.deepEqual(screens(view).items.map((i) => i.title), ["Black out players' screens", "Follow me", "Move players here", "Bring everyone here"]);
     const [follow, move, bring] = ["follow", "movePlayers", "bringEveryone"].map((id) => item(dmMenuSections(view), id));
     assert.equal(move!.note, "on Tower · Upper floor");
-    assert.deepEqual([bring!.disabled, bring!.description, follow!.note, follow!.description], [false, undefined, undefined, undefined]);
+    assert.deepEqual([bring!.disabled, bring!.description, bring!.under, follow!.note, follow!.description], [false, undefined, undefined, undefined, undefined]);
   });
 
   test("on a floor they have not reached, Bring everyone here is off and Follow me says the same line", () => {
     const view = viewOf({ viewing: upper, playerScene: players, playersHoldHere: false, playersSceneHere: true });
     const bring = item(dmMenuSections(view), "bringEveryone");
     assert.deepEqual([bring.disabled, bring.description], [true, NOT_REACHED]);
+    assert.deepEqual(bring.under, { text: NOT_REACHED, tone: "note" }, "an item that is off says why on screen, under its words");
     const follow = item(dmMenuSections(view), "follow");
-    assert.deepEqual([follow.note, follow.description], [undefined, NOT_REACHED]);
+    assert.deepEqual([follow.note, follow.description, follow.under], [undefined, NOT_REACHED, undefined]);
   });
 
   test("on another scene whatever players hold, there is no Bring everyone here and the notice names the players' place", () => {
