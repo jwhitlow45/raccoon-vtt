@@ -1428,7 +1428,8 @@ function ownersStopsCtx(ctx: Ctx, token: Token, stops: readonly PathStop[]): Pat
 export function projectCharacter(state: RoomState, viewer: Viewer, character: Character): ProjectedCharacter {
   if (viewer.role === "dm") return character;
   // Rev 0 for players, as on their tokens (projectTokenCtx). The last Long Rest's stamp is the DM's, the owners' copy
-  // included, so no clock change ever re-projects a character (docs/design/design-v1-calendar.md 6.4).
+  // included, so that stamp alone never re-projects a character (docs/design/design-v1-calendar.md 6.4). A time span's
+  // projection can (`spanDependents`).
   if (ownsCharacter(viewer, character)) {
     const { longRest: _longRest, ...owned } = character;
     return { ...owned, rev: 0, actor: projectActorOwner(character.actor, heldClock(state, viewer)?.id) };
@@ -2915,7 +2916,7 @@ export const SCENE_FOR_PLAYERS = {
   phaseGrid: "dm: the phases' reference grid",
   // Players' devices draw sight and stop drags at walls by these (docs/design/design-v1-maps-vision.md 4.3.5).
   blockMovement: "copied",
-  vision: "copied",
+  vision: "changed: without `byClock`, which is the DM's alone since it tells a clock exists (docs/design/design-v1-calendar-c2c3.md 6.4)",
   gridFromFile: "dm: the import's mark, which only Find the grid reads",
   // Players' devices snap, draw and measure by it (docs/design/design-v1-hex-grids.md section 7).
   gridShape: "copied",

@@ -58,7 +58,7 @@ function fullScene(): Required<Scene> {
     phaseId: "day",
     phaseGrid: { refWidthPx: 700, refHeightPx: 700, cellPx: 70, originPx: { x: 10, y: 10 } },
     blockMovement: true,
-    vision: { on: false, light: "bright" },
+    vision: { on: false, light: "bright", byClock: true },
     gridFromFile: true,
     gridShape: "hexRows",
     suggestedView: "isometric",
