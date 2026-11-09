@@ -262,6 +262,9 @@ describe("synced music and sound in a live room", () => {
       await delay(10);
     }
     assert.deepEqual(last, { t: "sys.sound", from: 2, music: null, loops: {}, effects: [] });
+    // The stop is stored before the room's committed state shows it, so a read at the first sight of the stored op can find the music still playing.
+    const commitDeadline = Date.now() + 5_000;
+    while (Date.now() < commitDeadline && (t.manager.get(roomId)!.committed.state.playing?.music ?? null) !== null) await delay(10);
     const state = t.manager.get(roomId)!.committed.state;
     assert.equal(state.playing?.music ?? null, null);
     assert.deepEqual(state.playing?.loops ?? {}, {});
