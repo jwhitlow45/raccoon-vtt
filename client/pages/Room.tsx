@@ -61,7 +61,7 @@ import { Notice } from "../components/Notice.tsx";
 import { useJobWaiting, usePdfJobRoom } from "../features/handouts/pdf/live.ts";
 import { useJournalUnread } from "../features/journal/store.ts";
 import { useLogUnread } from "../features/log/useLogUnread.ts";
-import { useRollToasts } from "../features/dice/useRollToasts.ts";
+import { RollToasts } from "../features/dice/useRollToasts.ts";
 import { ClockChip, useClockChipText } from "../features/clock/ClockChip.tsx";
 import { useClockToasts } from "../features/clock/useClockToasts.ts";
 import { PhaseMenu } from "../features/phases/PhaseMenu.tsx";
@@ -525,8 +525,8 @@ function RoomPage() {
   }, [wide, ui]);
   // New chat and whispers mark the Log's button while it is not on screen.
   const unread = useLogUnread(wide ? sideShows("log") : sheet?.id === "log");
-  // Others' rolls as toasts while the Dice panel is not on screen (docs/design/design-v1-dice.md 8.5).
-  useRollToasts(wide ? sideShows("dice") : sheet?.id === "dice");
+  // Others' rolls as toasts while the Dice panel is not on screen (docs/design/design-v1-dice.md 8.5), first in every screen this page draws, so its memory of the log lasts through them.
+  const rollToasts = <RollToasts diceShown={wide ? sideShows("dice") : sheet?.id === "dice"} />;
   // Clock lines as toasts while neither the Log nor Time is on screen (pages/timeSound.ts).
   useClockToasts(clockLinesShown(wide ? sideShows : (id) => sheet?.id === id));
   const journalUnread = useJournalUnread();
@@ -1107,11 +1107,25 @@ function RoomPage() {
     };
   }, [route, endRoute]);
 
-  if (ended) return <EndedScreen ended={ended} roomId={roomId} role={role} />;
+  if (ended) {
+    return (
+      <>
+        {rollToasts}
+        <EndedScreen ended={ended} roomId={roomId} role={role} />
+      </>
+    );
+  }
   // A blackout is for a break or a reveal (features section 13), so players
   // see nothing of the table: no map, panels, initiative strip, handouts or
   // toasts. sceneGate gives only players this kind, so a DM's room is unchanged.
-  if (gate.kind === "blackout") return <PauseScreen />;
+  if (gate.kind === "blackout") {
+    return (
+      <>
+        {rollToasts}
+        <PauseScreen />
+      </>
+    );
+  }
 
   const reserveTop = docked && !dockInHeader ? DOCK_PX + DOCK_GAP : undefined;
   // The cap the sheet takes once it stands at its normal height again, with the dock back on its edge where it fits there, for a long swipe from full screen after a change of layout.
@@ -1121,7 +1135,7 @@ function RoomPage() {
   const headerActions = dockInHeader ? <DockHeaderActions summary={summary} actions={dockActions} showRef={showRef} summaryRef={summaryRef} /> : undefined;
   const headerActionCount = dockInHeader ? (hasBar ? 1 : 0) + (summary ? 1 : 0) : 0;
   const notices = full ? <ModalSlots /> : undefined;
-  return (
+  const page = (
     <div
       style={{
         ...accentVars,
@@ -1380,6 +1394,12 @@ function RoomPage() {
       <SearchSheetHost wide={wide} tools={tools} top={topInset} panelOptions={panelOptions} preview={preview} />
       <RoomPasteHost />
     </div>
+  );
+  return (
+    <>
+      {rollToasts}
+      {page}
+    </>
   );
 }
 

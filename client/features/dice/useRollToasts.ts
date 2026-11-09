@@ -142,3 +142,13 @@ export function useRollToasts(diceShown: boolean): void {
     for (const { state, quiet } of tracker.unannounced()) ui.notify(ownResultText(state), state.state === "refused" ? "error" : "info", undefined, undefined, state.state === "committed", quiet);
   }, [tracker, version, ui]);
 }
+
+/**
+ * useRollToasts as a part of its own, drawn first in the Room page: the
+ * hook reads the log, the tokens and the names, which most ops change, and
+ * the page itself and all it holds would draw again with each.
+ */
+export function RollToasts(props: { diceShown: boolean }): null {
+  useRollToasts(props.diceShown);
+  return null;
+}
