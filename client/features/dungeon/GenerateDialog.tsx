@@ -308,6 +308,7 @@ export function GenerateDialog(props: {
       width={layout.width}
       height={layout.height}
       drawing={ready.drawing || looking}
+      drawingNow={looking}
       onPictured={(drawn) => step({ k: "pictured", drawn })}
       onPictureFailed={(drawn) => step({ k: "pictureFailed", drawn })}
       leftCorner={<LookCloser drawn={looksReady ? drawable(flow) : null} name={sceneName} disabled={locked} onDrawing={setLooking} onFailed={setLookFailed} />}

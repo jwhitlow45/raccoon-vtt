@@ -37,6 +37,8 @@ export function DungeonPreview(props: {
   width: number;
   height: number;
   drawing: boolean;
+  /** Show the drawing words at once. Look closer sets it, as its render holds the page before the shared delay would end. */
+  drawingNow?: boolean;
   /** The picture of `drawn` is on screen, so Make may send it (flow.ts). */
   onPictured(drawn: Drawn): void;
   /** The picture of `drawn` could not be made, so the box empties and Make stays off. */
@@ -135,7 +137,7 @@ export function DungeonPreview(props: {
       {props.leftCorner ? <div style={{ ...CORNER_SLOT, right: "auto", left: theme.space(2) }}>{props.leftCorner}</div> : null}
       {props.drawing ? (
         <div style={{ position: "absolute", left: theme.space(2), top: theme.space(2), padding: `${theme.space(1)}px ${theme.space(2)}px`, borderRadius: theme.radius.sm, background: theme.color.surface }}>
-          <Loading text={DRAWING} />
+          <Loading text={DRAWING} delay={props.drawingNow ? 0 : undefined} />
         </div>
       ) : null}
     </div>

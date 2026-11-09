@@ -39,3 +39,15 @@ test("Reroll itself wears the board's two-tone ring, whose dark halo stands betw
   const dialog = readFileSync(new URL("./GenerateDialog.tsx", import.meta.url), "utf8");
   assert.match(dialog, /<Button size="sm" \{\.\.\.ON_BOARD\} style=\{ON_BOARD_STYLE\}.*>\n\s*Reroll/);
 });
+
+const previewMarkup = (drawing: boolean, drawingNow?: boolean) =>
+  renderToStaticMarkup(createElement(DungeonPreview, { drawn: null, width: 400, height: 300, drawing, drawingNow, onPictured: () => undefined, onPictureFailed: () => undefined }));
+
+test("Look closer's status words are in the markup at once, before its render starts, and an ordinary redraw keeps the delay (DG2-SOL-01)", async () => {
+  const { DRAWING } = await import("./words.ts");
+  assert.ok(previewMarkup(true, true).includes(DRAWING), "drawingNow shows the words on the first render");
+  assert.ok(!previewMarkup(true).includes(DRAWING), "a plain redraw waits the shared delay");
+  const { readFileSync } = await import("node:fs");
+  const dialog = readFileSync(new URL("./GenerateDialog.tsx", import.meta.url), "utf8");
+  assert.match(dialog, /drawingNow=\{looking\}/);
+});
