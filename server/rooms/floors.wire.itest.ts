@@ -300,6 +300,27 @@ describe("several floors over the wire (docs/design/design-v1-floors.md 8, the s
     for (const x of all) x.socket.close();
   });
 
+  test("Ana asks for saves upstairs with her hidden creature, which the DM brings down and gives to Bree: no frame or snapshot of Bree's names Upper (FLRBUILD-PRIV-01)", async () => {
+    const r = await newRoom(t, "Handed down");
+    await ok(r.dmSocket, { t: "scene.update", sceneId: r.ground, patch: { name: "Tower" } });
+    const upper = await addFloor(r, r.ground, "above", "Upper floor");
+    await create(r, r.ground, { kind: "pc", name: "Wren", disposition: "ally", ownerIds: [r.breeId], x: 6, y: 4 });
+    const shade = await create(r, upper, { kind: "pc", name: "Shade", disposition: "ally", ownerIds: [r.anaId], visibility: "dm", x: 5, y: 5 });
+    const m = await withMarker(t, r, r.ground);
+    const s = await players(t, r, "ana first", false);
+    // Ana's own socket sends the ask and reads its answer, so her view is not folded here, and the oracle checks the others.
+    m.attach([s.bree, s.tv]);
+    await m.sync("seated");
+    const asked = await ok(s.ana.socket, { t: "cast.ask", cast: { id: uuidv7(), caster: shade, sceneId: upper, spell: "Fireball", targets: [shade] } } as Op);
+    assert.ok(JSON.stringify(asked.changes).includes(upper), "Ana's ask names Upper, which she holds through Shade");
+    await m.sync("Ana asked upstairs");
+    await m.apply({ t: "token.update", tokenId: shade, patch: { sceneId: r.ground, ownerIds: [r.breeId] } } as Op, "Shade brought down and given to Bree");
+    assert.ok(Object.values(s.bree.view.tokens).some((x) => x.id === shade), "Bree holds Shade now");
+    const again = await seat("Bree again", await t.connect(r.roomId, r.bree), { memberId: r.breeId, role: "player" });
+    for (const x of [s.bree, again, s.tv]) assert.deepEqual(naming(x, [upper, "Upper floor"]), [], `${x.name} never learns Upper's id or name`);
+    for (const x of [s.ana, s.bree, again, s.tv]) x.socket.close();
+  });
+
   test("Hide, then Show, Upper with a fight, its rows and its lines on it: they leave and come back with the floor", async () => {
     const r = await newRoom(t, "Show and hide");
     await ok(r.dmSocket, { t: "scene.update", sceneId: r.ground, patch: { name: "Tower" } });

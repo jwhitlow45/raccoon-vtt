@@ -18,7 +18,7 @@ import { groundAt } from "./rules/heights.ts";
 import { convexHull } from "./rules/aoe.ts";
 import type { Point } from "./rules/geom.ts";
 import { convexLive, fogClassOf, groundOf, partLive, type Ground } from "./rules/held.ts";
-import { deleteSet, heldFloors, onPlayersScene, startFloor, unhiddenPartyMember } from "./rules/floors.ts";
+import { deleteSet, heldFloors, holdsRecordOn, onPlayersScene, startFloor, unhiddenPartyMember } from "./rules/floors.ts";
 import {
   LEDGE_IN_THE_WAY,
   WALL_IN_THE_WAY,
@@ -1042,9 +1042,9 @@ function forPlayer(op: Op, c: Check): Decision {
       return rollChangeCheck(c, op);
 
     case "cast.ask":
-      return castAskCheck(c, op, holds);
+      return castAskCheck(c, op, held);
     case "cast.close":
-      return castCloseCheck(c, op, held.size > 0);
+      return castCloseCheck(c, op, held);
 
     case "dice.roll":
       return diceRollCheck(c, op);
@@ -1692,11 +1692,11 @@ export function waitingAsks(state: Pick<RoomState, "casts" | "tokens" | "charact
  * on the caster's floor (docs/design/design-v1-floors.md 8.3), since a spell
  * never reaches across floors.
  */
-function castAskCheck(c: Check, op: OpOf<"cast.ask">, holds: (sceneId: string) => boolean): Decision {
+function castAskCheck(c: Check, op: OpOf<"cast.ask">, held: ReadonlySet<string>): Decision {
   const input = op.cast;
   if (ownEntry(c.state.casts, input.id)) return GONE;
   const caster = c.visibleToken(input.caster);
-  if (!caster || !holds(caster.sceneId) || input.sceneId !== caster.sceneId) return GONE;
+  if (!caster || !held.has(caster.sceneId) || input.sceneId !== caster.sceneId) return GONE;
   if (!ownsToken(c.state, c.actor, caster)) return NOT_YOURS;
   if (input.area !== undefined) {
     const area = ownEntry(c.state.templates, input.area);
@@ -1712,15 +1712,16 @@ function castAskCheck(c: Check, op: OpOf<"cast.ask">, holds: (sceneId: string) =
   }
   const tag = input.damage?.tag;
   if (tag !== undefined && Object.values(c.state.casts).some((ask) => ask.damage?.tag === tag)) return refuse("invalid", ROLL_ASKED_ALREADY);
-  if (waitingAsks(c.state, c.actor).length >= LIMITS.castsPerMember) return refuse("quota", ASKS_WAITING);
+  // Only the asks the player holds count, as their block counts them, since one left on a floor they no longer hold is not theirs to withdraw.
+  if (waitingAsks(c.state, c.actor).filter((ask) => holdsRecordOn(c.state, held, ask.sceneId)).length >= LIMITS.castsPerMember) return refuse("quota", ASKS_WAITING);
   return OK;
 }
 
 /** A player's withdrawal, of an ask whose caster they own now. The DM's resolve and dismissal are the DM's alone. */
-function castCloseCheck(c: Check, op: OpOf<"cast.close">, holdsAny: boolean): Decision {
+function castCloseCheck(c: Check, op: OpOf<"cast.close">, held: ReadonlySet<string>): Decision {
   const ask = ownEntry(c.state.casts, op.castId);
-  // Behind a pause a player holds no ask (shared/project.ts), so none is there to withdraw.
-  if (!ask || !holdsAny || !c.ownsTokenId(ask.caster)) return refuse("gone", ASK_CLOSED);
+  // A player holds no ask behind a pause, nor one asked on a floor they do not hold (shared/project.ts projectCastCtx), so none is there to withdraw.
+  if (!ask || held.size === 0 || !holdsRecordOn(c.state, held, ask.sceneId) || !c.ownsTokenId(ask.caster)) return refuse("gone", ASK_CLOSED);
   return op.end === "withdrawn" ? OK : FORBIDDEN;
 }
 

@@ -258,6 +258,19 @@ describe("removing and deleting floors (7.1, 9, D-261102-493)", () => {
     assert.equal(floorProblem(back, "s1"), null);
   });
 
+  test("an ask for saves made on a removed floor goes with it, though its caster stands elsewhere, and its undo brings the ask back (FLRBUILD-PRIV-01)", () => {
+    let state = towerOf(3);
+    const ask = (id: string, sceneId: string) => ({ id, rev: 0, by: "p1", caster: "owl", sceneId, spell: "Fireball", targets: ["owl"], at: "2026-11-08T00:00:00Z" });
+    state = { ...state, tokens: { ...state.tokens, owl: token("owl", { sceneId: "s1", ownerIds: ["p2"] }) }, casts: { k1: ask("k1", "f2"), k2: ask("k2", "s1"), k3: ask("k3", "s2") } };
+    const removed = applied(state, { t: "scene.delete", sceneId: "f2" });
+    assert.deepEqual(Object.keys(removed.state.casts).sort(), ["k2", "k3"], "the ask on Upper goes, the others stay");
+    assert.deepEqual(Object.keys(undo(removed.state, removed.inverse).casts).sort(), ["k1", "k2", "k3"]);
+    const deleted = applied(state, { t: "scene.delete", sceneId: "s1" });
+    assert.deepEqual(Object.keys(deleted.state.casts), ["k3"], "a delete of the scene takes the asks on every floor");
+    const plain = applied({ ...state, casts: { k3: ask("k3", "s2") }, meta: { ...state.meta, playerSceneId: "s1" } }, { t: "scene.delete", sceneId: "s2" });
+    assert.deepEqual(Object.keys(plain.state.casts), ["k3"], "a scene without floors keeps its asks, as before floors");
+  });
+
   test("a delete of the main floor takes every floor, and one holding the start floor moves the players to a main floor", () => {
     const state = towerOf(3, room({ scenes: { s1: tower(), s2: scene("s2", { order: 1 }) } }));
     const upper = { ...state, meta: { ...state.meta, playerSceneId: "f3" } };

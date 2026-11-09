@@ -79,7 +79,7 @@ import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
 import { compareEntries, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
 import { legOnGround, pathThisTurn, seenWhole, stopsForNonOwners, stopsForOwners } from "./rules/path.ts";
 import { zoneFogged, zoneRanges } from "./rules/traps.ts";
-import { heldFloors, playersSee, sameScene, unhiddenPartyMember } from "./rules/floors.ts";
+import { heldFloors, holdsRecordOn, playersSee, sameScene, unhiddenPartyMember } from "./rules/floors.ts";
 import { clipFootprint, seesCreature, sightClipOf, sightRect } from "./rules/vision.ts";
 import type { SegmentIndex } from "./rules/segments.ts";
 import { deriveWalls, indexBuild, sceneWalls, type WallSet } from "./rules/walls.ts";
@@ -3108,11 +3108,14 @@ function projectHandoutDocCtx(ctx: Ctx, doc: HandoutDoc): HandoutDoc | null {
  * caster's former owners never learn of it. Its targets are cut to the
  * tokens the viewer sees now, its area to one they see, and its damage roll
  * and what it rolled reach only the asker, since a Secret roll's totals
- * reach only its roller and the DM.
+ * reach only its roller and the DM. On a scene with floors it reaches only
+ * a viewer who holds the floor it was asked on (rules/floors.ts
+ * holdsRecordOn): a caster brought down from a floor nobody reached and
+ * given to another player never sends them that floor's id.
  */
 function projectCastCtx(ctx: Ctx, ask: CastAsk): CastAsk | null {
   if (ctx.viewer.role === "dm") return ask;
-  if (ctx.paused || !ownsRollCreature(ctx, { tokenId: ask.caster })) return null;
+  if (ctx.paused || !holdsRecordOn(ctx.state, ctx.floors, ask.sceneId) || !ownsRollCreature(ctx, { tokenId: ask.caster })) return null;
   const out: CastAsk = { id: ask.id, rev: ask.rev, by: ask.by, caster: ask.caster, sceneId: ask.sceneId, spell: ask.spell, at: ask.at };
   if (ask.roll !== undefined) out.roll = ask.roll;
   if (ask.slot !== undefined) out.slot = ask.slot;

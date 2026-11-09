@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Scene, Viewer } from "./model.ts";
-import { FLOOR_REFUSALS, MOVE_PLAYERS_FIRST, canApply } from "./permissions.ts";
+import { ASK_CLOSED, ASKS_WAITING, FLOOR_REFUSALS, MOVE_PLAYERS_FIRST, canApply } from "./permissions.ts";
 import type { Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { DM, P1, P2, character, env, room, scene, template, token } from "./testutil.ts";
@@ -101,6 +101,17 @@ describe("a player's access follows the floors they hold (8.3)", () => {
     assert.equal(decide(state, cast("u"), P1), GONE, "a cast from Ground named on Upper");
     const follows: Op = { t: "template.create", template: { ...template("t9", { sceneId: "u", ownerId: "p1", visibility: "all", attachedTo: "thorn" }) } } as Op;
     assert.equal(decide(state, follows, P1), GONE, "an aura on Upper following Thorn on Ground");
+  });
+
+  test("an ask left on a floor its player no longer holds is not theirs to withdraw, and does not count among their asks waiting (FLRBUILD-PRIV-01)", () => {
+    const ask = (id: string, sceneId: string) => ({ id, rev: 0, by: "p1", caster: "thorn", sceneId, spell: "Fireball", targets: ["thorn"], at: "2026-11-08T00:00:00Z" });
+    // Thorn asked from the Attic, hidden, and the DM brought him down to Ground: Ana holds Ground alone, as her projection does.
+    const state = tower({ tokens: { thorn: thornOn("g") }, casts: { k1: ask("k1", "a"), k2: ask("k2", "g"), k3: ask("k3", "g") } });
+    assert.equal(decide(state, { t: "cast.close", castId: "k1", end: "withdrawn" }, P1), `gone: ${ASK_CLOSED}`);
+    assert.equal(decide(state, { t: "cast.close", castId: "k2", end: "withdrawn" }, P1), "ok");
+    const third: Op = { t: "cast.ask", cast: { id: "k4", caster: "thorn", sceneId: "g", spell: "Shatter", targets: ["thorn"] } };
+    assert.equal(decide(state, third, P1), "ok", "two asks wait where Ana can see them, so a third goes");
+    assert.equal(decide({ ...state, casts: { ...state.casts, k5: ask("k5", "g") } }, third, P1), `quota: ${ASKS_WAITING}`);
   });
 
   test("a roll asked of a hidden creature on a floor nobody reached is allowed, as on any floor of the players' scene", () => {

@@ -201,6 +201,50 @@ describe("a floor's place for players (D-261102-492)", () => {
   });
 });
 
+describe("a room-level record names only a floor the viewer holds (FLRBUILD-PRIV-01)", () => {
+  /**
+   * Ana's owl, which the DM hid, on the Attic, which nobody reached: her
+   * ask for saves there and the owl's turn starting there. Then the DM
+   * moves the owl down to Ground and gives it to Bree.
+   */
+  function handedDown(): RoomState {
+    const state = tower();
+    state.tokens.owl = token("owl", { sceneId: "attic", kind: "npc", name: "Owl", ownerIds: ["p1"], visibility: "dm", x: 2, y: 2 });
+    state.casts = { k1: { id: "k1", rev: 0, by: "p1", caster: "owl", sceneId: "attic", spell: "Fireball", targets: ["owl"], at: "2026-11-08T00:00:00Z" } };
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e-owl", entries: [entry("e-owl", { tokenId: "owl", value: 12 })], turnStart: { entryId: "e-owl", tokenId: "owl", sceneId: "attic", x: 2, y: 2, elevation: 0, seen: true } };
+    const held = projectState(state, P1, { sceneId: null });
+    assert.equal(held.casts.k1?.sceneId, "attic", "Ana holds the Attic through her owl, so her ask names it");
+    // A new room object, as each op makes one, since the held floors are kept per finished state.
+    return { ...state, tokens: { ...state.tokens, owl: { ...state.tokens.owl!, sceneId: "ground", ownerIds: ["p2"] } } };
+  }
+
+  test("an ask for saves made on a floor the caster's new owner does not hold reaches them as nothing, by snapshot and by key", () => {
+    const state = handedDown();
+    for (const viewer of PLAYERS) {
+      const copy = projectState(state, viewer, { sceneId: null });
+      assert.deepEqual(traces(copy, UNHELD), [], `${viewer.memberId}'s snapshot names the Attic`);
+      assert.equal(projectEntity(keys.cast("k1"), state, viewer, { sceneId: null }), null, viewer.memberId);
+      agrees(state, viewer, null, copy);
+    }
+    assert.equal(projectState(state, DM, { sceneId: "ground" }).casts.k1?.sceneId, "attic", "the DM's ask is whole");
+  });
+
+  test("an ask on a scene without floors, or naming no scene the room has, reaches its caster's players as before floors", () => {
+    for (const sceneId of ["road", "gone", "__proto__", "constructor"]) {
+      const state = handedDown();
+      state.casts.k1 = { ...state.casts.k1!, sceneId };
+      assert.equal(projectState(state, P2, { sceneId: null }).casts.k1?.sceneId, sceneId, sceneId);
+      assert.equal(projectState(state, P1, { sceneId: null }).casts.k1, undefined, `${sceneId}: Ana no longer owns the owl`);
+    }
+  });
+
+  test("the same ask on a floor Bree holds reaches her as before", () => {
+    const state = handedDown();
+    state.casts.k1 = { ...state.casts.k1!, sceneId: "ground" };
+    assert.equal(projectState(state, P2, { sceneId: null }).casts.k1?.sceneId, "ground");
+  });
+});
+
 describe("the DM's projection", () => {
   test("a DM holds every floor of the scene they view, by any floor, with the marks, and nothing of another scene's contents", () => {
     const state = tower();
