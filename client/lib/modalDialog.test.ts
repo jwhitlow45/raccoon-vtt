@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { applySheetDialogSteps, closeLedger, openingFocus, sheetDialogSteps, sheetFocusAfter, stopIndex, tabStops, wrapFocusIndex, type DialogLike } from "./modalDialog.ts";
+import { applySheetDialogSteps, closeLedger, openingFocus, raiseModalsAbove, sheetDialogSteps, sheetFocusAfter, stopIndex, tabStops, wrapFocusIndex, type DialogLike } from "./modalDialog.ts";
 
 describe("focus wrapping in a modal dialog", () => {
   test("Tab from the last control goes to the first", () => {
@@ -212,5 +212,23 @@ describe("a sheet's one dialog (useSheetDialog)", () => {
     assert.equal(sheetFocusAfter({ steps: ["close"], before: "page", hiding: true }), "hide", "a tap that focused nothing, as in Safari");
     assert.equal(sheetFocusAfter({ steps: ["close"], before: "outside", hiding: true }), "before");
     assert.equal(sheetFocusAfter({ steps: [], before: "inside", hiding: false }), null);
+  });
+});
+
+describe("raiseModalsAbove (TOKEN-SHEET-BAND-DIALOG)", () => {
+  test("each open modal dialog is closed and opened again in order, and focus goes back to the control that had it", () => {
+    const calls: string[] = [];
+    const field = { focus: () => calls.push("focus field") } as unknown as HTMLElement;
+    const other = {} as HTMLElement;
+    const dialog = (name: string, holds: HTMLElement | null) => ({
+      contains: (node: Node | null) => node === holds,
+      close: () => void calls.push(`close ${name}`),
+      showModal: () => void calls.push(`showModal ${name}`),
+    });
+    raiseModalsAbove([dialog("first", other), dialog("second", field)], field);
+    assert.deepEqual(calls, ["close first", "showModal first", "close second", "showModal second", "focus field"]);
+    calls.length = 0;
+    raiseModalsAbove([], field);
+    assert.deepEqual(calls, []);
   });
 });

@@ -205,6 +205,26 @@ export function applySheetDialogSteps(el: DialogLike, steps: readonly SheetDialo
   }
 }
 
+/**
+ * Puts modal dialogs that were open back above a sheet that has just been
+ * made modal. showModal() stacks the sheet over every dialog already in the
+ * top layer, so a sheet that turns modal with a dialog of its own open, as
+ * the Token sheet does when a phone's turn strip takes the band and a
+ * keyboard shrinks the screen, covered that dialog's Name and Add
+ * (TOKEN-SHEET-BAND-DIALOG). Each is closed and opened again in the order
+ * given, the order they opened in, so the stack reads as it did. The close
+ * event that follows finds the dialog open again, which useModalDialog
+ * ignores. Focus goes back to the control that had it.
+ */
+export function raiseModalsAbove(dialogs: readonly { contains(node: Node | null): boolean; close(): void; showModal(): void }[], active: HTMLElement | null): void {
+  for (const d of dialogs) {
+    const held = active !== null && d.contains(active) ? active : null;
+    d.close();
+    d.showModal();
+    held?.focus({ preventScroll: true });
+  }
+}
+
 /*
  * How many sheets are taking their dialog steps right now. The steps move
  * focus synchronously, the browser's focusing steps and then the hook's
@@ -279,7 +299,10 @@ export function useSheetDialog(
     const hear = roundTrip ? deafToFocus() : null;
     stepping++;
     try {
+      // Dialogs a plain sheet's own controls opened stand above it, whatever order the sheet took its modal step in.
+      const above = steps[steps.length - 1] === "showModal" ? Array.from(document.querySelectorAll<HTMLDialogElement>('dialog[open][aria-modal="true"]:not([data-rvtt-sheet])')) : [];
       applySheetDialogSteps(el, steps, ledger);
+      raiseModalsAbove(above, active);
       state.current = !shown ? "closed" : modal ? "modal" : "shown";
       if (shown && keep?.isConnected && el.contains(keep)) {
         keep.focus({ preventScroll: true });

@@ -355,7 +355,9 @@ async function dockButtons(page: Page): Promise<Record<string, Locator>> {
     // Under a modal dialog, such as Add a class resource over the sheet, the dock is out of reach on purpose, keyboard or not.
     const reachable = await button.evaluate((el) => {
       const node = el as unknown as { closest(s: string): unknown };
-      const modal = (globalThis as unknown as { document: { querySelector(s: string): { contains(n: unknown): boolean } | null } }).document.querySelector("dialog:modal");
+      // The topmost modal dialog is the last: a dialog opens in the body after the sheet it came from, which is itself modal where the strip stands in the band (TOKEN-SHEET-BAND-DIALOG).
+      const modals = (globalThis as unknown as { document: { querySelectorAll(s: string): ArrayLike<{ contains(n: unknown): boolean }> } }).document.querySelectorAll("dialog:modal");
+      const modal = modals.length > 0 ? modals[modals.length - 1]! : null;
       return node.closest("[inert]") === null && (modal === null || modal.contains(el));
     });
     if (!reachable) continue;
@@ -731,8 +733,9 @@ async function barHp(view: View, pan = 0, extra = ""): Promise<void> {
 }
 
 /** A sheet dialog's field, Add a class resource's Name, over the keyboard with Add. */
-async function addResource(view: View, extra = ""): Promise<void> {
+async function addResource(view: View, extra = "", ready?: () => Promise<void>): Promise<void> {
   await setUp(pat, view);
+  await ready?.();
   const sheet = await thornsSheet(pat);
   const add = sheet.locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Uses"]]').getByRole("button", { name: "Add a class resource" });
   await add.scrollIntoViewIfNeeded();
@@ -1159,6 +1162,28 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
       await barHp(view, 0, "fight");
     });
     test(`kb-15. in the fight at ${viewName(view)}, Add a class resource's Name and Add show whole over the keyboard`, () => addResource(view, "fight"));
+    // The turn strip in the band, where the Token sheet goes full and modal and the dialog it opens must stand over it (TOKEN-SHEET-BAND-DIALOG). D-261108-442 sent kb-15 to the bar's row, so this step forces the band with a turn timer run over.
+    if (view.width > view.height) {
+      test(`kb-15b. in the fight at ${viewName(view)} with the turn strip in the band, Add a class resource's Name and Add stand over the modal Token sheet and show whole over the keyboard`, async () => {
+        const turn = { entries: [{ id: "e-thorn", tokenId: run.thornToken, value: 18 }, { id: "e-gob", tokenId: run.goblin, value: 8 }] };
+        await ops.send({ t: "room.update", settings: { turnTimerSec: 2 } });
+        await ops.send({ t: "encounter.end" });
+        await ops.send({ t: "encounter.start", ...turn });
+        await ops.send({ t: "encounter.next" });
+        try {
+          await addResource(view, "fight in the band", async () => {
+            await pat.locator('header[data-rvtt-topbar] [role="timer"]').filter({ hasText: /Time's up/ }).first().waitFor({ timeout: 15_000 });
+            const band = pat.locator("header[data-rvtt-topbar] > *:not(:first-child)").filter({ has: pat.getByRole("button", { name: "End turn" }) });
+            await band.first().waitFor({ timeout: 5_000 });
+          });
+        } finally {
+          await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
+          await ops.send({ t: "encounter.end" });
+          await ops.send({ t: "encounter.start", ...turn });
+          await ops.send({ t: "encounter.next" });
+        }
+      });
+    }
     // Sideways the ask waits in the alerts column, whose card is the column's (InitiativeStrip.tsx), not the card at the foot.
     if (view.height > view.width) test(`kb-16. in the fight at ${viewName(view)}, the roll card's Total and Send show whole over the keyboard`, () => rollCard(view));
     test(`kb-17. in the fight at ${viewName(view)}, the Area's Spell field in its row and the Spells popover show whole over the keyboard`, () => optionsInline(view));
