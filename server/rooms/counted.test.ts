@@ -4,7 +4,9 @@ import { uuidv7 } from "#shared/ids.ts";
 import { COUNT_OP_VERSION, OP_VERSION } from "#shared/migrate.ts";
 import { member } from "#shared/testutil.ts";
 import { clientOps, serverOnlyOps, type OpType } from "#shared/protocol.ts";
+import { twins } from "#shared/secretDoorTestutil.ts";
 import { counted } from "./counted.ts";
+import { forgetSceneOp } from "./remember.ts";
 import { scopeActor, scopeFixture } from "./undoScopeTesting.ts";
 
 /**
@@ -62,5 +64,23 @@ describe("member changes over HTTP", () => {
     assert.equal(h.actor.committed.pub, start + 2);
     const third = await dm.apply({ t: "log.chat", text: "three" });
     assert.equal(third.seq, start + 3);
+  });
+});
+
+describe("the server's own ops", () => {
+  test("a batch's explore and a cleanup's remember store rows and leave the count", async (t) => {
+    const room = twins({ cover: "auto", explore: true }).door;
+    const h = await scopeActor(t, room);
+    const dm = await h.connect(room.members.dm1!);
+    const first = await dm.apply({ t: "log.chat", text: "one" });
+    assert.deepEqual(h.db.stored.map((op) => op.t), ["log.chat", "sys.explore"], "the chat's batch explored what the party sees");
+    assert.equal(first.seq, 1, "the explore took no number of its own");
+    const forget = forgetSceneOp(h.actor.committed.state, "s1");
+    assert.ok(forget);
+    await h.actor.sys(forget);
+    assert.deepEqual(h.db.stored.map((op) => op.t), ["log.chat", "sys.explore", "sys.remember"]);
+    assert.equal(h.actor.committed.pub, first.seq);
+    const second = await dm.apply({ t: "log.chat", text: "two" });
+    assert.equal(second.seq, first.seq + 1);
   });
 });
