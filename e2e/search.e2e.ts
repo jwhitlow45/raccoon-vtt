@@ -479,8 +479,14 @@ async function tapSearch(page: Page): Promise<void> {
   if ((await sheet(page).count()) > 0) return;
   if (await barSearch(page).isVisible().catch(() => false)) await barSearch(page).tap();
   else {
-    await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).tap();
-    await page.locator('[data-search-open="panels"]').tap();
+    const inPanels = page.locator('[data-search-open="panels"]');
+    const panels = page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ });
+    // A panel a pick opened stands in the sheet instead of the list, and Panels closes it first: the second tap opens the list.
+    for (let i = 0; i < 2 && !(await inPanels.isVisible().catch(() => false)); i++) {
+      await panels.tap();
+      await inPanels.waitFor({ timeout: 2_000 }).catch(() => {});
+    }
+    await inPanels.tap();
   }
   await sheet(page).waitFor();
 }
