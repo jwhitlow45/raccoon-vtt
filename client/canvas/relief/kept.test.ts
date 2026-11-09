@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { sceneGrid } from "#shared/rules/grid.ts";
-import { bandsOf, drawChildrenMeeting, KeptRelief, MAX_REPAIR_BOXES, onDeviceGrid, planDraw, probeSelfCopy, repairRegions, type KeptAt, type ProbeMemo } from "./kept.ts";
+import { bandsOf, drawChildrenMeeting, keepsTone, KeptRelief, MAX_REPAIR_BOXES, onCanvas, onDeviceGrid, planDraw, probeSelfCopy, repairRegions, TONE_PAST_PX, unionArea, type KeptAt, type ProbeMemo } from "./kept.ts";
 import type { VBox } from "./pieces.ts";
 import { installPath2D, KeptRig, TestCanvas, type RigScene } from "./keptTesting.ts";
 
@@ -308,6 +308,41 @@ describe("ground copies near the ground canvas's edges (5.3)", () => {
       assert.ok(repaired > 0, "some scroll repaired a toned cell");
     });
   }
+
+  test("a cell toned on all of it keeps its pixels through a scroll only while its copy stays wholly past the edge, before and after", () => {
+    const box = { x0: 0, y0: 0, x1: 10, y1: 10 };
+    // Past the top by 5 device pixels: the picture moving down brings its ground at 0 nearer the canvas.
+    assert.ok(keepsTone({ ...box, past: 5, side: -1 }, 5 - TONE_PAST_PX));
+    assert.ok(!keepsTone({ ...box, past: 5, side: -1 }, 5 - TONE_PAST_PX + 1));
+    assert.ok(keepsTone({ ...box, past: 5, side: -1 }, -40), "moving up takes it further past");
+    assert.ok(keepsTone({ ...box, past: 5, side: 1 }, 40), "past the bottom, moving down takes it further past");
+    assert.ok(!keepsTone({ ...box, past: 5, side: 1 }, -4));
+    assert.ok(!keepsTone({ ...box, past: TONE_PAST_PX - 0.5, side: -1 }, 0), "a pixel's smoothing still reads the ground's edge row");
+    assert.ok(!keepsTone(box, 0), "a cell that keeps some ground repairs");
+  });
+
+  test("a scene sunk deep, its floors along the screen's top wholly toned, pans equal a whole draw and repair only the cells by the edge", () => {
+    const ground = new Map<string, number>();
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) ground.set(`${x},${y}`, -2);
+    const r = new KeptRig({ grid: sceneGrid({}), w: 16, h: 16, ground }, { width: 80, height: 60, ratio: 2, camera: { x: 20, y: -14, scale: 5.13 }, margin: 0 });
+    r.frame();
+    const toned = r.tonedNow();
+    const wholly = toned.filter((b) => b.past !== undefined && b.past >= TONE_PAST_PX);
+    assert.ok(wholly.length > 10 && wholly.length < toned.length, `${wholly.length} of ${toned.length} toned cells wholly past`);
+    // A floor's box, about 7 device pixels and its reach, never the pit's from its opening down: the sides read no ground.
+    assert.ok(toned.every((b) => b.y1 - b.y0 < 12), "each toned box holds the floor alone");
+    const everyTone = unionArea(toned.flatMap((b) => onCanvas(b, 80, 60) ?? [])) / (80 * 60);
+    // Small moves, one past a toned cell's height, and back: a cell inside comes to lie wholly past and back.
+    for (const [dx, dy] of [[0, 1.5], [1, -2], [0, -9], [0, 9], [-1.5, 3]] as const) {
+      const before = r.scheduler.kept!.stats.repair;
+      const fit = r.pan(dx, dy);
+      if (fit !== "inside") r.commit();
+      r.frame();
+      assert.deepEqual(r.canvas.diff(r.whole()), [], `after a pan by ${dx},${dy}`);
+      if (Math.abs(dy) < 3) assert.ok(r.scheduler.kept!.stats.repair - before < everyTone, `a pan by ${dx},${dy} repaired ${r.scheduler.kept!.stats.repair - before} of the canvas, every toned cell ${everyTone}`);
+    }
+    assert.ok(r.scheduler.kept!.stats.scrolls >= 4, "the pans scrolled");
+  });
 
   test("a batch of tops straddling the ground canvas's bottom tones only its own cells past it", () => {
     const ground = new Map<string, number>();

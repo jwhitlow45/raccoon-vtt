@@ -1,6 +1,6 @@
 import { screenToView, type Camera, type Size } from "../../lib/camera.ts";
 import { meets, type Item } from "./buckets.ts";
-import { tonedBoxes, type DrawContext } from "./drawRelief.ts";
+import { tonedBoxes, type DrawContext, type TonedBox } from "./drawRelief.ts";
 import type { VBox } from "./pieces.ts";
 import type { KeptHost, KeptLayer } from "./scheduler.ts";
 
@@ -107,6 +107,25 @@ export function onCanvas(b: VBox, w: number, h: number): VBox | null {
 export function meetsAny(b: VBox, regions: readonly VBox[]): boolean {
   for (const r of regions) if (meets(b, r)) return true;
   return false;
+}
+
+/**
+ * How far past the ground canvas's edge a toned cell's copy must run out on
+ * all of it, in device pixels, for it to read no ground pixel: a margin
+ * for the pattern's smoothing, which blends a pixel with the one beside it.
+ */
+export const TONE_PAST_PX = 2;
+
+/**
+ * Whether a toned cell keeps its pixels through a scroll by `dy` device
+ * pixels from where its box was taken: its copy runs out on all of it
+ * there and after the move, so it shows its tone alone in both. A cell that
+ * keeps some ground in either can gain or lose it (5.3). A sunk scene tones
+ * the floors along the whole screen's top, a quarter of the canvas, and
+ * only the row by the edge changes as it pans (SUNKEN-PAN).
+ */
+export function keepsTone(b: TonedBox, dy: number): boolean {
+  return b.side !== undefined && b.past !== undefined && b.past >= TONE_PAST_PX && b.past + b.side * dy >= TONE_PAST_PX;
 }
 
 /** Past this many repair boxes a scroll repairs whole rows instead, so its clip and its box tests stay few (review HXPERF2B-OPUS-05). */
@@ -222,9 +241,9 @@ export type KeptDraw = {
   /** The relief and ground marks since the last draw were all the camera's (scheduler.ts). */
   clean: boolean;
   /** Draws the whole view, recording the toned cells' boxes into `toned`. */
-  whole(toned: VBox[]): void;
+  whole(toned: TonedBox[]): void;
   /** The toned cells' boxes at the camera now, from a pass of box tests over the layout. */
-  tonedNow(): VBox[];
+  tonedNow(): TonedBox[];
   /** Draws what meets `regions`, clipped to them already. */
   regions(regions: readonly VBox[]): void;
 };
@@ -254,7 +273,7 @@ export const PAGE_PROBE: ProbeMemo = { answer: null };
  */
 export class KeptRelief {
   #at: KeptAt | null = null;
-  #toned: VBox[] = [];
+  #toned: TonedBox[] = [];
   #probe: "pending" | "ok" | "off" = "pending";
   readonly #memo: ProbeMemo;
   readonly stats: KeptStats = emptyStats();
@@ -319,10 +338,13 @@ export class KeptRelief {
       const now = d.tonedNow();
       const boxes: VBox[] = [];
       for (const b of this.#toned) {
+        if (keepsTone(b, plan.dy)) continue;
         const r = onCanvas(moved(b, plan.dx, plan.dy), c.width, c.height);
         if (r) boxes.push(r);
       }
+      // A box taken now looks back to where the cell stood before the move.
       for (const b of now) {
+        if (keepsTone(b, -plan.dy)) continue;
         const r = onCanvas(b, c.width, c.height);
         if (r) boxes.push(r);
       }
@@ -333,7 +355,7 @@ export class KeptRelief {
       else scroll = { now, repair, regions };
     }
     if (plan.kind === "whole") {
-      const toned: VBox[] = [];
+      const toned: TonedBox[] = [];
       d.whole(toned);
       this.#toned = toned;
       this.stats.whole++;
@@ -418,7 +440,7 @@ export function keptHost<T>(b: KeptBoard<T>): KeptHost {
       d.toned = toned;
     },
     tonedNow: () => {
-      const out: VBox[] = [];
+      const out: TonedBox[] = [];
       const d = b.dc();
       if (d) for (const item of b.items()) if (item.kind === "run") tonedBoxes(item.pieces, d, out);
       return out;

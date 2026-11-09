@@ -45,9 +45,19 @@ export type DrawContext = {
    * each tested on its own. Absent, the canvas's whole view.
    */
   regions?: readonly VBox[] | null;
-  /** Where a draw records the painted box, in device pixels, of each cell it draws whose top or floor takes the face tone (docs/design/design-v1-relief-pan.md 5.3). */
-  toned?: VBox[];
+  /** Where a draw records the toned box, in device pixels, of each cell it draws whose top or floor takes the face tone (docs/design/design-v1-relief-pan.md 5.3). */
+  toned?: TonedBox[];
 };
+
+/**
+ * A toned cell's box in device pixels: its top's, where the tone shows,
+ * or a stair's whole painted box. When its copy runs out on all of it,
+ * its ground at 0 wholly past the ground canvas's top (`side` -1) or
+ * bottom (1), `past` says by how many device pixels at the least:
+ * it then shows its tone alone, the same wherever it stands, so a scroll
+ * that leaves it wholly past keeps its pixels (kept.ts keepsTone).
+ */
+export type TonedBox = VBox & { past?: number; side?: -1 | 1 };
 
 /**
  * How far a relief piece's paint reaches past its geometric bounds, in
@@ -143,6 +153,44 @@ function tonedCell(c: CellPiece, dc: DrawContext, view: VBox): boolean {
   return tonedAt(shapeOf(c, dc.turn).source, c.z, dc, view);
 }
 
+/**
+ * A toned cell's box: its top's painted box, all its ground copy and tone
+ * paint, never its sides, which read no ground. A pit's whole box reaches
+ * from its opening down to its floor, and on a sunk scene the floors by
+ * the screen's top repaired as whole boxes covered a quarter of the canvas
+ * (SUNKEN-PAN). With it, how far past the ground canvas's edge its copy
+ * runs out on all of it, if it does. A shown pixel copies the ground's row
+ * where its own lies at 0, so the rows a cell reads are those of its
+ * polygon at 0, with the antialiased pixel past each edge, whatever its
+ * height. A stair's treads copy at their own heights, so a stair keeps its
+ * whole box and never says.
+ */
+function tonedBox(c: CellPiece, dc: DrawContext): TonedBox {
+  if (c.kind === "steps") return paintedBox(c, dc);
+  const shape = shapeOf(c, dc.turn);
+  const box: TonedBox = deviceBox(dc, shape.topBox, PIECE_REACH_PX);
+  const ground = dc.ground;
+  if (!ground || ground.width === 0 || ground.height === 0) {
+    // With no ground to copy every top is its tone alone.
+    box.past = Infinity;
+    box.side = -1;
+    return box;
+  }
+  const s = shape.source;
+  const k = dc.pixelRatio * dc.camera.scale;
+  const ey = dc.pixelRatio * dc.camera.y;
+  const top = -(s.y1 * k + ey + EDGE_PX);
+  const bottom = s.y0 * k + ey - EDGE_PX - ground.height;
+  if (top > 0) {
+    box.past = top;
+    box.side = -1;
+  } else if (bottom > 0) {
+    box.past = bottom;
+    box.side = 1;
+  }
+  return box;
+}
+
 /** Whether a top whose polygon at 0 has the box `s`, copied up by `z` cells, takes the face tone. */
 function tonedAt(s: VBox, z: number, dc: DrawContext, view: VBox): boolean {
   const ground = dc.ground;
@@ -170,12 +218,12 @@ function deviceView(dc: DrawContext): VBox {
  * canvas whose top or floor takes the face tone at this camera: the cells
  * a scroll repaints, as they may gain or lose the ground (5.3).
  */
-export function tonedBoxes(pieces: readonly DrawPiece[], dc: DrawContext, out: VBox[]): void {
+export function tonedBoxes(pieces: readonly DrawPiece[], dc: DrawContext, out: TonedBox[]): void {
   const view = deviceView(dc);
   for (const p of pieces) {
     if (p.kind !== "column" && p.kind !== "pit" && p.kind !== "steps") continue;
     const box = paintedBox(p, dc);
-    if (meets(box, view) && tonedCell(p, dc, view)) out.push(box);
+    if (meets(box, view) && tonedCell(p, dc, view)) out.push(tonedBox(p, dc));
   }
 }
 
@@ -222,6 +270,8 @@ type CellShape = {
   atZero: readonly Pt[];
   /** The box of its polygon at 0, where a copy of its top reads the ground. */
   source: VBox;
+  /** The box of its top at its height: all a ground copy paints. */
+  topBox: VBox;
   /** Its top, and every side's outline together, as paths made once, where the canvas has them (tests' fakes may not). */
   topPath: Path2D | null;
   outline: Path2D | null;
@@ -253,13 +303,7 @@ function shapeOf(p: CellPiece, turn: Turn): CellShape {
   const sides = faces.map((f) => sideShape(view, f, paths));
   const top = lifted(turn, p.poly, p.z);
   const atZero = lifted(turn, p.poly, 0);
-  const source: VBox = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
-  for (const q of atZero) {
-    source.x0 = Math.min(source.x0, q.x);
-    source.y0 = Math.min(source.y0, q.y);
-    source.x1 = Math.max(source.x1, q.x);
-    source.y1 = Math.max(source.y1, q.y);
-  }
+  const source = boxOfPoints(atZero);
   // Which faces' ends join the next square's along their line (pieces.ts CellPiece.joins): a face cut in fifths beside a stair never does.
   const outlineLines = sides.flatMap((f, i) => {
     const bits = p.joins?.[faces[i]!.side] ?? 0;
@@ -276,6 +320,7 @@ function shapeOf(p: CellPiece, turn: Turn): CellShape {
     top,
     atZero,
     source,
+    topBox: boxOfPoints(top),
     topPath: paths ? polyPath(new Path2D(), top) : null,
     outline: paths && outlineLines.length > 0 ? linesPath(new Path2D(), outlineLines) : null,
     outlineLines,
@@ -284,6 +329,18 @@ function shapeOf(p: CellPiece, turn: Turn): CellShape {
   };
   byTurn[turn] = shape;
   return shape;
+}
+
+/** The box of points. */
+function boxOfPoints(pts: readonly Pt[]): VBox {
+  const box: VBox = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for (const q of pts) {
+    box.x0 = Math.min(box.x0, q.x);
+    box.y0 = Math.min(box.y0, q.y);
+    box.x1 = Math.max(box.x1, q.x);
+    box.y1 = Math.max(box.y1, q.y);
+  }
+  return box;
 }
 
 /** A face as it draws at a view. */
@@ -597,20 +654,28 @@ function topsPath(g: CanvasRenderingContext2D, cells: readonly CellPiece[], turn
  * Copies the ground under cells of one height, moved by that height up (a
  * top) or down (a pit's floor, negative), inside their polygons at it: one
  * path of those polygons in view units, filled with the ground's pixels
- * shifted by the lift.
+ * shifted by the lift. A cell whose copy runs out takes `tone` under it,
+ * or with none its own look's color.
  */
-function copyGround(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc: DrawContext, tone: string, view: VBox, tops: Path2D | null = null): void {
+function copyGround(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc: DrawContext, tone: string | null, view: VBox, tops: Path2D | null = null): void {
   const shift = K * cells[0]!.z * dc.camera.scale * dc.pixelRatio;
   // Past the ground stage's margin there is nothing to copy: the face tone fills the rest until the map pans up. Each cell tones by its own copy, never its batch's.
-  let toned: CellPiece[] | null = null;
+  let toned: Map<string, CellPiece[]> | null = null;
   for (const c of cells) {
     if (!tonedCell(c, dc, view)) continue;
-    (toned ??= []).push(c);
-    dc.toned?.push(paintedBox(c, dc));
+    const color = tone ?? c.look.color;
+    toned ??= new Map();
+    const group = toned.get(color);
+    if (group) group.push(c);
+    else toned.set(color, [c]);
+    dc.toned?.push(tonedBox(c, dc));
   }
   if (toned) {
-    g.fillStyle = tone;
-    fillWith(g, topsPath(g, toned, dc.turn));
+    // Each top in its own color, the colors in one order: a toned top then looks the same whatever cells the view puts in its batch, so a scroll can keep it (kept.ts keepsTone).
+    for (const color of [...toned.keys()].sort()) {
+      g.fillStyle = color;
+      fillWith(g, topsPath(g, toned.get(color)!, dc.turn));
+    }
   }
   const pattern = groundPattern(g, dc);
   if (!pattern) return;
@@ -754,7 +819,7 @@ function drawSteps(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext, v
     g.clip("nonzero");
   };
   const shape = stepsShapeOf(p, dc.turn);
-  if (dc.toned && shape.treads.some((t) => tonedAt(t.source, t.z, dc, view))) dc.toned.push(paintedBox(p, dc));
+  if (dc.toned && shape.treads.some((t) => tonedAt(t.source, t.z, dc, view))) dc.toned.push(tonedBox(p, dc));
   const unit = 1 / (dc.camera.scale * dc.pixelRatio);
   const pattern = groundPattern(g, dc);
   const k = dc.pixelRatio * dc.camera.scale;
@@ -1081,7 +1146,7 @@ export function drawRun(g: CanvasRenderingContext2D, pieces: readonly DrawPiece[
     if (batch.length === 0) return;
     // One path of the batch's tops for its copy and its outline, where the canvas has paths: the context's own is built again for each.
     const tops = batch.length > 1 && typeof Path2D === "function" ? topsPath(g, batch, dc.turn) : null;
-    copyGround(g, batch, dc, batch[0]!.look.color, view, tops);
+    copyGround(g, batch, dc, null, view, tops);
     outlineTops(g, batch, dc, tops);
     batch = [];
   };

@@ -17,7 +17,7 @@ import type { Camera } from "../../lib/camera.ts";
 import { isometric, toView, type Turn } from "../../lib/view.ts";
 import { cullFit, cullOf, type Cull } from "./cull.ts";
 import { ReliefIndex, type DrawPiece, type Item, type StandeeIn, type VolumePiece } from "./buckets.ts";
-import { drawRun, NO_AREA_PITS, runPaintedBox, standeePaintedBox, type DrawContext } from "./drawRelief.ts";
+import { drawRun, NO_AREA_PITS, runPaintedBox, standeePaintedBox, type DrawContext, type TonedBox } from "./drawRelief.ts";
 import { keptHost, onDeviceGrid } from "./kept.ts";
 import type { VBox } from "./pieces.ts";
 import { FrameScheduler, type KeptHost, type KeptLayer } from "./scheduler.ts";
@@ -603,7 +603,7 @@ export class KeptRig {
     this.mark("relief");
   }
 
-  #prepare(ratio: number, regions: readonly VBox[] | null, toned: VBox[] | undefined): void {
+  #prepare(ratio: number, regions: readonly VBox[] | null, toned: TonedBox[] | undefined): void {
     this.#host.prepare(ratio, regions, toned);
   }
 
@@ -756,7 +756,7 @@ export class KeptRig {
   }
 
   /** The toned cells' boxes at the camera now. */
-  tonedNow(): VBox[] {
+  tonedNow(): TonedBox[] {
     this.#prepare(this.ratio, null, undefined);
     return this.#host.tonedNow();
   }

@@ -1,3 +1,4 @@
+import type { TonedBox } from "./drawRelief.ts";
 import { KeptRelief, type KeptAt, type KeptCanvas } from "./kept.ts";
 import type { VBox } from "./pieces.ts";
 
@@ -53,9 +54,9 @@ export type KeptHost = {
   /** How many times the ground layer has drawn, on every path (Konva's `draw` event). */
   groundVersion(): number;
   /** Sets the board's draw context for a draw at the stage's camera into a canvas of this pixel ratio, with the regions a scroll paints (null for the whole view) and where toned cells go. */
-  prepare(ratio: number, regions: readonly VBox[] | null, toned: VBox[] | undefined): void;
+  prepare(ratio: number, regions: readonly VBox[] | null, toned: TonedBox[] | undefined): void;
   /** The toned cells' boxes at the camera prepared, from a pass over the layout. */
-  tonedNow(): VBox[];
+  tonedNow(): TonedBox[];
   /** Draws the relief root's children whose painted bounds meet a region, in order, into the clipped canvas. */
   drawChildren(canvas: unknown, regions: readonly VBox[]): void;
 };
