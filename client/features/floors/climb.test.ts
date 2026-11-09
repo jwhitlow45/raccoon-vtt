@@ -134,19 +134,22 @@ describe("the one wait (6.4)", () => {
     assert.deepEqual(wait.getState(), { n: null, tokenId: null });
   });
 
-  test("random presses and answers: never two climbs out at once, and the wait clears only with its own answer", () => {
+  test("random presses, answers, drops and late answers: never two climbs out at once, and the wait clears only with its own answer", () => {
     let seed = 7;
     const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
-    for (let round = 0; round < 200; round++) {
+    for (let round = 0; round < 300; round++) {
       const p = page();
-      for (let step = 0; step < 30; step++) {
+      // Ops a reconnect's snapshot settled, whose answer the page hears only later.
+      const late: (() => void)[] = [];
+      for (let step = 0; step < 40; step++) {
         const r = rand();
-        if (r < 0.5) p.send();
-        else if (r < 0.8 && p.pending.length > 0) p.answer(p.pending[0]!.n);
-        // A snapshot after a reconnect settles the op with no answer heard here: pending drops it, and the wait reads it as out no longer.
-        else if (p.pending.length > 0) p.pending.splice(0, 1);
+        if (r < 0.45) p.send();
+        else if (r < 0.7 && p.pending.length > 0) p.answer(p.pending[0]!.n);
+        else if (r < 0.85 && p.pending.length > 0) late.push(p.pending.splice(0, 1)[0]!.answer!);
+        else if (late.length > 0) late.splice(Math.floor(rand() * late.length), 1)[0]!();
         assert.ok(p.pending.length <= 1, `round ${round} step ${step}: two climbs out`);
         assert.equal(climbWaiting(p.wait.getState(), p.pending), p.pending.length === 1, `round ${round} step ${step}: the wait reads what is out`);
+        if (p.pending.length === 1) assert.equal(p.wait.getState().n, p.pending[0]!.n, `round ${round} step ${step}: the wait holds the climb out`);
       }
     }
   });
