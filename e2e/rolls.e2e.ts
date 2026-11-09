@@ -210,6 +210,8 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
       // an unlock that waits for pointerdown meets there.
       const Real = (globalThis as unknown as { AudioContext: { new (): { state: string; resume(): Promise<void> }; prototype: object } }).AudioContext;
       type Gesture = { type: string; pointerType?: string; key?: string };
+      // These rules repeat client/lib/activation.ts's countsAsActivation on purpose. They are an independent model of
+      // Safari, so a wrong rule there fails here instead of agreeing with itself.
       let counted = false;
       for (const type of ["pointerdown", "pointerup", "touchend", "click", "keydown"]) {
         (globalThis as unknown as { addEventListener(type: string, fn: (g: Gesture) => void, capture: boolean): void }).addEventListener(

@@ -17,7 +17,7 @@ export interface GestureEvent {
   readonly key?: string;
 }
 
-/** Event names listened for, in the order a touch tap fires them. */
+/** Event names listened for: every event that can count as an activation, whatever the device. A touch tap fires several, and `countsAsActivation` picks the ones that do. */
 export const UNLOCK_EVENTS = ["pointerdown", "pointerup", "touchend", "click", "keydown"] as const;
 
 /** Whether this event is one the browser counts as a user activation. */
@@ -69,6 +69,7 @@ export function onActivation(attempt: () => boolean | Promise<boolean>, target: 
     const result = attempt();
     if (result === true) return disarm();
     if (result === false) return;
+    // A rejected attempt (a resume() the browser refused) keeps listening on purpose, so the next gesture tries again.
     result.then(
       (ok) => ok && disarm(),
       () => {},
