@@ -646,13 +646,14 @@ describe("the room clock's Time panel", () => {
 
   test("cf-6. Pat's chip, gone for a long date, comes back at the same width once the date is short (CALB-O-09)", async () => {
     await ops.send({ t: "clock.update", calendar: { kind: "months", months: [{ name: "Longest-month-name-here1", days: 30 }], week: ["Moonday"], era: "Era words 12" } });
-    await pat.setViewportSize({ width: 900, height: 768 });
+    // 1024 px: at 900 the speaker's 56 px leave the chip no room even for a short date, since the clock gives way before it (D-261108-362).
+    await pat.setViewportSize({ width: 1024, height: 768 });
     await pat.goto(`${server.origin}/r/${run.roomId}`);
     await pat.getByRole("status", { name: "Connected" }).first().waitFor();
     await waitFor("the long calendar in Pat's copy", () => (patSocket.state?.clock?.calendar.kind === "months" ? true : null));
     const chip = pat.getByRole("button", { name: /^Time: / });
     await pat.waitForTimeout(300);
-    assert.equal(await chip.count(), 0, "the long date leaves no room at 900 px beside the long name");
+    assert.equal(await chip.count(), 0, "the long date leaves no room at 1024 px beside the long name");
     await ops.send({ t: "clock.update", calendar: { kind: "days" } });
     await chip.waitFor();
     const overflow = await pat.locator("header").first().evaluate((el) => el.scrollWidth - el.clientWidth);
