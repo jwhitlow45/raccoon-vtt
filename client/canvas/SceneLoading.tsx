@@ -4,7 +4,7 @@ import { Spinner, useDelayed } from "../components/Loading.tsx";
 import { Notice } from "../components/Notice.tsx";
 import type { Insets } from "../lib/camera.ts";
 import { theme } from "../lib/theme.ts";
-import { sceneLoadView, type SceneLoadNotice } from "../state/sceneLoad.ts";
+import { sceneLoadView, shownScene, type SceneLoadNotice } from "../state/sceneLoad.ts";
 import { useRoomView } from "../state/view.ts";
 import { useMapProgressStore } from "./mapProgress.ts";
 
@@ -20,7 +20,7 @@ export function useSceneLoading(): SceneLoadNotice | null {
   const progress = useStore(useMapProgressStore(), (s) => s.progress);
   return useMemo(() => {
     const scene = sceneId ? scenes?.[sceneId] : undefined;
-    const shown = scene ? { id: scene.id, name: scene.name, mapAssetId: scene.map?.assetId ?? null } : null;
+    const shown = scene ? shownScene(scene) : null;
     return sceneLoadView({ load, shown, map: progress, nameOf: (id) => scenes?.[id]?.name });
   }, [load, sceneId, scenes, progress]);
 }

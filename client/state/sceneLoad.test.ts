@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { scene } from "#shared/testutil.ts";
 import {
   mapFailureText,
+  mapName,
   SCENE_LOAD_IDLE,
   sceneLoadFailureText,
   sceneLoadView,
+  shownScene,
   stepSceneLoad,
   type MapProgress,
   type SceneLoad,
@@ -134,6 +137,14 @@ describe("sceneLoadView: what the map says", () => {
 
   test("the first load and a player moved to a scene wait for its map the same way", () => {
     assert.equal(sceneLoadView({ load: undefined, shown: shownA, map: null, nameOf })?.text, "Loading Crypt…");
+  });
+
+  test("a floor's map loading names the floor, since every floor of a scene shares the scene's name (design-v1-floors.md 7.3)", () => {
+    const map = { assetId: "m9", widthPx: 700, heightPx: 700, cellPx: 70, offsetX: 0, offsetY: 0 };
+    const upper = scene("u", { name: "Tower", floor: { of: "g", level: 1, name: "Upper floor", height: 10 }, map } as never);
+    assert.equal(sceneLoadView({ load: undefined, shown: shownScene(upper), map: null, nameOf })?.text, "Loading Upper floor…");
+    assert.equal(sceneLoadView({ load: undefined, shown: shownScene(scene("c", { name: "Caves", map } as never)), map: null, nameOf })?.text, "Loading Caves…", "a scene of one floor by its own name");
+    assert.equal(mapFailureText(mapName(upper)), "The map image for Upper floor did not load. Check your connection.");
   });
 
   test("a scene without a name still reads as a sentence", () => {

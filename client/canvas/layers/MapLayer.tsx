@@ -10,7 +10,7 @@ import { mapSwap, sameShown, type ShownMap } from "../../features/phases/swap.ts
 import type { AssetVariant } from "../../lib/api.ts";
 import type { Rect as WorldRect } from "../../lib/camera.ts";
 import { mapWorldRect } from "../../lib/scene.ts";
-import { mapFailureText } from "../../state/sceneLoad.ts";
+import { mapFailureText, mapName } from "../../state/sceneLoad.ts";
 import { useAssets, useRoomUi, useRoomView } from "../../state/view.ts";
 import { useMapProgressStore } from "../mapProgress.ts";
 import { mapReadable, useMapImage, type MapSource } from "../useImage.ts";
@@ -110,7 +110,7 @@ export const MapContent = memo(function MapContent(props: { scene: Scene; varian
   return (
     <>
       <Rect x={0} y={0} width={w} height={h} fill={scene.background || "#2b2b31"} />
-      {scene.map ? <MapImage sceneId={scene.id} map={scene.map} phases={scene.phases} variant={variant} sceneName={scene.name} report={props.report} video={props.video} onDrawn={props.onDrawn} /> : null}
+      {scene.map ? <MapImage sceneId={scene.id} map={scene.map} phases={scene.phases} variant={variant} sceneName={mapName(scene)} report={props.report} video={props.video} onDrawn={props.onDrawn} /> : null}
       {scene.grid?.show && !aligning ? <Grid scene={scene} /> : null}
     </>
   );

@@ -1,3 +1,5 @@
+import type { Scene } from "#shared/model.ts";
+
 /**
  * What the map area says while a scene loads. Switching scenes can take
  * seconds on a phone: the snapshot first (design 7.1), then the map image,
@@ -84,6 +86,21 @@ export type SceneLoadNotice = {
   /** A second line, when the server said the wait is longer. */
   detail: string | null;
 };
+
+/**
+ * The scene on screen as `sceneLoadView` reads it. A floor of a scene of
+ * several goes by its own name, so a switch between floors says "Loading
+ * Upper floor…" and not the scene's name every floor shares
+ * (docs/design/design-v1-floors.md 7.3).
+ */
+export function shownScene(scene: Pick<Scene, "id" | "name" | "floor" | "map">): { id: string; name: string; mapAssetId: string | null } {
+  return { id: scene.id, name: mapName(scene), mapAssetId: scene.map?.assetId ?? null };
+}
+
+/** The name the map's loading and failure words give the scene on screen: a floor's own, else the scene's. */
+export function mapName(scene: Pick<Scene, "name" | "floor">): string {
+  return scene.floor?.name ?? scene.name;
+}
 
 /** A scene's name as the Scenes panel shows it. */
 export function sceneLabel(name: string | undefined): string {
