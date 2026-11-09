@@ -21,8 +21,8 @@ import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
  * Invariants: each op number is answered at most once on a socket, no op is
  * applied twice, a socket closes only for a throw after staging or for the
  * third fault refusal within 60 s of one session (a fresh client id keeps the count), an op that threw before staging is
- * refused with the server's words on the socket that sent it, the third too, ahead of its close, where that socket
- * holds its snapshot (the app's client sends only then), and nothing is left staged at the end.
+ * refused with the server's words on the socket that sent it, the third ahead of its close whether or not that socket
+ * holds its snapshot, and nothing is left staged at the end.
  */
 
 const FAULT_WORDS = "That change could not be made: something went wrong on the server.";
@@ -97,7 +97,7 @@ type Device = {
 };
 
 /** What the sequences reached, so a generator that stops reaching a case fails. */
-const reached = { refusals: 0, throttled: 0, afterStaging: 0, newIds: 0, throttledAcrossIds: 0, closingWords: 0 };
+const reached = { refusals: 0, throttled: 0, afterStaging: 0, newIds: 0, throttledAcrossIds: 0, closingWords: 0, closingUnheld: 0 };
 
 /** The room being run, so a failed sequence still stops its timers. */
 let live: RoomActor | null = null;
@@ -215,20 +215,21 @@ async function run(seed: number, steps: number, script?: readonly Action[]): Pro
   }
 
   /**
-   * Op `n` was refused for its fault with the server's words on the socket that sent it, ahead of the close the third earns.
-   * Only where the socket held its snapshot as the op was sent, as the app's client sends only then: one still waiting on a
-   * delayed snapshot keeps its refusals for that snapshot, which a socket closed for its third fault never gets.
+   * Op `n` was refused for its fault with the server's words on the socket that sent it, ahead of the close the third earns:
+   * in its `ev`, or for a socket that held no snapshot in the `refusals` sent just before the close. Where the refusal closes
+   * nothing, a socket still waiting on a delayed snapshot keeps it for that snapshot, which comes after the steps this waits.
    */
   function refusedOnItsSocket(d: Device, n: number, held: boolean, why: string): void {
     const s = d.sockets[d.sockets.length - 1]!;
     const closes = refusedForFault(d);
-    if (!held) return;
-    const at = s.sent.findIndex((m) => m.t === "ev" && (m.rejects ?? []).some((r) => r.n === n));
-    const refusal = at < 0 ? undefined : (s.sent[at] as Extract<ServerMessage, { t: "ev" }>).rejects!.find((r) => r.n === n);
+    if (!held && !closes) return;
+    const at = s.sent.findIndex((m) => (m.t === "ev" || m.t === "refusals") && (m.rejects ?? []).some((r) => r.n === n));
+    const refusal = at < 0 ? undefined : (s.sent[at] as { rejects: { n: number; code: string; message: string }[] }).rejects.find((r) => r.n === n);
     assert.deepEqual([refusal?.code, refusal?.message], ["invalid", FAULT_WORDS], why);
     if (!closes) return;
     assert.ok(s.closedAt !== null && at < s.closedAt, `${why}, and only then its socket closes`);
     reached.closingWords++;
+    if (!held) reached.closingUnheld++;
   }
 
   /** Whether the device's socket holds its snapshot now. */
@@ -347,7 +348,7 @@ describe("ops that throw", () => {
       for (let seed = 1; seed <= 8; seed++) await run(seed, 30);
       // Faults with a fresh client id between them, so the third has to count across ids.
       for (let seed = 101; seed <= 108; seed++) await run(seed, 30, ["beforeStaging", "newId", "beforeStaging", "newId", "beforeStaging", "newId"]);
-      assert.ok(reached.refusals > 0 && reached.throttled > 0 && reached.afterStaging > 0 && reached.newIds > 0 && reached.throttledAcrossIds > 0 && reached.closingWords > 0, `the sequences reached ${JSON.stringify(reached)}`);
+      assert.ok(reached.refusals > 0 && reached.throttled > 0 && reached.afterStaging > 0 && reached.newIds > 0 && reached.throttledAcrossIds > 0 && reached.closingWords > 0 && reached.closingUnheld > 0, `the sequences reached ${JSON.stringify(reached)}`);
     } finally {
       await live?.shutdown({ code: 1012, snapshot: false });
     }

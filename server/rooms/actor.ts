@@ -1108,15 +1108,33 @@ export class RoomActor {
    * (Connection.closing), so a client cannot fault again while it waits.
    * A batch can only be abandoned at shutdown, which closes every socket
    * first, and a socket that goes first needs nothing more. A socket that
-   * holds no snapshot then keeps its refusals for one (fanout.ts
-   * takeKeptRejects): it gets them with a snapshot the batch owed it, and
-   * else they go with it, since the app's client sends ops only once it
-   * holds a snapshot.
+   * holds no snapshot then, as a scene resync leaves one or as one waiting on
+   * a delayed snapshot is, is sent what it kept for that snapshot just ahead
+   * of the close (#closeWithKept).
    */
   #closeOnPublish(conn: Connection, batch: Batch): void {
     if (conn.closed) return;
     conn.closing = true;
     batch.closing.push(conn);
+  }
+
+  /**
+   * Closes a socket the room closes for its faults, sending first the
+   * refusals it kept for a snapshot it will never get (fanout.ts
+   * takeKeptRejects), as a snapshot sends them ahead of itself (#snapshot).
+   * The device keeps them across its reconnect and shows them with its next
+   * snapshot, which settles their ops. A send that fails still closes it.
+   */
+  #closeWithKept(conn: Connection): void {
+    const kept = takeKeptRejects(conn);
+    if (kept.length > 0) {
+      try {
+        conn.send({ t: "refusals", rejects: kept });
+      } catch (err) {
+        this.#log.warn({ err, roomId: this.roomId }, "refusals before a close failed");
+      }
+    }
+    conn.close(1011, "internal error");
   }
 
   /**
@@ -2415,7 +2433,7 @@ export class RoomActor {
       }
     }
     // After the batch and any snapshot it owed them, so each of these sockets was sent its last refusal (#closeOnPublish).
-    for (const conn of batch.closing) conn.close(1011, "internal error");
+    for (const conn of batch.closing) this.#closeWithKept(conn);
     // After the owed snapshots, so a device that just took one on a scene this batch deleted is sent back too.
     this.#resyncOrphanedDms();
     // Every commit places the next tick (6.4). One that changed what plays moved its rev, which lifts a refused step's back-off.

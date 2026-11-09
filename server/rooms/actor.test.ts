@@ -3965,6 +3965,120 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     }
   });
 
+  /**
+   * A room whose draw always throws, so every roll is refused for a fault, and sockets of one session the test opens as it
+   * likes. Each socket notes how much it was sent when it was closed, and may throw on sending one kind of message.
+   */
+  async function faultRoom(budget?: SnapshotBudget) {
+    const dm = member("DM", "dm");
+    const db = new FakeDb({ state: createInitialState({ roomName: "Faults", dm }), dmGrants: [dm.id] });
+    const base = deps(db);
+    const draw = () => {
+      throw new Error("scripted draw fault");
+    };
+    const actor = await RoomActor.load({ ...base, ...(budget ? { budget } : {}), options: { ...base.options, draw } });
+    assert.ok(actor);
+    const sessionId = uuidv7();
+    const open = (opts: { session?: string; failing?: ServerMessage["t"] } = {}) => {
+      const sent: ServerMessage[] = [];
+      const at = { close: -1 };
+      const send = (text: string) => {
+        const msg = JSON.parse(text) as ServerMessage;
+        if (msg.t === opts.failing) throw new Error("scripted send fault");
+        sent.push(msg);
+      };
+      const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send, close: () => (at.close = sent.length), terminate: () => undefined };
+      const conn = new Connection(socket as never, { sessionId: opts.session ?? sessionId, roomId: ROOM, memberId: dm.id, role: "dm" }, "203.0.113.9");
+      actor.attach(conn);
+      return { conn, sent, at };
+    };
+    const roll = () => ({ t: "dice.roll", tag: uuidv7(), to: "all", rolls: [{ formula: "1d20" }] });
+    return { db, actor, open, roll };
+  }
+
+  const FAULT_WORDS = "That change could not be made: something went wrong on the server.";
+
+  /** The words of op `n`'s refusal in a `refusals` message, which a device keeps for its next snapshot, and where it came. */
+  function keptRefusal(sent: ServerMessage[], n: number): { message: string | undefined; at: number } {
+    const at = sent.findIndex((m) => m.t === "refusals" && m.rejects.some((r) => r.n === n));
+    const message = at < 0 ? undefined : (sent[at] as Extract<ServerMessage, { t: "refusals" }>).rejects.find((r) => r.n === n)?.message;
+    return { message, at };
+  }
+
+  async function until(done: () => boolean, what: string): Promise<void> {
+    for (let i = 0; i < 400 && !done(); i++) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(done(), what);
+  }
+
+  test("the third fault refusal reaches a socket a scene resync left without its snapshot before the fault ran (RULES-ASTRA-03)", async () => {
+    const { db, actor, open, roll } = await faultRoom();
+    try {
+      const first = open();
+      await actor.hello(first.conn, { clientId: "c1", resumeFrom: 1 });
+      for (const n of [1, 2]) {
+        await actor.op(first.conn, n, roll());
+        const ev = await answerTo(first.sent, n);
+        assert.ok(ev !== "stuck" && ev.rejects?.[0]?.message === FAULT_WORDS, `fault ${n} is refused on the socket`);
+      }
+      // The queue waits behind a commit whose answer is lost and whose read-back keeps failing.
+      let holding = true;
+      db.hooks.commit = () => {
+        if (holding) throw new Error("Connection terminated unexpectedly");
+      };
+      db.hooks.verify = () => {
+        if (holding) throw new Error("connect ECONNREFUSED 127.0.0.1:5432");
+      };
+      const other = open({ session: uuidv7() });
+      await actor.hello(other.conn, { clientId: "c2", resumeFrom: 1 });
+      await actor.op(other.conn, 1, { t: "log.chat", text: "holds the queue" });
+      await until(() => actor.retrying, "the commit retries");
+      // The device sent its third while it held its snapshot, and a scene resync takes that snapshot before the op is read.
+      await actor.op(first.conn, 3, roll());
+      actor.scene(first.conn);
+      assert.equal(first.conn.held, null, "the resync took the snapshot");
+      await actor.hello(first.conn, { clientId: "c1", resumeFrom: 4 });
+      holding = false;
+      await until(() => first.conn.closed, "the socket closes");
+      const kept = keptRefusal(first.sent, 3);
+      assert.equal(kept.message, FAULT_WORDS, "the third fault's refusal reaches the socket, kept for the device's next snapshot");
+      assert.ok(kept.at >= 0 && kept.at < first.at.close, "ahead of the close");
+      assert.equal(first.conn.closedWith, 1011);
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("the third fault refusal reaches a socket still waiting on a delayed snapshot, and a refusal that fails to send still lets it close", async () => {
+    for (const failing of [false, true]) {
+      // One snapshot a minute per session, so the device's second socket waits on its snapshot.
+      const { db, actor, open, roll } = await faultRoom(new SnapshotBudget({ sessionCount: 1 }));
+      try {
+        const first = open();
+        await actor.hello(first.conn, { clientId: "c1", resumeFrom: 1 });
+        for (const n of [1, 2]) {
+          await actor.op(first.conn, n, roll());
+          assert.notEqual(await answerTo(first.sent, n), "stuck", `fault ${n} is answered`);
+        }
+        const back = open(failing ? { failing: "refusals" } : {});
+        await actor.hello(back.conn, { clientId: "c1", resumeFrom: 3 });
+        assert.ok(back.sent.some((m) => m.t === "wait") && back.conn.held === null, "its snapshot is delayed");
+        // A crafted client need not wait for its snapshot to send.
+        await actor.op(back.conn, 3, roll());
+        await until(() => back.conn.closed, "the socket closes");
+        assert.equal(back.conn.closedWith, 1011, failing ? "a failed send still closes it" : "it closes");
+        if (!failing) {
+          const kept = keptRefusal(back.sent, 3);
+          assert.equal(kept.message, FAULT_WORDS, "the third fault's refusal reaches it");
+          assert.ok(kept.at >= 0 && kept.at < back.at.close, "ahead of the close");
+        }
+      } finally {
+        db.freeze();
+        void actor.shutdown({ code: 1012, snapshot: false });
+      }
+    }
+  });
+
   test("ground a reminder rests on is explored, though a later op in its batch looks away (MD2's review, pendingGround)", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
