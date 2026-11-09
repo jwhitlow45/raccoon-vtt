@@ -18,7 +18,7 @@ import { hpDisplay, hpLabel, hpText, type HpView } from "../../lib/tokenView.ts"
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
-import { applySlot, recordApplied } from "../dice/apply.ts";
+import { applySlot, sendFilledEntry } from "../dice/apply.ts";
 import { useHpChips, useMarkChipApplied } from "../dice/hpChips.ts";
 import { defenseSummaryText } from "../dice/damageSummaryLines.ts";
 import { DamageSummary } from "../dice/DamageSummary.tsx";
@@ -178,11 +178,8 @@ export function HpEntry(props: {
       setError(refused);
       return;
     }
-    sendHpEntry(actions, props.targets, parsed.change, sendsCrit);
-    if (filled) {
-      markApplied(filled.lineIds);
-      recordApplied(applies, filled.lineId, props.targets.map((t) => ({ holder: t.holder, name: t.name })));
-    }
+    if (filled) sendFilledEntry({ actions, applies, markApplied }, props.targets, parsed.change, sendsCrit, filled);
+    else sendHpEntry(actions, props.targets, parsed.change, sendsCrit);
     setFilled(null);
     setMode(modeAfterApply(mode));
     setText("");

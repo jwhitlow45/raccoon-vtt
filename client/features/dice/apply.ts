@@ -2,13 +2,14 @@ import { useMemo } from "react";
 import type { StoreApi } from "zustand";
 import { createStore } from "zustand/vanilla";
 import type { LogEntry, RoomState } from "#shared/model.ts";
+import type { HpChange } from "#shared/protocol.ts";
 import { isCoarsePointer } from "../../lib/device.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 import { sheetOpen, type LocalUi, type RoomActions, type ToastSend, type You } from "../../state/types.ts";
 import type { RoomUi } from "../../state/store.ts";
 import { useRoomActions, useRoomStore } from "../../state/view.ts";
 import { reasonText } from "../resources/logic.ts";
-import { hpTargets, sendHpEntry } from "../tokens/groupHp.ts";
+import { hpTargets, sendHpEntry, type HpTarget } from "../tokens/groupHp.ts";
 import type { HpFill } from "../tokens/hpDraft.ts";
 import { parseHpInput } from "../tokens/hpInput.ts";
 import { useMarkChipApplied } from "./hpChips.ts";
@@ -59,14 +60,35 @@ function setRoll(applies: StoreApi<Applies>, key: string, next: RollApplied): vo
  * A roll applied through an HP entry's filled amount, which a player's chip
  * asks for: the creatures it went to join the roll's applied ones, so the
  * chip leaves its row and the row says "Applied to Thorn." as it does after
- * the DM's chip (LP32-POLISH g). The entry goes out with no answer to wait
- * for, so it counts at once, as its own chip's mark does (hpChips.ts).
+ * the DM's chip (LP32-POLISH g). It counts once the server takes the
+ * entry (sendFilledEntry).
  */
 export function recordApplied(applies: StoreApi<Applies>, lineId: string, to: readonly { holder: string; name: string }[]): void {
   const was = applies.getState().rolls[lineId] ?? NOTHING_YET;
   const fresh = to.filter((t) => !was.applied.some((a) => a.holder === t.holder));
   if (fresh.length === 0) return;
   setRoll(applies, lineId, { ...was, applied: [...was.applied, ...fresh.map(({ holder, name }) => ({ holder, name }))] });
+}
+
+/**
+ * An HP entry filled from a chip, sent as the entry sends any change. The
+ * chip leaves its rows and its roll names the creatures only once the
+ * server takes it, as the DM's chip waits for its answer (applyNow): sent
+ * at once, a refused entry left the row saying "Applied to Goblin 2." The
+ * first answer decides. A refusal still says why in the entry's own toast.
+ */
+export function sendFilledEntry(env: Pick<ApplyEnv, "actions" | "applies" | "markApplied">, targets: readonly HpTarget[], change: HpChange, crit: boolean, chip: HpChip): void {
+  const to = targets.map((t) => ({ holder: t.holder, name: t.name }));
+  let settled = false;
+  sendHpEntry(env.actions, targets, change, crit, {
+    onAnswer: (answer) => {
+      if (settled) return;
+      settled = true;
+      if (answer !== "taken") return;
+      env.markApplied(chip.lineIds);
+      recordApplied(env.applies, chip.lineId, to);
+    },
+  });
 }
 
 /**

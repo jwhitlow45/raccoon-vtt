@@ -19,7 +19,7 @@ const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
 const { ApplyTo } = await import("./ApplyTo.tsx");
-const { applyNow, applySlot, APPLY_BUSY, APPLY_GONE, APPLY_UNKNOWN, recordApplied, toastChips } = await import("./apply.ts");
+const { applyNow, applySlot, APPLY_BUSY, APPLY_GONE, APPLY_UNKNOWN, recordApplied, sendFilledEntry, toastChips } = await import("./apply.ts");
 const { createRoomStore } = await import("../../state/store.ts");
 const { rollChip } = await import("./targets.ts");
 
@@ -59,6 +59,27 @@ describe("recordApplied, a filled entry's apply (LP32-POLISH g)", () => {
     recordApplied(applies, "9:0", [{ holder: "character:c-thorn", name: "Thorn" }]);
     recordApplied(applies, "9:0", [{ holder: "character:c-thorn", name: "Thorn" }, { holder: "token:g1", name: "Goblin Warrior 1" }]);
     assert.deepEqual(applies.getState().rolls["9:0"], { busy: null, said: null, applied: [{ holder: "character:c-thorn", name: "Thorn" }, { holder: "token:g1", name: "Goblin Warrior 1" }] });
+  });
+
+  test("a filled entry marks its chip and records its creatures only once the server takes it, so a refused one leaves the chip in its row", async () => {
+    const { hpTargets } = await import("../tokens/groupHp.ts");
+    const { parseHpInput } = await import("../tokens/hpInput.ts");
+    const view = table();
+    const { env, sent, marked } = harness(view);
+    const chip = rollChip([slash("dm1")])!;
+    const parsed = parseHpInput(String(chip.amount), "damage", chip);
+    assert.ok(parsed.ok);
+    const targets = hpTargets([view.tokens.g1!], { role: "dm", memberId: "dm1", characters: view.characters, playersApplyDamage: false });
+    sendFilledEntry(env, targets, parsed.change, false, chip);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]!.quiet, undefined, "a refusal still says why in its toast");
+    sent[0]!.onAnswer!("refused");
+    assert.deepEqual(marked, []);
+    assert.equal(env.applies.getState().rolls["9:0"], undefined);
+    sendFilledEntry(env, targets, parsed.change, false, chip);
+    sent[1]!.onAnswer!("taken");
+    assert.deepEqual(marked, [chip.lineIds]);
+    assert.deepEqual(env.applies.getState().rolls["9:0"]?.applied, targets.map((t) => ({ holder: t.holder, name: t.name })));
   });
 });
 
