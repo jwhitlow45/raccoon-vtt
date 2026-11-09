@@ -28,7 +28,8 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  *   Floor, its menu and the notice in line at 1440 x 900, 390 x 844 and
  *   320 x 568 at 100% and 130%.
  * - flrv-6: Thorn's turn while the DM shows Ground: the turn chip's name
- *   ends "on Upper floor".
+ *   ends "on Upper floor", and Thorn's tracker row names Upper floor and
+ *   shows it on a tap.
  * - flrv-7: Bree joins Thorn, and the display follows the party to Upper,
  *   saying the floor and its weather.
  * - flrv-8: Ana's JS heap across 20 switches among 8 floors, one with a
@@ -414,13 +415,25 @@ describe("Which floor each device shows on a scene of several floors", { concurr
     assert.deepEqual(lines, [], "Floor, Floors or the Viewing notice out of line");
   });
 
-  test("flrv-6. on Thorn's turn while the DM shows Ground, the turn chip's name ends on Upper floor", async () => {
+  test("flrv-6. on Thorn's turn while the DM shows Ground, the turn chip's name ends on Upper floor, and his tracker row names that floor and shows it on a tap", async () => {
     await showsFloor(dm, "Ground floor");
     await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.tThorn, value: 20 }, { id: randomUUID(), tokenId: run.tBree, value: 10 }] });
     await ops.send({ t: "encounter.next" });
     const turn = topBar(dm).locator('button[aria-label^="Initiative, round"]').first();
     await waitFor("the turn chip names Upper floor", async () => ((await turn.getAttribute("aria-label").catch(() => null))?.includes("Thorn's turn on Upper floor. Open the tracker.") ? true : null));
     await shots.take(dm, "flrv-6-dm-turn-on-upper");
+    // The tracker holds Thorn's row upstairs, tagged with his floor, and a tap on it shows that floor (7.6).
+    await turn.click();
+    const row = dm.locator("[data-entry-row]").filter({ has: dm.locator("[data-row-name]", { hasText: /^Thorn$/ }) });
+    await row.waitFor();
+    assert.match(await row.innerText(), /Upper floor/, "Thorn's row names his floor");
+    assert.doesNotMatch(await dm.locator("[data-entry-row]").filter({ has: dm.locator("[data-row-name]", { hasText: /^Bree$/ }) }).innerText(), /Ground floor/, "Bree's row is on the floor shown");
+    await shots.take(dm, "flrv-6-dm-tracker-floor-tag");
+    await row.locator("[data-row-button]").click();
+    await showsFloor(dm, "Upper floor", "a tap on Thorn's row shows Upper floor");
+    const menu = await openFloors(dm);
+    await menu.locator(`[data-floor-row="${run.ground}"]`).click();
+    await showsFloor(dm, "Ground floor");
     await ops.send({ t: "encounter.end" });
   });
 

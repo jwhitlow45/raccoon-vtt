@@ -396,6 +396,7 @@ function EntryList(props: { close(): void }) {
   const you = useYou();
   const facts = useRowFacts();
   const actions = useRoomActions();
+  const store = useRoomStore();
   const ui = useRoomUi();
   const scope = useRoomScope();
   const dm = you.role === "dm";
@@ -439,6 +440,8 @@ function EntryList(props: { close(): void }) {
       ui.showActions(false);
       return;
     }
+    // A creature on another floor of the scene: that floor shows first, and the camera keeps its place, since floors line up square for square (docs/design/design-v1-floors.md 7.6).
+    if (token.sceneId !== store.getState().sceneId) actions.showFloor(token.sceneId);
     ui.tap(token.id);
     props.close();
     const fp = footprint(token);

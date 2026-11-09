@@ -11,6 +11,7 @@ import { Button } from "../../components/Button.tsx";
 import { IconButton } from "../../components/IconButton.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { Tag } from "../../components/Tag.tsx";
+import { otherFloorName } from "../floors/words.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
@@ -112,6 +113,8 @@ export function EntryRow(props: {
   });
   // An own-turn companion's row names whose it is, in the words of the token panel's name block, for every viewer whose copy says so.
   const companionOf = useRoomView((s) => (token?.companion ? s.view?.characters[token.companion.of]?.name : undefined));
+  // A creature on another floor of the scene shown carries that floor's name after its other tags, and a tap shows that floor (docs/design/design-v1-floors.md 7.6).
+  const floorName = useRoomView((s) => (token && s.view ? otherFloorName(s.view, token.sceneId, s.sceneId) : null));
   // A rider's mount and a controlled mount's rider, from the links in this copy (docs/design/design-v1-attach.md 4.5 and 7.1).
   const link = useMemo(() => rowLink(tokens ?? {}, token), [tokens, token]);
   // A controlled mount's row whose turn was its rider's this round only lets time pass for it, and reads muted.
@@ -253,6 +256,12 @@ export function EntryRow(props: {
                       // A mount's name of any length: cut, so the row's other tags keep their room.
                       <Tag tone="muted" dense cut={160}>
                         {link.riding}
+                      </Tag>
+                    ) : null,
+                    floorName !== null ? (
+                      // A floor's name of up to 40 characters: cut, as the names before it are.
+                      <Tag tone="muted" dense cut={160} icon="floors">
+                        {floorName}
                       </Tag>
                     ) : null,
                   ]),

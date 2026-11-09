@@ -32,6 +32,17 @@ export function playersPlace(state: Scenes, playersId: string, viewingId: string
   return placeName(state, playersId);
 }
 
+/**
+ * The name of the floor a creature stands on when that is another floor of
+ * the scene shown, else null: the tracker row's tag (7.6). A device holds
+ * only its own floors, so a creature on a floor it does not hold is not in
+ * its copy to name.
+ */
+export function otherFloorName(state: Scenes, sceneId: string, shownId: string | null): string | null {
+  if (shownId === null || sceneId === shownId || !sameScene(state, sceneId, shownId)) return null;
+  return ownEntry(state.scenes, sceneId)?.floor?.name ?? null;
+}
+
 /** "floor" when the two ids name floors of one scene, else "scene", for words such as "the players are on another scene now". */
 export function placeKind(state: Scenes, a: string, b: string): "floor" | "scene" {
   return a !== b && sameScene(state, a, b) ? "floor" : "scene";
