@@ -21,6 +21,8 @@ import { addSound, errors, inStep, IPHONE_AUDIO, musicVoice, readTap, roomSoundS
  * built frame by frame (soundRoom.ts), uploaded through the asset route.
  * sndglitch-1, sndfade-1 and sndfade-2 play a tone into a tap, each in the
  * quiet room (`quietRoom`), so they may run in any order.
+ * vol-2 opens this device's Volume from the top bar's speaker as its
+ * popover, card and sheet (docs/design/design-v1-volume.md 3).
  *
  * Each page's engine is read through its test hook (testHook.ts): the root
  * element's `data-sound` ("playing music loops:2", set on change) and,
@@ -1252,6 +1254,87 @@ describe("synced music and sound", { concurrency: false }, () => {
     await dm.keyboard.press("End");
     await shows("100", "100%", "false");
     await ops.send({ t: "sound.stopAll" });
+  });
+
+  test("vol-2. the top bar's speaker: loud at 100%, low under 50% and muted, its Volume as a popover at 1280, a card at 900 x 900 at 130% and Pat's sheet at 390, setting this device's level and mute, focus back on it as each closes (docs/design/design-v1-volume.md 3)", async (t) => {
+    const speakerOf = (page: Page) => page.locator("header[data-rvtt-topbar] [data-volume-button]");
+    const icon = (page: Page, want: string, label: string) =>
+      waitFor(
+        `the speaker ${want}`,
+        async () => {
+          const s = speakerOf(page);
+          return (await s.getAttribute("data-volume-icon")) === want && (await s.getAttribute("aria-label")) === label ? true : null;
+        },
+        5_000,
+      );
+    const focused = (page: Page) => waitFor("focus back on the speaker", () => speakerOf(page).evaluate((el) => (el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement ? true : null)), 3_000);
+    const stored = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem("rvtt.soundMix") ?? "{}").volume as number | undefined);
+    t.after(async () => {
+      await ops.send({ t: "sound.stopAll" }).catch(() => {});
+      await dm.evaluate(() => {
+        const mix = JSON.parse(localStorage.getItem("rvtt.soundMix") ?? "{}");
+        localStorage.setItem("rvtt.soundMix", JSON.stringify({ ...mix, volume: 100 }));
+        localStorage.setItem("rvtt.roomSound", "on");
+        localStorage.removeItem("rvtt.uiScale");
+      });
+      await dm.setViewportSize({ width: 1280, height: 800 });
+      await openRoom(dm);
+    });
+    await playTrack(run.ids.tavern, 0, "all");
+    await soundSays(dm, /^playing music/, 8_000);
+    const speaker = speakerOf(dm);
+    await icon(dm, "volume", "Volume on this device: 100%");
+
+    // From 900 px up, a dialog popover under the speaker.
+    await speaker.click();
+    const pop = dm.getByRole("dialog", { name: "Volume", exact: true });
+    await pop.waitFor();
+    assert.notEqual(await pop.getAttribute("data-rvtt-popover"), null, "a popover from 900 px up");
+    const master = pop.getByRole("slider", { name: "Volume", exact: true });
+    await master.fill("40");
+    await icon(dm, "volumeLow", "Volume on this device: 40%");
+    assert.equal(await stored(dm), 40, "the level is this device's stored mix");
+    await shots.take(dm, "vol-2-popover-1280");
+    // Mute stops the room's sound here and keeps the level, and unmute plays it again at that level.
+    await pop.getByRole("button", { name: "Mute", exact: true }).click();
+    await icon(dm, "muted", "Volume on this device: muted");
+    assert.equal(await master.getAttribute("aria-valuetext"), "Muted");
+    await soundSays(dm, /^off/, 5_000);
+    assert.equal(await stored(dm), 40, "muting keeps the level");
+    await shots.take(dm, "vol-2-popover-muted-1280");
+    await pop.getByRole("button", { name: "Mute", exact: true }).click();
+    await icon(dm, "volumeLow", "Volume on this device: 40%");
+    await soundSays(dm, /^playing music/, 8_000);
+    await dm.keyboard.press("Escape");
+    await pop.waitFor({ state: "detached" });
+    await focused(dm);
+
+    // Under 900 px a card from 600 px up, through the room's chip dialogs.
+    await dm.setViewportSize({ width: 900, height: 900 });
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+    await openRoom(dm);
+    await speakerOf(dm).click();
+    const card = dm.getByRole("dialog", { name: "Volume", exact: true });
+    await card.getByRole("slider", { name: "Volume", exact: true }).waitFor();
+    assert.equal(await card.getAttribute("data-rvtt-popover"), null, "no popover under 900 px");
+    const cardBox = await card.locator(":scope > *").first().boundingBox();
+    assert.ok(cardBox && cardBox.width < 900 - 1, `a card, ${cardBox?.width} px wide`);
+    await shots.take(dm, "vol-2-card-900x900-130");
+    await dm.keyboard.press("Escape");
+    await card.waitFor({ state: "detached" });
+    await focused(dm);
+
+    // Pat's phone: a sheet the width of the screen.
+    const patSpeaker = speakerOf(pat);
+    await patSpeaker.tap();
+    const sheet = pat.getByRole("dialog", { name: "Volume", exact: true });
+    await sheet.getByRole("slider", { name: "Volume", exact: true }).waitFor();
+    const sheetBox = await sheet.locator(":scope > *").first().boundingBox();
+    assert.ok(sheetBox && Math.abs(sheetBox.width - PHONE.width) <= 1, `a sheet, ${sheetBox?.width} px wide`);
+    await shots.take(pat, "vol-2-sheet-390");
+    await pat.keyboard.press("Escape");
+    await sheet.waitFor({ state: "detached" });
+    await focused(pat);
   });
 });
 
