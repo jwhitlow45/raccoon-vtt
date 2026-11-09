@@ -32,8 +32,8 @@ const FOLDERS = [
   "features/weather",
   "features/animmap",
 ];
-/** Readers that mean every floor. */
-const SKIPPED = new Set(["features/areas/reminders.ts", "features/attach/turns.ts", "features/areas/useAreaReminders.ts"]);
+/** Readers that mean every floor. The stairs builder checks a draft against both floors it joins. */
+const SKIPPED = new Set(["features/areas/reminders.ts", "features/attach/turns.ts", "features/areas/useAreaReminders.ts", "features/builder/linkTap.ts", "features/builder/LinkPane.tsx"]);
 const FLOOR_SCOPED = "tokens|buildChunks|fogTiles|exploredTiles|labels|stamps|lights|pins|traps|templates|drawings|fogDrafts|holders|exploredBy|memory|memoryBy";
 const OFFENDING = new RegExp(`\\b(?:s|v)\\.view\\??\\.(?:${FLOOR_SCOPED})\\b|getState\\(\\)\\.view\\b`);
 
