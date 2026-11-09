@@ -214,10 +214,13 @@ export function applySheetDialogSteps(el: DialogLike, steps: readonly SheetDialo
  * (TOKEN-SHEET-BAND-DIALOG). Each is closed and opened again in the order
  * given, the order they opened in, so the stack reads as it did. The close
  * event that follows finds the dialog open again, which useModalDialog
- * ignores. Focus goes back to the control that had it.
+ * ignores. Focus goes back to the control that had it. A dialog the sheet
+ * stands inside stays under it: "Viewing as Pat" holds the previewed room,
+ * and raised over its own Panels sheet it covered every tile.
  */
-export function raiseModalsAbove(dialogs: readonly { contains(node: Node | null): boolean; close(): void; showModal(): void }[], active: HTMLElement | null): void {
+export function raiseModalsAbove(dialogs: readonly { contains(node: Node | null): boolean; close(): void; showModal(): void }[], sheet: HTMLElement, active: HTMLElement | null): void {
   for (const d of dialogs) {
+    if (d.contains(sheet)) continue;
     const held = active !== null && d.contains(active) ? active : null;
     d.close();
     d.showModal();
@@ -302,7 +305,7 @@ export function useSheetDialog(
       // Dialogs a plain sheet's own controls opened stand above it, whatever order the sheet took its modal step in.
       const above = steps[steps.length - 1] === "showModal" ? Array.from(document.querySelectorAll<HTMLDialogElement>('dialog[open][aria-modal="true"]:not([data-rvtt-sheet])')) : [];
       applySheetDialogSteps(el, steps, ledger);
-      raiseModalsAbove(above, active);
+      raiseModalsAbove(above, el, active);
       state.current = !shown ? "closed" : modal ? "modal" : "shown";
       if (shown && keep?.isConnected && el.contains(keep)) {
         keep.focus({ preventScroll: true });

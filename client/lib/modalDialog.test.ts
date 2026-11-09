@@ -225,10 +225,20 @@ describe("raiseModalsAbove (TOKEN-SHEET-BAND-DIALOG)", () => {
       close: () => void calls.push(`close ${name}`),
       showModal: () => void calls.push(`showModal ${name}`),
     });
-    raiseModalsAbove([dialog("first", other), dialog("second", field)], field);
+    const sheet = {} as HTMLElement;
+    raiseModalsAbove([dialog("first", other), dialog("second", field)], sheet, field);
     assert.deepEqual(calls, ["close first", "showModal first", "close second", "showModal second", "focus field"]);
     calls.length = 0;
-    raiseModalsAbove([], field);
+    raiseModalsAbove([], sheet, field);
     assert.deepEqual(calls, []);
+  });
+
+  test("a dialog the sheet stands inside, as Viewing as Pat holds the previewed room's sheets, stays under it", () => {
+    const calls: string[] = [];
+    const sheet = {} as HTMLElement;
+    const host = { contains: (node: Node | null) => node === sheet, close: () => void calls.push("close host"), showModal: () => void calls.push("showModal host") };
+    const opened = { contains: () => false, close: () => void calls.push("close opened"), showModal: () => void calls.push("showModal opened") };
+    raiseModalsAbove([host, opened], sheet, null);
+    assert.deepEqual(calls, ["close opened", "showModal opened"]);
   });
 });
