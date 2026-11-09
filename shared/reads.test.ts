@@ -447,8 +447,8 @@ describe("a climb's reads (docs/design/design-v1-floors.md phase 2, 6.4)", () =>
     assert.ok(!satisfies(reads(climbOp("l1"), copy as unknown as RoomState), copy, ANA, { sceneId: null }));
     const elsewhere = { ...projectState(s, DM, { sceneId: "s2" }), floorLinks: s.floorLinks! } as unknown as ProjectedState;
     assert.ok(!satisfies(reads(climbOp("l1"), elsewhere as unknown as RoomState), elsewhere, DM, { sceneId: "s2" }));
-    // A copy without the end reads nothing to climb by.
-    const bare = projectState(s, DM, { sceneId: GROUND });
+    // A copy without the end reads nothing to climb by. The DM's snapshot holds every end, so this one is cut.
+    const { floorLinks: _ends, ...bare } = projectState(s, DM, { sceneId: GROUND });
     assert.ok(!satisfies(reads(climbOp("l1"), bare as unknown as RoomState), bare, DM, { sceneId: GROUND }));
   });
 
