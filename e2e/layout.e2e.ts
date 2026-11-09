@@ -1136,6 +1136,35 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await modal(phone).getByRole("button", { name: "Close DM" }).tap();
   });
 
+  // An upright phone's bottom sheet turns modal only once it fills the screen, and the preview it stands in must stay under it (B52-OPUS-1).
+  test("7. a DM's \"view as a player\" at 390 x 844: a sheet filled on Pat's page stands above the preview, with \"Viewing as Pat\" and its Exit", async () => {
+    await view(phone, phoneCdp, { width: 390, height: 844 }, { top: 47, bottom: 34 });
+    await reloadAt(phone, 1);
+    await openPanel(phone, "DM");
+    await openGroup(sheet(phone, "DM"), "Preview");
+    await sheet(phone, "DM").getByRole("button", { name: "View", exact: true }).tap();
+    const preview = phone.locator('dialog[aria-label="Viewing as Pat"]');
+    await preview.waitFor();
+    await preview.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).tap();
+    await preview.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Log/ }).tap();
+    const log = preview.locator('dialog[data-rvtt-sheet][aria-label="Log"]');
+    await log.waitFor();
+    // Expand sheet shows only while it has focus (SheetHeader.tsx).
+    await log.getByRole("button", { name: "Expand sheet" }).focus();
+    await phone.keyboard.press("Enter");
+    await waitFor("the filled Log sheet modal", async () => ((await log.getAttribute("aria-modal")) === "true" ? true : null));
+    const close = log.getByRole("button", { name: "Close Log" });
+    assert.equal(await reachable(close), true, `Close Log takes a tap above the preview: ${await whatTakes(close)}`);
+    const exit = log.getByRole("button", { name: "Exit", exact: true });
+    await exit.waitFor();
+    assert.equal(await reachable(exit), true, `Exit takes a tap above the preview: ${await whatTakes(exit)}`);
+    assert.ok(inside(await rect(log.getByText(/^Viewing as Pat/)), await rect(log)));
+    await shots.take(phone, "layout-preview-filled-sheet-390x844");
+    await exit.tap();
+    await preview.waitFor({ state: "detached" });
+    await sheet(phone, "DM").getByRole("button", { name: "Close DM" }).tap();
+  });
+
   /*
    * At 844 x 390 and 667 x 375 at 130% the strip and a player's End turn
    * still fit the top bar, the room's name giving way first. At 480 x 320
