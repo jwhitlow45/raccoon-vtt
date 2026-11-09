@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { JournalPage } from "#shared/model.ts";
+import { unreadCounter } from "./store.ts";
 import { markSeen, pageHash, parseSeen, seenKey, unreadPageIds } from "./unread.ts";
 
 const page = (id: string, text: string, extra: Partial<JournalPage> = {}): JournalPage => ({ id, rev: 0, title: `Page ${id}`, access: "all", blocks: [{ id: "aaaaaaaaaaaa", text }], ...extra });
@@ -44,5 +45,19 @@ describe("journal unread dot", () => {
     assert.deepEqual(parseSeen("{"), {});
     assert.deepEqual(parseSeen(null), {});
     assert.equal(seenKey("r1", "m1"), "rvtt.journalSeen.r1.m1");
+  });
+
+  test("the Journal button's count follows the pages and the pages read, worked out again only when either changes", () => {
+    const count = unreadCounter();
+    const a = page("a", "one");
+    const pages = { a, b: page("b", "two") };
+    assert.equal(count(pages, {}), 2);
+    const seen = markSeen({}, a, pages);
+    assert.equal(count(pages, seen), 1);
+    const more = { ...pages, c: page("c", "three") };
+    assert.equal(count(more, seen), 2);
+    const edited = { ...more, a: { ...a, title: "Renamed" } };
+    assert.equal(count(edited, seen), 3);
+    assert.equal(count(edited, markSeen(seen, edited.a, edited)), 2);
   });
 });

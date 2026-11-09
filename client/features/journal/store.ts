@@ -1,4 +1,4 @@
-import { useMemo, useSyncExternalStore } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { createStore } from "zustand/vanilla";
 import type { JournalPage } from "#shared/model.ts";
 import { scopeSlot } from "../../state/scope.ts";
@@ -74,9 +74,28 @@ export function useJournalSeen(): { unread: ReadonlySet<string>; seen: SeenPages
   };
 }
 
-/** How many pages a player has not read, for the Journal's button. */
+/**
+ * How many pages a player has not read, for the Journal's button. It reads
+ * the count alone, so the Room page that shows it draws nothing when a page
+ * changes and the count stays the same, as a DM's always does.
+ */
 export function useJournalUnread(): number {
-  return useJournalSeen().unread.size;
+  const roomId = useRoomView((s) => s.roomId);
+  const you = useRoomView((s) => s.you);
+  const key = you && you.role === "player" ? seenKey(roomId, you.memberId) : null;
+  const seen = useSyncExternalStore(subscribe, () => (key ? readSeen(key) : NONE));
+  const [count] = useState(unreadCounter);
+  return useRoomView((s) => (key ? count(s.view?.journal ?? EMPTY, seen) : 0));
+}
+
+/** The unread count, worked out again only when the pages or the pages read change, since the store asks on every change. */
+export function unreadCounter(): (pages: Readonly<Record<string, JournalPage>>, seen: SeenPages) => number {
+  let last: { pages: Readonly<Record<string, JournalPage>>; seen: SeenPages; n: number } | null = null;
+  return (pages, seen) => {
+    if (last !== null && last.pages === pages && last.seen === seen) return last.n;
+    last = { pages, seen, n: unreadPageIds(pages, seen).size };
+    return last.n;
+  };
 }
 
 /** Folded folders in the Journal, remembered per room on this device only, as the Scenes panel remembers its own. */
