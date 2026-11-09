@@ -8,6 +8,7 @@ import { applyChanges, stableStringify, type ProjectedState } from "#shared/proj
 import type { Change, Op, ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { classesOf, classOfMember, holdsAny, withoutRevs } from "#shared/secretDoorTestutil.ts";
+import { FrameReader, T0 } from "#shared/seqTestutil.ts";
 import { chance, int, pick, rng, room, token } from "#shared/testutil.ts";
 import { mapStepOps } from "./remember.ts";
 import { scopeActor, type ScopeClient } from "./undoScopeTesting.ts";
@@ -32,9 +33,10 @@ import { scopeActor, type ScopeClient } from "./undoScopeTesting.ts";
  *   the class is in its audience, and the runs must compare many steps with
  *   the near square held and the door's edge an automatic wall bit there,
  *   or they test nothing.
- * - Equal is projected state: each device's whole state and each class's
- *   memory and explored layer on the server, revs left out. Frames and
- *   sequence numbers are the room's own channel (SEQ-PRIVATE-OPS).
+ * - Equal is every frame each device got, whole, its numbers and revs
+ *   included (shared/seqTestutil.ts FrameReader), and each class's memory
+ *   and explored layer on the server, revs left out. Each event moves both
+ *   twins' clocks alike.
  * - Beside SB6: a loop doorway seen from both ends reads as the automatic
  *   wall bit live and remembered, before and after the class holds both
  *   squares, a stored memory entry for a door's edge is "auto", and a door
@@ -256,8 +258,10 @@ const mapStep: typeof mapStepOps = (input) => {
   return mapStepOps(stepMode === "tiny" ? { ...input, cap: () => 900 } : input);
 };
 
-type Device = { client: ScopeClient; read: number; view: ProjectedState | null };
-type Twin = { h: Awaited<ReturnType<typeof scopeActor>>; dm: ScopeClient; devices: Map<string, Device> };
+/** A player's device: what it got, how far the view and the comparison have read it, and the view. */
+type Device = { client: ScopeClient; read: number; compared: number; view: ProjectedState | null };
+/** One twin: its room, which keeps its clock and frame reader across room reloads, and its devices. */
+type Twin = { h: Awaited<ReturnType<typeof scopeActor>>; dm: ScopeClient; devices: Map<string, Device>; clock: { now: number }; reader: FrameReader };
 const PLAYERS = ["p1", "p2"] as const;
 
 function members(state: RoomState): Record<"dm" | "p1" | "p2", Member> {
@@ -275,17 +279,25 @@ function catchUp(d: Device): void {
   }
 }
 
-async function open(t: TestContext, state: RoomState): Promise<Twin> {
-  const h = await scopeActor(t, state, { mapStep });
+async function open(t: TestContext, state: RoomState, clock = { now: T0 }, reader = new FrameReader()): Promise<Twin> {
+  const h = await scopeActor(t, state, { mapStep, now: () => clock.now });
   const who = members(state);
   const dm = await h.connect(who.dm);
   const devices = new Map<string, Device>();
   for (const p of PLAYERS) {
-    const d: Device = { client: await h.connect(who[p]), read: 0, view: null };
+    const d: Device = { client: await h.connect(who[p]), read: 0, compared: 0, view: null };
     catchUp(d);
     devices.set(p, d);
   }
-  return { h, dm, devices };
+  return { h, dm, devices, clock, reader };
+}
+
+/** The frames a device got since the last comparison, as its twin's reader reads them. */
+function newFrames(twin: Twin, d: Device): string[] {
+  const sent = d.client.sent;
+  const texts = twin.reader.texts(sent.slice(d.compared));
+  d.compared = sent.length;
+  return texts;
 }
 
 /** The chunk of a device's view that files the edge. */
@@ -367,18 +379,19 @@ function rejection(event: Extract<ServerMessage, { t: "ev" }>, n: number): strin
 async function take(t: TestContext, pair: [Twin, Twin], event: Event, where: string): Promise<string[]> {
   const answers: string[] = [];
   for (const twin of pair) {
+    twin.clock.now += 1_000;
     if ("reload" in event) {
       if (event.reload === "page") {
         const old = twin.devices.get(event.who)!;
         twin.h.actor.detach(old.client.conn);
-        const d: Device = { client: await twin.h.connect(members(twin.h.actor.committed.state)[event.who]), read: 0, view: null };
+        const d: Device = { client: await twin.h.connect(members(twin.h.actor.committed.state)[event.who]), read: 0, compared: 0, view: null };
         catchUp(d);
         catchUp(old);
         assert.equal(stableStringify(d.view), stableStringify(old.view), `${where}: a reload gives ${event.who} what the events built`);
         twin.devices.set(event.who, d);
       } else {
         for (const d of twin.devices.values()) catchUp(d);
-        const next = await open(t, twin.h.actor.committed.state);
+        const next = await open(t, twin.h.actor.committed.state, twin.clock, twin.reader);
         twin.h = next.h;
         twin.dm = next.dm;
         twin.devices = next.devices;
@@ -407,17 +420,17 @@ function compare(pair: [Twin, Twin], side: Side, where: string, counts: Counts, 
     assert.equal(layer, classOfMember(states[1], p), `${where}: ${p} is in one class in both twins`);
     assert.ok(classesOf(states[0]).includes(layer), `${where}: ${p}'s class exists`);
     assert.equal(holdsAny(states, layer, side.banned), false, `${where}: the ${layer ?? "party"} class is in SB6's audience`);
-    const views = pair.map((twin) => {
+    const frames = pair.map((twin) => {
       const d = twin.devices.get(p)!;
       catchUp(d);
-      return stableStringify(withoutRevs(d.view));
+      return newFrames(twin, d);
     });
     const layers = states.map((s) => layerOf(s, layer));
     if (!expectSame) {
-      if (views[0] !== views[1] || layers[0] !== layers[1]) differ = true;
+      if (stableStringify(frames[0]) !== stableStringify(frames[1]) || layers[0] !== layers[1]) differ = true;
       continue;
     }
-    assert.equal(views[0], views[1], `${where}: ${p}'s device (${layer ?? "party"}) is the same in both twins`);
+    assert.deepEqual(frames[0], frames[1], `${where}: ${p}'s device (${layer ?? "party"}) gets the same frames in both twins`);
     assert.equal(layers[0], layers[1], `${where}: the ${layer ?? "party"} layer is the same in both twins`);
     counts.compared++;
     const view = pair[0].devices.get(p)!.view;
@@ -588,7 +601,7 @@ describe("the dungeon generator's secret door gate (SB6 on generated plans)", ()
       check("remembered after both", true);
       const page = twin.devices.get("p1")!;
       twin.h.actor.detach(page.client.conn);
-      twin.devices.set("p1", { client: await twin.h.connect(members(twin.h.actor.committed.state).p1), read: 0, view: null });
+      twin.devices.set("p1", { client: await twin.h.connect(members(twin.h.actor.committed.state).p1), read: 0, compared: 0, view: null });
       check("after a reload", true);
     }
   });
