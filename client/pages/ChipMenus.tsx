@@ -23,6 +23,7 @@ import { loadRecent, recentHandoutsSlot, rememberShow } from "../features/handou
 import { useLibrary } from "../features/images/library.ts";
 import { movingPlayersTo } from "../features/scenes/movePlayers.ts";
 import { useMovePlayers } from "../features/scenes/useMovePlayers.ts";
+import { useVolumeNote, VolumeDialog } from "../features/sound/device/Speaker.tsx";
 import { NowPlayerDialog } from "../features/sound/mini/NowChip.tsx";
 import { characterPageSlot, openCharacterPage } from "../features/tokens/characterPage.ts";
 import { SheetDialog } from "../features/tokens/SheetDialog.tsx";
@@ -165,7 +166,7 @@ function ChipDot(props: { color: string }) {
 // ---------------------------------------------------------------- what an item opens
 
 /** A chip dialog open in the room, and where focus goes back when it closes: the chip that opened it. */
-type ChipDialog = { what: Extract<ChipOpen, { t: "handout" | "time" | "xcard" | "nowPlaying" }>; returnFocus: HTMLElement | null };
+type ChipDialog = { what: Extract<ChipOpen, { t: "handout" | "time" | "xcard" | "nowPlaying" | "volume" }>; returnFocus: HTMLElement | null };
 
 /** The one chip dialog open in this Room, opened by a menu item or the search's twin of it, drawn by ChipDialogs. */
 export const chipDialogSlot = scopeSlot(() => createStore<{ open: ChipDialog | null }>(() => ({ open: null })));
@@ -215,7 +216,8 @@ export function useChipEnv(returnFocus: () => HTMLElement | null): ChipEnv {
  * from the DM menu (C5), a player's X-card (C7), and the Now playing
  * chip's player as a card or a sheet, opened by the chip under 900 px and
  * by the DM menu's Now playing while the chip is off the bar
- * (docs/design/design-v1-sound-layout.md 5.3). One at a time, in the
+ * (docs/design/design-v1-sound-layout.md 5.3), and the speaker's Volume
+ * the same way (docs/design/design-v1-volume.md 3). One at a time, in the
  * room's scope, so the search's twins open the same ones.
  */
 export function ChipDialogs(props: { openTime(): void }) {
@@ -242,6 +244,7 @@ export function ChipDialogs(props: { openTime(): void }) {
     );
   }
   if (open.what.t === "xcard") return <XCardSheet opener={opener} onClose={close} />;
+  if (open.what.t === "volume") return <VolumeDialog opener={opener} onClose={close} />;
   return <NowPlayerDialog opener={opener} onClose={close} />;
 }
 
@@ -583,8 +586,10 @@ export function useBlackoutShown(): boolean {
  * menu while it is open and the search's twins. `timeGaveWay`: the clock
  * chip is off the bar. `nowPlayingGaveWay`: Now playing's is. `images`:
  * the library's handout images once listed (LibraryProbe), else null.
+ * `volumeGaveWay`: the speaker is off the bar, which the search never
+ * says, since it reaches Volume in This device.
  */
-export function useDmMenuView(timeGaveWay: boolean, nowPlayingGaveWay: boolean, images: ReadonlySet<string> | null): DmMenuView {
+export function useDmMenuView(timeGaveWay: boolean, nowPlayingGaveWay: boolean, images: ReadonlySet<string> | null, volumeGaveWay = false): DmMenuView {
   const roomId = useRoomView((s) => s.roomId);
   const blackout = useRoomView((s) => s.view?.meta.view.blackout === true);
   const follow = useRoomView((s) => s.view?.meta.view.follow === true);
@@ -612,6 +617,7 @@ export function useDmMenuView(timeGaveWay: boolean, nowPlayingGaveWay: boolean, 
   // The same read serves a render to markup, so the room search's test can draw the menu's view (features/search/SearchSheet.test.ts).
   const focusScene = useSyncExternalStore(subscribe, readFocus, readFocus);
   const now = clock ? clockNow(clock, encounter) : null;
+  const volume = useVolumeNote();
   return {
     blackout,
     follow,
@@ -627,6 +633,7 @@ export function useDmMenuView(timeGaveWay: boolean, nowPlayingGaveWay: boolean, 
     images,
     time: timeGaveWay && clock && now !== null ? { text: chipText(now, clock.calendar), name: chipName(now, clock) } : null,
     nowPlaying: nowPlayingGaveWay,
+    volume: volumeGaveWay ? volume : null,
     movingTo,
     revealing,
     outShown,
@@ -657,9 +664,9 @@ export function useImages(): [ReadonlySet<string> | null, (ids: string | null) =
   return [images, setIds];
 }
 
-function DmMenuBody(props: { host: ChipHost; anchor: () => HTMLElement | null; timeGaveWay: boolean; nowPlayingGaveWay: boolean; blackoutOnly: boolean }) {
+function DmMenuBody(props: { host: ChipHost; anchor: () => HTMLElement | null; timeGaveWay: boolean; nowPlayingGaveWay: boolean; volumeGaveWay: boolean; blackoutOnly: boolean }) {
   const [images, setImages] = useImages();
-  const view = useDmMenuView(props.timeGaveWay, props.nowPlayingGaveWay, images);
+  const view = useDmMenuView(props.timeGaveWay, props.nowPlayingGaveWay, images, props.volumeGaveWay);
   const env = useChipEnv(props.anchor);
   const sections: ChipSection[] = props.blackoutOnly ? [{ key: "blackout", items: blackoutItems(view) }] : dmMenuSections(view);
   return (
@@ -675,9 +682,10 @@ function DmMenuBody(props: { host: ChipHost; anchor: () => HTMLElement | null; t
  * opening the DM menu under it, on a computer and a phone alike
  * (D-261106-120, D-261106-176). Where the bar is short it is its dot, and
  * during a blackout there the crossed eye, whose menu leads with the
- * blackout's items (D-261106-123).
+ * blackout's items (D-261106-123). `volumeGaveWay`: the speaker is off the
+ * bar, so the menu holds its Volume.
  */
-export function DmChip(props: { dot: boolean; eye: boolean; eyeSlim?: boolean; timeGaveWay: boolean; nowPlayingGaveWay?: boolean; chipRef?: Ref<HTMLButtonElement>; onOpen?(open: boolean): void }) {
+export function DmChip(props: { dot: boolean; eye: boolean; eyeSlim?: boolean; timeGaveWay: boolean; nowPlayingGaveWay?: boolean; volumeGaveWay?: boolean; chipRef?: Ref<HTMLButtonElement>; onOpen?(open: boolean): void }) {
   const menu = usePopover({ kind: "menu" });
   useRaise(menu.open, props.onOpen);
   const host = useChipHost(menu);
@@ -701,7 +709,7 @@ export function DmChip(props: { dot: boolean; eye: boolean; eyeSlim?: boolean; t
     <>
       {chip}
       <Popover handle={menu} side="below" bound={viewportBound} contentKey={host.shape}>
-        <DmMenuBody host={host} anchor={anchor} timeGaveWay={props.timeGaveWay} nowPlayingGaveWay={props.nowPlayingGaveWay === true} blackoutOnly={false} />
+        <DmMenuBody host={host} anchor={anchor} timeGaveWay={props.timeGaveWay} nowPlayingGaveWay={props.nowPlayingGaveWay === true} volumeGaveWay={props.volumeGaveWay === true} blackoutOnly={false} />
       </Popover>
     </>
   );
@@ -725,7 +733,7 @@ export function BlackoutChip(props: { fallbackFocus(): HTMLElement | null; onOpe
         {CHIP_WORDS.playersSeeBlack}
       </ChipButton>
       <Popover handle={menu} side="below" bound={viewportBound} contentKey={host.shape}>
-        <DmMenuBody host={host} anchor={anchor} timeGaveWay={false} nowPlayingGaveWay={false} blackoutOnly />
+        <DmMenuBody host={host} anchor={anchor} timeGaveWay={false} nowPlayingGaveWay={false} volumeGaveWay={false} blackoutOnly />
       </Popover>
     </>
   );
@@ -733,24 +741,25 @@ export function BlackoutChip(props: { fallbackFocus(): HTMLElement | null; onOpe
 
 // ---------------------------------------------------------------- a player's chip
 
-function YouMenuBody(props: { host: ChipHost; anchor: () => HTMLElement | null }) {
+function YouMenuBody(props: { host: ChipHost; anchor: () => HTMLElement | null; volumeGaveWay: boolean }) {
+  const volume = useVolumeNote();
   const memberId = useRoomView((s) => s.you?.memberId ?? "");
   const member = useRoomView((s) => (s.you ? s.view?.members[s.you.memberId] : undefined));
   const characters = useRoomView((s) => s.view?.characters);
   const preview = usePreview() !== null;
   const env = useChipEnv(props.anchor);
-  const sections = youMenuSections({ memberId, member, characters: characters ?? {}, preview });
+  const sections = youMenuSections({ memberId, member, characters: characters ?? {}, preview, volume: props.volumeGaveWay ? volume : null });
   return <ChipMenuBody host={props.host} env={env} label={CHIP_WORDS.youMenuName} sections={sections} mark="you" />;
 }
 
 /**
  * A player's chip (design-v1-qol.md 4, C7, D-261106-130): their dot, their name and a
  * caret, or only the dot where the bar is short, opening the You menu:
- * each of their characters' sheets and the X-card. In View as a player it
- * is that player's, from the preview's projection, its X-card off
- * (D-261106-134).
+ * each of their characters' sheets, Volume while the speaker is off the
+ * bar (`volumeGaveWay`), and the X-card. In View as a player it is that
+ * player's, from the preview's projection, its X-card off (D-261106-134).
  */
-export function YouChip(props: { dot: boolean; onOpen?(open: boolean): void }) {
+export function YouChip(props: { dot: boolean; volumeGaveWay?: boolean; onOpen?(open: boolean): void }) {
   const menu = usePopover({ kind: "menu" });
   useRaise(menu.open, props.onOpen);
   const host = useChipHost(menu);
@@ -771,7 +780,7 @@ export function YouChip(props: { dot: boolean; onOpen?(open: boolean): void }) {
         </ChipButton>
       )}
       <Popover handle={menu} side="below" bound={viewportBound} contentKey={host.shape}>
-        <YouMenuBody host={host} anchor={anchor} />
+        <YouMenuBody host={host} anchor={anchor} volumeGaveWay={props.volumeGaveWay === true} />
       </Popover>
     </>
   );

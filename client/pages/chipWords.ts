@@ -11,8 +11,9 @@ import { MOVING_PLAYERS } from "../features/scenes/movePlayers.ts";
 /**
  * Each kind of item the DM menu and the Blackout menu hold (design-v1-qol.md
  * 4, C1 and C2). The search pairs each kind with its twin, the panel control
- * that does the same (design-v1-qol.md 5, Acting). Time and Now playing stand in for
- * the bar's chips that gave way, and the search leaves them out.
+ * that does the same (design-v1-qol.md 5, Acting). Time, Now playing and Volume stand in for
+ * the bar's parts that gave way, and the search leaves them out: it reaches
+ * Time and Now playing as panels, and Volume in This device.
  */
 export type DmItemKind =
   | "hideHandout"
@@ -26,15 +27,25 @@ export type DmItemKind =
   | "viewAs"
   | "time"
   | "nowPlaying"
+  | "volume"
   | "endBlackout"
   | "showPlayers";
 
-/** The DM menu's sections in order, each shown only while it holds something. During a blackout its two items lead, above a line. */
-export type DmMenuSection = "handouts" | "screens" | "phase" | "preview" | "time" | "nowPlaying";
+/**
+ * The DM menu's sections in order, each shown only while it holds
+ * something. During a blackout its two items lead, above a line. This
+ * device comes first after them: it holds the speaker's Volume only on the
+ * one layout whose bar has no room for the speaker, where a row last in a
+ * long menu would sit below its fold (docs/design/design-v1-volume.md 3,
+ * D-261108-382).
+ */
+export type DmMenuSection = "thisDevice" | "handouts" | "screens" | "phase" | "preview" | "time" | "nowPlaying";
 
-export const DM_MENU_SECTIONS: readonly DmMenuSection[] = ["handouts", "screens", "phase", "preview", "time", "nowPlaying"];
+export const DM_MENU_SECTIONS: readonly DmMenuSection[] = ["thisDevice", "handouts", "screens", "phase", "preview", "time", "nowPlaying"];
 
 export const DM_MENU_HEADINGS: Readonly<Record<DmMenuSection, string>> = {
+  // Over the row Volume, so the word never shows twice, and apart from Now playing's room sound (D-261108-386).
+  thisDevice: "This device",
   handouts: "Handouts",
   screens: "Players' screens",
   phase: "Map phase",
@@ -78,6 +89,8 @@ export const CHIP_WORDS = {
   nextName: "Next turn",
   youMenuName: "You",
   xcard: "X-card…",
+  // The speaker's row in the DM menu and the You menu where it left the bar, its note the level (docs/design/design-v1-volume.md 9).
+  volume: "Volume",
   handoutDialogTitle: "Show a handout",
   rememberedTitleHint: "This device keeps the title for the next time you show this image.",
   document: "Document",

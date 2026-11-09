@@ -64,6 +64,7 @@ function menuView(over: Partial<DmMenuView> = {}): DmMenuView {
     images: null,
     time: { text: "Day 4, 8:00 PM", name: "Time: Day 4" },
     nowPlaying: true,
+    volume: "80%",
     movingTo: null,
     revealing: null,
     outShown: false,
@@ -86,9 +87,13 @@ const KINDS = {
   viewAs: true,
   time: true,
   nowPlaying: true,
+  volume: true,
   endBlackout: true,
   showPlayers: true,
 } as const satisfies Record<DmItemKind, true>;
+
+/** The kinds that stand in for a part of the bar that gave way: the search reaches each elsewhere, Volume in This device (docs/design/design-v1-volume.md 3). */
+const UNSEARCHED: readonly string[] = ["time", "nowPlaying", "volume"];
 
 const dmCtx = ctxOf(DM_VIEW(), { dmMenu: AT_PLAY });
 const patCtx = ctxOf(PAT_VIEW());
@@ -148,16 +153,16 @@ describe("the catalogs' entries (design-v1-qol.md 5, What keeps it current)", ()
 });
 
 describe("the DM menu's items (design-v1-qol.md 5, Acting and 6)", () => {
-  test("every kind the menu draws is one row with its twin, but Time and Now playing", () => {
+  test("every kind the menu draws is one row with its twin, but Time, Now playing and Volume", () => {
     const drawn = new Set([...itemsOf(dmMenuSections(AT_PLAY)), ...itemsOf(dmMenuSections(IN_BLACKOUT))].map((i) => i.kind));
     assert.deepEqual([...drawn].sort(), Object.keys(KINDS).sort(), "the two views draw every kind");
-    const searched = Object.keys(KINDS).filter((k) => k !== "time" && k !== "nowPlaying");
+    const searched = Object.keys(KINDS).filter((k) => !UNSEARCHED.includes(k));
     assert.deepEqual(Object.keys(TWINS).sort(), searched.sort());
     for (const view of [AT_PLAY, IN_BLACKOUT]) {
       const rows = dmMenuEntries(view);
       for (const item of itemsOf(dmMenuSections(view))) {
         const row = rows.filter((r) => r.act.t === "item" && r.act.itemId === item.id);
-        if (item.kind === "time" || item.kind === "nowPlaying") assert.equal(row.length, 0, item.id);
+        if (UNSEARCHED.includes(item.kind)) assert.equal(row.length, 0, item.id);
         else assert.equal(row.length, 1, item.id);
       }
     }

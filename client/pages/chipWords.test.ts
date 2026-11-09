@@ -23,6 +23,14 @@ describe("the chips' words (docs/design/design-v1-qol.md 4, Words)", () => {
     for (const word of [...Object.values(CHIP_WORDS), ...Object.values(DM_MENU_HEADINGS)]) assert.doesNotMatch(word, /[\u2014;]/, word);
   });
 
+  test("the speaker's row leads the DM menu under This device, never the word Volume twice (docs/design/design-v1-volume.md 3, D-261108-382 and 386)", () => {
+    assert.equal(DM_MENU_SECTIONS[0], "thisDevice");
+    assert.deepEqual(DM_MENU_SECTIONS.slice(-2), ["time", "nowPlaying"], "Time and Now playing stay last");
+    assert.equal(DM_MENU_HEADINGS.thisDevice, "This device");
+    assert.equal(CHIP_WORDS.volume, "Volume");
+    assert.notEqual(DM_MENU_HEADINGS.thisDevice, CHIP_WORDS.volume);
+  });
+
   test("the words that name a floor (design-v1-floors.md 18.6)", () => {
     assert.equal(notReached("Attic"), "Players haven't reached Attic, so their maps stay.");
     assert.equal(CHIP_WORDS.liftRefusedFloor, "Not shown: the players are on another floor now. The blackout stays on.");

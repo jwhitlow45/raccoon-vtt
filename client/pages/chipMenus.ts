@@ -36,14 +36,15 @@ import {
  * through `ChipEnv`.
  */
 
-/** A player's You menu's items (design-v1-qol.md 4, C7). */
-export type YouItemKind = "sheet" | "xcard";
+/** A player's You menu's items (design-v1-qol.md 4, C7, and design-v1-volume.md 3 for Volume). */
+export type YouItemKind = "sheet" | "volume" | "xcard";
 
 /** What a run opened, which the room's chip dialogs or the preview draw (ChipMenus.tsx). */
 export type ChipOpen =
   | { t: "handout" }
   | { t: "time" }
   | { t: "nowPlaying" }
+  | { t: "volume" }
   | { t: "xcard" }
   | { t: "viewAs"; memberId: string; name: string }
   | { t: "sheet"; characterId: string };
@@ -132,6 +133,8 @@ export type DmMenuView = {
   time: { text: string; name: string } | null;
   /** Now playing's chip gave way from the bar (the sound layout's SL-C). */
   nowPlaying: boolean;
+  /** The speaker's value, "80%" or "Muted", while it gave way from the bar (docs/design/design-v1-volume.md 3), else null. */
+  volume: string | null;
   /** The scene a move this page sent is going to, before the server answers (movePlayers.ts movingPlayersTo). */
   movingTo: string | null;
   /** The scene a reveal's guarded lift names while it is out. Until it is answered the players still see black, so the blackout's items stay. */
@@ -248,9 +251,10 @@ export function blackoutItems(view: DmMenuView): ChipItem[] {
 
 /**
  * The DM menu (design-v1-qol.md 4, C1, D-261106-121): during a blackout its two items
- * first, above a line, then Handouts, Players' screens, Map phase,
- * Preview, and what gave way from the bar. A section shows only while it
- * holds something.
+ * first, above a line, then This device's Volume where the speaker gave
+ * way (docs/design/design-v1-volume.md 3, D-261108-382), Handouts,
+ * Players' screens, Map phase, Preview, and the chips that gave way from
+ * the bar. A section shows only while it holds something.
  */
 export function dmMenuSections(view: DmMenuView): ChipSection[] {
   const sections: ChipSection[] = [];
@@ -260,6 +264,8 @@ export function dmMenuSections(view: DmMenuView): ChipSection[] {
   const section = (key: DmMenuSection, items: ChipItem[]) => {
     if (items.length > 0) sections.push({ key, heading: DM_MENU_HEADINGS[key], ...(separator && sections.length === 1 ? { separator: true } : {}), items });
   };
+
+  if (view.volume !== null) section("thisDevice", [volumeItem(view.volume)]);
 
   // Handouts: Hide what shows, newest first, then up to three recent ones that do not show, then the form.
   const showing = Object.values(view.handouts)
@@ -330,6 +336,11 @@ export function dmMenuSections(view: DmMenuView): ChipSection[] {
   return sections;
 }
 
+/** The speaker that left the bar, as a row: it opens the same card or sheet, never This device (no jump rows). */
+function volumeItem(note: string): ChipItem {
+  return { id: "volume", kind: "volume", title: CHIP_WORDS.volume, role: "action", note, run: openRun({ t: "volume" }) };
+}
+
 function openRun(what: ChipOpen): ChipRun {
   return (env) => {
     env.open(what);
@@ -382,6 +393,8 @@ export type YouMenuView = {
   characters: Readonly<Record<string, (Pick<Character, "id" | "name"> & { ownerIds?: readonly string[] }) | undefined>>;
   /** The DM viewing as this player, where the X-card cannot be sent (XCardButton.tsx). */
   preview: boolean;
+  /** The speaker's value while it gave way from the bar, as DmMenuView's. The search's You menu leaves it out. */
+  volume?: string | null;
 };
 
 /** Said on the X-card item in a preview, as the Menu panel's X-card says it. */
@@ -389,8 +402,9 @@ export const XCARD_PREVIEW = "Not available while viewing as a player.";
 
 /**
  * A player's You menu (design-v1-qol.md 4, C7), headed with their name: each
- * character they own, by name, opening its sheet, then X-card…. Only the
- * characters their projection lists with them among its owners.
+ * character they own, by name, opening its sheet, Volume while the speaker
+ * gave way from the bar, then X-card…. Only the characters their
+ * projection lists with them among its owners.
  */
 export function youMenuSections(view: YouMenuView): ChipSection[] {
   if (!view.member) return [];
@@ -403,6 +417,7 @@ export function youMenuSections(view: YouMenuView): ChipSection[] {
       heading: view.member.name,
       items: [
         ...own.map((c): ChipItem => ({ id: `sheet:${c.id}`, kind: "sheet", title: sheetOf(c.name), role: "action", run: openRun({ t: "sheet", characterId: c.id }) })),
+        ...(view.volume ? [volumeItem(view.volume)] : []),
         { id: "xcard", kind: "xcard", title: CHIP_WORDS.xcard, role: "action", ...(view.preview ? { disabled: true, description: XCARD_PREVIEW } : {}), run: openRun({ t: "xcard" }) },
       ],
     },

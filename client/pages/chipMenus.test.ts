@@ -9,7 +9,7 @@ import { scene as sceneOf } from "#shared/testutil.ts";
 import type { OnAnswer, OpRefusal } from "../state/types.ts";
 import type { RecentHandout, RecentShow } from "../features/handouts/recent.ts";
 import type { MoveRoom } from "../features/scenes/movePlayers.ts";
-import { CHIP_WORDS } from "./chipWords.ts";
+import { CHIP_WORDS, DM_MENU_SECTIONS } from "./chipWords.ts";
 import {
   anywayId,
   asDrawn,
@@ -63,6 +63,7 @@ function viewOf(over: Partial<DmMenuView> = {}): DmMenuView {
     images: null,
     time: null,
     nowPlaying: false,
+    volume: null,
     movingTo: null,
     revealing: null,
     outShown: false,
@@ -177,6 +178,42 @@ describe("the DM menu (design-v1-qol.md 4, C1)", () => {
     const follow = item(sections, "follow");
     assert.equal(follow.disabled, undefined);
     assert.equal(follow.description, "Players' maps follow yours only while you look at their scene, Citadel gate.");
+  });
+});
+
+describe("the speaker in the DM menu (docs/design/design-v1-volume.md 3, D-261108-382)", () => {
+  test("only once it gave way from the bar, the menu leads with This device's Volume, its level as the note, opening the same card or sheet", () => {
+    assert.ok(!itemsOf(dmMenuSections(viewOf())).some((i) => i.kind === "volume"), "on the bar, the menu holds none");
+    const sections = dmMenuSections(viewOf({ volume: "80%" }));
+    assert.deepEqual(titles(sections)[0], ["This device", ["Volume"]]);
+    assert.equal(sections[0]?.separator, undefined, "nothing above it to part from");
+    const volume = item(sections, "volume");
+    assert.deepEqual([volume.kind, volume.role, volume.note], ["volume", "action", "80%"]);
+    assert.equal(item(dmMenuSections(viewOf({ volume: "Muted" })), "volume").note, "Muted");
+    const room = fakeEnv();
+    assert.deepEqual(volume.run(room.env), { t: "opened" });
+    assert.deepEqual(room.opened, [{ t: "volume" }], "the card or sheet in place, never This device");
+    assert.deepEqual(room.sent, []);
+  });
+
+  test("during a blackout its items lead above the line, then This device's Volume", () => {
+    const sections = dmMenuSections(viewOf({ blackout: true, volume: "100%" }));
+    assert.deepEqual(titles(sections).slice(0, 2), [
+      ["(blackout)", ["End the blackout"]],
+      ["This device", ["Volume"]],
+    ]);
+    assert.equal(sections[1]?.separator, true);
+  });
+
+  test("with every section held, they come in DM_MENU_SECTIONS' order: This device first, Time and Now playing still last", () => {
+    const sections = dmMenuSections(
+      viewOf({ viewing: crypt, playerScene: { id: hall.id, name: hall.name }, handouts: { h1: showing }, time: { text: "Day 4, 8:00 PM", name: "Time: Day 4" }, nowPlaying: true, volume: "40%" }),
+    );
+    assert.deepEqual(
+      sections.map((s) => s.key),
+      DM_MENU_SECTIONS.filter((key) => sections.some((s) => s.key === key)),
+    );
+    assert.deepEqual(sections.map((s) => s.key), ["thisDevice", "handouts", "screens", "phase", "preview", "time", "nowPlaying"]);
   });
 });
 
@@ -390,6 +427,17 @@ describe("a player's You menu (design-v1-qol.md 4, C7)", () => {
   test("a character whose owners the projection leaves out is not theirs, and draws nothing amiss", () => {
     const projected = { thorn: characters.thorn, wren: { id: "wren", name: "Wren" } };
     assert.deepEqual(titles(youMenuSections({ memberId: "pat", member: members.pat, characters: projected, preview: false })), [["Pat", ["Thorn's sheet", "X-card…"]]]);
+  });
+
+  test("once the speaker gave way from the bar, Volume with its level after their sheets and before X-card…, opening the same card or sheet", () => {
+    const sections = youMenuSections({ memberId: "pat", member: members.pat, characters, preview: false, volume: "Muted" });
+    assert.deepEqual(titles(sections), [["Pat", ["Bree's sheet", "Thorn's sheet", "Volume", "X-card…"]]]);
+    const volume = item(sections, "volume");
+    assert.deepEqual([volume.kind, volume.note], ["volume", "Muted"]);
+    const room = fakeEnv();
+    volume.run(room.env);
+    assert.deepEqual(room.opened, [{ t: "volume" }]);
+    assert.ok(!itemsOf(youMenuSections({ memberId: "pat", member: members.pat, characters, preview: false, volume: null })).some((i) => i.kind === "volume"), "on the bar, none");
   });
 
   test("viewing as a player, the X-card is off and says why", () => {

@@ -28,11 +28,16 @@ import { onOff } from "./write.ts";
  * of the feature files whose DM entries this gathers.
  */
 
-/** The DM menu's kinds the search finds. Time and Now playing stand in for the bar's chips that gave way, and the search reaches those as panels (design-v1-qol.md 5, What it finds). */
-export type SearchedItemKind = Exclude<DmItemKind, "time" | "nowPlaying">;
+/**
+ * The DM menu's kinds the search finds. Time, Now playing and Volume stand
+ * in for the bar's parts that gave way, and the search reaches those
+ * elsewhere: Time and Now playing as panels (design-v1-qol.md 5, What it
+ * finds), Volume as This device's own rows (docs/design/design-v1-volume.md 3).
+ */
+export type SearchedItemKind = Exclude<DmItemKind, "time" | "nowPlaying" | "volume">;
 
 export function searchedKind(kind: ChipItem["kind"]): kind is SearchedItemKind {
-  return kind !== "time" && kind !== "nowPlaying" && kind !== "cancel" && kind !== "sheet" && kind !== "xcard";
+  return kind !== "time" && kind !== "nowPlaying" && kind !== "volume" && kind !== "cancel" && kind !== "sheet" && kind !== "xcard";
 }
 
 const screens = (anchor: string): SearchRoute => ({ panel: "dm", section: "screens", anchor });
@@ -138,6 +143,7 @@ export function dmMenuViewOf(state: Pick<RoomView, "view" | "sceneId">): DmMenuV
     images: null,
     time: null,
     nowPlaying: false,
+    volume: null,
     movingTo: null,
     revealing: null,
     outShown: false,
