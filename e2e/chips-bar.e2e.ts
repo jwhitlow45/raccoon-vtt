@@ -27,10 +27,15 @@ import { addSound } from "./soundRoom.ts";
  * - qc-15: 1440 to 900 and back gives every part back.
  * - qc-16: the worst case at 900 x 900 and at 1170 x 900 at 130%, for the
  *   DM (the name gone with its tooltip, the short overrun timer, Search's
- *   icon, Now playing in the DM menu) and for Pat on his turn ("Your turn"
+ *   icon, Now playing and the speaker in the DM menu) and for Pat on his turn ("Your turn"
  *   dropped while End turn shows, the notice still announced).
  * - qc-16b: Pat's short landscape phone at 740 x 360 at 130% gives the
  *   band back to the bar as his turn ends.
+ * - vol-c1 to vol-c3: this device's speaker (docs/design/design-v1-volume.md
+ *   3 and 10): right of Now playing at 1440 with the bar's own gaps and its
+ *   icon on the row's middle, still on the bar at 1024, gone into the DM
+ *   menu's first row at 320 x 568 and 130%, and on the bar in a fight at
+ *   1024 and 1280 for the DM and Pat.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus fifty-eight, one file
  * after another. The other environment variables are the smoke run's
@@ -152,6 +157,7 @@ function barParts(page: Page): Promise<BarParts> {
     }
     const search = row.querySelector('[data-search-open="bar"]');
     if (search) parts.push(`search:${search.getAttribute("data-search-form")}`);
+    if (row.querySelector("[data-volume-button]")) parts.push("volume");
     if (row.querySelector('[aria-label="Map phase"]')) parts.push("phase");
     if (row.querySelector('[aria-label="Full screen"]')) parts.push("fullscreen");
     if (row.querySelector('[aria-label^="View: "]')) parts.push("view");
@@ -222,6 +228,46 @@ async function phases(on: boolean): Promise<void> {
     await ops.send({ t: "scene.setMap", sceneId: run.sceneId, map: null });
     await waitFor("no phases", () => (dmSocket.state?.scenes[run.sceneId]?.phases ? null : true));
   }
+}
+
+/**
+ * The speaker as the row draws it, in layout px: what stands before it,
+ * the gaps either side to the parts drawn beside it, its height, and how
+ * far its icon's middle sits from the row's. Null while it is off the bar.
+ */
+type SpeakerFit = { before: string; gapLeft: number; gapRight: number; height: number; iconOff: number };
+
+function speakerFit(page: Page): Promise<SpeakerFit | null> {
+  return topBar(page).evaluate((found) => {
+    type Rect = { left: number; right: number; top: number; bottom: number; width: number; height: number };
+    type El = { getBoundingClientRect(): Rect; parentElement: El | null; previousElementSibling: El | null; nextElementSibling: El | null; clientWidth: number; querySelector(s: string): El | null; getAttribute(n: string): string | null; tagName: string };
+    const view = globalThis as unknown as { getComputedStyle(el: El): { position: string } };
+    const header = found as unknown as El;
+    const row = header.querySelector(":scope > div");
+    const button = row?.querySelector("[data-volume-button]");
+    const icon = button?.querySelector("svg");
+    if (!row || !button || !icon || !button.parentElement) return null;
+    const zoom = row.getBoundingClientRect().width / row.clientWidth || 1;
+    const drawn = (el: El | null, step: (e: El) => El | null): El | null => {
+      // A tooltip or a live region laid out apart takes no gap.
+      while (el && (view.getComputedStyle(el).position === "absolute" || view.getComputedStyle(el).position === "fixed" || el.getBoundingClientRect().width < 1)) el = step(el);
+      return el;
+    };
+    const part = button.parentElement;
+    const box = part.getBoundingClientRect();
+    const prev = drawn(part.previousElementSibling, (e) => e.previousElementSibling);
+    const next = drawn(part.nextElementSibling, (e) => e.nextElementSibling);
+    const rowBox = row.getBoundingClientRect();
+    const iconBox = icon.getBoundingClientRect();
+    const round = (n: number) => Math.round((n / zoom) * 10) / 10;
+    return {
+      before: prev?.getAttribute("data-chip") ?? prev?.tagName.toLowerCase() ?? "",
+      gapLeft: prev ? round(box.left - prev.getBoundingClientRect().right) : -1,
+      gapRight: next ? round(next.getBoundingClientRect().left - box.right) : -1,
+      height: round(button.getBoundingClientRect().height),
+      iconOff: round(Math.abs((iconBox.top + iconBox.bottom) / 2 - (rowBox.top + rowBox.bottom) / 2)),
+    };
+  });
 }
 
 /** Waits until the parts hold every word of `want`, and none of `not`. */
@@ -400,7 +446,7 @@ describe("The top bar's give-way and Next", { concurrency: false }, () => {
     assert.deepEqual(back.parts, rest.parts);
   });
 
-  test("qc-16. the DM's worst case at 900 x 900 and 1170 x 900 at 130%: Belak's name leaves with its tooltip kept, the overrun timer is short, Search is its icon and Now playing is in the DM menu, and nothing overflows", async (t) => {
+  test("qc-16. the DM's worst case at 900 x 900 and 1170 x 900 at 130%: Belak's name leaves with its tooltip kept, the overrun timer is short, Search is its icon, Now playing and the speaker are in the DM menu, and nothing overflows", async (t) => {
     t.after(async () => {
       await openAt(dm, DESK, 1);
       await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
@@ -413,7 +459,8 @@ describe("The top bar's give-way and Next", { concurrency: false }, () => {
     for (const w of WORST) {
       await openAt(dm, w.size, w.scale);
       await dm.waitForTimeout(2_500);
-      const fit = await partsHold(dm, ["chip:dm:eye", "search:icon", "timer:short"], ["turn-name", "chip:nowPlaying:full", "chip:nowPlaying:compact", "chip:clock", "phase", "fullscreen"], `${w.at}: the worst case's steps`);
+      // The speaker folds right before the turn chip's name would (docs/design/design-v1-volume.md 3), so with the name gone it is gone too.
+      const fit = await partsHold(dm, ["chip:dm:eye", "search:icon", "timer:short"], ["turn-name", "volume", "chip:nowPlaying:full", "chip:nowPlaying:compact", "chip:clock", "phase", "fullscreen"], `${w.at}: the worst case's steps`);
       assert.ok(fit.overflow <= 1, `${w.at}: the row overflows by ${fit.overflow} px (${fit.parts.join(", ")})`);
       await shots.take(dm, `qc-16-dm-${w.at}`);
       // The name that left shows whole on hover, and the tracker's button keeps it for a reader.
@@ -428,6 +475,7 @@ describe("The top bar's give-way and Next", { concurrency: false }, () => {
       await menu.locator('[data-chip-item="nowPlaying"]').waitFor();
       await menu.locator('[data-chip-item="time"]').waitFor();
       await menu.locator('[data-chip-item="endBlackout"]').waitFor();
+      await menu.locator('[data-chip-item="volume"]').waitFor();
       await dm.keyboard.press("Escape");
       await menu.waitFor({ state: "detached" });
     }
@@ -435,7 +483,7 @@ describe("The top bar's give-way and Next", { concurrency: false }, () => {
     await ops.send({ t: "music.stop" }).catch(() => undefined);
   });
 
-  test("qc-16. Pat's worst case on his own turn at 900 x 900 and 1170 x 900 at 130%: the name leaves, the overrun timer is short, Your turn drops while End turn shows, and the turn is still announced", async (t) => {
+  test("qc-16. Pat's worst case on his own turn at 900 x 900 and 1170 x 900 at 130%: the speaker and the name leave, the overrun timer is short, Your turn drops while End turn shows, and the turn is still announced", async (t) => {
     t.after(async () => {
       await openAt(pat, PHONE, 1);
       await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
@@ -452,7 +500,7 @@ describe("The top bar's give-way and Next", { concurrency: false }, () => {
       await notice.waitFor({ state: "attached", timeout: 3_000 });
       assert.equal(await notice.getAttribute("aria-live"), "assertive");
       await pat.waitForTimeout(2_500);
-      const fit = await partsHold(pat, ["search:icon", "timer:short"], ["turn-name"], `${w.at}: Pat's worst case`);
+      const fit = await partsHold(pat, ["search:icon", "timer:short"], ["turn-name", "volume"], `${w.at}: Pat's worst case`);
       assert.ok(fit.parts.some((part) => part.startsWith("chip:you")), `${w.at}: Pat's chip stays (${fit.parts.join(", ")})`);
       assert.ok(fit.overflow <= 1, `${w.at}: Pat's row overflows by ${fit.overflow} px (${fit.parts.join(", ")})`);
       const end = bar.getByRole("button", { name: "End turn", exact: true });
@@ -484,6 +532,96 @@ describe("The top bar's give-way and Next", { concurrency: false }, () => {
     const fit = await settledParts(pat);
     assert.ok(fit.overflow <= 1, `the row overflows by ${fit.overflow} px`);
     await shots.take(pat, "qc-16b-bar-after-his-turn-740x360-130");
+  });
+
+  test("vol-c1. the speaker stands right of Now playing at 1440 at the bar's 12 px gaps, its icon on the row's middle, and stays on the bar at 1024 with the side panel", async (t) => {
+    t.after(async () => {
+      await ops.send({ t: "music.stop" }).catch(() => undefined);
+      await openAt(dm, DESK, 1);
+    });
+    await ops.send({ t: "music.play", run: randomUUID(), playlistId: run.playlist, order: [run.track], index: 0, repeat: "all", fade: 5 });
+    await openAt(dm, DESK, 1);
+    const wide = await partsHold(dm, ["volume", "chip:nowPlaying:full"], [], "the speaker beside Now playing at 1440");
+    assert.ok(wide.overflow <= 1, `the row overflows by ${wide.overflow} px (${wide.parts.join(", ")})`);
+    const fit = await speakerFit(dm);
+    assert.ok(fit, "the speaker is drawn");
+    assert.equal(fit.before, "nowPlaying", "the room's sound, then this device's");
+    assert.ok(Math.abs(fit.gapLeft - 12) <= 1 && Math.abs(fit.gapRight - 12) <= 1, `gaps ${fit.gapLeft} and ${fit.gapRight} px`);
+    assert.ok(Math.abs(fit.height - 44) <= 0.5, `${fit.height} px tall`);
+    assert.ok(fit.iconOff <= 1, `its icon sits ${fit.iconOff} px off the row's middle`);
+    const speaker = topBar(dm).locator("[data-volume-button]");
+    assert.equal(await speaker.getAttribute("aria-label"), "Volume on this device: 100%");
+    await shots.take(dm, "vol-c1-speaker-1440");
+    await openAt(dm, { width: 1024, height: 768 }, 1);
+    const narrow = await partsHold(dm, ["volume"], [], "the speaker on the bar at 1024");
+    assert.ok(narrow.overflow <= 1, `at 1024 the row overflows by ${narrow.overflow} px (${narrow.parts.join(", ")})`);
+    const at1024 = await speakerFit(dm);
+    assert.ok(at1024 && at1024.iconOff <= 1, `at 1024 its icon sits ${at1024?.iconOff} px off the row's middle`);
+    await shots.take(dm, "vol-c1-speaker-1024");
+  });
+
+  test("vol-c2. on the DM's 320 x 568 phone at 130% the speaker leaves the bar, and the DM menu leads with This device's Volume, after a blackout's items, opening the sheet", async (t) => {
+    t.after(async () => {
+      await blackout(false);
+      await openAt(dm, DESK, 1);
+    });
+    await openAt(dm, { width: 320, height: 568 }, 1.3);
+    const fit = await partsHold(dm, ["chip:dm:dot"], ["volume"], "the speaker off the DM's smallest bar");
+    assert.ok(fit.overflow <= 1, `the row overflows by ${fit.overflow} px (${fit.parts.join(", ")})`);
+    const chip = topBar(dm).locator('[data-chip="dm"]');
+    await chip.click();
+    const menu = dm.locator('[data-chip-menu="dm"]');
+    const first = menu.locator("[data-chip-item]").first();
+    await first.waitFor();
+    assert.equal(await first.getAttribute("data-chip-item"), "volume", "Volume leads the menu");
+    assert.match((await first.textContent()) ?? "", /^Volume\s*100%$/);
+    await menu.getByText("This device", { exact: true }).waitFor();
+    await shots.take(dm, "vol-c2-dm-menu-320x568-130");
+    await first.click();
+    const sheet = dm.getByRole("dialog", { name: "Volume", exact: true });
+    await sheet.getByRole("slider", { name: "Volume", exact: true }).waitFor();
+    await shots.take(dm, "vol-c2-dm-sheet-320x568-130");
+    await dm.keyboard.press("Escape");
+    await sheet.waitFor({ state: "detached" });
+    await waitFor("focus back on the DM chip", async () => ((await chip.evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement)) ? true : null), 3_000);
+    await blackout(true);
+    const eye = await partsHold(dm, ["chip:dm:eye"], ["volume"], "the crossed eye on the smallest bar");
+    assert.ok(eye.overflow <= 1, `in the blackout the row overflows by ${eye.overflow} px`);
+    await topBar(dm).locator('[data-chip="dm"]').click();
+    const items = await menu.locator("[data-chip-item]").evaluateAll((els) => els.map((el) => (el as unknown as DomNode).getAttribute("data-chip-item")));
+    assert.deepEqual(items.slice(0, 2), ["endBlackout", "volume"], "the blackout's items, then Volume");
+    await dm.keyboard.press("Escape");
+    await menu.waitFor({ state: "detached" });
+  });
+
+  test("vol-c3. in a fight on Goblin 1's turn, as design-v1-volume.md 10b measured it, the speaker stays on the DM's bar and Pat's at 1024 and 1280, at 100% and 130%, and nothing overflows", async (t) => {
+    t.after(async () => {
+      await endFight();
+      await openAt(dm, DESK, 1);
+      await openAt(pat, PHONE, 1);
+    });
+    await startFight();
+    // Belak, then Thorn, then Goblin 1: table 10b's turn, with the DM's next faces after it.
+    await ops.send({ t: "encounter.next" });
+    await ops.send({ t: "encounter.next" });
+    await waitFor("Goblin 1's turn", () => (dmSocket.state?.encounter?.activeEntryId === run.fight[2]!.entry ? true : null));
+    for (const [who, page] of [
+      ["dm", dm],
+      ["pat", pat],
+    ] as const) {
+      for (const width of [1024, 1280]) {
+        for (const scale of [1, 1.3]) {
+          await openAt(page, { width, height: 900 }, scale);
+          const at = `${who} ${width}${scale === 1 ? "" : " at 130%"}`;
+          const fit = await partsHold(page, ["volume"], [], `${at}: the speaker on the bar in the fight`);
+          assert.ok(fit.overflow <= 1, `${at}: the row overflows by ${fit.overflow} px (${fit.parts.join(", ")})`);
+          // The speaker folds before the turn chip's name gives way, so while it stands the name does too, where the strip is in the row.
+          const inRow = (await topBar(page).locator(":scope > div").first().getByRole("button", { name: /^Initiative, round/ }).count()) === 1;
+          if (inRow) assert.ok(fit.parts.includes("turn-name"), `${at}: the turn chip keeps its name (${fit.parts.join(", ")})`);
+          await shots.take(page, `vol-c3-${who}-${width}${scale === 1 ? "" : "-130"}`);
+        }
+      }
+    }
   });
 
   test("qcb-end. no page logged an error", () => {
