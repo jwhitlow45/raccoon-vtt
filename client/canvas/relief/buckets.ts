@@ -107,6 +107,16 @@ export type Item =
 
 type TurnData = { order: StaticPiece[]; keys: number[]; locals: number[]; bounds: VBox[]; union: VBox };
 
+/** A piece of the merged order, with its key and bounds at the turn. */
+type Static = { p: StaticPiece; key: number; bounds: VBox };
+
+/**
+ * What the last layout made, for the next to reuse while no sync has
+ * changed a bucket since: its merge of the buckets in view, its runs by
+ * their first piece, and its whole list.
+ */
+type LastLayout = { generation: number; turn: Turn; lists: readonly TurnData[]; statics: readonly Static[]; runs: Map<DrawPiece, DrawPiece[]>; out: Item[] };
+
 type Bucket = {
   key: string;
   pieces: StaticPiece[];
@@ -221,6 +231,9 @@ export class ReliefIndex {
   #found = false;
   /** How many buckets the last sync rebuilt, for the tests and the bench. */
   rebuilt = 0;
+  /** Counts the syncs that changed what any piece draws, buckets or their regions: a layout reuses only the last one made since the last of them. */
+  #generation = 0;
+  #last: LastLayout | null = null;
 
   /** Rebuilds every bucket whose inputs changed, and drops buckets past the scene's edge. */
   sync(input: SyncInput): void {
@@ -231,7 +244,10 @@ export class ReliefIndex {
     const across = Math.max(1, Math.ceil(span.cols / CHUNK_CELLS));
     const down = Math.max(1, Math.ceil(span.rows / CHUNK_CELLS));
     this.#across = across;
-    if (this.#grid !== grid) this.#buckets.clear();
+    if (this.#grid !== grid) {
+      this.#buckets.clear();
+      this.#generation++;
+    }
     this.#grid = grid;
     this.rebuilt = 0;
     const seen = new Set<string>();
@@ -265,8 +281,16 @@ export class ReliefIndex {
         this.#buckets.set(key, { key, pieces, sig, cells, turns: new Map() });
       }
     }
-    for (const key of this.#buckets.keys()) if (!seen.has(key)) this.#buckets.delete(key);
-    if (this.rebuilt > 0 || !this.#found) this.#findRegions();
+    for (const key of this.#buckets.keys()) {
+      if (seen.has(key)) continue;
+      this.#buckets.delete(key);
+      this.#generation++;
+    }
+    // A rebuilt bucket finds the regions again, which sets the region of pits and walls in buckets that kept their pieces.
+    if (this.rebuilt > 0 || !this.#found) {
+      this.#findRegions();
+      this.#generation++;
+    }
   }
 
   /**
@@ -434,6 +458,25 @@ export class ReliefIndex {
    */
   layout(turn: Turn, view: VBox, standees: readonly StandeeIn[], volumes: readonly VolumePiece[] = []): Item[] {
     const lists = this.visible(turn, view);
+    /*
+     * A pan's cull step lays out again for a box a step along, which mostly
+     * meets the same buckets, and the same pieces then stand in the same
+     * order: the merge is reused, and so are the runs and the list when
+     * they come out the same, so the board renders and commits only what
+     * changed (HXPERF-3). Only within one generation: a sync that changes
+     * a bucket can change what a kept piece draws, its region.
+     */
+    const last = this.#last?.generation === this.#generation && this.#last.turn === turn ? this.#last : null;
+    const statics = last && sameSig(last.lists, lists) ? last.statics : this.#merge(lists);
+    const items = this.#items(turn, view, statics, standees, volumes);
+    const out = reuseRuns(items, last);
+    const kept = last && sameItems(last.out, out) ? last.out : out;
+    this.#last = { generation: this.#generation, turn, lists, statics, runs: runsByFirst(kept), out: kept };
+    return kept;
+  }
+
+  /** The pieces of the buckets in view in one depth order, by a k-way merge of the sorted buckets. */
+  #merge(lists: readonly TurnData[]): Static[] {
     // A k-way merge of the sorted buckets, by a small heap of each list's next piece.
     type Next = { list: TurnData; i: number };
     const heap: Next[] = [];
@@ -469,13 +512,17 @@ export class ReliefIndex {
       return top;
     };
     for (const list of lists) push({ list, i: 0 });
-    const statics: { p: StaticPiece; key: number; bounds: VBox }[] = [];
+    const statics: Static[] = [];
     while (heap.length > 0) {
       const n = pop();
       statics.push({ p: n.list.order[n.i]!, key: n.list.keys[n.i]!, bounds: n.list.bounds[n.i]! });
       if (n.i + 1 < n.list.order.length) push({ list: n.list, i: n.i + 1 });
     }
+    return statics;
+  }
 
+  /** The drawing order from the merged pieces: the standees and bands in view placed among them, runs between standees each one item. */
+  #items(turn: Turn, view: VBox, statics: readonly Static[], standees: readonly StandeeIn[], volumes: readonly VolumePiece[]): Item[] {
     const placed = this.#placeStandees(turn, view, standees);
     // The bands in view, far to near, each with the stretch between standees it draws in: after the last placed standee whose natural key is below its key.
     const bands = volumes.filter((v) => meets(v.bounds, view)).sort((a, b) => (before(a.key, VOLUME_RANK, a.id, b.key, VOLUME_RANK, b.id) ? -1 : 1));
@@ -602,6 +649,45 @@ export class ReliefIndex {
     placed.sort((a, b) => (a.key !== b.key ? a.key - b.key : a.order < b.order ? -1 : a.order > b.order ? 1 : 0));
     return placed;
   }
+}
+
+/** Each run's pieces by its first piece, the first run a piece starts. */
+function runsByFirst(items: readonly Item[]): Map<DrawPiece, DrawPiece[]> {
+  const out = new Map<DrawPiece, DrawPiece[]>();
+  for (const item of items) if (item.kind === "run" && !out.has(item.pieces[0]!)) out.set(item.pieces[0]!, item.pieces);
+  return out;
+}
+
+function samePieces(a: readonly DrawPiece[], b: readonly DrawPiece[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/** The items, each run holding the last layout's array of its pieces where that run had the same ones, so its shape keeps its props. */
+function reuseRuns(items: Item[], last: LastLayout | null): Item[] {
+  if (!last) return items;
+  for (const item of items) {
+    if (item.kind !== "run") continue;
+    const old = last.runs.get(item.pieces[0]!);
+    if (old && samePieces(old, item.pieces)) item.pieces = old;
+  }
+  return items;
+}
+
+/** Whether two lists draw the same: their runs the same arrays, their standees the same with the same silhouettes and pits. */
+function sameItems(a: readonly Item[], b: readonly Item[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (x.kind === "run" && y.kind === "run") {
+      if (x.pieces !== y.pieces) return false;
+    } else if (x.kind === "standee" && y.kind === "standee") {
+      if (x.id !== y.id || x.silhouette !== y.silhouette || x.pits.length !== y.pits.length || x.pits.some((p, k) => p !== y.pits[k])) return false;
+    } else return false;
+  }
+  return true;
 }
 
 /**

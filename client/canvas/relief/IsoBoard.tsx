@@ -382,6 +382,17 @@ function IsoBoardImpl(props: IsoBoardProps) {
 
   // The box is made anew each render, so its numbers say when it changed.
   const items = useMemo(() => relief.layout(turn, cull, standees, volumesNow?.pieces ?? []), [relief, synced, turn, cullKey, standees, volumesNow]);
+  // Each run keyed by its first piece, so a run the layout kept keeps its shape and its props when runs come in before it (HXPERF-3).
+  const runKeys = useMemo(() => {
+    const seen = new Map<string, number>();
+    return items.map((item) => {
+      if (item.kind !== "run") return "";
+      const id = item.pieces[0]!.id;
+      const n = seen.get(id) ?? 0;
+      seen.set(id, n + 1);
+      return n === 0 ? `run:${id}` : `run:${id}#${n}`;
+    });
+  }, [items]);
   useLayoutReport()(items, volumesNow, rings?.byToken ?? null);
 
   // Looked up by id for each standee, silhouette and decor: a search of the list each time is quadratic at 500 tokens.
@@ -741,7 +752,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
             <Group scaleY={groups.outer.scaleY}>
               <Group ref={reliefRootRef} rotation={groups.inner.rotation}>
                 {items.map((item, i) =>
-                  item.kind === "run" ? <ReliefRun key={`run${i}`} pieces={item.pieces} dc={dc} /> : props.renderToken(byId.get(item.id)!, isoOf.get(item.id)!, isoText.get(item.id)),
+                  item.kind === "run" ? <ReliefRun key={runKeys[i]} pieces={item.pieces} dc={dc} /> : props.renderToken(byId.get(item.id)!, isoOf.get(item.id)!, isoText.get(item.id)),
                 )}
                 {flat.map((t) => props.renderToken(t, flatIsoOf.get(t.id)!))}
               </Group>

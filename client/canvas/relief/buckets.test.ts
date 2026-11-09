@@ -578,3 +578,57 @@ describe("areas standing as their real shapes in the depth list (docs/design/des
     assert.deepEqual(sideOf(pieces, 2.5, "front").map((p) => p.band), [2, 3]);
   });
 });
+
+describe("a layout reused across a pan's cull step (HXPERF-3)", () => {
+  /** A 64 by 64 scene in 16 by 16 buckets with a platform and a pit in the top-left bucket, a wall in the far one. */
+  const ground: Record<string, number> = { "3,3": 2, "4,3": 2, "6,6": -2 };
+  const far = [wall(50, 50, 51, 50)];
+  const bounds = { w: 64, h: 64 };
+  const sync = (relief: ReliefIndex, walls: WallPiece[]) => relief.sync({ sceneId: "s1", bounds, chunks: {}, tiles: null, walls: groupWalls(walls, null, bounds), global: ground, src: source(ground, bounds) });
+  /** A box over the top-left bucket alone at turn 0, moved along by `dx` view units. */
+  const box = (dx: number) => ({ x0: -10 + dx, y0: 0, x1: 2 + dx, y1: 10 });
+
+  test("a box a step along that meets the same buckets gives back the same list, its runs the same arrays", () => {
+    const relief = new ReliefIndex();
+    sync(relief, far);
+    const a = relief.layout(0, box(0), []);
+    const b = relief.layout(0, box(0.5), []);
+    assert.ok(a.length > 0);
+    assert.equal(b, a);
+  });
+
+  test("a standee coming into the box keeps the run before it as it was", () => {
+    const relief = new ReliefIndex();
+    sync(relief, far);
+    const near = standee("near", 7, 7);
+    // Out of the first box and in the second, whatever its real bounds.
+    const deep = standee("deep", 12, 12, 0, 1, 1, { bounds: { x0: 2.2, y0: 9, x1: 2.4, y1: 10 } });
+    const a = relief.layout(0, box(0), [near, deep]);
+    const b = relief.layout(0, box(0.5), [near, deep]);
+    assert.deepEqual(order(a), ["c3,3", "c4,3", "c6,6", "near"]);
+    assert.deepEqual(order(b), [...order(a), "deep"]);
+    assert.ok(a[0]?.kind === "run" && b[0]?.kind === "run" && b[0].pieces === a[0].pieces, "the run before both standees keeps its array");
+  });
+
+  test("after a sync that rebuilt any bucket, even one out of the box, the list and its runs are made anew", () => {
+    const relief = new ReliefIndex();
+    sync(relief, far);
+    const a = relief.layout(0, box(0), []);
+    sync(relief, [wall(50, 52, 51, 52)]);
+    assert.ok(relief.rebuilt > 0);
+    const b = relief.layout(0, box(0), []);
+    assert.deepEqual(order(b), order(a));
+    assert.notEqual(b, a);
+    assert.ok(a[0]?.kind === "run" && b[0]?.kind === "run" && b[0].pieces !== a[0].pieces);
+  });
+
+  test("at another turn the list is made anew", () => {
+    const relief = new ReliefIndex();
+    sync(relief, far);
+    const a = relief.layout(0, EVERYTHING, []);
+    relief.layout(1, EVERYTHING, []);
+    const c = relief.layout(0, EVERYTHING, []);
+    assert.deepEqual(order(c), order(a));
+    assert.ok(a[0]?.kind === "run" && c[0]?.kind === "run" && c[0].pieces !== a[0].pieces);
+  });
+});
