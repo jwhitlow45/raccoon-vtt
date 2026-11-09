@@ -643,6 +643,13 @@ newest first.
 
 **Since v0.3.1**
 
+- **Change numbers**: room format 44, change format 57. No data migrates,
+  since a room saved before reads as it did, and no page needs a reload. Once
+  this version has saved a room, an older build refuses it and its backups
+  and exports, with two exceptions: a room this version could only open
+  read-only, and a room whose first save here could not write the new
+  format, until a later save does. An older build refuses every export this
+  version makes. Going back needs the backups taken just before the update.
 - **Several floors in one scene** ([design](design/design-v1-floors.md)): room
   format 43, change format 56. No data migrates, since a scene without floors
   reads as before. Until it reloads, an old page refuses the server's pings,
