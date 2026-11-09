@@ -49,6 +49,8 @@ export function DungeonPreview(props: {
 }) {
   const { drawn, width, height, onPictured, onPictureFailed } = props;
   const [url, setUrl] = useState<{ src: string; of: Drawn } | null>(null);
+  // A failed picture leaves the box empty, and a short empty box measures a corner control off its middle (DG-REROLL-320), so the corners centre until a picture shows again.
+  const [failed, setFailed] = useState(false);
   const hatch = useId();
 
   useEffect(() => {
@@ -57,6 +59,7 @@ export function DungeonPreview(props: {
     const scene = Object.values(drawn.room.scenes)[0];
     if (!scene) {
       setUrl(null);
+      setFailed(true);
       onPictureFailed(drawn);
       return;
     }
@@ -69,12 +72,14 @@ export function DungeonPreview(props: {
       (blob) => {
         if (!live) return;
         setUrl({ src: URL.createObjectURL(blob), of: drawn });
+        setFailed(false);
         onPictured(drawn);
       },
       // A canvas the device refuses empties the box rather than leave an older dungeon standing for this one.
       () => {
         if (!live) return;
         setUrl(null);
+        setFailed(true);
         onPictureFailed(drawn);
       },
     );
@@ -90,6 +95,7 @@ export function DungeonPreview(props: {
   const shown = url?.of ?? null;
   const plan = shown?.plan;
   const box = plan ? fitBox(plan.w, plan.h, width, height) : { width, height };
+  const centred = failed && !shown ? ({ bottom: "auto", top: "50%", transform: "translateY(-50%)" } as const) : null;
   const traps = shown ? Object.values(shown.room.traps ?? {}).filter((t): t is Trap => !!t) : [];
   const sceneId = shown ? Object.keys(shown.room.scenes)[0] ?? "" : "";
 
@@ -133,8 +139,8 @@ export function DungeonPreview(props: {
           </svg>
         </div>
       ) : null}
-      {props.children ? <div style={CORNER_SLOT}>{props.children}</div> : null}
-      {props.leftCorner ? <div style={{ ...CORNER_SLOT, right: "auto", left: theme.space(2) }}>{props.leftCorner}</div> : null}
+      {props.children ? <div style={{ ...CORNER_SLOT, ...centred }}>{props.children}</div> : null}
+      {props.leftCorner ? <div style={{ ...CORNER_SLOT, right: "auto", left: theme.space(2), ...centred }}>{props.leftCorner}</div> : null}
       {props.drawing ? <DrawingPill now={props.drawingNow ?? false} /> : null}
     </div>
   );

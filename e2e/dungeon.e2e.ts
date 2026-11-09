@@ -1033,6 +1033,38 @@ describe("dungeon generator", { concurrency: false }, () => {
     assert.deepEqual(lines, []);
   });
 
+  test("FU52-1. the whole dialog, with the picture drawn and with it failed, within 1 px at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%", async () => {
+    const page = await dmContext.newPage();
+    const lines: string[] = [];
+    try {
+      for (const scale of [1, 1.3]) {
+        for (const size of [{ width: 1440, height: 900 }, PHONE, { width: 320, height: 568 }]) {
+          await page.setViewportSize(size);
+          if (!page.url().startsWith(server.origin)) await page.goto(server.origin);
+          await page.evaluate((v) => localStorage.setItem("rvtt.uiScale", v), String(scale));
+          await page.goto(dm.url());
+          await page.getByRole("status", { name: "Connected" }).first().waitFor();
+          const dialog = await openDialog(page);
+          await statusText(dialog);
+          const at = `${size.width} x ${size.height} at ${scale * 100}%`;
+          const off = alignmentLines(await measureAlignment(dialog), `FU52-1 dialog, ${at}`);
+          await encodes(page, "fail");
+          await dialog.getByRole("button", { name: "Reroll", exact: true }).click();
+          await dialog.getByText("This device could not draw the preview, so Make is off. Reroll or change a choice to try again.", { exact: true }).waitFor();
+          off.push(...alignmentLines(await measureAlignment(dialog), `FU52-1 dialog with the picture failed, ${at}`));
+          run.measured.push(`FU52-1 ${at}: ${off.length === 0 ? "all within 1 px" : off.join(" | ")}`);
+          lines.push(...off);
+          await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+          await dialog.waitFor({ state: "detached" });
+        }
+      }
+    } finally {
+      await page.evaluate(() => localStorage.removeItem("rvtt.uiScale")).catch(() => {});
+      await page.close();
+    }
+    assert.deepEqual(lines, []);
+  });
+
   test("DG-10. no page logged an error", () => {
     assert.deepEqual(consoles.dm.errors, []);
     assert.deepEqual(consoles.pat.errors, []);
