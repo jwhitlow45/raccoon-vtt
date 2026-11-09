@@ -202,10 +202,10 @@ export function saveDisplayChoices(choices: { mode: "follow" | "fit"; turn: bool
 }
 
 /**
- * The display menu's Sound (docs/design/design-v1-music.md 4.5): On or Off,
- * on at first, kept apart from a member's Room sound for the same reason
- * as its weather. A display plays at full volume, since the TV's remote
- * sets it.
+ * Whether the display plays (docs/design/design-v1-music.md 4.5): on at
+ * first, kept apart from a member's mute for the same reason as its
+ * weather. Its menu's Volume Off stores "off" and keeps the level below
+ * (docs/design/design-v1-volume.md 7).
  */
 export const DISPLAY_SOUND_KEY = "rvtt.displaySound";
 
@@ -219,3 +219,25 @@ export const displaySound = displaySoundSetting.get;
 export const chooseDisplaySound = displaySoundSetting.set;
 export const useDisplaySound = displaySoundSetting.use;
 export const subscribeDisplaySound = displaySoundSetting.subscribe;
+
+/**
+ * The display's Volume (docs/design/design-v1-volume.md 7): 25, 50, 75 or
+ * 100, 100 at first, the level a choice after Off returns to. A few
+ * choices rather than a slider, since a TV remote's arrows step through
+ * the menu's buttons. Anything else stored reads as 100.
+ */
+export const DISPLAY_VOLUME_KEY = "rvtt.displayVolume";
+export const DISPLAY_VOLUMES = [25, 50, 75, 100] as const;
+export type DisplayVolume = (typeof DISPLAY_VOLUMES)[number];
+
+export function parseDisplayVolume(raw: string | null): DisplayVolume {
+  return DISPLAY_VOLUMES.find((v) => raw === String(v)) ?? 100;
+}
+
+const displayVolumeSetting = setting<DisplayVolume>(DISPLAY_VOLUME_KEY, parseDisplayVolume, String);
+
+export const displayVolume = displayVolumeSetting.get;
+export const chooseDisplayVolume = displayVolumeSetting.set;
+export const useDisplayVolume = displayVolumeSetting.use;
+/** The engine's, so a change while sound plays applies at once, as a member's mix does. */
+export const subscribeDisplayVolume = displayVolumeSetting.subscribe;

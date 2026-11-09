@@ -348,11 +348,13 @@ export const restoreAnimatedMaps = animatedMapsSetting.restore;
 // ---------------------------------------------------------------- room sound
 
 /**
- * "Room sound" (docs/design/design-v1-music.md 4.4): whether this device
- * plays the music, background sounds and effects the DM plays. "on",
- * "off", or null until a choice: a DM device takes null as on, and a
- * player's asks the first time there is something to hear. A table display
- * keeps its own (features/display/remember.ts).
+ * Whether this device is muted (docs/design/design-v1-volume.md 5), stored
+ * as "Room sound" was (docs/design/design-v1-music.md 4.4), so nothing
+ * migrates: whether it plays the music, background sounds and effects the
+ * DM plays. "on" unmuted, "off" muted, or null until a choice: a DM device
+ * takes null as unmuted, and a player's asks the first time there is
+ * something to hear. A table display keeps its own
+ * (features/display/remember.ts).
  */
 export type RoomSoundChoice = "on" | "off" | null;
 
@@ -382,9 +384,16 @@ export function subscribeRoomSound(listener: () => void): () => void {
   return roomSoundSetting.subscribe(listener);
 }
 
-/** "Music", "Background" and "Effects" on this device, 0 to 100, squared into the gain. */
-export type SoundMix = { readonly music: number; readonly loops: number; readonly effects: number };
-export const SOUND_MIX_DEFAULT: SoundMix = { music: 80, loops: 80, effects: 80 };
+/**
+ * This device's "Volume" over its "Music", "Background" and "Effects"
+ * (docs/design/design-v1-volume.md 5), each squared into the gain. Volume
+ * is 5 to 100, 100 at first so a device sounds as it did until someone
+ * moves it, and it is the level unmuting returns to, so it is never stored
+ * as 0: muting is the choice above. The other three are 0 to 100, 80% at
+ * first.
+ */
+export type SoundMix = { readonly volume: number; readonly music: number; readonly loops: number; readonly effects: number };
+export const SOUND_MIX_DEFAULT: SoundMix = { volume: 100, music: 80, loops: 80, effects: 80 };
 
 function mixPart(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.min(100, Math.max(0, Math.round(value))) : fallback;
@@ -395,14 +404,16 @@ export function parseSoundMix(raw: string | null): SoundMix {
   try {
     const v = JSON.parse(raw) as Partial<Record<keyof SoundMix, unknown>> | null;
     if (!v || typeof v !== "object") return SOUND_MIX_DEFAULT;
-    return { music: mixPart(v.music, 80), loops: mixPart(v.loops, 80), effects: mixPart(v.effects, 80) };
+    // A mix an older build wrote has no volume. A 0, which unmuting could not return to, reads as the default too.
+    const volume = mixPart(v.volume, 100);
+    return { volume: volume === 0 ? 100 : volume, music: mixPart(v.music, 80), loops: mixPart(v.loops, 80), effects: mixPart(v.effects, 80) };
   } catch {
     return SOUND_MIX_DEFAULT;
   }
 }
 
 export const SOUND_MIX_KEY = "rvtt.soundMix";
-const soundMixSetting = setting<SoundMix>(SOUND_MIX_KEY, parseSoundMix, (m) => JSON.stringify({ music: m.music, loops: m.loops, effects: m.effects }));
+const soundMixSetting = setting<SoundMix>(SOUND_MIX_KEY, parseSoundMix, (m) => JSON.stringify({ volume: m.volume, music: m.music, loops: m.loops, effects: m.effects }));
 
 export function soundMix(): SoundMix {
   followOtherWindows();

@@ -53,7 +53,7 @@ export type EngineDeps = {
 };
 
 /** A display plays at full volume: the TV's remote sets it (4.5). */
-const FULL_MIX: SoundMix = { music: 100, loops: 100, effects: 100 };
+const FULL_MIX: SoundMix = { volume: 100, music: 100, loops: 100, effects: 100 };
 /** The master is 3 dB down, so the loudest mix the caps allow stays under 0 dBFS with the compressor (D-261102-465). */
 const MASTER_GAIN = 10 ** (-3 / 20);
 /** The audio clock advancing this much less than the page's over a check means the context stood still. */

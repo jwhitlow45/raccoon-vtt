@@ -481,6 +481,35 @@ describe("the room sound's unlock", () => {
     }
   });
 
+  test("U and the mute toggle unmute inside the press, blessing the pool there, and mute keeping the level (docs/design/design-v1-volume.md 5)", async () => {
+    const { soundUnlock } = await import("./context.ts");
+    const { toggleMute } = await import("./store.ts");
+    const { roomSoundChoice, setRoomSoundChoice, setSoundMix, soundMix } = await import("../../device/settings.ts");
+    const unlock = soundUnlock();
+    const bless = unlock.blessPool;
+    let blessed = 0;
+    unlock.blessPool = () => (blessed++, Promise.resolve(true));
+    try {
+      setSoundMix({ ...soundMix(), volume: 70 });
+      setRoomSoundChoice(null);
+      toggleMute("player");
+      assert.equal(roomSoundChoice(), "on", "a player's device not yet asked is muted, so U unmutes it");
+      assert.equal(blessed, 1, "inside the press, since the capture listeners ran while it was muted");
+      toggleMute("player");
+      assert.equal(roomSoundChoice(), "off");
+      assert.equal(soundMix().volume, 70, "muting keeps the level unmuting returns to");
+      setRoomSoundChoice(null);
+      toggleMute("dm");
+      assert.equal(roomSoundChoice(), "off", "a DM device with no choice plays, so U mutes it");
+      assert.equal(blessed, 1, "muting blesses nothing");
+      toggleMute("dm");
+      assert.equal(blessed, 2);
+    } finally {
+      unlock.blessPool = bless;
+      setRoomSoundChoice(null);
+    }
+  });
+
   test("a pooled element reads ahead and lets the pitch go, so a change of rate never time-stretches", () => {
     const el = poolElement({ preload: "none", preservesPitch: true });
     assert.equal(el.preload, "auto");

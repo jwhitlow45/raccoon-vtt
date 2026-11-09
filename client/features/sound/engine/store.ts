@@ -2,8 +2,8 @@ import { useSyncExternalStore } from "react";
 import { LEAD_MS, type FiredEffect, type Playing, type Sound, type SoundId } from "#shared/sound.ts";
 import { api } from "../../../lib/api.ts";
 import { useRoomRoleIfAny } from "../../../state/view.ts";
-import { roomSoundOnFor, setRoomSoundChoice, useRoomSoundChoice } from "../../device/settings.ts";
-import { useDisplaySound } from "../../display/remember.ts";
+import { roomSoundChoice, roomSoundOnFor, setRoomSoundChoice, useRoomSoundChoice, useSoundMix } from "../../device/settings.ts";
+import { useDisplaySound, useDisplayVolume } from "../../display/remember.ts";
 import { builtinMs } from "./builtins.ts";
 import { LISTEN_ELEMENT, soundContext, soundUnlock } from "./context.ts";
 
@@ -98,8 +98,8 @@ export function resetServerRoomSoundForTests(): void {
 // ---------------------------------------------------------------- this page's part
 
 /**
- * What this page does with the room's sound: "off" (Room sound off, or a
- * player's not chosen yet), "tap" (on, waiting for a tap the browser
+ * What this page does with the room's sound: "off" (muted, or a player's
+ * not chosen yet), "tap" (unmuted, waiting for a tap the browser
  * counts), "plays", "other" (another window of this browser plays it), or
  * "cannot" (the browser lacks what the mixer needs).
  */
@@ -136,7 +136,7 @@ export function setMusicRetry(fn: (() => void) | null): void {
   musicRetry = fn;
 }
 
-/** Whether this page's Room sound is on: a member's choice for its role, or a display's own Sound. */
+/** Whether this page plays the room's sound, unmuted: a member's choice for its role, or a display's own Sound. */
 export function useRoomSoundOn(): boolean {
   const room = useRoomRoleIfAny();
   const choice = useRoomSoundChoice();
@@ -146,9 +146,10 @@ export function useRoomSoundOn(): boolean {
 }
 
 /**
- * Room sound on or off on this device, from a click. Turning it on unlocks
- * the audio inside that click, since the window's capture listeners ran
- * before the setting changed (4.4), as Play here does.
+ * Unmuted or muted on this device, from a click or a key. Unmuting unlocks
+ * the audio inside that gesture, since the window's capture listeners ran
+ * before the setting changed (docs/design/design-v1-music.md 4.4), as Play
+ * here does. Muting stores "off" and keeps the level.
  */
 export function setRoomSound(on: boolean): void {
   setRoomSoundChoice(on ? "on" : "off");
@@ -156,6 +157,27 @@ export function setRoomSound(on: boolean): void {
   const ctx = soundContext();
   if (ctx && ctx.state !== "running") void ctx.resume().catch(() => {});
   void soundUnlock().blessPool();
+}
+
+/**
+ * This device's volume as the top bar's speaker and its controls show it
+ * (docs/design/design-v1-volume.md 3 to 5): muted or not, and the kept
+ * level, 5 to 100, which unmuting returns to and a muted slider does not
+ * show. A table display's are its own Sound and Volume.
+ */
+export type DeviceVolume = { readonly muted: boolean; readonly volume: number };
+
+export function useDeviceVolume(): DeviceVolume {
+  const room = useRoomRoleIfAny();
+  const on = useRoomSoundOn();
+  const mix = useSoundMix();
+  const displayLevel = useDisplayVolume();
+  return { muted: !on, volume: room?.display ? displayLevel : mix.volume };
+}
+
+/** U and the mute toggle (docs/design/design-v1-volume.md 5, 8): mutes an unmuted device, and unmutes a muted one inside the press, a player's not yet asked included. */
+export function toggleMute(role: "dm" | "player"): void {
+  setRoomSound(!roomSoundOnFor(roomSoundChoice(), role));
 }
 
 // ---------------------------------------------------------------- what is there to hear

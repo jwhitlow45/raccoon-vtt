@@ -238,13 +238,14 @@ test("a table display's animated maps last for its page and give the device's ow
 });
 
 /*
- * Room sound (docs/design/design-v1-music.md 4.4): "on", "off", or no
- * choice, which is on for a DM device and asks on a player's. The mix is
- * this device's Music, Background and Effects, 80% at first, each 0 to
- * 100, and a broken stored mix reads as the default.
+ * Mute, stored as Room sound was (docs/design/design-v1-volume.md 5): "on",
+ * "off", or no choice, which is unmuted for a DM device and asks on a
+ * player's. The mix is this device's Volume, 100% at first and never 0,
+ * then Music, Background and Effects, 80% at first, each 0 to 100, and a
+ * broken stored mix reads as the default.
  */
 
-test("room sound is on, off or not chosen, and no choice is on for a DM only", async () => {
+test("the mute is on, off or not chosen, and no choice is unmuted for a DM only", async () => {
   reset({ writes: true, reads: true });
   const s = await loadPage();
   assert.equal(s.roomSoundChoice(), null);
@@ -260,19 +261,29 @@ test("room sound is on, off or not chosen, and no choice is on for a DM only", a
   assert.equal((await loadPage()).roomSoundChoice(), "off");
 });
 
-test("the sound mix is 80% at first, kept 0 to 100, and a broken one reads as the default", async () => {
+test("the sound mix is Volume 100% and the rest 80% at first, kept 0 to 100, and a broken one reads as the default", async () => {
   reset({ writes: true, reads: true });
   const s = await loadPage();
-  assert.deepEqual(s.soundMix(), { music: 80, loops: 80, effects: 80 });
-  assert.deepEqual(s.parseSoundMix('{"music":10,"loops":250,"effects":-4}'), { music: 10, loops: 100, effects: 0 });
-  assert.deepEqual(s.parseSoundMix('{"music":"loud"}'), { music: 80, loops: 80, effects: 80 });
-  for (const raw of ["", "{", "null", "[]", "7"]) assert.deepEqual(s.parseSoundMix(raw), { music: 80, loops: 80, effects: 80 }, raw);
-  s.setSoundMix({ music: 35, loops: 60, effects: 100 });
-  assert.equal(stored.get("rvtt.soundMix"), '{"music":35,"loops":60,"effects":100}');
-  assert.deepEqual((await loadPage()).soundMix(), { music: 35, loops: 60, effects: 100 });
+  const first = { volume: 100, music: 80, loops: 80, effects: 80 };
+  assert.deepEqual(s.soundMix(), first);
+  assert.deepEqual(s.parseSoundMix('{"volume":45,"music":10,"loops":250,"effects":-4}'), { volume: 45, music: 10, loops: 100, effects: 0 });
+  assert.deepEqual(s.parseSoundMix('{"music":"loud"}'), first);
+  for (const raw of ["", "{", "null", "[]", "7"]) assert.deepEqual(s.parseSoundMix(raw), first, raw);
+  s.setSoundMix({ volume: 70, music: 35, loops: 60, effects: 100 });
+  assert.equal(stored.get("rvtt.soundMix"), '{"volume":70,"music":35,"loops":60,"effects":100}');
+  assert.deepEqual((await loadPage()).soundMix(), { volume: 70, music: 35, loops: 60, effects: 100 });
 });
 
-test("room sound and the mix follow another window's change, and a cleared storage gives the defaults back", async () => {
+test("a mix an older build wrote, without Volume, plays at 100%, and so does a stored 0, which unmuting could not return to", async () => {
+  reset({ writes: true, reads: true });
+  const s = await loadPage();
+  assert.deepEqual(s.parseSoundMix('{"music":35,"loops":60,"effects":100}'), { volume: 100, music: 35, loops: 60, effects: 100 });
+  for (const v of ["0", "0.4", "-20", '"70"', "null"]) assert.equal(s.parseSoundMix(`{"volume":${v},"music":35}`).volume, 100, v);
+  assert.equal(s.parseSoundMix('{"volume":5}').volume, 5, "the slider's lowest level");
+  assert.equal(s.parseSoundMix('{"volume":180}').volume, 100);
+});
+
+test("the mute and the mix follow another window's change, and a cleared storage gives the defaults back", async () => {
   reset({ writes: true, reads: true });
   const events = new EventTarget();
   Object.assign(globalThis, { window: events });
@@ -283,11 +294,11 @@ test("room sound and the mix follow another window's change, and a cleared stora
     assert.equal(s.roomSoundChoice(), null);
     events.dispatchEvent(storageEvent("rvtt.roomSound", "on"));
     assert.equal(s.roomSoundChoice(), "on");
-    events.dispatchEvent(storageEvent("rvtt.soundMix", '{"music":5,"loops":5,"effects":5}'));
-    assert.deepEqual(s.soundMix(), { music: 5, loops: 5, effects: 5 });
+    events.dispatchEvent(storageEvent("rvtt.soundMix", '{"volume":30,"music":5,"loops":5,"effects":5}'));
+    assert.deepEqual(s.soundMix(), { volume: 30, music: 5, loops: 5, effects: 5 });
     events.dispatchEvent(storageEvent(null, null));
     assert.equal(s.roomSoundChoice(), null);
-    assert.deepEqual(s.soundMix(), { music: 80, loops: 80, effects: 80 });
+    assert.deepEqual(s.soundMix(), { volume: 100, music: 80, loops: 80, effects: 80 });
   } finally {
     delete (globalThis as { window?: unknown }).window;
   }

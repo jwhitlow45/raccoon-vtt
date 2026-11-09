@@ -53,7 +53,7 @@ test("a display's animated maps are its own, apart from a member's in the same b
   assert.equal(animatedMaps(), "still", "closing the display gives the member's back");
 });
 
-test("a display's sound is its own, on at first, apart from a member's Room sound in the same browser", async () => {
+test("a display's sound is its own, on at first, apart from a member's mute in the same browser", async () => {
   const { roomSoundChoice, setRoomSoundChoice } = await import("../device/settings.ts");
   const { chooseDisplaySound, displaySound, parseDisplaySound } = await import("./remember.ts");
   setRoomSoundChoice("off");
@@ -77,4 +77,25 @@ test("a display's Show the date and time is off at first and kept apart from who
   saveDisplayChoices({ mode: "fit", turn: true, date: false });
   assert.equal(readDisplayDate(), false);
   assert.equal(readDisplayTurn(), true);
+});
+
+test("a display's volume is its own, 100% at first, one of four levels, and Off keeps it", async () => {
+  const { soundMix } = await import("../device/settings.ts");
+  const { chooseDisplaySound, chooseDisplayVolume, displaySound, displayVolume, parseDisplayVolume, subscribeDisplayVolume } = await import("./remember.ts");
+  assert.equal(displayVolume(), 100);
+  let heard = 0;
+  const stop = subscribeDisplayVolume(() => heard++);
+  chooseDisplayVolume(75);
+  assert.equal(stored.get("rvtt.displayVolume"), "75");
+  assert.equal(heard, 1, "the engine hears a change at once");
+  assert.equal(soundMix().volume, 100, "a member's Volume is its own");
+  chooseDisplaySound(false);
+  assert.equal(displayVolume(), 75, "Off keeps the level");
+  chooseDisplaySound(true);
+  assert.equal(displaySound(), true);
+  stop();
+  chooseDisplayVolume(25);
+  assert.equal(heard, 1);
+  for (const raw of [null, "", "0", "60", "100.5", "loud"]) assert.equal(parseDisplayVolume(raw), 100, String(raw));
+  for (const v of [25, 50, 75, 100] as const) assert.equal(parseDisplayVolume(String(v)), v);
 });

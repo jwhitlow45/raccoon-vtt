@@ -137,6 +137,8 @@ export type IconName =
   | "repeatOne"
   | "shuffle"
   | "volume"
+  | "volumeLow"
+  | "muted"
   | "foldWidth"
   | "previous"
   | "queue"
@@ -223,6 +225,8 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   repeatOne: "repeat-1",
   shuffle: "shuffle",
   volume: "volume-2",
+  volumeLow: "volume-1",
+  muted: "volume-x",
   foldWidth: "fold-horizontal",
   previous: "skip-back",
   queue: "list-music",
@@ -719,6 +723,20 @@ const SHAPES: Record<IconName, ReactNode> = {
     <g {...STROKE}>
       <path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z" />
       <path d="M16 9a5 5 0 0 1 0 6M19.364 18.364a9 9 0 0 0 0-12.728" />
+    </g>
+  ),
+  // Lucide volume-1: this device's sound turned low, under 50% (the top bar's speaker).
+  volumeLow: (
+    <g {...STROKE}>
+      <path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z" />
+      <path d="M16 9a5 5 0 0 1 0 6" />
+    </g>
+  ),
+  // Lucide volume-x: this device muted, on the top bar's speaker and its mute toggle.
+  muted: (
+    <g {...STROKE}>
+      <path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z" />
+      <path d="M22 9l-6 6M16 9l6 6" />
     </g>
   ),
   // Lucide scan-eye: the DM looks through a player's eyes (View as a player). Never the plain eye, which means players see a thing.
