@@ -519,7 +519,7 @@ describe("the archive reader against an array", () => {
         await store(rows);
         const history = new LogHistory({ pool: scanPool, batchRows: 1 + Math.floor(random() * 600) });
         const answers = async (who: Who, reader = history) => {
-          const view = captureView({ state, seq: seq + 1 }, roomId, who);
+          const view = captureView({ state, seq: seq + 1, pub: seq + 1 }, roomId, who);
           const scan = budget.open({ pool: "page", roomId, memberId: who.memberId });
           try {
             const back: string[] = [];
@@ -621,7 +621,7 @@ describe("a scan's connection, every step bounded and cancellable", () => {
   const dm = { id: "dm1", rev: 1, name: "DM", color: "#f7df00", kind: "dm" as const, createdAt: "2026-01-01T00:00:00Z" };
   const state = createInitialState({ roomName: "Fake", dm: dm as never });
   const rows: LogEntry[] = Array.from({ length: 6 }, (_, i) => ({ id: `1:${i}`, at: "2025-10-01T19:00:00.000Z", kind: "chat", from: dm.id, text: `line ${i}` }));
-  const view = captureView({ state, seq: 10 }, "FAKEROOM", { memberId: dm.id, role: "dm" });
+  const view = captureView({ state, seq: 10, pub: 10 }, "FAKEROOM", { memberId: dm.id, role: "dm" });
   const tick = () => new Promise<void>((r) => setImmediate(r));
 
   function rig(connect: () => Promise<unknown>, cancelLog?: string[], cancel?: (client: { processID: number }) => Promise<void>) {
@@ -921,7 +921,7 @@ describe("PostgreSQL's cancel request", () => {
       } as never,
     });
     const dm = { id: "dm1", rev: 1, name: "DM", color: "#f7df00", kind: "dm" as const, createdAt: "2026-01-01T00:00:00Z" };
-    const view = captureView({ state: createInitialState({ roomName: "Timeout", dm: dm as never }), seq: 10 }, "NOSUCHROOM", { memberId: dm.id, role: "dm" });
+    const view = captureView({ state: createInitialState({ roomName: "Timeout", dm: dm as never }), seq: 10, pub: 10 }, "NOSUCHROOM", { memberId: dm.id, role: "dm" });
     const budget = new LogScanBudget();
     const scan = budget.open({ pool: "page", roomId: "NOSUCHROOM", memberId: dm.id });
     try {

@@ -23,7 +23,7 @@ const looseJoin = {
 
 function pool(opVersion: number): Pool {
   const snapshot = { seq: "0", state: createInitialState({ roomName: "Old", dm }), schema_version: SNAPSHOT_VERSION };
-  const row = { seq: "1", at: new Date("2026-10-12T00:00:01.000Z"), actor_member_id: "server", actor_role: "dm", op: looseJoin, op_version: opVersion };
+  const row = { seq: "1", at: new Date("2026-10-12T00:00:01.000Z"), actor_member_id: "server", actor_role: "dm", op: looseJoin, op_version: opVersion, pub: "1" };
   const query = (sql: string) => Promise.resolve({ rows: sql.includes("room_snapshots") ? [snapshot] : [row] });
   return { query, connect: () => Promise.reject(new Error("not used")) } as unknown as Pool;
 }
@@ -103,7 +103,7 @@ describe("replaying stored ops", () => {
     const line = (id: string): LogEntry => ({ id, at: "2026-10-12T00:00:00.000Z", kind: "event", data: { type: "trapSeen", by: [], message: id } });
     const stored = { ...createInitialState({ roomName: "Old", dm }), log: ["3:0", "1:0", "2:0"].map(chat), trapLog: ["2:900001", "1:900000"].map(line), trapSeen: ["2:1", "1:1"].map(line) };
     const op = { t: "log.chat", text: "next" };
-    const row = { seq: "4", at: new Date("2026-10-12T00:00:04.000Z"), actor_member_id: "dm", actor_role: "dm", op, op_version: OP_VERSION };
+    const row = { seq: "4", at: new Date("2026-10-12T00:00:04.000Z"), actor_member_id: "dm", actor_role: "dm", op, op_version: OP_VERSION, pub: "4" };
     const query = (sql: string) => Promise.resolve({ rows: sql.includes("room_snapshots") ? [{ seq: "3", state: stored, schema_version: SNAPSHOT_VERSION }] : [row] });
     const loaded = await loadRoom({ query, connect: () => Promise.reject(new Error("not used")) } as unknown as Pool, "R");
     assert.equal(loaded?.replayFailed, false);
@@ -130,7 +130,7 @@ describe("replaying stored ops", () => {
       let state: RoomState = snapshot;
       const rows: unknown[] = [];
       const store = (op: Op, who: Viewer) => {
-        rows.push({ seq: String(rows.length + 1), at: new Date(env(rows.length + 1).at), actor_member_id: who.memberId, actor_role: who.role, op, op_version: OP_VERSION });
+        rows.push({ seq: String(rows.length + 1), at: new Date(env(rows.length + 1).at), actor_member_id: who.memberId, actor_role: who.role, op, op_version: OP_VERSION, pub: String(rows.length + 1) });
       };
       const act = (op: Op, who: Viewer) => {
         const r = applyOp(state, op, who, env(rows.length + 1));
@@ -297,7 +297,7 @@ describe("replaying ops stored before op version 4", () => {
       const r = applyOp(state, op, DM, { ...env(seq), opVersion: 3 });
       assert.ok(r.ok, `${op.t}: ${r.ok ? "" : r.message}`);
       state = r.state;
-      rows.push({ seq: String(seq), at: new Date(env(seq).at), actor_member_id: DM.memberId, actor_role: DM.role, op, op_version: opVersion });
+      rows.push({ seq: String(seq), at: new Date(env(seq).at), actor_member_id: DM.memberId, actor_role: DM.role, op, op_version: opVersion, pub: String(seq) });
       return r;
     };
     for (const [i, op] of ops.entries()) {
@@ -345,7 +345,7 @@ describe("replaying ops stored before op version 4", () => {
       [{ t: "encounter.next", from: { entry: "e-l", round: 1 } }, { memberId: "p1", role: "player" }],
     ];
     const load = async (opVersion: number) => {
-      const rows = pressed.map(([op, who], i) => ({ seq: String(i + 1), at: new Date(env(i + 1).at), actor_member_id: who.memberId, actor_role: who.role, op, op_version: opVersion }));
+      const rows = pressed.map(([op, who], i) => ({ seq: String(i + 1), at: new Date(env(i + 1).at), actor_member_id: who.memberId, actor_role: who.role, op, op_version: opVersion, pub: String(i + 1) }));
       const query = (sql: string) => Promise.resolve({ rows: sql.includes("room_snapshots") ? [{ seq: "0", state: start, schema_version: SNAPSHOT_VERSION }] : rows });
       const loaded = await loadRoom({ query, connect: () => Promise.reject(new Error("not used")) } as unknown as Pool, "R");
       assert.ok(loaded && !loaded.replayFailed);

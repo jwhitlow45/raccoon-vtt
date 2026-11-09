@@ -69,7 +69,7 @@ function batch(state: RoomState, seq: number, ops: readonly (Op | { op: Op; by: 
   const explore = exploreOp(s);
   if (explore) run(explore, SERVER);
   for (const op of mapStepOps({ before, after: s, touched, cap: () => MEMORY_CAP })) run(op, SERVER);
-  publishBatch({ seq, before, after: s, touched, global, acks: new Map(), rejects: new Map(), restored: new Map(), ...(blocked ? { blocked } : {}) }, viewers.map((v) => v.conn), (key) => viewers.find((v) => v.conn.key === key)?.conn);
+  publishBatch({ seq, pub: seq, before, after: s, touched, global, acks: new Map(), rejects: new Map(), restored: new Map(), ...(blocked ? { blocked } : {}) }, viewers.map((v) => v.conn), (key) => viewers.find((v) => v.conn.key === key)?.conn);
   return s;
 }
 

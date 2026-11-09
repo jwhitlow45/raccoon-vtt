@@ -105,18 +105,19 @@ function newestCommitted(rows: readonly ReceiptRow[]): number {
 }
 
 /**
- * The room's committed state once it has reached `seq`. A receipt is
- * written in its batch's transaction, a moment before the room takes that
- * batch as its committed state, so a row read in that moment is newer than
- * the state. Projecting its op's lines against a state without the op could
- * drop lines the caller may read, so the lookup waits for the state, and a
- * cancel or the deadline ends the wait as ScanCancelledError (busy).
+ * The room's committed state once its count (counted.ts) has reached `seq`,
+ * a receipt's number. A receipt is written in its batch's transaction, a
+ * moment before the room takes that batch as its committed state, so a row
+ * read in that moment is newer than the state. Projecting its op's lines
+ * against a state without the op could drop lines the caller may read, so
+ * the lookup waits for the state, and a cancel or the deadline ends the wait
+ * as ScanCancelledError (busy).
  */
-export async function stateThrough(actor: { readonly committed: { state: RoomState; seq: number }; readonly closed?: boolean; readonly replayFailed?: boolean }, seq: number, signal: AbortSignal): Promise<RoomState> {
+export async function stateThrough(actor: { readonly committed: { state: RoomState; pub: number }; readonly closed?: boolean; readonly replayFailed?: boolean }, seq: number, signal: AbortSignal): Promise<RoomState> {
   for (;;) {
     if (signal.aborted) throw new ScanCancelledError(signal.reason);
     const committed = actor.committed;
-    if (committed.seq >= seq) return committed.state;
+    if (committed.pub >= seq) return committed.state;
     if (actor.closed || actor.replayFailed) throw new ScanBusyError();
     await new Promise<void>((resolve, reject) => {
       const onAbort = () => {

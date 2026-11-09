@@ -647,7 +647,7 @@ describe("history delivery and legacy commands", () => {
     await dm.apply({ t: "undo", head });
   });
 
-  test("an ack-only refusal advances watermark at the same sequence and serial", async (t) => {
+  test("an ack-only refusal advances the watermark and the room count at the same serial", async (t) => {
     const f = scopeFixture();
     const h = await scopeActor(t, f.state);
     const dm = await h.connect(f.dm);
@@ -656,7 +656,8 @@ describe("history delivery and legacy commands", () => {
     const event = await dm.send({ t: "undo", head: uuidv7() });
     assert.equal(event.rejects?.length, 1);
     const after = dm.history();
-    assert.equal(after.seq, before.seq);
+    // A refusal moves the room count (counted.ts) as a taken op does, so the history frame's number moves with it.
+    assert.equal(after.seq, before.seq + 1);
     assert.equal(after.serial, before.serial);
     assert.ok(after.watermark > before.watermark);
     assert.deepEqual(after.play, before.play);

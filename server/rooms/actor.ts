@@ -2,7 +2,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, checkLimits, LIMITS, ROLLING_TOO_FAST, SOUND_LIMITS, type LimitCheck } from "#shared/limits.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
-import { withTodaysSrdIds } from "#shared/migrate.ts";
+import { OP_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { HandoutPage, LogEntry, MapVideo, RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply, doorReachPassed, touchLanding, MOVE_PLAYERS_FIRST_BACK, type PermissionDeps } from "#shared/permissions.ts";
@@ -29,6 +29,7 @@ import { roomStoredBytes } from "../assets/quota.ts";
 import { SnapshotBudget, TokenBucket, type Clock } from "./budgets.ts";
 import { CloseWrites } from "./closeWrites.ts";
 import { CLOSE, clientKey, sessionOfKey, type ClientKey, type Connection } from "./connection.ts";
+import { counted } from "./counted.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { cancelPreviews, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
 import { exploreOp, floorsExplored } from "./explore.ts";
@@ -50,6 +51,7 @@ import {
   type ArchiveGuard,
   type AssetFact,
   type BatchWrite,
+  type LoadedRoom,
   type OpRecord,
   type Pool,
   type ReceiptRow,
@@ -273,11 +275,18 @@ type Batch = {
   /** The receipts of the tagged ops this batch settles (docs/design/design-v1-dice.md 1.2), durable with it. */
   receipts: Receipt[];
   timer: NodeJS.Timeout | null;
+  /** Whether `timer` runs from the batch's first answer: one an uncounted op or a hello started runs again from it (#scheduleCommit). */
+  timedFromAnswer: boolean;
+  /** How many times the room count moved since the batch opened: its answers, taken or refused. */
+  answered: number;
   state: RoomState;
   seq: number;
+  /** The room count as the batch began to commit, the number its frames carry. */
+  pub: number;
 };
 
-type Reduced = { ok: true; inverse: RestoreEntry[] | null; changed: boolean; trapped?: true; trapWrote?: ReadonlySet<string> } | { ok: false; code: RefusalCode; message: string };
+/** `number` is the one the op's envelope took (#reduce). */
+type Reduced = { ok: true; number: number; inverse: RestoreEntry[] | null; changed: boolean; trapped?: true; trapWrote?: ReadonlySet<string> } | { ok: false; code: RefusalCode; message: string };
 
 /**
  * The DM's ops that ask before players' remembered map is forgotten
@@ -402,8 +411,17 @@ export class RoomActor {
   #opts: ActorOptions;
   #onIdle: ((actor: RoomActor) => void) | undefined;
   #closeWrites: CloseWrites;
-  #committed: { state: RoomState; seq: number };
+  #committed: { state: RoomState; seq: number; pub: number };
   #staged: { state: RoomState; seq: number };
+  /**
+   * The room count (counted.ts): every number a device gets is made from it,
+   * and never from `seq`, which storage alone reads. It moves once for each
+   * member's op the room answers, taken or refused, and each member change
+   * applied over HTTP (#countAnswer, #reduce), and never for an op the
+   * server makes to keep its books. The two are never compared: the count
+   * runs ahead of `seq` by refusals and behind it by bookkeeping rows.
+   */
+  #pub: number;
   #snapshotSeq: number;
   #opsSinceSnapshot = 0;
   #snapshotTimer: NodeJS.Timeout | null = null;
@@ -502,7 +520,7 @@ export class RoomActor {
   /** The run whose refused step was logged last, so a step that keeps failing logs once a run. */
   #soundRefusedRun: string | null | undefined = undefined;
 
-  private constructor(deps: ActorDeps, loaded: { state: RoomState; seq: number; snapshotSeq: number; replayFailed: boolean; stateBytes: number }, receipts: readonly ReceiptRow[]) {
+  private constructor(deps: ActorDeps, loaded: Pick<LoadedRoom, "state" | "seq" | "pub" | "snapshotSeq" | "replayFailed" | "stateBytes">, receipts: readonly ReceiptRow[]) {
     this.roomId = deps.info.roomId;
     this.pinned = deps.info.pinned;
     this.createdIp = deps.info.createdIp;
@@ -518,8 +536,9 @@ export class RoomActor {
     this.loadedAt = this.#opts.now();
     this.lastOpAt = this.loadedAt;
     this.#lastMemberAt = deps.info.lastActiveAt ?? this.loadedAt;
-    this.#committed = { state: loaded.state, seq: loaded.seq };
+    this.#committed = { state: loaded.state, seq: loaded.seq, pub: loaded.pub };
     this.#staged = this.#committed;
+    this.#pub = loaded.pub;
     this.#snapshotSeq = loaded.snapshotSeq;
     this.#opsSinceSnapshot = loaded.seq - loaded.snapshotSeq;
     this.#sizes = new SizeGuard(this.#opts.sizeLimits);
@@ -570,7 +589,8 @@ export class RoomActor {
     return actor;
   }
 
-  get committed(): { state: RoomState; seq: number } {
+  /** The committed state, its storage seq and its room count. */
+  get committed(): { state: RoomState; seq: number; pub: number } {
     return this.#committed;
   }
 
@@ -911,8 +931,8 @@ export class RoomActor {
     });
   }
 
-  /** Runs `fn` on the committed state in queue order, for copies that must not interleave with a snapshot. */
-  read<T>(fn: (state: RoomState, seq: number) => T): Promise<T> {
+  /** Runs `fn` on the committed state and its room count in queue order, for copies that must not interleave with a snapshot. */
+  read<T>(fn: (state: RoomState, pub: number) => T): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       if (this.#closed) {
         reject(new ActorClosedError(this.roomId));
@@ -922,7 +942,7 @@ export class RoomActor {
         t: "read",
         run: () => {
           try {
-            resolve(fn(this.#committed.state, this.#committed.seq));
+            resolve(fn(this.#committed.state, this.#committed.pub));
           } catch (err) {
             reject(err as Error);
           }
@@ -1037,7 +1057,7 @@ export class RoomActor {
         } catch (err) {
           this.#commandFailed(cmd, err, batch, records);
         }
-        if (this.#batch && this.#batch.ops.length >= this.#opts.maxBatchOps) this.#commitNow();
+        if (this.#batch && this.#batch.answered >= this.#opts.maxBatchOps) this.#commitNow();
       }
     } finally {
       this.#draining = false;
@@ -1209,7 +1229,7 @@ export class RoomActor {
    * that walks a token on a floor where traps go off (traps.ts trapsLiveOn,
    * a floor players see now, docs/design/design-v1-floors.md 7.7), with fog
    * and party vision on there, while the batch
-   * holds any work, a server op's or a staged change. Its stop reads the
+   * holds an answer, taken or refused. Its stop reads the
    * party's sight as the room has it before the move (traps.ts
    * stopGround), so the batch's explore and map steps run first and that
    * sight is what players were sent. A prep scene, a blackout and a scene
@@ -1221,8 +1241,10 @@ export class RoomActor {
   #walkEndsBatch(raw: unknown): boolean {
     const batch = this.#batch;
     if (!batch || this.#inFlight !== null) return false;
+    // A batch with no answer holds at most the music's tick or a cleanup's remember, neither of which moves the fog,
+    // the explored ground or the sight a stop reads, and a mid-batch explore only ever follows an answer.
+    if (batch.answered === 0) return false;
     const state = this.#staged.state;
-    if (batch.ops.length === 0 && state === this.#committed.state) return false;
     if (raw === null || typeof raw !== "object") return false;
     const op = raw as { t?: unknown; tokenId?: unknown; moves?: unknown };
     const on = (id: unknown) => {
@@ -1263,7 +1285,7 @@ export class RoomActor {
       return;
     }
     if (n <= wm.committed) {
-      conn.send({ t: "ev", seq: this.#committed.seq, changes: [], acks: [n] });
+      conn.send({ t: "ev", seq: this.#committed.pub, changes: [], acks: [n] });
       this.#sendHistory(conn);
       return;
     }
@@ -1378,6 +1400,7 @@ export class RoomActor {
         }
         wm.staged = n;
         const batch = this.#ensureBatch();
+        this.#countAnswer(batch);
         push(batch.acks, key, n);
         if (this.#clients.get(key)?.ackDetails) push(batch.ackDetails, key, { n, scope: "none", changed: false, recorded: false });
         batch.watermarks.set(key, n);
@@ -1575,7 +1598,7 @@ export class RoomActor {
     const stamped = stampedAt(op, this.#staged.state);
     if (stamped !== undefined) push(batch.stamped, key, { n, at: stamped });
     batch.watermarks.set(key, n);
-    if (admitted) this.#stageReceipt(batch, admitted, { state: "committed", seq: this.#staged.seq });
+    if (admitted) this.#stageReceipt(batch, admitted, { state: "committed", seq: reduced.number });
     if (cmd.group !== undefined && actionScope !== "none" && !trackedOutcome) this.#groupScopes.set(key, { group: cmd.group, scope: actionScope, declared: cmd.groupScope === "setup" || (sameGroup && priorGroup.declared) });
     if (restoredFrom && step) {
       push(batch.restored, key, { n, what: saveOutcomeMissing ? step.label.slice(0, 200 - SAVE_CANNOT_REOPEN.length) + SAVE_CANNOT_REOPEN : step.label });
@@ -1655,6 +1678,7 @@ export class RoomActor {
     this.#asking.delete(key);
     wm.staged = n;
     const batch = this.#ensureBatch();
+    this.#countAnswer(batch);
     const words = message.slice(0, 200);
     push(batch.rejects, key, { n, code, message: words });
     batch.watermarks.set(key, n);
@@ -1682,6 +1706,7 @@ export class RoomActor {
     }
     wm.staged = n;
     const batch = this.#ensureBatch();
+    this.#countAnswer(batch);
     push(batch.acks, key, n);
     if (this.#clients.get(key)?.ackDetails) push(batch.ackDetails, key, { n, scope, changed: false, recorded: false });
     batch.watermarks.set(key, n);
@@ -1707,7 +1732,7 @@ export class RoomActor {
         return false;
       }
     }
-    const result = applyOp(this.#staged.state, restore, viewer, { seq: this.#staged.seq + 1, at });
+    const result = applyOp(this.#staged.state, restore, viewer, { seq: this.#nextNumber(), at });
     const over = result.ok && this.#memoryEstimate(result.state, result.touched, false)?.over;
     if (!over || confirmed) {
       this.#forgetAsks.delete(key);
@@ -1784,7 +1809,7 @@ export class RoomActor {
       return;
     }
     // Read from a turn of its own, so no turn holds the end of what came before, such as an earlier part's answer, and an op of this one.
-    const read: AskRead = { key, wm, n, op, group, viewer, chain, next: 0, ctx: { seq: this.#staged.seq + 1, at: new Date(this.#opts.now()).toISOString() } };
+    const read: AskRead = { key, wm, n, op, group, viewer, chain, next: 0, ctx: { seq: this.#nextNumber(), at: new Date(this.#opts.now()).toISOString() } };
     this.#reading = read;
     setImmediate(() => this.#readOn(read));
   }
@@ -1858,16 +1883,31 @@ export class RoomActor {
     }
     wm.staged = n;
     const batch = this.#ensureBatch();
+    this.#countAnswer(batch);
     push(batch.acks, key, n);
     if (this.#clients.get(key)?.ackDetails) push(batch.ackDetails, key, { n, scope: "none", changed: false, recorded: false });
     batch.watermarks.set(key, n);
     this.#scheduleCommit();
   }
 
-  /** Steps 7 and 8: reduce on the staged state, then check the limits on what came out. `asks` refuses with FORGET_ASK an op that would pass a layer's cap. */
+  /**
+   * Steps 7 and 8: reduce on the staged state, then check the limits on what
+   * came out. `asks` refuses with FORGET_ASK an op that would pass a layer's
+   * cap. A counted op (counted.ts) reduces with the next number of the room
+   * count, an uncounted one with the count as it stands.
+   *
+   * An op that passes is installed in one step with nothing in it that can
+   * throw, everything it needs made before: its row joins the batch with
+   * the staged state, `seq` and the count moving, and the fan-out's keys.
+   * So a throw before the install leaves no trace of the op and no gap in
+   * `seq`, and its refusal (#refuseFault) moves the count once. A throw
+   * after it keeps all of the op, its row once and its keys, whose number
+   * #settleStaged settles, and the next op's numbers stay above it.
+   */
   #reduce(op: Op, viewer: Viewer, asks = false, at = new Date(this.#opts.now()).toISOString()): Reduced {
-    const seq = this.#staged.seq + 1;
-    const result = applyOp(this.#staged.state, op, viewer, { seq, at });
+    const counts = counted(op.t, OP_VERSION);
+    const number = counts ? this.#nextNumber() : this.#pub;
+    const result = applyOp(this.#staged.state, op, viewer, counts ? { seq: number, at } : { seq: number, at, uncounted: true });
     if (!result.ok) return result;
     // The limits read the op as it would apply with no trap step: what a trap writes is reserved or counted ahead, so a
     // springing never changes whether an op passes (docs/design/design-v1-traps.md 6.7). The room stored is the op's real result.
@@ -1916,20 +1956,29 @@ export class RoomActor {
     if (asks && memory?.over) return { ok: false, code: "forget", message: FORGET_ASK };
     // The room stored is the real one, larger only by what a public springing changed, which every viewer sees anyway: the
     // guard counts that too, so its bounds stay bounds of what is stored.
-    if (measured !== result) this.#sizes.grew(growthBound(measured.state, result.state, [...new Set([...measured.touched, ...result.touched])]), grown);
-    this.#staged = { state: result.state, seq };
-    memory?.commit();
+    const springing = measured !== result ? growthBound(measured.state, result.state, [...new Set([...measured.touched, ...result.touched])]) : null;
     const batch = this.#ensureBatch();
-    batch.ops.push({ seq, at, actor: viewer, op, log: result.log });
-    batch.touched.push(...result.touched);
+    const seq = this.#staged.seq + 1;
+    const record: OpRecord = { seq, pub: number, at, actor: viewer, op, log: result.log };
+    // The install.
+    batch.ops.push(record);
+    this.#staged = { state: result.state, seq };
+    if (counts) {
+      this.#pub = number;
+      batch.answered++;
+    }
+    for (const key of result.touched) batch.touched.push(key);
     if (result.global) batch.global = true;
+    if (springing !== null) this.#sizes.grew(springing, grown);
+    memory?.commit();
+    if (counts) this.lastOpAt = this.#opts.now();
     // An area's reminder is judged on the sight this op left, not cut to explored ground (pendingGround), so that sight
     // is explored at once: a later op in the batch that looks away must not leave the line resting on ground never held.
     if (result.log.some((e) => e.data?.type === "area")) this.#exploreNow(batch);
-    this.lastOpAt = this.#opts.now();
     // Both values are lazy. History reads the inverse, while only an opted-in sender needs semantic acknowledgment hashes.
     return {
       ok: true,
+      number,
       get inverse() {
         return result.inverse;
       },
@@ -1943,6 +1992,23 @@ export class RoomActor {
       ...(result.trapped ? { trapped: true as const } : {}),
       ...(result.trapWrote ? { trapWrote: result.trapWrote } : {}),
     };
+  }
+
+  /** The number the next counted op takes: the room count's next. A preflight that reads an op as it would apply reads it too. */
+  #nextNumber(): number {
+    return this.#pub + 1;
+  }
+
+  /**
+   * An answer that stores no row of its own moves the room count, a refusal
+   * or a taken op answered without one, as #reduce moves it for an op it
+   * installs. `lastOpAt`, which eviction reads, moves with it.
+   */
+  #countAnswer(batch: Batch): void {
+    const now = this.#opts.now();
+    this.#pub++;
+    batch.answered++;
+    this.lastOpAt = now;
   }
 
   #permissionDeps(viewer: Viewer, facts: Map<string, AssetFact>): PermissionDeps {
@@ -2114,7 +2180,7 @@ export class RoomActor {
       return;
     }
     const wm = this.#watermarks.get(key);
-    const snapshot = buildSnapshot(this.#committed.state, this.#committed.seq, conn, wm?.committed ?? 0);
+    const snapshot = buildSnapshot(this.#committed.state, this.#committed.pub, conn, wm?.committed ?? 0);
     // Ahead of the snapshot, which settles the ops they name with no answer, so the page says why each was refused.
     const refused = takeKeptRejects(conn);
     if (refused.length > 0) conn.send({ t: "refusals", rejects: refused });
@@ -2198,21 +2264,35 @@ export class RoomActor {
         sys: [],
         receipts: [],
         timer: null,
+        timedFromAnswer: false,
+        answered: 0,
         state: after?.state ?? this.#committed.state,
         seq: after?.seq ?? this.#committed.seq,
+        pub: 0,
       };
     }
     return this.#batch;
   }
 
+  /**
+   * The batch commits once it holds `maxBatchOps` answers, or `batchMs`
+   * after its first answer. A batch an uncounted op or a hello opened runs a
+   * timer of its own until an answer joins it, which starts the timer again
+   * from that moment, so members' ops group by when they came alone.
+   */
   #scheduleCommit(): void {
     const batch = this.#batch;
     if (!batch || this.#inFlight) return;
-    if (batch.ops.length >= this.#opts.maxBatchOps) {
+    if (batch.answered >= this.#opts.maxBatchOps) {
       this.#commitNow();
       return;
     }
+    if (batch.timer && !batch.timedFromAnswer && batch.answered > 0) {
+      clearTimeout(batch.timer);
+      batch.timer = null;
+    }
     if (!batch.timer) {
+      batch.timedFromAnswer = batch.answered > 0;
       batch.timer = setTimeout(() => {
         batch.timer = null;
         this.#commitNow();
@@ -2229,6 +2309,7 @@ export class RoomActor {
     if (batch.ops.length > 0 || batch.doors.length > 0) this.#explore(batch);
     batch.state = this.#staged.state;
     batch.seq = this.#staged.seq;
+    batch.pub = this.#pub;
     try {
       batch.history = this.#undo.summaries();
     } catch (err) {
@@ -2332,7 +2413,8 @@ export class RoomActor {
   /**
    * Appends a server-made op to the batch on the staged state, as stored and
    * replayed, logging rather than refusing one that fails. False when it
-   * failed, so the map step can fail closed.
+   * failed, so the map step can fail closed. Both its kinds are uncounted
+   * (counted.ts): it reduces at the room count as it stands and leaves it.
    */
   #appendServerOp(batch: Batch, op: OpOf<"sys.explore"> | OpOf<"sys.remember">, what: string): boolean {
     const checked = checkServerOp(op);
@@ -2343,16 +2425,17 @@ export class RoomActor {
     const state = this.#staged.state;
     const seq = this.#staged.seq + 1;
     const at = new Date(this.#opts.now()).toISOString();
-    const result = applyOp(state, checked.op, SERVER_ACTOR, { seq, at });
+    const result = applyOp(state, checked.op, SERVER_ACTOR, { seq: this.#pub, at, uncounted: true });
     if (!result.ok) {
       this.#log.error({ roomId: this.roomId, message: result.message }, `${what} op refused`);
       return false;
     }
-    this.#sizes.grew(growthBound(state, result.state, result.touched), [op.sceneId]);
+    const grew = growthBound(state, result.state, result.touched);
+    batch.ops.push({ seq, pub: this.#pub, at, actor: SERVER_ACTOR, op: checked.op, log: result.log });
     this.#staged = { state: result.state, seq };
-    batch.ops.push({ seq, at, actor: SERVER_ACTOR, op: checked.op, log: result.log });
-    batch.touched.push(...result.touched);
+    for (const key of result.touched) batch.touched.push(key);
     if (result.global) batch.global = true;
+    this.#sizes.grew(grew, [op.sceneId]);
     return true;
   }
 
@@ -2374,6 +2457,7 @@ export class RoomActor {
         message: r.message ?? null,
         at: new Date(r.at).toISOString(),
       })),
+      pub: batch.pub,
     };
     const lines = batch.ops.some((r) => r.log.length > 0);
     let attempt = 0;
@@ -2409,7 +2493,7 @@ export class RoomActor {
       }
     }
     this.retrying = false;
-    this.#committed = { state: batch.state, seq: batch.seq };
+    this.#committed = { state: batch.state, seq: batch.seq, pub: batch.pub };
     this.#committedHistory = batch.history ?? new Map();
     this.#receipts.committed(batch.receipts);
     for (const [key, n] of batch.watermarks) {
@@ -2424,6 +2508,7 @@ export class RoomActor {
       const published = publishBatch(
         {
           seq: batch.seq,
+          pub: batch.pub,
           before: batch.before,
           after: batch.state,
           touched: batch.touched,
@@ -2480,9 +2565,9 @@ export class RoomActor {
     const empty = { undo: { head: null, depth: 0 }, redo: { head: null, depth: 0 } };
     const { setup, ...common } = stored ?? { t: "history" as const, epoch: this.#undo.epoch, seq: 0, serial: 0, watermark: 0, play: empty, setup: empty };
     if (!delivered && this.#sentHistory.get(conn) === common.serial) return;
-    if (!delivered) conn.send({ t: "ev", seq: this.#committed.seq, changes: [] });
+    if (!delivered) conn.send({ t: "ev", seq: this.#committed.pub, changes: [] });
     const watermark = conn.key === null ? 0 : (this.#watermarks.get(conn.key)?.committed ?? 0);
-    conn.send({ ...common, seq: this.#committed.seq, watermark, ...(conn.role === "dm" ? { setup: setup ?? empty } : {}) });
+    conn.send({ ...common, seq: this.#committed.pub, watermark, ...(conn.role === "dm" ? { setup: setup ?? empty } : {}) });
     this.#sentHistory.set(conn, common.serial);
   }
 
@@ -2491,6 +2576,7 @@ export class RoomActor {
     this.retrying = false;
     this.#log.error({ err, roomId: this.roomId, ops: batch.ops.length }, "batch abandoned at shutdown");
     this.#staged = this.#committed;
+    this.#pub = this.#committed.pub;
     // The batch's receipts go with it and give back their slots (docs/design/design-v1-dice.md 1.2). Their clients resend the ops.
     this.#receipts.abandoned(batch.receipts);
     for (const s of batch.sys) s.reject(new ActorClosedError(this.roomId));

@@ -29,12 +29,13 @@ import {
  * design 10.8), behind Show older pages, the session listing and the
  * Markdown export.
  *
- * Each request captures one committed state and seq (`HistoryView`) and
- * reads only rows at or below that seq, projecting every batch against that
- * same state, so a commit or a change of sight during the request never
- * mixes two states in one answer. Rows are projected before anything is
- * counted, grouped, paged or written, and a reader's answer depends on the
- * lines they may read alone: hidden rows only cost scanning time, and the
+ * Each request captures one committed state and its room count
+ * (`HistoryView`) and reads only rows numbered at or below that count,
+ * projecting every batch against that same state, so a commit or a change
+ * of sight during the request never mixes two states in one answer. Rows
+ * are projected before anything is counted, grouped, paged or written, and
+ * a reader's answer depends on the lines they may read alone: hidden rows
+ * only cost scanning time, and the
  * scan goes on through them however many there are, in bounded batches
  * admitted by the scan budget (logScanBudget.ts), until the answer is full
  * or the archive is done. A scan that cannot finish fails the request,
@@ -118,7 +119,14 @@ class ConnectionUnavailable extends Error {
 export type HistoryView = {
   roomId: string;
   state: RoomState;
+  /** The committed state's storage seq. */
   seq: number;
+  /**
+   * The committed state's room count (counted.ts). Every line the state
+   * holds has a number at or below it, and every line a later commit writes
+   * a number above it, so a read takes rows at or below it alone.
+   */
+  pub: number;
   /** Whose lines: the caller, or the player a DM previews. */
   viewer: Viewer;
   sceneId: string | null;
@@ -126,8 +134,8 @@ export type HistoryView = {
   previewBy: string | null;
 };
 
-export function captureView(committed: { state: RoomState; seq: number }, roomId: string, viewer: Viewer, opts: { sceneId?: string | null; previewBy?: string | null } = {}): HistoryView {
-  return { roomId, state: committed.state, seq: committed.seq, viewer, sceneId: opts.sceneId ?? null, previewBy: opts.previewBy ?? null };
+export function captureView(committed: { state: RoomState; seq: number; pub: number }, roomId: string, viewer: Viewer, opts: { sceneId?: string | null; previewBy?: string | null } = {}): HistoryView {
+  return { roomId, state: committed.state, seq: committed.seq, pub: committed.pub, viewer, sceneId: opts.sceneId ?? null, previewBy: opts.previewBy ?? null };
 }
 
 /**
@@ -307,7 +315,7 @@ export class LogHistory {
    * the viewer may not read costs a candidate and nothing else.
    */
   async *#indexedBatches(view: HistoryView, range: Pick<LogScanRange, "order" | "lower" | "upper">, scan: Scan, pass: "page" | "sessions" | "bounds" | "lines"): AsyncGenerator<LogEntry[]> {
-    const full: LogScanRange = { ...range, roomId: view.roomId, maxSeq: view.seq };
+    const full: LogScanRange = { ...range, roomId: view.roomId, maxSeq: view.pub };
     const asc = range.order === "asc";
     const streams: StreamCursor[] = readerStreams(view.viewer).map((access) => ({ access, buffer: [], last: null, done: false }));
     const n = this.#batchRows;
@@ -475,7 +483,7 @@ export class LogHistory {
               sql = guardedQueries(taken, scan.signal, () => dropping !== null);
               // One snapshot for the cursor and every entry read beside it.
               await sql.query("begin isolation level repeatable read read only");
-              await declareLogScan(sql, CURSOR, { ...range, roomId: view.roomId, maxSeq: view.seq });
+              await declareLogScan(sql, CURSOR, { ...range, roomId: view.roomId, maxSeq: view.pub });
             }
             const q = sql as Queryable;
             const ids = await fetchLogIds(q, CURSOR, this.#batchRows);

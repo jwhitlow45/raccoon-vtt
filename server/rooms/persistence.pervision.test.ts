@@ -27,7 +27,7 @@ function table(): RoomState {
 
 function pool(state: RoomState, ops: readonly { op: Op; role: "dm" }[]): Pool {
   const snapshot = { seq: "0", state: JSON.parse(JSON.stringify(state)), schema_version: SNAPSHOT_VERSION };
-  const rows = ops.map(({ op, role }, i) => ({ seq: String(i + 1), at: new Date(env(i + 1).at), actor_member_id: role === "dm" ? "dm1" : "server", actor_role: role, op, op_version: OP_VERSION }));
+  const rows = ops.map(({ op, role }, i) => ({ seq: String(i + 1), at: new Date(env(i + 1).at), actor_member_id: role === "dm" ? "dm1" : "server", actor_role: role, op, op_version: OP_VERSION, pub: String(i + 1) }));
   const query = (sql: string) => Promise.resolve({ rows: sql.includes("room_snapshots") ? [snapshot] : rows });
   return { query, connect: () => Promise.reject(new Error("not used")) } as unknown as Pool;
 }

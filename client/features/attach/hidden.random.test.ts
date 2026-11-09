@@ -726,7 +726,7 @@ function feedsOf(state: RoomState): Feed[] {
 function publish(t: UndoTable, feeds: readonly Feed[]): void {
   const last = t.last;
   if (!last) return;
-  publishBatch({ seq: t.seq, before: last.before, after: t.state, touched: last.applied.touched, global: last.applied.global, acks: new Map(), rejects: new Map(), restored: new Map() }, feeds.map((f) => f.conn), () => undefined);
+  publishBatch({ seq: t.seq, pub: t.seq, before: last.before, after: t.state, touched: last.applied.touched, global: last.applied.global, acks: new Map(), rejects: new Map(), restored: new Map() }, feeds.map((f) => f.conn), () => undefined);
   for (const f of feeds) {
     for (const msg of f.inbox.splice(0)) {
       if (msg.t !== "ev") continue;

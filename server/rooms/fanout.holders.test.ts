@@ -57,7 +57,7 @@ describe("the fan-out on a per-player scene", () => {
       const result = applyOp(state, { t: "token.move", tokenId: i % 2 === 0 ? "a" : "b", x: i % 2 === 0 ? x : 16 + x, y: 8 }, DM, env(++seq));
       assert.ok(result.ok);
       state = result.state;
-      publishBatch({ seq, before, after: state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+      publishBatch({ seq, pub: seq, before, after: state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
       for (const v of viewers) {
         for (const msg of v.inbox.splice(0)) if (msg.t === "ev") v.view = applyChanges(v.view, msg.changes as Change[]);
         const fresh = projectState(state, v.conn.viewer, { sceneId: "s1" });
@@ -110,7 +110,7 @@ describe("the fan-out on a per-player scene", () => {
       state = result.state;
       assert.equal(tiles(state, "union"), tiles(before, "union"), `move ${i}: the union stays as it was`);
       if (i === 2) assert.notEqual(tiles(state, P2.memberId), tiles(state, P1.memberId), "in the alcove the second holder sees less");
-      publishBatch({ seq, before, after: state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+      publishBatch({ seq, pub: seq, before, after: state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
       for (const v of viewers) {
         for (const msg of v.inbox.splice(0)) if (msg.t === "ev") v.view = applyChanges(v.view, msg.changes as Change[]);
         const fresh = projectState(state, v.conn.viewer, { sceneId: "s1" });

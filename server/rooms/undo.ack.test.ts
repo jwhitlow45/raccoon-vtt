@@ -147,7 +147,9 @@ for (const retry of [false, true]) test(`acknowledgment details wait for a ${ret
   }
   const event = await pending;
   details(event, [{ n: 2, scope: "setup", changed: true }]);
-  assert.equal(h.db.durableMax, event.seq);
+  assert.equal(h.db.durableMax, 1);
+  // The frame carries the room count (counted.ts), which the refusal before it moved too, not the stored row's seq.
+  assert.equal(event.seq, 2);
 });
 
 test("retained discard and successful stack and HP Log restores report their own effect", async (t) => {

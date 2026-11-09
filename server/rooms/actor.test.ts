@@ -124,9 +124,9 @@ class FakeDb {
       if (seqs.some((seq) => seq <= this.durableMax)) throw new Error('duplicate key value violates unique constraint "room_ops_pkey"');
       this.#staged = seqs;
       for (const op of params[5] as string[]) this.storedOps.push(JSON.parse(op));
-      const [, , ats, members, roles, ops, version] = params as [string, number[], string[], string[], string[], string[], number];
+      const [, , ats, members, roles, ops, version, pubs] = params as [string, number[], string[], string[], string[], string[], number, number[]];
       for (const [i, seq] of seqs.entries()) {
-        this.storedRows.push({ seq: String(seq), at: new Date(ats[i]!), actor_member_id: members[i], actor_role: roles[i], op: JSON.parse(ops[i]!), op_version: version });
+        this.storedRows.push({ seq: String(seq), at: new Date(ats[i]!), actor_member_id: members[i], actor_role: roles[i], op: JSON.parse(ops[i]!), op_version: version, pub: String(pubs[i]) });
       }
       return { rows: [] };
     }

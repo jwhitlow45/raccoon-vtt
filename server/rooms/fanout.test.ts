@@ -96,7 +96,7 @@ function run(seed: number, batches: number, tally: Tally): void {
     }
     tally.batches++;
     if (!global && changedSightKeys(before, state, ["s1", "s2"]).length > 0) tally.narrowSight++;
-    publishBatch({ seq, before, after: state, touched, global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+    publishBatch({ seq, pub: seq, before, after: state, touched, global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
     for (const v of viewers) {
       for (const msg of v.inbox.splice(0)) {
         if (msg.t !== "ev") continue;
@@ -134,7 +134,7 @@ describe("the server's fan-out with the explore step", () => {
       const result = applyOp(state, { t: "log.chat", text: `next ${i}` }, DM, env(seq));
       assert.ok(result.ok);
       state = result.state;
-      publishBatch({ seq, before, after: state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+      publishBatch({ seq, pub: seq, before, after: state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
       for (const viewer of viewers) {
         for (const message of viewer.inbox.splice(0)) if (message.t === "ev") viewer.view = applyChanges(viewer.view, message.changes as Change[]);
       }
@@ -168,7 +168,7 @@ describe("what hidden work leaves in a player's message", () => {
     const viewers = [open(state, P1, "s1"), open(state, P2, "s1")];
     const result = applyOp(state, op, DM, env(2));
     assert.ok(result.ok, result.ok ? "" : result.message);
-    publishBatch({ seq: 2, before: state, after: result.state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+    publishBatch({ seq: 2, pub: 2, before: state, after: result.state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
     return viewers.map((v) => JSON.stringify(v.inbox));
   }
 
@@ -190,7 +190,7 @@ describe("what hidden work leaves in a player's message", () => {
     ops.forEach((op, i) => {
       const result = applyOp(before, op, DM, env(2 + i));
       assert.ok(result.ok, result.ok ? "" : `${op.t}: ${result.message}`);
-      publishBatch({ seq: 2 + i, before, after: result.state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+      publishBatch({ seq: 2 + i, pub: 2 + i, before, after: result.state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
       before = result.state;
     });
     return { inboxes: viewers.map((v) => JSON.stringify(v.inbox)), state: before };
@@ -298,7 +298,7 @@ describe("the server's held maps", () => {
     // A settings change re-projects everything (global), the map included, and the map is as it was.
     const result = applyOp(state, { t: "room.update", settings: { skipDefeated: !state.meta.settings.skipDefeated } }, DM, env(500));
     assert.ok(result.ok && result.global);
-    publishBatch({ seq: 500, before: state, after: result.state, touched: result.touched, global: true, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+    publishBatch({ seq: 500, pub: 500, before: state, after: result.state, touched: result.touched, global: true, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
     for (const v of viewers) {
       const ev = v.inbox.find((m): m is Extract<ServerMessage, { t: "ev" }> => m.t === "ev");
       assert.ok(ev && ev.changes.every((c) => !c.key.startsWith("chunk:") && !c.key.startsWith("fog:")), v.conn.memberId);
@@ -327,7 +327,7 @@ describe("a mount's path in its rider's turn (docs/design/design-v1-attach.md 7.
       const result = applyOp(state, op, DM, env(++seq));
       assert.ok(result.ok, result.ok ? "" : result.message);
       state = result.state;
-      publishBatch({ seq, before, after: state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+      publishBatch({ seq, pub: seq, before, after: state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
       for (const v of viewers) {
         for (const msg of v.inbox.splice(0)) if (msg.t === "ev") v.view = applyChanges(v.view, msg.changes as Change[]);
         assert.deepEqual(JSON.parse(JSON.stringify(v.view.tokens)), JSON.parse(JSON.stringify(projectState(state, P1, { sceneId: "s1" }).tokens)), `after ${op.t}`);
@@ -362,7 +362,7 @@ describe("a per-player scene in the fan-out (docs/design/design-v1-per-player-vi
       const viewers = [open(state, P1, "s1"), open(state, P2, "s1")];
       const result = applyOp(state, { t: "token.move", tokenId: "thorn", x: 6, y: 5 }, DM, env(700));
       assert.ok(result.ok, result.ok ? "" : result.message);
-      publishBatch({ seq: 700, before: state, after: result.state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+      publishBatch({ seq: 700, pub: 700, before: state, after: result.state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
       const tile = (v: Viewing) => {
         const ev = v.inbox.find((m): m is Extract<ServerMessage, { t: "ev" }> => m.t === "ev");
         return JSON.stringify(ev?.changes.find((c) => c.key === "sight:s1:0,0") ?? null);

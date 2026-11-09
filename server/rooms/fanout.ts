@@ -26,7 +26,10 @@ export type Restored = { n: number; what: string };
 export type Stamped = { n: number; at: string };
 
 export type CommittedBatch = {
+  /** The batch's storage seq. No frame carries it. */
   seq: number;
+  /** The room count (counted.ts) as it stood when the batch began to commit, the number each frame of it carries. */
+  pub: number;
   before: RoomState;
   after: RoomState;
   touched: EntityKey[];
@@ -476,7 +479,7 @@ export function publishBatch(
     }
     const msg: { t: "ev"; seq: number; changes: Change[]; acks?: number[]; ackDetails?: OpAcknowledgment[]; rejects?: Reject[]; restored?: Restored[]; trapped?: number[]; stamped?: Stamped[]; blocked?: number[] } = {
       t: "ev",
-      seq: batch.seq,
+      seq: batch.pub,
       changes: diff.changes,
     };
     if (acks?.length) msg.acks = acks;
@@ -523,15 +526,16 @@ export type Snapshot = { message: { t: "snapshot"; seq: number; state: unknown; 
  * goes with it, holding the values unhashed (shared/project.ts HeldEntry):
  * a room's first snapshot, which also computes sight from nothing, is the
  * longest pause a room load makes (docs/design/design-v1-maps-vision.md 4.3.6).
+ * Its `seq` is `pub`, the room count (counted.ts) of the committed state.
  */
-export function buildSnapshot(state: RoomState, seq: number, conn: Connection, watermark: number): Snapshot {
+export function buildSnapshot(state: RoomState, pub: number, conn: Connection, watermark: number): Snapshot {
   const viewed = projectState(state, conn.viewer, { sceneId: conn.sceneId });
   const by = conn.previewBy;
   const projected = by === null ? viewed : { ...viewed, log: viewed.log.filter((line) => !previewOmits(line, by)) };
   return {
     message: {
       t: "snapshot",
-      seq,
+      seq: pub,
       state: projected,
       you: { memberId: conn.memberId, role: conn.display ? "display" : conn.role, sceneId: viewerSceneId(state, conn.viewer, { sceneId: conn.sceneId }) },
       watermark,

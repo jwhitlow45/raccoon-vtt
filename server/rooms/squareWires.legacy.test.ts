@@ -32,7 +32,7 @@ function oldRoom(): RoomState {
 
 /** The ops the table played, as room_ops holds them, behind a snapshot of `state` at `version`. */
 function stored(state: RoomState, version: number, table: UndoTable): Pool {
-  const ops = table.played.map((p) => ({ seq: String(p.seq), at: new Date(AT), actor_member_id: p.who.memberId, actor_role: p.who.role, op: p.op, op_version: OP_VERSION }));
+  const ops = table.played.map((p) => ({ seq: String(p.seq), at: new Date(AT), actor_member_id: p.who.memberId, actor_role: p.who.role, op: p.op, op_version: OP_VERSION, pub: String(p.seq) }));
   const query = async (sql: string) => {
     if (sql.includes("room_snapshots")) return { rows: [{ seq: "0", state: structuredClone(state), schema_version: version, imported_seq: null }] };
     if (sql.includes("room_ops")) return { rows: ops };

@@ -1,13 +1,14 @@
 import type pg from "pg";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { dmNumbered, logsInIdOrder, whisperParties } from "#shared/logRings.ts";
-import { MAP_DISCOVERY_OP_VERSION, OP_VERSION, SNAPSHOT_VERSION, mapDiscoveryUpgrade, migrateOp, migrateSnapshot, needsMapDiscoveryUpgrade, opMigrations, type MigrationStep } from "#shared/migrate.ts";
+import { COUNT_OP_VERSION, MAP_DISCOVERY_OP_VERSION, OP_VERSION, SNAPSHOT_VERSION, mapDiscoveryUpgrade, migrateOp, migrateSnapshot, needsMapDiscoveryUpgrade, opMigrations, type MigrationStep } from "#shared/migrate.ts";
 import type { LogEntry, RoomState, SoundFacts, VideoFacts, Viewer } from "#shared/model.ts";
 import { checkedVideoFacts, opSchema, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
 import { soundFactsOfRow, type AssetMedia } from "../assets/store.ts";
 import { CommitOutcomeUnknown, type Queryable } from "../auth/tx.ts";
+import { counted } from "./counted.ts";
 
 /**
  * Everything the room engine reads from or writes to Postgres (design
@@ -68,8 +69,12 @@ export async function roomInfo(pool: Pool, roomId: string): Promise<RoomInfo | n
 export type LoadedRoom = {
   state: RoomState;
   seq: number;
+  /** The room count (counted.ts) the room resumes from. */
+  pub: number;
   /** The seq of the snapshot row the load started from. */
   snapshotSeq: number;
+  /** The schema version the snapshot row was stored at, before migration. */
+  snapshotVersion: number;
   /** Replay stopped at an op that did not validate or apply. The room serves reads only. */
   replayFailed: boolean;
   /** How many ops were replayed on top of the snapshot. */
@@ -78,7 +83,18 @@ export type LoadedRoom = {
   stateBytes: number;
 };
 
-type OpRow = { seq: string; at: Date; actor_member_id: string; actor_role: Viewer["role"]; op: unknown; op_version: number };
+/** A stored row. `pub` is null on rows from before COUNT_OP_VERSION, and absent where a test's stand-in leaves it out. */
+type OpRow = { seq: string; at: Date; actor_member_id: string; actor_role: Viewer["role"]; op: unknown; op_version: number; pub?: string | number | null };
+
+/**
+ * The number a stored row's envelope took: its `pub` from COUNT_OP_VERSION,
+ * its seq before. Null for a row of that version or later stored without
+ * one, which replay refuses rather than number by its seq.
+ */
+function rowNumber(r: OpRow): number | null {
+  if (r.op_version < COUNT_OP_VERSION) return Number(r.seq);
+  return r.pub === null || r.pub === undefined ? null : Number(r.pub);
+}
 
 /**
  * Loads the snapshot, migrates it, then replays every later op through the
@@ -97,6 +113,16 @@ type OpRow = { seq: string; at: Date; actor_member_id: string; actor_role: Viewe
  * op of op version 26, or after the last op when none is that new. Older
  * ops replay by their own rules first, so the scenes they made or moved
  * the players to are marked by the step alone (MD-R6-1).
+ *
+ * Each row replays with the number its envelope took (rowNumber) and
+ * whether it moved the count (counted.ts), never one worked out again. The
+ * room's count is `rooms.pub`, written in the transaction of every commit
+ * since the count began, so no stored number is above it, and the
+ * snapshot's seq, which counts the server's own ops too, never stands in
+ * for it. A room without one, never committed by a build with the count,
+ * counts on from its snapshot's seq and takes every number its stored rows
+ * hold, those past a replay failure included, so its next line never takes
+ * an id one of them holds.
  */
 export async function loadRoom(
   pool: Pool,
@@ -105,8 +131,8 @@ export async function loadRoom(
   migrations: MigrationStep[] = opMigrations,
   admitArchive: ArchiveGuard = ARCHIVE_ALWAYS,
 ): Promise<LoadedRoom | null> {
-  const snap = await pool.query<{ seq: string; state: unknown; schema_version: number; imported_seq: string | null }>(
-    "select s.seq, s.state, s.schema_version, r.imported_seq from room_snapshots s left join rooms r on r.id = s.room_id where s.room_id = $1",
+  const snap = await pool.query<{ seq: string; state: unknown; schema_version: number; imported_seq: string | null; pub?: string | number | null }>(
+    "select s.seq, s.state, s.schema_version, r.imported_seq, r.pub from room_snapshots s left join rooms r on r.id = s.room_id where s.room_id = $1",
     [roomId],
   );
   const row = snap.rows[0];
@@ -136,25 +162,29 @@ export async function loadRoom(
   let replayed = 0;
   let upgrade = needsMapDiscoveryUpgrade(row.schema_version);
   const ops = await pool.query<OpRow>(
-    "select seq, at, actor_member_id, actor_role, op, op_version from room_ops where room_id = $1 and seq > $2 order by seq",
+    "select seq, at, actor_member_id, actor_role, op, op_version, pub from room_ops where room_id = $1 and seq > $2 order by seq",
     [roomId, snapshotSeq],
   );
   for (const r of ops.rows) {
     const rowSeq = Number(r.seq);
     let reason: string | null = null;
+    const number = rowNumber(r);
     if (rowSeq !== seq + 1) {
       reason = `op ${rowSeq} does not follow ${seq}`;
     } else {
       const stored = storedOp(r, rowSeq, migrations);
       if (!stored.ok) {
         reason = stored.reason;
+      } else if (number === null) {
+        reason = `op ${rowSeq} has no number`;
       } else {
         if (upgrade && r.op_version >= MAP_DISCOVERY_OP_VERSION) {
           state = mapDiscoveryUpgrade(state);
           upgrade = false;
         }
         // The stored version goes in the envelope, so an older op keeps the rules it was applied under (shared/migrate.ts).
-        const result = applyOp(state, stored.op, { memberId: r.actor_member_id, role: r.actor_role }, { seq: rowSeq, at: r.at.toISOString(), opVersion: r.op_version });
+        const uncounted = !counted(stored.op.t, r.op_version);
+        const result = applyOp(state, stored.op, { memberId: r.actor_member_id, role: r.actor_role }, { seq: number, at: r.at.toISOString(), opVersion: r.op_version, ...(uncounted ? { uncounted: true as const } : {}) });
         if (!result.ok) reason = `op ${rowSeq} (${stored.op.t}) was refused on replay: ${result.message}`;
         else {
           state = result.state;
@@ -170,7 +200,12 @@ export async function loadRoom(
     }
   }
   if (upgrade) state = mapDiscoveryUpgrade(state);
-  return { state, seq, snapshotSeq, replayFailed, replayed, stateBytes: serializedBytes(state) };
+  let pub = row.pub === null || row.pub === undefined ? null : Number(row.pub);
+  if (pub === null) {
+    pub = snapshotSeq;
+    for (const r of ops.rows) pub = Math.max(pub, rowNumber(r) ?? 0);
+  }
+  return { state, seq, pub, snapshotSeq, snapshotVersion: row.schema_version, replayFailed, replayed, stateBytes: serializedBytes(state) };
 }
 
 /** One stored op, migrated to the current version and checked with the protocol schema, or why it cannot be replayed. */
@@ -186,7 +221,8 @@ function storedOp(r: OpRow, rowSeq: number, migrations: MigrationStep[]): { ok: 
   return { ok: true, op: parsed.data };
 }
 
-export type OpRecord = { seq: number; at: string; actor: Viewer; op: Op; log: LogEntry[] };
+/** One row of a batch: `seq` its place in storage, `pub` the number its envelope took (counted.ts). */
+export type OpRecord = { seq: number; pub: number; at: string; actor: Viewer; op: Op; log: LogEntry[] };
 
 export type WatermarkKey = { sessionId: string; clientId: string };
 
@@ -216,6 +252,8 @@ export type BatchWrite = {
   name?: string;
   /** False when the free-disk guard refused the batch's log rows (ArchiveGuard): the rest commits without them. */
   archive?: boolean;
+  /** The room count (counted.ts) after this batch, written as `rooms.pub` when the batch holds ops or watermarks. */
+  pub?: number;
 };
 
 // One class for every commit whose answer was lost, the room's batches and
@@ -228,6 +266,10 @@ export { CommitOutcomeUnknown };
  * they produced (`on conflict do nothing`, so a replay never duplicates
  * them), the room's new name if it changed, the receipts of the tagged ops
  * it settles, and the client watermarks. Watermarks only ever move up.
+ *
+ * A batch that holds ops or watermarks writes the room count too, so a
+ * restart resumes from it as it was when its answers went out. One that
+ * holds neither answered nothing, and its count is the one stored already.
  *
  * An error before COMMIT is a clean failure and is rethrown as it is. An
  * error from the COMMIT statement is wrapped, because the connection may
@@ -245,22 +287,27 @@ export async function commitBatch(pool: Pool, roomId: string, batch: BatchWrite)
       const members: string[] = [];
       const roles: string[] = [];
       const ops: string[] = [];
+      const pubs: number[] = [];
       for (const r of batch.ops) {
         seqs.push(r.seq);
         ats.push(r.at);
         members.push(r.actor.memberId);
         roles.push(r.actor.role);
         ops.push(JSON.stringify(r.op));
+        pubs.push(r.pub);
       }
       await client.query(
-        `insert into room_ops (room_id, seq, at, actor_member_id, actor_role, op, op_version)
-         select $1, s, a::timestamptz, m, r, o::jsonb, $7
-         from unnest($2::bigint[], $3::text[], $4::text[], $5::text[], $6::text[]) as t(s, a, m, r, o)`,
-        [roomId, seqs, ats, members, roles, ops, OP_VERSION],
+        `insert into room_ops (room_id, seq, at, actor_member_id, actor_role, op, op_version, pub)
+         select $1, s, a::timestamptz, m, r, o::jsonb, $7, p
+         from unnest($2::bigint[], $3::text[], $4::text[], $5::text[], $6::text[], $8::bigint[]) as t(s, a, m, r, o, p)`,
+        [roomId, seqs, ats, members, roles, ops, OP_VERSION, pubs],
       );
       if (batch.archive !== false) await archiveLines(client, roomId, batch.ops.flatMap((r) => r.log));
-      if (batch.name === undefined) await client.query("update rooms set last_active_at = now() where id = $1", [roomId]);
-      else await client.query("update rooms set last_active_at = now(), name = $2 where id = $1", [roomId, batch.name]);
+      const pub = batch.pub ?? null;
+      if (batch.name === undefined) await client.query("update rooms set last_active_at = now(), pub = coalesce($2, pub) where id = $1", [roomId, pub]);
+      else await client.query("update rooms set last_active_at = now(), name = $2, pub = coalesce($3, pub) where id = $1", [roomId, batch.name, pub]);
+    } else if (batch.watermarks.length > 0 && batch.pub !== undefined) {
+      await client.query("update rooms set pub = $2 where id = $1", [roomId, batch.pub]);
     }
     const receipts = batch.receipts ?? [];
     if (receipts.length > 0) {
@@ -346,15 +393,25 @@ export async function readWatermark(pool: Pool, roomId: string, key: WatermarkKe
  * members who may read it. Returns the serialized size in UTF-8 bytes.
  */
 export async function writeSnapshot(pool: Pool, roomId: string, seq: number, state: RoomState): Promise<number> {
+  const json = snapshotJson(state);
+  await storeSnapshot(pool, roomId, seq, json);
+  return Buffer.byteLength(json);
+}
+
+/** A state as its snapshot row stores it, its save ledger checked first, so a ledger that does not check is never stored. */
+export function snapshotJson(state: RoomState): string {
   if (state.saveOutcomes !== undefined) saveOutcomeLedgerSchema.parse(state.saveOutcomes);
-  const json = JSON.stringify(state);
-  await pool.query(
+  return JSON.stringify(state);
+}
+
+/** Writes a snapshot row at today's schema version and prunes the rows it covers that are older than an hour. */
+async function storeSnapshot(q: Queryable, roomId: string, seq: number, json: string): Promise<void> {
+  await q.query(
     `insert into room_snapshots (room_id, seq, state, schema_version, written_at) values ($1, $2, $3::jsonb, $4, now())
      on conflict (room_id) do update set seq = excluded.seq, state = excluded.state, schema_version = excluded.schema_version, written_at = now()`,
     [roomId, seq, json, SNAPSHOT_VERSION],
   );
-  await pool.query("delete from room_ops where room_id = $1 and seq <= $2 and at < now() - interval '1 hour'", [roomId, seq]);
-  return Buffer.byteLength(json);
+  await q.query("delete from room_ops where room_id = $1 and seq <= $2 and at < now() - interval '1 hour'", [roomId, seq]);
 }
 
 /** The room's receipts written since `since`: those younger than 24 hours, which the actor holds in memory (docs/design/design-v1-dice.md 1.2). */
@@ -641,8 +698,9 @@ export type LogBound = { seq: string; index: number; inclusive: boolean };
 
 /**
  * A pass over one room's archive in id order, numeric by op seq then line
- * index, through rows at or below `maxSeq`: the committed seq the reader
- * captured, so a row committed later never meets a state that lacks it.
+ * index, through rows at or below `maxSeq`: the room count of the committed
+ * state the reader captured (logHistory.ts HistoryView), so a row committed
+ * later never meets a state that lacks it.
  */
 export type LogScanRange = { roomId: string; maxSeq: number; order: "asc" | "desc"; lower?: LogBound; upper?: LogBound };
 

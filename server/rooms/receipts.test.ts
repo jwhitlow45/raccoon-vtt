@@ -99,7 +99,7 @@ describe("the receipt book", () => {
 
 // ------------------------------------------------------------------ the actor, randomized
 
-type Row = { seq: number; at: Date; actor_member_id: string; actor_role: string; op: unknown; op_version: number };
+type Row = { seq: number; at: Date; actor_member_id: string; actor_role: string; op: unknown; op_version: number; pub: number };
 type StoredReceipt = { member_id: string; tag: string; part: number; state: string; seq: string | null; code: string | null; message: string | null; at: Date };
 
 /**
@@ -111,6 +111,8 @@ type StoredReceipt = { member_id: string; tag: string; part: number; state: stri
 class Store {
   readonly state: RoomState;
   ops: Row[] = [];
+  /** `rooms.pub`, the room count at the last commit that held ops or watermarks. */
+  pub: number | null = null;
   receipts = new Map<string, StoredReceipt>();
   watermarks = new Map<string, number>();
   dmGrants: string[];
@@ -137,7 +139,7 @@ class Store {
   }
 
   #read(sql: string, params: unknown[]): { rows: unknown[]; rowCount?: number } {
-    if (sql.includes("from room_snapshots")) return { rows: [{ seq: "0", state: this.state, schema_version: SNAPSHOT_VERSION }] };
+    if (sql.includes("from room_snapshots")) return { rows: [{ seq: "0", state: this.state, schema_version: SNAPSHOT_VERSION, pub: this.pub === null ? null : String(this.pub) }] };
     if (sql.includes("max(seq)")) return { rows: [{ max: String(this.ops.at(-1)?.seq ?? 0) }] };
     if (sql.includes("from room_ops")) return { rows: this.ops.map((r) => ({ ...r, seq: String(r.seq) })) };
     if (sql.includes("from roll_receipts")) {
@@ -164,11 +166,11 @@ class Store {
       }
       for (const w of writes.splice(0)) w();
     } else if (sql.startsWith("insert into room_ops")) {
-      const [, seqs, ats, members, roles, ops, version] = params as [string, number[], string[], string[], string[], string[], number];
+      const [, seqs, ats, members, roles, ops, version, pubs] = params as [string, number[], string[], string[], string[], string[], number, number[]];
       writes.push(() => {
         for (const [i, seq] of seqs.entries()) {
           assert.ok(!this.ops.some((r) => r.seq === seq), `seq ${seq} is written once`);
-          this.ops.push({ seq, at: new Date(ats[i]!), actor_member_id: members[i]!, actor_role: roles[i]!, op: JSON.parse(ops[i]!), op_version: version });
+          this.ops.push({ seq, at: new Date(ats[i]!), actor_member_id: members[i]!, actor_role: roles[i]!, op: JSON.parse(ops[i]!), op_version: version, pub: pubs[i]! });
         }
       });
     } else if (sql.startsWith("insert into roll_receipts")) {
@@ -178,6 +180,9 @@ class Store {
           this.receipts.set(JSON.stringify([m[i], t[i], p[i]]), { member_id: m[i]!, tag: t[i]!, part: p[i]!, state: s[i]!, seq: q[i] === null ? null : String(q[i]), code: c[i]!, message: g[i]!, at: new Date(a[i]!) });
         }
       });
+    } else if (sql.startsWith("update rooms") && sql.includes("pub")) {
+      const pub = (sql.includes("name = $2") ? params[2] : params[1]) as number | null;
+      if (pub !== null) writes.push(() => (this.pub = pub));
     } else if (sql.startsWith("insert into client_watermarks")) {
       const [, sessions, clients, ns] = params as [string, string[], string[], number[]];
       writes.push(() => {
@@ -427,7 +432,8 @@ describe("receipts and admission in the actor, randomized (docs/design/design-v1
       for (const [key] of applied) assert.equal(store.receipts.get(key)?.state, "committed", `seed ${seed}: ${key} has its receipt`);
       for (const [key, rec] of store.receipts) {
         if (rec.state !== "committed") continue;
-        const row = store.ops.find((o) => String(o.seq) === rec.seq);
+        // A receipt names its op's number, the row's room count (counted.ts), not the row's place in storage.
+        const row = store.ops.find((o) => String(o.pub) === rec.seq);
         const asked = (row?.op as { asked?: { tag: string } } | undefined)?.asked;
         assert.equal(asked?.tag, rec.tag, `seed ${seed}: ${key}'s seq names its own roll`);
         assert.equal(row?.actor_member_id, rec.member_id);

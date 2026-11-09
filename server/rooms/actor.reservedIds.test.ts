@@ -141,7 +141,7 @@ describe("a live op that adds an array entry with a reserved id", () => {
 
   test("replays as stored, so a room that holds such an id still loads", async () => {
     const { dm, state, tokenId } = setup();
-    const row = (seq: number, op: unknown) => ({ seq: String(seq), at: new Date(), actor_member_id: dm.id, actor_role: "dm", op, op_version: OP_VERSION });
+    const row = (seq: number, op: unknown) => ({ seq: String(seq), at: new Date(), actor_member_id: dm.id, actor_role: "dm", op, op_version: OP_VERSION, pub: String(seq) });
     const db = new FakeDb(state, dm.id, [row(1, { t: "actor.effect.add", target: { tokenId }, effect: { id: "constructor", key: "blessed" } })]);
     const actor = await load(db);
     assert.ok(actor);

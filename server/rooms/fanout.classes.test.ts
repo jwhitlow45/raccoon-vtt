@@ -86,7 +86,7 @@ function shownTo(state: RoomState, conn: Connection): ProjectedState {
 }
 
 function batchOf(seq: number, before: RoomState, after: RoomState, touched: EntityKey[], global: boolean): CommittedBatch {
-  return { seq, before, after, touched, global, acks: new Map(), rejects: new Map(), restored: new Map() };
+  return { seq, pub: seq, before, after, touched, global, acks: new Map(), rejects: new Map(), restored: new Map() };
 }
 
 describe("the fan-out's projection classes", () => {
