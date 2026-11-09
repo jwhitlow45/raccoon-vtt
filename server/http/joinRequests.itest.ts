@@ -684,26 +684,31 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     const { dm, roomId } = await k.room("ask");
     const phone = t.client();
     const id = await k.asked(phone, roomId);
-    const at = Date.now();
     let failed = 0;
-    // The hold's write fails for 2.5 s, the sweep's retries too, so the saved hold's date tells a retry dated back from one dated now.
+    // The hold's write fails until the test lifts the outage, which it does once the sweep's retries have failed too. A clock for the outage
+    // could end before a loaded machine reached the write at all (JR-SOL-03). The saved hold's date tells a retry dated back from one dated now.
+    let outage = true;
     const restore = beforeTxStatement(t.pool, (sql, values) => {
-      if (Date.now() - at < 2_500 && sql.startsWith("insert into rate_events") && String(values?.[0]?.[0]).startsWith("askno:")) {
+      if (outage && sql.startsWith("insert into rate_events") && String(values?.[0]?.[0]).startsWith("askno:")) {
         failed++;
         throw new Error("the database went away");
       }
     });
     try {
+      const at = Date.now();
       const turned = await dm.post(`/api/rooms/${roomId}/join-requests/turn-away`, { ids: [id] });
       assert.equal(turned.statusCode, 204, turned.body);
       assert.equal(k.error(await phone.post(`/api/rooms/${roomId}/join-requests`, { name: "Quinn", color: "#3e8ef7" })), "asked_recently", "held in memory meanwhile");
       const deviceId = (await k.askRow(phone.token))?.id;
+      // Down for at least 1.5 s too, so a retry dated to its own run would read over the date check's 1 s.
+      for (let i = 0; i < 200 && (failed <= 1 || Date.now() - at < 1_500); i++) await new Promise((r) => setTimeout(r, 50));
+      assert.ok(failed > 1, "the sweep's retries failed too, and the hold stayed owed");
+      outage = false;
       let rows: Array<{ ago: number }> = [];
       for (let i = 0; i < 100 && rows.length === 0; i++) {
         await new Promise((r) => setTimeout(r, 50));
         rows = (await t.pool.query<{ ago: number }>("select extract(epoch from now() - at)::float8 as ago from rate_events where key = $1", [`askno:${roomId}:${deviceId}`])).rows;
       }
-      assert.ok(failed > 1, "the sweep's retries failed too, and the hold stayed owed");
       assert.equal(rows.length, 1, "the sweep saved the owed hold once the database came back");
       assert.ok(Math.abs((rows[0]?.ago ?? 0) - (Date.now() - at) / 1000) < 1, `dated to the turn away, so it ends when it would have: ${rows[0]?.ago} s ago`);
       assert.equal(t.app.joinRequests.owedHolds, 0);
