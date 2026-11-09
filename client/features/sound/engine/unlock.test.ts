@@ -7,7 +7,7 @@ import { planVoices, Voices } from "./voices.ts";
 /*
  * The room sound's unlock on the shared activation helper (lib/activation.ts,
  * docs/design/design-v1-music.md 5.5 and 12): the pool's attempt answers
- * false and plays nothing with Room sound off, answers true only once every
+ * false and plays nothing while muted, answers true only once every
  * play resolved, a blessing in flight is the one a second call gets, the
  * pool listens again when the context or the audio session leaves
  * `running` or `active`, and Play here's own call in its click blesses.
@@ -189,7 +189,7 @@ function graph(): AudioContext {
 }
 
 describe("the room sound's unlock", () => {
-  test("with Room sound off a tap touches nothing: no element plays and no context is made", () => {
+  test("while muted a tap touches nothing: no element plays and no context is made", () => {
     const h = harness();
     h.unlock.arm(() => false);
     h.tap();
@@ -197,7 +197,7 @@ describe("the room sound's unlock", () => {
     assert.equal(h.made(), 0);
   });
 
-  test("with Room sound on a tap plays silence on every element inside the gesture, and answers true only once every play resolved", async () => {
+  test("while unmuted a tap plays silence on every element inside the gesture, and answers true only once every play resolved", async () => {
     const h = harness();
     h.unlock.arm(() => true);
     h.tap();

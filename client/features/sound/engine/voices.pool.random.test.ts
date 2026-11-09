@@ -8,8 +8,8 @@ import { leaveMs, planVoices, Voices, type MusicState } from "./voices.ts";
 /*
  * The pool's elements under random sequences of what the engine and the
  * browser do (docs/design/design-v1-music.md 5.3 and 5.5): plans that
- * change, the engine's ticks, stops and starts as Room sound goes off and
- * on or another page takes the sound, a Skip during a crossfade that
+ * change, the engine's ticks, stops and starts as the device is muted and
+ * unmuted or another page takes the sound, a Skip during a crossfade that
  * leaves a track waiting for an element, plays the browser refuses until
  * a gesture, gestures, an element the browser stops short, and decode
  * errors in a file, as Chrome's PIPELINE_ERROR_DECODE. Timers and the

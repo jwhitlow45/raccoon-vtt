@@ -66,7 +66,7 @@ export const IPHONE_AUDIO = `(() => {
   };
 })();`;
 
-/** A member's Room sound chosen before the page loads, as Play here leaves it. */
+/** A member's mute or unmute chosen before the page loads, as Play here leaves it. */
 export function roomSoundScript(choice: "on" | "off" | null): string {
   return choice === null ? "localStorage.removeItem('rvtt.roomSound');" : `localStorage.setItem('rvtt.roomSound', '${choice}');`;
 }

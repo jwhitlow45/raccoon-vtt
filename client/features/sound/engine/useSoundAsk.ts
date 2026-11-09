@@ -13,8 +13,9 @@ import { firedAfter, setRoomSound } from "./store.ts";
  * something already plays (a late joiner), when music or a loop starts, or
  * when an effect is fired after the page loaded. Passed unanswered, the
  * device stays muted and does not ask again in that page load: the top
- * bar's speaker, This device or the Sound panel unmutes it. A state with nothing about sound, while Only DM devices play or
- * behind a blackout, closes an open ask without passing it
+ * bar's speaker, This device or the Sound panel unmutes it. A state with
+ * nothing about sound, while Only DM devices play or behind a blackout,
+ * closes an open ask without passing it
  * (docs/design/design-v1-sound-dm-only.md 5), so the device is asked again
  * at the first state after with something to hear, as a late joiner is:
  * music, a loop, or an effect fired after the close.

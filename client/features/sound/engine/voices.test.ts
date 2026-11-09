@@ -326,12 +326,12 @@ describe("the voices on the pool", () => {
     voices.dispose();
   });
 
-  // The engine stops this way when Room sound goes off and when another page takes the sound, and a display's blackout too.
+  // The engine stops this way when the device is muted and when another page takes the sound, and a display's blackout too.
   for (const [how, stop] of [
     ["a stop", (voices: Voices) => voices.stopAll(SHORT_FADE_MS)],
     ["a blackout's empty plan", (voices: Voices) => voices.update([], () => BLACKOUT_FADE_MS)],
   ] as const) {
-    test(`${how} while a track waits for an element, as Room sound off or another page taking the sound during a Skip in a crossfade, starts nothing later`, async () => {
+    test(`${how} while a track waits for an element, as muting or another page taking the sound during a Skip in a crossfade, starts nothing later`, async () => {
       const t = { now: T };
       const { voices, pool } = rig(t);
       const crossing: Playing = { ...quiet, music: { run: "r1", repeat: "all", fade: 5, now: { soundId: "tavern", at: T - 57_000 }, next: { soundId: "road", at: T - 2_000 } } };
