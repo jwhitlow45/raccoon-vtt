@@ -60,6 +60,8 @@ const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
 
 const DESK = { width: 1440, height: 900 };
 const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
+/** A large phone, where the DM's bar still holds the Search icon beside the speaker: at 390 on a one-floor scene the speaker takes the icon's room (D-261108-409). */
+const LARGE_PHONE = { width: 430, height: 932 };
 
 /**
  * Which keys a device takes as Ctrl is read from its platform (lib/device.ts
@@ -1261,10 +1263,10 @@ describe("the room search", { concurrency: false }, () => {
   });
 
   test("se-17. a DM's phone: the top bar's Search icon and Cancel, Enter on Cancel running no row, the Panels list's field, landings inside the panel's sheet, a token picked with the sheet closed first, and at 320 x 568 at 130% Search folded into the Panels field with nothing overflowing", async () => {
-    let phone = await dmPhone();
+    let phone = await dmPhone(LARGE_PHONE);
     try {
       const page = phone.page;
-      assert.equal(await barSearch(page).getAttribute("data-search-form"), "icon", "the icon at 390");
+      assert.equal(await barSearch(page).getAttribute("data-search-form"), "icon", "the icon at 430");
       await barSearch(page).tap();
       await sheet(page).waitFor();
       assert.equal(await sheet(page).getAttribute("data-search-sheet"), "sheet", "a sheet over the whole screen");
@@ -1348,7 +1350,7 @@ describe("the room search", { concurrency: false }, () => {
         for (const go of held.splice(0)) go();
       };
     };
-    const context = await dmContext(PHONE, WINDOWS, "late");
+    const context = await dmContext({ ...PHONE, viewport: LARGE_PHONE }, WINDOWS, "late");
     try {
       const release = await holdMenu(context);
       const page = await context.newPage();
