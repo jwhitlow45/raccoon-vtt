@@ -1,6 +1,6 @@
 # raccoon-vtt: volume on the top bar
 
-Status: built (2026-11-08), from design draft 2 at review consensus (round 1, and the build notes of rounds 2 and 3 below), in lanes VOL-A (vola, the controls, storage and engine), VOL-B (volb, the speaker on the bar) and VOL-C (volc, the table display). Device only: no OP_VERSION or SNAPSHOT_VERSION step. Decisions D-261108-361 to 370 and 381 to 386, and the builders' D-261108-397 to 416. Code is cited from `floors` (szxxtuyl, ff96039a). "As built" says where the build went its own way. The throwaway prototype behind every picture and number was bookmark `vol-proto`. Pictures: `screenshots/volume/` (001 to 015, 015 replacing 006).
+Status: built (2026-11-08), from design draft 2 at review consensus (round 1, and the build notes of rounds 2 and 3 below), in lanes VOL-A (vola, the controls, storage and engine), VOL-B (volb, the speaker on the bar) and VOL-C (volc, the table display). Device only: no OP_VERSION or SNAPSHOT_VERSION step. Decisions D-261108-361 to 370 and 381 to 386, and the builders' D-261108-397 to 402, 405 to 411 and 417 to 420. Code is cited from `floors` (szxxtuyl, ff96039a). "As built" says where the build went its own way. The throwaway prototype behind every picture and number was bookmark `vol-proto`. Pictures: `screenshots/volume/` (001 to 015, 015 replacing 006).
 
 ## The owner's words
 
@@ -243,7 +243,7 @@ Reply volume-opus, every finding adopted with the reviewer's pick. 01 the `line`
 
 ### VOL-C (volc): the table display's volume
 
-- **Volume row.** Off, 25, 50, 75 and 100% as menu radios. Off stores `displaySound` "off" and keeps the level, and a level stores `displayVolume` then "on". `volumeChecked` and `VOLUME_CHOICES` are pure parts in features/display/logic.ts, so display.test.ts can test them.
-- **Labels.** The Text size, Weather, Animated maps and Volume labels lose their 4 px inset, so they meet the row's left edge. Animated maps was the same class and went with them.
-- **vol-d.** display.e2e.ts sets `ROOM_SOUND=1`, Chrome's autoplay flag and the sound test hook on the TV's context, since the upload needs the server's switch. It plays music and reads the gains from the hook's `mix` (100 gives 1, 75 gives 0.5625, Off keeps 75, 50 gives 0.25 with sound on). The display menu has no sweep root, so vol-d runs `measureAlignment` on it at 1920 x 1080.
+- **Volume row** (D-261108-417). Off, 25, 50, 75 and 100% as menu radios. Off stores `displaySound` "off" and keeps the level, and a level stores `displayVolume` then "on". `volumeChecked` and `VOLUME_CHOICES` are pure parts in features/display/logic.ts, so display.test.ts can test them (D-261108-419).
+- **Labels.** The Text size, Weather, Animated maps and Volume labels lose their 4 px inset, so they meet the row's left edge (D-261108-418). Animated maps was the same class and went with them.
+- **vol-d** (D-261108-420). display.e2e.ts sets `ROOM_SOUND=1`, Chrome's autoplay flag and the sound test hook on the TV's context, since the upload needs the server's switch. It plays music and reads the gains from the hook's `mix` (100 gives 1, 75 gives 0.5625, Off keeps 75, 50 gives 0.25 with sound on). The display menu has no sweep root, so vol-d runs `measureAlignment` on it at 1920 x 1080.
 - **Mutation checks.** Each failed a test: `volumeChecked` without the sound-on guard, and the Volume label's padding put back.
