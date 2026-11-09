@@ -1,6 +1,7 @@
 import { SHORT_FADE_MS, type BuiltinSound, type FiredEffect, type Playing, type Sound, type SoundId } from "#shared/sound.ts";
 import type { SoundTimeLink } from "../../../state/socket.ts";
 import { soundMix, subscribeSoundMix, type SoundMix } from "../../device/settings.ts";
+import { displayVolume, subscribeDisplayVolume } from "../../display/remember.ts";
 import { playShape, TRAP_SOUND_SHAPES } from "./builtins.ts";
 import { ServerClock } from "./clock.ts";
 import { mixerSupported, soundContext, soundUnlock, watchAudio, type AudioSessionLike } from "./context.ts";
@@ -22,17 +23,18 @@ import { BLOB_LOOP_BYTES, leaveMs, planVoices, Voices, type Channel } from "./vo
  *   element → its gains → music or background → master, 3 dB down
  *   effect  → its level → effects ────────────↗ → compressor → lease → speaker
  *
- * Gains are the device's slider squared, times the room's volume squared,
- * times the sound's level, times the timeline's envelope, ramped over
- * 0.3 s on any change. Devices play from the confirmed state only, so a
- * device's own clock never places a sound.
+ * Gains are the device's Volume squared, times its channel's slider
+ * squared, times the room's volume squared, times the sound's level, times
+ * the timeline's envelope, ramped over 0.3 s on any change. Devices play
+ * from the confirmed state only, so a device's own clock never places a
+ * sound.
  */
 
 export type EngineInput = {
   /** The confirmed projection's `playing`: null for nothing (a blackout included), undefined while the store is cleared for a reconnect. */
   playing: Playing | null | undefined;
   sounds: Readonly<Record<SoundId, Sound>>;
-  /** Room sound on, or a display's Sound on with no blackout and Only DM devices play off (SoundHost.tsx soundEnabled). */
+  /** Unmuted, or a display's Sound on with no blackout and Only DM devices play off (SoundHost.tsx soundEnabled). */
   enabled: boolean;
   /** The socket is open: a reconnect starts a new measurement epoch. */
   connected: boolean;
@@ -52,8 +54,28 @@ export type EngineDeps = {
   loadAt(): number | null;
 };
 
-/** A display plays at full volume: the TV's remote sets it (4.5). */
-const FULL_MIX: SoundMix = { volume: 100, music: 100, loops: 100, effects: 100 };
+/**
+ * This page's own mix (docs/design/design-v1-volume.md 5 and 7): a
+ * member's Volume and sliders, or a display's Volume over full channels,
+ * since it has no sliders and the TV's remote sets the rest.
+ */
+export function deviceMix(kind: PageKind): SoundMix {
+  return kind === "display" ? { volume: displayVolume(), music: 100, loops: 100, effects: 100 } : soundMix();
+}
+
+/** Whatever changes `deviceMix`, so a change while sound plays applies at once on a display too. */
+export function subscribeDeviceMix(kind: PageKind, listener: () => void): () => void {
+  return kind === "display" ? subscribeDisplayVolume(listener) : subscribeSoundMix(listener);
+}
+
+export type ChannelGains = { readonly music: number; readonly loop: number; readonly effects: number };
+
+/** The channels' gains: each level squared, Volume over every channel, the room's volumes over music and effects. Pure. */
+export function channelGains(device: SoundMix, room: { music: number; effects: number }): ChannelGains {
+  const sq = (n: number) => (n / 100) ** 2;
+  const master = sq(device.volume);
+  return { music: master * sq(device.music) * sq(room.music), loop: master * sq(device.loops), effects: master * sq(device.effects) * sq(room.effects) };
+}
 /** The master is 3 dB down, so the loudest mix the caps allow stays under 0 dBFS with the compressor (D-261102-465). */
 const MASTER_GAIN = 10 ** (-3 / 20);
 /** The audio clock advancing this much less than the page's over a check means the context stood still. */
@@ -72,6 +94,8 @@ export class SoundEngine {
   #effects: EffectPlayer | null = null;
   #media: SoundMediaSession;
   #gains: { music: GainNode; loop: GainNode; effects: GainNode; master: GainNode; lease: GainNode } | null = null;
+  /** What `#mix` last ramped the channels to, for the test hook, which reads the aim rather than a value partway up the ramp. */
+  #mixed: ChannelGains = { music: 0, loop: 0, effects: 0 };
   #active = false;
   #music: MusicHere = "none";
   #timer: ReturnType<typeof setTimeout> | null = null;
@@ -96,7 +120,7 @@ export class SoundEngine {
     });
     if (deps.time) this.#cleanups.push(deps.time.listen((k, at) => this.#clock.answer(k, at)));
     if (this.#ctx) this.#build(this.#ctx);
-    this.#cleanups.push(subscribeSoundMix(() => this.#mix()));
+    this.#cleanups.push(subscribeDeviceMix(deps.kind, () => this.#mix()));
     this.#cleanups.push(exposeSoundTest(() => this.#testView()));
     this.#tick();
   }
@@ -350,18 +374,17 @@ export class SoundEngine {
     const g = this.#gains;
     const ctx = this.#ctx;
     if (!g || !ctx) return;
-    const device = this.#deps.kind === "display" ? FULL_MIX : soundMix();
-    const room = this.#input.playing?.volume ?? { music: 100, effects: 100 };
-    const sq = (n: number) => (n / 100) ** 2;
+    const gains = channelGains(deviceMix(this.#deps.kind), this.#input.playing?.volume ?? { music: 100, effects: 100 });
     const set = (p: AudioParam, v: number) => {
       const now = ctx.currentTime;
       p.cancelScheduledValues(now);
       p.setValueAtTime(p.value, now);
       p.linearRampToValueAtTime(v, now + SHORT_FADE_MS / 1000);
     };
-    set(g.music.gain, sq(device.music) * sq(room.music));
-    set(g.loop.gain, sq(device.loops));
-    set(g.effects.gain, sq(device.effects) * sq(room.effects));
+    set(g.music.gain, gains.music);
+    set(g.loop.gain, gains.loop);
+    set(g.effects.gain, gains.effects);
+    this.#mixed = gains;
   }
 
   #refreshing = false;
@@ -515,6 +538,7 @@ export class SoundEngine {
       offset: this.#clock.offset() ?? null,
       lease: this.#gains?.lease.gain.value ?? 0,
       context: this.#ctx?.state ?? "none",
+      mix: { ...this.#mixed },
     };
   }
 }
