@@ -6,6 +6,8 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
+import { addSound, soundProbe, SOUND_TEST_FLAG } from "./soundRoom.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
@@ -129,11 +131,14 @@ function sharedFile(page: Page): Promise<{ name: string; type: string; bytes: st
 
 describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
   before(async () => {
+    // vol-d plays room sound on the display, which the server allows only with its switch on.
+    process.env.ROOM_SOUND = "1";
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
-    browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
+    browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1", args: ["--autoplay-policy=no-user-gesture-required"] });
     dmContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     tvContext = await browser.newContext({ viewport: TV });
     playerContext = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    await tvContext.addInitScript(SOUND_TEST_FLAG);
     dm = await dmContext.newPage();
     tv = await tvContext.newPage();
     player = await playerContext.newPage();
@@ -645,6 +650,46 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
     await shots.take(tv, "display-pages-one-page");
     await tv.mouse.click(TV.width / 2, TV.height / 2);
     await letter.waitFor({ state: "detached" });
+  });
+
+  test("vol-d. the display's Volume sets the level while sound plays, Off keeps it, and the menu's labels line up", async () => {
+    const soundId = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: "vol-d-music", name: "Volume test", use: "music", ms: 60_000 });
+    await ops.send({ t: "music.play", run: "vol-d-run", soundId, order: [soundId], repeat: "all", fade: 0 });
+    // The engine waits for a tap on a display, as the card says.
+    await tv.mouse.click(TV.width / 2, TV.height / 2);
+    const menu = tv.getByRole("menu", { name: "Table display" });
+    await menu.waitFor();
+    const gain = async () => ((await soundProbe(tv)).state as { mix?: { music: number } } | null)?.mix?.music ?? -1;
+    const settled = async (want: number) => {
+      await waitFor(`the music gain to reach ${want}`, async () => Math.abs((await gain()) - want) < 0.001 || null);
+    };
+    const volume = menu.getByRole("group", { name: "Volume" });
+    await shots.take(tv, "display-volume-menu");
+    await volume.getByRole("menuitemradio", { name: "100%" }).click();
+    await settled(1);
+    await volume.getByRole("menuitemradio", { name: "75%" }).click();
+    await settled(0.5625);
+    await volume.getByRole("menuitemradio", { name: "Off" }).click();
+    await waitFor("sound off on the display", async () => (await tv.evaluate(() => localStorage.getItem("rvtt.displaySound"))) === "off" || null);
+    assert.equal(await tv.evaluate(() => localStorage.getItem("rvtt.displayVolume")), "75", "Off keeps the level");
+    await volume.getByRole("menuitemradio", { name: "50%" }).click();
+    await settled(0.25);
+    assert.equal(await tv.evaluate(() => localStorage.getItem("rvtt.displaySound")), "on");
+
+    const found = await measureAlignment(menu);
+    const lines = alignmentLines(found, "display menu");
+    assert.deepEqual(lines, [], lines.join("\n"));
+    // The labels meet the buttons' left edge, as the Volume row's does.
+    const edges = await menu.evaluate((m) => {
+      type Box = { getBoundingClientRect(): { left: number }; querySelector(q: string): Box | null };
+      const left = (el: Box) => el.getBoundingClientRect().left;
+      const m2 = m as unknown as Box;
+      return ["Text size", "Weather", "Volume"].map((name) => left(m2.querySelector(`[role="group"][aria-label="${name}"] > span`)!) - left(m2.querySelector(`[role="group"][aria-label="${name}"]`)!));
+    });
+    assert.deepEqual(edges, [0, 0, 0], "the labels start at the row's edge");
+    await shots.take(tv, "display-volume-menu-50");
+    await tv.keyboard.press("Escape");
+    await ops.send({ t: "music.pause" });
   });
 
   test("8. changing the player password warns that it signs the display out, and does", async () => {
