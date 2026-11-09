@@ -42,7 +42,18 @@ export type Env = {
    * changes whether an op passes. Never stored and never replayed.
    */
   withoutTraps?: true;
+  /**
+   * An op that takes the room's count as it stands without moving it
+   * (server/rooms/counted.ts): the server's own explore, remember and music
+   * ops. Its `seq` is a number an answered op may hold already, so a line it
+   * wrote could share that op's id. None writes one, and Tx refuses any it
+   * tries (UNCOUNTED_LINE). Replay sets it from the row's op version.
+   */
+  uncounted?: true;
 };
+
+/** The refusal of a log or trap line written under an uncounted envelope (Env.uncounted). */
+export const UNCOUNTED_LINE = "an op that does not move the room count writes no log line";
 
 export { DM_LINE_BASE, MAX_LOG } from "../logRings.ts";
 
@@ -348,7 +359,10 @@ export class Tx {
       this.unsettled.forEach((u, i) => {
         if (!("line" in u)) {
           // A trap line its ring dropped in this same op stays dropped.
-          if (held.has(u.trapSeen)) this.write(keys.trapSeen(`${this.env.seq}:${index}`), { ...u.trapSeen, id: `${this.env.seq}:${index}` });
+          if (held.has(u.trapSeen)) {
+            const id = this.lineId(index);
+            this.write(keys.trapSeen(id), { ...u.trapSeen, id });
+          }
           index++;
           return;
         }
@@ -475,7 +489,13 @@ export class Tx {
 
   /** A log line numbered `index` in this op, as `fit` makes it. */
   private lineOf(entry: Omit<LogEntry, "id" | "at">, index: number, fit: (line: LogEntry) => LogEntry = (line) => line): LogEntry {
-    return fit({ id: `${this.env.seq}:${index}`, at: this.env.at, ...entry });
+    return fit({ id: this.lineId(index), at: this.env.at, ...entry });
+  }
+
+  /** A line's id from the envelope, refused under an uncounted one, whose number another op's lines may hold (Env.uncounted). */
+  private lineId(index: number): string {
+    if (this.env.uncounted === true) throw invalid(UNCOUNTED_LINE);
+    return `${this.env.seq}:${index}`;
   }
 
   addEvent(data: LogEvent): LogEntry {
@@ -524,7 +544,7 @@ export class Tx {
    */
   addTrapLine(ring: "trapLog" | "trapSeen", data: LogEvent, keep: number): LogEntry {
     const index = ring === "trapLog" ? this.dmIndex() : this.sharedIndex();
-    const line: LogEntry = { id: `${this.env.seq}:${index}`, at: this.env.at, kind: "event", data };
+    const line: LogEntry = { id: this.lineId(index), at: this.env.at, kind: "event", data };
     const key = ring === "trapLog" ? keys.trapLog : keys.trapSeen;
     this.write(key(line.id), line);
     if (ring === "trapSeen") this.unsettled.push({ trapSeen: line });

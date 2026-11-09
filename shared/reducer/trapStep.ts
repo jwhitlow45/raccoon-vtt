@@ -91,9 +91,18 @@ export function trapSpring(tx: Tx, op: OpOf<"trap.spring">): void {
   if (!tx.state.encounter) rearmNow(tx, trap.id);
 }
 
-/** The creature whose turn this op started, or null: a Next, or a removal that passed the turn on. Previous and undo start none. */
+/**
+ * The creature whose turn this op started, or null: a Next, or a removal
+ * that passed the turn on. Previous and undo start none, and neither do the
+ * server's own explore, remember and music ops, whatever their version.
+ * Those take the room count as it stands (tx.ts Env.uncounted), which can
+ * be the Next's own number, so the number alone would read them as the op
+ * that started the turn and set its turn-start traps off again. Before op
+ * version 57 they took a number of their own, never a Next's, so leaving
+ * them out by type changes no stored room.
+ */
 function turnStarted(tx: Tx, op: Op): string | null {
-  if (op.t === "encounter.prev" || op.t === "sys.restore") return null;
+  if (op.t === "encounter.prev" || op.t === "sys.restore" || op.t === "sys.explore" || op.t === "sys.remember" || op.t === "sys.sound") return null;
   const encounter = tx.state.encounter;
   const start = encounter?.turnStart;
   if (!encounter || !start || start.seq !== tx.env.seq || start.entryId !== encounter.activeEntryId) return null;

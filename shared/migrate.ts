@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 43;
-export const OP_VERSION = 56;
+export const SNAPSHOT_VERSION = 44;
+export const OP_VERSION = 57;
 
 export type MigrationStep = {
   from: number;
@@ -271,6 +271,11 @@ export const snapshotMigrations: MigrationStep[] = [
   // floors naming a scene that is gone, and it would project only the start floor, dropping every creature off it from
   // players' trackers.
   { from: 42, to: 43, apply: (state) => state },
+  // The room count (COUNT_SNAPSHOT_VERSION): a room's state holds no new field, so a v43 room is a v44 room as it is. The
+  // number moves so that an older build, which numbers new log lines and turns by the op sequence, refuses a room this
+  // one saved. The count can run ahead of that sequence, so the older build would number a line with an id one already
+  // holds.
+  { from: 43, to: 44, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1363,6 +1368,20 @@ export const opMigrations: MigrationStep[] = [
     to: 56,
     apply: (op) => op,
   },
+  {
+    // The room count (COUNT_OP_VERSION): no op changes shape, so the step is
+    // the identity. From this version each stored row carries `pub`, the
+    // number its envelope took, which replay reads in place of the row's
+    // seq, and the server's own explore, remember and music ops take the
+    // count as it stands without moving it (server/rooms/counted.ts).
+    // Deploy: back up the database just before. No page needs a reload,
+    // since every number a device holds is at most the count a room starts
+    // at. Rollback needs the backup for any room this version saved, which
+    // an older build refuses.
+    from: 56,
+    to: 57,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -1434,6 +1453,18 @@ export function timedEnds(opVersion: number | undefined): boolean {
 export function followsDaylight(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 55);
 }
+
+/**
+ * The first op version and snapshot version of the room count
+ * (server/rooms/counted.ts). From COUNT_OP_VERSION an op's envelope number
+ * is the room's count of members' ops answered, stored as the row's `pub`,
+ * and the server's own explore, remember and music ops take the count as it
+ * stands without moving it. A row stored before took its seq. A room loaded
+ * from a snapshot below COUNT_SNAPSHOT_VERSION writes its snapshot again in
+ * its first commit here, so an older build refuses it from then on.
+ */
+export const COUNT_OP_VERSION = 57;
+export const COUNT_SNAPSHOT_VERSION = 44;
 
 /** The first op version of several floors in one scene (floorsOps). */
 export const FLOORS_OP_VERSION = 56;

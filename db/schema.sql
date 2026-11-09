@@ -367,3 +367,13 @@ begin
       );
   end if;
 end $$;
+-- The room count (server/rooms/counted.ts). Each op row's `pub` is the
+-- number its envelope took, which its log lines and turns carry and replay
+-- reads in place of the row's seq. Null on rows from before op version 57,
+-- which took their seq.
+alter table room_ops add column if not exists pub bigint;
+-- The room's count at its last commit, written in every commit that holds
+-- ops or watermarks, so a load resumes from it and a restart keeps every
+-- answer that commit held. Null for a room no build with the count has
+-- committed yet, which counts on from its snapshot and stored rows.
+alter table rooms add column if not exists pub bigint;
