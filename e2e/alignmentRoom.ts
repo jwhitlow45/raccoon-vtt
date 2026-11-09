@@ -25,7 +25,7 @@ import { measureSpacing, spacingLines, type SpacingFinding } from "./helpers/spa
 import { moreMenuFixture } from "./helpers/menuFixture.ts";
 import { openGroup } from "./helpers/groups.ts";
 import { SCENE_GROUP_NAMES } from "./helpers/sceneGroups.ts";
-import { floorRoot } from "../client/features/floors/ids.ts";
+import { floorRoot, LINK_PANE_ATTR } from "../client/features/floors/ids.ts";
 import { framesFor, silentFrames } from "../shared/audio/mp3Testutil.ts";
 
 /**
@@ -8009,6 +8009,7 @@ export function sceneSettingsTests(): void {
     withinSnapshotBudget("hx4-a");
   });
   floorsRootTests();
+  floorLinkBuildTests();
 }
 
 /*
@@ -8141,6 +8142,120 @@ function floorsRootTests(): void {
     assert.deepEqual(lines, [], "the floors screens out of line");
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     withinSnapshotBudget("flr-a");
+  });
+}
+
+/*
+ * flrk-a: the builder's side of stairs and ladders (docs/design/design-v1-floors.md
+ * phase 2, 13), measured at FU30_AT's sizes: the Map builder's row in Between
+ * floors with its Kind and To choices open, an end's pane (data-link-pane)
+ * and with Remove armed, and the Floors group and a floor's page with their
+ * stairs' reasons. Tower is a scene of its own, deleted at the end.
+ */
+function floorLinkBuildTests(): void {
+  test(`flrk-a. the Map builder's row in Between floors with Kind and To, an end's pane, and the floors group and page where stairs turn the adds and moves off, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+    await newDmSession();
+    const tower = randomUUID();
+    const upper = randomUUID();
+    const attic = randomUUID();
+    await ops.send({ t: "scene.create", scene: { id: tower, name: "Tower", bounds: BOUNDS, background: "#2b2b31" } });
+    await ops.send({ t: "scene.create", scene: { id: upper, name: "Tower", bounds: BOUNDS }, floor: { beside: tower, side: "above" } });
+    await ops.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor" } } });
+    await ops.send({ t: "scene.create", scene: { id: attic, name: "Tower", bounds: BOUNDS }, floor: { beside: upper, side: "above" } });
+    await ops.send({ t: "scene.update", sceneId: attic, patch: { floor: { name: "Attic" } } });
+    const lines: string[] = [];
+    try {
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(`flrk-${atName(at)}`);
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        if (page.url().startsWith(server.origin)) await page.evaluate(() => localStorage.removeItem("rvtt.sceneSettingsFolds"));
+        await openAt(page, at.size, at.scale);
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        try {
+          await viewScene(await openDmPanel(page, "Scenes"), tower);
+          await closeSheets(page);
+          await escapeAll(page);
+          // Put while the page is open, so it reads the pair as an op's event and never depends on what a snapshot holds.
+          await ops.send({ t: "floorLink.put", link: { id: "flrk-a", pairId: "flrk-b", sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
+
+          // The builder's row in Between floors, and each choice open.
+          await pickTool(page, "Map builder");
+          const bar = page.getByRole("toolbar", { name: "Map builder options" });
+          await bar.waitFor();
+          await page.locator('[data-options-line="shown"]').first().waitFor();
+          await pickOption(page, "Map builder", "Builder mode", "Between floors");
+          await bar.getByRole("button", { name: /^Builder mode: Between floors/ }).waitFor();
+          await sweep.measure(page, "flrk-builder-row", bar);
+          await shots.take(page, `alignment-${sweep.at}-flrk-builder-row`);
+          for (const group of ["Kind", "To"]) {
+            const chip = bar.getByRole("button", { name: new RegExp(`^${group}:`) });
+            if (!(await visible(chip))) {
+              // Behind ⋯ where the row has no room: its choice is measured there.
+              await bar.getByRole("button", { name: "More options" }).click();
+              await sweep.measure(page, `flrk-${group.toLowerCase()}-more`, page.getByRole("dialog", { name: "More Map builder options" }));
+              await escapeAll(page);
+              continue;
+            }
+            await chip.first().click();
+            const picker = page.getByRole("dialog", { name: group });
+            await picker.waitFor();
+            await sweep.measure(page, `flrk-${group.toLowerCase()}-picker`, picker);
+            await shots.take(page, `alignment-${sweep.at}-flrk-${group.toLowerCase()}-picker`);
+            await escapeAll(page);
+          }
+
+          // An end's pane, and with Remove armed, whose words wrap rather than run past the pane.
+          await tapCell(page, BOUNDS, { x: 6, y: 6 });
+          const pane = page.locator(`[${LINK_PANE_ATTR}]`);
+          if (!(await showsWithin(pane, 5_000))) await sweep.missing(page, "flrk-pane", "a tap on an end opened no pane");
+          else {
+            await sweep.measure(page, "flrk-pane", pane);
+            await shots.take(page, `alignment-${sweep.at}-flrk-pane`);
+            await pane.getByRole("button", { name: "Remove stairs" }).click();
+            await pane.getByRole("button", { name: "Remove both ends" }).waitFor();
+            await sweep.measure(page, "flrk-pane-armed", pane);
+            await shots.take(page, `alignment-${sweep.at}-flrk-pane-armed`);
+          }
+          await escapeAll(page);
+          await pickTool(page, "Select");
+
+          // The Floors group with Add a floor above off for the stairs, and Upper floor's page with Move up off.
+          const panel = await openDmPanel(page, "Scenes");
+          const root = (name: Parameters<typeof floorRoot>[0]) => panel.locator(floorRoot(name));
+          await openSceneGroup(panel, "Floors");
+          await root("group").scrollIntoViewIfNeeded();
+          await root("group").getByText("Stairs join Ground floor and Upper floor.", { exact: false }).waitFor();
+          await sweep.measure(page, "flrk-floors-group", root("group"));
+          await shots.take(page, `alignment-${sweep.at}-flrk-floors-group`);
+          await root("group").getByRole("button", { name: /^Upper floor,/ }).click();
+          await root("page").waitFor();
+          await root("page").getByText("Stairs join Ground floor and Upper floor.", { exact: false }).waitFor();
+          await sweep.measure(page, "flrk-floor-page", root("page"));
+          await shots.take(page, `alignment-${sweep.at}-flrk-floor-page`);
+          await root("page").getByRole("button", { name: "Back to Floors" }).click();
+          await closeSheets(page);
+        } finally {
+          await ops.send({ t: "floorLink.delete", linkId: "flrk-a" }).catch(() => {});
+          await escapeAll(page);
+        }
+        console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      await ops.send({ t: "scene.delete", sceneId: tower }).catch(() => {});
+      // Later steps start on the players' scene. A failure here must not hide the one that brought the test here.
+      try {
+        const page = await dmPageFor(FU30_AT.at(-1)!.size);
+        await viewScene(await openDmPanel(page, "Scenes"), run.sceneId);
+        await escapeAll(page);
+      } catch (err) {
+        console.error("flrk-a: going back to the players' scene failed", err);
+      }
+    }
+    assert.deepEqual(lines, [], "the stairs' builder screens out of line");
+    assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
+    withinSnapshotBudget("flrk-a");
   });
 }
 
