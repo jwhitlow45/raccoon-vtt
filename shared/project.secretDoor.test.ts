@@ -178,13 +178,14 @@ describe("build.edge writes the cover (SB1)", () => {
   });
 
   test("a key named twice gives its cover only to a hidden door still standing after the loop (RULES-OPUS-1)", () => {
-    for (const second of [null, WALL]) {
+    // A door with its own drawn cover keeps it, though its line would give the edge an automatic one (RULES-OPUS-7).
+    for (const second of [null, WALL, { kind: "window" } as const, door("drawn")]) {
       const state = walled();
       const after = build(state, [
         { key: "4,2,n", feature: door() },
         { key: "4,2,n", feature: second },
       ]);
-      assert.deepEqual(edgeOf(after, "4,2,n"), second ?? undefined, "no cover on what the second entry left");
+      assert.deepEqual(edgeOf(after, "4,2,n"), second ?? undefined, `the second entry's ${second?.kind ?? "deletion"} stands as sent`);
       assert.ok(parseRoomState(JSON.parse(JSON.stringify(after))).ok, "the stored edge passes the state schema");
       const sent = JSON.stringify(chunksOf(after, P1));
       assert.ok(!sent.includes("cover"), "no player chunk carries a cover");
