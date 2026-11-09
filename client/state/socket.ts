@@ -247,6 +247,21 @@ function keepsAlive(e: EphEvent): boolean {
   return e.k === "dragStart" || e.k === "dragMove" || e.k === "ruler" || e.k === "aoe";
 }
 
+/** The bare end of a preview's frame, for the floor the preview leaves, or null for an event that is no preview's frame. */
+function endOf(e: EphEvent): EphEvent | null {
+  switch (e.k) {
+    case "dragStart":
+    case "dragMove":
+      return { k: "dragCancel", tokenId: e.tokenId };
+    case "ruler":
+      return { k: "rulerEnd", id: e.id };
+    case "aoe":
+      return { k: "aoeEnd", id: e.id };
+    default:
+      return null;
+  }
+}
+
 /**
  * The room sound's time frames (docs/design/design-v1-music.md 5.1): the
  * engine sends `{ t: "time", k }` and the server answers `{ t: "time", k,
@@ -880,16 +895,26 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
 
     sendEph(e) {
       const slot = ephSlot(e, () => ++pingSlot);
-      const sceneId = room.store.getState().sceneId;
+      const shown = room.store.getState().sceneId;
+      const open = openPreviews.get(slot);
+      // The server routes an end only to the floor it names, so a preview ends on the floor its frames went to, though
+      // the floor shown changed since, and one that goes on after a switch ends there first. Otherwise a screen holding
+      // only the old floor keeps it until its own timeout (docs/design/design-v1-floors.md 8.2).
+      const sceneId = !keepsAlive(e) && open ? open.sceneId : shown;
+      const left = open && open.sceneId !== null && open.sceneId !== shown ? endOf(e) : null;
       if (keepsAlive(e)) {
-        const prev = openPreviews.get(slot);
-        openPreviews.set(slot, { e, sceneId, sentAt: prev?.sentAt ?? Number.NEGATIVE_INFINITY });
+        openPreviews.set(slot, { e, sceneId, sentAt: open?.sentAt ?? Number.NEGATIVE_INFINITY });
         armKeepAlive();
       } else {
         openPreviews.delete(slot);
         armKeepAlive();
       }
       if (phase !== "open") return;
+      if (left && open?.sceneId) {
+        // Out of the queue first, so the old floor's end goes before the new floor's frame, the order the server needs.
+        ephQueue.delete(slot);
+        ephQueue.set(`${slot}@${open.sceneId}`, { e: left, sceneId: open.sceneId });
+      }
       ephQueue.set(slot, { e, sceneId });
       scheduleEphFlush();
     },

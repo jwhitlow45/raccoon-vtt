@@ -1210,4 +1210,69 @@ describe("floors on the socket (docs/design/design-v1-floors.md 8.2, 10)", () =>
     assert.equal(s.room.store.getState().ephemeral.pings.length, 0, "not on the floor shown");
     assert.equal(s.room.store.getState().ephemeralFloors[UPPER]?.pings.length, 1);
   });
+
+  const sent = (s: ReturnType<typeof setup>) => s.last().take("eph").map((m) => (m.t === "eph" ? [m.sceneId, m.e.k] : null));
+
+  test("a ruler, an area or a drag that ends after a floor switch ends on the floor it was drawn on", () => {
+    const s = setup({ state: floors() });
+    s.socket.start();
+    s.connect(TOWER);
+    s.last().take();
+    s.socket.sendEph({ k: "ruler", id: "r1", points: [{ x: 1, y: 1 }] });
+    s.socket.sendEph({ k: "aoe", id: "a1", shape: "sphere", origin: { x: 2, y: 2, z: 0 }, yaw: 0, size: 20 });
+    s.socket.sendEph({ k: "dragStart", tokenId: "g1", x: 3, y: 3 });
+    s.runFrames();
+    assert.equal(s.last().take("eph").length, 3);
+    s.room.showFloor(UPPER);
+    s.clock.advance(40);
+    s.socket.sendEph({ k: "rulerEnd", id: "r1" });
+    s.socket.sendEph({ k: "aoeEnd", id: "a1" });
+    s.socket.sendEph({ k: "dragCancel", tokenId: "g1" });
+    s.runFrames();
+    assert.deepEqual(sent(s), [
+      [TOWER, "rulerEnd"],
+      [TOWER, "aoeEnd"],
+      [TOWER, "dragCancel"],
+    ]);
+  });
+
+  test("a preview that goes on after a floor switch ends on the old floor first, then goes on and ends on the new one", () => {
+    const s = setup({ state: floors() });
+    s.socket.start();
+    s.connect(TOWER);
+    s.last().take();
+    s.socket.sendEph({ k: "ruler", id: "r1", points: [{ x: 1, y: 1 }] });
+    s.runFrames();
+    s.last().take();
+    s.room.showFloor(UPPER);
+    s.clock.advance(40);
+    s.socket.sendEph({ k: "ruler", id: "r1", points: [{ x: 2, y: 2 }] });
+    s.runFrames();
+    assert.deepEqual(sent(s), [
+      [TOWER, "rulerEnd"],
+      [UPPER, "ruler"],
+    ]);
+    s.clock.advance(2_000);
+    s.runFrames();
+    assert.deepEqual(sent(s), [[UPPER, "ruler"]], "held still, it is repeated on the new floor only");
+    s.socket.sendEph({ k: "rulerEnd", id: "r1" });
+    s.clock.advance(40);
+    s.runFrames();
+    assert.deepEqual(sent(s), [[UPPER, "rulerEnd"]]);
+  });
+
+  test("a frame still queued when the floor switches gives way to the old floor's end, which goes first", () => {
+    const s = setup({ state: floors() });
+    s.socket.start();
+    s.connect(TOWER);
+    s.last().take();
+    s.socket.sendEph({ k: "dragStart", tokenId: "g1", x: 3, y: 3 });
+    s.room.showFloor(UPPER);
+    s.socket.sendEph({ k: "dragMove", tokenId: "g1", x: 4, y: 3 });
+    s.runFrames();
+    assert.deepEqual(sent(s), [
+      [TOWER, "dragCancel"],
+      [UPPER, "dragMove"],
+    ]);
+  });
 });
