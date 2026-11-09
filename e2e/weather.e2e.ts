@@ -983,7 +983,7 @@ async function pinch(touches: Touches, page: Page, way: 1 | -1, span = 60): Prom
 /**
  * How far the sum of marks seen over every zoom stop may stray from the sum wanted. A count of marks spreads by about
  * its root, so each stop holds within four of those, and the sum within these fractions. The full step ran within 10%.
- * At the half step the fixed seed's Isometric marks ran 2.1% to 2.5% over in three local runs and 4.9% to 9.2% over on CI, so its limit
+ * At the half step the fixed seed's Isometric marks ran 2.1% to 2.5% over in three local runs and 4.9% to 10.2% over on CI, so its limit
  * is 12%: past the CI counts, and far under the 50% a step that halved twice or not at all would miss by.
  */
 const SUM_LIMIT = { full: 0.1, half: 0.12 };
