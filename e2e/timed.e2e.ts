@@ -85,6 +85,12 @@ async function openCharacters(page: Page): Promise<Locator> {
   return sheet;
 }
 
+/** Waits for the DM's page to lay out as a desk, with the side panel's tabs, or as a phone, without them. */
+async function deskLayout(desk: boolean): Promise<void> {
+  const tabs = dm.getByRole("tablist", { name: "Panels" });
+  await waitFor(`the DM's ${desk ? "desk" : "phone"} layout`, async () => ((await tabs.first().isVisible().catch(() => false)) === desk ? true : null));
+}
+
 /** A character's page open in the Characters panel, with its Combat group unfolded. */
 async function openCard(page: Page, characterId: string): Promise<Locator> {
   const panel = await openCharacters(page);
@@ -380,10 +386,16 @@ describe("time spans on effects", () => {
         await section.getByText("Leave as is to keep its end.", { exact: true }).waitFor();
         for (const size of [DESK, { width: 320, height: 568 }]) {
           await dm.setViewportSize(size);
-          const lines = alignmentLines(await measureAlignment(section), `Duration row on an effect, ${size.width} x ${size.height}`);
+          // The page lays out for a new size a frame or more after the resize, the panel moving between the side panel and a sheet: measure that layout, never the one before it, with the form a resize closed opened again.
+          await deskLayout(size.width >= DESK.width);
+          const there = conditions(await openCard(dm, run.bree));
+          if (!(await there.getByRole("combobox", { name: "Duration", exact: true }).isVisible())) await there.locator(`[data-effect-row="${id}"]`).click();
+          await there.getByText("Leave as is to keep its end.", { exact: true }).waitFor();
+          const lines = alignmentLines(await measureAlignment(there), `Duration row on an effect, ${size.width} x ${size.height}`);
           assert.deepEqual(lines, [], "the Duration select's row is aligned");
         }
         await dm.setViewportSize(DESK);
+        await deskLayout(true);
         // A resize may lay the panel out again and close the form, so reopen it if it did.
         await openCard(dm, run.bree);
         if (!(await duration.isVisible())) await open(id);
