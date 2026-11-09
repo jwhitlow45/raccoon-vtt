@@ -303,6 +303,7 @@ describe("several floors (design-v1-floors.md 18.7, D-261107-217)", () => {
       ["Upper floor", "Tower · Showing", { t: "floor", sceneId: "upper" }],
       ["Attic", "Tower", { t: "floor", sceneId: "attic" }],
     ]);
+    assert.deepEqual(new Set(dm.map((e) => e.icon)), new Set(["floors"]), "the Floor button's icon");
     assert.deepEqual(rows(towerView(room, P1, "ground", ["ground", "upper"])).map((e) => e.title), ["Ground floor", "Upper floor"]);
     assert.deepEqual(rows(towerView(room, P1, "ground", ["ground"])), [], "one floor held is no choice");
     assert.deepEqual(rows(DM_VIEW()), [], "a scene without floors");

@@ -298,7 +298,7 @@ export function buildIndex(input: IndexInput): SearchIndex {
         kind: "floor",
         title: f.floor?.name ?? f.name,
         where: f.id === sceneId ? `${f.name} · ${ROW_WORDS.showing}` : f.name,
-        icon: "scenes",
+        icon: "floors",
         act: { t: "floor", sceneId: f.id },
       });
     }
