@@ -2592,7 +2592,7 @@ export class RoomActor {
    * only once the commit is confirmed.
    */
   async #countSnapshot(batch: Batch, write: BatchWrite): Promise<(() => void) | null> {
-    if (!this.#countSnapshotDue || this.replayFailed || (write.ops.length === 0 && write.watermarks.length === 0)) return null;
+    if (!this.#countSnapshotDue || (write.ops.length === 0 && write.watermarks.length === 0)) return null;
     if (this.#opts.now() < this.#countSnapshotAfter) return null;
     let json: string;
     try {
