@@ -12,7 +12,7 @@ Versions: OP_VERSION 56 and SNAPSHOT_VERSION 43. The snapshot step is the identi
 
 - `Scene.floor?: { of, level, name, height }`. `of` names the main floor, which holds the scene's place in the list, its folder, order and thumbnail. `level` runs 0 to n - 1 from the lowest. `name` is unique in the scene and at most 40 characters. `height` is feet above the floor below, 5 to 50 in steps of 5, 10 by default. Every floor's record name is the scene's name. A scene of one floor has no `floor`.
 - `RoomState.openFloors?: Record<SceneId, SceneMark>`: one mark for a floor that is open to the players (reached or shown). It is bookkeeping outside undo, written by `markOpened` after every op from op version 56, and a floor stays marked when the players leave it. A DM's projection carries it as `keys.opened` and `openFloors`.
-- A player's copy of a floor is `{ level, name }`, numbered among the floors that player holds and sent only while two or more are held. `of` and `height` stay the DM's.
+- A player's copy of a floor is `{ level, name }`, numbered among the floors that player holds and sent only while two or more are held, with `unseen` on a floor no player sees, which the player holds only through a creature the DM hid. `of` and `height` stay the DM's.
 - `meta.partyFloors` is on a table display's copy only: the held floors with the most unhidden party members, lowest first, absent when empty.
 - The rules live in shared/rules/floors.ts: `floorsOf`, `startFloor`, `onPlayersScene`, `openFloor` (blind to a blackout), `playersSee`, `heldFloors` and `floorProblem`. `floorProblem` runs beside `checkLimits` in the actor and on import, never in the reducer, so a pending replay on a redacted copy never meets it.
 - Ops: `scene.create` takes `floor: { beside, side, besideName? }`, `scene.update`'s patch takes `floor: { name?, height? }`, and `floor.order` and `floor.open` are new. Ephemeral events from the server carry `sceneId`.
@@ -54,12 +54,16 @@ Each recipient's projection covers a held set of floors, decided before any cach
 | Ana's creature upstairs, Bree and the display beside her | Ana holds Upper, the others get nothing of it, in both connection orders | floors.wire.itest.ts |
 | A trap on a floor not reached | Never goes off by itself | floors.wire.itest.ts, rules tests |
 | Remove with the party there, Hide with the party there on the players' scene, Delete while the players start on one of the floors | Refused with the reason shown, and Hide goes on a scene the players are not on | permissions.floors.test.ts, floorWords.test.ts, floors-build.e2e.ts |
-| Move to floor of a nudged or squeezed token, then undo | Lands unnudged and unsqueezed, and the undo puts both back | reducer/floors.test.ts, moveToFloor.test.ts |
+| Move to floor of a nudged or squeezed token, then undo | Lands unnudged and unsqueezed on the ground of its full space, and the undo puts both back | reducer/floors.test.ts, moveToFloor.test.ts |
 | A rider and its mount, or a chain of three, named in any order | Every link holds on the new floor, and each creature named drops its nudge | moveToFloor.test.ts |
 | A ruler, area or drag that ends or goes on after `[` or `]` | Its end goes to the floor it was drawn on, before any frame on the new one | socket.test.ts |
 | Thorn moves to Upper | Ana's phone follows and says so, Bree's desk stays, the DM's menu marks Upper | floors-view.e2e.ts |
 | Ana picks another floor | "Viewing Ground floor." with Back to Thorn, in line at every size | floors-view.e2e.ts |
 | A fight across floors | Rows of both floors, tagged, the turn chip's name ending "on Upper floor" | floors-view.e2e.ts, floorRow.test.ts |
+| A tracker or search row on another floor, and a player's selected companion moved upstairs | The floor shows with the creature selected, and the player's device stays with the companion | scene.test.ts, store.floors.test.ts, floors-view.e2e.ts, floors-menus.e2e.ts |
+| Ana asks for saves upstairs with a hidden creature, which the DM brings down and gives to Bree | No snapshot or frame of Bree's names Upper | project.floors.test.ts, floors.wire.itest.ts |
+| A hand-made group move across two reached floors, an area changed to a caster on another floor | Refused | permissions.floors.test.ts, floors.wire.itest.ts |
+| A drag on a floor held only through a hidden creature, and the DM's on a floor not reached | The device counts the dragged group as the server does | floors.differential.test.ts, project.floors.test.ts |
 | The display with the party split, then joined | Ground, then Upper with "Weather here: Heavy rain, Strong wind." | floors-view.e2e.ts |
 | Bring everyone here on a floor not reached | Off, with "Players haven't reached Attic, so their maps stay." | chipMenus.test.ts, floors-menus.e2e.ts |
 | Random adds, removals, moves, undos and held-set changes | floorProblem holds, no unheld floor in a player's copy, an incremental copy equals a fresh one | floors.random.test.ts |
@@ -67,13 +71,13 @@ Each recipient's projection covers a held set of floors, decided before any cach
 
 ## As built
 
-Where the build went its own way, with the decision ids from the decisions log (D-261108-270 to 380):
+Where the build went its own way, with the decision ids from the decisions log (D-261108-270 to 380, and 421 to 425 for the fixes after review):
 
 - **Shared rules.** `SceneFloor.of` and `height` are optional, since a player's copy lacks them (D-261108-270). An add's `scene` carries only id, name and size, and the reducer copies the rest. `floorProblem` also holds every floor's record name to the main floor's. The floor rules restate the party and ownership tests, because limits.ts sits in sight's arithmetic closure and must not import project.ts, and a test holds both to project.ts. Reorder and Duplicate naming a floor that is not a main floor are refused, not mapped.
 - **Projection.** `viewerFloors` takes a scene without floors as itself alone and skips `heldFloors` (D-261108-283), `partyFloors` is absent when empty (D-261108-280), and the DM gets every opened mark (D-261108-281).
 - **Server.** The explore step runs on every floor players see, per-player floors included. Every scene-budget refusal of a floor add reads the floor words, and players' memory is reserved on every floor of their scene (D-261108-290 to 297).
 - **A pick in Floors closes it**, because Room.tsx closes an open pop-up whenever the scene shown changes. The DM's marks say "Reached", since one opened mark cannot tell "Reached" from "Shown to players" (D-261108-300 and 301).
-- **Moving to a floor** lands a creature on the new floor's ground and keeps a flier's height. Move to floor has no search entry, since its control is in the action bar and the More sheet, which carry no search anchors (D-261108-350).
+- **Moving to a floor** lands a creature on the new floor's ground under its full space, since the move drops a squeeze, and keeps a flier's height. Whether it stood on the ground reads the space it stood in, squeezed or not (D-261108-425). Move to floor has no search entry, since its control is in the action bar and the More sheet, which carry no search anchors (D-261108-350).
 - **A floor's page** has Back to Floors alone on its row with no tag, and Go to this floor on a row of its own, since a tag or a third button wrapped alone at some sizes (D-261108-351). An off Bring everyone here shows its reason as a dim line (D-261108-352).
 - **The floor on the DM's screen** wears an On screen tag in the Floors group, and the folded group says "3 floors · Upper floor on screen". "Shown" read as shown to players beside Show to players, and the page's button reads Go to this floor for the same reason (D-261108-379 and 380).
 - **The party panel** reads "On Upper floor" for a member on another floor of the scene, and a tap shows that floor (D-261108-353). A floor's map says "Loading Upper floor…" (D-261108-354).
@@ -83,5 +87,9 @@ Where the build went its own way, with the decision ids from the decisions log (
 - **A preview's end** goes to the floor its frames went to, though the floor shown changed since, and a preview that goes on after a switch ends on the old floor first, since the server routes an end only to the floor it names.
 - **Replacing a floor's map** asks first on every open floor of the players' scene (D-261108-358). The tracker row's floor tag, which the design listed and no lane owned, was built in the wiring commit with the floors icon (D-261108-359).
 - **The action bar** reads `floorView` wholesale, as the board does, and the guard test checks it (D-261108-360).
+- **A switch of floors keeps the selection** on the floor now shown and lets go of the rest, since Room lets go of it on a change of the scene projected rather than of the floor shown. A start floor moved within the scene lets go of nothing. So a tracker or search row on another floor selects its creature, and a player's device stays with a selected companion that moved (D-261108-421).
+- **An ask for saves** on a floor the player does not hold reaches no player, is not theirs to withdraw and is not among their asks waiting, and a floor's removal takes the asks made on it, which its undo brings back. On a scene without floors, or naming no scene, an ask still follows its player to another scene, as before (D-261108-422).
+- **A group move names one floor's creatures:** the server refuses a hand-made `token.moveMany` across floors from anyone, since a walk's traps go off on its first token's floor alone. An area's caster and what it follows stay on its floor when the area changes, as when it is made (D-261108-423).
+- **A floor no player sees**, which a player holds only through a creature the DM hid, carries `unseen` on that player's copy, and the server's seen marks and every device's count of what all players see read one rule, `unseenFloor`, the DM's device included, so a drag there takes the group the server takes. A player's copy holds no opened marks to work it out from (D-261108-424).
 
 Not built: stairs and ladders (phase 2), Universal VTT files and generated dungeons onto a floor (phase 3), seeing between floors (phase 4), and a Move to floor entry in the search.

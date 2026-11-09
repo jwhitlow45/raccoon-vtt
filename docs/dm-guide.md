@@ -279,7 +279,7 @@ In the Scenes list the tower is one row, "Tower · 3 floors". **Delete** reads "
 
 ![Ana's phone while she looks at the ground floor: the notice Viewing Ground floor. with its Back to Thorn button under the top bar, and the Floor button in the bar.](dm-guide/floors-viewing.webp)
 
-In a fight, the tracker keeps every creature the players may see, whatever floor it stands on, and a creature off the floor on screen carries its floor's name as a tag. A tap on its row shows that floor. The party panel says "On Upper floor" for a party member who stands there, and the turn chip names the floor of whoever is acting when it is another one. The map's **Find my token** goes through your tokens on every floor.
+In a fight, the tracker keeps every creature the players may see, whatever floor it stands on, and a creature off the floor on screen carries its floor's name as a tag. A tap on its row shows that floor and selects the creature, as a tap on its token does. The party panel says "On Upper floor" for a party member who stands there, and the turn chip names the floor of whoever is acting when it is another one. The map's **Find my token** goes through your tokens on every floor.
 
 ### Moving between floors
 
