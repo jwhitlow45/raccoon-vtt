@@ -1901,11 +1901,12 @@ export async function comparePngs(a: string, b: string): Promise<string[]> {
 /**
  * The words of `--only a,b`: the rows timed are those whose names hold one
  * of them, for a quick look at a change. Row names hold commas, so
- * `--only "a; b"` splits on semicolons instead, each word trimmed.
+ * `--only "a; b"` splits on semicolons instead. Each word is trimmed, and
+ * an empty one dropped, since every row name holds it.
  */
 export function onlyOf(value: string | undefined): string[] | undefined {
   if (value === undefined) return undefined;
-  return value.includes(";") ? value.split(";").map((o) => o.trim()) : value.split(",");
+  return (value.includes(";") ? value.split(";") : value.split(",")).map((o) => o.trim()).filter((o) => o !== "");
 }
 
 const argv = process.argv;

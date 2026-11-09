@@ -127,4 +127,9 @@ describe("the rows `--only` names", () => {
     assert.deepEqual(onlyOf("pan, 12 px, hex relief rows; sunk 100 ft"), ["pan, 12 px, hex relief rows", "sunk 100 ft"]);
     assert.equal(onlyOf(undefined), undefined);
   });
+
+  test("an empty word, which every row name holds, is dropped on both paths, and a comma's words are trimmed too", () => {
+    assert.deepEqual(onlyOf("sunk 100 ft;"), ["sunk 100 ft"]);
+    assert.deepEqual(onlyOf("hex relief, sunk 100 ft,"), ["hex relief", "sunk 100 ft"]);
+  });
 });
