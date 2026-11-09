@@ -447,12 +447,13 @@ test("a player's projection and the fan-out keep every sound rule of 6.5 over ra
         }
       }
     }),
-    { numRuns: 500 },
+    { numRuns: 1000 },
   );
   // The generator reaches the paths that matter, so the invariants hold over something.
   assert.ok(applied > 3_000, `only ${applied} ops applied`);
   assert.ok(ticks > 250 && reveals > 50, `${ticks} ticks, ${reveals} reveals`);
   assert.ok(hiddenFires > 50, `${hiddenFires} effects fired behind a blackout`);
+  // 1000 runs, not 500, because at 500 the lifts ran 48 to 77 over 40 runs and the 250 ticks floor sat only 3 standard deviations under its mean. At 1000, over 40 runs, ticks ran 571 to 735, lifts 113 to 147 and reclassified effects 53 to 107, every floor 6 or more standard deviations down.
   // Over 12 runs fires ran 153 to 212 and lifts 54 to 77, so a lift floor of 50 sat under 2 standard deviations of its mean and failed now and then.
   assert.ok(dmOnlyFires > 50 && dmOnlyLifted > 30, `${dmOnlyFires} effects fired while Only DM devices play, ${dmOnlyLifted} times it turned off with something playing`);
   // Reclassified effects ran 28 to 72 over 16 runs once the queue's ops joined the mix, so the floor sits well under that spread.
