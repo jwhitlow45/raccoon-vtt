@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { uuidv7 } from "./ids.ts";
-import { ANA, ATTIC, GROUND, UPPER, tower, withStairs } from "./floorLinksTestutil.ts";
+import { ANA, ATTIC, GROUND, UPPER, run, tower, withStairs } from "./floorLinksTestutil.ts";
 import type { RoomState } from "./model.ts";
 import { projectState, type ProjectedState } from "./project.ts";
 import { reads, satisfies } from "./reads.ts";
@@ -437,11 +437,13 @@ describe("a climb's reads (docs/design/design-v1-floors.md phase 2, 6.4)", () =>
   });
 
   test("a player holding both ends, or the DM viewing another scene, waits for the server", () => {
-    const s = withStairs(tower());
+    // Upper floor shown to players, so Ana's copy holds it and its end's far floor too: only the floor's whole collection is missing.
+    const s = run(withStairs(tower()), { t: "floor.open", sceneId: UPPER, open: true });
     const { pair: _p1, to: _t1, ground: _g1, made: _m1, ...l1 } = s.floorLinks!.l1!;
     const { pair: _p2, to: _t2, ground: _g2, made: _m2, ...l2 } = s.floorLinks!.l2!;
     // As a player's copy holding Upper floor too would carry them, with `to` while they hold it.
     const copy = { ...projectState(s, ANA, { sceneId: null }), floorLinks: { l1: { ...l1, to: UPPER, dir: "up" }, l2: { ...l2, to: GROUND, dir: "down" } } } as unknown as ProjectedState;
+    assert.ok(copy.scenes[UPPER]?.floor !== undefined, "Ana holds Upper floor");
     assert.ok(!satisfies(reads(climbOp("l1"), copy as unknown as RoomState), copy, ANA, { sceneId: null }));
     const elsewhere = { ...projectState(s, DM, { sceneId: "s2" }), floorLinks: s.floorLinks! } as unknown as ProjectedState;
     assert.ok(!satisfies(reads(climbOp("l1"), elsewhere as unknown as RoomState), elsewhere, DM, { sceneId: "s2" }));

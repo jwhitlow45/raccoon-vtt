@@ -1,0 +1,825 @@
+{
+ "initial": {
+  "meta": {
+   "name": "Test room",
+   "settings": {
+    "feetPerCell": 5,
+    "diagonal": "five",
+    "aoeCoverage": "half",
+    "aoeInclusion": "anyCell",
+    "pcHpVisibleToParty": true,
+    "monstersDieAtZero": true,
+    "playersSeeAoeOfOthers": true,
+    "playersMoveAny": "none",
+    "playersCreateCharacters": true,
+    "playersApplyDamage": false,
+    "playersTypeTotals": true,
+    "skipDefeated": true,
+    "monsterInitScore": false,
+    "revealHiddenOnTurn": true,
+    "turnTimerSec": 0,
+    "healRevives": true,
+    "critRule": "rollTwice",
+    "playersSeeOrder": "all"
+   },
+   "playerSceneId": "s1",
+   "view": {
+    "follow": false,
+    "blackout": false
+   }
+  },
+  "members": {
+   "dm1": {
+    "id": "dm1",
+    "rev": 0,
+    "name": "dm1",
+    "color": "#ff0000",
+    "kind": "dm",
+    "createdAt": "2026-10-12T20:00:00.000Z"
+   },
+   "p1": {
+    "id": "p1",
+    "rev": 0,
+    "name": "p1",
+    "color": "#ff0000",
+    "kind": "player",
+    "createdAt": "2026-10-12T20:00:00.000Z"
+   },
+   "p2": {
+    "id": "p2",
+    "rev": 0,
+    "name": "p2",
+    "color": "#ff0000",
+    "kind": "player",
+    "createdAt": "2026-10-12T20:00:00.000Z"
+   }
+  },
+  "scenes": {
+   "s1": {
+    "id": "s1",
+    "rev": 0,
+    "name": "Tower",
+    "order": 0,
+    "bounds": {
+     "w": 20,
+     "h": 20
+    },
+    "grid": {
+     "show": true,
+     "color": "#ffffff",
+     "opacity": 0.25,
+     "lineWidth": 1
+    },
+    "background": "#2b2b31",
+    "fogEnabled": false,
+    "wallsVersion": 0,
+    "floor": {
+     "of": "s1",
+     "level": 0,
+     "name": "Ground floor",
+     "height": 10
+    }
+   },
+   "up": {
+    "id": "up",
+    "rev": 0,
+    "name": "Tower",
+    "order": 0,
+    "bounds": {
+     "w": 20,
+     "h": 20
+    },
+    "grid": {
+     "show": true,
+     "color": "#ffffff",
+     "opacity": 0.25,
+     "lineWidth": 1
+    },
+    "background": "#2b2b31",
+    "fogEnabled": false,
+    "wallsVersion": 0,
+    "floor": {
+     "of": "s1",
+     "level": 1,
+     "name": "Upper floor",
+     "height": 10
+    }
+   },
+   "s2": {
+    "id": "s2",
+    "rev": 0,
+    "name": "s2",
+    "order": 1,
+    "bounds": {
+     "w": 40,
+     "h": 30
+    },
+    "grid": {
+     "show": true,
+     "color": "#ffffff",
+     "opacity": 0.25,
+     "lineWidth": 1
+    },
+    "background": "#2b2b31",
+    "fogEnabled": false,
+    "wallsVersion": 0
+   }
+  },
+  "buildChunks": {},
+  "labels": {},
+  "fogTiles": {},
+  "fogDrafts": {},
+  "tokens": {
+   "thorn": {
+    "id": "thorn",
+    "rev": 0,
+    "sceneId": "s1",
+    "kind": "pc",
+    "name": "Thorn",
+    "nameHidden": false,
+    "size": "medium",
+    "x": 3,
+    "y": 3,
+    "elevation": 0,
+    "rotation": 0,
+    "disposition": "ally",
+    "visibility": "all",
+    "fogExempt": false,
+    "fogExemptAuto": false,
+    "locked": false,
+    "layer": "token",
+    "ownerIds": [
+     "p1"
+    ],
+    "actor": {
+     "ref": "thorn"
+    },
+    "hpVisibility": "label"
+   },
+   "gob": {
+    "id": "gob",
+    "rev": 0,
+    "sceneId": "s1",
+    "kind": "monster",
+    "name": "Goblin",
+    "nameHidden": false,
+    "size": "medium",
+    "x": 10,
+    "y": 10,
+    "elevation": 0,
+    "rotation": 0,
+    "disposition": "hostile",
+    "visibility": "all",
+    "fogExempt": false,
+    "fogExemptAuto": false,
+    "locked": false,
+    "layer": "token",
+    "ownerIds": [],
+    "actor": {
+     "inline": {
+      "hp": {
+       "cur": 20,
+       "max": 20,
+       "temp": 0
+      },
+      "life": "alive",
+      "ac": 14,
+      "speeds": {
+       "walk": 30
+      },
+      "initBonus": 2,
+      "passivePerception": 12,
+      "senses": "",
+      "effects": [],
+      "deathSaves": {
+       "ok": 0,
+       "fail": 0
+      },
+      "notes": "",
+      "dmNotes": "secret plan"
+     }
+    },
+    "hpVisibility": "label"
+   }
+  },
+  "characters": {
+   "thorn": {
+    "id": "thorn",
+    "rev": 0,
+    "ownerIds": [
+     "p1"
+    ],
+    "name": "Thorn",
+    "size": "medium",
+    "actor": {
+     "hp": {
+      "cur": 20,
+      "max": 20,
+      "temp": 0
+     },
+     "life": "alive",
+     "ac": 14,
+     "speeds": {
+      "walk": 30
+     },
+     "initBonus": 2,
+     "passivePerception": 12,
+     "senses": "",
+     "effects": [],
+     "deathSaves": {
+      "ok": 0,
+      "fail": 0
+     },
+     "notes": "",
+     "dmNotes": "secret plan"
+    }
+   }
+  },
+  "templates": {},
+  "drawings": {},
+  "encounter": null,
+  "encounterHistory": [],
+  "handouts": {},
+  "log": [],
+  "monsters": {},
+  "srdImages": {},
+  "savedEncounters": {},
+  "stamps": {},
+  "lights": {},
+  "exploredTiles": {},
+  "holders": {},
+  "exploredBy": {},
+  "journal": {},
+  "pins": {},
+  "rolls": {},
+  "handoutDocs": {},
+  "companionBlocks": {},
+  "casts": {},
+  "traps": {},
+  "trapLog": [],
+  "trapSeen": [],
+  "memory": {},
+  "memoryBy": {},
+  "playedScenes": {},
+  "memoryShared": {}
+ },
+ "ops": [
+  {
+   "op": {
+    "t": "encounter.start",
+    "entries": [
+     {
+      "id": "n1",
+      "tokenId": "thorn",
+      "value": 20
+     },
+     {
+      "id": "n2",
+      "tokenId": "gob",
+      "value": 5
+     }
+    ]
+   },
+   "who": {
+    "memberId": "dm1",
+    "role": "dm"
+   },
+   "seq": 11,
+   "at": "2026-11-09T12:00:00.000Z",
+   "opVersion": 57
+  },
+  {
+   "op": {
+    "t": "encounter.next"
+   },
+   "who": {
+    "memberId": "dm1",
+    "role": "dm"
+   },
+   "seq": 12,
+   "at": "2026-11-09T12:00:00.000Z",
+   "opVersion": 57
+  },
+  {
+   "op": {
+    "t": "token.move",
+    "tokenId": "thorn",
+    "x": 3,
+    "y": 8
+   },
+   "who": {
+    "memberId": "p1",
+    "role": "player"
+   },
+   "seq": 13,
+   "at": "2026-11-09T12:00:00.000Z",
+   "opVersion": 57
+  },
+  {
+   "op": {
+    "t": "token.update",
+    "tokenId": "thorn",
+    "patch": {
+     "sceneId": "up"
+    }
+   },
+   "who": {
+    "memberId": "dm1",
+    "role": "dm"
+   },
+   "seq": 14,
+   "at": "2026-11-09T12:00:00.000Z",
+   "opVersion": 57
+  },
+  {
+   "op": {
+    "t": "token.move",
+    "tokenId": "thorn",
+    "x": 5,
+    "y": 8
+   },
+   "who": {
+    "memberId": "p1",
+    "role": "player"
+   },
+   "seq": 15,
+   "at": "2026-11-09T12:00:00.000Z",
+   "opVersion": 57
+  },
+  {
+   "op": {
+    "t": "token.update",
+    "tokenId": "thorn",
+    "patch": {
+     "sceneId": "s1"
+    }
+   },
+   "who": {
+    "memberId": "dm1",
+    "role": "dm"
+   },
+   "seq": 16,
+   "at": "2026-11-09T12:00:00.000Z",
+   "opVersion": 57
+  },
+  {
+   "op": {
+    "t": "encounter.next"
+   },
+   "who": {
+    "memberId": "dm1",
+    "role": "dm"
+   },
+   "seq": 17,
+   "at": "2026-11-09T12:00:00.000Z",
+   "opVersion": 57
+  },
+  {
+   "op": {
+    "t": "token.update",
+    "tokenId": "gob",
+    "patch": {
+     "sceneId": "up"
+    }
+   },
+   "who": {
+    "memberId": "dm1",
+    "role": "dm"
+   },
+   "seq": 18,
+   "at": "2026-11-09T12:00:00.000Z",
+   "opVersion": 57
+  }
+ ],
+ "final": {
+  "meta": {
+   "name": "Test room",
+   "settings": {
+    "feetPerCell": 5,
+    "diagonal": "five",
+    "aoeCoverage": "half",
+    "aoeInclusion": "anyCell",
+    "pcHpVisibleToParty": true,
+    "monstersDieAtZero": true,
+    "playersSeeAoeOfOthers": true,
+    "playersMoveAny": "none",
+    "playersCreateCharacters": true,
+    "playersApplyDamage": false,
+    "playersTypeTotals": true,
+    "skipDefeated": true,
+    "monsterInitScore": false,
+    "revealHiddenOnTurn": true,
+    "turnTimerSec": 0,
+    "healRevives": true,
+    "critRule": "rollTwice",
+    "playersSeeOrder": "all"
+   },
+   "playerSceneId": "s1",
+   "view": {
+    "follow": false,
+    "blackout": false
+   }
+  },
+  "members": {
+   "dm1": {
+    "id": "dm1",
+    "rev": 0,
+    "name": "dm1",
+    "color": "#ff0000",
+    "kind": "dm",
+    "createdAt": "2026-10-12T20:00:00.000Z"
+   },
+   "p1": {
+    "id": "p1",
+    "rev": 0,
+    "name": "p1",
+    "color": "#ff0000",
+    "kind": "player",
+    "createdAt": "2026-10-12T20:00:00.000Z"
+   },
+   "p2": {
+    "id": "p2",
+    "rev": 0,
+    "name": "p2",
+    "color": "#ff0000",
+    "kind": "player",
+    "createdAt": "2026-10-12T20:00:00.000Z"
+   }
+  },
+  "scenes": {
+   "s1": {
+    "id": "s1",
+    "rev": 0,
+    "name": "Tower",
+    "order": 0,
+    "bounds": {
+     "w": 20,
+     "h": 20
+    },
+    "grid": {
+     "show": true,
+     "color": "#ffffff",
+     "opacity": 0.25,
+     "lineWidth": 1
+    },
+    "background": "#2b2b31",
+    "fogEnabled": false,
+    "wallsVersion": 0,
+    "floor": {
+     "of": "s1",
+     "level": 0,
+     "name": "Ground floor",
+     "height": 10
+    }
+   },
+   "up": {
+    "id": "up",
+    "rev": 0,
+    "name": "Tower",
+    "order": 0,
+    "bounds": {
+     "w": 20,
+     "h": 20
+    },
+    "grid": {
+     "show": true,
+     "color": "#ffffff",
+     "opacity": 0.25,
+     "lineWidth": 1
+    },
+    "background": "#2b2b31",
+    "fogEnabled": false,
+    "wallsVersion": 0,
+    "floor": {
+     "of": "s1",
+     "level": 1,
+     "name": "Upper floor",
+     "height": 10
+    }
+   },
+   "s2": {
+    "id": "s2",
+    "rev": 0,
+    "name": "s2",
+    "order": 1,
+    "bounds": {
+     "w": 40,
+     "h": 30
+    },
+    "grid": {
+     "show": true,
+     "color": "#ffffff",
+     "opacity": 0.25,
+     "lineWidth": 1
+    },
+    "background": "#2b2b31",
+    "fogEnabled": false,
+    "wallsVersion": 0
+   }
+  },
+  "buildChunks": {},
+  "labels": {},
+  "fogTiles": {},
+  "fogDrafts": {},
+  "tokens": {
+   "thorn": {
+    "id": "thorn",
+    "rev": 4,
+    "sceneId": "s1",
+    "kind": "pc",
+    "name": "Thorn",
+    "nameHidden": false,
+    "size": "medium",
+    "x": 5,
+    "y": 8,
+    "elevation": 0,
+    "rotation": 0,
+    "disposition": "ally",
+    "visibility": "all",
+    "fogExempt": false,
+    "fogExemptAuto": false,
+    "locked": false,
+    "layer": "token",
+    "ownerIds": [
+     "p1"
+    ],
+    "actor": {
+     "ref": "thorn"
+    },
+    "hpVisibility": "label"
+   },
+   "gob": {
+    "id": "gob",
+    "rev": 1,
+    "sceneId": "up",
+    "kind": "monster",
+    "name": "Goblin",
+    "nameHidden": false,
+    "size": "medium",
+    "x": 10,
+    "y": 10,
+    "elevation": 0,
+    "rotation": 0,
+    "disposition": "hostile",
+    "visibility": "all",
+    "fogExempt": false,
+    "fogExemptAuto": false,
+    "locked": false,
+    "layer": "token",
+    "ownerIds": [],
+    "actor": {
+     "inline": {
+      "hp": {
+       "cur": 20,
+       "max": 20,
+       "temp": 0
+      },
+      "life": "alive",
+      "ac": 14,
+      "speeds": {
+       "walk": 30
+      },
+      "initBonus": 2,
+      "passivePerception": 12,
+      "senses": "",
+      "effects": [],
+      "deathSaves": {
+       "ok": 0,
+       "fail": 0
+      },
+      "notes": "",
+      "dmNotes": "secret plan"
+     }
+    },
+    "hpVisibility": "label"
+   }
+  },
+  "characters": {
+   "thorn": {
+    "id": "thorn",
+    "rev": 0,
+    "ownerIds": [
+     "p1"
+    ],
+    "name": "Thorn",
+    "size": "medium",
+    "actor": {
+     "hp": {
+      "cur": 20,
+      "max": 20,
+      "temp": 0
+     },
+     "life": "alive",
+     "ac": 14,
+     "speeds": {
+      "walk": 30
+     },
+     "initBonus": 2,
+     "passivePerception": 12,
+     "senses": "",
+     "effects": [],
+     "deathSaves": {
+      "ok": 0,
+      "fail": 0
+     },
+     "notes": "",
+     "dmNotes": "secret plan"
+    }
+   }
+  },
+  "templates": {},
+  "drawings": {},
+  "encounter": {
+   "rev": 3,
+   "round": 1,
+   "activeEntryId": "n2",
+   "entries": [
+    {
+     "id": "n1",
+     "value": 20,
+     "tieOrder": 0,
+     "hidden": false,
+     "reactionUsed": false,
+     "inLair": false,
+     "tokenId": "thorn",
+     "hadTurn": true
+    },
+    {
+     "id": "n2",
+     "value": 5,
+     "tieOrder": 1,
+     "hidden": false,
+     "reactionUsed": false,
+     "inLair": false,
+     "tokenId": "gob",
+     "groupKey": "Goblin",
+     "hadTurn": true
+    }
+   ],
+   "startSeq": 11,
+   "turnStart": {
+    "entryId": "n2",
+    "tokenId": "gob",
+    "sceneId": "s1",
+    "x": 10,
+    "y": 10,
+    "elevation": 0,
+    "seq": 17,
+    "seen": true
+   }
+  },
+  "encounterHistory": [
+   {
+    "encounter": {
+     "rev": 1,
+     "round": 1,
+     "activeEntryId": null,
+     "entries": [
+      {
+       "id": "n1",
+       "value": 20,
+       "tieOrder": 0,
+       "hidden": false,
+       "reactionUsed": false,
+       "inLair": false,
+       "tokenId": "thorn"
+      },
+      {
+       "id": "n2",
+       "value": 5,
+       "tieOrder": 1,
+       "hidden": false,
+       "reactionUsed": false,
+       "inLair": false,
+       "tokenId": "gob",
+       "groupKey": "Goblin"
+      }
+     ],
+     "startSeq": 11
+    },
+    "effects": {},
+    "revealed": [],
+    "at": "2026-11-09T12:00:00.000Z",
+    "turnFlags": []
+   },
+   {
+    "encounter": {
+     "rev": 2,
+     "round": 1,
+     "activeEntryId": "n1",
+     "entries": [
+      {
+       "id": "n1",
+       "value": 20,
+       "tieOrder": 0,
+       "hidden": false,
+       "reactionUsed": false,
+       "inLair": false,
+       "tokenId": "thorn",
+       "hadTurn": true
+      },
+      {
+       "id": "n2",
+       "value": 5,
+       "tieOrder": 1,
+       "hidden": false,
+       "reactionUsed": false,
+       "inLair": false,
+       "tokenId": "gob",
+       "groupKey": "Goblin"
+      }
+     ],
+     "startSeq": 11,
+     "turnStart": {
+      "entryId": "n1",
+      "tokenId": "thorn",
+      "sceneId": "s1",
+      "x": 3,
+      "y": 3,
+      "elevation": 0,
+      "seq": 12,
+      "seen": true
+     }
+    },
+    "effects": {},
+    "revealed": [],
+    "at": "2026-11-09T12:00:00.000Z",
+    "turnFlags": []
+   }
+  ],
+  "handouts": {},
+  "log": [
+   {
+    "id": "11:0",
+    "at": "2026-11-09T12:00:00.000Z",
+    "kind": "event",
+    "data": {
+     "type": "encounter",
+     "action": "start"
+    }
+   },
+   {
+    "id": "12:0",
+    "at": "2026-11-09T12:00:00.000Z",
+    "kind": "event",
+    "data": {
+     "type": "turn",
+     "entryId": "n1",
+     "round": 1,
+     "seen": true
+    }
+   },
+   {
+    "id": "17:0",
+    "at": "2026-11-09T12:00:00.000Z",
+    "kind": "event",
+    "data": {
+     "type": "turn",
+     "entryId": "n2",
+     "round": 1,
+     "seen": true
+    }
+   }
+  ],
+  "monsters": {},
+  "srdImages": {},
+  "savedEncounters": {},
+  "stamps": {},
+  "lights": {},
+  "exploredTiles": {},
+  "holders": {},
+  "exploredBy": {},
+  "journal": {},
+  "pins": {},
+  "rolls": {},
+  "handoutDocs": {},
+  "companionBlocks": {},
+  "casts": {},
+  "traps": {},
+  "trapLog": [],
+  "trapSeen": [],
+  "memory": {},
+  "memoryBy": {},
+  "playedScenes": {
+   "s1": {
+    "sceneId": "s1",
+    "rev": 1
+   },
+   "up": {
+    "sceneId": "up",
+    "rev": 1
+   }
+  },
+  "memoryShared": {},
+  "openFloors": {
+   "s1": {
+    "sceneId": "s1",
+    "rev": 1
+   },
+   "up": {
+    "sceneId": "up",
+    "rev": 1
+   }
+  }
+ }
+}
