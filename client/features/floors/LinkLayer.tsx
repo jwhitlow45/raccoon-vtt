@@ -7,7 +7,9 @@ import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { rectHexes } from "#shared/rules/traps.ts";
 import { usePublishPills, type PillSpec } from "../../canvas/boardView.ts";
 import { MarkPill } from "../../canvas/IsoParts.tsx";
-import { useTreeShownView } from "../../canvas/relief/context.ts";
+import { drawsHere } from "../../canvas/isoPlace.ts";
+import { pillStands } from "../../canvas/markStand.ts";
+import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
 import { hexOutline } from "../../lib/scene.ts";
 import { boardTheme } from "../../lib/theme.ts";
 import type { LayerProps } from "../layers.ts";
@@ -36,9 +38,12 @@ const LOCK_PATH = "M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2
  * yet" where players have not reached it. The name gives way to the
  * turn's marker while the creature whose turn it is stands where its moves
  * on this floor began, as after it climbed (picture 07). No tap in play:
- * a tap on the board selects creatures. Isometric draws it flat on the
- * ground. Each mark carries its end's id and its pill's words as
- * attributes, which the e2e files read off the canvas.
+ * a tap on the board selects creatures. Isometric draws the end flat on
+ * the ground, and its name stands up where every cell under it is
+ * revealed, as a trap's name does, else lies flat under the fog
+ * (docs/design/design-v1-isometric-view.md 5.2). Each mark carries its
+ * end's id and its pill's words as attributes, which the e2e files read
+ * off the canvas.
  */
 export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
   const links = useTreeShownView((s) => s.floorView?.floorLinks ?? NO_LINKS);
@@ -120,17 +125,31 @@ const LinkMark = memo(function LinkMark(props: { link: FloorLink; scenes: Readon
     label === null || props.quiet || !trapNameShown(scale)
       ? null
       : { name: label, ...(props.notReached ? { value: NOT_REACHED } : {}), x: at.x, y: at.y, above: true, size: "map", small: true, maxLines: 1 };
+  const iso = useIsoGround();
+  // The end lies on the ground: Top-down's board, or the isometric ground stage.
+  const flat = iso === null || iso.place === "ground";
   const pillKey = pill ? JSON.stringify(pill) : "";
   // Keyed on what the name says and where, so a pinch that keeps it shown publishes nothing new.
   usePublishPills(`floorLink:${link.id}`, useMemo(() => (pill ? [pill] : NO_PILLS), [pillKey]));
   const color = boardTheme.color.accentSoft;
   const locked = link.locked === true;
-  const s = 1 / scale;
-  const r = (LOCK_PX / 2) * s;
-  const k = (LOCK_PX * 0.6 * s) / 24;
   const words = pill ? (pill.value ? `${pill.name} · ${pill.value}` : pill.name!) : "";
   return (
     <Group {...{ [FLOOR_LINK_ATTR]: link.id, "data-floor-link-name": words }}>
+      {flat ? <LinkShape o={o} kind={link.kind} dir={dir} locked={locked} color={color} scale={scale} /> : null}
+      {pill && drawsHere(iso, iso ? pillStands(iso.fog, { ...pill, scale }) : true) ? <MarkPill {...pill} scale={scale} color={color} /> : null}
+    </Group>
+  );
+});
+
+/** An end's marks on the ground: its treads or rungs, the chevron of its way, its outline, and its lock on the bottom right corner, clear of the name over the top edge. */
+function LinkShape(props: { o: Outline; kind: FloorLink["kind"]; dir: "up" | "down" | null; locked: boolean; color: string; scale: number }) {
+  const { o, kind, dir, locked, color } = props;
+  const s = 1 / props.scale;
+  const r = (LOCK_PX / 2) * s;
+  const k = (LOCK_PX * 0.6 * s) / 24;
+  return (
+    <>
       <Shape
         listening={false}
         perfectDrawEnabled={false}
@@ -156,7 +175,7 @@ const LinkMark = memo(function LinkMark(props: { link: FloorLink; scenes: Readon
           };
           const pad = Math.min(w, h) * 0.12;
           ctx.beginPath();
-          if (link.kind === "stairs") {
+          if (kind === "stairs") {
             // Treads across the long side, about three a square.
             const across = w >= h;
             const n = Math.max(4, Math.round((across ? w : h) * 3));
@@ -211,14 +230,12 @@ const LinkMark = memo(function LinkMark(props: { link: FloorLink; scenes: Readon
           ctx.setLineDash([]);
         }}
       />
-      {/* On the bottom right corner, clear of the name over the top edge. */}
       {locked ? (
         <>
           <Circle x={o.x + o.w} y={o.y + o.h} radius={r} fill={boardTheme.color.overlay} stroke={color} strokeWidth={1.5} strokeScaleEnabled={false} listening={false} />
           <Path data={LOCK_PATH} x={o.x + o.w - 12 * k} y={o.y + o.h - 12 * k} scaleX={k} scaleY={k} stroke={color} strokeWidth={2} strokeScaleEnabled={false} lineCap="round" lineJoin="round" listening={false} />
         </>
       ) : null}
-      {pill ? <MarkPill {...pill} scale={scale} color={color} /> : null}
-    </Group>
+    </>
   );
-});
+}

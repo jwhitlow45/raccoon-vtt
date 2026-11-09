@@ -174,8 +174,8 @@ export const LAYERS: readonly LayerDef[] = [
   { id: "tethers", layer: "board", order: 40, iso: "ground", Component: TetherLayer },
   { id: "traps", layer: "board", order: 35, iso: ["ground", "upright"], Component: TrapLayer },
   { id: "trapNames", layer: "overlay", order: 36, iso: "off", Component: TrapNameLayer },
-  // Stairs and ladders lie flat under the fog, as a found trap's squares do (docs/design/design-v1-floors.md phase 2, 11).
-  { id: "floorLinks", layer: "board", order: 36, iso: "ground", Component: LinkLayer },
+  // Stairs and ladders lie flat under the fog, as a found trap's squares do, and their names stand as trap names do (docs/design/design-v1-floors.md phase 2, 11).
+  { id: "floorLinks", layer: "board", order: 36, iso: ["ground", "upright"], Component: LinkLayer },
 ];
 
 /** Everything that runs effects for the board and draws nothing, mounted once outside both drawing trees. */
