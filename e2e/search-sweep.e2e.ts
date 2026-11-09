@@ -26,7 +26,8 @@ import { addSound, roomSoundScript } from "./soundRoom.ts";
  *   heading still leads with its title, so a heading renamed without its
  *   entry fails. An action goes there by Shift+Enter, which presses
  *   nothing, and a DM menu item goes to its twin. Each entry lands in at
- *   least one of the room's states.
+ *   least one of the room's states. In the fight the DM looks at the middle
+ *   floor of the cave, where a floor's page has every control on.
  * - se-s7: no page logged an error.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus fifty-six. The other
@@ -80,6 +81,8 @@ const run = {
   dmKey: "",
   mat: "",
   cave: randomUUID(),
+  caveLoft: randomUUID(),
+  caveTop: randomUUID(),
   day: randomUUID(),
   night: randomUUID(),
   bree: randomUUID(),
@@ -253,6 +256,28 @@ const field = (page: Page) => page.locator("[data-search-field]");
 
 async function rowIds(page: Page): Promise<string[]> {
   return page.locator("[data-search-row]").evaluateAll((els) => els.map((e) => (e as unknown as DomEl).getAttribute("data-search-row") ?? ""));
+}
+
+/** Shows a floor of the scene in view through the search's Floor row, as a DM picks one there, and closes the search. */
+async function showFloorBySearch(page: Page, floorId: string, name: string): Promise<void> {
+  await openSearch(page);
+  await field(page).fill(name);
+  const id = `floor:${floorId}`;
+  await waitFor(`${name}'s Floor row`, async () => ((await rowIds(page)).includes(id) ? true : null));
+  const at = (await rowIds(page)).indexOf(id);
+  for (let i = 0; i < at; i++) await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  // The Floor row of the floor in view says "Showing", whether the bar has room for Floor or folded it into the Menu panel.
+  await waitFor(`${name} shown`, async () => {
+    if ((await sheet(page).count()) > 0) await page.keyboard.press("Escape");
+    await openSearch(page);
+    await field(page).fill(name);
+    await settle(page);
+    const row = page.locator(`[data-search-row="${id}"]`);
+    return (await row.count()) > 0 && (await row.innerText()).includes("Showing") ? true : null;
+  });
+  await page.keyboard.press("Escape");
+  await sheet(page).waitFor({ state: "detached" });
 }
 
 async function openSearch(page: Page): Promise<void> {
@@ -714,12 +739,17 @@ describe("the room search's sweep", { concurrency: false }, () => {
     assert.deepEqual([...outcomes.dmDesk.problems.slice(from[0]), ...outcomes.dmPhone.problems.slice(from[1])], []);
   });
 
-  test("se-s4. as the DM in a fight, with a clock running, a blackout on and the camera on another scene, every entry offered lands on its control, at a desk and on a phone", async () => {
+  test("se-s4. as the DM in a fight, with a clock running, a blackout on and the camera on another scene's middle floor, every entry offered lands on its control, at a desk and on a phone", async () => {
     await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.goblin, value: 15 }, { id: randomUUID(), tokenId: run.tBree, value: 12 }] });
     await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
     await ops.send({ t: "view.blackout", blackout: true });
     await ops.send({ t: "handout.close", handoutId: run.shown });
     const recent = JSON.stringify([{ kind: "image", assetId: run.letter, title: "Belak's letter", to: "all", at: Date.now() }]);
+    // The cave gets two floors above it, and the DM looks at the middle one, Cave loft: a floor's page is offered only on a scene with floors, and each of its controls is on there, as it is on no main floor, start floor or top floor (scenes/search.ts, FloorPage.tsx).
+    await ops.send({ t: "scene.create", scene: { id: run.caveLoft, name: "Goblin cave", bounds: { w: 20, h: 14 } }, floor: { beside: run.cave, side: "above" } });
+    await ops.send({ t: "scene.update", sceneId: run.caveLoft, patch: { floor: { name: "Cave loft" } } });
+    await ops.send({ t: "scene.create", scene: { id: run.caveTop, name: "Goblin cave", bounds: { w: 20, h: 14 } }, floor: { beside: run.caveLoft, side: "above" } });
+    await waitFor("the cave's floors", () => (dmSocket.state?.scenes[run.caveTop]?.floor?.level === 2 && dmSocket.state.scenes[run.caveLoft]?.floor?.name === "Cave loft" ? true : null));
     const from = [outcomes.dmDesk.problems.length, outcomes.dmPhone.problems.length];
     try {
       for (const [options, out, label] of [
@@ -740,6 +770,7 @@ describe("the room search's sweep", { concurrency: false }, () => {
           await spend(context);
           await rowButton.click();
           await waitFor("the camera on the cave", async () => ((await page.locator(`[data-search-page="scene:${run.cave}"] [aria-current]`).count()) > 0 ? true : null));
+          await showFloorBySearch(page, run.caveLoft, "Cave loft");
           await land(page, dmCases("fight"), `the DM's ${label} in a fight`, out);
         } finally {
           await context.close();
@@ -750,6 +781,8 @@ describe("the room search's sweep", { concurrency: false }, () => {
       await ops.send({ t: "clock.stop" });
       await ops.send({ t: "view.blackout", blackout: false });
       await ops.send({ t: "handout.show", handout: { id: run.shown, assetId: run.letter, title: "Belak's letter", to: "all" } });
+      await ops.send({ t: "scene.delete", sceneId: run.caveTop });
+      await ops.send({ t: "scene.delete", sceneId: run.caveLoft });
     }
     assert.deepEqual([...outcomes.dmDesk.problems.slice(from[0]), ...outcomes.dmPhone.problems.slice(from[1])], []);
   });
