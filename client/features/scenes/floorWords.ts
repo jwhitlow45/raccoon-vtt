@@ -47,11 +47,25 @@ export function floorsTopFirst(view: Pick<View, "scenes">, sceneId: string): Sce
   return floorsOf(view, sceneId).slice().reverse();
 }
 
-/** The group's folded summary: "One floor" or "3 floors · Upper floor shown", the floor on screen. */
+/**
+ * The tag on the floor on the DM's screen. "Shown" read as shown to players beside Show to players and Hide from
+ * players (D-261108-379), so the words say where the floor is: on this screen.
+ */
+export const ON_SCREEN = "On screen";
+
+/** The floor page's button that puts the floor on the DM's own screen, named apart from Show to players (D-261108-380). */
+export const GO_TO_FLOOR = "Go to this floor";
+
+/** A floor row's accessible name: "Upper floor, Not reached yet, on screen. Open its page". */
+export function floorRowLabel(name: string, mark: string, onScreen: boolean): string {
+  return `${name}, ${mark}${onScreen ? `, ${ON_SCREEN.toLowerCase()}` : ""}. Open its page`;
+}
+
+/** The group's folded summary: "One floor" or "3 floors · Upper floor on screen". */
 export function floorsSummary(floors: readonly Scene[], shownId: string | null): string {
   if (floors.length < 2) return "One floor";
   const shown = floors.find((f) => f.id === shownId);
-  return shown?.floor ? `${floors.length} floors · ${shown.floor.name} shown` : `${floors.length} floors`;
+  return shown?.floor ? `${floors.length} floors · ${shown.floor.name} ${ON_SCREEN.toLowerCase()}` : `${floors.length} floors`;
 }
 
 /** Under This scene, once the scene has floors: every other group sets the floor on screen. */

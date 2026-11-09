@@ -85,15 +85,15 @@ async function floorsGroup(page: Page): Promise<Locator> {
   return group;
 }
 
-/** Shows the DM a floor of Tower: its page's Show this floor, then back to the list. */
+/** Shows the DM a floor of Tower: its page's Go to this floor, then back to the list. */
 async function showFloorNamed(name: string): Promise<void> {
   const group = await floorsGroup(dm);
   const back = dm.locator(floorRoot("page")).getByRole("button", { name: "Back to Floors" });
   if ((await back.count()) > 0) await back.click();
   await floorRow(group, name).click();
-  await dm.locator(floorRoot("page")).getByRole("button", { name: "Show this floor" }).click();
+  await dm.locator(floorRoot("page")).getByRole("button", { name: "Go to this floor" }).click();
   await dm.locator(floorRoot("page")).getByRole("button", { name: "Back to Floors" }).click();
-  await waitFor(`${name} shown`, async () => ((await floorRow(group, name).getAttribute("aria-label"))?.includes(", shown") ? true : null));
+  await waitFor(`${name} on screen`, async () => ((await floorRow(group, name).getAttribute("aria-label"))?.includes(", on screen") ? true : null));
 }
 
 /** A floor's row in the group, whatever its mark: named for the floor. */
@@ -224,11 +224,11 @@ describe("raccoon-vtt several floors: the DM's building side", { timeout: 900_00
     await page.getByRole("button", { name: "Move up" }).click();
     await waitFor("Upper floor above Ground", () => (floorNamed("Upper floor")?.floor?.level === 1 ? true : null));
 
-    // Back to Floors lists them top first, the floor on screen marked shown.
+    // Back to Floors lists them top first, the floor on screen marked on screen.
     await page.getByRole("button", { name: "Back to Floors" }).click();
     group = await floorsGroup(dm);
     const rows = await group.getByRole("listitem").getByRole("button").evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")));
-    assert.deepEqual(rows, ["Upper floor, Not reached yet, shown. Open its page", "Ground floor, Not reached yet. Open its page"]);
+    assert.deepEqual(rows, ["Upper floor, Not reached yet, on screen. Open its page", "Ground floor, Not reached yet. Open its page"]);
     await shots.take(dm, "flrb-1-floors-group");
 
     // A second add below Ground, and one more above Upper floor: each goes beside the floor on screen, and the reducer names them without a clash.
@@ -312,12 +312,13 @@ describe("raccoon-vtt several floors: the DM's building side", { timeout: 900_00
     await waitFor("Attic hidden", () => (state().openFloors?.[atticId] === undefined ? true : null));
     await page.getByText("Players have not reached this floor.", { exact: true }).waitFor();
 
-    // Show this floor looks at it. The group's row says it is shown.
-    await page.getByRole("button", { name: "Show this floor" }).click();
+    // Go to this floor looks at it. The group's row says it is on screen, in its tag and its name.
+    await page.getByRole("button", { name: "Go to this floor" }).click();
     await page.getByRole("button", { name: "Back to Floors" }).click();
     group = await floorsGroup(dm);
     await floorRow(group, "Attic").filter({ hasText: "Attic" }).waitFor();
-    assert.match((await floorRow(group, "Attic").getAttribute("aria-label")) ?? "", /, shown\./);
+    assert.match((await floorRow(group, "Attic").getAttribute("aria-label")) ?? "", /, on screen\./);
+    await floorRow(group, "Attic").getByText("On screen", { exact: true }).waitFor();
 
     // Remove: the first tap arms, the second removes the floor with everything on it. Undo brings it back.
     await floorRow(group, "Attic").click();

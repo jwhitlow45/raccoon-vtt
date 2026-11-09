@@ -8097,7 +8097,7 @@ function floorsRootTests(): void {
             const back = scenes.locator(floorRoot("page")).getByRole("button", { name: "Back to Floors" });
             if ((await back.count()) > 0) await back.click();
             await scenes.locator(floorRoot("group")).getByRole("button", { name: new RegExp(`^${name},`) }).click();
-            await scenes.locator(floorRoot("page")).getByRole("button", { name: "Show this floor" }).click();
+            await scenes.locator(floorRoot("page")).getByRole("button", { name: "Go to this floor" }).click();
             await scenes.locator(floorRoot("page")).getByRole("button", { name: "Back to Floors" }).click();
             await closeSheets(page);
           };

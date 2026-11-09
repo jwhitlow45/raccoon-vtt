@@ -90,9 +90,11 @@ describe("a scene with floors in the Scenes panel", () => {
 
   test("the Floors group lists the floors top first with where the players stand", () => {
     const html = draw(world("g"), "g");
-    const order = ["Roof, Not reached yet", "Upper floor, Not reached yet", "Ground floor, Players here, shown"].map((name) => html.indexOf(`aria-label="${name}. Open its page"`));
+    const order = ["Roof, Not reached yet", "Upper floor, Not reached yet", "Ground floor, Players here, on screen"].map((name) => html.indexOf(`aria-label="${name}. Open its page"`));
     assert.ok(order.every((at) => at >= 0), order.join());
     assert.ok(order[0]! < order[1]! && order[1]! < order[2]!);
+    assert.equal(html.match(/>On screen</g)?.length, 1, "the floor on screen wears the tag, never Shown beside Show to players");
+    assert.doesNotMatch(html, />Shown</);
     assert.match(html, /data-floors="group"/);
   });
 

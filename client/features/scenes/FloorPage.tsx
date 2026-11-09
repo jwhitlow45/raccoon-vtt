@@ -11,7 +11,7 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { FLOOR_ROOT_ATTR, FLOOR_ROOTS } from "../floors/ids.ts";
 import { ConfirmButton } from "./controls.tsx";
-import { floorsTopFirst, heightOf, hideRefusal, orderAfterMove, PLAYERS_LINES, playersAt, removeRefusal, SHOW_HELP, stepHeight } from "./floorWords.ts";
+import { floorsTopFirst, GO_TO_FLOOR, heightOf, hideRefusal, orderAfterMove, PLAYERS_LINES, playersAt, removeRefusal, SHOW_HELP, stepHeight } from "./floorWords.ts";
 
 /**
  * One floor's page inside the Floors group (docs/design/design-v1-floors.md
@@ -59,7 +59,7 @@ export function FloorPage(props: { floor: Scene; selectName: boolean; onBack(): 
 
   return (
     <div {...{ [FLOOR_ROOT_ATTR]: FLOOR_ROOTS.page }} style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
-      {/* Back stands alone: Show this floor, pressed, below says which floor is on screen, and a tag beside Back would set a 20 px pill against a 44 px button. */}
+      {/* Back stands alone: Go to this floor, pressed, below says which floor is on screen, and a tag beside Back would set a 20 px pill against a 44 px button. */}
       <div style={{ justifySelf: "start" }}>
         <Button size="sm" icon="back" onClick={props.onBack}>
           Back to Floors
@@ -87,7 +87,7 @@ export function FloorPage(props: { floor: Scene; selectName: boolean; onBack(): 
         </div>
         <Help id={open && hide !== null ? reasonId : undefined}>{open && hide !== null ? hide : SHOW_HELP}</Help>
       </div>
-      {/* Show this floor moves the DM's view, not the floor, so it has a row apart from the stack's two moves, where it never wraps alone under them. */}
+      {/* Go to this floor moves the DM's view, not the floor, so it has a row apart from the stack's two moves, where it never wraps alone under them. */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
         <Button size="sm" icon="arrowUp" search="scenes.floor.order" disabled={level >= floors.length - 1} onClick={() => order(true)}>
           Move up
@@ -98,7 +98,7 @@ export function FloorPage(props: { floor: Scene; selectName: boolean; onBack(): 
       </div>
       <div style={{ justifySelf: "start" }}>
         <Button size="sm" search="scenes.floor.show" pressed={shown} onClick={() => actions.showFloor(floor.id)}>
-          Show this floor
+          {GO_TO_FLOOR}
         </Button>
       </div>
       <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>

@@ -8,7 +8,7 @@ import type { RoomState } from "#shared/model.ts";
 import { FLOOR_HEIGHT } from "#shared/protocol.ts";
 import { room, scene, token } from "#shared/testutil.ts";
 import { FLOOR_SEARCH } from "../floors/ids.ts";
-import { addRefusal, FLOOR_MARKS, floorSettingsLine, floorsSummary, floorsTopFirst, heightOf, hideRefusal, orderAfterMove, playersAt, removeRefusal, stepHeight } from "./floorWords.ts";
+import { addRefusal, FLOOR_MARKS, floorRowLabel, floorSettingsLine, floorsSummary, floorsTopFirst, GO_TO_FLOOR, heightOf, hideRefusal, ON_SCREEN, orderAfterMove, playersAt, removeRefusal, stepHeight } from "./floorWords.ts";
 
 /*
  * The Floors group's and a floor's page's words and rules
@@ -85,9 +85,16 @@ describe("the group's lines", () => {
     const state = tower();
     assert.deepEqual(floorsTopFirst(state, "u").map((f) => f.id), ["r", "u", "g"]);
     const floors = floorsTopFirst(state, "u").reverse();
-    assert.equal(floorsSummary(floors, "u"), "3 floors · Upper floor shown");
+    assert.equal(floorsSummary(floors, "u"), "3 floors · Upper floor on screen");
     assert.equal(floorsSummary([scene("x")], "x"), "One floor");
     assert.equal(floorSettingsLine("Upper floor"), "The groups below set Upper floor. Each floor keeps its own.");
+  });
+
+  test("the floor on screen reads On screen, never Shown beside Show to players, and its page goes to it", () => {
+    assert.equal(ON_SCREEN, "On screen");
+    assert.equal(floorRowLabel("Upper floor", "Not reached yet", true), "Upper floor, Not reached yet, on screen. Open its page");
+    assert.equal(floorRowLabel("Attic", "Reached", false), "Attic, Reached. Open its page");
+    assert.equal(GO_TO_FLOOR, "Go to this floor");
   });
 
   test("a ninth floor is refused in the server's words", () => {

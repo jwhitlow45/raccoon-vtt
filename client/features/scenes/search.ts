@@ -49,7 +49,7 @@ export const SCENES_ENTRIES: readonly CatalogEntry[] = [
   setting(FLOORS, "scenes.floor.height", "Height above the floor below", { names: ["floor height", "storey height"], when: (ctx) => (viewing(ctx)?.floor?.level ?? 0) > 0 }),
   action(FLOORS, "scenes.floor.players", "Show a floor to players", { names: ["hide a floor from players", "reveal a floor", "open a floor"], press: false, when: onFloor }),
   action(FLOORS, "scenes.floor.order", "Move a floor up or down", { names: ["reorder the floors"], press: false, when: onFloor }),
-  action(FLOORS, "scenes.floor.show", "Show this floor", { names: ["switch floor", "look at a floor"], press: false, when: onFloor }),
+  action(FLOORS, "scenes.floor.show", "Go to this floor", { names: ["switch floor", "look at a floor"], press: false, when: onFloor }),
   action(FLOORS, "scenes.floor.remove", "Remove floor", { names: ["delete a floor"], press: false, when: onFloor }),
   section(at(LIGHT), "scenes.light", SCENE_GROUP_LABELS.light, { when: shown }),
   setting(LIGHT, "scenes.light.level", "Light level", {

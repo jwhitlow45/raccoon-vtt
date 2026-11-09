@@ -8,7 +8,7 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { FLOOR_ROOT_ATTR, FLOOR_ROOTS } from "../floors/ids.ts";
 import { FloorPage } from "./FloorPage.tsx";
-import { addRefusal, FLOOR_MARKS, floorsSummary, floorsTopFirst, playersAt } from "./floorWords.ts";
+import { addRefusal, FLOOR_MARKS, floorRowLabel, floorsSummary, floorsTopFirst, ON_SCREEN, playersAt } from "./floorWords.ts";
 import { SCENE_GROUP_ICONS, SCENE_GROUP_LABELS } from "./settingsFolds.ts";
 
 type Side = "above" | "below";
@@ -90,7 +90,7 @@ export function FloorsGroup(props: { scene: Scene; fold: { open: boolean; onTogg
                     <li key={floor.id} style={{ borderTop: i === 0 ? undefined : `${theme.line.border}px solid ${theme.color.border}` }}>
                       <button
                         type="button"
-                        aria-label={`${name}, ${mark}${shown ? ", shown" : ""}. Open its page`}
+                        aria-label={floorRowLabel(name, mark, shown)}
                         onClick={() => setPage({ id: floor.id, selectName: false })}
                         style={{
                           width: "100%",
@@ -112,7 +112,7 @@ export function FloorsGroup(props: { scene: Scene; fold: { open: boolean; onTogg
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight }}>{name}</span>
                           <span style={{ fontSize: theme.font.small, lineHeight: theme.leading.tight, color: theme.color.textMuted }}>{mark}</span>
                         </span>
-                        {shown ? <Tag tone="muted">Shown</Tag> : null}
+                        {shown ? <Tag tone="muted">{ON_SCREEN}</Tag> : null}
                       </button>
                     </li>
                   );
