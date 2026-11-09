@@ -1,4 +1,4 @@
-import type { Encounter, PathStop, Token, TokenPath, TurnStart } from "../model.ts";
+import type { Encounter, PathPrior, PathStop, Token, TokenPath, TurnStart } from "../model.ts";
 import { MAX_PATH_CORNERS, MAX_PATH_STOPS } from "../protocol.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
 import { footprintSize, isSqueezed, occupiedHexes, snapStep, type PlacedToken } from "./footprint.ts";
@@ -14,6 +14,12 @@ import { hexPiece, hexPieceSpots, hexRouteFeet, legSteps, routeFeet, routeLattic
  * A path lives on its token, tagged with the turn it belongs to, so a move
  * writes only the token and the turn passing writes nothing. A path whose
  * tag is not the turn under way counts as empty wherever it is read.
+ *
+ * Its stops are the turn's legs on the floor the creature stands on. What
+ * the turn took on floors it left is summed in `prior`
+ * (docs/design/design-v1-floors.md phase 2, 5): each helper here that
+ * counts stops counts this floor's alone, and a reader adds `prior` once,
+ * or starts its 5-10-5 count from it.
  */
 
 /** Where a token stands, as a path counts it. Facing is not movement. */
@@ -89,6 +95,7 @@ export function reshapeLeg(a: PathStop, b: PathStop, now: { w: number; h: number
  */
 export function withStop(path: TokenPath, stop: PathStop, now?: { w: number; h: number }, walk?: Walked): TokenPath {
   const stops = [...path.stops, stop];
+  const start = priorDiag(path);
   while (stops.length > MAX_PATH_STOPS) {
     let i = 1;
     while (i < stops.length - 1 && !(oneSize(stops[i - 1]!, stops[i]!, now) && oneSize(stops[i]!, stops[i + 1]!, now))) i++;
@@ -99,11 +106,58 @@ export function withStop(path: TokenPath, stop: PathStop, now?: { w: number; h: 
     // A joined leg was carried only when both its legs were (docs/design/design-v1-attach.md 7.2).
     if (corner.carried !== true) delete joined.carried;
     if (corner.seen !== true || corner.joinedUnseen === true) joined.joinedUnseen = true;
-    if (walk) joinWalked(stops, i, joined, walk);
+    if (walk) joinWalked(stops, i, joined, walk, start);
     stops.splice(i, 2, joined);
   }
   if (walk) capCorners(stops);
-  return { turn: path.turn, stops };
+  return keepPrior(path, stops);
+}
+
+/** A path of the same turn with these stops, keeping what earlier floors took (`prior`). */
+export function keepPrior(path: Pick<TokenPath, "turn" | "prior">, stops: PathStop[]): TokenPath {
+  return path.prior ? { turn: path.turn, prior: path.prior, stops } : { turn: path.turn, stops };
+}
+
+/** The 5-10-5 count the turn's earlier floors left (`prior.diag`), where this floor's count runs on from. */
+export function priorDiag(path: Pick<TokenPath, "prior"> | null | undefined): DiagonalCounter {
+  const diag = path?.prior?.diag;
+  return { h: diag?.[0] ?? 0, v: diag?.[1] ?? 0 };
+}
+
+/** The same for what players who do not own the creature could count (`prior.seenDiag`). */
+export function priorSeenDiag(path: Pick<TokenPath, "prior"> | null | undefined): DiagonalCounter {
+  const diag = path?.prior?.seenDiag;
+  return { h: diag?.[0] ?? 0, v: diag?.[1] ?? 0 };
+}
+
+/**
+ * The path's legs on this floor folded into `prior`
+ * (docs/design/design-v1-floors.md phase 2, 5.3): the feet walked and
+ * taken by its counted legs, their 5-10-5 diagonals, and those players who
+ * do not own it could count (publicCounters), each added to what earlier
+ * floors left, so every reader counts each leg exactly once. `token` is
+ * the creature as it stood on this floor, whose size a stop without a
+ * footprint was made at. The stored path's, which holds the marks of who
+ * saw each stop.
+ */
+export function foldPrior(g: Grid, token: PlacedToken, path: TokenPath, rules: DistanceSettings): PathPrior {
+  const was = path.prior;
+  const start = priorDiag(path);
+  const counter = { ...start };
+  let moved = 0;
+  let cost = 0;
+  for (let i = 1; i < path.stops.length; i++) {
+    if (path.stops[i]!.uncounted === true) continue;
+    const t = legTaken(g, token, path.stops[i - 1]!, path.stops[i]!, rules, counter);
+    moved += t.moved;
+    cost += t.cost;
+    counter.h += t.diag[0];
+    counter.v += t.diag[1];
+  }
+  const seen = publicCounters(g, token, path.stops, rules, true, priorSeenDiag(path));
+  const prior: PathPrior = { moved: (was?.moved ?? 0) + moved, cost: (was?.cost ?? 0) + cost, seenDiag: [seen.h, seen.v] };
+  if (counter.h !== 0 || counter.v !== 0) prior.diag = [counter.h, counter.v];
+  return prior;
 }
 
 /**
@@ -121,10 +175,10 @@ export type Walked = { token: PlacedToken; rules: DistanceSettings; grid: Grid }
  * place. Its corners are both legs' with the one that goes, and it was seen
  * whole only when both legs were and that corner was seen.
  */
-function joinWalked(stops: readonly PathStop[], i: number, joined: PathStop, walk: Walked): void {
+function joinWalked(stops: readonly PathStop[], i: number, joined: PathStop, walk: Walked, start: DiagonalCounter): void {
   const corner = stops[i]!;
   const next = stops[i + 1]!;
-  const counter = pathCounters(walk.grid, walk.token, stops.slice(0, i), walk.rules);
+  const counter = pathCounters(walk.grid, walk.token, stops.slice(0, i), walk.rules, start);
   const a = legTaken(walk.grid, walk.token, stops[i - 1]!, corner, walk.rules, counter);
   if (corner.uncounted !== true) {
     counter.h += a.diag[0];
@@ -168,9 +222,14 @@ export function legTaken(g: Grid, token: PlacedToken, from: PathStop, to: PathSt
   return to.cost !== undefined ? { ...geometry, cost: to.cost } : geometry;
 }
 
-/** The true 5-10-5 counters after these stops' counted legs: the sum of their diagonals, a leg that does not count taking none. */
-export function pathCounters(g: Grid, token: PlacedToken, stops: readonly PathStop[], rules: DistanceSettings): DiagonalCounter {
-  const counter = { h: 0, v: 0 };
+/**
+ * The true 5-10-5 counters after these stops' counted legs: the sum of
+ * their diagonals, a leg that does not count taking none, run on from
+ * `start`, which a reader gives as the count earlier floors left
+ * (priorDiag).
+ */
+export function pathCounters(g: Grid, token: PlacedToken, stops: readonly PathStop[], rules: DistanceSettings, start: DiagonalCounter = { h: 0, v: 0 }): DiagonalCounter {
+  const counter = { h: start.h, v: start.v };
   for (let i = 1; i < stops.length; i++) {
     if (stops[i]!.uncounted === true) continue;
     const t = legTaken(g, token, stops[i - 1]!, stops[i]!, rules, counter);
@@ -334,10 +393,12 @@ function sizedAt(token: PlacedToken, stop: PathStop): PlacedToken {
  * the creature saw whole, read from their geometry, the stop and its
  * corners. So which diagonal of a new route costs 10 ft never depends on a
  * leg only the owners saw. `stored` says the stops are the DM's, which
- * hold the marks of who saw what.
+ * hold the marks of who saw what. The count runs on from `start`, which a
+ * reader gives as what players could count on earlier floors
+ * (priorSeenDiag).
  */
-export function publicCounters(g: Grid, token: PlacedToken, stops: readonly PathStop[], rules: DistanceSettings, stored: boolean): DiagonalCounter {
-  const counter = { h: 0, v: 0 };
+export function publicCounters(g: Grid, token: PlacedToken, stops: readonly PathStop[], rules: DistanceSettings, stored: boolean, start: DiagonalCounter = { h: 0, v: 0 }): DiagonalCounter {
+  const counter = { h: start.h, v: start.v };
   for (let i = 1; i < stops.length; i++) {
     if (stops[i]!.uncounted === true || !seenWhole(stops, i, stored)) continue;
     const t = legGeometry(g, token, stops[i - 1]!, stops[i]!, rules, counter);

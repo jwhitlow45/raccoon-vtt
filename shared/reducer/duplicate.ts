@@ -1,5 +1,5 @@
 import { holderTileKey, keys, tileKey } from "../keys.ts";
-import type { AreaTemplate, Drawing, Effect, Label, Light, Pin, RoomState, Scene, Stamp, Token, Trap, TrapAction } from "../model.ts";
+import type { AreaTemplate, Drawing, Effect, FloorLink, Label, Light, Pin, RoomState, Scene, Stamp, Token, Trap, TrapAction } from "../model.ts";
 import { gridOfScene, hash128, inSightOfNonOwners } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { footprintRect } from "../rules/footprint.ts";
@@ -14,7 +14,7 @@ import { floorsOf } from "../rules/floors.ts";
  * Duplicate a scene (docs/design/design-v1-maps-vision.md section 3.2), in one op.
  *
  * The map with its phases, the build, labels, stamps, lights, map pins
- * (wave 5) and traps are always copied. A copied pin keeps its page, so it reaches
+ * (wave 5), traps and the stairs between its floors are always copied. A copied pin keeps its page, so it reaches
  * exactly whom the original does. Monsters, NPCs and objects, player characters, the fog and the
  * drawings with placed areas come along when the op says so.
  *
@@ -69,6 +69,17 @@ export function sceneDuplicate(tx: Tx, op: OpOf<"scene.duplicate">): void {
     }
   }
   for (const floor of floors) copyFloor(tx, op, floor.id, floor.to, copied);
+
+  // Stairs and ladders come with the floors they join, on the copies of both, each pair placed by this op
+  // (docs/design/design-v1-floors.md phase 2, 3).
+  const floorCopies = new Map(floors.map((floor) => [floor.id, floor.to]));
+  for (const link of sortedById(Object.values(s.floorLinks ?? {}))) {
+    const sceneId = floorCopies.get(link.sceneId);
+    const far = floorCopies.get(link.to);
+    if (sceneId === undefined || far === undefined) continue;
+    const id = fresh(s.floorLinks ?? {}, copyId(link.id));
+    tx.write(keys.floorLink(id), { ...link, id, rev: 0, sceneId, to: far, pair: copyId(link.pair), made: tx.env.seq } satisfies FloorLink);
+  }
 }
 
 /** One floor's contents onto its copy: the build and the records on it, the tokens `copied` names, and the fog and drawings the op asks for. */

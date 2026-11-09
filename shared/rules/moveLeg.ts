@@ -9,6 +9,7 @@ import type { Point } from "./geom.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
 import { hexDistance, hexLine } from "./hex.ts";
 import { sameScene } from "./floors.ts";
+import { climbKeepsSqueeze } from "./floorLinks.ts";
 import { footing, footprintGround } from "./heights.ts";
 import { groundUnder, hexFullStop, landing, legSpots, legStop, offGridWallThrough, storedBuild, walkEnd, type MovingToken } from "./movement.ts";
 import { fileRoutes, followerTrace, hexFileClasses, hexFileRoutes, pieceReach, routeWalkers, walkSqueezes, type RoutePoint, type WalkTrace } from "./route.ts";
@@ -135,6 +136,15 @@ function namedMoves(op: Op, before: RoomState, env: Versioned): Named[] {
       const token = ownEntry(before.tokens, op.tokenId);
       if (!token || op.x === undefined || op.y === undefined || !attaches(env.opVersion)) return [];
       return [straight(token, { sceneId: token.sceneId, x: op.x, y: op.y, elevation: op.elevation ?? token.elevation }, "walk")];
+    }
+    case "token.climb": {
+      // The same squares of the far floor, on the ground its end keeps (docs/design/design-v1-floors.md phase 2, 3).
+      const token = ownEntry(before.tokens, op.tokenId);
+      const link = ownEntry(before.floorLinks, op.linkId);
+      const far = link && ownEntry(before.floorLinks, link.pair);
+      if (!token || !link || !far || link.sceneId !== token.sceneId) return [];
+      const named = straight(token, { sceneId: link.to, x: token.x, y: token.y, elevation: far.ground }, "climb");
+      return [climbKeepsSqueeze(before, token, link) ? { ...named, squeezed: true } : named];
     }
     default:
       return [];
@@ -405,7 +415,8 @@ function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: 
   const pass = isPublic ? "public" : "private";
   const ox = member.x - holder.from.x;
   const oy = member.y - holder.from.y;
-  if (holder.how === "teleport" && !onHolder(kind)) return null;
+  // A climb takes what sits on it up or down with it and lets go of what it drags, as a teleport does (docs/design/design-v1-floors.md phase 2, 3).
+  if ((holder.how === "teleport" || holder.how === "climb") && !onHolder(kind)) return null;
   // In single file, or on a trap's cut where the trap step judged it, its own walk, whatever its link (review FU45B-ASTRA-11).
   const own = how.file ?? how.kept;
   // Its holder's walk, held at its last point where the private pass stopped it short, so a walk of its own runs to its end: the

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { PathStop, RoomState, Token, Viewer } from "./model.ts";
+import type { RoomState, Token, Viewer } from "./model.ts";
 import { canApply, mayMoveToken, touchLanding } from "./permissions.ts";
 import { inSightOfNonOwners, projectState } from "./project.ts";
 import type { Op } from "./protocol.ts";
@@ -9,7 +9,7 @@ import { pathThisTurn } from "./rules/path.ts";
 import { findRouteOn } from "./rules/hexWalk.ts";
 import { isHex, sceneGrid, SQUARES } from "./rules/grid.ts";
 import { hexSubcells, sceneHexes } from "./rules/hex.ts";
-import { groupWalkWorld, publicToken } from "./rules/walkWorld.ts";
+import { groupWalkWorld, publicToken, type TurnStops } from "./rules/walkWorld.ts";
 import { env } from "./testutil.ts";
 
 /**
@@ -126,13 +126,13 @@ export function assertMembership(state: RoomState, view: RoomState, who: Viewer,
   }
 }
 
-/** The creature's stops this turn as a device holds them (client/features/measure/movement.ts pathNow). */
-function stopsNow(view: RoomState, token: Token, role: Viewer["role"]): readonly PathStop[] {
+/** The creature's path this turn as a device holds it (client/features/measure/movement.ts pathNow), with what earlier floors took. */
+function stopsNow(view: RoomState, token: Token, role: Viewer["role"]): TurnStops {
   const e = view.encounter;
   if (!e || !token.path || e.activeEntryId === null) return [];
-  if (e.turnStart?.entryId === e.activeEntryId) return pathThisTurn(e, token)?.stops ?? [];
+  if (e.turnStart?.entryId === e.activeEntryId) return pathThisTurn(e, token) ?? [];
   if (role === "dm") return [];
-  return e.entries.find((x) => x.id === e.activeEntryId)?.tokenId === token.id ? token.path.stops : [];
+  return e.entries.find((x) => x.id === e.activeEntryId)?.tokenId === token.id ? token.path : [];
 }
 
 /**

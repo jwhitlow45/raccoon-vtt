@@ -1,12 +1,13 @@
 import { keys } from "../keys.ts";
-import { attaches, healRevivesDead, keepsLairTick, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers, syncsFromDdb, walksRoutes } from "../migrate.ts";
+import { attaches, floorLinksOps, healRevivesDead, keepsLairTick, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers, syncsFromDdb, walksRoutes } from "../migrate.ts";
 import type { Actor, AreaTemplate, Character, ClassResource, DdbSync, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
 import { gridOfToken, inSightOfNonOwners, seenAtEvery, seenMark } from "../project.ts";
 import { MAX_RULER_STOPS, SYNC_AT_AHEAD, syncAtAhead, syncStamp, type ActorPatch, type CharacterPatch, type DdbSyncPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
 import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/footprint.ts";
-import { pathCounters, pathThisTurn, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
+import { foldPrior, keepPrior, pathCounters, pathThisTurn, priorDiag, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
+import { sameScene } from "../rules/floors.ts";
 import { hexRouteFeet, onTrace, routeFeet, routePoints, routeWalk, routeWalkBeforeV14, routeWalkers, straightCost, type LegCost, type RoutePiece, type RoutePoint, type WalkTrace } from "../rules/route.ts";
 import { planMove, type MovedToken } from "../rules/moveLeg.ts";
 import { holderOf, linkHolds, walkerFor } from "../rules/attach.ts";
@@ -313,7 +314,7 @@ function updateCompanion(tx: Tx, token: Token, next: Token, p: TokenPatch): void
 }
 
 /** An attached area follows its token, to another scene too, rather than staying behind at a stale origin. */
-function areasFollow(tx: Tx, tokenId: string, sceneId: string): void {
+export function areasFollow(tx: Tx, tokenId: string, sceneId: string): void {
   for (const template of sortedById(Object.values(tx.state.templates))) {
     if (template.attachedTo === tokenId) tx.write(keys.template(template.id), { ...template, sceneId });
   }
@@ -523,7 +524,12 @@ export function dismounted(tx: Tx, rider: Token, next: Token, mount: Token, judg
  * turn passing writes no token, so the first move of a turn finds no path
  * of this turn and starts one where the turn began. A move outside its
  * turn, or to another scene, drops the path, which counts as empty by then
- * anyway. A change of facing alone is not movement and leaves it be.
+ * anyway. A move to another floor of the same scene, by an op of the
+ * stairs' version (floorLinksOps), folds the turn's legs into the path's
+ * `prior` and starts the path again where it lands
+ * (docs/design/design-v1-floors.md phase 2, 5.3): a climb's own leg, `climb`,
+ * follows as a second stop on the same spot. A change of facing alone is
+ * not movement and leaves it be.
  *
  * A change of the footprint is not movement either
  * (docs/design/design-v1-token-window.md 8.7) where it is not a move: a resize,
@@ -539,15 +545,26 @@ export function dismounted(tx: Tx, rider: Token, next: Token, mount: Token, judg
  * footprint now unless it holds its own. Ops stored before version 6 did
  * neither (`resizeStop`), and replay as they were.
  */
-export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, uncounted = false, route?: readonly RoutePiece[], carried?: Pick<MovedToken, "route" | "trace">, cost?: number): Token {
-  if (after.sceneId !== before.sceneId) return withoutPath(after);
+export function withPath(
+  tx: Tx,
+  before: Token,
+  after: Token,
+  judged: Judged,
+  uncounted = false,
+  route?: readonly RoutePiece[],
+  carried?: Pick<MovedToken, "route" | "trace">,
+  cost?: number,
+  climb?: { moved: number; cost: number },
+): Token {
+  const floors = after.sceneId !== before.sceneId;
+  if (floors && !(floorLinksOps(tx.env.opVersion) && sameScene(tx.state, before.sceneId, after.sceneId))) return withoutPath(after);
   const from = footprintSize(before);
   const to = footprintSize(after);
   const sinceV6 = resizeStop(tx.env.opVersion);
   const resized = (from.w !== to.w || from.h !== to.h) && sinceV6;
   const reshaped = resized || (sinceV6 && isSqueezed(before) !== isSqueezed(after));
   const inPlace = sameSpot(before, after);
-  if (!reshaped && inPlace) return after;
+  if (!floors && !reshaped && inPlace) return after;
   const encounter = tx.state.encounter;
   let turn = turnUnderWay(encounter);
   if (!turn) {
@@ -562,7 +579,8 @@ export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, un
   // A controlled mount sharing its rider's turn moves on its own path then (docs/design/design-v1-attach.md 7.2), from op version 14.
   const mount = turn.tokenId !== after.id && attaches(tx.env.opVersion) && sharesTurn(tx.state, after.id, turn);
   // A mount's path this turn outlives a move that shares no turn, which records nothing, so a remount the same turn goes on with it (7.2).
-  if (turn.tokenId !== after.id && !mount) return attaches(tx.env.opVersion) && before.path?.turn === turn.seq ? after : withoutPath(after);
+  // On another floor its stops would lie on the floor it left, so a change of floor drops it, as a change of scene does.
+  if (turn.tokenId !== after.id && !mount) return !floors && attaches(tx.env.opVersion) && before.path?.turn === turn.seq ? after : withoutPath(after);
   // A row that marks time had its movement on its rider's turn, so its moves there are outside its turn (7.1).
   if (!mount && attaches(tx.env.opVersion) && marksTime(encounter, turn.entryId)) return withoutPath(after);
   // Since op version 13 every leg records what it took, and full paths join by those sums (walksRoutes).
@@ -570,6 +588,7 @@ export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, un
   // A mount's path starts where it stood before its first move this turn, since the turn's start is its rider's.
   const first = !mount && turn.sceneId === before.sceneId ? [startStop(turn)] : [];
   let path: TokenPath = before.path?.turn === turn.seq ? before.path : { turn: turn.seq, stops: first };
+  if (floors) return { ...after, path: foldedPath(tx, path, before, after, judged, mount, walked!, carried === undefined ? climb : undefined) };
   // Every move of the creature this turn is a leg, so the last stop is where it stood. The check keeps a stop from being skipped if not.
   const last = path.stops[path.stops.length - 1];
   if (!last || !sameSpot(last, before)) {
@@ -581,7 +600,7 @@ export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, un
   let stop = stopAt(judged.after(), after, tx.env);
   if (reshaped) {
     const old = stopFootprint(before);
-    path = { turn: path.turn, stops: path.stops.map((s): PathStop => (s.footprint ? s : { ...s, footprint: old })) };
+    path = keepPrior(path, path.stops.map((s): PathStop => (s.footprint ? s : { ...s, footprint: old })));
   }
   if (walked) stop = walkedStop(tx, path, stop, before, after, judged, route, carried);
   // Getting on or off a mount costs what the rules say whatever the leg (docs/design/design-v1-attach.md 7.3), set before the stop joins the path.
@@ -590,6 +609,26 @@ export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, un
   if (carried) stop = { ...stop, uncounted: true, carried: true };
   const counts = !resized && !(reshaped && inPlace) && !uncounted;
   return { ...after, path: withStop(path, counts ? stop : { ...stop, uncounted: true }, to, walked) };
+}
+
+/**
+ * The path after a change of floor within one scene
+ * (docs/design/design-v1-floors.md phase 2, 5.2, 5.3): the legs so far, the
+ * step from the last stop to where it stood included, go into `prior`, and
+ * the path starts again where it lands, marked seen by the same rule as any
+ * stop. A climb adds its own leg as a second stop on that spot, holding the
+ * climb's feet, which no viewer reads from geometry: two stops on one spot
+ * are 0 ft apart, so players who do not own it learn no height.
+ */
+function foldedPath(tx: Tx, path: TokenPath, before: Token, after: Token, judged: Judged, mount: boolean, walked: Walked, climb: { moved: number; cost: number } | undefined): TokenPath {
+  const last = path.stops[path.stops.length - 1];
+  if (!last || !sameSpot(last, before)) {
+    const gap = stopAt(judged.before, before, tx.env);
+    path = withStop(path, mount && last ? { ...gap, uncounted: true } : gap, undefined, walked);
+  }
+  const prior = foldPrior(gridOfToken(tx.state, before), before, path, walked.rules);
+  const landing = stopAt(judged.after(), after, tx.env);
+  return { turn: path.turn, prior, stops: climb ? [landing, { ...landing, moved: climb.moved, cost: climb.cost }] : [landing] };
 }
 
 /**
@@ -653,7 +692,8 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
   const rules = tx.state.meta.settings;
   const grid = gridOfToken(tx.state, after);
   const from = path.stops[path.stops.length - 1]!;
-  const counter = pathCounters(grid, after, path.stops, rules);
+  // The 5-10-5 count runs on from what the turn's earlier floors took (docs/design/design-v1-floors.md phase 2, 5.4).
+  const counter = pathCounters(grid, after, path.stops, rules, priorDiag(path));
   const walker = walkerFor(tx.state, before, seenNow(tx), { opVersion: tx.env.opVersion, to: after });
   let taken: LegCost;
   // The walk's trace (route.ts WalkTrace): its own, its route's or the straight leg's, or its holder's taking it along.
@@ -757,7 +797,7 @@ export function tokenCountLeg(tx: Tx, op: OpOf<"token.countLeg">): void {
   // A carried leg counted is the table's choice, and loses its mark, so no refusal says how the leg was made (7.2).
   const { uncounted: _uncounted, carried: _carried, ...counted } = last;
   const stops = [...path.stops.slice(0, -1), op.counts ? counted : { ...counted, uncounted: true as const }];
-  tx.write(keys.token(token.id), { ...token, path: { turn: path.turn, stops } });
+  tx.write(keys.token(token.id), { ...token, path: keepPrior(path, stops) });
 }
 
 export function characterCreate(tx: Tx, op: OpOf<"character.create">): void {

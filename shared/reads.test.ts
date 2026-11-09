@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { uuidv7 } from "./ids.ts";
-import { projectState } from "./project.ts";
+import { ANA, ATTIC, GROUND, UPPER, tower, withStairs } from "./floorLinksTestutil.ts";
+import type { RoomState } from "./model.ts";
+import { projectState, type ProjectedState } from "./project.ts";
 import { reads, satisfies } from "./reads.ts";
-import { DM, P1, P2, actor, blockOf, character, companionBlock, customMonster, entry, reveal, room, token } from "./testutil.ts";
+import { applyOp } from "./reducer.ts";
+import { DM, P1, P2, actor, blockOf, character, companionBlock, customMonster, entry, env, reveal, room, token } from "./testutil.ts";
 
 function setup() {
   const state = room();
@@ -408,5 +411,52 @@ describe("the room's clock (docs/design/design-v1-calendar.md 6.3, CAL-1)", () =
       assert.ok(predicts(op, { ...setup(), clock: clock(false) }, P1), `${op.t} hidden`);
       assert.ok(predicts(op, { ...setup(), clock: clock(true) }, P1), `${op.t} shared`);
     }
+  });
+});
+
+describe("a climb's reads (docs/design/design-v1-floors.md phase 2, 6.4)", () => {
+  const climbOp = (linkId: string) => ({ t: "token.climb" as const, tokenId: "thorn", linkId });
+  const dmCopy = (s: RoomState) => ({ ...projectState(s, DM, { sceneId: GROUND }), floorLinks: s.floorLinks! }) as unknown as ProjectedState;
+  const withHeight = (s: RoomState, height: number | undefined): RoomState => {
+    const { height: _h, ...floor } = s.scenes[UPPER]!.floor!;
+    return { ...s, scenes: { ...s.scenes, [UPPER]: { ...s.scenes[UPPER]!, floor: height === undefined ? floor : { ...floor, height } } } };
+  };
+
+  test("the DM viewing the tower predicts it up and down, the upper floor's height read where stored and 10 ft where not", () => {
+    for (const height of [20, undefined]) {
+      const up = withHeight(withStairs(tower()), height);
+      const copy = dmCopy(up);
+      assert.ok(satisfies(reads(climbOp("l1"), copy as unknown as RoomState), copy, DM, { sceneId: GROUND }), `up, ${height}`);
+      const predicted = applyOp(copy as unknown as RoomState, climbOp("l1"), DM, env(5));
+      assert.ok(predicted.ok);
+      const down = applyOp(up, climbOp("l1"), DM, env(5));
+      assert.ok(down.ok);
+      const above = dmCopy(down.state);
+      assert.ok(satisfies(reads(climbOp("l2"), above as unknown as RoomState), above, DM, { sceneId: GROUND }), `down, ${height}`);
+    }
+  });
+
+  test("a player holding both ends, or the DM viewing another scene, waits for the server", () => {
+    const s = withStairs(tower());
+    const { pair: _p1, to: _t1, ground: _g1, made: _m1, ...l1 } = s.floorLinks!.l1!;
+    const { pair: _p2, to: _t2, ground: _g2, made: _m2, ...l2 } = s.floorLinks!.l2!;
+    // As a player's copy holding Upper floor too would carry them, with `to` while they hold it.
+    const copy = { ...projectState(s, ANA, { sceneId: null }), floorLinks: { l1: { ...l1, to: UPPER, dir: "up" }, l2: { ...l2, to: GROUND, dir: "down" } } } as unknown as ProjectedState;
+    assert.ok(!satisfies(reads(climbOp("l1"), copy as unknown as RoomState), copy, ANA, { sceneId: null }));
+    const elsewhere = { ...projectState(s, DM, { sceneId: "s2" }), floorLinks: s.floorLinks! } as unknown as ProjectedState;
+    assert.ok(!satisfies(reads(climbOp("l1"), elsewhere as unknown as RoomState), elsewhere, DM, { sceneId: "s2" }));
+    // A copy without the end reads nothing to climb by.
+    const bare = projectState(s, DM, { sceneId: GROUND });
+    assert.ok(!satisfies(reads(climbOp("l1"), bare as unknown as RoomState), bare, DM, { sceneId: GROUND }));
+  });
+
+  test("placing, changing and removing stairs predict for the DM viewing the tower", () => {
+    const s = withStairs(tower());
+    const copy = dmCopy(s);
+    const opts = { sceneId: GROUND };
+    assert.ok(satisfies(reads({ t: "floorLink.put", link: { id: "l3", pairId: "l4", sceneId: UPPER, to: ATTIC, rect: { x: 8, y: 8, w: 1, h: 1 }, kind: "ladder" } }, copy as unknown as RoomState), copy, DM, opts));
+    assert.ok(satisfies(reads({ t: "floorLink.update", linkId: "l1", patch: { locked: true } }, copy as unknown as RoomState), copy, DM, opts));
+    assert.ok(satisfies(reads({ t: "floorLink.delete", linkId: "l2" }, copy as unknown as RoomState), copy, DM, opts));
+    assert.ok(!satisfies(reads({ t: "floorLink.put", link: { id: "l3", pairId: "l4", sceneId: UPPER, to: ATTIC, rect: { x: 8, y: 8, w: 1, h: 1 }, kind: "ladder" } }, copy as unknown as RoomState), copy, DM, { sceneId: "s2" }));
   });
 });

@@ -220,3 +220,18 @@ describe("the same public world on every device (5.5, review MV-O-1 and MV-O-10)
     }, true);
   });
 });
+
+describe("a route after a climb (docs/design/design-v1-floors.md phase 2, 5.4)", () => {
+  test("starts its 5-10-5 count from what players could count on floors left, as the server counted it", () => {
+    const state = room({ tokens: { hero: token("hero", { x: 2, y: 2 }) } });
+    state.meta = { ...state.meta, settings: { ...state.meta.settings, diagonal: "fiveTen" } };
+    const hero = ownWalk(state.tokens.hero!);
+    const landing: PathStop = { x: 2, y: 2, elevation: 0 };
+    // A player who does not own it gets `{ seenDiag }` alone, with no stops on this floor at times.
+    assert.deepEqual(publicWorld(state, hero, { role: "player" }, { stops: [], prior: { seenDiag: [1, 0] } }).input.counter, { h: 1, v: 0 });
+    assert.deepEqual(publicWorld(state, hero, { role: "player" }, { stops: [landing, landing], prior: { seenDiag: [0, 1] } }).input.counter, { h: 0, v: 1 });
+    // A plain list of stops carries none.
+    assert.deepEqual(publicWorld(state, hero, { role: "player" }, [landing]).input.counter, { h: 0, v: 0 });
+    assert.deepEqual(groupWalkWorld(state, hero, { role: "player" }, { stops: [], prior: { seenDiag: [1, 0] } }).input.counter, { h: 1, v: 0 });
+  });
+});

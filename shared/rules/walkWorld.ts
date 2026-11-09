@@ -1,11 +1,11 @@
-import type { AreaSlows, AreaTemplate, BuildChunk, Effect, PathStop, RoomState, Token } from "../model.ts";
+import type { AreaSlows, AreaTemplate, BuildChunk, Effect, PathStop, RoomState, Token, TokenPath } from "../model.ts";
 import { inSightOfNonOwners, isPartyMember, perPlayerScene, playersSeeGround, projectChunkForPlayer, seenAllMarked, sharedGround, withheldWhereItStands } from "../project.ts";
 import { computeCoverage, creaturesInArea, type AreaContext, type AreaToken } from "./aoe.ts";
 import { carriedGroup, dragExtra, onHolder, publicMembers } from "./attach.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
 import { footprintRect, occupiedHexes, sizeCategory, sizeSteps, verticalExtentFt } from "./footprint.ts";
 import { INCAPACITATING_KEYS } from "./hp.ts";
-import { publicCounters } from "./path.ts";
+import { priorSeenDiag, publicCounters } from "./path.ts";
 import type { Walker } from "./movement.ts";
 import { followerTrace } from "./route.ts";
 import type { WalkArea, WalkCreature, WalkInput } from "./walk.ts";
@@ -164,11 +164,18 @@ function publicAreas(state: RoomState, sceneId: string, seen: (id: string) => To
 }
 
 /**
- * The public world for a walk by `token` on its scene, as this device sees
- * it. `stops` are the creature's earlier stops this turn as this viewer
- * holds them, for the public counters, or none outside a turn.
+ * The creature's earlier stops this turn as this viewer holds them, for the
+ * public counters, or none outside a turn: a list of stops, or the turn's
+ * path itself, whose `prior` holds what players could count on floors it
+ * has left (docs/design/design-v1-floors.md phase 2, 5.4).
  */
-export function publicWorld(state: RoomState, token: Token & Walker, viewer: WalkViewer, stops: readonly PathStop[] = [], opts: WorldOptions = {}): PublicWorld {
+export type TurnStops = readonly PathStop[] | Pick<TokenPath, "stops" | "prior">;
+
+/**
+ * The public world for a walk by `token` on its scene, as this device sees
+ * it. `stops` are the creature's earlier stops this turn (TurnStops).
+ */
+export function publicWorld(state: RoomState, token: Token & Walker, viewer: WalkViewer, stops: TurnStops = [], opts: WorldOptions = {}): PublicWorld {
   const scene = ownEntry(state.scenes, token.sceneId);
   const rules: DistanceSettings = { feetPerCell: state.meta.settings.feetPerCell, diagonal: state.meta.settings.diagonal };
   const blocks = scene?.blockMovement === true;
@@ -214,7 +221,8 @@ export function publicWorld(state: RoomState, token: Token & Walker, viewer: Wal
     creatures,
     areas,
     prone: publicKeys(state, token).has("prone"),
-    counter: publicCounters(grid, token, stops, rules, viewer.role === "dm"),
+    // The 5-10-5 count runs on from what players could count on floors the creature left this turn.
+    counter: "stops" in stops ? publicCounters(grid, token, stops.stops, rules, viewer.role === "dm", priorSeenDiag(stops)) : publicCounters(grid, token, stops as readonly PathStop[], rules, viewer.role === "dm"),
   };
   return { input, spaces, halfSpeed, areaCtx };
 }
@@ -231,7 +239,7 @@ export function publicWorld(state: RoomState, token: Token & Walker, viewer: Wal
  * beside it walk each step with it (WalkInput `towed`), so its route is one
  * they all fit through (4.2, review LP12-AT-2).
  */
-export function groupWalkWorld(state: RoomState, token: Token & Walker, viewer: WalkViewer, stops: readonly PathStop[] = [], opts: WorldOptions = {}): PublicWorld {
+export function groupWalkWorld(state: RoomState, token: Token & Walker, viewer: WalkViewer, stops: TurnStops = [], opts: WorldOptions = {}): PublicWorld {
   const shown = shownBy(state, viewer, opts);
   const seen = (t: { id: string }) => {
     const other = ownEntry(state.tokens, t.id);

@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { PathStop } from "../model.ts";
+import type { PathStop, TokenPath } from "../model.ts";
 import { stopFootprint } from "./footprint.ts";
 import { COLUMNS, ROWS } from "./hexWalls.testkit.ts";
 import { SQUARES } from "./grid.ts";
 import { hexStandPlace } from "./movement.ts";
 import { hexRouteFeet, routeFeet } from "./route.ts";
 import { MAX_PATH_STOPS } from "../protocol.ts";
-import { legGeometry, oneSize, publicCounters, reshapeLeg, stopsForNonOwners, stopsForOwners, withStop } from "./path.ts";
+import { foldPrior, keepPrior, legGeometry, oneSize, pathCounters, priorDiag, priorSeenDiag, publicCounters, reshapeLeg, stopsForNonOwners, stopsForOwners, withStop } from "./path.ts";
 
 /**
  * A path's stops each keep the size the creature had there
@@ -142,5 +142,38 @@ describe("a visible route's corners keep their own stand (LP26-RIDE-1)", () => {
       assert.deepEqual(legGeometry(SQUARES, token, from, to, rules, zero), { ...stored, cost: stored.moved });
       assert.deepEqual(publicCounters(SQUARES, token, [from, to], rules, true), { h: stored.diag[0], v: stored.diag[1] });
     }
+  });
+});
+
+describe("what earlier floors took (docs/design/design-v1-floors.md phase 2, 5.3, 5.4)", () => {
+  const rules = { feetPerCell: 5, diagonal: "fiveTen" as const };
+  const token = { size: "medium" as const, x: 0, y: 0 };
+  const stop = (x: number, y: number, more: Partial<PathStop> = {}): PathStop => ({ x, y, elevation: 0, seen: true, ...more });
+
+  test("a fold sums this floor's counted legs onto prior, its diagonals and those players saw", () => {
+    const path = { turn: 2, stops: [stop(0, 0), stop(1, 1, { moved: 5, cost: 5, diag: [1, 0], routeSeen: true }), stop(4, 1, { moved: 15, cost: 30 }), stop(5, 1, { moved: 5, cost: 5, uncounted: true })] };
+    assert.deepEqual(foldPrior(SQUARES, token, path, rules), { moved: 20, cost: 35, diag: [1, 0], seenDiag: [1, 0] });
+    const again = { turn: 2, prior: { moved: 20, cost: 35, diag: [1, 0] as [number, number], seenDiag: [1, 0] as [number, number] }, stops: [stop(5, 1), stop(5, 1, { moved: 10, cost: 10 })] };
+    assert.deepEqual(foldPrior(SQUARES, token, again, rules), { moved: 30, cost: 45, diag: [1, 0], seenDiag: [1, 0] });
+    // A diagonal no player saw whole is the owners' alone.
+    const unseen = { turn: 2, stops: [stop(0, 0), stop(1, 1, { moved: 5, cost: 5, diag: [1, 0] })] };
+    assert.deepEqual(foldPrior(SQUARES, token, unseen, rules), { moved: 5, cost: 5, diag: [1, 0], seenDiag: [0, 0] });
+  });
+
+  test("the counters run on from prior, and every path writer keeps it", () => {
+    const prior = { moved: 5, cost: 5, diag: [1, 0] as [number, number], seenDiag: [1, 0] as [number, number] };
+    const path = { turn: 2, prior, stops: [stop(0, 0)] };
+    assert.deepEqual(priorDiag(path), { h: 1, v: 0 });
+    assert.deepEqual(priorSeenDiag(path), { h: 1, v: 0 });
+    assert.deepEqual(priorDiag({}), { h: 0, v: 0 });
+    assert.deepEqual(pathCounters(SQUARES, token, path.stops, rules, priorDiag(path)), { h: 1, v: 0 });
+    assert.deepEqual(publicCounters(SQUARES, token, path.stops, rules, true, priorSeenDiag(path)), { h: 1, v: 0 });
+    assert.equal(withStop(path, stop(1, 0)).prior, prior);
+    assert.equal(keepPrior(path, []).prior, prior);
+    assert.equal("prior" in keepPrior({ turn: 2 }, []), false);
+    // A full path joins its oldest corner and keeps prior too.
+    let full: TokenPath = path;
+    for (let i = 1; i <= MAX_PATH_STOPS; i++) full = withStop(full, stop(i, 0, { moved: 5, cost: 5 }), undefined, { token, rules, grid: SQUARES });
+    assert.equal(full.prior, prior);
   });
 });

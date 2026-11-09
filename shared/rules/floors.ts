@@ -178,12 +178,32 @@ export const FLOOR_WORDS = {
  * to n - 1, their names are unique, there are at most
  * LIMITS.floorsPerScene, `of` names a main floor whose `of` is itself, a
  * lone scene has no `floor`, and opened marks lie on floors of scenes with
- * floors. Run on the server's own state only, in the actor beside the
- * limits and on import, never in the reducer, so a device's replay on its
- * copy never meets it. A gone `sceneId` checks the floors and marks that
- * still name it.
+ * floors. Then the stairs and ladders between them hold (floorLinkRules,
+ * docs/design/design-v1-floors.md phase 2, 3). Run on the server's own
+ * state only, in the actor beside the limits and on import, never in the
+ * reducer, so a device's replay on its copy never meets it. A gone
+ * `sceneId` checks the floors, marks and stairs that still name it.
  */
 export function floorProblem(state: RoomState, sceneId: SceneId): string | null {
+  return floorsProblem(state, sceneId) ?? floorLinkRules.problem(state, sceneId);
+}
+
+/**
+ * The stairs' half of floorProblem (rules/floorLinks.ts linksProblem, docs/design/design-v1-floors.md
+ * phase 2, 3), which that file sets as it loads. This file cannot import it:
+ * limits.ts imports this one, sight's arithmetic check reads everything
+ * limits.ts imports (segments.test.ts), and the stairs' wall test reads
+ * walls.ts. Every caller of floorProblem loads the reducer, which loads it,
+ * and until then it refuses to answer, so the check is never skipped.
+ */
+export const floorLinkRules: { problem: (state: RoomState, sceneId: SceneId) => string | null } = {
+  problem: () => {
+    throw new Error("floorProblem needs shared/rules/floorLinks.ts loaded");
+  },
+};
+
+/** floorProblem's floor invariants, without the stairs. */
+function floorsProblem(state: RoomState, sceneId: SceneId): string | null {
   const scene = ownEntry(state.scenes, sceneId);
   const main = scene?.floor?.of ?? sceneId;
   const group = Object.values(state.scenes).filter((s) => s.id === main || s.floor?.of === main || (scene !== undefined && s.id === scene.id));
