@@ -30,6 +30,7 @@ function filled(): View {
     state.fogTiles[`${floor}:0,0`] = { sceneId: floor, tx: 0, ty: 0 } as never;
     state.exploredTiles[`${floor}:1,0`] = { sceneId: floor, tx: 1, ty: 0 } as never;
     state.fogDrafts[floor] = { sceneId: floor } as never;
+    (state.floorLinks ??= {})[`k${n}`] = { id: `k${n}`, sceneId: floor } as never;
   }
   const view = asView(state) as unknown as Record<string, unknown>;
   view.sight = { [`${TOWER}:0,0`]: {}, [`${UPPER}:0,0`]: {} };
@@ -80,6 +81,7 @@ describe("the board's cut (floorView)", () => {
     assert.deepEqual(Object.keys(cut.buildChunks!), [`${UPPER}:0,0`]);
     assert.deepEqual(Object.keys(cut.fogDrafts!), [UPPER]);
     assert.deepEqual(Object.keys(cut.sight!), [`${UPPER}:0,0`]);
+    assert.deepEqual(Object.keys(cut.floorLinks!), ["k1"], "the ends on the floor shown alone (docs/design/design-v1-floors.md phase 2, 11)");
     for (const whole of ["scenes", "characters", "members", "meta", "encounter", "log", "handouts"]) {
       assert.equal(cut[whole], (view as unknown as Record<string, unknown>)[whole], `${whole} stays whole`);
     }

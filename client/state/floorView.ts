@@ -8,8 +8,8 @@ export type RoomViewState = NonNullable<RoomView["view"]>;
 
 type Entries = Readonly<Record<string, unknown>>;
 
-/** The collections whose entries each stand on one floor by their own `sceneId`. */
-const BY_RECORD = ["tokens", "labels", "templates", "drawings", "stamps", "lights", "pins", "traps"] as const;
+/** The collections whose entries each stand on one floor by their own `sceneId`. A stairs or ladder end lies on its own floor, as its pair lies on the other. */
+const BY_RECORD = ["tokens", "labels", "templates", "drawings", "stamps", "lights", "pins", "traps", "floorLinks"] as const;
 
 /** The collections keyed `"<sceneId>:..."`: build chunks and the fog, explored and sight tiles. */
 const BY_KEY = ["buildChunks", "fogTiles", "exploredTiles", "sight", "sightAll", "fogAll", "exploredAny"] as const;
@@ -69,11 +69,11 @@ function cutOf(kind: Cut, all: Entries, sceneId: SceneId, prev: Entries | undefi
 /**
  * The cut of the whole view that the board reads (docs/design/design-v1-floors.md
  * 10, D-261107-224): the floor-scoped collections (tokens, chunks, fog,
- * explored and sight tiles, labels, stamps, lights, pins, traps, templates,
- * drawings, the fog draft and the sight holders) cut to the floor shown,
- * `sceneId`, and every other part of `view` as it is. `prev` is the last
- * cut, whose collections it shares while they hold the same entries, so a
- * layer that reads one renders only when it changes.
+ * explored and sight tiles, labels, stamps, lights, pins, traps, stairs and
+ * ladders, templates, drawings, the fog draft and the sight holders) cut to
+ * the floor shown, `sceneId`, and every other part of `view` as it is.
+ * `prev` is the last cut, whose collections it shares while they hold the
+ * same entries, so a layer that reads one renders only when it changes.
  *
  * A view that holds nothing of another floor is its own cut: a scene of one
  * floor's, which holds that one scene's records as it did before floors, so
