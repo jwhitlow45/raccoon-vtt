@@ -211,10 +211,11 @@ const LinkMark = memo(function LinkMark(props: { link: FloorLink; scenes: Readon
           ctx.setLineDash([]);
         }}
       />
+      {/* On the bottom right corner, clear of the name over the top edge. */}
       {locked ? (
         <>
-          <Circle x={o.x + o.w} y={o.y} radius={r} fill={boardTheme.color.overlay} stroke={color} strokeWidth={1.5} strokeScaleEnabled={false} listening={false} />
-          <Path data={LOCK_PATH} x={o.x + o.w - 12 * k} y={o.y - 12 * k} scaleX={k} scaleY={k} stroke={color} strokeWidth={2} strokeScaleEnabled={false} lineCap="round" lineJoin="round" listening={false} />
+          <Circle x={o.x + o.w} y={o.y + o.h} radius={r} fill={boardTheme.color.overlay} stroke={color} strokeWidth={1.5} strokeScaleEnabled={false} listening={false} />
+          <Path data={LOCK_PATH} x={o.x + o.w - 12 * k} y={o.y + o.h - 12 * k} scaleX={k} scaleY={k} stroke={color} strokeWidth={2} strokeScaleEnabled={false} lineCap="round" lineJoin="round" listening={false} />
         </>
       ) : null}
       {pill ? <MarkPill {...pill} scale={scale} color={color} /> : null}
