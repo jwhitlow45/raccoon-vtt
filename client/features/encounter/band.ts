@@ -72,6 +72,13 @@ export const STRIP_NAME_MIN_PX = 40;
 /** The acting creature's name always keeps this much of the band's row: two or three letters and the ellipsis, at the band's 16 px. */
 export const BAND_NAME_MIN_PX = 36;
 
+/**
+ * The name column's least on a player's own turn: "Your turn" stands under the
+ * name in the band, at the 12 px small size, and is read whole, never as "Your t…"
+ * (LP32-POLISH e). Measured 59 px, rounded up.
+ */
+export const BAND_YOUR_TURN_PX = 60;
+
 /** The most Next disks the band shows, room allowing. */
 export const BAND_MAX_DISKS = 4;
 
@@ -140,7 +147,8 @@ export function bandFit(input: { width: number; round: number; timer: BandTimer;
   const timer = input.timer === "none" ? 0 : gap + (input.timer === "over" ? ROW.timeUp : clockWidth(input.timer.clock));
   // The DM's Next never gives way or stacks (one short word), so it counts as an End turn that is already stacked or not at all.
   const end = (stacked: boolean) => (input.endTurn ? gap + (stacked ? ROW.endTurnStacked : ROW.endTurn) : input.dmNext ? gap + ROW.dmNext : 0);
-  const base = ROW.gutters + ROW.portrait + gap + ROW.nameFrame + BAND_NAME_MIN_PX + timer + ROW.slack;
+  const nameLeast = input.endTurn ? BAND_YOUR_TURN_PX : BAND_NAME_MIN_PX;
+  const base = ROW.gutters + ROW.portrait + gap + ROW.nameFrame + nameLeast + timer + ROW.slack;
   const room = input.width - base - round - end(false);
   if (room >= 0) {
     const disks = Math.floor((room - gap - ROW.nextLabel) / (ROW.diskGap + ROW.disk));

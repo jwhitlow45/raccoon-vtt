@@ -67,10 +67,11 @@ describe("bandFit (LPD-DMPHONE-2)", () => {
   });
 
   test("a player's own turn at 130%: the round gives way, then End turn stacks its words", () => {
-    assert.deepEqual(fit(390, 1.3, { timer: "over", endTurn: true }), { disks: 0, round: false, stackEnd: false });
+    assert.deepEqual(fit(390, 1.3, { timer: "over", endTurn: true }), { disks: 0, round: false, stackEnd: true }, "Your turn under the name keeps its 60 px (LP32-POLISH e)");
     assert.deepEqual(fit(360, 1.3, { timer: "over", endTurn: true }), { disks: 0, round: false, stackEnd: true });
     assert.deepEqual(fit(320, 1.3, { timer: "over", endTurn: true }), { disks: 0, round: false, stackEnd: true });
-    assert.deepEqual(fit(320, 1.3, { endTurn: true }), { disks: 0, round: true, stackEnd: false }, "without the timer everything fits");
+    assert.deepEqual(fit(320, 1.3, { endTurn: true }), { disks: 0, round: false, stackEnd: false }, "without the timer the round gives way, so Your turn reads whole beside End turn (LP32-POLISH e)");
+    assert.deepEqual(fit(360, 1.3, { endTurn: true }), { disks: 0, round: true, stackEnd: false });
     assert.deepEqual(fit(390, 1, { timer: "over", endTurn: true }), { disks: 0, round: true, stackEnd: false });
   });
 

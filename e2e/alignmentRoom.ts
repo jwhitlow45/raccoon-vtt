@@ -10427,6 +10427,32 @@ async function qolFightScreens(sweep: Sweep, page: Page, at: { size: Size; scale
   if (at.size.width < 900 && !(await visible(band))) sweep.lines.push(`${sweep.at} qe-band: a phone's fight has no band with Next`);
 }
 
+/**
+ * The words a box cuts: a text that an ellipsis shortens, or one that lies
+ * past the edge of an ancestor that clips across. The alignment sweep
+ * measures positions, which a cut word keeps, so a band that reads
+ * "Your t…" needs this check beside it (LP32-POLISH e).
+ */
+async function cutWords(scope: Locator): Promise<string[]> {
+  return scope.evaluate((root) => {
+    const cut: string[] = [];
+    for (const el of Array.from(root.querySelectorAll<HTMLElement>("*"))) {
+      if (el.children.length > 0 || !(el.textContent ?? "").trim() || el.closest("[aria-hidden='true'][data-rvtt-ghost]")) continue;
+      const own = getComputedStyle(el);
+      if (own.textOverflow === "ellipsis" && el.scrollWidth > el.clientWidth + 1) cut.push(`${el.textContent} (ellipsis)`);
+      const box = el.getBoundingClientRect();
+      for (let up = el.parentElement; up && up !== root.parentElement; up = up.parentElement) {
+        const x = getComputedStyle(up).overflowX;
+        if (x !== "hidden" && x !== "clip") continue;
+        const edge = up.getBoundingClientRect();
+        if (box.right > edge.right + 1 || box.left < edge.left - 1) cut.push(`${el.textContent} (past its box)`);
+        break;
+      }
+    }
+    return cut;
+  });
+}
+
 /** Waits out a turn notice's flare, a pill that stands in the row for TURN_NOTICE_MS and is not this sweep's (see the qe-d step). */
 async function afterFlare(page: Page): Promise<void> {
   await waitFor("the turn notice's flare to settle", async () => ((await page.locator("header[data-rvtt-topbar] .rvtt-turn-notice").count()) === 0 ? true : null), 8_000);
@@ -10444,7 +10470,10 @@ async function qolPatScreens(sweep: Sweep, page: Page, at: { size: Size; scale: 
   await afterFlare(page);
   await sweep.measure(page, "qe-pat-bar", barRow(page));
   const band = turnBand(page);
-  if (await visible(band)) await sweep.measure(page, "qe-pat-band", band);
+  if (await visible(band)) {
+    await sweep.measure(page, "qe-pat-band", band);
+    for (const words of await cutWords(band)) sweep.lines.push(`${sweep.at} qe-pat-band: ${words} is cut on his own turn`);
+  }
   await sweep.measure(page, "qe-chip-you", barChip(page, "you"));
   const menu = await openChipMenu(page, "you", "you");
   if (menu) {

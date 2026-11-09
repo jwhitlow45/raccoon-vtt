@@ -29,7 +29,7 @@ import { sheetOpen } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { announceTurn, unlockAudioOnTap } from "./alerts.ts";
 import { AutoRollWatch } from "./autoState.ts";
-import { BAND_MAX_DISKS, BAND_NAME_MIN_PX, bandFit, STRIP_FACES, STRIP_NAME_PX, STRIP_NAME_YOURS_PX, TURN_BAND_PX, useTopBars, type BandTimer, type TurnPlacement } from "./band.ts";
+import { BAND_MAX_DISKS, BAND_NAME_MIN_PX, BAND_YOUR_TURN_PX, bandFit, STRIP_FACES, STRIP_NAME_PX, STRIP_NAME_YOURS_PX, TURN_BAND_PX, useTopBars, type BandTimer, type TurnPlacement } from "./band.ts";
 import { clockText, type TimerState } from "./timer.ts";
 import { useConfirmedSeq, useRowFacts, useSortedEntries, useTurnTimer, useYou } from "./hooks.ts";
 import {
@@ -354,7 +354,7 @@ function Band(props: { notice: boolean; onTurn?(turn: TurnFacts): void }) {
         style={{
           flex: 1,
           // A few letters of the name stay, and what stands beside it gives way first (band.ts bandFit).
-          minWidth: BAND_NAME_MIN_PX + 2 * PILL_PAD,
+          minWidth: (!dm && yours ? BAND_YOUR_TURN_PX : BAND_NAME_MIN_PX) + 2 * PILL_PAD,
           display: "grid",
           gridTemplateColumns: "minmax(0, 1fr)",
           /*
