@@ -20,7 +20,7 @@ import { RoomScope } from "../../../state/scope.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { DeviceLineView, nextWords, SceneSoundLine, TableSound, UseWhatsPlaying } = await import("./NowPlaying.tsx");
+const { DeviceLineView, MusicVolume, nextWords, SceneSoundLine, TableSound, UseWhatsPlaying } = await import("./NowPlaying.tsx");
 const { LoopToggles } = await import("./LoopsSection.tsx");
 const { Board } = await import("./EffectsBoard.tsx");
 const { PlayerNow, PlayerSound } = await import("./PlayerSound.tsx");
@@ -117,6 +117,17 @@ describe("Table sound (docs/design/design-v1-sound-layout.md 4.2 and 7)", () => 
       ]);
       assert.doesNotMatch(html.replace(/What everyone at the table hears[^<]*/, ""), /for everyone/);
     }
+  });
+
+  test("the chip's music volume shows its whole name, and drops for everyone while only the DM's devices sound", () => {
+    const base = room().meta;
+    const slider = (meta: RoomState["meta"]) => inRoom(createElement(MusicVolume), room({ sounds, playing, meta }));
+    const name = (html: string) => [...html.matchAll(/aria-label="(Music volume[^"]*)"/g)].map((m) => m[1]);
+    assert.deepEqual(name(slider(base)), ["Music volume for everyone"]);
+    assert.match(slider(base), /<label[^>]*>Music volume for everyone<\/label>/);
+    const dmOnly = slider({ ...base, settings: { ...base.settings, soundDmOnly: true } });
+    assert.deepEqual(name(dmOnly), ["Music volume"]);
+    assert.match(dmOnly, /<label[^>]*>Music volume<\/label>/);
   });
 
   test("then the scene's line with Use what's playing, and the names switch last", () => {
