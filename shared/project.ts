@@ -54,6 +54,7 @@ import {
   type StairDir,
   type StairMark,
   type TerrainId,
+  type PathPrior,
   type PathStop,
   type Token,
   type TokenPath,
@@ -1445,6 +1446,13 @@ function linkShown(ctx: Ctx, token: Token): Token["attached"] | null {
  * reads the turn's earlier legs as the move stores them (review
  * AT-HIDDENPATH). Owners get every stop, and other players only those they
  * could see (rules/path.ts). Neither gets the marks of who could see.
+ *
+ * What the turn took on floors the creature left (`prior`,
+ * docs/design/design-v1-floors.md phase 2, 4 and 5) goes whole to its
+ * owners. Everyone else gets only the diagonals they could count there,
+ * and only while there is one. Those come even with no stop here they
+ * saw, so a player who may move the creature counts its next diagonal as
+ * the server does.
  */
 function projectPathCtx(ctx: Ctx, token: Token, owner: boolean): TokenPath | null {
   const encounter = ctx.state.encounter;
@@ -1454,7 +1462,23 @@ function projectPathCtx(ctx: Ctx, token: Token, owner: boolean): TokenPath | nul
   const ownTurn = owner && encounter.turnStart?.tokenId === token.id;
   if (!ownTurn && (!entry || !entryShown(ctx, entry))) return null;
   const stops = owner ? ownersStopsCtx(ctx, token, path.stops) : stopsForNonOwners(path.stops, ctx.viewer.memberId);
-  return stops.length > 0 ? { turn: path.turn, stops } : null;
+  const prior = path.prior ? (owner ? ownersPrior(path.prior) : seenPrior(path.prior)) : null;
+  if (stops.length === 0 && prior === null) return null;
+  return prior ? { turn: path.turn, prior, stops } : { turn: path.turn, stops };
+}
+
+function ownersPrior(prior: PathPrior): PathPrior {
+  const out: PathPrior = { seenDiag: [prior.seenDiag[0], prior.seenDiag[1]] };
+  if (prior.moved !== undefined) out.moved = prior.moved;
+  if (prior.cost !== undefined) out.cost = prior.cost;
+  if (prior.diag) out.diag = [prior.diag[0], prior.diag[1]];
+  return out;
+}
+
+/** The diagonals players who do not own the creature could count on floors it left, or null for none, which is no `prior` at all. */
+function seenPrior(prior: PathPrior): PathPrior | null {
+  const [h, v] = prior.seenDiag;
+  return h === 0 && v === 0 ? null : { seenDiag: [h, v] };
 }
 
 /**
