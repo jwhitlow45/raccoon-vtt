@@ -10869,6 +10869,10 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
         const group = page.locator('[role="dialog"][data-bar-mode]');
         await group.getByText("2 selected").waitFor();
         await sweep.measure(page, "qe-group-bar", group);
+        // With both warriors in the fight there is no Add to the fight, and Clear once stood alone across a third line (LP32-POLISH i): More, Delete and Clear share a line.
+        const ends: number[] = [];
+        for (const name of ["More", "Delete", "Clear"]) ends.push(Math.round((await group.getByRole("button", { name, exact: true }).boundingBox())?.y ?? -1));
+        if (new Set(ends).size > 1) sweep.lines.push(`${sweep.at} qe-group-bar: the foot's More, Delete and Clear stand on lines ${ends.join(", ")} px down, so one is alone`);
         await qolGroupSave(sweep, page, group);
         const clear = group.getByRole("button", { name: "Clear", exact: true });
         if (await visible(clear)) await clear.click();
@@ -11061,7 +11065,7 @@ export function qolPanelTests(): void {
     try {
       if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
       for (const w of QOL_WARRIORS) await ops.send({ t: "token.create", token: { id: w.id, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", number: w.number, size: "medium", ...w.at, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
-      await ops.send({ t: "encounter.start", entries: [{ id: fightId, tokenId: QOL_WARRIORS[0].id, value: 20 }, { id: randomUUID(), tokenId: run.ids.thorn, value: 10 }] });
+      await ops.send({ t: "encounter.start", entries: [{ id: fightId, tokenId: QOL_WARRIORS[0].id, value: 20 }, { id: randomUUID(), tokenId: run.ids.thorn, value: 10 }, { id: randomUUID(), tokenId: QOL_WARRIORS[1].id, value: 5 }] });
       await ops.send({ t: "encounter.next" });
       await waitFor("the warrior's turn", () => (dmSocket.state?.encounter?.activeEntryId === fightId ? true : null));
       for (const at of FU30_AT) {

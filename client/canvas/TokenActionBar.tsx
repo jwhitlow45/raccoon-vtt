@@ -843,23 +843,26 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
                 {encounter ? "Add to the fight" : "Start a fight"}
               </BarButton>
             ) : null}
-            {offers.dm ? (
-              <BarButton ref={moreButton} icon="more" iconOnly always onClick={() => setMore(true)}>
-                More
+            {/* The three icon buttons wrap as one, so a row that runs out never leaves Clear alone across a line of its own (LP32-POLISH i). */}
+            <span data-bar-ends="" style={{ display: "flex", flex: ROW_BUTTON_FLEX, flexWrap: "wrap", gap: theme.space(1) }}>
+              {offers.dm ? (
+                <BarButton ref={moreButton} icon="more" iconOnly always onClick={() => setMore(true)}>
+                  More
+                </BarButton>
+              ) : null}
+              {offers.dm ? (
+                <DeleteButton
+                  armedText={`Delete ${tokens.length} tokens?`}
+                  onDelete={() => {
+                    send(deleteManyOps(ids));
+                    props.onClose();
+                  }}
+                />
+              ) : null}
+              <BarButton icon="close" iconOnly always onClick={props.onClose}>
+                Clear
               </BarButton>
-            ) : null}
-            {offers.dm ? (
-              <DeleteButton
-                armedText={`Delete ${tokens.length} tokens?`}
-                onDelete={() => {
-                  send(deleteManyOps(ids));
-                  props.onClose();
-                }}
-              />
-            ) : null}
-            <BarButton icon="close" iconOnly always onClick={props.onClose}>
-              Clear
-            </BarButton>
+            </span>
           </ButtonRow>
           {groupSave.confirm}
           {offers.dm && outOfFight > 0 && joinState === "failed" ? <SrdLoadFailed what="The stat blocks" inline /> : null}
