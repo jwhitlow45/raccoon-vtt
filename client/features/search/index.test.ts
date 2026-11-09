@@ -264,6 +264,13 @@ describe("a typed dice formula", () => {
     assert.deepEqual(diceRow(" 2d6 + 3 "), { id: "dice:2d6+3", kind: "dice", title: "Roll 2d6+3", where: "Dice", icon: "dice", act: { t: "roll", formula: "2d6+3" } });
   });
 
+  test("words after the formula are the roll's label and adv or dis its typed advantage, as the Dice field reads them (LP32-POLISH c)", () => {
+    assert.deepEqual(diceRow("2d6+3 fire"), { id: "dice:2d6+3 fire", kind: "dice", title: "Roll 2d6+3 fire", where: "Dice", icon: "dice", act: { t: "roll", formula: "2d6+3", label: "fire" } });
+    const adv = diceRow("1d20+5 advantage hit");
+    assert.equal(adv?.title, "Roll 1d20+5 adv hit");
+    assert.deepEqual(adv?.act, { t: "roll", formula: "1d20+5", label: "hit", sources: [{ kind: "adv", from: "typed" }] });
+  });
+
   test("its row comes first, above the entries the words match", () => {
     const view = DM_VIEW();
     const catalog: Catalog = { entries: [{ id: "action:loot", kind: "action", title: "Roll 2d6 for loot", where: "", icon: "dice", act: { t: "open", route: { panel: "dice" } } }], fields: [], panels: {} };
@@ -273,7 +280,7 @@ describe("a typed dice formula", () => {
   });
 
   test("anything else is no row", () => {
-    for (const text of ["dmg", "d", "2", "3d", "dex save", "1d20+5 fire", "d20 please", "2d0"]) assert.equal(diceRow(text), null, text);
+    for (const text of ["dmg", "d", "2", "3d", "dex save", "2d0", "2d6+ fire", "1d20 ".concat("x".repeat(200))]) assert.equal(diceRow(text), null, text);
   });
 });
 

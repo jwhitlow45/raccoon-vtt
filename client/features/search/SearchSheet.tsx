@@ -33,7 +33,8 @@ import type { OutlineRow } from "../outliner/rows.ts";
 import type { PanelsForOptions } from "../panels.ts";
 import { dmCatalog, type DmCatalogState } from "./dmCatalog.ts";
 import type { SearchAct, SearchEntry, SearchRoute } from "./entry.ts";
-import { buildIndex, catalogsFor, recordPage, searchResults, type IndexInput, type KeySource, type SearchIndex, type SearchResults } from "./index.ts";
+import type { AdvantageSource } from "#shared/dice/formula.ts";
+import { buildIndex, catalogsFor, recordPage, rollWords, searchResults, type IndexInput, type KeySource, type SearchIndex, type SearchResults } from "./index.ts";
 import { fold, parseQuery } from "./match.ts";
 import { loadRecentPicks, recentPicksSlot, rememberPick } from "./recent.ts";
 import { openAt } from "./route.ts";
@@ -244,7 +245,8 @@ export type PickStep =
   | { t: "floor"; sceneId: string }
   | { t: "condition"; condition: string; remove: boolean }
   | { t: "item"; itemId: string }
-  | { t: "roll"; formula: string }
+  | { t: "roll"; formula: string; label?: string; sources?: AdvantageSource[] }
+  /** The text the Dice field takes: the formula, then any words typed after it. */
   | { t: "fill"; formula: string };
 
 function onlyGoes(route: SearchRoute): SearchRoute {
@@ -270,7 +272,9 @@ export function pickStep(act: SearchAct, only: boolean): PickStep {
     case "item":
       return only ? { t: "route", route: onlyGoes(act.twin) } : { t: "item", itemId: act.itemId };
     case "roll":
-      return only ? { t: "fill", formula: act.formula } : { t: "roll", formula: act.formula };
+      return only
+        ? { t: "fill", formula: [act.formula, ...rollWords(act)].join(" ") }
+        : { t: "roll", formula: act.formula, ...(act.label !== undefined ? { label: act.label } : {}), ...(act.sources ? { sources: act.sources } : {}) };
   }
 }
 
@@ -682,7 +686,7 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
         return;
       case "roll":
         // As the Dice panel's Roll, with its next-roll choices, then the panel, where the roll's line shows.
-        dice.roll([{ formula: step.formula }]);
+        dice.roll([{ formula: step.formula, ...(step.label !== undefined ? { label: step.label } : {}), ...(step.sources ? { sources: step.sources } : {}) }]);
         openAt(scope, ui, DICE);
         close();
         return;

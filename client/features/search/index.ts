@@ -1,4 +1,4 @@
-import { formatFormula, parseFormula } from "#shared/dice/formula.ts";
+import { formatFormula, parseRollText, type AdvantageSource } from "#shared/dice/formula.ts";
 import type { ProjectedActor } from "#shared/project.ts";
 import { floorsOf, mainFloorId, onPlayersScene } from "#shared/rules/floors.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
@@ -419,14 +419,32 @@ function finish(role: SearchRole, b: Builder): SearchIndex {
   return { role, items: b.items, byId: b.byId, suggested };
 }
 
-/** A typed dice formula's row, "Roll 2d6+3", which rolls as the Dice panel's Roll does. Null for anything that is not one. */
+/**
+ * A typed dice formula's row, "Roll 2d6+3 fire", which rolls as the Dice
+ * panel's Roll does: words after the formula are the roll's label and
+ * adv or dis its typed advantage. Null for anything that is not one.
+ */
 export function diceRow(text: string): SearchEntry | null {
   const typed = text.trim();
   if (!/d\d/i.test(typed)) return null;
-  const parsed = parseFormula(typed);
+  const parsed = parseRollText(typed);
   if (!parsed.ok) return null;
   const formula = formatFormula(parsed.formula);
-  return { id: `dice:${formula}`, kind: "dice", title: ROW_WORDS.roll(formula), where: ROW_WORDS.dice, icon: "dice", act: { t: "roll", formula } };
+  const words = rollWords(parsed);
+  return {
+    id: `dice:${[formula, ...words.map((w) => w.toLowerCase())].join(" ")}`,
+    kind: "dice",
+    title: ROW_WORDS.roll([formula, ...words].join(" ")),
+    where: ROW_WORDS.dice,
+    icon: "dice",
+    act: { t: "roll", formula, ...(parsed.label !== undefined ? { label: parsed.label } : {}), ...(parsed.sources.length > 0 ? { sources: parsed.sources } : {}) },
+  };
+}
+
+/** The words a typed roll carries after its formula, in the order the Dice field reads them: advantage sources, then the label. */
+export function rollWords(parsed: { sources?: readonly AdvantageSource[]; label?: string }): string[] {
+  const sources = (parsed.sources ?? []).map((s) => (s.kind === "adv" ? "adv" : "dis"));
+  return [...new Set(sources), ...(parsed.label !== undefined ? [parsed.label] : [])];
 }
 
 export type SearchResults =

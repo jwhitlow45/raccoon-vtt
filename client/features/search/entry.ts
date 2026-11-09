@@ -1,3 +1,4 @@
+import type { AdvantageSource } from "#shared/dice/formula.ts";
 import type { IconName } from "../../components/Icon.tsx";
 
 /**
@@ -67,7 +68,8 @@ export type SearchAct =
   | { t: "condition"; condition: string; remove: boolean }
   /** `twin` is the panel control that does the same, which Shift+Enter goes to without pressing (design-v1-qol.md 5, Acting). */
   | { t: "item"; itemId: string; twin: SearchRoute }
-  | { t: "roll"; formula: string };
+  /** `label` and `sources` are the words typed after the formula, which the Dice panel's Roll reads the same way. */
+  | { t: "roll"; formula: string; label?: string; sources?: AdvantageSource[] };
 
 /** One result the search can find, for one viewer, built from the catalog or from the view this device holds. */
 export type SearchEntry = {

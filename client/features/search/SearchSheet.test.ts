@@ -298,6 +298,9 @@ describe("what a pick does (design-v1-qol.md 5, Acting, D-261106-144)", () => {
     assert.deepEqual(pickStep({ t: "condition", condition: "prone", remove: false }, true), { t: "route", route: { panel: "token", section: "combat" } });
     assert.deepEqual(pickStep({ t: "roll", formula: "2d6+3" }, false), { t: "roll", formula: "2d6+3" });
     assert.deepEqual(pickStep({ t: "roll", formula: "2d6+3" }, true), { t: "fill", formula: "2d6+3" });
+    // Typed words go with the roll, and into the Dice field as typed (LP32-POLISH c).
+    assert.deepEqual(pickStep({ t: "roll", formula: "2d6+3", label: "fire" }, false), { t: "roll", formula: "2d6+3", label: "fire" });
+    assert.deepEqual(pickStep({ t: "roll", formula: "2d6+3", label: "fire" }, true), { t: "fill", formula: "2d6+3 fire" });
   });
 
   test("a condition sends the token bar picker's op, read against the creature now, and never one that changes nothing", () => {
