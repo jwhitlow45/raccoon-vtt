@@ -533,7 +533,7 @@ describe("synced music and sound", { concurrency: false }, () => {
       assert.equal(errors(quiet).length, 0, "Cy's phone plays nothing");
       assert.equal(await cy.evaluate(() => localStorage.getItem("rvtt.roomSound")), "off");
 
-      // Opened again, Room sound is on, and the page waits for a tap: Play here's tap unlocked the last page load only.
+      // Opened again, this device is unmuted, and the page waits for a tap: Play here's tap unlocked the last page load only.
       await bo.reload();
       await bo.getByRole("status", { name: "Connected" }).first().waitFor();
       await soundSays(bo, /^tap/, 8_000);
