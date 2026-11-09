@@ -8,6 +8,7 @@ import { mixerSupported, soundContext, soundUnlock, watchAudio, type AudioSessio
 import { CHECK_MS } from "./settle.ts";
 import { EffectPlayer, type EffectSound, type EffectVoice } from "./effects.ts";
 import { browserLocks, channelName, Handoff, type HandoffAudio, type HandoffPost, type PageKind } from "./handoff.ts";
+import { LoopBlobs } from "./loopBlobs.ts";
 import { SoundMediaSession } from "./mediaSession.ts";
 import { setMusicRetry, setSoundHere, somethingToHear, type MusicHere, type SoundHere } from "./store.ts";
 import { exposeSoundTest, type SoundTestView } from "./testHook.ts";
@@ -117,7 +118,12 @@ export class SoundEngine {
   #timer: ReturnType<typeof setTimeout> | null = null;
   #lastCheck = { perf: 0, ctx: 0 };
   #wasConnected = false;
-  readonly #blobs = new Map<string, string | Promise<void>>();
+  readonly #loopBlobs = new LoopBlobs({
+    fetch: (url, init) => fetch(url, init),
+    createObjectURL: (blob) => URL.createObjectURL(blob),
+    revokeObjectURL: (url) => URL.revokeObjectURL(url),
+    maxBytes: BLOB_LOOP_BYTES,
+  });
   readonly #started: { id: string; at: number; offsetMs: number }[] = [];
   readonly #cleanups: (() => void)[] = [];
   #disposed = false;
@@ -167,7 +173,7 @@ export class SoundEngine {
     this.#media.dispose();
     setMusicRetry(null);
     for (const c of this.#cleanups.splice(0)) c();
-    for (const url of this.#blobs.values()) if (typeof url === "string") URL.revokeObjectURL(url);
+    this.#loopBlobs.dispose();
     this.#gains?.lease.disconnect();
     this.#setAudioSession(false);
     setSoundHere({ here: "off", music: "none" });
@@ -356,34 +362,9 @@ export class SoundEngine {
     return ((Number.isFinite(out) ? out! : 0) + (Number.isFinite(ctx.baseLatency) ? ctx.baseLatency : 0)) * 1000;
   }
 
-  /** A loop of 5 MB or less plays from a blob of its whole file, fetched once, since Safari may not keep range answers (5.3). */
   #url(assetId: string, channel: Channel): string {
     const direct = this.#deps.url(assetId);
-    if (channel !== "loop") return direct;
-    const known = this.#blobs.get(assetId);
-    if (typeof known === "string") return known;
-    if (!known) {
-      const load = (async () => {
-        const abort = new AbortController();
-        try {
-          const res = await fetch(direct, { credentials: "same-origin", signal: abort.signal });
-          const size = Number(res.headers.get("content-length") ?? Infinity);
-          if (!res.ok || !(size <= BLOB_LOOP_BYTES)) {
-            abort.abort();
-            this.#blobs.set(assetId, direct);
-            return;
-          }
-          const blob = await res.blob();
-          if (this.#disposed) return;
-          this.#blobs.set(assetId, URL.createObjectURL(blob));
-        } catch {
-          this.#blobs.set(assetId, direct);
-        }
-      })();
-      this.#blobs.set(assetId, load);
-    }
-    // Until the blob is in, the file streams by Range. The next pass takes the blob.
-    return direct;
+    return channel === "loop" ? this.#loopBlobs.urlFor(assetId, direct) : direct;
   }
 
   #mix(): void {
