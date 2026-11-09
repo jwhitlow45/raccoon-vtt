@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import fc from "fast-check";
 import { STRIP_FACES_FEW, STRIP_NAME_MIN_PX, STRIP_NAME_PX, STRIP_NAME_YOURS_PX } from "../features/encounter/band.ts";
-import { fitKey, fitStep, sameRecord, shapeOf, stepsFor, WIDE_STEPS, type BarContent, type BarShape, type FitRecord } from "./topBarFit.ts";
+import { fitKey, fitStep, sameRecord, shapeOf, stepsFor, WIDE_STEPS, type BarContent, type BarShape, type BarStep, type FitMeasure, type FitRecord } from "./topBarFit.ts";
 import { FLOOR_NAME_MAX_PX } from "../features/floors/bar.ts";
 
 /*
@@ -14,6 +14,9 @@ import { FLOOR_NAME_MAX_PX } from "../features/floors/bar.ts";
  * (BAR_FIELD_PX and its 44 px icon) and features/sound/mini/NowChip.tsx
  * draw them, and the speaker by its 44 px (features/sound/device/Speaker.tsx).
  */
+
+/** The steps a phone's player chip cut short takes (topBarFit.ts nameNeedsStep). */
+const NAME_STEPS: readonly BarStep[] = ["searchPanels", "tightGaps"];
 
 /** The widths a bar's words and parts take, which the content's `words` stand for. */
 type Words = {
@@ -76,14 +79,20 @@ function drawn(bar: Bar, shape: BarShape): { parts: { w: number; min: number }[]
   return { parts, name };
 }
 
-/** What the row overflows its width by, after its shrinking parts have shrunk as far as they go. */
-function measure(bar: Bar, shape: BarShape, width: number) {
+/**
+ * What the row overflows its width by, after its shrinking parts have
+ * shrunk as far as they go, and on a phone what it cuts off the player's
+ * chip, which shrinks only once the room name is down to its few letters.
+ */
+function measure(bar: Bar, shape: BarShape, width: number): FitMeasure {
   const { parts, name } = drawn(bar, shape);
   const gap = bar.content.phone ? (shape.tight ? GAP.phoneTight : GAP.phone) : shape.tight ? GAP.wideTight : GAP.wide;
   const gaps = gap * (parts.length - 1);
   const natural = parts.reduce((a, p) => a + p.w, 0) + gaps;
   const least = parts.reduce((a, p) => a + p.min, 0) + gaps;
-  return { width, overflow: natural <= width ? 0 : Math.max(0, least - width), name };
+  const [, room, chip] = parts;
+  const chipCut = bar.content.phone && bar.content.role === "player" && chip ? Math.max(0, Math.min(chip.w - chip.min, natural - width - (room!.w - room!.min))) : 0;
+  return { width, overflow: natural <= width ? 0 : Math.max(0, least - width), name, chipCut };
 }
 
 /** Measures and steps until the record stops changing, as TopBar's layout effects do, and how many renders that took. */
@@ -205,7 +214,10 @@ describe("the top bar's give-way (topBarFit)", () => {
           assert.ok(m.overflow <= 0 || taken === steps.length, `overflows ${m.overflow} with ${taken} of ${steps.length} steps`);
           if (taken > 0 && steps[taken - 1] !== "turnName") {
             const fewer = { ...record!, taken: taken - 1, nameCap: steps.slice(0, taken - 1).includes("turnName") ? record!.nameCap : null };
-            assert.ok(measure(bar, shapeOf(bar.content, key, fewer), width).overflow > 0, `fits with one step fewer than ${steps[taken - 1]}`);
+            const less = measure(bar, shapeOf(bar.content, key, fewer), width);
+            // A phone's player chip cut short takes Search's move and the tight gaps too (nameNeedsStep).
+            const forName = (less.chipCut ?? 0) > 0 && NAME_STEPS.includes(steps[taken - 1]!);
+            assert.ok(less.overflow > 0 || forName, `fits with one step fewer than ${steps[taken - 1]}`);
           }
           if (!bar.content.phone && bar.content.search) assert.ok(shape.search === "field" || shape.search === "icon");
           // Each step changes what the bar draws, so none costs a render for nothing.
@@ -290,6 +302,45 @@ describe("the top bar's give-way (topBarFit)", () => {
       ),
       { numRuns: 3000 },
     );
+  });
+
+  test("on a phone the player's own name is cut only once Search's move to the Panels field and the tight gaps are taken, and View, Floor and the speaker never fold for it (LP4-REGRESS-5, D-261108-443)", () => {
+    fc.assert(
+      fc.property(
+        bars.filter((b) => b.content.phone && b.content.role === "player"),
+        fc.integer({ min: 240, max: 899 }),
+        (bar, width) => {
+          const key = fitKey(bar.content);
+          const steps = stepsFor(bar.content);
+          const { record, shape } = settle(bar, width, null);
+          const taken = record?.taken ?? 0;
+          const m = measure(bar, shape, width);
+          const next = steps[taken];
+          if ((m.chipCut ?? 0) > 0) assert.ok(next === undefined || !NAME_STEPS.includes(next), `the name is cut by ${m.chipCut} px with ${next} still to take`);
+          // Every other step was taken for the row's own lack of room.
+          for (let i = 0; i < taken; i++) {
+            if (NAME_STEPS.includes(steps[i]!)) continue;
+            const before = measure(bar, shapeOf(bar.content, key, { ...record!, taken: i }), width);
+            assert.ok(before.overflow > 0, `${steps[i]} folded for the player's name`);
+          }
+        },
+      ),
+      { numRuns: 3000 },
+    );
+  });
+
+  test("Pat on a 390 px phone with a long room name: the speaker takes Search's icon to the Panels field, not letters of his name, and at 320 px and 130% his chip keeps its dot beside the speaker", () => {
+    const content: BarContent = { phone: true, role: "player", search: true, nowPlaying: false, clock: false, blackout: false, fullscreen: false, phase: false, gaps: true, view: true, volume: true, floor: false, strip: "none", faces: 0, timerOver: false, yourTurn: false, words: ["E2E regress, a room name longer than the bar"] };
+    const bar: Bar = { content, words: { room: 300, youName: 77, clock: 0, phase: 0, turnName: 0, nowPlaying: 0, timer: 0 }, fight: false };
+    // 390 px less the bar's 12 px each side: the chip would lose 32 px of its name with Search's icon on the bar.
+    const phone = settle(bar, 366, null);
+    assert.equal(phone.shape.search, "panels");
+    assert.deepEqual([phone.shape.tight, phone.shape.viewFold, phone.shape.volume], [false, false, true], "one step makes the room");
+    assert.equal(measure(bar, phone.shape, 366).chipCut, 0, "the name shows whole");
+    // 320 px at 130%, a 222 px row and the 8 px Fit tucks into the bar's padding, which the model leaves out: View folded for the row's own lack of room, the chip down to its dot and caret, and the speaker kept.
+    const small = settle(bar, 230, null);
+    assert.deepEqual([small.shape.search, small.shape.tight, small.shape.viewFold, small.shape.volume], ["panels", true, true, true]);
+    assert.ok((measure(bar, small.shape, 230).chipCut ?? 0) > 0);
   });
 
   test("a fight in a blackout at 1440 takes the clock, and both ending, or a narrowing to 900 and back, brings it back (CHIPS-GIVEWAY-1)", () => {

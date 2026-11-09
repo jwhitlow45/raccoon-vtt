@@ -243,9 +243,10 @@ export type FitRecord = { key: string; width: number; taken: number; nameCap: nu
 /**
  * The row as measured, in layout px: its own width (clientWidth), what its
  * content overflows it by, and the turn chip's name as drawn, null while
- * it draws none.
+ * it draws none. `chipCut` is what a phone's row cuts off the player's own
+ * name in their chip, which shrinks rather than overflow the row.
  */
-export type FitMeasure = { width: number; overflow: number; name: number | null };
+export type FitMeasure = { width: number; overflow: number; name: number | null; chipCut?: number };
 
 /** A record for another content is no record: the bar draws the content's first shape then. */
 function drawnFor(record: FitRecord | null, key: string): FitRecord | null {
@@ -284,12 +285,30 @@ export function fitStep(record: FitRecord | null, key: string, m: FitMeasure, st
 }
 
 function giveWay(r: FitRecord, m: FitMeasure, steps: readonly BarStep[]): FitRecord {
-  if (m.overflow <= 0) return r;
+  if (m.overflow <= 0) return nameNeedsStep(r, m, steps) ? { ...r, taken: r.taken + 1 } : r;
   // The name gives way by what the row lacks, and again where a pixel's rounding left the row short, until it fits or leaves.
   if (steps[r.taken - 1] === "turnName" && r.nameCap !== null && r.nameCap > 0) return { ...r, nameCap: nameCapFor(m) };
   const step = steps[r.taken];
   if (step === undefined) return r;
   return { ...r, taken: r.taken + 1, nameCap: step === "turnName" ? nameCapFor(m) : r.nameCap };
+}
+
+/**
+ * On a phone the room name gives way to the player's chip, down to a few
+ * letters, and the chip only after it (Room.tsx). So the row never
+ * overflows while the chip can shrink, and the player's own name was cut
+ * to a letter where a step would have made room: the speaker's 50 px cut
+ * "Pat" on a 390 px phone with a long room name (LP4-REGRESS-5). A cut name
+ * takes the steps that fold nothing into a menu, Search's move to the
+ * Panels field and the tight gaps, and no more: a player's 390 px phone
+ * keeps View and Floor on the bar, and at 320 px and 130% the chip keeps
+ * its dot beside the speaker (docs/design/design-v1-volume.md 10).
+ */
+const NAME_STEPS: readonly BarStep[] = ["searchPanels", "tightGaps"];
+
+function nameNeedsStep(r: FitRecord, m: FitMeasure, steps: readonly BarStep[]): boolean {
+  const step = steps[r.taken];
+  return (m.chipCut ?? 0) > 0 && step !== undefined && NAME_STEPS.includes(step);
 }
 
 /** Two records alike, so a check that changes nothing draws nothing again. */

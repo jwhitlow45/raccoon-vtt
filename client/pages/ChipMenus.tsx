@@ -776,7 +776,7 @@ export function YouChip(props: { dot: boolean; volumeGaveWay?: boolean; onOpen?(
       ) : (
         <ChipButton anchor={menu.anchorProps} label={youChipName(member.name)} tip={you} outline={theme.color.accent} shrink data={{ "data-chip": "you" }}>
           <ChipDot color={member.color} />
-          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{member.name}</span>
+          <span data-chip-name="" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{member.name}</span>
         </ChipButton>
       )}
       <Popover handle={menu} side="below" bound={viewportBound} contentKey={host.shape}>

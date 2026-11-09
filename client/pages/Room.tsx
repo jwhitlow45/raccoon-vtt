@@ -1689,9 +1689,12 @@ function TopBar(props: {
     const overflow = row.scrollWidth - row.clientWidth - tuck;
     const nameEl = strip?.querySelector<HTMLElement>("[data-rvtt-strip-name]");
     const turnName = nameEl ? nameEl.getBoundingClientRect().width / effectiveZoom(nameEl) : null;
-    const next = fitStep(record, key, { width: row.clientWidth, overflow, name: turnName }, steps);
+    // A phone's player chip shrinks before the row overflows, so what it cuts off the player's own name counts too (topBarFit.ts nameNeedsStep).
+    const chipName = props.compact ? row.querySelector<HTMLElement>("[data-chip-name]") : null;
+    const chipCut = chipName ? chipName.scrollWidth - chipName.clientWidth : 0;
+    const next = fitStep(record, key, { width: row.clientWidth, overflow, name: turnName, chipCut }, steps);
     if (!sameRecord(next, record)) setRecord(next);
-  }, [content.strip, shape.band, props.placement, strip, record, key, steps]);
+  }, [content.strip, shape.band, props.placement, props.compact, strip, record, key, steps]);
   const checkRef = useRef(check);
   useLayoutEffect(() => {
     checkRef.current = check;
