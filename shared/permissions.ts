@@ -1255,8 +1255,9 @@ function forPlayer(op: Op, c: Check): Decision {
       const asked = askedAreaRefusal(c, template.id);
       if (asked) return asked;
       if (op.patch.visibility !== undefined && op.patch.visibility !== "all") return refuse("forbidden", "players cannot hide areas");
-      if (op.patch.attachedTo && !c.visibleToken(op.patch.attachedTo)) return GONE;
-      if (op.patch.casterId && !c.visibleToken(op.patch.casterId)) return GONE;
+      // What it follows and its caster stand on its floor, as when it was made (FLRBUILD-PRIV-02).
+      if (op.patch.attachedTo && c.visibleToken(op.patch.attachedTo)?.sceneId !== template.sceneId) return GONE;
+      if (op.patch.casterId && c.visibleToken(op.patch.casterId)?.sceneId !== template.sceneId) return GONE;
       return OK;
     }
     case "template.delete": {

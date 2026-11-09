@@ -103,6 +103,22 @@ describe("a player's access follows the floors they hold (8.3)", () => {
     assert.equal(decide(state, follows, P1), GONE, "an aura on Upper following Thorn on Ground");
   });
 
+  test("an area's caster and what it follows stand on its floor, as it is made and as it is changed (FLRBUILD-PRIV-02)", () => {
+    const state = tower({
+      tokens: { thorn: thornOn("g"), owl: token("owl", { sceneId: "u", kind: "npc", ownerIds: ["p1"] }), gob: token("gob", { sceneId: "g" }) },
+      openFloors: { u: { sceneId: "u", rev: 0 } },
+      templates: { t1: template("t1", { sceneId: "g", ownerId: "p1", visibility: "all" }) },
+    });
+    const make = (over: Record<string, string>): Op => ({ t: "template.create", template: { ...template("t9", { sceneId: "g", ownerId: "p1", visibility: "all", ...over }) } }) as Op;
+    const change = (patch: Record<string, string>): Op => ({ t: "template.update", templateId: "t1", patch }) as Op;
+    for (const field of ["casterId", "attachedTo"]) {
+      assert.equal(decide(state, make({ [field]: "thorn" }), P1), "ok", `a ${field} on Ground for an area on Ground`);
+      assert.equal(decide(state, make({ [field]: "owl" }), P1), GONE, `a ${field} upstairs for an area on Ground`);
+      assert.equal(decide(state, change({ [field]: "thorn" }), P1), "ok", `a ${field} changed to one on Ground`);
+      assert.equal(decide(state, change({ [field]: "owl" }), P1), GONE, `a ${field} changed to one upstairs`);
+    }
+  });
+
   test("an ask left on a floor its player no longer holds is not theirs to withdraw, and does not count among their asks waiting (FLRBUILD-PRIV-01)", () => {
     const ask = (id: string, sceneId: string) => ({ id, rev: 0, by: "p1", caster: "thorn", sceneId, spell: "Fireball", targets: ["thorn"], at: "2026-11-08T00:00:00Z" });
     // Thorn asked from the Attic, hidden, and the DM brought him down to Ground: Ana holds Ground alone, as her projection does.
