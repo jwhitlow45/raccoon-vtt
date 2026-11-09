@@ -69,12 +69,32 @@ Changes to every icon: the black background square was removed and the fill set 
 
 The interface icons marked Lucide in `client/components/Icon.tsx` are path data copied from [Lucide](https://github.com/lucide-icons/lucide) ([lucide.dev](https://lucide.dev)), version 0.525.0, used under the ISC License. The app does not ship the Lucide package. The other icons in that file were drawn for this project. The icons copied, by Lucide's names:
 
-`arrow-down`, `arrow-left`, `arrow-right`, `arrow-up`, `book-open`, `brick-wall`, `calendar-clock`, `chevrons-down`, `circle-stop`, `circle-user-round`, `clipboard-list`, `cloud-rain`, `compass`, `contact-round`, `copy-plus`, `crop`, `crown`, `download`, `eraser`, `external-link`, `eye`, `eye-off`, `file-text`, `focus`, `fold-horizontal`, `footprints`, `hash`, `image`, `info`, `layers`, `library`, `lightbulb`, `list-music`, `list-tree`, `lock`, `log-out`, `map`, `maximize-2`, `menu`, `minimize-2`, `mountain`, `music`, `notebook-text`, `paintbrush`, `pause`, `paw-print`, `pencil`, `play`, `radar`, `radius`, `redo-2`, `refresh-cw`, `repeat`, `repeat-1`, `scan-eye`, `scroll-text`, `search`, `settings`, `share`, `shuffle`, `skip-back`, `skip-forward`, `skull`, `smartphone`, `snail`, `square-dashed`, `stamp`, `sticky-note`, `swords`, `timer`, `trash-2`, `type`, `undo-2`, `user-minus`, `users`, `volume-1`, `volume-2`, `volume-x`, `zap`, `zoom-in`, `zoom-out`.
+`arrow-down`, `arrow-left`, `arrow-right`, `arrow-up`, `book-open`, `brick-wall`, `calendar-clock`, `chevrons-down`, `circle-stop`, `circle-user-round`, `clipboard-list`, `cloud-rain`, `compass`, `contact-round`, `copy-plus`, `crop`, `crown`, `door-stairwell`, `download`, `eraser`, `external-link`, `eye`, `eye-off`, `file-text`, `focus`, `fold-horizontal`, `footprints`, `hash`, `image`, `info`, `layers`, `library`, `lightbulb`, `list-music`, `list-tree`, `lock`, `log-out`, `map`, `maximize-2`, `menu`, `minimize-2`, `mountain`, `music`, `notebook-text`, `paintbrush`, `pause`, `paw-print`, `pencil`, `play`, `radar`, `radius`, `redo-2`, `refresh-cw`, `repeat`, `repeat-1`, `scan-eye`, `scroll-text`, `search`, `settings`, `share`, `shuffle`, `skip-back`, `skip-forward`, `skull`, `smartphone`, `snail`, `square-dashed`, `stamp`, `sticky-note`, `swords`, `timer`, `trash-2`, `type`, `undo-2`, `user-minus`, `users`, `volume-1`, `volume-2`, `volume-x`, `zap`, `zoom-in`, `zoom-out`.
 
 ```
 ISC License
 
 Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2022.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
+`door-stairwell` came to Lucide after that release, so it is copied from version 1.41.0, whose license reads the same under a new copyright line:
+
+```
+ISC License
+
+Copyright (c) 2026 Lucide Icons and Contributors
 
 Permission to use, copy, modify, and/or distribute this software for any
 purpose with or without fee is hereby granted, provided that the above

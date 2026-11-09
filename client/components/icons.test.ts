@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { CREDITS, FEATHER_ICONS, FEATHER_NOTICE, LUCIDE_ICONS, LUCIDE_NOTICE } from "#shared/credits.ts";
+import { CREDITS, FEATHER_ICONS, FEATHER_NOTICE, LUCIDE_ICONS, LUCIDE_LATER, LUCIDE_LATER_NOTICE, LUCIDE_NOTICE } from "#shared/credits.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -36,6 +36,21 @@ describe("the interface icons", () => {
     const markup = renderToStaticMarkup(createElement(Icon, { name: "search" }));
     assert.ok(markup.includes('d="m21 21-4.34-4.34"') && markup.includes('cx="11"') && markup.includes('r="8"'), markup);
     assert.ok((FEATHER_ICONS as readonly string[]).includes("search"), "Feather's search is the drawing's source (Lucide's metadata names its author)");
+  });
+
+  test("Go up's stairwell is Lucide's door-stairwell, as 1.41.0 draws it, credited with that release's own notice (docs/design/design-v1-floors.md phase 2, 6.2)", () => {
+    assert.equal(LUCIDE.stairwell, "door-stairwell");
+    assert.equal(LUCIDE_LATER["door-stairwell"], "1.41.0");
+    const markup = renderToStaticMarkup(createElement(Icon, { name: "stairwell" }));
+    // Its five paths as the release writes them, with the arcs' flags spelled out.
+    for (const d of ["M12 17v-3a1 1 0 0 1 1-1h6", "M19 17h-9a1 1 0 0 0-1 1v3", "M19 21V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v16", "M19 9h-3a1 1 0 0 0-1 1v3", "M22 21H2"]) assert.ok(markup.includes(d), d);
+    const credit = CREDITS.find((g) => g.id === "interface-icons")!.credits[0]!;
+    assert.ok(credit.changes?.includes("door-stairwell, from 1.41.0"));
+    assert.ok(credit.changes?.includes(LUCIDE_LATER_NOTICE));
+    assert.ok(LUCIDE_LATER_NOTICE.includes("Copyright (c) 2026 Lucide Icons and Contributors"));
+    const md = readFileSync(join(import.meta.dirname, "../../CREDITS.md"), "utf8");
+    const section = md.slice(md.indexOf("## Interface icons"), md.indexOf("## Token icons"));
+    assert.ok(section.includes("copied from version 1.41.0") && section.includes("Copyright (c) 2026 Lucide Icons and Contributors"));
   });
 
   test("the Lucide icons copied are exactly the ones the credit and CREDITS.md name", () => {

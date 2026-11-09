@@ -124,9 +124,21 @@ export const LUCIDE_NOTICE =
  * (its LUCIDE table), and a test holds the two lists and CREDITS.md to
  * the same names, so a newly copied icon cannot ship uncredited.
  */
-export const LUCIDE_ICONS = ["arrow-down", "arrow-left", "arrow-right", "arrow-up", "book-open", "brick-wall", "calendar-clock", "chevrons-down", "circle-stop", "circle-user-round", "clipboard-list", "cloud-rain", "compass", "contact-round", "copy-plus", "crop", "crown", "download", "eraser", "external-link", "eye", "eye-off", "file-text", "focus", "fold-horizontal", "footprints", "hash", "image", "info", "layers", "library", "lightbulb", "list-music", "list-tree", "lock", "log-out", "map", "maximize-2", "menu", "minimize-2", "mountain", "music", "notebook-text", "paintbrush", "pause", "paw-print", "pencil", "play", "radar", "radius", "redo-2", "refresh-cw", "repeat", "repeat-1", "scan-eye", "scroll-text", "search", "settings", "share", "shuffle", "skip-back", "skip-forward", "skull", "smartphone", "snail", "square-dashed", "stamp", "sticky-note", "swords", "timer", "trash-2", "type", "undo-2", "user-minus", "users", "volume-1", "volume-2", "volume-x", "zap", "zoom-in", "zoom-out"] as const;
+export const LUCIDE_ICONS = ["arrow-down", "arrow-left", "arrow-right", "arrow-up", "book-open", "brick-wall", "calendar-clock", "chevrons-down", "circle-stop", "circle-user-round", "clipboard-list", "cloud-rain", "compass", "contact-round", "copy-plus", "crop", "crown", "door-stairwell", "download", "eraser", "external-link", "eye", "eye-off", "file-text", "focus", "fold-horizontal", "footprints", "hash", "image", "info", "layers", "library", "lightbulb", "list-music", "list-tree", "lock", "log-out", "map", "maximize-2", "menu", "minimize-2", "mountain", "music", "notebook-text", "paintbrush", "pause", "paw-print", "pencil", "play", "radar", "radius", "redo-2", "refresh-cw", "repeat", "repeat-1", "scan-eye", "scroll-text", "search", "settings", "share", "shuffle", "skip-back", "skip-forward", "skull", "smartphone", "snail", "square-dashed", "stamp", "sticky-note", "swords", "timer", "trash-2", "type", "undo-2", "user-minus", "users", "volume-1", "volume-2", "volume-x", "zap", "zoom-in", "zoom-out"] as const;
 
 export type LucideIcon = (typeof LUCIDE_ICONS)[number];
+
+/**
+ * The copied icons Lucide added after 0.525.0, the release the rest are
+ * copied from, by the release each is copied from: door-stairwell, for
+ * stairs and ladders between floors, first shipped in 1.41.0. Its license
+ * is the same ISC License under a new copyright line, which the credit
+ * carries for it as LUCIDE_LATER_NOTICE.
+ */
+export const LUCIDE_LATER = { "door-stairwell": "1.41.0" } as const satisfies Partial<Record<LucideIcon, string>>;
+
+export const LUCIDE_LATER_NOTICE =
+  "ISC License. Copyright (c) 2026 Lucide Icons and Contributors. Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies. THE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.";
 
 /**
  * The copied icons Lucide derives from Feather, which its license credits
@@ -175,6 +187,13 @@ export const TOKEN_ICONS: {
   leadAuthors: ["lorc", "delapouite"],
   authors: GAME_ICON_AUTHORS,
 };
+
+/** The icons copied from a later Lucide release, each with its version: "door-stairwell, from 1.41.0". */
+function laterIcons(): string {
+  return Object.entries(LUCIDE_LATER)
+    .map(([icon, version]) => `${icon}, from ${version}`)
+    .join(", ");
+}
 
 function gameIconCredit(dir: "conditions" | "statuses" | "damage", key: string, icon: GameIcon): Credit {
   const authorUrl = GAME_ICON_AUTHOR_URLS[icon.author];
@@ -334,7 +353,7 @@ export const CREDITS: CreditGroup[] = [
         authorUrl: "https://lucide.dev",
         source: "https://github.com/lucide-icons/lucide",
         license: "ISC",
-        changes: `The interface icons marked Lucide in client/components/Icon.tsx (${LUCIDE_ICONS.join(", ")}), their path data copied as written. ${LUCIDE_NOTICE} Of these, ${FEATHER_ICONS.join(", ")} are derived from Feather: ${FEATHER_NOTICE}`,
+        changes: `The interface icons marked Lucide in client/components/Icon.tsx (${LUCIDE_ICONS.join(", ")}), their path data copied as written from version 0.525.0, except ${laterIcons()}. ${LUCIDE_NOTICE} The later release carries its own notice: ${LUCIDE_LATER_NOTICE} Of these, ${FEATHER_ICONS.join(", ")} are derived from Feather: ${FEATHER_NOTICE}`,
       },
     ],
   },
