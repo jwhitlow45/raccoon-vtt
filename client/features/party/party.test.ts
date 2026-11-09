@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { actor, character, room, token } from "#shared/testutil.ts";
+import { actor, character, room, scene, token } from "#shared/testutil.ts";
 import { panelsFor } from "../panels.ts";
 import { hpLine, lifeWord, partyEntries, PARTY_CHIPS } from "./party.ts";
 
@@ -74,6 +74,21 @@ describe("the party bar", () => {
     const onS1 = partyEntries(state, "s1");
     assert.deepEqual(onS1.map((e) => e.tokenId), [null, "a1"]);
     assert.deepEqual(partyEntries(state, "s2").map((e) => e.tokenId), ["b1", null]);
+    assert.deepEqual(onS1.map((e) => e.floor), [null, null], "s1 and s2 are scenes of one floor each, so neither stands on another floor");
+  });
+
+  test("a member on another floor of the scene in view is named by that floor, and a tap shows it, while one on another scene is not (design-v1-floors.md 7.6)", () => {
+    const state = setup();
+    state.scenes.g = scene("g", { name: "Tower", floor: { of: "g", level: 0, name: "Ground floor" } });
+    state.scenes.u = scene("u", { name: "Tower", floor: { of: "g", level: 1, name: "Upper floor", height: 10 } });
+    state.scenes.r = scene("r", { name: "Tower", floor: { of: "g", level: 2, name: "Roof", height: 10 } });
+    state.tokens.a1 = { ...state.tokens.a1!, sceneId: "g" };
+    state.tokens.b1 = { ...state.tokens.b1!, sceneId: "r" };
+    state.tokens.b2 = token("b2", { kind: "pc", sceneId: "u", actor: { ref: "bram" } });
+    const [bram, ayla] = partyEntries(state, "g");
+    assert.deepEqual([ayla!.tokenId, ayla!.floor], ["a1", null], "on the floor in view");
+    assert.deepEqual([bram!.tokenId, bram!.floor], [null, { tokenId: "b2", sceneId: "u", name: "Upper floor" }], "on two other floors, the lower one");
+    assert.deepEqual(partyEntries(state, "s1").map((e) => e.floor), [null, null], "the tower's floors are another scene's from s1");
   });
 
   test("on a phone it is a DM's panel, and from 900 px up it leaves the tabs for the top of the side panel", () => {

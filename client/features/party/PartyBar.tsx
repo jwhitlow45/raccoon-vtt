@@ -11,7 +11,7 @@ import { footprint } from "../../lib/scene.ts";
 import { ChipFace } from "../tokens/EffectIcon.tsx";
 import { effectChip } from "../../lib/tokenView.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { useRoomUi, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { layoutSize, screenHeight } from "../device/layout.ts";
 import { uiScale } from "../device/settings.ts";
 import { Portrait } from "../encounter/parts.tsx";
@@ -69,21 +69,26 @@ function storeFolded(folded: boolean): void {
  */
 export function PartyBar(props: { dock?: boolean; short?: boolean; onLeave?(): void }) {
   const ui = useRoomUi();
+  const actions = useRoomActions();
   const scope = useRoomScope();
   const members = useRoomView((s) => s.view?.members);
   const characters = useRoomView((s) => s.view?.characters);
   const tokens = useRoomView((s) => s.view?.tokens);
+  const scenes = useRoomView((s) => s.view?.scenes);
   const sceneId = useRoomView((s) => s.sceneId);
   const [folded, setFolded] = useState(() => (props.dock ? readFolded(props.short ?? false) : false));
   const entries = useMemo(
-    () => (members && characters && tokens ? partyEntries({ members, characters, tokens }, sceneId) : []),
-    [members, characters, tokens, sceneId],
+    () => (members && characters && tokens && scenes ? partyEntries({ members, characters, tokens, scenes }, sceneId) : []),
+    [members, characters, tokens, scenes, sceneId],
   );
 
   const frame = (entry: PartyEntry) => {
-    const token = entry.tokenId ? tokens?.[entry.tokenId] : undefined;
+    const id = entry.tokenId ?? entry.floor?.tokenId;
+    const token = id ? tokens?.[id] : undefined;
     if (!token) return;
     props.onLeave?.();
+    // A member on another floor: that floor shows first, and the camera keeps its place, since floors line up square for square (docs/design/design-v1-floors.md 7.3).
+    if (token.sceneId !== sceneId) actions.showFloor(token.sceneId);
     ui.tap(token.id);
     const fp = footprint(token);
     requestPan(scope, {
@@ -172,16 +177,16 @@ export function FoldedParty(props: { entries: readonly PartyEntry[]; onFrame(ent
         <div key={e.character.id} role="listitem" style={{ flex: "none", display: "flex" }}>
           <button
             type="button"
-            aria-disabled={e.tokenId ? undefined : true}
+            aria-disabled={onMap(e) ? undefined : true}
             onClick={() => {
-              if (e.tokenId) props.onFrame(e);
+              if (onMap(e)) props.onFrame(e);
             }}
-            aria-label={`${e.character.name}, HP ${hpLine(e.hp)}${e.tokenId ? ". Show it on the map" : ", not on this scene"}`}
+            aria-label={`${e.character.name}, HP ${hpLine(e.hp)}${whereSaid(e)}`}
             title={e.character.name}
             {...PILL_FOCUS}
-            style={{ ...pill, cursor: e.tokenId ? "pointer" : "default" }}
+            style={{ ...pill, cursor: onMap(e) ? "pointer" : "default" }}
           >
-            <strong style={{ maxWidth: CHIP_NAME_MAX, overflow: "hidden", textOverflow: "ellipsis", color: e.tokenId ? theme.color.text : theme.color.textDisabled }}>{e.character.name}</strong>
+            <strong style={{ maxWidth: CHIP_NAME_MAX, overflow: "hidden", textOverflow: "ellipsis", color: onMap(e) ? theme.color.text : theme.color.textDisabled }}>{e.character.name}</strong>
             <span data-disabled-look="readonly" style={{ color: LABEL_TEXT[e.label], fontVariantNumeric: "tabular-nums" }}>{lifeWord(e.life) ?? hpLine(e.hp)}</span>
             <Pill look={{ background: theme.color.surfaceRaised, border: `${theme.line.border}px solid ${theme.color.border}` }} />
           </button>
@@ -194,18 +199,29 @@ export function FoldedParty(props: { entries: readonly PartyEntry[]; onFrame(ent
 /** A chip's name past this many px ends in an ellipsis: "Seraphina Nig…", room for two or three chips in the line. */
 const CHIP_NAME_MAX = 96;
 
+/** Whether a tap has a token to frame: on the floor in view, or on another floor of its scene, which the tap shows first. */
+function onMap(entry: PartyEntry): boolean {
+  return entry.tokenId !== null || entry.floor !== null;
+}
+
+/** The end of an entry's name for a screen reader: what a tap does, or why it does nothing. */
+function whereSaid(entry: PartyEntry): string {
+  if (entry.tokenId !== null) return ". Show it on the map";
+  return entry.floor !== null ? `, on ${entry.floor.name}. Show it on the map` : ", not on this scene";
+}
+
 export function Entry(props: { entry: PartyEntry; onFrame(): void }) {
   const { entry } = props;
   const life = lifeWord(entry.life);
   const color = LABEL_COLOR[entry.label];
-  const here = entry.tokenId !== null;
+  const here = onMap(entry);
   const ac = entry.shield;
   return (
     <button
       type="button"
       onClick={props.onFrame}
       disabled={!here}
-      aria-label={`${entry.character.name}: HP ${hpLine(entry.hp)}${life ? `, ${life}` : ""}${ac !== null ? `, AC ${ac}` : ""}, Passive Perception ${entry.passivePerception}${here ? ". Show it on the map" : ", not on this scene"}`}
+      aria-label={`${entry.character.name}: HP ${hpLine(entry.hp)}${life ? `, ${life}` : ""}${ac !== null ? `, AC ${ac}` : ""}, Passive Perception ${entry.passivePerception}${whereSaid(entry)}`}
       style={{
         display: "flex",
         alignItems: "center",
@@ -279,7 +295,7 @@ export function Entry(props: { entry: PartyEntry; onFrame(): void }) {
           })}
           {entry.more > 0 ? <span>+{entry.more}</span> : null}
         </span>
-        {!here ? <span style={{ fontSize: theme.font.small, color: theme.color.textDisabled }}>Not on this scene</span> : null}
+        {entry.floor !== null ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>On {entry.floor.name}</span> : !here ? <span style={{ fontSize: theme.font.small, color: theme.color.textDisabled }}>Not on this scene</span> : null}
       </span>
     </button>
   );

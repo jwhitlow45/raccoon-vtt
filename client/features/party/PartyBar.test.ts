@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import type { Effect } from "#shared/model.ts";
-import { actor, character, effect, room, token } from "#shared/testutil.ts";
+import { actor, character, effect, room, scene, token } from "#shared/testutil.ts";
 import { theme } from "../../lib/theme.ts";
 import { partyEntries } from "./party.ts";
 import { tokenPattern } from "../../components/testing/tokenPattern.ts";
@@ -144,6 +144,26 @@ describe("a party member's row", () => {
     assert.match(markup, new RegExp(`PP <span style="color:${tokenPattern(theme.color.textDisabled)}`, "i"), "the Passive Perception figure dims with its label");
     // The portrait's initials are words in the off row too (LOOK1-OPUS-08).
     assert.match(markup, new RegExp(`color:${tokenPattern(theme.color.textDisabled)}[^"]*">Br</span>`, "i"), "the portrait's initials draw the disabled color");
+  });
+
+  test("a row for a member on another floor names the floor, and stays a button whose tap shows it (design-v1-floors.md 7.6)", () => {
+    const state = room({
+      scenes: { g: scene("g", { name: "Tower", floor: { of: "g", level: 0, name: "Ground floor" } }), u: scene("u", { name: "Tower", floor: { of: "g", level: 1, name: "Upper floor", height: 10 } }) },
+      characters: { bram: character("bram", { name: "Bram", ownerIds: ["p1"], actor: actor({ hp: { cur: 9, max: 12, temp: 0 }, passivePerception: 11 }) }) },
+      tokens: { b1: token("b1", { kind: "pc", sceneId: "u", actor: { ref: "bram" } }) },
+    });
+    const [entry] = partyEntries(state, "g");
+    assert.ok(entry);
+    const store = createStore(() => ({ view: state, you: { role: "dm" } }));
+    const markup = renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: createElement(Entry, { entry, onFrame: () => {} }) }) }));
+    const button = /<button[^>]*>/.exec(markup)?.[0] ?? "";
+    assert.doesNotMatch(button, /\sdisabled=""/);
+    assert.match(button, /aria-label="Bram: HP 9\/12, AC 14, Passive Perception 11, on Upper floor\. Show it on the map"/);
+    assert.match(markup, />On Upper floor</);
+    assert.doesNotMatch(markup, /Not on this scene/);
+    const folded = renderToStaticMarkup(createElement(FoldedParty, { entries: [entry], onFrame: () => {} }));
+    assert.match(folded, /aria-label="Bram, HP 9\/12, on Upper floor\. Show it on the map"/);
+    assert.doesNotMatch(folded, /aria-disabled/);
   });
 
   test("a row on the scene keeps its portrait's initials bright, and a dead member's faded portrait says it shows a state (LOOK1-OPUS-08)", () => {
