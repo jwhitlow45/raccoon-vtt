@@ -111,6 +111,27 @@ describe("the walking ruler into a corridor one wide with a creature in tow", ()
     });
   }
 
+  for (const [name, g] of [
+    ["hex rows", ROWS],
+    ["hex columns", COLUMNS],
+  ] as const) {
+    test(`on ${name}, a second creature in tow that cannot follow in file stops the warhorse at the corridor's mouth, the drag and the ruler alike (LP33-B-HEX-1)`, () => {
+      const { s, at, solid } = hexes(g);
+      // Below the warhorse's hex at its east, a second one that squares would also leave behind in file.
+      s.tokens.hob = onHex(g, "hob", "medium", g.orient === "rows" ? { col: 4, row: 7 } : { col: 7, row: 4 }, { name: "Hobgoblin", kind: "npc", ownerIds: ["p1"], attached: { to: "horse", kind: "drag" } });
+      const view = copyFor(s, P1);
+      const aim = hexCenter(g, at(10, 6));
+      const drag = dragOf(view, "player", "horse", { x: aim.x, y: aim.y });
+      const op = drag.op as { t: string; x: number; y: number } | null;
+      assert.ok(op && op.t === "token.move", "the warhorse moves");
+      assert.notDeepEqual([op.x, op.y], [view.tokens.horse!.x, view.tokens.horse!.y], "off where it started");
+      assert.ok(!occupiedHexes(g, { size: "large", x: op.x, y: op.y }).some(solid), "clear of the rock");
+      const m = measured(s, [{ x: 0, y: 0, tokenId: "horse" }, aim]);
+      assert.ok(m.legs[0]!.ft > 0, "the ruler reads a walk, not 0 ft");
+      assert.deepEqual([m.legs[0]!.to.x, m.legs[0]!.to.y], [op.x, op.y], "the ruler ends where the drag lands");
+    });
+  }
+
   test("a leg into the corridor and one beside it, measured in either order, read as each does alone", () => {
     const fresh = (stops: readonly RulerStop[]) => measured(squares(), stops);
     const into: RulerStop[] = [{ x: 0, y: 0, tokenId: "horse" }, { x: 12.5, y: 10.5 }];

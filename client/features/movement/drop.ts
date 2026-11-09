@@ -905,7 +905,16 @@ export function walkersStop(
   const spots = (a: RoutePoint, b: RoutePoint, at: Walker): Point[] => {
     if (hex) {
       const leg = hexLegOf(hex, hexStartStand(hex, at), hexEndStand(hex, lead, b));
-      return leg.squeezed ? [] : leg.line.slice(1, -1).map((_, k) => hexStandPlace(hex, lead, hexLegStand(leg, leg.line.length - 2 - k)));
+      // A leg that ends squeezed has no full-size stands of its own, but a cut lands full. So each hex of its line is tried at the
+      // lead's full size, the leg's end included since a squeezed route's waypoints are squeezed stands the cut cannot end on. The leg
+      // test of each spot (legStop) keeps only those the walk can reach (LP33-B-HEX-1).
+      const full = sizeCategory(lead);
+      const last = leg.line.length - 1;
+      const refs = leg.squeezed ? leg.line.slice(1) : leg.line.slice(1, -1);
+      return refs.map((_, k) => {
+        const index = (leg.squeezed ? last : last - 1) - k;
+        return hexStandPlace(hex, lead, leg.squeezed ? { size: full, ref: leg.line[index]!, squeezed: false } : hexLegStand(leg, index));
+      });
     }
     const n = Math.max(1, Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / L));
     const along = (d: number, k: number) => Math.round((d * k) / n / L) * L + 0;
