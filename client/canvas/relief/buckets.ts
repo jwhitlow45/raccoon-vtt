@@ -107,8 +107,8 @@ export type Item =
 
 type TurnData = { order: StaticPiece[]; keys: number[]; locals: number[]; bounds: VBox[]; union: VBox };
 
-/** A piece of the merged order, with its key and bounds at the turn. */
-type Static = { p: StaticPiece; key: number; bounds: VBox };
+/** A piece of the merged order, with its key, its own depth in its host and its bounds at the turn, and the bucket's list it came from. */
+type Static = { p: StaticPiece; key: number; local: number; bounds: VBox; list: TurnData };
 
 /**
  * What the last layout made, for the next to reuse while no sync has
@@ -231,6 +231,8 @@ export class ReliefIndex {
   #found = false;
   /** How many buckets the last sync rebuilt, for the tests and the bench. */
   rebuilt = 0;
+  /** How many pieces the last layout merged through the heap, for the tests. */
+  heaped = 0;
   /** Counts the syncs that changed what any piece draws, buckets or their regions: a layout reuses only the last one made since the last of them. */
   #generation = 0;
   #last: LastLayout | null = null;
@@ -467,12 +469,48 @@ export class ReliefIndex {
      * a bucket can change what a kept piece draws, its region.
      */
     const last = this.#last?.generation === this.#generation && this.#last.turn === turn ? this.#last : null;
-    const statics = last && sameSig(last.lists, lists) ? last.statics : this.#merge(lists);
+    this.heaped = 0;
+    const statics = last ? this.#remerge(last, lists) : this.#merge(lists);
     const items = this.#items(turn, view, statics, standees, volumes);
     const out = reuseRuns(items, last);
     const kept = last && sameItems(last.out, out) ? last.out : out;
     this.#last = { generation: this.#generation, turn, lists, statics, runs: runsByFirst(kept), out: kept };
     return kept;
+  }
+
+  /**
+   * The last merge for the buckets in view now: the same when they are,
+   * else its pieces from buckets still in view, merged in one pass with the
+   * new buckets' own. One order holds every piece, so this is the merge of
+   * every bucket in view, at one comparison a piece where the heap takes
+   * several: a 200 by 200 scene at 12 px spent 16 ms of a cull step's
+   * frame in the heap.
+   */
+  #remerge(last: LastLayout, lists: readonly TurnData[]): readonly Static[] {
+    if (sameSig(last.lists, lists)) return last.statics;
+    const now = new Set(lists);
+    const had = new Set(last.lists);
+    const kept = last.lists.every((l) => now.has(l)) ? last.statics : last.statics.filter((s) => now.has(s.list));
+    const added = lists.filter((l) => !had.has(l));
+    if (added.length === 0) return kept;
+    const fresh = this.#merge(added);
+    const out: Static[] = [];
+    let i = 0;
+    let j = 0;
+    while (i < kept.length && j < fresh.length) {
+      const a = kept[i]!;
+      const b = fresh[j]!;
+      if (before(a.key, RANK[a.p.kind], a.p.id, b.key, RANK[b.p.kind], b.p.id, a.local, b.local)) {
+        out.push(a);
+        i++;
+      } else {
+        out.push(b);
+        j++;
+      }
+    }
+    while (i < kept.length) out.push(kept[i++]!);
+    while (j < fresh.length) out.push(fresh[j++]!);
+    return out;
   }
 
   /** The pieces of the buckets in view in one depth order, by a k-way merge of the sorted buckets. */
@@ -511,11 +549,14 @@ export class ReliefIndex {
       }
       return top;
     };
-    for (const list of lists) push({ list, i: 0 });
+    for (const list of lists) {
+      push({ list, i: 0 });
+      this.heaped += list.order.length;
+    }
     const statics: Static[] = [];
     while (heap.length > 0) {
       const n = pop();
-      statics.push({ p: n.list.order[n.i]!, key: n.list.keys[n.i]!, bounds: n.list.bounds[n.i]! });
+      statics.push({ p: n.list.order[n.i]!, key: n.list.keys[n.i]!, local: n.list.locals[n.i]!, bounds: n.list.bounds[n.i]!, list: n.list });
       if (n.i + 1 < n.list.order.length) push({ list: n.list, i: n.i + 1 });
     }
     return statics;

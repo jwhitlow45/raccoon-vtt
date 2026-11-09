@@ -4,7 +4,7 @@ import type { BuildChunk } from "#shared/model.ts";
 import { depth, type Turn } from "../../lib/view.ts";
 import { resolveArea, type AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { buildVolume } from "../../features/areas/volume.ts";
-import { ctxOf } from "../../features/areas/volumeTesting.ts";
+import { ctxOf, mulberry32 } from "../../features/areas/volumeTesting.ts";
 import { groupWalls, meets, ReliefIndex, stretches, type Item, type StandeeIn, type VolumePiece } from "./buckets.ts";
 import { boundsOf, facesOf, keyOf, sortKey, type PieceSource } from "./pieces.ts";
 import { bandPieces, pitsUnder, sideOf } from "./volumes.ts";
@@ -620,6 +620,45 @@ describe("a layout reused across a pan's cull step (HXPERF-3)", () => {
     assert.deepEqual(order(b), order(a));
     assert.notEqual(b, a);
     assert.ok(a[0]?.kind === "run" && b[0]?.kind === "run" && b[0].pieces !== a[0].pieces);
+  });
+
+  test("a box a step along that meets one more bucket merges that bucket's pieces alone into the last order", () => {
+    // Two platform cells in the bucket east of the first, which only the wider box meets at turn 0.
+    const two = { ...ground, "20,3": 1, "21,4": 1 };
+    const syncTwo = (r: ReliefIndex) => r.sync({ sceneId: "s1", bounds, chunks: {}, tiles: null, walls: groupWalls(far, null, bounds), global: two, src: source(two, bounds) });
+    const relief = new ReliefIndex();
+    syncTwo(relief);
+    const a = relief.layout(0, box(0), []);
+    assert.ok(relief.heaped > 0);
+    const b = relief.layout(0, { x0: -10, y0: 0, x1: 14, y1: 14 }, []);
+    const all = new ReliefIndex();
+    syncTwo(all);
+    assert.deepEqual(order(b), order(all.layout(0, { x0: -10, y0: 0, x1: 14, y1: 14 }, [])));
+    assert.ok(order(b).length > order(a).length);
+    assert.ok(relief.heaped > 0 && relief.heaped < all.heaped, `merged ${relief.heaped} of ${all.heaped} pieces`);
+  });
+
+  test("a walk of boxes and turns lays out what a fresh index lays out, buckets coming and going", () => {
+    const rand = mulberry32(52);
+    const heights: Record<string, number> = {};
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) if (rand() < 0.4) heights[`${x},${y}`] = Math.floor(rand() * 7) - 3;
+    const walls = Array.from({ length: 30 }, () => {
+      const x = Math.floor(rand() * 63);
+      const y = 1 + Math.floor(rand() * 62);
+      return wall(x, y, x + 1, y);
+    });
+    const big = { w: 64, h: 64 };
+    const kept = index(heights, walls, big);
+    const people = Array.from({ length: 12 }, (_, i) => standee(`t${i}`, Math.floor(rand() * 64), Math.floor(rand() * 64)));
+    let turn: Turn = 0;
+    let at = { x: 0, y: 20 };
+    for (let step = 0; step < 300; step++) {
+      if (rand() < 0.05) turn = Math.floor(rand() * 4) as Turn;
+      at = rand() < 0.1 ? { x: (rand() - 0.5) * 80, y: rand() * 60 } : { x: at.x + (rand() - 0.5) * 12, y: at.y + (rand() - 0.5) * 8 };
+      const size = 4 + rand() * 30;
+      const box = { x0: at.x, y0: at.y, x1: at.x + size, y1: at.y + size * 1.5 };
+      assert.deepEqual(order(kept.layout(turn, box, people)), order(index(heights, walls, big).layout(turn, box, people)), `step ${step}`);
+    }
   });
 
   test("at another turn the list is made anew", () => {
