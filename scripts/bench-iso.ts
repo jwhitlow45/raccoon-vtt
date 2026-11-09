@@ -346,7 +346,7 @@ function pits(sceneId: string): Built {
 const hexRow = (orient: string, what: string) => `${what}, hex relief ${orient}`;
 
 /** A fixed seed whose 50 by 50 dungeon, with Many heights, has rooms raised 10 ft and sunk 5 and 10 ft, each reached by a run of stairs. */
-export const DUNGEON_SEED = "TAJT2AJT2AJT2AJ2";
+export const DUNGEON_SEED = "TAJT2AJT2AJT2AJ0";
 const DUNGEON_SIDE = 50;
 
 type PlannedDungeon = { plan: unknown; board: { W: number; doorways: { removed: boolean; run: { ground: number; near: number[]; stairs: { cell: number }[]; far: number[] } | null }[] } };
