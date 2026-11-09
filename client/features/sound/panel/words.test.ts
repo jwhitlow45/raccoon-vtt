@@ -98,6 +98,11 @@ describe("the words of the Sound panel's views and the Now playing chip (docs/de
     assert.equal(words.speakerName({ muted: true, volume: 45 }), "Volume on this device: muted");
     assert.equal(words.DEVICE_HELP_PLAYER, "This device only. At one table, the DM can turn on Only DM devices play in Sound. Music uses about 60 MB of data an hour, none while muted. On an iPhone it pauses other apps' music and plays even with the ringer off.");
     assert.equal(words.DEVICE_HELP_DM, "This device only. Table sound, in Sound, sets the volumes for everyone. Music uses about 60 MB of data an hour, none while muted. On an iPhone it pauses other apps' music and plays even with the ringer off.");
+    // With the server's sound files off there is no music to download, so the data sentence goes and nothing else does.
+    assert.equal(words.deviceHelp(true, false), "This device only. At one table, the DM can turn on Only DM devices play in Sound. On an iPhone it pauses other apps' music and plays even with the ringer off.");
+    assert.equal(words.deviceHelp(false, false), "This device only. Table sound, in Sound, sets the volumes for everyone. On an iPhone it pauses other apps' music and plays even with the ringer off.");
+    assert.equal(words.deviceHelp(true, true), words.DEVICE_HELP_PLAYER);
+    assert.equal(words.deviceHelp(false, true), words.DEVICE_HELP_DM);
     assert.equal(words.TURN_SOUND_HELP, "A short chime on your turn and a trap's sound, even while muted. Android phones also vibrate.");
     assert.equal(words.PING_SOUND_HELP, "A short tone when someone pings the map, even while muted.");
     assert.deepEqual([words.CANNOT_PLAY, words.DEVICE_MUTED], ["This browser can't play the room's sound.", "This device is muted."]);

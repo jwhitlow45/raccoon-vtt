@@ -106,10 +106,23 @@ export function volumeNote(v: { muted: boolean; volume: number }): string {
 export function speakerName(v: { muted: boolean; volume: number }): string {
   return v.muted ? "Volume on this device: muted" : `Volume on this device: ${v.volume}%`;
 }
+const DEVICE_ONLY = "This device only.";
+const DEVICE_PLAYER_POINTER = "At one table, the DM can turn on Only DM devices play in Sound.";
+const DEVICE_DM_POINTER = "Table sound, in Sound, sets the volumes for everyone.";
+const MUSIC_DATA = "Music uses about 60 MB of data an hour, none while muted.";
+const IPHONE = "On an iPhone it pauses other apps' music and plays even with the ringer off.";
 /** The controls' help on a player's device, which keeps the pointer to Only DM devices play for a table that plays together (D-261108-384). */
-export const DEVICE_HELP_PLAYER = "This device only. At one table, the DM can turn on Only DM devices play in Sound. Music uses about 60 MB of data an hour, none while muted. On an iPhone it pauses other apps' music and plays even with the ringer off.";
+export const DEVICE_HELP_PLAYER = `${DEVICE_ONLY} ${DEVICE_PLAYER_POINTER} ${MUSIC_DATA} ${IPHONE}`;
 /** On a DM device the pointer is to Table sound, the volumes for everyone. */
-export const DEVICE_HELP_DM = "This device only. Table sound, in Sound, sets the volumes for everyone. Music uses about 60 MB of data an hour, none while muted. On an iPhone it pauses other apps' music and plays even with the ringer off.";
+export const DEVICE_HELP_DM = `${DEVICE_ONLY} ${DEVICE_DM_POINTER} ${MUSIC_DATA} ${IPHONE}`;
+/**
+ * The help under the volumes on this device. With the server's sound files off there is no music to download, and Volume shows only
+ * the master and Effects, so the data sentence goes (LP33-A polish note).
+ */
+export function deviceHelp(player: boolean, music: boolean): string {
+  if (music) return player ? DEVICE_HELP_PLAYER : DEVICE_HELP_DM;
+  return `${DEVICE_ONLY} ${player ? DEVICE_PLAYER_POINTER : DEVICE_DM_POINTER} ${IPHONE}`;
+}
 export const TURN_SOUND = "Turn sound";
 /** Turn sound's help, here and in the Initiative panel's copy. It gates a trap's sound too, and neither waits on the mute (D-261108-364, 381). */
 export const TURN_SOUND_HELP = "A short chime on your turn and a trap's sound, even while muted. Android phones also vibrate.";

@@ -13,8 +13,7 @@ import { setRoomSound, useDeviceVolume, useServerRoomSoundState, useSoundHere, t
 import {
   ANOTHER_WINDOW,
   CANNOT_PLAY,
-  DEVICE_HELP_DM,
-  DEVICE_HELP_PLAYER,
+  deviceHelp,
   DM_PLAYS_IT,
   MUTE,
   PING_SOUND,
@@ -180,7 +179,7 @@ export function DeviceSound(props: { line: boolean; anchored?: boolean; keyHint?
           </Fragment>
         ))}
       </div>
-      <Help id={`${id}-help`}>{player ? DEVICE_HELP_PLAYER : DEVICE_HELP_DM}</Help>
+      <Help id={`${id}-help`}>{deviceHelp(player, mixShown(server).includes("music"))}</Help>
       <div style={{ display: "grid", gap: theme.space(2), borderTop: `${theme.line.border}px solid ${theme.color.border}`, paddingTop: theme.space(2) }}>
         <Switch label={TURN_SOUND} search={anchor("menu.this-device.sounds.turn")} help={TURN_SOUND_HELP} checked={turnSound} onChange={setSoundOn} />
         <Switch label={PING_SOUND} search={anchor("menu.this-device.sounds.ping")} help={PING_SOUND_HELP} checked={pingSound} onChange={setSoundEnabled} />

@@ -14,7 +14,8 @@ const { createStore } = await import("zustand/vanilla");
 const { room } = await import("#shared/testutil.ts");
 const { RoomProvider } = await import("../../../state/view.ts");
 const { DeviceSound, deviceSoundLine, takeOn, mixShown, volumeIcon, volumeStep } = await import("./DeviceSound.tsx");
-const { setSoundHere } = await import("../engine/store.ts");
+const { setSoundHere, resetServerRoomSoundForTests, serverRoomSound } = await import("../engine/store.ts");
+const { api } = await import("../../../lib/api.ts");
 const { setRoomSoundChoice, setSoundMix, soundMix } = await import("../../device/settings.ts");
 const words = await import("../panel/words.ts");
 const noop = () => {};
@@ -59,6 +60,29 @@ describe("this device's volume", () => {
     assert.match(shown(), /\(U\)/);
     assert.doesNotMatch(shown(false), /aria-keyshortcuts/);
     assert.doesNotMatch(shown(false), /\(U\)/);
+  });
+
+  test("the help names the music's data use only while the server offers sound files, and the volumes shown match (LP33-A polish note)", async () => {
+    const says = async (roomSound: boolean) => {
+      resetServerRoomSoundForTests();
+      const real = api.getConfig;
+      api.getConfig = (async () => ({ roomSound })) as unknown as typeof api.getConfig;
+      await serverRoomSound();
+      api.getConfig = real;
+    };
+    try {
+      for (const role of ["dm", "player"] as const) {
+        await says(false);
+        const off = render(role, { line: false });
+        assert.doesNotMatch(off, /60 MB/, `${role}, server off`);
+        assert.match(off, /pauses other apps/, `${role}: the rest of the help stays`);
+        assert.doesNotMatch(off, />Music</, `${role}: no Music slider to match the help`);
+        await says(true);
+        assert.match(render(role, { line: false }), /Music uses about 60 MB of data an hour/, `${role}, server on`);
+      }
+    } finally {
+      resetServerRoomSoundForTests();
+    }
   });
 
   test("the kept level is taken at press, release and focus, so a click then a key press to 0 keeps the click's level", () => {
