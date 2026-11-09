@@ -665,6 +665,14 @@ export type SceneFloor = {
   name: string;
   /** DM only. Feet above the floor below, 5 to 50 in 5 ft steps, 10 by default. Phase 2's climbs read it. */
   height?: number;
+  /**
+   * A player's copy only, never stored: no player sees this floor now, which
+   * its player holds only through a creature of theirs the DM hid
+   * (docs/design/design-v1-floors.md 8.3, FLRBUILD-PRIV-03). Their device
+   * reads it for what every player sees there (rules/floors.ts unseenFloor),
+   * since the copy carries no opened marks to tell it from a floor reached.
+   */
+  unseen?: true;
 };
 
 /**

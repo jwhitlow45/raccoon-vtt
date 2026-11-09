@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { checkOps, dragged, type Apart, type Drag, type OpPair } from "./differential.ts";
+import { checkOps, checkPair, dragged, type Apart, type Drag, type OpPair } from "./differential.ts";
 import type { MapVideo, RoomState, Scene, Viewer } from "./model.ts";
 import { projectState } from "./project.ts";
 import type { Op } from "./protocol.ts";
@@ -172,5 +172,37 @@ describe("what the DM did on an unopened floor (a history pair)", () => {
     for (const [i, op] of history.entries()) a = apply(a, op, DM, i + 1);
     assert.ok(a.log.length > b.log.length, "the history wrote lines only the DM reads");
     played(checkOps({ name: "the DM's work upstairs", a, b, equal: EVERYONE, steps: PLAY }, undefined, 50));
+  });
+});
+
+describe("a drag on a floor no player sees (FLRBUILD-PRIV-03)", () => {
+  /**
+   * The Attic, which nobody reached, holds p1's owl, which the DM hid, so
+   * p1 holds it, and a pony dragging a cart, which the room lets p1 move.
+   * One room also holds a goblin the DM hid there.
+   */
+  function stable(goblin: boolean): RoomState {
+    const s = tower([GROUND, UPPER, { id: "attic", name: "Attic" }]);
+    s.meta.settings = { ...s.meta.settings, playersMoveAny: ["p1"] };
+    s.tokens.owl = token("owl", { sceneId: "attic", kind: "npc", name: "Owl", ownerIds: ["p1"], visibility: "dm", x: 2, y: 12 });
+    s.tokens.pony = token("pony", { sceneId: "attic", kind: "npc", name: "Pony", x: 6, y: 6 });
+    s.tokens.cart = token("cart", { sceneId: "attic", kind: "object", layer: "object", name: "Cart", x: 5, y: 6, attached: { to: "pony", kind: "drag" } });
+    if (goblin) s.tokens.goblin2 = token("goblin2", { sceneId: "attic", name: "Goblin", visibility: "dm", x: 12, y: 12 });
+    return s;
+  }
+
+  test("p1's drag there, held only through the owl, and the DM's count the pony's group as the server does: no member seen by every player", () => {
+    const a = stable(true);
+    const view = projectState(a, P1, { sceneId: null });
+    assert.ok(view.tokens.pony && view.tokens.cart, "p1 sees the pony and its cart");
+    checkPair({
+      name: "the pony on the Attic",
+      a,
+      b: stable(false),
+      drags: [
+        { who: P1, tokenId: "pony", to: { x: 9, y: 6 } },
+        { who: DM, tokenId: "pony", to: { x: 9, y: 8 } },
+      ],
+    });
   });
 });

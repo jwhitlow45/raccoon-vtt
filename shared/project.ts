@@ -44,6 +44,7 @@ import {
   type RoomState,
   type SavedEncounter,
   type Scene,
+  type SceneFloor,
   type SightHolders,
   type SightTile,
   type SrdImage,
@@ -79,7 +80,7 @@ import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
 import { compareEntries, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
 import { legOnGround, pathThisTurn, seenWhole, stopsForNonOwners, stopsForOwners } from "./rules/path.ts";
 import { zoneFogged, zoneRanges } from "./rules/traps.ts";
-import { heldFloors, holdsRecordOn, playersSee, sameScene, unhiddenPartyMember } from "./rules/floors.ts";
+import { heldFloors, holdsRecordOn, playersSee, sameScene, unhiddenPartyMember, unseenFloor } from "./rules/floors.ts";
 import { clipFootprint, seesCreature, sightClipOf, sightRect } from "./rules/vision.ts";
 import type { SegmentIndex } from "./rules/segments.ts";
 import { deriveWalls, indexBuild, sceneWalls, type WallSet } from "./rules/walls.ts";
@@ -998,10 +999,12 @@ function behindBlackout(state: RoomState): boolean {
  * any floor of a scene players are not on. A token there is seen by no
  * player, wherever the question asks. On a scene without floors this is
  * never so, and each question keeps the rule stored ops were marked by
- * (FLR-ASTRA-20, OPUS-29).
+ * (FLR-ASTRA-20, OPUS-29). The rule is rules/floors.ts `unseenFloor`,
+ * which a player's device reads from its copy's `unseen` mark, so a device
+ * asking these questions of its copy answers as the server does.
  */
 function onUnseenFloor(state: RoomState, token: Pick<Token, "sceneId">): boolean {
-  return ownEntry(state.scenes, token.sceneId)?.floor !== undefined && !playersSee(state, token.sceneId);
+  return unseenFloor(state, token.sceneId);
 }
 
 /**
@@ -3011,7 +3014,7 @@ export const SCENE_FOR_PLAYERS = {
   weather: "copied",
   sound: "dm: the playlist and loops the scene starts, which players hear only once they play (docs/design/design-v1-music.md 6.5)",
   // Players learn a floor's place and name, never which floor is main or its height (docs/design/design-v1-floors.md 8, D-261102-492).
-  floor: "changed: { level, name }, levels renumbered among the floors held, and only while two or more are held",
+  floor: "changed: { level, name }, levels renumbered among the floors held, and only while two or more are held, with `unseen` on one no player sees (FLRBUILD-PRIV-03)",
 } as const satisfies Record<keyof Scene, PlayerField>;
 
 /** A scene as a player gets it: an allowlist, field by field as SCENE_FOR_PLAYERS rules, and only a floor they hold. */
@@ -3057,6 +3060,13 @@ function projectSceneCtx(ctx: Ctx, scene: Scene): Scene | null {
  * hold, counted up from 0, so an unopened floor below or between leaves no
  * gap. Only while they hold two or more floors of the scene: one floor held
  * reads as a scene without floors. Never which floor is main, nor its height.
+ *
+ * A floor no player sees, which a player holds only through a creature of
+ * theirs the DM hid, says so (`unseen`), so their device counts no creature
+ * there as seen by every player, as the server does (rules/floors.ts
+ * unseenFloor, FLRBUILD-PRIV-03). It tells them only what every other
+ * player's copy shows: that floor is in none of them. The opened mark's
+ * change sends the record again (dependents).
  */
 function heldFloorOf(ctx: Ctx, scene: Scene): Scene["floor"] | null {
   if (scene.floor === undefined) return null;
@@ -3067,7 +3077,9 @@ function heldFloorOf(ctx: Ctx, scene: Scene): Scene["floor"] | null {
   }
   if (levels.length < 2) return null;
   const own = scene.floor.level;
-  return { level: levels.filter((level) => level < own).length, name: scene.floor.name };
+  const out: SceneFloor = { level: levels.filter((level) => level < own).length, name: scene.floor.name };
+  if (!playersSee(ctx.state, scene.id)) out.unseen = true;
+  return out;
 }
 
 function projectHandoutCtx(ctx: Ctx, handout: Handout): Handout | null {
@@ -4659,6 +4671,8 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
   // when a log line is added or dropped without changing the stored meta.
   if (touched.some((key) => key.startsWith("log:"))) add(keys.meta);
   if (partyFloorsMoved(state, touched, other)) add(keys.meta);
+  // A floor opened or hidden again changes whether a player who holds it through a hidden creature reads it `unseen` (heldFloorOf).
+  for (const key of touched) if (key.startsWith("opened:")) add(keys.scene(key.slice("opened:".length)));
   const tokenIds = new Set<string>();
   const characterIds = new Set<string>();
   const handoutIds = new Set<string>();

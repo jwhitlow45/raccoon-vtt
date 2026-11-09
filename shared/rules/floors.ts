@@ -86,6 +86,22 @@ export function playersSee(state: RoomState, sceneId: SceneId): boolean {
 }
 
 /**
+ * Whether no player sees the floor now, so no creature on it counts as
+ * seen by every player (8.3): a floor of a scene with floors that players
+ * do not see. On a scene without floors never. The server's state and a
+ * DM's copy hold the opened marks and read it by the rule. A player's copy
+ * holds neither the marks nor `of`, so there the projection says it of a
+ * floor they hold only through a creature the DM hid (`unseen`), and the
+ * device agrees with the server on what every player sees
+ * (FLRBUILD-PRIV-03).
+ */
+export function unseenFloor(state: RoomState, sceneId: SceneId): boolean {
+  const floor = ownEntry(state.scenes, sceneId)?.floor;
+  if (floor === undefined) return false;
+  return floor.of === undefined ? floor.unseen === true : !playersSee(state, sceneId);
+}
+
+/**
  * The floors a viewer holds (8, 8.3): what a projection covers and what
  * access checks read. A DM holds every floor of the scene they view. A
  * player holds none behind a blackout, else the open floors of the

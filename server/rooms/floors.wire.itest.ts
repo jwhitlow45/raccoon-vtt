@@ -216,7 +216,7 @@ describe("several floors over the wire (docs/design/design-v1-floors.md 8, the s
         assert.ok(upper in s.ana.view.scenes, "Ana holds Upper, where her own creature stands");
         assert.ok(scout in s.ana.view.tokens);
         assert.equal(stableStringify(s.asAna!.view.scenes), stableStringify(s.ana.view.scenes), "the DM's view as Ana holds what Ana holds");
-        assert.deepEqual(s.ana.view.scenes[upper]?.floor, { level: 1, name: "Upper floor" }, "a player's floor is its level and name alone");
+        assert.deepEqual(s.ana.view.scenes[upper]?.floor, { level: 1, name: "Upper floor", unseen: true }, "a player's floor is its level and name alone, and no player sees one held through a hidden creature");
         // Upper's own content, set up while the players watch.
         const gargoyle = await create(r, upper, { name: "Gargoyle", x: 6, y: 5 });
         await m.apply({ t: "build.label", sceneId: upper, labelId: uuidv7(), label: { x: 7, y: 6, text: "Belfry", size: 1 } } as Op, "a label upstairs");
@@ -378,7 +378,7 @@ describe("several floors over the wire (docs/design/design-v1-floors.md 8, the s
     m.attach(all);
     await m.sync("seated");
     assert.deepEqual(s.ana.view.scenes[r.ground]?.floor, { level: 0, name: "Ground floor" });
-    assert.deepEqual(s.ana.view.scenes[attic]?.floor, { level: 1, name: "Attic" }, "levels renumbered among the floors held");
+    assert.deepEqual(s.ana.view.scenes[attic]?.floor, { level: 1, name: "Attic", unseen: true }, "levels renumbered among the floors held");
     for (const x of all) assert.deepEqual(naming(x, [cellar, upper, "Cellar", "Upper floor"]), [], `${x.name} gets nothing of Cellar or Upper`);
     // A ping on Cellar reaches only the DM, who holds every floor of the scene.
     r.dmSocket.send({ t: "eph", sceneId: cellar, e: { k: "ping", x: 2, y: 2 } });

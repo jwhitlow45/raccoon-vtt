@@ -20,6 +20,7 @@ import {
   visibleAssetIds,
   type ProjectedState,
 } from "./project.ts";
+import { unseenFloor } from "./rules/floors.ts";
 import { DM, FULL_TILE_BITS, P1, P2, character, drawing, entry, imageRef, member, reveal, room, scene, template, token, trap } from "./testutil.ts";
 
 /**
@@ -180,7 +181,7 @@ describe("a floor's place for players (D-261102-492)", () => {
     const deeper = projectState(owned, P1, { sceneId: null });
     assert.deepEqual(
       Object.fromEntries(Object.entries(deeper.scenes).map(([id, s]) => [id, s.floor])),
-      { cellar: { level: 0, name: "Cellar" }, ground: { level: 1, name: "Ground floor" }, upper: { level: 2, name: "Upper floor" } },
+      { cellar: { level: 0, name: "Cellar", unseen: true }, ground: { level: 1, name: "Ground floor" }, upper: { level: 2, name: "Upper floor" } },
     );
   });
 
@@ -242,6 +243,34 @@ describe("a room-level record names only a floor the viewer holds (FLRBUILD-PRIV
     const state = handedDown();
     state.casts.k1 = { ...state.casts.k1!, sceneId: "ground" };
     assert.equal(projectState(state, P2, { sceneId: null }).casts.k1?.sceneId, "ground");
+  });
+});
+
+describe("a floor held only through a hidden creature says no player sees it (FLRBUILD-PRIV-03)", () => {
+  const owlUpstairs = (over: Partial<RoomState> = {}): RoomState => {
+    const state = { ...tower(), ...over };
+    state.tokens = { ...state.tokens, owl: token("owl", { sceneId: "attic", kind: "npc", name: "Owl", ownerIds: ["p1"], visibility: "dm" }) };
+    return state;
+  };
+
+  test("Ana's copy marks the Attic `unseen`, every floor players see goes unmarked, and the device reads it as the server does", () => {
+    const state = owlUpstairs();
+    const ana = projectState(state, P1, { sceneId: null });
+    assert.deepEqual(ana.scenes.attic?.floor, { level: 2, name: "Attic", unseen: true });
+    for (const id of ["ground", "upper"]) assert.equal(ana.scenes[id]?.floor?.unseen, undefined, id);
+    for (const viewer of [P2, DISPLAY]) assert.ok(Object.values(projectState(state, viewer, { sceneId: null }).scenes).every((s) => s.floor?.unseen === undefined), viewer.memberId);
+    assert.equal(projectState(state, DM, { sceneId: "ground" }).scenes.attic?.floor?.unseen, undefined, "the DM's floors are the stored ones");
+    const copy = ana as unknown as RoomState;
+    for (const id of ["ground", "upper", "attic"]) assert.equal(unseenFloor(copy, id), unseenFloor(state, id), `Ana's device and the server agree on ${id}`);
+    agrees(state, P1, null, ana);
+  });
+
+  test("shown to players, the Attic loses its mark, by a key the opened mark's change projects again", () => {
+    const shown = owlUpstairs({ openFloors: { ...tower().openFloors, attic: { sceneId: "attic", rev: 0 } } });
+    assert.equal(projectState(shown, P1, { sceneId: null }).scenes.attic?.floor?.unseen, undefined);
+    assert.ok(dependents(shown, [keys.opened("attic")], owlUpstairs()).includes(keys.scene("attic")), "the floor's record goes again with its mark");
+    const dark = { ...owlUpstairs(), meta: { ...owlUpstairs().meta, view: { ...owlUpstairs().meta.view, blackout: true } } };
+    assert.deepEqual(projectState(dark, P1, { sceneId: null }).scenes, {}, "behind a blackout Ana holds nothing to mark");
   });
 });
 

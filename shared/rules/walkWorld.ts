@@ -13,6 +13,7 @@ import { sceneWalls } from "./walls.ts";
 import { isHex, sceneGrid, SQUARES } from "./grid.ts";
 import { hexKey } from "./hex.ts";
 import { ownEntry } from "../records.ts";
+import { unseenFloor } from "./floors.ts";
 
 /**
  * The public world a route is searched in (docs/design/design-v1-movement.md 5.5):
@@ -97,10 +98,13 @@ export type WorldOptions = {
  * on a per-player hex scene and on the DM's hex scenes with fog on, a
  * device reads the server's answer from the token's `seenAll` mark: a
  * holder's copy and the DM's hold walls the shared class's copy lacks, so
- * neither can work it out there.
+ * neither can work it out there. On a floor no player sees, a player's
+ * held only through a creature the DM hid or one the DM prepares, nothing
+ * is seen by every player, as the server's `onUnseenFloor` says, which a
+ * player's copy reads from its `unseen` mark (FLRBUILD-PRIV-03).
  */
 export function publicToken(state: RoomState, token: Token, viewer: WalkViewer): boolean {
-  if (token.visibility === "dm") return false;
+  if (token.visibility === "dm" || unseenFloor(state, token.sceneId)) return false;
   if (viewer.role === "player" && !perPlayerScene(ownEntry(state.scenes, token.sceneId))) return true;
   if (state.meta.view?.blackout === true) return false;
   if (seenAllMarked(ownEntry(state.scenes, token.sceneId), viewer.role)) return (token as Token & { seenAll?: true }).seenAll === true;
