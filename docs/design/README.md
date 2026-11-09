@@ -225,3 +225,7 @@ and for how to use it, the [DM guide](../dm-guide.md).
   devices play, a switch in Table sound for a table that hears the sound
   from one speaker, and a next track that a change of crossfade keeps
   shared only within its 20 second window.
+- [design-v1-volume.md](design-v1-volume.md): each device's volume
+  from a speaker on the top bar, a master level with a mute in place of
+  the Room sound switch, the same controls in This device and Sound, U to
+  mute, and a table display's Off to 100%.
