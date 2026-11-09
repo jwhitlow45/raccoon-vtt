@@ -124,6 +124,7 @@ describe("the stopped walk's note on a short screen (review LP2L2-ASTRA-2)", () 
     assert.match(markup, /-webkit-line-clamp:6/, "the sentence in the header");
     assert.match(markup, /<div style="min-height:0;overflow-y:auto;overscroll-behavior:contain"><p id="[^"]+"[^>]*>For Misty Step/);
     assert.doesNotMatch(markup, /data-stop-note-body/);
+    assert.match(markup, /data-stop-note=""[^>]*padding:4px 12px 12px/, "the usual card keeps its 4 px top under the header's own target");
   });
 
   test("its usual rows need FULL_NOTE_ROOM: a six-line sentence, Teleport here, a line of help, the padding, borders and gaps", () => {
@@ -145,6 +146,10 @@ describe("the stopped walk's note on a short screen (review LP2L2-ASTRA-2)", () 
     assert.match(markup, /<\/div><button[^>]*aria-label="Close"/);
     assert.match(markup, /aria-describedby="[^"]+"[^>]*>(?:<[^>]+>)*Teleport here/);
     assert.doesNotMatch(markup, /data-stop-note-actions/, "118 px keeps Close beside the body");
+    // A short card keeps even room above and below, and Close and the sentence stay where a 4 px top put them.
+    assert.match(markup, /data-stop-note=""[^>]*padding:12px 12px 12px/);
+    assert.match(markup, /data-stop-note-body=""[^>]*padding-top:4px/);
+    assert.match(markup, /<button[^>]*aria-label="Close"[^>]*margin-top:-8px/);
   });
 
   // 480 x 320 at 130% over a phone's 21 px home bar leaves 97 px (review LP2L2-ASTRA-3).
@@ -158,6 +163,8 @@ describe("the stopped walk's note on a short screen (review LP2L2-ASTRA-2)", () 
     const body = /<div data-stop-note-body=""[^>]*overflow-y:auto[^>]*>([\s\S]*?)<\/div><div data-stop-note-actions/.exec(markup);
     assert.ok(body, "the body scrolls over the row");
     assert.doesNotMatch(body[1]!, /<button/);
+    assert.match(markup, /data-stop-note=""[^>]*padding:12px 12px 12px/, "even room above and below, the sentence 12 px down as before");
+    assert.match(markup, /data-stop-note-body=""[^>]*padding-top:0/);
     assert.doesNotMatch(render(COMPACT_NOTE_ROOM + 52 + 60 + 16, 369), /data-stop-note-actions/, "at COMPACT_NOTE_ROOM, Close stays beside the body");
     assert.match(render(COMPACT_NOTE_ROOM + 52 + 60 + 15, 369), /data-stop-note-actions/, "a pixel less, one row");
   });

@@ -117,6 +117,14 @@ export function StopNoteHost(props: { scene: Scene; chrome: ChromeCamera; viewpo
   const room = Math.max(0, props.viewport.height - props.insets.top - props.insets.bottom - 2 * theme.space(2));
   const compact = room < FULL_NOTE_ROOM;
   const oneRow = room < COMPACT_NOTE_ROOM;
+  /*
+   * A compact card is a short painted box, which keeps as much room above
+   * its content as below, as every short card does. Its top takes the
+   * foot's padding, and the body and Close give the difference back, so
+   * the sentence and Close's icon stay where they were.
+   */
+  const padTop = compact ? PAD_FOOT : PAD_TOP;
+  const lift = padTop - PAD_TOP;
   const place = cardPlace({ anchor, viewport: props.viewport, insets: props.insets, width, height: Math.min(height, room), gap: theme.space(3), prefer: "below" });
   const close = () => slot.setState({ note: null, busy: false });
   const teleport = () => {
@@ -147,9 +155,9 @@ export function StopNoteHost(props: { scene: Scene; chrome: ChromeCamera; viewpo
       {busy ? "Teleporting…" : "Teleport here"}
     </Button>
   );
-  const closeButton = <IconButton icon="close" label="Close" onClick={close} style={oneRow ? undefined : { alignSelf: "flex-start" }} />;
+  const closeButton = <IconButton icon="close" label="Close" onClick={close} style={oneRow ? undefined : { alignSelf: "flex-start", marginTop: -lift }} />;
   const body = (
-    <div data-stop-note-body="" style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", paddingTop: oneRow ? theme.space(2) : theme.space(3) }}>
+    <div data-stop-note-body="" style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", paddingTop: (oneRow ? theme.space(2) : theme.space(3)) - lift }}>
       <strong style={{ display: "block", fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>{status}</strong>
       <Help id={helpId} style={{ marginTop: theme.space(1) }}>
         {HELP}
@@ -171,7 +179,7 @@ export function StopNoteHost(props: { scene: Scene; chrome: ChromeCamera; viewpo
         display: "grid",
         gridTemplateRows: compact ? "minmax(0, 1fr) auto" : "auto auto minmax(0, 1fr)",
         gap: GAP,
-        padding: `${PAD_TOP}px ${theme.space(3)}px ${PAD_FOOT}px`,
+        padding: `${padTop}px ${theme.space(3)}px ${PAD_FOOT}px`,
         background: theme.color.surface,
         border: `${theme.line.border}px solid ${theme.color.border}`,
         borderRadius: theme.radius.lg,
