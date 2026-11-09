@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { barButtons, barCapacity, barShort, critSent, groupRestButtons, isCompanion, nextRestMode, restButtons, restFit, restStatus, rowUnits, SPAN_SHORT_BAR_PX, type BarButtonInput, type BarRoom, type EntryStatus, type RestFit, type RestStatusInput } from "./barButtons.ts";
+import { barButtons, barCapacity, barShort, CLIMB_ICON, critSent, groupRestButtons, isCompanion, nextRestMode, restButtons, restFit, restStatus, rowUnits, SPAN_SHORT_BAR_PX, type BarButtonInput, type BarRoom, type EntryStatus, type RestFit, type RestStatusInput } from "./barButtons.ts";
 import { deadCase, type HpTarget } from "../features/tokens/groupHp.ts";
 import { parseHpInput } from "../features/tokens/hpInput.ts";
 import { DEFAULT_SPOT, freeArea, placeBar, spanRoomAtWorst, type Chrome } from "./barDock.ts";
@@ -80,6 +80,14 @@ describe("the bar's rows", () => {
       play: ["conditions", "multiSelect", "roll", "light"],
       less: [],
     });
+  });
+
+  test("Go up or Go down leads the passing line, before Undo move, for the DM, an owner and anyone the offer lets climb (docs/design/design-v1-floors.md phase 2, 6.2)", () => {
+    assert.deepEqual(barButtons({ ...OWNER, climb: true, undoMove: true, movedThisTurn: true, door: true }).passing, ["climb", "undoMove", "countLeg", "door"]);
+    assert.deepEqual(barButtons({ ...DM, climb: true }).passing, ["climb"]);
+    // The offer reads the right to move the creature (floors/climb.ts), so a player the room lets move any token gets it too.
+    assert.deepEqual(barButtons({ ...NOTHING, climb: true }).passing, ["climb"]);
+    assert.deepEqual(barButtons({ ...OWNER, undoMove: true }).passing, ["undoMove"], "and nothing off the stairs");
   });
 
   test("Attach follows Light on the steady line, and Get off comes before it on a carried token (docs/design/design-v1-attach.md 4.1, 4.3)", () => {
@@ -300,6 +308,19 @@ describe("the resting strip's quick row (docs/design/design-v1-bar-compact.md 3.
         assert.equal(restFit(pick("mode", "crit", "conditions", passing, "roll"), room, GAP, FIELD_MIN).includes("conditions"), without, `${passing} at ${room}`);
       }
     }
+  });
+
+  test("Go up takes Roll's place with its words where they fit, else as its icon alone, and at 320 x 568 at 130% waits behind Expand (docs/design/design-v1-floors.md phase 2, 6.2, Appendix)", () => {
+    // Its words with the stairwell drawn 90 px wide, its icon 44 px, as measured on the prototype.
+    const climb = { ...pick("mode", "conditions", "roll", "multiSelect"), climb: 90, [CLIMB_ICON]: 44 };
+    assert.deepEqual(restFit(climb, INNER.p390, GAP, FIELD_MIN), ["mode", "conditions", CLIMB_ICON]);
+    assert.deepEqual(restFit(climb, INNER.p440, GAP, FIELD_MIN), ["mode", "conditions", "climb"]);
+    assert.deepEqual(restFit(climb, INNER.p320at130, GAP, FIELD_MIN), ["mode"]);
+    // Before Undo move: only the first passing action is offered the place, in either form.
+    assert.deepEqual(restFit({ ...climb, undoMove: 44 }, INNER.p390, GAP, FIELD_MIN), ["mode", "conditions", CLIMB_ICON]);
+    // Neither form fits: Roll keeps its place.
+    assert.deepEqual(restFit({ ...climb, [CLIMB_ICON]: 70 }, INNER.p390, GAP, FIELD_MIN), ["mode", "conditions", "roll"]);
+    assert.deepEqual(restButtons({ ...OWNER, lead: true, climb: true }), ["mode", "conditions", "climb", CLIMB_ICON, "roll", "multiSelect"]);
   });
 
   test("one that does not fit is skipped, and a narrower one after it may still fit", () => {

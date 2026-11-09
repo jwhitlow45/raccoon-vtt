@@ -1056,7 +1056,7 @@ export function heldOrOpenMode(input: { layout: Size; free: Box; foot: number; c
  * place holds a passing action or Roll, so they share one spot, and only
  * one of them is drawn (restFit).
  */
-const REST_DISPLAY: readonly string[] = ["mode", "crit", "useRoll", "conditions", "undoMove", "countLeg", "door", "roll", "multiSelect", "uses", "hidden", "details"];
+const REST_DISPLAY: readonly string[] = ["mode", "crit", "useRoll", "conditions", "climb", "climbIcon", "undoMove", "countLeg", "door", "roll", "multiSelect", "uses", "hidden", "details"];
 
 /**
  * The quick row's candidates in the order they show, left to right (3.3).

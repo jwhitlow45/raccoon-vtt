@@ -32,6 +32,7 @@ import { EndTurnPill } from "../features/encounter/parts.tsx";
 import { tokenAccess } from "../features/tokens/access.ts";
 import { AltImagesRow } from "../features/tokens/AltImages.tsx";
 import { DoorButton } from "../features/doors/DoorButton.tsx";
+import { ClimbButton, ClimbNote, useClimbOffer } from "../features/floors/ClimbButton.tsx";
 import { GroundNotice } from "../features/movement/GroundNotice.tsx";
 import { LightChip } from "../features/vision/LightChip.tsx";
 import { AttachButton } from "../features/attach/AttachButton.tsx";
@@ -137,7 +138,7 @@ import {
   type RestState,
   type Spot,
 } from "./barDock.ts";
-import { barButtons, barShort, END_TURN_STACKED, isCompanion, rowUnits, type BarButtonId } from "./barButtons.ts";
+import { barButtons, barShort, CLIMB_ICON, END_TURN_STACKED, isCompanion, rowUnits, type BarButtonId } from "./barButtons.ts";
 import { groupRestButtons, restButtons, restStatus, type EntryStatus, type RestFit, type RestStatus } from "./barButtons.ts";
 import { RestRow, type RestItem } from "./RestRow.tsx";
 import { NOTE_INSET } from "./barDock.ts";
@@ -323,6 +324,8 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
 
   const duplicate = useDuplicate(token, DUPLICATE_FOCUS_IN_BAR);
   const offersFloors = useOffersMoveToFloor(useMemo(() => [token], [token]));
+  const climb = useClimbOffer(token);
+  const climbNoteId = useId();
 
   const path = pathNow(encounter, token, you?.role ?? "player");
   const undoIds = barTokenIds(tokens, token);
@@ -350,6 +353,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
     floors: access.dm && offersFloors,
     // On an upright phone only, where the strip's End turn is out of the thumb's reach (docs/design/design-v1-qol.md 3, Q6). Kept while it waits, so a press shows busy to its answer.
     endTurn: rest !== null && (yourTurn || endTurn.waiting),
+    climb: climb !== null,
   };
   const rows = barButtons(buttonInput);
   useConditionsKey(rows.play.includes("conditions") && !frame.folded, drawers.openByKey);
@@ -364,6 +368,8 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
         return <CountLegButton key={id} token={token} />;
       case "door":
         return <DoorButton key={id} token={token} />;
+      case "climb":
+        return climb ? <ClimbButton key={id} token={token} offer={climb} noteId={climbNoteId} /> : null;
       case "conditions":
         return (
           <BarButton key={id} ref={drawers.ref("play", id)} shortcut="conditions" pressed={drawer === "conditions"} onClick={() => drawers.toggle("conditions")}>
@@ -501,13 +507,15 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
         return <BarButton onClick={props.onDetails}>Details</BarButton>;
       case END_TURN_STACKED:
         return <EndTurnPill waiting={endTurn.waiting} stack onClick={endTurn.end} />;
+      case CLIMB_ICON:
+        return climb ? <ClimbButton token={token} offer={climb} compact /> : null;
       default:
         return button(id as BarButtonId);
     }
   };
   const restItems: RestItem[] = restIds.map((id) => ({ id, node: restButton(id) }));
   // What the quick row drew is out of the scrolling strip's rows below it. Before its first fit, every candidate counts as drawn. End turn drawn in either form is drawn.
-  const inStrip = (id: string) => scrolls && (drawn ?? restIds).some((at) => at === id || (id === "endTurn" && at === END_TURN_STACKED));
+  const inStrip = (id: string) => scrolls && (drawn ?? restIds).some((at) => at === id || (id === "endTurn" && at === END_TURN_STACKED) || (id === "climb" && at === CLIMB_ICON));
   const status = useRestStatus({ entry: lead ? entry : QUIET_ENTRY, idle: vitalsWords(split.line), critInRow: drawn === null || drawn.includes("crit"), active: resting });
 
   const savesAndDefenses = short ? (
@@ -641,6 +649,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
           {rows.passing.some((id) => !inStrip(id)) ? (
             <ButtonRow row="passing">{rows.passing.filter((id) => !inStrip(id)).map(button)}</ButtonRow>
           ) : null}
+          {rows.passing.includes("climb") && !inStrip("climb") ? <ClimbNote offer={climb} id={climbNoteId} /> : null}
           <ButtonRow row="play">{placementUnits(rows.play.filter((id) => !inStrip(id)), button)}</ButtonRow>
           {rows.play.includes("detach") ? <DetachNote detach={detach} id={detachNoteId} /> : null}
           {/* Used a few times a campaign, so after the steady line, which it would push out of view on an upright phone, and before the less-used buttons (docs/design/design-v1-token-window.md 8.9). */}

@@ -8,6 +8,7 @@ import type { HpMode, HpParse } from "../features/tokens/hpInput.ts";
  */
 
 export type BarButtonId =
+  | "climb"
   | "undoMove"
   | "countLeg"
   | "door"
@@ -67,6 +68,12 @@ export type BarButtonInput = {
   floors?: boolean;
   /** An upright phone's bar, on the viewer's own turn or while their End turn waits, for a player's own token (docs/design/design-v1-qol.md 3, Q6). Left out, no. */
   endTurn?: boolean;
+  /**
+   * The creature stands on stairs or a ladder its viewer may take it up or
+   * down, on or off (docs/design/design-v1-floors.md phase 2, 6.1, features/floors/climb.ts
+   * climbOffer, which reads the right to move it). Left out, no.
+   */
+  climb?: boolean;
 };
 
 /**
@@ -90,6 +97,8 @@ export type BarButtonInput = {
 export function barButtons(input: BarButtonInput): { passing: BarButtonId[]; play: BarButtonId[]; less: BarButtonId[] } {
   const { dm, owner } = input;
   const passing: BarButtonId[] = [];
+  // First, before Undo move: a creature that just stepped onto stairs most likely takes them (docs/design/design-v1-floors.md phase 2, 6.2, D-261109-019).
+  if (input.climb) passing.push("climb");
   if (input.undoMove) passing.push("undoMove");
   if ((dm || owner) && input.movedThisTurn) passing.push("countLeg");
   if (!dm && owner && input.door) passing.push("door");
@@ -213,7 +222,7 @@ function roomMode(room: BarRoom, free: Box): BarMode {
 export const REST_FIELD_MIN = 56;
 
 /** The passing actions, newest first, which take Roll's place in the strip while one applies (docs/design/design-v1-bar-compact.md 3.3). */
-const PASSING: readonly string[] = ["undoMove", "countLeg", "door"];
+const PASSING: readonly string[] = ["climb", "undoMove", "countLeg", "door"];
 
 /*
  * The order the quick row fills by, apart from the order it shows in
@@ -249,7 +258,7 @@ export function restFit(widths: Readonly<Record<string, number>>, room: number, 
     shown.push(id);
   };
   const width = (id: string) => widths[id] ?? 0;
-  const unknown = ids.filter((id) => !REST_FIT.includes(id) && !PASSING.includes(id) && id !== "roll" && id !== END_TURN_STACKED);
+  const unknown = ids.filter((id) => !REST_FIT.includes(id) && !PASSING.includes(id) && id !== "roll" && id !== END_TURN_STACKED && id !== CLIMB_ICON);
   for (const slot of [...REST_FIT, ...unknown]) {
     if (slot === "mode") {
       if (ids.includes("mode")) take("mode", width("mode") + fieldMin);
@@ -264,6 +273,8 @@ export function restFit(widths: Readonly<Record<string, number>>, room: number, 
     if (slot === "place") {
       const passing = PASSING.find((id) => ids.includes(id));
       if (passing !== undefined && fits(width(passing))) take(passing, width(passing));
+      // Go up's or Go down's icon alone where its words do not fit, tried before Roll as End turn's narrow form is (docs/design/design-v1-floors.md phase 2, 6.2).
+      else if (passing === "climb" && ids.includes(CLIMB_ICON) && fits(width(CLIMB_ICON))) take(CLIMB_ICON, width(CLIMB_ICON));
       else if (ids.includes("roll") && fits(width("roll"))) take("roll", width("roll"));
       continue;
     }
@@ -271,6 +282,9 @@ export function restFit(widths: Readonly<Record<string, number>>, room: number, 
   }
   return restOrder(shown);
 }
+
+/** Go up's or Go down's narrow form in the strip, its icon alone in 44 px, offered beside its words, at most one of them drawn. */
+export const CLIMB_ICON = "climbIcon";
 
 /** End turn's narrow form in the strip, its words on two lines (docs/design/design-v1-qol.md 3, Q6), offered beside its one-line form, at most one of them drawn. */
 export const END_TURN_STACKED = "endTurnStacked";
@@ -292,6 +306,7 @@ const REST_PLAY: readonly BarButtonId[] = ["conditions", "roll", "multiSelect", 
 export function restButtons(input: BarButtonInput & { lead: boolean }): string[] {
   const rows = barButtons(input);
   const ids: string[] = [...rows.passing, ...rows.play.filter((id) => REST_PLAY.includes(id))];
+  if (rows.passing.includes("climb")) ids.push(CLIMB_ICON);
   if (rows.play.includes("endTurn")) ids.push(END_TURN_STACKED);
   if (input.lead) ids.push("mode");
   else ids.push("details");
