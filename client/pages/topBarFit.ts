@@ -295,7 +295,9 @@ function giveWay(r: FitRecord, m: FitMeasure, steps: readonly BarStep[]): FitRec
   if (steps[r.taken - 1] === "turnName" && r.nameCap !== null && r.nameCap > 0) return { ...r, nameCap: nameCapFor(m) };
   const step = steps[r.taken];
   if (step === undefined) return r;
-  return { ...r, taken: r.taken + 1, nameCap: step === "turnName" ? nameCapFor(m) : r.nameCap };
+  // A step makes room the chip's name may use, so the dot is judged again after it: a fresh page takes the steps before the dot.
+  const { chipDot: _judged, ...rest } = r;
+  return { ...rest, taken: r.taken + 1, nameCap: step === "turnName" ? nameCapFor(m) : r.nameCap };
 }
 
 /**
