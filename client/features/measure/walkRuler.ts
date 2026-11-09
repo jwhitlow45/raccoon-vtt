@@ -214,6 +214,9 @@ function aloneSearchFor(view: RoomState, group: RouteSearch, key: string, budget
   return search;
 }
 
+// A follower that cannot follow in single file means no way, as the drag answers (routeDrag.ts #inFile), not a search by places.
+const NO_FILE_WAY: Found = { kind: "none", capped: false };
+
 /**
  * What a leg's search found, as a drag's search finds it (routeDrag.ts):
  * the straight leg on open ground, else the route, or none. A leg that
@@ -221,9 +224,10 @@ function aloneSearchFor(view: RoomState, group: RouteSearch, key: string, budget
  * file (RULER-SINGLE-FILE, D-261107-174) searches the walker alone first,
  * the straight leg first, and takes that way where each follows it in
  * single file on ground the search may read (walk.ts and hexWalk.ts
- * fileBlocked), so it reads the way the drag goes. Otherwise it searches
- * with them by their places. Worked on the
- * frame's budget: null while it is still searching. Once the budget is
+ * fileBlocked), so it reads the way the drag goes. Where one cannot follow
+ * so, the leg reads no way, as the drag does, and only where the walker
+ * alone finds no way does it search with them by their places. Worked on
+ * the frame's budget: null while it is still searching. Once the budget is
  * spent no leg begins, and none gets an allowance of its own: the frame's
  * work (routeWork.ts) gives the frame's first work its bit of progress,
  * once a frame (review ASTRA-14). Kept by the legs before it, its start,
@@ -231,9 +235,6 @@ function aloneSearchFor(view: RoomState, group: RouteSearch, key: string, budget
  * legs needs a leg's search only while that leg is searched (review
  * ASTRA-07).
  */
-// A follower that cannot follow in single file means no way, as the drag answers (routeDrag.ts #inFile), not a search by places.
-const NO_FILE_WAY: Found = { kind: "none", capped: false };
-
 function legFound(view: RoomState, at: Walked, walker: Token & Walker, input: WalkInput, target: Point & { squeeze?: boolean }, budget: WorkBudget, progress: Progress): { found: Found; search: () => RouteSearch } | null {
   const kept = keptFor(view, walker.sceneId);
   const key = `${at.history}#${searchKey(walker, input.everything, publicCounters(gridOfView(view, walker.sceneId), walker, at.left, rulesOf(view), input.viewer.role === "dm"))}`;
