@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import type { ClassResource, MapPhase, PcRoll, PcStats, RoomState } from "./model.ts";
 import { clientOpSchema } from "./protocol.ts";
-import { addsReservedEntryId, ENTITY_ID_PATHS, ENTRY_ID_PATHS, EXISTING_ID_PATHS } from "./reservedIds.ts";
+import { addsReservedEntryId, ENTITY_ID_PATHS, ENTRY_ID_PATHS, EXISTING_ID_PATHS, REPLACED_ARRAYS } from "./reservedIds.ts";
+import { character, room, scene } from "./testutil.ts";
 
 /**
  * PROTO-IDS-ARRAY-IDS. The list of ops and paths that carry a new array
@@ -11,6 +13,9 @@ import { addsReservedEntryId, ENTITY_ID_PATHS, ENTRY_ID_PATHS, EXISTING_ID_PATHS
  */
 
 const MEMBERS = Object.getOwnPropertyNames(Object.prototype);
+
+/** A room holding none of the arrays a replacement reads, so every id an op brings is new. */
+const EMPTY = room();
 
 // Zod's own definitions are the only way to read a schema's shape, and they are not typed for it.
 type Def = { type: string; shape?: Record<string, Zod>; element?: Zod; options?: Zod[]; innerType?: Zod; in?: Zod; valueType?: Zod; items?: Zod[]; left?: Zod; right?: Zod; values?: unknown[] };
@@ -88,19 +93,50 @@ describe("ids of new array entries (PROTO-IDS-ARRAY-IDS)", () => {
   test("at every listed path, an entry named for any member of Object.prototype is found and an ordinary id is not", () => {
     for (const [t, paths] of Object.entries(ENTRY_ID_PATHS)) {
       for (const path of paths) {
-        for (const name of MEMBERS) assert.equal(addsReservedEntryId(opWith(t, path, { id: name })), true, `${t} ${path} ${name}`);
-        assert.equal(addsReservedEntryId(opWith(t, path, { id: "prototype" })), false, `${t} ${path}: prototype is no member`);
-        assert.equal(addsReservedEntryId(opWith(t, path, { id: "e1" })), false, `${t} ${path}: e1`);
+        for (const name of MEMBERS) assert.equal(addsReservedEntryId(opWith(t, path, { id: name }), EMPTY), true, `${t} ${path} ${name}`);
+        assert.equal(addsReservedEntryId(opWith(t, path, { id: "prototype" }), EMPTY), false, `${t} ${path}: prototype is no member`);
+        assert.equal(addsReservedEntryId(opWith(t, path, { id: "e1" }), EMPTY), false, `${t} ${path}: e1`);
       }
     }
   });
 
   test("an op of another kind, or with no entries, names none", () => {
-    assert.equal(addsReservedEntryId({ t: "log.chat" }), false);
-    assert.equal(addsReservedEntryId({ t: "encounter.add", entries: [] }), false);
-    assert.equal(addsReservedEntryId({ t: "encounter.add", entries: [{ id: "a" }, { id: "b" }, { id: "constructor" }] }), true);
+    assert.equal(addsReservedEntryId({ t: "log.chat" }, EMPTY), false);
+    assert.equal(addsReservedEntryId({ t: "encounter.add", entries: [] }, EMPTY), false);
+    assert.equal(addsReservedEntryId({ t: "encounter.add", entries: [{ id: "a" }, { id: "b" }, { id: "constructor" }] }, EMPTY), true);
     // Only the entries' own ids count, not another field's value.
-    assert.equal(addsReservedEntryId({ t: "encounter.add", entries: [{ id: "a", label: "constructor", tokenId: "__proto__" }] }), false);
-    assert.equal(addsReservedEntryId({ t: "toString" }), false);
+    assert.equal(addsReservedEntryId({ t: "encounter.add", entries: [{ id: "a", label: "constructor", tokenId: "__proto__" }] }, EMPTY), false);
+    assert.equal(addsReservedEntryId({ t: "toString" }, EMPTY), false);
+  });
+
+  test("a whole array that replaces a stored one refuses only reserved ids the stored one lacks, so a legacy entry kept beside an edit passes (RULES-PRIV-03)", () => {
+    // Stored before ids were checked: a resource, a stat block roll and a map phase each named for a member.
+    const legacy = (id: string, extra: object) => ({ id, ...extra });
+    const resources = [legacy("constructor", { name: "Old", max: 2, used: 0, reset: "long" }), legacy("r1", { name: "Rage", max: 3, used: 0, reset: "long" })] as ClassResource[];
+    const rolls = [legacy("toString", { name: "Old", kind: "other" }), legacy("w1", { name: "Axe", kind: "weapon" })] as PcRoll[];
+    const phases = [legacy("valueOf", { name: "Old" }), legacy("ph1", { name: "Day" })] as MapPhase[];
+    const state: RoomState = room({ characters: { c1: character("c1", { resources, stats: { rolls } as PcStats }) }, scenes: { s1: scene("s1", { phases }) } });
+    const cases = [
+      { what: "a class resource", stored: resources, op: (list: object[]) => ({ t: "character.update", characterId: "c1", patch: { resources: list } }) },
+      { what: "a stat block roll", stored: rolls, op: (list: object[]) => ({ t: "character.update", characterId: "c1", patch: { stats: { rolls: list } } }) },
+      { what: "a map phase", stored: phases, op: (list: object[]) => ({ t: "scene.update", sceneId: "s1", patch: { phases: list } }) },
+    ];
+    for (const { what, stored, op } of cases) {
+      const [kept, ordinary] = stored as readonly { id: string }[] as [{ id: string }, { id: string }];
+      assert.equal(addsReservedEntryId(op([kept, { ...ordinary, name: "Edited" }]), state), false, `${what}: kept beside an edit of another`);
+      assert.equal(addsReservedEntryId(op([kept, ordinary, { ...ordinary, id: "fresh" }]), state), false, `${what}: kept beside an ordinary addition`);
+      assert.equal(addsReservedEntryId(op([ordinary]), state), false, `${what}: removed`);
+      assert.equal(addsReservedEntryId(op([kept, ordinary, { ...ordinary, id: "hasOwnProperty" }]), state), true, `${what}: a new reserved id is still refused`);
+      assert.equal(addsReservedEntryId(op([kept]), EMPTY), true, `${what}: a reserved id is new where nothing is stored`);
+    }
+    // Another character's, or another scene's, is no stored array of this one.
+    assert.equal(addsReservedEntryId({ t: "character.update", characterId: "c2", patch: { resources: [resources[0]] } }, state), true);
+    assert.equal(addsReservedEntryId({ t: "scene.update", sceneId: "s2", patch: { phases: [phases[0]] } }, state), true);
+    // An id naming a member reads no stored array through the prototype.
+    assert.equal(addsReservedEntryId({ t: "character.update", characterId: "constructor", patch: { resources: [resources[0]] } }, state), true);
+  });
+
+  test("every replacement path is one of the entry paths", () => {
+    for (const [t, paths] of Object.entries(REPLACED_ARRAYS)) for (const path of Object.keys(paths)) assert.ok(ENTRY_ID_PATHS[t]?.includes(path), `${t} ${path}`);
   });
 });

@@ -1475,7 +1475,7 @@ export class RoomActor {
       return;
     }
     // A live op only: a restore replays what was stored, and stored ops apply as stored.
-    if (!restoredFrom && addsReservedEntryId(clientOp)) {
+    if (!restoredFrom && addsReservedEntryId(clientOp, this.#staged.state)) {
       this.#refuse(key, wm, n, "invalid", RESERVED_ID, admitted);
       return;
     }
