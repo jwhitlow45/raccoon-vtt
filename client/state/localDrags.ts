@@ -1,4 +1,6 @@
 import { createStore } from "zustand/vanilla";
+import type { Grid } from "#shared/rules/grid.ts";
+import { footprint, snapPosition } from "../lib/scene.ts";
 import { scopeSlot } from "./scope.ts";
 
 /**
@@ -6,9 +8,21 @@ import { scopeSlot } from "./scope.ts";
  * lands where its plan does, which may squeeze it into a narrow space half
  * a cell off the grid, so its spot says whether it squeezes there
  * (`squeeze`, true or false). The other tokens of a drag land at the cell
- * under them, and theirs leaves `squeeze` out: the token keeps its own.
+ * under them and name `squeeze` false too (`groupSpot`), since a group move
+ * and a carry land every token unsqueezed.
  */
 export type DragSpot = { x: number; y: number; squeeze?: boolean };
+
+/**
+ * The spot of a token that lands at the cell under it: a member of a group
+ * drag or a token carried along. token.moveMany and a carry both drop the
+ * squeeze, so a squeezed token's aura and areas must read it unsqueezed
+ * mid-drag, as the lone lead's spot does. Leaving `squeeze` out would make
+ * them read the stored squeeze the drop will not keep.
+ */
+export function groupSpot(grid: Grid, token: Parameters<typeof footprint>[0], x: number, y: number): DragSpot & { squeeze: false } {
+  return { ...snapPosition(grid, x, y, footprint(token)), squeeze: false };
+}
 
 /**
  * Where this device's own token drags would land right now, by token, in

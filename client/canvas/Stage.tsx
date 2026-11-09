@@ -59,7 +59,7 @@ import { fitTarget } from "../lib/fitTarget.ts";
 import { revealedMask } from "../lib/fogTiles.ts";
 import { CameraGesture, distance, LongPress, mousePans, TAP_SLOP_PX } from "../lib/gestures.ts";
 import { groupFollowers, tokensByCenter, tokensInBox } from "../lib/group.ts";
-import { displayName, drawsAboveFog, dragAim, footprint, snapPosition, type ViewToken } from "../lib/scene.ts";
+import { displayName, drawsAboveFog, dragAim, footprint, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { BoardViewContext, boardViewsOf, useBoardPills } from "./boardView.ts";
 import { useBoardFontEpoch } from "./boardFont.ts";
@@ -77,7 +77,7 @@ import { dragsToken, movesToken, reseats, type AttachViewer, type RightsView } f
 import { cameraInZoomed, chromeZoom, insetsInZoomed, inZoomed, layoutSize, sizeInZoomed, smallUi } from "../features/device/layout.ts";
 import { stageMountKey, uiScale, useLowPower, useMapVariant, useUiScale } from "../features/device/settings.ts";
 import { mapFocusSlot, spaceMovesMap } from "../pages/mapFocus.ts";
-import { localDragSlot } from "../state/localDrags.ts";
+import { groupSpot, localDragSlot } from "../state/localDrags.ts";
 import { useRoomScope } from "../state/scope.ts";
 import { liveCameraSlot, showGestureCamera, useChromeCamera, type ChromeAt, type ChromeCamera } from "../state/liveCamera.ts";
 import { addsToSelection, barDismiss, frontToBack, nextUnderTap } from "../state/selection.ts";
@@ -1431,9 +1431,9 @@ export function MapStage(props: {
   const localDrags = scope.get(localDragSlot);
   const setSpot = useCallback(
     (token: ViewToken, x: number, y: number) => {
-      const at = snapPosition(sceneGrid(sceneRef.current), x, y, footprint(token));
+      const at = groupSpot(sceneGrid(sceneRef.current), token, x, y);
       const prev = localDrags.getState().spots[token.id];
-      if (prev && prev.x === at.x && prev.y === at.y) return;
+      if (prev && prev.x === at.x && prev.y === at.y && prev.squeeze === at.squeeze) return;
       localDrags.setState({ spots: { ...localDrags.getState().spots, [token.id]: at } });
     },
     [localDrags],
