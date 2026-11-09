@@ -54,7 +54,7 @@ export function subscribeSound(fn: () => void): () => void {
 }
 
 export function usePingSound(): boolean {
-  return useSyncExternalStore(subscribeSound, soundEnabled);
+  return useSyncExternalStore(subscribeSound, soundEnabled, soundEnabled);
 }
 
 export function setSoundEnabled(on: boolean): void {

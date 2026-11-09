@@ -72,7 +72,7 @@ describe("the words of the Sound panel's views and the Now playing chip (docs/de
 
   test("Table sound says for everyone once, and the device's own help says this device", () => {
     assert.equal(words.TABLE_SOUND, "Table sound");
-    assert.equal(words.TABLE_SOUND_HELP, "What everyone at the table hears, set here for every device. Each device can turn itself down under On this device.");
+    assert.equal(words.TABLE_SOUND_HELP, "What everyone at the table hears, set here for every device. Each device sets its own volume from the speaker on its top bar.");
     assert.deepEqual([words.MUSIC_LABEL, words.EFFECTS_LABEL], ["Music", "Effects"]);
     assert.equal(words.THIS_DEVICE_ONLY, "This device only:");
     assert.equal(words.MUSIC_VOLUME, "Music volume for everyone", "the accessible name keeps whose volume it is");
@@ -86,9 +86,22 @@ describe("the words of the Sound panel's views and the Now playing chip (docs/de
 
   test("Only DM devices play: the switch, its help, the DM's reminder and the players' line, word for word (docs/design/design-v1-sound-dm-only.md 11)", () => {
     assert.equal(words.DM_ONLY_SWITCH, "Only DM devices play");
-    assert.equal(words.DM_ONLY_HELP, "For a table that hears the sound from one speaker. Players' devices and the table display play nothing and don't ask. Each DM device still plays while its Room sound is on.");
+    assert.equal(words.DM_ONLY_HELP, "For a table that hears the sound from one speaker. Players' devices and the table display play nothing and don't ask. Each DM device still plays unless it is muted.");
     assert.equal(words.DM_ONLY_ON, "Only DM devices play the sound.");
     assert.equal(words.DM_PLAYS_IT, "The DM plays the sound on their own device.");
+  });
+
+  test("this device's volume: the speaker's name and the notes carry the level or Muted, and the help says what sounds while muted (docs/design/design-v1-volume.md 9)", () => {
+    assert.deepEqual([words.VOLUME, words.MUTE, words.UNMUTE, words.MUTED], ["Volume", "Mute", "Unmute", "Muted"]);
+    assert.equal(words.volumeNote({ muted: false, volume: 80 }), "80%");
+    assert.equal(words.volumeNote({ muted: true, volume: 80 }), "Muted", "never the level it keeps");
+    assert.equal(words.speakerName({ muted: false, volume: 45 }), "Volume on this device: 45%");
+    assert.equal(words.speakerName({ muted: true, volume: 45 }), "Volume on this device: muted");
+    assert.equal(words.DEVICE_HELP_PLAYER, "This device only. At one table, the DM can turn on Only DM devices play in Sound. Music uses about 60 MB of data an hour, none while muted. On an iPhone it pauses other apps' music and plays even with the ringer off.");
+    assert.equal(words.DEVICE_HELP_DM, "This device only. Table sound, in Sound, sets the volumes for everyone. Music uses about 60 MB of data an hour, none while muted. On an iPhone it pauses other apps' music and plays even with the ringer off.");
+    assert.equal(words.TURN_SOUND_HELP, "A short chime on your turn and a trap's sound, even while muted. Android phones also vibrate.");
+    assert.equal(words.PING_SOUND_HELP, "A short tone when someone pings the map, even while muted.");
+    assert.deepEqual([words.CANNOT_PLAY, words.DEVICE_MUTED], ["This browser can't play the room's sound.", "This device is muted."]);
   });
 
   test("the chip's player, its loading lines and the maker's", () => {

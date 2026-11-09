@@ -80,18 +80,50 @@ export const NO_MUSIC_PLAYING = "No music is playing.";
  * whose volume it is.
  */
 export const TABLE_SOUND = "Table sound";
-export const TABLE_SOUND_HELP = "What everyone at the table hears, set here for every device. Each device can turn itself down under On this device.";
+export const TABLE_SOUND_HELP = "What everyone at the table hears, set here for every device. Each device sets its own volume from the speaker on its top bar.";
 export const MUSIC_LABEL = "Music";
 export const EFFECTS_LABEL = "Effects";
 /** How Room sound's help begins under On this device, so it reads apart from Table sound's (7). */
 export const THIS_DEVICE_ONLY = "This device only:";
 /** Only DM devices play (docs/design/design-v1-sound-dm-only.md 4), the last switch in Table sound. */
 export const DM_ONLY_SWITCH = "Only DM devices play";
-export const DM_ONLY_HELP = "For a table that hears the sound from one speaker. Players' devices and the table display play nothing and don't ask. Each DM device still plays while its Room sound is on.";
+export const DM_ONLY_HELP = "For a table that hears the sound from one speaker. Players' devices and the table display play nothing and don't ask. Each DM device still plays unless it is muted.";
 /** The DM's reminder while it is on, in Now playing and the chip's player, so a game played apart never starts silent unnoticed. */
 export const DM_ONLY_ON = "Only DM devices play the sound.";
 /** A player's line while it is on (5), in the Sound panel and This device, the same whether or not anything plays. */
 export const DM_PLAYS_IT = "The DM plays the sound on their own device.";
+
+/*
+ * This device's volume (docs/design/design-v1-volume.md 4 and 9): the top
+ * bar's speaker and its popover, card or sheet, This device's Sounds and
+ * the Sound panel's On this device, one set of controls with one set of
+ * words.
+ */
+export const VOLUME = "Volume";
+export const MUTE = "Mute";
+export const UNMUTE = "Unmute";
+export const MUTED = "Muted";
+/** The level as a menu row's note, a summary or the master slider's value: "80%", or "Muted" whatever level it keeps. */
+export function volumeNote(v: { muted: boolean; volume: number }): string {
+  return v.muted ? MUTED : `${v.volume}%`;
+}
+/** The speaker's name, which carries its value for a screen reader. */
+export function speakerName(v: { muted: boolean; volume: number }): string {
+  return v.muted ? "Volume on this device: muted" : `Volume on this device: ${v.volume}%`;
+}
+/** The controls' help on a player's device, which keeps the pointer to Only DM devices play for a table that plays together (D-261108-384). */
+export const DEVICE_HELP_PLAYER = "This device only. At one table, the DM can turn on Only DM devices play in Sound. Music uses about 60 MB of data an hour, none while muted. On an iPhone it pauses other apps' music and plays even with the ringer off.";
+/** On a DM device the pointer is to Table sound, the volumes for everyone. */
+export const DEVICE_HELP_DM = "This device only. Table sound, in Sound, sets the volumes for everyone. Music uses about 60 MB of data an hour, none while muted. On an iPhone it pauses other apps' music and plays even with the ringer off.";
+export const TURN_SOUND = "Turn sound";
+/** Turn sound's help, here and in the Initiative panel's copy. It gates a trap's sound too, and neither waits on the mute (D-261108-364, 381). */
+export const TURN_SOUND_HELP = "A short chime on your turn and a trap's sound, even while muted. Android phones also vibrate.";
+export const PING_SOUND = "Ping sound";
+export const PING_SOUND_HELP = "A short tone when someone pings the map, even while muted.";
+/** A browser without what the mixer needs, in the controls' line and the DM's Now playing. */
+export const CANNOT_PLAY = "This browser can't play the room's sound.";
+/** The DM's Now playing on a muted device, beside its Unmute (6). */
+export const DEVICE_MUTED = "This device is muted.";
 
 /* The Now playing chip and its player (5). */
 export const CHIP_PAUSE = "Pause";

@@ -94,7 +94,7 @@ describe("Table sound (docs/design/design-v1-sound-layout.md 4.2 and 7)", () => 
 
   test("its help says once that it is for every device, then the music, each background sound and the effects by plain names", () => {
     const html = draw();
-    const help = html.indexOf("What everyone at the table hears, set here for every device. Each device can turn itself down under On this device.");
+    const help = html.indexOf("What everyone at the table hears, set here for every device. Each device sets its own volume from the speaker on its top bar.");
     assert.ok(help >= 0 && help < html.indexOf("<label"), "the help first");
     assert.deepEqual(labels(html), [
       { text: "Music", name: "Music volume for everyone" },
@@ -134,7 +134,7 @@ describe("Table sound (docs/design/design-v1-sound-layout.md 4.2 and 7)", () => 
     const row = /<button type="button" role="switch" aria-checked="(true|false)" aria-labelledby="[^"]+" aria-describedby="([^"]+)" data-search="sound\.table\.dmonly"/.exec(html);
     assert.ok(row, "a switch with the search's anchor");
     assert.equal(row[1], "false");
-    assert.match(html, new RegExp(`id="${row[2]}"[^>]*>For a table that hears the sound from one speaker\. Players&#x27; devices and the table display play nothing and don&#x27;t ask\. Each DM device still plays while its Room sound is on\.<`));
+    assert.match(html, new RegExp(`id="${row[2]}"[^>]*>For a table that hears the sound from one speaker\. Players&#x27; devices and the table display play nothing and don&#x27;t ask\. Each DM device still plays unless it is muted\.<`));
   });
 
   test("Only DM devices play on: the switch says so, and Players see what is playing keeps its own value", () => {
