@@ -12,13 +12,14 @@ import { useChromeCamera, type ChromeCamera } from "../../state/liveCamera.ts";
 import { labelPaneAllowed, panePlacement } from "./labelEdit.ts";
 import { labelScreenBox, PANE_HEIGHT_UNMEASURED } from "./labelPaneFrame.ts";
 import { labelLook } from "./labelTap.ts";
+import { LinkPaneHost } from "./LinkPaneHost.tsx";
 import { PaneFailedFrame, PaneLoadingFrame } from "./PaneFrames.tsx";
 import { builderSlot, labelPaneSlot } from "./store.ts";
 
 const LabelPane = retryableLazy(() => import("./LabelPane.tsx"), { roles: ["dm"] });
 
 /**
- * Where the canvas mounts a label's edit pane, for the DM. The pane itself
+ * Where the canvas mounts a label's edit pane, for the DM, and an end's pane in Between floors beside it (LinkPaneHost.tsx), so the canvas mounts both with one line. The pane itself
  * loads only for a DM (design section 14.1). It closes on its own when it
  * no longer applies: its label is gone or on another scene, the tool or the
  * builder's mode moved on, or a token was tapped, whose bar takes its place.
@@ -27,6 +28,15 @@ const LabelPane = retryableLazy(() => import("./LabelPane.tsx"), { roles: ["dm"]
  * drew, subscribed only while it shows (docs/design/design-v1-relief-pan.md 6.3).
  */
 export function LabelPaneHost(props: { scene: Scene; tool: string; chrome: ChromeCamera; viewport: Size; insets: Insets }) {
+  return (
+    <>
+      <LabelPaneOnly {...props} />
+      <LinkPaneHost {...props} />
+    </>
+  );
+}
+
+function LabelPaneOnly(props: { scene: Scene; tool: string; chrome: ChromeCamera; viewport: Size; insets: Insets }) {
   const pane = useScoped(labelPaneSlot);
   const labelId = useStore(pane, (p) => p.labelId);
   const mode = useStore(useScoped(builderSlot).store, (b) => b.mode);
