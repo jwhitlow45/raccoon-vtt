@@ -3,6 +3,8 @@ import { describe, test } from "node:test";
 import { compareLogIds, readEntity } from "./keys.ts";
 import { LIMITS } from "./limits.ts";
 import {
+  COUNT_OP_VERSION,
+  COUNT_SNAPSHOT_VERSION,
   OP_VERSION,
   SNAPSHOT_VERSION,
   healRevivesDead,
@@ -2004,6 +2006,24 @@ describe("op version 55 and snapshot 42, time of day light (docs/design/design-v
     const op = { t: "clock.update", daylight: { dawn: 5 * H, dusk: 19 * H } };
     assert.throws(() => runMigrations(op, 55, 54, opMigrations), /down/);
     assert.throws(() => runMigrations(daylit(), 42, 41, snapshotMigrations), /down/);
+  });
+});
+
+describe("op version 57 and snapshot 44, the room count (server/rooms/counted.ts)", () => {
+  test("keeps stored operations and snapshots unchanged through the identity steps", () => {
+    assert.equal(COUNT_OP_VERSION, 57);
+    assert.equal(COUNT_SNAPSHOT_VERSION, 44);
+    assert.ok(OP_VERSION >= COUNT_OP_VERSION && SNAPSHOT_VERSION >= COUNT_SNAPSHOT_VERSION);
+    for (const op of [{ t: "log.chat", text: "hello" }, { t: "sys.explore", sceneId: "s1", tiles: [] }, { t: "sys.restore", entries: [], from: "undo" }]) {
+      assert.equal(runMigrations(op, 56, 57, opMigrations), op);
+    }
+    const state = room();
+    assert.equal(runMigrations(state, 43, 44, snapshotMigrations), state);
+  });
+
+  test("a build at 56 and 43 refuses the rows and the snapshot this one writes", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hello" }, 57, 56, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 44, 43, snapshotMigrations), /down/);
   });
 });
 
