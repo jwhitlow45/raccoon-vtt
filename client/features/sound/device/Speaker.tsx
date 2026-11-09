@@ -102,7 +102,7 @@ export function Speaker(props: { popover: boolean; dialogOpen: boolean; onOpen?(
       {props.popover ? (
         <Popover handle={pop} side="below" flip bound={viewportBound} title={VOLUME} contentKey={shape}>
           <div style={{ width: POPOVER_BODY_PX, maxWidth: "100%", minWidth: 0 }}>
-            <DeviceSound line />
+            <DeviceSound line keyHint={false} />
           </div>
         </Popover>
       ) : null}
@@ -114,12 +114,13 @@ export function Speaker(props: { popover: boolean; dialogOpen: boolean; onOpen?(
  * Volume as a card from 600 px and a sheet below, drawn by the room's chip
  * dialogs (pages/ChipMenus.tsx ChipDialogs): opened by the speaker under
  * 900 px and by the DM menu's or the You menu's Volume once the speaker
- * has left the bar. Focus goes back to what opened it.
+ * has left the bar. Focus goes back to what opened it. Every key stops under
+ * a dialog, so the toggle here names no key.
  */
 export function VolumeDialog(props: { opener: RefObject<HTMLElement | null>; onClose(): void }) {
   return (
     <SheetDialog title={VOLUME} opener={props.opener} onClose={props.onClose} width={theme.layout.dialog.sm}>
-      <DeviceSound line />
+      <DeviceSound line keyHint={false} />
     </SheetDialog>
   );
 }

@@ -49,6 +49,18 @@ describe("this device's volume", () => {
     assert.deepEqual(volumeStep(70, 100), { muted: false, volume: 100 });
   });
 
+  test("the toggle names U where U works, and the Volume card and sheet name no key since every key stops under a dialog", () => {
+    const shown = (keyHint?: boolean) => {
+      const view = room();
+      const store = createStore(() => ({ view, you: { memberId: "dm1", role: "dm" }, roomId: "r1", sceneId: "s1", serverOffset: 0, connection: "open", pending: [], online: [], displays: 0, local: { selectedIds: [], multi: false } }));
+      return renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: { dispatch: () => 1, newId: () => "x", sendEph: noop } as never, ui: { notify: noop, openPanel: noop } as never, display: false, children: createElement(DeviceSound, { line: false, keyHint }) }));
+    };
+    assert.match(shown(), /aria-keyshortcuts="U"/);
+    assert.match(shown(), /\(U\)/);
+    assert.doesNotMatch(shown(false), /aria-keyshortcuts/);
+    assert.doesNotMatch(shown(false), /\(U\)/);
+  });
+
   test("one status line: a player's Only DM devices play wins, then a tap, another window, a browser that can't, and nothing for muted or playing", () => {
     assert.equal(deviceSoundLine({ player: true, dmOnly: true, here: "other" }), words.DM_PLAYS_IT);
     assert.equal(deviceSoundLine({ player: false, dmOnly: true, here: "plays" }), null, "a DM device plays under Only DM devices play");

@@ -88,7 +88,7 @@ const MIX_PARTS: Readonly<Record<MixKey, { label: string; search: string }>> = {
  * device's search ids (features/device/search.ts), which one place alone
  * may carry.
  */
-export function DeviceSound(props: { line: boolean; anchored?: boolean }) {
+export function DeviceSound(props: { line: boolean; anchored?: boolean; keyHint?: boolean }) {
   const room = useRoomRoleIfAny();
   const volume = useDeviceVolume();
   const mix = useSoundMix();
@@ -98,7 +98,9 @@ export function DeviceSound(props: { line: boolean; anchored?: boolean }) {
   const dmOnly = useRoomView((s) => s.view?.meta.settings.soundDmOnly === true);
   const { here } = useSoundHere();
   // U does what the toggle does, so its tooltip names the key as this device has it.
-  const muteKey = useKeyHint("mute");
+  const hint = useKeyHint("mute");
+  // Under a dialog every key stops, so the Volume card and sheet name no key (D-261108-438).
+  const muteKey = props.keyHint === false ? null : hint;
   const id = useId();
   // The level a drag or a key press started from, read from storage as it is taken.
   const kept = useRef<number | null>(null);
