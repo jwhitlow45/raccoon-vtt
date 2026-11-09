@@ -160,7 +160,8 @@ export function DmOnlyLine() {
  * (6.2), the names switch and Only DM devices play
  * (docs/design/design-v1-sound-dm-only.md 4). Each slider shows a plain name, "Music", the
  * sound's or "Effects", since the help says once that these are for every
- * device, and keeps "volume for everyone" in its accessible name.
+ * device, and keeps "volume for everyone" in its accessible name, except
+ * while only the DM's devices sound it (`useHearers`).
  */
 export function TableSound() {
   const actions = useRoomActions();
@@ -239,7 +240,8 @@ function SceneSoundUse(props: { playing: Playing | null }) {
  * The music's volume for everyone while music plays, one setting, in Table
  * sound and the chip's player (docs/design/design-v1-sound-layout.md 5.3).
  * `label` is the visible name, "Music" under Table sound's help, and the
- * accessible name always says whose volume it is. The chip's player has no
+ * accessible name says whose volume it is ("for everyone"), or just "Music
+ * volume" while only the DM's devices sound it. The chip's player has no
  * heading that says so, so there it shows the whole name.
  */
 export function MusicVolume(props: { label?: string } = {}) {

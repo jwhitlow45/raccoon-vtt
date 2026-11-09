@@ -30,8 +30,6 @@ const FOR_EVERYONE = " for everyone";
 function hearersTail(h: Hearers): string {
   return h === "everyone" ? FOR_EVERYONE : "";
 }
-export const MUSIC_VOLUME = "Music volume for everyone";
-export const EFFECTS_VOLUME = "Effects volume for everyone";
 export function musicVolume(h: Hearers = "everyone"): string {
   return `Music volume${hearersTail(h)}`;
 }
