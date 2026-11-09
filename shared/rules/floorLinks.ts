@@ -296,6 +296,12 @@ function placeOn(g: Grid, token: PlacedToken, rect: CellRect): { inside: boolean
   return { inside, touches };
 }
 
+/** Whether the creature's snapped space lies inside an end's squares on its floor, whatever its height. */
+export function spaceOn(state: Pick<RoomState, "scenes">, token: Token, link: Pick<LinkEnd, "sceneId" | "rect">): boolean {
+  const scene = ownEntry(state.scenes, link.sceneId);
+  return scene !== undefined && token.sceneId === link.sceneId && placeOn(sceneGrid(scene), token, link.rect).inside;
+}
+
 /**
  * Whether a creature stands on an end (6.1), on its snapped footprint
  * (footprint.ts footprintRect), as the copy it is asked on reads it. "on"

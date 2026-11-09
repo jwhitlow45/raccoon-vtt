@@ -1,7 +1,7 @@
 import { chunkKey, doorChunk, holderChunkKey, keys, wallMidpoint } from "./keys.ts";
 import { imageAssetId } from "./imageRef.ts";
 import { eventLines } from "./logRings.ts";
-import type { Actor, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, MapVideo, PromptKey, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
+import type { Actor, AreaTemplate, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, MapVideo, PromptKey, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
 import { MAX_ROUTE_REACH, syncStampFits, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
 import { gridOfToken, hash128, heldFreeDoor, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, shownFreeWall, stableStringify, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
 import { CHARACTER_CHANGED, LIMITS, stillFitsVideo } from "./limits.ts";
@@ -19,6 +19,7 @@ import { convexHull } from "./rules/aoe.ts";
 import type { Point } from "./rules/geom.ts";
 import { convexLive, fogClassOf, groundOf, partLive, type Ground } from "./rules/held.ts";
 import { deleteSet, heldFloors, holdsRecordOn, onPlayersScene, startFloor, unhiddenPartyMember } from "./rules/floors.ts";
+import { LINK_WORDS, linksOn, rectsOverlap, spaceOn, standsOn } from "./rules/floorLinks.ts";
 import {
   LEDGE_IN_THE_WAY,
   WALL_IN_THE_WAY,
@@ -281,6 +282,8 @@ function decide(op: Op, actor: Viewer, state: RoomState, deps: PermissionDeps, s
   if (!squeezed.ok) return squeezed;
   const together = oneFloorFits(op, check);
   if (!together.ok) return together;
+  const pits = pitsFit(op, check);
+  if (!pits.ok) return pits;
   const routed = routeFits(op, check);
   if (!routed.ok) return routed;
   const stamped = stampFits(op, check);
@@ -635,6 +638,27 @@ function squeezeFits(op: Op, c: Check): Decision {
   const ground = c.liveGround(token.sceneId);
   const { squeeze: _squeeze, ...full } = token;
   return refuse("invalid", ground && !footprintLive(ground, { ...full, x: op.x, y: op.y }) ? SOMETHING_BLOCKS : NOT_A_SQUEEZE);
+}
+
+/**
+ * A pit trap placed or changed over stairs or a ladder, by anyone, the DM
+ * included (docs/design/design-v1-floors.md phase 2, 3, OPUS-3): its pit
+ * would drop the ground an end keeps (D-261109-106). Refused in the trap
+ * pane's words. Here, where ops arrive, never in the reducer, so a stored
+ * trap replays as it was made. floorProblem holds the same after every op.
+ */
+function pitsFit(op: Op, c: Check): Decision {
+  if (op.t !== "trap.create" && op.t !== "trap.update") return OK;
+  const trap = op.t === "trap.update" ? ownEntry(c.state.traps, op.trapId) : undefined;
+  if (op.t === "trap.update" && trap === undefined) return OK;
+  const sceneId = op.t === "trap.create" ? op.trap.sceneId : trap!.sceneId;
+  const zone = op.t === "trap.create" ? op.trap.zone : (op.patch.zone ?? trap!.zone);
+  const rig = op.t === "trap.create" ? op.trap.rig : op.patch.rig;
+  // A patch's field replaces the trap's whole, and null takes it away (reducer/traps.ts trapUpdate).
+  const pit = rig !== undefined && "pit" in rig && rig.pit !== undefined ? rig.pit : trap?.rig?.pit;
+  if (pit === undefined || pit === null || !("cells" in zone)) return OK;
+  const under = linksOn(c.state, sceneId).find((link) => zone.cells.some((cells) => rectsOverlap(cells, link.rect)));
+  return under ? refuse("invalid", LINK_WORDS.pitUnder(under.kind)) : OK;
 }
 
 /** The refusal of a group move whose creatures stand on more than one floor or scene. */
@@ -1369,25 +1393,44 @@ function forPlayer(op: Op, c: Check): Decision {
 
     case "sys.restore": {
       if (op.saveOutcome !== undefined) return FORBIDDEN;
+      // A climb's undo or redo first finds the stairs it took, on the climber's floor now (docs/design/design-v1-floors.md phase 2, 8).
+      if (op.climb) {
+        const found = climbBackCheck(c, op.climb, op.from);
+        if (!found.ok) return found;
+      }
       // A player's stack holds only their own drawings and token moves and resizes (design 7.7), so that is all a restore may touch.
       const restoring = restoredTokens(op);
       const quiet = new Set(op.quiet ?? []);
+      // Under a climb, each branch below takes its change between the climb's two floors as a pose (8).
+      const climbed = (current: { sceneId: string }, restored: { sceneId: string }) => climbMoves(op.climb, op.from, current, restored);
       for (const entry of op.entries) {
         if (entry.key.startsWith("token:")) {
           // An undo retraces a move that was allowed when made. A redo makes it again, so walls stop it as they would a new
-          // move, except a teleport's, which passed them the first time too (docs/design/design-v1-maps-vision.md 4.1).
+          // move, except a teleport's, which passed them the first time too (docs/design/design-v1-maps-vision.md 4.1), and a
+          // climb's, which walks no leg and found its stairs above.
           const tokenId = entry.key.slice("token:".length);
           // A silent passenger of the step answers nothing, whatever the DM changed about it unseen since (docs/design/design-v1-attach.md 8.3).
           if (quiet.has(tokenId)) {
             const current = ownEntry(c.state.tokens, tokenId);
             const restored = entry.value && typeof entry.value === "object" ? (entry.value as Token) : null;
-            if (!current || !restored || withoutPose(restored) !== withoutPose(current)) return FORBIDDEN;
+            if (!current || !restored) return FORBIDDEN;
+            const also = climbed(current, restored);
+            if (withoutPose(restored, also) !== withoutPose(current, also)) return FORBIDDEN;
             continue;
           }
-          const redo = op.from === "redo" && !op.teleport;
+          const redo = op.from === "redo" && !op.teleport && !op.climb;
           const holder = carriedThroughout(c, tokenId, entry.value, restoring);
-          const d = holder ? restoreCarriedCheck(c, tokenId, entry.value, redo, holder, ownEntry(op.routes, holder), restoring) : restorePoseCheck(c, tokenId, entry.value, redo, ownEntry(op.routes, tokenId));
+          const also = climbAlso(c, tokenId, entry.value, climbed);
+          const d = holder ? restoreCarriedCheck(c, tokenId, entry.value, redo, holder, ownEntry(op.routes, holder), restoring, also) : restorePoseCheck(c, tokenId, entry.value, redo, ownEntry(op.routes, tokenId), also);
           if (!d.ok) return restoreWords(d);
+          continue;
+        }
+        // An area that follows a token the climb's restore puts back goes with it, and changes nothing but its floor (8).
+        if (op.climb && entry.key.startsWith("template:")) {
+          const current = ownEntry(c.state.templates, entry.key.slice("template:".length));
+          const restored = entry.value && typeof entry.value === "object" ? (entry.value as AreaTemplate) : null;
+          if (!current || !restored || restored.attachedTo === undefined || !restoring.has(restored.attachedTo) || climbed(current, restored).length === 0) return FORBIDDEN;
+          if (stableStringify({ ...restored, rev: 0, sceneId: "" }) !== stableStringify({ ...current, rev: 0, sceneId: "" })) return FORBIDDEN;
           continue;
         }
         if (!entry.key.startsWith("drawing:")) return FORBIDDEN;
@@ -1757,9 +1800,74 @@ function castCloseCheck(c: Check, op: OpOf<"cast.close">, held: ReadonlySet<stri
 }
 
 /** Movement (design 8.1): owners, or the players the room lets move any token, and never a locked token. */
-/** A player's Go up or Go down (docs/design/design-v1-floors.md phase 2, 4, 6.1). FL2-A's permissions commit builds it. */
-function climbCheck(_c: Check, _op: OpOf<"token.climb">, _held: ReadonlySet<string>): Decision {
-  return refuse("invalid", "stairs and ladders are not built yet");
+/**
+ * A player's Go up or Go down (docs/design/design-v1-floors.md phase 2, 4,
+ * 6.1): a creature they may move, on an end they get (project.ts
+ * projectFloorLinkCtx: on a floor they hold, on revealed ground) on its own
+ * floor, and not on a holder they receive, which takes the stairs instead.
+ * Every way of an end not there for them answers "There are no stairs
+ * here.", so a refusal never tells a fogged or gone end from no end. A
+ * holder they do not receive counts as absent (D-261109-018): the reducer
+ * lets that link go. The lock and the stand the reducer checks for every
+ * requester, the DM too, in the same words.
+ */
+function climbCheck(c: Check, op: OpOf<"token.climb">, held: ReadonlySet<string>): Decision {
+  const d = namedMoveCheck(c, op.tokenId);
+  if (!d.ok) return d;
+  const token = c.visibleToken(op.tokenId)!;
+  const link = ownEntry(c.state.floorLinks, op.linkId);
+  if (!link || link.sceneId !== token.sceneId || !held.has(link.sceneId) || !c.visible(keys.floorLink(link.id))) return refuse("invalid", LINK_WORDS.noStairs);
+  if (token.attached && onHolder(token.attached.kind) && c.visibleToken(token.attached.to)) return refuse("invalid", LINK_WORDS.carried(shownName(token), link.kind));
+  if (link.locked === true) return refuse("invalid", LINK_WORDS.locked);
+  const stand = standsOn(c.state, c.actor, token, link);
+  if (stand === "squeeze") return refuse("invalid", LINK_WORDS.tooBigSqueeze(link.kind));
+  if (stand === "tooBig") return refuse("invalid", LINK_WORDS.tooBig(link.kind));
+  return stand === "on" ? OK : refuse("invalid", LINK_WORDS.noStairs);
+}
+
+/** The fields a token's restore may change beyond its pose: its floor, under a climb (`climbMoves`). */
+function climbAlso(c: Check, tokenId: string, value: unknown, climbed: (current: { sceneId: string }, restored: { sceneId: string }) => readonly string[]): readonly string[] {
+  const current = ownEntry(c.state.tokens, tokenId);
+  const restored = value && typeof value === "object" ? (value as Token) : null;
+  return current && restored ? climbed(current, restored) : [];
+}
+
+/** The climb a restore takes back or makes again (`sys.restore` climb, docs/design/design-v1-floors.md phase 2, 8). */
+type Climb = NonNullable<OpOf<"sys.restore">["climb"]>;
+
+/**
+ * Whether a player's undo or redo of a climb finds the stairs it took
+ * (8, ASTRA-04, ASTRA-14), read on the climber's floor now alone: an undo
+ * goes from `to` back to `from` by the end there whose pair is the end it
+ * took, a redo from `from` to `to` by that end itself. Either way that end
+ * is one the player gets, at the climb's rev and `made`, unlocked, with the
+ * climber's snapped space inside its squares. A pair removed and placed
+ * again with the same ids has a new `made`, so it fails too. Else "the
+ * stairs changed", whatever changed, so no answer reads the far floor.
+ */
+function climbBackCheck(c: Check, climb: Climb, from: "undo" | "redo"): Decision {
+  const token = ownEntry(c.state.tokens, climb.tokenId);
+  const here = from === "undo" ? climb.to : climb.from;
+  const there = from === "undo" ? climb.from : climb.to;
+  const end = token === undefined || token.sceneId !== here ? undefined : from === "redo" ? ownEntry(c.state.floorLinks, climb.linkId) : linksOn(c.state, here).find((l) => l.pair === climb.linkId);
+  const kind = end?.kind ?? "stairs";
+  const changed = refuse("invalid", LINK_WORDS.changed(kind));
+  if (!token || !end || end.sceneId !== here || end.to !== there || end.rev !== climb.rev || end.made !== climb.made || end.locked === true) return changed;
+  if (!c.visible(keys.floorLink(end.id))) return changed;
+  // Its space alone: a later move, its height's included, is the restore's own guard to answer (MOVED_SINCE).
+  return spaceOn(c.state, token, end) ? OK : changed;
+}
+
+/**
+ * The one change of floor a climb's restore may make (8): the climber,
+ * what rode with it and their areas go between the climb's two floors, the
+ * way the restore runs, and only there. The extra field such a change may
+ * differ by, for withoutPose, or none.
+ */
+function climbMoves(climb: Climb | undefined, from: "undo" | "redo", current: { sceneId: string }, restored: { sceneId: string }): readonly string[] {
+  if (!climb || current.sceneId === restored.sceneId) return [];
+  const [now, back] = from === "undo" ? [climb.to, climb.from] : [climb.from, climb.to];
+  return current.sceneId === now && restored.sceneId === back ? ["sceneId"] : [];
 }
 
 function moveCheck(c: Check, tokenId: string): Decision {
@@ -2032,7 +2140,7 @@ function withoutPose(token: Token, also: readonly string[] = []): string {
  * and so does an owner whose undo changes where it is drawn in its box,
  * which on a locked token only the DM changes (docs/design/design-v1-snap-off.md 5.4).
  */
-function restoreMoveCheck(c: Check, tokenId: string, value: unknown): Decision {
+function restoreMoveCheck(c: Check, tokenId: string, value: unknown, also: readonly string[] = []): Decision {
   const current = ownEntry(c.state.tokens, tokenId);
   if (!current) return GONE;
   const token = c.visibleToken(tokenId);
@@ -2049,7 +2157,7 @@ function restoreMoveCheck(c: Check, tokenId: string, value: unknown): Decision {
     ownInPlace || viaHolder(c, current, restored) || (linkChanges && ownsToken(c.state, c.actor, token)) ? OK : namedMoveCheck(c, tokenId, restored ?? undefined);
   if (!may.ok) return may;
   if (!restored) return FORBIDDEN;
-  return withoutPose(restored) === withoutPose(current) ? OK : refuse("forbidden", "an undo of yours only moves tokens back");
+  return withoutPose(restored, also) === withoutPose(current, also) ? OK : refuse("forbidden", "an undo of yours only moves tokens back");
 }
 
 function sameNudge(a: Pick<Token, "nudge">, b: Pick<Token, "nudge">): boolean {
@@ -2100,7 +2208,16 @@ function carriedThroughout(c: Check, tokenId: string, value: unknown, restoring:
  * player's copy and change only its pose, and on a redo a dragged one
  * walks its holder's kept routes offset by its place, as the move did.
  */
-function restoreCarriedCheck(c: Check, tokenId: string, value: unknown, redo: boolean, holderId: string, routes: readonly (readonly RoutePiece[])[] | undefined, restoring: ReadonlyMap<string, unknown>): Decision {
+function restoreCarriedCheck(
+  c: Check,
+  tokenId: string,
+  value: unknown,
+  redo: boolean,
+  holderId: string,
+  routes: readonly (readonly RoutePiece[])[] | undefined,
+  restoring: ReadonlyMap<string, unknown>,
+  also: readonly string[] = [],
+): Decision {
   const current = ownEntry(c.state.tokens, tokenId);
   const restored = value && typeof value === "object" ? (value as Token) : null;
   if (!current || !restored) return OK;
@@ -2119,7 +2236,7 @@ function restoreCarriedCheck(c: Check, tokenId: string, value: unknown, redo: bo
   };
   if (!chain()) return OK;
   if (!c.visibleToken(tokenId)) return GONE;
-  if (withoutPose(restored) !== withoutPose(current)) return refuse("forbidden", "an undo of yours only moves tokens back");
+  if (withoutPose(restored, also) !== withoutPose(current, also)) return refuse("forbidden", "an undo of yours only moves tokens back");
   if (!redo || current.attached?.kind !== "drag") return OK;
   const holder = ownEntry(c.state.tokens, holderId);
   if (!holder || !routes || routes.length === 0) return legCheck(c, tokenId, restored, false);
@@ -2157,11 +2274,11 @@ const SIZE_FIELDS = ["size", "w", "h"] as const;
  * Then the footprint put back is judged as a resize to it (resizeRefusal),
  * and nothing but the pose and the size may differ.
  */
-function restorePoseCheck(c: Check, tokenId: string, value: unknown, redo: boolean, routes?: readonly (readonly RoutePiece[])[]): Decision {
+function restorePoseCheck(c: Check, tokenId: string, value: unknown, redo: boolean, routes?: readonly (readonly RoutePiece[])[], also: readonly string[] = []): Decision {
   const current = ownEntry(c.state.tokens, tokenId);
   const restored = value && typeof value === "object" ? (value as Token) : null;
   if (!current || !restored || SIZE_FIELDS.every((field) => restored[field] === current[field])) {
-    const d = restoreMoveCheck(c, tokenId, value);
+    const d = restoreMoveCheck(c, tokenId, value, also);
     if (!d.ok || !redo || !restored) return d;
     // A redo of walks meets the walls along each piece of the routes they took, in order, and never routes again (7.4).
     return routes && routes.length > 0 ? routeCheck(c, tokenId, routes, restored) : legCheck(c, tokenId, restored, false);

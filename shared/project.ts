@@ -18,6 +18,7 @@ import {
   type Encounter,
   type EncounterSnapshot,
   type ExploredTile,
+  type FloorLink,
   type FogDraft,
   type FogTile,
   type FreeWall,
@@ -80,6 +81,7 @@ import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
 import { compareEntries, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
 import { legOnGround, pathThisTurn, seenWhole, stopsForNonOwners, stopsForOwners } from "./rules/path.ts";
 import { zoneFogged, zoneRanges } from "./rules/traps.ts";
+import { linkDir } from "./rules/floorLinks.ts";
 import { heldFloors, holdsRecordOn, playersSee, sameScene, unhiddenPartyMember, unseenFloor } from "./rules/floors.ts";
 import { clipFootprint, seesCreature, sightClipOf, sightRect } from "./rules/vision.ts";
 import type { SegmentIndex } from "./rules/segments.ts";
@@ -2901,6 +2903,31 @@ function projectStampCtx(ctx: Ctx, stamp: Stamp): Stamp | null {
  * disarmed it. So a springing, re-arming, uses and rig edits send players
  * nothing, and a trap nobody found is in no player's data at all.
  */
+/**
+ * An end of stairs or a ladder as a viewer gets it (docs/design/design-v1-floors.md
+ * phase 2, 4), on a floor they hold: the DM every end as stored, a player
+ * one on revealed ground, as a found trap's zone, cut to ProjectedFloorLink:
+ * no pair, ground or seq, `to` only while they hold that floor, the way it
+ * leads from the levels, and rev 0. Permissions read the same answer
+ * (permissions.ts climbCheck), so a climb on an end a player does not get
+ * answers as one on no stairs. FL2-B owns its projection kind: what
+ * re-projects it and the snapshot's field.
+ */
+function projectFloorLinkCtx(ctx: Ctx, link: FloorLink): unknown {
+  if (!ctx.floors.has(link.sceneId)) return null;
+  if (ctx.viewer.role === "dm") return link;
+  const scene = ownEntry(ctx.state.scenes, link.sceneId);
+  if (scene?.fogEnabled) {
+    const fogs = ctx.presence(link.sceneId);
+    const fogged = (r: CellRange) => isRangeFullyFogged(fogs, link.sceneId, r, (x, y) => ctx.fogged(link.sceneId, x, y));
+    if (zoneFogged(ctx.state, link.sceneId, { cells: [link.rect] }, fogged, (sx, sy) => ctx.fogged.sub(link.sceneId, sx, sy))) return null;
+  }
+  const dir = linkDir(ctx.state, link);
+  if (dir === null) return null;
+  const { pair: _pair, to, ground: _ground, made: _made, ...kept } = link;
+  return { ...kept, rev: 0, ...(ctx.floors.has(to) ? { to } : {}), dir };
+}
+
 function projectTrapCtx(ctx: Ctx, trap: Trap): ProjectedTrap | null {
   if (!ctx.floors.has(trap.sceneId)) return null;
   if (ctx.viewer.role === "dm") return trap;
@@ -4194,9 +4221,8 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
     // Which floors players have reached is the DM's, whose Floors menu and warnings read it (docs/design/design-v1-floors.md 8).
     case "opened":
       return ctx.viewer.role === "dm" ? value : null;
-    // The DM gets every end as stored. FL2-B projects a player's (docs/design/design-v1-floors.md phase 2, 4).
     case "floorLink":
-      return ctx.viewer.role === "dm" ? value : null;
+      return value ? projectFloorLinkCtx(ctx, value as FloorLink) : null;
     case "holders":
       return value ? projectHoldersCtx(ctx, value as SightHolders) : null;
     case "fogDraft":
