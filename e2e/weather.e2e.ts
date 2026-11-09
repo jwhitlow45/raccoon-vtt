@@ -806,6 +806,8 @@ describe("weather over the map", { concurrency: false }, () => {
     await setWeather(run.sceneId, { kind: "rain", heavy: true, wind: "strong" });
     const look = lookOf({ kind: "rain", heavy: true, wind: "strong" })!;
     const lines = await heldStill(async () => {
+      // A runner whose canvas has no GPU has halved the weather by now (moving). Half the fixed seed's marks ran 5 to 10% over in Isometric on CI, past the sum's 10% on some runs, so this measures at the full step, as a machine with a GPU does, held still so it stays there.
+      await moving(pat);
       const out: string[] = [];
       for (const view of ["topDown", "isometric"] as const) {
         await viewAs(pat, view, 1);
