@@ -342,7 +342,10 @@ describe("The DM menu and the search on a scene of several floors", { concurrenc
     await row(dm, `token:${run.goblin}`).click();
     await sheet(dm).waitFor({ state: "detached" });
     await waitFor("the DM on Upper", async () => ((await dmOn(run.upper)) ? true : null), 20_000);
-    await dm.locator("[data-token-bar], [data-action-bar]").first().waitFor({ timeout: 8_000 }).catch(() => undefined);
+    // The switch of floors keeps him selected, so his bar opens on Upper (FLRBUILD-ASTRA-04).
+    await dm.getByRole("dialog", { name: "Goblin actions" }).waitFor({ timeout: 8_000 });
+    await dm.waitForTimeout(500);
+    assert.ok(await dm.getByRole("dialog", { name: "Goblin actions" }).isVisible(), "the goblin's bar stays open after the switch");
     await shots.take(dm, "flrm-5-token-on-another-floor");
   });
 

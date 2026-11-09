@@ -6,6 +6,7 @@ import type { Change, ClientOp } from "#shared/protocol.ts";
 import { DM, entry, P1, P2, token } from "#shared/testutil.ts";
 import { setFollowTurn } from "../features/encounter/followTurn.ts";
 import { ATTIC, CAVE, playerCopy, TOWER, tower, UPPER } from "../features/floors/testing.ts";
+import { sceneGate, settleSelection, type SelectionOn } from "../lib/scene.ts";
 import { createRoomStore } from "./store.ts";
 import { FakeClock, FakeOutbox } from "./testing.ts";
 
@@ -169,6 +170,28 @@ describe("a player's floors (7.3)", () => {
     s.room.ui.select("owl");
     assert.deepEqual(s.state().floorFollow, { sceneId: UPPER, tokenId: "owl" });
     assert.equal(s.state().sceneId, UPPER);
+  });
+
+  test("a selected companion moved upstairs takes the device with it, and Room's gate keeps it selected, so the device stays there (FLRBUILD-ASTRA-04)", () => {
+    const state = opened();
+    state.tokens.owl = token("owl", { sceneId: TOWER, name: "Owl", kind: "npc", ownerIds: ["p1"], x: 3 });
+    const s = storeOf(P1, playerCopy(state, [TOWER, UPPER]), TOWER);
+    // What Room's effect does after each render that changes the gate.
+    let on: SelectionOn | null = null;
+    const settle = () => {
+      const now = s.state();
+      on = settleSelection(on, sceneGate({ view: now.view, sceneId: now.sceneId, role: "player" }), now, s.room.ui);
+    };
+    settle();
+    s.room.ui.select("owl");
+    settle();
+    s.ev([tokenAt(state, "owl", { sceneId: UPPER })]);
+    assert.equal(s.state().sceneId, UPPER, "the device follows the owl");
+    settle();
+    assert.deepEqual(s.state().local.selectedIds, ["owl"], "the switch of floors keeps the owl selected");
+    s.ev([tokenAt(state, "bree", { x: 9 })]);
+    settle();
+    assert.deepEqual([s.state().sceneId, s.state().floorFollow?.tokenId], [UPPER, "owl"], "and the device stays upstairs with it, not back down to Thorn");
   });
 
   test("players started straight on Upper anchor there, never on a main floor they do not hold, and a blackout anchors nowhere (FLR32-ASTRA-04, ASTRA-07)", () => {

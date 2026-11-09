@@ -439,9 +439,16 @@ describe("Which floor each device shows on a scene of several floors", { concurr
     assert.deepEqual(alignmentLines(await measureAlignment(row), "Thorn's row on Upper floor"), [], "the tracker row out of line");
     await row.locator("[data-row-button]").click();
     await showsFloor(dm, "Upper floor", "a tap on Thorn's row shows Upper floor");
+    // And selects him there, as a tap on his token does: the switch of floors keeps the selection (FLRBUILD-ASTRA-04).
+    const bar = dm.getByRole("dialog", { name: "Thorn actions" });
+    await bar.waitFor();
+    await dm.waitForTimeout(500);
+    assert.ok(await bar.isVisible(), "Thorn's bar stays open on Upper floor");
+    await shots.take(dm, "flrv-6-dm-tracker-tap-selects");
     const menu = await openFloors(dm);
     await menu.locator(`[data-floor-row="${run.ground}"]`).click();
     await showsFloor(dm, "Ground floor");
+    await bar.waitFor({ state: "hidden" });
     await ops.send({ t: "encounter.end" });
   });
 

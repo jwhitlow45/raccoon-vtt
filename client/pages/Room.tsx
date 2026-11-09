@@ -97,7 +97,7 @@ import { dmPanelFoldsSlot, panelIsOpen, scenesFoldsSlot, soundFoldsSlot, thisDev
 import { useFocusedFieldInView, useKeyboardView } from "../lib/keyboardInset.ts";
 import { sheetStepping } from "../lib/modalDialog.ts";
 import { roomPath } from "../lib/roomId.ts";
-import { sceneGate, selectionScene } from "../lib/scene.ts";
+import { sceneGate, settleSelection, type SelectionOn } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { PanelBody, RoomLoadNotice } from "../panels/Panels.tsx";
 import { RoomScope, RoomScopeProvider, scopeSlot, useRoomScope, useScoped } from "../state/scope.ts";
@@ -380,15 +380,14 @@ function RoomPage() {
   const localNow = useRoomView((s) => s.local);
   const select = useCallback((id: string | null, add?: boolean) => ui.tap(id, add), [ui]);
 
-  // A change of scene lets go of the selection, and a blackout does not (lib/scene.ts selectionScene).
-  const selectionOn = useRef<string | null>(null);
-  const gateKey = gate.kind === "ready" ? `ready:${gate.scene.id}` : gate.kind;
+  // A change of scene lets go of the selection, a switch of floors keeps what stands on the new one, and a blackout does neither (lib/scene.ts selectionScene).
+  const selectionOn = useRef<SelectionOn | null>(null);
+  const projectedScene = useRoomView((s) => s.projectedSceneId);
+  const gateKey = gate.kind === "ready" ? `ready:${projectedScene}:${gate.scene.id}` : gate.kind;
   useEffect(() => {
-    const next = selectionScene(selectionOn.current, gate);
-    selectionOn.current = next.scene;
-    if (next.letGo) ui.select(null);
-    // The gate is read through gateKey, which changes exactly when its kind or its scene does.
-  }, [gateKey, ui]);
+    selectionOn.current = settleSelection(selectionOn.current, gate, store.getState(), ui);
+    // The gate is read through gateKey, which changes exactly when its kind, the scene projected or the floor shown does.
+  }, [gateKey, ui, store]);
   // A change of scene closes whatever popover is open (docs/design/design-v1-tool-options.md 13.3): a tool popover's choices and actions belong to the scene it opened on.
   const sceneNow = useRoomView((s) => s.sceneId);
   const sceneBefore = useRef(sceneNow);

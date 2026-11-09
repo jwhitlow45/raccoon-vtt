@@ -16,6 +16,7 @@ import {
   mapWorldRect,
   sceneGate,
   selectionScene,
+  settleSelection,
   snapPosition,
   type ViewToken,
 } from "./scene.ts";
@@ -78,22 +79,55 @@ describe("selectionScene (LPD-PLAYER-7)", () => {
   const { state, sceneId } = stateWithScene();
   const ready = sceneGate({ view: state, sceneId, role: "player" });
 
+  const here = { scene: sceneId, floor: sceneId };
+
   test("a blackout keeps the selection: the same scene comes back after it", () => {
-    const first = selectionScene(null, ready);
-    assert.deepEqual(first, { scene: sceneId, letGo: true }, "the first scene starts with nothing selected");
-    const paused = selectionScene(first.scene, { kind: "blackout" });
-    assert.deepEqual(paused, { scene: sceneId, letGo: false });
-    assert.deepEqual(selectionScene(paused.scene, ready), { scene: sceneId, letGo: false }, "the pause lifting lets go of nothing");
+    const first = selectionScene(null, ready, sceneId, state);
+    assert.deepEqual(first, { on: here, letGo: true, floor: null }, "the first scene starts with nothing selected");
+    const paused = selectionScene(first.on, { kind: "blackout" }, null, state);
+    assert.deepEqual(paused, { on: here, letGo: false, floor: null });
+    assert.deepEqual(selectionScene(paused.on, ready, sceneId, state), { on: here, letGo: false, floor: null }, "the pause lifting lets go of nothing");
   });
 
   test("a new scene, or losing the scene, still lets go", () => {
     const other = stateWithScene();
     other.state.scenes.next = { ...other.state.scenes[other.sceneId]!, id: "next" };
     const next = sceneGate({ view: other.state, sceneId: "next", role: "player" });
-    assert.deepEqual(selectionScene(sceneId, next), { scene: "next", letGo: true });
-    assert.deepEqual(selectionScene(sceneId, { kind: "noScene" }), { scene: null, letGo: true });
-    assert.deepEqual(selectionScene(sceneId, { kind: "wait" }), { scene: null, letGo: true });
-    assert.deepEqual(selectionScene(null, { kind: "wait" }), { scene: null, letGo: false });
+    assert.deepEqual(selectionScene(here, next, "next", other.state), { on: { scene: "next", floor: "next" }, letGo: true, floor: null });
+    assert.deepEqual(selectionScene(here, { kind: "noScene" }, null, state), { on: null, letGo: true, floor: null });
+    assert.deepEqual(selectionScene(here, { kind: "wait" }, null, state), { on: null, letGo: true, floor: null });
+    assert.deepEqual(selectionScene(null, { kind: "wait" }, null, state), { on: null, letGo: false, floor: null });
+  });
+
+  /** Tower's Ground floor (the main floor) and Upper floor, and Road, a scene without floors. */
+  function tower(): { view: RoomState; ground: string } {
+    const { state: view, sceneId: ground } = stateWithScene();
+    view.scenes[ground] = { ...view.scenes[ground]!, floor: { of: ground, level: 0, name: "Ground floor" } };
+    view.scenes.upper = { ...view.scenes[ground]!, id: "upper", floor: { of: ground, level: 1, name: "Upper floor" } };
+    view.scenes.road = { ...view.scenes[ground]!, id: "road", floor: undefined };
+    return { view, ground };
+  }
+  const gateOn = (view: RoomState, id: string) => sceneGate({ view, sceneId: id, role: "dm" });
+
+  test("a switch of floors keeps the selection and names the floor it keeps, and a start floor moved within the scene lets go of nothing (FLRBUILD-ASTRA-04)", () => {
+    const { view, ground } = tower();
+    const start = { scene: ground, floor: ground };
+    const up = selectionScene(start, gateOn(view, "upper"), ground, view);
+    assert.deepEqual(up, { on: { scene: ground, floor: "upper" }, letGo: false, floor: "upper" }, "the floor shown changed, the scene projected did not");
+    assert.deepEqual(selectionScene(up.on, gateOn(view, "upper"), ground, view), { on: up.on, letGo: false, floor: null }, "no switch, nothing to drop");
+    assert.deepEqual(selectionScene(up.on, gateOn(view, ground), "upper", view), { on: { scene: "upper", floor: ground }, letGo: false, floor: ground }, "the start floor moved to Upper within the scene");
+    assert.equal(selectionScene(start, gateOn(view, "road"), "road", view).letGo, true, "another scene lets go");
+  });
+
+  test("settleSelection lets go on a new scene and keeps only the tokens on the floor now shown", () => {
+    const { view, ground } = tower();
+    view.tokens = { a: { sceneId: "upper" } as RoomState["tokens"][string], b: { sceneId: ground } as RoomState["tokens"][string] };
+    const calls: string[] = [];
+    const ui = { select: () => void calls.push("let go"), keepSelected: (present: (id: string) => boolean) => void calls.push(`keep ${["a", "b", "gone"].filter(present).join(" ")}`) };
+    const on = settleSelection({ scene: ground, floor: ground }, gateOn(view, "upper"), { projectedSceneId: ground, view }, ui);
+    assert.deepEqual([on, calls], [{ scene: ground, floor: "upper" }, ["keep a"]]);
+    settleSelection(on, { kind: "noScene" }, { projectedSceneId: null, view }, ui);
+    assert.deepEqual(calls, ["keep a", "let go"]);
   });
 });
 

@@ -1,4 +1,6 @@
-import { SIZE_CELLS, type Character, type Member, type RoomState, type Scene, type SceneMap, type Token } from "#shared/model.ts";
+import { SIZE_CELLS, type Character, type Member, type RoomState, type Scene, type SceneId, type SceneMap, type Token } from "#shared/model.ts";
+import { ownEntry } from "#shared/records.ts";
+import { sameScene } from "#shared/rules/floors.ts";
 import { footprintRect, occupiedHexes, sizeCategory, type PlacedToken } from "#shared/rules/footprint.ts";
 import type { Grid } from "#shared/rules/grid.ts";
 import { drawnSpot } from "#shared/rules/nudge.ts";
@@ -276,18 +278,51 @@ export function sceneGate(input: { view: RoomState | null; sceneId: string | nul
   return { kind: "ready", scene, fog: scene.fogEnabled !== false };
 }
 
+/** Where a selection was made: the scene projected (RoomView.projectedSceneId) and the floor shown. */
+export type SelectionOn = { scene: SceneId; floor: SceneId };
+
 /**
- * The scene a selection belongs to after the gate changes, and whether
- * the change lets go of the selection: a new scene does, and so does
- * losing the scene, since the tokens selected stand on the one before. A
- * player's blackout does neither (LPD-PLAYER-7). It is a pause with the
- * same scene behind it, and letting go there took each player's selection,
- * and the token bar with it, whenever the DM paused the game.
+ * Where a selection stands after the gate changes, and what the change
+ * does to it: a new scene lets go of it, and so does losing the scene,
+ * since the tokens selected stand on the one before. A player's blackout
+ * does neither (LPD-PLAYER-7). It is a pause with the same scene behind
+ * it, and letting go there took each player's selection, and the token
+ * bar with it, whenever the DM paused the game.
+ *
+ * The scene is the scene projected, which a switch of floors leaves alone
+ * (docs/design/design-v1-floors.md 7.3), so a switch keeps the tokens
+ * selected on the floor now shown (`floor`) and drops the rest: a tracker
+ * or search row on another floor shows it and selects its creature, and a
+ * player's device follows a selected companion upstairs (FLRBUILD-ASTRA-04).
+ * A group move then names one floor's tokens, as the server asks. A start
+ * floor moved within the scene changes the scene projected of a player's
+ * device without changing the scene, which `sameScene` tells on the view.
  */
-export function selectionScene(before: string | null, gate: SceneGate): { scene: string | null; letGo: boolean } {
-  if (gate.kind === "blackout") return { scene: before, letGo: false };
-  const scene = gate.kind === "ready" ? gate.scene.id : null;
-  return { scene, letGo: scene !== before };
+export function selectionScene(before: SelectionOn | null, gate: SceneGate, projected: SceneId | null, view: Pick<RoomState, "scenes"> | null): { on: SelectionOn | null; letGo: boolean; floor: SceneId | null } {
+  if (gate.kind === "blackout") return { on: before, letGo: false, floor: null };
+  if (gate.kind !== "ready") return { on: null, letGo: before !== null, floor: null };
+  const on = { scene: projected ?? gate.scene.id, floor: gate.scene.id };
+  const kept = before !== null && (before.scene === on.scene || (view !== null && sameScene(view, before.scene, on.scene)));
+  if (!kept) return { on, letGo: true, floor: null };
+  return { on, letGo: false, floor: before.floor === on.floor ? null : on.floor };
+}
+
+/**
+ * Room's answer to a change of the gate (selectionScene) on the store's
+ * selection: it lets go, or keeps what stands on the floor now shown.
+ * Returns where the selection stands, for the next change.
+ */
+export function settleSelection(
+  before: SelectionOn | null,
+  gate: SceneGate,
+  room: { projectedSceneId: SceneId | null; view: Pick<RoomState, "scenes" | "tokens"> | null },
+  ui: { select(tokenId: null): void; keepSelected(present: (tokenId: string) => boolean): void },
+): SelectionOn | null {
+  const next = selectionScene(before, gate, room.projectedSceneId, room.view);
+  const tokens = room.view?.tokens;
+  if (next.letGo) ui.select(null);
+  else if (next.floor !== null) ui.keepSelected((id) => ownEntry(tokens, id)?.sceneId === next.floor);
+  return next.on;
 }
 
 /**
