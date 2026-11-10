@@ -25,6 +25,8 @@ import { lightCaption, lightCaptionSpot, lightReach, lightSlot, tokenBodies } fr
 import { labelPaneSlot, linkPaneSlot, useBuilderStore } from "./store.ts";
 import { useStampDrawing } from "./stamps/useStampDrawing.ts";
 import { TERRAIN_COLORS, useTextures } from "./textures.ts";
+import type { WingGhost } from "./wingGhost.ts";
+import { hexAreaOutline, type WingJoin } from "./wingPick.ts";
 
 /**
  * The build on the board layer (design section 12): one path per floor
@@ -42,6 +44,7 @@ export function BuilderLayer(props: LayerProps) {
       <BuildBoard sceneId={props.scene.id} grid={props.scene.grid} autoWalls={props.scene.autoWalls} bounds={props.scene.bounds} gridShape={props.scene.gridShape} role={props.role} scale={props.scale} />
       {props.role === "dm" ? <LightMarks sceneId={props.scene.id} scale={props.scale} /> : null}
       {props.role === "dm" ? <BuildPreview scene={props.scene} scale={props.scale} /> : null}
+      {props.role === "dm" ? <WingMarks scene={props.scene} scale={props.scale} /> : null}
       {props.role === "dm" ? <LabelMarks /> : null}
     </>
   );
@@ -450,6 +453,147 @@ function LinkRect(props: { rect: CellRect; grid: Grid; scale: number; color: str
             }
           }
         }
+        c.restore();
+      }}
+    />
+  );
+}
+
+/** The ghost's build is drawn this faint, as a gesture not yet sent is (dungeon phase 3, 3.3). */
+const GHOST_ALPHA = 0.6;
+/** A wing's area, its outline and the ghost's, in amber: no build color, and apart from the accent of the join's ring. */
+const AREA_COLOR = boardTheme.color.warning;
+
+/**
+ * Add a wing's marks (docs/design: dungeon generator phase 3, 3.1 and 3.3),
+ * for the DM while the mode is open: the area being dragged, in the danger
+ * color while the rules refuse it, the area dashed in amber, the join
+ * ringed, and the wing's ghost while the pane plans one, its rooms
+ * numbered with Edit rooms on. Players never see any of it: the ghost
+ * comes from the DM's own scratch room.
+ */
+function WingMarks(props: { scene: Scene; scale: number }) {
+  const { scene, scale } = props;
+  const active = useRoomView((s) => s.local.tool === "build");
+  const { mode, wing, draft, ghost, numbered } = useStore(
+    useBuilderStore(),
+    useShallow((b) => ({ mode: b.mode, wing: b.wing, draft: b.wingDraft, ghost: b.wingGhost, numbered: b.wingEdit })),
+  );
+  const { accent } = useAccent();
+  if (!active || mode !== "wing") return null;
+  const grid = sceneGrid(scene);
+  const picked = wing?.sceneId === scene.id ? wing : null;
+  return (
+    <>
+      {ghost && ghost.sceneId === scene.id ? <GhostShape ghost={ghost} scene={scene} scale={scale} numbered={numbered} /> : null}
+      {picked?.area ? <AreaOutline rect={picked.area} grid={grid} bounds={scene.bounds} scale={scale} color={AREA_COLOR} fill={0} /> : null}
+      {draft ? <AreaOutline rect={draft.rect} grid={grid} bounds={scene.bounds} scale={scale} color={draft.problem === null ? accent : boardTheme.color.danger} fill={0.15} /> : null}
+      {picked?.join ? <JoinRing join={picked.join} scale={scale} color={accent} /> : null}
+    </>
+  );
+}
+
+function AreaOutline(props: { rect: CellRect; grid: Grid; bounds: Scene["bounds"]; scale: number; color: string; fill: number }) {
+  const { rect, grid, bounds, scale, color, fill } = props;
+  // A rectangle of hex keys is no rectangle on the map, so its outline runs along the sides of its edge hexes.
+  const sides = useMemo(() => (isHex(grid) ? hexAreaOutline(grid, rect, bounds) : null), [grid, rect, bounds]);
+  return (
+    <Shape
+      listening={false}
+      perfectDrawEnabled={false}
+      sceneFunc={(ctx) => {
+        const c = ctx._context;
+        c.save();
+        c.strokeStyle = color;
+        c.fillStyle = color;
+        c.lineWidth = 2 / scale;
+        c.setLineDash([6 / scale, 4 / scale]);
+        c.beginPath();
+        if (sides) {
+          for (const [a, b] of sides) {
+            c.moveTo(a.x, a.y);
+            c.lineTo(b.x, b.y);
+          }
+        } else c.rect(rect.x, rect.y, rect.w, rect.h);
+        if (fill > 0 && !sides) {
+          c.globalAlpha = fill;
+          c.fill();
+          c.globalAlpha = 1;
+        }
+        c.stroke();
+        c.restore();
+      }}
+    />
+  );
+}
+
+/** The join's leaves drawn thick, and a ring round them all, at least a fingertip across on screen. */
+function JoinRing(props: { join: WingJoin; scale: number; color: string }) {
+  const { join, scale, color } = props;
+  const points = join.leaves.flatMap((l) => [l.a, l.b]);
+  const x0 = Math.min(...points.map((p) => p.x));
+  const x1 = Math.max(...points.map((p) => p.x));
+  const y0 = Math.min(...points.map((p) => p.y));
+  const y1 = Math.max(...points.map((p) => p.y));
+  const radius = Math.max(Math.hypot(x1 - x0, y1 - y0) / 2 + 8 / scale, 18 / scale);
+  return (
+    <>
+      {join.leaves.map((l, i) => (
+        <Line key={i} points={[l.a.x, l.a.y, l.b.x, l.b.y]} stroke={color} strokeWidth={6} strokeScaleEnabled={false} lineCap="round" listening={false} />
+      ))}
+      <Circle x={(x0 + x1) / 2} y={(y0 + y1) / 2} radius={radius} stroke={color} strokeWidth={3} strokeScaleEnabled={false} listening={false} />
+    </>
+  );
+}
+
+/**
+ * The ghost: the wing's build at GHOST_ALPHA where it would land, its traps'
+ * squares hatched, its lights' reach as rings, and with Edit rooms on its
+ * rooms' numbers, W1 and on. Its paths are built once per ghost.
+ */
+function GhostShape(props: { ghost: WingGhost; scene: Scene; scale: number; numbered: boolean }) {
+  const { ghost, scene, scale, numbered } = props;
+  const paths = useMemo(() => buildPaths(ghost.chunks, "dm", ghost.walls), [ghost]);
+  const textures = useTextures(paths.floors.map(([t]) => t));
+  const grid = useMemo(() => ({ ...scene.grid, show: false }), [scene.grid]);
+  return (
+    <Shape
+      listening={false}
+      perfectDrawEnabled={false}
+      sceneFunc={(ctx) => {
+        const c = ctx._context;
+        c.save();
+        c.translate(ghost.offset.x, ghost.offset.y);
+        c.globalAlpha = GHOST_ALPHA;
+        drawBuild(c, paths, { role: "dm", scale, grid, textures, labels: [] });
+        c.globalAlpha = 1;
+        c.lineWidth = 1.5 / scale;
+        c.strokeStyle = boardTheme.color.danger;
+        for (const r of ghost.traps) {
+          c.save();
+          c.beginPath();
+          c.rect(r.x, r.y, r.w, r.h);
+          c.stroke();
+          c.clip();
+          c.beginPath();
+          // Hatched at 45 degrees, a line every half cell across the zone.
+          for (let t = -r.h; t < r.w; t += 0.5) {
+            c.moveTo(r.x + t, r.y + r.h);
+            c.lineTo(r.x + t + r.h, r.y);
+          }
+          c.stroke();
+          c.restore();
+        }
+        c.strokeStyle = AREA_COLOR;
+        c.setLineDash([3 / scale, 3 / scale]);
+        for (const l of ghost.lights) {
+          c.beginPath();
+          c.arc(l.x, l.y, l.reach, 0, Math.PI * 2);
+          c.stroke();
+        }
+        c.setLineDash([]);
+        // As a label is drawn, a number a steady 16 px tall on screen at any zoom.
+        if (numbered) for (const room of ghost.rooms) drawLabel(c, { x: room.x, y: room.y, text: `W${room.n}`, size: 16 / scale });
         c.restore();
       }}
     />

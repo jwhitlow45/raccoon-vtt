@@ -65,6 +65,8 @@ export type BuilderState = {
   wingOpen: boolean;
   /** The wing the pane plans, drawn on the map as its ghost (wingGhost.ts). */
   wingGhost: WingGhost | null;
+  /** The pane's Edit rooms, which numbers the ghost's rooms. */
+  wingEdit: boolean;
 };
 
 export type WingPicks = { sceneId: string; area: CellRect | null; tap: WingTap | null; join: WingJoin | null };
@@ -115,7 +117,7 @@ export function pickBuildMode(scope: RoomScope, mode: BuildMode): void {
 }
 
 /** Add a wing with nothing picked: what a new mode, another scene or floor, or an added wing leaves (dungeon phase 3, 3.1). */
-export const NO_WING = { wing: null, wingDraft: null, wingOpen: false, wingGhost: null } as const satisfies Partial<BuilderState>;
+export const NO_WING = { wing: null, wingDraft: null, wingOpen: false, wingGhost: null, wingEdit: false } as const satisfies Partial<BuilderState>;
 
 /** A gesture's bookkeeping that the canvas never draws. */
 export type BuilderGesture = {
@@ -209,5 +211,5 @@ export function useBuilderStore(): StoreApi<BuilderState> {
 
 /** Ends whatever gesture was in progress, keeping the DM's choices. A wing's area and join stay, its pane closes with the tool. */
 export function resetGesture(store: StoreApi<BuilderState>): void {
-  store.setState({ unsent: [], rect: null, poly: [], run: [], labelMove: null, note: null, inSight: false, line: [], lineScene: null, lineAt: null, lineDrag: null, linkDraft: null, wingDraft: null, wingOpen: false, wingGhost: null });
+  store.setState({ unsent: [], rect: null, poly: [], run: [], labelMove: null, note: null, inSight: false, line: [], lineScene: null, lineAt: null, lineDrag: null, linkDraft: null, wingDraft: null, wingOpen: false, wingGhost: null, wingEdit: false });
 }
