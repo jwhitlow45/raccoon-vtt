@@ -400,10 +400,13 @@ type TurnPress = Extract<ClientOp, { t: "encounter.next" | "encounter.prev" }>;
  * row and round (features section 10). The server moves a turn only for the
  * press that names it, so a player's End Turn and the DM's Next at the same
  * moment, or two DM devices, never skip a creature. A press while this
- * device still waits on one of the same kind names that one's turn again:
- * the DM's Next is predicted, so the screen already shows the next turn,
- * and naming it would make a double tap move two. A press of the other kind
- * is a change of mind and names the turn on screen.
+ * device still waits on one of the same kind names that one's turn again,
+ * so a double tap moves one. No device predicts a turn change
+ * (shared/reads.ts TURN_OPS), so the screen still shows the turn the
+ * waiting press moves from. A press of the other kind names that turn
+ * too, and the server takes it as over once the first lands. The turn
+ * controls show busy and send nothing while one waits, so only the N key
+ * can send such a press.
  */
 export function turnOp(t: TurnPress["t"], room: { view: { encounter: Pick<Encounter, "activeEntryId" | "round"> | null } | null; pending: readonly { op: ClientOp }[] }): TurnPress {
   const last = room.pending.findLast((p): p is { op: TurnPress } => p.op.t === "encounter.next" || p.op.t === "encounter.prev");

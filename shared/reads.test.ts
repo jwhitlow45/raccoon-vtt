@@ -4,7 +4,7 @@ import { uuidv7 } from "./ids.ts";
 import { ANA, ATTIC, GROUND, UPPER, run, tower, withStairs } from "./floorLinksTestutil.ts";
 import type { RoomState } from "./model.ts";
 import { projectState, type ProjectedState } from "./project.ts";
-import { reads, satisfies } from "./reads.ts";
+import { opReads, reads, satisfies } from "./reads.ts";
 import { applyOp } from "./reducer.ts";
 import { DM, P1, P2, actor, blockOf, character, companionBlock, customMonster, entry, env, reveal, room, token } from "./testutil.ts";
 
@@ -146,7 +146,8 @@ describe("reads", () => {
 
   test("ops that scan a collection wait for players and for a DM viewing another scene", () => {
     const player = view();
-    const next = reads({ t: "encounter.next" }, player.state);
+    // What a turn change reads before its hold: no device predicts one now (reads.turnOps.prop.test.ts).
+    const next = opReads({ t: "encounter.next" }, player.state);
     assert.ok(!("never" in next) && next.complete.includes("encounter"));
     assert.ok(!satisfies(next, player.projected, P1, player.opts));
     const dmOnS1 = view(setup(), DM, "s1");
@@ -156,7 +157,7 @@ describe("reads", () => {
     single.encounter!.entries = [single.encounter!.entries[0]!];
     const dmFull = view(single, DM, "s1");
     // Next reads the scene of the row it lands on too (its companions' Reactions), so it is asked of this room.
-    assert.ok(satisfies(reads({ t: "encounter.next" }, single), dmFull.projected, DM, dmFull.opts));
+    assert.ok(satisfies(opReads({ t: "encounter.next" }, single), dmFull.projected, DM, dmFull.opts));
     const create = reads({ t: "token.create", token: { id: "x", sceneId: "s1", kind: "monster", name: "G", size: "medium", x: 0, y: 0, actor: { inline: actor() } } }, single);
     assert.ok(!("never" in create) && create.complete.includes("scene:s1"));
     assert.ok(satisfies(create, dmFull.projected, DM, dmFull.opts));
@@ -164,7 +165,7 @@ describe("reads", () => {
     assert.ok(!satisfies(create, dmOnS2.projected, DM, dmOnS2.opts));
     const pcCreate = reads({ t: "token.create", token: { id: "x", sceneId: "s1", kind: "pc", name: "G", size: "medium", x: 0, y: 0, actor: { ref: "c1" } } }, single);
     assert.ok(!("never" in pcCreate) && pcCreate.complete.length === 0);
-    const del = reads({ t: "character.delete", characterId: "c1" }, single);
+    const del = opReads({ t: "character.delete", characterId: "c1" }, single);
     assert.ok(!satisfies(del, dmFull.projected, DM, dmFull.opts), "two scenes exist");
   });
 
@@ -320,7 +321,8 @@ describe("companion ops (docs/design/design-v1-combat-flow.md 4.6)", () => {
 
   test("a deletion reads the history, and a character's new owners every token, which only a one-scene room viewed whole holds", () => {
     const state = party();
-    const del = reads({ t: "token.delete", tokenId: "ws" }, state);
+    // What a deletion reads before its hold: in a fight no device predicts one now (reads.turnOps.prop.test.ts).
+    const del = opReads({ t: "token.delete", tokenId: "ws" }, state);
     assert.ok(!("never" in del) && del.keys.some((k) => k.key === "encounterHistory"));
     const owners = reads({ t: "character.update", characterId: "c1", patch: { ownerIds: ["p2"] } }, state);
     assert.ok(!("never" in owners) && owners.complete.includes("tokens"));
@@ -339,14 +341,15 @@ describe("companion ops (docs/design/design-v1-combat-flow.md 4.6)", () => {
     const state = party();
     delete state.tokens.far;
     state.encounter = { rev: 0, round: 1, activeEntryId: "n1", entries: [entry("n1", { tokenId: "pc1" }), entry("n2", { characterId: "c1", tieOrder: 1 })] };
-    const next = reads({ t: "encounter.next" }, state);
+    // What a turn change reads before its hold: no device predicts one now (reads.turnOps.prop.test.ts).
+    const next = opReads({ t: "encounter.next" }, state);
     assert.ok(!("never" in next) && next.complete.includes("scene:s1"));
     const onPlayers = view(state, DM, "s1");
     assert.ok(satisfies(next, onPlayers.projected, DM, onPlayers.opts));
     const elsewhere = view(state, DM, "s2");
     assert.ok(!satisfies(next, elsewhere.projected, DM, elsewhere.opts));
     state.encounterHistory = [{ encounter: structuredClone(state.encounter), effects: {}, revealed: [], companionReactions: ["ws"], at: "x" }];
-    const prev = reads({ t: "encounter.prev" }, state);
+    const prev = opReads({ t: "encounter.prev" }, state);
     assert.ok(!("never" in prev) && prev.keys.some((k) => k.key === "token:ws"));
   });
 });
@@ -355,7 +358,8 @@ describe("the room's clock (docs/design/design-v1-calendar.md 6.3, CAL-1)", () =
   const clock = (shown: boolean) => ({ id: "k1", rev: 1, t: 0, shown, calendar: { kind: "days" as const } });
   /** Whether the viewer's own copy predicts the op, read from that copy as a device reads it (client/state/store.ts). */
   const readsClock = (op: Parameters<typeof reads>[0], state: ReturnType<typeof setup>) => {
-    const r = reads(op, state);
+    // Before the turn's hold, so a fight's end, which waits for its answer, still shows what it reads.
+    const r = opReads(op, state);
     return !("never" in r) && r.keys.some((k) => k.key === "clock");
   };
   const predicts = (op: Parameters<typeof reads>[0], state: ReturnType<typeof setup>, viewer = DM) => {
@@ -373,13 +377,14 @@ describe("the room's clock (docs/design/design-v1-calendar.md 6.3, CAL-1)", () =
     const state = here();
     const rest = { t: "actor.rest" as const, target: { characterId: "c1" }, kind: "long" as const };
     assert.ok(predicts(rest, state));
-    assert.ok(predicts({ t: "encounter.end" }, state));
+    // A fight's end can change the turn, so it waits for its answer, clock or none (reads.ts TURN_OPS).
+    assert.ok(!predicts({ t: "encounter.end" }, state));
     assert.ok(!readsClock(rest, state));
     const timed = { ...here(), clock: clock(true) };
     assert.ok(readsClock(rest, timed));
     assert.ok(readsClock({ t: "encounter.end" }, timed));
     assert.ok(predicts(rest, timed));
-    assert.ok(predicts({ t: "encounter.end" }, timed));
+    assert.ok(!predicts({ t: "encounter.end" }, timed));
   });
 
   test("a player's own rest predicts with the clock hidden and with it shared", () => {

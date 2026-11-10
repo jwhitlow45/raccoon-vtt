@@ -10,7 +10,7 @@ import { actor, character, companionBlock, DM, entry, P1, P2, room, template, to
 import { LocalServer } from "../dev/localServer.ts";
 import { turnOp } from "../features/encounter/logic.ts";
 import { DRAG_END_HOLD_MS, PREVIEW_IDLE_MS } from "./ephemeral.ts";
-import { createRoomStore, FORGET_UNSURE, OP_ANSWER_MS, refusalText, replayPending, type RoomStore } from "./store.ts";
+import { createRoomStore, FORGET_UNSURE, OP_ANSWER_MS, refusalText, replayPending, turnPending, type RoomStore } from "./store.ts";
 import { applyTestHistory, TEST_HISTORY_HEAD, FakeClock, FakeOutbox } from "./testing.ts";
 import { INITIAL_LOCAL, panelView, sheetOpen, withoutBelow, withPanel, type LocalUi, type OpAnswer, type OpRefusal, type UnknownCause } from "./types.ts";
 
@@ -250,11 +250,15 @@ describe("which ops are optimistic", () => {
     assert.equal(s.state().view?.encounter?.activeEntryId, "e-g1", "applied when the ev lands");
   });
 
-  test("the DM viewing the scene of every combatant predicts it", () => {
+  test("the DM's Next waits for its answer, even viewing the scene of every combatant", () => {
     const s = setup(fight(), DM);
     s.connect();
     s.room.dispatch({ t: "encounter.next" });
-    assert.equal(s.state().view?.encounter?.activeEntryId, "e-g1");
+    assert.equal(s.state().view?.encounter?.activeEntryId, "e-pc", "not predicted");
+    assert.equal(turnPending(s.state()), true);
+    s.deliver();
+    assert.equal(s.state().view?.encounter?.activeEntryId, "e-g1", "applied when the ev lands");
+    assert.equal(turnPending(s.state()), false);
   });
 
   test("a double tap on the DM's Next moves the turn once, on this device and on the server", () => {
@@ -265,17 +269,19 @@ describe("which ops are optimistic", () => {
     s.connect();
     s.room.dispatch(turnOp("encounter.next", s.state()));
     s.room.dispatch(turnOp("encounter.next", s.state()));
-    assert.equal(s.state().view?.encounter?.activeEntryId, "e-g1", "the second tap is the same press");
+    const [first, second] = s.state().pending.map((p) => p.op);
+    assert.deepEqual(second, first, "the second tap is the same press");
     s.deliver();
     assert.equal(s.state().view?.encounter?.activeEntryId, "e-g1");
     assert.equal(s.state().pending.length, 0);
     assert.deepEqual(s.state().toasts, [], "the late press is taken quietly");
-    // Answered, the next press is a press of its own. Next then Previous before an answer both count.
+    // Answered, the next press is a press of its own. A Previous sent before the Next's answer names the turn on screen,
+    // which the Next ends, so the server moves the turn once.
     s.room.dispatch(turnOp("encounter.next", s.state()));
     s.room.dispatch(turnOp("encounter.prev", s.state()));
     assert.equal(s.state().view?.encounter?.activeEntryId, "e-g1");
     s.deliver();
-    assert.equal(s.state().view?.encounter?.activeEntryId, "e-g1");
+    assert.equal(s.state().view?.encounter?.activeEntryId, "e-g2");
   });
 
   test("the DM viewing another scene than a combatant's waits", () => {
@@ -382,13 +388,15 @@ describe("which companion ops are optimistic (docs/design/design-v1-combat-flow.
     assert.deepEqual(one.state().view?.tokens.ws?.ownerIds, ["p2"], "predicted");
   });
 
-  test("the DM's Next onto a character-only row is predicted while the DM views the players' scene, and clears the spirit's Reaction", () => {
+  test("the DM's Next onto a character-only row waits for its answer, which clears the spirit's Reaction", () => {
     const state = party();
     state.encounter = { rev: 0, round: 1, activeEntryId: "e-g1", entries: [entry("e-g1", { tokenId: "g1", value: 20 }), entry("e-bree", { characterId: "bree", value: 10, tieOrder: 1 })] };
     const s = setup(state, DM, "s1");
     s.connect();
     s.room.dispatch({ t: "encounter.next" });
-    assert.equal(s.state().view?.encounter?.activeEntryId, "e-bree", "predicted");
+    assert.equal(s.state().view?.encounter?.activeEntryId, "e-g1", "not predicted");
+    s.deliver();
+    assert.equal(s.state().view?.encounter?.activeEntryId, "e-bree");
     assert.equal(s.state().view?.tokens.ws?.companion?.reactionUsed, undefined);
     const away = setup(state, DM, "s2");
     away.connect();
@@ -396,15 +404,15 @@ describe("which companion ops are optimistic (docs/design/design-v1-combat-flow.
     assert.equal(away.state().view?.encounter?.activeEntryId, "e-g1", "waits while the DM views another scene");
   });
 
-  test("the DM's Next with a companion Reaction spent is predicted when the view holds every row's token", () => {
+  test("the DM's Next with a companion Reaction spent waits for its answer, which clears the Reaction with the turn", () => {
     const state = party();
     state.encounter = { rev: 0, round: 1, activeEntryId: "e-g1", entries: [entry("e-g1", { tokenId: "g1", value: 20 }), entry("e-bree", { tokenId: "bt", value: 10, tieOrder: 1 })] };
     const s = setup(state, DM, "s1");
     s.connect();
     s.room.dispatch({ t: "encounter.next" });
-    assert.equal(s.state().view?.encounter?.activeEntryId, "e-bree");
-    assert.equal(s.state().view?.tokens.ws?.companion?.reactionUsed, undefined, "predicted with the turn");
+    assert.equal(s.state().view?.encounter?.activeEntryId, "e-g1", "not predicted");
     s.deliver();
+    assert.equal(s.state().view?.encounter?.activeEntryId, "e-bree");
     assert.equal(s.state().pending.length, 0);
     assert.equal(s.state().view?.tokens.ws?.companion?.reactionUsed, undefined);
   });

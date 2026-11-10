@@ -21,7 +21,7 @@ import {
   type RefusalCode,
   type ServerMessage,
 } from "#shared/protocol.ts";
-import { reads, satisfies } from "#shared/reads.ts";
+import { holdsTurn, opReads, reads, satisfies } from "#shared/reads.ts";
 import { applyOp } from "#shared/reducer.ts";
 import type { ConnectionState } from "../lib/connection.ts";
 import { applyEph, clearTokens, floorEph, keepFloors, keepLocal, keepMembers, nextFloorExpiry, NO_FLOOR_EPHEMERAL, onEveryFloor, onFloor, sweepEph, type FloorEphemeral } from "./ephemeral.ts";
@@ -484,8 +484,21 @@ export function undoAnswer(t: "undo" | "redo", answer: { what: string | undefine
 
 /** The entity keys an op names, for the `busy` spinners of ops that wait. */
 function readKeys(op: ClientOp, state: RoomState): string[] {
-  const r = reads(op, state);
+  const r = opReads(op, state);
   return "never" in r ? [] : r.keys.map((k) => k.key);
+}
+
+/**
+ * Whether an op that can change the turn waits for its answer
+ * (shared/reads.ts holdsTurn). It is read from the ops still pending, never
+ * kept, so an ack, a refusal and a snapshot that settles a lost ack each
+ * end it as they take the op off the list. Meanwhile the turn controls and
+ * every action that sends a turn's record show busy and send nothing: the
+ * record on screen may be the turn the op ends.
+ */
+export function turnPending(s: { pending?: readonly { op: ClientOp }[]; confirmed?: ProjectedState | null }): boolean {
+  const room = s.confirmed ?? {};
+  return s.pending?.some((p) => holdsTurn(p.op, room)) ?? false;
 }
 
 /**

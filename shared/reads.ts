@@ -140,7 +140,60 @@ function namingSound(state: RoomState, soundId: string): Read[] {
   return out;
 }
 
+/**
+ * The ops that can change which turn runs: the active row, where and when
+ * that turn began, the fight's start, or the id or presence of any
+ * creature's turn record. The server numbers each turn, so a device that
+ * showed such an op before its answer would key its cards, and send its
+ * record actions, on a number the server never gave. No device predicts
+ * them, and while one waits the actions that send a turn's record wait
+ * with it (`holdsTurn`). shared/reads.turnOps.prop.test.ts holds the list
+ * to the reducer.
+ */
+export const TURN_OPS: ReadonlySet<Op["t"]> = new Set<Op["t"]>([
+  "encounter.start",
+  "encounter.end",
+  "encounter.next",
+  "encounter.prev",
+  "encounter.remove",
+  "token.delete",
+  "token.deleteMany",
+  "scene.delete",
+  "character.delete",
+  "token.update",
+  "undo",
+  "redo",
+]);
+
+/**
+ * Whether this op, in this room, can change which turn runs. A delete
+ * removes rows only from a fight, and a token change only when it changes
+ * what a companion is, so outside those they still show at once.
+ */
+export function holdsTurn(op: Op, state: { readonly encounter?: object | null }): boolean {
+  if (!TURN_OPS.has(op.t)) return false;
+  switch (op.t) {
+    case "token.delete":
+    case "token.deleteMany":
+    case "scene.delete":
+    case "character.delete":
+      return !!state.encounter;
+    case "token.update":
+      return !!state.encounter && op.patch.companion !== undefined;
+    default:
+      return true;
+  }
+}
+
 export function reads(op: Op, state: RoomState): Reads {
+  return holdsTurn(op, state) ? NEVER : opReads(op, state);
+}
+
+/**
+ * What an op reads, before the turn's hold. A waiting op marks the keys
+ * it touches busy (client/state/store.ts), held or not.
+ */
+export function opReads(op: Op, state: RoomState): Reads {
   switch (op.t) {
     case "undo":
     case "redo":
