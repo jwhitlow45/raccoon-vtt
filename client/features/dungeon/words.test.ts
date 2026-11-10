@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { keyTitle } from "./keyPage.ts";
-import { entranceSide, fitLine, floorKeyName, floorOutcomeText, floorTitle, fogLine, MAKE_FLOOR, makingLine, MAKING_FLOOR, NO_FOG_WARNING, outcomeText, previewName, roomsHint, sizeLine, statusLine } from "./words.ts";
+import { doorName, editedLine, entranceSide, fitLine, floorKeyName, floorOutcomeText, floorTitle, fogLine, MAKE_FLOOR, makingLine, MAKING_FLOOR, NO_FOG_WARNING, outcomeText, previewName, roomsHint, roomTitle, selectedName, sizeLine, statusLine } from "./words.ts";
 
 test("DG-C: the size line in the room's feet per square", () => {
   assert.equal(sizeLine(30, 30, 5), "30 × 30 squares (150 by 150 ft)");
@@ -155,4 +155,29 @@ test("FL3S: how Make of a floor ended names the floor as stored, and Remove floo
     (["none", "partial", "unconfirmed"] as const).map((k) => floorOutcomeText(k === "none" ? { k, lost: true } : { k }, "Crypt", "Tower", true).tone),
     ["error", "error", "error"],
   );
+});
+
+/* Phase 3 (design 2.1, 4.1, 7): the dialog's words on hexes and for room edits. */
+test("DG3: on hexes the size line counts hexes and rows as the Size row does, and the fit lines name the walls", () => {
+  assert.equal(sizeLine(50, 50, 5, "hexRows"), "250 by 250 ft: 50 hexes across and 57 rows down");
+  assert.equal(sizeLine(50, 50, 5, "hexColumns"), "250 by 250 ft: 57 columns across and 50 hexes down");
+  assert.equal(sizeLine(30, 30, 5, "squares"), "30 × 30 squares (150 by 150 ft)");
+  assert.equal(fitLine({ rooms: 18, asked: 24 }, "hexRows"), "Fit 18 of 24 rooms. On hexes every wall is a wall line, so fewer fit: Sparse or Narrow fits more.");
+  assert.equal(fitLine({ rooms: 24, asked: 24 }, "hexRows"), null);
+  assert.equal(roomsHint(14, true), "2 to 14 in this area. Fewer fit when the layout is tight.");
+});
+
+test("DG3: a hex entrance's side reads the room's box in the scene", () => {
+  assert.equal(entranceSide({ w: 50, h: 50, entrance: { x: 0.5, y: 20, w: 6, h: 5 } }), "west");
+  assert.equal(entranceSide({ w: 50, h: 50, entrance: { x: 43, y: 20, w: 6.5, h: 5 } }), "east");
+});
+
+test("DG3: the room panel's words, the edits line and the preview's name with a room picked", () => {
+  assert.equal(roomTitle(3), "Room 3");
+  assert.equal(doorName("w", 1), "West, to room 1");
+  assert.equal(doorName("s", "edge"), "South, to the way in");
+  assert.equal(editedLine(1), "Edited: 1 room. The seed alone makes this dungeon without your edits.");
+  assert.equal(editedLine(3), "Edited: 3 rooms. The seed alone makes this dungeon without your edits.");
+  assert.equal(selectedName("Preview of the dungeon: 12 rooms, entrance on the west side.", 3), "Preview of the dungeon: 12 rooms, entrance on the west side. Room 3 selected.");
+  assert.equal(selectedName("Preview.", null), "Preview.");
 });

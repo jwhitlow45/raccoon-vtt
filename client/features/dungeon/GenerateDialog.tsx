@@ -15,20 +15,30 @@ import { floorAddRefusal, floorCreateOf, type FloorTarget } from "../scenes/floo
 import { CHECK_MS } from "../uvtt/rules.ts";
 import { NumberInput } from "../scenes/controls.tsx";
 import { Choice, Choices as ChoiceRows } from "./Choices.tsx";
+import type { DungeonEdits, RoomEdit, RoomFacts } from "./edits.ts";
 import { closePreviews, preview, warmPreviews, type Preview } from "./client.ts";
-import { counted, drawable, flowStep, readiness, startFlow, type Flow, type FlowEvent } from "./flow.ts";
+import { counted, drawable, editedRooms, editsStep, flowStep, readiness, startEdits, startFlow, type EditsEvent, type EditsState, type Flow, type FlowEvent } from "./flow.ts";
 import { journalFull } from "./keyHold.ts";
 import { keyOps, type KeyInput } from "./keyPage.ts";
 import { LookCloser } from "./LookCloser.tsx";
 import { SCENE_PLACEHOLDER, withIds } from "./ops.ts";
+import { roomBox } from "./marks.ts";
 import { DungeonPreview, type Drawn } from "./Preview.tsx";
-import { keptSize, loadChoices, saveChoices, settingsOf, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
+import { RoomPanel } from "./RoomPanel.tsx";
+import { keptSize, loadChoices, saveChoices, settingsOf, sideCap, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
 import { formatSeed, newSeed, parseSeed } from "./seed.ts";
-import { CHOICE_NAMES, MAX_SIDE, MIN_SIDE, type DungeonSettings, type SizeChoice } from "./settings.ts";
+import { CHOICE_NAMES, isHexGrid, MIN_SIDE, type DungeonSettings, type GridKind, type SizeChoice } from "./settings.ts";
 import { sendDungeon, warmOpChecks } from "./send.ts";
 import {
+  BRING_BACK,
+  DROP_EDITS,
+  EDIT_OVER_WALLS,
+  EDIT_ROOMS,
+  editedLine,
+  EDITS_DROPPED,
   entranceSide,
   FIT_NONE,
+  FIT_NONE_HEX,
   fitLine,
   floorKeyName,
   floorOutcomeText,
@@ -46,6 +56,7 @@ import {
   sizeLine,
   startScene,
   statusLine,
+  TOO_MANY_HEX,
   WAITING,
 } from "./words.ts";
 
@@ -56,7 +67,18 @@ const FRAME_MARGIN = 4;
 /** From this card width the preview takes the left half (4.7). */
 const TWO_COLUMNS_PX = 640;
 
-type Shown = { result: Extract<Preview, { ok: true }>; drawn: Drawn };
+/*
+ * The worker takes the room edits and answers with each kept room's facts,
+ * the room count it asked for and, on a failed fit, why (phase 3, section
+ * 9). The landing lane's client carries them. Read through this shape, an
+ * answer without them has no rooms to edit and a plain fit error.
+ */
+type Answered = Preview & { facts?: RoomFacts[]; fitted?: number; why?: string };
+const previewEdited = preview as (...args: [...Parameters<typeof preview>, DungeonEdits | null]) => Promise<Answered>;
+
+type Shown = { result: Extract<Answered, { ok: true }>; drawn: Drawn };
+/** What Bring them back restores beside the edits: the choices and the seed as typed. */
+type Before = { choices: Choices; seedText: string };
 type Sending = { answered: number; total: number };
 
 /**
@@ -95,7 +117,11 @@ export function GenerateDialog(props: {
   onMade(sceneId: string): void;
   /** Make a floor here in place of a scene. `form` is then the floor beside's size, and `name` its scene's. */
   floor?: FloorTarget;
+  /** The New scene form's grid. A hex dungeon is wall lines on hexes (phase 3, section 2). */
+  grid?: GridKind;
 }) {
+  const grid: GridKind = props.grid ?? "squares";
+  const hex = isHexGrid(grid);
   const actions = useRoomActions();
   const store = useRoomStore();
   const ui = useRoomUi();
@@ -117,6 +143,15 @@ export function GenerateDialog(props: {
   const [choices, setChoices] = useState<Choices>(start.choices);
   const [seedText, setSeedText] = useState(() => formatSeed(newSeed()));
   const [flow, step] = useReducer((f: Flow<Shown>, e: FlowEvent<Shown>) => flowStep(f, e), undefined, startFlow<Shown>);
+  const [edits, editStep] = useReducer((s: EditsState<Before>, e: EditsEvent<Before>) => editsStep(s, e), undefined, startEdits<Before>);
+  const editsRef = useRef(edits);
+  editsRef.current = edits;
+  /** The room whose panel is open, by board index (phase 3, 4.1). */
+  const [picked, setPicked] = useState<number | null>(null);
+  const editRef = useRef<HTMLButtonElement>(null);
+  const focusEdit = useRef(false);
+  /** Why the newest hex plan did not fit, as the worker said. */
+  const [fitWhy, setFitWhy] = useState<string | null>(null);
   const [sending, setSending] = useState<Sending | null>(null);
   /** How a Make that did not complete ended, said in the dialog. `retry` when no scene was made, so Make may send again. */
   const [failed, setFailed] = useState<{ text: string; retry: boolean } | null>(null);
@@ -133,19 +168,19 @@ export function GenerateDialog(props: {
   const layout = useBodyLayout(root);
 
   const parsed = parseSeed(seedText);
-  const settings = settingsOf(choices);
-  const { w, h } = sidesOf(choices);
+  const settings = settingsOf(choices, grid);
+  const { w, h } = sidesOf(choices, grid);
   const sceneName = cleanName(props.name, "Dungeon");
   /** A floor is named for its theme, numbered by the reducer while taken (D-261110-076). */
   const floorName = CHOICE_NAMES.theme[choices.theme];
   // The preview's scene: the form's name at the chosen size. Players see goes on at Make, read then.
-  const scene: SceneInput = useMemo(() => builderScene({ id: SCENE_PLACEHOLDER, name: props.name, w, h }), [props.name, w, h]);
+  const scene: SceneInput = useMemo(() => builderScene({ id: SCENE_PLACEHOLDER, name: props.name, w, h, ...(isHexGrid(grid) ? { gridShape: grid } : {}) }), [props.name, w, h, grid]);
   // Held when the journal has room for nothing more: the preview then lands no key, and the switch reads off.
   const [keyHeld, setKeyHeld] = useState(false);
   // A floor's page is titled again from the stored name once its create is taken (send.ts). The preview's guesses it.
   const keyName = props.floor ? floorKeyName(sceneName, floorName) : sceneName;
   const keyInput: KeyInput | null = choices.key && !keyHeld && myColor ? { name: keyName, color: myColor, feetPerCell } : null;
-  const key = parsed.ok ? JSON.stringify([settings, parsed.seed, keyInput]) : null;
+  const key = parsed.ok ? JSON.stringify([settings, parsed.seed, keyInput, edits.edits]) : null;
 
   // The worker loads as the dialog opens, and closing ends it, dropping any late answer (client.ts).
   useEffect(() => {
@@ -181,12 +216,19 @@ export function GenerateDialog(props: {
     }
     step({ k: "ask", id: asked });
     const seed = parsed.seed;
+    const sent = edits.edits;
     const timer = setTimeout(() => {
-      preview(settings, seed, scene, { feetPerCell }, keyInput).then(
+      previewEdited(settings, seed, scene, hex ? { feetPerCell, grid } : { feetPerCell }, keyInput, sent).then(
         (result) => {
           if (!mounted.current) return;
-          if (!result.ok) return step({ k: "answer", id: asked, answer: { ok: false, error: result.error } });
-          const drawn = { plan: result.plan, room: result.room, name: previewName(result.summary, entranceSide(result.plan)) };
+          if (!result.ok) {
+            // Edits freeze a layout that fit, so a plan with them that does not fit is the newest edit's doing: it is undone, and the plan asked again (4.2).
+            if (result.error === "fit" && sent !== null && asked === request.current && editsRef.current.last !== null) return editStep({ k: "overBudget", report: EDIT_OVER_WALLS });
+            if (asked === request.current) setFitWhy(result.why ?? null);
+            return step({ k: "answer", id: asked, answer: { ok: false, error: result.error } });
+          }
+          const plan = result.plan;
+          const drawn = { plan, room: result.room, name: previewName(result.summary, entranceSide({ w: plan.w, h: plan.h, entrance: roomBox(plan, plan.entrance) })) };
           step({ k: "answer", id: asked, answer: { ok: true, value: { result, drawn } } });
         },
         () => {
@@ -243,8 +285,28 @@ export function GenerateDialog(props: {
     if (holding) return;
     props.onClose(sceneMayExist.current);
   };
-  const set = (patch: Partial<Choices>) => setChoices((c) => ({ ...c, ...patch }));
-  const setSize = (patch: Partial<Pick<Choices, "size" | "across" | "down">>) => setChoices((c) => withSize(c, patch));
+  // A changed choice, a Reroll or a new seed drops the edits, keeping what stood before for Bring them back (4.4).
+  const dropEdits = () => editStep({ k: "change", before: { choices, seedText } });
+  const set = (patch: Partial<Choices>) => {
+    dropEdits();
+    setChoices((c) => ({ ...c, ...patch }));
+  };
+  const setSize = (patch: Partial<Pick<Choices, "size" | "across" | "down">>) => {
+    dropEdits();
+    setChoices((c) => withSize(c, patch, grid));
+  };
+  const setSeed = (text: string) => {
+    dropEdits();
+    setPicked(null);
+    setSeedText(text);
+  };
+  const bringBack = () => {
+    const back = edits.dropped;
+    if (!back) return;
+    setChoices(back.before.choices);
+    setSeedText(back.before.seedText);
+    editStep({ k: "bringBack" });
+  };
 
   const make = async () => {
     if (!canMake || !current) return;
@@ -264,7 +326,8 @@ export function GenerateDialog(props: {
     const ops = made.ops.map((op) => (op.t !== "scene.create" ? op : floor ? floorCreateOf(startScene(op.scene, pick, startsDark), floor, floorName, "own") : { ...op, scene: startScene(op.scene, pick, startsDark) }));
     const { plan } = current;
     // Only this device's camera frames the entrance, through its own room scope, and nothing is stored (4.5).
-    frames.frameOnOpen = { sceneId: made.sceneId, rect: grownWithin({ x: plan.entrance.x, y: plan.entrance.y, width: plan.entrance.w, height: plan.entrance.h }, FRAME_MARGIN, { w: plan.w, h: plan.h }) };
+    const entrance = roomBox(plan, plan.entrance);
+    frames.frameOnOpen = { sceneId: made.sceneId, rect: grownWithin({ x: entrance.x, y: entrance.y, width: entrance.w, height: entrance.h }, FRAME_MARGIN, { w: plan.w, h: plan.h }) };
     setFailed(null);
     setSending({ answered: 0, total: ops.length });
     sceneMayExist.current = true;
@@ -321,6 +384,32 @@ export function GenerateDialog(props: {
   // Off until the picture on screen is the dungeon Make would send.
   const looksReady = !ready.drawing && !ready.pictureFailed && current !== null;
 
+  // The rooms on screen, as the key numbers them, and the picked room's place among them (4.1).
+  const onScreen = counted(flow)?.result ?? null;
+  const facts = onScreen?.facts ?? [];
+  const pickedFacts = picked === null ? null : (facts.find((f) => f.room === picked) ?? null);
+  const stepRoom = (by: -1 | 1) => {
+    const at = facts.findIndex((f) => f.room === picked);
+    const next = at < 0 ? facts[0] : facts[(at + by + facts.length) % facts.length];
+    if (next) setPicked(next.room);
+  };
+  const done = () => {
+    focusEdit.current = true;
+    setPicked(null);
+  };
+  // Done gives focus back to Edit rooms, which a tap on the picture has no focus of its own to take (7).
+  useEffect(() => {
+    if (picked !== null || !focusEdit.current) return;
+    focusEdit.current = false;
+    editRef.current?.focus({ preventScroll: true });
+  }, [picked]);
+  const editRoom = (next: RoomEdit | null) => {
+    if (picked === null || !parsed.ok || !onScreen) return;
+    // The first edit freezes the layout on screen: the room count its plan asked for, the seed and the choices (4.2).
+    const layout = { fitted: onScreen.fitted ?? settings.rooms, seed: parsed.seed, settings: JSON.stringify(settings), base: null };
+    editStep({ k: "edit", room: picked, edit: next, layout });
+  };
+
   // Reroll stands in the preview's corner, so the preview and the choices each keep one left edge. Its ring can fall on the picture's stone, so it is the board's two-tone ring (Preview.tsx CORNER_SLOT).
   const previewBox = (
     <DungeonPreview
@@ -332,26 +421,43 @@ export function GenerateDialog(props: {
       onPictured={(drawn) => step({ k: "pictured", drawn })}
       onPictureFailed={(drawn) => step({ k: "pictureFailed", drawn })}
       leftCorner={<LookCloser drawn={looksReady ? drawable(flow) : null} name={sceneName} disabled={locked} onDrawing={setLooking} onFailed={setLookFailed} />}
+      topCorner={
+        <Button ref={editRef} size="sm" {...ON_BOARD} style={ON_BOARD_STYLE} pressed={picked !== null} disabled={locked || facts.length === 0} onClick={() => (picked !== null ? done() : setPicked(facts[0]?.room ?? null))}>
+          {EDIT_ROOMS}
+        </Button>
+      }
+      rooms={facts}
+      showNumbers={picked !== null}
+      picked={picked}
+      {...(locked ? null : { onPick: setPicked })}
     >
-      <Button size="sm" {...ON_BOARD} style={ON_BOARD_STYLE} disabled={locked} onClick={() => setSeedText(formatSeed(newSeed()))}>
+      <Button size="sm" {...ON_BOARD} style={ON_BOARD_STYLE} disabled={locked} onClick={() => setSeed(formatSeed(newSeed()))}>
         Reroll
       </Button>
     </DungeonPreview>
   );
 
-  const fit = current ? fitLine(current.summary) : null;
+  const fit = current ? fitLine(current.summary, grid) : null;
   // Pinned above the foot with the fog warning, so a DM scrolled down sees why Make is off.
   const errorLine = failed ? <ErrorText>{failed.text}</ErrorText> : null;
   const previewError =
-    problem === "fit" ? <ErrorText>{FIT_NONE}</ErrorText> : problem === "bug" ? <ErrorText>{NOT_MADE}</ErrorText> : ready.pictureFailed ? <ErrorText>{PICTURE_FAILED}</ErrorText> : lookFailed ? <ErrorText>{lookFailed}</ErrorText> : null;
+    problem === "fit" ? <ErrorText>{hex ? (fitWhy === "tooMany" ? TOO_MANY_HEX : FIT_NONE_HEX) : FIT_NONE}</ErrorText> : problem === "bug" ? <ErrorText>{NOT_MADE}</ErrorText> : ready.pictureFailed ? <ErrorText>{PICTURE_FAILED}</ErrorText> : lookFailed ? <ErrorText>{lookFailed}</ErrorText> : null;
   const choicesBox = (
     <div style={{ display: "grid", gap: theme.space(4), minWidth: 0, alignContent: "start" }}>
       {problem === null && !ready.pictureFailed && fit ? <Note>{fit}</Note> : null}
+      {edits.dropped ? (
+        <div data-edits-dropped="" style={EDITS_LINE}>
+          <Help style={{ flex: "1 1 12em" }}>{EDITS_DROPPED}</Help>
+          <Button size="sm" disabled={locked} onClick={bringBack}>
+            {BRING_BACK}
+          </Button>
+        </div>
+      ) : null}
       <ChoiceRows
         value={settings}
         onChange={(next) => set(changed(settings, next))}
         held={locked}
-        grid="squares"
+        grid={grid}
         wing={false}
         keyHeld={keyHeld}
         size={
@@ -365,22 +471,47 @@ export function GenerateDialog(props: {
               { value: "large", label: "Large" },
               { value: "custom", label: "Custom" },
             ]}
-            help={sizeLine(w, h, feetPerCell)}
+            help={sizeLine(w, h, feetPerCell, grid)}
           >
             {choices.size === "custom" ? (
               <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
-                <NumberInput label="Across" value={choices.across} min={MIN_SIDE} max={MAX_SIDE} onChange={(across) => setSize({ across })} />
+                <NumberInput label="Across" value={Math.min(choices.across, sideCap(grid, "w"))} min={MIN_SIDE} max={sideCap(grid, "w")} onChange={(across) => setSize({ across })} />
                 <span aria-hidden>×</span>
-                <NumberInput label="Down" value={choices.down} min={MIN_SIDE} max={MAX_SIDE} onChange={(down) => setSize({ down })} />
+                <NumberInput label="Down" value={Math.min(choices.down, sideCap(grid, "h"))} min={MIN_SIDE} max={sideCap(grid, "h")} onChange={(down) => setSize({ down })} />
               </div>
             ) : null}
           </Choice>
         }
         light={<LightLine kept={keptLit} onToggle={() => setKeptLit((k) => !k)} />}
-        seed={{ text: seedText, onChange: setSeedText }}
+        seed={{
+          text: seedText,
+          onChange: setSeed,
+          below: edits.edits ? (
+            <div data-edits-line="" style={EDITS_LINE}>
+              <Help style={{ flex: "1 1 12em" }}>{editedLine(editedRooms(edits))}</Help>
+              <Button size="sm" disabled={locked} onClick={() => editStep({ k: "drop" })}>
+                {DROP_EDITS}
+              </Button>
+            </div>
+          ) : null,
+        }}
       />
     </div>
   );
+  // The room panel takes the choices' place while a room is picked (4.1, D-261110-097).
+  const panel =
+    picked === null ? null : (
+      <RoomPanel
+        facts={pickedFacts}
+        edit={edits.edits?.rooms[picked]}
+        onEdit={editRoom}
+        onStep={stepRoom}
+        onDone={done}
+        cave={choices.theme === "cave"}
+        held={locked}
+        more={edits.undone[picked] ? [edits.undone[picked]] : []}
+      />
+    );
 
   return (
     <Dialog
@@ -417,7 +548,7 @@ export function GenerateDialog(props: {
           {/* One place in the tree at either width, or crossing the breakpoint remounts the preview empty. */}
           <div style={layout.wide ? { position: "sticky", top: 0 } : undefined}>{previewBox}</div>
         </div>
-        {choicesBox}
+        {panel ?? choicesBox}
         {/* Above the foot whatever the scroll, so it is read before Make. */}
         {errorLine || previewError || fogWarning ? (
           <div style={{ ...PINNED_FOOT, display: "grid", gap: theme.space(2) }}>
@@ -486,6 +617,9 @@ export function changed(before: DungeonSettings, after: DungeonSettings): Partia
   for (const k of Object.keys(after) as (keyof DungeonSettings)[]) if (k !== "w" && k !== "h" && after[k] !== before[k]) patch[k] = after[k];
   return patch as Partial<Choices>;
 }
+
+/** The edits line and the dropped line: their words, then the button, wrapping under them when narrow. */
+const EDITS_LINE = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minWidth: 0 } as const;
 
 /** The light line: what the scene starts as with lights in it, and the one tap that flips it. Focus stays on the button as the words swap. */
 function LightLine(props: { kept: boolean; onToggle(): void }) {

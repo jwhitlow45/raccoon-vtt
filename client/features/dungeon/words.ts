@@ -2,7 +2,9 @@ import { playersSeeFields, withPlayersSee, type NewScenePick, type SceneInput } 
 import { openFloorLine } from "../scenes/floorWords.ts";
 import type { DungeonPlan } from "./plan.ts";
 import { versionChar } from "./seed.ts";
-import { litCount, raisedCount, secretCount, trapCount, type Theme } from "./settings.ts";
+import { isHexGrid, litCount, raisedCount, secretCount, trapCount, type GridKind, type Theme } from "./settings.ts";
+import { sceneHexSpan } from "#shared/rules/hex.ts";
+import { hexGridOf } from "./lattice.ts";
 import type { DungeonOutcome } from "./send.ts";
 import type { Summary } from "./client.ts";
 
@@ -13,7 +15,6 @@ import type { Summary } from "./client.ts";
  */
 
 export const GENERATE_LEAD = "Or start from a generated dungeon";
-export const HEX_NOTE = "Generated dungeons are squares for now. Pick Squares above to make one.";
 
 export const THEME_HELP = {
   dungeon: "Stone and wood rooms, closed and locked doors, rubble and pits.",
@@ -105,9 +106,17 @@ export const PICTURE_FAILED = "This device could not draw the preview, so Make i
 export const SEED_BAD = `A seed is 16 letters and digits, like ${versionChar()}K7Q-H2MX-A9F3-TWQ5.`;
 export const SEED_OTHER_VERSION = "This seed is from another version of the generator, so it makes a different dungeon now.";
 
-/** "30 × 30 squares (150 by 150 ft)", in the room's feet per square. */
-export function sizeLine(w: number, h: number, feetPerCell: number): string {
-  return `${w} × ${h} squares (${w * feetPerCell} by ${h * feetPerCell} ft)`;
+/**
+ * "30 × 30 squares (150 by 150 ft)", in the room's feet per square. On
+ * hexes it counts what the size holds as the Size row's words do
+ * (grid/words.ts `sizeWords`): "250 by 250 ft: 50 hexes across and 57 rows
+ * down", or on Hex columns "57 columns across and 50 hexes down" (2.1).
+ */
+export function sizeLine(w: number, h: number, feetPerCell: number, grid: GridKind = "squares"): string {
+  if (!isHexGrid(grid)) return `${w} × ${h} squares (${w * feetPerCell} by ${h * feetPerCell} ft)`;
+  const span = sceneHexSpan(hexGridOf(grid), { w, h });
+  const counts = grid === "hexRows" ? `${span.cols} hexes across and ${span.rows} rows down` : `${span.cols} columns across and ${span.rows} hexes down`;
+  return `${w * feetPerCell} by ${h * feetPerCell} ft: ${counts}`;
 }
 
 /** The cap is what the size could take at best. A Wide, Sparse or small map fits fewer, and the status line says how many did (DG-ROOMS-CAP). A wing's is its area's (phase 3, 3.3). */
@@ -143,10 +152,17 @@ export function statusLine(s: Summary): string {
   return `${rooms}, ${doors}, ${traps}.`;
 }
 
-/** Said when fewer rooms fit than were asked for, else null. */
-export function fitLine(s: Pick<Summary, "rooms" | "asked">): string | null {
-  return s.rooms < s.asked ? `Fit ${s.rooms} of ${s.asked} rooms. A larger size or fewer rooms fits them all.` : null;
+/** Said when fewer rooms fit than were asked for, else null. On hexes the walls are what bind (phase 3, 7). */
+export function fitLine(s: Pick<Summary, "rooms" | "asked">, grid: GridKind = "squares"): string | null {
+  if (s.rooms >= s.asked) return null;
+  return isHexGrid(grid)
+    ? `Fit ${s.rooms} of ${s.asked} rooms. On hexes every wall is a wall line, so fewer fit: Sparse or Narrow fits more.`
+    : `Fit ${s.rooms} of ${s.asked} rooms. A larger size or fewer rooms fits them all.`;
 }
+
+/** Why no hex dungeon came (phase 3, 2.5 and 7): under two rooms with walls to spare, or past the plans a fit tries. */
+export const FIT_NONE_HEX = "Could not fit two rooms with walls to spare on hexes. Try fewer rooms or Sparse.";
+export const TOO_MANY_HEX = "Too many rooms for the walls a hex scene holds. Try fewer rooms or Sparse.";
 
 export function makingLine(answered: number, of: number): string {
   return `Making the dungeon… ${answered} of ${of}`;
@@ -154,7 +170,7 @@ export function makingLine(answered: number, of: number): string {
 
 export type Side = "west" | "north" | "east" | "south";
 
-/** The scene edge nearest the entrance room, ties going west, north, east, south, as the generator picks it. */
+/** The scene edge nearest the entrance room, ties going west, north, east, south, as the generator picks it. On hexes `entrance` is the room's box in the scene (marks.ts `roomBox`). */
 export function entranceSide(plan: Pick<DungeonPlan, "w" | "h" | "entrance">): Side {
   const e = plan.entrance;
   const gaps: [Side, number][] = [

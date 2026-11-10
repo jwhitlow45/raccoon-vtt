@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import fc from "fast-check";
 import { DEFAULT_CHOICES, keptSize, loadChoices, parseChoices, roomsDefault, saveChoices, settingsOf, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
-import { clampRooms, roomCap } from "./settings.ts";
+import { clampRooms, clampSettings, roomCap } from "./settings.ts";
 
 function memory() {
   const data = new Map<string, string>();
@@ -135,4 +135,21 @@ test("FL3S: a typed 30 rooms on Large, clamped on a 30 by 30 floor, stays 30 bes
   assert.equal(loadChoices("ROOM1", storage)!.rooms, 30, "opened and cancelled: still 30");
   saveChoices("ROOM1", { ...open, rooms: open.rooms - 1 }, storage, kept);
   assert.equal(loadChoices("ROOM1", storage)!.rooms, open.rooms - 1, "a count typed in the dialog is remembered");
+});
+
+/* Phase 3 (design 2.1, 2.5, 4.2): sizes and rooms on hexes, and settings as the planner compares them. */
+test("DG3: on hexes Custom stops at 87 across the rows, the presets stand, and Rooms stop at 24", () => {
+  const custom = { ...DEFAULT_CHOICES, size: "custom" as const, across: 100, down: 100, rooms: 40 };
+  assert.deepEqual(sidesOf(custom, "hexRows"), { w: 100, h: 87 });
+  assert.deepEqual(sidesOf(custom, "hexColumns"), { w: 87, h: 100 });
+  assert.deepEqual(sidesOf(custom, "squares"), { w: 100, h: 100 });
+  assert.deepEqual(sidesOf({ ...custom, size: "large" }, "hexRows"), { w: 80, h: 80 });
+  assert.equal(settingsOf(custom, "hexRows").rooms, 24);
+  assert.equal(settingsOf(custom, "squares").rooms, 40);
+  assert.equal(roomsDefault({ size: "custom", across: 100, down: 87 }, "hexRows"), 24);
+});
+
+test("DG3: settings come in clampSettings' order, so the JSON an edit freezes is the planner's", () => {
+  const s = settingsOf({ ...DEFAULT_CHOICES, rooms: 9 });
+  assert.equal(JSON.stringify(s), JSON.stringify(clampSettings(s)));
 });

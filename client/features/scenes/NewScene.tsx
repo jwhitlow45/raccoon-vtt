@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { MAX_SCENE_CELLS } from "#shared/protocol.ts";
 import { gridOfShape } from "#shared/rules/grid.ts";
 import type { FoundWork } from "#shared/starter.ts";
@@ -29,7 +29,8 @@ import { loadedStarterWork } from "../starter/catalog.ts";
 import { answeredGrid, retainedGrid, starterMapScene, type StarterGrid } from "../starter/mapScene.ts";
 import { StarterDialog } from "../starter/StarterDialog.tsx";
 import { GenerateDialog } from "../dungeon/GenerateDialog.tsx";
-import { GENERATE_LEAD, HEX_NOTE } from "../dungeon/words.ts";
+import type { GridKind } from "../dungeon/settings.ts";
+import { GENERATE_LEAD } from "../dungeon/words.ts";
 import { thisDevice } from "../uvtt/limits.ts";
 import { NewScenePlayersSee, type PlayersSeeValue } from "../vision/PlayersSee.tsx";
 import { ColorInput, NumberInput } from "./controls.tsx";
@@ -138,9 +139,8 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
   /** The grid the starter dialog was opened with, as its intent is held. */
   const starterShapeRef = useRef<ShapeChoice | undefined>(undefined);
   /** The form's name, size and Players see as Generate a dungeon opened, held while its dialog is open as the starter dialog's are. */
-  const [generate, setGenerate] = useState<{ name: string; w: number; h: number; intent: NewSceneIntent } | null>(null);
+  const [generate, setGenerate] = useState<{ name: string; w: number; h: number; intent: NewSceneIntent; grid: GridKind } | null>(null);
   const generateButton = useRef<HTMLButtonElement>(null);
-  const hexNoteId = useId();
   const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
   const setting = useRoomView((s) => s.view?.meta.settings.newScenePlayers);
   const shapeSetting = useRoomView((s) => s.view?.meta.settings.newScenes);
@@ -528,16 +528,9 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
               {kind === "builder" ? (
                 <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>
                   <Help>{GENERATE_LEAD}</Help>
-                  <Button
-                    ref={generateButton}
-                    size="sm"
-                    disabled={hexFor("builder")}
-                    aria-describedby={hexFor("builder") ? hexNoteId : undefined}
-                    onClick={() => setGenerate({ name, w, h, intent: intentNow("builder") })}
-                  >
+                  <Button ref={generateButton} size="sm" onClick={() => setGenerate({ name, w, h, intent: intentNow("builder"), grid: storedShape(shapeFor("builder")) ?? "squares" })}>
                     Generate a dungeon
                   </Button>
-                  {hexFor("builder") ? <Help id={hexNoteId}>{HEX_NOTE}</Help> : null}
                 </div>
               ) : null}
               {generate ? (
@@ -546,6 +539,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
                   name={generate.name}
                   form={generate}
                   intent={generate.intent}
+                  grid={generate.grid}
                   opener={generateButton}
                   onClose={(made) => {
                     setGenerate(null);
