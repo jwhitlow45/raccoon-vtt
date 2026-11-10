@@ -2318,6 +2318,77 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     assert.ok(!(await chipNames(card)).includes("Bree"), "Undo put Bree's chip back");
   });
 
+  test("pd-1. the DM's Next held on the wire leaves the warrior's turn on screen with Previous and Next busy, a second tap sends nothing, and the answer moves the turn once", async () => {
+    const { page, wire } = qeDesk();
+    await openTracker(page);
+    const header = page.locator("[data-round-header]").first();
+    const next = header.getByRole("button", { name: "Next", exact: true });
+    const previous = header.getByRole("button", { name: "Previous turn" });
+    const acting = () => page.locator('[data-round-section] [aria-current="step"]').first().innerText();
+    const before = dmSocket.state!.encounter!.activeEntryId;
+    assert.equal(before, "qe-warrior", "the case under test: the warrior acts");
+    assert.match(await acting(), /Goblin Warrior/);
+    const sent = sentOps(wire, "encounter.next");
+    wire.hold = /"t":"encounter\.next"/;
+    try {
+      await next.click();
+      await waitFor("the Next on the wire", () => (wire.held.length === 1 ? true : null));
+      await waitFor("Next busy", async () => ((await next.getAttribute("aria-busy")) === "true" ? true : null), 3_000);
+      assert.equal(await previous.getAttribute("aria-busy"), "true", "Previous is not busy with the waiting Next");
+      // Nothing moves before the answer: the device shows no turn the server has not numbered.
+      assert.match(await acting(), /Goblin Warrior/, "the turn moved before the answer");
+      await next.dispatchEvent("click");
+      await previous.dispatchEvent("click");
+      await page.waitForTimeout(300);
+      assert.equal(sentOps(wire, "encounter.next"), sent + 1, "a second tap sent another Next");
+      assert.equal(sentOps(wire, "encounter.prev"), 0, "Previous went while the Next waited");
+      await shots.take(page, "pd-1-next-held");
+    } finally {
+      release(wire);
+    }
+    await waitFor("the next turn", () => (dmSocket.state?.encounter?.activeEntryId !== before ? true : null));
+    const after = dmSocket.state!.encounter!.activeEntryId;
+    await waitFor("the desk shows the turn the server gave", async () => (!/Goblin Warrior/.test(await acting()) ? true : null));
+    await waitFor("Next live again", async () => ((await next.getAttribute("aria-busy")) === null ? true : null), 3_000);
+    await page.waitForTimeout(300);
+    assert.equal(dmSocket.state!.encounter!.activeEntryId, after, "the turn moved more than once");
+
+    // Busy past the shared delay, the round header's spinners stay in line at every size. Previous and Next take turns, so the run ends on Bree's turn again.
+    const off: string[] = [];
+    const sizes = [[1440, 900, 1], [1440, 900, 1.3], [390, 844, 1], [390, 844, 1.3], [320, 568, 1], [320, 568, 1.3]] as const;
+    try {
+      for (const [i, [width, height, scale]] of sizes.entries()) {
+        const at = `${width} x ${height} at ${Math.round(scale * 100)}%`;
+        await page.setViewportSize({ width, height });
+        await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+        await page.goto(`${server.origin}/r/${run.roomId}`);
+        await page.getByRole("status", { name: "Connected" }).first().waitFor();
+        await openTracker(page);
+        const row = page.locator("[data-round-header]").first();
+        const press = i % 2 === 0 ? row.getByRole("button", { name: "Previous turn" }) : row.getByRole("button", { name: "Next", exact: true });
+        const was = dmSocket.state!.encounter!.activeEntryId;
+        wire.hold = /"t":"encounter\.(next|prev)"/;
+        try {
+          await press.click();
+          await waitFor(`the turn change on the wire at ${at}`, () => (wire.held.length === 1 ? true : null));
+          await row.locator('[aria-busy="true"] .rvtt-spin').first().waitFor({ timeout: 3_000 });
+          off.push(...alignmentLines(await measureAlignment(row), `the round header, busy, at ${at}`));
+          await shots.take(page, `pd-1-busy-${width}x${height}-${Math.round(scale * 100)}`);
+        } finally {
+          release(wire);
+        }
+        await waitFor(`the turn moved at ${at}`, () => (dmSocket.state?.encounter?.activeEntryId !== was ? true : null));
+        await waitFor(`the header live again at ${at}`, async () => ((await row.locator('[aria-busy="true"]').count()) === 0 ? true : null), 3_000);
+      }
+    } finally {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+    }
+    assert.deepEqual(off, [], "the busy round header out of line by more than 1 px");
+  });
+
   test("qe-4. the warrior's next turn shows its card with its attacks again, and none of last turn's results or chips, though a healthy warrior has no turn record (QOL audit Q1)", async () => {
     const { page } = qeDesk();
     try {
