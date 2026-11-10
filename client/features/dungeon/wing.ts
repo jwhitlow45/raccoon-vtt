@@ -72,6 +72,8 @@ export type JoinFacts = {
 /** The scene's lattice, its grid and its keys. */
 export type WingWorld = {
   L: Lattice;
+  /** The scene's bounds in cells. */
+  bounds: { w: number; h: number };
   grid: GridKind;
   autoWalls: AutoWalls;
   /** A scene key's lattice cell, or -1 off the scene. */
@@ -91,7 +93,7 @@ export function wingWorld(base: WingScene): WingWorld {
     const [x, y] = grid === "hexColumns" ? [b, a] : [a, b];
     return Number.isInteger(x) && Number.isInteger(y) && L.inMap(x, y) ? y * L.W + x : -1;
   };
-  return { L, grid, autoWalls: autoWallsOf(scene), cellOf, chunks };
+  return { L, bounds: scene.bounds, grid, autoWalls: autoWallsOf(scene), cellOf, chunks };
 }
 
 /** The lattice cell a scene point falls in: its square, or the hex holding it. */

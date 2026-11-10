@@ -1041,8 +1041,9 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   const plan: DungeonPlan = {
     version: GENERATOR_VERSION,
     theme: s.theme,
-    w: s.w,
-    h: s.h,
+    // A wing's plan is in its scene's cells, so it carries the scene's bounds.
+    w: wing ? wing.world.bounds.w : s.w,
+    h: wing ? wing.world.bounds.h : s.h,
     asked: s.rooms,
     rooms: kept.map((i) => {
       const r = board.rooms[i]!;
