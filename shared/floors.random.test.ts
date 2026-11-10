@@ -34,7 +34,7 @@ const DM_OPTS = { sceneId: "t" };
 const BASE = Date.parse(AT);
 
 type Act =
-  | { k: "add"; beside: number; above: boolean }
+  | { k: "add"; beside: number; above: boolean; source: number }
   | { k: "remove"; floor: number }
   | { k: "order"; turn: number }
   | { k: "open"; floor: number; open: boolean }
@@ -50,7 +50,7 @@ type Act =
 
 const n = fc.nat({ max: 40 });
 const ACT: fc.Arbitrary<Act> = fc.oneof(
-  { weight: 5, arbitrary: fc.record({ k: fc.constant("add" as const), beside: n, above: fc.boolean() }) },
+  { weight: 5, arbitrary: fc.record({ k: fc.constant("add" as const), beside: n, above: fc.boolean(), source: fc.nat({ max: 3 }) }) },
   { weight: 2, arbitrary: fc.record({ k: fc.constant("remove" as const), floor: n }) },
   { weight: 1, arbitrary: fc.record({ k: fc.constant("order" as const), turn: n }) },
   { weight: 2, arbitrary: fc.record({ k: fc.constant("open" as const), floor: n, open: fc.boolean() }) },
@@ -64,6 +64,29 @@ const ACT: fc.Arbitrary<Act> = fc.oneof(
   { weight: 1, arbitrary: fc.record({ k: fc.constant("blackout" as const), on: fc.boolean() }) },
   { weight: 2, arbitrary: fc.constant({ k: "undo" as const }) },
 );
+
+/**
+ * A blank add, then floors phase 3's (docs/design/design-v1-floors.md phase
+ * 3, 3.2): a taken name, a dungeon's own settings, and a file's under a
+ * name at the limit that ends on a two-unit character, so every name the
+ * reducer numbers is cut and must stay free and whole.
+ */
+const SOURCES = [
+  {},
+  { name: "Crypt" },
+  { name: "Crypt", own: { bounds: { w: 30, h: 30 }, background: "#141418", grid: { show: true, color: "#ffffff", opacity: 0.15, lineWidth: 1 }, autoWalls: "all", fogEnabled: true, vision: { on: true, light: "dark", byClock: false } } },
+  {
+    name: `${"x".repeat(39)}\u{1F409}`,
+    own: {
+      bounds: { w: 40, h: 30 },
+      background: "#1b1b20",
+      grid: { show: true, color: "#ffffff", opacity: 0.25, lineWidth: 1 },
+      autoWalls: "off",
+      map: { assetId: "a1", widthPx: 2800, heightPx: 2100, cellPx: 70, originPx: { x: 0, y: 0 } },
+      gridFromFile: true,
+    },
+  },
+] as const;
 
 type World = { state: RoomState; seq: number; next: number; undo: RestoreEntry[][] };
 
@@ -90,7 +113,7 @@ function opFor(w: World, a: Act): Op | null {
   switch (a.k) {
     case "add": {
       const beside = pickOf(floors, a.beside)!;
-      return { t: "scene.create", scene: { id: `f${w.next++}`, name: "Tower", bounds: { w: 12, h: 12 } }, floor: { beside: beside.id, side: a.above ? "above" : "below" } };
+      return { t: "scene.create", scene: { id: `f${w.next++}`, name: "Tower", bounds: { w: 12, h: 12 } }, floor: { beside: beside.id, side: a.above ? "above" : "below", ...SOURCES[a.source % SOURCES.length] } } as Op;
     }
     case "remove": {
       const others = floors.filter((f) => f.id !== "t");
@@ -229,6 +252,9 @@ test("floors keep their invariants, held sets and every viewer's copy over rando
         w.state = r.state;
         const s = r.state;
         const where = `act ${i} (${op.t})`;
+
+        // 1. Every floor's name, numbered or not, is one a rename could send (phase 3, 3.2).
+        for (const { id, floor } of tower(s)) if (floor) assert.ok(opSchema.safeParse({ t: "scene.update", sceneId: id, patch: { floor: { name: floor.name } } }).success, `${where}: ${floor.name} is a floor name`);
 
         // 2. Every unhidden party member's floor on the players' scene, and the start floor, are held outside a blackout.
         const start = startFloor(s);
