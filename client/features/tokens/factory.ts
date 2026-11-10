@@ -183,8 +183,8 @@ export function newCharacter(input: {
  * A copy of a token, as a fresh creature: full HP, no effects, no death
  * saves, legendary uses refilled. Duplicating is how the DM adds another of
  * the same monster, not a way to clone a wounded one. A PC's copy points at
- * the same character, so it shares that character's HP. The reducer numbers
- * the copy.
+ * the same character, so it shares that character's HP. The copy takes a
+ * number when the party first sees it beside another of its name.
  *
  * The copy lands where it goes as its original would if dropped there
  * (shared/rules/movement.ts landedElevation): a copy of a creature on the ground
@@ -225,7 +225,7 @@ export function duplicateToken(
   if (source.altImages) copy.altImages = source.altImages.map(copyImage);
   if (source.rangeRings) copy.rangeRings = [...source.rangeRings];
   // Built field by field: a spent Reaction is the source's own, and the strict schema takes no stored field
-  // (docs/design/design-v1-combat-flow.md 4.2). The reducer gives the copy its character's owners and no number.
+  // (docs/design/design-v1-combat-flow.md 4.2). The reducer gives the copy its character's owners and no number of its own yet.
   if (source.companion) copy.companion = { of: source.companion.of, turn: source.companion.turn };
   return copy;
 }

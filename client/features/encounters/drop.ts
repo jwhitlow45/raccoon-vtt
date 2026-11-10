@@ -12,9 +12,9 @@ import type { Resolved } from "./draft.ts";
  * Placing a saved encounter on the scene the DM views (features section
  * 10): every creature as its own token, exactly as the monster browser
  * places them by hand, so each wears its monster's default image, the
- * reducer numbers duplicates ("Goblin Warrior 3"), and the tracker groups
- * them by the same keys. Kept free of React, so the plan runs under plain
- * Node tests.
+ * duplicates take their numbers ("Goblin Warrior 3") when the party first
+ * sees them, and the tracker groups them by the same keys. Kept free of
+ * React, so the plan runs under plain Node tests.
  */
 
 export type DropOptions = {
