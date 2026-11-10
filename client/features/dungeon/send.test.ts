@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { describe, test } from "node:test";
 import fc from "fast-check";
 import type { RoomState } from "#shared/model.ts";
 import { clientOpSchema, type ClientOp } from "#shared/protocol.ts";
@@ -8,7 +8,8 @@ import type { OnAnswer, OpAnswer, RoomActions, RoomView } from "../../state/type
 import { dialogScene, dressedRooms, HAND_SETTINGS, handKey, twoRooms } from "./handPlans.ts";
 import { PAGE_PLACEHOLDER, withIds } from "./ops.ts";
 import { landAll, previewOf, scratchRoom } from "./scratch.ts";
-import { dungeonOutcome, madeIds, sceneContents, sendDungeon, warmOpChecks, type DungeonOutcome, type SendRoom } from "./send.ts";
+import { dungeonOutcome, isKeyOp, madeIds, sceneContents, sendDungeon, warmOpChecks, type DungeonOutcome, type SendFloor, type SendRoom } from "./send.ts";
+import { floorKeyName } from "./words.ts";
 import { DEFAULT_CONTEXT, DEFAULT_SETTINGS } from "./settings.ts";
 import { NO_ANSWERS } from "../uvtt/rules.ts";
 
@@ -370,4 +371,139 @@ test("warmOpChecks parses each of a preview's ops once and leaves them as they w
   assert.equal(JSON.stringify(ops), before);
   // The store's own check, which the press runs again, takes every one.
   warmOpChecks(ops, (op) => assert.ok(clientOpSchema.safeParse(op).success, op.t));
+});
+
+/*
+ * A dungeon made as a floor (docs/design/design-v1-floors.md phase 3, 3.7,
+ * D-261110-113 and 183): the key page and its pins wait for the create, go
+ * in the same group titled from the stored name, and never go after a
+ * refused create.
+ */
+describe("a dungeon floor's key after its create", () => {
+  /** The floor's record as the reducer stores it, numbered "Crypt 2" while "Crypt" is taken. */
+  function storedFloor(stored: RoomState, sceneId: string, name = "Crypt 2"): RoomState {
+    const floored = structuredClone(stored);
+    floored.scenes[sceneId] = { ...floored.scenes[sceneId]!, name: "Tower", floor: { of: "ground", level: 1, name, height: 10 } };
+    return floored;
+  }
+
+  function floorRun(opts: { many?: boolean; checkMs?: number; loads?: boolean } = {}) {
+    const { made: m, stored } = made(true);
+    const floored = storedFloor(stored, m.sceneId);
+    // A short check, so a failing run leaves no long wait behind it.
+    const t = table({ stored: floored, many: opts.many, checkMs: opts.checkMs ?? 500, ...(opts.loads !== undefined ? { loads: opts.loads } : {}) });
+    const created: OpAnswer[] = [];
+    const progress: [number, number][] = [];
+    const floor: SendFloor = { keyName: (name) => floorKeyName("Tower", name), sentName: "Crypt", onCreated: (a) => created.push(a) };
+    const done = sendDungeon(m, t.actions, (a, of) => progress.push([a, of]), t.room, floor);
+    return { m, stored: floored, t, created, progress, done };
+  }
+
+  const keyOpsOf = (m: { ops: ClientOp[] }) => m.ops.filter(isKeyOp);
+
+  for (const many of [false, true]) {
+    test(`FL3S: the key goes only once the create is taken, in the same group, titled from the stored name${many ? ", with the store's dispatchMany" : ""}`, async () => {
+      const r = floorRun({ many });
+      const keys = keyOpsOf(r.m);
+      assert.ok(keys.length > 1, "a page and its pins");
+      assert.equal(r.t.sent.length, r.m.ops.length - keys.length, "everything but the key at once");
+      assert.ok(!r.t.sent.some((x) => isKeyOp(x.op)), "no key op before the create's answer");
+      r.t.listScene(r.m.sceneId, r.stored);
+      // Every op but the create answered first: the key still waits for the create's own answer.
+      for (const x of r.t.sent.slice(1)) x.onAnswer?.("taken");
+      await flush();
+      assert.ok(!r.t.sent.some((x) => isKeyOp(x.op)), "the rest's answers do not send the key");
+      assert.deepEqual(r.created, []);
+      r.t.sent[0]!.onAnswer?.("taken");
+      assert.deepEqual(r.created, ["taken"]);
+      await flush();
+      const sentKeys = r.t.sent.filter((x) => isKeyOp(x.op));
+      assert.equal(sentKeys.length, keys.length, "the page and every pin once the create is taken");
+      assert.ok(sentKeys.every((x) => x.group === "group-1" && x.groupScope === "setup"), "in the floor's group");
+      const page = sentKeys.find((x) => x.op.t === "journal.create")!.op;
+      assert.ok(page.t === "journal.create");
+      assert.equal(page.page.title, "Tower · Crypt 2 key", "from the stored name, never the sent one");
+      for (const x of sentKeys) x.onAnswer?.("taken");
+      assert.deepEqual(await r.done, { k: "complete", checked: false });
+      assert.deepEqual(r.progress.at(-1), [r.m.ops.length, r.m.ops.length], "the making line's total counts the key");
+      assert.ok(r.t.sent.every((x) => clientOpSchema.safeParse(x.op).success));
+    });
+  }
+
+  test("FL3S: a refused create (a co-DM's stairs between) sends no key page, and Try again makes one floor and one page", async () => {
+    const r = floorRun();
+    r.t.sent[0]!.onAnswer?.("refused");
+    for (const x of r.t.sent.slice(1)) x.onAnswer?.("refused");
+    assert.deepEqual(await r.done, { k: "none", lost: false });
+    assert.ok(!r.t.sent.some((x) => isKeyOp(x.op)), "no page is left behind");
+    assert.deepEqual(r.progress.at(-1), [r.m.ops.length, r.m.ops.length]);
+    const again = floorRun();
+    again.t.listScene(again.m.sceneId, again.stored);
+    for (const x of again.t.sent) x.onAnswer?.("taken");
+    await flush();
+    for (const x of again.t.sent.filter((y) => isKeyOp(y.op))) x.onAnswer?.("taken");
+    assert.deepEqual(await again.done, { k: "complete", checked: false });
+    assert.equal(again.t.sent.filter((x) => x.op.t === "scene.create").length, 1, "one floor");
+    assert.equal(again.t.sent.filter((x) => x.op.t === "journal.create").length, 1, "one page");
+  });
+
+  test("FL3S: a create refused at input sends nothing after it and says so to the dialog", async () => {
+    const { made: m, stored } = made(true);
+    const t = table({ stored, refuseAtInput: (_op, i) => i === 0 });
+    const created: OpAnswer[] = [];
+    const outcome = await sendDungeon(m, t.actions, () => {}, t.room, { keyName: (n) => n, sentName: "Crypt", onCreated: (a) => created.push(a) });
+    assert.deepEqual(outcome, { k: "none", lost: false });
+    assert.equal(t.sent.length, 1);
+    assert.deepEqual(created, ["refused"]);
+  });
+
+  test("FL3S: the create's answer lost, the key waits for the floor to show, then goes titled from the stored name and is compared under that title", async () => {
+    const r = floorRun();
+    for (const x of r.t.sent) x.onAnswer?.("unknown");
+    await flush();
+    assert.ok(!r.t.sent.some((x) => isKeyOp(x.op)), "nothing until the floor shows");
+    r.t.listScene(r.m.sceneId, r.stored);
+    await flush();
+    const sentKeys = r.t.sent.filter((x) => isKeyOp(x.op));
+    assert.equal(sentKeys.length, keyOpsOf(r.m).length);
+    const page = sentKeys.find((x) => x.op.t === "journal.create")!.op;
+    assert.ok(page.t === "journal.create" && page.page.title === "Tower · Crypt 2 key");
+    // The server stores the page under the title sent, which the comparison reads in place of the preview's.
+    const pageId = r.m.ids.get(PAGE_PLACEHOLDER)!;
+    r.stored.journal[pageId] = { ...r.stored.journal[pageId]!, title: "Tower · Crypt 2 key" };
+    for (const x of sentKeys) x.onAnswer?.("taken");
+    assert.deepEqual(await r.done, { k: "complete", checked: true });
+  });
+
+  test("FL3S: a floor that never shows within the check's time sends no key and is unconfirmed", async () => {
+    const r = floorRun({ checkMs: 20 });
+    for (const x of r.t.sent) x.onAnswer?.("unknown");
+    assert.deepEqual(await r.done, { k: "unconfirmed" });
+    assert.ok(!r.t.sent.some((x) => isKeyOp(x.op)));
+    assert.deepEqual(r.progress.at(-1), [r.m.ops.length, r.m.ops.length], "the key's ops count as lost");
+  });
+
+  test("FL3S: a delayed create answer holds the key, and the dialog hears the answer once it comes", async () => {
+    const r = floorRun();
+    r.t.listScene(r.m.sceneId, r.stored);
+    for (const x of r.t.sent.slice(1)) x.onAnswer?.("taken");
+    for (let i = 0; i < 5; i++) await flush();
+    assert.deepEqual(r.created, [], "still waiting: Hide holds");
+    assert.ok(!r.t.sent.some((x) => isKeyOp(x.op)));
+    r.t.sent[0]!.onAnswer?.("taken");
+    await flush();
+    assert.deepEqual(r.created, ["taken"]);
+    for (const x of r.t.sent.filter((y) => isKeyOp(y.op))) x.onAnswer?.("taken");
+    assert.deepEqual(await r.done, { k: "complete", checked: false });
+    // The key follows the floor's last op in the group, with no op of this device between, so the server merges them into one Undo setup step.
+    const groups = r.t.sent.map((x) => x.group);
+    assert.ok(groups.every((g) => g === "group-1"));
+    const firstKey = r.t.sent.findIndex((x) => isKeyOp(x.op));
+    assert.equal(firstKey, r.m.ops.length - keyOpsOf(r.m).length);
+  });
+
+  test("FL3S: without a floor the key goes with everything else, as a new scene's always did", async () => {
+    const { sentAtOnce, m } = await run(() => "taken", { dressed: true });
+    assert.equal(sentAtOnce, m.ops.length);
+  });
 });

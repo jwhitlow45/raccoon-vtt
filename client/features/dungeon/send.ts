@@ -4,6 +4,7 @@ import { clientOpSchema, type ClientOp } from "#shared/protocol.ts";
 import type { OpAnswer, RoomActions } from "../../state/types.ts";
 import type { RoomViewStore } from "../../state/view.ts";
 import { addAnswer, CHECK_MS, movedOn, NO_ANSWERS, sceneShown, type Answers } from "../uvtt/rules.ts";
+import { keyTitle } from "./keyPage.ts";
 
 /*
  * Make the scene (docs/design/design-v1-dungeon-generator.md 4.4 and 5.5):
@@ -22,6 +23,51 @@ export type DungeonOutcome = { k: "complete"; checked: boolean } | { k: "none"; 
  * so the new scene does not pull them away.
  */
 export type SendRoom = { store: Pick<RoomViewStore, "getState" | "subscribe">; shown: () => boolean; checkMs?: number };
+
+/**
+ * A dungeon made as a floor (docs/design/design-v1-floors.md phase 3, 3.7,
+ * D-261110-113): its key page and pins wait for the create, so a refused
+ * floor leaves no page behind, and the page takes its title from the name
+ * the server stored, which the reducer numbers while taken.
+ */
+export type SendFloor = {
+  /** The key page's name for the floor's stored name: "Tower · Crypt 2" (words.ts `floorKeyName`). */
+  keyName(floorName: string): string;
+  /** The name the add sent, read until the floor's record shows. */
+  sentName: string;
+  /** Told once the create is answered, or refused at input: until then no close may let another op of this device into the group. */
+  onCreated?(answer: OpAnswer): void;
+};
+
+/** A key page's ops: its page and the pins that link it (keyPage.ts `keyOps`). A dungeon writes no other page or pin. */
+export function isKeyOp(op: ClientOp): boolean {
+  return op.t === "journal.create" || op.t === "pin.put";
+}
+
+/**
+ * Resolves true once the view holds the scene's record, or false when the
+ * room ends or `ms` pass. A DM's view lists every scene, so a floor whose
+ * create's answer was lost shows here once a reconnect brings it back.
+ */
+export function sceneListed(store: SendRoom["store"], sceneId: string, ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (listed: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      unsubscribe();
+      resolve(listed);
+    };
+    const check = (s: ReturnType<SendRoom["store"]["getState"]>) => {
+      if (s.view?.scenes[sceneId] !== undefined) finish(true);
+      else if (s.ended) finish(false);
+    };
+    const timer = setTimeout(() => finish(false), ms);
+    const unsubscribe = store.subscribe(check);
+    check(store.getState());
+  });
+}
 
 type Of<T> = Readonly<Record<string, T | undefined>>;
 type Contents = Pick<RoomState, "buildChunks"> & {
@@ -121,20 +167,34 @@ export function warmOpChecks(ops: readonly ClientOp[], parse: (op: ClientOp) => 
  * `withIds`' map, which the comparison follows references through:
  * without it a dungeon whose stones or pins name another of its ids is
  * never confirmed after a lost answer.
+ *
+ * As a floor (`floor`), the key page and its pins go once the create is
+ * answered taken, or, its answer lost, once the floor's record shows, in the
+ * same group and titled from the stored name. The dialog holds every close
+ * until the create is answered, so no op of this device falls between, and
+ * the key joins the floor's one Undo setup step. A refused create sends no
+ * key, and a floor that never shows within the check's time sends none and
+ * is unconfirmed.
  */
 export async function sendDungeon(
   made: { ops: ClientOp[]; sceneId: string; room: RoomState; ids?: ReadonlyMap<string, string> },
   actions: RoomActions,
   onAnswered: (n: number, of: number) => void,
   room: SendRoom,
+  floor?: SendFloor,
 ): Promise<DungeonOutcome> {
   const { store } = room;
   const total = made.ops.length;
   const startScene = store.getState().sceneId;
   const group = actions.newId();
+  const checkMs = room.checkMs ?? CHECK_MS;
   let answers = NO_ANSWERS;
   // Set by the scene's own answer, inside the callbacks, so it is typed wide rather than narrowed to its start.
   let created = "unknown" as OpAnswer;
+  /** The key's title as sent, which the lost-answer comparison reads in place of the preview's. */
+  let sentTitle: string | null = null;
+  /** The floor never showed in time after a lost answer, so its key was never sent. */
+  let keyHeld = false;
   await new Promise<void>((resolve) => {
     let answered = 0;
     const settle = (i: number) => {
@@ -151,31 +211,76 @@ export async function sendDungeon(
     };
     const answer = made.ops.map((_, i) => settle(i));
     const opts = (i: number) => ({ group, groupScope: "setup" as const, onAnswer: answer[i]! });
-    const [create, ...rest] = made.ops;
+    const [create, ...ops] = made.ops;
     if (create === undefined) return resolve();
+    const later = floor ? ops.flatMap((op, k) => (isKeyOp(op) ? [k + 1] : [])) : [];
+    const rest = ops.flatMap((op, k) => (later.includes(k + 1) ? [] : [{ op, i: k + 1 }]));
+    /** Dispatches ops by index, in one view rebuild where the store offers it, since one rebuild per op costs the square of the count (D-261107-263). */
+    const send = (list: readonly { op: ClientOp; i: number }[]) => {
+      const ns = actions.dispatchMany ? actions.dispatchMany(list.map(({ op, i }) => ({ op, opts: opts(i) }))) : list.map(({ op, i }) => actions.dispatch(op, opts(i)));
+      for (const [k, n] of ns.entries()) if (n === null) answer[list[k]!.i]!("refused");
+    };
+    /** The key page, titled from the floor's stored name, and its pins. */
+    const sendKey = () => {
+      const stored = store.getState().view?.scenes[made.sceneId]?.floor?.name ?? floor!.sentName;
+      sentTitle = keyTitle(floor!.keyName(stored));
+      send(later.map((i) => {
+        const op = made.ops[i]!;
+        return { op: op.t === "journal.create" ? { ...op, page: { ...op.page, title: sentTitle! } } : op, i };
+      }));
+    };
+    const settleLater = (answer_: OpAnswer) => {
+      for (const i of later) answer[i]!(answer_);
+    };
+    const createOpts = floor
+      ? {
+          ...opts(0),
+          onAnswer: (a: OpAnswer) => {
+            answer[0]!(a);
+            floor.onCreated?.(a);
+            if (later.length === 0) return;
+            // Out of the store's answer, so the key's dispatch never runs inside the store's own handling of a reply.
+            if (a === "taken") queueMicrotask(sendKey);
+            else if (a === "refused") settleLater("refused");
+            else
+              void sceneListed(store, made.sceneId, checkMs).then((listed) => {
+                if (listed) sendKey();
+                else {
+                  keyHeld = true;
+                  settleLater("unknown");
+                }
+              });
+          },
+        }
+      : opts(0);
     // The scene alone first: refused at input, nothing after it is sent.
-    if (actions.dispatch(create, opts(0)) === null) {
+    if (actions.dispatch(create, createOpts) === null) {
+      floor?.onCreated?.("refused");
       for (const a of answer) a("refused");
       return;
     }
-    // The rest in one view rebuild where the store offers it, since one rebuild per op costs the square of the count (D-261107-263).
-    const ns = actions.dispatchMany ? actions.dispatchMany(rest.map((op, k) => ({ op, opts: opts(k + 1) }))) : rest.map((op, k) => actions.dispatch(op, opts(k + 1)));
-    for (const [k, n] of ns.entries()) if (n === null) answer[k + 1]!("refused");
+    send(rest);
   });
 
   const sceneId = made.sceneId;
   const exists = () => store.getState().view?.scenes[sceneId] !== undefined;
   const mayOpen = () => room.shown() || !movedOn(startScene, store.getState(), sceneId);
   let same: boolean | null = null;
-  if (created !== "refused" && answers.refused === 0 && answers.unknown > 0 && exists() && mayOpen()) {
+  if (!keyHeld && created !== "refused" && answers.refused === 0 && answers.unknown > 0 && exists() && mayOpen()) {
     actions.switchScene(sceneId);
-    if (await sceneShown(store, sceneId, room.checkMs ?? CHECK_MS)) {
+    if (await sceneShown(store, sceneId, checkMs)) {
       const view = store.getState().view;
       const scratchScene = Object.keys(made.room.scenes)[0] ?? "";
-      same = view !== null && sceneContents(view, sceneId) === sceneContents(made.room, scratchScene, madeIds(made.ids));
+      same = view !== null && sceneContents(view, sceneId) === sceneContents(titled(made.room, sentTitle), scratchScene, madeIds(made.ids));
     }
   }
-  const outcome = dungeonOutcome(answers, created, { exists: exists(), same });
+  const outcome: DungeonOutcome = keyHeld ? { k: "unconfirmed" } : dungeonOutcome(answers, created, { exists: exists(), same });
   if (outcome.k === "complete" && !outcome.checked && mayOpen()) actions.switchScene(sceneId);
   return outcome;
+}
+
+/** The scratch room with its key page under the title the send gave it, so the comparison reads the page the server holds. */
+function titled(room: RoomState, title: string | null): RoomState {
+  if (title === null) return room;
+  return { ...room, journal: Object.fromEntries(Object.entries(room.journal).map(([id, page]) => [id, page && { ...page, title }])) };
 }
