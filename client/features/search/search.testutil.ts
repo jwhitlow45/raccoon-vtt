@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import type { Character, RoomState, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
-import { actor, character, DM, handoutPage, member, P1, room, scene, token } from "#shared/testutil.ts";
+import { actor, character, DM, handoutPage, member, numbered, P1, room, scene, token } from "#shared/testutil.ts";
 import { RoomScope } from "../../state/scope.ts";
 import { DEFAULT_KEYS, keyText, type ShortcutEnv } from "../../state/shortcuts.ts";
 import type { RoomUi } from "../../state/store.ts";
@@ -82,12 +82,13 @@ export const DM_FIXTURE: Catalog = {
  * Kel is another player's. On the Battle mat, the players' scene, stand
  * Goblin 1 and 2, a hidden Goblin Boss and Count Varo under the name
  * Hooded figure. The DM holds a Goblin cave, Goblin war drums, a page for
- * themselves and one for everyone, and a document in the library.
+ * themselves and one for everyone, and a document in the library. The
+ * goblins hold the numbers the table gave them when the party met them.
  */
 export function seededRoom(): RoomState {
   const bree: Character = character("bree", { name: "Bree", ownerIds: ["p1"], actor: actor({ hp: { cur: 24, max: 24, temp: 0 }, ac: 15, senses: "Darkvision 60 ft.", passivePerception: 13 }) });
   const kel: Character = character("kel", { name: "Kel", ownerIds: ["p2"], actor: actor({ hp: { cur: 9, max: 18, temp: 0 }, ac: 12 }) });
-  return room({
+  return numbered(room({
     members: { dm1: { ...member("dm1", "dm"), name: "DM" }, p1: { ...member("p1"), name: "Pat" }, p2: { ...member("p2"), name: "Sam" } },
     scenes: { s1: scene("s1", { name: "Battle mat" }), s2: scene("s2", { name: "Goblin cave", order: 1 }) },
     characters: { bree, kel },
@@ -107,7 +108,7 @@ export function seededRoom(): RoomState {
       town: { id: "town", rev: 0, title: "Town map", access: "all", blocks: [] },
     },
     handoutDocs: { letter: { id: "letter", rev: 0, title: "Belak's letter", pages: [handoutPage("page1")], createdAt: "2026-10-12T20:00:00.000Z" } },
-  });
+  }));
 }
 
 /** The room as a viewer's device holds it: the projection the server sends, with the local parts the index reads. */

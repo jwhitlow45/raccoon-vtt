@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
-import type { Token } from "#shared/model.ts";
+import type { Token, Viewer } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import { occupiedHexes, placedOnHex, tokenRefHex } from "#shared/rules/footprint.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
@@ -25,6 +25,8 @@ import {
   spreadPositions,
 } from "./factory.ts";
 
+/** The server, which meets creatures at a batch's end with its own op. */
+const SERVER: Viewer = { memberId: "server", role: "dm" };
 const MONSTERS = JSON.parse(readFileSync(new URL("../../../shared/srd/monsters.json", import.meta.url), "utf8")) as SrdMonster[];
 const byId = (id: string) => MONSTERS.find((m) => m.srdId === id)!;
 
@@ -176,12 +178,14 @@ describe("monsters to tokens", () => {
     }
   });
 
-  test("dropped monsters number themselves through the reducer", () => {
+  test("dropped monsters are made with no number and take 1, 2 and 3 when the party meets them", () => {
     let state = room();
     const goblin = byId("goblin-warrior");
     for (const id of ["a", "b", "c"]) {
       state = apply(state, { t: "token.create", token: monsterToken(goblin, { hp: null, hidden: false, inLair: false }, { id, sceneId: "s1", at: { x: 1, y: 1 } }) }, DM);
     }
+    assert.deepEqual(["a", "b", "c"].map((id) => state.tokens[id]!.number), [undefined, undefined, undefined]);
+    state = apply(state, { t: "sys.meet", tokenIds: ["a", "b", "c"] }, SERVER);
     assert.deepEqual(["a", "b", "c"].map((id) => state.tokens[id]!.number), [1, 2, 3]);
   });
 });
@@ -214,7 +218,7 @@ describe("other token sources", () => {
     assert.deepEqual(c.actor.speeds, { walk: 25 });
   });
 
-  test("a duplicate is a fresh copy with no view-only fields, numbered by the reducer", () => {
+  test("a duplicate is a fresh copy with no view-only fields, numbered beside its original when the party meets them", () => {
     let state = room();
     const wounded: Token & { aboveFog?: boolean } = token("g1", {
       name: "Goblin",
@@ -242,6 +246,8 @@ describe("other token sources", () => {
     assert.deepEqual(copy.actor.inline.deathSaves, { ok: 0, fail: 0 });
     assert.deepEqual(copy.actor.inline.legendary, { actionsMax: 3, actionsUsed: 0, resistMax: 1, resistUsed: 0 });
     state = apply(state, { t: "token.create", token: copy });
+    assert.equal(state.tokens.g2!.number, undefined, "made with no number");
+    state = apply(state, { t: "sys.meet", tokenIds: ["g1", "g2"] }, SERVER);
     assert.equal(state.tokens.g1!.number, 1);
     assert.equal(state.tokens.g2!.number, 2);
     assert.equal(state.tokens.g2!.fogExemptAuto, false);

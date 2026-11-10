@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { RoomState, SavedEncounterMonster } from "#shared/model.ts";
+import type { RoomState, SavedEncounterMonster, Viewer } from "#shared/model.ts";
 import type { ClientOp, RestoreEntry } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { loadMonsters } from "#shared/srd/monsters.ts";
@@ -41,6 +41,9 @@ async function plan(state: RoomState, options: Partial<DropOptions> = {}) {
     newId: () => `new-${n++}`,
   });
 }
+
+/** The server, which meets creatures at a batch's end with its own op. */
+const SERVER: Viewer = { memberId: "server", role: "dm" };
 
 /** Applies every op as the DM, collecting each inverse, and fails on a refusal. */
 function applyAll(state: RoomState, ops: ClientOp[]) {
@@ -97,10 +100,13 @@ describe("placing a saved encounter", () => {
       for (const b of boxes.slice(i + 1)) assert.ok(a.x >= b.x + b.w || b.x >= a.x + a.w || a.y >= b.y + b.h || b.y >= a.y + a.h, "no overlap");
     }
 
-    // The reducer numbers the goblins as it numbers any duplicates.
+    // The goblins are made with no number, and take theirs when the party first sees them, as any duplicates do.
     const { state: after } = applyAll(state, p.ops);
     const goblins = Object.values(after.tokens).filter((t) => t.name === "Goblin Warrior");
-    assert.deepEqual(goblins.map((t) => t.number).sort(), [1, 2, 3]);
+    assert.deepEqual(goblins.map((t) => t.number), [undefined, undefined, undefined]);
+    const met = applyOp(after, { t: "sys.meet", tokenIds: goblins.map((t) => t.id).sort() }, SERVER, env(p.ops.length + 1));
+    assert.ok(met.ok);
+    assert.deepEqual(goblins.map((t) => met.state.tokens[t.id]!.number).sort(), [1, 2, 3]);
   });
 
   test("hidden from players, and into a running fight grouped as the tracker groups them", async () => {

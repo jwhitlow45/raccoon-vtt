@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import fc from "fast-check";
 import type { DiceRoll, LogEntry, RoomState, Token } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import { actor, character, diceLine, P1, room, token } from "#shared/testutil.ts";
+import { actor, character, diceLine, numbered, P1, room, token } from "#shared/testutil.ts";
 import { hpChips } from "./options.ts";
 import { appliedWords, applyTargets, chipName, chipWords, holderOf, MAX_APPLY_CHIPS, offersChips, rollChip, rollOrigin, type ApplyYou } from "./targets.ts";
 
@@ -17,10 +17,10 @@ import { appliedWords, applyTargets, chipName, chipWords, holderOf, MAX_APPLY_CH
 const dm: ApplyYou = { role: "dm", memberId: "dm1" };
 const pat: ApplyYou = { role: "player", memberId: "p1" };
 
-/** A table on s1: a goblin at 5,5 with a second one beside it, the party to its east, a hidden bugbear north of Thorn, and a dead one. */
+/** A table on s1: a goblin at 5,5 with a second one beside it, the party to its east, a hidden bugbear north of Thorn, and a dead one. The goblins hold the numbers the table gave them. */
 function table(overrides: Partial<RoomState> = {}): RoomState {
   const pc = (id: string, name: string, x: number): Token => token(id, { kind: "pc", name, x, y: 5, disposition: "ally", ownerIds: [], actor: { ref: `c-${id}` } });
-  return room({
+  return numbered(room({
     characters: {
       "c-thorn": character("c-thorn", { name: "Thorn", ownerIds: ["p1"], actor: actor() }),
       "c-bree": character("c-bree", { name: "Bree", ownerIds: ["p2"], actor: actor() }),
@@ -42,7 +42,7 @@ function table(overrides: Partial<RoomState> = {}): RoomState {
       far: token("far", { name: "Goblin Boss", sceneId: "s2", x: 6, y: 5 }),
     },
     ...overrides,
-  });
+  }));
 }
 
 const names = (list: readonly { name: string }[]) => list.map((t) => t.name);
