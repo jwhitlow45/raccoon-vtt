@@ -101,7 +101,7 @@ describe("undo shortcuts", () => {
 describe("the shortcut table", () => {
   type Calls = { tool: string[]; ops: { op: ClientOp; group?: string }[]; notes: string[]; panels: string[]; undo: number; selected: (string | null)[] };
 
-  function env(input: { role?: "dm" | "player"; selected?: string[]; playersDraw?: "none" | "all" | string[]; turn?: "mine" | "theirs" | null; tool?: string; rows?: { id: string; tokenId: string; hidden: boolean }[] } = {}) {
+  function env(input: { role?: "dm" | "player"; selected?: string[]; playersDraw?: "none" | "all" | string[]; turn?: "mine" | "theirs" | null; tool?: string; rows?: { id: string; tokenId: string; hidden: boolean }[]; pending?: { op: ClientOp }[] } = {}) {
     const role = input.role ?? "dm";
     const calls: Calls = { tool: [], ops: [], notes: [], panels: [], undo: 0, selected: [] };
     const tokens: Record<string, unknown> = {
@@ -116,7 +116,7 @@ describe("the shortcut table", () => {
     const state = {
       you: { memberId: role === "dm" ? "dm1" : "p1", role },
       sceneId: "s1",
-      pending: [],
+      pending: input.pending ?? [],
       local: { selectedIds: input.selected ?? [], selectedId: input.selected?.at(-1) ?? null, tool: input.tool ?? "" },
       view: { tokens, characters: {}, encounter, meta: { settings: input.playersDraw === undefined ? {} : { playersDraw: input.playersDraw } } },
     };
@@ -437,6 +437,16 @@ describe("the shortcut table", () => {
     const hiding = env({ selected: ["t1", "t2"], rows });
     run(hiding.env, press({ key: "h", code: "KeyH" }));
     assert.deepEqual(hiding.calls.ops, [{ op: { t: "token.updateMany", tokenIds: ["t1", "t2"], patch: { visibility: "dm" } } }]);
+  });
+
+  test("H while the fight's start waits for its answer shows the token's row from that start, as one undo step", () => {
+    const start: ClientOp = { t: "encounter.start", entries: [{ id: "r1", tokenId: "t1" }, { id: "r2", tokenId: "t2" }] };
+    const showing = env({ selected: ["t2"], pending: [{ op: start }] });
+    assert.equal(run(showing.env, press({ key: "h", code: "KeyH" })), "hide");
+    assert.deepEqual(showing.calls.ops, [
+      { op: { t: "token.updateMany", tokenIds: ["t2"], patch: { visibility: "all" } }, group: "g1" },
+      { op: { t: "encounter.update", entryId: "r2", patch: { hidden: false } }, group: "g1" },
+    ]);
   });
 
   test("Page Up and Page Down raise only what the viewer may, as one undo step", () => {

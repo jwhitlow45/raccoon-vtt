@@ -13,7 +13,7 @@ import { turnOp } from "../features/encounter/logic.ts";
 import { resolveLine, srdIndex } from "../features/encounters/draft.ts";
 import { dropPlan } from "../features/encounters/drop.ts";
 import { companionInput, joinFightOp, NEW_COMPANION, type CompanionDraft } from "../features/tokens/companions.ts";
-import { fightOps } from "../features/tokens/groupEdit.ts";
+import { fightOps, shownRowOps } from "../features/tokens/groupEdit.ts";
 import { createRoomStore, fightAhead, turnPending, type RoomStore } from "./store.ts";
 import { applyTestHistory, FakeClock, FakeOutbox } from "./testing.ts";
 import type { OpAnswer } from "./types.ts";
@@ -368,5 +368,30 @@ describe("an action that adds creatures while a fight's start waits for its answ
     assert.deepEqual(fightAhead(s.state())?.entries.map((e) => e.tokenId), ["g1", "g2"]);
     s.room.dispatch({ t: "encounter.end" });
     assert.equal(fightAhead(s.state()), null);
+  });
+});
+
+describe("Hidden turned off while the fight's start waits for its answer", () => {
+  test("the row the start left to its hidden token shows once the server takes the start and the reveal, and a row the start showed gets nothing", () => {
+    const s = setup(
+      room({
+        tokens: {
+          g1: token("g1", { name: "Goblin 1", visibility: "dm" }),
+          g2: token("g2", { name: "Goblin 2", x: 4, y: 2, visibility: "dm" }),
+        },
+      }),
+    );
+    s.connect();
+    s.room.dispatch({ t: "encounter.start", entries: [{ id: "e-g1", tokenId: "g1" }, { id: "e-g2", tokenId: "g2", hidden: false }] });
+    assert.equal((s.state().view as unknown as RoomState).encounter, null, "the start shows only once the server takes it");
+    const rows = shownRowOps(fightAhead(s.state()), ["g1", "g2"]);
+    assert.deepEqual(rows, [{ t: "encounter.update", entryId: "e-g1", patch: { hidden: false } }]);
+    s.room.dispatch({ t: "token.updateMany", tokenIds: ["g1", "g2"], patch: { visibility: "all" } });
+    for (const op of rows) s.room.dispatch(op);
+    s.deliver();
+    assert.deepEqual(s.state().pending, [], "every op answered");
+    assert.deepEqual(s.state().refused, [], "none refused");
+    const entries = (s.state().view as unknown as RoomState).encounter?.entries ?? [];
+    assert.deepEqual(Object.fromEntries(entries.map((e) => [e.tokenId, e.hidden])), { g1: false, g2: false });
   });
 });

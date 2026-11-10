@@ -1,6 +1,6 @@
 import { sameImage } from "#shared/imageRef.ts";
 import { actsOnCharacterTurn } from "#shared/reducer/companions.ts";
-import type { Character, Effect, Encounter, ImageRef, MemberId, Token } from "#shared/model.ts";
+import type { Character, Effect, ImageRef, MemberId, Token } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { MAX_ENTRIES_PER_OP, type ActorTarget, type ClientOp, type EntryInput, type TokenGroupPatch } from "#shared/protocol.ts";
 import type { FightRows } from "../../state/store.ts";
@@ -135,12 +135,17 @@ export function flagPatch(tokens: readonly GroupToken[], flag: "hidden" | "locke
  * can still be hidden on its own from the tracker, and hiding a token
  * leaves its rows as they are. The caller sends these with the tokens'
  * change as one gesture, so one undo takes both back.
+ *
+ * `fight` is the fight with a start still waiting for its answer counted
+ * in (state/store.ts fightAhead), since the server takes that start before
+ * this gesture. A row it sends without `hidden` takes its token's, and the
+ * tokens shown here are hidden until then.
  */
-export function shownRowOps(encounter: Pick<Encounter, "entries"> | null | undefined, tokenIds: readonly string[]): ClientOp[] {
-  if (!encounter) return [];
+export function shownRowOps(fight: FightRows | null | undefined, tokenIds: readonly string[]): ClientOp[] {
+  if (!fight) return [];
   const shown = new Set(tokenIds);
-  return encounter.entries
-    .filter((entry) => entry.hidden && entry.tokenId !== undefined && shown.has(entry.tokenId))
+  return fight.entries
+    .filter((entry) => (entry.hidden ?? true) && entry.tokenId !== undefined && shown.has(entry.tokenId))
     .map((entry): ClientOp => ({ t: "encounter.update", entryId: entry.id, patch: { hidden: false } }));
 }
 

@@ -502,7 +502,9 @@ export function turnPending(s: { pending?: readonly { op: ClientOp }[]; confirme
 }
 
 /** A fight's rows as an action that adds creatures to it reads them: who has a row. */
-export type FightRows = { readonly entries: readonly Pick<InitEntry, "id" | "tokenId" | "characterId">[] };
+/** A row a start or add still on its way names no `hidden` when it leaves it to the token. */
+export type FightRow = Pick<InitEntry, "id" | "tokenId" | "characterId"> & Partial<Pick<InitEntry, "hidden">>;
+export type FightRows = { readonly entries: readonly FightRow[] };
 
 /**
  * The fight the room holds once the ops still pending land, for an action
@@ -515,7 +517,7 @@ export type FightRows = { readonly entries: readonly Pick<InitEntry, "id" | "tok
 export function fightAhead(s: { view?: { readonly encounter?: FightRows | null } | null; pending?: readonly { op: ClientOp }[] }): FightRows | null {
   const shown = s.view?.encounter;
   if (shown) return shown;
-  let rows: Pick<InitEntry, "id" | "tokenId" | "characterId">[] | null = null;
+  let rows: FightRow[] | null = null;
   for (const { op } of s.pending ?? []) {
     // A second start would be refused, since the first makes the fight, and an add with no fight before it too.
     if (op.t === "encounter.start") rows ??= [...op.entries];

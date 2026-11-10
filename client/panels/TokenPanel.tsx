@@ -56,6 +56,7 @@ import { theme } from "../lib/theme.ts";
 import { DISPOSITION_RING, elevationBadge, initials } from "../lib/tokenView.ts";
 import { dispatchGesture } from "../state/actions.ts";
 import { useRoomScope } from "../state/scope.ts";
+import { fightAhead } from "../state/store.ts";
 import { handFocusOn, handFocusWhenFound } from "../lib/handFocus.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 
@@ -513,7 +514,7 @@ function DmSettings(props: { token: Token; feetPerCell: number; update(patch: To
   // A creature companion a player plays is the party's, so its HP follows the party's setting (docs/design/design-v1-combat-flow.md 3.6.5).
   const followsParty = useRoomView((s) => followsPartyHp(s.view, token));
   const actions = useRoomActions();
-  const encounter = useRoomView((s) => s.view?.encounter);
+  const store = useRoomStore();
   return (
     <>
       <FieldRow label="Name" fill>
@@ -568,7 +569,7 @@ function DmSettings(props: { token: Token; feetPerCell: number; update(patch: To
         checked={token.visibility === "dm"}
         onChange={(hidden) => {
           const change: ClientOp = { t: "token.update", tokenId: token.id, patch: { visibility: hidden ? "dm" : "all" } };
-          dispatchGesture(actions, hidden ? [change] : [change, ...shownRowOps(encounter, [token.id])]);
+          dispatchGesture(actions, hidden ? [change] : [change, ...shownRowOps(fightAhead(store.getState()), [token.id])]);
         }}
         label="Hidden from players"
         help="Never sent to players while hidden."

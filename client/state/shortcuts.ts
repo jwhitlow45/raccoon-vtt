@@ -27,7 +27,7 @@ import { turned } from "../lib/view.ts";
 import { digitHolders, digitRange, hpDigits, keyLabel, keysInEffect, pressKeys, sameKey, UNBOUND, type KeyChanges, type KeyMap } from "./keyBindings.ts";
 import { scopeSlot, type RoomScope } from "./scope.ts";
 import { sayTool, tuckEvent } from "./toolbar.ts";
-import type { RoomUi } from "./store.ts";
+import { fightAhead, type RoomUi } from "./store.ts";
 import type { RoomActions, RoomView } from "./types.ts";
 import { useRoomActions, useRoomRoleIfAny, useRoomStore, useRoomUi } from "./view.ts";
 
@@ -622,7 +622,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
       const tokens = selectedTokens(env);
       const visibility = tokens.every((t) => t.visibility === "dm") ? "all" : "dm";
       const ids = tokens.map((t) => t.id);
-      const rows = visibility === "all" ? shownRowOps(env.getState().view?.encounter, ids) : [];
+      const rows = visibility === "all" ? shownRowOps(fightAhead(env.getState()), ids) : [];
       dispatchAll(env, [...batches(ids).map((tokenIds): ClientOp => ({ t: "token.updateMany", tokenIds, patch: { visibility } })), ...rows]);
     },
   },

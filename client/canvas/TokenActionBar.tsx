@@ -85,7 +85,7 @@ import { effectChip, elevationBadge } from "../lib/tokenView.ts";
 import { dockSlot, foldsUnderSheet, sideSheetRoom, usePublishBar } from "../pages/fold.ts";
 import { dispatchGesture } from "../state/actions.ts";
 import { useRoomScope, useScoped } from "../state/scope.ts";
-import { placeFreelySlot } from "../state/store.ts";
+import { fightAhead, placeFreelySlot } from "../state/store.ts";
 import { barKeysSlot, useKeyHints, withKey } from "../state/shortcuts.ts";
 import { allOfKindText, sameKind } from "../state/selection.ts";
 import { sheetOpen } from "../state/types.ts";
@@ -145,7 +145,7 @@ import { NOTE_INSET } from "./barDock.ts";
 import { unitText, type VitalItem } from "../features/tokens/statSummary.ts";
 import { useGroupHp } from "../features/tokens/GroupHpEntry.tsx";
 import type { HpRest } from "../features/tokens/HpSection.tsx";
-import { useRoomActions, useRoomUi, useRoomView } from "../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 
 const NO_CHARACTERS = {};
 
@@ -254,6 +254,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
   const { token } = props;
   const frame = useContext(FrameContext);
   const actions = useRoomActions();
+  const room = useRoomStore();
   const ui = useRoomUi();
   const you = useRoomView((s) => s.you);
   const character = useRoomView((s) => ("ref" in token.actor ? s.floorView?.characters[token.actor.ref] : undefined));
@@ -416,7 +417,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
             onClick={() => {
               const showing = token.visibility === "dm";
               const change: ClientOp = { t: "token.update", tokenId: token.id, patch: { visibility: showing ? "all" : "dm" } };
-              dispatchGesture(actions, showing ? [change, ...shownRowOps(encounter, [token.id])] : [change]);
+              dispatchGesture(actions, showing ? [change, ...shownRowOps(fightAhead(room.getState()), [token.id])] : [change]);
             }}
           >
             Hidden
@@ -710,8 +711,7 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
   const you = useRoomView((s) => s.you);
   const characters = useRoomView((s) => s.floorView?.characters ?? NO_CHARACTERS);
   const playersApplyDamage = useRoomView((s) => s.floorView?.meta.settings.playersApplyDamage ?? false);
-  const encounter = useRoomView((s) => s.floorView?.encounter ?? null);
-  // A start still waiting for its answer counts, so the fight's button adds behind it rather than starting another.
+  // A start still waiting for its answer counts, so the fight's button adds behind it rather than starting another, and Hidden shows the rows it sent.
   const fight = useFightAhead();
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [more, setMore] = useState(false);
@@ -763,7 +763,7 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
       shortcut="hide"
       onClick={() => {
         const patch = flagPatch(tokens, "hidden");
-        send([...updateManyOps(ids, patch), ...(patch.visibility === "all" ? shownRowOps(encounter, ids) : [])]);
+        send([...updateManyOps(ids, patch), ...(patch.visibility === "all" ? shownRowOps(fight, ids) : [])]);
       }}
     >
       Hidden
