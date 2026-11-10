@@ -169,8 +169,8 @@ and for how to use it, the [DM guide](../dm-guide.md).
   set in the Time panel.
 - [design-v1-floors.md](design-v1-floors.md): several floors in one scene,
   with a Floors group in the scene's settings, a Floor button and menu, a
-  player's screen that follows their character between floors, and Move to
-  floor for the DM.
+  player's screen that follows their character between floors, Move to
+  floor for the DM, and stairs and ladders that players take themselves.
 
 ## The look
 

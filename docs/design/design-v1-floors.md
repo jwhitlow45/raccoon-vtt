@@ -1,10 +1,10 @@
-# Several floors in one scene: phase 1
+# Several floors in one scene: phases 1 and 2
 
 ## Summary
 
 A scene can hold a tower, a keep or a cellar as up to 8 floors. Each floor is a scene linked to its main floor, so it keeps its own map, build, fog, light, weather, scene sound, tokens, traps and explored ground, while the Scenes list, the grid shape, the 500 tokens, the 200 areas and the size budget belong to the whole scene. The DM builds floors in the scene's settings and moves creatures between them with Move to floor. A player's device holds only the floors their party has reached and the floors where a creature they own stands, and shows the floor of the creature it follows.
 
-This note is the design as built in phase 1. Phase 2 (stairs and ladders players take themselves, keeping the turn's feet) is not built, and neither are the later phases (Universal VTT files a floor, openings and falls, sight between floors). The design's full text, with its rounds of review, is kept outside the repository, and this note gives what was built and where the build went its own way. Decision ids are in the project's decisions log.
+This note is the design as built in phase 1. Phase 2 (stairs and ladders players take themselves, keeping the turn's feet) is built, and its design as built is the last part of this note. The later phases (Universal VTT files a floor, openings and falls, sight between floors) are not built. The design's full text, with its rounds of review, is kept outside the repository, and this note gives what was built and where the build went its own way. Decision ids are in the project's decisions log.
 
 Versions: OP_VERSION 56 and SNAPSHOT_VERSION 43. The snapshot step is the identity, since `Scene.floor` and the room's `openFloors` are optional and absent reads as a scene of one floor, so no data migrates. The number moves so that an older build, which knows nothing of floors, refuses a v43 snapshot (its Delete would remove a main floor alone and leave the other floors naming a scene that is gone).
 
@@ -93,4 +93,58 @@ Where the build went its own way, with the decision ids from the decisions log (
 - **A floor no player sees**, which a player holds only through a creature the DM hid, carries `unseen` on that player's copy, and the server's seen marks and every device's count of what all players see read one rule, `unseenFloor`, the DM's device included, so a drag there takes the group the server takes. A player's copy holds no opened marks to work it out from (D-261108-424).
 - **A scene of one floor is cut too** while the view holds another scene's records, as a DM's predicted ops on a scene not shown add them, so the board draws nothing new for a dungeon's Make. A view with nothing on another floor is still given back as it is (D-261108-436).
 
-Not built: stairs and ladders (phase 2), Universal VTT files and generated dungeons onto a floor (phase 3), seeing between floors (phase 4), and a Move to floor entry in the search.
+Not built: Universal VTT files and generated dungeons onto a floor (phase 3), seeing between floors (phase 4), and a Move to floor entry in the search.
+
+# Phase 2: stairs and ladders
+
+Players take stairs and ladders themselves, and the turn keeps its feet across floors. This part is the design as built. The full text, with its five rounds of review, is kept outside the repository. Decisions: D-261109-011 to 030 (some revised in review), D-261109-099 to 104, 106 and 108, and D-261109-130 to 152 from the build.
+
+Versions: OP_VERSION 58 and SNAPSHOT_VERSION 45 (`FLOOR_LINKS_OP_VERSION`, `FLOOR_LINKS_SNAPSHOT_VERSION`, gate `floorLinksOps`). Both steps are the identity, since an absent `floorLinks` and `prior` read as none. The snapshot number moves so that an older build refuses a v45 snapshot: it would keep creatures on floors only stairs let them reach, drop the feet a turn took on floors left, and leave ends naming a floor it removed. From the op version a change of floor within one scene folds the turn's path into `prior` in place of dropping it, and every op ends by taking away the stairs whose floors went.
+
+## 7. Model and ops
+
+- `RoomState.floorLinks?: Record<FloorLinkId, FloorLink>`, key `floorLink`. An end holds `sceneId`, `to` (the floor just above or below), `pair`, `rect` (1 to 4 a side, the same on both ends), `kind`, `locked`, `grid` (the hex shape it was written under), `ground` (the one height of its squares, fixed while the pair stands) and `made` (the seq of the op that placed the pair, never reused). Code names are `FloorLink` and `floorLink`, since Attach already calls a holder's tie a link (D-261109-011).
+- `TokenPath.prior?: PathPrior { moved, cost, diag, seenDiag }` holds the legs on floors left. The first stop of a path is where the creature's moves on this floor began.
+- Ops: `floorLink.put` (DM, Setup, writes both ends), `floorLink.update` (`kind` and `locked`, Play when `locked` alone), `floorLink.delete`, and `token.climb { tokenId, linkId }` (Play, a pose op, planned by the reducer with the scene-change plan of `tokenUpdate`). `sys.restore` may carry a server-made `climb { tokenId, linkId, rev, made, from, to }`, never from a device.
+- Limits: 16 pairs a scene (`LIMITS.floorLinksPerScene`), 4 a side. The size guard counts both ends.
+- `floorProblem` holds each end to its pair, floors, shape, squares, ground and the walls and pits there. It reaches the stairs' rules through a hook that `rules/floorLinks.ts` sets as it loads (D-261109-133). `scenesOf` and `floorsWritten` name the floors a climb, a stairs op, a trap op and any chunk write touch, so every op meets the check.
+- A trap's 50 per scene now checks when a `trap.create` is made, since the trap op meets its scene's checks.
+
+## 8. Climbing
+
+- Cost: stairs the upper floor's height, a ladder twice it without a Climb speed, prone adding crawling's foot. No terrain, area or diagonal. The climb is the new floor's first leg, two stops on one spot, the second holding the feet, so two stops draw no line and non-owners read 0 ft.
+- A holder the requester does not receive counts as absent, so its rider climbs alone. A seated creature the requester does receive is refused (D-261109-130). A dragged creature is let go, as at a teleport.
+- A player's climb waits for the server, since players are not sent heights, and only the DM's device predicts it (D-261109-102). A second press or key sends nothing while one is out (D-261109-139).
+- Move to floor keeps the turn's feet too (D-261109-016).
+- The walking ruler and a drag do not route through stairs (D-261109-029). Landing sets off no trap or area reminder (D-261109-027).
+
+## 9. Undo
+
+- The actor keeps the `climb` record on the climb's step, the DM's too, and copies it onto a player's `sys.restore`. `pushRestored` copies it both ways, and a climb step never merges with another (D-261109-148).
+- An undo reads the end on the creature's floor now, which must be the stored end's pair at the stored `rev` and `made`, unlocked, holding the creature's space. A redo reads the stored end. Else "the stairs changed", naming the end's current kind (D-261109-132). A pair placed again has a new `made`, so an old step fails.
+- The climber, its passengers and their areas go back with it. An area follows the creature it follows now, and one it cannot put back is left out without a word (D-261109-147).
+- A DM's undo or redo that a stairs rule refuses keeps its step, in words true whoever placed the stairs (D-261109-108). An end no DM edit explains drops the step (D-261109-134).
+- A backup carries `floorLinks` and `prior`. Its import remaps ids, keeps `made` and starts its op numbering past the largest. A backup holds at most 800 ends (D-261109-149).
+
+## 10. Privacy
+
+A player's copy of an end is built field by field from `LINK_FOR_PLAYERS` (D-261109-135): no `pair`, `ground` or `made`, `to` only while that floor is held, `dir` added from the levels, `rev` zeroed. It is sent on a held floor outside a blackout, not under full fog, as a found trap is, and a per-member kind re-projects it on a held-set change, fog under it or a level change, with no cache across viewers (D-261109-136). Owners get `prior` whole and other players `seenDiag` alone. The twins in `floorLinks.differential.test.ts` and `floors.wire.itest.ts` hold the answers equal across far-floor differences. Three channels are accepted: the climbed height to the climber's owners (D-261109-100), "Stairs up" telling a player that a floor lies next to this one (D-261109-101), and a floor change out of sight restarting a hidden creature's trail.
+
+## 11. Client
+
+- Go up and Go down lead the bar's passing row and take Roll's place in a phone's strip, as words or the stairwell icon, and `}` and `{` press them (D-261109-019, 020). An off button stays dim with its reason, and a press says it again (D-261109-141).
+- `LinkLayer` draws each end under the fog, named by what the viewer holds, flat in Isometric with its name standing up.
+- The builder's Between floors mode, its pane, and the floor page's reasons are in `client/features/builder/` and `client/features/scenes/`. Every word is in `client/features/floors/linkWords.ts` and `shared/rules/floorLinks.ts`.
+
+## Phase 2 as built
+
+Where the build went its own way:
+
+- **The icon.** Lucide 0.525.0 has no `door-stairwell`. It is copied from release 1.41.0 with that release's notice (`credits.ts`, `CREDITS.md`).
+- **The ruler.** `walkRuler.ts` is unchanged, since the ruler reads its own legs as a stop list that carries no `prior`. A turn's trail draws a ring with one spot where a copy holds `prior` and no leg here.
+- **Isometric.** An end lies on the ground and its name stands up where its cells are revealed, as a trap's does.
+- **Focus.** The pane's Escape blurs its control, since the board takes no focus (D-261109-145). The key's focus stays where it was, and a button press moves it to the other way (D-261109-140).
+- **Keys.** The key the other way says "going up" or "going down" (D-261109-138), and the landing's name gives way wherever the turn's mover stands where its moves on this floor began (D-261109-142).
+- **Builder.** To lists only floors next to the one shown, and the mode leaves the builder key's cycle on a scene of one floor (D-261109-143, 146).
+- **The grid rule of a retained undo** across a re-created floor with a new shape cannot be reached through ops, since the one-shape rule refuses the return first. It is held by `floorProblem`'s own test and the import's check.
+- **Not built:** the walking ruler through stairs, arrival traps, hidden stairs (D-261109-026) and a move or resize of a pair after placing (D-261109-022). Phase 3 and later bring the ruler through stairs.
