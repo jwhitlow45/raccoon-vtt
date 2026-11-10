@@ -33,7 +33,12 @@ export const MAX_APPLY_CHIPS = 4;
 
 /** Whose HP a token's is: its character's, shared by every token of it, or its own. The same words as groupHp.ts hpTargets. */
 export function holderOf(token: Pick<Token, "id" | "actor">): string {
-  return "ref" in token.actor ? `character:${token.actor.ref}` : `token:${token.id}`;
+  return "ref" in token.actor ? characterHolder(token.actor.ref) : `token:${token.id}`;
+}
+
+/** A character's HP holder. A token showing the character names this one too (holderOf), so an applied entry finds its chip whichever way it was sent. */
+export function characterHolder(characterId: string): string {
+  return `character:${characterId}`;
 }
 
 /** Whether a token is a creature, alive, whose HP this viewer may change, as its own bar decides it (tokens/access.ts). */
@@ -70,7 +75,7 @@ export function applyTargets(input: { view: ApplyView; you: ApplyYou; sceneId: s
   const here = Object.values(view.tokens).filter((t) => t.sceneId === scene.id);
   const rollToken = input.origin.tokenId !== undefined ? view.tokens[input.origin.tokenId] : undefined;
   const characterId = input.origin.characterId ?? (rollToken && "ref" in rollToken.actor ? rollToken.actor.ref : undefined);
-  const roller = rollToken ? holderOf(rollToken) : characterId !== undefined ? `character:${characterId}` : null;
+  const roller = rollToken ? holderOf(rollToken) : characterId !== undefined ? characterHolder(characterId) : null;
   const origins = (rollToken?.sceneId === scene.id ? [rollToken] : characterId !== undefined ? here.filter((t) => "ref" in t.actor && t.actor.ref === characterId) : []).sort((a, b) => byText(a.id, b.id));
   const leave = input.leave ?? new Set<string>();
   const offered = (t: Token) => holderOf(t) !== roller && !leave.has(holderOf(t)) && changesHp(view, you, t);

@@ -128,7 +128,8 @@ describe("the HP entry's lines on the dead (docs/design/design-v1-combat-flow.md
 });
 
 describe("the Hit points section of a creature with no HP to show (docs/design/design-v1-combat-flow.md 3.6.6)", () => {
-  const section = (actor: object, token: { kind: "object" | "npc" | "monster"; companion?: unknown }, life = true) => {
+  const section = (actor: object, kind: { kind: "object" | "npc" | "monster"; companion?: unknown }, life = true) => {
+    const token = { id: "t1", actor: { inline: {} as never }, ...kind };
     const store = createStore(() => ({ view: { meta: { settings: {} } }, you: { role: "dm" } }));
     const el = createElement(HpSection, { actor: actor as never, hpVisibility: "exact", target: { tokenId: "t1" }, access: { full: true, hp: "all", deathSaves: true, life }, name: "Thorn", token });
     return renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: el }) }));

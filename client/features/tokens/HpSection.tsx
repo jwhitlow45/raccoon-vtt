@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { healRevivesDead } from "#shared/migrate.ts";
-import type { Actor, HpVisibility, LifeState, TokenKind } from "#shared/model.ts";
+import type { Actor, HpVisibility, LifeState, Token, TokenKind } from "#shared/model.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
@@ -23,6 +23,7 @@ import { useHpChips, useMarkChipApplied } from "../dice/hpChips.ts";
 import { defenseSummaryText } from "../dice/damageSummaryLines.ts";
 import { DamageSummary } from "../dice/DamageSummary.tsx";
 import { resultWords, type HpChip } from "../dice/options.ts";
+import { characterHolder, holderOf } from "../dice/targets.ts";
 import { returnedRollMode, RollResultLine } from "../rolls/card.ts";
 import { useDicePanel, useRollPresses } from "../dice/useDicePanel.ts";
 import { useRollModeMenu } from "../dice/useRollModeMenu.tsx";
@@ -47,9 +48,13 @@ type HpActor = HpView & Partial<Pick<Actor, "deathSaves">>;
 
 export type HpAccessLevel = "all" | "relative" | "none";
 
-/** The HP entry's target for a single creature: its name, life and maximum feed the entry's lines on the dead (groupHp.ts deadLines). */
-export function oneTarget(target: ActorTarget, access: HpAccessLevel, atZero: boolean, vitals: Pick<HpTarget, "name" | "dead" | "max">): HpTarget {
-  return { holder: "tokenId" in target ? `token:${target.tokenId}` : `character:${target.characterId}`, target, access, atZero, ...vitals };
+/**
+ * The HP entry's target for a single creature: its name, life and maximum feed the entry's lines on the dead (groupHp.ts deadLines).
+ * A token names its holder as the Fill chips do (targets.ts holderOf), so Apply marks the chip it filled from.
+ */
+export function oneTarget(target: ActorTarget, access: HpAccessLevel, atZero: boolean, vitals: Pick<HpTarget, "name" | "dead" | "max">, token?: Pick<Token, "id" | "actor">): HpTarget {
+  const holder = token ? holderOf(token) : "tokenId" in target ? `token:${target.tokenId}` : characterHolder(target.characterId);
+  return { holder, target, access, atZero, ...vitals };
 }
 
 /**
@@ -469,7 +474,7 @@ export function HpSection(props: {
   /** The creature's name, for the entry's lines on the dead. */
   name?: string;
   /** The token, when there is one: an effect companion and every object have no life controls (docs/design/design-v1-combat-flow.md 3.6.6). */
-  token?: { kind: TokenKind; companion?: unknown };
+  token?: Pick<Token, "id" | "actor"> & { kind: TokenKind; companion?: unknown };
   /** The room search's anchor id (features/search/entry.ts) on its heading: the token panel's or a character page's. */
   search?: string;
 }) {
@@ -520,7 +525,7 @@ export function HpSection(props: {
       )}
 
       {access.hp !== "none" ? (
-        <HpEntry targets={[oneTarget(target, access.hp, atZero, { name: props.name ?? "it", dead: life === "dead", max: hp?.max })]} access={access.hp} place="panel" />
+        <HpEntry targets={[oneTarget(target, access.hp, atZero, { name: props.name ?? "it", dead: life === "dead", max: hp?.max }, props.token)]} access={access.hp} place="panel" />
       ) : null}
 
       {access.hp === "all" && hp ? (

@@ -6,6 +6,7 @@ import { dispatchGesture } from "../../state/actions.ts";
 import type { OnAnswer, RoomActions } from "../../state/types.ts";
 import { tokenAccess, type Role } from "./access.ts";
 import { withCrit, type HpMode, type HpParse } from "./hpInput.ts";
+import { holderOf } from "../dice/targets.ts";
 import { creatureRolls, type DiceView } from "../dice/creature.ts";
 import { damageSummary, type DamageSummaryLines, type DamageSummaryContext } from "../dice/damageSummaryLines.ts";
 
@@ -54,7 +55,7 @@ export function hpTargets(
     const actor = "inline" in token.actor ? token.actor.inline : character?.actor;
     const atZero = actor?.hp?.cur === 0 && (actor.life === "dying" || actor.life === "stable");
     return {
-      holder: "ref" in token.actor ? `character:${token.actor.ref}` : `token:${token.id}`,
+      holder: holderOf(token),
       target: { tokenId: token.id },
       name: displayName(token as Token),
       access: access.hp,

@@ -546,7 +546,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
 
       {access.hp !== "none" && !noHp ? (
         <HpEntry
-          targets={[oneTarget(target, access.hp, atZero, { name: displayName(token), dead: life === "dead", max: actor?.hp?.max })]}
+          targets={[oneTarget(target, access.hp, atZero, { name: displayName(token), dead: life === "dead", max: actor?.hp?.max }, token)]}
           access={access.hp}
           place="bar"
           fieldFirst={short}
