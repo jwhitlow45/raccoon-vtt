@@ -41,7 +41,8 @@ export type Budget = { left: number };
 /** A square or a block's top-left square, as x and y. */
 export type XY = readonly [number, number];
 
-export type RouteOptions = { wide: boolean; turn: number; budget: Budget };
+/** `reach`: the route may cross a wing's whole open ground, as its stub does, rather than only its area (phase 3, 3.4). */
+export type RouteOptions = { wide: boolean; turn: number; budget: Budget; reach?: boolean };
 
 /** Where a search ends: a doorway's anchor, or the scene edge on one side, reached heading out. */
 export type Goal = { anchor: number[]; side: Side } | { edge: Side };
@@ -210,6 +211,8 @@ export class Router {
         const k = y * b.W + x;
         if (!stub && !b.inside(x, y)) continue;
         if (b.hex && !b.lattice.inMap(x, y)) continue;
+        // A wing's stub crosses only the open ground the planning flood reached (phase 3, 3.4).
+        if (stub && b.masks && b.masks.reach[k] !== 1) continue;
         if (b.roomAt[k] !== 0 || b.besideAt[k] !== 0) continue;
         if (b.runAt[k] !== 0 && b.farAt[k] === 0) continue;
         if (b.halo(k) && mouths[k] === 0) continue;
@@ -235,7 +238,7 @@ export class Router {
   route(from: Doorway, goal: Goal, options: RouteOptions, bend?: (a: XY, b: XY) => XY[]): RouteResult {
     const b = this.#board;
     const stub = "edge" in goal;
-    const open = this.openSquares(stub);
+    const open = this.openSquares(stub || options.reach === true);
     this.#markBeside();
     const size = options.wide ? 2 : 1;
     const start = blockOf(b, b.anchor(from), from.side, size);

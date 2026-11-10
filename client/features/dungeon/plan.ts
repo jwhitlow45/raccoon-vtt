@@ -3,8 +3,8 @@ import type { JoinExpect } from "#shared/rules/wingClear.ts";
 import { trapPreset } from "#shared/srd/traps.ts";
 import { bends, Router, TURN_COST } from "./corridors.ts";
 import { daisClear, doorLines, doorStates, placePillars, placePits, placeRubble, roomFloors } from "./dress.ts";
-import { DAIS_RISE, placeDais, raiseRooms, type Dais } from "./heights.ts";
-import { Board, chooseEntrance, doorEdge, facingSides, loopLinks, placeDoorway, placeRooms, rockBetween, SIDE_ORDER, treeLinks, type Doorway, type Link, type Rect, type Side } from "./layout.ts";
+import { DAIS_RISE, placeDais, raiseRooms, runFor, type Dais } from "./heights.ts";
+import { Board, chooseEntrance, doorEdge, facingSides, loopLinks, middleDistance, placeDoorway, placeRooms, rockBetween, SIDE_ORDER, treeLinks, type Doorway, type Link, type Rect, type Side } from "./layout.ts";
 import { seedStream } from "./random.ts";
 import type { Seed } from "./seed.ts";
 import { besideDoorway, bulgeTunnels, erodeRoom, placeColumns } from "./cave.ts";
@@ -17,12 +17,13 @@ import { placeLights, placeLightsHex, type LitRoom } from "./lightSpots.ts";
 import { doorKey, editsHold, REPORTS, SECRET_OFF, type DoorPin, type DungeonEdits, type RoomEdit, type RoomFacts } from "./edits.ts";
 import { fitRooms, NEW_SCENE, withinAllowance, type Allowance, type FitFailure } from "./fit.ts";
 import { chooseSecrets, secretCandidates, stillWhole, type Candidate } from "./secrets.ts";
-import { clampContext, clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, isHexGrid, MAX_DOOR_EDGES, MAX_LIGHTS, MAX_SECRET_DOORS, MAX_STAMPS, MAX_TRAPS, SEARCH_BUDGET, litCount, secretCount, trapCount, type DungeonSettings, type GridKind, type PlanContext, type Theme } from "./settings.ts";
+import { clampContext, clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, isHexGrid, MAX_DOOR_EDGES, MAX_LIGHTS, MAX_SECRET_DOORS, MAX_STAMPS, MAX_TRAPS, MIN_ROOMS, SEARCH_BUDGET, litCount, secretCount, trapCount, type DungeonSettings, type GridKind, type PlanContext, type Theme } from "./settings.ts";
 import { channelWater, placeCisterns, type Channel } from "./sewer.ts";
 import { THEME_SPECS } from "./themes.ts";
 import { propsFor, stampSize } from "./props.ts";
 import { FIRE_STATUE, HIDDEN_PIT, hexTrapSpots, pickTraps, POISONED_NEEDLE, SPIKED_PIT, presetKind, spotsApart, STATUE_STAMP, statueReaches, statueStamp, trapAt, trapSpots, type PickedTraps, type Spot } from "./trapSpots.ts";
 import { wallChunk } from "#shared/keys.ts";
+import { wingSetup, type WingProblem, type WingSetup } from "./wing.ts";
 
 /*
  * The dungeon a seed and the choices make (docs/design/design-v1-dungeon-generator.md
@@ -69,7 +70,7 @@ export type PlanTrap = { preset: string; zone: TrapZone; hits?: CellRect[]; cone
 export type PlanWall = { a: [number, number]; b: [number, number]; f: "wall" | "closed" | "locked" | "secret" };
 
 /** A room's doorway as the key reads it: its side, the other room's number or the map's edge, and its door ("open" on Cave). */
-export type KeyDoor = { side: "n" | "e" | "s" | "w"; to: number | "edge"; state: PlanDoor["state"] | "open" };
+export type KeyDoor = { side: "n" | "e" | "s" | "w"; to: number | "edge" | "join"; state: PlanDoor["state"] | "open" };
 
 /**
  * A room as the key describes it: its number (1 for the entrance, breadth
@@ -158,7 +159,9 @@ const LANE_ROOM_PROPS = 64;
 const PIT_DROP = 10;
 
 /** What a plan takes besides the choices (phase 3): the room count to ask for, and the rooms' edits by board index. */
-export type PlanOptions = { rooms?: number; edits?: Readonly<Record<number, RoomEdit>>; allowance?: Allowance };
+export type PlanOptions = { rooms?: number; edits?: Readonly<Record<number, RoomEdit>>; allowance?: Allowance; wing?: WingSetup };
+/** The join's doorway id, past any board's, so its run marks no room's doorway. */
+const JOIN_DOORWAY = 30_000;
 
 /*
  * The streams a seed starts (random.ts `seedStream`, phase 2 5.7): the main
@@ -224,7 +227,7 @@ export type Planned = {
   fitted: number;
   /** The lattice the board lies on. */
   lattice: Lattice;
-  /** On hexes, each cell's space for the wall pass (hexWalls.ts), and each kept doorway's leaves in `plan.walls`, in `doorways` order. Empty on squares. */
+  /** On hexes, each cell's space for the wall pass (hexWalls.ts), and each kept doorway's leaves in `plan.walls`, in `doorways` order, a wing's join last. Empty on squares. */
   space: Int32Array;
   leaves: number[][];
   /** Each kept room as the room panel shows it, in number order (phase 3, 4.1). */
@@ -233,6 +236,8 @@ export type Planned = {
   reports: ReadonlyMap<number, readonly string[]>;
   /** Why the fit gave up, or null when the plan fits its allowance (phase 3, 2.5). */
   overBudget: FitFailure | null;
+  /** A wing's outcome: why it cannot be planned, or null, and what the scene had room for (3.4). Null for a new scene. */
+  wing: { problem: WingProblem | null; allowance: Allowance } | null;
 };
 
 export function generate(settings: DungeonSettings, seed: Seed, context: PlanContext, budget: number = SEARCH_BUDGET): DungeonPlan {
@@ -240,36 +245,46 @@ export function generate(settings: DungeonSettings, seed: Seed, context: PlanCon
 }
 
 /**
- * The plan a dialog or a wing pane shows (phase 3, 2.5 and 4.2): on hexes
- * the first plan within the wall budget, stepping the room count down, and
- * with edits exactly the room count they froze, the edits applied.
+ * The plan a dialog or a wing pane shows (phase 3, 2.5, 3.4 and 4.2): on
+ * hexes, and for a wing on either grid, the first plan within what the
+ * scene has room for, stepping the room count down, and with edits exactly
+ * the room count they froze, the edits applied. `fits` adds a check of its
+ * own, such as the sight cap the scratch room counts.
  */
-export function planFitted(settings: DungeonSettings, seed: Seed, context: PlanContext, extras: { edits?: DungeonEdits; wing?: WingBase } = {}): Planned {
+export function planFitted(settings: DungeonSettings, seed: Seed, context: PlanContext, extras: { edits?: DungeonEdits; wing?: WingBase; fits?: (planned: Planned) => boolean } = {}): Planned {
   const ctx = clampContext(context);
-  const s = clampSettings(settings, ctx.grid);
-  const allowance = NEW_SCENE;
-  // Squares hold no free walls, so only a hex plan has a wall budget to fit.
-  const fits = (p: Planned) => !isHexGrid(ctx.grid) || withinAllowance(p.plan, allowance);
-  const edits = extras.edits && editsHold(extras.edits, s, seed, null) ? extras.edits : undefined;
+  const setup = extras.wing ? wingSetup(extras.wing, clampSettings(settings, extras.wing.scene.gridShape ?? "squares")) : undefined;
+  const s = clampSettings(settings, setup ? setup.world.grid : ctx.grid);
+  const allowance = setup?.allowance ?? NEW_SCENE;
+  // Squares hold no free walls, so a new square scene has no budget to fit. A wing counts its scene's doors and pillars too.
+  const fits = (p: Planned) => (!setup && !isHexGrid(ctx.grid)) || (withinAllowance(p.plan, allowance) && (extras.fits?.(p) ?? true));
+  const base = extras.wing?.hash ?? null;
+  const edits = extras.edits && editsHold(extras.edits, s, seed, base) ? extras.edits : undefined;
+  const plan = (rooms: number, pins?: DungeonEdits["rooms"]) => planDungeon(s, seed, ctx, SEARCH_BUDGET, { rooms, allowance, ...(pins ? { edits: pins } : {}), ...(setup ? { wing: setup } : {}) });
   if (edits) {
     // Edits freeze the room count, so a plan over budget is not fitted again: the edit that took it over is undone (4.2).
-    const planned = planDungeon(s, seed, ctx, SEARCH_BUDGET, { rooms: edits.layout.fitted, edits: edits.rooms, allowance });
+    const planned = plan(edits.layout.fitted, edits.rooms);
     return fits(planned) ? planned : { ...planned, overBudget: "edits" };
   }
-  const { planned, failed } = fitRooms(s.rooms, (rooms) => planDungeon(s, seed, ctx, SEARCH_BUDGET, { rooms, allowance }), fits);
-  return failed ? { ...planned, overBudget: failed } : planned;
+  const { planned, failed } = fitRooms(s.rooms, (rooms) => plan(rooms), fits);
+  if (!failed) return planned;
+  // A wing that fits under two rooms finds the scene too full of walls and doors (3.4).
+  const wing = planned.wing && failed === "underTwo" ? { ...planned.wing, problem: planned.wing.problem ?? ("full" as const) } : planned.wing;
+  return { ...planned, overBudget: failed, wing };
 }
 
 /** The plan with its working. A caller with no room (a bench script) plans at the default 5 ft a square. */
 export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanContext = DEFAULT_CONTEXT, budget: number = SEARCH_BUDGET, extras: PlanOptions = {}): Planned {
   const ctx = clampContext(context);
-  const grid: GridKind = ctx.grid ?? "squares";
+  const wing = extras.wing ?? null;
+  const grid: GridKind = wing ? wing.world.grid : (ctx.grid ?? "squares");
   const hex = isHexGrid(grid);
-  const s = clampSettings(input, ctx.grid);
-  const theme = THEME_SPECS[s.theme];
-  // On hexes the plan works on the rows lattice of the scene's bounds, larger than the bounds by about a seventh down the rows.
-  const lattice = latticeFor(grid, { w: s.w, h: s.h });
+  const s = clampSettings(input, grid);
+  const theme = wing?.flat ? { ...THEME_SPECS[s.theme], pillars: false } : THEME_SPECS[s.theme];
+  // On hexes the plan works on the rows lattice of the scene's bounds, larger than the bounds by about a seventh down the rows. A wing plans on its scene's whole lattice.
+  const lattice = wing ? wing.world.L : latticeFor(grid, { w: s.w, h: s.h });
   const { W, H } = lattice;
+  const allowance = extras.allowance ?? wing?.allowance ?? NEW_SCENE;
   const fitted = extras.rooms ?? s.rooms;
   const edits = extras.edits;
   // What each pinned room's edits did not do, by board index (4.1).
@@ -281,11 +296,17 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   const trace: PlanTrace = { retried: [], failed: [], dropped: [], replaced: [], skipped: [], stubFailed: false, treeLeft: budget, loopsLeft: budget, budgetLeft: budget };
 
   // Steps 1 to 3: rooms, the entrance, the tree and the extra ways around.
-  const rects = placeRooms(rng, { w: W, h: H, rooms: fitted, density: s.density, wide: s.wide });
-  const board = new Board(W, H, rects, lattice);
+  // A wing's rooms are placed in its area, off the ground it may not take, and stand in the scene where the area does (3.4).
+  const rects = wing
+    ? placeRooms(rng, { w: wing.area.w, h: wing.area.h, rooms: fitted, density: s.density, wide: s.wide }, wing.blocked).map((r) => ({ ...r, x: r.x + wing.area.x, y: r.y + wing.area.y }))
+    : placeRooms(rng, { w: W, h: H, rooms: fitted, density: s.density, wide: s.wide });
+  const board = new Board(W, H, rects, lattice, wing ? { inside: wing.inside, reach: wing.reach } : undefined);
   // On hexes the way in leaves by the west or east edge, and on Wide by the west alone: the Wide block's east goal lands on an odd row's missing hex (2.3, D-261110-240).
   const sides: readonly Side[] = hex ? (s.wide ? ["w"] : ["w", "e"]) : SIDE_ORDER;
-  const entrance = rects.length > 0 ? chooseEntrance(rects, W, H, sides) : { room: -1, side: sides[0]! };
+  // A wing's way in is its room nearest the join (3.4), leaving on the side facing it.
+  const joinAt = wing && wing.facts.outside.length > 0 ? { x: wing.facts.outside[0]! % W, y: Math.floor(wing.facts.outside[0]! / W), w: 1, h: 1 } : null;
+  const nearest = (at: Rect) => rects.reduce((best, r, i) => (middleDistance(r, at) < middleDistance(rects[best]!, at) ? i : best), 0);
+  const entrance = rects.length === 0 ? { room: -1, side: sides[0]! } : joinAt ? { room: nearest(joinAt), side: facingSides(rects[nearest(joinAt)]!, joinAt)[0] } : chooseEntrance(rects, W, H, sides);
   const tree = entrance.room >= 0 ? treeLinks(rects, entrance.room) : [];
   const doorEdges = (loops: number) => (2 * tree.length + 1 + 2 * loops) * width;
   const loops = s.loops ? loopLinks(rects, tree, Math.floor(rects.length / ROOMS_PER_LOOP), (n) => doorEdges(n) <= MAX_DOOR_EDGES) : [];
@@ -297,7 +318,8 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   const style = s.corridors;
   // Straight aims each doorway at the other room's middle, so facing rooms join in a line. The others aim at a spot drawn along the side, so even a short crossing takes a Z.
   const aim = style === "straight" ? undefined : (last: number) => ways.int(1, last);
-  const stub = entrance.room >= 0 ? placeDoorway(board, entrance.room, [entrance.side], rects[entrance.room]!, width, -1, true) : null;
+  const stub =
+    entrance.room < 0 ? null : joinAt ? placeDoorway(board, entrance.room, facingSides(rects[entrance.room]!, joinAt), joinAt, width, -1) : placeDoorway(board, entrance.room, [entrance.side], rects[entrance.room]!, width, -1, true);
   /** A link's two doorways on the first of each room's `sides` with a spot, or none. */
   const placeLink = (li: number, sides: (r: Rect, o: Rect) => readonly Side[], at?: (last: number) => number): { a: Doorway | null; b: Doorway | null } => {
     const l = links[li]!;
@@ -319,8 +341,19 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     });
   }
 
-  // Step 5: heights, before any corridor, so every run is reserved first.
-  if (entrance.room >= 0) raiseRooms(rng, board, entrance.room, s.heights, grounds);
+  // A wing's join is a doorway of the room it joins, on no room of the board: its run, where the floor inside is raised or sunk, is reserved before every other (3.2).
+  const joinDoor: Doorway | null = wing && joinAt ? { id: JOIN_DOORWAY, room: -1, side: wing.facts.side, at: 0, width, inside: wing.facts.inside, outside: wing.facts.outside, link: -1, run: null, flat: null, removed: false } : null;
+  let wingProblem: WingProblem | null = wing?.problem ?? null;
+  if (joinDoor && wing && wing.facts.ground !== 0) {
+    const run = runFor(board, joinDoor, wing.facts.ground, hex ? wing.facts.dir : undefined);
+    const cells = [...run.near, ...run.stairs.map((st) => st.cell), ...run.far];
+    const fits = cells.every((k) => k >= 0 && wing.reach[k] === 1 && board.roomAt[k] === 0 && !board.halo(k));
+    if (fits) board.reserve(joinDoor, run);
+    else wingProblem ??= "noStairs";
+  }
+
+  // Step 5: heights, before any corridor, so every run is reserved first. A wing on a "floor" scene is flat, since its stairs would make no walls (3.2).
+  if (entrance.room >= 0) raiseRooms(rng, board, entrance.room, wing?.flat ? 0 : s.heights, wing?.flat ? new Map() : grounds);
 
   // Step 6: corridors, tree links in Prim's order, then the loops, then the stub.
   const bend = (a: readonly [number, number], b: readonly [number, number]) => bends(ways, s.corridors, a, b, width);
@@ -387,8 +420,9 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   trace.loopsLeft = options.budget.left;
   let stubPath: number[] | null = null;
   let stubChain: number[] | null = null;
-  if (stub) {
-    const found = router.route(stub, { edge: entrance.side }, options);
+  if (stub && !wingProblem) {
+    // A wing's stub runs to the join's far landing, or its outside cells, across the open ground the flood reached.
+    const found = joinDoor ? router.route(stub, { anchor: board.anchor(joinDoor), side: joinDoor.side }, { ...options, reach: true }) : router.route(stub, { edge: entrance.side }, options);
     if (found.ok) {
       for (const k of found.cells) board.laid[k] = 1;
       stubPath = found.cells;
@@ -396,6 +430,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     }
   }
   if (!stubPath) trace.stubFailed = true;
+  if (wing && !stubPath) wingProblem ??= "noWay";
   trace.budgetLeft = options.budget.left;
   // A doorway whose corridor was never built goes with its door and run, so no door opens onto rock.
   for (const d of board.doorways) if (!d.removed && (d.link < 0 ? stubPath === null : paths[d.link] === null)) board.removeDoorway(d);
@@ -407,7 +442,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   const realRuns = new Set<number>();
   const runSquares = new Set<number>();
   const mouths = new Set<number>();
-  for (const d of doorways) {
+  for (const d of joinDoor ? [...doorways, joinDoor] : doorways) {
     for (const k of d.outside) mouths.add(k);
     if (d.run) for (const k of [...d.run.near, ...d.run.stairs.map((st) => st.cell), ...d.run.far]) realRuns.add(k);
     if (d.flat) for (const k of d.flat) runSquares.add(k);
@@ -417,7 +452,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   // On hexes the way in's stair stands on the edge hex whose border side opens off the map: an even row's, so a Wide stub's odd lane ends against a wall (2.3).
   const outward = entrance.side === "w" ? 3 : 0;
   // Only the stub's last position counts on hexes: a stub can run along the edge column on its way, and those hexes keep their outer walls.
-  const stubEnd = new Set(stubChain && stubChain.length > 0 ? [0, 1, W, W + 1].slice(0, width === 1 ? 1 : 4).map((o) => stubChain.at(-1)! + o) : []);
+  const stubEnd = new Set(!wing && stubChain && stubChain.length > 0 ? [0, 1, W, W + 1].slice(0, width === 1 ? 1 : 4).map((o) => stubChain.at(-1)! + o) : []);
   if (stubPath) {
     for (const k of stubPath) {
       const x = k % W;
@@ -567,13 +602,16 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
       }
     }
     for (const k of corridor) space[k] = CORRIDOR_SPACE;
-    for (const d of doorways) if (d.run) for (const k of [...d.run.near, ...d.run.stairs.map((st) => st.cell), ...d.run.far]) space[k] = RUN_SPACE + d.id;
+    const runDoors = joinDoor ? [...doorways, joinDoor] : doorways;
+    for (const d of runDoors) if (d.run) for (const k of [...d.run.near, ...d.run.stairs.map((st) => st.cell), ...d.run.far]) space[k] = RUN_SPACE + d.id;
     walled = hexWalls({
       lattice,
       space,
-      doorways: doorways.map((d) => ({ inside: d.inside, outside: d.outside, state: doorState(d) })),
-      far: new Set(doorways.flatMap((d) => d.run?.far ?? [])),
+      // A wing's join takes a closed leaf where it was a wall, and a door there keeps standing as it is (3.2).
+      doorways: [...doorways.map((d) => ({ inside: d.inside, outside: d.outside, state: doorState(d) })), ...(joinDoor && wing ? [{ inside: joinDoor.inside, outside: joinDoor.outside, state: wing.facts.door ? ("open" as const) : ("closed" as const) }] : [])],
+      far: new Set(runDoors.flatMap((d) => d.run?.far ?? [])),
       wayIn: [...edgeStairs].map((cell) => ({ cell, dir: outward })),
+      ...(wing ? { skip: wing.skip } : {}),
     });
   }
   // A scene's own keys for a rectangle of lattice cells: the same on Hex rows, mirrored on Hex columns.
@@ -652,7 +690,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
             stones: s.wide && (s.band === "11-16" || s.band === "17-20"),
             feetPerCell: ctx.feetPerCell,
           });
-  let picked: PickedTraps = s.traps === 0 ? { traps: [], squares: [], statues: [], stones: [], picks: [] } : pickTraps(rng, spots, trapCount(s.traps, kept.length), hex ? () => false : reaches);
+  let picked: PickedTraps = s.traps === 0 ? { traps: [], squares: [], statues: [], stones: [], picks: [] } : pickTraps(rng, spots, Math.min(trapCount(s.traps, kept.length), allowance.traps), hex ? () => false : reaches);
 
   // Lights (5.5), from their own stream after the traps, so Lit rooms keeps the rooms, corridors, doors and traps.
   const used = new Set(picked.squares.flat());
@@ -678,8 +716,8 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   const stampHex = (i: number, k: number) => space[k] === i && !nearDoor.has(k) && !overlay.has(k) && !clear.has(k) && !daisSquares.has(k) && k !== pins.get(i) && !used.has(k);
   const lightStream = seedStream(seed, GENERATOR_VERSION, LANE_LIGHTS);
   let lit = hexStamps
-    ? placeLightsHex(lightStream, board, kept, litCount(s.lit, kept.length), own, free, theme, (i, stamp) => hexStamps.fits(stamp, (k) => stampHex(i, k)))
-    : placeLights(lightStream, board, kept, litCount(s.lit, kept.length), own, free, theme);
+    ? placeLightsHex(lightStream, board, kept, Math.min(litCount(s.lit, kept.length), allowance.lights), own, free, theme, (i, stamp) => hexStamps.fits(stamp, (k) => stampHex(i, k)))
+    : placeLights(lightStream, board, kept, Math.min(litCount(s.lit, kept.length), allowance.lights), own, free, theme);
   let litStamps = lit.flatMap((l) => (l.stamp ? [l.stamp] : []));
   for (const l of lit) {
     used.add(l.square);
@@ -696,7 +734,8 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     props: (i: number) => propsFor(s.theme, floors[i]!),
     free,
     held: (i: number) => stampsIn.get(i) ?? 0,
-    total: picked.statues.length + litStamps.length,
+    // A wing's room for stamps stands in as the dungeon's total, so its props stop where the scene's allowance does.
+    total: picked.statues.length + litStamps.length + Math.max(0, MAX_STAMPS - allowance.stamps),
   };
   const dressStream = seedStream(seed, GENERATOR_VERSION, LANE_DRESSING);
   let props = hexStamps ? furnishHex(dressStream, { ...dressing, stamps: hexStamps, lattice, allowed: stampHex }) : furnish(dressStream, { ...dressing, ground: groundAt });
@@ -705,7 +744,8 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   const doorRoom = new Map<string, number>();
   for (const d of doorways) d.inside.forEach((_, j) => doorRoom.set(doorEdgeOf(board, d, j), d.room));
   const leafRoom = new Map<number, number>();
-  walled.leaves.forEach((leaves, j) => leaves.forEach((leaf) => leafRoom.set(leaf, doorways[j]!.room)));
+  // A wing's join is the last doorway the wall pass read, on no room of the wing.
+  walled.leaves.forEach((leaves, j) => leaves.forEach((leaf) => leafRoom.set(leaf, doorways[j]?.room ?? -1)));
   const spotRoom = (sp: Pick<Spot, "zone" | "squares" | "leaf">): number =>
     sp.leaf !== undefined ? (leafRoom.get(sp.leaf) ?? -1) : "door" in sp.zone ? ("edge" in sp.zone.door ? (doorRoom.get(sp.zone.door.edge) ?? -1) : -1) : sp.squares.length > 0 ? roomOf(sp.squares[0]!) : -1;
 
@@ -713,7 +753,6 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   // whole contents, so nothing in any other room moves, and every allowance is checked again after each room (phase 3,
   // 4.3, D-261110-237, 242 and 243).
   if (edits) {
-    const allowance = extras.allowance ?? NEW_SCENE;
     const caps = { traps: Math.min(MAX_TRAPS, allowance.traps), stamps: Math.min(MAX_STAMPS, allowance.stamps), lights: Math.min(MAX_LIGHTS, allowance.lights) };
     type TrapEntry = { trap: PlanTrap; squares: number[]; statue: PlanStamp | null; stone: [number, number] | null; spot: Spot };
     let entries: TrapEntry[] = picked.traps.map((trap, ti) => {
@@ -902,6 +941,8 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
         cistern: (i) => cisterns.has(i),
       })
     : null;
+  // A wing's way in leads to the wall it joins, not off the map.
+  if (keyed && wing) for (const k of keyed) k.doors = k.doors.map((d) => (d.to === "edge" ? { ...d, to: "join" as const } : d));
 
   // What the pins left undone that no step above saw: a room or door gone, a height with no room for its stairs.
   if (edits) {
@@ -937,7 +978,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
             return {
               key: doorKey(d.link),
               side: d.side,
-              to: other >= 0 ? (numbers.get(other) ?? "edge") : "edge",
+              to: other >= 0 ? (numbers.get(other) ?? "edge") : wing ? "join" : "edge",
               state: !theme.doors ? "open" : isSecret(d) ? "secret" : states.get(d.id)!,
               secretOk: !theme.doors ? SECRET_OFF.cave : d.run ? SECRET_OFF.stairs : mayBeSecret.some((c) => c.doorway === d) ? null : SECRET_OFF.notCandidate,
             };
@@ -959,8 +1000,10 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
       for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (inRoom(board.cell(x, y))) terrain.set(board.cell(x, y), floors[i]!);
     }
     for (const k of corridor) terrain.set(k, theme.corridor);
-    for (const [k, t] of overlay) if (terrain.has(k)) terrain.set(k, t);
+    // On a "floor" scene overlays make no walls, so a wing there keeps its floors and marks rubble, water and pits as hexes do (3.4).
+    if (!wing?.flat) for (const [k, t] of overlay) if (terrain.has(k)) terrain.set(k, t);
   }
+  const marked = hex || wing?.flat === true;
   // A cell that is floor: on hexes a pillar is a walled hex, so it holds no ground.
   const isFloor = (k: number) => (hex ? space[k] !== NO_SPACE : inRoom(k));
 
@@ -971,9 +1014,9 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   }
   for (const [k, ft] of daisSquares) ground.set(k, ft);
   // On hexes a pit or a shaft is its hexes sunk 10 ft below the room's floor (2.4).
-  if (hex) for (const [k, t] of overlay) if (t === "pit" && board.roomAt[k] !== 0) ground.set(k, board.rooms[board.roomAt[k]! - 1]!.ground - PIT_DROP);
+  if (marked) for (const [k, t] of overlay) if (t === "pit" && board.roomAt[k] !== 0) ground.set(k, board.rooms[board.roomAt[k]! - 1]!.ground - PIT_DROP);
   const ups = new Map<number, StairDirection>();
-  for (const d of doorways) {
+  for (const d of joinDoor ? [...doorways, joinDoor] : doorways) {
     if (!d.run) continue;
     for (const k of d.run.near) ground.set(k, d.run.ground);
     for (const st of d.run.stairs) {
@@ -1035,8 +1078,13 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
           walls: walled.walls,
           rough: [...overlay].flatMap(([k, t]) => (t === "rubble" || t === "water") && isFloor(k) ? [k] : []).sort((a, b) => a - b).map(key),
         }
-      : {}),
+      : wing?.flat
+        ? { rough: [...overlay].flatMap(([k, t]) => ((t === "rubble" || t === "water") && terrain.has(k) ? [k] : [])).sort((a, b) => a - b).map(key) }
+        : {}),
+    ...(wing ? { join: wing.expect } : {}),
   };
+  // A square join that was a wall becomes a closed door, Cave or not, since the room it joins keeps its doors. A door keeps its state (3.2).
+  if (wing && wing.expect.grid === "squares" && !wing.facts.door) plan.doors = [...plan.doors, ...wing.expect.edges.map((e) => ({ edge: e.key, state: "closed" as const }))];
   return {
     plan,
     trace,
@@ -1062,6 +1110,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     facts,
     reports,
     overBudget: null,
+    wing: wing ? { problem: wingProblem ?? (kept.length < MIN_ROOMS ? "noRooms" : null), allowance } : null,
   };
 }
 

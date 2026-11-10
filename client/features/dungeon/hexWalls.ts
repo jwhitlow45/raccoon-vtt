@@ -115,12 +115,18 @@ export function hexWalls(input: HexWallInput): HexWalls {
         continue;
       }
       const sn = space[n]!;
+      const door = doorAt.get(pair(k, n));
+      // A wing's join opens onto the room it joins, which is not the wing's floor: its leaf stands on that side all the same.
+      if (sn === NO_SPACE && door) {
+        const state = input.doorways[door.doorway]!.state;
+        if (state !== "open") add(k, dir, state, door.doorway, door.middle);
+        continue;
+      }
       if (sn === NO_SPACE) {
         add(k, dir, "wall");
         continue;
       }
       if (n < k || sn === sk) continue;
-      const door = doorAt.get(pair(k, n));
       if (door) {
         const state = input.doorways[door.doorway]!.state;
         if (state !== "open") add(k, dir, state, door.doorway, door.middle);

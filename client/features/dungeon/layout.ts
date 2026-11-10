@@ -62,10 +62,10 @@ const LAYOUT_TRIES = 12;
  * that leaves rooms out is tried again from the start, up to 12 times, and
  * the first that fits them all wins, else the first that fit the most.
  */
-export function placeRooms(rng: Stream, s: Pick<DungeonSettings, "w" | "h" | "rooms" | "density" | "wide">): Rect[] {
+export function placeRooms(rng: Stream, s: Pick<DungeonSettings, "w" | "h" | "rooms" | "density" | "wide">, blocked?: Uint8Array): Rect[] {
   let best: Rect[] = [];
   for (let t = 0; t < LAYOUT_TRIES && best.length < s.rooms; t++) {
-    const rooms = layoutOnce(rng, s);
+    const rooms = layoutOnce(rng, s, blocked);
     if (rooms.length > best.length) best = rooms;
   }
   return best;
@@ -77,12 +77,19 @@ export function placeRooms(rng: Stream, s: Pick<DungeonSettings, "w" | "h" | "ro
  * crowded map still finds the gaps a blind try would miss. A size that
  * fits nowhere rules out every size at least as large for that room.
  */
-function layoutOnce(rng: Stream, s: Pick<DungeonSettings, "w" | "h" | "rooms" | "density" | "wide">): Rect[] {
+function layoutOnce(rng: Stream, s: Pick<DungeonSettings, "w" | "h" | "rooms" | "density" | "wide">, blocked?: Uint8Array): Rect[] {
   const { w: W, h: H } = s;
   const [lo, hi] = sideRange(s.density, s.wide);
   const gap = roomGap(s.density, s.wide);
   const occupied = new Uint8Array(W * H);
   const spots = new Int32Array(W * H);
+  // A wing's rooms keep a cell from ground they may not take, so their walls stand on open ground (phase 3, 3.4).
+  const closed = blocked ? prefixSums(blocked, W, H) : null;
+  const shut = (x0: number, y0: number, x1: number, y1: number) => {
+    if (!closed) return false;
+    const a = Math.max(0, x0), b = Math.max(0, y0), c = Math.min(W, x1), d = Math.min(H, y1);
+    return closed[d * (W + 1) + c]! - closed[b * (W + 1) + c]! - closed[d * (W + 1) + a]! + closed[b * (W + 1) + a]! > 0;
+  };
   const rooms: Rect[] = [];
   for (let r = 0; r < s.rooms; r++) {
     const sums = prefixSums(occupied, W, H);
@@ -98,7 +105,7 @@ function layoutOnce(rng: Stream, s: Pick<DungeonSettings, "w" | "h" | "rooms" | 
       if (tooBig.some(([bw, bh]) => w >= bw && h >= bh)) continue;
       let n = 0;
       for (let y = MARGIN; y + h <= H - MARGIN; y++) {
-        for (let x = MARGIN; x + w <= W - MARGIN; x++) if (count(x - gap, y - gap, x + w + gap, y + h + gap) === 0) spots[n++] = y * W + x;
+        for (let x = MARGIN; x + w <= W - MARGIN; x++) if (count(x - gap, y - gap, x + w + gap, y + h + gap) === 0 && !shut(x - 1, y - 1, x + w + 1, y + h + 1)) spots[n++] = y * W + x;
       }
       if (n === 0) {
         tooBig.push([w, h]);
@@ -286,9 +293,17 @@ export class Board {
   readonly besideAt: Uint8Array;
   readonly laid: Uint8Array;
 
-  constructor(W: number, H: number, rects: readonly Rect[], lattice?: Lattice) {
+  /**
+   * A wing's ground (phase 3, 3.4): `inside` the cells its rooms and their
+   * corridors may take, the area's open ground, and `reach` those its stub
+   * may cross to the join. Absent for a new scene, which owns its map.
+   */
+  readonly masks: { inside: Uint8Array; reach: Uint8Array } | null;
+
+  constructor(W: number, H: number, rects: readonly Rect[], lattice?: Lattice, masks?: { inside: Uint8Array; reach: Uint8Array }) {
     this.W = W;
     this.H = H;
+    this.masks = masks ?? null;
     this.lattice = lattice ?? latticeFor("squares", { w: W, h: H });
     this.hex = this.lattice.kind !== "squares";
     this.rooms = rects.map((r) => ({ ...r, ground: 0, dropped: false }));
@@ -313,6 +328,7 @@ export class Board {
   }
 
   inside(x: number, y: number): boolean {
+    if (this.masks) return this.inMap(x, y) && this.masks.inside[y * this.W + x] === 1;
     return x >= MARGIN && y >= MARGIN && x < this.W - MARGIN && y < this.H - MARGIN && (!this.hex || this.lattice.inMap(x, y));
   }
 
