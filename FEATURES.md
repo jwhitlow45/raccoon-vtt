@@ -254,7 +254,7 @@ All of this is the DM's.
   - Its light starts as a New scene dungeon's does: the room's New scenes default, and Dark under Explore when its rooms are lit, unless Keep it lit is tapped. It stays so beside a floor on Time of day.
   - Its DM key page and pins follow once the server has taken the floor, and the page is titled from the stored name ("Tower · Crypt 2 key"). A refused floor leaves no page. Until the server answers, for 30 seconds at most, Hide reads "Making the floor…" and nothing closes the dialog, Escape included, so the floor and its key go in one Undo setup. A dropped answer ends the wait at once, and the key page may then be an Undo setup step of its own.
   - The dialog says how it ended: "Added Crypt to Tower.", or after a refusal or a dropped connection whether the floor exists and may lack rooms, doors or traps. **Remove floor** on its page always takes it back.
-  - VTT file and Dungeon are off on a hex scene, with "Universal VTT maps bring square walls, and Tower's floors are hexes." and "Generated dungeons are squares for now, and Tower's floors are hexes." Both adds are off, whatever Map says, at 8 floors, between stairs-linked floors and when the room holds 50 scenes ("A room holds at most 50 scenes. Delete one to add another.").
+  - VTT file is off on a hex scene, with "Universal VTT maps bring square walls, and Tower's floors are hexes.", while Dungeon makes a dungeon on the scene's hexes there. Both adds are off, whatever Map says, at 8 floors, between stairs-linked floors and when the room holds 50 scenes ("A room holds at most 50 scenes. Delete one to add another.").
   - A floor from a file or a dungeon starts as a floor the players have not reached, so their devices hold nothing of it, not its name, size or map, until it opens as any floor does.
   - A floor's page (**Back to Floors**) holds **Floor name**, **Height above the floor below** (5 to 50 ft in steps of 5, 10 by default, not on the lowest floor, and how far stairs and ladders between it and the floor below climb), **Show to players** or **Hide from players**, **Move up**, **Move down**, **Go to this floor** and **Remove floor**, which asks for a second tap and removes the floor with everything on it.
   - **Remove floor** is off on the floor the scene was made with ("Delete Tower from its menu to remove every floor"), on the start floor ("The players start here. Move the players to another floor first.") and while an unhidden party member stands there ("Move the party off Upper floor first."). **Hide from players** is off on the start floor ("The players start here.") and while an unhidden party member stands there on the players' scene ("Players are on Upper floor.").
@@ -376,7 +376,7 @@ All of this is the DM's.
   - A map whose ambient light is 70% or brighter keeps its daylight, and one whose image is already lit with no lights stays Bright.
   - One Undo setup in Setup history takes it all back. A phone takes files up to 40 MB, so large maps import on a computer.
   - A file can also make a floor of an existing scene (see Several floors).
-- **Generate a dungeon**, under New scene's Builder form ("Or start from a generated dungeon"), makes a whole Builder scene on squares: rooms joined by corridors, automatic walls, a closed or locked door at every doorway, and a way in at the room nearest the map's edge, a closed door and then a corridor to stairs at the edge. The dialog's choices are Theme, Size, Rooms, Density, Corridors, Corridor width, Extra ways around, Dead ends, Heights, Traps, Secret doors, Lit rooms, Dressing and DM key.
+- **Generate a dungeon**, under New scene's Builder form ("Or start from a generated dungeon"), makes a whole Builder scene on the form's Grid, squares or hexes: rooms joined by corridors, walls, a closed or locked door at every doorway, and a way in at the room nearest the map's edge, a closed door and then a corridor to stairs at the edge. The dialog's choices are Theme, Size, Rooms, Density, Corridors, Corridor width, Extra ways around, Dead ends, Heights, Traps, Secret doors, Lit rooms, Dressing and DM key.
   - A dungeon can also make a floor of an existing scene (see Several floors).
   - **Theme** has five choices, and each changes more than the floor. Any room 6 by 6 or larger may have a dais 5 ft up with a stair.
     - **Dungeon**: stone and wood rooms, rubble and pits, about 1 door in 7 locked.
@@ -413,6 +413,16 @@ All of this is the DM's.
     - When the Journal has no room for the page, the switch is off with "The journal is full, so there is no room for a key."
   - A seed makes the same dungeon again on the same version of the app at the same feet per square.
   - A slider steps with the arrow keys, goes to its ends with Home and End, and jumps to its next or previous mark with Page Up and Page Down. A tap on a mark's name sets it.
+- **A dungeon on hexes**, on Hex rows or Hex columns, draws its rooms with wall lines: one wall or door on each hex side between a room, a corridor, a flight of stairs and the rock, and toward the scene's edge, with no painted floor. Under Theme the dialog says "On hexes rooms are drawn with wall lines: no painted floors, and rubble and water are difficult ground."
+  - Rubble and water are difficult ground, pits and a Mine's shafts are hexes 10 ft below the room's floor, and a Crypt's pillars and a Cave's rock columns are walled hexes. Heights, daises and their stairs work as on squares.
+  - Size counts hexes as a hex scene's size does: Small, Medium and Large are 30, 50 and 80 cells a side, which on Hex rows hold 34, 57 and 92 rows, and the line under Size reads "250 by 250 ft: 50 hexes across and 57 rows down" (on Hex columns "57 columns across and 50 hexes down"). Custom goes up to 87 cells down on Hex rows, or 87 across on Hex columns, which is 100 rows or columns.
+  - Rooms stop at 24 on hexes.
+  - A scene holds 4,000 wall pieces, so a hex dungeon keeps at most 3,200 walls and doors. When the rooms asked for need more, it tries one room fewer at a time, up to 12 tries, and the line above the choices says "Fit 18 of 24 rooms. On hexes every wall is a wall line, so fewer fit: Sparse or Narrow fits more."
+  - When none of the 12 tries fits, Make the scene is off with "Too many rooms for the walls a hex scene holds. Try fewer rooms or Sparse.", and when not even two rooms fit, with "Could not fit two rooms with walls to spare on hexes. Try fewer rooms or Sparse."
+  - A Wide doorway is three hex sides, each a door in the same state, and Corridor width's help says so: "Wide corridors and their doorways are 2 hexes across, with a door on each of a doorway's three sides, so Large creatures walk them without squeezing once the doors are open."
+  - The way in leaves by the west or east edge of Hex rows (north or south of Hex columns), on Wide always by the west (north) edge.
+  - Traps on hexes are Hidden and Spiked Pits, a Poisoned Needle on a locked door, and Falling Nets, Collapsing Roofs and Poisoned Darts in Narrow corridors. A hex dungeon holds no Fire-Casting Statue or Rolling Stone.
+  - Furniture and light stamps stay inside their own room, at least 2 hexes from any doorway. A lit room whose light stamp fits nowhere keeps its light alone.
 - **The generator's preview** is the map drawn from exactly what Make the scene sends, with each trap's zone hatched, the entrance ringed, a small ring for each light, the stamps drawn, and each room's number when DM key is on.
   - **Look closer**, over the preview's bottom left corner, shows "Drawing the dungeon…" and then opens the DM view at 40 px a square in the handout viewer, where secret doors show as "S" and traps, secret rooms and room numbers show too. The viewer's zoom works there, and closing it returns focus to Look closer. It is off while the preview is not ready.
   - **Reroll** draws another dungeon from the same choices.
@@ -421,6 +431,18 @@ All of this is the DM's.
   - The **Seed** (16 letters and digits such as `5K7Q-H2MX-A9F3-TWQ5`, read without regard to case, spaces or dashes) makes the same dungeon again on this version of the app, and **Copy seed** copies it in that form, however it was typed. A seed from another version says it makes a different dungeon now. The seed is never stored or sent: the dialog remembers this device's last choices for the room, never the seed.
   - The foot counts rooms (secret ones in brackets), doors (locked and secret ones in brackets) and traps, such as "12 rooms (1 secret), 18 doors (3 locked, 2 secret), 4 traps.", and a Cave says "no doors". While the next dungeon draws, the foot keeps the counts of the one on screen and changes with its picture, so Reroll stays put on a phone. A line above the choices says when fewer rooms fit than asked or when fewer than two fit, which turns Make the scene off. Make the scene stays off, with "Drawing the dungeon…", until the new dungeon's picture is on screen, so it always makes the dungeon shown. A picture this device cannot draw says so and keeps Make the scene off until a Reroll or another choice draws one.
   - Layout: On a computer the dialog is wide and the preview fills its column, as tall as the dialog's body allows, while the choices keep at least 360 px beside it once the window is wide enough.
+- **Room edits**: **Edit rooms**, over the preview's top right corner, opens room 1's panel in place of the choices and numbers every room on the preview as the key numbers them. A tap or click on a room in the preview, the nearest room within 22 px, opens that room's panel with the room ringed.
+  - The panel, titled for its room ("Room 3"), steps through the rooms with **‹** and **›**, and **Done** goes back to the choices.
+  - **Height** is Sunk 10 ft, Sunk 5 ft, Flat, Raised 5 ft or Raised 10 ft, with "Each door gets a straight flight of stairs. Where they do not fit, the room stays flat." The entrance room's is off: "The entrance room stays flat."
+  - Each door has a row named for its side and where it leads, such as "West, to room 1" or "South, to the way in", with **Closed**, **Locked** and **Secret**. Secret is off with "Only a door on an extra way around, or a room's only door, can be secret." or "A door at the top of stairs is never secret.", and a Cave's panel says "Caves have no doors."
+  - **Trap** offers None and each trap with a spot in the room, or says "No trap fits in this room." **Dressing** is None, Some or Full, and **Other props** draws another set for the room. **Lit** is Off or On. **Reset room** drops the room's edits.
+  - Each edit draws the dungeon again with that room as set. A height or door edit can move corridors, and with them other rooms' traps, lights and props, while a Trap, Dressing or Lit edit changes nothing outside its room.
+  - An edit that cannot hold says why under its row, such as "No room for its stairs, so it stays flat.", "No spot for that trap here, so it has none." or "That door cannot be secret here: every room must still be reached without it." On hexes an edit that needs more walls than the scene holds is undone: "That change needs more walls than a hex scene holds, so it was undone."
+  - Edits keep the dungeon's layout, so the rooms stay where they are while edits stand. Under the seed, "Edited: 3 rooms. The seed alone makes this dungeon without your edits." comes with **Drop edits**, which goes back to the seed alone.
+  - A changed choice, Reroll or a new seed drops the edits, and "Room edits dropped." above the choices comes with **Bring them back**, which restores the choices, seed and edits from before that change, for one step.
+  - Edits stay on the DM's device, and Make the scene makes the dungeon as edited.
+  - A screen reader hears the picked room in the preview's name ("Room 3 selected.") and each report once.
+  - Layout: on a computer the panel takes the choices' column, and on a phone it stands under the preview.
 - **Make the scene** sends the dungeon as ordinary builder changes in one Setup step, so Undo setup in Setup history usually takes the whole dungeon back, and the scene's Delete always does once the players are on another scene.
   - A dungeon sends up to 100 changes. Past 60 at once the rest go out paced, and the foot counts every answer.
   - Each lit room's light stands with its stamp as a DM-only light with its SRD preset, shown in the Lights pane.
@@ -431,11 +453,10 @@ All of this is the DM's.
   - Once the dialog closes on a dungeon sent, New scene's form starts over, so its Create makes no second scene.
   - If the connection drops while a dungeon is made, the app opens the new scene and checks it against the preview before it calls the dungeon complete. A refusal partway, or a check that cannot be confirmed, says so and how to take the scene back.
 - **Players and a generated dungeon**: players see only what map discovery shows them, with locked doors as closed and traps hidden until found.
-  - A secret door not yet found reads to them as the wall beside it, and a secret room stays dark until found.
+  - A secret door not yet found reads to them as the wall beside it (on hexes, a plain wall piece like every other side), and a secret room stays dark until found.
   - On Explore or Reveal by hand they get a stamp only on ground they have seen, and a light only as what their creatures see lit. They never get the key page, the pins, a light's source, the Rolling Stone's hidden stone or a trap not yet found.
   - Where the form's Players see leaves fog off, the dialog warns that every room shows at once, "secret rooms too" when the dungeon has one.
   - With Lit rooms above None, the scene starts on Explore with the light on Dark so its lights light it, whatever the form's Players see, unless Keep it lit is tapped.
-- On a hex Grid the Generate a dungeon button is off, with "Generated dungeons are squares for now. Pick Squares above to make one."
 
 ### Isometric view
 
@@ -471,8 +492,7 @@ Everyone, the DM and every player, picks how their own device shows the map.
 Hex grids are complete: everything else in this list works on a hex scene, by hexes. Only what follows stays square, and each says so on a hex scene, in plain words, where the DM would reach for it.
 
 - The builder's line on a hex scene, for the modes hexes leave out, reads "On hexes the builder draws wall lines, paints heights and stairs, marks difficult ground, and places lights, stamps and labels. Painted ground needs squares."
-- **Square for good**: painted ground and rooms, pillars, automatic walls, the **Square count** row in Map and grid, the Universal VTT import (it makes a square scene) and the export's WxH file name.
-- **Square for now**: Generate a dungeon, until it makes hex dungeons too. Its button is off while the form's Grid is a hex shape, and says so.
+- Painted ground and rooms, pillars, automatic walls, the **Square count** row in Map and grid, the Universal VTT import (it makes a square scene) and the export's WxH file name stay square for good.
 
 ## Building maps
 
@@ -491,6 +511,26 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
   - A starter prop is placed as a shipped stamp is, with nothing copied into the room.
   - A stamp moves by dragging, turns and resizes by its handles, takes one of 8 tints, flips, comes to the front, duplicates, hides from players, or is deleted.
   - Its tint, flip, front, duplicate, DM only, delete and Done sit in the builder's row, or behind ⋯ where the row has no room, on every screen.
+- **Add a wing** (chip **Wing**) generates a dungeon in an empty part of the scene, joined to a room already there by a wall or door the DM taps. Drag the wing's area, from 12 by 12 up to 100 by 100 squares inside the scene (on hexes up to 100 hexes across and 100 rows down), tap the wall it joins, and **Generate a wing** opens the wing pane.
+  - The row's line moves on as the DM picks: "Drag the wing's area over empty ground, up to 100 by 100.", then "Tap the wall the wing joins.", then "Area 30 by 44 squares, joined at the ringed wall." A new drag or tap replaces its own, and another mode, scene or floor clears both.
+  - Generate a wing is off until both are set. The mode is off on a scene whose Automatic walls are Off: "Automatic walls are off on this scene, so a wing would stand without walls. Turn them on in Map and grid to add one."
+  - On squares the wing joins a wall or door on the grid lines between floor and empty ground, an automatic wall included, and the area may lie over build, which the wing keeps clear of. A door keeps its state, and a wall becomes a closed door.
+  - On hexes it joins a wall or door exactly one hex side long on a closed room, and the area may not cover walls or other build ("On hexes the wing's area must not cover walls or other build.").
+  - On Wide it joins a wall two squares long, or three hex sides that open two hexes onto two. A wall that cannot be joined says why on the row, such as "Tap a wall or door between floor and empty ground." or "That room is open somewhere else, so the wing cannot tell its inside. Tap a wall of a closed room."
+  - Where the party can see part of the area or the joined wall, or players have it revealed, the row warns: "The party can see part of the area or the wall it joins, so they see the wing appear there." or "Part of the area or the wall it joins is revealed to players, so they see the wing there at once."
+  - **The wing pane**, titled **Add a wing**, holds **Reroll**, **Edit rooms**, the area line ("Area 30 by 44 squares (150 by 220 ft)"), then the dialog's choices from Theme to DM key, with Rooms' hint for the area ("2 to 14 in this area. Fewer fit when the layout is tight."). Its foot counts the planned rooms, doors and traps beside **Add the wing**. Escape or its close closes it, and the area and join stay.
+  - The planned wing shows on the DM's map as a ghost: floor and walls faded, doors, stairs, trap zones hatched, light rings and the area's dashed outline. No other device sees it.
+  - With **Edit rooms** on, the ghost's rooms carry their numbers, W1 and on, and a tap on a ghost room opens its room panel in the pane, as in Generate a dungeon (see Room edits).
+  - Where the planner cannot place a wing, the foot says why, such as "Something stands too near that wall for a doorway. Tap another wall.", "No way from the area to that wall. Tap a nearer wall or drag the area closer." or "Could not fit two rooms. Drag a larger area over empty ground, or pick fewer rooms or Sparse."
+  - On a scene whose Automatic walls go Around floor only, as on a map image, a wing is flat: Heights is off with "Stairs make no walls on this scene, so the wing stays flat.", and a wall whose floor inside is raised or sunk cannot be joined.
+  - On a scene without fog the pane says "Players see this scene without fog, so the wing shows at once."
+  - **Add the wing** first checks the wing against players' remembered map ("Checking players' remembered map…"), and asks the builder's Remembered map question before any of that map is forgotten. Then the foot counts the changes as the server takes them ("Adding the wing… 12 of 30").
+  - If the joined wall changed meanwhile, nothing lands, and the pane closes with "The wall the wing joins has changed. Tap it again." If something moved into the area, nothing lands, and the pane plans the wing again with "Something moved into the area. Generate again."
+  - The wing lands as one Setup step, so Undo setup in Setup history usually takes it back, on the players' scene too.
+  - With DM key on, its key is a page of its own, "Crypt wing key" (numbered while taken) in "Dungeon keys", and its pins number on from the scene's highest W pin, so a second wing starts after the first.
+  - A refusal partway or a dropped connection says what landed, such as "The server refused part of the wing, so it may be missing rooms, doors or traps. Undo setup in Setup history usually takes back what landed.", and a wing that did not land whole sends no key page or pins.
+  - Players get the wing as map discovery shows them any build, never its key, pins, traps not yet found or lights' sources.
+  - Layout: from 600 px wide the pane is a 296 px card docked at the map's left or right edge, the one farther from the area, as tall as the map between the bars, and as it opens the map pans once to show the area beside it. Below 600 px it is a bottom sheet of at most 60% of the screen's height.
 - **Between floors**, the last mode and present only on a scene of several floors, places stairs and ladders between floors (see Several floors).
 - **On a hex scene** Walls/doors draws **Wall lines**: tap points and tap Done, or drag for one straight run.
   - Each run between two points is a wall, door, secret door or window as the Walls/doors choice says, cut into pieces of at most 8 cells. A tap on the first point closes the line, a tap on the last point again ends it, and Undo point and Cancel sit beside Done.
@@ -503,7 +543,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
   - A stair points up toward one of its hex's six sides: Auto points it at its one higher neighbor, and six arrows set a side by hand ("Up to the east" and round, from the south on hex columns).
   - Raised hexes look raised as squares do, each hex's sides rimmed or shaded, and the readout names a hex stair's side ("Stairs, 5 ft up, up to the south-east.").
   - Erase and Erase area take a hex's height and stair with the rest.
-- **A generated dungeon is a Builder scene** like any other: every builder mode edits it, Fog reveals it, the Fog tool's Builder room reveals exactly one of its rooms (every cave the tunnels join, in a Cave), and Duplicate and Export as image work. Its walls are all automatic, so no drawn wall marks the side of a room players have not found, and a secret door is closed and hidden until the DM taps it with Select and chooses Mark found.
+- **A generated dungeon is a Builder scene** like any other: every builder mode edits it, Fog reveals it, the Fog tool's Builder room reveals exactly one of its rooms (every cave the tunnels join, in a Cave), and Duplicate and Export as image work. On squares its walls are all automatic, so no drawn wall marks the side of a room players have not found, and on hexes each side carries one wall or door piece, so a secret door not yet found is a wall like any other. A secret door is closed and hidden until the DM taps it with Select and chooses Mark found.
 - The builder's bar has Undo and Redo buttons, the same undo as everywhere else. "Clear the build" in the scene's settings removes all of the build.
 - The builder works top-down: on a device showing Isometric it shows Top-down while open, centered where the selected token is, and Isometric comes back with the next tool.
 
@@ -788,7 +828,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 - The DM's moves are never stopped.
 - With the Select tool, a tap on a door offers the DM Open or Close and Lock or Unlock, and Mark found or Hide on a secret door.
 - A secret door not yet found looks to players like the wall it stands in, in Top-down and Isometric, until it is found.
-  - In a line of automatic walls, as around every room of a generated dungeon, it looks like an automatic wall, and in a line of walls the DM drew it looks like a drawn wall. On a scene whose "Automatic walls" is Off it looks like a drawn wall.
+  - In a line of automatic walls, as around every room of a generated dungeon on squares, it looks like an automatic wall, and in a line of walls the DM drew it looks like a drawn wall. On a scene whose "Automatic walls" is Off it looks like a drawn wall.
   - Its line is the run of walls on either side of it, through doors and windows, up to the first gap, so a wall drawn farther along past open ground does not set its look.
   - Players who have seen the floor on its far side see a wall standing between two floors, which tells them something is there.
   - A secret door drawn with an older version of the app keeps the look it had then: an automatic wall where the floor beside it walls that edge anyway, and a drawn wall elsewhere, which can stand out in a line of automatic walls. Drawing it again with Walls/doors gives it the new look.
