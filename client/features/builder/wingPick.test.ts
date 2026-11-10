@@ -7,6 +7,8 @@ import { SQUARES } from "#shared/rules/grid.ts";
 import { hexCenter, hexKey, hexNeighbors, sameHex, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { room, scene } from "#shared/testutil.ts";
 import { encodeTileFrom } from "../../lib/fogTiles.ts";
+import { editLayout, editsHold } from "../dungeon/edits.ts";
+import { clampSettings, DEFAULT_SETTINGS } from "../dungeon/settings.ts";
 import {
   areaBetween,
   areaLine,
@@ -446,6 +448,11 @@ describe("the wing's base", () => {
     const elsewhere = { ...view, tokens: { t1: { id: "t1", sceneId: "s2", x: 25, y: 5 } as never } };
     assert.equal(wingBaseOf(elsewhere, s, AREA, join).hash, first.hash, "a token on another scene");
     assert.notEqual(wingBaseOf(view, s, { ...AREA, w: 21 }, join).hash, first.hash, "another area");
+    // Edits freeze the hash (4.2): they hold on the base read again, and drop once something stands there.
+    const settings = clampSettings({ ...DEFAULT_SETTINGS, w: AREA.w, h: AREA.h });
+    const edits = { layout: editLayout(settings, "1Q8V2DR4HJ0Y7ZB3", settings.rooms, first.hash), rooms: { 1: { lit: true } } };
+    assert.ok(editsHold(edits, settings, "1Q8V2DR4HJ0Y7ZB3", wingBaseOf(view, s, AREA, join).hash));
+    assert.ok(!editsHold(edits, settings, "1Q8V2DR4HJ0Y7ZB3", wingBaseOf(token, s, AREA, join).hash));
   });
 
   test("its hash names the tapped wall, not the join Corridor width widens, so a change of width is no changed scene", () => {

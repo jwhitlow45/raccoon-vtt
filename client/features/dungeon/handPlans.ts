@@ -9,7 +9,6 @@ import { latticeFor } from "./lattice.ts";
 import type { DungeonPlan, PlanRoom, WingBase } from "./plan.ts";
 import { landAll, landDungeon, scratchRoom } from "./scratch.ts";
 import { clampSettings, DEFAULT_SETTINGS, GENERATOR_VERSION, type DungeonSettings } from "./settings.ts";
-import { wingHash } from "./wing.ts";
 
 /*
  * Plans written by hand for the landing tests, so the ops, the scratch room
@@ -278,8 +277,9 @@ export const WING_SCENE = "wing-scene";
 /** A wing's choices for the landing tests: a few rooms, the key on. */
 export const WING_SETTINGS: DungeonSettings = clampSettings({ ...DEFAULT_SETTINGS, w: 30, h: 30, rooms: 4, key: true, traps: 12, dressing: "full", lit: 100 });
 
-function withHash(base: Omit<WingBase, "hash">, s: DungeonSettings): WingBase {
-  return { ...base, hash: wingHash(base, s) };
+/** A hand base with a hash naming it by its area and join, as the edits made on it freeze it (builder/wingPick.ts wingBaseOf hashes a base read from the room). */
+function withHash(base: Omit<WingBase, "hash">): WingBase {
+  return { ...base, hash: `hand:${JSON.stringify([base.area, base.join])}` };
 }
 
 /**
@@ -300,7 +300,7 @@ export function squareWingBase(opts: { ground?: number; wide?: boolean; rule?: "
   if (!landed.ok) throw new Error(landed.why);
   const keys = wide ? ["20,16,w", "20,17,w"] : ["20,16,w"];
   const join: JoinExpect = { grid: "squares", edges: keys.map((key) => ({ key, feature: null, ground })) };
-  return withHash({ scene: landed.room.scenes[WING_SCENE]!, state: landed.room, area: { x: 30, y: 2, w: 36, h: 36 }, join }, { ...WING_SETTINGS, wide });
+  return withHash({ scene: landed.room.scenes[WING_SCENE]!, state: landed.room, area: { x: 30, y: 2, w: 36, h: 36 }, join });
 }
 
 /**
@@ -335,7 +335,7 @@ export function hexWingBase(grid: "hexRows" | "hexColumns" = "hexRows", opts: { 
   if (!found) throw new Error("no wall on the room's east side");
   const lattice: CellRect = { x: 26, y: 2, w: 40, h: 44 };
   const area = grid === "hexColumns" ? { x: lattice.y, y: lattice.x, w: lattice.h, h: lattice.w } : lattice;
-  return { base: withHash({ scene: state.scenes[WING_SCENE]!, state, area, join: { grid: "hex", walls: [found], ground } }, WING_SETTINGS), state };
+  return { base: withHash({ scene: state.scenes[WING_SCENE]!, state, area, join: { grid: "hex", walls: [found], ground } }), state };
 }
 
 /**
@@ -394,5 +394,5 @@ export function hexWingSide(grid: "hexRows" | "hexColumns", opts: { dir: number;
   });
   const lattice: CellRect = dir === 0 ? { x: 51, y: 15, w: 28, h: 60 } : dir === 3 ? { x: 1, y: 15, w: 28, h: 60 } : north ? { x: 10, y: 1, w: 60, h: 32 } : { x: 10, y: 58, w: 60, h: 32 };
   const area = grid === "hexColumns" ? { x: lattice.y, y: lattice.x, w: lattice.h, h: lattice.w } : lattice;
-  return { base: withHash({ scene: state.scenes[sceneId]!, state, area, join: { grid: "hex", walls: join, ground } }, { ...WING_SETTINGS, wide }), ops };
+  return { base: withHash({ scene: state.scenes[sceneId]!, state, area, join: { grid: "hex", walls: join, ground } }), ops };
 }

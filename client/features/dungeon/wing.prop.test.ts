@@ -12,7 +12,6 @@ import { planFitted, type WingBase } from "./plan.ts";
 import { landAll, scratchRoom } from "./scratch.ts";
 import { CROCKFORD, versionChar, type Seed } from "./seed.ts";
 import { clampSettings, DEFAULT_SETTINGS, type DungeonSettings } from "./settings.ts";
-import { wingHash } from "./wing.ts";
 
 /*
  * Any wing (phase 3, 3.2 to 3.4): on squares it paints only open ground,
@@ -48,7 +47,7 @@ const SCENES = { all: squareScene("all"), floor: squareScene("floor") };
 
 function wing(state: RoomState, join: WingBase["join"], s: DungeonSettings, seed: Seed) {
   const base = { scene: state.scenes[S]!, state, area: AREA, join };
-  return planFitted(s, seed, { feetPerCell: 5 }, { wing: { ...base, hash: wingHash(base, s) } });
+  return planFitted(s, seed, { feetPerCell: 5 }, { wing: { ...base, hash: "prop-wing" } });
 }
 
 describe("any square wing", () => {

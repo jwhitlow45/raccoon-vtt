@@ -518,22 +518,3 @@ export function wingSetup(base: WingScene & Pick<WingBase, "area" | "join">, s: 
   }
   return { world, facts, expect: base.join, area, inside, reach, blocked, approach, flat, skip: world.grid === "squares" ? new Set() : standingWallEnds(world, base.join), allowance: wingAllowance(world, base), problem: null };
 }
-
-/**
- * A wing base's hash (4.2, D-261110-231): what the planner reads of the
- * scene, the join's facts and the open ground, so a base posted again with
- * the same ground keeps the edits and one whose ground changed drops them.
- */
-export function wingHash(base: WingScene & Pick<WingBase, "area" | "join">, s: Pick<DungeonSettings, "wide">): string {
-  const setup = wingSetup(base, s);
-  let h = 0x811c9dc5;
-  const feed = (text: string) => {
-    for (let i = 0; i < text.length; i++) {
-      h ^= text.charCodeAt(i);
-      h = Math.imul(h, 0x01000193) >>> 0;
-    }
-  };
-  feed(JSON.stringify([setup.world.grid, base.scene.bounds, setup.world.autoWalls, base.area, base.join, setup.facts, setup.problem, [...setup.skip].sort()]));
-  for (let k = 0; k < setup.reach.length; k++) if (setup.reach[k] === 1) feed(`${k},`);
-  return h.toString(16).padStart(8, "0");
-}

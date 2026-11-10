@@ -13,7 +13,6 @@ import { planFitted, type DungeonPlan, type Planned, type WingBase } from "./pla
 import { parseSeed, versionChar } from "./seed.ts";
 import { landAll, landDungeon, previewOf, scratchRoom, summarize, wingPreviewOf } from "./scratch.ts";
 import { clampSettings, DEFAULT_CONTEXT, DEFAULT_SETTINGS, GENERATOR_VERSION, HEIGHTS_MAX, LIT_MAX, roomCap, SECRETS_MAX, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
-import { wingHash } from "./wing.ts";
 
 /*
  * The op fixture between the client and the server's tests (docs/design/design-v1-dungeon-generator.md
@@ -200,7 +199,7 @@ function wingOnMedium(mediumOps: ClientOp[]) {
       if (!painted(x - 1, y) || painted(x, y) || ground(x - 1, y) === 0) continue;
       const join: JoinExpect = { grid: "squares", edges: [{ key: `${x},${y},w`, feature: null, ground: ground(x - 1, y) }] };
       const raw: Omit<WingBase, "hash"> = { scene, state, area, join };
-      const base: WingBase = { ...raw, hash: wingHash(raw, WING_FIXTURE_SETTINGS) };
+      const base: WingBase = { ...raw, hash: "fixture-wing" };
       const preview = wingPreviewOf(WING_FIXTURE_SETTINGS, parsed.seed, base, DEFAULT_CONTEXT, { ...handKey("Dungeon"), wing: { from: 0, titles: [], pins: 100 } });
       if (!preview.ok) continue;
       let n = 0;

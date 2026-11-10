@@ -4,14 +4,13 @@ import type { AutoWalls, CellRect, EdgeFeature, RoomState } from "#shared/model.
 import type { ClientOp } from "#shared/protocol.ts";
 import type { JoinExpect } from "#shared/rules/wingClear.ts";
 import { builderScene } from "../scenes/create.ts";
-import { editLayout, editsHold } from "./edits.ts";
 import { endsKey, hexSide, hexWalls, NO_SPACE } from "./hexWalls.ts";
 import { latticeFor } from "./lattice.ts";
 import type { Rect } from "./layout.ts";
 import { planFitted, type WingBase } from "./plan.ts";
 import { landAll, scratchRoom } from "./scratch.ts";
 import { clampSettings, DEFAULT_SETTINGS, type DungeonSettings } from "./settings.ts";
-import { readJoin, wingAllowance, wingHash, wingSetup, wingWorld, type WingProblem } from "./wing.ts";
+import { readJoin, wingAllowance, wingSetup, wingWorld, type WingProblem } from "./wing.ts";
 
 /*
  * Add a wing (phase 3, 3.2 to 3.4): the join a DM taps, the open ground
@@ -75,7 +74,7 @@ const hexBase = (state: RoomState, area: CellRect, walls: Extract<JoinExpect, { 
 
 /** A wing planned on a base, with its problem. */
 function planned(base: Omit<WingBase, "hash">, s: DungeonSettings = SETTINGS()) {
-  return planFitted(s, "1Q8V2DR4HJ0Y7ZB3", { feetPerCell: 5 }, { wing: { ...base, hash: wingHash(base, s) } });
+  return planFitted(s, "1Q8V2DR4HJ0Y7ZB3", { feetPerCell: 5 }, { wing: { ...base, hash: "base" } });
 }
 
 describe("square joins", () => {
@@ -259,7 +258,7 @@ describe("hex joins", () => {
   });
 });
 
-describe("the scene's allowances and the base's hash", () => {
+describe("the scene's allowances", () => {
   test("a wing adds at most 90% of each cap less what the scene holds", () => {
     const state = squareRoom(ROOM);
     const traps = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`t${i}`, { id: `t${i}`, sceneId: S, zone: { cells: [{ x: 60, y: 30, w: 1, h: 1 }] } }]));
@@ -273,20 +272,5 @@ describe("the scene's allowances and the base's hash", () => {
     const p = planned(base, SETTINGS({ traps: 6, rooms: 8 }));
     assert.ok(p.plan.traps.length <= 5);
     assert.equal(p.wing?.allowance.traps, 5);
-  });
-
-  test("the hash holds while the ground does, and moves when something stands in the open ground, which drops edits", () => {
-    const state = squareRoom(ROOM);
-    const base = squareBase(state, EAST, [{ key: `${ROOM.x + ROOM.w},${ROOM.y + 4},w` }]);
-    const s = SETTINGS();
-    const same = squareBase(squareRoom(ROOM), EAST, base.join.grid === "squares" ? base.join.edges : []);
-    assert.equal(wingHash(base, s), wingHash(same, s));
-    const moved = { ...state, tokens: { t1: { id: "t1", sceneId: S, x: 45, y: 20, size: "medium", w: 1, h: 1 } as never } };
-    const changed = squareBase(moved, EAST, base.join.grid === "squares" ? base.join.edges : []);
-    assert.notEqual(wingHash(base, s), wingHash(changed, s));
-    const p = planned(base, s);
-    const edits = { layout: editLayout(clampSettings(s), "1Q8V2DR4HJ0Y7ZB3", p.fitted, wingHash(base, s)), rooms: { [p.kept[1]!]: { lit: true } } };
-    assert.ok(editsHold(edits, clampSettings(s), "1Q8V2DR4HJ0Y7ZB3", wingHash(same, s)));
-    assert.ok(!editsHold(edits, clampSettings(s), "1Q8V2DR4HJ0Y7ZB3", wingHash(changed, s)));
   });
 });

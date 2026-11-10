@@ -8,7 +8,6 @@ import { editLayout } from "./edits.ts";
 import { generate, planFitted, type WingBase } from "./plan.ts";
 import { landAll, scratchRoom } from "./scratch.ts";
 import { clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, type DungeonSettings, type GridKind } from "./settings.ts";
-import { wingHash } from "./wing.ts";
 
 /*
  * Plans pinned by hash (docs/design/design-v1-dungeon-generator.md
@@ -55,7 +54,7 @@ const PHASE3: { name: string; settings: Partial<DungeonSettings>; seed: string; 
 ];
 
 /** The wing case's scene: a 70 by 40 square scene holding one painted room, joined on its east wall. */
-function wingBase(s: DungeonSettings): WingBase {
+function wingBase(): WingBase {
   const cells: string[] = [];
   for (let y = 14; y < 24; y++) for (let x = 8; x < 18; x++) cells.push(`${x},${y}`);
   const landed = landAll(scratchRoom(), [
@@ -65,13 +64,14 @@ function wingBase(s: DungeonSettings): WingBase {
   if (!landed.ok) throw new Error(landed.why);
   const state: RoomState = landed.room;
   const base = { scene: state.scenes.s!, state, area: { x: 28, y: 2, w: 40, h: 36 }, join: { grid: "squares" as const, edges: [{ key: "18,18,w", feature: null, ground: 0 }] } };
-  return { ...base, hash: wingHash(base, s) };
+  // The hash only names the base for the edits it freezes (builder/wingPick.ts wingBaseOf), and this case has none.
+  return { ...base, hash: "golden-wing" };
 }
 
 /** A phase 3 case's plan, as the dialog or the pane plans it. */
 function phase3Plan(c: (typeof PHASE3)[number], s: DungeonSettings): ReturnType<typeof generate> {
   const context = c.grid ? { ...DEFAULT_CONTEXT, grid: c.grid } : DEFAULT_CONTEXT;
-  if (c.wing) return planFitted(s, c.seed, context, { wing: wingBase(s) }).plan;
+  if (c.wing) return planFitted(s, c.seed, context, { wing: wingBase() }).plan;
   if (c.edits) {
     const base = planFitted(s, c.seed, context);
     const [a, b] = base.kept.filter((i) => i !== base.entrance);
