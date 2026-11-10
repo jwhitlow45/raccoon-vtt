@@ -277,6 +277,8 @@ export const ROOM_GONE = { title: "Room gone", line: "This room is gone in this 
 /** An edit that took a hex plan past its wall budget, undone (4.2). */
 export const EDIT_OVER_WALLS = "That change needs more walls than a hex scene holds, so it was undone.";
 export const EDITS_DROPPED = "Room edits dropped.";
+/** A wing's base posted again with other geometry (4.2): no Bring them back. */
+export const EDITS_GONE = "Room edits dropped: the scene changed under the wing.";
 export const BRING_BACK = "Bring them back";
 export const DROP_EDITS = "Drop edits";
 

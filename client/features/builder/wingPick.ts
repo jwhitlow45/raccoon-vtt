@@ -14,6 +14,7 @@ import { distance, TAP_SLOP_PX } from "../../lib/gestures.ts";
 import type { ToolContext, ToolPointer, ToolPointerHandlers } from "../tools.ts";
 import { edgeDistance, edgeInBounds, nearestEdge, nearestFreeWall, type Bounds, type Point } from "./cells.ts";
 import { builderSlot, type WingPicks } from "./store.ts";
+import { ghostRoomAt } from "./wingGhost.ts";
 
 /*
  * Add a wing's picks (docs/design: dungeon generator phase 3, 3.1 and 3.2,
@@ -677,6 +678,14 @@ function wingUp(p: ToolPointer, ctx: ToolContext): void {
     const next = nextPicks(view, ctx.scene, s.wing, { area: rect });
     store.setState({ wing: next.picks, note: next.note });
     return;
+  }
+  // With Edit rooms on, a tap on a ghost room opens its panel in the pane rather than picking a join (dungeon phase 3, 3.3).
+  if (s.wingOpen && s.wingEdit && s.wingGhost) {
+    const room = ghostRoomAt(s.wingGhost, p.world, WING_REACH_PX / ctx.camera().scale);
+    if (room) {
+      store.setState({ wingRoom: room.n });
+      return;
+    }
   }
   const tapped = tapAt(view, ctx.scene, p.world, WING_REACH_PX / ctx.camera().scale);
   if (tapped === null) {

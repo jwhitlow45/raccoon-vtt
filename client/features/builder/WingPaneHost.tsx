@@ -9,6 +9,7 @@ import { RoomLoadNotice } from "../../panels/Panels.tsx";
 import { useChromeCamera, type ChromeCamera } from "../../state/liveCamera.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
+import { Choices } from "../dungeon/Choices.tsx";
 import { PaneFailedFrame, PaneLoadingFrame } from "./PaneFrames.tsx";
 import { builderSlot } from "./store.ts";
 import { wingPlace } from "./wingPanePlacement.ts";
@@ -32,11 +33,11 @@ export function WingPaneHost(props: { scene: Scene; tool: string; chrome: Chrome
   const open = wingOpen && props.tool === "build" && mode === "wing" && role === "dm" && area !== null && join !== null;
   const lane = useAlertsLane(props.viewport);
   useEffect(() => {
-    if (wingOpen && !open) store.setState({ wingOpen: false, wingGhost: null, wingEdit: false });
+    if (wingOpen && !open) store.setState({ wingOpen: false, wingGhost: null, wingEdit: false, wingRoom: null });
   }, [wingOpen, open, store]);
   const at = useChromeCamera(props.chrome, open);
   if (!open || !picks || !area || !join || !at) return null;
-  const close = () => store.setState({ wingOpen: false, wingGhost: null, wingEdit: false });
+  const close = () => store.setState({ wingOpen: false, wingGhost: null, wingEdit: false, wingRoom: null });
   const place = wingPlace({ scene: props.scene, area, camera: at.camera, viewport: props.viewport, insets: props.insets, lane });
   return (
     <LoadBoundary
@@ -54,7 +55,7 @@ export function WingPaneHost(props: { scene: Scene; tool: string; chrome: Chrome
           viewport={props.viewport}
           insets={props.insets}
           onClose={close}
-          choices={null}
+          choices={Choices}
         />
       </Suspense>
     </LoadBoundary>

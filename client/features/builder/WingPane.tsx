@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, type ComponentType } from "react";
 import { useStore } from "zustand";
 import type { CellRect, RoomState, Scene } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
@@ -22,13 +22,16 @@ import { postWingBase, previewWing, type Preview, type Summary } from "../dungeo
 import { highestWingPin, type KeyInput } from "../dungeon/keyPage.ts";
 import { latticeFor } from "../dungeon/lattice.ts";
 import { wingIds } from "../dungeon/ops.ts";
+import { editLayout, type DungeonEdits, type RoomEdit, type RoomFacts } from "../dungeon/edits.ts";
+import { editedRooms, editsStep, startEdits, type EditsEvent, type EditsState } from "../dungeon/flow.ts";
 import type { DungeonPlan, WingBase } from "../dungeon/plan.ts";
+import { RoomPanel } from "../dungeon/RoomPanel.tsx";
 import { newSeed, type Seed } from "../dungeon/seed.ts";
 import { sendWing, WING_TOO_LARGE, type SendRoom, type WingOutcome } from "../dungeon/send.ts";
 import { DEFAULT_SETTINGS, isHexGrid, type DungeonSettings, type GridKind } from "../dungeon/settings.ts";
 import type { WingProblem } from "../dungeon/wing.ts";
 import { BUILD_ASKING } from "./ask.ts";
-import { statusLine } from "../dungeon/words.ts";
+import { BRING_BACK, DROP_EDITS, EDIT_OVER_WALLS, editedLine, EDITS_DROPPED, EDITS_GONE, statusLine } from "../dungeon/words.ts";
 import { requestPan } from "../encounter/pan.ts";
 import { paneEscape } from "./labelEdit.ts";
 import { labelPaneFrame } from "./labelPaneFrame.ts";
@@ -48,16 +51,18 @@ import { JOIN_CHANGED, WING_MOVED } from "#shared/rules/wingClear.ts";
  */
 
 /** The shared choice rows' props (dungeon/Choices.tsx), `wing` set so they speak of a wing. */
-export type WingChoicesProps = { value: DungeonSettings; onChange(next: DungeonSettings): void; held: boolean; grid: GridKind; wing: boolean };
+export type WingChoicesProps = { value: DungeonSettings; onChange(next: DungeonSettings): void; held: boolean; grid: GridKind; wing: boolean; flat?: boolean };
 
 /** What the wing would land, as a send takes it: its ops and the scratch room they landed in. */
 export type WingMade = { ops: ClientOp[]; room: RoomState; ids: ReadonlyMap<string, string> };
 
 /** A plan of the wing: its ghost, the foot's counts and what Add the wing sends with what its asks carry, or why there is none, in words when the planner says. */
-export type WingPlan = { ok: true; summary: Summary; ghost: WingGhost; made: WingMade | null; clear?: WingClear } | { ok: false; error: "fit" | "bug"; words?: string };
+export type WingPlan =
+  | { ok: true; summary: Summary; ghost: WingGhost; made: WingMade | null; clear?: WingClear; facts?: RoomFacts[]; fitted?: number }
+  | { ok: false; error: "fit" | "bug"; words?: string; why?: string };
 
-/** Plans the wing for the choices and seed on its base. Only the newest call's answer is shown. */
-export type WingPlanner = (input: { settings: DungeonSettings; seed: Seed; base: WingBase; feetPerCell: number }) => Promise<WingPlan>;
+/** Plans the wing for the choices, seed and room edits on its base. Only the newest call's answer is shown. */
+export type WingPlanner = (input: { settings: DungeonSettings; seed: Seed; base: WingBase; feetPerCell: number; edits?: DungeonEdits | null }) => Promise<WingPlan>;
 
 /** Sends a planned wing behind its asks (dungeon/send.ts sendWing), saying how far it got, and asking the forget question. */
 export type WingSend = (made: WingMade & { sceneId: string; clear: WingClear }, onAnswered: (n: number, of: number) => void, ask: (q: "forget") => Promise<boolean>) => Promise<WingOutcome>;
@@ -135,7 +140,7 @@ export type WingKeyRoom = { name: string; color: string; titles: readonly string
  */
 export function wingPlanner(keyRoom: () => WingKeyRoom | null, post: (base: WingBase) => void = postWingBase, plan: typeof previewWing = previewWing): WingPlanner {
   let posted: string | null = null;
-  return async ({ settings, seed, base, feetPerCell }) => {
+  return async ({ settings, seed, base, feetPerCell, edits }) => {
     if (posted !== base.hash) {
       post(base);
       posted = base.hash;
@@ -145,15 +150,15 @@ export function wingPlanner(keyRoom: () => WingKeyRoom | null, post: (base: Wing
     const room = keyRoom();
     const held = Object.values(base.state.pins).filter((p) => p?.sceneId === sceneId).length;
     const key: KeyInput | null = settings.key && room ? { name: room.name, color: room.color, feetPerCell, wing: { from: highestWingPin(base.state.pins, sceneId), titles: room.titles, pins: Math.max(0, Math.floor(0.9 * LIMITS.pinsPerScene) - held) } } : null;
-    const answer: Preview = await plan(settings, seed, { feetPerCell, ...(isHexGrid(grid) ? { grid } : {}) }, key);
+    const answer: Preview = await plan(settings, seed, { feetPerCell, ...(isHexGrid(grid) ? { grid } : {}) }, key, edits ?? null);
     if (!answer.ok) {
       const words = answer.problem ? problemWords(answer.problem, isHexGrid(grid)) : answer.why === "tooMany" ? WING_HEX_TOO_MANY : undefined;
-      return { ok: false, error: answer.error, ...(words ? { words } : {}) };
+      return { ok: false, error: answer.error, ...(words ? { words } : {}), ...(answer.why ? { why: answer.why } : {}) };
     }
     const scratchScene = answer.room.scenes[sceneId];
     if (!scratchScene) return { ok: false, error: "bug" };
     const ghost = ghostOf({ base: base.state, sceneId, scratch: answer.room, scratchScene, area: base.area, offset: { x: 0, y: 0 }, feetPerCell, rooms: wingRooms(answer.plan, base) });
-    return { ok: true, summary: answer.summary, ghost, made: { ops: answer.ops, room: answer.room, ids: new Map() }, ...(answer.clear ? { clear: answer.clear } : {}) };
+    return { ok: true, summary: answer.summary, ghost, made: { ops: answer.ops, room: answer.room, ids: new Map() }, ...(answer.clear ? { clear: answer.clear } : {}), facts: answer.facts, fitted: answer.fitted };
   };
 }
 
@@ -191,6 +196,9 @@ export function outcomeWords(outcome: WingOutcome): string | null {
 }
 
 type Planned = { asked: number; pending: boolean; plan: WingPlan | null };
+/** What Bring them back restores beside the edits. */
+type WingBefore = { settings: DungeonSettings; seed: Seed };
+const EDITS_LINE = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minWidth: 0 } as const;
 
 export default function WingPane(props: {
   scene: Scene;
@@ -246,13 +254,38 @@ export default function WingPane(props: {
     const fit = wingFit({ viewport: props.viewport, insets: props.insets, place, box: view });
     requestPan(scope, { sceneId: scene.id, x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2, anchor: fit.anchor });
     // The pane opens on its first control, for a mouse: a phone keeps its keyboard and focus ring down.
-    if (!isCoarsePointer()) firstRef.current?.querySelector<HTMLElement>("input, button")?.focus({ preventScroll: true });
+    // The pane opens on Theme (design 7), as the dialog does.
+    const first = firstRef.current?.querySelector<HTMLElement>('[data-choice="theme"] input:checked') ?? firstRef.current?.querySelector<HTMLElement>("input, button");
+    if (!isCoarsePointer()) first?.focus({ preventScroll: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const [settings, setSettings] = useState<DungeonSettings>(() => ({ ...DEFAULT_SETTINGS, w: picks.area.w, h: picks.area.h }));
-  const [seed, setSeed] = useState<Seed>(() => newSeed());
+  const [settings, setSettingsNow] = useState<DungeonSettings>(() => ({ ...DEFAULT_SETTINGS, w: picks.area.w, h: picks.area.h }));
+  const [seed, setSeedNow] = useState<Seed>(() => newSeed());
   const edit = useStore(builder, (b) => b.wingEdit);
+  const pickedRoom = useStore(builder, (b) => b.wingRoom);
+  // Room edits in the pane, kept as the dialog keeps them (dungeon/flow.ts, 3.3, D-261110-171): a change of choice or seed drops them with Bring them back.
+  const [edits, editStep] = useReducer((s: EditsState<WingBefore>, e: EditsEvent<WingBefore>) => editsStep(s, e), undefined, startEdits<WingBefore>);
+  const editsRef = useRef(edits);
+  editsRef.current = edits;
+  const setSettings = (next: DungeonSettings) => {
+    editStep({ k: "change", before: { settings, seed } });
+    setSettingsNow(next);
+  };
+  const setSeed = (next: Seed) => {
+    editStep({ k: "change", before: { settings, seed } });
+    builder.setState({ wingRoom: null });
+    setSeedNow(next);
+  };
+  const bringBack = () => {
+    const back = edits.dropped;
+    if (!back) return;
+    setSettingsNow(back.before.settings);
+    setSeedNow(back.before.seed);
+    editStep({ k: "bringBack" });
+  };
+  // A "floor" scene's stairs make no walls, so its wing stays flat (3.2, D-261110-235).
+  const flat = scene.autoWalls === "floor";
 
   // Wide joins two squares or three hex sides, so the join is judged again for the pane's Corridor width.
   const judged = useMemo(() => {
@@ -283,6 +316,14 @@ export default function WingPane(props: {
     [props.planner, roomStore, scene.name],
   );
 
+  // A base posted again whose geometry changed drops the edits, with no way back (4.2).
+  const baseHash = base?.hash ?? null;
+  const lastHash = useRef(baseHash);
+  useEffect(() => {
+    if (lastHash.current !== null && baseHash !== null && lastHash.current !== baseHash) editStep({ k: "baseChanged" });
+    lastHash.current = baseHash;
+  }, [baseHash]);
+
   const view = useRoomView((s) => s.floorView);
   const warnings = useMemo(() => (view ? wingWarnings(view, scene, picks.area, join).join(" ") : ""), [view, scene, picks.area, join]);
 
@@ -296,10 +337,13 @@ export default function WingPane(props: {
       return;
     }
     setPlanned((p) => ({ ...p, asked: id, pending: true }));
+    const sent = edits.edits;
     const timer = setTimeout(() => {
-      planner({ settings, seed, base, feetPerCell }).then(
+      planner({ settings, seed, base, feetPerCell, edits: sent }).then(
         (plan) => {
           if (asked.current !== id) return;
+          // Edits freeze a layout that fit, so a plan with them that does not fit is the newest edit's doing: undone, and asked again (4.2).
+          if (!plan.ok && plan.error === "fit" && (plan.why === undefined || plan.why === "edits") && sent !== null && editsRef.current.last !== null) return editStep({ k: "overBudget", report: EDIT_OVER_WALLS });
           setPlanned({ asked: id, pending: false, plan });
           builder.setState({ wingGhost: plan.ok ? plan.ghost : null });
         },
@@ -309,10 +353,10 @@ export default function WingPane(props: {
       );
     }, QUIET_MS);
     return () => clearTimeout(timer);
-  }, [planner, base, settings, seed, feetPerCell, builder]);
+  }, [planner, base, settings, seed, feetPerCell, builder, edits.edits]);
 
   // The ghost goes with the pane.
-  useEffect(() => () => builder.setState({ wingGhost: null, wingEdit: false }), [builder]);
+  useEffect(() => () => builder.setState({ wingGhost: null, wingEdit: false, wingRoom: null }), [builder]);
 
   const drawing = useDelayed(planned.pending);
   const plan = planned.plan;
@@ -360,13 +404,26 @@ export default function WingPane(props: {
     if (outcome.k === "join") {
       // A changed join is tapped again: the pane closes with it, and the toast says why.
       ui.notify(JOIN_CHANGED, "error");
-      builder.setState({ wing: { ...picks, tap: null, join: null }, wingOpen: false, wingGhost: null, wingEdit: false });
+      builder.setState({ wing: { ...picks, tap: null, join: null }, wingOpen: false, wingGhost: null, wingEdit: false, wingRoom: null });
       return;
     }
     if (outcome.k === "moved") setReread((n) => n + 1);
     setSaid(words);
   };
   const Choices = props.choices;
+  // The rooms on the ghost as the key numbers them, and the picked one's panel in the rows' place (3.3).
+  const facts = plan?.ok ? (plan.facts ?? []) : [];
+  const pickedFacts = pickedRoom === null ? null : (facts.find((f) => f.n === pickedRoom) ?? null);
+  const pickedIndex = pickedFacts?.room ?? null;
+  const stepRoom = (by: -1 | 1) => {
+    const at = facts.findIndex((f) => f.n === pickedRoom);
+    const next = at < 0 ? facts[0] : facts[(at + by + facts.length) % facts.length];
+    if (next) builder.setState({ wingRoom: next.n });
+  };
+  const editRoom = (next: RoomEdit | null) => {
+    if (pickedIndex === null || !plan?.ok || !base) return;
+    editStep({ k: "edit", room: pickedIndex, edit: next, layout: editLayout(settings, seed, plan.fitted ?? settings.rooms, base.hash) });
+  };
   // A docked card keeps its foot in view and scrolls its rows. A sheet can be short, as at 320 by 568 at 130%, where a pinned foot would leave the rows no room, so the whole sheet scrolls under its header.
   const sheet = place.kind === "sheet";
 
@@ -388,12 +445,47 @@ export default function WingPane(props: {
           <Button size="sm" icon="again" onClick={() => setSeed(newSeed())}>
             Reroll
           </Button>
-          <Button size="sm" pressed={edit} onClick={() => builder.setState({ wingEdit: !edit })}>
+          <Button size="sm" pressed={edit} onClick={() => builder.setState({ wingEdit: !edit, wingRoom: null })}>
             Edit rooms
           </Button>
         </div>
         <p style={{ margin: 0 }}>{areaLine(grid, picks.area, feetPerCell)}</p>
-        {Choices ? <Choices value={settings} onChange={setSettings} held={false} grid={gridKind(grid)} wing /> : null}
+        {/* A planner that gives no room facts has no rooms to edit. */}
+        {pickedRoom !== null && facts.length > 0 ? (
+          <RoomPanel
+            facts={pickedFacts}
+            edit={pickedIndex === null ? undefined : edits.edits?.rooms[pickedIndex]}
+            onEdit={editRoom}
+            onStep={stepRoom}
+            onDone={() => builder.setState({ wingRoom: null })}
+            cave={settings.theme === "cave"}
+            flat={flat}
+            held={sending !== null}
+            more={pickedIndex !== null && edits.undone[pickedIndex] ? [edits.undone[pickedIndex]] : []}
+          />
+        ) : (
+          <>
+            {edits.dropped || edits.gone ? (
+              <div data-edits-dropped="" style={EDITS_LINE}>
+                <Help style={{ flex: "1 1 12em" }}>{edits.gone ? EDITS_GONE : EDITS_DROPPED}</Help>
+                {edits.dropped ? (
+                  <Button size="sm" onClick={bringBack}>
+                    {BRING_BACK}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            {Choices ? <Choices value={settings} onChange={setSettings} held={sending !== null} grid={gridKind(grid)} wing flat={flat} /> : null}
+            {edits.edits ? (
+              <div data-edits-line="" style={EDITS_LINE}>
+                <Help style={{ flex: "1 1 12em" }}>{editedLine(editedRooms(edits))}</Help>
+                <Button size="sm" onClick={() => editStep({ k: "drop" })}>
+                  {DROP_EDITS}
+                </Button>
+              </div>
+            ) : null}
+          </>
+        )}
         {joinProblem ? <Help style={{ color: theme.color.warning }}>{joinProblem}</Help> : null}
         {scene.fogEnabled !== true ? <Help>{WING_NO_FOG}</Help> : null}
         {warnings ? <Help style={{ color: theme.color.warning }}>{warnings}</Help> : null}
