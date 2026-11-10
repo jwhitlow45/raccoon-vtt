@@ -643,6 +643,14 @@ newest first.
 
 **Since v0.3.1**
 
+- **Stairs and ladders between floors** ([design](design/design-v1-floors.md)):
+  room format 45, change format 58. No data migrates, since a room without
+  stairs reads as before. Until it reloads, an old page draws no stairs or
+  ladders and offers no Go up or Go down, and an old DM page has no Between
+  floors mode. Reload DM pages first, then every other open page, table
+  displays included. An older build refuses every room and backup this
+  version has saved, stairs or not, so going back needs the backups taken
+  just before the update.
 - **Change numbers**: room format 44, change format 57. No data migrates,
   since a room saved before reads as it did, and no page needs a reload. Once
   this version has saved a room, an older build refuses it and its backups
