@@ -7,7 +7,9 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import { versionChar } from "../client/features/dungeon/seed.ts";
 import { GENERATOR_VERSION } from "../client/features/dungeon/settings.ts";
-import { CHUNK_CELLS, type BuildChunk, type RoomState } from "../shared/model.ts";
+import { CHUNK_CELLS, type BuildChunk, type FreeWall, type RoomState } from "../shared/model.ts";
+import { placedOnHex } from "../shared/rules/footprint.ts";
+import { hexAt, type HexGrid } from "../shared/rules/hex.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { undoSetup } from "./helpers/undoScope.ts";
 import { ConsoleWatch, openSceneGroup, openSideTab, OpSocket, pagePoint, pickTool, readCamera, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
@@ -16,7 +18,7 @@ import { ConsoleWatch, openSceneGroup, openSideTab, OpSocket, pagePoint, pickToo
  * The dungeon generator end to end (docs/design/design-v1-dungeon-generator.md
  * 14, prefix DG), on the real server serving the production build: the DM
  * on a desktop and Pat on a phone. New scene's Builder form offers Generate
- * a dungeon, off on hexes with its note. The dialog draws a fixed seed's
+ * a dungeon, on squares and hexes. The dialog draws a fixed seed's
  * preview with its status line, reads a bad seed and another version's,
  * rerolls, and drops a late preview when closed. Make sends every op in
  * one Setup group, the scene opens framed on its entrance with no starting
@@ -24,6 +26,7 @@ import { ConsoleWatch, openSceneGroup, openSideTab, OpSocket, pagePoint, pickToo
  * a generated door opens from the map, and Pat on Explore gets only what
  * the party saw. Make's main-thread time is measured under Chrome's 4x CPU
  * slowdown, with a DM who hides the dialog and opens the scene mid-send.
+ * Phase 3 (DG3) makes a hex dungeon and edits rooms in the dialog.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus forty-three. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
@@ -41,6 +44,9 @@ const PHONE = { width: 390, height: 844 };
 const DESKTOP = { width: 1280, height: 800 };
 /** A seed of this generator's version, so its dungeon is the same on every run. */
 const SEED = `${versionChar()}K7Q-H2MX-A9F0-TW15`;
+/** DG3: a hex Medium on the default choices whose Secret doors at Many keeps secret doors. */
+const HEX_SEED = `${versionChar()}SD0-BPEJ-DMYA-EJ6R`;
+const HEX: HexGrid = { shape: "hex", orient: "rows" };
 /** The same seed as a DM might type it: lower case, spaces, O for 0 and L for 1. */
 const SEED_TYPED = `${versionChar().toLowerCase()}k7q h2mx a9fo twl5`;
 /** The words for a seed that does not read, its example a seed of this version. */
@@ -109,6 +115,8 @@ const run = {
   thornChar: randomUUID(),
   thorn: randomUUID(),
   sceneId: "",
+  hexSceneId: "",
+  hexThorn: randomUUID(),
   /** What each measure found, for the report. */
   measured: [] as string[],
 };
@@ -302,6 +310,10 @@ function sceneChunks(s: RoomState | null, sceneId: string): BuildChunk[] {
   return Object.values(s?.buildChunks ?? {}).filter((c): c is BuildChunk => !!c && c.sceneId === sceneId);
 }
 
+function freeWalls(s: RoomState | null, sceneId: string): FreeWall[] {
+  return sceneChunks(s, sceneId).flatMap((c) => c.walls ?? []);
+}
+
 function paintedCells(s: RoomState | null, sceneId: string): number {
   let n = 0;
   for (const c of sceneChunks(s, sceneId)) n += Object.keys(c.cells).length;
@@ -368,15 +380,14 @@ describe("dungeon generator", { concurrency: false }, () => {
     await dm.locator(".konvajs-content").first().waitFor();
   });
 
-  test("DG-1. on hexes Generate a dungeon is off with its note, and on squares it opens the dialog with focus on Theme", async () => {
+  test("DG-1. Generate a dungeon is on whatever the grid (DG3), and on squares it opens the dialog with focus on Theme", async () => {
     const form = await newSceneForm(await scenesPanel(dm));
     await form.getByRole("radio", { name: "Builder", exact: true }).click();
     await form.getByText("Or start from a generated dungeon", { exact: true }).waitFor();
     const button = form.getByRole("button", { name: "Generate a dungeon", exact: true });
     await form.getByRole("radiogroup", { name: "Grid", exact: true }).getByRole("radio", { name: "Hex rows", exact: true }).check();
-    await form.getByText("Generated dungeons are squares for now. Pick Squares above to make one.", { exact: true }).waitFor();
-    assert.equal(await button.isDisabled(), true, "off on hexes");
-    await shots.take(dm, "DG-1-hex-note");
+    await form.getByText(/^Holds \d+ hexes across/).waitFor();
+    assert.equal(await button.isDisabled(), false, "DG3: on on hexes");
     await form.getByRole("radiogroup", { name: "Grid", exact: true }).getByRole("radio", { name: "Squares", exact: true }).check();
     assert.equal(await button.isDisabled(), false);
     await form.getByLabel("Scene name").fill("Crypt of the north road");
@@ -1061,6 +1072,144 @@ describe("dungeon generator", { concurrency: false }, () => {
     } finally {
       await page.evaluate(() => localStorage.removeItem("rvtt.uiScale")).catch(() => {});
       await page.close();
+    }
+    assert.deepEqual(lines, []);
+  });
+
+  /*
+   * DG3 (dungeon generator phase 3, sections 2, 4 and 7): a hex dungeon
+   * made on Explore, a hidden secret leaf reaching Pat as a plain wall,
+   * and the room panel on a computer and a phone with an edit, the edits
+   * line and Bring them back.
+   */
+  test("DG3-1. on hex rows the dialog speaks of hexes, and Make lands wall lines with no painted ground", async () => {
+    const form = await newSceneForm(await scenesPanel(dm));
+    if ((await form.getByRole("button", { name: "Generate a dungeon", exact: true }).count()) === 0) await form.getByRole("radio", { name: "Builder", exact: true }).click();
+    await form.getByRole("radiogroup", { name: "Grid", exact: true }).getByRole("radio", { name: "Hex rows", exact: true }).check();
+    await form.getByLabel("Scene name").fill("Hex crypt");
+    // The defaults, as HEX_SEED was picked on, not the choices the cases before left remembered.
+    await dm.evaluate((key) => localStorage.removeItem(key), `rvtt.dungeon.${run.roomId}`);
+    await form.getByRole("button", { name: "Generate a dungeon", exact: true }).click();
+    const dialog = dialogOf(dm);
+    await previewImg(dialog);
+    await dialog.getByText("On hexes rooms are drawn with wall lines: no painted floors, and rubble and water are difficult ground.", { exact: true }).waitFor();
+    await dialog.getByText(/^\d+ by \d+ ft: \d+ hexes across and \d+ rows down$/).waitFor();
+    await (await seedField(dialog)).fill(HEX_SEED);
+    await mark(dialog, "Secret doors", "Many").click();
+    // No lights, so the scene starts lit as the form says and Thorn sees by it (Lit rooms runs last, so the walls stay HEX_SEED's).
+    await mark(dialog, "Lit rooms", "None").click();
+    const status = await statusText(dialog);
+    assert.match(status, /secret\)/, `a secret door in ${status}`);
+    await shots.take(dm, "DG3-1-hex-dialog");
+    const sent = dmSocket.sent.length;
+    await dialog.getByRole("button", { name: "Make the scene", exact: true }).click();
+    await dialog.waitFor({ state: "detached", timeout: 60_000 });
+    const frames = opsSent(dmSocket, sent);
+    const kinds = new Set(frames.map((f) => f.op.t));
+    assert.ok(kinds.has("build.walls"), [...kinds].join(", "));
+    assert.ok(!kinds.has("build.paint") && !kinds.has("build.edge"), "no painted ground or grid edges on hexes");
+    run.hexSceneId = frames[0]!.op.scene!.id;
+    const scene = await waitFor("the hex scene stored", () => state(dmSocket)?.scenes[run.hexSceneId]);
+    assert.equal(scene.gridShape, "hexRows");
+    await waitFor("the walls on the DM's page", () => (freeWalls(state(dmSocket), run.hexSceneId).length > 0 ? true : null), 30_000);
+    assert.equal(paintedCells(state(dmSocket), run.hexSceneId), 0);
+    await waitFor("the DM on the hex scene", () => (dmSocket.you?.sceneId === run.hexSceneId ? true : null), 30_000);
+    await dm.keyboard.press("Escape");
+    await shots.take(dm, "DG3-1-hex-dungeon");
+  });
+
+  test("DG3-2. Pat on Explore beside a hidden secret leaf gets a plain wall on its side, as every other side", async () => {
+    const walls = freeWalls(state(dmSocket), run.hexSceneId);
+    const leaf = walls.find((w) => w.f.kind === "door" && (w.f as { secret?: boolean }).secret === true && (w.f as { discovered?: boolean }).discovered !== true);
+    assert.ok(leaf, "a hidden secret leaf");
+    // Thorn stands on a hex beside the leaf's side, a third of a hex off its middle.
+    const mid = { x: (leaf.a[0] + leaf.b[0]) / 2, y: (leaf.a[1] + leaf.b[1]) / 2 };
+    const len = Math.hypot(leaf.b[0] - leaf.a[0], leaf.b[1] - leaf.a[1]);
+    const n = { x: -(leaf.b[1] - leaf.a[1]) / len, y: (leaf.b[0] - leaf.a[0]) / len };
+    const beside = hexAt(HEX, { x: mid.x + n.x * 0.3, y: mid.y + n.y * 0.3 });
+    await ops.send({ t: "token.create", token: { id: run.hexThorn, sceneId: run.hexSceneId, kind: "pc", name: "Thorn", size: "medium", visibility: "all", ...placedOnHex(HEX, { size: "medium", x: 0, y: 0 }, beside), disposition: "ally", actor: { ref: run.thornChar } } });
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.hexSceneId });
+    // Pat's copy holds each wall as its own piece, its ends a hair past the lattice: the leaf's side is a plain wall there, never a door.
+    const near = (p: [number, number], q: [number, number]) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 0.01;
+    const onSide = (w: FreeWall) => (near(w.a, leaf.a) && near(w.b, leaf.b)) || (near(w.a, leaf.b) && near(w.b, leaf.a));
+    const shown = await waitFor("the leaf's side in Pat's copy", () => freeWalls(state(patSocket), run.hexSceneId).find(onSide), 30_000);
+    assert.deepEqual(shown.f, { kind: "wall" }, "a plain wall on the leaf's side");
+    assert.equal(freeWalls(state(patSocket), run.hexSceneId).filter(onSide).length, 1, "one piece on the side, as every other side");
+    for (const w of freeWalls(state(patSocket), run.hexSceneId)) {
+      if (w.f.kind === "door") assert.notEqual((w.f as { secret?: boolean }).secret, true, "no hidden leaf reaches Pat as a door");
+    }
+    assert.ok(!patSocket.everSaw(HEX_SEED.replace(/-/g, "").slice(4, 12)), "the seed never reaches a player");
+    await shots.take(pat, "DG3-2-pat-hex");
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.firstSceneId });
+  });
+
+  test("DG3-3. on a computer Edit rooms opens room 1's panel in the choices' place, an edit holds, a change drops it, and Bring them back restores it", async () => {
+    const form = await newSceneForm(await scenesPanel(dm));
+    if ((await form.getByRole("button", { name: "Generate a dungeon", exact: true }).count()) === 0) await form.getByRole("radio", { name: "Builder", exact: true }).click();
+    await form.getByRole("radiogroup", { name: "Grid", exact: true }).getByRole("radio", { name: "Squares", exact: true }).check();
+    const dialog = await openDialog(dm);
+    await (await seedField(dialog)).fill(SEED);
+    await statusText(dialog);
+    const edit = dialog.getByRole("button", { name: "Edit rooms", exact: true });
+    await edit.click();
+    assert.equal(await edit.getAttribute("aria-pressed"), "true");
+    const room1 = dialog.getByRole("region", { name: "Room 1", exact: true });
+    await room1.waitFor();
+    assert.equal(await dialog.getByRole("radiogroup", { name: "Theme", exact: true }).count(), 0, "the panel takes the choices' place");
+    assert.equal(await dm.evaluate(() => (globalThis as unknown as { document: { activeElement: { textContent: string | null } | null } }).document.activeElement?.textContent ?? null), "Room 1", "focus on the panel's heading");
+    await dialog.getByRole("img", { name: / Room 1 selected\.$/ }).waitFor();
+    assert.equal(await room1.getByRole("radio", { name: "Raised 5 ft", exact: true }).isDisabled(), true, "the entrance stays flat");
+    // A click on room 2's number opens its panel.
+    const two = dialog.locator("svg text").filter({ hasText: /^2$/ });
+    const box = (await two.boundingBox())!;
+    await dm.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    const room2 = dialog.getByRole("region", { name: "Room 2", exact: true });
+    await room2.waitFor();
+    const lines = alignmentLines(await measureAlignment(room2), "DG3-3 room panel, desktop");
+    // The edit flips the room's light, whichever way the plan left it.
+    const lit = room2.getByRole("radiogroup", { name: "Lit", exact: true });
+    const on = await lit.getByRole("radio", { name: "On", exact: true }).isChecked();
+    await lit.getByRole("radio", { name: on ? "Off" : "On", exact: true }).check();
+    await statusText(dialog);
+    await shots.take(dm, "DG3-3-room-panel-desktop");
+    await room2.getByRole("button", { name: "Done", exact: true }).click();
+    await waitFor("focus back on Edit rooms", async () => ((await edit.evaluate((b) => b === (b as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement)) ? true : null));
+    const edited = dialog.getByText("Edited: 1 room. The seed alone makes this dungeon without your edits.", { exact: true });
+    await edited.waitFor();
+    // A choice change drops the edits, and Bring them back restores the choices and the edits.
+    await dialog.getByRole("radiogroup", { name: "Density", exact: true }).getByRole("radio", { name: "Dense", exact: true }).check();
+    await dialog.getByText("Room edits dropped.", { exact: true }).waitFor();
+    assert.equal(await edited.count(), 0);
+    await dialog.getByRole("button", { name: "Bring them back", exact: true }).click();
+    await edited.waitFor();
+    assert.equal(await dialog.getByRole("radiogroup", { name: "Density", exact: true }).getByRole("radio", { name: "Normal", exact: true }).isChecked(), true, "the choices before the change");
+    await dialog.getByRole("button", { name: "Drop edits", exact: true }).click();
+    await edited.waitFor({ state: "detached" });
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await dialog.waitFor({ state: "detached" });
+    assert.deepEqual(lines, []);
+  });
+
+  test("DG3-4. on a phone the room panel stands under the preview, within 1 px", async () => {
+    const phone = await dmContext.newPage();
+    let lines: string[] = [];
+    try {
+      await phone.setViewportSize(PHONE);
+      await phone.goto(dm.url());
+      await phone.getByRole("status", { name: "Connected" }).first().waitFor();
+      const dialog = await openDialog(phone);
+      await statusText(dialog);
+      await dialog.getByRole("button", { name: "Edit rooms", exact: true }).click();
+      const panel = dialog.getByRole("region", { name: "Room 1", exact: true });
+      await panel.waitFor();
+      const img = (await dialog.getByRole("img", { name: /^Preview of the dungeon/ }).boundingBox())!;
+      const head = (await panel.boundingBox())!;
+      assert.ok(head.y >= img.y + img.height - 1, "the panel under the preview");
+      lines = alignmentLines(await measureAlignment(dialog), "DG3-4 room panel, phone");
+      await shots.take(phone, "DG3-4-room-panel-phone");
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    } finally {
+      await phone.close();
     }
     assert.deepEqual(lines, []);
   });

@@ -1112,13 +1112,13 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
             await playersSee(form).getByRole("radio", { name: "Explore", exact: true }).check();
             await measure("new-scene-players-see", playersSee(form).locator("xpath=../.."));
             await form.getByRole("button", { name: "Cancel", exact: true }).click();
-            // DG-C: the Builder kind with Or start from a generated dungeon, on squares, and on hex rows with the button off and its note.
+            // DG-C: the Builder kind with Or start from a generated dungeon, on squares, and on hex rows, where DG3 has it on too.
             await form.getByRole("radio", { name: "Builder", exact: true }).click();
             await form.getByRole("button", { name: "Generate a dungeon", exact: true }).waitFor();
             await measure("new-scene-builder", form);
             await form.getByRole("radio", { name: "Hex rows", exact: true }).click();
-            await form.getByText("Generated dungeons are squares for now. Pick Squares above to make one.", { exact: true }).waitFor();
-            assert.equal(await form.getByRole("button", { name: "Generate a dungeon", exact: true }).isDisabled(), true, `${screen}: Generate a dungeon is off on hexes`);
+            await form.getByText(/^Holds \d+ hexes across/).waitFor();
+            assert.equal(await form.getByRole("button", { name: "Generate a dungeon", exact: true }).isDisabled(), false, `${screen}: DG3: Generate a dungeon is on on hexes`);
             await measure("new-scene-builder-hex", form);
             await form.getByRole("button", { name: "Cancel", exact: true }).click();
             // The copy sheet.
