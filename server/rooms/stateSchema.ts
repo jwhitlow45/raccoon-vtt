@@ -12,6 +12,7 @@ import { nudgeValid } from "#shared/rules/nudge.ts";
 import { withLevelInRange } from "#shared/srd/conditions.ts";
 import { sceneWeatherSchema } from "#shared/weather.ts";
 import { floorProblem } from "#shared/rules/floors.ts";
+import { NUMBER_NAMES_MOST, NUMBERS_MOST } from "#shared/numbering.ts";
 import {
   MAX_ALT_IMAGES,
   MAX_RESTORE_ENTRIES,
@@ -156,6 +157,25 @@ const sceneFloor = z.strictObject({
  * leaves it. Otherwise a switch on an imported scene would write a map the
  * protocol refuses, and the room would no longer export and import again.
  */
+/** A creature number group's id (Token.met, SceneNumbers), 16 digits at most, as the size guard counts it. */
+const groupId = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
+
+/**
+ * A scene's creature numbers (SceneNumbers), by shown name. Read as a list
+ * of entries and built back with `Object.fromEntries`, so a creature named
+ * `__proto__` keeps its entry as an own key, which a record schema would
+ * drop.
+ */
+const sceneNumbers = z.strictObject({
+  names: z.preprocess(
+    (names) => (names !== null && typeof names === "object" && !Array.isArray(names) ? Object.entries(names) : names),
+    z
+      .array(z.tuple([name, z.tuple([groupId, z.number().int().min(1).max(NUMBERS_MOST)])]))
+      .max(NUMBER_NAMES_MOST)
+      .transform((entries) => Object.fromEntries(entries) as Record<string, [number, number]>),
+  ),
+});
+
 const scene = z
   .strictObject({
     id,
@@ -201,6 +221,8 @@ const scene = z
     sound: sceneSoundSchema.optional(),
     // Backups from before floors have none, which reads as a scene of one floor (docs/design/design-v1-floors.md 9).
     floor: sceneFloor.optional(),
+    // Backups from before creature numbers have none, which reads as none given.
+    numbers: sceneNumbers.optional(),
   })
   .refine(
     (s) =>
@@ -438,7 +460,9 @@ const token = z.strictObject({
   ownerIds: memberIds,
   actor: z.union([z.strictObject({ ref: id }), z.strictObject({ inline: actorStored })]),
   hpVisibility: z.enum(["hidden", "label", "bar", "exact"]),
-  number: z.number().int().min(1).max(10_000).optional(),
+  number: z.number().int().min(1).max(NUMBERS_MOST).optional(),
+  // Backups from before creature numbers have none: such a number counts for nothing until its creature is met.
+  met: groupId.optional(),
   notes: notes.optional(),
   altImages: z.array(imageRef).min(1).max(MAX_ALT_IMAGES).optional(),
   rangeRings: z.array(z.number().int().min(5).max(MAX_RANGE_RING_FT)).min(1).max(MAX_RANGE_RINGS).optional(),
@@ -1115,6 +1139,8 @@ export const roomStateSchema = z.strictObject({
   sounds: byOwnId(sound, SOUND_LIMITS.soundsPerRoom, "sounds").optional(),
   playlists: byOwnId(playlist, SOUND_LIMITS.playlistsPerRoom, "playlists").optional(),
   playing: playing.nullable().optional(),
+  // The count of creature number groups. Backups from before it have none, which reads as none made.
+  numbering: z.strictObject({ rev, groups: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }).optional(),
 });
 
 const SOUND_WANTED: Record<SoundUse, string> = { music: "not a music sound of the room", loop: "not a background sound of the room", effect: "not an effect of the room" };
@@ -1165,6 +1191,19 @@ function soundProblem(state: RoomState): string | null {
     run?.next ? named("playing.music.next.soundId", run.next.soundId, "music") : null,
     ...sortedKeys(playing.loops).map((id) => named(`playing.loops.${id}.soundId`, playing.loops[id]!.soundId, "loop")),
   ]);
+}
+
+const GROUPS_BELOW = "the count of creature number groups is below a group id the room holds";
+
+/** Why the room's count of creature number groups is below a scene's group id or a creature's mark, in a fixed order, or null. */
+function numberingProblem(state: RoomState): string | null {
+  const groups = state.numbering?.groups ?? 0;
+  for (const id of sortedKeys(state.scenes)) {
+    const names = state.scenes[id]!.numbers?.names ?? {};
+    for (const name of Object.keys(names).sort()) if (names[name]![0] > groups) return `scenes.${id}.numbers: ${GROUPS_BELOW}`;
+  }
+  for (const id of sortedKeys(state.tokens)) if ((state.tokens[id]!.met ?? 0) > groups) return `tokens.${id}.met: ${GROUPS_BELOW}`;
+  return null;
 }
 
 const NUDGE_PLACE = "a token is drawn between squares only on a square scene, standing unsqueezed on its own square, at most 3/8 of a square off it (1/8 for one that snaps to half squares)";
@@ -1235,6 +1274,9 @@ export function parseRoomState(value: unknown, now = Date.now()): { ok: true; st
     const problem = floorProblem(state, sceneId);
     if (problem) return { ok: false, message: `scenes.${sceneId}.floor: ${problem}` };
   }
+  // A new group takes the id after the room's count, so a count below an id the room holds would give that id again.
+  const numbering = numberingProblem(state);
+  if (numbering) return { ok: false, message: numbering };
   for (const character of Object.values(state.characters)) {
     if (character.ddbSync && syncAtAhead(character.ddbSync.at, now)) character.ddbSync = { ...character.ddbSync, at: new Date(now).toISOString() };
   }
