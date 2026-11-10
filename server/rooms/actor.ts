@@ -1666,9 +1666,9 @@ export class RoomActor {
     // once the DM stops it the same Undo works. So does a DM's step that stairs refuse (docs/design/design-v1-floors.md
     // phase 2, 8, D-261109-108), placed by another DM: once they go, the same Undo works.
     const stairs = isStairsRefusal(reason);
-    // A floor the restore would bring back whose level a co-DM's new floor holds keeps the step too, so removing the new floor
-    // lets the same Undo work. The words come from the step, as floorProblem cannot tell which of the two floors is the newcomer.
-    const taken = code === "invalid" && viewer.role === "dm" ? levelTakenWords(this.#staged.state, step.entries) : null;
+    // A floor the restore would bring back whose level a floor added or moved since holds keeps the step too, so freeing the
+    // level lets the same Undo or Redo work. The words come from the step, as floorProblem names only the scene.
+    const taken = code === "invalid" && viewer.role === "dm" ? levelTakenWords(this.#staged.state, step.entries, direction) : null;
     if (step.id && !isPlayingRefusal(reason) && !(stairs && viewer.role === "dm") && taken === null) this.#undo.consume(viewer.memberId, direction, scope, step.id);
     if (taken !== null) return taken;
     if (!stairs) return reason;

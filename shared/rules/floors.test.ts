@@ -4,7 +4,7 @@ import type { RoomState, Scene, Viewer } from "../model.ts";
 import { isPartyMember, ownsToken, projectState, viewerSceneId } from "../project.ts";
 import { applyOp } from "../reducer.ts";
 import { DM, P1, P2, character, env, randomState, rng, room, scene, token } from "../testutil.ts";
-import { floorsOf, heldFloors, mainFloorId, onPlayersScene, openFloor, ownedBy, playersSee, sameScene, startFloor, unhiddenPartyMember } from "./floors.ts";
+import { floorsOf, heldFloors, levelTakenWords, mainFloorId, onPlayersScene, openFloor, ownedBy, playersSee, sameScene, startFloor, unhiddenPartyMember } from "./floors.ts";
 
 /*
  * The questions that replace "the players' scene" (docs/design/design-v1-floors.md
@@ -173,5 +173,21 @@ describe("rooms without floors give today's answers (8.3)", () => {
         assert.equal(playersSee(state, id), players && state.meta.view.blackout !== true);
       }
     }
+  });
+});
+
+describe("an undo or redo that brings back a floor whose level another floor now holds", () => {
+  // The DM removed Attic, then a co-DM added Cellar under Ground floor, which renumbered Upper floor onto Attic's level.
+  const pushedUp = () => {
+    const { a: _attic, ...scenes } = tower().scenes;
+    return tower({ scenes: { ...scenes, c: floor("c", 0, "Cellar"), g: floor("g", 1, "Ground floor"), u: floor("u", 2, "Upper floor") } });
+  };
+  const atticBack = [{ key: "scene:a", value: floor("a", 2, "Attic") }];
+
+  test("names no floor, since the one on the level may be an old one pushed up, and repeats the press that failed (B53-OPUS-1, B53-SOL-03)", () => {
+    assert.equal(levelTakenWords(pushedUp(), atticBack, "undo"), "A floor added or moved since holds Attic's place. Remove or move it, then Undo again.");
+    assert.equal(levelTakenWords(pushedUp(), atticBack, "redo"), "A floor added or moved since holds Attic's place. Remove or move it, then Redo again.");
+    const { a: _attic, ...free } = tower().scenes;
+    assert.equal(levelTakenWords(tower({ scenes: free }), atticBack, "undo"), null, "the level is free");
   });
 });

@@ -275,7 +275,7 @@ describe("several floors on the server (docs/design/design-v1-floors.md 9)", () 
     for (const id of [r.ground, upper]) assert.equal(floorProblem(back, id), null);
   });
 
-  test("an undo that would leave two floors on one level is refused naming the new floor, keeps its step, and works once the new floor is gone (LP35-A-FLR-1)", async () => {
+  test("an undo that would leave two floors on one level is refused, keeps its step, and works once the new floor is gone (LP35-A-FLR-1)", async () => {
     const r = await tower(t, "Two DMs");
     const co = t.client();
     await co.claimDm(r.roomId, r.dmKey);
@@ -291,7 +291,7 @@ describe("several floors on the server (docs/design/design-v1-floors.md 9)", () 
     const fresh = await addFloor(coSocket, upper, "above", "New floor");
     const head = await r.dmSocket.historyHead("setup", "undo");
     const answer = await r.dmSocket.apply({ t: "undo", head: head!, scope: "setup" } as Op);
-    assert.match(refused(answer), /^could not undo removing .*Attic.*: New floor is in Attic's place\. Remove or move it, then Undo again\.$/);
+    assert.match(refused(answer), /^could not undo removing .*Attic.*: A floor added or moved since holds Attic's place\. Remove or move it, then Undo again\.$/);
     const state = live(t, r.roomId);
     assert.equal(state.scenes[attic], undefined, "the room is as it was");
     assert.equal(await r.dmSocket.historyHead("setup", "undo"), head, "the step is kept");
@@ -300,6 +300,55 @@ describe("several floors on the server (docs/design/design-v1-floors.md 9)", () 
     const back = live(t, r.roomId);
     assert.ok(back.scenes[attic]?.floor, "Attic is back");
     for (const id of pairs) assert.ok(back.floorLinks?.[id], "and both its pairs");
+    for (const id of Object.keys(back.scenes)) assert.equal(floorProblem(back, id), null);
+    coSocket.close();
+  });
+
+  test("a floor added under the others since pushes an old floor onto the level, so the words name no floor, and the step stays (B53-OPUS-1)", async () => {
+    const r = await tower(t, "Add below");
+    const co = t.client();
+    await co.claimDm(r.roomId, r.dmKey);
+    const coSocket = await t.connect(r.roomId, co);
+    await coSocket.snapshot("co");
+    const upper = await addFloor(r.dmSocket, r.ground, "above", "Upper floor");
+    const attic = await addFloor(r.dmSocket, upper, "above", "Attic");
+    await ok(r.dmSocket, { t: "scene.delete", sceneId: attic } as Op);
+    // The new bottom floor renumbers the rest, so Upper floor now stands on Attic's level.
+    const cellar = await addFloor(coSocket, r.ground, "below", "Cellar");
+    assert.equal(live(t, r.roomId).scenes[upper]?.floor?.level, 2);
+    const head = await r.dmSocket.historyHead("setup", "undo");
+    const answer = await r.dmSocket.apply({ t: "undo", head: head!, scope: "setup" } as Op);
+    assert.match(refused(answer), /^could not undo removing .*Attic.*: A floor added or moved since holds Attic's place\. Remove or move it, then Undo again\.$/);
+    assert.equal(await r.dmSocket.historyHead("setup", "undo"), head, "the step is kept");
+    await ok(coSocket, { t: "scene.delete", sceneId: cellar } as Op);
+    await ok(r.dmSocket, { t: "undo", head: head!, scope: "setup" } as Op);
+    const back = live(t, r.roomId);
+    assert.equal(back.scenes[attic]?.floor?.level, 2, "Attic is back on its level");
+    for (const id of Object.keys(back.scenes)) assert.equal(floorProblem(back, id), null);
+    coSocket.close();
+  });
+
+  test("a redo refused because a floor holds the level its floor comes back to says Redo again, and keeps its step (B53-SOL-03)", async () => {
+    const r = await tower(t, "Redo taken");
+    const co = t.client();
+    await co.claimDm(r.roomId, r.dmKey);
+    const coSocket = await t.connect(r.roomId, co);
+    await coSocket.snapshot("co");
+    const upper = await addFloor(r.dmSocket, r.ground, "above", "Upper floor");
+    // Left with its free name, so the add is the DM's newest step.
+    const top = await addFloor(r.dmSocket, upper, "above");
+    await ok(r.dmSocket, { t: "undo", head: (await r.dmSocket.historyHead("setup", "undo"))!, scope: "setup" } as Op);
+    assert.equal(live(t, r.roomId).scenes[top], undefined);
+    const roof = await addFloor(coSocket, upper, "above", "Roof");
+    const head = await r.dmSocket.historyHead("setup", "redo");
+    const answer = await r.dmSocket.apply({ t: "redo", head: head!, scope: "setup" } as Op);
+    assert.match(refused(answer), /^could not redo .*: A floor added or moved since holds New floor's place\. Remove or move it, then Redo again\.$/);
+    assert.equal(live(t, r.roomId).scenes[top], undefined, "the room is as it was");
+    assert.equal(await r.dmSocket.historyHead("setup", "redo"), head, "the step is kept");
+    await ok(coSocket, { t: "scene.delete", sceneId: roof } as Op);
+    await ok(r.dmSocket, { t: "redo", head: head!, scope: "setup" } as Op);
+    const back = live(t, r.roomId);
+    assert.equal(back.scenes[top]?.floor?.level, 2, "the floor is back on its level");
     for (const id of Object.keys(back.scenes)) assert.equal(floorProblem(back, id), null);
     coSocket.close();
   });

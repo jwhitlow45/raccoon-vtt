@@ -3,6 +3,7 @@ import { LIMITS } from "../limits.ts";
 import type { RoomState, Scene, SceneId, Token, Viewer } from "../model.ts";
 import type { ProjectOpts } from "../project.ts";
 import { ownEntry } from "../records.ts";
+import type { HistoryDirection } from "../undoContract.ts";
 import { isWritable } from "../writable.ts";
 
 /*
@@ -178,24 +179,22 @@ export const FLOOR_WORDS = {
   broken: (scene: string) => `${scene}'s floors don't fit together any more.`,
 } as const;
 
-/** The restore's words when a floor it would bring back has had its level taken by another floor, or null. */
-export const LEVEL_TAKEN_ENDING = " Remove or move it, then Undo again.";
-
 /**
- * A restore that brings back a floor whose level another floor now holds (a co-DM added one in its place) in words that
- * name both, or null. floorProblem alone cannot say which floor is the newcomer, only that two share a level, so the
- * actor asks this with the step's entries and keeps the step: the same Undo works once the new floor is gone.
+ * The refusal of an undo or redo that would bring back a floor whose level another floor now holds, or null.
+ * floorProblem alone cannot say which floor is the newcomer, only that two share a level, and neither can this:
+ * every floor added renumbers the levels, so the floor on the restored level may be an old one pushed up by a floor
+ * added under it (B53-OPUS-1). The words name no holder (D-261110-391), and the ending repeats the press that
+ * failed, so the actor keeps the step and the same Undo or Redo works once the level is free.
  */
-export function levelTakenWords(state: RoomState, entries: readonly { key: string; value?: unknown }[]): string | null {
+export function levelTakenWords(state: RoomState, entries: readonly { key: string; value?: unknown }[], direction: HistoryDirection): string | null {
   let restored = state;
   for (const entry of entries) if (parseKey(entry.key) !== null) restored = writeEntity(restored, entry.key as EntityKey, entry.value ?? null);
   const back = entries.flatMap((entry) => (parseKey(entry.key)?.kind === "scene" && entry.value ? [entry.value as Scene] : []));
   const ids = new Set(back.map((s) => s.id));
   for (const floor of back) {
     if (!floor.floor) continue;
-    // The newcomer is the floor on that level that the restore did not write: a co-DM's, added after the step.
-    const holder = floorsOf(restored, floor.floor.of ?? floor.id).find((s) => !ids.has(s.id) && s.floor?.level === floor.floor?.level);
-    if (holder?.floor) return `${holder.floor.name} is in ${floor.floor.name}'s place.${LEVEL_TAKEN_ENDING}`;
+    const held = floorsOf(restored, floor.floor.of ?? floor.id).some((s) => !ids.has(s.id) && s.floor?.level === floor.floor?.level);
+    if (held) return `A floor added or moved since holds ${floor.floor.name}'s place. Remove or move it, then ${direction === "undo" ? "Undo" : "Redo"} again.`;
   }
   return null;
 }
