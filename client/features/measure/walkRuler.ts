@@ -1,6 +1,6 @@
 import { sightOf, viewMapsOf } from "#shared/keys.ts";
 import type { Actor, PathStop, RoomState, Token, Viewer } from "#shared/model.ts";
-import type { Op } from "#shared/protocol.ts";
+import type { Op, RulerPrior } from "#shared/protocol.ts";
 import { gridOfToken } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { planMove } from "#shared/rules/moveLeg.ts";
@@ -21,6 +21,7 @@ import { carriedIndex } from "#shared/rules/attach.ts";
 import { towingWord, walkersFor } from "../attach/walk.ts";
 import type { RouteJob } from "../movement/routeWork.ts";
 import { dragReading, EXTRA_WORDS, joinWords, walkWords, type DragWalk } from "./movement.ts";
+import { beforeFloorLine } from "../floors/linkWords.ts";
 import { formatFeet, tokenStop, type Point, type RulerStop } from "./ruler.ts";
 
 /**
@@ -59,18 +60,43 @@ export type WalkMeasure = {
   size: { w: number; h: number };
   /** A leg's search ran out of its time slice: the walk is not known yet, and is asked for again next frame. */
   searching: boolean;
+  /**
+   * The walker where the walk leaves it and the 5-10-5 count it ran up, the
+   * prior's count included, for a press of the stairs button
+   * (docs/design/design-v1-floors.md phase 3, 4.1). While searching, where
+   * the legs known leave it.
+   */
+  end: { walker: Token; counter: DiagonalCounter };
+  /** The feet walked before this floor, on a ruler carried over stairs. */
+  before?: number;
 };
 
-/** The creature a walking ruler walks: the token its first stop is on, or a Medium creature standing on the ground there. */
-function walkerAt(view: RoomState, sceneId: string, first: RulerStop): Token | null {
-  const on = first.tokenId ? view.tokens[first.tokenId] : undefined;
+/**
+ * The creature a walking ruler walks: the token its first stop is on, or a
+ * Medium creature standing on the ground there. A ruler carried over stairs
+ * (docs/design/design-v1-floors.md phase 3, 4.2) stands a fresh creature
+ * of the carried shape instead, its middle on the first stop, which is the
+ * landed walker's middle. It has no speeds, or on the DM's private ruler
+ * the real creature's `actor`, and never that creature's id, path, riders
+ * or links, so its legs fold no turn path and pull no rider across floors.
+ */
+function walkerAt(view: RoomState, sceneId: string, first: RulerStop, prior?: RulerPrior, actor?: Actor): Token | null {
+  const on = !prior && first.tokenId ? view.tokens[first.tokenId] : undefined;
   if (on) return on;
-  // On hexes it stands on the hex under the stop, as a creature dropped there would.
   const g = gridOfView(view, sceneId);
-  const { x, y } = isHex(g) ? placedOnHex(g, { size: "medium", x: 0, y: 0 }, hexAt(g, first)) : { x: Math.floor(first.x), y: Math.floor(first.y) };
-  const stand = { sceneId, size: "medium" as const, x, y, elevation: 0 };
+  let stand: Pick<Token, "sceneId" | "size" | "x" | "y" | "elevation"> & Partial<Pick<Token, "w" | "h" | "squeeze">>;
+  if (prior) {
+    const shape = { size: prior.walker.size, ...(prior.walker.w !== undefined ? { w: prior.walker.w } : {}), ...(prior.walker.h !== undefined ? { h: prior.walker.h } : {}) };
+    // Its stored middle, which a squeeze keeps (footprint.ts squeezedRect), on the stop.
+    const full = footprintSize({ ...shape, x: 0, y: 0 });
+    stand = { sceneId, ...shape, x: first.x - full.w / 2, y: first.y - full.h / 2, elevation: 0, ...(prior.walker.squeeze ? { squeeze: true as const } : {}) };
+  } else {
+    // On hexes it stands on the hex under the stop, as a creature dropped there would.
+    const { x, y } = isHex(g) ? placedOnHex(g, { size: "medium", x: 0, y: 0 }, hexAt(g, first)) : { x: Math.floor(first.x), y: Math.floor(first.y) };
+    stand = { sceneId, size: "medium", x, y, elevation: 0 };
+  }
   const elevation = first.z ?? footprintGround(view.buildChunks, stand);
-  return { id: "", rev: 0, kind: "pc", name: "", nameHidden: false, rotation: 0, disposition: "ally", visibility: "all", fogExempt: false, fogExemptAuto: false, locked: false, layer: "token", ownerIds: [], hpVisibility: "hidden", actor: { inline: NO_ACTOR }, ...stand, elevation } as Token;
+  return { id: "", rev: 0, kind: "pc", name: "", nameHidden: false, rotation: 0, disposition: "ally", visibility: "all", fogExempt: false, fogExemptAuto: false, locked: false, layer: "token", ownerIds: [], hpVisibility: "hidden", actor: { inline: actor ?? NO_ACTOR }, ...stand, elevation } as Token;
 }
 
 const NO_ACTOR: Actor = { hp: { cur: 1, max: 1, temp: 0 }, life: "alive", ac: 10, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
@@ -185,7 +211,9 @@ function searchFor(view: RoomState, at: Walked, walker: Token & Walker, input: W
     // Who players see of the tokens the legs before moved, by where those legs left them, on every copy alike.
     const moved = new Set(Object.keys(at.sim.tokens).filter((id) => !samePose(at.sim.tokens[id], view.tokens[id])));
     // A shared or kept ruler keeps to the ground every player shares, never this player's own memory (docs/design/design-v1-per-player-vision.md 6.6).
-    const world = groupWalkWorld(at.sim, walker, input.viewer, at.left, ownRuler(input) ? { creatures: false, everything: true, moved } : { creatures: false, seenGround: true, sharedGround: true, moved, unseen: unseenAtStart(view, input) });
+    // A ruler carried over stairs counts its diagonals on from the floors before (docs/design/design-v1-floors.md phase 3, 4.2).
+    const stops = input.prior ? { stops: at.left, prior: { seenDiag: [input.prior.diag.h, input.prior.diag.v] as [number, number] } } : at.left;
+    const world = groupWalkWorld(at.sim, walker, input.viewer, stops, ownRuler(input) ? { creatures: false, everything: true, moved } : { creatures: false, seenGround: true, sharedGround: true, moved, unseen: unseenAtStart(view, input) });
     search = routeSearch(routeWorld({ ...world.input, prone: false }));
     budget.charge(routeWorldUnits(search.world) + Math.ceil((search.world.nx * search.world.ny) / 400));
     if (kept.searches.size >= MAX_SEARCHES) kept.searches.delete(kept.searches.keys().next().value!);
@@ -237,7 +265,7 @@ const NO_FILE_WAY: Found = { kind: "none", capped: false };
  */
 function legFound(view: RoomState, at: Walked, walker: Token & Walker, input: WalkInput, target: Point & { squeeze?: boolean }, budget: WorkBudget, progress: Progress): { found: Found; search: () => RouteSearch } | null {
   const kept = keptFor(view, walker.sceneId);
-  const key = `${at.history}#${searchKey(walker, input.everything, publicCounters(gridOfView(view, walker.sceneId), walker, at.left, rulesOf(view), input.viewer.role === "dm"))}`;
+  const key = `${at.history}#${searchKey(walker, input.everything, publicCounters(gridOfView(view, walker.sceneId), walker, at.left, rulesOf(view), input.viewer.role === "dm", input.prior?.diag))}`;
   const legKey = `${key}|${target.x},${target.y},${target.squeeze === true}`;
   const searchOf = () => searchFor(view, at, walker, input, key, budget);
   const known = kept.legs.get(legKey);
@@ -356,7 +384,32 @@ function rulesOf(view: RoomState): DistanceSettings {
   return { feetPerCell: view.meta.settings.feetPerCell, diagonal: view.meta.settings.diagonal };
 }
 
-export type WalkInput = { view: RoomState; sceneId: string; stops: readonly RulerStop[]; viewer: WalkViewer; everything: boolean };
+/**
+ * `prior` is what a ruler carried over stairs measured before this floor
+ * (docs/design/design-v1-floors.md phase 3, 4.2), and `actor` the real
+ * walker's, which only the DM's private carried ruler gives its fresh
+ * walker, for its speeds.
+ */
+export type WalkInput = { view: RoomState; sceneId: string; stops: readonly RulerStop[]; viewer: WalkViewer; everything: boolean; prior?: RulerPrior; actor?: Actor };
+
+/** What a carried ruler's prior and actor add to the keys its walks are kept by. */
+function carriedKey(input: Pick<WalkInput, "prior" | "actor">): string {
+  if (!input.prior) return "";
+  return `|${JSON.stringify(input.prior)}|${input.actor ? JSON.stringify(input.actor.speeds) : ""}`;
+}
+
+/**
+ * The creature a ruler's walk starts with: the token its first stop is on,
+ * or the mount it rides (rulerLead), or a fresh creature on empty ground or
+ * of a carried shape (walkerAt). The stairs button reads it for a ruler of
+ * one stop, which measures no walk.
+ */
+export function rulerWalker(input: WalkInput): Token | null {
+  const view = rulerRoom(input.view);
+  const first = input.stops[0];
+  const anchor = first ? walkerAt(view, input.sceneId, first, input.prior, input.actor) : null;
+  return anchor ? rulerLead(view, input, anchor) : null;
+}
 
 /**
  * The walk a walking ruler measures. `everything` is the DM's own ruler
@@ -374,7 +427,7 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
   const budget = input.budget ?? (input.deadline !== undefined ? WorkBudget.until(input.deadline) : WorkBudget.all());
   const room = keptFor(view, input.sceneId);
   const memo = room.walks;
-  const memoKey = `${input.sceneId},${input.viewer.role},${input.everything}`;
+  const memoKey = `${input.sceneId},${input.viewer.role},${input.everything}${carriedKey(input)}`;
   const known = memo.get(stops)?.get(memoKey);
   if (known) return known;
   const byRuler = room.progress.get(stops) ?? new Map<string, Progress>();
@@ -382,8 +435,9 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
   const progress = byRuler.get(memoKey) ?? { steps: [], on: null };
   byRuler.set(memoKey, progress);
   const first = stops[0];
-  const anchor = first ? walkerAt(view, input.sceneId, first) : null;
-  if (!anchor || stops.length < 2) return null;
+  const anchor = first ? walkerAt(view, input.sceneId, first, input.prior, input.actor) : null;
+  // A carried ruler of one stop reads what it measured before this floor.
+  if (!anchor || (stops.length < 2 && !input.prior)) return null;
   const size = footprintSize(anchor);
   // A drag from a rider of a controlled mount moves the mount (attach 4.2), so the legs walk the mount, offset by where the
   // rider sits on it, and are drawn from the rider's place.
@@ -401,10 +455,11 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
   // (planStep), so a later leg walks, lands and is seen as the token would after them (reviews AT-SOL-1, AT-SOL-3,
   // AT-ASTRA-25, AT-SOL-5 and AT-ASTRA-26).
   const sim: RoomState = view.tokens[start.id] ? view : { ...view, tokens: { ...view.tokens, [start.id]: start } };
-  let at: Walked = { sim, seen: dropView(sim, input.viewer.role), walker: start, left: [{ x: start.x, y: start.y, elevation: start.elevation, seen: true }], counter: { h: 0, v: 0 }, history: `${start.id},${start.size},${start.w},${start.h},${start.x},${start.y},${start.elevation},${start.squeeze === true}` };
+  const counter = input.prior ? { h: input.prior.diag.h, v: input.prior.diag.v } : { h: 0, v: 0 };
+  let at: Walked = { sim, seen: dropView(sim, input.viewer.role), walker: start, left: [{ x: start.x, y: start.y, elevation: start.elevation, seen: true }], counter, history: `${start.id},${start.size},${start.w},${start.h},${start.x},${start.y},${start.elevation},${start.squeeze === true}` };
   const legs: WalkLeg[] = [];
   const words = new Set<string>();
-  let totalFt = 0;
+  let totalFt = input.prior?.ft ?? 0;
   let extraFt = 0;
   // Past a leg still searching, the legs are drawn straight between their stops, never searched or simulated until it is known: they would only push its search out.
   let waiting: Point | null = null;
@@ -444,7 +499,15 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
   }
   const searching = waiting !== null;
   const named = EXTRA_WORDS.filter((w) => words.has(w));
-  const walk: WalkMeasure = { legs, totalFt, extra: extraFt > 0 && named.length > 0 ? `+${formatFeet(extraFt)} for ${joinWords(named)}` : null, size, searching };
+  const walk: WalkMeasure = {
+    legs,
+    totalFt,
+    extra: extraFt > 0 && named.length > 0 ? `+${formatFeet(extraFt)} for ${joinWords(named)}` : null,
+    size,
+    searching,
+    end: { walker: at.walker, counter: at.counter },
+    ...(input.prior ? { before: input.prior.ft } : {}),
+  };
   if (!searching) {
     const byViewer = memo.get(stops) ?? new Map<string, WalkMeasure>();
     byViewer.set(memoKey, walk);
@@ -641,9 +704,14 @@ export function walkJob(input: WalkInput, more: () => void): RouteJob {
   };
 }
 
-/** "Walking 40 ft", with what terrain added under it. */
-export function walkText(m: WalkMeasure): string {
-  return m.extra ? `Walking ${formatFeet(m.totalFt)}\n${m.extra}` : `Walking ${formatFeet(m.totalFt)}`;
+/**
+ * "Walking 40 ft", with what terrain added under it, and on a ruler carried
+ * over stairs the feet before this floor beside it (docs/design/design-v1-floors.md
+ * phase 3, 4.1): "+10 ft for difficult terrain, 25 ft before this floor".
+ */
+export function walkText(m: Pick<WalkMeasure, "totalFt" | "extra" | "before">): string {
+  const under = [m.extra, m.before !== undefined ? beforeFloorLine(formatFeet(m.before)) : null].filter((w) => w !== null);
+  return under.length > 0 ? `Walking ${formatFeet(m.totalFt)}\n${under.join(", ")}` : `Walking ${formatFeet(m.totalFt)}`;
 }
 
 /** The last walk a ruler finished, and that ruler (heldKey), kept while a later walk of it searches (walkShown). */

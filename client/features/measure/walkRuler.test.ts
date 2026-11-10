@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { chunkKey, holderTileKey } from "#shared/keys.ts";
 import type { EdgeFeature, RoomState } from "#shared/model.ts";
-import { mapSchemas } from "#shared/protocol.ts";
+import { mapSchemas, type RulerPrior } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
 import { DM, P1, P2, reveal, room as baseRoom, scene, template, token } from "#shared/testutil.ts";
 import { wall } from "#shared/discoveryTestutil.ts";
@@ -32,6 +32,9 @@ function room(): RoomState {
 
 const free = (x: number, y: number): RulerStop => ({ x: x + 0.5, y: y + 0.5 });
 const WALL: EdgeFeature = { kind: "wall" };
+/** Where a hand-built walk leaves its walker, for the tests that read only its legs and total. */
+const END: WalkMeasure["end"] = { walker: token("w", { x: 0, y: 0 }), counter: { h: 0, v: 0 } };
+const NO_SPEEDS = { hp: { cur: 1, max: 1, temp: 0 }, life: "alive" as const, ac: 10, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
 
 describe("the walking ruler", () => {
   test("a Medium creature from empty ground walks round the wall's end, and the total says so", () => {
@@ -338,10 +341,83 @@ describe("the walking ruler", () => {
   });
 });
 
+describe("a walking ruler carried over stairs (docs/design/design-v1-floors.md phase 3, 4.2)", () => {
+  const prior = (over: Partial<RulerPrior> = {}): RulerPrior => ({ ft: 25, diag: { h: 0, v: 0 }, walker: { size: "medium" }, ...over });
+
+  test("one stop reads the feet before this floor, and the next stops add to them", () => {
+    const one = measureWalk({ view: world({}), sceneId: "s1", stops: [free(2, 5)], viewer: { role: "player" }, everything: false, prior: prior() })!;
+    assert.deepEqual([one.legs.length, one.totalFt, one.before, walkText(one)], [0, 25, 25, "Walking 25 ft\n25 ft before this floor"]);
+    const on = measureWalk({ view: world({}), sceneId: "s1", stops: [free(2, 5), free(6, 5)], viewer: { role: "player" }, everything: false, prior: prior() })!;
+    assert.deepEqual([on.totalFt, walkText(on)], [45, "Walking 45 ft\n25 ft before this floor"]);
+    assert.equal(measureWalk({ view: world({}), sceneId: "s1", stops: [free(2, 5)], viewer: { role: "player" }, everything: false }), null, "uncarried, one stop measures nothing");
+  });
+
+  test("the terrain line and the feet before share the line under the total", () => {
+    const state = world({});
+    state.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: Object.fromEntries([4, 5, 6].flatMap((y) => [4, 5, 6].map((x) => [`${x},${y}`, "rubble" as const]))), edges: {} };
+    const m = measureWalk({ view: state, sceneId: "s1", stops: [free(2, 5), free(5, 5)], viewer: { role: "player" }, everything: false, prior: prior() })!;
+    assert.equal(walkText(m), "Walking 50 ft\n+10 ft for difficult terrain, 25 ft before this floor");
+  });
+
+  test("a custom 1 by 3 walker walks 1 by 3, the same on every device", () => {
+    // A wall along x = 6 with a gap one square high at y = 5.
+    const state = world({ edges: { ...line("w", 6, 0, 5), ...line("w", 6, 6, 30) } });
+    const stops = [{ x: 2.5, y: 5.5 }, { x: 9.5, y: 5.5 }];
+    const read = (role: "dm" | "player", p: RulerPrior) => measureWalk({ view: state, sceneId: "s1", stops, viewer: { role }, everything: false, prior: p })!;
+    const tall = prior({ walker: { size: "custom", w: 1, h: 3 } });
+    // Its middle on the stop: the stored 1 by 3 stands from 2, 4 to 3, 7.
+    assert.deepEqual([read("player", tall).size, read("player", tall).legs[0]!.from], [{ w: 1, h: 3 }, { x: 2, y: 4 }]);
+    assert.deepEqual([read("player", tall).legs[0]!.none, read("dm", tall).legs[0]!.none], [true, true], "too tall for the gap on every device");
+    assert.equal(read("player", prior()).legs[0]!.none, false, "a Medium walks through");
+  });
+
+  test("a squeezed Large walker lands squeezed and walks a corridor one square wide squeezed", () => {
+    // A corridor one square wide along y = 5, walled north and south from x = 2 to 12.
+    const edges = { ...line("n", 5, 2, 12), ...line("n", 6, 2, 12) };
+    const state = world({ edges: Object.fromEntries(Object.entries(edges).map(([k, v]) => [k, v])) });
+    const read = (squeeze: boolean) => measureWalk({ view: state, sceneId: "s1", stops: [free(3, 5), free(10, 5)], viewer: { role: "player" }, everything: false, prior: prior({ walker: { size: "large", ...(squeeze ? { squeeze: true as const } : {}) } }) })!;
+    assert.equal(read(true).legs[0]!.none, false);
+    assert.equal(read(true).end.walker.squeeze, true, "still squeezed where the walk leaves it");
+    assert.deepEqual([read(true).end.walker.x, read(true).end.walker.y], [9.5, 4.5]);
+  });
+
+  test("5-10-5 across the stairs: the far floor's first diagonal costs as the next in the count", () => {
+    const state = world({});
+    state.meta = { ...state.meta, settings: { ...state.meta.settings, diagonal: "fiveTen" } };
+    const read = (p: RulerPrior) => measureWalk({ view: state, sceneId: "s1", stops: [free(0, 0), free(1, 1)], viewer: { role: "player" }, everything: false, prior: p })!;
+    assert.equal(read(prior({ ft: 0 })).totalFt, 5);
+    assert.equal(read(prior({ ft: 5, diag: { h: 1, v: 0 } })).totalFt, 15, "one diagonal counted before: this one costs 10");
+    assert.deepEqual(read(prior({ ft: 5, diag: { h: 1, v: 0 } })).end.counter, { h: 2, v: 0 });
+  });
+
+  test("the DM's private ruler walks its fresh walker on the real creature's speeds, never its id, path or riders", () => {
+    const state = world({ tokens: [token("thorn", { x: 2, y: 5, actor: { inline: { ...NO_SPEEDS, speeds: { walk: 30, swim: 30 } } } })] });
+    const m = measureWalk({ view: state, sceneId: "s1", stops: [free(12, 5), free(14, 5)], viewer: { role: "dm" }, everything: true, prior: prior(), actor: { ...NO_SPEEDS, speeds: { walk: 30, swim: 30 } } })!;
+    assert.equal(m.end.walker.id, "", "a fresh creature");
+    assert.deepEqual("inline" in m.end.walker.actor ? m.end.walker.actor.inline.speeds : null, { walk: 30, swim: 30 });
+    assert.equal(m.end.walker.attached, undefined);
+    assert.equal(state.tokens.thorn!.x, 2, "the real creature stays where it is");
+  });
+
+  test("a carry onto a landing players have not seen: a stop on revealed ground the landing joins walks, one past unseen ground draws red", () => {
+    // The wall along x = 6 from the top down to y = 10. The landing at 2, 5 lies under the fog, and revealed ground starts beside it.
+    const fogged = (h: number) => {
+      const state = room();
+      state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true };
+      reveal(state, "s1", { x: 3, y: 0, w: 27, h });
+      return projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState;
+    };
+    const read = (view: RoomState, to: RulerStop) => measureWalk({ view, sceneId: "s1", stops: [free(2, 5), to], viewer: { role: "player" }, everything: false, prior: prior() })!;
+    assert.deepEqual([read(fogged(10), free(4, 5)).legs[0]!.none, read(fogged(10), free(4, 5)).totalFt], [false, 35], "joined to the landing by revealed ground");
+    assert.equal(read(fogged(10), free(9, 5)).legs[0]!.none, true, "the way round the wall's end is unseen: No way through");
+    assert.equal(read(fogged(12), free(9, 5)).legs[0]!.none, false, "once the way round is revealed");
+  });
+});
+
 describe("a walking ruler while its walk is searched", () => {
   const leg = (searching: boolean) => ({ from: { x: 0, y: 0 }, to: { x: 4, y: 0 }, corners: [], ft: searching ? 0 : 20, none: false, ...(searching ? { searching: true as const } : {}) });
-  const done: WalkMeasure = { legs: [leg(false)], totalFt: 20, extra: null, size: { w: 1, h: 1 }, searching: false };
-  const searching: WalkMeasure = { legs: [leg(false), leg(true)], totalFt: 20, extra: null, size: { w: 1, h: 1 }, searching: true };
+  const done: WalkMeasure = { legs: [leg(false)], totalFt: 20, extra: null, size: { w: 1, h: 1 }, searching: false, end: END };
+  const searching: WalkMeasure = { legs: [leg(false), leg(true)], totalFt: 20, extra: null, size: { w: 1, h: 1 }, searching: true, end: END };
 
   test("a finished walk reads itself", () => {
     assert.deepEqual(walkShown(done, null, false), { reading: done, finding: false });
@@ -380,8 +456,8 @@ describe("a walking ruler while its walk is searched", () => {
 
 describe("a walking ruler's leg costs while a stop is dragged (review LP2L2-P3-4)", () => {
   const leg = (ft: number, extra: { searching?: true; none?: boolean } = {}) => ({ from: { x: 0, y: 0 }, to: { x: 4, y: 0 }, corners: [], ft, none: extra.none ?? false, ...(extra.searching ? { searching: true as const } : {}) });
-  const held: WalkMeasure = { legs: [leg(20), leg(15), leg(10, { none: true })], totalFt: 45, extra: null, size: { w: 1, h: 1 }, searching: false };
-  const dragging: WalkMeasure = { legs: [leg(20), leg(0, { searching: true }), leg(0, { searching: true }), leg(0, { searching: true })], totalFt: 20, extra: null, size: { w: 1, h: 1 }, searching: true };
+  const held: WalkMeasure = { legs: [leg(20), leg(15), leg(10, { none: true })], totalFt: 45, extra: null, size: { w: 1, h: 1 }, searching: false, end: END };
+  const dragging: WalkMeasure = { legs: [leg(20), leg(0, { searching: true }), leg(0, { searching: true }), leg(0, { searching: true })], totalFt: 20, extra: null, size: { w: 1, h: 1 }, searching: true, end: END };
 
   test("a found leg reads its own cost", () => {
     assert.equal(legReading(dragging, 0, held, false), dragging.legs[0]);
@@ -403,8 +479,8 @@ describe("a walking ruler's leg costs while a stop is dragged (review LP2L2-P3-4
 
 describe("the walk a ruler holds (review LP2L2-ASTRA-1)", () => {
   const leg = { from: { x: 0, y: 0 }, to: { x: 4, y: 0 }, corners: [], ft: 20, none: false };
-  const done: WalkMeasure = { legs: [leg], totalFt: 120, extra: null, size: { w: 1, h: 1 }, searching: false };
-  const searching: WalkMeasure = { legs: [{ ...leg, ft: 0, searching: true }], totalFt: 0, extra: null, size: { w: 1, h: 1 }, searching: true };
+  const done: WalkMeasure = { legs: [leg], totalFt: 120, extra: null, size: { w: 1, h: 1 }, searching: false, end: END };
+  const searching: WalkMeasure = { legs: [{ ...leg, ft: 0, searching: true }], totalFt: 0, extra: null, size: { w: 1, h: 1 }, searching: true, end: END };
   /** The reading after each render of `steps`, each what the render measured and for which ruler. */
   function run(steps: [WalkMeasure | null, string][]): (WalkMeasure | null)[] {
     let held: HeldWalk = null;

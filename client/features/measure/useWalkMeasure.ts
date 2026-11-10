@@ -13,7 +13,9 @@ import { measureWalk, nextHeld, walkJob, type HeldWalk, type WalkInput, type Wal
  * spot at once, so its walk follows the pointer. Any other ruler's work
  * waits its turn, so no ruler drawn first takes every frame. While the
  * walk is still searching it comes back `searching`, and renders again
- * when a turn finds more. `null` input measures nothing.
+ * when a turn finds more. `null` input measures nothing. A ruler carried
+ * over stairs walks again for a new `prior` or walker's actor
+ * (docs/design/design-v1-floors.md phase 3, 4.2).
  */
 export function useWalkMeasure(input: WalkInput | null, live = false): WalkMeasure | null {
   const [found, more] = useReducer((n: number) => n + 1, 0);
@@ -21,7 +23,7 @@ export function useWalkMeasure(input: WalkInput | null, live = false): WalkMeasu
     () => (input ? (live ? BOARD_WORK.within((budget) => measureWalk({ ...input, budget })) : measureWalk({ ...input, budget: WorkBudget.none() })) : null),
     // `found` reads again what a frame's turn found.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [input?.view, input?.sceneId, input?.stops, input?.viewer.role, input?.everything, live, found],
+    [input?.view, input?.sceneId, input?.stops, input?.viewer.role, input?.everything, input?.prior, input?.actor, live, found],
   );
   const searching = m?.searching === true;
   useLayoutEffect(() => {
@@ -30,7 +32,7 @@ export function useWalkMeasure(input: WalkInput | null, live = false): WalkMeasu
     BOARD_WORK.add(job);
     return () => BOARD_WORK.drop(job);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input?.view, input?.sceneId, input?.stops, input?.viewer.role, input?.everything, searching]);
+  }, [input?.view, input?.sceneId, input?.stops, input?.viewer.role, input?.everything, input?.prior, input?.actor, searching]);
   return m;
 }
 
