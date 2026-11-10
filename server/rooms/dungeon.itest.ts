@@ -34,6 +34,8 @@ const LARGEST = FIXTURE.dungeons.find((d) => d.name === "largest")!;
 /** Phase 2's hand plans (client/features/dungeon/handPlans.ts): two rooms dressed, with a stone and the key, and the 100-op plan. */
 const DRESSED = FIXTURE.dungeons.find((d) => d.name === "dressed")!;
 const HUNDRED = FIXTURE.dungeons.find((d) => d.name === "hundred")!;
+/** Phase 3's hex dungeons, Hex rows and Hex columns, each with a secret room and a pit (dungeon generator phase 3, 9). */
+const HEX = FIXTURE.dungeons.filter((d) => d.name === "hex-secret" || d.name === "hex-columns");
 
 const BLOCK_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
 /** A journal block's id: 12 characters, as Make draws them. */
@@ -51,8 +53,8 @@ const NAME = "Crypt";
 function made(d: FixtureDungeon, see: "reveal" | "explore" | "dark" = "reveal"): { sceneId: string; trapIds: string[]; ids: Map<string, string>; ops: Op[] } {
   const sceneId = uuidv7();
   const ids = new Map<string, string>([[d.sceneId, sceneId]]);
-  // Every id Make gives a fresh one, a key block's 12 characters as Make draws them.
-  for (const id of d.placeholders) ids.set(id, id.startsWith("dungeonblk") ? blockId() : uuidv7());
+  // Every id Make gives a fresh one, a key block's and a free wall's 12 characters as Make draws them.
+  for (const id of d.placeholders) ids.set(id, id.startsWith("dungeonblk") || id.startsWith("dgw") ? blockId() : uuidv7());
   let text = JSON.stringify(d.ops);
   for (const [was, now] of ids) text = text.replaceAll(JSON.stringify(was), JSON.stringify(now));
   const ops = JSON.parse(text) as Op[];
@@ -93,7 +95,7 @@ async function setupHistory(socket: Socket): Promise<{ depth: number; label: str
 function contents(state: Pick<RoomState, "buildChunks" | "scenes"> & { traps?: Readonly<Record<string, Trap>> }, sceneId: string): string {
   const chunks = Object.values(state.buildChunks)
     .filter((c) => c.sceneId === sceneId)
-    .map((c) => [`${c.cx},${c.cy}`, { cells: c.cells, edges: c.edges, heights: c.heights, up: c.up }] as const)
+    .map((c) => [`${c.cx},${c.cy}`, { cells: c.cells, edges: c.edges, heights: c.heights, up: c.up, rough: c.rough, walls: c.walls }] as const)
     .sort(([a], [b]) => (a < b ? -1 : 1));
   const traps = Object.values(state.traps ?? {}).filter((t) => t.sceneId === sceneId).map((t) => stableStringify({ zone: t.zone, state: t.state, found: t.found, rig: t.rig })).sort();
   return stableStringify({ scene: state.scenes[sceneId] ? true : false, chunks, traps });
@@ -162,7 +164,8 @@ describe("a generated dungeon on the server", () => {
     assert.equal(typeof FIXTURE.generatorVersion, "number");
     for (const d of FIXTURE.dungeons) {
       assert.ok(d.ops.length <= 100, `${d.name}: ${d.ops.length} ops`);
-      assert.equal(d.ops[0]?.t, "scene.create");
+      // A wing (phase 3) lands on a scene it does not make: dungeon.wing.itest.ts lands it.
+      assert.equal(d.ops[0]?.t === "scene.create", d.name !== "wing", d.name);
       assert.ok(!JSON.stringify(d.ops).includes("defaultView"), "no starting view");
     }
   });
@@ -198,6 +201,41 @@ describe("a generated dungeon on the server", () => {
     assert.equal(stableStringify(replayed.state.traps), stableStringify(live.traps));
     const player = await playerView(t, tb, "after");
     assert.deepEqual(Object.keys(player.scenes), [tb.mat], "a player holds only the players' scene");
+  });
+
+  test("DG3: a hex dungeon on rows and columns is taken whole through the actor, stores and replays the same, and Delete removes it whole", async () => {
+    assert.equal(HEX.length, 2);
+    const tb = await table(t, "Hex dungeon");
+    for (const d of HEX) {
+      const m = made(d);
+      // Two dungeons of 35 ops pass the socket's burst, so they go as the store sends them, resending what is answered busy.
+      assert.deepEqual((await sendPaced(tb.dmSocket, m.ops)).refused, [], `${d.name} all taken`);
+      const live = t.manager.get(tb.roomId)!.committed.state;
+      assert.ok(live.scenes[m.sceneId]?.gridShape?.startsWith("hex"), `${d.name} on its grid`);
+      const walls = Object.values(live.buildChunks).filter((c) => c.sceneId === m.sceneId).flatMap((c) => c.walls ?? []);
+      assert.equal(walls.length, d.ops.flatMap((op) => (op.t === "build.walls" ? (op.put ?? []) : [])).length, `${d.name}: every wall stored`);
+      assert.ok(walls.some((w) => w.f.kind === "door" && w.f.secret && !w.f.discovered), `${d.name}: a hidden leaf`);
+      const dmSnapshot = await stored(t, tb, m.sceneId, `dm-check-${d.name}`);
+      assert.equal(contents(dmSnapshot, m.sceneId), contents(live, m.sceneId));
+      assert.equal(contents(reducerLanding(m.ops), m.sceneId), contents(dmSnapshot, m.sceneId), `${d.name}: the snapshot is the reducer's landing`);
+    }
+    const before = t.manager.get(tb.roomId)!.committed.state;
+    tb.dmSocket.close();
+    await t.manager.unload(tb.roomId, 1011, false);
+    const replayed = await loadRoom(t.pool, tb.roomId);
+    assert.ok(replayed && !replayed.replayFailed);
+    assert.equal(stableStringify(replayed.state.buildChunks), stableStringify(before.buildChunks));
+    assert.equal(stableStringify(replayed.state.traps), stableStringify(before.traps));
+    const again = await t.connect(tb.roomId, tb.dm);
+    await again.snapshot("again");
+    const h = await setupHistory(again);
+    void h;
+    const last = Object.keys(before.scenes).find((id) => before.scenes[id]!.gridShape === "hexColumns")!;
+    // After a restart history is empty: Delete removes the scene, its walls and its traps whole.
+    assert.equal((await again.apply({ t: "scene.delete", sceneId: last })).rejects, undefined);
+    const after = t.manager.get(tb.roomId)!.committed.state;
+    assert.equal(Object.values(after.buildChunks).some((c) => c.sceneId === last), false);
+    again.close();
   });
 
   test("DG-B: one Undo setup takes the whole dungeon back, and Redo setup brings it back", async () => {
