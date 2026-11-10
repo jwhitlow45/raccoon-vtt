@@ -183,14 +183,25 @@ export function clampSide(n: number): number {
   return Number.isFinite(n) ? clamp(Math.round(n), MIN_SIDE, MAX_SIDE) : MIN_SIDE;
 }
 
-/** The most rooms a map of this size takes: one per 90 squares, 2 to 40. */
-export function roomCap(w: number, h: number): number {
-  return clamp(Math.floor((clampSide(w) * clampSide(h)) / SQUARES_PER_ROOM_CAP), MIN_ROOMS, MAX_ROOMS);
+/** The most rooms a map of this size takes: one per 90 squares, 2 to 40, and at most 24 on hexes (phase 3, 2.5). */
+export function roomCap(w: number, h: number, grid?: GridKind): number {
+  return clamp(Math.floor((clampSide(w) * clampSide(h)) / SQUARES_PER_ROOM_CAP), MIN_ROOMS, isHexGrid(grid) ? MAX_HEX_ROOMS : MAX_ROOMS);
 }
 
 /** Rooms clamped to what the size takes. */
-export function clampRooms(n: number, w: number, h: number): number {
-  return Number.isFinite(n) ? clamp(Math.round(n), MIN_ROOMS, roomCap(w, h)) : MIN_ROOMS;
+export function clampRooms(n: number, w: number, h: number, grid?: GridKind): number {
+  return Number.isFinite(n) ? clamp(Math.round(n), MIN_ROOMS, roomCap(w, h, grid)) : MIN_ROOMS;
+}
+
+/**
+ * The longest a side may be on a grid: 100 on squares, and on hexes 87 for
+ * the side across the rows (down on Hex rows, across on Hex columns), whose
+ * 100 rows are the most a plan takes (phase 3, 2.1).
+ */
+export function maxSide(grid: GridKind | undefined, axis: "w" | "h"): number {
+  if (grid === "hexRows" && axis === "h") return MAX_HEX_CELLS;
+  if (grid === "hexColumns" && axis === "w") return MAX_HEX_CELLS;
+  return MAX_SIDE;
 }
 
 /** Rooms a size starts on: 6, 12 and 20 for the presets, and one per 200 squares on Custom, within the cap. */
@@ -250,13 +261,13 @@ export function litCount(share: number, rooms: number): number {
  * choices a device remembered under an older build: each field read or
  * replaced by its default, sides and Rooms clamped.
  */
-export function clampSettings(s: Partial<Record<keyof DungeonSettings, unknown>>): DungeonSettings {
-  const w = typeof s.w === "number" ? clampSide(s.w) : DEFAULT_SETTINGS.w;
-  const h = typeof s.h === "number" ? clampSide(s.h) : DEFAULT_SETTINGS.h;
+export function clampSettings(s: Partial<Record<keyof DungeonSettings, unknown>>, grid?: GridKind): DungeonSettings {
+  const w = Math.min(maxSide(grid, "w"), typeof s.w === "number" ? clampSide(s.w) : DEFAULT_SETTINGS.w);
+  const h = Math.min(maxSide(grid, "h"), typeof s.h === "number" ? clampSide(s.h) : DEFAULT_SETTINGS.h);
   return {
     w,
     h,
-    rooms: typeof s.rooms === "number" ? clampRooms(s.rooms, w, h) : clampRooms(DEFAULT_SETTINGS.rooms, w, h),
+    rooms: typeof s.rooms === "number" ? clampRooms(s.rooms, w, h, grid) : clampRooms(DEFAULT_SETTINGS.rooms, w, h, grid),
     density: oneOf(s.density, DENSITIES, DEFAULT_SETTINGS.density),
     corridors: oneOf(s.corridors, CORRIDORS, DEFAULT_SETTINGS.corridors),
     wide: typeof s.wide === "boolean" ? s.wide : DEFAULT_SETTINGS.wide,

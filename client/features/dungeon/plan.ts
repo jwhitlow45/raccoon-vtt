@@ -4,21 +4,24 @@ import { trapPreset } from "#shared/srd/traps.ts";
 import { bends, Router, TURN_COST } from "./corridors.ts";
 import { daisClear, doorLines, doorStates, placePillars, placePits, placeRubble, roomFloors } from "./dress.ts";
 import { DAIS_RISE, placeDais, raiseRooms, type Dais } from "./heights.ts";
-import { Board, chooseEntrance, doorEdge, facingSides, loopLinks, placeDoorway, placeRooms, rockBetween, treeLinks, type Doorway, type Link, type Rect, type Side } from "./layout.ts";
+import { Board, chooseEntrance, doorEdge, facingSides, loopLinks, placeDoorway, placeRooms, rockBetween, SIDE_ORDER, treeLinks, type Doorway, type Link, type Rect, type Side } from "./layout.ts";
 import { seedStream } from "./random.ts";
 import type { Seed } from "./seed.ts";
 import { besideDoorway, bulgeTunnels, erodeRoom, placeColumns } from "./cave.ts";
 import { deadEndCount, placeDeadEnds, type Spur } from "./deadEnds.ts";
-import { furnish } from "./furnish.ts";
+import { furnish, furnishHex, HexStamps, STAMP_DOOR_STEPS } from "./furnish.ts";
+import { CORRIDOR_SPACE, directionTo, hexSide, hexWalls, NO_SPACE, RUN_SPACE, type HexWalls, type WallDoorway } from "./hexWalls.ts";
+import { latticeFor, type Lattice } from "./lattice.ts";
 import { corridorTraps, keyRooms, numberRooms, pinSquare } from "./keyRooms.ts";
-import { placeLights } from "./lightSpots.ts";
+import { placeLights, placeLightsHex } from "./lightSpots.ts";
 import type { DungeonEdits } from "./edits.ts";
 import { chooseSecrets, secretCandidates, stillWhole, type Candidate } from "./secrets.ts";
-import { clampContext, clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, MAX_DOOR_EDGES, SEARCH_BUDGET, litCount, secretCount, trapCount, type DungeonSettings, type GridKind, type PlanContext, type Theme } from "./settings.ts";
+import { clampContext, clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, isHexGrid, MAX_DOOR_EDGES, SEARCH_BUDGET, litCount, secretCount, trapCount, type DungeonSettings, type GridKind, type PlanContext, type Theme } from "./settings.ts";
 import { channelWater, placeCisterns, type Channel } from "./sewer.ts";
 import { THEME_SPECS } from "./themes.ts";
 import { propsFor } from "./props.ts";
-import { pickTraps, STATUE_STAMP, statueReaches, trapSpots, type PickedTraps } from "./trapSpots.ts";
+import { hexTrapSpots, pickTraps, STATUE_STAMP, statueReaches, trapSpots, type PickedTraps } from "./trapSpots.ts";
+import { wallChunk } from "#shared/keys.ts";
 
 /*
  * The dungeon a seed and the choices make (docs/design/design-v1-dungeon-generator.md
@@ -148,6 +151,11 @@ export type WingBase = {
 const WRAP_BELOW = { narrow: 8, wide: 10 } as const;
 /** About one extra way round per this many rooms. */
 const ROOMS_PER_LOOP = 4;
+/** A pit or a mine shaft on hexes, in feet below its room's floor (phase 3, 2.4). */
+const PIT_DROP = 10;
+
+/** What a plan takes besides the choices (phase 3): the room count to ask for, and each room's height pin by board index. */
+export type PlanOptions = { rooms?: number; grounds?: ReadonlyMap<number, number> };
 
 /*
  * The streams a seed starts (random.ts `seedStream`, phase 2 5.7): the main
@@ -211,6 +219,11 @@ export type Planned = {
   pins: Map<number, number>;
   /** The room count the plan asked `placeRooms` for: the Rooms asked, or fewer where a hex plan stepped down (phase 3, 2.5). */
   fitted: number;
+  /** The lattice the board lies on. */
+  lattice: Lattice;
+  /** On hexes, each cell's space for the wall pass (hexWalls.ts), and each kept doorway's leaves in `plan.walls`, in `doorways` order. Empty on squares. */
+  space: Int32Array;
+  leaves: number[][];
 };
 
 export function generate(settings: DungeonSettings, seed: Seed, context: PlanContext, budget: number = SEARCH_BUDGET): DungeonPlan {
@@ -228,19 +241,26 @@ export function planFitted(settings: DungeonSettings, seed: Seed, context: PlanC
 }
 
 /** The plan with its working. A caller with no room (a bench script) plans at the default 5 ft a square. */
-export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanContext = DEFAULT_CONTEXT, budget: number = SEARCH_BUDGET): Planned {
-  const s = clampSettings(input);
+export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanContext = DEFAULT_CONTEXT, budget: number = SEARCH_BUDGET, extras: PlanOptions = {}): Planned {
   const ctx = clampContext(context);
+  const grid: GridKind = ctx.grid ?? "squares";
+  const hex = isHexGrid(grid);
+  const s = clampSettings(input, ctx.grid);
   const theme = THEME_SPECS[s.theme];
-  const { w: W, h: H } = s;
+  // On hexes the plan works on the rows lattice of the scene's bounds, larger than the bounds by about a seventh down the rows.
+  const lattice = latticeFor(grid, { w: s.w, h: s.h });
+  const { W, H } = lattice;
+  const fitted = extras.rooms ?? s.rooms;
   const width = s.wide ? 2 : 1;
   const rng = seedStream(seed);
   const trace: PlanTrace = { retried: [], failed: [], dropped: [], replaced: [], skipped: [], stubFailed: false, treeLeft: budget, loopsLeft: budget, budgetLeft: budget };
 
   // Steps 1 to 3: rooms, the entrance, the tree and the extra ways around.
-  const rects = placeRooms(rng, s);
-  const board = new Board(W, H, rects);
-  const entrance = rects.length > 0 ? chooseEntrance(rects, W, H) : { room: -1, side: "w" as Side };
+  const rects = placeRooms(rng, { w: W, h: H, rooms: fitted, density: s.density, wide: s.wide });
+  const board = new Board(W, H, rects, lattice);
+  // On hexes the way in leaves by the west or east edge, and on Wide by the west alone: the Wide block's east goal lands on an odd row's missing hex (2.3, D-261110-240).
+  const sides: readonly Side[] = hex ? (s.wide ? ["w"] : ["w", "e"]) : SIDE_ORDER;
+  const entrance = rects.length > 0 ? chooseEntrance(rects, W, H, sides) : { room: -1, side: sides[0]! };
   const tree = entrance.room >= 0 ? treeLinks(rects, entrance.room) : [];
   const doorEdges = (loops: number) => (2 * tree.length + 1 + 2 * loops) * width;
   const loops = s.loops ? loopLinks(rects, tree, Math.floor(rects.length / ROOMS_PER_LOOP), (n) => doorEdges(n) <= MAX_DOOR_EDGES) : [];
@@ -275,7 +295,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   }
 
   // Step 5: heights, before any corridor, so every run is reserved first.
-  if (entrance.room >= 0) raiseRooms(rng, board, entrance.room, s.heights);
+  if (entrance.room >= 0) raiseRooms(rng, board, entrance.room, s.heights, extras.grounds);
 
   // Step 6: corridors, tree links in Prim's order, then the loops, then the stub.
   const bend = (a: readonly [number, number], b: readonly [number, number]) => bends(ways, s.corridors, a, b, width);
@@ -369,11 +389,17 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   }
   for (const k of realRuns) runSquares.add(k);
   const edgeStairs = new Set<number>();
+  // On hexes the way in's stair stands on the edge hex whose border side opens off the map: an even row's, so a Wide stub's odd lane ends against a wall (2.3).
+  const outward = entrance.side === "w" ? 3 : 0;
+  // Only the stub's last position counts on hexes: a stub can run along the edge column on its way, and those hexes keep their outer walls.
+  const stubEnd = new Set(stubChain && stubChain.length > 0 ? [0, 1, W, W + 1].slice(0, width === 1 ? 1 : 4).map((o) => stubChain.at(-1)! + o) : []);
   if (stubPath) {
     for (const k of stubPath) {
       const x = k % W;
       const y = (k - x) / W;
-      if ((entrance.side === "w" && x === 0) || (entrance.side === "e" && x === W - 1) || (entrance.side === "n" && y === 0) || (entrance.side === "s" && y === H - 1)) edgeStairs.add(k);
+      if (hex) {
+        if (stubEnd.has(k) && lattice.border(k, outward)) edgeStairs.add(k);
+      } else if ((entrance.side === "w" && x === 0) || (entrance.side === "e" && x === W - 1) || (entrance.side === "n" && y === 0) || (entrance.side === "s" && y === H - 1)) edgeStairs.add(k);
     }
   }
   const builtPaths = [...paths.filter((p): p is number[] => p !== null), ...(stubPath ? [stubPath] : [])];
@@ -478,6 +504,33 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     }
   }
 
+  // On hexes the walls come before the traps, so a Poisoned Needle can name its leaf (2.2).
+  const doorState = (d: Doorway): WallDoorway["state"] => (!theme.doors ? "open" : isSecret(d) ? "secret" : states.get(d.id)!);
+  const space = new Int32Array(hex ? W * H : 0).fill(NO_SPACE);
+  let walled: HexWalls = { walls: [], leaves: [] };
+  if (hex) {
+    for (const i of kept) {
+      const r = board.rooms[i]!;
+      for (let y = r.y; y < r.y + r.h; y++) {
+        for (let x = r.x; x < r.x + r.w; x++) {
+          const k = board.cell(x, y);
+          if (inRoom(k) && overlay.get(k) !== "pillar") space[k] = i;
+        }
+      }
+    }
+    for (const k of corridor) space[k] = CORRIDOR_SPACE;
+    for (const d of doorways) if (d.run) for (const k of [...d.run.near, ...d.run.stairs.map((st) => st.cell), ...d.run.far]) space[k] = RUN_SPACE + d.id;
+    walled = hexWalls({
+      lattice,
+      space,
+      doorways: doorways.map((d) => ({ inside: d.inside, outside: d.outside, state: doorState(d) })),
+      far: new Set(doorways.flatMap((d) => d.run?.far ?? [])),
+      wayIn: [...edgeStairs].map((cell) => ({ cell, dir: outward })),
+    });
+  }
+  // A scene's own keys for a rectangle of lattice cells: the same on Hex rows, mirrored on Hex columns.
+  const sceneRect = (r: CellRect): CellRect => (grid === "hexColumns" ? { x: r.y, y: r.x, w: r.h, h: r.w } : r);
+
   // Step 10: traps. A secret doorway's inside squares are plain floor, and its outside squares and edges take none.
   const inside = new Set(doorways.filter((d) => !isSecret(d)).flatMap((d) => d.inside));
   const secretMouths = new Set(secret.flatMap((c) => c.doorway.outside));
@@ -501,10 +554,38 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     }
     return { terrain, ground };
   };
+  const doorIndex = new Map(doorways.map((d, j) => [d.id, j]));
   const picked: PickedTraps =
     s.traps === 0
       ? { traps: [], squares: [], statues: [], stones: [] }
-      : pickTraps(
+      : hex
+        ? pickTraps(
+            rng,
+            hexTrapSpots({
+              board,
+              lattice,
+              rooms: kept.filter((i) => i !== entrance.room),
+              onLine,
+              floorFree,
+              hitFree: (k) => corridor.has(k) && plainCorridor(k) && !secretMouths.has(k),
+              corridor: [...new Set([...builtPaths.flat(), ...spurPaths.flat()])],
+              painted,
+              wide: s.wide,
+              feetPerCell: ctx.feetPerCell,
+              rect: sceneRect,
+              side: (k, dir) => hexSide(lattice, k, dir),
+              needles: doorways.flatMap((d) => {
+                if (d.room === entrance.room || doorState(d) !== "locked") return [];
+                const leaf = walled.leaves[doorIndex.get(d.id)!]?.[0];
+                if (leaf === undefined) return [];
+                const { cx, cy } = wallChunk(walled.walls[leaf]!);
+                const [i, o] = [d.inside[0]!, d.outside[0]!];
+                return [{ leaf, cx, cy, mid: [(i % W) + (o % W) + 1, Math.floor(i / W) + Math.floor(o / W) + 1] as [number, number] }];
+              }),
+            }),
+            trapCount(s.traps, kept.length),
+          )
+        : pickTraps(
           rng,
           trapSpots({
             board,
@@ -541,33 +622,65 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   }
   const own = (i: number, k: number) => k >= 0 && k < W * H && board.roomAt[k] === i + 1 && inRoom(k);
   const free = (i: number, k: number) => own(i, k) && !overlay.has(k) && !clear.has(k) && !inside.has(k) && !openLines.get(i)!.has(k) && k !== pins.get(i) && !used.has(k);
-  const lit = placeLights(seedStream(seed, GENERATOR_VERSION, LANE_LIGHTS), board, kept, litCount(s.lit, kept.length), own, free, theme);
+  // On hexes a stamp's box keeps to its own room's floor, more than 2 steps from every doorway (2.4, D-261110-178).
+  const hexStamps = hex ? new HexStamps(lattice) : null;
+  const nearDoor = new Set<number>();
+  if (hex) {
+    let ring = doorways.flatMap((d) => d.inside);
+    for (const k of ring) nearDoor.add(k);
+    for (let step = 0; step < STAMP_DOOR_STEPS; step++) {
+      ring = ring.flatMap((k) => lattice.halo(k).filter((n) => !nearDoor.has(n)));
+      for (const k of ring) nearDoor.add(k);
+    }
+  }
+  const stampHex = (i: number, k: number) => space[k] === i && !nearDoor.has(k) && !overlay.has(k) && !clear.has(k) && !daisSquares.has(k) && k !== pins.get(i) && !used.has(k);
+  const lightStream = seedStream(seed, GENERATOR_VERSION, LANE_LIGHTS);
+  const lit = hexStamps
+    ? placeLightsHex(lightStream, board, kept, litCount(s.lit, kept.length), own, free, theme, (i, stamp) => hexStamps.fits(stamp, (k) => stampHex(i, k)))
+    : placeLights(lightStream, board, kept, litCount(s.lit, kept.length), own, free, theme);
+  const litStamps = lit.flatMap((l) => (l.stamp ? [l.stamp] : []));
   for (const l of lit) {
     used.add(l.square);
-    stampsIn.set(l.room, (stampsIn.get(l.room) ?? 0) + 1);
+    if (hexStamps && l.stamp) for (const k of hexStamps.touched(l.stamp)) used.add(k);
+    if (l.stamp) stampsIn.set(l.room, (stampsIn.get(l.room) ?? 0) + 1);
   }
   const groundAt = (k: number) => daisSquares.get(k) ?? board.rooms[roomOf(k)]?.ground ?? 0;
 
   // Dressing (5.5), from its own stream after the lights, so Dressing keeps everything before it.
-  const props = furnish(seedStream(seed, GENERATOR_VERSION, LANE_DRESSING), {
+  const dressing = {
     board,
     rooms: kept,
     dressing: s.dressing,
-    props: (i) => propsFor(s.theme, floors[i]!),
+    props: (i: number) => propsFor(s.theme, floors[i]!),
     free,
-    ground: groundAt,
-    held: (i) => stampsIn.get(i) ?? 0,
-    total: picked.statues.length + lit.length,
-  });
+    held: (i: number) => stampsIn.get(i) ?? 0,
+    total: picked.statues.length + litStamps.length,
+  };
+  const dressStream = seedStream(seed, GENERATOR_VERSION, LANE_DRESSING);
+  const props = hexStamps ? furnishHex(dressStream, { ...dressing, stamps: hexStamps, lattice, allowed: stampHex }) : furnish(dressStream, { ...dressing, ground: groundAt });
 
   // The key (5.6), from its own stream, last: DM key moves nothing before it.
   const roomTraps = new Map<number, string[]>();
   const doorRoom = new Map<string, number>();
   for (const d of doorways) d.inside.forEach((_, j) => doorRoom.set(doorEdgeOf(board, d, j), d.room));
   const inRoomTrap = new Set<number>();
+  const leafRoom = new Map<number, number>();
+  walled.leaves.forEach((leaves, j) => leaves.forEach((leaf) => leafRoom.set(leaf, doorways[j]!.room)));
   picked.traps.forEach((t, ti) => {
     const z = t.zone;
-    const i = "door" in z ? ("edge" in z.door ? (doorRoom.get(z.door.edge) ?? -1) : -1) : "cells" in z ? roomOf(board.cell(z.cells[0]!.x, z.cells[0]!.y)) : -1;
+    // On hexes a zone is in the scene's keys, mirrored on Hex columns, so the room is read from the lattice squares the trap took.
+    const i =
+      t.leaf !== undefined
+        ? (leafRoom.get(t.leaf) ?? -1)
+        : "door" in z
+          ? "edge" in z.door
+            ? (doorRoom.get(z.door.edge) ?? -1)
+            : -1
+          : "cells" in z
+            ? hex
+              ? roomOf(picked.squares[ti]![0]!)
+              : roomOf(board.cell(z.cells[0]!.x, z.cells[0]!.y))
+            : -1;
     if (i >= 0) {
       roomTraps.set(i, [...(roomTraps.get(i) ?? []), trapPreset(t.preset, s.band)?.name ?? t.preset]);
       inRoomTrap.add(ti);
@@ -601,22 +714,28 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
       })
     : null;
 
-  // The plan.
+  // The plan. On hexes nothing is painted: the walls show the rooms (D-261110-160).
   const terrain = new Map<number, TerrainId>();
-  for (const i of kept) {
-    const r = board.rooms[i]!;
-    for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (inRoom(board.cell(x, y))) terrain.set(board.cell(x, y), floors[i]!);
+  if (!hex) {
+    for (const i of kept) {
+      const r = board.rooms[i]!;
+      for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (inRoom(board.cell(x, y))) terrain.set(board.cell(x, y), floors[i]!);
+    }
+    for (const k of corridor) terrain.set(k, theme.corridor);
+    for (const [k, t] of overlay) if (terrain.has(k)) terrain.set(k, t);
   }
-  for (const k of corridor) terrain.set(k, theme.corridor);
-  for (const [k, t] of overlay) if (terrain.has(k)) terrain.set(k, t);
+  // A cell that is floor: on hexes a pillar is a walled hex, so it holds no ground.
+  const isFloor = (k: number) => (hex ? space[k] !== NO_SPACE : inRoom(k));
 
   const ground = new Map<number, number>();
   for (const i of kept) {
     const r = board.rooms[i]!;
-    if (r.ground !== 0) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (inRoom(board.cell(x, y))) ground.set(board.cell(x, y), r.ground);
+    if (r.ground !== 0) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (isFloor(board.cell(x, y))) ground.set(board.cell(x, y), r.ground);
   }
   for (const [k, ft] of daisSquares) ground.set(k, ft);
-  const ups = new Map<number, Side>();
+  // On hexes a pit or a shaft is its hexes sunk 10 ft below the room's floor (2.4).
+  if (hex) for (const [k, t] of overlay) if (t === "pit" && board.roomAt[k] !== 0) ground.set(k, board.rooms[board.roomAt[k]! - 1]!.ground - PIT_DROP);
+  const ups = new Map<number, StairDirection>();
   for (const d of doorways) {
     if (!d.run) continue;
     for (const k of d.run.near) ground.set(k, d.run.ground);
@@ -625,10 +744,11 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
       ups.set(st.cell, st.up);
     }
   }
-  for (const dais of daises.values()) ups.set(dais.stair, dais.up);
-  for (const k of edgeStairs) ups.set(k, entrance.side);
+  // On hexes a dais's stair faces the dais hex it touches (2.3), and the way in's stair faces off the map along its row.
+  for (const dais of daises.values()) ups.set(dais.stair, hex ? (String(directionTo(lattice, dais.stair, dais.top)) as StairDirection) : dais.up);
+  for (const k of edgeStairs) ups.set(k, hex ? (String(outward) as StairDirection) : entrance.side);
 
-  const key = (k: number) => `${k % W},${Math.floor(k / W)}`;
+  const key = (k: number) => (hex ? lattice.keyOf(k) : `${k % W},${Math.floor(k / W)}`);
   const grouped = <V extends string | number>(m: Map<number, V>, order: (a: V, b: V) => number) => {
     const by = new Map<V, number[]>();
     for (const [k, v] of m) by.set(v, [...(by.get(v) ?? []), k]);
@@ -636,13 +756,13 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   };
   const paint: Partial<Record<TerrainId, string[]>> = {};
   for (const { v, cells } of grouped(terrain, (a, b) => (a < b ? -1 : a > b ? 1 : 0))) paint[v] = cells;
-  const DIR_ORDER = "nesw";
+  const DIR_ORDER = "nesw012345";
   const xy = (k: number): [number, number] => [k % W, Math.floor(k / W)];
   const plan: DungeonPlan = {
     version: GENERATOR_VERSION,
     theme: s.theme,
-    w: W,
-    h: H,
+    w: s.w,
+    h: s.h,
     asked: s.rooms,
     rooms: kept.map((i) => {
       const r = board.rooms[i]!;
@@ -659,19 +779,26 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
       };
     }),
     paint,
-    doors: theme.doors ? doorways.flatMap((d) => d.inside.map((_, j) => ({ edge: doorEdgeOf(board, d, j), state: isSecret(d) ? ("secret" as const) : states.get(d.id)! }))) : [],
+    doors: theme.doors && !hex ? doorways.flatMap((d) => d.inside.map((_, j) => ({ edge: doorEdgeOf(board, d, j), state: isSecret(d) ? ("secret" as const) : states.get(d.id)! }))) : [],
     heights: grouped(
       new Map([...ground].filter(([, ft]) => ft !== 0)),
       (a, b) => a - b,
     ).map(({ v, cells }) => ({ ft: v, cells })),
     stairs: grouped(ups, (a, b) => DIR_ORDER.indexOf(a) - DIR_ORDER.indexOf(b)).map(({ v, cells }) => ({ up: v, cells })),
-    stamps: [...picked.statues, ...lit.map((l) => l.stamp), ...props.map((f) => f.stamp)],
+    stamps: [...picked.statues, ...litStamps, ...props.map((f) => f.stamp)],
     lights: lit.map((l) => l.light),
     stones: picked.stones,
     traps,
     entrance: entrance.room >= 0 ? { x: rects[entrance.room]!.x, y: rects[entrance.room]!.y, w: rects[entrance.room]!.w, h: rects[entrance.room]!.h } : { x: 0, y: 0, w: 0, h: 0 },
     key: keyed,
     ...(inCorridors.length > 0 ? { corridorTraps: inCorridors } : {}),
+    ...(hex
+      ? {
+          grid,
+          walls: walled.walls,
+          rough: [...overlay].flatMap(([k, t]) => (t === "rubble" || t === "water") && isFloor(k) ? [k] : []).sort((a, b) => a - b).map(key),
+        }
+      : {}),
   };
   return {
     plan,
@@ -691,7 +818,10 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     unpainted,
     cisterns,
     pins,
-    fitted: s.rooms,
+    fitted,
+    lattice,
+    space,
+    leaves: walled.leaves,
   };
 }
 
