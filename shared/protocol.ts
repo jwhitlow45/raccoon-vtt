@@ -2230,6 +2230,28 @@ const stateClientOps = [
         beside: id,
         side: z.enum(["above", "below"]),
         besideName: floorName.optional(),
+        /** The new floor's name, numbered while taken: "Crypt", then "Crypt 2" (docs/design/design-v1-floors.md phase 3, 3.2). Absent, "New floor" as before. */
+        name: floorName.optional(),
+        /**
+         * A floor from a file or a dungeon (phase 3, 3.1): its
+         * own size, background, grid look, automatic walls and map in place
+         * of the floor beside's. Fog and vision patch the copied ones, and
+         * the client names `byClock: false` whenever it sends a vision, so
+         * only an add without one keeps Time of day.
+         */
+        own: z
+          .strictObject({
+            bounds: sceneBounds,
+            background: color,
+            grid: sceneGrid,
+            autoWalls,
+            map: sceneMap.optional(),
+            gridFromFile: z.literal(true).optional(),
+            fogEnabled: z.boolean().optional(),
+            vision: sceneVisionPatch.optional(),
+          })
+          .refine((o) => o.gridFromFile === undefined || o.map !== undefined, { message: "a file's grid comes with its map" })
+          .optional(),
       })
       .optional(),
   }).refine((o) => o.floor === undefined || Object.keys(o.scene).every((k) => k === "id" || k === "name" || k === "bounds"), {
@@ -3275,63 +3297,134 @@ const rulerPoint = z
   .strictObject({ x: coord, y: coord, z: groundFeet.optional(), tokenId: id.optional() })
   .refine((p) => p.z === undefined || p.tokenId === undefined, { message: "a stop on a token takes its height from the token" });
 
-export const ephEventSchema = z.discriminatedUnion("k", [
-  z.strictObject({ k: z.literal("dragStart"), tokenId: id, x: coord, y: coord }),
-  // `squeeze` is the dragging client's own preview, for drawing only: the server judges a frame's footprint itself (section 4.1).
-  // `path` is the live route's corners and `ft` its cost (docs/design/design-v1-movement.md 6.5). The server sends `ft` only to the DM and the token's owners.
-  // `free` says the drag drops between squares, so a receiver reads its point as the box under it, not less the nudge (docs/design/design-v1-snap-off.md 6.3).
-  // It names no place, and the server judges the frame by its point either way.
-  z.strictObject({
-    k: z.literal("dragMove"),
-    tokenId: id,
-    x: coord,
-    y: coord,
-    path: z.array(coord).max(200).optional(),
-    ft: z.number().min(0).max(100_000).optional(),
-    squeeze: z.literal(true).optional(),
-    free: z.literal(true).optional(),
-  }),
-  z.strictObject({ k: z.literal("dragEnd"), tokenId: id, x: coord, y: coord, squeeze: z.literal(true).optional() }),
-  z.strictObject({ k: z.literal("dragCancel"), tokenId: id }),
-  z.strictObject({ k: z.literal("ruler"), id, points: z.array(rulerPoint).min(1).max(MAX_RULER_STOPS), shared: z.boolean().optional(), walk: z.literal(true).optional() }),
-  z.strictObject({ k: z.literal("rulerEnd"), id }),
-  z.strictObject({
-    k: z.literal("aoe"),
-    id,
-    shape: areaShape,
-    origin: z.strictObject({ x: coord, y: coord, z: feet }),
-    yaw: degrees,
-    pitch: pitch.optional(),
-    size: areaFeet,
-    width: areaFeet.optional(),
-    height: areaFeet.optional(),
-    shared: z.boolean().optional(),
-  }),
-  z.strictObject({ k: z.literal("aoeEnd"), id }),
-  z.strictObject({ k: z.literal("ping"), x: coord, y: coord }),
-  z.strictObject({ k: z.literal("laser"), x: coord, y: coord, on: z.boolean() }),
-  z.strictObject({ k: z.literal("focus"), x: coord, y: coord, zoom: z.number().min(0.01).max(100) }),
-  /**
-   * A DM device's camera for table displays (wave 5, docs/design/design-v1-dm-tools.md
-   * 3.1): the center, width and height of its visible map area, in cells.
-   * Only a DM sends it, and only display sockets on its scene receive it.
-   *
-   * An Isometric DM adds `iso` (docs/design/design-v1-isometric-view.md ISO-D17):
-   * its turn, and its canvas's size in view units centered on its middle.
-   * It holds the DM's camera alone, nothing about the map. A page loaded
-   * before it checks events against its old strict schema and drops this
-   * one, so it stops following an Isometric DM until it is reloaded.
-   */
-  z.strictObject({
-    k: z.literal("view"),
-    x: coord,
-    y: coord,
-    w: viewSize,
-    h: viewSize,
-    iso: z.strictObject({ turn: z.number().int().min(0).max(3), vw: viewSize, vh: viewSize }).optional(),
-  }),
-]);
+/** The most stairs one ruler crosses (docs/design/design-v1-floors.md phase 3, 4.1). */
+export const MAX_RULER_ENDS = 8;
+const rulerCount = z.number().int().min(0).max(100_000);
+/** A custom token's side in cells, as `tokenInput` bounds it. */
+const tokenCells = z.number().min(0.5).max(20);
+
+/**
+ * What a ruler carried over stairs measured before the floor it is on
+ * (docs/design/design-v1-floors.md phase 3, 4.2): the feet so far, the
+ * 5-10-5 count of diagonals, and the walker's shape on the landing. Only a
+ * custom walker carries its sides, and `squeeze` says it landed squeezed.
+ *
+ * Inbound it also names every token a stop sat on before the landing and
+ * the ends crossed, in order, so the server forwards the frame only to a
+ * receiver who sees every one of those tokens and holds every one of
+ * those ends (D-261110-115). The server forwards it without them
+ * (`outboundEph`), and the outbound schema refuses either.
+ */
+const rulerPriorIn = z.strictObject({
+  ft: rulerCount,
+  diag: z.strictObject({ h: rulerCount, v: rulerCount }),
+  walker: z
+    .strictObject({ size: sizeSchema, w: tokenCells.optional(), h: tokenCells.optional(), squeeze: z.literal(true).optional() })
+    .refine((w) => (w.size === "custom" ? w.w !== undefined && w.h !== undefined : w.w === undefined && w.h === undefined), {
+      message: "only a custom walker carries its sides, and it carries both",
+    }),
+  anchors: z.array(id).max(MAX_RULER_STOPS).refine(unique, { message: "a token is named twice" }),
+  ends: z.array(id).min(1).max(MAX_RULER_ENDS),
+});
+const rulerPriorOut = rulerPriorIn.omit({ anchors: true, ends: true });
+
+const rulerFields = {
+  k: z.literal("ruler"),
+  id,
+  points: z.array(rulerPoint).min(1).max(MAX_RULER_STOPS),
+  shared: z.boolean().optional(),
+  walk: z.literal(true).optional(),
+};
+/** A carried ruler walks on from a free stop on the landing, so its first stop names no token. */
+const carriedWalk = (e: { walk?: true; points: readonly { tokenId?: string }[]; prior?: object }) => e.prior === undefined || (e.walk === true && e.points[0]?.tokenId === undefined);
+const CARRIED_WALK = { message: "a ruler carried over stairs walks on from a free stop" };
+const rulerIn = z.strictObject({ ...rulerFields, prior: rulerPriorIn.optional() }).refine(carriedWalk, CARRIED_WALK);
+const rulerOut = z.strictObject({ ...rulerFields, prior: rulerPriorOut.optional() }).refine(carriedWalk, CARRIED_WALK);
+
+/**
+ * The ephemeral events, with the ruler as one direction takes it
+ * (D-261110-182): a client sends `ephEventSchema`, whose carried ruler
+ * names its tokens and ends, and the server sends `ephEventOutSchema`,
+ * whose carried ruler names neither.
+ */
+function ephUnion<R extends typeof rulerIn | typeof rulerOut>(ruler: R) {
+  return z.discriminatedUnion("k", [
+    z.strictObject({ k: z.literal("dragStart"), tokenId: id, x: coord, y: coord }),
+    // `squeeze` is the dragging client's own preview, for drawing only: the server judges a frame's footprint itself (section 4.1).
+    // `path` is the live route's corners and `ft` its cost (docs/design/design-v1-movement.md 6.5). The server sends `ft` only to the DM and the token's owners.
+    // `free` says the drag drops between squares, so a receiver reads its point as the box under it, not less the nudge (docs/design/design-v1-snap-off.md 6.3).
+    // It names no place, and the server judges the frame by its point either way.
+    z.strictObject({
+      k: z.literal("dragMove"),
+      tokenId: id,
+      x: coord,
+      y: coord,
+      path: z.array(coord).max(200).optional(),
+      ft: z.number().min(0).max(100_000).optional(),
+      squeeze: z.literal(true).optional(),
+      free: z.literal(true).optional(),
+    }),
+    z.strictObject({ k: z.literal("dragEnd"), tokenId: id, x: coord, y: coord, squeeze: z.literal(true).optional() }),
+    z.strictObject({ k: z.literal("dragCancel"), tokenId: id }),
+    ruler,
+    z.strictObject({ k: z.literal("rulerEnd"), id }),
+    z.strictObject({
+      k: z.literal("aoe"),
+      id,
+      shape: areaShape,
+      origin: z.strictObject({ x: coord, y: coord, z: feet }),
+      yaw: degrees,
+      pitch: pitch.optional(),
+      size: areaFeet,
+      width: areaFeet.optional(),
+      height: areaFeet.optional(),
+      shared: z.boolean().optional(),
+    }),
+    z.strictObject({ k: z.literal("aoeEnd"), id }),
+    z.strictObject({ k: z.literal("ping"), x: coord, y: coord }),
+    z.strictObject({ k: z.literal("laser"), x: coord, y: coord, on: z.boolean() }),
+    z.strictObject({ k: z.literal("focus"), x: coord, y: coord, zoom: z.number().min(0.01).max(100) }),
+    /**
+     * A DM device's camera for table displays (wave 5, docs/design/design-v1-dm-tools.md
+     * 3.1): the center, width and height of its visible map area, in cells.
+     * Only a DM sends it, and only display sockets on its scene receive it.
+     *
+     * An Isometric DM adds `iso` (docs/design/design-v1-isometric-view.md ISO-D17):
+     * its turn, and its canvas's size in view units centered on its middle.
+     * It holds the DM's camera alone, nothing about the map. A page loaded
+     * before it checks events against its old strict schema and drops this
+     * one, so it stops following an Isometric DM until it is reloaded.
+     */
+    z.strictObject({
+      k: z.literal("view"),
+      x: coord,
+      y: coord,
+      w: viewSize,
+      h: viewSize,
+      iso: z.strictObject({ turn: z.number().int().min(0).max(3), vw: viewSize, vh: viewSize }).optional(),
+    }),
+  ]);
+}
+
+export const ephEventSchema = ephUnion(rulerIn);
+export const ephEventOutSchema = ephUnion(rulerOut);
 export type EphEvent = z.infer<typeof ephEventSchema>;
+export type EphEventOut = z.infer<typeof ephEventOutSchema>;
+/** A carried ruler's `prior` as receivers get it. */
+export type RulerPrior = z.infer<typeof rulerPriorOut>;
+/** A carried ruler's `prior` as its sender sends it, with the tokens and ends the server judges it by. */
+export type RulerPriorIn = z.infer<typeof rulerPriorIn>;
+
+/**
+ * An event as the server forwards it (docs/design/design-v1-floors.md
+ * phase 3, 4.2): a carried ruler without the tokens and ends it named for
+ * the server. The sending device records its own frame the same way.
+ */
+export function outboundEph(e: EphEvent): EphEventOut {
+  if (e.k !== "ruler" || e.prior === undefined) return e;
+  const { anchors: _anchors, ends: _ends, ...prior } = e.prior;
+  return { ...e, prior };
+}
 
 /** The frame budget caps a whole message. This cap is the ephemeral payload on its own. */
 function withinEphBytes(e: unknown): boolean {
@@ -3436,7 +3529,7 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
    * 8.2), which the receiver holds: a device keeps events per floor and
    * draws the shown floor's.
    */
-  z.strictObject({ t: z.literal("eph"), from: id, sceneId: id, e: ephEventSchema }),
+  z.strictObject({ t: z.literal("eph"), from: id, sceneId: id, e: ephEventOutSchema }),
   /** `online` never lists a table display. DM sockets also get `displays`, how many display sockets are open (wave 5). */
   z.strictObject({ t: z.literal("presence"), online: z.array(id).max(1_000), displays: z.number().int().min(0).max(1_000).optional() }),
   /**

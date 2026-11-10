@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { lift, liftSubs, wall } from "#shared/discoveryTestutil.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import { projectState, stableStringify } from "#shared/project.ts";
-import type { EphEvent, ServerMessage } from "#shared/protocol.ts";
+import type { EphEvent, EphEventOut, ServerMessage } from "#shared/protocol.ts";
 import { occupiedHexes } from "#shared/rules/footprint.ts";
 import { hexSubcells, type HexGrid } from "#shared/rules/hex.ts";
 import { COLUMNS, onHex, ROWS } from "#shared/rules/hexWalls.testkit.ts";
@@ -21,8 +21,8 @@ import { rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
  * judged by both its footprints (D-261101-187), on hexes by the hex rules.
  */
 
-function viewer(who: Viewer): { conn: Connection; got: EphEvent[] } {
-  const got: EphEvent[] = [];
+function viewer(who: Viewer): { conn: Connection; got: EphEventOut[] } {
+  const got: EphEventOut[] = [];
   const socket = {
     readyState: 1,
     OPEN: 1,
@@ -41,7 +41,7 @@ function viewer(who: Viewer): { conn: Connection; got: EphEvent[] } {
 }
 
 /** The DM's frames in `state`, then a fog change on every copy and a global batch's judgment: what Pat receives, start to end. */
-function patReceives(state: RoomState, frames: readonly EphEvent[], change?: (s: RoomState) => void): EphEvent[] {
+function patReceives(state: RoomState, frames: readonly EphEvent[], change?: (s: RoomState) => void): EphEventOut[] {
   const dm = viewer(DM);
   const p1 = viewer(P1);
   const all = [dm.conn, p1.conn];

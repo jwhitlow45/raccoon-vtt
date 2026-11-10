@@ -1,6 +1,6 @@
 import { keys } from "../keys.ts";
 import { discoversMap } from "../migrate.ts";
-import type { Encounter, GridShape, MemberId, PathStop, RoomSettings, RoomState, Scene, SceneVision, TurnStart } from "../model.ts";
+import type { Encounter, GridShape, MemberId, PathStop, RoomSettings, RoomState, Scene, TurnStart } from "../model.ts";
 import type { OpOf } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
 import { HEX_ORIGIN, OWN_SQUARE_GRID, gridOfShape, hexOriginBefore, switchRefusal } from "../rules/grid.ts";
@@ -12,6 +12,7 @@ import { ownEntry } from "../records.ts";
 import { normalWeather } from "../weather.ts";
 import { checkedSceneSound } from "./sound.ts";
 import { afterRemoval, floorAdd, ONE_FLOOR } from "./floors.ts";
+import { patchedVision } from "./sceneVision.ts";
 import { deleteSet, FLOOR_WORDS, floorsOf } from "../rules/floors.ts";
 
 export function roomUpdate(tx: Tx, op: OpOf<"room.update">): void {
@@ -194,26 +195,6 @@ function scrubSight(tx: Tx, memberId: MemberId): void {
   if (encounter && scrubbed(encounter) !== encounter) tx.write(keys.encounter, scrubbed(encounter));
   const history = tx.state.encounterHistory;
   if (history.some((step) => scrubbed(step.encounter) !== step.encounter)) tx.write(keys.encounterHistory, history.map((step) => ({ ...step, encounter: scrubbed(step.encounter) })));
-}
-
-/**
- * A scene's vision after a patch (docs/design/design-v1-per-player-vision.md 6.7):
- * the patch's, keeping the scene's `perPlayer` when the patch names none,
- * and stored only while true. A whole-party scene's is the patch's as sent.
- * `byClock` keeps the same way, so Players see's patches leave Time of day
- * on (docs/design/design-v1-calendar-c2c3.md 6.2). The level is stored as sent:
- * the daylight pass reads the time.
- */
-export function patchedVision(
-  was: SceneVision | undefined,
-  patch: { on: boolean; light: SceneVision["light"]; perPlayer?: boolean; byClock?: boolean },
-): SceneVision {
-  const { perPlayer, byClock, ...rest } = patch;
-  return {
-    ...rest,
-    ...((perPlayer ?? was?.perPlayer === true) ? { perPlayer: true as const } : {}),
-    ...((byClock ?? was?.byClock === true) ? { byClock: true as const } : {}),
-  };
 }
 
 const DEFAULT_GRID: Scene["grid"] = { show: true, color: "#ffffff", opacity: 0.25, lineWidth: 1 };

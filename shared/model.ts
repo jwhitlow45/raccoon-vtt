@@ -725,9 +725,11 @@ export type FloorLink = {
 /**
  * An end as a player gets it (docs/design/design-v1-floors.md 4): no pair,
  * ground or seq, `to` only while the player holds that floor, and the way
- * it leads, worked out from the floors' levels.
+ * it leads, worked out from the floors' levels. `rise` is the climb's
+ * height in feet, which comes exactly with `to` (phase 3, 4.3), so a
+ * player's ruler prices the climb as the DM's does.
  */
-export type ProjectedFloorLink = Omit<FloorLink, "pair" | "to" | "ground" | "made"> & { to?: SceneId; dir: "up" | "down" };
+export type ProjectedFloorLink = Omit<FloorLink, "pair" | "to" | "ground" | "made"> & { to?: SceneId; dir: "up" | "down"; rise?: number };
 
 /**
  * A hex grid's orientation (docs/design/design-v1-hex-grids.md 4.1): hex rows have

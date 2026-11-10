@@ -12,7 +12,7 @@ import { ownEntry } from "./records.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 45;
-export const OP_VERSION = 58;
+export const OP_VERSION = 59;
 
 export type MigrationStep = {
   from: number;
@@ -1405,6 +1405,21 @@ export const opMigrations: MigrationStep[] = [
     to: 58,
     apply: (op) => op,
   },
+  {
+    // A floor from a file or a dungeon (docs/design/design-v1-floors.md
+    // phase 3, FLOOR_SOURCE_OP_VERSION): `scene.create`'s `floor` may carry
+    // the new floor's `name` and its source's own settings (`own`). Older
+    // ops lack them and replay as they were, so the step is the identity.
+    // An older build's strict schema refuses either in a stored add, which
+    // the version makes that build refuse cleanly instead. No stored
+    // record changes shape, so the snapshot version stays.
+    // Deploy: back up the database just before, and reload DM pages to see
+    // the Map choice. Rollback needs the backup for a room with version 59
+    // ops after its last snapshot, which an older build refuses.
+    from: 58,
+    to: 59,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -1504,6 +1519,9 @@ export const FLOOR_LINKS_SNAPSHOT_VERSION = 45;
 export function floorLinksOps(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < FLOOR_LINKS_OP_VERSION);
 }
+
+/** The first op version whose floor adds may carry a name and a file's or a dungeon's own settings (docs/design/design-v1-floors.md phase 3, 3.3). */
+export const FLOOR_SOURCE_OP_VERSION = 59;
 
 /** The first op version of several floors in one scene (floorsOps). */
 export const FLOORS_OP_VERSION = 56;

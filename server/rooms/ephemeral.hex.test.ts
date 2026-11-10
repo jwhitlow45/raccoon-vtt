@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { EphEvent, ServerMessage } from "#shared/protocol.ts";
+import type { EphEvent, EphEventOut, ServerMessage } from "#shared/protocol.ts";
 import type { Viewer } from "#shared/model.ts";
 import { footprintRect, footprintSubcells, placedOnHex } from "#shared/rules/footprint.ts";
 import { gridOfShape } from "#shared/rules/grid.ts";
@@ -15,8 +15,8 @@ import { routeEphemeral } from "./ephemeral.ts";
  * hexes it stands on, never by its box.
  */
 
-function viewer(who: Viewer): { conn: Connection; got: EphEvent[] } {
-  const got: EphEvent[] = [];
+function viewer(who: Viewer): { conn: Connection; got: EphEventOut[] } {
+  const got: EphEventOut[] = [];
   const socket = {
     readyState: 1,
     OPEN: 1,

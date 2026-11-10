@@ -17,6 +17,7 @@ import {
   type ClientMessage,
   type ClientOp,
   type EphEvent,
+  type EphEventOut,
   type RefusalCode,
   type ServerMessage,
 } from "#shared/protocol.ts";
@@ -406,7 +407,7 @@ export type RoomStore = {
   /** `retry` for one op: `busy` or `gap` (design 7.4). Scene retries are the socket's. */
   retryOps(n: number): void;
   /** An event from `from` on the floor `sceneId`, which this device holds. */
-  receiveEph(from: string, sceneId: SceneId, e: EphEvent): void;
+  receiveEph(from: string, sceneId: SceneId, e: EphEventOut): void;
   /** `displays` is the number of table display sockets, which the server sends DM sockets only. */
   setPresence(online: string[], displays?: number): void;
   /** The server's `access` signal: what DM views show about getting in changed. */

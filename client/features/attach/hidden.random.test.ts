@@ -9,7 +9,7 @@ import { keys } from "#shared/keys.ts";
 import { CHUNK_CELLS, type AttachKind, type BuildChunk, type EdgeFeature, type RoomState, type Token, type Viewer } from "#shared/model.ts";
 import { RIDE_ON_YOUR_TURN, canApply, mayMoveToken } from "#shared/permissions.ts";
 import { applyChanges, inSightOfNonOwners, isPartyMember, ownsToken, projectState, type ProjectedState } from "#shared/project.ts";
-import type { Change, ClientOp, EphEvent, Op, ServerMessage } from "#shared/protocol.ts";
+import type { Change, ClientOp, EphEvent, EphEventOut, Op, ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import type { HistoryScope } from "#shared/undoContract.ts";
 import { undoScope } from "#shared/undoScope.ts";
@@ -1261,11 +1261,11 @@ function previewWorld(r: () => number): { state: RoomState; cart: { x: number; y
 }
 
 /** Each viewer's connection, keeping the frames it is sent. */
-function previewTable(): { conns: Map<string, Connection>; got: Map<string, EphEvent[]> } {
+function previewTable(): { conns: Map<string, Connection>; got: Map<string, EphEventOut[]> } {
   const conns = new Map<string, Connection>();
-  const got = new Map<string, EphEvent[]>();
+  const got = new Map<string, EphEventOut[]>();
   for (const who of [DM, P1, P2]) {
-    const inbox: EphEvent[] = [];
+    const inbox: EphEventOut[] = [];
     const socket = {
       readyState: 1,
       OPEN: 1,

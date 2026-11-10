@@ -35,11 +35,15 @@ export function floorRoot(root: FloorRoot): string {
 
 /**
  * The `search=` anchors of the floors controls, beside the scene settings'
- * own `scenes.*` ones. Move to floor has none (D-261108-350): it lives on the
- * token's action bar and More sheet, which carry no anchors.
+ * own `scenes.*` ones. Move to floor has none: it lives on the token's
+ * action bar and More sheet, which carry no anchors, and the search offers
+ * it as an action row per floor for the selected creature
+ * (docs/design/design-v1-floors.md phase 3, 5, D-261110-081).
  */
 export const FLOOR_SEARCH = {
   group: "scenes.floors",
+  /** The Map choice over the adds: Blank, VTT file or Dungeon (phase 3, 3.5). */
+  map: "scenes.floors.map",
   addAbove: "scenes.floors.add-above",
   addBelow: "scenes.floors.add-below",
   name: "scenes.floor.name",

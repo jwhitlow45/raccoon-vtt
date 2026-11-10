@@ -1,5 +1,5 @@
 import type { MemberId, SceneId } from "#shared/model.ts";
-import type { EphEvent } from "#shared/protocol.ts";
+import type { EphEventOut } from "#shared/protocol.ts";
 import { EMPTY_EPHEMERAL, type DragPreview, type Ephemeral, type LaserTrail, type Ping, type ViewRequest } from "./types.ts";
 
 /**
@@ -49,7 +49,7 @@ let viewSeq = 0;
 export function applyEph(
   eph: Ephemeral,
   from: MemberId,
-  e: EphEvent,
+  e: EphEventOut,
   now: number,
   opts: { local: boolean; role: "dm" | "player" },
 ): Ephemeral {

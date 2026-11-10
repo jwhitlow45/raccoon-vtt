@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { chunkKey, wallChunk } from "#shared/keys.ts";
 import { CHUNK_CELLS, type BuildChunk, type EdgeFeature, type FreeWall, type RoomState, type Viewer } from "#shared/model.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
-import { MAX_EPH_BYTES, type EphEvent, type Op, type ServerMessage } from "#shared/protocol.ts";
+import { MAX_EPH_BYTES, type EphEvent, type EphEventOut, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { canApply } from "#shared/permissions.ts";
 import { liftSubs, remember } from "#shared/discoveryTestutil.ts";
 import { projectState, withheldFromViewer } from "#shared/project.ts";
@@ -21,8 +21,8 @@ import { Connection } from "./connection.ts";
 import { cancelPreviews, MOST_PREVIEWS_SENT, PREVIEW_STALE_MS, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
 
 /** A connection that has had its snapshot, keeping what it is sent, on the clock given or the real one. */
-function viewer(who: Viewer, now?: () => number): { conn: Connection; got: EphEvent[] } {
-  const got: EphEvent[] = [];
+function viewer(who: Viewer, now?: () => number): { conn: Connection; got: EphEventOut[] } {
+  const got: EphEventOut[] = [];
   const socket = {
     readyState: 1,
     OPEN: 1,
@@ -536,7 +536,7 @@ describe("two sockets of one member on one preview", () => {
     const send = (from: Connection, e: EphEvent) => routeEphemeral(state, from, "s1", e, all);
     return { a, b, p1, all, send, tick: (ms: number) => (clock += ms) };
   }
-  const cancels = (got: EphEvent[]) => got.filter((e) => e.k === "dragCancel");
+  const cancels = (got: EphEventOut[]) => got.filter((e) => e.k === "dragCancel");
 
   test("the older socket's entry expiring leaves the newer one's drag on the screen", () => {
     const state = room();
@@ -769,8 +769,8 @@ describe("events on a scene with floors (docs/design/design-v1-floors.md 8.2)", 
   }
 
   /** A socket keeping every `eph` it is sent with its floor. */
-  function seat(who: Viewer, sceneId = "s1"): { conn: Connection; got: { sceneId: string; e: EphEvent }[] } {
-    const got: { sceneId: string; e: EphEvent }[] = [];
+  function seat(who: Viewer, sceneId = "s1"): { conn: Connection; got: { sceneId: string; e: EphEventOut }[] } {
+    const got: { sceneId: string; e: EphEventOut }[] = [];
     const socket = {
       readyState: 1,
       OPEN: 1,

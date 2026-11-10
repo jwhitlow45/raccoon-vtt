@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Actor, RoomState, Viewer } from "#shared/model.ts";
-import type { EphEvent, ServerMessage } from "#shared/protocol.ts";
+import type { EphEvent, EphEventOut, ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
 import { clearVisionCache } from "#shared/rules/vision.ts";
@@ -21,8 +21,8 @@ import { exploreOp } from "./explore.ts";
 
 const DISPLAY: Viewer = { memberId: "display:abcdefghijkl", role: "player" };
 
-function viewer(who: Viewer, display = false, now?: () => number): { conn: Connection; got: EphEvent[] } {
-  const got: EphEvent[] = [];
+function viewer(who: Viewer, display = false, now?: () => number): { conn: Connection; got: EphEventOut[] } {
+  const got: EphEventOut[] = [];
   const socket = {
     readyState: 1,
     OPEN: 1,
