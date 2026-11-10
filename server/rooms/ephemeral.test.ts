@@ -1009,6 +1009,9 @@ describe("a ruler carried over stairs (docs/design/design-v1-floors.md phase 3, 
       ["two ends that do not join", { ends: ["l1", "l1"] }, ATTIC],
       ["an end that does not exist", { ends: ["nope"] }, UPPER],
       ["a gone anchor", { anchors: ["ghost"] }, UPPER],
+      // Names an object's own keys never hold, which a plain index would find on the prototype.
+      ["an anchor named for the prototype", { anchors: ["constructor"] }, UPPER],
+      ["an end named for the prototype", { ends: ["constructor"] }, UPPER],
     ];
     for (const [name, over, sceneId] of cases) {
       const t = seats();

@@ -2,6 +2,7 @@ import { keys, partsKey, type EntityKey } from "#shared/keys.ts";
 import type { RoomState, Token, Viewer } from "#shared/model.ts";
 import { mayMoveToken } from "#shared/permissions.ts";
 import { ownsToken, perPlayerScene, projectEntity, withheldFromViewer } from "#shared/project.ts";
+import { ownEntry } from "#shared/records.ts";
 import { startFloor } from "#shared/rules/floors.ts";
 import { canSqueeze } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid } from "#shared/rules/grid.ts";
@@ -85,12 +86,12 @@ function onItsFloor(state: RoomState, sceneId: string, e: EphEvent): boolean {
  */
 function chainHolds(state: RoomState, sceneId: string, e: EphEvent): boolean {
   if (e.k !== "ruler" || e.prior === undefined) return true;
-  const ends = e.prior.ends.map((id) => state.floorLinks?.[id]);
+  const ends = e.prior.ends.map((id) => ownEntry(state.floorLinks, id));
   for (const [i, end] of ends.entries()) {
     if (end === undefined) return false;
     if (end.to !== (ends[i + 1]?.sceneId ?? sceneId)) return false;
   }
-  return e.prior.anchors.every((id) => state.tokens[id] !== undefined);
+  return e.prior.anchors.every((id) => ownEntry(state.tokens, id) !== undefined);
 }
 
 /**
