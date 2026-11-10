@@ -145,6 +145,27 @@ describe("sendFilledEntry, one op per holder", () => {
     assert.deepEqual(env.applies.getState().rolls["9:0"]?.applied, [{ holder: "character:c-thorn", name: "Thorn" }]);
   });
 
+  test("LP34-HP-1: a ref token's one-target entry records its character, so the chip for that token leaves", async () => {
+    const { oneTarget } = await import("../tokens/HpSection.tsx");
+    const { parseHpInput } = await import("../tokens/hpInput.ts");
+    const { applyTargets } = await import("./targets.ts");
+    const view = table();
+    const { env, sent } = harness(view);
+    const chip = rollChip([slash("dm1")])!;
+    const parsed = parseHpInput(String(chip.amount), "damage", chip);
+    assert.ok(parsed.ok);
+    const ref = view.tokens.thorn!;
+    const entry = oneTarget({ tokenId: ref.id }, "all", false, { name: "Thorn", dead: false, max: 20 }, ref);
+    assert.equal(entry.holder, "character:c-thorn");
+    const you = { role: "dm" as const, memberId: "dm1" };
+    const chips = (leave?: ReadonlySet<string>) => applyTargets({ view, you, sceneId: "s1", origin: { tokenId: "g1" }, selected: [], leave }).map((t) => t.tokenId);
+    assert.ok(chips().includes("thorn"), "the chip starts in its row");
+    sendFilledEntry(env, [entry], parsed.change, false, chip);
+    sent[0]!.onAnswer!("taken");
+    const applied = new Set(env.applies.getState().rolls["9:0"]!.applied.map((a) => a.holder));
+    assert.ok(!chips(applied).includes("thorn"), "the chip is gone once applied");
+  });
+
   test("recordApplied dedupes by holder within one call", () => {
     const applies = applySlot.create();
     recordApplied(applies, "9:0", [{ holder: "character:c-thorn", name: "Thorn" }, { holder: "character:c-thorn", name: "Thorn" }]);
