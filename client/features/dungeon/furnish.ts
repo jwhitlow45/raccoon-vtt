@@ -1,3 +1,7 @@
+import { FOG_SUBCELLS } from "#shared/model.ts";
+import { stampCells } from "#shared/project.ts";
+import { hexAt, type HexGrid } from "#shared/rules/hex.ts";
+import { hexGridOf, type Lattice } from "./lattice.ts";
 import type { Side } from "./layout.ts";
 import type { Board } from "./layout.ts";
 import type { PlanStamp } from "./plan.ts";
@@ -94,6 +98,134 @@ export function furnish(rng: Stream, input: FurnishInput): Furnished[] {
         for (let yy = y; yy < y + bh; yy++) for (let xx = x; xx < x + bw; xx++) squares.push(board.cell(xx, yy));
         for (const k of squares) used.add(k);
         out.push({ room: i, squares, stamp: { key, x: x + bw / 2, y: y + bh / 2, w: size.w, h: size.h, rotation } });
+        total++;
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+// ------------------------------------------------------------ hexes
+
+/** A stamp's place and size, as its whole-cell box reads it. */
+export type StampBox = Pick<PlanStamp, "x" | "y" | "w" | "h" | "rotation">;
+
+/** Hex steps a stamp's box keeps from every doorway's inside hex (phase 3, 2.4): none within 2. */
+export const STAMP_DOOR_STEPS = 2;
+
+/** Steps between two cells of the hex rows lattice. */
+export function latticeDistance(W: number, a: number, b: number): number {
+  const ax = a % W;
+  const ay = (a - ax) / W;
+  const bx = b % W;
+  const by = (b - bx) / W;
+  const aq = ax - Math.floor(ay / 2);
+  const bq = bx - Math.floor(by / 2);
+  const dq = aq - bq;
+  const dr = ay - by;
+  return Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr));
+}
+
+/**
+ * The stamp rule on hexes (phase 3, 2.4, D-261110-178). A player gets a
+ * stamp unless every fog sub-cell of its whole-cell box is fogged
+ * (shared/project.ts `stampCells`), so a box reaching past its room's walls
+ * would show the room's contents early. A stamp stands only where every
+ * sub-cell of its box lies in a hex `allowed` passes: its own room's floor,
+ * more than 2 steps from any doorway's inside hex.
+ */
+export class HexStamps {
+  readonly #L: Lattice;
+  readonly #g: HexGrid;
+  readonly #cells = new Map<number, readonly number[]>();
+
+  constructor(L: Lattice) {
+    if (L.kind === "squares") throw new Error("HexStamps reads a hex lattice");
+    this.#L = L;
+    this.#g = hexGridOf(L.kind);
+  }
+
+  /** The lattice cells holding a scene cell's fog sub-cells, -1 for one off the scene's hexes. */
+  hexesOf(cx: number, cy: number): readonly number[] {
+    const id = cy * 100_000 + cx;
+    const known = this.#cells.get(id);
+    if (known) return known;
+    const L = this.#L;
+    const out = new Set<number>();
+    for (let j = 0; j < FOG_SUBCELLS; j++) {
+      for (let i = 0; i < FOG_SUBCELLS; i++) {
+        const h = hexAt(this.#g, { x: cx + (i + 0.5) / FOG_SUBCELLS, y: cy + (j + 0.5) / FOG_SUBCELLS });
+        const [x, y] = L.kind === "hexRows" ? [h.col, h.row] : [h.row, h.col];
+        out.add(L.inMap(x, y) ? y * L.W + x : -1);
+      }
+    }
+    const list = [...out];
+    this.#cells.set(id, list);
+    return list;
+  }
+
+  /** Every hex a stamp's box touches by a sub-cell, -1 among them when it reaches off the scene. */
+  touched(stamp: StampBox): number[] {
+    const box = stampCells(stamp);
+    const out = new Set<number>();
+    for (let y = box.y0; y < box.y1; y++) for (let x = box.x0; x < box.x1; x++) for (const k of this.hexesOf(x, y)) out.add(k);
+    return [...out];
+  }
+
+  fits(stamp: StampBox, allowed: (k: number) => boolean): boolean {
+    return this.touched(stamp).every((k) => k >= 0 && allowed(k));
+  }
+}
+
+export type HexFurnishInput = Omit<FurnishInput, "ground"> & {
+  stamps: HexStamps;
+  lattice: Lattice;
+  /** Hexes of a room a stamp's box may cover: its floor away from the doorways and off what stands there. */
+  allowed: (room: number, k: number) => boolean;
+};
+
+/**
+ * Dressing on hexes (2.4): the draws of `furnish`, each room's count, key
+ * and turn, but each prop centered on one of its room's free hexes where
+ * the stamp rule holds and its box shares no hex with a prop before it. A
+ * prop with no such spot is left out.
+ */
+export function furnishHex(rng: Stream, input: HexFurnishInput): Furnished[] {
+  const { board, lattice: L } = input;
+  const out: Furnished[] = [];
+  if (input.dressing === "none") return out;
+  let total = input.total;
+  const used = new Set<number>();
+  for (const i of input.rooms) {
+    const list = input.props(i);
+    let want = input.dressing === "full" ? rng.int(2, 4) : rng.chance(...SOME_ROOMS) ? rng.int(1, 2) : 0;
+    want = Math.max(0, Math.min(want, MAX_ROOM_STAMPS - input.held(i), MAX_STAMPS - total));
+    const r = board.rooms[i]!;
+    const ok = (k: number) => !used.has(k) && input.allowed(i, k);
+    for (let n = 0; n < want; n++) {
+      for (let t = 0; t < PROP_TRIES; t++) {
+        const key = rng.pick(list);
+        const size = stampSize(key);
+        const wall = WALL_PIECES.has(key);
+        const side = wall ? rng.pick(["n", "e", "s", "w"] as const) : null;
+        const rotation = side ? ((WALL_TURN[side] + (size && size.h > size.w ? 90 : 0)) % 360) as 0 | 90 | 180 | 270 : rng.pick(TURNS);
+        if (!size) continue;
+        const spots: { x: number; y: number; hexes: number[] }[] = [];
+        for (let y = r.y; y < r.y + r.h; y++) {
+          for (let x = r.x; x < r.x + r.w; x++) {
+            const k = board.cell(x, y);
+            if (!input.free(i, k) || !ok(k)) continue;
+            const [px, py] = L.pointOf(x, y);
+            const stamp = { x: px, y: py, w: size.w, h: size.h, rotation };
+            const hexes = input.stamps.touched(stamp);
+            if (hexes.every((h) => h >= 0 && ok(h))) spots.push({ x: px, y: py, hexes });
+          }
+        }
+        if (spots.length === 0) continue;
+        const spot = rng.pick(spots);
+        for (const h of spot.hexes) used.add(h);
+        out.push({ room: i, squares: spot.hexes, stamp: { key, x: spot.x, y: spot.y, w: size.w, h: size.h, rotation } });
         total++;
         break;
       }

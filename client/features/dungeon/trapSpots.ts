@@ -7,6 +7,8 @@ import { trapPreset, type LevelBand } from "#shared/srd/traps.ts";
 import { boardTheme } from "../../lib/theme.ts";
 import { builderScene } from "../scenes/create.ts";
 import { blankToken } from "../tokens/factory.ts";
+import { wallPlaceholder } from "./hexWalls.ts";
+import type { Lattice } from "./lattice.ts";
 import type { Board } from "./layout.ts";
 import type { PlanStamp, PlanTrap } from "./plan.ts";
 import type { Stream } from "./random.ts";
@@ -76,6 +78,8 @@ export type Spot = {
   statue?: { x: number; y: number; w: number; h: number; rotation: 0 | 90 | 180 | 270 };
   /** A Rolling Stone's 2 by 2 squares, top left. */
   stone?: [number, number];
+  /** On hexes, a Poisoned Needle's leaf: its index in the plan's walls. */
+  leaf?: number;
   /** Every square it takes, so no two traps share one. */
   squares: number[];
 };
@@ -393,6 +397,7 @@ export function pickTraps(rng: Stream, spots: readonly Spot[], count: number, re
       const b = spot.statue;
       out.statues.push({ key: STATUE_STAMP.key, x: b.x + b.w / 2, y: b.y + b.h / 2, w: STATUE_STAMP.w, h: STATUE_STAMP.h, rotation: b.rotation });
     }
+    if (spot.leaf !== undefined) trap.leaf = spot.leaf;
     if (spot.stone) {
       trap.stone = out.stones.length;
       out.stones.push(spot.stone);
@@ -485,4 +490,128 @@ export function statueReaches(r: Reach): boolean {
 export function originGround(r: Pick<Reach, "w" | "ground" | "cone">): number {
   const [ox, oy] = r.cone.origin;
   return r.ground.get(Math.floor(oy - 0.5) * r.w + Math.floor(ox - 0.5)) ?? 0;
+}
+
+// ------------------------------------------------------------ hexes
+
+export type HexSpotInput = Omit<SpotInput, "locked" | "stones" | "statueRooms" | "blockFree" | "plateFree"> & {
+  lattice: Lattice;
+  /** A rectangle of lattice cells as the scene's keys: itself on Hex rows, mirrored on Hex columns. */
+  rect: (r: CellRect) => CellRect;
+  /** A cell's side toward a hex direction, as its ends in the scene. */
+  side: (k: number, dir: number) => [[number, number], [number, number]];
+  /** Locked doors off the entrance room: each one's leaf (the middle one on Wide) by its index in the walls and its chunk, and its middle, doubled, in lattice cells. */
+  needles: readonly { leaf: number; cx: number; cy: number; mid: [number, number] }[];
+};
+
+const onWallLattice = (v: number) => Math.round(v * 64) / 64 + 0;
+
+/**
+ * Where traps go on hexes (phase 3, 2.4): pits on a room's doorway line or
+ * in a Wide corridor, a Falling Net's or a Collapsing Roof's wire through a
+ * Narrow corridor hex's center between two opposite walled sides'
+ * midpoints, Poisoned Darts on a long Narrow stretch, and a Poisoned
+ * Needle on a locked door's leaf. Zones and the hexes they hit are the
+ * scene's keys. No Rolling Stone, and the statue waits on a hex probe of
+ * its cone (a follow-up), so neither stands on hexes.
+ */
+export function hexTrapSpots(input: HexSpotInput): Spot[] {
+  const { board, wide, lattice: L } = input;
+  const W = board.W;
+  const out: Spot[] = [];
+  const { w: pw, h: ph } = pitSize();
+  const cellsOf = (r: CellRect) => {
+    const cells: number[] = [];
+    for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) cells.push(y * W + x);
+    return cells;
+  };
+  const pitAt = (x: number, y: number, needLine: boolean): Spot | null => {
+    let line = false;
+    for (let j = 0; j < ph; j++) {
+      for (let i = 0; i < pw; i++) {
+        if (!board.inMap(x + i, y + j)) return null;
+        const k = board.cell(x + i, y + j);
+        if (!input.floorFree(k)) return null;
+        if (input.onLine(k)) line = true;
+      }
+    }
+    if (needLine && !line) return null;
+    const rect = { x, y, w: pw, h: ph };
+    return { kind: "pit", zone: { cells: [input.rect(rect)] }, mid: [2 * x + pw, 2 * y + ph], squares: cellsOf(rect) };
+  };
+  for (const i of input.rooms) {
+    const r = board.rooms[i]!;
+    for (let y = r.y; y + ph <= r.y + r.h; y++) {
+      for (let x = r.x; x + pw <= r.x + r.w; x++) {
+        const spot = pitAt(x, y, true);
+        if (spot) out.push(spot);
+      }
+    }
+  }
+  const corridor = new Set(input.corridor);
+  const painted = (k: number | null) => k !== null && input.painted(k);
+  /** A wire through a hex's center across its corridor: between the midpoints of the first opposite pair of rock sides that parts its two floor neighbors. */
+  const wireAt = (k: number): TrapZone | null => {
+    const open = [0, 1, 2, 3, 4, 5].filter((d) => painted(L.step(k, d, 1)));
+    if (open.length !== 2) return null;
+    for (let d = 0; d < 3; d++) {
+      if (open.includes(d) || open.includes(d + 3)) continue;
+      const half = (e: number) => ((e - d + 6) % 6 < 3 ? 0 : 1);
+      if (half(open[0]!) === half(open[1]!)) continue;
+      const mid = (dir: number): [number, number] => {
+        const [a, b] = input.side(k, dir);
+        return [onWallLattice((a[0] + b[0]) / 2), onWallLattice((a[1] + b[1]) / 2)];
+      };
+      return { wire: { a: mid(d), b: mid(d + 3) } };
+    }
+    return null;
+  };
+  /** A hex on a straight stretch along an offset axis: corridor open to a trap, whose only floor neighbors lie along the axis. */
+  const straight = (x: number, y: number, alongX: boolean): boolean => {
+    if (!board.inMap(x, y)) return false;
+    const k = y * W + x;
+    if (!corridor.has(k) || !input.hitFree(k)) return false;
+    const along = alongX ? [k - 1, k + 1] : [k - W, k + W];
+    return L.halo(k).every((n) => !input.painted(n) || along.includes(n));
+  };
+  if (wide) {
+    const seen = new Set<number>();
+    for (const k of input.corridor) {
+      const x = k % W;
+      const y = (k - x) / W;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      let all = true;
+      for (let j = 0; j < ph && all; j++) for (let i = 0; i < pw; i++) if (!corridor.has(k + j * W + i) || !board.inMap(x + i, y + j)) all = false;
+      if (!all) continue;
+      const spot = pitAt(x, y, false);
+      if (spot) out.push(spot);
+    }
+  } else {
+    for (const k of input.corridor) {
+      if (!input.floorFree(k)) continue;
+      const zone = wireAt(k);
+      if (zone) out.push({ kind: "net", zone, mid: [2 * (k % W) + 1, 2 * Math.floor(k / W) + 1], squares: [k] });
+    }
+    const seen = new Set<string>();
+    for (const k of input.corridor) {
+      const x = k % W;
+      const y = (k - x) / W;
+      for (const alongX of [true, false]) {
+        const id = `${x},${y},${alongX}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const at = (t: number): [number, number] => (alongX ? [x + t, y] : [x, y + t]);
+        const run = (reach: number) => Array.from({ length: 2 * reach + 1 }, (_, i) => i - reach).every((t) => straight(...at(t), alongX));
+        if (!input.floorFree(k)) continue;
+        const hit = (reach: number): CellRect => (alongX ? { x: x - reach, y, w: 2 * reach + 1, h: 1 } : { x, y: y - reach, w: 1, h: 2 * reach + 1 });
+        const mid: [number, number] = [2 * x + 1, 2 * y + 1];
+        const wire = wireAt(k);
+        if (wire && run(1)) out.push({ kind: "roof", zone: wire, hits: [input.rect(hit(1))], mid, squares: cellsOf(hit(1)) });
+        if (run(DART_REACH)) out.push({ kind: "darts", zone: { cells: [input.rect({ x, y, w: 1, h: 1 })] }, hits: [input.rect(hit(DART_REACH))], mid, squares: cellsOf(hit(DART_REACH)) });
+      }
+    }
+  }
+  for (const n of input.needles) out.push({ kind: "needle", zone: { door: { cx: n.cx, cy: n.cy, id: wallPlaceholder(n.leaf) } }, mid: n.mid, squares: [], leaf: n.leaf });
+  return out;
 }

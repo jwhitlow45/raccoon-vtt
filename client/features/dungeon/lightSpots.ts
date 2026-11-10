@@ -12,7 +12,8 @@ import type { ThemeSpec } from "./themes.ts";
  * walls as a placed light does.
  */
 
-export type LitRoom = { room: number; light: PlanLight; stamp: PlanStamp; square: number };
+/** A lit room: its light, the stamp picturing it (none for a hex light whose stamp fits nowhere, phase 3, 2.4), and its square. */
+export type LitRoom = { room: number; light: PlanLight; stamp?: PlanStamp; square: number };
 
 /**
  * Lights `count` rooms (5.5): the kept rooms in an order drawn from the
@@ -59,6 +60,72 @@ export function placeLights(rng: Stream, board: Board, rooms: readonly number[],
       square: k,
       light: { x, y, preset: theme.light.preset, label: theme.light.label, stamp: theme.light.stamp },
       stamp: { key: theme.light.stamp, x, y, w: size.w, h: size.h, rotation: 0 },
+    });
+  }
+  return out;
+}
+
+/**
+ * Lit rooms on hexes (phase 3, 2.4): the draws of `placeLights`, each lit
+ * room's spot among the free hexes nearest a corner where its stamp's box
+ * keeps the stamp rule, its light at the hex's center. A room with no such
+ * hex takes its light alone, a light with no picture, at the free edge hex
+ * nearest a corner as on squares, and the key still names it.
+ */
+export function placeLightsHex(
+  rng: Stream,
+  board: Board,
+  rooms: readonly number[],
+  count: number,
+  own: (room: number, k: number) => boolean,
+  free: (room: number, k: number) => boolean,
+  theme: ThemeSpec,
+  stampFits: (room: number, stamp: PlanStamp) => boolean,
+): LitRoom[] {
+  const out: LitRoom[] = [];
+  if (count <= 0) return out;
+  const L = board.lattice;
+  const size = stampSize(theme.light.stamp) ?? { w: 1, h: 1 };
+  const stampAt = (k: number): PlanStamp => {
+    const [x, y] = L.pointOf(k % board.W, Math.floor(k / board.W));
+    return { key: theme.light.stamp, x, y, w: size.w, h: size.h, rotation: 0 };
+  };
+  for (const i of rng.shuffle([...rooms])) {
+    if (out.length >= count) break;
+    const r = board.rooms[i]!;
+    const corners: [number, number][] = [
+      [r.x, r.y],
+      [r.x + r.w - 1, r.y],
+      [r.x, r.y + r.h - 1],
+      [r.x + r.w - 1, r.y + r.h - 1],
+    ];
+    const nearest = (pass: (k: number) => boolean) => {
+      let best: number[] = [];
+      let bestD = Infinity;
+      for (let y = r.y; y < r.y + r.h; y++) {
+        for (let x = r.x; x < r.x + r.w; x++) {
+          const k = board.cell(x, y);
+          if (!free(i, k) || !pass(k)) continue;
+          const d = Math.min(...corners.map(([cx, cy]) => Math.max(Math.abs(x - cx), Math.abs(y - cy))));
+          if (d < bestD) {
+            best = [k];
+            bestD = d;
+          } else if (d === bestD) best.push(k);
+        }
+      }
+      return best;
+    };
+    const pictured = nearest((k) => stampFits(i, stampAt(k)));
+    const alone = pictured.length > 0 ? [] : nearest((k) => L.halo(k).some((n) => !own(i, n)) || L.halo(k).length < 6);
+    const best = pictured.length > 0 ? pictured : alone;
+    if (best.length === 0) continue;
+    const k = rng.pick(best);
+    const stamp = stampAt(k);
+    out.push({
+      room: i,
+      square: k,
+      light: { x: stamp.x, y: stamp.y, preset: theme.light.preset, label: theme.light.label, stamp: theme.light.stamp },
+      ...(pictured.length > 0 ? { stamp } : {}),
     });
   }
   return out;
