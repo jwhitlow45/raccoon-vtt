@@ -1236,6 +1236,43 @@ describe("floors phase 3 over the wire: the privacy twins (phase 3, 6)", () => {
     close(a, b);
   });
 
+  test("T3, one batch that sets hidden Loft's height and hides Attic ends the ruler Ana showed on Attic, Loft 10 ft against 30 ft alike (FL3-SOL-02)", async () => {
+    /** Tower: Ground floor, Attic above it shown to players with a gargoyle and its damage line, and Loft above Attic, `height` ft high, hidden. */
+    const loftRoom = async (height: number) => {
+      const r = await newRoom(t, "Mixed batch");
+      await ok(r.dmSocket, { t: "scene.update", sceneId: r.ground, patch: { name: "Tower" } });
+      const attic = await floor(r, r.ground, "above", "Attic");
+      await ok(r.dmSocket, { t: "floor.open", sceneId: attic, open: true } as Op);
+      const loft = await floor(r, attic, "above", "Loft");
+      await ok(r.dmSocket, { t: "scene.update", sceneId: loft, patch: { floor: { height } } } as Op);
+      const gargoyle = await create(r, attic, { name: "Gargoyle", x: 6, y: 5 });
+      await ok(r.dmSocket, { t: "actor.hp", target: { tokenId: gargoyle }, change: { kind: "damage", amount: 3 } } as Op);
+      const x = await seated(r, r.ground, [[r.ground, "ground"], [attic, "attic"], [gargoyle, "gargoyle"]], [loft, "Loft", '"height":']);
+      return { ...x, attic, loft, gargoyle };
+    };
+    const a = await loftRoom(10);
+    const b = await loftRoom(30);
+    const ruler: EphEvent = { k: "ruler", id: "attic-ruler", points: [{ x: 2.5, y: 2.5 }, { x: 6.5, y: 2.5 }] };
+    for (const x of [a, b]) {
+      send(x.seats.bree.socket, x.attic, ruler);
+      await x.sync("Bree measures on Attic");
+      assert.deepEqual(ephs(x.seats.ana).at(-1)?.e, ruler, "Ana shows Bree's ruler");
+    }
+    await alike(a, b, "Bree measures on Attic");
+    for (const x of [a, b]) assert.ok(x.seats.ana.view.log.some((l) => JSON.stringify(l).includes(x.gargoyle)), "Ana reads the gargoyle's line");
+    for (const x of [a, b]) {
+      const height = x.dmSocket.op({ t: "scene.update", sceneId: x.loft, patch: { floor: { height: 30 } } } as Op);
+      const hide = x.dmSocket.op({ t: "floor.open", sceneId: x.attic, open: false } as Op);
+      const ev = await x.dmSocket.next("ev", (m) => (m.acks ?? []).includes(hide));
+      assert.deepEqual([ev.acks?.includes(height), ev.rejects ?? []], [true, []], "both ops in one batch");
+      await x.sync("Loft set to 30 ft and Attic hidden in one batch");
+      assert.deepEqual(ephs(x.seats.ana).at(-1)?.e, { k: "rulerEnd", id: "attic-ruler" }, "Ana's screen drops the ruler");
+      assert.ok(!stableStringify(x.seats.ana.view).includes(x.gargoyle), "the gargoyle and its line go with Attic");
+    }
+    await alike(a, b, "Loft set to 30 ft and Attic hidden in one batch");
+    close(a, b);
+  });
+
   test("T3, `rise` under the fog: every player holds both floors with the stairs fogged at both ends, so no end and no `rise`, Attic 10 ft against 30 ft alike", async () => {
     const a = await riseRoom(10, true);
     const b = await riseRoom(30, true);

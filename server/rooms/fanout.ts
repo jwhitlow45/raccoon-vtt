@@ -426,7 +426,10 @@ const NAMED_BY_PREVIEWS = new Set(["token", "floorLink"]);
  * connection is on a global batch, so the rows, casts, roll requests and
  * log lines of a floor it gains or loses come and go with the floor
  * (docs/design/design-v1-floors.md 8.1). The answer says whether any did, so
- * the actor judges held previews again.
+ * the actor judges held previews again. It is read on a global batch too,
+ * since a height edit is global and judges no preview by itself
+ * (Tx.rejudge), and a floor hidden in the same batch must still end what
+ * showed on it (review FL3-SOL-02).
  *
  * `lost` is given, for each connection, the token and end keys whose
  * deleted change the batch sent it, after its `ev` (docs/design/design-v1-floors.md
@@ -444,7 +447,7 @@ export function publishBatch(
   const all = [...connections];
   const live = all.filter((conn) => !conn.closed && conn.held !== null);
   const held = new Map(live.map((conn) => [conn, heldBy(batch.after, conn)] as const));
-  const changed = new Set(batch.global ? [] : live.filter((conn) => !sameFloors(heldBy(batch.before, conn), held.get(conn)!)));
+  const changed = new Set(live.filter((conn) => !sameFloors(heldBy(batch.before, conn), held.get(conn)!)));
   // In key order, never the order the reducer wrote them, so the order of a viewer's changes says nothing of work they never see.
   const candidates = [
     ...candidateKeys(
