@@ -4,6 +4,7 @@ import type { Token } from "#shared/model.ts";
 import { MAX_ENTRIES_PER_OP, type EntryInput } from "#shared/protocol.ts";
 import { Button } from "../components/Button.tsx";
 import { Empty } from "../components/Empty.tsx";
+import { Spinner } from "../components/Loading.tsx";
 import { QuickStartLink } from "../features/guide/GuideLink.tsx";
 import { Help, Section } from "../components/Panel.tsx";
 import { Segmented } from "../components/Segmented.tsx";
@@ -267,6 +268,25 @@ function standardRowPx(list: HTMLElement): number {
 const PAD_TOP = "var(--pane-pad-top, 0px)";
 const PAD_X = "var(--pane-pad-x, 0px)";
 
+/**
+ * A turn control's words while a turn change waits: the spinner stands in
+ * their place once the shared delay passes, and the words stay, unseen, so
+ * the button keeps its width and its name, and the compact header keeps
+ * its form (as EndTurnPill does).
+ */
+function TurnWords(props: { shown: boolean; children: ReactNode }) {
+  return (
+    <span style={{ position: "relative", display: "inline-grid", placeItems: "center" }}>
+      {props.shown ? (
+        <span style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
+          <Spinner size={theme.icon.sm} />
+        </span>
+      ) : null}
+      <span style={{ opacity: props.shown ? 0 : 1 }}>{props.children}</span>
+    </span>
+  );
+}
+
 function TurnControls(props: { compact: boolean; onCompactShown(): void; onContentChange(): void }) {
   const you = useYou();
   const actions = useRoomActions();
@@ -345,20 +365,19 @@ function TurnControls(props: { compact: boolean; onCompactShown(): void; onConte
         {heading}
         {buttons(
           <>
-            <Button size="sm" disabled={!canGoBack} busy={turnWait.shown} aria-busy={turnWait.waits || undefined} onClick={() => turnPress("encounter.prev")} aria-label="Previous turn">
-              Previous
+            <Button size="sm" disabled={!canGoBack} aria-busy={turnWait.waits || undefined} onClick={() => turnPress("encounter.prev")} aria-label="Previous turn">
+              <TurnWords shown={turnWait.shown}>Previous</TurnWords>
             </Button>
             <Button
               size="sm"
               variant="primary"
               disabled={entries.length === 0}
-              busy={turnWait.shown}
               aria-busy={turnWait.waits || undefined}
               title={turnKey ? withKey(activeEntryId === null ? "Start" : "Next", turnKey) : undefined}
               aria-keyshortcuts={turnKey?.aria}
               onClick={() => turnPress("encounter.next")}
             >
-              {activeEntryId === null ? "Start" : "Next"}
+              <TurnWords shown={turnWait.shown}>{activeEntryId === null ? "Start" : "Next"}</TurnWords>
             </Button>
           </>,
         )}
@@ -781,7 +800,6 @@ function DmSettings() {
             variant="danger"
             search="tracker.end"
             armed={confirmEnd}
-            busy={turnWait.shown}
             aria-busy={turnWait.waits || undefined}
             onClick={() => {
               if (turnWait.waits) return;
@@ -793,7 +811,7 @@ function DmSettings() {
               actions.dispatch({ t: "encounter.end" });
             }}
           >
-            {confirmEnd ? "Tap again to end the fight" : "End the fight"}
+            <TurnWords shown={turnWait.shown}>{confirmEnd ? "Tap again to end the fight" : "End the fight"}</TurnWords>
           </Button>
         </Wrap>
       </Section>
