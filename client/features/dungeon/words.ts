@@ -14,10 +14,6 @@ import type { Summary } from "./client.ts";
 
 export const GENERATE_LEAD = "Or start from a generated dungeon";
 export const HEX_NOTE = "Generated dungeons are squares for now. Pick Squares above to make one.";
-/** Why Dungeon is off in the Floors group's Map on a hex scene (docs/design/design-v1-floors.md phase 3, 3.5, D-261110-075). */
-export function floorHexNote(sceneName: string): string {
-  return `Generated dungeons are squares for now, and ${sceneName}'s floors are hexes.`;
-}
 
 export const THEME_HELP = {
   dungeon: "Stone and wood rooms, closed and locked doors, rubble and pits.",

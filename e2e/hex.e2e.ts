@@ -14,6 +14,7 @@ import { cornerAt, hexAt, hexCenter, hexCorners, hexDistance, hexKey, hexNeighbo
 import { hexCellsOutline } from "../client/features/fog/shapes.ts";
 import { arrowStep, isometric } from "../client/lib/view.ts";
 import { HEX_LIMITS, NEW_SCENES_HELP } from "../client/features/grid/words.ts";
+import { fileHexReason, floorHexNote } from "../client/features/scenes/floorWords.ts";
 import { calibrationFromHexFind } from "../client/features/grid/calibrate.ts";
 import { drawMap } from "../client/features/grid/synthetic.ts";
 import { assertCanvasAt, barControl, ConsoleWatch, dragWorld, expandBar, openSceneGroup, openSideTab, sceneGroup, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
@@ -496,13 +497,26 @@ async function sideways(inside: Locator, screen: string): Promise<string[]> {
 /** The limit lines, which say what a hex scene leaves to squares (section 6's table). Walking and an area's movement inside are hexes' from H2. */
 const LIMIT_LINES = new Set<string>(Object.values(HEX_LIMITS));
 
-/** Every word "square" the page shows, but the Squares choices' own name and H1's limit lines. */
-async function squareWords(page: Page): Promise<string[]> {
+/**
+ * The Floors group's reasons VTT file and Dungeon are off on a hex scene
+ * (FloorsGroup.tsx): they say why with the word, since a file's walls and
+ * a generated dungeon lie on squares (D-261110-075). Each alone and as the
+ * group joins them.
+ */
+function floorHexLines(sceneName: string): Set<string> {
+  const file = fileHexReason(sceneName);
+  const dungeon = floorHexNote(sceneName);
+  return new Set([file, dungeon, `${file} ${dungeon}`]);
+}
+
+/** Every word "square" the page shows, but the Squares choices' own name, H1's limit lines and the Floors group's hex reasons. */
+async function squareWords(page: Page, sceneName: string): Promise<string[]> {
   const text = await page.locator("body").innerText();
+  const floorLines = floorHexLines(sceneName);
   return text
     .split("\n")
     .map((line: string) => line.trim())
-    .filter((line) => line !== "Squares" && !LIMIT_LINES.has(line) && /square/i.test(line));
+    .filter((line) => line !== "Squares" && !LIMIT_LINES.has(line) && !floorLines.has(line) && /square/i.test(line));
 }
 
 /** Opens the room at a size and interface scale, from a new navigation. */
@@ -1084,9 +1098,10 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     const panel = await openScenes(dm);
     await openSceneGroup(panel, "Map and grid");
     await openSceneGroup(panel, "Size and view");
-    assert.deepEqual(await squareWords(dm), [], "the DM's screen");
+    const camp = dmSocket.state!.scenes[run.camp]!.name;
+    assert.deepEqual(await squareWords(dm, camp), [], "the DM's screen");
     await pat.bringToFront();
-    assert.deepEqual(await squareWords(pat), [], "Pat's screen");
+    assert.deepEqual(await squareWords(pat, camp), [], "Pat's screen");
     await dm.bringToFront();
   });
 

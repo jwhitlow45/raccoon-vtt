@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { keyTitle } from "./keyPage.ts";
-import { entranceSide, fitLine, floorHexNote, floorKeyName, floorOutcomeText, floorTitle, fogLine, MAKE_FLOOR, makingLine, MAKING_FLOOR, NO_FOG_WARNING, outcomeText, previewName, roomsHint, sizeLine, statusLine } from "./words.ts";
+import { entranceSide, fitLine, floorKeyName, floorOutcomeText, floorTitle, fogLine, MAKE_FLOOR, makingLine, MAKING_FLOOR, NO_FOG_WARNING, outcomeText, previewName, roomsHint, sizeLine, statusLine } from "./words.ts";
 
 test("DG-C: the size line in the room's feet per square", () => {
   assert.equal(sizeLine(30, 30, 5), "30 × 30 squares (150 by 150 ft)");
@@ -126,12 +126,11 @@ test("Make starts the scene dark under party vision for lit rooms, and Keep it l
 });
 
 // Generate a dungeon aimed at a floor (docs/design/design-v1-floors.md phase 3, 3.5 and 3.7).
-test("FL3S: a floor's title, Make, the busy Hide, the hex reason and the key page's title, from the stored name", () => {
+test("FL3S: a floor's title, Make, the busy Hide and the key page's title, from the stored name", () => {
   assert.equal(floorTitle("below", "Ground floor"), "Generate a dungeon below Ground floor");
   assert.equal(floorTitle("above", "Ground floor"), "Generate a dungeon above Ground floor");
   assert.equal(MAKE_FLOOR, "Make the floor");
   assert.equal(MAKING_FLOOR, "Making the floor…");
-  assert.equal(floorHexNote("Tower"), "Generated dungeons are squares for now, and Tower's floors are hexes.");
   assert.equal(keyTitle(floorKeyName("Tower", "Crypt 2")), "Tower · Crypt 2 key");
 });
 

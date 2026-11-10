@@ -8,9 +8,8 @@ import type { RoomState } from "#shared/model.ts";
 import { drawing, member, scene } from "#shared/testutil.ts";
 import { RoomScope } from "../../state/scope.ts";
 import { tower, TOWER, UPPER } from "../floors/testing.ts";
-import { fileHexReason, FLOOR_MAP_HELP, playersAt } from "./floorWords.ts";
+import { fileHexReason, floorHexNote, FLOOR_MAP_HELP, playersAt } from "./floorWords.ts";
 import { SCENES_FULL } from "./floorSource.ts";
-import { floorHexNote } from "../dungeon/words.ts";
 
 /*
  * The Floors group's rows read only what their marks read (floorWords.ts

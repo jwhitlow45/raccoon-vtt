@@ -12,14 +12,13 @@ import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { GenerateDialog } from "../dungeon/GenerateDialog.tsx";
-import { floorHexNote } from "../dungeon/words.ts";
 import { FLOOR_ROOT_ATTR, FLOOR_ROOTS } from "../floors/ids.ts";
 import { ImportDialog } from "../uvtt/ImportDialog.tsx";
 import { EXTENSIONS, fileSizeProblem, thisDevice, type Device } from "../uvtt/limits.ts";
 import { newSceneIntent, newScenePreset } from "./create.ts";
 import { FloorPage } from "./FloorPage.tsx";
 import { floorAddRefusal } from "./floorSource.ts";
-import { fileHexReason, FLOOR_MAP_HELP, FLOOR_MAP_NAME, FLOOR_MAP_OPTIONS, FLOOR_MARKS, floorRowLabel, floorsSummary, floorsTopFirst, ON_SCREEN, playersAt, type FloorMap } from "./floorWords.ts";
+import { fileHexReason, floorHexNote, FLOOR_MAP_HELP, FLOOR_MAP_NAME, FLOOR_MAP_OPTIONS, FLOOR_MARKS, floorRowLabel, floorsSummary, floorsTopFirst, ON_SCREEN, playersAt, type FloorMap } from "./floorWords.ts";
 import { SCENE_GROUP_ICONS, SCENE_GROUP_LABELS } from "./settingsFolds.ts";
 
 type Side = "above" | "below";
