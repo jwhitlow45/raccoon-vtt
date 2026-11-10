@@ -3,19 +3,23 @@ import { test } from "node:test";
 import fc from "fast-check";
 import { holds } from "#shared/propertyTestutil.ts";
 import { DungeonPreviews, type Preview, type PreviewWorker } from "./client.ts";
+import type { WingBase } from "./plan.ts";
 import { dialogScene, twoRooms } from "./handPlans.ts";
 import { DEFAULT_CONTEXT, DEFAULT_SETTINGS } from "./settings.ts";
 import type { FromWorker, ToWorker } from "./worker.ts";
 
 /** A worker the test answers by hand: what it was sent, and a way to answer, crash or see it ended. */
 class FakeWorker implements PreviewWorker {
-  sent: ToWorker[] = [];
+  sent: Extract<ToWorker, { id: number }>[] = [];
+  /** The wing bases posted, in order, kept apart from the requests. */
+  bases: Extract<ToWorker, { t: "base" }>["base"][] = [];
   ended = false;
   #message: ((e: MessageEvent<FromWorker>) => void)[] = [];
   #error: (() => void)[] = [];
   postMessage(message: ToWorker): void {
     assert.ok(!this.ended, "nothing is sent to an ended worker");
-    this.sent.push(message);
+    if (message.t === "base") this.bases.push(message.base);
+    else this.sent.push(message);
   }
   addEventListener(type: string, listener: ((e: MessageEvent<FromWorker>) => void) | (() => void)): void {
     if (type === "message") this.#message.push(listener as (e: MessageEvent<FromWorker>) => void);
@@ -205,4 +209,44 @@ test("DG-B: under any order of asks, answers, stray answers, crashes and closes,
     assert.equal(new Set(ns).size, ns.length, "each ask settles at most once");
     if (newest > 0 && !closed) assert.equal(ns.at(-1), newest, "the newest ask always ends in an answer");
   }
+});
+
+test("DG3: a wing's base posts ahead of the wing it plans, again to a worker started after a crash, and a wing request is answered as any preview", async () => {
+  const h = harness();
+  const base = { hash: "b1" } as unknown as WingBase;
+  h.previews.base(base);
+  assert.equal(h.workers.length, 1, "posting the base starts the worker");
+  assert.deepEqual(h.last().bases, [base]);
+  const wing = h.previews.wing(DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", DEFAULT_CONTEXT, null, null);
+  assert.equal(h.last().sent[0]!.t, "wing");
+  h.last().crash();
+  assert.deepEqual(await wing, { ok: false, error: "bug" });
+  const again = h.previews.wing(DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", DEFAULT_CONTEXT, null, null);
+  assert.equal(h.workers.length, 2);
+  assert.deepEqual(h.last().bases, [base], "the fresh worker gets the base before its first request");
+  h.last().answer(h.last().sent[0]!.id, fit(2));
+  assert.deepEqual(await again, fit(2));
+  // A dungeon's preview after a wing's overtakes it: only the newest of either kind settles.
+  const older = h.previews.wing(DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", DEFAULT_CONTEXT, null, null);
+  let olderSettled = false;
+  void older.then(() => (olderSettled = true));
+  const newer = h.previews.preview(DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", dialogScene(twoRooms()), DEFAULT_CONTEXT, null, null);
+  h.last().answer(h.last().sent[1]!.id, fit(1));
+  await flush();
+  h.last().answer(h.last().sent[2]!.id, fit(2));
+  assert.deepEqual(await newer, fit(2));
+  assert.equal(olderSettled, false);
+  // Closing forgets the base, so a later wing plans on none until one is posted.
+  h.previews.close();
+  void h.previews.wing(DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", DEFAULT_CONTEXT, null, null);
+  assert.deepEqual(h.last().bases, []);
+});
+
+test("DG3: edits ride the preview request", () => {
+  const h = harness();
+  const edits = { layout: { fitted: 4, seed: "1K7QH2MXA9F3TWQ5", settings: "{}", base: null }, rooms: { 0: { lit: true } } };
+  void h.previews.preview(DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", dialogScene(twoRooms()), DEFAULT_CONTEXT, null, edits);
+  const sent = h.last().sent[0]!;
+  assert.ok(sent.t === "preview");
+  assert.deepEqual(sent.edits, edits);
 });

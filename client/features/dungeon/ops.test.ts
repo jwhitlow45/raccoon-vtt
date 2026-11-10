@@ -4,9 +4,14 @@ import { serializedBytes } from "#shared/limits.ts";
 import { clientOpSchema, MAX_BUILD_CELLS, type ClientOp } from "#shared/protocol.ts";
 import { trapPreset } from "#shared/srd/traps.ts";
 import { groundAt } from "#shared/rules/heights.ts";
-import { dialogScene, dressedRooms, hundredOps, hundredPlan, twoRooms, widestDoors } from "./handPlans.ts";
-import { buildOps, dressOps, MAX_OPS, PAGE_PLACEHOLDER, SCENE_PLACEHOLDER, stonePlaceholder, trapInputOf, trapOps, trapPlaceholder, withIds } from "./ops.ts";
-import { landAll, scratchRoom, summarize } from "./scratch.ts";
+import { builderScene } from "../scenes/create.ts";
+import { dialogScene, dressedRooms, hexWingBase, hundredOps, hundredPlan, twoRooms, widestDoors, WING_SETTINGS } from "./handPlans.ts";
+import { wallPlaceholder } from "./hexWalls.ts";
+import { buildOps, dressOps, MAX_OPS, PAGE_PLACEHOLDER, SCENE_PLACEHOLDER, stonePlaceholder, trapInputOf, trapOps, trapPlaceholder, WALLS_PER_OP, WING_OP_BYTES, wingIds, withIds } from "./ops.ts";
+import { planFitted, type DungeonPlan } from "./plan.ts";
+import { landAll, landDungeon, scratchRoom, summarize, wingPreviewOf } from "./scratch.ts";
+import { versionChar } from "./seed.ts";
+import { clampSettings, DEFAULT_SETTINGS, SECRETS_MAX, TRAPS_MAX } from "./settings.ts";
 import { OP_BYTES } from "../uvtt/batch.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { newTrapInput } from "../traps/rules.ts";
@@ -299,4 +304,89 @@ test("DG2B: every secret door, both edges of a Wide doorway too, is written clos
   for (const e of secret) assert.deepEqual(e.feature, { kind: "door", state: "closed", secret: true, discovered: false, cover: "auto" }, e.key);
   for (const e of edges.filter((x) => !(x.feature?.kind === "door" && x.feature.secret))) assert.equal(e.feature && "cover" in e.feature, false, `${e.key}: only a secret door names a cover`);
   for (const op of ops) assert.ok(clientOpSchema.safeParse(op).success, op.t);
+});
+
+/** The first of a run of seeds whose hex plan holds what `wanted` asks, with the choices that make traps, secret rooms and every dressing likely. */
+function hexPlanWith(grid: "hexRows" | "hexColumns", wanted: (plan: DungeonPlan) => boolean): { plan: DungeonPlan; seed: string } {
+  const s = clampSettings({ ...DEFAULT_SETTINGS, traps: TRAPS_MAX, secrets: SECRETS_MAX, dressing: "full", lit: 100, key: true, heights: 40 }, grid);
+  for (let i = 0; i < 80; i++) {
+    const seed = `${versionChar()}${String(i).padStart(15, "0")}`;
+    const plan = planFitted(s, seed, { feetPerCell: 5, grid }).plan;
+    if (wanted(plan)) return { plan, seed };
+  }
+  throw new Error("no seed of 80 made such a hex plan");
+}
+
+const needle = (plan: DungeonPlan) => plan.traps.some((t) => t.preset === "poisoned-needle" && "door" in t.zone && "id" in t.zone.door) && (plan.walls ?? []).some((w) => w.f === "secret");
+
+test("DG3: a hex plan lands as its scene on its grid, then free walls 384 an op with placeholder ids, heights, stairs and difficult ground, and no paint or edges", () => {
+  for (const grid of ["hexRows", "hexColumns"] as const) {
+    const { plan } = hexPlanWith(grid, needle);
+    const scene = { ...builderScene({ id: SCENE_PLACEHOLDER, name: "Crypt", w: plan.w, h: plan.h, gridShape: grid }) };
+    const ops = buildOps(plan, scene);
+    assert.equal(ops[0]!.t, "scene.create");
+    assert.equal((ops[0] as { scene: { gridShape?: string } }).scene.gridShape, grid);
+    assert.ok(!ops.some((op) => op.t === "build.paint" || op.t === "build.edge"), "walls show the rooms");
+    const walls = ops.flatMap((op) => (op.t === "build.walls" ? [op] : []));
+    assert.ok(walls.every((op) => (op.put?.length ?? 0) <= WALLS_PER_OP && op.remove === undefined && serializedBytes(op) <= OP_BYTES));
+    const put = walls.flatMap((op) => op.put ?? []);
+    assert.equal(put.length, plan.walls!.length);
+    put.forEach((w, i) => assert.equal(w.id, wallPlaceholder(i)));
+    const leaf = put.find((w) => w.f.kind === "door" && w.f.secret);
+    assert.ok(leaf, "a secret leaf");
+    assert.deepEqual(leaf.f, { kind: "door", state: "closed", secret: true, discovered: false }, "a hidden free door carries no cover");
+    if (plan.rough?.length) assert.ok(ops.some((op) => op.t === "build.rough" && op.on));
+    const kinds = ops.map((op) => op.t);
+    assert.ok(kinds.lastIndexOf("build.walls") < kinds.indexOf("build.height"), "walls before heights");
+    for (const op of ops) assert.ok(clientOpSchema.safeParse(op).success, op.t);
+    // Traps on hexes, landed through the scratch room: a Poisoned Needle names its leaf's placeholder.
+    const landed = landDungeon(plan, scene, "5-10", null);
+    assert.ok(landed.ok, landed.ok ? "" : landed.why);
+    const trap = landed.ops.find((op) => op.t === "trap.create" && "door" in op.trap.zone);
+    assert.ok(trap && trap.t === "trap.create" && "door" in trap.trap.zone && "id" in trap.trap.zone.door);
+    assert.match((trap.trap.zone.door as { id: string }).id, /^dgw/);
+  }
+});
+
+test("DG3: Make gives every free wall a fresh wall id, and a Poisoned Needle follows its leaf", () => {
+  const { plan } = hexPlanWith("hexRows", needle);
+  const scene = builderScene({ id: SCENE_PLACEHOLDER, name: "Crypt", w: plan.w, h: plan.h, gridShape: "hexRows" });
+  const landed = landDungeon(plan, scene, "5-10", null);
+  assert.ok(landed.ok);
+  let n = 0;
+  const made = withIds(landed.ops, () => `fresh-${++n}`);
+  const walls = made.ops.flatMap((op) => (op.t === "build.walls" ? (op.put ?? []) : []));
+  assert.ok(walls.every((w) => /^[A-Za-z0-9_-]{12}$/.test(w.id) && !w.id.startsWith("dgw")));
+  assert.equal(new Set(walls.map((w) => w.id)).size, walls.length);
+  const trap = made.ops.find((op) => op.t === "trap.create" && "door" in op.trap.zone && "id" in op.trap.zone.door);
+  assert.ok(trap && trap.t === "trap.create");
+  const ref = trap.trap.zone as { door: { cx: number; cy: number; id: string } };
+  assert.ok(walls.some((w) => w.id === ref.door.id), "the needle names a wall Make put");
+  const stored = landAll(scratchRoom(), made.ops);
+  assert.ok(stored.ok, stored.ok ? "" : stored.why);
+  assert.ok(stored.room.buildChunks[`${made.sceneId}:${ref.door.cx},${ref.door.cy}`]?.walls?.some((w) => w.id === ref.door.id && w.f.kind === "door"), "the leaf stands in the chunk the trap names");
+});
+
+test("DG3: a hex wing's join goes first, the wall it stood as removed beside its leaf, and its ids stay those of the scene", () => {
+  const { base } = hexWingBase();
+  const preview = wingPreviewOf(WING_SETTINGS, "1Q8V2DR4HJ0Y7ZB3", base, { feetPerCell: 5 }, null);
+  assert.ok(preview.ok);
+  assert.ok(!preview.ops.some((op) => op.t === "scene.create"), "a wing makes no scene");
+  const first = preview.ops.find((op) => op.t === "build.walls")!;
+  assert.ok(first.t === "build.walls");
+  const join = base.join.grid === "hex" ? base.join.walls[0]! : null!;
+  assert.deepEqual(first.remove, [{ cx: join.cx, cy: join.cy, id: join.id }]);
+  assert.equal(first.put?.length, 1);
+  assert.deepEqual([first.put![0]!.a, first.put![0]!.b], [join.a, join.b]);
+  assert.equal(first.put![0]!.f.kind, "door");
+  for (const op of preview.ops.filter((o) => o.t.startsWith("build.") && o.t !== "build.lights")) assert.ok(serializedBytes(op) <= WING_OP_BYTES, op.t);
+  let n = 0;
+  const made = wingIds(preview.ops, base.scene.id, base.scene.id, () => `fresh-${++n}`);
+  const again = made.ops.find((op) => op.t === "build.walls")!;
+  assert.ok(again.t === "build.walls");
+  assert.deepEqual(again.remove, first.remove, "the join's removal keeps the scene's id");
+  assert.notEqual(again.put![0]!.id, first.put![0]!.id);
+  assert.throws(() => wingIds([{ t: "scene.create", scene: base.scene }, ...preview.ops], base.scene.id, base.scene.id, () => "x"), /makes no scene/);
+  assert.throws(() => wingIds(preview.ops, "other-scene", base.scene.id, () => "x"), /another scene/);
+  assert.throws(() => withIds([{ t: "scene.create", scene: { id: "s", name: "S", bounds: { w: 10, h: 10 } } }, { ...again, sceneId: "s" }], () => "y"), /removes no wall/);
 });

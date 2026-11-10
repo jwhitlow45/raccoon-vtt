@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { groundAt } from "#shared/rules/heights.ts";
 import { markIn } from "#shared/rules/heights.ts";
-import { dialogScene, dressedRooms, HAND_SETTINGS, handKey, hundredPlan, twoRooms } from "./handPlans.ts";
+import { builderScene } from "../scenes/create.ts";
+import { dialogScene, dressedRooms, HAND_SETTINGS, handKey, hexWingBase, hundredPlan, squareWingBase, twoRooms, WING_SETTINGS } from "./handPlans.ts";
+import { NO_SPACE } from "./hexWalls.ts";
+import { latticeFor } from "./lattice.ts";
 import { buildOps, MAX_OPS, SCENE_PLACEHOLDER } from "./ops.ts";
-import { landAll, landDungeon, previewOf, previewScene, scratchRoom } from "./scratch.ts";
-import { DEFAULT_CONTEXT, DEFAULT_SETTINGS, SECRET_PRESETS, type DungeonSettings } from "./settings.ts";
-import type { DungeonPlan } from "./plan.ts";
+import { floorRuns, landAll, landDungeon, previewOf, previewScene, scratchRoom, wingPreviewOf } from "./scratch.ts";
+import { clampSettings, DEFAULT_CONTEXT, DEFAULT_SETTINGS, MAX_HEX_WALLS, SECRET_PRESETS, type DungeonSettings } from "./settings.ts";
+import { planFitted, type DungeonPlan } from "./plan.ts";
 
 const SEED = "1K7QH2MXA9F3TWQ5";
 
@@ -109,7 +112,7 @@ test("DG-B: a preview is the plan, its ops, the room they make and the foot's co
   assert.equal(made.ops.length, 10);
   assert.deepEqual(Object.keys(made.room.scenes), [SCENE_PLACEHOLDER]);
   const one = { ...plan, rooms: plan.rooms.slice(0, 1) };
-  assert.deepEqual(previewOf(DEFAULT_SETTINGS, SEED, dialogScene(plan), DEFAULT_CONTEXT, null, () => one), { ok: false, error: "fit" });
+  assert.deepEqual(previewOf(DEFAULT_SETTINGS, SEED, dialogScene(plan), DEFAULT_CONTEXT, null, () => one), { ok: false, error: "fit", why: "underTwo" });
 });
 
 test("DG-B: a generator that throws, or a plan the scratch room refuses, is the bug error", () => {
@@ -168,4 +171,76 @@ test("DG2B: the preview plans the DM's Secret doors as chosen, and the key says 
   assert.ok(made.ok);
   const page = made.ops.find((op) => op.t === "journal.create");
   assert.ok(page?.t === "journal.create" && page.page.blocks[0]!.text.includes("Secret doors Many"));
+});
+
+test("DG3: a hex preview lands on its grid, its plan within the wall budget, with the room panel's facts and the count it asked", () => {
+  for (const grid of ["hexRows", "hexColumns"] as const) {
+    const s = clampSettings({ ...DEFAULT_SETTINGS, key: true }, grid);
+    const scene = builderScene({ id: "chosen", name: "Crypt", w: s.w, h: s.h, gridShape: grid });
+    const made = previewOf(s, SEED, scene, { feetPerCell: 5, grid }, handKey());
+    assert.ok(made.ok);
+    assert.equal(made.room.scenes[SCENE_PLACEHOLDER]!.gridShape, grid);
+    assert.ok((made.plan.walls?.length ?? 0) > 0 && made.plan.walls!.length <= MAX_HEX_WALLS);
+    assert.equal(made.facts.length, made.plan.rooms.length);
+    assert.equal(made.fitted, s.rooms);
+    assert.ok(made.summary.doors > 0, "a doorway's leaves count as its one door");
+    assert.deepEqual(structuredClone(made), made, "the worker can post it");
+  }
+});
+
+test("DG3: a fit that gives up says why: past its plans, under two rooms, or edits over the budget", () => {
+  const plan = twoRooms();
+  const made = (overBudget: "tooMany" | "underTwo" | "edits") => previewOf(DEFAULT_SETTINGS, SEED, dialogScene(plan), DEFAULT_CONTEXT, null, () => ({ plan, facts: [], fitted: 2, overBudget, leaves: [] }));
+  assert.deepEqual(made("tooMany"), { ok: false, error: "fit", why: "tooMany" });
+  assert.deepEqual(made("underTwo"), { ok: false, error: "fit", why: "underTwo" });
+  assert.deepEqual(made("edits"), { ok: false, error: "fit", why: "edits" });
+});
+
+test("DG3: a wing lands on its base, keeping the scene's id and everything on it, with what its asks carry", () => {
+  for (const [name, base] of [["squares", squareWingBase()], ["rows", hexWingBase("hexRows").base], ["columns", hexWingBase("hexColumns", { ground: 5 }).base]] as const) {
+    const made = wingPreviewOf(WING_SETTINGS, SEED, base, { feetPerCell: 5 }, { ...handKey("Keep"), wing: { from: 3, titles: ["Keep wing key"], pins: 100 } });
+    assert.ok(made.ok, name);
+    assert.deepEqual(Object.keys(made.room.scenes), [base.scene.id], name);
+    for (const [key, chunk] of Object.entries(base.state.buildChunks)) assert.ok(made.room.buildChunks[key], `${name}: the base's chunk ${key} stays`), void chunk;
+    assert.ok(made.ops.every((op) => op.t !== "scene.create" && (!("sceneId" in op) || op.sceneId === base.scene.id)));
+    const page = made.ops.find((op) => op.t === "journal.create");
+    assert.ok(page && page.t === "journal.create" && page.page.title === "Keep wing key 2", `${name}: its own page, numbered while taken`);
+    assert.ok(made.ops.filter((op) => op.t === "pin.put").every((op) => op.t === "pin.put" && /^W([4-9]|\d\d)/.test(op.pin.label ?? "")), `${name}: pins numbered on from W3`);
+    const clear = made.clear!;
+    assert.equal(clear.margin, 2);
+    assert.deepEqual(clear.join, base.join);
+    assert.equal(clear.autoWalls, "all");
+    if (base.join.grid === "squares") {
+      assert.equal(clear.floor, undefined, "squares carry their floor as paint");
+      assert.equal(clear.inside, undefined);
+    } else {
+      assert.equal(clear.inside!.length, 1);
+      // The runs hold the wing's floor exactly: every hex of the plan's spaces, and nothing of the base.
+      const runs = clear.floor!;
+      const keys = new Set(runs.flatMap(([y, x0, x1]) => Array.from({ length: x1 - x0 + 1 }, (_, i) => `${x0 + i},${y}`)));
+      const planned = planFitted(WING_SETTINGS, SEED, { feetPerCell: 5 }, { wing: base });
+      const floor = new Set<string>();
+      planned.space.forEach((v, k) => {
+        if (v !== NO_SPACE) floor.add(planned.lattice.keyOf(k));
+      });
+      assert.deepEqual([...keys].sort(), [...floor].sort(), name);
+      assert.ok(!keys.has(clear.inside![0]!), "the joined room is not the wing's floor");
+    }
+  }
+});
+
+test("DG3: a wing that cannot be planned says the planner's problem, and floorRuns joins neighbors along a row", () => {
+  const base = squareWingBase();
+  const off = { ...base, scene: { ...base.scene, autoWalls: "off" as const } };
+  const made = wingPreviewOf(WING_SETTINGS, SEED, off, { feetPerCell: 5 }, null);
+  assert.ok(!made.ok && made.error === "fit" && made.problem !== undefined);
+  const L = latticeFor("hexRows", { w: 10, h: 10 });
+  const space = new Int32Array(L.W * L.H).fill(NO_SPACE);
+  for (const k of [L.W * 2 + 1, L.W * 2 + 2, L.W * 2 + 3, L.W * 2 + 5, L.W * 4]) space[k] = 0;
+  assert.deepEqual(floorRuns({ space, lattice: L }), [[2, 1, 3], [2, 5, 5], [4, 0, 0]]);
+  const C = latticeFor("hexColumns", { w: 10, h: 10 });
+  const cols = new Int32Array(C.W * C.H).fill(NO_SPACE);
+  cols[C.W * 2 + 1] = 0;
+  cols[C.W * 3 + 1] = 0;
+  assert.deepEqual(floorRuns({ space: cols, lattice: C }), [[1, 2, 3]], "mirrored on Hex columns: lattice (1, 2) and (1, 3) are scene keys 2,1 and 3,1");
 });
