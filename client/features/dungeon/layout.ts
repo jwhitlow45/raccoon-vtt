@@ -1,3 +1,5 @@
+import type { HexFacing } from "#shared/model.ts";
+import { latticeFor, type Lattice } from "./lattice.ts";
 import type { Stream } from "./random.ts";
 import type { Density, DungeonSettings } from "./settings.ts";
 
@@ -128,10 +130,14 @@ export function edgeDistance(r: Rect, side: Side, W: number, H: number): number 
   }
 }
 
-/** The room nearest a scene edge, and that edge. Ties go west, north, east, south, then by room order. */
-export function chooseEntrance(rooms: readonly Rect[], W: number, H: number): { room: number; side: Side } {
-  let best = { room: 0, side: "w" as Side, d: Infinity };
-  for (const side of SIDE_ORDER) {
+/**
+ * The room nearest a scene edge, and that edge. Ties go west, north, east,
+ * south, then by room order. `sides` narrows the edges: on hexes only west
+ * and east hold a way in (phase 3, 2.3).
+ */
+export function chooseEntrance(rooms: readonly Rect[], W: number, H: number, sides: readonly Side[] = SIDE_ORDER): { room: number; side: Side } {
+  let best = { room: 0, side: sides[0] ?? ("w" as Side), d: Infinity };
+  for (const side of sides) {
     rooms.forEach((r, i) => {
       const d = edgeDistance(r, side, W, H);
       if (d < best.d) best = { room: i, side, d };
@@ -231,12 +237,14 @@ export type Run = {
   ground: number;
   /** The doorway's outside squares, at the room's ground. */
   near: number[];
-  /** Each stair's cell, ground and the way it points up. */
-  stairs: { cell: number; ground: number; up: Side }[];
+  /** Each stair's cell, ground and the way it points up: a side on squares, a hex facing on hexes. */
+  stairs: { cell: number; ground: number; up: Side | HexFacing }[];
   /** Where the run meets 0 ft and its corridor starts. */
   far: number[];
   /** Squares beside the near landing and the stairs, closed to every corridor. */
   beside: number[];
+  /** On hexes, the hex direction the run steps along (phase 3, 2.3). */
+  dir?: number;
 };
 
 export type Doorway = {
@@ -264,6 +272,9 @@ export type Doorway = {
 export class Board {
   readonly W: number;
   readonly H: number;
+  /** The lattice the cells lie on: squares, or the hex rows lattice (phase 3, 2.1). */
+  readonly lattice: Lattice;
+  readonly hex: boolean;
   readonly rooms: Room[];
   readonly doorways: Doorway[] = [];
   /** Room index + 1 on each room square. */
@@ -275,9 +286,11 @@ export class Board {
   readonly besideAt: Uint8Array;
   readonly laid: Uint8Array;
 
-  constructor(W: number, H: number, rects: readonly Rect[]) {
+  constructor(W: number, H: number, rects: readonly Rect[], lattice?: Lattice) {
     this.W = W;
     this.H = H;
+    this.lattice = lattice ?? latticeFor("squares", { w: W, h: H });
+    this.hex = this.lattice.kind !== "squares";
     this.rooms = rects.map((r) => ({ ...r, ground: 0, dropped: false }));
     this.roomAt = new Int16Array(W * H);
     this.runAt = new Int16Array(W * H);
@@ -296,16 +309,21 @@ export class Board {
   }
 
   inMap(x: number, y: number): boolean {
-    return x >= 0 && y >= 0 && x < this.W && y < this.H;
+    return this.hex ? this.lattice.inMap(x, y) : x >= 0 && y >= 0 && x < this.W && y < this.H;
   }
 
   inside(x: number, y: number): boolean {
-    return x >= MARGIN && y >= MARGIN && x < this.W - MARGIN && y < this.H - MARGIN;
+    return x >= MARGIN && y >= MARGIN && x < this.W - MARGIN && y < this.H - MARGIN && (!this.hex || this.lattice.inMap(x, y));
   }
 
-  /** Whether a square touches a room by an edge, without being one. */
+  /**
+   * Whether a square touches a room by an edge, without being one. On hexes
+   * by any of its six sides, so a corridor keeps off a room's slanted sides
+   * as it keeps off its straight ones (phase 3, 2.1).
+   */
   halo(k: number): boolean {
     if (this.roomAt[k] !== 0) return false;
+    if (this.hex) return this.lattice.halo(k).some((n) => this.roomAt[n] !== 0);
     const x = k % this.W;
     const y = (k - x) / this.W;
     return (x > 0 && this.roomAt[k - 1] !== 0) || (x < this.W - 1 && this.roomAt[k + 1] !== 0) || (y > 0 && this.roomAt[k - this.W] !== 0) || (y < this.H - 1 && this.roomAt[k + this.W] !== 0);
@@ -432,23 +450,24 @@ export function placeDoorway(board: Board, room: number, sides: readonly Side[],
     const toward = middleAlong(target, side) - Math.floor((width - 1) / 2);
     const want = aim ? aim(last) : Math.min(last, Math.max(1, toward - start));
     const taken = board.doorways.filter((d) => d.room === room && d.side === side && !d.removed);
-    for (let off = 0; off <= last; off++) {
-      for (const i of off === 0 ? [want] : [want - off, want + off]) {
-        if (i < 1 || i > last) continue;
-        if (taken.some((d) => i <= d.at + d.width && d.at <= i + width)) continue;
-        const inside: number[] = [];
-        const outside: number[] = [];
-        for (let j = 0; j < width; j++) {
-          const [x, y] = at(i + j);
-          inside.push(board.cell(x, y));
-          outside.push(board.cell(x + DX[side], y + DY[side]));
-        }
-        if (!stub && !approachOpen(board, outside, side, width)) continue;
-        if (stub && !outside.every((k) => board.inMap(k % board.W, Math.floor(k / board.W)))) continue;
-        const d: Doorway = { id: board.doorways.length, room, side, at: i, width, inside, outside, link, run: null, flat: null, removed: false };
-        board.doorways.push(d);
-        return d;
+    // On hexes a Narrow way in looks for an even row first: only an even row's end hex opens off the scene, so a stub from an odd row must turn in the margin, where the room's slanted sides close it (phase 3, 2.3).
+    const order: number[] = [];
+    for (let off = 0; off <= last; off++) for (const i of off === 0 ? [want] : [want - off, want + off]) if (i >= 1 && i <= last) order.push(i);
+    if (board.hex && stub && width === 1) order.sort((p, q) => (at(p)[1] & 1) - (at(q)[1] & 1));
+    for (const i of order) {
+      if (taken.some((d) => i <= d.at + d.width && d.at <= i + width)) continue;
+      const inside: number[] = [];
+      const outside: number[] = [];
+      for (let j = 0; j < width; j++) {
+        const [x, y] = at(i + j);
+        inside.push(board.cell(x, y));
+        outside.push(board.cell(x + DX[side], y + DY[side]));
       }
+      if (!stub && !approachOpen(board, outside, side, width)) continue;
+      if (stub && !outside.every((k) => board.inMap(k % board.W, Math.floor(k / board.W)))) continue;
+      const d: Doorway = { id: board.doorways.length, room, side, at: i, width, inside, outside, link, run: null, flat: null, removed: false };
+      board.doorways.push(d);
+      return d;
     }
   }
   return null;

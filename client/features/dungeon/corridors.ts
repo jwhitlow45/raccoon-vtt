@@ -209,6 +209,7 @@ export class Router {
       for (let x = 0; x < b.W; x++) {
         const k = y * b.W + x;
         if (!stub && !b.inside(x, y)) continue;
+        if (b.hex && !b.lattice.inMap(x, y)) continue;
         if (b.roomAt[k] !== 0 || b.besideAt[k] !== 0) continue;
         if (b.runAt[k] !== 0 && b.farAt[k] === 0) continue;
         if (b.halo(k) && mouths[k] === 0) continue;
@@ -383,7 +384,9 @@ export class Router {
       if (DIRS[d] !== edge) return false;
       const x = k % W;
       const y = (k - x) / W;
-      return edge === "w" ? x === 0 : edge === "n" ? y === 0 : edge === "e" ? x === W - size : y === b.H - size;
+      const at = edge === "w" ? x === 0 : edge === "n" ? y === 0 : edge === "e" ? x === W - size : y === b.H - size;
+      // On hexes a Narrow way in ends on an even row, the only rows whose end hex's outer side is the scene's edge (phase 3, 2.3). A Wide block holds one even row.
+      return at && (!b.hex || size > 1 || (y & 1) === 0);
     };
     const s0 = start * 4 + dir;
     this.#stamp[s0] = id;

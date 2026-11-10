@@ -1,3 +1,4 @@
+import type { HexFacing } from "#shared/model.ts";
 import { Board, DX, DY, OPPOSITE, type Doorway, type Rect, type Run, type Side } from "./layout.ts";
 import type { Stream } from "./random.ts";
 import { raisedCount } from "./settings.ts";
@@ -38,7 +39,8 @@ const across = (side: Side): [number, number] => (side === "n" || side === "s" ?
  * it. Every stair faces along that axis, toward the room when the room is
  * raised and away from it when it is sunk, so each points up the run.
  */
-export function runFor(board: Board, d: Doorway, ground: number): Run {
+export function runFor(board: Board, d: Doorway, ground: number, dir?: number): Run {
+  if (board.hex) return hexRunFor(board, d, ground, dir ?? runDirections(board, d)[0]!);
   const n = Math.abs(ground) / 5;
   const [ax, ay] = across(d.side);
   const step = (k: number, t: number) => {
@@ -66,6 +68,60 @@ export function runFor(board: Board, d: Doorway, ground: number): Run {
     }
   }
   return { ground, near, stairs, far, beside };
+}
+
+/** A hex direction's digit as a stair's facing. */
+const facing = (dir: number) => String(((dir % 6) + 6) % 6) as HexFacing;
+
+/**
+ * The hex directions a doorway's run may leave along, in the order tried
+ * (phase 3, 2.3, D-261110-087): east and west doorways along the row, north
+ * and south ones on the slant away from the room's middle first, then the
+ * other slant, since a straight run up an offset column zigzags on hexes.
+ * Ties go west. Squares have the one way out.
+ */
+export function runDirections(board: Board, d: Doorway): number[] {
+  if (!board.hex) return [0];
+  if (d.side === "e") return [0];
+  if (d.side === "w") return [3];
+  const r = board.rooms[d.room]!;
+  const [dx2] = middle2(board, d.inside);
+  const east = dx2 > 2 * r.x + r.w;
+  const [toEast, toWest] = d.side === "n" ? [5, 4] : [1, 2];
+  return east ? [toEast, toWest] : [toWest, toEast];
+}
+
+/**
+ * A hex run (phase 3, 2.3): the near landing, the stairs and the far
+ * landing step along one hex axis from each lane, a Wide run's two lanes
+ * the same way. Each stair faces along the axis, toward a raised room and
+ * away from a sunk one. The squares beside it are every hex touching its
+ * landing or stairs outside the run and the room, which no corridor takes.
+ * A cell off the scene is -1, which no run fits.
+ */
+function hexRunFor(board: Board, d: Doorway, ground: number, dir: number): Run {
+  const L = board.lattice;
+  const n = Math.abs(ground) / 5;
+  const up = facing(ground > 0 ? dir + 3 : dir);
+  const near = [...d.outside];
+  const stairs: Run["stairs"] = [];
+  for (let i = 1; i <= n; i++) {
+    const ft = (ground * (n - i)) / n || 0;
+    for (const k of d.outside) stairs.push({ cell: L.step(k, dir, i) ?? -1, ground: ft, up });
+  }
+  const far = d.outside.map((k) => L.step(k, dir, n + 1) ?? -1);
+  const own = new Set([...near, ...stairs.map((st) => st.cell), ...far]);
+  const beside: number[] = [];
+  const seen = new Set<number>();
+  for (const k of [...near, ...stairs.map((st) => st.cell)]) {
+    if (k < 0) continue;
+    for (const b of L.halo(k)) {
+      if (own.has(b) || seen.has(b) || board.roomAt[b] !== 0) continue;
+      seen.add(b);
+      beside.push(b);
+    }
+  }
+  return { ground, near, stairs, far, beside, dir };
 }
 
 /**
@@ -103,6 +159,7 @@ export function runFits(board: Board, d: Doorway, run: Run, mouths: Uint8Array):
   const others = (k: number) => mouths[k]! - (own.has(k) ? 1 : 0) > 0;
   for (const k of run.near) if (board.runAt[k] !== 0 || board.besideAt[k] !== 0) return false;
   for (const k of [...run.stairs.map((s) => s.cell), ...run.far]) {
+    if (k < 0) return false;
     const x = k % board.W;
     const y = (k - x) / board.W;
     if (!board.inside(x, y) || board.roomAt[k] !== 0 || board.halo(k) || board.runAt[k] !== 0 || board.besideAt[k] !== 0 || others(k)) return false;
@@ -120,16 +177,23 @@ export function runFits(board: Board, d: Doorway, run: Run, mouths: Uint8Array):
  * stream the rest of the dungeon draws from. A share the map has no room
  * for raises fewer.
  */
-export function raiseRooms(rng: Stream, board: Board, entrance: number, share: number): void {
+export function raiseRooms(rng: Stream, board: Board, entrance: number, share: number, pins: ReadonlyMap<number, number> = new Map()): void {
   // Drawn even for Flat, so moving Heights never moves the doors and dressing drawn after.
   const order = rng.shuffle(board.rooms.flatMap((r, i) => (i === entrance || r.dropped ? [] : [i])));
   const grounds = order.map(() => rng.shuffle([...RAISES]));
   const want = raisedCount(share, board.rooms.length);
-  if (want === 0) return;
   const mouths = mouthCounts(board);
+  // A height pin is taken first, in board order, where its runs fit, and its room stands outside the share (phase 3, 4.3).
+  for (const [i, ground] of [...pins].sort((a, b) => a[0] - b[0])) {
+    const r = board.rooms[i];
+    if (!r || i === entrance || r.dropped || ground === 0) continue;
+    const doors = board.doorways.filter((d) => d.room === i && !d.removed);
+    if (doors.length > 0 && reserveAll(board, doors, ground, mouths)) r.ground = ground;
+  }
+  if (want === 0) return;
   let raised = 0;
   order.forEach((i, n) => {
-    if (raised === want) return;
+    if (raised === want || pins.has(i)) return;
     const doors = board.doorways.filter((d) => d.room === i && !d.removed);
     if (doors.length === 0) return;
     for (const ground of grounds[n]!) {
@@ -141,12 +205,14 @@ export function raiseRooms(rng: Stream, board: Board, entrance: number, share: n
   });
 }
 
-/** Reserves a run for each doorway at `ground`, or none of them when one does not fit. */
+/** Reserves a run for each doorway at `ground`, each on the first way out that fits, or none of them when one has none. */
 function reserveAll(board: Board, doors: readonly Doorway[], ground: number, mouths: Uint8Array): boolean {
   const reserved: Doorway[] = [];
   for (const d of doors) {
-    const run = runFor(board, d, ground);
-    if (!runFits(board, d, run, mouths)) {
+    const run = runDirections(board, d)
+      .map((dir) => runFor(board, d, ground, dir))
+      .find((r) => runFits(board, d, r, mouths));
+    if (!run) {
       for (const r of reserved) {
         board.unreserve(r.run!);
         r.run = null;
