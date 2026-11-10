@@ -8025,6 +8025,7 @@ export function sceneSettingsTests(): void {
   floorLinkBuildTests();
   floorPillTests();
   floorMarkerTests();
+  floorMarkerIsoTests();
 }
 
 /*
@@ -8356,6 +8357,74 @@ function floorMarkerTests(): void {
       await restartFight();
     }
     assert.deepEqual(lines, [], "a stairs name meets the turn marker");
+  });
+}
+
+/**
+ * B53-SOL-02: in Isometric the marker stands upright where the view puts its point, so a reading apart from the
+ * stairs' name on the map can stand over it on screen: a creature that moved from just above the stairs to the
+ * right. The name goes under the end there too.
+ */
+function floorMarkerIsoTests(): void {
+  test("b53fix-marker-iso. in Isometric a stairs end's name keeps clear of the turn marker that stands over it on screen, at 1440 x 900", async () => {
+    await newDmSession();
+    const tower = randomUUID();
+    const upper = randomUUID();
+    const goblin = randomUUID();
+    await ops.send({ t: "scene.create", scene: { id: tower, name: "Tower", bounds: BOUNDS, background: "#2b2b31" } });
+    await ops.send({ t: "scene.create", scene: { id: upper, name: "Tower", bounds: BOUNDS }, floor: { beside: tower, side: "above" } });
+    await ops.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor" } } });
+    const lines: string[] = [];
+    const size = SIZES.find((s) => s.width === 1440)!;
+    const page = await dmPageFor(size);
+    const view = async (name: "Isometric" | "Top-down") => {
+      await page.getByRole("button", { name: /^View: / }).click();
+      const menu = page.getByRole("radio", { name }).first();
+      await menu.check();
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: `View: ${name}` }).waitFor();
+    };
+    try {
+      await ops.send({ t: "floorLink.put", link: { id: "b53-c", pairId: "b53-d", sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
+      await ops.send({ t: "token.create", token: { id: goblin, sceneId: tower, kind: "monster", name: "Goblin Warrior", number: 1, size: "medium", x: 6, y: 3, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
+      // The step before restarts the room's fight, which the DM's copy may not show yet.
+      await ops.send({ t: "encounter.end" }).catch(() => {});
+      await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: goblin, value: 20 }, { id: randomUUID(), tokenId: run.ids.thorn, value: 10 }] });
+      await ops.send({ t: "encounter.next" });
+      await ops.send({ t: "token.move", tokenId: goblin, x: 9, y: 3 });
+      page.setDefaultTimeout(10_000);
+      await openAt(page, size, 1);
+      await waitFor("the DM's snapshot", () => dmSocket.state);
+      await viewScene(await openDmPanel(page, "Scenes"), tower);
+      await closeSheets(page);
+      await escapeAll(page);
+      await view("Isometric");
+      await waitFor("the stairs pill in Isometric", async () => ((await boardPillWords(page)).some((w) => w.includes("Up to")) ? true : null), 8_000);
+      const pills = await boardPillBoxes(page);
+      const marker = pills.find((p) => /ft/.test(p.text));
+      if (!marker) lines.push("no turn marker drew");
+      for (const p of pills) {
+        if (p === marker || !marker) continue;
+        const w = Math.min(p.r, marker.r) - Math.max(p.l, marker.l);
+        const h = Math.min(p.b, marker.b) - Math.max(p.t, marker.t);
+        if (w > 0 && h > 0) lines.push(`"${p.text.replace("\n", " / ")}" meets the marker "${marker.text.replace("\n", " / ")}" by ${w.toFixed(1)} x ${h.toFixed(1)} px`);
+      }
+      console.log(`b53fix-marker-iso: ${pills.map((p) => `${p.text.replace("\n", " / ")} at ${p.l.toFixed(0)},${p.t.toFixed(0)}`).join(" | ")}`);
+      await shots.take(page, "alignment-b53fix-marker-iso");
+    } finally {
+      await view("Top-down").catch((err) => console.error("b53fix-marker-iso: going back to Top-down failed", err));
+      await ops.send({ t: "encounter.end" }).catch(() => {});
+      await ops.send({ t: "token.delete", tokenId: goblin }).catch(() => {});
+      await ops.send({ t: "scene.delete", sceneId: tower }).catch(() => {});
+      try {
+        await viewScene(await openDmPanel(page, "Scenes"), run.sceneId);
+        await escapeAll(page);
+      } catch (err) {
+        console.error("b53fix-marker-iso: going back to the players' scene failed", err);
+      }
+      await restartFight();
+    }
+    assert.deepEqual(lines, [], "a stairs name meets the turn marker in Isometric");
   });
 }
 
