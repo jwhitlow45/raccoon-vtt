@@ -63,7 +63,7 @@ import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCa
 import { layerCharge } from "./memorySize.ts";
 import { forgetAllOps, forgetSceneOp, mapStepOps, memoryGrowth, type DoorTouch } from "./remember.ts";
 import { meetOps } from "./meet.ts";
-import { growthBound, measuredFromStored, SizeGuard, touchedScenes } from "./sizeGuard.ts";
+import { growthBound, measuredFromStored, scenesOverByNumbering, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { climbOf, keptFrom, MOVED_SINCE, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf } from "./undoLabels.ts";
 import { undoScope } from "#shared/undoScope.ts";
@@ -646,6 +646,11 @@ export class RoomActor {
     this.#opsSinceSnapshot = loaded.seq - loaded.snapshotSeq;
     this.#sizes = new SizeGuard(this.#opts.sizeLimits);
     this.#sizes.stateMeasured(measuredFromStored(loaded.stateBytes, loaded.state), loaded.state);
+    // A room saved before creature numbers may hold a scene their reserve puts over its limit, so the operator is told
+    // once for each, as the room loads, by ids alone.
+    for (const sceneId of scenesOverByNumbering(loaded.state, this.#sizes.share, this.#sizes.sceneLimit)) {
+      this.#log.warn({ roomId: this.roomId, sceneId }, "a scene is over its size limit once creature numbers are reserved");
+    }
     this.#roomRate = new TokenBucket(this.#opts.roomOpsPerSec, this.#opts.roomOpsPerSec * 2, this.#opts.now);
     this.#receipts = new ReceiptBook(this.#opts.now, this.#opts.receiptCaps);
     // Who admitted a stored receipt is read from the member's kind now, which the DM grants keep (reconcileKinds).

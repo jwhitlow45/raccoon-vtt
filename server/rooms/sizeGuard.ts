@@ -1168,6 +1168,29 @@ export function projectionNumbering(state: RoomState, sceneId: string): number {
 }
 
 /**
+ * The scenes, each by its main floor, that creature numbers put over the
+ * scene limit: the whole measure a DM's op is checked by (projectedSceneBytes
+ * at `share`) is over it, and within it without what numbers count
+ * (projectionNumbering). A room saved before creature numbers can hold such
+ * a scene, which then refuses every op that grows it. One pass over the
+ * state, as a room's load reads it.
+ */
+export function scenesOverByNumbering(state: RoomState, share: number, sceneLimit: number = LIMITS.projectedSceneBytes): string[] {
+  const room = roomLevelBytes(state);
+  const owns = allScenesOwnBytes(state);
+  const scenesPart = scenesNumbering(state.scenes);
+  const tokensPart = new Map<string, number>();
+  for (const token of Object.values(state.tokens)) tokensPart.set(token.sceneId, (tokensPart.get(token.sceneId) ?? 0) + tokenNumbering(token));
+  const out: string[] = [];
+  for (const floors of sceneGroups(state)) {
+    const need = SHELL_BYTES + room + sum(floors, (scene) => (owns.get(scene.id) ?? 0) + sightReserve(scene) + perPlayerSceneReserve(state, scene) + exploredReserve(state, scene.id) + discoveryReserve(state, scene, share));
+    const numbering = scenesPart + sum(floors, (scene) => tokensPart.get(scene.id) ?? 0);
+    if (need > sceneLimit && need - numbering <= sceneLimit) out.push(floors[0]!.floor?.of ?? floors[0]!.id);
+  }
+  return out;
+}
+
+/**
  * The room's own bytes as the guard counts them: everything exactly, the
  * traps by their measures and reserves. The log's lines only some viewers
  * or none read and the record of a turn's reminders (RoomState.reminded)

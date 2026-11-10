@@ -7,8 +7,10 @@ import { NUMBER_NAMES_MOST, NUMBERS_MOST, registerBytesMost } from "#shared/numb
 import { projectState } from "#shared/project.ts";
 import { MAX_NAME, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { room, token } from "#shared/testutil.ts";
-import { checkWholeScenes, growthBound, measuredFromStored, measuredStateBytes, numberingAdjust, projectedSceneBytes, roomLevelBytes, sceneOwnBytes, SizeGuard, TOKEN_NUMBERING } from "./sizeGuard.ts";
+import { room, scene, token } from "#shared/testutil.ts";
+import { MEMORY_CAP } from "./memorySize.ts";
+import { Room } from "./numberingTesting.ts";
+import { checkWholeScenes, growthBound, measuredFromStored, measuredStateBytes, numberingAdjust, projectedSceneBytes, projectionNumbering, roomLevelBytes, sceneOwnBytes, scenesOverByNumbering, SizeGuard, TOKEN_NUMBERING } from "./sizeGuard.ts";
 
 /*
  * Creature numbers are written by `sys.meet` after admission, so the
@@ -189,5 +191,45 @@ describe("creature numbers in the size guard", () => {
     assert.ok(shown.numbers, "a DM's copy holds the scene's numbers");
     const { numbers: _numbers, ...bare } = shown;
     assert.ok(serializedBytes(shown) - serializedBytes(bare) <= registerBytesMost(), `${serializedBytes(shown) - serializedBytes(bare)} over ${registerBytesMost()}`);
+  });
+});
+
+describe("a room's load names each scene creature numbers put over its limit", () => {
+  /** The Goblins on s1, and s2 with no creature, whose measures read no players' memory, so any share gives them. */
+  const measured = (state: RoomState, sceneId: string) => {
+    const bytes = projectedSceneBytes(state, sceneId, MEMORY_CAP);
+    assert.equal(projectedSceneBytes(state, sceneId, 0), bytes, `${sceneId} reads no players' memory`);
+    return bytes;
+  };
+
+  test("a scene over its limit only once numbers count is named by its main floor, one within it or over it anyway is not", () => {
+    const state = unmet();
+    const s1 = measured(state, "s1");
+    const numbers = projectionNumbering(state, "s1");
+    assert.ok(numbers > 0 && measured(state, "s2") < s1 - numbers, "the Goblins' numbers are what s1 counts beyond s2");
+    assert.deepEqual(scenesOverByNumbering(state, MEMORY_CAP, s1 - 1), ["s1"]);
+    assert.deepEqual(scenesOverByNumbering(state, MEMORY_CAP, s1 - numbers), ["s1"], "within it by a byte without them");
+    assert.deepEqual(scenesOverByNumbering(state, MEMORY_CAP, s1), [], "within it with them");
+    assert.deepEqual(scenesOverByNumbering(state, MEMORY_CAP, s1 - numbers - 1), [], "over it without them");
+    // A scene of two floors counts as one, named by its main floor, with the numbers of the creatures on either.
+    const floors = unmet();
+    floors.scenes.s1 = { ...floors.scenes.s1!, floor: { of: "s1", level: 0, name: "Ground" } };
+    floors.scenes.up = scene("up", { floor: { of: "s1", level: 1, name: "Upper" } });
+    floors.tokens.g2 = { ...floors.tokens.g2!, sceneId: "up" };
+    const whole = measured(floors, "up");
+    assert.equal(measured(floors, "s1"), whole);
+    assert.deepEqual(scenesOverByNumbering(floors, MEMORY_CAP, whole - 1), ["s1"]);
+    assert.deepEqual(scenesOverByNumbering(floors, MEMORY_CAP, whole - projectionNumbering(floors, "up")), ["s1"]);
+  });
+
+  test("the room's load warns once for that scene, with the room's and the scene's ids and no name", async (t) => {
+    const state = unmet();
+    const sceneLimit = measured(state, "s1") - 1;
+    const room = new Room(t, "A", state, { sizeLimits: { sceneLimit } });
+    await room.load();
+    const warned = () => room.logged.filter((line) => line.startsWith("a scene is over its size limit"));
+    assert.deepEqual(warned(), ['a scene is over its size limit once creature numbers are reserved {"roomId":"UNDOSCOPE","sceneId":"s1"}']);
+    await room.restart(false);
+    assert.equal(warned().length, 2, "and once again at the next load");
   });
 });
