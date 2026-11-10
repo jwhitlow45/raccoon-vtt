@@ -274,7 +274,8 @@ export async function sendDungeon(
       same = view !== null && sceneContents(view, sceneId) === sceneContents(titled(made.room, sentTitle), scratchScene, madeIds(made.ids));
     }
   }
-  const outcome: DungeonOutcome = keyHeld ? { k: "unconfirmed" } : dungeonOutcome(answers, created, { exists: exists(), same });
+  // A floor whose key waited past the check and never showed reads as no floor added, as a new scene does (D-261110-410).
+  const outcome: DungeonOutcome = keyHeld && exists() ? { k: "unconfirmed" } : dungeonOutcome(answers, created, { exists: exists(), same });
   if (outcome.k === "complete" && !outcome.checked && mayOpen()) actions.switchScene(sceneId);
   return outcome;
 }

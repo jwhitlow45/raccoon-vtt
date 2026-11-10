@@ -475,12 +475,22 @@ describe("a dungeon floor's key after its create", () => {
     assert.deepEqual(await r.done, { k: "complete", checked: true });
   });
 
-  test("FL3S: a floor that never shows within the check's time sends no key and is unconfirmed", async () => {
+  test("FL3S: a floor that never shows within the check's time sends no key and reads as no floor added, as a new scene does (D-261110-410)", async () => {
     const r = floorRun({ checkMs: 20 });
     for (const x of r.t.sent) x.onAnswer?.("unknown");
-    assert.deepEqual(await r.done, { k: "unconfirmed" });
+    assert.deepEqual(await r.done, { k: "none", lost: true });
     assert.ok(!r.t.sent.some((x) => isKeyOp(x.op)));
     assert.deepEqual(r.progress.at(-1), [r.m.ops.length, r.m.ops.length], "the key's ops count as lost");
+  });
+
+  test("FL3S: a floor that shows only after the check's time, its key unsent, is unconfirmed, even with an op of it refused", async () => {
+    const r = floorRun({ checkMs: 20 });
+    r.t.sent[0]!.onAnswer?.("unknown");
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    r.t.listScene(r.m.sceneId, r.stored);
+    for (const [i, x] of r.t.sent.slice(1).entries()) x.onAnswer?.(i === 0 ? "refused" : "taken");
+    assert.deepEqual(await r.done, { k: "unconfirmed" });
+    assert.ok(!r.t.sent.some((x) => isKeyOp(x.op)));
   });
 
   test("FL3S: a delayed create answer holds the key, and the dialog hears the answer once it comes", async () => {
