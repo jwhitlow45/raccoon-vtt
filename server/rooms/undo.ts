@@ -1,9 +1,12 @@
 import { parseKey, readEntity } from "#shared/keys.ts";
-import type { RoomState, Token } from "#shared/model.ts";
+import type { AreaTemplate, RoomState, Token } from "#shared/model.ts";
 import { MAX_KEPT_ROUTES, MAX_RESTORE_ENTRIES, onPlayerUndoStack, type Op, type OpOf, type RefusalCode, type RestoreEntry } from "#shared/protocol.ts";
 
 /** A route as `token.move` carries it. */
 export type KeptRoute = NonNullable<OpOf<"token.move">["route"]>;
+/** The climb a step made, as its restore carries it (UndoEntry.climb). */
+export type ClimbRecord = NonNullable<OpOf<"sys.restore">["climb"]>;
+import { ownEntry } from "#shared/records.ts";
 import { guardMatches } from "#shared/reducer/misc.ts";
 import { guardHash } from "#shared/reducer/tx.ts";
 import { LIMITS } from "#shared/limits.ts";
@@ -126,6 +129,17 @@ export type UndoEntry = {
    * them, so a ride put back on the same turn shares the turn again.
    */
   rides?: Ride[];
+  /**
+   * The step is a climb (docs/design/design-v1-floors.md phase 2, 8): the
+   * climber, the end it took by id, rev and `made`, and the floors it went
+   * from and to, read by the server off the op and the room before it,
+   * never sent by a device. Its undo and redo carry it on the restore, so
+   * permissions let the climber, what rode with it and their areas cross
+   * between those two floors and no others. Undone and redone it stays
+   * one, and it never merges with another step, either way: each climb
+   * finds its own stairs.
+   */
+  climb?: ClimbRecord;
 };
 
 /** A controlled ride on one turn's list of mounts. */
@@ -139,7 +153,7 @@ export type Origin = { client: string; n: number };
 
 type Stacks = { undo: UndoEntry[]; redo: UndoEntry[] };
 type MemberHistory = { play: Stacks; setup: Stacks; serial: number; latest: UndoEntry | null };
-export type RecordHistory = { scope?: HistoryScope; values?: DmHistoryValues; declared?: boolean; saveOutcome?: SaveOutcomeIdentity };
+export type RecordHistory = { scope?: HistoryScope; values?: DmHistoryValues; declared?: boolean; saveOutcome?: SaveOutcomeIdentity; climb?: ClimbRecord };
 
 export class UndoStacks {
   #members = new Map<string, MemberHistory>();
@@ -217,7 +231,8 @@ export class UndoStacks {
       return "too-large";
     }
     const top = s.undo.at(-1);
-    if (group !== undefined && top?.group === group && !top.saveOutcome && member.latest === top && (top.poses === undefined) === (poses === undefined)) {
+    const climbs = history.climb !== undefined || top?.climb !== undefined;
+    if (group !== undefined && top?.group === group && !top.saveOutcome && !climbs && member.latest === top && (top.poses === undefined) === (poses === undefined)) {
       const merged = mergeInverses(top.entries, inverse);
       if (merged && merged.length <= MAX_RESTORE_ENTRIES) {
         top.entries = merged;
@@ -256,6 +271,7 @@ export class UndoStacks {
     if (trapped) entry.trapped = true;
     const recorded = withExtras(group !== undefined && tally ? { ...entry, tally } : entry, poses, origin);
     if (saveOutcome) recorded.saveOutcome = { ...saveOutcome };
+    if (history.climb) recorded.climb = { ...history.climb };
     if (group !== undefined) recorded.gesture = { group, ...(origin ? { client: origin.client } : {}), declared: history.declared === true };
     if (history.values) recorded.values = history.values;
     this.#identify(recorded);
@@ -295,7 +311,7 @@ export class UndoStacks {
    * still the one its op made. It carries no group, so nothing sent later
    * merges into a step that was undone and redone.
    */
-  pushRestored(memberId: string, from: "undo" | "redo", inverse: RestoreEntry[], label: string, poses?: Record<string, Pose>, origin?: Origin, teleport = false, walked?: Pick<UndoEntry, "routes" | "routed" | "rides" | "gesture" | "saveOutcome">, history: RecordHistory = {}): void {
+  pushRestored(memberId: string, from: "undo" | "redo", inverse: RestoreEntry[], label: string, poses?: Record<string, Pose>, origin?: Origin, teleport = false, walked?: Pick<UndoEntry, "routes" | "routed" | "rides" | "gesture" | "saveOutcome" | "climb">, history: RecordHistory = {}): void {
     const saveOutcome = walked?.saveOutcome ?? history.saveOutcome;
     label = label.slice(0, 200);
     const member = this.#member(memberId);
@@ -313,6 +329,8 @@ export class UndoStacks {
     if (walked?.routes) entry.routes = walked.routes;
     if (walked?.routed) entry.routed = true;
     if (walked?.rides) entry.rides = walked.rides;
+    // A climb undone is still one, so its redo crosses back by the same stairs, and every later undo and redo after it.
+    if (walked?.climb) entry.climb = walked.climb;
     if (walked?.gesture && !saveOutcome) entry.gesture = walked.gesture;
     if (saveOutcome) entry.saveOutcome = { ...saveOutcome };
     const recorded = withExtras(entry, poses, origin);
@@ -510,6 +528,14 @@ function samePose(a: Pose, b: Pose, path = true): boolean {
   );
 }
 
+/** The climb a `token.climb` makes, for its step: the end it takes as it stands before the op, and the floors from and to. */
+export function climbOf(before: RoomState, op: Op): ClimbRecord | undefined {
+  if (op.t !== "token.climb") return undefined;
+  const link = ownEntry(before.floorLinks, op.linkId);
+  const token = ownEntry(before.tokens, op.tokenId);
+  return link && token ? { tokenId: token.id, linkId: link.id, rev: link.rev, made: link.made, from: token.sceneId, to: link.to } : undefined;
+}
+
 /** The tokens an op names, the roots of its groups (docs/design/design-v1-attach.md 8.2): every other token it moves rides on one of them. */
 export function namedTokens(op: Op): string[] {
   if (op.t === "token.moveMany") return op.moves.map((m) => m.tokenId);
@@ -633,7 +659,9 @@ function stillUnder(state: RoomState, tokenId: string, restoring: ReadonlySet<st
  * where the step left it, at another size, or its path is not what the
  * step left, because someone moved or resized it since, to another scene
  * or away and back included, or marked its move. It never puts a token
- * back on another scene, only in its place on this one.
+ * back on another scene, only in its place on this one, but for a climb's
+ * (UndoEntry.climb), which takes the climber, what rode with it and their
+ * areas back across the stairs between the climb's two floors.
  *
  * A token the player cannot see now answers as if it were gone, before its
  * position is looked at, so a refusal never tells a player that a creature
@@ -648,23 +676,30 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
   const tokens: { key: string; before: Token; current: Token; left: Pose | undefined }[] = [];
   const quiet: RestoreEntry[] = [];
   const quietIds: string[] = [];
+  const areas: RestoreEntry[] = [];
   const restoring = new Set<string>();
   for (const entry of step.entries) {
     const parsed = parseKey(entry.key);
     if (parsed?.kind === "token") restoring.add(parsed.id);
   }
   const silent = new Set([...restoring].filter((id) => step.poses[id]?.silent === true));
+  const crosses = crossing(step.climb);
   for (const entry of step.entries) {
     const parsed = parseKey(entry.key);
     // An attach's rows and the turn's list stay as they are: the undo takes back the link and the seat only (docs/design/design-v1-attach.md 8.3).
     if (parsed?.kind === "encounter") continue;
+    // A climb's areas go back with the creatures they follow, once those are known (below).
+    if (step.climb && parsed?.kind === "template") {
+      areas.push(entry);
+      continue;
+    }
     if (parsed?.kind !== "token") return { ok: false, code: "invalid", message: "only token moves and resizes undo this way" };
     const current = state.tokens[parsed.id];
     const before = entry.value as Token | null | undefined;
     // A silent passenger of the step rides back quietly while it is still under the group, and is left as it is otherwise,
     // gone or not. Either way it never answers (docs/design/design-v1-attach.md 8.3).
     if (silent.has(parsed.id)) {
-      const back = current && stillUnder(state, parsed.id, restoring, silent) ? quietlyBack(current, before, step.poses[parsed.id], visible) : null;
+      const back = current && stillUnder(state, parsed.id, restoring, silent) ? quietlyBack(current, before, step.poses[parsed.id], visible, crosses) : null;
       if (back && current) {
         quiet.push({ key: entry.key, value: back, expectHash: guardHash(entry.key, current) });
         quietIds.push(parsed.id);
@@ -679,11 +714,52 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
     tokens.push({ key: entry.key, before, current, left: step.poses[parsed.id] });
   }
   if (tokens.some((t) => !t.left || !samePose(poseOf(t.current, visible), t.left, pathShown(t.current.id)))) return { ok: false, code: "invalid", message: MOVED_SINCE };
+  const moved = [...tokens.map((t) => ({ key: t.key, value: putBack(t.current, t.before, (id) => state.tokens[id] !== undefined, crosses), expectHash: guardHash(t.key, t.current) })), ...quiet];
   return {
     ok: true,
-    entries: [...tokens.map((t) => ({ key: t.key, value: putBack(t.current, t.before, (id) => state.tokens[id] !== undefined), expectHash: guardHash(t.key, t.current) })), ...quiet],
+    entries: [...moved, ...areasBack(state, areas, moved)],
     ...(quietIds.length > 0 ? { quiet: quietIds } : {}),
   };
+}
+
+/**
+ * Whether a climb's restore may take a creature from one floor to the
+ * other (docs/design/design-v1-floors.md phase 2, 8): only between the two
+ * floors it joined, either way, so an undo and a redo both cross. A step
+ * that is no climb never changes a floor.
+ */
+function crossing(climb: ClimbRecord | undefined): (now: string, back: string) => boolean {
+  return (now, back) => climb !== undefined && now !== back && ((now === climb.from && back === climb.to) || (now === climb.to && back === climb.from));
+}
+
+/**
+ * The areas a climb's restore takes across (docs/design/design-v1-floors.md
+ * phase 2, 8): each that follows a creature `moved` puts on the other floor,
+ * on the floor that creature stands on now and was on that other floor
+ * before, as its value now with only its floor changed. One the DM moved
+ * onto another creature that crosses too goes with that one, so no area is
+ * left on a floor apart from what it follows. Every other is left out
+ * without a word, gone, attached to a creature that stays or on another
+ * floor, whatever carries it, the climber included, so an area the player
+ * does not receive never answers.
+ */
+function areasBack(state: RoomState, areas: readonly RestoreEntry[], moved: readonly RestoreEntry[]): RestoreEntry[] {
+  const across = new Map<string, { now: string; back: string }>();
+  for (const entry of moved) {
+    const id = entry.key.slice("token:".length);
+    const now = state.tokens[id]?.sceneId;
+    const back = (entry.value as Token).sceneId;
+    if (now !== undefined && now !== back) across.set(id, { now, back });
+  }
+  const out: RestoreEntry[] = [];
+  for (const entry of areas) {
+    const current = ownEntry(state.templates, entry.key.slice("template:".length));
+    const before = entry.value as AreaTemplate | null | undefined;
+    const follows = current?.attachedTo === undefined ? undefined : across.get(current.attachedTo);
+    if (!current || !before || !follows || current.sceneId !== follows.now || before.sceneId !== follows.back) continue;
+    out.push({ key: entry.key, value: { ...current, sceneId: before.sceneId }, expectHash: guardHash(entry.key, current) });
+  }
+  return out;
 }
 
 /**
@@ -695,14 +771,17 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
  * keeps the nudge it has now, which the reducer's pass keeps only where it
  * still holds (docs/design/design-v1-snap-off.md 5.5).
  */
-function quietlyBack(current: Token, before: Token | null | undefined, left: Pose | undefined, shows: Shows): Token | null {
-  if (!before || !left || before.sceneId !== left.sceneId || current.sceneId !== left.sceneId) return null;
+function quietlyBack(current: Token, before: Token | null | undefined, left: Pose | undefined, shows: Shows, crosses: (now: string, back: string) => boolean): Token | null {
+  if (!before || !left || current.sceneId !== left.sceneId) return null;
+  // A climb's passenger crosses back to the floor it left by the same offsets (docs/design/design-v1-floors.md phase 2, 8).
+  const across = crosses(left.sceneId, before.sceneId);
+  if (before.sceneId !== left.sceneId && !across) return null;
   const dx = left.x - before.x;
   const dy = left.y - before.y;
   const dz = left.elevation - before.elevation;
   const still = samePose(poseOf(current, shows), left);
-  if (dx === 0 && dy === 0 && dz === 0 && !still) return null;
-  const out: Token = { ...current, x: current.x - dx, y: current.y - dy, elevation: current.elevation - dz };
+  if (!across && dx === 0 && dy === 0 && dz === 0 && !still) return null;
+  const out: Token = { ...current, sceneId: before.sceneId, x: current.x - dx, y: current.y - dy, elevation: current.elevation - dz };
   delete out.squeeze;
   if (still) {
     if (before.path) out.path = before.path;
@@ -717,10 +796,14 @@ function quietlyBack(current: Token, before: Token | null | undefined, left: Pos
  * goes with it. So does a squeeze: undoing a move into a corridor takes it
  * off, and undoing one out of it puts it back. So does where it was drawn
  * in its box: undoing a drop between squares from a square leaves none.
+ * So does its floor, where a climb crossed (`crosses`): the ground under
+ * both ends is fixed while the stairs stand (D-261109-106), so its place
+ * there is on the ground as it is now.
  */
-function putBack(current: Token, before: Token, exists: (tokenId: string) => boolean): Token {
+function putBack(current: Token, before: Token, exists: (tokenId: string) => boolean, crosses: (now: string, back: string) => boolean): Token {
   const { path: _path, squeeze: _squeeze, nudge: _nudge, w: _w, h: _h, attached: _attached, ...rest } = current;
   const out: Token = { ...rest, ...placeOf(before), ...sizeOf(before) };
+  if (crosses(current.sceneId, before.sceneId)) out.sceneId = before.sceneId;
   if (before.path) out.path = before.path;
   // The link goes back with the seat (docs/design/design-v1-attach.md 8.3). One to a holder the player cannot see now comes back
   // too, and the link pass keeps it only where it holds, so the player's answer is the one with no hidden holder at all.

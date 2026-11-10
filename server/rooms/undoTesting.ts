@@ -10,7 +10,7 @@ import { retainedSaveOutcome } from "#shared/saveOutcomes.ts";
 import { env } from "#shared/testutil.ts";
 import type { HistoryScope } from "#shared/undoContract.ts";
 import { undoScope } from "#shared/undoScope.ts";
-import { keptFrom, MOVED_SINCE, plannedOn, poseRestore, posesAfter, ridesChanged, TRAPPED_ON_THE_WAY, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
+import { climbOf, keptFrom, MOVED_SINCE, plannedOn, poseRestore, posesAfter, ridesChanged, TRAPPED_ON_THE_WAY, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
 import { dmHistoryValues, dmPoseRestore } from "./undoDm.ts";
 import { describeOp } from "./undoLabels.ts";
 
@@ -64,8 +64,8 @@ export class UndoTable {
     return r;
   }
 
-  /** An op as the actor takes it: the answer's words, or "ok". */
-  play(who: Viewer, op: Op): string {
+  /** An op as the actor takes it: the answer's words, or "ok". `group` is the gesture it was sent under, if any. */
+  play(who: Viewer, op: Op, group?: string): string {
     this.last = null;
     const before = this.state;
     if (who.role === "player") {
@@ -85,8 +85,10 @@ export class UndoTable {
       const teleport = op.t === "token.move" && op.teleport !== undefined;
       const walk: Walk | undefined = poses && op.t === "token.move" && !teleport ? { tokenId: op.tokenId, route: op.route ?? [[op.x, op.y, 0, 0]], routed: op.route !== undefined } : undefined;
       const rides = poses ? ridesChanged(before, this.state) : undefined;
-      this.stacks.push(who.memberId, inverse, describeOp(op as ClientOp, before, who, this.state), undefined, poses, undefined, undefined, teleport, walk, rides, r.trapped === true, {
+      const climb = climbOf(before, op);
+      this.stacks.push(who.memberId, inverse, describeOp(op as ClientOp, before, who, this.state), group, poses, undefined, undefined, teleport, walk, rides, r.trapped === true, {
         scope: who.role === "dm" ? scope : "play",
+        ...(climb ? { climb } : {}),
         ...(saveOutcome ? { saveOutcome } : {}),
         ...(who.role === "dm" ? { values: dmHistoryValues(inverse, this.state, scope === "play") } : {}),
       });
@@ -148,6 +150,7 @@ export class UndoTable {
       ...(step.teleport ? { teleport: true as const } : {}),
       ...(from === "redo" && step.routed && step.routes ? { routes: step.routes } : {}),
       ...(step.poses && step.rides && step.rides.length > 0 ? { rides: step.rides } : {}),
+      ...(step.poses && step.climb ? { climb: step.climb } : {}),
       ...(quiet ? { quiet } : {}),
       ...(saveOutcome ? { saveOutcome } : {}),
     };

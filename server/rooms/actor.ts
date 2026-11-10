@@ -62,7 +62,7 @@ import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCa
 import { layerCharge } from "./memorySize.ts";
 import { forgetAllOps, forgetSceneOp, mapStepOps, memoryGrowth, type DoorTouch } from "./remember.ts";
 import { growthBound, measuredFromStored, SizeGuard, touchedScenes } from "./sizeGuard.ts";
-import { keptFrom, MOVED_SINCE, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
+import { climbOf, keptFrom, MOVED_SINCE, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf } from "./undoLabels.ts";
 import { undoScope } from "#shared/undoScope.ts";
 import type { HistoryDirection, HistoryMessage, HistoryScope, OpAcknowledgment, StackHistoryCommand } from "#shared/undoContract.ts";
@@ -1466,6 +1466,9 @@ export class RoomActor {
       const routes = op.t === "redo" && step.routed && step.routes ? { routes: step.routes } : {};
       // A controlled ride the step ended or made shares its turn again when put back on that turn (docs/design/design-v1-attach.md 8.3).
       const rides = step.poses && step.rides && step.rides.length > 0 ? { rides: step.rides } : {};
+      // A player's climb crosses back by the stairs its step names, which permissions find on the climber's floor
+      // (docs/design/design-v1-floors.md phase 2, 8). The DM's restore is the generic one, with the floor check after.
+      const climb = step.poses && step.climb ? { climb: step.climb } : {};
       let saveOutcome: SaveOutcomeTransition | undefined;
       if (step.saveOutcome) {
         const record = retainedSaveOutcome(this.#staged.state, step.saveOutcome.id, at);
@@ -1481,7 +1484,7 @@ export class RoomActor {
       }
       // A DM's restore carries the head its command named, which its clock line carries, so the sending device knows the line
       // for its own (docs/design/design-v1-calendar-c2c3.md 4.6). A second command naming that head in this batch is refused above.
-      const checked = checkServerOp({ t: "sys.restore", entries, from: op.t, scope: historyScope, ...(viewer.role === "dm" ? { correction: { label: step.label }, claim: historyHead } : {}), deps: true, ...(step.teleport ? { teleport: true as const } : {}), ...routes, ...rides, ...(quiet ? { quiet } : {}), ...(saveOutcome ? { saveOutcome } : {}) });
+      const checked = checkServerOp({ t: "sys.restore", entries, from: op.t, scope: historyScope, ...(viewer.role === "dm" ? { correction: { label: step.label }, claim: historyHead } : {}), deps: true, ...(step.teleport ? { teleport: true as const } : {}), ...routes, ...rides, ...climb, ...(quiet ? { quiet } : {}), ...(saveOutcome ? { saveOutcome } : {}) });
       if (!checked.ok) {
         this.#undo.consume(viewer.memberId, op.t, historyScope, historyHead);
         this.#refuse(key, wm, n, "invalid", checked.message);
@@ -1640,7 +1643,9 @@ export class RoomActor {
       const walk: Walk | undefined =
         poses && op.t === "token.move" && !teleport ? { tokenId: op.tokenId, route: op.route ?? [[op.x, op.y, 0, 0]], routed: op.route !== undefined } : undefined;
       const rides = poses ? ridesChanged(before, this.#staged.state) : undefined;
-      recording = this.#undo.push(viewer.memberId, inverse, describeOp(clientOp, before, viewer, this.#staged.state), trackedOutcome ? undefined : cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport, walk, rides, reduced.trapped === true, { scope: viewer.role === "dm" ? actionScope : "play", declared: declaredSetup, ...(op.t === "actor.outcome" && op.page ? { saveOutcome: { id: op.page.id, plan: op.plan } } : {}), ...(viewer.role === "dm" ? { values: dmHistoryValues(inverse, this.#staged.state, actionScope === "play") } : {}) });
+      // A climb's step names the stairs it took, read here off the room before it, never from the device (undo.ts UndoEntry.climb).
+      const climb = climbOf(before, op);
+      recording = this.#undo.push(viewer.memberId, inverse, describeOp(clientOp, before, viewer, this.#staged.state), trackedOutcome ? undefined : cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport, walk, rides, reduced.trapped === true, { scope: viewer.role === "dm" ? actionScope : "play", declared: declaredSetup, ...(op.t === "actor.outcome" && op.page ? { saveOutcome: { id: op.page.id, plan: op.plan } } : {}), ...(viewer.role === "dm" ? { values: dmHistoryValues(inverse, this.#staged.state, actionScope === "play") } : {}), ...(climb ? { climb } : {}) });
     }
     if (conn.ackDetails) push(batch.ackDetails, key, { n, scope: actionScope, changed: reduced.changed, recorded: recording === "recorded", ...(recording === "too-large" ? { tooLarge: true as const } : {}) });
     this.#scheduleCommit();
