@@ -1,7 +1,9 @@
 import type { RoomState, Trap } from "#shared/model.ts";
 import { boardTheme } from "../../lib/theme.ts";
 import { findDoor } from "../doors/doors.ts";
-import type { DungeonPlan } from "./plan.ts";
+import { latticeFor } from "./lattice.ts";
+import type { DungeonPlan, PlanRoom } from "./plan.ts";
+import { isHexGrid } from "./settings.ts";
 
 /*
  * The DM marks over the dungeon preview and inside Look closer's picture
@@ -18,18 +20,98 @@ export const RING_OUTLINE = boardTheme.color.textHalo;
 
 export type LightMark = { x: number; y: number };
 export type NumberMark = { n: number; x: number; y: number };
+/** A room's box in the scene, in cells, by its board index. */
+export type RoomBox = { room: number; x: number; y: number; w: number; h: number };
+/** A room's number and board index, as the key numbers it (edits.ts `RoomFacts`). */
+export type Numbered = { n: number; room: number };
+
+type Placed = Pick<DungeonPlan, "w" | "h" | "grid">;
+
+/**
+ * Where a lattice cell's middle stands in the scene. Rooms, their pins and
+ * the entrance are on the plan's lattice, which on hexes is the rows
+ * lattice (phase 3, 2.1), so each goes through `pointOf`. On squares that
+ * is the square's middle, as it always was.
+ */
+function pointer(plan: Placed): (x: number, y: number) => [number, number] {
+  if (!isHexGrid(plan.grid)) return (x, y) => [x + 0.5, y + 0.5];
+  const lattice = latticeFor(plan.grid, { w: plan.w, h: plan.h });
+  return (x, y) => lattice.pointOf(x, y);
+}
+
+/**
+ * A room's box in the scene: its rectangle on squares, and on hexes the
+ * box round its hexes' centers grown by a hex's radius, near enough for a
+ * ring and a tap.
+ */
+export function roomBox(plan: Placed, r: Pick<PlanRoom, "x" | "y" | "w" | "h">, room = 0): RoomBox {
+  if (!isHexGrid(plan.grid)) return { room, x: r.x, y: r.y, w: r.w, h: r.h };
+  const lattice = latticeFor(plan.grid, { w: plan.w, h: plan.h });
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (let y = r.y; y < r.y + r.h; y++) {
+    for (let x = r.x; x < r.x + r.w; x++) {
+      if (!lattice.inMap(x, y)) continue;
+      const [px, py] = lattice.pointOf(x, y);
+      x0 = Math.min(x0, px);
+      y0 = Math.min(y0, py);
+      x1 = Math.max(x1, px);
+      y1 = Math.max(y1, py);
+    }
+  }
+  if (x0 > x1) return { room, x: 0, y: 0, w: 0, h: 0 };
+  // A hex's corner past the outer centers: neighbors along a lattice row stand √3 radii apart, on either hex grid.
+  const [ax, ay] = lattice.pointOf(0, 0);
+  const [bx, by] = lattice.pointOf(1, 0);
+  const pad = Math.hypot(bx - ax, by - ay) / Math.sqrt(3);
+  return { room, x: x0 - pad, y: y0 - pad, w: x1 - x0 + 2 * pad, h: y1 - y0 + 2 * pad };
+}
+
+/** Every room's box, by board index. */
+export function roomBoxes(plan: Placed & Pick<DungeonPlan, "rooms">): RoomBox[] {
+  return plan.rooms.map((r, i) => roomBox(plan, r, i));
+}
+
+/**
+ * The room a tap picks (phase 3, 4.1): the nearest box within `slop`
+ * pixels of the point, inside one counting as 0, ties to the smaller box.
+ * `point` is in cells and `px` the pixels a cell takes on screen. Only the
+ * rooms given count, so a room gone from the plan is never picked.
+ */
+export function pickRoom(boxes: readonly RoomBox[], point: { x: number; y: number }, px: number, slop = 22): number | null {
+  let best: { room: number; d: number; area: number } | null = null;
+  for (const b of boxes) {
+    const dx = Math.max(b.x - point.x, 0, point.x - (b.x + b.w));
+    const dy = Math.max(b.y - point.y, 0, point.y - (b.y + b.h));
+    const d = Math.hypot(dx, dy) * px;
+    if (d > slop) continue;
+    const area = b.w * b.h;
+    if (!best || d < best.d || (d === best.d && area < best.area)) best = { room: b.room, d, area };
+  }
+  return best?.room ?? null;
+}
 
 /** Where each light stands, in squares. */
 export function lightMarks(plan: Pick<DungeonPlan, "lights">): LightMark[] {
   return plan.lights.map((l) => ({ x: l.x, y: l.y }));
 }
 
-/** Each room's number at its pin's middle, which is where the landing puts the pin. None with DM key off. */
-export function numberMarks(plan: Pick<DungeonPlan, "key" | "rooms">): NumberMark[] {
-  if (!plan.key) return [];
-  return plan.key.flatMap((k) => {
+/**
+ * Each room's number at its pin's middle, which is where the landing puts
+ * the pin. None with DM key off, unless `numbered` gives the rooms' numbers,
+ * as Edit rooms does whatever DM key says (phase 3, 4.1).
+ */
+export function numberMarks(plan: Placed & Pick<DungeonPlan, "key" | "rooms">, numbered?: readonly Numbered[]): NumberMark[] {
+  const rooms = numbered ?? plan.key;
+  if (!rooms) return [];
+  const at = pointer(plan);
+  return rooms.flatMap((k) => {
     const room = plan.rooms[k.room];
-    return room ? [{ n: k.n, x: room.pin[0] + 0.5, y: room.pin[1] + 0.5 }] : [];
+    if (!room) return [];
+    const [x, y] = at(room.pin[0], room.pin[1]);
+    return [{ n: k.n, x, y }];
   });
 }
 
@@ -42,7 +124,7 @@ export const NUMBER_SIZE = 1.1;
  * Look closer's picture shows what the preview's overlay does. Strokes are
  * in pixels: `px` is the pixels a square takes.
  */
-export function drawMarks(g: CanvasRenderingContext2D, plan: DungeonPlan, room: RoomState, sceneId: string, px: number): void {
+export function drawMarks(g: CanvasRenderingContext2D, plan: DungeonPlan, room: RoomState, sceneId: string, px: number, numbered?: readonly Numbered[]): void {
   g.save();
   g.setTransform(px, 0, 0, px, 0, 0);
   const stroke = (width: number, color: string) => {
@@ -50,7 +132,7 @@ export function drawMarks(g: CanvasRenderingContext2D, plan: DungeonPlan, room: 
     g.strokeStyle = color;
   };
   for (const trap of Object.values(room.traps ?? {})) if (trap) drawTrap(g, trap, room, sceneId, stroke);
-  const e = plan.entrance;
+  const e = roomBox(plan, plan.entrance);
   g.beginPath();
   g.roundRect(e.x - 0.5, e.y - 0.5, e.w + 1, e.h + 1, 0.8);
   stroke(4, boardTheme.color.textHalo);
@@ -68,7 +150,7 @@ export function drawMarks(g: CanvasRenderingContext2D, plan: DungeonPlan, room: 
   g.font = `700 ${NUMBER_SIZE}px sans-serif`;
   g.textAlign = "center";
   g.textBaseline = "middle";
-  for (const m of numberMarks(plan)) {
+  for (const m of numberMarks(plan, numbered)) {
     stroke(4, RING_OUTLINE);
     g.strokeText(String(m.n), m.x, m.y);
     g.fillStyle = boardTheme.color.white;

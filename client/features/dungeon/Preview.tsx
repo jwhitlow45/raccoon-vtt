@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import type { RoomState, Trap } from "#shared/model.ts";
 import { Loading, SHOW_DELAY_MS, useDelayed } from "../../components/Loading.tsx";
 import { BOARD_SCOPE, boardTheme, theme } from "../../lib/theme.ts";
@@ -7,8 +7,8 @@ import { exportContent } from "../mapexport/content.ts";
 import { renderMapPng } from "../mapexport/render.ts";
 import { encodeThumb } from "../scenes/thumbnail.ts";
 import type { DungeonPlan } from "./plan.ts";
-import { lightMarks, LIGHT_RING, NUMBER_SIZE, numberMarks, RING_OUTLINE, RING_RADIUS } from "./marks.ts";
-import { DRAWING } from "./words.ts";
+import { lightMarks, LIGHT_RING, NUMBER_SIZE, numberMarks, pickRoom, RING_OUTLINE, RING_RADIUS, roomBox, roomBoxes, type Numbered, type RoomBox } from "./marks.ts";
+import { DRAWING, selectedName } from "./words.ts";
 
 /** What a preview draws: the plan, and the scratch room its ops made (client.ts `preview`). */
 export type Drawn = { plan: DungeonPlan; room: RoomState; name: string };
@@ -45,6 +45,16 @@ export function DungeonPreview(props: {
   onPictureFailed(drawn: Drawn): void;
   /** Stands in the bottom left corner, where Look closer is (CORNER_SLOT's mirror). */
   leftCorner?: ReactNode;
+  /** Stands in the top right corner: Edit rooms (phase 3, 4.1). */
+  topCorner?: ReactNode;
+  /** Every kept room by number and board index: the rooms a tap can pick. */
+  rooms?: readonly Numbered[];
+  /** Show every kept room's number whatever DM key says, as Edit rooms does. */
+  showNumbers?: boolean;
+  /** The room whose panel is open, ringed, by board index. */
+  picked?: number | null;
+  /** A tap or click on a room, the nearest of `rooms` within 22 px, opens its panel. */
+  onPick?(room: number): void;
   children?: ReactNode;
 }) {
   const { drawn, width, height, onPictured, onPictureFailed } = props;
@@ -98,6 +108,22 @@ export function DungeonPreview(props: {
   const centred = failed && !shown ? ({ bottom: "auto", top: "50%", transform: "translateY(-50%)" } as const) : null;
   const traps = shown ? Object.values(shown.room.traps ?? {}).filter((t): t is Trap => !!t) : [];
   const sceneId = shown ? Object.keys(shown.room.scenes)[0] ?? "" : "";
+  const kept = new Set((props.rooms ?? []).map((r) => r.room));
+  const boxes = plan ? roomBoxes(plan).filter((b) => kept.has(b.room)) : [];
+  const picked = props.picked ?? null;
+  const pickedBox = boxes.find((b) => b.room === picked) ?? null;
+  const pickedN = props.rooms?.find((r) => r.room === picked)?.n ?? null;
+  const onPick = props.onPick;
+  const pick =
+    onPick && plan && boxes.length > 0
+      ? (e: MouseEvent<HTMLDivElement>) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          if (rect.width === 0) return;
+          const px = rect.width / plan.w;
+          const room = pickRoom(boxes, { x: (e.clientX - rect.left) / px, y: (e.clientY - rect.top) / px }, px);
+          if (room !== null) onPick(room);
+        }
+      : undefined;
 
   return (
     <div
@@ -113,8 +139,8 @@ export function DungeonPreview(props: {
       }}
     >
       {shown && plan ? (
-        <div style={{ position: "relative", width: box.width, height: box.height }}>
-          <img src={url!.src} alt={shown.name} style={{ display: "block", width: "100%", height: "100%" }} />
+        <div onClick={pick} data-preview-picture="" style={{ position: "relative", width: box.width, height: box.height, cursor: pick ? "pointer" : undefined }}>
+          <img src={url!.src} alt={selectedName(shown.name, pickedN)} style={{ display: "block", width: "100%", height: "100%" }} />
           <svg aria-hidden viewBox={`0 0 ${plan.w} ${plan.h}`} preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
             <defs>
               <pattern id={hatch} width={0.5} height={0.5} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -124,14 +150,15 @@ export function DungeonPreview(props: {
             {traps.map((t) => (
               <TrapMark key={t.id} trap={t} room={shown.room} sceneId={sceneId} hatch={hatch} />
             ))}
-            <EntranceRing rect={plan.entrance} />
+            <EntranceRing box={roomBox(plan, plan.entrance)} />
+            {pickedBox ? <PickedRing box={pickedBox} /> : null}
             {lightMarks(plan).map((m, i) => (
               <g key={`l${i}`}>
                 <circle cx={m.x} cy={m.y} r={RING_RADIUS} fill="none" stroke={RING_OUTLINE} strokeWidth={4} style={THIN} />
                 <circle cx={m.x} cy={m.y} r={RING_RADIUS} fill="none" stroke={LIGHT_RING} strokeWidth={2} style={THIN} />
               </g>
             ))}
-            {numberMarks(plan).map((m) => (
+            {numberMarks(plan, props.showNumbers ? props.rooms : undefined).map((m) => (
               <text key={`n${m.n}`} x={m.x} y={m.y} textAnchor="middle" dominantBaseline="central" fontSize={NUMBER_SIZE} fontWeight={700} fontFamily="sans-serif" fill={boardTheme.color.white} stroke={RING_OUTLINE} strokeWidth={4} paintOrder="stroke" style={THIN}>
                 {m.n}
               </text>
@@ -141,6 +168,7 @@ export function DungeonPreview(props: {
       ) : null}
       {props.children ? <div style={{ ...CORNER_SLOT, ...centred }}>{props.children}</div> : null}
       {props.leftCorner ? <div style={{ ...CORNER_SLOT, right: "auto", left: theme.space(2), ...centred }}>{props.leftCorner}</div> : null}
+      {props.topCorner ? <div style={{ ...CORNER_SLOT, bottom: "auto", top: theme.space(2) }}>{props.topCorner}</div> : null}
       {props.drawing ? <DrawingPill now={props.drawingNow ?? false} /> : null}
     </div>
   );
@@ -206,13 +234,25 @@ function TrapMark(props: { trap: Trap; room: RoomState; sceneId: string; hatch: 
 }
 
 /** A white ring over a dark one, so it reads on floor and on rock alike. */
-function EntranceRing(props: { rect: DungeonPlan["entrance"] }) {
-  const { x, y, w, h } = props.rect;
+function EntranceRing(props: { box: RoomBox }) {
+  const { x, y, w, h } = props.box;
   const ring = { x: x - 0.5, y: y - 0.5, width: w + 1, height: h + 1, rx: 0.8, fill: "none" };
   return (
     <>
       <rect {...ring} stroke={boardTheme.color.textHalo} strokeWidth={4} style={THIN} />
       <rect {...ring} stroke={boardTheme.color.white} strokeWidth={2} style={THIN} />
+    </>
+  );
+}
+
+/** The picked room's ring, in the light marks' crest yellow over the dark outline and wider than the entrance's, so the two never read as one. */
+function PickedRing(props: { box: RoomBox }) {
+  const { x, y, w, h } = props.box;
+  const ring = { x: x - 0.3, y: y - 0.3, width: w + 0.6, height: h + 0.6, rx: 0.6, fill: "none" };
+  return (
+    <>
+      <rect {...ring} stroke={RING_OUTLINE} strokeWidth={6} style={THIN} />
+      <rect {...ring} stroke={LIGHT_RING} strokeWidth={3} style={THIN} />
     </>
   );
 }
