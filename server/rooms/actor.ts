@@ -21,7 +21,7 @@ import { stampedAt } from "#shared/reducer/tokens.ts";
 import { splitCheck } from "#shared/rules/walls.ts";
 import { pitsMoved, withPitsCounted } from "#shared/rules/pitCount.ts";
 import { trapsLiveOn } from "#shared/rules/traps.ts";
-import { floorProblem, mainFloorId } from "#shared/rules/floors.ts";
+import { floorProblem, levelTakenWords, mainFloorId } from "#shared/rules/floors.ts";
 import { renewOpenDisplay } from "../auth/displaySessions.ts";
 import { checkDisplayGrant, checkGrant } from "../auth/grants.ts";
 import type { RoomGateway } from "./gateway.ts";
@@ -1666,7 +1666,11 @@ export class RoomActor {
     // once the DM stops it the same Undo works. So does a DM's step that stairs refuse (docs/design/design-v1-floors.md
     // phase 2, 8, D-261109-108), placed by another DM: once they go, the same Undo works.
     const stairs = isStairsRefusal(reason);
-    if (step.id && !isPlayingRefusal(reason) && !(stairs && viewer.role === "dm")) this.#undo.consume(viewer.memberId, direction, scope, step.id);
+    // A floor the restore would bring back whose level a co-DM's new floor holds keeps the step too, so removing the new floor
+    // lets the same Undo work. The words come from the step, as floorProblem cannot tell which of the two floors is the newcomer.
+    const taken = code === "invalid" && viewer.role === "dm" ? levelTakenWords(this.#staged.state, step.entries) : null;
+    if (step.id && !isPlayingRefusal(reason) && !(stairs && viewer.role === "dm") && taken === null) this.#undo.consume(viewer.memberId, direction, scope, step.id);
+    if (taken !== null) return taken;
     if (!stairs) return reason;
     // Stairs the restore would put back are not there to remove: the words name what stands in their way instead (FL2-OPUS-2).
     const absent = restoredLinkWords(this.#staged.state, step.entries);

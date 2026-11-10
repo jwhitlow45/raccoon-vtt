@@ -9,7 +9,7 @@ import type { FloorLink, RoomState, Scene } from "#shared/model.ts";
 import { stableStringify, type ProjectedState } from "#shared/project.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
 import { LINK_WORDS } from "#shared/rules/floorLinks.ts";
-import { FLOOR_WORDS, floorProblem, floorsOf } from "#shared/rules/floors.ts";
+import { floorProblem, floorsOf } from "#shared/rules/floors.ts";
 import { floorFullWords } from "./actor.ts";
 import { Connection } from "./connection.ts";
 import type { RoomExport } from "./exportRoom.ts";
@@ -275,7 +275,7 @@ describe("several floors on the server (docs/design/design-v1-floors.md 9)", () 
     for (const id of [r.ground, upper]) assert.equal(floorProblem(back, id), null);
   });
 
-  test("an undo that would leave two floors on one level is refused by the floor check, in the DM's words", async () => {
+  test("an undo that would leave two floors on one level is refused naming the new floor, keeps its step, and works once the new floor is gone (LP35-A-FLR-1)", async () => {
     const r = await tower(t, "Two DMs");
     const co = t.client();
     await co.claimDm(r.roomId, r.dmKey);
@@ -283,16 +283,24 @@ describe("several floors on the server (docs/design/design-v1-floors.md 9)", () 
     await coSocket.snapshot("co");
     const upper = await addFloor(r.dmSocket, r.ground, "above", "Upper floor");
     const attic = await addFloor(r.dmSocket, upper, "above", "Attic");
-    // The DM removes the top floor, which touches no other floor, and the co-DM adds a new top floor meanwhile.
+    const pairs = [uuidv7(), uuidv7()];
+    await ok(r.dmSocket, { t: "floorLink.put", link: { id: pairs[0]!, pairId: uuidv7(), sceneId: upper, to: attic, rect: STAIRS, kind: "stairs" } } as Op);
+    await ok(r.dmSocket, { t: "floorLink.put", link: { id: pairs[1]!, pairId: uuidv7(), sceneId: upper, to: attic, rect: { x: 8, y: 8, w: 1, h: 1 }, kind: "ladder" } } as Op);
+    // The DM removes the top floor with both pairs, and the co-DM adds a new top floor meanwhile.
     await ok(r.dmSocket, { t: "scene.delete", sceneId: attic } as Op);
-    await addFloor(coSocket, upper, "above", "Belfry");
+    const fresh = await addFloor(coSocket, upper, "above", "New floor");
     const head = await r.dmSocket.historyHead("setup", "undo");
-    const refused = await r.dmSocket.apply({ t: "undo", head: head!, scope: "setup" } as Op);
-    const words = Object.values(FLOOR_WORDS).map((w) => w("Tower", "Belfry"));
-    assert.ok(refused.rejects?.some((x) => words.some((w) => x.message.includes(w))), JSON.stringify(refused.rejects));
+    const answer = await r.dmSocket.apply({ t: "undo", head: head!, scope: "setup" } as Op);
+    assert.match(refused(answer), /^could not undo removing .*Attic.*: New floor is in Attic's place\. Remove or move it, then Undo again\.$/);
     const state = live(t, r.roomId);
     assert.equal(state.scenes[attic], undefined, "the room is as it was");
-    for (const id of Object.keys(state.scenes)) assert.equal(floorProblem(state, id), null);
+    assert.equal(await r.dmSocket.historyHead("setup", "undo"), head, "the step is kept");
+    await ok(coSocket, { t: "scene.delete", sceneId: fresh } as Op);
+    await ok(r.dmSocket, { t: "undo", head: head!, scope: "setup" } as Op);
+    const back = live(t, r.roomId);
+    assert.ok(back.scenes[attic]?.floor, "Attic is back");
+    for (const id of pairs) assert.ok(back.floorLinks?.[id], "and both its pairs");
+    for (const id of Object.keys(back.scenes)) assert.equal(floorProblem(back, id), null);
     coSocket.close();
   });
 
