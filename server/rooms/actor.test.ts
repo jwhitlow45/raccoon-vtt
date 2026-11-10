@@ -42,7 +42,7 @@ import { assertWithinLimits } from "./importRoom.ts";
 import { HttpError } from "../auth/http.ts";
 import { remapState } from "./remap.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { checkWholeScenes, growthBound, measuredStateBytes, memoryReserves, memoryShare, memoryStateReserve, roomLevelBytes, SHARE_MARGIN, SizeGuard, touchedScenes } from "./sizeGuard.ts";
+import { checkWholeScenes, discoveryReserve, growthBound, measuredStateBytes, memoryReserves, memoryShare, memoryStateReserve, roomLevelBytes, SCENE_MAPS_FULL, SHARE_MARGIN, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { loadRoom, type Pool } from "./persistence.ts";
 import { SQUARES } from "../../shared/rules/grid.ts";
 import { STANDING_CLOCK } from "./undoScopeTesting.ts";
@@ -2681,7 +2681,9 @@ describe("every op's growth counts on the scenes it wrote into (docs/design/desi
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
     const { state, sceneId, ids } = goblins(dm, player);
-    const sceneLimit = serializedBytes(projectState({ ...state, sight: {} } as unknown as RoomState, { memberId: dm.id, role: "dm" }, { sceneId })) + 300;
+    // The guard adds what players' copies may hold (discoveryReserve): the scene is squares with fog off and automatic walls on.
+    const players = discoveryReserve(state, state.scenes[sceneId]!, MEMORY_CAP);
+    const sceneLimit = serializedBytes(projectState({ ...state, sight: {} } as unknown as RoomState, { memberId: dm.id, role: "dm" }, { sceneId })) + players + 300;
     const frighten = (label: string): Op => ({ t: "actor.effects", add: ids.map((tokenId) => ({ target: { tokenId }, effect: { id: uuidv7(), key: "frightened", label } })) });
     const long = "Frightened of the dark, the deep water and the thing that waits below the ford";
     // The op adds to the scene's tokens more than is left, while the room-level part, with its log, does not grow.
@@ -2689,13 +2691,14 @@ describe("every op's growth counts on the scenes it wrote into (docs/design/desi
     const probe = applyOp(state, frighten(long), dmView, { seq: 2, at: new Date().toISOString() });
     assert.ok(probe.ok);
     assert.ok(roomLevelBytes(probe.state) <= roomLevelBytes(state));
-    assert.ok(serializedBytes(projectState({ ...probe.state, sight: {} } as unknown as RoomState, dmView, { sceneId })) > sceneLimit);
+    assert.ok(serializedBytes(projectState({ ...probe.state, sight: {} } as unknown as RoomState, dmView, { sceneId })) + players > sceneLimit);
     await withRoom(
       state,
       dm,
       async (actor, send) => {
         // Three effects of about 150 bytes each on the scene's tokens: past the 300 bytes left, though the op names no scene.
-        assert.deepEqual(await send(frighten(long)), { code: "quota", message: "this scene is at its 0 MiB size limit" });
+        // What players' copies may add is all that carries it past the limit, so the DM reads the maps note.
+        assert.deepEqual(await send(frighten(long)), { code: "quota", message: SCENE_MAPS_FULL });
         assert.ok(checkWholeScenes(actor.committed.state, sceneLimit).ok);
         assert.equal(await send({ t: "actor.effects", add: [{ target: { tokenId: ids[0]! }, effect: { id: uuidv7(), key: "prone" } }] }), null, "one small one still fits");
       },

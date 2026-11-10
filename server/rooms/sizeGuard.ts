@@ -4,7 +4,7 @@ import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, UP_DIR_CHARS, type BuildChunk, ty
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
 import { exploredReserve, LIMITS, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, reservedExploreFloors, serializedBytes, utf8Bytes, type LimitCheck } from "#shared/limits.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
-import { chunkPositions, perPlayerScene } from "#shared/project.ts";
+import { chunkPositions, heldGroundMap, perPlayerScene } from "#shared/project.ts";
 import { keepsMemory, type Layer } from "#shared/reducer/memory.ts";
 import { floorsOf, onPlayersScene } from "#shared/rules/floors.ts";
 import { encodeTile, fullTileBits, tilesAcross } from "#shared/rules/fog.ts";
@@ -991,14 +991,16 @@ function wallsExtra(state: RoomState, scene: Scene): number {
 
 /**
  * What players' copies of a scene may hold beyond the DM's (5.5), read
- * from the scene, its walls and the public marks alone: on a scene with
- * fog on, each free wall at its largest form and every chunk position at
- * its widest, and where memory is reserved, the memory a copy reads at its
- * cap, the party's and on a per-player scene a holder's own too.
+ * from the scene, its walls and the public marks alone: on a scene players
+ * get cut from held ground (heldGroundMap: fog on, or a square scene with
+ * fog off whose automatic walls are not "off"), each free wall at its
+ * largest form and every chunk position at its widest, and where memory is
+ * reserved, the memory a copy reads at its cap, the party's and on a
+ * per-player scene a holder's own too.
  */
 export function discoveryReserve(state: RoomState, scene: Scene, share: number, withMemory = true): number {
   let bytes = 0;
-  if (scene.fogEnabled) bytes += wallsExtra(state, scene) + positionsReserve(scene);
+  if (heldGroundMap(scene)) bytes += wallsExtra(state, scene) + positionsReserve(scene);
   // A copy reads the party's memory, and a holder's view their own as well.
   if (withMemory && memoryReserved(state, scene)) {
     const cap = (holder: boolean) => (sharesRoom(state, scene, holder) ? share : MEMORY_CAP);

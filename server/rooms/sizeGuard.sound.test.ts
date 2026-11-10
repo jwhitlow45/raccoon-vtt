@@ -6,7 +6,8 @@ import { projectState, type ProjectedState } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { room } from "#shared/testutil.ts";
-import { checkWholeScenes, growthBound, measuredLog, measuredStateBytes, SizeGuard } from "./sizeGuard.ts";
+import { MEMORY_CAP } from "./memorySize.ts";
+import { checkWholeScenes, discoveryReserve, growthBound, measuredLog, measuredStateBytes, SizeGuard } from "./sizeGuard.ts";
 
 /**
  * Synced music and sound in the size guard (docs/design/design-v1-music.md
@@ -61,7 +62,8 @@ function steps(): { before: RoomState; state: RoomState; growth: number; op: Op 
 
 function assertExact(state: RoomState, why: string): void {
   for (const sceneId of ["s1", "s2"]) {
-    const bytes = dmScene(state, sceneId);
+    // The guard adds what players' copies may hold to every scene (discoveryReserve), which the import's check leaves out.
+    const bytes = dmScene(state, sceneId) + discoveryReserve(state, state.scenes[sceneId]!, MEMORY_CAP);
     assert.equal(new SizeGuard({ sceneLimit: bytes }).check(state, [sceneId], 0).ok, true, `${why}, ${sceneId}`);
     assert.equal(new SizeGuard({ sceneLimit: bytes - 1 }).check(state, [sceneId], 0).ok, false, `${why}, ${sceneId}`);
   }

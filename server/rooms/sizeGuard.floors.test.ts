@@ -4,6 +4,7 @@ import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { room, scene, token } from "#shared/testutil.ts";
+import { MEMORY_CAP } from "./memorySize.ts";
 import { checkWholeScenes, growthBound, memoryReserved, projectedSceneBytes, sceneFullWords, sceneGroups, SizeGuard } from "./sizeGuard.ts";
 
 /**
@@ -45,18 +46,18 @@ describe("the size guard on a scene with floors", () => {
   });
 
   test("an op on one floor is refused when the floors together pass the budget, though the floor alone fits", () => {
-    const before = withBulk(tower(2, 40), "a", "s1", 3_000);
-    const after = withBulk(before, "b", "f1", 3_000);
-    // Room for one bulky floor and not two.
-    const sceneLimit = projectedSceneBytes(after, "s1") - 1_000;
-    assert.ok(projectedSceneBytes(withBulk(tower(1, 40), "b", "s1", 3_000), "s1") < sceneLimit, "one floor of it alone fits");
+    const before = withBulk(tower(2, 40), "a", "s1", 20_000);
+    const after = withBulk(before, "b", "f1", 20_000);
+    // Room for one bulky floor and not two, even before what players' copies of the floors may add, so the words are the plain ones.
+    const sceneLimit = projectedSceneBytes(after, "s1", MEMORY_CAP, "player") - 1_000;
+    assert.ok(projectedSceneBytes(withBulk(tower(1, 40), "b", "s1", 20_000), "s1") < sceneLimit, "one floor of it alone fits");
     const guard = new SizeGuard({ stateLimit: 8 * MIB, sceneLimit });
     assert.equal(guard.check(before, ["s1"], 0, before).ok, true);
     const refused = guard.check(after, ["f1"], growthBound(before, after, ["token:b"]), before);
     assert.deepEqual(refused, { ok: false, code: "quota", message: sceneFullWords(sceneLimit) });
     // The same bulk on another scene goes in: only a scene's own floors share its budget.
     assert.equal(guard.refusedScene, "s1");
-    const elsewhere = withBulk(before, "b", "s2", 3_000);
+    const elsewhere = withBulk(before, "b", "s2", 20_000);
     assert.equal(guard.check(elsewhere, ["s2"], growthBound(before, elsewhere, ["token:b"]), before).ok, true);
   });
 
@@ -76,7 +77,8 @@ describe("the size guard on a scene with floors", () => {
   test("a room import refuses a scene whose floors together pass the budget, though each floor alone fits", () => {
     let state = tower(4, 40);
     for (const id of ["s1", "f1", "f2", "f3"]) state = withBulk(state, `t-${id}`, id, 9_000);
-    const sceneLimit = projectedSceneBytes(state, "s1") - 1_000;
+    // The import's check leaves out what players' copies may add, as a player's measure does.
+    const sceneLimit = projectedSceneBytes(state, "s1", MEMORY_CAP, "player") - 1_000;
     assert.equal(checkWholeScenes(state, sceneLimit).ok, false);
     assert.equal(checkWholeScenes(withBulk(tower(1, 40), "t", "s1", 9_000), sceneLimit).ok, true, "one such floor fits");
   });

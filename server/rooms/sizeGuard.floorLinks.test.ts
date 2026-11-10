@@ -5,6 +5,7 @@ import { serializedBytes } from "#shared/limits.ts";
 import type { RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { DM } from "#shared/testutil.ts";
+import { MEMORY_CAP } from "./memorySize.ts";
 import { checkWholeScenes, growthBound, projectedSceneBytes, SizeGuard } from "./sizeGuard.ts";
 
 /**
@@ -45,7 +46,8 @@ describe("the size guard on stairs and ladders", () => {
 
   test("an import counts the ends too: a tower that fits without them and not with them is refused", () => {
     const state = stairs();
-    const limit = projectedSceneBytes(state, GROUND) - 1;
+    // The import's check leaves out what players' copies may add, as a player's measure does.
+    const limit = projectedSceneBytes(state, GROUND, MEMORY_CAP, "player") - 1;
     assert.equal(checkWholeScenes(tower(), limit).ok, true);
     assert.equal(checkWholeScenes(state, limit).ok, false);
   });
