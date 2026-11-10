@@ -37,16 +37,16 @@ function platform(sceneId: string, feet: number): BuildChunk {
 describe("the floors a move can go to", () => {
   test("every floor of the scene but the one they stand on, top first", () => {
     const state = tower((s) => void (s.tokens.thorn = thorn()));
-    assert.deepEqual(floorChoices(state, [state.tokens.thorn!]).map((c) => c.name), ["Attic", "Upper floor"]);
+    assert.deepEqual(floorChoices(state, [state.tokens.thorn!], new Map()).map((c) => c.name), ["Attic", "Upper floor"]);
     const onUpper = tower((s) => void (s.tokens.thorn = thorn({ sceneId: "u" })));
-    assert.deepEqual(floorChoices(onUpper, [onUpper.tokens.thorn!]).map((c) => c.name), ["Attic", "Ground floor"]);
+    assert.deepEqual(floorChoices(onUpper, [onUpper.tokens.thorn!], new Map()).map((c) => c.name), ["Attic", "Ground floor"]);
   });
 
   test("a floor is off where the full space of a creature lies outside it", () => {
     const state = tower((s) => void (s.tokens.thorn = thorn({ x: 12, y: 4 })));
-    const attic = floorChoices(state, [state.tokens.thorn!]).find((c) => c.name === "Attic")!;
+    const attic = floorChoices(state, [state.tokens.thorn!], new Map()).find((c) => c.name === "Attic")!;
     assert.equal(attic.off, "Outside Attic");
-    const upper = floorChoices(state, [state.tokens.thorn!]).find((c) => c.name === "Upper floor")!;
+    const upper = floorChoices(state, [state.tokens.thorn!], new Map()).find((c) => c.name === "Upper floor")!;
     assert.equal(upper.off, null);
   });
 
@@ -60,7 +60,7 @@ describe("the floors a move can go to", () => {
 
   test("an unhidden party member bound for a floor players have not reached warns in one line", () => {
     const state = tower((s) => void (s.tokens.thorn = thorn()));
-    const [attic, upper] = floorChoices(state, [state.tokens.thorn!]);
+    const [attic, upper] = floorChoices(state, [state.tokens.thorn!], new Map());
     assert.equal(attic!.warning, "Players haven't reached Attic. Moving Thorn there opens it to them.");
     assert.equal(upper!.warning, "Players haven't reached Upper floor. Moving Thorn there opens it to them.");
   });
@@ -70,16 +70,16 @@ describe("the floors a move can go to", () => {
       s.tokens.thorn = thorn();
       s.openFloors = { a: { sceneId: "a", rev: 0 } };
     });
-    assert.equal(floorChoices(reached, [reached.tokens.thorn!])[0]!.warning, null, "Attic is reached");
+    assert.equal(floorChoices(reached, [reached.tokens.thorn!], new Map())[0]!.warning, null, "Attic is reached");
     const goblin = tower((s) => void (s.tokens.gob = token("gob", { sceneId: "g", x: 2, y: 2 })));
-    assert.deepEqual(floorChoices(goblin, [goblin.tokens.gob!]).map((c) => c.warning), [null, null]);
+    assert.deepEqual(floorChoices(goblin, [goblin.tokens.gob!], new Map()).map((c) => c.warning), [null, null]);
     const hidden = tower((s) => void (s.tokens.thorn = thorn({ visibility: "dm" })));
-    assert.deepEqual(floorChoices(hidden, [hidden.tokens.thorn!]).map((c) => c.warning), [null, null]);
+    assert.deepEqual(floorChoices(hidden, [hidden.tokens.thorn!], new Map()).map((c) => c.warning), [null, null]);
     const prepared = tower((s) => {
       s.tokens.thorn = thorn();
       s.meta = { ...s.meta, playerSceneId: "elsewhere" };
     });
-    assert.deepEqual(floorChoices(prepared, [prepared.tokens.thorn!]).map((c) => c.warning), [null, null], "a scene the players are not on opens nothing");
+    assert.deepEqual(floorChoices(prepared, [prepared.tokens.thorn!], new Map()).map((c) => c.warning), [null, null], "a scene the players are not on opens nothing");
   });
 
   test("a mount's rider is part of the move: the warning names the rider and the mount that carries them", () => {
@@ -89,12 +89,12 @@ describe("the floors a move can go to", () => {
     });
     const horse = state.tokens.horse!;
     assert.deepEqual(movedTokens(state, [horse]).map((t) => t.id), ["horse", "thorn"]);
-    assert.equal(floorChoices(state, [horse])[1]!.warning, "Players haven't reached Upper floor. Moving Thorn there opens it to them.");
+    assert.equal(floorChoices(state, [horse], new Map())[1]!.warning, "Players haven't reached Upper floor. Moving Thorn there opens it to them.");
   });
 
   test("a scene with one floor offers none, and names read as a list", () => {
     const plain = room({ scenes: { s1: scene("s1") }, tokens: { t: token("t") } });
-    assert.deepEqual(floorChoices(plain, [plain.tokens.t!]), []);
+    assert.deepEqual(floorChoices(plain, [plain.tokens.t!], new Map()), []);
     assert.deepEqual([nameList([]), nameList(["Thorn"]), nameList(["Thorn", "Bree"]), nameList(["Thorn", "Bree", "Mira"])], ["", "Thorn", "Thorn and Bree", "Thorn, Bree and Mira"]);
   });
 });

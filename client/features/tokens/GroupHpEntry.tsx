@@ -7,6 +7,7 @@ import { groupAccess, hpTargets, type HpTarget } from "./groupHp.ts";
 import type { HpPlace } from "./hpDraft.ts";
 import { HpEntry, type HpRest } from "./HpSection.tsx";
 import { Note } from "./ui.tsx";
+import { useLabels } from "../../state/labels.ts";
 
 const NO_CHARACTERS = {};
 
@@ -18,9 +19,10 @@ export function useGroupHp(tokens: readonly Token[]): { targets: HpTarget[]; acc
   const you = useRoomView((s) => s.you);
   const characters = useRoomView((s) => s.view?.characters ?? NO_CHARACTERS);
   const playersApplyDamage = useRoomView((s) => s.view?.meta.settings.playersApplyDamage ?? false);
+  const labels = useLabels();
   const targets = useMemo(
-    () => hpTargets(tokens, { role: you?.role ?? "player", memberId: you?.memberId, characters, playersApplyDamage }),
-    [tokens, you, characters, playersApplyDamage],
+    () => hpTargets(tokens, { role: you?.role ?? "player", memberId: you?.memberId, characters, playersApplyDamage, labels }),
+    [tokens, you, characters, playersApplyDamage, labels],
   );
   return { targets, access: groupAccess(targets) };
 }

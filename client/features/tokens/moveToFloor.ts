@@ -9,6 +9,7 @@ import { carriedGroup } from "#shared/rules/attach.ts";
 import { ownEntry } from "#shared/records.ts";
 import { displayName } from "../../lib/scene.ts";
 import type { RoomActions } from "../../state/types.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /*
  * Move to floor (docs/design/design-v1-floors.md 7.4): the DM moves the
@@ -64,7 +65,7 @@ export function nameList(names: readonly string[]): string {
  * already stand on. A floor is off where a creature's full space lies outside it ("Outside Attic"). A floor
  * players have not reached warns, in one line, when the whole move holds an unhidden party member (D-261102-484).
  */
-export function floorChoices(view: View, named: readonly Token[]): FloorChoice[] {
+export function floorChoices(view: View, named: readonly Token[], labels: Labels): FloorChoice[] {
   const first = named[0];
   if (!first) return [];
   const moved = movedTokens(view, named);
@@ -80,7 +81,7 @@ export function floorChoices(view: View, named: readonly Token[]): FloorChoice[]
       floor,
       name,
       off: outside ? `Outside ${name}` : null,
-      warning: warns ? `Players haven't reached ${name}. Moving ${nameList(party.map((t) => displayName(t)))} there opens it to them.` : null,
+      warning: warns ? `Players haven't reached ${name}. Moving ${nameList(party.map((t) => displayName(t, labels)))} there opens it to them.` : null,
     });
   }
   return choices;

@@ -5,6 +5,7 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { FLOOR_ROOT_ATTR, FLOOR_ROOTS } from "../floors/ids.ts";
 import { floorChoices, sendMoveToFloor } from "./moveToFloor.ts";
+import { useLabels } from "../../state/labels.ts";
 
 /** The words of the action bar's button and the More sheet's section: the bar says "Floor…" where its row is short. */
 export const MOVE_TO_FLOOR = "Move to floor…";
@@ -28,6 +29,7 @@ export function useOffersMoveToFloor(tokens: readonly Pick<Token, "sceneId">[]):
  * it waits for the server every row is busy and refuses another tap.
  */
 export function MoveToFloorList(props: { tokens: readonly Token[]; onMoved?(): void; /** The action bar opens this list at its foot, past a phone's fold, so it scrolls itself into view. A sheet that holds it always does not. */ reveal?: boolean }) {
+  const labels = useLabels();
   const actions = useRoomActions();
   const root = useRef<HTMLDivElement>(null);
   const { reveal } = props;
@@ -37,7 +39,7 @@ export function MoveToFloorList(props: { tokens: readonly Token[]; onMoved?(): v
   const view = useRoomView((s) => s.view);
   const [moving, setMoving] = useState<string | null>(null);
   const listId = useId();
-  const choices = useMemo(() => (view ? floorChoices(view, props.tokens) : []), [view, props.tokens]);
+  const choices = useMemo(() => (view ? floorChoices(view, props.tokens, labels) : []), [view, props.tokens]);
   if (!view) return null;
 
   const go = (floorId: string) => {

@@ -12,6 +12,7 @@ import { CONDITIONS } from "#shared/srd/conditions.ts";
 import { pendingSaves } from "#shared/rules/saveEnds.ts";
 import { NO_INPUTS, type RollInputs } from "./card.ts";
 import { displayName } from "../../lib/scene.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * Request a roll (docs/design/design-v1-dm-tools.md 3.3), as plain functions for
@@ -100,7 +101,7 @@ export type AskFrom = ({ kind: "party" } | { kind: "selection"; tokenIds: readon
  * reaches wherever it stands, and no character is called "on another
  * scene" (LP5-ROLLS-2). A selected token is in view, so its own rule holds.
  */
-export function defaultTargets(view: View, from: AskFrom, viewing?: string | null): TargetOption[] {
+export function defaultTargets(view: View, from: AskFrom, labels: Labels, viewing?: string | null): TargetOption[] {
   const playersSceneInView = viewing === undefined || viewingPlayersScene(view, viewing);
   const out: TargetOption[] = [];
   const seen = new Set<string>();
@@ -112,7 +113,7 @@ export function defaultTargets(view: View, from: AskFrom, viewing?: string | nul
   if (from.kind === "selection") {
     for (const id of from.tokenIds) {
       const token = view.tokens[id];
-      const option = token ? askTarget(view, token) : null;
+      const option = token ? askTarget(view, token, labels) : null;
       if (option) add(option);
     }
   }
@@ -139,18 +140,18 @@ export function defaultTargets(view: View, from: AskFrom, viewing?: string | nul
  * rolls nothing of its own (docs/design/design-v1-token-panel.md 3.3), so neither
  * bar offers "Request a roll" for it and the sheet does not list it.
  */
-export function askTarget(view: Pick<RoomState, "members" | "characters" | "meta" | "scenes">, token: Token): TargetOption | null {
+export function askTarget(view: Pick<RoomState, "members" | "characters" | "meta" | "scenes">, token: Token, labels: Labels): TargetOption | null {
   if (token.kind === "object" || !playersToken(view, token)) return null;
   const character = "ref" in token.actor ? view.characters[token.actor.ref] : undefined;
   if (character && anyPlayer(view, character.ownerIds)) return { key: `c:${character.id}`, ref: { characterId: character.id }, name: character.name, ticked: true };
-  if (onPlayersScene(view, token.sceneId)) return { key: `t:${token.id}`, ref: { tokenId: token.id }, name: displayName(token), ticked: true };
-  return { key: `t:${token.id}`, ref: { tokenId: token.id }, name: displayName(token), ticked: false, why: "not on the players' scene", blocked: true };
+  if (onPlayersScene(view, token.sceneId)) return { key: `t:${token.id}`, ref: { tokenId: token.id }, name: displayName(token, labels), ticked: true };
+  return { key: `t:${token.id}`, ref: { tokenId: token.id }, name: displayName(token, labels), ticked: false, why: "not on the players' scene", blocked: true };
 }
 
 /** Whether a token action bar offers "Request a roll": some selected creature can be asked, by the rule the sheet ticks them by. */
-export function offersRequest(view: Pick<RoomState, "members" | "characters" | "meta" | "scenes">, tokens: readonly Token[]): boolean {
+export function offersRequest(view: Pick<RoomState, "members" | "characters" | "meta" | "scenes">, tokens: readonly Token[], labels: Labels): boolean {
   return tokens.some((t) => {
-    const option = askTarget(view, t);
+    const option = askTarget(view, t, labels);
     return option !== null && option.blocked !== true;
   });
 }
@@ -673,10 +674,10 @@ export function newestFirst(rolls: Readonly<Record<string, RollRequest | undefin
  * target missing from it may well be on the players' scene still, and is
  * not called removed.
  */
-export function targetName(view: Pick<RoomState, "tokens" | "characters" | "meta" | "scenes">, target: Pick<RollTarget, "tokenId" | "characterId">, viewing?: string | null): string {
+export function targetName(view: Pick<RoomState, "tokens" | "characters" | "meta" | "scenes">, target: Pick<RollTarget, "tokenId" | "characterId">, labels: Labels, viewing?: string | null): string {
   if (target.tokenId !== undefined) {
     const token = view.tokens[target.tokenId];
-    if (token) return displayName(token);
+    if (token) return displayName(token, labels);
     return viewing !== undefined && !viewingPlayersScene(view, viewing) ? "A token not on this scene" : "A removed token";
   }
   return view.characters[target.characterId ?? ""]?.name ?? "A removed character";

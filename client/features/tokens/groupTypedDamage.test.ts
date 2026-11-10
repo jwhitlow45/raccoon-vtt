@@ -42,13 +42,13 @@ function fixture() {
 test("FL-3: group HP sends typed parts for each permitted holder and the server applies each target's defenses", () => {
   let state = fixture();
   const view = projectState(state, P1, { sceneId: "s1" }) as RoomState;
-  const targets = hpTargets(Object.values(view.tokens), { ...P1, characters: view.characters, playersApplyDamage: true });
+  const targets = hpTargets(Object.values(view.tokens), { ...P1, characters: view.characters, playersApplyDamage: true, labels: new Map() });
   const parsed = parseHpInput("11 cold", "damage");
   assert.ok(parsed.ok);
   const restricted = fixture();
   restricted.meta.settings.playersApplyDamage = false;
   const restrictedView = projectState(restricted, P1, { sceneId: "s1" }) as RoomState;
-  const ownOnly = hpTargets(Object.values(restrictedView.tokens), { ...P1, characters: restrictedView.characters, playersApplyDamage: false });
+  const ownOnly = hpTargets(Object.values(restrictedView.tokens), { ...P1, characters: restrictedView.characters, playersApplyDamage: false, labels: new Map() });
   const ownSent: ClientOp[] = [];
   sendHpEntry({ dispatch: (op) => { ownSent.push(op); return ownSent.length; }, newId: () => "own" }, ownOnly, parsed.change, false);
   assert.deepEqual(ownSent.map((op) => op.t === "actor.hp" ? op.target : null), [{ tokenId: "own1" }]);
@@ -81,7 +81,7 @@ test("FL-3: map and tracker group entries share typed previews without disclosin
   for (const place of ["bar", "panel"] as const) for (const you of [DM, P1]) {
     const view = projectState(fixture(), you, { sceneId: "s1" }) as RoomState;
     const tokens = Object.values(view.tokens);
-    const targets = hpTargets(tokens, { ...you, characters: view.characters, playersApplyDamage: true });
+    const targets = hpTargets(tokens, { ...you, characters: view.characters, playersApplyDamage: true, labels: new Map() });
     const scope = new RoomScope();
     scope.get(hpDraftSlot).set(hpDraftKey(place, targets), { mode: "damage", text: "11 cold", crit: false });
     const store = createStore(() => ({ view, you }));
@@ -104,7 +104,7 @@ test("FL3-OPUS-4: plain group previews have no trailing period", () => {
   for (const place of ["bar", "panel"] as const) {
     const view = projectState(fixture(), DM, { sceneId: "s1" }) as RoomState;
     const tokens = Object.values(view.tokens);
-    const targets = hpTargets(tokens, { ...DM, characters: view.characters, playersApplyDamage: true });
+    const targets = hpTargets(tokens, { ...DM, characters: view.characters, playersApplyDamage: true, labels: new Map() });
     const scope = new RoomScope();
     scope.get(hpDraftSlot).set(hpDraftKey(place, targets), { mode: "damage", text: "7", crit: false });
     const store = createStore(() => ({ view, you: DM }));
@@ -119,7 +119,7 @@ test("FL-4: a resting group's clipped HP description keeps the field's width and
   for (const scrolls of [false, true]) {
     const view = projectState(fixture(), DM, { sceneId: "s1" }) as RoomState;
     const tokens = Object.values(view.tokens);
-    const targets = hpTargets(tokens, { ...DM, characters: view.characters, playersApplyDamage: true });
+    const targets = hpTargets(tokens, { ...DM, characters: view.characters, playersApplyDamage: true, labels: new Map() });
     const scope = new RoomScope();
     scope.get(hpDraftSlot).set(hpDraftKey("bar", targets), { mode: "damage", text: "28 cold + 14 slashing + 10 piercing", crit: false });
     const store = createStore(() => ({ view, you: DM }));

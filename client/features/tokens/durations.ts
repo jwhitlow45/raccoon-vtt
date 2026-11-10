@@ -3,6 +3,7 @@ import { LIMITS } from "#shared/limits.ts";
 import type { DurationAnchor, Effect, EffectEnds, RoomClock, RoomState } from "#shared/model.ts";
 import type { DurationInput } from "#shared/protocol.ts";
 import { displayName } from "../../lib/scene.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * The duration form for effects (design section 9.5): "Start of X's next
@@ -91,13 +92,13 @@ export function spanWords(seconds: number): string {
 }
 
 /** A name for whoever an anchor points at, from this viewer's own projection. */
-export function anchorName(view: View | null | undefined, anchor: DurationAnchor): string {
+export function anchorName(view: View | null | undefined, anchor: DurationAnchor, labels: Labels): string {
   if ("entryId" in anchor) {
     const entry = view?.encounter?.entries.find((e) => e.id === anchor.entryId);
     if (!entry) return "another creature";
     if (entry.tokenId !== undefined) {
       const token = view?.tokens[entry.tokenId];
-      if (token) return displayName(token);
+      if (token) return displayName(token, labels);
     }
     if (entry.characterId !== undefined) {
       const character = view?.characters[entry.characterId];
@@ -107,7 +108,7 @@ export function anchorName(view: View | null | undefined, anchor: DurationAnchor
   }
   if ("tokenId" in anchor) {
     const token = view?.tokens[anchor.tokenId];
-    return token ? displayName(token) : "another creature";
+    return token ? displayName(token, labels) : "another creature";
   }
   return view?.characters[anchor.characterId]?.name ?? "another creature";
 }
@@ -132,12 +133,12 @@ export function entryIsSelf(view: View, entry: { tokenId?: string; characterId?:
  * The creature's own row is folded into the first option, since the reducer
  * finds that row from the token or character anyway.
  */
-export function anchorOptions(view: View | null | undefined, self: SelfRef, selfLabel: string): AnchorOption[] {
+export function anchorOptions(view: View | null | undefined, self: SelfRef, selfLabel: string, labels: Labels): AnchorOption[] {
   const options: AnchorOption[] = [{ key: SELF_KEY, label: `${selfLabel} (${selfWords(view, self)})`, anchor: self }];
   if (!view?.encounter) return options;
   for (const entry of view.encounter.entries) {
     if (entryIsSelf(view, entry, self)) continue;
-    options.push({ key: `entry:${entry.id}`, label: anchorName(view, { entryId: entry.id }), anchor: { entryId: entry.id } });
+    options.push({ key: `entry:${entry.id}`, label: anchorName(view, { entryId: entry.id }, labels), anchor: { entryId: entry.id } });
   }
   return options;
 }
@@ -239,8 +240,8 @@ export function isPaused(duration: NonNullable<Effect["duration"]>): boolean {
  * encounter is paused and says so, keeping its count for when the creature
  * joins (design 9.5).
  */
-export function describeDuration(view: View | null | undefined, duration: NonNullable<Effect["duration"]>): string {
-  const who = anchorName(view, duration.anchor);
+export function describeDuration(view: View | null | undefined, duration: NonNullable<Effect["duration"]>, labels: Labels): string {
+  const who = anchorName(view, duration.anchor, labels);
   const active = "entryId" in duration.anchor && view?.encounter?.activeEntryId === duration.anchor.entryId;
   const r = duration.remaining;
   let text: string;

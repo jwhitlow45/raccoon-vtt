@@ -10,6 +10,7 @@ import { Note as Caution } from "../../components/Panel.tsx";
 import { Note } from "../tokens/ui.tsx";
 import { didLines, hiddenLine, lineOf, whoLines } from "./desk.ts";
 import { TrapSaveStart } from "./TrapSaveStart.tsx";
+import { useLabels } from "../../state/labels.ts";
 
 const NO_LOG: LogEntry[] = [];
 
@@ -23,6 +24,7 @@ const NO_LOG: LogEntry[] = [];
  * that came first is refused, "It was settled meanwhile.", and said here.
  */
 export function TrapCard(props: { trap: Trap; due: TrapDue; open: boolean; onToggle(): void; toggleRef(el: HTMLButtonElement | null): void }) {
+  const labels = useLabels();
   const { trap, due } = props;
   const view = useRoomView((s) => s.view);
   const trapLog = useRoomView((s) => s.view?.trapLog ?? NO_LOG);
@@ -35,9 +37,9 @@ export function TrapCard(props: { trap: Trap; due: TrapDue; open: boolean; onTog
   // With no save the page opens on No save, so conditions with no save apply in one tap.
   const effects = rig?.save !== undefined || rig?.damage !== undefined || rig?.conditions !== undefined;
   const applyWord = rig?.save || rig?.damage ? "Save and damage" : "Apply";
-  const who = whoLines(view, due);
+  const who = whoLines(view, due, labels);
   const line = lineOf(trapLog, due.id);
-  const did = line ? didLines(trap, line.did, view) : [];
+  const did = line ? didLines(trap, line.did, view, labels) : [];
   const title = `${trap.name} went off`;
 
   const send = (key: string, op: ClientOp) => {
@@ -85,7 +87,7 @@ export function TrapCard(props: { trap: Trap; due: TrapDue; open: boolean; onTog
       {props.open ? (
         <>
           {/* Out of the players' sight it is still armed for them, which the DM must weigh: a warning, not muted help. */}
-          {due.hidden ? <Caution>{hiddenLine(view, due)}</Caution> : <span style={{ fontSize: theme.font.small }}>{who.by}</span>}
+          {due.hidden ? <Caution>{hiddenLine(view, due, labels)}</Caution> : <span style={{ fontSize: theme.font.small }}>{who.by}</span>}
           <span style={{ fontSize: theme.font.small }}>{who.hits}</span>
           {/* What it could not do takes the error's color from the line's own outcome, not from its words. */}
           {did.map((d, i) =>

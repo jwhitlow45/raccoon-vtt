@@ -46,7 +46,7 @@ function fixture(withEncounter: boolean): RoomState {
 describe("duration form options", () => {
   test("outside combat only the creature itself is offered", () => {
     const state = fixture(false);
-    const options = anchorOptions(state, { tokenId: "g1" }, "Goblin 1");
+    const options = anchorOptions(state, { tokenId: "g1" }, "Goblin 1", new Map());
     assert.deepEqual(options, [{ key: SELF_KEY, label: "Goblin 1 (this creature)", anchor: { tokenId: "g1" } }]);
     assert.equal(defaultAnchorKey(state, options), SELF_KEY);
   });
@@ -54,17 +54,17 @@ describe("duration form options", () => {
   test("a companion that acts on its character's turn reads as on that character's turn, and its durations count that row (docs/design/design-v1-combat-flow.md 3.6.8)", () => {
     const state = fixture(true);
     state.tokens.ws = token("ws", { kind: "npc", name: "Wildfire Spirit", companion: { of: "hero", turn: "shared" } });
-    const options = anchorOptions(state, { tokenId: "ws" }, "Wildfire Spirit");
+    const options = anchorOptions(state, { tokenId: "ws" }, "Wildfire Spirit", new Map());
     assert.equal(options[0]!.label, "Wildfire Spirit (on Thorn's turn)");
     const input = durationInput({ ...emptyForm(null, options), mode: "turnEnd", rounds: 1, anchorKey: SELF_KEY }, options) as TurnDurationInput;
     assert.deepEqual(resolveDuration(state, input).anchor, { entryId: "e-pc" });
     state.tokens.ws = { ...state.tokens.ws!, companion: { of: "hero", turn: "own" } };
-    assert.equal(anchorOptions(state, { tokenId: "ws" }, "Wildfire Spirit")[0]!.label, "Wildfire Spirit (this creature)");
+    assert.equal(anchorOptions(state, { tokenId: "ws" }, "Wildfire Spirit", new Map())[0]!.label, "Wildfire Spirit (this creature)");
   });
 
   test("in combat the other rows follow, and the creature's own row folds into the first option", () => {
     const state = fixture(true);
-    const options = anchorOptions(state, { tokenId: "g2" }, "Goblin 2");
+    const options = anchorOptions(state, { tokenId: "g2" }, "Goblin 2", new Map());
     assert.deepEqual(
       options.map((o) => o.key),
       [SELF_KEY, "entry:e-pc", "entry:e-g1"],
@@ -76,20 +76,20 @@ describe("duration form options", () => {
   test("a PC's own row is found through its character, from the token or the character card", () => {
     const state = fixture(true);
     assert.deepEqual(
-      anchorOptions(state, { tokenId: "pc" }, "Thorn").map((o) => o.key),
+      anchorOptions(state, { tokenId: "pc" }, "Thorn", new Map()).map((o) => o.key),
       [SELF_KEY, "entry:e-g1", "entry:e-g2"],
     );
     assert.deepEqual(
-      anchorOptions(state, { characterId: "hero" }, "Thorn").map((o) => o.key),
+      anchorOptions(state, { characterId: "hero" }, "Thorn", new Map()).map((o) => o.key),
       [SELF_KEY, "entry:e-g1", "entry:e-g2"],
     );
   });
 
   test("a new duration counts on whoever is acting", () => {
     const state = fixture(true);
-    const forPc = anchorOptions(state, { tokenId: "pc" }, "Thorn");
+    const forPc = anchorOptions(state, { tokenId: "pc" }, "Thorn", new Map());
     assert.equal(defaultAnchorKey(state, forPc), "entry:e-g1");
-    const forG1 = anchorOptions(state, { tokenId: "g1" }, "Goblin 1");
+    const forG1 = anchorOptions(state, { tokenId: "g1" }, "Goblin 1", new Map());
     assert.equal(defaultAnchorKey(state, forG1), SELF_KEY);
     assert.deepEqual(emptyForm(state, forPc), { mode: "none", rounds: 10, anchorKey: "entry:e-g1", length: "", unit: "hours" });
   });
@@ -97,7 +97,7 @@ describe("duration form options", () => {
 
 describe("duration form to op input", () => {
   const state = fixture(true);
-  const options = anchorOptions(state, { tokenId: "pc" }, "Thorn");
+  const options = anchorOptions(state, { tokenId: "pc" }, "Thorn", new Map());
   const form = (patch: Partial<DurationForm>): DurationForm => ({ mode: "none", rounds: 10, anchorKey: SELF_KEY, length: "", unit: "hours", ...patch });
 
   test("each mode", () => {
@@ -149,23 +149,23 @@ describe("describing a stored duration", () => {
   test("words for each shape, from the viewer's own names", () => {
     const state = fixture(true);
     assert.equal(
-      describeDuration(state, { remaining: 1, boundary: "turnStart", anchor: { entryId: "e-g2" } }),
+      describeDuration(state, { remaining: 1, boundary: "turnStart", anchor: { entryId: "e-g2" } }, new Map()),
       "Until the start of Goblin 2's next turn",
     );
     assert.equal(
-      describeDuration(state, { remaining: 4, boundary: "turnStart", anchor: { entryId: "e-pc" } }),
+      describeDuration(state, { remaining: 4, boundary: "turnStart", anchor: { entryId: "e-pc" } }, new Map()),
       "4 rounds left, ending at the start of Thorn's turn",
     );
     assert.equal(
-      describeDuration(state, { remaining: 2, boundary: "turnEnd", anchor: { entryId: "e-g1" } }),
+      describeDuration(state, { remaining: 2, boundary: "turnEnd", anchor: { entryId: "e-g1" } }, new Map()),
       "Until the end of Goblin 1's next turn",
     );
     assert.equal(
-      describeDuration(state, { remaining: 1, boundary: "turnEnd", anchor: { entryId: "e-g1" } }),
+      describeDuration(state, { remaining: 1, boundary: "turnEnd", anchor: { entryId: "e-g1" } }, new Map()),
       "Until the end of Goblin 1's current turn",
     );
     assert.equal(
-      describeDuration(state, { remaining: 1, boundary: "turnEnd", anchor: { entryId: "e-g2" } }),
+      describeDuration(state, { remaining: 1, boundary: "turnEnd", anchor: { entryId: "e-g2" } }, new Map()),
       "Until the end of Goblin 2's next turn",
     );
   });
@@ -173,11 +173,11 @@ describe("describing a stored duration", () => {
   test("a duration outside combat says it is paused", () => {
     const state = fixture(false);
     assert.equal(
-      describeDuration(state, { remaining: 10, boundary: "turnStart", anchor: { tokenId: "g1" } }),
+      describeDuration(state, { remaining: 10, boundary: "turnStart", anchor: { tokenId: "g1" } }, new Map()),
       "10 rounds left, ending at the start of Goblin 1's turn, paused (outside combat)",
     );
     assert.equal(
-      describeDuration(state, { remaining: 1, boundary: "turnEnd", anchor: { characterId: "hero" } }),
+      describeDuration(state, { remaining: 1, boundary: "turnEnd", anchor: { characterId: "hero" } }, new Map()),
       "Until the end of Thorn's next turn, paused (outside combat)",
     );
   });
@@ -185,7 +185,7 @@ describe("describing a stored duration", () => {
   test("a row this viewer cannot see stays anonymous", () => {
     const state = fixture(true);
     assert.equal(
-      describeDuration(state, { remaining: 1, boundary: "turnStart", anchor: { entryId: "hidden-row" } }),
+      describeDuration(state, { remaining: 1, boundary: "turnStart", anchor: { entryId: "hidden-row" } }, new Map()),
       "Until the start of another creature's next turn",
     );
   });
@@ -198,12 +198,12 @@ describe("describing a stored duration", () => {
       effect: { id: "bless", key: "blessed", duration: { mode: "rounds", rounds: 10, of: { tokenId: "g1" } } },
     });
     const effect = (state.tokens.g1!.actor as { inline: { effects: { duration?: unknown }[] } }).inline.effects[0]!;
-    assert.match(describeDuration(state, effect.duration as never), /paused \(outside combat\)$/);
+    assert.match(describeDuration(state, effect.duration as never, new Map()), /paused \(outside combat\)$/);
   });
 });
 
 describe("time spans", () => {
-  const options = anchorOptions(fixture(false), { tokenId: "pc" }, "Thorn");
+  const options = anchorOptions(fixture(false), { tokenId: "pc" }, "Thorn", new Map());
   const form = (patch: Partial<DurationForm>): DurationForm => ({ ...emptyForm(null, options), ...patch });
   const calendar = { kind: "days" } as const;
   const hours = (n: number) => n * 3_600;
@@ -265,7 +265,7 @@ describe("time spans", () => {
   });
 
   test("an effect with a count or an end opens on Keep current duration, so No duration is a change that takes it away", () => {
-    const options = anchorOptions(null, { tokenId: "pc" }, "Thorn");
+    const options = anchorOptions(null, { tokenId: "pc" }, "Thorn", new Map());
     const turns = { duration: { remaining: 2, boundary: "turnStart", anchor: { tokenId: "pc" } } } as const;
     const timed = { ends: { span: 60, at: 60, clock: "c1" } } as const;
     for (const existing of [turns, timed]) {
@@ -279,7 +279,7 @@ describe("time spans", () => {
   });
 
   test("a Save that never touched Duration sends no duration, so one another device added meanwhile survives", () => {
-    const options = anchorOptions(null, { tokenId: "pc" }, "Thorn");
+    const options = anchorOptions(null, { tokenId: "pc" }, "Thorn", new Map());
     const form = openingForm({}, null, options);
     const remote = { ends: { span: 60, at: 60, clock: "c1" } } as const;
     assert.equal(durationEdit(remote, form, options, false), undefined);

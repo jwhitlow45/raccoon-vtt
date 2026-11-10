@@ -140,7 +140,7 @@ describe("who a request asks", () => {
   });
 
   test("Ask the party ticks those on the players' scene and lists the rest unticked, on another scene", () => {
-    const targets = defaultTargets(setup(), { kind: "party" });
+    const targets = defaultTargets(setup(), { kind: "party" }, new Map());
     assert.deepEqual(
       targets.map((t) => [t.name, t.ticked, t.why ?? ""]),
       [
@@ -156,7 +156,7 @@ describe("who a request asks", () => {
     const state = setup();
     for (const [id, t] of Object.entries(state.tokens)) if (t?.sceneId !== "s2") delete state.tokens[id];
     assert.deepEqual(
-      defaultTargets(state, { kind: "party" }, "s2").map((t) => [t.name, t.ticked, t.why ?? ""]),
+      defaultTargets(state, { kind: "party" }, new Map(), "s2").map((t) => [t.name, t.ticked, t.why ?? ""]),
       [
         ["Bram", true, ""],
         ["Ayla", true, ""],
@@ -164,7 +164,7 @@ describe("who a request asks", () => {
     );
     // From the players' scene the rule of who stands there holds as before.
     assert.deepEqual(
-      defaultTargets(setup(), { kind: "party" }, "s1").map((t) => [t.name, t.ticked, t.why ?? ""]),
+      defaultTargets(setup(), { kind: "party" }, new Map(), "s1").map((t) => [t.name, t.ticked, t.why ?? ""]),
       [
         ["Bram", false, "on another scene"],
         ["Ayla", true, ""],
@@ -172,7 +172,7 @@ describe("who a request asks", () => {
     );
     // A selected token is in view, so a familiar there still cannot be asked off the players' scene, and the rest of the party starts unticked.
     assert.deepEqual(
-      defaultTargets(state, { kind: "selection", tokenIds: ["far"] }, "s2").map((t) => [t.name, t.ticked, t.blocked ?? false, t.why ?? ""]),
+      defaultTargets(state, { kind: "selection", tokenIds: ["far"] }, new Map(), "s2").map((t) => [t.name, t.ticked, t.blocked ?? false, t.why ?? ""]),
       [
         ["Owl", false, true, "not on the players' scene"],
         ["Bram", false, false, ""],
@@ -187,18 +187,18 @@ describe("who a request asks", () => {
     state.scenes.up = { ...state.scenes.s1, id: "up", floor: { of: "s1", level: 1, name: "Upper floor" } };
     state.tokens.a1 = { ...state.tokens.a1!, sceneId: "up" };
     state.tokens.wolf = { ...state.tokens.wolf!, sceneId: "up" };
-    const names = (viewing?: string | null) => defaultTargets(state, { kind: "party" }, viewing).map((t) => [t.name, t.ticked, t.why ?? ""]);
+    const names = (viewing?: string | null) => defaultTargets(state, { kind: "party" }, new Map(), viewing).map((t) => [t.name, t.ticked, t.why ?? ""]);
     const here = [["Bram", false, "on another scene"], ["Ayla", true, ""]];
     assert.deepEqual(names(), here, "Ayla stands on the upper floor, which is on the players' scene");
     assert.deepEqual(names("up"), here, "viewing the upper floor is viewing the players' scene");
     assert.deepEqual(names("s2"), [["Bram", true, ""], ["Ayla", true, ""]], "another scene calls no one elsewhere");
-    assert.equal(askTarget(state, state.tokens.wolf!)?.blocked, undefined, "a familiar on the upper floor can be asked");
-    assert.equal(askTarget(state, state.tokens.far!)?.blocked, true, "one on another scene cannot");
+    assert.equal(askTarget(state, state.tokens.wolf!, new Map())?.blocked, undefined, "a familiar on the upper floor can be asked");
+    assert.equal(askTarget(state, state.tokens.far!, new Map())?.blocked, true, "one on another scene cannot");
   });
 
   test("from the action bar the selected creatures start ticked, a familiar included, then the rest of the party", () => {
     const state = setup();
-    const targets = defaultTargets(state, { kind: "selection", tokenIds: ["wolf", "a1", "goblin", "far"] });
+    const targets = defaultTargets(state, { kind: "selection", tokenIds: ["wolf", "a1", "goblin", "far"] }, new Map());
     assert.deepEqual(
       targets.map((t) => [t.name, t.ticked, t.blocked ?? false]),
       [
@@ -217,7 +217,7 @@ describe("who a request asks", () => {
     // The DM's NPC lent to Pip for a scene, and one lent on another scene.
     state.tokens.cap = token("cap", { kind: "npc", name: "Captain", sceneId: "s1", ownerIds: ["p1"], actor: { ref: "npc" } });
     state.tokens.capFar = token("capFar", { kind: "npc", name: "Captain", sceneId: "s2", ownerIds: ["p1"], actor: { ref: "npc" } });
-    const targets = defaultTargets(state, { kind: "selection", tokenIds: ["cap", "capFar", "a1"] });
+    const targets = defaultTargets(state, { kind: "selection", tokenIds: ["cap", "capFar", "a1"] }, new Map());
     assert.deepEqual(
       targets.map((t) => [t.ref, t.ticked, t.blocked ?? false]),
       [
@@ -240,7 +240,7 @@ describe("who a request asks", () => {
     state.tokens.cap = token("cap", { kind: "npc", name: "Captain", sceneId: "s1", ownerIds: ["p1"], actor: { ref: "npc" } });
     state.tokens.capFar = token("capFar", { kind: "npc", name: "Captain", sceneId: "s2", ownerIds: ["p1"], actor: { ref: "npc" } });
     state.tokens.npcDm = token("npcDm", { kind: "npc", name: "Captain", sceneId: "s1", actor: { ref: "npc" } });
-    const offered = (...ids: string[]) => offersRequest(state, ids.map((id) => state.tokens[id]!));
+    const offered = (...ids: string[]) => offersRequest(state, ids.map((id) => state.tokens[id]!), new Map());
     assert.equal(offered("cap"), true, "the DM's NPC lent to Pip, asked by its token");
     assert.equal(offered("capFar"), false, "the same off the players' scene cannot be asked");
     assert.equal(offered("far"), false, "nor can a familiar there");
@@ -252,10 +252,10 @@ describe("who a request asks", () => {
   test("an object a player plays, such as a Spiritual Weapon, is no creature to ask, alone or in a group", () => {
     const state = setup();
     state.tokens.weapon = token("weapon", { kind: "object", name: "Spiritual Weapon", sceneId: "s1", ownerIds: ["p1"], actor: { inline: actor({ hp: { cur: 0, max: 0, temp: 0 }, ac: 0 }) } });
-    assert.equal(askTarget(state, state.tokens.weapon!), null);
-    assert.equal(offersRequest(state, [state.tokens.weapon!]), false, "the single bar");
-    assert.equal(offersRequest(state, [state.tokens.weapon!, state.tokens.goblin!]), false, "the group bar, with nothing else to ask");
-    assert.equal(offersRequest(state, [state.tokens.weapon!, state.tokens.b1!]), true, "a party character beside it still is");
+    assert.equal(askTarget(state, state.tokens.weapon!, new Map()), null);
+    assert.equal(offersRequest(state, [state.tokens.weapon!], new Map()), false, "the single bar");
+    assert.equal(offersRequest(state, [state.tokens.weapon!, state.tokens.goblin!], new Map()), false, "the group bar, with nothing else to ask");
+    assert.equal(offersRequest(state, [state.tokens.weapon!, state.tokens.b1!], new Map()), true, "a party character beside it still is");
   });
 });
 
@@ -653,15 +653,15 @@ describe("answers on the DM's card", () => {
       new: { id: "new", rev: 0, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, at: "2026-10-14T19:05:00.000Z", targets: [{ characterId: "ayla" }] },
     };
     assert.deepEqual(newestFirst(rolls).map((r) => r.id), ["new", "old"]);
-    assert.equal(targetName(setup(), { tokenId: "gone" }), "A removed token");
+    assert.equal(targetName(setup(), { tokenId: "gone" }, new Map()), "A removed token");
   });
 
   test("a token target the DM's view lacks only because the DM looks at another scene is not called removed (LP5-ROLLS-10)", () => {
     const view = setup();
     const players = view.meta.playerSceneId;
-    assert.equal(targetName(view, { tokenId: "gone" }, players), "A removed token", "on the players' scene, a missing token is gone");
-    assert.equal(targetName(view, { tokenId: "gone" }, "elsewhere"), "A token not on this scene");
-    assert.equal(targetName(view, { characterId: "ayla" }, "elsewhere"), "Ayla", "characters are in every DM view");
+    assert.equal(targetName(view, { tokenId: "gone" }, new Map(), players), "A removed token", "on the players' scene, a missing token is gone");
+    assert.equal(targetName(view, { tokenId: "gone" }, new Map(), "elsewhere"), "A token not on this scene");
+    assert.equal(targetName(view, { characterId: "ayla" }, new Map(), "elsewhere"), "Ayla", "characters are in every DM view");
   });
 });
 

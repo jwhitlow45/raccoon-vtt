@@ -58,6 +58,8 @@ import {
 import { SIZE_WORDS } from "./resize.ts";
 import { FieldRow, NumberField, Select } from "./ui.tsx";
 import { groundAtMiddle } from "../../lib/view.ts";
+import { useLabels } from "../../state/labels.ts";
+import { useInitials } from "../../state/labels.ts";
 
 /**
  * Companions in the interface (docs/design/design-v1-combat-flow.md 3.6.3, 3.6.9
@@ -86,7 +88,7 @@ function CompanionPortrait(props: { token: Token; size: number }) {
       aspect={fp.w / fp.h}
       width={props.size}
       ring={theme.color.ally}
-      initials={initials(displayName(props.token))}
+      initials={useInitials(props.token)}
     />
   );
 }
@@ -99,6 +101,7 @@ function CompanionPortrait(props: { token: Token; size: number }) {
  * its bar, as a party bar tap does. Folded, it names them.
  */
 export function CharacterCompanions(props: { search?: string; character: Character; canAdd: boolean; onAdd(): void; onBlocks?(): void; close(): void; group: { open: boolean; onToggle(): void } }) {
+  const labels = useLabels();
   const tokens = useRoomView((s) => s.view?.tokens);
   const blocks = useRoomView((s) => s.view?.companionBlocks);
   const monsters = useRoomView((s) => s.view?.monsters);
@@ -127,16 +130,16 @@ export function CharacterCompanions(props: { search?: string; character: Charact
     });
   };
   return (
-    <Group label="Companions" icon="companion" search={props.search} {...props.group} summary={list.length > 0 ? list.map((t) => displayName(t)).join(", ") : "None yet"}>
+    <Group label="Companions" icon="companion" search={props.search} {...props.group} summary={list.length > 0 ? list.map((t) => displayName(t, labels)).join(", ") : "None yet"}>
       {list.length > 0 ? (
         <RowList label={`${props.character.name}'s companions`}>
           {list.map((t) => (
             <Row
               key={t.id}
               leading={<CompanionPortrait token={t} size={28} />}
-              title={displayName(t)}
+              title={displayName(t, labels)}
               detail={t.companion ? [blockName(t), turnLabel(props.character.name, t.companion.turn)].filter(Boolean).join(" · ") : undefined}
-              label={`${displayName(t)}. Show it on the map with its actions`}
+              label={`${displayName(t, labels)}. Show it on the map with its actions`}
               onClick={() => show(t)}
               trailing={<Icon name="chevronRight" style={{ color: theme.color.textMuted }} />}
             />

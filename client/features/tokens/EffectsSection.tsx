@@ -44,6 +44,7 @@ import { FieldRow, Note, NumberField, Section, Select, SmallButton, Stepper } fr
 import { useHeld } from "../../components/Held.tsx";
 import { usePreview } from "../dm/previewContext.ts";
 import { noteConditionUsed, recentConditions } from "./recentConditions.ts";
+import { useLabels } from "../../state/labels.ts";
 
 /**
  * Conditions and statuses on a creature (features section 7): the list with
@@ -80,6 +81,7 @@ export function EffectsSection(props: {
   /** The room search's anchor id (features/search/entry.ts) on its heading, in both of its looks: the token panel's or a character page's. */
   search?: string;
 }) {
+  const labels = useLabels();
   const [detail, setDetail] = useState<Detail | null>(null);
   const [picking, setPicking] = useState(false);
   const view = useRoomView((s) => s.view);
@@ -166,7 +168,7 @@ export function EffectsSection(props: {
                     <span style={{ display: "block", fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight, fontVariantNumeric: "tabular-nums" }}>{effectChip(effect).label}</span>
                     {effect.duration || effect.ends ? (
                       <span style={{ ...UNDER_NAME, fontSize: theme.font.small, color: theme.color.textMuted }}>
-                        {effect.duration ? describeDuration(view, effect.duration) : describeEnds(view, effect.ends!)}
+                        {effect.duration ? describeDuration(view, effect.duration, labels) : describeEnds(view, effect.ends!)}
                       </span>
                     ) : null}
                     {effect.hiddenFromPlayers ? (
@@ -316,6 +318,7 @@ function EffectDetail(props: {
   canEdit: boolean;
   onDone(): void;
 }) {
+  const labels = useLabels();
   const { effectKey: key, existing, target, canEdit } = props;
   const actions = useRoomActions();
   // "View as a player" changes nothing on this device, its recent conditions included.
@@ -323,7 +326,7 @@ function EffectDetail(props: {
   const view = useRoomView((s) => s.view);
   const dm = useRoomView((s) => s.you?.role === "dm");
   const info = infoOf(key);
-  const options = useMemo(() => anchorOptions(view, props.self, props.selfLabel), [view, props.self, props.selfLabel]);
+  const options = useMemo(() => anchorOptions(view, props.self, props.selfLabel, labels), [view, props.self, props.selfLabel]);
 
   const [level, setLevel] = useState(existing?.level ?? 1);
   /** Any other effect's counter, or null for none. */
@@ -453,7 +456,7 @@ function EffectDetail(props: {
           ) : null}
         </div>
       ) : null}
-      {existing?.duration ? <Note tone="info">{describeDuration(view, existing.duration)}</Note> : null}
+      {existing?.duration ? <Note tone="info">{describeDuration(view, existing.duration, labels)}</Note> : null}
       {existing?.ends ? <Note tone="info">{describeEnds(view, existing.ends)}</Note> : null}
       {existing?.save && !(dm && canEdit) ? <Note tone="info">{saveEndsText(existing.save)}</Note> : null}
 

@@ -92,6 +92,8 @@ import {
 import { answerChoiceMarks, requestMarks, rowTest, type LevelOf } from "./marks.ts";
 import { cardStyle, focusable } from "./parts.tsx";
 import { footFold, measureWhy, NO_WHY, WHY_QUIET_ATTR, type WhyLines } from "./whyLines.ts";
+import { labelsOf, useLabels } from "../../state/labels.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 const NO_ROLLS = {};
 
@@ -452,11 +454,12 @@ export function PlayerRolls() {
  * yet, whose card offers "Add a stat block" (docs/design/design-v1-roll-request.md 5.2).
  */
 function useCreature(target: RollTarget): { name: string; effects: readonly Effect[]; noBlock: string | null } {
+  const labels = useLabels();
   const token = useRoomView((s) => (target.tokenId !== undefined ? s.view?.tokens[target.tokenId] : undefined));
   const characterId = target.characterId ?? (token && "ref" in token.actor ? token.actor.ref : undefined);
   const character = useRoomView((s) => (characterId !== undefined ? s.view?.characters[characterId] : undefined));
   const you = useRoomView((s) => s.you);
-  const name = token ? displayName(token) : (character?.name ?? "Your creature");
+  const name = token ? displayName(token, labels) : (character?.name ?? "Your creature");
   const effects = token && "inline" in token.actor ? token.actor.inline.effects : (character?.actor.effects ?? []);
   // Only a character the player owns offers its editor: a lent NPC's token is theirs to roll for, not to change.
   return { name, effects, noBlock: character && character.stats === undefined && editsPcStats(you, character) ? character.id : null };
@@ -565,7 +568,7 @@ export function RollCard(props: {
   const [rolledHere, setRolledHere] = useState<ReadonlySet<string>>(() => new Set());
   const [news, setNews] = useState("");
   const headerButton = useRef<HTMLButtonElement>(null);
-  const names = useRoomView((s) => (s.view ? request.targets.map((t) => creatureName(s.view!, t)).join("|") : ""));
+  const names = useRoomView((s) => (s.view ? request.targets.map((t) => creatureName(s.view!, t, labelsOf(s))).join("|") : ""));
   const { onEngage } = props;
   useEffect(() => {
     rollResultEffect({
@@ -1352,7 +1355,7 @@ function RolledResult(props: { target: RollTarget }) {
  */
 export function RollChip(props: { buttonRef?: RefObject<HTMLButtonElement | null>; request: RollRequest; onOpen(): void }) {
   const { request } = props;
-  const names = useRoomView((s) => (s.view ? request.targets.map((t) => creatureName(s.view!, t)).join("|") : ""));
+  const names = useRoomView((s) => (s.view ? request.targets.map((t) => creatureName(s.view!, t, labelsOf(s))).join("|") : ""));
   const several = request.targets.length > 1;
   const lines = request.targets.map((t, i) => chipLine(request, t, several ? { name: names.split("|")[i] ?? "" } : {}));
   // Each line is one creature's, so each marks its test with that creature's level.
@@ -1388,10 +1391,10 @@ export function RollChip(props: { buttonRef?: RefObject<HTMLButtonElement | null
   );
 }
 
-function creatureName(view: Pick<RoomState, "tokens" | "characters">, target: RollTarget): string {
+function creatureName(view: Pick<RoomState, "tokens" | "characters">, target: RollTarget, labels: Labels): string {
   if (target.tokenId !== undefined) {
     const token = view.tokens[target.tokenId];
-    return token ? displayName(token) : "your creature";
+    return token ? displayName(token, labels) : "your creature";
   }
   return view.characters[target.characterId ?? ""]?.name ?? "your creature";
 }

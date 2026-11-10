@@ -298,7 +298,7 @@ export function buildIndex(input: IndexInput): SearchIndex {
     const name = displayName(selected);
     // Ranked in the order floorChoices lists them, top floor first, as the Floors menu reads, not by the length of the floor's name.
     let order = 0;
-    for (const c of floorChoices(view, [selected])) {
+    for (const c of floorChoices(view, [selected], labels)) {
       if (c.off !== null) continue;
       b.entry({
         order: order++,

@@ -2,6 +2,7 @@ import type { BuildChunk, LogEntry, LogEvent, RoomState, Token, Trap, TrapAction
 import { compareLogIds } from "#shared/keys.ts";
 import { displayName } from "../../lib/scene.ts";
 import { findDoor } from "../doors/doors.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /*
  * What a trap going off shows the DM (docs/design/design-v1-traps.md 4.3), as
@@ -20,30 +21,30 @@ export function deskTraps(traps: Readonly<Record<string, Trap | undefined>>): De
 
 type Names = Pick<RoomState, "tokens">;
 
-function nameOf(names: Names, id: string): string {
+function nameOf(names: Names, id: string, labels: Labels): string {
   const token = names.tokens[id];
-  return token ? displayName(token) : "a creature";
+  return token ? displayName(token, labels) : "a creature";
 }
 
 /** "Thorn", "Thorn and Bree", "Thorn, Bree and 2 more". */
-export function nameList(names: Names, ids: readonly string[], more = 0): string {
-  const parts = ids.map((id) => nameOf(names, id));
+export function nameList(names: Names, ids: readonly string[], labels: Labels, more = 0): string {
+  const parts = ids.map((id) => nameOf(names, id, labels));
   if (more > 0) parts.push(`${more} more`);
   if (parts.length <= 1) return parts[0] ?? "";
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
 /** The card's lines on who: who set it off and who it hits (5.6, frozen when it went off). */
-export function whoLines(names: Names, due: TrapDue): { by: string; hits: string } {
-  const by = nameList(names, due.by, due.more ?? 0);
-  const hits = nameList(names, due.hits, due.hitsMore ?? 0);
+export function whoLines(names: Names, due: TrapDue, labels: Labels): { by: string; hits: string } {
+  const by = nameList(names, due.by, labels, due.more ?? 0);
+  const hits = nameList(names, due.hits, labels, due.hitsMore ?? 0);
   const set = due.how === "hand" ? (by ? `You set it off for ${by}.` : "You set it off.") : by ? `${by} set it off.` : "It went off.";
   return { by: set, hits: hits ? `It hits ${hits}.` : "It hits no one." };
 }
 
 /** A hidden springing's line (5.5): "Imp set it off, out of the players' sight. The trap is still armed for them." */
-export function hiddenLine(names: Names, due: TrapDue): string {
-  const by = nameList(names, due.by, due.more ?? 0) || "A creature";
+export function hiddenLine(names: Names, due: TrapDue, labels: Labels): string {
+  const by = nameList(names, due.by, labels, due.more ?? 0) || "A creature";
   return `${by} set it off, out of the players' sight. The trap is still armed for them.`;
 }
 
@@ -61,13 +62,13 @@ const DOOR_DONE: Record<"open" | "closed" | "locked", [string, string]> = { open
  * the DM's line, whose outcomes name the actions by their place in the
  * list, and the pit as -1.
  */
-export function didLines(trap: Trap, did: readonly { action: number; ok: boolean }[], view: Pick<RoomState, "tokens" | "lights" | "stamps" | "scenes"> & { buildChunks: Readonly<Record<string, BuildChunk>> }): string[] {
+export function didLines(trap: Trap, did: readonly { action: number; ok: boolean }[], view: Pick<RoomState, "tokens" | "lights" | "stamps" | "scenes"> & { buildChunks: Readonly<Record<string, BuildChunk>> }, labels: Labels): string[] {
   const actions = trap.rig?.actions ?? [];
   return did.map(({ action, ok }) => {
     if (action === -1) return ok ? "Opened the pit." : `Could not open the pit: ${pitOutside(trap, view) ? "some of its squares lie outside the scene" : "the scene is at its wall limit"}.`;
     const a = actions[action];
     if (!a) return ok ? "Did something it no longer lists." : "Could not do something it no longer lists.";
-    return actionLine(a, ok, view, trap.sceneId);
+    return actionLine(a, ok, view, trap.sceneId, labels);
   });
 }
 
@@ -78,7 +79,7 @@ function pitOutside(trap: Trap, view: Pick<RoomState, "scenes">): boolean {
   return trap.zone.cells.some((r) => r.x + r.w > bounds.w || r.y + r.h > bounds.h);
 }
 
-function actionLine(a: TrapAction, ok: boolean, view: Pick<RoomState, "tokens" | "lights" | "stamps"> & { buildChunks: Readonly<Record<string, BuildChunk>> }, sceneId: string): string {
+function actionLine(a: TrapAction, ok: boolean, view: Pick<RoomState, "tokens" | "lights" | "stamps"> & { buildChunks: Readonly<Record<string, BuildChunk>> }, sceneId: string, labels: Labels): string {
   if ("door" in a) {
     const [done, verb] = DOOR_DONE[a.state];
     return ok ? `${done} a door.` : `Could not ${verb} a door: ${findDoor(view.buildChunks, sceneId, a.door) ? "it would not change" : "it was removed"}.`;
@@ -91,7 +92,7 @@ function actionLine(a: TrapAction, ok: boolean, view: Pick<RoomState, "tokens" |
   }
   if ("tokenId" in a.show) {
     const token: Token | undefined = view.tokens[a.show.tokenId];
-    const name = token ? displayName(token) : "a creature";
+    const name = token ? displayName(token, labels) : "a creature";
     return ok ? `Showed ${name}.` : `Could not show ${name}: it was ${token ? "moved to another scene" : "deleted"}.`;
   }
   const stamp = view.stamps[a.show.stampId];

@@ -62,6 +62,7 @@ import {
   zoneKind,
 } from "./rules.ts";
 import { trapSlot } from "./store.ts";
+import { useLabels } from "../../state/labels.ts";
 
 const NO_CHUNKS: Readonly<Record<string, BuildChunk>> = {};
 
@@ -887,6 +888,7 @@ function useRest(): { start(then: () => void): void; stop(): void } {
 
 /** "Map effects" (4.1): each thing it does when it goes off, in order, with its choice and a way to take it out. */
 function ActionList(props: { trap: Trap; rig: TrapRig; setRig(patch: RigPatch): void }) {
+  const labels = useLabels();
   const { trap, rig, setRig } = props;
   const view = useRoomView((s) => s.view);
   if (rig.actions.length === 0) return <Help>Nothing else. Add a door to slam, a light to put out, or a hidden creature or stamp to show.</Help>;
@@ -927,7 +929,7 @@ function ActionList(props: { trap: Trap; rig: TrapRig; setRig(patch: RigPatch): 
           );
         } else if ("tokenId" in a.show) {
           const token = view?.tokens[a.show.tokenId];
-          what = token ? `Show ${displayName(token)}` : "Show a creature that is gone";
+          what = token ? `Show ${displayName(token, labels)}` : "Show a creature that is gone";
         } else {
           what = view?.stamps[a.show.stampId] ? "Show a hidden stamp" : "Show a stamp that is gone";
         }

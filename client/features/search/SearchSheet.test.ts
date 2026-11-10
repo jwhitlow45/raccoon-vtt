@@ -303,16 +303,16 @@ describe("what a pick does (design-v1-qol.md 5, Acting, D-261106-144)", () => {
     };
     const room = towerRoom();
     const view = towerView(room, DM, "upper", ["ground", "upper", "attic"]).view!;
-    assert.equal(moveToFloorPick(actions, view, { tokenId: "thorn", floorId: "ground" }), null);
+    assert.equal(moveToFloorPick(actions, view, { tokenId: "thorn", floorId: "ground" }, new Map()), null);
     assert.deepEqual(sent, [{ t: "token.update", tokenId: "thorn", patch: { sceneId: "ground" } }]);
     assert.deepEqual(shown, ["ground"]);
     sent.length = 0;
     shown.length = 0;
     room.scenes.attic!.bounds = { w: 3, h: 3 };
     const small = towerView(room, DM, "upper", ["ground", "upper", "attic"]).view!;
-    assert.equal(moveToFloorPick(actions, small, { tokenId: "thorn", floorId: "attic" }), "Outside Attic");
-    assert.equal(moveToFloorPick(actions, small, { tokenId: "thorn", floorId: "nowhere" }), "That floor is gone");
-    assert.equal(moveToFloorPick(actions, small, { tokenId: "nobody", floorId: "ground" }), "That floor is gone");
+    assert.equal(moveToFloorPick(actions, small, { tokenId: "thorn", floorId: "attic" }, new Map()), "Outside Attic");
+    assert.equal(moveToFloorPick(actions, small, { tokenId: "thorn", floorId: "nowhere" }, new Map()), "That floor is gone");
+    assert.equal(moveToFloorPick(actions, small, { tokenId: "nobody", floorId: "ground" }, new Map()), "That floor is gone");
     assert.deepEqual([sent, shown], [[], []]);
   });
 

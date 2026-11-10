@@ -48,6 +48,7 @@ import {
   type AskFrom,
   type AskSheet,
 } from "./logic.ts";
+import { useLabels } from "../../state/labels.ts";
 
 /**
  * The DM's "Request a roll" (docs/design/design-v1-dm-tools.md 3.3,
@@ -58,6 +59,7 @@ import {
  * creature's player and opens the live card.
  */
 export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
+  const labels = useLabels();
   const actions = useRoomActions();
   const ui = useRoomUi();
   const roomId = useRoomView((s) => s.roomId);
@@ -70,7 +72,7 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
   const open = useRoomView((s) => Object.keys(s.view?.rolls ?? {}).length);
   // Worked out once, when the sheet opens: a creature that moves meanwhile keeps the tick the DM gave it.
   const [options] = useState(() =>
-    members && characters && tokens && meta && scenes ? defaultTargets({ members, characters, tokens, meta, scenes }, props.from, viewing) : [],
+    members && characters && tokens && meta && scenes ? defaultTargets({ members, characters, tokens, meta, scenes }, props.from, labels, viewing) : [],
   );
   const [recent] = useState(() => readRecent(roomId));
   // Read once as the sheet opens, as its recent requests are, so a chip never moves under the DM's finger.

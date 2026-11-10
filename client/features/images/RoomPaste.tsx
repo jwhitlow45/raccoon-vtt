@@ -20,6 +20,7 @@ import { ImagePicker } from "./ImagePicker.tsx";
 import { severalImages } from "./paste.ts";
 import { pasteSlot, type RoomPasteOffer } from "./pasteRouter.ts";
 import { roomPasteRows, roomPasteSlot, type RoomPasteRowId } from "./roomPaste.ts";
+import { useLabels } from "../../state/labels.ts";
 
 type Offer = { file: File; images: number };
 
@@ -105,6 +106,7 @@ function useStaleHandoffs(): void {
  * had pasted there.
  */
 function UsePastedImage(props: { offer: Offer; onClose(): void; onToken(tokenId: string): void }) {
+  const labels = useLabels();
   const { file, images } = props.offer;
   const scope = useRoomScope();
   const ui = useRoomUi();
@@ -128,7 +130,7 @@ function UsePastedImage(props: { offer: Offer; onClose(): void; onToken(tokenId:
   const rows = roomPasteRows({
     role: "dm",
     sceneCount,
-    token: selected ? displayName(selected) : null,
+    token: selected ? displayName(selected, labels) : null,
     onScene,
     stampMode: tool === "build" && builderMode === "stamp",
     busy,
@@ -213,6 +215,7 @@ function UsePastedImage(props: { offer: Offer; onClose(): void; onToken(tokenId:
  * the token panel's own image patch goes out.
  */
 function TokenPicture(props: { tokenId: string; file: File; onDone(): void }) {
+  const labels = useLabels();
   const token = useRoomView((s) => s.view?.tokens[props.tokenId]);
   const actions = useRoomActions();
   const [crop, setCrop] = useState<string | null>(null);
@@ -229,5 +232,5 @@ function TokenPicture(props: { tokenId: string; file: File; onDone(): void }) {
     onDone();
   };
   if (crop) return <CropEditor assetId={crop} initial={DEFAULT_CROP} shape={shape} aspect={fp.w / fp.h} onCancel={onDone} onSave={(c) => set({ assetId: crop, crop: c })} />;
-  return <ImagePicker initialFile={props.file} current={token.image} hint={`The picture for ${displayName(token)}.`} onClose={onDone} onPick={(image) => setCrop(image.id)} onPickIcon={set} />;
+  return <ImagePicker initialFile={props.file} current={token.image} hint={`The picture for ${displayName(token, labels)}.`} onClose={onDone} onPick={(image) => setCrop(image.id)} onPickIcon={set} />;
 }

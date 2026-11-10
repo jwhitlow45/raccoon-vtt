@@ -73,7 +73,7 @@ describe("one HP entry for several creatures", () => {
         g2: token("g2", { actor: { inline: actor({ hp: { cur: 7, max: 7, temp: 0 } }) } }),
       },
     });
-    const targets = hpTargets([state.tokens.g1!, state.tokens.g2!], { role: "dm", memberId: DM.memberId, characters: state.characters, playersApplyDamage: false });
+    const targets = hpTargets([state.tokens.g1!, state.tokens.g2!], { role: "dm", memberId: DM.memberId, characters: state.characters, playersApplyDamage: false, labels: new Map() });
     assert.equal(groupAccess(targets), "all");
     for (const op of hpOps(targets, { kind: "damage", amount: 6 }, false)) {
       const r = applyOp(state, op, DM, { seq: 1, at: new Date(0).toISOString() });
@@ -146,10 +146,10 @@ describe("the HP entry's lines on the dead (docs/design/design-v1-combat-flow.md
         up: token("up"),
       },
     });
-    const [dead, up] = hpTargets([state.tokens.dead!, state.tokens.up!], { role: "dm", memberId: DM.memberId, characters: {}, playersApplyDamage: false });
+    const [dead, up] = hpTargets([state.tokens.dead!, state.tokens.up!], { role: "dm", memberId: DM.memberId, characters: {}, playersApplyDamage: false, labels: new Map() });
     assert.deepEqual([dead!.dead, dead!.max, up!.dead], [true, 7, false]);
     const label = { ...state.tokens.dead!, actor: { inline: { life: "dead" as const, effects: [], hpLabel: "Dead" as const } } };
-    assert.equal(hpTargets([label as never], { role: "player", memberId: "p1", characters: {}, playersApplyDamage: true })[0]!.max, undefined, "no HP in the viewer's copy, no maximum");
+    assert.equal(hpTargets([label as never], { role: "player", memberId: "p1", characters: {}, playersApplyDamage: true, labels: new Map() })[0]!.max, undefined, "no HP in the viewer's copy, no maximum");
   });
 
   test("with healing on, a heal counts the dead it brings back, and so does a set of a current HP above 0", () => {

@@ -9,6 +9,7 @@ import { withCrit, type HpMode, type HpParse } from "./hpInput.ts";
 import { holderOf } from "../dice/targets.ts";
 import { creatureRolls, type DiceView } from "../dice/creature.ts";
 import { damageSummary, type DamageSummaryLines, type DamageSummaryContext } from "../dice/damageSummaryLines.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * One HP entry for several creatures (features section 10: "one entry can
@@ -42,6 +43,7 @@ export function hpTargets(
     memberId: MemberId | null | undefined;
     characters: Readonly<Record<string, Character | undefined>>;
     playersApplyDamage: boolean;
+    labels: Labels;
   },
 ): HpTarget[] {
   return tokens.map((token) => {
@@ -57,7 +59,7 @@ export function hpTargets(
     return {
       holder: holderOf(token),
       target: { tokenId: token.id },
-      name: displayName(token as Token),
+      name: displayName(token as Token, ctx.labels),
       access: access.hp,
       atZero: !!atZero,
       dead: actor?.life === "dead",

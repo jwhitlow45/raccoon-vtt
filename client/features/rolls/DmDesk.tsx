@@ -58,6 +58,7 @@ import { RequestSheet } from "./RequestSheet.tsx";
 import { deskTraps, foldedWithTraps } from "../traps/desk.ts";
 import { TrapCard } from "../traps/TrapCard.tsx";
 import { cardStyle, ResultBadge } from "./parts.tsx";
+import { labelsOf, useLabels } from "../../state/labels.ts";
 
 const NO_ROLLS = {};
 const NO_CASTS = {};
@@ -115,7 +116,7 @@ export function DmDesk() {
   useRestoreGroupSave();
   const heldAsk = useGroupSave((s) => (s.page && s.page.phase !== "applied" ? (s.page.cast?.ask.id ?? null) : null));
   const asked = useMemo(() => deskAsks(casts, heldAsk), [casts, heldAsk]);
-  const askWho = useRoomView((s) => (s.view && asked.length === 1 ? castWho(s.view, asked[0]!) : ""));
+  const askWho = useRoomView((s) => (s.view && asked.length === 1 ? castWho(s.view, asked[0]!, labelsOf(s)) : ""));
   const traps = useRoomView((s) => s.view?.traps ?? NO_TRAPS);
   const sprung = useMemo(() => deskTraps(traps), [traps]);
   const items = sprung.length + asked.length + cards.length;
@@ -300,10 +301,11 @@ export function DmDesk() {
 }
 
 export function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; onClose(): void; request: RollRequest; open: boolean; onToggle(): void }) {
+  const labels = useLabels();
   const { request } = props;
   const tally = tallyText(request);
   const asking = request.targets.filter((t) => t.change !== undefined);
-  const askName = useRoomView((s) => (s.view && asking.length === 1 ? targetName(s.view, asking[0]!, s.sceneId) : ""));
+  const askName = useRoomView((s) => (s.view && asking.length === 1 ? targetName(s.view, asking[0]!, labels, s.sceneId) : ""));
   const asks = asking.length === 1 && asking[0]!.change ? askRowText(asking[0]!.change, askName) : tally.asks;
   const dc = dcText(request, "dm");
   const title = `${testShortText(request.test)}${dc ? `, ${dc}` : ""}`;
@@ -367,9 +369,10 @@ export function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; o
 }
 
 function TargetRow(props: { request: RollRequest; target: RollTarget; levelOf: LevelOf }) {
+  const labels = useLabels();
   const { request, target } = props;
   const actions = useRoomActions();
-  const name = useRoomView((s) => (s.view ? targetName(s.view, target, s.sceneId) : ""));
+  const name = useRoomView((s) => (s.view ? targetName(s.view, target, labels, s.sceneId) : ""));
   const ref = targetRef(target);
   const waiting = !answered(target);
   // With several creatures the title stays neutral, so a row's name carries its mark. A recorded choice of two is marked where the answer names it.

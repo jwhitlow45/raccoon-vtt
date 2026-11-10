@@ -22,6 +22,8 @@ import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { keyText, letterOf, searchSheetSlot, setSearchSheet, SHORTCUTS, useKeyHint, useShortcutKeys, withKey, type KeyPress, type ShortcutEnv, type ShortcutTool } from "../../state/shortcuts.ts";
 import type { RoomActions, RoomView } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
+import { labelsOf } from "../../state/labels.ts";
+import type { Labels } from "../../lib/labels.ts";
 import { useLayoutSize } from "../device/layout.ts";
 import { useUiScale } from "../device/settings.ts";
 import { fillDiceField } from "../dice/fill.ts";
@@ -301,9 +303,9 @@ export function conditionOp(effects: readonly Pick<Effect, "id" | "key">[], step
  * A Move to floor row's pick, judged again against the room as it is now: the floor may have gone off or away since
  * the row was built. Returns the words of a refusal, which the sheet toasts, and sends nothing then.
  */
-export function moveToFloorPick(actions: Pick<RoomActions, "dispatch" | "newId" | "showFloor">, view: NonNullable<RoomView["view"]>, step: { tokenId: string; floorId: string }): string | null {
+export function moveToFloorPick(actions: Pick<RoomActions, "dispatch" | "newId" | "showFloor">, view: NonNullable<RoomView["view"]>, step: { tokenId: string; floorId: string }, labels: Labels): string | null {
   const token = view.tokens[step.tokenId];
-  const choice = token ? floorChoices(view, [token]).find((c) => c.floor.id === step.floorId) : undefined;
+  const choice = token ? floorChoices(view, [token], labels).find((c) => c.floor.id === step.floorId) : undefined;
   if (!token || !choice) return ROW_WORDS.floorGone;
   return sendMoveToFloor(actions, view, [token], choice);
 }
@@ -742,7 +744,7 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
     } else if (step.t === "floor") {
       actions.showFloor(step.sceneId);
     } else if (step.t === "moveToFloor") {
-      const refusal = s.view ? moveToFloorPick(actions, s.view, step) : ROW_WORDS.floorGone;
+      const refusal = s.view ? moveToFloorPick(actions, s.view, step, labelsOf(s)) : ROW_WORDS.floorGone;
       if (refusal !== null) ui.notify(refusal, "error");
     } else {
       const on = selectionEffects(s);
