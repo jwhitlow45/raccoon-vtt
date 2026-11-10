@@ -1,11 +1,15 @@
-import type { TerrainId } from "#shared/model.ts";
+import type { CellRect, RoomState, TerrainId } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
+import type { JoinExpect } from "#shared/rules/wingClear.ts";
 import { MEMBER_COLORS } from "../../lib/theme.ts";
 import { builderScene, type SceneInput } from "../scenes/create.ts";
 import type { KeyInput } from "./keyPage.ts";
-import type { DungeonPlan, PlanRoom } from "./plan.ts";
-import { landDungeon } from "./scratch.ts";
-import { DEFAULT_SETTINGS, GENERATOR_VERSION, type DungeonSettings } from "./settings.ts";
+import { endsKey, hexSide, hexWalls, NO_SPACE } from "./hexWalls.ts";
+import { latticeFor } from "./lattice.ts";
+import type { DungeonPlan, PlanRoom, WingBase } from "./plan.ts";
+import { landAll, landDungeon, scratchRoom } from "./scratch.ts";
+import { clampSettings, DEFAULT_SETTINGS, GENERATOR_VERSION, type DungeonSettings } from "./settings.ts";
+import { wingHash } from "./wing.ts";
 
 /*
  * Plans written by hand for the landing tests, so the ops, the scratch room
@@ -266,4 +270,70 @@ export function dressedRooms(): DungeonPlan {
     { n: 2, room: 1, doors: [{ side: "w", to: 1, state: "locked" }], traps: ["Hidden Pit", "Poisoned Needle", "Fire-Casting Statue"], trinket: 99, dais: true },
   ];
   return plan;
+}
+
+/** The scene the wing bases stand on. */
+export const WING_SCENE = "wing-scene";
+
+/** A wing's choices for the landing tests: a few rooms, the key on. */
+export const WING_SETTINGS: DungeonSettings = clampSettings({ ...DEFAULT_SETTINGS, w: 30, h: 30, rooms: 4, key: true, traps: 12, dressing: "full", lit: 100 });
+
+function withHash(base: Omit<WingBase, "hash">, s: DungeonSettings): WingBase {
+  return { ...base, hash: wingHash(base, s) };
+}
+
+/**
+ * A square wing's base (phase 3, 3.2): a 70 by 40 Builder scene with one
+ * stone room of 10 by 10 at (10, 12), raised `ground` ft, the area east of
+ * it, and the join on its east wall, an automatic wall, `wide` taking the
+ * edge below it too.
+ */
+export function squareWingBase(opts: { ground?: number; wide?: boolean; rule?: "all" | "floor" } = {}): WingBase {
+  const { ground = 0, wide = false, rule = "all" } = opts;
+  const cells = rect(10, 12, 10, 10);
+  const ops: ClientOp[] = [
+    { t: "scene.create", scene: { ...builderScene({ id: WING_SCENE, name: "Keep", w: 70, h: 40 }), autoWalls: rule } },
+    { t: "build.paint", sceneId: WING_SCENE, terrain: "stone", cells },
+    ...(ground !== 0 ? [{ t: "build.height", sceneId: WING_SCENE, cells, height: ground } as ClientOp] : []),
+  ];
+  const landed = landAll(scratchRoom(), ops);
+  if (!landed.ok) throw new Error(landed.why);
+  const keys = wide ? ["20,16,w", "20,17,w"] : ["20,16,w"];
+  const join: JoinExpect = { grid: "squares", edges: keys.map((key) => ({ key, feature: null, ground })) };
+  return withHash({ scene: landed.room.scenes[WING_SCENE]!, state: landed.room, area: { x: 30, y: 2, w: 36, h: 36 }, join }, { ...WING_SETTINGS, wide });
+}
+
+/**
+ * A hex wing's base: a 70 by 50 hex scene with one closed room of free
+ * walls over lattice cells (10, 12) to (19, 21), raised `ground` ft, the
+ * area east of it, and the join on its east side at row 16 (mirrored on
+ * Hex columns).
+ */
+export function hexWingBase(grid: "hexRows" | "hexColumns" = "hexRows", opts: { ground?: number } = {}): { base: WingBase; state: RoomState } {
+  const { ground = 0 } = opts;
+  const bounds = { w: 70, h: 50 };
+  const L = latticeFor(grid, bounds);
+  const space = new Int32Array(L.W * L.H).fill(NO_SPACE);
+  const room: number[] = [];
+  for (let y = 12; y < 22; y++) {
+    for (let x = 10; x < 20; x++) {
+      space[y * L.W + x] = 0;
+      room.push(y * L.W + x);
+    }
+  }
+  const { walls } = hexWalls({ lattice: L, space, doorways: [], far: new Set(), wayIn: [] });
+  const put = walls.map((w, i) => ({ id: `wl${String(i).padStart(10, "0")}`, a: w.a, b: w.b, f: { kind: "wall" as const } }));
+  const ops: ClientOp[] = [{ t: "scene.create", scene: builderScene({ id: WING_SCENE, name: "Keep", w: bounds.w, h: bounds.h, gridShape: grid }) }];
+  for (let i = 0; i < put.length; i += 300) ops.push({ t: "build.walls", sceneId: WING_SCENE, put: put.slice(i, i + 300) });
+  if (ground !== 0) ops.push({ t: "build.height", sceneId: WING_SCENE, cells: room.map((k) => L.keyOf(k)), height: ground });
+  const landed = landAll(scratchRoom(), ops);
+  if (!landed.ok) throw new Error(landed.why);
+  const state = landed.room;
+  const key = endsKey(...hexSide(L, 16 * L.W + 19, 0));
+  let found: Extract<JoinExpect, { grid: "hex" }>["walls"][number] | null = null;
+  for (const c of Object.values(state.buildChunks)) for (const w of c?.walls ?? []) if (endsKey(w.a, w.b) === key) found = { cx: c!.cx, cy: c!.cy, id: w.id, a: w.a, b: w.b, f: w.f };
+  if (!found) throw new Error("no wall on the room's east side");
+  const lattice: CellRect = { x: 26, y: 2, w: 40, h: 44 };
+  const area = grid === "hexColumns" ? { x: lattice.y, y: lattice.x, w: lattice.h, h: lattice.w } : lattice;
+  return { base: withHash({ scene: state.scenes[WING_SCENE]!, state, area, join: { grid: "hex", walls: [found], ground } }, WING_SETTINGS), state };
 }

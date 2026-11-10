@@ -1,6 +1,8 @@
 import { createInitialState } from "#shared/initial.ts";
 import { checkLimits } from "#shared/limits.ts";
 import type { Member, RoomState, Viewer } from "#shared/model.ts";
+import { autoWallsOf } from "#shared/rules/autoWalls.ts";
+import type { WingClear } from "#shared/rules/wingClear.ts";
 import { clientOpSchema, type ClientOp, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { pitsMoved, withPitsCounted } from "#shared/rules/pitCount.ts";
@@ -11,10 +13,13 @@ import { boardTheme } from "../../lib/theme.ts";
 import type { SceneInput } from "../scenes/create.ts";
 import type { Preview, Summary } from "./client.ts";
 import { keyOps, type KeyInput } from "./keyPage.ts";
-import { buildOps, dressOps, MAX_OPS, SCENE_PLACEHOLDER, trapOps } from "./ops.ts";
-import { generate, type DungeonPlan } from "./plan.ts";
+import type { DungeonEdits } from "./edits.ts";
+import { NO_SPACE } from "./hexWalls.ts";
+import { buildOps, dressOps, MAX_OPS, SCENE_PLACEHOLDER, trapOps, WING_OP_BYTES, wingMapOps } from "./ops.ts";
+import { planFitted, type DungeonPlan, type Planned, type WingBase } from "./plan.ts";
 import type { Seed } from "./seed.ts";
-import { MIN_ROOMS, type DungeonSettings, type PlanContext } from "./settings.ts";
+import { clampSettings, isHexGrid, MIN_ROOMS, type DungeonSettings, type PlanContext } from "./settings.ts";
+import { wingSetup } from "./wing.ts";
 
 /*
  * The scratch room (docs/design/design-v1-dungeon-generator.md 5.5): the
@@ -137,17 +142,20 @@ export function landDungeon(plan: DungeonPlan, scene: SceneInput, band: LevelBan
  * cropped to the rooms, so players learn nothing of the rooms' reach
  * (D-261102-384).
  */
-export function previewScene(scene: SceneInput, plan: Pick<DungeonPlan, "w" | "h">): SceneInput {
+export function previewScene(scene: SceneInput, plan: Pick<DungeonPlan, "w" | "h" | "grid">): SceneInput {
   const { gridShape: _shape, defaultView: _view, ...rest } = scene;
-  return { ...rest, id: SCENE_PLACEHOLDER, bounds: { w: plan.w, h: plan.h } };
+  // A hex plan lands on its grid (phase 3, 2.1), and its bounds are the scene's cells, which its rows lattice covers.
+  return { ...rest, id: SCENE_PLACEHOLDER, bounds: { w: plan.w, h: plan.h }, ...(isHexGrid(plan.grid) ? { gridShape: plan.grid } : {}) };
 }
 
 /**
  * The foot's counts. A Wide doorway's two door edges are one double door,
  * so doors count doorways: door edges in a line, touching end to end, are
- * one, which is exact since doorways keep a square apart (5.3 step 4).
+ * one, which is exact since doorways keep a square apart (5.3 step 4). On
+ * hexes a doorway's leaves (`leaves`, the plan's walls by doorway) are one
+ * door in their doorway's one state (phase 3, 2.2).
  */
-export function summarize(plan: Pick<DungeonPlan, "rooms" | "asked" | "doors" | "traps" | "lights">): Summary {
+export function summarize(plan: Pick<DungeonPlan, "rooms" | "asked" | "doors" | "traps" | "lights" | "walls">, leaves?: readonly (readonly number[])[]): Summary {
   const byKey = new Map(plan.doors.map((d) => [d.edge, d.state]));
   const seen = new Set<string>();
   let doors = 0;
@@ -169,14 +177,44 @@ export function summarize(plan: Pick<DungeonPlan, "rooms" | "asked" | "doors" | 
       }
     }
   }
+  for (const doorway of leaves ?? []) {
+    const f = plan.walls?.[doorway[0] ?? -1]?.f;
+    if (f === undefined || f === "wall") continue;
+    doors++;
+    if (f === "locked") locked++;
+    if (f === "secret") secretDoors++;
+  }
   return { rooms: plan.rooms.length, asked: plan.asked, doors, locked, traps: plan.traps.length, secretDoors, secretRooms: plan.rooms.filter((r) => r.secret).length, lights: plan.lights.length };
+}
+
+/** What a preview reads of a plan's working. */
+type Made = Pick<Planned, "plan" | "facts" | "fitted" | "overBudget" | "leaves">;
+
+/**
+ * Why a plan cannot be shown, as the preview says it: under two rooms,
+ * past the fit's plans, or a hex plan with edits over the wall budget
+ * (phase 3, 2.5 and 4.2), or none.
+ */
+function fitFailure(planned: Made): Preview | null {
+  if (planned.overBudget === "tooMany") return { ok: false, error: "fit", why: "tooMany" };
+  if (planned.overBudget === "edits") return { ok: false, error: "fit", why: "edits" };
+  if (planned.overBudget === "underTwo" || planned.plan.rooms.length < MIN_ROOMS) return { ok: false, error: "fit", why: "underTwo" };
+  return null;
+}
+
+/** What the room panel reads of a plan (phase 3, 4.1): each kept room's facts, and the room count the plan asked for. */
+function panelOf(planned: Made): { facts: Planned["facts"]; fitted: number } {
+  return { facts: planned.facts, fitted: planned.fitted };
 }
 
 /**
  * A preview whole, as the worker answers it: the plan, the ops Make sends,
  * the room they make and the foot's counts, the key's page and pins among
- * the ops when `key` is given and DM key is on. Fewer than two rooms is the
- * "fit" error, and anything thrown or refused is a generator bug.
+ * the ops when `key` is given and DM key is on, and what the room panel
+ * reads. On hexes the plan is the first within the wall budget, stepping
+ * the room count down, and with edits the count they froze (phase 3, 2.5
+ * and 4.2). A failed fit is the "fit" error with why, and anything thrown
+ * or refused is a generator bug.
  */
 export function previewOf(
   settings: DungeonSettings,
@@ -184,16 +222,21 @@ export function previewOf(
   scene: SceneInput,
   context: PlanContext,
   key: KeyInput | null,
-  make: (settings: DungeonSettings, seed: Seed, context: PlanContext) => DungeonPlan = generate,
+  make: (settings: DungeonSettings, seed: Seed, context: PlanContext, edits: DungeonEdits | null) => Made | DungeonPlan = (s, sd, c, e) => planFitted(s, sd, c, e ? { edits: e } : {}),
+  edits: DungeonEdits | null = null,
 ): Preview {
-  let plan: DungeonPlan;
+  let planned: Made;
   try {
-    plan = make(settings, seed, context);
+    const made = make(settings, seed, context, edits);
+    // A plan alone, as a test hands one, has no room panel and asked for its rooms.
+    planned = "plan" in made ? made : { plan: made, facts: [], fitted: made.asked, overBudget: null, leaves: [] };
   } catch (err) {
     console.error("raccoon: the dungeon generator failed", err);
     return { ok: false, error: "bug" };
   }
-  if (plan.rooms.length < MIN_ROOMS) return { ok: false, error: "fit" };
+  const failed = fitFailure(planned);
+  if (failed) return failed;
+  const plan = planned.plan;
   let landed: Landed;
   try {
     landed = landDungeon(plan, previewScene(scene, plan), settings.band, key && { input: key, settings });
@@ -205,5 +248,124 @@ export function previewOf(
     console.error(`raccoon: a generated dungeon was refused at ${landed.why}`);
     return { ok: false, error: "bug" };
   }
-  return { ok: true, plan, ops: landed.ops, room: landed.room, summary: summarize(plan) };
+  return { ok: true, plan, ops: landed.ops, room: landed.room, summary: summarize(plan, isHexGrid(plan.grid) ? planned.leaves : undefined), ...panelOf(planned) };
+}
+
+/** The scene id a wing's scratch room keeps: the base's own, so the ops a wing plans already name the scene it joins. */
+function wingScratch(base: WingBase): RoomState {
+  const room = scratchRoom();
+  return {
+    ...room,
+    scenes: { [base.scene.id]: base.scene },
+    buildChunks: base.state.buildChunks,
+    traps: base.state.traps,
+    stamps: base.state.stamps,
+    lights: base.state.lights,
+    labels: base.state.labels,
+    pins: base.state.pins,
+    tokens: base.state.tokens,
+    ...(base.state.floorLinks ? { floorLinks: base.state.floorLinks } : {}),
+  };
+}
+
+/**
+ * A wing through a scratch room holding its base (phase 3, 3.3 and 3.5):
+ * the scene it joins with what can stand in the way, then the wing's map
+ * ops, stamps, lights and stones, its traps from the chunks those left,
+ * and last its key's page and pins. Every check `landOp` runs reads the
+ * scene's own counts with the wing's, so a wing the scene has no room for
+ * is refused here, as the server would refuse it.
+ */
+export function landWing(plan: DungeonPlan, base: WingBase, band: LevelBand, key: { input: KeyInput; settings: DungeonSettings } | null): Landed {
+  const sceneId = base.scene.id;
+  const build = [...wingMapOps(plan, sceneId), ...dressOps(plan, sceneId, WING_OP_BYTES)];
+  const built = landAll(wingScratch(base), build);
+  if (!built.ok) return { ok: false, why: `op ${built.at}: ${built.why}` };
+  const rest = [...trapOps(plan, built.room.buildChunks, band, sceneId), ...(key ? keyOps(plan, key.settings, key.input, sceneId) : [])];
+  const ops = [...build, ...rest];
+  if (ops.length > MAX_OPS) return { ok: false, why: `${ops.length} ops, past ${MAX_OPS}` };
+  const landed = landAll(built.room, rest, build.length + 1);
+  if (!landed.ok) return { ok: false, why: `op ${build.length + landed.at}: ${landed.why}` };
+  return { ok: true, ops, room: landed.room };
+}
+
+/**
+ * The wing's floor as row runs of scene keys (phase 3, 3.6): every hex of
+ * its rooms, corridors and runs, which its last ask carries for the
+ * server's clearance check. Empty on squares, where the paint is the floor.
+ */
+export function floorRuns(planned: Pick<Planned, "space" | "lattice">): [number, number, number][] {
+  const { space, lattice: L } = planned;
+  const rows = new Map<number, number[]>();
+  for (let k = 0; k < space.length; k++) {
+    if (space[k] === NO_SPACE) continue;
+    const [x, y] = L.keyOf(k).split(",").map(Number) as [number, number];
+    const row = rows.get(y);
+    if (row) row.push(x);
+    else rows.set(y, [x]);
+  }
+  const runs: [number, number, number][] = [];
+  for (const y of [...rows.keys()].sort((a, b) => a - b)) {
+    const xs = rows.get(y)!.sort((a, b) => a - b);
+    let from = xs[0]!;
+    let to = from;
+    for (const x of xs.slice(1)) {
+      if (x === to + 1) to = x;
+      else {
+        runs.push([y, from, to]);
+        from = to = x;
+      }
+    }
+    runs.push([y, from, to]);
+  }
+  return runs;
+}
+
+/** What a wing's asks carry (phase 3, 3.6): its margin, join and the scene's wall rule, and on hexes the join's inside hexes and the wing's floor. */
+export function wingClearOf(planned: Planned, base: WingBase, settings: DungeonSettings): WingClear | null {
+  const join = planned.plan.join;
+  if (!join) return null;
+  const clear: WingClear = { margin: settings.wide ? 3 : 2, join, autoWalls: autoWallsOf(base.scene) };
+  if (join.grid === "squares") return clear;
+  const setup = wingSetup(base, clampSettings(settings, base.scene.gridShape ?? "squares"));
+  const runs = floorRuns(planned);
+  return { ...clear, inside: setup.facts.inside.map((k) => setup.world.L.keyOf(k)), ...(runs.length > 0 ? { floor: runs } : {}) };
+}
+
+/**
+ * A wing's preview, as the worker answers it (phase 3, 3.3 to 3.5): the
+ * plan on its base, the ops Make sends with the key's when DM key is on,
+ * the scratch room with the wing landed in it, the counts, the room
+ * panel's facts, and what its asks carry. A wing that cannot be planned
+ * is the "fit" error with the planner's problem.
+ */
+export function wingPreviewOf(settings: DungeonSettings, seed: Seed, base: WingBase, context: PlanContext, key: KeyInput | null, edits: DungeonEdits | null = null): Preview {
+  let planned: Planned;
+  try {
+    planned = planFitted(settings, seed, context, { wing: base, ...(edits ? { edits } : {}) });
+  } catch (err) {
+    console.error("raccoon: the wing planner failed", err);
+    return { ok: false, error: "bug" };
+  }
+  const problem = planned.wing?.problem ?? null;
+  if (problem) return { ok: false, error: "fit", problem };
+  const failed = fitFailure(planned);
+  if (failed) return failed;
+  const plan = planned.plan;
+  const clear = wingClearOf(planned, base, settings);
+  if (!clear) return { ok: false, error: "bug" };
+  let landed: Landed;
+  try {
+    landed = landWing(plan, base, settings.band, key && { input: key, settings });
+  } catch (err) {
+    console.error("raccoon: a planned wing could not be landed", err);
+    return { ok: false, error: "bug" };
+  }
+  if (!landed.ok) {
+    // The scene's counts with the wing's past a cap the planner's allowance did not hold, such as the sight cap: the scene is too full.
+    if (/over a limit|over the split|over the sight cap/.test(landed.why)) return { ok: false, error: "fit", problem: "full" };
+    console.error(`raccoon: a planned wing was refused at ${landed.why}`);
+    return { ok: false, error: "bug" };
+  }
+  return { ok: true, plan, ops: landed.ops, room: landed.room, summary: summarize(plan, isHexGrid(plan.grid) ? planned.leaves : undefined), ...panelOf(planned), clear };
 }
