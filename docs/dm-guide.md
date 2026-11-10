@@ -267,7 +267,7 @@ A tower, a keep or a cellar under an inn is one place on several levels, and a s
 
 ![The Floors group open on the Tower: Attic, Upper floor with its On screen tag, and Ground floor with the players, then Add a floor above and Add a floor below, and Light and weather under them.](dm-guide/floors-settings.webp)
 
-Tap a floor to open its page. It sets the floor's **Floor name**, its **Height above the floor below** (5 to 50 ft in steps of 5, and 10 by default, which the stairs and ladders to come will read), **Show to players** or **Hide from players**, **Move up** and **Move down** in the stack, **Go to this floor** to put it on your own screen, and **Remove floor**, which asks for a second tap and takes everything on that floor with it. Every other group in the settings, Light and weather, Fog and vision, Map and grid and the rest, sets the floor on your screen, and a line under **This scene** says which: "The groups below set Upper floor."
+Tap a floor to open its page. It sets the floor's **Floor name**, its **Height above the floor below** (5 to 50 ft in steps of 5, and 10 by default, which the cost of a climb on stairs and ladders reads), **Show to players** or **Hide from players**, **Move up** and **Move down** in the stack, **Go to this floor** to put it on your own screen, and **Remove floor**, which asks for a second tap and takes everything on that floor with it. Every other group in the settings, Light and weather, Fog and vision, Map and grid and the rest, sets the floor on your screen, and a line under **This scene** says which: "The groups below set Upper floor."
 
 Some buttons stay off, with the reason under them. **Remove floor** is off on the floor the scene was made with ("Delete Tower from its menu to remove every floor"), on the floor the players start on and while a party member stands on the floor. **Hide from players** is off on the start floor too, and while a party member stands on a floor of the players' scene, since it only exists to close a floor you opened by mistake. A party member on a scene you are preparing in private opens nothing, so there Hide stays on. The scene's grid shape is fixed while it has more than one floor, so every floor stays square for square with the others.
 
@@ -283,9 +283,46 @@ In a fight, the tracker keeps every creature the players may see, whatever floor
 
 ### Moving between floors
 
-Players cannot take stairs themselves yet, so a character who climbs asks you. Select the token and press **Move to floor…** in its action bar (**Floor…** where the row is short), or in the **More** sheet for a group. Pick the floor, and the creatures move to the same squares there, standing on that floor's ground, with what they carry, drag and their areas. It is one Undo step. A creature's **Moved** count starts again on the new floor, as it does when you move it to another scene.
+A character who climbs by [stairs or a ladder](#stairs-and-ladders) needs no help from you, but a character who has to cross floors another way asks you. Select the token and press **Move to floor…** in its action bar (**Floor…** where the row is short), or in the **More** sheet for a group. Pick the floor, and the creatures move to the same squares there, standing on that floor's ground, with what they carry, drag and their areas. It is one Undo step. A creature moved to another floor of its scene mid-turn keeps its **Moved** count, as a climb does, while a move to another scene starts it again.
 
 If the move would bring a party member onto a floor the players have not reached, the floor's row warns you first: "Players haven't reached Attic. Moving Thorn there opens it to them." Nothing asks for confirmation, so look before you tap. A floor the players have reached stays reached, and **Hide from players** closes it again if you opened it by mistake.
+
+### Stairs and ladders
+
+Stairs and ladders let a character change floors without asking you. They are not the **Stairs** terrain from [Heights and stairs](#heights-and-stairs), which climbs a ledge on one floor. A pair of these joins two floors that lie next to each other. To get from the ground floor to the attic, one pair joins the ground floor to Upper floor and another joins Upper floor to the attic. Reach for stairs where the party can walk up and for a ladder where a creature has to climb, such as a trapdoor or a rope into a loft.
+
+**Placing a pair.** Open the **Map builder** on the floor where the climb starts and pick **Between floors**, the last mode. It shows only on a scene with more than one floor. Choose **Stairs** or **Ladder** under **Kind** and the floor under **To**, which lists only the floors next to this one, then drag over the squares, up to 4 by 4. A tap places one square. The app writes an end on each floor at the same squares, so a creature that climbs lands on the square above where it stood.
+
+![The Map builder in Between floors on the Tower's ground floor: a box of stairs on the stone floor, named for Upper floor and Not reached yet, with its pane open beside Thorn and the table, showing Kind on Stairs and the Locked switch off.](dm-guide/floors-stairs-builder.webp)
+
+The squares must be open, level ground on both floors. A wall through them, two heights under them, a pit trap or the edge of a floor refuses the placement, and the box turns red with the reason under the toolbar. A scene holds 16 pairs. Once a pair is placed, the app keeps the ground under it as it is, so an undo of a climb always lands where the creature stood. A height, a paint stroke, an erase or a generated dungeon over its squares is refused, and so are a wall through them and a pit trap under them, each with "Remove them first." Adding a floor between two linked floors, or moving one there, is off too, with "Stairs join Ground floor and Upper floor. Remove them before putting a floor between." on the floor's page.
+
+Tap an end while **Between floors** is open to open its pane. **Kind** turns stairs into a ladder and back on both ends. **Locked** switches **Go up** and **Go down** off while it is on, which suits a stair you want shut until the party has earned it. **Go to Upper floor** shows the other end, and **Remove stairs** asks again as **Remove both ends**. Removing a floor takes the stairs to it with it, and the floor's undo brings them back.
+
+> [!NOTE]
+> A party member who climbs onto a floor the players have not reached opens it to them, as walking there would, even if you hid it. Lock the stairs until the party should go up.
+
+**Climbing.** A creature standing on the squares gets **Go up** or **Go down** first in its action bar, ahead of Undo move, Doesn't count and the door. On a phone held upright it takes Roll's place in the strip, with its words where they fit and as a stairwell icon where they do not. On a keyboard, `}` goes up and `{` goes down for the one selected creature. A player can climb whenever they could move that creature, and you can climb any creature. The creature lands on the same squares of the other floor, on the ground there, with what rides or is carried on it and its areas. A creature it was dragging is let go, so a drag ends at the stairs.
+
+![Pat's phone on Thorn's turn: Thorn stands on the stairs, named Stairs up, the marker reads Moved 15 ft and 15 ft left, and the stairwell icon, Go up, sits beside Apply and End turn.](dm-guide/floors-climb-strip.webp)
+
+![Pat's phone after the climb: Upper floor's wooden boards, Thorn on the stairs' other end, the marker reading Moved 25 ft and 5 ft left, and the stairwell icon in the strip now Go down.](dm-guide/floors-climb-landed.webp)
+
+A climb is a leg of the turn and costs speed. Stairs cost the height between the two floors, 10 ft unless you set another under the floor's **Height above the floor below**. A ladder costs twice that, unless the creature has a Climb speed, and a prone creature pays one more foot for each foot. **Moved** keeps the feet of the floors a creature left, so after a 15 ft walk and stairs 10 ft high it reads "Moved 25 ft" upstairs. A ruler or a drag that ends on stairs reads as any walk and never routes through them.
+
+Some creatures cannot take the stairs, and the button says why:
+
+- **It's locked.** shows under the row while the pair is locked. You can still use **Move to floor…**.
+- **Too big for these stairs. Squeeze to fit.** shows for a creature larger than the squares that could squeeze in. **Too big for these stairs.** shows for one that could not.
+- The button does not show for a creature only partly on the squares, in the air over them, or riding or carried by a creature the player can see, which takes the stairs for it, nor for a group selection.
+
+A player's climb waits for the server before it shows anything, since a player's device is not told the height of the floors. The button shows busy and a second press does nothing. The phone then follows the creature ("Thorn is on Upper floor. Showing Upper floor.") and focus moves to the button for the way back. Your own screen follows the climb at once.
+
+Landing sets off no trap or area reminder, so put a trap a square beyond the stairs if you want the party to meet it on arrival.
+
+A player's **Undo** takes a climb back down the same stairs, with what rode on the creature and its areas, and **Redo** takes it up again, while the stairs stand as they were. If you lock them, remove them or place them again in between, the undo answers "Could not undo moving Thorn up the stairs: the stairs changed." A later move of the creature refuses it too, so steps undo in order. When your own Undo or Redo would put something back that stairs now block, it keeps its step and says "The DM who placed them can remove them." Remove the stairs and the same Undo works. A backup and an import carry the stairs with the rest of the scene.
+
+**What players see.** A player sees an end only on a floor they hold and on ground they have seen. It reads "Up to Upper floor" where they hold that floor and "Stairs up" or "Ladder down" where they do not, which also tells them a floor lies next to this one. You see "Up to Attic · Not reached yet" on an end whose far floor the players have not reached. Neither the far end nor what stands on the far floor reaches a player, and the climb tells only the climber's owners how far they went.
 
 ### What players are sent
 
@@ -2447,7 +2484,7 @@ These are the keys a DM uses most:
 - `Ctrl+Z` is Undo, and `Ctrl+Shift+Z` is Redo, for play and board changes (Cmd in place of Ctrl on a Mac). Inside the **Setup history** sheet the same two keys are **Undo setup** and **Redo setup**.
 - `0` fits the map to the screen, `+` zooms in and `-` zooms out. `S` hides or shows the side panel, and `O` switches to the other of two panels.
 - `I` switches between Top-down and Isometric, `Q` turns the isometric view left and `E` turns it right.
-- `[` shows the floor below and `]` the floor above, on a scene of several floors.
+- `[` shows the floor below and `]` the floor above, on a scene of several floors. `}` goes up and `{` goes down the stairs or ladder the one selected creature stands on.
 - `W` turns full screen on or off, where the browser allows it.
 - Escape closes the newest pop-up, sheet or action bar.
 - `Shift+F10` or the `ContextMenu` key, on a focused roll button, opens its one-roll menu. With a mouse, right-click the button, and on a phone hold it.
