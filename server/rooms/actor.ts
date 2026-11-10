@@ -2325,7 +2325,9 @@ export class RoomActor {
     this.#batch = null;
     if (batch.timer) clearTimeout(batch.timer);
     batch.timer = null;
-    if (batch.answered > 0 || batch.doors.length > 0) this.#explore(batch);
+    // A room whose replay failed keeps its stored tail for a fixed build and writes no row of its own: the next seq is one
+    // that tail holds, or a gap in it.
+    if (!this.replayFailed && (batch.answered > 0 || batch.doors.length > 0)) this.#explore(batch);
     batch.state = this.#staged.state;
     batch.seq = this.#staged.seq;
     batch.pub = this.#pub;
@@ -2442,6 +2444,11 @@ export class RoomActor {
    * (counted.ts): it reduces at the room count as it stands and leaves it.
    */
   #appendServerOp(batch: Batch, op: OpOf<"sys.explore"> | OpOf<"sys.remember">, what: string): boolean {
+    // Never reached while #commitNow skips the explore there: the tail a failed replay left holds the next seq, or a gap.
+    if (this.replayFailed) {
+      this.#log.error({ roomId: this.roomId }, `${what} op skipped, the room's replay failed`);
+      return false;
+    }
     const checked = checkServerOp(op);
     if (!checked.ok) {
       this.#log.error({ roomId: this.roomId, message: checked.message }, `${what} op does not validate`);

@@ -174,10 +174,12 @@ export class StoredRoomDb extends UndoScopeDb {
   #write(sql: string, params: unknown[]): (() => void) | null {
     if (sql.startsWith("insert into room_ops")) {
       const [, seqs, ats, members, roles, ops, version, pubs] = params as [string, number[], string[], string[], string[], string[], number, number[]];
+      // The table's primary key refuses a stored row's seq at the insert, before the commit.
+      const taken = seqs.find((seq) => this.rows.some((r) => r.seq === seq));
+      if (taken !== undefined) throw new Error(`duplicate key value violates unique constraint "room_ops_pkey": seq ${taken}`);
       this.stored.push(...ops.map((op) => JSON.parse(op) as Op));
       return () => {
         for (const [i, seq] of seqs.entries()) {
-          assert.ok(!this.rows.some((r) => r.seq === seq), `room_ops ${seq} is written once`);
           this.rows.push({ seq, at: ats[i]!, actorMemberId: members[i]!, actorRole: roles[i] as "dm" | "player", op: JSON.parse(ops[i]!), opVersion: version, pub: pubs[i] ?? null });
         }
         this.durableMax = Math.max(this.durableMax, ...seqs);

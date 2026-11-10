@@ -4,6 +4,7 @@ import { uuidv7 } from "#shared/ids.ts";
 import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, OP_VERSION, SNAPSHOT_VERSION, runMigrations, snapshotMigrations } from "#shared/migrate.ts";
 import type { Member, RoomState } from "#shared/model.ts";
 import type { ServerMessage } from "#shared/protocol.ts";
+import { seqTwins } from "#shared/seqTestutil.ts";
 import { stateThrough } from "../http/receipts.ts";
 import type { ActorDeps } from "./actor.ts";
 import { Connection } from "./connection.ts";
@@ -11,7 +12,7 @@ import { captureView } from "./logHistory.ts";
 import { ScanBusyError } from "./logScanBudget.ts";
 import { loadRoom, snapshotJson } from "./persistence.ts";
 import { memoryGrowth } from "./remember.ts";
-import { restartStored, scopeFixture, storedActor, StoredRoomDb, until, type StoredRow } from "./undoScopeTesting.ts";
+import { restartStored, ScopeClient, scopeFixture, storedActor, StoredRoomDb, until, type StoredRow } from "./undoScopeTesting.ts";
 
 /**
  * The snapshot a room saved before the room count writes again here
@@ -319,6 +320,29 @@ describe("reads in a room whose replay stopped", () => {
     assert.deepEqual(await load(new StoredRoomDb(lined, { seq: 5, rows: [newChat(7, 9, f.dm)], pub: 9 })), [4, 9], "a row that does not follow the snapshot");
     assert.deepEqual(await load(new StoredRoomDb(lined, { seq: 5, rows: [{ ...newChat(6, 9, f.dm), pub: null }], pub: 9 })), [4, 9], "a row without its number");
   });
+
+  for (const stop of ["at its first row", "at a gap after a row it replayed"] as const) {
+    test(`a refusal in a room whose replay stopped ${stop} answers at once and stores its count alone, though the room shows sight it never explored`, async (t) => {
+      // The twins' door room as loaded, before its first answer explores what its players see.
+      const state = seqTwins().door;
+      const dm = state.members.dm1!;
+      const rows = stop === "at its first row" ? [broken(newChat(1, 1, dm))] : [newChat(1, 1, dm), newChat(3, 3, dm)];
+      const db = new StoredRoomDb(state, { rows, pub: rows.at(-1)!.pub });
+      const logged: string[] = [];
+      const h = await storedActor(t, db, {}, { info() {}, warn() {}, debug() {}, error: (_o: unknown, msg?: string) => void logged.push(msg ?? "") });
+      assert.equal(h.actor.replayFailed, true);
+      const before = { rows: structuredClone(db.rows), snapshot: structuredClone(db.snapshot), pub: h.actor.committed.pub, through: h.actor.committed.through };
+      const p1 = await ScopeClient.open(h.actor, state.members.p1!, "player");
+      const refused = await p1.send({ t: "log.chat", text: "read only" });
+      assert.equal(refused.rejects?.length, 1, "the refusal answers");
+      await until(() => (db.pub === before.pub + 1 ? true : undefined), "the refusal's count stored");
+      assert.equal(h.actor.retrying, false);
+      assert.deepEqual(db.rows, before.rows, "no row of the room's own joins the stored tail");
+      assert.deepEqual([db.snapshot, db.snapshotWrites], [before.snapshot, 0], "the snapshot stays as it was");
+      assert.deepEqual([h.actor.committed.pub, h.actor.committed.through], [before.pub + 1, before.through], "the count moves and the reads stay where the replay stopped");
+      assert.deepEqual(logged.filter((m) => m.includes("skipped")), [], "no explore or map step was tried");
+    });
+  }
 
   test("a whole replay reads up to the count", async () => {
     const f = scopeFixture();
