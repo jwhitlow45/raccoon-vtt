@@ -5,11 +5,13 @@ import type { RoomState, SceneId, Token } from "#shared/model.ts";
 import type { EphEvent } from "#shared/protocol.ts";
 import { chunkKey } from "#shared/keys.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
-import { actor, character, reveal, token } from "#shared/testutil.ts";
+import { projectState } from "#shared/project.ts";
+import { standsOn } from "#shared/rules/floorLinks.ts";
+import { actor, character, DM, P1, reveal } from "#shared/testutil.ts";
 import { RoomScope } from "../../state/scope.ts";
 import type { ToolContext } from "../tools.ts";
 import { CARRIED_NO_KEEP, CARRIED_TOO_LONG, CARRIED_WALKS } from "../floors/linkWords.ts";
-import { climbFeet, frameFits, priorOut, rulerAnchors, rulerFrame, shareLocked, stairsPlan, stillCarried, type Carry, type Stairs } from "./carry.ts";
+import { climbFeet, frameFits, priorOut, rulerAnchors, rulerFrame, shareLocked, stairsOffer, stairsPlan, stillCarried, type Carry, type Stairs } from "./carry.ts";
 import { tokenStop, type RulerState, type RulerStop } from "./ruler.ts";
 import { pickMeasure, publish, refuseKeep, rulerActivated, rulerDeactivated, rulerSlot, takeStairs } from "./rulerStore.ts";
 import { measureWalk, walkText, type WalkInput } from "./walkRuler.ts";
@@ -99,6 +101,12 @@ describe("the stairs button's offer (4.1)", () => {
     const large = stairsRoom({ thorn: { size: "large", x: 2, y: 2 } });
     // Its middle on the stairs' middle: unsqueezed it would hang over them.
     assert.equal(plan(large, [thornStop(large), free(8, 3)], DM_OWN), null);
+    // Standing over them unsqueezed in a stairwell, where Go up would ask it to squeeze first (standsOn "squeeze", D-261110-184).
+    const well = stairsRoom({ thorn: { size: "large", x: 7.5, y: 2.5 } });
+    const walls = Object.fromEntries(["8,2,w", "8,3,w", "8,4,w", "9,2,w", "9,3,w", "9,4,w"].map((k) => [k, { kind: "wall" as const }]));
+    const over: RoomState = { ...well, scenes: { ...well.scenes, [GROUND]: { ...well.scenes[GROUND]!, blockMovement: true, autoWalls: "off" } }, buildChunks: { ...well.buildChunks, [chunkKey(GROUND, 0, 0)]: { sceneId: GROUND, cx: 0, cy: 0, rev: 1, cells: {}, edges: walls } } };
+    assert.equal(standsOn(over, DM, over.tokens.thorn!, over.floorLinks!.l1!), "squeeze");
+    assert.equal(plan(over, [thornStop(over)], DM_OWN), null);
     const squeezed = stairsRoom({ thorn: { size: "large", x: 7.5, y: 2.5, squeeze: true } });
     const stairs = plan(squeezed, [thornStop(squeezed)], DM_OWN)!;
     assert.deepEqual(stairs.plan.carry.prior.walker, { size: "large", squeeze: true });
@@ -137,6 +145,19 @@ describe("the climb's price (4.1, D-261110-082)", () => {
     const ft = (s: RoomState, who: { role: "dm" | "player"; share: boolean }) => plan(s, [thornStop(s)], who)?.plan.carry.prior.ft;
     assert.equal(ft(stairs, DM_OWN), 10);
     assert.deepEqual([ft(ladder, DM_OWN), ft(ladder, DM_SHARED), ft(ladder, PLAYER)], [10, 20, 20]);
+  });
+
+  test("a player's copy prices the climb by the end's `rise`, as the DM's prices it by the floors' heights", () => {
+    const base = stairsRoom({ thorn: { x: 8, y: 3 } });
+    const tall = { ...base, scenes: { ...base.scenes, [UPPER]: { ...base.scenes[UPPER]!, floor: { ...base.scenes[UPPER]!.floor!, height: 30 } } }, openFloors: { [UPPER]: { sceneId: UPPER, rev: 1 } } };
+    const ana = projectState(tall, P1, { sceneId: GROUND }) as unknown as RoomState;
+    assert.equal(ana.floorLinks?.l1 && "rise" in ana.floorLinks.l1 ? ana.floorLinks.l1.rise : undefined, 30, "her end carries the climb's height");
+    assert.equal(ana.scenes[UPPER]?.floor && "height" in ana.scenes[UPPER].floor ? ana.scenes[UPPER].floor.height : undefined, undefined, "and her floors none");
+    const stops = [tokenStop(SQUARES, ana.tokens.thorn!)];
+    const walkInput = walkOf(ana, GROUND, stops, PLAYER);
+    const stairs = stairsPlan({ role: "player", share: false, rulerId: "r1", walkInput, walked: null, carried: null, held: [GROUND, UPPER], whole: ana });
+    assert.equal(stairs?.plan.carry.prior.ft, 30);
+    assert.equal(plan(tall, [thornStop(tall)], DM_SHARED)?.plan.carry.prior.ft, 30, "the same on the DM's");
   });
 
   test("crawling never counts: a Prone walker climbs stairs at their height", () => {
@@ -289,12 +310,23 @@ describe("a press, the switch and the edges (4.2, D-261110-078)", () => {
     assert.equal(tool.store.getState().carry?.shared, false);
   });
 
-  test("any other switch of floors drops the carry with the ruler, as `[` or `]` does", () => {
-    const { ctx, tool, state } = carryUp(stairsRoom());
+  test("any other switch of floors drops the carry with the ruler, as `[` or `]` does, and ends it", () => {
+    const { ctx, tool, state, sent } = carryUp(stairsRoom(), DM_SHARED);
     state.sceneId = GROUND;
-    rulerDeactivated(ctx);
+    assert.equal(rulerDeactivated(ctx), false);
     rulerActivated(ctx);
     assert.deepEqual([tool.store.getState().ruler, tool.store.getState().carry], [null, null]);
+    assert.deepEqual(sent[sent.length - 1], { e: { k: "rulerEnd", id: "r1" }, localOnly: false });
+  });
+
+  test("a ruler that has crossed eight ends, or would name more than 50 creatures, is offered no more stairs", () => {
+    const s = stairsRoom({ thorn: { x: 8, y: 3 } });
+    const end = { walker: s.tokens.thorn!, counter: { h: 0, v: 0 }, ft: 0 };
+    const carry = (ends: number): Carry => ({ prior: { ft: 0, diag: { h: 0, v: 0 }, walker: { size: "medium" }, anchors: [], ends: Array.from({ length: ends }, (_, i) => `e${i}`) }, floor: GROUND, shared: true, tokenId: null, landing: free(8, 3) });
+    const offer = (c: Carry | null, anchors: number) => stairsOffer({ view: s, held: ALL, end, shared: false, role: "dm", carry: c, anchors: Array.from({ length: anchors }, (_, i) => `t${i}`) });
+    assert.notEqual(offer(carry(7), 50), null);
+    assert.equal(offer(carry(8), 1), null, "eight ends crossed");
+    assert.equal(offer(null, 51), null, "51 creatures");
   });
 
   test("up and down the stairs again and again: eight crossings, then no button", () => {
