@@ -11560,8 +11560,81 @@ export function fu52Tests(): void {
   });
 }
 
+/**
+ * The creature numbers' token panel headers on the DM's page: two Goblins
+ * the party has not seen, whose names read "Goblin (n)" and "Goblin (n+1)"
+ * with their initials outlined and the help line under the name, and an
+ * Orc shown to players as a Goblin, which reads "Orc (as Goblin (n+2))".
+ * All three are hidden from players, so the party meets none of them. The
+ * scene's other Goblins the party has not seen take the brackets before
+ * them, so n is what the DM's board gives (dmName).
+ */
+const NUMC1_CREATURES = [
+  { id: randomUUID(), name: "Goblin", at: { x: 17, y: 11 }, shape: /^Goblin \((\d+)\)$/ },
+  { id: randomUUID(), name: "Goblin", at: { x: 18, y: 11 }, shape: /^Goblin \((\d+)\)$/ },
+  { id: randomUUID(), name: "Orc", publicName: "Goblin", at: { x: 18, y: 12 }, shape: /^Orc \(as Goblin \((\d+)\)\)$/ },
+] as const;
+
+function creatureNumberTests(): void {
+  test(`numc1-a. the token panel's header for a creature the party has not seen and for a disguise, on the DM's page, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+    const lines: string[] = [];
+    await freshDm();
+    // Ids in order, so the brackets count the Goblins first and the disguise last, as the board ranks them.
+    const ids = NUMC1_CREATURES.map(() => uuidv7()).sort();
+    for (const [i, c] of NUMC1_CREATURES.entries()) {
+      const hidden = "publicName" in c ? { nameHidden: true, publicName: c.publicName } : {};
+      await ops.send({ t: "token.create", token: { id: ids[i]!, sceneId: run.sceneId, kind: "monster", name: c.name, ...hidden, size: "medium", ...c.at, visibility: "dm", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
+    }
+    try {
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(`numc1-${atName(at)}`);
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, at.size, at.scale);
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        await dmOnScene(page, run.sceneId);
+        await waitFor("the creatures in the DM's snapshot", () => (ids.every((id) => dmSocket.state?.tokens[id]) ? true : null));
+        const creatures = NUMC1_CREATURES.map((c, i) => ({ ...c, reads: dmName(ids[i]!) }));
+        // Bracketed, and one after another in id order, as the meeting would number them.
+        const first = Number(creatures[0]!.shape.exec(creatures[0]!.reads)?.[1]);
+        for (const [i, c] of creatures.entries()) if (Number(c.shape.exec(c.reads)?.[1]) !== first + i) lines.push(`${sweep.at} numc1-header-${i}: the DM's board reads "${c.reads}"`);
+        for (const [i, c] of creatures.entries()) {
+          await closeSheets(page);
+          await escapeAll(page);
+          await page.getByRole("button", { name: "Fit the map to the screen", exact: true }).click();
+          await tapCell(page, BOUNDS, c.at);
+          const bar = page.getByRole("dialog", { name: new RegExp(`^${c.name}\\b.* actions$`) });
+          if (!(await showsWithin(bar, 3_000))) {
+            await sweep.missing(page, `numc1-header-${i}`, `a tap on ${c.reads} opened no bar`);
+            continue;
+          }
+          if (!(await visible(bar.getByRole("button", { name: "Details", exact: true })))) await expandBar(bar);
+          await (await barControl(bar, "Details")).click();
+          const panel = page.getByRole("tabpanel", { name: sideTabName("Token") }).or(page.getByRole("region", { name: "Token", exact: true }));
+          const header = panel.locator("[data-creature-header]").first();
+          await header.waitFor();
+          const name = (await header.locator("h3 [aria-hidden]").first().textContent()) ?? "";
+          if (name !== c.reads) lines.push(`${sweep.at} numc1-header-${i}: the name reads "${name}", not "${c.reads}"`);
+          if ((await header.locator("[data-name-help]").count()) !== 1) lines.push(`${sweep.at} numc1-header-${i}: no help line under the name`);
+          // The picture's initials outlined, in the box filled ones take.
+          const stroke = await header.locator("[data-initials]").first().evaluate((el) => (globalThis as unknown as { getComputedStyle(e: unknown): { webkitTextStrokeWidth: string } }).getComputedStyle(el).webkitTextStrokeWidth);
+          if (stroke !== "1px") lines.push(`${sweep.at} numc1-header-${i}: the initials are not outlined (${stroke})`);
+          await sweep.measure(page, `numc1-header-${i}`, header);
+        }
+        await closeSheets(page);
+        await escapeAll(page);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      for (const id of ids) await ops.send({ t: "token.delete", tokenId: id }).catch(() => {});
+    }
+    assert.deepEqual(lines, [], "the creature numbers' headers out of line");
+  });
+}
+
 export function qolPanelTests(): void {
   fu52Tests();
+  creatureNumberTests();
   test(`qe-f. the audit's surfaces on the DM's page in a fight on a Goblin Warrior's turn: its turn card's attacks with results and Apply to, the Dice panel's newest roll and Pat's damage toast with their chips, All of a kind, Conditions' Recent, the group bar's Save, its Recent DCs and its ask, Request a roll's Recent DCs, Handouts' Recent and the Tab row, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
     await freshDm();
     await playersHome();
