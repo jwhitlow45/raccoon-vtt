@@ -1079,14 +1079,16 @@ export const NEAR_LINEAR_GROWTH = 20;
  * Asserts that `cpuMsAt(scale)`, the CPU time of the work at 1/scale of the
  * caps, grows near linearly from an eighth to the whole, and that the whole
  * stays under `backstopMs`, a cap no runner comes near. One eighth runs first
- * and is dropped, so every timed run finds the code warm. The eighth takes
- * the least of two runs, since noise only ever adds time, and runs before
- * the whole, so it never pays for collecting the whole's garbage.
+ * and is dropped, so every timed run finds the code warm. Each side takes
+ * the least of two runs, since noise only ever adds time: a runner's pause
+ * or a collection landing in the whole's one run read 24.9 times in CI
+ * where the work grows 8 (VIDEO-GROWTH-FLAKE). The eighth runs before the
+ * whole, so it never pays for collecting the whole's garbage.
  */
 export async function assertNearLinear(what: string, cpuMsAt: (scale: number) => Promise<number>, backstopMs: number): Promise<void> {
   await cpuMsAt(GROWTH_SCALE);
   const eighth = Math.min(await cpuMsAt(GROWTH_SCALE), await cpuMsAt(GROWTH_SCALE));
-  const whole = await cpuMsAt(1);
+  const whole = Math.min(await cpuMsAt(1), await cpuMsAt(1));
   const growth = whole / Math.max(eighth, 0.1);
   const read = `${what} took ${whole.toFixed(1)} ms of CPU at the caps and ${eighth.toFixed(1)} ms at an eighth`;
   // Logged on success too, so a creeping ratio shows in the run's output before it fails (CIFIX-F5).
