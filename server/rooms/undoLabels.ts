@@ -720,6 +720,15 @@ function placeOf(state: RoomState, sceneId: string): string | undefined {
   return name ? `${name} · ${quoted(scene.floor.name, "a floor")}` : undefined;
 }
 
+/**
+ * A wing's Setup step (docs/design: dungeon generator phase 3, 3.5), named
+ * for the wing and its scene as a made dungeon's step is named for its new
+ * scene, rather than for the wing's first op ("changing walls and doors").
+ */
+export function wingLabel(before: RoomState, sceneId: string): string {
+  return `adding a wing to ${the("scene", placeOf(before, sceneId))}`;
+}
+
 /** "the scene Cave", or "a scene" when it has no name to give. */
 function the(kind: string, name: string | undefined): string {
   const n = quoted(name, "");

@@ -65,7 +65,7 @@ import { forgetAllOps, forgetSceneOp, mapStepOps, memoryGrowth, type DoorTouch }
 import { meetOps } from "./meet.ts";
 import { growthBound, measuredFromStored, scenesOverByNumbering, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { climbOf, keptFrom, MOVED_SINCE, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
-import { describeHpEvent, describeOp, tallyOf } from "./undoLabels.ts";
+import { describeHpEvent, describeOp, tallyOf, wingLabel } from "./undoLabels.ts";
 import { undoScope } from "#shared/undoScope.ts";
 import type { HistoryDirection, HistoryMessage, HistoryScope, OpAcknowledgment, StackHistoryCommand } from "#shared/undoContract.ts";
 import { dmHistoryValues, dmPoseRestore } from "./undoDm.ts";
@@ -563,6 +563,13 @@ export class RoomActor {
    */
   #askRefused = new Map<ClientKey, string>();
   /**
+   * Each client's undo group whose asks carried a wing's clear and were
+   * answered, so the group's Setup step is named for the wing (undoLabels.ts
+   * wingLabel) rather than for its first op. Cleared by the client's next op
+   * of another group and when its socket goes, as #askRefused is.
+   */
+  #wingGroups = new Map<ClientKey, { group: string; sceneId: string }>();
+  /**
    * When each session's last fault refusals came, for the throttle (#faultsPastLimit). Keyed by session and not
    * by client key: a client picks its own client id, so a key that held it would give each fresh id a throttle
    * of its own, and a map that grows with them. Gone with the room's unload.
@@ -781,6 +788,7 @@ export class RoomActor {
       // A gesture's asks die with the socket that sent them: the device asks again on its next one (MD4-ASTRA-6).
       this.#asking.delete(key);
       this.#askRefused.delete(key);
+      this.#wingGroups.delete(key);
       const delayed = this.#delayed.get(key);
       if (delayed && delayed.conn === conn) {
         delayed.cancel();
@@ -1461,6 +1469,7 @@ export class RoomActor {
     const sameGroup = !trackedOutcome && cmd.group !== undefined && priorGroup?.group === cmd.group;
     const declaredSetup = !trackedOutcome && (cmd.groupScope === "setup" || (sameGroup && priorGroup.declared));
     this.#endAsks(key, cmd.group);
+    if (this.#wingGroups.get(key)?.group !== cmd.group) this.#wingGroups.delete(key);
     // The rest of a gesture the DM was asked about goes unmade with it, unless sent with the yes (5.3).
     const refusedGroup = this.#askRefused.get(key);
     if (refusedGroup !== undefined) {
@@ -1773,7 +1782,9 @@ export class RoomActor {
       const rides = poses ? ridesChanged(before, this.#staged.state) : undefined;
       // A climb's step names the stairs it took, read here off the room before it, never from the device (undo.ts UndoEntry.climb).
       const climb = climbOf(before, op);
-      recording = this.#undo.push(viewer.memberId, inverse, describeOp(clientOp, before, viewer, this.#staged.state), trackedOutcome ? undefined : cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport, walk, rides, reduced.trapped === true, { scope: viewer.role === "dm" ? actionScope : "play", declared: declaredSetup, ...(op.t === "actor.outcome" && op.page ? { saveOutcome: { id: op.page.id, plan: op.plan } } : {}), ...(viewer.role === "dm" ? { values: dmHistoryValues(inverse, this.#staged.state, actionScope === "play") } : {}), ...(climb ? { climb } : {}) });
+      const wing = this.#wingGroups.get(key);
+      const label = wing !== undefined && wing.group === cmd.group ? wingLabel(before, wing.sceneId) : describeOp(clientOp, before, viewer, this.#staged.state);
+      recording = this.#undo.push(viewer.memberId, inverse, label, trackedOutcome ? undefined : cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport, walk, rides, reduced.trapped === true, { scope: viewer.role === "dm" ? actionScope : "play", declared: declaredSetup, ...(op.t === "actor.outcome" && op.page ? { saveOutcome: { id: op.page.id, plan: op.plan } } : {}), ...(viewer.role === "dm" ? { values: dmHistoryValues(inverse, this.#staged.state, actionScope === "play") } : {}), ...(climb ? { climb } : {}) });
     }
     if (conn.ackDetails) push(batch.ackDetails, key, { n, scope: actionScope, changed: reduced.changed, recorded: recording === "recorded", ...(recording === "too-large" ? { tooLarge: true as const } : {}) });
     this.#scheduleCommit();
@@ -2054,6 +2065,8 @@ export class RoomActor {
       this.#refuse(key, wm, n, "invalid", read.refused);
       return;
     }
+    // Taken or asked about, the wing's ops come next in this group, the yes or not.
+    if (op.clear && this.#clients.has(key)) this.#wingGroups.set(key, { group, sceneId: op.sceneId });
     if (op.more) {
       if (this.#clients.has(key)) this.#asking.set(key, { ...chain, next: op.part + 1, at: this.#opts.now() });
     } else if (chain.over) {

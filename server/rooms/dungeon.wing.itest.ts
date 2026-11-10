@@ -157,7 +157,10 @@ describe("a wing on the server", () => {
     const chunk = Object.values(after.buildChunks).find((c) => c.sceneId === tb.sceneId && c.edges[join]);
     assert.equal(chunk?.edges[join]?.kind, "door", "the join's automatic wall became a door");
     assert.equal(Object.values(after.journal).filter((p) => p.title.endsWith("wing key")).length, 1);
-    assert.equal((await tb.dmSocket.step("undo", "setup")).rejects, undefined);
+    const undone = await tb.dmSocket.step("undo", "setup");
+    assert.equal(undone.rejects, undefined);
+    // Named for the wing, as a made dungeon's step is named for its scene, not for its first op (LP37 polish).
+    assert.deepEqual(undone.restored?.map((x) => x.what), [`adding a wing to the scene ${after.scenes[tb.sceneId]!.name}`]);
     assert.equal(wingPart(t.manager.get(tb.roomId)!.committed.state, tb.sceneId), wingPart(before, tb.sceneId), "one Undo setup takes the wing back");
     const { rows } = await t.pool.query<{ op: { t: string } }>("select op from room_ops where room_id = $1", [tb.roomId]);
     assert.ok(rows.length > ops.length, "the wing's ops are stored");
@@ -246,7 +249,9 @@ describe("a wing on the server", () => {
     }
     assert.ok(after.length > before.length + 20, `the wing's walls stored: ${before.length} then ${after.length}`);
     assert.equal(Object.values(stored().journal).filter((p) => p.title.endsWith("wing key")).length, 1);
-    assert.equal((await socket.step("undo", "setup")).rejects, undefined);
+    const undone = await socket.step("undo", "setup");
+    assert.equal(undone.rejects, undefined);
+    assert.deepEqual(undone.restored?.map((x) => x.what), [`adding a wing to the scene ${stored().scenes[sceneId]!.name}`]);
     assert.deepEqual(walls(stored()).map((w) => w.id).sort(), before.map((w) => w.id).sort(), "one Undo setup takes the wing back");
     socket.close();
   });
