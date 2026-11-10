@@ -236,6 +236,10 @@ describe("the words (6.3, 7.3, 8)", () => {
     // A co-DM's wall through the old squares on the floor that stayed is what blocks them.
     assert.equal(restoredLinkWords(run(removed.state, edge(GROUND, "4,3,w")), entries), "A wall crosses those squares on Ground floor.");
     assert.equal(restoredLinkWords(run(removed.state, raise(GROUND, ["3,3", "4,3"], 5)), entries), "That would change the ground under the stairs to Upper floor.");
+    // Ground the floor brings back with it is the ground its stairs stood on.
+    const high = applied(withStairs(run(tower(), raise(UPPER, ["3,3", "4,3"], 5))), { t: "scene.delete", sceneId: UPPER });
+    assert.equal(high.inverse!.find((e) => e.key === "floorLink:l2")!.value && (high.inverse!.find((e) => e.key === "floorLink:l2")!.value as FloorLink).ground, 5);
+    assert.equal(restoredLinkWords(high.state, high.inverse!), null, "the raised landing comes back under them");
     // At the scene's cap the pair does not count itself.
     let full = removed.state;
     for (let k = 0; k < LIMITS.floorLinksPerScene - 1; k++) full = run(full, { t: "floorLink.put", link: { id: `f${k}a`, pairId: `f${k}b`, sceneId: GROUND, to: ATTIC, rect: { x: k % 10, y: 12 + Math.floor(k / 10), w: 1, h: 1 }, kind: "ladder" } });
