@@ -52,7 +52,7 @@ function table(vision: boolean): RoomState {
 describe("the union the DM's tools read (decision 14)", () => {
   test("with fog alone, a label and a creature on ground only one holder remembers reach players, and the rest stay under fog", () => {
     const view = dmView(table(false));
-    const rows = new Map(outlineRows(view, "s1").map((r) => [r.key, r.mark]));
+    const rows = new Map(outlineRows(view, "s1", new Map()).map((r) => [r.key, r.mark]));
     assert.equal(rows.get("label:east"), null, "p1 gets it");
     assert.equal(rows.get("label:far"), "Under fog");
     assert.equal(rows.get("token:gob"), null);
@@ -60,7 +60,7 @@ describe("the union the DM's tools read (decision 14)", () => {
     view.tokens.scout = token("scout", { name: "Scout", x: 0, y: 6 });
     assert.equal(withheldFromEveryPlayer(view, view.tokens.scout), false, "the party's own ground stays in the union");
     delete view.tokens.scout;
-    assert.deepEqual(addCandidates(view, "s1", "visible", null).map((t) => t.id), ["gob"]);
+    assert.deepEqual(addCandidates(view, "s1", "visible", null, new Map()).map((t) => t.id), ["gob"]);
     assert.equal(withheldFromEveryPlayer(view, view.tokens.gob!), false);
     assert.equal(withheldFromEveryPlayer(view, view.tokens.boss!), true);
     assert.equal(projectState(table(false), P3, { sceneId: "s1" }).labels.east, undefined, "a player who is no holder does not get the label");
@@ -72,10 +72,10 @@ describe("the union the DM's tools read (decision 14)", () => {
     s.tokens.thorn = token("thorn", { kind: "pc", name: "Thorn", ownerIds: ["p1"], x: 19, y: 20 });
     const view = dmView(s);
     assert.ok(Object.keys((view as RoomState & { sight?: object }).sight ?? {}).length > 0, "the DM holds the union's sight");
-    const rows = new Map(outlineRows(view, "s1").map((r) => [r.key, r.mark]));
+    const rows = new Map(outlineRows(view, "s1", new Map()).map((r) => [r.key, r.mark]));
     assert.equal(rows.get("token:boss"), null, "Thorn's player sees it");
     assert.equal(rows.get("token:gob"), "Out of the party's sight");
-    assert.deepEqual(addCandidates(view, "s1", "visible", null).map((t) => t.id), ["boss", "thorn"], "Thorn's own creature too, never the goblin");
+    assert.deepEqual(addCandidates(view, "s1", "visible", null, new Map()).map((t) => t.id), ["boss", "thorn"], "Thorn's own creature too, never the goblin");
   });
 
   test("a whole-party view is the DM's own", () => {

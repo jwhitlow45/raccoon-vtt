@@ -58,16 +58,16 @@ describe("the floors' own words", () => {
     assert.equal(floorStatus(elsewhere, UPPER), "Not reached yet", "on a scene the players are not on, a party member there is no player there");
     assert.equal(floorStatus(elsewhere, TOWER), "Not reached yet");
     const dm = { memberId: "dm1", role: "dm" as const };
-    assert.deepEqual(floorMarks(state, state.scenes[TOWER]!, dm, null), ["Players here", "Br Th"]);
-    assert.deepEqual(floorMarks(state, state.scenes[UPPER]!, dm, null), ["Not reached yet"]);
+    assert.deepEqual(floorMarks(state, state.scenes[TOWER]!, dm, null, new Map()), ["Players here", "Br Th"]);
+    assert.deepEqual(floorMarks(state, state.scenes[UPPER]!, dm, null, new Map()), ["Not reached yet"]);
   });
 
   test("a player's row: You are here on their creature's floor, and the party's creatures there they see", () => {
     const state = tower({ openFloors: { [UPPER]: { sceneId: UPPER, rev: 0 } } });
     const copy = playerCopy(state, [TOWER, UPPER]);
     const p1 = { memberId: "p1", role: "player" as const };
-    assert.deepEqual(floorMarks(copy, copy.scenes[TOWER]!, p1, TOWER), ["You are here", "Bree, Thorn"]);
-    assert.deepEqual(floorMarks(copy, copy.scenes[UPPER]!, p1, TOWER), []);
+    assert.deepEqual(floorMarks(copy, copy.scenes[TOWER]!, p1, TOWER, new Map()), ["You are here", "Bree, Thorn"]);
+    assert.deepEqual(floorMarks(copy, copy.scenes[UPPER]!, p1, TOWER, new Map()), []);
   });
 
   test("a player's row names another player's companion by the projected party mark", () => {
@@ -77,6 +77,6 @@ describe("the floors' own words", () => {
     copy.tokens["wolf"] = token("wolf", { sceneId: TOWER, kind: "npc", name: "Wolf companion", disposition: "ally", party: true } as never);
     copy.tokens["goblin"] = token("goblin", { sceneId: TOWER, kind: "npc", name: "Goblin", disposition: "hostile" });
     const p1 = { memberId: "p1", role: "player" as const };
-    assert.deepEqual(floorMarks(copy, copy.scenes[TOWER]!, p1, TOWER), ["You are here", "Bree, Thorn, Wolf companion"]);
+    assert.deepEqual(floorMarks(copy, copy.scenes[TOWER]!, p1, TOWER, new Map()), ["You are here", "Bree, Thorn, Wolf companion"]);
   });
 });

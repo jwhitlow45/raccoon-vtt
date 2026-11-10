@@ -38,7 +38,7 @@ describe("the scene outliner's rows", () => {
       },
     });
     reveal(state, "s1", { x: 0, y: 0, w: 10, h: 10 });
-    const r = byKey(outlineRows(state, "s1"));
+    const r = byKey(outlineRows(state, "s1", new Map()));
     assert.equal(r.get("trap:other"), undefined);
     assert.deepEqual([r.get("trap:pit")?.detail, r.get("trap:pit")?.mark, r.get("trap:pit")?.group], ["Armed", "Hidden", "traps"]);
     assert.deepEqual([r.get("trap:net")?.detail, r.get("trap:net")?.mark], ["Sprung", "Found"]);
@@ -75,7 +75,7 @@ describe("the scene outliner's rows", () => {
     });
     state.meta.settings.playersSeeAoeOfOthers = false;
     reveal(state, "s1", { x: 0, y: 0, w: 10, h: 10 });
-    const rows = outlineRows(state, "s1");
+    const rows = outlineRows(state, "s1", new Map());
     const r = byKey(rows);
     assert.equal(r.get("token:other"), undefined, "only the scene in view");
     assert.equal(r.get("token:seen")?.name, "Goblin 1");
@@ -120,13 +120,13 @@ describe("the scene outliner's rows", () => {
     state.tokens.bt = token("bt", { kind: "pc", actor: { ref: "bree" }, sceneId: "s1" });
     state.tokens.ws = token("ws", { kind: "npc", name: "Wildfire Spirit", sceneId: "s1", ownerIds: ["p1"], companion: { of: "bree", turn: "shared" } });
     state.tokens.left = token("left", { kind: "npc", name: "Owl", sceneId: "s2", ownerIds: ["p1"], companion: { of: "bree", turn: "own" } });
-    const here = byKey(outlineRows(state, "s1")).get("token:ws")!;
+    const here = byKey(outlineRows(state, "s1", new Map())).get("token:ws")!;
     assert.equal(here.detail, "Companion of Bree");
     assert.equal(here.mark, null);
-    const away = byKey(outlineRows(state, "s2")).get("token:left")!;
+    const away = byKey(outlineRows(state, "s2", new Map())).get("token:left")!;
     assert.equal(away.detail, "Companion of Bree");
     assert.equal(away.mark, "Away from Bree");
-    assert.deepEqual(filterRows(outlineRows(state, "s1"), "companion", null).map((r) => r.id), ["ws"]);
+    assert.deepEqual(filterRows(outlineRows(state, "s1", new Map()), "companion", null).map((r) => r.id), ["ws"]);
   });
 
   test("a mark agrees with what a player is sent, token by token", () => {
@@ -134,7 +134,7 @@ describe("the scene outliner's rows", () => {
     for (let i = 0; i < 30; i++) state.tokens[`t${i}`] = token(`t${i}`, { x: (i * 7) % 38, y: (i * 5) % 28, visibility: i % 7 === 0 ? "dm" : "all" });
     reveal(state, "s1", { x: 5, y: 5, w: 12, h: 9 });
     const sent = projectState(state, { memberId: "p2", role: "player" }, { sceneId: null }).tokens;
-    for (const row of outlineRows(state, "s1").filter((x) => x.kind === "token")) {
+    for (const row of outlineRows(state, "s1", new Map()).filter((x) => x.kind === "token")) {
       assert.equal(row.mark === null, sent[row.id] !== undefined, row.id);
     }
   });
@@ -142,14 +142,14 @@ describe("the scene outliner's rows", () => {
   test("a scene not shown to players reads as it will once they are moved to it", () => {
     const state = room({ scenes: { s1: scene("s1"), s2: scene("s2", { fogEnabled: true }) }, tokens: { t: token("t", { sceneId: "s2", x: 30, y: 20 }) } });
     reveal(state, "s2", { x: 0, y: 0, w: 4, h: 4 });
-    assert.equal(outlineRows(state, "s2")[0]?.mark, "Under fog");
+    assert.equal(outlineRows(state, "s2", new Map())[0]?.mark, "Under fog");
     state.meta.view = { follow: false, blackout: true };
-    assert.equal(outlineRows(state, "s2")[0]?.mark, "Under fog", "a blackout is not what the scene holds");
+    assert.equal(outlineRows(state, "s2", new Map())[0]?.mark, "Under fog", "a blackout is not what the scene holds");
   });
 
   test("on a party vision scene a creature outside the party's sight says so", () => {
     const state = room({ scenes: { s1: scene("s1", { vision: { on: true, light: "dark" } }), s2: scene("s2") }, tokens: { m: token("m", { x: 30, y: 20 }) } });
-    assert.equal(outlineRows(state, "s1")[0]?.mark, "Out of the party's sight");
+    assert.equal(outlineRows(state, "s1", new Map())[0]?.mark, "Out of the party's sight");
   });
 
   test("a pin answers for its page: DM only, one player's, or anyone's under the fog rule", () => {
@@ -163,7 +163,7 @@ describe("the scene outliner's rows", () => {
       pins: { p1: pin("p1", { pageId: "all" }), p2: pin("p2", { pageId: "dm" }), p3: pin("p3", { pageId: "thorn" }), p4: pin("p4", { visibility: "dm" }), p5: pin("p5", { x: 30.5, y: 20.5, pageId: "thorn" }) },
     });
     reveal(state, "s1", { x: 0, y: 0, w: 10, h: 10 });
-    const r = byKey(outlineRows(state, "s1"));
+    const r = byKey(outlineRows(state, "s1", new Map()));
     assert.equal(r.get("pin:p1")?.mark, null);
     assert.equal(r.get("pin:p1")?.name, "Old map", "a pin with no label shows its page's title");
     assert.equal(r.get("pin:p2")?.mark, "DM only");
@@ -177,7 +177,7 @@ describe("the scene outliner's rows", () => {
       tokens: { a: token("a", { name: "Goblin" }), b: token("b", { name: "Goblin boss" }), c: token("c", { name: "Owlbear" }) },
       drawings: { d: drawing("d", { kind: "text", text: "Goblin camp" }) },
     });
-    const rows = outlineRows(state, "s1");
+    const rows = outlineRows(state, "s1", new Map());
     assert.deepEqual(filterRows(rows, "gob", null).map((r) => r.id), ["a", "b", "d"]);
     assert.deepEqual(filterRows(rows, "GOBLIN boss", null).map((r) => r.id), ["b"]);
     assert.deepEqual(filterRows(rows, "goblin", "drawings").map((r) => r.id), ["d"]);
@@ -187,7 +187,7 @@ describe("the scene outliner's rows", () => {
 
   test("groups fold to their header, with their count", () => {
     const state = room({ tokens: { a: token("a"), b: token("b") }, drawings: { d: drawing("d") } });
-    const rows = outlineRows(state, "s1");
+    const rows = outlineRows(state, "s1", new Map());
     const open = listItems(rows, new Set());
     assert.deepEqual(open.map((i) => (i.kind === "header" ? `${i.title} (${i.count})` : i.row.id)), ["Creatures and objects (2)", "a", "b", "Drawings (1)", "d"]);
     const folded = listItems(rows, new Set(["tokens"]));
@@ -196,7 +196,7 @@ describe("the scene outliner's rows", () => {
 
   test("a tap frames the item's rectangle with room around it", () => {
     const state = room({ tokens: { big: token("big", { x: 10, y: 10, size: "large" }) }, lights: { li: light("li") } });
-    const r = byKey(outlineRows(state, "s1"));
+    const r = byKey(outlineRows(state, "s1", new Map()));
     assert.deepEqual(r.get("token:big")?.rect, { x: 10, y: 10, width: 2, height: 2 });
     assert.deepEqual(frameRect({ x: 10, y: 10, width: 2, height: 2 }), { x: 7, y: 7, width: 8, height: 8 });
     // A point grows to a few cells, so a light is framed with what is around it.

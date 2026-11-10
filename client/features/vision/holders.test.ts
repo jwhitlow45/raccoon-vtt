@@ -87,27 +87,27 @@ describe("a mount not every player sees (7.1, risk 2)", () => {
   }
 
   test("a rider every player sees on a controlled mount the shared sight misses is named, with what keeps the turn", () => {
-    assert.deepEqual(unsharedMounts(riding(), "s1"), ["Thorn rides Horse, which not every player sees, so they share no turn. Make Horse always visible to keep it."]);
+    assert.deepEqual(unsharedMounts(riding(), "s1", new Map()), ["Thorn rides Horse, which not every player sees, so they share no turn. Make Horse always visible to keep it."]);
   });
 
   test("an always visible mount, one the DM hid, an independent ride and a whole-party scene say nothing", () => {
     const exempt = riding();
     exempt.tokens.horse = { ...exempt.tokens.horse!, fogExempt: true };
-    assert.deepEqual(unsharedMounts(exempt, "s1"), []);
+    assert.deepEqual(unsharedMounts(exempt, "s1", new Map()), []);
     const hidden = riding();
     hidden.tokens.horse = { ...hidden.tokens.horse!, visibility: "dm" };
-    assert.deepEqual(unsharedMounts(hidden, "s1"), []);
+    assert.deepEqual(unsharedMounts(hidden, "s1", new Map()), []);
     const free = riding();
     free.tokens.thorn = { ...free.tokens.thorn!, attached: { to: "horse", kind: "ride" } };
-    assert.deepEqual(unsharedMounts(free, "s1"), []);
+    assert.deepEqual(unsharedMounts(free, "s1", new Map()), []);
     // The note is a per-player scene's (7.1), so a whole-party scene says nothing even where no creature sees the horse.
     const whole = riding();
     whole.scenes.s1 = { ...whole.scenes.s1!, vision: { on: true, light: "dark" } };
     whole.tokens.thorn = { ...whole.tokens.thorn!, actor: { inline: actor({ effects: [effect("b", { key: "blinded" })] }) } };
-    assert.deepEqual(unsharedMounts(whole, "s1"), []);
+    assert.deepEqual(unsharedMounts(whole, "s1", new Map()), []);
     const lent = riding();
     lent.tokens.horse = { ...lent.tokens.horse!, partyVision: true };
-    assert.deepEqual(unsharedMounts(lent, "s1"), [], "a mount sharing sight is always shown");
+    assert.deepEqual(unsharedMounts(lent, "s1", new Map()), [], "a mount sharing sight is always shown");
   });
 });
 
@@ -131,6 +131,6 @@ describe("a mount not every player sees, on hexes", () => {
     s.tokens.thorn = { ...onHex(g, "thorn", "medium", at, { kind: "pc", name: "Thorn", ownerIds: ["ana"] }), attached: { to: "horse", kind: "ride", steer: true } };
     const view = projectState(s, DM, { sceneId: "s1" }) as unknown as RoomState;
     assert.equal(withheldWhereItStands(view, view.tokens.horse!), true, "the DM's view withholds it by the build's walls");
-    assert.deepEqual(unsharedMounts(view, "s1"), [], "every player sees it");
+    assert.deepEqual(unsharedMounts(view, "s1", new Map()), [], "every player sees it");
   });
 });

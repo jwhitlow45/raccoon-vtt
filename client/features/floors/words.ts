@@ -1,11 +1,13 @@
 import type { RoomState, Scene, Token } from "#shared/model.ts";
 import type { ProjectedToken } from "#shared/project.ts";
 import { displayName } from "../../lib/scene.ts";
-import { initials } from "../../lib/tokenView.ts";
+import { labelOf } from "../../lib/labels.ts";
+import { initialsOf } from "../../lib/tokenView.ts";
 import { FLOOR_MARKS, playersAt } from "../scenes/floorWords.ts";
 import { ownsToken } from "../tokens/access.ts";
 import { sameScene, unhiddenPartyMember } from "#shared/rules/floors.ts";
 import { ownEntry } from "#shared/records.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /*
  * The one helper every site that names the players' place uses
@@ -123,16 +125,16 @@ export function floorRowDetail(floor: string, scene: string): string {
 }
 
 /** The words under a floor's name, each a mark the row's name carries too. */
-export function floorMarks(view: RoomState, floor: Scene, you: { memberId: string; role: "dm" | "player" }, followed: string | null): string[] {
+export function floorMarks(view: RoomState, floor: Scene, you: { memberId: string; role: "dm" | "player" }, followed: string | null, labels: Labels): string[] {
   // By name, so a row reads the same however the tokens were made.
   const here = Object.values(view.tokens)
     .filter((t): t is Token => t !== undefined && t.sceneId === floor.id && t.kind !== "object")
-    .sort((a, b) => displayName(a).localeCompare(displayName(b)));
+    .sort((a, b) => displayName(a, labels).localeCompare(displayName(b, labels)));
   if (you.role === "dm") {
-    const party = here.filter((t) => unhiddenPartyMember(view, t)).map((t) => initials(displayName(t)));
+    const party = here.filter((t) => unhiddenPartyMember(view, t)).map((t) => initialsOf(labelOf(labels, t)).text);
     return [floorStatus(view, floor.id), ...(party.length > 0 ? [party.join(" ")] : [])];
   }
   // A player's copy holds only what they see, and the party's creatures are the player characters and what players own. Another player's token has no owners there, so the projected party mark stands in for them.
-  const party = here.filter((t) => t.kind === "pc" || (t as ProjectedToken).party === true || ownsToken(view, you.memberId, t)).map((t) => displayName(t));
+  const party = here.filter((t) => t.kind === "pc" || (t as ProjectedToken).party === true || ownsToken(view, you.memberId, t)).map((t) => displayName(t, labels));
   return [...(followed === floor.id ? [YOU_ARE_HERE] : []), ...(party.length > 0 ? [party.join(", ")] : [])];
 }

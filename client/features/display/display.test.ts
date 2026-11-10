@@ -128,10 +128,10 @@ describe("a tap on the display", () => {
   test("whose turn it is, when the display may see the creature that acts", () => {
     const state = room({ tokens: { g: token("g", { name: "Goblin", number: 2 }) } });
     const encounter = { round: 1, activeEntryId: "e1", entries: [entry("e1", { tokenId: "g" })], started: true } as unknown as NonNullable<typeof state.encounter>;
-    assert.equal(turnText({ encounter, tokens: state.tokens, characters: {} }), "Turn: Goblin 2");
-    assert.equal(turnText({ encounter: { ...encounter, activeEntryId: null }, tokens: state.tokens, characters: {} }), null);
-    assert.equal(turnText({ encounter: { ...encounter, activeEntryId: "hidden" }, tokens: state.tokens, characters: {} }), null, "a row the display does not hold names no one");
-    assert.equal(turnText({ encounter: null, tokens: {}, characters: {} }), null);
+    assert.equal(turnText({ labels: new Map(), encounter, tokens: state.tokens, characters: {} }), "Turn: Goblin 2");
+    assert.equal(turnText({ labels: new Map(), encounter: { ...encounter, activeEntryId: null }, tokens: state.tokens, characters: {} }), null);
+    assert.equal(turnText({ labels: new Map(), encounter: { ...encounter, activeEntryId: "hidden" }, tokens: state.tokens, characters: {} }), null, "a row the display does not hold names no one");
+    assert.equal(turnText({ labels: new Map(), encounter: null, tokens: {}, characters: {} }), null);
   });
 });
 

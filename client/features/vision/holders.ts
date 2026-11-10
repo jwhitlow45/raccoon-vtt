@@ -4,6 +4,7 @@ import { ownsToken, perPlayerScene, seenAllMarked, sightHolders, withheldWhereIt
 import { holderOf } from "#shared/rules/attach.ts";
 import { HOLDERS_FULL } from "#shared/reducer/map.ts";
 import { displayName } from "../../lib/scene.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * Who sees for themselves on a per-player scene, and what the Vision
@@ -93,7 +94,7 @@ export function lendsText(view: Pick<RoomState, "members" | "holders" | "charact
  * every player sees (project.ts seenAllMarked), since the DM's view holds
  * the build's walls where the shared class's copy may hold fewer.
  */
-export function unsharedMounts(view: RoomState, sceneId: string): string[] {
+export function unsharedMounts(view: RoomState, sceneId: string, labels: Labels): string[] {
   if (!perPlayerScene(view.scenes[sceneId])) return [];
   const marked = seenAllMarked(view.scenes[sceneId], "dm");
   const seenByAll = (t: Token) => (marked ? (t as Token & { seenAll?: true }).seenAll === true : !withheldWhereItStands(view, t));
@@ -103,8 +104,8 @@ export function unsharedMounts(view: RoomState, sceneId: string): string[] {
     const mount = view.tokens[rider.attached.to];
     if (!mount || holderOf(view.tokens, rider) !== mount || mount.visibility === "dm" || rider.visibility === "dm") continue;
     if (!seenByAll(rider) || seenByAll(mount)) continue;
-    const name = displayName(mount);
-    out.push({ key: `${displayName(rider)}\u0000${rider.id}`, text: `${displayName(rider)} rides ${name}, which not every player sees, so they share no turn. Make ${name} always visible to keep it.` });
+    const name = displayName(mount, labels);
+    out.push({ key: `${displayName(rider, labels)}\u0000${rider.id}`, text: `${displayName(rider, labels)} rides ${name}, which not every player sees, so they share no turn. Make ${name} always visible to keep it.` });
   }
   return out.sort((a, b) => a.key.localeCompare(b.key)).map((o) => o.text);
 }

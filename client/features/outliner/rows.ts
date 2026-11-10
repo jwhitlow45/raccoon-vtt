@@ -7,6 +7,7 @@ import { displayName, footprint } from "../../lib/scene.ts";
 import { shippedStamp } from "../builder/stamps/rules.ts";
 import { zoneBox } from "../traps/rules.ts";
 import { unionView } from "../vision/union.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * The scene outliner's rows (docs/design/design-v1-dm-tools.md 3.2), as pure
@@ -128,7 +129,7 @@ function companionOf(view: RoomState, t: Token, sceneId: string): { detail: stri
 }
 
 /** Every row for the scene, in group order, each group sorted by name. */
-export function outlineRows(view: RoomState, sceneId: string): OutlineRow[] {
+export function outlineRows(view: RoomState, sceneId: string, labels: Labels): OutlineRow[] {
   const scene = view.scenes[sceneId];
   if (!scene) return [];
   const forPlayers = asPlayersScene(unionView(view), sceneId);
@@ -153,7 +154,7 @@ export function outlineRows(view: RoomState, sceneId: string): OutlineRow[] {
       group: "tokens",
       kind: "token",
       id: t.id,
-      name: displayName(t),
+      name: displayName(t, labels),
       detail: companion?.detail ?? KIND_WORD[t.kind] ?? "",
       mark: companion?.away ?? tokenMark(t),
       rect: rectOf(t.x, t.y, t.x + fp.w, t.y + fp.h),

@@ -4,7 +4,8 @@ import { fitRect, type Camera, type Rect, type Size } from "../../lib/camera.ts"
 import { drawnHeights, isometric, K, TOP_DOWN, toView, toWorld, viewBox, type DrawnHeights, type Turn, type View, type ViewBox, type ViewPoint } from "../../lib/view.ts";
 import { fitTarget } from "../../lib/fitTarget.ts";
 import type { FogMask } from "../../lib/fogTiles.ts";
-import { footprint } from "../../lib/scene.ts";
+import type { Labels } from "../../lib/labels.ts";
+import { displayName, footprint } from "../../lib/scene.ts";
 import type { Ended } from "../../state/types.ts";
 
 /**
@@ -328,13 +329,13 @@ export function containRect(box: Size, size: Size): Rect {
 export const MENU_MS = 5_000;
 
 /** "Turn: Thorn": whose turn, when the room is in a fight and the display may see who acts. */
-export function turnText(input: { encounter: RoomState["encounter"]; tokens: RoomState["tokens"]; characters: RoomState["characters"] }): string | null {
+export function turnText(input: { encounter: RoomState["encounter"]; tokens: RoomState["tokens"]; characters: RoomState["characters"]; labels: Labels }): string | null {
   const e = input.encounter;
   if (!e || e.activeEntryId === null) return null;
   const row = e.entries.find((r) => r.id === e.activeEntryId);
   if (!row) return null;
   const token = row.tokenId !== undefined ? input.tokens[row.tokenId] : undefined;
-  const name = token ? (token.number === undefined ? token.name : `${token.name} ${token.number}`) : row.characterId !== undefined ? input.characters[row.characterId]?.name : row.label;
+  const name = token ? displayName(token, input.labels) : row.characterId !== undefined ? input.characters[row.characterId]?.name : row.label;
   return name ? `Turn: ${name}` : null;
 }
 

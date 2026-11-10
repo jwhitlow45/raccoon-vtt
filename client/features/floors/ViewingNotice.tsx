@@ -8,6 +8,7 @@ import { useIsDisplay, useRoomActions, useRoomView } from "../../state/view.ts";
 import { usePreview } from "../dm/previewContext.ts";
 import { floorRoot, FLOOR_ROOT_ATTR, FLOOR_ROOTS } from "./ids.ts";
 import { backLabel, viewingLine } from "./words.ts";
+import { useLabels } from "../../state/labels.ts";
 
 /**
  * The Viewing notice (docs/design/design-v1-floors.md 7.3, 7.9): while a
@@ -21,6 +22,7 @@ import { backLabel, viewingLine } from "./words.ts";
  * display follows the party, so neither has one.
  */
 export function ViewingNotice() {
+  const labels = useLabels();
   const role = useRoomView((s) => s.you?.role);
   const display = useIsDisplay();
   const preview = usePreview() !== null;
@@ -32,7 +34,7 @@ export function ViewingNotice() {
     const to = s.floorFollow;
     if (!to) return null;
     const token = to.tokenId ? s.view?.tokens[to.tokenId] : undefined;
-    if (token) return displayName(token);
+    if (token) return displayName(token, labels);
     return to.sceneId ? (s.view?.scenes[to.sceneId]?.floor?.name ?? null) : null;
   });
   if (role !== "player" || display || preview || !shown?.floor || !follow || follow.sceneId === shown.id || back === null) return null;

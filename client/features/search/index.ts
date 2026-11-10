@@ -19,6 +19,7 @@ import type { SearchAct, SearchEntry, SearchRoute } from "./entry.ts";
 import { indexed, MAX_ROWS, parseQuery, rank, type Indexed } from "./match.ts";
 import { recentEntries } from "./recent.ts";
 import { ROW_WORDS, TOKEN_KIND_WORD } from "./words.ts";
+import { labelsOf } from "../../state/labels.ts";
 
 /**
  * The room search's index for one viewer (docs/design/design-v1-qol.md 5, What keeps it current),
@@ -205,6 +206,7 @@ function fieldRoute(panel: string, place: FieldPlace, page?: string): SearchRout
 
 export function buildIndex(input: IndexInput): SearchIndex {
   const { state } = input;
+  const labels = labelsOf(state);
   const role = searchRole(state);
   const memberId = state.you?.memberId ?? null;
   const ctx: SearchContext = { role, memberId, state, wide: input.wide, ...(input.dmMenu ? { dmMenu: input.dmMenu } : null) };
@@ -267,7 +269,7 @@ export function buildIndex(input: IndexInput): SearchIndex {
   const selected = selectedId ? view.tokens[selectedId] : undefined;
   let selectionCharacter: string | null = null;
   if (selected && selected.sceneId === sceneId && tokenAccess({ role, memberId, view, token: selected }).full) {
-    const name = displayName(selected);
+    const name = displayName(selected, labels);
     const character = "ref" in selected.actor ? view.characters[selected.actor.ref] : undefined;
     const actor = "inline" in selected.actor ? selected.actor.inline : character?.actor;
     if (character) selectionCharacter = character.id;
@@ -334,7 +336,7 @@ export function buildIndex(input: IndexInput): SearchIndex {
     b.entry({
       id: `token:${tk.id}`,
       kind: "token",
-      title: displayName(tk),
+      title: displayName(tk, labels),
       ...(publicName ? { names: publicName } : null),
       where: place ? ROW_WORDS.tokenOn(kind, place) : kind,
       icon: "token",

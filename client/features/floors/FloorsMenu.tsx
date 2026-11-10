@@ -10,6 +10,7 @@ import { SheetDialog } from "../tokens/SheetDialog.tsx";
 import { FLOOR_ROOT_ATTR, FLOOR_ROOTS, FLOOR_SEARCH } from "./ids.ts";
 import { useHeldFloors } from "./useFloors.ts";
 import { floorMarks, FLOORS_GROUP, FLOORS_SETTINGS } from "./words.ts";
+import { useLabels } from "../../state/labels.ts";
 
 /*
  * Floors (docs/design/design-v1-floors.md 7.2): the floors this device
@@ -31,6 +32,7 @@ import { floorMarks, FLOORS_GROUP, FLOORS_SETTINGS } from "./words.ts";
  * the floor shown (12).
  */
 export function FloorsMenuBody(props: { onDone(): void }) {
+  const labels = useLabels();
   const view = useRoomView((s) => s.view);
   const you = useRoomView((s) => s.you);
   const sceneId = useRoomView((s) => s.sceneId);
@@ -66,7 +68,7 @@ export function FloorsMenuBody(props: { onDone(): void }) {
       <div ref={group} role="radiogroup" aria-label={FLOORS_GROUP} onKeyDown={onKeyDown} style={{ display: "grid", gap: theme.space(0.5), minWidth: 0 }}>
         {top.map((floor) => {
           const chosen = floor.id === sceneId;
-          const marks = floorMarks(view, floor, you, followed);
+          const marks = floorMarks(view, floor, you, followed, labels);
           const own = floor.floor?.name ?? floor.name;
           return (
             <label key={floor.id} className="rvtt-choice" data-floor-row={floor.id} style={{ ...ROW, ...buttonLook("quiet", { pressed: chosen }) }}>

@@ -7,6 +7,7 @@ import { useRoomScope } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import { heldHere } from "./follow.ts";
 import { followedLine, showingLine } from "./words.ts";
+import { labelsOf } from "../../state/labels.ts";
 
 /*
  * What the floors controls read (docs/design/design-v1-floors.md 7.2, 7.3):
@@ -41,7 +42,7 @@ export function useFloorVoice(): void {
     const floor = s.sceneId ? s.view?.scenes[s.sceneId]?.floor?.name : undefined;
     if (floor === undefined || !s.floorShift) return null;
     const token = s.floorShift.tokenId ? s.view?.tokens[s.floorShift.tokenId] : undefined;
-    return token ? followedLine(displayName(token), floor) : showingLine(floor);
+    return token ? followedLine(displayName(token, labelsOf(s)), floor) : showingLine(floor);
   });
   const heard = useRef(shift?.n ?? 0);
   useEffect(() => {

@@ -44,6 +44,7 @@ import {
 } from "./settings.ts";
 import { noSightText } from "./sources.ts";
 import { usePartyReport } from "./usePartyReport.ts";
+import { useLabels } from "../../state/labels.ts";
 
 const PHASE_LIGHTS: readonly { value: LightLevel | "keep"; label: string }[] = [
   { value: "keep", label: "Leave the light" },
@@ -489,8 +490,9 @@ function UntickQuestion(props: { open: boolean; name: string; busy: boolean; onC
 
 /** Riders whose controlled mount not every player sees, so they share no turn (7.1), each with what keeps it. */
 function MountNotes(props: { sceneId: string }) {
+  const labels = useLabels();
   const view = useRoomView((s) => s.floorView);
-  const notes = useMemo(() => (view ? unsharedMounts(view, props.sceneId) : []), [view, props.sceneId]);
+  const notes = useMemo(() => (view ? unsharedMounts(view, props.sceneId, labels) : []), [view, props.sceneId]);
   if (notes.length === 0) return null;
   return (
     <div style={{ display: "grid", gap: theme.space(1), paddingBottom: theme.space(2) }}>
@@ -506,6 +508,7 @@ function MountNotes(props: { sceneId: string }) {
  * scene each lending row says to whom (7.1).
  */
 function Sources(props: { sceneId: string; perPlayer: boolean }) {
+  const labels = useLabels();
   const report = usePartyReport(props.sceneId, true);
   const feetPerCell = useRoomView((s) => s.floorView?.meta.settings.feetPerCell ?? 5);
   const members = useRoomView((s) => (props.perPlayer ? s.floorView?.members : undefined));
@@ -533,7 +536,7 @@ function Sources(props: { sceneId: string; perPlayer: boolean }) {
                   lineHeight: theme.leading.body,
                 }}
               >
-                <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>{displayName(row.token)}</span>
+                <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>{displayName(row.token, labels)}</span>
                 <span style={{ color: theme.color.textMuted }}>
                   Senses: {sensesShort(row.senses, feetPerCell)}. Light: {row.light ? lightText(row.light, feetPerCell) : "none"}.
                 </span>

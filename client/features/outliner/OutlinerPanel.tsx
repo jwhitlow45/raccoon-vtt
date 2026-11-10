@@ -15,6 +15,7 @@ import { uiScale } from "../device/settings.ts";
 import type { PanelProps } from "../panels.ts";
 import { focusOutlineRow } from "./focus.ts";
 import { filterRows, GROUPS, listItems, outlineRows, ROW_PX, windowRange, type ListItem, type OutlineGroup, type OutlineRow } from "./rows.ts";
+import { useLabels } from "../../state/labels.ts";
 
 /**
  * The scene outliner (docs/design/design-v1-dm-tools.md 3.2): a searchable list of
@@ -62,6 +63,7 @@ function useScenePieces(): RoomState | null {
 }
 
 function Outliner(props: { sceneId: string; close(): void; shown: boolean }) {
+  const labels = useLabels();
   const view = useScenePieces();
   const scope = useRoomScope();
   const ui = useRoomUi();
@@ -99,7 +101,7 @@ function Outliner(props: { sceneId: string; close(): void; shown: boolean }) {
     searchRef.current?.select();
   }, [scope, props.shown, asked]);
 
-  const rows = useMemo(() => (view ? outlineRows(view, props.sceneId) : []), [view, props.sceneId]);
+  const rows = useMemo(() => (view ? outlineRows(view, props.sceneId, labels) : []), [view, props.sceneId]);
   const shown = useMemo(() => filterRows(rows, query, group), [rows, query, group]);
   // A search shows every match, folded groups included.
   const items = useMemo(() => listItems(shown, query.trim() ? new Set() : folded), [shown, query, folded]);

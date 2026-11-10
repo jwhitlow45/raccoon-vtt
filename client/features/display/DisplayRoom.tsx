@@ -86,6 +86,7 @@ import {
   useDisplayWeather,
 } from "./remember.ts";
 import { TV_BUTTON_HEIGHT, TV_HANDOUT_SCRIM, TV_TEXT } from "./tvType.ts";
+import { labelsOf } from "../../state/labels.ts";
 
 /**
  * A table display's room (docs/design/design-v1-dm-tools.md 3.1): the player scene
@@ -259,7 +260,7 @@ function DisplayTable(props: { roomId: string; followDm(on: boolean): void }) {
   }, [menu, overlay, press, paging]);
 
   const camera = useDisplayCamera(gate, mode, viewChoice.shown);
-  const turn = useRoomView((s) => (showTurn && s.view ? turnText({ encounter: s.view.encounter, tokens: s.view.tokens, characters: s.view.characters }) : null));
+  const turn = useRoomView((s) => (showTurn && s.view ? turnText({ encounter: s.view.encounter, tokens: s.view.tokens, characters: s.view.characters, labels: labelsOf(s) }) : null));
 
   return (
     <div style={{ position: "fixed", inset: 0, height: "100dvh", overflow: "hidden", background: theme.color.stage, color: theme.color.text, fontFamily: theme.font.body }}>
