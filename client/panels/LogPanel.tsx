@@ -18,6 +18,7 @@ import {
   type LogNames,
 } from "../features/log/format.ts";
 import { canUndoLogLine } from "../features/encounter/hpLog.ts";
+import { useConfirmedSeq } from "../features/encounter/hooks.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { ExportLog } from "../features/log/ExportLog.tsx";
 import { TakeBack } from "../features/encounter/HpLog.tsx";
@@ -64,6 +65,7 @@ export default function LogPanel(_props: PanelProps) {
   // An older server supplies no archive retention, so only its live lines
   // offer Undo. A new server keeps loaded pages current without a refetch.
   const retainedIds = useMemo(() => hpUndoLogIds ?? mainLog.map((entry) => entry.id), [hpUndoLogIds, mainLog]);
+  const confirmedSeq = useConfirmedSeq();
   // Trap lines keep logs of their own, so no players' line ever pushes out a DM's, and read in among the rest (docs/design/design-v1-traps.md 6.3).
   const trapLog = useRoomView((s) => s.view?.trapLog ?? EMPTY_LOG);
   const trapSeen = useRoomView((s) => s.view?.trapSeen ?? EMPTY_LOG);
@@ -129,7 +131,7 @@ export default function LogPanel(_props: PanelProps) {
   // Cached revert records may outlive retention. Check the live undo ids,
   // and include loaded take-backs even when they are outside the live tail.
   const allEntries = useMemo(() => (apart ? held : held.length > 0 ? mergeLog(held, log) : log), [apart, held, log]);
-  const undoable = (entry: LogEntry): boolean => canUndoLogLine(names, allEntries, entry, retainedIds);
+  const undoable = (entry: LogEntry): boolean => canUndoLogLine(names, allEntries, entry, retainedIds, confirmedSeq);
 
   const entries = useMemo(() => {
     return chatOnly ? allEntries.filter((e) => e.kind !== "event") : displayLog(allEntries);

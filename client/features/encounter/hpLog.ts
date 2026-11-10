@@ -49,9 +49,12 @@ function currentActor(view: HolderView, data: HpLine["data"]): Actor | undefined
  * of a take-back, has nothing to offer. When this view holds the creature,
  * the same check the server runs says whether it changed since, so the
  * button shows only where the undo would apply. A creature on another
- * scene is not in a DM's view, and the server decides.
+ * scene is not in a DM's view, and the server decides. A line this device
+ * predicted carries an id the server has not given yet, numbered above
+ * the confirmed `seq`, so it offers nothing until its answer lands.
  */
-export function canTakeBack(view: HolderView, log: readonly LogEntry[], line: HpLine): boolean {
+export function canTakeBack(view: HolderView, log: readonly LogEntry[], line: HpLine, confirmedSeq: number): boolean {
+  if (lineSeq(line.entry) > confirmedSeq) return false;
   if (!line.data.revert || line.data.back || takenBack(log, line.entry.id)) return false;
   const actor = currentActor(view, line.data);
   if (!actor) return true;
@@ -59,6 +62,11 @@ export function canTakeBack(view: HolderView, log: readonly LogEntry[], line: Hp
 }
 
 /** Whether an HP event in the general log offers Undo. */
-export function canUndoLogLine(view: HolderView, log: readonly LogEntry[], entry: LogEntry, retainedIds: readonly string[]): boolean {
-  return retainedIds.includes(entry.id) && entry.data?.type === "hp" && canTakeBack(view, log, { entry, data: entry.data });
+export function canUndoLogLine(view: HolderView, log: readonly LogEntry[], entry: LogEntry, retainedIds: readonly string[], confirmedSeq: number): boolean {
+  return retainedIds.includes(entry.id) && entry.data?.type === "hp" && canTakeBack(view, log, { entry, data: entry.data }, confirmedSeq);
+}
+
+/** The number a line's id starts with, the `seq` of the op that wrote it. */
+function lineSeq(entry: Pick<LogEntry, "id">): number {
+  return Number(entry.id.slice(0, entry.id.indexOf(":")));
 }

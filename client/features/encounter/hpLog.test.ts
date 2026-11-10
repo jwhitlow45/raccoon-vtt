@@ -16,6 +16,9 @@ const { RoomProvider } = await import("../../state/view.ts");
 const { HpLog } = await import("./HpLog.tsx");
 const { default: LogPanel } = await import("../../panels/LogPanel.tsx");
 
+/** A confirmed `seq` above every line here, so each counts as the server's. */
+const ALL = Number.POSITIVE_INFINITY;
+
 function hurtGoblin(): RoomState {
   let state = room();
   state.tokens.gob = token("gob", { name: "Goblin", actor: { inline: actor({ hp: { cur: 7, max: 7, temp: 0 } }) } });
@@ -44,12 +47,12 @@ describe("the combat log of HP changes", () => {
     const older = projectArchivedLog(state, [heal], DM, { sceneId: "s1" });
     let view = projectState(state, DM, { sceneId: "s1" });
     assert.ok(!view.log.some((line) => line.id === heal.id), "the retained line is outside the live tail");
-    assert.equal(canUndoLogLine(view as RoomState, [...older, ...view.log], older[0]!, view.meta.hpUndoLogIds ?? []), true);
+    assert.equal(canUndoLogLine(view as RoomState, [...older, ...view.log], older[0]!, view.meta.hpUndoLogIds ?? [], ALL), true);
     assert.ok(hpUndoRestore(state, heal.id).ok);
     for (let i = 0; i < MAX_LOG; i++) state = apply(state, { t: "log.chat", text: `next ${i}` }, DM, 1_000 + i);
     view = projectState(state, DM, { sceneId: "s1" });
     assert.equal(hpUndoRestore(state, heal.id).ok, false, "server retention expired");
-    assert.equal(canUndoLogLine(view as RoomState, [...older, ...view.log], older[0]!, view.meta.hpUndoLogIds ?? []), false, "the same cached page loses Undo without another fetch");
+    assert.equal(canUndoLogLine(view as RoomState, [...older, ...view.log], older[0]!, view.meta.hpUndoLogIds ?? [], ALL), false, "the same cached page loses Undo without another fetch");
     assert.equal(older[0]!.id, heal.id, "the old line remains readable");
   });
 
@@ -61,13 +64,13 @@ describe("the combat log of HP changes", () => {
     assert.ok(!view.log.some((e) => e.id === heal.id), "the ring cut the HP line from the DM's live log");
     const archived = projectArchivedLog(state, [heal], DM, { sceneId: "s1" })[0]!;
     assert.ok(hpUndoRestore(state, archived.id).ok, "the server can still take it back");
-    assert.equal(canUndoLogLine(view as RoomState, view.log, archived, view.meta.hpUndoLogIds ?? []), true);
+    assert.equal(canUndoLogLine(view as RoomState, view.log, archived, view.meta.hpUndoLogIds ?? [], ALL), true);
     const dropped = { ...state, log: state.log.filter((e) => e.id !== heal.id) };
     const gone = projectArchivedLog(dropped, [heal], DM, { sceneId: "s1" })[0]!;
-    assert.equal(canUndoLogLine(view as RoomState, view.log, gone, view.meta.hpUndoLogIds ?? []), false, "an archive-only line offers no Undo");
+    assert.equal(canUndoLogLine(view as RoomState, view.log, gone, view.meta.hpUndoLogIds ?? [], ALL), false, "an archive-only line offers no Undo");
     const taken: LogEntry = { id: "1000:0", at: heal.at, kind: "event", data: { type: "hp", change: "heal", back: true, of: heal.id } };
     const already = projectArchivedLog({ ...state, log: [...state.log, taken] }, [heal], DM, { sceneId: "s1" })[0]!;
-    assert.equal(canUndoLogLine(view as RoomState, [], already, view.meta.hpUndoLogIds ?? []), false, "a take-back outside the loaded page still prevents another");
+    assert.equal(canUndoLogLine(view as RoomState, [], already, view.meta.hpUndoLogIds ?? [], ALL), false, "a take-back outside the loaded page still prevents another");
   });
   test("FL3-ASTRA-01: a defense that stops the hit leaves a line without a take-back", () => {
     let state = room({
@@ -79,7 +82,7 @@ describe("the combat log of HP changes", () => {
     const lines = fightHpLines(state.log);
     assert.equal(lines.length, 1);
     assert.equal(lines[0]!.data.amount, 0);
-    assert.equal(canTakeBack(state, state.log, lines[0]!), false);
+    assert.equal(canTakeBack(state, state.log, lines[0]!, ALL), false);
     assert.equal(hpUndoRestore(state, lines[0]!.entry.id).ok, false);
     for (const you of [DM, P1]) {
       const view = projectState(state, you, { sceneId: "s1" });
@@ -98,18 +101,36 @@ describe("the combat log of HP changes", () => {
   test("offers the DM an undo only where it would apply", () => {
     let state = hurtGoblin();
     const [heal, hit] = fightHpLines(state.log);
-    assert.equal(canTakeBack(state, state.log, heal!), true);
-    assert.equal(canTakeBack(state, state.log, hit!), false, "the heal since changed the goblin");
+    assert.equal(canTakeBack(state, state.log, heal!, ALL), true);
+    assert.equal(canTakeBack(state, state.log, hit!, ALL), false, "the heal since changed the goblin");
     const built = hpUndoRestore(state, heal!.entry.id);
     assert.ok(built.ok);
     state = apply(state, { t: "sys.restore", entries: built.entries, from: "undo", deps: true, undid: heal!.entry.id }, DM, 5);
     const [back, ...rest] = fightHpLines(state.log);
     assert.equal(back!.data.back, true);
-    assert.equal(canTakeBack(state, state.log, back!), false, "a take-back is not taken back from the log");
-    assert.equal(canTakeBack(state, state.log, rest[0]!), false, "the heal was already taken back");
-    assert.equal(canTakeBack(state, state.log, rest[1]!), true, "now the hit can go");
+    assert.equal(canTakeBack(state, state.log, back!, ALL), false, "a take-back is not taken back from the log");
+    assert.equal(canTakeBack(state, state.log, rest[0]!, ALL), false, "the heal was already taken back");
+    assert.equal(canTakeBack(state, state.log, rest[1]!, ALL), true, "now the hit can go");
     // A DM viewing another scene does not hold the token, and the server decides.
     const elsewhere = { ...state, tokens: {} };
-    assert.equal(canTakeBack(elsewhere, state.log, rest[1]!), true);
+    assert.equal(canTakeBack(elsewhere, state.log, rest[1]!, ALL), true);
+  });
+
+  test("a line this device predicted offers no Undo until its answer, in the tracker's HP log and in the Log panel", () => {
+    const state = hurtGoblin();
+    const [heal] = fightHpLines(state.log);
+    assert.equal(heal!.entry.id.split(":")[0], "4");
+    assert.equal(canTakeBack(state, state.log, heal!, 3), false, "numbered above the confirmed seq");
+    assert.equal(canTakeBack(state, state.log, heal!, 4), true);
+    const view = projectState(state, DM, { sceneId: "s1" });
+    const markup = (seq: number, panel: "tracker" | "log") => {
+      const store = createStore(() => ({ roomId: "room", view, you: DM, sceneId: "s1", seq, pending: [] }));
+      const child = panel === "tracker" ? createElement(HpLog) : createElement(LogPanel, { selectedTokenId: null, shown: true, close() {} });
+      return renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: child }));
+    };
+    for (const panel of ["tracker", "log"] as const) {
+      assert.doesNotMatch(markup(3, panel), /Undo this change/, `${panel}: the predicted line`);
+      assert.match(markup(4, panel), /Undo this change/, `${panel}: the confirmed line`);
+    }
   });
 });

@@ -5,7 +5,7 @@ import { Empty } from "../../components/Empty.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { describeEvent, type LogNames } from "../log/format.ts";
-import { useSend, useYou } from "./hooks.ts";
+import { useConfirmedSeq, useSend, useYou } from "./hooks.ts";
 import { canTakeBack, fightHpLines, type HpLine } from "./hpLog.ts";
 
 const EMPTY: LogEntry[] = [];
@@ -25,6 +25,7 @@ export function HpLog() {
   const characters = useRoomView((s) => s.view?.characters);
   const handouts = useRoomView((s) => s.view?.handouts);
   const encounter = useRoomView((s) => s.view?.encounter ?? null);
+  const confirmedSeq = useConfirmedSeq();
   const [all, setAll] = useState(false);
   const names = useMemo<LogNames>(
     () => ({ members: members ?? {}, tokens: tokens ?? {}, characters: characters ?? {}, handouts: handouts ?? {}, encounter }),
@@ -37,7 +38,7 @@ export function HpLog() {
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
       <ol aria-label="HP changes this fight" style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
         {shown.map((line) => (
-          <HpLogLine key={line.entry.id} line={line} names={names} dm={you.role === "dm"} canUndo={you.role === "dm" && canTakeBack(names, log, line)} />
+          <HpLogLine key={line.entry.id} line={line} names={names} dm={you.role === "dm"} canUndo={you.role === "dm" && canTakeBack(names, log, line, confirmedSeq)} />
         ))}
       </ol>
       {lines.length > FIRST_LINES ? (
