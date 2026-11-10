@@ -25,7 +25,7 @@
     "build": "vite build",
     "start": "node server/main.ts",
     "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.client.json",
-    "test": "node --test \"shared/**/*.test.ts\" \"server/**/*.test.ts\" \"client/**/*.test.ts\" \"scripts/**/*.test.ts\"",
+    "test": "node --test \"shared/**/*.test.ts\" \"server/**/*.test.ts\" \"client/**/*.test.ts\" \"scripts/**/*.test.ts\" \"e2e/**/*.test.ts\"",
     "coverage": "node scripts/coverage.ts",
     "test:int": "node --test --test-concurrency=1 \"server/**/*.itest.ts\"",
     "test:int:clock": "ITEST_NUMBER_CLOCK=real node --test --test-concurrency=1 \"server/**/*.itest.ts\"",

@@ -377,7 +377,7 @@ export function main(deps: Deps = defaults): number {
   try {
     const unit = join(dir, "unit.lcov");
     const int = join(dir, "int.lcov");
-    const unitStatus = deps.runSuite(unit, [], ["shared/**/*.test.ts", "server/**/*.test.ts", "client/**/*.test.ts", "scripts/**/*.test.ts"]);
+    const unitStatus = deps.runSuite(unit, [], ["shared/**/*.test.ts", "server/**/*.test.ts", "client/**/*.test.ts", "scripts/**/*.test.ts", "e2e/**/*.test.ts"]);
     // The integration tests share one database, so they run one file at a time.
     const intStatus = deps.runSuite(int, ["--test-concurrency=1"], ["server/**/*.itest.ts"]);
     const merged = mergeLcov([readFileSync(unit, "utf8"), readFileSync(int, "utf8")], deps.cwd);
