@@ -1,7 +1,7 @@
 import { chunkKey, doorChunk, keys, parseKey, partsKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { linesPastStart } from "#shared/logRings.ts";
 import type { Label, LogEntry, RoomState, SceneId, Stamp, Trap, Viewer } from "#shared/model.ts";
-import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, namedByMemory, perPlayerScene, playerChunkBatch, projectEntity, projectState, rankedStamp, sightHolders, stampCells, stampOrder, stampRanks, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
+import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, heldGroundMap, namedByMemory, perPlayerScene, playerChunkBatch, projectEntity, projectState, rankedStamp, sightHolders, stampCells, stampOrder, stampRanks, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
 import { MAX_KEPT_REFUSALS, type Change, type RefusalCode } from "#shared/protocol.ts";
 import type { OpAcknowledgment } from "#shared/undoContract.ts";
 import { visionRules, type PartySight } from "#shared/ruleHooks.ts";
@@ -316,7 +316,8 @@ class Projector {
     if (this.#byClass.has(cls)) return;
     const values = new Map<EntityKey, unknown>();
     this.#byClass.set(cls, values);
-    if (!this.#state.scenes[sceneId]?.fogEnabled) return;
+    const scene = this.#state.scenes[sceneId];
+    if (!scene || !heldGroundMap(scene)) return;
     const positions = candidates.flatMap((key) => {
       const parsed = parseKey(key);
       return parsed?.kind === "chunk" && parsed.sceneId === sceneId ? [parsed] : [];

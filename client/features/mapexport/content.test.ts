@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { BuildChunk, Label, RoomState } from "#shared/model.ts";
+import type { AutoWalls, BuildChunk, Label, RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import type { StampInput } from "#shared/protocol.ts";
 import { decodeTile, rasterizeFogOps } from "#shared/rules/fog.ts";
+import { deriveWalls, indexBuild } from "#shared/rules/walls.ts";
 import { apply, P1, reveal, room, scene } from "#shared/testutil.ts";
 import { contentEmpty, exportContent, fromServer, hasBuildOn, playerFog, playerViewContent, type ExportView } from "./content.ts";
 
@@ -48,6 +49,13 @@ function explore(state: RoomState, rect: { x: number; y: number; w: number; h: n
 
 function edgesOf(chunks: readonly BuildChunk[]): Record<string, unknown> {
   return Object.assign({}, ...chunks.map((c) => c.edges));
+}
+
+/** What a drawing of the chunks shows: each painted square, and each wall, door and window by its edge, automatic or drawn alike. */
+function drawn(chunks: readonly BuildChunk[], rule: AutoWalls | undefined): { cells: string[]; walls: string[] } {
+  const build = indexBuild(chunks.filter((c) => c.sceneId === "s1"));
+  const walls = deriveWalls(build, "export", { rule: rule ?? "all" });
+  return { cells: [...build.cells].map(([id, terrain]) => `${id} ${terrain}`).sort(), walls: walls.edges.map((e) => `${e.x},${e.y},${e.side} ${JSON.stringify(e.feature)}`).sort() };
 }
 
 function sortedLabels(labels: readonly Label[]): string[] {
@@ -156,7 +164,14 @@ describe("exportContent", () => {
       const byKey = (chunks: readonly BuildChunk[]) => Object.fromEntries(chunks.map((c) => [`${c.cx},${c.cy}`, c]));
       // With fog on a player's client holds only the ground they discovered (docs/design/design-v1-map-discovery.md 5.2), which the
       // export's player view is to take from the server (section 4), so only the chunks of a scene without fog compare here.
-      if (!fogEnabled) assert.deepEqual(byKey(player.chunks), byKey(Object.values(projected.buildChunks)));
+      if (!fogEnabled) {
+        const held = Object.values(projected.buildChunks);
+        // A square scene with fog off reaches the client cut from held ground, its automatic walls sent as bits (D-261110-530), where
+        // the export reads the stored build by the scene's rule: the two draw the same floor, walls, doors and windows.
+        assert.deepEqual(drawn(player.chunks, state.scenes.s1!.autoWalls), drawn(held, projected.scenes.s1!.autoWalls));
+        const off = { ...state, scenes: { ...state.scenes, s1: { ...state.scenes.s1!, autoWalls: "off" as const } } };
+        assert.deepEqual(byKey(content(off, "player").chunks), byKey(Object.values(projectState(off, P1, { sceneId: null }).buildChunks)), "an \"off\" scene's, which stay the stored build");
+      }
       assert.deepEqual(sortedLabels(player.labels), sortedLabels(Object.values(projected.labels)));
     }
   });

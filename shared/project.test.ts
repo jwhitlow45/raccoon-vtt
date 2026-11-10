@@ -16,6 +16,7 @@ import {
   partySightOf,
   pinCells,
   playersToken,
+  projectChunkForPlayer,
   projectEntity,
   projectState,
   stableStringify,
@@ -1614,6 +1615,7 @@ describe("specific rules", () => {
 describe("wave 3 projection", () => {
   const door = { kind: "door" as const, state: "closed" as const, secret: true, discovered: false };
 
+  // The stored build as players read it (projectChunkForPlayer): theirs with fog off on a hex or "off" scene, and the map export's and the DM's public world on any.
   test("a hidden secret door goes only where the scene's rule puts an automatic wall, across a chunk border too", () => {
     const state = room();
     // Stone at 15,3 in chunk 0 beside nothing at 16,3 in chunk 1; water at 16,5 beside nothing at 15,5; stone beside water at 16,7.
@@ -1626,11 +1628,7 @@ describe("wave 3 projection", () => {
       cells: { "16,5": "water", "16,7": "water" },
       edges: { "16,3,w": door, "16,5,w": door, "16,7,w": door, "16,9,w": door },
     };
-    const shown = (rule: "all" | "floor" | "off" | undefined) => {
-      if (rule === undefined) delete state.scenes.s1!.autoWalls;
-      else state.scenes.s1!.autoWalls = rule;
-      return projectState(state, P1, { sceneId: "s1" }).buildChunks["s1:1,0"]!.edges;
-    };
+    const shown = (rule: "all" | "floor" | "off" | undefined) => projectChunkForPlayer(state.buildChunks, state.buildChunks["s1:1,0"]!, rule)!.edges;
     const wall = { kind: "wall" };
     // Floor beside nothing, an overlay beside nothing, floor beside an overlay, nothing on either side.
     assert.deepEqual(shown(undefined), { "16,7,w": wall, "16,9,w": wall });
@@ -1641,6 +1639,8 @@ describe("wave 3 projection", () => {
 
   test("free walls arrive sorted, a hidden secret free door as a wall and a locked one closed, and a chunk of only free walls is sent", () => {
     const state = room();
+    // An "off" scene with fog off, whose copy is the stored build (heldGroundMap), as a Universal VTT import's.
+    state.scenes.s1!.autoWalls = "off";
     const w = (id: string, x: number, f: FreeWall["f"]): FreeWall => ({ id, a: [x, 1], b: [x, 2], f });
     state.buildChunks["s1:0,0"] = {
       sceneId: "s1",
@@ -1667,7 +1667,8 @@ describe("wave 3 projection", () => {
     state.scenes.s1 = { ...state.scenes.s1!, rev: 7, order: 3, map, autoWalls: "floor", folder: "Act 1", thumb: "th", phases: [{ id: "p1", name: "Day", assetId: "day", widthPx: 100, heightPx: 100 }, { id: "p2", name: "On fire", assetId: "fire", widthPx: 100, heightPx: 100 }], phaseId: "p1", phaseGrid: { refWidthPx: 100, refHeightPx: 100, cellPx: 10, originPx: { x: 0, y: 0 } } };
     const scene = projectState(state, P1, { sceneId: "s1" }).scenes.s1!;
     const { rev: _rev, order: _order, folder: _folder, thumb: _thumb, phases: _phases, phaseId: _phaseId, phaseGrid: _grid, ...kept } = state.scenes.s1!;
-    assert.deepEqual(scene, { ...kept, rev: 0, order: 0 });
+    // The rule reads "off", since the copy's chunks carry the automatic walls players hold (heldGroundMap).
+    assert.deepEqual(scene, { ...kept, rev: 0, order: 0, autoWalls: "off" });
     const before = hashValue(scene);
     const edited = apply(state, { t: "scene.update", sceneId: "s1", patch: { folder: "Act 2", thumb: "th2" } });
     assert.equal(hashValue(projectEntity(keys.scene("s1"), edited, P1, { sceneId: "s1" })), before);

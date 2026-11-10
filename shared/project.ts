@@ -1577,25 +1577,42 @@ function projectDrawingCtx(ctx: Ctx, drawing: Drawing): Drawing | null {
 }
 
 /**
+ * Whether players' copies of a scene's map are cut from held ground
+ * (playerChunk), with the automatic walls they hold sent as `auto` bits:
+ * every scene with fog on, and a square scene with fog off and automatic
+ * walls, where every class holds all of it. A hidden secret door whose
+ * cover is "auto" then reaches them as the automatic wall bit the walls of
+ * its line are (shownEdge), never as a drawn wall standing apart from them
+ * (docs/design/design-v1-maps-vision.md 2.1). A device derives automatic
+ * walls from cells only on a hex scene or an "off" one, which have none for
+ * a door to look like, so their copies with fog off stay the stored build
+ * (projectChunkForPlayer). The test reads only the scene's own settings,
+ * never its doors, so which way a scene goes tells nothing.
+ */
+export function heldGroundMap(scene: Pick<Scene, "fogEnabled" | "gridShape" | "autoWalls">): boolean {
+  return scene.fogEnabled || (!isHex(sceneGrid(scene)) && autoWallsOf(scene) !== "off");
+}
+
+/**
  * A chunk position of a floor the viewer holds. The DM gets the stored
- * chunk. A player on a scene with fog on gets what their fog class holds
- * there, a stub where no chunk is stored (playerChunk), and on a scene with
- * fog off the whole build as before (projectChunkForPlayer).
+ * chunk. A player gets what their fog class holds there, a stub where no
+ * chunk is stored (playerChunk), or on a hex or "off" scene with fog off
+ * the whole build as before (projectChunkForPlayer).
  */
 function projectChunkAtCtx(ctx: Ctx, sceneId: string, cx: number, cy: number): BuildChunk | null {
   if (!ctx.floors.has(sceneId)) return null;
   const chunk = ownEntry(ctx.state.buildChunks, chunkKey(sceneId, cx, cy));
   if (ctx.viewer.role === "dm") return chunk ?? null;
   const scene = ownEntry(ctx.state.scenes, sceneId);
-  if (scene?.fogEnabled) return playerChunk(ctx.state, { sceneId, cx, cy }, fogClassOf(ctx.state, sceneId, ctx.viewer.memberId));
+  if (scene && heldGroundMap(scene)) return playerChunk(ctx.state, { sceneId, cx, cy }, fogClassOf(ctx.state, sceneId, ctx.viewer.memberId));
   return chunk ? projectChunkForPlayer(ctx.state.buildChunks, chunk, scene?.autoWalls) : null;
 }
 
 /**
  * The chunks of the floors the viewer holds, by chunk key, as a snapshot
- * holds them (projectChunkAtCtx): a player's floor with fog on as their
- * fog class holds it, and every other held floor's stored chunks in one
- * pass over the build.
+ * holds them (projectChunkAtCtx): a player's floor cut from held ground as
+ * their fog class holds it, and every other held floor's stored chunks in
+ * one pass over the build.
  */
 function projectChunksCtx(ctx: Ctx): Record<string, BuildChunk> {
   const out: Record<string, BuildChunk> = {};
@@ -1603,7 +1620,7 @@ function projectChunksCtx(ctx: Ctx): Record<string, BuildChunk> {
   for (const sceneId of ctx.floors) {
     const scene = ownEntry(ctx.state.scenes, sceneId);
     if (!scene) continue;
-    if (ctx.viewer.role !== "dm" && scene.fogEnabled) Object.assign(out, heldChunks(ctx.state, sceneId, fogClassOf(ctx.state, sceneId, ctx.viewer.memberId)));
+    if (ctx.viewer.role !== "dm" && heldGroundMap(scene)) Object.assign(out, heldChunks(ctx.state, sceneId, fogClassOf(ctx.state, sceneId, ctx.viewer.memberId)));
     else stored.add(sceneId);
   }
   if (stored.size === 0) return out;
@@ -1653,8 +1670,9 @@ function byCoordinates(a: FreeWall, b: FreeWall): number {
  * Whether an edge has an automatic wall can depend on a neighbor chunk's
  * cells (an edge on a chunk's north or west border), so `dependents`
  * re-projects the chunks below and to the right of a touched one, and a
- * change of the scene's rule re-projects everything. The map export's
- * player view calls this too.
+ * change of the scene's rule re-projects everything. Players get this on a
+ * hex or "off" scene with fog off (heldGroundMap). The map export's player
+ * view with fog off, and the public world on the DM's device, call it too.
  */
 export function projectChunkForPlayer(all: Readonly<Record<string, BuildChunk>>, chunk: BuildChunk, autoWalls: AutoWalls | undefined): BuildChunk | null {
   const hit = playerChunks.get(chunk);
@@ -1674,10 +1692,10 @@ export function projectChunkForPlayer(all: Readonly<Record<string, BuildChunk>>,
 const playerChunks = new WeakMap<BuildChunk, { all: object; autoWalls: AutoWalls | undefined; out: BuildChunk | null }>();
 
 /**
- * A chunk's fields for players on a scene with fog off (projectChunkForPlayer),
- * held to every key of BuildChunk as SCENE_FOR_PLAYERS is. With fog on a
- * player's chunk is built from held ground instead, with fields of its own
- * (playerChunk, PlayerChunkFields).
+ * A chunk's fields for players on a hex or "off" scene with fog off
+ * (projectChunkForPlayer), held to every key of BuildChunk as
+ * SCENE_FOR_PLAYERS is. On every other scene a player's chunk is built from
+ * held ground instead, with fields of its own (playerChunk, PlayerChunkFields).
  */
 export const CHUNK_FOR_PLAYERS = {
   sceneId: "copied",
@@ -1887,11 +1905,12 @@ function chosen<T>(live: boolean, own: boolean, mine: Record<string, T> | undefi
 }
 
 /**
- * A player's chunk at a position of a scene with fog on
- * (docs/design/design-v1-map-discovery.md 5.2), for a fog class: only what the
- * class holds, each element live or remembered, with the fields only a
- * player's chunk carries. Null where it holds no cell, wall or piece, and
- * on a scene with fog off, whose chunks go as projectChunkForPlayer says.
+ * A player's chunk at a position of a scene cut from held ground
+ * (docs/design/design-v1-map-discovery.md 5.2, heldGroundMap), for a fog
+ * class: only what the class holds, each element live or remembered, with
+ * the fields only a player's chunk carries. With fog off the class holds
+ * all of it, live. Null where it holds no cell, wall or piece, and on a hex
+ * or "off" scene with fog off, whose chunks go as projectChunkForPlayer says.
  *
  * - Cells, heights, stair marks and difficult ground go by their cell,
  *   edges by either cell beside them (decision 1), and every other cell
@@ -1911,7 +1930,7 @@ function chosen<T>(live: boolean, own: boolean, mine: Record<string, T> | undefi
  */
 export function playerChunk(state: RoomState, at: { sceneId: string; cx: number; cy: number }, view: FogClass): PlayerChunk | null {
   const scene = ownEntry(state.scenes, at.sceneId);
-  if (!scene || !scene.fogEnabled || !inPositions(scene, at.cx, at.cy)) return null;
+  if (!scene || !heldGroundMap(scene) || !inPositions(scene, at.cx, at.cy)) return null;
   const own = view !== null && holdsOwnSight(state, scene.id, view) ? view : null;
   const ground = groundOf(state, at.sceneId, own);
   if (!ground) return null;
@@ -1938,7 +1957,7 @@ export function playerChunkBatch(state: RoomState, sceneId: string, positions: r
   const out = new Map<string, PlayerChunk | null>();
   const scene = ownEntry(state.scenes, sceneId);
   const own = view !== null && holdsOwnSight(state, sceneId, view) ? view : null;
-  const ground = scene?.fogEnabled ? groundOf(state, sceneId, own) : null;
+  const ground = scene && heldGroundMap(scene) ? groundOf(state, sceneId, own) : null;
   const missing: { cx: number; cy: number; key: string; memo: Memo | null; pieces: readonly FreeWall[] | undefined }[] = [];
   for (const { cx, cy } of positions) {
     const key = chunkKey(sceneId, cx, cy);
@@ -1964,11 +1983,11 @@ export function playerChunkBatch(state: RoomState, sceneId: string, positions: r
   return out;
 }
 
-/** Every position's chunk of one scene with fog on for one class, by chunk key, as a snapshot holds them: the free walls cut once for the whole scene. */
+/** Every position's chunk of one scene cut from held ground for one class, by chunk key, as a snapshot holds them: the free walls cut once for the whole scene. */
 export function heldChunks(state: RoomState, sceneId: string, view: FogClass): Record<string, PlayerChunk> {
   const scene = ownEntry(state.scenes, sceneId);
   const out: Record<string, PlayerChunk> = {};
-  if (!scene || !scene.fogEnabled) return out;
+  if (!scene || !heldGroundMap(scene)) return out;
   const own = view !== null && holdsOwnSight(state, sceneId, view) ? view : null;
   const ground = groundOf(state, sceneId, own);
   if (!ground) return out;
@@ -3193,7 +3212,7 @@ export const SCENE_FOR_PLAYERS = {
   fogEnabled: "copied",
   wallsVersion: "zeroed",
   defaultView: "copied",
-  autoWalls: "changed: \"off\" with fog on, since a player's chunks then carry the automatic walls they hold",
+  autoWalls: "changed: \"off\" where a player's chunks carry the automatic walls they hold (heldGroundMap)",
   folder: "dm: how the DM files scenes in the Scenes panel",
   thumb: "dm: the Scenes panel's picture, which a background render moves",
   phases: "dm: the map's other images and their names (On fire)",
@@ -3231,8 +3250,8 @@ function projectSceneCtx(ctx: Ctx, scene: Scene): Scene | null {
   };
   if (scene.map !== undefined) out.map = scene.map;
   if (scene.defaultView !== undefined) out.defaultView = scene.defaultView;
-  // With fog on a player's chunks carry the automatic walls they hold (`auto`), so their device derives none (docs/design/design-v1-map-discovery.md 5.2).
-  if (scene.fogEnabled) out.autoWalls = "off";
+  // Cut from held ground, a player's chunks carry the automatic walls they hold (`auto`), so their device derives none (docs/design/design-v1-map-discovery.md 5.2).
+  if (heldGroundMap(scene)) out.autoWalls = "off";
   else if (scene.autoWalls !== undefined) out.autoWalls = scene.autoWalls;
   if (scene.blockMovement !== undefined) out.blockMovement = scene.blockMovement;
   if (scene.vision !== undefined) {
@@ -4778,14 +4797,15 @@ export function allKeys(state: RoomState): EntityKey[] {
   for (const id of Object.keys(state.openFloors ?? {})) out.push(keys.opened(id));
   for (const id of Object.keys(state.floorLinks ?? {})) out.push(keys.floorLink(id));
   for (const c of Object.values(state.buildChunks)) out.push(keys.chunk(c.sceneId, c.cx, c.cy));
-  // On a scene with fog on every position may hold a stub (docs/design/design-v1-map-discovery.md 5.6), and memory can name labels and stamps the build no longer has.
+  // On a scene cut from held ground every position may hold a stub (docs/design/design-v1-map-discovery.md 5.6), and with fog on memory can name labels and stamps the build no longer has.
   const chunkKeys = new Set(Object.values(state.buildChunks).map((c) => keys.chunk(c.sceneId, c.cx, c.cy)));
   for (const scene of Object.values(state.scenes)) {
-    if (!scene.fogEnabled) continue;
+    if (!heldGroundMap(scene)) continue;
     for (const { cx, cy } of chunkPositions(scene)) {
       const key = keys.chunk(scene.id, cx, cy);
       if (!chunkKeys.has(key)) out.push(key);
     }
+    if (!scene.fogEnabled) continue;
     for (const id of rememberedOnly(state, scene.id, "labels")) out.push(keys.label(id));
     for (const id of rememberedOnly(state, scene.id, "stamps")) out.push(keys.stamp(id));
   }
@@ -4966,12 +4986,17 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
     for (const token of Object.values(state.tokens)) if (token.path) add(keys.token(token.id));
   }
   /*
-   * On a scene with fog on a player's chunk at a position reads the stored
-   * and remembered chunks of its 8 neighbors, since a piece filed by its
-   * own midpoint lies up to 4 cells from the chunk its wall is stored in,
-   * and an edge reads the cells beside it (docs/design/design-v1-map-discovery.md
-   * 5.6). Stubs count, so every position of the scene is a key.
+   * On a scene cut from held ground (heldGroundMap) a player's chunk at a
+   * position reads the stored and remembered chunks of its 8 neighbors,
+   * since a piece filed by its own midpoint lies up to 4 cells from the
+   * chunk its wall is stored in, and an edge reads the cells beside it
+   * (docs/design/design-v1-map-discovery.md 5.6). Stubs count, so every
+   * position of the scene is a key.
    */
+  const heldScene = (sceneId: string) => {
+    const scene = ownEntry(state.scenes, sceneId);
+    return scene !== undefined && heldGroundMap(scene);
+  };
   const fogScene = (sceneId: string) => ownEntry(state.scenes, sceneId)?.fogEnabled === true;
   const visionScene = (sceneId: string) => fogScene(sceneId) && ownEntry(state.scenes, sceneId)?.vision?.on === true;
   const aroundChunk = (sceneId: string, cx: number, cy: number) => {
@@ -5010,7 +5035,7 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
     if (!parsed) continue;
     if (parsed.kind === "chunk") {
       if (isHex(gridOfScene(state, parsed.sceneId))) wallChunks.push(parsed);
-      if (fogScene(parsed.sceneId)) {
+      if (heldScene(parsed.sceneId)) {
         aroundChunk(parsed.sceneId, parsed.cx, parsed.cy);
         stairScenes.add(parsed.sceneId);
         continue;
@@ -5034,7 +5059,7 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
       // Callers with one state keep the conservative dependency set.
       const scene = ownEntry(state.scenes, parsed.id);
       const was = ownEntry(other?.scenes, parsed.id);
-      if (scene?.fogEnabled && (!was || sceneFields(scene) !== sceneFields(was) || stableStringify(scene.vision) !== stableStringify(was.vision))) {
+      if (scene && heldGroundMap(scene) && (!was || sceneFields(scene) !== sceneFields(was) || stableStringify(scene.vision) !== stableStringify(was.vision))) {
         for (const { cx, cy } of chunkPositions(scene)) add(keys.chunk(scene.id, cx, cy));
       }
       // Every chunk of a viewer's copy reads the scene's fields, so on hexes each creature's outline may clip anew.

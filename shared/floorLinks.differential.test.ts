@@ -114,14 +114,14 @@ describe("an end's far floor, way and rev (4)", () => {
 
   const top = (state: RoomState) => Object.values(state.scenes).find((s) => s.floor?.level === 2)!.id;
 
-  /** Ana's copy without the top floor she holds: its record, what stands there and its ends, and the ladder's far floor read as one name. */
+  /** Ana's copy without the top floor she holds: its record, its map, what stands there and its ends, and the ladder's far floor read as one name. */
   const withoutTop = (copy: Record<string, unknown>): object => {
     const scenes = copy.scenes as Record<string, Scene>;
     const gone = new Set(Object.keys(scenes).filter((id) => id !== GROUND && id !== UPPER));
     const kept = <T extends { sceneId: string }>(map: unknown) => Object.fromEntries(Object.entries((map ?? {}) as Record<string, T>).filter(([, v]) => !gone.has(v.sceneId)));
     const links = kept<{ sceneId: string; to?: string }>(copy.floorLinks);
     for (const [id, link] of Object.entries(links)) if (link.to !== undefined && gone.has(link.to)) links[id] = { ...link, to: "top" };
-    return { ...copy, scenes: Object.fromEntries(Object.entries(scenes).filter(([id]) => !gone.has(id))), tokens: kept(copy.tokens), floorLinks: links };
+    return { ...copy, scenes: Object.fromEntries(Object.entries(scenes).filter(([id]) => !gone.has(id))), buildChunks: kept(copy.buildChunks), tokens: kept(copy.tokens), floorLinks: links };
   };
 
   test("every player observes the same of the ladder's lock, kind, removal and the tower turned over, Ana apart from Attic itself", () => {

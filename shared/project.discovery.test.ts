@@ -154,15 +154,32 @@ describe("what a player holds of the build (5.1, 5.2)", () => {
     assert.equal(JSON.stringify(chunksOf(c, P1)["1,0"]), JSON.stringify(chunksOf(d, P1)["1,0"]));
   });
 
-  test("a scene with fog off reaches players whole, as before (MX6)", () => {
-    const state = fogRoom({ scene: { fogEnabled: false } });
+  test("an \"off\" scene with fog off reaches players whole, as before (MX6)", () => {
+    const state = fogRoom({ scene: { fogEnabled: false, autoWalls: "off" } });
     paint(state, { x: 30, y: 20, w: 3, h: 3 });
     wall(state, "abcdefghijkl", [31.25, 22.5], [36.75, 22.5]);
     const p = projectState(state, P1, { sceneId: "s1" });
     assert.ok(p.buildChunks["s1:1,1"]!.cells["30,20"]);
     assert.equal(p.buildChunks["s1:2,1"]!.walls![0]!.id, "abcdefghijkl");
-    assert.equal(p.scenes.s1!.autoWalls, undefined);
+    assert.equal(p.scenes.s1!.autoWalls, "off");
     assert.equal((p.buildChunks["s1:1,1"] as PlayerChunk).known, undefined);
+  });
+
+  test("a square scene with automatic walls and fog off reaches players whole, as a class holds it with all of it revealed (MX6, D-261110-530)", () => {
+    const state = fogRoom({ scene: { fogEnabled: false } });
+    paint(state, { x: 30, y: 20, w: 3, h: 3 });
+    wall(state, "abcdefghijkl", [31.25, 22.5], [36.75, 22.5]);
+    const p = projectState(state, P1, { sceneId: "s1" });
+    assert.ok(p.buildChunks["s1:1,1"]!.cells["30,20"]);
+    assert.equal(p.scenes.s1!.autoWalls, "off", "the device derives no automatic walls of its own");
+    assert.ok(autoAt(p.buildChunks["s1:1,1"] as PlayerChunk, "30,20,n"), "the room's automatic walls arrive as bits");
+    for (const [x, y] of [[0, 0], [47, 31], [31, 21]] as const) assert.ok(knownAt(p.buildChunks[`s1:${Math.floor(x / 16)},${Math.floor(y / 16)}`] as PlayerChunk, x, y), `${x},${y} held`);
+    assert.ok(!JSON.stringify(p.buildChunks).includes("abcdefghijkl"), "the free wall arrives as pieces of its own");
+    const revealed = fogRoom({ scene: { fogEnabled: true } });
+    paint(revealed, { x: 30, y: 20, w: 3, h: 3 });
+    wall(revealed, "abcdefghijkl", [31.25, 22.5], [36.75, 22.5]);
+    lift(revealed, "dm", { x: 0, y: 0, w: 48, h: 32 });
+    assert.equal(JSON.stringify(p.buildChunks), JSON.stringify(projectState(revealed, P1, { sceneId: "s1" }).buildChunks));
   });
 
   test("a fog-only scene withholds unrevealed ground and shows revealed ground live, memory or not", () => {

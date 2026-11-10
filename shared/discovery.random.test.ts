@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { chunkOf, discoveryOp, discoveryState, fogRoom, lift, randomFeature, randomWallFeature, remember, TERRAINS, wall } from "./discoveryTestutil.ts";
-import { keys, type EntityKey } from "./keys.ts";
+import { keys, tileKey, type EntityKey } from "./keys.ts";
 import { CHUNK_CELLS, MAX_FREE_WALL_CELLS, type FreeWall, type Label, type PlayerChunk, type RememberedWall, type RoomState, type Scene, type Viewer, type WallFeature } from "./model.ts";
 import { exploreFor, playersOf, withCellVision } from "./perPlayerTestutil.ts";
-import { allKeys, applyChanges, changedSightKeys, dependents, diffProjection, heldOf, projectChunkForPlayer, projectEntity, projectState, stableStringify, stampCells, viewerSceneId, type HeldEntry, type ProjectedState } from "./project.ts";
+import { allKeys, applyChanges, changedSightKeys, dependents, diffProjection, heldGroundMap, heldOf, projectChunkForPlayer, projectEntity, projectState, stableStringify, stampCells, viewerSceneId, type HeldEntry, type ProjectedState } from "./project.ts";
 import { mapSchemas, opSchema, type Op } from "./protocol.ts";
 import { applyOp, type ApplyResult } from "./reducer.ts";
-import { labelCells } from "./rules/fog.ts";
+import { FULL_TILE, labelCells, tilesAcross } from "./rules/fog.ts";
 import { decodeHeights } from "./rules/heights.ts";
 import { sceneGrid } from "./rules/grid.ts";
 import { fogClassOf, groundOf, wallSpans, type Ground } from "./rules/held.ts";
@@ -38,8 +38,10 @@ import { DM, P1, chance, comparable, deepClone, env, int, pick, rng } from "./te
  *   piece, a walk lands on their device where it lands on the server.
  * - MX5: no player's projection holds memory or its marks, and replaying
  *   the ops rebuilds the same room.
- * - MX6: on a scene with fog off, players get today's chunks, and the
- *   scene's own automatic walls rule.
+ * - MX6: on a hex or "off" scene with fog off, players get today's chunks,
+ *   and the scene's own automatic walls rule. On any other scene with fog
+ *   off (D-261110-530) they get what a class holds of the same scene with
+ *   fog on and every square of it revealed by hand, and the rule "off".
  *
  * MX2's selection, each element's live or remembered value by decision 6,
  * a free wall per cell, is checked over random memory below: the memory a
@@ -144,6 +146,19 @@ function checkCopy(where: string, state: RoomState, view: ProjectedState, viewer
   for (const field of ["memory", "memoryBy", "played", "memoryShared", "playedScenes"]) assert.equal(record[field], undefined, `${where}: ${viewer.memberId} holds ${field}`);
   const scene = state.scenes[sceneId];
   if (!scene || scene.fogEnabled || viewerSceneId(state, viewer, { sceneId }) !== sceneId) return;
+  const chunksOn = (copy: ProjectedState) => {
+    const out: Record<string, unknown> = {};
+    for (const chunk of Object.values(copy.buildChunks)) if (chunk.sceneId === sceneId) out[`${chunk.cx},${chunk.cy}`] = chunk;
+    return out;
+  };
+  const got = chunksOn(view);
+  if (heldGroundMap(scene)) {
+    // MX6 since D-261110-530: what a class holds of the scene with fog on and all of it revealed by hand, and no rule to derive walls by.
+    const revealed = chunksOn(projectState(revealedByHand(state, scene), viewer, { sceneId }));
+    assert.equal(stableStringify(got), stableStringify(revealed), `${where}: ${viewer.memberId}'s chunks with fog off are not those of the scene revealed by hand`);
+    assert.equal(view.scenes[sceneId]?.autoWalls, "off", `${where}: the scene copy derives automatic walls of its own with fog off`);
+    return;
+  }
   // MX6: today's chunks, each the old flattening of its stored chunk, and no position past them.
   const today: Record<string, unknown> = {};
   for (const chunk of Object.values(state.buildChunks)) {
@@ -151,10 +166,19 @@ function checkCopy(where: string, state: RoomState, view: ProjectedState, viewer
     const out = projectChunkForPlayer(state.buildChunks, chunk, scene.autoWalls);
     if (out) today[`${chunk.cx},${chunk.cy}`] = out;
   }
-  const got: Record<string, unknown> = {};
-  for (const chunk of Object.values(view.buildChunks)) if (chunk.sceneId === sceneId) got[`${chunk.cx},${chunk.cy}`] = chunk;
   assert.equal(stableStringify(got), stableStringify(today), `${where}: ${viewer.memberId} gets other chunks than today's with fog off`);
   assert.equal(view.scenes[sceneId]?.autoWalls, scene.autoWalls, `${where}: the scene copy changed its automatic walls rule with fog off`);
+}
+
+/** The room with the scene's fog on, its party vision off so no memory is read, and every square of it revealed by the DM (MX6). */
+function revealedByHand(state: RoomState, scene: Scene): RoomState {
+  const fogTiles = { ...state.fogTiles };
+  for (let ty = 0; ty < tilesAcross(scene.bounds.h); ty++) {
+    for (let tx = 0; tx < tilesAcross(scene.bounds.w); tx++) fogTiles[tileKey(scene.id, tx, ty)] = { sceneId: scene.id, tx, ty, rev: 1, bits: FULL_TILE };
+  }
+  const { vision, ...rest } = scene;
+  const fogged: Scene = { ...rest, fogEnabled: true, ...(vision ? { vision: { ...vision, on: false } } : {}) };
+  return { ...state, fogTiles, scenes: { ...state.scenes, [scene.id]: fogged } };
 }
 
 // ---------------------------------------------------------------------------

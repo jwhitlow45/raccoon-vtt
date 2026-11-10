@@ -7,9 +7,9 @@ import { DOOR_COVER_OP_VERSION, DOOR_COVER_SNAPSHOT_VERSION, migrateOp, migrateS
 /** The op and snapshot versions just before covers. */
 const OP_BEFORE = DOOR_COVER_OP_VERSION - 1;
 const SNAPSHOT_BEFORE = DOOR_COVER_SNAPSHOT_VERSION - 1;
-import type { AutoWalls, DoorCover, EdgeFeature, RoomState } from "./model.ts";
+import type { AutoWalls, DoorCover, EdgeFeature, PlayerChunk, RoomState, Viewer } from "./model.ts";
 import { privateFieldsIn } from "./privateFields.ts";
-import { projectChunkForPlayer, projectState, shownEdge, stableStringify } from "./project.ts";
+import { projectChunkForPlayer, projectState, shownEdge, stableStringify, type ProjectedState } from "./project.ts";
 import { memorySchemas, opSchema, type Op } from "./protocol.ts";
 import { canApply } from "./permissions.ts";
 import { applyOp } from "./reducer.ts";
@@ -267,19 +267,102 @@ describe("the look of a hidden secret door (SB2, SB4, SB5)", () => {
     for (const value of [projectState(state, P1, { sceneId: "s1" }), open]) assert.deepEqual(privateFieldsIn(value), []);
   });
 
-  test("with fog off, the projection is the same bytes as before covers, but for a drawn cover on a real automatic edge", () => {
-    const covered = walled();
-    const before = walled();
-    for (const [key, cover] of [["8,4,w", "auto"], ["4,4,w", "auto"], ["4,6,w", "drawn"], ["2,3,w", "drawn"]] as const) {
-      edge(covered, key, door(cover));
-      edge(before, key, door());
+  test("with fog off, each hidden door reaches players as its look, the automatic wall bit or a drawn wall, as with fog on (D-261110-530)", () => {
+    for (const rule of ["all", "floor"] as const) {
+      const covered = walled(rule);
+      for (const [key, cover] of [["8,4,w", "auto"], ["4,4,w", "auto"], ["4,6,w", "drawn"], ["2,3,w", "drawn"], ["5,2,n", undefined], ["5,5,n", undefined]] as const) edge(covered, key, door(cover));
+      const revealed = structuredClone(covered);
+      reveal(revealed);
+      covered.scenes.s1!.fogEnabled = false;
+      const chunk = projectState(covered, P1, { sceneId: "s1" }).buildChunks[chunkKey("s1", 0, 0)] as PlayerChunk;
+      for (const key of ["8,4,w", "4,4,w", "4,6,w", "2,3,w", "5,2,n", "5,5,n"]) {
+        const look = shownEdge(covered.buildChunks, "s1", rule, key);
+        if (look === "auto") assert.ok(autoAt(chunk, key) && chunk.edges[key] === undefined, `${rule} ${key}: the automatic wall bit alone`);
+        else assert.deepEqual(chunk.edges[key], look, `${rule} ${key}`);
+      }
+      assert.equal(JSON.stringify(chunk), JSON.stringify(chunksOf(revealed, P1)["0,0"]), `${rule}: the chunk the scene gives with fog on, revealed by hand`);
     }
-    covered.scenes.s1!.fogEnabled = false;
-    before.scenes.s1!.fogEnabled = false;
-    const shown = (s: RoomState) => projectState(s, P1, { sceneId: "s1" }).buildChunks[chunkKey("s1", 0, 0)]!;
-    // 2,3,w is the room's west side, a real automatic edge: before covers the door went, and drawn it is the wall it looks like.
-    assert.deepEqual(shown(covered).edges, { ...shown(before).edges, "2,3,w": WALL });
-    assert.deepEqual(shown(before).edges["2,3,w"], undefined);
+  });
+});
+
+describe("a covered door with fog off (D-261110-530)", () => {
+  const DISPLAY: Viewer = { memberId: "display:abcdefghijkl", role: "player" };
+
+  /**
+   * twins' door twin with fog off, and its doorway twin: the same squares
+   * painted, the passage open through the doorway with no door in it.
+   */
+  function fogOff(opts: { rule?: AutoWalls; wide?: boolean; found?: boolean; cover?: DoorCover }): { door: RoomState; doorway: RoomState; doors: string[] } {
+    const w = twins({ cover: opts.cover ?? "auto", explore: false, wide: opts.wide === true, ...(opts.rule ? { rule: opts.rule } : {}) });
+    const doorway = structuredClone(w.door);
+    for (const key of w.doors) {
+      if (opts.found) edge(w.door, key, { ...HIDDEN_DOOR, discovered: true, cover: opts.cover ?? "auto" });
+      const chunk = doorway.buildChunks[chunkKey("s1", 1, 0)]!;
+      const { [key]: _door, ...edges } = chunk.edges;
+      doorway.buildChunks[chunkKey("s1", 1, 0)] = { ...chunk, edges };
+    }
+    for (const s of [w.door, doorway]) s.scenes.s1!.fogEnabled = false;
+    return { door: w.door, doorway, doors: w.doors };
+  }
+
+  /** A copy with the automatic wall bit set on each edge, in the auto tile its chunk already carries. */
+  function withBits(copy: ProjectedState, edges: readonly string[]): ProjectedState {
+    const buildChunks: Record<string, PlayerChunk> = { ...copy.buildChunks };
+    for (const key of edges) {
+      const [x, y, side] = key.split(",");
+      const at = chunkKey("s1", Math.floor(Number(x) / 16), Math.floor(Number(y) / 16));
+      const chunk = buildChunks[at] as PlayerChunk;
+      assert.ok(chunk.auto !== undefined, `${key}: its chunk carries automatic walls already, so the tile's length tells nothing`);
+      const bits = Buffer.from(chunk.auto, "base64");
+      const k = (Number(y) % 16) * 16 + (Number(x) % 16);
+      const bit = 2 * k + (side === "w" ? 1 : 0);
+      bits[bit >> 3] = bits[bit >> 3]! | (1 << (bit & 7));
+      buildChunks[at] = { ...chunk, auto: bits.toString("base64") };
+    }
+    return { ...copy, buildChunks };
+  }
+
+  test("P1 and the display get the bytes of the open doorway with the automatic wall bit on its edge, and nothing names the door", () => {
+    for (const rule of [undefined, "all", "floor"] as const) {
+      for (const wide of [false, true]) {
+        const { door, doorway, doors } = fogOff({ rule, wide });
+        for (const viewer of [P1, DISPLAY]) {
+          const where = `${rule ?? "no rule"}${wide ? ", wide" : ""}, ${viewer.memberId}`;
+          const sent = JSON.stringify(projectState(door, viewer, { sceneId: "s1" }));
+          const open = projectState(doorway, viewer, { sceneId: "s1" });
+          for (const word of [...doors, "secret", '"cover"', "discovered", '"door"']) assert.ok(!sent.includes(word), `${where}: the copy holds ${word}`);
+          assert.equal(sent.length, JSON.stringify(open).length, `${where}: the same length as the open doorway's`);
+          assert.equal(sent, JSON.stringify(withBits(open, doors)), where);
+        }
+      }
+    }
+  });
+
+  test("on an \"off\" scene, or under a drawn cover, the door reaches P1 and the display as the plain drawn wall in its place does", () => {
+    for (const [rule, cover] of [["off", "auto"], ["off", "drawn"], ["all", "drawn"], ["floor", "drawn"]] as const) {
+      const { door, doorway, doors } = fogOff({ rule, cover });
+      for (const key of doors) edge(doorway, key, WALL);
+      for (const viewer of [P1, DISPLAY]) {
+        const sent = JSON.stringify(projectState(door, viewer, { sceneId: "s1" }));
+        assert.equal(sent, JSON.stringify(projectState(doorway, viewer, { sceneId: "s1" })), `${rule} ${cover} ${viewer.memberId}`);
+      }
+    }
+  });
+
+  test("a found door reaches P1 and the display as the door it is, with no automatic wall bit and no cover", () => {
+    for (const rule of ["all", "floor"] as const) {
+      const { door, doorway, doors } = fogOff({ rule, found: true });
+      for (const key of doors) edge(doorway, key, { ...HIDDEN_DOOR, discovered: true });
+      for (const viewer of [P1, DISPLAY]) {
+        const copy = projectState(door, viewer, { sceneId: "s1" });
+        const chunk = copy.buildChunks[chunkKey("s1", 1, 0)] as PlayerChunk;
+        for (const key of doors) {
+          assert.deepEqual(chunk.edges[key], { ...HIDDEN_DOOR, discovered: true }, `${rule} ${key}`);
+          assert.ok(!autoAt(chunk, key), `${rule} ${key}: no wall bit under the door`);
+        }
+        assert.equal(JSON.stringify(copy), JSON.stringify(projectState(doorway, viewer, { sceneId: "s1" })), `${rule} ${viewer.memberId}`);
+      }
+    }
   });
 });
 
