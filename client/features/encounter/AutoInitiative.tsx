@@ -90,8 +90,9 @@ function usePress(): (rows: readonly RollRow[], mode: RollMode, kept?: readonly 
  * (useRollBusy). A press while a start still waits for its answer sends
  * its rows as adds behind it (state/store.ts fightAhead), since a start
  * shows only once the server takes it and a second one would be refused.
- * `start` returns the numbers of the ops it sent, none for a press with
- * nothing to send, or null for a press it refused.
+ * Behind a start that rolls, they join its wait and roll with its
+ * monsters. `start` returns the numbers of the ops it sent, none for a
+ * press with nothing to send, or null for a press it refused.
  */
 export function useStartFight(): (batches: readonly EntryInput[][], from: StartFrom | null) => readonly number[] | null {
   const store = useAutoStore();
@@ -125,14 +126,15 @@ export function useStartFight(): (batches: readonly EntryInput[][], from: StartF
     const group = actions.newId();
     // Nobody yet starts with no one, so nothing to roll.
     const rollsFrom = on && from !== null && first.length > 0 ? from : null;
-    if (rollsFrom !== null) {
-      // A second press while one waits, or while a roll still lands, sends nothing.
-      if (busy || store.getState().start !== null) return null;
-      step({ kind: "press", press: group, from: rollsFrom, ops: ops.length });
-    }
+    const waiting = store.getState().start;
+    // A press while the last roll still lands sends nothing.
+    if (rollsFrom !== null && waiting === null && busy) return null;
+    // The wait these ops answer to, and their first place in it: a start's own, or the waiting start's they join.
+    const wait = rollsFrom === null ? null : waiting !== null ? { press: waiting.press, at: waiting.ops } : { press: group, at: 0 };
+    if (rollsFrom !== null) step(waiting !== null ? { kind: "join", press: waiting.press, ops: ops.length } : { kind: "press", press: group, from: rollsFrom, ops: ops.length });
     const sent: number[] = [];
     ops.forEach((op, index) => {
-      const onAnswer = rollsFrom !== null ? (answer: OpAnswer) => step({ kind: "answer", press: group, index, answer }) : undefined;
+      const onAnswer = wait !== null ? (answer: OpAnswer) => step({ kind: "answer", press: wait.press, index: wait.at + index, answer }) : undefined;
       const n = actions.dispatch(op, { group, ...(onAnswer ? { onAnswer } : {}) });
       if (n === null) onAnswer?.("refused");
       else sent.push(n);

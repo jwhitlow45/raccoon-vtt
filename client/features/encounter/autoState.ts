@@ -137,27 +137,34 @@ export function pressAfter<F>(held: StartPress<F> | null, heldWaits: boolean, fr
 /**
  * A start that rolls once the server takes it (D-261106-118): its press,
  * the button, how many ops it sent (`encounter.start`, then each
- * `encounter.add` batch, one gesture) and which of them were taken, by
- * their place in the start.
+ * `encounter.add` batch, one gesture, then the adds of any press that
+ * joined it) and which of them were taken, by their place in the start.
  */
 export type StartWait = { press: string; from: StartFrom; ops: number; taken: readonly number[] };
 
 export type StartEvent =
   | { kind: "press"; press: string; from: StartFrom; ops: number }
+  /** Another button's adds, sent behind the waiting start, which roll with it. Their places follow the start's. */
+  | { kind: "join"; press: string; ops: number }
   /** What became of the start's op at `index`. A dispatch that sent nothing counts as refused. */
   | { kind: "answer"; press: string; index: number; answer: OpAnswer };
 
 /**
  * One step of the start's wait: what it becomes, and whether the monsters
  * roll now. A press while one waits is refused, so each press rolls at
- * most once. Every op taken rolls. Any other answer ends the wait with no
- * roll, and the refusal shows as it does today. An answer for a press
- * that no longer waits changes nothing.
+ * most once, and another button's adds join the wait instead, so they
+ * roll with the start's monsters in its one roll. Every op taken rolls.
+ * Any other answer ends the wait with no roll, and the refusal shows as it
+ * does today. An answer for a press that no longer waits changes nothing.
  */
 export function startStep(wait: StartWait | null, event: StartEvent): { wait: StartWait | null; roll: boolean } {
   if (event.kind === "press") {
     if (wait !== null) return { wait, roll: false };
     return { wait: event.ops > 0 ? { press: event.press, from: event.from, ops: event.ops, taken: [] } : null, roll: false };
+  }
+  if (event.kind === "join") {
+    if (wait === null || wait.press !== event.press) return { wait, roll: false };
+    return { wait: { ...wait, ops: wait.ops + event.ops }, roll: false };
   }
   if (wait === null || wait.press !== event.press || event.index < 0 || event.index >= wait.ops || wait.taken.includes(event.index)) return { wait, roll: false };
   if (event.answer !== "taken") return { wait: null, roll: false };

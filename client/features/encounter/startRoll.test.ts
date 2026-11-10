@@ -65,12 +65,18 @@ describe("the start's wait, at random", () => {
         };
         for (const e of events) {
           if (e.kind === "press") {
-            // The controller's own rule: nothing goes while a start waits.
             const held = current();
             if (held !== null) {
+              // A press as a start: never while one waits.
               refusedPresses++;
               step({ kind: "press", press: `x${refusedPresses}`, from: e.from, ops: e.ops });
               assert.equal(current(), held, "a second press never replaces the wait");
+              // The controller's own rule: its adds join the wait instead, and roll with the start.
+              const p = presses.find((x) => x.id === held.press)!;
+              p.ops += e.ops;
+              p.answers.push(...Array.from({ length: e.ops }, () => null));
+              step({ kind: "join", press: held.press, ops: e.ops });
+              assert.deepEqual(current(), { ...held, ops: held.ops + e.ops }, "the adds join the wait");
               continue;
             }
             const id = `p${presses.length}`;
@@ -90,6 +96,10 @@ describe("the start's wait, at random", () => {
             if (!answered && !outside && !ended) continue;
             step({ kind: "answer", press: p.id, index: e.index, answer: e.answer });
             assert.equal(current(), before, "a stray answer changes nothing");
+            if (ended) {
+              step({ kind: "join", press: p.id, ops: 2 });
+              assert.equal(current(), before, "adds never join a press that no longer waits");
+            }
           } else if (e.kind === "drop") {
             for (const p of presses) p.answers.forEach((a, i) => (a === null && i >= e.keep ? answer(p, i, "unknown") : undefined));
           }
@@ -200,8 +210,6 @@ describe("starting a fight (Q12)", () => {
       assert.ok(t.sent[0]!.group && t.sent.every((s) => s.group === t.sent[0]!.group), "one group: one Play step");
       assert.equal(t.auto.getState().start?.from, "scene", "the pressed button waits");
       assert.equal(t.busy(), true, "and every roll button with it");
-      assert.equal(t.start(BATCHES, "visible"), null, "a second press while it waits sends nothing");
-      assert.equal(t.sent.length, 2);
       t.land();
       t.sent[1]!.onAnswer!("taken");
       assert.equal(t.sent.length, 2, "no roll until every op is taken");
@@ -311,6 +319,30 @@ describe("starting a fight (Q12)", () => {
       t.store.setState({ pending: [] });
       busy = pressAfter(busy, waits(busy), "selected", t.start([[{ id: "e9", tokenId: "g1" }]], "selected"));
       assert.deepEqual(busy, { from: "selected", ops: [4] });
+    } finally {
+      t.done();
+    }
+  });
+
+  test("another button pressed while a start that rolls waits sends its rows behind it, and they roll with the start's in one roll once the server takes every op", () => {
+    const t = table({ holds: true });
+    try {
+      // Thorn alone has nothing to roll, so a roll means the goblins sent behind the start rolled with it.
+      assert.deepEqual(t.start([[{ id: "e1", tokenId: "pc" }]], "selected"), [1]);
+      assert.equal(t.auto.getState().start?.from, "selected", "the pressed button waits to roll");
+      assert.deepEqual(t.start([[{ id: "e2", tokenId: "g1" }], [{ id: "e3", tokenId: "g2" }]], "scene"), [2, 3]);
+      assert.deepEqual(t.sent.map((s) => s.op.t), ["encounter.start", "encounter.add", "encounter.add"], "no second start, which the server would refuse");
+      assert.equal(t.auto.getState().start?.from, "selected", "the first button still waits");
+      t.land();
+      t.sent[0]!.onAnswer!("taken");
+      assert.equal(t.sent.length, 3, "no roll until the adds behind the start are taken too");
+      t.sent[2]!.onAnswer!("taken");
+      t.sent[1]!.onAnswer!("taken");
+      const roll = t.sent[3]?.op;
+      assert.ok(roll?.t === "dice.roll", JSON.stringify(t.sent.map((s) => s.op.t)));
+      assert.equal(roll.rolls.length, 1, "the two goblins share one roll");
+      assert.equal(t.sent.length, 4, "one roll for the start and the adds");
+      assert.equal(t.auto.getState().start, null);
     } finally {
       t.done();
     }
