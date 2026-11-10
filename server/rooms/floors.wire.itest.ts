@@ -628,7 +628,7 @@ describe("a climb's undo and redo over the wire with passengers and areas player
   after(() => t.close());
 
   type Seats = { ana: Seat; bree: Seat; tv: Seat };
-  type Twin = Room & Pick<Table, "sync" | "marker"> & { attach: (seats: Seat[]) => void; upper: string; thorn: string; link: string; pair: string; gob: string; row: string; seats: Seats; hidden: { owl?: string; aura?: string; ward?: string } };
+  type Twin = Room & Pick<Table, "sync" | "marker"> & { attach: (seats: Seat[]) => void; upper: string; thorn: string; link: string; pair: string; gob: string; row: string; seats: Seats; hidden: { owl?: string; aura?: string; ward?: string }; forbidden: string[]; anaFrom: number };
 
   const area = (id: string, sceneId: string, ownerId: string, on: string) => ({ id, sceneId, shape: "sphere", size: 10, origin: { x: 3.5, y: 3.5, z: 0 }, yaw: 0, includeOrigin: true, color: "#e5484d", ownerId, visibility: "dm", attachedTo: on });
 
@@ -658,48 +658,97 @@ describe("a climb's undo and redo over the wire with passengers and areas player
     const seats = await players(t, r, "ana first", false);
     m.attach([seats.ana, seats.bree, seats.tv]);
     await m.sync("seated");
-    return { ...r, sync: m.sync, marker: m.marker, attach: m.attach, upper, thorn, link, pair, gob, row, seats, hidden: secrets };
+    // What no player's frame may carry, by id or by name: the hidden goblin upstairs, and the owl and the areas where the room has them.
+    const forbidden = [gob, '"Goblin"', ...(hidden ? [secrets.owl!, secrets.aura!, secrets.ward!, '"Owl"'] : [])];
+    return { ...r, sync: m.sync, marker: m.marker, attach: m.attach, upper, thorn, link, pair, gob, row, seats, hidden: secrets, forbidden, anaFrom: 0 };
   }
 
   const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
   const TIME = /\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z/g;
 
   /**
-   * Everything a seat holds or was sent, made comparable between two rooms
-   * (FL2-SOL-04). The rooms' generated ids differ, so each id the test
-   * knows reads as its role ("thorn", "upper"), any other as "id" (the
-   * server's own: a history step, a history epoch), and each time as
-   * "time", on values and on keys, which are then sorted again, as are
-   * who is online and a frame's changes, which the server sends in the
-   * order of their ids. One accepted channel is left out by name, the room's count
-   * of ops, which a hidden op moves too: every `seq`, a path's `turn`,
-   * which is that count where the turn began, the log line ids made from
-   * it ("13:0" reads "n:0"), and an `ev` that carries nothing else.
+   * The names a seat's ids read by, so two rooms compare (FL2-SOL-04). An
+   * id the test made for something players may hold reads as its role
+   * ("thorn", "upper"). Any other id the seat was sent is the server's own
+   * (a history step, a history epoch) and reads "id1", "id2" and on by
+   * where the seat's frames first carry it, so two of them never read
+   * alike, one swapped for another shows, and two records keyed by them
+   * stay two. Such a name is allowed only where the server's ids belong
+   * (GENERATED_AT, checked in `normal`). A hidden thing's id has no role
+   * here: `leaks` refuses it raw, before any name is given.
    */
-  function normal(x: Twin, value: unknown): unknown {
+  function aliases(x: Twin, s: Seat): Names {
     const names = new Map<string, string>([
-      [x.roomId, "room"], [x.dmId, "dm"], [x.anaId, "ana"], [x.breeId, "bree"], [x.seats.tv.who.memberId, "tv"],
-      [x.ground, "ground"], [x.upper, "upper"], [x.thorn, "thorn"], [x.gob, "goblin"], [x.link, "link"], [x.pair, "pair"], [x.row, "row"], [x.marker, "marker"],
+      [x.roomId, "room"], [x.dmId, "dm"], [x.anaId, "ana"], [x.breeId, "bree"],
+      [x.ground, "ground"], [x.upper, "upper"], [x.thorn, "thorn"], [x.link, "link"], [x.pair, "pair"], [x.row, "row"], [x.marker, "marker"],
     ]);
-    const text = (s: string) => s.split(x.seats.tv.who.memberId).join("tv").replace(UUID, (id) => names.get(id) ?? "id").replace(TIME, "time").replace(/^\d+:(\d+)$/, "n:$1");
-    const walk = (v: unknown, key = ""): unknown => {
-      if (typeof v === "string") return text(v);
-      if (Array.isArray(v)) return key === "online" || key === "changes" ? v.map((inner) => walk(inner)).sort((p, q) => (stableStringify(p) < stableStringify(q) ? -1 : 1)) : v.map((inner) => walk(inner));
-      if (v === null || typeof v !== "object") return v;
-      return Object.fromEntries(Object.entries(v).filter(([k]) => k !== "seq" && !(key === "path" && k === "turn")).map(([k, inner]) => [text(k), walk(inner, k)]));
+    let made = 0;
+    const meet = (text: string) => {
+      for (const id of text.match(UUID) ?? []) if (!names.has(id)) names.set(id, `id${++made}`);
     };
-    return JSON.parse(stableStringify(walk(value)));
+    for (const frame of s.frames) meet(frame);
+    // What only the view holds, if anything, in the order its own text gives.
+    meet(JSON.stringify(s.view));
+    const text = (raw: string) => raw.split(x.seats.tv.who.memberId).join("tv").replace(UUID, (id) => names.get(id)!).replace(TIME, "time").replace(/^\d+:(\d+)$/, "n:$1");
+    return { text, generated: (raw) => (raw.match(UUID) ?? []).some((id) => /^id\d+$/.test(names.get(id)!)) };
   }
 
-  /** A seat's frames, normalized, without the room's op count (`normal`). */
-  function sent(x: Twin, s: Seat): unknown[] {
+  /** A seat's names for its ids (`aliases`), and whether a text carries an id that got a generated name. */
+  type Names = { text: (raw: string) => string; generated: (raw: string) => boolean };
+
+  /**
+   * The only places the server's own ids may stand: a history line's epoch
+   * and the id of the step at the head of each stack. Anywhere else an id
+   * the test did not make is refused, so a generated name never covers one.
+   */
+  const GENERATED_AT = [/^epoch$/, /^(play|setup)\.(undo|redo)\.head\.id$/];
+
+  /**
+   * Something a seat holds or was sent, made comparable between two rooms
+   * (FL2-SOL-04): ids by `aliases`, each time as "time", on values and on
+   * keys, which are then sorted again, as are who is online and a frame's
+   * changes, which the server sends in the order of their ids. One
+   * accepted channel is left out by name, the room's count of ops, which
+   * a hidden op moves too: every `seq`, a path's `turn`, which is that
+   * count where the turn began, the log line ids made from it ("13:0"
+   * reads "n:0"), and an `ev` that carries nothing else. Two keys never
+   * fold into one, which would drop a record unseen, and a generated name
+   * stands only where GENERATED_AT allows.
+   */
+  function normal(names: Names, value: unknown): unknown {
+    const text = (raw: string, path: string): string => {
+      if (names.generated(raw)) assert.ok(GENERATED_AT.some((at) => at.test(path)), `an id the test did not make stands at ${path}: ${raw.slice(0, 80)}`);
+      return names.text(raw);
+    };
+    const walk = (v: unknown, key: string, path: string): unknown => {
+      if (typeof v === "string") return text(v, path);
+      if (Array.isArray(v)) return key === "online" || key === "changes" ? v.map((inner) => walk(inner, "", path)).sort((p, q) => (stableStringify(p) < stableStringify(q) ? -1 : 1)) : v.map((inner) => walk(inner, "", path));
+      if (v === null || typeof v !== "object") return v;
+      const entries = Object.entries(v).filter(([k]) => k !== "seq" && !(key === "path" && k === "turn")).map(([k, inner]) => [text(k, `${path} (a key)`), walk(inner, k, path === "" ? k : `${path}.${k}`)] as const);
+      assert.equal(new Set(entries.map(([k]) => k)).size, entries.length, `two keys read alike under ${path || "the top"}`);
+      return Object.fromEntries(entries);
+    };
+    return JSON.parse(stableStringify(walk(value, "", "")));
+  }
+
+  /** A seat's frames, every connection's, normalized, without the room's op count (`normal`). */
+  function sent(names: Names, s: Seat): unknown[] {
     const out: unknown[] = [];
     for (const frame of s.frames) {
       const m = JSON.parse(frame) as Record<string, unknown>;
       if (m.t === "ev" && Object.keys(m).every((k) => k === "t" || k === "seq" || k === "changes") && (m.changes as unknown[]).length === 0) continue;
-      out.push(normal(x, m));
+      out.push(normal(names, m));
     }
     return out;
+  }
+
+  /** No frame a seat was ever sent, nor its view, carries a forbidden id or name, read raw, before any normalizing could hide it. */
+  function leaks(x: Twin, when: string): void {
+    for (const s of [x.seats.ana, x.seats.bree, x.seats.tv]) {
+      assert.deepEqual(naming(s, x.forbidden), [], `${when}: ${s.name} was sent something hidden`);
+      const view = JSON.stringify(s.view);
+      assert.deepEqual(x.forbidden.filter((secret) => view.includes(secret)), [], `${when}: ${s.name} holds something hidden`);
+    }
   }
 
   /** Waits until no seat of the rooms has been sent a frame for a moment, so a history line that trails its `ev` is in before frames are compared. */
@@ -708,20 +757,26 @@ describe("a climb's undo and redo over the wire with passengers and areas player
     for (let last = -1, now = count(); now !== last; last = now, now = count()) await new Promise((resolve) => setTimeout(resolve, 120));
   }
 
-  /** Every seat of both rooms holds the same room and was sent the same frames, whole (FL2-SOL-04). */
-  async function alike(a: Twin, b: Twin, when: string): Promise<void> {
-    await quiet(a, b);
+  /** Every seat of both rooms was sent nothing hidden, holds the same room and was sent the same frames, whole (FL2-SOL-04). */
+  function same(a: Twin, b: Twin, when: string): void {
+    for (const x of [a, b]) leaks(x, when);
     for (const who of ["ana", "bree", "tv"] as const) {
-      assert.deepEqual(normal(a, a.seats[who].view), normal(b, b.seats[who].view), `${when}: ${who} holds the same room`);
-      assert.deepEqual(normal(a, a.seats[who].you), normal(b, b.seats[who].you), `${when}: ${who} is told the same floor`);
-      assert.deepEqual(sent(a, a.seats[who]), sent(b, b.seats[who]), `${when}: ${who} was sent the same frames`);
+      const [ta, tb] = [aliases(a, a.seats[who]), aliases(b, b.seats[who])];
+      assert.deepEqual(normal(ta, a.seats[who].view), normal(tb, b.seats[who].view), `${when}: ${who} holds the same room`);
+      assert.deepEqual(normal(ta, a.seats[who].you), normal(tb, b.seats[who].you), `${when}: ${who} is told the same floor`);
+      assert.deepEqual(sent(ta, a.seats[who]), sent(tb, b.seats[who]), `${when}: ${who} was sent the same frames`);
     }
   }
 
-  /** The answer Ana's op `n` got, from her frames: refused with its code and words, or applied with the toast's words, if any. */
-  async function answered(s: Seat, n: number): Promise<string> {
+  async function alike(a: Twin, b: Twin, when: string): Promise<void> {
+    await quiet(a, b);
+    same(a, b, when);
+  }
+
+  /** The answer Ana's op `n` got, from her frames since she last connected (`from`): refused with its code and words, or applied with the toast's words, if any. */
+  async function answered(s: Seat, n: number, from: number): Promise<string> {
     for (let i = 0; i < 100; i++) {
-      for (const frame of s.frames) {
+      for (const frame of s.frames.slice(from)) {
         const m = JSON.parse(frame) as ServerMessage;
         if (m.t !== "ev") continue;
         const no = m.rejects?.find((x) => x.n === n);
@@ -738,7 +793,7 @@ describe("a climb's undo and redo over the wire with passengers and areas player
     const answers: string[] = [];
     for (const x of [a, b]) {
       const n = x.seats.ana.socket.op(await op(x));
-      answers.push(await answered(x.seats.ana, n));
+      answers.push(await answered(x.seats.ana, n, x.anaFrom));
       await x.sync(when);
     }
     assert.equal(answers[0], answers[1], `${when}: the answer`);
@@ -753,12 +808,16 @@ describe("a climb's undo and redo over the wire with passengers and areas player
     await alike(a, b, when);
   }
 
-  /** Ana's device drops and comes back in both rooms: her new snapshot is the same room, and her next ops go on it. */
+  /** Ana's device drops and comes back in both rooms: her new snapshot is the same room, her next ops go on it, and what she was sent before stays compared. */
   async function reconnect(a: Twin, b: Twin, when: string): Promise<void> {
     for (const x of [a, b]) {
-      x.seats.ana.socket.close();
-      await x.seats.ana.socket.waitClosed();
+      const earlier = x.seats.ana;
+      earlier.socket.close();
+      await earlier.socket.waitClosed();
       x.seats.ana = await seat("Ana", await t.connect(x.roomId, x.ana), { memberId: x.anaId, role: "player" }, "ana-again");
+      // Her first connection's frames stay in the record, ahead of the new ones, so every later scan and comparison reads both.
+      x.seats.ana.frames.unshift(...earlier.frames);
+      x.anaFrom = earlier.frames.length;
       x.attach([x.seats.ana, x.seats.bree, x.seats.tv]);
       await x.sync(when);
     }
@@ -772,6 +831,38 @@ describe("a climb's undo and redo over the wire with passengers and areas player
   const close = (...rooms: Twin[]) => {
     for (const x of rooms) for (const s of all(x)) s.socket.close();
   };
+
+  test("the comparison itself: a hidden id in place of a step's id, one step's id in place of another's, and a record too many each fail it (FL2-SOL-04)", async () => {
+    const a = await twin(true);
+    const b = await twin(false);
+    assert.equal(await step(a, b, climb, "Go up"), "applied: ");
+    assert.equal(await step(a, b, undo, "undo"), "applied: moving Thorn up the stairs");
+    await reconnect(a, b, "Ana back");
+    same(a, b, "untouched");
+    /** A room as it is, with Ana's frames or view changed by hand. */
+    const with_ = (x: Twin, over: Partial<Seat>): Twin => ({ ...x, seats: { ...x.seats, ana: { ...x.seats.ana, ...over } } });
+    const frames = a.seats.ana.frames;
+    // The last history line of her first connection: its epoch and its redo step's id are the server's own.
+    const at = frames.slice(0, a.anaFrom).findLastIndex((f) => f.includes('"t":"history"'));
+    const line = JSON.parse(frames[at]!) as { epoch: string; play: { redo: { head: { id: string } } } };
+    const [epoch, head] = [line.epoch, line.play.redo.head.id];
+    assert.ok(epoch.match(UUID) && head.match(UUID) && epoch !== head);
+    const swapped = (to: string) => frames.map((f, k) => (k === at ? f.split(head).join(to) : f));
+    assert.throws(() => same(with_(a, { frames: swapped(a.hidden.owl!) }), b, "an owl for a step"), /was sent something hidden/, "a hidden id in her first connection's frames is refused raw");
+    assert.throws(() => same(with_(a, { frames: swapped(epoch) }), b, "an epoch for a step"), /was sent the same frames/, "two of the server's ids do not read alike");
+    assert.throws(() => same(with_(a, { frames: swapped(uuidv7()) }), b, "a new id for a step"), /was sent the same frames/, "an id met once more than in the other room shifts the names");
+    const extra = (x: Twin, n: number) => with_(x, { view: { ...x.seats.ana.view, templates: { ...x.seats.ana.view.templates, ...Object.fromEntries(Array.from({ length: n }, () => [uuidv7(), { shape: "sphere" }])) } } as ProjectedState });
+    assert.throws(() => same(extra(a, 1), b, "a record too many"), /an id the test did not make stands at templates/);
+    assert.throws(() => same(extra(a, 2), extra(b, 2), "the same records too many in both"), /an id the test did not make stands at templates/, "a generated name covers no record's key, alike in both rooms or not");
+    // An id of the server's own outside its places, the same way in both rooms, is refused too.
+    const moved = (x: Twin) => with_(x, { you: { ...x.seats.ana.you, sceneId: (JSON.parse(x.seats.ana.frames.find((f) => f.includes('"t":"history"'))!) as { epoch: string }).epoch } });
+    assert.throws(() => same(moved(a), moved(b), "an epoch for a floor"), /an id the test did not make stands at sceneId/);
+    const named = (x: Twin, n: number) => with_(x, { view: { ...x.seats.ana.view, templates: { ...x.seats.ana.view.templates, ...Object.fromEntries(Array.from({ length: n }, (_, k) => [`extra${k}`, { shape: "sphere" }])) } } as ProjectedState });
+    assert.throws(() => same(named(a, 2), named(b, 1), "two records against one"), /holds the same room/);
+    assert.throws(() => same(with_(a, { view: { ...a.seats.ana.view, note: a.hidden.ward } as unknown as ProjectedState }), b, "a hidden id held"), /holds something hidden/);
+    same(a, b, "untouched still");
+    close(a, b);
+  });
 
   for (const [name, change] of [
     ["kept as they are", null],
@@ -800,8 +891,6 @@ describe("a climb's undo and redo over the wire with passengers and areas player
         // Her device drops between the first undo and its redo: the step is the member's, and the new snapshot tells nothing more.
         if (i === 0) await reconnect(a, b, "Ana back");
       }
-      const secrets = [a.hidden.owl!, a.hidden.aura!, a.hidden.ward!, '"Owl"'];
-      for (const s of all(a)) assert.deepEqual(naming(s, secrets), [], `${s.name} gets nothing hidden`);
       close(a, b);
     });
   }
@@ -813,6 +902,7 @@ describe("a climb's undo and redo over the wire with passengers and areas player
       assert.equal(await step(a, b, climb, "Go up"), "applied: ");
       if (from === "redo") assert.equal(await step(a, b, undo, "undo first"), "applied: moving Thorn up the stairs");
       const late = uuidv7();
+      a.forbidden.push(late);
       await unseen(a, b, [{ t: "template.create", template: area(late, from === "undo" ? a.upper : a.ground, a.dmId, a.thorn) } as Op], "the DM's area unseen");
       const steps = from === "undo" ? ([[undo, "undo"], [redo, "redo"], [undo, "undo"]] as const) : ([[redo, "redo"], [undo, "undo"], [redo, "redo"]] as const);
       for (const [i, [op, words]] of steps.entries()) {
@@ -822,7 +912,6 @@ describe("a climb's undo and redo over the wire with passengers and areas player
         assert.deepEqual([state.tokens[a.thorn]!.sceneId, state.templates[late]!.sceneId, state.templates[late]!.attachedTo], [where, where, a.thorn], `${words} ${i + 1}: the area is on Thorn's floor, still attached`);
         if (i === 0) await reconnect(a, b, "Ana back");
       }
-      for (const s of all(a)) assert.deepEqual(naming(s, [late]), [], `${s.name} gets nothing of the area`);
       close(a, b);
     });
 
@@ -837,12 +926,11 @@ describe("a climb's undo and redo over the wire with passengers and areas player
       }
       await alike(a, b, "fog on both floors");
       for (const s of all(a)) assert.deepEqual(Object.keys((s.view as { floorLinks?: object }).floorLinks ?? {}), [], `${s.name} holds no end under the fog`);
+      // No frame so far names a ladder, and none may from here on.
+      a.forbidden.push("ladder");
       await unseen(a, b, [{ t: "floorLink.update", linkId: a.link, patch: { kind: "ladder" } } as Op], "the kind changed unseen");
-      const mark = all(a).map((s) => s.frames.length);
       assert.equal(await step(a, b, from === "undo" ? undo : redo, from), `refused invalid: could not ${from} moving Thorn up the stairs: the stairs changed`);
       await reconnect(a, b, "Ana back");
-      for (const [i, s] of [a.seats.bree, a.seats.tv].entries()) assert.doesNotMatch(JSON.stringify(s.frames.slice(mark[i + 1])), /ladder/, `${s.name} is told of no ladder`);
-      assert.doesNotMatch(JSON.stringify(a.seats.ana.frames), /ladder/, "Ana's new snapshot and frames name no ladder");
       close(a, b);
     });
   }
