@@ -2312,6 +2312,39 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     }
   });
 
+  test("qe-5b. a chip for a party member's character token leaves its row once Apply lands, so a second tap cannot fill and apply it again (LP34-HP-1)", async () => {
+    const wren = { character: randomUUID(), token: randomUUID() };
+    await ops!.send({ t: "room.update", settings: { playersApplyDamage: true } });
+    try {
+      const sceneId = dmSocket.state!.meta.playerSceneId!;
+      await ops!.send({ t: "character.create", character: { id: wren.character, name: "Wren", size: "medium", ownerIds: [], actor: THORN_ACTOR, level: 3, stats: THORN_STATS } });
+      await ops!.send({ t: "token.create", token: { id: wren.token, sceneId, kind: "pc", name: "Wren", size: "medium", x: 7, y: qe.row, visibility: "all", disposition: "ally", actor: { ref: wren.character } } });
+      await waitFor("Wren on Pat's phone", () => playerSocket.state?.tokens[wren.token] ?? null);
+      await closeAll(player);
+      const total = await patDamage();
+      const sheet = player.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
+      const last = sheet.locator("[data-dice-last]");
+      await last.getByRole("group", { name: "Apply to" }).waitFor();
+      const fill = last.getByRole("button", { name: `Fill ${total} Slashing damage for Wren`, exact: true });
+      assert.ok((await chipNames(last)).includes("Wren"), "Wren's chip is offered before Apply");
+      const before = hpOf(wren.token);
+      await fill.tap();
+      await sheet.waitFor({ state: "hidden" });
+      await player.getByRole("button", { name: "Apply", exact: true }).first().tap();
+      await waitFor("Wren hurt by Pat's Apply", () => (hpOf(wren.token) === Math.max(0, before - total) ? true : null));
+      await openDicePhone(player);
+      await last.getByText(String(total), { exact: true }).first().waitFor();
+      await player.waitForTimeout(400);
+      assert.ok(!(await chipNames(last)).includes("Wren"), "Wren's chip stayed after Apply landed");
+      assert.equal(await fill.count(), 0, "a second tap could fill Wren again");
+    } finally {
+      await ops!.send({ t: "room.update", settings: { playersApplyDamage: false } });
+      await closeAll(player);
+      await ops!.send({ t: "token.delete", tokenId: wren.token }).catch(() => undefined);
+      await ops!.send({ t: "character.delete", characterId: wren.character }).catch(() => undefined);
+    }
+  });
+
   test("qe-6. with the setting off, Pat's own damage roll offers no chips (QOL audit Q2)", async () => {
     await waitFor("the setting off on Pat's phone", () => (playerSocket.state?.meta.settings.playersApplyDamage === false ? true : null));
     await closeAll(player);
