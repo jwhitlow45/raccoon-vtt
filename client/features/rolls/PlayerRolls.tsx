@@ -24,7 +24,7 @@ import { GRAB_ATTR, GRAB_STYLE, useSheetSwipe } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { revealAndFocus } from "../../lib/reveal.ts";
 import { useStore } from "zustand";
-import { barDockSlot, placedChrome, stripSqueezed, type CardAt } from "../../canvas/barDock.ts";
+import { barDockSlot, placedChrome, type CardAt } from "../../canvas/barDock.ts";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { useScoped } from "../../state/scope.ts";
 import { sheetOpen, type OpAnswer, type OpRefusal } from "../../state/types.ts";
@@ -91,6 +91,7 @@ import {
 } from "./logic.ts";
 import { answerChoiceMarks, requestMarks, rowTest, type LevelOf } from "./marks.ts";
 import { cardStyle, focusable } from "./parts.tsx";
+import { footFold, measureWhy, NO_WHY, WHY_QUIET_ATTR, type WhyLines } from "./whyLines.ts";
 
 const NO_ROLLS = {};
 
@@ -111,8 +112,6 @@ type FootNeed = {
  * Measured from then on.
  */
 const FOOT_NEED_ESTIMATE: FootNeed = { whole: 134, least: 106 };
-/** The line under a waiting Roll and its gap, in px, until one has shown (RollCard quietWhy). */
-const WHY_ESTIMATE = 22;
 
 /** What a card at the screen's foot stands on, and how high it may reach (RollCard `stand`). */
 type FootStand = "options" | "toolbar" | "screen";
@@ -228,32 +227,9 @@ export function PlayerRolls() {
   const room = chrome ? size.height - chrome.top - chrome.bottom : Infinity;
   const tooShort = atFoot && room < need.whole;
   const onToolbar = tooShort && summoned === shown?.id;
-  /*
-   * Why Roll waits keeps to screen readers where its line would squeeze a
-   * held strip (RollCard quietWhy). Both questions read the card's height
-   * with its lines shown, from the last measure and whether its lines
-   * showed then (`footQuiet`), since a folded card keeps its last height:
-   * keeping the lines back, which frees the room, never brings them
-   * straight back, and a card that folded with its lines showing comes back
-   * without them.
-   */
-  const whyPx = useRef(WHY_ESTIMATE);
-  const footQuiet = useRef(false);
-  const quietNow = useRef(false);
-  const footWith = footHeight + (footQuiet.current ? whyPx.current : 0);
-  const quietWhy = atFoot && chrome !== null && stripSqueezed({ viewport: size, chrome, foot: footWith, held: heldStrip });
-  quietNow.current = quietWhy;
-  const squeezed = chrome !== null && stripSqueezed({ viewport: size, chrome, foot: quietWhy ? footWith - whyPx.current : footWith, held: heldStrip });
-  useLayoutEffect(() => {
-    const card = cardRef.current;
-    if (quietWhy || !card || card.offsetHeight === 0) return;
-    const lines = [...card.querySelectorAll<HTMLElement>(".rvtt-roll-why")];
-    if (lines.length === 0) return;
-    // Each line takes its height and its grid's gap, in the card's own pixels as `foot` is.
-    const px = lines.reduce((sum, el) => sum + el.getBoundingClientRect().height + parseFloat(getComputedStyle(el.parentElement ?? el).rowGap || "0"), 0) / zoom;
-    // A line a short screen's rule already keeps back measures 1 px, and the estimate stands for it.
-    whyPx.current = px > lines.length * 2 ? px : lines.length * WHY_ESTIMATE;
-  });
+  // Why Roll waits keeps to screen readers where its line would squeeze a held strip (whyLines.ts), read from the card's last measure.
+  const [why, setWhy] = useState<WhyLines>(NO_WHY);
+  const { quietWhy, squeezed } = footFold({ viewport: size, chrome, foot: footHeight, held: heldStrip, atFoot, why: why.id === shown?.id ? why : NO_WHY });
   const toolbarRoom = chrome ? size.height - chrome.top - chrome.toolbar : Infinity;
   const screenRoom = chrome ? size.height - chrome.safe.top - chrome.toolbar : Infinity;
   const decided = {
@@ -281,6 +257,7 @@ export function PlayerRolls() {
   useLayoutEffect(() => () => dockStore.setState({ columnRollAsked: false }), [dockStore]);
   useLayoutEffect(() => {
     const el = cardRef.current;
+    const id = shown?.id;
     if (!atFoot || !el) {
       if (dockStore.getState().foot !== 0) dockStore.setState({ foot: 0 });
       return;
@@ -288,8 +265,9 @@ export function PlayerRolls() {
     // Folded, the card has no height: it keeps the last it had, so folding it never moves the bar.
     const measure = () => {
       const height = el.getBoundingClientRect().height / zoom;
-      if (height > 0) footQuiet.current = quietNow.current;
       if (height > 0 && dockStore.getState().foot !== height) dockStore.setState({ foot: height });
+      // Measured with the height, so the fold reads both from one layout, and as state, so a change renders again.
+      if (height > 0 && id !== undefined) setWhy((was) => measureWhy(el, id, zoom, was));
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -1156,7 +1134,7 @@ function CreatureAnswer(props: {
                 </div>
                 {/* Shown, since a disabled Roll's title is no help on a phone. A short screen keeps it for screen readers only, where a line more folds the card (globals.css, rvtt-roll-why), and so does a held strip its line would squeeze (quietWhy). */}
                 {waitsFor ? (
-                  <div id={whyId} className="rvtt-roll-why" style={props.quietWhy === true ? VISUALLY_HIDDEN : { fontSize: theme.font.small, color: theme.color.textMuted }}>
+                  <div id={whyId} className="rvtt-roll-why" {...(props.quietWhy === true ? { [WHY_QUIET_ATTR]: "", style: VISUALLY_HIDDEN } : { style: { fontSize: theme.font.small, color: theme.color.textMuted } })}>
                     {waitsFor}
                   </div>
                 ) : null}
