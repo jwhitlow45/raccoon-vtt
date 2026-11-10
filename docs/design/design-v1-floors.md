@@ -1,10 +1,10 @@
-# Several floors in one scene: phases 1 and 2
+# Several floors in one scene: phases 1 to 3
 
 ## Summary
 
 A scene can hold a tower, a keep or a cellar as up to 8 floors. Each floor is a scene linked to its main floor, so it keeps its own map, build, fog, light, weather, scene sound, tokens, traps and explored ground, while the Scenes list, the grid shape, the 500 tokens, the 200 areas and the size budget belong to the whole scene. The DM builds floors in the scene's settings and moves creatures between them with Move to floor. A player's device holds only the floors their party has reached and the floors where a creature they own stands, and shows the floor of the creature it follows.
 
-This note is the design as built in phase 1. Phase 2 (stairs and ladders players take themselves, keeping the turn's feet) is built, and its design as built is the last part of this note. The later phases (Universal VTT files a floor, openings and falls, sight between floors) are not built. The design's full text, with its rounds of review, is kept outside the repository, and this note gives what was built and where the build went its own way. Decision ids are in the project's decisions log.
+This note is the design as built in phase 1. Phase 2 (stairs and ladders players take themselves, keeping the turn's feet) and phase 3 (floors from Universal VTT files and generated dungeons, the walking ruler over stairs, and Move to floor in the search) are built, and their designs as built are the last parts of this note. The later phases (openings and falls, sight between floors) are not built. The design's full text, with its rounds of review, is kept outside the repository, and this note gives what was built and where the build went its own way. Decision ids are in the project's decisions log.
 
 Versions: OP_VERSION 56 and SNAPSHOT_VERSION 43. The snapshot step is the identity, since `Scene.floor` and the room's `openFloors` are optional and absent reads as a scene of one floor, so no data migrates. The number moves so that an older build, which knows nothing of floors, refuses a v43 snapshot (its Delete would remove a main floor alone and leave the other floors naming a scene that is gone).
 
@@ -77,7 +77,7 @@ Where the build went its own way, with the decision ids from the decisions log (
 - **Projection.** `viewerFloors` takes a scene without floors as itself alone and skips `heldFloors` (D-261108-283), `partyFloors` is absent when empty (D-261108-280), and the DM gets every opened mark (D-261108-281).
 - **Server.** The explore step runs on every floor players see, per-player floors included. Every scene-budget refusal of a floor add reads the floor words, and players' memory is reserved on every floor of their scene (D-261108-290 to 297).
 - **A pick in Floors closes it**, because Room.tsx closes an open pop-up whenever the scene shown changes. The DM's marks say "Reached", since one opened mark cannot tell "Reached" from "Shown to players" (D-261108-300 and 301).
-- **Moving to a floor** lands a creature on the new floor's ground under its full space, since the move drops a squeeze, and keeps a flier's height. Whether it stood on the ground reads the space it stood in, squeezed or not (D-261108-425). Move to floor has no search entry, since its control is in the action bar and the More sheet, which carry no search anchors (D-261108-350).
+- **Moving to a floor** lands a creature on the new floor's ground under its full space, since the move drops a squeeze, and keeps a flier's height. Whether it stood on the ground reads the space it stood in, squeezed or not (D-261108-425). Move to floor had no search entry in this phase, since its control is in the action bar and the More sheet, which carry no search anchors (D-261108-350). Phase 3 added selection rows for it.
 - **A floor's page** has Back to Floors alone on its row with no tag, and Go to this floor on a row of its own, since a tag or a third button wrapped alone at some sizes (D-261108-351). An off Bring everyone here shows its reason as a dim line (D-261108-352).
 - **The floor on the DM's screen** wears an On screen tag in the Floors group, and the folded group says "3 floors · Upper floor on screen". "Shown" read as shown to players beside Show to players, and the page's button reads Go to this floor for the same reason (D-261108-379 and 380).
 - **The party panel** reads "On Upper floor" for a member on another floor of the scene, and a tap shows that floor (D-261108-353). A floor's map says "Loading Upper floor…" (D-261108-354).
@@ -93,7 +93,7 @@ Where the build went its own way, with the decision ids from the decisions log (
 - **A floor no player sees**, which a player holds only through a creature the DM hid, carries `unseen` on that player's copy, and the server's seen marks and every device's count of what all players see read one rule, `unseenFloor`, the DM's device included, so a drag there takes the group the server takes. A player's copy holds no opened marks to work it out from (D-261108-424).
 - **A scene of one floor is cut too** while the view holds another scene's records, as a DM's predicted ops on a scene not shown add them, so the board draws nothing new for a dungeon's Make. A view with nothing on another floor is still given back as it is (D-261108-436).
 
-Not built: Universal VTT files and generated dungeons onto a floor (phase 3), seeing between floors (phase 4), and a Move to floor entry in the search.
+Not built in phase 1: Universal VTT files and generated dungeons onto a floor, seeing between floors, and a Move to floor entry in the search. Phase 3 built the first and the last, and seeing between floors is phase 4.
 
 # Phase 2: stairs and ladders
 
@@ -114,9 +114,9 @@ Versions: OP_VERSION 58 and SNAPSHOT_VERSION 45 (`FLOOR_LINKS_OP_VERSION`, `FLOO
 
 - Cost: stairs the upper floor's height, a ladder twice it without a Climb speed, prone adding crawling's foot. No terrain, area or diagonal. The climb is the new floor's first leg, two stops on one spot, the second holding the feet, so two stops draw no line and non-owners read 0 ft.
 - A holder the requester does not receive counts as absent, so its rider climbs alone. A seated creature the requester does receive is refused (D-261109-130). A dragged creature is let go, as at a teleport.
-- A player's climb waits for the server, since players are not sent heights, and only the DM's device predicts it (D-261109-102). A second press or key sends nothing while one is out (D-261109-139).
+- A player's climb waits for the server, since only the DM's device holds the far floor whole to work the climb out, and only it predicts the climb (D-261109-102). Phase 3 sends a player who holds both floors the climb's height as `rise`, for the walking ruler, which changes neither rule. A second press or key sends nothing while one is out (D-261109-139).
 - Move to floor keeps the turn's feet too (D-261109-016).
-- The walking ruler and a drag do not route through stairs (D-261109-029). Landing sets off no trap or area reminder (D-261109-027).
+- The walking ruler and a drag do not route through stairs (D-261109-029). Phase 3 lets a walking ruler be carried over them by a button. Landing sets off no trap or area reminder (D-261109-027).
 
 ## 9. Undo
 
@@ -152,4 +152,41 @@ Where the build went its own way:
 - **The words of a kept step.** An undo that would put removed stairs back names what blocks them now in the builder's words, since no stairs stand to remove (FL2-OPUS-2). They are judged on the room as the undo would leave it, so stairs that come back with their floor are not held against the floor's absence (FL2-OPUS-10). The placer's sentence stays for stairs that stand.
 - **The far floor's limits.** A DM's climb meets the far floor's limits, its cap on lit token lights among them. A player's leaves them unread (FL2-ASTRA-03), and a player's undo or redo of a climb reads neither floor's own limits (FL2-SOL-05).
 - **The walls under an end.** `wallInside` tests only the walls whose box meets the end's box (`scripts/bench-floor-links.ts`).
-- **Not built:** the walking ruler through stairs, arrival traps, hidden stairs (D-261109-026) and a move or resize of a pair after placing (D-261109-022). Phase 3 and later bring the ruler through stairs.
+- **Not built:** arrival traps, hidden stairs (D-261109-026) and a move or resize of a pair after placing (D-261109-022). Phase 3 brought the ruler through stairs.
+
+# Phase 3: floors from files and dungeons, the ruler over stairs, the search
+
+A floor can come from a Universal VTT file or a generated dungeon, a walking ruler can be carried over stairs, and the search can move a creature to another floor. This part is the design as built. The full text, with its four rounds of review, is kept outside the repository. Decisions: D-261110-070 to 084, 110 to 119, 180 to 202.
+
+Versions: OP_VERSION 59 (`FLOOR_SOURCE_OP_VERSION`) and no SNAPSHOT_VERSION step, which stays 45. The step is the identity, since the new fields are optional and a stored add without them replays as it did. It moves so that an older build, whose strict schema would refuse a stored sourced add, refuses it cleanly (D-261110-127 numbered it 59, ahead of the privacy change).
+
+## 12. A floor from a file or a dungeon
+
+- `scene.create`'s `floor` gains `name` and `own`. `own` carries the source's size, background, grid look, automatic walls, map and file mark, and may carry fog and vision. The reducer lets it replace what `newFloorFrom` copied, patches vision as a scene patch does, and names the floor by `freeName`, which cuts by code point and numbers a taken name (D-261110-071, 072, 074).
+- A floor from a file or a dungeon is one `scene.create`, with the source's walls, lights, doors, traps and pins after it in one Setup group. `floorCreateOf` in `scenes/floorSource.ts` builds it from the scene the source would have made, so the import and the generator build as they always do and only the first op changes. Like the floor beside, with its light untouched, sends no fog or vision and copies the floor beside whole. Any other pick is sent whole, with `byClock: false`, even where it equals the floor beside, so a co-DM's edit in between never changes it (D-261110-110, 186).
+- The Floors group's **Map** (Blank, VTT file, Dungeon) sits over the two adds and is off for VTT file and Dungeon on a hex scene (D-261110-073, 075). The import dialog and Generate a dungeon take a floor target. The import's `ImportTarget` gained `kind: "floor"`, and GenerateDialog takes `floor?: FloorTarget`.
+- Both dialogs check the floor's limits (8 floors, stairs between, 50 scenes) on the latest view before sending, and the import checks again after its upload. `floorAddRefusal` and `SCENES_FULL` in `floorSource.ts` hold the rules (D-261110-187).
+- A dungeon floor's key page and pins go after the create is answered, titled from the stored name, in the same Setup group (D-261110-113). Until then the dialog cannot close, and a native close the browser makes (Chrome's, after repeated Escape) reopens it through an opt-in `keepOpen` on `useModalDialog`, so no op of this device lands inside the group (D-261110-183, 192).
+- The server fills `own.map` from its asset row (`withAssetSizes`) and checks it and its video as it checks a new scene's.
+- A floor from a source is a floor not reached, so a player holds nothing of it, and the asset route answers 404 for its map until it opens.
+
+## 13. The ruler over stairs
+
+- A walking ruler that ends on stairs to a held floor offers a button in its row. A press prices the climb, builds `prior` (the feet so far, the 5-10-5 counters, the walker's shape, and inbound only the creatures it sat on and the ends it crossed), shows the far floor and publishes the ruler there from the landing. `carry.ts` holds the rules, `walkRuler.ts` measures on from `prior`, and rulerStore keeps the carry on the device.
+- A ruler frame has two schemas. The device's goes to the server with `anchors` and `ends`, and the server's goes to receivers without them (`outboundEph`). The server sends a carried frame only to a receiver who sees every anchor and holds every end, and ends the preview on a screen in the batch that takes one of them out of that screen's copy (`lost`, the fifth parameter of `publishBatch`, run right after each connection's `ev`, D-261110-189).
+- A player's copy of an end gains `rise`, the climb's height, set where `to` is, so it comes only with `to`. A height edit is a global change. `linkHeight` reads `rise` first on any copy (D-261110-190).
+
+## Phase 3 as built
+
+Where the build went its own way:
+
+- **Only the button keeps a ruler.** `[`, `]`, the Floors menu and a follow end the ruler and its carry, as any switch ends a ruler (D-261110-197). The design's case 10 read that it goes on without `prior`.
+- **A frame over 4 KB is not sent.** The ruler keeps the last frame that fit and says once "A ruler over stairs can't take more stops. Clear it to measure again." (D-261110-196).
+- **Anchors name the walker.** A carried frame's `anchors` also name the walk's own walker, the mount for a rider, so the server withholds the frame from anyone who cannot see the creature that walks. A ruler restarted away from its landing is carried no more and sends no `prior` (D-261110-198, 199).
+- **An unexplored landing.** The design's "a straight leg fails at its first unseen square" does not hold on open ground. A stop on unseen open ground reads the straight walk, as review MV-O-21 set for any shared ruler. "No way through" shows only where the public route has none.
+- **The stairs button** keeps priority 1, so at 320 by 568 at 130% a player's row shows it with Measure, Keep and Clear behind the overflow. A ruler of one stop on a creature standing on stairs offers them too. Shared's and Straight's off reasons are tooltips.
+- **The rows of the search** show for a selected creature on any held floor of the scene in view, not only the floor on screen, and judge the floor again at Enter (D-261110-200, 201). The list and the search share `sendMoveToFloor` (D-261110-202).
+- **Words the design left open** (D-261110-192 to 195): Hide's busy words "Making the floor…", a refusal that stops the dialog in place with Back or Make still on, Map back on Blank on each open, and "Ground floor" before the first add. A lost create answer whose floor never shows within 30 seconds reads unconfirmed.
+- **The twins** (T1 to T6) are in `floors.wire.itest.ts` beside the phase 2 ones, not in `floorSources.itest.ts` (D-261110-191). The delayed create answer and the other-device split order have unit and source tests only, since an e2e cannot delay one server answer.
+- **Alignment.** The Floors group per pick and both dialogs are measured in `e2e/floors-sources.e2e.ts`, and the ruler's row in `e2e/floors-ruler.e2e.ts`, not in `e2e/alignmentRoom.ts`.
+- **Not built:** openings and falls, fliers through openings, arrival traps, hidden stairs, moving a pair, ends on different squares, Export every floor, Start a fight on every floor and a new scene from several files (D-261110-084, 111).
