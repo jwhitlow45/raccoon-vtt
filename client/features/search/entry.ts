@@ -101,6 +101,8 @@ export type SearchEntry = {
   description?: string;
   /** Ranks above the others of its tier: the selection's fields and conditions, a player's own character (design-v1-qol.md 5, Matching). */
   near?: boolean;
+  /** Rows of one kind that read in a fixed order (the floors, top first) break a tie of rank by it, before the shorter title wins. */
+  order?: number;
   act: SearchAct;
 };
 

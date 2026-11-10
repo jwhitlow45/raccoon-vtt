@@ -331,6 +331,7 @@ describe("several floors (design-v1-floors.md 18.7, D-261107-217)", () => {
       ["moveToFloor:attic", "Move to Attic", "Thorn · Opens Attic to players", "floors", true, { t: "moveToFloor", tokenId: "thorn", floorId: "attic" }],
       ["moveToFloor:upper", "Move to Upper floor", "Thorn · Opens Upper floor to players", "floors", true, { t: "moveToFloor", tokenId: "thorn", floorId: "upper" }],
     ]);
+    assert.deepEqual(rows(withSelection("thorn")).map((e) => e.order), [0, 1], "ranked in the list's order, not by the length of the name");
     // A creature with no party member moves without a consequence, and the floor it stands on has no row.
     const moth = rows(withSelection("moth"));
     assert.deepEqual(moth.map((e) => [e.title, e.where]), [["Move to Upper floor", "Moth"], ["Move to Ground floor", "Moth"]]);

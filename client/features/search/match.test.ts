@@ -156,6 +156,13 @@ describe("ranking (design-v1-qol.md 5, Matching)", () => {
     assert.deepEqual(rank([a, b], parseQuery("senses")).map((e) => e.id), ["field:a", "field:b"]);
   });
 
+  test("rows with an order keep it over the shorter title, and rows without one come after", () => {
+    const rows = ["Move to Cellar", "Move to Dungeon", "Move to Cellar 2", "Move to Upper floor"].map((title, order) => entry(title, { kind: "action", near: true, order }));
+    const plain = entry("Move to a", { kind: "action", near: true, id: "plain" });
+    const list = items([plain, ...rows].reverse());
+    assert.deepEqual(titles(list, "move to"), ["Move to Cellar", "Move to Dungeon", "Move to Cellar 2", "Move to Upper floor", "Move to a"]);
+  });
+
   test("nearness outranks the kind but not the tier", () => {
     const list = items([entry("Prone", { kind: "condition", near: true }), entry("Prone tokens", { kind: "action" }), entry("Prone", { kind: "action", id: "far" })]);
     assert.deepEqual(rank(list, parseQuery("prone")).map((e) => `${e.kind}:${e.title}`), ["condition:Prone", "action:Prone", "action:Prone tokens"]);

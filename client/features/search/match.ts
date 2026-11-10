@@ -308,6 +308,7 @@ function byRank(a: Hit, b: Hit): number {
     Number(y.near ?? false) - Number(x.near ?? false) ||
     KIND_GROUP[x.kind] - KIND_GROUP[y.kind] ||
     a.m.cost - b.m.cost ||
+    (x.order === y.order ? 0 : (x.order ?? Infinity) < (y.order ?? Infinity) ? -1 : 1) ||
     x.title.length - y.title.length ||
     titles.compare(x.title, y.title) ||
     titles.compare(x.where, y.where) ||
