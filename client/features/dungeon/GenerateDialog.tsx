@@ -1,24 +1,20 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { GROUND_FLOOR } from "#shared/reducer/floors.ts";
-import { LEVEL_BANDS, type LevelBand } from "#shared/srd/traps.ts";
 import { Button } from "../../components/Button.tsx";
 import { Dialog, PINNED_FOOT } from "../../components/Dialog.tsx";
-import { ErrorText, Input } from "../../components/Field.tsx";
-import { Held } from "../../components/Held.tsx";
+import { ErrorText } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help, Note } from "../../components/Panel.tsx";
-import { Segmented } from "../../components/Segmented.tsx";
-import { Switch } from "../../components/Switch.tsx";
 import { fitSlot, grownWithin } from "../../canvas/fitSlot.ts";
 import { uiScale } from "../device/settings.ts";
 import { ON_BOARD, ON_BOARD_STYLE, theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
-import { BAND_NAMES } from "../traps/rules.ts";
 import { builderScene, cleanName, pickNow, type NewSceneIntent, type SceneInput } from "../scenes/create.ts";
 import { floorAddRefusal, floorCreateOf, type FloorTarget } from "../scenes/floorSource.ts";
 import { CHECK_MS } from "../uvtt/rules.ts";
 import { NumberInput } from "../scenes/controls.tsx";
+import { Choice, Choices as ChoiceRows } from "./Choices.tsx";
 import { closePreviews, preview, warmPreviews, type Preview } from "./client.ts";
 import { counted, drawable, flowStep, readiness, startFlow, type Flow, type FlowEvent } from "./flow.ts";
 import { journalFull } from "./keyHold.ts";
@@ -27,48 +23,17 @@ import { LookCloser } from "./LookCloser.tsx";
 import { SCENE_PLACEHOLDER, withIds } from "./ops.ts";
 import { DungeonPreview, type Drawn } from "./Preview.tsx";
 import { keptSize, loadChoices, saveChoices, settingsOf, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
-import { formatSeed, newSeed, parseSeed, type Seed } from "./seed.ts";
-import { PresetSlider, type Preset } from "./PresetSlider.tsx";
-import {
-  CHOICE_NAMES,
-  clampRooms,
-  DRESSINGS,
-  HEIGHT_PRESETS,
-  HEIGHTS_MAX,
-  HEIGHTS_STEP,
-  LIT_MAX,
-  LIT_PRESETS,
-  LIT_STEP,
-  MAX_SIDE,
-  MIN_ROOMS,
-  MIN_SIDE,
-  roomCap,
-  SECRET_PRESETS,
-  SECRETS_MAX,
-  THEMES,
-  TRAP_PRESETS,
-  TRAPS_MAX,
-  type SizeChoice,
-} from "./settings.ts";
+import { formatSeed, newSeed, parseSeed } from "./seed.ts";
+import { CHOICE_NAMES, MAX_SIDE, MIN_SIDE, type DungeonSettings, type SizeChoice } from "./settings.ts";
 import { sendDungeon, warmOpChecks } from "./send.ts";
 import {
-  DEAD_ENDS_HELP,
-  DENSITY_HELP,
-  DRESSING_HELP,
   entranceSide,
   FIT_NONE,
   fitLine,
   floorKeyName,
   floorOutcomeText,
   floorTitle,
-  HEIGHTS_HELP,
-  heightsWords,
-  KEY_FULL,
-  KEY_HELP,
-  LIT_HELP,
   lightLine,
-  litWords,
-  LOOPS_HELP,
   MAKE_FLOOR,
   MAKE_SCENE,
   makingLine,
@@ -76,30 +41,13 @@ import {
   fogLine,
   NOT_MADE,
   outcomeText,
-  PARTY_LEVEL_HELP,
   PICTURE_FAILED,
   previewName,
-  roomsHint,
-  SECRETS_CAVE,
-  SECRETS_HELP,
-  secretsWords,
-  SEED_BAD,
-  SEED_HELP,
-  SEED_OTHER_VERSION,
   sizeLine,
   startScene,
   statusLine,
-  THEME_HELP,
-  TRAPS_HELP,
-  trapsWords,
   WAITING,
-  WIDE_HELP,
 } from "./words.ts";
-
-const HEIGHT_MARKS: readonly Preset[] = Object.entries(HEIGHT_PRESETS).map(([label, value]) => ({ label, value }));
-const TRAP_MARKS: readonly Preset[] = Object.entries(TRAP_PRESETS).map(([label, value]) => ({ label, value }));
-const SECRET_MARKS: readonly Preset[] = Object.entries(SECRET_PRESETS).map(([label, value]) => ({ label, value }));
-const LIT_MARKS: readonly Preset[] = Object.entries(LIT_PRESETS).map(([label, value]) => ({ label, value }));
 
 /** A change of choice or seed draws a new preview after this much quiet (4.3). */
 const QUIET_MS = 150;
@@ -181,7 +129,6 @@ export function GenerateDialog(props: {
   const hideRef = useRef<HTMLButtonElement>(null);
   // A scene's one floor takes this name with its first add.
   const besideName = useRoomView((s) => (props.floor ? (s.view?.scenes[props.floor.beside]?.floor?.name ?? GROUND_FLOOR) : GROUND_FLOOR));
-  const themeRef = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const layout = useBodyLayout(root);
 
@@ -212,7 +159,7 @@ export function GenerateDialog(props: {
 
   // Focus starts on Theme (section 11), after the dialog's own first focus.
   useLayoutEffect(() => {
-    themeRef.current?.querySelector<HTMLInputElement>("input:checked")?.focus({ preventScroll: true });
+    root.current?.querySelector<HTMLInputElement>('[data-choice="theme"] input:checked')?.focus({ preventScroll: true });
   }, []);
 
   useEffect(() => saveChoices(props.roomId, choices, undefined, start.kept), [props.roomId, choices, start.kept]);
@@ -392,9 +339,6 @@ export function GenerateDialog(props: {
     </DungeonPreview>
   );
 
-  const cave = choices.theme === "cave";
-  const roomsLimit = roomCap(w, h);
-  const rooms = clampRooms(choices.rooms, w, h);
   const fit = current ? fitLine(current.summary) : null;
   // Pinned above the foot with the fog warning, so a DM scrolled down sees why Make is off.
   const errorLine = failed ? <ErrorText>{failed.text}</ErrorText> : null;
@@ -403,144 +347,38 @@ export function GenerateDialog(props: {
   const choicesBox = (
     <div style={{ display: "grid", gap: theme.space(4), minWidth: 0, alignContent: "start" }}>
       {problem === null && !ready.pictureFailed && fit ? <Note>{fit}</Note> : null}
-      {/* Held while Make sends and once a scene exists, so no choice draws a preview Make can no longer send. */}
-      <Held held={locked} style={{ display: "grid", gap: theme.space(4), minWidth: 0 }}>
-        <div ref={themeRef}>
-          <Choice<Choices["theme"]>
-            name="Theme"
-            value={choices.theme}
-            onChange={(theme) => set({ theme })}
-            options={THEMES.map((value) => ({ value, label: CHOICE_NAMES.theme[value] }))}
-            help={THEME_HELP[choices.theme]}
-          />
-        </div>
-        <Choice<SizeChoice>
-          name="Size"
-          value={choices.size}
-          onChange={(size) => setSize({ size })}
-          options={[
-            { value: "small", label: "Small" },
-            { value: "medium", label: "Medium" },
-            { value: "large", label: "Large" },
-            { value: "custom", label: "Custom" },
-          ]}
-          help={sizeLine(w, h, feetPerCell)}
-        >
-          {choices.size === "custom" ? (
-            <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
-              <NumberInput label="Across" value={choices.across} min={MIN_SIDE} max={MAX_SIDE} onChange={(across) => setSize({ across })} />
-              <span aria-hidden>×</span>
-              <NumberInput label="Down" value={choices.down} min={MIN_SIDE} max={MAX_SIDE} onChange={(down) => setSize({ down })} />
-            </div>
-          ) : null}
-        </Choice>
-        <Named name="Rooms" help={roomsHint(roomsLimit)}>
-          {(nameId, helpId) => (
-            <div role="group" aria-labelledby={nameId} aria-describedby={helpId}>
-              <NumberInput label="Rooms" value={rooms} min={MIN_ROOMS} max={roomsLimit} onChange={(rooms) => set({ rooms })} />
-            </div>
-          )}
-        </Named>
-        <Choice<Choices["density"]>
-          name="Density"
-          value={choices.density}
-          onChange={(density) => set({ density })}
-          options={[
-            { value: "sparse", label: "Sparse" },
-            { value: "normal", label: "Normal" },
-            { value: "dense", label: "Dense" },
-          ]}
-          help={DENSITY_HELP}
-        />
-        <Choice<Choices["corridors"]>
-          name="Corridors"
-          value={choices.corridors}
-          onChange={(corridors) => set({ corridors })}
-          options={[
-            { value: "straight", label: "Straight" },
-            { value: "bending", label: "Bending" },
-            { value: "winding", label: "Winding" },
-          ]}
-        />
-        <Choice<"narrow" | "wide">
-          name="Corridor width"
-          value={choices.wide ? "wide" : "narrow"}
-          onChange={(v) => set({ wide: v === "wide" })}
-          options={[
-            { value: "narrow", label: "Narrow" },
-            { value: "wide", label: "Wide" },
-          ]}
-          help={WIDE_HELP}
-        />
-        <Switch label="Extra ways around" help={LOOPS_HELP} checked={choices.loops} onChange={(loops) => set({ loops })} />
-        <Switch label="Dead ends" help={DEAD_ENDS_HELP} checked={choices.deadEnds} onChange={(deadEnds) => set({ deadEnds })} />
-        <PresetSlider
-          name="Heights"
-          value={choices.heights}
-          min={0}
-          max={HEIGHTS_MAX}
-          step={HEIGHTS_STEP}
-          presets={HEIGHT_MARKS}
-          words={heightsWords(choices.heights, rooms)}
-          help={HEIGHTS_HELP}
-          onChange={(heights) => set({ heights })}
-        />
-        <PresetSlider
-          name="Traps"
-          value={choices.traps}
-          min={0}
-          max={TRAPS_MAX}
-          step={1}
-          presets={TRAP_MARKS}
-          words={trapsWords(choices.traps, rooms)}
-          help={choices.traps === 0 ? undefined : TRAPS_HELP}
-          onChange={(traps) => set({ traps })}
-        />
-        {choices.traps === 0 ? null : (
-          <Choice<LevelBand>
-            name="Party level"
-            value={choices.band}
-            onChange={(band) => set({ band })}
-            options={LEVEL_BANDS.map((b) => ({ value: b, label: BAND_NAMES[b].replace("Levels ", ""), title: BAND_NAMES[b] }))}
-            help={PARTY_LEVEL_HELP}
-          />
-        )}
-        {/* Caves have no doors. The DM's own pick stays in the choices and comes back with the next theme. */}
-        <Held held={cave} style={{ display: "grid", minWidth: 0 }}>
-          <PresetSlider
-            name="Secret doors"
-            value={cave ? 0 : choices.secrets}
-            min={0}
-            max={SECRETS_MAX}
-            step={1}
-            presets={SECRET_MARKS}
-            words={secretsWords(cave ? 0 : choices.secrets, rooms)}
-            help={cave ? SECRETS_CAVE : choices.secrets === 0 ? undefined : SECRETS_HELP}
-            onChange={(secrets) => set({ secrets })}
-          />
-        </Held>
-        <PresetSlider
-          name="Lit rooms"
-          value={choices.lit}
-          min={0}
-          max={LIT_MAX}
-          step={LIT_STEP}
-          presets={LIT_MARKS}
-          words={litWords(choices.lit, rooms)}
-          help={LIT_HELP[choices.theme]}
-          onChange={(lit) => set({ lit })}
-        />
-        {choices.lit > 0 ? <LightLine kept={keptLit} onToggle={() => setKeptLit((k) => !k)} /> : null}
-        <Choice<Choices["dressing"]>
-          name="Dressing"
-          value={choices.dressing}
-          onChange={(dressing) => set({ dressing })}
-          options={DRESSINGS.map((value) => ({ value, label: CHOICE_NAMES.dressing[value] }))}
-          help={DRESSING_HELP}
-        />
-        <Switch label="DM key" help={keyHeld ? KEY_FULL : KEY_HELP} checked={choices.key && !keyHeld} disabled={keyHeld} onChange={(key) => set({ key })} />
-      </Held>
-      <SeedField text={seedText} seed={parsed.ok ? parsed.seed : null} disabled={locked} error={parsed.ok ? null : SEED_BAD} note={parsed.ok && parsed.otherVersion ? SEED_OTHER_VERSION : SEED_HELP} onChange={setSeedText} />
+      <ChoiceRows
+        value={settings}
+        onChange={(next) => set(changed(settings, next))}
+        held={locked}
+        grid="squares"
+        wing={false}
+        keyHeld={keyHeld}
+        size={
+          <Choice<SizeChoice>
+            name="Size"
+            value={choices.size}
+            onChange={(size) => setSize({ size })}
+            options={[
+              { value: "small", label: "Small" },
+              { value: "medium", label: "Medium" },
+              { value: "large", label: "Large" },
+              { value: "custom", label: "Custom" },
+            ]}
+            help={sizeLine(w, h, feetPerCell)}
+          >
+            {choices.size === "custom" ? (
+              <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
+                <NumberInput label="Across" value={choices.across} min={MIN_SIDE} max={MAX_SIDE} onChange={(across) => setSize({ across })} />
+                <span aria-hidden>×</span>
+                <NumberInput label="Down" value={choices.down} min={MIN_SIDE} max={MAX_SIDE} onChange={(down) => setSize({ down })} />
+              </div>
+            ) : null}
+          </Choice>
+        }
+        light={<LightLine kept={keptLit} onToggle={() => setKeptLit((k) => !k)} />}
+        seed={{ text: seedText, onChange: setSeedText }}
+      />
     </div>
   );
 
@@ -638,6 +476,17 @@ export function previewSide(width: number, height: number): number {
   return Math.max(0, Math.floor(Math.min(Math.max(room / 2, room - theme.layout.sidePanelWidth), height)));
 }
 
+/**
+ * The choices a row change touched, so a field the rows show clamped (Rooms
+ * past the size's cap) keeps the DM's own value until they change it, and a
+ * later size change still reads it (remembered.ts `withSize`).
+ */
+export function changed(before: DungeonSettings, after: DungeonSettings): Partial<Choices> {
+  const patch: Record<string, unknown> = {};
+  for (const k of Object.keys(after) as (keyof DungeonSettings)[]) if (k !== "w" && k !== "h" && after[k] !== before[k]) patch[k] = after[k];
+  return patch as Partial<Choices>;
+}
+
 /** The light line: what the scene starts as with lights in it, and the one tap that flips it. Focus stays on the button as the words swap. */
 function LightLine(props: { kept: boolean; onToggle(): void }) {
   const line = lightLine(props.kept);
@@ -649,86 +498,6 @@ function LightLine(props: { kept: boolean; onToggle(): void }) {
           {line.action}
         </Button>
       </div>
-    </div>
-  );
-}
-
-const NAME_STYLE = { fontSize: theme.font.body14, fontWeight: theme.weight.strong } as const;
-
-function Named(props: { name: string; help?: ReactNode; children: (nameId: string, helpId: string | undefined) => ReactNode }) {
-  const nameId = useId();
-  const helpId = useId();
-  return (
-    <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
-      <span id={nameId} style={NAME_STYLE}>
-        {props.name}
-      </span>
-      {props.children(nameId, props.help ? helpId : undefined)}
-      {props.help ? <Help id={helpId}>{props.help}</Help> : null}
-    </div>
-  );
-}
-
-/** A named choice with its help under it, the group named by the visible name. */
-function Choice<T extends string>(props: {
-  name: string;
-  value: T;
-  options: readonly { value: T; label: string; title?: string }[];
-  onChange(value: NoInfer<T>): void;
-  help?: ReactNode;
-  children?: ReactNode;
-}) {
-  const nameId = useId();
-  return (
-    <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
-      <span id={nameId} style={NAME_STYLE}>
-        {props.name}
-      </span>
-      <Segmented<T> labelledBy={nameId} value={props.value} options={props.options} onChange={props.onChange} description={props.help} />
-      {props.children}
-    </div>
-  );
-}
-
-/** The seed's field. Copy seed copies the seed as read, in its usual form, whatever spacing or case was typed. */
-function SeedField(props: { text: string; seed: Seed | null; disabled: boolean; error: string | null; note: string | null; onChange(text: string): void }) {
-  const id = useId();
-  const hintId = useId();
-  const { seed } = props;
-  const copy = () => {
-    if (seed !== null) void navigator.clipboard?.writeText(formatSeed(seed)).catch(() => {});
-  };
-  return (
-    <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
-      <label htmlFor={id} style={NAME_STYLE}>
-        Seed
-      </label>
-      <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
-        <Input
-          id={id}
-          value={props.text}
-          error={!!props.error}
-          disabled={props.disabled}
-          maxLength={40}
-          autoComplete="off"
-          autoCapitalize="characters"
-          spellCheck={false}
-          aria-invalid={props.error ? true : undefined}
-          aria-describedby={props.error || props.note ? hintId : undefined}
-          onChange={(e) => props.onChange(e.target.value)}
-          style={{ flex: "1 1 12em", minWidth: 0, fontFamily: theme.font.mono }}
-        />
-        <Button onClick={copy} disabled={seed === null}>
-          Copy seed
-        </Button>
-      </div>
-      {props.error ? (
-        <div id={hintId} role="alert" style={{ fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.dangerText }}>
-          {props.error}
-        </div>
-      ) : props.note ? (
-        <Help id={hintId}>{props.note}</Help>
-      ) : null}
     </div>
   );
 }

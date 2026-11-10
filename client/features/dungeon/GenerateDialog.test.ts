@@ -61,16 +61,20 @@ test("DGFIX-FU-1: the errors share the pinned foot with the fog warning, and the
  * the preview's bottom left corner, and the light line stays in the tree
  * through a Lit rooms change.
  */
+// The rows are the shared Choices (phase 3, D-261110-239).
+const rows = readFileSync(new URL("./Choices.tsx", import.meta.url), "utf8");
+
 test("DG2C: Theme offers every theme, and a theme change touches no other choice", () => {
-  assert.match(source, /options=\{THEMES\.map\(/);
-  assert.match(source, /onChange=\{\(theme\) => set\(\{ theme \}\)\}/);
+  assert.match(rows, /options=\{THEMES\.map\(/);
+  assert.match(rows, /onChange=\{\(theme\) => set\(\{ theme \}\)\}/);
+  assert.match(source, /onChange=\{\(next\) => set\(changed\(settings, next\)\)\}/);
 });
 
 test("DG2C: Cave holds Secret doors at None for display and keeps the DM's pick in the choices", () => {
-  assert.match(source, /<Held held=\{cave\}/);
-  assert.match(source, /value=\{cave \? 0 : choices\.secrets\}/);
-  assert.match(source, /words=\{secretsWords\(cave \? 0 : choices\.secrets, rooms\)\}/);
-  assert.doesNotMatch(source, /set\(\{ secrets: 0 \}\)/);
+  assert.match(rows, /<Held held=\{cave\}/);
+  assert.match(rows, /value=\{cave \? 0 : value\.secrets\}/);
+  assert.match(rows, /words=\{secretsWords\(cave \? 0 : value\.secrets, rooms\)\}/);
+  assert.doesNotMatch(rows, /set\(\{ secrets: 0 \}\)/);
 });
 
 // The lanes meet here (phase 2 section 6): a send compares references through withIds' map.
@@ -79,7 +83,8 @@ test("DG2M: Make sends withIds' map with the ops", () => {
 });
 
 test("DG2C: the light line shows while Lit rooms is above None, and its tap lives in the dialog", () => {
-  assert.match(source, /choices\.lit > 0 \? <LightLine kept=\{keptLit\}/);
+  assert.match(rows, /\{value\.lit > 0 \? props\.light : null\}/);
+  assert.match(source, /light=\{<LightLine kept=\{keptLit\}/);
   assert.match(source, /const \[keptLit, setKeptLit\] = useState\(false\)/);
   assert.match(source, /const startsDark = choices\.lit > 0 && !keptLit/);
 });

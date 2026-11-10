@@ -24,6 +24,12 @@ export const THEME_HELP = {
 } as const;
 export const DENSITY_HELP = "How much of the map the rooms fill.";
 export const WIDE_HELP = "Wide corridors and their doorways are 2 squares across, with double doors, so Large creatures walk them without squeezing once the doors are open.";
+/** Corridor width's help on hexes (phase 3, 7). */
+export const WIDE_HELP_HEX = "Wide corridors and their doorways are 2 hexes across, with a door on each of a doorway's three sides, so Large creatures walk them without squeezing once the doors are open.";
+/** Under Theme on hexes (phase 3, 7, D-261110-160). */
+export const HEX_THEME_NOTE = "On hexes rooms are drawn with wall lines: no painted floors, and rubble and water are difficult ground.";
+/** Heights' help on a wing whose scene's stairs make no walls (phase 3, 3.2, D-261110-235). */
+export const WING_FLAT = "Stairs make no walls on this scene, so the wing stays flat.";
 export const LOOPS_HELP = "Adds loops, so the way back is not always the way in.";
 export const HEIGHTS_HELP = "Rooms raised or sunk 5 or 10 ft, with stairs to them. The entrance room stays flat.";
 export const TRAPS_HELP = "Example traps from the SRD. Players see one only once it is found.";
@@ -104,9 +110,9 @@ export function sizeLine(w: number, h: number, feetPerCell: number): string {
   return `${w} × ${h} squares (${w * feetPerCell} by ${h * feetPerCell} ft)`;
 }
 
-/** The cap is what the size could take at best. A Wide, Sparse or small map fits fewer, and the status line says how many did (DG-ROOMS-CAP). */
-export function roomsHint(max: number): string {
-  return `2 to ${max} on this size. Fewer fit when the layout is tight.`;
+/** The cap is what the size could take at best. A Wide, Sparse or small map fits fewer, and the status line says how many did (DG-ROOMS-CAP). A wing's is its area's (phase 3, 3.3). */
+export function roomsHint(max: number, wing = false): string {
+  return `2 to ${max} ${wing ? "in this area" : "on this size"}. Fewer fit when the layout is tight.`;
 }
 
 /** Heights' value in words, for the Rooms asked: "Flat", or "About 3 rooms of 12 off flat ground". */
@@ -240,3 +246,4 @@ export function floorOutcomeText(outcome: DungeonOutcome, name: string, scene: s
       return { text: `The connection dropped while making ${name}, and it could not be confirmed complete. To start again, remove it with Remove floor on its page.${goTo}`, tone: "error" };
   }
 }
+
