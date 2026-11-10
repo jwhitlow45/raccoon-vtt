@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type ComponentType } from "react";
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ComponentType, type RefObject } from "react";
 import { useStore } from "zustand";
 import type { CellRect, RoomState, Scene } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
@@ -211,6 +211,39 @@ export function outcomeWords(outcome: WingOutcome): string | null {
   }
 }
 
+/**
+ * Whether a sheet is too short to keep its header in place over the rows:
+ * the room the rows would get beside the header is under two of their
+ * first row, the Reroll row. Measured, so it holds at any interface size,
+ * and the same either way the header stands, so it never flips back and
+ * forth. Each move of the header observes it afresh. A docked card is
+ * never short.
+ */
+function useShortSheet(sheet: boolean, scroll: RefObject<HTMLElement | null>, head: RefObject<HTMLElement | null>, rows: RefObject<HTMLElement | null>): boolean {
+  const [short, setShort] = useState(false);
+  useLayoutEffect(() => {
+    const box = scroll.current;
+    if (!sheet || !box) {
+      setShort(false);
+      return;
+    }
+    const measure = () => {
+      const header = head.current;
+      const first = rows.current?.firstElementChild;
+      if (!header || !(first instanceof HTMLElement)) return;
+      const inside = box.contains(header);
+      const room = box.clientHeight - (inside ? header.offsetHeight : 0);
+      setShort(room < 2 * first.offsetHeight + theme.space(2));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    if (head.current) observer.observe(head.current);
+    return () => observer.disconnect();
+  }, [sheet, scroll, head, rows, short]);
+  return short;
+}
+
 type Planned = { asked: number; pending: boolean; plan: WingPlan | null };
 /** What Bring them back restores beside the edits. */
 type WingBefore = { settings: DungeonSettings; seed: Seed };
@@ -232,6 +265,8 @@ export default function WingPane(props: {
   const { scene, picks } = props;
   const paneRef = useRef<HTMLDivElement>(null);
   const firstRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const headRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(props.onClose);
   closeRef.current = props.onClose;
   useBackClose(true, () => closeRef.current());
@@ -442,8 +477,12 @@ export default function WingPane(props: {
     if (pickedIndex === null || !plan?.ok || !plan.layout) return;
     editStep({ k: "edit", room: pickedIndex, edit: next, layout: plan.layout });
   };
-  // A docked card keeps its foot in view and scrolls its rows. A sheet can be short, as at 320 by 568 at 130%, where a pinned foot would leave the rows no room, so the whole sheet scrolls under its header.
-  const sheet = place.kind === "sheet";
+  const short = useShortSheet(place.kind === "sheet", scrollRef, headRef, firstRef);
+  const header = (
+    <div ref={headRef}>
+      <PaneHeader title={<span role="heading" aria-level={2}>{WING_TITLE}</span>} closeLabel="Close" onClose={props.onClose} />
+    </div>
+  );
 
   return (
     <div
@@ -452,65 +491,71 @@ export default function WingPane(props: {
       aria-label={WING_TITLE}
       data-map-pane=""
       data-wing-pane=""
-      style={{ ...labelPaneFrame(place), height: place.height, boxSizing: "border-box", display: "flex", flexDirection: "column", color: theme.color.text, ...(sheet ? { overflowY: "auto", overscrollBehavior: "contain" } : null) }}
+      style={{ ...labelPaneFrame(place), height: place.height, boxSizing: "border-box", display: "flex", flexDirection: "column", color: theme.color.text }}
     >
-      <PaneHeader title={<span role="heading" aria-level={2}>{WING_TITLE}</span>} closeLabel="Close" onClose={props.onClose} sticky={sheet} />
-      <div
-        ref={firstRef}
-        style={{ display: "grid", alignContent: "start", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), ...(sheet ? { flex: "1 0 auto" } : { flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }) }}
-      >
-        <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-          <Button size="sm" icon="again" onClick={() => setSeed(newSeed())}>
-            Reroll
-          </Button>
-          <Button size="sm" pressed={edit} onClick={() => builder.setState({ wingEdit: !edit, wingRoom: null })}>
-            Edit rooms
-          </Button>
-        </div>
-        <p style={{ margin: 0 }}>{areaLine(grid, picks.area, feetPerCell)}</p>
-        {/* A planner that gives no room facts has no rooms to edit. */}
-        {pickedRoom !== null && facts.length > 0 ? (
-          <RoomPanel
-            facts={pickedFacts}
-            edit={pickedIndex === null ? undefined : edits.edits?.rooms[pickedIndex]}
-            onEdit={editRoom}
-            onStep={stepRoom}
-            onDone={() => builder.setState({ wingRoom: null })}
-            cave={settings.theme === "cave"}
-            flat={flat}
-            wing
-            held={sending !== null}
-            more={pickedIndex !== null && edits.undone[pickedIndex] ? [edits.undone[pickedIndex]] : []}
-          />
-        ) : (
-          <>
-            {edits.dropped || edits.gone ? (
-              <div data-edits-dropped="" style={EDITS_LINE}>
-                <Help style={{ flex: "1 1 12em" }}>{edits.gone ? EDITS_GONE : EDITS_DROPPED}</Help>
-                {edits.dropped ? (
-                  <Button size="sm" onClick={bringBack}>
-                    {BRING_BACK}
+      {short ? null : header}
+      {/*
+       * Only the rows scroll, on a docked card and on a sheet alike, so the foot's counts, the planner's words and
+       * Add the wing are in view as the pane opens (LP37-A-WING-3). A sheet too short for the header, two rows and the
+       * foot, as at 320 by 568 at 130%, scrolls its header away with the rows instead (`useShortSheet`). The forget
+       * question, which needs the room only while it asks, scrolls on its own.
+       */}
+      <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }}>
+        {short ? header : null}
+        <div ref={firstRef} style={{ display: "grid", alignContent: "start", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+            <Button size="sm" icon="again" onClick={() => setSeed(newSeed())}>
+              Reroll
+            </Button>
+            <Button size="sm" pressed={edit} onClick={() => builder.setState({ wingEdit: !edit, wingRoom: null })}>
+              Edit rooms
+            </Button>
+          </div>
+          <p style={{ margin: 0 }}>{areaLine(grid, picks.area, feetPerCell)}</p>
+          {/* A planner that gives no room facts has no rooms to edit. */}
+          {pickedRoom !== null && facts.length > 0 ? (
+            <RoomPanel
+              facts={pickedFacts}
+              edit={pickedIndex === null ? undefined : edits.edits?.rooms[pickedIndex]}
+              onEdit={editRoom}
+              onStep={stepRoom}
+              onDone={() => builder.setState({ wingRoom: null })}
+              cave={settings.theme === "cave"}
+              flat={flat}
+              wing
+              held={sending !== null}
+              more={pickedIndex !== null && edits.undone[pickedIndex] ? [edits.undone[pickedIndex]] : []}
+            />
+          ) : (
+            <>
+              {edits.dropped || edits.gone ? (
+                <div data-edits-dropped="" style={EDITS_LINE}>
+                  <Help style={{ flex: "1 1 12em" }}>{edits.gone ? EDITS_GONE : EDITS_DROPPED}</Help>
+                  {edits.dropped ? (
+                    <Button size="sm" onClick={bringBack}>
+                      {BRING_BACK}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+              {Choices ? <Choices value={settings} onChange={setSettings} held={sending !== null} grid={gridKind(grid)} wing flat={flat} /> : null}
+              {edits.edits ? (
+                <div data-edits-line="" style={EDITS_LINE}>
+                  <Help style={{ flex: "1 1 12em" }}>{editedLine(editedRooms(edits))}</Help>
+                  <Button size="sm" onClick={() => editStep({ k: "drop" })}>
+                    {DROP_EDITS}
                   </Button>
-                ) : null}
-              </div>
-            ) : null}
-            {Choices ? <Choices value={settings} onChange={setSettings} held={sending !== null} grid={gridKind(grid)} wing flat={flat} /> : null}
-            {edits.edits ? (
-              <div data-edits-line="" style={EDITS_LINE}>
-                <Help style={{ flex: "1 1 12em" }}>{editedLine(editedRooms(edits))}</Help>
-                <Button size="sm" onClick={() => editStep({ k: "drop" })}>
-                  {DROP_EDITS}
-                </Button>
-              </div>
-            ) : null}
-          </>
-        )}
-        {joinProblem ? <Help style={{ color: theme.color.warning }}>{joinProblem}</Help> : null}
-        {scene.fogEnabled !== true ? <Help>{WING_NO_FOG}</Help> : null}
-        {warnings ? <Help style={{ color: theme.color.warning }}>{warnings}</Help> : null}
+                </div>
+              ) : null}
+            </>
+          )}
+          {joinProblem ? <Help style={{ color: theme.color.warning }}>{joinProblem}</Help> : null}
+          {scene.fogEnabled !== true ? <Help>{WING_NO_FOG}</Help> : null}
+          {warnings ? <Help style={{ color: theme.color.warning }}>{warnings}</Help> : null}
+        </div>
       </div>
       {forget ? (
-        <div role="group" aria-label={FORGET_TITLE} style={{ display: "grid", gap: theme.space(2), paddingTop: theme.space(2), borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
+        <div role="group" aria-label={FORGET_TITLE} style={{ display: "grid", gap: theme.space(2), paddingTop: theme.space(2), borderTop: `${theme.line.border}px solid ${theme.color.border}`, flex: "0 1 auto", minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }}>
           <span role="heading" aria-level={3} style={{ fontWeight: 600 }}>
             {FORGET_TITLE}
           </span>

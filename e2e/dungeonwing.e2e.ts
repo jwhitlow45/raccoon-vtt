@@ -28,6 +28,8 @@ import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOption, pickTool, S
  *   one hex side long joins.
  * - D3FIX-1: on hexes Add the wing lands a Wide wing joined on a slanted
  *   side, whose three sides become its doors (DG3 review round 1).
+ * - LP37FIX: DGW-3 also finds the sheet's foot in sight as it opens, and
+ *   its rows in reach.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seventy. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
@@ -165,6 +167,18 @@ async function pressInRow(page: Page, name: string): Promise<void> {
 
 function pane(page: Page = dm): Locator {
   return page.locator("[data-wing-pane]");
+}
+
+/** Whether a control is in sight as it stands: inside the screen, and the topmost thing at its middle. */
+async function inSight(target: Locator): Promise<string | null> {
+  return target.evaluate((el) => {
+    const doc = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): unknown }; innerHeight: number; innerWidth: number }).document;
+    const view = globalThis as unknown as { innerHeight: number; innerWidth: number };
+    const r = (el as { getBoundingClientRect(): { left: number; top: number; right: number; bottom: number; width: number; height: number } }).getBoundingClientRect();
+    if (r.width === 0 || r.top < 0 || r.left < 0 || r.bottom > view.innerHeight || r.right > view.innerWidth) return `off the screen: ${JSON.stringify(r)}`;
+    const hit = doc.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return hit === el || (el as { contains(n: unknown): boolean }).contains(hit) ? null : `covered at its middle: ${JSON.stringify(r)}`;
+  });
 }
 
 describe("raccoon-vtt Add a wing: the DM's mode, pane and ghost", { timeout: 900_000 }, () => {
@@ -332,6 +346,24 @@ describe("raccoon-vtt Add a wing: the DM's mode, pane and ghost", { timeout: 900
           const box = (await pane(page).boundingBox())!;
           assert.ok(Math.round(box.width) >= size.width - 1, `a sheet as wide as the screen: ${JSON.stringify(box)}`);
           assert.ok(box.height <= size.height * 0.6 + 1, `at most 60% of the height: ${box.height}`);
+          // LP37FIX: the foot is pinned, so the plan's counts and Add the wing are in sight as the sheet opens.
+          for (const [what, control] of [
+            ["Add the wing", pane(page).getByRole("button", { name: "Add the wing" })],
+            ["the status", pane(page).getByRole("status")],
+          ] as const) {
+            const off = await inSight(control);
+            assert.equal(off, null, `${what} at ${size.width} x ${size.height} at ${scale}: ${off}`);
+          }
+          // And the rows stay in reach: scrolled to, Reroll shows with the foot still in sight below it.
+          const reroll = pane(page).getByRole("button", { name: "Reroll", exact: true });
+          await reroll.scrollIntoViewIfNeeded();
+          for (const [what, control] of [
+            ["Reroll", reroll],
+            ["Add the wing after scrolling", pane(page).getByRole("button", { name: "Add the wing" })],
+          ] as const) {
+            const off = await inSight(control);
+            assert.equal(off, null, `${what} at ${size.width} x ${size.height} at ${scale}: ${off}`);
+          }
           lines.push(...alignmentLines(await measureAlignment(pane(page)), `the wing pane at ${size.width} x ${size.height} at ${scale}`));
           await shots.take(page, `dgw-3-sheet-${size.width}-${scale.replace(".", "")}`);
           await page.keyboard.press("Escape");
