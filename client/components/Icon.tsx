@@ -144,7 +144,8 @@ export type IconName =
   | "queue"
   | "search"
   | "floors"
-  | "stairwell";
+  | "stairwell"
+  | "wing";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -234,6 +235,7 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   search: "search",
   floors: "layers",
   stairwell: "door-stairwell",
+  wing: "blocks",
 };
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -775,6 +777,13 @@ const SHAPES: Record<IconName, ReactNode> = {
   floors: <path {...STROKE} d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83zM2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17" />,
   // Lucide door-stairwell, from 1.41.0 (shared/credits.ts LUCIDE_LATER): stairs and ladders between floors (docs/design/design-v1-floors.md phase 2, 6.2, 7.1), on Go up, Go down and the builder's Between floors. Never the Stairs terrain or Heights/stairs, which draw their own.
   stairwell: <path {...STROKE} d="M12 17v-3a1 1 0 0 1 1-1h6M19 17h-9a1 1 0 0 0-1 1v3M19 21V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v16M19 9h-3a1 1 0 0 0-1 1v3M22 21H2" />,
+  // Lucide blocks: the builder's Add a wing, rooms added beside what is built.
+  wing: (
+    <g {...STROKE}>
+      <path d="M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2" />
+      <rect x="14" y="2" width="8" height="8" rx="1" />
+    </g>
+  ),
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];
