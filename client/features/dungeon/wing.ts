@@ -194,13 +194,12 @@ export function readJoin(base: WingScene, join: JoinExpect, area: CellRect, wide
   const reachesArea = (from: number) => [...flood(from)].some((k) => areaCells.has(k));
   const hexes = [...new Set(sides.flat())];
   if (hexes.length !== (wide ? 4 : 2)) return { ok: false, problem: "wideShape" };
-  // The outside is the side whose flood reaches the area, and the inside the other, which must be a closed room.
+  // The outside is the side whose flood reaches the area. Both reaching it means the room is open somewhere else, so its inside cannot be told.
   const first = sides[0]!;
-  const outsideOf = (p: [number, number]) => (reachesArea(p[0]) ? p[0] : reachesArea(p[1]) ? p[1] : -1);
-  const firstOut = outsideOf(first);
-  if (firstOut < 0) return { ok: false, problem: "noGround" };
-  const firstIn = first[0] === firstOut ? first[1] : first[0];
-  if (flood(firstIn).has(firstOut)) return { ok: false, problem: "openRoom" };
+  const [reach0, reach1] = [reachesArea(first[0]), reachesArea(first[1])];
+  if (reach0 && reach1) return { ok: false, problem: "openRoom" };
+  if (!reach0 && !reach1) return { ok: false, problem: "noGround" };
+  const firstIn = reach0 ? first[1] : first[0];
   const room = flood(firstIn);
   const inside = hexes.filter((k) => room.has(k)).sort((a, b) => a - b);
   const outside = hexes.filter((k) => !room.has(k)).sort((a, b) => a - b);
@@ -379,18 +378,24 @@ export function joinedRoom(world: WingWorld, join: JoinExpect, facts: JoinFacts)
   return room;
 }
 
+/** An occupied cell's structure: painted ground, an edge or a wall, a height or difficult mark, which the joined room's own excuses for the approach. */
+export const STRUCTURE = 1;
+/** An occupied cell's objects and stair marks, which count wherever they stand. */
+export const OBJECT = 2;
+
 /**
- * Every occupied cell (3.4): painted ground, drawn edges and free walls by
- * both their cells, height, stair and difficult marks, token footprints,
- * trap zones and the cells they hit, stamp boxes, lights, labels, pins and
- * floor link squares.
+ * Every occupied cell (3.4), as bits: STRUCTURE for painted ground, drawn
+ * edges and free walls by both their cells, height and difficult marks,
+ * and OBJECT for stair marks, token footprints, trap zones and the cells
+ * they hit, stamp boxes, lights, labels, pins and floor link squares.
  */
 export function occupiedOf(world: WingWorld, base: WingScene): Uint8Array {
   const { L } = world;
   const occ = new Uint8Array(L.W * L.H);
   const sceneId = base.scene.id;
+  let bit = STRUCTURE;
   const mark = (k: number) => {
-    if (k >= 0) occ[k] = 1;
+    if (k >= 0) occ[k]! |= bit;
   };
   const markKey = (key: string) => mark(world.cellOf(key));
   const markRect = (r: CellRect) => {
@@ -423,9 +428,14 @@ export function occupiedOf(world: WingWorld, base: WingScene): Uint8Array {
         const a = c.cx * CHUNK_CELLS + i;
         const b = c.cy * CHUNK_CELLS + j;
         const at = j * CHUNK_CELLS + i;
-        if ((heights && heights[at] !== 0) || (c.up && c.up[at] !== ".") || (c.rough && c.rough[at] !== ".")) markKey(`${a},${b}`);
+        if ((heights && heights[at] !== 0) || (c.rough && c.rough[at] !== ".")) markKey(`${a},${b}`);
       }
     }
+  }
+  bit = OBJECT;
+  for (const c of world.chunks) {
+    if (!c.up) continue;
+    for (let at = 0; at < c.up.length; at++) if (c.up[at] !== ".") markKey(`${c.cx * CHUNK_CELLS + (at % CHUNK_CELLS)},${c.cy * CHUNK_CELLS + Math.floor(at / CHUNK_CELLS)}`);
   }
   const g = gridOfShape(base.scene.gridShape);
   for (const t of Object.values(base.state.tokens)) {
@@ -463,10 +473,10 @@ export function occupiedOf(world: WingWorld, base: WingScene): Uint8Array {
 /** Cells within `margin` of a marked one: Chebyshev distance on squares, hex steps on hexes. */
 export function grown(world: WingWorld, marked: Uint8Array, margin: number): Uint8Array {
   const { L } = world;
-  const out = marked.slice();
+  const out = marked.map((v) => (v !== 0 ? 1 : 0));
   if (world.grid === "squares") {
     for (let k = 0; k < marked.length; k++) {
-      if (marked[k] !== 1) continue;
+      if (marked[k] === 0) continue;
       const x = k % L.W;
       const y = (k - x) / L.W;
       for (let dy = -margin; dy <= margin; dy++) for (let dx = -margin; dx <= margin; dx++) if (L.inMap(x + dx, y + dy)) out[(y + dy) * L.W + x + dx] = 1;
@@ -474,7 +484,7 @@ export function grown(world: WingWorld, marked: Uint8Array, margin: number): Uin
     return out;
   }
   let ring: number[] = [];
-  for (let k = 0; k < marked.length; k++) if (marked[k] === 1) ring.push(k);
+  for (let k = 0; k < marked.length; k++) if (marked[k] !== 0) ring.push(k);
   for (let step = 0; step < margin; step++) {
     const next: number[] = [];
     for (const k of ring) for (const n of L.halo(k)) if (out[n] !== 1) (out[n] = 1), next.push(n);
@@ -490,13 +500,25 @@ export function excusedOf(world: WingWorld, room: ReadonlySet<number>): Set<numb
   return out;
 }
 
-/** The join's approach (3.4): its outside cells and the cells straight out from them for the doorway's depth. */
-export function approachOf(world: WingWorld, facts: JoinFacts, depth: number): number[] {
+/**
+ * The join's approach (3.4): its outside cells and the cells straight out
+ * from them for the doorway's depth: a run's stairs and far landing where
+ * the floor inside is raised or sunk, along the run's hex axis on hexes,
+ * then `margin` cells more by the offset moves a corridor takes, so the
+ * wing's stub can reach the join through the joined room's own margin.
+ */
+export function approachOf(world: WingWorld, facts: JoinFacts, run: number, margin: number): number[] {
   const out: number[] = [];
   for (const o of facts.outside) {
-    for (let t = 0; t < depth; t++) {
-      const k = world.grid === "squares" ? stepSquare(world.L, o, facts.side, t) : world.L.step(o, facts.dir, t);
-      if (k !== null && k >= 0) out.push(k);
+    let end: number | null = o;
+    out.push(o);
+    for (let t = 1; t <= run && end !== null; t++) {
+      end = world.grid === "squares" ? stepSquare(world.L, o, facts.side, t) : world.L.step(o, facts.dir, t);
+      if (end !== null) out.push(end);
+    }
+    for (let t = 1; t <= margin && end !== null; t++) {
+      const k = stepSquare(world.L, end, facts.side, t);
+      if (k !== null) out.push(k);
     }
   }
   return out;
@@ -600,12 +622,12 @@ export function wingSetup(base: WingScene & Pick<WingBase, "area" | "join">, s: 
   const occ = occupiedOf(world, base);
   const room = joinedRoom(world, base.join, facts);
   const excused = excusedOf(world, room);
-  // The approach runs past the joined room's own margin, since a hex wall's outside hex is occupied too: the outside cell, a run where the floor is raised or sunk, then the margin.
-  const depth = 1 + (facts.ground !== 0 ? Math.abs(facts.ground) / 5 + 1 : 0) + margin;
-  const approach = approachOf(world, facts, depth);
+  // The approach runs past the joined room's own margin, since a hex wall's outside hex is occupied too.
+  const approach = approachOf(world, facts, facts.ground !== 0 ? Math.abs(facts.ground) / 5 + 1 : 0, margin);
   const approachSet = new Set(approach);
+  // For the approach the joined room's own structure does not count, but its objects and stair marks do (D-261110-233).
   const otherOcc = occ.slice();
-  for (const k of excused) otherOcc[k] = 0;
+  for (const k of excused) otherOcc[k]! &= ~STRUCTURE;
   const nearAll = grown(world, occ, margin);
   const nearOther = grown(world, otherOcc, margin);
   const flood = planningFlood(world, facts.outside[0]!, null);
