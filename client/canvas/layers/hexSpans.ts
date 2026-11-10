@@ -8,7 +8,9 @@ import type { Point } from "../../lib/camera.ts";
  * row of the hex lattice takes only the span of hexes across the polygon's
  * width over that row's band, so the work is the hexes on screen, not the
  * 6.6 times as many in the polygon's bounding box. The hex lines draw from
- * these spans (`strokeHexLines`, MapLayer.tsx).
+ * these spans: `strokeHexLines` for the grid tool's lines (GridLayer.tsx)
+ * and a map export (mapexport/render.ts), and gridTiles.ts for the board's
+ * grid.
  */
 export function hexesInView(g: HexGrid, bounds: { w: number; h: number }, polygon: readonly Point[]): Hex[] {
   const out: Hex[] = [];
