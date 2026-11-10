@@ -143,6 +143,8 @@ export type Applied = {
   touched: EntityKey[];
   /** Design 7.2 step 8: the fan-out must re-project everything in scope. */
   global: boolean;
+  /** A global change that can take away what a held preview shows, so the server judges them again (Tx.rejudge). */
+  rejudge: boolean;
   log: LogEntry[];
   /** The absolute restore that undoes the op, or null when nothing undoable changed. */
   inverse: RestoreEntry[] | null;
@@ -250,6 +252,7 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
     state: tx.state,
     touched: tx.touched(),
     global: tx.global,
+    rejudge: tx.rejudge,
     log: tx.log,
     get inverse() {
       if (inverse === undefined) inverse = withRecordReads(env.opVersion, () => tx.inverse());

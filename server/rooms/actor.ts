@@ -258,6 +258,8 @@ type Batch = {
   ops: OpRecord[];
   touched: EntityKey[];
   global: boolean;
+  /** Whether a global change in the batch can take away what a held preview shows (Tx.rejudge). */
+  rejudge: boolean;
   acks: Map<ClientKey, number[]>;
   ackDetails: Map<ClientKey, OpAcknowledgment[]>;
   rejects: Map<ClientKey, Reject[]>;
@@ -2005,6 +2007,7 @@ export class RoomActor {
     }
     for (const key of result.touched) batch.touched.push(key);
     if (result.global) batch.global = true;
+    if (result.rejudge) batch.rejudge = true;
     if (springing !== null) this.#sizes.grew(springing, grown);
     memory?.commit();
     if (counts) this.lastOpAt = this.#opts.now();
@@ -2285,6 +2288,7 @@ export class RoomActor {
         ops: [],
         touched: [],
         global: false,
+        rejudge: false,
         acks: new Map(),
         ackDetails: new Map(),
         rejects: new Map(),
@@ -2484,6 +2488,7 @@ export class RoomActor {
     this.#staged = { state: result.state, seq };
     for (const key of result.touched) batch.touched.push(key);
     if (result.global) batch.global = true;
+    if (result.rejudge) batch.rejudge = true;
     this.#sizes.grew(grew, [op.sceneId]);
     return true;
   }
@@ -2582,8 +2587,8 @@ export class RoomActor {
         (conn, lost) => cancelLost(conn, lost, this.#connections),
       );
       // A batch that re-projects everything can take away what a held drag or live ruler showed (docs/design/design-v1-per-player-vision.md 7.2),
-      // and so can one that changed the floors a socket holds (docs/design/design-v1-floors.md 8.1).
-      if (batch.global || published.heldChanged) rejudgePreviews(batch.state, this.#connections);
+      // and so can one that changed the floors a socket holds (docs/design/design-v1-floors.md 8.1). A height edit re-projects the climbs alone.
+      if (batch.rejudge || published.heldChanged) rejudgePreviews(batch.state, this.#connections);
       for (const conn of this.#connections) this.#previewStands(conn, batch.state);
     } catch (err) {
       // The batch is stored, but which sockets it reached is unknown: each one takes the committed room afresh as it reconnects.

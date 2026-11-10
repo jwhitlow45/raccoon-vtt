@@ -358,6 +358,14 @@ describe("floor.order (9)", () => {
   test("a level change is global, so every recipient re-projects", () => {
     assert.equal(applied(towerOf(3), { t: "floor.order", sceneId: "s1", floors: ["f2", "s1", "f3"] }).global, true);
   });
+
+  test("a level change judges previews again, and a height edit re-projects without judging them (FL3-SOL-01)", () => {
+    assert.equal(applied(towerOf(3), { t: "floor.order", sceneId: "s1", floors: ["f2", "s1", "f3"] }).rejudge, true);
+    const raised = applied(towerOf(3), { t: "scene.update", sceneId: "f2", patch: { floor: { height: 25 } } });
+    assert.deepEqual([raised.global, raised.rejudge], [true, false]);
+    const same = applied(towerOf(3), { t: "scene.update", sceneId: "f2", patch: { floor: { height: 10 } } });
+    assert.deepEqual([same.global, same.rejudge], [false, false]);
+  });
 });
 
 describe("renaming and settings (9)", () => {

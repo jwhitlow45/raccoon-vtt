@@ -1178,7 +1178,7 @@ describe("floors phase 3 over the wire: the privacy twins (phase 3, 6)", () => {
   });
 
   /** Tower: Ground floor and Attic above it, `height` ft high, stairs from Ground (link) up to Attic (far) under Thorn, and Wren, Bree's, beside him. */
-  async function riseRoom(height: number, fogged: boolean): Promise<Compared & { roles: [string, string][]; attic: string; link: string; far: string }> {
+  async function riseRoom(height: number, fogged: boolean): Promise<Compared & { roles: [string, string][]; attic: string; link: string; far: string; thorn: string }> {
     const r = await newRoom(t, "Rise");
     await ok(r.dmSocket, { t: "scene.update", sceneId: r.ground, patch: { name: "Tower" } });
     const attic = await floor(r, r.ground, "above", "Attic");
@@ -1195,7 +1195,7 @@ describe("floors phase 3 over the wire: the privacy twins (phase 3, 6)", () => {
     } else roles.push([link, "link"]);
     const forbidden = fogged ? [link, far, '"rise"'] : [attic, far, "Attic", '"rise"', '"height":'];
     const x = await seated(r, r.ground, roles, forbidden);
-    return { ...x, attic, link, far };
+    return { ...x, attic, link, far, thorn };
   }
 
   /** A height edit, its Undo and Redo, a co-DM's rename of Attic, Ana's reconnect and Bree's log page, alike in both rooms of a `rise` pair. */
@@ -1241,6 +1241,21 @@ describe("floors phase 3 over the wire: the privacy twins (phase 3, 6)", () => {
     const b = await riseRoom(30, true);
     for (const s of [a.seats.ana, a.seats.bree, a.seats.tv]) assert.ok(a.attic in s.view.scenes && !("floorLinks" in s.view), `${s.name} holds Attic and no end`);
     await riseSteps(a, b, true);
+    close(a, b);
+  });
+
+  test("T3, a height edit judges no preview again: Ana drags Thorn, the DM locks him, then sets hidden Attic to 30 ft where it was 10 against 30, and Bree's frames stay alike (FL3-SOL-01)", async () => {
+    const a = await riseRoom(10, false);
+    const b = await riseRoom(30, false);
+    for (const x of [a, b]) {
+      send(x.seats.ana.socket, x.ground, { k: "dragMove", tokenId: x.thorn, x: 5, y: 5 });
+      await x.sync("Ana drags Thorn");
+      assert.deepEqual(ephs(x.seats.bree).at(-1)?.e, { k: "dragMove", tokenId: x.thorn, x: 5, y: 5 }, "Bree shows the drag");
+    }
+    await alike(a, b, "Ana drags Thorn");
+    await both(a, b, (x) => ({ t: "token.update", tokenId: (x as typeof a).thorn, patch: { locked: true } }) as Op, "the DM locks Thorn");
+    await both(a, b, (x) => ({ t: "scene.update", sceneId: (x as typeof a).attic, patch: { floor: { height: 30 } } }) as Op, "hidden Attic set to 30 ft");
+    for (const x of [a, b]) assert.equal(live(x.roomId).scenes[x.attic]?.floor?.height, 30);
     close(a, b);
   });
 

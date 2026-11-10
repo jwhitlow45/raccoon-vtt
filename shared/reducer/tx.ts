@@ -118,6 +118,8 @@ export class Tx {
   readonly env: Env;
   readonly actor: Viewer;
   global = false;
+  /** A global change that can take away what a held preview shows: every one but a floor's height (changesRise). */
+  rejudge = false;
   log: LogEntry[] = [];
   private readonly copied = new Set<keyof RoomState>();
   private readonly before = new Map<EntityKey, unknown>();
@@ -265,7 +267,8 @@ export class Tx {
         }
       }
     }
-    if (isGlobalChange(parsed.kind, prev, next)) this.global = true;
+    if (isGlobalChange(parsed.kind, prev, next)) this.global = this.rejudge = true;
+    else if (changesRise(parsed.kind, prev, next)) this.global = true;
   }
 
   remove(key: EntityKey): void {
@@ -811,11 +814,21 @@ function sameIds(a: string[] | undefined, b: string[] | undefined): boolean {
  * Several floors (docs/design/design-v1-floors.md 8.1): a floor's place in
  * its scene, its level or its main floor, and a scene gaining or losing
  * floors, renumber every floor a player holds, so they are global, as an
- * add and a removal already are. A floor's name is its scene key's alone.
- * Its height is global too (phase 3, 4.3): it is the `rise` a player's
- * copy of each end of a climb up to it carries, and those are other keys.
- * Heights change rarely, so the whole re-projection costs little.
+ * add and a removal already are. A floor's name is its scene key's alone,
+ * and its height is in changesRise.
  */
+/**
+ * A floor's height is global too (docs/design/design-v1-floors.md phase 3,
+ * 4.3): it is the `rise` a player's copy of each end of a climb up to it
+ * carries, and those are other keys. Heights change rarely, so the whole
+ * re-projection costs little. A height edit changes the climbs in those
+ * copies and no token or end a preview shows, so it leaves `rejudge` alone
+ * (review FL3-SOL-01).
+ */
+function changesRise(kind: string, prev: unknown, next: unknown): boolean {
+  return kind === "scene" && prev !== null && next !== null && (prev as Scene).floor?.height !== (next as Scene).floor?.height;
+}
+
 function isGlobalChange(kind: string, prev: unknown, next: unknown): boolean {
   switch (kind) {
     case "member":
@@ -850,8 +863,7 @@ function isGlobalChange(kind: string, prev: unknown, next: unknown): boolean {
         (a.vision?.perPlayer === true) !== (b.vision?.perPlayer === true) ||
         a.gridShape !== b.gridShape ||
         a.floor?.level !== b.floor?.level ||
-        a.floor?.of !== b.floor?.of ||
-        a.floor?.height !== b.floor?.height
+        a.floor?.of !== b.floor?.of
       );
     }
     case "token": {
