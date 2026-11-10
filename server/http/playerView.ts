@@ -13,9 +13,10 @@ import type { RoomManager } from "../rooms/manager.ts";
  * The map export's player view (docs/design/design-v1-map-discovery.md 4 and 5.1):
  * one scene as the shared fog class holds it, every player who does not see
  * for themselves and a table display. The DM's own store holds the whole
- * build, which on a scene players get cut from held ground (heldGroundMap)
- * is more than players hold, so the export asks the server for the
- * players' share instead.
+ * build, more than players hold on a scene with fog on, so an export of
+ * such a scene asks the server for the players' share instead
+ * (client/features/mapexport/content.ts fromServer). An export of a scene
+ * with fog off draws from the DM's own store.
  *
  * `GET /api/rooms/:id/scenes/:sceneId/player-view`, DM only, answers 200
  * with `PlayerView` (below), `cache-control: no-store`. Refusals, as
