@@ -3,7 +3,9 @@ import { describe, test } from "node:test";
 import { encodeHeights } from "#shared/heightCodec.ts";
 import { CHUNK_CELLS, type BuildChunk, type Light, type Trap } from "#shared/model.ts";
 import { room, scene } from "#shared/testutil.ts";
-import { addedChunk, ghostOf, ghostRoomAt } from "./wingGhost.ts";
+import { squareWingBase, WING_SETTINGS } from "../dungeon/handPlans.ts";
+import { wingPreviewOf } from "../dungeon/scratch.ts";
+import { addedChunk, ghostOf, ghostRoomAt, ghostRooms, type WingGhost } from "./wingGhost.ts";
 
 /*
  * The wing's ghost (docs/design: dungeon generator phase 3, 3.3): only what
@@ -83,5 +85,34 @@ describe("the ghost of a wing", () => {
     assert.equal(ghostRoomAt(ghost, { x: 12.5, y: 12.5 }, 0.5)?.n, 1, "inside the room as it stands on the scene");
     assert.equal(ghostRoomAt(ghost, { x: 14.3, y: 12.5 }, 0.5)?.n, 1, "within reach of its edge");
     assert.equal(ghostRoomAt(ghost, { x: 2.5, y: 2.5 }, 0.5), null, "where the room stands in its own scene is not where it stands on the map");
+  });
+});
+
+describe("the ghost's rooms (DG3 review round 1)", () => {
+  const SEED = "1Q8V2DR4HJ0Y7ZB3";
+  /** A ghost of the given rooms where the wing landed in the scene itself. */
+  const ghostWith = (rooms: WingGhost["rooms"]) => ({ offset: { x: 0, y: 0 }, rooms }) as WingGhost;
+
+  test("a room's number is its facts' whatever DM key says, so a tap on a room opens the room drawn there", () => {
+    const base = squareWingBase();
+    const opened = new Map<boolean, Map<number, number>>();
+    for (const key of [true, false]) {
+      const p = wingPreviewOf({ ...WING_SETTINGS, key }, SEED, base, { feetPerCell: 5 }, null);
+      if (!p.ok) throw new Error("the wing plans");
+      const { plan, facts } = p;
+      assert.equal(plan.key === null, !key);
+      if (!key) assert.ok(facts.some((f) => f.n !== f.at + 1), "not vacuous: the key's numbers are not the plan's order");
+      const ghost = ghostWith(ghostRooms(plan, facts));
+      const rooms = new Map<number, number>();
+      for (const f of facts) {
+        const r = plan.rooms[f.at]!;
+        const n = ghostRoomAt(ghost, { x: r.x + r.w / 2, y: r.y + r.h / 2 }, 0.5)?.n;
+        const tapped = facts.find((g) => g.n === n);
+        assert.equal(tapped?.room, f.room, `DM key ${key ? "on" : "off"}: a tap in room ${f.room}'s middle opens it`);
+        rooms.set(f.room, n!);
+      }
+      opened.set(key, rooms);
+    }
+    assert.deepEqual(opened.get(false), opened.get(true), "the same number on each room with DM key off");
   });
 });

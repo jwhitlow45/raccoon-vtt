@@ -1,5 +1,9 @@
 import { decodeHeights, decodeRough, decodeStairs, encodeHeights, encodeRough, encodeStairs } from "#shared/heightCodec.ts";
 import type { BuildChunk, CellRect, FreeWall, RoomState, Scene } from "#shared/model.ts";
+import type { RoomFacts } from "../dungeon/edits.ts";
+import { latticeFor } from "../dungeon/lattice.ts";
+import type { DungeonPlan } from "../dungeon/plan.ts";
+import { isHexGrid } from "../dungeon/settings.ts";
 
 /*
  * The wing's ghost (docs/design: dungeon generator phase 3, 3.3,
@@ -120,6 +124,26 @@ export function ghostOf(input: {
     lights,
     rooms: input.rooms,
   };
+}
+
+/**
+ * The ghost's rooms (3.3), one for each kept room's facts, at its middle
+ * (on hexes its middle hex's center). Each is numbered as its facts are,
+ * whatever DM key says, since a tap on it opens the facts carrying its
+ * number (DG3 review round 1: with DM key off the ghost numbered rooms in
+ * plan order, and a tap opened another room).
+ */
+export function ghostRooms(plan: Pick<DungeonPlan, "rooms" | "grid" | "w" | "h">, facts: readonly Pick<RoomFacts, "n" | "at">[]): GhostRoom[] {
+  const grid = plan.grid ?? "squares";
+  const L = isHexGrid(grid) ? latticeFor(grid, { w: plan.w, h: plan.h }) : null;
+  return facts.flatMap((f) => {
+    const r = plan.rooms[f.at];
+    if (!r) return [];
+    if (!L) return [{ n: f.n, x: r.x + r.w / 2, y: r.y + r.h / 2, rect: { x: r.x, y: r.y, w: r.w, h: r.h } }];
+    const [x, y] = L.pointOf(r.x + Math.floor(r.w / 2), r.y + Math.floor(r.h / 2));
+    const rect = grid === "hexColumns" ? { x: r.y, y: r.x, w: r.h, h: r.w } : { x: r.x, y: r.y, w: r.w, h: r.h };
+    return [{ n: f.n, x, y, rect }];
+  });
 }
 
 /** The room nearest a point, inside it or within `reach` cells of its edge, for a tap on the ghost with Edit rooms on (3.3). */

@@ -18,6 +18,7 @@ const nothing = () => {};
 const ROOM: RoomFacts = {
   n: 3,
   room: 5,
+  at: 4,
   ground: 0,
   doors: [
     { key: "2", side: "w", to: 1, state: "closed", secretOk: "Only a door on an extra way around, or a room's only door, can be secret." },

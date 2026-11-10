@@ -36,8 +36,14 @@ export type DoorFacts = { key: string; side: "n" | "e" | "s" | "w"; to: number |
  * it, its board index, its floor, its doorways, the trap presets with a
  * spot in it and the one it holds, its dressing, whether it is lit, and the
  * reports its pins left on this plan.
+ *
+ * `room` is the room's board index, which edits and a picked room name,
+ * and `at` its place in `plan.rooms`, which holds the kept rooms only. A
+ * plan that drops rooms in routing numbers the two apart, so the preview,
+ * the wing's ghost and the panel find a room's box and pin by `at` and
+ * name it by `room` (DG3 review round 1).
  */
-export type RoomFacts = { n: number; room: number; ground: number; doors: DoorFacts[]; traps: string[]; trap: string | null; dressing: Dressing; lit: boolean; reports: string[] };
+export type RoomFacts = { n: number; room: number; at: number; ground: number; doors: DoorFacts[]; traps: string[]; trap: string | null; dressing: Dressing; lit: boolean; reports: string[] };
 
 /**
  * A doorway's key in a room's door pins: its link's index, or "stub" for

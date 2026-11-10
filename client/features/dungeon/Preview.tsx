@@ -109,8 +109,7 @@ export function DungeonPreview(props: {
   const centred = failed && !shown ? ({ bottom: "auto", top: "50%", transform: "translateY(-50%)" } as const) : null;
   const traps = shown ? Object.values(shown.room.traps ?? {}).filter((t): t is Trap => !!t) : [];
   const sceneId = shown ? Object.keys(shown.room.scenes)[0] ?? "" : "";
-  const kept = new Set((props.rooms ?? []).map((r) => r.room));
-  const boxes = plan ? roomBoxes(plan).filter((b) => kept.has(b.room)) : [];
+  const boxes = plan ? roomBoxes(plan, props.rooms ?? []) : [];
   const picked = props.picked ?? null;
   const pickedBox = boxes.find((b) => b.room === picked) ?? null;
   const pickedN = props.rooms?.find((r) => r.room === picked)?.n ?? null;

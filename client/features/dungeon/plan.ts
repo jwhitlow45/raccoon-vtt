@@ -973,12 +973,14 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   const mayBeSecret = theme.doors ? secretCandidates({ doorways, links, entrance: entrance.room, stub, locked: () => false }) : [];
   const ROOM_PRESETS: Readonly<Record<string, readonly string[]>> = { pit: [HIDDEN_PIT, SPIKED_PIT], needle: [POISONED_NEEDLE], statue: [FIRE_STATUE] };
   const facts: RoomFacts[] = kept
-    .map((i): RoomFacts => {
+    .map((i, at): RoomFacts => {
       const kinds = new Set(spots.filter((sp) => spotRoom(sp) === i).map((sp) => sp.kind));
       const held = picked.traps.filter((_, ti) => spotRoom(picked.picks[ti]!) === i);
       return {
         n: numbers.get(i) ?? 0,
         room: i,
+        // The plan's rooms are the kept ones in this order (`rooms: kept.map`, below).
+        at,
         ground: board.rooms[i]!.ground,
         doors: doorways
           .filter((d) => d.room === i)

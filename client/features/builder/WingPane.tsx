@@ -20,11 +20,10 @@ import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { postWingBase, previewWing, type Preview, type Summary } from "../dungeon/client.ts";
 import { highestWingPin, type KeyInput } from "../dungeon/keyPage.ts";
-import { latticeFor } from "../dungeon/lattice.ts";
 import { wingIds } from "../dungeon/ops.ts";
 import type { DungeonEdits, RoomEdit, RoomFacts } from "../dungeon/edits.ts";
 import { editedRooms, editsStep, startEdits, type EditsEvent, type EditsState } from "../dungeon/flow.ts";
-import type { DungeonPlan, WingBase } from "../dungeon/plan.ts";
+import type { WingBase } from "../dungeon/plan.ts";
 import { RoomPanel } from "../dungeon/RoomPanel.tsx";
 import { newSeed, type Seed } from "../dungeon/seed.ts";
 import { sendWing, WING_TOO_LARGE, type SendRoom, type WingOutcome } from "../dungeon/send.ts";
@@ -36,7 +35,7 @@ import { requestPan } from "../encounter/pan.ts";
 import { paneEscape } from "./labelEdit.ts";
 import { labelPaneFrame } from "./labelPaneFrame.ts";
 import { NO_WING, useBuilderStore, type WingPicks } from "./store.ts";
-import { ghostOf, type GhostRoom, type WingGhost } from "./wingGhost.ts";
+import { ghostOf, ghostRooms, type WingGhost } from "./wingGhost.ts";
 import { wingBox, wingFit, wingPanePlacement, wingPlace } from "./wingPanePlacement.ts";
 import { areaLine, JOIN_WORDS, judgeJoin, wingBaseOf, wingWarnings, type WingJoin } from "./wingPick.ts";
 import { JOIN_CHANGED, WING_MOVED } from "#shared/rules/wingClear.ts";
@@ -115,20 +114,6 @@ export const WING_NO_WAY = "No way from the area to that wall. Tap a nearer wall
 export const WING_FULL = "This scene has too many walls and doors for a wing.";
 export const WING_HEX_TOO_MANY = "Too many rooms for the walls a hex scene holds. Try fewer rooms or Sparse.";
 
-/** Each room's number as the key numbers it where there is a key, else in plan order, at its middle: on hexes its middle hex's center. */
-function wingRooms(plan: DungeonPlan, base: WingBase): GhostRoom[] {
-  const numbers = new Map(plan.key?.map((k) => [k.room, k.n]) ?? []);
-  const grid = base.scene.gridShape ?? "squares";
-  const L = isHexGrid(grid) ? latticeFor(grid, base.scene.bounds) : null;
-  return plan.rooms.map((r, i) => {
-    const n = numbers.get(i) ?? i + 1;
-    if (!L) return { n, x: r.x + r.w / 2, y: r.y + r.h / 2, rect: { x: r.x, y: r.y, w: r.w, h: r.h } };
-    const [x, y] = L.pointOf(r.x + Math.floor(r.w / 2), r.y + Math.floor(r.h / 2));
-    const rect = grid === "hexColumns" ? { x: r.y, y: r.x, w: r.h, h: r.w } : { x: r.x, y: r.y, w: r.w, h: r.h };
-    return { n, x, y, rect };
-  });
-}
-
 /** What the wing's key reads of the room: the scene's name, the DM's color, the scene's highest W pin, its pages' titles and the pins it has room for (D-261110-165). */
 export type WingKeyRoom = { name: string; color: string; titles: readonly string[] };
 
@@ -157,7 +142,7 @@ export function wingPlanner(keyRoom: () => WingKeyRoom | null, post: (base: Wing
     }
     const scratchScene = answer.room.scenes[sceneId];
     if (!scratchScene) return { ok: false, error: "bug" };
-    const ghost = ghostOf({ base: base.state, sceneId, scratch: answer.room, scratchScene, area: base.area, offset: { x: 0, y: 0 }, feetPerCell, rooms: wingRooms(answer.plan, base) });
+    const ghost = ghostOf({ base: base.state, sceneId, scratch: answer.room, scratchScene, area: base.area, offset: { x: 0, y: 0 }, feetPerCell, rooms: ghostRooms(answer.plan, answer.facts) });
     return { ok: true, summary: answer.summary, ghost, made: { ops: answer.ops, room: answer.room, ids: new Map() }, ...(answer.clear ? { clear: answer.clear } : {}), facts: answer.facts, layout: answer.layout };
   };
 }

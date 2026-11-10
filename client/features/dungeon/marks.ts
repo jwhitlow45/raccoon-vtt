@@ -2,6 +2,7 @@ import type { RoomState, Trap } from "#shared/model.ts";
 import { boardTheme } from "../../lib/theme.ts";
 import { findDoor } from "../doors/doors.ts";
 import { latticeFor } from "./lattice.ts";
+import type { RoomFacts } from "./edits.ts";
 import type { DungeonPlan, PlanRoom } from "./plan.ts";
 import { isHexGrid } from "./settings.ts";
 
@@ -22,8 +23,8 @@ export type LightMark = { x: number; y: number };
 export type NumberMark = { n: number; x: number; y: number };
 /** A room's box in the scene, in cells, by its board index. */
 export type RoomBox = { room: number; x: number; y: number; w: number; h: number };
-/** A room's number and board index, as the key numbers it (edits.ts `RoomFacts`). */
-export type Numbered = { n: number; room: number };
+/** A room's number, board index and place in `plan.rooms`, as the key numbers it (edits.ts `RoomFacts`). */
+export type Numbered = Pick<RoomFacts, "n" | "room" | "at">;
 
 type Placed = Pick<DungeonPlan, "w" | "h" | "grid">;
 
@@ -69,9 +70,12 @@ export function roomBox(plan: Placed, r: Pick<PlanRoom, "x" | "y" | "w" | "h">, 
   return { room, x: x0 - pad, y: y0 - pad, w: x1 - x0 + 2 * pad, h: y1 - y0 + 2 * pad };
 }
 
-/** Every room's box, by board index. */
-export function roomBoxes(plan: Placed & Pick<DungeonPlan, "rooms">): RoomBox[] {
-  return plan.rooms.map((r, i) => roomBox(plan, r, i));
+/** Each of the given rooms' boxes, found by its place in the plan and named by its board index. */
+export function roomBoxes(plan: Placed & Pick<DungeonPlan, "rooms">, rooms: readonly Numbered[]): RoomBox[] {
+  return rooms.flatMap((f) => {
+    const r = plan.rooms[f.at];
+    return r ? [roomBox(plan, r, f.room)] : [];
+  });
 }
 
 /**
@@ -101,16 +105,17 @@ export function lightMarks(plan: Pick<DungeonPlan, "lights">): LightMark[] {
 /**
  * Each room's number at its pin's middle, which is where the landing puts
  * the pin. None with DM key off, unless `numbered` gives the rooms' numbers,
- * as Edit rooms does whatever DM key says (phase 3, 4.1).
+ * as Edit rooms does whatever DM key says (phase 3, 4.1). A key room names
+ * its place in `plan.rooms` (keyRooms.ts), a numbered one by `at`.
  */
 export function numberMarks(plan: Placed & Pick<DungeonPlan, "key" | "rooms">, numbered?: readonly Numbered[]): NumberMark[] {
-  const rooms = numbered ?? plan.key;
+  const rooms = numbered?.map((f) => ({ n: f.n, at: f.at })) ?? plan.key?.map((k) => ({ n: k.n, at: k.room }));
   if (!rooms) return [];
-  const at = pointer(plan);
+  const point = pointer(plan);
   return rooms.flatMap((k) => {
-    const room = plan.rooms[k.room];
+    const room = plan.rooms[k.at];
     if (!room) return [];
-    const [x, y] = at(room.pin[0], room.pin[1]);
+    const [x, y] = point(room.pin[0], room.pin[1]);
     return [{ n: k.n, x, y }];
   });
 }

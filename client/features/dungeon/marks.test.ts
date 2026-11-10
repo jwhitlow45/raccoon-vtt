@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { latticeFor } from "./lattice.ts";
-import { drawMarks, lightMarks, numberMarks, pickRoom, roomBox } from "./marks.ts";
+import { drawMarks, lightMarks, numberMarks, pickRoom, roomBox, roomBoxes } from "./marks.ts";
 import { twoRooms } from "./handPlans.ts";
-import type { DungeonPlan } from "./plan.ts";
+import { planFitted, type DungeonPlan } from "./plan.ts";
 import { scratchRoom } from "./scratch.ts";
+import { clampSettings, DEFAULT_SETTINGS } from "./settings.ts";
 
 /*
  * The DM marks (phase 2, 4.2): a ring on each light, and with DM key on a
@@ -92,5 +93,34 @@ test("DG3: a tap picks the room it falls in, the nearest within 22 px, and nothi
 });
 
 test("DG3: Edit rooms numbers every kept room whatever DM key says, at its pin through the lattice", () => {
-  assert.deepEqual(numberMarks(twoRooms(), [{ n: 1, room: 1 }]), [{ n: 1, x: 18.5, y: 6.5 }]);
+  assert.deepEqual(numberMarks(twoRooms(), [{ n: 1, room: 1, at: 1 }]), [{ n: 1, x: 18.5, y: 6.5 }]);
+});
+
+test("DG3: after routing drops rooms, each room's box, number, ring and edit are the room drawn there", () => {
+  // Round 2's seed (edits.test.ts): 15 placed, 9 kept, so board indices and places in the plan part ways (DG3 review round 1).
+  const s = clampSettings({ ...DEFAULT_SETTINGS, w: 50, h: 57, rooms: 24, wide: true, density: "dense", corridors: "winding", heights: 75 });
+  const seed = "900000000000000Z";
+  const planned = planFitted(s, seed, { feetPerCell: 5 });
+  const { plan, facts } = planned;
+  assert.deepEqual(planned.kept, [0, 1, 4, 5, 6, 7, 9, 13, 14], "not vacuous: rooms dropped");
+  const boxes = roomBoxes(plan, facts);
+  const marks = numberMarks(plan, facts);
+  assert.equal(boxes.length, facts.length, "every kept room can be tapped");
+  assert.equal(marks.length, facts.length, "every kept room is numbered");
+  for (const f of facts) {
+    const r = plan.rooms[f.at]!;
+    // A tap in the middle of the room drawn there picks it by its board index, and its box, which the ring draws, is that room's.
+    const picked = pickRoom(boxes, { x: r.x + r.w / 2, y: r.y + r.h / 2 }, 10);
+    assert.equal(picked, f.room, `room ${f.n}'s middle`);
+    assert.deepEqual(boxes.find((b) => b.room === picked), roomBox(plan, r, f.room));
+    assert.deepEqual(marks.find((m) => m.n === f.n), { n: f.n, x: r.pin[0] + 0.5, y: r.pin[1] + 0.5 });
+  }
+  // An edit made on the tapped room changes the room drawn there.
+  const entrance = facts.find((f) => plan.rooms[f.at]!.entrance)!;
+  const r = plan.rooms[entrance.at]!;
+  const picked = pickRoom(boxes, { x: r.x + r.w / 2, y: r.y + r.h / 2 }, 10)!;
+  const edited = planFitted(s, seed, { feetPerCell: 5 }, { edits: { layout: planned.layout, rooms: { [picked]: { lit: !entrance.lit } } } });
+  const now = edited.facts.find((f) => f.room === picked)!;
+  assert.equal(now.lit, !entrance.lit);
+  assert.ok(edited.plan.rooms[now.at]!.entrance, "the entrance took the edit");
 });
