@@ -1727,7 +1727,6 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
         if (pair[0]!.down.side === pair[1]!.down.side) groups.push({ axis: "down", parts: pair, word: `from the ${pair[0]!.down.side}` });
       }
       for (const { axis, parts, word } of groups) {
-        if (parts.length < 2) continue;
         const gaps = parts.map((s) => round(s[axis].gap));
         if (round(spread(gaps)) <= LIMIT) continue;
         push({
