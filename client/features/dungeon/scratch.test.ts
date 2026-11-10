@@ -9,6 +9,7 @@ import { latticeFor } from "./lattice.ts";
 import { buildOps, MAX_OPS, SCENE_PLACEHOLDER } from "./ops.ts";
 import { floorRuns, landAll, landDungeon, previewOf, previewScene, scratchRoom, wingPreviewOf } from "./scratch.ts";
 import { clampSettings, DEFAULT_CONTEXT, DEFAULT_SETTINGS, MAX_HEX_WALLS, SECRET_PRESETS, type DungeonSettings } from "./settings.ts";
+import { editLayout } from "./edits.ts";
 import { planFitted, type DungeonPlan } from "./plan.ts";
 
 const SEED = "1K7QH2MXA9F3TWQ5";
@@ -173,7 +174,7 @@ test("DG2B: the preview plans the DM's Secret doors as chosen, and the key says 
   assert.ok(page?.t === "journal.create" && page.page.blocks[0]!.text.includes("Secret doors Many"));
 });
 
-test("DG3: a hex preview lands on its grid, its plan within the wall budget, with the room panel's facts and the count it asked", () => {
+test("DG3: a hex preview lands on its grid, its plan within the wall budget, with the room panel's facts and the layout it froze", () => {
   for (const grid of ["hexRows", "hexColumns"] as const) {
     const s = clampSettings({ ...DEFAULT_SETTINGS, key: true }, grid);
     const scene = builderScene({ id: "chosen", name: "Crypt", w: s.w, h: s.h, gridShape: grid });
@@ -182,7 +183,7 @@ test("DG3: a hex preview lands on its grid, its plan within the wall budget, wit
     assert.equal(made.room.scenes[SCENE_PLACEHOLDER]!.gridShape, grid);
     assert.ok((made.plan.walls?.length ?? 0) > 0 && made.plan.walls!.length <= MAX_HEX_WALLS);
     assert.equal(made.facts.length, made.plan.rooms.length);
-    assert.equal(made.fitted, s.rooms);
+    assert.deepEqual(made.layout, editLayout(s, SEED, s.rooms, null));
     assert.ok(made.summary.doors > 0, "a doorway's leaves count as its one door");
     assert.deepEqual(structuredClone(made), made, "the worker can post it");
   }

@@ -22,7 +22,7 @@ import { postWingBase, previewWing, type Preview, type Summary } from "../dungeo
 import { highestWingPin, type KeyInput } from "../dungeon/keyPage.ts";
 import { latticeFor } from "../dungeon/lattice.ts";
 import { wingIds } from "../dungeon/ops.ts";
-import { editLayout, type DungeonEdits, type RoomEdit, type RoomFacts } from "../dungeon/edits.ts";
+import type { DungeonEdits, RoomEdit, RoomFacts } from "../dungeon/edits.ts";
 import { editedRooms, editsStep, startEdits, type EditsEvent, type EditsState } from "../dungeon/flow.ts";
 import type { DungeonPlan, WingBase } from "../dungeon/plan.ts";
 import { RoomPanel } from "../dungeon/RoomPanel.tsx";
@@ -58,7 +58,7 @@ export type WingMade = { ops: ClientOp[]; room: RoomState; ids: ReadonlyMap<stri
 
 /** A plan of the wing: its ghost, the foot's counts and what Add the wing sends with what its asks carry, or why there is none, in words when the planner says. */
 export type WingPlan =
-  | { ok: true; summary: Summary; ghost: WingGhost; made: WingMade | null; clear?: WingClear; facts?: RoomFacts[]; fitted?: number }
+  | { ok: true; summary: Summary; ghost: WingGhost; made: WingMade | null; clear?: WingClear; facts?: RoomFacts[]; layout?: DungeonEdits["layout"] }
   | { ok: false; error: "fit" | "bug"; words?: string; why?: string };
 
 /** Plans the wing for the choices, seed and room edits on its base. Only the newest call's answer is shown. */
@@ -158,7 +158,7 @@ export function wingPlanner(keyRoom: () => WingKeyRoom | null, post: (base: Wing
     const scratchScene = answer.room.scenes[sceneId];
     if (!scratchScene) return { ok: false, error: "bug" };
     const ghost = ghostOf({ base: base.state, sceneId, scratch: answer.room, scratchScene, area: base.area, offset: { x: 0, y: 0 }, feetPerCell, rooms: wingRooms(answer.plan, base) });
-    return { ok: true, summary: answer.summary, ghost, made: { ops: answer.ops, room: answer.room, ids: new Map() }, ...(answer.clear ? { clear: answer.clear } : {}), facts: answer.facts, fitted: answer.fitted };
+    return { ok: true, summary: answer.summary, ghost, made: { ops: answer.ops, room: answer.room, ids: new Map() }, ...(answer.clear ? { clear: answer.clear } : {}), facts: answer.facts, layout: answer.layout };
   };
 }
 
@@ -421,8 +421,9 @@ export default function WingPane(props: {
     if (next) builder.setState({ wingRoom: next.n });
   };
   const editRoom = (next: RoomEdit | null) => {
-    if (pickedIndex === null || !plan?.ok || !base) return;
-    editStep({ k: "edit", room: pickedIndex, edit: next, layout: editLayout(settings, seed, plan.fitted ?? settings.rooms, base.hash) });
+    // The layout the plan froze, its choices clamped to the area, as the planner holds edits to (4.2).
+    if (pickedIndex === null || !plan?.ok || !plan.layout) return;
+    editStep({ k: "edit", room: pickedIndex, edit: next, layout: plan.layout });
   };
   // A docked card keeps its foot in view and scrolls its rows. A sheet can be short, as at 320 by 568 at 130%, where a pinned foot would leave the rows no room, so the whole sheet scrolls under its header.
   const sheet = place.kind === "sheet";

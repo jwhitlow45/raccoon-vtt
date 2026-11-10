@@ -15,7 +15,7 @@ import { floorAddRefusal, floorCreateOf, type FloorTarget } from "../scenes/floo
 import { CHECK_MS } from "../uvtt/rules.ts";
 import { NumberInput } from "../scenes/controls.tsx";
 import { Choice, Choices as ChoiceRows } from "./Choices.tsx";
-import { editLayout, type RoomEdit } from "./edits.ts";
+import type { RoomEdit } from "./edits.ts";
 import { closePreviews, preview, warmPreviews, type Preview } from "./client.ts";
 import { counted, drawable, editedRooms, editsStep, flowStep, readiness, startEdits, startFlow, type EditsEvent, type EditsState, type Flow, type FlowEvent } from "./flow.ts";
 import { journalFull } from "./keyHold.ts";
@@ -403,9 +403,8 @@ export function GenerateDialog(props: {
   );
   const editRoom = (next: RoomEdit | null) => {
     if (picked === null || !parsed.ok || !onScreen) return;
-    // The first edit freezes the layout on screen: the room count its plan asked for, the seed and the choices (4.2).
-    const layout = editLayout(settings, parsed.seed, onScreen.fitted, null);
-    editStep({ k: "edit", room: picked, edit: next, layout });
+    // The first edit freezes the layout on screen, as its plan read it: the room count it asked for, the seed and the choices (4.2).
+    editStep({ k: "edit", room: picked, edit: next, layout: onScreen.layout });
   };
 
   // Reroll stands in the preview's corner, so the preview and the choices each keep one left edge. Its ring can fall on the picture's stone, so it is the board's two-tone ring (Preview.tsx CORNER_SLOT).

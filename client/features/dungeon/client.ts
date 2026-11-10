@@ -26,13 +26,13 @@ export type Summary = { rooms: number; asked: number; doors: number; locked: num
 /**
  * A preview as the worker answers it. Made: the plan, the ops Make sends,
  * the scratch room they landed in and the foot's counts, with each kept
- * room's facts for the room panel and the room count the plan asked for
- * (phase 3, 4.1 and 4.2), and for a wing what its asks carry (3.6). Not
+ * room's facts for the room panel and the layout an edit on the plan
+ * freezes (phase 3, 4.1 and 4.2), and for a wing what its asks carry (3.6). Not
  * made: "fit" with why a fit gave up (past its plans, under two rooms, or
  * edits over a hex scene's walls) or a wing's problem, or "bug".
  */
 export type Preview =
-  | { ok: true; plan: DungeonPlan; ops: ClientOp[]; room: RoomState; summary: Summary; facts: RoomFacts[]; fitted: number; clear?: WingClear }
+  | { ok: true; plan: DungeonPlan; ops: ClientOp[]; room: RoomState; summary: Summary; facts: RoomFacts[]; layout: DungeonEdits["layout"]; clear?: WingClear }
   | { ok: false; error: "fit" | "bug"; why?: "tooMany" | "underTwo" | "edits"; problem?: WingProblem };
 
 /** What the page needs of a worker, so the tests can stand one in. */

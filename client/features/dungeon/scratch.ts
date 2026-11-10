@@ -13,12 +13,12 @@ import { boardTheme } from "../../lib/theme.ts";
 import type { SceneInput } from "../scenes/create.ts";
 import type { Preview, Summary } from "./client.ts";
 import { keyOps, type KeyInput } from "./keyPage.ts";
-import type { DungeonEdits } from "./edits.ts";
+import { editLayout, type DungeonEdits } from "./edits.ts";
 import { NO_SPACE } from "./hexWalls.ts";
 import { buildOps, dressOps, MAX_OPS, SCENE_PLACEHOLDER, trapOps, WING_OP_BYTES, wingMapOps } from "./ops.ts";
-import { planFitted, type DungeonPlan, type Planned, type WingBase } from "./plan.ts";
+import { planFitted, type DungeonPlan, type Fitted, type Planned, type WingBase } from "./plan.ts";
 import type { Seed } from "./seed.ts";
-import { clampSettings, isHexGrid, MIN_ROOMS, type DungeonSettings, type PlanContext } from "./settings.ts";
+import { clampSettings, isHexGrid, MIN_ROOMS, type DungeonSettings, type GridKind, type PlanContext } from "./settings.ts";
 import { wingSetup } from "./wing.ts";
 
 /*
@@ -187,8 +187,8 @@ export function summarize(plan: Pick<DungeonPlan, "rooms" | "asked" | "doors" | 
   return { rooms: plan.rooms.length, asked: plan.asked, doors, locked, traps: plan.traps.length, secretDoors, secretRooms: plan.rooms.filter((r) => r.secret).length, lights: plan.lights.length };
 }
 
-/** What a preview reads of a plan's working. */
-type Made = Pick<Planned, "plan" | "facts" | "fitted" | "overBudget" | "leaves">;
+/** What a preview reads of a plan's working, and the layout an edit on it freezes where the planner says (`planFitted`). */
+type Made = Pick<Planned, "plan" | "facts" | "fitted" | "overBudget" | "leaves"> & { layout?: DungeonEdits["layout"] };
 
 /**
  * Why a plan cannot be shown, as the preview says it: under two rooms,
@@ -202,9 +202,13 @@ function fitFailure(planned: Made): Preview | null {
   return null;
 }
 
-/** What the room panel reads of a plan (phase 3, 4.1): each kept room's facts, and the room count the plan asked for. */
-function panelOf(planned: Made): { facts: Planned["facts"]; fitted: number } {
-  return { facts: planned.facts, fitted: planned.fitted };
+/**
+ * What the room panel reads of a plan (phase 3, 4.1 and 4.2): each kept
+ * room's facts, and the layout an edit on it freezes, the planner's own
+ * or, for a plan handed in whole, the clamped choices at its room count.
+ */
+function panelOf(planned: Made, settings: DungeonSettings, seed: Seed, grid: GridKind | undefined): { facts: Planned["facts"]; layout: DungeonEdits["layout"] } {
+  return { facts: planned.facts, layout: planned.layout ?? editLayout(clampSettings(settings, grid), seed, planned.fitted, null) };
 }
 
 /**
@@ -248,7 +252,7 @@ export function previewOf(
     console.error(`raccoon: a generated dungeon was refused at ${landed.why}`);
     return { ok: false, error: "bug" };
   }
-  return { ok: true, plan, ops: landed.ops, room: landed.room, summary: summarize(plan, isHexGrid(plan.grid) ? planned.leaves : undefined), ...panelOf(planned) };
+  return { ok: true, plan, ops: landed.ops, room: landed.room, summary: summarize(plan, isHexGrid(plan.grid) ? planned.leaves : undefined), ...panelOf(planned, settings, seed, context.grid) };
 }
 
 /** The scene id a wing's scratch room keeps: the base's own, so the ops a wing plans already name the scene it joins. */
@@ -340,7 +344,7 @@ export function wingClearOf(planned: Planned, base: WingBase, settings: DungeonS
  * is the "fit" error with the planner's problem.
  */
 export function wingPreviewOf(settings: DungeonSettings, seed: Seed, base: WingBase, context: PlanContext, key: KeyInput | null, edits: DungeonEdits | null = null): Preview {
-  let planned: Planned;
+  let planned: Fitted;
   try {
     planned = planFitted(settings, seed, context, { wing: base, ...(edits ? { edits } : {}) });
   } catch (err) {
@@ -367,5 +371,5 @@ export function wingPreviewOf(settings: DungeonSettings, seed: Seed, base: WingB
     console.error(`raccoon: a planned wing was refused at ${landed.why}`);
     return { ok: false, error: "bug" };
   }
-  return { ok: true, plan, ops: landed.ops, room: landed.room, summary: summarize(plan, isHexGrid(plan.grid) ? planned.leaves : undefined), ...panelOf(planned), clear };
+  return { ok: true, plan, ops: landed.ops, room: landed.room, summary: summarize(plan, isHexGrid(plan.grid) ? planned.leaves : undefined), ...panelOf(planned, settings, seed, base.scene.gridShape), clear };
 }

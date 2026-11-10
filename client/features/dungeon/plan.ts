@@ -14,7 +14,7 @@ import { CORRIDOR_SPACE, directionTo, hexSide, hexWalls, NO_SPACE, RUN_SPACE, ty
 import { latticeFor, type Lattice } from "./lattice.ts";
 import { corridorTraps, keyRooms, numberRooms, pinSquare } from "./keyRooms.ts";
 import { placeLights, placeLightsHex, type LitRoom } from "./lightSpots.ts";
-import { doorKey, editsHold, REPORTS, SECRET_OFF, type DoorPin, type DungeonEdits, type RoomEdit, type RoomFacts } from "./edits.ts";
+import { doorKey, editLayout, editsHold, REPORTS, SECRET_OFF, type DoorPin, type DungeonEdits, type RoomEdit, type RoomFacts } from "./edits.ts";
 import { fitRooms, NEW_SCENE, withinAllowance, type Allowance, type FitFailure } from "./fit.ts";
 import { chooseSecrets, secretCandidates, stillWhole, type Candidate } from "./secrets.ts";
 import { clampContext, clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, isHexGrid, MAX_DOOR_EDGES, MAX_LIGHTS, MAX_SECRET_DOORS, MAX_STAMPS, MAX_TRAPS, MIN_ROOMS, SEARCH_BUDGET, litCount, secretCount, trapCount, type DungeonSettings, type GridKind, type PlanContext, type Theme } from "./settings.ts";
@@ -244,14 +244,24 @@ export function generate(settings: DungeonSettings, seed: Seed, context: PlanCon
   return planDungeon(settings, seed, context, budget).plan;
 }
 
+/** A plan as `planFitted` gives it, with the layout an edit made on it freezes (4.2). */
+export type Fitted = Planned & { layout: DungeonEdits["layout"] };
+
 /**
  * The plan a dialog or a wing pane shows (phase 3, 2.5, 3.4 and 4.2): on
  * hexes, and for a wing on either grid, the first plan within what the
  * scene has room for, stepping the room count down, and with edits exactly
  * the room count they froze, the edits applied. `fits` adds a check of its
  * own, such as the sight cap the scratch room counts.
+ *
+ * `layout` is what an edit made on this plan freezes: the room count the
+ * plan asked for, the seed, the choices as clamped here and the base's
+ * hash. Edits hold only on that layout, so a caller freezes this one
+ * rather than its own copy of the choices, which can differ once clamped
+ * (DG3 review round 1: the wing pane's raw choices dropped every edit on a
+ * small area).
  */
-export function planFitted(settings: DungeonSettings, seed: Seed, context: PlanContext, extras: { edits?: DungeonEdits; wing?: WingBase; fits?: (planned: Planned) => boolean } = {}): Planned {
+export function planFitted(settings: DungeonSettings, seed: Seed, context: PlanContext, extras: { edits?: DungeonEdits; wing?: WingBase; fits?: (planned: Planned) => boolean } = {}): Fitted {
   const ctx = clampContext(context);
   const setup = extras.wing ? wingSetup(extras.wing, clampSettings(settings, extras.wing.scene.gridShape ?? "squares")) : undefined;
   const s = clampSettings(settings, setup ? setup.world.grid : ctx.grid);
@@ -261,16 +271,17 @@ export function planFitted(settings: DungeonSettings, seed: Seed, context: PlanC
   const base = extras.wing?.hash ?? null;
   const edits = extras.edits && editsHold(extras.edits, s, seed, base) ? extras.edits : undefined;
   const plan = (rooms: number, pins?: DungeonEdits["rooms"]) => planDungeon(s, seed, ctx, SEARCH_BUDGET, { rooms, allowance, ...(pins ? { edits: pins } : {}), ...(setup ? { wing: setup } : {}) });
+  const frozen = (p: Planned): Fitted => ({ ...p, layout: editLayout(s, seed, p.fitted, base) });
   if (edits) {
     // Edits freeze the room count, so a plan over budget is not fitted again: the edit that took it over is undone (4.2).
     const planned = plan(edits.layout.fitted, edits.rooms);
-    return fits(planned) ? planned : { ...planned, overBudget: "edits" };
+    return frozen(fits(planned) ? planned : { ...planned, overBudget: "edits" });
   }
   const { planned, failed } = fitRooms(s.rooms, (rooms) => plan(rooms), fits);
-  if (!failed) return planned;
+  if (!failed) return frozen(planned);
   // A wing that fits under two rooms finds the scene too full of walls and doors (3.4).
   const wing = planned.wing && failed === "underTwo" ? { ...planned.wing, problem: planned.wing.problem ?? ("full" as const) } : planned.wing;
-  return { ...planned, overBudget: failed, wing };
+  return frozen({ ...planned, overBudget: failed, wing });
 }
 
 /** The plan with its working. A caller with no room (a bench script) plans at the default 5 ft a square. */
