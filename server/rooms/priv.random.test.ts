@@ -617,6 +617,11 @@ async function run(t: TestContext, seed: number, steps: number, counts: Counts):
         const fresh = await scopeObserver(twin.actor, { memberId: "p1", role: "player" });
         await twin.settle();
         const live = new StampCopy().read(twin.clients.p1.sent).orders();
+        assert.deepEqual(hiddenIn(fresh.sent, twin.hidden), [], `${where}: ${twin.name}: no frame of P1's fresh socket names what P1 never sees`);
+        assert.deepEqual(revsIn(fresh.sent), [], `${where}: ${twin.name}: every rev P1's fresh socket holds is 0`);
+        const snapshot = new StampCopy().read(fresh.sent);
+        assert.deepEqual(snapshot.notRanks(), [], `${where}: ${twin.name}: a fresh snapshot's stamps carry their ranks`);
+        assert.deepEqual(live, snapshot.orders(), `${where}: ${twin.name}: P1's live ranks equal a fresh snapshot's`);
         twin.actor.detach(fresh.conn);
         await twin.settle();
       }
