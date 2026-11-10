@@ -10,7 +10,7 @@ import { room, scene, token } from "#shared/testutil.ts";
 import { ATTIC, GROUND, UPPER, tower as linkedTower, withStairs } from "#shared/floorLinksTestutil.ts";
 import { LINK_WORDS } from "#shared/rules/floorLinks.ts";
 import { FLOOR_SEARCH } from "../floors/ids.ts";
-import { addBetweenRefusal, addRefusal, FLOOR_MARKS, floorRowLabel, floorSettingsLine, floorsSummary, floorsTopFirst, GO_TO_FLOOR, heightOf, hideRefusal, ON_SCREEN, moveBetweenRefusal, orderAfterMove, playersAt, removeRefusal, stepHeight } from "./floorWords.ts";
+import { addBetweenRefusal, addRefusal, FLOOR_MARKS, floorRowLabel, floorSettingsLine, floorsSummary, floorsTopFirst, GO_TO_FLOOR, heightOf, hideRefusal, ON_SCREEN, moveBetweenRefusal, moveReasonsLine, orderAfterMove, playersAt, removeRefusal, stepHeight } from "./floorWords.ts";
 
 /*
  * The Floors group's and a floor's page's words and rules
@@ -175,6 +175,18 @@ describe("stairs between floors (docs/design/design-v1-floors.md phase 2, 7.3)",
     assert.equal(moveBetweenRefusal(state, floors(state), UPPER, true), joins);
     assert.equal(moveBetweenRefusal(state, floors(state), ATTIC, false), joins);
     assert.equal(moveBetweenRefusal(state, floors(state), ATTIC, true), null);
+  });
+
+  test("a floor linked above and below reads both moves' reasons, each once (LP35-A-FLR-2)", () => {
+    const state = withStairs(withStairs(), { id: "l3", pairId: "l4", sceneId: UPPER, to: ATTIC, rect: { x: 8, y: 8, w: 1, h: 1 } });
+    const up = moveBetweenRefusal(state, floors(state), UPPER, true);
+    const down = moveBetweenRefusal(state, floors(state), UPPER, false);
+    assert.equal(up, LINK_WORDS.between("stairs", "Ground floor", "Upper floor"));
+    assert.equal(down, LINK_WORDS.between("stairs", "Upper floor", "Attic"));
+    assert.equal(moveReasonsLine(up, down), `${up} ${down}`);
+    assert.equal(moveReasonsLine(up, up), up);
+    assert.equal(moveReasonsLine(null, down), down);
+    assert.equal(moveReasonsLine(null, null), null);
   });
 
   test("a ladder reads in its own words, and a room with no stairs refuses nothing", () => {

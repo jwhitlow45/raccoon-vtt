@@ -172,3 +172,9 @@ export function moveBetweenRefusal(view: Pick<RoomState, "scenes" | "floorLinks"
   const next = orderAfterMove(floors, id, up);
   return next === null ? null : stairsBetweenRefusal(view, next);
 }
+
+/** The reasons Move up and Move down are off, joined once, as the Floors group joins Add's: each button is described by the whole line. */
+export function moveReasonsLine(up: string | null, down: string | null): string | null {
+  const reasons = [...new Set([up, down].filter((r): r is string => r !== null))];
+  return reasons.length === 0 ? null : reasons.join(" ");
+}
