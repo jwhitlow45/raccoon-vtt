@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { applySheetDialogSteps, closeLedger, openingFocus, raiseModalsAbove, sheetDialogSteps, sheetFocusAfter, stopIndex, tabStops, wrapFocusIndex, type DialogLike } from "./modalDialog.ts";
+import { applySheetDialogSteps, closeLedger, nativeClose, openingFocus, raiseModalsAbove, sheetDialogSteps, sheetFocusAfter, stopIndex, tabStops, wrapFocusIndex, type DialogLike } from "./modalDialog.ts";
 
 describe("focus wrapping in a modal dialog", () => {
   test("Tab from the last control goes to the first", () => {
@@ -240,5 +240,32 @@ describe("raiseModalsAbove (TOKEN-SHEET-BAND-DIALOG)", () => {
     const opened = { contains: () => false, close: () => void calls.push("close opened"), showModal: () => void calls.push("showModal opened") };
     raiseModalsAbove([host, opened], sheet, null);
     assert.deepEqual(calls, ["close opened", "showModal opened"]);
+  });
+});
+
+describe("a close the browser makes itself (nativeClose)", () => {
+  function dialog(open: boolean) {
+    const calls: string[] = [];
+    return { calls, el: { open, showModal: () => calls.push("showModal") }, keep: { focus: () => calls.push("focus Hide") }, onClose: () => calls.push("onClose") };
+  }
+
+  test("a dialog without keepOpen still asks its owner to close", () => {
+    const d = dialog(false);
+    assert.equal(nativeClose(d.el, null, d.onClose), "closed");
+    assert.deepEqual(d.calls, ["onClose"]);
+  });
+
+  test("while its owner keeps it open, it opens again at once with focus on the held element, and the owner is not asked", () => {
+    const d = dialog(false);
+    assert.equal(nativeClose(d.el, d.keep, d.onClose), "reopened");
+    assert.deepEqual(d.calls, ["showModal", "focus Hide"]);
+  });
+
+  test("a close event that finds the dialog open again is left over and does nothing, held or not", () => {
+    for (const keep of [null, dialog(true).keep]) {
+      const d = dialog(true);
+      assert.equal(nativeClose(d.el, keep, d.onClose), "ignored");
+      assert.deepEqual(d.calls, []);
+    }
   });
 });

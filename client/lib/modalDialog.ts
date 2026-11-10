@@ -40,6 +40,15 @@ export function useModalDialog(
     returnFocus?: RefObject<HTMLElement | null>;
     /** False keeps the dialog at 100% whatever the interface size. */
     zoom?: boolean;
+    /**
+     * Holds an element while the owner refuses every close, as Generate a
+     * dungeon does while a floor's create waits for its answer
+     * (docs/design/design-v1-floors.md phase 3, 3.7). A close the browser
+     * makes itself then opens the dialog again at once, with focus on that
+     * element. Without it a native close asks the owner to close, as Escape
+     * does.
+     */
+    keepOpen?: RefObject<HTMLElement | null>;
   },
 ): void {
   const latest = useRef(options);
@@ -63,9 +72,7 @@ export function useModalDialog(
     };
     // Chrome closes without a cancel event when Escape repeats with no tap or click in between.
     // A close event left over from an earlier cleanup, such as React's development double mount, finds the dialog open again and is ignored.
-    const onNativeClose = () => {
-      if (!el.open) latest.current.onClose();
-    };
+    const onNativeClose = () => nativeClose(el, latest.current.keepOpen?.current ?? null, latest.current.onClose);
     const onKey = (e: KeyboardEvent) => containTab(el, e);
     el.addEventListener("cancel", onCancel);
     el.addEventListener("close", onNativeClose);
@@ -102,6 +109,25 @@ export function useModalDialog(
     el.style.setProperty("--rvtt-ui", scale === 1 ? "" : String(scale));
     el.toggleAttribute("data-rvtt-small-ui", scale < 1);
   }, [dialog, scale]);
+}
+
+/**
+ * What a `close` event the hook did not ask for does. One that finds the
+ * dialog open again is left over from an earlier cleanup and does nothing.
+ * While the owner keeps the dialog open (`keepOpen`), the dialog opens
+ * again at once with focus on the held element, so a busy dialog never
+ * disappears with its work still running. Otherwise the owner is asked to
+ * close, as Escape asks.
+ */
+export function nativeClose(el: Pick<DialogLike, "open" | "showModal">, keep: { focus(options?: FocusOptions): void } | null, onClose: () => void): "ignored" | "reopened" | "closed" {
+  if (el.open) return "ignored";
+  if (keep) {
+    el.showModal();
+    keep.focus({ preventScroll: true });
+    return "reopened";
+  }
+  onClose();
+  return "closed";
 }
 
 /** How a sheet's `<dialog>` stands: closed (hidden, or not yet open), open beside the map with show(), or modal with showModal(). */

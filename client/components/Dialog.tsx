@@ -60,6 +60,8 @@ export type DialogProps = {
   opener?: RefObject<HTMLElement | null>;
   /** Android's Back closes the dialog (lib/backClose.ts) rather than leaving the room. */
   backClose?: boolean;
+  /** Set while the owner refuses every close: a close the browser makes itself opens the dialog again with focus here (lib/modalDialog.ts `keepOpen`). */
+  keepOpen?: RefObject<HTMLElement | null>;
   /** False keeps the dialog at 100% whatever the interface size, for one with pointer math of its own (lib/modalDialog.ts). */
   zoom?: boolean;
   /** A tap on the backdrop beside the card closes the dialog. On by default. */
@@ -198,7 +200,7 @@ export function Dialog(props: DialogProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const detailId = useId();
   useBackClose(props.backClose === true, onClose);
-  useModalDialog(dialog, { onClose, ...(props.opener ? { returnFocus: props.opener } : null), ...(props.zoom === false ? { zoom: false } : null) });
+  useModalDialog(dialog, { onClose, ...(props.opener ? { returnFocus: props.opener } : null), ...(props.zoom === false ? { zoom: false } : null), ...(props.keepOpen ? { keepOpen: props.keepOpen } : null) });
   useStepFocus(dialog, props.title);
   const card = useRef<HTMLElement>(null);
   const body = useRef<HTMLDivElement>(null);
