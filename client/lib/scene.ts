@@ -360,7 +360,7 @@ export function drawsAboveFog(
  * Players' projections already carry the public name. A token missing
  * from the map is named from its own fields (labels.ts labelOf).
  */
-export function displayName(token: Pick<Token, "name" | "number"> & { id?: string }, labels?: Labels): string {
+export function displayName(token: Pick<Token, "name" | "number"> & { id?: string }, labels: Labels): string {
   return labelText(labelOf(labels, token));
 }
 
@@ -370,6 +370,6 @@ export function displayName(token: Pick<Token, "name" | "number"> & { id?: strin
  * drawn between squares says so (docs/design/design-v1-snap-off.md section 4),
  * because its picture sits off the square its rules count.
  */
-export function actionsName(token: Pick<Token, "name" | "number" | "nudge"> & { id?: string }, labels?: Labels): string {
+export function actionsName(token: Pick<Token, "name" | "number" | "nudge"> & { id?: string }, labels: Labels): string {
   return `${displayName(token, labels)} actions${token.nudge ? ", placed between squares" : ""}`;
 }

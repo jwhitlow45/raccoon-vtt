@@ -295,7 +295,7 @@ export function buildIndex(input: IndexInput): SearchIndex {
 
   // One row for each floor the DM's one selected creature can go to, acting at once as the condition rows do (floors3 design 5).
   if (role === "dm" && withFloors && selected && floorIds.has(selected.sceneId) && state.local.selectedIds.length <= 1) {
-    const name = displayName(selected);
+    const name = displayName(selected, labels);
     // Ranked in the order floorChoices lists them, top floor first, as the Floors menu reads, not by the length of the floor's name.
     let order = 0;
     for (const c of floorChoices(view, [selected], labels)) {

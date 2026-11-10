@@ -244,8 +244,8 @@ describe("tokens", () => {
   });
 
   test("numbered names", () => {
-    assert.equal(displayName({ name: "Goblin", number: 3 }), "Goblin 3");
-    assert.equal(displayName({ name: "Thorn" }), "Thorn");
+    assert.equal(displayName({ name: "Goblin", number: 3 }, new Map()), "Goblin 3");
+    assert.equal(displayName({ name: "Thorn" }, new Map()), "Thorn");
   });
 
   test("HP labels", () => {

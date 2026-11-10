@@ -103,9 +103,9 @@ describe("a token at a drag's spot (SNAPBUILD-ASTRA-04)", () => {
 
 describe("a token's accessible name (snap-off section 4)", () => {
   test("a token drawn between squares says so at the end, and one on its square does not", () => {
-    assert.equal(actionsName({ name: "Bree" }), "Bree actions");
-    assert.equal(actionsName({ name: "Goblin", number: 2 }), "Goblin 2 actions");
-    assert.equal(actionsName({ name: "Bree", nudge: { x: 3, y: 0 } }), "Bree actions, placed between squares");
-    assert.equal(actionsName({ name: "Goblin", number: 2, nudge: { x: -1, y: 1 } }), "Goblin 2 actions, placed between squares");
+    assert.equal(actionsName({ name: "Bree" }, new Map()), "Bree actions");
+    assert.equal(actionsName({ name: "Goblin", number: 2 }, new Map()), "Goblin 2 actions");
+    assert.equal(actionsName({ name: "Bree", nudge: { x: 3, y: 0 } }, new Map()), "Bree actions, placed between squares");
+    assert.equal(actionsName({ name: "Goblin", number: 2, nudge: { x: -1, y: 1 } }, new Map()), "Goblin 2 actions, placed between squares");
   });
 });
