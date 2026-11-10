@@ -8,6 +8,15 @@ import { guardHash } from "#shared/reducer/tx.ts";
 
 const POSE_FIELDS = ["sceneId", "x", "y", "elevation", "rotation", "size", "w", "h", "squeeze", "nudge", "path", "attached"] as const;
 const POSE_KEYS = new Set<string>(POSE_FIELDS);
+/**
+ * A creature's number and mark (shared/numbering.ts), which the table
+ * gives at a batch's end and so are no edit of the DM's: a meeting since
+ * the step never stops its pose from adapting. A pose restore takes them
+ * from the step, with its scene, and the restore reconciles them with the
+ * creature now (shared/reducer/numbering.ts keepNumbering).
+ */
+const NUMBERING_FIELDS = ["met", "number"] as const;
+const NUMBERING_KEYS = new Set<string>(NUMBERING_FIELDS);
 
 /** After-values belong to the action that created this entry, including an Undo that created a Redo entry. */
 export type DmHistoryValues = { after: Record<string, unknown>; poseKeys: Set<string> };
@@ -18,7 +27,7 @@ function pose(token: Token): string {
 }
 
 function nonPose(token: Token): string {
-  return stableStringify(Object.fromEntries(Object.entries(token).filter(([key]) => key !== "rev" && !POSE_KEYS.has(key))));
+  return stableStringify(Object.fromEntries(Object.entries(token).filter(([key]) => key !== "rev" && !POSE_KEYS.has(key) && !NUMBERING_KEYS.has(key))));
 }
 
 export function dmHistoryValues(inverse: readonly RestoreEntry[], after: RoomState, adaptPose: boolean): DmHistoryValues {
@@ -74,7 +83,7 @@ export function dmPoseRestore(state: RoomState, entries: readonly RestoreEntry[]
     if (!current || !saved || !entry.value || pose(current) !== pose(saved)) return entry;
     const before = entry.value as Token;
     const value = { ...current };
-    for (const key of POSE_FIELDS) {
+    for (const key of [...POSE_FIELDS, ...NUMBERING_FIELDS]) {
       delete (value as unknown as Record<string, unknown>)[key];
       if (before[key] !== undefined) (value as unknown as Record<string, unknown>)[key] = before[key];
     }
