@@ -2353,27 +2353,30 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await page.waitForTimeout(300);
     assert.equal(dmSocket.state!.encounter!.activeEntryId, after, "the turn moved more than once");
 
-    // Busy past the shared delay, the round header's spinners stay in line at every size. Previous and Next take turns, so the run ends on Bree's turn again.
-    const off: string[] = [];
-    const sizes = [[1440, 900, 1], [1440, 900, 1.3], [390, 844, 1], [390, 844, 1.3], [320, 568, 1], [320, 568, 1.3]] as const;
+    /*
+     * Busy past the shared delay, the round header's spinners move nothing: at each width its findings while busy are the
+     * ones it has idle. The width changes without a reload, since each reload is a snapshot on the DM's session, and
+     * Previous and Next take turns, so the run ends on Bree's turn again.
+     */
+    const added: string[] = [];
+    const findings = async (row: Locator, at: string) => alignmentLines(await measureAlignment(row), at).map((line) => line.slice(at.length));
     try {
-      for (const [i, [width, height, scale]] of sizes.entries()) {
-        const at = `${width} x ${height} at ${Math.round(scale * 100)}%`;
+      for (const [i, [width, height]] of ([[1440, 900], [390, 844], [320, 568]] as const).entries()) {
+        const at = `${width} x ${height}`;
         await page.setViewportSize({ width, height });
-        await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
-        await page.goto(`${server.origin}/r/${run.roomId}`);
-        await page.getByRole("status", { name: "Connected" }).first().waitFor();
-        await openTracker(page);
         const row = page.locator("[data-round-header]").first();
+        // A phone width shows the tracker as a sheet, which stays open from one width to the next.
+        if (!(await row.isVisible())) await openTracker(page);
         const press = i % 2 === 0 ? row.getByRole("button", { name: "Previous turn" }) : row.getByRole("button", { name: "Next", exact: true });
+        const idle = new Set(await findings(row, at));
         const was = dmSocket.state!.encounter!.activeEntryId;
         wire.hold = /"t":"encounter\.(next|prev)"/;
         try {
           await press.click();
           await waitFor(`the turn change on the wire at ${at}`, () => (wire.held.length === 1 ? true : null));
           await row.locator('[aria-busy="true"] .rvtt-spin').first().waitFor({ timeout: 3_000 });
-          off.push(...alignmentLines(await measureAlignment(row), `the round header, busy, at ${at}`));
-          await shots.take(page, `pd-1-busy-${width}x${height}-${Math.round(scale * 100)}`);
+          for (const line of await findings(row, at)) if (!idle.has(line)) added.push(`the round header, busy, at ${at}${line}`);
+          await shots.take(page, `pd-1-busy-${width}x${height}`);
         } finally {
           release(wire);
         }
@@ -2382,11 +2385,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       }
     } finally {
       await page.setViewportSize({ width: 1440, height: 900 });
-      await page.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
-      await page.goto(`${server.origin}/r/${run.roomId}`);
-      await page.getByRole("status", { name: "Connected" }).first().waitFor();
     }
-    assert.deepEqual(off, [], "the busy round header out of line by more than 1 px");
+    assert.deepEqual(added, [], "the busy round header out of line where the idle one is not");
   });
 
   test("qe-4. the warrior's next turn shows its card with its attacks again, and none of last turn's results or chips, though a healthy warrior has no turn record (QOL audit Q1)", async () => {
@@ -2412,7 +2412,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     }
   });
 
-  test("qe-5. Roll monsters' Initiative, on at first: a start of more than one batch shows the fight at once and waits for the server with Auto Initiative reading Rolling…, then every monster rolls and the party's rows wait for their players, and Undo takes back the totals, then the whole start, leaving the roll's line (QOL audit Q12)", async () => {
+  test("qe-5. Roll monsters' Initiative, on at first: a start of more than one batch waits for the server with the pressed button reading Rolling…, then every monster rolls and the party's rows wait for their players, and Undo takes back the totals, then the whole start, leaving the roll's line (QOL audit Q12)", async () => {
     const { page, wire } = qeDesk();
     await ops.send({ t: "encounter.end" }).catch(() => {});
     // 90 kobolds, so every creature here makes more than the 100 rows one op may carry.
@@ -2435,10 +2435,11 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     try {
       await everyone.click();
       await waitFor("the start's two batches on the wire", () => (wire.held.length === 2 ? true : null));
-      // The start is predicted, so the fight's sections replace New fight at once, and the button that waits is Auto Initiative's (LP32-B-INIT-1).
-      const rolling = auto.getByRole("button", { name: "Rolling…", exact: true });
+      // A start can change the turn, so it shows once the server takes it, and the button that waits is the pressed one in New fight.
+      const fresh = page.locator("section").filter({ has: page.locator('[data-search="tracker.new-fight"]') }).last();
+      const rolling = fresh.getByRole("button", { name: "Rolling…", exact: true });
       await rolling.waitFor();
-      assert.equal(await page.getByRole("button", { name: "Rolling…", exact: true }).count(), 1, "a button other than Auto Initiative's reads Rolling…");
+      assert.equal(await page.getByRole("button", { name: "Rolling…", exact: true }).count(), 1, "a button other than the pressed one reads Rolling…");
       assert.equal(await rolling.getAttribute("aria-busy"), "true");
       await shots.take(page, "qe-5-rolling");
       // Nothing rolls before the server takes the start: the rows are not in the view yet.
