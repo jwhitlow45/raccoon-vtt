@@ -325,7 +325,7 @@ describe("the partial index", () => {
       second.steps.length = 0;
       await dropIndex();
       await legacyInsert(pool, nextRoom, next.rows);
-      const view = captureView({ state: state(), seq: next.seq, through: next.seq }, nextRoom, VIEWERS[1]!);
+      const view = captureView({ state: state(), through: next.seq }, nextRoom, VIEWERS[1]!);
       assert.deepEqual((await read(reader(undefined), view, new LogScanBudget())).back, oracle(view.state, next.rows, view.viewer, next.seq));
       const a = first.outcome(nextRoom);
       const b = second.outcome(nextRoom);
@@ -372,7 +372,7 @@ describe("the backfill", () => {
     w.m.start();
     await until(() => w.m.ready, "ready");
     const used = new Set<HistoryReader>();
-    const view = (viewer: Viewer, seq: number) => captureView({ state: s, seq, through: seq }, roomId, viewer);
+    const view = (viewer: Viewer, seq: number) => captureView({ state: s, through: seq }, roomId, viewer);
     const done = w.outcome(roomId);
     const raw = await read(reader(w.m, used), view(VIEWERS[1]!, first.seq), budget);
     assert.deepEqual([...used], ["raw"]);
@@ -541,7 +541,7 @@ describe("the backfill", () => {
     w.m.want(roomId);
     assert.deepEqual(w.m.detail.wanted, [], "not asked for again");
     const used = new Set<HistoryReader>();
-    const got = await read(reader(w.m, used), captureView({ state: s, seq, through: seq }, roomId, VIEWERS[0]!), new LogScanBudget());
+    const got = await read(reader(w.m, used), captureView({ state: s, through: seq }, roomId, VIEWERS[0]!), new LogScanBudget());
     assert.deepEqual([...used], ["raw"]);
     assert.ok(got.back.includes("05:7"), "the raw reader reads the odd id as its number");
     // The raw reader orders it by its number, 5, where the oracle's string order cannot, so the two are compared as sets.
@@ -654,7 +654,7 @@ describe("indexed and raw reads agree", () => {
       await legacyInsert(pool, roomId, theirs);
       const budget = new LogScanBudget({ waitMs: 5_000 });
       const truth = new Map<string, Answers>();
-      for (const viewer of VIEWERS) truth.set(viewer.memberId, await read(reader(undefined), captureView({ state: s, seq, through: seq }, roomId, viewer), budget));
+      for (const viewer of VIEWERS) truth.set(viewer.memberId, await read(reader(undefined), captureView({ state: s, through: seq }, roomId, viewer), budget));
       for (const viewer of VIEWERS) assert.deepEqual(truth.get(viewer.memberId)!.back, oracle(s, rows, viewer, seq));
       // The first worker stops after two batches.
       let batches = 0;
@@ -679,7 +679,7 @@ describe("indexed and raw reads agree", () => {
       await first.m.stop();
       await noLeftovers("after a restart");
       const used = new Set<HistoryReader>();
-      for (const viewer of VIEWERS) assert.deepEqual(await read(reader(first.m, used), captureView({ state: s, seq, through: seq }, roomId, viewer), budget, 1 + Math.floor(random() * 90)), truth.get(viewer.memberId), `seed ${seed} half done`);
+      for (const viewer of VIEWERS) assert.deepEqual(await read(reader(first.m, used), captureView({ state: s, through: seq }, roomId, viewer), budget, 1 + Math.floor(random() * 90)), truth.get(viewer.memberId), `seed ${seed} half done`);
       assert.deepEqual([...used], ["raw"]);
       assert.ok((await nulls(roomId)) > 0 && (await nulls(roomId)) < theirs.length, "half done");
       // The restart reads its rows again from the index: no checkpoint to skip any.
@@ -690,7 +690,7 @@ describe("indexed and raw reads agree", () => {
       second.m.want(roomId);
       assert.equal(await done, "complete");
       used.clear();
-      for (const viewer of VIEWERS) assert.deepEqual(await read(reader(second.m, used, 1 + Math.floor(random() * 600)), captureView({ state: s, seq, through: seq }, roomId, viewer), budget, 1 + Math.floor(random() * 90)), truth.get(viewer.memberId), `seed ${seed} complete`);
+      for (const viewer of VIEWERS) assert.deepEqual(await read(reader(second.m, used, 1 + Math.floor(random() * 600)), captureView({ state: s, through: seq }, roomId, viewer), budget, 1 + Math.floor(random() * 90)), truth.get(viewer.memberId), `seed ${seed} complete`);
       assert.deepEqual([...used], ["indexed"]);
       await second.m.stop();
     }
@@ -766,7 +766,7 @@ describe("backfill, index builds, live writes, reads and shutdowns in random ord
           const viewer = VIEWERS[Math.floor(random() * VIEWERS.length)]!;
           // Sometimes a view captured before the newest rows, which it must not read.
           const seq = random() < 0.5 ? seqs.get(roomId)! : Math.floor(random() * seqs.get(roomId)!);
-          const got = await read(reader(w?.m, used, 1 + Math.floor(random() * 200)), captureView({ state: s, seq, through: seq }, roomId, viewer), budget, 1 + Math.floor(random() * 80));
+          const got = await read(reader(w?.m, used, 1 + Math.floor(random() * 200)), captureView({ state: s, through: seq }, roomId, viewer), budget, 1 + Math.floor(random() * 80));
           const want = oracle(s, stored.get(roomId)!, viewer, seq);
           assert.deepEqual(got.back, want, `seed ${seed} step ${step} (${events.join(", ")}): backward`);
           assert.deepEqual(got.forward, want, `seed ${seed} step ${step}: forward`);
@@ -812,7 +812,7 @@ describe("backfill, index builds, live writes, reads and shutdowns in random ord
         for (const viewer of VIEWERS) {
           used.clear();
           const seq = seqs.get(roomId)!;
-          const got = await read(reader(last.m, used), captureView({ state: s, seq, through: seq }, roomId, viewer), budget);
+          const got = await read(reader(last.m, used), captureView({ state: s, through: seq }, roomId, viewer), budget);
           assert.deepEqual(got.back, oracle(s, stored.get(roomId)!, viewer, seq), `seed ${seed} settled`);
           if (stored.get(roomId)!.length > 0) assert.deepEqual([...used], ["indexed"]);
         }

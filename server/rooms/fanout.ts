@@ -26,8 +26,6 @@ export type Restored = { n: number; what: string };
 export type Stamped = { n: number; at: string };
 
 export type CommittedBatch = {
-  /** The batch's storage seq. No frame carries it. */
-  seq: number;
   /** The room count (counted.ts) as it stood when the batch began to commit, the number each frame of it carries. */
   pub: number;
   before: RoomState;

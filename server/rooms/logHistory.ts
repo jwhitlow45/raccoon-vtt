@@ -119,8 +119,6 @@ class ConnectionUnavailable extends Error {
 export type HistoryView = {
   roomId: string;
   state: RoomState;
-  /** The committed state's storage seq. */
-  seq: number;
   /**
    * The newest number whose op the state holds (RoomActor.committed). Every
    * line the state holds has a number at or below it, and every line a
@@ -135,8 +133,8 @@ export type HistoryView = {
   previewBy: string | null;
 };
 
-export function captureView(committed: { state: RoomState; seq: number; through: number }, roomId: string, viewer: Viewer, opts: { sceneId?: string | null; previewBy?: string | null } = {}): HistoryView {
-  return { roomId, state: committed.state, seq: committed.seq, through: committed.through, viewer, sceneId: opts.sceneId ?? null, previewBy: opts.previewBy ?? null };
+export function captureView(committed: { state: RoomState; through: number }, roomId: string, viewer: Viewer, opts: { sceneId?: string | null; previewBy?: string | null } = {}): HistoryView {
+  return { roomId, state: committed.state, through: committed.through, viewer, sceneId: opts.sceneId ?? null, previewBy: opts.previewBy ?? null };
 }
 
 /**
@@ -601,7 +599,7 @@ export class LogHistory {
    * keep is found again by each request, which keeps only its own page.
    */
   async sessions(view: HistoryView, q: { before?: string; limit: number }, scan: Scan): Promise<SessionPage> {
-    const key = `${view.roomId}|${view.seq}|${stateSerial(view.state)}|${view.viewer.memberId}|${view.viewer.role}|${view.sceneId ?? ""}|${view.previewBy ?? ""}`;
+    const key = `${view.roomId}|${view.through}|${stateSerial(view.state)}|${view.viewer.memberId}|${view.viewer.role}|${view.sceneId ?? ""}|${view.previewBy ?? ""}`;
     const hit = this.#hit(key);
     if (hit) return { ...sliceSessions(hit.sessions, q.before, q.limit), lines: hit.lines };
     // A second request for a list being found waits for that one, holding nothing, rather than finding it again. It

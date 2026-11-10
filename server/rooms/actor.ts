@@ -2537,7 +2537,6 @@ export class RoomActor {
     try {
       const published = publishBatch(
         {
-          seq: batch.seq,
           pub: batch.pub,
           before: batch.before,
           after: batch.state,

@@ -74,7 +74,7 @@ function publishAlone(batch: CommittedBatch, sockets: readonly Socket[]): void {
     }
     const diff = diffProjection(conn.held!, next, hashValue);
     conn.held = diff.held;
-    if (diff.changes.length > 0) conn.send({ t: "ev", seq: batch.seq, changes: diff.changes });
+    if (diff.changes.length > 0) conn.send({ t: "ev", seq: batch.pub, changes: diff.changes });
   }
 }
 
@@ -86,7 +86,7 @@ function shownTo(state: RoomState, conn: Connection): ProjectedState {
 }
 
 function batchOf(seq: number, before: RoomState, after: RoomState, touched: EntityKey[], global: boolean): CommittedBatch {
-  return { seq, pub: seq, before, after, touched, global, acks: new Map(), rejects: new Map(), restored: new Map() };
+  return { pub: seq, before, after, touched, global, acks: new Map(), rejects: new Map(), restored: new Map() };
 }
 
 describe("the fan-out's projection classes", () => {

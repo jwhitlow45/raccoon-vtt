@@ -139,14 +139,15 @@ describe("a log read is bounded by the room count it captured", () => {
     await entered;
     const viewers: Viewer[] = [{ memberId: "p1", role: "player" }, { memberId: "p2", role: "player" }, { memberId: "dm1", role: "dm" }];
     const views = viewers.map((viewer) => captureView(h.actor.committed, "UNDOSCOPE", viewer));
+    const seq = h.actor.committed.seq;
     release();
     await chat;
 
     const view = views[0]!;
-    assert.ok(view.seq > view.through, `the room's own work moved the storage seq past the count (${view.seq} against ${view.through})`);
+    assert.ok(seq > view.through, `the room's own work moved the storage seq past the count (${seq} against ${view.through})`);
     const during = h.actor.committed.state.log.find((line) => line.kind === "chat" && line.text === "during");
     assert.ok(during && numberOf(during.id) === view.through + 1, "the held batch's line takes the count's next number");
-    assert.ok(numberOf(during.id) <= view.seq, "and a number at or below the storage seq the read captured");
+    assert.ok(numberOf(during.id) <= seq, "and a number at or below the storage seq the read captured");
 
     // The commit landed before the read scans: the archive holds every line, the held batch's too.
     const archive = new Archive();

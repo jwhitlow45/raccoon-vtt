@@ -41,7 +41,7 @@ describe("a hex scene through the fan-out", () => {
       const r = applyOp(state, { t: "scene.update", sceneId: "s1", patch: { gridShape: shape } }, DM, env(++seq));
       assert.ok(r.ok);
       state = r.state;
-      publishBatch({ seq, pub: seq, before, after: state, touched: r.touched, global: r.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+      publishBatch({ pub: seq, before, after: state, touched: r.touched, global: r.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
       for (const v of viewers) {
         const changes = v.inbox.splice(0).flatMap((msg) => (msg.t === "ev" ? (msg.changes as Change[]) : []));
         const scene = changes.find((c) => c.key === "scene:s1");
@@ -77,7 +77,7 @@ describe("a wall change on a hex scene through the fan-out (HX-D22)", () => {
     state = r.state;
     assert.equal(r.global, false, "a wall change is no global change");
     assert.deepEqual(state.tokens.gob, before.tokens.gob, "the goblin did not move");
-    publishBatch({ seq: 50, pub: 50, before, after: state, touched: r.touched, global: r.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+    publishBatch({ pub: 50, before, after: state, touched: r.touched, global: r.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
     for (const v of viewers) {
       const changes = v.inbox.splice(0).flatMap((msg) => (msg.t === "ev" ? (msg.changes as Change[]) : []));
       assert.ok(changes.some((c) => c.key === "token:gob"), `${v.conn.memberId} hears of the goblin`);

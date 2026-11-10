@@ -251,7 +251,7 @@ describe("the indexed reader against the raw reader", () => {
         const indexed = new LogHistory({ pool: archive, metadata, batchRows, onBatch: async ({ reader }) => void used.add(reader) });
         const raw = new LogHistory({ pool: archive, batchRows: 1 + Math.floor(random() * 600) });
         for (const { viewer, previewBy } of viewers) {
-          const view = captureView({ state, seq: maxSeq, through: maxSeq }, "ROOM", viewer, { previewBy: previewBy ?? null });
+          const view = captureView({ state, through: maxSeq }, "ROOM", viewer, { previewBy: previewBy ?? null });
           const pickSeed = Math.floor(random() * 1e9);
           const want = await answers(raw, view, budget, rng(pickSeed), ids);
           used.clear();
@@ -264,7 +264,7 @@ describe("the indexed reader against the raw reader", () => {
         // One row without metadata, anywhere: every read is raw again, and the room is queued.
         archive.rows[Math.floor(random() * archive.rows.length)]!.complete = false;
         const fresh = new LogHistory({ pool: archive, metadata, batchRows, onBatch: async ({ reader }) => void used.add(reader) });
-        const view = captureView({ state, seq: maxSeq, through: maxSeq }, "ROOM", viewers[1]!.viewer);
+        const view = captureView({ state, through: maxSeq }, "ROOM", viewers[1]!.viewer);
         const pickSeed = Math.floor(random() * 1e9);
         used.clear();
         const half = await answers(fresh, view, budget, rng(pickSeed), ids);
@@ -286,7 +286,7 @@ describe("the indexed reader against the raw reader", () => {
     const budget = new LogScanBudget();
     const scan = budget.open({ pool: "page", roomId: "ROOM", memberId: DM_ID });
     try {
-      const page = await history.page(captureView({ state: roomState(), seq: 1e9, through: 1e9 }, "ROOM", { memberId: DM_ID, role: "dm" }), { limit: 10 }, scan);
+      const page = await history.page(captureView({ state: roomState(), through: 1e9 }, "ROOM", { memberId: DM_ID, role: "dm" }), { limit: 10 }, scan);
       assert.equal(page.entries.length, 10);
     } finally {
       scan.close();
@@ -325,7 +325,7 @@ describe("the indexed reader against the raw reader", () => {
       const budget = new LogScanBudget();
       const scan = budget.open({ pool: "page", roomId: "ROOM", memberId: DM_ID, signal: abort.signal });
       try {
-        await assert.rejects(history.page(captureView({ state, seq: 1e9, through: 1e9 }, "ROOM", viewer), { limit: 10 }, scan), ScanCancelledError, `${c.reader}, at ${c.what}`);
+        await assert.rejects(history.page(captureView({ state, through: 1e9 }, "ROOM", viewer), { limit: 10 }, scan), ScanCancelledError, `${c.reader}, at ${c.what}`);
       } finally {
         scan.close();
         budget.close();
