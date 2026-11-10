@@ -56,10 +56,13 @@ function viewSeq(watch: SocketWatch): number {
   }
   return -1;
 }
-/** The seq of the newest snapshot, or event with changes, among frames: every DM socket gets those, unlike another device's refusal. */
+/**
+ * The seq of the newest event with changes among frames: every DM socket gets those, unlike another device's refusal or
+ * snapshot, which carries the number of the tick that answered it.
+ */
 function changeSeq(frames: readonly { t?: string; seq?: number; changes?: readonly unknown[] }[]): number {
   for (const frame of [...frames].reverse()) {
-    if (typeof frame.seq === "number" && (frame.t === "snapshot" || (frame.t === "ev" && (frame.changes?.length ?? 0) > 0))) return frame.seq;
+    if (typeof frame.seq === "number" && frame.t === "ev" && (frame.changes?.length ?? 0) > 0) return frame.seq;
   }
   return -1;
 }
