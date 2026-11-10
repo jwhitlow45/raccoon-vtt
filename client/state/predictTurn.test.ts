@@ -417,4 +417,33 @@ describe("Hidden turned off while the fight's start waits for its answer", () =>
     const entries = (s.state().view as unknown as RoomState).encounter?.entries ?? [];
     assert.deepEqual(Object.fromEntries(entries.map((e) => [e.tokenId, e.hidden])), { g1: false, g2: false });
   });
+
+  test("a hidden goblin added behind End the fight and a new start, then shown, gets its row shown once the server takes them all", () => {
+    const s = setup(
+      room({
+        tokens: {
+          dragon: token("dragon", { name: "Dragon" }),
+          g2: token("g2", { name: "Goblin 2", x: 4, y: 2, visibility: "dm" }),
+        },
+      }),
+    );
+    s.connect();
+    s.room.dispatch({ t: "encounter.start", entries: [{ id: "e-a", tokenId: "dragon" }] });
+    s.deliver();
+    s.room.dispatch({ t: "encounter.end" });
+    s.room.dispatch({ t: "encounter.start", entries: [{ id: "e-b", tokenId: "dragon" }] });
+    s.room.dispatch({ t: "encounter.add", entries: [{ id: "e-c", tokenId: "g2" }] });
+    const view = s.state().view as unknown as RoomState;
+    assert.ok(view.encounter?.entries.some((e) => e.id === "e-c"), "the add shows on the old fight, whose end has no answer yet");
+    assert.deepEqual(fightAhead(s.state())?.entries.map((e) => e.id), ["e-b", "e-c"], "the new fight's rows");
+    const rows = shownRowOps(fightAhead(s.state()), ["g2"]);
+    assert.deepEqual(rows, [{ t: "encounter.update", entryId: "e-c", patch: { hidden: false } }]);
+    s.room.dispatch({ t: "token.update", tokenId: "g2", patch: { visibility: "all" } });
+    for (const op of rows) s.room.dispatch(op);
+    s.deliver();
+    assert.deepEqual(s.state().pending, [], "every op answered");
+    assert.deepEqual(s.state().refused, [], "none refused");
+    const entries = (s.state().view as unknown as RoomState).encounter?.entries ?? [];
+    assert.deepEqual(Object.fromEntries(entries.map((e) => [e.id, e.hidden])), { "e-b": false, "e-c": false });
+  });
 });

@@ -519,22 +519,26 @@ export function fightAhead(s: { view?: { readonly encounter?: FightRows | null }
   const shown = s.view?.encounter ?? null;
   let rows: readonly FightRow[] | null = shown?.entries ?? null;
   let changed = false;
-  // An add the view already shows, predicted while a fight shows, counts once.
-  let showing: ReadonlySet<string> | null = null;
+  // The ids of `rows`, so an add the view already shows, predicted onto the shown fight, counts once. That fight's rows
+  // can also hold an add predicted past an end and a start still waiting, which belongs to the new fight.
+  let ids: Set<string> | null = null;
   for (const { op } of s.pending ?? []) {
     // A second start would be refused, since the first makes the fight, and an add with no fight before it too.
     if (op.t === "encounter.start" && rows === null) {
       rows = op.entries;
+      ids = null;
       changed = true;
     } else if (op.t === "encounter.add" && rows !== null) {
-      const seen = (showing ??= new Set(shown?.entries.map((e) => e.id)));
+      const seen = (ids ??= new Set(rows.map((e) => e.id)));
       const more = op.entries.filter((e) => !seen.has(e.id));
+      for (const e of more) seen.add(e.id);
       if (more.length > 0) {
         rows = [...rows, ...more];
         changed = true;
       }
     } else if (op.t === "encounter.end") {
       rows = null;
+      ids = null;
       changed = true;
     }
   }
