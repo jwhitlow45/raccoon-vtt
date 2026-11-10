@@ -160,33 +160,40 @@ describe("several floors on the server (docs/design/design-v1-floors.md 9)", () 
     assert.ok(ev.seq > 0);
   });
 
-  test("a walk on a floor players see ends the batch staged before it, and one on a floor they have not reached keeps batching", async () => {
+  test("a walk on a floor players see runs the explore step of the batch staged before it, in place, and one on a floor they have not reached runs none", async () => {
     const r = await tower(t, "Walks");
     await ok(r.dmSocket, { t: "scene.update", sceneId: r.ground, patch: { fogEnabled: true, vision: { on: true, light: "dark" } } } as Op);
     const upper = await addFloor(r.dmSocket, r.ground, "above", "Upper floor");
     const gargoyle = await create(r.dmSocket, upper, { name: "Gargoyle" });
-    await create(r.dmSocket, upper, { kind: "pc", name: "Shade", ownerIds: [r.anaId], visibility: "dm" });
+    const shade = await create(r.dmSocket, upper, { kind: "pc", name: "Shade", ownerIds: [r.anaId], visibility: "dm", x: 25, y: 10, actor: inline("Darkvision 30 ft.") });
     const actor = t.manager.get(r.roomId)!;
     const dmId = Object.values(live(t, r.roomId).members).find((m) => m.kind === "dm")!.id;
-    // Ops sent in one turn of the actor's queue, as actor.test.ts sends them, so they share a batch unless the walk ends it.
-    const together = async (x: number): Promise<boolean> => {
+    // Shade's move, then the walk, sent in one turn of the actor's queue, as actor.test.ts sends them, so they share a batch.
+    const together = async (shadeX: number, x: number): Promise<string[]> => {
+      const { rows: mark } = await t.pool.query<{ seq: string }>("select coalesce(max(seq), 0)::text as seq from room_ops where room_id = $1", [r.roomId]);
       const sent: ServerMessage[] = [];
       const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => sent.push(JSON.parse(text) as ServerMessage), close: () => undefined, terminate: () => undefined };
       const conn = new Connection(socket as never, { sessionId: uuidv7(), roomId: r.roomId, memberId: dmId, role: "dm" }, "203.0.113.9");
       assert.ok(actor.attach(conn));
       await actor.hello(conn, { clientId: uuidv7(), resumeFrom: 1 });
       for (let i = 0; i < 400 && !sent.some((m) => m.t === "snapshot"); i++) await new Promise((resolve) => setTimeout(resolve, 5));
-      void actor.op(conn, 1, { t: "log.chat", text: "one" });
+      void actor.op(conn, 1, { t: "token.move", tokenId: shade, x: shadeX, y: 10 });
       void actor.op(conn, 2, { t: "token.move", tokenId: gargoyle, x, y: 2 });
       const acked = (n: number) => sent.find((m) => m.t === "ev" && (m.acks ?? []).includes(n));
       for (let i = 0; i < 400 && acked(2) === undefined; i++) await new Promise((resolve) => setTimeout(resolve, 5));
-      assert.ok(acked(1) && acked(2), "both ops acked");
+      assert.ok(acked(1) && acked(1) === acked(2), "both ops acked in one frame");
       actor.detach(conn);
-      return acked(1) === acked(2);
+      const { rows } = await t.pool.query<{ t: string; scene: string | null; token: string | null }>(
+        "select op->>'t' as t, op->>'sceneId' as scene, op->>'tokenId' as token from room_ops where room_id = $1 and seq > $2 order by seq",
+        [r.roomId, mark[0]!.seq],
+      );
+      return rows.flatMap((row) => (row.token === shade ? ["shade"] : row.token === gargoyle ? ["walk"] : row.t === "sys.explore" && row.scene === upper ? ["explore"] : []));
     };
-    assert.equal(await together(6), true, "Upper is not reached, and Ana's hidden creature there does not reach it, so the walk keeps batching");
+    assert.deepEqual(await together(24, 6), ["shade", "walk"], "Upper is not reached, and Ana's hidden creature there does not reach it, so nothing there is explored");
     await ok(r.dmSocket, { t: "floor.open", sceneId: upper, open: true } as Op);
-    assert.equal(await together(7), false, "once Upper is shown, the walk there ends the batch");
+    // Shown to players, Shade's sight is the party's, so the move below shows them new ground.
+    await ok(r.dmSocket, { t: "token.update", tokenId: shade, patch: { visibility: "all" } } as Op);
+    assert.deepEqual(await together(4, 7), ["shade", "explore", "walk"], "once Upper is shown, the ground Shade's move shows is explored before the walk");
   });
 
   test("on a floor of the players' scene beside the start floor, what a party member walks back into sight of is live again, in a batch that only moved them", async () => {

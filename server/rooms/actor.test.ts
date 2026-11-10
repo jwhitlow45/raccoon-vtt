@@ -1966,7 +1966,7 @@ describe("the explore step (docs/design/design-v1-maps-vision.md 4.3.3)", () => 
   });
 });
 
-describe("a walk on the scene where traps go off ends the batch staged before it", () => {
+describe("a walk on the scene where traps go off runs the steps of the batch staged before it, in place", () => {
   /**
    * The DM's ops sent one after another in one turn of the queue, so they
    * would share a batch, and the stored ops of each commit in order.
@@ -2001,7 +2001,7 @@ describe("a walk on the scene where traps go off ends the batch staged before it
 
   const batchOf = (batches: { t: string; tokenId?: string }[][], t: string, tokenId?: string) => batches.findIndex((b) => b.some((op) => op.t === t && (tokenId === undefined || op.tokenId === tokenId)));
 
-  test("an eye that steps in and out around a walk: the batch before the walk commits first, so the ground it saw is explored", async () => {
+  test("an eye that steps in and out around a walk: the batch's explore runs before the walk, in the same batch, so the ground it saw is explored", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
     const { state, sceneId, pcId, goblinId } = darkRoom(dm, player);
@@ -2012,12 +2012,13 @@ describe("a walk on the scene where traps go off ends the batch staged before it
       return 3;
     });
     try {
+      // One batch, as a commit just before the walk would have stored it: the eye's step in, what it saw, the walk.
       assert.deepEqual(
-        batches[0]!.map((op) => op.t),
-        ["token.move", "sys.explore"],
+        batches.map((batch) => batch.map((op) => op.t)),
+        [["token.move", "sys.explore", "token.move", "token.move", "sys.explore"]],
         "the eye's step in, and what it saw, explored before the walk",
       );
-      assert.equal(batchOf(batches, "token.move", goblinId), 1);
+      assert.equal(batchOf(batches, "token.move", goblinId), 0);
       assert.ok(actor.committed.state.exploredTiles[`${sceneId}:1,0`], "the ground the eye saw was explored and sent");
     } finally {
       db.freeze();
@@ -2025,7 +2026,7 @@ describe("a walk on the scene where traps go off ends the batch staged before it
     }
   });
 
-  test("a batch that holds only a server op commits before the walk too", async () => {
+  test("a batch that holds only a server op runs its steps before the walk too, and the walk joins it", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
     const { state, goblinId } = darkRoom(dm, player);
@@ -2036,18 +2037,20 @@ describe("a walk on the scene where traps go off ends the batch staged before it
     });
     try {
       assert.equal(batchOf(batches, "sys.memberJoin"), 0);
-      assert.equal(batchOf(batches, "token.move", goblinId), 1);
+      assert.equal(batchOf(batches, "token.move", goblinId), 0);
+      const ops = batches[0]!.map((op) => op.t);
+      assert.ok(ops.indexOf("sys.memberJoin") < ops.indexOf("token.move"), ops.join());
     } finally {
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });
     }
   });
 
-  test("a moveMany walk ends the batch too, and the acks keep their order across each commit, ops queued behind the walk after it", async () => {
+  test("a moveMany walk runs the steps too, and the ops keep their order in the one batch, ops queued behind each walk after it", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
     const { state, pcId, goblinId } = darkRoom(dm, player);
-    // Ops 2 to 5 queue while the first commit is out. Once it lands, the walk at 4 ends the batch holding 2 and 3 with 5 queued behind it.
+    // Ops 1 to 5 in one turn of the queue: the walks at 2 and 4 each run the steps of what came before them, in place.
     const { batches, actor, db, sent } = await sentTogether(state, dm, (actor, conn) => {
       void actor.op(conn, 1, { t: "token.move", tokenId: pcId, x: 20, y: 2 });
       void actor.op(conn, 2, { t: "token.moveMany", moves: [{ tokenId: goblinId, x: 6, y: 2 }] });
@@ -2057,10 +2060,9 @@ describe("a walk on the scene where traps go off ends the batch staged before it
       return 5;
     });
     try {
-      assert.deepEqual(batches[0]!.map((op) => op.t), ["token.move", "sys.explore"]);
-      assert.equal(batchOf(batches, "token.moveMany"), 1);
-      assert.equal(batchOf(batches, "token.move", goblinId), 2);
-      assert.deepEqual(acksOf(sent), [[1], [2, 3], [4, 5]], "each acked with its batch, in the order sent");
+      // The rows the commits before each walk stored, in one batch. The goblin's steps change no sight, so later explores add nothing.
+      assert.deepEqual(batches.map((batch) => batch.map((op) => op.t)), [["token.move", "sys.explore", "token.moveMany", "log.chat", "token.move", "log.chat"]]);
+      assert.deepEqual(acksOf(sent), [[1, 2, 3, 4, 5]], "acked with their batch, in the order sent");
       assert.ok(!sent.some((m) => m.t === "retry"), "no op was answered out of turn");
     } finally {
       db.freeze();
@@ -2068,7 +2070,7 @@ describe("a walk on the scene where traps go off ends the batch staged before it
     }
   });
 
-  test("a walk on the room's last rate token ends the batch and is still staged after the commit, its rate counted once", async () => {
+  test("a walk on the room's last rate token runs the steps and is staged after them, its rate counted once", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
     const { state, pcId, goblinId } = darkRoom(dm, player);
@@ -2085,9 +2087,9 @@ describe("a walk on the scene where traps go off ends the batch staged before it
     );
     try {
       assert.equal(batchOf(batches, "token.move", pcId), 0);
-      assert.equal(batchOf(batches, "token.move", goblinId), 1, "the walk forced the commit and was staged after it");
+      assert.equal(batchOf(batches, "token.move", goblinId), 0, "the walk was staged after the steps, in the same batch");
       assert.ok(!sent.some((m) => m.t === "retry"), "never answered busy");
-      assert.deepEqual(acksOf(sent), [[1], [2]]);
+      assert.deepEqual(acksOf(sent), [[1, 2]]);
     } finally {
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });

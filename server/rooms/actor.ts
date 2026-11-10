@@ -113,6 +113,12 @@ export type ActorOptions = {
    * `batchMs` after it opens.
    */
   numberClock: Clock | null;
+  /**
+   * Tests only: a walk that needs the batch's sight commits the batch first
+   * and runs after it, as before the steps ran in place, so a test can hold
+   * the two builds' stored rows side by side.
+   */
+  walkCloses: boolean;
   /** The size guard's byte limits (design 10.5), lowered only by tests that fill a room. */
   sizeLimits: { stateLimit?: number; sceneLimit?: number };
   /** The dice's draw (docs/design/design-v1-dice.md 4.2). Only tests script it. */
@@ -155,6 +161,7 @@ export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   retryMaxMs: 5_000,
   now: Date.now,
   numberClock: null,
+  walkCloses: false,
   sizeLimits: {},
   draw: serverDraw,
   receiptCaps: {},
@@ -292,6 +299,14 @@ type Moment = { now: number; number: number };
  */
 type Read = { conn: Connection; key: ClientKey; resent?: number };
 
+/**
+ * Where a batch's explore and map steps last ran (#stepInPlace): the state
+ * they left, how far into `touched` and `doors` they read, and how many
+ * answers came before them. A batch with no walk that needs its sight
+ * keeps the start it opened with.
+ */
+type StepCursor = { before: RoomState; touched: number; doors: number; answered: number };
+
 type Batch = {
   history?: Map<string, HistoryMessage>;
   before: RoomState;
@@ -313,11 +328,12 @@ type Batch = {
   blocked: Map<ClientKey, number[]>;
   /** The doors players' `door.set` touched, whose remembered states the map step drops (5.3, MD-O-6). */
   doors: DoorTouch[];
-  /** The running estimate of each layer's memory through the batch, by layerKey (5.3, the ask): what it holds plus what each op could add. */
+  /** The running estimate of each layer's memory since the step cursor, by layerKey (5.3, the ask): what it holds plus what each op could add. */
   estimate: Map<string, number>;
   watermarks: Map<ClientKey, number>;
   /** The requests answered once the batch commits, in the order they came. */
   reads: Read[];
+  step: StepCursor;
   /** Sockets that close once this batch is published to them, each with its refusal of its third fault (#closeOnPublish). */
   closing: Connection[];
   sys: Array<{ resolve: () => void; reject: (err: Error) => void }>;
@@ -1165,7 +1181,7 @@ export class RoomActor {
         } finally {
           this.#moment = null;
         }
-        if (this.#batch && this.#batch.answered >= this.#opts.maxBatchOps) this.#commitNow();
+        if (this.#batch && answeredSinceStep(this.#batch) >= this.#opts.maxBatchOps) this.#commitNow();
       }
     } finally {
       this.#draining = false;
@@ -1283,8 +1299,8 @@ export class RoomActor {
   /**
    * Settles an op's number when its record joined the batch before it threw,
    * and says whether one did. Read from the batch and not from the staged
-   * seq, which a walk's flush moves before the op goes back to the queue
-   * unapplied (#processOp).
+   * seq, which the steps a walk runs first move before the walk itself is
+   * applied (#processOp).
    */
   #settleStaged(cmd: Extract<Command, { t: "op" }>, before: Batch | null, records: number): boolean {
     const key = cmd.conn.key;
@@ -1332,25 +1348,25 @@ export class RoomActor {
   }
 
   /**
-   * Whether a move must wait for the batch staged so far to commit: one
+   * Whether a move needs the batch's explore and map steps run first: one
    * that walks a token on a floor where traps go off (traps.ts trapsLiveOn,
    * a floor players see now, docs/design/design-v1-floors.md 7.7), with fog
-   * and party vision on there, while the batch
-   * holds an answer, taken or refused. Its stop reads the
-   * party's sight as the room has it before the move (traps.ts
-   * stopGround), so the batch's explore and map steps run first and that
-   * sight is what players were sent. A prep scene, a blackout and a scene
-   * with fog alone keep batching. Every such walk ends the batch, with or
-   * without a trap armed on its way, since whether a trap is armed there
-   * is not every player's to know. `raw` is the op as the client sent it,
-   * read only for its kind and token ids before it is parsed.
+   * and party vision on there, while the batch holds an answer since its
+   * steps last ran, taken or refused. Its stop reads the party's sight as
+   * the room has it before the move (traps.ts stopGround), so that sight
+   * must be explored and remembered as a commit would leave it. A prep
+   * scene, a blackout and a scene with fog alone need nothing. Every such
+   * walk needs them, with or without a trap armed on its way, since whether
+   * a trap is armed there is not every player's to know. `raw` is the op as
+   * the client sent it, read only for its kind and token ids before it is
+   * parsed.
    */
-  #walkEndsBatch(raw: unknown): boolean {
+  #walkNeedsSteps(raw: unknown): boolean {
     const batch = this.#batch;
     if (!batch || this.#inFlight !== null) return false;
-    // A batch with no answer holds at most the music's tick or a cleanup's remember, neither of which moves the fog,
-    // the explored ground or the sight a stop reads, and a mid-batch explore only ever follows an answer.
-    if (batch.answered === 0) return false;
+    // A batch with no answer since its steps holds at most the music's tick or a cleanup's remember, neither of which
+    // moves the fog, the explored ground or the sight a stop reads, and a mid-batch explore only ever follows an answer.
+    if (answeredSinceStep(batch) === 0) return false;
     const state = this.#staged.state;
     if (raw === null || typeof raw !== "object") return false;
     const op = raw as { t?: unknown; tokenId?: unknown; moves?: unknown };
@@ -1377,14 +1393,18 @@ export class RoomActor {
       return;
     }
     const n = cmd.n;
-    // Ahead of every count it takes, since it comes back to the front of the queue and is processed again once the commit lands.
-    // Only an op the rates below will let through ends the batch, so one answered `busy` forces no commit.
-    if (n > wm.committed && n === wm.staged + 1 && conn.opRate.wouldAllow() && this.#roomRate.tokens >= 1 && this.#walkEndsBatch(cmd.raw)) {
-      this.#queue.unshift(cmd);
-      // Marked until it is handled again: a throw from this commit is a fault outside the op (#commandFailed).
-      cmd.requeued = true;
-      this.#commitNow();
-      return;
+    // Ahead of every count it takes, and only for an op the rates below will let through, so one answered `busy` runs no
+    // step. The walk's number and time are its arrival's (#moment), read before the steps' work.
+    if (n > wm.committed && n === wm.staged + 1 && conn.opRate.wouldAllow() && this.#roomRate.tokens >= 1 && this.#walkNeedsSteps(cmd.raw)) {
+      if (this.#opts.walkCloses) {
+        // The old order, for the tests that compare the two: the walk comes back to the front once the commit lands.
+        this.#queue.unshift(cmd);
+        // Marked until it is handled again: a throw from this commit is a fault outside the op (#commandFailed).
+        cmd.requeued = true;
+        this.#commitNow();
+        return;
+      }
+      this.#stepInPlace(this.#batch!);
     }
     // Every op message counts toward the sustained-abuse rule, duplicates and gaps included.
     if (conn.opRate.count()) {
@@ -2190,7 +2210,8 @@ export class RoomActor {
 
   #permissionDeps(viewer: Viewer, facts: Map<string, AssetFact>): PermissionDeps {
     return {
-      batchBefore: this.#batch?.before,
+      // Where the batch's steps last left the room: its start, or the state the steps before a walk left (#stepInPlace).
+      batchBefore: this.#batch?.step.before,
       canUseAsset: (memberId, assetId, kind) => {
         const fact = facts.get(assetId.toLowerCase());
         if (!fact || fact.roomId !== this.roomId || fact.kind !== kind) return false;
@@ -2455,6 +2476,7 @@ export class RoomActor {
         estimate: new Map(),
         watermarks: new Map(),
         reads: [],
+        step: { before, touched: 0, doors: 0, answered: 0 },
         closing: [],
         sys: [],
         receipts: [],
@@ -2472,13 +2494,14 @@ export class RoomActor {
   /**
    * The batch commits at the next multiple of `batchMs` on the number
    * clock, whoever opened it and whatever joined it, or at once when it
-   * holds `maxBatchOps` answers. A batch that could not close while another
-   * committed takes the next tick after that commit lands (#runCommit).
+   * holds `maxBatchOps` answers since its steps last ran. A batch that could
+   * not close while another committed takes the next tick after that commit
+   * lands (#runCommit).
    */
   #scheduleCommit(): void {
     const batch = this.#batch;
     if (!batch || this.#inFlight) return;
-    if (batch.answered >= this.#opts.maxBatchOps) {
+    if (answeredSinceStep(batch) >= this.#opts.maxBatchOps) {
       this.#commitNow();
       return;
     }
@@ -2502,7 +2525,7 @@ export class RoomActor {
     const close = this.#numberClock();
     // A room whose replay failed keeps its stored tail for a fixed build and writes no row of its own: the next seq is one
     // that tail holds, or a gap in it.
-    if (!this.replayFailed && (batch.answered > 0 || batch.doors.length > 0)) this.#explore(batch);
+    if (!this.replayFailed && (answeredSinceStep(batch) > 0 || batch.doors.length > batch.step.doors)) this.#explore(batch);
     batch.state = this.#staged.state;
     batch.seq = this.#staged.seq;
     this.#closeNumbers(batch, close);
@@ -2536,6 +2559,25 @@ export class RoomActor {
   }
 
   /**
+   * The batch's explore and map steps run in place before a walk that
+   * needs the sight they leave (#walkNeedsSteps), exactly as a commit's end
+   * runs them, from where they last ran, and the cursor moves to what they
+   * leave. The walk is then handled in the same pass, so it keeps its place
+   * among the ops and nothing waits on it. What a new batch would start
+   * afresh starts afresh here too: the memory estimate, the state the
+   * permission checks read as the batch's start, and the answers the cap
+   * counts. The rows stored and the state left are those of a commit just
+   * before the walk, in one transaction.
+   */
+  #stepInPlace(batch: Batch): void {
+    // As #commitNow skips its own: the tail a failed replay left holds the next seq.
+    if (this.replayFailed) return;
+    this.#explore(batch);
+    batch.step = { before: this.#staged.state, touched: batch.touched.length, doors: batch.doors.length, answered: batch.answered };
+    batch.estimate.clear();
+  }
+
+  /**
    * The explore step (docs/design/design-v1-maps-vision.md 4.3.3): what the party
    * now sees on the player scene that its explored layer lacks goes into
    * that layer, by one server-made op at the end of the same batch, so
@@ -2555,18 +2597,19 @@ export class RoomActor {
    * included, and of none that only kept the room's books (the music's
    * tick, the cleanup's remember), which move no one's sight. So sight a
    * loaded state never explored is explored at the room's first answer,
-   * whatever that answer was.
+   * whatever that answer was. It runs before a walk that needs its sight
+   * too (#stepInPlace), and each run reads from where the last one stopped.
    */
   #explore(batch: Batch): void {
     try {
-      if (batch.answered > 0) this.#exploreNow(batch);
+      if (answeredSinceStep(batch) > 0) this.#exploreNow(batch);
       this.#remember(batch);
     } catch (err) {
       // The batch commits all the same: its ops are staged, and a batch dropped here would leave the room ahead of what is
       // stored. So the steps fail closed as the map step does (rule 9): the scenes the batch wrote on forget their ground.
       this.#fault("explore or map step failed, forgetting the scenes the batch wrote on", err, null);
       try {
-        for (const op of forgetAllOps({ before: batch.before, after: this.#staged.state, touched: batch.touched })) this.#appendServerOp(batch, op, "map step's forgetting");
+        for (const op of forgetAllOps({ before: batch.step.before, after: this.#staged.state, touched: touchedSinceStep(batch) })) this.#appendServerOp(batch, op, "map step's forgetting");
       } catch (again) {
         this.#fault("map step's forgetting failed", again, null);
       }
@@ -2601,10 +2644,10 @@ export class RoomActor {
       const after = this.#staged.state;
       const lowered = this.#sizes.shareLowered;
       ops = this.#opts.mapStep({
-        before: batch.before,
+        before: batch.step.before,
         after,
-        touched: batch.touched,
-        doors: batch.doors,
+        touched: touchedSinceStep(batch),
+        doors: batch.step.doors === 0 ? batch.doors : batch.doors.slice(batch.step.doors),
         cap: (scene, layer) => this.#sizes.memoryCap(after, scene, layer),
         everyLayer: lowered,
       });
@@ -2614,7 +2657,7 @@ export class RoomActor {
       // Fail closed (rule 9): the layers of the scenes the batch wrote on forget their ground rather than show the edit.
       this.#log.error({ err, roomId: this.roomId }, "map step failed, forgetting the scenes it wrote on");
       try {
-        ops = forgetAllOps({ before: batch.before, after: this.#staged.state, touched: batch.touched });
+        ops = forgetAllOps({ before: batch.step.before, after: this.#staged.state, touched: touchedSinceStep(batch) });
       } catch (again) {
         this.#log.error({ err: again, roomId: this.roomId }, "map step's forgetting failed");
         return;
@@ -3199,6 +3242,16 @@ function acknowledgmentValueHash(key: EntityKey, value: unknown): string {
   const { rev: _rev, ...fields } = value as Record<string, unknown>;
   if (parseKey(key)?.kind === "scene") delete fields.wallsVersion;
   return hashValue(fields);
+}
+
+/** The members' ops a batch answered since its steps last ran (StepCursor), which the cap and the steps count, as a new batch's own would. */
+function answeredSinceStep(batch: Batch): number {
+  return batch.answered - batch.step.answered;
+}
+
+/** The keys the batch's ops touched since its steps last ran, which the next steps read. */
+function touchedSinceStep(batch: Batch): EntityKey[] {
+  return batch.step.touched === 0 ? batch.touched : batch.touched.slice(batch.step.touched);
 }
 
 function push<T>(map: Map<ClientKey, T[]>, key: ClientKey, value: T): void {
