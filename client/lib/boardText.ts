@@ -485,6 +485,7 @@ export function placeLabels(
     // Spare room for one step's jump of this text and the text beside it, since a step widens a text by stepPx for each em of its
     // width, half on each side. None from the label's own token, whose marks it sits against by design.
     const clearly: Fits = (box) => {
+      if (within && (box.x0 < within.x0 || box.x1 > within.x1)) return false;
       const probe = grow(box, gap);
       const selfEm = (box.x1 - box.x0) / s.namePx;
       const off = (other: Box, otherEm: number) => {

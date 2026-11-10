@@ -93,6 +93,11 @@ export type BoardTextInput = {
   within?: Pick<Box, "x0" | "x1">;
 };
 
+/** How far off the screen a token can stand and still push a label onto it: a side label is up to its style's maxWidth wide, past the gap (boardText.ts). */
+export function edgeReach(sizes: { namePx: number; gapPx: number }): number {
+  return 15 * sizes.namePx + sizes.gapPx;
+}
+
 export function useBoardText(input: BoardTextInput): Map<string, TokenText> {
   // The last layout and the font it was measured in, read and written inside the layout on purpose: its shapes steer the next one, never trigger one.
   const previous = useRef<{ fontEpoch: number; placed: Map<string, PlacedLabel> }>({ fontEpoch: input.fontEpoch, placed: new Map() });
@@ -124,8 +129,7 @@ export function useBoardText(input: BoardTextInput): Map<string, TokenText> {
       return (x0 < left && x1 > left) || (x0 < right && x1 > right);
     };
     if (![...layout.out].some(([id, text]) => crossing(id, text))) return layout.out;
-    // A label reaches the screen only from a token within half its widest, past the token's own width.
-    const reach = layout.sizes.namePx * 8;
+    const reach = edgeReach(layout.sizes);
     const near = tokens.filter((t) => {
       const m = layout.meta.get(t.id);
       return m !== undefined && m.ox + m.widthPx > left - reach && m.ox < right + reach;

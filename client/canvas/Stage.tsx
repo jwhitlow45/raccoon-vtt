@@ -783,7 +783,7 @@ export function MapStage(props: {
   // The lock shows where it is the only thing in the way of a drag.
   const lockShown = useCallback((t: ViewToken) => t.locked && (role === "dm" || ownsToken(t) || movesAny(t)), [role, ownsToken, movesAny]);
   const within = useMemo(() => (cam && size ? { x0: -cam.x, x1: size.width - cam.x } : undefined), [cam?.x, size?.width]);
-  const boardText = useBoardText({ tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, mapLabels, lockShown, fontEpoch, ...(within ? { within } : {}) });
+  const boardText = useBoardText({ tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, mapLabels, lockShown, fontEpoch, ...(within && !isoShown ? { within } : {}) });
   // The isometric board lays the same labels out again in view space (5.4, relief/IsoBoard.tsx), and the chrome under a token reads those there.
   const isoTextInput = useMemo(() => ({ characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, lockShown, fontEpoch }), [characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, lockShown, fontEpoch]);
   const [isoText, setIsoText] = useState<ReadonlyMap<string, TokenText>>(NO_TEXT);

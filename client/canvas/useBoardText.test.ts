@@ -4,7 +4,7 @@ import { describe, test } from "node:test";
 import { boardSizes } from "../lib/boardScale.ts";
 import { labelStyle, overlaps, placeLabels, type Box, type LabelInput } from "../lib/boardText.ts";
 
-const { pillObstacles } = await import("./useBoardText.ts");
+const { pillObstacles, edgeReach } = await import("./useBoardText.ts");
 const { pillPlace } = await import("../features/measure/Pill.tsx");
 const { measureLabel } = await import("./measureText.ts");
 
@@ -78,5 +78,28 @@ describe("a label beside the screen's edge (LP36-B polish)", () => {
     const short = { ...token("goblin", { x: 3, y: 8 }) };
     const obstacles = [{ box: short.box, owner: "goblin", kind: "body" as const }];
     assert.deepEqual(placeLabels([short], obstacles, measureLabel, undefined, { x0: 0, x1: 1000 }), placeLabels([short], obstacles, measureLabel));
+  });
+});
+
+describe("a label beside the screen's edge as the screen moves (LP36-SOL-01, LP36F-SONNET-2)", () => {
+  test("handed its own last result while the bound moves, a name never leaves the screen", () => {
+    const long = { ...token("bree", { x: 3, y: 8 }), name: "Bree the Extraordinarily Long Named Wanderer", sides: true, rank: 2 };
+    const body = [{ box: long.box, owner: "bree", kind: "body" as const }];
+    let kept: ReturnType<typeof placeLabels> | undefined;
+    for (let f = 0; f < 120; f++) {
+      const x0 = long.box.x0 - 60 + (f % 2 === 0 ? 0 : 7) + f;
+      const within = { x0, x1: x0 + 300 };
+      kept = placeLabels([long], body, measureLabel, kept, within);
+      const label = kept.get("bree")!;
+      if (label.lines.length === 0) continue;
+      assert.ok(label.box.x0 >= within.x0 - 1e-9 && label.box.x1 <= within.x1 + 1e-9, `frame ${f}: ${JSON.stringify(label.box)} leaves ${JSON.stringify(within)}`);
+    }
+  });
+
+  test("the reach covers the widest side label past its gap, at every zoom", () => {
+    for (const s of [10, 20, 40, 80, 160]) {
+      const sizes = boardSizes(s);
+      assert.ok(labelStyle(sizes, s, s).maxWidth + sizes.gapPx <= edgeReach(sizes) + 1e-9, `scale ${s}`);
+    }
   });
 });
