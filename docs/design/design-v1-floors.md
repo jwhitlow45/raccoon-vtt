@@ -147,4 +147,9 @@ Where the build went its own way:
 - **Keys.** The key the other way says "going up" or "going down" (D-261109-138), and the landing's name gives way wherever the turn's mover stands where its moves on this floor began (D-261109-142).
 - **Builder.** To lists only floors next to the one shown, and the mode leaves the builder key's cycle on a scene of one floor (D-261109-143, 146).
 - **The grid rule of a retained undo** across a re-created floor with a new shape cannot be reached through ops, since the one-shape rule refuses the return first. It is held by `floorProblem`'s own test and the import's check.
+- **Alignment.** The measured roots of Go up and Go down, the DM's bar, a phone's strip and the locked button, are in `e2e/floors-links.e2e.ts`, beside the steps that put a creature on stairs, not in `e2e/alignmentRoom.ts`.
+- **Areas on an undo.** A restore that puts a creature on another floor, a climb's or the DM's of Move to floor, takes every area attached to that creature now, read from the room, so one cast or attached after the step crosses too (FL2-OPUS-1).
+- **The words of a kept step.** An undo that would put removed stairs back names what blocks them now in the builder's words, since no stairs stand to remove (FL2-OPUS-2). The placer's sentence stays for stairs that stand.
+- **The far floor's limits.** A DM's climb meets the far floor's limits, its cap on lit token lights among them. A player's leaves them unread (FL2-ASTRA-03).
+- **The walls under an end.** `wallInside` tests only the walls whose box meets the end's box (`scripts/bench-floor-links.ts`).
 - **Not built:** the walking ruler through stairs, arrival traps, hidden stairs (D-261109-026) and a move or resize of a pair after placing (D-261109-022). Phase 3 and later bring the ruler through stairs.
