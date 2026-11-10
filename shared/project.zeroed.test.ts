@@ -160,3 +160,41 @@ describe("a player's stamps carry their rank", () => {
     assert.equal(readEntity(state, keys.stamp("gone")), null, "only memory names it");
   });
 });
+
+/** A value with its fields in the opposite order, as a room loaded from storage can hold them against one written since. */
+function reversed<T extends object>(value: T): T {
+  return Object.fromEntries(Object.entries(value).reverse()) as T;
+}
+
+describe("a player's labels and stamps have their fields in one order", () => {
+  /** The room with a label and a stamp in sight, and a label and a stamp remembered out of it, each written in `order`. */
+  function written(order: <T extends object>(value: T) => T): RoomState {
+    const state = fogRoom({ vision: true });
+    lift(state, "party", { x: 0, y: 0, w: 10, h: 10 });
+    lift(state, "dm", { x: 0, y: 0, w: 10, h: 2 });
+    // In sight. The stamp is at rev 0 and its stored z is its rank.
+    state.stamps.lamp = order(stamp("lamp", 0, { x: 5.5, y: 0.5 }));
+    state.labels.hall = order<Label>({ id: "hall", rev: 0, sceneId: "s1", x: 2.5, y: 0.5, text: "Hall", size: 1 });
+    // Out of sight, remembered as they were before the DM changed them.
+    state.stamps.crate = order(stamp("crate", 50));
+    state.labels.altar = order<Label>({ id: "altar", rev: 3, sceneId: "s1", x: 3.5, y: 5.5, text: "Shrine", size: 1 });
+    // And a label the DM deleted since, which only memory names now.
+    const gone = order<Label>({ id: "gone", rev: 2, sceneId: "s1", x: 7.5, y: 7.5, text: "Bones", size: 1 });
+    remember(state, null, 0, 0, { stamps: { crate: order(stamp("crate", 1)) }, labels: { altar: order<Label>({ id: "altar", rev: 1, sceneId: "s1", x: 3.5, y: 5.5, text: "Altar", size: 1 }), gone } });
+    return state;
+  }
+
+  test("the copy reads the same whatever order its source holds its fields in, live, remembered and alone, a stamp already at rev 0 and at its rank included", () => {
+    for (const viewer of [P1, DISPLAY]) {
+      const read = (state: RoomState) => {
+        const { labels, stamps } = projectState(state, viewer, { sceneId: "s1" });
+        const alone = ["hall", "altar", "gone"].map((id) => projectEntity(keys.label(id), state, viewer, { sceneId: "s1" }));
+        return JSON.stringify({ labels, stamps, alone: [...alone, projectEntity(keys.stamp("lamp"), state, viewer, { sceneId: "s1" })] });
+      };
+      const plain = read(written((value) => value));
+      assert.equal(read(written(reversed)), plain, viewer.memberId);
+      assert.match(plain, /"altar":\{"id":"altar","rev":0,"sceneId":"s1","size":1,"text":"Altar"/, "the remembered label, as it was");
+      assert.match(plain, /"gone":\{"id":"gone","rev":0,"sceneId":"s1","size":1,"text":"Bones"/, "the label only memory names");
+    }
+  });
+});
