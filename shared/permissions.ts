@@ -757,9 +757,12 @@ function forDm(op: Op, c: Check): Decision {
       return imageUsable(c, op.block.defaultImage) ? OK : GONE;
     case "companionBlock.update":
       return imageUsable(c, op.patch.defaultImage) ? OK : GONE;
-    case "scene.create":
-      if (op.scene.map && !c.asset(op.scene.map.assetId, "map")) return GONE;
-      return mapVideosUsable(c, op.scene.map ? [op.scene.map] : []);
+    case "scene.create": {
+      // A floor from a file brings its map in `floor.own` (docs/design/design-v1-floors.md phase 3, 3.4), checked as a new scene's.
+      const maps = [op.scene.map, op.floor?.own?.map].filter((map) => map !== undefined);
+      if (!maps.every((map) => c.asset(map.assetId, "map"))) return GONE;
+      return mapVideosUsable(c, maps);
+    }
     case "scene.delete":
       // Here, where ops arrive, never in the reducer: a stored delete of the players' scene from before the rule still replays, moving them on as it did.
       return deleteCheck(c, op.sceneId);

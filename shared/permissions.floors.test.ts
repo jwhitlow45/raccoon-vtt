@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Scene, Viewer } from "./model.ts";
-import { ASK_CLOSED, ASKS_WAITING, FLOOR_REFUSALS, MOVE_PLAYERS_FIRST, ONE_FLOOR_MOVE, canApply } from "./permissions.ts";
+import { ASK_CLOSED, ASKS_WAITING, FLOOR_REFUSALS, MOVE_PLAYERS_FIRST, ONE_FLOOR_MOVE, VIDEO_MISSING, VIDEO_SHAPE, canApply, type AssetKind } from "./permissions.ts";
 import type { Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { DM, P1, P2, character, env, room, scene, template, token } from "./testutil.ts";
@@ -40,6 +40,35 @@ describe("floor ops are the DM's (9)", () => {
       assert.match(decide(state, op, P1), /^forbidden/, op.t);
       assert.equal(decide(state, op), "ok", op.t);
     }
+  });
+});
+
+describe("a floor from a file brings a map of this room (phase 3, 3.4)", () => {
+  const ROWS: Record<string, AssetKind> = { "a-crypt": "map", "v-crypt": "video", "t-thumb": "thumb" };
+  const rows = { canUseAsset: (_member: string, assetId: string, kind: AssetKind) => ROWS[assetId] === kind };
+  const MAP = { assetId: "a-crypt", widthPx: 1920, heightPx: 1080, cellPx: 64, originPx: { x: 0, y: 0 } };
+  const VIDEO = { assetId: "v-crypt", widthPx: 1920, heightPx: 1080, container: "mp4" as const, video: "avc1.640028", fps: 30, durationMs: 42_000, kbps: 6_000 };
+  const fileFloor = (map: object): Op =>
+    ({
+      t: "scene.create",
+      scene: { id: "n", name: "Tower", bounds: { w: 30, h: 17 } },
+      floor: { beside: "g", side: "above", name: "Crypt", own: { bounds: { w: 30, h: 17 }, background: "#1b1b20", grid: { show: true, color: "#ffffff", opacity: 0.25, lineWidth: 1 }, autoWalls: "off", map, gridFromFile: true } },
+    }) as Op;
+  const rule = (state: RoomState, op: Op) => {
+    const d = canApply(op, DM, state, rows);
+    return d.ok ? "ok" : `${d.code}: ${d.message}`;
+  };
+
+  test("its map must be a map row of this room, as a new scene's is", () => {
+    assert.equal(rule(tower(), fileFloor(MAP)), "ok");
+    assert.equal(rule(tower(), fileFloor({ ...MAP, assetId: "a-other-room" })), GONE);
+    assert.equal(rule(tower(), fileFloor({ ...MAP, assetId: "t-thumb" })), GONE, "a thumbnail is not a map");
+  });
+
+  test("its map's video must be a checked video row of its still's shape", () => {
+    assert.equal(rule(tower(), fileFloor({ ...MAP, video: VIDEO })), "ok");
+    assert.equal(rule(tower(), fileFloor({ ...MAP, video: { ...VIDEO, assetId: "v-facts-failed" } })), `invalid: ${VIDEO_MISSING}`);
+    assert.equal(rule(tower(), fileFloor({ ...MAP, video: { ...VIDEO, widthPx: 1080, heightPx: 1920 } })), `invalid: ${VIDEO_SHAPE}`);
   });
 });
 
