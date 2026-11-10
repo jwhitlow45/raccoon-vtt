@@ -19,7 +19,9 @@ import { ScopeClient, StoredRoomDb, type StoredRow } from "./undoScopeTesting.ts
  * Rooms for the creature number tests: the real actor on a stored room
  * (undoScopeTesting.ts StoredRoomDb), with the DM's, P1's and P2's
  * sockets. Two rooms take the same members' ops, and what each sent P1 is
- * compared whole and scanned raw. Nothing here runs in the app.
+ * scanned raw, then compared whole as a socket's bytes are, every key in
+ * its order (shared/seqTestutil.ts FrameReader). Nothing here runs in the
+ * app.
  */
 
 /** The DM, the second and third DMs some tests take steps with, and the two players. */
@@ -136,7 +138,7 @@ export class Room {
     for (const row of this.db.rows) this.rows.set(row.seq, row);
   }
 
-  /** P1's frames as one reader reads them, every page in order. */
+  /** P1's frames as one reader reads them, every page in order, each as sent with its keys in their order. */
   p1Frames(): string[] {
     const reader = new FrameReader();
     return this.pages.flatMap((p) => p.client.sent.map((f) => `${p.label} ${reader.text(f)}`));
@@ -216,7 +218,7 @@ export function scanP1(room: Room, hidden: readonly string[], what: string): voi
   }
 }
 
-/** Scans both rooms' new frames raw (`hidden` by room), then compares P1's frames whole. */
+/** Scans both rooms' new frames raw (`hidden` by room), then compares P1's frames whole, key order included. */
 export function same(rooms: Rooms, what: string, hidden: { a?: readonly string[]; b?: readonly string[] } = {}): void {
   scanP1(rooms[0], hidden.a ?? [], what);
   scanP1(rooms[1], hidden.b ?? [], what);
