@@ -6,6 +6,7 @@ import type { Grid } from "#shared/rules/grid.ts";
 import { drawnSpot } from "#shared/rules/nudge.ts";
 import { HEX_R, hexAt, hexCenter, hexDistance, hexKey, hexNeighbors, snapAnchor, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import type { Rect } from "./camera.ts";
+import { labelOf, labelText, type Labels } from "./labels.ts";
 
 /**
  * Scene geometry and the fail-closed gate for drawing a scene. Local helpers
@@ -352,9 +353,15 @@ export function drawsAboveFog(
   return byPlayer(token.ownerIds) || byPlayer(character?.ownerIds);
 }
 
-/** "Goblin 3" for numbered duplicates. Players' projections already carry the public name. */
-export function displayName(token: Pick<Token, "name" | "number">): string {
-  return token.number === undefined ? token.name : `${token.name} ${token.number}`;
+/**
+ * A token's name as this viewer reads it, from the view's label map
+ * (state/labels.ts): "Goblin 3", and on a DM's device "Goblin (3)" for a
+ * creature the party has not seen and "Orc (as Goblin 2)" for a disguise.
+ * Players' projections already carry the public name. A token missing
+ * from the map is named from its own fields (labels.ts labelOf).
+ */
+export function displayName(token: Pick<Token, "name" | "number"> & { id?: string }, labels?: Labels): string {
+  return labelText(labelOf(labels, token));
 }
 
 /**
@@ -363,6 +370,6 @@ export function displayName(token: Pick<Token, "name" | "number">): string {
  * drawn between squares says so (docs/design/design-v1-snap-off.md section 4),
  * because its picture sits off the square its rules count.
  */
-export function actionsName(token: Pick<Token, "name" | "number" | "nudge">): string {
-  return `${displayName(token)} actions${token.nudge ? ", placed between squares" : ""}`;
+export function actionsName(token: Pick<Token, "name" | "number" | "nudge"> & { id?: string }, labels?: Labels): string {
+  return `${displayName(token, labels)} actions${token.nudge ? ", placed between squares" : ""}`;
 }

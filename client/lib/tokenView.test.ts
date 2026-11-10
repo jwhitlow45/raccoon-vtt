@@ -7,7 +7,7 @@ import { projectState } from "#shared/project.ts";
 import type { Actor } from "#shared/model.ts";
 import { P1, actor, character, room, token } from "#shared/testutil.ts";
 import { theme } from "./theme.ts";
-import { badgeLeft, chipRow, DISPOSITION_RING, effectChip, effectCount, healthState, hpDisplay, hpText, initials } from "./tokenView.ts";
+import { badgeLeft, chipRow, DISPOSITION_RING, effectChip, effectCount, healthState, hpDisplay, hpText, initials, initialsOf, initialsLook } from "./tokenView.ts";
 
 /**
  * A player's projection sends `hpLabel` or `hpBar` in place of numbers
@@ -126,6 +126,16 @@ describe("telling numbered monsters apart", () => {
     assert.equal(initials("Goblin Warrior"), "GW");
     assert.equal(initials("Thorn"), "Th");
     assert.equal(initials(""), "?");
+  });
+
+  test("a token's initials show what the table reads, and a DM's preview outlined", () => {
+    assert.deepEqual(initialsOf({ name: "Goblin", number: 2 }), { text: "G2", preview: false });
+    assert.deepEqual(initialsOf({ name: "Goblin", preview: 3 }), { text: "G3", preview: true });
+    assert.deepEqual(initialsOf({ name: "Orc", as: "Goblin", number: 2 }), { text: "G2", preview: false });
+    assert.deepEqual(initialsOf({ name: "Orc", as: "Goblin", preview: 3 }), { text: "G3", preview: true });
+    assert.deepEqual(initialsOf({ name: "Goblin Warrior" }), { text: "GW", preview: false });
+    assert.deepEqual(initialsLook(false), {});
+    assert.equal(initialsLook(true).color, "transparent");
   });
 });
 

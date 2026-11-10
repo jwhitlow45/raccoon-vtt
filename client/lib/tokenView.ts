@@ -1,4 +1,5 @@
 import type { Actor, Effect, HpVisibility, Token } from "#shared/model.ts";
+import { badgeNumber, isPreview, type Label } from "./labels.ts";
 import { boardTheme, theme } from "./theme.ts";
 
 /**
@@ -295,6 +296,31 @@ export function initials(name: string): string {
   if (words.length >= 2 && /^\d+$/.test(last)) return `${words[0]![0]!.toUpperCase()}${last}`;
   if (words.length >= 2) return (words[0]![0]! + words[1]![0]!).toUpperCase();
   return words[0]!.slice(0, 2);
+}
+
+/**
+ * A token's initials from its label: what the table reads, so a disguise
+ * shows its shown name's ("G2" for an Orc shown as Goblin 2), and a DM's
+ * preview its bracketed number without the brackets ("G3"), which the
+ * caller draws outlined (`preview`) so it never reads as a number the
+ * table gave (the creature numbers design, section 4).
+ */
+export function initialsOf(label: Label): { text: string; preview: boolean } {
+  const shown = label.as ?? label.name;
+  const number = badgeNumber(label);
+  return { text: initials(number === undefined ? shown : `${shown} ${number}`), preview: isPreview(label) && label.number === undefined };
+}
+
+/** Initials as a picture takes them: letters, or a token's from initialsOf, whose preview draws outlined. */
+export type Initials = string | { text: string; preview: boolean };
+
+/**
+ * How HTML draws a preview's initials: the letters outlined in `ink` and
+ * hollow, in the same box as filled ones, so a row or header keeps its
+ * size and alignment. Empty for initials the table gave.
+ */
+export function initialsLook(preview: boolean, ink: string = theme.color.text): { color?: string; WebkitTextStroke?: string } {
+  return preview ? { color: "transparent", WebkitTextStroke: `1px ${ink}` } : {};
 }
 
 /** Marks are hidden below this on-screen size: a 10 px token has no room for chips or a bar. */

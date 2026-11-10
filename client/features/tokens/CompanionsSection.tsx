@@ -127,7 +127,7 @@ export function CharacterCompanions(props: { search?: string; character: Charact
     });
   };
   return (
-    <Group label="Companions" icon="companion" search={props.search} {...props.group} summary={list.length > 0 ? list.map(displayName).join(", ") : "None yet"}>
+    <Group label="Companions" icon="companion" search={props.search} {...props.group} summary={list.length > 0 ? list.map((t) => displayName(t)).join(", ") : "None yet"}>
       {list.length > 0 ? (
         <RowList label={`${props.character.name}'s companions`}>
           {list.map((t) => (
