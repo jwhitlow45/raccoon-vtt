@@ -345,6 +345,102 @@
       },
       "seed": "1SEWER0RAT5N0SE5",
       "sha256": "059a17ebc5ca9e12609f53a5028722193a206102db834e64ffeb2f9ee4dc179e"
+    },
+    {
+      "name": "a hex Medium",
+      "settings": {
+        "w": 50,
+        "h": 50,
+        "rooms": 12,
+        "density": "normal",
+        "corridors": "bending",
+        "wide": false,
+        "loops": true,
+        "theme": "dungeon",
+        "heights": 25,
+        "traps": 4,
+        "band": "1-4",
+        "deadEnds": true,
+        "secrets": 2,
+        "lit": 50,
+        "dressing": "full",
+        "key": true
+      },
+      "seed": "1HEX0MED1VM0R0WS",
+      "grid": "hexRows",
+      "sha256": "5e154069ff14464b5b9d674a42232fec37e7fc6631b6aa83506101d9d7e7fa92"
+    },
+    {
+      "name": "a hex Wide Crypt on columns",
+      "settings": {
+        "w": 50,
+        "h": 50,
+        "rooms": 12,
+        "density": "normal",
+        "corridors": "bending",
+        "wide": true,
+        "loops": true,
+        "theme": "crypt",
+        "heights": 50,
+        "traps": 4,
+        "band": "1-4",
+        "deadEnds": true,
+        "secrets": 1,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
+      },
+      "seed": "1HEX0W1DE0CRYPT0",
+      "grid": "hexColumns",
+      "sha256": "9998bd37f503ab209df3c26cbf8f8adbaa9c72d80c59c1ab9955949b651c2f7e"
+    },
+    {
+      "name": "a wing on a square scene",
+      "settings": {
+        "w": 30,
+        "h": 30,
+        "rooms": 6,
+        "density": "normal",
+        "corridors": "bending",
+        "wide": false,
+        "loops": true,
+        "theme": "dungeon",
+        "heights": 25,
+        "traps": 4,
+        "band": "1-4",
+        "deadEnds": true,
+        "secrets": 1,
+        "lit": 50,
+        "dressing": "some",
+        "key": true
+      },
+      "seed": "1W1NG0ADDED0EAST",
+      "wing": true,
+      "sha256": "bce4a4f78d7d7298e7d96331c4ee02257a9a85221e15b7c3d4eaede396290089"
+    },
+    {
+      "name": "an edited plan",
+      "settings": {
+        "w": 50,
+        "h": 50,
+        "rooms": 12,
+        "density": "normal",
+        "corridors": "bending",
+        "wide": false,
+        "loops": true,
+        "theme": "dungeon",
+        "heights": 25,
+        "traps": 4,
+        "band": "1-4",
+        "deadEnds": true,
+        "secrets": 1,
+        "lit": 25,
+        "dressing": "some",
+        "key": true
+      },
+      "seed": "1K7QH2MXA9F3TWQ5",
+      "edits": true,
+      "sha256": "734fc27911c437041a2b44273784b966d08cc25b6acab64f24d0c5ae9433fedf"
     }
   ]
 }

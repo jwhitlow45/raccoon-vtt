@@ -2,8 +2,13 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { describe, test } from "node:test";
-import { generate } from "./plan.ts";
-import { clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, type DungeonSettings } from "./settings.ts";
+import type { RoomState } from "#shared/model.ts";
+import { builderScene } from "../scenes/create.ts";
+import { editLayout } from "./edits.ts";
+import { generate, planFitted, type WingBase } from "./plan.ts";
+import { landAll, scratchRoom } from "./scratch.ts";
+import { clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, type DungeonSettings, type GridKind } from "./settings.ts";
+import { wingHash } from "./wing.ts";
 
 /*
  * Plans pinned by hash (docs/design/design-v1-dungeon-generator.md
@@ -16,7 +21,8 @@ import { clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, type DungeonSettings
 
 const FIXTURE = new URL("./plan.golden.fixture.json", import.meta.url);
 
-type Golden = { version: number; plans: { name: string; settings: DungeonSettings; seed: string; sha256: string }[] };
+/** A pinned plan. Phase 3's cases name what else made them: a hex grid, a wing on the fixture scene, edits. */
+type Golden = { version: number; plans: { name: string; settings: DungeonSettings; seed: string; grid?: GridKind; wing?: true; edits?: true; sha256: string }[] };
 
 const CASES: { name: string; settings: Partial<DungeonSettings>; seed: string }[] = [
   { name: "the defaults", settings: {}, seed: "1K7QH2MXA9F3TWQ5" },
@@ -35,6 +41,46 @@ const CASES: { name: string; settings: Partial<DungeonSettings>; seed: string }[
   { name: "a Wide Mine with secret doors", settings: { theme: "mine", wide: true, secrets: 4, heights: 50 }, seed: "1M1N3S7AF7Y0DEEP" },
   { name: "a Narrow Sewer with secret doors and no dead ends", settings: { theme: "sewer", secrets: 6, deadEnds: false, traps: 6 }, seed: "1SEWER0RAT5N0SE5" },
 ];
+
+/*
+ * Phase 3's cases (5): each made as the dialog or the wing pane makes it,
+ * through `planFitted`. None moves a case above, whose plans carry none of
+ * phase 3's fields.
+ */
+const PHASE3: { name: string; settings: Partial<DungeonSettings>; seed: string; grid?: GridKind; wing?: true; edits?: true }[] = [
+  { name: "a hex Medium", settings: { traps: 4, secrets: 2, lit: 50, dressing: "full" }, seed: "1HEX0MED1VM0R0WS", grid: "hexRows" },
+  { name: "a hex Wide Crypt on columns", settings: { theme: "crypt", wide: true, heights: 50, traps: 4 }, seed: "1HEX0W1DE0CRYPT0", grid: "hexColumns" },
+  { name: "a wing on a square scene", settings: { w: 30, h: 30, rooms: 6, traps: 4, lit: 50 }, seed: "1W1NG0ADDED0EAST", wing: true },
+  { name: "an edited plan", settings: { traps: 4, lit: 25, dressing: "some" }, seed: "1K7QH2MXA9F3TWQ5", edits: true },
+];
+
+/** The wing case's scene: a 70 by 40 square scene holding one painted room, joined on its east wall. */
+function wingBase(s: DungeonSettings): WingBase {
+  const cells: string[] = [];
+  for (let y = 14; y < 24; y++) for (let x = 8; x < 18; x++) cells.push(`${x},${y}`);
+  const landed = landAll(scratchRoom(), [
+    { t: "scene.create", scene: builderScene({ id: "s", name: "Old", w: 70, h: 40 }) },
+    { t: "build.paint", sceneId: "s", terrain: "stone", cells },
+  ]);
+  if (!landed.ok) throw new Error(landed.why);
+  const state: RoomState = landed.room;
+  const base = { scene: state.scenes.s!, state, area: { x: 28, y: 2, w: 40, h: 36 }, join: { grid: "squares" as const, edges: [{ key: "18,18,w", feature: null, ground: 0 }] } };
+  return { ...base, hash: wingHash(base, s) };
+}
+
+/** A phase 3 case's plan, as the dialog or the pane plans it. */
+function phase3Plan(c: (typeof PHASE3)[number], s: DungeonSettings): ReturnType<typeof generate> {
+  const context = c.grid ? { ...DEFAULT_CONTEXT, grid: c.grid } : DEFAULT_CONTEXT;
+  if (c.wing) return planFitted(s, c.seed, context, { wing: wingBase(s) }).plan;
+  if (c.edits) {
+    const base = planFitted(s, c.seed, context);
+    const [a, b] = base.kept.filter((i) => i !== base.entrance);
+    const door = base.facts.find((f) => f.room === a)!.doors[0]!;
+    const rooms = { [a!]: { trap: "spiked-pit", lit: true, dressing: "full" as const, propsDraw: 3, doors: { [door.key]: "locked" as const } }, [b!]: { ground: 10, lit: false, trap: null } };
+    return planFitted(s, c.seed, context, { edits: { layout: editLayout(s, c.seed, base.fitted, null), rooms } }).plan;
+  }
+  return planFitted(s, c.seed, context).plan;
+}
 
 /**
  * Why a rewrite would hide a moved plan, or null when it may go ahead: a
@@ -57,10 +103,17 @@ const hash = (plan: ReturnType<typeof generate>) => createHash("sha256").update(
 function today(): Golden {
   return {
     version: GENERATOR_VERSION,
-    plans: CASES.map(({ name, settings, seed }) => {
-      const s = clampSettings(settings);
-      return { name, settings: s, seed, sha256: hash(generate(s, seed, DEFAULT_CONTEXT)) };
-    }),
+    plans: [
+      ...CASES.map(({ name, settings, seed }) => {
+        const s = clampSettings(settings);
+        return { name, settings: s, seed, sha256: hash(generate(s, seed, DEFAULT_CONTEXT)) };
+      }),
+      ...PHASE3.map((c) => {
+        const s = clampSettings(c.settings, c.grid);
+        const { name, seed, grid, wing, edits } = c;
+        return { name, settings: s, seed, ...(grid ? { grid } : {}), ...(wing ? { wing } : {}), ...(edits ? { edits } : {}), sha256: hash(phase3Plan(c, s)) };
+      }),
+    ],
   };
 }
 
@@ -88,7 +141,7 @@ describe("golden dungeon plans", () => {
       writeFileSync(FIXTURE, `${JSON.stringify(now, null, 2)}\n`);
     }
     const fixture = JSON.parse(readFileSync(FIXTURE, "utf8")) as Golden;
-    assert.equal(fixture.plans.length, CASES.length);
+    assert.equal(fixture.plans.length, CASES.length + PHASE3.length);
     assert.deepEqual(now, fixture, "a plan moved: bump GENERATOR_VERSION and rerun with UPDATE_FIXTURES=1");
   });
 });
