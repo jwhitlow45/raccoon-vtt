@@ -314,8 +314,8 @@ describe("all of a kind (docs/design/design-v1-qol.md 3, Q7)", () => {
   ];
 
   test("the same block under the same name on the same scene, by number, the one tapped among them", () => {
-    assert.deepEqual(sameKind(room, room[0]!), ["g1", "g2", "g3", "hid", "npc"]);
-    assert.deepEqual(sameKind(room, goblin("g2", 2)), ["g1", "g2", "g3", "hid", "npc"]);
+    assert.deepEqual(sameKind(room, room[0]!, new Map()), ["g1", "g2", "g3", "hid", "npc"]);
+    assert.deepEqual(sameKind(room, goblin("g2", 2), new Map()), ["g1", "g2", "g3", "hid", "npc"]);
   });
 
   test("on a DM's board the unseen follow the met in the order their brackets count", () => {
@@ -326,30 +326,30 @@ describe("all of a kind (docs/design/design-v1-qol.md 3, Q7)", () => {
       ["m", { name: "Goblin Warrior", number: 1 }],
     ]);
     assert.deepEqual(sameKind(pack, pack[0]!, labels), ["m", "z", "a"]);
-    assert.deepEqual(sameKind(pack, pack[0]!), ["m", "a", "z"], "with no labels, by number then id");
+    assert.deepEqual(sameKind(pack, pack[0]!, new Map()), ["m", "a", "z"], "with no label for them, by number then id");
   });
 
   test("the dead are left out: the living alone are counted and selected, so a group's HP entry and Conditions never act on a corpse (LP32-B-ALL-1)", () => {
     const fallen = [...room.slice(0, 4), goblin("dead", 10, {}, { srdId: "goblin-warrior", life: "dead" }), goblin("dying", 11, {}, { srdId: "goblin-warrior", life: "dying" })];
-    assert.deepEqual(sameKind(fallen, fallen[0]!), ["g1", "g2", "g3", "hid", "dying"]);
+    assert.deepEqual(sameKind(fallen, fallen[0]!, new Map()), ["g1", "g2", "g3", "hid", "dying"]);
     // From a dead one's own bar, the button stands for the living.
-    assert.deepEqual(sameKind(fallen, fallen[4]!), ["g1", "g2", "g3", "hid", "dying"]);
+    assert.deepEqual(sameKind(fallen, fallen[4]!, new Map()), ["g1", "g2", "g3", "hid", "dying"]);
     const last = [goblin("one", 1), goblin("two", 2, {}, { srdId: "goblin-warrior", life: "dead" })];
-    assert.deepEqual(sameKind(last, last[0]!), ["one"], "one left alive: no button");
+    assert.deepEqual(sameKind(last, last[0]!, new Map()), ["one"], "one left alive: no button");
   });
 
   test("a renamed token, another block, one with no block and a player character are kinds of their own, or none", () => {
-    assert.deepEqual(sameKind(room, room[5]!), ["boss"], "Snarl alone: no button");
-    assert.deepEqual(sameKind(room, room[6]!), ["custom"], "the room's own monster is not the SRD's");
+    assert.deepEqual(sameKind(room, room[5]!, new Map()), ["boss"], "Snarl alone: no button");
+    assert.deepEqual(sameKind(room, room[6]!, new Map()), ["custom"], "the room's own monster is not the SRD's");
     assert.equal(kindOf(room[7]!), null);
-    assert.deepEqual(sameKind(room, room[7]!), []);
+    assert.deepEqual(sameKind(room, room[7]!, new Map()), []);
     assert.equal(kindOf(room[9]!), null);
     assert.equal(kindOf({ ...room[0]!, actor: { ref: "c1" } } as KindToken), null, "a character's token");
   });
 
   test("selecting them puts the group in the one's place, in their order, its bar showing", () => {
     const one = tapToken(INITIAL_LOCAL, "g3");
-    const kin = sameKind(room, room[0]!);
+    const kin = sameKind(room, room[0]!, new Map());
     const group = addToSelection(selectToken(one, null), kin);
     assert.deepEqual(group.selectedIds, kin);
     assert.equal(group.selectedId, "npc");

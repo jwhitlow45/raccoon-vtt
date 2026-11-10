@@ -226,7 +226,7 @@ function living(token: KindToken): boolean {
  * one is dead, and is empty for one with no kind, so a lone creature, or
  * the last one alive, shows no button.
  */
-export function sameKind(tokens: Iterable<KindToken>, token: KindToken, labels?: Labels): string[] {
+export function sameKind(tokens: Iterable<KindToken>, token: KindToken, labels: Labels): string[] {
   const kind = kindOf(token);
   if (kind === null) return [];
   const kin = [...tokens].filter((t) => t.sceneId === token.sceneId && kindOf(t) === kind && living(t));
