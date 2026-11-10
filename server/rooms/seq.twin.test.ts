@@ -6,13 +6,14 @@ import type { Member, RoomState } from "#shared/model.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
 import { COUNT_SNAPSHOT_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { FAMILIAR, FrameReader, IMAGE, IN_Q, numbersIn, seqTwins, T0, TRACK_END, type SeqTwinOptions } from "#shared/seqTestutil.ts";
-import { trap } from "#shared/testutil.ts";
+import { template, trap } from "#shared/testutil.ts";
 import { forgetRememberedStamps } from "../assets/cleanup.ts";
 import { stateThrough } from "../http/receipts.ts";
 import { RoomActor, type ActorDeps, type ActorOptions } from "./actor.ts";
 import { SnapshotBudget } from "./budgets.ts";
 import type { Connection } from "./connection.ts";
 import type { RoomGateway } from "./gateway.ts";
+import { snapshotJson } from "./persistence.ts";
 import { SizeGuard } from "./sizeGuard.ts";
 import { UndoStacks } from "./undo.ts";
 import { scopeObserver, ScopeClient, StoredRoomDb, until } from "./undoScopeTesting.ts";
@@ -452,9 +453,16 @@ describe("an op that faults before its install or after it", () => {
   const fault = new Error("a fault the test throws");
   for (const when of ["before", "after"] as const) {
     for (const barrier of [false, true]) {
-      test(`C23: a fault ${when} the install, ${barrier ? "after" : "before"} the room's first save at today's format, across a restart`, async (t) => {
+      test(`C23: a fault ${when} the install, ${barrier ? "after the room's first save at today's format" : "in the first commit after a load at the format below the count's, which saves the room at today's"}, across a restart`, async (t) => {
         const w = seqTwins();
-        const pair: Pair = [await Twin.open(t, "door", w.door, {}, COUNT_SNAPSHOT_VERSION - 1), await Twin.open(t, "rock", w.rock, {}, COUNT_SNAPSHOT_VERSION - 1)];
+        // While held, the build of today's snapshot throws, so the room stays at the format below the count's through C1's
+        // moves, as a room whose first save here could not write it does.
+        let held = !barrier;
+        const heldBuild = (state: RoomState) => {
+          if (held) throw new Error("a snapshot build the test holds back");
+          return snapshotJson(state);
+        };
+        const pair: Pair = [await Twin.open(t, "door", w.door, { snapshotJson: heldBuild }, COUNT_SNAPSHOT_VERSION - 1), await Twin.open(t, "rock", w.rock, { snapshotJson: heldBuild }, COUNT_SNAPSHOT_VERSION - 1)];
         if (barrier) {
           await both(pair, (twin) => twin.apply("p1", { t: "log.chat", text: "ready" }));
           for (const twin of pair) assert.equal(twin.db.snapshot.version, SNAPSHOT_VERSION, `${twin.name}: the first commit saved the room at today's format`);
@@ -463,6 +471,15 @@ describe("an op that faults before its install or after it", () => {
           for (const [who, op] of C1.slice(0, 4)) await twin.apply(who, op);
         });
         bookkeepingDiffers(pair, `C23 ${when}`);
+        if (!barrier) {
+          // The room loads again, so the faulted op's commit is its first after the load, and builds the snapshot again.
+          held = false;
+          await both(pair, (twin) => twin.restart(false));
+          for (const twin of pair) {
+            assert.equal(twin.db.snapshot.version, COUNT_SNAPSHOT_VERSION - 1, `${twin.name}: still at the format below the count's just before the fault`);
+            assert.equal(twin.db.snapshotWrites, 0, `${twin.name}: no snapshot written yet`);
+          }
+        }
         // Before the install the size guard throws, after it the history's push, which runs once the op is staged. The op is
         // P1's drawing, which moves no one's sight, so only its own keys can carry it to another member's device.
         const mocked = when === "before" ? t.mock.method(SizeGuard.prototype, "check") : t.mock.method(UndoStacks.prototype, "push");
@@ -482,8 +499,9 @@ describe("an op that faults before its install or after it", () => {
         for (const [i, twin] of pair.entries()) {
           const { state, pub, seq } = twin.actor.committed;
           const rows = twin.db.rows.map((r) => r.seq);
-          assert.deepEqual(rows, rows.map((_, k) => rows[0]! + k), `${twin.name}: no gap in the stored rows`);
-          const stored = twin.db.rows.filter((r) => (r.op as { t: string }).t === "drawing.create");
+          assert.deepEqual(rows, rows.map((_, k) => twin.db.snapshot.seq + 1 + k), `${twin.name}: the rows past the snapshot follow it with no gap`);
+          // Every row the room wrote, the ones a snapshot pruned since included.
+          const stored = twin.db.stored.filter((op) => op.t === "drawing.create");
           if (when === "before") {
             assert.equal(state.drawings[SKETCH], undefined, `${twin.name}: nothing of the op`);
             assert.equal(stored.length, 0, `${twin.name}: no row`);
@@ -493,8 +511,15 @@ describe("an op that faults before its install or after it", () => {
           } else {
             assert.ok(state.drawings[SKETCH], `${twin.name}: the whole op`);
             assert.equal(stored.length, 1, `${twin.name}: its row once`);
-            assert.ok(stored[0]!.pub === pub && pub === before[i]!.pub + 1, `${twin.name}: the op took the count's next number`);
+            assert.equal(pub, before[i]!.pub + 1, `${twin.name}: the op took the count's next number`);
+            // The row is still there unless the commit carried the snapshot, which then holds the op.
+            if (barrier) assert.equal(twin.db.rows.find((r) => (r.op as { t: string }).t === "drawing.create")?.pub, pub, `${twin.name}: its row carries that number`);
             assert.ok(twin.clients.dm.sent.slice(dmFrom[i]).some(drawn), `${twin.name}: the DM's device got the drawing at once`);
+          }
+          if (!barrier) {
+            const saved = twin.db.snapshot;
+            assert.deepEqual([saved.version, saved.seq, twin.db.snapshotWrites], [SNAPSHOT_VERSION, seq, 1], `${twin.name}: the faulted op's commit saved the room at today's format, at its seq`);
+            assert.equal((saved.state as RoomState).drawings[SKETCH] !== undefined, when === "after", `${twin.name}: the saved room holds the op exactly when it was installed`);
           }
         }
         same(pair, `C23 ${when}, at once`);
