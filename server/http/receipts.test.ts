@@ -10,7 +10,7 @@ import { registerReceiptRoutes, stateThrough } from "./receipts.ts";
 import { ScanBusyError, ScanCancelledError } from "../rooms/logScanBudget.ts";
 
 for (const property of ["closed", "replayFailed"] as const) test(`a behind actor that is ${property} answers busy promptly`, async () => {
-  const actor = { committed: { state: {} as never, pub: 1 }, closed: false, replayFailed: false };
+  const actor = { committed: { state: {} as never, through: 1 }, closed: false, replayFailed: false };
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), 100);
   try {
@@ -20,7 +20,7 @@ for (const property of ["closed", "replayFailed"] as const) test(`a behind actor
 });
 
 test("actor closure while waiting answers busy, and cancellation rejects a caught-up state", async () => {
-  const actor = { committed: { state: {} as never, pub: 1 }, closed: false, replayFailed: false };
+  const actor = { committed: { state: {} as never, through: 1 }, closed: false, replayFailed: false };
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), 100);
   try {
@@ -81,7 +81,7 @@ async function routeRig(stage = "", opts: { slide?: boolean; stale?: boolean; li
   const config = loadConfig({ NODE_ENV: "test", DATABASE_URL: "postgres://localhost/test" });
   const kit = await setupAuth(app, { config, pool: pool as never, gateway: { closeSockets: () => { stats.closed++; } } as never });
   const lines = new ReceiptLines({ pool: pool as never, cancel: async () => { stats.cancels++; } });
-  await registerReceiptRoutes(app, kit, { manager: { acquire: async () => ({ committed: { state: {} as never, pub: 0 } }) } as never, options: { lines, deadlineMs: 25 } });
+  await registerReceiptRoutes(app, kit, { manager: { acquire: async () => ({ committed: { state: {} as never, through: 0 } }) } as never, options: { lines, deadlineMs: 25 } });
   await app.ready();
   return { app, stats, sql, pool, request: (cookie = true) => app.inject({ method: "GET", url: "/api/rooms/ABCDEFGH/receipts/tag", headers: cookie ? { cookie: `rvtt=${"a".repeat(43)}` } : {} }) };
 }
@@ -158,10 +158,10 @@ for (const cookie of [false, true]) test(`a request without a live session refus
 
 describe("a lookup's wait for the room's state", () => {
   test("returns the state once it reaches the newest receipt's seq, and a cancel ends the wait", async () => {
-    const actor = { committed: { state: { meta: { name: "five" } } as never, pub: 5 } };
+    const actor = { committed: { state: { meta: { name: "five" } } as never, through: 5 } };
     assert.equal(await stateThrough(actor, 5, new AbortController().signal), actor.committed.state, "a state already there is taken at once");
     const later = stateThrough(actor, 6, new AbortController().signal);
-    setTimeout(() => (actor.committed = { state: { meta: { name: "six" } } as never, pub: 6 }), 30);
+    setTimeout(() => (actor.committed = { state: { meta: { name: "six" } } as never, through: 6 }), 30);
     assert.equal(((await later) as unknown as { meta: { name: string } }).meta.name, "six");
     const abort = new AbortController();
     const never = stateThrough(actor, 99, abort.signal);
@@ -174,7 +174,7 @@ test("random actor capture, close, replay failure, cancellation and late progres
   const random = rng(4105);
   const modes = new Set<number>();
   for (let i = 0; i < 80; i++) {
-    const actor = { committed: { state: {} as never, pub: 1 }, closed: false, replayFailed: false };
+    const actor = { committed: { state: {} as never, through: 1 }, closed: false, replayFailed: false };
     const abort = new AbortController();
     const mode = Math.floor(random() * 4);
     modes.add(mode);
@@ -182,12 +182,12 @@ test("random actor capture, close, replay failure, cancellation and late progres
     if (mode === 0) actor.closed = true;
     if (mode === 1) actor.replayFailed = true;
     if (mode === 2) abort.abort();
-    if (mode === 3) actor.committed = { state: {} as never, pub: 2 };
+    if (mode === 3) actor.committed = { state: {} as never, through: 2 };
     const found = await result;
     if (mode < 2) assert.ok(found.error instanceof ScanBusyError, `sequence ${i}: terminal actors answer busy`);
     else if (mode === 2) assert.ok(found.error instanceof ScanCancelledError, `sequence ${i}: cancellation rejects`);
     else assert.equal(found.state, actor.committed.state, `sequence ${i}: one caught-up capture`);
-    actor.committed = { state: {} as never, pub: 3 };
+    actor.committed = { state: {} as never, through: 3 };
     if (found.state) assert.notEqual(found.state, actor.committed.state, "late progress cannot replace captured state");
   }
   assert.equal(modes.size, 4);

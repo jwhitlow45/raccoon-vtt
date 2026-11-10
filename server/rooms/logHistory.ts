@@ -122,11 +122,12 @@ export type HistoryView = {
   /** The committed state's storage seq. */
   seq: number;
   /**
-   * The committed state's room count (counted.ts). Every line the state
-   * holds has a number at or below it, and every line a later commit writes
-   * a number above it, so a read takes rows at or below it alone.
+   * The newest number whose op the state holds (RoomActor.committed). Every
+   * line the state holds has a number at or below it, and every line a
+   * later commit writes, or a row past a replay failure holds, a number
+   * above it, so a read takes rows at or below it alone.
    */
-  pub: number;
+  through: number;
   /** Whose lines: the caller, or the player a DM previews. */
   viewer: Viewer;
   sceneId: string | null;
@@ -134,8 +135,8 @@ export type HistoryView = {
   previewBy: string | null;
 };
 
-export function captureView(committed: { state: RoomState; seq: number; pub: number }, roomId: string, viewer: Viewer, opts: { sceneId?: string | null; previewBy?: string | null } = {}): HistoryView {
-  return { roomId, state: committed.state, seq: committed.seq, pub: committed.pub, viewer, sceneId: opts.sceneId ?? null, previewBy: opts.previewBy ?? null };
+export function captureView(committed: { state: RoomState; seq: number; through: number }, roomId: string, viewer: Viewer, opts: { sceneId?: string | null; previewBy?: string | null } = {}): HistoryView {
+  return { roomId, state: committed.state, seq: committed.seq, through: committed.through, viewer, sceneId: opts.sceneId ?? null, previewBy: opts.previewBy ?? null };
 }
 
 /**
@@ -315,7 +316,7 @@ export class LogHistory {
    * the viewer may not read costs a candidate and nothing else.
    */
   async *#indexedBatches(view: HistoryView, range: Pick<LogScanRange, "order" | "lower" | "upper">, scan: Scan, pass: "page" | "sessions" | "bounds" | "lines"): AsyncGenerator<LogEntry[]> {
-    const full: LogScanRange = { ...range, roomId: view.roomId, maxSeq: view.pub };
+    const full: LogScanRange = { ...range, roomId: view.roomId, maxSeq: view.through };
     const asc = range.order === "asc";
     const streams: StreamCursor[] = readerStreams(view.viewer).map((access) => ({ access, buffer: [], last: null, done: false }));
     const n = this.#batchRows;
@@ -483,7 +484,7 @@ export class LogHistory {
               sql = guardedQueries(taken, scan.signal, () => dropping !== null);
               // One snapshot for the cursor and every entry read beside it.
               await sql.query("begin isolation level repeatable read read only");
-              await declareLogScan(sql, CURSOR, { ...range, roomId: view.roomId, maxSeq: view.pub });
+              await declareLogScan(sql, CURSOR, { ...range, roomId: view.roomId, maxSeq: view.through });
             }
             const q = sql as Queryable;
             const ids = await fetchLogIds(q, CURSOR, this.#batchRows);

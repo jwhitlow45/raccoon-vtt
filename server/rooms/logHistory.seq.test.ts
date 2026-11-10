@@ -11,7 +11,7 @@ import { ScopeClient, StoredRoomDb, storedActor } from "./undoScopeTesting.ts";
 
 /**
  * A log read takes the room count it captured as its bound (logHistory.ts
- * HistoryView `pub`): the lines a commit writes are numbered above the count
+ * HistoryView `through`): the lines a commit writes are numbered above the count
  * it captured, whatever the storage seq has reached through the room's own
  * work, so a page read while a batch commits returns none of that batch's
  * lines, even once they reach the archive before the read scans it. The
@@ -143,9 +143,9 @@ describe("a log read is bounded by the room count it captured", () => {
     await chat;
 
     const view = views[0]!;
-    assert.ok(view.seq > view.pub, `the room's own work moved the storage seq past the count (${view.seq} against ${view.pub})`);
+    assert.ok(view.seq > view.through, `the room's own work moved the storage seq past the count (${view.seq} against ${view.through})`);
     const during = h.actor.committed.state.log.find((line) => line.kind === "chat" && line.text === "during");
-    assert.ok(during && numberOf(during.id) === view.pub + 1, "the held batch's line takes the count's next number");
+    assert.ok(during && numberOf(during.id) === view.through + 1, "the held batch's line takes the count's next number");
     assert.ok(numberOf(during.id) <= view.seq, "and a number at or below the storage seq the read captured");
 
     // The commit landed before the read scans: the archive holds every line, the held batch's too.
@@ -171,7 +171,7 @@ describe("a log read is bounded by the room count it captured", () => {
         const who = `${name}, ${v.viewer.role} ${v.viewer.memberId}`;
         assert.ok(got.back.length > 0, `${who}: the read returns lines`);
         assert.deepEqual(got.forward, got.back, `${who}: both directions read the same lines`);
-        for (const id of got.back) assert.ok(numberOf(id) <= v.pub, `${who}: ${id} is at or below the count ${v.pub}`);
+        for (const id of got.back) assert.ok(numberOf(id) <= v.through, `${who}: ${id} is at or below the count ${v.through}`);
         assert.ok(!got.back.includes(during.id), `${who}: the held batch's line is not read`);
         assert.equal(got.lines, got.back.length, `${who}: the sessions count the same lines`);
       }

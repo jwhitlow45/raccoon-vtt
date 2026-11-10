@@ -327,7 +327,7 @@ describe("the archive reader against the reducer's own lines", () => {
           const who = role(id);
           const mine = archived.filter((line) => readable(line, who, hidden));
           const ids = mine.map((line) => line.id);
-          const got = await answers(who, new LogHistory({ pool: scanPool, batchRows: 1 + Math.floor(random() * 600) }), captureView({ state, seq, pub: seq }, roomId, who));
+          const got = await answers(who, new LogHistory({ pool: scanPool, batchRows: 1 + Math.floor(random() * 600) }), captureView({ state, seq, through: seq }, roomId, who));
           const label = `seed ${seed} ${who.role} ${players.indexOf(id)}`;
           assert.deepEqual(got.back, ids, `${label} backward`);
           assert.deepEqual(got.forward, ids, `${label} forward`);
@@ -341,7 +341,7 @@ describe("the archive reader against the reducer's own lines", () => {
         await flush();
         for (const id of players.slice(1)) {
           const who = role(id);
-          const again = await answers(who, new LogHistory({ pool: scanPool, batchRows: 1 + Math.floor(random() * 600) }), captureView({ state, seq, pub: seq }, roomId, who));
+          const again = await answers(who, new LogHistory({ pool: scanPool, batchRows: 1 + Math.floor(random() * 600) }), captureView({ state, seq, through: seq }, roomId, who));
           assert.deepEqual(again, first.get(id), `seed ${seed} private additions`);
         }
         assert.ok(snapshots > 0, `seed ${seed} wrote snapshots`);

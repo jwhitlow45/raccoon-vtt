@@ -3,7 +3,7 @@ import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { dmNumbered, logsInIdOrder, whisperParties } from "#shared/logRings.ts";
 import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, MAP_DISCOVERY_OP_VERSION, OP_VERSION, SNAPSHOT_VERSION, mapDiscoveryUpgrade, migrateOp, migrateSnapshot, needsMapDiscoveryUpgrade, opMigrations, type MigrationStep } from "#shared/migrate.ts";
 import type { LogEntry, RoomState, SoundFacts, VideoFacts, Viewer } from "#shared/model.ts";
-import { checkedVideoFacts, opSchema, type Op } from "#shared/protocol.ts";
+import { checkedVideoFacts, opSchema, type Op, type OpType } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
 import { soundFactsOfRow, type AssetMedia } from "../assets/store.ts";
@@ -71,6 +71,13 @@ export type LoadedRoom = {
   seq: number;
   /** The room count (counted.ts) the room resumes from. */
   pub: number;
+  /**
+   * The newest number whose op the loaded state holds, where reads of the
+   * log and receipts stop: `pub` after a whole replay, and below it after a
+   * replay failure, since the count still takes every number the stored
+   * rows hold (replayedThrough).
+   */
+  through: number;
   /** The seq of the snapshot row the load started from. */
   snapshotSeq: number;
   /** The schema version the snapshot row was stored at, before migration. */
@@ -125,7 +132,8 @@ function rowNumber(r: OpRow): number | null {
  * wrote, whose lines and turns that seq numbered, so the next line never
  * takes an id one of them holds, even after an older build wrote to a room
  * it could still load (a room whose replay failed here, or whose snapshot
- * here could not be written yet).
+ * here could not be written yet). Reads stop at the numbers the state holds
+ * (`through`).
  */
 export async function loadRoom(
   pool: Pool,
@@ -163,6 +171,7 @@ export async function loadRoom(
   let seq = snapshotSeq;
   let replayFailed = false;
   let replayed = 0;
+  let lastNumber: number | null = null;
   let upgrade = needsMapDiscoveryUpgrade(row.schema_version);
   const ops = await pool.query<OpRow>(
     "select seq, at, actor_member_id, actor_role, op, op_version, pub from room_ops where room_id = $1 and seq > $2 order by seq",
@@ -192,6 +201,7 @@ export async function loadRoom(
         else {
           state = result.state;
           seq = rowSeq;
+          lastNumber = number;
           replayed++;
         }
       }
@@ -206,7 +216,37 @@ export async function loadRoom(
   let pub = row.pub === null || row.pub === undefined ? snapshotSeq : Number(row.pub);
   if (row.schema_version < COUNT_SNAPSHOT_VERSION) pub = Math.max(pub, snapshotSeq);
   for (const r of ops.rows) pub = Math.max(pub, rowNumber(r) ?? 0);
-  return { state, seq, pub, snapshotSeq, snapshotVersion: row.schema_version, replayFailed, replayed, stateBytes: serializedBytes(state) };
+  const through = replayFailed ? replayedThrough(state, lastNumber, snapshotSeq, row.schema_version, ops.rows[0]) : pub;
+  return { state, seq, pub, through, snapshotSeq, snapshotVersion: row.schema_version, replayFailed, replayed, stateBytes: serializedBytes(state) };
+}
+
+/**
+ * The newest number whose op a state a replay failure stopped holds. The
+ * count cannot say, since it takes the numbers of the rows that did not
+ * replay too. The last replayed row's number can: rows take their numbers
+ * in order, and an uncounted row carries the count it was staged at, whose
+ * op came before it. With no row replayed, a snapshot an older build wrote
+ * holds every op up to its seq, which numbered them, and one this build
+ * wrote every op below the first row's number, or up to it when that row
+ * is uncounted. A first row that does not follow the snapshot or has no
+ * number, which no build writes, says nothing, and the newest line the
+ * state holds stands in, since that line's op and every op before it are
+ * in the state.
+ */
+function replayedThrough(state: RoomState, lastNumber: number | null, snapshotSeq: number, snapshotVersion: number, first: OpRow | undefined): number {
+  if (lastNumber !== null) return lastNumber;
+  if (snapshotVersion < COUNT_SNAPSHOT_VERSION) return snapshotSeq;
+  const number = first === undefined ? null : rowNumber(first);
+  if (first === undefined || number === null || Number(first.seq) !== snapshotSeq + 1) return newestLine(state);
+  const type = (first.op as { t?: unknown } | null)?.t;
+  return typeof type === "string" && !counted(type as OpType, first.op_version) ? number : number - 1;
+}
+
+/** The newest number any line of the state carries. */
+function newestLine(state: RoomState): number {
+  let newest = 0;
+  for (const line of [...state.log, ...state.trapLog, ...state.trapSeen]) newest = Math.max(newest, Number(line.id.slice(0, line.id.indexOf(":"))));
+  return newest;
 }
 
 /** One stored op, migrated to the current version and checked with the protocol schema, or why it cannot be replayed. */
@@ -708,9 +748,10 @@ export type LogBound = { seq: string; index: number; inclusive: boolean };
 
 /**
  * A pass over one room's archive in id order, numeric by op seq then line
- * index, through rows at or below `maxSeq`: the room count of the committed
- * state the reader captured (logHistory.ts HistoryView), so a row committed
- * later never meets a state that lacks it.
+ * index, through rows at or below `maxSeq`: the newest number whose op the
+ * committed state the reader captured holds (logHistory.ts HistoryView), so
+ * a row committed later, or one a replay failure left out, never meets a
+ * state that lacks it.
  */
 export type LogScanRange = { roomId: string; maxSeq: number; order: "asc" | "desc"; lower?: LogBound; upper?: LogBound };
 

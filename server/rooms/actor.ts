@@ -415,7 +415,7 @@ export class RoomActor {
   #opts: ActorOptions;
   #onIdle: ((actor: RoomActor) => void) | undefined;
   #closeWrites: CloseWrites;
-  #committed: { state: RoomState; seq: number; pub: number };
+  #committed: { state: RoomState; seq: number; pub: number; through: number };
   #staged: { state: RoomState; seq: number };
   /**
    * The room count (counted.ts): every number a device gets is made from it,
@@ -532,7 +532,7 @@ export class RoomActor {
   /** The run whose refused step was logged last, so a step that keeps failing logs once a run. */
   #soundRefusedRun: string | null | undefined = undefined;
 
-  private constructor(deps: ActorDeps, loaded: Pick<LoadedRoom, "state" | "seq" | "pub" | "snapshotSeq" | "snapshotVersion" | "replayFailed" | "stateBytes">, receipts: readonly ReceiptRow[]) {
+  private constructor(deps: ActorDeps, loaded: Pick<LoadedRoom, "state" | "seq" | "pub" | "through" | "snapshotSeq" | "snapshotVersion" | "replayFailed" | "stateBytes">, receipts: readonly ReceiptRow[]) {
     this.roomId = deps.info.roomId;
     this.pinned = deps.info.pinned;
     this.createdIp = deps.info.createdIp;
@@ -548,7 +548,7 @@ export class RoomActor {
     this.loadedAt = this.#opts.now();
     this.lastOpAt = this.loadedAt;
     this.#lastMemberAt = deps.info.lastActiveAt ?? this.loadedAt;
-    this.#committed = { state: loaded.state, seq: loaded.seq, pub: loaded.pub };
+    this.#committed = { state: loaded.state, seq: loaded.seq, pub: loaded.pub, through: loaded.through };
     this.#staged = this.#committed;
     this.#pub = loaded.pub;
     // A room whose replay failed writes no snapshot at all, so a fixed build can still rebuild it from its rows.
@@ -603,8 +603,13 @@ export class RoomActor {
     return actor;
   }
 
-  /** The committed state, its storage seq and its room count. */
-  get committed(): { state: RoomState; seq: number; pub: number } {
+  /**
+   * The committed state, its storage seq, its room count, and `through`, the
+   * newest number whose op the state holds, where reads of the log and
+   * receipts stop. That is the count, except in a room whose replay failed,
+   * whose count also takes the numbers of the rows it could not replay.
+   */
+  get committed(): { state: RoomState; seq: number; pub: number; through: number } {
     return this.#committed;
   }
 
@@ -2509,7 +2514,8 @@ export class RoomActor {
       }
     }
     this.retrying = false;
-    this.#committed = { state: batch.state, seq: batch.seq, pub: batch.pub };
+    // A room whose replay failed applies no op, so its reads stay where its replay stopped while refusals move the count.
+    this.#committed = { state: batch.state, seq: batch.seq, pub: batch.pub, through: this.replayFailed ? this.#committed.through : batch.pub };
     this.#committedHistory = batch.history ?? new Map();
     this.#receipts.committed(batch.receipts);
     for (const [key, n] of batch.watermarks) {
