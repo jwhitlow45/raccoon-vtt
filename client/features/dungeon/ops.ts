@@ -1,9 +1,11 @@
 import { LIMITS } from "#shared/limits.ts";
 import type { BuildChunk, EdgeFeature, TerrainId, TrapRig } from "#shared/model.ts";
-import { MAX_BUILD_CELLS, MAX_BUILD_EDGES, type ClientOp, type OpOf, type TokenInput, type TrapInput } from "#shared/protocol.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
+import { MAX_ASK_BYTES, MAX_BUILD_CELLS, MAX_BUILD_EDGES, type ClientOp, type OpOf, type TokenInput, type TrapInput } from "#shared/protocol.ts";
+import { gridOfShape, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { groundAt } from "#shared/rules/heights.ts";
+import { hexAt } from "#shared/rules/hex.ts";
 import type { LevelBand } from "#shared/srd/traps.ts";
+import { newWallId } from "../builder/hexBuild.ts";
 import { DEFAULT_ICON_COLOR } from "../images/iconColors.ts";
 import { newBlockId } from "../journal/draft.ts";
 import type { SceneInput } from "../scenes/create.ts";
@@ -11,6 +13,7 @@ import { blankActor, blankToken } from "../tokens/factory.ts";
 import { newTrapInput } from "../traps/rules.ts";
 import { batchByBytes, OP_BYTES } from "../uvtt/batch.ts";
 import { PLACED_LIGHTS } from "../vision/presets.ts";
+import { wallPlaceholder } from "./hexWalls.ts";
 import type { DungeonPlan, PlanTrap } from "./plan.ts";
 
 /*
@@ -75,36 +78,92 @@ function door(state: DungeonPlan["doors"][number]["state"]): EdgeFeature {
   return { kind: "door", state, secret: false, discovered: false };
 }
 
-/** Cells cut into ops of at most MAX_BUILD_CELLS cells and OP_BYTES each. */
-function cellOps(cells: readonly string[], wrap: (cells: string[]) => ClientOp): ClientOp[] {
-  return batchByBytes(cells, MAX_BUILD_CELLS, OP_BYTES, wrap).map(wrap);
-}
+/** Free walls one op puts at most, as a Wall line batches them (builder/hexBuild.ts): each is under 128 bytes, so the count binds before the bytes. */
+export const WALLS_PER_OP = 384;
 
 /**
- * The ground ops, in the order they apply: the scene, a paint per terrain,
- * the doors, a height per value and a stair mark per facing. The scene
- * never carries a starting view, which would tell players where the
- * entrance is through the fog (D-261102-387), and no op draws a wall, since
- * every wall is automatic (D-261102-022).
+ * Bytes one of a wing's map ops holds at most, so each rides in an ask
+ * with the ask's own fields and the wing's clear (phase 3, 3.6). The floor
+ * runs ride the smallest op, which leaves them the room.
  */
-export function buildOps(plan: DungeonPlan, scene: SceneInput): ClientOp[] {
-  const { defaultView: _view, ...bare } = scene;
-  const sceneId = bare.id;
-  const ops: ClientOp[] = [{ t: "scene.create", scene: bare }];
+export const WING_OP_BYTES = MAX_ASK_BYTES - 4 * 1024;
+
+/**
+ * A plan's map ops on a scene, in the order they apply: on squares a paint
+ * per terrain and the doors, on hexes the free walls (each a placeholder
+ * id Make replaces, sorted by their ends), then a height per value, a stair
+ * mark per facing, and difficult ground where the plan marks it (hexes and
+ * a wing on a "floor" scene). A hex wing's join goes in an op of its own
+ * first: the wall it stood as removed and its leaf put, in one op, since a
+ * put on the same ends as a standing wall would double it.
+ */
+export function mapOps(plan: DungeonPlan, sceneId: string, bytes: number = OP_BYTES): ClientOp[] {
+  const ops: ClientOp[] = [];
+  const cellOps = (cells: readonly string[], wrap: (cells: string[]) => ClientOp) => batchByBytes(cells, MAX_BUILD_CELLS, bytes, wrap).map(wrap);
   for (const terrain of TERRAIN_ORDER) {
     const cells = plan.paint[terrain];
     if (cells && cells.length > 0) ops.push(...cellOps(cells, (c) => ({ t: "build.paint", sceneId, terrain, cells: c })));
   }
   const edges: OpOf<"build.edge">["edges"] = plan.doors.map((d) => ({ key: d.edge, feature: door(d.state) }));
   const edgeOp = (e: OpOf<"build.edge">["edges"]): ClientOp => ({ t: "build.edge", sceneId, edges: e });
-  if (edges.length > 0) ops.push(...batchByBytes(edges, MAX_BUILD_EDGES, OP_BYTES, edgeOp).map(edgeOp));
+  if (edges.length > 0) ops.push(...batchByBytes(edges, MAX_BUILD_EDGES, bytes, edgeOp).map(edgeOp));
+  ops.push(...wallOps(plan, sceneId, bytes));
   for (const { ft, cells } of plan.heights) {
     if (ft !== 0 && cells.length > 0) ops.push(...cellOps(cells, (c) => ({ t: "build.height", sceneId, cells: c, height: ft })));
   }
   for (const { up, cells } of plan.stairs) {
     if (cells.length > 0) ops.push(...cellOps(cells, (c) => ({ t: "build.stairs", sceneId, cells: c, up })));
   }
+  if (plan.rough && plan.rough.length > 0) ops.push(...cellOps(plan.rough, (c) => ({ t: "build.rough", sceneId, cells: c, on: true })));
   return ops;
+}
+
+type WallPut = NonNullable<OpOf<"build.walls">["put"]>[number];
+
+/** A plan wall's feature as a free wall carries it: a leaf's door in its doorway's state, a secret one hidden. */
+function wallFeature(f: NonNullable<DungeonPlan["walls"]>[number]["f"]): WallPut["f"] {
+  if (f === "wall") return { kind: "wall" };
+  if (f === "secret") return { kind: "door", state: "closed", secret: true, discovered: false };
+  return { kind: "door", state: f, secret: false, discovered: false };
+}
+
+/** The plan's free walls as ops (2.2), a hex wing's join first in an op of its own with the wall it replaces removed. */
+function wallOps(plan: DungeonPlan, sceneId: string, bytes: number): ClientOp[] {
+  if (!plan.walls || plan.walls.length === 0) return [];
+  const join = plan.join?.grid === "hex" ? plan.join.walls : [];
+  const same = (a: readonly [number, number], b: readonly [number, number], p: readonly [number, number], q: readonly [number, number]) =>
+    (a[0] === p[0] && a[1] === p[1] && b[0] === q[0] && b[1] === q[1]) || (a[0] === q[0] && a[1] === q[1] && b[0] === p[0] && b[1] === p[1]);
+  const puts: WallPut[] = plan.walls.map((w, i) => ({ id: wallPlaceholder(i), a: w.a, b: w.b, f: wallFeature(w.f) }));
+  // A join that was a wall takes a leaf on its ends. A door there keeps standing as it is, and gets no put.
+  const leaves = puts.filter((p) => join.some((j) => same(p.a, p.b, j.a, j.b)));
+  const replaced = join.filter((j) => leaves.some((p) => same(p.a, p.b, j.a, j.b))).map((j) => ({ cx: j.cx, cy: j.cy, id: j.id }));
+  const rest = puts.filter((p) => !leaves.includes(p));
+  const wallOp = (put: WallPut[]): ClientOp => ({ t: "build.walls", sceneId, put });
+  const ops: ClientOp[] = leaves.length > 0 ? [{ t: "build.walls", sceneId, remove: replaced, put: leaves }] : [];
+  for (const put of batchByBytes(rest, WALLS_PER_OP, bytes, wallOp)) ops.push(wallOp(put));
+  return ops;
+}
+
+/**
+ * The ground ops, in the order they apply: the scene, then its map ops
+ * (`mapOps`). The scene never carries a starting view, which would tell
+ * players where the entrance is through the fog (D-261102-387). On squares
+ * no op draws a wall, since every wall is automatic (D-261102-022), and on
+ * hexes the walls are free walls (phase 3, D-261110-160).
+ */
+export function buildOps(plan: DungeonPlan, scene: SceneInput): ClientOp[] {
+  const { defaultView: _view, ...bare } = scene;
+  return [{ t: "scene.create", scene: bare }, ...mapOps(plan, bare.id)];
+}
+
+/**
+ * A wing's ops on the scene it joins (phase 3, 3.5): no scene, its map ops
+ * cut to ride in its asks, then its dressing and traps as a new scene's.
+ * Every id is a placeholder until Make, but the join's, which names the
+ * standing wall the wing replaces.
+ */
+export function wingMapOps(plan: DungeonPlan, sceneId: string): ClientOp[] {
+  return mapOps(plan, sceneId, WING_OP_BYTES);
 }
 
 /** A planned light's SRD radii as the Lights mode's preset holds them, so the Lights pane shows that preset chosen. */
@@ -140,11 +199,11 @@ export function stoneToken(id: string, sceneId: string, at: readonly [number, nu
  * on ground a player has not seen and each lies inside one room or
  * corridor. A light is DM-only state, lit and casting shadows from walls.
  */
-export function dressOps(plan: DungeonPlan, sceneId: string): ClientOp[] {
+export function dressOps(plan: DungeonPlan, sceneId: string, bytes: number = OP_BYTES): ClientOp[] {
   const ops: ClientOp[] = [];
   const stamps: NonNullable<OpOf<"build.stamps">["put"]> = plan.stamps.map((s, i) => ({ id: stampPlaceholder(i), art: { key: s.key }, x: s.x, y: s.y, w: s.w, h: s.h, rotation: s.rotation, z: i, visibility: "all" }));
   const stampOp = (put: NonNullable<OpOf<"build.stamps">["put"]>): ClientOp => ({ t: "build.stamps", sceneId, put });
-  for (const put of batchByBytes(stamps, LIMITS.stampsPerOp, OP_BYTES, stampOp)) ops.push(stampOp(put));
+  for (const put of batchByBytes(stamps, LIMITS.stampsPerOp, bytes, stampOp)) ops.push(stampOp(put));
   const lights: NonNullable<OpOf<"build.lights">["put"]> = plan.lights.map((l, i) => ({ id: lightPlaceholder(i), x: l.x, y: l.y, ...lightRadii(l.preset), on: true, walls: true, label: l.label }));
   const lightOp = (put: NonNullable<OpOf<"build.lights">["put"]>): ClientOp => ({ t: "build.lights", sceneId, put });
   for (const put of batchByBytes(lights, LIMITS.lightsPerOp, OP_BYTES, lightOp)) ops.push(lightOp(put));
@@ -163,15 +222,17 @@ const PLACE_THE_CONE = /^Place the \d+-foot cone from the statue\. /;
  * generator's reach check (trapSpots.ts `statueReaches`) can land this same
  * input, so the trap it kept is the trap Make sends.
  */
-export function trapInputOf(trap: PlanTrap, id: string, chunks: Readonly<Record<string, BuildChunk>>, band: LevelBand, sceneId: string): TrapInput {
-  const input = newTrapInput({ grid: SQUARES, id, sceneId, start: trap.preset, band, zone: trap.zone, chunks });
+export function trapInputOf(trap: PlanTrap, id: string, chunks: Readonly<Record<string, BuildChunk>>, band: LevelBand, sceneId: string, grid: Grid = SQUARES): TrapInput {
+  const input = newTrapInput({ grid, id, sceneId, start: trap.preset, band, zone: trap.zone, chunks });
   const rig: TrapRig = { ...input.rig };
   if (trap.hits) rig.hits = { cells: trap.hits.map((r) => ({ ...r })) };
   if (trap.cone) {
     const hits = rig.hits;
     if (typeof hits !== "object" || !("area" in hits)) throw new Error(`${trap.preset} has no cone to place`);
     const [x, y] = trap.cone.origin;
-    rig.hits = { area: { ...hits.area, origin: { x, y, z: groundAt(chunks, sceneId, Math.floor(x), Math.floor(y)) }, yaw: trap.cone.yaw } };
+    // The ground under the cone's origin: its square's, or on hexes the hex's that holds it.
+    const at = grid.shape === "hex" ? hexAt(grid, { x, y }) : { col: Math.floor(x), row: Math.floor(y) };
+    rig.hits = { area: { ...hits.area, origin: { x, y, z: groundAt(chunks, sceneId, at.col, at.row) }, yaw: trap.cone.yaw } };
     // The preset's note tells the DM to place the cone, which the generator just did.
     if (rig.note) rig.note = rig.note.replace(PLACE_THE_CONE, "");
   }
@@ -186,33 +247,64 @@ export function trapInputOf(trap: PlanTrap, id: string, chunks: Readonly<Record<
  * no player gets it until it is found, and each follows the stone it shows.
  */
 export function trapOps(plan: DungeonPlan, chunks: Readonly<Record<string, BuildChunk>>, band: LevelBand, sceneId: string): ClientOp[] {
-  return plan.traps.map((trap, i) => ({ t: "trap.create", trap: trapInputOf(trap, trapPlaceholder(i), chunks, band, sceneId) }));
+  const grid = gridOfShape(plan.grid === "hexRows" || plan.grid === "hexColumns" ? plan.grid : undefined);
+  return plan.traps.map((trap, i) => ({ t: "trap.create", trap: trapInputOf(trap, trapPlaceholder(i), chunks, band, sceneId, grid) }));
 }
 
 /**
- * The ops with every id fresh: the scene's, each stamp's, light's,
- * token's and trap's, the key page's and each of its blocks', and each
- * pin's. A trap's show action and a pin's page follow their targets. Every
- * op must name the one scene the first op makes, since an op naming any
- * other would land on a scene the DM never meant, and a reference must name
- * an id made before it here, as the server would refuse one it cannot
- * find. `ids` maps each placeholder to its fresh id, so the outcome's check
- * follows a reference through it (phase 2, section 6). A block's id is 12
- * characters, unique in its page, as the journal's own are.
+ * The ops with every id fresh: the scene's, each free wall's, stamp's,
+ * light's, token's and trap's, the key page's and each of its blocks', and
+ * each pin's. A trap's show action, a Poisoned Needle's leaf and a pin's
+ * page follow their targets. Every op must name the one scene the first op
+ * makes, since an op naming any other would land on a scene the DM never
+ * meant, and a reference must name an id made before it here, as the
+ * server would refuse one it cannot find. `ids` maps each placeholder to
+ * its fresh id, so the outcome's check follows a reference through it
+ * (phase 2, section 6). A block's id is 12 characters, unique in its page,
+ * as the journal's own are, and a free wall's is a free wall id
+ * (builder/hexBuild.ts `newWallId`).
  */
 export function withIds(
   ops: ClientOp[],
   newId: () => string,
   newBlock: () => string = () => newBlockId(),
+  newWall: () => string = newWallId,
 ): { ops: ClientOp[]; sceneId: string; ids: ReadonlyMap<string, string> } {
   const create = ops[0];
   if (create?.t !== "scene.create") throw new Error("a dungeon's ops start with its scene");
-  const was = create.scene.id;
   const sceneId = newId();
-  const ids = new Map<string, string>([[was, sceneId]]);
-  const fresh = (placeholder: string): string => {
+  return { ...freshIds(ops, { was: create.scene.id, now: sceneId, made: true }, newId, newBlock, newWall), sceneId };
+}
+
+/**
+ * A wing's ops with every id fresh as `withIds` makes a dungeon's, on the
+ * scene it joins (phase 3, 3.5): no op makes a scene, and every op must
+ * name the scene the worker planned it on, which Make sends to `sceneId`.
+ * A removal names a standing wall, the join's, and keeps its id.
+ */
+export function wingIds(
+  ops: ClientOp[],
+  planned: string,
+  sceneId: string,
+  newId: () => string,
+  newBlock: () => string = () => newBlockId(),
+  newWall: () => string = newWallId,
+): { ops: ClientOp[]; sceneId: string; ids: ReadonlyMap<string, string> } {
+  return { ...freshIds(ops, { was: planned, now: sceneId, made: false }, newId, newBlock, newWall), sceneId };
+}
+
+function freshIds(
+  ops: ClientOp[],
+  scene: { was: string; now: string; made: boolean },
+  newId: () => string,
+  newBlock: () => string,
+  newWall: () => string,
+): { ops: ClientOp[]; ids: ReadonlyMap<string, string> } {
+  const { was, now: sceneId } = scene;
+  const ids = new Map<string, string>(scene.made ? [[was, sceneId]] : []);
+  const fresh = (placeholder: string, make: () => string = newId): string => {
     if (ids.has(placeholder)) throw new Error(`a dungeon makes ${placeholder} twice`);
-    const id = newId();
+    const id = make();
     ids.set(placeholder, id);
     return id;
   };
@@ -228,13 +320,18 @@ export function withIds(
   const out = ops.map((op, i): ClientOp => {
     switch (op.t) {
       case "scene.create":
+        if (!scene.made) throw new Error("a wing makes no scene");
         if (i !== 0) throw new Error("a dungeon makes one scene");
         return { ...op, scene: { ...op.scene, id: sceneId } };
       case "build.paint":
       case "build.edge":
       case "build.height":
       case "build.stairs":
+      case "build.rough":
         return { ...op, sceneId: onScene(op.sceneId) };
+      case "build.walls":
+        if (op.remove !== undefined && scene.made) throw new Error("a dungeon removes no wall");
+        return { ...op, sceneId: onScene(op.sceneId), put: (op.put ?? []).map((w) => ({ ...w, id: fresh(w.id, newWall) })) };
       case "build.stamps":
         if (op.remove !== undefined) throw new Error("a dungeon removes no stamp");
         return { ...op, sceneId: onScene(op.sceneId), put: (op.put ?? []).map((s) => ({ ...s, id: fresh(s.id) })) };
@@ -248,7 +345,10 @@ export function withIds(
           if ("show" in a && "tokenId" in a.show) return { show: { tokenId: made(a.show.tokenId) } };
           throw new Error("a dungeon's trap only shows a token it made");
         });
-        return { ...op, trap: { ...op.trap, id: fresh(op.trap.id), sceneId: onScene(op.trap.sceneId), rig: { ...op.trap.rig, actions } } };
+        const zone = op.trap.zone;
+        // A Poisoned Needle on a hex door names its leaf by chunk and id (phase 3, 2.4), which Make gave a fresh one.
+        const z = "door" in zone && "id" in zone.door ? { door: { ...zone.door, id: made(zone.door.id) } } : zone;
+        return { ...op, trap: { ...op.trap, id: fresh(op.trap.id), sceneId: onScene(op.trap.sceneId), zone: z, rig: { ...op.trap.rig, actions } } };
       }
       case "journal.create": {
         const taken = new Set<string>();
@@ -270,5 +370,5 @@ export function withIds(
         throw new Error(`a dungeon sends no ${op.t}`);
     }
   });
-  return { ops: out, sceneId, ids };
+  return { ops: out, ids };
 }
