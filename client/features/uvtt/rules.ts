@@ -3,12 +3,57 @@ import { sameScene } from "#shared/rules/floors.ts";
 import type { OpAnswer, RoomView } from "../../state/types.ts";
 import type { RoomViewStore } from "../../state/view.ts";
 import { NOT_SAME_SHAPE, phaseProblem, referenceGrid } from "../phases/rules.ts";
+import { nameFromFile } from "../scenes/create.ts";
+import { floorNameOf, type FloorSight } from "../scenes/floorSource.ts";
+import { openFloorLine } from "../scenes/floorWords.ts";
 import type { ImportPlan } from "./convert.ts";
 
 /**
  * The import dialog's decisions (ImportDialog.tsx), apart from React so
  * they run under node's test runner.
  */
+
+/**
+ * What the import makes: a new scene, a phase of a scene (the image
+ * alone), or a floor just above or below the floor `beside`
+ * (docs/design/design-v1-floors.md phase 3, 3.6).
+ */
+export type ImportTarget = { kind: "scene" } | { kind: "phase"; sceneId: string } | { kind: "floor"; beside: string; side: "above" | "below" };
+
+/** What the worker is asked to read the file for. A floor takes the file's walls, as a new scene does, so the worker converts them, and the options convert them again. */
+export function workerKind(target: ImportTarget): "scene" | "phase" {
+  return target.kind === "phase" ? "phase" : "scene";
+}
+
+/** "crypt_level-2.dd2vtt" becomes "crypt level 2". The format's extensions are longer than nameFromFile strips. */
+export function fileSceneName(fileName: string): string {
+  return nameFromFile(fileName.replace(/\.(dd2vtt|uvtt|df2vtt)$/i, ""));
+}
+
+/** The name field's start: the file's name, cut for a floor to the floor name's 40 code points and trimmed. */
+export function importName(fileName: string, target: ImportTarget): string {
+  const name = fileSceneName(fileName);
+  return target.kind === "floor" ? floorNameOf(name) : name;
+}
+
+/**
+ * How a floor's fog and vision are sent (scenes/floorSource.ts): Like with
+ * its light untouched sends none, so the floor copies the floor beside as
+ * the add applies, and every other pick is sent whole (3.6, D-261110-110).
+ * `lightTouched` is a light picked in the row, or the lead's tap, since
+ * Like was picked.
+ */
+export function importSight(seen: string, lightTouched: boolean): FloorSight {
+  return seen === "like" && !lightTouched ? "like" : "own";
+}
+
+/** The name the reducer gives a floor added with none (shared/reducer/floors.ts), which the words read until the floor shows. */
+export const NEW_FLOOR = "New floor";
+
+/** Under Players see on a floor beside a per-player floor: a preset patches the floor beside's sight and keeps Per player. */
+export function perPlayerNote(besideName: string): string {
+  return `Each player still sees for themselves, as on ${besideName}.`;
+}
 
 /**
  * Why the file's image cannot be a phase of the scene, checked before it
@@ -114,6 +159,28 @@ export function outcomeText(outcome: ImportOutcome, name: string, opened: boolea
         text: `The connection dropped during the import, and ${name} could not be confirmed complete. It may be missing walls, doors or lights.${goTo} Undo setup in Setup history takes the whole import back.`,
         tone: "error",
       };
+  }
+}
+
+/**
+ * How a floor's import ended, in one sentence, naming the floor by `name`,
+ * the name the server stored once the floor shows, else the one sent.
+ * `scene` is its scene's name, for a DM who went elsewhere meanwhile.
+ */
+export function floorOutcomeText(outcome: ImportOutcome, name: string, scene: string, opened: boolean): { text: string; tone: "info" | "error" } {
+  const goTo = opened ? "" : openFloorLine(scene, name);
+  const back = "Undo setup in Setup history takes the whole import back.";
+  switch (outcome.k) {
+    case "complete":
+      return outcome.checked
+        ? { text: `The connection dropped during the import, but ${name} is complete: every wall, door and light is in. ${back}`, tone: "info" }
+        : { text: `${name} is added to ${scene}, with every wall, door and light.${goTo}`, tone: "info" };
+    case "none":
+      return { text: outcome.lost ? "The connection dropped during the import, and no floor was added. Try again." : "The server refused the import, so no floor was added.", tone: "error" };
+    case "partial":
+      return { text: `The server refused part of the import, so the floor may be missing walls. ${back}`, tone: "error" };
+    case "unconfirmed":
+      return { text: `The connection dropped during the import, and ${name} could not be confirmed complete. It may be missing walls, doors or lights.${goTo} ${back}`, tone: "error" };
   }
 }
 

@@ -1,4 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { LIMITS } from "#shared/limits.ts";
+import { GROUND_FLOOR } from "#shared/reducer/floors.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
@@ -12,7 +14,8 @@ import { theme } from "../../lib/theme.ts";
 import type { OpAnswer } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { addPhase } from "../phases/rules.ts";
-import { nameFromFile, newSceneIntent, newScenePreset, pickNow, withPlayersSee } from "../scenes/create.ts";
+import { newSceneIntent, newScenePreset, pickNow, withPlayersSee } from "../scenes/create.ts";
+import { floorAddRefusal, floorCreateOf, floorNameOf } from "../scenes/floorSource.ts";
 import { uploadErrorText, uploadMap } from "../scenes/upload.ts";
 import { importOps, importScene, placeMap, type SceneInput } from "./batch.ts";
 import { UvttWorker, type Progress } from "./client.ts";
@@ -23,16 +26,23 @@ import {
   addAnswer,
   CHECK_MS,
   earlyShapeProblem,
+  floorOutcomeText,
+  importName,
   importOutcome,
+  importSight,
   movedOn,
   mustCount,
+  NEW_FLOOR,
   NO_ANSWERS,
   outcomeText,
+  perPlayerNote,
   sceneShown,
   sentContents,
   storedContents,
+  workerKind,
   type Answers,
   type Contents,
+  type ImportTarget,
 } from "./rules.ts";
 import { foundLine, imageNote, notes, shapeNote, sizeText, summaryLight } from "./summary.ts";
 import type { LightLevel, Scene, ScenePreset } from "#shared/model.ts";
@@ -55,9 +65,15 @@ import { lightsLead, startingLight, type LightProposal, whyShown } from "../visi
  *
  * Once the walls are being sent, closing the dialog only hides it. The
  * ops go on, and the import still ends in the new scene or a toast.
+ *
+ * Aimed at a floor (docs/design/design-v1-floors.md phase 3, 3.6), it makes
+ * a floor just above or below the floor `beside` in place of a scene: the
+ * same summary and steps, Like naming the floor beside, the add's refusals
+ * asked before the upload and again after it, and a first op that makes the
+ * floor with the file's own settings (scenes/floorSource.ts).
  */
 
-export type ImportTarget = { kind: "scene" } | { kind: "phase"; sceneId: string };
+export type { ImportTarget };
 
 type Step =
   | { k: "reading"; progress: Progress | null }
@@ -80,26 +96,41 @@ const READING_TEXT: Record<Progress["stage"], string> = {
   resizing: "Resizing the map image…",
 };
 
-export function ImportDialog(props: { file: File; target: ImportTarget; device: Device; onClose(): void }) {
+export function ImportDialog(props: {
+  file: File;
+  target: ImportTarget;
+  device: Device;
+  onClose(): void;
+  /** A floor's import ended complete with the dialog open: the Floors group opens the floor's page on its name. */
+  onFloor?(floorId: string): void;
+}) {
   const actions = useRoomActions();
   const store = useRoomStore();
   const ui = useRoomUi();
   const roomId = useRoomView((s) => s.roomId);
   const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
   const phaseScene = useRoomView((s) => (props.target.kind === "phase" ? s.view?.scenes[props.target.sceneId] : undefined));
+  const floorTarget = props.target.kind === "floor" ? props.target : null;
+  /** The floor beside the new one, which Like copies and the words name. */
+  const beside = useRoomView((s) => (floorTarget ? s.view?.scenes[floorTarget.beside] : undefined));
   const [file, setFile] = useState(props.file);
   const [step, setStep] = useState<Step>({ k: "reading", progress: null });
   const [read, setRead] = useState<Read | null>(null);
-  const [name, setName] = useState(() => sceneNameOf(props.file));
+  const [name, setName] = useState(() => importName(props.file.name, props.target));
   const [objects, setObjects] = useState(true);
   const [portals, setPortals] = useState<ImportOptions["portals"]>("window");
   const setting = useRoomView((s) => s.view?.meta.settings.newScenePlayers);
   const shape = useRoomView((s) => shapeNote(s.view?.meta.settings.newScenes));
-  const current = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId] : undefined));
+  const onScreen = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId] : undefined));
+  // A floor's Like is the floor beside it, named for the floor: "Like Ground floor". A scene's one floor takes that name with its first add.
+  const besideName = beside?.floor?.name ?? GROUND_FLOOR;
+  const current = floorTarget ? (beside ? { ...beside, name: besideName } : undefined) : onScreen;
   /** The DM's pick of Players see. Until there is one, Explore for a map that brings lights, else the room's default for an import. */
   const [seen, setSeen] = useState<PlayersSeeValue | null>(null);
   /** The DM's pick of the scene's light level. Until there is one, the file's proposal, else Bright. */
   const [light, setLight] = useState<LightLevel | null>(null);
+  /** A light picked in the row or by the lead since Like was picked, which a floor then sends whole (rules.ts `importSight`). */
+  const [lightTouched, setLightTouched] = useState(false);
   const [converting, setConverting] = useState(false);
   /** The options the plan on screen was worked out with. */
   const [planKey, setPlanKey] = useState<string | null>(null);
@@ -107,6 +138,8 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
   const abortRef = useRef<AbortController | null>(null);
   const mounted = useRef(true);
   const options: ImportOptions = { objects, portals, feetPerCell };
+  // A string, so a target object made afresh by each render of the opener never starts the worker over.
+  const kind = workerKind(props.target);
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
@@ -129,10 +162,11 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
     // Players see and light start from each file's own proposal, so a pick made for a file that failed never stands over the next.
     setSeen(null);
     setLight(null);
+    setLightTouched(false);
     setStep({ k: "reading", progress: null });
     let preview: string | null = null;
     const asked = optionsRef.current;
-    worker.read(file, props.device, props.target.kind, asked).then(
+    worker.read(file, props.device, kind, asked).then(
       (result) => {
         if (workerRef.current !== worker) return;
         preview = URL.createObjectURL(result.info.image.blob);
@@ -148,13 +182,13 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
     return () => {
       if (preview) URL.revokeObjectURL(preview);
     };
-  }, [file, props.device, props.target.kind]);
+  }, [file, props.device, kind]);
 
   // The walls change with the options, so the counts are worked out again. A change made meanwhile runs once that finishes.
   const optionsKey = JSON.stringify(options);
   useEffect(() => {
     const worker = workerRef.current;
-    if (!read || !worker || props.target.kind !== "scene" || converting || planKey === null || planKey === optionsKey) return;
+    if (!read || !worker || kind !== "scene" || converting || planKey === null || planKey === optionsKey) return;
     setConverting(true);
     worker.convert(optionsRef.current).then(
       (result) => {
@@ -169,7 +203,7 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
         setStep({ k: "failed", error: errorText(err), back: false });
       },
     );
-  }, [read, converting, planKey, optionsKey, props.target.kind]);
+  }, [read, converting, planKey, optionsKey, kind]);
 
   const busy = step.k === "image" || step.k === "upload" || step.k === "walls" || step.k === "checking";
   const phase = props.target.kind === "phase";
@@ -182,7 +216,7 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
 
   const pickAnother = (next: File) => {
     abortRef.current?.abort();
-    setName(sceneNameOf(next));
+    setName(importName(next.name, props.target));
     setFile(next);
   };
 
@@ -224,7 +258,7 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
    * the dialog and went to another scene has moved on: the new scene does
    * not pull them away, and a toast says how it ended.
    */
-  const finish = async (scene: SceneInput, plan: ImportPlan, answers: Answers, startScene: string | null) => {
+  const finish = async (scene: SceneInput, plan: ImportPlan, answers: Answers, startScene: string | null, floor: { name: string; scene: string } | null) => {
     const id = scene.id;
     const exists = () => store.getState().view?.scenes[id] !== undefined;
     const mayOpen = () => mounted.current || !movedOn(startScene, store.getState(), id);
@@ -243,7 +277,7 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
     }
     const outcome = importOutcome(answers, { exists: exists(), contents }, sentContents(plan));
     if (outcome.k === "complete" && mayOpen()) open();
-    const { text, tone } = outcomeText(outcome, scene.name, opened);
+    const { text, tone } = floor ? floorOutcomeText(outcome, store.getState().view?.scenes[id]?.floor?.name ?? floor.name, floor.scene, opened) : outcomeText(outcome, scene.name, opened);
     if (!mounted.current) {
       ui.notify(text, tone);
       return;
@@ -253,23 +287,39 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
       return;
     }
     if (outcome.checked) ui.notify(text, tone);
+    if (floor) props.onFloor?.(id);
     props.onClose();
+  };
+
+  /** Why the floor cannot be added now, on the latest view, or null: a scene or a phase is never refused here. */
+  const floorRefusal = (): string | null => {
+    const view = store.getState().view;
+    return floorTarget && view ? floorAddRefusal(view, floorTarget) : null;
   };
 
   const createScene = () =>
     run(async (signal) => {
       const plan = read?.plan;
       if (!read || !plan) return;
+      // A floor's add is asked before the upload and again once it answers, so a change made meanwhile that refuses it sends nothing (3.6).
+      const early = floorRefusal();
+      if (early) throw new Error(early);
       // Like holds its scene by id through the upload, and reads it after (create.ts `pickNow`).
       const intent = newSceneIntent(picked.seen, current);
       const asset = await uploadImage(signal);
       const map = placeMap(plan, { assetId: asset.id, width: asset.width, height: asset.height, fileImageWidth: read.info.image.width });
       if (!map) throw new Error(GRID_PROBLEM);
+      const late = floorRefusal();
+      if (late) throw new Error(late);
       const level = picked.light;
       const { pick, gone } = pickNow(intent, store.getState().view, "uvtt");
       if (gone) ui.notify(gone);
       const scene = withPlayersSee(importScene(plan, map, { id: actions.newId(), name, light: level }), pick, level);
       const ops = importOps(scene, plan, actions.newId);
+      // The floor's add in place of the scene's, the rest unchanged: Like untouched sends no fog or vision, any other pick all of it.
+      if (floorTarget) ops[0] = floorCreateOf(scene, floorTarget, name, importSight(picked.seen, lightTouched));
+      const sentName = floorNameOf(name);
+      const floor = floorTarget ? { name: sentName === "" ? NEW_FLOOR : sentName, scene: store.getState().view?.scenes[floorTarget.beside]?.name ?? beside?.name ?? "" } : null;
       // One undo group, so one undo takes the whole scene back (design 7.7).
       const group = actions.newId();
       // The dialog covers the room, so the DM can go to another scene only once it is hidden.
@@ -288,7 +338,7 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
           if (actions.dispatch(op, { group, groupScope: "setup", onAnswer: settle }) === null) settle("refused");
         }
       });
-      await finish(scene, plan, answers, startScene);
+      await finish(scene, plan, answers, startScene, floor);
     });
 
   const addAsPhase = () =>
@@ -307,11 +357,12 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
 
   const shapeProblem = phase && read && phaseScene ? earlyShapeProblem(phaseScene, { ...read.info.image, resize: read.info.resize }) : null;
   const canCreate = !!read && !busy && !converting && (phase ? !shapeProblem && !!phaseScene : !!read.plan && planKey === optionsKey);
-  const primaryLabel = phase ? (busy ? "Adding…" : `Add as a phase of ${phaseScene?.name ?? "the scene"}`) : busy ? "Creating…" : "Create scene";
+  const primaryLabel = phase ? (busy ? "Adding…" : `Add as a phase of ${phaseScene?.name ?? "the scene"}`) : floorTarget ? (busy ? "Adding…" : "Add the floor") : busy ? "Creating…" : "Create scene";
+  const title = phase ? "Add a phase from a Universal VTT file" : floorTarget ? `Import a floor ${floorTarget.side} ${besideName}` : "Import a Universal VTT map";
 
   return (
     <Dialog
-      title={phase ? "Add a phase from a Universal VTT file" : "Import a Universal VTT map"}
+      title={title}
       onClose={props.onClose}
       width="lg"
       phone="fill"
@@ -345,7 +396,8 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
           <Summary
             read={read}
             phase={phase}
-            shape={shape}
+            floor={floorTarget !== null}
+            shape={floorTarget ? null : shape}
             name={name}
             onName={setName}
             disabled={busy}
@@ -358,6 +410,7 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
                   onPick={() => {
                     setSeen(lead.to.seen);
                     setLight(lead.to.light);
+                    setLightTouched(true);
                   }}
                 />
               ) : null
@@ -377,9 +430,14 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
                     setSeen(v);
                     // Like brings the scene's light too, which the light row then shows and the DM can still change.
                     if (v === "like" && current) setLight(lightOf(current));
+                    setLightTouched(false);
                   }}
                   light={picked.light}
-                  onLight={setLight}
+                  onLight={(v) => {
+                    setLight(v);
+                    setLightTouched(true);
+                  }}
+                  perPlayerNote={floorTarget && beside?.vision?.perPlayer && picked.seen !== "like" ? perPlayerNote(besideName) : null}
                   why={why}
                   disabled={busy}
                 />
@@ -389,15 +447,10 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
             converting={converting}
           />
         ) : null}
-        <CreateProgress step={step} />
+        <CreateProgress step={step} floor={floorTarget !== null} />
       </div>
     </Dialog>
   );
-}
-
-/** "crypt_level-2.dd2vtt" becomes "crypt level 2". The format's extensions are longer than nameFromFile strips. */
-function sceneNameOf(file: File): string {
-  return nameFromFile(file.name.replace(/\.(dd2vtt|uvtt|df2vtt)$/i, ""));
 }
 
 /** An upload's own wording for server answers, the worker's sentence for everything else. */
@@ -431,7 +484,7 @@ function ReadingProgress(props: { progress: Progress | null }) {
   );
 }
 
-function CreateProgress(props: { step: Step }) {
+function CreateProgress(props: { step: Step; floor: boolean }) {
   const { step } = props;
   if (step.k === "image") return <Loading delay={0} text="Getting the map image ready…" />;
   if (step.k === "upload") {
@@ -451,13 +504,15 @@ function CreateProgress(props: { step: Step }) {
       </div>
     );
   }
-  if (step.k === "checking") return <Loading delay={0} text="Checking the new scene…" detail="The connection dropped while the walls were sent." />;
+  if (step.k === "checking") return <Loading delay={0} text={props.floor ? "Checking the new floor…" : "Checking the new scene…"} detail="The connection dropped while the walls were sent." />;
   return null;
 }
 
 function Summary(props: {
   read: Read;
   phase: boolean;
+  /** A floor's import: the name field names the floor and holds a floor name's 40 characters. */
+  floor: boolean;
   /** Why the scene is made on squares, in a room whose new scenes start on hexes. */
   shape: string | null;
   name: string;
@@ -480,7 +535,13 @@ function Summary(props: {
         alt="The map's image"
         style={{ display: "block", width: "100%", maxHeight: 220, objectFit: "contain", borderRadius: theme.radius.md, background: theme.color.bg }}
       />
-      <Field label={props.phase ? "Phase name" : "Scene name"} value={props.name} maxLength={80} disabled={props.disabled} onChange={(e) => props.onName(e.target.value)} />
+      <Field
+        label={props.phase ? "Phase name" : props.floor ? "Floor name" : "Scene name"}
+        value={props.name}
+        maxLength={props.floor ? LIMITS.floorNameChars : 80}
+        disabled={props.disabled}
+        onChange={(e) => props.onName(e.target.value)}
+      />
       <p style={{ margin: 0, color: theme.color.textMuted }}>
         {frame ? `${count(frame.w)} × ${count(frame.h)} squares, ` : ""}
         {count(read.info.image.width)} × {count(read.info.image.height)} pixels
@@ -543,6 +604,8 @@ export function Options(props: {
   /** The file's proposal, while the DM's pick is still it. */
   why: LightProposal | null;
   disabled: boolean;
+  /** Under Players see on a floor beside a per-player floor: a preset keeps each player's own sight (3.6). */
+  perPlayerNote?: string | null;
 }) {
   const portalsId = useId();
   return (
@@ -574,6 +637,7 @@ export function Options(props: {
         disabled={props.disabled}
         onChange={props.onSeen}
       />
+      {props.perPlayerNote ? <Help>{props.perPlayerNote}</Help> : null}
       <UvttLightChoice value={props.light} proposal={props.why} disabled={props.disabled} onChange={props.onLight} />
     </div>
   );

@@ -15,7 +15,11 @@ import {
   addAnswer,
   earlyShapeProblem,
   entryShown,
+  fileSceneName,
+  floorOutcomeText,
+  importName,
   importOutcome,
+  importSight,
   movedOn,
   mustCount,
   NO_ANSWERS,
@@ -24,8 +28,13 @@ import {
   sceneShown,
   sentContents,
   storedContents,
+  workerKind,
   type Answers,
 } from "./rules.ts";
+import { applied, GROUND, tower } from "#shared/floorLinksTestutil.ts";
+import { floorCreateOf } from "../scenes/floorSource.ts";
+import { withPlayersSee } from "../scenes/create.ts";
+import { proposedLight, startingLight } from "../vision/uvttLight.ts";
 import { readUvtt } from "./schema.ts";
 import { uvttFile } from "./synthetic.ts";
 
@@ -265,4 +274,100 @@ describe("the import's entry at the scene limit", () => {
     assert.deepEqual(entryShown(true, true), { picker: false, dialog: true });
     assert.deepEqual(entryShown(true, false), { picker: false, dialog: false });
   });
+});
+
+/*
+ * The import aimed at a floor (docs/design/design-v1-floors.md phase 3,
+ * 3.6): the worker reads it as for a scene, the name starts from the file
+ * cut to a floor name's limit, Like untouched is sent as intent, the light
+ * starts as a new scene from the same file starts, and the words name the
+ * floor.
+ */
+describe("an import aimed at a floor", () => {
+  const FLOOR = { kind: "floor", beside: GROUND, side: "above" } as const;
+
+  test("the worker converts a floor's walls as a scene's, so a change of Objects converts them again, and only a phase is read without them", () => {
+    assert.equal(workerKind(FLOOR), "scene");
+    assert.equal(workerKind({ kind: "scene" }), "scene");
+    assert.equal(workerKind({ kind: "phase", sceneId: "s1" }), "phase");
+  });
+
+  test("a floor's name starts from the file's, cut to 40 code points and trimmed, and a scene's stays whole", () => {
+    const file = "The_Sunken_Temple_of_the_Serpent_Lord_Level_2.dd2vtt";
+    assert.equal(importName(file, FLOOR), "The Sunken Temple of the Serpent Lord Le");
+    assert.equal(importName(file, { kind: "scene" }), fileSceneName(file));
+    assert.equal(fileSceneName(file), "The Sunken Temple of the Serpent Lord Level 2");
+    assert.equal(importName(`${"x".repeat(39)}\u{1F409}tail.uvtt`, FLOOR), `${"x".repeat(39)}\u{1F409}`, "an emoji at the cut stays whole");
+  });
+
+  test("Like with its light untouched is sent as Like, and a light picked since, or any other pick, is sent whole", () => {
+    assert.equal(importSight("like", false), "like");
+    assert.equal(importSight("like", true), "own");
+    assert.equal(importSight("explore", false), "own");
+    assert.equal(importSight("reveal", true), "own");
+  });
+
+  test("the light starts as a new scene from the file starts: dark under party vision with lights, the file's own level when daylit, else the room's default", () => {
+    const plan = planOf();
+    const map = placeMap(plan, { assetId: "crypt.png", width: 700, height: 560, fileImageWidth: 700 })!;
+    assert.ok(map);
+    const floorOp = (proposal: ReturnType<typeof proposedLight>, roomDefault: "explore" | "reveal" | "all") => {
+      const start = startingLight(proposal, roomDefault);
+      if (start.seen === "like") throw new Error("a file never starts on Like");
+      const scene = withPlayersSee(importScene(plan, map, { id: "crypt", name: "Crypt level 2", light: start.light }), { preset: start.seen }, start.light);
+      return floorCreateOf(scene, FLOOR, "Crypt level 2", importSight(start.seen, false));
+    };
+    const lit = floorOp(proposedLight({ baked: false, ambient: null }, 3), "reveal");
+    assert.deepEqual([lit.floor?.own?.fogEnabled, lit.floor?.own?.vision], [true, { on: true, light: "dark", byClock: false }]);
+    const daylit = floorOp(proposedLight({ baked: true, ambient: null }), "all");
+    assert.deepEqual([daylit.floor?.own?.fogEnabled, daylit.floor?.own?.vision], [false, { on: false, light: "bright", byClock: false }]);
+    const plain = floorOp(null, "reveal");
+    assert.deepEqual([plain.floor?.own?.fogEnabled, plain.floor?.own?.vision], [true, { on: false, light: "bright", byClock: false }]);
+    // Beside a floor on Time of day the lit floor starts dark and stays dark: its vision is sent with byClock false.
+    const state = tower();
+    state.scenes[GROUND] = { ...state.scenes[GROUND]!, vision: { on: true, light: "bright", byClock: true } };
+    const made = applied(state, lit).state.scenes.crypt!;
+    assert.deepEqual([made.vision?.light, made.vision?.byClock === true, made.gridFromFile, made.autoWalls], ["dark", false, true, "off"]);
+  });
+
+  test("the outcome names the floor and its scene, and a DM who went elsewhere is told where to pick it", () => {
+    assert.equal(floorOutcomeText({ k: "complete", checked: false }, "Crypt level 2", "Tower", true).text, "Crypt level 2 is added to Tower, with every wall, door and light.");
+    assert.equal(floorOutcomeText({ k: "complete", checked: false }, "Crypt level 2", "Tower", false).text, "Crypt level 2 is added to Tower, with every wall, door and light. Open Tower, then pick Crypt level 2 in Floors.");
+    assert.equal(floorOutcomeText({ k: "none", lost: false }, "Crypt level 2", "Tower", true).text, "The server refused the import, so no floor was added.");
+    assert.equal(floorOutcomeText({ k: "none", lost: true }, "Crypt level 2", "Tower", true).text, "The connection dropped during the import, and no floor was added. Try again.");
+    assert.equal(floorOutcomeText({ k: "partial" }, "Crypt level 2", "Tower", true).text, "The server refused part of the import, so the floor may be missing walls. Undo setup in Setup history takes the whole import back.");
+    assert.equal(
+      floorOutcomeText({ k: "complete", checked: true }, "Crypt level 2", "Tower", true).text,
+      "The connection dropped during the import, but Crypt level 2 is complete: every wall, door and light is in. Undo setup in Setup history takes the whole import back.",
+    );
+    assert.equal(
+      floorOutcomeText({ k: "unconfirmed" }, "Crypt level 2", "Tower", true).text,
+      "The connection dropped during the import, and Crypt level 2 could not be confirmed complete. It may be missing walls, doors or lights. Undo setup in Setup history takes the whole import back.",
+    );
+    assert.equal(
+      floorOutcomeText({ k: "unconfirmed" }, "Crypt level 2", "Tower", false).text,
+      "The connection dropped during the import, and Crypt level 2 could not be confirmed complete. It may be missing walls, doors or lights. Open Tower, then pick Crypt level 2 in Floors. Undo setup in Setup history takes the whole import back.",
+    );
+    for (const k of ["none", "partial", "unconfirmed"] as const) assert.equal(floorOutcomeText(k === "none" ? { k, lost: false } : { k }, "Crypt", "Tower", true).tone, "error");
+  });
+});
+
+/*
+ * The dialog's order of work on a floor (3.6): the add's refusals asked on
+ * the latest view before the upload and again once it answers, before any
+ * op, and the floor's add in place of the scene's.
+ */
+test("FL3S: a floor's import asks its refusals before the upload and again after it, then sends the floor's add first", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("./ImportDialog.tsx", import.meta.url), "utf8");
+  const create = source.slice(source.indexOf("const createScene = () =>"), source.indexOf("const addAsPhase = () =>"));
+  const upload = create.indexOf("await uploadImage(signal)");
+  const early = create.indexOf("const early = floorRefusal();");
+  const late = create.indexOf("const late = floorRefusal();");
+  assert.ok(early >= 0 && early < upload, "asked before the upload");
+  assert.ok(late > upload && late < create.indexOf("importOps("), "asked again after it, before any op");
+  assert.match(create, /if \(early\) throw new Error\(early\);/);
+  assert.match(create, /if \(late\) throw new Error\(late\);/);
+  assert.match(create, /if \(floorTarget\) ops\[0\] = floorCreateOf\(scene, floorTarget, name, importSight\(picked\.seen, lightTouched\)\);/);
+  assert.match(source, /floorAddRefusal\(view, floorTarget\)/);
 });
