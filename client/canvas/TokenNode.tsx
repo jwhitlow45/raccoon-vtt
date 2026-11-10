@@ -8,12 +8,13 @@ import { shownLife } from "#shared/rules/hp.ts";
 import { boardSizes } from "../lib/boardScale.ts";
 import { isAppleDevice } from "../lib/device.ts";
 import { lineHeight, type LabelLine } from "../lib/boardText.ts";
-import { displayName, drawnAt, footprint, hexFootprintOutline, rulesOutline, type ViewToken } from "../lib/scene.ts";
+import { drawnAt, footprint, hexFootprintOutline, rulesOutline, type ViewToken } from "../lib/scene.ts";
 import { gridOfShape } from "#shared/rules/grid.ts";
 import { boardTheme, theme } from "../lib/theme.ts";
-import { BOARD_DISPOSITION_RING, cropSourceRect, DECOR_MIN_PX, effectChip, effectCount, initials, type Chip } from "../lib/tokenView.ts";
+import { BOARD_DISPOSITION_RING, cropSourceRect, DECOR_MIN_PX, effectChip, effectCount, type Chip } from "../lib/tokenView.ts";
 import { useAccent } from "../state/accent.ts";
 import { localDragSlot } from "../state/localDrags.ts";
+import { useInitials } from "../state/labels.ts";
 import { useScoped } from "../state/scope.ts";
 import { addsToSelection } from "../state/selection.ts";
 import { useAssets, useRoomView } from "../state/view.ts";
@@ -139,7 +140,7 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
   const character = useRoomView((s) => ("ref" in token.actor ? s.floorView?.characters[token.actor.ref] : undefined));
   const actor: Partial<Actor> | undefined = "inline" in token.actor ? token.actor.inline : character?.actor;
   const fp = footprint(token);
-  const name = displayName(token);
+  const face = useInitials(token);
   const gridShape = useRoomView((s) => s.floorView?.scenes[token.sceneId]?.gridShape);
   const hexes = useSelectedHexes(gridShape, token, selected);
   // The node sits where the token is drawn, its stored spot moved by its nudge (snap-off 6.2), so its picture, decor and hit area move together.
@@ -200,7 +201,7 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
               w={fp.w}
               h={fp.h}
               scale={scale}
-              name={name}
+              face={face}
               active={active}
               selected={selected}
               hexes={hexes}
@@ -211,19 +212,19 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
         ) : props.inset ? (
           <>
             <Group x={(fp.w * (1 - COVER_INSET)) / 2} y={(fp.h * (1 - COVER_INSET)) / 2} scaleX={COVER_INSET} scaleY={COVER_INSET} listening={!holes}>
-              <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale * COVER_INSET} name={name} active={active} selected={selected} />
+              <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale * COVER_INSET} face={face} active={active} selected={selected} />
             </Group>
             {holes ? <PressArea w={fp.w} h={fp.h} inset holes={holes} /> : null}
           </>
         ) : holes ? (
           <>
             <Group listening={false}>
-              <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} hexes={hexes} />
+              <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} face={face} active={active} selected={selected} hexes={hexes} />
             </Group>
             <PressArea w={fp.w} h={fp.h} inset={false} holes={holes} />
           </>
         ) : (
-          <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} hexes={hexes} />
+          <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} face={face} active={active} selected={selected} hexes={hexes} />
         )}
         {props.decor && !iso ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
       </Group>
@@ -341,7 +342,7 @@ export function clipToOpenings(ctx: Pick<Konva.Context, "save" | "translate" | "
  * its own decor (`decor`), upright on the box the overlay lays it out on
  * (standee.ts frame), so it travels with the standee in the drag layer.
  */
-function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; name: string; active: boolean; selected: boolean; hexes: SelectedHexes | null; iso: IsoToken; decor?: ReactNode }) {
+function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; face: Face; active: boolean; selected: boolean; hexes: SelectedHexes | null; iso: IsoToken; decor?: ReactNode }) {
   const { token, w, h, scale, iso } = props;
   // Drawn from the capped base the layout read, so the art is where it culls, decorates and casts silhouettes.
   const parts = standeeParts(iso.turn, iso.drawn, iso.ground, { w, h }, iso);
@@ -371,7 +372,7 @@ function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w
         <Group x={w / 2} y={h / 2} rotation={upright.rotation} scaleY={upright.scaleY}>
           {parts.stem > 0 ? <Line points={[0, 0, 0, parts.stem]} stroke={theme.relief.stem} strokeWidth={1} strokeScaleEnabled={false} dash={iso.capped ? [6 / scale, 4 / scale] : undefined} listening={false} /> : null}
           <Group x={parts.art.x} y={parts.art.y} scaleX={parts.art.scale} scaleY={parts.art.scale}>
-            <TokenBody token={token} actor={props.actor} w={w} h={h} scale={scale * parts.art.scale} name={props.name} upright />
+            <TokenBody token={token} actor={props.actor} w={w} h={h} scale={scale * parts.art.scale} face={props.face} upright />
           </Group>
           {props.decor ? (
             <Group x={-w / 2} y={-h - iso.rise} listening={false}>
@@ -413,12 +414,12 @@ function PressArea(props: { w: number; h: number; inset: boolean; holes: readonl
 }
 
 /** The token's own picture: its shadow, its body and the rings that mark it active or selected. */
-function TokenFace(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; name: string; active: boolean; selected: boolean; hexes?: SelectedHexes | null }) {
-  const { token, actor, w, h, scale, name } = props;
+function TokenFace(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; face: Face; active: boolean; selected: boolean; hexes?: SelectedHexes | null }) {
+  const { token, actor, w, h, scale, face } = props;
   return (
     <>
       <TokenShadow token={token} w={w} h={h} />
-      <TokenBody token={token} actor={actor} w={w} h={h} scale={scale} name={name} />
+      <TokenBody token={token} actor={actor} w={w} h={h} scale={scale} face={face} />
       {props.active ? <Outline w={w} h={h} scale={scale} gapPx={7} color={boardTheme.color.accentSoft} widthPx={3} /> : null}
       {props.selected ? <SelectedOutline w={w} h={h} scale={scale} hexes={props.hexes ?? null} /> : null}
     </>
@@ -473,7 +474,7 @@ function DecorParts(props: DecorProps & {
     <Group scaleX={1 / scale} scaleY={1 / scale}>
       {marks && text.marks ? <TopDecor effects={props.effects} marks={text.marks} /> : null}
       {marks && text.notch ? <BloodiedNotch notch={text.notch} /> : null}
-      {marks && text.numberBadge && token.number !== undefined ? <NumberBadge widthPx={text.widthPx} heightPx={text.heightPx} number={token.number} px={sizes.numberPx} /> : null}
+      {marks && text.numberBadge ? <NumberBadge widthPx={text.widthPx} heightPx={text.heightPx} number={text.numberBadge.number} preview={text.numberBadge.preview} px={sizes.numberPx} /> : null}
       {marks && text.marks?.lock && props.lockMark && token.locked ? <LockMark place={text.marks.lock} /> : null}
       {marks && text.marks?.ac ? <AcMark ac={text.marks.ac} /> : null}
       {marks && text.marks?.bar && text.hp.kind === "bar" ? <HpBar box={text.marks.bar} fraction={text.hp.fraction} /> : null}
@@ -544,17 +545,35 @@ function BloodiedNotch(props: { notch: Notch }) {
   return <Line points={props.notch.points} closed fill={boardTheme.color.warning} stroke={boardTheme.color.textHalo} strokeWidth={props.notch.strokeWidth} lineJoin="round" />;
 }
 
-/** A numbered picture token's number, in its bottom right corner, when its name has given way. */
-function NumberBadge(props: { widthPx: number; heightPx: number; number: number; px: number }) {
+/**
+ * A numbered picture token's number, in its bottom right corner, when its
+ * name has given way. A DM's preview is outlined instead of filled, in the
+ * same box, its number haloed so it reads over the picture (D-261110-303).
+ * Named for the e2e.
+ */
+function NumberBadge(props: { widthPx: number; heightPx: number; number: number; preview: boolean; px: number }) {
   const text = String(props.number);
   const d = Math.ceil(props.px + 6);
   const width = numberBadgeWidth(props.number, props.px);
   const x = props.widthPx - width;
   const y = props.heightPx - d;
   return (
-    <Group x={x} y={y}>
-      <Rect width={width} height={d} cornerRadius={d / 2} fill={boardTheme.color.surfaceRaised} stroke={boardTheme.color.text} strokeWidth={1} />
-      <Text text={text} width={width} height={d} align="center" verticalAlign="middle" fontSize={props.px} fontFamily={LABEL_FAMILY} fontStyle="700" fill={boardTheme.color.text} />
+    <Group name={props.preview ? "number-badge-preview" : "number-badge"} x={x} y={y}>
+      <Rect width={width} height={d} cornerRadius={d / 2} fill={props.preview ? undefined : boardTheme.color.surfaceRaised} stroke={boardTheme.color.text} strokeWidth={1} dash={props.preview ? [3, 2] : undefined} />
+      <Text
+        text={text}
+        width={width}
+        height={d}
+        align="center"
+        verticalAlign="middle"
+        fontSize={props.px}
+        fontFamily={LABEL_FAMILY}
+        fontStyle="700"
+        fill={boardTheme.color.text}
+        stroke={props.preview ? boardTheme.color.textHalo : undefined}
+        strokeWidth={props.preview ? 3 : 0}
+        fillAfterStrokeEnabled={props.preview}
+      />
     </Group>
   );
 }
@@ -589,11 +608,12 @@ export const TokenGhost = memo(function TokenGhost(props: {
   const character = useRoomView((s) => ("ref" in token.actor ? s.floorView?.characters[token.actor.ref] : undefined));
   const actor: Partial<Actor> | undefined = "inline" in token.actor ? token.actor.inline : character?.actor;
   const fp = footprint(token);
+  const face = useInitials(token);
   const clip = props.clip;
   if (props.iso) {
     return (
       <Group x={x} y={y} opacity={theme.relief.ghostOpacity} listening={false}>
-        <Standee token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={displayName(token)} active={false} selected={false} hexes={null} iso={props.iso} />
+        <Standee token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} face={face} active={false} selected={false} hexes={null} iso={props.iso} />
       </Group>
     );
   }
@@ -613,7 +633,7 @@ export const TokenGhost = memo(function TokenGhost(props: {
       }
     >
       <TokenShadow token={token} w={fp.w} h={fp.h} at={{ x, y }} />
-      <TokenBody token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={displayName(token)} />
+      <TokenBody token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} face={face} />
       <Outline w={fp.w} h={fp.h} scale={scale} gapPx={3} color={color} widthPx={3} />
     </Group>
   );
@@ -625,11 +645,11 @@ function TokenBody(props: {
   w: number;
   h: number;
   scale: number;
-  name: string;
+  face: Face;
   /** A standee's art, which its rotation never turns (ISO-D4): a turned figure reads as a fallen one. */
   upright?: boolean;
 }) {
-  const { token, actor, w, h, scale, name } = props;
+  const { token, actor, w, h, scale, face } = props;
   const assets = useAssets();
   const upload = token.image && isAssetImage(token.image) ? token.image : undefined;
   // A shipped icon is a disk of its color with the glyph on it, initials until its file arrives (docs/design/design-v1-dm-tools.md 3.12).
@@ -673,8 +693,9 @@ function TokenBody(props: {
       </Group>
       {!drawn && w * scale >= DECOR_MIN_PX ? (
         <Group scaleX={1 / scale} scaleY={1 / scale} listening={false}>
+          {/* A DM's preview is drawn hollow in the same box, so "G3" never reads as a number the table gave (D-261110-303). */}
           <Text
-            text={initials(name)}
+            text={face.text}
             x={(-w * scale) / 2}
             y={(-h * scale) / 2}
             width={w * scale}
@@ -685,6 +706,9 @@ function TokenBody(props: {
             fontFamily={LABEL_FAMILY}
             fontStyle="600"
             fill={icon ? glyphColor(icon.color) : boardTheme.color.text}
+            fillEnabled={!face.preview}
+            stroke={face.preview ? (icon ? glyphColor(icon.color) : boardTheme.color.text) : undefined}
+            strokeWidth={face.preview ? 1 : 0}
           />
         </Group>
       ) : null}
@@ -739,6 +763,9 @@ function IconGlyph(props: { iconKey: string; d: string; side: number; color: str
  * so a drag moves it with the token. Null on squares or while unselected.
  */
 type SelectedHexes = { points: number[] };
+
+/** A token's initials as its body draws them (tokenView.ts initialsOf): hollow for a DM's preview. */
+type Face = { text: string; preview: boolean };
 
 function useSelectedHexes(gridShape: GridShape | undefined, token: ViewToken, selected: boolean): SelectedHexes | null {
   const { x, y, size, w, h } = token;

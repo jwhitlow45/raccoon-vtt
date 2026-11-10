@@ -3,6 +3,7 @@ import { isAssetImage } from "#shared/imageRef.ts";
 import type { ImageRef } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { theme } from "../../lib/theme.ts";
+import type { Initials } from "../../lib/tokenView.ts";
 import { useRoomView } from "../../state/view.ts";
 import { DEFAULT_CROP, type Crop } from "./crop.ts";
 import { CreditLine } from "./CreditLine.tsx";
@@ -38,7 +39,7 @@ export function ImageField(props: {
   canEdit: boolean;
   ring?: string;
   /** Shown when there is no image. */
-  initials?: string;
+  initials?: Initials;
   /** The preview's width. The token panel's row is compact (docs/design/design-v1-token-panel.md 3.6). */
   previewSize?: number;
   /**

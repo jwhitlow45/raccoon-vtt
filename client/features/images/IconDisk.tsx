@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { ImageRef } from "#shared/model.ts";
 import { theme } from "../../lib/theme.ts";
+import { initialsLook, type Initials } from "../../lib/tokenView.ts";
 import { CroppedImage, ringStyle } from "./CropEditor.tsx";
 import { glyphColor, glyphSide, iconUrl, useIconGlyph } from "./icons.ts";
 
@@ -89,12 +90,16 @@ export function ImagePreview(props: {
   aspect: number;
   width: number;
   ring?: string;
-  initials?: string;
+  /** A token's preview initials draw outlined (tokenView.ts initialsOf). */
+  initials?: Initials;
 }) {
   const { image, width, shape } = props;
   const height = width / props.aspect;
+  const letters = typeof props.initials === "object" ? props.initials : { text: props.initials ?? "", preview: false };
   const initials = (
-    <span style={{ fontWeight: theme.weight.bold, fontSize: Math.max(9, Math.round(Math.min(width, height) * 0.32)), lineHeight: 1 }}>{props.initials ?? ""}</span>
+    <span data-initials={letters.preview ? "preview" : ""} style={{ fontWeight: theme.weight.bold, fontSize: Math.max(9, Math.round(Math.min(width, height) * 0.32)), lineHeight: 1, ...initialsLook(letters.preview) }}>
+      {letters.text}
+    </span>
   );
   if (image && "assetId" in image) {
     return <CroppedImage assetId={image.assetId} crop={image.crop} shape={shape} aspect={props.aspect} width={width} ring={props.ring} />;
