@@ -156,7 +156,7 @@ Tiers:
 - Dungeon generator.
   - Phase 1 is built (docs/design/design-v1-dungeon-generator.md). New scene's Builder form offers Generate a dungeon, which makes a whole Builder scene on squares: Dungeon and Crypt themes, rooms and corridors, doors, stairs to raised and sunk rooms, and four of the SRD's example traps, with a preview, Reroll and a seed. It lands as ordinary builder changes in one Setup step, so it adds no op and no stored field.
   - Phase 2 is built. The dialog adds the Cave, Mine and Sewer themes, Dead ends, Secret doors (with secret rooms), Lit rooms with their SRD lights and a Keep it lit choice, Dressing from the shipped stamps, and a DM key: a DM-only journal page of numbered rooms with a trinket each, and a numbered pin in each room. The generator also places a Collapsing Roof, Poisoned Darts, a Fire-Casting Statue and a Rolling Stone, and the preview gains Look closer. It still adds no op or stored field of its own.
-  - Still Later: per-room edits in the preview, then hexes and adding a wing to an existing scene (phase 3).
+  - Phase 3 is built. Generate a dungeon works on Hex rows and Hex columns, its rooms drawn in wall lines, Add a wing in the Map builder generates rooms into an empty part of an existing scene, joined at a wall the DM taps, and Edit rooms in the preview sets one room's height, doors, trap, dressing and light. It adds no op or stored field either.
 
 ## 4. Grid and measurement
 

@@ -21,7 +21,7 @@ are the ones [mvp.md](docs/design/mvp.md) lists today:
 - Join requests that the DM approves.
 - Several floors in one scene. Phases 1 and 2 are built: floors in a scene, a Floor button and menu, Move to floor for the DM, and stairs and ladders that players take themselves. Openings and falls, Universal VTT files onto a floor and sight between floors come next.
 - Animated maps. They are built, behind a switch the server's owner turns on.
-- A dungeon generator. It is built on squares, with five themes, secret doors, lights, dressing and a DM key. Edits to single rooms in the preview, hexes and adding a wing to an existing scene come next.
+- A dungeon generator. It is built, on squares and hexes, with five themes, secret doors, lights, dressing, a DM key, edits to single rooms and adding a wing to an existing scene.
 - Weather overlays.
 - Ambient music and sound effects, kept in sync for everyone.
 - An in-game calendar and time of day.
