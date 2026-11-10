@@ -1410,6 +1410,25 @@ async function dungeonScreens(sweep: Sweep, page: Page, size: Size, scale: numbe
       await viewer.getByRole("button", { name: /^Close/ }).first().click();
       await viewer.waitFor({ state: "detached" });
     } else await sweep.missing(page, "dungeon-look-closer", "Look closer never opened its picture");
+    // DG3 (dungeon generator phase 3, 4.1): the room panel in the choices' place, then the edits line under the seed once a room is edited.
+    const editRooms = dialog.getByRole("button", { name: "Edit rooms", exact: true });
+    if (await showsWithin(editRooms.and(dialog.locator("button:not([disabled])")), 30_000)) {
+      await editRooms.click();
+      const roomPanel = dialog.getByRole("region", { name: /^Room \d+$/ });
+      await roomPanel.waitFor();
+      await sweep.measure(page, "dungeon-room-panel", roomPanel);
+      await shots.take(page, `alignment-${sweep.at}-dungeon-room-panel`);
+      // The edit flips the room's light, whichever way the plan left it, so it always makes an edit.
+      const lit = roomPanel.getByRole("radiogroup", { name: "Lit", exact: true });
+      const on = await lit.getByRole("radio", { name: "On", exact: true }).isChecked();
+      await lit.getByRole("radio", { name: on ? "Off" : "On", exact: true }).check();
+      await roomPanel.getByRole("button", { name: "Done", exact: true }).click();
+      const line = dialog.locator("[data-edits-line]");
+      await line.scrollIntoViewIfNeeded();
+      await sweep.measure(page, "dungeon-edits-line", line);
+      await line.getByRole("button", { name: "Drop edits", exact: true }).click();
+      await line.waitFor({ state: "detached" });
+    } else await sweep.missing(page, "dungeon-room-panel", "Edit rooms never came on");
     await dialog.getByRole("radio", { name: "Medium", exact: true }).click();
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await dialog.waitFor({ state: "detached" });
@@ -1417,6 +1436,7 @@ async function dungeonScreens(sweep: Sweep, page: Page, size: Size, scale: numbe
   } finally {
     await escapeAll(page);
   }
+  await wingScreens(sweep, page);
 }
 
 /** The sizes where the sweep measures animated maps' screens: the phones upright and sideways, the tablet and the computer. */
@@ -6863,6 +6883,73 @@ async function builderScreens(sweep: Sweep, page: Page): Promise<void> {
   await stepper.getByText("1 square", { exact: true }).filter({ visible: true }).first().waitFor();
   await escapeAll(page);
   await pickTool(page, "Select");
+}
+
+/** DG3 (dungeon generator phase 3, 3.1 and 3.3): a stone room on a scene of its own, where Add a wing's row and pane are measured. */
+let wingKeepId: string | null = null;
+const WING_KEEP = { w: 40, h: 30 };
+
+async function wingKeepScene(): Promise<string> {
+  if (wingKeepId) return wingKeepId;
+  const id = randomUUID();
+  await ops.send({ t: "scene.create", scene: { id, name: "Wing keep", bounds: WING_KEEP, fogEnabled: false } });
+  await ops.send({ t: "build.rect", sceneId: id, terrain: "stone", x: 4, y: 4, w: 9, h: 9 });
+  await waitFor("the wing keep", () => dmSocket.state?.scenes[id] ?? null);
+  wingKeepId = id;
+  return id;
+}
+
+/** Add a wing's row with its area and join set, then the wing pane docked or as a sheet, on the wing keep, and back to the scene before. */
+async function wingScreens(sweep: Sweep, page: Page): Promise<void> {
+  const before = dmSocket.you?.sceneId ?? null;
+  const keep = await wingKeepScene();
+  await closeSheets(page);
+  await escapeAll(page);
+  const scenes = await openPanel(page, "Scenes");
+  await viewScene(scenes, keep);
+  await closeSheets(page);
+  await escapeAll(page);
+  try {
+    await pickTool(page, "Map builder");
+    await pickOption(page, "Map builder", "Builder mode", "Add a wing");
+    const bar = page.getByRole("toolbar", { name: "Map builder options" });
+    await bar.getByRole("button", { name: /^Builder mode: Add a wing/ }).waitFor();
+    await page.getByRole("button", { name: "Fit the map to the screen" }).click();
+    await dragCells(page, WING_KEEP, { x: 18, y: 4 }, { x: 37, y: 25 });
+    // The room's east wall itself, on the grid line: a cell's middle lies as near its floor edges as the wall.
+    const wall = await pagePoint(page, WING_KEEP, { x: 13, y: 8.5 });
+    await page.mouse.click(wall.x, wall.y);
+    // The line says the area and join took. Generate a wing stands in the row, or in ⋯ where a narrow row has no room for it.
+    if (!(await showsWithin(page.locator('[data-options-line="shown"]').filter({ hasText: "joined at the ringed wall" }).first(), 5_000))) {
+      const said = await page.locator('[data-options-line="shown"]').first().innerText().catch(() => "");
+      await sweep.missing(page, "builder-wing-row", `the area and join never took: ${said}`);
+      return;
+    }
+    await sweep.measure(page, "builder-wing-row", bar);
+    const inRow = bar.getByRole("button", { name: "Generate a wing", exact: true });
+    if ((await inRow.count()) > 0 && (await inRow.first().isVisible())) await inRow.first().click();
+    else {
+      await bar.getByRole("button", { name: "More options" }).click();
+      await page.getByRole("dialog", { name: "More Map builder options" }).getByRole("button", { name: "Generate a wing", exact: true }).click();
+    }
+    const pane = page.locator("[data-wing-pane]");
+    if (!(await showsWithin(pane.getByRole("status").filter({ hasText: /rooms?\b/ }), 30_000))) {
+      await sweep.missing(page, "builder-wing-pane", "the pane never counted a plan");
+      return;
+    }
+    await sweep.measure(page, "builder-wing-pane", pane);
+    await shots.take(page, `alignment-${sweep.at}-builder-wing-pane`);
+    await escapeAll(page);
+  } finally {
+    await escapeAll(page);
+    await pickTool(page, "Select");
+    if (before && before !== keep) {
+      const back = await openPanel(page, "Scenes");
+      await viewScene(back, before);
+      await closeSheets(page);
+      await escapeAll(page);
+    }
+  }
 }
 
 /**
