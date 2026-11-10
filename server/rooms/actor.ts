@@ -2529,7 +2529,8 @@ export class RoomActor {
       if (wm && wm.committed < n) wm.committed = n;
     }
     if (batch.ops.length > 0) this.#opsSinceSnapshot += batch.ops.length;
-    if (write.snapshot) this.#snapshotWritten(write.snapshot.seq, write.snapshot.json, batch.state);
+    // Its quota check runs without holding the queue, as a deletion step's does.
+    if (write.snapshot) void this.#snapshotStored(write.snapshot.seq, Buffer.byteLength(write.snapshot.json), batch.state).catch((err: unknown) => this.#log.warn({ err, roomId: this.roomId }, "quota recheck failed"));
     release?.();
     // Nothing from here on throws out of the commit: no one awaits it, and the queue waits until its end. The publish is
     // caught here, each owed snapshot and resync on its own socket, and the rest sets timers or drains the queue, which
@@ -2599,7 +2600,7 @@ export class RoomActor {
    * `snapshotIdleMs` or by the next snapshot write. A running snapshot write
    * finishes first, and this one holds `#snapshotting` until its commit
    * ends, so the two never write the row at once. The release it returns
-   * lets go of that hold, and the room records the write (#snapshotWritten)
+   * lets go of that hold, and the room records the write (#snapshotStored)
    * only once the commit is confirmed.
    */
   async #countSnapshot(batch: Batch, write: BatchWrite): Promise<(() => void) | null> {
@@ -2627,13 +2628,19 @@ export class RoomActor {
     };
   }
 
-  /** What a stored snapshot changes in the room, written by #writeSnapshot or with a commit: it is at today's version. */
-  #snapshotWritten(seq: number, json: string, state: RoomState): void {
+  /**
+   * What a stored snapshot of `bytes` changes in the room, written by
+   * #writeSnapshot or with a commit: it is at today's version, so no commit
+   * needs to carry one (#countSnapshot), and the room's size and quota are
+   * measured again. It returns the quota check, which only #writeSnapshot
+   * waits for.
+   */
+  #snapshotStored(seq: number, bytes: number, state: RoomState): Promise<void> {
     this.#countSnapshotDue = false;
     this.#snapshotSeq = seq;
     this.#opsSinceSnapshot = this.#committed.seq - seq;
-    this.#sizes.stateMeasured(measuredFromStored(Buffer.byteLength(json), state), state);
-    void this.#checkQuota().catch((err: unknown) => this.#log.warn({ err, roomId: this.roomId }, "quota recheck failed"));
+    this.#sizes.stateMeasured(measuredFromStored(bytes, state), state);
+    return this.#checkQuota();
   }
 
   /** Histories are frozen with the commit, so a delayed snapshot never pairs an old view with staged heads. */
@@ -2700,12 +2707,7 @@ export class RoomActor {
     if (seq <= this.#snapshotSeq) return Promise.resolve();
     this.#snapshotting = (async () => {
       try {
-        const bytes = await writeSnapshot(this.#pool, this.roomId, seq, state);
-        this.#countSnapshotDue = false;
-        this.#snapshotSeq = seq;
-        this.#opsSinceSnapshot = this.#committed.seq - seq;
-        this.#sizes.stateMeasured(measuredFromStored(bytes, state), state);
-        await this.#checkQuota();
+        await this.#snapshotStored(seq, await writeSnapshot(this.#pool, this.roomId, seq, state), state);
       } catch (err) {
         this.#log.error({ err, roomId: this.roomId, seq }, "snapshot write failed");
       } finally {
