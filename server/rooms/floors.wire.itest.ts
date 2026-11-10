@@ -627,18 +627,21 @@ describe("a climb's undo and redo over the wire with passengers and areas player
   });
   after(() => t.close());
 
-  type Twin = Room & Pick<Table, "sync"> & { upper: string; thorn: string; link: string; gob: string; seats: { ana: Seat; bree: Seat; tv: Seat }; hidden: { owl?: string; aura?: string; ward?: string } };
+  type Seats = { ana: Seat; bree: Seat; tv: Seat };
+  type Twin = Room & Pick<Table, "sync" | "marker"> & { attach: (seats: Seat[]) => void; upper: string; thorn: string; link: string; pair: string; gob: string; row: string; seats: Seats; hidden: { owl?: string; aura?: string; ward?: string } };
 
   const area = (id: string, sceneId: string, ownerId: string, on: string) => ({ id, sceneId, shape: "sphere", size: 10, origin: { x: 3.5, y: 3.5, z: 0 }, yaw: 0, includeOrigin: true, color: "#e5484d", ownerId, visibility: "dm", attachedTo: on });
 
   async function twin(hidden: boolean): Promise<Twin> {
-    const r = await newRoom(t, hidden ? "Hidden riders" : "No riders");
+    // One name for both rooms: a room's name is every member's to read.
+    const r = await newRoom(t, "Twin tower");
     await ok(r.dmSocket, { t: "scene.update", sceneId: r.ground, patch: { name: "Tower" } });
     const upper = await addFloor(r, r.ground, "above", "Upper floor");
     const thorn = await create(r, r.ground, { kind: "pc", name: "Thorn", disposition: "ally", ownerIds: [r.anaId], x: 3, y: 3 });
     const gob = await create(r, upper, { name: "Goblin", x: 12, y: 12, visibility: "dm" });
     const link = uuidv7();
-    await ok(r.dmSocket, { t: "floorLink.put", link: { id: link, pairId: uuidv7(), sceneId: r.ground, to: upper, rect: { x: 3, y: 3, w: 2, h: 1 }, kind: "stairs" } } as Op);
+    const pair = uuidv7();
+    await ok(r.dmSocket, { t: "floorLink.put", link: { id: link, pairId: pair, sceneId: r.ground, to: upper, rect: { x: 3, y: 3, w: 2, h: 1 }, kind: "stairs" } } as Op);
     const secrets: Twin["hidden"] = {};
     if (hidden) {
       secrets.owl = await create(r, r.ground, { name: "Owl", kind: "npc", size: "tiny", visibility: "dm", x: 3, y: 3 });
@@ -648,23 +651,81 @@ describe("a climb's undo and redo over the wire with passengers and areas player
       await ok(r.dmSocket, { t: "template.create", template: area(secrets.aura, r.ground, r.dmId, secrets.owl) } as Op);
       await ok(r.dmSocket, { t: "template.create", template: area(secrets.ward, r.ground, r.dmId, thorn) } as Op);
     }
-    await ok(r.dmSocket, { t: "encounter.start", entries: [{ id: uuidv7(), tokenId: thorn, value: 20 }] } as Op);
+    const row = uuidv7();
+    await ok(r.dmSocket, { t: "encounter.start", entries: [{ id: row, tokenId: thorn, value: 20 }] } as Op);
     await ok(r.dmSocket, { t: "encounter.next" } as Op);
     const m = await withMarker(t, r, r.ground);
     const seats = await players(t, r, "ana first", false);
     m.attach([seats.ana, seats.bree, seats.tv]);
     await m.sync("seated");
-    return { ...r, sync: m.sync, upper, thorn, link, gob, seats, hidden: secrets };
+    return { ...r, sync: m.sync, marker: m.marker, attach: m.attach, upper, thorn, link, pair, gob, row, seats, hidden: secrets };
   }
 
-  /** The answer Ana's op `n` got, from her frames: refused with its words, or applied with the toast's words, if any. */
+  const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
+  const TIME = /\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z/g;
+
+  /**
+   * Everything a seat holds or was sent, made comparable between two rooms
+   * (FL2-SOL-04). The rooms' generated ids differ, so each id the test
+   * knows reads as its role ("thorn", "upper"), any other as "id" (the
+   * server's own: a history step, a history epoch), and each time as
+   * "time", on values and on keys, which are then sorted again, as are
+   * who is online and a frame's changes, which the server sends in the
+   * order of their ids. One accepted channel is left out by name, the room's count
+   * of ops, which a hidden op moves too: every `seq`, a path's `turn`,
+   * which is that count where the turn began, the log line ids made from
+   * it ("13:0" reads "n:0"), and an `ev` that carries nothing else.
+   */
+  function normal(x: Twin, value: unknown): unknown {
+    const names = new Map<string, string>([
+      [x.roomId, "room"], [x.dmId, "dm"], [x.anaId, "ana"], [x.breeId, "bree"], [x.seats.tv.who.memberId, "tv"],
+      [x.ground, "ground"], [x.upper, "upper"], [x.thorn, "thorn"], [x.gob, "goblin"], [x.link, "link"], [x.pair, "pair"], [x.row, "row"], [x.marker, "marker"],
+    ]);
+    const text = (s: string) => s.split(x.seats.tv.who.memberId).join("tv").replace(UUID, (id) => names.get(id) ?? "id").replace(TIME, "time").replace(/^\d+:(\d+)$/, "n:$1");
+    const walk = (v: unknown, key = ""): unknown => {
+      if (typeof v === "string") return text(v);
+      if (Array.isArray(v)) return key === "online" || key === "changes" ? v.map((inner) => walk(inner)).sort((p, q) => (stableStringify(p) < stableStringify(q) ? -1 : 1)) : v.map((inner) => walk(inner));
+      if (v === null || typeof v !== "object") return v;
+      return Object.fromEntries(Object.entries(v).filter(([k]) => k !== "seq" && !(key === "path" && k === "turn")).map(([k, inner]) => [text(k), walk(inner, k)]));
+    };
+    return JSON.parse(stableStringify(walk(value)));
+  }
+
+  /** A seat's frames, normalized, without the room's op count (`normal`). */
+  function sent(x: Twin, s: Seat): unknown[] {
+    const out: unknown[] = [];
+    for (const frame of s.frames) {
+      const m = JSON.parse(frame) as Record<string, unknown>;
+      if (m.t === "ev" && Object.keys(m).every((k) => k === "t" || k === "seq" || k === "changes") && (m.changes as unknown[]).length === 0) continue;
+      out.push(normal(x, m));
+    }
+    return out;
+  }
+
+  /** Waits until no seat of the rooms has been sent a frame for a moment, so a history line that trails its `ev` is in before frames are compared. */
+  async function quiet(...rooms: Twin[]): Promise<void> {
+    const count = () => rooms.reduce((n, x) => n + x.seats.ana.frames.length + x.seats.bree.frames.length + x.seats.tv.frames.length, 0);
+    for (let last = -1, now = count(); now !== last; last = now, now = count()) await new Promise((resolve) => setTimeout(resolve, 120));
+  }
+
+  /** Every seat of both rooms holds the same room and was sent the same frames, whole (FL2-SOL-04). */
+  async function alike(a: Twin, b: Twin, when: string): Promise<void> {
+    await quiet(a, b);
+    for (const who of ["ana", "bree", "tv"] as const) {
+      assert.deepEqual(normal(a, a.seats[who].view), normal(b, b.seats[who].view), `${when}: ${who} holds the same room`);
+      assert.deepEqual(normal(a, a.seats[who].you), normal(b, b.seats[who].you), `${when}: ${who} is told the same floor`);
+      assert.deepEqual(sent(a, a.seats[who]), sent(b, b.seats[who]), `${when}: ${who} was sent the same frames`);
+    }
+  }
+
+  /** The answer Ana's op `n` got, from her frames: refused with its code and words, or applied with the toast's words, if any. */
   async function answered(s: Seat, n: number): Promise<string> {
     for (let i = 0; i < 100; i++) {
       for (const frame of s.frames) {
         const m = JSON.parse(frame) as ServerMessage;
         if (m.t !== "ev") continue;
         const no = m.rejects?.find((x) => x.n === n);
-        if (no) return `refused: ${no.message}`;
+        if (no) return `refused ${no.code}: ${no.message}`;
         if (m.acks?.includes(n)) return `applied: ${m.restored?.find((x) => x.n === n)?.what ?? ""}`;
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -672,22 +733,7 @@ describe("a climb's undo and redo over the wire with passengers and areas player
     return "no answer";
   }
 
-  /** Thorn as a seat reads it, by its floor's name and without ids, which differ between the rooms. */
-  function reading(x: Twin, s: Seat) {
-    const thorn = s.view.tokens[x.thorn];
-    if (!thorn) return null;
-    const { turn: _turn, ...path } = thorn.path ?? { turn: 0, stops: [] };
-    return {
-      floor: s.view.scenes[thorn.sceneId]?.floor?.name ?? null,
-      at: [thorn.x, thorn.y, thorn.elevation],
-      attached: thorn.attached ?? null,
-      path: JSON.parse(JSON.stringify(path, (key, value) => (key === "seenBy" ? undefined : value))) as unknown,
-      tokens: Object.values(s.view.tokens).map((tk) => tk.name).sort(),
-      areas: Object.keys(s.view.templates).length,
-    };
-  }
-
-  /** One step of Ana's in both rooms: the same answer, and every player reading the rooms alike. */
+  /** One step of Ana's in both rooms: the same answer, and every seat holding and sent the same. */
   async function step(a: Twin, b: Twin, op: (x: Twin) => Promise<Op>, when: string): Promise<string> {
     const answers: string[] = [];
     for (const x of [a, b]) {
@@ -696,13 +742,36 @@ describe("a climb's undo and redo over the wire with passengers and areas player
       await x.sync(when);
     }
     assert.equal(answers[0], answers[1], `${when}: the answer`);
-    for (const who of ["ana", "bree", "tv"] as const) assert.deepEqual(reading(a, a.seats[who]), reading(b, b.seats[who]), `${when}: ${who} reads Thorn alike`);
+    await alike(a, b, when);
     return answers[0]!;
+  }
+
+  /** The DM's ops in the first room alone, which no player may tell from none: both rooms sync, and every seat holds and was sent the same. */
+  async function unseen(a: Twin, b: Twin, ops: readonly Op[], when: string): Promise<void> {
+    for (const op of ops) await ok(a.dmSocket, op);
+    for (const x of [a, b]) await x.sync(when);
+    await alike(a, b, when);
+  }
+
+  /** Ana's device drops and comes back in both rooms: her new snapshot is the same room, and her next ops go on it. */
+  async function reconnect(a: Twin, b: Twin, when: string): Promise<void> {
+    for (const x of [a, b]) {
+      x.seats.ana.socket.close();
+      await x.seats.ana.socket.waitClosed();
+      x.seats.ana = await seat("Ana", await t.connect(x.roomId, x.ana), { memberId: x.anaId, role: "player" }, "ana-again");
+      x.attach([x.seats.ana, x.seats.bree, x.seats.tv]);
+      await x.sync(when);
+    }
+    await alike(a, b, when);
   }
 
   const climb = async (x: Twin): Promise<Op> => ({ t: "token.climb", tokenId: x.thorn, linkId: x.link });
   const undo = async (x: Twin): Promise<Op> => ({ t: "undo", head: (await x.seats.ana.socket.historyHead("play", "undo"))! }) as Op;
   const redo = async (x: Twin): Promise<Op> => ({ t: "redo", head: (await x.seats.ana.socket.historyHead("play", "redo"))! }) as Op;
+  const all = (x: Twin) => [x.seats.ana, x.seats.bree, x.seats.tv];
+  const close = (...rooms: Twin[]) => {
+    for (const x of rooms) for (const s of all(x)) s.socket.close();
+  };
 
   for (const [name, change] of [
     ["kept as they are", null],
@@ -711,18 +780,16 @@ describe("a climb's undo and redo over the wire with passengers and areas player
     ["the owl's area deleted after the climb", (x: Twin): Op => ({ t: "template.delete", templateId: x.hidden.aura! })],
     ["the owl taken off Thorn after the climb", (x: Twin): Op => ({ t: "token.detach", tokenId: x.hidden.owl!, x: 3, y: 4 }) as Op],
   ] as const) {
-    test(`a hidden owl and DM-only areas, ${name}: Ana's climb, Undo and Redo answer as in a room without them`, async () => {
+    test(`a hidden owl and DM-only areas, ${name}: Ana's climb, Undo and Redo answer as in a room without them, through a reconnect`, async () => {
       const a = await twin(true);
       const b = await twin(false);
+      await alike(a, b, "seated");
       assert.equal(await step(a, b, climb, "Go up"), "applied: ");
-      if (change) {
-        await ok(a.dmSocket, change(a));
-        await a.sync("the DM's change unseen");
-      }
+      await unseen(a, b, change ? [change(a)] : [], "the DM's change unseen");
       for (const [i, [op, words]] of ([[undo, "undo"], [redo, "redo"], [undo, "undo"], [redo, "redo"]] as const).entries()) {
         assert.equal(await step(a, b, op, `${words} ${i + 1}`), "applied: moving Thorn up the stairs", `${words} ${i + 1}`);
         const where = words === "undo" ? a.ground : a.upper;
-        const state = await oracle(t, a.roomId, [a.seats.ana, a.seats.bree, a.seats.tv], `${words} ${i + 1}`);
+        const state = await oracle(t, a.roomId, all(a), `${words} ${i + 1}`);
         assert.equal(state.tokens[a.thorn]!.sceneId, where);
         const owl = state.tokens[a.hidden.owl!]!;
         assert.equal(owl.sceneId, owl.attached ? where : a.upper, "the owl rides back and forth while it sits on Thorn, and stays where the DM set it down");
@@ -730,10 +797,53 @@ describe("a climb's undo and redo over the wire with passengers and areas player
           const follows = state.templates[id]?.attachedTo;
           if (follows !== undefined) assert.equal(state.templates[id]!.sceneId, state.tokens[follows]!.sceneId, `${id} stays with what it follows`);
         }
+        // Her device drops between the first undo and its redo: the step is the member's, and the new snapshot tells nothing more.
+        if (i === 0) await reconnect(a, b, "Ana back");
       }
       const secrets = [a.hidden.owl!, a.hidden.aura!, a.hidden.ward!, '"Owl"'];
-      for (const s of [a.seats.ana, a.seats.bree, a.seats.tv]) assert.deepEqual(naming(s, secrets), [], `${s.name} gets nothing hidden`);
-      for (const x of [a, b]) for (const s of Object.values(x.seats)) s.socket.close();
+      for (const s of all(a)) assert.deepEqual(naming(s, secrets), [], `${s.name} gets nothing hidden`);
+      close(a, b);
+    });
+  }
+
+  for (const from of ["undo", "redo"] as const) {
+    test(`a DM-only area attached to Thorn after the climb${from === "redo" ? "'s undo" : ""} crosses with him on Ana's ${from} and back, answering as a room with none (FL2-OPUS-1)`, async () => {
+      const a = await twin(false);
+      const b = await twin(false);
+      assert.equal(await step(a, b, climb, "Go up"), "applied: ");
+      if (from === "redo") assert.equal(await step(a, b, undo, "undo first"), "applied: moving Thorn up the stairs");
+      const late = uuidv7();
+      await unseen(a, b, [{ t: "template.create", template: area(late, from === "undo" ? a.upper : a.ground, a.dmId, a.thorn) } as Op], "the DM's area unseen");
+      const steps = from === "undo" ? ([[undo, "undo"], [redo, "redo"], [undo, "undo"]] as const) : ([[redo, "redo"], [undo, "undo"], [redo, "redo"]] as const);
+      for (const [i, [op, words]] of steps.entries()) {
+        assert.equal(await step(a, b, op, `${words} ${i + 1}`), "applied: moving Thorn up the stairs", `${words} ${i + 1}`);
+        const state = await oracle(t, a.roomId, all(a), `${words} ${i + 1}`);
+        const where = words === "undo" ? a.ground : a.upper;
+        assert.deepEqual([state.tokens[a.thorn]!.sceneId, state.templates[late]!.sceneId, state.templates[late]!.attachedTo], [where, where, a.thorn], `${words} ${i + 1}: the area is on Thorn's floor, still attached`);
+        if (i === 0) await reconnect(a, b, "Ana back");
+      }
+      for (const s of all(a)) assert.deepEqual(naming(s, [late]), [], `${s.name} gets nothing of the area`);
+      close(a, b);
+    });
+
+    test(`under fog the stairs turned to a ladder refuse Ana's ${from} of her climb in the words of stairs left alone, every frame alike (FL2-ASTRA-01)`, async () => {
+      const a = await twin(false);
+      const b = await twin(false);
+      assert.equal(await step(a, b, climb, "Go up"), "applied: ");
+      if (from === "redo") assert.equal(await step(a, b, undo, "undo first"), "applied: moving Thorn up the stairs");
+      for (const x of [a, b]) {
+        for (const sceneId of [x.ground, x.upper]) await ok(x.dmSocket, { t: "scene.update", sceneId, patch: { fogEnabled: true } } as Op);
+        await x.sync("fog on both floors");
+      }
+      await alike(a, b, "fog on both floors");
+      for (const s of all(a)) assert.deepEqual(Object.keys((s.view as { floorLinks?: object }).floorLinks ?? {}), [], `${s.name} holds no end under the fog`);
+      await unseen(a, b, [{ t: "floorLink.update", linkId: a.link, patch: { kind: "ladder" } } as Op], "the kind changed unseen");
+      const mark = all(a).map((s) => s.frames.length);
+      assert.equal(await step(a, b, from === "undo" ? undo : redo, from), `refused invalid: could not ${from} moving Thorn up the stairs: the stairs changed`);
+      await reconnect(a, b, "Ana back");
+      for (const [i, s] of [a.seats.bree, a.seats.tv].entries()) assert.doesNotMatch(JSON.stringify(s.frames.slice(mark[i + 1])), /ladder/, `${s.name} is told of no ladder`);
+      assert.doesNotMatch(JSON.stringify(a.seats.ana.frames), /ladder/, "Ana's new snapshot and frames name no ladder");
+      close(a, b);
     });
   }
 });
