@@ -297,7 +297,7 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
     const a = state.templates[id]!;
     assert.equal(a.visibility, "all", `${label}: hidden template ${id} leaked`);
     if (a.attachedTo !== undefined) assert.ok(p.tokens[a.attachedTo], `${label}: template ${id} attached to an unseen token`);
-    if (a.casterId !== undefined) assert.ok(pa.casterId === null || p.tokens[a.casterId], `${label}: template ${id} caster leaked`);
+    if (a.casterId !== undefined) assert.ok(pa.casterId === undefined || p.tokens[a.casterId], `${label}: template ${id} names a caster the viewer cannot see`);
     if (a.ownerId !== viewer.memberId && !state.meta.settings.playersSeeAoeOfOthers) {
       assert.equal(state.members[a.ownerId]?.kind, "dm", `${label}: another player's template ${id} leaked`);
     }
@@ -1067,7 +1067,7 @@ describe("specific rules", () => {
     ];
     let p = projectState(state, P1, { sceneId: "s1" });
     assert.deepEqual(Object.keys(p.templates).sort(), ["caster", "dms", "p2s"]);
-    assert.equal(p.templates.caster!.casterId, null);
+    assert.equal("casterId" in p.templates.caster!, false);
     assert.deepEqual(Object.keys(p.handouts), ["h2"]);
     assert.deepEqual(p.log.map((e) => e.id), ["1:0", "1:2"]);
     state.meta.settings.playersSeeAoeOfOthers = false;
@@ -1076,6 +1076,17 @@ describe("specific rules", () => {
     const dm = projectState(state, DM, { sceneId: "s1" });
     assert.deepEqual(dm.log.map((e) => e.id), ["1:1"]);
     assert.equal(dm.templates.caster!.casterId, "dark");
+  });
+
+  test("a player's copy of an area reads the same whether a caster they cannot see stays or is deleted", () => {
+    const kept = setup();
+    kept.templates.caster = template("caster", { casterId: "dark", ownerId: "dm1" });
+    const gone = apply(kept, { t: "token.delete", tokenId: "dark" });
+    assert.equal("casterId" in gone.templates.caster!, false, "the delete drops the caster");
+    const copy = (state: RoomState) => projectState(state, P1, { sceneId: "s1" }).templates;
+    assert.equal("caster" in copy(kept), true);
+    assert.deepEqual(copy(gone), copy(kept));
+    assert.equal(projectState(kept, DM, { sceneId: "s1" }).templates.caster!.casterId, "dark");
   });
 
   test("log events strip HP numbers the viewer may not see and keep the label", () => {

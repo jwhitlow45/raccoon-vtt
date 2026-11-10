@@ -148,8 +148,6 @@ export type ProjectedToken = Omit<Token, "actor" | DmOnlyTokenField> &
 
 export type ProjectedCharacter = Omit<Character, "actor" | "ownerIds"> & Partial<Pick<Character, "ownerIds">> & { actor: ProjectedActor };
 
-export type ProjectedTemplate = Omit<AreaTemplate, "casterId"> & { casterId?: string | null };
-
 export type ProjectedEntry = Omit<InitEntry, "groupKey"> & Partial<Pick<InitEntry, "groupKey">>;
 export type ProjectedEncounter = Omit<Encounter, "entries"> & { entries: ProjectedEntry[] };
 
@@ -185,7 +183,7 @@ export type ProjectedState = Omit<RoomState, "meta" | "tokens" | "characters" | 
   /** The ends of stairs and ladders, each as stored for the DM and cut for a player (projectFloorLinkCtx), only while the copy holds one. */
   floorLinks?: Record<string, FloorLink | ProjectedFloorLink>;
   characters: Record<string, ProjectedCharacter>;
-  templates: Record<string, ProjectedTemplate>;
+  templates: Record<string, AreaTemplate>;
   encounter: ProjectedEncounter | null;
   /**
    * The viewer's sight on their scene when its vision is on, keyed
@@ -1531,7 +1529,12 @@ export function projectCharacter(state: RoomState, viewer: Viewer, character: Ch
   return out;
 }
 
-function projectTemplateCtx(ctx: Ctx, template: AreaTemplate): ProjectedTemplate | null {
+/**
+ * An area as the viewer gets it. A player's copy leaves out a caster they
+ * cannot see, as a deleted caster is left out (deleteToken drops the
+ * field), so the copy reads the same whether that caster stays or goes.
+ */
+function projectTemplateCtx(ctx: Ctx, template: AreaTemplate): AreaTemplate | null {
   if (!ctx.floors.has(template.sceneId)) return null;
   if (ctx.viewer.role === "dm") return template;
   if (template.visibility === "dm") return null;
@@ -1541,7 +1544,8 @@ function projectTemplateCtx(ctx: Ctx, template: AreaTemplate): ProjectedTemplate
     if (owner === undefined || owner.kind !== "dm") return null;
   }
   if (template.casterId !== undefined && !tokenVisibleById(ctx, template.casterId)) {
-    return { ...template, casterId: null };
+    const { casterId: _unseen, ...uncast } = template;
+    return uncast;
   }
   return template;
 }
