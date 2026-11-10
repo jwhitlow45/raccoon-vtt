@@ -461,7 +461,19 @@ describe("raccoon-vtt Add a wing: the DM's mode, pane and ghost", { timeout: 900
     await bar.getByRole("button", { name: "Generate a wing" }).click();
     await pane().waitFor();
     await pane().getByRole("radio", { name: "Wide", exact: true }).check();
-    await waitFor("the Wide plan's counts", async () => (/rooms?\b.*doors?\b/.test(await pane().getByRole("status").innerText()) && (await pane().getByRole("button", { name: "Add the wing" }).isEnabled()) ? true : null));
+    // The pane opens on a random seed, and this crowded Wide join finds no way for about one seed in four, which the pane says with Reroll first: so Reroll until one plans.
+    for (let tries = 0; ; tries++) {
+      const outcome = await waitFor("the Wide plan's counts or its no way line", async () => {
+        const status = await pane().getByRole("status").innerText();
+        if (/rooms?\b.*doors?\b/.test(status) && (await pane().getByRole("button", { name: "Add the wing" }).isEnabled())) return "planned";
+        return /^No way from the area|^Could not fit two rooms/.test(status) ? "reroll" : null;
+      });
+      if (outcome === "planned") break;
+      assert.ok(tries < 8, "a Wide plan within 8 rerolls");
+      await pane().getByRole("button", { name: "Reroll", exact: true }).click();
+      // The next plan can say the same words, so the old line is given time to go: the pane waits 120 ms, and a plan here takes far less than the rest.
+      await dm.waitForTimeout(800);
+    }
     await shots.take(dm, "d3fix-1-wide-hex-wing");
     await pane().getByRole("button", { name: "Add the wing" }).click();
     await pane().waitFor({ state: "detached", timeout: 30_000 });
