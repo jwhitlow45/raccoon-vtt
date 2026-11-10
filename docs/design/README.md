@@ -26,6 +26,9 @@ and for how to use it, the [DM guide](../dm-guide.md).
   log history, and reading back older lines.
 - [design-v1-join-requests.md](design-v1-join-requests.md): join requests
   the DM approves, and the three ways new players can join a room.
+- [design-v1-room-count.md](design-v1-room-count.md): the room count, so that
+  the numbers a player's device receives never reflect the server's private
+  bookkeeping.
 
 ## Maps and the board
 
