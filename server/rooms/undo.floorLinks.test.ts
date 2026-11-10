@@ -314,6 +314,28 @@ describe("what rode with the climber, and areas Ana does not receive (4, 8)", ()
     }
   }
 
+  test("a DM-only area that names Thorn from another floor, as a room from before this rule can hold, answers nothing and goes with him once he stands on its floor", () => {
+    const a = table({ tokens: { thorn: thornToken() } });
+    const b = table({ tokens: { thorn: thornToken() } });
+    twins(a, b, [(t) => t.play(ANA, climb())], "the climb");
+    a.state = { ...a.state, templates: { stray: { ...area("stray", "thorn"), sceneId: GROUND } } };
+    twins(a, b, [backAndForth[0]!], "the undo, the area left where it lies");
+    assert.deepEqual([a.state.tokens.thorn!.sceneId, a.state.templates.stray!.sceneId], [GROUND, GROUND]);
+    twins(a, b, [backAndForth[1]!], "the redo, the area along");
+    assert.deepEqual([a.state.tokens.thorn!.sceneId, a.state.templates.stray!.sceneId], [UPPER, UPPER]);
+  });
+
+  test("the DM's undo of one gesture that changed an area and moved its creature to a floor puts the area back as the step found it", () => {
+    const t = table({ templates: { ward: { ...area("ward", "thorn"), size: 20 } } });
+    assert.equal(t.play(DM, { t: "template.update", templateId: "ward", patch: { size: 30 } }, "g"), "ok");
+    const depth = t.stacks.depth("dm1").undo;
+    assert.equal(t.play(DM, { t: "token.update", tokenId: "thorn", patch: { sceneId: UPPER } }, "g"), "ok");
+    assert.equal(t.stacks.depth("dm1").undo, depth, "one step");
+    assert.deepEqual([t.state.templates.ward!.sceneId, t.state.templates.ward!.size], [UPPER, 30]);
+    assert.equal(t.undo(DM), "ok");
+    assert.deepEqual([t.state.tokens.thorn!.sceneId, t.state.templates.ward!.sceneId, t.state.templates.ward!.size], [GROUND, GROUND, 20]);
+  });
+
   test("Ana's own area on Thorn, cast upstairs, leaves the climb her next undo and goes down with him", () => {
     const t = table();
     assert.equal(t.play(ANA, climb()), "ok");

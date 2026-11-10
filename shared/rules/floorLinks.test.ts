@@ -207,6 +207,7 @@ describe("the words (6.3, 7.3, 8)", () => {
     const ends = [end(s, "l2"), end(s, "l1")];
     const gone = run(s, { t: "floorLink.delete", linkId: "l1" });
     assert.equal(restoredLinkWords(s, ends), null, "stairs that stand are the placer's to remove");
+    assert.equal(restoredLinkWords(s, ends.map((e) => ({ ...e, ground: 5 }))), null, "whatever the restore would write over them");
     assert.equal(restoredLinkWords(gone, ends), null, "nothing in their way");
     assert.equal(restoredLinkWords(gone, [null, undefined, "x"]), null);
     assert.equal(restoredLinkWords(run(gone, edge(UPPER, "4,3,w")), ends), "A wall crosses those squares on Upper floor.");
