@@ -28,7 +28,7 @@ import {
   type RulerState,
   type RulerToken,
 } from "./ruler.ts";
-import { MEASURES, endGoneCarry, pickMeasure, publish, refuseKeep, restoreRuler, rulerActivated, rulerDeactivated, rulerSlot, shares, takeStairs, toggleShare } from "./rulerStore.ts";
+import { MEASURES, pickMeasure, publish, refuseKeep, restoreRuler, rulerActivated, rulerDeactivated, rulerSlot, shares, takeStairs, toggleShare } from "./rulerStore.ts";
 import { useHeldWalk, useWalkMeasure } from "./useWalkMeasure.ts";
 import { heldKey, walkShown, walkText, type WalkInput, type WalkMeasure } from "./walkRuler.ts";
 import { rulerCycle } from "../toolChoices.ts";
