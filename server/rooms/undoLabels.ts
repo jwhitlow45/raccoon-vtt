@@ -117,7 +117,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       // A new kind names the step, and a kind sent as it is leaves the lock to name it, as the pane sends the two apart.
       if (op.patch?.kind !== undefined && op.patch.kind !== kind) return LINK_LABELS.kind(kind);
       if (op.patch?.locked !== undefined) return LINK_LABELS.lock(kind, op.patch.locked);
-      return LINK_LABELS.kind(kind);
+      return LINK_LABELS.same(kind);
     }
     case "floorLink.delete": {
       const link = ownEntry(before.floorLinks, op.linkId);

@@ -364,6 +364,9 @@ describe("stairs' undo labels (6.3, 7.2)", () => {
     assert.equal(label({ t: "floorLink.update", linkId: "l1", patch: { locked: true } }), "locking the stairs");
     assert.equal(label({ t: "floorLink.update", linkId: "l1", patch: { locked: false } }), "unlocking the stairs");
     assert.equal(label({ t: "floorLink.update", linkId: "l1", patch: { kind: "ladder" } }), "changing stairs to a ladder");
+    // A kind sent as it is changes no kind: the lock sent with it names the step, else no kind is named as new (FL2-OPUS-8).
+    assert.equal(label({ t: "floorLink.update", linkId: "l1", patch: { kind: "stairs" } }), "changing stairs");
+    assert.equal(label({ t: "floorLink.update", linkId: "l1", patch: { kind: "stairs", locked: true } }), "locking the stairs");
     // A kind sent as it is, beside the lock, changes the lock alone.
     assert.equal(label({ t: "floorLink.update", linkId: "l1", patch: { kind: "stairs", locked: true } }), "locking the stairs");
     const ladder = structuredClone(table().state);

@@ -121,7 +121,7 @@ describe("placing, changing and removing stairs (3)", () => {
 });
 
 describe("a climb (3, 5)", () => {
-  test("a 25 ft walk onto stairs then Go up lands on Upper floor's same squares, on its ground, Moved 35 ft", () => {
+  test("a 50 ft walk onto stairs then Go up lands on Upper floor's same squares, on its ground, Moved 60 ft", () => {
     let s = onThornsTurn(withStairs(run(tower(), raise(UPPER, ["3,3", "4,3"], 5))));
     s = run(s, move(3, 8), ANA);
     s = run(s, move(3, 3), ANA);

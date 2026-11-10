@@ -549,7 +549,6 @@ export function reads(op: Op, state: RoomState): Reads {
   }
 }
 
-/** The tokens an op names and everything their groups carry, as this copy holds them. */
 /** Both ends of a pair, the second only where the view holds the first. */
 function pairReads(state: RoomState, linkId: string): Read[] {
   const link = ownEntry(state.floorLinks, linkId);
@@ -574,6 +573,7 @@ function climbReads(state: RoomState, tokenId: string, linkId: string): Reads {
   return of(r, [`scene:${link.to}`]);
 }
 
+/** The tokens an op names and everything their groups carry, as this copy holds them. */
 function groupReads(state: RoomState, named: readonly string[]): Read[] {
   const out: Read[] = [];
   for (const ids of moveGroups(state.tokens, named).values()) for (const id of ids) out.push({ key: keys.token(id) });

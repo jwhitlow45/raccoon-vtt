@@ -109,6 +109,8 @@ export const LINK_LABELS = {
   removed: (kind: Kind, floor: string) => `removing ${kind === "stairs" ? "stairs" : "a ladder"} to ${floor}`,
   lock: (kind: Kind, locked: boolean) => `${locked ? "locking" : "unlocking"} the ${kind === "stairs" ? "stairs" : "ladder"}`,
   kind: (from: Kind) => (from === "stairs" ? "changing stairs to a ladder" : "changing a ladder to stairs"),
+  /** An update that changes neither the kind nor the lock, which the pane never sends. */
+  same: (kind: Kind) => (kind === "stairs" ? "changing stairs" : "changing a ladder"),
 } as const;
 
 /** The ends on a floor, by id order, so every reader walks them alike. */
