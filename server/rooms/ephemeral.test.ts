@@ -947,7 +947,7 @@ describe("a ruler carried over stairs (docs/design/design-v1-floors.md phase 3, 
   }
 
   /** Thorn's walk carried up the stairs to Upper floor, as Ana's device sends it: a free stop on the landing, then one beyond. */
-  const carried = (over: Partial<RulerPriorIn> = {}, id = "r1"): EphEvent => ({
+  const carried = (over: Partial<RulerPriorIn> = {}, id = "r1"): Extract<EphEvent, { k: "ruler" }> => ({
     k: "ruler",
     id,
     walk: true,
@@ -1003,13 +1003,14 @@ describe("a ruler carried over stairs (docs/design/design-v1-floors.md phase 3, 
 
   test("a broken chain or a gone anchor goes nowhere, and a screen showing the ruler gets its bare cancel", () => {
     const state = stairs();
-    for (const [name, over, sceneId] of [
+    const cases: [string, Partial<RulerPriorIn>, string][] = [
       ["an end that leads elsewhere", { ends: ["l2"] }, UPPER],
       ["the last end short of the frame's floor", { ends: ["l1"] }, ATTIC],
       ["two ends that do not join", { ends: ["l1", "l1"] }, ATTIC],
       ["an end that does not exist", { ends: ["nope"] }, UPPER],
       ["a gone anchor", { anchors: ["ghost"] }, UPPER],
-    ] as const) {
+    ];
+    for (const [name, over, sceneId] of cases) {
       const t = seats();
       routeEphemeral(state, t.dm.conn, sceneId, { ...carried(over), shared: true }, t.all);
       for (const s of [t.coDm, t.ana, t.bree]) assert.deepEqual(s.got, [], `${name}: ${s.conn.memberId}`);
