@@ -906,7 +906,8 @@ export async function askTimed(table: Table, ops: readonly Op[]): Promise<{ turn
   const answer = answered();
   if (!answer) throw new Error("the ask got no answer");
   const refused = answer.rejects?.find((r) => r.n === n);
-  if (refused) throw new Error(`the ask was refused: ${refused.message}`);
+  // An ask whose ops would forget players' remembered map is answered with that question, which is its whole answer.
+  if (refused && refused.code !== "forget") throw new Error(`the ask was refused: ${refused.message}`);
   return { turn, total };
 }
 
