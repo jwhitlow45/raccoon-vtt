@@ -57,7 +57,8 @@ test("a flat wing holds Heights at Flat with its line and keeps the DM's pick", 
   const flat = draw({ heights: 50 }, { wing: true, flat: true });
   assert.ok(text(flat).includes(WING_FLAT));
   assert.ok(!text(flat).includes(HEIGHTS_HELP));
-  assert.match(flat, /aria-valuetext="Flat"/);
+  const slider = flat.match(/<input[^>]*aria-valuetext="Flat"[^>]*>/)?.[0] ?? "";
+  assert.match(slider, /\svalue="0"/, "the slider itself at Flat");
   assert.match(draw({ heights: 50 }, { wing: true }), /aria-valuetext="About \d+ rooms? of \d+ off flat ground"/);
 });
 
