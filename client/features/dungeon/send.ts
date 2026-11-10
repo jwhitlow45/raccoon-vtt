@@ -1,7 +1,10 @@
-import type { BuildChunk, JournalPage, Light, Pin, RoomState, Stamp, Token, Trap, TrapRig } from "#shared/model.ts";
+import { doorChunk, wallChunk } from "#shared/keys.ts";
+import { serializedBytes } from "#shared/limits.ts";
+import { CHUNK_CELLS, type BuildChunk, type JournalPage, type Light, type Pin, type RoomState, type Stamp, type Token, type Trap, type TrapRig, type TrapZone } from "#shared/model.ts";
 import { stableStringify } from "#shared/project.ts";
-import { clientOpSchema, type ClientOp } from "#shared/protocol.ts";
-import type { OpAnswer, RoomActions } from "../../state/types.ts";
+import { ASK_LOST, clientOpSchema, MAX_ASK_BYTES, MAX_ASK_OPS, MAX_ASK_PARTS, type ClientOp, type OpOf } from "#shared/protocol.ts";
+import { JOIN_CHANGED, joinChanged, WING_MOVED, wingClash, type WingClear } from "#shared/rules/wingClear.ts";
+import type { OnAnswer, OpAnswer, OpRefusal, RoomActions, UnknownCause } from "../../state/types.ts";
 import type { RoomViewStore } from "../../state/view.ts";
 import { addAnswer, CHECK_MS, movedOn, NO_ANSWERS, sceneShown, type Answers } from "../uvtt/rules.ts";
 import { keyTitle } from "./keyPage.ts";
@@ -112,18 +115,47 @@ function sorted(items: Iterable<unknown>): string[] {
  * one this send made.
  */
 export function sceneContents(state: Contents, sceneId: string, idOf: IdOf = AS_STORED): string {
-  const chunks: [string, Pick<BuildChunk, "cells" | "edges" | "heights" | "up">][] = [];
+  return contentsOf(state, sceneId, idOf, null);
+}
+
+/**
+ * A chunk as the outcome compares it: its cells, edges, heights, stairs and
+ * difficult ground, and its free walls by their ends and feature, sorted,
+ * without ids, which are fresh at Make (phase 3, 3.5).
+ */
+function chunkContents(c: BuildChunk): unknown {
+  const walls = c.walls && c.walls.length > 0 ? sorted(c.walls.map((w) => ({ a: w.a, b: w.b, f: w.f }))) : undefined;
+  return { cells: c.cells, edges: c.edges, heights: c.heights, up: c.up, rough: c.rough, walls };
+}
+
+/** A trap's zone with a hex door's leaf named through `idOf`, as Make named it (phase 3, 3.5). */
+function zoneNamed(zone: TrapZone, idOf: IdOf): TrapZone {
+  return "door" in zone && "id" in zone.door ? { door: { ...zone.door, id: idOf(zone.door.id) } } : zone;
+}
+
+/**
+ * The contents compared: a whole scene with `only` null, else a wing's
+ * part of it, the chunks at `only.chunks` and the entities `only.made`
+ * names, so what other members changed elsewhere on the scene, a token
+ * walking past among it, never counts.
+ */
+function contentsOf(state: Contents, sceneId: string, idOf: IdOf, only: { chunks: ReadonlySet<string>; made: (id: string) => boolean } | null): string {
+  const chunks: [string, unknown][] = [];
   for (const c of Object.values(state.buildChunks)) {
-    if (c.sceneId === sceneId) chunks.push([`${c.cx},${c.cy}`, { cells: c.cells, edges: c.edges, heights: c.heights, up: c.up }]);
+    if (c.sceneId !== sceneId) continue;
+    const at = `${c.cx},${c.cy}`;
+    if (!only || only.chunks.has(at)) chunks.push([at, chunkContents(c)]);
   }
   chunks.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  const on = <T extends { sceneId: string }>(r: Of<T> | undefined): T[] => Object.values(r ?? {}).filter((x): x is T => x?.sceneId === sceneId);
+  const on = <T extends { sceneId: string }>(r: Of<T> | undefined): T[] =>
+    Object.entries(r ?? {}).flatMap(([id, x]) => (x?.sceneId === sceneId && (!only || only.made(id)) ? [x] : []));
   const named = (rig: TrapRig | undefined): TrapRig | undefined =>
     rig && { ...rig, actions: rig.actions.map((a) => ("show" in a && "tokenId" in a.show ? { show: { tokenId: idOf(a.show.tokenId) } } : a)) };
-  const traps = sorted(on(state.traps).map((t) => ({ zone: t.zone, state: t.state, rig: named(t.rig) })));
+  const traps = sorted(on(state.traps).map((t) => ({ zone: zoneNamed(t.zone, idOf), state: t.state, rig: named(t.rig) })));
   const stamps = sorted(on(state.stamps).map((s) => ({ art: s.art, x: s.x, y: s.y, w: s.w, h: s.h, rotation: s.rotation })));
   const lights = sorted(on(state.lights).map((l) => ({ x: l.x, y: l.y, bright: l.bright, dim: l.dim })));
-  const tokens = sorted(on(state.tokens).map((t) => ({ id: idOf(t.id), kind: t.kind, name: t.name, x: t.x, y: t.y, visibility: t.visibility })));
+  // A wing's stones are compared without their place, since one may have rolled since (3.5: moved tokens never count).
+  const tokens = sorted(on(state.tokens).map((t) => ({ id: idOf(t.id), kind: t.kind, name: t.name, visibility: t.visibility, ...(only ? {} : { x: t.x, y: t.y }) })));
   const pins = on(state.pins);
   const pages = sorted(
     [...new Set(pins.flatMap((p) => (p.pageId !== undefined ? [p.pageId] : [])))].map((id) => {
@@ -133,6 +165,42 @@ export function sceneContents(state: Contents, sceneId: string, idOf: IdOf = AS_
   );
   const pinned = sorted(pins.map((p) => ({ x: p.x, y: p.y, label: p.label, visibility: p.visibility, page: p.pageId === undefined ? null : idOf(p.pageId) })));
   return stableStringify({ chunks, traps, stamps, lights, tokens, pins: pinned, pages });
+}
+
+/** The chunks a wing's ops write, as "cx,cy": each cell's, each edge's and each free wall's. */
+export function wingChunks(ops: readonly ClientOp[]): Set<string> {
+  const out = new Set<string>();
+  const cell = (key: string) => {
+    const [x, y] = key.split(",").map(Number) as [number, number];
+    out.add(`${Math.floor(x / CHUNK_CELLS)},${Math.floor(y / CHUNK_CELLS)}`);
+  };
+  for (const op of ops) {
+    if (op.t === "build.paint" || op.t === "build.height" || op.t === "build.stairs" || op.t === "build.rough") op.cells.forEach(cell);
+    else if (op.t === "build.edge") {
+      for (const e of op.edges) {
+        const c = doorChunk({ edge: e.key });
+        out.add(`${c.cx},${c.cy}`);
+      }
+    } else if (op.t === "build.walls") {
+      for (const w of op.put ?? []) {
+        const c = wallChunk(w);
+        out.add(`${c.cx},${c.cy}`);
+      }
+      for (const r of op.remove ?? []) out.add(`${r.cx},${r.cy}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * A wing as the outcome compares it (3.5): the chunks its ops write and
+ * the entities it made, in the stored room by the ids Make gave them, and
+ * in the scratch room by the placeholders `ids` maps.
+ */
+export function wingContents(state: Contents, sceneId: string, ops: readonly ClientOp[], ids: ReadonlyMap<string, string>, stored: boolean): string {
+  const fresh = new Set(ids.values());
+  const made = stored ? (id: string) => fresh.has(id) : (id: string) => ids.has(id);
+  return contentsOf(state, sceneId, stored ? AS_STORED : madeIds(ids), { chunks: wingChunks(ops), made });
 }
 
 /** How it ended, from the answers and the room after: the import's rule, with the contents compared whole. */
@@ -286,4 +354,235 @@ export async function sendDungeon(
 function titled(room: RoomState, title: string | null): RoomState {
   if (title === null) return room;
   return { ...room, journal: Object.fromEntries(Object.entries(room.journal).map(([id, page]) => [id, page && { ...page, title }])) };
+}
+
+/*
+ * Add a wing (docs/design: dungeon generator phase 3, 3.5 and 3.6). A wing
+ * lands on a scene players may remember, so it always asks first: its map
+ * ops ride `build.ask`s carrying its clear, which the server checks against
+ * the room as each part comes, and the send goes once every part is taken.
+ */
+
+/** A wing's end beside a dungeon's: its join changed, something moved into its footprint, or its asks were too many to send. */
+export type WingOutcome = DungeonOutcome | { k: "join" } | { k: "moved" } | { k: "large" };
+
+/** The line for a wing too large for its asks (3.5). */
+export const WING_TOO_LARGE = "This wing is too large to check against players' remembered map. Pick fewer rooms.";
+
+/** The ops a wing's asks carry: the builder's own and a wing's free walls and stamps (phase 3, 5). */
+export const WING_ASKS: ReadonlySet<ClientOp["t"]> = new Set<ClientOp["t"]>(["build.paint", "build.erase", "build.rect", "build.edge", "build.height", "build.stairs", "build.rough", "build.walls", "build.stamps"]);
+
+type Askable = OpOf<"build.ask">["ops"][number];
+
+/** A wing's map ops in the shape an ask carries them: on the scene, without a yes. */
+function asked(sceneId: string, ops: readonly ClientOp[]): Askable[] {
+  return ops.flatMap((op) => {
+    if (!WING_ASKS.has(op.t) || (op as { sceneId?: string }).sceneId !== sceneId) return [];
+    const { forget: _yes, ...bare } = op as Askable;
+    return [bare as Askable];
+  });
+}
+
+/**
+ * A wing's asks (3.6): its map ops packed in order into asks of at most
+ * MAX_ASK_OPS ops and MAX_ASK_BYTES, each carrying the clear, numbered by
+ * `part` and all but the last marked `more`. The smallest op goes last,
+ * alone in its part, with the floor runs, so no part passes the bytes (I8).
+ * Null when they take more than MAX_ASK_PARTS asks, or a part cannot fit.
+ */
+export function wingAsks(sceneId: string, ops: readonly ClientOp[], clear: WingClear): OpOf<"build.ask">[] | null {
+  const all = asked(sceneId, ops);
+  if (all.length === 0) return [];
+  const { floor: _runs, ...bare } = clear;
+  let smallest = 0;
+  all.forEach((op, i) => {
+    if (serializedBytes(op) < serializedBytes(all[smallest]!)) smallest = i;
+  });
+  const wrap = (part: Askable[], last: boolean): OpOf<"build.ask"> => ({ t: "build.ask", sceneId, ops: part, part: MAX_ASK_PARTS - 1, ...(last ? {} : { more: true as const }), clear: last ? clear : bare });
+  const parts: Askable[][] = [];
+  for (const [i, op] of all.entries()) {
+    if (i === smallest) continue;
+    const part = parts.at(-1);
+    if (part && part.length < MAX_ASK_OPS && serializedBytes(wrap([...part, op], false)) <= MAX_ASK_BYTES) part.push(op);
+    else parts.push([op]);
+  }
+  parts.push([all[smallest]!]);
+  if (parts.length > MAX_ASK_PARTS) return null;
+  const asks = parts.map((part, i): OpOf<"build.ask"> => {
+    const last = i === parts.length - 1;
+    return { t: "build.ask", sceneId, ops: part, part: i, ...(last ? {} : { more: true as const }), clear: last ? clear : bare };
+  });
+  return asks.every((a) => serializedBytes(a) <= MAX_ASK_BYTES) ? asks : null;
+}
+
+type Heard = { answer: OpAnswer; refusal?: OpRefusal; unknown?: UnknownCause };
+
+/** What a wing's asks came to, the first refusal deciding (3.5): all taken, a forget question, a changed join or footprint, lost, or no. */
+export function asksSettled(heard: readonly Heard[]): "taken" | "forget" | "join" | "moved" | "lost" | "none" {
+  // A refused part drops the server's chain, so the parts after it are refused as lost: only the first refusal counts.
+  const first = heard.find((h) => h.answer === "refused" && h.refusal?.message !== ASK_LOST);
+  if (first) {
+    if (first.refusal?.code === "forget") return "forget";
+    if (first.refusal?.code === "invalid" && first.refusal.message === JOIN_CHANGED) return "join";
+    if (first.refusal?.code === "invalid" && first.refusal.message === WING_MOVED) return "moved";
+    return "none";
+  }
+  if (heard.every((h) => h.answer === "taken")) return "taken";
+  if (heard.some((h) => h.answer === "unknown" && h.unknown === "expired")) return "none";
+  return "lost";
+}
+
+/**
+ * Sends a planned wing behind its asks (3.5) and says how it ended.
+ *
+ * First the device runs the server's two checks on the room as it stands:
+ * a changed join ends as `join` and a clash as `moved`, so the pane clears
+ * the join or plans again. Then the asks, under the wing's group, with the
+ * builder held so no other edit overtakes it and Undo cancels it. A
+ * refused `forget` asks the DM (`ask`), whose yes sends every op with the
+ * yes. Asks lost before any refusal go again once.
+ *
+ * The send, in one task under Setup: the first map op alone, and nothing
+ * after it if it is refused at input, then the other map ops, traps,
+ * stamps, lights and stones by `dispatchMany`. Once each of those is
+ * answered taken, the key's page and its pins go in the same group, so a
+ * failed wing never leaves a key naming what is not there. `onAnswered`
+ * hears (0, of) as the send starts, then each answer, so the pane says it
+ * is checking until the first call. Every op is quiet: the pane says the
+ * outcome.
+ */
+export async function sendWing(
+  made: { ops: ClientOp[]; ids: ReadonlyMap<string, string>; room: RoomState; sceneId: string; clear: WingClear },
+  actions: RoomActions,
+  room: SendRoom,
+  onAnswered: (n: number, of: number) => void,
+  ask: (q: "forget") => Promise<boolean>,
+): Promise<WingOutcome> {
+  const { store } = room;
+  const { sceneId, clear } = made;
+  const live = store.getState().view;
+  if (!live || joinChanged(live, sceneId, clear)) return { k: "join" };
+  if (wingClash(live, sceneId, asked(sceneId, made.ops), clear) !== null) return { k: "moved" };
+  const asks = wingAsks(sceneId, made.ops, clear);
+  if (asks === null) return { k: "large" };
+
+  let cancelled = false;
+  let wake: (() => void) | null = null;
+  const release = actions.holdBuild?.(() => {
+    cancelled = true;
+    wake?.();
+  }) ?? (() => undefined);
+  let group = actions.newId();
+  let settled: ReturnType<typeof asksSettled> = "lost";
+  try {
+    for (let round = 0; round < 2 && settled === "lost"; round++) {
+      if (round > 0) group = actions.newId();
+      const heard: Heard[] = [];
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+        let left = asks.length;
+        const hear = (h: Heard) => {
+          heard.push(h);
+          if (--left === 0) resolve();
+        };
+        for (const a of asks) {
+          const onAnswer: OnAnswer = (answer, refusal, unknown) => hear({ answer, ...(refusal ? { refusal } : {}), ...(unknown ? { unknown } : {}) });
+          if (actions.dispatch(a, { group, groupScope: "setup", quiet: true, onAnswer }) === null) hear({ answer: "refused" });
+        }
+      });
+      wake = null;
+      if (cancelled) return { k: "none", lost: false };
+      settled = asksSettled(heard);
+    }
+  } finally {
+    release();
+  }
+  if (settled === "join") return { k: "join" };
+  if (settled === "moved") return { k: "moved" };
+  if (settled === "lost") return { k: "none", lost: true };
+  if (settled === "none") return { k: "none", lost: false };
+  const forget = settled === "forget";
+  if (forget && !(await ask("forget"))) return { k: "none", lost: false };
+  return sendWingOps(made, actions, room, group, forget, onAnswered);
+}
+
+/** The wing's ops once its asks are answered (3.5), and the outcome compared with the scratch room where answers were lost. */
+async function sendWingOps(
+  made: { ops: ClientOp[]; ids: ReadonlyMap<string, string>; room: RoomState; sceneId: string },
+  actions: RoomActions,
+  room: SendRoom,
+  group: string,
+  forget: boolean,
+  onAnswered: (n: number, of: number) => void,
+): Promise<WingOutcome> {
+  const yes = (op: ClientOp): ClientOp => (forget && WING_ASKS.has(op.t) ? ({ ...op, forget: true } as ClientOp) : op);
+  const keyed = made.ops.flatMap((op, i) => (isKeyOp(op) ? [i] : []));
+  const body = made.ops.flatMap((op, i) => (isKeyOp(op) ? [] : [i]));
+  const total = made.ops.length;
+  let answers = NO_ANSWERS;
+  let first = "unknown" as OpAnswer;
+  let keySent = false;
+  onAnswered(0, total);
+  await new Promise<void>((resolve) => {
+    let answered = 0;
+    let bodyLeft = body.length;
+    let bodyTaken = true;
+    const once = new Set<number>();
+    const opts = (i: number): { group: string; groupScope: "setup"; onAnswer: OnAnswer; quiet: boolean } => ({ group, groupScope: "setup", quiet: true, onAnswer: (a) => hear(i, a) });
+    const sendKey = () => {
+      keySent = true;
+      const ns = actions.dispatchMany ? actions.dispatchMany(keyed.map((i) => ({ op: made.ops[i]!, opts: opts(i) }))) : keyed.map((i) => actions.dispatch(made.ops[i]!, opts(i)));
+      ns.forEach((n, k) => {
+        if (n === null) hear(keyed[k]!, "refused");
+      });
+    };
+    const hear = (i: number, a: OpAnswer) => {
+      if (once.has(i)) return;
+      once.add(i);
+      if (i === body[0]) first = a;
+      answers = addAnswer(answers, a);
+      answered++;
+      onAnswered(answered, total);
+      if (!keyed.includes(i)) {
+        if (a !== "taken") bodyTaken = false;
+        if (--bodyLeft === 0) {
+          // The page and its pins only once all the rest is taken: otherwise they stay unsent (3.5, D-261110-174).
+          if (bodyTaken && keyed.length > 0) queueMicrotask(sendKey);
+          else resolve();
+          return;
+        }
+      }
+      if (answered === (keySent ? total : body.length)) resolve();
+    };
+    const [lead, ...rest] = body;
+    if (lead === undefined) return resolve();
+    if (actions.dispatch(yes(made.ops[lead]!), opts(lead)) === null) {
+      // Refused at input, nothing after it goes.
+      first = "refused";
+      answers = addAnswer(answers, "refused");
+      return resolve();
+    }
+    const ns = actions.dispatchMany ? actions.dispatchMany(rest.map((i) => ({ op: yes(made.ops[i]!), opts: opts(i) }))) : rest.map((i) => actions.dispatch(yes(made.ops[i]!), opts(i)));
+    ns.forEach((n, k) => {
+      if (n === null) hear(rest[k]!, "refused");
+    });
+  });
+  if (first === "refused") return { k: "none", lost: false };
+  if (answers.refused > 0) return { k: "partial" };
+  if (answers.unknown === 0) return { k: "complete", checked: false };
+  // Lost answers: the wing's part of the scene the server holds against the scratch room's, without the key where it never went.
+  const { store } = room;
+  if (store.getState().sceneId !== made.sceneId || !(await sceneShown(store, made.sceneId, room.checkMs ?? CHECK_MS))) return { k: "unconfirmed" };
+  const view = store.getState().view;
+  const sent = keySent ? made.ops : made.ops.filter((op) => !isKeyOp(op));
+  const scratch = keySent ? made.room : withoutKey(made.room, made.ops, made.ids);
+  const same = view !== null && wingContents(view, made.sceneId, sent, made.ids, true) === wingContents(scratch, made.sceneId, sent, made.ids, false);
+  return same ? { k: "complete", checked: true } : { k: "unconfirmed" };
+}
+
+/** The scratch room without the key's page and pins, for a comparison where they were never sent. Its ids are placeholders, which `ids` maps to the ops' fresh ones. */
+function withoutKey(room: RoomState, ops: readonly ClientOp[], ids: ReadonlyMap<string, string>): RoomState {
+  const sent = new Set(ops.flatMap((op) => (op.t === "journal.create" ? [op.page.id] : op.t === "pin.put" ? [op.pin.id] : [])));
+  const kept = <T>(r: Readonly<Record<string, T>>) => Object.fromEntries(Object.entries(r).filter(([id]) => !sent.has(ids.get(id) ?? id)));
+  return { ...room, journal: kept(room.journal), pins: kept(room.pins) };
 }
