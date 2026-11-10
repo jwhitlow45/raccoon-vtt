@@ -2,6 +2,7 @@ import { createStore } from "zustand/vanilla";
 import type { SceneId } from "#shared/model.ts";
 import { scopeSlot, type RoomScope } from "../../state/scope.ts";
 import { CARRIED_NO_KEEP, CARRIED_STAIRS_GONE, CARRIED_TOO_LONG, CARRIED_WALKS } from "../floors/linkWords.ts";
+import type { RoomView } from "../../state/types.ts";
 import type { ToolContext } from "../tools.ts";
 import { frameFits, rulerFrame, shareLocked, stillCarried, type Carry } from "./carry.ts";
 import { allStops, type LastTap, type RulerGesture, type RulerState, type RulerStop } from "./ruler.ts";
@@ -149,6 +150,25 @@ export function endGoneCarry(ctx: PublishCtx & Pick<ToolContext, "getState">): b
   publish(ctx, null);
   ctx.ui?.notify(CARRIED_STAIRS_GONE);
   return true;
+}
+
+/**
+ * Follows the room for the tool's whole active life, not the options row's,
+ * which a sheet or picker unmounts while the ruler stays on the board: when
+ * the whole copy's ends change, a carried ruler whose stairs are gone ends
+ * (endGoneCarry). Returns the way to stop.
+ */
+export function watchGoneStairs(room: { getState(): RoomView; subscribe(listener: (state: RoomView) => void): () => void }, scope: RoomScope): () => void {
+  const tool = scope.get(rulerSlot);
+  const endsOf = (state: RoomView) => state.view?.floorLinks;
+  let seen = endsOf(room.getState());
+  return room.subscribe((state) => {
+    const ends = endsOf(state);
+    if (ends === seen) return;
+    seen = ends;
+    const ctx = tool.activeCtx;
+    if (ctx && tool.store.getState().carry) endGoneCarry(ctx);
+  });
 }
 
 /**

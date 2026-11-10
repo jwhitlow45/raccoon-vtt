@@ -1,7 +1,9 @@
 import type Konva from "konva";
 import { useEffect } from "react";
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { scopeSlot, useScoped } from "../../state/scope.ts";
+import { scopeSlot, useRoomScope, useScoped } from "../../state/scope.ts";
+import { useRoomStore } from "../../state/view.ts";
+import { watchGoneStairs } from "./rulerStore.ts";
 import type { ControllerProps } from "../layers.ts";
 
 /** This device's own token drag as the ruler layer measures it: the pressed token and where Konva holds it now, in cells, not snapped. */
@@ -22,6 +24,7 @@ export const localMeasureSlot = scopeSlot((): StoreApi<{ drag: LocalMeasure }> =
 export function RulerController(props: ControllerProps): null {
   const store = useScoped(localMeasureSlot);
   useLocalDrag(props.stage, store);
+  useGoneStairs();
   return null;
 }
 
@@ -43,4 +46,10 @@ function useLocalDrag(stage: Konva.Stage | null, store: StoreApi<{ drag: LocalMe
       store.setState({ drag: null });
     };
   }, [stage, store]);
+}
+
+function useGoneStairs(): void {
+  const room = useRoomStore();
+  const scope = useRoomScope();
+  useEffect(() => watchGoneStairs(room, scope), [room, scope]);
 }

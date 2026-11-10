@@ -14,7 +14,8 @@ import type { ToolContext } from "../tools.ts";
 import { CARRIED_NO_KEEP, CARRIED_STAIRS_GONE, CARRIED_TOO_LONG, CARRIED_WALKS } from "../floors/linkWords.ts";
 import { climbFeet, frameFits, priorOut, rulerAnchors, rulerFrame, shareLocked, stairsOffer, stairsPlan, stillCarried, type Carry, type Stairs } from "./carry.ts";
 import { tokenStop, type RulerState, type RulerStop } from "./ruler.ts";
-import { endGoneCarry, pickMeasure, publish, refuseKeep, restoreRuler, rulerActivated, rulerDeactivated, rulerSlot, takeStairs } from "./rulerStore.ts";
+import { createStore } from "zustand/vanilla";
+import { endGoneCarry, watchGoneStairs, pickMeasure, publish, refuseKeep, restoreRuler, rulerActivated, rulerDeactivated, rulerSlot, takeStairs } from "./rulerStore.ts";
 import { measureWalk, walkText, type WalkInput } from "./walkRuler.ts";
 
 /*
@@ -418,6 +419,23 @@ describe("a press, the switch and the edges (4.2, D-261110-078)", () => {
       assert.equal(sent[sent.length - 1]!.e.k, "rulerEnd");
       assert.equal(endGoneCarry(ctx), false, "nothing left to end");
     }
+  });
+
+  test("the watch ends a carried ruler when co-DM removes its stairs, with no options row mounted", () => {
+    const s = stairsRoom();
+    const { ctx, tool, scope, state, said } = carryUp(s);
+    tool.activeCtx = ctx;
+    const room = createStore<{ view: RoomState }>(() => ({ view: s }));
+    const stop = watchGoneStairs(room as never, scope);
+    // An unrelated change leaves the ends as they are and the ruler stands.
+    room.setState({ view: { ...s } });
+    assert.ok(tool.store.getState().ruler);
+    const { l1, ...none } = s.floorLinks!;
+    state.view = { ...s, floorLinks: none } as RoomState;
+    room.setState({ view: state.view });
+    assert.deepEqual([tool.store.getState().ruler, tool.store.getState().carry], [null, null]);
+    assert.deepEqual(said, [CARRIED_STAIRS_GONE]);
+    stop();
   });
 
   test("a copy that holds no ends yet, or a ruler that is not carried, is left alone", () => {
