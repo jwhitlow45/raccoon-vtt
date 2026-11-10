@@ -43,7 +43,7 @@ The client's readers of these numbers stay as they are. The store predicts an op
 
 ## 3. Approaches weighed
 
-- **A count that private ops never move (chosen).** A second number beside `seq` moves once for each member op the room answers, taken or refused, and once for each member change applied over HTTP. Bookkeeping never moves it. Frames publish it as it stands at each commit, and it is stored in every commit's transaction. Twin rooms that receive the same members' ops get the same numbers, whatever the bookkeeping does. It costs one integer per batch, and the client does not change.
+- **A count that private ops never move (chosen).** A second number beside `seq` moves once for each member op the room answers, taken or refused, and once for each member change applied over HTTP. Bookkeeping never moves it. A member's answer takes the server's clock in milliseconds, or one past the last number when that is later, and frames carry the clock as their batch closes (4.8). The stored number is written in every commit's transaction. Twin rooms that receive the same members' ops get the same numbers, whatever the bookkeeping does. It costs one integer per batch, and the client does not change.
 - **Numbers per recipient.** Log ids are stored once and shared by the state, the archive, receipts and `room_log_access`, and turn numbers and record ids live in state and come back in ops (`undo` with `log`, `record`). Each projection would need a translation for each player and a reverse map for each op, plus a record of which ops reached each player, offline ones too. That means projecting every member on every batch inside the fan-out and changing about 40 client readers. Rejected for cost (D-261109-066).
 - **Equal counts by padding.** Write every bookkeeping op for every floor in every batch and tick on a fixed clock. This stores more rows, the explore itself reads the list of sight holders, and any conditional server op added later would reopen the problem without a sign. Rejected.
 - **No numbers on the wire.** Opaque ids ordered by time. Two lines in the same millisecond would misorder, and every reader in section 2 would change. Rejected.
@@ -52,15 +52,15 @@ The client's readers of these numbers stay as they are. The store predicts an op
 
 ### 4.1 The count, and what stays on `seq`
 
-The count (`#pub` in the room actor) is a nonnegative integer for each room, and it is never less than any number a device was given.
+The count (`#pub` in the room actor, the stored number) is a nonnegative integer for each room, at or above the number of every stored row and line. The highest number handed out (`#handed`, 4.8) is at or above it and every number a device was given.
 
 `seq` keeps every storage job, and nothing a player receives is made from it. Those jobs are the numbering of stored rows, replay order and contiguity, the prune of covered rows, `batchCommitted`, snapshot gating, `#ensureBatch`, the asset caches `#visibleCache` and `#stagedVisibleCache` (which must miss after an uncounted op changes state, for example a tick moving to a track whose sound is refused), and a deletion step's `committed.seq` argument.
 
-The two are never compared. The count can run ahead of `seq`, because refusals move it and store no row. It can run behind, because bookkeeping rows take a `seq` and leave the count.
+The two are never compared. The number runs far ahead of `seq`, since it follows the clock, and bookkeeping rows take a `seq` and leave it.
 
 ### 4.2 Where the count moves
 
-The count moves once for each answered member op and each applied member change, at these points and nowhere else.
+A new number is taken once for each answered member op and each applied member change, at these points and nowhere else, and the stored number moves to the batch's number at the close of a batch that answered one (4.8).
 
 - `#reduce` installs a counted op in one step with nothing inside it that can throw. Everything the step needs is prepared before it: `#ensureBatch`, the row, `growthBound` for the size guard, and the time `lastOpAt` takes. The step adds the row to the batch, moves the staged state and `seq`, moves the count and the batch's `answered`, sets `lastOpAt`, and installs the fan-out's metadata: each of `result.touched` pushed onto `batch.touched` by a loop, and `batch.global` when set. The size guard's `grew` and `memory?.commit()` run after it. Done in another order, a throw between the staged state and the row would keep a refused op's state and leave a gap in `seq`. Without its touched keys an accepted op would reach no other device. A throw before the install leaves no effect of the op, and `#refuseFault` moves the count once. A throw after it keeps the whole accepted state, its row once and its keys, and `#settleStaged` finishes it. The ops that go through this step are a member's op, `sys.restore`, `sys.dice` and the three member changes from `#processSys`.
 - `#refuse` moves it for every refusal of a member op, including one after a failed `#reduce` and the refused branches of `#answerFromReceipt` and `#finishAsk`.
@@ -70,7 +70,7 @@ It does not move in `#settleStaged` (the staged row already moved it), on a hell
 
 ### 4.3 The numbers ops carry
 
-- A counted op reduces with `env.seq` set to `#nextNumber()`, the count plus one, which is the number it takes at staging. The restore preflight and the ask read use the same helper.
+- A counted op reduces with `env.seq` set to `#nextNumber()`, which is the number it takes at staging (4.8). The restore preflight and the ask read use the same helper.
 - An uncounted op reduces with `env.seq` set to the count at its staging, whatever was last published (D-261109-068). Its result never depends on that number.
 - **No bookkeeping op starts a turn.** `turnStarted` in shared/reducer/trapStep.ts returns null for `sys.explore`, `sys.remember` and `sys.sound` by op type, live and in replay, for every op version (D-261109-078). It used to test `start.seq === tx.env.seq`, and an uncounted op carries the count of the Next before it, so a tick or a mid-batch explore would have sprung the turn-start traps a second time. Before op 57 these rows took `seq + 1`, never equal to a turn's number, so the exclusion changes no stored room.
 - `Env.uncounted: true` (shared/reducer/tx.ts) marks an uncounted op. `Tx` refuses with `invalid` any log or trap line written under it. This is a net only. The actor's refused-server-op path logs it, and a refused map step makes its scene forget.
@@ -78,11 +78,11 @@ It does not move in `#settleStaged` (the staged row already moved it), on a hell
 
 ### 4.4 Batches and frames
 
-- `CommittedBatch.pub` is the count as it stands at `#commitNow`, after the batch's explore and map step, with refusals and row-less answers included. An event's `seq` is `batch.pub`. `committed.pub` takes it when the commit lands.
-- `buildSnapshot(state, pub, conn, watermark)`, the resent event, the empty event and the history frame all send `committed.pub`. A refused op and a taken one read alike at once.
+- A batch's `pub` is the number its frames carry, set at `#commitNow` before its explore and map steps, and its `stored` is the stored number then (4.8). The fan-out's `CommittedBatch.pub` and an event's `seq` are `batch.pub`. When the commit lands `committed.pub` takes it, and `committed.through` takes `stored`.
+- `buildSnapshot(state, pub, conn, watermark)`, the resent event, the empty event and the history frame are sent at the close of the batch the request joined, with that batch's number (4.8). A refused op and a taken one read alike.
 - The receipt row's `seq` is the op's number. `stateThrough` (server/http/receipts.ts) waits on the committed `through`. `captureView` in server/rooms/logHistory.ts carries the committed `through`, and the log read's scan stops at it (its `maxSeq` is the view's `through`), so a page read during a commit returns none of that commit's lines.
-- The batch cap counts answers only. Each batch keeps `answered`, the count's moves since it opened. The cap compares `answered` with `maxBatchOps`, so a refusal fills a batch as a taken op does. Compared by rows instead, a second player's hidden move that is taken would split another player's acks into [1, 2] and [3], and the same move refused would give [1, 2, 3]. `#walkEndsBatch` finds work when `answered > 0`, which keeps its flush invariant: a batch with no answer holds at most a tick or a cleanup remember, and neither changes what `stopGround` reads (fog, explored tiles and sight).
-- The batch timer runs from the first answer. A batch an uncounted op opened, a tick or a cleanup remember, runs its own timer, and the first answer to join it restarts the timer once from that moment (`#scheduleCommit`, D-261109-117).
+- The batch cap counts answers only. Each batch keeps `answered`, the count's moves since it opened. The cap compares `answered` with `maxBatchOps`, so a refusal fills a batch as a taken op does. Compared by rows instead, a second player's hidden move that is taken would split another player's acks into [1, 2] and [3], and the same move refused would give [1, 2, 3]. Both the cap and `#walkNeedsSteps` count the answers since the batch's steps last ran (4.8). A walk finds work only after such an answer, which keeps its invariant: a batch with no answer since holds at most a tick or a cleanup remember, and neither changes what `stopGround` reads (fog, explored tiles and sight).
+- A batch closes at the next multiple of `batchMs` on the number clock, whoever opened it (`#scheduleCommit`), or at the cap. A deletion step waits for the open batch's own commit.
 - `lastOpAt`, which eviction reads, moves with the count, refusals and row-less answers included, and never for bookkeeping.
 - The wire keeps the name `seq` (D-261109-072). Export keeps writing `seq` in room.json, and it is the count (D-261109-116). Import starts a room at its last line's number, which is already in the count's space.
 
@@ -111,10 +111,21 @@ It does not move in `#settleStaged` (the staged row already moved it), on a hell
 
 ### 4.7 Resync, reconnect, undo and redo, co-DM
 
-- A hello's snapshot carries `committed.pub` and the client overwrites its number with it.
-- An undo or redo is answered once, and its `sys.restore` stores that number. Rides compare `TurnStart.seq` by equality. An HP undo finds its line by id, and that id is in the count's space. History frames carry `committed.pub`, so `history.seq === store.seq` holds.
-- Prediction at `store.seq + 1 + i` stays above every confirmed id, because a frame's number is at least every line id it confirms. A bookkeeping op no longer makes it miss.
+- A hello's snapshot carries the number of the batch that answered it (4.8), and the client overwrites its number with it.
+- An undo or redo is answered once, and its `sys.restore` stores that number. Rides compare `TurnStart.seq` by equality. An HP undo finds its line by id, and that id is in the count's space. A history frame carries the number of the frames it goes out with, so `history.seq === store.seq` holds.
+- Prediction at `store.seq + 1 + i` is a placeholder the confirmed line replaces. The DM's device does not predict an op that can change the turn, so every turn number and record id it holds is a confirmed one.
 - Every DM socket, preview and table display gets the same count. A saved roll's `seq` comes from `env.seq`, so reopening a save compares numbers in one space.
+
+### 4.8 Numbers on the clock
+
+- `ActorOptions.numberClock` is `now` unless a test passes one. A counted answer takes `max(handed + 1, clock)`, where `handed` is the highest number any device was sent or any answer took, kept in memory. The stored number (`#pub`) moves only with answers and at the close of a batch that answered one.
+- A command reads both clocks once, as it is queued (`#enqueue`), and its number, its lines' times and `lastOpAt` come from that reading, however long it waited behind a commit or a deletion step. The music's tick reads them as the queue reaches it, since the step it works out is for that moment.
+- A batch's frames carry `max(handed, close)`, where `close` is the number clock read as the batch closes, before its explore and map steps. A batch that answered no one stores nothing new, and hands its number out only as one of its frames goes to a device.
+- A counted op's `at` is its number as a date while that leads the clock by at most a second, and the clock otherwise.
+- Every snapshot, the hello's, a preview's, a display's and a delayed one's, and every resent op's ack with the history after it, joins the open batch and is answered when it commits, from the committed state, with its number. A batch of reads alone writes nothing.
+- A walk that needs the batch's sight runs the batch's explore and map steps in place from a cursor, and the end step reads from the cursor, so the rows and the state equal a commit before the walk.
+- A load warns once when `rooms.pub` leads the clock by more than 5 minutes, and an import refuses a file whose newest line leads it by more than 5 minutes.
+- Tests that pin small numbers run a standing number clock (`STANDING_CLOCK` in server/rooms/undoScopeTesting.ts, the default of `startEngine`, `scopeActor` and `storedActor`). `ITEST_NUMBER_CLOCK=real` runs the integration suite on the real clock.
 
 ## 5. Residuals
 
@@ -123,7 +134,7 @@ It does not move in `#settleStaged` (the staged row already moved it), on a hell
 
 ## 6. Tests
 
-Twin rooms differ in hidden state alone and take the same members' ops. `numbersIn(frames)` in shared/seqTestutil.ts lists every frame's `seq` and every log and trap line id, turn start, path turn, turn record id and receipt `seq` the frames carry. Each twin test compares the first player's and the table display's whole frames, with history ids mapped to a first-seen order. The twin tests leave some kinds' rev out of the comparison, and `KINDS_WITHOUT_REV` names them. Every twin case fails on the code before the change.
+Twin rooms differ in hidden state alone and take the same members' ops. `numbersIn(frames)` in shared/seqTestutil.ts lists every frame's `seq` and every log and trap line id, turn start, path turn, turn record id and receipt `seq` the frames carry. Each twin test compares the first player's and the table display's whole frames byte for byte, every rev included, with history ids mapped to a first-seen order. Every twin case fails on the code before the change.
 
 - **server/rooms/seq.twin.test.ts** covers a second player walking out of sight, then a reload, a resend, a tagged roll, initiative with Next, a trap, a map step, an image cleanup, a tick, an op taken in one twin and refused in the other, restarts with snapshots, undo and redo, two DM sockets with a preview, faults before and after the install, bursts queued behind a held commit with `maxBatchOps` 3, a walk after a lone tick, the sweep, and the batch timer.
 - **server/rooms/seq.random.test.ts** runs random twins: moves, chats, whispers, rolls, initiative, undo, edits on remembered ground, an image delete, the clock past a track's end, the sweep, resends, page reloads and room reloads through a stored room fake, and bursts that the actor's own cap splits. After every event the counts agree between twins and every frame the first player got is equal byte for byte while the two twins' players see the same ground. A frame's `seq` never decreases, and no turn-start trap springs twice for one Next.
@@ -141,7 +152,7 @@ The whole unit and integration suites run, with the tests that pinned a number c
 
 - `#reduce` reads the clock for `lastOpAt` just after the install, with `grew` and the memory commit (D-261109-110).
 - The barrier is `#countSnapshot`, built by the `snapshotJson` option, which only tests replace to make the build throw. Its gate (ops or watermarks) is in the actor, and `commitBatch` writes any snapshot it is given.
-- `CommittedBatch` carries `pub` and `HistoryView` carries `through`, and neither carries the storage `seq`. The sessions cache keys on the view's `through`, the number the read stops at, which equals `pub` except in a room whose replay failed (D-261109-164).
+- `CommittedBatch` carries `pub` and `HistoryView` carries `through`, and neither carries the storage `seq`. The sessions cache keys on the view's `through`, the number the read stops at: the stored number at the last commit, or where a failed replay stopped (D-261109-164).
 - The batch-end explore runs when the batch answered something (`answered > 0`) or holds door work, and the explore inside it needs an answer. A refusal therefore explores, and a batch that only keeps the room's books never does (D-261109-165).
 - A room whose replay failed skips the explore and the map step, and `#appendServerOp` refuses with an error log, so no server op writes into the failed tail. Its refusals still commit their count and watermarks (D-261109-186).
 - One helper, `#snapshotStored`, records a stored snapshot for a commit's barrier and for a snapshot written alone, and returns the quota check, which `#writeSnapshot` awaits.

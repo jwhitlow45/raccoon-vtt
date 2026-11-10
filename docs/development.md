@@ -33,6 +33,7 @@ follows `PORT`.
 | `pnpm typecheck` | `tsc --noEmit` for the server and the client |
 | `pnpm test` | unit tests (`*.test.ts`) |
 | `pnpm test:int` | integration tests against the dev postgres (`*.itest.ts`). Run `pnpm db:up` first |
+| `pnpm test:int:clock` | the same integration tests with rooms numbered by the real clock, as in production (`ITEST_NUMBER_CLOCK=real`). `pnpm test:int` gives them a clock that stands still, so numbers count by one |
 | `pnpm test:e2e` | builds the client, then runs the browser tests (`e2e/*.e2e.ts`) against a server on port 3100 (`E2E_PORT`) and the dev postgres, one file at a time as a single shard of [continuous integration](#continuous-integration): the join limits' counts are cleared before each file, and a failing file runs once more. Needs Google Chrome installed. Screenshots go to `test-results/e2e-screenshots` (gitignored), or to the folder in `E2E_SCREENSHOT_DIR`, and `E2E_SCREENSHOT_DIR=0` takes none. Run it alone, not beside `pnpm test:int`, since both use the same database |
 | `pnpm test:e2e:shard <index> <count>` | one shard of the browser tests, as [continuous integration](#continuous-integration) runs them. Run `pnpm build` first |
 | `pnpm coverage` | line coverage of the unit and integration tests, and with `--e2e <folder>` of the browser tests too, with no new dependency. See [Coverage](#coverage). Needs `DATABASE_URL` set to a database the integration tests may use |
@@ -182,6 +183,8 @@ These jobs run on Ubuntu:
 - **build**: `pnpm build` once, kept for the e2e shards.
 - **typecheck-int**: `pnpm typecheck` and `pnpm test:int`, the second
   against a postgres service container like the one in `docker-compose.yml`.
+- **int-clock**: `pnpm test:int:clock`, on a postgres container of its own,
+  once the build has said the push is not docs only.
 - **unit**: `pnpm test`, which needs no database.
 - **e2e**, 14 shards at once: each shard installs, downloads the build,
   gets a postgres service container of its own and runs its share of

@@ -1022,6 +1022,8 @@ A scene can have weather over its map: rain, snow, fog, falling leaves, ash or s
 ## Combat and Initiative
 
 - The DM starts a fight with the selected tokens, every token on the scene, or only the visible ones. Players add their own character under "Your creatures".
+  - A fight shows once the server takes its start, and until then the pressed New fight button is busy.
+  - A creature added while the start waits, from another New fight button, the selection's Add to the fight, a saved encounter placed with "Add them to the fight" or a new companion with a turn of its own, joins the fight behind the start.
 - Players type in their own Initiative, or tap Roll in their row's Initiative box.
   - With "Players may type their roll totals" off, they roll it, and the server refuses a typed one, whether set on their row or given as the row joins the fight.
   - The DM types in the monsters', taps Roll in a row's box, or uses **Auto Initiative**: by creature (identical monsters share a roll), one each, or all at once.
@@ -1031,7 +1033,7 @@ A scene can have weather over its map: rain, snow, fog, falling leaves, ash or s
   - A row's Roll has the one-roll options. Auto Initiative and a monster's Roll Initiative have them too, for Advantage, Disadvantage or Normal, their dice always the DM's alone, and Auto Initiative applies a pick before it groups the monsters.
 - "Use Initiative scores for monsters" in Room settings, or "Monsters use Initiative scores" in the Initiative panel, gives them 10 + their Dexterity modifier instead of a roll.
 - **Roll monsters' Initiative** (DM, Initiative panel): a switch under Start a fight with, on by default and kept on this device for each room. Help: "Auto Initiative rolls for every monster as the fight starts."
-  - With it on, Everyone here, Visible to players and Selected token start the fight and then roll for the monster rows that have no value, by the tracker's sharing mode. The fight shows at once, and Auto Initiative reads "Rolling…", with every roll button waiting, until the totals land.
+  - With it on, Everyone here, Visible to players and Selected token start the fight and then roll for the monster rows that have no value, by the tracker's sharing mode. The pressed button reads "Rolling…" until the server takes the start. Then the fight shows, and Auto Initiative reads "Rolling…", with every roll button waiting, until the totals land.
   - Starting a fight of any size is one Undo step, and its rolls are another, so Undo takes back the totals first, then the start.
   - Offline, the start waits with the rest, and the monsters roll once the server takes it.
   - With "Monsters use Initiative scores" on, the switch rolls only the monster rows still without a score, such as a custom monster, and with every row valued it rolls nothing.

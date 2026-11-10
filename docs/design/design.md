@@ -587,7 +587,7 @@ Only `committed` is ever stored or reported to a client. It is written to `clien
 
 **The explore step** (v1 wave 4, section 13.6). Before the batch commits, the actor works out the party's sight on the player scene, when it has vision and fog on and no blackout is on, and appends one `sys.explore` to the same batch with every explored tile the sight adds to (`server/rooms/explore.ts`), each with the tile's new bits, in row order. It is no one's op and on no undo stack. The size guard never refuses it: the explored layer's room to grow is reserved in advance (section 10.5). Replay applies the stored bits and never works out sight again. Replay checks every stored op with the protocol schema (section 16.2), so an op that fails it is refused when it is made, never stored where it would stop the room's next load.
 
-The batch commits in one transaction after 20 ms, or at once at 50 ops. It writes the `room_ops` rows, the `room_log` rows for their log entries, since v1 wave 7 the `roll_receipts` rows of the tagged ops it settles, and the `client_watermarks` rows. After the commit succeeds:
+The batch commits in one transaction at the next multiple of 20 ms on the server's clock, whoever opened it, or at once when it holds 50 answers. It writes the `room_ops` rows, the `room_log` rows for their log entries, since v1 wave 7 the `roll_receipts` rows of the tagged ops it settles, and the `client_watermarks` rows. After the commit succeeds:
 
 - the staged state becomes the committed state, and every `committed` watermark becomes its `staged` value;
 - the actor sends each viewer one `ev` for the whole batch (section 7.3), with each client's `acks` and `rejects`.
