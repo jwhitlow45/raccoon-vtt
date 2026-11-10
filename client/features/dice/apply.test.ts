@@ -166,6 +166,41 @@ describe("sendFilledEntry, one op per holder", () => {
     assert.ok(!chips(applied).includes("thorn"), "the chip is gone once applied");
   });
 
+  test("a dispatch the store will not queue counts as refused, so only the holders that queued are recorded", async () => {
+    const { hpTargets } = await import("../tokens/groupHp.ts");
+    const { parseHpInput } = await import("../tokens/hpInput.ts");
+    const view = table();
+    const { env, sent, marked } = harness(view);
+    let calls = 0;
+    const dispatch = env.actions.dispatch;
+    env.actions.dispatch = (op, opts) => (calls++ === 0 ? null : dispatch(op, opts)) as never;
+    const chip = rollChip([slash("dm1")])!;
+    const parsed = parseHpInput(String(chip.amount), "damage", chip);
+    assert.ok(parsed.ok);
+    const targets = hpTargets([view.tokens.g1!, view.tokens.g2!], { role: "dm", memberId: "dm1", characters: view.characters, playersApplyDamage: false });
+    sendFilledEntry(env, targets, parsed.change, false, chip);
+    assert.equal(sent.length, 1);
+    assert.deepEqual(marked, [], "waits for the queued op");
+    sent[0]!.onAnswer!("taken");
+    assert.deepEqual(env.applies.getState().rolls["9:0"]?.applied.map((a) => a.holder), ["token:g2"]);
+    assert.deepEqual(marked, [chip.lineIds]);
+  });
+
+  test("when no dispatch is queued nothing is recorded and the chip stays", async () => {
+    const { hpTargets } = await import("../tokens/groupHp.ts");
+    const { parseHpInput } = await import("../tokens/hpInput.ts");
+    const view = table();
+    const { env, marked } = harness(view);
+    env.actions.dispatch = (() => null) as never;
+    const chip = rollChip([slash("dm1")])!;
+    const parsed = parseHpInput(String(chip.amount), "damage", chip);
+    assert.ok(parsed.ok);
+    const targets = hpTargets([view.tokens.g1!], { role: "dm", memberId: "dm1", characters: view.characters, playersApplyDamage: false });
+    sendFilledEntry(env, targets, parsed.change, false, chip);
+    assert.deepEqual(marked, []);
+    assert.equal(env.applies.getState().rolls["9:0"], undefined);
+  });
+
   test("recordApplied dedupes by holder within one call", () => {
     const applies = applySlot.create();
     recordApplied(applies, "9:0", [{ holder: "character:c-thorn", name: "Thorn" }, { holder: "character:c-thorn", name: "Thorn" }]);

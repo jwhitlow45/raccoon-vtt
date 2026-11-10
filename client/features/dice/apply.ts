@@ -109,7 +109,7 @@ export function sendFilledEntry(env: Pick<ApplyEnv, "actions" | "applies" | "mar
       const to = sentTo[next++];
       const n = env.actions.dispatch(op, {
         ...opts,
-        onAnswer: (answer, ...rest) => {
+        onAnswer: (answer) => {
           if (!to || answers.has(to.holder)) return;
           answers.set(to.holder, answer);
           finish();
