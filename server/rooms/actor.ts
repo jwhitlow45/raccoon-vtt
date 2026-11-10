@@ -70,6 +70,7 @@ import { dmHistoryValues, dmPoseRestore } from "./undoDm.ts";
 import { retainedSaveOutcome } from "#shared/saveOutcomes.ts";
 import { soundDue, soundStep, type Playing } from "#shared/sound.ts";
 import { isPlayingRefusal } from "#shared/reducer/sound.ts";
+import { ownEntry } from "#shared/records.ts";
 import { SAVE_CANNOT_REOPEN, type SaveOutcomeTransition } from "#shared/saveOutcomeContract.ts";
 
 /**
@@ -1948,7 +1949,7 @@ export class RoomActor {
     }
     // A scene's floors fit together after every op, undo, redo and restore (docs/design/design-v1-floors.md 9,
     // D-261107-221): checked here on the server's own state, never in the reducer, which a device replays on its copy.
-    for (const sceneId of floorsWritten(measured.touched, sceneIds)) {
+    for (const sceneId of floorsWritten(measured.touched, sceneIds, before, measured.state)) {
       const problem = floorProblem(measured.state, sceneId);
       if (problem !== null) return { ok: false, code: "invalid", message: problem };
     }
@@ -3208,13 +3209,20 @@ function wallsMoved(before: RoomState, after: RoomState): string[] {
  * The floors whose invariants an op may have broken (floorProblem): each
  * scene record and opened mark it wrote, gone ones included, and each scene
  * whose limits it pushed. floorProblem checks a floor's whole scene, so one
- * floor of each stands for the rest.
+ * floor of each stands for the rest. Then the floor of each build chunk and
+ * each end of stairs it wrote, before and after, so any op that changes
+ * the ground under stairs meets their check, whatever op it is
+ * (docs/design/design-v1-floors.md phase 2, 3, D-261109-106).
  */
-function floorsWritten(touched: readonly EntityKey[], sceneIds: readonly string[]): string[] {
+function floorsWritten(touched: readonly EntityKey[], sceneIds: readonly string[], before: RoomState, after: RoomState): string[] {
   const out = new Set(sceneIds);
   for (const key of touched) {
     const parsed = parseKey(key);
     if (parsed?.kind === "scene" || parsed?.kind === "opened") out.add(parsed.id);
+    else if (parsed?.kind === "chunk") out.add(parsed.sceneId);
+    else if (parsed?.kind === "floorLink") {
+      for (const end of [ownEntry(before.floorLinks, parsed.id), ownEntry(after.floorLinks, parsed.id)]) if (end) out.add(end.sceneId);
+    }
   }
   return [...out];
 }
@@ -3308,6 +3316,35 @@ function scenesOf(op: Op, before: RoomState, after: RoomState): string[] {
     case "drawing.create":
       out.add(op.drawing.sceneId);
       break;
+    // Stairs join two floors, and floorProblem reads both (docs/design/design-v1-floors.md phase 2, 3).
+    case "token.climb": {
+      tokenScene(op.tokenId);
+      const link = ownEntry(before.floorLinks, op.linkId);
+      if (link) out.add(link.to);
+      break;
+    }
+    case "floorLink.put":
+      out.add(op.link.sceneId);
+      out.add(op.link.to);
+      break;
+    case "floorLink.update":
+    case "floorLink.delete": {
+      const link = ownEntry(before.floorLinks, op.linkId);
+      if (link) {
+        out.add(link.sceneId);
+        out.add(link.to);
+      }
+      break;
+    }
+    // A pit can never open under stairs (3).
+    case "trap.create":
+      out.add(op.trap.sceneId);
+      break;
+    case "trap.update": {
+      const trap = ownEntry(before.traps, op.trapId);
+      if (trap) out.add(trap.sceneId);
+      break;
+    }
     case "sys.restore":
       for (const entry of op.entries) {
         const parsed = parseKey(entry.key);
@@ -3328,6 +3365,12 @@ function scenesOf(op: Op, before: RoomState, after: RoomState): string[] {
           if (restored?.sceneId) out.add(restored.sceneId);
           const current = readEntity(after, entry.key) as { sceneId?: string } | null;
           if (current?.sceneId) out.add(current.sceneId);
+        } else if (parsed.kind === "floorLink") {
+          // Both floors an end joins, as it was put back and as it was (docs/design/design-v1-floors.md phase 2, 3).
+          for (const end of [entry.value, readEntity(before, entry.key), readEntity(after, entry.key)] as ({ sceneId?: string; to?: string } | null | undefined)[]) {
+            if (end?.sceneId) out.add(end.sceneId);
+            if (end?.to) out.add(end.to);
+          }
         }
       }
       break;
