@@ -26,8 +26,8 @@ import { roomBox } from "./marks.ts";
 import { DungeonPreview, type Drawn } from "./Preview.tsx";
 import { RoomPanel } from "./RoomPanel.tsx";
 import { keptSize, loadChoices, saveChoices, settingsOf, sideCap, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
-import { formatSeed, newSeed, parseSeed } from "./seed.ts";
-import { CHOICE_NAMES, isHexGrid, MIN_SIDE, type DungeonSettings, type GridKind, type SizeChoice } from "./settings.ts";
+import { formatSeed, newSeed, parseSeed, type Seed } from "./seed.ts";
+import { CHOICE_NAMES, isHexGrid, MIN_SIDE, type DungeonSettings, type GridKind, type PlanContext, type SizeChoice } from "./settings.ts";
 import { sendDungeon, warmOpChecks } from "./send.ts";
 import {
   BRING_BACK,
@@ -74,7 +74,7 @@ const TWO_COLUMNS_PX = 640;
  * answer without them has no rooms to edit and a plain fit error.
  */
 type Answered = Preview & { facts?: RoomFacts[]; fitted?: number; why?: string };
-const previewEdited = preview as (...args: [...Parameters<typeof preview>, DungeonEdits | null]) => Promise<Answered>;
+const previewEdited = preview as unknown as (settings: DungeonSettings, seed: Seed, scene: SceneInput, context: PlanContext, key: KeyInput | null, edits: DungeonEdits | null) => Promise<Answered>;
 
 type Shown = { result: Extract<Answered, { ok: true }>; drawn: Drawn };
 /** What Bring them back restores beside the edits: the choices and the seed as typed. */
@@ -223,7 +223,7 @@ export function GenerateDialog(props: {
           if (!mounted.current) return;
           if (!result.ok) {
             // Edits freeze a layout that fit, so a plan with them that does not fit is the newest edit's doing: it is undone, and the plan asked again (4.2).
-            if (result.error === "fit" && sent !== null && asked === request.current && editsRef.current.last !== null) return editStep({ k: "overBudget", report: EDIT_OVER_WALLS });
+            if (result.error === "fit" && (result.why === undefined || result.why === "edits") && sent !== null && asked === request.current && editsRef.current.last !== null) return editStep({ k: "overBudget", report: EDIT_OVER_WALLS });
             if (asked === request.current) setFitWhy(result.why ?? null);
             return step({ k: "answer", id: asked, answer: { ok: false, error: result.error } });
           }
