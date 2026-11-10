@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { clampContext, clampRooms, clampSettings, clampSide, DEFAULT_CONTEXT, DEFAULT_SETTINGS, defaultRooms, litCount, MAX_ROOMS, raisedCount, roomCap, secretCount, SIZE_SIDES } from "./settings.ts";
+import { latticeFor } from "./lattice.ts";
+import { clampContext, clampRooms, clampSettings, clampSide, DEFAULT_CONTEXT, DEFAULT_SETTINGS, defaultRooms, litCount, MAX_HEX_CELLS, MAX_HEX_ROOMS, MAX_HEX_ROWS, MAX_ROOMS, maxSide, raisedCount, roomCap, secretCount, SIZE_SIDES } from "./settings.ts";
 
 describe("dungeon settings", () => {
   test("defaults: Dungeon, Medium, 12 rooms, Normal, Bending, Narrow, loops on, Heights Some, Traps Few at 1-4, dead ends, Secret doors Few, Lit rooms Few, Dressing Some, DM key on", () => {
@@ -126,5 +127,43 @@ describe("dungeon settings", () => {
     assert.equal(raisedCount(50, 6), 3, "half of five rounds up");
     assert.equal(raisedCount(75, 2), 1);
     assert.equal(raisedCount(75, 1), 0, "the entrance alone");
+  });
+
+  test("phase 3: Custom on hexes takes 86 and 87 cells across the rows, 98 and 100 rows, and reads 88 as 87", () => {
+    for (const [h, rows] of [
+      [86, 98],
+      [87, 100],
+    ] as const) {
+      const s = clampSettings({ w: 50, h }, "hexRows");
+      assert.equal(s.h, h);
+      assert.equal(latticeFor("hexRows", s).H, rows);
+    }
+    assert.equal(clampSettings({ w: 50, h: 88 }, "hexRows").h, MAX_HEX_CELLS);
+    assert.equal(latticeFor("hexRows", clampSettings({ w: 50, h: 88 }, "hexRows")).H, MAX_HEX_ROWS);
+    assert.equal(clampSettings({ w: 88, h: 100 }, "hexColumns").w, MAX_HEX_CELLS, "across on Hex columns");
+    assert.equal(clampSettings({ w: 88, h: 100 }, "hexColumns").h, 100);
+    assert.equal(maxSide("squares", "h"), 100);
+    assert.equal(clampSettings({ w: 100, h: 100 }).h, 100, "squares keep 100");
+  });
+
+  test("phase 3: the presets give 34, 57 and 92 rows on Hex rows", () => {
+    assert.deepEqual(
+      (["small", "medium", "large"] as const).map((size) => latticeFor("hexRows", { w: SIZE_SIDES[size], h: SIZE_SIDES[size] }).H),
+      [34, 57, 92],
+    );
+  });
+
+  test("phase 3: Rooms stop at 24 on hexes", () => {
+    assert.equal(roomCap(80, 80, "hexRows"), MAX_HEX_ROOMS);
+    assert.equal(roomCap(80, 80), MAX_ROOMS);
+    assert.equal(clampRooms(40, 80, 80, "hexColumns"), MAX_HEX_ROOMS);
+    assert.equal(clampSettings({ w: 80, h: 80, rooms: 30 }, "hexRows").rooms, MAX_HEX_ROOMS);
+  });
+
+  test("phase 3: a context keeps a hex grid and leaves squares out, so a square context is the one plans always had", () => {
+    assert.deepEqual(clampContext({ feetPerCell: 5, grid: "hexRows" }), { feetPerCell: 5, grid: "hexRows" });
+    assert.deepEqual(clampContext({ feetPerCell: 5, grid: "squares" }), { feetPerCell: 5 });
+    assert.deepEqual(clampContext({ feetPerCell: 5, grid: "octagons" }), { feetPerCell: 5 });
+    assert.deepEqual(clampContext(DEFAULT_CONTEXT), DEFAULT_CONTEXT);
   });
 });
