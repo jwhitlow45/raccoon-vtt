@@ -4,7 +4,7 @@ import { describe, test, type TestContext } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import type { Member, RoomState } from "#shared/model.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
-import { COUNT_SNAPSHOT_VERSION } from "#shared/migrate.ts";
+import { COUNT_SNAPSHOT_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { FAMILIAR, FrameReader, IMAGE, IN_Q, numbersIn, seqTwins, T0, TRACK_END, type SeqTwinOptions } from "#shared/seqTestutil.ts";
 import { trap } from "#shared/testutil.ts";
 import { forgetRememberedStamps } from "../assets/cleanup.ts";
@@ -457,7 +457,7 @@ describe("an op that faults before its install or after it", () => {
         const pair: Pair = [await Twin.open(t, "door", w.door, {}, COUNT_SNAPSHOT_VERSION - 1), await Twin.open(t, "rock", w.rock, {}, COUNT_SNAPSHOT_VERSION - 1)];
         if (barrier) {
           await both(pair, (twin) => twin.apply("p1", { t: "log.chat", text: "ready" }));
-          for (const twin of pair) assert.equal(twin.db.snapshot.version, COUNT_SNAPSHOT_VERSION, `${twin.name}: the first commit saved the room at today's format`);
+          for (const twin of pair) assert.equal(twin.db.snapshot.version, SNAPSHOT_VERSION, `${twin.name}: the first commit saved the room at today's format`);
         }
         await both(pair, async (twin) => {
           for (const [who, op] of C1.slice(0, 4)) await twin.apply(who, op);
@@ -504,7 +504,7 @@ describe("an op that faults before its install or after it", () => {
           const snapshot = twin.clients.dm.sent.find((m) => m.t === "snapshot");
           const held = (snapshot?.state as { drawings?: Record<string, unknown> } | undefined)?.drawings?.[SKETCH];
           assert.equal(held !== undefined, when === "after", `${twin.name}: the DM's snapshot after the restart`);
-          assert.equal(twin.db.snapshot.version, COUNT_SNAPSHOT_VERSION, `${twin.name}: saved at today's format`);
+          assert.equal(twin.db.snapshot.version, SNAPSHOT_VERSION, `${twin.name}: saved at today's format`);
         }
         await both(pair, (twin) => twin.apply("p1", { t: "log.chat", text: "after" }));
         for (const twin of pair) {

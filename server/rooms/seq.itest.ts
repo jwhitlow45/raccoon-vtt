@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, test } from "node:test";
-import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
+import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
 import { FAMILIAR, FrameReader, IN_Q, numbersIn, seqTwins, T0, type SeqTwinOptions } from "#shared/seqTestutil.ts";
@@ -261,7 +261,7 @@ describe("twin rooms on the database give their devices the same frames", () => 
     }
   });
 
-  test("C16: an old room, a format 43 snapshot and op version 56 rows, loads, numbers its next line after its last row and saves the snapshot at 44 with that line", async () => {
+  test("C16: an old room, its snapshot and rows from before the count, loads, numbers its next line after its last row and saves the snapshot at today's format with that line", async () => {
     const owner = t.client();
     const { roomId } = await owner.createRoom("Before the count");
     const s = await t.connect(roomId, owner);
@@ -272,14 +272,15 @@ describe("twin rooms on the database give their devices the same frames", () => 
     const { rows } = await t.pool.query<{ seq: string; state: RoomState }>("select seq::text, state from room_snapshots where room_id = $1", [roomId]);
     const base = Number(rows[0]!.seq);
     const dmId = Object.values(rows[0]!.state.members).find((m) => m.kind === "dm")!.id;
-    // As a build before the count left it: no `rooms.pub`, a format 43 snapshot, and rows at op version 56 without `pub`.
+    // As a build before the count left it: no `rooms.pub`, a snapshot at the format below the count's, and rows at the op
+    // version below it without `pub`.
     await t.pool.query("update rooms set pub = null where id = $1", [roomId]);
-    await t.pool.query("update room_snapshots set schema_version = 43 where room_id = $1", [roomId]);
+    await t.pool.query("update room_snapshots set schema_version = $2 where room_id = $1", [roomId, COUNT_SNAPSHOT_VERSION - 1]);
     for (let i = 1; i <= 3; i++) {
       await t.pool.query(
         `insert into room_ops (room_id, seq, at, actor_member_id, actor_role, op, op_version)
-         values ($1, $2, now(), $3, 'dm', $4::jsonb, 56)`,
-        [roomId, base + i, dmId, JSON.stringify({ t: "log.chat", text: `old ${i}` })],
+         values ($1, $2, now(), $3, 'dm', $4::jsonb, $5)`,
+        [roomId, base + i, dmId, JSON.stringify({ t: "log.chat", text: `old ${i}` }), COUNT_OP_VERSION - 1],
       );
     }
     // A snapshot prunes covered rows older than an hour by the database's clock, so the new row is written at today's time and kept to be read.
@@ -291,7 +292,6 @@ describe("twin rooms on the database give their devices the same frames", () => 
     assert.ok(ev.changes.some((c) => c.key === `log:${base + 4}:0`), `the next line is ${base + 4}:0`);
     const stored = await t.pool.query<{ schema_version: number; seq: string }>("select schema_version, seq::text from room_snapshots where room_id = $1", [roomId]);
     assert.equal(stored.rows[0]!.schema_version, SNAPSHOT_VERSION, "the first commit saved the snapshot at today's format");
-    assert.equal(SNAPSHOT_VERSION, 44);
     const op = await t.pool.query<{ op_version: number; pub: string | null }>("select op_version, pub::text from room_ops where room_id = $1 and seq = $2", [roomId, base + 4]);
     assert.deepEqual([op.rows[0]?.op_version, op.rows[0]?.pub], [OP_VERSION, String(base + 4)], "the new row carries its number");
     const room = await t.pool.query<{ pub: string | null }>("select pub::text from rooms where id = $1", [roomId]);
