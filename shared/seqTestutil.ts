@@ -70,9 +70,9 @@ export function numbersIn(frames: readonly unknown[]): Given[] {
   return out;
 }
 
-/** The kinds whose `rev` the twin tests leave out, by their key's kind and their collection in a state. */
-export const REV_KINDS: ReadonlySet<string> = new Set(["template", "drawing", "stamp", "label", "handout", "handoutDoc", "pin", "cast"]);
-const REV_COLLECTIONS: ReadonlySet<string> = new Set(["templates", "drawings", "stamps", "labels", "handouts", "handoutDocs", "pins", "casts"]);
+/** The kinds FrameReader compares without their `rev`: by a change's key kind, and by a collection's name in a state. */
+export const KINDS_WITHOUT_REV: ReadonlySet<string> = new Set(["template", "drawing", "stamp", "label", "handout", "handoutDoc", "pin", "cast"]);
+const COLLECTIONS_WITHOUT_REV: ReadonlySet<string> = new Set(["templates", "drawings", "stamps", "labels", "handouts", "handoutDocs", "pins", "casts"]);
 
 function withoutKindRevs(value: unknown, entry: boolean): unknown {
   if (Array.isArray(value)) return value.map((v) => withoutKindRevs(v, false));
@@ -81,7 +81,7 @@ function withoutKindRevs(value: unknown, entry: boolean): unknown {
   for (const [k, v] of Object.entries(value)) {
     if (entry && k === "rev") continue;
     // A collection is a record by id, wherever it sits: the state's, or a remembered chunk's labels and stamps.
-    if (REV_COLLECTIONS.has(k) && v !== null && typeof v === "object" && !Array.isArray(v)) {
+    if (COLLECTIONS_WITHOUT_REV.has(k) && v !== null && typeof v === "object" && !Array.isArray(v)) {
       out[k] = Object.fromEntries(Object.entries(v).map(([id, e]) => [id, withoutKindRevs(e, true)]));
     } else out[k] = withoutKindRevs(v, false);
   }
@@ -92,8 +92,9 @@ function withoutKindRevs(value: unknown, entry: boolean): unknown {
  * Reads one twin's frames for comparison, each as one line of text: the
  * history's epochs and head ids become ids in the order this twin first
  * showed them, so two twins' frames are equal only while their ids pair
- * one to one, and the kinds of REV_KINDS lose their `rev`. Use one reader
- * per twin, over every socket compared, in the same order in both twins.
+ * one to one, and the kinds of KINDS_WITHOUT_REV lose their `rev`. Use one
+ * reader per twin, over every socket compared, in the same order in both
+ * twins.
  */
 export class FrameReader {
   #ids = new Map<string, string>();
@@ -112,7 +113,7 @@ export class FrameReader {
     const f = frame as Record<string, unknown>;
     if (f.t === "history") return stableStringify(this.#history(f));
     if (f.t === "ev" && Array.isArray(f.changes)) {
-      const changes = (f.changes as Array<{ key: string; value?: unknown }>).map((c) => ("value" in c ? { ...c, value: withoutKindRevs(c.value, REV_KINDS.has(c.key.slice(0, c.key.indexOf(":")))) } : c));
+      const changes = (f.changes as Array<{ key: string; value?: unknown }>).map((c) => ("value" in c ? { ...c, value: withoutKindRevs(c.value, KINDS_WITHOUT_REV.has(c.key.slice(0, c.key.indexOf(":")))) } : c));
       return stableStringify({ ...f, changes });
     }
     if (f.t === "snapshot") return stableStringify({ ...f, state: withoutKindRevs(f.state, false) });
