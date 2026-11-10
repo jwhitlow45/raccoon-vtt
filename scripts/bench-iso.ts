@@ -394,8 +394,16 @@ const dungeonRow = (what: string) => `${what}, generated dungeon on squares`;
 
 // ---------------------------------------------------------------- the page
 
+/**
+ * How long a room socket may take to send its snapshot: past the minute
+ * the server's snapshot budget may hold one back (rooms/budgets.ts), with
+ * room to build it. A loaded machine once left a run waiting for one
+ * forever, since nothing gave up.
+ */
+export const SNAPSHOT_WAIT_MS = 180_000;
+
 /** A room socket of an existing session, for ops and for another member's ephemeral events. */
-class Socket {
+export class Socket {
   sceneId = "";
   memberId = "";
   private n = 1;
@@ -404,6 +412,10 @@ class Socket {
   private readonly ws: WebSocket;
   private constructor(ws: WebSocket) {
     this.ws = ws;
+    // A socket that closes answers every op still waiting at once, rather than each after its own minute.
+    ws.on("close", (code) => {
+      for (const done of [...this.waiting.values()]) done(new Error(`the room socket closed (${code}) before the op's answer`));
+    });
     ws.on("message", (data) => {
       const msg = JSON.parse(String(data)) as { t?: string; n?: number; acks?: number[]; rejects?: { n: number; code: string; message: string }[] };
       // A busy room asks for the op again: send it again in a moment, under its own number.
@@ -422,17 +434,34 @@ class Socket {
     const done = typeof n === "number" ? this.waiting.get(n) : undefined;
     if (typeof done === "function") done(err);
   }
-  static async open(origin: string, roomId: string, cookie: string): Promise<Socket> {
+  /** Opens a room socket and waits for its snapshot, failing when the socket errs, closes first, or `waitMs` passes. */
+  static async open(origin: string, roomId: string, cookie: string, waitMs = SNAPSHOT_WAIT_MS): Promise<Socket> {
     const ws = new WebSocket(`${origin.replace(/^http/, "ws")}/ws?room=${roomId}`, { headers: { Origin: origin, Cookie: cookie } });
     const snapshot = await new Promise<{ state: { meta: { playerSceneId: string } }; you: { memberId: string } }>((resolve, reject) => {
+      // The error listener stays once the snapshot is in, so a later error is still heard, and does nothing then.
+      let settled = false;
+      const fail = (err: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        ws.off("close", closed);
+        ws.terminate();
+        reject(err);
+      };
+      const timer = setTimeout(() => fail(new Error(`no snapshot from room ${roomId} in ${waitMs} ms`)), waitMs);
+      const closed = (code: number) => fail(new Error(`the room socket closed (${code}) before its snapshot`));
       ws.on("open", () => ws.send(JSON.stringify({ t: "hello", clientId: randomUUID(), resumeFrom: 1 })));
       ws.on("message", function first(data) {
         const msg = JSON.parse(String(data)) as { t?: string };
         if (msg.t !== "snapshot") return;
         ws.off("message", first);
+        ws.off("close", closed);
+        clearTimeout(timer);
+        settled = true;
         resolve(msg as never);
       });
-      ws.on("error", reject);
+      ws.on("close", closed);
+      ws.on("error", fail);
     });
     const socket = new Socket(ws);
     socket.sceneId = snapshot.state.meta.playerSceneId;
@@ -440,6 +469,7 @@ class Socket {
     return socket;
   }
   op(op: Op): Promise<void> {
+    if (this.ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error(`op ${String(op.t)} sent on a room socket that has closed`));
     const n = this.n++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`op ${String(op.t)} got no answer`)), 60_000);

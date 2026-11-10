@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { CDPSession, Page } from "playwright-core";
-import { CAP_FIRST_ROW, gate, generatedDungeon, hexRelief, largestGate, onlyOf, partsPast, tetherWork, timedUntil } from "./bench-iso.ts";
+import type { AddressInfo } from "node:net";
+import { WebSocketServer, type WebSocket } from "ws";
+import { CAP_FIRST_ROW, gate, generatedDungeon, hexRelief, largestGate, onlyOf, partsPast, Socket, tetherWork, timedUntil } from "./bench-iso.ts";
 
 /*
  * The isometric bench's build rows (docs/design/design-v1-iso-area-shapes.md 6
@@ -131,5 +133,63 @@ describe("the rows `--only` names", () => {
   test("an empty word, which every row name holds, is dropped on both paths, and a comma's words are trimmed too", () => {
     assert.deepEqual(onlyOf("sunk 100 ft;"), ["sunk 100 ft"]);
     assert.deepEqual(onlyOf("hex relief, sunk 100 ft,"), ["hex relief", "sunk 100 ft"]);
+  });
+});
+
+describe("the bench's room sockets (FU52PERF-LEFT)", () => {
+  /** A room server on a free port that does `then` with each socket once it says hello. */
+  async function server(then: (ws: WebSocket) => void): Promise<{ origin: string; close(): Promise<void> }> {
+    const wss = new WebSocketServer({ port: 0 });
+    await new Promise<void>((resolve) => wss.once("listening", () => resolve()));
+    wss.on("connection", (ws) => ws.once("message", () => then(ws)));
+    return {
+      origin: `http://127.0.0.1:${(wss.address() as AddressInfo).port}`,
+      close: () =>
+        new Promise<void>((resolve) => {
+          for (const c of wss.clients) c.terminate();
+          wss.close(() => resolve());
+        }),
+    };
+  }
+  const snapshot = JSON.stringify({ t: "snapshot", state: { meta: { playerSceneId: "s1" } }, you: { memberId: "m1" } });
+
+  test("a room that never sends its snapshot fails the open once the wait is up, rather than hanging the run", async () => {
+    const room = await server(() => {});
+    try {
+      const start = Date.now();
+      await assert.rejects(Socket.open(room.origin, "r1", "", 300), /no snapshot from room r1 in 300 ms/);
+      assert.ok(Date.now() - start < 5000);
+    } finally {
+      await room.close();
+    }
+  });
+
+  test("a socket that closes before its snapshot fails the open at once", async () => {
+    const room = await server((ws) => ws.close(4001, "gone"));
+    try {
+      await assert.rejects(Socket.open(room.origin, "r1", "", 30_000), /closed \(4001\) before its snapshot/);
+    } finally {
+      await room.close();
+    }
+  });
+
+  test("a socket that closes answers each op still waiting at once, and one sent after it", async () => {
+    let peer: WebSocket | null = null;
+    const room = await server((ws) => {
+      peer = ws;
+      ws.send(snapshot);
+    });
+    try {
+      const socket = await Socket.open(room.origin, "r1", "", 30_000);
+      assert.equal(socket.sceneId, "s1");
+      const start = Date.now();
+      const waiting = socket.op({ t: "log.chat", text: "hi" } as never);
+      (peer as WebSocket | null)?.close(4002);
+      await assert.rejects(waiting, /closed \(4002\) before the op's answer/);
+      assert.ok(Date.now() - start < 5000);
+      await assert.rejects(socket.op({ t: "log.chat", text: "again" } as never), /a room socket that has closed/);
+    } finally {
+      await room.close();
+    }
   });
 });
