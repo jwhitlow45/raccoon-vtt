@@ -1146,6 +1146,10 @@ export const BEHAVIORS: readonly Behavior[] = [
     when: "in an ability's rolls",
     device: "pointer",
   },
+  // Generated dungeons' room edits and Add a wing (docs/design: dungeon generator phase 3, 4.1 and 3.1): dungeon/Preview.tsx and builder/wingGhost.ts ghostRoomAt for a room, builder/wingPick.ts withWingMode for the area and the join.
+  { id: "roomEdits", input: "Tap or click a room in the preview or the wing's ghost", does: "Open its edits", roles: DM, when: "in Generate a dungeon, or in Add a wing with Edit rooms on", device: "pointer" },
+  { id: "wingArea", input: "Drag in Add a wing", does: "Set the wing's area", roles: DM, when: "in the Map builder", device: "pointer" },
+  { id: "wingJoin", input: "Tap a wall in Add a wing", does: "Set where the wing joins", roles: DM, when: "in the Map builder", device: "pointer" },
   // The fight's cards have no surface of their own: features/encounter/CardRoll.tsx for concentration, save-ends and death-save cards.
   {
     id: "cardRollOptions",

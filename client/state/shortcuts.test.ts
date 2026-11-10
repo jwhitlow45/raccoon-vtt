@@ -732,7 +732,8 @@ describe("the sheet's rows beside the keys", () => {
       // An ability box's tap and a roll's hold in its list, which open rolls and options a tap on a roll would not (docs/design/design-v1-stat-block-rolls.md 3.3 and 5.1).
       // The swipe back in a panel, a gesture with no mark of its own on screen (lib/backSwipe.ts).
       // The token bar's Place freely, the touch twin of Alt+drag, which drops one drag between squares (docs/design/design-v1-snap-off.md 4).
-      if (b.device === "pointer") assert.match(b.input, /^(Drag .*(carries|carried|mount)|Place freely, then drag the token$|Tap a standee again$|Double click or tap on Undo or Redo$|Hold a roll button$|Double-tap and hold a roll button with a screen reader$|Tap, click, hold or right-click an ability box in a stat block$|Hold or right-click a roll in an ability's rolls$|Swipe right in a panel$)/, b.id);
+      // A room's tap in a dungeon's preview or a wing's ghost, and Add a wing's drag and tap, which a map tap never does elsewhere (dungeon generator phase 3, 7).
+      if (b.device === "pointer") assert.match(b.input, /^(Drag .*(carries|carried|mount)|Place freely, then drag the token$|Tap a standee again$|Double click or tap on Undo or Redo$|Hold a roll button$|Double-tap and hold a roll button with a screen reader$|Tap, click, hold or right-click an ability box in a stat block$|Hold or right-click a roll in an ability's rolls$|Swipe right in a panel$|Tap or click a room in the preview or the wing's ghost$|Drag in Add a wing$|Tap a wall in Add a wing$)/, b.id);
       if (b.device !== "mouse") continue;
       // A mouse row names a key, or a button other than the left one, or the trackpad's pinch, which arrives as Ctrl and the wheel.
       // And the side panel edge's double-click, which nothing on screen marks, as nothing marks the swipe back (docs/design/design-v1-panel-size.md 6).

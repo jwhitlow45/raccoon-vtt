@@ -1789,6 +1789,9 @@ On any device. A token that carries others, such as a rider's mount or a holder 
 | Double-tap and hold a roll button with a screen reader | Open its one-roll options. A plain double-tap still rolls | everyone |
 | Tap, click, hold or right-click an ability box in a stat block | Open its rolls: the check, the save, its skills, and Initiative under Dexterity. Tap one to roll it | everyone, where you may roll for the creature |
 | Hold or right-click a roll in an ability's rolls | Show its one-roll options in their place, without rolling | everyone, in an ability's rolls |
+| Tap or click a room in the preview or the wing's ghost | Open its edits | DM, in Generate a dungeon, or in Add a wing with Edit rooms on |
+| Drag in Add a wing | Set the wing's area | DM, in the Map builder |
+| Tap a wall in Add a wing | Set where the wing joins | DM, in the Map builder |
 | Double click or tap on Undo or Redo | Take back or restore one step. A second tap in the same double-click sequence never takes the following step | everyone |
 | Swipe right in a panel | Go back, as the panel's Back does: to the list of panels, or from a page inside a panel, such as Members, to the panel. Not from something that can still scroll left or drags sideways itself, or from the screen's left edge | everyone, where panels open as sheets, as on a phone |
 
