@@ -26,6 +26,8 @@ import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOption, pickTool, S
  *   height.
  * - DGW-4: on hexes an area over walls is refused with its line, and a wall
  *   one hex side long joins.
+ * - D3FIX-1: on hexes Add the wing lands a Wide wing joined on a slanted
+ *   side, whose three sides become its doors (DG3 review round 1).
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seventy. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
@@ -355,6 +357,42 @@ describe("raccoon-vtt Add a wing: the DM's mode, pane and ghost", { timeout: 900
     await tapWorld(dm, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, BURROW);
     await lineIs("Area 15 hexes across and 17 rows down, joined at the ringed wall.");
     await shots.take(dm, "dgw-4-hex-join");
+  });
+
+  test("D3FIX-1. on hexes Add the wing lands a Wide wing joined on a slanted side, whose three sides become its doors", async () => {
+    const walls = () => Object.values(state().buildChunks).filter((c) => c?.sceneId === run.burrowId).flatMap((c) => c!.walls ?? []);
+    const before = walls();
+    // Another scene clears DGW-4's area and join, which would still stand for the new area.
+    await showScene(dm, "Keep", run.keepId);
+    await showScene(dm, "Burrow", run.burrowId);
+    await lineIs("Drag the wing's area over empty ground, up to 100 hexes across and 100 rows down.");
+    // Below the room, and its bottom row's south-east side: on Wide its join is that side and the two beside it, the doorway facing south-west.
+    await drag(dm, hexCenter(ROWS, { col: 2, row: 18 }), hexCenter(ROWS, { col: 30, row: 36 }), BURROW);
+    await lineIs(WING_TAP);
+    const [a, b] = sideEnds(ROWS, { col: 11, row: 13 }, 1);
+    await tapWorld(dm, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, BURROW);
+    await lineIs("Area 29 hexes across and 19 rows down, joined at the ringed wall.");
+    const bar = dm.getByRole("toolbar", { name: `${TOOL} options` });
+    await bar.getByRole("button", { name: "Generate a wing" }).click();
+    await pane().waitFor();
+    await pane().getByRole("radio", { name: "Wide", exact: true }).check();
+    await waitFor("the Wide plan's counts", async () => (/rooms?\b.*doors?\b/.test(await pane().getByRole("status").innerText()) && (await pane().getByRole("button", { name: "Add the wing" }).isEnabled()) ? true : null));
+    await shots.take(dm, "d3fix-1-wide-hex-wing");
+    await pane().getByRole("button", { name: "Add the wing" }).click();
+    await pane().waitFor({ state: "detached", timeout: 30_000 });
+    await waitFor("the wing's walls stored", () => (walls().length > before.length + 20 ? true : null));
+    // The three sides of the join: the tapped one, and on either side of it the room's sides toward 12,14 and from 11,13 toward 11,14.
+    for (const [h, d] of [
+      [{ col: 11, row: 13 }, 1],
+      [{ col: 12, row: 13 }, 2],
+      [{ col: 11, row: 13 }, 2],
+    ] as const) {
+      const [p, q] = sideEnds(ROWS, h, d);
+      const leaf = walls().find((w) => (w.a[0] === p.x && w.a[1] === p.y && w.b[0] === q.x && w.b[1] === q.y) || (w.a[0] === q.x && w.a[1] === q.y && w.b[0] === p.x && w.b[1] === p.y));
+      assert.equal(leaf?.f.kind, "door", `a door on side ${d} of ${h.col},${h.row}`);
+    }
+    await lineIs("Drag the wing's area over empty ground, up to 100 hexes across and 100 rows down.");
+    await shots.take(dm, "d3fix-1-wide-hex-wing-added");
   });
 
   test("DGW-B1. Add the wing asks, lands the wing on the scene, closes the pane and clears the mode, and the wing takes the join for its door", async () => {
