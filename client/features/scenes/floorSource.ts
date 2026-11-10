@@ -22,7 +22,8 @@ export type FloorTarget = { beside: string; side: "above" | "below" };
  * floor copies the floor beside as the add applies it, Time of day and Per
  * player included: Like the floor beside with its light untouched. "own"
  * sends the scene's whole, so a co-DM's edit of the floor beside before
- * the add applies never changes it: every other pick, even one equal to
+ * the add applies changes none of it but Per player, which still follows
+ * the floor beside as the add applies: every other pick, even one equal to
  * the floor beside (D-261110-110).
  */
 export type FloorSight = "like" | "own";
