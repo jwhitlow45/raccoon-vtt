@@ -60,7 +60,7 @@ export const REPLACED_ARRAYS: Readonly<Record<string, Readonly<Record<string, (o
  * the id of one the room already holds.
  */
 export const ENTITY_ID_PATHS: Readonly<Record<string, readonly string[]>> = {
-  // A wing's ask carries its stamps, read on a copy as the stamps op itself would apply (docs/design: dungeon generator phase 3, 5).
+  // A wing's ask carries its stamps and, on hexes, its free walls, read on a copy as those ops themselves would apply (docs/design: dungeon generator phase 3, 5).
   "build.ask": ["ops[].put[]"],
   "build.lights": ["put[]"],
   "build.stamps": ["put[]"],
