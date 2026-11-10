@@ -1,4 +1,4 @@
-import { clampRooms, clampSettings, clampSide, DEFAULT_SETTINGS, defaultRooms, isHexGrid, MAX_HEX_CELLS, MAX_HEX_ROOMS, MAX_SIDE, MIN_ROOMS, SIZE_SIDES, type DungeonSettings, type GridKind, type SizeChoice } from "./settings.ts";
+import { clampRooms, clampSettings, clampSide, DEFAULT_SETTINGS, defaultRooms, maxSide, SIZE_SIDES, type DungeonSettings, type GridKind, type SizeChoice } from "./settings.ts";
 
 /**
  * The dialog's choices, and this device's memory of them per room
@@ -18,20 +18,9 @@ export type Choices = Omit<DungeonSettings, "w" | "h"> & {
 const { w: _w, h: _h, ...DEFAULT_REST } = DEFAULT_SETTINGS;
 export const DEFAULT_CHOICES: Choices = { ...DEFAULT_REST, size: "medium", across: SIZE_SIDES.medium, down: SIZE_SIDES.medium };
 
-/**
- * The longest a side may be on a grid (phase 3, 2.1): 100 on squares, and
- * on hexes 87 for the side across the rows, down on Hex rows and across on
- * Hex columns, whose 100 rows are the most a plan takes. The presets' 80
- * is within it.
- */
+/** The longest a side may be on a grid (settings.ts `maxSide`): 87 across a hex scene's rows, else 100. The presets' 80 is within it. */
 export function sideCap(grid: GridKind, axis: "w" | "h"): number {
-  return (grid === "hexRows" && axis === "h") || (grid === "hexColumns" && axis === "w") ? MAX_HEX_CELLS : MAX_SIDE;
-}
-
-/** Rooms within what the size takes, and on hexes at most MAX_HEX_ROOMS (2.5). */
-function roomsWithin(n: number, w: number, h: number, grid: GridKind): number {
-  const rooms = clampRooms(n, w, h);
-  return isHexGrid(grid) ? Math.max(MIN_ROOMS, Math.min(rooms, MAX_HEX_ROOMS)) : rooms;
+  return maxSide(grid, axis);
 }
 
 /** The scene's sides for the choices, Custom's within the grid's caps. */
@@ -44,7 +33,7 @@ export function sidesOf(c: Pick<Choices, "size" | "across" | "down">, grid: Grid
 /** Rooms for the choices' size picked fresh (settings.ts `defaultRooms`). */
 export function roomsDefault(c: Pick<Choices, "size" | "across" | "down">, grid: GridKind = "squares"): number {
   const { w, h } = sidesOf(c, grid);
-  return roomsWithin(defaultRooms(c.size, w, h), w, h, grid);
+  return clampRooms(defaultRooms(c.size, w, h), w, h, grid);
 }
 
 /**
@@ -67,7 +56,7 @@ export function withSize(c: Choices, next: Partial<Pick<Choices, "size" | "acros
 export function settingsOf(c: Choices, grid: GridKind = "squares"): DungeonSettings {
   const { w, h } = sidesOf(c, grid);
   const { size: _size, across: _across, down: _down, ...rest } = c;
-  return clampSettings({ ...rest, w, h, rooms: roomsWithin(c.rooms, w, h, grid) });
+  return clampSettings({ ...rest, w, h, rooms: clampRooms(c.rooms, w, h, grid) }, grid);
 }
 
 /**

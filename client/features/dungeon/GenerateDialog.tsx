@@ -15,7 +15,7 @@ import { floorAddRefusal, floorCreateOf, type FloorTarget } from "../scenes/floo
 import { CHECK_MS } from "../uvtt/rules.ts";
 import { NumberInput } from "../scenes/controls.tsx";
 import { Choice, Choices as ChoiceRows } from "./Choices.tsx";
-import type { DungeonEdits, RoomEdit, RoomFacts } from "./edits.ts";
+import { editLayout, type DungeonEdits, type RoomEdit, type RoomFacts } from "./edits.ts";
 import { closePreviews, preview, warmPreviews, type Preview } from "./client.ts";
 import { counted, drawable, editedRooms, editsStep, flowStep, readiness, startEdits, startFlow, type EditsEvent, type EditsState, type Flow, type FlowEvent } from "./flow.ts";
 import { journalFull } from "./keyHold.ts";
@@ -406,7 +406,7 @@ export function GenerateDialog(props: {
   const editRoom = (next: RoomEdit | null) => {
     if (picked === null || !parsed.ok || !onScreen) return;
     // The first edit freezes the layout on screen: the room count its plan asked for, the seed and the choices (4.2).
-    const layout = { fitted: onScreen.fitted ?? settings.rooms, seed: parsed.seed, settings: JSON.stringify(settings), base: null };
+    const layout = editLayout(settings, parsed.seed, onScreen.fitted ?? settings.rooms, null);
     editStep({ k: "edit", room: picked, edit: next, layout });
   };
 

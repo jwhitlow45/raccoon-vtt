@@ -272,7 +272,6 @@ export function floorOutcomeText(outcome: DungeonOutcome, name: string, scene: s
 export const EDIT_ROOMS = "Edit rooms";
 export const HEIGHT_HELP = "Each door gets a straight flight of stairs. Where they do not fit, the room stays flat.";
 export const ENTRANCE_FLAT = "The entrance room stays flat.";
-export const CAVE_NO_DOORS = "Caves have no doors.";
 export const NO_TRAP_FITS = "No trap fits in this room.";
 export const ROOM_GONE = { title: "Room gone", line: "This room is gone in this dungeon." } as const;
 /** An edit that took a hex plan past its wall budget, undone (4.2). */

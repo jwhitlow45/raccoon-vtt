@@ -22,7 +22,6 @@ import {
   LIT_MAX,
   LIT_PRESETS,
   LIT_STEP,
-  MAX_HEX_ROOMS,
   MIN_ROOMS,
   roomCap,
   SECRET_PRESETS,
@@ -101,8 +100,7 @@ export type ChoicesProps = {
 
 /** The most rooms the rows offer: the size's cap, and on hexes at most MAX_HEX_ROOMS (2.5). */
 export function roomsLimit(value: Pick<DungeonSettings, "w" | "h">, grid: GridKind): number {
-  const cap = roomCap(value.w, value.h);
-  return isHexGrid(grid) ? Math.max(MIN_ROOMS, Math.min(cap, MAX_HEX_ROOMS)) : cap;
+  return roomCap(value.w, value.h, grid);
 }
 
 export function Choices(props: ChoicesProps) {
@@ -111,7 +109,7 @@ export function Choices(props: ChoicesProps) {
   const hex = isHexGrid(grid);
   const cave = value.theme === "cave";
   const limit = roomsLimit(value, grid);
-  const rooms = Math.min(clampRooms(value.rooms, value.w, value.h), limit);
+  const rooms = clampRooms(value.rooms, value.w, value.h, grid);
   const flat = props.flat === true;
   const keyHeld = props.keyHeld === true;
   return (

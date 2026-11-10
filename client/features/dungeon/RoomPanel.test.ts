@@ -1,8 +1,8 @@
 import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { RoomEdit, RoomFacts } from "./edits.ts";
-import { CAVE_NO_DOORS, doorName, EDIT_OVER_WALLS, ENTRANCE_FLAT, HEIGHT_HELP, NO_TRAP_FITS, reportRow, ROOM_GONE, WING_FLAT } from "./words.ts";
+import { REPORTS, SECRET_OFF, type RoomEdit, type RoomFacts } from "./edits.ts";
+import { doorName, EDIT_OVER_WALLS, ENTRANCE_FLAT, HEIGHT_HELP, NO_TRAP_FITS, reportRow, ROOM_GONE, WING_FLAT } from "./words.ts";
 
 const { createElement: h } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -86,7 +86,7 @@ test("the entrance and a flat wing hold Height at Flat with their lines", () => 
 });
 
 test("a cave has no doors, a room with no trap spot says so, and a gone room offers only Reset room", () => {
-  assert.ok(text(draw(ROOM, undefined, { cave: true })).includes(CAVE_NO_DOORS));
+  assert.ok(text(draw(ROOM, undefined, { cave: true })).includes(SECRET_OFF.cave));
   assert.ok(text(draw({ ...ROOM, traps: [] })).includes(NO_TRAP_FITS));
   const gone = draw(null, { lit: true });
   assert.ok(text(gone).includes(ROOM_GONE.line));
@@ -107,6 +107,11 @@ test("each report stands under its row and is spoken once in the status region",
     ["height", "doors", "doors", "trap", "dressing", "lit"],
   );
   assert.equal(reportRow(EDIT_OVER_WALLS), "other");
+  // The generator's own report lines, each under the row it speaks of.
+  assert.deepEqual(
+    [REPORTS.flat, REPORTS.noTrapSpot, REPORTS.doorGone, REPORTS.secretOnStairs, REPORTS.secretBreaksReach, REPORTS.roomGone, REPORTS.noRoom("trap"), REPORTS.noRoom("secret door"), REPORTS.noRoom("stamp"), REPORTS.noRoom("light")].map(reportRow),
+    ["height", "trap", "doors", "doors", "doors", "other", "trap", "doors", "dressing", "lit"],
+  );
   const html = draw({ ...ROOM, reports }, undefined, { extra: [EDIT_OVER_WALLS] });
   assert.match(html, new RegExp(`role="status" aria-live="polite"[^>]*>${reports.join(" ").replace(/[.?*+()]/g, "\\$&")} ${EDIT_OVER_WALLS.replace(/[.]/g, "\\.")}<`));
   const height = html.slice(html.indexOf(">Height<"), html.indexOf("West, to room 1"));

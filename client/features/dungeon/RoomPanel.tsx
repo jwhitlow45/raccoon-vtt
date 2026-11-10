@@ -6,9 +6,9 @@ import { Help } from "../../components/Panel.tsx";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { Choice } from "./Choices.tsx";
-import type { DoorFacts, DoorPin, RoomEdit, RoomFacts } from "./edits.ts";
+import { SECRET_OFF, type DoorFacts, type DoorPin, type RoomEdit, type RoomFacts } from "./edits.ts";
 import { CHOICE_NAMES, DRESSINGS, type Dressing } from "./settings.ts";
-import { CAVE_NO_DOORS, doorName, ENTRANCE_FLAT, HEIGHT_HELP, NO_TRAP_FITS, reportsByRow, ROOM_GONE, roomTitle, WING_FLAT } from "./words.ts";
+import { doorName, ENTRANCE_FLAT, HEIGHT_HELP, NO_TRAP_FITS, reportsByRow, ROOM_GONE, roomTitle, WING_FLAT } from "./words.ts";
 
 /*
  * The room panel (docs/design: dungeon generator phase 3, 4.1, D-261110-097
@@ -159,7 +159,7 @@ function HeightRow(props: { facts: RoomFacts; edit: RoomEdit | undefined; flat: 
 }
 
 function DoorRows(props: { facts: RoomFacts; edit: RoomEdit | undefined; cave: boolean; onChange(key: string, pin: DoorPin): void; reports: readonly string[] }) {
-  if (props.cave) return <Labelled name="Doors">{CAVE_NO_DOORS}</Labelled>;
+  if (props.cave) return <Labelled name="Doors">{SECRET_OFF.cave}</Labelled>;
   return (
     <div style={{ display: "grid", gap: theme.space(3), minWidth: 0 }}>
       {props.facts.doors.map((d) => (
