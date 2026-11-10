@@ -4,6 +4,8 @@ import type { IconName } from "../../components/Icon.tsx";
 import { LINK_MODE } from "../floors/linkWords.ts";
 import { scopeSlot, useScoped, type RoomScope } from "../../state/scope.ts";
 import type { BrushSize, Point } from "./cells.ts";
+import type { WingGhost } from "./wingGhost.ts";
+import type { WingJoin, WingTap } from "./wingPick.ts";
 
 /**
  * The map builder's choices and its gesture in progress. Local to this
@@ -11,7 +13,7 @@ import type { BrushSize, Point } from "./cells.ts";
  * the unsent part of a gesture from here so it shows under the finger
  * before its op goes out.
  */
-export type BuildMode = "paint" | "rect" | "poly" | "erase" | "eraseRect" | "edge" | "label" | "light" | "stamp" | "height" | "rough" | "link";
+export type BuildMode = "paint" | "rect" | "poly" | "erase" | "eraseRect" | "edge" | "label" | "light" | "stamp" | "wing" | "height" | "rough" | "link";
 export type EdgeKind = "wall" | "none" | "door" | "secret" | "window" | "clear";
 
 export type BuilderState = {
@@ -55,7 +57,17 @@ export type BuilderState = {
   linkTo: string | null;
   /** The squares being dragged in Between floors and the rules' first refusal of them, which shows the draft red and fills the note. */
   linkDraft: { rect: CellRect; problem: string | null } | null;
+  /** Add a wing's picks (wingPick.ts): the area and the wall the wing joins, on the scene they were picked on. A tapped hex wall waits for an area to be judged against, so `tap` can stand without `join`. */
+  wing: WingPicks | null;
+  /** The area being dragged in Add a wing, and why the rules refuse it, which shows it red and fills the note. */
+  wingDraft: { rect: CellRect; problem: string | null } | null;
+  /** Whether the wing pane is open (WingPane.tsx). */
+  wingOpen: boolean;
+  /** The wing the pane plans, drawn on the map as its ghost (wingGhost.ts). */
+  wingGhost: WingGhost | null;
 };
+
+export type WingPicks = { sceneId: string; area: CellRect | null; tap: WingTap | null; join: WingJoin | null };
 
 export const TERRAINS: readonly { value: TerrainId; label: string }[] = [
   { value: "stone", label: "Stone" },
@@ -91,14 +103,19 @@ export const BUILD_MODES: readonly { value: BuildMode; label: string; spoken?: s
   { value: "label", label: "Label", short: "Label", icon: "mapLabel" },
   { value: "light", label: "Lights", short: "Lights", icon: "light" },
   { value: "stamp", label: "Stamp", short: "Stamp", icon: "stamp" },
+  // Off on a scene with automatic walls off (wingPick.ts wingOff), which its tile says.
+  { value: "wing", label: "Add a wing", short: "Wing", icon: "wing" },
   // Last, and offered only while the scene has more than one floor (Options.tsx, toolChoices.ts).
   { value: "link", label: LINK_MODE, short: LINK_MODE, icon: "stairwell" },
 ];
 
-/** A new mode, which drops a shape room's corners, a rectangle's start, a wall run, a Wall line and the note. A selected stamp stays selected. */
+/** A new mode, which drops a shape room's corners, a rectangle's start, a wall run, a Wall line, a wing's area and join with its pane, and the note. A selected stamp stays selected. */
 export function pickBuildMode(scope: RoomScope, mode: BuildMode): void {
-  scope.get(builderSlot).store.setState({ mode, poly: [], rect: null, run: [], line: [], lineScene: null, lineAt: null, lineDrag: null, linkDraft: null, note: null });
+  scope.get(builderSlot).store.setState({ mode, poly: [], rect: null, run: [], line: [], lineScene: null, lineAt: null, lineDrag: null, linkDraft: null, note: null, ...NO_WING });
 }
+
+/** Add a wing with nothing picked: what a new mode, another scene or floor, or an added wing leaves (dungeon phase 3, 3.1). */
+export const NO_WING = { wing: null, wingDraft: null, wingOpen: false, wingGhost: null } as const satisfies Partial<BuilderState>;
 
 /** A gesture's bookkeeping that the canvas never draws. */
 export type BuilderGesture = {
@@ -122,6 +139,8 @@ export type BuilderGesture = {
   hex: HexGesture | null;
   /** Where a Between floors press began, on screen and on the map (linkTap.ts). */
   link: { screen: Point; world: Point } | null;
+  /** Where an Add a wing press began, on screen and on the map (wingPick.ts withWingMode). */
+  wing: { screen: Point; world: Point } | null;
 };
 
 /** A hex gesture in progress: a brush stroke as `stroke` has it, or a drag from where it began. */
@@ -156,8 +175,9 @@ export const builderSlot = scopeSlot(
       linkKind: "stairs",
       linkTo: null,
       linkDraft: null,
+      ...NO_WING,
     })),
-    gesture: { stroke: null, downAt: null, labelGrab: null, asking: false, hex: null, link: null } as BuilderGesture,
+    gesture: { stroke: null, downAt: null, labelGrab: null, asking: false, hex: null, link: null, wing: null } as BuilderGesture,
   }),
   (b) => {
     if (b.gesture.stroke) clearInterval(b.gesture.stroke.timer);
@@ -187,7 +207,7 @@ export function useBuilderStore(): StoreApi<BuilderState> {
   return useScoped(builderSlot).store;
 }
 
-/** Ends whatever gesture was in progress, keeping the DM's choices. */
+/** Ends whatever gesture was in progress, keeping the DM's choices. A wing's area and join stay, its pane closes with the tool. */
 export function resetGesture(store: StoreApi<BuilderState>): void {
-  store.setState({ unsent: [], rect: null, poly: [], run: [], labelMove: null, note: null, inSight: false, line: [], lineScene: null, lineAt: null, lineDrag: null, linkDraft: null });
+  store.setState({ unsent: [], rect: null, poly: [], run: [], labelMove: null, note: null, inSight: false, line: [], lineScene: null, lineAt: null, lineDrag: null, linkDraft: null, wingDraft: null, wingOpen: false, wingGhost: null });
 }

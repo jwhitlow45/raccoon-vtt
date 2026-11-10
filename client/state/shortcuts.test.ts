@@ -1226,16 +1226,16 @@ describe("a second press of the tool's key moves through its main choice (docs/d
     assert.deepEqual(r.said(), { key: 2, text: "Close or cancel the room first." }, "a repeat is said again");
   });
 
-  test("B ten times from Brush, then once more, and Shift+B from Brush: Stamp", () => {
+  test("B eleven times from Brush, then once more, and Shift+B from Brush: Add a wing", () => {
     const r = room({ tool: "build" });
     const seen: string[] = [];
-    for (let i = 0; i < 11; i++) {
+    for (let i = 0; i < 12; i++) {
       hit(r.env, press({ key: "b", code: "KeyB" }));
       seen.push(r.said().text.replace("Map builder: ", ""));
     }
-    assert.deepEqual(seen, ["Rectangle room", "Shape room", "Erase", "Erase area", "Walls and doors", "Heights and stairs", "Difficult ground", "Label", "Lights", "Stamp", "Brush"]);
+    assert.deepEqual(seen, ["Rectangle room", "Shape room", "Erase", "Erase area", "Walls and doors", "Heights and stairs", "Difficult ground", "Label", "Lights", "Stamp", "Add a wing", "Brush"]);
     hit(r.env, press({ key: "B", code: "KeyB", shiftKey: true }));
-    assert.equal(r.scope.get(builderSlot).store.getState().mode, "stamp");
+    assert.equal(r.scope.get(builderSlot).store.getState().mode, "wing");
   });
 
   test("a moved key moves the choice: Area on K, Shift goes back on a moved letter with case, and a moved symbol always goes forward", () => {

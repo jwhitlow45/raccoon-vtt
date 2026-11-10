@@ -63,11 +63,11 @@ describe("cycleStep", () => {
 describe("each tool's main choice", () => {
   type Sent = { e: EphEvent; localOnly?: boolean };
 
-  function room(input: { role?: "dm" | "player"; fog?: boolean; scene?: boolean; playersDraw?: "none" | "all"; drawings?: Record<string, unknown>; templates?: Record<string, unknown> } = {}) {
+  function room(input: { role?: "dm" | "player"; fog?: boolean; scene?: boolean; playersDraw?: "none" | "all"; drawings?: Record<string, unknown>; templates?: Record<string, unknown>; autoWalls?: "all" | "floor" | "off" } = {}) {
     const role = input.role ?? "dm";
     const sent: Sent[] = [];
     const scope = new RoomScope();
-    const scene = { id: "s1", fogEnabled: input.fog ?? true, bounds: { w: 30, h: 20 } };
+    const scene = { id: "s1", fogEnabled: input.fog ?? true, bounds: { w: 30, h: 20 }, ...(input.autoWalls ? { autoWalls: input.autoWalls } : {}) };
     const state = {
       you: { memberId: role === "dm" ? "dm1" : "p1", role },
       sceneId: "s1",
@@ -227,14 +227,14 @@ describe("each tool's main choice", () => {
     assert.equal(fogCycle.now(env)?.held, undefined, "fog never holds");
   });
 
-  test("the builder: its eleven modes once the scene is loaded, by the names a press says (FU32-SR-NAMES), held for a shape room's corners and an open label pane, and a pick clears the gesture", () => {
+  test("the builder: its twelve modes once the scene is loaded, by the names a press says (FU32-SR-NAMES), held for a shape room's corners and an open label pane, and a pick clears the gesture", () => {
     assert.equal(builderCycle.now(room({ scene: false }).env), null);
     const { env, scope } = room();
     const builder = scope.get(builderSlot).store;
     const choice = builderCycle.now(env)!;
     assert.deepEqual(
       choice.options.map((o) => o.label),
-      ["Brush", "Rectangle room", "Shape room", "Erase", "Erase area", "Walls and doors", "Heights and stairs", "Difficult ground", "Label", "Lights", "Stamp"],
+      ["Brush", "Rectangle room", "Shape room", "Erase", "Erase area", "Walls and doors", "Heights and stairs", "Difficult ground", "Label", "Lights", "Stamp", "Add a wing"],
     );
     assert.equal(choice.value, "paint");
     builder.setState({ mode: "poly", poly: [{ x: 1, y: 1 }, { x: 2, y: 1 }] });
@@ -248,6 +248,20 @@ describe("each tool's main choice", () => {
     builderCycle.pick(env, "erase");
     const s = builder.getState();
     assert.deepEqual([s.mode, s.rect, s.run, s.note, s.poly], ["erase", null, [], null, []]);
+  });
+
+  test("the builder: Add a wing is off on a scene with automatic walls off, so a press passes over it, and a pick clears a wing's area and join", () => {
+    const off = room({ autoWalls: "off" });
+    const wing = builderCycle.now(off.env)!.options.find((o) => o.value === "wing");
+    assert.equal(wing?.disabled, true);
+    assert.equal(cycleStep(builderCycle.now(off.env)!.options, "stamp", false), "paint");
+    assert.equal(builderCycle.now(room().env)!.options.find((o) => o.value === "wing")?.disabled, undefined);
+    const { env, scope } = room();
+    const builder = scope.get(builderSlot).store;
+    builder.setState({ mode: "wing", wing: { sceneId: "s1", area: { x: 0, y: 0, w: 12, h: 12 }, tap: null, join: null }, wingOpen: true });
+    builderCycle.pick(env, "stamp");
+    const s = builder.getState();
+    assert.deepEqual([s.mode, s.wing, s.wingOpen], ["stamp", null, false]);
   });
 
   test("Add token: the blank kind while nothing else is chosen, and goblins waiting stay", () => {

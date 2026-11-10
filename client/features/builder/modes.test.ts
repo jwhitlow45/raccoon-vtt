@@ -18,6 +18,14 @@ describe("the builder's modes", () => {
     assert.deepEqual([named("height").label, named("height").short], ["Heights/stairs", "Heights"]);
   });
 
+  test("Add a wing comes after Stamp and before Between floors, its chip Wing, its icon blocks", () => {
+    const order = BUILD_MODES.map((m) => m.value);
+    assert.equal(order.indexOf("wing"), order.indexOf("stamp") + 1);
+    assert.equal(order.indexOf("link"), order.indexOf("wing") + 1);
+    const wing = BUILD_MODES.find((m) => m.value === "wing")!;
+    assert.deepEqual([wing.label, wing.short, wing.icon], ["Add a wing", "Wing", "wing"]);
+  });
+
   test("each mode has an icon the app draws, and no two modes share one", () => {
     for (const m of BUILD_MODES) assert.ok(ICON_NAMES.includes(m.icon), `${m.label}: ${String(m.icon)} draws nothing`);
     assert.equal(new Set(BUILD_MODES.map((m) => m.icon)).size, BUILD_MODES.length);

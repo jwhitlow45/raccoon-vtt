@@ -1,5 +1,5 @@
 import { usePreview } from "../dm/previewContext.ts";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { TerrainId } from "#shared/model.ts";
@@ -13,7 +13,8 @@ import { theme } from "../../lib/theme.ts";
 import { BRUSH_MAX, BRUSH_MIN } from "./cells.ts";
 import { LABEL_SIZES } from "./labelEdit.ts";
 import { lightModeHint, sceneHasLights } from "./lightTap.ts";
-import { BUILD_MODES, pickBuildMode, TERRAINS, useBuilderStore, type BuildMode, type EdgeKind } from "./store.ts";
+import { BUILD_MODES, NO_WING, pickBuildMode, TERRAINS, useBuilderStore, type BuildMode, type EdgeKind, type WingPicks } from "./store.ts";
+import { dragHint, readyHint, WING_TAP, wingOff, wingWarnings } from "./wingPick.ts";
 import { TERRAIN_SWATCHES } from "./textures.ts";
 import { closePolygon } from "./tool.tsx";
 import { finishWallLine } from "./hexPointer.ts";
@@ -54,7 +55,7 @@ const HEX_HINTS = {
 } as const;
 
 
-const HINTS: Record<Exclude<BuildMode, "edge" | "light" | "height" | "rough" | "link">, string> = {
+const HINTS: Record<Exclude<BuildMode, "edge" | "light" | "height" | "rough" | "link" | "wing">, string> = {
   paint: "Drag to paint. Two fingers or a right-drag move the map.",
   rect: "Drag from corner to corner.",
   poly: "Tap corners, then tap the first one to close.",
@@ -94,7 +95,7 @@ export function brushWords(n: number, g: Grid): string {
   return `${n} ${cellWord(g, n !== 1)}`;
 }
 
-function hint(mode: BuildMode, edge: EdgeKind, secretFound: boolean, hasLights: boolean, heightHint: string, terrain: TerrainId, g: Grid, kind: "stairs" | "ladder"): string {
+function hint(mode: Exclude<BuildMode, "wing">, edge: EdgeKind, secretFound: boolean, hasLights: boolean, heightHint: string, terrain: TerrainId, g: Grid, kind: "stairs" | "ladder"): string {
   const limit = hexBuilderLine(mode, g);
   if (limit !== null) return limit;
   if (isHex(g) && mode === "edge") {
@@ -151,6 +152,8 @@ export default function BuilderOptions() {
       asking: b.asking > 0,
       linkKind: b.linkKind,
       linkTo: b.linkTo,
+      wing: b.wing,
+      wingOpen: b.wingOpen,
     })),
   );
   // A gesture waiting on its asks says so once the wait shows (Loading.tsx), so a quick answer never flashes it.
@@ -180,6 +183,12 @@ export default function BuilderOptions() {
   useEffect(() => {
     if (stranded) pickBuildMode(scope, "paint");
   }, [stranded, scope]);
+  // A wing's area and join belong to the scene they were picked on: another scene or floor clears both (dungeon phase 3, 3.1).
+  const wingElsewhere = s.wing !== null && s.wing.sceneId !== sceneId;
+  useEffect(() => {
+    if (wingElsewhere) builderState.setState(NO_WING);
+  }, [wingElsewhere, builderState]);
+  const wingLine = useWingLine(s.mode === "wing" ? s.wing : null, sceneId);
   if (!sceneId || !scene) return null;
 
   const grid = sceneGrid(scene);
@@ -222,6 +231,7 @@ export default function BuilderOptions() {
     ),
   });
   const modes = linking ? BUILD_MODES : BUILD_MODES.filter((m) => m.value !== "link");
+  const wingOffLine = wingOff(scene);
   const mode = BUILD_MODES.find((m) => m.value === s.mode);
   const modeName = mode?.spoken ?? mode?.label ?? s.mode;
 
@@ -242,7 +252,13 @@ export default function BuilderOptions() {
           options={modes.map((m) => ({ key: m.value, words: m.short, glyph: <Icon name={m.icon} /> }))}
         >
           <PickCloses>
-            <ChoiceTiles<BuildMode> label="Builder mode" even value={s.mode} options={modes.map((m) => ({ value: m.value, label: m.label, ...(m.spoken ? { spoken: m.spoken } : null), glyph: <Icon name={m.icon} /> }))} onChange={(mode) => pickBuildMode(scope, mode)} />
+            <ChoiceTiles<BuildMode>
+              label="Builder mode"
+              even
+              value={s.mode}
+              options={modes.map((m) => ({ value: m.value, label: m.label, ...(m.spoken ? { spoken: m.spoken } : null), glyph: <Icon name={m.icon} />, ...(m.value === "wing" && wingOffLine !== null ? { disabled: true, title: wingOffLine } : null) }))}
+              onChange={(mode) => pickBuildMode(scope, mode)}
+            />
           </PickCloses>
         </ValueChip>
       ),
@@ -407,6 +423,18 @@ export default function BuilderOptions() {
     );
   }
   if (s.mode === "stamp") slots.push(...stamps.slots);
+  if (s.mode === "wing") {
+    const ready = wingOffLine === null && s.wing?.sceneId === sceneId && s.wing.area !== null && s.wing.join !== null;
+    slots.push({
+      id: "wingGenerate",
+      priority: 1,
+      control: (
+        <OptButton tone="primary" ends disabled={!ready || s.asking || s.wingOpen} onClick={() => set({ wingOpen: true, note: null })}>
+          Generate a wing
+        </OptButton>
+      ),
+    });
+  }
   slots.push({
     id: "clearBuild",
     priority: 9,
@@ -425,10 +453,40 @@ export default function BuilderOptions() {
 
   return (
     <div ref={row} style={{ display: "contents" }}>
-      <OptionsStrip tool="Map builder" task={corners || stamped} line={asking ? ASKING_LINE : { tone: s.note || s.inSight ? "warning" : "hint", content: s.note ?? (s.inSight ? BUILD_IN_SIGHT : hint(s.mode, s.edge, s.secretFound, hasLights, heightHint, s.terrain, grid, s.linkKind)) }} slots={slots} />
+      <OptionsStrip
+        tool="Map builder"
+        task={corners || stamped}
+        line={
+          asking
+            ? ASKING_LINE
+            : s.mode === "wing"
+              ? (wingOffLine !== null ? { tone: "warning", content: wingOffLine } : s.note ? { tone: "warning", content: s.note } : wingLine)
+              : { tone: s.note || s.inSight ? "warning" : "hint", content: s.note ?? (s.inSight ? BUILD_IN_SIGHT : hint(s.mode, s.edge, s.secretFound, hasLights, heightHint, s.terrain, grid, s.linkKind)) }
+        }
+        slots={slots}
+      />
       {s.mode === "stamp" ? stamps.picker : null}
     </div>
   );
+}
+
+/**
+ * Add a wing's line (dungeon phase 3, 3.1): what to drag, then the wall to
+ * tap, then the area and join, or the warnings where players would see the
+ * wing appear. The warnings read the room, so they are worked out only
+ * while both picks stand.
+ */
+function useWingLine(wing: WingPicks | null, sceneId: string | null): StripLine {
+  const scene = useRoomView((v) => (sceneId ? v.floorView?.scenes[sceneId] : undefined));
+  const view = useRoomView((v) => v.floorView);
+  const area = wing?.sceneId === sceneId ? wing.area : null;
+  const join = wing?.sceneId === sceneId ? wing.join : null;
+  const warnings = useMemo(() => (view && scene && area && join ? wingWarnings(view, scene, area, join) : []), [view, scene, area, join]);
+  const g = sceneGrid(scene ?? {});
+  if (area === null) return { tone: "hint", content: dragHint(g) };
+  if (join === null) return { tone: "hint", content: WING_TAP };
+  if (warnings.length > 0) return { tone: "warning", content: warnings.join(" ") };
+  return { tone: "hint", content: readyHint(g, area) };
 }
 
 /**

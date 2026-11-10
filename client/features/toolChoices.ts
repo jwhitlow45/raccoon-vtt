@@ -4,6 +4,7 @@ import { SHAPES } from "./areas/labels.ts";
 import { areaSlot, pickAreaShape, type AreaEnv } from "./areas/store.ts";
 import { linkTargets } from "./builder/linkTap.ts";
 import { builderSlot, BUILD_MODES, labelPaneSlot, pickBuildMode } from "./builder/store.ts";
+import { wingOff } from "./builder/wingPick.ts";
 import { accessOf, DRAW_MODES, drawSlot, pickDrawMode } from "./drawings/store.ts";
 import { fogSlot, FOG_MODES, pickFogMode } from "./fog/store.ts";
 import { MEASURES, pickMeasure, rulerSlot } from "./measure/rulerStore.ts";
@@ -140,15 +141,17 @@ export const fogCycle: ToolCycle = {
 /** The builder's modes by the names a press says: "Walls and doors" where the tile shows "Walls/doors" (FU32-SR-NAMES). */
 const BUILD_SAID: readonly ChoiceOption[] = BUILD_MODES.map((m) => ({ value: m.value, label: m.spoken ?? m.label }));
 
-/** The builder's mode, once the scene is loaded. A mode change drops a shape room's corners and closes a label's pane with its unsaved words, so both hold. */
+/** The builder's mode, once the scene is loaded. A mode change drops a shape room's corners and closes a label's pane with its unsaved words, so both hold. Add a wing is off where its tile is, on a scene with automatic walls off. */
 export const builderCycle: ToolCycle = {
   now(env) {
-    if (!shownScene(env.getState())) return null;
+    const scene = shownScene(env.getState());
+    if (!scene) return null;
     const st = env.scope.get(builderSlot).store.getState();
     const held = st.mode === "poly" && st.poly.length > 0 ? ROOM_HELD : env.scope.get(labelPaneSlot).getState().labelId !== null ? LABEL_HELD : undefined;
     // Between floors needs a floor next to this one, as the builder's row offers it (builder/Options.tsx).
     const view = env.getState().view;
-    const options = view && linkTargets(view, env.getState().sceneId).length > 0 ? BUILD_SAID : BUILD_SAID.filter((o) => o.value !== "link");
+    const linked = view && linkTargets(view, env.getState().sceneId).length > 0 ? BUILD_SAID : BUILD_SAID.filter((o) => o.value !== "link");
+    const options = wingOff(scene) === null ? linked : linked.map((o) => (o.value === "wing" ? { ...o, disabled: true } : o));
     return { options, value: st.mode, ...(held ? { held } : {}) };
   },
   pick(env, value) {
