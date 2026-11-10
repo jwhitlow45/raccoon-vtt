@@ -18,7 +18,9 @@ import { groupReading } from "../movement/preview.ts";
 import { routeSlot, type DragRoute } from "../movement/store.ts";
 import { markOwner } from "../pings/who.ts";
 import { dragLabel, remoteReading, type DragRead, type SpeedLeft, type Speeds } from "./movement.ts";
+import { actorOfToken, stillCarried } from "./carry.ts";
 import { localMeasureSlot } from "./RulerController.ts";
+import { rulerSlot } from "./rulerStore.ts";
 import { drawnPoints, formatFeet, keptStops, measureStops, type DistanceRules, type Point, type RulerStop } from "./ruler.ts";
 import { useHeldWalk, useWalkMeasure } from "./useWalkMeasure.ts";
 import { heldKey, legReading, walkShown, walkText, type WalkInput } from "./walkRuler.ts";
@@ -86,6 +88,9 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
   // Walking rulers search the room itself, so only they read the whole view.
   const anyWalk = useTreeShownView((s) => Object.values(s.ephemeral.rulers).some((r) => r.walk) || Object.values(s.floorView?.drawings ?? {}).some((d) => d?.kind === "ruler" && d.walk === true));
   const view = useTreeShownView((s) => (anyWalk ? s.floorView : null));
+  // This device's own carried ruler, while private on the DM's, walks on with the real creature's speeds (docs/design/design-v1-floors.md phase 3, 4.2).
+  const carry = useTreeShownStore(useScoped(rulerSlot).store, (s) => s.carry);
+  const carriedActor = useTreeShownView((s) => (carry && role === "dm" && s.view ? actorOfToken(s.view, carry.tokenId) : undefined));
   // This device's own drag, which the board's ruler controller hears from the stage on screen (RulerController.ts).
   const localDrag = useTreeShownStore(useScoped(localMeasureSlot), (s) => s.drag);
   // Only this device's own drag reads the room, for where its token lands: by its holder while it sits on one every player sees.
@@ -132,7 +137,7 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
           <WalkRuler
             key={key}
             stops={r.points}
-            walk={{ view, sceneId: props.scene.id, viewer: { role }, everything: role === "dm" && r.local && !r.shared }}
+            walk={walkOf(r.local && role === "dm" && !r.shared && stillCarried(carry, r.points) ? carriedActor : undefined, r.prior, { view, sceneId: props.scene.id, viewer: { role }, everything: role === "dm" && r.local && !r.shared })}
             live={r.local}
             scale={props.scale}
             color={colorOf(r.from)}
@@ -166,6 +171,12 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
 });
 
 type WalkSource = Omit<WalkInput, "stops">;
+
+/** A ruler's walk source with what a carried one measured before this floor, and the real walker's actor where its own device may read it. */
+function walkOf(actor: WalkInput["actor"], prior: WalkInput["prior"], walk: WalkSource): WalkSource {
+  if (!prior) return walk;
+  return { ...walk, prior, ...(actor ? { actor } : {}) };
+}
 
 function KeptRuler(props: { drawing: Drawing; tokens: Record<string, Token>; rules: DistanceRules; grid: Grid; scale: number; color: string; owner: string | null; walk: WalkSource | undefined }) {
   const { drawing } = props;
@@ -202,7 +213,9 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
   if (!m) return <Ruler stops={stops} tokens={walk.view.tokens} rules={walk.view.meta.settings} grid={gridOfWalk(walk)} scale={scale} color={color} owner={props.owner} kept={props.kept === true} />;
   const shown = walkShown(m, held, slow);
   const mid = (p: Point) => ({ x: p.x + m.size.w / 2, y: p.y + m.size.h / 2 });
-  const last = mid(m.legs[m.legs.length - 1]!.to);
+  // A ruler carried over stairs with one stop stands at its landing, with no leg yet.
+  const start = m.legs[0]?.from ?? { x: m.end.walker.x, y: m.end.walker.y };
+  const last = mid(m.legs[m.legs.length - 1]?.to ?? start);
   return (
     <>
       {m.legs.map((leg, i) => {
@@ -224,7 +237,7 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
         );
       })}
       <Upright>
-        {[m.legs[0]!.from, ...m.legs.map((l) => l.to)].map((p, i) => {
+        {[start, ...m.legs.map((l) => l.to)].map((p, i) => {
           const c = viewPointOf(iso, mid(p));
           return <Circle key={i} x={c.x} y={c.y} radius={(i === 0 || i === m.legs.length ? 5 : 4) / scale} fill={color} stroke={boardTheme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />;
         })}

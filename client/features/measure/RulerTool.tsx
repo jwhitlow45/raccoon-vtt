@@ -1,13 +1,17 @@
-import type { ReactNode } from "react";
+import { useMemo, useRef, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { useDelayed } from "../../components/Loading.tsx";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { boardPickOf, pressGap } from "../../canvas/boardPick.ts";
+import { handFocusTo } from "../../lib/handFocus.ts";
 import { theme } from "../../lib/theme.ts";
 import { groundSource, seenGround } from "../builder/heights/ground.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
-import { isHex, sceneGrid, SQUARES } from "#shared/rules/grid.ts";
+import { sceneGrid, SQUARES } from "#shared/rules/grid.ts";
+import { CARRIED_WALKS, rulerStairsName, rulerStairsWords, SHARE_BEFORE_STAIRS } from "../floors/linkWords.ts";
+import { useHeldFloors } from "../floors/useFloors.ts";
+import { actorOfToken, priorOut, shareLocked, stairsPlan, stillCarried, type Carry, type Stairs } from "./carry.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import { OptButton, OptionsStrip, OptSegmented, StripWait } from "./controls.tsx";
 import { KeptRulersChip, useKeptRulers } from "./KeptRulers.tsx";
@@ -24,9 +28,9 @@ import {
   type RulerState,
   type RulerToken,
 } from "./ruler.ts";
-import { MEASURES, pickMeasure, publish, rulerSlot, shares } from "./rulerStore.ts";
+import { MEASURES, pickMeasure, publish, refuseKeep, rulerActivated, rulerDeactivated, rulerSlot, shares, takeStairs, toggleShare } from "./rulerStore.ts";
 import { useHeldWalk, useWalkMeasure } from "./useWalkMeasure.ts";
-import { heldKey, walkShown, walkText } from "./walkRuler.ts";
+import { heldKey, walkShown, walkText, type WalkInput, type WalkMeasure } from "./walkRuler.ts";
 import { rulerCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
@@ -108,6 +112,7 @@ function onUp(p: ToolPointer, ctx: ToolContext): void {
  * nothing.
  */
 function keep(ctx: ToolContext, ruler: RulerState | null): void {
+  if (refuseKeep(ctx, ruler)) return;
   const s = ctx.getState();
   const you = s.you;
   const plan = keepPlan(
@@ -142,33 +147,60 @@ function onCancel(ctx: ToolContext): void {
   else publish(ctx, null);
 }
 
+/** The stairs button's offer and press (carry.ts stairsPlan), read on this render's walk. */
+function useStairs(input: { role: "dm" | "player"; share: boolean; ruler: RulerState | null; walkInput: WalkInput | null; walked: WalkMeasure | null; carried: Carry | null }): Stairs | null {
+  const whole = useRoomView((s) => (input.walkInput ? s.view : null));
+  const held = useHeldFloors();
+  const { role, share, ruler, walkInput, walked, carried } = input;
+  return useMemo(
+    () => (ruler && walkInput && whole ? stairsPlan({ role, share, rulerId: ruler.id, walkInput, walked, carried, held: held.map((f) => f.id), whole }) : null),
+    [whole, held, role, share, ruler, walkInput, walked, carried],
+  );
+}
+
 /**
  * The Ruler's row (docs/design/design-v1-tool-options.md 9.2): Shared for the DM,
- * Measure, Keep and Clear, and the kept rulers behind a chip. Its line is
- * the hint, or the reading with the diagonal rule: a walking ruler's walk
- * and what terrain added (docs/design/design-v1-movement.md 3.3). While a walk is
- * searching the line keeps the last walk, and past the shared loading
- * delay it says "Finding the way…" in the small loading line (StripWait,
- * walkRuler.ts walkShown).
+ * the stairs where the walk ends on them, Measure, Keep and Clear, and the
+ * kept rulers behind a chip. Its line is the hint, or the reading with the
+ * diagonal rule: a walking ruler's walk and what terrain added
+ * (docs/design/design-v1-movement.md 3.3), and on a ruler carried over stairs the
+ * feet before this floor. While a walk is searching the line keeps the last
+ * walk, and past the shared loading delay it says "Finding the way…" in the
+ * small loading line (StripWait, walkRuler.ts walkShown).
  */
 function RulerOptions(props: { role: "dm" | "player" }) {
   const scope = useRoomScope();
   const tool = useScoped(rulerSlot);
   const rulerStore = tool.store;
-  const { ruler, share, walk: wantsWalk } = useStore(rulerStore);
+  const { ruler, share, walk: wantsWalk, carry } = useStore(rulerStore);
   const tokens = useRoomView((s) => s.floorView?.tokens);
   const settings = useRoomView((s) => s.floorView?.meta.settings);
   const scene = useRoomView((s) => (s.sceneId ? s.floorView?.scenes[s.sceneId] : undefined));
   const walk = wantsWalk;
   const view = useRoomView((s) => (walk ? s.floorView : null));
   const kept = useKeptRulers(props.role);
-  const stops = ruler ? allStops(ruler) : [];
+  const stops = useMemo(() => (ruler ? allStops(ruler) : []), [ruler]);
+  const carried = stillCarried(carry, stops);
+  const everything = props.role === "dm" && !share;
+  // Only the DM's private carried ruler walks on with the real creature's speeds (4.2 The walk).
+  const actor = useRoomView((s) => (carried && everything && s.view ? actorOfToken(s.view, carried.tokenId) : undefined));
+  const sceneId = tool.activeCtx?.scene.id;
+  const walkInput = useMemo<WalkInput | null>(
+    () =>
+      walk && view && sceneId && stops.length > 0
+        ? { view, sceneId, stops, viewer: { role: props.role }, everything, ...(carried ? { prior: priorOut(carried.prior), ...(actor ? { actor } : {}) } : {}) }
+        : null,
+    [walk, view, sceneId, stops, props.role, everything, carried, actor],
+  );
   let info: ReactNode = "Drag to measure. Tap to add a waypoint. Double-tap to keep a ruler on the map.";
   if (stops.length === 1) info = "Tap or drag to the next point.";
-  const walked = useWalkMeasure(walk && view && tool.activeCtx && stops.length > 1 ? { view, sceneId: tool.activeCtx.scene.id, stops, viewer: { role: props.role }, everything: props.role === "dm" && !share } : null, true);
+  const walked = useWalkMeasure(walkInput && (stops.length > 1 || carried) ? walkInput : null, true);
   const slow = useDelayed(walked?.searching === true);
   const held = useHeldWalk(walked, heldKey(ruler?.id ?? "", stops));
   const shown = walked ? walkShown(walked, held, slow) : null;
+  const stairs = useStairs({ role: props.role, share, ruler, walkInput, walked, carried });
+  const stairsRef = useRef<HTMLButtonElement>(null);
+  const clearRef = useRef<HTMLButtonElement>(null);
   // The diagonal rule follows a reading only, never the hint or the wait.
   let reading = false;
   if (shown?.finding) {
@@ -193,11 +225,12 @@ function RulerOptions(props: { role: "dm" | "player" }) {
       </>
     );
   }
+  const shareOff = shareLocked(carried, share);
   return (
     <OptionsStrip
       tool="Ruler"
       line={{
-        tone: stops.length > 1 ? "reading" : "hint",
+        tone: stops.length > 1 || reading ? "reading" : "hint",
         finding: walked?.searching === true,
         content: (
           <>
@@ -213,26 +246,42 @@ function RulerOptions(props: { role: "dm" | "player" }) {
           // Its eye alone where the row cannot hold its word, so a DM's row with Measure and kept rulers still fits a 375 px phone.
           compact: true,
           control: (
-            // A fixed name that says what pressed means (docs/design/design-v1-visual.md 3.7).
+            // A fixed name that says what pressed means (docs/design/design-v1-visual.md 3.7), or why it is off.
             <OptButton
               pressed={share}
               icon="shown"
-              label="Players see this ruler"
+              label={shareOff ? SHARE_BEFORE_STAIRS : "Players see this ruler"}
               compactIcon
+              disabled={shareOff}
               onClick={() => {
                 const ctx = tool.activeCtx;
-                const next = !share;
-                const { ruler: current, sent } = rulerStore.getState();
-                if (!next && current && sent && ctx) {
-                  // Take it off everyone else's map, then keep showing it here.
-                  ctx.actions.sendEph({ k: "rulerEnd", id: current.id });
-                  rulerStore.setState({ sent: false });
-                }
-                rulerStore.setState({ share: next });
-                if (ctx && current) publish(ctx, current);
+                if (ctx) toggleShare(ctx);
+                else rulerStore.setState({ share: !share });
               }}
             >
               Shared
+            </OptButton>
+          ),
+        },
+        stairs && {
+          id: "stairs",
+          priority: 1,
+          // Its stairwell alone where the row is short (docs/design/design-v1-floors.md phase 3, 7).
+          compact: true,
+          control: (
+            <OptButton
+              ref={stairsRef}
+              icon="stairwell"
+              compactIcon
+              label={rulerStairsName(stairs.offer.dir, stairs.offer.kind, stairs.offer.floor)}
+              onClick={() => {
+                const ctx = tool.activeCtx;
+                if (!ctx || !takeStairs(ctx, stairs.plan)) return;
+                // Focus stays on the button while the landing offers stairs again, else it goes to Clear (9).
+                handFocusTo(() => (stairsRef.current?.isConnected ? stairsRef.current : clearRef.current));
+              }}
+            >
+              {rulerStairsWords(stairs.offer.dir, stairs.offer.kind)}
             </OptButton>
           ),
         },
@@ -245,7 +294,7 @@ function RulerOptions(props: { role: "dm" | "player" }) {
             <OptSegmented
               label="Measure"
               value={walk ? "walking" : "straight"}
-              options={MEASURES}
+              options={carried ? CARRIED_MEASURES : MEASURES}
               onChange={(v) => pickMeasure(scope, v)}
             />
           ),
@@ -265,7 +314,7 @@ function RulerOptions(props: { role: "dm" | "player" }) {
           // Its eraser alone where the row cannot hold its words, such as a DM's with kept rulers on a 360 px phone, so the kept rulers' chip never waits behind ⋯ for it.
           compact: true,
           control: (
-            <OptButton tone="danger" icon="eraser" compactIcon disabled={!ruler} onClick={() => tool.activeCtx && publish(tool.activeCtx, null)}>
+            <OptButton ref={clearRef} tone="danger" icon="eraser" compactIcon disabled={!ruler} onClick={() => tool.activeCtx && publish(tool.activeCtx, null)}>
               Clear
             </OptButton>
           ),
@@ -276,6 +325,9 @@ function RulerOptions(props: { role: "dm" | "player" }) {
   );
 }
 
+/** Measure while a ruler is carried over stairs: Straight is off, since a ruler over stairs walks (4.2). */
+const CARRIED_MEASURES = MEASURES.map((o) => (o.value === "straight" ? { ...o, disabled: true, title: CARRIED_WALKS } : o));
+
 export const rulerTool: ToolDef = {
   id: "ruler",
   label: "Ruler",
@@ -285,16 +337,12 @@ export const rulerTool: ToolDef = {
   cursor: "crosshair",
   pointer: { down: onDown, move: onMove, up: onUp, cancel: onCancel },
   activate(ctx) {
-    const tool = ctx.scope.get(rulerSlot);
-    tool.activeCtx = ctx;
-    // Every ruler starts private for the DM (design 7.6). Measure stays as this device left it.
-    tool.store.setState({ ruler: null, share: false, sent: false });
+    ctx.scope.get(rulerSlot).activeCtx = ctx;
+    rulerActivated(ctx);
   },
   deactivate(ctx) {
     const tool = ctx.scope.get(rulerSlot);
-    tool.gesture = null;
-    tool.lastTap = null;
-    publish(ctx, null);
+    rulerDeactivated(ctx);
     if (tool.activeCtx === ctx) tool.activeCtx = null;
   },
   Options: RulerOptions,
