@@ -2,6 +2,7 @@ import { decodeHeights, decodeRough, decodeStairs, encodeHeights, encodeRough, e
 import type { BuildChunk, CellRect, FreeWall, RoomState, Scene } from "#shared/model.ts";
 import type { RoomFacts } from "../dungeon/edits.ts";
 import { latticeFor } from "../dungeon/lattice.ts";
+import { roomBox } from "../dungeon/marks.ts";
 import type { DungeonPlan } from "../dungeon/plan.ts";
 import { isHexGrid } from "../dungeon/settings.ts";
 
@@ -132,6 +133,11 @@ export function ghostOf(input: {
  * whatever DM key says, since a tap on it opens the facts carrying its
  * number (DG3 review round 1: with DM key off the ghost numbered rooms in
  * plan order, and a tap opened another room).
+ *
+ * Its rectangle is in the scene's cells, where a tap lands: on hexes the
+ * box round its hexes' centers that the preview taps by (`roomBox`), since
+ * a hex row stands about 0.87 of a cell below the last and the lattice's
+ * own rectangle drifts off the drawn room further down the scene.
  */
 export function ghostRooms(plan: Pick<DungeonPlan, "rooms" | "grid" | "w" | "h">, facts: readonly Pick<RoomFacts, "n" | "at">[]): GhostRoom[] {
   const grid = plan.grid ?? "squares";
@@ -139,10 +145,9 @@ export function ghostRooms(plan: Pick<DungeonPlan, "rooms" | "grid" | "w" | "h">
   return facts.flatMap((f) => {
     const r = plan.rooms[f.at];
     if (!r) return [];
-    if (!L) return [{ n: f.n, x: r.x + r.w / 2, y: r.y + r.h / 2, rect: { x: r.x, y: r.y, w: r.w, h: r.h } }];
-    const [x, y] = L.pointOf(r.x + Math.floor(r.w / 2), r.y + Math.floor(r.h / 2));
-    const rect = grid === "hexColumns" ? { x: r.y, y: r.x, w: r.h, h: r.w } : { x: r.x, y: r.y, w: r.w, h: r.h };
-    return [{ n: f.n, x, y, rect }];
+    const { x: bx, y: by, w, h } = roomBox(plan, r);
+    const [x, y] = L ? L.pointOf(r.x + Math.floor(r.w / 2), r.y + Math.floor(r.h / 2)) : [r.x + r.w / 2, r.y + r.h / 2];
+    return [{ n: f.n, x, y, rect: { x: bx, y: by, w, h } }];
   });
 }
 

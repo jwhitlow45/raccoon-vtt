@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { encodeHeights } from "#shared/heightCodec.ts";
 import { CHUNK_CELLS, type BuildChunk, type Light, type Trap } from "#shared/model.ts";
 import { room, scene } from "#shared/testutil.ts";
-import { squareWingBase, WING_SETTINGS } from "../dungeon/handPlans.ts";
+import { hexWingBase, squareWingBase, WING_SETTINGS } from "../dungeon/handPlans.ts";
 import { wingPreviewOf } from "../dungeon/scratch.ts";
 import { addedChunk, ghostOf, ghostRoomAt, ghostRooms, type WingGhost } from "./wingGhost.ts";
 
@@ -114,5 +114,18 @@ describe("the ghost's rooms (DG3 review round 1)", () => {
       opened.set(key, rooms);
     }
     assert.deepEqual(opened.get(false), opened.get(true), "the same number on each room with DM key off");
+  });
+
+  test("on hexes a tap on a room's drawn middle opens it, on Hex rows and Hex columns", () => {
+    for (const grid of ["hexRows", "hexColumns"] as const) {
+      const p = wingPreviewOf(WING_SETTINGS, SEED, hexWingBase(grid).base, { feetPerCell: 5 }, null);
+      if (!p.ok) throw new Error(`${grid}: the wing plans`);
+      const rooms = ghostRooms(p.plan, p.facts);
+      assert.equal(rooms.length, p.facts.length);
+      const ghost = ghostWith(rooms);
+      // The number stands on the room's middle hex as the ghost draws it, in the scene's cells.
+      for (const room of rooms) assert.equal(ghostRoomAt(ghost, { x: room.x, y: room.y }, 0.25)?.n, room.n, `${grid}: room ${room.n} at ${room.x}, ${room.y}`);
+      assert.ok(rooms.some((r) => r.y > 12), "not vacuous: a room far enough down the scene for the rows to drift");
+    }
   });
 });
