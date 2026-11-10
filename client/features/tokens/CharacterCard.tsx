@@ -66,6 +66,11 @@ export const SIZE_OPTIONS: { value: CreatureSize; label: string }[] = [
  * allows: name, image, level, HP and the stat card's numbers, senses,
  * notes, the sheet link and the stat block (docs/design/design-v1-pc-stats.md 7.1).
  */
+/** The disk a character wears on its card, its initials the ones the board draws. */
+export function characterPicture(character: Pick<Character, "name" | "defaultImage">) {
+  return { image: character.defaultImage, shape: "circle" as const, aspect: 1, ring: theme.color.ally, initials: initials(character.name) };
+}
+
 export function CharacterPage(props: { character: Character; close: PanelClose; onAddCompanion(): void; onBlocks(): void; onDelete(): number | null }) {
   const { character } = props;
   const actions = useRoomActions();
@@ -152,7 +157,7 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
         return (
           <CreatureHeader
             key={id}
-            picture={{ image: character.defaultImage, shape: "circle", aspect: 1, ring: theme.color.ally, initials: initials(character.name) }}
+            picture={characterPicture(character)}
             name={character.name}
             line={kindLine(characterKind(character), sizeText(character.size, { w: cells, h: cells }, feetPerCell))}
             focusable
@@ -196,7 +201,7 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
               aspect={1}
               canEdit={access.canEdit("defaultImage")}
               ring={theme.color.ally}
-              initials={initials(character.name)}
+              initials={characterPicture(character).initials}
               previewSize={48}
             />
           </Group>

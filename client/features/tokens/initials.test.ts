@@ -15,6 +15,7 @@ import { initials } from "../../lib/tokenView.ts";
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { Portrait } = await import("./CharactersPanel.tsx");
+const { characterPicture } = await import("./CharacterCard.tsx");
 const { MonsterImageField } = await import("../monsters/MonsterImage.tsx");
 
 /** Names whose first two letters differ from their initials, and a few that do not. */
@@ -56,8 +57,9 @@ describe("one initials() everywhere a creature shows initials", () => {
       const source = readFileSync(new URL(file, import.meta.url), "utf8");
       assert.doesNotMatch(source, /\.slice\(0, ?2\)/, `${file} slices a name`);
     }
-    const card = readFileSync(new URL("./CharacterCard.tsx", import.meta.url), "utf8");
-    assert.match(card, /import \{[^}]*\binitials\b[^}]*\} from "\.\.\/\.\.\/lib\/tokenView\.ts"/);
-    assert.match(card, /initials=\{initials\(character\.name\)\}/, "the character card's portrait takes the board's initials");
+  });
+
+  test("the character card's disk takes the board's initials", () => {
+    for (const name of NAMES) assert.equal(characterPicture({ name, defaultImage: undefined }).initials, initials(name), name);
   });
 });
