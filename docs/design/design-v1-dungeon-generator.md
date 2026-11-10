@@ -1,6 +1,6 @@
 # The dungeon generator: design draft 2.1 (2026-11-02)
 
-Status: built, phases 1 and 2 (2026-11-02 and 2026-11-08). Draft 2.1 passed design review in round 3, and the build followed it except where **As built** says otherwise. The Round 1, Round 2 and Round 3 sections at the end list each finding and what changed, and Build review round 1 the fixes after the build. From [mvp.md](mvp.md) section 3, Later: "Dungeon generator." The project owner set the Later order on 2026-11-02 (D-261102-007): the generator comes right after the easy items. Code was cited from the tree before this feature, at OP_VERSION 41 and SNAPSHOT_VERSION 31. The generator adds no op or snapshot version of its own: it ships at whatever versions the app is on. Decisions are D-261102-370 to D-261102-389 (section 16) with D-261102-022 to 024, and the build's own guesses are in As built.
+Status: built, phases 1, 2 and 3 (2026-11-02, 2026-11-08 and 2026-11-10). Draft 2.1 passed design review in round 3, and the build followed it except where **As built** says otherwise. The Round 1, Round 2 and Round 3 sections at the end list each finding and what changed, and Build review round 1 the fixes after the build. From [mvp.md](mvp.md) section 3, Later: "Dungeon generator." The project owner set the Later order on 2026-11-02 (D-261102-007): the generator comes right after the easy items. Code was cited from the tree before this feature, at OP_VERSION 41 and SNAPSHOT_VERSION 31. The generator adds no op or snapshot version of its own: it ships at whatever versions the app is on. Decisions are D-261102-370 to D-261102-389 (section 16) with D-261102-022 to 024, and the build's own guesses are in As built.
 
 ## Summary
 
@@ -9,7 +9,7 @@ Status: built, phases 1 and 2 (2026-11-02 and 2026-11-08). Draft 2.1 passed desi
 - **How it lands.** At most 60 ordinary ops (`scene.create`, `build.paint`, `build.edge` for doors, `build.height`, `build.stairs`, `trap.create`) in one Setup undo group, the Universal VTT import's path. Usually one Undo setup takes it back, and the scene's Delete always does once the players are on another scene.
 - **Replay and versions.** The stored ops hold the result, so the generator never replays and may change freely. No new state, op or field, so the generator takes no OP_VERSION or SNAPSHOT_VERSION step in any phase.
 - **Privacy.** It runs on the DM's device. The seed lives only in the open dialog, never stored or sent. Every wall is automatic, so no drawn edge marks a hidden room's side. No starting view is stored. Players receive the build only as map discovery allows. The seed's 75 random bits drive a ChaCha20 stream, so neither guessing nor the rooms seen give a player the rest.
-- **Phase 1 is one batch:** squares, Dungeon and Crypt, no secret doors, four lanes (L, M, M, S) after a contract commit. Phase 2 adds themes, lights, dressing, a DM key, more traps and secret doors (after SECRET-DOOR-DRAWN-EDGE). Phase 3 adds hexes and generating into an existing scene.
+- **Phase 1 is one batch:** squares, Dungeon and Crypt, no secret doors, four lanes (L, M, M, S) after a contract commit. Phase 2 adds themes, lights, dressing, a DM key, more traps and secret doors (after SECRET-DOOR-DRAWN-EDGE). Phase 3 adds hexes, generating into an existing scene and per-room edits.
 
 ## 1. Today
 
@@ -312,7 +312,13 @@ Phase 1, one batch, after the easy Later items. DG-A's first commit is the contr
 
 **Phase 2 (M to L, no versions).** Cave, Mine and Sewer themes, lights with the scene starting Dark and Keep it lit, dressing from shipped stamps and starter props, a DM key (a DM-only journal page with numbered rooms, a trinket each, the choices, and DM-only numbered pins, via `journal.create` and `pin.put` in the same group), Collapsing Roof and Poisoned Darts with their hit squares, Fire-Casting Statue with its cone, Rolling Stone (it shows a hidden stone token the generator would place, rolls 60 ft a turn on its own Initiative down a straight run, and is rated only for levels 11 to 20), dead ends, per-room preview edits, and Look closer. Secret doors and secret rooms come only after SECRET-DOOR-DRAWN-EDGE makes an undiscovered secret door between painted cells project like an automatic wall, remembered walls included, proven by a paired projection test against solid rock.
 
-**Phase 3 (L, its own design pass, no versions).** Hexes as wall-line dungeons (free walls on hex sides, so `splitCheck` binds and the cap needs its own count), and Add a wing into an empty part of an existing scene through `build.ask`.
+**Phase 3 (L, its own design pass, no versions).** Built on 2026-11-10 after four design review rounds, with decisions D-261110-085 to D-261110-099, D-261110-160 to D-261110-179 and D-261110-230 to D-261110-245. Four lanes (the generator, the landing, the dialog and the wing mode) built on a contract commit, and a docs lane followed.
+
+- **Hex dungeons.** The square planner runs on the hex rows lattice (`lattice.ts`), Hex columns through its mirror, keeping its four offset moves with a six-sided halo. A wall pass (`hexWalls.ts`) puts one free wall or door leaf on each hex side between floor and rock, between two spaces (each room, each run, the corridors) and toward the scene's outside, except the way in's one border side. So a hidden leaf reaches players as a plain wall with its own ends, and no sight runs along a sliver at the scene's edge into the rock. A Wide doorway is three leaves in one state. Runs follow a hex axis, with nothing walled inside one. There are no floor terrains: rubble and water are difficult ground, pits sink 10 ft, pillars and rock columns are walled hexes, and stamps keep inside their room, 2 hexes from any doorway.
+- **The wall budget.** Every hex wall is a free wall, so the scene's 4,000 bind. A plan keeps at most 3,200 (`MAX_HEX_WALLS`) and 24 rooms, and `planFitted` steps the room count down one at a time, at most 12 plans, taking the first that fits (`Planned.fitted`).
+- **Add a wing.** A Map builder mode picks an area and the wall it joins. The worker plans a dungeon in the area's open ground on a posted base of the scene, the DM sees it as a ghost beside a docked pane, and it lands as ordinary builder ops behind `build.ask`. The ask's new `clear` lets the server check on its own copy that the join is unchanged (`JOIN_CHANGED`) and the wing's whole footprint is still clear (`WING_MOVED`), part by part, the last part over the union of every part's footprint. The key page and its pins go only once everything else is taken.
+- **Per-room edits.** Height and door pins are generator inputs. Trap, Lit and dressing pins reconcile one room after the unchanged pipeline, so no other room changes. Edits freeze the layout (`fitted`, the seed, the choices and a wing base's hash), and a change drops them with Bring them back for one step.
+- **Versions.** None: `build.ask` is never stored, and GENERATOR_VERSION stays 9 with the 15 golden square plans unchanged.
 
 ## 16. Decisions
 
@@ -489,6 +495,41 @@ Phase 2 is built: five themes, dead ends, secret doors and secret rooms, four mo
 - **Mutants.** The generator's runner put 38 rules back wrong, and 32 were caught. One went with the redundant flag it targeted, and 5 are equivalent today, such as a stone allowed on Narrow, where no two-lane straight stretch exists. The landing's 27 mutants left one equivalent, and the gate's 2 were caught.
 - **Measures.** At the largest choices a plan holds at most 2,410 sight pieces (under 4,800), at most about 83 ops and 156 of 160 stamps, and takes 30 to 82 ms on a Mac mini against 2.5 ms for the defaults. The worker bundle gained 5 KB, to 262 KB gzipped.
 - **Guide pictures.** The guide's five pictures are made by `scripts/guide-dungeon.ts` from the production build.
+
+## As built, phase 3
+
+Phase 3 is built: hex dungeons, Add a wing and per-room edits. It took no op, snapshot or generator version step, and the 15 golden square plans hold unchanged at GENERATOR_VERSION 9. The build's own guesses are D-261110-280 to D-261110-299, and this section lists where the build went its own way.
+
+### The generator
+
+- **Hex traps (D-261110-280).** A Wide hex corridor takes pits only, since none of its hexes has two opposite walled sides for a Falling Net's or a Collapsing Roof's wire and it has no single lane for Poisoned Darts. The Fire-Casting Statue does not stand on hexes until a hex probe of its cone exists, a follow-up.
+- **Placing on hexes (D-261110-281, D-261110-282, D-261110-283).** A light whose stamp fits nowhere in its room stands alone on its hex. A wing's approach runs straight out from the join along its hex direction for the margin, then grows by the planner's four offset moves, so the planner can always route through it. The check that a secret door leaves every room reachable keeps the four offset moves, stricter than six-way walking.
+- **The wing's key (D-261110-284).** "<scene> wing key", numbered while taken, with at most the pins left in the wing's allowance. The wing planner takes a hook so the landing can count sight pieces in the allowance.
+- **Measured.** Default hex plans take under 35 ms. Crypt at Medium stepped down in none of 40 seeds, so its pillar ring stays whole. The worst heavy fit (100 by 87 Crypt, Wide, Dense, Winding, Most), which often runs all 12 plans, took about 1.1 s, over the 1 s target, timed while other builds loaded the machine.
+
+### The landing and the server
+
+- **The join's inside (D-261110-290).** A hex wing's `clear` also carries `inside`, the join's inside hex keys, so the server reads the inside's ground on the right side of a free wall.
+- **Wall hexes (D-261110-291).** In `wingClash` the wing's floor keeps the whole margin, while the hexes beside its free walls keep the margin less one, with the joined room's structure excused, since a wall's far hex stands one step past floor the planner already kept clear.
+- **Outcomes (D-261110-293, D-261110-294).** `sendWing` adds `join`, `moved` and `large` to a dungeon's outcomes. After lost answers a wing is compared by the chunks its ops wrote and the entities it made, so another member's edit elsewhere never reads as unconfirmed.
+- **Reserved ids.** `shared/reservedIds.ts` lists the wall ids a `build.ask` part puts among the ids an op makes.
+
+### The dialog, the pane and the mode
+
+- **The shared choices (D-261110-295).** `Choices.tsx` takes the contract's five props, and the dialog's Size row, light line and Seed row come in through optional slots. The wing pane passes only the five, so it has no Seed row, and its Reroll draws a new seed.
+- **The room panel (D-261110-296, D-261110-297, D-261110-298).** A door to the map's edge or a wing's join reads "to the way in". Edit rooms is pressed exactly while a panel is open, and Done returns focus to it. Reroll and a new seed close the panel, and a room gone from the next plan keeps a panel that says so, with only Reset room. Where the preview is too short for Edit rooms beside Reroll, it stands above the choices.
+- **The picked ring (D-261110-299).** Crest yellow over a dark outline, wider than the entrance's ring. A hex room's box, for the ring and the tap, is its hexes' centers grown by a hex's radius.
+- **The area and join (D-261110-285 to D-261110-288).** A drag under 12 a side grows to 12 the way it went, and one over 100 gives up its far end. A grid edge that is no join, a window and a tap near nothing each have a line. Hex columns' words mirror the rows', and a hex area's line gives no feet. The warnings take the row's ready line and repeat in the pane.
+- **The camera.** As the pane opens, the map pans to the area and the join beside it and keeps its zoom.
+- **Floors on hexes.** A hex scene's Floors group takes a generated dungeon, lifting floors phase 3's hold (D-261110-075), so only VTT file stays off there.
+
+### Tests
+
+- **New files.** Generator: lattice, hexWalls, hex runs, fit, caps on hexes, hex plans, hex traps, edits and their property test, wing and its property test, and four golden plans (a hex Medium on rows, a hex Wide Crypt on columns, a square wing and an edited plan). Landing: hex and wing ops, previews, `sendWing` and its asks, the landed hex property test, and through the actor `dungeon.itest.ts`'s hex dungeon, `dungeon.wing.itest.ts` and `dungeon.hexsecret.test.ts` (leaf twins frame by frame on rows and columns, and the way in's sight). Shared: `wingClear`. Client: the shared choices, the room panel, the edits flow, the picked room, the wing pick, ghost, pane placement and ghost room tap.
+- **End to end.** `e2e/dungeon.e2e.ts` gains `DG3`: a hex dungeon made on Explore, a player beside a hidden leaf seeing a plain wall, and the room panel on a computer and a phone. `e2e/dungeonwing.e2e.ts` (`DGW`) covers the mode on squares and hexes, the docked pane and its ghost, the phone's sheet and Add the wing. The alignment sweep gained dungeon-room-panel, dungeon-edits-line, builder-wing-row and builder-wing-pane.
+- **Mutants.** The generator's 38 rules put back wrong were all caught, as were the landing's, the dialog's 18 and the wing mode's 14.
+- **Not covered.** The wing's memory twin (Reveal by hand keeps no memory once hidden, so a projection test of a seen join stands in), the forget path through the actor (send.wing.test.ts covers it with fake answers), browser runs of the forget question, a token walking into the area, a changed join and Undo setup, hex Wide joins in wingClear.test.ts, a Large creature leaving a Wide run, a ghost room tapped in a browser (a unit test only), and a hex Wide Crypt, a landed wing and the over-budget undo in a browser.
+- **Guide pictures.** The guide's four phase 3 pictures are made by `scripts/guide-dungeon-phase3.ts` from the production build.
 
 ## Round 1
 
