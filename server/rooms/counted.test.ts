@@ -6,9 +6,11 @@ import { retainedSaveOutcome } from "#shared/saveOutcomes.ts";
 import { member } from "#shared/testutil.ts";
 import { clientOps, serverOnlyOps, type OpType } from "#shared/protocol.ts";
 import { twins } from "#shared/secretDoorTestutil.ts";
+import { IMAGE, seqTwins } from "#shared/seqTestutil.ts";
+import { forgetRememberedStamps } from "../assets/cleanup.ts";
 import { counted } from "./counted.ts";
 import { forgetSceneOp } from "./remember.ts";
-import { restartStored, scopeActor, scopeFixture, StoredRoomDb, storedActor } from "./undoScopeTesting.ts";
+import { restartStored, scopeActor, scopeFixture, StoredRoomDb, storedActor, until } from "./undoScopeTesting.ts";
 
 /**
  * The room count's classes (counted.ts): which ops move the count, frozen
@@ -156,6 +158,39 @@ describe("numbers follow the number clock", () => {
     assert.ok(reconnected > handed, `the reconnect's ${reconnected} is above ${handed}`);
     assert.ok(Number(again.actor.committed.state.log.at(-1)!.id.split(":")[0]) > handed);
     assert.ok(chat.seq > handed);
+  });
+
+  test("after a batch of a cleanup's remember alone, which no device is sent, reads stop at the stored number, below the number an op staged in the same millisecond takes", async (t) => {
+    const room = seqTwins({ stamp: true }).door;
+    let clock = T0;
+    const db = new StoredRoomDb(room);
+    const h = await storedActor(t, db, { now: () => clock, numberClock: () => clock });
+    const p1 = await h.connect(room.members.p1!, "player", () => clock);
+    clock = T0 + 1_000;
+    await p1.apply({ t: "log.chat", text: "ready" });
+    const stored = db.pub;
+    assert.equal(stored, T0 + 1_000);
+    // At 5 s a cleanup forgets a stamp only P2 remembers, in a batch of its own that P1 is sent nothing for.
+    clock = T0 + 5_000;
+    const frames = p1.sent.length;
+    const forgets = forgetRememberedStamps(h.actor.committed.state, new Set([IMAGE]));
+    assert.ok(forgets.length > 0);
+    for (const op of forgets) await h.actor.sys(op);
+    assert.equal(p1.sent.length, frames, "no frame for P1");
+    assert.equal(db.pub, stored, "the remember stored no number of its own");
+    assert.equal(h.actor.committed.through, stored, "reads stop at the stored number, not at the batch's number no op took");
+    // P1's chat in the same millisecond, its commit held, so the committed state does not hold it yet.
+    let release: (() => void) | undefined;
+    db.beforeCommit = () => new Promise<void>((resolve) => (release = resolve));
+    const sent = p1.send({ t: "log.chat", text: "same millisecond" });
+    await until(() => release, "the commit held");
+    const through = h.actor.committed.through;
+    db.beforeCommit = undefined;
+    release!();
+    await sent;
+    const number = Number(h.actor.committed.state.log.at(-1)!.id.split(":")[0]);
+    assert.equal(number, T0 + 5_000);
+    assert.ok(through < number, `reads stopped at ${through} while the chat numbered ${number} was staged`);
   });
 
   test("a room that loads with numbers an hour ahead warns once, counts on by one, and dates its lines by the clock", async (t) => {

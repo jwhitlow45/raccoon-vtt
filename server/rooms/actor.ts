@@ -691,10 +691,12 @@ export class RoomActor {
   }
 
   /**
-   * The committed state, its storage seq, its room count, and `through`, the
-   * newest number whose op the state holds, where reads of the log and
-   * receipts stop. That is the count, except in a room whose replay failed,
-   * whose count also takes the numbers of the rows it could not replay.
+   * The committed state, its storage seq, `pub`, the number its last batch's
+   * frames carried, and `through`, where reads of the log and receipts stop:
+   * the stored number at that commit, at or above the number of every op the
+   * state holds and below any op still staged. In a room whose replay
+   * failed it stays where the replay stopped, since the stored number also
+   * takes the numbers of the rows it could not replay.
    */
   get committed(): { state: RoomState; seq: number; pub: number; through: number } {
     return this.#committed;
@@ -2776,8 +2778,10 @@ export class RoomActor {
       }
     }
     this.retrying = false;
-    // A room whose replay failed applies no op, so its reads stay where its replay stopped while refusals take numbers.
-    this.#committed = { state: batch.state, seq: batch.seq, pub: batch.pub, through: this.replayFailed ? this.#committed.through : batch.pub };
+    // Reads stop at the stored number, which every op the state holds is at or below. The frames' number can be one no op
+    // took, which an op staged in the same millisecond takes next. A room whose replay failed applies no op, so its reads
+    // stay where its replay stopped while refusals take numbers.
+    this.#committed = { state: batch.state, seq: batch.seq, pub: batch.pub, through: this.replayFailed ? this.#committed.through : batch.stored };
     this.#committedStored = batch.stored;
     this.#committedHistory = batch.history ?? new Map();
     this.#receipts.committed(batch.receipts);
