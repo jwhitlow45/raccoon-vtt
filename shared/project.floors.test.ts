@@ -22,7 +22,8 @@ import {
 } from "./project.ts";
 import type { Op } from "./protocol.ts";
 import { applyOp, type Applied } from "./reducer.ts";
-import { unseenFloor } from "./rules/floors.ts";
+import { openFloor, playersSee, unseenFloor } from "./rules/floors.ts";
+import { trapsLiveOn } from "./rules/traps.ts";
 import { DM, FULL_TILE_BITS, P1, P2, character, drawing, entry, env, imageRef, member, reveal, room, scene, template, token, trap } from "./testutil.ts";
 
 /**
@@ -395,6 +396,20 @@ describe("a floor held only through a hidden creature says no player sees it (FL
     const copy = ana as unknown as RoomState;
     for (const id of ["ground", "upper", "attic"]) assert.equal(unseenFloor(copy, id), unseenFloor(state, id), `Ana's device and the server agree on ${id}`);
     agrees(state, P1, null, ana);
+  });
+
+  test("every reader on Ana's copy predicts what the server does for the Attic (FLR-UNSEEN-READERS)", () => {
+    const state = owlUpstairs();
+    const copy = projectState(state, P1, { sceneId: null }) as unknown as RoomState;
+    for (const id of ["ground", "upper", "attic"]) {
+      assert.equal(openFloor(copy, id), openFloor(state, id), `openFloor ${id}`);
+      assert.equal(playersSee(copy, id), playersSee(state, id), `playersSee ${id}`);
+      assert.equal(trapsLiveOn(copy, id), trapsLiveOn(state, id), `trapsLiveOn ${id}`);
+    }
+    // The mark is the floor's, so a shown owl on it is the case that tells the readers apart.
+    const owl = { ...state.tokens.owl!, visibility: "all" as const };
+    const env = { opVersion: OP_VERSION };
+    assert.equal(seenByNonOwners(copy, owl, env), seenByNonOwners(state, owl, env), "seenByNonOwners owl");
   });
 
   test("shown to players, the Attic loses its mark, by a key the opened mark's change projects again", () => {

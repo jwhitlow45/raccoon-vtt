@@ -70,12 +70,18 @@ export function onPlayersScene(state: Pick<RoomState, "meta" | "scenes">, sceneI
  * Whether players have reached the floor, whatever a blackout hides: a
  * floor of the players' scene that is the start floor, has an unhidden
  * party member on it, or carries an opened mark (Show, or reached before).
- * On a scene without floors, the players' scene.
+ * On a scene without floors, the players' scene. A player's copy holds
+ * neither the marks nor `of`, so it reads the projection's `unseen` mark:
+ * a floor it holds only through a creature the DM hid is not open, as the
+ * server reads it (FLR-UNSEEN-READERS). Every reader of this rule, the
+ * traps, the seen marks and the companions' turns among them, then
+ * predicts on a device what the server does.
  */
 export function openFloor(state: RoomState, sceneId: SceneId): boolean {
   if (!onPlayersScene(state, sceneId)) return false;
   const floor = ownEntry(state.scenes, sceneId)?.floor;
-  if (floor === undefined || floor.of === undefined) return true;
+  if (floor === undefined) return true;
+  if (floor.of === undefined) return floor.unseen !== true;
   if (sceneId === startFloor(state) || ownEntry(state.openFloors, sceneId) !== undefined) return true;
   return partyFloorsOf(state).has(sceneId);
 }
