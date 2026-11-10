@@ -78,9 +78,9 @@ describe("websocket: hello, ops and acks", () => {
     const upsert = ev.changes.find((c) => c.key === `token:${(op as { token: { id: string } }).token.id}`);
     assert.ok(upsert && "value" in upsert);
 
+    // The party sees the new creature, so the batch's end stores the table's meeting of it after the create.
     const { rows } = await t.pool.query("select seq, op from room_ops where room_id = $1 order by seq", [roomId]);
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].op.t, "token.create");
+    assert.deepEqual(rows.map((r) => r.op.t), ["token.create", "sys.meet"]);
     const wm = await t.pool.query<{ n: string }>("select n::text from client_watermarks where room_id = $1 and client_id = 'c1'", [roomId]);
     assert.equal(wm.rows[0]?.n, "1");
     s.close();

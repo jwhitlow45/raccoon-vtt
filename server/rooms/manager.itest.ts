@@ -118,7 +118,8 @@ describe("idle unload, snapshots and recovery", () => {
     const snap1 = await t.pool.query<{ seq: string }>("select seq::text from room_snapshots where room_id = $1", [roomId]);
     assert.equal(snap1.rows[0]?.seq, "3");
     const goblinId = uuidv7();
-    await s.apply({ t: "token.create", token: { id: goblinId, sceneId, kind: "monster", name: "Goblin", size: "medium", x: 1, y: 1, actor: { inline: actor } } });
+    // Hidden from the party, so the table gives it no number and every row below is an op sent here.
+    await s.apply({ t: "token.create", token: { id: goblinId, sceneId, kind: "monster", name: "Goblin", size: "medium", x: 1, y: 1, visibility: "dm", actor: { inline: actor } } });
     await s.apply({ t: "token.move", tokenId: goblinId, x: 4, y: 4 });
     // Crash: no snapshot, the actor is simply gone.
     await t.manager.unload(roomId, 1011, false);
@@ -151,8 +152,9 @@ describe("idle unload, snapshots and recovery", () => {
     const sceneId = ((await s.snapshot("c1")).state as ProjectedState).meta.playerSceneId!;
     const goblin = (hp: number) => ({ ...actor, hp: { cur: hp, max: 20, temp: 0 }, life: "dead" });
     const [healed, set, revived] = [uuidv7(), uuidv7(), uuidv7()];
+    // Hidden from the party, so the table gives them no numbers and the snapshot falls after the third op.
     for (const [id, hp] of [[healed, 0], [set, 0], [revived, 12]] as const) {
-      await s.apply({ t: "token.create", token: { id, sceneId, kind: "monster", name: "Goblin", size: "medium", x: 1, y: 1, actor: { inline: goblin(hp) } } });
+      await s.apply({ t: "token.create", token: { id, sceneId, kind: "monster", name: "Goblin", size: "medium", x: 1, y: 1, visibility: "dm", actor: { inline: goblin(hp) } } });
     }
     // Three ops: the snapshot schedule fires, so the ops below come after the snapshot, as a crash leaves them.
     await new Promise((r) => setTimeout(r, 300));
@@ -203,8 +205,9 @@ describe("idle unload, snapshots and recovery", () => {
     const s = await t.connect(roomId, owner);
     const sceneId = ((await s.snapshot("c1")).state as ProjectedState).meta.playerSceneId!;
     const [thorn, gob] = [uuidv7(), uuidv7()];
-    await s.apply({ t: "token.create", token: { id: thorn, sceneId, kind: "npc", name: "Thorn", size: "medium", x: 1, y: 1, actor: { inline: actor } } });
-    await s.apply({ t: "token.create", token: { id: gob, sceneId, kind: "monster", name: "Goblin", size: "medium", x: 20, y: 1, actor: { inline: actor } } });
+    // Hidden from the party, so the table gives them no numbers and the snapshot falls after the third op.
+    await s.apply({ t: "token.create", token: { id: thorn, sceneId, kind: "npc", name: "Thorn", size: "medium", x: 1, y: 1, visibility: "dm", actor: { inline: actor } } });
+    await s.apply({ t: "token.create", token: { id: gob, sceneId, kind: "monster", name: "Goblin", size: "medium", x: 20, y: 1, visibility: "dm", actor: { inline: actor } } });
     await s.apply({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: thorn, value: 20 }, { id: uuidv7(), tokenId: gob, value: 10 }] });
     // Three ops: the snapshot schedule fires, so the ops below come after the snapshot, as a crash leaves them.
     await new Promise((r) => setTimeout(r, 300));
