@@ -21,6 +21,7 @@ import {
   WING_OFF,
   WING_REVEALED,
   WING_SIGHT,
+  wingBaseOf,
   wingOff,
   wingWarnings,
   type WingJoin,
@@ -424,5 +425,26 @@ describe("the warnings", () => {
   test("none on a scene without fog, whose own line says players see it all", () => {
     const { view, scene: s, join } = base({ fogTiles: tileWith(25, 8) });
     assert.deepEqual(wingWarnings(view, { ...s, fogEnabled: false }, AREA, join), []);
+  });
+});
+
+// ------------------------------------------------------------ the base
+
+describe("the wing's base", () => {
+  const ROOM = rect(5, 5, 5, 5);
+  const AREA = { x: 20, y: 0, w: 20, h: 20 };
+  test("its hash stays while the scene stays, and moves when anything on it that the planner reads does", () => {
+    const { view, scene: s } = squareRoom({ cells: ROOM });
+    const join = joined(judgeJoin(view, s, { grid: "squares", key: "10,7,w" }, AREA, false));
+    const first = wingBaseOf(view, s, AREA, join);
+    assert.equal(wingBaseOf(view, s, AREA, join).hash, first.hash);
+    assert.deepEqual([first.area, first.join, first.scene.id], [AREA, join.expect, "s1"]);
+    const painted = squareRoom({ cells: { ...ROOM, "30,30": "stone" } });
+    assert.notEqual(wingBaseOf(painted.view, painted.scene, AREA, join).hash, first.hash, "a cell painted");
+    const token = { ...view, tokens: { t1: { id: "t1", sceneId: "s1", x: 25, y: 5 } as never } };
+    assert.notEqual(wingBaseOf(token, s, AREA, join).hash, first.hash, "a token standing there");
+    const elsewhere = { ...view, tokens: { t1: { id: "t1", sceneId: "s2", x: 25, y: 5 } as never } };
+    assert.equal(wingBaseOf(elsewhere, s, AREA, join).hash, first.hash, "a token on another scene");
+    assert.notEqual(wingBaseOf(view, s, { ...AREA, w: 21 }, join).hash, first.hash, "another area");
   });
 });

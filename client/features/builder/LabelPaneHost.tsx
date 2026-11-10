@@ -13,13 +13,14 @@ import { labelPaneAllowed, panePlacement } from "./labelEdit.ts";
 import { labelScreenBox, PANE_HEIGHT_UNMEASURED } from "./labelPaneFrame.ts";
 import { labelLook } from "./labelTap.ts";
 import { LinkPaneHost } from "./LinkPaneHost.tsx";
+import { WingPaneHost } from "./WingPaneHost.tsx";
 import { PaneFailedFrame, PaneLoadingFrame } from "./PaneFrames.tsx";
 import { builderSlot, labelPaneSlot } from "./store.ts";
 
 const LabelPane = retryableLazy(() => import("./LabelPane.tsx"), { roles: ["dm"] });
 
 /**
- * Where the canvas mounts a label's edit pane, for the DM, and an end's pane in Between floors beside it (LinkPaneHost.tsx), so the canvas mounts both with one line. The pane itself
+ * Where the canvas mounts a label's edit pane, for the DM, and beside it an end's pane in Between floors (LinkPaneHost.tsx) and the wing pane (WingPaneHost.tsx), so the canvas mounts all three with one line. The pane itself
  * loads only for a DM (design section 14.1). It closes on its own when it
  * no longer applies: its label is gone or on another scene, the tool or the
  * builder's mode moved on, or a token was tapped, whose bar takes its place.
@@ -32,6 +33,7 @@ export function LabelPaneHost(props: { scene: Scene; tool: string; chrome: Chrom
     <>
       <LabelPaneOnly {...props} />
       <LinkPaneHost {...props} />
+      <WingPaneHost {...props} />
     </>
   );
 }

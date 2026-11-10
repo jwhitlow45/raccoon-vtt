@@ -9,6 +9,7 @@ import { cornerAt, hexAt, hexCenter, hexCorners, hexInScene, hexKey, hexNeighbor
 import { seenFogBits } from "#shared/rules/vision.ts";
 import { deriveWalls, floodHexRoom, indexBuild, sceneChunks } from "#shared/rules/walls.ts";
 import type { JoinExpect } from "#shared/rules/wingClear.ts";
+import type { WingBase } from "../dungeon/plan.ts";
 import { distance, TAP_SLOP_PX } from "../../lib/gestures.ts";
 import type { ToolContext, ToolPointer, ToolPointerHandlers } from "../tools.ts";
 import { edgeDistance, edgeInBounds, nearestEdge, nearestFreeWall, type Bounds, type Point } from "./cells.ts";
@@ -688,4 +689,60 @@ function wingUp(p: ToolPointer, ctx: ToolContext): void {
   }
   const next = nextPicks(view, ctx.scene, s.wing, { tap: tapped.value });
   store.setState({ wing: next.picks, note: next.note });
+}
+
+// ------------------------------------------------------------ the base
+
+type Based = Pick<RoomState, "buildChunks" | "traps" | "stamps" | "lights" | "labels" | "pins" | "tokens" | "floorLinks">;
+
+/** FNV-1a over a string's UTF-16 units, as eight hex digits: enough to tell a changed scene from the same one, never a secret. */
+function fnv(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+/** The scene's own entries of a collection, by id order, so a hash reads them the same way every time. */
+function own<T extends { sceneId?: string }>(all: Readonly<Record<string, T | undefined>> | undefined, sceneId: string): [string, T][] {
+  return Object.entries(all ?? {})
+    .filter((e): e is [string, T] => e[1] !== undefined && e[1].sceneId === sceneId)
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+}
+
+/**
+ * What the wing is planned on (3.3 and 4.2, D-261110-231): the scene, the
+ * parts of the room that can stand in the planner's way, the area, the
+ * join as the asks carry it, and a hash of all of it on this scene, which
+ * edits freeze, so a base posted again over a changed scene drops them.
+ */
+export function wingBaseOf(view: Based, scene: Scene, area: CellRect, join: WingJoin): WingBase {
+  const state: WingBase["state"] = {
+    buildChunks: view.buildChunks,
+    traps: view.traps,
+    stamps: view.stamps,
+    lights: view.lights,
+    labels: view.labels,
+    pins: view.pins,
+    tokens: view.tokens,
+    floorLinks: view.floorLinks,
+  };
+  const geometry = {
+    bounds: scene.bounds,
+    grid: scene.gridShape ?? "squares",
+    autoWalls: autoWallsOf(scene),
+    area,
+    join: join.expect,
+    chunks: own(view.buildChunks, scene.id),
+    traps: own(view.traps, scene.id),
+    stamps: own(view.stamps, scene.id),
+    lights: own(view.lights, scene.id),
+    labels: own(view.labels, scene.id),
+    pins: own(view.pins, scene.id),
+    tokens: own(view.tokens, scene.id),
+    floorLinks: own(view.floorLinks, scene.id),
+  };
+  return { scene, state, area, join: join.expect, hash: fnv(JSON.stringify(geometry)) };
 }

@@ -1,6 +1,9 @@
+import type { CellRect, Scene } from "#shared/model.ts";
+import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
+import { hexCenter } from "#shared/rules/hex.ts";
 import type { PaneLaneBox } from "../../canvas/barDock.ts";
-import { fitRect, viewToScreen, type Insets, type Size } from "../../lib/camera.ts";
-import type { ViewBox, ViewPoint } from "../../lib/view.ts";
+import { fitRect, viewToScreen, type Camera, type Insets, type Size } from "../../lib/camera.ts";
+import { TOP_DOWN, toView, type ViewBox, type ViewPoint } from "../../lib/view.ts";
 import { PANE_MIN_HEIGHT, PANE_WIDTH, sheetPaneRoom, SHEET_BELOW_PX } from "./labelEdit.ts";
 
 /*
@@ -63,4 +66,26 @@ export function wingFit(input: { viewport: Size; insets: Insets; place: WingPlac
   const camera = fitRect(input.viewport, input.box, 24, clear);
   const middle = viewToScreen(camera, { x: input.box.x + input.box.width / 2, y: input.box.y + input.box.height / 2 } as ViewPoint);
   return { scale: camera.scale, anchor: { x: middle.x / input.viewport.width, y: middle.y / input.viewport.height } };
+}
+
+/** The area with the join's leaves, as a box in cells: on hexes the hexes' middles less and more half a cell, as near as a box gets. */
+export function wingBox(g: Grid, area: CellRect, join: { leaves: readonly { a: { x: number; y: number }; b: { x: number; y: number } }[] } | null): { x0: number; y0: number; x1: number; y1: number } {
+  const corners = isHex(g)
+    ? [hexCenter(g, { col: area.x, row: area.y }), hexCenter(g, { col: area.x + area.w - 1, row: area.y + area.h - 1 }), hexCenter(g, { col: area.x + area.w - 1, row: area.y }), hexCenter(g, { col: area.x, row: area.y + area.h - 1 })].flatMap((c) => [
+        { x: c.x - 0.5, y: c.y - 0.5 },
+        { x: c.x + 0.5, y: c.y + 0.5 },
+      ])
+    : [
+        { x: area.x, y: area.y },
+        { x: area.x + area.w, y: area.y + area.h },
+      ];
+  const points = [...corners, ...(join?.leaves.flatMap((l) => [l.a, l.b]) ?? [])];
+  return { x0: Math.min(...points.map((p) => p.x)), y0: Math.min(...points.map((p) => p.y)), x1: Math.max(...points.map((p) => p.x)), y1: Math.max(...points.map((p) => p.y)) };
+}
+
+/** Where the pane stands for the camera it opened at: by the area's middle on screen. */
+export function wingPlace(input: { scene: Pick<Scene, "gridShape">; area: CellRect; camera: Camera; viewport: Size; insets: Insets; lane: PaneLaneBox | null }): WingPlacement {
+  const box = wingBox(sceneGrid(input.scene), input.area, null);
+  const middle = viewToScreen(input.camera, toView(TOP_DOWN, { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 }));
+  return wingPanePlacement({ viewport: input.viewport, insets: input.insets, areaX: middle.x, lane: input.lane });
 }
