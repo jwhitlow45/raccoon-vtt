@@ -7,6 +7,7 @@ import type {
   Actor,
   AreaTemplate,
   Character,
+  FloorLink,
   CompanionBlock,
   CustomMonster,
   Drawing,
@@ -370,6 +371,20 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       opened[sceneId] = { ...mark, sceneId };
     }
     if (Object.keys(opened).length > 0) out.openFloors = opened;
+  }
+  // Stairs and ladders follow their floors under new ids, each end naming its pair's new one
+  // (docs/design/design-v1-floors.md phase 2, 3). `made` stays: the new room's ops count on past it (lastLineSeq), so no
+  // stairs placed there later take the stamp a climb's undo tells these by.
+  if (state.floorLinks) {
+    const ends = Object.values(state.floorLinks).filter((end) => scenes.has(end.sceneId) && scenes.has(end.to));
+    const linkIds = new Ids(newId);
+    linkIds.assign(ends.map((end) => end.id));
+    const links: Record<string, FloorLink> = {};
+    for (const end of ends) {
+      const id = linkIds.of(end.id);
+      links[id] = { ...end, id, pair: linkIds.of(end.pair), sceneId: scenes.of(end.sceneId), to: scenes.of(end.to) };
+    }
+    if (Object.keys(links).length > 0) out.floorLinks = links;
   }
   for (const c of Object.values(state.buildChunks)) {
     if (!scenes.has(c.sceneId)) continue;
@@ -1083,7 +1098,10 @@ function numberedWithin<K>(lines: readonly { id: string; key: K }[], base: numbe
 /**
  * The seq of the newest op a room's lines name: the room log's, both trap
  * logs' and the occurrences waiting on a trap. An imported room's lines
- * keep their seqs (remapState), so its own ops start after this one.
+ * keep their seqs (remapState), so its own ops start after this one. So
+ * does every pair of stairs' `made` (docs/design/design-v1-floors.md phase
+ * 2, 3, ASTRA-16), so stairs placed again in the new room never share the
+ * stamp of a pair that came in the file.
  */
 export function lastLineSeq(state: RoomState): number {
   let last = 0;
@@ -1092,6 +1110,7 @@ export function lastLineSeq(state: RoomState): number {
   for (const line of state.trapLog ?? []) see(line.id);
   for (const line of state.trapSeen ?? []) see(line.id);
   for (const trap of Object.values(state.traps ?? {})) for (const d of trap.rig?.due ?? []) see(d.id);
+  for (const end of Object.values(state.floorLinks ?? {})) last = Math.max(last, end.made);
   return last;
 }
 

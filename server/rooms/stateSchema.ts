@@ -24,6 +24,7 @@ import {
   rollAnswerSchemas,
   MAX_EFFECTS,
   MAX_OWNERS,
+  MAX_SCENE_CELLS,
   MAX_PATH_STOPS,
   MAX_RANGE_RINGS,
   MAX_PATH_CORNERS,
@@ -56,7 +57,9 @@ import {
 } from "#shared/protocol.ts";
 import { MAX_LOG_LINES } from "#shared/logRings.ts";
 import { phaseMap, phaseProblem } from "#shared/reducer/phases.ts";
-import { OWN_SQUARE_GRID, cameWithGrid, holdsGridKeys, isHex, sceneGrid, sceneHolds, standsWords } from "#shared/rules/grid.ts";
+import { OWN_SQUARE_GRID, cameWithGrid, cellIndexMost, holdsGridKeys, isHex, sceneGrid, sceneHolds, standsWords } from "#shared/rules/grid.ts";
+// floorProblem asks the stairs' rules through the hook this file sets as it loads (rules/floors.ts floorLinkRules).
+import "#shared/rules/floorLinks.ts";
 
 /**
  * The shape of a stored room state, for validating an imported `room.json`
@@ -401,6 +404,11 @@ const pathStop = z.strictObject({
   carried: z.literal(true).optional(),
 });
 
+/** What a turn took on floors its creature left (docs/design/design-v1-floors.md phase 2, 5), as a stop's totals read. */
+const pathFeet = z.number().min(0).max(1_000_000);
+const pathDiag = z.tuple([pathFeet, pathFeet]);
+const pathPrior = z.strictObject({ moved: pathFeet.optional(), cost: pathFeet.optional(), diag: pathDiag.optional(), seenDiag: pathDiag });
+
 /** Eighths of a square, at most 3/8 off a token's spot (rules/nudge.ts nudgeBound). */
 const nudgeEighths = z.number().int().min(-3).max(3);
 
@@ -434,8 +442,8 @@ const token = z.strictObject({
   notes: notes.optional(),
   altImages: z.array(imageRef).min(1).max(MAX_ALT_IMAGES).optional(),
   rangeRings: z.array(z.number().int().min(5).max(MAX_RANGE_RING_FT)).min(1).max(MAX_RANGE_RINGS).optional(),
-  // Backups from before paths were recorded have none.
-  path: z.strictObject({ turn: z.number().int().min(0), stops: z.array(pathStop).min(1).max(MAX_PATH_STOPS) }).optional(),
+  // Backups from before paths were recorded have none, and those from before stairs no `prior` (docs/design/design-v1-floors.md phase 2, 5).
+  path: z.strictObject({ turn: z.number().int().min(0), prior: pathPrior.optional(), stops: z.array(pathStop).min(1).max(MAX_PATH_STOPS) }).optional(),
   // Backups from before wave 4 have none of these.
   squeeze: z.literal(true).optional(),
   light: mapSchemas.tokenLight.optional(),
@@ -952,6 +960,37 @@ const trap = z.strictObject({
   grid: mapSchemas.gridShape.optional(),
 });
 
+/**
+ * The newest op a backup's stairs may say placed them: an import starts its
+ * op sequence past it (remap.ts lastLineSeq), so it keeps to the bound of
+ * every seq a file names, importRoom.ts IMPORT_LIMITS.lineSeq, and a file
+ * past it is refused in words that name the stairs.
+ */
+export const MADE_MOST = 2 ** 48;
+
+/** A cell's key index on any scene, as an op's squares take it (grid.ts cellIndexMost). */
+const sceneCell = z.number().int().min(0).max(cellIndexMost(MAX_SCENE_CELLS));
+const linkSide = z.number().int().min(1).max(LIMITS.floorLinkSide);
+
+/**
+ * An end of stairs or a ladder as stored (docs/design/design-v1-floors.md
+ * phase 2, 2): its op's fields with what the reducer writes. How the two
+ * ends and their floors fit together is floorProblem's to check, below.
+ */
+const floorLink = z.strictObject({
+  id: trapSchemas.plainId,
+  rev,
+  sceneId: id,
+  to: id,
+  pair: trapSchemas.plainId,
+  rect: z.strictObject({ x: sceneCell, y: sceneCell, w: linkSide, h: linkSide }),
+  kind: z.enum(["stairs", "ladder"]),
+  locked: z.literal(true).optional(),
+  grid: mapSchemas.gridShape.optional(),
+  ground: z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT),
+  made: z.number().int().min(0).max(MADE_MOST, { message: "stairs placed past the newest op a backup may name" }),
+});
+
 /** The lines of the two trap logs (docs/design/design-v1-traps.md 6.3). */
 const trapLine = z.discriminatedUnion("type", [
   z.strictObject({
@@ -1066,6 +1105,9 @@ export const roomStateSchema = z.strictObject({
   memoryShared: shareMarks.default({}),
   // The floors players reached (docs/design/design-v1-floors.md 9). Backups from before floors have none, which reads as none.
   openFloors: sceneMarks.optional(),
+  // Stairs and ladders (docs/design/design-v1-floors.md phase 2). Backups from before them have none, which reads as none.
+  // Each pair joins two floors of a scene, so the scenes a room may hold bound how many ends it holds.
+  floorLinks: byOwnId(floorLink, LIMITS.floorLinksPerScene * LIMITS.scenesPerRoom, "ends of stairs and ladders").optional(),
   // The in-game clock. Backups from before it have none, and absent and null both read as none (docs/design/design-v1-calendar.md 6.6).
   clock: roomClock.nullable().optional(),
   // Synced music and sound. Backups from before it have none, which reads as an empty library and silence, and absent and
@@ -1184,9 +1226,12 @@ export function parseRoomState(value: unknown, now = Date.now()): { ok: true; st
   const sound = soundProblem(state);
   if (sound) return { ok: false, message: sound };
   // A scene's floors fit together as every op leaves them (docs/design/design-v1-floors.md 9, D-261107-221), and a mark
-  // lies only on a floor. An empty collection of marks reads as none, and the import keeps none.
+  // lies only on a floor. So do their stairs, each end on a floor and naming one, both read here even where no scene is
+  // (phase 2, 3). An empty collection of marks or stairs reads as none, and the import keeps none.
   if (state.openFloors !== undefined && Object.keys(state.openFloors).length === 0) delete state.openFloors;
-  for (const sceneId of [...new Set([...Object.keys(state.scenes), ...Object.keys(state.openFloors ?? {})])].sort()) {
+  if (state.floorLinks !== undefined && Object.keys(state.floorLinks).length === 0) delete state.floorLinks;
+  const ends = Object.values(state.floorLinks ?? {}).flatMap((end) => [end.sceneId, end.to]);
+  for (const sceneId of [...new Set([...Object.keys(state.scenes), ...Object.keys(state.openFloors ?? {}), ...ends])].sort()) {
     const problem = floorProblem(state, sceneId);
     if (problem) return { ok: false, message: `scenes.${sceneId}.floor: ${problem}` };
   }
