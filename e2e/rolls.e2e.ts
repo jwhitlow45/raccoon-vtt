@@ -591,6 +591,8 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await c.getByText("The DM asks for a Dexterity saving throw, DC 10.").waitFor();
     assert.equal(await c.getByRole("button", { name: "Roll d20 for Thorn" }).isDisabled(), true, "no bonus is known yet");
     await c.getByText(/^Type your bonus first, such as \+5 or 0\./).waitFor();
+    // LP33-POLISH: the reason is a line a player reads, not text for screen readers alone (clipped to one pixel).
+    assert.ok((await c.getByText(/^Type your bonus first, such as \+5 or 0\./).evaluate((el) => (el as unknown as { getBoundingClientRect(): { width: number } }).getBoundingClientRect().width)) > 40, "the reason Roll waits shows");
     await c.getByLabel("Your bonus for Thorn").fill("4");
     await c.getByRole("button", { name: "Roll d20+4 for Thorn" }).tap();
     await c.getByText(/^Rolled \d+ \(1d20\+4: \d+\)\./).waitFor();

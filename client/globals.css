@@ -538,6 +538,19 @@ select:disabled {
   }
 }
 
+/* Why a player's Roll waits (features/rolls/PlayerRolls.tsx) is a line under the row. A short sideways phone, where the card is
+   already tight, keeps it for screen readers only: a line more would fold the card. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .rvtt-roll-why {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
 /* The token window's resize handle shows the accent under a hovering mouse
    and while focused (canvas/TokenActionBar.tsx). It shows at rest too, so
    nothing depends on hover. Its inline muted color would otherwise win.
