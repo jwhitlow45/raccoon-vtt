@@ -1799,7 +1799,6 @@ function castCloseCheck(c: Check, op: OpOf<"cast.close">, held: ReadonlySet<stri
   return op.end === "withdrawn" ? OK : FORBIDDEN;
 }
 
-/** Movement (design 8.1): owners, or the players the room lets move any token, and never a locked token. */
 /**
  * A player's Go up or Go down (docs/design/design-v1-floors.md phase 2, 4,
  * 6.1): a creature they may move, on an end they get (project.ts
@@ -1850,10 +1849,10 @@ function climbBackCheck(c: Check, climb: Climb, from: "undo" | "redo"): Decision
   const here = from === "undo" ? climb.to : climb.from;
   const there = from === "undo" ? climb.from : climb.to;
   const end = token === undefined || token.sceneId !== here ? undefined : from === "redo" ? ownEntry(c.state.floorLinks, climb.linkId) : linksOn(c.state, here).find((l) => l.pair === climb.linkId);
-  const kind = end?.kind ?? "stairs";
-  const changed = refuse("invalid", LINK_WORDS.changed(kind));
-  if (!token || !end || end.sceneId !== here || end.to !== there || end.rev !== climb.rev || end.made !== climb.made || end.locked === true) return changed;
-  if (!c.visible(keys.floorLink(end.id))) return changed;
+  // Whether they get the end comes before any word about it: an end gone and an end withheld read alike, so the words never name the kind of an end they cannot see.
+  if (!token || !end || !c.visible(keys.floorLink(end.id))) return refuse("invalid", LINK_WORDS.changed("stairs"));
+  const changed = refuse("invalid", LINK_WORDS.changed(end.kind));
+  if (end.sceneId !== here || end.to !== there || end.rev !== climb.rev || end.made !== climb.made || end.locked === true) return changed;
   // Its space alone: a later move, its height's included, is the restore's own guard to answer (MOVED_SINCE).
   return spaceOn(c.state, token, end) ? OK : changed;
 }
@@ -1870,6 +1869,7 @@ function climbMoves(climb: Climb | undefined, from: "undo" | "redo", current: { 
   return current.sceneId === now && restored.sceneId === back ? ["sceneId"] : [];
 }
 
+/** Movement (design 8.1): owners, or the players the room lets move any token, and never a locked token. */
 function moveCheck(c: Check, tokenId: string): Decision {
   const token = c.visibleToken(tokenId);
   if (!token) return GONE;

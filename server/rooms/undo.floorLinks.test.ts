@@ -154,6 +154,34 @@ describe("a climb's undo and redo refused (8)", () => {
     }
   });
 
+  test("under fog the stairs turned to a ladder answer Ana's undo and redo as stairs left alone do, in the same words (FL2-ASTRA-01)", () => {
+    const fogged = (t: UndoTable) => {
+      t.state = { ...t.state, scenes: { ...t.state.scenes, [GROUND]: { ...t.state.scenes[GROUND]!, fogEnabled: true }, [UPPER]: { ...t.state.scenes[UPPER]!, fogEnabled: true } } };
+    };
+    for (const from of ["undo", "redo"] as const) {
+      const [a, b] = [table(), table()];
+      for (const t of [a, b]) {
+        assert.equal(t.play(ANA, climb()), "ok");
+        if (from === "redo") assert.equal(t.undo(ANA), "ok");
+        fogged(t);
+      }
+      assert.equal(a.play(DM, { t: "floorLink.update", linkId: "l1", patch: { kind: "ladder" } }), "ok");
+      assert.deepEqual([a.state.floorLinks!.l1!.kind, a.state.floorLinks!.l2!.kind, b.state.floorLinks!.l1!.kind], ["ladder", "ladder", "stairs"]);
+      assert.deepEqual(copies(a), copies(b), `${from}: every player's copy, neither with an end`);
+      assert.doesNotMatch(JSON.stringify(copies(a)), /"floorLinks":\{"l/, `${from}: no end reaches a player`);
+      const answers = [a, b].map((t) => t.restore(ANA, from));
+      assert.deepEqual(answers, [LINK_WORDS.changed("stairs"), LINK_WORDS.changed("stairs")], from);
+      assert.deepEqual(copies(a), copies(b), `${from}: after the answer`);
+    }
+  });
+
+  test("a ladder Ana sees, locked since, is named as a ladder", () => {
+    const t = table();
+    assert.equal(t.play(ANA, climb()), "ok");
+    assert.equal(t.play(DM, { t: "floorLink.update", linkId: "l1", patch: { kind: "ladder" } }), "ok");
+    assert.equal(t.undo(ANA), LINK_WORDS.changed("ladder"));
+  });
+
   test("Ana's own walk after the climb undoes first, then the climb (moved since only for another's move)", () => {
     const t = table();
     assert.equal(t.play(ANA, climb()), "ok");
