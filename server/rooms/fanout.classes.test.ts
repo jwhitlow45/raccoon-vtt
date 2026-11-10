@@ -66,8 +66,13 @@ function publishAlone(batch: CommittedBatch, sockets: readonly Socket[]): void {
   const candidates = [...candidateKeys(batch, watched, live.map((c) => c.viewer))].sort();
   for (const conn of live) {
     const next = new Map<EntityKey, unknown>();
-    for (const key of candidates) {
-      const value = projectEntity(key, batch.after, conn.viewer, { sceneId: conn.sceneId });
+    // A player's stamps carry the rank a fresh snapshot gives them, so every stamp the copy holds or gets is compared at it.
+    const ranked = conn.viewer.role === "dm" ? null : shownTo(batch.after, conn).stamps;
+    const held = ranked ? [...conn.held!.keys()].filter((key) => key.startsWith("stamp:")) : [];
+    const compared = ranked ? [...new Set([...candidates, ...held, ...Object.keys(ranked).map((id) => keys.stamp(id))])].sort() : candidates;
+    for (const key of compared) {
+      const stamp = ranked && key.startsWith("stamp:");
+      const value = stamp ? (ranked[key.slice("stamp:".length)] ?? null) : projectEntity(key, batch.after, conn.viewer, { sceneId: conn.sceneId });
       // A view as a player leaves out every whisper its DM is not party to.
       const omitted = conn.previewBy !== null && key.startsWith("log:") && value !== null && previewOmits(value as LogEntry, conn.previewBy);
       next.set(key, omitted ? null : value);

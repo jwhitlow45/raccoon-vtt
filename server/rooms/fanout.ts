@@ -1,7 +1,7 @@
 import { chunkKey, doorChunk, keys, parseKey, partsKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { linesPastStart } from "#shared/logRings.ts";
 import type { Label, LogEntry, RoomState, SceneId, Stamp, Trap, Viewer } from "#shared/model.ts";
-import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, namedByMemory, perPlayerScene, playerChunkBatch, projectEntity, projectState, sightHolders, stampCells, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
+import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, namedByMemory, perPlayerScene, playerChunkBatch, projectEntity, projectState, rankedStamp, sightHolders, stampCells, stampOrder, stampRanks, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
 import { MAX_KEPT_REFUSALS, type Change, type RefusalCode } from "#shared/protocol.ts";
 import type { OpAcknowledgment } from "#shared/undoContract.ts";
 import { visionRules, type PartySight } from "#shared/ruleHooks.ts";
@@ -26,7 +26,7 @@ export type Restored = { n: number; what: string };
 export type Stamped = { n: number; at: string };
 
 export type CommittedBatch = {
-  /** The room count (counted.ts) as it stood when the batch began to commit, the number each frame of it carries. */
+  /** The number each frame of the batch carries, which the actor sets at the batch's close (counted.ts). */
   pub: number;
   before: RoomState;
   after: RoomState;
@@ -391,6 +391,119 @@ class Projector {
 }
 
 /*
+ * Each player connection's stamp table: the stamps its copy holds, by
+ * scene, with each one's order (shared/project.ts stampOrder) and the rank
+ * its copy holds it at. Never sent. A projection is shared by a class of
+ * viewers, and the stamps a copy holds are not (two sockets of one member
+ * opened at different times may differ), so the projection hands each
+ * candidate stamp over at rank 0 with its order, and each connection ranks
+ * it from its own table. A table is kept with the held map it goes with,
+ * made with it by a snapshot and handed on with it by each batch, so a
+ * snapshot built and never sent changes no connection's table.
+ */
+export type StampTable = { scenes: Map<SceneId, Map<string, number>>; where: Map<string, SceneId>; ranks: Map<string, number> };
+const stampTables = new WeakMap<ReadonlyMap<EntityKey, HeldEntry>, StampTable>();
+
+/** The ranks a player connection's copy holds its stamps at, by id, or undefined for a DM's or one with no table yet. */
+export function stampRanksOf(conn: Connection): ReadonlyMap<string, number> | undefined {
+  return conn.held === null ? undefined : stampTables.get(conn.held)?.ranks;
+}
+
+export function newStampTable(): StampTable {
+  return { scenes: new Map(), where: new Map(), ranks: new Map() };
+}
+
+function stampTableOf(stamps: Iterable<Stamp>): StampTable {
+  const table = newStampTable();
+  for (const stamp of stamps) {
+    putStamp(table, stamp.id, stamp.sceneId, stampOrder(stamp));
+    table.ranks.set(stamp.id, stamp.z);
+  }
+  return table;
+}
+
+function putStamp(table: StampTable, id: string, sceneId: SceneId, order: number): void {
+  let orders = table.scenes.get(sceneId);
+  if (!orders) table.scenes.set(sceneId, (orders = new Map()));
+  orders.set(id, order);
+  table.where.set(id, sceneId);
+}
+
+function dropStamp(table: StampTable, id: string, sceneId: SceneId): void {
+  const orders = table.scenes.get(sceneId);
+  orders?.delete(id);
+  if (orders?.size === 0) table.scenes.delete(sceneId);
+  table.where.delete(id);
+  table.ranks.delete(id);
+}
+
+/**
+ * One player connection's projection with its stamps ranked. The class's
+ * projection gives each candidate stamp at rank 0, or null. Each enters,
+ * leaves or keeps its place in the connection's table. A scene where one
+ * entered, left or changed order is ranked again, and every stamp of it
+ * whose rank moved joins the projection, projected through `more`. Then
+ * every stamp in the projection takes its current rank, so a stamp edited
+ * out of sight at rank 1 is compared at rank 1 and never at 0. The table is
+ * changed in place. The projection is copied when it holds a stamp, since
+ * its class shares it.
+ */
+export function rankStamps(table: StampTable, next: ReadonlyMap<EntityKey, unknown>, more: (keys: EntityKey[]) => Map<EntityKey, unknown>): ReadonlyMap<EntityKey, unknown> {
+  let out: Map<EntityKey, unknown> | null = null;
+  let grown = false;
+  let facts: Iterable<[EntityKey, unknown]> = next;
+  while (true) {
+    const dirty = new Set<SceneId>();
+    for (const [key, value] of facts) {
+      if (!key.startsWith("stamp:")) continue;
+      out ??= new Map(next);
+      const id = key.slice("stamp:".length);
+      const was = table.where.get(id);
+      const stamp = value as Stamp | null | undefined;
+      if (!stamp) {
+        if (was !== undefined) {
+          dropStamp(table, id, was);
+          dirty.add(was);
+        }
+        continue;
+      }
+      const order = stampOrder(stamp);
+      if (was === stamp.sceneId && table.scenes.get(was)!.get(id) === order) continue;
+      if (was !== undefined) {
+        dropStamp(table, id, was);
+        dirty.add(was);
+      }
+      putStamp(table, id, stamp.sceneId, order);
+      dirty.add(stamp.sceneId);
+    }
+    if (out === null) return next;
+    const moved: EntityKey[] = [];
+    for (const sceneId of dirty) {
+      for (const [id, rank] of stampRanks(table.scenes.get(sceneId) ?? new Map())) {
+        if (table.ranks.get(id) === rank) continue;
+        table.ranks.set(id, rank);
+        const key = keys.stamp(id);
+        if (!out.has(key)) moved.push(key);
+      }
+    }
+    if (moved.length === 0) break;
+    // A stamp the batch did not touch projects as before, so this changes nothing in the table but its rank, unless the copy and the table had drifted.
+    const projected = more(moved);
+    for (const [key, value] of projected) out.set(key, value);
+    grown = true;
+    facts = projected;
+  }
+  // In key order, as the candidates are, so where a change sits never tells whether the batch touched it.
+  if (grown) out = new Map([...out].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  for (const [key, value] of out) {
+    if (!value || !key.startsWith("stamp:")) continue;
+    const rank = table.ranks.get(key.slice("stamp:".length));
+    if (rank !== undefined) out.set(key, rankedStamp(value as Stamp, rank));
+  }
+  return out;
+}
+
+/*
  * Refusals a client's current socket could not be sent, as it held no
  * snapshot then, kept for the snapshot it waits on (RESYNC-REFUSAL-LOST).
  * That snapshot settles every op up to its watermark with no answer, so
@@ -477,17 +590,25 @@ export function publishBatch(
       next = projector.project(conn, whole ? everything! : candidates, held.get(conn)!);
       known.set(cls, next);
     }
-    const diff = diffProjection(conn.held, next, hashOf);
+    let mine: ReadonlyMap<EntityKey, unknown> = next;
+    let table: StampTable | null = null;
+    if (conn.viewer.role !== "dm") {
+      table = stampTables.get(conn.held) ?? newStampTable();
+      const floors = held.get(conn)!;
+      mine = rankStamps(table, next, (more) => projector.project(conn, more, floors));
+    }
+    const diff = diffProjection(conn.held, mine, hashOf);
     conn.held = diff.held;
+    if (table) stampTables.set(diff.held, table);
     const key = conn.key;
-    const mine = key !== null && current(key) === conn;
-    const acks = mine ? batch.acks.get(key) : undefined;
-    const ackDetails = mine && conn.ackDetails ? batch.ackDetails?.get(key) : undefined;
-    const rejects = mine ? batch.rejects.get(key) : undefined;
-    const restored = mine ? batch.restored.get(key) : undefined;
-    const trapped = mine ? batch.trapped?.get(key) : undefined;
-    const stamped = mine ? batch.stamped?.get(key) : undefined;
-    const blocked = mine ? batch.blocked?.get(key) : undefined;
+    const answered = key !== null && current(key) === conn;
+    const acks = answered ? batch.acks.get(key) : undefined;
+    const ackDetails = answered && conn.ackDetails ? batch.ackDetails?.get(key) : undefined;
+    const rejects = answered ? batch.rejects.get(key) : undefined;
+    const restored = answered ? batch.restored.get(key) : undefined;
+    const trapped = answered ? batch.trapped?.get(key) : undefined;
+    const stamped = answered ? batch.stamped?.get(key) : undefined;
+    const blocked = answered ? batch.blocked?.get(key) : undefined;
     if (diff.changes.length === 0 && !acks?.length && !rejects?.length) {
       history?.(conn, false);
       continue;
@@ -545,12 +666,14 @@ export type Snapshot = { message: { t: "snapshot"; seq: number; state: unknown; 
  * goes with it, holding the values unhashed (shared/project.ts HeldEntry):
  * a room's first snapshot, which also computes sight from nothing, is the
  * longest pause a room load makes (docs/design/design-v1-maps-vision.md 4.3.6).
- * Its `seq` is `pub`, the room count (counted.ts) of the committed state.
+ * Its `seq` is `pub`, the number the actor hands out with it (counted.ts).
  */
 export function buildSnapshot(state: RoomState, pub: number, conn: Connection, watermark: number): Snapshot {
   const viewed = projectState(state, conn.viewer, { sceneId: conn.sceneId });
   const by = conn.previewBy;
   const projected = by === null ? viewed : { ...viewed, log: viewed.log.filter((line) => !previewOmits(line, by)) };
+  const held = heldFor(projected);
+  if (conn.viewer.role !== "dm") stampTables.set(held, stampTableOf(Object.values(projected.stamps)));
   return {
     message: {
       t: "snapshot",
@@ -559,6 +682,6 @@ export function buildSnapshot(state: RoomState, pub: number, conn: Connection, w
       you: { memberId: conn.memberId, role: conn.display ? "display" : conn.role, sceneId: viewerSceneId(state, conn.viewer, { sceneId: conn.sceneId }) },
       watermark,
     },
-    held: heldFor(projected),
+    held,
   };
 }
