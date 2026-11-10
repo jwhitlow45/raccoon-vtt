@@ -25,6 +25,7 @@ import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { MOVE_PLAYERS_FIRST, SOMETHING_BLOCKS_BACK } from "#shared/permissions.ts";
 import type { Actor, ClassResource, FreeWall, MapPhase, Member, PcStats, RoomState, Trap } from "#shared/model.ts";
 import { ASK_LOST, FORGET_ASK, type Op, type OpOf, type ServerMessage } from "#shared/protocol.ts";
+import { JOIN_CHANGED, WING_MOVED, type WingClear } from "#shared/rules/wingClear.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor as testActor, character as testCharacter, companionBlock as testBlock, entry as testEntry, template as testTemplate, token as testToken } from "#shared/testutil.ts";
@@ -3513,6 +3514,70 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       const theirs = await answerTo(phone.sent, 1);
       assert.ok(theirs !== "stuck");
       assert.equal(theirs.rejects?.find((r) => r.n === 1)?.code, "forbidden");
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("a wing's ask checks its join and footprint against the room as each part is read, and a refusal drops the chain (dungeon generator phase 3, 3.6)", async () => {
+    const dm = member("DM", "dm");
+    const initial = createInitialState({ roomName: "Wing", dm });
+    const sceneId = initial.meta.playerSceneId!;
+    const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+    const painted = applyOp(initial, { t: "build.paint", sceneId, terrain: "stone", cells: range(10, 19).flatMap((y) => range(10, 19).map((x) => `${x},${y}`)) }, { memberId: dm.id, role: "dm" }, { seq: 1, at: new Date().toISOString() });
+    assert.ok(painted.ok);
+    const clear: WingClear = { margin: 2, join: { grid: "squares", edges: [{ key: "10,14,w", feature: null, ground: 0 }] }, autoWalls: "all" };
+    const corridor: OpOf<"build.paint"> = { t: "build.paint", sceneId, terrain: "stone", cells: range(3, 9).map((x) => `${x},14`) };
+    const door: OpOf<"build.edge"> = { t: "build.edge", sceneId, edges: [{ key: "10,14,w", feature: { kind: "door", state: "closed", secret: false, discovered: false } }] };
+    const db = new FakeDb({ state: painted.state, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const table = connect(actor, dm);
+      const other = connect(actor, dm);
+      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await actor.hello(other.conn, { clientId: "c2", resumeFrom: 1 });
+      let n = 0;
+      const ask = async (ops: Op[], group: string, more: Partial<OpOf<"build.ask">> = {}) => {
+        n++;
+        await actor.op(table.conn, n, { t: "build.ask", sceneId, ops: ops as OpOf<"build.ask">["ops"], part: 0, clear, ...more }, group);
+        const answer = await answerTo(table.sent, n);
+        assert.ok(answer !== "stuck");
+        return answer.rejects?.find((r) => r.n === n) ?? null;
+      };
+      let m = 0;
+      const elsewhere = async (op: Op) => {
+        m++;
+        await actor.op(other.conn, m, op);
+        assert.notEqual(await answerTo(other.sent, m), "stuck");
+      };
+      assert.equal(await ask([corridor, door], "g1"), null, "clear: taken");
+      // A token walks into the corridor's footprint: the wing moved.
+      const goblin = uuidv7();
+      await elsewhere({ t: "token.create", token: { id: goblin, sceneId, kind: "monster", name: "Goblin", size: "medium", x: 5, y: 14, actor: { inline } } });
+      assert.deepEqual(await ask([corridor, door], "g2"), { n, code: "invalid", message: WING_MOVED });
+      await elsewhere({ t: "token.move", tokenId: goblin, x: 30, y: 25 });
+      assert.equal(await ask([corridor, door], "g3"), null, "the token walked off");
+      // The join's wall drawn over: the join changed.
+      await elsewhere({ t: "build.edge", sceneId, edges: [{ key: "10,14,w", feature: { kind: "wall" } }] });
+      assert.deepEqual(await ask([corridor, door], "g4"), { n, code: "invalid", message: JOIN_CHANGED });
+      await elsewhere({ t: "build.edge", sceneId, edges: [{ key: "10,14,w", feature: null }] });
+      // An op lands between two parts, only in part 0's footprint: the last part checks the union and refuses.
+      assert.equal(await ask([corridor], "g5", { more: true }), null, "part 0 taken");
+      await elsewhere({ t: "token.move", tokenId: goblin, x: 4, y: 14 });
+      n++;
+      await actor.op(table.conn, n, { t: "build.ask", sceneId, ops: [door], part: 1, clear }, "g5");
+      const last = await answerTo(table.sent, n);
+      assert.ok(last !== "stuck");
+      assert.deepEqual(last.rejects?.find((r) => r.n === n), { n, code: "invalid", message: WING_MOVED }, "the union catches part 0's cells");
+      // A refused part drops the chain: a part after it finds none.
+      n++;
+      await actor.op(table.conn, n, { t: "build.ask", sceneId, ops: [door], part: 2, clear }, "g5");
+      const after = await answerTo(table.sent, n);
+      assert.ok(after !== "stuck");
+      assert.deepEqual(after.rejects?.find((r) => r.n === n), { n, code: "invalid", message: ASK_LOST });
+      assert.ok(!(db.storedRows as { op: { t: string } }[]).some((r) => r.op.t === "build.ask"), "no ask is stored");
     } finally {
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });

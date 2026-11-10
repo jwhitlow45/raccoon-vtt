@@ -21,6 +21,7 @@ import { stampedAt } from "#shared/reducer/tokens.ts";
 import { splitCheck } from "#shared/rules/walls.ts";
 import { pitsMoved, withPitsCounted } from "#shared/rules/pitCount.ts";
 import { trapsLiveOn } from "#shared/rules/traps.ts";
+import { JOIN_CHANGED, joinChanged, WING_MOVED, wingClash, wingFootprint, type WingFootprint } from "#shared/rules/wingClear.ts";
 import { floorProblem, levelTakenWords, mainFloorId } from "#shared/rules/floors.ts";
 import { renewOpenDisplay } from "../auth/displaySessions.ts";
 import { checkDisplayGrant, checkGrant } from "../auth/grants.ts";
@@ -207,10 +208,10 @@ type Watermark = { sessionId: string; clientId: string; staged: number; committe
  * its ops so far would leave it, and each layer's estimate with their
  * growth.
  */
-type AskChain = { group: string; next: number; at: number; state: RoomState; totals: Map<string, number>; over: boolean };
+type AskChain = { group: string; next: number; at: number; state: RoomState; totals: Map<string, number>; over: boolean; wing?: WingFootprint };
 
-/** An ask being read (#readAsk): the op and where its sender stands, its chain, the next of its ops to read, and the context they read in. */
-type AskRead = { key: ClientKey; wm: Watermark; n: number; op: OpOf<"build.ask">; group: string; viewer: Viewer; chain: AskChain; next: number; ctx: { seq: number; at: string } };
+/** An ask being read (#readAsk): the op and where its sender stands, its chain, the next of its ops to read, the context they read in, and a wing's refusal. */
+type AskRead = { key: ClientKey; wm: Watermark; n: number; op: OpOf<"build.ask">; group: string; viewer: Viewer; chain: AskChain; next: number; ctx: { seq: number; at: string }; refused?: string };
 
 /** How long a gesture's asks wait for their next part before the server lets them go (MD4-ASTRA-6): the device sends every part at once. */
 export const ASK_CHAIN_MS = 30_000;
@@ -1860,6 +1861,15 @@ export class RoomActor {
    */
   #readAsk(read: AskRead): boolean {
     const { op, chain } = read;
+    if (read.next === 0 && op.clear) {
+      // A wing's ask (docs/design: dungeon generator phase 3, 3.6): its join as planned, and every part's footprint so far clear,
+      // read against the room as it stands now, since its own ops are only asked and another's may land between parts.
+      const now = this.#staged.state;
+      chain.wing = wingFootprint(now, op.sceneId, op.ops, op.clear, chain.wing);
+      if (joinChanged(now, op.sceneId, op.clear)) read.refused = JOIN_CHANGED;
+      else if (wingClash(now, op.sceneId, [], op.clear, chain.wing) !== null) read.refused = WING_MOVED;
+      if (read.refused !== undefined) return true;
+    }
     const until = performance.now() + ASK_TURN_MS;
     while (read.next < op.ops.length && !chain.over) {
       const inner = op.ops[read.next++]!;
@@ -1911,6 +1921,11 @@ export class RoomActor {
   /** An ask read whole: a part with more to come keeps its chain while its socket stays, and the last answers for the gesture. */
   #finishAsk(read: AskRead): void {
     const { key, wm, n, op, group, chain } = read;
+    // A refused wing drops its chain: the parts after it find none, and the device takes the first refusal as final.
+    if (read.refused !== undefined) {
+      this.#refuse(key, wm, n, "invalid", read.refused);
+      return;
+    }
     if (op.more) {
       if (this.#clients.has(key)) this.#asking.set(key, { ...chain, next: op.part + 1, at: this.#opts.now() });
     } else if (chain.over) {
