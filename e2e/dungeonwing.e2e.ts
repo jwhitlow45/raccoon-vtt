@@ -267,7 +267,7 @@ describe("raccoon-vtt Add a wing: the DM's mode, pane and ghost", { timeout: 900
     await pane().getByText("Players see this scene without fog, so the wing shows at once.", { exact: true }).waitFor();
     // The status counts the plan once the ghost is drawn.
     await waitFor("the plan's counts", async () => (/rooms?\b.*doors?\b.*traps?\b/.test(await pane().getByRole("status").innerText()) ? true : null));
-    assert.equal(await pane().getByRole("button", { name: "Add the wing" }).isDisabled(), true, "nothing sends a wing yet");
+    assert.equal(await pane().getByRole("button", { name: "Add the wing" }).isDisabled(), false, "the planned wing can be added");
 
     // The area's middle (35 of the scene's 60 across, framed whole) is right of the map's middle, so the pane docks on the left, the map's height between the bars.
     const box = (await pane().boundingBox())!;
@@ -355,6 +355,28 @@ describe("raccoon-vtt Add a wing: the DM's mode, pane and ghost", { timeout: 900
     await tapWorld(dm, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, BURROW);
     await lineIs("Area 15 hexes across and 17 rows down, joined at the ringed wall.");
     await shots.take(dm, "dgw-4-hex-join");
+  });
+
+  test("DGW-B1. Add the wing asks, lands the wing on the scene, closes the pane and clears the mode, and the wing takes the join for its door", async () => {
+    await showScene(dm, "Keep", run.keepId);
+    await pickOption(dm, TOOL, "Builder mode", "Add a wing");
+    const bar = dm.getByRole("toolbar", { name: `${TOOL} options` });
+    await drag(dm, { x: 22.5, y: 4.5 }, { x: 47.5, y: 29.5 }, KEEP);
+    await tapWorld(dm, { x: 13, y: 8.5 }, KEEP);
+    await lineIs("Area 26 by 26 squares, joined at the ringed wall.");
+    const cells = () => Object.values(state().buildChunks).filter((c) => c?.sceneId === run.keepId).reduce((n, c) => n + Object.keys(c!.cells).length, 0);
+    const before = cells();
+    await bar.getByRole("button", { name: "Generate a wing" }).click();
+    await pane().waitFor();
+    await waitFor("the plan's counts", async () => (/rooms?\b.*doors?\b/.test(await pane().getByRole("status").innerText()) ? true : null));
+    await pane().getByRole("button", { name: "Add the wing" }).click();
+    await pane().waitFor({ state: "detached", timeout: 30_000 });
+    await waitFor("the wing's floor stored", () => (cells() > before + 20 ? true : null));
+    const join = Object.values(state().buildChunks).find((c) => c?.sceneId === run.keepId && c.edges["13,8,w"]);
+    assert.equal(join?.edges["13,8,w"]?.kind, "door", "the joined wall became the wing's door");
+    // The mode clears: the line asks for a new area.
+    await lineIs("Drag the wing's area over empty ground, up to 100 by 100.");
+    await shots.take(dm, "dgw-b1-wing-added");
   });
 
   test("DGW-5. the pages logged no console errors", () => {
