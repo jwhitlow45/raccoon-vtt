@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { BuildChunk, RoomState, Scene, Viewer } from "../model.ts";
 import { opSchema, type Op, type RestoreEntry } from "../protocol.ts";
-import { projectChunkForPlayer, projectState, type ProjectedState } from "../project.ts";
+import { projectChunkForPlayer, projectState, type ProjectedState, type ProjectedToken } from "../project.ts";
 import { asPlayerCopy } from "../rankTestutil.ts";
 import { applyOp, type ApplyResult } from "../reducer.ts";
 
@@ -173,6 +173,29 @@ function storedFogOff(state: RoomState, view: ProjectedState): ProjectedState {
   return { ...view, buildChunks, scenes };
 }
 
+/**
+ * A copy as the builds before creature numbers the table gives sent it
+ * (shared/numbering.ts): with each creature's stored number, but none on a
+ * player's copy of a creature they do not own, which carries no owners,
+ * while its name is hidden. These rooms met no creature, so today's copies
+ * carry none. The copy's other records, and the tokens' own prototype, are
+ * kept as they are.
+ */
+function numberedBefore(state: RoomState, view: ProjectedState): ProjectedState {
+  const tokens = Object.defineProperties(Object.create(Object.getPrototypeOf(view.tokens)) as ProjectedState["tokens"], Object.getOwnPropertyDescriptors(view.tokens));
+  let changed = false;
+  for (const id of Object.keys(view.tokens)) {
+    const token = Object.getOwnPropertyDescriptor(view.tokens, id)!.value as ProjectedToken;
+    const real = Object.hasOwn(state.tokens, id) ? state.tokens[id] : undefined;
+    const stored = token.ownerIds === undefined && real?.nameHidden === true ? undefined : real?.number;
+    if (token.number === stored) continue;
+    const { number: _table, ...rest } = token;
+    Object.defineProperty(tokens, id, { value: stored === undefined ? rest : { ...rest, number: stored }, enumerable: true, writable: true, configurable: true });
+    changed = true;
+  }
+  return changed ? { ...view, tokens } : view;
+}
+
 /** A projection reads only the room, so rooms alike have projections alike, worked out once. */
 const viewsByRoom = new Map<string, string[]>();
 
@@ -184,7 +207,7 @@ function viewsOf(state: RoomState): string[] {
   const mark = reparented(state) ? "reparented " : "";
   const views = (["dm1", "p1", "p2"] as const).map((who) => {
     try {
-      const view = projectState(state, VIEWERS[who], { sceneId: null });
+      const view = numberedBefore(state, projectState(state, VIEWERS[who], { sceneId: null }));
       // A player's copy in the form this build sends it, recorded the same way (rankTestutil.ts).
       return mark + digest(canon(who === "dm1" ? view : storedFogOff(state, asPlayerCopy(view))));
     } catch (err) {

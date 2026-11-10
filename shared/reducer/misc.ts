@@ -1,5 +1,5 @@
 import { keys, parseKey, readEntity, revOf, type EntityKey, type ParsedKey } from "../keys.ts";
-import { oldSrdIdGuards, withOldSrdIds } from "../migrate.ts";
+import { meetsNumbers, oldSrdIdGuards, withOldSrdIds } from "../migrate.ts";
 import { MOVE_PLAYERS_FIRST_BACK } from "../permissions.ts";
 import type { AreaTemplate, BuildChunk, CompanionBlock, Encounter, FogDraft, Handout, HandoutDoc, Pin, RoomState, Scene, Token, Trap } from "../model.ts";
 import type { OpOf, RestoreEntry } from "../protocol.ts";
@@ -14,6 +14,7 @@ import { rowLeadsMounts } from "./encounter.ts";
 import { writeHpUndoLine } from "./hpUndo.ts";
 import { forgetExplored } from "./map.ts";
 import { gone, guardHash, invalid, type Tx } from "./tx.ts";
+import { keepNumbering } from "./numbering.ts";
 import { prepareSaveOutcomeRestore, pruneSaveOutcomes, writeSaveOutcome } from "./saveOutcomes.ts";
 import { playingAsRefusal, playingOf } from "./sound.ts";
 import { ownEntry } from "../records.ts";
@@ -108,7 +109,7 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
     if (parsed.kind === "log" || parsed.kind === "trapLog" || parsed.kind === "trapSeen") throw invalid("log entries are never restored");
     const current = tx.read(entry.key);
     before.set(entry.key, current);
-    const matches = guardMatches(entry, current) || (oldSrdIdGuards(tx.env.opVersion) && guardMatches(entry, withOldSrdIds(entry.key, current)));
+    const matches = guardMatches(entry, current, tx.env.opVersion) || (oldSrdIdGuards(tx.env.opVersion) && guardMatches(entry, withOldSrdIds(entry.key, current), tx.env.opVersion));
     if (!matches) throw invalid(CHANGED_SINCE);
     if (entry.key === keys.meta && (entry.value === null || entry.value === undefined)) throw invalid("the room meta cannot be removed");
     if (current !== null && (entry.value === null || entry.value === undefined)) removed.push(parsed);
@@ -120,14 +121,18 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
     if (parsed?.kind === "chunk") wallsMoved.add(parsed.sceneId);
   }
   const scenesWritten = new Set<string>();
+  // Whether a restored creature's stored mark fits is read on the scenes as the restore leaves them (keepNumbering).
+  // Ops stored before op version 60 wrote numbers as stored, and replay so.
+  const marksFit = meetsNumbers(tx.env.opVersion) ? scenesAfter(tx.state, op.entries) : null;
   for (const entry of op.entries) {
     let value = entry.value === undefined ? null : entry.value;
     const parsed = parseKey(entry.key);
     if (parsed?.kind === "scene" && value !== null) {
       const current = ownEntry(tx.state.scenes, parsed.id);
-      value = keepThumb(forwardWalls(value as Scene, current, wallsMoved.has(parsed.id)), current);
+      value = keepRegister(keepThumb(forwardWalls(value as Scene, current, wallsMoved.has(parsed.id)), current), current);
       scenesWritten.add(parsed.id);
     }
+    if (marksFit && parsed?.kind === "token" && value !== null) value = keepNumbering(marksFit, value as Token, ownEntry(tx.state.tokens, parsed.id));
     tx.write(entry.key, value);
   }
   // A scene a restore takes away takes the party's explored layer with it, as bookkeeping (docs/design/design-v1-maps-vision.md
@@ -588,12 +593,13 @@ function sceneIdOf(parsed: ParsedKey, value: Record<string, unknown>): string | 
 /**
  * Whether an entity's current value (null when absent) is what a restore
  * entry's guard expects. An entry with no guard at all, a stored restore
- * from before guards, always matches.
+ * from before guards, always matches. `opVersion` is the restore's, whose
+ * guards were hashed by that version's rule (guardHash).
  */
-export function guardMatches(entry: RestoreEntry, current: unknown): boolean {
+export function guardMatches(entry: RestoreEntry, current: unknown, opVersion?: number): boolean {
   if (entry.expectRev === null) return current === null;
   if (entry.expectRev !== undefined) return revOf(current) === entry.expectRev;
-  if (entry.expectHash !== undefined) return guardHash(entry.key, current) === entry.expectHash;
+  if (entry.expectHash !== undefined) return guardHash(entry.key, current, opVersion) === entry.expectHash;
   return true;
 }
 
@@ -611,6 +617,32 @@ function forwardWalls(restored: Scene, current: Scene | undefined, wallsMoved: b
   const moved = wallsMoved || (current !== undefined && autoWallsOf(current) !== autoWallsOf(restored));
   const version = Math.max(was, current?.wallsVersion ?? 0) + (moved ? 1 : 0);
   return version === restored.wallsVersion ? restored : { ...restored, wallsVersion: version };
+}
+
+/**
+ * A restored scene keeps the creature numbers it has now
+ * (shared/numbering.ts): a name's count never goes down, so no number is
+ * given twice. A scene a restore brings back from nothing comes with the
+ * numbers it was deleted with, beside its creatures.
+ */
+function keepRegister(restored: Scene, current: Scene | undefined): Scene {
+  if (current === undefined || restored.numbers === current.numbers) return restored;
+  const { numbers: _stored, ...rest } = restored;
+  return current.numbers === undefined ? rest : { ...rest, numbers: current.numbers };
+}
+
+/** The room's scenes as a restore of `entries` leaves them, their numbers kept as keepRegister keeps them. */
+function scenesAfter(state: RoomState, entries: readonly RestoreEntry[]): Pick<RoomState, "scenes"> {
+  let scenes: Record<string, Scene> | undefined;
+  for (const entry of entries) {
+    const parsed = parseKey(entry.key);
+    if (parsed?.kind !== "scene") continue;
+    scenes ??= { ...state.scenes };
+    const value = (entry.value ?? null) as Scene | null;
+    if (value === null) delete scenes[parsed.id];
+    else scenes[parsed.id] = keepRegister(value, ownEntry(state.scenes, parsed.id));
+  }
+  return { scenes: scenes ?? state.scenes };
 }
 
 /**

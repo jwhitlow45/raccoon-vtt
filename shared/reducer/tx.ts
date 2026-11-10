@@ -1,6 +1,6 @@
 import { collectionOf, compareLogIds, holderTileKey, parseKey, readEntity, revOf, keys, type EntityKey } from "../keys.ts";
 import { cutLine, DM_LINE_BASE, dmNumbered, droppedLines, MAX_LOG, neverRead, PARTY_LINE_BASE, PARTY_SLOT, partyIndex, rosterRanks } from "../logRings.ts";
-import { logsByAudience } from "../migrate.ts";
+import { logsByAudience, meetsNumbers } from "../migrate.ts";
 import type {
   Actor,
   Character,
@@ -596,11 +596,12 @@ export class Tx {
   inverse(): RestoreEntry[] | null {
     const entries: RestoreEntry[] = [];
     for (const key of this.order) {
-      if (key.startsWith("log:") || key.startsWith("trapLog:") || key.startsWith("trapSeen:") || key.startsWith("saveOutcome:") || this.bookkeeping.has(key)) continue;
+      // The creature number count only goes up (shared/numbering.ts), so no undo puts it back.
+      if (key.startsWith("log:") || key.startsWith("trapLog:") || key.startsWith("trapSeen:") || key.startsWith("saveOutcome:") || key === keys.numbering || this.bookkeeping.has(key)) continue;
       const after = readEntity(this.state, key);
       const entry: RestoreEntry = { key, value: this.before.get(key) ?? null };
       if (after === null) entry.expectRev = null;
-      else entry.expectHash = guardHash(key, after);
+      else entry.expectHash = guardHash(key, after, this.env.opVersion);
       entries.push(entry);
     }
     return entries.length === 0 ? null : entries;
@@ -686,19 +687,34 @@ export class Tx {
  * it likes (docs/design/design-v1-maps-vision.md 3.3), so a thumbnail that lands
  * between a rename and its undo never makes the undo refuse.
  *
+ * Nor do creature numbers (shared/numbering.ts): the table gives them at a
+ * batch's end, so a meeting between a move and its undo never makes the
+ * undo refuse. A scene's numbers are left out always, and a creature's
+ * number and mark from op version 60, the version `opVersion` names, the
+ * live one when absent. A stored restore from before hashed a creature's
+ * number with it, and replays so.
+ *
  * The meta and the encounter history have none of these fields, so their
  * hash is the plain value hash older stored restores were guarded with, and
  * those still replay exactly as they applied. A scene from before
- * thumbnails has none, so leaving it out changes no stored scene guard.
+ * thumbnails or numbers has neither, so leaving them out changes no stored
+ * scene guard.
  */
-export function guardHash(key: EntityKey, value: unknown): string {
+export function guardHash(key: EntityKey, value: unknown, opVersion?: number): string {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return hashValue(value);
-  const scene = parseKey(key)?.kind === "scene";
-  if (!("rev" in value) && !(scene && ("wallsVersion" in value || "thumb" in value))) return hashValue(value);
+  const kind = parseKey(key)?.kind;
+  const scene = kind === "scene";
+  const token = kind === "token" && meetsNumbers(opVersion);
+  if (!("rev" in value) && !(scene && ("wallsVersion" in value || "thumb" in value || "numbers" in value)) && !(token && ("number" in value || "met" in value))) return hashValue(value);
   const { rev: _rev, ...rest } = value as Record<string, unknown>;
   if (scene) {
     delete rest.wallsVersion;
     delete rest.thumb;
+    delete rest.numbers;
+  }
+  if (token) {
+    delete rest.number;
+    delete rest.met;
   }
   return hashValue(rest);
 }

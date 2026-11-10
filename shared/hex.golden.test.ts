@@ -6,11 +6,13 @@ import type { RoomState, Viewer } from "./model.ts";
 import { canApply } from "./permissions.ts";
 import { opSchema, type Op } from "./protocol.ts";
 import { hash128, projectState, stableStringify, type ProjectedState } from "./project.ts";
+import { readEntity } from "./keys.ts";
+import { guardHash } from "./reducer/tx.ts";
 import { asPlayerCopy } from "./rankTestutil.ts";
 import { storedFogOff } from "./secretDoorTestutil.ts";
 import { applyOp, type Env } from "./reducer.ts";
 import { seenWhole } from "./rules/path.ts";
-import { DOOR_COVER_OP_VERSION } from "./migrate.ts";
+import { DOOR_COVER_OP_VERSION, NUMBERING_OP_VERSION } from "./migrate.ts";
 import { DM, P1, P2, env, randomOp, randomState, rng } from "./testutil.ts";
 
 /**
@@ -68,7 +70,7 @@ function stored(state: RoomState): string {
  */
 /** A viewer's projection as the fixture hashes it: a player's in the form this build sends it (rankTestutil.ts). */
 function copyOf(state: RoomState, viewer: Viewer, sceneId: string): ProjectedState {
-  const view = projectState(state, viewer, { sceneId });
+  const view = asNumberedBefore(state, viewer, projectState(state, viewer, { sceneId }));
   return viewer.role === "dm" ? view : storedFogOff(state, asPlayerCopy(view));
 }
 
@@ -235,7 +237,41 @@ function answer(before: RoomState, result: ReturnType<typeof applyOp>): string[]
  * one, so an edge op goes in as one stored just before them: it writes none, and the room reads as the build before.
  */
 function beforeCovers(op: Op, at: Env): Env {
-  return op.t === "build.edge" ? { ...at, opVersion: DOOR_COVER_OP_VERSION - 1 } : at;
+  return op.t === "build.edge" ? { ...at, opVersion: DOOR_COVER_OP_VERSION - 1 } : beforeNumbers(at);
+}
+
+/**
+ * Creature numbers the table gives came after this fixture too
+ * (shared/numbering.ts): from op version 60 a made creature takes no
+ * number and an undo's guard leaves numbers out. So every op goes in as one
+ * stored just before them, and the rooms number as the build before did.
+ */
+function beforeNumbers(at: Env): Env {
+  return { ...at, opVersion: NUMBERING_OP_VERSION - 1 };
+}
+
+/** An HP line's undo, built as the server builds it, with its guards hashed as the build before hashed them, numbers included. */
+function guardedBefore(op: Op, state: RoomState): Op {
+  if (op.t !== "sys.restore") return op;
+  const entries = op.entries.map((entry) => (entry.expectHash === undefined ? entry : { ...entry, expectHash: guardHash(entry.key, readEntity(state, entry.key), NUMBERING_OP_VERSION - 1) }));
+  return { ...op, entries };
+}
+
+/**
+ * A copy's numbers are the table's now, and these rooms met no creature, so
+ * no copy carries one. Each copy is hashed with the numbers the build
+ * before sent it: the stored number, but on a player's copy of a creature
+ * they do not own, which carries no owners, none while its name is hidden.
+ */
+function asNumberedBefore(state: RoomState, viewer: Viewer, view: ProjectedState): ProjectedState {
+  const tokens = Object.entries(view.tokens).map(([id, token]) => {
+    const { number: _table, ...rest } = token;
+    const real = state.tokens[id];
+    const hidden = viewer.role === "player" && token.ownerIds === undefined && real?.nameHidden === true;
+    const stored = hidden ? undefined : real?.number;
+    return [id, stored === undefined ? rest : { ...rest, number: stored }];
+  });
+  return { ...view, tokens: Object.fromEntries(tokens) };
 }
 
 function run(seed: number): { input: string; output: string } {
@@ -246,7 +282,7 @@ function run(seed: number): { input: string; output: string } {
   for (let i = 0; i < OPS; i++) {
     // Every fourth op is a player's, the two taking turns.
     const who = i % 4 === 3 ? (Math.floor(i / 4) % 2 === 0 ? P1 : P2) : DM;
-    const op = opSchema.parse(randomOp(r, state, who));
+    const op = guardedBefore(opSchema.parse(randomOp(r, state, who)), state);
     inputs.push(stableStringify(op));
     const decision = canApply(op, who, state, deps);
     outputs.push(decision.ok ? "allowed" : touchBlind(state, who, op, decision.code, decision.message));
@@ -258,7 +294,7 @@ function run(seed: number): { input: string; output: string } {
     if (inverse !== null && i % 3 === 0) {
       // The step's undo, as the server builds it: through the same restore every undo and redo takes.
       const undo: Op = { t: "sys.restore", entries: inverse, from: "undo", deps: true };
-      outputs.push(...answer(result.state, applyOp(result.state, undo, DM, env(1_000 + i))));
+      outputs.push(...answer(result.state, applyOp(result.state, undo, DM, beforeNumbers(env(1_000 + i)))));
     }
     state = result.state;
     for (const [viewer, sceneId] of VIEWS) outputs.push(hash128(seenBy(state, viewer, copyOf(state, viewer, sceneId))));
