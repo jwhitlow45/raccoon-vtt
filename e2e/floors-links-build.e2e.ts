@@ -316,14 +316,15 @@ describe("raccoon-vtt stairs and ladders: the DM's building side", { timeout: 90
     assert.deepEqual(endOn(run.towerId, 2, 9)?.rect, { x: 2, y: 9, w: 4, h: 1 });
     await dm.keyboard.press("Escape");
 
-    const refuses = async (from: { x: number; y: number }, to: { x: number; y: number }, words: string) => {
+    // `probe` is the square whose center the red is read at: one no end's own marks cross, since a ladder's rung and chevron run through the middle of its square and blend the draft's tint into their own color.
+    const refuses = async (from: { x: number; y: number }, to: { x: number; y: number }, words: string, probe = from) => {
       const count = before();
       await holdDrag(from, to, async () => {
         await waitFor(`"${words}"`, async () => ((await line()) === words ? true : null)).catch(async (err: Error) => {
           throw new Error(`${err.message}, the line reads "${await line()}"`);
         });
         // The draft is red while the rules refuse it.
-        assert.equal(await drawnAt(from), "red", `${words}: the draft is not drawn red`);
+        await waitFor(`the draft drawn red at ${probe.x}, ${probe.y}`, async () => ((await drawnAt(probe)) === "red" ? true : null));
       });
       // Nothing is sent, and the note stays after the lift.
       assert.equal(await line(), words);
@@ -332,7 +333,7 @@ describe("raccoon-vtt stairs and ladders: the DM's building side", { timeout: 90
     };
 
     // Over another end: the pair FLRK-2 made a ladder.
-    await refuses({ x: 7, y: 5 }, { x: 7, y: 7 }, LINK_WORDS.overEnd("ladder", "Upper floor"));
+    await refuses({ x: 7, y: 5 }, { x: 7, y: 7 }, LINK_WORDS.overEnd("ladder", "Upper floor"), { x: 7, y: 7 });
     // A wall inside the squares, on Ground floor.
     await ops.send({ t: "build.edge", sceneId: run.towerId, edges: [{ key: "15,3,w", feature: { kind: "wall" } }] });
     await refuses({ x: 14, y: 3 }, { x: 15, y: 3 }, LINK_WORDS.wall("Ground floor"));
