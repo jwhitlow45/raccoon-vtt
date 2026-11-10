@@ -28,8 +28,9 @@ import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOption, pickTool, S
  *   one hex side long joins.
  * - D3FIX-1: on hexes Add the wing lands a Wide wing joined on a slanted
  *   side, whose three sides become its doors (DG3 review round 1).
- * - LP37FIX: DGW-3 also finds the sheet's foot in sight as it opens, and
- *   its rows in reach.
+ * - LP37FIX-1: a ghost room's panel names it as the ghost does, and Done
+ *   gives focus back to Edit rooms. DGW-3 also finds the sheet's foot in
+ *   sight as it opens, and its rows in reach.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seventy. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
@@ -313,6 +314,39 @@ describe("raccoon-vtt Add a wing: the DM's mode, pane and ghost", { timeout: 900
     await waitFor("the ghost gone", async () => ((await drawnIn(dm, area, KEEP)) <= before + 5 ? true : null));
     // The area and join stay for another try.
     await lineIs("Area 26 by 26 squares, joined at the ringed wall.");
+  });
+
+  test("LP37FIX-1. a tap on a ghost room opens its panel named as the ghost numbers it, and Done gives focus back to Edit rooms", async () => {
+    const bar = dm.getByRole("toolbar", { name: `${TOOL} options` });
+    await drag(dm, { x: 22.5, y: 4.5 }, { x: 47.5, y: 29.5 }, KEEP);
+    await tapWorld(dm, { x: 13, y: 8.5 }, KEEP);
+    await lineIs("Area 26 by 26 squares, joined at the ringed wall.");
+    const area = { x0: 22, y0: 4, x1: 48, y1: 30 };
+    await bar.getByRole("button", { name: "Generate a wing" }).click();
+    await pane().waitFor();
+    await waitFor("the plan's counts", async () => (/rooms?\b.*doors?\b/.test(await pane().getByRole("status").innerText()) ? true : null));
+    await pane().getByRole("button", { name: "Edit rooms" }).click();
+    // A tap that misses every room is judged as a join and refused, which leaves the pane as it was.
+    const panel = pane().locator("[data-room-panel]");
+    let opened = false;
+    for (let j = 1; j < 8 && !opened; j++) {
+      for (let i = 1; i < 8 && !opened; i++) {
+        await tapWorld(dm, { x: area.x0 + ((area.x1 - area.x0) * i) / 8, y: area.y0 + ((area.y1 - area.y0) * j) / 8 }, KEEP);
+        opened = await panel.waitFor({ timeout: 400 }).then(
+          () => true,
+          () => false,
+        );
+      }
+    }
+    assert.ok(opened, "a tap inside the area opened a ghost room's panel");
+    const title = (await panel.getByRole("heading", { level: 3 }).innerText()).trim();
+    assert.match(title, /^Room W\d+$/, "the panel names the room as the ghost does");
+    await shots.take(dm, "lp37fix-room-panel-w-title");
+    await panel.getByRole("button", { name: "Done", exact: true }).click();
+    await panel.waitFor({ state: "detached" });
+    assert.equal(await pane().getByRole("button", { name: "Edit rooms" }).evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement), true, "Done gave focus back to Edit rooms");
+    await dm.keyboard.press("Escape");
+    await pane().waitFor({ state: "detached" });
   });
 
   test("DGW-3. on a phone the pane is a bottom sheet of at most 60% of the height, and in line at 390 and 320 wide, 100% and 130%", async () => {

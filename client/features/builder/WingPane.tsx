@@ -477,6 +477,12 @@ export default function WingPane(props: {
     if (pickedIndex === null || !plan?.ok || !plan.layout) return;
     editStep({ k: "edit", room: pickedIndex, edit: next, layout: plan.layout });
   };
+  // Done gives focus back to Edit rooms, the control that lets a tap on the ghost open a room, since the tap that opened the panel left none to return to (LP37-A-WING-5).
+  const editRef = useRef<HTMLButtonElement>(null);
+  const roomDone = () => {
+    editRef.current?.focus({ preventScroll: true });
+    builder.setState({ wingRoom: null });
+  };
   const short = useShortSheet(place.kind === "sheet", scrollRef, headRef, firstRef);
   const header = (
     <div ref={headRef}>
@@ -507,7 +513,7 @@ export default function WingPane(props: {
             <Button size="sm" icon="again" onClick={() => setSeed(newSeed())}>
               Reroll
             </Button>
-            <Button size="sm" pressed={edit} onClick={() => builder.setState({ wingEdit: !edit, wingRoom: null })}>
+            <Button ref={editRef} size="sm" pressed={edit} onClick={() => builder.setState({ wingEdit: !edit, wingRoom: null })}>
               Edit rooms
             </Button>
           </div>
@@ -519,7 +525,7 @@ export default function WingPane(props: {
               edit={pickedIndex === null ? undefined : edits.edits?.rooms[pickedIndex]}
               onEdit={editRoom}
               onStep={stepRoom}
-              onDone={() => builder.setState({ wingRoom: null })}
+              onDone={roomDone}
               cave={settings.theme === "cave"}
               flat={flat}
               wing
