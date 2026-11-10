@@ -91,6 +91,7 @@ import { planBefore, trapSpring, trapStep, type TrapWrites } from "./reducer/tra
 import { sysDice } from "./reducer/dice.ts";
 import { actorPrompt, actorUse } from "./reducer/uses.ts";
 import { handoutClose, handoutDocCreate, handoutDocDelete, handoutShow, logChat, logWhisper, restore } from "./reducer/misc.ts";
+import { sysMeet } from "./reducer/numbering.ts";
 import { sceneSetPhase } from "./reducer/phases.ts";
 import { monsterCreate, monsterDelete, monsterSetSrdImage, monsterUpdate } from "./reducer/monsters.ts";
 import { companionBlockCreate, companionBlockDelete, companionBlockUpdate } from "./reducer/companionBlocks.ts";
@@ -545,6 +546,8 @@ function dispatch(tx: Tx, op: Op): void {
       return sysExplore(tx, op);
     case "sys.remember":
       return sysRemember(tx, op);
+    case "sys.meet":
+      return sysMeet(tx, op);
     case "vision.holders":
       return visionHolders(tx, op);
     case "token.updateMany":
