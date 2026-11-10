@@ -3,7 +3,8 @@ import { SIZE_CELLS } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { footprint } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
-import { DISPOSITION_RING, initials } from "../../lib/tokenView.ts";
+import { labelOf, type Labels } from "../../lib/labels.ts";
+import { DISPOSITION_RING, initials, initialsOf, type Initials } from "../../lib/tokenView.ts";
 import type { CreaturePicture } from "../tokens/CreatureHeader.tsx";
 import { characterKind, kindLine, sizeText, tokenKind, type KindLine } from "../tokens/creatureKind.ts";
 
@@ -27,7 +28,8 @@ export type CreatureLook = { picture: CreaturePicture; badge: CreatureBadge | nu
  */
 export function tokenLook(input: {
   token: Pick<Token, "kind" | "image" | "size" | "w" | "h" | "disposition" | "companion">;
-  name: string;
+  /** The initials its picture shows when it has no image: what the table reads (tokenView.ts initialsOf). */
+  initials: Initials;
   /** A companion's character, where the viewer's copy holds it. */
   keeper?: Pick<Character, "name" | "defaultImage"> | undefined;
   /** The character a player character's token is of, where the viewer's copy holds it. */
@@ -39,7 +41,7 @@ export function tokenLook(input: {
   const fp = footprint(token);
   const kind = tokenKind({ token, companionOf: keeper?.name, character: input.character, cr: input.cr });
   return {
-    picture: { image: token.image, shape: token.kind === "object" ? "square" : "circle", aspect: fp.w / fp.h, ring: DISPOSITION_RING[token.disposition] ?? theme.color.neutral, initials: initials(input.name) },
+    picture: { image: token.image, shape: token.kind === "object" ? "square" : "circle", aspect: fp.w / fp.h, ring: DISPOSITION_RING[token.disposition] ?? theme.color.neutral, initials: input.initials },
     badge: keeper ? { image: keeper.defaultImage, initials: initials(keeper.name) } : null,
     line: kindLine(kind, sizeText(token.size, fp, input.feetPerCell)),
   };
@@ -69,9 +71,9 @@ export function creatureLook(input: {
   view: Pick<RoomState, "tokens" | "characters" | "meta">;
   creature: ActorTarget;
   tokenId?: string | undefined;
-  name: string;
+  labels: Labels;
 }): CreatureLook | null {
-  const { view, creature, name } = input;
+  const { view, creature } = input;
   const feetPerCell = view.meta.settings.feetPerCell;
   const tokenId = input.tokenId ?? ("tokenId" in creature ? creature.tokenId : undefined);
   const token = tokenId !== undefined ? view.tokens[tokenId] : undefined;
@@ -79,7 +81,8 @@ export function creatureLook(input: {
     const character = "ref" in token.actor ? view.characters[token.actor.ref] : undefined;
     const actor: Partial<Actor> | undefined = "inline" in token.actor ? token.actor.inline : character?.actor;
     const keeper = token.companion ? view.characters[token.companion.of] : undefined;
-    return tokenLook({ token, name, keeper, character, cr: actor?.cr, feetPerCell });
+    const letters = initialsOf(labelOf(input.labels, token));
+    return tokenLook({ token, initials: letters.preview ? letters : letters.text, keeper, character, cr: actor?.cr, feetPerCell });
   }
   if ("tokenId" in creature) return null;
   const character = view.characters[creature.characterId];

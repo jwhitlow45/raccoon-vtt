@@ -12,6 +12,7 @@ import { ReplaceConfirm } from "../groupSave/ReplaceConfirm.tsx";
 import { useStartGroupSave, type StartInput } from "../groupSave/start.ts";
 import { useDiceView } from "../useDiceView.ts";
 import { castCardText, castStart, readingWords } from "./castStart.ts";
+import { labelsOf, useLabels } from "../../../state/labels.ts";
 
 /**
  * A player's ask for saves on the DM's desk (docs/design/design-v1-player-save-spell.md
@@ -21,6 +22,7 @@ import { castCardText, castStart, readingWords } from "./castStart.ts";
  * the live cards in their look, and folds to its first line as they do.
  */
 export function CastCard(props: { ask: CastAsk; open: boolean; onToggle(): void; toggleRef(el: HTMLButtonElement | null): void }) {
+  const labels = useLabels();
   const { ask } = props;
   const view = useRoomView((s) => s.view);
   const viewing = useRoomView((s) => s.sceneId);
@@ -37,7 +39,7 @@ export function CastCard(props: { ask: CastAsk; open: boolean; onToggle(): void;
     return caughtTokens(template, areaContext(view, scene), template.sceneId).length;
   }, [tokens, template, scene, viewing, ask.sceneId]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!view) return null;
-  const text = castCardText(view, ask, { viewing, caught });
+  const text = castCardText(view, ask, { viewing, caught, labels });
 
   const open = () => {
     setError(null);
@@ -126,14 +128,15 @@ export function CastCard(props: { ask: CastAsk; open: boolean; onToggle(): void;
  * (ReplaceConfirm), as an area's Save and damage does.
  */
 function CastOpen(props: { ask: CastAsk; onDone(): void }) {
+  const labels = useLabels();
   const { ask, onDone } = props;
   const start = useStartGroupSave();
   const here = useRoomView((s) => s.sceneId === ask.sceneId && s.view?.tokens[ask.caster] !== undefined);
-  const reading = useRoomView((s) => (s.view ? readingWords(s.view, ask) : "Reading the caster's stat block…"));
+  const reading = useRoomView((s) => (s.view ? readingWords(s.view, ask, labelsOf(s)) : "Reading the caster's stat block…"));
   const creatures = useMemo(() => (here ? [{ tokenId: ask.caster }] : []), [here, ask.caster]);
   const { dice, loading } = useDiceView(creatures);
   const [pending, setPending] = useState<StartInput | null>(null);
-  const input = useMemo<StartInput | null>(() => (here && dice && !loading ? castStart(dice, ask) : null), [here, dice, loading, ask]);
+  const input = useMemo<StartInput | null>(() => (here && dice && !loading ? castStart(dice, ask, labels) : null), [here, dice, loading, ask, labels]);
   useEffect(() => {
     if (!input || pending) return;
     if (start(input)) onDone();

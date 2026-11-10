@@ -145,7 +145,7 @@ export function applyNow(env: ApplyEnv, chip: HpChip, to: ApplyTarget): Promise<
   if (!view || !you || !token) return Promise.resolve(APPLY_GONE);
   const parsed = parseHpInput(String(chip.amount), "damage", chip);
   if (!parsed.ok) return Promise.resolve(parsed.error);
-  const targets = hpTargets([token], { role: you.role, memberId: you.memberId, characters: view.characters, playersApplyDamage: view.meta.settings.playersApplyDamage });
+  const targets = hpTargets([token], { role: you.role, memberId: you.memberId, characters: view.characters, playersApplyDamage: view.meta.settings.playersApplyDamage, labels: labelsOf({ view, you }) });
   setRoll(env.applies, key, { ...was, busy: to.holder, said: null });
   return new Promise((resolve) => {
     let settled = false;

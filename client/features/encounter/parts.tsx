@@ -7,7 +7,8 @@ import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { Icon } from "../../components/Icon.tsx";
 import { ChipFace } from "../tokens/EffectIcon.tsx";
-import { DISPOSITION_RING, effectChip, initials } from "../../lib/tokenView.ts";
+import { labelOf } from "../../lib/labels.ts";
+import { DISPOSITION_RING, effectChip, initials, initialsLook, initialsOf } from "../../lib/tokenView.ts";
 import { useKeyHint, withKey } from "../../state/shortcuts.ts";
 import { useAssets, useRoomView } from "../../state/view.ts";
 import { entryName, onAnotherScene, portraitDisposition, type HpView } from "./logic.ts";
@@ -39,6 +40,8 @@ export function Portrait(props: { entry: Pick<InitEntry, "tokenId" | "characterI
   const character = useRoomView((s) => (characterId !== undefined ? s.view?.characters[characterId] : undefined));
   const name = useRoomView((s) => (s.view ? entryName(s.view, entry, labels) : ""));
   const elsewhere = useRoomView((s) => (s.view ? onAnotherScene(s.view, entry) : false));
+  // A token's letters are its label's, so a preview draws outlined and never reads "G(".
+  const letters = token ? initialsOf(labelOf(labels, token)) : { text: initials(name), preview: false };
   const shown = token?.image ?? character?.defaultImage;
   const image = shown && isAssetImage(shown) ? shown : undefined;
   const color = DISPOSITION_RING[portraitDisposition(token, elsewhere)];
@@ -59,13 +62,13 @@ export function Portrait(props: { entry: Pick<InitEntry, "tokenId" | "characterI
   const letterSize = size >= 30 ? theme.font.small : theme.font.tiny;
   if (shown && !isAssetImage(shown)) {
     // A shipped icon on its disk (docs/design/design-v1-dm-tools.md 3.12), initials until its file arrives.
-    const letters = <span style={{ fontSize: letterSize, fontWeight: theme.weight.bold, ...(props.ink ? { color: props.ink } : null) }}>{initials(name)}</span>;
-    return <IconDisk icon={shown.icon} color={shown.color} width={size} shape="circle" style={frame} fallback={letters} readonly={props.dim} />;
+    const text = <span style={{ fontSize: letterSize, fontWeight: theme.weight.bold, ...(props.ink ? { color: props.ink } : null), ...initialsLook(letters.preview, props.ink) }}>{letters.text}</span>;
+    return <IconDisk icon={shown.icon} color={shown.color} width={size} shape="circle" style={frame} fallback={text} readonly={props.dim} />;
   }
   if (!image) {
     return (
       <span aria-hidden data-disabled-look={props.dim ? "readonly" : undefined} style={{ ...box, color: props.ink ?? (elsewhere ? theme.color.textMuted : theme.color.text), fontSize: letterSize, fontWeight: theme.weight.bold }}>
-        {elsewhere ? "?" : initials(name)}
+        {elsewhere ? "?" : letters.preview ? <span style={initialsLook(true, props.ink ?? theme.color.text)}>{letters.text}</span> : letters.text}
       </span>
     );
   }

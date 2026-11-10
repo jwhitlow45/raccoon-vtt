@@ -35,7 +35,7 @@ const dice = (v: RoomState = view()): DiceView => ({ you: { memberId: "dm1", rol
 const ROLLED_31 = { damage: { tag: "r1", parts: 1 }, rolled: [{ formula: "9d6", total: 31, type: "fire" as const }] };
 
 function pageOf(ask: CastAsk, d: DiceView = dice()): Page {
-  const input = castStart(d, ask);
+  const input = castStart(d, ask, new Map());
   return newPage({
     id: "page",
     sceneId: ask.sceneId,
@@ -57,7 +57,7 @@ describe("the group save an ask opens", () => {
     // The area names no caster, so the ask's caster gives the DC and the dice.
     const v = view();
     v.templates.a1 = template("a1", { ownerId: "p1", spell: "Fireball" });
-    const input = castStart(dice(v), castAsk("k1", { slot: 4, ...ROLLED_31 }));
+    const input = castStart(dice(v), castAsk("k1", { slot: 4, ...ROLLED_31 }), new Map());
     assert.deepEqual(input.source, { kind: "area", templateId: "a1" });
     assert.equal(input.panel, "areas");
     assert.deepEqual([input.test, input.dc, input.spell], [{ kind: "save", ability: "dex" }, 15, true]);
@@ -71,7 +71,7 @@ describe("the group save an ask opens", () => {
   });
 
   test("a targets ask: its tokens, never the DM's selection, in the Dice panel, filled from the caster's row at the level", () => {
-    const input = castStart(dice(), castAsk("k2", { area: undefined, targets: ["g1", "g2"], roll: "hp", spell: "Hold Person", slot: 3 }));
+    const input = castStart(dice(), castAsk("k2", { area: undefined, targets: ["g1", "g2"], roll: "hp", spell: "Hold Person", slot: 3 }), new Map());
     assert.deepEqual(input.source, { kind: "selection", tokenIds: ["g1", "g2"] });
     assert.equal(input.panel, "dice");
     assert.deepEqual([input.test, input.dc, input.outcome?.slot, input.outcome?.damage], [{ kind: "save", ability: "wis" }, 15, 3, ""]);
@@ -80,12 +80,12 @@ describe("the group save an ask opens", () => {
   });
 
   test("a targets Fireball scales its dice at the level, as the row does", () => {
-    const filled = castFill(dice(), castAsk("k3", { area: undefined, targets: ["g1"], roll: "fb", slot: 5 }));
+    const filled = castFill(dice(), castAsk("k3", { area: undefined, targets: ["g1"], roll: "fb", slot: 5 }), new Map());
     assert.deepEqual([filled.input.outcome.damage, filled.input.outcome.slot], ["10d6 Fire", 5]);
   });
 
   test("a rider of another type on: the field is the roll's own parts and types, each part's amount seeded", () => {
-    const filled = castFill(dice(), castAsk("k4", { slot: 3, damage: { tag: "r2", parts: 2 }, rolled: [{ formula: "8d6", total: 31, type: "fire" }, { formula: "2d8", total: 9, type: "radiant" }] }));
+    const filled = castFill(dice(), castAsk("k4", { slot: 3, damage: { tag: "r2", parts: 2 }, rolled: [{ formula: "8d6", total: 31, type: "fire" }, { formula: "2d8", total: 9, type: "radiant" }] }), new Map());
     assert.equal(filled.input.outcome.damage, "8d6 Fire + 2d8 Radiant");
     assert.deepEqual(filled.damage, { tag: "r2", state: "committed", amounts: [31, 9], imported: true });
     assert.match(filled.input.fill.from, /8d6 Fire \+ 2d8 Radiant, rolled 31 \+ 9 \(Thorn's roll\), half on a pass\.$/);
@@ -97,47 +97,47 @@ describe("the group save an ask opens", () => {
 
   test("a long-named roll whose label lost its types, or any untyped part among several, imports nothing and says so (SS-O-27)", () => {
     const says = "Thorn's roll could not be read part by part. Roll it here or type it.";
-    const untyped = castFill(dice(), castAsk("k5", { area: undefined, targets: ["g1"], roll: "long", spell: LONG.slice(0, 60), slot: 1, damage: { tag: "r3", parts: 2 }, rolled: [{ formula: "4d6", total: 14 }, { formula: "2d8", total: 9 }] }));
+    const untyped = castFill(dice(), castAsk("k5", { area: undefined, targets: ["g1"], roll: "long", spell: LONG.slice(0, 60), slot: 1, damage: { tag: "r3", parts: 2 }, rolled: [{ formula: "4d6", total: 14 }, { formula: "2d8", total: 9 }] }), new Map());
     assert.equal(untyped.damage, null);
     assert.equal(untyped.says, says);
     assert.equal(untyped.input.outcome.damage, "4d6 Fire + 2d8 Radiant", "the fill's own formula stays");
     assert.doesNotMatch(untyped.input.fill.from, /rolled/);
-    const mixed = castFill(dice(), castAsk("k6", { area: undefined, targets: ["g1"], roll: "long", spell: LONG.slice(0, 60), slot: 1, damage: { tag: "r4", parts: 2 }, rolled: [{ formula: "4d6", total: 14, type: "fire" }, { formula: "2d8", total: 9 }] }));
+    const mixed = castFill(dice(), castAsk("k6", { area: undefined, targets: ["g1"], roll: "long", spell: LONG.slice(0, 60), slot: 1, damage: { tag: "r4", parts: 2 }, rolled: [{ formula: "4d6", total: 14, type: "fire" }, { formula: "2d8", total: 9 }] }), new Map());
     assert.deepEqual([mixed.damage, mixed.says], [null, says], "a typed part then an untyped one reads as one part with the next, so nothing goes in");
   });
 
   test("a lone untyped part takes the fill's type, as a typed 28 does", () => {
-    const filled = castFill(dice(), castAsk("k7", { slot: 3, damage: { tag: "r5", parts: 1 }, rolled: [{ formula: "8d6", total: 28 }] }));
+    const filled = castFill(dice(), castAsk("k7", { slot: 3, damage: { tag: "r5", parts: 1 }, rolled: [{ formula: "8d6", total: 28 }] }), new Map());
     assert.equal(filled.says, null);
     assert.equal(filled.input.outcome.damage, "8d6");
     assert.deepEqual(amountsOf({ outcome: filled.input.outcome as Page["outcome"], damage: filled.damage }, filled.input.fill.damageType), [{ amount: 28, type: "fire" }]);
   });
 
   test("a slot change refills the formula from the fill and drops the roll", () => {
-    const filled = castFill(dice(), castAsk("k8", { slot: 3, ...ROLLED_31 }), 5, { imported: false });
+    const filled = castFill(dice(), castAsk("k8", { slot: 3, ...ROLLED_31 }), new Map(), 5, { imported: false });
     assert.equal(filled.damage, null);
     assert.equal(filled.input.outcome.damage, "10d6 Fire");
     assert.equal(filled.input.fill.from, "From Thorn's Fireball at level 5: Dexterity save, DC 15 (Thorn's spell save DC), 10d6 Fire, half on a pass.");
   });
 
   test("the caster's block without that roll fills from the area's preset, else opens on Dexterity with no DC", () => {
-    const preset = castFill(dice(), castAsk("k9", { area: undefined, targets: ["g1"], roll: "gone", spell: "Lightning Bolt", slot: 3 }));
+    const preset = castFill(dice(), castAsk("k9", { area: undefined, targets: ["g1"], roll: "gone", spell: "Lightning Bolt", slot: 3 }), new Map());
     assert.equal(preset.input.fill.name, "Lightning Bolt");
     assert.equal(preset.input.outcome.damage, "8d6 Lightning");
-    const bare = castFill(dice(), castAsk("k10", { area: undefined, targets: ["g1"], roll: "gone", spell: "Mystery Bolt", slot: undefined }));
+    const bare = castFill(dice(), castAsk("k10", { area: undefined, targets: ["g1"], roll: "gone", spell: "Mystery Bolt", slot: undefined }), new Map());
     assert.deepEqual([bare.input.test, bare.input.dc, bare.input.outcome.slot], [{ kind: "save", ability: "dex" }, null, undefined]);
     assert.equal(bare.input.fill.from, "From Thorn's Mystery Bolt: not on Thorn's stat block, so set the save and the damage.");
   });
 
   test("a row gone or renamed before Open, with no preset, still takes the caster's stored roll (SSB-A-05)", () => {
     const ask = castAsk("k13", { area: undefined, targets: ["g1"], roll: "gone", spell: "Mystery Bolt", slot: undefined, damage: { tag: "r6", parts: 1 }, rolled: [{ formula: "8d6", total: 28, type: "fire" }] });
-    const filled = castFill(dice(), ask);
+    const filled = castFill(dice(), ask, new Map());
     assert.deepEqual([filled.input.test, filled.input.dc], [{ kind: "save", ability: "dex" }, null], "the DM sets the save");
     assert.equal(filled.input.outcome.damage, "8d6 Fire");
     assert.deepEqual(filled.damage, { tag: "r6", state: "committed", amounts: [28], imported: true });
     assert.equal(filled.says, null);
     assert.equal(filled.input.fill.from, "From Thorn's Mystery Bolt: not on Thorn's stat block, so set the save. 8d6 Fire, rolled 28 (Thorn's roll).");
-    assert.deepEqual(castStart(dice(), ask).damage, filled.damage, "Open seeds it");
+    assert.deepEqual(castStart(dice(), ask, new Map()).damage, filled.damage, "Open seeds it");
   });
 
   test("the seeded roll is left out of holdsRolls and rolledAny until the DM rolls or the page sends anything", () => {
@@ -222,7 +222,7 @@ describe("the page and its ask", () => {
 
 describe("the DM's card", () => {
   test("names the ask, the roll and the area's count, with Open and Dismiss named for it", () => {
-    const text = castCardText(view(), castAsk("d1", { slot: 4, ...ROLLED_31 }), { viewing: "s1", caught: 4 });
+    const text = castCardText(view(), castAsk("d1", { slot: 4, ...ROLLED_31 }), { viewing: "s1", caught: 4, labels: new Map() });
     assert.deepEqual(
       [text.title, text.short, text.rolled, text.where, text.gone, text.open, text.openName, text.dismissName],
       ["Thorn asks for saves: Fireball, level 4", "Thorn asks for saves: Fireball", "Thorn rolled 31 Fire", "In the area: 4", null, "Open", "Open the group save for Thorn's Fireball", "Dismiss Thorn's Fireball"],
@@ -230,25 +230,25 @@ describe("the DM's card", () => {
   });
 
   test("a targets ask names its targets, and one with no roll says so", () => {
-    const text = castCardText(view(), castAsk("d2", { area: undefined, targets: ["g1", "g2"], spell: "Hold Person", slot: 3 }), { viewing: "s1", caught: null });
+    const text = castCardText(view(), castAsk("d2", { area: undefined, targets: ["g1", "g2"], spell: "Hold Person", slot: 3 }), { viewing: "s1", caught: null, labels: new Map() });
     assert.deepEqual([text.rolled, text.where], ["No damage rolled", "Targets: Goblin 1, Goblin 2"]);
-    const reversed = castCardText(view(), castAsk("d2", { area: undefined, targets: ["g2", "g1"], spell: "Hold Person" }), { viewing: "s1", caught: null });
+    const reversed = castCardText(view(), castAsk("d2", { area: undefined, targets: ["g2", "g1"], spell: "Hold Person" }), { viewing: "s1", caught: null, labels: new Map() });
     assert.equal(reversed.where, "Targets: Goblin 1, Goblin 2", "by name and number, whatever order the ask holds (LP10-SAVE-3)");
   });
 
   test("an ask on another scene goes there to open, and only an ask here reads its area or caster as gone", () => {
     const v = view();
     delete v.templates.a1;
-    const away = castCardText(v, castAsk("d3"), { viewing: "s2", caught: null });
+    const away = castCardText(v, castAsk("d3"), { viewing: "s2", caught: null, labels: new Map() });
     assert.deepEqual([away.where, away.gone, away.open], ["On s1", null, "Go to s1 and open"]);
-    assert.equal(castCardText(v, castAsk("d3"), { viewing: "s1", caught: null }).gone, "Its area is gone");
+    assert.equal(castCardText(v, castAsk("d3"), { viewing: "s1", caught: null, labels: new Map() }).gone, "Its area is gone");
     delete v.tokens.thorn;
-    assert.equal(castCardText(v, castAsk("d4", { area: undefined, targets: ["g1"] }), { viewing: "s1", caught: null }).gone, "Its caster is gone");
-    assert.equal(castWho(v, castAsk("d4")), "p1", "with no token in view, the player who asked");
-    assert.equal(readingWords(v, castAsk("d4")), "Reading the caster's stat block…", "Open on its way to the scene names no player's stat block");
-    assert.equal(readingWords(view(), castAsk("d4")), "Reading Thorn's stat block…");
+    assert.equal(castCardText(v, castAsk("d4", { area: undefined, targets: ["g1"] }), { viewing: "s1", caught: null, labels: new Map() }).gone, "Its caster is gone");
+    assert.equal(castWho(v, castAsk("d4"), new Map()), "p1", "with no token in view, the player who asked");
+    assert.equal(readingWords(v, castAsk("d4"), new Map()), "Reading the caster's stat block…", "Open on its way to the scene names no player's stat block");
+    assert.equal(readingWords(view(), castAsk("d4"), new Map()), "Reading Thorn's stat block…");
     delete v.scenes.s1;
-    assert.equal(castCardText(v, castAsk("d5"), { viewing: "s2", caught: null }).gone, "Its scene is gone");
+    assert.equal(castCardText(v, castAsk("d5"), { viewing: "s2", caught: null, labels: new Map() }).gone, "Its scene is gone");
   });
 
   test("the desk shows the newest first, less the ask the open page holds", () => {

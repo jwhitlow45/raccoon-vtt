@@ -93,7 +93,7 @@ export function GroupOptions(props: { tokenIds: readonly string[] }) {
   });
   const names = tokens.map((t) => displayName(t, labels));
   const n = names.length;
-  const pictures = tokens.slice(0, CARD_PICTURES).flatMap((token) => creatureLook({ view, creature: { tokenId: token.id }, name: displayName(token, labels) })?.picture ?? []);
+  const pictures = tokens.slice(0, CARD_PICTURES).flatMap((token) => creatureLook({ view, creature: { tokenId: token.id }, labels })?.picture ?? []);
 
   const go = (input: StartInput) => {
     if (!start(input)) setPending(input);

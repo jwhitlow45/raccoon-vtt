@@ -36,7 +36,7 @@ function table(feetPerCell = 5): RoomState {
 
 describe("a token's look, as the token panel's header draws it", () => {
   test("a monster: its image in its disposition's ring, its initials, its CR and size", () => {
-    const look = creatureLook({ view: table(), creature: { tokenId: "dragon" }, name: "Adult Black Dragon" });
+    const look = creatureLook({ labels: new Map(), view: table(), creature: { tokenId: "dragon" } });
     assert.ok(look);
     assert.deepEqual(look.picture, { image: undefined, shape: "circle", aspect: 1, ring: theme.color.hostile, initials: "AB" });
     assert.equal(look.badge, null);
@@ -45,14 +45,14 @@ describe("a token's look, as the token panel's header draws it", () => {
   });
 
   test("a player's character on its token: the token's own image, its level and size", () => {
-    const look = creatureLook({ view: table(), creature: { characterId: "thorn" }, tokenId: "tt", name: "Thorn" });
+    const look = creatureLook({ labels: new Map(), view: table(), creature: { characterId: "thorn" }, tokenId: "tt" });
     assert.ok(look);
     assert.deepEqual(look.picture, { image: imageRef("thorn-token"), shape: "circle", aspect: 1, ring: theme.color.ally, initials: "Th" });
     assert.equal(kindLineText(look.line), "Level 5 character · Medium (5 ft)");
   });
 
   test("a companion wears its character's portrait as a badge and names it in its own part of the line", () => {
-    const look = creatureLook({ view: table(), creature: { tokenId: "wolf" }, name: "Wolf" });
+    const look = creatureLook({ labels: new Map(), view: table(), creature: { tokenId: "wolf" } });
     assert.ok(look);
     assert.deepEqual(look.badge, { image: PORTRAIT, initials: "Th" });
     assert.equal(look.picture.image, WOLF_ICON);
@@ -64,40 +64,40 @@ describe("a token's look, as the token panel's header draws it", () => {
   test("a companion whose character the viewer's copy lacks reads as its token's kind, with no badge", () => {
     const view = table();
     delete view.characters.thorn;
-    const look = creatureLook({ view, creature: { tokenId: "wolf" }, name: "Wolf" });
+    const look = creatureLook({ labels: new Map(), view, creature: { tokenId: "wolf" } });
     assert.ok(look);
     assert.equal(look.badge, null);
     assert.equal(kindLineText(look.line), "Monster, CR 1/4 · Medium (5 ft)");
   });
 
   test("an object is square, a custom footprint keeps its sides, and an NPC lent to a player reads as an NPC", () => {
-    const crate = creatureLook({ view: table(), creature: { tokenId: "crate" }, name: "Crate" });
+    const crate = creatureLook({ labels: new Map(), view: table(), creature: { tokenId: "crate" } });
     assert.equal(crate?.picture.shape, "square");
     assert.equal(crate?.picture.ring, theme.color.neutral);
     assert.equal(kindLineText(crate!.line), "Object · Medium (5 ft)");
-    const cart = creatureLook({ view: table(), creature: { tokenId: "cart" }, name: "Cart" });
+    const cart = creatureLook({ labels: new Map(), view: table(), creature: { tokenId: "cart" } });
     assert.equal(cart?.picture.aspect, 2);
     assert.equal(kindLineText(cart!.line), "Object · Custom (10 by 5 ft)");
-    const npc = creatureLook({ view: table(), creature: { tokenId: "npc" }, name: "Sildar Hallwinter" });
+    const npc = creatureLook({ labels: new Map(), view: table(), creature: { tokenId: "npc" } });
     assert.equal(kindLineText(npc!.line), "NPC, CR 1 · Medium (5 ft)");
     assert.equal(npc?.picture.initials, "SH");
   });
 
   test("feet follow the room's cell", () => {
-    const look = creatureLook({ view: table(10), creature: { tokenId: "dragon" }, name: "Adult Black Dragon" });
+    const look = creatureLook({ labels: new Map(), view: table(10), creature: { tokenId: "dragon" } });
     assert.equal(look?.line.size, "Huge (30 ft)");
   });
 
   test("each disposition's ring, and the neutral ring for one the copy does not know", () => {
     assert.deepEqual(DISPOSITION_RING, { ally: theme.color.ally, neutral: theme.color.neutral, hostile: theme.color.hostile });
-    const odd = tokenLook({ token: { ...token("x"), disposition: "odd" as "ally" }, name: "X", feetPerCell: 5 });
+    const odd = tokenLook({ token: { ...token("x"), disposition: "odd" as "ally" }, initials: "X", feetPerCell: 5 });
     assert.equal(odd.picture.ring, theme.color.neutral);
   });
 });
 
 describe("a character with no token in view", () => {
   test("its portrait in the party's ring, and its size in cells of the room", () => {
-    const look = creatureLook({ view: table(), creature: { characterId: "thorn" }, name: "Thorn" });
+    const look = creatureLook({ labels: new Map(), view: table(), creature: { characterId: "thorn" } });
     assert.ok(look);
     assert.deepEqual(look.picture, { image: PORTRAIT, shape: "circle", aspect: 1, ring: theme.color.ally, initials: "Th" });
     assert.equal(look.badge, null);
@@ -114,12 +114,12 @@ describe("a character with no token in view", () => {
   });
 
   test("a pick whose token left the scene falls back to its character", () => {
-    const look = creatureLook({ view: table(), creature: { characterId: "thorn" }, tokenId: "gone", name: "Thorn" });
+    const look = creatureLook({ labels: new Map(), view: table(), creature: { characterId: "thorn" }, tokenId: "gone" });
     assert.equal(look?.picture.image, PORTRAIT);
   });
 
   test("a creature the copy no longer holds has no look", () => {
-    assert.equal(creatureLook({ view: table(), creature: { tokenId: "gone" }, name: "Gone" }), null);
-    assert.equal(creatureLook({ view: table(), creature: { characterId: "gone" }, name: "Gone" }), null);
+    assert.equal(creatureLook({ labels: new Map(), view: table(), creature: { tokenId: "gone" } }), null);
+    assert.equal(creatureLook({ labels: new Map(), view: table(), creature: { characterId: "gone" } }), null);
   });
 });

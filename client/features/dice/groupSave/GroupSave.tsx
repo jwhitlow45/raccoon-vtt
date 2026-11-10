@@ -628,7 +628,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
               const cast = pageRef.current.cast;
               if (!cast) return;
               // A slot change refills the formula from the fill and drops the caster's roll, as a new formula would (3.3).
-              const filled = castFill(dice, cast.ask, slot, { imported: false }).input;
+              const filled = castFill(dice, cast.ask, labels, slot, { imported: false }).input;
               const current = pageRef.current;
               update({ ...current, fill: filled.fill, outcome: { ...current.outcome, damage: filled.outcome.damage ?? "", slot: filled.outcome.slot ?? slot }, damage: current.damage?.imported ? null : current.damage });
             }

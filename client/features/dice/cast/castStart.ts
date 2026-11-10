@@ -8,6 +8,8 @@ import { parseParts } from "../groupSave/outcome.ts";
 import type { StartInput } from "../groupSave/start.ts";
 import { creatureKey } from "../options.ts";
 import { areaPresetOf, byName, sameSpell, spellLevel } from "./cast.ts";
+import type { Labels } from "../../../lib/labels.ts";
+import { displayName } from "../../../lib/scene.ts";
 
 /**
  * The DM's side of a player's ask for saves (docs/design/design-v1-player-save-spell.md
@@ -17,15 +19,10 @@ import { areaPresetOf, byName, sameSpell, spellLevel } from "./cast.ts";
  * or targets, and the caster's own damage roll.
  */
 
-/** "Goblin 3" for numbered duplicates, as the log names a token. */
-function tokenName(token: { name: string; number?: number }): string {
-  return token.number === undefined ? token.name : `${token.name} ${token.number}`;
-}
-
 /** The caster as the card names it: its token in view, else the player who asked, as the log names a creature it cannot see. */
-export function castWho(view: Pick<RoomState, "tokens" | "members">, ask: Pick<CastAsk, "caster" | "by">): string {
+export function castWho(view: Pick<RoomState, "tokens" | "members">, ask: Pick<CastAsk, "caster" | "by">, labels: Labels): string {
   const token = view.tokens[ask.caster];
-  if (token) return tokenName(token);
+  if (token) return displayName(token, labels);
   return view.members[ask.by]?.name ?? "A player";
 }
 
@@ -34,9 +31,9 @@ export function castWho(view: Pick<RoomState, "tokens" | "members">, ask: Pick<C
  * scene, the caster's token is not in view yet, and the asker castWho
  * falls back to has no stat block to read.
  */
-export function readingWords(view: Pick<RoomState, "tokens">, ask: Pick<CastAsk, "caster">): string {
+export function readingWords(view: Pick<RoomState, "tokens">, ask: Pick<CastAsk, "caster">, labels: Labels): string {
   const token = view.tokens[ask.caster];
-  return token ? `Reading ${tokenName(token)}'s stat block…` : "Reading the caster's stat block…";
+  return token ? `Reading ${displayName(token, labels)}'s stat block…` : "Reading the caster's stat block…";
 }
 
 /** The caster's row the ask was sent from: its key, else a save of the spell's name. */
@@ -74,8 +71,8 @@ export type CastFill = {
  * with any untyped. A lone untyped part takes the fill's type, as a typed
  * "28" does.
  */
-export function castFill(dice: DiceView, ask: CastAsk, slot?: number, opts: { imported?: boolean } = {}): CastFill {
-  const who = castWho(dice.view, ask);
+export function castFill(dice: DiceView, ask: CastAsk, labels: Labels, slot?: number, opts: { imported?: boolean } = {}): CastFill {
+  const who = castWho(dice.view, ask, labels);
   const pick = slot ?? ask.slot;
   const named = askedRoll(dice, ask);
   const template: AreaTemplate | undefined = ask.area ? dice.view.templates[ask.area] : undefined;
@@ -125,8 +122,8 @@ export function castFill(dice: DiceView, ask: CastAsk, slot?: number, opts: { im
 }
 
 /** The group save an ask opens: its area, followed until the roll, or its tokens, never the DM's selection, with castFill's fields. */
-export function castStart(dice: DiceView, ask: CastAsk): StartInput {
-  const filled = castFill(dice, ask);
+export function castStart(dice: DiceView, ask: CastAsk, labels: Labels): StartInput {
+  const filled = castFill(dice, ask, labels);
   const { input } = filled;
   return {
     source: ask.area ? { kind: "area", templateId: ask.area } : { kind: "selection", tokenIds: [...(ask.targets ?? [])] },
@@ -136,7 +133,7 @@ export function castStart(dice: DiceView, ask: CastAsk): StartInput {
     outcome: input.outcome,
     spell: input.spell,
     panel: ask.area ? "areas" : "dice",
-    cast: { ask, who: castWho(dice.view, ask), ...(filled.says ? { says: filled.says } : {}) },
+    cast: { ask, who: castWho(dice.view, ask, labels), ...(filled.says ? { says: filled.says } : {}) },
     ...(filled.damage ? { damage: filled.damage } : {}),
   };
 }
@@ -167,8 +164,8 @@ export type CastCardText = {
  * the area's caught creatures as the DM's page counts them, hidden ones
  * included.
  */
-export function castCardText(view: Pick<RoomState, "tokens" | "members" | "templates" | "scenes">, ask: CastAsk, input: { viewing: string | null; caught: number | null }): CastCardText {
-  const who = castWho(view, ask);
+export function castCardText(view: Pick<RoomState, "tokens" | "members" | "templates" | "scenes">, ask: CastAsk, input: { viewing: string | null; caught: number | null; labels: Labels }): CastCardText {
+  const who = castWho(view, ask, input.labels);
   const spell = ask.spell;
   const level = ask.slot !== undefined ? `, level ${ask.slot}` : "";
   const rolled = ask.rolled && ask.rolled.length > 0 ? `${who} rolled ${ask.rolled.map((r) => `${r.total.toLocaleString("en-US")}${r.type ? ` ${damageTypeName(r.type)}` : ""}`).join(" + ")}` : "No damage rolled";
@@ -185,7 +182,7 @@ export function castCardText(view: Pick<RoomState, "tokens" | "members" | "templ
     const ids = ask.targets ?? [];
     const names = ids.flatMap((id) => {
       const t = view.tokens[id];
-      return t ? [tokenName(t)] : [];
+      return t ? [displayName(t, input.labels)] : [];
     });
     const missing = ids.length - names.length;
     where = `Targets: ${[...byName(names), ...(missing > 0 ? [`${missing} gone`] : [])].join(", ")}`;

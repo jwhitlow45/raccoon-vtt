@@ -70,8 +70,8 @@ describe("the falling off reminder", () => {
   test("the toast's words, and Ask for the save only when a player plays the rider", () => {
     const state = stable();
     assert.equal(fallText(state.tokens.bree!, state.tokens.horse!, new Map()), "Bree may fall off Warhorse: DC 10 Dexterity save.");
-    assert.deepEqual(fallAsk(state, state.tokens.bree!), { kind: "selection", tokenIds: ["bree"], fill: { test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 10 } });
-    assert.equal(fallAsk(state, state.tokens.goblin!), null, "the DM rolls a goblin's save");
+    assert.deepEqual(fallAsk(state, state.tokens.bree!, new Map()), { kind: "selection", tokenIds: ["bree"], fill: { test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 10 } });
+    assert.equal(fallAsk(state, state.tokens.goblin!, new Map()), null, "the DM rolls a goblin's save");
   });
 
   test("the DM's device reminds once, of what the server took, and never for a snapshot or on a player's", () => {

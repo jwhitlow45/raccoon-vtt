@@ -78,7 +78,7 @@ export function groupRows(dice: DiceView, tokenIds: readonly string[], test: Gro
     const bonus = d20 && rolls?.numbers ? bonusFor(rolls.numbers, d20) : null;
     const preset = d20 ? presetFor(dice, target, d20, { rolls }) : null;
     const played = playersToken(state, token) && token.kind !== "object";
-    const ask = played ? askTarget(state, token) : null;
+    const ask = played ? askTarget(state, token, labels) : null;
     const ways: Way[] = [];
     if (preset?.fails) ways.push("fails");
     if (ask && !ask.blocked) ways.push("ask");

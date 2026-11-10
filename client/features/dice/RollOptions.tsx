@@ -291,6 +291,7 @@ export function useOptionsEndOnGroup(): boolean {
  * nothing here looks like Adv, Dis or Secret.
  */
 function CreatureTabs(props: { view: RoomState; options: readonly Pickable[]; current: Pickable; regionId: string; onPick(key: string): void }) {
+  const labels = useLabels();
   const { options, current } = props;
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
@@ -306,7 +307,7 @@ function CreatureTabs(props: { view: RoomState; options: readonly Pickable[]; cu
     <ScrollStrip role="tablist" aria-label="Roll for" active={current.key} onKeyDown={onKey} gap={theme.space(4)} edge={0}>
       {options.map((o) => {
         const chosen = o.key === current.key;
-        const look = creatureLook({ view: props.view, creature: o.creature, tokenId: o.tokenId, name: o.name });
+        const look = creatureLook({ view: props.view, creature: o.creature, tokenId: o.tokenId, labels });
         return (
           <button
             key={o.key}
@@ -377,9 +378,10 @@ export function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creat
  * starts each afresh while the tabs keep their focus.
  */
 function CreatureFrame(props: { loaded: Loaded; creature: ActorTarget; tokenId?: string | undefined; name: string; tabs?: ReactNode; regionId?: string }) {
+  const labels = useLabels();
   const view = useRoomView((s) => s.view);
   const { dice, rolls, failed } = props.loaded;
-  const look = view ? creatureLook({ view, creature: props.creature, tokenId: props.tokenId, name: props.name }) : null;
+  const look = view ? creatureLook({ view, creature: props.creature, tokenId: props.tokenId, labels }) : null;
   const key = view ? creatureKey(view, props.creature) : "";
   const shown = !failed && dice !== null && rolls !== null ? { dice, rolls, creature: props.creature, tokenId: props.tokenId, name: props.name } : null;
   const tabbed = props.tabs !== undefined && props.tabs !== null;

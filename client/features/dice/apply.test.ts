@@ -69,7 +69,7 @@ describe("recordApplied, a filled entry's apply (LP32-POLISH g)", () => {
     const chip = rollChip([slash("dm1")])!;
     const parsed = parseHpInput(String(chip.amount), "damage", chip);
     assert.ok(parsed.ok);
-    const targets = hpTargets([view.tokens.g1!], { role: "dm", memberId: "dm1", characters: view.characters, playersApplyDamage: false });
+    const targets = hpTargets([view.tokens.g1!], { role: "dm", memberId: "dm1", characters: view.characters, playersApplyDamage: false, labels: new Map() });
     sendFilledEntry(env, targets, parsed.change, false, chip);
     assert.equal(sent.length, 1);
     assert.equal(sent[0]!.quiet, undefined, "a refusal still says why in its toast");
@@ -93,7 +93,7 @@ describe("sendFilledEntry, one op per holder", () => {
     const chip = rollChip([slash("dm1")])!;
     const parsed = parseHpInput(String(chip.amount), "damage", chip);
     assert.ok(parsed.ok);
-    const targets = hpTargets(names.map((n) => view.tokens[n]!), { role: "dm", memberId: "dm1", characters: view.characters, playersApplyDamage: false }).map((t) => ({ ...t, access: access[t.holder] ?? t.access }));
+    const targets = hpTargets(names.map((n) => view.tokens[n]!), { role: "dm", memberId: "dm1", characters: view.characters, playersApplyDamage: false, labels: new Map() }).map((t) => ({ ...t, access: access[t.holder] ?? t.access }));
     sendFilledEntry(env, targets, parsed.change, false, chip);
     const holders = () => (env.applies.getState().rolls["9:0"]?.applied ?? []).map((a) => a.holder);
     return { env, sent, marked, chip, holders };
