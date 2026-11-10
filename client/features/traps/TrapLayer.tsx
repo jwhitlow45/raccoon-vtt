@@ -233,6 +233,11 @@ export function isoTrapNamePill(original: PillSpec, grid: Grid, trap: Trap, chun
 
 const NO_PILLS: readonly PillSpec[] = [];
 
+/** Whether a trap's mark draws its own name: only an isometric tree's does, where the name stands by the stand rule. Top-down, TrapNameLayer draws it. */
+export function nameStands(name: PillSpec, iso: IsoGround | null, scale: number): boolean {
+  return iso !== null && drawsHere(iso, pillStands(iso.fog, { ...name, scale }));
+}
+
 const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Record<string, BuildChunk>>; scale: number; dm: boolean; iso: IsoGround | null; grid: Grid }) {
   const { trap, scale, dm, grid } = props;
   const seen = trap as SeenTrap;
@@ -276,7 +281,7 @@ const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Re
   // Top-down draws the badge under the fog, so it stands only where every sub-cell under it is revealed (5.2).
   const badgeHere = drawsHere(iso, iso ? markStands(iso.fog, trapBadgeBox(badge, scale, found)) : true);
   // Top-down draws the name above the fog (TrapNameLayer), so a found trap's name is never cut by fog over ground its zone lies on.
-  const nameHere = name !== null && iso !== null && drawsHere(iso, pillStands(iso.fog, { ...name, scale }));
+  const nameHere = name !== null && nameStands(name, iso, scale);
   const badgeAt = iso?.place === "upright" ? viewPointOf(iso, badge) : badge;
   return (
     <Group opacity={dm && trap.state === "sprung" ? 0.8 : 1}>
