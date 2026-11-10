@@ -1,5 +1,5 @@
 import type { RoomState, Token, TokenId } from "#shared/model.ts";
-import { labelParts, labelText as sharedLabelText, memberOf, nameEntry, NUMBER_NAMES_MOST, numberable, numbersOf, numberScope, previewNumbers, shownName, type TokenLabel } from "#shared/numbering.ts";
+import { labelParts, labelText as sharedLabelText, nameEntry, NUMBER_NAMES_MOST, numberable, numbersOf, numberScope, previewNumbers, shownName, type TokenLabel } from "#shared/numbering.ts";
 
 /**
  * How a device names a creature (the creature numbers design, section 4):
@@ -87,8 +87,9 @@ export type LabelView = Pick<RoomState, "tokens" | "scenes" | "members" | "chara
  * itself.
  */
 export function labelsFor(view: LabelView, role: "dm" | "player", previous?: Labels): Labels {
+  const labelFor = role === "dm" ? "board" : "own";
   const previews = new Map<TokenId, number>();
-  if (role === "dm") {
+  if (labelFor === "board") {
     const scopes = new Set<string>();
     for (const token of Object.values(view.tokens)) scopes.add(numberScope(view, token));
     for (const scope of scopes) for (const [id, n] of previewNumbers(view, scope)) previews.set(id, n);
@@ -96,7 +97,7 @@ export function labelsFor(view: LabelView, role: "dm" | "player", previous?: Lab
   const out = new Map<string, Label>();
   let same = previous !== undefined;
   for (const token of Object.values(view.tokens)) {
-    const made = labelParts(null, token, role === "dm" ? "board" : "own", previews);
+    const made = labelParts(null, token, labelFor, previews);
     const before = previous?.get(token.id);
     if (before && sameLabel(before, made)) out.set(token.id, before);
     else {
@@ -136,7 +137,8 @@ export function numberHelp(label: Label, dm: boolean, full: boolean): string | n
  * the scene's numbers.
  */
 export function namesFull(view: LabelView, token: Token): boolean {
-  if (!numberable(view, token) || memberOf(view, token)) return false;
+  // A member's name always has its entry, so the entry alone tells a met name from a new one.
+  if (!numberable(view, token)) return false;
   const scope = numberScope(view, token);
   return Object.keys(numbersOf(view, scope)).length >= NUMBER_NAMES_MOST && nameEntry(view, scope, shownName(token)) === undefined;
 }

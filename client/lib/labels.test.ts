@@ -111,5 +111,6 @@ describe("the token panel's help under a name", () => {
     assert.equal(namesFull(state, state.tokens.k!), true);
     assert.equal(namesFull(state, state.tokens.n!), false);
     assert.equal(namesFull(state, state.tokens.m!), false, "a name the scene already numbers still takes numbers");
+    assert.equal(namesFull(state, token("torch", { name: "Torch", kind: "object" })), false, "an object takes no number anyway");
   });
 });
