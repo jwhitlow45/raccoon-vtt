@@ -731,9 +731,9 @@ export class LogHistory {
 /**
  * A number for each committed state the reader has seen. A room keeps one
  * state object from one commit to the next, and a load makes a new one, so
- * this tells apart two loads of a room at the same seq: an old import's lines
- * can reach the archive as a room loads (persistence.ts loadRoom) without any
- * op, and a list kept from before must not answer for after.
+ * this tells apart two loads of a room at the same number: an old import's
+ * lines can reach the archive as a room loads (persistence.ts loadRoom)
+ * without any op, and a list kept from before must not answer for after.
  */
 const stateSerials = new WeakMap<RoomState, number>();
 let lastSerial = 0;
