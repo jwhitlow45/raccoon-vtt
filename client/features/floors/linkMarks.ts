@@ -109,7 +109,8 @@ function drawnBox(p: PillSpec, scale: number, iso: DrawSpace, upright: boolean):
 /**
  * An end's name pill kept off the turn's marker (FL2-POLISH): the name hangs
  * over the end's top edge, and where its box meets a marker's it hangs
- * under the bottom edge (`bottom`) instead. Only the marker is read, never
+ * under the bottom edge (`bottom`) instead, unless the marker meets that
+ * spot too, when it keeps the first. Only the marker is read, never
  * another end's name or a trap's, so no two layers chase each other, and the
  * marker places itself from the creature alone (TurnStartLayer.tsx).
  *
@@ -119,10 +120,13 @@ function drawnBox(p: PillSpec, scale: number, iso: DrawSpace, upright: boolean):
  * pills apart on the map can cover each other on screen, and the reverse.
  */
 export function clearOfMarkers(pill: PillSpec, bottom: { x: number; y: number }, markers: readonly PillSpec[], scale: number, iso: DrawSpace = null, upright = true): PillSpec {
-  const mine = drawnBox(pill, scale, iso, upright);
-  const meets = markers.some((m) => {
-    const b = drawnBox(m, scale, iso, true);
-    return Math.min(mine.x1, b.x1) > Math.max(mine.x0, b.x0) && Math.min(mine.y1, b.y1) > Math.max(mine.y0, b.y0);
-  });
-  return meets ? { ...pill, x: bottom.x, y: bottom.y, above: false, below: true } : pill;
+  const drawnMarkers = markers.map((m) => drawnBox(m, scale, iso, true));
+  const meetsMarker = (p: PillSpec) => {
+    const mine = drawnBox(p, scale, iso, upright);
+    return drawnMarkers.some((b) => Math.min(mine.x1, b.x1) > Math.max(mine.x0, b.x0) && Math.min(mine.y1, b.y1) > Math.max(mine.y0, b.y0));
+  };
+  if (!meetsMarker(pill)) return pill;
+  // Under the end can meet the marker too (Isometric on a phone), and then moving only trades one cover for another.
+  const under: PillSpec = { ...pill, x: bottom.x, y: bottom.y, above: false, below: true };
+  return meetsMarker(under) ? pill : under;
 }

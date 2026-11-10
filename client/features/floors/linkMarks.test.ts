@@ -100,7 +100,7 @@ describe("an end's name and the turn's marker meet where they draw (B53-SOL-02)"
         const world = toWorld(view, { x: at.x, y: at.y - d } as ViewPoint);
         const m = { ...marker, ...world };
         const drawn = (p: typeof name | typeof marker) => pillReach({ ...p, ...viewPointOf(flat(turn), p), scale: SCALE });
-        if (meet(onMap(name), onMap(m)) || !meet(drawn(name), drawn(m))) continue;
+        if (meet(onMap(name), onMap(m)) || !meet(drawn(name), drawn(m)) || meet(drawn(under), drawn(m))) continue;
         found = true;
         assert.deepEqual(clearOfMarkers(name, bottom, [m], SCALE, flat(turn)), under, `turn ${turn}`);
       }
@@ -108,6 +108,14 @@ describe("an end's name and the turn's marker meet where they draw (B53-SOL-02)"
       const far = { ...marker, ...toWorld(view, { x: at.x + 20, y: at.y + 20 } as ViewPoint) };
       assert.equal(clearOfMarkers(name, bottom, [far], SCALE, flat(turn)), name, `turn ${turn}, far`);
     }
+  });
+
+  test("a marker over the spot under the end too leaves the name over it", () => {
+    // One marker over the top spot and one over the bottom spot: moving would only trade covers.
+    const overTop = marker;
+    const overBottom = { ...marker, y: marker.y + 1 };
+    assert.deepEqual(clearOfMarkers(name, bottom, [overTop], SCALE, flat(0)), under, "one marker moves it");
+    assert.equal(clearOfMarkers(name, bottom, [overTop, overBottom], SCALE, flat(0)), name);
   });
 
   test("drawn heights count: ground raising the marker's point lifts its reading off the name", () => {
