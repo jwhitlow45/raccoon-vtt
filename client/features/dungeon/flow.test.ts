@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import fc from "fast-check";
 import { holds } from "#shared/propertyTestutil.ts";
-import { counted, drawable, flowStep, readiness, startFlow, type Flow, type FlowEvent } from "./flow.ts";
+import type { RoomEdit } from "./edits.ts";
+import { counted, drawable, editedRooms, editsStep, flowStep, readiness, startEdits, startFlow, type EditLayout, type EditsEvent, type Flow, type FlowEvent } from "./flow.ts";
 
 /** A worker's answer as the dialog holds it: the dungeon and the drawing its picture is made from. */
 type Shown = { n: number; drawn: { n: number } };
@@ -164,5 +165,98 @@ test("DG-R1-01, DGBUILD-ASTRA-2: across random requests, late answers, bad seeds
       }
     }),
     500,
+  );
+});
+
+/*
+ * Per-room edits (phase 3, 4.2 and 4.4): frozen on the first edit's layout,
+ * dropped by a change with Bring them back for one step, the wall budget's
+ * undo, and a changed wing base.
+ */
+type Before = { choices: string; seed: string };
+const LAYOUT = (n: number): EditLayout => ({ fitted: n, seed: `S${n}` as EditLayout["seed"], settings: `{"n":${n}}`, base: null });
+const edit = (room: number, e: RoomEdit | null, layout = LAYOUT(1)): EditsEvent<Before> => ({ k: "edit", room, edit: e, layout });
+const runEdits = (events: EditsEvent<Before>[]) => events.reduce(editsStep<Before>, startEdits<Before>());
+
+test("DG3-EDITS: the first edit freezes its layout, and later edits keep it", () => {
+  const s = runEdits([edit(2, { ground: 5 }, LAYOUT(7)), edit(4, { lit: true }, LAYOUT(9))]);
+  assert.deepEqual(s.edits, { layout: LAYOUT(7), rooms: { 2: { ground: 5 }, 4: { lit: true } } });
+  assert.equal(editedRooms(s), 2);
+});
+
+test("DG3-EDITS: Reset room or pins set back to none leave no edit, and the last one leaves no edits at all", () => {
+  let s = runEdits([edit(2, { ground: 5 }), edit(3, { trap: null })]);
+  s = editsStep(s, edit(2, null));
+  assert.deepEqual(s.edits?.rooms, { 3: { trap: null } }, "a trap pinned to None is a pin");
+  s = editsStep(s, edit(3, { trap: undefined }));
+  assert.equal(s.edits, null);
+});
+
+test("DG3-EDITS: a change drops the edits, Bring them back restores them with what stood before, once", () => {
+  const before = { choices: "dense", seed: "A" };
+  let s = runEdits([edit(2, { ground: 5 }), { k: "change", before }]);
+  assert.equal(s.edits, null);
+  assert.deepEqual(s.dropped, { before, edits: { layout: LAYOUT(1), rooms: { 2: { ground: 5 } } } });
+  const back = editsStep(s, { k: "bringBack" });
+  assert.deepEqual(back.edits, { layout: LAYOUT(1), rooms: { 2: { ground: 5 } } });
+  assert.equal(back.dropped, null);
+  // One step: a second change forgets the way back.
+  s = editsStep(s, { k: "change", before: { choices: "sparse", seed: "A" } });
+  assert.equal(s.dropped, null);
+  assert.equal(editsStep(s, { k: "bringBack" }), s);
+});
+
+test("DG3-EDITS: the wall budget undoes only the newest edit and reports it on its room", () => {
+  let s = runEdits([edit(2, { ground: 5 }), edit(2, { ground: 10 })]);
+  s = editsStep(s, { k: "overBudget", report: "over" });
+  assert.deepEqual(s.edits?.rooms, { 2: { ground: 5 } });
+  assert.deepEqual(s.undone, { 2: "over" });
+  assert.equal(editsStep(s, { k: "overBudget", report: "again" }), s, "nothing newer to undo");
+  s = editsStep(s, edit(2, { lit: true }));
+  assert.deepEqual(s.undone, {}, "the room's next edit clears its report");
+  const first = editsStep(runEdits([edit(5, { lit: true })]), { k: "overBudget", report: "over" });
+  assert.equal(first.edits, null, "undoing the only edit leaves none");
+});
+
+test("DG3-EDITS: a wing base with other geometry drops the edits with no Bring them back", () => {
+  let s = runEdits([edit(1, { lit: true }), { k: "change", before: { choices: "x", seed: "y" } }, edit(3, { lit: true })]);
+  s = editsStep(s, { k: "baseChanged" });
+  assert.equal(s.edits, null);
+  assert.equal(s.dropped, null);
+  assert.equal(s.gone, true);
+  assert.equal(editsStep(startEdits<Before>(), { k: "baseChanged" }).gone, false, "nothing to drop, nothing said");
+});
+
+test("DG3-EDITS-PROP: any sequence keeps the layout frozen, no empty pins, Bring them back exact and one step", () => {
+  const pins = fc.oneof(fc.constant(null), fc.record({ ground: fc.constantFrom(-10, -5, 0, 5, 10) }), fc.record({ lit: fc.boolean() }), fc.constant({ trap: undefined }));
+  const event: fc.Arbitrary<EditsEvent<Before>> = fc.oneof(
+    fc.record({ k: fc.constant("edit" as const), room: fc.integer({ min: 0, max: 5 }), edit: pins, layout: fc.integer({ min: 1, max: 4 }).map(LAYOUT) }),
+    fc.record({ k: fc.constant("change" as const), before: fc.record({ choices: fc.string({ maxLength: 2 }), seed: fc.string({ maxLength: 2 }) }) }),
+    fc.constant({ k: "bringBack" as const }),
+    fc.constant({ k: "drop" as const }),
+    fc.constant({ k: "overBudget" as const, report: "over" }),
+    fc.constant({ k: "baseChanged" as const }),
+  );
+  holds(
+    fc.property(fc.array(event, { maxLength: 40 }), (events) => {
+      let s = startEdits<Before>();
+      for (const e of events) {
+        const prev = s;
+        s = editsStep(s, e);
+        // Edits never hold a room without a pin, nor an empty set.
+        if (s.edits) {
+          assert.ok(Object.keys(s.edits.rooms).length > 0);
+          for (const r of Object.values(s.edits.rooms)) assert.ok(Object.values(r).some((v) => v !== undefined));
+        }
+        // The layout is frozen while edits stand: only a first edit, or Bring them back, sets one.
+        if (prev.edits && s.edits && e.k !== "bringBack") assert.equal(s.edits.layout, prev.edits.layout);
+        if (e.k === "change" && prev.edits) assert.deepEqual(s.dropped, { before: e.before, edits: prev.edits });
+        if (e.k === "change" && !prev.edits) assert.equal(s.dropped, null, "one step: a second change forgets the way back");
+        if (e.k === "edit" || e.k === "drop" || e.k === "baseChanged") assert.equal(s.dropped, null);
+        if (e.k === "bringBack" && prev.dropped) assert.equal(s.edits, prev.dropped.edits);
+        if (e.k === "overBudget" && prev.edits && prev.last) assert.deepEqual(s.edits?.rooms[prev.last.room], prev.last.before);
+      }
+    }),
+    300,
   );
 });
