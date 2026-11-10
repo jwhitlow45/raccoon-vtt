@@ -51,6 +51,11 @@ export const SIZE_OPTIONS: { value: CreatureSize; label: string }[] = [
   { value: "gargantuan", label: "Gargantuan" },
 ];
 
+/** The disk a character wears on its card, its initials the ones the board draws. */
+export function characterPicture(character: Pick<Character, "name" | "defaultImage">) {
+  return { image: character.defaultImage, shape: "circle" as const, aspect: 1, ring: theme.color.ally, initials: initials(character.name) };
+}
+
 /**
  * A player character's page in the Characters panel (features section 15,
  * docs/design/design-v1-look-pass.md 3.1), for the DM and the character's players.
@@ -66,11 +71,6 @@ export const SIZE_OPTIONS: { value: CreatureSize; label: string }[] = [
  * allows: name, image, level, HP and the stat card's numbers, senses,
  * notes, the sheet link and the stat block (docs/design/design-v1-pc-stats.md 7.1).
  */
-/** The disk a character wears on its card, its initials the ones the board draws. */
-export function characterPicture(character: Pick<Character, "name" | "defaultImage">) {
-  return { image: character.defaultImage, shape: "circle" as const, aspect: 1, ring: theme.color.ally, initials: initials(character.name) };
-}
-
 export function CharacterPage(props: { character: Character; close: PanelClose; onAddCompanion(): void; onBlocks(): void; onDelete(): number | null }) {
   const { character } = props;
   const actions = useRoomActions();
