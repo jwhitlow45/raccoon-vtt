@@ -101,12 +101,16 @@ describe("making a companion", () => {
     assert.equal(run(bree(), create(), DM).log.some((e) => e.data?.type === "companion"), false);
   });
 
-  test("attaching a numbered Owl clears its number first, while a number the op supplies is refused everywhere", () => {
+  test("attaching a numbered Owl keeps the number the table gave it, as an op stored before cleared it, while a number the op supplies is refused everywhere", () => {
     const state = bree();
     state.tokens.owl = token("owl", { kind: "monster", name: "Owl", number: 2, disposition: "hostile" });
-    const attached = apply(state, { t: "token.update", tokenId: "owl", patch: { companion: { of: "bree", turn: "shared" } } }).tokens.owl!;
-    assert.equal(attached.number, undefined);
+    const attach: Op = { t: "token.update", tokenId: "owl", patch: { companion: { of: "bree", turn: "shared" } } };
+    const attached = apply(state, attach).tokens.owl!;
+    assert.equal(attached.number, 2);
     assert.deepEqual(attached.ownerIds, ["p1"]);
+    const before = applyOp(state, attach, DM, { ...env(1), opVersion: 59 });
+    assert.ok(before.ok);
+    assert.equal(before.state.tokens.owl!.number, undefined);
     assert.match(refused(state, { t: "token.update", tokenId: "owl", patch: { companion: { of: "bree", turn: "shared" }, number: 3 } }).message, /no number/);
     const later = withSpirit();
     assert.match(refused(later, { t: "token.update", tokenId: "ws", patch: { number: 4 } }).message, /no number/);

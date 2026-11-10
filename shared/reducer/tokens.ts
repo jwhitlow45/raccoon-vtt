@@ -1,5 +1,5 @@
 import { keys } from "../keys.ts";
-import { attaches, floorLinksOps, healRevivesDead, keepsLairTick, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers, syncsFromDdb, walksRoutes } from "../migrate.ts";
+import { attaches, floorLinksOps, healRevivesDead, keepsLairTick, meetsNumbers, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers, syncsFromDdb, walksRoutes } from "../migrate.ts";
 import type { Actor, AreaTemplate, Character, ClassResource, DdbSync, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
 import { gridOfToken, inSightOfNonOwners, seenAtEvery, seenMark } from "../project.ts";
 import { MAX_RULER_STOPS, SYNC_AT_AHEAD, syncAtAhead, syncStamp, type ActorPatch, type CharacterPatch, type DdbSyncPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
@@ -45,10 +45,11 @@ function tokenDefaults(kind: Token["kind"]): Pick<Token, "disposition" | "layer"
 }
 
 /**
- * Numbers duplicates: a second Goblin on the scene makes the first "Goblin 1"
- * and becomes "Goblin 2". Siblings are visited by id, never by map order,
- * because a snapshot loaded from jsonb loses insertion order and replay must
- * number the same way the live run did.
+ * How ops stored before op version 60 numbered duplicates as they were
+ * made: a second Goblin on the scene made the first "Goblin 1" and became
+ * "Goblin 2". Replay numbers them the same way, siblings visited by id,
+ * never by map order, since a snapshot loaded from jsonb loses insertion
+ * order. From version 60 the table gives numbers (shared/numbering.ts).
  */
 function autoNumber(tx: Tx, token: Token): number | undefined {
   if (token.kind !== "npc" && token.kind !== "monster") return undefined;
@@ -112,7 +113,7 @@ export function tokenCreate(tx: Tx, op: OpOf<"token.create">): void {
   if (input.light !== undefined) token.light = input.light;
   if (input.partyVision === true) token.partyVision = true;
   if (input.companion) {
-    // A companion is played by whoever plays its character, and carries no number (docs/design/design-v1-combat-flow.md 3.6.3).
+    // A companion is played by whoever plays its character, and is made with no number (docs/design/design-v1-combat-flow.md 3.6.3).
     if (input.number !== undefined) throw invalid(NO_NUMBER);
     const character = tx.character(input.companion.of);
     if (input.ownerIds !== undefined && !sameMembers(input.ownerIds, character.ownerIds)) throw invalid(COMPANION_OWNERS);
@@ -126,7 +127,7 @@ export function tokenCreate(tx: Tx, op: OpOf<"token.create">): void {
     return;
   }
   checkBlockLink(tx, token);
-  const number = input.number ?? autoNumber(tx, token);
+  const number = input.number ?? (meetsNumbers(tx.env.opVersion) ? undefined : autoNumber(tx, token));
   if (number !== undefined) token.number = number;
   tx.write(keys.token(token.id), token);
 }
@@ -281,18 +282,21 @@ export function tokenUpdate(tx: Tx, op: OpOf<"token.update">): void {
 /**
  * The companion rules on a token.update (docs/design/design-v1-combat-flow.md
  * 3.6.3, 3.6.4 and 3.6.8), applied to `next`, the token as the rest of the
- * patch leaves it. Attaching clears an inherited number first, then the
- * result is checked, so a numbered Owl attaches, while a number the op
- * itself supplies is refused. Owners always come from the character, and a
- * spent Reaction stays only while the companion acts on its character's
- * turn listed under it.
+ * patch leaves it. Attaching keeps the creature's number and mark
+ * (shared/numbering.ts), which count only while players read it as a plain
+ * creature, so a creature numbered and then attached to a character no
+ * player plays reads as it did. Ops stored before op version 60 cleared an
+ * inherited number first, and replay so. A number the op itself supplies
+ * is refused. Owners always come from the character, and a spent Reaction
+ * stays only while the companion acts on its character's turn listed
+ * under it.
  */
 function updateCompanion(tx: Tx, token: Token, next: Token, p: TokenPatch): void {
   if (p.companion === null) delete next.companion;
   else if (p.companion !== undefined) {
     const keep = token.companion?.turn === "shared" && token.companion.reactionUsed === true && p.companion.turn === "shared";
     next.companion = { of: p.companion.of, turn: p.companion.turn, ...(keep ? { reactionUsed: true as const } : {}) };
-    delete next.number;
+    if (!meetsNumbers(tx.env.opVersion)) delete next.number;
   }
   // A companion block is its character's, so a companion given to another character, or no longer one, lets it go
   // (docs/design/design-v1-companion-stat-blocks.md 3.2, rule 3). An SRD link holds nothing of the character's and stays.

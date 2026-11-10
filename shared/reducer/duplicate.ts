@@ -6,6 +6,7 @@ import { footprintRect } from "../rules/footprint.ts";
 import { sortedById } from "./tokens.ts";
 import { copyMemory } from "./memory.ts";
 import { invalid, type Env, type Tx } from "./tx.ts";
+import { meetsNumbers } from "../migrate.ts";
 import { withoutTurnScoped } from "./uses.ts";
 import { ownEntry } from "../records.ts";
 import { floorsOf } from "../rules/floors.ts";
@@ -58,6 +59,8 @@ export function sceneDuplicate(tx: Tx, op: OpOf<"scene.duplicate">): void {
   for (const floor of floors) {
     const copy: Scene = { ...floor.from, id: floor.to, rev: 0, name: op.name, order: original.order + 1, wallsVersion: 0, fogEnabled: copyFogEnabled(floor.from, op.include.fog) };
     if (floor.from.floor !== undefined) copy.floor = { ...floor.from.floor, of: to };
+    // The party has met nothing on the copy, whose creatures take numbers as they are met there (shared/numbering.ts).
+    delete copy.numbers;
     tx.write(keys.scene(floor.to), copy);
   }
 
@@ -117,6 +120,12 @@ function copyFloor(tx: Tx, op: OpOf<"scene.duplicate">, from: string, to: string
     if (id === undefined || token.sceneId !== original.id) continue;
     const { path: _path, attached, ...kept } = token;
     const next: Token = { ...kept, id, sceneId: to, fogExemptAuto: false };
+    // A copy is a creature the party has not met, so it carries no number or mark (shared/numbering.ts). Ops stored before
+    // op version 60 copied the number, and replay so.
+    if (meetsNumbers(tx.env.opVersion)) {
+      delete next.number;
+      delete next.met;
+    }
     // A link joins the copies of the two tokens, and goes when the holder was not copied (docs/design/design-v1-attach.md 5.2).
     const holder = attached ? copied.get(attached.to) : undefined;
     if (attached && holder !== undefined) next.attached = { ...attached, to: holder };

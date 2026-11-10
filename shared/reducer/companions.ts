@@ -1,6 +1,6 @@
 import { keys } from "../keys.ts";
 import type { Actor, Effect, Encounter, EncounterSnapshot, InitEntry, RoomState, Token } from "../model.ts";
-import { takesBackTurnOnly } from "../migrate.ts";
+import { meetsNumbers, takesBackTurnOnly } from "../migrate.ts";
 import { pausedAnchorForEntry } from "../rules/durations.ts";
 import { renumber, rowCharacter, sortEntries } from "../rules/initiative.ts";
 import { bindDurations, removeEntries } from "./encounter.ts";
@@ -12,9 +12,10 @@ import { ownEntry } from "../records.ts";
  * The companion rules (docs/design/design-v1-combat-flow.md 3.6) the token,
  * character, encounter and restore reducers call, kept in one place. A
  * companion is a token that belongs to a character: its owners are always
- * the character's, it never carries a number, an effect takes no turn of
- * its own, and one that acts on its character's turn never has an
- * initiative row, live or saved for Previous.
+ * the character's, it is made with no number and the table gives it none
+ * while players read it as a companion (shared/numbering.ts numberable), an
+ * effect takes no turn of its own, and one that acts on its character's
+ * turn never has an initiative row, live or saved for Previous.
  */
 
 export const COMPANION_OWNERS = "a companion is played by whoever plays its character";
@@ -41,9 +42,11 @@ function byId<T extends { id: string }>(items: T[]): T[] {
 
 /**
  * The token as an op leaves it, if it is a companion: its character exists
- * (`gone` otherwise), it has stats of its own and is no PC, an effect takes
- * no turn of its own, and it carries no number. One rule for creation, turn
- * changes and kind changes, by anyone.
+ * (`gone` otherwise), it has stats of its own and is no PC, and an effect
+ * takes no turn of its own. One rule for creation, turn changes and kind
+ * changes, by anyone. Ops stored before op version 60 also refused one
+ * carrying a number, and replay so: from then a creature keeps the number
+ * the table gave it when attached (shared/numbering.ts).
  */
 export function checkCompanion(tx: Tx, token: Token): void {
   const companion = token.companion;
@@ -51,7 +54,7 @@ export function checkCompanion(tx: Tx, token: Token): void {
   tx.character(companion.of);
   if (!("inline" in token.actor) || token.kind === "pc") throw invalid("a companion has stats of its own and is never a player character");
   if (companion.turn === "own" && token.kind === "object") throw invalid(NO_OWN_TURN);
-  if (token.number !== undefined) throw invalid(NO_NUMBER);
+  if (token.number !== undefined && !meetsNumbers(tx.env.opVersion)) throw invalid(NO_NUMBER);
 }
 
 /**

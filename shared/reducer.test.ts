@@ -511,12 +511,15 @@ describe("room, members and scenes", () => {
 });
 
 describe("tokens", () => {
-  test("create fills defaults by kind and numbers duplicates", () => {
+  test("create fills defaults by kind and numbers nothing, as an op stored before op version 60 numbered duplicates", () => {
     const state = fresh();
-    const r = apply(state, { t: "token.create", token: { id: "gob3", sceneId: "s1", kind: "monster", name: "Goblin", size: "medium", x: 1, y: 1, actor: { inline: actor() } } });
-    assert.equal(r.tokens.gob3!.number, 3);
-    assert.equal(r.tokens.gob1!.number, 1);
-    assert.equal(r.tokens.gob2!.number, 2);
+    const gob3: Op = { t: "token.create", token: { id: "gob3", sceneId: "s1", kind: "monster", name: "Goblin", size: "medium", x: 1, y: 1, actor: { inline: actor() } } };
+    const before = applyOp(state, gob3, DM, { ...env(1), opVersion: 59 });
+    assert.ok(before.ok);
+    assert.deepEqual([before.state.tokens.gob1!.number, before.state.tokens.gob2!.number, before.state.tokens.gob3!.number], [1, 2, 3]);
+    const r = apply(state, gob3);
+    assert.equal(r.tokens.gob3!.number, undefined, "the table gives it a number when the party meets it");
+    assert.equal(r.tokens.gob1!.number, state.tokens.gob1!.number);
     assert.equal(r.tokens.gob3!.hpVisibility, "label");
     assert.equal(r.tokens.gob3!.disposition, "hostile");
     assert.equal(r.tokens.gob3!.rev, 1);
