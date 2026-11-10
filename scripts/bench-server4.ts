@@ -27,6 +27,7 @@
  *   node scripts/bench-server4.ts --server   (the server box itself: budgets as they are)
  *   node scripts/bench-server4.ts --discovery   (map discovery's rows alone, with or without --server)
  *   node scripts/bench-server4.ts --ask   (the builder's ask rows alone, whole party and per player)
+ *   node scripts/bench-server4.ts --stamps   (the walk bringing stamps into view alone)
  *   Add --revision <full commit id> to tie the output to the measured checkout.
  *
  * Then the bright and dark scenes again per player
@@ -595,6 +596,40 @@ async function runFreeLight(feetPerCell: number, perPlayer: boolean, rows: Row[]
 }
 
 /*
+ * Stamps coming into view on a walk: the dark scene with 500 stamps, each
+ * at a random place and order east of the hall, and the last character
+ * walking 40 steps east into them, one cell a step past any wall. Each step
+ * brings stamps into the party's sight, so every player's copy of the
+ * scene's stamps changes on most steps. Checked after the walk: the players
+ * see more of them than before it.
+ */
+async function runStampWalk(rows: Row[]): Promise<void> {
+  clearVisionCache();
+  const room = benchRoom("dark", 5);
+  let seed = 11;
+  const rand = () => ((seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 4294967296);
+  for (let k = 0; k < 500; k++) {
+    const id = `st${String(k).padStart(3, "0")}`;
+    room.stamps[id] = { id, rev: 0, sceneId: SCENE, art: { key: "barrel" }, x: 124 + rand() * 74, y: 84 + rand() * 52, w: 1, h: 1, rotation: 0, z: Math.floor(rand() * 500), visibility: "all" };
+  }
+  const table = await sitDown(room);
+  checkMode(table.actor.committed.state, false);
+  const seen = () => Object.keys(projectState(table.actor.committed.state, { memberId: "p1", role: "player" }, { sceneId: SCENE }).stamps).length;
+  const before = seen();
+  const steps: Timing[] = [];
+  for (let k = 0; k < 40; k++) {
+    const t = table.actor.committed.state.tokens.pc11!;
+    steps.push(await send(table, table.dm, { t: "token.move", tokenId: t.id, x: t.x + 1, y: t.y, teleport: "wall" }));
+  }
+  const after = seen();
+  if (after <= before) throw new Error(`the walk brought no stamp into view (${before} before, ${after} after)`);
+  const where = `dark scene, whole party, ${before} to ${after} of 500 stamps in view`;
+  rows.push({ row: `A walk of 40 steps bringing stamps into view, ${where}`, budget: 25, ms: stats(steps.map((s) => s.total)), covers: "the DM's token.move one cell east, past any wall, with the fan-out of the stamps it brings into view, median and max over the 40 steps" });
+  rows.push({ row: `Fan-out for each step of that walk, ${where}`, budget: 10, ms: stats(steps.map((s) => s.fanout)), covers: "commit to the last frame, 7 sockets" });
+  await table.actor.shutdown({ code: 1012, snapshot: false });
+}
+
+/*
  * A routed walk across three areas that remind on entering, during the
  * walker's turn (docs/design/design-v1-per-player-vision.md 8.1): the reminders
  * judge who saw each crossing at its moment along the walk, which on a
@@ -901,6 +936,7 @@ export async function runServerBench(): Promise<Row[]> {
 /** Map discovery's rows alone (`--discovery`). */
 export async function runDiscoveryBench(): Promise<Row[]> {
   const rows: Row[] = [];
+  await runStampWalk(rows);
   await runWalk(false, rows);
   await runWalk(true, rows);
   await runDiscovery(false, rows);
@@ -950,5 +986,6 @@ if (argv[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts
     await runAsk(false, rows);
     await runAsk(true, rows);
   }
-  console.log(formatServerBench(argv.includes("--ask") ? rows : argv.includes("--discovery") ? await runDiscoveryBench() : await runServerBench(), argv.includes("--server"), revision));
+  if (argv.includes("--stamps")) await runStampWalk(rows);
+  console.log(formatServerBench(argv.includes("--ask") || argv.includes("--stamps") ? rows : argv.includes("--discovery") ? await runDiscoveryBench() : await runServerBench(), argv.includes("--server"), revision));
 }
