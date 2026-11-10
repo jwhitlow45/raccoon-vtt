@@ -4,7 +4,7 @@ import { describe, test, type TestContext } from "node:test";
 import { autoAt } from "#shared/discoveryTestutil.ts";
 import { CHUNK_CELLS, type EdgeFeature, type MemoryChunk, type Member, type PlayerChunk, type RoomState } from "#shared/model.ts";
 import { privateFieldsIn } from "#shared/privateFields.ts";
-import { applyChanges, stableStringify, type ProjectedState } from "#shared/project.ts";
+import { applyChanges, projectState, stableStringify, type ProjectedState } from "#shared/project.ts";
 import type { Change, Op, ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { classesOf, classOfMember, holdsAny, withoutRevs } from "#shared/secretDoorTestutil.ts";
@@ -52,6 +52,7 @@ const WIDE = FIXTURE.dungeons.find((d) => d.name === "secrets-wide")!;
 /** The scene's id here: the test room's players' scene, which the shared twin helpers read. */
 const S = "s1";
 const AT = "2026-01-01T00:00:00.000Z";
+const P1_VIEWER = { memberId: "p1", role: "player" } as const;
 
 const cellKey = (x: number, y: number) => `${x},${y}`;
 const xy = (key: string) => key.split(",").map(Number) as [number, number];
@@ -623,6 +624,31 @@ describe("the dungeon generator's secret door gate (SB6 on generated plans)", ()
       const d = twin.devices.get("p1")!;
       catchUp(d);
       assert.ok(autoAt(chunkOf(d.view, e), e), `the door ${edit} out of sight: the device still reads the automatic wall`);
+    }
+  });
+
+  test("with fog off, P1 and the display hold no drawn wall and every unfound secret door as an automatic wall bit, and a found one as a door (D-261110-530)", () => {
+    const display: Member["id"] = "display:abcdefghijkl";
+    for (const d of [NARROW, WIDE]) {
+      const plan = planOf(d);
+      const secret = [...plan.edges].filter(([, f]) => f.kind === "door" && f.secret).map(([k]) => k);
+      assert.ok(secret.length >= 2, `${d.name}: secret doors to look for`);
+      const entrance = [...plan.painted].find((c) => inRect(c, plan.entrance))!;
+      let state = landed(onS1(d), { explore: false }, [entrance]);
+      state = { ...state, scenes: { ...state.scenes, [S]: { ...state.scenes[S]!, fogEnabled: false } } };
+      for (const memberId of ["p1", display]) {
+        const copy = projectState(state, { memberId, role: "player" }, { sceneId: S });
+        const raw = JSON.stringify(copy);
+        // Plain doors carry `"secret":false`, so only a hidden door's own marks are looked for.
+        for (const word of [...secret, '"secret":true', '"cover"']) assert.ok(!raw.includes(word), `${d.name}, ${memberId}: the copy holds ${word}`);
+        for (const chunk of Object.values(copy.buildChunks)) for (const [key, f] of Object.entries(chunk.edges)) assert.notEqual(f.kind, "wall", `${d.name}, ${memberId}: a drawn wall at ${key}`);
+        for (const e of secret) assert.ok(autoAt(chunkOf(copy, e), e), `${d.name}, ${memberId}: ${e} an automatic wall bit`);
+      }
+      const found = applyOp(state, { t: "door.set", sceneId: S, door: { edge: secret[0]! }, state: "closed", found: true }, { memberId: "dm1", role: "dm" }, { seq: 900, at: AT });
+      assert.ok(found.ok);
+      const chunk = chunkOf(projectState(found.state, P1_VIEWER, { sceneId: S }), secret[0]!);
+      assert.deepEqual(chunk?.edges[secret[0]!], { kind: "door", state: "closed", secret: true, discovered: true }, `${d.name}: found, the door it is`);
+      assert.ok(!autoAt(chunk, secret[0]!), `${d.name}: found, no wall bit under it`);
     }
   });
 });

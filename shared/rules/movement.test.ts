@@ -618,7 +618,7 @@ describe("after a resize (docs/design/design-v1-token-window.md 8.3 and 8.5)", (
 
 describe("the real rules through the core (permissions, projection)", async () => {
   const { canApply, DOOR_TOO_FAR, LEDGE_IN_THE_WAY, NOT_A_SQUEEZE, WALL_IN_THE_WAY } = await import("../permissions.ts");
-  const { projectChunkForPlayer } = await import("../project.ts");
+  const { projectChunkForPlayer, projectState } = await import("../project.ts");
   const { P1, room, token } = await import("../testutil.ts");
   const deps = { canUseAsset: () => true };
 
@@ -707,6 +707,51 @@ describe("the real rules through the core (permissions, projection)", async () =
       }
     }
     assert.ok(compared > 10_000);
+  });
+
+  test("a player's copy of a square scene with fog off, cut from held ground, stops exactly the moves the server stops, a covered door between floors included (D-261110-530)", () => {
+    let compared = 0;
+    for (const rule of ["all", "floor"] as const) {
+      for (const cover of ["auto", "drawn", undefined] as const) {
+        for (const state of ["open", "closed"] as const) {
+          for (const discovered of [false, true]) {
+            const door = { kind: "door", state, secret: true, discovered, ...(cover ? { cover } : {}) } as const;
+            // As above, with two more doors between floors: one inside a chunk, one on a north edge.
+            const cells: Record<string, TerrainId> = {};
+            for (let y = 2; y < 10; y++) for (let x = 10; x < 22; x++) if (x !== 16) cells[`${x},${y}`] = "stone";
+            const spec: Spec = {
+              autoWalls: rule,
+              cells,
+              edges: { "16,4,w": door, "17,4,w": door, "12,2,n": door, "16,7,w": door, "13,5,w": door, "19,3,n": door },
+              marks: { "16,7": "a", "16,4": "a" },
+              walls: [free("secretfree01", 18, 9, 20, 9, door)],
+            };
+            const built = world({ ...spec, w: 30, h: 20 });
+            const base = room();
+            const scene: Scene = { ...base.scenes.s1!, ...built.scenes[built.sceneId]!, fogEnabled: false };
+            const roomState = { ...base, scenes: { ...base.scenes, [built.sceneId]: scene }, buildChunks: built.buildChunks, meta: { ...base.meta, playerSceneId: built.sceneId } };
+            const copy = projectState(roomState, P1, { sceneId: built.sceneId });
+            assert.equal(copy.scenes[built.sceneId]?.autoWalls, "off");
+            const player = { sceneId: built.sceneId, scenes: { [built.sceneId]: copy.scenes[built.sceneId]! }, buildChunks: copy.buildChunks };
+            for (let fx = 9; fx < 23; fx++) {
+              for (let fy = 1; fy < 11; fy++) {
+                for (const [tx, ty] of [
+                  [fx + 3, fy],
+                  [fx, fy + 3],
+                ] as const) {
+                  const t = tok(built, { x: fx, y: fy });
+                  const server = legStop(built, ownWalk(t), go(tx, ty));
+                  const theirs = legStop(player, ownWalk(t), go(tx, ty));
+                  assert.equal(theirs?.blocker ?? null, server?.blocker ?? null, `${rule} ${cover ?? "no cover"} ${state} found ${discovered}: ${fx},${fy} to ${tx},${ty}`);
+                  compared++;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    assert.ok(compared > 6_000);
   });
 });
 
