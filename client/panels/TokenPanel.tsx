@@ -53,7 +53,9 @@ import { TokenSight } from "../features/vision/TokenSight.tsx";
 import { ConfirmButton, FieldRow, Note, NumberField, Section, Select, Stepper, TextField } from "../features/tokens/ui.tsx";
 import { displayName, footprint } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
-import { DISPOSITION_RING, elevationBadge, initials } from "../lib/tokenView.ts";
+import { DISPOSITION_RING, elevationBadge, initials, initialsOf } from "../lib/tokenView.ts";
+import { labelSpoken, namesFull, numberHelp } from "../lib/labels.ts";
+import { useLabel, useLabels } from "../state/labels.ts";
 import { dispatchGesture } from "../state/actions.ts";
 import { useRoomScope } from "../state/scope.ts";
 import { fightAhead } from "../state/store.ts";
@@ -154,6 +156,7 @@ function TokenDetails(props: PanelProps) {
     [token, you, character, playersApplyDamage],
   );
   const self = useMemo(() => (tokenId ? { tokenId } : null), [tokenId]);
+  const labels = useLabels();
   // Its uses, for the DM on any creature with one and for owners on theirs, as the bar's Uses button reads them.
   const usesPresence = useUsesPresence(access?.full ? self : null);
   // Each a yes or no, so the panel draws again only when one changes, not on every change to the room.
@@ -176,7 +179,7 @@ function TokenDetails(props: PanelProps) {
 
   const actor: Partial<Actor> | undefined = "inline" in token.actor ? token.actor.inline : character?.actor;
   const fp = footprint(token);
-  const name = displayName(token);
+  const name = displayName(token, labels);
   const update = (patch: TokenPatch) => actions.dispatch({ t: "token.update", tokenId: token.id, patch });
   const patchActor = (patch: ActorPatch) => {
     if (access.actorVia === "character" && character) actions.dispatch({ t: "character.update", characterId: character.id, patch: { actor: patch } });
@@ -321,6 +324,9 @@ function NameBlock(props: { token: Token; name: string; actor: Partial<Actor> | 
   const { token } = props;
   const keeper = useRoomView((s) => (token.companion ? s.view?.characters[token.companion.of] : undefined));
   const you = useRoomView((s) => s.you);
+  const label = useLabel(token);
+  // A yes or no on the scene's register, so the header draws again only when it changes.
+  const capped = useRoomView((s) => (s.you?.role === "dm" && s.view ? namesFull(s.view, token) : false));
   // A count, so the header draws again only when it changes.
   const players = useRoomView((s) => viewAsPlayers(s.view, token).length);
   const ui = useRoomUi();
@@ -347,9 +353,11 @@ function NameBlock(props: { token: Token; name: string; actor: Partial<Actor> | 
   const kind = tokenKind({ token, companionOf: keeper?.name, character: props.character, cr: props.actor?.cr });
   return (
     <CreatureHeader
-      picture={{ image: token.image, shape: token.kind === "object" ? "square" : "circle", aspect: fp.w / fp.h, ring: DISPOSITION_RING[token.disposition] ?? theme.color.neutral, initials: initials(props.name) }}
+      picture={{ image: token.image, shape: token.kind === "object" ? "square" : "circle", aspect: fp.w / fp.h, ring: DISPOSITION_RING[token.disposition] ?? theme.color.neutral, initials: initialsOf(label) }}
       badge={keeper ? { image: keeper.defaultImage, initials: initials(keeper.name) } : null}
       name={props.name}
+      spokenName={labelSpoken(label)}
+      nameHelp={numberHelp(label, you?.role === "dm", capped)}
       line={kindLine(kind, sizeText(token.size, fp, props.feetPerCell))}
       onCompanionOf={openKeeper}
       // Focus lands here once a press selected another token and the panel remounted for it, as Duplicate's does.
@@ -367,6 +375,7 @@ function NameBlock(props: { token: Token; name: string; actor: Partial<Actor> | 
 /** The image's buttons and the other images, in the Image group (docs/design/design-v1-dice-ui.md 5.2): the picture itself stands beside the name. */
 function ImageRow(props: { token: Token; name: string; access: TokenAccess; update(patch: TokenPatch): void }) {
   const { token, access, update } = props;
+  const label = useLabel(token);
   const fp = footprint(token);
   const shape = token.kind === "object" ? "square" : "circle";
   const ring = DISPOSITION_RING[token.disposition] ?? theme.color.neutral;
@@ -381,7 +390,7 @@ function ImageRow(props: { token: Token; name: string; access: TokenAccess; upda
         aspect={fp.w / fp.h}
         canEdit={access.canEditToken("image")}
         ring={ring}
-        initials={initials(props.name)}
+        initials={initialsOf(label)}
         previewSize={48}
         extra={access.canEditToken("altImages") ? alts : { beside: null }}
       />

@@ -4,6 +4,7 @@ import type { IconName } from "../../components/Icon.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
+import type { Initials } from "../../lib/tokenView.ts";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import type { KindLine } from "./creatureKind.ts";
 
@@ -28,7 +29,7 @@ export type CreaturePicture = {
   shape: "circle" | "square";
   aspect: number;
   ring: string;
-  initials: string;
+  initials: Initials;
 };
 
 /**
@@ -58,6 +59,10 @@ export function CreatureHeader(props: {
   picture: CreaturePicture;
   badge?: Omit<CreaturePicture, "shape" | "aspect" | "ring"> | null;
   name: string;
+  /** What a screen reader says for the name, where the shown text reads badly aloud ("Goblin (3)"). */
+  spokenName?: string;
+  /** A help line under the name, such as what a DM's bracketed number means. */
+  nameHelp?: string | null;
   line: KindLine;
   /** Opens the companion's character's page, for a viewer who may open it. Without it "Companion of Thorn" is text. */
   onCompanionOf?: (() => void) | null;
@@ -88,8 +93,20 @@ export function CreatureHeader(props: {
           {...(props.focusable ? { tabIndex: -1, "data-creature-heading": "" } : {})}
           style={{ margin: 0, fontSize: theme.font.heading, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}
         >
-          {props.name}
+          {props.spokenName !== undefined && props.spokenName !== props.name ? (
+            <>
+              <span aria-hidden>{props.name}</span>
+              <span style={VISUALLY_HIDDEN}>{props.spokenName}</span>
+            </>
+          ) : (
+            props.name
+          )}
         </h3>
+        {props.nameHelp ? (
+          <p data-name-help="" style={{ margin: 0, color: theme.color.textMuted, fontSize: theme.font.small, lineHeight: theme.leading.body, overflowWrap: "anywhere" }}>
+            {props.nameHelp}
+          </p>
+        ) : null}
         {/* A companion's character's name may be one unbroken word as long as a name may be, so the line breaks anywhere. */}
         <p data-kind-line="" style={{ margin: 0, color: theme.color.textMuted, fontSize: theme.font.small, lineHeight: theme.leading.body, overflowWrap: "anywhere" }}>
           {/* "Companion of Thorn" is always its own element with exactly those words, which the tracker's row repeats. */}
