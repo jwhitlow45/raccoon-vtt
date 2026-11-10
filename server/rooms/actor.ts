@@ -3146,9 +3146,9 @@ async function recheckQuotaOnLoad(deps: ActorDeps, quotaBytes: number): Promise<
 }
 
 /**
- * `scene.setMap`, `scene.create` and a phase list carry the map's
- * canonical size, and a handout's pages each page's, which only the asset
- * row knows (design 5). The row's
+ * `scene.setMap`, `scene.create` (a floor's own map too) and a phase list
+ * carry the map's canonical size, and a handout's pages each page's, which
+ * only the asset row knows (design 5). The row's
  * values replace whatever the client sent, before authorization sees the
  * op. An asset the room cannot use keeps the client's numbers, and
  * authorization refuses it. A map's or a phase's video takes every fact but
@@ -3171,6 +3171,8 @@ function withAssetSizes(op: Op, facts: Map<string, AssetFact>): Op {
   }
   if (op.t === "scene.setMap" && op.map) return { ...op, map: withVideoFacts(withMapSize(op.map, facts), facts) };
   if (op.t === "scene.create" && op.scene.map) return { ...op, scene: { ...op.scene, map: withVideoFacts(withMapSize(op.scene.map, facts), facts) } };
+  // A floor from a file brings its map in `floor.own`, as a new scene does in `scene` (docs/design/design-v1-floors.md phase 3, 3.4).
+  if (op.t === "scene.create" && op.floor?.own?.map) return { ...op, floor: { ...op.floor, own: { ...op.floor.own, map: withVideoFacts(withMapSize(op.floor.own.map, facts), facts) } } };
   return op;
 }
 

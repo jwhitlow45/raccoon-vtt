@@ -111,6 +111,18 @@ describe("a map's video in the room actor (docs/design/design-v1-animated-maps.m
     assert.deepEqual((lastStored(h) as { scene: { map: SceneMap } }).scene.map.video, real(DAY));
   });
 
+  test("a floor from a file takes its map's size and video facts from the row, whatever the client sent (docs/design/design-v1-floors.md phase 3, 3.4)", async (t) => {
+    const f = scopeFixture();
+    const h = await actorFor(t, f.state, true);
+    const dm = await h.connect(f.dm);
+    const own = { bounds: { w: 30, h: 17 }, background: "#202020", grid: { show: true, color: "#000000", opacity: 0.3, lineWidth: 1 }, autoWalls: "all" as const };
+    await dm.apply({ t: "scene.create", scene: { id: uuidv7(), name: "Tower", bounds: { w: 30, h: 17 } }, floor: { beside: f.sceneId, side: "below", name: "Crypt", own: { ...own, map: { ...MAP, widthPx: 7, heightPx: 7 } } } });
+    const still = (lastStored(h) as { floor: { own: { map: SceneMap } } }).floor.own.map;
+    assert.deepEqual({ w: still.widthPx, h: still.heightPx }, { w: 1920, h: 1080 }, "the still's size from its row");
+    await dm.apply({ t: "scene.create", scene: { id: uuidv7(), name: "Tower", bounds: { w: 30, h: 17 } }, floor: { beside: f.sceneId, side: "above", name: "Loft", own: { ...own, map: { ...MAP, video: sent(FRESH) } } } });
+    assert.deepEqual((lastStored(h) as { floor: { own: { map: SceneMap } } }).floor.own.map.video, real(FRESH), "the video's facts from its row");
+  });
+
   test("a video row whose facts did not check, another room's video and a still of another shape are refused", async (t) => {
     const f = scopeFixture();
     const h = await actorFor(t, f.state, true);
