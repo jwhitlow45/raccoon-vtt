@@ -54,7 +54,6 @@ export function WingPaneHost(props: { scene: Scene; tool: string; chrome: Chrome
           viewport={props.viewport}
           insets={props.insets}
           onClose={close}
-          send={null}
           choices={null}
         />
       </Suspense>

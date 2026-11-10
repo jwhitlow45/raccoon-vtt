@@ -14,21 +14,29 @@ import { isCoarsePointer } from "../../lib/device.ts";
 import { theme } from "../../lib/theme.ts";
 import type { ViewBox } from "../../lib/view.ts";
 import { useAlertsLane } from "../../pages/fold.ts";
+import { LIMITS } from "#shared/limits.ts";
+import type { RoomActions } from "../../state/types.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { useRoomStore, useRoomView } from "../../state/view.ts";
-import { preview, type Summary } from "../dungeon/client.ts";
+import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
+import { postWingBase, previewWing, type Preview, type Summary } from "../dungeon/client.ts";
+import { highestWingPin, type KeyInput } from "../dungeon/keyPage.ts";
+import { latticeFor } from "../dungeon/lattice.ts";
+import { wingIds } from "../dungeon/ops.ts";
 import type { DungeonPlan, WingBase } from "../dungeon/plan.ts";
 import { newSeed, type Seed } from "../dungeon/seed.ts";
-import type { DungeonOutcome } from "../dungeon/send.ts";
-import { DEFAULT_SETTINGS, MAX_SIDE, MIN_SIDE, type DungeonSettings, type GridKind } from "../dungeon/settings.ts";
+import { sendWing, WING_TOO_LARGE, type SendRoom, type WingOutcome } from "../dungeon/send.ts";
+import { DEFAULT_SETTINGS, isHexGrid, type DungeonSettings, type GridKind } from "../dungeon/settings.ts";
+import type { WingProblem } from "../dungeon/wing.ts";
+import { BUILD_ASKING } from "./ask.ts";
 import { statusLine } from "../dungeon/words.ts";
 import { requestPan } from "../encounter/pan.ts";
 import { paneEscape } from "./labelEdit.ts";
 import { labelPaneFrame } from "./labelPaneFrame.ts";
-import { useBuilderStore, type WingPicks } from "./store.ts";
+import { NO_WING, useBuilderStore, type WingPicks } from "./store.ts";
 import { ghostOf, type GhostRoom, type WingGhost } from "./wingGhost.ts";
 import { wingBox, wingFit, wingPanePlacement, wingPlace } from "./wingPanePlacement.ts";
-import { areaLine, judgeJoin, wingBaseOf, wingWarnings, type WingJoin } from "./wingPick.ts";
+import { areaLine, JOIN_WORDS, judgeJoin, wingBaseOf, wingWarnings, type WingJoin } from "./wingPick.ts";
+import { JOIN_CHANGED, WING_MOVED } from "#shared/rules/wingClear.ts";
 
 /*
  * The wing pane (docs/design: dungeon generator phase 3, 3.3, D-261110-161,
@@ -45,20 +53,21 @@ export type WingChoicesProps = { value: DungeonSettings; onChange(next: DungeonS
 /** What the wing would land, as a send takes it: its ops and the scratch room they landed in. */
 export type WingMade = { ops: ClientOp[]; room: RoomState; ids: ReadonlyMap<string, string> };
 
-/** A plan of the wing: its ghost, the foot's counts and what Add the wing sends, or why there is none. */
-export type WingPlan = { ok: true; summary: Summary; ghost: WingGhost; made: WingMade | null } | { ok: false; error: "fit" | "bug" };
+/** A plan of the wing: its ghost, the foot's counts and what Add the wing sends with what its asks carry, or why there is none, in words when the planner says. */
+export type WingPlan = { ok: true; summary: Summary; ghost: WingGhost; made: WingMade | null; clear?: WingClear } | { ok: false; error: "fit" | "bug"; words?: string };
 
 /** Plans the wing for the choices and seed on its base. Only the newest call's answer is shown. */
 export type WingPlanner = (input: { settings: DungeonSettings; seed: Seed; base: WingBase; feetPerCell: number }) => Promise<WingPlan>;
 
 /** Sends a planned wing behind its asks (dungeon/send.ts sendWing), saying how far it got, and asking the forget question. */
-export type WingSend = (made: WingMade & { sceneId: string; clear: WingClear }, onAnswered: (n: number, of: number) => void, ask: (q: "forget") => Promise<boolean>) => Promise<DungeonOutcome>;
+export type WingSend = (made: WingMade & { sceneId: string; clear: WingClear }, onAnswered: (n: number, of: number) => void, ask: (q: "forget") => Promise<boolean>) => Promise<WingOutcome>;
 
 export const WING_TITLE = "Add a wing";
 export const WING_DRAWING = "Drawing the wing…";
 export const WING_NO_FOG = "Players see this scene without fog, so the wing shows at once.";
 export const WING_FIT_NONE = "Could not fit two rooms. Drag a larger area over empty ground, or pick fewer rooms or Sparse.";
 export const WING_NOT_MADE = "This wing could not be made. Reroll for another.";
+export const WING_WAITING = "Waiting for the server…";
 /** A request waits this long after the last change, so a run of quick changes plans once. */
 const QUIET_MS = 120;
 
@@ -67,31 +76,119 @@ function gridKind(g: Grid): GridKind {
   return isHex(g) ? (g.orient === "rows" ? "hexRows" : "hexColumns") : "squares";
 }
 
-/** Each room's number, as the key numbers it where there is a key, else in plan order, at its middle. */
-function ghostRooms(plan: DungeonPlan): GhostRoom[] {
-  const numbers = new Map(plan.key?.map((k) => [k.room, k.n]) ?? []);
-  return plan.rooms.map((r, i) => ({ n: numbers.get(i) ?? i + 1, x: r.x + r.w / 2, y: r.y + r.h / 2, rect: { x: r.x, y: r.y, w: r.w, h: r.h } }));
+/** What each of the planner's problems says (design 3.2 to 3.4), in the pane's status line. */
+export function problemWords(problem: WingProblem, hex: boolean): string {
+  switch (problem) {
+    case "noGround":
+      return JOIN_WORDS.hexBeyond;
+    case "openRoom":
+      return JOIN_WORDS.hexOpen;
+    case "longWall":
+      return JOIN_WORDS.hexLong;
+    case "offGrid":
+      return JOIN_WORDS.squaresFree;
+    case "wideShape":
+      return hex ? JOIN_WORDS.wideHex : JOIN_WORDS.wideSquares;
+    case "raised":
+      return JOIN_WORDS.floorRaised;
+    case "nearJoin":
+      return WING_NEAR;
+    case "noStairs":
+      return WING_NO_STAIRS;
+    case "noWay":
+      return WING_NO_WAY;
+    case "noRooms":
+      return WING_FIT_NONE;
+    case "full":
+      return WING_FULL;
+  }
 }
 
+export const WING_NEAR = "Something stands too near that wall for a doorway. Tap another wall.";
+export const WING_NO_STAIRS = "No room for stairs at that wall. Tap another wall.";
+export const WING_NO_WAY = "No way from the area to that wall. Tap a nearer wall or drag the area closer.";
+export const WING_FULL = "This scene has too many walls and doors for a wing.";
+export const WING_HEX_TOO_MANY = "Too many rooms for the walls a hex scene holds. Try fewer rooms or Sparse.";
+
+/** Each room's number as the key numbers it where there is a key, else in plan order, at its middle: on hexes its middle hex's center. */
+function wingRooms(plan: DungeonPlan, base: WingBase): GhostRoom[] {
+  const numbers = new Map(plan.key?.map((k) => [k.room, k.n]) ?? []);
+  const grid = base.scene.gridShape ?? "squares";
+  const L = isHexGrid(grid) ? latticeFor(grid, base.scene.bounds) : null;
+  return plan.rooms.map((r, i) => {
+    const n = numbers.get(i) ?? i + 1;
+    if (!L) return { n, x: r.x + r.w / 2, y: r.y + r.h / 2, rect: { x: r.x, y: r.y, w: r.w, h: r.h } };
+    const [x, y] = L.pointOf(r.x + Math.floor(r.w / 2), r.y + Math.floor(r.h / 2));
+    const rect = grid === "hexColumns" ? { x: r.y, y: r.x, w: r.h, h: r.w } : { x: r.x, y: r.y, w: r.w, h: r.h };
+    return { n, x, y, rect };
+  });
+}
+
+/** What the wing's key reads of the room: the scene's name, the DM's color, the scene's highest W pin, its pages' titles and the pins it has room for (D-261110-165). */
+export type WingKeyRoom = { name: string; color: string; titles: readonly string[] };
+
 /**
- * Until the worker plans wings against the scene, its join and open ground
- * (design 3.4), the pane previews a dungeon of the area's size on a scene
- * of its own, stood at the area's corner, so the choices and the ghost can
- * be seen and checked. It never lands as a wing, so Add the wing stays off
- * for it, and on hexes, which the generator does not plan yet, it plans
- * nothing.
+ * The worker's wing (dungeon/client.ts previewWing, design 3.3 and 3.4):
+ * the base posted once per hash, then planned with the choices, the ghost
+ * drawn from the scratch room the wing landed in, and what Add the wing
+ * sends with what its asks carry.
  */
-export const areaPreview: WingPlanner = async ({ settings, seed, base, feetPerCell }) => {
-  if (isHex(sceneGrid(base.scene))) return { ok: false, error: "bug" };
-  const side = (n: number) => Math.min(MAX_SIDE, Math.max(MIN_SIDE, n));
-  const own = { id: "wing-area", name: "Wing", bounds: { w: side(base.area.w), h: side(base.area.h) } };
-  const answer = await preview({ ...settings, w: own.bounds.w, h: own.bounds.h }, seed, own, { feetPerCell }, null);
-  if (!answer.ok) return answer;
-  const scratchScene = Object.values(answer.room.scenes).find((s) => s !== undefined);
-  if (!scratchScene) return { ok: false, error: "bug" };
-  const ghost = ghostOf({ base: base.state, sceneId: base.scene.id, scratch: answer.room, scratchScene, area: base.area, offset: { x: base.area.x, y: base.area.y }, feetPerCell, rooms: ghostRooms(answer.plan) });
-  return { ok: true, summary: answer.summary, ghost, made: null };
-};
+export function wingPlanner(keyRoom: () => WingKeyRoom | null, post: (base: WingBase) => void = postWingBase, plan: typeof previewWing = previewWing): WingPlanner {
+  let posted: string | null = null;
+  return async ({ settings, seed, base, feetPerCell }) => {
+    if (posted !== base.hash) {
+      post(base);
+      posted = base.hash;
+    }
+    const grid = base.scene.gridShape ?? "squares";
+    const sceneId = base.scene.id;
+    const room = keyRoom();
+    const held = Object.values(base.state.pins).filter((p) => p?.sceneId === sceneId).length;
+    const key: KeyInput | null = settings.key && room ? { name: room.name, color: room.color, feetPerCell, wing: { from: highestWingPin(base.state.pins, sceneId), titles: room.titles, pins: Math.max(0, Math.floor(0.9 * LIMITS.pinsPerScene) - held) } } : null;
+    const answer: Preview = await plan(settings, seed, { feetPerCell, ...(isHexGrid(grid) ? { grid } : {}) }, key);
+    if (!answer.ok) {
+      const words = answer.problem ? problemWords(answer.problem, isHexGrid(grid)) : answer.why === "tooMany" ? WING_HEX_TOO_MANY : undefined;
+      return { ok: false, error: answer.error, ...(words ? { words } : {}) };
+    }
+    const scratchScene = answer.room.scenes[sceneId];
+    if (!scratchScene) return { ok: false, error: "bug" };
+    const ghost = ghostOf({ base: base.state, sceneId, scratch: answer.room, scratchScene, area: base.area, offset: { x: 0, y: 0 }, feetPerCell, rooms: wingRooms(answer.plan, base) });
+    return { ok: true, summary: answer.summary, ghost, made: { ops: answer.ops, room: answer.room, ids: new Map() }, ...(answer.clear ? { clear: answer.clear } : {}) };
+  };
+}
+
+/** Add the wing's send: every id fresh at Make (dungeon/ops.ts wingIds), then sendWing behind its asks. */
+export function wingSender(actions: RoomActions, room: SendRoom): WingSend {
+  return (made, onAnswered, ask) => {
+    const fresh = wingIds(made.ops, made.sceneId, made.sceneId, actions.newId);
+    return sendWing({ ops: fresh.ops, ids: fresh.ids, room: made.room, sceneId: made.sceneId, clear: made.clear }, actions, room, onAnswered, ask);
+  };
+}
+
+/** The forget question's words, the builder's own (design 3.5). */
+export const FORGET_TITLE = "Remembered map";
+export const FORGET_ASK_WORDS = "Players' remembered map here will be forgotten. Go ahead?";
+export const FORGET_HELP = "Their map can keep only so much that changed out of their sight. The ground this change runs past that goes back under the fog for them, as if never seen, and neither Undo nor Undo setup in Setup history brings it back.";
+
+/** What the pane says of a wing that did not end complete (3.5), or null where the pane closes. */
+export function outcomeWords(outcome: WingOutcome): string | null {
+  switch (outcome.k) {
+    case "complete":
+      return outcome.checked ? "The connection dropped while adding the wing, but it is complete. Undo setup in Setup history usually takes it back." : null;
+    case "none":
+      return outcome.lost ? "The connection dropped, and nothing was added. Try again." : "Nothing was added.";
+    case "partial":
+      return "The server refused part of the wing, so it may be missing rooms, doors or traps. Undo setup in Setup history usually takes back what landed.";
+    case "unconfirmed":
+      return "The connection dropped while adding the wing, and it could not be confirmed complete. Undo setup in Setup history usually takes back what landed.";
+    case "join":
+      return JOIN_CHANGED;
+    case "moved":
+      return WING_MOVED;
+    case "large":
+      return WING_TOO_LARGE;
+  }
+}
 
 type Planned = { asked: number; pending: boolean; plan: WingPlan | null };
 
@@ -102,9 +199,10 @@ export default function WingPane(props: {
   viewport: Size;
   insets: Insets;
   onClose(): void;
-  /** Left out, the area's preview below stands in. */
+  /** Left out, the worker's wing (`wingPlanner`) plans it. */
   planner?: WingPlanner;
-  send: WingSend | null;
+  /** Left out, the room's own send (`wingSender`). Null sends nothing, as a test's pane. */
+  send?: WingSend | null;
   choices: ComponentType<WingChoicesProps> | null;
 }) {
   const { scene, picks } = props;
@@ -116,6 +214,8 @@ export default function WingPane(props: {
   const builder = useBuilderStore();
   const scope = useRoomScope();
   const roomStore = useRoomStore();
+  const ui = useRoomUi();
+  const actions = useRoomActions();
   const feetPerCell = useRoomView((s) => s.floorView?.meta.settings.feetPerCell ?? 5);
   const grid = sceneGrid(scene);
   const lane = useAlertsLane(props.viewport);
@@ -164,10 +264,24 @@ export default function WingPane(props: {
   const joinProblem = judged?.ok === false ? judged.problem : null;
 
   // The base is read when the area or join is set, not on every change to the room: Add the wing checks the live scene again (3.5).
+  // A clash at Add the wing posts the base again (3.5): `reread` moves it on.
+  const [reread, setReread] = useState(0);
   const base = useMemo(() => {
     const view = roomStore.getState().floorView;
     return view && join ? wingBaseOf(view, scene, picks.area, join) : null;
-  }, [roomStore, scene, picks.area, join]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomStore, scene, picks.area, join, reread]);
+  // The key's room: the scene's name, the DM's color and the pages' titles, read as each plan asks.
+  const planner = useMemo(
+    () =>
+      props.planner ??
+      wingPlanner(() => {
+        const s = roomStore.getState();
+        const color = s.view?.members[s.you?.memberId ?? ""]?.color;
+        return color ? { name: scene.name, color, titles: Object.values(s.view?.journal ?? {}).flatMap((p) => (p ? [p.title] : [])) } : null;
+      }),
+    [props.planner, roomStore, scene.name],
+  );
 
   const view = useRoomView((s) => s.floorView);
   const warnings = useMemo(() => (view ? wingWarnings(view, scene, picks.area, join).join(" ") : ""), [view, scene, picks.area, join]);
@@ -182,7 +296,6 @@ export default function WingPane(props: {
       return;
     }
     setPlanned((p) => ({ ...p, asked: id, pending: true }));
-    const planner = props.planner ?? areaPreview;
     const timer = setTimeout(() => {
       planner({ settings, seed, base, feetPerCell }).then(
         (plan) => {
@@ -196,15 +309,63 @@ export default function WingPane(props: {
       );
     }, QUIET_MS);
     return () => clearTimeout(timer);
-  }, [props.planner, base, settings, seed, feetPerCell, builder]);
+  }, [planner, base, settings, seed, feetPerCell, builder]);
 
   // The ghost goes with the pane.
   useEffect(() => () => builder.setState({ wingGhost: null, wingEdit: false }), [builder]);
 
   const drawing = useDelayed(planned.pending);
   const plan = planned.plan;
-  const status = drawing ? WING_DRAWING : plan === null ? "" : plan.ok ? statusLine(plan.summary) : plan.error === "fit" ? WING_FIT_NONE : WING_NOT_MADE;
-  const ready = !planned.pending && plan?.ok === true && plan.made !== null && props.send !== null && joinProblem === null;
+  // Add the wing: checking players' remembered map, then how many of its ops are answered, and the forget question while it waits.
+  const [sending, setSending] = useState<"asking" | { n: number; of: number } | null>(null);
+  const [forget, setForget] = useState<((yes: boolean) => void) | null>(null);
+  const [said, setSaid] = useState<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => () => void (mounted.current = false), []);
+  const send = useMemo(() => (props.send === undefined ? wingSender(actions, { store: roomStore, shown: () => mounted.current }) : props.send), [props.send, actions, roomStore]);
+  const sendLine = sending === "asking" ? BUILD_ASKING : sending ? (sending.n >= sending.of ? WING_WAITING : `Adding the wing… ${sending.n} of ${sending.of}`) : null;
+  const planLine = drawing ? WING_DRAWING : plan === null ? "" : plan.ok ? statusLine(plan.summary) : (plan.words ?? (plan.error === "fit" ? WING_FIT_NONE : WING_NOT_MADE));
+  const status = sendLine ?? said ?? planLine;
+  const ready = !planned.pending && sending === null && plan?.ok === true && plan.made !== null && plan.clear !== undefined && send !== null && joinProblem === null;
+  const add = async () => {
+    if (!ready || !plan?.ok || !plan.made || !plan.clear || !send) return;
+    setSaid(null);
+    setSending("asking");
+    const outcome = await send(
+      { ...plan.made, sceneId: scene.id, clear: plan.clear },
+      (n, of) => {
+        if (mounted.current) setSending({ n, of });
+      },
+      () =>
+        new Promise<boolean>((resolve) => {
+          if (!mounted.current) return resolve(false);
+          setForget(() => (yes: boolean) => {
+            setForget(null);
+            resolve(yes);
+          });
+        }),
+    );
+    const words = outcomeWords(outcome);
+    if (!mounted.current) {
+      if (words) ui.notify(words, outcome.k === "complete" ? "info" : "error");
+      return;
+    }
+    setSending(null);
+    if (outcome.k === "complete") {
+      // The pane closes and the mode clears (3.5), and a checked wing says how it was confirmed.
+      if (words) ui.notify(words, "info");
+      builder.setState({ ...NO_WING });
+      return;
+    }
+    if (outcome.k === "join") {
+      // A changed join is tapped again: the pane closes with it, and the toast says why.
+      ui.notify(JOIN_CHANGED, "error");
+      builder.setState({ wing: { ...picks, tap: null, join: null }, wingOpen: false, wingGhost: null, wingEdit: false });
+      return;
+    }
+    if (outcome.k === "moved") setReread((n) => n + 1);
+    setSaid(words);
+  };
   const Choices = props.choices;
   // A docked card keeps its foot in view and scrolls its rows. A sheet can be short, as at 320 by 568 at 130%, where a pinned foot would leave the rows no room, so the whole sheet scrolls under its header.
   const sheet = place.kind === "sheet";
@@ -237,11 +398,28 @@ export default function WingPane(props: {
         {scene.fogEnabled !== true ? <Help>{WING_NO_FOG}</Help> : null}
         {warnings ? <Help style={{ color: theme.color.warning }}>{warnings}</Help> : null}
       </div>
+      {forget ? (
+        <div role="group" aria-label={FORGET_TITLE} style={{ display: "grid", gap: theme.space(2), paddingTop: theme.space(2), borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
+          <span role="heading" aria-level={3} style={{ fontWeight: 600 }}>
+            {FORGET_TITLE}
+          </span>
+          <p style={{ margin: 0 }}>{FORGET_ASK_WORDS}</p>
+          <Help>{FORGET_HELP}</Help>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+            <Button size="sm" variant="primary" onClick={() => forget(true)}>
+              Go ahead
+            </Button>
+            <Button size="sm" onClick={() => forget(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: theme.space(2), paddingTop: theme.space(2), borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
         <span role="status" style={{ flex: "1 1 10em", minWidth: 0, color: theme.color.textMuted, fontSize: theme.font.body14 }}>
           {status}
         </span>
-        <Button size="sm" variant="primary" disabled={!ready}>
+        <Button size="sm" variant="primary" disabled={!ready} busy={sending !== null} onClick={() => void add()}>
           Add the wing
         </Button>
       </div>
