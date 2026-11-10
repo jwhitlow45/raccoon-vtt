@@ -178,3 +178,36 @@ export function moveReasonsLine(up: string | null, down: string | null): string 
   const reasons = [...new Set([up, down].filter((r): r is string => r !== null))];
   return reasons.length === 0 ? null : reasons.join(" ");
 }
+
+/** What a new floor starts from: empty, a Universal VTT file, or a generated dungeon (docs/design/design-v1-floors.md phase 3, 3.5). */
+export type FloorMap = "blank" | "file" | "dungeon";
+
+export const FLOOR_MAP_NAME = "Map";
+
+export const FLOOR_MAP_OPTIONS: readonly { value: FloorMap; label: string }[] = [
+  { value: "blank", label: "Blank" },
+  { value: "file", label: "VTT file" },
+  { value: "dungeon", label: "Dungeon" },
+];
+
+/** The help line under Map, which changes with the pick. */
+export const FLOOR_MAP_HELP: Readonly<Record<FloorMap, string>> = {
+  blank: "Starts empty, with the size, look, what players see and light of the floor on screen.",
+  file: "A map from Dungeondraft, Dungeon Alchemist, Arkenforge or DungeonFog, with its walls, doors and lights, at the file's size.",
+  dungeon: "Generate a dungeon for the new floor. Stairs to other floors are yours to place.",
+};
+
+/** Why VTT file is off on a hex scene: a file's walls lie on squares (D-261110-075). */
+export function fileHexReason(sceneName: string): string {
+  return `Universal VTT maps bring square walls, and ${sceneName}'s floors are hexes.`;
+}
+
+/**
+ * Where a DM who went elsewhere while a file or a dungeon floor was made
+ * finds it: " Open Tower, then pick Crypt level 2 in Floors.", in place of
+ * a new scene's " Open it from the Scenes panel." A floor has no row of
+ * its own in the Scenes panel.
+ */
+export function openFloorLine(sceneName: string, floorName: string): string {
+  return ` Open ${sceneName}, then pick ${floorName} in Floors.`;
+}

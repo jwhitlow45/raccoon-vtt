@@ -10,7 +10,7 @@ import { room, scene, token } from "#shared/testutil.ts";
 import { ATTIC, GROUND, UPPER, tower as linkedTower, withStairs } from "#shared/floorLinksTestutil.ts";
 import { LINK_WORDS } from "#shared/rules/floorLinks.ts";
 import { FLOOR_SEARCH } from "../floors/ids.ts";
-import { addBetweenRefusal, addRefusal, FLOOR_MARKS, floorRowLabel, floorSettingsLine, floorsSummary, floorsTopFirst, GO_TO_FLOOR, heightOf, hideRefusal, ON_SCREEN, moveBetweenRefusal, moveReasonsLine, orderAfterMove, playersAt, removeRefusal, stepHeight } from "./floorWords.ts";
+import { addBetweenRefusal, addRefusal, fileHexReason, FLOOR_MAP_HELP, FLOOR_MAP_NAME, FLOOR_MAP_OPTIONS, FLOOR_MARKS, floorRowLabel, floorSettingsLine, floorsSummary, floorsTopFirst, GO_TO_FLOOR, heightOf, hideRefusal, ON_SCREEN, moveBetweenRefusal, moveReasonsLine, openFloorLine, orderAfterMove, playersAt, removeRefusal, stepHeight } from "./floorWords.ts";
 
 /*
  * The Floors group's and a floor's page's words and rules
@@ -194,5 +194,22 @@ describe("stairs between floors (docs/design/design-v1-floors.md phase 2, 7.3)",
     assert.equal(addBetweenRefusal(ladder, floors(ladder), GROUND, "above"), LINK_WORDS.between("ladder", "Ground floor", "Upper floor"));
     const plain = linkedTower();
     assert.equal(addBetweenRefusal(plain, floors(plain), GROUND, "above"), null);
+  });
+});
+
+describe("a floor from a file or a dungeon (docs/design/design-v1-floors.md phase 3, 3.5)", () => {
+  test("Map offers Blank, VTT file and Dungeon, each with its help line", () => {
+    assert.equal(FLOOR_MAP_NAME, "Map");
+    assert.deepEqual(FLOOR_MAP_OPTIONS.map((o) => o.label), ["Blank", "VTT file", "Dungeon"]);
+    assert.deepEqual(FLOOR_MAP_HELP, {
+      blank: "Starts empty, with the size, look, what players see and light of the floor on screen.",
+      file: "A map from Dungeondraft, Dungeon Alchemist, Arkenforge or DungeonFog, with its walls, doors and lights, at the file's size.",
+      dungeon: "Generate a dungeon for the new floor. Stairs to other floors are yours to place.",
+    });
+  });
+
+  test("the hex reason names the scene, and a DM who went elsewhere is told where to pick the floor", () => {
+    assert.equal(fileHexReason("Tower"), "Universal VTT maps bring square walls, and Tower's floors are hexes.");
+    assert.equal(openFloorLine("Tower", "Crypt level 2"), " Open Tower, then pick Crypt level 2 in Floors.");
   });
 });
