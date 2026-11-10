@@ -3,6 +3,7 @@ import { after, before, describe, test } from "node:test";
 import yauzl from "yauzl";
 import yazl from "yazl";
 import { uuidv7 } from "#shared/ids.ts";
+import { LIMITS } from "#shared/limits.ts";
 import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import type { FloorLink, RoomState, Scene } from "#shared/model.ts";
 import { stableStringify, type ProjectedState } from "#shared/project.ts";
@@ -556,6 +557,15 @@ describe("stairs and ladders on the server (docs/design/design-v1-floors.md phas
     assert.ok(live(t, r.roomId).floorLinks?.[link], "the stairs are back");
     assert.equal(live(t, r.roomId).scenes[middle], undefined);
     coSocket.close();
+  });
+
+  test("a trap op meets its scene's checks now that the floor check reads its floor: the 51st trap on Ground floor is refused", async () => {
+    const r = await stairsTower(t, "Trap cap", false);
+    r.anaSocket.close();
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false };
+    const plate = (i: number): Op => ({ t: "trap.create", trap: { id: `plate-${uuidv7()}`, sceneId: r.ground, name: "Plate", zone: { cells: [{ x: 10 + (i % 10), y: 10 + Math.floor(i / 10), w: 1, h: 1 }] }, rig } }) as Op;
+    for (let i = 0; i < LIMITS.trapsPerScene; i++) await ok(r.dmSocket, plate(i));
+    assert.match(refused(await r.dmSocket.apply(plate(LIMITS.trapsPerScene))), new RegExp(`at most ${LIMITS.trapsPerScene} traps`));
   });
 
   test("an undo of Remove stairs after the co-DM drew a wall through them is refused, the floor check reading both floors, and a live edit of the ground under them reads the builder's words", async () => {
