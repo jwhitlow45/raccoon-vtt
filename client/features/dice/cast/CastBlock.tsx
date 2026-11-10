@@ -61,6 +61,7 @@ import {
   type CastSend,
 } from "./cast.ts";
 import { useCastTracker } from "./alerts.ts";
+import { useLabels } from "../../../state/labels.ts";
 
 /**
  * A player's ask for saves in the Dice panel (docs/design/design-v1-player-save-spell.md
@@ -261,6 +262,7 @@ function useAreaEntries(view: RoomState, areaId: string | undefined, sceneId: st
  * gives it.
  */
 function CastBlockView(props: Parameters<typeof RowCast>[0] & { spec: CastBlock }) {
+  const labels = useLabels();
   const { spec, dice } = props;
   const view = dice.view;
   const env = useCastEnv();
@@ -289,7 +291,7 @@ function CastBlockView(props: Parameters<typeof RowCast>[0] & { spec: CastBlock 
   const words = sendWords({ rolls, save: fill === null || fill.test.kind !== "none" });
   const entries = useAreaEntries(view, spec.area, sceneId);
   const targets = spec.area ? [] : selectionTargets(view, selected, caster?.id, sceneId);
-  const targetNames = targets.map((id) => displayName(view.tokens[id]!));
+  const targetNames = targets.map((id) => displayName(view.tokens[id]!, labels));
   const reason = sendBlocked({ blocked: props.blocked, casterName: props.name, caster, targets: spec.area ? null : targets.length, waiting: waitingCount(view, you) });
   const sent = spec.sent ? sends[spec.sent] : undefined;
   const sentPhase = sent ? phaseOf(env.tracker.state(sent.id), view.casts[sent.id] !== undefined) : null;
@@ -437,6 +439,7 @@ function OwnLevel(props: { spell: string; min: number; value: number; onChange(n
  * picked creature's options, and so the block, are drawn.
  */
 export function WaitingAsks(props: { view: RoomState; pickedKey: string | null; blockDraws: boolean }) {
+  const labels = useLabels();
   const env = useCastEnv();
   const sends = useSends();
   const options = useOptionStore();
@@ -448,7 +451,7 @@ export function WaitingAsks(props: { view: RoomState; pickedKey: string | null; 
   const casterName = (id: string) => {
     const token = props.view.tokens[id];
     if (!token) return "Your creature";
-    return "ref" in token.actor ? (props.view.characters[token.actor.ref]?.name ?? displayName(token)) : displayName(token);
+    return "ref" in token.actor ? (props.view.characters[token.actor.ref]?.name ?? displayName(token, labels)) : displayName(token, labels);
   };
   return (
     <div role="group" aria-label="Asks for saves" style={{ display: "grid", gap: theme.space(1) }}>

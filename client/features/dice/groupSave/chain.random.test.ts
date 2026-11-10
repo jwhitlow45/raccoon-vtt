@@ -112,7 +112,7 @@ const BASE = world();
 const DICE: DiceView = { you: { memberId: "dm1", role: "dm" }, view: BASE, srd: { monsters: [], rolls: {} } };
 const IDS = Object.keys(BASE.tokens);
 const SAVE = { kind: "save" as const, ability: "dex" as const };
-const ROWS: RowBase[] = groupRows(DICE, IDS, SAVE, false);
+const ROWS: RowBase[] = groupRows(DICE, IDS, SAVE, false, new Map());
 const key = (t: { tokenId?: string; characterId?: string }) => creatureKey(BASE, t);
 
 function serverRolls(rows: readonly RowBase[]): ServerRoll[] {
@@ -592,7 +592,7 @@ test("a player's ask through the DM's page keeps its invariants over 1,500 rando
   const reached: Record<string, number> = {};
   const count = (k: string) => (reached[k] = (reached[k] ?? 0) + 1);
   const ids = ["m1", "m2", "p1"];
-  const rows = groupRows(DICE, ids, SAVE, false);
+  const rows = groupRows(DICE, ids, SAVE, false, new Map());
   let n = 0;
   const newId = () => `0192f0a8-6c1e-7a4b-9c3d-${String(++n).padStart(12, "0")}`;
   for (let seed = 1; seed <= 1_500; seed++) {

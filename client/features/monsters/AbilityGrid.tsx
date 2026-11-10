@@ -11,6 +11,7 @@ import { useBlockHeader, type BlockHeaderApi } from "../dice/BlockHeader.tsx";
 import { blockRoller, type BlockFrom, type BlockRoller } from "../dice/blockRolls.ts";
 import { useAbilityMenu } from "../dice/useAbilityMenu.tsx";
 import type { AbilityBox } from "./abilityTable.ts";
+import { labelsOf } from "../../state/labels.ts";
 
 /**
  * The six abilities three across, as the 2024 block prints them: about a
@@ -38,7 +39,7 @@ import type { AbilityBox } from "./abilityTable.ts";
  */
 /** The roller as text, so equal rollers are equal values and the room store skips the redraw. */
 export function blockRollerText(s: { view: RoomState | null; you: You | null; sceneId: string | null }, from: BlockFrom): string {
-  return s.view && s.you ? (JSON.stringify(blockRoller(s.view, s.you, s.sceneId, from)) ?? "null") : "null";
+  return s.view && s.you ? (JSON.stringify(blockRoller(s.view, s.you, s.sceneId, from, labelsOf(s))) ?? "null") : "null";
 }
 
 export function useBlockRoller(from: BlockFrom): BlockRoller | null {

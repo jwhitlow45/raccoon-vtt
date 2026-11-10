@@ -15,6 +15,7 @@ import { parseHpInput } from "../tokens/hpInput.ts";
 import { useMarkChipApplied } from "./hpChips.ts";
 import type { HpChip } from "./options.ts";
 import { applyTargets, chipName, rollChip, rollOrigin, type ApplyTarget } from "./targets.ts";
+import { labelsOf } from "../../state/labels.ts";
 
 /*
  * What a damage roll's "Apply to" chips do (QOL audit Q2), apart from the
@@ -198,7 +199,7 @@ export function toastChips(env: ApplyEnv, lines: readonly LogEntry[], at: { scen
   const chip = rollChip(lines);
   if (!view || !you || you.role !== "dm" || !chip) return [];
   const applied = new Set((env.applies.getState().rolls[chip.lineId] ?? NOTHING_YET).applied.map((a) => a.holder));
-  return applyTargets({ view, you, sceneId: at.sceneId, origin: rollOrigin(lines), selected: at.selected, leave: applied }).map((to) => ({
+  return applyTargets({ labels: labelsOf({ view, you }), view, you, sceneId: at.sceneId, origin: rollOrigin(lines), selected: at.selected, leave: applied }).map((to) => ({
     label: to.name,
     name: chipName(chip, to.name, true),
     send: () => applyNow(env, chip, to),

@@ -16,7 +16,7 @@ const DICE: DiceView = {
   view: room({ tokens: { g1: token("g1", { kind: "monster", name: "Goblin", actor: { inline: actor({ hp: { cur: 30, max: 30, temp: 0 } }) } }) } }),
   srd: { monsters: [], rolls: {} },
 };
-const ROWS = groupRows(DICE, ["g1"], { kind: "save", ability: "con" }, false);
+const ROWS = groupRows(DICE, ["g1"], { kind: "save", ability: "con" }, false, new Map());
 
 /** Sunburst's page: Blinded on a fail, a Constitution save at each turn's end ending it, at the page's DC. */
 function sunburst(dc: number | null, own: number | null = null): Page {
@@ -76,7 +76,7 @@ describe("the DM's own amount and the outcome's size", () => {
   test("a No save page, in setup until its Apply, takes the DM's own amount for one creature, the others the worked-out one (ASTRA-13, round 2)", () => {
     const tokens = { g1: token("g1", { kind: "monster", name: "Goblin", actor: { inline: actor({ hp: { cur: 30, max: 30, temp: 0 } }) } }), g2: token("g2", { kind: "monster", name: "Hobgoblin", actor: { inline: actor({ hp: { cur: 30, max: 30, temp: 0 } }) } }) };
     const dice: DiceView = { ...DICE, view: room({ tokens }) };
-    const rows = groupRows(dice, ["g1", "g2"], { kind: "none" }, false);
+    const rows = groupRows(dice, ["g1", "g2"], { kind: "none" }, false, new Map());
     const setup: Page = { ...newPage({ id: "p", sceneId: "s1", source: { kind: "selection", tokenIds: ["g1", "g2"] }, test: { kind: "none" }, dc: null, secret: true, spell: false, switches: { dcShown: true, resultShown: true }, outcome: { damage: "10" } }), rows };
     assert.equal(setup.phase, "setup");
     const typed = setAmount(setup, rows[0]!.holder, 4);
@@ -89,7 +89,7 @@ describe("the DM's own amount and the outcome's size", () => {
     const hundred = Array.from({ length: 100 }, (_, i) => `0192f0a8-6c1e-7a4b-9c3d-${String(i).padStart(12, "0")}`);
     const tokens = Object.fromEntries(hundred.map((id) => [id, token(id, { kind: "monster", name: "Cultist", actor: { inline: actor() } })]));
     const dice: DiceView = { ...DICE, view: room({ tokens }) };
-    const rows = groupRows(dice, hundred, { kind: "save", ability: "wis" }, false);
+    const rows = groupRows(dice, hundred, { kind: "save", ability: "wis" }, false, new Map());
     const page: Page = {
       ...newPage({ id: "p", sceneId: "s1", source: { kind: "selection", tokenIds: hundred }, test: { kind: "save", ability: "wis" }, dc: 15, secret: true, spell: true, switches: { dcShown: true, resultShown: true } }),
       fill: { name: "Hypnotic Pattern", from: "" },
@@ -112,7 +112,7 @@ describe("the plan's damage types and its quiet", () => {
   };
   const dice: DiceView = { ...DICE, view: room({ tokens, monsters: { lurker: customMonster("lurker", { immunities: "Fire" }) } }) };
   const ids = Object.keys(tokens);
-  const rows = groupRows(dice, ids, { kind: "save", ability: "dex" }, false);
+  const rows = groupRows(dice, ids, { kind: "save", ability: "dex" }, false, new Map());
   function page(damage: string, result: "fail" | "pass", secret = true): Page {
     const base: Page = {
       ...newPage({ id: "p", sceneId: "s1", source: { kind: "selection", tokenIds: ids }, test: { kind: "save", ability: "dex" }, dc: 15, secret, spell: false, switches: { dcShown: true, resultShown: true }, outcome: { damage, onPass: "half" } }),
@@ -174,7 +174,7 @@ describe("the plan's damage types and its quiet", () => {
   test("the page's bound counts every type its damage field names, on every row", () => {
     const hundred = Array.from({ length: 100 }, (_, i) => `0192f0a8-6c1e-7a4b-9c3d-${String(i).padStart(12, "0")}`);
     const many: DiceView = { ...DICE, view: room({ tokens: Object.fromEntries(hundred.map((id) => [id, token(id, { kind: "monster", name: "Cultist", actor: { inline: actor() } })])) }) };
-    const cultists = groupRows(many, hundred, { kind: "save", ability: "wis" }, false);
+    const cultists = groupRows(many, hundred, { kind: "save", ability: "wis" }, false, new Map());
     const at = (damage: string): Page => ({
       ...newPage({ id: "p", sceneId: "s1", source: { kind: "selection", tokenIds: hundred }, test: { kind: "save", ability: "wis" }, dc: 15, secret: true, spell: true, switches: { dcShown: true, resultShown: true } }),
       fill: { name: "Prismatic Storm", from: "" },

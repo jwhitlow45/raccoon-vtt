@@ -8,6 +8,7 @@ import { useRoomUi, useRoomView } from "../../state/view.ts";
 import { useAskHpFill } from "../tokens/hpDraft.ts";
 import { applyNow, fillEntry, NOTHING_YET, useApplyEnv } from "./apply.ts";
 import { appliedWords, applyTargets, chipName, offersChips, rollChip, rollOrigin, type ApplyTarget } from "./targets.ts";
+import { useLabels } from "../../state/labels.ts";
 
 /**
  * The chips under one roll's result, its lines as the receipt holds them.
@@ -18,6 +19,7 @@ import { appliedWords, applyTargets, chipName, offersChips, rollChip, rollOrigin
 export function ApplyTo(props: { lines: readonly LogEntry[]; style?: CSSProperties }) {
   const you = useRoomView((s) => s.you);
   const view = useRoomView((s) => s.view);
+  const labels = useLabels();
   const sceneId = useRoomView((s) => s.sceneId);
   const selected = useRoomView((s) => s.local.selectedIds);
   const local = useRoomView((s) => s.local);
@@ -31,8 +33,8 @@ export function ApplyTo(props: { lines: readonly LogEntry[]; style?: CSSProperti
   const offered = you !== null && view !== null && chip !== null && offersChips(you, mine, view.meta.settings.playersApplyDamage);
   const leave = useMemo(() => new Set(state.applied.map((a) => a.holder)), [state.applied]);
   const targets = useMemo(
-    () => (offered && view && you ? applyTargets({ view, you, sceneId, origin: rollOrigin(props.lines), selected, leave }) : []),
-    [offered, view, you, sceneId, props.lines, selected, leave],
+    () => (offered && view && you ? applyTargets({ labels, view, you, sceneId, origin: rollOrigin(props.lines), selected, leave }) : []),
+    [offered, view, you, sceneId, props.lines, selected, leave, labels],
   );
   if (!offered || !chip || !you) return null;
   const dm = you.role === "dm";

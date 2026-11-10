@@ -114,6 +114,7 @@ import { useCommittedRoll } from "./Roller.tsx";
 import { useReceiptVoice, type ReceiptState } from "./useReceipt.ts";
 import { chipWords, rollChip } from "./targets.ts";
 import { cardAttacks } from "../combat/alerts.ts";
+import { useLabels } from "../../state/labels.ts";
 
 /** The roll mode row (Roller.tsx) and the sticky result line, which a token's Roll lands the panel by (docs/design/design-v1-dice-pass.md 8), found from the Dice panel's root (DicePanel.tsx). */
 const DICE_PANEL = "[data-dice-panel]";
@@ -131,6 +132,7 @@ const DICE_LAST = "[data-dice-last]";
  * (docs/design/design-v1-stat-block-rolls.md), and the rest of its views stay text.
  */
 export function RollOptions(_props: PanelProps) {
+  const labels = useLabels();
   const role = useRoomView((s) => s.you?.role ?? null);
   const selected = useRoomView((s) => s.local.selectedIds);
   const view = useRoomView((s) => s.view);
@@ -160,7 +162,7 @@ export function RollOptions(_props: PanelProps) {
     const token = id !== undefined ? view.tokens[id] : undefined;
     if (selected.length > 1) body = <GroupOptions tokenIds={selected} />;
     else if (!token) body = <CreatureCard><Note>Select a token to roll for it.</Note></CreatureCard>;
-    else body = <CreatureOptions creature={{ tokenId: token.id }} tokenId={token.id} name={displayName(token)} />;
+    else body = <CreatureOptions creature={{ tokenId: token.id }} tokenId={token.id} name={displayName(token, labels)} />;
   } else body = <PlayerOptions view={view} selected={selected} />;
   return (
     <div ref={ref} data-roll-options="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
@@ -206,13 +208,14 @@ function landOnModes(options: HTMLElement, smooth: boolean): void {
  */
 /** Exported for its render test. */
 export function PlayerOptions(props: { view: RoomState; selected: readonly string[] }) {
+  const labels = useLabels();
   const me = useRoomView((s) => s.you?.memberId ?? "");
   const sceneId = useRoomView((s) => s.sceneId);
   const picked = useOption((s) => s.picked);
   const store = useOptionStore();
   const regionId = useId();
   const { view } = props;
-  const options = useMemo(() => playerCreatures(view, me, sceneId, displayName), [view, me, sceneId]);
+  const options = useMemo(() => playerCreatures(view, me, sceneId, (t) => displayName(t, labels)), [view, me, sceneId, labels]);
   const current = currentPick(view, options, picked, props.selected);
   const loaded = useCreatureRolls(current?.creature ?? null);
   const cast = useOption((s) => s.cast);
@@ -264,6 +267,7 @@ function currentPick(view: RoomState, options: readonly Pickable[], picked: stri
  * before them included (DicePanel.tsx).
  */
 export function useOptionsEndOnGroup(): boolean {
+  const labels = useLabels();
   const role = useRoomView((s) => s.you?.role ?? null);
   const selected = useRoomView((s) => s.local.selectedIds);
   const view = useRoomView((s) => s.view);
@@ -271,7 +275,7 @@ export function useOptionsEndOnGroup(): boolean {
   const sceneId = useRoomView((s) => s.sceneId);
   const picked = useOption((s) => s.picked);
   const player = view !== null && role !== null && role !== "dm";
-  const options = useMemo(() => (view && player ? playerCreatures(view, me, sceneId, displayName) : []), [view, player, me, sceneId]);
+  const options = useMemo(() => (view && player ? playerCreatures(view, me, sceneId, (t) => displayName(t, labels)) : []), [view, player, me, sceneId, labels]);
   const token = view && role === "dm" && selected.length === 1 ? view.tokens[selected[0]!] : undefined;
   const creature: ActorTarget | null = token ? { tokenId: token.id } : view && player ? (currentPick(view, options, picked, selected)?.creature ?? null) : null;
   const loaded = useCreatureRolls(creature);

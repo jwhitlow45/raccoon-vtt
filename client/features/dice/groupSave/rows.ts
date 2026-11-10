@@ -8,6 +8,7 @@ import { askTarget } from "../../rolls/logic.ts";
 import { creatureRolls, type DiceView } from "../creature.ts";
 import { presetFor } from "../presets.ts";
 import { holderOf } from "../targets.ts";
+import type { Labels } from "../../../lib/labels.ts";
 
 /**
  * A group save's rows (docs/design/design-v1-roll-options.md 5.2 and 5.3): one per
@@ -60,7 +61,7 @@ export function d20Of(test: GroupTest, spell: boolean): D20Test | null {
  * character are one row. The living first by name, then objects and the
  * dead, Skip from the start.
  */
-export function groupRows(dice: DiceView, tokenIds: readonly string[], test: GroupTest, spell: boolean): RowBase[] {
+export function groupRows(dice: DiceView, tokenIds: readonly string[], test: GroupTest, spell: boolean, labels: Labels): RowBase[] {
   const state = dice.view;
   const seen = new Set<string>();
   const out: RowBase[] = [];
@@ -89,7 +90,7 @@ export function groupRows(dice: DiceView, tokenIds: readonly string[], test: Gro
       target,
       tokenId: token.id,
       ...(ask && !ask.blocked ? { askRef: ask.ref } : {}),
-      name: displayName(token),
+      name: displayName(token, labels),
       ways,
       bonus,
       ...(preset?.fails ? { fails: preset.fails } : {}),

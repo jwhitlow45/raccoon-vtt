@@ -158,7 +158,7 @@ describe("sendFilledEntry, one op per holder", () => {
     const entry = oneTarget({ tokenId: ref.id }, "all", false, { name: "Thorn", dead: false, max: 20 }, ref);
     assert.equal(entry.holder, "character:c-thorn");
     const you = { role: "dm" as const, memberId: "dm1" };
-    const chips = (leave?: ReadonlySet<string>) => applyTargets({ view, you, sceneId: "s1", origin: { tokenId: "g1" }, selected: [], leave }).map((t) => t.tokenId);
+    const chips = (leave?: ReadonlySet<string>) => applyTargets({ labels: new Map(), view, you, sceneId: "s1", origin: { tokenId: "g1" }, selected: [], leave }).map((t) => t.tokenId);
     assert.ok(chips().includes("thorn"), "the chip starts in its row");
     sendFilledEntry(env, [entry], parsed.change, false, chip);
     sent[0]!.onAnswer!("taken");

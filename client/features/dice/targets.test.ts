@@ -49,7 +49,7 @@ const names = (list: readonly { name: string }[]) => list.map((t) => t.name);
 
 describe("applyTargets", () => {
   test("a goblin's damage names its enemies nearest first, four at most, never the goblin itself", () => {
-    const got = applyTargets({ view: table(), you: dm, sceneId: "s1", origin: { tokenId: "g1" }, selected: [] });
+    const got = applyTargets({ labels: new Map(), view: table(), you: dm, sceneId: "s1", origin: { tokenId: "g1" }, selected: [] });
     assert.deepEqual(names(got), ["Thorn", "Bree", "Wren", "Ash"], "the fifth ally nearest, Lee, gets no chip: no range is read");
     assert.equal(got.length, MAX_APPLY_CHIPS);
   });
@@ -57,60 +57,60 @@ describe("applyTargets", () => {
   test("enemies come first however near the rest stand, then the others by distance, the dead and objects never", () => {
     const view = table();
     // Thorn's hit: the hostiles first, the hidden bugbear included on the DM's map, then the party.
-    const got = applyTargets({ view, you: dm, sceneId: "s1", origin: { characterId: "c-thorn" }, selected: [] });
+    const got = applyTargets({ labels: new Map(), view, you: dm, sceneId: "s1", origin: { characterId: "c-thorn" }, selected: [] });
     assert.deepEqual(names(got), ["Bugbear Warrior", "Goblin Warrior 1", "Goblin Warrior 2", "Bree"]);
     // A neutral roller has no enemies: everyone by distance.
     const neutral = table({ tokens: { ...view.tokens, g1: { ...view.tokens.g1!, disposition: "neutral" } } });
     // The three beside it stand 5 ft off, so their names order them.
-    assert.deepEqual(names(applyTargets({ view: neutral, you: dm, sceneId: "s1", origin: { tokenId: "g1" }, selected: [] })), ["Bugbear Warrior", "Goblin Warrior 2", "Thorn", "Bree"]);
+    assert.deepEqual(names(applyTargets({ labels: new Map(), view: neutral, you: dm, sceneId: "s1", origin: { tokenId: "g1" }, selected: [] })), ["Bugbear Warrior", "Goblin Warrior 2", "Thorn", "Bree"]);
   });
 
   test("a typed roll for no creature offers the selected tokens in selection order, and nothing with none selected", () => {
     const view = table();
-    assert.deepEqual(names(applyTargets({ view, you: dm, sceneId: "s1", origin: {}, selected: ["thorn"] })), ["Thorn"]);
-    assert.deepEqual(applyTargets({ view, you: dm, sceneId: "s1", origin: {}, selected: [] }), []);
+    assert.deepEqual(names(applyTargets({ labels: new Map(), view, you: dm, sceneId: "s1", origin: {}, selected: ["thorn"] })), ["Thorn"]);
+    assert.deepEqual(applyTargets({ labels: new Map(), view, you: dm, sceneId: "s1", origin: {}, selected: [] }), []);
     // Unranked: the order picked, the dead and those on another scene left out.
-    assert.deepEqual(names(applyTargets({ view, you: dm, sceneId: "s1", origin: {}, selected: ["lee", "dead", "far", "g2", "thorn"] })), ["Lee", "Goblin Warrior 2", "Thorn"]);
+    assert.deepEqual(names(applyTargets({ labels: new Map(), view, you: dm, sceneId: "s1", origin: {}, selected: ["lee", "dead", "far", "g2", "thorn"] })), ["Lee", "Goblin Warrior 2", "Thorn"]);
   });
 
   test("a roller on another scene offers the selection, else nothing", () => {
     const view = table();
-    assert.deepEqual(names(applyTargets({ view, you: dm, sceneId: "s1", origin: { tokenId: "far" }, selected: ["g2"] })), ["Goblin Warrior 2"]);
-    assert.deepEqual(applyTargets({ view, you: dm, sceneId: "s1", origin: { tokenId: "far" }, selected: [] }), []);
+    assert.deepEqual(names(applyTargets({ labels: new Map(), view, you: dm, sceneId: "s1", origin: { tokenId: "far" }, selected: ["g2"] })), ["Goblin Warrior 2"]);
+    assert.deepEqual(applyTargets({ labels: new Map(), view, you: dm, sceneId: "s1", origin: { tokenId: "far" }, selected: [] }), []);
     // This device shows no scene: no chips.
-    assert.deepEqual(applyTargets({ view, you: dm, sceneId: null, origin: { tokenId: "g1" }, selected: ["g2"] }), []);
+    assert.deepEqual(applyTargets({ labels: new Map(), view, you: dm, sceneId: null, origin: { tokenId: "g1" }, selected: ["g2"] }), []);
   });
 
   test("Thorn with two tokens: as the roller, the nearer one counts and neither is offered. As a target, one chip at the nearer", () => {
     const view = table();
     const two = table({ tokens: { ...view.tokens, thorn2: { ...view.tokens.thorn!, id: "thorn2", x: 2, y: 5 } } });
-    const asRoller = applyTargets({ view: two, you: dm, sceneId: "s1", origin: { characterId: "c-thorn" }, selected: [] });
+    const asRoller = applyTargets({ labels: new Map(), view: two, you: dm, sceneId: "s1", origin: { characterId: "c-thorn" }, selected: [] });
     assert.ok(!asRoller.some((t) => t.holder === "character:c-thorn"));
     assert.deepEqual(names(asRoller).slice(0, 1), ["Bugbear Warrior"]);
     // Thorn's far token stands by nobody: the goblins are nearest the near one, whatever the far one sees.
-    const asTarget = applyTargets({ view: two, you: dm, sceneId: "s1", origin: { tokenId: "g1" }, selected: [] });
+    const asTarget = applyTargets({ labels: new Map(), view: two, you: dm, sceneId: "s1", origin: { tokenId: "g1" }, selected: [] });
     assert.deepEqual(asTarget.filter((t) => t.holder === "character:c-thorn").map((t) => t.tokenId), ["thorn"]);
     // From the roll's token alone, when it is here: a roll for thorn2 measures from thorn2.
-    const fromFar = applyTargets({ view: two, you: dm, sceneId: "s1", origin: { tokenId: "thorn2" }, selected: [] });
+    const fromFar = applyTargets({ labels: new Map(), view: two, you: dm, sceneId: "s1", origin: { tokenId: "thorn2" }, selected: [] });
     assert.ok(!fromFar.some((t) => t.holder === "character:c-thorn"), "the roller's other token is the roller too");
   });
 
   test("leave takes out creatures the roll already landed on", () => {
-    const got = applyTargets({ view: table(), you: dm, sceneId: "s1", origin: { tokenId: "g1" }, selected: [], leave: new Set(["character:c-thorn"]) });
+    const got = applyTargets({ labels: new Map(), view: table(), you: dm, sceneId: "s1", origin: { tokenId: "g1" }, selected: [], leave: new Set(["character:c-thorn"]) });
     assert.deepEqual(names(got), ["Bree", "Wren", "Ash", "Lee"]);
   });
 
   test("a hidden creature beside the roller is on the DM's chips, never on a player's, whose map is their projection", () => {
     const state = table({ meta: { ...table().meta, settings: { ...table().meta.settings, playersApplyDamage: true } } });
-    const dmChips = applyTargets({ view: state, you: dm, sceneId: "s1", origin: { characterId: "c-thorn" }, selected: [] });
+    const dmChips = applyTargets({ labels: new Map(), view: state, you: dm, sceneId: "s1", origin: { characterId: "c-thorn" }, selected: [] });
     assert.ok(dmChips.some((t) => t.tokenId === "bugbear"));
     const view = projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState;
     assert.equal(view.tokens.bugbear, undefined, "the projection holds no hidden token");
-    const patChips = applyTargets({ view, you: pat, sceneId: "s1", origin: { characterId: "c-thorn" }, selected: ["bugbear"] });
+    const patChips = applyTargets({ labels: new Map(), view, you: pat, sceneId: "s1", origin: { characterId: "c-thorn" }, selected: ["bugbear"] });
     assert.deepEqual(names(patChips), ["Goblin Warrior 1", "Goblin Warrior 2", "Bree", "Wren"]);
     // Without the setting a player may hurt only their own, and Thorn is the roller.
     const off = projectState(table(), P1, { sceneId: "s1" }) as unknown as RoomState;
-    assert.deepEqual(applyTargets({ view: off, you: pat, sceneId: "s1", origin: { characterId: "c-thorn" }, selected: [] }), []);
+    assert.deepEqual(applyTargets({ labels: new Map(), view: off, you: pat, sceneId: "s1", origin: { characterId: "c-thorn" }, selected: [] }), []);
   });
 
   test("any room: never the roller, the dead, one without HP access or off the map, one chip a creature, enemies first, and the same order however the room was built (property)", () => {
@@ -154,7 +154,7 @@ describe("applyTargets", () => {
         const selected = picked.map((n) => ids[n % ids.length]!);
         const view = asPlayer ? (projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState) : state;
         const you = asPlayer ? pat : dm;
-        const got = applyTargets({ view, you, sceneId: "s1", origin, selected });
+        const got = applyTargets({ labels: new Map(), view, you, sceneId: "s1", origin, selected });
         assert.ok(got.length <= MAX_APPLY_CHIPS);
         assert.equal(new Set(got.map((t) => t.holder)).size, got.length, "one chip a creature");
         const roller = state.tokens[rollerId]!;
@@ -178,7 +178,7 @@ describe("applyTargets", () => {
         }
         // The same room built in another order gives the same chips.
         const shuffled = Object.fromEntries(Object.entries(view.tokens).sort((a, b) => (seed === 0 ? b[0].localeCompare(a[0]) : a[0].localeCompare(b[0]))));
-        assert.deepEqual(applyTargets({ view: { ...view, tokens: shuffled }, you, sceneId: "s1", origin, selected }), got);
+        assert.deepEqual(applyTargets({ labels: new Map(), view: { ...view, tokens: shuffled }, you, sceneId: "s1", origin, selected }), got);
       }),
       { numRuns: 300 },
     );

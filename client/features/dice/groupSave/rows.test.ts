@@ -38,7 +38,7 @@ const dice = (): DiceView => ({ you: { memberId: "dm1", role: "dm" }, view: stat
 
 describe("who rolls how", () => {
   test("each holder once, the living first, objects and the dead at the end set to Skip, each with its ways in order", () => {
-    const rows = groupRows(dice(), ["g1", "g2", "g3", "cart", "bree1", "bree2", "owl"], { kind: "save", ability: "dex" }, false);
+    const rows = groupRows(dice(), ["g1", "g2", "g3", "cart", "bree1", "bree2", "owl"], { kind: "save", ability: "dex" }, false, new Map());
     assert.deepEqual(
       rows.map((r) => [r.name, r.ways, r.skip]),
       [
@@ -57,7 +57,7 @@ describe("who rolls how", () => {
   });
 
   test("a row the DM runs for a creature with no stat block rolls on the server with the bonus the DM types, and waits for it (owner's no-numbers rule)", () => {
-    const rows = groupRows(dice(), ["owl"], { kind: "save", ability: "dex" }, false);
+    const rows = groupRows(dice(), ["owl"], { kind: "save", ability: "dex" }, false, new Map());
     const owl = rows[0]!;
     assert.equal(owl.bonus, null);
     assert.equal(rowBonus(owl, {}), null);

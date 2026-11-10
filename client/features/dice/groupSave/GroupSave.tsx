@@ -93,6 +93,7 @@ import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { noticeWords, prepareSave, reconcileSave, resumeSaveEdits, saveEditable, SAVE_MEMORY_ONLY, OUTCOME_UNAVAILABLE, type SaveHistory, type SaveSession } from "./reopen.ts";
 import { authorityOf, knownSaveHistory, serverTime } from "./lifecycle.ts";
 import { askAgain, rerollSaves } from "./reroll.ts";
+import { useLabels } from "../../../state/labels.ts";
 
 export function RowDamageField(props: { name: string; value: number | string | undefined; computed: number | null; summary?: DamageSummaryLines; onChange(value: string | null): void }) {
   const errorId = useId();
@@ -210,6 +211,7 @@ export function GroupSave(props: { parent: "Dice" | "Areas"; onBack(): void; are
 }
 
 function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): void; set(page: Page | null): void; areaIds?: (templateId: string) => string[] }) {
+  const labels = useLabels();
   const { page, set } = props;
   const groupStore = useGroupSaveStore();
   const roomStore = useRoomStore();
@@ -298,7 +300,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     return caster ? [caster] : [];
   }, [rechargeHolder]);
   useDiceView(casters);
-  const live = dice && page.phase === "setup" && !reopened ? groupRows(dice, fromSource, page.test, page.spell) : page.rows;
+  const live = dice && page.phase === "setup" && !reopened ? groupRows(dice, fromSource, page.test, page.spell, labels) : page.rows;
   const rows = live;
   const tooMany = rows.length > 100;
   const shown: Page = page.phase === "setup" ? { ...page, rows } : page;

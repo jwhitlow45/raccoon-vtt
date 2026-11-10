@@ -633,10 +633,10 @@ describe("a shared attack in weather (docs/design/design-v1-weather.md 2.1)", ()
   });
 
   test("the shared attack's note says the preset once for three Shortbows, a thrown weapon's reminder, and nothing in calm air", () => {
-    assert.equal(sharedAttackNote(bows([shortbow, shortbow, shortbow]), goblins({ kind: "clear", wind: "strong" })), "Dis: Strong wind");
+    assert.equal(sharedAttackNote(bows([shortbow, shortbow, shortbow]), goblins({ kind: "clear", wind: "strong" }), new Map()), "Dis: Strong wind");
     const javelin = named("Javelin", { range: "either", weapon: true });
-    assert.equal(sharedAttackNote(bows([javelin, javelin]), goblins({ kind: "clear", wind: "strong" })), "Strong wind: Disadvantage on ranged attack rolls with weapons.");
-    assert.equal(sharedAttackNote(bows([shortbow, shortbow]), goblins(undefined)), "");
+    assert.equal(sharedAttackNote(bows([javelin, javelin]), goblins({ kind: "clear", wind: "strong" }), new Map()), "Strong wind: Disadvantage on ranged attack rolls with weapons.");
+    assert.equal(sharedAttackNote(bows([shortbow, shortbow]), goblins(undefined), new Map()), "");
   });
 
   test("words that bear on only some of the attackers name them, and on all of them name no one (GS-MIXED-NOTE)", () => {
@@ -645,9 +645,9 @@ describe("a shared attack in weather (docs/design/design-v1-weather.md 2.1)", ()
     for (const [id, number] of [["g1", 1], ["g2", 2], ["g3", 3]] as const) {
       view.view.tokens[id] = token(id, { kind: "monster", name: "Goblin Warrior", number, actor: { inline: actor(id === "g3" ? {} : { effects: [{ id: `e-${id}`, key: "poisoned" }] }) } });
     }
-    assert.equal(sharedAttackNote(attackers, view), "Dis: Poisoned for Goblin Warrior 1 and Goblin Warrior 2");
-    assert.equal(sharedAttackNote(attackers.slice(0, 2), view), "Dis: Poisoned", "both of two carry it, so it is said of the attack");
+    assert.equal(sharedAttackNote(attackers, view, new Map()), "Dis: Poisoned for Goblin Warrior 1 and Goblin Warrior 2");
+    assert.equal(sharedAttackNote(attackers.slice(0, 2), view, new Map()), "Dis: Poisoned", "both of two carry it, so it is said of the attack");
     view.view.tokens.g3 = token("g3", { kind: "monster", name: "Goblin Warrior", number: 3, actor: { inline: actor({ effects: [{ id: "e-g3", key: "poisoned" }] }) } });
-    assert.equal(sharedAttackNote(attackers, view), "Dis: Poisoned");
+    assert.equal(sharedAttackNote(attackers, view, new Map()), "Dis: Poisoned");
   });
 });

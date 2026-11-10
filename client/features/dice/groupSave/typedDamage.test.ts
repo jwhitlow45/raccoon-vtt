@@ -17,7 +17,7 @@ function setup() {
     tokens: { a: token("a", { actor: { inline: actor({ monsterId: "frost", hp: { cur: 100, max: 100, temp: 2 } }) } }) },
   });
   const dice: DiceView = { view, you: DM, srd: { monsters: [], rolls: {} } };
-  const rows = groupRows(dice, ["a"], { kind: "save", ability: "dex" }, false);
+  const rows = groupRows(dice, ["a"], { kind: "save", ability: "dex" }, false, new Map());
   const page = mark({ ...newPage({ id: "p", sceneId: "s1", source: { kind: "selection", tokenIds: ["a"] }, test: { kind: "save", ability: "dex" }, dc: 15, secret: false, spell: true, switches: { dcShown: true, resultShown: true }, outcome: { damage: "15 cold + 9 fire + 5 radiant", onPass: "half" } }), rows, phase: "rolled" as const }, rows[0]!.holder, "pass");
   return { dice, page, row: rows[0]!, parts: amountsOf(page)! };
 }
@@ -27,7 +27,7 @@ describe("FL-3 group save typed server damage", () => {
     for (const passAll of [false, true]) {
       const { dice, page } = setup();
       dice.view.tokens.b = token("b", { actor: { inline: actor({ hp: { cur: 100, max: 100, temp: 0 } }) } });
-      const rows = groupRows(dice, ["a", "b"], { kind: "none" }, false);
+      const rows = groupRows(dice, ["a", "b"], { kind: "none" }, false, new Map());
       let noSave = { ...page, test: { kind: "none" as const }, rows, states: {}, outcome: { ...page.outcome, damage: "10 cold" } };
       noSave = { ...noSave, states: Object.fromEntries(rows.map((row, i) => [row.holder, { way: "type" as const, mark: i === 0 || passAll ? "pass" as const : "fail" as const, evasion: true }])) };
       const parts = amountsOf(noSave)!;

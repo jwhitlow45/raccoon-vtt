@@ -38,6 +38,8 @@ import { d20Of, groupRows, type GroupTest } from "./rows.ts";
 import { quickRollNow } from "./start.ts";
 import { useRollModeMenu } from "../useRollModeMenu.tsx";
 import type { RollModeOverride, RollModeCapability } from "../rollMode.ts";
+import { useLabels } from "../../../state/labels.ts";
+import type { Labels } from "../../../lib/labels.ts";
 
 /**
  * Several selected creatures (docs/design/design-v1-roll-options.md 4.4): a DC,
@@ -52,6 +54,7 @@ import type { RollModeOverride, RollModeCapability } from "../rollMode.ts";
  * Shared attacks as folding groups, each remembered for the device.
  */
 export function GroupOptions(props: { tokenIds: readonly string[] }) {
+  const labels = useLabels();
   const view = useRoomView((s) => s.view);
   const panel = useDicePanel();
   const start = useStartGroupSave();
@@ -88,9 +91,9 @@ export function GroupOptions(props: { tokenIds: readonly string[] }) {
     const token = view.tokens[id];
     return token ? [token] : [];
   });
-  const names = tokens.map((t) => displayName(t));
+  const names = tokens.map((t) => displayName(t, labels));
   const n = names.length;
-  const pictures = tokens.slice(0, CARD_PICTURES).flatMap((token) => creatureLook({ view, creature: { tokenId: token.id }, name: displayName(token) })?.picture ?? []);
+  const pictures = tokens.slice(0, CARD_PICTURES).flatMap((token) => creatureLook({ view, creature: { tokenId: token.id }, name: displayName(token, labels) })?.picture ?? []);
 
   const go = (input: StartInput) => {
     if (!start(input)) setPending(input);
@@ -101,7 +104,7 @@ export function GroupOptions(props: { tokenIds: readonly string[] }) {
     go({ source: { kind: "selection", tokenIds: [...props.tokenIds] }, test, dc, panel: "dice", rollNow: quickRollNow(taken, secretStartIn(room.getState(), creatures), override) });
   };
   const quickMode = (test: GroupTest): CellMode => {
-    const rows = dice ? groupRows(dice, [...props.tokenIds], test, false) : [];
+    const rows = dice ? groupRows(dice, [...props.tokenIds], test, false, labels) : [];
     const server = rows.some((r) => !r.skip && r.ways[0] === "server");
     const d20 = d20Of(test, false);
     const source = JSON.stringify([props.tokenIds, dc, test, rows.map((row) => [row, dice && d20 ? presetFor(dice, row.target, d20) : null]), secretStartIn(room.getState(), creatures), panel.adv, panel.dis, panel.secret]);
@@ -259,22 +262,22 @@ export function attackPanelRolls(each: readonly Attacker[], dice: DiceView): Pan
  * says of the whole attack what one creature's roll does not take
  * (GS-MIXED-NOTE). Empty when nothing does.
  */
-export function sharedAttackNote(each: readonly Attacker[], dice: DiceView): string {
+export function sharedAttackNote(each: readonly Attacker[], dice: DiceView, labels: Labels): string {
   const presets = each.map(({ creature, named }) => presetFor(dice, creature, attackTest(named)));
   const lines = presets.map((p) => presetLine(p).split(". ").filter(Boolean));
   const parts = [...new Set(lines.flat())];
   const words = parts.map((part) => {
-    const owners = each.flatMap((e, i) => (lines[i]!.includes(part) ? [attackerName(e.creature, dice)] : []));
+    const owners = each.flatMap((e, i) => (lines[i]!.includes(part) ? [attackerName(e.creature, dice, labels)] : []));
     return owners.length === each.length ? part : `${part} for ${joinNames(owners)}`;
   });
   return joinSentences([words.join(". "), ...presetNotes(presets)]);
 }
 
 /** An attacker's name as the group's other lines say it: its token's, or its character's. */
-function attackerName(creature: ActorTarget, dice: DiceView): string {
+function attackerName(creature: ActorTarget, dice: DiceView, labels: Labels): string {
   if ("tokenId" in creature) {
     const token = dice.view.tokens[creature.tokenId];
-    return token ? displayName(token) : "a creature";
+    return token ? displayName(token, labels) : "a creature";
   }
   return dice.view.characters[creature.characterId]?.name ?? "a character";
 }
@@ -405,6 +408,7 @@ export function attackSummary(name: string, state: SharedAttackState | undefined
  * one chip: one target takes the hits, so there is no Apply.
  */
 function SharedAttack(props: { name: string; each: Attacker[]; dice: DiceView; blocked: string | null }) {
+  const labels = useLabels();
   const panel = useDicePanel();
   // The attack rolls for every attacker, whose Secret start the panel reads as it rolls.
   const presses = useRollPresses(props.each.map((e) => e.creature));
@@ -447,7 +451,7 @@ function SharedAttack(props: { name: string; each: Attacker[]; dice: DiceView; b
   const commonMode = modes[0];
   const missingModes = modes.every((mode) => mode === commonMode) ? commonMode ? `, ${commonMode}` : "" : `; ${detailedResults}`;
   const total = damage?.state === "committed" ? rollsOf(damage.lines).reduce((a, r) => a + r.total, 0) : null;
-  const note = sharedAttackNote(props.each, props.dice);
+  const note = sharedAttackNote(props.each, props.dice, labels);
   return (
     // Named for the attack alone, as its button's name grows with what bears on it. Every shared attack has a Target's AC field, and this says whose.
     <div role="group" aria-label={`${props.name} for ${n}`} style={{ display: "grid", gap: theme.space(1), borderTop: `${theme.line.border}px solid ${theme.color.border}`, paddingTop: theme.space(1) }}>

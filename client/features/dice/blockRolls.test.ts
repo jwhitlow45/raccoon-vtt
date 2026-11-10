@@ -78,39 +78,39 @@ const strip = (r: BlockRoller | null) => r && { ...r };
 describe("whose block rolls (section 2)", () => {
   test("a PC token's panel rolls for the character, for the DM on its scene and for its players anywhere", () => {
     const view = state();
-    assert.deepEqual(strip(blockRoller(view, DM, "s1", { tokenId: "thornTok" })), { creature: { characterId: "thorn" }, tokenId: "thornTok", name: "Thorn", played: true });
-    assert.deepEqual(strip(blockRoller(view, P1, "s1", { tokenId: "thornTok" })), { creature: { characterId: "thorn" }, tokenId: "thornTok", name: "Thorn", played: false });
-    assert.equal(blockRoller(view, DM, "s2", { tokenId: "thornTok" }), null, "the DM rolls only for a token on the scene in view");
-    assert.ok(blockRoller(view, P1, "s2", { tokenId: "thornTok" }), "a player rolls for their own character wherever its token is");
-    assert.equal(blockRoller(view, P2, "s1", { tokenId: "thornTok" }), null, "another player holds none of its numbers");
-    assert.equal(blockRoller(view, P1, "s1", { tokenId: "lent" }), null, "a lent token of a character whose numbers the player does not hold stays text");
+    assert.deepEqual(strip(blockRoller(view, DM, "s1", { tokenId: "thornTok" }, new Map())), { creature: { characterId: "thorn" }, tokenId: "thornTok", name: "Thorn", played: true });
+    assert.deepEqual(strip(blockRoller(view, P1, "s1", { tokenId: "thornTok" }, new Map())), { creature: { characterId: "thorn" }, tokenId: "thornTok", name: "Thorn", played: false });
+    assert.equal(blockRoller(view, DM, "s2", { tokenId: "thornTok" }, new Map()), null, "the DM rolls only for a token on the scene in view");
+    assert.ok(blockRoller(view, P1, "s2", { tokenId: "thornTok" }, new Map()), "a player rolls for their own character wherever its token is");
+    assert.equal(blockRoller(view, P2, "s1", { tokenId: "thornTok" }, new Map()), null, "another player holds none of its numbers");
+    assert.equal(blockRoller(view, P1, "s1", { tokenId: "lent" }, new Map()), null, "a lent token of a character whose numbers the player does not hold stays text");
   });
 
   test("a character's page rolls for its players with or without a token, and for the DM only with a token on the scene in view", () => {
     const view = state();
-    assert.deepEqual(strip(blockRoller(view, P1, "s1", { characterId: "thorn" })), { creature: { characterId: "thorn" }, tokenId: "thornTok", name: "Thorn", played: false });
-    assert.deepEqual(strip(blockRoller(view, P1, "s1", { characterId: "loner" })), { creature: { characterId: "loner" }, name: "Loner", played: false }, "no token at all");
-    assert.deepEqual(strip(blockRoller(view, P1, "s2", { characterId: "thorn" })), { creature: { characterId: "thorn" }, name: "Thorn", played: false }, "its token on another scene than the viewer's is not its token here");
-    assert.deepEqual(strip(blockRoller(view, DM, "s1", { characterId: "thorn" })), { creature: { characterId: "thorn" }, tokenId: "thornTok", name: "Thorn", played: true });
-    assert.equal(blockRoller(view, DM, "s2", { characterId: "thorn" }), null, "no token on the DM's scene");
-    assert.equal(blockRoller(view, DM, "s1", { characterId: "loner" }), null);
-    assert.equal(blockRoller(view, P2, "s1", { characterId: "thorn" }), null);
-    assert.equal(blockRoller(view, P1, "s1", { characterId: "gone" }), null);
+    assert.deepEqual(strip(blockRoller(view, P1, "s1", { characterId: "thorn" }, new Map())), { creature: { characterId: "thorn" }, tokenId: "thornTok", name: "Thorn", played: false });
+    assert.deepEqual(strip(blockRoller(view, P1, "s1", { characterId: "loner" }, new Map())), { creature: { characterId: "loner" }, name: "Loner", played: false }, "no token at all");
+    assert.deepEqual(strip(blockRoller(view, P1, "s2", { characterId: "thorn" }, new Map())), { creature: { characterId: "thorn" }, name: "Thorn", played: false }, "its token on another scene than the viewer's is not its token here");
+    assert.deepEqual(strip(blockRoller(view, DM, "s1", { characterId: "thorn" }, new Map())), { creature: { characterId: "thorn" }, tokenId: "thornTok", name: "Thorn", played: true });
+    assert.equal(blockRoller(view, DM, "s2", { characterId: "thorn" }, new Map()), null, "no token on the DM's scene");
+    assert.equal(blockRoller(view, DM, "s1", { characterId: "loner" }, new Map()), null);
+    assert.equal(blockRoller(view, P2, "s1", { characterId: "thorn" }, new Map()), null);
+    assert.equal(blockRoller(view, P1, "s1", { characterId: "gone" }, new Map()), null);
   });
 
   test("a token's own creature rolls for the DM on its scene, and for a player where the Dice panel offers it", () => {
     const view = state();
-    assert.deepEqual(strip(blockRoller(view, DM, "s1", { tokenId: "gob" })), { creature: { tokenId: "gob" }, tokenId: "gob", name: "Goblin", played: false });
-    assert.equal(blockRoller(view, DM, "s1", { tokenId: "gobFar" }), null);
-    assert.ok(blockRoller(view, DM, "s2", { tokenId: "gobFar" }), "the DM's scene in view, which the players need not be on");
-    assert.equal(blockRoller(view, P1, "s1", { tokenId: "gob" }), null, "a monster nobody lent");
-    assert.deepEqual(strip(blockRoller(view, P1, "s1", { tokenId: "moth" })), { creature: { tokenId: "moth" }, tokenId: "moth", name: "Moth", played: false }, "a companion of their character");
-    assert.deepEqual(strip(blockRoller(view, DM, "s1", { tokenId: "moth" })), { creature: { tokenId: "moth" }, tokenId: "moth", name: "Moth", played: true }, "the DM's ask names its player");
-    assert.equal(blockRoller(view, P1, "s1", { tokenId: "mothFar" }), null, "off the players' scene");
-    assert.ok(blockRoller(view, P1, "s1", { tokenId: "wolf" }), "an SRD token the player owns, such as a 2014 Wild Shape");
-    assert.equal(blockRoller(view, P1, "s1", { tokenId: "crate" }), null, "objects never roll");
-    assert.equal(blockRoller(view, DM, "s1", { tokenId: "crate" }), null, "not even for the DM: an object is no creature");
-    assert.equal(blockRoller(view, DM, "s1", { tokenId: "gone" }), null);
+    assert.deepEqual(strip(blockRoller(view, DM, "s1", { tokenId: "gob" }, new Map())), { creature: { tokenId: "gob" }, tokenId: "gob", name: "Goblin", played: false });
+    assert.equal(blockRoller(view, DM, "s1", { tokenId: "gobFar" }, new Map()), null);
+    assert.ok(blockRoller(view, DM, "s2", { tokenId: "gobFar" }, new Map()), "the DM's scene in view, which the players need not be on");
+    assert.equal(blockRoller(view, P1, "s1", { tokenId: "gob" }, new Map()), null, "a monster nobody lent");
+    assert.deepEqual(strip(blockRoller(view, P1, "s1", { tokenId: "moth" }, new Map())), { creature: { tokenId: "moth" }, tokenId: "moth", name: "Moth", played: false }, "a companion of their character");
+    assert.deepEqual(strip(blockRoller(view, DM, "s1", { tokenId: "moth" }, new Map())), { creature: { tokenId: "moth" }, tokenId: "moth", name: "Moth", played: true }, "the DM's ask names its player");
+    assert.equal(blockRoller(view, P1, "s1", { tokenId: "mothFar" }, new Map()), null, "off the players' scene");
+    assert.ok(blockRoller(view, P1, "s1", { tokenId: "wolf" }, new Map()), "an SRD token the player owns, such as a 2014 Wild Shape");
+    assert.equal(blockRoller(view, P1, "s1", { tokenId: "crate" }, new Map()), null, "objects never roll");
+    assert.equal(blockRoller(view, DM, "s1", { tokenId: "crate" }, new Map()), null, "not even for the DM: an object is no creature");
+    assert.equal(blockRoller(view, DM, "s1", { tokenId: "gone" }, new Map()), null);
   });
 
   test("a box says what its list holds", () => {

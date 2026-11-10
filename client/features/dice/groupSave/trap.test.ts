@@ -37,7 +37,7 @@ function pageFor(t: Trap, secret: boolean): { page: Page; rows: RowBase[]; dice:
   const filled = trapFill(t);
   const source = { kind: "trap" as const, trapId: t.id, due: "20:0", tokenIds: ["thorn", "gob"] };
   const page = newPage({ id: "p", sceneId: "s1", source, test: filled.test, dc: filled.dc, secret, spell: filled.spell, switches: { dcShown: false, resultShown: true }, fill: filled.fill, outcome: filled.outcome });
-  return { page, rows: groupRows(dice, sourceIds(source, ["someone else"]), filled.test, false), dice };
+  return { page, rows: groupRows(dice, sourceIds(source, ["someone else"]), filled.test, false, new Map()), dice };
 }
 
 describe("a trap's group save", () => {

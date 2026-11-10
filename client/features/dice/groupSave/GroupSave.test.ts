@@ -40,7 +40,7 @@ const VIEW = room({ tokens: { g1: token("g1", { name: "Guard", actor: { inline: 
 const DICE = { view: VIEW, you: DM, srd: { monsters: [], rolls: {} } };
 function damagePage(damage: string): Page {
   const test = { kind: "none" } as const;
-  return { ...newPage({ id: "damage", sceneId: "s1", source: { kind: "selection", tokenIds: ["g1"] }, test, dc: null, secret: false, spell: false, switches: { dcShown: true, resultShown: true }, outcome: { damage, conditions: ["prone"] } }), rows: groupRows(DICE, ["g1"], test, false) };
+  return { ...newPage({ id: "damage", sceneId: "s1", source: { kind: "selection", tokenIds: ["g1"] }, test, dc: null, secret: false, spell: false, switches: { dcShown: true, resultShown: true }, outcome: { damage, conditions: ["prone"] } }), rows: groupRows(DICE, ["g1"], test, false, new Map()) };
 }
 function drawPage(page: Page, lines: import("#shared/model.ts").LogEntry[] = [], connection = "open", reopen: SaveReopen | null = null, choices: Partial<import("../useDicePanel.ts").DiceState> = {}, history?: { epoch: string; undo: number }): string {
   const scope = new RoomScope();
@@ -314,7 +314,7 @@ test("group row Secret is informative only when it differs from the page switch"
 test("group main, row and damage sources ignore unrelated room and row state", () => {
   const view = structuredClone(VIEW);
   view.tokens.other = token("other");
-  const base: Page = { ...PAGE, rows: groupRows(DICE, ["g1"], PAGE.test, false), source: { kind: "selection", tokenIds: ["g1"] }, states: { "token:g1": { way: "server", typedBonus: 4 } } };
+  const base: Page = { ...PAGE, rows: groupRows(DICE, ["g1"], PAGE.test, false, new Map()), source: { kind: "selection", tokenIds: ["g1"] }, states: { "token:g1": { way: "server", typedBonus: 4 } } };
   for (const page of [base, { ...base, phase: "rolled" as const, states: { "token:g1": { way: "server" as const, typedBonus: 4, status: "unknown" as const } } }, damagePage("1d6 fire")]) {
     const source = (p: Page) => new Map(captureRolls(p, view).buttons.map((b) => [b.name, b.source]));
     const before = source(page);
@@ -369,7 +369,7 @@ test("a group row source ignores its sibling request answer and request bookkeep
   let view = structuredClone(VIEW);
   view.tokens.other = token("other");
   view.rolls.request = { id: "request", rev: 1, at: "now", dcShown: true, resultShown: true, test: { kind: "save", choices: [{ ability: "dex" }] }, targets: [{ tokenId: "g1" }, { tokenId: "other" }] };
-  const page: Page = { ...PAGE, phase: "rolled", rows: groupRows(DICE, ["g1"], PAGE.test, false).map((row) => ({ ...row, askRef: { tokenId: "g1" }, bonus: 4 })), states: { "token:g1": { way: "ask", asked: { rollId: "request" } } } };
+  const page: Page = { ...PAGE, phase: "rolled", rows: groupRows(DICE, ["g1"], PAGE.test, false, new Map()).map((row) => ({ ...row, askRef: { tokenId: "g1" }, bonus: 4 })), states: { "token:g1": { way: "ask", asked: { rollId: "request" } } } };
   const source = () => captureRolls(page, view).buttons.find((button) => button.name === "Guard's requested roll")!.source;
   const before = source();
   view = apply(view, { t: "roll.answer", rollId: "request", target: { tokenId: "other" }, total: 15, tag: "sibling-answer" });
@@ -437,7 +437,7 @@ test("a page Redo locked again draws Done alone in its foot, with no empty line 
 });
 
 test("a reopened row waiting on its ask keeps the typed bonus with its roll, and its switches in a group that fills a line it wraps onto", () => {
-  const page: Page = { ...PAGE, phase: "rolled", outcome: { ...PAGE.outcome, damage: "9 fire", onPass: "half" }, rows: groupRows(DICE, ["g1"], PAGE.test, false).map((row) => ({ ...row, askRef: { tokenId: "g1" }, bonus: null })), states: { "token:g1": { way: "ask", asked: { rollId: "request" } } } };
+  const page: Page = { ...PAGE, phase: "rolled", outcome: { ...PAGE.outcome, damage: "9 fire", onPass: "half" }, rows: groupRows(DICE, ["g1"], PAGE.test, false, new Map()).map((row) => ({ ...row, askRef: { tokenId: "g1" }, bonus: null })), states: { "token:g1": { way: "ask", asked: { rollId: "request" } } } };
   const markup = drawPage(page, [], "open", { check: "undone", notice: OUTCOME_UNDONE });
   const gap = theme.space(1);
   assert.match(markup, new RegExp(`<div style="display:flex;align-items:center;gap:${gap}px;flex:none"><input aria-label="Bonus for Guard"[^>]*/><button[^>]*>Roll d20</button></div><button[^>]*>Ask again</button><div style="display:flex;flex-wrap:wrap;align-items:center;gap:${gap}px;flex:1 1 auto"><label[^>]*>(?:(?!</label>).)*Evasion`));
@@ -493,7 +493,7 @@ test("a reopened No save page applies to the creatures its first Apply named, ne
 });
 
 test("a row keeps its total field while the connection is down, so a total being typed survives, with its actions waiting", () => {
-  const page: Page = { ...PAGE, phase: "rolled", outcome: { ...PAGE.outcome, damage: "9 fire" }, rows: groupRows(DICE, ["g1"], PAGE.test, false), states: { "token:g1": { way: "type" } } };
+  const page: Page = { ...PAGE, phase: "rolled", outcome: { ...PAGE.outcome, damage: "9 fire" }, rows: groupRows(DICE, ["g1"], PAGE.test, false, new Map()), states: { "token:g1": { way: "type" } } };
   const online = drawPage(page, [], "open");
   assert.match(online, /aria-label="Guard&#x27;s total"/);
   const offline = drawPage(page, [], "closed");
@@ -532,7 +532,7 @@ test("an Apply the queue let go of with no receipt draws Start over and Discard,
 });
 
 test("a total committed as the connection drops reaches the page, and Apply after the reconnect uses it", () => {
-  const page: Page = { ...PAGE, source: { kind: "selection", tokenIds: ["g1"] }, phase: "rolled", outcome: { ...PAGE.outcome, damage: "9 fire", onPass: "half" }, rows: groupRows(DICE, ["g1"], PAGE.test, false), states: { "token:g1": { way: "type", typed: 7 } } };
+  const page: Page = { ...PAGE, source: { kind: "selection", tokenIds: ["g1"] }, phase: "rolled", outcome: { ...PAGE.outcome, damage: "9 fire", onPass: "half" }, rows: groupRows(DICE, ["g1"], PAGE.test, false, new Map()), states: { "token:g1": { way: "type", typed: 7 } } };
   const offline = captureRolls(page, VIEW, null, { connection: "closed" });
   const total = offline.fields.find((field) => field.label === "Guard's total");
   assert.ok(total, JSON.stringify(offline.fields.map((field) => field.label)));

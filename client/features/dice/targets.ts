@@ -8,6 +8,7 @@ import { joinNames } from "../clock/words.ts";
 import { tokenAccess } from "../tokens/access.ts";
 import { damageSummary } from "./damageSummaryLines.ts";
 import { hpChips, type HpChip } from "./options.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /*
  * Who a damage roll's "Apply to" chips name, and what they carry (QOL audit
@@ -68,7 +69,7 @@ function byText(a: string, b: string): number {
  * this viewer may not hurt, or a token off this device's map: a player's
  * map is their projection, which holds no withheld or fogged token.
  */
-export function applyTargets(input: { view: ApplyView; you: ApplyYou; sceneId: string | null; origin: RollOrigin; selected: readonly string[]; leave?: ReadonlySet<string> }): ApplyTarget[] {
+export function applyTargets(input: { labels: Labels; view: ApplyView; you: ApplyYou; sceneId: string | null; origin: RollOrigin; selected: readonly string[]; leave?: ReadonlySet<string> }): ApplyTarget[] {
   const { view, you } = input;
   const scene = input.sceneId !== null ? view.scenes[input.sceneId] : undefined;
   if (!scene) return [];
@@ -79,7 +80,7 @@ export function applyTargets(input: { view: ApplyView; you: ApplyYou; sceneId: s
   const origins = (rollToken?.sceneId === scene.id ? [rollToken] : characterId !== undefined ? here.filter((t) => "ref" in t.actor && t.actor.ref === characterId) : []).sort((a, b) => byText(a.id, b.id));
   const leave = input.leave ?? new Set<string>();
   const offered = (t: Token) => holderOf(t) !== roller && !leave.has(holderOf(t)) && changesHp(view, you, t);
-  const target = (t: Token): ApplyTarget => ({ tokenId: t.id, holder: holderOf(t), name: displayName(t) });
+  const target = (t: Token): ApplyTarget => ({ tokenId: t.id, holder: holderOf(t), name: displayName(t, input.labels) });
   if (origins.length === 0) {
     const seen = new Set<string>();
     const out: ApplyTarget[] = [];
@@ -106,7 +107,7 @@ export function applyTargets(input: { view: ApplyView; you: ApplyYou; sceneId: s
   }
   const group = (t: Token) => (enemy !== null && t.disposition === enemy ? 0 : 1);
   return [...nearest.values()]
-    .sort((a, b) => group(a.token) - group(b.token) || a.ft - b.ft || byText(displayName(a.token), displayName(b.token)) || byText(a.token.id, b.token.id))
+    .sort((a, b) => group(a.token) - group(b.token) || a.ft - b.ft || byText(displayName(a.token, input.labels), displayName(b.token, input.labels)) || byText(a.token.id, b.token.id))
     .slice(0, MAX_APPLY_CHIPS)
     .map((c) => target(c.token));
 }

@@ -16,6 +16,7 @@ import { creatureKey, initiativeRow, initiativeTag, playerCreatures, presetLine,
 import { presetFor } from "./presets.ts";
 import { marksTest } from "./proficiencyPresentation.ts";
 import type { RollModeCapability } from "./rollMode.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * Rolling from a stat block's ability boxes (docs/design/design-v1-stat-block-rolls.md),
@@ -34,7 +35,7 @@ export type BlockFrom = { tokenId: TokenId } | { characterId: CharacterId };
 export type BlockRoller = { creature: ActorTarget; tokenId?: TokenId; name: string; played: boolean };
 
 /** Who rolls from a block, or null where its boxes stay text (section 2). */
-export function blockRoller(view: RoomState, you: You, sceneId: string | null, from: BlockFrom): BlockRoller | null {
+export function blockRoller(view: RoomState, you: You, sceneId: string | null, from: BlockFrom, labels: Labels): BlockRoller | null {
   const dm = you.role === "dm";
   const onScene = (t: RoomState["tokens"][string]) => t.sceneId === sceneId;
   if ("characterId" in from) {
@@ -43,7 +44,7 @@ export function blockRoller(view: RoomState, you: You, sceneId: string | null, f
     // The token the Dice panel picks for it: its first on the viewer's scene (playerCreatures).
     const token = Object.values(view.tokens).find((t) => onScene(t) && "ref" in t.actor && t.actor.ref === character.id);
     if (dm ? token === undefined : !ownsCharacter(you.memberId, character)) return null;
-    return characterRoller(view, dm, character, token);
+    return characterRoller(view, dm, character, token, labels);
   }
   const token = view.tokens[from.tokenId];
   if (!token || token.kind === "object") return null;
@@ -51,14 +52,14 @@ export function blockRoller(view: RoomState, you: You, sceneId: string | null, f
     const character = view.characters[token.actor.ref];
     // The DM rolls for a character through a token on the scene in view. A player rolls for their own character wherever its token stands, and never with numbers they do not hold.
     if (!character || (dm ? !onScene(token) : !ownsCharacter(you.memberId, character))) return null;
-    return characterRoller(view, dm, character, token);
+    return characterRoller(view, dm, character, token, labels);
   }
-  if (dm ? !onScene(token) : !playerCreatures(view, you.memberId, sceneId, displayName).some((o) => "tokenId" in o.creature && o.creature.tokenId === token.id)) return null;
-  return { creature: { tokenId: token.id }, tokenId: token.id, name: displayName(token), played: dm && playersToken(view, token) };
+  if (dm ? !onScene(token) : !playerCreatures(view, you.memberId, sceneId, (t) => displayName(t, labels)).some((o) => "tokenId" in o.creature && o.creature.tokenId === token.id)) return null;
+  return { creature: { tokenId: token.id }, tokenId: token.id, name: displayName(token, labels), played: dm && playersToken(view, token) };
 }
 
 /** A character's roller, its token the one on the viewer's scene, played as the Dice panel's card reads it (RollOptions useCtx). */
-function characterRoller(view: RoomState, dm: boolean, character: RoomState["characters"][string], token: RoomState["tokens"][string] | undefined): BlockRoller {
+function characterRoller(view: RoomState, dm: boolean, character: RoomState["characters"][string], token: RoomState["tokens"][string] | undefined, labels: Labels): BlockRoller {
   const played = dm && (token ? playersToken(view, token) : character.ownerIds.some((id) => view.members[id]?.kind === "player"));
   return { creature: { characterId: character.id }, ...(token ? { tokenId: token.id } : {}), name: character.name, played };
 }
