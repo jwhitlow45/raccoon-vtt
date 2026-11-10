@@ -447,4 +447,16 @@ describe("the wing's base", () => {
     assert.equal(wingBaseOf(elsewhere, s, AREA, join).hash, first.hash, "a token on another scene");
     assert.notEqual(wingBaseOf(view, s, { ...AREA, w: 21 }, join).hash, first.hash, "another area");
   });
+
+  test("its hash names the tapped wall, not the join Corridor width widens, so a change of width is no changed scene", () => {
+    // DG3 review round 1: Wide joined two edges, the hash moved, and the pane dropped the edits as if the scene had changed, with no Bring them back.
+    const { view, scene: s } = squareRoom({ cells: ROOM });
+    const tap = { grid: "squares" as const, key: "10,7,w" };
+    const narrow = joined(judgeJoin(view, s, tap, AREA, false));
+    const wide = joined(judgeJoin(view, s, tap, AREA, true));
+    assert.notDeepEqual(wide.expect, narrow.expect, "not vacuous: Wide joins more of the wall");
+    assert.equal(wingBaseOf(view, s, AREA, wide).hash, wingBaseOf(view, s, AREA, narrow).hash);
+    const other = joined(judgeJoin(view, s, { grid: "squares", key: "10,6,w" }, AREA, false));
+    assert.notEqual(wingBaseOf(view, s, AREA, other).hash, wingBaseOf(view, s, AREA, narrow).hash, "another wall tapped");
+  });
 });

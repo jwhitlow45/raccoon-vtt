@@ -724,8 +724,15 @@ function own<T extends { sceneId?: string }>(all: Readonly<Record<string, T | un
 /**
  * What the wing is planned on (3.3 and 4.2, D-261110-231): the scene, the
  * parts of the room that can stand in the planner's way, the area, the
- * join as the asks carry it, and a hash of all of it on this scene, which
- * edits freeze, so a base posted again over a changed scene drops them.
+ * join as the asks carry it, and a hash of the scene, the area and the
+ * tapped wall, which edits freeze, so a base posted again over a changed
+ * scene drops them.
+ *
+ * The hash names the tapped wall rather than the join it judged, since
+ * Corridor width widens or narrows that join: a change of width drops the
+ * edits as any change of choice does, with Bring them back, and is no
+ * changed scene (DG3 review round 1). The planner posts the base again
+ * when its join changes (WingPane.tsx `wingPlanner`).
  */
 export function wingBaseOf(view: Based, scene: Scene, area: CellRect, join: WingJoin): WingBase {
   const state: WingBase["state"] = {
@@ -743,7 +750,7 @@ export function wingBaseOf(view: Based, scene: Scene, area: CellRect, join: Wing
     grid: scene.gridShape ?? "squares",
     autoWalls: autoWallsOf(scene),
     area,
-    join: join.expect,
+    tap: join.tap,
     chunks: own(view.buildChunks, scene.id),
     traps: own(view.traps, scene.id),
     stamps: own(view.stamps, scene.id),

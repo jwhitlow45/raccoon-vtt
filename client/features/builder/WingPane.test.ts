@@ -39,3 +39,20 @@ test("on a small area a room edit holds: the pane freezes the layout its plan fr
     assert.equal(again.facts.find((f) => f.room === room.room)?.lit, !room.lit, `${w} by ${h}: the edit holds`);
   }
 });
+
+test("the planner posts the base again when its join changes under the same hash, as Corridor width does, and not otherwise", async () => {
+  const base = squareWingBase();
+  const posted: unknown[] = [];
+  const planner = wingPlanner(
+    () => null,
+    (b) => posted.push(b.join),
+    async (s, seed, context, key, edits) => wingPreviewOf(s, seed, base, context, key, edits),
+  );
+  const settings = { ...DEFAULT_SETTINGS, w: base.area.w, h: base.area.h };
+  await planner({ settings, seed: SEED, base, feetPerCell: 5 });
+  await planner({ settings: { ...settings, theme: "crypt" }, seed: SEED, base, feetPerCell: 5 });
+  assert.equal(posted.length, 1, "a change of choice plans on the base posted");
+  const wide = squareWingBase({ wide: true });
+  await planner({ settings: { ...settings, wide: true }, seed: SEED, base: { ...base, join: wide.join }, feetPerCell: 5 });
+  assert.deepEqual(posted, [base.join, wide.join]);
+});

@@ -119,16 +119,19 @@ export type WingKeyRoom = { name: string; color: string; titles: readonly string
 
 /**
  * The worker's wing (dungeon/client.ts previewWing, design 3.3 and 3.4):
- * the base posted once per hash, then planned with the choices, the ghost
- * drawn from the scratch room the wing landed in, and what Add the wing
- * sends with what its asks carry.
+ * the base posted once per hash and join, then planned with the choices,
+ * the ghost drawn from the scratch room the wing landed in, and what Add
+ * the wing sends with what its asks carry. The hash leaves out the join
+ * Corridor width widens (wingPick.ts `wingBaseOf`), so the join is read
+ * apart.
  */
 export function wingPlanner(keyRoom: () => WingKeyRoom | null, post: (base: WingBase) => void = postWingBase, plan: typeof previewWing = previewWing): WingPlanner {
   let posted: string | null = null;
   return async ({ settings, seed, base, feetPerCell, edits }) => {
-    if (posted !== base.hash) {
+    const read = `${base.hash} ${JSON.stringify(base.join)}`;
+    if (posted !== read) {
       post(base);
-      posted = base.hash;
+      posted = read;
     }
     const grid = base.scene.gridShape ?? "squares";
     const sceneId = base.scene.id;
