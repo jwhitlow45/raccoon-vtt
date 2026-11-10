@@ -3,10 +3,12 @@ import type { Actor, Character } from "#shared/model.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import { boardSizes } from "../lib/boardScale.ts";
 import { focusLines, focusStyle, labelStyle, linesSize, placeLabels, showsNumberBadge, widestLabel, type Box, type LabelInput, type LabelLine, type Obstacle, type PlacedLabel } from "../lib/boardText.ts";
+import { badgeNumber, labelOf, type Labels } from "../lib/labels.ts";
 import { drawnAt, footprint, type ViewToken } from "../lib/scene.ts";
 import { DECOR_MIN_PX, healthState, hpDisplay, type HpDisplay } from "../lib/tokenView.ts";
 import { pillReach } from "../features/measure/Pill.tsx";
 import type { PillSpec } from "./boardView.ts";
+import { useLabels } from "../state/labels.ts";
 import { measureLabel } from "./measureText.ts";
 import { bloodiedNotch, numberBadgeWidth, shieldAc, tokenMarks, type Notch, type TokenMarks } from "./tokenMarks.ts";
 
@@ -26,8 +28,8 @@ export type TokenText = {
   label: PlacedLines | null;
   /** The selected or hovered token's whole label on its plate, over everything. */
   plate: PlacedLines | null;
-  /** A numbered picture token whose name gave way shows its number on it. */
-  numberBadge: boolean;
+  /** A numbered picture token whose name gave way shows its number on it, outlined when it is a DM's preview. Null when it shows none. */
+  numberBadge: { number: number; preview: boolean } | null;
   /** The creature is Bloodied and this viewer may know it: a notch on its ring, at every zoom (tokenMarks.ts). */
   notch: Notch | null;
 };
@@ -81,6 +83,8 @@ export type BoardTextInput = {
   lockShown: (t: ViewToken) => boolean;
   /** Moves on when the interface font arrives (boardFont.ts), so labels measured in the fallback are placed again. */
   fontEpoch: number;
+  /** Every token's label (state/labels.ts). The hook reads the room's own, and a token missing from it is named from its own fields. */
+  labels?: Labels;
   /**
    * Where a token's decor lays out, in view units, and the ring under it,
    * as the isometric board draws it (docs/design/design-v1-isometric-view.md 5.4,
@@ -105,16 +109,18 @@ export function edgeReach(sizes: Parameters<typeof labelStyle>[0] & { gapPx: num
 export function useBoardText(input: BoardTextInput): Map<string, TokenText> {
   // The last layout and the font it was measured in, read and written inside the layout on purpose: its shapes steer the next one, never trigger one.
   const previous = useRef<{ fontEpoch: number; placed: Map<string, PlacedLabel> }>({ fontEpoch: input.fontEpoch, placed: new Map() });
+  const roomLabels = useLabels();
   const { tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, mapLabels, lockShown, fontEpoch, place } = input;
   const left = input.within?.x0;
   const right = input.within?.x1;
+  const labels = input.labels ?? roomLabels;
   const layout = useMemo(() => {
     // A new font is a new measure, so labels are laid out afresh, not held to shapes measured in the old one.
     const kept = previous.current.fontEpoch === fontEpoch ? previous.current.placed : undefined;
-    const laid = layoutBoardText({ tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place }, kept);
+    const laid = layoutBoardText({ tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place, labels }, kept);
     previous.current = { fontEpoch, placed: laid.placed };
     return laid;
-  }, [tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place]);
+  }, [tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place, labels]);
 
   /*
    * A pan moves the screen's sides over the labels, so it must not lay them
@@ -139,7 +145,7 @@ export function useBoardText(input: BoardTextInput): Map<string, TokenText> {
       const reach = edgeReach(layout.sizes, m.widthPx, scale);
       return m.ox + m.widthPx > left - reach && m.ox < right + reach;
     });
-    const edged = layoutBoardText({ tokens: near, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place, within: { x0: left, x1: right } }, edge.current);
+    const edged = layoutBoardText({ tokens: near, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place, labels, within: { x0: left, x1: right } }, edge.current);
     edge.current = edged.placed;
     const out = new Map(layout.out);
     for (const [id, text] of edged.out) {
@@ -147,7 +153,7 @@ export function useBoardText(input: BoardTextInput): Map<string, TokenText> {
       if (was) out.set(id, { ...was, label: text.label, numberBadge: text.numberBadge });
     }
     return out;
-  }, [layout, left, right, tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place]);
+  }, [layout, left, right, tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place, labels]);
 
   return useMemo(() => {
     if (plateIds.size === 0) return shown;
@@ -159,13 +165,14 @@ export function useBoardText(input: BoardTextInput): Map<string, TokenText> {
       const text = out.get(id);
       const t = tokens.find((x) => x.id === id);
       if (!m || !text || !t) continue;
-      const lines = focusLines({ name: t.name, number: t.number, hp: m.hpLine, style }, measureLabel);
+      const label = labelOf(labels, t);
+      const lines = focusLines({ name: label.name, tag: label, hp: m.hpLine, style }, measureLabel);
       const size = linesSize(lines, style, measureLabel);
       const top = Math.max(text.marks ? text.marks.belowY : text.heightPx + sizes.gapPx, m.ringBottom !== null ? m.ringBottom + sizes.gapPx : -Infinity);
       out.set(id, { ...text, plate: { lines, x: m.widthPx / 2 - size.width / 2, y: top + 2, width: size.width, height: size.height } });
     }
     return out;
-  }, [layout, shown, plateIds, tokens]);
+  }, [layout, shown, plateIds, tokens, labels]);
 }
 
 /**
@@ -174,14 +181,16 @@ export function useBoardText(input: BoardTextInput): Map<string, TokenText> {
  * and sides hold while they fit.
  */
 export function layoutBoardText(input: Omit<BoardTextInput, "plateIds">, kept: Map<string, PlacedLabel> | undefined) {
-  const { tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, place, within } = input;
+  const { tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, place, within, labels } = input;
   const sizes = boardSizes(scale);
   const out = new Map<string, TokenText>();
   const labelInputs: LabelInput[] = [];
   const obstacles = pillObstacles(pills, scale);
   for (const b of mapLabels) obstacles.push({ box: { x0: b.x0 * scale, y0: b.y0 * scale, x1: b.x1 * scale, y1: b.y1 * scale }, kind: "map" });
-  const meta = new Map<string, { widthPx: number; ox: number; oy: number; hpLine: string | null; image: boolean; number: number | undefined; ringBottom: number | null }>();
+  const meta = new Map<string, { widthPx: number; ox: number; oy: number; hpLine: string | null; image: boolean; number: number | undefined; preview: boolean; ringBottom: number | null }>();
   for (const t of tokens) {
+    const label = labelOf(labels, t);
+    const badge = badgeNumber(label);
     const fp = footprint(t);
     const widthPx = fp.w * scale;
     const heightPx = fp.h * scale;
@@ -214,15 +223,15 @@ export function layoutBoardText(input: Omit<BoardTextInput, "plateIds">, kept: M
           measure: measureLabel,
           ac: shieldAc(t, actor),
           lock: lockShown(t),
-          numberReserve: t.image && t.number !== undefined ? numberBadgeWidth(t.number, sizes.numberPx) : 0,
+          numberReserve: t.image && badge !== undefined ? numberBadgeWidth(badge, sizes.numberPx) : 0,
         })
       : null;
     for (const m of marks?.boxes ?? []) obstacles.push({ box: { x0: m.x0 + ox, y0: m.y0 + oy, x1: m.x1 + ox, y1: m.y1 + oy }, owner: t.id, kind: "mark" });
     const own = t.kind === "pc" || ownsToken(t);
     const rank = t.id === selectedId ? 3 : t.id === activeTokenId ? 2 : own ? 1 : 0;
     const hpLine = hp.kind === "label" ? hp.label : hp.kind === "bar" ? (hp.text ?? null) : null;
-    meta.set(t.id, { widthPx, ox, oy, hpLine, image: !!t.image, number: t.number, ringBottom: ring ? ring.y1 - oy : null });
-    out.set(t.id, { widthPx, heightPx, ...(ring ? { footPx: ring.y1 - oy } : {}), hp, marks, label: null, plate: null, numberBadge: false, notch: bloodiedNotch(state, widthPx, heightPx, sizes.ringPx) });
+    meta.set(t.id, { widthPx, ox, oy, hpLine, image: !!t.image, number: badge, preview: label.number === undefined && label.preview !== undefined, ringBottom: ring ? ring.y1 - oy : null });
+    out.set(t.id, { widthPx, heightPx, ...(ring ? { footPx: ring.y1 - oy } : {}), hp, marks, label: null, plate: null, numberBadge: null, notch: bloodiedNotch(state, widthPx, heightPx, sizes.ringPx) });
     // Under the marks' size only the acting creature and the viewer's own tokens try for a name.
     if (!big && rank < 2 && !ownsToken(t)) continue;
     labelInputs.push({
@@ -231,8 +240,8 @@ export function layoutBoardText(input: Omit<BoardTextInput, "plateIds">, kept: M
       belowY: Math.max(oy + (marks ? marks.belowY : heightPx + sizes.gapPx), ring ? ring.y1 + sizes.gapPx : -Infinity),
       aboveY: oy + (marks ? marks.aboveY : -sizes.gapPx),
       sideTopY: marks ? oy + marks.sideTopY : undefined,
-      name: t.name,
-      number: t.number,
+      name: label.name,
+      tag: label,
       hp: hpLine,
       alert: state === "Bloodied" || state === "Dying",
       rank,
@@ -248,8 +257,12 @@ export function layoutBoardText(input: Omit<BoardTextInput, "plateIds">, kept: M
     if (p.lines.length > 0) {
       text.label = { lines: p.lines, x: p.box.x0 - m.ox, y: p.box.y0 - m.oy, width: p.box.x1 - p.box.x0, height: p.box.y1 - p.box.y0 };
     }
-    text.numberBadge = showsNumberBadge(m, p);
+    text.numberBadge = badgeOf(m, p);
   }
-  for (const [id, m] of meta) if (!placed.has(id)) out.get(id)!.numberBadge = showsNumberBadge(m, undefined);
+  for (const [id, m] of meta) if (!placed.has(id)) out.get(id)!.numberBadge = badgeOf(m, undefined);
   return { out, meta, sizes, placed };
+}
+
+function badgeOf(m: { image: boolean; number: number | undefined; preview: boolean; widthPx: number }, label: PlacedLabel | undefined): TokenText["numberBadge"] {
+  return showsNumberBadge(m, label) && m.number !== undefined ? { number: m.number, preview: m.preview } : null;
 }

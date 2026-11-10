@@ -1,4 +1,5 @@
 import type { BoardSizes } from "./boardScale.ts";
+import { countText, labelSuffix, type NameTag } from "./labels.ts";
 
 /**
  * Where each token's name and HP go on the board, and what gives way when
@@ -8,9 +9,12 @@ import type { BoardSizes } from "./boardScale.ts";
  * The rules, in the order they bind:
  *
  * - Text that fits is never cut. A name is whole on one line, whole on two
- *   balanced lines, or cut once on one line keeping its duplicate number and
- *   at least four letters ("Kobold… 4"). Never a shorter fragment: below
- *   that, the token's own initials or number badge name it.
+ *   balanced lines, or cut once on one line keeping what follows it (a
+ *   duplicate's number, a DM's bracketed preview or a disguise's shown name)
+ *   and at least four letters ("Kobold… 4"). A disguise's shown name that
+ *   still does not fit is cut inside, before its number ("Orc (as Gob… 2)").
+ *   Never a shorter fragment: below that, the token's own initials or number
+ *   badge name it.
  * - No label covers another token's body, chips, badge or HP bar, the move
  *   marker, an area's name, a label written on the map, or a label placed
  *   before it, at any zoom. Map labels keep their place: a token's label
@@ -147,7 +151,8 @@ export type LabelInput = {
   belowY: number;
   aboveY: number;
   name: string;
-  number?: number;
+  /** What follows the name (labels.ts): a number, a DM's preview, a disguise's shown name. */
+  tag?: NameTag;
   /** The HP text this viewer sees: numbers, or a word. Null when they see none. */
   hp: string | null;
   /** Bloodied or Dying, from what this viewer may know of the creature's HP. */
@@ -178,14 +183,37 @@ export type PlacedLabel = {
 const ELLIPSIS = "…";
 /** Letters a cut name keeps at the least: fewer say less than the token's own initials. */
 export const MIN_CUT_LETTERS = 4;
+/**
+ * Letters a disguise's shown name keeps when it is cut inside its brackets.
+ * The real name before it already says which creature this is, so the
+ * shown name may give way further than a name does ("Orc (as Gob… 2)").
+ */
+export const MIN_AS_LETTERS = 3;
 
 export function lineHeight(px: number, leading: number): number {
   return Math.round(px * leading);
 }
 
-/** The full name as the board shows it: "Goblin 3". */
-export function fullName(name: string, number: number | undefined): string {
-  return number === undefined ? name : `${name} ${number}`;
+/** The full name as the board shows it: "Goblin 3", "Goblin (3)", "Orc (as Goblin 2)". */
+export function fullName(name: string, tag: NameTag | undefined): string {
+  return tag === undefined ? name : `${name}${labelSuffix(tag)}`;
+}
+
+/**
+ * What follows a name, in the units a wrap keeps whole: a number "2" or a
+ * preview "(3)" as one unit, and a disguise as its words, "(as" glued to
+ * the first and the number and closing bracket to the last, so no line
+ * ends on "(as" and the number never stands alone.
+ */
+function tagUnits(tag: NameTag | undefined): string[] {
+  if (tag === undefined) return [];
+  const count = countText(tag);
+  if (tag.as === undefined) return count ? [count] : [];
+  const words = tag.as.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [`(as${count ? ` ${count}` : ""})`];
+  words[0] = `(as ${words[0]}`;
+  words[words.length - 1] = `${words[words.length - 1]}${count ? ` ${count}` : ""})`;
+  return words;
 }
 
 /**
@@ -193,24 +221,29 @@ export function fullName(name: string, number: number | undefined): string {
  * when it does not fit whole. The number of a numbered duplicate is never
  * broken: it rides on the last word's line when the two fit together
  * ("Sorcerer 4"), and moves to the next line whole when they do not. A
+ * disguise's bracket wraps between its words (tagUnits) and never breaks
+ * inside one. A
  * word wider than a line breaks with a hyphen after a letter, never after
  * a digit or a space, and only when the whole name then fits. Lines are
  * balanced when no word broke, so a centered label reads as a block
  * ("Owlbear Matriarch" over "of the Thornwood") and takes less room from
  * its neighbors.
  */
-export function wrapWhole(name: string, number: number | undefined, width: number, maxLines: number, px: number, measure: Measure): string[] | null {
+export function wrapWhole(name: string, tag: NameTag | undefined, width: number, maxLines: number, px: number, measure: Measure): string[] | null {
   const fits = (t: string) => measure(t, px) <= width;
   const units: { text: string; breakable: boolean }[] = name
     .trim()
     .split(/\s+/)
     .filter(Boolean)
     .map((text) => ({ text, breakable: true }));
-  if (number !== undefined) {
-    const suffix = String(number);
+  const tail = tagUnits(tag);
+  if (tail.length === 1 && tag?.as === undefined) {
+    const suffix = tail[0]!;
     const last = units[units.length - 1];
     if (last && fits(`${last.text} ${suffix}`)) units[units.length - 1] = { text: `${last.text} ${suffix}`, breakable: false };
     else units.push({ text: suffix, breakable: false });
+  } else {
+    for (const text of tail) units.push({ text, breakable: false });
   }
   if (units.length === 0) return null;
   const lines: string[] = [];
@@ -284,27 +317,52 @@ function balanced(units: string[], lines: string[], width: number, px: number, m
 
 /**
  * The name cut once on one line: as many letters as fit, an ellipsis, and
- * the duplicate number ("Kobold Sc… 4", "Bartholo…"). Null when fewer than
- * MIN_CUT_LETTERS letters would fit.
+ * what follows the name ("Kobold Sc… 4", "Goblin Wa… (3)", "Bartholo…").
+ * A disguise's shown name is cut only once the name is down to its least
+ * (`shortestName`), keeping MIN_AS_LETTERS letters and its number
+ * ("Orc (as Gob… 2)"). Null when not even that fits.
  */
-export function cutName(name: string, number: number | undefined, width: number, px: number, measure: Measure): string | null {
-  const chars = [...name.trim()];
-  const suffix = number === undefined ? "" : ` ${number}`;
-  const make = (n: number) => `${chars.slice(0, n).join("").trimEnd()}${ELLIPSIS}${suffix}`;
+export function cutName(name: string, tag: NameTag | undefined, width: number, px: number, measure: Measure): string | null {
+  const suffix = tag === undefined ? "" : labelSuffix(tag);
+  const outer = longestCut([...name.trim()], MIN_CUT_LETTERS, (head) => `${head}${ELLIPSIS}${suffix}`, width, px, measure);
+  if (outer !== null || tag?.as === undefined) return outer;
+  const count = countText(tag);
+  const lead = `${shortestName(name, px, measure)} (as `;
+  return longestCut([...tag.as.trim()], MIN_AS_LETTERS, (head) => `${lead}${head}${ELLIPSIS}${count ? ` ${count}` : ""})`, width, px, measure);
+}
+
+/** The longest cut of `chars` that `make` turns into text within `width`, keeping at least `least` letters, or null. */
+function longestCut(chars: readonly string[], least: number, make: (head: string) => string, width: number, px: number, measure: Measure): string | null {
+  const text = (n: number) => make(chars.slice(0, n).join("").trimEnd());
   const letters = (n: number) => chars.slice(0, n).filter((c) => /\S/.test(c)).length;
   let lo = 1;
   let hi = chars.length - 1;
   let best: string | null = null;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
-    if (measure(make(mid), px) <= width) {
-      if (letters(mid) >= MIN_CUT_LETTERS) best = make(mid);
+    if (measure(text(mid), px) <= width) {
+      if (letters(mid) >= least) best = text(mid);
       lo = mid + 1;
     } else {
       hi = mid - 1;
     }
   }
   return best;
+}
+
+/** A name at its least before a disguise's bracket is cut: its shortest allowed cut, or the whole name where that is narrower. */
+function shortestName(name: string, px: number, measure: Measure): string {
+  const whole = name.trim();
+  const chars = [...whole];
+  let n = 0;
+  let letters = 0;
+  while (n < chars.length && letters < MIN_CUT_LETTERS) {
+    if (/\S/.test(chars[n]!)) letters++;
+    n++;
+  }
+  if (n >= chars.length) return whole;
+  const cut = `${chars.slice(0, n).join("").trimEnd()}${ELLIPSIS}`;
+  return measure(cut, px) < measure(whole, px) ? cut : whole;
 }
 
 export type Content = { lines: LabelLine[]; nameShown: boolean; hpShown: boolean; cut: boolean };
@@ -325,7 +383,7 @@ export function templates(input: LabelInput, measure: Measure): Template[][] {
   // A pinch lays every label out on every frame, mostly with the same text at the same sizes, so the shapes are kept.
   const s0 = input.style;
   const r0 = s0.room;
-  const key = [input.name, input.number, input.nameOnly ? null : input.hp, input.alert, s0.namePx, s0.hpPx, r0.wrapEm, r0.maxEm, r0.ownEm].join("\u0000");
+  const key = [input.name, tagKey(input.tag), input.nameOnly ? null : input.hp, input.alert, s0.namePx, s0.hpPx, r0.wrapEm, r0.maxEm, r0.ownEm].join("\u0000");
   let byMeasure = templateCache.get(measure);
   if (!byMeasure) templateCache.set(measure, (byMeasure = new Map()));
   const hit = byMeasure.get(key);
@@ -338,11 +396,16 @@ export function templates(input: LabelInput, measure: Measure): Template[][] {
 
 const templateCache = new WeakMap<Measure, Map<string, Template[][]>>();
 
+/** A tag as a cache key: its text, which tells every tag apart. */
+function tagKey(tag: NameTag | undefined): string {
+  return tag === undefined ? "" : labelSuffix(tag);
+}
+
 function makeTemplates(input: LabelInput, measure: Measure): Template[][] {
   const s = input.style;
   const room = s.room;
   const name = (text: string): LabelLine => ({ text, px: s.namePx, kind: "name" });
-  const full = fullName(input.name, input.number);
+  const full = fullName(input.name, input.tag);
   const wholeForms: string[][] = [];
   const seen = new Set<string>();
   for (const [em, maxLines] of [
@@ -351,7 +414,7 @@ function makeTemplates(input: LabelInput, measure: Measure): Template[][] {
     [room.maxEm, 1],
     [room.maxEm, 2],
   ] as const) {
-    const lines = wrapWhole(input.name, input.number, Math.max(0, em) * SHAPE_PX, maxLines, SHAPE_PX, measure);
+    const lines = wrapWhole(input.name, input.tag, Math.max(0, em) * SHAPE_PX, maxLines, SHAPE_PX, measure);
     const key = lines?.join("\n");
     if (lines && key !== undefined && !seen.has(key)) {
       seen.add(key);
@@ -361,7 +424,7 @@ function makeTemplates(input: LabelInput, measure: Measure): Template[][] {
   const hp = input.nameOnly ? null : input.hp;
   const hpLine: LabelLine | null = hp ? { text: hp, px: s.hpPx, kind: "hp" } : null;
   // The longest cut the width rule allows, decided like a shape, so a font whose widths do not scale with its size cannot move it at each step.
-  const widest = cutName(input.name, input.number, Math.max(0, room.maxEm) * SHAPE_PX, SHAPE_PX, measure);
+  const widest = cutName(input.name, input.tag, Math.max(0, room.maxEm) * SHAPE_PX, SHAPE_PX, measure);
   const out: Template[][] = [];
   const shape = (lines: LabelLine[], nameShown: boolean, hpShown: boolean): Template => ({ kind: "lines", content: { lines, nameShown, hpShown, cut: false } });
 
@@ -465,7 +528,7 @@ export function placeLabels(
   previous?: ReadonlyMap<string, PlacedLabel>,
   within?: Pick<Box, "x0" | "x1">,
 ): Map<string, PlacedLabel> {
-  const natural = new Map(inputs.map((input) => [input.id, measure(fullName(input.name, input.number), SHAPE_PX)]));
+  const natural = new Map(inputs.map((input) => [input.id, measure(fullName(input.name, input.tag), SHAPE_PX)]));
   const order = [...inputs].sort(
     (a, b) =>
       b.rank - a.rank ||
@@ -502,7 +565,7 @@ export function placeLabels(
     };
     const sides: Side[] = input.sides ? ["below", "above", "right", "left"] : ["below", "above"];
     const levels = templates(input, measure);
-    const source = [input.name, input.number, input.nameOnly ? null : input.hp, input.alert].join("\u0000");
+    const source = [input.name, tagKey(input.tag), input.nameOnly ? null : input.hp, input.alert].join("\u0000");
     const last = previous?.get(input.id);
     const kept = last?.source === source ? last : undefined;
     const keptSide = kept && kept.lines.length > 0 && sides.includes(kept.side) ? kept.side : undefined;
@@ -583,13 +646,26 @@ function keptShape(input: LabelInput, levels: Template[][], kept: PlacedLabel): 
   return null;
 }
 
-/** Whether `text` is a cut of the label's name as cutName makes them. */
-function isCutOf(text: string, input: Pick<LabelInput, "name" | "number">): boolean {
-  const tail = `${ELLIPSIS}${input.number === undefined ? "" : ` ${input.number}`}`;
-  if (!text.endsWith(tail)) return false;
-  const head = text.slice(0, text.length - tail.length);
+/** Whether `text` is a cut of the label's name as cutName makes them: the name cut, or a disguise's shown name cut after the name at its least. */
+function isCutOf(text: string, input: Pick<LabelInput, "name" | "tag">): boolean {
   const name = input.name.trim();
-  return head.length < name.length && name.startsWith(head) && [...head].filter((c) => /\S/.test(c)).length >= MIN_CUT_LETTERS;
+  const tail = `${ELLIPSIS}${input.tag === undefined ? "" : labelSuffix(input.tag)}`;
+  if (text.endsWith(tail) && isHeadOf(text.slice(0, text.length - tail.length), name, MIN_CUT_LETTERS)) return true;
+  const as = input.tag?.as?.trim();
+  if (as === undefined) return false;
+  const count = countText(input.tag!);
+  const close = `${ELLIPSIS}${count ? ` ${count}` : ""})`;
+  if (!text.endsWith(close)) return false;
+  const open = text.indexOf(" (as ");
+  if (open < 0) return false;
+  const lead = text.slice(0, open);
+  const leadOk = lead === name || (lead.endsWith(ELLIPSIS) && isHeadOf(lead.slice(0, -ELLIPSIS.length), name, MIN_CUT_LETTERS));
+  return leadOk && isHeadOf(text.slice(open + 5, text.length - close.length), as, MIN_AS_LETTERS);
+}
+
+/** Whether `head` begins `whole`, shorter than it, with at least `least` letters. */
+function isHeadOf(head: string, whole: string, least: number): boolean {
+  return head.length < whole.length && whole.startsWith(head) && [...head].filter((c) => /\S/.test(c)).length >= least;
 }
 
 /**
@@ -604,7 +680,7 @@ function cutToRoom(input: LabelInput, template: Extract<Template, { kind: "cut" 
   const s = input.style;
   const nameH = lineHeight(s.namePx, s.leading);
   const height = nameH + (hp ? lineHeight(hp.px, s.leading) : 0);
-  const least = cutName(input.name, input.number, Number.POSITIVE_INFINITY, s.namePx, measure) === null ? null : minCutWidth(input, measure);
+  const least = minCutWidth(input, measure);
   if (least === null) return null;
   const floor = Math.max(least, hp ? measure(hp.text, hp.px) : 0) + 2 * s.padX;
   if (floor > s.maxWidth || !free(boxAt(input, side, floor, height))) return null;
@@ -615,7 +691,7 @@ function cutToRoom(input: LabelInput, template: Extract<Template, { kind: "cut" 
     if (free(boxAt(input, side, mid, height))) lo = mid;
     else hi = mid;
   }
-  const roomy = cutName(input.name, input.number, lo - 2 * s.padX, s.namePx, measure);
+  const roomy = cutName(input.name, input.tag, lo - 2 * s.padX, s.namePx, measure);
   if (!roomy) return null;
   const text = [...roomy].length > [...widest].length ? widest : roomy;
   const lines: LabelLine[] = [{ text, px: s.namePx, kind: "name" }];
@@ -623,17 +699,35 @@ function cutToRoom(input: LabelInput, template: Extract<Template, { kind: "cut" 
   return { lines, nameShown: true, hpShown: !!hp, cut: true };
 }
 
-/** The width of the shortest cut a name allows: four letters, the ellipsis and the number. */
-function minCutWidth(input: LabelInput, measure: Measure): number {
-  const chars = [...input.name.trim()];
+/**
+ * The width of the shortest cut a label allows, or null when it allows
+ * none: four letters, the ellipsis and what follows the name, or for a
+ * disguise its shown name cut to three letters after the name at its least.
+ */
+function minCutWidth(input: LabelInput, measure: Measure): number | null {
+  const px = input.style.namePx;
+  const widths: number[] = [];
+  const head = leastHead(input.name, MIN_CUT_LETTERS);
+  if (head !== null) widths.push(measure(`${head}${ELLIPSIS}${input.tag === undefined ? "" : labelSuffix(input.tag)}`, px));
+  const as = input.tag?.as;
+  const asHead = as === undefined ? null : leastHead(as, MIN_AS_LETTERS);
+  if (asHead !== null) {
+    const count = countText(input.tag!);
+    widths.push(measure(`${shortestName(input.name, px, measure)} (as ${asHead}${ELLIPSIS}${count ? ` ${count}` : ""})`, px));
+  }
+  return widths.length === 0 ? null : Math.min(...widths);
+}
+
+/** The first `least` letters of `text`, or null when that is all of it, so no cut is shorter than the whole. */
+function leastHead(text: string, least: number): string | null {
+  const chars = [...text.trim()];
   let n = 0;
   let letters = 0;
-  while (n < chars.length && letters < MIN_CUT_LETTERS) {
+  while (n < chars.length && letters < least) {
     if (/\S/.test(chars[n]!)) letters++;
     n++;
   }
-  const suffix = input.number === undefined ? "" : ` ${input.number}`;
-  return measure(`${chars.slice(0, n).join("").trimEnd()}${ELLIPSIS}${suffix}`, input.style.namePx);
+  return n >= chars.length ? null : chars.slice(0, n).join("").trimEnd();
 }
 
 /**
@@ -641,6 +735,8 @@ function minCutWidth(input: LabelInput, measure: Measure): number {
  * label shows no name: a pack of goblins sharing one picture is otherwise
  * told apart only by a tap. A body without a picture already shows its
  * initials with the number ("G3"). Too small a token has no room for it.
+ * `number` is the badge's (labels.ts badgeNumber): a DM's preview shows
+ * too, outlined.
  */
 export function showsNumberBadge(token: { image: boolean; number: number | undefined; widthPx: number }, label: Pick<PlacedLabel, "nameShown"> | undefined): boolean {
   return token.image && token.number !== undefined && token.widthPx >= 20 && !label?.nameShown;
@@ -656,18 +752,19 @@ function area(b: Box): number {
  * does not fit, since the action bar's header is the full reveal), then its
  * HP. Shaped at SHAPE_PX like a label.
  */
-export function focusLines(input: Pick<LabelInput, "name" | "number" | "hp" | "style">, measure: Measure): LabelLine[] {
+export function focusLines(input: Pick<LabelInput, "name" | "tag" | "hp" | "style">, measure: Measure): LabelLine[] {
   const s = input.style;
   const width = s.room.maxEm * SHAPE_PX;
   const name = (text: string): LabelLine => ({ text, px: s.namePx, kind: "name" });
-  let lines = wrapWhole(input.name, input.number, width, 3, SHAPE_PX, measure);
+  let lines = wrapWhole(input.name, input.tag, width, 3, SHAPE_PX, measure);
   if (!lines) {
-    const all = wrapWhole(input.name, input.number, width, Number.MAX_SAFE_INTEGER, SHAPE_PX, measure) ?? [fullName(input.name, input.number)];
-    const suffix = input.number === undefined ? "" : ` ${input.number}`;
-    const rest = all.slice(2).join(" ");
-    const base = suffix && rest.endsWith(suffix) ? rest.slice(0, -suffix.length) : rest;
-    const last = cutName(base, input.number, width, SHAPE_PX, measure) ?? `${[...base].slice(0, MIN_CUT_LETTERS).join("")}${ELLIPSIS}${suffix}`;
-    lines = [...all.slice(0, 2), last];
+    // The name's own lines lead, and the last carries the rest of it cut with all that follows it, so the number is never lost.
+    const own = wrapWhole(input.name, undefined, width, Number.MAX_SAFE_INTEGER, SHAPE_PX, measure) ?? [input.name.trim()];
+    const lead = own.slice(0, Math.min(2, own.length - 1));
+    const base = own.slice(lead.length).join(" ");
+    const suffix = input.tag === undefined ? "" : labelSuffix(input.tag);
+    const last = cutName(base, input.tag, width, SHAPE_PX, measure) ?? `${[...base].slice(0, MIN_CUT_LETTERS).join("")}${ELLIPSIS}${suffix}`;
+    lines = [...lead, last];
   }
   const out = lines.map(name);
   if (input.hp) out.push({ text: input.hp, px: s.hpPx, kind: "hp" });

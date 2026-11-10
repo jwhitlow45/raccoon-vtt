@@ -24,6 +24,7 @@ import {
   type Side,
 } from "./boardText.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
+import type { NameTag } from "./labels.ts";
 
 /** Every character is half an em wide, so 12 px text is 6 px a character. */
 const measure = (text: string, px: number) => [...text].length * px * 0.5;
@@ -33,7 +34,7 @@ function style(cell: number): LabelStyle {
   return labelStyle({ namePx, hpPx: Math.max(11, Math.min(15, (11 * cell) / 40)), gapPx: 3, stepPx: 0.5, unrounded: { namePx, gapPx: 3 } }, cell, cell);
 }
 
-type Spec = { id: string; x: number; y: number; size?: number; name: string; number?: number; hp?: string | null; alert?: boolean; rank?: number; label?: boolean };
+type Spec = { id: string; x: number; y: number; size?: number; name: string; number?: number; tag?: NameTag; hp?: string | null; alert?: boolean; rank?: number; label?: boolean };
 
 /** Tokens on a grid of `cell` px, as useBoardText.ts hands them over: bodies for every token, a label input for those with `label` not false. */
 function board(cell: number, specs: Spec[]): { inputs: LabelInput[]; obstacles: Obstacle[] } {
@@ -51,7 +52,7 @@ function board(cell: number, specs: Spec[]): { inputs: LabelInput[]; obstacles: 
       belowY: box.y1 + st.gapPx,
       aboveY: box.y0 - st.gapPx,
       name: s.name,
-      number: s.number,
+      ...(s.tag ? { tag: s.tag } : s.number === undefined ? {} : { tag: { number: s.number } }),
       hp: s.hp ?? null,
       alert: s.alert ?? false,
       rank: s.rank ?? 0,
@@ -96,11 +97,11 @@ function assertNoFragments(placed: Map<string, PlacedLabel>) {
 describe("names", () => {
   test("wrap whole onto two balanced lines, the number glued to the last word", () => {
     assert.deepEqual(wrapWhole("Owlbear Matriarch of the Thornwood", undefined, 120, 2, 12, measure), ["Owlbear Matriarch", "of the Thornwood"]);
-    assert.deepEqual(wrapWhole("Kobold Scale Sorcerer", 4, 80, 2, 12, measure), ["Kobold Scale", "Sorcerer 4"]);
+    assert.deepEqual(wrapWhole("Kobold Scale Sorcerer", { number: 4 }, 80, 2, 12, measure), ["Kobold Scale", "Sorcerer 4"]);
   });
 
   test("two lines only when the whole name fits them", () => {
-    assert.equal(wrapWhole("Kobold Scale Sorcerer", 4, 50, 2, 12, measure), null);
+    assert.equal(wrapWhole("Kobold Scale Sorcerer", { number: 4 }, 50, 2, 12, measure), null);
     assert.equal(wrapWhole("Grand Inquisitor Malachar the Unrelenting", undefined, 120, 2, 12, measure), null);
   });
 
@@ -115,7 +116,7 @@ describe("names", () => {
   test("a duplicate's number stays whole, and no line strands a hyphen or starts with a space, at any width", () => {
     const sweep = (name: string, number: number, from: number, to: number) => {
       for (let width = from; width <= to; width++) {
-        const lines = wrapWhole(name, number, width, 2, 12, measure);
+        const lines = wrapWhole(name, { number }, width, 2, 12, measure);
         if (!lines) continue;
         for (const line of lines) {
           assert.doesNotMatch(line, / -$|^ |\d-$/, `"${line}" at ${width} px`);
@@ -143,9 +144,52 @@ describe("names", () => {
   });
 
   test("a cut keeps the number and at least four letters, or does not happen", () => {
-    assert.equal(cutName("Kobold Scale Sorcerer", 4, 60, 12, measure), "Kobold… 4");
+    assert.equal(cutName("Kobold Scale Sorcerer", { number: 4 }, 60, 12, measure), "Kobold… 4");
     assert.equal(cutName("Bartholomewsworthingtonshire", undefined, 60, 12, measure), "Bartholom…");
-    assert.equal(cutName("Kobold Scale Sorcerer", 4, 40, 12, measure), null, "Kob… 4 would keep three letters");
+    assert.equal(cutName("Kobold Scale Sorcerer", { number: 4 }, 40, 12, measure), null, "Kob… 4 would keep three letters");
+  });
+});
+
+describe("a DM's brackets and a disguise", () => {
+  test("a preview's brackets stay whole beside a cut name", () => {
+    assert.equal(cutName("Goblin Warrior", { preview: 3 }, 60, 12, measure), "Gobli… (3)");
+    assert.deepEqual(wrapWhole("Goblin Warrior", { preview: 3 }, 66, 2, 12, measure), ["Goblin", "Warrior (3)"]);
+  });
+
+  test("a disguise's bracket wraps between its words, never leaving \"(as\" or its number alone", () => {
+    assert.deepEqual(wrapWhole("Orc", { as: "Goblin Warrior", number: 2 }, 90, 2, 12, measure), ["Orc (as Goblin", "Warrior 2)"]);
+    assert.deepEqual(wrapWhole("Orc", { as: "Goblin", preview: 3 }, 200, 1, 12, measure), ["Orc (as Goblin (3))"]);
+  });
+
+  test("the name is cut first, then the shown name inside its bracket, keeping its number", () => {
+    assert.equal(cutName("Goblin Warrior", { as: "Kobold Sorcerer", number: 2 }, 168, 12, measure), "Gobl… (as Kobold Sorcerer 2)");
+    assert.equal(cutName("Goblin Warrior", { as: "Kobold Sorcerer", number: 2 }, 150, 12, measure), "Gobl… (as Kobold Sorc… 2)");
+    assert.equal(cutName("Orc", { as: "Goblin", number: 2 }, 90, 12, measure), "Orc (as Gob… 2)");
+    assert.equal(cutName("Orc", { as: "Goblin", preview: 3 }, 102, 12, measure), "Orc (as Gob… (3))");
+    assert.equal(cutName("Orc", { as: "Goblin", number: 2 }, 84, 12, measure), null, "Orc (as Go… 2) would keep two letters");
+  });
+
+  test("a focus plate too narrow for a disguise whole keeps its number on the last line", () => {
+    const style = focusStyle(boardSizes(40));
+    const lines = focusLines({ name: "Orc", tag: { as: "Grand Inquisitor Malachar the Unrelenting of the Thornwood Deeps and the Ashen Wastes Beyond", number: 12 }, hp: null, style }, measure).map((l) => l.text);
+    assert.ok(lines.at(-1)!.endsWith(" 12)"), JSON.stringify(lines));
+  });
+
+  test("a cut disguise keeps its shape when laid out again", () => {
+    const specs: Spec[] = [
+      { id: "orc", x: 0, y: 0, name: "Orc", tag: { as: "Bartholomewsworthingtonshire", number: 2 } },
+      { id: "n1", x: -2, y: 1, name: "X", label: false },
+      { id: "n2", x: 2, y: 1, name: "Y", label: false },
+    ];
+    const first = place(34, specs);
+    assert.match(texts(first.placed.get("orc")).join(" "), /^Orc \(as Bart.*… 2\)$/);
+    const again = place(34, specs, first.placed);
+    assert.deepEqual(texts(again.placed.get("orc")), texts(first.placed.get("orc")));
+    assertClear(again.placed, again.obstacles);
+  });
+
+  test("an outlined preview badge shows where a number badge would", () => {
+    assert.equal(showsNumberBadge({ image: true, number: 3, widthPx: 34 }, { nameShown: false }), true);
   });
 });
 
@@ -520,7 +564,7 @@ describe("a smooth zoom", () => {
     for (const ui of [1, 1.3]) {
       for (const em of emsAround(c)) {
         for (const [f, measure] of fonts(em).entries()) {
-          const plate = (cell: number) => focusLines({ name, number: undefined, hp: "18/24", style: focusStyle(boardSizes(cell, ui)) }, measure).map((l) => l.text);
+          const plate = (cell: number) => focusLines({ name, hp: "18/24", style: focusStyle(boardSizes(cell, ui)) }, measure).map((l) => l.text);
           const what = `the plate, ${em.toFixed(4)} em a letter${f ? " snapped" : ""}, at ${ui * 100}%`;
           assertSettles(cells.map(plate), `${what}, zooming in`);
           assertSettles([...cells].reverse().map(plate), `${what}, zooming out`);
