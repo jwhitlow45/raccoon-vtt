@@ -6,6 +6,7 @@ import type { RoomState, Viewer } from "./model.ts";
 import { opSchema, type Op } from "./protocol.ts";
 import { hash128, projectState, stableStringify, type ProjectedState } from "./project.ts";
 import { asPlayerCopy } from "./rankTestutil.ts";
+import { storedFogOff } from "./secretDoorTestutil.ts";
 import { applyOp, type Env } from "./reducer.ts";
 import { seenWhole } from "./rules/path.ts";
 import { DOOR_COVER_OP_VERSION } from "./migrate.ts";
@@ -62,12 +63,14 @@ function stored(state: RoomState): string {
  * corners of a private leg on a scene with vision (decision 12), and which
  * area reminders there they read (onFoggedArea). Legs seen whole keep their
  * corners. Scenes with fog off stay byte for byte, and so does everything
- * else on those with it.
+ * else on those with it, but for square scenes with automatic walls, whose
+ * copies are cut from held ground since D-261110-530: those are read with
+ * their chunks and rule as the stored build gave them (storedFogOff).
  */
 /** A viewer's projection as the fixture hashes it: a player's in the form this build sends it (rankTestutil.ts). */
 function copyOf(state: RoomState, viewer: Viewer, sceneId: string): ProjectedState {
   const view = projectState(state, viewer, { sceneId });
-  return viewer.role === "dm" ? view : asPlayerCopy(view);
+  return viewer.role === "dm" ? view : storedFogOff(state, asPlayerCopy(view));
 }
 
 function seenBy(state: RoomState, viewer: Viewer, view: ProjectedState): string {

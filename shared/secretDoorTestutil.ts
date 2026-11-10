@@ -1,5 +1,6 @@
-import type { AutoWalls, DoorCover, EdgeFeature, RoomState } from "./model.ts";
+import type { AutoWalls, BuildChunk, DoorCover, EdgeFeature, RoomState, Scene } from "./model.ts";
 import { edge, fogRoom, paint } from "./discoveryTestutil.ts";
+import { projectChunkForPlayer, type ProjectedState } from "./project.ts";
 import { groundOf } from "./rules/held.ts";
 import { token } from "./testutil.ts";
 
@@ -116,4 +117,37 @@ export function withoutRevs(value: unknown): unknown {
   const out: Record<string, unknown> = {};
   for (const key of Object.keys(value).sort()) if (key !== "rev") out[key] = withoutRevs((value as Record<string, unknown>)[key]);
   return out;
+}
+
+/**
+ * A player's copy with every scene with fog off read as players got it
+ * before D-261110-530: its chunks as projectChunkForPlayer gives them from
+ * the stored build, and the scene's own automatic walls rule. That changes
+ * only a square scene with automatic walls, whose copy is now cut from held
+ * ground (heldGroundMap). The goldens recorded before then read a copy
+ * through it, so they still pin everything else in it.
+ */
+export function storedFogOff<T extends Pick<ProjectedState, "buildChunks" | "scenes">>(state: RoomState, view: T): T {
+  const rules = new Map<string, Scene["autoWalls"]>();
+  for (const id of Object.keys(view.scenes)) {
+    const scene = Object.hasOwn(state.scenes, id) ? state.scenes[id] : undefined;
+    if (scene && !scene.fogEnabled) rules.set(id, scene.autoWalls);
+  }
+  if (rules.size === 0) return view;
+  const buildChunks: Record<string, BuildChunk> = Object.fromEntries(Object.entries(view.buildChunks).filter(([, chunk]) => !rules.has(chunk.sceneId)));
+  for (const [key, chunk] of Object.entries(state.buildChunks)) {
+    if (!rules.has(chunk.sceneId)) continue;
+    const shown = projectChunkForPlayer(state.buildChunks, chunk, rules.get(chunk.sceneId));
+    if (shown) buildChunks[key] = shown;
+  }
+  // Built by entries, so a scene keyed "__proto__" stays an own key.
+  const scenes: Record<string, Scene> = Object.fromEntries(
+    Object.entries(view.scenes).map(([id, scene]) => {
+      if (!rules.has(id)) return [id, scene];
+      const { autoWalls: _sent, ...rest } = scene;
+      const rule = rules.get(id);
+      return [id, rule === undefined ? rest : { ...rest, autoWalls: rule }];
+    }),
+  );
+  return { ...view, buildChunks, scenes };
 }

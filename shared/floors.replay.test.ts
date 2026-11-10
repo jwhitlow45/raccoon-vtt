@@ -4,6 +4,7 @@ import type { RoomState, Viewer } from "./model.ts";
 import { hash128, projectState, stableStringify } from "./project.ts";
 import { opSchema, type Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
+import { storedFogOff } from "./secretDoorTestutil.ts";
 import { DM, P1, P2, actor, character, room, scene, token } from "./testutil.ts";
 
 /*
@@ -120,7 +121,11 @@ function replay(seq: Sequence, opVersion: number | undefined): { steps: string[]
     state = r.state;
     steps.push(hashOf(state));
   });
-  const copies = seq.viewers.map(({ viewer, sceneId }) => hashOf(projectState(state, viewer, { sceneId })));
+  // A player's copy reads scenes with fog off as players got them when the hashes were recorded, before D-261110-530 (storedFogOff).
+  const copies = seq.viewers.map(({ viewer, sceneId }) => {
+    const view = projectState(state, viewer, { sceneId });
+    return hashOf(viewer.role === "dm" ? view : storedFogOff(state, view));
+  });
   return { steps, copies };
 }
 

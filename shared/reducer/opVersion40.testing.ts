@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import type { RoomState, Viewer } from "../model.ts";
+import type { BuildChunk, RoomState, Scene, Viewer } from "../model.ts";
 import { opSchema, type Op, type RestoreEntry } from "../protocol.ts";
-import { projectState } from "../project.ts";
+import { projectChunkForPlayer, projectState, type ProjectedState } from "../project.ts";
 import { asPlayerCopy } from "../rankTestutil.ts";
 import { applyOp, type ApplyResult } from "../reducer.ts";
 
@@ -141,6 +141,38 @@ function reparented(state: RoomState): boolean {
   return Object.values(state).some((v) => v !== null && typeof v === "object" && !Array.isArray(v) && Object.getPrototypeOf(v) !== Object.prototype);
 }
 
+/**
+ * A player's copy with every scene with fog off read as players got it
+ * before D-261110-530, as secretDoorTestutil.ts storedFogOff reads it: its
+ * chunks as projectChunkForPlayer gives them and the scene's own automatic
+ * walls rule. Written out here, since this file runs on the older build too,
+ * where it changes nothing.
+ */
+function storedFogOff(state: RoomState, view: ProjectedState): ProjectedState {
+  const rules = new Map<string, Scene["autoWalls"]>();
+  for (const id of Object.keys(view.scenes)) {
+    const scene = Object.hasOwn(state.scenes, id) ? state.scenes[id] : undefined;
+    if (scene && !scene.fogEnabled) rules.set(id, scene.autoWalls);
+  }
+  if (rules.size === 0) return view;
+  const buildChunks: Record<string, BuildChunk> = Object.fromEntries(Object.entries(view.buildChunks).filter(([, chunk]) => !rules.has(chunk.sceneId)));
+  for (const [key, chunk] of Object.entries(state.buildChunks)) {
+    if (!rules.has(chunk.sceneId)) continue;
+    const shown = projectChunkForPlayer(state.buildChunks, chunk, rules.get(chunk.sceneId));
+    if (shown) buildChunks[key] = shown;
+  }
+  // Built by entries, so a scene keyed "__proto__" stays an own key.
+  const scenes: Record<string, Scene> = Object.fromEntries(
+    Object.entries(view.scenes).map(([id, scene]) => {
+      if (!rules.has(id)) return [id, scene];
+      const { autoWalls: _sent, ...rest } = scene;
+      const rule = rules.get(id);
+      return [id, rule === undefined ? rest : { ...rest, autoWalls: rule }];
+    }),
+  );
+  return { ...view, buildChunks, scenes };
+}
+
 /** A projection reads only the room, so rooms alike have projections alike, worked out once. */
 const viewsByRoom = new Map<string, string[]>();
 
@@ -154,7 +186,7 @@ function viewsOf(state: RoomState): string[] {
     try {
       const view = projectState(state, VIEWERS[who], { sceneId: null });
       // A player's copy in the form this build sends it, recorded the same way (rankTestutil.ts).
-      return mark + digest(canon(who === "dm1" ? view : asPlayerCopy(view)));
+      return mark + digest(canon(who === "dm1" ? view : storedFogOff(state, asPlayerCopy(view))));
     } catch (err) {
       return `threw ${(err as Error).message}`;
     }

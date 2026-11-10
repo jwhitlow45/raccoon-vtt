@@ -7,6 +7,7 @@ import { hash128, projectState, stableStringify } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp, type Applied, type Env } from "../reducer.ts";
 import { ownEntry, readsOwnKeys, withRecordReads } from "../records.ts";
+import { storedFogOff } from "../secretDoorTestutil.ts";
 import { DM, P1, P2, room, token } from "../testutil.ts";
 
 /**
@@ -93,7 +94,8 @@ async function load(rows: Row[], states: RoomState[], taken: number): Promise<{ 
   return { loaded, reasons };
 }
 
-const playersOf = (state: RoomState) => [P1, P2].map((viewer) => hashOf(projectState(state, viewer, { sceneId: null })));
+// Read as players got scenes with fog off when the hashes were recorded, before D-261110-530 (storedFogOff).
+const playersOf = (state: RoomState) => [P1, P2].map((viewer) => hashOf(storedFogOff(state, projectState(state, viewer, { sceneId: null }))));
 
 describe("ops stored at version 40 that named Object.prototype's members (FU48-ASTRA-01, FU48-SR-001)", () => {
   for (const sequence of SEQUENCES) {
