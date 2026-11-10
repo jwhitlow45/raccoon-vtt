@@ -643,6 +643,23 @@ newest first.
 
 **Since v0.3.1**
 
+- **Creature numbers** ([design](design/design-v1-creature-numbers.md)):
+  room format 46, change format 60. A creature now takes its number when the
+  party first sees it beside another creature of its name, creatures whose
+  names are hidden are numbered under the name players read, and the DM's
+  board shows the number a creature the party has not seen would take, in
+  brackets. Numbers on creatures the party can see on the players' scene when
+  a room first loads on this version stay, for up to 100 creature names a
+  scene, and every other creature takes a number when the party sees it.
+  Until it reloads, an old DM page shows a creature the party has not seen
+  with no number and a disguised one without the name players read. Reload DM
+  pages first, then every other open page. A room with a scene the reserve
+  for numbers puts over its size limit logs "a scene is over its size limit
+  once creature numbers are reserved" with the room's and the scene's ids
+  as it loads, and that scene refuses changes that grow it until something
+  on it is removed. An older build refuses every room and backup this
+  version has saved, so going back needs the backups taken just before the
+  update.
 - **Clock**: log lines are now numbered by the server's clock, so keep the
   clock right. A room whose numbers are ahead of the clock logs a warning
   when it loads, and a backup dated more than 5 minutes after the clock is

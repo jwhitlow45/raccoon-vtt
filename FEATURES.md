@@ -581,7 +581,15 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
   - Plain numbers, healing and Temporary HP keep their usual behavior.
 - What players see of a monster's HP, set per token: nothing, a label (Healthy, Bloodied, Dying, Dead), a bar, or the exact number.
 - A colored ring shows ally, neutral or hostile.
-- Copies of a monster are numbered (Goblin 1, Goblin 2). A token without a picture shows its initials, G1, G2 or "AR" for Ash Rider, the same on the board, in the tracker and in the Characters and Monsters panels.
+- Creatures that share a name are numbered by what the party has seen (Goblin 1, Goblin 2). A token without a picture shows its initials, G1, G2 or "AR" for Ash Rider, the same on the board, in the tracker and in the Characters and Monsters panels.
+  - A creature takes its number when the party first sees it beside another creature of the name players read. One seen alone reads "Goblin", and once a second is seen they read Goblin 1 and Goblin 2.
+  - Numbers follow the name players read: creatures whose names are hidden read "Unknown creature 1" and "Unknown creature 2", and an Orc shown to players as a Goblin is numbered among the Goblins.
+  - A scene and its floors keep one set of numbers, and a number is never given twice there: after Goblin 3 is deleted, the next Goblin seen is Goblin 4.
+  - On the DM's board, a creature the party has not yet seen beside others of its name shows the number it would take in brackets, "Goblin (3)", with outlined initials, and its Token panel says "Not yet seen by the party. It takes this number when they see it, if they have seen no other first."
+  - A creature shown to players under another name reads "Orc (as Goblin 2)" for the DM and its owners, with the initials players see, and its Token panel says "Players read Goblin 2."
+  - Renamed and named back while the party watches, a creature takes the next number: "Goblin 2", "Orc 3", then "Goblin 4". Undo and Redo give the numbers back exactly.
+  - A creature keeps its number when it is attached to a character, and a duplicate takes its own number when the party sees it. A companion of a character a player plays is never numbered.
+  - A scene keeps numbers for 100 creature names the party has seen there. Past that, new names get no number, and the Token panel says "The party has met 100 creature names on this scene, the most it keeps numbers for. New names get no number here."
 - Each creature shows its AC on a small shield in the bottom left corner of its token. The DM sees every creature's, a player sees the AC of the creatures whose stats they have: their own character and creatures they own. A dead creature's shield hides, and on a token too small for it the action bar still says its AC.
 - Names, condition chips and badges draw above every token and the fog. They scale with the map and make way when crowded. On a top-down board a name also stays between the screen's sides, so beside an edge it is cut with an ellipsis or moves to another side of its token.
 - Hidden tokens are translucent to the DM and never reach players. A locked token shows a padlock and cannot be dragged.
