@@ -3365,6 +3365,11 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     const actor = await RoomActor.load(deps(db));
     assert.ok(actor);
     try {
+      // The room's first answer explores the sight the fixture shows, so another device's chat comes first.
+      const first = connect(actor, dm);
+      await actor.hello(first.conn, { clientId: "c0", resumeFrom: 1 });
+      await actor.op(first.conn, 1, { t: "log.chat", text: "ready" });
+      assert.notEqual(await answerTo(first.sent, 1), "stuck");
       const table = connect(actor, dm);
       await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
       // A gesture that fits: its ask is taken and changes nothing, and its ops apply.
@@ -3522,8 +3527,10 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     await first.hello(a.conn, { clientId: "c1", resumeFrom: 1 });
     await first.op(a.conn, 1, ask(0, bands.slice(0, 1), true), "g1");
     assert.equal(await outcome(a.sent, 1), "taken");
-    // The room restarts: its chains lived only in memory.
+    // The room restarts: its chains lived only in memory. It replays what the first room stored, the explore of the sight
+    // the fixture shows that the first answer ran.
     await first.shutdown({ code: 1012, snapshot: false });
+    db.opRows.push(...db.storedRows);
     const actor = await RoomActor.load(deps(db));
     assert.ok(actor);
     try {

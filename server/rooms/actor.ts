@@ -2325,7 +2325,7 @@ export class RoomActor {
     this.#batch = null;
     if (batch.timer) clearTimeout(batch.timer);
     batch.timer = null;
-    if (batch.ops.length > 0 || batch.doors.length > 0) this.#explore(batch);
+    if (batch.answered > 0 || batch.doors.length > 0) this.#explore(batch);
     batch.state = this.#staged.state;
     batch.seq = this.#staged.seq;
     batch.pub = this.#pub;
@@ -2356,10 +2356,16 @@ export class RoomActor {
    * by every earlier op's size check (sizeGuard.ts), and its growth only
    * spends that reserve. The protocol schema still checks it, because
    * replay checks every stored op against it.
+   *
+   * It runs at the end of every batch that answered something, a refusal
+   * included, and of none that only kept the room's books (the music's
+   * tick, the cleanup's remember), which move no one's sight. So sight a
+   * loaded state never explored is explored at the room's first answer,
+   * whatever that answer was.
    */
   #explore(batch: Batch): void {
     try {
-      if (batch.ops.length > 0) this.#exploreNow(batch);
+      if (batch.answered > 0) this.#exploreNow(batch);
       this.#remember(batch);
     } catch (err) {
       // The batch commits all the same: its ops are staged, and a batch dropped here would leave the room ahead of what is
