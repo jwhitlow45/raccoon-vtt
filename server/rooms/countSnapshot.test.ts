@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
-import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, SNAPSHOT_VERSION, runMigrations, snapshotMigrations } from "#shared/migrate.ts";
+import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, OP_VERSION, SNAPSHOT_VERSION, runMigrations, snapshotMigrations } from "#shared/migrate.ts";
 import type { Member, RoomState } from "#shared/model.ts";
 import type { ServerMessage } from "#shared/protocol.ts";
+import { stateThrough } from "../http/receipts.ts";
 import type { ActorDeps } from "./actor.ts";
 import { Connection } from "./connection.ts";
-import { snapshotJson } from "./persistence.ts";
+import { captureView } from "./logHistory.ts";
+import { ScanBusyError } from "./logScanBudget.ts";
+import { loadRoom, snapshotJson } from "./persistence.ts";
 import { memoryGrowth } from "./remember.ts";
 import { restartStored, scopeFixture, storedActor, StoredRoomDb, until, type StoredRow } from "./undoScopeTesting.ts";
 
@@ -271,5 +274,56 @@ describe("the build and the write of that snapshot", () => {
     assert.equal(db.snapshotWrites, 1);
     assert.ok(own.some((c) => c.snapshot && c.marks > 0), `the snapshot rode on the ask's answer: ${JSON.stringify(own)}`);
     assert.equal(db.pub, 3);
+  });
+});
+
+/** A chat row this build stored, numbered `pub`. */
+const newChat = (seq: number, pub: number, who: Member, text = `line ${pub}`): StoredRow => ({ ...oldChat(seq, who, text), opVersion: OP_VERSION, pub });
+/** The row with an op that no longer applies, so replay stops at it. */
+const broken = (row: StoredRow): StoredRow => ({ ...row, op: { t: "token.delete", tokenId: "missing" } });
+
+describe("reads in a room whose replay stopped", () => {
+  test("stop at the last number replayed, before a refusal and after it, while the count goes past every stored row", async (t) => {
+    const f = scopeFixture();
+    const db = new StoredRoomDb(f.state, { rows: [newChat(1, 1, f.dm), broken(newChat(2, 2, f.dm)), newChat(3, 3, f.dm)], pub: 3 });
+    const h = await storedActor(t, db);
+    assert.equal(h.actor.replayFailed, true);
+    const dm = await h.connect(f.dm);
+    for (const when of ["before a refusal", "after it"]) {
+      const { state, pub, through } = h.actor.committed;
+      assert.equal(through, 1, `${when}: the state holds the ops through 1`);
+      assert.equal(pub, when === "before a refusal" ? 3 : 4, `${when}: the count takes every stored row's number, and the refusal's`);
+      assert.equal(captureView(h.actor.committed, "UNDOSCOPE", { memberId: f.dm.id, role: "dm" }).through, 1, `${when}: a log read stops at 1`);
+      assert.equal(await stateThrough(h.actor, 1, AbortSignal.timeout(1_000)), state, `${when}: a receipt of 1 reads the state`);
+      for (const seq of [2, 3, pub]) await assert.rejects(stateThrough(h.actor, seq, AbortSignal.timeout(1_000)), ScanBusyError, `${when}: a receipt of ${seq} answers busy`);
+      if (when === "before a refusal") {
+        assert.equal((await dm.send({ t: "log.chat", text: "read only" })).rejects?.length, 1);
+        assert.equal(db.pub, 4);
+      }
+    }
+  });
+
+  test("with no row replayed, stop at an older build's snapshot seq, or below the first row's number, or at it for a row that moved no count", async () => {
+    const f = scopeFixture();
+    const load = async (db: StoredRoomDb) => {
+      const loaded = await loadRoom(db.pool(), "UNDOSCOPE");
+      assert.ok(loaded?.replayFailed);
+      return [loaded.through, loaded.pub];
+    };
+    assert.deepEqual(await load(new StoredRoomDb(f.state, { version: OLD, seq: 5, rows: [broken(oldChat(6, f.dm))] })), [5, 6], "an older build's snapshot numbered its ops by seq");
+    assert.deepEqual(await load(new StoredRoomDb(f.state, { seq: 5, rows: [broken(newChat(6, 9, f.dm))], pub: 9 })), [8, 9], "a counted row's number is the count's next");
+    const explore: StoredRow = { ...newChat(6, 9, f.dm), op: { t: "sys.explore", sceneId: "gone", tiles: [] } };
+    assert.deepEqual(await load(new StoredRoomDb(f.state, { seq: 5, rows: [explore], pub: 9 })), [9, 9], "an uncounted row carries the count it was staged at");
+    // A first row no build writes, out of order or without its number: the newest line the state holds.
+    const lined: RoomState = { ...f.state, log: [{ id: "4:0", at: "2026-11-01T12:00:00.000Z", kind: "chat", from: f.dm.id, text: "held" }] };
+    assert.deepEqual(await load(new StoredRoomDb(lined, { seq: 5, rows: [newChat(7, 9, f.dm)], pub: 9 })), [4, 9], "a row that does not follow the snapshot");
+    assert.deepEqual(await load(new StoredRoomDb(lined, { seq: 5, rows: [{ ...newChat(6, 9, f.dm), pub: null }], pub: 9 })), [4, 9], "a row without its number");
+  });
+
+  test("a whole replay reads up to the count", async () => {
+    const f = scopeFixture();
+    const loaded = await loadRoom(new StoredRoomDb(f.state, { rows: [newChat(1, 1, f.dm), newChat(2, 3, f.dm)], pub: 4 }).pool(), "UNDOSCOPE");
+    assert.equal(loaded?.replayFailed, false);
+    assert.deepEqual([loaded.through, loaded.pub], [4, 4]);
   });
 });

@@ -300,6 +300,62 @@ describe("twin rooms on the database give their devices the same frames", () => 
     await back.waitClosed();
   });
 
+  test("a room whose replay stopped reads its log, sessions, export and receipts up to the last op replayed, before a refusal and after it", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Stopped replay");
+    const pip = t.client();
+    await pip.join(roomId, "Pip");
+    const socket = await t.connect(roomId, pip);
+    await socket.snapshot(randomUUID());
+    const kept = randomUUID();
+    const past = randomUUID();
+    const ops: Array<Record<string, unknown>> = [
+      { t: "log.chat", text: "kept" },
+      { t: "dice.roll", tag: kept, to: "all", rolls: [{ formula: "1d20" }] },
+      { t: "log.chat", text: "breaks" },
+      { t: "dice.roll", tag: past, to: "all", rolls: [{ formula: "1d20" }] },
+      { t: "log.chat", text: "past" },
+    ];
+    for (const op of ops) {
+      clock.now += 1_000;
+      assert.equal((await socket.apply(op)).rejects, undefined);
+    }
+    socket.close();
+    await socket.waitClosed();
+    // Unloaded as a crash, with no snapshot, so the room replays its rows, and the third no longer applies.
+    await t.manager.unload(roomId, undefined, false);
+    await t.pool.query(`update room_ops set op = '{"t":"token.delete","tokenId":"missing"}'::jsonb where room_id = $1 and op->>'text' = 'breaks'`, [roomId]);
+    const back = await t.connect(roomId, pip);
+    await back.snapshot(randomUUID());
+    const actor = t.manager.get(roomId)!;
+    assert.equal(actor.replayFailed, true);
+    const read = async () => {
+      const receipt = async (tag: string) => (await pip.get(`/api/rooms/${roomId}/receipts/${tag}`)).statusCode;
+      const page = await pip.get(`/api/rooms/${roomId}/log?limit=100`);
+      assert.equal(page.statusCode, 200, page.body);
+      const sessions = await pip.get(`/api/rooms/${roomId}/log/sessions`);
+      assert.equal(sessions.statusCode, 200, sessions.body);
+      const file = await pip.get(`/api/rooms/${roomId}/log/export?tz=UTC`);
+      assert.equal(file.statusCode, 200, file.body);
+      const entries = page.json<{ entries: Array<{ id: string; text?: string }> }>().entries;
+      return { kept: await receipt(kept), past: await receipt(past), ids: entries.map((e) => e.id), texts: entries.flatMap((e) => (e.text ? [e.text] : [])), lines: sessions.json<{ lines: number }>().lines, file: file.body };
+    };
+    const before = await read();
+    assert.equal(before.kept, 200, "the receipt of an op replayed reads");
+    assert.equal(before.past, 503, "the receipt of an op past the stop answers busy");
+    assert.deepEqual(before.texts, ["kept"], "the page holds the replayed chat and nothing past the stop");
+    assert.ok(before.ids.every((id) => Number(id.split(":")[0]) <= actor.committed.through), "every line at or below the last number replayed");
+    assert.equal(before.lines, before.ids.length, "the sessions count the same lines");
+    assert.ok(before.file.includes("kept") && !before.file.includes("breaks") && !before.file.includes("past"), "the export holds the replayed chat alone");
+    const pub = actor.committed.pub;
+    clock.now += 1_000;
+    assert.equal((await back.apply({ t: "log.chat", text: "read only" })).rejects?.length, 1);
+    assert.equal(actor.committed.pub, pub + 1, "the refusal moved the count");
+    assert.deepEqual(await read(), before, "and every read is as it was");
+    back.close();
+    await back.waitClosed();
+  });
+
   test("C18: refusals alone, then a shutdown with its snapshot and a restart, reload with the count that holds them, not the snapshot's seq", async () => {
     const pair = await twins();
     const room = pair[0];
