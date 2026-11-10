@@ -6,7 +6,7 @@ import type { ClientOp } from "#shared/protocol.ts";
 import { groundAt } from "#shared/rules/heights.ts";
 import type { JoinExpect } from "#shared/rules/wingClear.ts";
 import { builderScene } from "../scenes/create.ts";
-import { dialogScene, dressedRooms, HAND_SETTINGS, handKey, hundredOps, hundredPlan } from "./handPlans.ts";
+import { dialogScene, dressedRooms, HAND_SETTINGS, handKey, hexWingSide, hundredOps, hundredPlan } from "./handPlans.ts";
 import { endsKey, hexSide, NO_SPACE } from "./hexWalls.ts";
 import { SCENE_PLACEHOLDER, trapPlaceholder, wingIds, withIds } from "./ops.ts";
 import { planFitted, type DungeonPlan, type Planned, type WingBase } from "./plan.ts";
@@ -211,6 +211,28 @@ function wingOnMedium(mediumOps: ClientOp[]) {
   throw new Error("no raised room of Medium takes a wing");
 }
 
+/**
+ * A Wide hex wing joined on a slanted side (DG3 review round 1), for
+ * server/rooms/dungeon.wing.itest.ts: a raised room of free walls on a Hex
+ * rows scene, joined by a Wide doorway on its bottom row's south-east
+ * sides, and the wing in the area below it. `baseOps` make the scene and
+ * the room. It names the area and join, its asks' clear with the floor
+ * runs, and the wing's ops with the key's, each placeholder but the join's.
+ */
+const HEX_WING_SEED = `${versionChar()}H3X-W1NG-5ANT-0001`;
+
+function hexWing() {
+  const { base, ops: baseOps } = hexWingSide("hexRows", { dir: 1, odd: true, wide: true, ground: 5, sceneId: SCENE_PLACEHOLDER });
+  const settings = clampSettings({ ...WING_FIXTURE_SETTINGS, wide: true, heights: 40 }, "hexRows");
+  const parsed = parseSeed(HEX_WING_SEED);
+  assert.ok(parsed.ok);
+  const preview = wingPreviewOf(settings, parsed.seed, base, { feetPerCell: 5 }, { ...handKey("Keep"), wing: { from: 0, titles: [], pins: 100 } });
+  assert.ok(preview.ok && preview.clear, `the hex wing plans: ${JSON.stringify(preview.ok ? "" : preview)}`);
+  let n = 0;
+  const placeholders = [...wingIds(preview.ops, SCENE_PLACEHOLDER, SCENE_PLACEHOLDER, () => `x${++n}`).ids.keys()];
+  return { name: "hex-wing", grid: "hexRows", seed: parsed.seed, settings, sceneId: SCENE_PLACEHOLDER, baseOps, area: base.area, join: base.join, clear: preview.clear, placeholders, rooms: preview.plan.rooms.map(({ x, y, w, h }) => ({ x, y, w, h })), ops: preview.ops };
+}
+
 function today() {
   const hundred = hundredPlan();
   const dressed = dressedRooms();
@@ -248,6 +270,7 @@ function today() {
         assert.ok(made.ok);
         return wingOnMedium(made.ops);
       })(),
+      hexWing(),
     ],
   };
 }

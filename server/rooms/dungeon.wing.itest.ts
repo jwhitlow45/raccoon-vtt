@@ -6,6 +6,7 @@ import { uuidv7 } from "#shared/ids.ts";
 import type { RoomState } from "#shared/model.ts";
 import { stableStringify, type ProjectedState } from "#shared/project.ts";
 import type { Op, OpOf, ServerMessage } from "#shared/protocol.ts";
+import { hexCenter } from "#shared/rules/hex.ts";
 import { JOIN_CHANGED, WING_MOVED, type JoinExpect, type WingClear } from "#shared/rules/wingClear.ts";
 import { startEngine, type Engine, type Socket, type TestClient } from "./testing.ts";
 
@@ -19,15 +20,18 @@ import { startEngine, type Engine, type Socket, type TestClient } from "./testin
  * Setup step; a token walked into its floor, a join drawn over, or an op
  * landing between two parts in an earlier part's cells refuses it with
  * nothing landed. On the players' scene, sight off the area, players get
- * nothing of the wing but the join they see change.
+ * nothing of the wing but the join they see change. A Wide hex wing joined
+ * on a slanted side (DG3 review round 1) is taken and lands too.
  */
 
 type Rect = { x: number; y: number; w: number; h: number };
 type FixtureDungeon = { name: string; sceneId: string; placeholders: string[]; ops: Op[]; rooms: Rect[] };
 type FixtureWing = FixtureDungeon & { bounds: { w: number; h: number }; area: Rect; join: Extract<JoinExpect, { grid: "squares" }>; clear: WingClear };
 const FIXTURE = JSON.parse(readFileSync(new URL("./dungeon.fixture.json", import.meta.url), "utf8")) as { dungeons: (FixtureDungeon | FixtureWing)[] };
+type FixtureHexWing = FixtureDungeon & { baseOps: Op[]; area: Rect; join: Extract<JoinExpect, { grid: "hex" }>; clear: WingClear };
 const MEDIUM = FIXTURE.dungeons.find((d) => d.name === "medium")!;
 const WING = FIXTURE.dungeons.find((d) => d.name === "wing") as FixtureWing;
+const HEX_WING = FIXTURE.dungeons.find((d) => d.name === "hex-wing") as FixtureHexWing;
 
 const BLOCK_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
 const shortId = () => Array.from(randomBytes(12), (b) => BLOCK_CHARS[b % BLOCK_CHARS.length]).join("");
@@ -59,6 +63,13 @@ const MAP_OPS = new Set(["build.paint", "build.erase", "build.rect", "build.edge
 function asks(ops: readonly Op[], sceneId: string, clear: WingClear): OpOf<"build.ask">[] {
   const mapOps = ops.filter((op) => MAP_OPS.has(op.t)) as OpOf<"build.ask">["ops"];
   return mapOps.map((op, i) => ({ t: "build.ask", sceneId, ops: [op], part: i, ...(i < mapOps.length - 1 ? { more: true as const } : {}), clear }));
+}
+
+/** A hex wing's asks as the device packs them: the floor runs on the last part only (3.6). */
+function hexAsks(ops: readonly Op[], sceneId: string, clear: WingClear): OpOf<"build.ask">[] {
+  const { floor: _floor, ...bare } = clear;
+  const parts = asks(ops, sceneId, bare);
+  return parts.map((a, i) => (i === parts.length - 1 ? { ...a, clear } : a));
 }
 
 /** Sends ops one group under Setup and waits for every answer. */
@@ -197,6 +208,47 @@ describe("a wing on the server", () => {
     assert.ok(refused.some((r) => r.code === "invalid" && r.message === WING_MOVED), JSON.stringify(refused));
     other.close();
     tb.dmSocket.close();
+  });
+
+  test("DGW-B: a Wide hex wing joined on a slanted side is refused while a token stands on its floor, then taken, and lands as one Setup step", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Hex wing");
+    const socket = await t.connect(roomId, dm);
+    await socket.snapshot("dm-hex-wing");
+    const sceneId = uuidv7();
+    const base = JSON.parse(JSON.stringify(HEX_WING.baseOps).replaceAll(JSON.stringify(HEX_WING.sceneId), JSON.stringify(sceneId))) as Op[];
+    assert.deepEqual(await send(socket, base), [], "the scene and its room land");
+    const stored = () => t.manager.get(roomId)!.committed.state;
+    const walls = (state: RoomState) => Object.values(state.buildChunks).filter((c) => c.sceneId === sceneId).flatMap((c) => c.walls ?? []);
+    const before = walls(stored());
+    assert.equal(HEX_WING.join.walls.length, 3, "a Wide join");
+    const ops = fresh(HEX_WING, sceneId);
+
+    // A token on the wing's floor, which only the last part's floor runs name.
+    const floor = HEX_WING.clear.floor!;
+    const [row, col] = floor[Math.floor(floor.length / 2)]!;
+    const at = hexCenter({ shape: "hex", orient: "rows" }, { col, row });
+    const tokenId = uuidv7();
+    assert.equal((await socket.apply({ t: "token.create", token: { id: tokenId, sceneId, kind: "monster", name: "Goblin", size: "medium", x: at.x - 0.5, y: at.y - 0.5, actor: { inline: GOBLIN } } })).rejects, undefined);
+    const moved = await send(socket, hexAsks(ops, sceneId, HEX_WING.clear));
+    assert.ok(moved.some((r) => r.code === "invalid" && r.message === WING_MOVED), JSON.stringify(moved));
+    assert.equal((await socket.apply({ t: "token.move", tokenId, x: 1, y: 1 })).rejects, undefined);
+
+    const g = uuidv7();
+    assert.deepEqual(await send(socket, hexAsks(ops, sceneId, HEX_WING.clear), g), [], "every part taken: the join stands and the wing's footprint is clear");
+    assert.deepEqual(await send(socket, ops, g), [], "the wing is taken");
+    const after = walls(stored());
+    const joinIds = new Set(HEX_WING.join.walls.map((w) => w.id));
+    assert.ok(!after.some((w) => joinIds.has(w.id)), "the join's walls are replaced");
+    for (const j of HEX_WING.join.walls) {
+      const leaf = after.find((w) => w.a[0] === j.a[0] && w.a[1] === j.a[1] && w.b[0] === j.b[0] && w.b[1] === j.b[1]);
+      assert.equal(leaf?.f.kind, "door", "a door leaf on each side of the join");
+    }
+    assert.ok(after.length > before.length + 20, `the wing's walls stored: ${before.length} then ${after.length}`);
+    assert.equal(Object.values(stored().journal).filter((p) => p.title.endsWith("wing key")).length, 1);
+    assert.equal((await socket.step("undo", "setup")).rejects, undefined);
+    assert.deepEqual(walls(stored()).map((w) => w.id).sort(), before.map((w) => w.id).sort(), "one Undo setup takes the wing back");
+    socket.close();
   });
 
   test("DGW-B: on the players' scene, sight off the area, players get nothing of the wing but the join they see change", async () => {

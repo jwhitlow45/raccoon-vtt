@@ -165,7 +165,7 @@ describe("a generated dungeon on the server", () => {
     for (const d of FIXTURE.dungeons) {
       assert.ok(d.ops.length <= 100, `${d.name}: ${d.ops.length} ops`);
       // A wing (phase 3) lands on a scene it does not make: dungeon.wing.itest.ts lands it.
-      assert.equal(d.ops[0]?.t === "scene.create", d.name !== "wing", d.name);
+      assert.equal(d.ops[0]?.t === "scene.create", d.name !== "wing" && d.name !== "hex-wing", d.name);
       assert.ok(!JSON.stringify(d.ops).includes("defaultView"), "no starting view");
     }
   });
