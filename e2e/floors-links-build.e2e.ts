@@ -135,7 +135,8 @@ async function drawnAt(cell: { x: number; y: number }): Promise<"red" | "clear" 
       const py = Math.round(((y! - r.top) / r.height) * canvas.height);
       const d = canvas.getContext("2d")?.getImageData(px, py, 1, 1).data;
       if (!d || d[3]! < 20) continue;
-      if (d[0]! > 150 && d[1]! < 120 && d[2]! < 130) return "red";
+      // The tint over a dark square (a pit's shade) is a dim red, not the danger color itself, so a red that outweighs both other channels counts too.
+      if ((d[0]! > 150 && d[1]! < 120 && d[2]! < 130) || (d[0]! > 60 && d[0]! > d[1]! * 1.8 && d[0]! > d[2]! * 1.8)) return "red";
       if (d[0]! > 150 && d[1]! > 120 && d[2]! < 120) seen = "clear";
     }
     return seen;
