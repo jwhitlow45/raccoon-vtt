@@ -4,9 +4,10 @@ import yauzl from "yauzl";
 import yazl from "yazl";
 import { uuidv7 } from "#shared/ids.ts";
 import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
-import type { RoomState, Scene } from "#shared/model.ts";
+import type { FloorLink, RoomState, Scene } from "#shared/model.ts";
 import { stableStringify, type ProjectedState } from "#shared/project.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
+import { LINK_WORDS } from "#shared/rules/floorLinks.ts";
 import { FLOOR_WORDS, floorProblem, floorsOf } from "#shared/rules/floors.ts";
 import { floorFullWords } from "./actor.ts";
 import { Connection } from "./connection.ts";
@@ -359,6 +360,224 @@ describe("several floors on the server (docs/design/design-v1-floors.md 9)", () 
       if (c.state.openFloors) delete c.state.openFloors[upper];
     });
     await refuse("a height off its steps", (c) => (scenes(c)[upper]!.floor!.height = 12));
+  });
+});
+
+/** Stairs' squares on both floors: two squares wide, as the tower tests place them. */
+const STAIRS = { x: 3, y: 3, w: 2, h: 1 };
+
+type Stairs = Tower & { upper: string; thorn: string; link: string; pair: string; anaSocket: Socket };
+
+/**
+ * Tower with Upper floor above Ground floor, stairs between them at STAIRS
+ * (`link` on Ground floor, `pair` on Upper floor), and Thorn, Ana's
+ * creature, on Ground floor 25 ft south of them. `fight` starts a fight on
+ * Thorn's turn, so its moves write their path.
+ */
+async function stairsTower(t: Engine, name: string, fight = true): Promise<Stairs> {
+  const r = await tower(t, name);
+  const upper = await addFloor(r.dmSocket, r.ground, "above", "Upper floor");
+  const thorn = await create(r.dmSocket, r.ground, { kind: "pc", name: "Thorn", disposition: "ally", ownerIds: [r.anaId], x: 3, y: 8 });
+  const link = uuidv7();
+  const pair = uuidv7();
+  await ok(r.dmSocket, { t: "floorLink.put", link: { id: link, pairId: pair, sceneId: r.ground, to: upper, rect: STAIRS, kind: "stairs" } } as Op);
+  if (fight) {
+    await ok(r.dmSocket, { t: "encounter.start", entries: [{ id: uuidv7(), tokenId: thorn, value: 20 }] } as Op);
+    await ok(r.dmSocket, { t: "encounter.next" } as Op);
+  }
+  const anaSocket = await t.connect(r.roomId, r.ana);
+  await anaSocket.snapshot("ana");
+  return { ...r, upper, thorn, link, pair, anaSocket };
+}
+
+/** Where a token stands and its turn's path. */
+function pose(state: RoomState, tokenId: string) {
+  const token = state.tokens[tokenId]!;
+  return { sceneId: token.sceneId, x: token.x, y: token.y, elevation: token.elevation, path: token.path };
+}
+
+/** The one refusal of a socket's op, its words. */
+function refused(ev: Extract<ServerMessage, { t: "ev" }>): string {
+  assert.equal(ev.rejects?.length, 1, `one refusal: ${JSON.stringify(ev.acks)}`);
+  return ev.rejects![0]!.message;
+}
+
+describe("stairs and ladders on the server (docs/design/design-v1-floors.md phase 2, lane FL2-C)", () => {
+  let t: Engine;
+  before(async () => {
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
+  });
+  after(() => t.close());
+
+  test("Ana's Undo takes Thorn down the stairs it climbed and her Redo up again, twice, its walk's 25 ft kept upstairs, each toast naming the climb", async () => {
+    const r = await stairsTower(t, "Climb undo");
+    await ok(r.anaSocket, { t: "token.move", tokenId: r.thorn, x: 3, y: 3 });
+    const below = pose(live(t, r.roomId), r.thorn);
+    await ok(r.anaSocket, { t: "token.climb", tokenId: r.thorn, linkId: r.link });
+    const above = pose(live(t, r.roomId), r.thorn);
+    assert.equal(above.sceneId, r.upper);
+    assert.equal(above.path?.prior?.moved, 25, "the walk downstairs is the turn's before the climb");
+    for (let i = 0; i < 2; i++) {
+      const undone = await ok(r.anaSocket, { t: "undo", head: (await r.anaSocket.historyHead("play", "undo"))! } as Op);
+      assert.deepEqual(undone.restored?.map((x) => x.what), ["moving Thorn up the stairs"]);
+      assert.deepEqual(pose(live(t, r.roomId), r.thorn), below, `undo ${i + 1}`);
+      await ok(r.anaSocket, { t: "redo", head: (await r.anaSocket.historyHead("play", "redo"))! } as Op);
+      assert.deepEqual(pose(live(t, r.roomId), r.thorn), above, `redo ${i + 1}`);
+    }
+    r.anaSocket.close();
+  });
+
+  test("Doesn't count on the climb keeps the 25 ft walked downstairs, which a reload and a backup carry, its stairs under new ids", async () => {
+    const r = await stairsTower(t, "Climb kept");
+    await ok(r.anaSocket, { t: "token.move", tokenId: r.thorn, x: 3, y: 3 });
+    await ok(r.anaSocket, { t: "token.climb", tokenId: r.thorn, linkId: r.link });
+    await ok(r.anaSocket, { t: "token.countLeg", tokenId: r.thorn, counts: false } as Op);
+    const before = live(t, r.roomId);
+    const path = before.tokens[r.thorn]!.path!;
+    assert.equal(path.prior?.moved, 25, "the 25 ft stay");
+    assert.equal(path.stops.at(-1)?.uncounted, true, "the climb itself is not counted");
+    r.anaSocket.close();
+    await r.anaSocket.waitClosed();
+    await t.manager.unload(r.roomId);
+    const reloaded = await loadRoom(t.pool, r.roomId);
+    assert.ok(reloaded && !reloaded.replayFailed);
+    assert.equal(stableStringify(reloaded.state.tokens[r.thorn]), stableStringify(before.tokens[r.thorn]), "a reload keeps the path whole");
+    assert.equal(stableStringify(reloaded.state.floorLinks), stableStringify(before.floorLinks));
+
+    const res = await r.dm.get(`/api/rooms/${r.roomId}/export`);
+    assert.equal(res.statusCode, 200);
+    const room = JSON.parse((await unzip(res.rawPayload)).get("room.json")!.toString()) as RoomExport;
+    assert.deepEqual(room.state.tokens[r.thorn]!.path?.prior, path.prior, "the backup carries the feet of floors left");
+    const imported = await importZip(t.client(), await zipOf({ "room.json": JSON.stringify(room) }));
+    assert.equal(imported.statusCode, 201, imported.body);
+    const newId = imported.json<{ roomId: string }>().roomId;
+    t.track(newId);
+    const state = (await t.pool.query<{ state: RoomState }>("select state from room_snapshots where room_id = $1", [newId])).rows[0]!.state;
+    const ends = Object.values(state.floorLinks ?? {});
+    assert.equal(ends.length, 2);
+    const floorIds = new Set(Object.keys(state.scenes));
+    for (const end of ends) {
+      assert.ok(![r.link, r.pair].includes(end.id), "a new id");
+      assert.ok(floorIds.has(end.sceneId) && floorIds.has(end.to), "on the new floors");
+      assert.equal(state.floorLinks![end.pair]?.pair, end.id, "each names the other");
+      assert.equal(end.made, before.floorLinks![r.link]!.made, "the stamp stays");
+    }
+    for (const id of Object.keys(state.scenes)) assert.equal(floorProblem(state, id), null);
+  });
+
+  test("stairs removed and placed again with the same ids over a raised landing are other stairs: Ana's Undo answers the stairs changed (ASTRA-14)", async () => {
+    const r = await stairsTower(t, "Placed again");
+    await ok(r.anaSocket, { t: "token.move", tokenId: r.thorn, x: 3, y: 3 });
+    await ok(r.anaSocket, { t: "token.climb", tokenId: r.thorn, linkId: r.link });
+    await ok(r.dmSocket, { t: "floorLink.delete", linkId: r.link } as Op);
+    await ok(r.dmSocket, { t: "build.height", sceneId: r.ground, cells: ["3,3", "4,3"], height: 5 } as Op);
+    await ok(r.dmSocket, { t: "floorLink.put", link: { id: r.link, pairId: r.pair, sceneId: r.ground, to: r.upper, rect: STAIRS, kind: "stairs" } } as Op);
+    const answer = await r.anaSocket.apply({ t: "undo", head: (await r.anaSocket.historyHead("play", "undo"))! } as Op);
+    assert.equal(refused(answer), `could not undo moving Thorn up the stairs: ${LINK_WORDS.changed("stairs")}`);
+    assert.equal(live(t, r.roomId).tokens[r.thorn]!.sceneId, r.upper);
+    r.anaSocket.close();
+  });
+
+  test("a backup whose stairs were placed past every op its lines name starts its room past them, so stairs placed again there are other stairs (ASTRA-16)", async () => {
+    const r = await stairsTower(t, "Stamped", false);
+    r.anaSocket.close();
+    const res = await r.dm.get(`/api/rooms/${r.roomId}/export`);
+    const room = JSON.parse((await unzip(res.rawPayload)).get("room.json")!.toString()) as RoomExport;
+    const late = 100_000;
+    for (const end of Object.values(room.state.floorLinks!)) end.made = late;
+    const importer = t.client();
+    const imported = await importZip(importer, await zipOf({ "room.json": JSON.stringify(room) }));
+    assert.equal(imported.statusCode, 201, imported.body);
+    const copyId = imported.json<{ roomId: string }>().roomId;
+    t.track(copyId);
+    const { rows } = await t.pool.query<{ imported_seq: string }>("select imported_seq from rooms where id = $1", [copyId]);
+    assert.ok(Number(rows[0]!.imported_seq) >= late, `the room starts past the stamp: ${rows[0]!.imported_seq}`);
+    const dm = await t.connect(copyId, importer);
+    const view = (await dm.snapshot("dm")).state as ProjectedState;
+    const cara = t.client();
+    const caraId = await cara.join(copyId, "Cara");
+    const thorn = Object.values(view.tokens).find((x) => x.name === "Thorn")!.id;
+    const ends = Object.values(view.floorLinks!) as FloorLink[];
+    const lower = ends.find((end) => view.scenes[end.sceneId]?.floor?.level === 0);
+    const upper = ends.find((end) => end !== lower);
+    await ok(dm, { t: "token.update", tokenId: thorn, patch: { ownerIds: [caraId], x: 3, y: 3 } } as Op);
+    const caraSocket = await t.connect(copyId, cara);
+    await caraSocket.snapshot("cara");
+    await ok(caraSocket, { t: "token.climb", tokenId: thorn, linkId: lower!.id });
+    await ok(dm, { t: "floorLink.delete", linkId: lower!.id } as Op);
+    await ok(dm, { t: "floorLink.put", link: { id: lower!.id, pairId: upper!.id, sceneId: lower!.sceneId, to: upper!.sceneId, rect: STAIRS, kind: "stairs" } } as Op);
+    assert.ok(live(t, copyId).floorLinks![lower!.id]!.made > late, "placed again past the stamp");
+    const answer = await caraSocket.apply({ t: "undo", head: (await caraSocket.historyHead("play", "undo"))! } as Op);
+    assert.equal(refused(answer), `could not undo moving Thorn up the stairs: ${LINK_WORDS.changed("stairs")}`);
+    caraSocket.close();
+    dm.close();
+  });
+
+  test("DM A's undo of a Remove floor after co-DM B placed stairs between the floors beside it is refused with its step kept, and works once B removes them (D-261109-108)", async () => {
+    const r = await tower(t, "Kept step");
+    const co = t.client();
+    await co.claimDm(r.roomId, r.dmKey);
+    const coSocket = await t.connect(r.roomId, co);
+    await coSocket.snapshot("co");
+    const middle = await addFloor(r.dmSocket, r.ground, "above", "Middle floor");
+    const upper = await addFloor(r.dmSocket, middle, "above", "Upper floor");
+    await ok(r.dmSocket, { t: "scene.delete", sceneId: middle } as Op);
+    const link = uuidv7();
+    await ok(coSocket, { t: "floorLink.put", link: { id: link, pairId: uuidv7(), sceneId: r.ground, to: upper, rect: STAIRS, kind: "stairs" } } as Op);
+    const head = await r.dmSocket.historyHead("setup", "undo");
+    const answer = await r.dmSocket.apply({ t: "undo", head: head!, scope: "setup" } as Op);
+    assert.match(refused(answer), /^could not undo removing .*Middle floor.*: Stairs join Ground floor and Upper floor\. The DM who placed them can remove them\.$/);
+    assert.equal(live(t, r.roomId).scenes[middle], undefined, "the room is as it was");
+    assert.equal(await r.dmSocket.historyHead("setup", "undo"), head, "the step is kept");
+    await ok(coSocket, { t: "floorLink.delete", linkId: link } as Op);
+    await ok(r.dmSocket, { t: "undo", head: head!, scope: "setup" } as Op);
+    const back = live(t, r.roomId);
+    assert.ok(back.scenes[middle]?.floor, "Middle floor is back");
+    for (const id of Object.keys(back.scenes)) assert.equal(floorProblem(back, id), null);
+    coSocket.close();
+  });
+
+  test("the same with A removing the stairs in Setup: A's next Undo takes back A's own removal, as the history rules say", async () => {
+    const r = await tower(t, "Own removal");
+    const co = t.client();
+    await co.claimDm(r.roomId, r.dmKey);
+    const coSocket = await t.connect(r.roomId, co);
+    await coSocket.snapshot("co");
+    const middle = await addFloor(r.dmSocket, r.ground, "above", "Middle floor");
+    const upper = await addFloor(r.dmSocket, middle, "above", "Upper floor");
+    await ok(r.dmSocket, { t: "scene.delete", sceneId: middle } as Op);
+    const link = uuidv7();
+    await ok(coSocket, { t: "floorLink.put", link: { id: link, pairId: uuidv7(), sceneId: r.ground, to: upper, rect: STAIRS, kind: "stairs" } } as Op);
+    const head = await r.dmSocket.historyHead("setup", "undo");
+    refused(await r.dmSocket.apply({ t: "undo", head: head!, scope: "setup" } as Op));
+    await ok(r.dmSocket, { t: "floorLink.delete", linkId: link } as Op);
+    const undone = await ok(r.dmSocket, { t: "undo", head: (await r.dmSocket.historyHead("setup", "undo"))!, scope: "setup" } as Op);
+    assert.deepEqual(undone.restored?.map((x) => x.what), ["removing stairs to Upper floor"]);
+    assert.ok(live(t, r.roomId).floorLinks?.[link], "the stairs are back");
+    assert.equal(live(t, r.roomId).scenes[middle], undefined);
+    coSocket.close();
+  });
+
+  test("an undo of Remove stairs after the co-DM drew a wall through them is refused, the floor check reading both floors, and a live edit of the ground under them reads the builder's words", async () => {
+    const r = await stairsTower(t, "Wall since", false);
+    r.anaSocket.close();
+    const co = t.client();
+    await co.claimDm(r.roomId, r.dmKey);
+    const coSocket = await t.connect(r.roomId, co);
+    await coSocket.snapshot("co");
+    const raise = await coSocket.apply({ t: "build.height", sceneId: r.ground, cells: ["4,3"], height: 5 } as Op);
+    assert.equal(refused(raise), LINK_WORDS.changeGround("stairs", "Upper floor"));
+    await ok(r.dmSocket, { t: "floorLink.delete", linkId: r.link } as Op);
+    await ok(coSocket, { t: "build.edge", sceneId: r.upper, edges: [{ key: "4,3,w", feature: { kind: "wall" } }] } as Op);
+    const head = await r.dmSocket.historyHead("setup", "undo");
+    const answer = await r.dmSocket.apply({ t: "undo", head: head!, scope: "setup" } as Op);
+    assert.match(refused(answer), /^could not undo removing stairs to Upper floor: That would block the stairs to (Ground|Upper) floor\. The DM who placed them can remove them\.$/);
+    assert.equal(live(t, r.roomId).floorLinks?.[r.link], undefined);
+    assert.equal(await r.dmSocket.historyHead("setup", "undo"), head, "the step is kept");
+    await ok(coSocket, { t: "build.edge", sceneId: r.upper, edges: [{ key: "4,3,w", feature: null }] } as Op);
+    await ok(r.dmSocket, { t: "undo", head: head!, scope: "setup" } as Op);
+    assert.ok(live(t, r.roomId).floorLinks?.[r.link], "back once the wall is gone");
+    coSocket.close();
   });
 });
 
