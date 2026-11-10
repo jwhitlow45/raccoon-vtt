@@ -8,7 +8,7 @@ import type { RoomState } from "#shared/model.ts";
 import { drawing, member, scene } from "#shared/testutil.ts";
 import { RoomScope } from "../../state/scope.ts";
 import { tower, TOWER, UPPER } from "../floors/testing.ts";
-import { fileHexReason, floorHexNote, FLOOR_MAP_HELP, playersAt } from "./floorWords.ts";
+import { fileHexReason, FLOOR_MAP_HELP, playersAt } from "./floorWords.ts";
 import { SCENES_FULL } from "./floorSource.ts";
 
 /*
@@ -101,13 +101,14 @@ describe("the Floors group's Map", () => {
     assert.match(html, /data-floor-file=""/);
   });
 
-  test("on hexes VTT file and Dungeon are off, each with its reason on the dim line, and Blank still adds", () => {
+  test("on hexes VTT file is off with its reason on the dim line, and Dungeon and Blank still add (dungeon phase 3)", () => {
     const state = tower();
     for (const id of Object.keys(state.scenes)) if (state.scenes[id]!.name === "Tower") state.scenes[id] = { ...state.scenes[id]!, gridShape: "hexRows" };
     const html = draw(state, TOWER);
-    for (const label of ["VTT file", "Dungeon"]) assert.match(radio(html, label), /disabled=""/, label);
-    assert.doesNotMatch(radio(html, "Blank"), /disabled=""/);
-    assert.ok(html.includes(`${escaped(fileHexReason("Tower"))} ${escaped(floorHexNote("Tower"))}`));
+    assert.match(radio(html, "VTT file"), /disabled=""/);
+    for (const label of ["Dungeon", "Blank"]) assert.doesNotMatch(radio(html, label), /disabled=""/, label);
+    assert.ok(html.includes(escaped(fileHexReason("Tower"))));
+    assert.ok(!html.includes("squares for now"));
   });
 
   test("a room of 50 scenes turns both adds off with its reason", () => {

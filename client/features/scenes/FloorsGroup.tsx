@@ -18,7 +18,7 @@ import { EXTENSIONS, fileSizeProblem, thisDevice, type Device } from "../uvtt/li
 import { newSceneIntent, newScenePreset } from "./create.ts";
 import { FloorPage } from "./FloorPage.tsx";
 import { floorAddRefusal } from "./floorSource.ts";
-import { fileHexReason, floorHexNote, FLOOR_MAP_HELP, FLOOR_MAP_NAME, FLOOR_MAP_OPTIONS, FLOOR_MARKS, floorRowLabel, floorsSummary, floorsTopFirst, ON_SCREEN, playersAt, type FloorMap } from "./floorWords.ts";
+import { fileHexReason, FLOOR_MAP_HELP, FLOOR_MAP_NAME, FLOOR_MAP_OPTIONS, FLOOR_MARKS, floorRowLabel, floorsSummary, floorsTopFirst, ON_SCREEN, playersAt, type FloorMap } from "./floorWords.ts";
 import { SCENE_GROUP_ICONS, SCENE_GROUP_LABELS } from "./settingsFolds.ts";
 
 type Side = "above" | "below";
@@ -37,8 +37,9 @@ type Side = "above" | "below";
  * Map (docs/design/design-v1-floors.md phase 3, 3.5) picks what the adds
  * make: a blank floor at once, a floor from a Universal VTT file through
  * the import dialog, or a generated dungeon through Generate a dungeon,
- * each aimed at a floor above or below the floor on screen. A file or a
- * dungeon brings square walls, so both are off on a hex scene.
+ * each aimed at a floor above or below the floor on screen. A file brings
+ * square walls, so it is off on a hex scene, where a generated dungeon is
+ * wall lines (docs/design: dungeon generator phase 3, section 2).
  */
 export function FloorsGroup(props: { scene: Scene; fold: { open: boolean; onToggle(): void }; ask?: number }) {
   const { scene } = props;
@@ -84,10 +85,11 @@ export function FloorsGroup(props: { scene: Scene; fold: { open: boolean; onTogg
   const above = floorAddRefusal(linkView, { beside: scene.id, side: "above" });
   const below = floorAddRefusal(linkView, { beside: scene.id, side: "below" });
   const reasons = [...new Set([above, below].filter((r): r is string => r !== null))];
-  // A file's walls and a generated dungeon lie on squares (D-261110-075).
-  const hex = isHex(sceneGrid(scene));
-  const pick: FloorMap = hex ? "blank" : map;
-  const hexReasons = hex ? `${fileHexReason(mainName)} ${floorHexNote(mainName)}` : null;
+  // A file's walls lie on squares (D-261110-075). A generated dungeon is drawn for the scene's own grid.
+  const grid = sceneGrid(scene);
+  const hex = isHex(grid);
+  const pick: FloorMap = hex && map === "file" ? "blank" : map;
+  const hexReasons = hex ? fileHexReason(mainName) : null;
 
   const add = (side: Side) => {
     if (adding !== null || (side === "above" ? above : below) !== null) return;
@@ -151,7 +153,7 @@ export function FloorsGroup(props: { scene: Scene; fold: { open: boolean; onTogg
                     wrap
                     description={FLOOR_MAP_HELP[pick]}
                     {...(hexReasons ? { describedBy: hexId } : null)}
-                    options={FLOOR_MAP_OPTIONS.map((o) => ({ ...o, disabled: hex && o.value !== "blank" }))}
+                    options={FLOOR_MAP_OPTIONS.map((o) => ({ ...o, disabled: hex && o.value === "file" }))}
                     onChange={(next) => {
                       setMap(next);
                       setTooBig(null);
@@ -216,6 +218,7 @@ export function FloorsGroup(props: { scene: Scene; fold: { open: boolean; onTogg
           intent={newSceneIntent(newScenePreset(newScenePlayers, "builder"), undefined)}
           opener={generating === "above" ? aboveButton : belowButton}
           floor={{ beside: scene.id, side: generating }}
+          grid={isHex(grid) ? (grid.orient === "rows" ? "hexRows" : "hexColumns") : "squares"}
           onClose={() => setGenerating(null)}
           onMade={(id) => {
             setGenerating(null);

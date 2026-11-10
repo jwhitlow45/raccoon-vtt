@@ -372,13 +372,14 @@ describe("raccoon-vtt several floors: a floor from a file or a dungeon", { timeo
     }
   });
 
-  test("FL3S-4. on a hex scene VTT file and Dungeon are off, each with its reason", async () => {
+  test("FL3S-4. on a hex scene VTT file is off with its reason, and Dungeon is on (dungeon phase 3)", async () => {
     const panel = await scenesPanel(dm);
     await panel.getByRole("button", { name: /^Hive(?![A-Za-z])/ }).first().click();
     await waitFor("the DM on Hive", () => dmSocket.you?.sceneId === run.hiveId || null);
     const group = await floorsGroup(dm);
-    for (const label of ["VTT file", "Dungeon"]) assert.equal(await group.getByRole("radio", { name: label, exact: true }).isDisabled(), true, label);
-    await group.getByText("Universal VTT maps bring square walls, and Hive's floors are hexes. Generated dungeons are squares for now, and Hive's floors are hexes.", { exact: true }).waitFor();
+    assert.equal(await group.getByRole("radio", { name: "VTT file", exact: true }).isDisabled(), true, "VTT file");
+    assert.equal(await group.getByRole("radio", { name: "Dungeon", exact: true }).isDisabled(), false, "Dungeon");
+    await group.getByText("Universal VTT maps bring square walls, and Hive's floors are hexes.", { exact: true }).waitFor();
     assert.equal(await group.getByRole("button", { name: "Add a floor above", exact: true }).isEnabled(), true, "Blank still adds");
     await shots.take(dm, "fl3s-4-hex");
     await panel.getByRole("button", { name: /^Tower(?![A-Za-z])/ }).first().click();

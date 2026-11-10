@@ -202,11 +202,6 @@ export function fileHexReason(sceneName: string): string {
   return `Universal VTT maps bring square walls, and ${sceneName}'s floors are hexes.`;
 }
 
-/** Why Dungeon is off in the Floors group's Map on a hex scene (docs/design/design-v1-floors.md phase 3, 3.5, D-261110-075). */
-export function floorHexNote(sceneName: string): string {
-  return `Generated dungeons are squares for now, and ${sceneName}'s floors are hexes.`;
-}
-
 /**
  * Where a DM who went elsewhere while a file or a dungeon floor was made
  * finds it: " Open Tower, then pick Crypt level 2 in Floors.", in place of

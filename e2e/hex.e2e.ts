@@ -14,7 +14,7 @@ import { cornerAt, hexAt, hexCenter, hexCorners, hexDistance, hexKey, hexNeighbo
 import { hexCellsOutline } from "../client/features/fog/shapes.ts";
 import { arrowStep, isometric } from "../client/lib/view.ts";
 import { HEX_LIMITS, NEW_SCENES_HELP } from "../client/features/grid/words.ts";
-import { fileHexReason, floorHexNote } from "../client/features/scenes/floorWords.ts";
+import { fileHexReason } from "../client/features/scenes/floorWords.ts";
 import { calibrationFromHexFind } from "../client/features/grid/calibrate.ts";
 import { drawMap } from "../client/features/grid/synthetic.ts";
 import { assertCanvasAt, barControl, ConsoleWatch, dragWorld, expandBar, openSceneGroup, openSideTab, sceneGroup, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
@@ -498,18 +498,16 @@ async function sideways(inside: Locator, screen: string): Promise<string[]> {
 const LIMIT_LINES = new Set<string>(Object.values(HEX_LIMITS));
 
 /**
- * The Floors group's reasons VTT file and Dungeon are off on a hex scene
- * (FloorsGroup.tsx): they say why with the word, since a file's walls and
- * a generated dungeon lie on squares (D-261110-075). Each alone and as the
- * group joins them.
+ * The Floors group's reason VTT file is off on a hex scene
+ * (FloorsGroup.tsx): it says why with the word, since a file's walls lie
+ * on squares (D-261110-075). A generated dungeon is drawn on the scene's
+ * hexes (dungeon generator phase 3), so Dungeon stays on without one.
  */
 function floorHexLines(sceneName: string): Set<string> {
-  const file = fileHexReason(sceneName);
-  const dungeon = floorHexNote(sceneName);
-  return new Set([file, dungeon, `${file} ${dungeon}`]);
+  return new Set([fileHexReason(sceneName)]);
 }
 
-/** Every word "square" the page shows, but the Squares choices' own name, H1's limit lines and the Floors group's hex reasons. */
+/** Every word "square" the page shows, but the Squares choices' own name, H1's limit lines and the Floors group's file line. */
 async function squareWords(page: Page, sceneName: string): Promise<string[]> {
   const text = await page.locator("body").innerText();
   const floorLines = floorHexLines(sceneName);
