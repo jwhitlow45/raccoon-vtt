@@ -90,5 +90,41 @@ test("DG2C: Look closer stands in the preview's left corner and Reroll keeps the
 });
 
 test("DG2C: the preview is asked for with the key only when DM key is on and not held", () => {
-  assert.match(source, /choices\.key && !keyHeld && myColor \? \{ name: sceneName, color: myColor, feetPerCell \} : null/);
+  assert.match(source, /choices\.key && !keyHeld && myColor \? \{ name: keyName, color: myColor, feetPerCell \} : null/);
+  assert.match(source, /const keyName = props\.floor \? floorKeyName\(sceneName, floorName\) : sceneName/);
+});
+
+/*
+ * Aimed at a floor (docs/design/design-v1-floors.md phase 3, 3.7): the size
+ * a floor opens at is never remembered, every close waits for the create's
+ * answer, the browser's own close included, the add's refusals are asked
+ * before anything is sent, and the floor's light and walls are sent whole.
+ */
+test("FL3S: a floor's autosave writes every choice but the size, which keeps what was remembered as it opened", () => {
+  assert.match(source, /startChoices\(saved, props\.form, props\.floor \? props\.form : undefined\)/);
+  assert.match(source, /kept: props\.floor \? keptSize\(saved\) : undefined/);
+  assert.match(source, /saveChoices\(props\.roomId, choices, undefined, start\.kept\)/);
+});
+
+test("FL3S: while a floor's create waits, Hide is busy, every close does nothing and a native close opens the dialog again on Hide", () => {
+  const close = source.slice(source.indexOf("const close = () =>"), source.indexOf("const set = (patch"));
+  assert.match(close, /if \(holding\) return;/);
+  assert.match(source, /\{\.\.\.\(holding \? \{ keepOpen: hideRef \} : null\)\}/);
+  assert.match(source, /<Button ref=\{hideRef\} busy=\{holding\} onClick=\{close\}/);
+  assert.match(source, /\{holding \? MAKING_FLOOR : busy \? "Hide"/);
+  assert.match(source, /if \(floor\) setHolding\(true\);/);
+  assert.match(source, /onCreated: \(\) => \{\s*if \(mounted\.current\) setHolding\(false\);/);
+  // At most CHECK_MS, so a create whose answer never comes never traps the DM.
+  assert.match(source, /setTimeout\(\(\) => setHolding\(false\), CHECK_MS\)/);
+});
+
+test("FL3S: Make asks the add's refusals on the latest view before any op, and makes the floor with its theme's name and its light sent whole", () => {
+  const make = source.slice(source.indexOf("const make = async"), source.indexOf("// The foot counts"));
+  const refusal = make.indexOf("floorAddRefusal(view, floor)");
+  assert.ok(refusal > 0 && refusal < make.indexOf("withIds("), "the refusal comes first");
+  assert.match(make, /if \(refused\) \{\s*setFailed\(\{ text: refused, retry: true \}\);\s*return;/);
+  assert.match(make, /floorCreateOf\(startScene\(op\.scene, pick, startsDark\), floor, floorName, "own"\)/);
+  assert.match(source, /const floorName = CHOICE_NAMES\.theme\[choices\.theme\]/);
+  assert.match(make, /keyName: \(stored\) => floorKeyName\(sceneName, stored\)/);
+  assert.match(make, /floorOutcomeText\(outcome, named, sceneName, opened\)/);
 });

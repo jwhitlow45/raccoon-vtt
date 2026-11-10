@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode, type RefObject } from "react";
+import { GROUND_FLOOR } from "#shared/reducer/floors.ts";
 import { LEVEL_BANDS, type LevelBand } from "#shared/srd/traps.ts";
 import { Button } from "../../components/Button.tsx";
 import { Dialog, PINNED_FOOT } from "../../components/Dialog.tsx";
@@ -15,6 +16,8 @@ import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { BAND_NAMES } from "../traps/rules.ts";
 import { builderScene, cleanName, pickNow, type NewSceneIntent, type SceneInput } from "../scenes/create.ts";
+import { floorAddRefusal, floorCreateOf, type FloorTarget } from "../scenes/floorSource.ts";
+import { CHECK_MS } from "../uvtt/rules.ts";
 import { NumberInput } from "../scenes/controls.tsx";
 import { closePreviews, preview, warmPreviews, type Preview } from "./client.ts";
 import { counted, drawable, flowStep, readiness, startFlow, type Flow, type FlowEvent } from "./flow.ts";
@@ -23,7 +26,7 @@ import { keyOps, type KeyInput } from "./keyPage.ts";
 import { LookCloser } from "./LookCloser.tsx";
 import { SCENE_PLACEHOLDER, withIds } from "./ops.ts";
 import { DungeonPreview, type Drawn } from "./Preview.tsx";
-import { loadChoices, saveChoices, settingsOf, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
+import { keptSize, loadChoices, saveChoices, settingsOf, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
 import { formatSeed, newSeed, parseSeed, type Seed } from "./seed.ts";
 import { PresetSlider, type Preset } from "./PresetSlider.tsx";
 import {
@@ -55,6 +58,9 @@ import {
   entranceSide,
   FIT_NONE,
   fitLine,
+  floorKeyName,
+  floorOutcomeText,
+  floorTitle,
   HEIGHTS_HELP,
   heightsWords,
   KEY_FULL,
@@ -63,7 +69,10 @@ import {
   lightLine,
   litWords,
   LOOPS_HELP,
+  MAKE_FLOOR,
+  MAKE_SCENE,
   makingLine,
+  MAKING_FLOOR,
   fogLine,
   NOT_MADE,
   outcomeText,
@@ -116,6 +125,14 @@ type Sending = { answered: number; total: number };
  * Once Make has sent, closing only hides the dialog. The answers still
  * end in the new scene or a toast, and a DM who went to another scene
  * meanwhile is not pulled back (the import's `movedOn`).
+ *
+ * Aimed at a floor (docs/design/design-v1-floors.md phase 3, 3.7), it makes
+ * a floor just above or below the floor beside, named for the theme: it
+ * opens on Custom at that floor's size, leaves the remembered size alone,
+ * starts the light as an untouched New scene form starts a generated scene,
+ * and sends the key page once the floor's create is taken. Until then no
+ * close goes through, the browser's own included, so no op of this device
+ * splits the floor's Undo setup step from its key (D-261110-183).
  */
 export function GenerateDialog(props: {
   roomId: string;
@@ -128,6 +145,8 @@ export function GenerateDialog(props: {
   onClose(made: boolean): void;
   /** Make ended complete with the dialog open: the form opens the scene. */
   onMade(sceneId: string): void;
+  /** Make a floor here in place of a scene. `form` is then the floor beside's size, and `name` its scene's. */
+  floor?: FloorTarget;
 }) {
   const actions = useRoomActions();
   const store = useRoomStore();
@@ -141,7 +160,12 @@ export function GenerateDialog(props: {
   const [keptLit, setKeptLit] = useState(false);
   const [looking, setLooking] = useState(false);
   const [lookFailed, setLookFailed] = useState<string | null>(null);
-  const [choices, setChoices] = useState<Choices>(() => startChoices(loadChoices(props.roomId), props.form));
+  // A floor opens at its own size and leaves the remembered size as it was when the dialog opened (D-261110-185).
+  const [start] = useState(() => {
+    const saved = loadChoices(props.roomId);
+    return { choices: startChoices(saved, props.form, props.floor ? props.form : undefined), kept: props.floor ? keptSize(saved) : undefined };
+  });
+  const [choices, setChoices] = useState<Choices>(start.choices);
   const [seedText, setSeedText] = useState(() => formatSeed(newSeed()));
   const [flow, step] = useReducer((f: Flow<Shown>, e: FlowEvent<Shown>) => flowStep(f, e), undefined, startFlow<Shown>);
   const [sending, setSending] = useState<Sending | null>(null);
@@ -151,6 +175,11 @@ export function GenerateDialog(props: {
   const request = useRef(0);
   /** A Make was sent and did not end with no scene, so a scene may exist: the form starts over when the dialog goes. */
   const sceneMayExist = useRef(false);
+  /** A floor's create sent and not yet answered: every close waits, up to CHECK_MS (D-261110-183). */
+  const [holding, setHolding] = useState(false);
+  const hideRef = useRef<HTMLButtonElement>(null);
+  // A scene's one floor takes this name with its first add.
+  const besideName = useRoomView((s) => (props.floor ? (s.view?.scenes[props.floor.beside]?.floor?.name ?? GROUND_FLOOR) : GROUND_FLOOR));
   const themeRef = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const layout = useBodyLayout(root);
@@ -159,11 +188,15 @@ export function GenerateDialog(props: {
   const settings = settingsOf(choices);
   const { w, h } = sidesOf(choices);
   const sceneName = cleanName(props.name, "Dungeon");
+  /** A floor is named for its theme, numbered by the reducer while taken (D-261110-076). */
+  const floorName = CHOICE_NAMES.theme[choices.theme];
   // The preview's scene: the form's name at the chosen size. Players see goes on at Make, read then.
   const scene: SceneInput = useMemo(() => builderScene({ id: SCENE_PLACEHOLDER, name: props.name, w, h }), [props.name, w, h]);
   // Held when the journal has room for nothing more: the preview then lands no key, and the switch reads off.
   const [keyHeld, setKeyHeld] = useState(false);
-  const keyInput: KeyInput | null = choices.key && !keyHeld && myColor ? { name: sceneName, color: myColor, feetPerCell } : null;
+  // A floor's page is titled again from the stored name once its create is taken (send.ts). The preview's guesses it.
+  const keyName = props.floor ? floorKeyName(sceneName, floorName) : sceneName;
+  const keyInput: KeyInput | null = choices.key && !keyHeld && myColor ? { name: keyName, color: myColor, feetPerCell } : null;
   const key = parsed.ok ? JSON.stringify([settings, parsed.seed, keyInput]) : null;
 
   // The worker loads as the dialog opens, and closing ends it, dropping any late answer (client.ts).
@@ -181,7 +214,14 @@ export function GenerateDialog(props: {
     themeRef.current?.querySelector<HTMLInputElement>("input:checked")?.focus({ preventScroll: true });
   }, []);
 
-  useEffect(() => saveChoices(props.roomId, choices), [props.roomId, choices]);
+  useEffect(() => saveChoices(props.roomId, choices, undefined, start.kept), [props.roomId, choices, start.kept]);
+
+  // The hold lasts until the create is answered, or CHECK_MS at most, so a create whose answer never comes never traps the DM.
+  useEffect(() => {
+    if (!holding) return;
+    const timer = setTimeout(() => setHolding(false), CHECK_MS);
+    return () => clearTimeout(timer);
+  }, [holding]);
 
   // Only the newest answer shows: each request takes a number, and the flow drops an answer to any older one (flow.ts).
   // A seed that stops reading takes a number too, so a request still drawing never replaces the preview kept.
@@ -234,7 +274,7 @@ export function GenerateDialog(props: {
     }
     let held = false;
     try {
-      held = journalFull(room, keyOps(plan, settings, { name: sceneName, color: myColor, feetPerCell }, SCENE_PLACEHOLDER), store.getState().you?.memberId ?? "");
+      held = journalFull(room, keyOps(plan, settings, { name: keyName, color: myColor, feetPerCell }, SCENE_PLACEHOLDER), store.getState().you?.memberId ?? "");
     } catch {
       // The key page is not built or the room cannot be read: nothing to hold.
     }
@@ -250,23 +290,37 @@ export function GenerateDialog(props: {
   }, [current]);
   const canMake = !locked && parsed.ok && current !== null && current.summary.rooms >= 2;
 
-  const close = () => props.onClose(sceneMayExist.current);
+  // While a floor's create waits, Hide, Escape, the backdrop and Back do nothing, so no op of this device lands between the floor and its key.
+  const close = () => {
+    if (holding) return;
+    props.onClose(sceneMayExist.current);
+  };
   const set = (patch: Partial<Choices>) => setChoices((c) => ({ ...c, ...patch }));
   const setSize = (patch: Partial<Pick<Choices, "size" | "across" | "down">>) => setChoices((c) => withSize(c, patch));
 
   const make = async () => {
     if (!canMake || !current) return;
+    const floor = props.floor;
+    // A floor's add asks its refusals on the latest view first, so a change made since the dialog opened stops it with its reason.
+    const view = store.getState().view;
+    const refused = floor && view ? floorAddRefusal(view, floor) : null;
+    if (refused) {
+      setFailed({ text: refused, retry: true });
+      return;
+    }
     const made = withIds(current.ops, actions.newId);
     // Players see as the form says now: Like reads its scene at Make, as the form's own Create does.
     const { pick, gone } = pickNow(props.intent, store.getState().view, "builder");
     if (gone) ui.notify(gone);
-    const ops = made.ops.map((op) => (op.t === "scene.create" ? { ...op, scene: startScene(op.scene, pick, startsDark) } : op));
+    // A floor's light is sent whole, so a floor beside on Time of day never relights it, and its automatic walls are stated (floorSource.ts).
+    const ops = made.ops.map((op) => (op.t !== "scene.create" ? op : floor ? floorCreateOf(startScene(op.scene, pick, startsDark), floor, floorName, "own") : { ...op, scene: startScene(op.scene, pick, startsDark) }));
     const { plan } = current;
     // Only this device's camera frames the entrance, through its own room scope, and nothing is stored (4.5).
     frames.frameOnOpen = { sceneId: made.sceneId, rect: grownWithin({ x: plan.entrance.x, y: plan.entrance.y, width: plan.entrance.w, height: plan.entrance.h }, FRAME_MARGIN, { w: plan.w, h: plan.h }) };
     setFailed(null);
     setSending({ answered: 0, total: ops.length });
     sceneMayExist.current = true;
+    if (floor) setHolding(true);
     // The send opens the scene once complete, or to compare it when answers were lost, unless a hidden dialog's DM went elsewhere.
     const outcome = await sendDungeon(
       { ops, sceneId: made.sceneId, room: current.room, ids: made.ids },
@@ -275,14 +329,26 @@ export function GenerateDialog(props: {
         if (mounted.current) setSending({ answered, total });
       },
       { store, shown: () => mounted.current },
+      floor
+        ? {
+            keyName: (stored) => floorKeyName(sceneName, stored),
+            sentName: floorName,
+            onCreated: () => {
+              if (mounted.current) setHolding(false);
+            },
+          }
+        : undefined,
     );
+    // The floor's words read the name the server stored once it shows, else the one sent.
+    const named = store.getState().view?.scenes[made.sceneId]?.floor?.name ?? floorName;
+    const words = (opened: boolean) => (floor ? floorOutcomeText(outcome, named, sceneName, opened) : outcomeText(outcome, sceneName, opened));
     if (outcome.k === "complete" && mounted.current) {
-      if (outcome.checked) ui.notify(outcomeText(outcome, sceneName, true).text, "info");
+      if (outcome.checked) ui.notify(words(true).text, "info");
       props.onMade(made.sceneId);
       return;
     }
     const opened = (store.getState().sceneLoad?.requested ?? store.getState().sceneId) === made.sceneId;
-    const said = outcomeText(outcome, sceneName, opened);
+    const said = words(opened);
     if (!mounted.current) {
       ui.notify(said.text, said.tone);
       return;
@@ -479,21 +545,24 @@ export function GenerateDialog(props: {
 
   return (
     <Dialog
-      title="Generate a dungeon"
+      title={props.floor ? floorTitle(props.floor.side, besideName) : "Generate a dungeon"}
       onClose={close}
       width="xl"
       phone="fill"
       backClose
       opener={props.opener}
+      {...(holding ? { keepOpen: hideRef } : null)}
       status={status}
       statusGrow
       footer={
         <>
           {/* Each grows, so one that wraps under the status fills its line. */}
-          <Button onClick={close} style={{ flex: "1 1 auto" }}>{busy ? "Hide" : failed && !failed.retry ? "Close" : "Cancel"}</Button>
+          <Button ref={hideRef} busy={holding} onClick={close} style={{ flex: "1 1 auto" }}>
+            {holding ? MAKING_FLOOR : busy ? "Hide" : failed && !failed.retry ? "Close" : "Cancel"}
+          </Button>
           {failed && !failed.retry ? null : (
             <Button variant="primary" busy={busy} disabled={!canMake && !busy} onClick={() => void make()} style={{ flex: "1 1 auto" }}>
-              Make the scene
+              {props.floor ? MAKE_FLOOR : MAKE_SCENE}
             </Button>
           )}
         </>
