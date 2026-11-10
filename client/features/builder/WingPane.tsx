@@ -163,6 +163,34 @@ export const FORGET_TITLE = "Remembered map";
 export const FORGET_ASK_WORDS = "Players' remembered map here will be forgotten. Go ahead?";
 export const FORGET_HELP = "Their map can keep only so much that changed out of their sight. The ground this change runs past that goes back under the fog for them, as if never seen, and neither Undo nor Undo setup in Setup history brings it back.";
 
+/**
+ * The forget question as Add the wing asks it (3.5): `ask` shows it through
+ * `show` and waits for Go ahead or Cancel, and `close`, as the pane goes,
+ * answers a question still showing as Cancel without showing anything, so
+ * the send never waits on a pane that is gone (DG3 review round 1). An
+ * answer given after that, or to an older question, does nothing.
+ */
+export function forgetQuestion(show: (answer: ((yes: boolean) => void) | null) => void): { ask(): Promise<boolean>; close(): void } {
+  let waiting: ((yes: boolean) => void) | null = null;
+  return {
+    ask: () =>
+      new Promise<boolean>((resolve) => {
+        waiting = resolve;
+        show((yes) => {
+          if (waiting !== resolve) return;
+          waiting = null;
+          show(null);
+          resolve(yes);
+        });
+      }),
+    close() {
+      const pending = waiting;
+      waiting = null;
+      pending?.(false);
+    },
+  };
+}
+
 /** What the pane says of a wing that did not end complete (3.5), or null where the pane closes. */
 export function outcomeWords(outcome: WingOutcome): string | null {
   switch (outcome.k) {
@@ -351,9 +379,17 @@ export default function WingPane(props: {
   // Add the wing: checking players' remembered map, then how many of its ops are answered, and the forget question while it waits.
   const [sending, setSending] = useState<"asking" | { n: number; of: number } | null>(null);
   const [forget, setForget] = useState<((yes: boolean) => void) | null>(null);
+  const question = useMemo(() => forgetQuestion((answer) => setForget(() => answer)), []);
   const [said, setSaid] = useState<string | null>(null);
   const mounted = useRef(true);
-  useEffect(() => () => void (mounted.current = false), []);
+  // Set again on each mount, since development's strict mode mounts the pane twice.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      question.close();
+    };
+  }, [question]);
   const send = useMemo(() => (props.send === undefined ? wingSender(actions, { store: roomStore, shown: () => mounted.current }) : props.send), [props.send, actions, roomStore]);
   const sendLine = sending === "asking" ? BUILD_ASKING : sending ? (sending.n >= sending.of ? WING_WAITING : `Adding the wing… ${sending.n} of ${sending.of}`) : null;
   const planLine = drawing ? WING_DRAWING : plan === null ? "" : plan.ok ? statusLine(plan.summary) : (plan.words ?? (plan.error === "fit" ? WING_FIT_NONE : WING_NOT_MADE));
@@ -368,14 +404,7 @@ export default function WingPane(props: {
       (n, of) => {
         if (mounted.current) setSending({ n, of });
       },
-      () =>
-        new Promise<boolean>((resolve) => {
-          if (!mounted.current) return resolve(false);
-          setForget(() => (yes: boolean) => {
-            setForget(null);
-            resolve(yes);
-          });
-        }),
+      () => (mounted.current ? question.ask() : Promise.resolve(false)),
     );
     const words = outcomeWords(outcome);
     if (!mounted.current) {

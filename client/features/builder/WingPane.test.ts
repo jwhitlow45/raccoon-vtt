@@ -6,7 +6,7 @@ import { squareWingBase } from "../dungeon/handPlans.ts";
 import { wingPreviewOf } from "../dungeon/scratch.ts";
 import { DEFAULT_SETTINGS } from "../dungeon/settings.ts";
 
-const { wingPlanner } = await import("./WingPane.tsx");
+const { forgetQuestion, wingPlanner } = await import("./WingPane.tsx");
 
 /*
  * The wing pane's parts that run without a page (docs/design: dungeon
@@ -55,4 +55,25 @@ test("the planner posts the base again when its join changes under the same hash
   const wide = squareWingBase({ wide: true });
   await planner({ settings: { ...settings, wide: true }, seed: SEED, base: { ...base, join: wide.join }, feetPerCell: 5 });
   assert.deepEqual(posted, [base.join, wide.join]);
+});
+
+test("closing the pane while the forget question shows answers it as Cancel, so the send goes on, and a late tap does nothing", async () => {
+  // DG3 review round 1: the question's answer lived only in the pane, so closing the pane left the send waiting for ever.
+  const shown: (((yes: boolean) => void) | null)[] = [];
+  const question = forgetQuestion((answer) => shown.push(answer));
+  const asked = question.ask();
+  assert.equal(shown.length, 1);
+  const goAhead = shown[0]!;
+  question.close();
+  // A question left waiting would hold the send for ever, so the test waits only a moment for the answer.
+  assert.equal(await Promise.race([asked, new Promise((resolve) => setTimeout(() => resolve("still waiting"), 100))]), false);
+  goAhead(true);
+  assert.equal(shown.length, 1, "nothing shown once the pane is gone");
+
+  const again = forgetQuestion((answer) => shown.push(answer));
+  const yes = again.ask();
+  shown.at(-1)!(true);
+  assert.equal(await yes, true);
+  assert.equal(shown.at(-1), null, "the question goes once answered");
+  again.close();
 });
