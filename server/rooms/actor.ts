@@ -70,6 +70,7 @@ import { dmHistoryValues, dmPoseRestore } from "./undoDm.ts";
 import { retainedSaveOutcome } from "#shared/saveOutcomes.ts";
 import { soundDue, soundStep, type Playing } from "#shared/sound.ts";
 import { isPlayingRefusal } from "#shared/reducer/sound.ts";
+import { isStairsRefusal, restoreStairsWords } from "#shared/rules/floorLinks.ts";
 import { ownEntry } from "#shared/records.ts";
 import { SAVE_CANNOT_REOPEN, type SaveOutcomeTransition } from "#shared/saveOutcomeContract.ts";
 
@@ -1662,9 +1663,12 @@ export class RoomActor {
       return blocker.buried ? `${verb} the ${blocker.scope} steps through ${blocker.label} first` : `${verb} the ${blocker.scope} step first: ${blocker.label}`;
     }
     // A sound playing under the use the step would take from it (docs/design/design-v1-music.md 6.6) keeps the step, so
-    // once the DM stops it the same Undo works.
-    if (step.id && !isPlayingRefusal(reason)) this.#undo.consume(viewer.memberId, direction, scope, step.id);
-    return reason;
+    // once the DM stops it the same Undo works. So does a DM's step that stairs refuse (docs/design/design-v1-floors.md
+    // phase 2, 8, D-261109-108), placed by another DM: once they go, the same Undo works.
+    const stairs = isStairsRefusal(reason);
+    if (step.id && !isPlayingRefusal(reason) && !(stairs && viewer.role === "dm")) this.#undo.consume(viewer.memberId, direction, scope, step.id);
+    // Only history knows who placed the stairs, and it can be trimmed or lost, so a restore's words are true whoever did.
+    return stairs ? restoreStairsWords(reason) : reason;
   }
 
   /** Which tokens a viewer sees in the staged room, as their undo's poses read links (undo.ts poseOf). */
