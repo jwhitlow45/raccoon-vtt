@@ -6,7 +6,7 @@ import { canApply } from "./permissions.ts";
 import { holds, mutatedJson } from "./propertyTestutil.ts";
 import { clientMessageSchema, clientOpSchema, opSchema, type Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
-import { DM, env, P1, P2, randomOp, randomState, rng } from "./testutil.ts";
+import { DM, env, P1, P2, randomOp, randomState, rng, trap } from "./testutil.ts";
 
 /**
  * Property tests of the wire schemas (docs/design/design.md 7) against what a
@@ -116,6 +116,27 @@ describe("the wire schemas, over hostile input (property)", () => {
         if (result.ok && replay.ok) assert.equal(JSON.stringify(replay.state), JSON.stringify(result.state), `${op.t} leaves the same stored room when replayed`);
       }),
       4_000,
+    );
+  });
+  test("a trap's square with any number past its bounds is parsed or refused without a throw, fast, wherever the squares sit", () => {
+    const { rev: _rev, state: _state, rig, ...rest } = trap("t");
+    const input = { ...rest, rig: rig! };
+    const side = fc.constantFrom("x", "y", "w", "h");
+    const where = fc.constantFrom("create zone", "create rig.hits", "update zone", "update rig.hits");
+    holds(
+      fc.property(where, side, fc.constantFrom(...EXTREME), (place, key, value) => {
+        const cells = [{ x: 0, y: 0, w: 2, h: 2, [key]: value }];
+        const op =
+          place === "create zone" ? { t: "trap.create", trap: { ...input, zone: { cells } } }
+          : place === "create rig.hits" ? { t: "trap.create", trap: { ...input, rig: { ...input.rig, hits: { cells } } } }
+          : place === "update zone" ? { t: "trap.update", trapId: "t", patch: { zone: { cells } } }
+          : { t: "trap.update", trapId: "t", patch: { rig: { hits: { cells } } } };
+        const started = performance.now();
+        clientOpSchema.safeParse(stored(op));
+        // A refine that counted such a square's cells would walk millions of them, or never end past 2^53.
+        assert.ok(performance.now() - started < 1_000, `${place}: ${key} ${value} took ${Math.round(performance.now() - started)} ms to read`);
+      }),
+      200,
     );
   });
 });
