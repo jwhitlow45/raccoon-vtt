@@ -53,3 +53,19 @@ describe("stairs' words", () => {
     assert.equal(words.LINK_LABELS.kind("stairs"), "changing stairs to a ladder");
   });
 });
+
+describe("the walking ruler over stairs (phase 3, 4.1 and 4.2)", () => {
+  test("the stairs button's words and name, the carried line and the hints", () => {
+    assert.deepEqual(
+      [words.rulerStairsWords("up", "stairs"), words.rulerStairsWords("down", "stairs"), words.rulerStairsWords("up", "ladder"), words.rulerStairsWords("down", "ladder")],
+      ["Up the stairs", "Down the stairs", "Up the ladder", "Down the ladder"],
+    );
+    assert.equal(words.rulerStairsName("up", "stairs", "Upper floor"), "Measure on up the stairs to Upper floor");
+    assert.equal(words.rulerStairsName("down", "ladder", "Cellar"), "Measure on down the ladder to Cellar");
+    assert.equal(words.beforeFloorLine("25 ft"), "25 ft before this floor");
+    assert.equal(words.CARRIED_NO_KEEP, "A ruler over stairs can't be kept.");
+    assert.equal(words.CARRIED_WALKS, "A ruler over stairs walks.");
+    assert.equal(words.SHARE_BEFORE_STAIRS, "Share it before it takes the stairs.");
+    assert.equal(words.CARRIED_TOO_LONG, "A ruler over stairs can't take more stops. Clear it to measure again.");
+  });
+});

@@ -123,3 +123,32 @@ export const REMOVE_BOTH = "Remove both ends";
 
 // The builder's undo steps (7.2): the server's labels after "Undo ", "placing stairs to Upper floor".
 export { LINK_LABELS } from "#shared/rules/floorLinks.ts";
+
+// The walking ruler over stairs (phase 3, 4.1 and 4.2).
+
+/** The ruler's stairs button: "Up the stairs", "Down the ladder". */
+export function rulerStairsWords(dir: Dir, kind: Kind): string {
+  return `${dir === "up" ? "Up" : "Down"} the ${noun(kind)}`;
+}
+
+/** Its name, which names the floor: "Measure on up the stairs to Upper floor". */
+export function rulerStairsName(dir: Dir, kind: Kind, floor: string): string {
+  return `Measure on ${dir} the ${noun(kind)} to ${floor}`;
+}
+
+/** A carried ruler's line under its total, given the feet already written: "25 ft before this floor" (D-261110-083). */
+export function beforeFloorLine(feet: string): string {
+  return `${feet} before this floor`;
+}
+
+/** Keep or a double tap on a ruler carried over stairs. */
+export const CARRIED_NO_KEEP = "A ruler over stairs can't be kept.";
+
+/** Measure's Straight while a ruler is carried over stairs. */
+export const CARRIED_WALKS = "A ruler over stairs walks.";
+
+/** The DM's Shared while a ruler carried private is on another floor. */
+export const SHARE_BEFORE_STAIRS = "Share it before it takes the stairs.";
+
+/** A stop that would make a carried ruler's frame too big to send (the server's 4 KB cap on a preview). */
+export const CARRIED_TOO_LONG = "A ruler over stairs can't take more stops. Clear it to measure again.";
