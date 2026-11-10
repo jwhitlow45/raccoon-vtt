@@ -38,6 +38,8 @@ describe("room import", () => {
     assert.match(importErrorText(err(413, "quota_exceeded")), /more than a room may store/);
     assert.match(importErrorText(err(507, "storage_full")), /out of disk space/);
     assert.match(importErrorText(err(400, "bad_zip")), /not a room export/);
+    assert.match(importErrorText(err(400, "bad_room_json", { field: "state.log" })), /not a room export/);
+    assert.equal(importErrorText(err(400, "bad_room_json", { field: "state.log", reason: "ahead" })), "This backup's log is dated after this server's clock. Check the clock, then import again.");
     assert.match(importErrorText(err(400, "weak_password", { reason: "too_common" })), /too common/);
     assert.match(importErrorText(err(429, "rate_limited")), /Too many rooms/);
     assert.equal(importErrorText(err(500, "internal")), "raw");

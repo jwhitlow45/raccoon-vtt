@@ -44,9 +44,11 @@ export function importErrorText(err: unknown): string {
       return "This export holds more than 2,000 files, more than one room may hold.";
     case "over_room_limits":
       return "This room is bigger than the room limits allow, so it cannot be imported.";
+    case "bad_room_json":
+      if (err.detail.reason === "ahead") return "This backup's log is dated after this server's clock. Check the clock, then import again.";
+      return "This file is not a room export, or it is damaged.";
     case "bad_zip":
     case "missing_room_json":
-    case "bad_room_json":
     case "bad_manifest":
       return "This file is not a room export, or it is damaged.";
     case "unsupported_schema_version":

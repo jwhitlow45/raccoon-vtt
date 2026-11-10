@@ -15,8 +15,9 @@ import type { FreeWall, RoomState } from "#shared/model.ts";
 import { apply, AT, room, scene, token, trap } from "#shared/testutil.ts";
 import { sightPieces, tooManySightPieces } from "#shared/visionLimits.ts";
 import { MANIFEST_VERSION, type ExportManifest, type ManifestAsset } from "./exportRoom.ts";
-import { assertWithinLimits, entryToFile, IMPORT_LIMITS, InflatedCounter, inflatedLimit, manifestGeometry, silenced, soundsLeftOut } from "./importRoom.ts";
+import { assertLinesNotAhead, assertWithinLimits, entryToFile, IMPORT_LIMITS, InflatedCounter, inflatedLimit, manifestGeometry, silenced, soundsLeftOut } from "./importRoom.ts";
 import { MEMORY_CAP } from "./memorySize.ts";
+import { lastLineSeq } from "./remap.ts";
 import { SizeGuard } from "./sizeGuard.ts";
 
 async function zipWith(name: string, data: Buffer): Promise<{ zip: yauzl.ZipFile; entry: yauzl.Entry }> {
@@ -145,6 +146,23 @@ describe("import limits", () => {
       () => assertWithinLimits(columns(LIMITS.pillarsPerScene + 1)),
       (err: unknown) => err instanceof HttpError && err.status === 413 && err.extra?.reason === `this scene can hold at most ${LIMITS.pillarsPerScene.toLocaleString("en-US")} pillars`,
     );
+  });
+});
+
+describe("a backup dated after this server's clock", () => {
+  const now = Date.parse("2026-11-10T20:00:00.000Z");
+  const lineAt = (ms: number) => lastLineSeq(room({ log: [{ id: `${ms}:0`, at: new Date(ms).toISOString(), kind: "chat", text: "last" }] as RoomState["log"] }));
+
+  test("whose newest line leads the clock by 4 minutes is taken, and by 6 minutes is refused as dated ahead", () => {
+    assert.doesNotThrow(() => assertLinesNotAhead(lineAt(now + 4 * 60_000), now));
+    assert.throws(
+      () => assertLinesNotAhead(lineAt(now + 6 * 60_000), now),
+      (err: unknown) => err instanceof HttpError && err.status === 400 && err.code === "bad_room_json" && err.extra?.field === "state.log" && err.extra.reason === "ahead",
+    );
+  });
+
+  test("a room numbered by a count from one is always taken", () => {
+    assert.doesNotThrow(() => assertLinesNotAhead(lineAt(3_000), now));
   });
 });
 

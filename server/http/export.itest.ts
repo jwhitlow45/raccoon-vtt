@@ -1108,7 +1108,7 @@ describe("an imported log in the archive (shared/logRings.ts)", () => {
     }
   });
 
-  test("a file whose lines name an op past the seqs a room counts on from is refused, and one at the bound comes", async () => {
+  test("a file whose lines name an op past the seqs a room counts on from is refused, one at the bound is refused as dated after the clock, and one at the clock comes", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom("Far seq");
     const res = await dm.get(`/api/rooms/${roomId}/export`);
@@ -1120,6 +1120,10 @@ describe("an imported log in the archive (shared/logRings.ts)", () => {
     assert.equal(refused.statusCode, 400, refused.body);
     assert.deepEqual(refused.json<{ error: string; field: string }>(), { error: "bad_room_json", field: "state.log" });
     room.state.log = [line(2 ** 48)];
+    const ahead = await importZip(t.client(), await zipOf({ "room.json": JSON.stringify(room) }));
+    assert.equal(ahead.statusCode, 400, ahead.body);
+    assert.deepEqual(ahead.json<{ error: string; field: string; reason: string }>(), { error: "bad_room_json", field: "state.log", reason: "ahead" });
+    room.state.log = [line(Date.now())];
     const imported = await importZip(t.client(), await zipOf({ "room.json": JSON.stringify(room) }));
     assert.equal(imported.statusCode, 201, imported.body);
     t.track(imported.json<{ roomId: string }>().roomId);

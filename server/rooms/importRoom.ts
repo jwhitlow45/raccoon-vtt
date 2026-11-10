@@ -85,7 +85,20 @@ export const IMPORT_LIMITS = {
    * read as exactly, whatever a hand-made file says.
    */
   lineSeq: 2 ** 48,
+  /** How far a file's newest line number may lead this server's clock (`reason: "ahead"`, client settings/backup.ts words it). */
+  lineLeadMs: 5 * 60_000,
 } as const;
+
+/**
+ * Refuses a file whose newest line number leads this server's clock by more
+ * than IMPORT_LIMITS.lineLeadMs. A room's numbers follow its server's clock,
+ * so the room would count on by one for as long as its lines led, and a few
+ * minutes cover ordinary drift between two hosts. Files from builds that
+ * counted lines from one are always far behind it.
+ */
+export function assertLinesNotAhead(newestLine: number, now: number): void {
+  if (newestLine - now > IMPORT_LIMITS.lineLeadMs) throw new HttpError(400, "bad_room_json", { extra: { field: "state.log", reason: "ahead" } });
+}
 
 export type ImportForm = {
   /** Overrides the exported room name when given. */
@@ -262,6 +275,7 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
     // Imported lines keep their ops' seqs, so the room starts at the newest of them and its own lines sort after them.
     const startSeq = lastLineSeq(parsed.state);
     if (startSeq > IMPORT_LIMITS.lineSeq) throw new HttpError(400, "bad_room_json", { extra: { field: "state.log" } });
+    assertLinesNotAhead(startSeq, Date.now());
 
     let manifest: z.infer<typeof manifestSchema> = { formatVersion: 1, assets: [] };
     const manifestEntry = entries.get("assets.json");
