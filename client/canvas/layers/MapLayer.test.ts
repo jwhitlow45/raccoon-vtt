@@ -16,6 +16,7 @@ import { member, room, scene } from "#shared/testutil.ts";
 
 // The builder's paths and textures use browser classes Node lacks. Neither is drawn here.
 class NoPath {
+  addPath() {}
   moveTo() {}
   lineTo() {}
   closePath() {}
@@ -140,5 +141,58 @@ describe("Line up grid hides the app's own lines", () => {
     b.setTool("select");
     assert.ok(floorStrokes(b).includes(GRID_COLOR), "the floor's grid did not come back");
     assert.deepEqual(b.dispatched, []);
+  });
+});
+
+describe("the grid's path across camera moves (FU52PERF-LEFT)", () => {
+  /** Draws the scene's grid shape as the board does, and gives the path it stroked and the move it stroked it with, in stage pixels. */
+  function draw(b: Board): { path: unknown; dx: number; dy: number } {
+    const shape = b.root.findOne(".sceneGrid") as Konva.Shape;
+    // A phone's stage, which the hex lines read the view from.
+    (shape as unknown as { getStage(): unknown }).getStage = () => ({ width: () => 390, height: () => 844 });
+    const out = { path: null as unknown, dx: NaN, dy: NaN };
+    const g = new Proxy({} as Record<string | symbol, unknown>, {
+      get: (own, key) => {
+        if (key === "setTransform") return (_a: number, _b: number, _c: number, _d: number, e: number, f: number) => Object.assign(out, { dx: e / 2, dy: f / 2 });
+        if (key === "stroke") return (path: unknown) => void (out.path = path);
+        return key in own ? own[key] : () => {};
+      },
+      set: (own, key, value) => {
+        own[key] = value;
+        return true;
+      },
+    });
+    shape.sceneFunc().call(shape, { _context: g, getCanvas: () => ({ getPixelRatio: () => 2 }) } as never, shape);
+    return out;
+  }
+
+  for (const gridShape of [undefined, "hexRows"] as const) {
+    test(`a pan moves the path it made, and a zoom makes another (${gridShape ?? "squares"})`, () => {
+      const b = board(lined(gridShape), "select", mapContent);
+      b.root.scale({ x: 40, y: 40 });
+      b.root.position({ x: -400, y: -300 });
+      const first = draw(b);
+      assert.ok(first.path, "the grid stroked a path");
+      assert.deepEqual([first.dx, first.dy], [0, 0]);
+      b.root.position({ x: -409.5, y: -296 });
+      const panned = draw(b);
+      assert.equal(panned.path, first.path, "a short pan made a new path");
+      assert.deepEqual([panned.dx, panned.dy], [-9.5, 4]);
+      b.root.scale({ x: 41, y: 41 });
+      const zoomed = draw(b);
+      assert.notEqual(zoomed.path, first.path, "a zoom kept a path whose lines it would scale");
+      assert.deepEqual([zoomed.dx, zoomed.dy], [0, 0]);
+    });
+  }
+
+  test("on hexes, a pan that brings tiles into view makes the path again from them", () => {
+    const b = board(lined("hexRows"), "select", mapContent);
+    b.root.scale({ x: 40, y: 40 });
+    b.root.position({ x: -400, y: -300 });
+    const first = draw(b);
+    b.root.position({ x: -400 - 40 * 10, y: -300 });
+    const far = draw(b);
+    assert.notEqual(far.path, first.path);
+    assert.deepEqual([far.dx, far.dy], [0, 0]);
   });
 });

@@ -14,7 +14,7 @@ import { mapFailureText, mapName } from "../../state/sceneLoad.ts";
 import { useAssets, useRoomUi, useRoomView } from "../../state/view.ts";
 import { useMapProgressStore } from "../mapProgress.ts";
 import { mapReadable, useMapImage, type MapSource } from "../useImage.ts";
-import { hexLinesInView } from "./hexSpans.ts";
+import { hexLineTiles, squareLines, type HexLineTiles, type TileSet } from "./gridTiles.ts";
 import { treeMap, type SharedMap } from "./sharedMap.ts";
 
 /**
@@ -222,15 +222,20 @@ const PLAIN = {};
  * the 46,000 of the largest scene. What is in view is read from the
  * shape's own transform as it draws, the camera's and in Isometric the
  * ground's turn and squash, so both views draw the very same hexes, each
- * through its own projection.
+ * through its own projection. The lines are kept in world cells, in tiles
+ * on hexes (gridTiles.ts), and a pan moves the path made from them
+ * (gridPath), so a camera move costs no walk over the hexes.
  */
 function Grid(props: { scene: Scene }) {
   const { w, h } = props.scene.bounds;
   const { color, opacity, lineWidth } = props.scene.grid;
   const grid = sceneGrid(props.scene);
   const strokeWidth = lineWidth > 0 ? lineWidth : 1;
-  // A new grid or bounds starts a new path cache. The scene keeps its grid object until the grid changes.
-  const cache = useMemo<GridPath>(() => ({ key: "", path: null }), [props.scene.grid, props.scene.gridShape, w, h]);
+  // A new grid or bounds starts new kept lines. The scene keeps its grid object until the grid changes.
+  const cache = useMemo<GridPath>(
+    () => ({ place: "", tiles: "", e: 0, f: 0, path: null, hex: grid.shape === "hex" ? hexLineTiles(grid, { w, h }, () => new Path2D()) : null, squares: null }),
+    [props.scene.grid, props.scene.gridShape, w, h],
+  );
   return (
     <Shape
       name="sceneGrid"
@@ -240,62 +245,61 @@ function Grid(props: { scene: Scene }) {
       opacity={Number.isFinite(opacity) ? opacity : 0.25}
       perfectDrawEnabled={false}
       sceneFunc={(ctx, shape) => {
-        const path = gridPath(cache, shape, (sink) => {
-          if (grid.shape === "hex") {
-            const view = groundInView(shape);
-            if (view) hexLinesInView(grid, props.scene.bounds, view, sink);
-            return;
-          }
-          for (let x = 0; x <= w; x++) {
-            sink.moveTo(x, 0);
-            sink.lineTo(x, h);
-          }
-          for (let y = 0; y <= h; y++) {
-            sink.moveTo(0, y);
-            sink.lineTo(w, y);
-          }
-        });
-        if (!path) return;
-        // As Konva strokes a line that keeps its width on screen: in the canvas's device pixels, the path already in the stage's.
+        const drawn = gridPath(cache, shape, { w, h });
+        if (!drawn) return;
+        // As Konva strokes a line that keeps its width on screen: in the canvas's device pixels, the path already in the stage's, moved by the pan since it was made.
         const g = ctx._context;
         const ratio = ctx.getCanvas().getPixelRatio();
         g.save();
-        g.setTransform(ratio, 0, 0, ratio, 0, 0);
+        g.setTransform(ratio, 0, 0, ratio, ratio * drawn.dx, ratio * drawn.dy);
         g.lineWidth = strokeWidth;
         g.strokeStyle = color || "#ffffff";
-        g.stroke(path);
+        g.stroke(drawn.path);
         g.restore();
       }}
     />
   );
 }
 
-/** A grid's lines as one path in the stage's pixels, and the transform and stage size it was built for. */
-type GridPath = { key: string; path: Path2D | null };
+/**
+ * A grid's lines as one path in the stage's pixels, with what it was made
+ * for: the shape's transform but its move (`place`, with the stage's size),
+ * that move (`e`, `f`), and the tiles it holds. The lines it is made from
+ * are kept in world cells: a hex scene's tiles, or a squares scene's whole
+ * path.
+ */
+type GridPath = { place: string; tiles: string; e: number; f: number; path: Path2D | null; hex: HexLineTiles<Path2D> | null; squares: Path2D | null };
 
 /**
- * The grid's path, built once per camera (docs/design/design-v1-animated-maps.md
- * 5.2). An animated map redraws the map layer up to 30 times a second with
- * the camera still, and a hex scene's lines walk every hex in view
- * (hexSpans.ts), which would be the main cost of a zoomed-out hex scene. So
- * the path is kept in the stage's pixels, keyed on the shape's absolute
- * transform and the stage's size, and a draw with neither changed strokes
- * the same path. A camera move builds it afresh, as every draw did before.
+ * The grid's path for this draw, and how far the camera has moved it since
+ * it was made. A camera that only moves, as a pan does, keeps the path and
+ * moves it, until it needs tiles the path does not hold. So an animated
+ * map's redraws with the camera still (docs/design/design-v1-animated-maps.md 5.2)
+ * and the frames of a pan cost no path work, and a zoom, a turn or a tile
+ * coming into view makes the path again from the lines kept in world
+ * cells, through the transform. A line's width is in screen pixels, so
+ * only a move may carry a path over: a scale or a turn would change it.
  */
-function gridPath(cache: GridPath, shape: Konva.Shape, build: (sink: { moveTo(x: number, y: number): void; lineTo(x: number, y: number): void }) => void): Path2D | null {
+function gridPath(cache: GridPath, shape: Konva.Shape, bounds: { w: number; h: number }): { path: Path2D; dx: number; dy: number } | null {
   const stage = shape.getStage();
-  const m = shape.getAbsoluteTransform().getMatrix();
-  const key = `${m.join(",")}|${stage?.width() ?? 0}x${stage?.height() ?? 0}`;
-  if (cache.key === key) return cache.path;
-  const [a = 1, b = 0, c = 0, d = 1, e = 0, f = 0] = m;
-  const path = new Path2D();
-  build({
-    moveTo: (x, y) => path.moveTo(a * x + c * y + e, b * x + d * y + f),
-    lineTo: (x, y) => path.lineTo(a * x + c * y + e, b * x + d * y + f),
-  });
-  cache.key = key;
-  cache.path = path;
-  return path;
+  const [a = 1, b = 0, c = 0, d = 1, e = 0, f = 0] = shape.getAbsoluteTransform().getMatrix();
+  const place = `${a},${b},${c},${d}|${stage?.width() ?? 0}x${stage?.height() ?? 0}`;
+  let need: TileSet | null = null;
+  let tiles = "";
+  if (cache.hex) {
+    const view = groundInView(shape);
+    need = view ? cache.hex.need(view) : null;
+    tiles = need?.key ?? "";
+  }
+  if (!cache.path || cache.place !== place || cache.tiles !== tiles) {
+    const path = new Path2D();
+    const m = { a, b, c, d, e, f };
+    if (cache.hex) {
+      if (need) cache.hex.add(need, path, m);
+    } else path.addPath((cache.squares ??= squareLines(bounds, new Path2D())), m);
+    Object.assign(cache, { place, tiles, e, f, path });
+  }
+  return { path: cache.path!, dx: e - cache.e, dy: f - cache.f };
 }
 
 /**
