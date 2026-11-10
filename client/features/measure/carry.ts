@@ -153,8 +153,8 @@ export function landedShape(view: Pick<RoomState, "scenes">, walker: Token, link
 }
 
 const COUNT_MAX = 100_000;
-/** To the half, as the schema takes it: a Tiny walker's feet and diagonals come in halves (review FL3-ASTRA-01). */
-const count = (n: number) => Math.min(COUNT_MAX, Math.max(0, Math.round(n * 2) / 2));
+/** Within the schema's bounds and never rounded: a Tiny walker's half squares and a rise's fifths of a diagonal carry on as counted (review FL3-ASTRA-01). */
+const count = (n: number) => Math.min(COUNT_MAX, Math.max(0, n));
 
 /**
  * What a press of the stairs button carries: the next carry, with its

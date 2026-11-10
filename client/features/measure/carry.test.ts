@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { ATTIC, GROUND, UPPER, tower, withStairs } from "#shared/floorLinksTestutil.ts";
 import type { RoomState, SceneId, Token } from "#shared/model.ts";
-import { ephEventOutSchema, ephEventSchema, outboundEph, type EphEvent } from "#shared/protocol.ts";
+import { ephEventOutSchema, ephEventSchema, outboundEph, type EphEvent, type Op } from "#shared/protocol.ts";
 import { chunkKey } from "#shared/keys.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { projectState } from "#shared/project.ts";
 import { standsOn } from "#shared/rules/floorLinks.ts";
-import { actor, character, DM, P1, reveal } from "#shared/testutil.ts";
+import { actor, character, DM, env, P1, reveal } from "#shared/testutil.ts";
+import { applyOp } from "#shared/reducer.ts";
 import { RoomScope } from "../../state/scope.ts";
 import type { ToolContext } from "../tools.ts";
 import { CARRIED_NO_KEEP, CARRIED_TOO_LONG, CARRIED_WALKS } from "../floors/linkWords.ts";
@@ -145,6 +146,24 @@ describe("the stairs button's offer (4.1)", () => {
     const frame = rulerFrame("r1", [{ x: 8.25, y: 3.25 }], false, true, diagonal);
     assert.ok(ephEventSchema.safeParse(frame).success, "the server takes the halves");
     assert.ok(ephEventOutSchema.safeParse(outboundEph(frame)).success, "and every receiver does");
+  });
+
+  test("a rise's fifth of a diagonal carries over the stairs: 1 ft down to them under 5-10-5 leaves v 0.2, so rising 4 then 5 ft on Upper reads 30 ft, not 25 (FL3-ASTRA-01)", () => {
+    const raise = (st: RoomState, sceneId: SceneId, cells: [string, number][]) =>
+      cells.reduce((acc, [cell, height], i) => {
+        const r = applyOp(acc, { t: "build.height", sceneId, cells: [cell], height } as Op, DM, env(900 + i));
+        assert.ok(r.ok, r.ok ? "" : r.message);
+        return r.state;
+      }, st);
+    let s = stairsRoom({ thorn: { x: 7, y: 3, elevation: 1 } });
+    s = { ...s, meta: { ...s.meta, settings: { ...s.meta.settings, diagonal: "fiveTen" as const } } };
+    s = raise(raise(s, GROUND, [["7,3", 1]]), UPPER, [["9,3", 4], ["10,3", 9]]);
+    const { carry, stop } = plan(s, [thornStop(s), free(8, 3)], DM_OWN)!.plan;
+    assert.deepEqual([carry.prior.ft, carry.prior.diag], [15, { h: 0, v: 0.2 }]);
+    assert.ok(ephEventSchema.safeParse(rulerFrame("r1", [stop], false, true, carry)).success, "the server takes the fifth");
+    const on = (c: Carry) => measureWalk(walkOf(s, UPPER, [stop, { x: 9.5, y: 3.5, z: 4 }, { x: 10.5, y: 3.5, z: 9 }], DM_OWN, c))!.totalFt;
+    assert.equal(on(carry), 30, "the second climb is the count's second diagonal, 10 ft");
+    assert.equal(on({ ...carry, prior: { ...carry.prior, diag: { h: 0, v: 0 } } }), 25, "as it would read with the fifth rounded away");
   });
 
   test("a custom walker carries its sides", () => {

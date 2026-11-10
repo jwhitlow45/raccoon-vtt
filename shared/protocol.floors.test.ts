@@ -121,12 +121,13 @@ describe("a carried ruler's frame in and out (4.2, D-261110-182)", () => {
     bad(ephEventSchema, withPrior({ walker: { size: "large", riders: ["ana"] } }));
   });
 
-  test("the feet and counters are halves within bounds, as a Tiny walker makes them, both ways (FL3-ASTRA-01)", () => {
-    const halves = { ft: 12.5, diag: { h: 1.5, v: 0.5 } };
-    ok(ephEventSchema, withPrior(halves));
-    ok(ephEventOutSchema, { ...outbound, prior: { ...outbound.prior, ...halves } });
-    ok(serverMessageSchema, { t: "eph", from: "p1", sceneId: "u", e: { ...outbound, prior: { ...outbound.prior, ...halves } } });
-    for (const prior of [{ ft: 12.25 }, { ft: 0.1 }, { diag: { h: 0.25, v: 0 } }]) {
+  test("the feet and counters are any fraction a walk counts, within bounds, both ways (FL3-ASTRA-01)", () => {
+    for (const fractions of [{ ft: 12.5, diag: { h: 1.5, v: 0.5 } }, { ft: 15, diag: { h: 0, v: 0.2 } }, { ft: 13.75, diag: { h: 0.25, v: 1.8 } }]) {
+      ok(ephEventSchema, withPrior(fractions));
+      ok(ephEventOutSchema, { ...outbound, prior: { ...outbound.prior, ...fractions } });
+      ok(serverMessageSchema, { t: "eph", from: "p1", sceneId: "u", e: { ...outbound, prior: { ...outbound.prior, ...fractions } } });
+    }
+    for (const prior of [{ ft: -0.1 }, { ft: "5" }, { diag: { h: -0.2, v: 0 } }, { diag: { h: 0, v: 100_000.2 } }]) {
       bad(ephEventSchema, withPrior(prior));
       bad(ephEventOutSchema, { ...outbound, prior: { ...outbound.prior, ...prior } });
     }
