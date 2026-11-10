@@ -1717,18 +1717,27 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
     });
     for (const host of new Set(slots.map((s) => s.host))) {
       const mine = slots.filter((s) => s.host === host);
-      for (const axis of ["across", "down"] as const) {
-        if (mine.length < 2) break;
-        const gaps = mine.map((s) => round(s[axis].gap));
+      // Only a mirrored pair is held: one part pinned to the left and one to the right (Look closer and Reroll). Parts along one side, as a list's rows or a header's buttons, sit at different insets on purpose.
+      const groups: { axis: "across" | "down"; parts: typeof mine; word: string }[] = [];
+      const lefts = mine.filter((s) => s.across.side === "left");
+      const rights = mine.filter((s) => s.across.side === "right");
+      if (lefts.length === 1 && rights.length === 1) {
+        const pair = [lefts[0]!, rights[0]!];
+        groups.push({ axis: "across", parts: pair, word: "from the sides" });
+        if (pair[0]!.down.side === pair[1]!.down.side) groups.push({ axis: "down", parts: pair, word: `from the ${pair[0]!.down.side}` });
+      }
+      for (const { axis, parts, word } of groups) {
+        if (parts.length < 2) continue;
+        const gaps = parts.map((s) => round(s[axis].gap));
         if (round(spread(gaps)) <= LIMIT) continue;
         push({
           check: "corner",
           role: roleOf(host),
           name: nameOf(host),
           offset: round(spread(gaps)),
-          box: union(mine.map((s) => rectOf(s.el))),
-          what: mine.map((s) => `${say(s.el)} ${s[axis].gap < 0 ? "past" : "at"} ${round(s[axis].gap)} from its ${s[axis].side}`).join(" | "),
-          detail: `corner parts keep one inset ${axis === "across" ? "from the sides" : "from the top and bottom"}`,
+          box: union(parts.map((s) => rectOf(s.el))),
+          what: parts.map((s) => `${say(s.el)} ${s[axis].gap < 0 ? "past" : "at"} ${round(s[axis].gap)} from its ${s[axis].side}`).join(" | "),
+          detail: `corner parts keep one inset ${word}`,
         });
       }
     }
