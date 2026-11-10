@@ -121,12 +121,19 @@ describe("a carried ruler's frame in and out (4.2, D-261110-182)", () => {
     bad(ephEventSchema, withPrior({ walker: { size: "large", riders: ["ana"] } }));
   });
 
-  test("the feet and counters are whole numbers within bounds", () => {
-    bad(ephEventSchema, withPrior({ ft: 2.5 }));
+  test("the feet and counters are halves within bounds, as a Tiny walker makes them, both ways (FL3-ASTRA-01)", () => {
+    const halves = { ft: 12.5, diag: { h: 1.5, v: 0.5 } };
+    ok(ephEventSchema, withPrior(halves));
+    ok(ephEventOutSchema, { ...outbound, prior: { ...outbound.prior, ...halves } });
+    ok(serverMessageSchema, { t: "eph", from: "p1", sceneId: "u", e: { ...outbound, prior: { ...outbound.prior, ...halves } } });
+    for (const prior of [{ ft: 12.25 }, { ft: 0.1 }, { diag: { h: 0.25, v: 0 } }]) {
+      bad(ephEventSchema, withPrior(prior));
+      bad(ephEventOutSchema, { ...outbound, prior: { ...outbound.prior, ...prior } });
+    }
     bad(ephEventSchema, withPrior({ ft: -5 }));
     bad(ephEventSchema, withPrior({ ft: 100_005 }));
+    bad(ephEventSchema, withPrior({ ft: 100_000.5 }));
     bad(ephEventSchema, withPrior({ diag: { h: 1 } }));
-    bad(ephEventSchema, withPrior({ diag: { h: 1, v: 0.5 } }));
     bad(ephEventSchema, withPrior({ tokenId: "thorn" }));
   });
 

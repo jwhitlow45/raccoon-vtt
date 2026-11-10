@@ -3300,7 +3300,8 @@ const rulerPoint = z
 
 /** The most stairs one ruler crosses (docs/design/design-v1-floors.md phase 3, 4.1). */
 export const MAX_RULER_ENDS = 8;
-const rulerCount = z.number().int().min(0).max(100_000);
+/** Feet and diagonals so far, in halves: a Tiny walker steps half a square. */
+const rulerCount = z.number().min(0).max(100_000).multipleOf(0.5);
 /** A custom token's side in cells, as `tokenInput` bounds it. */
 const tokenCells = z.number().min(0.5).max(20);
 

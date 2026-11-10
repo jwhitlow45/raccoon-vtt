@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { ATTIC, GROUND, UPPER, tower, withStairs } from "#shared/floorLinksTestutil.ts";
 import type { RoomState, SceneId, Token } from "#shared/model.ts";
-import type { EphEvent } from "#shared/protocol.ts";
+import { ephEventOutSchema, ephEventSchema, outboundEph, type EphEvent } from "#shared/protocol.ts";
 import { chunkKey } from "#shared/keys.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { projectState } from "#shared/project.ts";
@@ -128,6 +128,23 @@ describe("the stairs button's offer (4.1)", () => {
     assert.equal(corridor.end.walker.squeeze, true);
     assert.ok(corridor.totalFt > 10 + 30, "squeezing costs more than the six squares walked");
     assert.equal(two.plan.carry.prior.ft, corridor.totalFt + 20, "and the ladder twice its height");
+  });
+
+  test("a Tiny walker carries its half squares: 2.5 ft and half a diagonal before the stairs stay 12.5 ft and h 0.5, and walk on from there (FL3-ASTRA-01)", () => {
+    const tiny = (x: number, y: number, diagonal: "five" | "fiveTen") => {
+      const s = stairsRoom({ thorn: { size: "tiny", x, y } });
+      return { ...s, meta: { ...s.meta, settings: { ...s.meta.settings, diagonal } } };
+    };
+    const across = tiny(7.5, 3, "five");
+    const straight = plan(across, [thornStop(across), { x: 8.25, y: 3.25 }], DM_OWN)!.plan.carry;
+    assert.deepEqual([straight.prior.ft, straight.prior.diag], [12.5, { h: 0, v: 0 }]);
+    assert.equal(walkText(measureWalk(walkOf(across, UPPER, [{ x: 8.25, y: 3.25 }], DM_OWN, straight))!), "Walking 12.5 ft\n12.5 ft before this floor");
+    const slant = tiny(6.5, 1.5, "fiveTen");
+    const diagonal = plan(slant, [thornStop(slant), { x: 8.25, y: 3.25 }], DM_OWN)!.plan.carry;
+    assert.deepEqual([diagonal.prior.ft, diagonal.prior.diag], [17.5, { h: 1.5, v: 0 }], "three half diagonals, 2.5, 5 and 2.5 ft, and the 10 ft climb");
+    const frame = rulerFrame("r1", [{ x: 8.25, y: 3.25 }], false, true, diagonal);
+    assert.ok(ephEventSchema.safeParse(frame).success, "the server takes the halves");
+    assert.ok(ephEventOutSchema.safeParse(outboundEph(frame)).success, "and every receiver does");
   });
 
   test("a custom walker carries its sides", () => {
