@@ -15,7 +15,7 @@ import { floorAddRefusal, floorCreateOf, type FloorTarget } from "../scenes/floo
 import { CHECK_MS } from "../uvtt/rules.ts";
 import { NumberInput } from "../scenes/controls.tsx";
 import { Choice, Choices as ChoiceRows } from "./Choices.tsx";
-import { editLayout, type DungeonEdits, type RoomEdit, type RoomFacts } from "./edits.ts";
+import { editLayout, type RoomEdit } from "./edits.ts";
 import { closePreviews, preview, warmPreviews, type Preview } from "./client.ts";
 import { counted, drawable, editedRooms, editsStep, flowStep, readiness, startEdits, startFlow, type EditsEvent, type EditsState, type Flow, type FlowEvent } from "./flow.ts";
 import { journalFull } from "./keyHold.ts";
@@ -26,8 +26,8 @@ import { roomBox } from "./marks.ts";
 import { DungeonPreview, topCornerFits, type Drawn } from "./Preview.tsx";
 import { RoomPanel } from "./RoomPanel.tsx";
 import { keptSize, loadChoices, saveChoices, settingsOf, sideCap, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
-import { formatSeed, newSeed, parseSeed, type Seed } from "./seed.ts";
-import { CHOICE_NAMES, isHexGrid, MIN_SIDE, type DungeonSettings, type GridKind, type PlanContext, type SizeChoice } from "./settings.ts";
+import { formatSeed, newSeed, parseSeed } from "./seed.ts";
+import { CHOICE_NAMES, isHexGrid, MIN_SIDE, type DungeonSettings, type GridKind, type SizeChoice } from "./settings.ts";
 import { sendDungeon, warmOpChecks } from "./send.ts";
 import {
   BRING_BACK,
@@ -67,16 +67,7 @@ const FRAME_MARGIN = 4;
 /** From this card width the preview takes the left half (4.7). */
 const TWO_COLUMNS_PX = 640;
 
-/*
- * The worker takes the room edits and answers with each kept room's facts,
- * the room count it asked for and, on a failed fit, why (phase 3, section
- * 9). The landing lane's client carries them. Read through this shape, an
- * answer without them has no rooms to edit and a plain fit error.
- */
-type Answered = Preview & { facts?: RoomFacts[]; fitted?: number; why?: string };
-const previewEdited = preview as unknown as (settings: DungeonSettings, seed: Seed, scene: SceneInput, context: PlanContext, key: KeyInput | null, edits: DungeonEdits | null) => Promise<Answered>;
-
-type Shown = { result: Extract<Answered, { ok: true }>; drawn: Drawn };
+type Shown = { result: Extract<Preview, { ok: true }>; drawn: Drawn };
 /** What Bring them back restores beside the edits: the choices and the seed as typed. */
 type Before = { choices: Choices; seedText: string };
 type Sending = { answered: number; total: number };
@@ -218,7 +209,7 @@ export function GenerateDialog(props: {
     const seed = parsed.seed;
     const sent = edits.edits;
     const timer = setTimeout(() => {
-      previewEdited(settings, seed, scene, hex ? { feetPerCell, grid } : { feetPerCell }, keyInput, sent).then(
+      preview(settings, seed, scene, hex ? { feetPerCell, grid } : { feetPerCell }, keyInput, sent).then(
         (result) => {
           if (!mounted.current) return;
           if (!result.ok) {
@@ -413,7 +404,7 @@ export function GenerateDialog(props: {
   const editRoom = (next: RoomEdit | null) => {
     if (picked === null || !parsed.ok || !onScreen) return;
     // The first edit freezes the layout on screen: the room count its plan asked for, the seed and the choices (4.2).
-    const layout = editLayout(settings, parsed.seed, onScreen.fitted ?? settings.rooms, null);
+    const layout = editLayout(settings, parsed.seed, onScreen.fitted, null);
     editStep({ k: "edit", room: picked, edit: next, layout });
   };
 
