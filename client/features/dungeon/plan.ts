@@ -13,14 +13,15 @@ import { furnish, furnishHex, HexStamps, STAMP_DOOR_STEPS } from "./furnish.ts";
 import { CORRIDOR_SPACE, directionTo, hexSide, hexWalls, NO_SPACE, RUN_SPACE, type HexWalls, type WallDoorway } from "./hexWalls.ts";
 import { latticeFor, type Lattice } from "./lattice.ts";
 import { corridorTraps, keyRooms, numberRooms, pinSquare } from "./keyRooms.ts";
-import { placeLights, placeLightsHex } from "./lightSpots.ts";
-import type { DungeonEdits } from "./edits.ts";
+import { placeLights, placeLightsHex, type LitRoom } from "./lightSpots.ts";
+import { doorKey, editsHold, REPORTS, SECRET_OFF, type DoorPin, type DungeonEdits, type RoomEdit, type RoomFacts } from "./edits.ts";
+import { fitRooms, NEW_SCENE, withinAllowance, type Allowance, type FitFailure } from "./fit.ts";
 import { chooseSecrets, secretCandidates, stillWhole, type Candidate } from "./secrets.ts";
-import { clampContext, clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, isHexGrid, MAX_DOOR_EDGES, SEARCH_BUDGET, litCount, secretCount, trapCount, type DungeonSettings, type GridKind, type PlanContext, type Theme } from "./settings.ts";
+import { clampContext, clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, isHexGrid, MAX_DOOR_EDGES, MAX_LIGHTS, MAX_SECRET_DOORS, MAX_STAMPS, MAX_TRAPS, SEARCH_BUDGET, litCount, secretCount, trapCount, type DungeonSettings, type GridKind, type PlanContext, type Theme } from "./settings.ts";
 import { channelWater, placeCisterns, type Channel } from "./sewer.ts";
 import { THEME_SPECS } from "./themes.ts";
-import { propsFor } from "./props.ts";
-import { hexTrapSpots, pickTraps, STATUE_STAMP, statueReaches, trapSpots, type PickedTraps } from "./trapSpots.ts";
+import { propsFor, stampSize } from "./props.ts";
+import { FIRE_STATUE, HIDDEN_PIT, hexTrapSpots, pickTraps, POISONED_NEEDLE, SPIKED_PIT, presetKind, spotsApart, STATUE_STAMP, statueReaches, statueStamp, trapAt, trapSpots, type PickedTraps, type Spot } from "./trapSpots.ts";
 import { wallChunk } from "#shared/keys.ts";
 
 /*
@@ -151,11 +152,13 @@ export type WingBase = {
 const WRAP_BELOW = { narrow: 8, wide: 10 } as const;
 /** About one extra way round per this many rooms. */
 const ROOMS_PER_LOOP = 4;
+/** The first of the lanes a pinned room's own props are drawn from, 16 a room (phase 3, 4.3): lane 64 + 16 x room + propsDraw. */
+const LANE_ROOM_PROPS = 64;
 /** A pit or a mine shaft on hexes, in feet below its room's floor (phase 3, 2.4). */
 const PIT_DROP = 10;
 
-/** What a plan takes besides the choices (phase 3): the room count to ask for, and each room's height pin by board index. */
-export type PlanOptions = { rooms?: number; grounds?: ReadonlyMap<number, number> };
+/** What a plan takes besides the choices (phase 3): the room count to ask for, and the rooms' edits by board index. */
+export type PlanOptions = { rooms?: number; edits?: Readonly<Record<number, RoomEdit>>; allowance?: Allowance };
 
 /*
  * The streams a seed starts (random.ts `seedStream`, phase 2 5.7): the main
@@ -224,6 +227,12 @@ export type Planned = {
   /** On hexes, each cell's space for the wall pass (hexWalls.ts), and each kept doorway's leaves in `plan.walls`, in `doorways` order. Empty on squares. */
   space: Int32Array;
   leaves: number[][];
+  /** Each kept room as the room panel shows it, in number order (phase 3, 4.1). */
+  facts: RoomFacts[];
+  /** What the edits did not do, by board index, a room gone among them. */
+  reports: ReadonlyMap<number, readonly string[]>;
+  /** Why the fit gave up, or null when the plan fits its allowance (phase 3, 2.5). */
+  overBudget: FitFailure | null;
 };
 
 export function generate(settings: DungeonSettings, seed: Seed, context: PlanContext, budget: number = SEARCH_BUDGET): DungeonPlan {
@@ -236,8 +245,19 @@ export function generate(settings: DungeonSettings, seed: Seed, context: PlanCon
  * with edits exactly the room count they froze, the edits applied.
  */
 export function planFitted(settings: DungeonSettings, seed: Seed, context: PlanContext, extras: { edits?: DungeonEdits; wing?: WingBase } = {}): Planned {
-  void extras;
-  return planDungeon(settings, seed, context);
+  const ctx = clampContext(context);
+  const s = clampSettings(settings, ctx.grid);
+  const allowance = NEW_SCENE;
+  // Squares hold no free walls, so only a hex plan has a wall budget to fit.
+  const fits = (p: Planned) => !isHexGrid(ctx.grid) || withinAllowance(p.plan, allowance);
+  const edits = extras.edits && editsHold(extras.edits, s, seed, null) ? extras.edits : undefined;
+  if (edits) {
+    // Edits freeze the room count, so a plan over budget is not fitted again: the edit that took it over is undone (4.2).
+    const planned = planDungeon(s, seed, ctx, SEARCH_BUDGET, { rooms: edits.layout.fitted, edits: edits.rooms, allowance });
+    return fits(planned) ? planned : { ...planned, overBudget: "edits" };
+  }
+  const { planned, failed } = fitRooms(s.rooms, (rooms) => planDungeon(s, seed, ctx, SEARCH_BUDGET, { rooms, allowance }), fits);
+  return failed ? { ...planned, overBudget: failed } : planned;
 }
 
 /** The plan with its working. A caller with no room (a bench script) plans at the default 5 ft a square. */
@@ -251,6 +271,11 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   const lattice = latticeFor(grid, { w: s.w, h: s.h });
   const { W, H } = lattice;
   const fitted = extras.rooms ?? s.rooms;
+  const edits = extras.edits;
+  // What each pinned room's edits did not do, by board index (4.1).
+  const reports = new Map<number, string[]>();
+  const report = (room: number, line: string) => reports.set(room, [...(reports.get(room) ?? []), line]);
+  const grounds = new Map(Object.entries(edits ?? {}).flatMap(([i, e]) => (e.ground === undefined ? [] : [[Number(i), e.ground] as [number, number]])));
   const width = s.wide ? 2 : 1;
   const rng = seedStream(seed);
   const trace: PlanTrace = { retried: [], failed: [], dropped: [], replaced: [], skipped: [], stubFailed: false, treeLeft: budget, loopsLeft: budget, budgetLeft: budget };
@@ -295,7 +320,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   }
 
   // Step 5: heights, before any corridor, so every run is reserved first.
-  if (entrance.room >= 0) raiseRooms(rng, board, entrance.room, s.heights, extras.grounds);
+  if (entrance.room >= 0) raiseRooms(rng, board, entrance.room, s.heights, grounds);
 
   // Step 6: corridors, tree links in Prim's order, then the loops, then the stub.
   const bend = (a: readonly [number, number], b: readonly [number, number]) => bends(ways, s.corridors, a, b, width);
@@ -430,14 +455,37 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   // Step 8: doors, then the floors, both drawn before the secret doors, so whatever moves those keeps the locks and the floors.
   const states = doorStates(rng, doorways, theme, stub);
   const floors = roomFloors(rng, board, theme);
+  // Door pins (phase 3, 4.3, D-261110-238): Closed and Locked replace the drawn door and leave the random secret choice.
+  const doorPin = (d: Doorway): DoorPin | undefined => edits?.[d.room]?.doors?.[doorKey(d.link)];
+  if (theme.doors) {
+    for (const d of doorways) {
+      const pin = doorPin(d);
+      if (pin === "closed" || pin === "locked") states.set(d.id, pin);
+    }
+  }
 
   // Secret doors (5.3), from their own stream, chosen before anything is placed round the doorways.
   let secret: Candidate[] = [];
   const secrets = theme.doors ? secretCount(s.secrets, kept.length) : 0;
+  const wayPainted = (k: number) => board.roomAt[k] !== 0 || corridor.has(k);
+  // A Secret pin replaces a drawn lock, so its door is judged as if unlocked.
+  const candidates = theme.doors ? secretCandidates({ doorways, links, entrance: entrance.room, stub, locked: (d) => doorPin(d) !== "secret" && states.get(d.id) === "locked" }) : [];
   if (secrets > 0) {
-    const painted = (k: number) => board.roomAt[k] !== 0 || corridor.has(k);
-    const candidates = secretCandidates({ doorways, links, entrance: entrance.room, stub, locked: (d) => states.get(d.id) === "locked" });
-    secret = chooseSecrets(seedStream(seed, GENERATOR_VERSION, LANE_SECRETS), candidates, secrets, (set) => stillWhole(board, painted, entrance.room, kept, set));
+    const open = candidates.filter((c) => doorPin(c.doorway) !== "closed" && doorPin(c.doorway) !== "locked");
+    secret = chooseSecrets(seedStream(seed, GENERATOR_VERSION, LANE_SECRETS), open, secrets, (set) => stillWhole(board, wayPainted, entrance.room, kept, set));
+  }
+  // Each Secret pin then applies whatever Secret doors says, where its door may be secret and every room is still reached.
+  if (theme.doors && edits) {
+    for (const d of doorways) {
+      if (doorPin(d) !== "secret" || secret.some((c) => c.doorway === d)) continue;
+      const c = candidates.find((q) => q.doorway === d);
+      if (d.run) {
+        states.set(d.id, "closed");
+        report(d.room, REPORTS.secretOnStairs);
+      } else if (!c || !stillWhole(board, wayPainted, entrance.room, kept, [...secret, c])) report(d.room, REPORTS.secretBreaksReach);
+      else if (secret.length >= MAX_SECRET_DOORS) report(d.room, REPORTS.noRoom("secret door"));
+      else secret.push(c);
+    }
   }
   const secretIds = new Set(secret.map((c) => c.doorway.id));
   const isSecret = (d: Doorway) => secretIds.has(d.id);
@@ -555,41 +603,42 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     return { terrain, ground };
   };
   const doorIndex = new Map(doorways.map((d, j) => [d.id, j]));
-  const picked: PickedTraps =
-    s.traps === 0
-      ? { traps: [], squares: [], statues: [], stones: [] }
+  const trapRooms = kept.filter((i) => i !== entrance.room);
+  const reaches = (spot: Spot) => {
+    const i = board.roomAt[spot.squares[0]!]! - 1;
+    const [z] = "cells" in spot.zone ? spot.zone.cells : [];
+    return i >= 0 && z !== undefined && spot.cone !== undefined && statueReaches({ w: W, h: H, ...roomTerrain(i), plate: [z.x, z.y], cone: spot.cone, band: s.band, feetPerCell: ctx.feetPerCell });
+  };
+  // Edits read every spot a room has, so the spots are found with Traps None too. Finding them draws nothing.
+  const spots: Spot[] =
+    s.traps === 0 && !edits
+      ? []
       : hex
-        ? pickTraps(
-            rng,
-            hexTrapSpots({
-              board,
-              lattice,
-              rooms: kept.filter((i) => i !== entrance.room),
-              onLine,
-              floorFree,
-              hitFree: (k) => corridor.has(k) && plainCorridor(k) && !secretMouths.has(k),
-              corridor: [...new Set([...builtPaths.flat(), ...spurPaths.flat()])],
-              painted,
-              wide: s.wide,
-              feetPerCell: ctx.feetPerCell,
-              rect: sceneRect,
-              side: (k, dir) => hexSide(lattice, k, dir),
-              needles: doorways.flatMap((d) => {
-                if (d.room === entrance.room || doorState(d) !== "locked") return [];
-                const leaf = walled.leaves[doorIndex.get(d.id)!]?.[0];
-                if (leaf === undefined) return [];
-                const { cx, cy } = wallChunk(walled.walls[leaf]!);
-                const [i, o] = [d.inside[0]!, d.outside[0]!];
-                return [{ leaf, cx, cy, mid: [(i % W) + (o % W) + 1, Math.floor(i / W) + Math.floor(o / W) + 1] as [number, number] }];
-              }),
-            }),
-            trapCount(s.traps, kept.length),
-          )
-        : pickTraps(
-          rng,
-          trapSpots({
+        ? hexTrapSpots({
             board,
-            rooms: kept.filter((i) => i !== entrance.room),
+            lattice,
+            rooms: trapRooms,
+            onLine,
+            floorFree,
+            hitFree: (k) => corridor.has(k) && plainCorridor(k) && !secretMouths.has(k),
+            corridor: [...new Set([...builtPaths.flat(), ...spurPaths.flat()])],
+            painted,
+            wide: s.wide,
+            feetPerCell: ctx.feetPerCell,
+            rect: sceneRect,
+            side: (k, dir) => hexSide(lattice, k, dir),
+            needles: doorways.flatMap((d) => {
+              if (d.room === entrance.room || doorState(d) !== "locked") return [];
+              const leaf = walled.leaves[doorIndex.get(d.id)!]?.[0];
+              if (leaf === undefined) return [];
+              const { cx, cy } = wallChunk(walled.walls[leaf]!);
+              const [i, o] = [d.inside[0]!, d.outside[0]!];
+              return [{ leaf, cx, cy, mid: [(i % W) + (o % W) + 1, Math.floor(i / W) + Math.floor(o / W) + 1] as [number, number] }];
+            }),
+          })
+        : trapSpots({
+            board,
+            rooms: trapRooms,
             onLine,
             floorFree,
             hitFree: (k) => corridor.has(k) && plainCorridor(k) && !secretMouths.has(k),
@@ -602,15 +651,8 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
             plateFree: (i, k) => ownFloor(i, k) && openLines.get(i)!.has(k) && floorFree(k),
             stones: s.wide && (s.band === "11-16" || s.band === "17-20"),
             feetPerCell: ctx.feetPerCell,
-          }),
-          trapCount(s.traps, kept.length),
-          (spot) => {
-            const i = board.roomAt[spot.squares[0]!]! - 1;
-            const [z] = "cells" in spot.zone ? spot.zone.cells : [];
-            return i >= 0 && z !== undefined && spot.cone !== undefined && statueReaches({ w: W, h: H, ...roomTerrain(i), plate: [z.x, z.y], cone: spot.cone, band: s.band, feetPerCell: ctx.feetPerCell });
-          },
-        );
-  const traps = picked.traps;
+          });
+  let picked: PickedTraps = s.traps === 0 ? { traps: [], squares: [], statues: [], stones: [], picks: [] } : pickTraps(rng, spots, trapCount(s.traps, kept.length), hex ? () => false : reaches);
 
   // Lights (5.5), from their own stream after the traps, so Lit rooms keeps the rooms, corridors, doors and traps.
   const used = new Set(picked.squares.flat());
@@ -635,10 +677,10 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   }
   const stampHex = (i: number, k: number) => space[k] === i && !nearDoor.has(k) && !overlay.has(k) && !clear.has(k) && !daisSquares.has(k) && k !== pins.get(i) && !used.has(k);
   const lightStream = seedStream(seed, GENERATOR_VERSION, LANE_LIGHTS);
-  const lit = hexStamps
+  let lit = hexStamps
     ? placeLightsHex(lightStream, board, kept, litCount(s.lit, kept.length), own, free, theme, (i, stamp) => hexStamps.fits(stamp, (k) => stampHex(i, k)))
     : placeLights(lightStream, board, kept, litCount(s.lit, kept.length), own, free, theme);
-  const litStamps = lit.flatMap((l) => (l.stamp ? [l.stamp] : []));
+  let litStamps = lit.flatMap((l) => (l.stamp ? [l.stamp] : []));
   for (const l of lit) {
     used.add(l.square);
     if (hexStamps && l.stamp) for (const k of hexStamps.touched(l.stamp)) used.add(k);
@@ -657,15 +699,162 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     total: picked.statues.length + litStamps.length,
   };
   const dressStream = seedStream(seed, GENERATOR_VERSION, LANE_DRESSING);
-  const props = hexStamps ? furnishHex(dressStream, { ...dressing, stamps: hexStamps, lattice, allowed: stampHex }) : furnish(dressStream, { ...dressing, ground: groundAt });
+  let props = hexStamps ? furnishHex(dressStream, { ...dressing, stamps: hexStamps, lattice, allowed: stampHex }) : furnish(dressStream, { ...dressing, ground: groundAt });
+
+  // Which room a trap or a spot stands in: a door's room for a Poisoned Needle, else the room of the first square it takes, -1 in the corridors.
+  const doorRoom = new Map<string, number>();
+  for (const d of doorways) d.inside.forEach((_, j) => doorRoom.set(doorEdgeOf(board, d, j), d.room));
+  const leafRoom = new Map<number, number>();
+  walled.leaves.forEach((leaves, j) => leaves.forEach((leaf) => leafRoom.set(leaf, doorways[j]!.room)));
+  const spotRoom = (sp: Pick<Spot, "zone" | "squares" | "leaf">): number =>
+    sp.leaf !== undefined ? (leafRoom.get(sp.leaf) ?? -1) : "door" in sp.zone ? ("edge" in sp.zone.door ? (doorRoom.get(sp.zone.door.edge) ?? -1) : -1) : sp.squares.length > 0 ? roomOf(sp.squares[0]!) : -1;
+
+  // Trap, Lit and Dressing pins reconcile after the whole pipeline, one room at a time in board order, over each room's
+  // whole contents, so nothing in any other room moves, and every allowance is checked again after each room (phase 3,
+  // 4.3, D-261110-237, 242 and 243).
+  if (edits) {
+    const allowance = extras.allowance ?? NEW_SCENE;
+    const caps = { traps: Math.min(MAX_TRAPS, allowance.traps), stamps: Math.min(MAX_STAMPS, allowance.stamps), lights: Math.min(MAX_LIGHTS, allowance.lights) };
+    type TrapEntry = { trap: PlanTrap; squares: number[]; statue: PlanStamp | null; stone: [number, number] | null; spot: Spot };
+    let entries: TrapEntry[] = picked.traps.map((trap, ti) => {
+      const spot = picked.picks[ti]!;
+      return { trap, squares: picked.squares[ti]!, statue: spot.statue ? statueStamp(spot.statue) : null, stone: trap.stone !== undefined ? picked.stones[trap.stone]! : null, spot };
+    });
+    const lights = [...lit];
+    let dressed = [...props];
+    const stampCount = () => entries.filter((e) => e.statue).length + lights.filter((l) => l.stamp).length + dressed.length;
+    const stampSquares = (stamp: PlanStamp | undefined, square: number) => (hexStamps && stamp ? [square, ...hexStamps.touched(stamp)] : [square]);
+    // Floor a reconciled light or prop may take: free of the pipeline's ways, and of every trap and light standing now.
+    const takenNow = () => new Set([...entries.flatMap((e) => e.squares), ...lights.flatMap((l) => stampSquares(l.stamp, l.square))]);
+    const freeOf = (taken: ReadonlySet<number>) => (i: number, k: number) => own(i, k) && !overlay.has(k) && !clear.has(k) && !inside.has(k) && !openLines.get(i)!.has(k) && k !== pins.get(i) && !taken.has(k);
+    const hexAllowed = (taken: ReadonlySet<number>) => (i: number, k: number) => space[k] === i && !nearDoor.has(k) && !overlay.has(k) && !clear.has(k) && !daisSquares.has(k) && k !== pins.get(i) && !taken.has(k);
+    /**
+     * A Lit pin's light (4.3): at the room's free edge square nearest a
+     * corner, corners taken north-west, north-east, south-east, south-west,
+     * ties by row then column, with no stream draw. On hexes the nearest
+     * free hex where its stamp keeps the stamp rule, else the light alone
+     * at the edge hex, as `placeLightsHex` places one.
+     */
+    const fixedLight = (i: number, taken: ReadonlySet<number>): LitRoom | null => {
+      const r = board.rooms[i]!;
+      const corners: [number, number][] = [
+        [r.x, r.y],
+        [r.x + r.w - 1, r.y],
+        [r.x + r.w - 1, r.y + r.h - 1],
+        [r.x, r.y + r.h - 1],
+      ];
+      const freeHere = freeOf(taken);
+      const size = stampSize(theme.light.stamp) ?? { w: 1, h: 1 };
+      const stampAt = (k: number): PlanStamp => {
+        const [x, y] = lattice.pointOf(k % W, Math.floor(k / W));
+        return { key: theme.light.stamp, x, y, w: size.w, h: size.h, rotation: 0 };
+      };
+      const edge = (k: number) => lattice.halo(k).length < (hex ? 6 : 4) || lattice.halo(k).some((n) => !own(i, n));
+      const first = (pass: (k: number) => boolean): number | null => {
+        let best: number | null = null;
+        let bestRank: number[] = [];
+        for (let y = r.y; y < r.y + r.h; y++) {
+          for (let x = r.x; x < r.x + r.w; x++) {
+            const k = board.cell(x, y);
+            if (!freeHere(i, k) || !pass(k)) continue;
+            const far = corners.map(([cx, cy]) => Math.max(Math.abs(x - cx), Math.abs(y - cy)));
+            const d = Math.min(...far);
+            const rank = [d, far.indexOf(d), y, x];
+            if (best === null || ranksBefore(rank, bestRank)) {
+              best = k;
+              bestRank = rank;
+            }
+          }
+        }
+        return best;
+      };
+      const pictured = hexStamps ? first((k) => hexStamps.fits(stampAt(k), (q) => hexAllowed(taken)(i, q))) : first(edge);
+      const k = pictured ?? (hexStamps ? first(edge) : null);
+      if (k === null) return null;
+      const stamp = stampAt(k);
+      const light: PlanLight = { x: stamp.x, y: stamp.y, preset: theme.light.preset, label: theme.light.label, stamp: theme.light.stamp };
+      return pictured !== null ? { room: i, square: k, light, stamp } : { room: i, square: k, light };
+    };
+    const rooms = Object.keys(edits)
+      .map(Number)
+      .sort((a, b) => a - b);
+    for (const i of rooms) {
+      const e = edits[i]!;
+      if (!kept.includes(i)) continue;
+      if (e.trap !== undefined) {
+        const at = entries.findIndex((x) => spotRoom(x.spot) === i);
+        const rest = entries.filter((x) => spotRoom(x.spot) !== i);
+        const place = (entry: TrapEntry) => {
+          const next = [...rest];
+          next.splice(at >= 0 ? at : next.length, 0, entry);
+          return next;
+        };
+        if (e.trap === null) entries = rest;
+        else {
+          const kind = presetKind(e.trap);
+          const taken = new Set(rest.flatMap((x) => x.squares));
+          const off = new Set([...lights.filter((l) => l.room === i).flatMap((l) => stampSquares(l.stamp, l.square)), ...dressed.filter((f) => f.room === i).flatMap((f) => f.squares)]);
+          const spot = spots.find(
+            (sp) => sp.kind === kind && spotRoom(sp) === i && rest.every((x) => spotsApart(x.spot, sp)) && !sp.squares.some((k) => taken.has(k) || off.has(k)) && (sp.kind !== "statue" || reaches(sp)),
+          );
+          if (!spot) {
+            entries = rest;
+            report(i, REPORTS.noTrapSpot);
+          } else {
+            const entry: TrapEntry = { trap: trapAt(spot, e.trap), squares: spot.squares, statue: spot.statue ? statueStamp(spot.statue) : null, stone: null, spot };
+            const next = place(entry);
+            const statues = (list: TrapEntry[]) => list.filter((x) => x.statue).length;
+            if (next.length > caps.traps) report(i, REPORTS.noRoom("trap"));
+            else if (stampCount() - statues(entries) + statues(next) > caps.stamps) report(i, REPORTS.noRoom("stamp"));
+            else entries = next;
+          }
+        }
+      }
+      if (e.lit !== undefined) {
+        const was = lights.findIndex((l) => l.room === i);
+        if (!e.lit && was >= 0) lights.splice(was, 1);
+        else if (e.lit && was < 0) {
+          const spot = fixedLight(i, takenNow());
+          if (!spot || lights.length + 1 > caps.lights) report(i, REPORTS.noRoom("light"));
+          else if (spot.stamp && stampCount() + 1 > caps.stamps) report(i, REPORTS.noRoom("stamp"));
+          else {
+            lights.push(spot);
+            // A pinned light that lands on one of its room's props takes that prop's place.
+            const under = new Set(stampSquares(spot.stamp, spot.square));
+            dressed = dressed.filter((f) => f.room !== i || !f.squares.some((k) => under.has(k)));
+          }
+        }
+      }
+      if (e.dressing !== undefined || e.propsDraw !== undefined) {
+        const level = e.dressing ?? s.dressing;
+        const others = dressed.filter((f) => f.room !== i);
+        const held = entries.filter((x) => x.statue && spotRoom(x.spot) === i).length + lights.filter((l) => l.room === i && l.stamp).length;
+        const left = caps.stamps - (stampCount() - (dressed.length - others.length));
+        const taken = new Set([...takenNow(), ...others.flatMap((f) => f.squares)]);
+        const stream = seedStream(seed, GENERATOR_VERSION, LANE_ROOM_PROPS + 16 * i + ((e.propsDraw ?? 0) % 16));
+        // The dungeon's stamp total stands in for what is left, so the room's draws stop at the allowance.
+        const base = { board, rooms: [i], dressing: level, props: (r: number) => propsFor(s.theme, floors[r]!), free: freeOf(taken), held: () => held, total: MAX_STAMPS - Math.max(0, left) };
+        const fresh = hexStamps ? furnishHex(stream, { ...base, stamps: hexStamps, lattice, allowed: hexAllowed(taken) }) : furnish(stream, { ...base, ground: groundAt });
+        if (left <= 0 && level !== "none") report(i, REPORTS.noRoom("stamp"));
+        else dressed = [...others, ...fresh].sort((a, b) => kept.indexOf(a.room) - kept.indexOf(b.room));
+      }
+    }
+    const stones: [number, number][] = [];
+    const traps = entries.map((x) => {
+      const { stone: _old, ...trap } = x.trap;
+      if (!x.stone) return trap;
+      stones.push(x.stone);
+      return { ...trap, stone: stones.length - 1 };
+    });
+    picked = { traps, squares: entries.map((x) => x.squares), statues: entries.flatMap((x) => (x.statue ? [x.statue] : [])), stones, picks: entries.map((x) => x.spot) };
+    lit = lights;
+    litStamps = lit.flatMap((l) => (l.stamp ? [l.stamp] : []));
+    props = dressed;
+  }
 
   // The key (5.6), from its own stream, last: DM key moves nothing before it.
   const roomTraps = new Map<number, string[]>();
-  const doorRoom = new Map<string, number>();
-  for (const d of doorways) d.inside.forEach((_, j) => doorRoom.set(doorEdgeOf(board, d, j), d.room));
   const inRoomTrap = new Set<number>();
-  const leafRoom = new Map<number, number>();
-  walled.leaves.forEach((leaves, j) => leaves.forEach((leaf) => leafRoom.set(leaf, doorways[j]!.room)));
   picked.traps.forEach((t, ti) => {
     const z = t.zone;
     // On hexes a zone is in the scene's keys, mirrored on Hex columns, so the room is read from the lattice squares the trap took.
@@ -713,6 +902,54 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
         cistern: (i) => cisterns.has(i),
       })
     : null;
+
+  // What the pins left undone that no step above saw: a room or door gone, a height with no room for its stairs.
+  if (edits) {
+    for (const [index, e] of Object.entries(edits)) {
+      const i = Number(index);
+      if (!kept.includes(i)) {
+        report(i, REPORTS.roomGone);
+        continue;
+      }
+      if (e.ground !== undefined && e.ground !== 0 && board.rooms[i]!.ground === 0) report(i, REPORTS.flat);
+      const keys = new Set(doorways.filter((d) => d.room === i).map((d) => doorKey(d.link)));
+      for (const key of Object.keys(e.doors ?? {})) if (!keys.has(key)) report(i, REPORTS.doorGone);
+    }
+  }
+  // The room panel's facts (4.1), numbered as the key numbers rooms, whatever DM key says.
+  const numbers = numberRooms(links, kept, entrance.room);
+  const mayBeSecret = theme.doors ? secretCandidates({ doorways, links, entrance: entrance.room, stub, locked: () => false }) : [];
+  const ROOM_PRESETS: Readonly<Record<string, readonly string[]>> = { pit: [HIDDEN_PIT, SPIKED_PIT], needle: [POISONED_NEEDLE], statue: [FIRE_STATUE] };
+  const facts: RoomFacts[] = kept
+    .map((i): RoomFacts => {
+      const kinds = new Set(spots.filter((sp) => spotRoom(sp) === i).map((sp) => sp.kind));
+      const held = picked.traps.filter((_, ti) => spotRoom(picked.picks[ti]!) === i);
+      return {
+        n: numbers.get(i) ?? 0,
+        room: i,
+        ground: board.rooms[i]!.ground,
+        doors: doorways
+          .filter((d) => d.room === i)
+          .sort((a, b) => "nesw".indexOf(a.side) - "nesw".indexOf(b.side) || a.at - b.at)
+          .map((d) => {
+            const link = d.link >= 0 ? links[d.link]! : null;
+            const other = link ? (link.a === i ? link.b : link.a) : -1;
+            return {
+              key: doorKey(d.link),
+              side: d.side,
+              to: other >= 0 ? (numbers.get(other) ?? "edge") : "edge",
+              state: !theme.doors ? "open" : isSecret(d) ? "secret" : states.get(d.id)!,
+              secretOk: !theme.doors ? SECRET_OFF.cave : d.run ? SECRET_OFF.stairs : mayBeSecret.some((c) => c.doorway === d) ? null : SECRET_OFF.notCandidate,
+            };
+          }),
+        traps: ["pit", "needle", "statue"].flatMap((k) => (kinds.has(k as Spot["kind"]) ? ROOM_PRESETS[k]! : [])),
+        trap: held[0]?.preset ?? null,
+        dressing: edits?.[i]?.dressing ?? s.dressing,
+        lit: lit.some((l) => l.room === i),
+        reports: reports.get(i) ?? [],
+      };
+    })
+    .sort((a, b) => a.n - b.n);
 
   // The plan. On hexes nothing is painted: the walls show the rooms (D-261110-160).
   const terrain = new Map<number, TerrainId>();
@@ -788,7 +1025,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     stamps: [...picked.statues, ...litStamps, ...props.map((f) => f.stamp)],
     lights: lit.map((l) => l.light),
     stones: picked.stones,
-    traps,
+    traps: picked.traps,
     entrance: entrance.room >= 0 ? { x: rects[entrance.room]!.x, y: rects[entrance.room]!.y, w: rects[entrance.room]!.w, h: rects[entrance.room]!.h } : { x: 0, y: 0, w: 0, h: 0 },
     key: keyed,
     ...(inCorridors.length > 0 ? { corridorTraps: inCorridors } : {}),
@@ -822,7 +1059,16 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     lattice,
     space,
     leaves: walled.leaves,
+    facts,
+    reports,
+    overBudget: null,
   };
+}
+
+/** Whether one rank comes before another, compared element by element. */
+function ranksBefore(a: readonly number[], b: readonly number[]): boolean {
+  for (let j = 0; j < a.length; j++) if (a[j] !== b[j]) return a[j]! < b[j]!;
+  return false;
 }
 
 function doorEdgeOf(board: Board, d: Doorway, j: number): string {

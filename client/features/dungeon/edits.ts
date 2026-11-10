@@ -1,6 +1,6 @@
 import type { PlanDoor } from "./plan.ts";
 import type { Seed } from "./seed.ts";
-import type { Dressing } from "./settings.ts";
+import type { Dressing, DungeonSettings } from "./settings.ts";
 
 /*
  * Per-room edits (phase 3, section 4, D-261110-096, 231, 237 and 238). An
@@ -47,3 +47,36 @@ export type RoomFacts = { n: number; room: number; ground: number; doors: DoorFa
 export function doorKey(link: number): string {
   return link < 0 ? "stub" : String(link);
 }
+
+/** The layout edits freeze (4.2): the room count asked, the seed, the choices as JSON, and the wing base's hash or null. */
+export function editLayout(settings: DungeonSettings, seed: Seed, fitted: number, base: string | null): DungeonEdits["layout"] {
+  return { fitted, seed, settings: JSON.stringify(settings), base };
+}
+
+/**
+ * Whether edits were made on this layout: the same seed, choices and base.
+ * Any other plan would read their board indices as other rooms, so the
+ * planner leaves them out, whatever the caller kept.
+ */
+export function editsHold(edits: DungeonEdits, settings: DungeonSettings, seed: Seed, base: string | null): boolean {
+  const l = edits.layout;
+  return l.seed === seed && l.settings === JSON.stringify(settings) && l.base === base;
+}
+
+/** What a pin did not do on this plan, as the room panel says it under its row (4.1). */
+export const REPORTS = {
+  flat: "No room for its stairs, so it stays flat.",
+  noTrapSpot: "No spot for that trap here, so it has none.",
+  doorGone: "That door is gone in this dungeon.",
+  secretOnStairs: "A door at the top of stairs is never secret, so it is closed.",
+  secretBreaksReach: "That door cannot be secret here: every room must still be reached without it.",
+  roomGone: "This room is gone in this dungeon.",
+  noRoom: (what: "trap" | "secret door" | "stamp" | "light") => `No room for another ${what} in this dungeon, so that change was not made.`,
+} as const;
+
+/** Why a door may not be secret, as its Secret choice says while off (4.1). */
+export const SECRET_OFF = {
+  notCandidate: "Only a door on an extra way around, or a room's only door, can be secret.",
+  stairs: "A door at the top of stairs is never secret.",
+  cave: "Caves have no doors.",
+} as const;

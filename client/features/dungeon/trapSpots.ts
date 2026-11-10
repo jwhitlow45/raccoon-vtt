@@ -355,11 +355,37 @@ function stoneSpots(input: SpotInput, straight: Straight): Spot[] {
   return out;
 }
 
-const apart = (a: Spot, b: Spot) => Math.max(Math.abs(a.mid[0] - b.mid[0]), Math.abs(a.mid[1] - b.mid[1])) >= 2 * TRAP_SPACING;
+const apart = (a: Spot, b: Spot) => spotsApart(a, b);
 const PRESET: Readonly<Record<Exclude<SpotKind, "pit">, string>> = { net: FALLING_NET, needle: POISONED_NEEDLE, roof: COLLAPSING_ROOF, darts: POISONED_DARTS, statue: FIRE_STATUE, stone: ROLLING_STONE };
 
-/** The traps, each one's squares (its zone's, what it hits, a statue's block, a stone's stretch), and the statues' and stones' places. */
-export type PickedTraps = { traps: PlanTrap[]; squares: number[][]; statues: PlanStamp[]; stones: [number, number][] };
+/** The traps, each one's squares (its zone's, what it hits, a statue's block, a stone's stretch), the statues' and stones' places, and each trap's spot. */
+export type PickedTraps = { traps: PlanTrap[]; squares: number[][]; statues: PlanStamp[]; stones: [number, number][]; picks: Spot[] };
+
+/** A statue spot's stamp, its picture standing on its block. */
+export function statueStamp(b: NonNullable<Spot["statue"]>): PlanStamp {
+  return { key: STATUE_STAMP.key, x: b.x + b.w / 2, y: b.y + b.h / 2, w: STATUE_STAMP.w, h: STATUE_STAMP.h, rotation: b.rotation };
+}
+
+/** The preset a spot holds: a pit's is drawn, Hidden or Spiked. */
+export function presetKind(preset: string): SpotKind | null {
+  if (preset === HIDDEN_PIT || preset === SPIKED_PIT) return "pit";
+  const found = (Object.entries(PRESET) as [Exclude<SpotKind, "pit">, string][]).find(([, p]) => p === preset);
+  return found ? found[0] : null;
+}
+
+/** The trap a spot holds as the plan writes it, under `preset`. */
+export function trapAt(spot: Spot, preset: string): PlanTrap {
+  const trap: PlanTrap = { preset, zone: spot.zone };
+  if (spot.hits) trap.hits = spot.hits;
+  if (spot.cone) trap.cone = spot.cone;
+  if (spot.leaf !== undefined) trap.leaf = spot.leaf;
+  return trap;
+}
+
+/** Whether two spots keep TRAP_SPACING apart, between their middles. */
+export function spotsApart(a: Pick<Spot, "mid">, b: Pick<Spot, "mid">): boolean {
+  return Math.max(Math.abs(a.mid[0] - b.mid[0]), Math.abs(a.mid[1] - b.mid[1])) >= 2 * TRAP_SPACING;
+}
 
 /**
  * Picks up to `count` traps (5.4): each time a kind among those with a spot
@@ -370,7 +396,7 @@ export type PickedTraps = { traps: PlanTrap[]; squares: number[][]; statues: Pla
  * MAX_STONES stones.
  */
 export function pickTraps(rng: Stream, spots: readonly Spot[], count: number, reaches: (spot: Spot) => boolean = () => true): PickedTraps {
-  const out: PickedTraps = { traps: [], squares: [], statues: [], stones: [] };
+  const out: PickedTraps = { traps: [], squares: [], statues: [], stones: [], picks: [] };
   let left = [...spots];
   let tries = 0;
   const taken = new Set<number>();
@@ -390,14 +416,8 @@ export function pickTraps(rng: Stream, spots: readonly Spot[], count: number, re
     for (const k of spot.squares) taken.add(k);
     left = left.filter((s) => apart(s, spot) && !s.squares.some((k) => taken.has(k)));
     const preset = kind === "pit" ? (rng.chance(1, 2) ? HIDDEN_PIT : SPIKED_PIT) : PRESET[kind];
-    const trap: PlanTrap = { preset, zone: spot.zone };
-    if (spot.hits) trap.hits = spot.hits;
-    if (spot.cone) trap.cone = spot.cone;
-    if (spot.statue) {
-      const b = spot.statue;
-      out.statues.push({ key: STATUE_STAMP.key, x: b.x + b.w / 2, y: b.y + b.h / 2, w: STATUE_STAMP.w, h: STATUE_STAMP.h, rotation: b.rotation });
-    }
-    if (spot.leaf !== undefined) trap.leaf = spot.leaf;
+    const trap = trapAt(spot, preset);
+    if (spot.statue) out.statues.push(statueStamp(spot.statue));
     if (spot.stone) {
       trap.stone = out.stones.length;
       out.stones.push(spot.stone);
@@ -405,6 +425,7 @@ export function pickTraps(rng: Stream, spots: readonly Spot[], count: number, re
     }
     out.traps.push(trap);
     out.squares.push(spot.squares);
+    out.picks.push(spot);
   }
   return out;
 }
