@@ -139,7 +139,8 @@ export function refuseKeep(ctx: PublishCtx, ruler: RulerState | null): boolean {
 export function endGoneCarry(ctx: PublishCtx & Pick<ToolContext, "getState">): boolean {
   const tool = ctx.scope.get(rulerSlot);
   const { ruler, carry } = tool.store.getState();
-  const links = ctx.getState().view?.floorLinks;
+  const { view } = ctx.getState();
+  const links = view?.floorLinks;
   if (!ruler || !links) return false;
   const carried = stillCarried(carry, ruler.stops);
   if (!carried || carried.prior.ends.every((id) => links[id] !== undefined)) return false;
