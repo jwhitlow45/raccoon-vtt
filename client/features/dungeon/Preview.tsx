@@ -5,6 +5,7 @@ import { BOARD_SCOPE, boardTheme, theme } from "../../lib/theme.ts";
 import { findDoor } from "../doors/doors.ts";
 import { exportContent } from "../mapexport/content.ts";
 import { renderMapPng } from "../mapexport/render.ts";
+import { uiScale } from "../device/settings.ts";
 import { encodeThumb } from "../scenes/thumbnail.ts";
 import type { DungeonPlan } from "./plan.ts";
 import { lightMarks, LIGHT_RING, NUMBER_SIZE, numberMarks, pickRoom, RING_OUTLINE, RING_RADIUS, roomBox, roomBoxes, type Numbered, type RoomBox } from "./marks.ts";
@@ -168,7 +169,8 @@ export function DungeonPreview(props: {
       ) : null}
       {props.children ? <div style={{ ...CORNER_SLOT, ...centred }}>{props.children}</div> : null}
       {props.leftCorner ? <div style={{ ...CORNER_SLOT, right: "auto", left: theme.space(2), ...centred }}>{props.leftCorner}</div> : null}
-      {props.topCorner ? <div style={{ ...CORNER_SLOT, bottom: "auto", top: theme.space(2) }}>{props.topCorner}</div> : null}
+      {/* Only over a picture: an empty or failed box centres its corners, where this one would sit on Reroll. */}
+      {props.topCorner && shown && !failed && topCornerFits(height) ? <div style={{ ...CORNER_SLOT, bottom: "auto", top: theme.space(2) }}>{props.topCorner}</div> : null}
       {props.drawing ? <DrawingPill now={props.drawingNow ?? false} /> : null}
     </div>
   );
@@ -197,6 +199,16 @@ function DrawingPill(props: { now: boolean }) {
  * does.
  */
 export const CORNER_SLOT = { ...BOARD_SCOPE, position: "absolute", right: theme.space(2), bottom: theme.space(2), color: theme.color.text } as CSSProperties;
+
+/**
+ * Whether the top corner has room above Reroll: two controls and the
+ * corners' margins. A shorter box, as on the smallest phone at a large
+ * interface size, leaves its control to the dialog to place elsewhere.
+ */
+export function topCornerFits(height: number, scale: number = uiScale()): boolean {
+  return height >= (2 * TOUCH_PX + 4 * theme.space(2)) * scale;
+}
+const TOUCH_PX = 44;
 
 /** The scene's shape inside the preview's box, as large as fits. */
 export function fitBox(w: number, h: number, boxW: number, boxH: number): { width: number; height: number } {

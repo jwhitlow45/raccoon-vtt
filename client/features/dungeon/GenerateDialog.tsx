@@ -23,7 +23,7 @@ import { keyOps, type KeyInput } from "./keyPage.ts";
 import { LookCloser } from "./LookCloser.tsx";
 import { SCENE_PLACEHOLDER, withIds } from "./ops.ts";
 import { roomBox } from "./marks.ts";
-import { DungeonPreview, type Drawn } from "./Preview.tsx";
+import { DungeonPreview, topCornerFits, type Drawn } from "./Preview.tsx";
 import { RoomPanel } from "./RoomPanel.tsx";
 import { keptSize, loadChoices, saveChoices, settingsOf, sideCap, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
 import { formatSeed, newSeed, parseSeed, type Seed } from "./seed.ts";
@@ -403,6 +403,13 @@ export function GenerateDialog(props: {
     focusEdit.current = false;
     editRef.current?.focus({ preventScroll: true });
   }, [picked]);
+  // Edit rooms stands over the preview's top right corner, or above the choices where the preview is too short for it beside Reroll (Preview.tsx topCornerFits).
+  const cornerEdit = topCornerFits(layout.height);
+  const editButton = (onBoard: boolean) => (
+    <Button ref={editRef} size="sm" {...(onBoard ? ON_BOARD : null)} style={onBoard ? ON_BOARD_STYLE : undefined} pressed={picked !== null} disabled={locked || facts.length === 0} onClick={() => (picked !== null ? done() : setPicked(facts[0]?.room ?? null))}>
+      {EDIT_ROOMS}
+    </Button>
+  );
   const editRoom = (next: RoomEdit | null) => {
     if (picked === null || !parsed.ok || !onScreen) return;
     // The first edit freezes the layout on screen: the room count its plan asked for, the seed and the choices (4.2).
@@ -421,11 +428,7 @@ export function GenerateDialog(props: {
       onPictured={(drawn) => step({ k: "pictured", drawn })}
       onPictureFailed={(drawn) => step({ k: "pictureFailed", drawn })}
       leftCorner={<LookCloser drawn={looksReady ? drawable(flow) : null} name={sceneName} disabled={locked} onDrawing={setLooking} onFailed={setLookFailed} />}
-      topCorner={
-        <Button ref={editRef} size="sm" {...ON_BOARD} style={ON_BOARD_STYLE} pressed={picked !== null} disabled={locked || facts.length === 0} onClick={() => (picked !== null ? done() : setPicked(facts[0]?.room ?? null))}>
-          {EDIT_ROOMS}
-        </Button>
-      }
+      topCorner={cornerEdit ? editButton(true) : null}
       rooms={facts}
       showNumbers={picked !== null}
       picked={picked}
@@ -445,6 +448,7 @@ export function GenerateDialog(props: {
   const choicesBox = (
     <div style={{ display: "grid", gap: theme.space(4), minWidth: 0, alignContent: "start" }}>
       {problem === null && !ready.pictureFailed && fit ? <Note>{fit}</Note> : null}
+      {cornerEdit ? null : <div>{editButton(false)}</div>}
       {edits.dropped ? (
         <div data-edits-dropped="" style={EDITS_LINE}>
           <Help style={{ flex: "1 1 12em" }}>{EDITS_DROPPED}</Help>
