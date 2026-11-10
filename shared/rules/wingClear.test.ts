@@ -68,6 +68,24 @@ function hexRoom(ground = 0): { state: RoomState; clear: WingClear; join: FreeWa
   return { state, clear, join, inside, outside };
 }
 
+/** A clear joined on the hex room's given sides, each a room hex and the hex direction out of it, with the room's hexes on those sides inside. */
+function hexJoinOn(state: RoomState, sides: readonly [Hex, number][], ground = 0, margin: 2 | 3 = 2): WingClear {
+  const walls = sides.map(([h, d]) => {
+    const corners = hexCorners(ROWS, h);
+    const a = cornerAt(ROWS, corners[(d + 1) % 6]!);
+    const b = cornerAt(ROWS, corners[(d + 2) % 6]!);
+    for (const c of Object.values(state.buildChunks)) {
+      const w = c?.walls?.find((x) => (x.a[0] === a.x && x.a[1] === a.y && x.b[0] === b.x && x.b[1] === b.y) || (x.a[0] === b.x && x.a[1] === b.y && x.b[0] === a.x && x.b[1] === a.y));
+      if (w) return { cx: c!.cx, cy: c!.cy, id: w.id, a: w.a, b: w.b, f: w.f };
+    }
+    throw new Error(`no wall on side ${d} of ${hk(h)}`);
+  });
+  return { margin, join: { grid: "hex", walls, ground }, autoWalls: "all", inside: [...new Set(sides.map(([h]) => hk(h)))] };
+}
+
+/** Floor runs over the given hexes, one run per hex. */
+const runsOf = (hexes: readonly Hex[]): [number, number, number][] => hexes.map((h) => [h.row, h.col, h.col]);
+
 /** Hexes west of `from` along its row, `n` of them, and the floor runs that hold them. */
 function westRun(from: Hex, n: number): { hexes: Hex[]; floor: [number, number, number][] } {
   const hexes = range(1, n).map((i) => ({ col: from.col - i + 1, row: from.row }));
@@ -207,5 +225,47 @@ describe("wingClash on hexes", () => {
     const other = wallsAround([{ col: outside.col - 3, row: outside.row - 2 }], 950).slice(0, 1);
     const walled = apply(state, { t: "build.walls", sceneId: "s1", put: other });
     assert.notEqual(wingClash(walled, "s1", [], { ...clear, floor }), null);
+  });
+});
+
+describe("hex joins on every side, Narrow and Wide (DG3 review round 1)", () => {
+  // The room's west side on rows 12 and 13, and its bottom row 14 on columns 11 and 12, as the planner's Wide doorways stand.
+  const westA = { col: 10, row: 12 };
+  const westB = { col: 10, row: 13 };
+  const southA = { col: 11, row: 14 };
+  const southB = { col: 12, row: 14 };
+  const along = (from: Hex, dCol: number, dRow: number, n: number) => range(0, n - 1).map((i) => ({ col: from.col + dCol * i, row: from.row + dRow * i }));
+
+  test("a Wide join is three sides whose middle one runs at a slant, the way out the one its two outer sides share", () => {
+    const { state } = hexRoom(5);
+    // West: lanes out of 10,12 and 10,13 facing west, the middle side 10,12's toward 9,13.
+    const west = hexJoinOn(state, [[westA, 3], [westA, 2], [westB, 3]], 5, 3);
+    assert.equal(joinChanged(state, "s1", west), false, "west");
+    // The bottom row: lanes out of 11,14 and 12,14 facing south-east, the middle side 12,14's toward 11,15.
+    const south = hexJoinOn(state, [[southA, 1], [southB, 2], [southB, 1]], 5, 3);
+    assert.equal(joinChanged(state, "s1", south), false, "south-east");
+    // Three sides each facing its own way have no way out most of them share.
+    assert.equal(joinChanged(state, "s1", hexJoinOn(state, [[westA, 3], [westA, 2], [southA, 1]], 5, 3)), true, "no shared way out");
+  });
+
+  test("a slanted join's approach is the planner's: a run along the hex direction, then the margin a row at a time", () => {
+    const { state } = hexRoom();
+    // Narrow, out of 12,14 toward the south-east: the outside hex 12,15, then the stub straight down column 12.
+    const narrow = hexJoinOn(state, [[southB, 1]]);
+    assert.equal(joinChanged(state, "s1", narrow), false);
+    assert.equal(wingClash(state, "s1", [], { ...narrow, floor: runsOf(along({ col: 12, row: 15 }, 0, 1, 7)) }), null, "Narrow");
+    // Wide: both lanes' columns straight down.
+    const wide = hexJoinOn(state, [[southA, 1], [southB, 2], [southB, 1]], 0, 3);
+    assert.equal(wingClash(state, "s1", [], { ...wide, floor: runsOf([...along({ col: 11, row: 15 }, 0, 1, 7), ...along({ col: 12, row: 15 }, 0, 1, 7)]) }), null, "Wide");
+    // A token in the joined room still stands in the way.
+    assert.equal(wingClash(putOnHex(state, "t1", { col: 12, row: 13 }), "s1", [], { ...narrow, floor: runsOf(along({ col: 12, row: 15 }, 0, 1, 7)) }), "12,13");
+  });
+
+  test("a raised slanted join runs its stairs along the hex direction before the margin turns down the rows", () => {
+    const { state } = hexRoom(10);
+    const raised = hexJoinOn(state, [[southB, 1]], 10);
+    // 12,15 then two stairs and the far landing south-east: 13,16, 13,17 and 14,18, then the stub down column 14.
+    const run = [{ col: 12, row: 15 }, { col: 13, row: 16 }, { col: 13, row: 17 }, { col: 14, row: 18 }];
+    assert.equal(wingClash(state, "s1", [], { ...raised, floor: runsOf([...run, ...along({ col: 14, row: 19 }, 0, 1, 5)]) }), null);
   });
 });

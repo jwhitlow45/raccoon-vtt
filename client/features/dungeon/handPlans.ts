@@ -337,3 +337,62 @@ export function hexWingBase(grid: "hexRows" | "hexColumns" = "hexRows", opts: { 
   const area = grid === "hexColumns" ? { x: lattice.y, y: lattice.x, w: lattice.h, h: lattice.w } : lattice;
   return { base: withHash({ scene: state.scenes[WING_SCENE]!, state, area, join: { grid: "hex", walls: [found], ground } }, WING_SETTINGS), state };
 }
+
+/**
+ * A hex wing's base joined on any of a room's six sides (DG3 review round
+ * 1): an 80 by 80 hex scene with one closed room of free walls over 10 by
+ * 10 lattice cells, raised or sunk `ground` ft, joined on the side toward
+ * hex direction `dir` with its inside hex on an odd row or an even one,
+ * and the area beyond that side (mirrored on Hex columns). Wide joins the
+ * planner's own Wide doorway: two lanes a lattice row apart on the slanted
+ * sides, an offset column apart on the east and west, and the side between
+ * them that runs at a slant. `ops` make the scene and the room.
+ */
+export function hexWingSide(grid: "hexRows" | "hexColumns", opts: { dir: number; odd: boolean; wide?: boolean; ground?: number; sceneId?: string }): { base: WingBase; ops: ClientOp[] } {
+  const { dir, odd, wide = false, ground = 0, sceneId = WING_SCENE } = opts;
+  const bounds = { w: 80, h: 80 };
+  const L = latticeFor(grid, bounds);
+  const north = dir === 4 || dir === 5;
+  const south = dir === 1 || dir === 2;
+  // The room's top row sets the parity of a north join's row, and its bottom row, nine below, a south join's.
+  const room = { x: 35, y: north ? (odd ? 41 : 40) : south ? (odd ? 40 : 41) : 40, w: 10, h: 10 };
+  const space = new Int32Array(L.W * L.H).fill(NO_SPACE);
+  const cells: number[] = [];
+  for (let y = room.y; y < room.y + room.h; y++) {
+    for (let x = room.x; x < room.x + room.w; x++) {
+      space[y * L.W + x] = 0;
+      cells.push(y * L.W + x);
+    }
+  }
+  const { walls } = hexWalls({ lattice: L, space, doorways: [], far: new Set(), wayIn: [] });
+  const put = walls.map((w, i) => ({ id: `wl${String(i).padStart(10, "0")}`, a: w.a, b: w.b, f: { kind: "wall" as const } }));
+  const ops: ClientOp[] = [{ t: "scene.create", scene: builderScene({ id: sceneId, name: "Keep", w: bounds.w, h: bounds.h, gridShape: grid }) }];
+  for (let i = 0; i < put.length; i += 300) ops.push({ t: "build.walls", sceneId, put: put.slice(i, i + 300) });
+  if (ground !== 0) ops.push({ t: "build.height", sceneId, cells: cells.map((k) => L.keyOf(k)), height: ground });
+  const landed = landAll(scratchRoom(), ops);
+  if (!landed.ok) throw new Error(landed.why);
+  const state = landed.room;
+  const row = north ? room.y : south ? room.y + room.h - 1 : room.y + 4 + (odd ? 1 : 0);
+  const col = dir === 0 ? room.x + room.w - 1 : dir === 3 ? room.x : dir === 1 || dir === 5 ? room.x + 4 : room.x + 5;
+  const a = row * L.W + col;
+  const sides: [number, number][] = [[a, dir]];
+  if (wide) {
+    const b = north || south ? a + 1 : a + L.W;
+    const [oa, ob] = [L.step(a, dir, 1), L.step(b, dir, 1)];
+    sides.push([b, dir]);
+    for (const [i, o] of [
+      [a, ob],
+      [b, oa],
+    ] as const) {
+      for (let d = 0; d < 6; d++) if (L.step(i, d, 1) === o) sides.push([i, d]);
+    }
+  }
+  const join: Extract<JoinExpect, { grid: "hex" }>["walls"] = sides.map(([k, d]) => {
+    const key = endsKey(...hexSide(L, k, d));
+    for (const c of Object.values(state.buildChunks)) for (const w of c?.walls ?? []) if (endsKey(w.a, w.b) === key) return { cx: c!.cx, cy: c!.cy, id: w.id, a: w.a, b: w.b, f: w.f };
+    throw new Error(`no wall on side ${d} of ${k}`);
+  });
+  const lattice: CellRect = dir === 0 ? { x: 51, y: 15, w: 28, h: 60 } : dir === 3 ? { x: 1, y: 15, w: 28, h: 60 } : north ? { x: 10, y: 1, w: 60, h: 32 } : { x: 10, y: 58, w: 60, h: 32 };
+  const area = grid === "hexColumns" ? { x: lattice.y, y: lattice.x, w: lattice.h, h: lattice.w } : lattice;
+  return { base: withHash({ scene: state.scenes[sceneId]!, state, area, join: { grid: "hex", walls: join, ground } }, { ...WING_SETTINGS, wide }), ops };
+}

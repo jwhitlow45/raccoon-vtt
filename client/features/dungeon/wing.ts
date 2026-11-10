@@ -1,15 +1,28 @@
 import { LIMITS } from "#shared/limits.ts";
-import { CHUNK_CELLS, type AutoWalls, type BuildChunk, type CellRect, type EdgeFeature, type FreeWall, type Scene, type WallFeature } from "#shared/model.ts";
-import { stampCells } from "#shared/project.ts";
+import { CHUNK_CELLS, type AutoWalls, type BuildChunk, type CellRect, type EdgeFeature, type FreeWall, type WallFeature } from "#shared/model.ts";
 import { autoWallsOf, paintedCell, type Painted } from "#shared/rules/autoWalls.ts";
-import { occupiedCells, occupiedHexes } from "#shared/rules/footprint.ts";
-import { gridOfShape } from "#shared/rules/grid.ts";
 import { chunkHeights, markIn } from "#shared/rules/heights.ts";
-import { hexAt, type HexGrid } from "#shared/rules/hex.ts";
-import type { JoinExpect } from "#shared/rules/wingClear.ts";
+import { hexAt } from "#shared/rules/hex.ts";
+import {
+  approachOf,
+  boardCell,
+  cellParts,
+  eachOccupied,
+  excusedOf,
+  hexesBeside,
+  hexLane,
+  joinedRoom,
+  joinWay,
+  runAt,
+  squareLane,
+  wingBoard,
+  type JoinExpect,
+  type JoinLane,
+  type WingBoard,
+} from "#shared/rules/wingClear.ts";
 import { endsKey, hexSide } from "./hexWalls.ts";
 import { hexGridOf, latticeFor, type Lattice } from "./lattice.ts";
-import { DX, DY, type Side } from "./layout.ts";
+import type { Side } from "./layout.ts";
 import type { Allowance } from "./fit.ts";
 import type { WingBase } from "./plan.ts";
 import { MAX_HEX_WALLS, type DungeonSettings, type GridKind } from "./settings.ts";
@@ -23,6 +36,12 @@ import { MAX_HEX_WALLS, type DungeonSettings, type GridKind } from "./settings.t
  * The joined room's own structure is excused for the approach, the cells
  * a doorway at the join needs, so an ordinary wall can be joined however
  * deep its room runs (D-261110-233).
+ *
+ * How a join reads, its approach, the joined room, what is occupied and
+ * what the joined room excuses are the server's own rules
+ * (shared/rules/wingClear.ts), read here on the same scene cells and
+ * turned into the planner's, so every wing planned passes the server's
+ * checks.
  *
  * Cells are lattice indices over the whole scene (lattice.ts): squares, or
  * the hex rows lattice, mirrored on Hex columns.
@@ -79,6 +98,12 @@ export type WingWorld = {
   /** A scene key's lattice cell, or -1 off the scene. */
   cellOf(key: string): number;
   chunks: readonly BuildChunk[];
+  /** The scene as the shared wing rules read it, by packed scene key. */
+  board: WingBoard;
+  /** A packed scene key's lattice cell, or -1 off the scene. */
+  fromBoard(k: number): number;
+  /** A lattice cell's packed scene key. */
+  toBoard(k: number): number;
 };
 
 const SIDES: readonly Side[] = ["n", "e", "s", "w"];
@@ -88,12 +113,22 @@ export function wingWorld(base: WingScene): WingWorld {
   const grid: GridKind = scene.gridShape ?? "squares";
   const L = latticeFor(grid, scene.bounds);
   const chunks = Object.values(base.state.buildChunks).filter((c): c is BuildChunk => c !== undefined && c.sceneId === scene.id);
-  const cellOf = (key: string) => {
-    const [a, b] = key.split(",").map(Number) as [number, number];
-    const [x, y] = grid === "hexColumns" ? [b, a] : [a, b];
+  const columns = grid === "hexColumns";
+  const lattice = (a: number, b: number) => {
+    const [x, y] = columns ? [b, a] : [a, b];
     return Number.isInteger(x) && Number.isInteger(y) && L.inMap(x, y) ? y * L.W + x : -1;
   };
-  return { L, bounds: scene.bounds, grid, autoWalls: autoWallsOf(scene), cellOf, chunks };
+  const cellOf = (key: string) => {
+    const [a, b] = key.split(",").map(Number) as [number, number];
+    return lattice(a, b);
+  };
+  const fromBoard = (k: number) => (k < 0 ? -1 : lattice(...cellParts(k)));
+  const toBoard = (k: number) => {
+    const x = k % L.W;
+    const y = (k - x) / L.W;
+    return columns ? boardCell(y, x) : boardCell(x, y);
+  };
+  return { L, bounds: scene.bounds, grid, autoWalls: autoWallsOf(scene), cellOf, chunks, board: wingBoard(base.state, scene), fromBoard, toBoard };
 }
 
 /** The lattice cell a scene point falls in: its square, or the hex holding it. */
@@ -124,24 +159,6 @@ export function edgeCells(key: string): [[number, number], [number, number]] {
   return side === "n" ? [[x, y - 1], [x, y]] : [[x - 1, y], [x, y]];
 }
 
-/** The two lattice cells either side of a one-side hex wall, or null when its ends are not one hex side. */
-function hexesBeside(world: WingWorld, a: readonly [number, number], b: readonly [number, number]): [number, number] | null {
-  const mx = (a[0] + b[0]) / 2;
-  const my = (a[1] + b[1]) / 2;
-  const dx = b[0] - a[0];
-  const dy = b[1] - a[1];
-  const len = Math.hypot(dx, dy);
-  if (len === 0) return null;
-  const nx = (-dy / len) * 0.25;
-  const ny = (dx / len) * 0.25;
-  const p = cellAt(world, mx + nx, my + ny);
-  const q = cellAt(world, mx - nx, my - ny);
-  if (p < 0 || q < 0 || p === q) return null;
-  const d = world.L.halo(p).includes(q) ? [0, 1, 2, 3, 4, 5].find((dir) => world.L.step(p, dir, 1) === q) : undefined;
-  if (d === undefined) return null;
-  return endsKey(...hexSide(world.L, p, d)) === endsKey(a, b) ? [p, q] : null;
-}
-
 /** Every free wall of the scene, with its chunk. */
 function freeWalls(world: WingWorld): { cx: number; cy: number; wall: FreeWall }[] {
   return world.chunks.flatMap((c) => (c.walls ?? []).map((wall) => ({ cx: c.cx, cy: c.cy, wall })));
@@ -149,70 +166,70 @@ function freeWalls(world: WingWorld): { cx: number; cy: number; wall: FreeWall }
 
 /**
  * The join (3.2): its inside and outside cells, its way out and its ground,
- * or the problem with it. `reaches` says whether ground beyond a cell
- * reaches the area, which sets the outside on hexes.
+ * or the problem with it. On hexes the outside is the side whose ground
+ * reaches the area. Each edge or wall is a lane read by the server's own
+ * rule (shared/rules/wingClear.ts), so a join taken here is one the
+ * server's join check takes.
  */
 export function readJoin(base: WingScene, join: JoinExpect, area: CellRect, wide: boolean): { ok: true; facts: JoinFacts } | { ok: false; problem: WingProblem } {
   const world = wingWorld(base);
-  const { L } = world;
-  const byKey = new Map(world.chunks.map((c) => [`${c.cx},${c.cy}`, c]));
+  const { board } = world;
   if (join.grid === "squares") {
     if (world.grid !== "squares") return { ok: false, problem: "offGrid" };
     if (join.edges.length !== (wide ? 2 : 1)) return { ok: false, problem: "wideShape" };
-    const lanes = join.edges.map((e) => {
-      const [p, q] = edgeCells(e.key);
-      const pp = paintedIn(world, byKey, ...p);
-      const qp = paintedIn(world, byKey, ...q);
-      const north = e.key.endsWith(",n");
-      // The inside is the painted side: floor terrain, the ground an automatic wall bounds.
-      if (pp !== "empty" && qp === "empty") return { inside: p, outside: q, side: (north ? "s" : "e") as Side };
-      if (qp !== "empty" && pp === "empty") return { inside: q, outside: p, side: (north ? "n" : "w") as Side };
-      return null;
-    });
+    const lanes = join.edges.map((e) => squareLane(board, e.key));
     if (lanes.some((l) => l === null)) return { ok: false, problem: "noGround" };
-    const ok = lanes as { inside: [number, number]; outside: [number, number]; side: Side }[];
-    if (ok.some((l) => l.side !== ok[0]!.side)) return { ok: false, problem: "wideShape" };
-    const inside = ok.map((l) => l.inside[1] * L.W + l.inside[0]);
-    const outside = ok.map((l) => l.outside[1] * L.W + l.outside[0]);
-    if (outside.some((k, i) => !L.inMap(ok[i]!.outside[0], ok[i]!.outside[1]) || k < 0)) return { ok: false, problem: "noGround" };
-    if (wide && Math.abs(inside[0]! - inside[1]!) !== (ok[0]!.side === "n" || ok[0]!.side === "s" ? 1 : L.W)) return { ok: false, problem: "wideShape" };
-    const order = inside.map((_, i) => i).sort((a, b) => inside[a]! - inside[b]!);
-    const ground = groundOf(world, byKey, inside[order[0]!]!);
-    if (ground === null || inside.some((k) => groundOf(world, byKey, k) !== ground)) return { ok: false, problem: "raised" };
-    return {
-      ok: true,
-      facts: { inside: order.map((i) => inside[i]!), outside: order.map((i) => outside[i]!), side: ok[0]!.side, dir: SIDES.indexOf(ok[0]!.side), ground, door: join.edges.every((e) => e.feature?.kind === "door") },
-    };
+    return facing(world, lanes as JoinLane[], wide, join.edges.every((e) => e.feature?.kind === "door"));
   }
   if (world.grid === "squares") return { ok: false, problem: "longWall" };
   if (join.walls.length !== (wide ? 3 : 1)) return { ok: false, problem: "wideShape" };
-  const pairs = join.walls.map((w) => hexesBeside(world, w.a, w.b));
-  if (pairs.some((p) => p === null)) return { ok: false, problem: "longWall" };
-  const sides = pairs as [number, number][];
-  const flood = (from: number) => planningFlood(world, from, null);
+  const sides = join.walls.map((w) => hexesBeside(board, w.a, w.b));
+  if (sides.some((p) => p === null || world.fromBoard(p.p) < 0 || world.fromBoard(p.q) < 0)) return { ok: false, problem: "longWall" };
+  const flood = (from: number) => planningFlood(world, world.fromBoard(from), null);
   const areaCells = new Set(areaCellsOf(world, area));
   const reachesArea = (from: number) => [...flood(from)].some((k) => areaCells.has(k));
-  const hexes = [...new Set(sides.flat())];
-  if (hexes.length !== (wide ? 4 : 2)) return { ok: false, problem: "wideShape" };
+  const hexes = new Set(sides.flatMap((p) => [p!.p, p!.q]));
+  if (hexes.size !== (wide ? 4 : 2)) return { ok: false, problem: "wideShape" };
   // The outside is the side whose flood reaches the area. Both reaching it means the room is open somewhere else, so its inside cannot be told.
   const first = sides[0]!;
-  const [reach0, reach1] = [reachesArea(first[0]), reachesArea(first[1])];
+  const [reach0, reach1] = [reachesArea(first.p), reachesArea(first.q)];
   if (reach0 && reach1) return { ok: false, problem: "openRoom" };
   if (!reach0 && !reach1) return { ok: false, problem: "noGround" };
-  const firstIn = reach0 ? first[1] : first[0];
-  const room = flood(firstIn);
-  const inside = hexes.filter((k) => room.has(k)).sort((a, b) => a - b);
-  const outside = hexes.filter((k) => !room.has(k)).sort((a, b) => a - b);
-  if (inside.length !== outside.length) return { ok: false, problem: "wideShape" };
-  // A Wide join is the planner's own Wide doorway: two lanes a row or an offset column apart, each lane stepping out the same way.
-  const dirs = inside.map((k, i) => [0, 1, 2, 3, 4, 5].find((d) => L.step(k, d, 1) === outside[i]) ?? -1);
-  if (dirs.some((d) => d < 0 || d !== dirs[0])) return { ok: false, problem: "wideShape" };
-  if (wide && inside[1]! - inside[0]! !== 1 && inside[1]! - inside[0]! !== L.W) return { ok: false, problem: "wideShape" };
-  const dir = dirs[0]!;
+  const room = joinedRoom(board, base.scene, { inside: [reach0 ? first.q : first.p], dir: -1 }, join);
+  const lanes = join.walls.map((w) => hexLane(board, w.a, w.b, (k) => room.has(k)));
+  if (lanes.some((l) => l === null)) return { ok: false, problem: "wideShape" };
+  return facing(world, lanes as JoinLane[], wide, join.walls.every((w) => w.f.kind === "door"));
+}
+
+/**
+ * A join's facts from its lanes: the way out most of them share, each
+ * lane along it by its inside cell's lattice order, and its ground. Every
+ * cell the join touches must lie on one of those lanes, and on Wide the
+ * two lanes must stand as the planner's own Wide doorway does, a lattice
+ * row or offset column apart.
+ */
+function facing(world: WingWorld, lanes: readonly JoinLane[], wide: boolean, door: boolean): { ok: true; facts: JoinFacts } | { ok: false; problem: WingProblem } {
+  const { L } = world;
+  const way = joinWay(lanes);
+  if (!way) return { ok: false, problem: "wideShape" };
+  const touched = new Set(lanes.map((l) => l.inside));
+  const beyond = new Set(lanes.map((l) => l.outside));
+  if (new Set(way.inside).size !== way.inside.length || way.inside.length !== touched.size || new Set(way.outside).size !== beyond.size) return { ok: false, problem: "wideShape" };
+  const pairs = way.inside.map((k, i) => [world.fromBoard(k), world.fromBoard(way.outside[i]!)] as const).sort((a, b) => a[0] - b[0]);
+  if (pairs.some(([i, o]) => i < 0 || o < 0)) return { ok: false, problem: "noGround" };
+  const inside = pairs.map(([i]) => i);
+  const outside = pairs.map(([, o]) => o);
+  const dir = way.dir;
+  const side: Side = world.grid === "squares" ? SIDES[dir]! : dir === 0 ? "e" : dir === 3 ? "w" : dir === 1 || dir === 2 ? "s" : "n";
+  if (wide) {
+    const apart = inside[1]! - inside[0]!;
+    const ok = world.grid === "squares" ? apart === (side === "n" || side === "s" ? 1 : L.W) : apart === 1 || apart === L.W;
+    if (!ok) return { ok: false, problem: "wideShape" };
+  }
+  const byKey = new Map(world.chunks.map((c) => [`${c.cx},${c.cy}`, c]));
   const ground = groundOf(world, byKey, inside[0]!);
   if (ground === null || inside.some((k) => groundOf(world, byKey, k) !== ground)) return { ok: false, problem: "raised" };
-  const side: Side = dir === 0 ? "e" : dir === 3 ? "w" : dir === 1 || dir === 2 ? "s" : "n";
-  return { ok: true, facts: { inside, outside, side, dir, ground, door: join.walls.every((w) => w.f.kind === "door") } };
+  return { ok: true, facts: { inside, outside, side, dir, ground, door } };
 }
 
 /** A cell's ground in feet, or null off the scene. */
@@ -334,139 +351,25 @@ export function planningFlood(world: WingWorld, from: number, extra: ReadonlySet
   return seen;
 }
 
-/**
- * The joined room (3.4): the flood from the join's inside cell with the
- * join read as a wall. On squares it crosses painted cells, stopping at
- * drawn edges, free walls and automatic walls, and keeps only cells on the
- * room's side of the join's wall line, since a doorless opening could
- * otherwise take in a corridor beyond it (DG3 build note OPUS-40).
- */
-export function joinedRoom(world: WingWorld, join: JoinExpect, facts: JoinFacts): Set<number> {
-  const { L } = world;
-  const room = new Set<number>();
-  const byKey = new Map(world.chunks.map((c) => [`${c.cx},${c.cy}`, c]));
-  const walls = freeWalls(world).map((w) => w.wall);
-  const edges = new Map<string, EdgeFeature>(world.chunks.flatMap((c) => Object.entries(c.edges)));
-  const extra = new Set(join.grid === "squares" ? join.edges.map((e) => e.key) : join.walls.map((w) => endsKey(w.a, w.b)));
-  const squares = world.grid === "squares";
-  const [jx, jy] = [facts.inside[0]! % L.W, Math.floor(facts.inside[0]! / L.W)];
-  const roomSide = (k: number) => {
-    if (!squares) return true;
-    const x = k % L.W;
-    const y = (k - x) / L.W;
-    return facts.side === "n" ? y >= jy : facts.side === "s" ? y <= jy : facts.side === "w" ? x >= jx : x <= jx;
-  };
-  const painted = (k: number) => paintedIn(world, byKey, k % L.W, Math.floor(k / L.W));
-  const passes = (k: number, n: number) => {
-    if (!squares) return !wallBetween(world, walls, edges, k, n, extra);
-    const a = painted(k);
-    const b = painted(n);
-    if (b === "empty" || !roomSide(n)) return false;
-    if (world.autoWalls === "all" ? a === "empty" : a === "empty" && b === "floor") return false;
-    return !wallBetween(world, walls, edges, k, n, extra);
-  };
-  const queue = [...facts.inside];
-  for (const k of queue) room.add(k);
-  while (queue.length > 0) {
-    const k = queue.pop()!;
-    for (const n of L.halo(k)) {
-      if (room.has(n) || !passes(k, n)) continue;
-      room.add(n);
-      queue.push(n);
-    }
-  }
-  return room;
-}
-
 /** An occupied cell's structure: painted ground, an edge or a wall, a height or difficult mark, which the joined room's own excuses for the approach. */
 export const STRUCTURE = 1;
 /** An occupied cell's objects and stair marks, which count wherever they stand. */
 export const OBJECT = 2;
 
 /**
- * Every occupied cell (3.4), as bits: STRUCTURE for painted ground, drawn
- * edges and free walls by both their cells, height and difficult marks,
- * and OBJECT for stair marks, token footprints, trap zones and the cells
- * they hit, stamp boxes, lights, labels, pins and floor link squares.
+ * Every occupied cell (3.4), as bits, read by the server's own rule
+ * (`eachOccupied`): STRUCTURE for painted ground, drawn edges and free
+ * walls by both their cells, height and difficult marks, and OBJECT for
+ * stair marks, token footprints, trap zones and the cells they hit, stamp
+ * boxes, lights, labels, pins and floor link squares.
  */
 export function occupiedOf(world: WingWorld, base: WingScene): Uint8Array {
-  const { L } = world;
-  const occ = new Uint8Array(L.W * L.H);
-  const sceneId = base.scene.id;
-  let bit = STRUCTURE;
-  const mark = (k: number) => {
-    if (k >= 0) occ[k]! |= bit;
-  };
-  const markKey = (key: string) => mark(world.cellOf(key));
-  const markRect = (r: CellRect) => {
-    for (let b = r.y; b < r.y + r.h; b++) for (let a = r.x; a < r.x + r.w; a++) markKey(`${a},${b}`);
-  };
-  const markPoint = (x: number, y: number) => mark(cellAt(world, x, y));
-  const markSegment = (a: readonly [number, number], b: readonly [number, number]) => {
-    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    const steps = Math.max(1, Math.ceil(len / 0.2));
-    // Both cells of a wall: the points just off each side of it, all along.
-    const nx = len === 0 ? 0 : (-(b[1] - a[1]) / len) * 0.2;
-    const ny = len === 0 ? 0 : ((b[0] - a[0]) / len) * 0.2;
-    for (let i = 0; i <= steps; i++) {
-      const px = a[0] + ((b[0] - a[0]) * i) / steps;
-      const py = a[1] + ((b[1] - a[1]) * i) / steps;
-      markPoint(px + nx, py + ny);
-      markPoint(px - nx, py - ny);
-    }
-  };
-  for (const c of world.chunks) {
-    for (const key of Object.keys(c.cells)) markKey(key);
-    for (const [key, f] of Object.entries(c.edges)) {
-      if (f.kind === "none") continue;
-      for (const [x, y] of edgeCells(key)) markKey(`${x},${y}`);
-    }
-    for (const w of c.walls ?? []) markSegment(w.a, w.b);
-    const heights = chunkHeights(c);
-    for (let j = 0; j < CHUNK_CELLS; j++) {
-      for (let i = 0; i < CHUNK_CELLS; i++) {
-        const a = c.cx * CHUNK_CELLS + i;
-        const b = c.cy * CHUNK_CELLS + j;
-        const at = j * CHUNK_CELLS + i;
-        if ((heights && heights[at] !== 0) || (c.rough && c.rough[at] !== ".")) markKey(`${a},${b}`);
-      }
-    }
-  }
-  bit = OBJECT;
-  for (const c of world.chunks) {
-    if (!c.up) continue;
-    for (let at = 0; at < c.up.length; at++) if (c.up[at] !== ".") markKey(`${c.cx * CHUNK_CELLS + (at % CHUNK_CELLS)},${c.cy * CHUNK_CELLS + Math.floor(at / CHUNK_CELLS)}`);
-  }
-  const g = gridOfShape(base.scene.gridShape);
-  for (const t of Object.values(base.state.tokens)) {
-    if (!t || t.sceneId !== sceneId) continue;
-    if (g.shape === "hex") for (const h of occupiedHexes(g as HexGrid, t)) markKey(`${h.col},${h.row}`);
-    else for (const p of occupiedCells(g, t)) markKey(`${p.x},${p.y}`);
-  }
-  for (const trap of Object.values(base.state.traps)) {
-    if (!trap || trap.sceneId !== sceneId) continue;
-    const z = trap.zone;
-    if ("cells" in z) z.cells.forEach(markRect);
-    else if ("wire" in z) markSegment(z.wire.a, z.wire.b);
-    else if ("edge" in z.door) for (const [x, y] of edgeCells(z.door.edge)) markKey(`${x},${y}`);
-    else {
-      const ref = z.door;
-      const wall = world.chunks.find((c) => c.cx === ref.cx && c.cy === ref.cy)?.walls?.find((w) => w.id === ref.id);
-      if (wall) markSegment(wall.a, wall.b);
-    }
-    const hits = trap.rig?.hits;
-    if (hits && typeof hits === "object" && "cells" in hits) hits.cells.forEach(markRect);
-  }
-  for (const st of Object.values(base.state.stamps)) {
-    if (!st || st.sceneId !== sceneId) continue;
-    const box = stampCells(st);
-    // A stamp's box in whole cells: every square of it, or every hex a point of it falls in.
-    for (let y = box.y0; y < box.y1; y++) for (let x = box.x0; x < box.x1; x++) for (const [dx, dy] of [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]] as const) markPoint(x + dx, y + dy);
-  }
-  for (const l of Object.values(base.state.lights)) if (l && l.sceneId === sceneId) markPoint(l.x, l.y);
-  for (const l of Object.values(base.state.labels)) if (l && l.sceneId === sceneId) markPoint(l.x, l.y);
-  for (const p of Object.values(base.state.pins)) if (p && p.sceneId === sceneId) markPoint(p.x, p.y);
-  for (const f of Object.values(base.state.floorLinks ?? {})) if (f && f.sceneId === sceneId) markRect(f.rect);
+  const occ = new Uint8Array(world.L.W * world.L.H);
+  eachOccupied(base.state, world.board, (k, structure) => {
+    const at = world.fromBoard(k);
+    if (at >= 0) occ[at]! |= structure ? STRUCTURE : OBJECT;
+    return false;
+  });
   return occ;
 }
 
@@ -491,43 +394,6 @@ export function grown(world: WingWorld, marked: Uint8Array, margin: number): Uin
     ring = next;
   }
   return out;
-}
-
-/** The joined room's own structure, which the approach's cells do not count (3.4): its cells and both cells of each of its boundary walls or edges. */
-export function excusedOf(world: WingWorld, room: ReadonlySet<number>): Set<number> {
-  const out = new Set(room);
-  for (const k of room) for (const n of world.L.halo(k)) out.add(n);
-  return out;
-}
-
-/**
- * The join's approach (3.4): its outside cells and the cells straight out
- * from them for the doorway's depth: a run's stairs and far landing where
- * the floor inside is raised or sunk, along the run's hex axis on hexes,
- * then `margin` cells more by the offset moves a corridor takes, so the
- * wing's stub can reach the join through the joined room's own margin.
- */
-export function approachOf(world: WingWorld, facts: JoinFacts, run: number, margin: number): number[] {
-  const out: number[] = [];
-  for (const o of facts.outside) {
-    let end: number | null = o;
-    out.push(o);
-    for (let t = 1; t <= run && end !== null; t++) {
-      end = world.grid === "squares" ? stepSquare(world.L, o, facts.side, t) : world.L.step(o, facts.dir, t);
-      if (end !== null) out.push(end);
-    }
-    for (let t = 1; t <= margin && end !== null; t++) {
-      const k = stepSquare(world.L, end, facts.side, t);
-      if (k !== null) out.push(k);
-    }
-  }
-  return out;
-}
-
-function stepSquare(L: Lattice, k: number, side: Side, t: number): number | null {
-  const x = (k % L.W) + DX[side] * t;
-  const y = Math.floor(k / L.W) + DY[side] * t;
-  return L.inMap(x, y) ? y * L.W + x : null;
 }
 
 /** The free walls whose ends the wing's wall pass leaves alone: every wall of the scene but the join's, which the wing replaces (DG3 build note OPUS-41). */
@@ -620,14 +486,20 @@ export function wingSetup(base: WingScene & Pick<WingBase, "area" | "join">, s: 
   if (flat && facts.ground !== 0) return none("raised");
   const margin = s.wide ? 3 : 2;
   const occ = occupiedOf(world, base);
-  const room = joinedRoom(world, base.join, facts);
-  const excused = excusedOf(world, room);
+  const way = { inside: facts.inside.map(world.toBoard), outside: facts.outside.map(world.toBoard), dir: facts.dir };
+  const excused = excusedOf(world.board, joinedRoom(world.board, base.scene, way, base.join));
   // The approach runs past the joined room's own margin, since a hex wall's outside hex is occupied too.
-  const approach = approachOf(world, facts, facts.ground !== 0 ? Math.abs(facts.ground) / 5 + 1 : 0, margin);
+  const approach = approachOf(world.board, way, runAt(facts.ground), margin).flatMap((k) => {
+    const at = world.fromBoard(k);
+    return at < 0 ? [] : [at];
+  });
   const approachSet = new Set(approach);
   // For the approach the joined room's own structure does not count, but its objects and stair marks do (D-261110-233).
   const otherOcc = occ.slice();
-  for (const k of excused) otherOcc[k]! &= ~STRUCTURE;
+  for (const k of excused) {
+    const at = world.fromBoard(k);
+    if (at >= 0) otherOcc[at]! &= ~STRUCTURE;
+  }
   const nearAll = grown(world, occ, margin);
   const nearOther = grown(world, otherOcc, margin);
   const flood = planningFlood(world, facts.outside[0]!, null);

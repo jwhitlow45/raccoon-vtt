@@ -5,7 +5,7 @@ import type { RoomState } from "#shared/model.ts";
 import { ASK_LOST, clientOpSchema, MAX_ASK_BYTES, MAX_ASK_PARTS, type ClientOp, type OpOf } from "#shared/protocol.ts";
 import { JOIN_CHANGED, joinChanged, WING_MOVED, wingClash, type WingClear } from "#shared/rules/wingClear.ts";
 import type { OnAnswer, OpAnswer, OpRefusal, RoomActions, RoomView, UnknownCause } from "../../state/types.ts";
-import { handKey, hexWingBase, squareWingBase, WING_SETTINGS } from "./handPlans.ts";
+import { handKey, hexWingBase, hexWingSide, squareWingBase, WING_SETTINGS } from "./handPlans.ts";
 import { wingIds } from "./ops.ts";
 import type { WingBase } from "./plan.ts";
 import { landAll, wingPreviewOf } from "./scratch.ts";
@@ -320,5 +320,31 @@ describe("a planned wing passes the server's checks on its base", () => {
       }
     }
     assert.ok(checked >= 60, `${checked} wings planned`);
+  });
+
+  test("on hexes, joined on each of a room's six sides at both parities, Narrow and Wide, flat, raised and sunk, on Hex rows and Hex columns", () => {
+    // DG3 review round 1: a Wide join's slanted middle side read as a changed join, and a slanted side's approach clashed on the server.
+    let checked = 0;
+    for (const grid of ["hexRows", "hexColumns"] as const) {
+      for (let dir = 0; dir < 6; dir++) {
+        for (const odd of [false, true]) {
+          for (const wide of [false, true]) {
+            for (const ground of [0, 5, -10]) {
+              const name = `${grid}, side ${dir}, ${odd ? "odd" : "even"} row, ${wide ? "Wide" : "Narrow"}, ${ground} ft`;
+              const { base } = hexWingSide(grid, { dir, odd, wide, ground });
+              const seed = `${versionChar()}${String(checked * 7919).padStart(15, "0")}`;
+              const p = wingPreviewOf({ ...WING_SETTINGS, wide, heights: 40 }, seed, base, { feetPerCell: 5 }, null);
+              assert.ok(p.ok && p.clear, `${name}: ${JSON.stringify(p.ok ? "no clear" : p)}`);
+              const asks = wingAsks(base.scene.id, p.ops, p.clear);
+              assert.ok(asks && asks.length <= MAX_ASK_PARTS, `${name}: asks`);
+              assert.equal(joinChanged(base.state as RoomState, base.scene.id, p.clear), false, `${name}: join`);
+              assert.equal(wingClash(base.state as RoomState, base.scene.id, asks.flatMap((a) => a.ops as OpOf<"build.ask">["ops"]), p.clear), null, `${name}: clash`);
+              checked++;
+            }
+          }
+        }
+      }
+    }
+    assert.equal(checked, 144);
   });
 });
