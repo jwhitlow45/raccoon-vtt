@@ -360,6 +360,29 @@ describe("an action that adds creatures while a fight's start waits for its answ
     assert.deepEqual(s.server.state.encounter?.entries.map((e) => e.tokenId).sort(), ["bt", "g1", "g2", "hoot", lurker].sort(), "one row each");
   });
 
+  test("with End the fight waiting, the group bar's button starts a new fight behind the end, and the server takes both", () => {
+    const s = setup(noFight());
+    s.connect();
+    s.room.dispatch({ t: "encounter.start", entries: [{ id: "e-g1", tokenId: "g1" }] });
+    s.deliver();
+    s.room.dispatch({ t: "encounter.add", entries: [{ id: "e-bree", tokenId: "bt" }] });
+    assert.ok((s.state().view as unknown as RoomState).encounter?.entries.some((e) => e.id === "e-bree"), "the add shows before its answer");
+    assert.deepEqual(fightAhead(s.state())?.entries.map((e) => e.tokenId).sort(), ["bt", "g1"], "an add the view shows already counts once");
+    s.deliver();
+    s.room.dispatch({ t: "encounter.end" });
+    const view = s.state().view as unknown as RoomState;
+    assert.ok(view.encounter, "the end shows only once the server takes it");
+    assert.equal(fightAhead(s.state()), null);
+    let ids = 0;
+    const bar = fightOps([view.tokens.g1!, view.tokens.g2!], fightAhead(s.state()), () => `new-${++ids}`);
+    assert.deepEqual(bar, [{ t: "encounter.start", entries: [{ id: "new-1", tokenId: "g1" }, { id: "new-2", tokenId: "g2" }] }]);
+    for (const op of bar) s.room.dispatch(op);
+    s.deliver();
+    assert.deepEqual(s.state().pending, [], "every op answered");
+    assert.deepEqual(s.state().refused, [], "none refused");
+    assert.deepEqual(s.server.state.encounter?.entries.map((e) => e.tokenId).sort(), ["g1", "g2"], "the new fight's rows");
+  });
+
   test("an end sent after the start leaves no fight on its way", () => {
     const s = setup(noFight());
     s.connect();

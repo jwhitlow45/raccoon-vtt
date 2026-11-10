@@ -44,13 +44,13 @@ export function useAnyPending(ns: readonly number[]): boolean {
 
 /**
  * The fight as an action that adds creatures to it reads it
- * (state/store.ts fightAhead): the view's, or a start still waiting for
- * its answer with the adds sent behind it.
+ * (state/store.ts fightAhead): the view's, with a start, the adds behind
+ * it and an end still waiting for their answers counted in.
  */
 export function useFightAhead(): FightRows | null {
   const encounter = useRoomView((s) => s.view?.encounter ?? null);
   // Only the waiting ops that start, grow or end a fight, compared one by one, so other ops on their way render nothing here.
-  const pending = useRoomView(useShallow((s) => (s.view?.encounter ? NO_FIGHT_OPS : ((s as RoomView & PendingOps).pending ?? NO_FIGHT_OPS).filter((p) => FIGHT_OPS.has(p.op.t)))));
+  const pending = useRoomView(useShallow((s) => ((s as RoomView & PendingOps).pending ?? NO_FIGHT_OPS).filter((p) => FIGHT_OPS.has(p.op.t))));
   return useMemo(() => fightAhead({ view: { encounter }, pending }), [encounter, pending]);
 }
 

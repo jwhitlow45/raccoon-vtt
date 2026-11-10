@@ -282,6 +282,22 @@ describe("starting a fight (Q12)", () => {
     }
   });
 
+  test("with a fight on and End the fight waiting, the fight an add reads is none, and a start sent behind the end counts", () => {
+    const t = table({ switchOff: true, holds: true });
+    try {
+      t.start([[{ id: "e1", tokenId: "g1" }]], "selected");
+      t.land();
+      t.store.setState({ pending: [] });
+      assert.deepEqual(t.ahead(), ["g1"], "the fight on");
+      t.store.setState({ pending: [{ n: 2, op: { t: "encounter.end" } }] });
+      assert.equal(t.ahead(), null, "its end on its way");
+      t.store.setState({ pending: [{ n: 2, op: { t: "encounter.end" } }, { n: 3, op: { t: "encounter.start", entries: [{ id: "e9", tokenId: "g2" }] } }] });
+      assert.deepEqual(t.ahead(), ["g2"], "a new start behind it");
+    } finally {
+      t.done();
+    }
+  });
+
   test("Everyone here pressed while Nobody yet's start waits leaves Nobody yet busy, and once that start is answered the next press is the busy one", () => {
     const t = table({ switchOff: true, holds: true });
     try {

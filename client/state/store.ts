@@ -508,22 +508,37 @@ export type FightRows = { readonly entries: readonly FightRow[] };
 
 /**
  * The fight the room holds once the ops still pending land, for an action
- * that adds creatures to it: the view's fight, or, while a start waits for
- * its answer, the rows of that start and of the adds sent behind it. A
- * start shows only once the server takes it (holdsTurn), so an action that
- * read the view alone would send a second start, which the server refuses,
- * and leave its creatures out. Null with no fight on or on its way.
+ * that adds creatures to it: the view's fight with the pending starts,
+ * adds and ends run over it in order. A start or an end shows only once
+ * the server takes it (holdsTurn), so an action that read the view alone
+ * would send a second start or an add behind an end, which the server
+ * refuses, and leave its creatures out. Null with no fight on or on its
+ * way.
  */
 export function fightAhead(s: { view?: { readonly encounter?: FightRows | null } | null; pending?: readonly { op: ClientOp }[] }): FightRows | null {
-  const shown = s.view?.encounter;
-  if (shown) return shown;
-  let rows: FightRow[] | null = null;
+  const shown = s.view?.encounter ?? null;
+  let rows: readonly FightRow[] | null = shown?.entries ?? null;
+  let changed = false;
+  // An add the view already shows, predicted while a fight shows, counts once.
+  let showing: ReadonlySet<string> | null = null;
   for (const { op } of s.pending ?? []) {
     // A second start would be refused, since the first makes the fight, and an add with no fight before it too.
-    if (op.t === "encounter.start") rows ??= [...op.entries];
-    else if (op.t === "encounter.add") rows?.push(...op.entries);
-    else if (op.t === "encounter.end") rows = null;
+    if (op.t === "encounter.start" && rows === null) {
+      rows = op.entries;
+      changed = true;
+    } else if (op.t === "encounter.add" && rows !== null) {
+      const seen = (showing ??= new Set(shown?.entries.map((e) => e.id)));
+      const more = op.entries.filter((e) => !seen.has(e.id));
+      if (more.length > 0) {
+        rows = [...rows, ...more];
+        changed = true;
+      }
+    } else if (op.t === "encounter.end") {
+      rows = null;
+      changed = true;
+    }
   }
+  if (!changed) return shown;
   return rows === null ? null : { entries: rows };
 }
 
