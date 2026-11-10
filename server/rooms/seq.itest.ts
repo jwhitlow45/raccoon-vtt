@@ -5,7 +5,6 @@ import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, OP_VERSION, SNAPSHOT_VERSION 
 import type { RoomState } from "#shared/model.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
 import { FAMILIAR, FrameReader, IN_Q, numbersIn, seqTwins, T0, type SeqTwinOptions } from "#shared/seqTestutil.ts";
-import { snapshotJson } from "./persistence.ts";
 import { SizeGuard } from "./sizeGuard.ts";
 import { startEngine, type Engine, type Socket, type TestClient } from "./testing.ts";
 import { UndoStacks } from "./undo.ts";
@@ -33,12 +32,6 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
 
 const clock = { now: T0 };
 let t: Engine;
-/** While set, the build of today's snapshot throws, as a room's first save here that could not write it. */
-let holdBuilds = false;
-const heldBuild = (state: RoomState): string => {
-  if (holdBuilds) throw new Error("a snapshot build the test holds back");
-  return snapshotJson(state);
-};
 
 /** One twin room on the engine: the members' devices, and P1's sockets, each restart's in turn, whose frames are compared. */
 class RoomTwin {
@@ -185,7 +178,7 @@ const sketch = { t: "drawing.create", drawing: { id: SKETCH, sceneId: "s1", kind
 
 describe("twin rooms on the database give their devices the same frames", () => {
   before(async () => {
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { now: () => clock.now, numberClock: () => clock.now, draw, snapshotOps: 1_000, snapshotIdleMs: 60_000, snapshotJson: heldBuild } } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { now: () => clock.now, numberClock: () => clock.now, draw, snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
   });
   after(() => t.close());
 
@@ -284,66 +277,67 @@ describe("twin rooms on the database give their devices the same frames", () => 
 
   for (const when of ["before", "after"] as const) {
     for (const barrier of [false, true]) {
-      test(`C23: a fault ${when} the install, ${barrier ? "after the room's first save at today's format" : "in the commit that first saves the room at today's format"}, across a restart`, async (tc) => {
+      test(`C23: a fault ${when} the install, ${barrier ? "after the room's first save at today's format" : "in the first commit after a load at the format below the count's, which saves the room at today's"}, across a restart`, async (tc) => {
         const w = seqTwins();
-        holdBuilds = !barrier;
         const old = COUNT_SNAPSHOT_VERSION - 1;
         const pair: Pair = [await makeRoom("door", w.door, old), await makeRoom("rock", w.rock, old)];
         const saved = async (twin: RoomTwin) => (await t.pool.query<{ schema_version: number; seq: string; state: RoomState }>("select schema_version, seq::text, state from room_snapshots where room_id = $1", [twin.roomId])).rows[0]!;
         const actorOf = (twin: RoomTwin) => t.manager.get(twin.roomId)!;
-        try {
-          if (barrier) {
-            await step(pair, (twin) => twin.apply("p1", { t: "log.chat", text: "ready" }));
-            for (const twin of pair) assert.equal((await saved(twin)).schema_version, SNAPSHOT_VERSION, `${twin.name}: the first commit saved the room at today's format`);
-          }
-          await c1Moves(pair);
-          await bookkeepingDiffers(pair, `C23 ${when}`);
-          if (!barrier) {
-            // Past the wait after a build that threw, so the faulted op's commit builds the snapshot again.
-            holdBuilds = false;
-            clock.now += 60_001;
-            for (const twin of pair) assert.equal((await saved(twin)).schema_version, old, `${twin.name}: still at the format below the count's just before the fault`);
-          }
-          const before = pair.map((twin) => actorOf(twin).committed.pub);
-          const mocked = when === "before" ? tc.mock.method(SizeGuard.prototype, "check") : tc.mock.method(UndoStacks.prototype, "push");
-          await step(pair, async (twin) => {
-            mocked.mock.mockImplementationOnce(() => {
-              throw new Error("a fault the test throws");
-            });
-            twin.sockets.p1.op(sketch);
-          });
-          mocked.mock.restore();
-          for (const [i, twin] of pair.entries()) {
-            const { state, pub, seq } = actorOf(twin).committed;
-            assert.ok(pub === clock.now && pub > before[i]!, `${twin.name}: the op's answer took the clock's number`);
-            assert.equal(state.drawings[SKETCH] !== undefined, when === "after", `${twin.name}: the op whole or not at all`);
-            // A commit that saves the snapshot prunes the rows it covers, written at the steps' clock, so only the room saved
-            // before still holds the op's row.
-            const { rows } = await t.pool.query<{ pub: string }>("select pub::text from room_ops where room_id = $1 and op->>'t' = 'drawing.create'", [twin.roomId]);
-            if (barrier) assert.deepEqual(rows.map((r) => Number(r.pub)), when === "after" ? [pub] : [], `${twin.name}: its row once, with the count's number, or none`);
-            const shown = await twin.sockets.p2.maybe("ev", (m) => m.changes.some((c) => c.key === `drawing:${SKETCH}` && "value" in c), 100);
-            assert.equal(shown !== null, when === "after", `${twin.name}: P2's device got the drawing at once exactly when it was installed`);
-            if (!barrier) {
-              const row = await saved(twin);
-              assert.deepEqual([row.schema_version, Number(row.seq)], [SNAPSHOT_VERSION, seq], `${twin.name}: the faulted op's commit saved the room at today's format, at its seq`);
-              assert.equal(row.state.drawings[SKETCH] !== undefined, when === "after", `${twin.name}: the saved room holds the op exactly when it was installed`);
-            }
-          }
-          same(pair, `C23 ${when}, at once`);
-          await restart(pair);
-          for (const twin of pair) assert.equal(actorOf(twin).committed.state.drawings[SKETCH] !== undefined, when === "after", `${twin.name}: the restart keeps what the fault left`);
-          same(pair, `C23 ${when}, after the restart`);
-          await step(pair, (twin) => twin.apply("p1", { t: "log.chat", text: "after" }));
-          for (const twin of pair) {
-            const ids = actorOf(twin).committed.state.log.map((line) => Number(line.id.split(":")[0]));
-            const last = ids.at(-1)!;
-            assert.ok(ids.slice(0, -1).every((n) => n < last), `${twin.name}: the next op's id is above every earlier one`);
-            assert.equal(last, actorOf(twin).committed.pub, `${twin.name}: and is the count's`);
-          }
-          same(pair, `C23 ${when}, after P1's chat`);
-        } finally {
-          holdBuilds = false;
+        if (barrier) {
+          await step(pair, (twin) => twin.apply("p1", { t: "log.chat", text: "ready" }));
+          for (const twin of pair) assert.equal((await saved(twin)).schema_version, SNAPSHOT_VERSION, `${twin.name}: the first commit saved the room at today's format`);
         }
+        await c1Moves(pair);
+        await bookkeepingDiffers(pair, `C23 ${when}`);
+        if (!barrier) {
+          // A room's first commit at an older format saves it at today's, so C1's first move did. Each room stops as a
+          // crash does, its saved room goes back to the format below the count's, which the steps up to today's leave as
+          // it is, and it loads again, so the faulted op's commit is its first after a load at that format.
+          for (const twin of pair) {
+            await t.manager.unload(twin.roomId, undefined, false);
+            await t.pool.query("update room_snapshots set schema_version = $2 where room_id = $1", [twin.roomId, old]);
+            await twin.connect();
+          }
+          await settle();
+          for (const twin of pair) assert.equal((await saved(twin)).schema_version, old, `${twin.name}: still at the format below the count's just before the fault`);
+        }
+        const before = pair.map((twin) => actorOf(twin).committed.pub);
+        const mocked = when === "before" ? tc.mock.method(SizeGuard.prototype, "check") : tc.mock.method(UndoStacks.prototype, "push");
+        await step(pair, async (twin) => {
+          mocked.mock.mockImplementationOnce(() => {
+            throw new Error("a fault the test throws");
+          });
+          twin.sockets.p1.op(sketch);
+        });
+        mocked.mock.restore();
+        for (const [i, twin] of pair.entries()) {
+          const { state, pub, seq } = actorOf(twin).committed;
+          assert.ok(pub === clock.now && pub > before[i]!, `${twin.name}: the op's answer took the clock's number`);
+          assert.equal(state.drawings[SKETCH] !== undefined, when === "after", `${twin.name}: the op whole or not at all`);
+          // A commit that saves the snapshot prunes the rows it covers, written at the steps' clock, so only the room saved
+          // before still holds the op's row.
+          const { rows } = await t.pool.query<{ pub: string }>("select pub::text from room_ops where room_id = $1 and op->>'t' = 'drawing.create'", [twin.roomId]);
+          if (barrier) assert.deepEqual(rows.map((r) => Number(r.pub)), when === "after" ? [pub] : [], `${twin.name}: its row once, with the count's number, or none`);
+          const shown = await twin.sockets.p2.maybe("ev", (m) => m.changes.some((c) => c.key === `drawing:${SKETCH}` && "value" in c), 100);
+          assert.equal(shown !== null, when === "after", `${twin.name}: P2's device got the drawing at once exactly when it was installed`);
+          if (!barrier) {
+            const row = await saved(twin);
+            assert.deepEqual([row.schema_version, Number(row.seq)], [SNAPSHOT_VERSION, seq], `${twin.name}: the faulted op's commit saved the room at today's format, at its seq`);
+            assert.equal(row.state.drawings[SKETCH] !== undefined, when === "after", `${twin.name}: the saved room holds the op exactly when it was installed`);
+          }
+        }
+        same(pair, `C23 ${when}, at once`);
+        await restart(pair);
+        for (const twin of pair) assert.equal(actorOf(twin).committed.state.drawings[SKETCH] !== undefined, when === "after", `${twin.name}: the restart keeps what the fault left`);
+        same(pair, `C23 ${when}, after the restart`);
+        await step(pair, (twin) => twin.apply("p1", { t: "log.chat", text: "after" }));
+        for (const twin of pair) {
+          const ids = actorOf(twin).committed.state.log.map((line) => Number(line.id.split(":")[0]));
+          const last = ids.at(-1)!;
+          assert.ok(ids.slice(0, -1).every((n) => n < last), `${twin.name}: the next op's id is above every earlier one`);
+          assert.equal(last, actorOf(twin).committed.pub, `${twin.name}: and is the count's`);
+        }
+        same(pair, `C23 ${when}, after P1's chat`);
       });
     }
   }

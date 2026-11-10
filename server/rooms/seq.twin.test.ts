@@ -13,7 +13,6 @@ import { RoomActor, type ActorDeps, type ActorOptions } from "./actor.ts";
 import { SnapshotBudget } from "./budgets.ts";
 import type { Connection } from "./connection.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { snapshotJson } from "./persistence.ts";
 import { SizeGuard } from "./sizeGuard.ts";
 import { UndoStacks } from "./undo.ts";
 import { scopeObserver, ScopeClient, StoredRoomDb, until } from "./undoScopeTesting.ts";
@@ -461,14 +460,7 @@ describe("an op that faults before its install or after it", () => {
     for (const barrier of [false, true]) {
       test(`C23: a fault ${when} the install, ${barrier ? "after the room's first save at today's format" : "in the first commit after a load at the format below the count's, which saves the room at today's"}, across a restart`, async (t) => {
         const w = seqTwins();
-        // While held, the build of today's snapshot throws, so the room stays at the format below the count's through C1's
-        // moves, as a room whose first save here could not write it does.
-        let held = !barrier;
-        const heldBuild = (state: RoomState) => {
-          if (held) throw new Error("a snapshot build the test holds back");
-          return snapshotJson(state);
-        };
-        const pair: Pair = [await Twin.open(t, "door", w.door, { snapshotJson: heldBuild }, COUNT_SNAPSHOT_VERSION - 1), await Twin.open(t, "rock", w.rock, { snapshotJson: heldBuild }, COUNT_SNAPSHOT_VERSION - 1)];
+        const pair: Pair = [await Twin.open(t, "door", w.door, {}, COUNT_SNAPSHOT_VERSION - 1), await Twin.open(t, "rock", w.rock, {}, COUNT_SNAPSHOT_VERSION - 1)];
         if (barrier) {
           await both(pair, (twin) => twin.apply("p1", { t: "log.chat", text: "ready" }));
           for (const twin of pair) assert.equal(twin.db.snapshot.version, SNAPSHOT_VERSION, `${twin.name}: the first commit saved the room at today's format`);
@@ -478,8 +470,13 @@ describe("an op that faults before its install or after it", () => {
         });
         bookkeepingDiffers(pair, `C23 ${when}`);
         if (!barrier) {
-          // The room loads again, so the faulted op's commit is its first after the load, and builds the snapshot again.
-          held = false;
+          // A room's first commit at an older format saves it at today's, so C1's first move did. The saved room goes back
+          // to the format below the count's, which the steps up to today's leave as it is, and loads again, so the faulted
+          // op's commit is its first after a load at that format.
+          for (const twin of pair) {
+            twin.db.snapshot.version = COUNT_SNAPSHOT_VERSION - 1;
+            twin.db.snapshotWrites = 0;
+          }
           await both(pair, (twin) => twin.restart(false));
           for (const twin of pair) {
             assert.equal(twin.db.snapshot.version, COUNT_SNAPSHOT_VERSION - 1, `${twin.name}: still at the format below the count's just before the fault`);
