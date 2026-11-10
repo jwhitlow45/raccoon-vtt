@@ -89,9 +89,9 @@ async function refusedWith(client: ScopeClient, op: unknown): Promise<string | u
   return rejection(event, client.n);
 }
 
-/** The op the actor last stored, as replay will read it. */
+/** The op the actor last stored for a member, as replay will read it, past the creatures a batch's end met. */
 function lastStored(h: Awaited<ReturnType<typeof actorFor>>): Record<string, unknown> | undefined {
-  return h.db.stored.at(-1) as Record<string, unknown> | undefined;
+  return h.db.stored.filter((op) => (op as { t?: string }).t !== "sys.meet").at(-1) as Record<string, unknown> | undefined;
 }
 
 describe("a map's video in the room actor (docs/design/design-v1-animated-maps.md 9.2)", () => {

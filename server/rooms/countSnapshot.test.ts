@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
-import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, OP_VERSION, SNAPSHOT_VERSION, runMigrations, snapshotMigrations } from "#shared/migrate.ts";
+import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, NUMBERING_SNAPSHOT_VERSION, OP_VERSION, SNAPSHOT_VERSION, runMigrations, snapshotMigrations } from "#shared/migrate.ts";
 import type { Member, RoomState } from "#shared/model.ts";
 import type { ServerMessage } from "#shared/protocol.ts";
 import { seqTwins } from "#shared/seqTestutil.ts";
@@ -21,8 +21,8 @@ import { restartStored, ScopeClient, scopeFixture, storedActor, StoredRoomDb, un
  * today's version, so an older build refuses the room once a number past
  * its own sequence could have reached a device. Never for a room whose
  * replay failed, nor for one made here or whose load already wrote its
- * snapshot. A build that throws lets its batch commit without it and tries
- * again later, and a running snapshot write finishes first.
+ * snapshot. A build that throws holds its batch, which stores nothing until
+ * a build succeeds, and a running snapshot write finishes first.
  */
 
 const OLD = COUNT_SNAPSHOT_VERSION - 1;
@@ -74,6 +74,17 @@ describe("the first commit of a room saved before the count", () => {
     // Written once: the next commit carries none.
     await dm.apply({ t: "log.chat", text: "after" });
     assert.equal(db.snapshotWrites, 1);
+  });
+
+  test("a room saved after the count but before creature numbers stores its snapshot with its first commit too, which a build before numbers refuses", async (t) => {
+    const f = scopeFixture();
+    const db = new StoredRoomDb(f.state, { version: NUMBERING_SNAPSHOT_VERSION - 1 });
+    const h = await storedActor(t, db);
+    const dm = await h.connect(f.dm);
+    await dm.apply({ t: "log.chat", text: "one" });
+    assert.equal(db.snapshotWrites, 1);
+    assert.equal(db.snapshot.version, SNAPSHOT_VERSION);
+    assert.throws(() => runMigrations(db.snapshot.state, db.snapshot.version, NUMBERING_SNAPSHOT_VERSION - 1, snapshotMigrations), /down/);
   });
 
   test("a hello's watermark alone does too", async (t) => {
@@ -148,36 +159,49 @@ describe("numbers an older build made", () => {
 });
 
 describe("the build and the write of that snapshot", () => {
-  test("a build that throws commits the batch without it and logs once, and a commit past the wait stores it", async (t) => {
+  test("a build that throws stores nothing and logs at every attempt, and the batch commits with the snapshot once a build succeeds", async (t) => {
     const f = scopeFixture();
     const db = new StoredRoomDb(f.state, { version: OLD });
-    let clock = Date.UTC(2026, 10, 9, 12);
     let throws = 2;
+    const stored: number[] = [];
     const errors: string[] = [];
     const log: ActorDeps["log"] = { info() {}, warn() {}, debug() {}, error: (_o: unknown, msg?: string) => void errors.push(msg ?? "") };
     const build = (state: RoomState) => {
+      stored.push(db.rows.length + db.snapshotWrites + (db.pub ?? 0));
       if (throws-- > 0) throw new Error("scripted snapshot build fault");
       return snapshotJson(state);
     };
-    const h = await storedActor(t, db, { now: () => clock, snapshotJson: build }, log);
-    const dm = await h.connect(f.dm, "dm", () => clock);
+    const h = await storedActor(t, db, { snapshotJson: build, retryBaseMs: 1, retryMaxMs: 2 }, log);
+    const dm = await h.connect(f.dm);
     const first = await dm.apply({ t: "log.chat", text: "one" });
-    assert.equal(first.seq, 1, "the batch committed without it");
-    assert.equal(db.snapshotWrites, 0);
-    assert.equal(olderRefuses(db), false, "until a later commit stores it, an older build still loads the snapshot");
-    assert.equal(db.pub, 1);
-    // Within the wait no commit tries again.
-    await dm.apply({ t: "log.chat", text: "two" });
-    assert.equal(throws, 1, "no second build within the wait");
-    clock += 60_001;
-    await dm.apply({ t: "log.chat", text: "three" });
-    assert.equal(db.snapshotWrites, 0, "the second build threw too");
-    assert.equal(errors.filter((m) => m.startsWith("snapshot build failed")).length, 1, "logged once a run");
-    clock += 60_001;
-    await dm.apply({ t: "log.chat", text: "four" });
+    assert.equal(first.seq, 1);
+    assert.deepEqual(stored, [0, 0, 0], "nothing stored while the build threw");
+    assert.equal(errors.filter((m) => m.startsWith("snapshot build failed")).length, 2, "logged at every attempt");
     assert.equal(db.snapshotWrites, 1);
-    assert.equal(db.snapshot.seq, 4);
+    assert.equal(db.snapshot.seq, 1);
+    assert.equal(db.snapshot.version, SNAPSHOT_VERSION);
     assert.equal(olderRefuses(db), true);
+  });
+
+  test("a commit that fails after its build sends the snapshot it built again, built once", async (t) => {
+    const f = scopeFixture();
+    const db = new StoredRoomDb(f.state, { version: OLD });
+    let builds = 0;
+    let fails = 1;
+    db.beforeCommit = async () => {
+      if (fails-- > 0) throw new Error("scripted commit failure");
+    };
+    const build = (state: RoomState) => {
+      builds++;
+      return snapshotJson(state);
+    };
+    const h = await storedActor(t, db, { snapshotJson: build, retryBaseMs: 1, retryMaxMs: 2 });
+    const dm = await h.connect(f.dm);
+    assert.equal((await dm.apply({ t: "log.chat", text: "one" })).seq, 1);
+    assert.equal(fails, -1, "the first attempt failed");
+    assert.equal(builds, 1);
+    assert.equal(db.snapshotWrites, 1);
+    assert.equal(db.snapshot.version, SNAPSHOT_VERSION);
   });
 
   for (const fails of [0, 1]) {
@@ -220,12 +244,11 @@ describe("the build and the write of that snapshot", () => {
     });
   }
 
-  test("a batch that answered nothing stores nothing and carries no snapshot, and the answer after it carries it", async (t) => {
+  test("a batch that answered nothing stores nothing and opens no transaction, and the first answer carries the snapshot", async (t) => {
     const f = scopeFixture();
     const sceneId = f.sceneId;
     const db = new StoredRoomDb(f.state, { version: OLD });
     let clock = Date.UTC(2026, 10, 9, 12);
-    let throws = 1;
     let reading = false;
     // Each op of the ask reads past a turn (ASK_TURN_MS), so its reading spans turns while commits land around it, and each
     // grows a layer, so the reading begins a batch of its own (#memoryEstimate).
@@ -236,23 +259,14 @@ describe("the build and the write of that snapshot", () => {
       while (performance.now() < until);
       return growth.size > 0 ? growth : new Map([[JSON.stringify([sceneId, null]), 0]]);
     };
-    const build = (state: RoomState) => {
-      if (throws-- > 0) throw new Error("scripted snapshot build fault");
-      return snapshotJson(state);
-    };
-    const h = await storedActor(t, db, { now: () => clock, memoryGrowth: slow, snapshotJson: build });
+    const h = await storedActor(t, db, { now: () => clock, memoryGrowth: slow });
     const dm = await h.connect(f.dm, "dm", () => clock);
-    // The first commit's build throws, so the room stays armed past it and no commit tries again within the wait.
-    assert.equal((await dm.apply({ t: "log.chat", text: "one" })).seq, 1);
-    assert.equal(db.snapshotWrites, 0);
     // What each commit found stored as it began, so each one's own writes are the difference to the next.
     type Stored = { rows: number; marks: number; writes: number; pub: number | null };
     const now = (): Stored => ({ rows: db.rows.length, marks: [...db.watermarks.values()].reduce((a, b) => a + b, 0), writes: db.snapshotWrites, pub: db.pub });
     const began: Stored[] = [];
     db.beforeCommit = async () => {
       began.push(now());
-      // The wait is over once the chat ahead of the ask commits, so the batch the reading began could try.
-      clock += 60_001;
       // Each commit stays in flight across a turn of the reading, so the reading begins a batch meanwhile.
       await new Promise((resolve) => setTimeout(resolve, 20));
     };
@@ -272,8 +286,8 @@ describe("the build and the write of that snapshot", () => {
     // The batch the reading began closes with nothing to store, so it opens no transaction at all and carries no snapshot.
     assert.ok(own.every((c) => c.rows !== 0 || c.marks !== 0), `every commit that landed answered something: ${JSON.stringify(own)}`);
     assert.equal(db.snapshotWrites, 1);
-    assert.ok(own.some((c) => c.snapshot && c.marks > 0), `the snapshot rode on the ask's answer: ${JSON.stringify(own)}`);
-    assert.equal(db.pub, 3);
+    assert.ok(own[0]?.snapshot === true && own[0].marks > 0, `the snapshot rode on the first answer, the chat ahead of the ask: ${JSON.stringify(own)}`);
+    assert.equal(db.pub, 2);
   });
 });
 

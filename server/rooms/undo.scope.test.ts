@@ -717,7 +717,7 @@ describe("history while asset lookup waits", () => {
         const assetId = uuidv7();
         const image = { assetId, crop: { cx: 0, cy: 0, zoom: 1 } };
         f.state.tokens[f.goblin]!.image = image;
-        const { rev: _rev, fogExemptAuto: _auto, ...created } = f.state.tokens[f.goblin]!;
+        const { rev: _rev, fogExemptAuto: _auto, met: _met, ...created } = f.state.tokens[f.goblin]!;
         if (direction === "redo") {
           if (scope === "play") delete f.state.tokens[f.goblin];
           else delete f.state.tokens[f.goblin]!.image;

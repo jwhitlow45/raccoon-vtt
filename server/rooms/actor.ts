@@ -2,7 +2,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, checkLimits, LIMITS, ROLLING_TOO_FAST, SOUND_LIMITS, type LimitCheck } from "#shared/limits.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
-import { COUNT_SNAPSHOT_VERSION, OP_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
+import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { HandoutPage, LogEntry, MapVideo, RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply, doorReachPassed, touchLanding, MOVE_PLAYERS_FIRST_BACK, type PermissionDeps } from "#shared/permissions.ts";
@@ -62,6 +62,7 @@ import {
 import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCaps } from "./receipts.ts";
 import { layerCharge } from "./memorySize.ts";
 import { forgetAllOps, forgetSceneOp, mapStepOps, memoryGrowth, type DoorTouch } from "./remember.ts";
+import { meetOps } from "./meet.ts";
 import { growthBound, measuredFromStored, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { climbOf, keptFrom, MOVED_SINCE, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf } from "./undoLabels.ts";
@@ -127,6 +128,8 @@ export type ActorOptions = {
   receiptCaps: Partial<ReceiptCaps>;
   /** The map step (remember.ts), which only tests replace, to make its op one the schema or the reducer refuses. */
   mapStep: typeof mapStepOps;
+  /** The meet step (meet.ts), which only tests replace, to make it throw. */
+  meetStep: typeof meetOps;
   /** The memory estimate's scan (remember.ts), which only tests wrap, to see which scan each estimate asks for. */
   memoryGrowth: typeof memoryGrowth;
   /** The build of the snapshot a room's first commit here carries (#countSnapshot), which only tests replace, to make it throw. */
@@ -166,6 +169,7 @@ export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   draw: serverDraw,
   receiptCaps: {},
   mapStep: mapStepOps,
+  meetStep: meetOps,
   memoryGrowth,
   snapshotJson,
   archiveGuard: ARCHIVE_ALWAYS,
@@ -507,13 +511,11 @@ export class RoomActor {
   /** Deletion steps waiting for the open batch to commit (#runStep), in the order they came. */
   #parked: StepCommand[] = [];
   /**
-   * Whether the room was loaded from a snapshot below COUNT_SNAPSHOT_VERSION
-   * and still needs one at today's version, which its next commit carries
-   * (#countSnapshot), and when a build of it that threw lets it try again.
+   * Whether the room was loaded from a snapshot below
+   * NUMBERING_SNAPSHOT_VERSION and still needs one at today's version,
+   * which its next commit carries (#countSnapshot).
    */
   #countSnapshotDue: boolean;
-  #countSnapshotAfter = 0;
-  #countSnapshotLogged = false;
   #snapshotSeq: number;
   #opsSinceSnapshot = 0;
   #snapshotTimer: NodeJS.Timeout | null = null;
@@ -639,7 +641,7 @@ export class RoomActor {
     const aheadMs = loaded.pub - this.#numberClock();
     if (aheadMs > NUMBERS_AHEAD_WARN_MS) this.#log.warn({ roomId: this.roomId, aheadMs }, "room numbers are ahead of the server's clock: check the clock");
     // A room whose replay failed writes no snapshot at all, so a fixed build can still rebuild it from its rows.
-    this.#countSnapshotDue = !loaded.replayFailed && loaded.snapshotVersion < COUNT_SNAPSHOT_VERSION;
+    this.#countSnapshotDue = !loaded.replayFailed && loaded.snapshotVersion < NUMBERING_SNAPSHOT_VERSION;
     this.#snapshotSeq = loaded.snapshotSeq;
     this.#opsSinceSnapshot = loaded.seq - loaded.snapshotSeq;
     this.#sizes = new SizeGuard(this.#opts.sizeLimits);
@@ -2624,6 +2626,28 @@ export class RoomActor {
         this.#fault("map step's forgetting failed", again, null);
       }
     }
+    this.#meet(batch);
+  }
+
+  /**
+   * The meet step (meet.ts, shared/numbering.ts), after the explore and
+   * map steps whose sight it reads: the creatures the party now holds
+   * beside another of their shown name take their numbers, by `sys.meet`
+   * ops at the end of the same batch, so no frame ever holds a number the
+   * party's copy does not give. Like the explore it is never refused and
+   * runs none of an op's checks: its writes spend a reserve every size
+   * check holds (sizeGuard.ts). A step that throws fails closed: it is
+   * logged and the batch commits with nothing numbered.
+   */
+  #meet(batch: Batch): void {
+    let ops: OpOf<"sys.meet">[];
+    try {
+      ops = this.#opts.meetStep(batch.step.before, this.#staged.state, touchedSinceStep(batch));
+    } catch (err) {
+      this.#log.error({ err, roomId: this.roomId }, "meet step failed, the batch commits with nothing numbered");
+      return;
+    }
+    for (const op of ops) this.#appendServerOp(batch, op, "meet step");
   }
 
   /**
@@ -2685,11 +2709,12 @@ export class RoomActor {
   /**
    * Appends a server-made op to the batch on the staged state, as stored and
    * replayed, logging rather than refusing one that fails. False when it
-   * failed, so the map step can fail closed. Both its kinds are uncounted
+   * failed, so the map step can fail closed. Its kinds are uncounted
    * (counted.ts): it reduces at the stored number as it stands, never the
-   * higher one handed out, and moves neither.
+   * higher one handed out, and moves neither. A meeting names no scene, so
+   * its growth goes to the floors of the creatures it wrote.
    */
-  #appendServerOp(batch: Batch, op: OpOf<"sys.explore"> | OpOf<"sys.remember">, what: string): boolean {
+  #appendServerOp(batch: Batch, op: OpOf<"sys.explore"> | OpOf<"sys.remember"> | OpOf<"sys.meet">, what: string): boolean {
     // Never reached while #commitNow skips the explore there: the tail a failed replay left holds the next seq, or a gap.
     if (this.replayFailed) {
       this.#log.error({ roomId: this.roomId }, `${what} op skipped, the room's replay failed`);
@@ -2714,7 +2739,7 @@ export class RoomActor {
     for (const key of result.touched) batch.touched.push(key);
     if (result.global) batch.global = true;
     if (result.rejudge) batch.rejudge = true;
-    this.#sizes.grew(grew, [op.sceneId]);
+    this.#sizes.grew(grew, op.t === "sys.meet" ? creatureFloors(result.state, result.touched) : [op.sceneId]);
     return true;
   }
 
@@ -2740,7 +2765,12 @@ export class RoomActor {
       // here, and the clock has passed any number handed out above it.
       pub: batch.stored,
     };
-    const release = await this.#countSnapshot(batch, write);
+    const snapshot = await this.#countSnapshot(batch, write);
+    if (snapshot !== null && typeof snapshot !== "function") {
+      this.#abandon(batch, snapshot.closed);
+      return;
+    }
+    const release = snapshot;
     const lines = batch.ops.some((r) => r.log.length > 0);
     // A batch of reads alone writes nothing, so it waits only for the commit before it, which it could not close during.
     const stores = write.ops.length > 0 || write.watermarks.length > 0 || batch.receipts.length > 0 || write.name !== undefined || write.snapshot !== undefined;
@@ -2873,31 +2903,37 @@ export class RoomActor {
   }
 
   /**
-   * The snapshot a room loaded from one below COUNT_SNAPSHOT_VERSION writes
-   * in the transaction of its first commit here that answered something
-   * (persistence.ts commitBatch), refusals and watermarks alone included, so
-   * an older build refuses the room as soon as a number past its own
-   * sequence could reach a device. It is the batch's state at the batch's
-   * seq, built once here, before any attempt, so every retry sends the same
-   * bytes. A build that throws, a bug, logs once a run and lets the batch
-   * commit without it, and the snapshot is tried again by a commit past
-   * `snapshotIdleMs` or by the next snapshot write. A running snapshot write
-   * finishes first, and this one holds `#snapshotting` until its commit
-   * ends, so the two never write the row at once. The release it returns
-   * lets go of that hold, and the room records the write (#snapshotStored)
-   * only once the commit is confirmed.
+   * The snapshot a room loaded from one below NUMBERING_SNAPSHOT_VERSION
+   * writes in the transaction of its first commit here that answered
+   * something (persistence.ts commitBatch), refusals and watermarks alone
+   * included. From then an older build refuses the room, before a number
+   * past its own sequence could reach a device. A row of op version 60
+   * alone would not make it refuse: it would load the rows before that one
+   * and stop there. It is the batch's state at the batch's seq, built once
+   * here, before any attempt, so every database retry sends the same bytes.
+   *
+   * The batch never commits without it. A build that throws, a bug, is
+   * logged at every attempt and tried again on the commit's backoff, so a
+   * build that always throws holds the room's commits until a fixed build:
+   * the price of no older build ever loading the room part way. A room that
+   * closes meanwhile abandons the batch, whose clients resend it. A running
+   * snapshot write finishes first, and this one holds `#snapshotting` until
+   * its commit ends, so the two never write the row at once. The release it
+   * returns lets go of that hold, and the room records the write
+   * (#snapshotStored) only once the commit is confirmed.
    */
-  async #countSnapshot(batch: Batch, write: BatchWrite): Promise<(() => void) | null> {
+  async #countSnapshot(batch: Batch, write: BatchWrite): Promise<(() => void) | null | { closed: unknown }> {
     if (!this.#countSnapshotDue || (write.ops.length === 0 && write.watermarks.length === 0)) return null;
-    if (this.#opts.now() < this.#countSnapshotAfter) return null;
-    let json: string;
-    try {
-      json = this.#opts.snapshotJson(batch.state);
-    } catch (err) {
-      this.#countSnapshotAfter = this.#opts.now() + this.#opts.snapshotIdleMs;
-      if (!this.#countSnapshotLogged) this.#log.error({ err, roomId: this.roomId, seq: batch.seq }, "snapshot build failed, the batch commits without it");
-      this.#countSnapshotLogged = true;
-      return null;
+    let json: string | undefined;
+    for (let attempt = 0; json === undefined; attempt++) {
+      try {
+        json = this.#opts.snapshotJson(batch.state);
+      } catch (err) {
+        this.#log.error({ err, roomId: this.roomId, seq: batch.seq, attempt }, "snapshot build failed, the batch waits for it");
+        if (this.#closed) return { closed: err };
+        this.retrying = true;
+        await sleep(Math.min(this.#opts.retryMaxMs, this.#opts.retryBaseMs * 2 ** attempt));
+      }
     }
     while (this.#snapshotting) await this.#snapshotting;
     // A snapshot write that landed meanwhile was at today's version.
@@ -3264,6 +3300,17 @@ function answeredSinceStep(batch: Batch): number {
 /** The keys the batch's ops touched since its steps last ran, which the next steps read. */
 function touchedSinceStep(batch: Batch): EntityKey[] {
   return batch.step.touched === 0 ? batch.touched : batch.touched.slice(batch.step.touched);
+}
+
+/** The floors of the creatures a server op wrote, each once. */
+function creatureFloors(state: RoomState, touched: readonly EntityKey[]): string[] {
+  const floors = new Set<string>();
+  for (const key of touched) {
+    const parsed = parseKey(key);
+    const token = parsed?.kind === "token" ? ownEntry(state.tokens, parsed.id) : undefined;
+    if (token) floors.add(token.sceneId);
+  }
+  return [...floors];
 }
 
 function push<T>(map: Map<ClientKey, T[]>, key: ClientKey, value: T): void {

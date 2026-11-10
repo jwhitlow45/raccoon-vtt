@@ -9,6 +9,7 @@ import type { Env } from "#shared/reducer/tx.ts";
 import { DM, env, token } from "#shared/testutil.ts";
 import { exploreOp } from "./explore.ts";
 import { forgetSceneOp } from "./remember.ts";
+import { meetOps } from "./meet.ts";
 
 /**
  * No op the server makes to keep its books starts a turn
@@ -16,8 +17,8 @@ import { forgetSceneOp } from "./remember.ts";
  * stands (counted.ts), which right after a Next is the Next's own number,
  * the one the turn's start holds. Here Next starts Thorn's turn on a statue
  * that goes off at a turn's start and arms again each turn, then the music's
- * tick, an explore, a second explore once Thorn stands in the other room,
- * and the map step's forgetting each run at that very number, as the actor
+ * tick, an explore, the meet step, a second explore once Thorn stands in
+ * the other room, and the map step's forgetting each run at that very number, as the actor
  * runs them after a Next with no member's op between. The statue goes off once: one use spent, one line. Stored
  * rows before op version 57 replay the same way at whatever number they
  * carry.
@@ -65,6 +66,8 @@ function bookkeeping(state: RoomState, at: (state: RoomState) => Env): { kinds: 
   };
   run({ t: "sys.sound", from: s.playing?.rev ?? 0, music: null, loops: {}, effects: [] });
   run(exploreOp(s, "s1"));
+  // The meet step, for the Goblin the explore put in the party's sight.
+  for (const op of meetOps(s, s, [], { skip: false })) run(op);
   // Thorn stands in the other room for the next explore, so it has ground to add, and back on the statue after.
   const home = s.tokens.thorn!;
   s = { ...s, tokens: { ...s.tokens, thorn: { ...home, x: 35, y: 5 } } };
@@ -84,7 +87,7 @@ describe("bookkeeping ops start no turn", () => {
       assert.equal(sprungLines(next.state), 1);
       // Every one of them carries the Next's number: uncounted at today's version, and pinned to it for the older row.
       const after = bookkeeping(next.state, () => ({ ...env(NEXT), ...(opVersion === undefined ? { uncounted: true as const } : { opVersion }) }));
-      assert.deepEqual(after.kinds, ["sys.sound", "sys.explore", "sys.explore", "sys.remember"], "each kind ran");
+      assert.deepEqual(after.kinds, ["sys.sound", "sys.explore", "sys.meet", "sys.explore", "sys.remember"], "each kind ran");
       assert.equal(after.state.traps.statue!.rig!.usesLeft, 2, "no use spent again");
       assert.equal(sprungLines(after.state), 1, "no second line");
       assert.equal(after.state.encounter!.turnStart!.seq, NEXT);

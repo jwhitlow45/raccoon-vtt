@@ -244,7 +244,10 @@ export function scopeFixture() {
   const goblin = uuidv7();
   const bree = uuidv7();
   const pc = uuidv7();
-  state.tokens[goblin] = token(goblin, { sceneId, name: "Goblin 2", actor: { inline: creature({ dmNotes: "" }) } });
+  // The party has met the Goblin already, alone, so no batch's end meets it again (shared/numbering.ts).
+  state.tokens[goblin] = token(goblin, { sceneId, name: "Goblin 2", met: 1, actor: { inline: creature({ dmNotes: "" }) } });
+  state.scenes[sceneId] = { ...state.scenes[sceneId]!, numbers: { names: { "Goblin 2": [1, 1] } } };
+  state.numbering = { rev: 0, groups: 1 };
   state.characters[bree] = character(bree, { name: "Bree", ownerIds: [player.id], actor: creature({ dmNotes: "" }) });
   state.tokens[pc] = token(pc, { sceneId, kind: "pc", name: "Bree", x: 8, actor: { ref: bree } });
   return { state, dm, otherDm, player, unrelated, goblin, bree, pc, sceneId };

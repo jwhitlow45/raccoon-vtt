@@ -1358,7 +1358,9 @@ describe("an area's damage", () => {
       await sendWithHistory(actor, table.conn, 2, { t: "undo", log: lineOf(second).id });
       const one = await answerTo(table.sent, 2);
       assert.ok(one !== "stuck");
-      assert.deepEqual(one.restored, [{ n: 2, what: "damaging Goblin 2" }]);
+      // The table numbered the two Goblins as the first batch met them, in id order.
+      assert.deepEqual(one.restored, [{ n: 2, what: `damaging Goblin ${actor.committed.state.tokens[second]!.number}` }]);
+      assert.ok(actor.committed.state.tokens[second]!.number !== undefined);
       assert.deepEqual([hp(tokenId), hp(second)], [{ cur: 1, max: 7, temp: 0 }, { cur: 7, max: 7, temp: 3 }]);
       // The area's step would put back the creature the DM already took back, so it refuses and changes nothing.
       await sendWithHistory(actor, table.conn, 3, { t: "undo" });
@@ -1370,7 +1372,7 @@ describe("an area's damage", () => {
       await sendWithHistory(actor, table.conn, 4, { t: "undo", log: lineOf(tokenId).id });
       const other = await answerTo(table.sent, 4);
       assert.ok(other !== "stuck");
-      assert.deepEqual(other.restored, [{ n: 4, what: "damaging Goblin" }]);
+      assert.deepEqual(other.restored, [{ n: 4, what: `damaging Goblin ${actor.committed.state.tokens[tokenId]!.number}` }]);
       assert.deepEqual(hp(tokenId), { cur: 7, max: 7, temp: 0 });
     } finally {
       db.freeze();
@@ -2017,10 +2019,11 @@ describe("a walk on the scene where traps go off runs the steps of the batch sta
       return 3;
     });
     try {
-      // One batch, as a commit just before the walk would have stored it: the eye's step in, what it saw, the walk.
+      // One batch, as a commit just before the walk would have stored it: the eye's step in, what it saw, the walk, and the
+      // Goblin the walk brought into the party's sight met at its end.
       assert.deepEqual(
         batches.map((batch) => batch.map((op) => op.t)),
-        [["token.move", "sys.explore", "token.move", "token.move", "sys.explore"]],
+        [["token.move", "sys.explore", "token.move", "token.move", "sys.explore", "sys.meet"]],
         "the eye's step in, and what it saw, explored before the walk",
       );
       assert.equal(batchOf(batches, "token.move", goblinId), 0);
