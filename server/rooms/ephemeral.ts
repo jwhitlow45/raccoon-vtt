@@ -1,11 +1,11 @@
-import { keys, partsKey } from "#shared/keys.ts";
+import { keys, partsKey, type EntityKey } from "#shared/keys.ts";
 import type { RoomState, Token, Viewer } from "#shared/model.ts";
 import { mayMoveToken } from "#shared/permissions.ts";
 import { ownsToken, perPlayerScene, projectEntity, withheldFromViewer } from "#shared/project.ts";
 import { startFloor } from "#shared/rules/floors.ts";
 import { canSqueeze } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid } from "#shared/rules/grid.ts";
-import type { EphEvent } from "#shared/protocol.ts";
+import { outboundEph, type EphEvent, type EphEventOut } from "#shared/protocol.ts";
 import type { PartySight } from "#shared/ruleHooks.ts";
 import type { Connection, PreviewKind, SentPreview } from "./connection.ts";
 import { heldBy, perPlayerClasses } from "./fanout.ts";
@@ -24,6 +24,13 @@ import { heldBy, perPlayerClasses } from "./fanout.ts";
  * An event happens on one floor, which the client names (`sceneId`), and
  * reaches only receivers holding that floor, with its `sceneId`, so a
  * device keeps it with that floor (docs/design/design-v1-floors.md 8.2).
+ *
+ * A ruler carried over stairs (docs/design/design-v1-floors.md phase 3,
+ * 4.4) names, inbound only, every token a stop sat on before the landing
+ * and the ends it crossed. It goes only to a receiver who sees every one
+ * of those tokens and holds every one of those ends, and every receiver
+ * gets it without them (`outboundEph`). The server keeps the inbound frame,
+ * which every later judgement of the preview reads.
  */
 
 function previewOf(e: EphEvent): { kind: PreviewKind; id: string; ends: boolean } | null {
@@ -69,6 +76,33 @@ function onItsFloor(state: RoomState, sceneId: string, e: EphEvent): boolean {
   }
 }
 
+/**
+ * Whether a carried ruler's chain holds now (docs/design/design-v1-floors.md
+ * phase 3, 4.4, step 1): every end it names exists, each leads to the floor
+ * of the next, the last to the frame's floor, and every token it names
+ * exists. A frame that fails goes nowhere, as one whose anchor is gone
+ * does (onItsFloor), so stairs removed or a creature deleted ends it.
+ */
+function chainHolds(state: RoomState, sceneId: string, e: EphEvent): boolean {
+  if (e.k !== "ruler" || e.prior === undefined) return true;
+  const ends = e.prior.ends.map((id) => state.floorLinks?.[id]);
+  for (const [i, end] of ends.entries()) {
+    if (end === undefined) return false;
+    if (end.to !== (ends[i + 1]?.sceneId ?? sceneId)) return false;
+  }
+  return e.prior.anchors.every((id) => state.tokens[id] !== undefined);
+}
+
+/**
+ * Whether the sender's frame may go out at all, to anyone: a drag the
+ * sender may make, every token it names on its floor, and a carried
+ * ruler's chain whole.
+ */
+function senderMay(state: RoomState, sender: Connection, sceneId: string, e: EphEvent): boolean {
+  if ((e.k === "dragStart" || e.k === "dragMove" || e.k === "dragEnd") && !mayMove(state, sender, e.tokenId)) return false;
+  return onItsFloor(state, sceneId, e) && chainHolds(state, sceneId, e);
+}
+
 /** Whether the receiver holds the event's floor (heldBy): a player the floors they hold, a DM every floor of their scene. */
 function holds(state: RoomState, receiver: Connection, sceneId: string): boolean {
   return heldBy(state, receiver).has(sceneId);
@@ -86,7 +120,7 @@ function holds(state: RoomState, receiver: Connection, sceneId: string): boolean
 export const MOST_PREVIEWS_SENT = 64;
 export const PREVIEW_STALE_MS = 10_000;
 
-function cancelEvent(kind: PreviewKind, id: string): EphEvent {
+function cancelEvent(kind: PreviewKind, id: string): EphEventOut {
   switch (kind) {
     case "drag":
       return { k: "dragCancel", tokenId: id };
@@ -129,7 +163,7 @@ function mayMove(state: RoomState, sender: Connection, tokenId: string): boolean
  * into view), so a player gets only the position, which the check below
  * already passed (docs/design/design-v1-maps-vision.md 4.3.5).
  */
-function forPlayer(state: RoomState, sceneId: string, e: EphEvent, receiver: Connection): EphEvent {
+function forPlayer(state: RoomState, sceneId: string, e: EphEventOut, receiver: Connection): EphEventOut {
   if (e.k !== "dragMove") return e;
   let out = e;
   // A route's cost reads private facts, such as a Swim Speed, so only the token's owners get it (docs/design/design-v1-movement.md 6.5).
@@ -149,6 +183,11 @@ function forPlayer(state: RoomState, sceneId: string, e: EphEvent, receiver: Con
 
 function tokenVisibleTo(state: RoomState, receiver: Connection, tokenId: string): boolean {
   return projectEntity(keys.token(tokenId), state, receiver.viewer, { sceneId: receiver.sceneId }) !== null;
+}
+
+/** Whether the receiver's copy holds an end of stairs or a ladder (project.ts projectFloorLinkCtx), so it holds the end's floor and the end is not under its fog. */
+function endHeldBy(state: RoomState, receiver: Connection, linkId: string): boolean {
+  return projectEntity(keys.floorLink(linkId), state, receiver.viewer, { sceneId: receiver.sceneId }) !== null;
 }
 
 /**
@@ -216,8 +255,13 @@ function allowed(state: RoomState, receiver: Connection, e: EphEvent, withheld: 
       if (receiver.role === "player" && withheld(receiver)) return false;
       return true;
     }
+    // A carried ruler also needs every token it sat on before the landing and every end it crossed (phase 3, 4.4, step 2),
+    // so it shows no walk from a creature, or through stairs, the receiver does not hold.
     case "ruler":
-      return e.points.every((p) => p.tokenId === undefined || tokenVisibleTo(state, receiver, p.tokenId));
+      return (
+        e.points.every((p) => p.tokenId === undefined || tokenVisibleTo(state, receiver, p.tokenId)) &&
+        (e.prior === undefined || (e.prior.anchors.every((id) => tokenVisibleTo(state, receiver, id)) && e.prior.ends.every((id) => endHeldBy(state, receiver, id))))
+      );
     case "focus":
       return receiver.role === "player";
     // A DM device's camera, for table displays only (docs/design/design-v1-dm-tools.md 3.1). Like every event it goes only to
@@ -242,7 +286,8 @@ export function routeEphemeral(state: RoomState, sender: Connection, sceneId: st
   if (!shared(sender, e)) return;
   // A drag the sender may not make is withheld from everyone, and one
   // already showing (the token was locked mid-drag, say) is cancelled.
-  const senderMay = (!(e.k === "dragStart" || e.k === "dragMove" || e.k === "dragEnd") || mayMove(state, sender, e.tokenId)) && onItsFloor(state, sceneId, e);
+  const may = senderMay(state, sender, sceneId, e);
+  const out = outboundEph(e);
   const heldKey = preview ? `${sender.memberId}|${preview.kind}:${preview.id}` : null;
   const withheld = withheldFor(state, sceneId, e);
   // A bare end names only what stopped, so it goes to those showing that preview. Sent to
@@ -255,8 +300,8 @@ export function routeEphemeral(state: RoomState, sender: Connection, sceneId: st
       if (heldKey && receiver.previewsHeld.delete(heldKey)) receiver.send({ t: "eph", from: sender.memberId, sceneId, e });
       continue;
     }
-    if (senderMay && allowed(state, receiver, e, withheld)) {
-      receiver.send({ t: "eph", from: sender.memberId, sceneId, e: receiver.role === "player" ? forPlayer(state, sceneId, e, receiver) : e });
+    if (may && allowed(state, receiver, e, withheld)) {
+      receiver.send({ t: "eph", from: sender.memberId, sceneId, e: receiver.role === "player" ? forPlayer(state, sceneId, out, receiver) : out });
       if (heldKey && preview) {
         if (preview.ends) receiver.previewsHeld.delete(heldKey);
         else receiver.previewsHeld.set(heldKey, sender.id);
@@ -344,7 +389,10 @@ function withheldFor(state: RoomState, sceneId: string, e: EphEvent): (receiver:
  * receiver showing a drag or a live ruler it may no longer see. Each is
  * judged by its last frame, as it would be routed now, so one whose token
  * left its floor ends, and a receiver that may no longer have it gets its
- * bare cancel.
+ * bare cancel. A carried ruler's last frame is the inbound one, so it is
+ * judged by its chain and by every token and end it names too
+ * (docs/design/design-v1-floors.md phase 3, 4.4). A batch that is neither
+ * still ends a preview over a key it took from a screen (cancelLost).
  */
 export function rejudgePreviews(state: RoomState, connections: Iterable<Connection>): void {
   const all = [...connections];
@@ -353,19 +401,63 @@ export function rejudgePreviews(state: RoomState, connections: Iterable<Connecti
     for (const [key, { kind, id, sceneId, last }] of [...sender.previewsSent]) {
       const heldKey = `${sender.memberId}|${kind}:${id}`;
       const judged = state.scenes[sceneId] !== undefined;
-      const senderMay = (!(last.k === "dragStart" || last.k === "dragMove" || last.k === "dragEnd") || mayMove(state, sender, last.tokenId)) && onItsFloor(state, sceneId, last);
+      const may = senderMay(state, sender, sceneId, last);
       const withheld = withheldFor(state, sceneId, last);
       for (const receiver of all) {
         // Only the screens showing this socket's frame are judged by it.
         if (receiver === sender || receiver.closed || receiver.previewsHeld.get(heldKey) !== sender.id) continue;
         const here = judged && holds(state, receiver, sceneId);
-        if (here && senderMay && allowed(state, receiver, last, withheld)) continue;
+        if (here && may && allowed(state, receiver, last, withheld)) continue;
         release(receiver, heldKey, sender);
         receiver.send({ t: "eph", from: sender.memberId, sceneId, e: cancelEvent(kind, id) });
       }
       // A preview no screen shows from this socket any more keeps no frame.
       if (!showsAnywhere(sender, heldKey, all)) sender.previewsSent.delete(key);
     }
+  }
+}
+
+/** The keys of the tokens and ends a kept frame names: a drag's token, a ruler's stop tokens, and a carried ruler's anchors and ends. */
+function namedKeys(e: EphEvent): EntityKey[] {
+  switch (e.k) {
+    case "dragStart":
+    case "dragMove":
+    case "dragEnd":
+      return [keys.token(e.tokenId)];
+    case "ruler": {
+      const out = e.points.flatMap((p) => (p.tokenId === undefined ? [] : [keys.token(p.tokenId)]));
+      if (e.prior) out.push(...e.prior.anchors.map((id) => keys.token(id)), ...e.prior.ends.map((id) => keys.floorLink(id)));
+      return out;
+    }
+    default:
+      return [];
+  }
+}
+
+/**
+ * The previews a screen shows that the batch just took a named key from
+ * (docs/design/design-v1-floors.md phase 3, 4.4, D-261110-180 and 181): the
+ * fan-out gives the token and end keys whose deleted change it sent this
+ * connection (fanout.ts publishBatch `lost`), and each preview the screen
+ * shows whose kept frame names one of them gets its bare cancel in the same
+ * batch. So a Hide, a light turned off, a door closed, fog added or stairs
+ * removed, and the Undo or Redo of any of them, ends a drag or ruler over
+ * what the screen no longer holds, which no global batch would judge again.
+ * Only this screen's previews are read.
+ */
+export function cancelLost(receiver: Connection, lost: readonly EntityKey[], connections: Iterable<Connection>): void {
+  if (receiver.closed || receiver.previewsHeld.size === 0 || lost.length === 0) return;
+  const gone = new Set(lost);
+  const all = [...connections];
+  for (const [heldKey, senderId] of [...receiver.previewsHeld]) {
+    const sender = all.find((c) => c.id === senderId);
+    const key = heldKey.slice(heldKey.indexOf("|") + 1);
+    const sent = sender?.previewsSent.get(key);
+    if (!sender || !sent || !namedKeys(sent.last).some((k) => gone.has(k))) continue;
+    release(receiver, heldKey, sender);
+    receiver.send({ t: "eph", from: sender.memberId, sceneId: sent.sceneId, e: cancelEvent(sent.kind, sent.id) });
+    // A preview no screen shows from this socket any more keeps no frame, as rejudgePreviews drops one.
+    if (!showsAnywhere(sender, heldKey, all)) sender.previewsSent.delete(key);
   }
 }
 

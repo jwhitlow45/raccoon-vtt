@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { chunkKey, wallChunk } from "#shared/keys.ts";
 import { CHUNK_CELLS, type BuildChunk, type EdgeFeature, type FreeWall, type RoomState, type Viewer } from "#shared/model.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
-import { MAX_EPH_BYTES, type EphEvent, type EphEventOut, type Op, type ServerMessage } from "#shared/protocol.ts";
+import { ephEventOutSchema, ephEventSchema, MAX_EPH_BYTES, outboundEph, serverMessageSchema, type EphEvent, type EphEventOut, type Op, type RulerPriorIn, type ServerMessage } from "#shared/protocol.ts";
 import { canApply } from "#shared/permissions.ts";
 import { liftSubs, remember } from "#shared/discoveryTestutil.ts";
 import { projectState, withheldFromViewer } from "#shared/project.ts";
@@ -17,8 +17,9 @@ import { clipFootprint, sightClipOf } from "#shared/rules/vision.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { DM, P1, P2, actor, character, env, member, reveal, room, scene, token } from "#shared/testutil.ts";
+import { ANA, ATTIC, BREE, GROUND, UPPER, putOp, run, withStairs } from "#shared/floorLinksTestutil.ts";
 import { Connection } from "./connection.ts";
-import { cancelPreviews, MOST_PREVIEWS_SENT, PREVIEW_STALE_MS, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
+import { cancelLost, cancelPreviews, MOST_PREVIEWS_SENT, PREVIEW_STALE_MS, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
 
 /** A connection that has had its snapshot, keeping what it is sent, on the clock given or the real one. */
 function viewer(who: Viewer, now?: () => number): { conn: Connection; got: EphEventOut[] } {
@@ -893,5 +894,193 @@ describe("events on a scene with floors (docs/design/design-v1-floors.md 8.2)", 
     routeEphemeral(state, t.ana.conn, "s1", { k: "ping", x: 2, y: 2 }, t.all);
     assert.equal(t.dm.got.length, 1);
     assert.deepEqual(t.bree.got, []);
+  });
+});
+
+describe("a ruler carried over stairs (docs/design/design-v1-floors.md phase 3, 4.4)", () => {
+  /*
+   * The tower (floorLinksTestutil.ts): Ground floor (s1), Upper floor and
+   * Attic, stairs l1 on Ground up to l2 on Upper, and a ladder l3 on Upper
+   * up to l4 on Attic. Players have reached Upper. Ana (p1) owns Thorn, on
+   * the stairs, and an owl the DM hid on Attic, so she holds Attic and Bree
+   * (p2) does not. A goblin waits on Ground.
+   */
+  function stairs(): RoomState {
+    let s = withStairs();
+    s = run(s, putOp({ id: "l3", pairId: "l4", sceneId: UPPER, to: ATTIC, rect: { x: 8, y: 8, w: 1, h: 1 }, kind: "ladder" }));
+    return {
+      ...s,
+      openFloors: { [UPPER]: { sceneId: UPPER, rev: 1 } },
+      tokens: {
+        ...s.tokens,
+        gob: token("gob", { sceneId: GROUND, x: 8, y: 8 }),
+        owl: token("owl", { sceneId: ATTIC, kind: "npc", name: "Owl", ownerIds: ["p1"], visibility: "dm", x: 12, y: 12 }),
+      },
+    };
+  }
+
+  function seat(who: Viewer): { conn: Connection; got: { sceneId: string; e: EphEventOut }[] } {
+    const got: { sceneId: string; e: EphEventOut }[] = [];
+    const socket = {
+      readyState: 1,
+      OPEN: 1,
+      CONNECTING: 0,
+      send: (text: string) => {
+        const msg = serverMessageSchema.parse(JSON.parse(text));
+        if (msg.t === "eph") got.push({ sceneId: msg.sceneId, e: msg.e });
+      },
+      close: () => undefined,
+      terminate: () => undefined,
+    };
+    const conn = new Connection(socket as never, { sessionId: `s-${who.memberId}-${Math.random()}`, roomId: "ROOM0000", memberId: who.memberId, role: who.role }, "203.0.113.1");
+    conn.held = new Map();
+    conn.sceneId = GROUND;
+    return { conn, got };
+  }
+
+  function seats() {
+    const dm = seat(DM);
+    const coDm = seat({ memberId: "dm2", role: "dm" });
+    const ana = seat(ANA);
+    const bree = seat(BREE);
+    return { dm, coDm, ana, bree, all: [dm.conn, coDm.conn, ana.conn, bree.conn] };
+  }
+
+  /** Thorn's walk carried up the stairs to Upper floor, as Ana's device sends it: a free stop on the landing, then one beyond. */
+  const carried = (over: Partial<RulerPriorIn> = {}, id = "r1"): EphEvent => ({
+    k: "ruler",
+    id,
+    walk: true,
+    points: [{ x: 4, y: 3.5 }, { x: 7.5, y: 3.5 }],
+    prior: { ft: 25, diag: { h: 1, v: 0 }, walker: { size: "medium" }, anchors: ["thorn"], ends: ["l1"], ...over },
+  });
+  const rulers = (got: readonly { e: EphEventOut }[]) => got.filter((g) => g.e.k === "ruler").map((g) => g.e);
+  const kinds = (got: readonly { e: EphEventOut }[]) => got.map((g) => g.e.k);
+
+  test("a carried frame reaches each receiver who sees every anchor and holds every end, without `anchors` and `ends`, the DM's devices too", () => {
+    const state = stairs();
+    const t = seats();
+    const e = carried();
+    routeEphemeral(state, t.ana.conn, UPPER, e, t.all);
+    for (const s of [t.dm, t.coDm, t.bree]) {
+      assert.deepEqual(s.got, [{ sceneId: UPPER, e: outboundEph(e) }], s.conn.memberId);
+      const sent = s.got[0]!.e as { prior?: Record<string, unknown> };
+      assert.deepEqual(Object.keys(sent.prior!).sort(), ["diag", "ft", "walker"], `${s.conn.memberId} gets neither array`);
+    }
+    // The server keeps the inbound frame, which every later judgement reads.
+    assert.deepEqual(t.ana.conn.previewsSent.get("ruler:r1")?.last, e);
+  });
+
+  test("a hidden walker, a hidden other anchor, a fogged crossed end and an end on a floor not held each withhold it from that receiver alone", () => {
+    // (a) Thorn hidden: Ana still sees her own creature, Bree does not.
+    const hidden = stairs();
+    hidden.tokens.thorn = { ...hidden.tokens.thorn!, visibility: "dm" };
+    let t = seats();
+    routeEphemeral(hidden, t.ana.conn, UPPER, carried(), t.all);
+    assert.deepEqual(rulers(t.bree.got), [], "Bree does not see the walker");
+    assert.equal(rulers(t.dm.got).length, 1);
+    // (b) A stop of the ruler sat on the goblin, hidden, before the landing.
+    const goblin = stairs();
+    goblin.tokens.gob = { ...goblin.tokens.gob!, visibility: "dm" };
+    t = seats();
+    routeEphemeral(goblin, t.ana.conn, UPPER, carried({ anchors: ["thorn", "gob"] }), t.all);
+    assert.deepEqual(rulers(t.bree.got), [], "Bree does not see the goblin");
+    assert.equal(rulers(t.coDm.got).length, 1, "a co-DM does");
+    // (c) Ground fogged over the stairs: no player holds the crossed end, though they hold both floors.
+    const fogged = stairs();
+    fogged.scenes[GROUND] = { ...fogged.scenes[GROUND]!, fogEnabled: true };
+    reveal(fogged, GROUND, { x: 0, y: 0, w: 2, h: 2 });
+    t = seats();
+    routeEphemeral(fogged, t.dm.conn, UPPER, { ...carried(), shared: true }, t.all);
+    assert.deepEqual([rulers(t.ana.got), rulers(t.bree.got)], [[], []], "no player holds a fogged end");
+    assert.equal(rulers(t.coDm.got).length, 1);
+    // (d) Down the ladder from Attic onto Upper: Bree holds Upper but not Attic, so not the ladder's top end.
+    t = seats();
+    routeEphemeral(stairs(), t.dm.conn, UPPER, { ...carried({ anchors: ["owl"], ends: ["l4"] }), points: [{ x: 8.5, y: 8.5 }, { x: 10.5, y: 8.5 }], shared: true }, t.all);
+    assert.deepEqual(rulers(t.bree.got), [], "Bree does not hold Attic's end");
+    assert.equal(rulers(t.ana.got).length, 1, "Ana holds Attic through her owl, and sees it");
+  });
+
+  test("a broken chain or a gone anchor goes nowhere, and a screen showing the ruler gets its bare cancel", () => {
+    const state = stairs();
+    for (const [name, over, sceneId] of [
+      ["an end that leads elsewhere", { ends: ["l2"] }, UPPER],
+      ["the last end short of the frame's floor", { ends: ["l1"] }, ATTIC],
+      ["two ends that do not join", { ends: ["l1", "l1"] }, ATTIC],
+      ["an end that does not exist", { ends: ["nope"] }, UPPER],
+      ["a gone anchor", { anchors: ["ghost"] }, UPPER],
+    ] as const) {
+      const t = seats();
+      routeEphemeral(state, t.dm.conn, sceneId, { ...carried(over), shared: true }, t.all);
+      for (const s of [t.coDm, t.ana, t.bree]) assert.deepEqual(s.got, [], `${name}: ${s.conn.memberId}`);
+    }
+    // A whole chain over the ladder too: l1 to Upper, then l3 to Attic.
+    const t = seats();
+    routeEphemeral(state, t.dm.conn, ATTIC, { ...carried({ ends: ["l1", "l3"] }), shared: true }, t.all);
+    assert.equal(rulers(t.ana.got).length, 1, "a joined chain of two goes out");
+    // Shown on Bree's screen, then a frame whose anchor is gone: the bare cancel.
+    const u = seats();
+    routeEphemeral(state, u.ana.conn, UPPER, carried(), u.all);
+    assert.deepEqual(kinds(u.bree.got), ["ruler"]);
+    routeEphemeral(state, u.ana.conn, UPPER, carried({ anchors: ["ghost"] }), u.all);
+    assert.deepEqual(kinds(u.bree.got), ["ruler", "rulerEnd"]);
+  });
+
+  test("a DM's carried ruler is sent only once shared, and a carried frame without its provenance never parses inbound, nor one with it outbound", () => {
+    const t = seats();
+    routeEphemeral(stairs(), t.dm.conn, UPPER, carried(), t.all);
+    assert.deepEqual([...t.coDm.got, ...t.bree.got], [], "a DM's private ruler goes nowhere");
+    const e = carried();
+    assert.equal(ephEventSchema.safeParse(e).success, true);
+    const { anchors: _a, ends: _e, ...bare } = (e as { prior: RulerPriorIn }).prior;
+    assert.equal(ephEventSchema.safeParse({ ...e, prior: bare }).success, false, "inbound needs anchors and ends");
+    assert.equal(ephEventOutSchema.safeParse(e).success, false, "outbound refuses them");
+    assert.equal(ephEventOutSchema.safeParse(outboundEph(e)).success, true);
+  });
+
+  test("judged again after a global batch: a walker hidden, stairs removed or a crossed floor hidden ends it where it may no longer show", () => {
+    const state = stairs();
+    const shown = () => {
+      const t = seats();
+      routeEphemeral(state, t.ana.conn, UPPER, carried(), t.all);
+      assert.deepEqual([kinds(t.bree.got), kinds(t.dm.got)], [["ruler"], ["ruler"]]);
+      return t;
+    };
+    let t = shown();
+    rejudgePreviews({ ...state, tokens: { ...state.tokens, thorn: { ...state.tokens.thorn!, visibility: "dm" } } }, t.all);
+    assert.deepEqual([kinds(t.bree.got), kinds(t.dm.got)], [["ruler", "rulerEnd"], ["ruler"]], "the walker hidden: Bree alone");
+    t = shown();
+    const { l1: _l1, l2: _l2, ...links } = state.floorLinks!;
+    rejudgePreviews({ ...state, floorLinks: links }, t.all);
+    assert.deepEqual([kinds(t.bree.got), kinds(t.dm.got)], [["ruler", "rulerEnd"], ["ruler", "rulerEnd"]], "the stairs removed: every screen");
+    assert.equal(t.ana.conn.previewsSent.size, 0, "and the frame is no longer kept");
+    t = shown();
+    rejudgePreviews(state, t.all);
+    assert.deepEqual(kinds(t.bree.got), ["ruler"], "unchanged, it stays");
+  });
+
+  test("cancelLost ends each preview a screen shows whose kept frame names a key it lost: a carried ruler's anchor or end, a plain ruler's stop, a drag's token", () => {
+    const state = stairs();
+    const t = seats();
+    routeEphemeral(state, t.ana.conn, UPPER, carried(), t.all);
+    routeEphemeral(state, t.dm.conn, GROUND, { k: "ruler", id: "r2", shared: true, points: [{ x: 8, y: 8, tokenId: "gob" }, { x: 12, y: 8 }] }, t.all);
+    routeEphemeral(state, t.dm.conn, GROUND, { k: "dragStart", tokenId: "gob", x: 8, y: 8 }, t.all);
+    assert.deepEqual(kinds(t.bree.got), ["ruler", "ruler", "dragStart"]);
+    cancelLost(t.bree.conn, ["token:imp", "floorLink:l3"], t.all);
+    assert.equal(t.bree.got.length, 3, "keys no preview names end nothing");
+    cancelLost(t.bree.conn, ["token:gob"], t.all);
+    assert.deepEqual(t.bree.got.slice(3).map((g) => g.e).sort((a, b) => a.k.localeCompare(b.k)), [{ k: "dragCancel", tokenId: "gob" }, { k: "rulerEnd", id: "r2" }], "the goblin's ruler and drag end");
+    assert.deepEqual(kinds(t.ana.got), ["ruler", "dragStart"], "on that screen alone");
+    cancelLost(t.bree.conn, ["floorLink:l1"], t.all);
+    assert.deepEqual(t.bree.got.at(-1), { sceneId: UPPER, e: { k: "rulerEnd", id: "r1" } }, "the crossed end lost ends the carried ruler");
+    cancelLost(t.dm.conn, ["token:thorn"], t.all);
+    assert.deepEqual(t.dm.got.at(-1), { sceneId: UPPER, e: { k: "rulerEnd", id: "r1" } }, "an anchor lost ends it");
+    assert.ok(t.ana.conn.previewsSent.has("ruler:r1"), "the co-DM still shows it, so its frame is kept");
+    cancelLost(t.coDm.conn, ["token:thorn"], t.all);
+    assert.ok(!t.ana.conn.previewsSent.has("ruler:r1"), "shown nowhere, it is no longer kept");
+    // A frame already ended goes nowhere twice.
+    const before = t.bree.got.length;
+    cancelLost(t.bree.conn, ["token:gob", "floorLink:l1"], t.all);
+    assert.equal(t.bree.got.length, before);
   });
 });
