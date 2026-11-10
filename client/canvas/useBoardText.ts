@@ -102,16 +102,49 @@ export function useBoardText(input: BoardTextInput): Map<string, TokenText> {
   const layout = useMemo(() => {
     // A new font is a new measure, so labels are laid out afresh, not held to shapes measured in the old one.
     const kept = previous.current.fontEpoch === fontEpoch ? previous.current.placed : undefined;
-    const laid = layoutBoardText({ tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place, ...(left !== undefined && right !== undefined ? { within: { x0: left, x1: right } } : {}) }, kept);
+    const laid = layoutBoardText({ tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place }, kept);
     previous.current = { fontEpoch, placed: laid.placed };
     return laid;
-  }, [tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place, left, right]);
+  }, [tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place]);
+
+  /*
+   * A pan moves the screen's sides over the labels, so it must not lay them
+   * all out again (see the pills above): at 200 tokens that cost 5 ms a frame.
+   * Only while a label crosses a side, the tokens near the screen are laid
+   * out again with the sides, and their labels replace the others'.
+   */
+  const edge = useRef<Map<string, PlacedLabel>>(new Map());
+  const shown = useMemo(() => {
+    if (left === undefined || right === undefined) return layout.out;
+    const crossing = (id: string, text: TokenText) => {
+      const m = layout.meta.get(id);
+      if (!m || !text.label) return false;
+      const x0 = m.ox + text.label.x;
+      const x1 = x0 + text.label.width;
+      return (x0 < left && x1 > left) || (x0 < right && x1 > right);
+    };
+    if (![...layout.out].some(([id, text]) => crossing(id, text))) return layout.out;
+    // A label reaches the screen only from a token within half its widest, past the token's own width.
+    const reach = layout.sizes.namePx * 8;
+    const near = tokens.filter((t) => {
+      const m = layout.meta.get(t.id);
+      return m !== undefined && m.ox + m.widthPx > left - reach && m.ox < right + reach;
+    });
+    const edged = layoutBoardText({ tokens: near, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place, within: { x0: left, x1: right } }, edge.current);
+    edge.current = edged.placed;
+    const out = new Map(layout.out);
+    for (const [id, text] of edged.out) {
+      const was = out.get(id);
+      if (was) out.set(id, { ...was, label: text.label, numberBadge: text.numberBadge });
+    }
+    return out;
+  }, [layout, left, right, tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place]);
 
   return useMemo(() => {
-    if (plateIds.size === 0) return layout.out;
+    if (plateIds.size === 0) return shown;
     const { meta, sizes } = layout;
     const style = focusStyle(sizes);
-    const out = new Map(layout.out);
+    const out = new Map(shown);
     for (const id of plateIds) {
       const m = meta.get(id);
       const text = out.get(id);
@@ -123,7 +156,7 @@ export function useBoardText(input: BoardTextInput): Map<string, TokenText> {
       out.set(id, { ...text, plate: { lines, x: m.widthPx / 2 - size.width / 2, y: top + 2, width: size.width, height: size.height } });
     }
     return out;
-  }, [layout, plateIds, tokens]);
+  }, [layout, shown, plateIds, tokens]);
 }
 
 /**
