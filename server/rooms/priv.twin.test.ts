@@ -616,7 +616,7 @@ describe("stamps draw for a player in their rank among the stamps the copy holds
       await twin.apply("p2", move("b", 6, 7));
       if (twin.name === "door") {
         twin.to(6_500);
-        await twin.apply("dm", { t: "build.stamps", sceneId: "s1", remove: [upper] });
+        await twin.apply("dm", { t: "build.stamps", sceneId: "s1", remove: [lower] });
       }
       twin.to(7_000);
       await twin.reloadP1();
@@ -663,6 +663,35 @@ describe("a label a player remembers", () => {
     same(pair, "a remembered label");
     const snapshot = pair[0].p1.sent.find((m) => (m as { t?: string }).t === "snapshot") as { state: RoomState } | undefined;
     assert.equal(snapshot?.state.labels[altar]?.text, "Altar", "P1's reload holds the label as P1 last saw it");
+  });
+
+  test("the first of two labels deleted behind fog in one twin reaches P1's reload in the same place among P1's labels as in the other", async (t) => {
+    const altar = "0199f0a0-0000-7000-8000-0000000000f1";
+    const well = "0199f0a0-0000-7000-8000-0000000000f2";
+    const pair = await open(t, {
+      edit: (s) => {
+        s.labels = {
+          [altar]: { id: altar, sceneId: "s1", rev: 0, x: 6.5, y: 13.5, text: "Altar", size: 1 },
+          [well]: { id: well, sceneId: "s1", rev: 0, x: 7.5, y: 13.5, text: "Well", size: 1 },
+        };
+      },
+    });
+    await both(pair, async (twin) => {
+      twin.to(2_000);
+      await twin.apply("p1", move("a", IN_SIDE.x, IN_SIDE.y));
+      twin.to(3_000);
+      await twin.apply("p1", move("a", IN_R.x, IN_R.y));
+      if (twin.name === "door") {
+        twin.to(4_000);
+        await twin.apply("dm", { t: "build.label", sceneId: "s1", labelId: altar, label: null });
+      }
+      twin.to(5_000);
+      await twin.reloadP1();
+    });
+    storedDiffers(pair, "the deletion");
+    same(pair, "remembered labels");
+    const snapshot = pair[0].p1.sent.find((m) => (m as { t?: string }).t === "snapshot") as { state: RoomState } | undefined;
+    assert.deepEqual(Object.keys(snapshot?.state.labels ?? {}), [altar, well], "P1's reload holds both labels as P1 last saw them");
   });
 });
 

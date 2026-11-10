@@ -2763,7 +2763,7 @@ function playerLabel(label: Label | null): Label | null {
   return copy;
 }
 
-/** A copy of a flat value with its fields in name order. */
+/** A copy of a flat value with its fields, or of a record with its ids, in name order. */
 function inKeyOrder<T extends object>(value: T): T {
   return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) as T;
 }
@@ -2908,7 +2908,12 @@ function rememberedOnFloorCtx(ctx: Ctx, sceneId: string, field: "labels" | "stam
   return field === "labels" ? playerLabel(shown as Label | null) : shown;
 }
 
-/** The viewer's labels or stamps, as a snapshot holds them: the live ones and those only memory names on each held floor. */
+/**
+ * The viewer's labels or stamps, as a snapshot holds them: the live ones
+ * and those only memory names on each held floor. A player's come in id
+ * order, so one deleted out of their sight, which memory alone still
+ * names, holds the same place as one left alone.
+ */
 function projectByMemoryCtx<T extends Label | Stamp>(ctx: Ctx, field: "labels" | "stamps", live: Record<string, T>, project: (value: T) => T | null): Record<string, T> {
   const out = projectMap(live, project);
   if (ctx.viewer.role === "dm") return out;
@@ -2918,7 +2923,7 @@ function projectByMemoryCtx<T extends Label | Stamp>(ctx: Ctx, field: "labels" |
       if (value) out[id] = value as T;
     }
   }
-  return out;
+  return inKeyOrder(out);
 }
 
 /**
