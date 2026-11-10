@@ -11,7 +11,7 @@ import { RulerLayer } from "./measure/RulerLayer.tsx";
 import { TurnStartLayer } from "./measure/TurnStartLayer.tsx";
 import { LaserLayer } from "./pings/LaserLayer.tsx";
 import { PingLayer } from "./pings/PingLayer.tsx";
-import { BuilderLayer, LightReachLayer } from "./builder/BuilderLayer.tsx";
+import { BuilderLayer, LightReachLayer, LinkDraftLayer } from "./builder/BuilderLayer.tsx";
 import { StampHandles } from "./builder/stamps/StampHandles.tsx";
 import { FogLayer } from "./fog/FogLayer.tsx";
 import { GridLayer } from "./grid/GridLayer.tsx";
@@ -176,6 +176,8 @@ export const LAYERS: readonly LayerDef[] = [
   { id: "trapNames", layer: "overlay", order: 36, iso: "off", Component: TrapNameLayer },
   // Stairs and ladders lie flat under the fog, as a found trap's squares do, and their names stand as trap names do (docs/design/design-v1-floors.md phase 2, 11).
   { id: "floorLinks", layer: "board", order: 36, iso: ["ground", "upright"], Component: LinkLayer },
+  // The builder's draft over an end is drawn after the end, so a refusal's red shows over placed stairs.
+  { id: "linkDraft", layer: "board", order: 37, iso: "ground", Component: LinkDraftLayer },
 ];
 
 /** Everything that runs effects for the board and draws nothing, mounted once outside both drawing trees. */

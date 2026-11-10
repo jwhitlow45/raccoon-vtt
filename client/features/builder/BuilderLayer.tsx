@@ -43,7 +43,6 @@ export function BuilderLayer(props: LayerProps) {
       {props.role === "dm" ? <LightMarks sceneId={props.scene.id} scale={props.scale} /> : null}
       {props.role === "dm" ? <BuildPreview scene={props.scene} scale={props.scale} /> : null}
       {props.role === "dm" ? <LabelMarks /> : null}
-      {props.role === "dm" ? <LinkMarks scene={props.scene} scale={props.scale} /> : null}
     </>
   );
 }
@@ -387,8 +386,14 @@ function LabelMarks() {
  * Between floors' marks (docs/design/design-v1-floors.md phase 2, 7.2): the
  * squares being dragged, in the danger color while the rules refuse them,
  * and a dashed outline around the end whose pane is open. The ends
- * themselves are the link layer's.
+ * themselves are the link layer's. This is its own layer, above the ends:
+ * an end's dark ground and outline drawn over a draft would hide the red
+ * that tells the DM the rules refuse the squares.
  */
+export function LinkDraftLayer(props: LayerProps) {
+  return props.role === "dm" ? <LinkMarks scene={props.scene} scale={props.scale} /> : null;
+}
+
 function LinkMarks(props: { scene: Scene; scale: number }) {
   const { scene, scale } = props;
   const building = useRoomView((s) => s.local.tool === "build");
