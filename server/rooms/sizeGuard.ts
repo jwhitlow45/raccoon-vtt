@@ -1143,7 +1143,7 @@ function sceneOfEntry(name: SceneLevel, key: string, value: unknown): string | u
  * holds (docs/design/design-v1-per-player-vision.md 6.8).
  */
 export function sceneOwnBytes(state: RoomState, sceneId: string): number {
-  let bytes = pitReserve(state, sceneId);
+  let bytes = pitReserve(state, sceneId) + (linkBytesByFloor(state).get(sceneId) ?? 0);
   const widest = widestPartyLayer(state, sceneId);
   for (const name of SCENE_LEVEL) {
     let count = 0;
@@ -1162,6 +1162,33 @@ export function sceneOwnBytes(state: RoomState, sceneId: string): number {
   }
   return bytes;
 }
+
+/**
+ * The stairs and ladders each floor holds, as a DM's projection of its
+ * scene holds them (docs/design/design-v1-floors.md phase 2, 2): every end
+ * exactly, and the field they share counted on each floor that holds one,
+ * which bounds the one field a scene's floors share. A pair's ends lie on
+ * two floors of one scene, so the scene's measure counts both. Kept per
+ * collection object, which is replaced and never changed.
+ */
+function linkBytesByFloor(state: RoomState): ReadonlyMap<string, number> {
+  const links = state.floorLinks;
+  if (links === undefined) return NO_LINKS;
+  let hit = linkSizes.get(links);
+  if (hit) return hit;
+  const counts = new Map<string, number>();
+  const sizes = new Map<string, number>();
+  for (const [key, end] of Object.entries(links)) {
+    counts.set(end.sceneId, (counts.get(end.sceneId) ?? 0) + 1);
+    sizes.set(end.sceneId, (sizes.get(end.sceneId) ?? 0) + fieldBytes(key) + valueBytes(end));
+  }
+  hit = new Map([...counts].map(([sceneId, count]) => [sceneId, 1 + fieldBytes("floorLinks") + 2 + sizes.get(sceneId)! + count - 1]));
+  if (!isWritable(links)) linkSizes.set(links, hit);
+  return hit;
+}
+
+const NO_LINKS: ReadonlyMap<string, number> = new Map();
+const linkSizes = new WeakMap<object, ReadonlyMap<string, number>>();
 
 /** A per-player scene's party layer at its widest, or null on any other scene, whose layer counts as it is. */
 function widestPartyLayer(state: RoomState, sceneId: string): Widest | null {
@@ -1201,10 +1228,11 @@ function allScenesOwnBytes(state: RoomState): Map<string, number> {
     sizes.get(id)![layer] = widest.bytes;
   }
   const out = new Map<string, number>();
+  const links = linkBytesByFloor(state);
   for (const id of Object.keys(state.scenes)) {
     const count = counts.get(id)!;
     const size = sizes.get(id)!;
-    let bytes = pitReserve(state, id);
+    let bytes = pitReserve(state, id) + (links.get(id) ?? 0);
     SCENE_LEVEL.forEach((name, i) => (bytes += fieldBytes(name) + 2 + size[i]! + Math.max(0, count[i]! - 1)));
     out.set(id, bytes);
   }
@@ -1330,6 +1358,9 @@ function entryKeyBytes(key: EntityKey): number {
       return jsonKeyBytes(parsed.id) + jsonKeyBytes("sounds") + 2;
     case "playlist":
       return jsonKeyBytes(parsed.id) + jsonKeyBytes("playlists") + 2;
+    // A DM's projection holds stairs only while its floors hold one, so a floor's first end brings the field too.
+    case "floorLink":
+      return jsonKeyBytes(parsed.id) + jsonKeyBytes("floorLinks") + 2;
     case "log":
     case "trapLog":
     case "trapSeen":
