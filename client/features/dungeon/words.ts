@@ -247,3 +247,66 @@ export function floorOutcomeText(outcome: DungeonOutcome, name: string, scene: s
   }
 }
 
+/*
+ * Per-room edits (docs/design: dungeon generator phase 3, 4.1 to 4.4): the
+ * room panel's rows, the reports a pin leaves on the next plan, and the
+ * edits line under the seed.
+ */
+
+export const EDIT_ROOMS = "Edit rooms";
+export const HEIGHT_HELP = "Each door gets a straight flight of stairs. Where they do not fit, the room stays flat.";
+export const ENTRANCE_FLAT = "The entrance room stays flat.";
+export const CAVE_NO_DOORS = "Caves have no doors.";
+export const NO_TRAP_FITS = "No trap fits in this room.";
+export const ROOM_GONE = { title: "Room gone", line: "This room is gone in this dungeon." } as const;
+/** An edit that took a hex plan past its wall budget, undone (4.2). */
+export const EDIT_OVER_WALLS = "That change needs more walls than a hex scene holds, so it was undone.";
+export const EDITS_DROPPED = "Room edits dropped.";
+export const BRING_BACK = "Bring them back";
+export const DROP_EDITS = "Drop edits";
+
+/** "Room 3". */
+export function roomTitle(n: number): string {
+  return `Room ${n}`;
+}
+
+const SIDE_NAMES = { n: "North", e: "East", s: "South", w: "West" } as const;
+
+/** A door's row name: "West, to room 1", or "South, to the way in" for the entrance's way out of the map or a wing's join. */
+export function doorName(side: keyof typeof SIDE_NAMES, to: number | "edge" | "join"): string {
+  return `${SIDE_NAMES[side]}, to ${typeof to === "number" ? `room ${to}` : "the way in"}`;
+}
+
+/** The seed row's line while edits stand: "Edited: 1 room. The seed alone makes this dungeon without your edits." */
+export function editedLine(rooms: number): string {
+  return `Edited: ${rooms} ${rooms === 1 ? "room" : "rooms"}. The seed alone makes this dungeon without your edits.`;
+}
+
+/** The rows a report stands under in the room panel. */
+export type ReportRow = "height" | "doors" | "trap" | "dressing" | "lit" | "other";
+
+/**
+ * Which row each report belongs under, by what it speaks of (4.1): stairs
+ * under Height, doors under Doors, traps under Trap, stamps under Dressing
+ * and lights under Lit. A room gone and the wall budget's undo stand under
+ * every row.
+ */
+export function reportRow(line: string): ReportRow {
+  if (line.startsWith("No room for its stairs")) return "height";
+  if (/\bdoor\b/.test(line)) return "doors";
+  if (/\btrap\b/.test(line)) return "trap";
+  if (/\bstamp\b/.test(line)) return "dressing";
+  if (/\blight\b/.test(line)) return "lit";
+  return "other";
+}
+
+export function reportsByRow(lines: readonly string[]): Record<ReportRow, string[]> {
+  const out: Record<ReportRow, string[]> = { height: [], doors: [], trap: [], dressing: [], lit: [], other: [] };
+  for (const line of lines) out[reportRow(line)].push(line);
+  return out;
+}
+
+/** The preview's name with a room picked: "Room 3 selected." after the dungeon's own (7). */
+export function selectedName(name: string, n: number | null): string {
+  return n === null ? name : `${name} Room ${n} selected.`;
+}
