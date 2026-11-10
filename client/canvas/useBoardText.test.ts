@@ -58,3 +58,25 @@ describe("a pointed pill in the label pass (docs/design/design-v1-polish.md R4)"
     });
   }
 });
+
+describe("a label beside the screen's edge (LP36-B polish)", () => {
+  const long = { ...token("bree", { x: 1, y: 8 }), name: "Bree the Extraordinarily Long Named Wanderer" };
+  const body = [{ box: long.box, owner: "bree", kind: "body" as const }];
+  // The screen's left lies half a cell left of the token, as on a phone with the map panned until the token stands near the edge.
+  const within = { x0: long.box.x0 - scale / 2, x1: long.box.x0 + 280 };
+
+  test("a name wider than the room is cut inside the screen instead of running past its edge", () => {
+    const loose = placeLabels([long], body, measureLabel).get("bree")!;
+    assert.ok(loose.box.x0 < within.x0, "with no screen the label runs past its left edge, so this case tests nothing");
+    const kept = placeLabels([long], body, measureLabel, undefined, within).get("bree")!;
+    assert.ok(kept.lines.length > 0, "the name still shows");
+    assert.ok(kept.box.x0 >= within.x0 && kept.box.x1 <= within.x1, `${JSON.stringify(kept.box)} leaves ${JSON.stringify(within)}`);
+    assert.ok(kept.cut, "cut with an ellipsis");
+  });
+
+  test("a name that fits the screen is placed as it is without one", () => {
+    const short = { ...token("goblin", { x: 3, y: 8 }) };
+    const obstacles = [{ box: short.box, owner: "goblin", kind: "body" as const }];
+    assert.deepEqual(placeLabels([short], obstacles, measureLabel, undefined, { x0: 0, x1: 1000 }), placeLabels([short], obstacles, measureLabel));
+  });
+});

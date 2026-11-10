@@ -89,19 +89,23 @@ export type BoardTextInput = {
    * at its cell.
    */
   place?: (t: ViewToken) => { x: number; y: number; ring?: Box };
+  /** The screen's left and right in the layout's pixels (Top-down's board only), which a label stays between so a long name beside the screen's edge is cut by the layout, not by the screen. */
+  within?: Pick<Box, "x0" | "x1">;
 };
 
 export function useBoardText(input: BoardTextInput): Map<string, TokenText> {
   // The last layout and the font it was measured in, read and written inside the layout on purpose: its shapes steer the next one, never trigger one.
   const previous = useRef<{ fontEpoch: number; placed: Map<string, PlacedLabel> }>({ fontEpoch: input.fontEpoch, placed: new Map() });
   const { tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, mapLabels, lockShown, fontEpoch, place } = input;
+  const left = input.within?.x0;
+  const right = input.within?.x1;
   const layout = useMemo(() => {
     // A new font is a new measure, so labels are laid out afresh, not held to shapes measured in the old one.
     const kept = previous.current.fontEpoch === fontEpoch ? previous.current.placed : undefined;
-    const laid = layoutBoardText({ tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place }, kept);
+    const laid = layoutBoardText({ tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place, ...(left !== undefined && right !== undefined ? { within: { x0: left, x1: right } } : {}) }, kept);
     previous.current = { fontEpoch, placed: laid.placed };
     return laid;
-  }, [tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place]);
+  }, [tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place, left, right]);
 
   return useMemo(() => {
     if (plateIds.size === 0) return layout.out;
@@ -128,7 +132,7 @@ export function useBoardText(input: BoardTextInput): Map<string, TokenText> {
  * and sides hold while they fit.
  */
 export function layoutBoardText(input: Omit<BoardTextInput, "plateIds">, kept: Map<string, PlacedLabel> | undefined) {
-  const { tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, place } = input;
+  const { tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, place, within } = input;
   const sizes = boardSizes(scale);
   const out = new Map<string, TokenText>();
   const labelInputs: LabelInput[] = [];
@@ -195,7 +199,7 @@ export function layoutBoardText(input: Omit<BoardTextInput, "plateIds">, kept: M
       style: labelStyle(sizes, widthPx, scale),
     });
   }
-  const placed = placeLabels(labelInputs, obstacles, measureLabel, kept);
+  const placed = placeLabels(labelInputs, obstacles, measureLabel, kept, within);
   for (const [id, p] of placed) {
     const m = meta.get(id)!;
     const text = out.get(id)!;

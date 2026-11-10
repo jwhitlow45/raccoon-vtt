@@ -450,13 +450,15 @@ const STEP_Y = 4;
  * `obstacles` holds every visible token's body (tiny ones too, which have
  * no label of their own) and marks, and the other layers' pills. A label
  * keeps off all of them but its own body. `previous` is the last layout's
- * result, whose shapes and sides hold as KEEP_CLEARANCE_PX says.
+ * result, whose shapes and sides hold as KEEP_CLEARANCE_PX says. `within`
+ * is the screen's left and right in the same pixels, where the viewer has one.
  */
 export function placeLabels(
   inputs: readonly LabelInput[],
   obstacles: readonly Obstacle[],
   measure: Measure,
   previous?: ReadonlyMap<string, PlacedLabel>,
+  within?: Pick<Box, "x0" | "x1">,
 ): Map<string, PlacedLabel> {
   const natural = new Map(inputs.map((input) => [input.id, measure(fullName(input.name, input.number), SHAPE_PX)]));
   const order = [...inputs].sort(
@@ -473,6 +475,8 @@ export function placeLabels(
     const s = input.style;
     const gap = s.gapPx;
     const free = (box: Box, clearance: number) => {
+      // A label stays between the screen's sides, so a long name beside the edge is cut with an ellipsis or goes to another side, never cut off by the screen.
+      if (within && (box.x0 < within.x0 || box.x1 > within.x1)) return false;
       const probe = grow(box, clearance);
       return !placed.some((p) => overlaps(probe, p)) && !obstacles.some((o) => !(o.kind === "body" && o.owner === input.id) && overlaps(probe, o.box));
     };
