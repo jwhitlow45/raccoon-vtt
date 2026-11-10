@@ -98,13 +98,21 @@ test("FL3S: on a floor 140 by 60 with a remembered Large crypt, the dialog opens
   assert.deepEqual([open.size, open.across, open.down, open.theme, open.dressing], ["custom", 100, 60, "crypt", "full"]);
   assert.deepEqual(sidesOf(open), { w: 100, h: 60 });
   assert.equal(open.rooms, roomsDefault(open), "rooms left at Large's default move to the floor's");
-  // The DM changes the size and the theme, each change saved, then cancels.
   const kept = keptSize(saved);
+  // The dialog saves as it opens, so a Cancel at once leaves this.
+  saveChoices("ROOM1", open, storage, kept);
+  assert.equal(loadChoices("ROOM1", storage)!.rooms, large.rooms, "rooms at the floor's default are saved as Large's (review FL3-OPUS-1)");
+  // The DM changes the size and the theme, each change saved, then cancels.
   const changed = { ...withSize(open, { across: 80 }), theme: "mine" as const };
   saveChoices("ROOM1", changed, storage, kept);
   const after = loadChoices("ROOM1", storage)!;
   assert.deepEqual([after.size, after.across, after.down], [large.size, large.across, large.down], "the remembered size stays Large");
   assert.equal(after.theme, "mine", "every other choice is remembered");
+  assert.equal(after.rooms, large.rooms, "and the rooms still at the default stay Large's");
+  const typed = { ...changed, rooms: 7 };
+  saveChoices("ROOM1", typed, storage, kept);
+  assert.equal(loadChoices("ROOM1", storage)!.rooms, 7, "a typed count is remembered as typed");
+  saveChoices("ROOM1", changed, storage, kept);
   const next = startChoices(after, { w: 30, h: 30 });
   assert.equal(next.size, "large", "the next New scene dungeon opens on Large");
 });

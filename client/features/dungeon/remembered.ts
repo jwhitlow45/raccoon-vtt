@@ -117,7 +117,10 @@ export function loadChoices(roomId: string, storage: Storage | null = browserSto
  * Kept field by field, so no seed or anything else rides along. A storage
  * that refuses loses only the convenience. `size` is a floor's kept size,
  * written in place of the choices' own, so neither Make nor Cancel on a
- * floor changes the size the next New scene dungeon opens on.
+ * floor changes the size the next New scene dungeon opens on. Rooms still at
+ * the floor's default are kept at that size's default for the same reason:
+ * the dialog saves as it opens, and a count saved beside another size would
+ * read as typed (review FL3-OPUS-1).
  */
 export function saveChoices(roomId: string, c: Choices, storage: Storage | null = browserStorage(), size?: KeptSize): void {
   const kept: Choices = {
@@ -125,7 +128,7 @@ export function saveChoices(roomId: string, c: Choices, storage: Storage | null 
     size: size?.size ?? c.size,
     across: size?.across ?? c.across,
     down: size?.down ?? c.down,
-    rooms: c.rooms,
+    rooms: size && c.rooms === roomsDefault(c) ? roomsDefault({ ...c, ...size }) : c.rooms,
     density: c.density,
     corridors: c.corridors,
     wide: c.wide,
