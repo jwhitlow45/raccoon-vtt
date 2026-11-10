@@ -339,7 +339,12 @@ export class Board {
    */
   halo(k: number): boolean {
     if (this.roomAt[k] !== 0) return false;
-    if (this.hex) return this.lattice.halo(k).some((n) => this.roomAt[n] !== 0);
+    if (this.hex) {
+      // A plain loop: corridors ask this of every cell on every route.
+      const near = this.lattice.halo(k);
+      for (let i = 0; i < near.length; i++) if (this.roomAt[near[i]!] !== 0) return true;
+      return false;
+    }
     const x = k % this.W;
     const y = (k - x) / this.W;
     return (x > 0 && this.roomAt[k - 1] !== 0) || (x < this.W - 1 && this.roomAt[k + 1] !== 0) || (y > 0 && this.roomAt[k - this.W] !== 0) || (y < this.H - 1 && this.roomAt[k + this.W] !== 0);

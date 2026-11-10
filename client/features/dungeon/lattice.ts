@@ -87,11 +87,22 @@ export function hexStep(r: number, dir: number): readonly [number, number] {
  */
 export function latticeFor(grid: GridKind, bounds: { w: number; h: number }): Lattice {
   if (!isHexGrid(grid)) return squareLattice(grid, bounds.w, bounds.h);
+  // A fit plans up to 12 times on one lattice, and a hex lattice works out every cell's halo when made.
+  const id = `${grid}:${bounds.w}:${bounds.h}`;
+  const known = HEX_LATTICES.get(id);
+  if (known) return known;
   const g = hexGridOf(grid);
   const span = sceneHexSpan(g, bounds);
   const columns = grid === "hexColumns";
-  return hexLattice(grid, g, columns ? span.rows : span.cols, columns ? span.cols : span.rows);
+  const made = hexLattice(grid, g, columns ? span.rows : span.cols, columns ? span.cols : span.rows);
+  if (HEX_LATTICES.size >= LATTICES_KEPT) HEX_LATTICES.delete(HEX_LATTICES.keys().next().value!);
+  HEX_LATTICES.set(id, made);
+  return made;
 }
+
+/** Hex lattices kept for reuse, the oldest dropped first. A lattice holds nothing a plan writes. */
+const HEX_LATTICES = new Map<string, Lattice>();
+const LATTICES_KEPT = 4;
 
 function squareLattice(kind: GridKind, W: number, H: number): Lattice {
   const inMap = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H;
