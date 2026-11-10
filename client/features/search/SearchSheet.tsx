@@ -20,7 +20,7 @@ import { dmMenuSections, itemsOf, youMenuSections, type ChipAnswer, type ChipEnv
 import { focusMap, mapFocusSlot } from "../../pages/mapFocus.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { keyText, letterOf, searchSheetSlot, setSearchSheet, SHORTCUTS, useKeyHint, useShortcutKeys, withKey, type KeyPress, type ShortcutEnv, type ShortcutTool } from "../../state/shortcuts.ts";
-import type { RoomView } from "../../state/types.ts";
+import type { RoomActions, RoomView } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { useLayoutSize } from "../device/layout.ts";
 import { useUiScale } from "../device/settings.ts";
@@ -38,7 +38,8 @@ import { buildIndex, catalogsFor, recordPage, rollWords, searchResults, type Ind
 import { fold, parseQuery } from "./match.ts";
 import { loadRecentPicks, recentPicksSlot, rememberPick } from "./recent.ts";
 import { openAt } from "./route.ts";
-import { KIND_LABEL } from "./words.ts";
+import { floorChoices, sendMoveToFloor } from "../tokens/moveToFloor.ts";
+import { KIND_LABEL, ROW_WORDS } from "./words.ts";
 
 /*
  * The room search's sheet (docs/design/design-v1-qol.md 5 and 7): the field
@@ -244,6 +245,7 @@ export type PickStep =
   | { t: "tokenPanel"; tokenId: string }
   | { t: "floor"; sceneId: string }
   | { t: "condition"; condition: string; remove: boolean }
+  | { t: "moveToFloor"; tokenId: string; floorId: string }
   | { t: "item"; itemId: string }
   | { t: "roll"; formula: string; label?: string; sources?: AdvantageSource[] }
   /** The text the Dice field takes: the formula, then any words typed after it. */
@@ -269,6 +271,8 @@ export function pickStep(act: SearchAct, only: boolean): PickStep {
       return { t: "route", route: act.route ?? { panel: "characters", page: recordPage("character", act.characterId) } };
     case "condition":
       return only ? { t: "route", route: TOKEN_CONDITIONS } : { t: "condition", condition: act.condition, remove: act.remove };
+    case "moveToFloor":
+      return only ? { t: "token", tokenId: act.tokenId } : { t: "moveToFloor", tokenId: act.tokenId, floorId: act.floorId };
     case "item":
       return only ? { t: "route", route: onlyGoes(act.twin) } : { t: "item", itemId: act.itemId };
     case "roll":
@@ -291,6 +295,17 @@ export function conditionOp(effects: readonly Pick<Effect, "id" | "key">[], step
   if (existing) return null;
   const key = step.condition as Effect["key"];
   return { t: "actor.effect.add", target, effect: { id: newId(), key, ...(key === "exhaustion" ? { level: 1 } : {}) } };
+}
+
+/**
+ * A Move to floor row's pick, judged again against the room as it is now: the floor may have gone off or away since
+ * the row was built. Returns the words of a refusal, which the sheet toasts, and sends nothing then.
+ */
+export function moveToFloorPick(actions: Pick<RoomActions, "dispatch" | "newId" | "showFloor">, view: NonNullable<RoomView["view"]>, step: { tokenId: string; floorId: string }): string | null {
+  const token = view.tokens[step.tokenId];
+  const choice = token ? floorChoices(view, [token]).find((c) => c.floor.id === step.floorId) : undefined;
+  if (!token || !choice) return ROW_WORDS.floorGone;
+  return sendMoveToFloor(actions, view, [token], choice);
 }
 
 /** The selection's effects and its target, for a condition's pick: the token's own creature, or the character it stands for. */
@@ -726,6 +741,9 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
       focusOutlineRow(row, { scope, ui, actions, sceneId: floor, tokens: s.view.tokens });
     } else if (step.t === "floor") {
       actions.showFloor(step.sceneId);
+    } else if (step.t === "moveToFloor") {
+      const refusal = s.view ? moveToFloorPick(actions, s.view, step) : ROW_WORDS.floorGone;
+      if (refusal !== null) ui.notify(refusal, "error");
     } else {
       const on = selectionEffects(s);
       const op = on ? conditionOp(on.effects, step, on.target, () => actions.newId()) : null;

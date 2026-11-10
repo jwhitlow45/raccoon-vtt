@@ -6,7 +6,7 @@ import { DM } from "#shared/testutil.ts";
 import { RoomScope } from "../../state/scope.ts";
 import type { SearchEntry } from "./entry.ts";
 import { searchResults } from "./index.ts";
-import { DM_VIEW, indexOf, keysOf, PAT_VIEW, seededRoom, viewOf } from "./search.testutil.ts";
+import { DM_VIEW, indexOf, keysOf, PAT_VIEW, seededRoom, towerRoom, towerView, viewOf } from "./search.testutil.ts";
 
 /*
  * The room search's sheet (docs/design/design-v1-qol.md 5 and 7): what its
@@ -22,6 +22,7 @@ const {
   conditionOp,
   itemLook,
   listGroups,
+  moveToFloorPick,
   loadRows,
   markedTitle,
   PanelsSearchField,
@@ -280,6 +281,39 @@ describe("what a pick does (design-v1-qol.md 5, Acting, D-261106-144)", () => {
 
   test("a floor row shows its floor, on Enter and on Shift+Enter alike", () => {
     for (const only of [false, true]) assert.deepEqual(pickStep({ t: "floor", sceneId: "upper" }, only), { t: "floor", sceneId: "upper" });
+  });
+
+  test("a Move to floor row moves on Enter, and on Shift+Enter selects and frames the creature", () => {
+    const act = { t: "moveToFloor", tokenId: "thorn", floorId: "attic" } as const;
+    assert.deepEqual(pickStep(act, false), { t: "moveToFloor", tokenId: "thorn", floorId: "attic" });
+    assert.deepEqual(pickStep(act, true), { t: "token", tokenId: "thorn" });
+  });
+
+  test("a Move to floor pick is judged again: a floor gone off or away answers with its reason and sends nothing, an open one sends the list's ops and shows the floor", () => {
+    const sent: unknown[] = [];
+    const shown: (string | null)[] = [];
+    const actions = {
+      dispatch: (op: unknown, o?: { onAnswer?: () => void }) => {
+        sent.push(op);
+        o?.onAnswer?.();
+        return 1;
+      },
+      newId: () => "g1",
+      showFloor: (id: string | null) => void shown.push(id),
+    };
+    const room = towerRoom();
+    const view = towerView(room, DM, "upper", ["ground", "upper", "attic"]).view!;
+    assert.equal(moveToFloorPick(actions, view, { tokenId: "thorn", floorId: "ground" }), null);
+    assert.deepEqual(sent, [{ t: "token.update", tokenId: "thorn", patch: { sceneId: "ground" } }]);
+    assert.deepEqual(shown, ["ground"]);
+    sent.length = 0;
+    shown.length = 0;
+    room.scenes.attic!.bounds = { w: 3, h: 3 };
+    const small = towerView(room, DM, "upper", ["ground", "upper", "attic"]).view!;
+    assert.equal(moveToFloorPick(actions, small, { tokenId: "thorn", floorId: "attic" }), "Outside Attic");
+    assert.equal(moveToFloorPick(actions, small, { tokenId: "thorn", floorId: "nowhere" }), "That floor is gone");
+    assert.equal(moveToFloorPick(actions, small, { tokenId: "nobody", floorId: "ground" }), "That floor is gone");
+    assert.deepEqual([sent, shown], [[], []]);
   });
 
   test("a token is selected and framed, or its panel opens, and a key, a character and a field act the same either way", () => {

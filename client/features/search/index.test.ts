@@ -316,6 +316,39 @@ describe("several floors (design-v1-floors.md 18.7, D-261107-217)", () => {
     assert.deepEqual(rows(DM_VIEW()), [], "a scene without floors");
   });
 
+  test("a DM's one selected creature gets one Move to row for each floor it can go to, near, with the consequence of a floor players have not reached", () => {
+    const room = towerRoom();
+    room.tokens.ana = { ...room.tokens.moth!, id: "ana", name: "Ana", sceneId: "ground", kind: "pc", partyVision: true, x: 4, y: 4 };
+    room.tokens.thorn = { ...room.tokens.thorn!, sceneId: "ground", x: 4, y: 4, attached: undefined };
+    room.tokens.ana = { ...room.tokens.ana, attached: { to: "thorn", kind: "ride" } };
+    const withSelection = (selectedId: string, held = all) => {
+      const v = towerView(room, DM, "ground", held);
+      return { ...v, local: { ...v.local, selectedId, selectedIds: [selectedId] } } as RoomView;
+    };
+    const rows = (v: RoomView) => indexOf(v).items.map((i) => i.entry).filter((e) => e.id.startsWith("moveToFloor:"));
+    // Thorn carries Ana: Upper and Attic are not open, so each row says it opens the floor.
+    assert.deepEqual(rows(withSelection("thorn")).map((e) => [e.id, e.title, e.where, e.icon, e.near, e.act]), [
+      ["moveToFloor:attic", "Move to Attic", "Thorn · Opens Attic to players", "floors", true, { t: "moveToFloor", tokenId: "thorn", floorId: "attic" }],
+      ["moveToFloor:upper", "Move to Upper floor", "Thorn · Opens Upper floor to players", "floors", true, { t: "moveToFloor", tokenId: "thorn", floorId: "upper" }],
+    ]);
+    // A creature with no party member moves without a consequence, and the floor it stands on has no row.
+    const moth = rows(withSelection("moth"));
+    assert.deepEqual(moth.map((e) => [e.title, e.where]), [["Move to Upper floor", "Moth"], ["Move to Ground floor", "Moth"]]);
+    assert.equal(indexOf(withSelection("thorn")).items.find((i) => i.entry.id === "moveToFloor:ground"), undefined);
+  });
+
+  test("no Move to row for a floor that is off, without a selection, with two selected, or on a scene without floors", () => {
+    const room = towerRoom();
+    room.scenes.attic!.bounds = { w: 3, h: 3 };
+    const v = towerView(room, DM, "ground", all);
+    const selected = (ids: string[]) => ({ ...v, local: { ...v.local, selectedId: ids[ids.length - 1] ?? null, selectedIds: ids } }) as RoomView;
+    const rows = (x: RoomView) => indexOf(x).items.map((i) => i.entry.id).filter((id) => id.startsWith("moveToFloor:"));
+    assert.deepEqual(rows(selected(["thorn"])), ["moveToFloor:ground"], "Thorn at 6, 6 does not fit the small Attic, and stands on Upper");
+    assert.deepEqual(rows(selected([])), []);
+    assert.deepEqual(rows(selected(["thorn", "moth"])), []);
+    assert.deepEqual(rows(viewOf(seededRoom(), DM, { selectedId: "g1" })), []);
+  });
+
   test("typing a floor's name finds its row", () => {
     const dm = indexOf(towerView(towerRoom(), DM, "ground", all));
     assert.equal(rowsOf(dm, "attic").find((e) => e.kind === "floor")?.id, "floor:attic");

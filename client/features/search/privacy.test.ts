@@ -165,6 +165,7 @@ describe("a player's search holds only what that player may see and do (design-v
           for (const w of planted.notes) assert.ok(!text.includes(w), `invariant 2: ${entry.id} holds note text`);
           if (ROOM_KINDS.has(entry.id.split(":")[0]!)) assert.ok(heldBy(entry.id, v, owns, selectedId), `invariant 3: ${entry.id}`);
           assert.ok(!DM_KINDS.has(entry.kind), `invariant 4: ${entry.id}`);
+          assert.ok(!entry.id.startsWith("moveToFloor:"), `T7: ${entry.id}`);
           for (const w of dm.words) assert.ok(!text.includes(w), `invariant 5: ${entry.id} holds the DM catalog's "${w}"`);
         }
 
@@ -213,6 +214,21 @@ describe("a player's search and the floors they do not hold (design-v1-floors.md
         assert.deepEqual(out.t === "typed" && out.rows.map((e) => e.id), [], `seed ${seed}: typing "${w}"`);
       }
       assert.ok(!index.items.some((i) => i.entry.kind === "floor"), "one held floor offers no Floor row");
+    }
+  });
+});
+
+describe("a player's search offers no Move to floor (floors phase 3 design, T7)", () => {
+  test("a player holding both floors, their own creature selected, gets floors to show but no moveToFloor row", () => {
+    const room = towerRoom();
+    room.tokens.thorn!.ownerIds = ["p1"];
+    const held = ["ground", "upper"];
+    const base = towerView(room, P1, "upper", held);
+    for (const selectedId of ["thorn", "g1", null]) {
+      const view = { ...base, local: { ...base.local, selectedId, selectedIds: selectedId ? [selectedId] : [] } } as RoomView;
+      const index = buildIndex({ state: view, wide: true, keys: keysOf(view), catalogs: [], monsters: null, soundFiles: true });
+      assert.ok(index.items.some((i) => i.entry.kind === "floor"), "the Floor rows are there");
+      assert.deepEqual(index.items.map((i) => i.entry.id).filter((id) => id.startsWith("moveToFloor:")), [], String(selectedId));
     }
   });
 });

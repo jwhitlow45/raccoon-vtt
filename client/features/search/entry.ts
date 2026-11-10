@@ -66,6 +66,8 @@ export type SearchAct =
   | { t: "floor"; sceneId: string }
   | { t: "character"; characterId: string; route?: SearchRoute }
   | { t: "condition"; condition: string; remove: boolean }
+  /** Moves the selected creature to a floor of its scene at once. Shift+Enter selects and frames it instead, its action bar holding Move to floor. */
+  | { t: "moveToFloor"; tokenId: string; floorId: string }
   /** `twin` is the panel control that does the same, which Shift+Enter goes to without pressing (design-v1-qol.md 5, Acting). */
   | { t: "item"; itemId: string; twin: SearchRoute }
   /** `label` and `sources` are the words typed after the formula, which the Dice panel's Roll reads the same way. */

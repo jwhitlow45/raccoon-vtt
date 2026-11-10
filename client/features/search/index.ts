@@ -11,6 +11,7 @@ import type { RoomView } from "../../state/types.ts";
 import { panelsFor, SOUND_PANEL, type PanelsForOptions } from "../panels.ts";
 import type { DmMenuView } from "../../pages/chipMenus.ts";
 import { ownsCharacter, tokenAccess } from "../tokens/access.ts";
+import { floorChoices } from "../tokens/moveToFloor.ts";
 import { EVERYONE } from "./catalog/everyone.ts";
 import type { Catalog, CatalogEntry, FieldDef, FieldPlace, PanelWords, SearchContext, SearchRole } from "./catalog/types.ts";
 import type { DmCatalog, DmCatalogState } from "./dmCatalog.ts";
@@ -286,6 +287,23 @@ export function buildIndex(input: IndexInput): SearchIndex {
         icon: "combat",
         near: true,
         act: { t: "condition", condition: c.key, remove: has },
+      });
+    }
+  }
+
+  // One row for each floor the DM's one selected creature can go to, acting at once as the condition rows do (floors3 design 5).
+  if (role === "dm" && withFloors && selected && floorIds.has(selected.sceneId) && state.local.selectedIds.length <= 1) {
+    const name = displayName(selected);
+    for (const c of floorChoices(view, [selected])) {
+      if (c.off !== null) continue;
+      b.entry({
+        id: `moveToFloor:${c.floor.id}`,
+        kind: "action",
+        title: ROW_WORDS.moveTo(c.name),
+        where: ROW_WORDS.moveWhere(name, c.warning !== null ? c.name : null),
+        icon: "floors",
+        near: true,
+        act: { t: "moveToFloor", tokenId: selected.id, floorId: c.floor.id },
       });
     }
   }

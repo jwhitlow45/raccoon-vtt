@@ -142,6 +142,11 @@ export const ROW_WORDS = {
   /** A condition the selection lacks, and one it has. */
   addTo: (name: string) => `Add to ${name}`,
   removeFrom: (name: string) => `Remove from ${name}`,
+  /** A Move to floor row: its title, and its second line, which keeps the warning that the move opens the floor to players. */
+  moveTo: (floor: string) => `Move to ${floor}`,
+  moveWhere: (creature: string, opensFloor: string | null) => (opensFloor === null ? creature : `${creature} · Opens ${opensFloor} to players`),
+  /** The toast when a floor went off since the row was built, and when it is gone. */
+  floorGone: "That floor is gone",
   /** A key row's where: a tool's, and the rest. */
   toolbar: "Toolbar",
   shortcuts: "Shortcuts",
