@@ -31,6 +31,7 @@ import type { RollModeOverride } from "../dice/rollMode.ts";
 import { presetFor } from "../dice/presets.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useRollBlocked, useRollOption, useRowResult } from "../dice/useRollOption.ts";
+import { useTurnWait } from "../combat/turnWait.ts";
 import { actorOf, openRecord } from "../combat/logic.ts";
 import { useDeathSaveWaits, WAITS_FOR_REGENERATION } from "../combat/state.ts";
 import { damagePreview, deadCase, deadLines, entryOperation, entryRefusal, sendHpEntry, type HpTarget } from "./groupHp.ts";
@@ -686,6 +687,7 @@ function DeathRoll(props: { target: ActorTarget; children: ReactNode }) {
   const dm = useRoomView((s) => s.you?.role === "dm");
   const option = useRollOption();
   const waits = useDeathSaveWaits(target);
+  const turnWait = useTurnWait();
   const blocked = useRollBlocked() ?? (waits ? WAITS_FOR_REGENERATION : null);
   const { dice } = useDiceView([target]);
   const row = `deathSave:${"tokenId" in target ? target.tokenId : target.characterId}`;
@@ -699,12 +701,12 @@ function DeathRoll(props: { target: ActorTarget; children: ReactNode }) {
     if (waiting || blocked || !dice) return;
     if (override && !valid()) return;
     // The preset is read at the tap, from the creature's effects then (presets.ts). While its turn's death save is open, the roll settles it (docs/design/design-v1-combat-controls.md 2.3).
-    option.deathSave(target, presetFor(dice, target, { kind: "deathSave" }), row, openRecord(dice.view.encounter, actorOf(dice.view, target), "deathSave"), override);
+    option.deathSave(target, presetFor(dice, target, { kind: "deathSave" }), row, openRecord(dice.view.encounter, actorOf(dice.view, target), "deathSave", turnWait.waits), override);
   };
   const menu = useRollModeMenu({
-    source: JSON.stringify([target, dice && actorOf(dice.view, target), dice && openRecord(dice.view.encounter, actorOf(dice.view, target), "deathSave"), waits, blocked, panel.adv, panel.dis, panel.secret]), name: "Death Save",
+    source: JSON.stringify([target, dice && actorOf(dice.view, target), dice && openRecord(dice.view.encounter, actorOf(dice.view, target), "deathSave", turnWait.waits), waits, blocked, panel.adv, panel.dis, panel.secret]), name: "Death Save",
     capability: { d20: true, visibility: "creature", manual: { mode: presses.mode } }, dm,
-    disabled: waiting || !!blocked || !dice, valid,
+    disabled: waiting || !!blocked || !dice || turnWait.waits, valid,
     fallbackFocus: () => fallback.current,
     onTap: () => roll(), onRoll: roll,
   });
@@ -729,7 +731,8 @@ function DeathRoll(props: { target: ActorTarget; children: ReactNode }) {
             menu.buttonProps.ref(node);
           }}
           size="sm"
-          busy={waiting}
+          busy={waiting || turnWait.shown}
+          aria-busy={waiting || turnWait.waits || undefined}
           disabled={blocked !== null || !dice}
           aria-label={waiting ? "Rolling a Death Save" : "Roll a Death Save"}
           aria-describedby={menu.describe(blocked ? blockedId : undefined)}

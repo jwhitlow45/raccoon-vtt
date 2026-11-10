@@ -60,6 +60,7 @@ import { dropOldRechargeMarks } from "../dice/options.ts";
 import { presetFor } from "../dice/presets.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useActOnce, useRollBlocked } from "../dice/useRollOption.ts";
+import { useTurnWait } from "../combat/turnWait.ts";
 import { alertCard as card } from "./alertCard.ts";
 import { CardBonus, CardButtons, CardChips, rollTrouble, useCardRoll, useCardSend, useTypedRoll } from "./CardRoll.tsx";
 import { RechargeCard, rechargeAlertId } from "./RechargeCard.tsx";
@@ -1614,14 +1615,16 @@ function EndTurnButton(props: { stack?: boolean }) {
  * The DM's Next (chips C3), beside the chip and at the band's end. It
  * shares End turn's wait, so the chip's and the band's Next show busy
  * together and a second press on either while one waits sends nothing.
- * The N key and the tracker's Next send on their own, without the wait or
- * its busy look: each takes the waiting Next's `from` (logic.ts turnOp),
- * so the server moves the turn once. Start stands in before the first
+ * The N key and the tracker's Next send on their own, and each takes the
+ * waiting Next's `from` (logic.ts turnOp), so the server moves the turn
+ * once. Any turn change on its way makes it busy too (useTurnWait). Start stands in before the first
  * turn, as in the tracker, and an empty fight has nothing to start.
  */
 function NextButton(props: { start: boolean; empty: boolean }) {
   const { end, waiting } = useEndTurn();
-  return <NextPill waiting={waiting} start={props.start} disabled={props.empty} onClick={end} />;
+  // A turn change sent from the tracker or a key makes it busy too, after the shared delay, and deaf at once.
+  const turnWait = useTurnWait();
+  return <NextPill waiting={waiting || turnWait.shown} start={props.start} disabled={props.empty} onClick={() => turnWait.waits || end()} />;
 }
 
 /**

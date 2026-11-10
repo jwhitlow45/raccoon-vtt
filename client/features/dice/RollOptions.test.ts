@@ -5,6 +5,7 @@ import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import type { Effect, LogEntry, PcRoll, PcStats, RollRequest, RoomState, UseMark, Viewer } from "#shared/model.ts";
 import type { SceneWeather } from "#shared/weather.ts";
+import type { ClientOp } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
 import { SKILLS } from "#shared/rules/skills.ts";
 import { DM, P1, actor, character, customMonster, entry, room, token } from "#shared/testutil.ts";
@@ -377,13 +378,13 @@ describe("a row's recharge and X/Day uses, read from the room", () => {
     ],
   });
 
-  function draw(viewer: Viewer, uses?: Record<string, UseMark>): string {
+  function draw(viewer: Viewer, uses?: Record<string, UseMark>, pending: readonly { n: number; op: ClientOp; at: number }[] = []): string {
     const state = room({
       monsters: { lurker: LURKER },
       tokens: { lurk: token("lurk", { kind: "monster", name: "Lurker", actor: { inline: actor({ monsterId: "lurker", ...(uses ? { uses } : {}) }) } }) },
     });
     const view = projectState(state, viewer, { sceneId: "s1" }) as unknown as RoomState;
-    const store = createStore(() => ({ view, roomId: "r1", connection: "open", you: viewer, sceneId: "s1", local: { selectedIds: ["lurk"], multi: false }, ephemeral: { drags: {} } }));
+    const store = createStore(() => ({ view, confirmed: view, pending, roomId: "r1", connection: "open", you: viewer, sceneId: "s1", local: { selectedIds: ["lurk"], multi: false }, ephemeral: { drags: {} } }));
     const dice: DiceView = { you: viewer, view, srd: { monsters: null, rolls: null } };
     const creature = { tokenId: "lurk" } as const;
     return renderToStaticMarkup(
@@ -423,6 +424,15 @@ describe("a row's recharge and X/Day uses, read from the room", () => {
     assert.ok(reason && new RegExp(`id="${reason}"[^>]*>No uses left<`).test(none), "the off Use says why");
   });
 
+  test("while a turn change waits for its answer, the breath's recharge is busy, and Used and Use are not", () => {
+    const next = [{ n: 1, op: { t: "encounter.next" } as ClientOp, at: 0 }];
+    const waiting = draw(DM, undefined, next);
+    assert.match(chip(waiting, "Fire Breath recharge, 1d6") ?? "", /aria-busy="true"/);
+    assert.doesNotMatch(chip(waiting, "Mark Fire Breath used") ?? "", /aria-busy/);
+    assert.doesNotMatch(chip(waiting, "Use Dominate Mind, 2 of 2 left") ?? "", /aria-busy/);
+    assert.doesNotMatch(chip(draw(DM), "Fire Breath recharge, 1d6") ?? "", /aria-busy/);
+  });
+
   test("the breath's mark is not the X/Day ability's, and a mark of another kind under a key counts for neither", () => {
     const markup = draw(DM, { "actions:fire-breath": { kind: "day", name: "Fire Breath", used: 1, max: 1 } });
     assert.match(chip(markup, "Mark Fire Breath used") ?? "", /aria-pressed="false"/);
@@ -441,7 +451,7 @@ describe("the death save row while Regeneration is open", () => {
     traits: [{ name: "Regeneration", text: "The troll regains 15 Hit Points at the start of each of its turns. If the troll takes Acid or Fire damage, this trait doesn't function at the start of the troll's next turn." }],
   });
 
-  function draw(settled: boolean): string {
+  function draw(settled: boolean, pending: readonly { n: number; op: ClientOp; at: number }[] = []): string {
     const record = { id: 7, entryId: "e1", round: 2, hp: 0, life: "dying" as const, ...(settled ? { settled: { regeneration: { state: "done" as const, total: 15 } } } : {}) };
     const state = room({
       monsters: { troll: TROLL },
@@ -449,7 +459,7 @@ describe("the death save row while Regeneration is open", () => {
       encounter: { rev: 0, round: 2, activeEntryId: "e1", entries: [entry("e1", { tokenId: "tr" })] },
     });
     const view = projectState(state, DM, { sceneId: "s1" }) as unknown as RoomState;
-    const store = createStore(() => ({ view, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: ["tr"], multi: false }, ephemeral: { drags: {} } }));
+    const store = createStore(() => ({ view, confirmed: view, pending, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: ["tr"], multi: false }, ephemeral: { drags: {} } }));
     const dice: DiceView = { you: DM, view, srd: { monsters: null, rolls: null } };
     const creature = { tokenId: "tr" } as const;
     return renderToStaticMarkup(
@@ -472,6 +482,11 @@ describe("the death save row while Regeneration is open", () => {
     assert.ok(settled, "the row draws while the troll is dying");
     assert.doesNotMatch(settled, /disabled=""/);
     assert.match(settled, /aria-haspopup="menu"/);
+  });
+
+  test("busy while a turn change waits for its answer", () => {
+    assert.match(deathSave(draw(true, [{ n: 1, op: { t: "encounter.next" }, at: 0 }])), /aria-busy="true"/);
+    assert.doesNotMatch(deathSave(draw(true)), /aria-busy/);
   });
 });
 

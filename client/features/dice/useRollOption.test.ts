@@ -28,12 +28,12 @@ const { PanelHere } = await import("../panels.ts");
 type Api = ReturnType<typeof useRollOption>;
 
 /** The hook's sends, captured from one render: its functions read the room's store and scope when called, not when drawn. */
-function probe(connection = "open"): { api: Api; sent: ClientOp[]; scope: InstanceType<typeof RoomScope>; view: ReturnType<typeof room> } {
+function probe(connection = "open", pending: readonly { n: number; op: ClientOp; at: number }[] = []): { api: Api; sent: ClientOp[]; scope: InstanceType<typeof RoomScope>; view: ReturnType<typeof room> } {
   const view = room({
     characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"] }) },
     tokens: { drag: token("drag", { kind: "monster", name: "Dragon" }), bt: token("bt", { kind: "pc", name: "Bree", ownerIds: ["p1"], actor: { ref: "bree" } }) },
   });
-  const store = createStore(() => ({ view, roomId: "r1", connection, you: DM, sceneId: "s1", local: { selectedIds: ["drag"], multi: false } }));
+  const store = createStore(() => ({ view, confirmed: { ...view, encounter: { rev: 0, round: 1, activeEntryId: null, entries: [] } }, pending, roomId: "r1", connection, you: DM, sceneId: "s1", local: { selectedIds: ["drag"], multi: false } }));
   const sent: ClientOp[] = [];
   const scope = new RoomScope();
   let api: Api | null = null;
@@ -79,6 +79,25 @@ describe("the rows' rolls that settle an open prompt", () => {
     assert.equal(choices.getState().adv, true, "no d20, so the panel's choices stay for the next roll");
     api.recharge({ tokenId: "drag" }, { key: "actions:fire-breath", name: "Fire Breath", min: 5 }, row);
     assert.ok(sent[1] && !("record" in sent[1]), "outside an open prompt the roll stays manual");
+  });
+});
+
+describe("while a turn change waits for its answer, a roll that would settle the turn's prompt sends nothing", () => {
+  test("a death save and a recharge given \"pending\" send no op and keep no tag", () => {
+    const { api, sent, scope } = probe();
+    assert.equal(api.deathSave({ tokenId: "drag" }, NONE, "deathSave:drag", "pending"), null);
+    const row = "t:drag|actions:fire-breath|recharge";
+    assert.equal(api.recharge({ tokenId: "drag" }, { key: "actions:fire-breath", name: "Fire Breath", min: 5 }, row, "pending"), null);
+    assert.deepEqual(sent, []);
+    assert.equal(scope.get(optionSlot).getState().tags[row], undefined);
+  });
+
+  test("whatever record the surface read, nothing goes while the store holds a turn change", () => {
+    const { api, sent } = probe("open", [{ n: 1, op: { t: "encounter.next" }, at: 0 }]);
+    assert.equal(api.deathSave({ tokenId: "drag" }, NONE, "deathSave:drag", 12), null);
+    assert.equal(api.deathSave({ tokenId: "drag" }, NONE, "deathSave:drag"), null);
+    assert.equal(api.recharge({ tokenId: "drag" }, { key: "actions:fire-breath", name: "Fire Breath", min: 5 }, "t:drag|actions:fire-breath|recharge", 7), null);
+    assert.deepEqual(sent, []);
   });
 });
 

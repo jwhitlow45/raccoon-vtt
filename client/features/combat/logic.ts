@@ -262,8 +262,17 @@ export function deathSaveWaits(regeneration: RegenerationPrompt | null, dismisse
   return isOpen(regeneration) && !dismissed;
 }
 
-/** The record an open roll of a creature's settles (2.3): its current one, when the prompt is still open there, else none, so the roll stays manual. */
-export function openRecord(encounter: Turn, actor: Pick<Actor, "turnRecord" | "life" | "uses"> | undefined, what: PromptKey): number | undefined {
+/**
+ * The record an open roll of a creature's settles (2.3): its current one,
+ * when the prompt is still open there, else none, so the roll stays
+ * manual. While a turn change waits for its answer (state/store.ts
+ * turnPending) it answers "pending": the record on screen may be the turn
+ * that change ends, so the action shows busy and sends nothing.
+ */
+export function openRecord(encounter: Turn, actor: Pick<Actor, "turnRecord" | "life" | "uses"> | undefined, what: PromptKey): number | undefined;
+export function openRecord(encounter: Turn, actor: Pick<Actor, "turnRecord" | "life" | "uses"> | undefined, what: PromptKey, turnPending: boolean): number | "pending" | undefined;
+export function openRecord(encounter: Turn, actor: Pick<Actor, "turnRecord" | "life" | "uses"> | undefined, what: PromptKey, turnPending = false): number | "pending" | undefined {
+  if (turnPending) return "pending";
   const record = currentRecord(encounter, actor);
   if (!record || (record.settled && Object.hasOwn(record.settled, what))) return undefined;
   if (what === "deathSave") return record.life === "dying" && actor?.life === "dying" ? record.id : undefined;

@@ -22,6 +22,7 @@ import { reasonText } from "../resources/logic.ts";
 import { useOption } from "../dice/optionState.ts";
 import { useReceipts } from "../dice/useReceipt.ts";
 import { useRollBlocked } from "../dice/useRollOption.ts";
+import { useTurnWait } from "./turnWait.ts";
 import { combatLocalSlot, promptId, rechargeRow, tellPassed, useActsNow, useCreatureUses, useListRolls } from "./state.ts";
 import {
   abilityHead,
@@ -89,6 +90,7 @@ export function CombatUses(props: UsesSlots & { target: ActorTarget; form: UsesF
   const holder = useRoomView((s) => (s.view ? holderKey(s.view, target) : ""));
   const resourceCount = useRoomView((s) => (characterId !== undefined ? (s.view?.characters[characterId]?.resources?.length ?? 0) : 0));
   const record = currentRecord(encounter, actor);
+  const turnWait = useTurnWait();
   const turn = turnKey(encounter);
   const rows = usesRows({ form, uses: props.uses, actor, ownTurn: props.ownTurn, record });
   const [status, setStatus] = useState<{ text: string; refused: boolean } | null>(null);
@@ -117,7 +119,7 @@ export function CombatUses(props: UsesSlots & { target: ActorTarget; form: UsesF
       {rows.length > 0 ? (
         <ul aria-label={`${props.name}'s uses`} style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(3) }}>
           {rows.map((row) => (
-            <UseLine key={rowKey(row)} row={row} target={target} holder={holder} form={form} record={record?.id} turn={turn} encounter={encounter} actor={actor} onStatus={onStatus} />
+            <UseLine key={rowKey(row)} row={row} target={target} holder={holder} form={form} record={record?.id} turn={turn} turnWait={turnWait} encounter={encounter} actor={actor} onStatus={onStatus} />
           ))}
         </ul>
       ) : null}
@@ -256,6 +258,8 @@ type LineProps = {
   record: number | undefined;
   /** The turn the list shows (logic.ts turnKey), kept with each Roll recharge it sends. */
   turn: string | null;
+  /** A turn change waiting for its answer, which makes the buttons that send the turn's record busy (useTurnWait). */
+  turnWait: { waits: boolean; shown: boolean };
   encounter: Parameters<typeof openRecord>[0];
   actor: Parameters<typeof openRecord>[1];
   onStatus(status: { text: string; refused: boolean } | null): void;
@@ -306,7 +310,7 @@ function UseLine(props: LineProps) {
       <UseButton
         key={key}
         {...rest}
-        busy={send.busy === key}
+        busy={send.busy === key || (rest.waits === true && props.turnWait.shown)}
         onClick={() => {
           press();
           keepFocus();
@@ -364,12 +368,13 @@ function UseLine(props: LineProps) {
             key="roll"
             text="Roll recharge"
             label={`Roll the recharge of ${use.name}, 1d6`}
-            busy={recharge.waiting}
+            busy={recharge.waiting || props.turnWait.shown}
+            waits={props.turnWait.waits}
             off={recharge.blocked}
             offId={`${id}-roll`}
             onOff={props.onStatus}
             onClick={() => {
-              recharge.roll(target, use, openRecord(props.encounter, props.actor, `recharge:${use.key}`));
+              recharge.roll(target, use, openRecord(props.encounter, props.actor, `recharge:${use.key}`, props.turnWait.waits));
               keepFocus();
             }}
           />,
@@ -387,7 +392,8 @@ function UseLine(props: LineProps) {
       break;
     case "skipped":
       head = row.text;
-      if (props.record !== undefined) add("reopen", { text: "Reopen", label: `Reopen: ${row.text}`, op: promptOp(target, props.record, row.what as PromptKey, "open") });
+      // Reopen names the current record itself, so it waits for a turn change whether or not a prompt is open.
+      if (props.record !== undefined) add("reopen", { text: "Reopen", label: `Reopen: ${row.text}`, waits: props.turnWait.waits, op: promptOp(target, props.record, row.what as PromptKey, "open") });
       break;
   }
   return (
@@ -452,8 +458,8 @@ function useRechargeRoll(holder: string, key: string, turn: string | null, onSta
     waiting: card.waiting,
     blocked,
     total,
-    roll(target: ActorTarget, use: { key: string; name: string; min: number }, record: number | undefined) {
-      if (card.waiting || blocked) return;
+    roll(target: ActorTarget, use: { key: string; name: string; min: number }, record: number | "pending" | undefined) {
+      if (card.waiting || blocked || record === "pending") return;
       const tag = uuidv7();
       if (card.send(rechargeRollOp(tag, target, use, record)) === null) onStatus({ text: "That roll could not be sent. Try again.", refused: true });
       else {
@@ -512,6 +518,8 @@ type UseButtonProps = {
   text: string;
   label: string;
   busy?: boolean;
+  /** A turn change waits for its answer: busy to a reader at once and deaf to a tap, its spinner left to `busy`. */
+  waits?: boolean;
   /** Why it cannot act now, or null: it keeps its focus, says so to a reader, and a tap puts it in the status line. */
   off?: string | null;
   offId?: string;
@@ -530,7 +538,8 @@ function UseButton(props: UseButtonProps) {
         aria-disabled={off || undefined}
         aria-describedby={off ? props.offId : undefined}
         busy={props.busy}
-        onClick={() => (off ? props.onOff?.({ text: props.off!, refused: false }) : props.onClick?.())}
+        aria-busy={props.busy || props.waits || undefined}
+        onClick={() => (props.waits ? undefined : off ? props.onOff?.({ text: props.off!, refused: false }) : props.onClick?.())}
         style={{ flex: "1 1 auto", whiteSpace: "nowrap", ...(off ? { ...buttonLook("secondary", { disabled: true }), cursor: "default" } : null) }}
       >
         {props.text}

@@ -40,6 +40,7 @@ import { EntryRow, type RowDrag } from "../features/encounter/Row.tsx";
 import { ValueEntry } from "../features/encounter/ValueEntry.tsx";
 import { GroupHpEntry } from "../features/tokens/GroupHpEntry.tsx";
 import { useFightJoin, type JoinState } from "../features/combat/state.ts";
+import { useTurnWait } from "../features/combat/turnWait.ts";
 import { SrdLoadFailed } from "../features/monsters/SrdLoadFailed.tsx";
 import type { PanelProps } from "../features/panels.ts";
 import { displayName, footprint } from "../lib/scene.ts";
@@ -274,6 +275,11 @@ function TurnControls(props: { compact: boolean; onCompactShown(): void; onConte
   const activeEntryId = useRoomView((s) => s.view?.encounter?.activeEntryId ?? null);
   const started = useRoomView((s) => (s.view?.encounter ? hasStarted(s.view.encounter) : false));
   const canGoBack = useRoomView((s) => (s.view?.encounterHistory.length ?? 0) > 0);
+  // The DM's turn change shows once the server answers it, and until then Previous and Next are busy and send nothing more.
+  const turnWait = useTurnWait();
+  const turnPress = (t: "encounter.next" | "encounter.prev") => {
+    if (!turnWait.waits) actions.dispatch(turnOp(t, store.getState()));
+  };
   const entries = useSortedEntries();
   const facts = useRowFacts();
   const endTurn = useSend();
@@ -339,16 +345,18 @@ function TurnControls(props: { compact: boolean; onCompactShown(): void; onConte
         {heading}
         {buttons(
           <>
-            <Button size="sm" disabled={!canGoBack} onClick={() => actions.dispatch(turnOp("encounter.prev", store.getState()))} aria-label="Previous turn">
+            <Button size="sm" disabled={!canGoBack} busy={turnWait.shown} aria-busy={turnWait.waits || undefined} onClick={() => turnPress("encounter.prev")} aria-label="Previous turn">
               Previous
             </Button>
             <Button
               size="sm"
               variant="primary"
               disabled={entries.length === 0}
+              busy={turnWait.shown}
+              aria-busy={turnWait.waits || undefined}
               title={turnKey ? withKey(activeEntryId === null ? "Start" : "Next", turnKey) : undefined}
               aria-keyshortcuts={turnKey?.aria}
-              onClick={() => actions.dispatch(turnOp("encounter.next", store.getState()))}
+              onClick={() => turnPress("encounter.next")}
             >
               {activeEntryId === null ? "Start" : "Next"}
             </Button>
@@ -746,6 +754,7 @@ function DmSettings() {
   const actions = useRoomActions();
   const timerSec = useRoomView((s) => s.view?.meta.settings.turnTimerSec ?? 0);
   const [confirmEnd, setConfirmEnd] = useState(false);
+  const turnWait = useTurnWait();
 
   useEffect(() => {
     if (!confirmEnd) return;
@@ -772,7 +781,10 @@ function DmSettings() {
             variant="danger"
             search="tracker.end"
             armed={confirmEnd}
+            busy={turnWait.shown}
+            aria-busy={turnWait.waits || undefined}
             onClick={() => {
+              if (turnWait.waits) return;
               if (!confirmEnd) {
                 setConfirmEnd(true);
                 return;

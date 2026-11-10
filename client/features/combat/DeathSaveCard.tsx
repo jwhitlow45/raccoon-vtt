@@ -10,6 +10,8 @@ import type { CardButton } from "../encounter/saveCards.ts";
 import { presetFor } from "../dice/presets.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useRollBlocked } from "../dice/useRollOption.ts";
+import { useTurnWait } from "./turnWait.ts";
+import { turnPending } from "../../state/store.ts";
 import type { PromptCard } from "./alerts.ts";
 import { actorOf, openRecord, deathSaveResult, deathSaveWords, promptOp, type DeathSavePrompt } from "./logic.ts";
 import { useAnsweredSend } from "./send.ts";
@@ -51,6 +53,8 @@ export function DeathSaveCard(props: { card: PromptCard<DeathSavePrompt>; waits:
   const blocked = useRollBlocked();
   const roll = useCardRoll(deathSaveRow(target), card.record);
   const send = useAnsweredSend<Action>();
+  // Roll and Skip name the turn's record, which a turn change on its way may end.
+  const turnWait = useTurnWait();
   const settled = prompt.settled;
   const buttons: CardButton<Action>[] = settled
     ? [{ action: "done", text: "Done" }]
@@ -61,9 +65,10 @@ export function DeathSaveCard(props: { card: PromptCard<DeathSavePrompt>; waits:
       ];
   const valid = () => {
     const state = room.getState();
-    return state.connection === "open" && !!state.view && openRecord(state.view.encounter, actorOf(state.view, target), "deathSave") === card.record;
+    return state.connection === "open" && !!state.view && openRecord(state.view.encounter, actorOf(state.view, target), "deathSave", turnPending(state)) === card.record;
   };
   const tap = (action: Action, override?: RollModeOverride) => {
+    if (turnPending(room.getState()) && (action === "roll" || action === "skip")) return;
     if (action === "roll") {
       if (props.waits || blocked || !dice || roll.waiting) return;
       if (override && (send.busy || settled || !valid())) return;
@@ -98,10 +103,10 @@ export function DeathSaveCard(props: { card: PromptCard<DeathSavePrompt>; waits:
           {trouble ? <span style={{ color: theme.color.dangerText }}>{trouble}</span> : null}
         </div>
       ) : null}
-      <CardButtons buttons={buttons} busy={send.busy} rollBusy={roll.waiting} blocked={props.waits ? WAITS_FOR_REGENERATION : blocked} onTap={tap} rollMenu={{
-        source: JSON.stringify([card, target, props.waits, dice && actorOf(dice.view, target), dice && openRecord(dice.view.encounter, actorOf(dice.view, target), "deathSave"), blocked]),
+      <CardButtons buttons={buttons} busy={send.busy} rollBusy={roll.waiting} blocked={props.waits ? WAITS_FOR_REGENERATION : blocked} turnWait={turnWait} onTap={tap} rollMenu={{
+        source: JSON.stringify([card, target, props.waits, dice && actorOf(dice.view, target), dice && openRecord(dice.view.encounter, actorOf(dice.view, target), "deathSave", turnWait.waits), blocked]),
         name: `Death Save for ${participant.name}`, capability: { d20: !settled, visibility: "creature" }, dm,
-        disabled: props.waits || !!blocked || !dice || roll.waiting,
+        disabled: props.waits || !!blocked || !dice || roll.waiting || turnWait.waits,
         valid: () => send.busy === null && !settled && valid(), fallbackFocus: () => root.current,
         onTap: () => tap("roll"), onRoll: (override) => tap("roll", override),
       }} />

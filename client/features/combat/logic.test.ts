@@ -96,6 +96,16 @@ describe("the turn record", () => {
     assert.equal(openRecord(turn, { ...due, uses: {} }, `recharge:${breath.key}`), undefined, "marked ready meanwhile");
     assert.equal(openRecord(turn, { ...due, turnRecord: record() }, `recharge:${breath.key}`), undefined, "spent on its own turn, so not due");
   });
+
+  test("while a turn change waits for its answer, an open roll answers pending in place of any record", () => {
+    const turn = { activeEntryId: "ed", round: 2 };
+    const dying = { turnRecord: record({ life: "dying" }), life: "dying" as const };
+    const due = { turnRecord: record({ due: [breath.key] }), life: "alive" as const, uses: { [breath.key]: breathMark } };
+    assert.equal(openRecord(turn, dying, "deathSave", true), "pending");
+    assert.equal(openRecord(turn, due, `recharge:${breath.key}`, true), "pending");
+    assert.equal(openRecord(turn, { ...dying, life: "alive" }, "deathSave", true), "pending", "even one that would be manual");
+    assert.equal(openRecord(turn, dying, "deathSave", false), 7);
+  });
 });
 
 describe("prompts from a record", () => {

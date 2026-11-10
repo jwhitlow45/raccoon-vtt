@@ -169,14 +169,14 @@ describe("the death save Roll while Regeneration is open", () => {
     traits: [{ name: "Regeneration", text: "The troll regains 15 Hit Points at the start of each of its turns. If the troll takes Acid or Fire damage, this trait doesn't function at the start of the troll's next turn." }],
   });
 
-  function draw(settled: boolean): string {
+  function draw(settled: boolean, pending: readonly { n: number; op: { t: string }; at: number }[] = []): string {
     const record = { id: 7, entryId: "e1", round: 2, hp: 0, life: "dying" as const, ...(settled ? { settled: { regeneration: { state: "done" as const, total: 15 } } } : {}) };
     const view = room({
       monsters: { troll: TROLL },
       tokens: { tr: token("tr", { kind: "monster", name: "Troll", actor: { inline: actor({ monsterId: "troll", hp: { cur: 0, max: 84, temp: 0 }, life: "dying", turnRecord: record }) } }) },
       encounter: { rev: 0, round: 2, activeEntryId: "e1", entries: [entry("e1", { tokenId: "tr" })] },
     });
-    const store = createStore(() => ({ view, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: [], multi: false } }));
+    const store = createStore(() => ({ view, confirmed: view, pending, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: [], multi: false } }));
     const saves = createElement(DeathSaves, { saves: { ok: 0, fail: 1 }, canEdit: true, target: { tokenId: "tr" }, onChange() {} });
     return renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: saves }) }));
   }
@@ -191,6 +191,11 @@ describe("the death save Roll while Regeneration is open", () => {
     assert.ok(roll(open), "the Roll draws");
     assert.doesNotMatch(roll(open), /disabled=""/);
     assert.doesNotMatch(open, /Waiting for Regeneration/);
+  });
+
+  test("busy while a turn change waits for its answer, and live once none does", () => {
+    assert.match(roll(draw(true, [{ n: 1, op: { t: "encounter.next" }, at: 0 }])), /aria-busy="true"/);
+    assert.doesNotMatch(roll(draw(true)), /aria-busy/);
   });
 });
 

@@ -7,6 +7,7 @@ import type { DiceRoll, RollTest, RoomState } from "#shared/model.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
+import { turnPending } from "../../state/store.ts";
 import { PreviewContext } from "../dm/previewContext.ts";
 import { openAsk } from "../rolls/open.ts";
 import { rollsOf } from "./logic.ts";
@@ -144,10 +145,12 @@ export function useRollOption(surface?: "dice") {
       /**
        * A death save, counted by the server from the state then (4.3).
        * `record` names the turn record whose open death save it settles
-       * (docs/design/design-v1-combat-controls.md 2.3, combat/logic.ts openRecord).
+       * (docs/design/design-v1-combat-controls.md 2.3, combat/logic.ts
+       * openRecord). While a turn change waits it sends nothing, whatever
+       * record the surface read.
        */
-      deathSave(creature: ActorTarget, preset: RollPreset, row: string, record?: number, override?: RollModeOverride): string | null {
-        if (override === "secret") return null;
+      deathSave(creature: ActorTarget, preset: RollPreset, row: string, record?: number | "pending", override?: RollModeOverride): string | null {
+        if (override === "secret" || record === "pending" || turnPending(room.getState())) return null;
         const taken = override ? panel.peek() : panel.take();
         const tag = uuidv7();
         const extra = preset.extra.join("").replace(/^\+/, "");
@@ -173,11 +176,13 @@ export function useRollOption(surface?: "dice") {
       /**
        * An ability's Recharge 1d6, rolled on the server (docs/design/design-v1-combat-controls.md
        * 3.1): `min` or more there makes it ready, and with `record` it
-       * settles the turn's open prompt for it. Who reads it is the server's
+       * settles the turn's open prompt for it, or sends nothing while a turn
+       * change waits. Who reads it is the server's
        * rule for the creature, so the panel's choices are neither applied
        * nor taken, as no d20 is rolled.
        */
-      recharge(creature: ActorTarget, use: { key: string; name: string; min: number }, row: string, record?: number): string | null {
+      recharge(creature: ActorTarget, use: { key: string; name: string; min: number }, row: string, record?: number | "pending"): string | null {
+        if (record === "pending" || turnPending(room.getState())) return null;
         const tag = uuidv7();
         if (sendRoll(sender, rechargeRollOp(tag, creature, use, record)) === null) return null;
         panel.noted(tag, `${use.name} recharge`, origin());

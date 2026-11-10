@@ -108,6 +108,7 @@ import { acceptsRollMode, effectiveRollMode, type RollModeCapability, type RollM
 import { useRollModeMenu } from "./useRollModeMenu.tsx";
 import { useRollPresses } from "./useDicePanel.ts";
 import { useActOnce, useInitiativeChanged, useRollBlocked, useRollOption, useRowResult, useWatchInitiative } from "./useRollOption.ts";
+import { useTurnWait } from "../combat/turnWait.ts";
 import { ApplyTo } from "./ApplyTo.tsx";
 import { useCommittedRoll } from "./Roller.tsx";
 import { useReceiptVoice, type ReceiptState } from "./useReceipt.ts";
@@ -802,8 +803,11 @@ function Grid(props: { label: string; note?: string; children: ReactNode }) {
  * until its line lands. Its result shows in the panel's newest-roll line at the top (the project owner,
  * 2026-10-17: "it should just be in the header"), so a row never grows when a roll lands.
  */
-function OptionCell(props: { text: string; level?: Proficiency | undefined; tag?: string | undefined; name: string; title?: string; creature?: ActorTarget; row: string; disabled: string | null; onTap(override?: RollModeOverride): void; mode?: RollModeCapability; source?: string; valid?(): boolean; pressed?: boolean; grow?: boolean; fill?: boolean; nowrap?: boolean }) {
-  const { waiting } = useRowResult(props.row);
+function OptionCell(props: { text: string; level?: Proficiency | undefined; tag?: string | undefined; name: string; title?: string; creature?: ActorTarget; row: string; disabled: string | null; onTap(override?: RollModeOverride): void; mode?: RollModeCapability; source?: string; valid?(): boolean; pressed?: boolean; grow?: boolean; fill?: boolean; nowrap?: boolean; turnWait?: { waits: boolean; shown: boolean } }) {
+  const { waiting: rolling } = useRowResult(props.row);
+  // A cell that sends the turn's record waits with a turn change on its way, busy to a reader at once and its mark after the shared delay.
+  const waiting = rolling || props.turnWait?.waits === true;
+  const marked = rolling || props.turnWait?.shown === true;
   const dm = useRoomView((s) => s.you?.role === "dm");
   // Its roll is for this creature, whose Secret start the panel reads as it rolls.
   const manual = useRollPresses(props.creature ? [props.creature] : []);
@@ -850,7 +854,7 @@ function OptionCell(props: { text: string; level?: Proficiency | undefined; tag?
       {/* Skills keep their names whole in wider columns. Other options may wrap inside the cell. */}
       <span style={{ minWidth: 0, fontSize: theme.font.body14, fontWeight: theme.weight.strong, textAlign: props.fill ? "center" : "left", overflowWrap: "anywhere", whiteSpace: props.nowrap ? "nowrap" : undefined }}>
         <MarkedName text={props.text} level={props.level} />
-        {waiting ? "…" : null}
+        {marked ? "…" : null}
       </span>
       {props.tag ? <span style={{ flex: "none", fontSize: theme.font.tiny, fontWeight: theme.weight.strong, color: theme.color.textMuted, whiteSpace: "nowrap" }}>{props.tag}</span> : null}
     </button>
@@ -1010,6 +1014,7 @@ function DeathSaveCell(props: { ctx: Ctx; bonus: number | null }) {
   const { ctx } = props;
   const option = useRollOption("dice");
   const waits = useDeathSaveWaits(ctx.creature);
+  const turnWait = useTurnWait();
   const test: D20Test = { kind: "deathSave" };
   const preset = presetFor(ctx.dice, ctx.creature, test, { rolls: ctx.rolls });
   const row = `deathSave:${"tokenId" in ctx.creature ? ctx.creature.tokenId : ctx.creature.characterId}`;
@@ -1024,7 +1029,8 @@ function DeathSaveCell(props: { ctx: Ctx; bonus: number | null }) {
       name={["Death Save", presetWords(preset)].filter(Boolean).join(", ")}
       row={row}
       disabled={ctx.blocked ?? (waits ? WAITS_FOR_REGENERATION : null)}
-      onTap={(override) => option.deathSave(ctx.creature, preset, row, openRecord(ctx.dice.view.encounter, ctx.actor, "deathSave"), override)}
+      turnWait={turnWait}
+      onTap={(override) => option.deathSave(ctx.creature, preset, row, openRecord(ctx.dice.view.encounter, ctx.actor, "deathSave", turnWait.waits), override)}
     />
   );
 }
@@ -1085,6 +1091,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
   const riders = useOption((s) => s.riders[rowKey]);
   const slotPicked = useOption((s) => s.slots[rowKey]);
   const rowUse = useRowUse();
+  const turnWait = useTurnWait();
   const noneId = useId();
   const character = "characterId" in ctx.creature ? ctx.dice.view.characters[ctx.creature.characterId] : undefined;
   const slots = character && props.named.section === "spells" ? pcSlots(character, props.named.key) : null;
@@ -1238,8 +1245,9 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
             row={rechargeRow}
             disabled={ctx.blocked}
             fill
+            turnWait={turnWait}
             // Rolled on the server, where a success gives the mark back, and settling the turn's open prompt for it (2.3).
-            onTap={() => option.recharge(ctx.creature, rechargeUse, rechargeRow, openRecord(ctx.dice.view.encounter, ctx.actor, `recharge:${rechargeUse.key}`))}
+            onTap={() => option.recharge(ctx.creature, rechargeUse, rechargeRow, openRecord(ctx.dice.view.encounter, ctx.actor, `recharge:${rechargeUse.key}`, turnWait.waits))}
           />
         ) : null}
         {slots && slot !== null ? (

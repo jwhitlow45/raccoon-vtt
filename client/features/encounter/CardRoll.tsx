@@ -152,13 +152,17 @@ const DANGER = new Set(["fail", "accept"]);
  * A card's buttons in one wrapping row, 44 px each. The first is the
  * card's one primary when it asks, rolls, resists or applies, and the fails are
  * red. Roll is busy while its line is on the way and disabled while no
- * roll can go, with the reason as its title.
+ * roll can go, with the reason as its title. `turnWait` makes every
+ * button but Dismiss and Done busy and deaf while a turn change waits for
+ * its answer (combat/turnWait.ts useTurnWait), for a card whose buttons
+ * send the turn's record.
  */
 export function CardButtons<A extends string>(props: {
   buttons: readonly CardButton<A>[];
   busy: A | null;
   rollBusy: boolean;
   blocked: string | null;
+  turnWait?: { waits: boolean; shown: boolean };
   /** Roll opens the bonus field first, as a disclosure (useTypedRoll). */
   rollOpens?: boolean;
   onTap(action: A): void;
@@ -172,18 +176,21 @@ export function CardButtons<A extends string>(props: {
         const roll = b.action === "roll";
         const variant: ButtonVariant = i === 0 && PRIMARY.has(b.action) ? "primary" : DANGER.has(b.action) ? "danger" : "secondary";
         const opens = roll && props.rollOpens === true;
+        const waits = props.turnWait?.waits === true && b.action !== "dismiss" && b.action !== "done";
+        const busy = roll ? props.rollBusy : props.busy === b.action;
         return (
           <Fragment key={b.action}>
             <Button
               {...(roll && props.rollMenu ? menu.buttonProps : {})}
               size="sm"
               variant={variant}
-              busy={roll ? props.rollBusy : props.busy === b.action}
+              busy={busy || (waits && props.turnWait?.shown === true)}
+              aria-busy={busy || waits || undefined}
               expanded={opens ? false : undefined}
               disabled={roll && props.blocked !== null}
               title={roll && props.blocked !== null ? props.blocked : undefined}
               aria-label={opens ? b.text : undefined}
-              onClick={roll && props.rollMenu ? menu.buttonProps.onClick : () => props.onTap(b.action)}
+              onClick={waits ? () => undefined : roll && props.rollMenu ? menu.buttonProps.onClick : () => props.onTap(b.action)}
               aria-describedby={roll && props.rollMenu ? menu.describe() : undefined}
               style={{ flex: "1 1 auto", ...(roll && props.rollMenu ? menu.pressStyle : {}) }}
             >

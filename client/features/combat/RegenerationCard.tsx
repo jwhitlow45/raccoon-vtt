@@ -5,6 +5,7 @@ import type { CardButton } from "../encounter/saveCards.ts";
 import type { PromptCard } from "./alerts.ts";
 import { promptOp, regeneratedWords, REGENERATION_NOTE_HELP, regenerateOp, regenerationNote, regenerationWords, type RegenerationPrompt } from "./logic.ts";
 import { useAnsweredSend } from "./send.ts";
+import { useTurnWait } from "./turnWait.ts";
 
 type Action = "apply" | "skip" | "dismiss" | "done";
 
@@ -32,6 +33,8 @@ export function RegenerationCard(props: { card: PromptCard<RegenerationPrompt>; 
   const { card } = props;
   const { participant, prompt } = card;
   const send = useAnsweredSend<Action>();
+  // Apply and Skip name the turn's record, which a turn change on its way may end.
+  const turnWait = useTurnWait();
   const settled = prompt.settled;
   const words = regenerationWords(participant.name, prompt.use.amount, participant.record?.life ?? "alive", props.revives);
   const note = settled ? null : regenerationNote(participant.record?.took, prompt.use.stops);
@@ -39,6 +42,7 @@ export function RegenerationCard(props: { card: PromptCard<RegenerationPrompt>; 
     ? [{ action: "done", text: "Done" }]
     : [...(words.apply ? [{ action: "apply" as const, text: "Apply" }] : []), { action: "skip", text: "Skip" }, { action: "dismiss", text: "Dismiss" }];
   const tap = (action: Action) => {
+    if (turnWait.waits && (action === "apply" || action === "skip")) return;
     if (action === "apply") send.send("apply", regenerateOp(participant.target, prompt.use, card.record));
     else if (action === "skip") send.send("skip", promptOp(participant.target, card.record, "regeneration", "skipped"));
     else props.onDismiss();
@@ -73,7 +77,7 @@ export function RegenerationCard(props: { card: PromptCard<RegenerationPrompt>; 
           {send.refusal}
         </div>
       ) : null}
-      <CardButtons buttons={buttons} busy={send.busy} rollBusy={false} blocked={null} onTap={tap} />
+      <CardButtons buttons={buttons} busy={send.busy} rollBusy={false} blocked={null} turnWait={turnWait} onTap={tap} />
     </section>
   );
 }

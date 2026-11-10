@@ -31,9 +31,9 @@ type Scope = InstanceType<typeof RoomScope>;
 
 const legendary = { actionsMax: 3, actionsUsed: 0, resistMax: 0, resistUsed: 0 };
 
-function provide(state: RoomState, viewer: Viewer, child: ReturnType<typeof createElement>, scope: Scope = new RoomScope()): string {
+function provide(state: RoomState, viewer: Viewer, child: ReturnType<typeof createElement>, scope: Scope = new RoomScope(), pending: readonly { n: number; op: Op; at: number }[] = []): string {
   const view = projectState(state, viewer, { sceneId: "s1" });
-  const store = createStore(() => ({ view, you: { memberId: viewer.memberId, role: viewer.role }, roomId: "r1", connection: "open", pending: [], local: { selectedIds: [], multi: false } }));
+  const store = createStore(() => ({ view, confirmed: view, you: { memberId: viewer.memberId, role: viewer.role }, roomId: "r1", connection: "open", pending, local: { selectedIds: [], multi: false } }));
   return renderToStaticMarkup(
     createElement(RoomProvider, {
       store: store as never,
@@ -366,5 +366,45 @@ describe("the list's trouble line on a creature with two recharges, and a remoun
       ["A roll may have happened. Check the log.", "info"],
     ]);
     assert.deepEqual([...local.getState().seen], [A, B], "no list shows them after");
+  });
+});
+
+describe("while a turn change waits for its answer, Roll recharge and Reopen are busy, and the uses that name no record are not", () => {
+  /** Each button's name, and whether it says it is busy. */
+  const busyOf = (markup: string) => Object.fromEntries([...markup.matchAll(/<button([^>]*)>/g)].map(([, attrs]) => [/aria-label="([^"]*)"/.exec(attrs!)?.[1] ?? "", /aria-busy="true"/.test(attrs!)]));
+  const NEXT_WAITS = [{ n: 1, op: { t: "encounter.next" } as Op, at: 0 }];
+
+  test("a dragon's spent breath: Roll recharge busy, Mark ready live", () => {
+    const breath: RechargeUse = { kind: "recharge", key: "actions:fire-breath", name: "Fire Breath", section: "actions", min: 5 };
+    const state = room();
+    state.tokens.dragon = token("dragon", { name: "Dragon", actor: { inline: actor({ uses: { [breath.key]: { kind: "recharge", name: "Fire Breath", used: 1, max: 1, min: 5 } } }) } });
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e1", entries: [entry("e1", { tokenId: "dragon" })] };
+    const list = (pending: typeof NEXT_WAITS) => provide(state, DM, createElement(CombatUses, { target: { tokenId: "dragon" }, form: "list", uses: [breath], loading: false, failed: false, ownTurn: false, name: "Dragon" }), new RoomScope(), pending);
+    const waiting = busyOf(list(NEXT_WAITS));
+    assert.equal(waiting["Roll the recharge of Fire Breath, 1d6"], true);
+    assert.equal(waiting["Mark Fire Breath ready"], false);
+    assert.equal(busyOf(list([]))["Roll the recharge of Fire Breath, 1d6"], false);
+  });
+
+  test("a goblin's skipped death save: Reopen busy, though no prompt is open", () => {
+    let state = room();
+    state.meta.settings = { ...state.meta.settings, monstersDieAtZero: false };
+    state.tokens.g1 = token("g1", { name: "Goblin", x: 2, y: 2 });
+    state.tokens.o1 = token("o1", { name: "Orc", x: 4, y: 2 });
+    let seq = 0;
+    const run = (op: Op) => {
+      const r = applyOp(state, op, DM, env(++seq));
+      assert.ok(r.ok, `${op.t}: ${r.ok ? "" : r.message}`);
+      state = r.state;
+    };
+    run({ t: "actor.hp", target: { tokenId: "g1" }, change: { kind: "set", cur: 0 } });
+    run({ t: "encounter.start", entries: [{ id: "eo", tokenId: "o1", value: 15 }, { id: "eg", tokenId: "g1", value: 10 }] });
+    while (state.encounter!.activeEntryId !== "eg") run({ t: "encounter.next" });
+    const record = state.tokens.g1!.actor;
+    assert.ok("inline" in record && record.inline.turnRecord);
+    run({ t: "actor.prompt", target: { tokenId: "g1" }, record: record.inline.turnRecord.id, what: "deathSave", state: "skipped" });
+    const drawer = (pending: typeof NEXT_WAITS) => provide(state, DM, createElement(UsesDrawer, { target: { tokenId: "g1" }, name: "Goblin", onClose() {} }), new RoomScope(), pending);
+    assert.equal(busyOf(drawer(NEXT_WAITS))["Reopen: Death save skipped"], true);
+    assert.equal(busyOf(drawer([]))["Reopen: Death save skipped"], false);
   });
 });
