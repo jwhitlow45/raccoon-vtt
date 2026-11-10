@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { LIMITS } from "#shared/limits.ts";
-import { GROUND_FLOOR } from "#shared/reducer/floors.ts";
+import { GROUND_FLOOR, NEW_FLOOR } from "#shared/reducer/floors.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
@@ -32,7 +32,6 @@ import {
   importSight,
   movedOn,
   mustCount,
-  NEW_FLOOR,
   NO_ANSWERS,
   outcomeText,
   perPlayerNote,

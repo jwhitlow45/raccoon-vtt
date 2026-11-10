@@ -47,9 +47,6 @@ export function importSight(seen: string, lightTouched: boolean): FloorSight {
   return seen === "like" && !lightTouched ? "like" : "own";
 }
 
-/** The name the reducer gives a floor added with none (shared/reducer/floors.ts), which the words read until the floor shows. */
-export const NEW_FLOOR = "New floor";
-
 /** Under Players see on a floor beside a per-player floor: a preset patches the floor beside's sight and keeps Per player. */
 export function perPlayerNote(besideName: string): string {
   return `Each player still sees for themselves, as on ${besideName}.`;
