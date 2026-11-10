@@ -56,9 +56,36 @@ export type DungeonSettings = {
  * are set in feet. Nothing else of the room reaches the plan, so a seed
  * makes the same dungeon at the same scale.
  */
-export type PlanContext = { feetPerCell: number };
+export type PlanContext = { feetPerCell: number; grid?: GridKind };
 /** The room's default scale, which the golden plans pin. */
 export const DEFAULT_CONTEXT: Readonly<PlanContext> = { feetPerCell: 5 };
+
+/**
+ * The grid a plan lands on (phase 3, 2.1): squares, or hexes in rows or
+ * columns. A context without one reads as squares, so every plan made
+ * before hexes is made the same.
+ */
+export type GridKind = "squares" | "hexRows" | "hexColumns";
+const GRIDS: readonly GridKind[] = ["squares", "hexRows", "hexColumns"];
+
+export function isHexGrid(grid: GridKind | undefined): grid is "hexRows" | "hexColumns" {
+  return grid === "hexRows" || grid === "hexColumns";
+}
+
+/**
+ * Free walls a hex plan keeps at most (phase 3, 2.5): 80% of the scene's
+ * 4,000, since every wall on hexes is a free wall and the split's count and
+ * the sight cap bind next.
+ */
+export const MAX_HEX_WALLS = 3_200;
+/** Rooms asked for on hexes stop here, where the defaults never step down (phase 3, 2.5). */
+export const MAX_HEX_ROOMS = 24;
+/** Rows a hex plan reaches at most: 87 cells down on Hex rows hold exactly 100 (phase 3, 2.1). */
+export const MAX_HEX_ROWS = 100;
+/** Custom's longest side across the rows on hexes: down on Hex rows, across on Hex columns. */
+export const MAX_HEX_CELLS = 87;
+/** Plans a fit tries, one fewer room each time, before it gives up (phase 3, D-261110-175). */
+export const MAX_FIT_PLANS = 12;
 
 export const HEIGHTS_MAX = 75;
 export const HEIGHTS_STEP = 5;
@@ -246,8 +273,14 @@ export function clampSettings(s: Partial<Record<keyof DungeonSettings, unknown>>
   };
 }
 
-/** A plan context from anything: the feet per square as the room settings hold it, 1 to 100, else the default. */
+/**
+ * A plan context from anything: the feet per square as the room settings
+ * hold it, 1 to 100, else the default, and a hex grid when one is named.
+ * Squares are left out, so a square context is the one plans always had.
+ */
 export function clampContext(c: Partial<Record<keyof PlanContext, unknown>> | undefined): PlanContext {
   const ft = c?.feetPerCell;
-  return { feetPerCell: typeof ft === "number" && Number.isFinite(ft) ? clamp(Math.round(ft), 1, 100) : DEFAULT_CONTEXT.feetPerCell };
+  const feetPerCell = typeof ft === "number" && Number.isFinite(ft) ? clamp(Math.round(ft), 1, 100) : DEFAULT_CONTEXT.feetPerCell;
+  const grid = oneOf(c?.grid, GRIDS, "squares");
+  return isHexGrid(grid) ? { feetPerCell, grid } : { feetPerCell };
 }

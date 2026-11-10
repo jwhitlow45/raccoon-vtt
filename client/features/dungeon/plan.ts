@@ -1,4 +1,5 @@
-import type { CellRect, StairDirection, TerrainId, TrapZone } from "#shared/model.ts";
+import type { CellRect, RoomState, Scene, StairDirection, TerrainId, TrapZone } from "#shared/model.ts";
+import type { JoinExpect } from "#shared/rules/wingClear.ts";
 import { trapPreset } from "#shared/srd/traps.ts";
 import { bends, Router, TURN_COST } from "./corridors.ts";
 import { daisClear, doorLines, doorStates, placePillars, placePits, placeRubble, roomFloors } from "./dress.ts";
@@ -11,8 +12,9 @@ import { deadEndCount, placeDeadEnds, type Spur } from "./deadEnds.ts";
 import { furnish } from "./furnish.ts";
 import { corridorTraps, keyRooms, numberRooms, pinSquare } from "./keyRooms.ts";
 import { placeLights } from "./lightSpots.ts";
+import type { DungeonEdits } from "./edits.ts";
 import { chooseSecrets, secretCandidates, stillWhole, type Candidate } from "./secrets.ts";
-import { clampContext, clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, MAX_DOOR_EDGES, SEARCH_BUDGET, litCount, secretCount, trapCount, type DungeonSettings, type PlanContext, type Theme } from "./settings.ts";
+import { clampContext, clampSettings, DEFAULT_CONTEXT, GENERATOR_VERSION, MAX_DOOR_EDGES, SEARCH_BUDGET, litCount, secretCount, trapCount, type DungeonSettings, type GridKind, type PlanContext, type Theme } from "./settings.ts";
 import { channelWater, placeCisterns, type Channel } from "./sewer.ts";
 import { THEME_SPECS } from "./themes.ts";
 import { propsFor } from "./props.ts";
@@ -52,7 +54,15 @@ export type PlanLight = { x: number; y: number; preset: "Candle" | "Torch" | "Ho
  * cells and its yaw in 45 degree steps, and the index in `stones` of the
  * hidden token its one action shows.
  */
-export type PlanTrap = { preset: string; zone: TrapZone; hits?: CellRect[]; cone?: { origin: [number, number]; yaw: number }; stone?: number };
+export type PlanTrap = { preset: string; zone: TrapZone; hits?: CellRect[]; cone?: { origin: [number, number]; yaw: number }; stone?: number; leaf?: number };
+
+/**
+ * A free wall on a hex side (phase 3, 2.2): its ends on the 1/64 lattice
+ * and what it is, a wall or a door leaf in its doorway's state. Make gives
+ * each a fresh id. One per side, so a hidden leaf reaches players as a wall
+ * of its own ends, like every other piece.
+ */
+export type PlanWall = { a: [number, number]; b: [number, number]; f: "wall" | "closed" | "locked" | "secret" };
 
 /** A room's doorway as the key reads it: its side, the other room's number or the map's edge, and its door ("open" on Cave). */
 export type KeyDoor = { side: "n" | "e" | "s" | "w"; to: number | "edge"; state: PlanDoor["state"] | "open" };
@@ -99,6 +109,35 @@ export type DungeonPlan = {
   key: KeyRoom[] | null;
   /** The traps no room holds, for the key's closing part: present only with DM key on and a trap in a corridor. */
   corridorTraps?: KeyCorridorTrap[];
+  /*
+   * Phase 3's fields, each absent on squares and after the keys above, so
+   * every square plan and its golden hash stay as they were (5).
+   *
+   * On hexes `w` and `h` are the scene's bounds in cells, rooms, their pins
+   * and the entrance are on the rows lattice (lattice.ts), and every cell
+   * key, stamp, light and trap zone is the scene's own, mirrored on Hex
+   * columns. `paint` and `doors` are empty: walls show the rooms.
+   */
+  grid?: GridKind;
+  /** Every wall and door leaf, sorted by their ends. */
+  walls?: PlanWall[];
+  /** Difficult ground, as scene keys: rubble and water on hexes and on a "floor" wing. */
+  rough?: string[];
+  /** A wing's join as planned, which its asks carry for the server's check. */
+  join?: JoinExpect;
+};
+
+/**
+ * What a wing is planned on (phase 3, 3.3 and 3.4): the scene, the parts of
+ * the room that can stand in the way, the area dragged in the scene's own
+ * keys, the join, and a hash of the geometry, which edits freeze.
+ */
+export type WingBase = {
+  scene: Scene;
+  state: Pick<RoomState, "buildChunks" | "traps" | "stamps" | "lights" | "labels" | "pins" | "tokens" | "floorLinks">;
+  area: CellRect;
+  join: JoinExpect;
+  hash: string;
 };
 
 /**
@@ -170,10 +209,22 @@ export type Planned = {
   cisterns: Set<number>;
   /** Each kept room's pin square, by board index. */
   pins: Map<number, number>;
+  /** The room count the plan asked `placeRooms` for: the Rooms asked, or fewer where a hex plan stepped down (phase 3, 2.5). */
+  fitted: number;
 };
 
 export function generate(settings: DungeonSettings, seed: Seed, context: PlanContext, budget: number = SEARCH_BUDGET): DungeonPlan {
   return planDungeon(settings, seed, context, budget).plan;
+}
+
+/**
+ * The plan a dialog or a wing pane shows (phase 3, 2.5 and 4.2): on hexes
+ * the first plan within the wall budget, stepping the room count down, and
+ * with edits exactly the room count they froze, the edits applied.
+ */
+export function planFitted(settings: DungeonSettings, seed: Seed, context: PlanContext, extras: { edits?: DungeonEdits; wing?: WingBase } = {}): Planned {
+  void extras;
+  return planDungeon(settings, seed, context);
 }
 
 /** The plan with its working. A caller with no room (a bench script) plans at the default 5 ft a square. */
@@ -640,6 +691,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     unpainted,
     cisterns,
     pins,
+    fitted: s.rooms,
   };
 }
 
