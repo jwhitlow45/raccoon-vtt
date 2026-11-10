@@ -173,8 +173,10 @@ export function warmOpChecks(ops: readonly ClientOp[], parse: (op: ClientOp) => 
  * same group and titled from the stored name. The dialog holds every close
  * until the create is answered, so no op of this device falls between, and
  * the key joins the floor's one Undo setup step. A refused create sends no
- * key, and a floor that never shows within the check's time sends none and
- * is unconfirmed.
+ * key, and a floor that does not show within the check's time sends none.
+ * Still missing when the send ends, it reads as no floor added, as a new
+ * scene does (D-261110-410). There by then, it is unconfirmed, since its key
+ * page was never sent (D-261110-411).
  */
 export async function sendDungeon(
   made: { ops: ClientOp[]; sceneId: string; room: RoomState; ids?: ReadonlyMap<string, string> },
