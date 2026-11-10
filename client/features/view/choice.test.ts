@@ -23,6 +23,7 @@ import {
   turnsReasons,
   viewButtonLabel,
   VIEW_CHOICES,
+  staleTurnNotices,
   viewSaid,
   wantedKind,
   type ViewState,
@@ -99,6 +100,12 @@ describe("the view choice (docs/design/design-v1-isometric-view.md 7, 8)", () =>
     assert.equal(wantedKind(FOLLOW_THE_SCENE, "isometric"), "isometric");
     assert.equal(wantedKind(withPick(FOLLOW_THE_SCENE, "topDown"), "isometric"), "topDown", "a pick beats the suggestion");
     assert.equal(wantedKind(FOLLOW_THE_SCENE, undefined), "topDown");
+  });
+
+  test("a turn notice leaves once the board shows Isometric, and no other toast does", () => {
+    const toasts = [{ id: 1, text: "Turning needs the isometric view." }, { id: 2, text: "Saved." }, { id: 3, text: "Turning needs the isometric view." }];
+    assert.deepEqual(staleTurnNotices(toasts, isometric(0)), [1, 3]);
+    assert.deepEqual(staleTurnNotices(toasts, TOP_DOWN), [], "Top-down still needs the notice");
   });
 
   test("the status says each change once: a view, Follow the scene, a turn each way, and a tool's line per tool choice", () => {

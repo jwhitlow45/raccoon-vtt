@@ -183,6 +183,15 @@ export function turnRefused(stored: StoredView, suggested: Scene["suggestedView"
   return (wantedKind(stored, suggested) === "isometric" ? topDownLine(tool) : null) ?? TURN_NEEDS_ISOMETRIC;
 }
 
+/**
+ * The toasts that still say turning needs Isometric once the board shows it
+ * (a Q or E in Top-down a moment before the scene's suggested view took
+ * over): they have nothing left to say and should leave.
+ */
+export function staleTurnNotices(toasts: readonly { id: number; text: string }[], shown: Pick<View, "kind">): number[] {
+  return shown.kind === "isometric" ? toasts.filter((t) => t.text === TURN_NEEDS_ISOMETRIC).map((t) => t.id) : [];
+}
+
 // ---------------------------------------------------------------- the room's slots
 
 /**

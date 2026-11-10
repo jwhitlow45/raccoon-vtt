@@ -11,7 +11,7 @@ import { theme } from "../../lib/theme.ts";
 import { turned, type View, type ViewKind } from "../../lib/view.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { keySuffix, useKeyHint } from "../../state/shortcuts.ts";
-import { useRoomView } from "../../state/view.ts";
+import { useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import {
   choiceOf,
   choiceWords,
@@ -20,6 +20,7 @@ import {
   menuLine,
   previewViewSlot,
   sayView,
+  staleTurnNotices,
   turnsReason,
   turnsReasons,
   suggestedKind,
@@ -124,6 +125,8 @@ export function useRoomViewChoice(): ViewChoiceState {
 export function useViewVoice(choice: ViewChoiceState): void {
   const scope = useRoomScope();
   const before = useRef<ViewState | null>(null);
+  const store = useRoomStore();
+  const ui = useRoomUi();
   const { sceneId, shown, wanted, forcedBy } = choice;
   const pick = choice.stored.pick;
   useEffect(() => {
@@ -132,7 +135,9 @@ export function useViewVoice(choice: ViewChoiceState): void {
     before.current = now;
     const said = was ? viewSaid(was, now) : null;
     if (said) sayView(scope, said);
-  }, [scope, sceneId, shown, pick, wanted, forcedBy]);
+    // A refused turn's notice leaves once the board is Isometric after all.
+    for (const id of staleTurnNotices(store.getState().toasts, shown)) ui.dismissToast(id);
+  }, [scope, store, ui, sceneId, shown, pick, wanted, forcedBy]);
 }
 
 /**
