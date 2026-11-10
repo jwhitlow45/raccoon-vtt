@@ -37,4 +37,14 @@ describe("pill text", () => {
     assert.ok(one[0]!.endsWith("…"));
     assert.ok(measure(one[0]!, 12) <= 240);
   });
+
+  test("a name that fits whole keeps its line when the pill asks to stack, and its value goes under it (FL2-POLISH)", () => {
+    // "Up to Upper floor · Not reached yet" is 35 characters, 210 px: too wide for 200, so the plain pill cuts the name to fit.
+    const input = { name: "Up to Upper floor", value: "Not reached yet", px: 12, maxWidth: 200 };
+    assert.deepEqual(pillLines(input, measure), ["Up to Upper fl… · Not reached yet"]);
+    assert.deepEqual(pillLines({ ...input, stack: true }, measure), ["Up to Upper floor", "Not reached yet"]);
+    assert.deepEqual(pillLines({ ...input, stack: true, maxWidth: 240 }, measure), ["Up to Upper floor · Not reached yet"]);
+    // A name too long for a line of its own is still cut beside the value.
+    assert.equal(pillLines({ ...input, name: "Up to the Very Long Floor Name Of The Keep", stack: true }, measure).length, 1);
+  });
 });

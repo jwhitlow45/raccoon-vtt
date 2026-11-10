@@ -8023,6 +8023,7 @@ export function sceneSettingsTests(): void {
   });
   floorsRootTests();
   floorLinkBuildTests();
+  floorPillTests();
 }
 
 /*
@@ -8269,6 +8270,59 @@ function floorLinkBuildTests(): void {
     assert.deepEqual(lines, [], "the stairs' builder screens out of line");
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     withinSnapshotBudget("flrk-a");
+  });
+}
+
+/** The words of every board pill Konva draws, one entry a pill with its lines joined by a newline. */
+async function boardPillWords(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    type Label = { isVisible(): boolean; getText(): { text(): string } | undefined };
+    const konva = (globalThis as unknown as { Konva?: { stages: { find(selector: string): Label[] }[] } }).Konva;
+    return (konva?.stages ?? []).flatMap((stage) => stage.find("Label").filter((l) => l.isVisible()).map((l) => l.getText()?.text() ?? ""));
+  });
+}
+
+/**
+ * FL2-POLISH: the stairs' name pill keeps "Up to Upper floor" whole beside "Not reached yet" where the room has
+ * the width, the value on a line under it, never the name cut to "Up to Uppe…" at the desktop's width.
+ */
+function floorPillTests(): void {
+  test("fu53-pill. the DM's stairs pill keeps Up to Upper floor whole beside Not reached yet at 1280 x 800, 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%", async () => {
+    await newDmSession();
+    const tower = randomUUID();
+    const upper = randomUUID();
+    await ops.send({ t: "scene.create", scene: { id: tower, name: "Tower", bounds: BOUNDS, background: "#2b2b31" } });
+    await ops.send({ t: "scene.create", scene: { id: upper, name: "Tower", bounds: BOUNDS }, floor: { beside: tower, side: "above" } });
+    await ops.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor" } } });
+    const lines: string[] = [];
+    try {
+      await ops.send({ t: "floorLink.put", link: { id: "fu53-a", pairId: "fu53-b", sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
+      for (const at of [...FU30_AT, { size: IC2_DESK, scale: 1 }]) {
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, at.size, at.scale);
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        await viewScene(await openDmPanel(page, "Scenes"), tower);
+        await closeSheets(page);
+        await escapeAll(page);
+        const where = `${at.size.name} at ${at.scale * 100}%`;
+        const pill = await waitFor(`the stairs pill at ${where}`, async () => (await boardPillWords(page)).find((w) => w.includes("Up to")) ?? null, 8_000).catch(() => null);
+        // A phone zoomed out draws no name at all (trapNameShown), so a missing pill is no cut one.
+        if (pill !== null && !/^Up to Upper floor( · |\n)Not reached yet$/.test(pill)) lines.push(`${where}: the stairs pill reads ${JSON.stringify(pill)}`);
+        await shots.take(page, `alignment-fu53-pill-${at.size.name}-${at.scale}`);
+        console.log(`fu53-pill ${where}: ${JSON.stringify(pill)}`);
+      }
+    } finally {
+      await ops.send({ t: "scene.delete", sceneId: tower }).catch(() => {});
+      try {
+        const page = await dmPageFor(FU30_AT.at(-1)!.size);
+        await viewScene(await openDmPanel(page, "Scenes"), run.sceneId);
+        await escapeAll(page);
+      } catch (err) {
+        console.error("fu53-pill: going back to the players' scene failed", err);
+      }
+    }
+    assert.deepEqual(lines, [], "the stairs pill is cut or missing");
   });
 }
 

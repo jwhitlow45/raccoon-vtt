@@ -124,7 +124,7 @@ const LinkMark = memo(function LinkMark(props: { link: FloorLink; scenes: Readon
   const pill: PillSpec | null =
     label === null || props.quiet || !trapNameShown(scale)
       ? null
-      : { name: label, ...(props.notReached ? { value: NOT_REACHED } : {}), x: at.x, y: at.y, above: true, size: "map", small: true, maxLines: 1 };
+      : { name: label, ...(props.notReached ? { value: NOT_REACHED } : {}), x: at.x, y: at.y, above: true, size: "map", small: true, maxLines: 1, stack: true };
   const iso = useIsoGround();
   // The end lies on the ground: Top-down's board, or the isometric ground stage.
   const flat = iso === null || iso.place === "ground";
