@@ -1,10 +1,13 @@
 import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
+import type { ReactNode } from "react";
 import { setBoardInterfaceScale } from "../../lib/boardScale.ts";
 
-const { areaNameRoom, placedOutline } = await import("./TemplateLayer.tsx");
+const { createElement } = await import("react");
+const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
+const { drawn } = await import("../../components/testing/drawn.ts");
+const { areaNameRoom, PlacedArea, placedOutline } = await import("./TemplateLayer.tsx");
 const { pillGeometry } = await import("../measure/Pill.tsx");
 const { draftTemplate, newDraft } = await import("./placement.ts");
 const { SQUARES } = await import("#shared/rules/grid.ts");
@@ -47,10 +50,24 @@ describe("a placed area's outline (CUBE-PUBLISH-FRAME)", () => {
     const again = { ...ctx, tokens: {} };
     assert.notEqual(placedOutline(cube, again), first);
     assert.deepEqual(placedOutline(cube, again), first);
-    // A placed area reads it there, not from areaOutline, which makes a new one each call.
-    const source = readFileSync(new URL("./TemplateLayer.tsx", import.meta.url), "utf8");
-    const body = source.slice(source.indexOf("export const PlacedArea = memo("), source.indexOf("/** Children shown only inside"));
-    assert.match(body, /const outline = placedOutline\(t, ctx\);/);
-    assert.doesNotMatch(body, /areaOutline\(/);
+  });
+
+  test("a placed area draws that same outline object, not a fresh areaOutline", () => {
+    const ctx = { settings: { feetPerCell: 5, aoeCoverage: "half", aoeInclusion: "anyCell" }, bounds: { w: 40, h: 40 }, grid: SQUARES, tokens: {} } as const;
+    const drafted = draftTemplate(SQUARES, { ...newDraft("a1", "cube", "#f38400"), point: { x: 5, y: 5, z: 0 } }, {}, 5);
+    assert.ok(drafted);
+    const template = { ...drafted, sceneId: "s" };
+    const tree = drawn((PlacedArea as unknown as { type: (p: unknown) => ReactNode }).type, { template, ctx, scale: 40, sceneId: "s", dm: true, avoid: [], fogged: undefined, mode: "topDown", fog: null }, (child) => createElement(RoomScopeProvider, { scope: new RoomScope(), children: child }));
+    const outlines: unknown[] = [];
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (node === null || typeof node !== "object") return;
+      const el = node as { props?: { outline?: unknown; children?: unknown } };
+      if (el.props?.outline) outlines.push(el.props.outline);
+      walk(el.props?.children);
+    };
+    walk(tree);
+    assert.equal(outlines.length, 1, "the outline is drawn once");
+    assert.equal(outlines[0], placedOutline(template, ctx));
   });
 });
