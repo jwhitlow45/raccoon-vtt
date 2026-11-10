@@ -420,7 +420,8 @@ export function leafState(f: WallFeature | EdgeFeature | null): "closed" | "lock
 /**
  * What the planner takes for a wing (3.4): the scene's lattice, the join,
  * the area as a lattice rectangle, the open ground its rooms and corridors
- * may take (`inside`) and its stub may cross (`reach`), the area's cells
+ * may take (`inside`) and its stub may cross (`reach`, the open ground in
+ * the box spanning the area and the approach), the area's cells
  * closed to rooms (`blocked`, area-local, the approach among them), whether
  * the wing is flat on a "floor" scene, the wall ends the wall pass leaves
  * alone, and what the scene has room for. `problem` says why nothing can
@@ -503,9 +504,19 @@ export function wingSetup(base: WingScene & Pick<WingBase, "area" | "join">, s: 
   const nearAll = grown(world, occ, margin);
   const nearOther = grown(world, otherOcc, margin);
   const flood = planningFlood(world, facts.outside[0]!, null);
+  const open = new Uint8Array(L.W * L.H);
+  for (const k of flood) if ((approachSet.has(k) ? nearOther[k] : nearAll[k]) === 0) open[k] = 1;
+  if (approach.some((k) => open[k] !== 1)) return { ...none("nearJoin"), facts };
+  // The stub keeps to the box spanning the area and the approach (LP37-A-WING-2): the area itself
+  // once the area holds the approach, else the ground straight between the two. Across the whole
+  // flood, rooms crowding the approach sent it round the joined room, rows outside the area.
+  const span = spanning(area, approach, L.W);
   const reach = new Uint8Array(L.W * L.H);
-  for (const k of flood) if ((approachSet.has(k) ? nearOther[k] : nearAll[k]) === 0) reach[k] = 1;
-  if (approach.some((k) => reach[k] !== 1)) return { ...none("nearJoin"), facts };
+  for (const k of flood) {
+    const x = k % L.W;
+    const y = (k - x) / L.W;
+    if (open[k] === 1 && x >= span.x0 && x <= span.x1 && y >= span.y0 && y <= span.y1) reach[k] = 1;
+  }
   const inside = new Uint8Array(L.W * L.H);
   const blocked = new Uint8Array(area.w * area.h).fill(1);
   for (let y = 0; y < area.h; y++) {
@@ -517,4 +528,18 @@ export function wingSetup(base: WingScene & Pick<WingBase, "area" | "join">, s: 
     }
   }
   return { world, facts, expect: base.join, area, inside, reach, blocked, approach, flat, skip: world.grid === "squares" ? new Set() : standingWallEnds(world, base.join), allowance: wingAllowance(world, base), problem: null };
+}
+
+/** The least lattice box holding an area and some cells, inclusive. */
+function spanning(area: { x: number; y: number; w: number; h: number }, cells: readonly number[], W: number): { x0: number; y0: number; x1: number; y1: number } {
+  const box = area.w > 0 && area.h > 0 ? { x0: area.x, y0: area.y, x1: area.x + area.w - 1, y1: area.y + area.h - 1 } : { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for (const k of cells) {
+    const x = k % W;
+    const y = (k - x) / W;
+    box.x0 = Math.min(box.x0, x);
+    box.y0 = Math.min(box.y0, y);
+    box.x1 = Math.max(box.x1, x);
+    box.y1 = Math.max(box.y1, y);
+  }
+  return box;
 }

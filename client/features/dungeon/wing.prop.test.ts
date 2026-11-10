@@ -5,9 +5,10 @@ import type { AutoWalls, RoomState } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { holds } from "#shared/propertyTestutil.ts";
 import { FLOOR_TERRAINS } from "#shared/rules/autoWalls.ts";
+import { hexAt } from "#shared/rules/hex.ts";
 import { builderScene } from "../scenes/create.ts";
 import { endsKey, hexSide, hexWalls, NO_SPACE } from "./hexWalls.ts";
-import { latticeFor } from "./lattice.ts";
+import { hexGridOf, latticeFor } from "./lattice.ts";
 import { planFitted, type WingBase } from "./plan.ts";
 import { landAll, scratchRoom } from "./scratch.ts";
 import { CROCKFORD, versionChar, type Seed } from "./seed.ts";
@@ -145,4 +146,105 @@ describe("any hex wing", () => {
       20,
     );
   });
+});
+
+/*
+ * Any wing keeps to the area the DM dragged (LP37-A-WING-2): with the area
+ * holding the join's approach, as it does when dragged out from the wall,
+ * no room, corridor, stub or trap of the wing lies outside it. The room is
+ * small and the area wider than it, so a stub let loose across the open
+ * ground could run round the room, as one did on hexes. That took about
+ * one plan in a hundred here, so the plans that did it stand as cases of
+ * their own beside the property.
+ */
+describe("any wing whose area holds its approach", () => {
+  const ring = { x: 30, y: 30, w: 5, h: 5 };
+  const lattice = { x: 23, y: 10, w: 19, h: 20 };
+  type Choices = Partial<DungeonSettings>;
+  const inRect = (r: { x: number; y: number; w: number; h: number }, x: number, y: number) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+  /** Every trap's zone cells as scene keys, and for a wire the key of its middle, since its ends lie on the walls it spans. */
+  const zoneCells = (p: ReturnType<typeof planFitted>, keyAt: (x: number, y: number) => readonly [number, number]): (readonly [number, number])[] =>
+    p.plan.traps.flatMap((t) => {
+      const z = t.zone;
+      if ("wire" in z) return [keyAt((z.wire.a[0] + z.wire.b[0]) / 2, (z.wire.a[1] + z.wire.b[1]) / 2)];
+      return ("cells" in z ? z.cells : []).flatMap((r) => Array.from({ length: r.w * r.h }, (_, i) => [r.x + (i % r.w), r.y + Math.floor(i / r.w)] as const));
+    });
+  const planned = (p: ReturnType<typeof planFitted>): boolean => {
+    if (!p.wing?.problem) return true;
+    assert.ok(["noWay", "noRooms", "full"].includes(p.wing.problem), p.wing.problem);
+    return false;
+  };
+
+  /** A squares wing joined on the room's north wall `along` squares in, checked. */
+  const squares = (() => {
+    const cells: string[] = [];
+    for (let y = ring.y; y < ring.y + ring.h; y++) for (let x = ring.x; x < ring.x + ring.w; x++) cells.push(`${x},${y}`);
+    const landed = landAll(scratchRoom(), [{ t: "scene.create", scene: builderScene({ id: S, name: "Ring", w: 60, h: 60 }) }, { t: "build.paint", sceneId: S, terrain: "stone", cells }]);
+    if (!landed.ok) throw new Error(landed.why);
+    const state = landed.room;
+    return (choices: Choices, seed: Seed, along: number): boolean => {
+      const s = clampSettings({ ...DEFAULT_SETTINGS, ...choices, heights: 75 });
+      const x = ring.x + along;
+      const edges = (s.wide ? [x, x + 1] : [x]).map((xx) => ({ key: `${xx},${ring.y},n`, feature: null, ground: 0 }));
+      const p = planFitted(s, seed, { feetPerCell: 5 }, { wing: { scene: state.scenes[S]!, state, area: lattice, join: { grid: "squares", edges }, hash: "prop-wing" } });
+      if (!planned(p)) return false;
+      for (const c of Object.values(p.plan.paint).flat()) {
+        const [cx, cy] = c!.split(",").map(Number) as [number, number];
+        assert.ok(inRect(lattice, cx, cy), `${c} painted outside the area`);
+      }
+      for (const [cx, cy] of zoneCells(p, (wx, wy) => [Math.floor(wx), Math.floor(wy)])) assert.ok(inRect(lattice, cx, cy), `a trap at ${cx},${cy} outside the area`);
+      return true;
+    };
+  })();
+
+  /** A hex wing joined on side `dir` of the room's top row hex `along` in, checked. */
+  const hexes = (grid: "hexRows" | "hexColumns") => {
+    const L = latticeFor(grid, { w: 60, h: 60 });
+    const g = hexGridOf(grid);
+    const space = new Int32Array(L.W * L.H).fill(NO_SPACE);
+    for (let y = ring.y; y < ring.y + ring.h; y++) for (let x = ring.x; x < ring.x + ring.w; x++) space[y * L.W + x] = 0;
+    const old = hexWalls({ lattice: L, space, doorways: [], far: new Set(), wayIn: [] }).walls;
+    const landed = landAll(scratchRoom(), [
+      { t: "scene.create", scene: builderScene({ id: S, name: "Ring", w: 60, h: 60, gridShape: grid }) },
+      { t: "build.walls", sceneId: S, put: old.map((w, i) => ({ id: `ow${String(i).padStart(10, "0")}`, a: w.a, b: w.b, f: { kind: "wall" } })) },
+    ]);
+    if (!landed.ok) throw new Error(landed.why);
+    const state = landed.room;
+    const area = grid === "hexColumns" ? { x: lattice.y, y: lattice.x, w: lattice.h, h: lattice.w } : lattice;
+    return (choices: Choices, seed: Seed, along: number, dir: number): boolean => {
+      const s = clampSettings({ ...DEFAULT_SETTINGS, ...choices, wide: false, heights: 75 }, grid);
+      const key = endsKey(...hexSide(L, ring.y * L.W + ring.x + along, dir));
+      const chunk = Object.values(state.buildChunks).find((c) => c?.walls?.some((w) => endsKey(w.a, w.b) === key))!;
+      const wall = chunk.walls!.find((w) => endsKey(w.a, w.b) === key)!;
+      const p = planFitted(s, seed, { feetPerCell: 5 }, { wing: { scene: state.scenes[S]!, state, area, join: { grid: "hex", walls: [{ cx: chunk.cx, cy: chunk.cy, id: wall.id, a: wall.a, b: wall.b, f: wall.f }], ground: 0 }, hash: "prop-wing" } });
+      if (!planned(p)) return false;
+      for (let c = 0; c < p.space.length; c++) {
+        if (p.space[c] === NO_SPACE) continue;
+        assert.ok(inRect(lattice, c % L.W, Math.floor(c / L.W)), `lattice hex ${c % L.W},${Math.floor(c / L.W)} outside the area`);
+      }
+      for (const [cx, cy] of zoneCells(p, (wx, wy) => ((h) => [h.col, h.row] as const)(hexAt(g, { x: wx, y: wy })))) assert.ok(inRect(area, cx, cy), `a trap at ${cx},${cy} outside the area`);
+      return true;
+    };
+  };
+
+  test("on squares, every cell it paints and every trap lies in the area", () => {
+    // A plan whose stub ran round the room's west side when it could cross all the open ground, and plans inside the area now.
+    assert.ok(squares({ rooms: 3, density: "dense", corridors: "straight", traps: 0, dressing: "none" }, "90AAMREYKGPSESDG", 3));
+    holds(
+      fc.property(choiceArb, seedArb, fc.integer({ min: 0, max: ring.w - 2 }), (choices, seed, along) => void squares(choices, seed, along)),
+      25,
+    );
+  });
+
+  for (const grid of ["hexRows", "hexColumns"] as const) {
+    test(`on ${grid}, every hex of it and every trap lies in the area`, () => {
+      const check = hexes(grid);
+      // A plan whose stub ran round the room when it could cross all the open ground, as on Hex ring in live play, and plans inside the area now.
+      assert.ok(check({ rooms: 2, density: "dense", corridors: "straight", traps: 0, dressing: "none" }, "9H9XQHBW9JPEDMSF", 2, 4));
+      holds(
+        fc.property(choiceArb, seedArb, fc.integer({ min: 0, max: ring.w - 1 }), fc.constantFrom(4, 5), (choices, seed, along, dir) => void check(choices, seed, along, dir)),
+        25,
+      );
+    });
+  }
 });

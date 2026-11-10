@@ -432,7 +432,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
   let stubPath: number[] | null = null;
   let stubChain: number[] | null = null;
   if (stub && !wingProblem) {
-    // A wing's stub runs to the join's far landing, or its outside cells, across the open ground the flood reached.
+    // A wing's stub runs to the join's far landing, or its outside cells, across the open ground between its area and the join.
     const found = joinDoor ? router.route(stub, { anchor: board.anchor(joinDoor), side: joinDoor.side }, { ...options, reach: true }) : router.route(stub, { edge: entrance.side }, options);
     if (found.ok) {
       for (const k of found.cells) board.laid[k] = 1;
