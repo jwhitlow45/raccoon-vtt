@@ -8386,7 +8386,8 @@ function floorPillTests(): void {
         await escapeAll(page);
         const where = `${at.size.name} at ${at.scale * 100}%`;
         const pill = await waitFor(`the stairs pill at ${where}`, async () => (await boardPillWords(page)).find((w) => w.includes("Up to")) ?? null, 8_000).catch(() => null);
-        // A phone zoomed out draws no name at all (trapNameShown), so a missing pill is no cut one.
+        // A phone zoomed out draws no name at all (trapNameShown), so a missing pill is no cut one there. A desktop's zoom shows it, so there it must draw.
+        if (pill === null && !at.size.touch) lines.push(`${where}: no stairs pill drew`);
         if (pill !== null && !/^Up to Upper floor( · |\n)Not reached yet$/.test(pill)) lines.push(`${where}: the stairs pill reads ${JSON.stringify(pill)}`);
         await shots.take(page, `alignment-fu53-pill-${at.size.name}-${at.scale}`);
         console.log(`fu53-pill ${where}: ${JSON.stringify(pill)}`);
