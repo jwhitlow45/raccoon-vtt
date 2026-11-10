@@ -95,25 +95,27 @@ export function privTwins(seed: number, opts: SeqTwinOptions = {}): PrivTwins {
     }
     for (const c of creatures) state.tokens[c.id] = c;
     out.creatures[name] = creatures.map((c) => c.id);
-    // Public stamps keep one order. Hidden ones sit between them, a different number in each twin.
+    // Public stamps keep one order. Hidden ones sit between them, a different number in each twin, and the gaps
+    // leave room to move a stamp among the hidden ones without passing a public one.
     const stamps: Stamp[] = [];
     let z = 0;
+    const next = () => (z += int(r, 2, 10));
     const between = (x0: number, x1: number, y: number) => {
       for (let i = int(r, 0, 2); i > 0; i--) {
         const id = idFrom(r);
-        stamps.push(stampAt(id, int(r, x0, x1), y, z++, "dm"));
+        stamps.push(stampAt(id, int(r, x0, x1), y, next(), "dm"));
         hidden.ids.push(id);
         out.hiddenStamps[name].push(id);
       }
     };
     for (const [i, id] of stampsR.entries()) {
       between(3, 8, 8);
-      stamps.push(stampAt(id, 3 + 2 * i, 7, z++));
+      stamps.push(stampAt(id, 3 + 2 * i, 7, next()));
     }
     between(3, 8, 8);
     for (const [i, id] of stampsSide.entries()) {
       between(4, 9, 13);
-      stamps.push(stampAt(id, 6 + 2 * i, 12, z++));
+      stamps.push(stampAt(id, 6 + 2 * i, 12, next()));
     }
     between(4, 9, 13);
     state.stamps = Object.fromEntries(stamps.map((s) => [s.id, s]));
