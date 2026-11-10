@@ -643,6 +643,12 @@ newest first.
 
 **Since v0.3.1**
 
+- **Clock**: log lines are now numbered by the server's clock, so keep the
+  clock right. A room whose numbers are ahead of the clock logs a warning
+  when it loads, and a backup dated more than 5 minutes after the clock is
+  refused. No data migrates. Reload any DM page left open across the update:
+  until it reloads, its turn cards may flicker at a turn change and an action
+  tapped in that moment is refused.
 - **Floors from files and dungeons, and the ruler over stairs**
   ([design](design/design-v1-floors.md)): room format 45, change format 59. No
   data migrates, since a room saved before reads as it did. Until it reloads,
