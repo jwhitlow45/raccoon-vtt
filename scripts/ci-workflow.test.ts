@@ -40,9 +40,9 @@ function gateScript(): string {
   return body.join("\n");
 }
 
-type Results = { build: string; "typecheck-int": string; unit: string; e2e: string; "e2e-macos": string };
+type Results = { build: string; "typecheck-int": string; "int-clock": string; unit: string; e2e: string; "e2e-macos": string };
 
-const PASSED: Results = { build: "success", "typecheck-int": "success", unit: "success", e2e: "success", "e2e-macos": "skipped" };
+const PASSED: Results = { build: "success", "typecheck-int": "success", "int-clock": "success", unit: "success", e2e: "success", "e2e-macos": "skipped" };
 
 /** The gate run with these job results and build outputs, as GitHub's default bash runs a step. */
 function gate(results: Results, outputs: { macosFiles?: string; docsOnly?: string; pushTested?: boolean } = {}): { status: number | null; out: string } {
@@ -53,6 +53,7 @@ function gate(results: Results, outputs: { macosFiles?: string; docsOnly?: strin
       PUSH_TESTED: String(outputs.pushTested ?? false),
       BUILD: results.build,
       TYPECHECK_INT: results["typecheck-int"],
+      INT_CLOCK: results["int-clock"],
       UNIT: results.unit,
       E2E: results.e2e,
       E2E_MACOS: results["e2e-macos"],
@@ -78,6 +79,13 @@ describe("CI passed", () => {
     assert.equal(gate(PASSED, { macosFiles: "2", docsOnly: "true" }).status, 0);
   });
 
+  test("passes a docs-only push, which skips the integration tests on the real clock, and fails any other that skips them", () => {
+    assert.equal(gate({ ...PASSED, "int-clock": "skipped" }, { docsOnly: "true" }).status, 0);
+    const r = gate({ ...PASSED, "int-clock": "skipped" });
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /^::error::Not every job passed: int-clock \(skipped\)\.$/m);
+  });
+
   test("fails when e2e-macos was skipped though it had files to run", () => {
     const r = gate(PASSED, { macosFiles: "2" });
     assert.equal(r.status, 1, r.out);
@@ -85,12 +93,12 @@ describe("CI passed", () => {
   });
 
   test("fails a failed build and names every job it took down, e2e-macos's skip included", () => {
-    const r = gate({ ...PASSED, build: "failure", e2e: "skipped" });
+    const r = gate({ ...PASSED, build: "failure", "int-clock": "skipped", e2e: "skipped" });
     assert.equal(r.status, 1, r.out);
-    assert.match(r.out, /^::error::Not every job passed: build \(failure\) e2e \(skipped\) e2e-macos \(skipped\)\.$/m);
+    assert.match(r.out, /^::error::Not every job passed: build \(failure\) int-clock \(skipped\) e2e \(skipped\) e2e-macos \(skipped\)\.$/m);
   });
 
-  for (const job of ["build", "typecheck-int", "unit", "e2e", "e2e-macos"] as const) {
+  for (const job of ["build", "typecheck-int", "int-clock", "unit", "e2e", "e2e-macos"] as const) {
     for (const result of ["failure", "cancelled", "skipped"]) {
       if (job === "e2e-macos" && result === "skipped") continue;
       test(`fails when ${job} ended ${result}`, () => {
@@ -102,7 +110,7 @@ describe("CI passed", () => {
   }
 
   test("passes a pull request from this repository's ci/ branch, where every job skipped", () => {
-    const skipped = { build: "skipped", "typecheck-int": "skipped", unit: "skipped", e2e: "skipped", "e2e-macos": "skipped" };
+    const skipped = { build: "skipped", "typecheck-int": "skipped", "int-clock": "skipped", unit: "skipped", e2e: "skipped", "e2e-macos": "skipped" };
     const r = gate(skipped, { macosFiles: "", docsOnly: "", pushTested: true });
     assert.equal(r.status, 0, r.out);
     assert.match(r.out, /push run/);

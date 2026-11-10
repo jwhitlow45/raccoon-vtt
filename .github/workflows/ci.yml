@@ -153,6 +153,46 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' && needs.build.outputs.docs-only != 'true' }}
         run: pnpm -s test:int
 
+  # The integration tests again, with rooms numbered by the real clock as
+  # in production (server/rooms/testing.ts REAL_NUMBERS). A job of its own
+  # beside typecheck-int, on its own database, so the two runs go at once.
+  # It waits for the build's scope, as the e2e jobs do, so a docs-only push
+  # skips it, as it skips the first run.
+  int-clock:
+    needs: build
+    if: ${{ needs.build.outputs.docs-only != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+        env:
+          POSTGRES_USER: raccoon
+          POSTGRES_PASSWORD: raccoon
+          POSTGRES_DB: raccoon
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U raccoon -d raccoon"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://raccoon:raccoon@localhost:5434/raccoon
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Integration tests on the real clock
+        run: pnpm -s test:int:clock
+
   # About 5 minutes alone, which ends before the e2e shards do, so the unit
   # tests are not split with --test-shard.
   unit:
@@ -341,7 +381,7 @@ jobs:
   # otherwise add a passing one.
   ci-passed:
     name: ${{ startsWith(github.head_ref, 'ci/') && github.event.pull_request.head.repo.full_name == github.repository && 'Tested by the push run' || 'CI passed' }}
-    needs: [build, typecheck-int, unit, e2e, e2e-macos]
+    needs: [build, typecheck-int, int-clock, unit, e2e, e2e-macos]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -352,6 +392,7 @@ jobs:
           PUSH_TESTED: ${{ startsWith(github.head_ref, 'ci/') && github.event.pull_request.head.repo.full_name == github.repository }}
           BUILD: ${{ needs.build.result }}
           TYPECHECK_INT: ${{ needs.typecheck-int.result }}
+          INT_CLOCK: ${{ needs.int-clock.result }}
           UNIT: ${{ needs.unit.result }}
           E2E: ${{ needs.e2e.result }}
           E2E_MACOS: ${{ needs.e2e-macos.result }}
@@ -367,11 +408,12 @@ jobs:
             macos_by_design=true
           fi
           failed=""
-          for pair in "build=$BUILD" "typecheck-int=$TYPECHECK_INT" "unit=$UNIT" "e2e=$E2E" "e2e-macos=$E2E_MACOS"; do
+          for pair in "build=$BUILD" "typecheck-int=$TYPECHECK_INT" "int-clock=$INT_CLOCK" "unit=$UNIT" "e2e=$E2E" "e2e-macos=$E2E_MACOS"; do
             job=${pair%%=*}
             result=${pair#*=}
             if [ "$result" = success ]; then continue; fi
             if [ "$job" = e2e-macos ] && [ "$result" = skipped ] && [ "$macos_by_design" = true ]; then continue; fi
+            if [ "$job" = int-clock ] && [ "$result" = skipped ] && [ "$BUILD" = success ] && [ "$DOCS_ONLY" = true ]; then continue; fi
             failed="$failed $job ($result)"
           done
           if [ -n "$failed" ]; then

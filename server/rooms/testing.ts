@@ -56,7 +56,8 @@ export type Engine = {
  * Whether this run numbers rooms by the real clock, as production does
  * (`ITEST_NUMBER_CLOCK=real`). By default the engine's rooms take a standing
  * number clock (STANDING_CLOCK), so numbers count by one and each batch
- * closes `batchMs` after it opens. The checks run the suite once each way.
+ * closes `batchMs` after it opens. The checks run the suite once each way
+ * (`pnpm test:int` and `pnpm test:int:clock`).
  */
 export const REAL_NUMBERS = process.env.ITEST_NUMBER_CLOCK === "real";
 
