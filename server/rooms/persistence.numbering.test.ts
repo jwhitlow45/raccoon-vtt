@@ -5,8 +5,8 @@ import type { RoomState } from "#shared/model.ts";
 import { tableNumber } from "#shared/numbering.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { numberingUpgrade } from "#shared/reducer/numbering.ts";
-import { DM, room, scene, token } from "#shared/testutil.ts";
+import { meetCandidates, numberingUpgrade } from "#shared/reducer/numbering.ts";
+import { character, DM, room, scene, token } from "#shared/testutil.ts";
 import { exportableState, roomExport, type RoomExport } from "./exportRoom.ts";
 import { withNumberingUpgrade } from "./importRoom.ts";
 import { loadRoom, type Pool } from "./persistence.ts";
@@ -122,5 +122,19 @@ describe("an import", () => {
     const imported = throughFile(file, SNAPSHOT_VERSION);
     assert.deepEqual(imported.numbering, { rev: 4, groups: 7 });
     assert.deepEqual(Object.values(imported.tokens).map((t) => tableNumber(imported, t)).sort(), [1, 2, undefined, undefined]);
+  });
+
+  test("keeps a numbered companion of a character no player plays whole, so the next batch gives no second 1", () => {
+    const state = room();
+    state.characters.cap = character("cap", { name: "Captain", ownerIds: [] });
+    state.tokens.g1 = token("g1", { name: "Goblin", met: 1, number: 1 });
+    state.tokens.g2 = token("g2", { name: "Goblin", met: 1, number: 2, x: 5, companion: { of: "cap", turn: "shared" } });
+    state.scenes.s1 = { ...state.scenes.s1!, numbers: { names: { Goblin: [1, 2] } } };
+    state.numbering = { rev: 0, groups: 1 };
+    const imported = throughFile(state, SNAPSHOT_VERSION);
+    const companion = Object.values(imported.tokens).find((t) => t.companion !== undefined)!;
+    assert.deepEqual([companion.met, companion.number], [1, 2], "the companion keeps its mark and its number");
+    assert.deepEqual(Object.values(imported.tokens).map((t) => tableNumber(imported, t)).sort(), [1, 2]);
+    assert.deepEqual(meetCandidates(imported, Object.keys(imported.tokens).map((id) => `token:${id}` as const), {}), [], "the next batch has no one to meet");
   });
 });

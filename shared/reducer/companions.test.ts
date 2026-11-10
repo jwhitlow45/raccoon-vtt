@@ -427,7 +427,7 @@ describe("companions in an imported room", () => {
     state.encounterHistory = [{ encounter: structuredClone(state.encounter), effects: { gob: [effect("e1", { key: "blinded", duration: { remaining: 1, boundary: "turnEnd", anchor: { entryId: "e-ws" } } })] }, revealed: [], at: "x" }];
     const out = normalizeCompanionState(state);
     assert.deepEqual(out.tokens.ws!.ownerIds, ["p1"]);
-    assert.equal(out.tokens.ws!.number, undefined);
+    assert.equal(out.tokens.ws!.number, 3, "a companion keeps the number it carries");
     assert.equal(out.tokens.ws!.companion?.reactionUsed, true);
     assert.deepEqual(out.tokens.sw!.companion, { of: "bree", turn: "shared" });
     assert.equal(out.tokens.lost!.companion, undefined, "a companion whose character did not come through is a plain token");

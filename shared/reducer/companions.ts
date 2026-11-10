@@ -229,9 +229,10 @@ export function rowsForSharedCompanions(state: Pick<RoomState, "tokens">, encoun
  * (docs/design/design-v1-combat-flow.md 4.7), so a hand-made or older file comes
  * within them: a companion whose character is missing, or that is a PC or
  * has no stats of its own, becomes a plain token. Each other companion
- * takes its character's owners and loses any number, an effect with its
- * own turn acts on its character's turn listed under it, and only a
- * `shared` one keeps a spent Reaction. Rows of companions that act on
+ * takes its character's owners and keeps its number and group mark, as an
+ * attached creature keeps the number the table gave it (shared/numbering.ts),
+ * an effect with its own turn acts on its character's turn listed under
+ * it, and only a `shared` one keeps a spent Reaction. Rows of companions that act on
  * their character's turn leave the encounter and its history, with every
  * duration that counted them rebound as dropRows rebinds it.
  *
@@ -257,9 +258,8 @@ export function normalizeCompanionState(state: RoomState): RoomState {
       continue;
     }
     const turn = companion.turn === "own" && token.kind === "object" ? "shared" : companion.turn;
-    const { number: _number, ...rest } = token;
     tokens[id] = {
-      ...rest,
+      ...token,
       ownerIds: [...character.ownerIds],
       companion: { of: companion.of, turn, ...(turn === "shared" && companion.reactionUsed ? { reactionUsed: true as const } : {}) },
     };
