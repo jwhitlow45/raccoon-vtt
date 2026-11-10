@@ -312,12 +312,12 @@ export function buildPaths(
       const x = chunk.cx * CHUNK_CELLS + (i % CHUNK_CELLS);
       const y = chunk.cy * CHUNK_CELLS + Math.floor(i / CHUNK_CELLS);
       if (isHex(hexes)) {
-        // A mark under a hex key is that hex: its outline, by the corners every hex around it shares.
+        // A mark under a hex key is that hex: its outline, by the corners every hex around it shares. Left open,
+        // as the hatch's clip closes each, since closing them one by one costs the square of their count (relief.ts Sink).
         const hex = { col: x, row: y };
         if (scene.bounds && !hexInScene(hexes, scene.bounds, hex)) continue;
         const corners = hexCorners(hexes, hex).map((c) => cornerAt(hexes, c));
         corners.forEach((p, k) => (k === 0 ? rough.moveTo(p.x, p.y) : rough.lineTo(p.x, p.y)));
-        rough.closePath();
         grow(Math.min(...corners.map((p) => p.x)), Math.min(...corners.map((p) => p.y)), Math.max(...corners.map((p) => p.x)), Math.max(...corners.map((p) => p.y)));
         continue;
       }

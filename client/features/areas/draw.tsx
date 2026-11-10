@@ -46,16 +46,21 @@ export function shadedPieces(cov: Pick<CoverageResult, "cells" | "hexes">, grid:
 }
 
 /** Where a shape's path goes: the canvas's own calls, so a test counts them. */
-export type ShadeSink = { moveTo(x: number, y: number): void; lineTo(x: number, y: number): void; closePath(): void };
+export type ShadeSink = { moveTo(x: number, y: number): void; lineTo(x: number, y: number): void };
 
-/** One closed hexagon a covered hex, from its center: drawing only, so the rules' rounded corners (hex.ts cornerAt) are not needed. */
+/**
+ * One hexagon a covered hex, from its center: drawing only, so the rules'
+ * rounded corners (hex.ts cornerAt) are not needed. The shading only fills,
+ * which closes each hexagon itself, so none is closed here: Chrome's
+ * closePath costs as much as the path already holds, the square of a large
+ * area's hexes closed one by one (D-261109-051).
+ */
 export function shadeHexes(grid: HexGrid, hexes: readonly { col: number; row: number }[], sink: ShadeSink): void {
   const pts = grid.orient === "rows" ? HEX_ROWS : HEX_COLUMNS;
   for (const h of hexes) {
     const c = hexCenter(grid, h);
     sink.moveTo(c.x + pts[0]!, c.y + pts[1]!);
     for (let i = 2; i < 12; i += 2) sink.lineTo(c.x + pts[i]!, c.y + pts[i + 1]!);
-    sink.closePath();
   }
 }
 

@@ -311,8 +311,11 @@ function FootprintPress(props: { rects: readonly { x: number; y: number; w: numb
  * the canvas's top, so the near rim hides what is below it (5.5). Drawn in
  * view units: the clip undoes the ground's turn and squash, then restores
  * the transform, so the path stays and Konva's own transform is untouched.
+ * The openings go in unclosed, as the clip closes each: Chrome's closePath
+ * costs as much as the path already holds, the square of a wide pit's
+ * openings closed one by one (D-261109-051).
  */
-function clipToOpenings(ctx: Konva.Context, iso: IsoToken, at: { x: number; y: number }): void {
+export function clipToOpenings(ctx: Pick<Konva.Context, "save" | "translate" | "rotate" | "scale" | "beginPath" | "moveTo" | "lineTo" | "restore">, iso: Pick<IsoToken, "turn" | "pits">, at: { x: number; y: number }): void {
   const g = groundGroups(iso.turn);
   ctx.save();
   ctx.translate(-at.x, -at.y);
@@ -323,7 +326,6 @@ function clipToOpenings(ctx: Konva.Context, iso: IsoToken, at: { x: number; y: n
     const pts = pitSweep(iso.turn, poly);
     ctx.moveTo(pts[0]!.x, pts[0]!.y);
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
-    ctx.closePath();
   }
   ctx.restore();
 }

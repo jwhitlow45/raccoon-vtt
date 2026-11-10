@@ -228,18 +228,21 @@ function DrawingShape(props: { kind: DrawingKind; points: number[]; style: Drawi
 function ClippedPolys(props: { polys: readonly (readonly { x: number; y: number }[])[]; children: ReactNode }) {
   const { polys } = props;
   return (
-    <Group
-      listening={false}
-      clipFunc={(ctx) => {
-        ctx.beginPath();
-        for (const poly of polys) {
-          ctx.moveTo(poly[0]!.x, poly[0]!.y);
-          for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i]!.x, poly[i]!.y);
-          ctx.closePath();
-        }
-      }}
-    >
+    <Group listening={false} clipFunc={(ctx) => clipToPolys(ctx, polys)}>
       {props.children}
     </Group>
   );
+}
+
+/**
+ * The clip of ClippedPolys. The polygons go in unclosed, as the clip closes
+ * each: Chrome's closePath costs as much as the path already holds, the
+ * square of a long draft's hexes closed one by one (D-261109-051).
+ */
+export function clipToPolys(ctx: Pick<CanvasRenderingContext2D, "beginPath" | "moveTo" | "lineTo">, polys: readonly (readonly { x: number; y: number }[])[]): void {
+  ctx.beginPath();
+  for (const poly of polys) {
+    ctx.moveTo(poly[0]!.x, poly[0]!.y);
+    for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i]!.x, poly[i]!.y);
+  }
 }

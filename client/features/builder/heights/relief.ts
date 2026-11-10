@@ -17,8 +17,14 @@ import { mergeRects, wallRuns } from "../geometry.ts";
  * top, with a chevron at the high end.
  */
 
-/** The subset of Path2D these shapes use (draw.ts `PathSink`). */
-type Sink = Pick<Path2D, "moveTo" | "lineTo" | "closePath" | "rect">;
+/**
+ * The subset of Path2D these shapes use (draw.ts `PathSink`). Every
+ * polygon here is only filled, and a fill closes each one itself, so none
+ * is closed by hand: Chrome's closePath costs as much as the path already
+ * holds, so a path of many polygons closed one by one costs the square of
+ * their count (D-261109-051).
+ */
+type Sink = Pick<Path2D, "moveTo" | "lineTo" | "rect">;
 
 type Bounds = { w: number; h: number };
 
@@ -217,7 +223,6 @@ function hexReliefPaths<P extends Sink>(chunks: readonly BuildChunk[], walls: Re
     const path = make();
     for (const h of hexes) {
       corners(h.x, h.y).forEach((p, k) => (k === 0 ? path.moveTo(p.x, p.y) : path.lineTo(p.x, p.y)));
-      path.closePath();
     }
     out.tints.push({ color: tintOf(level), path });
   }
@@ -258,7 +263,6 @@ function hexReliefPaths<P extends Sink>(chunks: readonly BuildChunk[], walls: Re
           path.lineTo(b.x, b.y);
           path.lineTo(b.x + ux * e, b.y + uy * e);
           path.lineTo(a.x + ux * e, a.y + uy * e);
-          path.closePath();
         }
       }
       if (linked(x, y, d) || linked(nx, ny, oppositeFacing(g, d))) continue;
@@ -401,7 +405,6 @@ export function stairPaths<P extends Sink>(stairs: readonly StairCell[], make: (
       path.lineTo(...at(hi, v0));
       path.lineTo(...at(hi, v1));
       path.lineTo(...at(lo, v1));
-      path.closePath();
       if (k > 0) {
         out.risers.moveTo(...at(lo + 0.04, v1));
         out.risers.lineTo(...at(hi - 0.04, v1));

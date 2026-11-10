@@ -279,7 +279,7 @@ describe("difficult ground (docs/design/design-v1-movement.md 3.4)", () => {
     const rows: HexGrid = { shape: "hex", orient: "rows" };
     const outline = (h: { col: number; row: number }) => hexCorners(rows, h).map((k) => cornerAt(rows, k));
     const p = buildPaths([c], "player", { gridShape: "hexRows", bounds: { w: 30, h: 20 } }, () => new Recorder());
-    const want = [outline({ col: 0, row: 0 }), outline({ col: 1, row: 1 })].flatMap((corners) => [...corners.map((q, i) => [i === 0 ? "M" : "L", q.x, q.y]), ["Z"]]);
+    const want = [outline({ col: 0, row: 0 }), outline({ col: 1, row: 1 })].flatMap((corners) => corners.map((q, i) => [i === 0 ? "M" : "L", q.x, q.y]));
     assert.deepEqual((p.rough as Recorder).ops, want);
     const all = [...outline({ col: 0, row: 0 }), ...outline({ col: 1, row: 1 })];
     assert.deepEqual(p.roughBox, { x0: Math.min(...all.map((q) => q.x)), y0: Math.min(...all.map((q) => q.y)), x1: Math.max(...all.map((q) => q.x)), y1: Math.max(...all.map((q) => q.y)) });

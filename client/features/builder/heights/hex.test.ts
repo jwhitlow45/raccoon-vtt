@@ -87,7 +87,7 @@ for (const g of [gridOfShape("hexRows") as HexGrid, gridOfShape("hexColumns") as
       const walls = sceneWalls(s.scenes.s1!, s.buildChunks);
       const r = reliefPaths(chunksOf(s), walls, s.scenes.s1!.bounds, make, g);
       assert.equal(r.tints.length, 1);
-      assert.equal(r.tints[0]!.path.ops.filter((o) => o[0] === "Z").length, 1, "one hexagon");
+      assert.equal(r.tints[0]!.path.ops.filter((o) => o[0] === "M").length, 1, "one hexagon");
       assert.equal(r.rims.lines().length + r.ledges.lines().length, 6);
       assert.equal(r.rims.lines().length, 3, "the three sides facing up and left");
       const cs = hexCorners(g, H).map((c) => cornerAt(g, c));
@@ -95,7 +95,7 @@ for (const g of [gridOfShape("hexRows") as HexGrid, gridOfShape("hexColumns") as
         assert.ok(cs.some((p) => p.x === ax && p.y === ay) && cs.some((p) => p.x === bx && p.y === by), "along the hex's own sides");
       }
       for (const [ax, ay, bx, by] of r.rims.lines()) assert.ok((ax! + bx!) / 2 + (ay! + by!) / 2 < hexCenter(g, H).x + hexCenter(g, H).y, "up and to the left of the middle");
-      assert.ok(r.shadows.every((p) => p.ops.filter((o) => o[0] === "Z").length === 3), "a shadow off each far side");
+      assert.ok(r.shadows.every((p) => p.ops.filter((o) => o[0] === "M").length === 3), "a shadow off each far side");
       const below = hexNeighbors(g, H)[3]!;
       const stair = painted(g, [[H, 10]], [[below, "0"]]);
       const linked = reliefPaths(chunksOf(stair), sceneWalls(stair.scenes.s1!, stair.buildChunks), stair.scenes.s1!.bounds, make, g);

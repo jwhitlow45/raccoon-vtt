@@ -62,7 +62,7 @@ describe("areas on a hex scene draw what the rules return (docs/design/design-v1
       assert.ok("hexes" in pieces && pieces.hexes === cov.hexes, "a hex scene shades the rules' hexes");
       assert.ok("cells" in shadedPieces(cov, SQUARES), "and squares their cells");
       const polys: { x: number; y: number }[][] = [];
-      shadeHexes(g, pieces.hexes, { moveTo: (x, y) => polys.push([{ x, y }]), lineTo: (x, y) => polys[polys.length - 1]!.push({ x, y }), closePath: () => {} });
+      shadeHexes(g, pieces.hexes, { moveTo: (x, y) => polys.push([{ x, y }]), lineTo: (x, y) => polys[polys.length - 1]!.push({ x, y }) });
       assert.equal(polys.length, cov.hexes!.length);
       for (const [i, poly] of polys.entries()) {
         const h = cov.hexes![i]!;
