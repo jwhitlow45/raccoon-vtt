@@ -146,3 +146,18 @@ test("answer selection keeps operation identity across seeded interleavings of r
     assert.deepEqual(benchAnswer(frames, n), wanted, "an ack or refusal survives other frames in every position");
   }
 });
+
+test("the creature numbers row's room hides its Goblins behind a closed door, monsters or objects as asked", async () => {
+  const { numbersBenchRoom } = await import("./bench-server4.ts");
+  const { projectState } = await import("../shared/project.ts");
+  for (const monsters of [0, 50, 100]) {
+    const room = numbersBenchRoom(monsters);
+    const goblins = Object.values(room.tokens).filter((t) => t.name === "Goblin");
+    assert.equal(goblins.length, 100);
+    assert.equal(goblins.filter((t) => t.kind === "monster").length, monsters);
+    assert.ok(goblins.every((t) => t.number === undefined && t.met === undefined), "no Goblin starts with a number");
+    assert.equal(Object.values(room.tokens).filter((t) => t.kind === "pc").length, 4);
+    const view = projectState(room, { memberId: "p1", role: "player" }, { sceneId: "bench" });
+    assert.equal(Object.values(view.tokens).filter((t) => t.name === "Goblin").length, 0, "the party holds none of them");
+  }
+});

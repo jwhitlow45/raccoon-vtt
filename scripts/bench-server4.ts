@@ -27,6 +27,7 @@
  *   node scripts/bench-server4.ts --server   (the server box itself: budgets as they are)
  *   node scripts/bench-server4.ts --discovery   (map discovery's rows alone, with or without --server)
  *   node scripts/bench-server4.ts --ask   (the builder's ask rows alone, whole party and per player)
+ *   node scripts/bench-server4.ts --numbers   (creature numbers' row BN1 alone)
  *   node scripts/bench-server4.ts --stamps   (the walk bringing stamps into view alone)
  *   Add --revision <full commit id> to tie the output to the measured checkout.
  *
@@ -65,6 +66,7 @@ import { Connection } from "../server/rooms/connection.ts";
 import type { RoomGateway } from "../server/rooms/gateway.ts";
 import { chunkCharge, layerCharge, MEMORY_CAP } from "../server/rooms/memorySize.ts";
 import type { Pool } from "../server/rooms/persistence.ts";
+import { actor as testActor, room as testRoom, scene as testScene, token as testToken } from "../shared/testutil.ts";
 import { capRoom, lightReachesEveryHolder, lightScene } from "./bench-vision.ts";
 
 const SCENE = "bench";
@@ -948,6 +950,135 @@ export async function runDiscoveryBench(): Promise<Row[]> {
   return rows;
 }
 
+/*
+ * Creature numbers, row BN1 (shared/numbering.ts): 100 Goblins the party
+ * has never seen, behind a closed door on a fogged scene the party
+ * explores, and a party of four walking 60 steps that show none of them,
+ * then the door opened, which shows all 100. Every batch end looks for
+ * creatures the party newly holds and tests sight for each creature it
+ * has not met, so the walk's rows read what that look adds to a batch, and
+ * the door's row what meeting 100 creatures adds to its batch. Each is
+ * read against the same room with the Goblins made objects, which never
+ * take a number, and again with half of them objects, which gives the
+ * cost per unseen creature. Rooms of the three kinds take turns, each
+ * loaded fresh, so a walk always starts from the same ground.
+ */
+const GOBLINS = 100;
+const WALK_STEPS = 60;
+const NUMBERS_ROUNDS = 12;
+const NUMBERS_WARM = 2;
+/** The door in the wall at x 24, its gap from y 12 to y 20, and the Goblins beyond it in a block of 10 by 10. */
+const NUMBERS_DOOR = { id: "d00000000001", a: [24, 12] as [number, number], b: [24, 20] as [number, number] };
+
+/** The room of row BN1, with `monsters` of its 100 Goblins monsters and the rest objects. */
+export function numbersBenchRoom(monsters: number): RoomState {
+  const scene = { ...testScene(SCENE, { bounds: { w: 48, h: 32 }, fogEnabled: true, autoWalls: "off" as const, vision: { on: true, light: "bright" as const } }) };
+  const walls: FreeWall[] = [
+    { id: "w00000000001", a: [24, 0], b: [24, 8], f: { kind: "wall" } },
+    { id: "w00000000002", a: [24, 8], b: [24, 12], f: { kind: "wall" } },
+    { ...NUMBERS_DOOR, f: { kind: "door", state: "closed", secret: false, discovered: false } },
+    { id: "w00000000003", a: [24, 20], b: [24, 28], f: { kind: "wall" } },
+    { id: "w00000000004", a: [24, 28], b: [24, 32], f: { kind: "wall" } },
+  ];
+  const buildChunks: Record<string, BuildChunk> = {};
+  for (const wall of walls) {
+    const { cx, cy } = wallChunk(wall);
+    const key = chunkKey(SCENE, cx, cy);
+    const chunk = buildChunks[key] ?? { sceneId: SCENE, cx, cy, rev: 0, cells: {}, edges: {} };
+    buildChunks[key] = { ...chunk, walls: [...(chunk.walls ?? []), wall] };
+  }
+  const tokens: Record<string, Token> = {};
+  for (let k = 0; k < 4; k++) {
+    tokens[`pc${k}`] = testToken(`pc${k}`, { sceneId: SCENE, kind: "pc", name: `Hero ${k}`, x: 3, y: 6 + 6 * k, disposition: "ally", ownerIds: [`p${k + 1}`], actor: { inline: testActor() } });
+  }
+  for (let k = 0; k < GOBLINS; k++) {
+    const id = `gob${String(k).padStart(3, "0")}`;
+    tokens[id] = testToken(id, { sceneId: SCENE, kind: k < monsters ? "monster" : "object", name: "Goblin", x: 26 + (k % 10), y: 12 + Math.floor(k / 10) });
+  }
+  return testRoom({
+    meta: { name: "Bench", settings: { ...DEFAULT_SETTINGS }, playerSceneId: SCENE, view: { follow: false, blackout: false } },
+    members: members(),
+    scenes: { [SCENE]: scene },
+    buildChunks,
+    tokens,
+  });
+}
+
+/** How many of the Goblins the party's copy holds, and how many carry a number. */
+function goblinsSeen(state: RoomState): { held: number; numbered: number } {
+  const view = projectState(state, { memberId: "p1", role: "player" }, { sceneId: SCENE });
+  const goblins = Object.values(view.tokens).filter((t) => t.id.startsWith("gob"));
+  return { held: goblins.length, numbered: Object.values(state.tokens).filter((t) => t.id.startsWith("gob") && t.number !== undefined).length };
+}
+
+type NumbersRun = { walk: number[]; door: number[] };
+
+/** One table of row BN1: the walk, each step timed, then the door. Each character walks 15 cells east along its own row, so no step repeats a position. */
+async function numbersTable(monsters: number, into: NumbersRun | null): Promise<void> {
+  clearVisionCache();
+  const table = await sitDown(numbersBenchRoom(monsters));
+  const state = () => table.actor.committed.state;
+  for (let r = 0; r < WALK_STEPS; r++) {
+    const k = r % 4;
+    const t = state().tokens[`pc${k}`]!;
+    const timing = await send(table, table.players[k]!, { t: "token.move", tokenId: t.id, x: t.x + 1, y: t.y });
+    into?.walk.push(timing.total);
+  }
+  const walked = goblinsSeen(state());
+  if (walked.held !== 0 || walked.numbered !== 0) throw new Error(`the walk showed ${walked.held} Goblins and numbered ${walked.numbered}`);
+  const door = await send(table, table.dm, { t: "door.set", sceneId: SCENE, door: { cx: wallChunk(NUMBERS_DOOR).cx, cy: wallChunk(NUMBERS_DOOR).cy, id: NUMBERS_DOOR.id }, state: "open" });
+  into?.door.push(door.total);
+  const shown = goblinsSeen(state());
+  if (shown.held !== GOBLINS) throw new Error(`the door showed ${shown.held} of ${GOBLINS} Goblins`);
+  if (shown.numbered !== (monsters >= 2 ? monsters : 0)) throw new Error(`the door's batch numbered ${shown.numbered} of ${monsters} monsters`);
+  await table.actor.shutdown({ code: 1012, snapshot: false });
+}
+
+function percentile(times: readonly number[], p: number): number {
+  const sorted = [...times].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)]!;
+}
+
+export type NumbersBench = Record<"objects" | "half" | "monsters", NumbersRun>;
+
+/** Row BN1's timings, the three rooms taking turns. */
+export async function runNumbersBench(): Promise<NumbersBench> {
+  const out: NumbersBench = { objects: { walk: [], door: [] }, half: { walk: [], door: [] }, monsters: { walk: [], door: [] } };
+  const kinds = [
+    ["objects", 0],
+    ["half", GOBLINS / 2],
+    ["monsters", GOBLINS],
+  ] as const;
+  for (let round = 0; round < NUMBERS_ROUNDS; round++) {
+    for (const [kind, monsters] of kinds) await numbersTable(monsters, round < NUMBERS_WARM ? null : out[kind]);
+  }
+  return out;
+}
+
+export function formatNumbersBench(bench: NumbersBench, onServer: boolean, revision?: string): string {
+  const factor = onServer ? 1 : 1.5;
+  const f = (ms: number) => ms.toFixed(3);
+  const p50 = (t: readonly number[]) => percentile(t, 50);
+  const p95 = (t: readonly number[]) => percentile(t, 95);
+  const walkAdded = p95(bench.monsters.walk) - p95(bench.objects.walk);
+  const doorAdded = p50(bench.monsters.door) - p50(bench.objects.door);
+  const lines = [
+    `Revision: ${revision ?? "unrecorded"}`,
+    `Machine: ${onServer ? "server-box measurement, unscaled server budgets" : "laptop measurement, server budgets divided by 1.5"}.`,
+    "",
+    "room | walk step p50 | walk step p95 | door p50 | door p95",
+    "--- | --- | --- | --- | ---",
+    ...(["objects", "half", "monsters"] as const).map((k) => `${k === "objects" ? "100 objects" : k === "half" ? "50 monsters, 50 objects" : "100 monsters"} | ${f(p50(bench[k].walk))} | ${f(p95(bench[k].walk))} | ${f(p50(bench[k].door))} | ${f(p95(bench[k].door))}`),
+    "",
+    `Added to a walk step at p95 by 100 unseen monsters: ${f(walkAdded)} ms, limit ${f(0.3 / factor)} ms: ${walkAdded <= 0.3 / factor ? "yes" : "NO"}.`,
+    `Added to the door's batch at p50 by meeting 100 monsters: ${f(doorAdded)} ms, limit ${f(5 / factor)} ms: ${doorAdded <= 5 / factor ? "yes" : "NO"}.`,
+    `Per unseen monster, a walk step at p50: ${f((p50(bench.monsters.walk) - p50(bench.objects.walk)) / GOBLINS)} ms from none to 100, ${f((p50(bench.monsters.walk) - p50(bench.half.walk)) / (GOBLINS / 2))} ms from 50 to 100.`,
+    "",
+    `Walk steps: ${bench.monsters.walk.length} a room kind, ${WALK_STEPS} a table. Doors: ${bench.monsters.door.length} a room kind, one a table. Every table loaded fresh, the first ${NUMBERS_WARM} rounds untimed.`,
+  ];
+  return lines.join("\n");
+}
+
 /** A recorded gate names a complete commit, since bookmarks can move after the measurement. */
 export function benchRevision(args: readonly string[]): string | undefined {
   const flags = args.flatMap((arg, i) => arg === "--revision" ? [i] : []);
@@ -982,11 +1113,14 @@ export function formatServerBench(rows: Row[], onServer: boolean, revision?: str
 const argv = process.argv;
 if (argv[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts/"))) {
   const revision = benchRevision(argv);
-  const rows: Row[] = [];
-  if (argv.includes("--ask")) {
-    await runAsk(false, rows);
-    await runAsk(true, rows);
+  if (argv.includes("--numbers")) console.log(formatNumbersBench(await runNumbersBench(), argv.includes("--server"), revision));
+  else {
+    const rows: Row[] = [];
+    if (argv.includes("--ask")) {
+      await runAsk(false, rows);
+      await runAsk(true, rows);
+    }
+    if (argv.includes("--stamps")) await runStampWalk(rows);
+    console.log(formatServerBench(argv.includes("--ask") || argv.includes("--stamps") ? rows : argv.includes("--discovery") ? await runDiscoveryBench() : await runServerBench(), argv.includes("--server"), revision));
   }
-  if (argv.includes("--stamps")) await runStampWalk(rows);
-  console.log(formatServerBench(argv.includes("--ask") || argv.includes("--stamps") ? rows : argv.includes("--discovery") ? await runDiscoveryBench() : await runServerBench(), argv.includes("--server"), revision));
 }
