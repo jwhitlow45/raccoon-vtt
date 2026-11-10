@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import fc from "fast-check";
-import { DEFAULT_CHOICES, loadChoices, parseChoices, roomsDefault, saveChoices, settingsOf, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
+import { DEFAULT_CHOICES, keptSize, loadChoices, parseChoices, roomsDefault, saveChoices, settingsOf, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
 import { clampRooms, roomCap } from "./settings.ts";
 
 function memory() {
@@ -82,4 +82,35 @@ test("DGOPTS: choices kept before the sliders read as the marks that replaced th
   assert.deepEqual(loadChoices("OLD", storage), { ...DEFAULT_CHOICES, heights: 0, traps: 4 });
   storage.setItem("rvtt.dungeon.OLD", JSON.stringify({ ...DEFAULT_CHOICES, heights: "some", traps: "none" }));
   assert.deepEqual(loadChoices("OLD", storage), { ...DEFAULT_CHOICES, heights: 25, traps: 0 });
+});
+
+/*
+ * Generate a dungeon aimed at a floor (docs/design/design-v1-floors.md
+ * phase 3, 3.7, D-261110-185): Custom at the floor beside's size over the
+ * remembered choices, and an autosave that writes every choice but the size.
+ */
+test("FL3S: on a floor 140 by 60 with a remembered Large crypt, the dialog opens on Custom 100 by 60 with the crypt, and its saves leave Large remembered", () => {
+  const storage = memory();
+  const large: Choices = withSize({ ...DEFAULT_CHOICES, theme: "crypt", dressing: "full" }, { size: "large" });
+  saveChoices("ROOM1", large, storage);
+  const saved = loadChoices("ROOM1", storage);
+  const open = startChoices(saved, { w: 30, h: 30 }, { w: 140, h: 60 });
+  assert.deepEqual([open.size, open.across, open.down, open.theme, open.dressing], ["custom", 100, 60, "crypt", "full"]);
+  assert.deepEqual(sidesOf(open), { w: 100, h: 60 });
+  assert.equal(open.rooms, roomsDefault(open), "rooms left at Large's default move to the floor's");
+  // The DM changes the size and the theme, each change saved, then cancels.
+  const kept = keptSize(saved);
+  const changed = { ...withSize(open, { across: 80 }), theme: "mine" as const };
+  saveChoices("ROOM1", changed, storage, kept);
+  const after = loadChoices("ROOM1", storage)!;
+  assert.deepEqual([after.size, after.across, after.down], [large.size, large.across, large.down], "the remembered size stays Large");
+  assert.equal(after.theme, "mine", "every other choice is remembered");
+  const next = startChoices(after, { w: 30, h: 30 });
+  assert.equal(next.size, "large", "the next New scene dungeon opens on Large");
+});
+
+test("FL3S: a floor with nothing remembered opens on Custom at its size, clamped, and keeps the defaults' size", () => {
+  const open = startChoices(null, { w: 30, h: 30 }, { w: 12, h: 300 });
+  assert.deepEqual([open.size, open.across, open.down, open.theme], ["custom", 20, 100, DEFAULT_CHOICES.theme]);
+  assert.deepEqual(keptSize(null), { size: DEFAULT_CHOICES.size, across: DEFAULT_CHOICES.across, down: DEFAULT_CHOICES.down });
 });

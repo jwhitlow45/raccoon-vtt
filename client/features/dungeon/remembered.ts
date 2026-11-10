@@ -53,11 +53,24 @@ export function settingsOf(c: Choices): DungeonSettings {
 /**
  * Where the dialog opens: this device's last choices for the room, or the
  * defaults. Custom starts at the New scene form's size, clamped, until the
- * DM has kept a Custom size of their own.
+ * DM has kept a Custom size of their own. Aimed at a floor
+ * (docs/design/design-v1-floors.md phase 3, 3.7), it opens on Custom at the
+ * floor beside's size, each side clamped, so a floor 140 squares wide gives
+ * one 100 wide, with the remembered theme, rooms and the rest.
  */
-export function startChoices(saved: Choices | null, form: { w: number; h: number }): Choices {
+export function startChoices(saved: Choices | null, form: { w: number; h: number }, floor?: { w: number; h: number }): Choices {
+  if (floor) return withSize(saved ?? DEFAULT_CHOICES, { size: "custom", across: clampSide(floor.w), down: clampSide(floor.h) });
   if (saved) return saved;
   return { ...DEFAULT_CHOICES, across: clampSide(form.w), down: clampSide(form.h) };
+}
+
+/** The size choices, which a dialog aimed at a floor leaves as they were remembered when it opened (D-261110-185). */
+export type KeptSize = Pick<Choices, "size" | "across" | "down">;
+
+/** The size a floor's dialog keeps: the remembered one, or the defaults' when nothing was remembered. */
+export function keptSize(saved: Choices | null): KeptSize {
+  const c = saved ?? DEFAULT_CHOICES;
+  return { size: c.size, across: c.across, down: c.down };
 }
 
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem">;
@@ -100,13 +113,18 @@ export function loadChoices(roomId: string, storage: Storage | null = browserSto
   }
 }
 
-/** Kept field by field, so no seed or anything else rides along. A storage that refuses loses only the convenience. */
-export function saveChoices(roomId: string, c: Choices, storage: Storage | null = browserStorage()): void {
+/**
+ * Kept field by field, so no seed or anything else rides along. A storage
+ * that refuses loses only the convenience. `size` is a floor's kept size,
+ * written in place of the choices' own, so neither Make nor Cancel on a
+ * floor changes the size the next New scene dungeon opens on.
+ */
+export function saveChoices(roomId: string, c: Choices, storage: Storage | null = browserStorage(), size?: KeptSize): void {
   const kept: Choices = {
     theme: c.theme,
-    size: c.size,
-    across: c.across,
-    down: c.down,
+    size: size?.size ?? c.size,
+    across: size?.across ?? c.across,
+    down: size?.down ?? c.down,
     rooms: c.rooms,
     density: c.density,
     corridors: c.corridors,
