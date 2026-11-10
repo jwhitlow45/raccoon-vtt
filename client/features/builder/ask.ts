@@ -2,6 +2,7 @@ import { serializedBytes } from "#shared/limits.ts";
 import type { Scene } from "#shared/model.ts";
 import { ASK_LOST, MAX_ASK_BYTES, MAX_ASK_OPS, MAX_ASK_PARTS, type ClientOp, type OpOf } from "#shared/protocol.ts";
 import { keepsMemory } from "#shared/reducer/memory.ts";
+import type { WingClear } from "#shared/rules/wingClear.ts";
 import { dispatchGesture } from "../../state/actions.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { OpAnswer, OpRefusal, RoomActions, UnknownCause } from "../../state/types.ts";
@@ -11,6 +12,9 @@ import { builderSlot } from "./store.ts";
 type Askable = OpOf<"build.ask">["ops"][number];
 
 const ASKABLE: ReadonlySet<ClientOp["t"]> = new Set<Askable["t"]>(["build.paint", "build.erase", "build.rect", "build.edge", "build.height", "build.stairs", "build.rough"]);
+
+/** What a wing's asks carry (docs/design: dungeon generator phase 3, 5): the builder's ops and a wing's free walls and stamps. */
+export const WING_ASKS: ReadonlySet<ClientOp["t"]> = new Set<Askable["t"]>([...(ASKABLE as ReadonlySet<Askable["t"]>), "build.walls", "build.stamps"]);
 
 /** The builder's line while a gesture waits for the server's answer to its asks. */
 export const BUILD_ASKING = "Checking players' remembered map…";
@@ -167,16 +171,38 @@ export function whileAsking(handlers: ToolPointerHandlers): ToolPointerHandlers 
  * by `part`, all but the last marked `more`, so the server answers once
  * for the whole. A gesture past MAX_ASK_PARTS asks gets none, and goes as
  * a stroke goes.
+ *
+ * A wing's (`askable` WING_ASKS, docs/design: dungeon generator phase 3,
+ * 3.6) carry its `clear` on every part, and its smallest op goes last,
+ * alone, with the clear's floor runs, which ride the last part only, so no
+ * part passes the bytes (I8). A wing past MAX_ASK_PARTS asks, or whose
+ * last part cannot fit, gets none.
  */
-export function askOps(sceneId: string, ops: readonly ClientOp[]): OpOf<"build.ask">[] {
-  const parts: Askable[][] = [];
+export function askOps(sceneId: string, ops: readonly ClientOp[], askable: ReadonlySet<ClientOp["t"]> = ASKABLE, clear?: WingClear): OpOf<"build.ask">[] {
+  const all: Askable[] = [];
   for (const op of ops) {
-    if (!ASKABLE.has(op.t) || (op as { sceneId?: string }).sceneId !== sceneId) continue;
+    if (!askable.has(op.t) || (op as { sceneId?: string }).sceneId !== sceneId) continue;
     const { forget: _yes, ...asked } = op as Askable;
+    all.push(asked as Askable);
+  }
+  const { floor: _runs, ...bare } = clear ?? { floor: undefined };
+  const early = clear ? { clear: bare as WingClear } : {};
+  // The smallest op, kept for the last part with the floor runs: none for the builder's gestures.
+  let last = -1;
+  if (clear) all.forEach((op, i) => (last < 0 || serializedBytes(op) < serializedBytes(all[last]!) ? (last = i) : null));
+  const parts: Askable[][] = [];
+  for (const [i, asked] of all.entries()) {
+    if (i === last) continue;
     const part = parts.at(-1);
-    if (part && part.length < MAX_ASK_OPS && serializedBytes({ t: "build.ask", sceneId, ops: [...part, asked], part: MAX_ASK_PARTS - 1, more: true }) <= MAX_ASK_BYTES) part.push(asked);
+    if (part && part.length < MAX_ASK_OPS && serializedBytes({ t: "build.ask", sceneId, ops: [...part, asked], part: MAX_ASK_PARTS - 1, more: true, ...early }) <= MAX_ASK_BYTES) part.push(asked);
     else parts.push([asked]);
   }
+  if (last >= 0) parts.push([all[last]!]);
   if (parts.length > MAX_ASK_PARTS) return [];
-  return parts.map((part, i) => ({ t: "build.ask", sceneId, ops: part, part: i, ...(i < parts.length - 1 ? { more: true as const } : {}) }));
+  const asks = parts.map((part, i): OpOf<"build.ask"> => {
+    const final = i === parts.length - 1;
+    return { t: "build.ask", sceneId, ops: part, part: i, ...(final ? {} : { more: true as const }), ...(clear ? { clear: final ? clear : (bare as WingClear) } : {}) };
+  });
+  if (clear && asks.some((a) => serializedBytes(a) > MAX_ASK_BYTES)) return [];
+  return asks;
 }

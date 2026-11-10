@@ -1,11 +1,11 @@
 import { doorChunk, wallChunk } from "#shared/keys.ts";
-import { serializedBytes } from "#shared/limits.ts";
 import { CHUNK_CELLS, type BuildChunk, type JournalPage, type Light, type Pin, type RoomState, type Stamp, type Token, type Trap, type TrapRig, type TrapZone } from "#shared/model.ts";
 import { stableStringify } from "#shared/project.ts";
-import { ASK_LOST, clientOpSchema, MAX_ASK_BYTES, MAX_ASK_OPS, MAX_ASK_PARTS, type ClientOp, type OpOf } from "#shared/protocol.ts";
+import { ASK_LOST, clientOpSchema, type ClientOp, type OpOf } from "#shared/protocol.ts";
 import { JOIN_CHANGED, joinChanged, WING_MOVED, wingClash, type WingClear } from "#shared/rules/wingClear.ts";
 import type { OnAnswer, OpAnswer, OpRefusal, RoomActions, UnknownCause } from "../../state/types.ts";
 import type { RoomViewStore } from "../../state/view.ts";
+import { askOps, WING_ASKS } from "../builder/ask.ts";
 import { addAnswer, CHECK_MS, movedOn, NO_ANSWERS, sceneShown, type Answers } from "../uvtt/rules.ts";
 import { keyTitle } from "./keyPage.ts";
 
@@ -369,50 +369,23 @@ export type WingOutcome = DungeonOutcome | { k: "join" } | { k: "moved" } | { k:
 /** The line for a wing too large for its asks (3.5). */
 export const WING_TOO_LARGE = "This wing is too large to check against players' remembered map. Pick fewer rooms.";
 
-/** The ops a wing's asks carry: the builder's own and a wing's free walls and stamps (phase 3, 5). */
-export const WING_ASKS: ReadonlySet<ClientOp["t"]> = new Set<ClientOp["t"]>(["build.paint", "build.erase", "build.rect", "build.edge", "build.height", "build.stairs", "build.rough", "build.walls", "build.stamps"]);
-
-type Askable = OpOf<"build.ask">["ops"][number];
-
 /** A wing's map ops in the shape an ask carries them: on the scene, without a yes. */
-function asked(sceneId: string, ops: readonly ClientOp[]): Askable[] {
+function asked(sceneId: string, ops: readonly ClientOp[]): OpOf<"build.ask">["ops"] {
   return ops.flatMap((op) => {
     if (!WING_ASKS.has(op.t) || (op as { sceneId?: string }).sceneId !== sceneId) return [];
-    const { forget: _yes, ...bare } = op as Askable;
-    return [bare as Askable];
+    const { forget: _yes, ...bare } = op as OpOf<"build.ask">["ops"][number];
+    return [bare as OpOf<"build.ask">["ops"][number]];
   });
 }
 
 /**
- * A wing's asks (3.6): its map ops packed in order into asks of at most
- * MAX_ASK_OPS ops and MAX_ASK_BYTES, each carrying the clear, numbered by
- * `part` and all but the last marked `more`. The smallest op goes last,
- * alone in its part, with the floor runs, so no part passes the bytes (I8).
- * Null when they take more than MAX_ASK_PARTS asks, or a part cannot fit.
+ * A wing's asks (3.6), packed by the builder's `askOps` with the wing's
+ * clear: null when they take more than MAX_ASK_PARTS asks, or a part cannot
+ * fit, since a wing always has map ops to ask about.
  */
 export function wingAsks(sceneId: string, ops: readonly ClientOp[], clear: WingClear): OpOf<"build.ask">[] | null {
-  const all = asked(sceneId, ops);
-  if (all.length === 0) return [];
-  const { floor: _runs, ...bare } = clear;
-  let smallest = 0;
-  all.forEach((op, i) => {
-    if (serializedBytes(op) < serializedBytes(all[smallest]!)) smallest = i;
-  });
-  const wrap = (part: Askable[], last: boolean): OpOf<"build.ask"> => ({ t: "build.ask", sceneId, ops: part, part: MAX_ASK_PARTS - 1, ...(last ? {} : { more: true as const }), clear: last ? clear : bare });
-  const parts: Askable[][] = [];
-  for (const [i, op] of all.entries()) {
-    if (i === smallest) continue;
-    const part = parts.at(-1);
-    if (part && part.length < MAX_ASK_OPS && serializedBytes(wrap([...part, op], false)) <= MAX_ASK_BYTES) part.push(op);
-    else parts.push([op]);
-  }
-  parts.push([all[smallest]!]);
-  if (parts.length > MAX_ASK_PARTS) return null;
-  const asks = parts.map((part, i): OpOf<"build.ask"> => {
-    const last = i === parts.length - 1;
-    return { t: "build.ask", sceneId, ops: part, part: i, ...(last ? {} : { more: true as const }), clear: last ? clear : bare };
-  });
-  return asks.every((a) => serializedBytes(a) <= MAX_ASK_BYTES) ? asks : null;
+  const asks = askOps(sceneId, ops, WING_ASKS, clear);
+  return asks.length === 0 && ops.some((op) => WING_ASKS.has(op.t)) ? null : asks;
 }
 
 type Heard = { answer: OpAnswer; refusal?: OpRefusal; unknown?: UnknownCause };
@@ -460,7 +433,8 @@ export async function sendWing(
 ): Promise<WingOutcome> {
   const { store } = room;
   const { sceneId, clear } = made;
-  const live = store.getState().view;
+  // The scene as the pane read the wing's base: the floor shown, else the room's view.
+  const live = liveScene(store.getState());
   if (!live || joinChanged(live, sceneId, clear)) return { k: "join" };
   if (wingClash(live, sceneId, asked(sceneId, made.ops), clear) !== null) return { k: "moved" };
   const asks = wingAsks(sceneId, made.ops, clear);
@@ -573,11 +547,16 @@ async function sendWingOps(
   // Lost answers: the wing's part of the scene the server holds against the scratch room's, without the key where it never went.
   const { store } = room;
   if (store.getState().sceneId !== made.sceneId || !(await sceneShown(store, made.sceneId, room.checkMs ?? CHECK_MS))) return { k: "unconfirmed" };
-  const view = store.getState().view;
+  const view = liveScene(store.getState());
   const sent = keySent ? made.ops : made.ops.filter((op) => !isKeyOp(op));
   const scratch = keySent ? made.room : withoutKey(made.room, made.ops, made.ids);
   const same = view !== null && wingContents(view, made.sceneId, sent, made.ids, true) === wingContents(scratch, made.sceneId, sent, made.ids, false);
   return same ? { k: "complete", checked: true } : { k: "unconfirmed" };
+}
+
+/** The room a wing is read from: the floor the DM is shown, which holds the wing's scene, else the room's view. */
+function liveScene(s: ReturnType<SendRoom["store"]["getState"]>): RoomState | null {
+  return (s.floorView as RoomState | null | undefined) ?? s.view;
 }
 
 /** The scratch room without the key's page and pins, for a comparison where they were never sent. Its ids are placeholders, which `ids` maps to the ops' fresh ones. */
