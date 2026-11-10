@@ -5,11 +5,11 @@ import type { LogEntry, RoomState } from "#shared/model.ts";
 import type { HpChange } from "#shared/protocol.ts";
 import { isCoarsePointer } from "../../lib/device.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
-import { sheetOpen, type LocalUi, type RoomActions, type ToastSend, type You } from "../../state/types.ts";
+import { sheetOpen, type LocalUi, type OpAnswer, type RoomActions, type ToastSend, type You } from "../../state/types.ts";
 import type { RoomUi } from "../../state/store.ts";
 import { useRoomActions, useRoomStore } from "../../state/view.ts";
 import { reasonText } from "../resources/logic.ts";
-import { hpTargets, sendHpEntry, type HpTarget } from "../tokens/groupHp.ts";
+import { hpOps, hpTargets, sendHpEntry, type HpTarget } from "../tokens/groupHp.ts";
 import type { HpFill } from "../tokens/hpDraft.ts";
 import { parseHpInput } from "../tokens/hpInput.ts";
 import { useMarkChipApplied } from "./hpChips.ts";
@@ -65,30 +65,63 @@ function setRoll(applies: StoreApi<Applies>, key: string, next: RollApplied): vo
  */
 export function recordApplied(applies: StoreApi<Applies>, lineId: string, to: readonly { holder: string; name: string }[]): void {
   const was = applies.getState().rolls[lineId] ?? NOTHING_YET;
-  const fresh = to.filter((t) => !was.applied.some((a) => a.holder === t.holder));
+  const fresh: { holder: string; name: string }[] = [];
+  for (const t of to) {
+    if (was.applied.some((a) => a.holder === t.holder) || fresh.some((a) => a.holder === t.holder)) continue;
+    fresh.push({ holder: t.holder, name: t.name });
+  }
   if (fresh.length === 0) return;
-  setRoll(applies, lineId, { ...was, applied: [...was.applied, ...fresh.map(({ holder, name }) => ({ holder, name }))] });
+  setRoll(applies, lineId, { ...was, applied: [...was.applied, ...fresh] });
 }
 
 /**
  * An HP entry filled from a chip, sent as the entry sends any change. The
  * chip leaves its rows and its roll names the creatures only once the
- * server takes it, as the DM's chip waits for its answer (applyNow): sent
- * at once, a refused entry left the row saying "Applied to Goblin 2." The
- * first answer decides. A refusal still says why in the entry's own toast.
+ * server answers, as the DM's chip waits for its answer (applyNow): sent
+ * at once, a refused entry left the row saying "Applied to Goblin 2."
+ * A group entry sends one op per holder, so each answer is kept with its
+ * holder. The roll names exactly the holders whose op was taken, and a
+ * refused holder stays available. The chip goes once every op has answered
+ * and at least one was taken. A refusal still says why in the entry's own
+ * toast.
  */
 export function sendFilledEntry(env: Pick<ApplyEnv, "actions" | "applies" | "markApplied">, targets: readonly HpTarget[], change: HpChange, crit: boolean, chip: HpChip): void {
-  const to = targets.map((t) => ({ holder: t.holder, name: t.name }));
-  let settled = false;
-  sendHpEntry(env.actions, targets, change, crit, {
-    onAnswer: (answer) => {
-      if (settled) return;
-      settled = true;
-      if (answer !== "taken") return;
-      env.markApplied(chip.lineIds);
-      recordApplied(env.applies, chip.lineId, to);
+  // The holders hpOps sends to, in its order: it skips access "none" and a second token of one holder.
+  const sentTo: { holder: string; name: string }[] = [];
+  for (const t of targets) {
+    if (sentTo.some((s) => s.holder === t.holder) || hpOps([t], change, crit).length === 0) continue;
+    sentTo.push({ holder: t.holder, name: t.name });
+  }
+  const answers = new Map<string, OpAnswer>();
+  let done = false;
+  const finish = () => {
+    if (done || answers.size < sentTo.length) return;
+    done = true;
+    const taken = sentTo.filter((s) => answers.get(s.holder) === "taken");
+    if (taken.length === 0) return;
+    env.markApplied(chip.lineIds);
+    recordApplied(env.applies, chip.lineId, taken);
+  };
+  let next = 0;
+  const actions: Pick<RoomActions, "dispatch" | "newId"> = {
+    newId: () => env.actions.newId(),
+    dispatch: (op, opts) => {
+      const to = sentTo[next++];
+      const n = env.actions.dispatch(op, {
+        ...opts,
+        onAnswer: (answer, ...rest) => {
+          if (!to || answers.has(to.holder)) return;
+          answers.set(to.holder, answer);
+          finish();
+        },
+      });
+      // An op the store would not queue never answers, so it counts as refused.
+      if (n === null && to) answers.set(to.holder, "refused");
+      return n;
     },
-  });
+  };
+  sendHpEntry(actions, targets, change, crit);
+  finish();
 }
 
 /**

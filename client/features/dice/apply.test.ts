@@ -83,6 +83,75 @@ describe("recordApplied, a filled entry's apply (LP32-POLISH g)", () => {
   });
 });
 
+describe("sendFilledEntry, one op per holder", () => {
+  async function group(names: ("g1" | "g2" | "thorn" | "thorn2")[], access: Record<string, "all" | "none"> = {}) {
+    const { hpTargets } = await import("../tokens/groupHp.ts");
+    const { parseHpInput } = await import("../tokens/hpInput.ts");
+    const base = table();
+    const view: RoomState = { ...base, tokens: { ...base.tokens, thorn2: token("thorn2", { kind: "pc", name: "Thorn", x: 7, y: 5, disposition: "ally", actor: { ref: "c-thorn" } }) as Token } };
+    const { env, sent, marked } = harness(view);
+    const chip = rollChip([slash("dm1")])!;
+    const parsed = parseHpInput(String(chip.amount), "damage", chip);
+    assert.ok(parsed.ok);
+    const targets = hpTargets(names.map((n) => view.tokens[n]!), { role: "dm", memberId: "dm1", characters: view.characters, playersApplyDamage: false }).map((t) => ({ ...t, access: access[t.holder] ?? t.access }));
+    sendFilledEntry(env, targets, parsed.change, false, chip);
+    const holders = () => (env.applies.getState().rolls["9:0"]?.applied ?? []).map((a) => a.holder);
+    return { env, sent, marked, chip, holders };
+  }
+
+  test("A taken and B refused records only A and keeps B available", async () => {
+    const { sent, marked, chip, holders } = await group(["g1", "g2"]);
+    assert.equal(sent.length, 2);
+    sent[0]!.onAnswer!("taken");
+    assert.deepEqual(marked, [], "waits for every op");
+    sent[1]!.onAnswer!("refused");
+    assert.deepEqual(holders(), ["token:g1"]);
+    assert.deepEqual(marked, [chip.lineIds]);
+  });
+
+  test("A refused and B taken records only B", async () => {
+    const { sent, marked, chip, holders } = await group(["g1", "g2"]);
+    sent[0]!.onAnswer!("refused");
+    sent[1]!.onAnswer!("taken");
+    assert.deepEqual(holders(), ["token:g2"]);
+    assert.deepEqual(marked, [chip.lineIds]);
+  });
+
+  test("every op refused records nothing and keeps the chip", async () => {
+    const { sent, marked, holders } = await group(["g1", "g2"]);
+    sent[0]!.onAnswer!("refused");
+    sent[1]!.onAnswer!("unknown");
+    assert.deepEqual(holders(), []);
+    assert.deepEqual(marked, []);
+  });
+
+  test("a target hpOps skips for access none is never recorded", async () => {
+    const { sent, holders } = await group(["g1", "g2"], { "token:g1": "none", "token:g2": "none" });
+    assert.equal(sent.length, 0);
+    assert.deepEqual(holders(), []);
+  });
+
+  test("a skipped target beside a taken one records only the taken one", async () => {
+    const { sent, holders } = await group(["g1", "thorn"], { "token:g1": "none" });
+    assert.equal(sent.length, 1);
+    sent[0]!.onAnswer!("taken");
+    assert.deepEqual(holders(), ["character:c-thorn"]);
+  });
+
+  test("two tokens of one holder send one op and name the holder once", async () => {
+    const { sent, env } = await group(["thorn", "thorn2"]);
+    assert.equal(sent.length, 1);
+    sent[0]!.onAnswer!("taken");
+    assert.deepEqual(env.applies.getState().rolls["9:0"]?.applied, [{ holder: "character:c-thorn", name: "Thorn" }]);
+  });
+
+  test("recordApplied dedupes by holder within one call", () => {
+    const applies = applySlot.create();
+    recordApplied(applies, "9:0", [{ holder: "character:c-thorn", name: "Thorn" }, { holder: "character:c-thorn", name: "Thorn" }]);
+    assert.deepEqual(applies.getState().rolls["9:0"]?.applied, [{ holder: "character:c-thorn", name: "Thorn" }]);
+  });
+});
+
 describe("applyNow, the DM's chip", () => {
   test("one quiet actor.hp with the roll's parts, busy until taken, then the creature is applied and Use's chip for the roll goes", async () => {
     const { env, sent, marked } = harness(table());
