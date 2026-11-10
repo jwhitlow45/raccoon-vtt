@@ -691,7 +691,10 @@ function wingUp(p: ToolPointer, ctx: ToolContext): void {
   }
   const tapped = tapAt(view, ctx.scene, p.world, WING_REACH_PX / ctx.camera().scale);
   if (tapped === null) {
-    store.setState({ note: WING_TAP });
+    // A tap near no wall drops the join, so the row asks for one and Generate a wing waits (LP37-A-WING-4). An open
+    // pane keeps its join, and with it the choices and edits a stray tap would otherwise throw away.
+    const picks = s.wing?.sceneId === ctx.scene.id ? s.wing : null;
+    store.setState({ note: null, ...(picks && !s.wingOpen ? { wing: { ...picks, tap: null, join: null } } : null) });
     return;
   }
   if (!tapped.ok) {

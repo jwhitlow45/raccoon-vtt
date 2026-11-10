@@ -115,11 +115,11 @@ export const BUILD_MODES: readonly { value: BuildMode; label: string; spoken?: s
 
 /** A new mode, which drops a shape room's corners, a rectangle's start, a wall run, a Wall line, a wing's area and join with its pane, and the note. A selected stamp stays selected. */
 export function pickBuildMode(scope: RoomScope, mode: BuildMode): void {
-  scope.get(builderSlot).store.setState({ mode, poly: [], rect: null, run: [], line: [], lineScene: null, lineAt: null, lineDrag: null, linkDraft: null, note: null, ...NO_WING });
+  scope.get(builderSlot).store.setState({ mode, poly: [], rect: null, run: [], line: [], lineScene: null, lineAt: null, lineDrag: null, linkDraft: null, ...NO_WING });
 }
 
-/** Add a wing with nothing picked: what a new mode, another scene or floor, or an added wing leaves (dungeon phase 3, 3.1). */
-export const NO_WING = { wing: null, wingDraft: null, wingOpen: false, wingGhost: null, wingEdit: false, wingRoom: null } as const satisfies Partial<BuilderState>;
+/** Add a wing with nothing picked: what a new mode, another scene or floor, or an added wing leaves (dungeon phase 3, 3.1). The note goes too, since every wing note speaks of picks now gone (LP37-A-WING-4). */
+export const NO_WING = { wing: null, wingDraft: null, wingOpen: false, wingGhost: null, wingEdit: false, wingRoom: null, note: null } as const satisfies Partial<BuilderState>;
 
 /** A gesture's bookkeeping that the canvas never draws. */
 export type BuilderGesture = {
@@ -168,7 +168,6 @@ export const builderSlot = scopeSlot(
       poly: [],
       run: [],
       labelMove: null,
-      note: null,
       inSight: false,
       asking: 0,
       snapCorners: true,
