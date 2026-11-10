@@ -453,6 +453,29 @@ describe("twin rooms give P1 and the display the same frames, hidden work apart"
     same(pair, "the caster");
   });
 
+  test("a visible area whose hidden caster stays or is deleted gives P1 the same frames, live and on a reconnect", async (t) => {
+    const pair = await open(t);
+    const from = pair.map((twin) => twin.mark());
+    await both(pair, async (twin) => {
+      const caster = pair.fixture.creatures[twin.name][0]!;
+      if (twin.name === "door") await hiddenRename(twin, pair, 2_000);
+      else {
+        twin.to(2_000);
+        await twin.apply("dm", { t: "token.delete", tokenId: caster });
+        assert.equal(twin.actor.committed.state.templates[pair.fixture.area]?.casterId, undefined, `${twin.name}: the area lost its caster`);
+      }
+    });
+    for (const [i, twin] of pair.entries()) assert.deepEqual(twin.frames(from[i]), [], `${twin.name}: no frame for P1 or the display`);
+    await both(pair, async (twin) => {
+      twin.to(3_000);
+      await twin.apply("p1", chat("still here"));
+      twin.to(4_000);
+      await twin.reloadP1();
+    });
+    storedDiffers(pair, "the caster");
+    same(pair, "the caster", [from[0]!, from[1]!]);
+  });
+
   /** The kinds a player gets that each hide and show their own way, with an edit and its undo while hidden. */
   const kinds: Array<{ kind: string; make: Op; edit: Op; show: Op }> = [
     {
