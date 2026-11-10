@@ -31,8 +31,8 @@ const ROOM: RoomFacts = {
   reports: [],
 };
 
-function draw(facts: RoomFacts | null, edit?: RoomEdit, more: { cave?: boolean; flat?: boolean; extra?: string[] } = {}): string {
-  return renderToStaticMarkup(h(RoomPanel, { facts, edit, onEdit: nothing, onStep: nothing, onDone: nothing, cave: more.cave ?? false, ...(more.flat ? { flat: true } : {}), ...(more.extra ? { more: more.extra } : {}) }));
+function draw(facts: RoomFacts | null, edit?: RoomEdit, more: { cave?: boolean; flat?: boolean; extra?: string[]; wing?: boolean } = {}): string {
+  return renderToStaticMarkup(h(RoomPanel, { facts, edit, onEdit: nothing, onStep: nothing, onDone: nothing, cave: more.cave ?? false, ...(more.flat ? { flat: true } : {}), ...(more.extra ? { more: more.extra } : {}), ...(more.wing ? { wing: true } : {}) }));
 }
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'");
 /** The radio for an option label, and whether it is off and checked. */
@@ -53,6 +53,15 @@ test("a region named for its room, with ‹, › and Done, its height and doors 
   assert.ok(text(html).includes(doorName("w", 1)));
   assert.equal(doorName("s", "edge"), "South, to the way in");
   assert.equal(doorName("e", "join"), "East, to the way in");
+});
+
+test("a wing's room and the rooms its doors lead to go by the ghost's W numbers", () => {
+  // LP37 polish: the ghost said W3 over a panel that said Room 3.
+  const html = draw(ROOM, undefined, { wing: true });
+  assert.match(html, /<h3[^>]*>Room W3<\/h3>/);
+  assert.ok(text(html).includes("West, to room W1"));
+  assert.ok(text(html).includes("South, to room W4"));
+  assert.equal(doorName("e", "join", true), "East, to the way in");
 });
 
 test("Secret is off with its reason where the door may not be secret, and on where it may", () => {

@@ -478,6 +478,7 @@ export default function WingPane(props: {
             onDone={() => builder.setState({ wingRoom: null })}
             cave={settings.theme === "cave"}
             flat={flat}
+            wing
             held={sending !== null}
             more={pickedIndex !== null && edits.undone[pickedIndex] ? [edits.undone[pickedIndex]] : []}
           />

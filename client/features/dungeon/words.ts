@@ -282,16 +282,16 @@ export const EDITS_GONE = "Room edits dropped: the scene changed under the wing.
 export const BRING_BACK = "Bring them back";
 export const DROP_EDITS = "Drop edits";
 
-/** "Room 3". */
-export function roomTitle(n: number): string {
-  return `Room ${n}`;
+/** "Room 3", or for a wing "Room W3", as its ghost numbers its rooms. */
+export function roomTitle(n: number, wing = false): string {
+  return `Room ${wing ? "W" : ""}${n}`;
 }
 
 const SIDE_NAMES = { n: "North", e: "East", s: "South", w: "West" } as const;
 
-/** A door's row name: "West, to room 1", or "South, to the way in" for the entrance's way out of the map or a wing's join. */
-export function doorName(side: keyof typeof SIDE_NAMES, to: number | "edge" | "join"): string {
-  return `${SIDE_NAMES[side]}, to ${typeof to === "number" ? `room ${to}` : "the way in"}`;
+/** A door's row name: "West, to room 1" ("to room W1" in a wing), or "South, to the way in" for the entrance's way out of the map or a wing's join. */
+export function doorName(side: keyof typeof SIDE_NAMES, to: number | "edge" | "join", wing = false): string {
+  return `${SIDE_NAMES[side]}, to ${typeof to === "number" ? `room ${wing ? "W" : ""}${to}` : "the way in"}`;
 }
 
 /** The seed row's line while edits stand: "Edited: 1 room. The seed alone makes this dungeon without your edits." */

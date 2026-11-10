@@ -49,6 +49,8 @@ export type RoomPanelProps = {
   held?: boolean;
   /** Reports the owner adds beside the plan's own, such as an edit undone for the wall budget. */
   more?: readonly string[];
+  /** A wing's rooms, named W1 and on as its ghost numbers them (dungeon phase 3, 3.3). */
+  wing?: boolean;
 };
 
 export function RoomPanel(props: RoomPanelProps) {
@@ -61,7 +63,7 @@ export function RoomPanel(props: RoomPanelProps) {
     headingRef.current?.focus({ preventScroll: true });
   }, [room]);
 
-  const title = facts ? roomTitle(facts.n) : ROOM_GONE.title;
+  const title = facts ? roomTitle(facts.n, props.wing === true) : ROOM_GONE.title;
   const reports = [...(facts?.reports ?? []), ...(props.more ?? [])];
   const rows = reportsByRow(reports);
   const set = (patch: RoomEdit) => props.onEdit({ ...(edit ?? {}), ...patch });
@@ -92,7 +94,7 @@ export function RoomPanel(props: RoomPanelProps) {
       {facts ? (
         <Held held={props.held === true} style={{ display: "grid", gap: theme.space(4), minWidth: 0 }}>
           <HeightRow facts={facts} edit={edit} flat={props.flat === true} onChange={(ground) => set({ ground })} reports={rows.height} />
-          <DoorRows facts={facts} edit={edit} cave={props.cave} onChange={(key, pin) => set({ doors: { ...(edit?.doors ?? {}), [key]: pin } })} reports={rows.doors} />
+          <DoorRows facts={facts} edit={edit} cave={props.cave} wing={props.wing === true} onChange={(key, pin) => set({ doors: { ...(edit?.doors ?? {}), [key]: pin } })} reports={rows.doors} />
           <TrapRow facts={facts} edit={edit} onChange={(trap) => set({ trap })} reports={rows.trap} />
           <Choice<Dressing>
             name="Dressing"
@@ -158,24 +160,24 @@ function HeightRow(props: { facts: RoomFacts; edit: RoomEdit | undefined; flat: 
   );
 }
 
-function DoorRows(props: { facts: RoomFacts; edit: RoomEdit | undefined; cave: boolean; onChange(key: string, pin: DoorPin): void; reports: readonly string[] }) {
+function DoorRows(props: { facts: RoomFacts; edit: RoomEdit | undefined; cave: boolean; wing: boolean; onChange(key: string, pin: DoorPin): void; reports: readonly string[] }) {
   if (props.cave) return <Labelled name="Doors">{SECRET_OFF.cave}</Labelled>;
   return (
     <div style={{ display: "grid", gap: theme.space(3), minWidth: 0 }}>
       {props.facts.doors.map((d) => (
-        <DoorRow key={d.key} door={d} pin={props.edit?.doors?.[d.key]} onChange={(pin) => props.onChange(d.key, pin)} />
+        <DoorRow key={d.key} door={d} wing={props.wing} pin={props.edit?.doors?.[d.key]} onChange={(pin) => props.onChange(d.key, pin)} />
       ))}
       <Reports lines={props.reports} />
     </div>
   );
 }
 
-function DoorRow(props: { door: DoorFacts; pin: DoorPin | undefined; onChange(pin: DoorPin): void }) {
+function DoorRow(props: { door: DoorFacts; wing: boolean; pin: DoorPin | undefined; onChange(pin: DoorPin): void }) {
   const { door } = props;
   const state = props.pin ?? (door.state === "open" ? "closed" : door.state);
   return (
     <Choice<DoorPin>
-      name={doorName(door.side, door.to)}
+      name={doorName(door.side, door.to, props.wing)}
       value={state}
       onChange={props.onChange}
       options={[
