@@ -1,5 +1,5 @@
 import type { RoomState, Token, TokenId } from "#shared/model.ts";
-import { labelParts, labelText as sharedLabelText, nameEntry, NUMBER_NAMES_MOST, numberable, numbersOf, numberScope, previewNumbers, shownName, type TokenLabel } from "#shared/numbering.ts";
+import { labelParts, nameEntry, NUMBER_NAMES_MOST, numberable, numbersOf, numberScope, previewNumbers, shownName, type TokenLabel } from "#shared/numbering.ts";
 
 /**
  * How a device names a creature (docs/design/design-v1-creature-numbers.md 5):
@@ -15,24 +15,8 @@ import { labelParts, labelText as sharedLabelText, nameEntry, NUMBER_NAMES_MOST,
  */
 export type Label = TokenLabel;
 
-/** What follows a label's name: " 2", " (3)", " (as Goblin 2)", " (as Goblin (3))", or nothing. */
-export function labelSuffix(label: Omit<Label, "name">): string {
-  const count = countText(label);
-  if (label.as !== undefined) return ` (as ${label.as}${count ? ` ${count}` : ""})`;
-  return count ? ` ${count}` : "";
-}
-
-/** The number as the label writes it: "2", a preview "(3)", or empty. */
-export function countText(label: Omit<Label, "name">): string {
-  if (label.number !== undefined) return String(label.number);
-  if (label.preview !== undefined) return `(${label.preview})`;
-  return "";
-}
-
-/** The whole label: "Goblin 2", "Goblin (3)", "Orc (as Goblin 2)", as the server writes it too. */
-export function labelText(label: Label): string {
-  return sharedLabelText(label);
-}
+/** A label's text, the part after its name and its number, one rule with the server's (shared/numbering.ts). */
+export { countText, labelSuffix, labelText } from "#shared/numbering.ts";
 
 /**
  * What a screen reader says for a label. Brackets and "as" read badly

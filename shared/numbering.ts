@@ -121,10 +121,23 @@ export function labelParts(room: NumberState | null, token: NumberToken & Pick<T
   return out;
 }
 
+/** The number as a label writes it: "2", a preview "(3)", or nothing. */
+export function countText(label: Omit<TokenLabel, "name">): string {
+  if (label.number !== undefined) return String(label.number);
+  if (label.preview !== undefined) return `(${label.preview})`;
+  return "";
+}
+
+/** What follows a label's name: " 2", " (3)", " (as Goblin 2)", " (as Goblin (3))", or nothing. A device's board cuts the name and keeps it. */
+export function labelSuffix(label: Omit<TokenLabel, "name">): string {
+  const count = countText(label);
+  if (label.as !== undefined) return ` (as ${label.as}${count ? ` ${count}` : ""})`;
+  return count ? ` ${count}` : "";
+}
+
 /** "Goblin 2", "Goblin (3)", "Orc (as Goblin 2)" and "Orc (as Goblin (3))". */
 export function labelText(label: TokenLabel): string {
-  const suffix = label.number !== undefined ? ` ${label.number}` : label.preview !== undefined ? ` (${label.preview})` : "";
-  return label.as !== undefined ? `${label.name} (as ${label.as}${suffix})` : `${label.name}${suffix}`;
+  return `${label.name}${labelSuffix(label)}`;
 }
 
 /** What a viewer who reads the shown name reads: the shown name and the table's number. Every stored text and every op uses it. */
