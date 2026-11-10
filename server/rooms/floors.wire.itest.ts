@@ -609,3 +609,131 @@ describe("several floors over the wire (docs/design/design-v1-floors.md 8, the s
     for (const x of all) x.socket.close();
   });
 });
+
+/**
+ * A climb's undo and redo twins over the wire (docs/design/design-v1-floors.md
+ * phase 2, 4 and 8, lane FL2-C, D-261109-137): two rooms alike but for a
+ * hidden owl perched on Thorn, a DM-only area on the owl and one on Thorn,
+ * none of which Ana or Bree receives. Ana climbs, the DM may change one of
+ * them unseen, and Ana's Undo and Redo go back and forth twice. Each
+ * step's answer, toast and every player's reading of Thorn agree across
+ * the rooms, every seat's view is a fresh snapshot, and no frame to a
+ * player names a hidden thing.
+ */
+describe("a climb's undo and redo over the wire with passengers and areas players do not receive (phase 2, D-261109-137)", () => {
+  let t: Engine;
+  before(async () => {
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000 } });
+  });
+  after(() => t.close());
+
+  type Twin = Room & Pick<Table, "sync"> & { upper: string; thorn: string; link: string; gob: string; seats: { ana: Seat; bree: Seat; tv: Seat }; hidden: { owl?: string; aura?: string; ward?: string } };
+
+  const area = (id: string, sceneId: string, ownerId: string, on: string) => ({ id, sceneId, shape: "sphere", size: 10, origin: { x: 3.5, y: 3.5, z: 0 }, yaw: 0, includeOrigin: true, color: "#e5484d", ownerId, visibility: "dm", attachedTo: on });
+
+  async function twin(hidden: boolean): Promise<Twin> {
+    const r = await newRoom(t, hidden ? "Hidden riders" : "No riders");
+    await ok(r.dmSocket, { t: "scene.update", sceneId: r.ground, patch: { name: "Tower" } });
+    const upper = await addFloor(r, r.ground, "above", "Upper floor");
+    const thorn = await create(r, r.ground, { kind: "pc", name: "Thorn", disposition: "ally", ownerIds: [r.anaId], x: 3, y: 3 });
+    const gob = await create(r, upper, { name: "Goblin", x: 12, y: 12, visibility: "dm" });
+    const link = uuidv7();
+    await ok(r.dmSocket, { t: "floorLink.put", link: { id: link, pairId: uuidv7(), sceneId: r.ground, to: upper, rect: { x: 3, y: 3, w: 2, h: 1 }, kind: "stairs" } } as Op);
+    const secrets: Twin["hidden"] = {};
+    if (hidden) {
+      secrets.owl = await create(r, r.ground, { name: "Owl", kind: "npc", size: "tiny", visibility: "dm", x: 3, y: 3 });
+      await ok(r.dmSocket, { t: "token.attach", tokenId: secrets.owl, to: thorn, kind: "perch", x: 3, y: 3, elevation: 0 } as Op);
+      secrets.aura = uuidv7();
+      secrets.ward = uuidv7();
+      await ok(r.dmSocket, { t: "template.create", template: area(secrets.aura, r.ground, r.dmId, secrets.owl) } as Op);
+      await ok(r.dmSocket, { t: "template.create", template: area(secrets.ward, r.ground, r.dmId, thorn) } as Op);
+    }
+    await ok(r.dmSocket, { t: "encounter.start", entries: [{ id: uuidv7(), tokenId: thorn, value: 20 }] } as Op);
+    await ok(r.dmSocket, { t: "encounter.next" } as Op);
+    const m = await withMarker(t, r, r.ground);
+    const seats = await players(t, r, "ana first", false);
+    m.attach([seats.ana, seats.bree, seats.tv]);
+    await m.sync("seated");
+    return { ...r, sync: m.sync, upper, thorn, link, gob, seats, hidden: secrets };
+  }
+
+  /** The answer Ana's op `n` got, from her frames: refused with its words, or applied with the toast's words, if any. */
+  async function answered(s: Seat, n: number): Promise<string> {
+    for (let i = 0; i < 100; i++) {
+      for (const frame of s.frames) {
+        const m = JSON.parse(frame) as ServerMessage;
+        if (m.t !== "ev") continue;
+        const no = m.rejects?.find((x) => x.n === n);
+        if (no) return `refused: ${no.message}`;
+        if (m.acks?.includes(n)) return `applied: ${m.restored?.find((x) => x.n === n)?.what ?? ""}`;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return "no answer";
+  }
+
+  /** Thorn as a seat reads it, by its floor's name and without ids, which differ between the rooms. */
+  function reading(x: Twin, s: Seat) {
+    const thorn = s.view.tokens[x.thorn];
+    if (!thorn) return null;
+    const { turn: _turn, ...path } = thorn.path ?? { turn: 0, stops: [] };
+    return {
+      floor: s.view.scenes[thorn.sceneId]?.floor?.name ?? null,
+      at: [thorn.x, thorn.y, thorn.elevation],
+      attached: thorn.attached ?? null,
+      path: JSON.parse(JSON.stringify(path, (key, value) => (key === "seenBy" ? undefined : value))) as unknown,
+      tokens: Object.values(s.view.tokens).map((tk) => tk.name).sort(),
+      areas: Object.keys(s.view.templates).length,
+    };
+  }
+
+  /** One step of Ana's in both rooms: the same answer, and every player reading the rooms alike. */
+  async function step(a: Twin, b: Twin, op: (x: Twin) => Promise<Op>, when: string): Promise<string> {
+    const answers: string[] = [];
+    for (const x of [a, b]) {
+      const n = x.seats.ana.socket.op(await op(x));
+      answers.push(await answered(x.seats.ana, n));
+      await x.sync(when);
+    }
+    assert.equal(answers[0], answers[1], `${when}: the answer`);
+    for (const who of ["ana", "bree", "tv"] as const) assert.deepEqual(reading(a, a.seats[who]), reading(b, b.seats[who]), `${when}: ${who} reads Thorn alike`);
+    return answers[0]!;
+  }
+
+  const climb = async (x: Twin): Promise<Op> => ({ t: "token.climb", tokenId: x.thorn, linkId: x.link });
+  const undo = async (x: Twin): Promise<Op> => ({ t: "undo", head: (await x.seats.ana.socket.historyHead("play", "undo"))! }) as Op;
+  const redo = async (x: Twin): Promise<Op> => ({ t: "redo", head: (await x.seats.ana.socket.historyHead("play", "redo"))! }) as Op;
+
+  for (const [name, change] of [
+    ["kept as they are", null],
+    ["the area on Thorn deleted after the climb", (x: Twin): Op => ({ t: "template.delete", templateId: x.hidden.ward! })],
+    ["the area on Thorn moved to a goblin after the climb", (x: Twin): Op => ({ t: "template.update", templateId: x.hidden.ward!, patch: { attachedTo: x.gob } }) as Op],
+    ["the owl's area deleted after the climb", (x: Twin): Op => ({ t: "template.delete", templateId: x.hidden.aura! })],
+    ["the owl taken off Thorn after the climb", (x: Twin): Op => ({ t: "token.detach", tokenId: x.hidden.owl!, x: 3, y: 4 }) as Op],
+  ] as const) {
+    test(`a hidden owl and DM-only areas, ${name}: Ana's climb, Undo and Redo answer as in a room without them`, async () => {
+      const a = await twin(true);
+      const b = await twin(false);
+      assert.equal(await step(a, b, climb, "Go up"), "applied: ");
+      if (change) {
+        await ok(a.dmSocket, change(a));
+        await a.sync("the DM's change unseen");
+      }
+      for (const [i, [op, words]] of ([[undo, "undo"], [redo, "redo"], [undo, "undo"], [redo, "redo"]] as const).entries()) {
+        assert.equal(await step(a, b, op, `${words} ${i + 1}`), "applied: moving Thorn up the stairs", `${words} ${i + 1}`);
+        const where = words === "undo" ? a.ground : a.upper;
+        const state = await oracle(t, a.roomId, [a.seats.ana, a.seats.bree, a.seats.tv], `${words} ${i + 1}`);
+        assert.equal(state.tokens[a.thorn]!.sceneId, where);
+        const owl = state.tokens[a.hidden.owl!]!;
+        assert.equal(owl.sceneId, owl.attached ? where : a.upper, "the owl rides back and forth while it sits on Thorn, and stays where the DM set it down");
+        for (const id of [a.hidden.aura!, a.hidden.ward!]) {
+          const follows = state.templates[id]?.attachedTo;
+          if (follows !== undefined) assert.equal(state.templates[id]!.sceneId, state.tokens[follows]!.sceneId, `${id} stays with what it follows`);
+        }
+      }
+      const secrets = [a.hidden.owl!, a.hidden.aura!, a.hidden.ward!, '"Owl"'];
+      for (const s of [a.seats.ana, a.seats.bree, a.seats.tv]) assert.deepEqual(naming(s, secrets), [], `${s.name} gets nothing hidden`);
+      for (const x of [a, b]) for (const s of Object.values(x.seats)) s.socket.close();
+    });
+  }
+});
