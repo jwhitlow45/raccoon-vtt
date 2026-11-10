@@ -643,6 +643,15 @@ newest first.
 
 **Since v0.3.1**
 
+- **Floors from files and dungeons, and the ruler over stairs**
+  ([design](design/design-v1-floors.md)): room format 45, change format 59. No
+  data migrates, since a room saved before reads as it did. Until it reloads,
+  an old DM page has no Map choice in the Floors group and no stairs button on
+  its ruler, and an old page drops a ruler carried over stairs by a page that has
+  reloaded. Reload DM pages first, then every other open page, table displays
+  included. An older build refuses every room and backup this version has
+  saved, floors from files or not, so going back needs the backups taken just
+  before the update.
 - **Stairs and ladders between floors** ([design](design/design-v1-floors.md)):
   room format 45, change format 58. No data migrates, since a room without
   stairs reads as before. Until it reloads, an old page draws no stairs or
