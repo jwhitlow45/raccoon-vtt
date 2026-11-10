@@ -4,6 +4,7 @@ import { uuidv7 } from "#shared/ids.ts";
 import { historyMessageSchema, type HistoryMessage, type HistoryScope } from "#shared/undoContract.ts";
 import { createInitialState } from "#shared/initial.ts";
 import { lift, wall } from "#shared/discoveryTestutil.ts";
+import { GROUND, UPPER, thornToken, tower, withStairs } from "#shared/floorLinksTestutil.ts";
 import { chunkKey, holderChunkKey, holderTileKey } from "#shared/keys.ts";
 import {
   BLOCK_SAVES_TOO_FAST,
@@ -2507,6 +2508,43 @@ describe("the lit token light cap in the limits step (docs/design/design-v1-maps
       assert.equal(await send("dm", { t: "token.update", tokenId: lurker, patch: { name: "Lurker in the light" } }), null);
       assert.equal(await send("player", { t: "token.update", tokenId: pc, patch: { light: lit } }), null);
       assert.equal(aylaLit(actor.committed.state), true);
+    });
+  });
+  /**
+   * The stairs tower (shared/floorLinksTestutil.ts) with Thorn, Ana's
+   * creature, carrying a torch on the stairs' lower end, and its DM and
+   * Ana as members.
+   */
+  function litTower(): { state: RoomState; dm: Member; ana: Member } {
+    const state = withStairs(tower({ tokens: { thorn: thornToken({ light: lit }) } }));
+    return { state, dm: state.members.dm1!, ana: state.members.p1! };
+  }
+  const climbUp: Op = { t: "token.climb", tokenId: "thorn", linkId: "l1" };
+
+  test("a DM's climb that would add a 21st lit creature upstairs is refused by the far floor's cap, and the same climb by its player passes (FL2-ASTRA-03)", async () => {
+    for (const who of ["dm", "player"] as const) {
+      const { state, dm, ana } = litTower();
+      for (let k = 0; k < LIMITS.litTokenLightsPerScene; k++) state.tokens[`g${k}`] = testToken(`g${k}`, { sceneId: UPPER, x: k % 10, y: 10 + Math.floor(k / 10), light: lit });
+      await withRoom(state, dm, ana, async (actor, send) => {
+        assert.deepEqual(await send(who, climbUp), who === "dm" ? { n: 1, ...refused } : null, who);
+        assert.equal(actor.committed.state.tokens.thorn!.sceneId, who === "dm" ? GROUND : UPPER, who);
+      });
+    }
+  });
+
+  test("a player's climb onto a floor already past a cap of its own passes, the far floor's counts left unread", async () => {
+    const { state, dm, ana } = litTower();
+    // More traps than a floor holds, as a room made before traps met their cap can have.
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false };
+    let over = state;
+    for (let k = 0; k <= LIMITS.trapsPerScene; k++) {
+      const made = applyOp(over, { t: "trap.create", trap: { id: `plate${k}`, sceneId: UPPER, name: "Plate", zone: { cells: [{ x: 10 + (k % 10), y: 10 + Math.floor(k / 10), w: 1, h: 1 }] }, rig } } as Op, dmOf(dm), { seq: 50 + k, at: new Date().toISOString() });
+      assert.ok(made.ok);
+      over = made.state;
+    }
+    await withRoom(over, dm, ana, async (actor, send) => {
+      assert.equal(await send("player", climbUp), null);
+      assert.equal(actor.committed.state.tokens.thorn!.sceneId, UPPER);
     });
   });
 });

@@ -1945,7 +1945,7 @@ export class RoomActor {
     // springing never changes whether an op passes (docs/design/design-v1-traps.md 6.7). The room stored is the op's real result.
     const measured = result.withoutTraps ? result.withoutTraps() : result;
     if (!measured.ok) return measured;
-    const sceneIds = scenesOf(op, this.#staged.state, measured.state);
+    const sceneIds = scenesOf(op, this.#staged.state, measured.state, viewer.role);
     const before = this.#staged.state;
     // `before` with no scene too, so a show past the room's handout pages says that showing counts them again.
     const limits: LimitCheck = checkLimits(measured.state, sceneIds[0] ?? null, before, viewer.role);
@@ -3252,7 +3252,7 @@ function withFloorWords(op: Op, before: RoomState, refused: Extract<LimitCheck, 
 }
 
 /** The scenes whose per-scene limits an op can push, for checkLimits (design 10.5). */
-function scenesOf(op: Op, before: RoomState, after: RoomState): string[] {
+function scenesOf(op: Op, before: RoomState, after: RoomState, by: Viewer["role"]): string[] {
   const out = new Set<string>();
   const tokenScene = (id: string) => {
     const t = before.tokens[id] ?? after.tokens[id];
@@ -3323,11 +3323,14 @@ function scenesOf(op: Op, before: RoomState, after: RoomState): string[] {
     case "drawing.create":
       out.add(op.drawing.sceneId);
       break;
-    // Stairs join two floors, and floorProblem reads both (docs/design/design-v1-floors.md phase 2, 3).
+    // A climb puts its creature on the far floor, whose cap on lit token lights a DM's climb can pass (FL2-ASTRA-03), so
+    // a DM's meets that floor's limits. A player's does not: that cap never refuses a player, a climb raises no other
+    // count there, and a far floor already over one would answer in words about a floor the player may not hold
+    // (docs/design/design-v1-floors.md phase 2, 4). floorProblem reads both floors from either.
     case "token.climb": {
       tokenScene(op.tokenId);
       const link = ownEntry(before.floorLinks, op.linkId);
-      if (link) out.add(link.to);
+      if (link && by === "dm") out.add(link.to);
       break;
     }
     case "floorLink.put":
