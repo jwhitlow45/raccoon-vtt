@@ -18,7 +18,7 @@ import { MANIFEST_VERSION, type ExportManifest, type ManifestAsset } from "./exp
 import { assertLinesNotAhead, assertWithinLimits, entryToFile, IMPORT_LIMITS, InflatedCounter, inflatedLimit, manifestGeometry, silenced, soundsLeftOut } from "./importRoom.ts";
 import { MEMORY_CAP } from "./memorySize.ts";
 import { lastLineSeq } from "./remap.ts";
-import { SizeGuard } from "./sizeGuard.ts";
+import { numberingAdjust, projectionNumbering, SizeGuard } from "./sizeGuard.ts";
 
 async function zipWith(name: string, data: Buffer): Promise<{ zip: yauzl.ZipFile; entry: yauzl.Entry }> {
   const out = new yazl.ZipFile();
@@ -185,10 +185,12 @@ describe("wave 4 import limits (docs/design/design-v1-maps-vision.md 2.4)", () =
   });
 
   /**
-   * A room of exactly `bytes` serialized, its player scene a 200 x 200
-   * vision scene. Tokens' long notes on four other scenes pad it: the limits
-   * step never reads their length, which the protocol bounds where ops
-   * arrive, and each scene's projection stays inside its 3 MiB.
+   * A room the size guard measures at exactly `bytes`, its serialized bytes
+   * with creature numbers at their widest (numberingAdjust), its player
+   * scene a 200 x 200 vision scene. Tokens' long notes on four other scenes
+   * pad it: the limits step never reads their length, which the protocol
+   * bounds where ops arrive, and each scene's projection stays inside its
+   * 3 MiB.
    */
   function roomOf(bytes: number): RoomState {
     const state = room({ scenes: { s1: scene("s1", { bounds: { w: 200, h: 200 }, fogEnabled: true, vision: { on: true, light: "dark" } }) } });
@@ -196,9 +198,9 @@ describe("wave 4 import limits (docs/design/design-v1-maps-vision.md 2.4)", () =
       state.scenes[`s${i}`] = scene(`s${i}`, { order: i - 1 });
       return (state.tokens[`pad${i}`] = token(`pad${i}`, { sceneId: `s${i}`, notes: "" }));
     });
-    const room0 = serializedBytes(state);
+    const room0 = serializedBytes(state) + numberingAdjust(state);
     for (const [i, pad] of pads.entries()) pad.notes = "x".repeat(Math.floor((bytes - room0) / 4) + (i === 0 ? (bytes - room0) % 4 : 0));
-    assert.equal(serializedBytes(state), bytes);
+    assert.equal(serializedBytes(state) + numberingAdjust(state), bytes);
     return state;
   }
 
@@ -215,7 +217,8 @@ describe("wave 4 import limits (docs/design/design-v1-maps-vision.md 2.4)", () =
         const view = projectState({ ...state, sight: {} } as unknown as RoomState, DM_VIEW, { sceneId: "s1" });
         // Undo metadata has its own bound outside the scene quota.
         const { hpUndoLogIds: _undo, ...meta } = view.meta;
-        return serializedBytes({ ...view, meta });
+        // Creature numbers count at their widest beside the projection (numberingAdjust).
+        return serializedBytes({ ...view, meta }) + projectionNumbering(state, "s1");
       };
       pad.notes = "x".repeat(bytes - measured());
       assert.equal(measured(), bytes);

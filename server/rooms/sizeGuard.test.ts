@@ -11,7 +11,7 @@ import { sightEntryMaxBytes } from "#shared/rules/vision.ts";
 import { actor, character, companionBlock, room, scene, template, token } from "#shared/testutil.ts";
 import { exploreOp } from "./explore.ts";
 import { MEMORY_CAP } from "./memorySize.ts";
-import { checkWholeScenes, discoveryReserve, growthBound, measuredLog, memoryStateReserve, SCENE_MAPS_FULL, SizeGuard } from "./sizeGuard.ts";
+import { checkWholeScenes, discoveryReserve, growthBound, measuredLog, memoryStateReserve, numberingAdjust, projectionNumbering, SCENE_MAPS_FULL, SizeGuard } from "./sizeGuard.ts";
 
 const DM: Viewer = { memberId: "dm", role: "dm" };
 
@@ -143,7 +143,8 @@ describe("SizeGuard's wave 4 reserves (docs/design/design-v1-maps-vision.md 2.4)
     for (const sceneId of ["0f8fad5b-d9cb-469f-a165-70867728950e", "梟".repeat(64), `"q\\u0001${"\u0007".repeat(40)}`]) {
       const state = bright(sceneId);
       const probe = { ...state, sight: {} } as unknown as RoomState;
-      const measured = projectionBytes(projectState(probe, DM, { sceneId })) + discoveryReserve(state, state.scenes[sceneId]!, MEMORY_CAP);
+      // Creature numbers count at their widest beside the projection (numberingAdjust).
+      const measured = projectionBytes(projectState(probe, DM, { sceneId })) + discoveryReserve(state, state.scenes[sceneId]!, MEMORY_CAP) + projectionNumbering(state, sceneId);
       const reserve = 13 * 13 * sightEntryMaxBytes(sceneId);
       const explored = exploredReserve(state);
       const real = { ...visionRules };
@@ -169,7 +170,8 @@ describe("SizeGuard's wave 4 reserves (docs/design/design-v1-maps-vision.md 2.4)
   test("a scene without vision reserves nothing for sight, and one that is not exploring nothing for its layer", () => {
     const state = bright("s9");
     state.scenes.s9 = { ...state.scenes.s9!, vision: { on: false, light: "bright" } };
-    const measured = projectionBytes(projectState(state, DM, { sceneId: "s9" })) + discoveryReserve(state, state.scenes.s9!, MEMORY_CAP);
+    // Creature numbers count at their widest beside the projection (numberingAdjust).
+    const measured = projectionBytes(projectState(state, DM, { sceneId: "s9" })) + discoveryReserve(state, state.scenes.s9!, MEMORY_CAP) + projectionNumbering(state, "s9");
     assert.equal(new SizeGuard({ sceneLimit: measured }).check(state, ["s9"], 0).ok, true);
   });
 
@@ -177,8 +179,9 @@ describe("SizeGuard's wave 4 reserves (docs/design/design-v1-maps-vision.md 2.4)
     const state = bright("s9");
     state.scenes.s8 = scene("s8", { bounds: { w: 200, h: 200 }, fogEnabled: true, vision: { on: true, light: "dark" } });
     const moved = { ...state, meta: { ...state.meta, playerSceneId: "s8" } };
-    // Players' memory of the scene they move to is reserved at its cap (docs/design/design-v1-map-discovery.md 5.5).
-    const bytes = serializedBytes(moved) + memoryStateReserve(moved);
+    // Players' memory of the scene they move to is reserved at its cap (docs/design/design-v1-map-discovery.md 5.5), and
+    // creature numbers count at their widest (numberingAdjust).
+    const bytes = serializedBytes(moved) + memoryStateReserve(moved) + numberingAdjust(moved);
     const fits = new SizeGuard({ stateLimit: bytes + exploredReserve(moved) });
     assert.equal(fits.check(moved, [], 0, state).ok, true);
     const tight = new SizeGuard({ stateLimit: bytes + exploredReserve(moved) - 1 });
@@ -186,7 +189,8 @@ describe("SizeGuard's wave 4 reserves (docs/design/design-v1-maps-vision.md 2.4)
     // The same room for any other op is simply full.
     assert.match((tight.check(moved, [], 0, moved) as { message: string }).message, /^the room is full/);
     // The projected check of the scene that starts exploring runs too, though the op never named it.
-    const sceneBytes = projectionBytes(projectState({ ...moved, sight: {} } as unknown as RoomState, DM, { sceneId: "s8" })) + discoveryReserve(moved, moved.scenes.s8!, MEMORY_CAP);
+    // Creature numbers count at their widest beside the projection (numberingAdjust).
+    const sceneBytes = projectionBytes(projectState({ ...moved, sight: {} } as unknown as RoomState, DM, { sceneId: "s8" })) + discoveryReserve(moved, moved.scenes.s8!, MEMORY_CAP) + projectionNumbering(moved, "s8");
     const sightReserve = 13 * 13 * sightEntryMaxBytes("s8");
     const sceneTight = new SizeGuard({ sceneLimit: sceneBytes + sightReserve + exploredReserve(moved) - 1 });
     assert.deepEqual(sceneTight.check(moved, [], 0, state), { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE });
@@ -255,7 +259,8 @@ describe("SizeGuard's room-level part (docs/design/design-v1-dm-tools.md 2.4)", 
     const state = twoScenes();
     const next = applied(state, journalOp(300)).state;
     for (const sceneId of ["s1", "s2"]) {
-      const bytes = projectionBytes(projectState({ ...next, sight: {} } as unknown as RoomState, DM, { sceneId })) + playersExtra(next, sceneId);
+      // Creature numbers count at their widest beside the projection (numberingAdjust).
+      const bytes = projectionBytes(projectState({ ...next, sight: {} } as unknown as RoomState, DM, { sceneId })) + playersExtra(next, sceneId) + projectionNumbering(next, sceneId);
       assert.equal(new SizeGuard({ sceneLimit: bytes }).check(next, [sceneId], 0).ok, true, sceneId);
       assert.equal(new SizeGuard({ sceneLimit: bytes - 1 }).check(next, [sceneId], 0).ok, false, sceneId);
     }
@@ -273,7 +278,8 @@ describe("SizeGuard's room-level part (docs/design/design-v1-dm-tools.md 2.4)", 
     const view = projectState(full, DM, { sceneId: "s1" });
     assert.equal(view.meta.hpUndoLogIds?.length, MAX_LOG + LIMITS.dmLogLines);
     assert.ok(serializedBytes({ hpUndoLogIds: view.meta.hpUndoLogIds }) < 12 * 1024, "the bounded metadata stays under 12 KiB");
-    const bytes = projectionBytes(projectState(publicOnly, DM, { sceneId: "s1" })) + playersExtra(publicOnly, "s1");
+    // Creature numbers count at their widest beside the projection (numberingAdjust).
+    const bytes = projectionBytes(projectState(publicOnly, DM, { sceneId: "s1" })) + playersExtra(publicOnly, "s1") + projectionNumbering(publicOnly, "s1");
     for (const state of [publicOnly, full]) {
       assert.equal(new SizeGuard({ sceneLimit: bytes }).check(state, ["s1"], 0).ok, true);
       assert.equal(new SizeGuard({ sceneLimit: bytes - 1 }).check(state, ["s1"], 0).ok, false, "shared HP lines count, private undo ids do not");
@@ -284,7 +290,8 @@ describe("SizeGuard's room-level part (docs/design/design-v1-dm-tools.md 2.4)", 
     const pages = Array.from({ length: 100 }, (_, i) => ({ assetId: `0192f0aa-0000-7000-8000-${String(i).padStart(12, "0")}`, width: 1584, height: 2048 }));
     const next = applied(twoScenes(), { t: "handoutDoc.create", doc: { id: "d1", title: "Strange letter", pages } }).state;
     for (const sceneId of ["s1", "s2"]) {
-      const bytes = projectionBytes(projectState({ ...next, sight: {} } as unknown as RoomState, DM, { sceneId })) + playersExtra(next, sceneId);
+      // Creature numbers count at their widest beside the projection (numberingAdjust).
+      const bytes = projectionBytes(projectState({ ...next, sight: {} } as unknown as RoomState, DM, { sceneId })) + playersExtra(next, sceneId) + projectionNumbering(next, sceneId);
       assert.equal(new SizeGuard({ sceneLimit: bytes }).check(next, [sceneId], 0).ok, true, sceneId);
       assert.equal(new SizeGuard({ sceneLimit: bytes - 1 }).check(next, [sceneId], 0).ok, false, sceneId);
     }
@@ -298,7 +305,8 @@ describe("SizeGuard's room-level part (docs/design/design-v1-dm-tools.md 2.4)", 
     assert.ok(r.ok);
     // The ask's own line only its caster's players read is the DM's, outside the measures.
     for (const sceneId of ["s1", "s2"]) {
-      const bytes: number = projectionBytes(projectState({ ...r.state, log: [...measuredLog(r.state.log)], sight: {} } as unknown as RoomState, DM, { sceneId })) + playersExtra(r.state, sceneId);
+      // Creature numbers count at their widest beside the projection (numberingAdjust).
+      const bytes: number = projectionBytes(projectState({ ...r.state, log: [...measuredLog(r.state.log)], sight: {} } as unknown as RoomState, DM, { sceneId })) + playersExtra(r.state, sceneId) + projectionNumbering(r.state, sceneId);
       assert.equal(new SizeGuard({ sceneLimit: bytes }).check(r.state, [sceneId], 0).ok, true, sceneId);
       assert.equal(new SizeGuard({ sceneLimit: bytes - 1 }).check(r.state, [sceneId], 0).ok, false, sceneId);
     }
@@ -313,7 +321,8 @@ describe("SizeGuard's room-level part (docs/design/design-v1-dm-tools.md 2.4)", 
     const plain = applied(quiet, { t: "log.chat", text: "hello" });
     const next = applied(loud, { t: "log.chat", text: "hello" });
     // The chat line, which every DM gets, is the whole of the log the measure counts.
-    const bytes = projectionBytes(projectState(plain.state, dm2, { sceneId: "s1" })) + playersExtra(plain.state, "s1");
+    // Creature numbers count at their widest beside the projection (numberingAdjust).
+    const bytes = projectionBytes(projectState(plain.state, dm2, { sceneId: "s1" })) + playersExtra(plain.state, "s1") + projectionNumbering(plain.state, "s1");
     for (const limit of [bytes - 1, bytes, bytes + 1]) {
       const passes = (r: { state: RoomState; growth: number }, before: RoomState) => new SizeGuard({ sceneLimit: limit }).check(r.state, [], r.growth, before).ok;
       assert.equal(passes(next, loud), passes(plain, quiet), `${limit}`);
@@ -360,14 +369,15 @@ describe("SizeGuard's room-level part (docs/design/design-v1-dm-tools.md 2.4)", 
   test("companion blocks ride outside the measure, so with 3 MiB of them a map edit that fits without them passes, and one that does not is refused as before (docs/design/design-v1-companion-stat-blocks.md 3.4)", () => {
     const state = twoScenes();
     state.characters.c1 = character("c1", { name: "Bree" });
-    // The measure counts the blocks' field as empty: it is a DM's projection without them, to the byte.
-    const without = projectionBytes(projectState({ ...state, sight: {} } as unknown as RoomState, DM, { sceneId: "s2" }));
+    // The measure counts the blocks' field as empty: it is a DM's projection without them, to the byte, with creature numbers
+    // at their widest (numberingAdjust).
+    const without = projectionBytes(projectState({ ...state, sight: {} } as unknown as RoomState, DM, { sceneId: "s2" })) + projectionNumbering(state, "s2");
     const blocks: RoomState["companionBlocks"] = {};
     for (let i = 0; i < 192; i++) blocks[`b${i}`] = companionBlock(`b${i}`, "c1", { traits: [{ name: "", text: "x".repeat(15_000) }] });
     const heavy = { ...state, companionBlocks: blocks };
     assert.ok(serializedBytes(blocks) > 2.7 * 1024 * 1024, `${serializedBytes(blocks)} bytes of blocks`);
     for (const sceneId of ["s1", "s2"]) {
-      const exact = projectionBytes(projectState({ ...state, sight: {} } as unknown as RoomState, DM, { sceneId })) + playersExtra(state, sceneId);
+      const exact = projectionBytes(projectState({ ...state, sight: {} } as unknown as RoomState, DM, { sceneId })) + playersExtra(state, sceneId) + projectionNumbering(state, sceneId);
       assert.equal(new SizeGuard({ sceneLimit: exact }).check(heavy, [sceneId], 0).ok, true, sceneId);
       assert.equal(new SizeGuard({ sceneLimit: exact - 1 }).check(heavy, [sceneId], 0).ok, false, sceneId);
     }
@@ -405,7 +415,8 @@ describe("the room's clock (docs/design/design-v1-calendar.md 6.7)", () => {
       const next = applied(room(), { t: "clock.start", id: "c1", at: 8 * 3_600, shown, calendar: months }).state;
       assert.ok(next.clock);
       for (const sceneId of ["s1", "s2"]) {
-        const bytes = projectionBytes(projectState({ ...next, log: [...measuredLog(next.log)], sight: {} } as unknown as RoomState, DM, { sceneId })) + playersExtra(next, sceneId);
+        // Creature numbers count at their widest beside the projection (numberingAdjust).
+        const bytes = projectionBytes(projectState({ ...next, log: [...measuredLog(next.log)], sight: {} } as unknown as RoomState, DM, { sceneId })) + playersExtra(next, sceneId) + projectionNumbering(next, sceneId);
         assert.equal(new SizeGuard({ sceneLimit: bytes }).check(next, [sceneId], 0).ok, true, `${sceneId} shown ${shown}`);
         assert.equal(new SizeGuard({ sceneLimit: bytes - 1 }).check(next, [sceneId], 0).ok, false, `${sceneId} shown ${shown}`);
       }

@@ -42,7 +42,7 @@ import { assertWithinLimits } from "./importRoom.ts";
 import { HttpError } from "../auth/http.ts";
 import { remapState } from "./remap.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { checkWholeScenes, discoveryReserve, growthBound, measuredStateBytes, memoryReserves, memoryShare, memoryStateReserve, roomLevelBytes, SCENE_MAPS_FULL, SHARE_MARGIN, SizeGuard, touchedScenes } from "./sizeGuard.ts";
+import { checkWholeScenes, discoveryReserve, growthBound, measuredStateBytes, memoryReserves, memoryShare, memoryStateReserve, numberingAdjust, roomLevelBytes, SCENE_MAPS_FULL, SHARE_MARGIN, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { loadRoom, type Pool } from "./persistence.ts";
 import { SQUARES } from "../../shared/rules/grid.ts";
 import { STANDING_CLOCK } from "./undoScopeTesting.ts";
@@ -2272,7 +2272,8 @@ describe("explore's growth under a scene ID that JSON escapes (docs/design/desig
       scenes: Object.fromEntries(Object.entries(room.state.scenes).map(([id, s]) => (id === room.sceneId ? [sceneId, { ...s, id: sceneId }] : [id, s]))),
       tokens: Object.fromEntries(Object.entries(room.state.tokens).map(([id, t]) => [id, t.sceneId === room.sceneId ? { ...t, sceneId } : t])),
     };
-    const stateLimit = serializedBytes(state) + exploredReserve(state) + memoryStateReserve(state) + 200;
+    // Creature numbers count at their widest (numberingAdjust).
+    const stateLimit = serializedBytes(state) + numberingAdjust(state) + exploredReserve(state) + memoryStateReserve(state) + 200;
     await withRoom(
       state,
       dm,
@@ -2285,12 +2286,12 @@ describe("explore's growth under a scene ID that JSON escapes (docs/design/desig
         // an unescaped key would leave out of the explored tile, so a guard counting it short would let this through unmeasured.
         const note = (n: number): Op => ({ t: "token.update", tokenId: room.goblinId, patch: { notes: "n".repeat(n) } });
         const room0 = actor.committed.state;
-        const spare = stateLimit - serializedBytes(room0) - exploredReserve(room0) - memoryStateReserve(room0);
+        const spare = stateLimit - serializedBytes(room0) - numberingAdjust(room0) - exploredReserve(room0) - memoryStateReserve(room0);
         assert.ok(spare >= 0 && spare < 300, `${spare} bytes spare`);
         assert.deepEqual(await send(note(spare + 150)), { code: "quota", message: `the room is full: it is at its ${Math.floor(stateLimit / 1024 / 1024)} MiB size limit` });
         assert.equal(await send(note(Math.max(0, spare - 40))), null, "an edit that fits still passes");
         const now = actor.committed.state;
-        assert.ok(serializedBytes(now) + exploredReserve(now) + memoryStateReserve(now) <= stateLimit);
+        assert.ok(serializedBytes(now) + numberingAdjust(now) + exploredReserve(now) + memoryStateReserve(now) <= stateLimit);
       },
       { sizeLimits: { stateLimit } },
     );

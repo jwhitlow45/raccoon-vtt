@@ -7,7 +7,7 @@ import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { room } from "#shared/testutil.ts";
 import { MEMORY_CAP } from "./memorySize.ts";
-import { checkWholeScenes, discoveryReserve, growthBound, measuredLog, measuredStateBytes, SizeGuard } from "./sizeGuard.ts";
+import { checkWholeScenes, discoveryReserve, growthBound, measuredLog, measuredStateBytes, numberingAdjust, projectionNumbering, SizeGuard } from "./sizeGuard.ts";
 
 /**
  * Synced music and sound in the size guard (docs/design/design-v1-music.md
@@ -25,7 +25,8 @@ function projectionBytes(view: ProjectedState): number {
 }
 
 function dmScene(state: RoomState, sceneId: string): number {
-  return projectionBytes(projectState({ ...state, log: [...measuredLog(state.log)], sight: {} } as unknown as RoomState, DM, { sceneId }));
+  // Creature numbers count at their widest beside the projection (numberingAdjust).
+  return projectionBytes(projectState({ ...state, log: [...measuredLog(state.log)], sight: {} } as unknown as RoomState, DM, { sceneId })) + projectionNumbering(state, sceneId);
 }
 
 function applied(state: RoomState, op: Op, seq: number): { state: RoomState; growth: number } {
@@ -76,7 +77,7 @@ describe("sound in the size guard (docs/design/design-v1-music.md 6.3)", () => {
     assert.ok(last.sounds && last.playlists && last.playing?.music && last.playing.dmEffects?.length === 1 && last.scenes.s1!.sound);
     for (const { state, op } of all) assertExact(state, op.t);
     // The whole room's own bytes count them too, so the room check and the import's check of every scene read them.
-    assert.equal(measuredStateBytes(last), serializedBytes(last));
+    assert.equal(measuredStateBytes(last), serializedBytes(last) + numberingAdjust(last));
     const bytes = dmScene(last, "s2");
     assert.equal(checkWholeScenes(last, bytes).ok, true);
     assert.equal(checkWholeScenes(last, bytes - 1).ok, false);

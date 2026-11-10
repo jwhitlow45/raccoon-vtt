@@ -5,7 +5,7 @@ import type { RoomState } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { entry, P1, room, template, token, trap } from "#shared/testutil.ts";
-import { growthBound, measuredFromStored, measuredStateBytes, roomLevelBytes, SizeGuard, touchedScenes } from "./sizeGuard.ts";
+import { growthBound, measuredFromStored, measuredStateBytes, numberingAdjust, roomLevelBytes, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { serializedBytes } from "#shared/limits.ts";
 
 /**
@@ -137,12 +137,13 @@ describe("a hidden line never changes whether a player's op passes (design 10.5,
 
   test("the DM lines the measures leave out are bounded on their own, and a room without any measures exactly", () => {
     const quiet = fightWithGlyph(9.5);
-    assert.equal(measuredStateBytes(quiet), serializedBytes(quiet));
-    assert.equal(measuredFromStored(serializedBytes(quiet), quiet), serializedBytes(quiet));
+    // Exactly, with creature numbers at their widest (numberingAdjust).
+    assert.equal(measuredStateBytes(quiet), serializedBytes(quiet) + numberingAdjust(quiet));
+    assert.equal(measuredFromStored(serializedBytes(quiet), quiet), serializedBytes(quiet) + numberingAdjust(quiet));
     // Shared lines count as before.
     const chat = applyOp(quiet, { t: "log.chat", text: "Onward." }, P1, { seq: SEQ, at: "2026-10-23T20:00:00.000Z" });
     assert.ok(chat.ok);
-    assert.equal(measuredStateBytes(chat.state), serializedBytes(chat.state));
+    assert.equal(measuredStateBytes(chat.state), serializedBytes(chat.state) + numberingAdjust(chat.state));
     assert.ok(growthBound(quiet, chat.state, chat.touched) > 0);
   });
 });

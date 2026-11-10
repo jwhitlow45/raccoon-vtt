@@ -2,8 +2,9 @@ import { chunkKey, holderChunkKey, holderTileKey, parseKey, readEntity, tileKey,
 import { lineAudience } from "#shared/logRings.ts";
 import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, UP_DIR_CHARS, type BuildChunk, type Encounter, type EncounterSnapshot, type LogEntry, type Token, type Trap } from "#shared/model.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
-import { exploredReserve, LIMITS, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, reservedExploreFloors, serializedBytes, utf8Bytes, type LimitCheck } from "#shared/limits.ts";
+import { exploredReserve, LIMITS, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, reservedExploreFloors, serializedBytes, utf8Bytes, WIDEST_REV, type LimitCheck } from "#shared/limits.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
+import { NUMBERS_MOST } from "#shared/numbering.ts";
 import { chunkPositions, heldGroundMap, perPlayerScene } from "#shared/project.ts";
 import { keepsMemory, type Layer } from "#shared/reducer/memory.ts";
 import { floorsOf, onPlayersScene } from "#shared/rules/floors.ts";
@@ -551,6 +552,8 @@ export function roomLevelBytes(state: RoomState): number {
     // Each list of who saw at its widest, whoever it names (docs/design/design-v1-per-player-vision.md 6.8).
     else if (name === "encounter") bytes += fieldBytes(name) + valueBytes(state.encounter) - encounterLists(state.encounter).extra + encounterLists(state.encounter).count * widestListExtra(state.members);
     else if (name === "encounterHistory") bytes += fieldBytes(name) + collectionBytes(state.encounterHistory) - historyLists(state.encounterHistory).extra + historyLists(state.encounterHistory).count * widestListExtra(state.members);
+    // Each scene's rev at its widest and its creature numbers left out (numberingAdjust).
+    else if (name === "scenes") bytes += fieldBytes(name) + collectionBytes(state.scenes) + scenesNumbering(state.scenes);
     else bytes += fieldBytes(name) + (name === "meta" ? valueBytes(state[name]) : collectionBytes(state[name] ?? (name === "trapLog" || name === "trapSeen" ? [] : {})));
   }
   // The clock is the one room-level field a room may lack (docs/design/design-v1-calendar.md 6.7): there, it adds its
@@ -603,7 +606,6 @@ export const PER_PLAYER_FULL = "The room is too full for per-player sight on thi
  * reserve reads only the roster, the scenes and how many lists there are,
  * which every player's own ops can observe anyway.
  */
-const WIDEST_REV = Number.MAX_SAFE_INTEGER;
 const FULL_TILE = encodeTile(fullTileBits());
 
 /** The roster's ids, longest as JSON first, kept per members collection, which is replaced and never changed. */
@@ -1097,6 +1099,74 @@ function trapsMeasure(state: RoomState): number {
   return bytes + collectionBytes(state.trapLog ?? []) - 2 + collectionBytes(state.trapSeen ?? []) - 2;
 }
 
+// ---------------------------------------------------------------------------
+// Creature numbers (shared/numbering.ts)
+
+/*
+ * A batch end gives creature numbers with `sys.meet`, after admission and
+ * never refused, so no measure counts what the numbers hold. Every monster
+ * and NPC counts its number and its group at their widest whether it has
+ * them or not, and its rev at its widest, since each write bumps it and a
+ * meeting can add a digit. Every scene counts its rev at its widest and
+ * its numbers not at all. The room's group count counts nothing. A meeting
+ * then moves no measure and no growth bound. The scenes' numbers ride in a
+ * DM's snapshot outside the measures, each scene's under the caps that
+ * bound it (registerBytesMost).
+ */
+
+/** What a monster's or NPC's number and group count as: `,"number":` with the most numbers a name gives and `,"met":` with the widest group id. */
+export const TOKEN_NUMBERING = serializedBytes({ number: NUMBERS_MOST, met: WIDEST_REV }) - 2 + 1;
+
+const WIDEST_REV_BYTES = serializedBytes(WIDEST_REV);
+
+/** What a token adds to a measure beyond its stored bytes. Only a monster or NPC is ever given a number, and every other token counts as it is. */
+export function tokenNumbering(token: Token): number {
+  if (token.kind !== "monster" && token.kind !== "npc") return 0;
+  const number = token.number === undefined ? 0 : fieldBytes("number") + 1 + serializedBytes(token.number);
+  const met = token.met === undefined ? 0 : fieldBytes("met") + 1 + serializedBytes(token.met);
+  return TOKEN_NUMBERING - number - met + WIDEST_REV_BYTES - serializedBytes(token.rev);
+}
+
+/** What a scene adds to a measure beyond its stored bytes: its rev widened, its numbers and the comma before them taken out. */
+function sceneNumbering(scene: Scene): number {
+  const numbers = scene.numbers === undefined ? 0 : serializedBytes({ numbers: scene.numbers }) - 1;
+  return WIDEST_REV_BYTES - serializedBytes(scene.rev) - numbers;
+}
+
+const numberingSums = new WeakMap<object, number>();
+
+/** Each value's part summed, kept per collection object, which is replaced and never changed. */
+function numberingSum<T>(collection: Record<string, T>, part: (value: T) => number): number {
+  let bytes = numberingSums.get(collection);
+  if (bytes === undefined) {
+    bytes = 0;
+    for (const value of Object.values(collection)) bytes += part(value);
+    if (!isWritable(collection)) numberingSums.set(collection, bytes);
+  }
+  return bytes;
+}
+
+/** The scenes' part of the adjust, which the room-level part of every DM's projection holds. */
+function scenesNumbering(scenes: RoomState["scenes"]): number {
+  return numberingSum(scenes, sceneNumbering);
+}
+
+/**
+ * What the measures count beyond the stored state for creature numbers:
+ * the tokens' part, the scenes' part, and the room's group count, with the
+ * comma before it, taken out.
+ */
+export function numberingAdjust(state: RoomState): number {
+  const count = state.numbering === undefined ? 0 : serializedBytes({ numbering: state.numbering }) - 1;
+  return numberingSum(state.tokens, tokenNumbering) + scenesNumbering(state.scenes) - count;
+}
+
+/** What a scene's measure counts beyond a DM's projection of it for creature numbers: every scene's part, and the tokens' on its floors. */
+export function projectionNumbering(state: RoomState, sceneId: string): number {
+  const floors = new Set(floorsOf(state, sceneId).map((scene) => scene.id));
+  return scenesNumbering(state.scenes) + sum(Object.values(state.tokens), (token) => (floors.has(token.sceneId) ? tokenNumbering(token) : 0));
+}
+
 /**
  * The room's own bytes as the guard counts them: everything exactly, the
  * traps by their measures and reserves. The log's lines only some viewers
@@ -1104,12 +1174,13 @@ function trapsMeasure(state: RoomState): number {
  * ride outside, under bounds of their own, so no player's op ever passes
  * or fails by what they cannot read. So does players' memory, which the
  * guard reserves at its caps and its share (docs/design/design-v1-map-discovery.md
- * 5.5), whatever it holds.
+ * 5.5), whatever it holds. Creature numbers count at their widest
+ * (numberingAdjust).
  */
 export function measuredStateBytes(state: RoomState): number {
   const memory = state.memory === undefined ? {} : { memory: {} };
   const memoryBy = state.memoryBy === undefined ? {} : { memoryBy: {} };
-  return serializedBytes({ ...state, log: measuredLog(state.log), traps: {}, trapLog: [], trapSeen: [], reminded: undefined, saveOutcomes: undefined, ...memory, ...memoryBy }) + trapsMeasure(state) - privateStateBytes(state) + perPlayerStoredReserve(state);
+  return serializedBytes({ ...state, log: measuredLog(state.log), traps: {}, trapLog: [], trapSeen: [], reminded: undefined, saveOutcomes: undefined, ...memory, ...memoryBy }) + trapsMeasure(state) - privateStateBytes(state) + perPlayerStoredReserve(state) + numberingAdjust(state);
 }
 
 /**
@@ -1126,7 +1197,7 @@ export function measuredFromStored(bytes: number, state: RoomState): number {
   // The record's field, `,"reminded":{…}`, is its object's bytes less the braces, and the comma before it.
   const reminded = state.reminded === undefined ? 0 : serializedBytes({ reminded: state.reminded }) - 1;
   const saveOutcomes = state.saveOutcomes === undefined ? 0 : serializedBytes({ saveOutcomes: state.saveOutcomes }) - 1;
-  const outside = reminded + saveOutcomes + (roomLog === state.log ? 0 : collectionBytes(state.log) - collectionBytes(roomLog)) + privateStateBytes(state) - perPlayerStoredReserve(state) + memoryStoredBytes(state);
+  const outside = reminded + saveOutcomes + (roomLog === state.log ? 0 : collectionBytes(state.log) - collectionBytes(roomLog)) + privateStateBytes(state) - perPlayerStoredReserve(state) + memoryStoredBytes(state) - numberingAdjust(state);
   if (Object.keys(traps).length === 0 && log.length === 0 && seen.length === 0) return bytes - outside;
   return bytes - outside - (collectionBytes(traps) - 2) - (collectionBytes(log) - 2) - (collectionBytes(seen) - 2) + trapsMeasure(state);
 }
@@ -1198,10 +1269,14 @@ function widestPartyLayer(state: RoomState, sceneId: string): Widest | null {
   return scene && perPlayerScene(scene) ? widestLayer(scene, null) : null;
 }
 
-/** An entity as a scene's part counts it: a trap by its measure, a token with every list of who saw in its path as `[]`, anything else exactly. */
+/**
+ * An entity as a scene's part counts it: a trap by its measure, a token with
+ * every list of who saw in its path as `[]` and its numbering at its widest
+ * (tokenNumbering), anything else exactly.
+ */
 function entryBytes(name: SceneLevel, value: unknown): number {
   if (name === "traps") return trapMeasure(value as Trap);
-  if (name === "tokens") return valueBytes(value) - tokenLists(value as Token).extra;
+  if (name === "tokens") return valueBytes(value) - tokenLists(value as Token).extra + tokenNumbering(value as Token);
   return valueBytes(value);
 }
 
@@ -1290,8 +1365,9 @@ export function growthBound(before: RoomState, after: RoomState, touched: readon
     const next = readEntity(after, key);
     if (next === null || next === undefined) continue;
     const parsed = parseKey(key);
-    // Private lifecycle metadata has its own cap and cannot change player quota answers.
-    if (parsed?.kind === "saveOutcome") continue;
+    // Private lifecycle metadata has its own cap and cannot change player quota answers. Nor does the room's count of
+    // creature number groups, which no measure counts.
+    if (parsed?.kind === "saveOutcome" || parsed?.kind === "numbering") continue;
     // A trap's line is held by its log's reserve while the room has a trap.
     if ((parsed?.kind === "trapLog" || parsed?.kind === "trapSeen") && trapped) continue;
     // The log's lines only some viewers or none read ride outside the measures.
@@ -1300,7 +1376,7 @@ export function growthBound(before: RoomState, after: RoomState, touched: readon
     if (parsed?.kind === "memory" || parsed?.kind === "memoryBy") continue;
     const prev = readEntity(before, key);
     const added = prev === null || prev === undefined || sceneOf(prev) !== sceneOf(next);
-    const size = (value: unknown) => (parsed?.kind === "trap" ? trapMeasure(value as Trap) + pitGrowth(value as Trap) : serializedBytes(value) - namesOf(parsed?.kind, value));
+    const size = (value: unknown) => (parsed?.kind === "trap" ? trapMeasure(value as Trap) + pitGrowth(value as Trap) : serializedBytes(value) - namesOf(parsed?.kind, value) + numberingOf(parsed?.kind, value));
     const delta = size(next) + (added ? entryKeyBytes(key) : -size(prev));
     if (delta > 0) growth += delta;
   }
@@ -1320,6 +1396,13 @@ function namesOf(kind: string | undefined, value: unknown): number {
   if (kind === "token") return tokenLists(value as Token).extra;
   if (kind === "encounter") return encounterLists(value as Encounter | null).extra;
   if (kind === "encounterHistory") return historyLists(value as EncounterSnapshot[]).extra;
+  return 0;
+}
+
+/** A token or scene as the measures count its creature numbers and rev (numberingAdjust), so a meeting's writes grow nothing. */
+function numberingOf(kind: string | undefined, value: unknown): number {
+  if (kind === "token") return tokenNumbering(value as Token);
+  if (kind === "scene") return sceneNumbering(value as Scene);
   return 0;
 }
 

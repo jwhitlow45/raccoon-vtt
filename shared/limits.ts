@@ -1145,7 +1145,7 @@ function companionBlocksVerdict(state: RoomState): LimitCheck {
 export const NO_ROOM_TO_EXPLORE = "The room is too full for the party to explore that scene. Turn vision off there, or delete unused scenes to free space.";
 
 /** The widest rev a stored entity can carry, 16 digits. */
-const WIDEST_REV = Number.MAX_SAFE_INTEGER;
+export const WIDEST_REV = Number.MAX_SAFE_INTEGER;
 const FULL_BITS = "A".repeat(HEIGHTS_CHARS);
 
 /**

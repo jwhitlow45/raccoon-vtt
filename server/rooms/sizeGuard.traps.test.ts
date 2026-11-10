@@ -8,7 +8,7 @@ import { encodeHeights } from "#shared/rules/heights.ts";
 import { dmLine, playersLine } from "#shared/reducer/traps.ts";
 import { Tx } from "#shared/reducer/tx.ts";
 import { DM, room, scene, token, trap } from "#shared/testutil.ts";
-import { DUE_RESERVE, growthBound, measuredFromStored, measuredStateBytes, pitReserve, roomLevelBytes, sceneOwnBytes, TRAP_LOG_RESERVE, TRAP_SEEN_RESERVE } from "./sizeGuard.ts";
+import { DUE_RESERVE, growthBound, measuredFromStored, measuredStateBytes, numberingAdjust, pitReserve, roomLevelBytes, sceneOwnBytes, TRAP_LOG_RESERVE, TRAP_SEEN_RESERVE } from "./sizeGuard.ts";
 
 const SEQ = 9_999_999_999_999_999;
 const AT = "2026-10-12T20:00:00.000Z";
@@ -50,7 +50,8 @@ describe("a springing never moves a measure (docs/design/design-v1-traps.md 6.7)
 
   test("a room without traps measures exactly, and its first trap brings the room's reserves into the op's growth", () => {
     const empty = room();
-    assert.equal(measuredStateBytes(empty), serializedBytes(empty));
+    // Exactly, with creature numbers at their widest (numberingAdjust).
+    assert.equal(measuredStateBytes(empty), serializedBytes(empty) + numberingAdjust(empty));
     const result = applyOp(empty, { t: "trap.create", trap: { id: "plate", sceneId: "s1", name: "Plate", zone: { cells: [{ x: 1, y: 1, w: 1, h: 1 }] }, rig: trap("plate").rig! } }, DM, { seq: 1, at: AT });
     assert.ok(result.ok);
     const growth = growthBound(empty, result.state, result.touched);

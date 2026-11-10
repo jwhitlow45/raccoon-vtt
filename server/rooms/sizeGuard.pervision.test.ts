@@ -9,7 +9,7 @@ import { applyOp } from "#shared/reducer.ts";
 import { encodeTile, fullTileBits, tilesAcross } from "#shared/rules/fog.ts";
 import { sightEntryMaxBytes } from "#shared/rules/vision.ts";
 import { DM, entry, env, member, room, scene, token } from "#shared/testutil.ts";
-import { growthBound, measuredFromStored, measuredStateBytes, PER_PLAYER_FULL, projectedSceneBytes, roomLevelBytes, sceneOwnBytes, SizeGuard, touchedScenes } from "./sizeGuard.ts";
+import { growthBound, measuredFromStored, measuredStateBytes, numberingAdjust, PER_PLAYER_FULL, projectedSceneBytes, roomLevelBytes, sceneOwnBytes, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 
 /**
  * The size guard on per-player vision (docs/design/design-v1-per-player-vision.md
@@ -64,7 +64,8 @@ const PLAYERS = [1, 2, 3, 4, 5, 6, 7].map(longId);
 
 /** The stored state as it was counted before per-player vision: exactly, every layer and list as it is. */
 function storedAsItIs(state: RoomState): number {
-  return serializedBytes({ ...state, traps: {}, trapLog: [], trapSeen: [], reminded: undefined });
+  // Creature numbers count at their widest whatever the room holds (numberingAdjust).
+  return serializedBytes({ ...state, traps: {}, trapLog: [], trapSeen: [], reminded: undefined }) + numberingAdjust(state);
 }
 
 describe("the size guard's per-player reserves", () => {
