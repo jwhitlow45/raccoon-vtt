@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { holderTileKey, tileKey, wallChunk, chunkKey } from "#shared/keys.ts";
 import { exploredReserve, LIMITS, serializedBytes } from "#shared/limits.ts";
 import { mapDiscoveryUpgrade } from "#shared/migrate.ts";
-import { CHUNK_CELLS, FOG_SUBCELLS, type BuildChunk, type FreeWall, type Member, type MemoryChunk, type RoomState, type Viewer } from "#shared/model.ts";
+import { CHUNK_CELLS, FOG_SUBCELLS, type BuildChunk, type Drawing, type FreeWall, type Member, type MemoryChunk, type RoomState, type Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -509,6 +509,52 @@ describe("the DM's words where players' maps do not fit (5.5)", () => {
     assert.ok(shrink.ok);
     assert.deepEqual(guard().check(shrink.state, ["bench"], growthBound(bench, shrink.state, shrink.touched), bench), { ok: true });
     assert.deepEqual(guard().check(grow.state, ["bench"], growthBound(bench, grow.state, grow.touched), bench, "player"), { ok: true });
+  });
+
+  test("a 200 by 200 square scene with fog off and automatic walls on, a DM's drawing from its limit by the DM's measure alone: the maps note, since players' copies would pass 3 MiB, and with automatic walls off it goes in", () => {
+    const P1: Viewer = { memberId: "p1", role: "player" };
+    // Public pen strokes of one size, so the scene fills in even steps.
+    const stroke = (i: number, numbers: number): Drawing => ({
+      id: `d${String(i).padStart(11, "0")}`,
+      rev: 0,
+      sceneId: "s1",
+      kind: "free",
+      points: Array.from({ length: numbers }, (_, k) => 10.25 + (k % 100)),
+      style: { stroke: "#ffffff", width: 2, opacity: 1 },
+      ownerId: "dm1",
+      visibility: "all",
+    });
+    const dmAlone = (s: RoomState) => projectedSceneBytes(s, "s1", MEMORY_CAP, "player");
+    const open = room();
+    open.scenes.s1 = { ...open.scenes.s1!, bounds: { w: 200, h: 200 } };
+    const [first, second] = [stroke(0, 300), stroke(1, 300)];
+    // A stroke's bytes with the comma before it, as every stroke after the first takes.
+    const each = dmAlone({ ...open, drawings: { [first.id]: first, [second.id]: second } }) - dmAlone({ ...open, drawings: { [first.id]: first } });
+    const drawings: Record<string, Drawing> = {};
+    const count = Math.floor((SCENE_LIMIT - 4_000 - dmAlone(open)) / each);
+    for (let i = 0; i < count; i++) drawings[stroke(i, 300).id] = stroke(i, 300);
+    const full = { ...open, drawings };
+    assert.ok(count < LIMITS.drawingsPerScene, `${count} drawings`);
+    // A room from before players' copies of such a scene counted: within the limit by the DM's measure alone.
+    assert.ok(dmAlone(full) <= SCENE_LIMIT - 4_000);
+    const op: Op = { t: "drawing.create", drawing: { ...stroke(count, 400), rev: undefined } as never };
+    const added = (s: RoomState) => {
+      const r = applyOp(s, op, DM, env(2));
+      assert.ok(r.ok);
+      return { next: r.state, growth: growthBound(s, r.state, r.touched) };
+    };
+    const held = added(full);
+    assert.ok(dmAlone(held.next) <= SCENE_LIMIT, "the DM's measure alone takes it");
+    assert.ok(serializedBytes(projectState(held.next, P1, { sceneId: "s1" })) > SCENE_LIMIT, "a player's copy of it would pass 3 MiB");
+    assert.deepEqual(new SizeGuard().check(held.next, ["s1"], held.growth, full), { ok: false, code: "quota", message: SCENE_MAPS_FULL });
+    // The scene was over its limit with players' copies counted, and the measure holds a player's copy.
+    assert.ok(projectedSceneBytes(full, "s1", MEMORY_CAP) > SCENE_LIMIT);
+    assert.ok(serializedBytes(projectState(full, P1, { sceneId: "s1" })) <= projectedSceneBytes(full, "s1", MEMORY_CAP));
+    // With automatic walls off players get the stored build, no larger than the DM's copy, so nothing is reserved for them.
+    const stored = { ...full, scenes: { ...full.scenes, s1: { ...full.scenes.s1!, autoWalls: "off" as const } } };
+    const plain = added(stored);
+    assert.deepEqual(new SizeGuard().check(plain.next, ["s1"], plain.growth, stored), { ok: true });
+    assert.ok(serializedBytes(projectState(plain.next, P1, { sceneId: "s1" })) <= SCENE_LIMIT);
   });
 
   test("on a scene within its limit with players' maps counted, a player's op that would pass it is refused in the plain words (D-261027-03)", () => {
