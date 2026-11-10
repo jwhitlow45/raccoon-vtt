@@ -1,15 +1,25 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { RoomState, Scene } from "#shared/model.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
+import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { Button } from "../../components/Button.tsx";
-import { Group, Help } from "../../components/Panel.tsx";
+import { Group, Help, Note } from "../../components/Panel.tsx";
+import { Segmented } from "../../components/Segmented.tsx";
+import { SettingRow } from "../../components/SettingRow.tsx";
 import { Tag } from "../../components/Tag.tsx";
+import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { GenerateDialog } from "../dungeon/GenerateDialog.tsx";
+import { floorHexNote } from "../dungeon/words.ts";
 import { FLOOR_ROOT_ATTR, FLOOR_ROOTS } from "../floors/ids.ts";
+import { ImportDialog } from "../uvtt/ImportDialog.tsx";
+import { EXTENSIONS, fileSizeProblem, thisDevice, type Device } from "../uvtt/limits.ts";
+import { newSceneIntent, newScenePreset } from "./create.ts";
 import { FloorPage } from "./FloorPage.tsx";
-import { addBetweenRefusal, addRefusal, FLOOR_MARKS, floorRowLabel, floorsSummary, floorsTopFirst, ON_SCREEN, playersAt } from "./floorWords.ts";
+import { floorAddRefusal } from "./floorSource.ts";
+import { fileHexReason, FLOOR_MAP_HELP, FLOOR_MAP_NAME, FLOOR_MAP_OPTIONS, FLOOR_MARKS, floorRowLabel, floorsSummary, floorsTopFirst, ON_SCREEN, playersAt, type FloorMap } from "./floorWords.ts";
 import { SCENE_GROUP_ICONS, SCENE_GROUP_LABELS } from "./settingsFolds.ts";
 
 type Side = "above" | "below";
@@ -24,6 +34,12 @@ type Side = "above" | "below";
  * folded, as the other groups do, so a page left open is still there. It
  * is not remounted by a switch of floor, so the page an add opens survives
  * the switch to the new floor.
+ *
+ * Map (docs/design/design-v1-floors.md phase 3, 3.5) picks what the adds
+ * make: a blank floor at once, a floor from a Universal VTT file through
+ * the import dialog, or a generated dungeon through Generate a dungeon,
+ * each aimed at a floor above or below the floor on screen. A file or a
+ * dungeon brings square walls, so both are off on a hex scene.
  */
 export function FloorsGroup(props: { scene: Scene; fold: { open: boolean; onToggle(): void }; ask?: number }) {
   const { scene } = props;
@@ -35,25 +51,57 @@ export function FloorsGroup(props: { scene: Scene; fold: { open: boolean; onTogg
   const shownId = useRoomView((s) => s.sceneId);
   const [page, setPage] = useState<{ id: string; selectName: boolean } | null>(null);
   const [adding, setAdding] = useState<Side | null>(null);
+  const [map, setMap] = useState<FloorMap>("blank");
+  /** The file picked for a floor, and the add that asked for it. */
+  const [picked, setPicked] = useState<{ file: File; device: Device; side: Side } | null>(null);
+  const [tooBig, setTooBig] = useState<string | null>(null);
+  /** The add whose Generate a dungeon is open. */
+  const [generating, setGenerating] = useState<Side | null>(null);
+  /** Which add clicked the file input, read when its pick comes back. */
+  const picking = useRef<Side>("above");
+  const fileInput = useRef<HTMLInputElement>(null);
+  const aboveButton = useRef<HTMLButtonElement>(null);
+  const belowButton = useRef<HTMLButtonElement>(null);
+  const hexId = useId();
+  const newScenePlayers = useRoomView((s) => s.view?.meta.settings.newScenePlayers);
+  const roomId = useRoomView((s) => s.roomId);
   // The search's route to a control on a floor's page (scenes/search.ts) asks for the floor on screen's page, which the control lives on.
   const ask = props.ask ?? 0;
   const onFloor = scene.floor !== undefined;
   useEffect(() => {
     if (ask > 0 && onFloor) setPage({ id: scene.id, selectName: false });
   }, [ask, onFloor, scene.id]);
+  // Blank whenever the group opens, so an add never makes a file or a dungeon floor the DM picked long ago.
+  const groupOpen = props.fold.open;
+  useEffect(() => {
+    if (groupOpen) setMap("blank");
+  }, [groupOpen]);
   if (!scenes) return null;
   const floors = floorsOf({ scenes }, scene.id);
   const mainName = scene.name;
-  const refusal = addRefusal(floors.length, mainName);
   const pageFloor = page ? scenes[page.id] : undefined;
-  // Stairs join floors next to each other, so an add that would put a floor between them is off, with its reason under the buttons.
+  // A full scene, a full room and stairs an add would come between each turn both adds off, with the reasons under the buttons.
   const linkView = { scenes, ...(floorLinks ? { floorLinks } : {}) };
-  const above = refusal ?? addBetweenRefusal(linkView, floors, scene.id, "above");
-  const below = refusal ?? addBetweenRefusal(linkView, floors, scene.id, "below");
+  const above = floorAddRefusal(linkView, { beside: scene.id, side: "above" });
+  const below = floorAddRefusal(linkView, { beside: scene.id, side: "below" });
   const reasons = [...new Set([above, below].filter((r): r is string => r !== null))];
+  // A file's walls and a generated dungeon lie on squares (D-261110-075).
+  const hex = isHex(sceneGrid(scene));
+  const pick: FloorMap = hex ? "blank" : map;
+  const hexReasons = hex ? `${fileHexReason(mainName)} ${floorHexNote(mainName)}` : null;
 
   const add = (side: Side) => {
     if (adding !== null || (side === "above" ? above : below) !== null) return;
+    setTooBig(null);
+    if (pick === "file") {
+      picking.current = side;
+      fileInput.current?.click();
+      return;
+    }
+    if (pick === "dungeon") {
+      setGenerating(side);
+      return;
+    }
     const id = actions.newId();
     setAdding(side);
     const n = actions.dispatch(
@@ -94,18 +142,88 @@ export function FloorsGroup(props: { scene: Scene; fold: { open: boolean; onTogg
             ) : (
               <Help>{mainName} has one floor. Add one above or below to build a tower, a cellar or a roof.</Help>
             )}
+            <SettingRow name={FLOOR_MAP_NAME} search="scenes.floors.map" wide>
+              {(ids) => (
+                <div style={{ display: "grid", gap: theme.space(1), minWidth: 0, width: "100%" }}>
+                  <Segmented<FloorMap>
+                    labelledBy={ids.nameId}
+                    value={pick}
+                    even
+                    wrap
+                    description={FLOOR_MAP_HELP[pick]}
+                    {...(hexReasons ? { describedBy: hexId } : null)}
+                    options={FLOOR_MAP_OPTIONS.map((o) => ({ ...o, disabled: hex && o.value !== "blank" }))}
+                    onChange={(next) => {
+                      setMap(next);
+                      setTooBig(null);
+                    }}
+                  />
+                  {hexReasons ? <Help id={hexId}>{hexReasons}</Help> : null}
+                </div>
+              )}
+            </SettingRow>
             <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-              <Button size="sm" icon="arrowUp" search="scenes.floors.add-above" busy={adding === "above"} disabled={above !== null || adding === "below"} aria-describedby={above !== null ? reasonId : undefined} onClick={() => add("above")}>
+              <Button ref={aboveButton} size="sm" icon="arrowUp" search="scenes.floors.add-above" busy={adding === "above"} disabled={above !== null || adding === "below"} aria-describedby={above !== null ? reasonId : undefined} onClick={() => add("above")}>
                 Add a floor above
               </Button>
-              <Button size="sm" icon="arrowDown" search="scenes.floors.add-below" busy={adding === "below"} disabled={below !== null || adding === "above"} aria-describedby={below !== null ? reasonId : undefined} onClick={() => add("below")}>
+              <Button ref={belowButton} size="sm" icon="arrowDown" search="scenes.floors.add-below" busy={adding === "below"} disabled={below !== null || adding === "above"} aria-describedby={below !== null ? reasonId : undefined} onClick={() => add("below")}>
                 Add a floor below
               </Button>
             </div>
             {reasons.length > 0 ? <Help id={reasonId}>{reasons.join(" ")}</Help> : null}
+            {tooBig ? (
+              <div role="alert">
+                <Note>{tooBig}</Note>
+              </div>
+            ) : null}
+            {/* The adds stay buttons whatever the pick, so a file pick clicks this input rather than wrapping them in its label (D-261110-117). */}
+            <input
+              ref={fileInput}
+              type="file"
+              data-floor-file=""
+              tabIndex={-1}
+              aria-hidden
+              accept={thisDevice() === "computer" ? EXTENSIONS.join(",") : undefined}
+              style={VISUALLY_HIDDEN}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+                const device = thisDevice();
+                // A phone checks the size before reading a byte: a file too big for its memory could end the tab.
+                const problem = fileSizeProblem(file.size, device);
+                setTooBig(problem);
+                if (!problem) setPicked({ file, device, side: picking.current });
+              }}
+            />
           </>
         )}
       </Group>
+      {/* Outside the list, so a floor's page opened by an add leaves the dialog that made it in place. */}
+      {picked ? (
+        <ImportDialog
+          file={picked.file}
+          device={picked.device}
+          target={{ kind: "floor", beside: scene.id, side: picked.side }}
+          onClose={() => setPicked(null)}
+          onFloor={(id) => setPage({ id, selectName: true })}
+        />
+      ) : null}
+      {generating && roomId ? (
+        <GenerateDialog
+          roomId={roomId}
+          name={mainName}
+          form={scene.bounds}
+          intent={newSceneIntent(newScenePreset(newScenePlayers, "builder"), undefined)}
+          opener={generating === "above" ? aboveButton : belowButton}
+          floor={{ beside: scene.id, side: generating }}
+          onClose={() => setGenerating(null)}
+          onMade={(id) => {
+            setGenerating(null);
+            setPage({ id, selectName: true });
+          }}
+        />
+      ) : null}
     </div>
   );
 }

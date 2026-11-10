@@ -42,6 +42,7 @@ export const SCENES_ENTRIES: readonly CatalogEntry[] = [
   action(at(NEW), "scenes.new", "New scene", { names: ["add a scene", "add a map", "upload a map"], press: false }),
   setting(SCENES, "scenes.name", "Scene name", { names: ["rename the scene"], when: shown }),
   section(at(FLOORS), "scenes.floors", SCENE_GROUP_LABELS.floors, { names: ["levels", "storeys", "stories", "upstairs", "downstairs", "cellar", "basement", "tower", "roof"], when: shown }),
+  setting(FLOORS, "scenes.floors.map", "Map", { names: ["floor from a file", "import a floor", "generate a floor", "dungeon floor"], when: shown }),
   // Adding a floor changes the room, so the search goes to the button and leaves the press to the DM.
   action(FLOORS, "scenes.floors.add-above", "Add a floor above", { names: ["new floor", "upper floor", "roof", "second floor"], press: false, when: shown }),
   action(FLOORS, "scenes.floors.add-below", "Add a floor below", { names: ["new floor", "lower floor", "cellar", "basement"], press: false, when: shown }),
