@@ -318,6 +318,17 @@ describe("all of a kind (docs/design/design-v1-qol.md 3, Q7)", () => {
     assert.deepEqual(sameKind(room, goblin("g2", 2)), ["g1", "g2", "g3", "hid", "npc"]);
   });
 
+  test("on a DM's board the unseen follow the met in the order their brackets count", () => {
+    const pack = [goblin("z", undefined), goblin("a", undefined), goblin("m", 1)];
+    const labels = new Map([
+      ["z", { name: "Goblin Warrior", preview: 2 }],
+      ["a", { name: "Goblin Warrior", preview: 3 }],
+      ["m", { name: "Goblin Warrior", number: 1 }],
+    ]);
+    assert.deepEqual(sameKind(pack, pack[0]!, labels), ["m", "z", "a"]);
+    assert.deepEqual(sameKind(pack, pack[0]!), ["m", "a", "z"], "with no labels, by number then id");
+  });
+
   test("the dead are left out: the living alone are counted and selected, so a group's HP entry and Conditions never act on a corpse (LP32-B-ALL-1)", () => {
     const fallen = [...room.slice(0, 4), goblin("dead", 10, {}, { srdId: "goblin-warrior", life: "dead" }), goblin("dying", 11, {}, { srdId: "goblin-warrior", life: "dying" })];
     assert.deepEqual(sameKind(fallen, fallen[0]!), ["g1", "g2", "g3", "hid", "dying"]);
