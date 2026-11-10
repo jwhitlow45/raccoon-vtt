@@ -4,6 +4,8 @@ import { linkDir, rectKeys, rectsOverlap, type LinkEnd } from "#shared/rules/flo
 import { footprintRect, occupiedHexes, type PlacedToken } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { hexKey } from "#shared/rules/hex.ts";
+import type { PillSpec } from "../../canvas/boardView.ts";
+import { pillReach } from "../measure/pillPlace.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import { pathNow } from "../measure/movement.ts";
 import { FLOOR_MARKS } from "../scenes/floorWords.ts";
@@ -73,4 +75,20 @@ export function quietLinks(view: Pick<RoomState, "tokens" | "encounter" | "scene
     .filter((l) => l.sceneId === sceneId && touches(g, mover, l.rect) && touches(g, began, l.rect))
     .map((l) => l.id)
     .sort();
+}
+
+/**
+ * An end's name pill kept off the turn's marker (FL2-POLISH): the name hangs
+ * over the end's top edge, and where its box meets a marker's it hangs
+ * under the bottom edge (`bottom`) instead. Only the marker is read, never
+ * another end's name or a trap's, so no two layers chase each other, and the
+ * marker places itself from the creature alone (TurnStartLayer.tsx).
+ */
+export function clearOfMarkers(pill: PillSpec, bottom: { x: number; y: number }, markers: readonly PillSpec[], scale: number): PillSpec {
+  const mine = pillReach({ ...pill, scale });
+  const meets = markers.some((m) => {
+    const b = pillReach({ ...m, scale });
+    return Math.min(mine.x1, b.x1) > Math.max(mine.x0, b.x0) && Math.min(mine.y1, b.y1) > Math.max(mine.y0, b.y0);
+  });
+  return meets ? { ...pill, x: bottom.x, y: bottom.y, above: false, below: true } : pill;
 }

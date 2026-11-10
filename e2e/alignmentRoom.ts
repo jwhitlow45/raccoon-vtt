@@ -8024,6 +8024,7 @@ export function sceneSettingsTests(): void {
   floorsRootTests();
   floorLinkBuildTests();
   floorPillTests();
+  floorMarkerTests();
 }
 
 /*
@@ -8282,21 +8283,99 @@ async function boardPillWords(page: Page): Promise<string[]> {
   });
 }
 
+/** Every board pill's words and box, in page px, as Konva draws it. */
+async function boardPillBoxes(page: Page): Promise<{ text: string; l: number; t: number; r: number; b: number }[]> {
+  return page.evaluate(() => {
+    type Rect = { x: number; y: number; width: number; height: number };
+    type Label = { isVisible(): boolean; getText(): { text(): string } | undefined; getClientRect(o: { skipStroke: boolean }): Rect };
+    type Stage = { container(): { getBoundingClientRect(): { left: number; top: number } }; find(selector: string): Label[] };
+    const konva = (globalThis as unknown as { Konva?: { stages: Stage[] } }).Konva;
+    return (konva?.stages ?? []).flatMap((stage) => {
+      const host = stage.container().getBoundingClientRect();
+      return stage.find("Label").filter((l) => l.isVisible()).map((l) => {
+        const r = l.getClientRect({ skipStroke: true });
+        return { text: l.getText()?.text() ?? "", l: host.left + r.x, t: host.top + r.y, r: host.left + r.x + r.width, b: host.top + r.y + r.height };
+      });
+    });
+  });
+}
+
+/**
+ * FL2-POLISH: the turn marker's reading hangs under the ring where a creature's moves began, here just over the
+ * stairs' top edge, where the end's name hangs. The name goes under the end instead, so no two pills meet.
+ */
+function floorMarkerTests(): void {
+  test("fu53-marker. a stairs end's name keeps clear of the turn marker beside it at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%", async () => {
+    await newDmSession();
+    const tower = randomUUID();
+    const upper = randomUUID();
+    const goblin = randomUUID();
+    await ops.send({ t: "scene.create", scene: { id: tower, name: "Tower", bounds: BOUNDS, background: "#2b2b31" } });
+    await ops.send({ t: "scene.create", scene: { id: upper, name: "Tower", bounds: BOUNDS }, floor: { beside: tower, side: "above" } });
+    await ops.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor" } } });
+    const lines: string[] = [];
+    try {
+      await ops.send({ t: "floorLink.put", link: { id: "fu53-c", pairId: "fu53-d", sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
+      await ops.send({ t: "token.create", token: { id: goblin, sceneId: tower, kind: "monster", name: "Goblin Warrior", number: 1, size: "medium", x: 6, y: 5, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
+      if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+      await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: goblin, value: 20 }, { id: randomUUID(), tokenId: run.ids.thorn, value: 10 }] });
+      await ops.send({ t: "encounter.next" });
+      await ops.send({ t: "token.move", tokenId: goblin, x: 9, y: 5 });
+      for (const at of FU30_AT) {
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, at.size, at.scale);
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        await viewScene(await openDmPanel(page, "Scenes"), tower);
+        await closeSheets(page);
+        await escapeAll(page);
+        const where = `${at.size.name} at ${at.scale * 100}%`;
+        await waitFor(`the stairs pill at ${where}`, async () => ((await boardPillWords(page)).some((w) => w.includes("Up to")) ? true : null), 8_000).catch(() => null);
+        const pills = await boardPillBoxes(page);
+        const marker = pills.find((p) => /ft/.test(p.text));
+        for (const p of pills) {
+          if (p === marker || !marker) continue;
+          const w = Math.min(p.r, marker.r) - Math.max(p.l, marker.l);
+          const h = Math.min(p.b, marker.b) - Math.max(p.t, marker.t);
+          if (w > 0 && h > 0) lines.push(`${where}: "${p.text.replace("\n", " / ")}" meets the marker "${marker.text.replace("\n", " / ")}" by ${w.toFixed(1)} x ${h.toFixed(1)} px`);
+        }
+        console.log(`fu53-marker ${where}: ${pills.map((p) => `${p.text.replace("\n", " / ")} at ${p.l.toFixed(0)},${p.t.toFixed(0)}`).join(" | ")}`);
+        await shots.take(page, `alignment-fu53-marker-${at.size.name}-${at.scale}`);
+      }
+    } finally {
+      await ops.send({ t: "encounter.end" }).catch(() => {});
+      await ops.send({ t: "token.delete", tokenId: goblin }).catch(() => {});
+      await ops.send({ t: "scene.delete", sceneId: tower }).catch(() => {});
+      try {
+        const page = await dmPageFor(FU30_AT.at(-1)!.size);
+        await viewScene(await openDmPanel(page, "Scenes"), run.sceneId);
+        await escapeAll(page);
+      } catch (err) {
+        console.error("fu53-marker: going back to the players' scene failed", err);
+      }
+      await restartFight();
+    }
+    assert.deepEqual(lines, [], "a stairs name meets the turn marker");
+  });
+}
+
 /**
  * FL2-POLISH: the stairs' name pill keeps "Up to Upper floor" whole beside "Not reached yet" where the room has
  * the width, the value on a line under it, never the name cut to "Up to Uppe…" at the desktop's width.
  */
 function floorPillTests(): void {
-  test("fu53-pill. the DM's stairs pill keeps Up to Upper floor whole beside Not reached yet at 1280 x 800, 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%", async () => {
+  test("fu53-pill. the DM's stairs pill keeps Up to Upper floor whole beside Not reached yet, and the bar of a creature on the stairs with Go up, at 1280 x 800, 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%", async () => {
     await newDmSession();
     const tower = randomUUID();
     const upper = randomUUID();
+    const warrior = randomUUID();
     await ops.send({ t: "scene.create", scene: { id: tower, name: "Tower", bounds: BOUNDS, background: "#2b2b31" } });
     await ops.send({ t: "scene.create", scene: { id: upper, name: "Tower", bounds: BOUNDS }, floor: { beside: tower, side: "above" } });
     await ops.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor" } } });
     const lines: string[] = [];
     try {
       await ops.send({ t: "floorLink.put", link: { id: "fu53-a", pairId: "fu53-b", sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
+      await ops.send({ t: "token.create", token: { id: warrior, sceneId: tower, kind: "monster", name: "Goblin Warrior", number: 1, size: "medium", x: 6, y: 6, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
       for (const at of [...FU30_AT, { size: IC2_DESK, scale: 1 }]) {
         const page = await dmPageFor(at.size);
         page.setDefaultTimeout(10_000);
@@ -8311,6 +8390,19 @@ function floorPillTests(): void {
         if (pill !== null && !/^Up to Upper floor( · |\n)Not reached yet$/.test(pill)) lines.push(`${where}: the stairs pill reads ${JSON.stringify(pill)}`);
         await shots.take(page, `alignment-fu53-pill-${at.size.name}-${at.scale}`);
         console.log(`fu53-pill ${where}: ${JSON.stringify(pill)}`);
+        // The bar of a creature standing on the stairs, with Go up in it (the strip's icon where the bar is short of room), measured as the sweep's own root.
+        const sweep = new Sweep(`fu53-${atName(at)}`);
+        const bar = await selectToken(page, "Goblin Warrior 1", { x: 6, y: 6 });
+        if (!bar) await sweep.missing(page, "fu53-go-up", "a tap on the creature on the stairs opened no bar");
+        else {
+          const up = bar.locator('[data-climb="up"]:visible').first();
+          // Where the strip has no room, Go up is behind Expand, as flrl-9 finds it.
+          if (!(await showsWithin(up, 3_000)) && (await bar.getAttribute("data-bar-state")) === "rest") await expandBar(bar);
+          if (await showsWithin(up, 3_000)) await sweep.measure(page, "fu53-go-up", bar);
+          else await sweep.missing(page, "fu53-go-up", "the bar offers no Go up");
+        }
+        lines.push(...sweep.lines);
+        await escapeAll(page);
       }
     } finally {
       await ops.send({ t: "scene.delete", sceneId: tower }).catch(() => {});

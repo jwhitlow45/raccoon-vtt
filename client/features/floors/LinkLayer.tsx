@@ -5,7 +5,9 @@ import type { FloorLink, Scene } from "#shared/model.ts";
 import { linkDir } from "#shared/rules/floorLinks.ts";
 import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { rectHexes } from "#shared/rules/traps.ts";
-import { usePublishPills, type PillSpec } from "../../canvas/boardView.ts";
+import { useStore } from "zustand";
+import { boardPillsSlot, usePublishPills, type PillSpec } from "../../canvas/boardView.ts";
+import { useScoped } from "../../state/scope.ts";
 import { MarkPill } from "../../canvas/IsoParts.tsx";
 import { drawsHere } from "../../canvas/isoPlace.ts";
 import { pillStands } from "../../canvas/markStand.ts";
@@ -16,7 +18,7 @@ import type { LayerProps } from "../layers.ts";
 import { trapNameShown } from "../traps/rules.ts";
 import { FLOOR_LINK_ATTR } from "./ids.ts";
 import { NOT_REACHED } from "./linkWords.ts";
-import { linkLabel, notReachedLinks, quietLinks } from "./linkMarks.ts";
+import { clearOfMarkers, linkLabel, notReachedLinks, quietLinks } from "./linkMarks.ts";
 
 const NO_LINKS: Readonly<Record<string, FloorLink>> = {};
 const NO_SCENES: Readonly<Record<string, Scene>> = {};
@@ -89,16 +91,17 @@ function outlineOf(g: Grid, rect: FloorLink["rect"]): Outline {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0, loop };
 }
 
-/** Where the name hangs: over the middle of the top edge, or on hexes the top point or side nearest the middle, so it never points at the notch between two hexes. */
-function nameAnchor(o: Outline): { x: number; y: number } {
+/** Where the name hangs: over the middle of the top edge, or under the bottom edge's, and on hexes the extreme point or side nearest the middle, so it never points at the notch between two hexes. */
+function nameAnchor(o: Outline, edge: "top" | "bottom" = "top"): { x: number; y: number } {
   const mid = o.x + o.w / 2;
-  if (!o.loop) return { x: mid, y: o.y };
-  let best = { x: mid, y: o.y };
+  const y0 = edge === "top" ? o.y : o.y + o.h;
+  if (!o.loop) return { x: mid, y: y0 };
+  let best = { x: mid, y: y0 };
   let gap = Infinity;
   for (let i = 0; i + 1 < o.loop.length; i += 2) {
     const x = o.loop[i]!;
     const y = o.loop[i + 1]!;
-    if (Math.abs(y - o.y) > 1e-9) continue;
+    if (Math.abs(y - y0) > 1e-9) continue;
     if (Math.abs(x - mid) < gap) {
       gap = Math.abs(x - mid);
       best = { x, y };
@@ -121,10 +124,13 @@ const LinkMark = memo(function LinkMark(props: { link: FloorLink; scenes: Readon
   const dir = linkDir({ scenes: props.scenes }, link);
   const label = linkLabel({ scenes: props.scenes }, link);
   const at = nameAnchor(o);
-  const pill: PillSpec | null =
+  // The turn's marker is the one pill the name keeps off (clearOfMarkers), read from the markers' own key.
+  const markers = useStore(useScoped(boardPillsSlot), (s) => s.pills.turnStart ?? NO_PILLS);
+  const top: PillSpec | null =
     label === null || props.quiet || !trapNameShown(scale)
       ? null
       : { name: label, ...(props.notReached ? { value: NOT_REACHED } : {}), x: at.x, y: at.y, above: true, size: "map", small: true, maxLines: 1, stack: true };
+  const pill = top ? clearOfMarkers(top, nameAnchor(o, "bottom"), markers, scale) : null;
   const iso = useIsoGround();
   // The end lies on the ground: Top-down's board, or the isometric ground stage.
   const flat = iso === null || iso.place === "ground";

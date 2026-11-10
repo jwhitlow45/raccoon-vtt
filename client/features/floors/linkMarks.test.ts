@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { ATTIC, GROUND, UPPER, onThornsTurn, run, tower, withStairs } from "#shared/floorLinksTestutil.ts";
 import type { FloorLink, RoomState } from "#shared/model.ts";
-import { linkLabel, notReachedLinks, quietLinks } from "./linkMarks.ts";
+import { clearOfMarkers, linkLabel, notReachedLinks, quietLinks } from "./linkMarks.ts";
 
 /*
  * The board's marks of stairs and ladders (docs/design/design-v1-floors.md
@@ -52,5 +52,17 @@ describe("the name gives way to the turn's marker (6.4, picture 07)", () => {
     // Off its turn there is no marker, so the name shows.
     const after = run(climbed, { t: "encounter.end" });
     assert.deepEqual(quietLinks(after, UPPER, "dm"), []);
+  });
+});
+
+describe("an end's name beside the turn's marker (FL2-POLISH)", () => {
+  const pill = { name: "Up to Upper floor", x: 10, y: 5, above: true, size: "map" as const, small: true, maxLines: 1 as const };
+  const bottom = { x: 10, y: 6 };
+  test("hangs under the end where the marker would meet it, and stays over it where they are apart", () => {
+    // The marker's reading hangs over the same top edge, so the two boxes meet.
+    const marker = { x: 10.5, y: 5, value: "Moved 20 ft\n10 ft left", size: "screen" as const, small: true, above: true };
+    assert.deepEqual(clearOfMarkers(pill, bottom, [marker], 40), { ...pill, x: 10, y: 6, above: false, below: true });
+    assert.equal(clearOfMarkers(pill, bottom, [{ ...marker, x: 30, y: 12 }], 40), pill);
+    assert.equal(clearOfMarkers(pill, bottom, [], 40), pill);
   });
 });
