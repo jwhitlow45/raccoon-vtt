@@ -28,7 +28,7 @@ import {
   type RulerState,
   type RulerToken,
 } from "./ruler.ts";
-import { MEASURES, pickMeasure, publish, refuseKeep, rulerActivated, rulerDeactivated, rulerSlot, shares, takeStairs, toggleShare } from "./rulerStore.ts";
+import { MEASURES, pickMeasure, publish, refuseKeep, restoreRuler, rulerActivated, rulerDeactivated, rulerSlot, shares, takeStairs, toggleShare } from "./rulerStore.ts";
 import { useHeldWalk, useWalkMeasure } from "./useWalkMeasure.ts";
 import { heldKey, walkShown, walkText, type WalkInput, type WalkMeasure } from "./walkRuler.ts";
 import { rulerCycle } from "../toolChoices.ts";
@@ -70,9 +70,9 @@ function groundOf(ctx: ToolContext): GroundReader {
 
 function onDown(p: ToolPointer, ctx: ToolContext): void {
   const tool = ctx.scope.get(rulerSlot);
-  const before = tool.store.getState().ruler;
+  const { ruler: before, carry } = tool.store.getState();
   const gap = pressGap(boardPickOf(ctx), p);
-  tool.gesture = { ...beginGesture(before, p.world, sceneToken(ctx, p.tokenId), (stop) => gap(stop), sceneGrid(ctx.scene)), screen: p.screen, before };
+  tool.gesture = { ...beginGesture(before, p.world, sceneToken(ctx, p.tokenId), (stop) => gap(stop), sceneGrid(ctx.scene)), screen: p.screen, before, carry };
 }
 
 function onMove(p: ToolPointer, ctx: ToolContext): void {
@@ -137,14 +137,13 @@ function keep(ctx: ToolContext, ruler: RulerState | null): void {
   publish(ctx, null);
 }
 
-/** A second finger landed: the gesture was a pinch, so the ruler goes back to how it was. */
+/** A second finger landed: the gesture was a pinch, so the ruler goes back to how it was, carried if it was. */
 function onCancel(ctx: ToolContext): void {
   const tool = ctx.scope.get(rulerSlot);
-  if (!tool.gesture) return;
-  const before = tool.gesture.before;
+  const g = tool.gesture;
+  if (!g) return;
   tool.gesture = null;
-  if (before) publish(ctx, before);
-  else publish(ctx, null);
+  restoreRuler(ctx, g.before, g.carry);
 }
 
 /** The stairs button's offer and press (carry.ts stairsPlan), read on this render's walk. */

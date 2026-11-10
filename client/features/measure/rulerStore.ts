@@ -28,7 +28,7 @@ export type RulerToolState = {
 /** One Room page's ruler: the ruler shown, the gesture in progress, and the context its option buttons act through. */
 export const rulerSlot = scopeSlot(() => ({
   store: createStore<RulerToolState>(() => ({ ruler: null, share: false, sent: false, walk: savedWalk(), carry: null })),
-  gesture: null as (RulerGesture & { screen: { x: number; y: number }; before: RulerState | null }) | null,
+  gesture: null as (RulerGesture & { screen: { x: number; y: number }; before: RulerState | null; carry: Carry | null }) | null,
   /** Room.tsx renders Options without a tool context, so the buttons reach the tool through this. */
   activeCtx: null as ToolContext | null,
   /** The last tap, and the ruler as it was before it, so a second tap close behind keeps that ruler. */
@@ -80,6 +80,20 @@ export function publish(ctx: PublishCtx, ruler: RulerState | null): boolean {
   ctx.actions.sendEph(e, { localOnly: !shared });
   rulerStore.setState({ ruler: { ...ruler, shared }, sent: prev.sent || shared, carry });
   return true;
+}
+
+/**
+ * A gesture a second finger cancelled: the ruler as it was when the gesture
+ * began, with the carry it had then, which a replacement drag's first move
+ * dropped (review FL3-ASTRA-02).
+ */
+export function restoreRuler(ctx: PublishCtx, before: RulerState | null, carry: Carry | null): void {
+  if (!before) {
+    publish(ctx, null);
+    return;
+  }
+  ctx.scope.get(rulerSlot).store.setState({ carry });
+  publish(ctx, before);
 }
 
 /**

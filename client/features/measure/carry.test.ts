@@ -13,7 +13,7 @@ import type { ToolContext } from "../tools.ts";
 import { CARRIED_NO_KEEP, CARRIED_TOO_LONG, CARRIED_WALKS } from "../floors/linkWords.ts";
 import { climbFeet, frameFits, priorOut, rulerAnchors, rulerFrame, shareLocked, stairsOffer, stairsPlan, stillCarried, type Carry, type Stairs } from "./carry.ts";
 import { tokenStop, type RulerState, type RulerStop } from "./ruler.ts";
-import { pickMeasure, publish, refuseKeep, rulerActivated, rulerDeactivated, rulerSlot, takeStairs } from "./rulerStore.ts";
+import { pickMeasure, publish, refuseKeep, restoreRuler, rulerActivated, rulerDeactivated, rulerSlot, takeStairs } from "./rulerStore.ts";
 import { measureWalk, walkText, type WalkInput } from "./walkRuler.ts";
 
 /*
@@ -303,6 +303,21 @@ describe("a press, the switch and the edges (4.2, D-261110-078)", () => {
     publish(ctx, { id: "r1", stops: [free(2, 2), free(5, 2)], live: null, shared: false });
     assert.equal(refuseKeep(ctx, tool.store.getState().ruler), false);
     assert.equal(tool.store.getState().carry, null);
+  });
+
+  test("a replacement drag a second finger cancels puts back the carried ruler with its carry, and its next frame carries the prior (FL3-ASTRA-02)", () => {
+    const { ctx, tool, sent, stairs } = carryUp(stairsRoom(), DM_SHARED);
+    const { ruler: before, carry } = tool.store.getState();
+    // The press away from the landing starts a new ruler, which drops the carry at its first move.
+    publish(ctx, { id: "r2", stops: [free(2, 2), free(5, 2)], live: null, shared: true });
+    assert.equal(tool.store.getState().carry, null);
+    restoreRuler(ctx, before, carry);
+    assert.equal(tool.store.getState().carry, stairs.plan.carry);
+    assert.deepEqual(tool.store.getState().ruler?.stops, before!.stops);
+    assert.deepEqual(sent.at(-1)?.e, { k: "ruler", id: "r1", points: [stairs.plan.stop], shared: true, walk: true, prior: stairs.plan.carry.prior });
+    // A cancelled first ruler leaves none.
+    restoreRuler(ctx, null, null);
+    assert.deepEqual([tool.store.getState().ruler, tool.store.getState().carry], [null, null]);
   });
 
   test("Straight is refused while carried, with its words", () => {
