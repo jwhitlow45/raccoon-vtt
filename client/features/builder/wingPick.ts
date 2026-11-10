@@ -1,5 +1,5 @@
 import { sightOf, tileKey } from "#shared/keys.ts";
-import { CHUNK_CELLS, FOG_SUBCELLS, type BuildChunk, type CellRect, type EdgeFeature, type FogTile, type FreeWall, type RoomState, type Scene, type WallFeature } from "#shared/model.ts";
+import { CHUNK_CELLS, FOG_SUBCELLS, type BuildChunk, type CellRect, type EdgeFeature, type FreeWall, type RoomState, type Scene, type WallFeature } from "#shared/model.ts";
 import { autoWallBetween, autoWallsOf, FLOOR_TERRAINS } from "#shared/rules/autoWalls.ts";
 import { decodeTile, TILE_SUB } from "#shared/rules/fog.ts";
 import { playersSee } from "#shared/rules/floors.ts";
@@ -559,9 +559,11 @@ function anySet(subcells: Iterable<[number, number]>, bitsOf: (tx: number, ty: n
 /**
  * The two warnings (3.1, C15, H14, I7): the party sees part of the area or
  * the join now (inSight.ts's rule: a floor players see, with fog and party
- * vision on), and part of either is revealed ground players hold, by the
- * DM's reveal or what the party explored. A scene without fog shows players
- * everything, which the pane says on its own line instead.
+ * vision on), and part of either is ground the DM revealed, which shows
+ * players the wing at once. Ground the party only explored is left out:
+ * their remembered map keeps the old ground there until they see it again
+ * (LP37-A-WING-1). A scene without fog shows players everything, which the
+ * pane says on its own line instead.
  */
 export function wingWarnings(view: RoomState, scene: Pick<Scene, "id" | "bounds" | "gridShape" | "fogEnabled" | "vision">, area: CellRect, join: WingJoin | null): string[] {
   if (scene.fogEnabled !== true) return [];
@@ -571,11 +573,11 @@ export function wingWarnings(view: RoomState, scene: Pick<Scene, "id" | "bounds"
   if (scene.vision?.on === true && sight && playersSee(view, scene.id)) {
     if (anySet(subcells, (tx, ty) => ((tile) => (tile ? seenFogBits(tile) : null))(sight[tileKey(scene.id, tx, ty)]))) out.push(WING_SIGHT);
   }
-  const revealed = (tiles: Readonly<Record<string, FogTile>> | undefined) => (tx: number, ty: number) => {
-    const tile = tiles?.[tileKey(scene.id, tx, ty)];
+  const revealed = (tx: number, ty: number) => {
+    const tile = view.fogTiles[tileKey(scene.id, tx, ty)];
     return tile ? decodeTile(tile.bits) : null;
   };
-  if (anySet(subcells, revealed(view.fogTiles)) || anySet(subcells, revealed(view.exploredTiles))) out.push(WING_REVEALED);
+  if (anySet(subcells, revealed)) out.push(WING_REVEALED);
   return out;
 }
 

@@ -410,10 +410,21 @@ describe("the warnings", () => {
     assert.deepEqual(wingWarnings(inArea.view, inArea.scene, AREA, inArea.join), [WING_REVEALED]);
     const inside = base({ fogTiles: tileWith(9, 7) });
     assert.deepEqual(wingWarnings(inside.view, inside.scene, AREA, inside.join), [WING_REVEALED], "the new door shows by its inside cell");
-    const outside = base({ exploredTiles: tileWith(10, 7) });
-    assert.deepEqual(wingWarnings(outside.view, outside.scene, AREA, outside.join), [WING_REVEALED], "ground the party explored counts");
+    const outside = base({ fogTiles: tileWith(10, 7) });
+    assert.deepEqual(wingWarnings(outside.view, outside.scene, AREA, outside.join), [WING_REVEALED], "and by its outside cell");
     const elsewhere = base({ fogTiles: tileWith(40, 40) });
     assert.deepEqual(wingWarnings(elsewhere.view, elsewhere.scene, AREA, elsewhere.join), []);
+  });
+
+  test("ground the party only explored warns of nothing, since their remembered map keeps the old ground there", () => {
+    for (const [x, y] of [
+      [25, 8],
+      [9, 7],
+      [10, 7],
+    ] as const) {
+      const explored = base({ exploredTiles: tileWith(x, y) });
+      assert.deepEqual(wingWarnings(explored.view, explored.scene, AREA, explored.join), [], `${x},${y} explored`);
+    }
   });
 
   test("the party's sight over the join or the area", () => {
