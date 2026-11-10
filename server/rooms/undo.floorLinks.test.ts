@@ -400,8 +400,10 @@ describe("stairs' undo labels (6.3, 7.2)", () => {
   test("a climb names the creature as its player saw it, the way and the kind, never the far floor", () => {
     assert.equal(label(climb(), ANA), UP);
     assert.equal(label(climb("l2"), ANA), "moving Thorn down the stairs");
-    const hidden = table({ tokens: { thorn: thornToken({ sceneId: UPPER }), gob: token("gob", { name: "Goblin", number: 3, sceneId: UPPER, x: 3, y: 3, nameHidden: true, publicName: "Shadow" }) } }).state;
-    assert.equal(label(climb("l2", "gob"), ANA, hidden), "moving Shadow down the stairs");
-    assert.equal(label(climb("l2", "gob"), DM, hidden), "moving Goblin 3 down the stairs");
+    // The Goblin is Shadow 3 to the table: its scene's numbers, kept on the main floor, gave its shown name three.
+    const climbed = table({ tokens: { thorn: thornToken({ sceneId: UPPER }), gob: token("gob", { name: "Goblin", met: 1, number: 3, sceneId: UPPER, x: 3, y: 3, nameHidden: true, publicName: "Shadow" }) } }).state;
+    const hidden = { ...climbed, scenes: { ...climbed.scenes, [GROUND]: { ...climbed.scenes[GROUND]!, numbers: { names: { Shadow: [1, 3] as [number, number] } } } } };
+    assert.equal(label(climb("l2", "gob"), ANA, hidden), "moving Shadow 3 down the stairs");
+    assert.equal(label(climb("l2", "gob"), DM, hidden), "moving Goblin (as Shadow 3) down the stairs");
   });
 });

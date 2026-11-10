@@ -1,22 +1,27 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { clientOps } from "#shared/protocol.ts";
-import { actor, apply, character, companionBlock, room, scene, token, trap } from "#shared/testutil.ts";
+import { actor, apply, character, companionBlock, numbered, room, scene, token, trap } from "#shared/testutil.ts";
 import { UndoStacks } from "./undo.ts";
 import { addTally, describeOp, describeTally, tallyOf } from "./undoLabels.ts";
 
 function state() {
-  return room({
-    scenes: { s1: scene("s1", { name: "Goblin cave" }) },
-    tokens: { g2: token("g2", { name: "Goblin", number: 2 }), long: token("long", { name: "A".repeat(70) }) },
-    characters: { c1: character("c1", { name: "Ayla", actor: actor() }) },
-  });
+  return numbered(
+    room({
+      scenes: { s1: scene("s1", { name: "Goblin cave" }) },
+      tokens: { g2: token("g2", { name: "Goblin", number: 2 }), long: token("long", { name: "A".repeat(70) }) },
+      characters: { c1: character("c1", { name: "Ayla", actor: actor() }) },
+    }),
+  );
 }
 
 describe("undo step labels", () => {
   test("name what the op did, from the state before it, so a deleted thing keeps its name", () => {
     const s = state();
     assert.equal(describeOp({ t: "token.move", tokenId: "g2", x: 1, y: 1 }, s), "moving Goblin 2");
+    // A number the table did not give, here one without the creature's mark, is never named.
+    const unmet = { ...s, tokens: { ...s.tokens, g2: { ...s.tokens.g2!, met: undefined } } };
+    assert.equal(describeOp({ t: "token.move", tokenId: "g2", x: 1, y: 1 }, unmet), "moving Goblin");
     assert.equal(describeOp({ t: "token.countLeg", tokenId: "g2", counts: false }, s), "not counting the last move of Goblin 2");
     assert.equal(describeOp({ t: "token.countLeg", tokenId: "g2", counts: true }, s), "counting the last move of Goblin 2 again");
     assert.equal(describeOp({ t: "token.delete", tokenId: "g2" }, s), "deleting Goblin 2");
@@ -229,7 +234,7 @@ describe("wave 5 undo labels (docs/design/design-v1-dm-tools.md 2.2)", () => {
     s.pins.p1 = { id: "p1", rev: 0, sceneId: "s1", x: 1, y: 1, color: "#ffffff", visibility: "all" };
     s.rolls.r1 = { id: "r1", rev: 0, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, at: "x", targets: [{ characterId: "c1" }] };
     s.tokens.g3 = token("g3", { name: "Goblin", number: 3, actor: { inline: actor({ effects: [{ id: "e1", key: "frightened" }] }) } });
-    return s;
+    return numbered(s);
   }
 
   test("each op says what it did", () => {

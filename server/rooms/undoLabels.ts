@@ -5,6 +5,7 @@ import { PLAYERS_SEE_WORDS, playersSeeOf } from "#shared/playersSee.ts";
 import { gridOfScene, gridOfToken, projectEntity, type ProjectedToken } from "#shared/project.ts";
 import { isResizeOp, type ActorTarget, type ClientOp, type OpOf, type TokenPatch } from "#shared/protocol.ts";
 import { ownEntry } from "#shared/records.ts";
+import { labelParts, labelText, type NumberState, type NumberToken } from "#shared/numbering.ts";
 import { testText } from "#shared/rules/skills.ts";
 import { LINK_LABELS, climbLabel, linkDir } from "#shared/rules/floorLinks.ts";
 import { sizeCategory } from "#shared/rules/footprint.ts";
@@ -28,7 +29,8 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
   const scene = (id: string) => the("scene", placeOf(before, id));
   // A floor by its own name, as Floors lists it (docs/design/design-v1-floors.md 7.1).
   const floor = (state: RoomState, id: string) => quoted(state.scenes[id]?.floor?.name, "a floor");
-  const token = (id: string) => tokenName(viewer?.role === "player" ? seenBy(before, viewer, id) : before.tokens[id]);
+  // A player's copy carries the table's numbers already, and the DM's are judged on the room (shared/numbering.ts).
+  const token = (id: string) => (viewer?.role === "player" ? tokenName(seenBy(before, viewer, id) as Token | undefined, null) : tokenName(before.tokens[id], before));
   const target = (t: ActorTarget) => ("tokenId" in t ? token(t.tokenId) : quoted(before.characters[t.characterId]?.name, "a character"));
   switch (op.t) {
     case "room.update":
@@ -124,7 +126,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return LINK_LABELS.removed(link?.kind ?? "stairs", (link && ownEntry(before.scenes, link.to)?.floor?.name) ?? "a floor");
     }
     case "token.create":
-      return `adding ${tokenName(op.token)}`;
+      return `adding ${tokenName({ ...op.token, ownerIds: op.token.ownerIds ?? [] }, null)}`;
     case "token.update": {
       if (op.patch.name !== undefined) return `renaming ${token(op.tokenId)} to ${quoted(op.patch.name, "nothing")}`;
       if (isResizeOp(op)) {
@@ -729,10 +731,17 @@ function seenBy(state: RoomState, viewer: Viewer, tokenId: string): ProjectedTok
   return (projectEntity(keys.token(tokenId), state, viewer, { sceneId: state.meta.playerSceneId }) as ProjectedToken | null) ?? undefined;
 }
 
-function tokenName(token: Pick<Token, "name" | "number"> | undefined): string {
+/**
+ * A creature as its reader knows it (shared/numbering.ts ownLabel): its
+ * name and the table's number, with the name players read after a
+ * disguise's ("Orc (as Goblin 2)"). `room` is the server's state, whose
+ * numbers are judged, or null for a copy that carries them already. Never
+ * a preview, which only a DM's device makes.
+ */
+function tokenName(token: (NumberToken & Pick<Token, "id">) | undefined, room: NumberState | null): string {
   if (!token) return "a token";
-  const name = quoted(token.name, "a token");
-  return token.number === undefined ? name : `${name} ${token.number}`;
+  const label = labelParts(room, token, "own");
+  return labelText({ ...label, name: quoted(label.name, "a token") });
 }
 
 /**
@@ -775,7 +784,7 @@ export function describeHpEvent(event: Extract<LogEvent, { type: "hp" }>, state:
     event.characterId !== undefined
       ? quoted(state.characters[event.characterId]?.name, "a character")
       : event.tokenId !== undefined
-        ? tokenName(state.tokens[event.tokenId])
+        ? tokenName(state.tokens[event.tokenId], state)
         : "a creature";
   return hpChangePhrase(event.change, name);
 }

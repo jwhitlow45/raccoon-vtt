@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { DM, room, scene, token } from "#shared/testutil.ts";
+import { DM, numbered, room, scene, token } from "#shared/testutil.ts";
 import { opSchema } from "#shared/protocol.ts";
 import { describeOp } from "./undoLabels.ts";
 import { UndoTable } from "./undoTesting.ts";
@@ -8,7 +8,7 @@ import { UndoTable } from "./undoTesting.ts";
 /** Undo steps on a hex scene say its cell word (docs/design/design-v1-hex-grids.md section 8). */
 
 function hexRoom() {
-  return room({ scenes: { s1: scene("s1", { name: "Goblin cave", gridShape: "hexRows" }) }, tokens: { g2: token("g2", { name: "Goblin", number: 2 }) } });
+  return numbered(room({ scenes: { s1: scene("s1", { name: "Goblin cave", gridShape: "hexRows" }) }, tokens: { g2: token("g2", { name: "Goblin", number: 2 }) } }));
 }
 
 describe("undo step labels on a hex scene", () => {

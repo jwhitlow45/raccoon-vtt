@@ -9,6 +9,7 @@ import { ABILITY_NAMES, testText } from "./rules/skills.ts";
 import { CONDITIONS } from "./srd/conditions.ts";
 import { STATUSES } from "./srd/statuses.ts";
 import { ownEntry } from "./records.ts";
+import { ownLabel } from "./numbering.ts";
 
 /**
  * How log entries read, on a device and in the session log export
@@ -56,9 +57,14 @@ export function displayLog(lines: readonly LogEntry[]): LogEntry[] {
   return out;
 }
 
-/** "Goblin 3" for numbered duplicates. Players' projections already carry the public name. */
-function displayName(token: Pick<Token, "name" | "number">): string {
-  return token.number === undefined ? token.name : `${token.name} ${token.number}`;
+/**
+ * "Goblin 3" for numbered duplicates, read from a view whose numbers are the
+ * table's already (shared/numbering.ts): a player's copy carries the name
+ * they read, and the DM's and an owner's the name with the shown name after
+ * a disguise's, "Orc (as Goblin 2)".
+ */
+function displayName(token: Token): string {
+  return ownLabel(null, token);
 }
 
 export type AreaEvent = Extract<LogEvent, { type: "area" }>;

@@ -2,6 +2,7 @@ import { keys } from "../keys.ts";
 import type { FloorLink, RoomState, Token } from "../model.ts";
 import type { OpOf } from "../protocol.ts";
 import { ownEntry } from "../records.ts";
+import { publicLabel } from "../numbering.ts";
 import { climbCost, climbKeepsSqueeze, LINK_WORDS, linkProblem, rectGround, standsOn } from "../rules/floorLinks.ts";
 import { onHolder } from "../rules/attach.ts";
 import { sameScene } from "../rules/floors.ts";
@@ -77,9 +78,9 @@ export function floorLinkDelete(tx: Tx, op: OpOf<"floorLink.delete">): void {
   for (const link of byId(pairOf(tx, op.linkId))) tx.remove(keys.floorLink(link.id));
 }
 
-/** A creature's name in the DM's words. */
-function nameOf(token: Pick<Token, "name" | "number">): string {
-  return token.number !== undefined ? `${token.name} ${token.number}` : token.name;
+/** A creature in a refusal, as players read it, with the table's number: a refusal is stored with its receipt (shared/numbering.ts). */
+function nameOf(tx: Tx, token: Token): string {
+  return publicLabel(tx.state, token);
 }
 
 /**
@@ -104,7 +105,7 @@ export function tokenClimb(tx: Tx, op: OpOf<"token.climb">): void {
   const link = ownEntry(tx.state.floorLinks, op.linkId);
   const far = link && ownEntry(tx.state.floorLinks, link.pair);
   if (!link || !far || link.sceneId !== token.sceneId) throw invalid(LINK_WORDS.noStairs);
-  if (token.attached !== undefined && onHolder(token.attached.kind) && tx.actor.role === "dm") throw invalid(LINK_WORDS.carried(nameOf(token), link.kind));
+  if (token.attached !== undefined && onHolder(token.attached.kind) && tx.actor.role === "dm") throw invalid(LINK_WORDS.carried(nameOf(tx, token), link.kind));
   if (link.locked === true) throw invalid(LINK_WORDS.locked);
   const stand = standsOn(tx.state, tx.actor, token, link);
   if (stand === "squeeze") throw invalid(LINK_WORDS.tooBigSqueeze(link.kind));

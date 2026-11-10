@@ -4,6 +4,7 @@ import { holdsOp } from "#shared/logRings.ts";
 import type { LogNames } from "#shared/logText.ts";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { projectArchivedLog, projectState } from "#shared/project.ts";
+import { tableNumber } from "#shared/numbering.ts";
 import { SessionFold, type LogSession } from "../http/logExport.ts";
 import type { Queryable } from "../auth/tx.ts";
 import { previewOmits } from "./fanout.ts";
@@ -141,12 +142,25 @@ export function captureView(committed: { state: RoomState; through: number }, ro
  * The names a file reads with: a DM's from the whole room's state, every
  * scene's tokens included, since the DM's scene-scoped view would read a
  * creature on another scene as "A creature", and a player's from their own
- * view, as their Log panel's are.
+ * view, as their Log panel's are. A DM's creatures carry the table's
+ * numbers, as every copy does (shared/numbering.ts tableNumber), so a
+ * number the table does not give never reaches the file.
  */
 export function viewNames(view: HistoryView): LogNames {
   const { state, viewer } = view;
-  const seen = viewer.role === "dm" ? state : projectState(state, viewer, { sceneId: null });
+  const seen = viewer.role === "dm" ? { ...state, tokens: tableNumbered(state) } : projectState(state, viewer, { sceneId: null });
   return { members: seen.members, tokens: seen.tokens, characters: seen.characters, handouts: seen.handouts, encounter: seen.encounter } as LogNames;
+}
+
+function tableNumbered(state: RoomState): RoomState["tokens"] {
+  return Object.fromEntries(
+    Object.entries(state.tokens).map(([id, token]) => {
+      const number = tableNumber(state, token);
+      if (number === token.number) return [id, token];
+      const { number: _stored, ...rest } = token;
+      return [id, number === undefined ? rest : { ...rest, number }];
+    }),
+  );
 }
 
 // Entry ids -----------------------------------------------------------------
