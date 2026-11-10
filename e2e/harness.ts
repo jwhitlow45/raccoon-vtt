@@ -923,19 +923,20 @@ export class OpSocket {
   }
 
   /**
-   * A busy or gap answer asks for the op again, under its number, with
-   * every op sent after it, as the app does (client/state/store.ts
-   * retryOps): the answers to the rest of the burst ride on the resend
-   * already waiting, and each resend in a row waits longer. A run's setup
-   * sends faster than one socket's op rate whenever the room answers
-   * quickly, so it meets busy as a member's device can.
+   * A busy or gap answer asks for the op again: every op still unanswered
+   * goes again under its number, in number order, as the app sends them
+   * (client/state/store.ts retryOps). The server can answer a later op
+   * busy before an earlier one, and the answers to the rest of the burst
+   * ride on the resend already waiting. Each resend in a row waits longer.
+   * A run's setup sends faster than one socket's op rate whenever the room
+   * answers quickly, so it meets busy as a member's device can.
    */
   private retryFrom(n: number): void {
     if (!this.unanswered.has(n) || this.resend) return;
     this.resend = setTimeout(() => {
       this.resend = null;
       if (this.gone) return;
-      for (const [m, text] of [...this.unanswered].sort((a, b) => a[0] - b[0])) if (m >= n) this.ws.send(text);
+      for (const [, text] of [...this.unanswered].sort((a, b) => a[0] - b[0])) this.ws.send(text);
     }, Math.min(2_000, 200 * 2 ** this.retries++));
   }
 

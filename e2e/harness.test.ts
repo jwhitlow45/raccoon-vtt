@@ -36,3 +36,20 @@ for (const end of ["close", "resync"] as const) test(`op socket history waiter r
   await checked;
   assert.deepEqual(wire.sent, []);
 });
+
+test("op socket sends every unanswered op again in number order when a later op is answered busy before an earlier one", async (t) => {
+  const wire = new FakeSocket();
+  const socket = new construct(wire, null);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const answered = [1, 2, 3].map((i) => socket.send({ t: "log.chat", text: `Line ${i}` }));
+  wire.sent = [];
+  const hear = (msg: object) => wire.emit("message", Buffer.from(JSON.stringify(msg)));
+  // Op 2's asset lookup answers at once while op 1 still waits behind a commit, so busy(2) comes first.
+  hear({ t: "retry", n: 2, code: "busy" });
+  hear({ t: "retry", n: 1, code: "busy" });
+  hear({ t: "retry", n: 3, code: "gap" });
+  t.mock.timers.tick(200);
+  assert.deepEqual(wire.sent.map((text) => (JSON.parse(text) as { n: number }).n), [1, 2, 3]);
+  hear({ t: "ev", acks: [1, 2, 3] });
+  await Promise.all(answered);
+});
