@@ -633,6 +633,39 @@ describe("stamps draw for a player in their rank among the stamps the copy holds
   });
 });
 
+describe("a label a player remembers", () => {
+  test("a label edited behind fog in one twin reaches P1's reload as the same text it holds in the other, its fields in one order", async (t) => {
+    const altar = "0199f0a0-0000-7000-8000-0000000000f1";
+    const pair = await open(t, {
+      edit: (s) => {
+        // In the side room, its fields in the order a room loaded from storage holds them: by length, then by name.
+        s.labels = { [altar]: { x: 6.5, y: 13.5, id: altar, rev: 0, size: 1, text: "Altar", sceneId: "s1" } };
+      },
+    });
+    await both(pair, async (twin) => {
+      // P1 sees the side room, then walks back to room R, out of sight of it.
+      twin.to(2_000);
+      await twin.apply("p1", move("a", IN_SIDE.x, IN_SIDE.y));
+      twin.to(3_000);
+      await twin.apply("p1", move("a", IN_R.x, IN_R.y));
+    });
+    const from = pair.map((twin) => twin.mark()) as [Mark, Mark];
+    // In the door twin alone the DM renames it behind the fog, so P1 remembers it as it was.
+    const door = pair[0];
+    door.to(4_000);
+    await door.apply("dm", { t: "build.label", sceneId: "s1", labelId: altar, label: { x: 6.5, y: 13.5, text: "Shrine", size: 1 } });
+    for (const [i, twin] of pair.entries()) assert.deepEqual(twin.frames(from[i]), [], `${twin.name}: no frame for P1 or the display`);
+    await both(pair, async (twin) => {
+      twin.to(5_000);
+      await twin.reloadP1();
+    });
+    storedDiffers(pair, "the rename");
+    same(pair, "a remembered label");
+    const snapshot = pair[0].p1.sent.find((m) => (m as { t?: string }).t === "snapshot") as { state: RoomState } | undefined;
+    assert.equal(snapshot?.state.labels[altar]?.text, "Altar", "P1's reload holds the label as P1 last saw it");
+  });
+});
+
 describe("waits and batches go by the clock and P1's own requests", () => {
   test("the DM's snapshots on P1's address, large or small, give P1 the same wait and delivery", async (t) => {
     const pair = await open(t, {

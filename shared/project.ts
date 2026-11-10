@@ -2740,8 +2740,32 @@ function projectLabelCtx(ctx: Ctx, label: Label): Label | null {
   if (!ctx.floors.has(label.sceneId)) return null;
   if (ctx.viewer.role === "dm") return label;
   const scene = ownEntry(ctx.state.scenes, label.sceneId);
-  if (!scene || !scene.fogEnabled) return label;
-  return shownByMemory(ctx, label.sceneId, "labels", label.id, label);
+  if (!scene || !scene.fogEnabled) return playerLabel(label);
+  return playerLabel(shownByMemory(ctx, label.sceneId, "labels", label.id, label));
+}
+
+/*
+ * A player's copy of a label or a stamp is built in one key order, its
+ * fields sorted by name, whatever order its source holds them in: a room
+ * loaded from storage, a write since and a memory entry each give their
+ * own, and a copy's text is the same for the same values (rankedStamp for
+ * a stamp). A label's copy is at rev 0, as zeroed would make it, and kept
+ * per source, so the fan-out's identity check still hits.
+ */
+const labelCopies = new WeakMap<Label, Label>();
+
+function playerLabel(label: Label | null): Label | null {
+  if (label === null) return null;
+  // A label an op is still writing may change, so its copy is not kept.
+  if (isWritable(label)) return inKeyOrder({ ...label, rev: 0 });
+  let copy = labelCopies.get(label);
+  if (!copy) labelCopies.set(label, (copy = inKeyOrder({ ...label, rev: 0 })));
+  return copy;
+}
+
+/** A copy of a flat value with its fields in name order. */
+function inKeyOrder<T extends object>(value: T): T {
+  return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) as T;
 }
 
 /** The cells a label or stamp is judged by: its box (labelCells, stampCells). */
@@ -2879,7 +2903,9 @@ function projectRememberedCtx(ctx: Ctx, field: "labels" | "stamps", id: string):
 function rememberedOnFloorCtx(ctx: Ctx, sceneId: string, field: "labels" | "stamps", id: string): Label | Stamp | null {
   const scene = ownEntry(ctx.state.scenes, sceneId);
   if (!scene || !scene.fogEnabled) return null;
-  return shownByMemory<Label | Stamp>(ctx, sceneId, field, id, null);
+  const shown = shownByMemory<Label | Stamp>(ctx, sceneId, field, id, null);
+  // A stamp's copy is made where it is ranked (rankedStamp).
+  return field === "labels" ? playerLabel(shown as Label | null) : shown;
 }
 
 /** The viewer's labels or stamps, as a snapshot holds them: the live ones and those only memory names on each held floor. */
@@ -2953,9 +2979,9 @@ const sourceOfCopy = new WeakMap<Stamp, Stamp>();
 /** A player's copy of a stamp at a rank, from the stored stamp or from another copy of it. */
 export function rankedStamp(stamp: Stamp, rank: number): Stamp {
   const source = sourceOfCopy.get(stamp) ?? stamp;
-  if (source.rev === 0 && source.z === rank) return source;
   const make = () => {
-    const copy: Stamp = { ...source, rev: 0, z: rank };
+    // A copy even where the source already reads rev 0 at this rank, so every copy has the one key order (playerLabel).
+    const copy = inKeyOrder<Stamp>({ ...source, rev: 0, z: rank });
     sourceOfCopy.set(copy, source);
     return copy;
   };

@@ -1,6 +1,5 @@
 import { holderChunkKey } from "./keys.ts";
 import type { RoomState, Stamp } from "./model.ts";
-import { stableStringify } from "./project.ts";
 import { twins, type TwinOptions, type Twins } from "./secretDoorTestutil.ts";
 import type { Playing, Sound } from "./sound.ts";
 import { token } from "./testutil.ts";
@@ -74,9 +73,10 @@ export function numbersIn(frames: readonly unknown[]): Given[] {
  * Reads one twin's frames for comparison, each as one line of text: the
  * history's epochs and head ids become ids in the order this twin first
  * showed them, so two twins' frames are equal only while their ids pair
- * one to one. Everything else is compared as sent, every `rev` included.
- * Use one reader per twin, over every socket compared, in the same order
- * in both twins.
+ * one to one. Everything else is compared as sent, as a socket's bytes
+ * are, every `rev` and the order of every object's keys included. Use one
+ * reader per twin, over every socket compared, in the same order in both
+ * twins.
  */
 export class FrameReader {
   #ids = new Map<string, string>();
@@ -91,10 +91,11 @@ export class FrameReader {
   }
 
   text(frame: unknown): string {
-    if (frame === null || typeof frame !== "object") return stableStringify(frame);
+    if (frame === null || typeof frame !== "object") return JSON.stringify(frame);
     const f = frame as Record<string, unknown>;
-    if (f.t === "history") return stableStringify(this.#history(f));
-    return stableStringify(frame);
+    // The history's copy keeps every field where the frame had it, so only its ids differ from the frame's text.
+    if (f.t === "history") return JSON.stringify(this.#history(f));
+    return JSON.stringify(frame);
   }
 
   /** Each frame as `text` reads it. */
