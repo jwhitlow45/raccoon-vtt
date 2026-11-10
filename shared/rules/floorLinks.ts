@@ -1,6 +1,7 @@
 import { LIMITS } from "../limits.ts";
 import type { CellRect, FloorLink, FloorLinkId, RoomState, Scene, SceneId, Token, Viewer } from "../model.ts";
 import { FLOOR_HEIGHT } from "../protocol.ts";
+import { parseKey, writeEntity, type EntityKey } from "../keys.ts";
 import { ownEntry } from "../records.ts";
 import { floorLinkRules, floorsOf, sameScene } from "./floors.ts";
 import { canSqueeze, footprintRect, isSqueezed, occupiedHexes, squeezedSize, type PlacedToken } from "./footprint.ts";
@@ -452,23 +453,39 @@ export function linkProblem(state: RoomState, draft: LinkDraft): string | null {
 /**
  * The words of a restore that stairs rules refuse where it would put back
  * stairs that are not there now (8, FL2-OPUS-2), or null where it puts
- * none back: no stairs stand to remove, so it names what is in their way,
- * in the builder's words for the first rule those stairs would break as a
- * new draft on the room as it is (`linkProblem`), on that end's own floor.
- * Ground of one height that is no longer the height they stood on reads
- * changeGround's first sentence. `restored` holds the values the restore
- * writes under `floorLink:` keys.
+ * none back or nothing is in their way: no stairs stand to remove, so it
+ * names what blocks them, in the builder's words for the first rule those
+ * stairs would break as a new draft (`linkProblem`), on that end's own
+ * floor. Ground of one height that is no longer the height they stood on
+ * reads changeGround's first sentence.
+ *
+ * They are judged on the room as the restore would leave it, every entry
+ * written, without the pair being asked about (FL2-OPUS-10): an undo of
+ * Remove floor puts back the floor, its ground and its stairs together,
+ * and on the room before it those stairs would join a floor that is not
+ * there. Where nothing is in their own way the refusal is about other
+ * stairs, and the caller keeps the placer's words.
  */
-export function restoredLinkWords(state: RoomState, restored: readonly unknown[]): string | null {
-  const ends = restored
+export function restoredLinkWords(state: RoomState, entries: readonly { key: string; value?: unknown }[]): string | null {
+  const ends = entries
+    .filter((entry) => parseKey(entry.key)?.kind === "floorLink")
+    .map((entry) => entry.value)
     .filter((value): value is FloorLink => value !== null && typeof value === "object" && typeof (value as FloorLink).id === "string" && ownEntry(state.floorLinks, (value as FloorLink).id) === undefined)
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  if (ends.length === 0) return null;
+  let restored = state;
+  for (const entry of entries) if (parseKey(entry.key) !== null) restored = writeEntity(restored, entry.key as EntityKey, entry.value ?? null);
+  /** The restored room without this pair, so the pair meets neither itself nor its own count. */
+  const without = (end: FloorLink): RoomState => {
+    const { [end.id]: _end, [end.pair]: _pair, ...others } = restored.floorLinks ?? {};
+    return { ...restored, floorLinks: others };
+  };
   for (const end of ends) {
-    const problem = linkProblem(state, { id: end.id, pairId: end.pair, sceneId: end.sceneId, to: end.to, rect: end.rect, kind: end.kind });
+    const problem = linkProblem(without(end), { id: end.id, pairId: end.pair, sceneId: end.sceneId, to: end.to, rect: end.rect, kind: end.kind });
     if (problem !== null) return problem;
   }
   for (const end of ends) {
-    if (rectGround(state.buildChunks, end.sceneId, end.rect) !== end.ground) return withoutEnding(LINK_WORDS.changeGround(end.kind, floorName(state, end.to)));
+    if (rectGround(restored.buildChunks, end.sceneId, end.rect) !== end.ground) return withoutEnding(LINK_WORDS.changeGround(end.kind, floorName(restored, end.to)));
   }
   return null;
 }

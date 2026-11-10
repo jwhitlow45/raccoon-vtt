@@ -538,6 +538,53 @@ describe("stairs and ladders on the server (docs/design/design-v1-floors.md phas
     coSocket.close();
   });
 
+  test("the same where the removed floor had stairs of its own: the words still name the stairs that stand, not stairs that would come back with the floor (FL2-OPUS-10)", async () => {
+    const r = await tower(t, "Kept step with stairs");
+    const co = t.client();
+    await co.claimDm(r.roomId, r.dmKey);
+    const coSocket = await t.connect(r.roomId, co);
+    await coSocket.snapshot("co");
+    const middle = await addFloor(r.dmSocket, r.ground, "above", "Middle floor");
+    const upper = await addFloor(r.dmSocket, middle, "above", "Upper floor");
+    const own = uuidv7();
+    await ok(r.dmSocket, { t: "floorLink.put", link: { id: own, pairId: uuidv7(), sceneId: r.ground, to: middle, rect: STAIRS, kind: "stairs" } } as Op);
+    await ok(r.dmSocket, { t: "scene.delete", sceneId: middle } as Op);
+    assert.equal(live(t, r.roomId).floorLinks?.[own], undefined, "its stairs went with it");
+    const link = uuidv7();
+    await ok(coSocket, { t: "floorLink.put", link: { id: link, pairId: uuidv7(), sceneId: r.ground, to: upper, rect: { x: 8, y: 8, w: 1, h: 1 }, kind: "stairs" } } as Op);
+    const head = await r.dmSocket.historyHead("setup", "undo");
+    const answer = await r.dmSocket.apply({ t: "undo", head: head!, scope: "setup" } as Op);
+    assert.match(refused(answer), /^could not undo removing .*Middle floor.*: Stairs join Ground floor and Upper floor\. The DM who placed them can remove them\.$/);
+    assert.equal(await r.dmSocket.historyHead("setup", "undo"), head, "the step is kept");
+    await ok(coSocket, { t: "floorLink.delete", linkId: link } as Op);
+    await ok(r.dmSocket, { t: "undo", head: head!, scope: "setup" } as Op);
+    const back = live(t, r.roomId);
+    assert.ok(back.scenes[middle]?.floor && back.floorLinks?.[own], "Middle floor and its stairs are back");
+    for (const id of Object.keys(back.scenes)) assert.equal(floorProblem(back, id), null);
+    coSocket.close();
+  });
+
+  test("an undo of Remove floor whose stairs a co-DM's wall on the floor below now blocks names the wall, keeps its step, and works once the wall is gone (FL2-ASTRA-04)", async () => {
+    const r = await stairsTower(t, "Floor back onto a wall", false);
+    r.anaSocket.close();
+    const co = t.client();
+    await co.claimDm(r.roomId, r.dmKey);
+    const coSocket = await t.connect(r.roomId, co);
+    await coSocket.snapshot("co");
+    await ok(r.dmSocket, { t: "scene.delete", sceneId: r.upper } as Op);
+    await ok(coSocket, { t: "build.edge", sceneId: r.ground, edges: [{ key: "4,3,w", feature: { kind: "wall" } }] } as Op);
+    const head = await r.dmSocket.historyHead("setup", "undo");
+    const answer = await r.dmSocket.apply({ t: "undo", head: head!, scope: "setup" } as Op);
+    assert.match(refused(answer), /^could not undo removing .*Upper floor.*: A wall crosses those squares on Ground floor\.$/);
+    assert.equal(live(t, r.roomId).scenes[r.upper], undefined);
+    assert.equal(await r.dmSocket.historyHead("setup", "undo"), head, "the step is kept");
+    await ok(coSocket, { t: "build.edge", sceneId: r.ground, edges: [{ key: "4,3,w", feature: null }] } as Op);
+    await ok(r.dmSocket, { t: "undo", head: head!, scope: "setup" } as Op);
+    const back = live(t, r.roomId);
+    assert.ok(back.scenes[r.upper]?.floor && back.floorLinks?.[r.link], "Upper floor and its stairs are back");
+    coSocket.close();
+  });
+
   test("the same with A removing the stairs in Setup: A's next Undo takes back A's own removal, as the history rules say", async () => {
     const r = await tower(t, "Own removal");
     const co = t.client();

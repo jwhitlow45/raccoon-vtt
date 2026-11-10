@@ -1669,7 +1669,7 @@ export class RoomActor {
     if (step.id && !isPlayingRefusal(reason) && !(stairs && viewer.role === "dm")) this.#undo.consume(viewer.memberId, direction, scope, step.id);
     if (!stairs) return reason;
     // Stairs the restore would put back are not there to remove: the words name what stands in their way instead (FL2-OPUS-2).
-    const absent = restoredLinkWords(this.#staged.state, step.entries.filter((entry) => parseKey(entry.key)?.kind === "floorLink").map((entry) => entry.value));
+    const absent = restoredLinkWords(this.#staged.state, step.entries);
     // Only history knows who placed the stairs, and it can be trimmed or lost, so a restore's words are true whoever did.
     return absent ?? restoreStairsWords(reason);
   }

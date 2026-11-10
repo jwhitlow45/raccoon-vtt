@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { ANA, ATTIC, GROUND, UPPER, run, thornToken, tower, withStairs } from "../floorLinksTestutil.ts";
+import { ANA, ATTIC, GROUND, UPPER, applied, run, thornToken, tower, withStairs } from "../floorLinksTestutil.ts";
+import { writeEntity, type EntityKey } from "../keys.ts";
+import { LIMITS } from "../limits.ts";
+import { floorProblem } from "./floors.ts";
 import type { FloorLink, RoomState, Scene } from "../model.ts";
 import type { Op } from "../protocol.ts";
 import { DM, actor, effect } from "../testutil.ts";
@@ -204,12 +207,12 @@ describe("the words (6.3, 7.3, 8)", () => {
 
   test("a restore of stairs that are gone names what is in their way now, on that end's floor, and no stairs to remove (FL2-OPUS-2)", () => {
     const s = withStairs();
-    const ends = [end(s, "l2"), end(s, "l1")];
+    const ends = [end(s, "l2"), end(s, "l1")].map((value) => ({ key: `floorLink:${value.id}`, value }));
     const gone = run(s, { t: "floorLink.delete", linkId: "l1" });
     assert.equal(restoredLinkWords(s, ends), null, "stairs that stand are the placer's to remove");
-    assert.equal(restoredLinkWords(s, ends.map((e) => ({ ...e, ground: 5 }))), null, "whatever the restore would write over them");
+    assert.equal(restoredLinkWords(s, ends.map((e) => ({ ...e, value: { ...e.value, ground: 5 } }))), null, "whatever the restore would write over them");
     assert.equal(restoredLinkWords(gone, ends), null, "nothing in their way");
-    assert.equal(restoredLinkWords(gone, [null, undefined, "x"]), null);
+    assert.equal(restoredLinkWords(gone, [{ key: "floorLink:l1", value: null }, { key: "floorLink:l2" }, { key: "floorLink:l3", value: "x" }]), null);
     assert.equal(restoredLinkWords(run(gone, edge(UPPER, "4,3,w")), ends), "A wall crosses those squares on Upper floor.");
     assert.equal(restoredLinkWords(run(gone, edge(GROUND, "4,3,w")), ends), "A wall crosses those squares on Ground floor.");
     assert.equal(restoredLinkWords(run(gone, raise(UPPER, ["3,3"], 5)), ends), "Those squares aren't one height on Upper floor.");
@@ -218,6 +221,25 @@ describe("the words (6.3, 7.3, 8)", () => {
     const other = run(gone, { t: "floorLink.put", link: { id: "m1", pairId: "m2", sceneId: GROUND, to: UPPER, rect: { x: 4, y: 3, w: 1, h: 1 }, kind: "ladder" } });
     assert.equal(restoredLinkWords(other, ends), "Those squares already have a ladder to Upper floor.");
     for (const words of [LINK_WORDS.wall("Upper floor"), "That would change the ground under the stairs to Upper floor."]) assert.equal(isStairsRefusal(words), false, words);
+  });
+
+  test("stairs a restore puts back with their floor are judged on the room as restored, not on the room without that floor (FL2-OPUS-10)", () => {
+    const s = withStairs();
+    const removed = applied(s, { t: "scene.delete", sceneId: UPPER });
+    const entries = removed.inverse!;
+    assert.ok(entries.some((e) => e.key === "floorLink:l1") && entries.some((e) => e.key === `scene:${UPPER}`), "the step holds the floor and its stairs");
+    assert.equal(restoredLinkWords(removed.state, entries), null, "nothing in their way");
+    // A co-DM joins the two floors now next to each other: the refusal is about those stairs, which stand, so the placer's words stay.
+    const joined = run(removed.state, { t: "floorLink.put", link: { id: "m1", pairId: "m2", sceneId: GROUND, to: ATTIC, rect: { x: 8, y: 8, w: 1, h: 1 }, kind: "stairs" } });
+    assert.match(floorProblem(entries.reduce((room, e) => writeEntity(room, e.key as EntityKey, e.value ?? null), joined), GROUND) ?? "", /^Stairs join Ground floor and Attic\. Remove them before putting a floor between\.$/);
+    assert.equal(restoredLinkWords(joined, entries), null);
+    // A co-DM's wall through the old squares on the floor that stayed is what blocks them.
+    assert.equal(restoredLinkWords(run(removed.state, edge(GROUND, "4,3,w")), entries), "A wall crosses those squares on Ground floor.");
+    assert.equal(restoredLinkWords(run(removed.state, raise(GROUND, ["3,3", "4,3"], 5)), entries), "That would change the ground under the stairs to Upper floor.");
+    // At the scene's cap the pair does not count itself.
+    let full = removed.state;
+    for (let k = 0; k < LIMITS.floorLinksPerScene - 1; k++) full = run(full, { t: "floorLink.put", link: { id: `f${k}a`, pairId: `f${k}b`, sceneId: GROUND, to: ATTIC, rect: { x: k % 10, y: 12 + Math.floor(k / 10), w: 1, h: 1 }, kind: "ladder" } });
+    assert.equal(restoredLinkWords(full, entries), null, "the pair is not counted against itself");
   });
 
   test("the climb's label and its refusals", () => {
