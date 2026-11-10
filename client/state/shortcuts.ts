@@ -30,6 +30,7 @@ import { sayTool, tuckEvent } from "./toolbar.ts";
 import { fightAhead, type RoomUi } from "./store.ts";
 import type { RoomActions, RoomView } from "./types.ts";
 import { useRoomActions, useRoomRoleIfAny, useRoomStore, useRoomUi } from "./view.ts";
+import { labelsOf } from "./labels.ts";
 
 /**
  * The room's keyboard shortcuts (features 13, docs/design/design-v1-dm-tools.md
@@ -510,7 +511,7 @@ function climbByKey(env: ShortcutEnv, dir: "up" | "down"): void {
   const s = env.getState();
   const [token] = selectedTokens(env);
   if (!token || !s.floorView || !s.you) return;
-  const out = climbKey(s.floorView, { role: s.you.role, memberId: s.you.memberId }, token, dir, displayName(token));
+  const out = climbKey(s.floorView, { role: s.you.role, memberId: s.you.memberId }, token, dir, displayName(token, labelsOf(s)));
   if ("say" in out) env.ui.notify(out.say);
   else sendClimb({ wait: env.scope.get(climbWaitSlot), pending: s.pending, dispatch: env.actions.dispatch }, token.id, out.climb.link.id);
 }
@@ -650,7 +651,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
       const tokens = selectedTokens(env);
       dispatchAll(env, batches(tokens.map((t) => t.id)).map((tokenIds) => ({ t: "token.deleteMany", tokenIds })));
       env.ui.select(null);
-      env.ui.notify(deletedText(tokens.map((t) => displayName(t))));
+      env.ui.notify(deletedText(tokens.map((t) => displayName(t, labelsOf(env.getState())))));
     },
   },
   {

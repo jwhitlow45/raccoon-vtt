@@ -4,6 +4,7 @@ import type { ClientOp } from "#shared/protocol.ts";
 import { playersSee } from "#shared/rules/floors.ts";
 import type { OpAnswer } from "../state/types.ts";
 import { displayName, type ViewToken } from "../lib/scene.ts";
+import { labelsFor } from "../lib/labels.ts";
 
 /**
  * What the map says when a drag does not do what the finger expected
@@ -133,7 +134,8 @@ export function watchDrop(input: { role: "dm" | "player"; store: SettleStore; mo
     if (!say) return;
     const now = input.store.getState().view;
     if (now === null || !stillOn(now)) return;
-    const gone = watched.filter((m) => taken.get(m.token.id) === true && now.tokens[m.token.id] === undefined).map((m) => displayName(m.token));
+    const labels = labelsFor(now, input.role);
+    const gone = watched.filter((m) => taken.get(m.token.id) === true && now.tokens[m.token.id] === undefined).map((m) => displayName(m.token, labels));
     // On a per-player scene the creature left this player's own sight, which may still be another's (docs/design/design-v1-per-player-vision.md 11).
     const text = intoFogText(gone, perPlayerScene(now.scenes[dropScene]) ? "yours" : "party");
     if (text) input.notify(text);

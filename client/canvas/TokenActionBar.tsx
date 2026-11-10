@@ -146,6 +146,7 @@ import { unitText, type VitalItem } from "../features/tokens/statSummary.ts";
 import { useGroupHp } from "../features/tokens/GroupHpEntry.tsx";
 import type { HpRest } from "../features/tokens/HpSection.tsx";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
+import { labelsOf, useLabels } from "../state/labels.ts";
 
 const NO_CHARACTERS = {};
 
@@ -233,6 +234,7 @@ export function TokenActionBar(props: {
   /** Moves the map down by this many of the chrome's pixels, or up when negative, for an upright phone's clearing move (barDock.ts clearShift). */
   onShift?(dy: number): void;
 }) {
+  const labels = useLabels();
   const { token } = props;
   return (
     <BarFrame
@@ -241,8 +243,8 @@ export function TokenActionBar(props: {
       tokenHeight={props.tokenHeight}
       opening={token.id}
       onShift={props.onShift}
-      label={actionsName(token)}
-      dock={{ text: displayName(token), show: `Show ${displayName(token)} actions`, closeLabel: "Close", close: props.onClose }}
+      label={actionsName(token, labels)}
+      dock={{ text: displayName(token, labels), show: `Show ${displayName(token, labels)} actions`, closeLabel: "Close", close: props.onClose }}
     >
       <TokenBarBody token={token} fullAccess={props.fullAccess} drags={props.drags === true} onDetails={props.onDetails} onClose={props.onClose} />
     </BarFrame>
@@ -251,6 +253,7 @@ export function TokenActionBar(props: {
 
 /** The single token's bar inside its frame, which tells it whether it is short and whether it docks. */
 function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boolean; onDetails(): void; onClose(): void }) {
+  const labels = useLabels();
   const { token } = props;
   const frame = useContext(FrameContext);
   const actions = useRoomActions();
@@ -315,7 +318,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
   const revives = useRoomView((s) => healRevivesDead(s.floorView?.meta.settings ?? {}));
   const deadLineId = useId();
   const revive = access.life && !noHp && offersRevive(life, token.kind);
-  const deadLine = revive ? REVIVE_NOTE : life === "dead" && !noHp && !access.dm && access.hp !== "none" ? deadHealLine(displayName(token), revives) : null;
+  const deadLine = revive ? REVIVE_NOTE : life === "dead" && !noHp && !access.dm && access.hp !== "none" ? deadHealLine(displayName(token, labels), revives) : null;
 
   const toggleEffect = (key: Effect["key"]) => {
     const existing = effects.find((e) => e.key === key);
@@ -333,7 +336,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
   const yourTurn = useYourTurn();
   const endTurn = useEndTurn();
   // The DM's "All 4 Goblin Warriors" (docs/design/design-v1-qol.md 3, Q7): every living token of this one's kind on its scene, hidden ones too.
-  const kin = useMemo(() => (access.dm && tokens ? sameKind(Object.values(tokens), token) : []), [access.dm, tokens, token]);
+  const kin = useMemo(() => (access.dm && tokens ? sameKind(Object.values(tokens), token, labels) : []), [access.dm, tokens, token, labels]);
   // Its combat uses (docs/design/design-v1-combat-controls.md 6), for the DM on any creature with one and for owners on theirs.
   const usesPresence = useUsesPresence(access.dm || access.owner ? target : null);
   const buttonInput = {
@@ -481,7 +484,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
         );
       // A companion's owners who are not the DM dismiss it in Delete's place (docs/design/design-v1-combat-flow.md 3.6.9).
       case "dismiss":
-        return <DismissButton key={id} tokenId={token.id} name={displayName(token)} />;
+        return <DismissButton key={id} tokenId={token.id} name={displayName(token, labels)} />;
       // The turn strip's End turn shares its one wait (InitiativeStrip.tsx endTurnWaitSlot), so a press on either shows both busy and sends one Next. In a row it grows to share its line, its pill at the end, so it keeps the right end and never stands alone short of it.
       case "endTurn":
         return (
@@ -542,7 +545,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
     <>
       <BarHeader
         // Two lines of the name at most: the frame's name holds all of it, and the token's plate shows it on the map.
-        title={displayName(token)}
+        title={displayName(token, labels)}
         status={resting ? status.node : undefined}
         sentence={resting ? status.status.sentence : null}
         actions={badgeInHeader ? badgeText : null}
@@ -555,7 +558,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
 
       {access.hp !== "none" && !noHp ? (
         <HpEntry
-          targets={[oneTarget(target, access.hp, atZero, { name: displayName(token), dead: life === "dead", max: actor?.hp?.max }, token)]}
+          targets={[oneTarget(target, access.hp, atZero, { name: displayName(token, labels), dead: life === "dead", max: actor?.hp?.max }, token)]}
           access={access.hp}
           place="bar"
           fieldFirst={short}
@@ -645,7 +648,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
           ) : null}
 
           {drawer === "conditions" ? <QuickConditions lit={(key) => (effects.some((e) => e.key === key) ? "all" : "none")} onToggle={toggleEffect} {...drawers.grid} /> : null}
-          {drawer === "uses" && rows.play.includes("uses") ? <UsesDrawer target={target} name={displayName(token)} onClose={drawers.close} /> : null}
+          {drawer === "uses" && rows.play.includes("uses") ? <UsesDrawer target={target} name={displayName(token, labels)} onClose={drawers.close} /> : null}
 
           {rows.passing.some((id) => !inStrip(id)) ? (
             <ButtonRow row="passing">{rows.passing.filter((id) => !inStrip(id)).map(button)}</ButtonRow>
@@ -703,6 +706,7 @@ export function GroupActionBar(props: {
 
 /** The group's bar inside its frame, which tells it whether it rests as an upright phone's strip. */
 function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; onClose(): void }) {
+  const labels = useLabels();
   const { tokens } = props;
   const frame = useContext(FrameContext);
   const ui = useRoomUi();
@@ -734,7 +738,7 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
   const joinState = join.stateOf(joining);
   const outOfFight = fightCandidates(tokens, fight).length;
   const scope = useRoomScope();
-  const anyPlayed = useRoomView((s) => (s.floorView ? offersRequest(s.floorView, tokens) : false));
+  const anyPlayed = useRoomView((s) => (s.floorView ? offersRequest(s.floorView, tokens, labels) : false));
   const openRolls = useOpenRollOptions();
   const undoOffer = useStore(useScoped(lastMoveSlot), offered);
   const rest = frame.rest;
@@ -750,7 +754,7 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
   // The group's strip (docs/design/design-v1-bar-compact.md 9.4): its entry as the lead, then these.
   const restIds = rest ? groupRestButtons({ dm: offers.dm, lead, conditions: offers.conditions, undoMove: offersUndo(undoOffer, ids) }).filter((id) => id !== "mode") : [];
   const inStrip = (id: string) => scrolls && (drawn ?? restIds).includes(id);
-  const names = tokens.map((t) => displayName(t)).join(", ");
+  const names = tokens.map((t) => displayName(t, labels)).join(", ");
   // With nothing else to say, the status line names who is selected, as the line under the expanded bar's header does.
   const status = useRestStatus({ entry, idle: [names], critInRow: drawn === null || drawn.includes("crit"), active: resting });
 

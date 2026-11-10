@@ -179,7 +179,7 @@ test("ISO34-LABELS: area and trap names avoid the raised token's actual label at
       const original = { ...point, name, size: "map" as const, small: true, above: true };
       const clearPoint = toWorld(view, toView({ kind: "topDown" }, { x: (ink.x0 + ink.x1) / 2, y: ink.y1 + 2 }));
       const clear = { ...original, ...clearPoint };
-      assert.ok(topDownBoxes([t], SCALE, measureLabel).every((b) => !overlaps(b, pillReach({ ...original, scale: SCALE }))), "Top-down's token boxes miss the raised name collision");
+      assert.ok(topDownBoxes([t], SCALE, measureLabel, new Map()).every((b) => !overlaps(b, pillReach({ ...original, scale: SCALE }))), "Top-down's token boxes miss the raised name collision");
       assert.ok(overlaps(pillReach({ ...viewPill(original, view, () => 0), scale: SCALE }), ink));
       const chosen = isoNamePill([original, clear], { view, ground: () => 0, boxes }, SCALE);
       for (const viewport of [null, { x0: ink.x0, x1: ink.x0 + 5, y0: ink.y0 - 4, y1: ink.y1 + 4 }, { x0: ink.x1 - 5, x1: ink.x1, y0: ink.y0 - 4, y1: ink.y1 + 4 }]) {

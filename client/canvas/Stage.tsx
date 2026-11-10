@@ -108,6 +108,7 @@ import { previewViewSlot } from "../features/view/choice.ts";
 import { placedTextBoxes } from "./textBoxes.ts";
 import { GroupActionBar, TokenActionBar } from "./TokenActionBar.tsx";
 import { TokenDecor, TokenInteractionContext, TokenNode, type IsoToken, type TokenInteraction } from "./TokenNode.tsx";
+import { labelsOf } from "../state/labels.ts";
 
 const EMPTY_TOKENS: Record<string, Token> = {};
 /** How long after a new size the fitted map follows the measures of the new layout as they arrive. */
@@ -814,8 +815,8 @@ export function MapStage(props: {
   );
   /** Why a press on a token cannot drag it (dragNotes.ts), or null when it can. */
   const dragRefusal = useCallback(
-    (t: ViewToken) => refusedDragText({ name: displayName(t), role, owns: ownsToken(t), locked: t.locked, moveAny: movesAny(t) }),
-    [role, ownsToken, movesAny],
+    (t: ViewToken) => refusedDragText({ name: displayName(t, labelsOf(store.getState())), role, owns: ownsToken(t), locked: t.locked, moveAny: movesAny(t) }),
+    [role, ownsToken, movesAny, store],
   );
   // The pointer handlers and the drag callbacks outlive renders, so they read these.
   const tokensByIdRef = useRef(tokensById);
@@ -882,7 +883,7 @@ export function MapStage(props: {
     const lead = pressLead(grid, links.allTokens, pressed, byId, new Set(selectedIds), canDragRef.current, movesLeadRef.current);
     const rootOf = new Map<string, string>([[pressed.id, lead.id]]);
     if (lead.id !== pressed.id && lead.id === mount && !movesLeadRef.current(lead)) {
-      const refusal = (links.role === "dm" ? dragRefusalRef.current(lead) : null) ?? carriesText(lead, pressed);
+      const refusal = (links.role === "dm" ? dragRefusalRef.current(lead) : null) ?? carriesText(lead, pressed, labelsOf(store.getState()));
       return { lead, named: [], rootOf, refusal, reseatOnly: false };
     }
     const holderIn = (t: ViewToken) => {
@@ -1573,7 +1574,7 @@ export function MapStage(props: {
         const holder = reseat as Token;
         if (!linkHolds(sceneGrid(sceneRef.current), links.settings ?? DEFAULT_SETTINGS, parts.lead.attached.kind, at, holder)) {
           putBack(node, token, followers);
-          uiRef.current.notify(reseatText(parts.lead, holder));
+          uiRef.current.notify(reseatText(parts.lead, holder, labelsOf(store.getState())));
           return;
         }
       }
@@ -1627,7 +1628,7 @@ export function MapStage(props: {
       const after = facts.store.getState().local;
       if (after.actionBar && after.selectedId !== null && group.some((t) => t.id === after.selectedId || after.selectedIds.includes(t.id))) scope.get(barDockSlot).setState({ clearRequest: { tokenId: after.selectedId } });
       watch?.sent(sent.length);
-      const note = intoFogText(swallowed.map((t) => displayName(t)));
+      const note = intoFogText(swallowed.map((t) => displayName(t, labelsOf(store.getState()))));
       if (note) uiRef.current.notify(note);
       for (const t of [token, ...followers.map((f) => f.token)]) {
         const m = landed.get(t.id);
