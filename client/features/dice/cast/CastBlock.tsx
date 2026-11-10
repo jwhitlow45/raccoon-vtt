@@ -243,6 +243,7 @@ function SendStatus(props: { send: CastSend; again?: () => string | null; onClos
 
 /** The live tokens' coverage of an area, as its In area line reads it: on a player's device by the walls they could know (areas/coverage.ts heldWalls). */
 function useAreaEntries(view: RoomState, areaId: string | undefined, sceneId: string | null) {
+  const labels = useLabels();
   const live = useLiveTokens();
   const role = useRoomView((s) => s.you?.role ?? "player");
   const scene = sceneId ? view.scenes[sceneId] : undefined;
@@ -252,7 +253,7 @@ function useAreaEntries(view: RoomState, areaId: string | undefined, sceneId: st
   const template = areaId ? view.templates[areaId] : undefined;
   if (!template || !scene || template.sceneId !== scene.id) return null;
   const ctx = contextFrom({ tokens: live.tokens, buildChunks: view.buildChunks, settings: view.meta.settings, live: ground }, scene, samplesNow(live.moving), fog);
-  return inAreaEntries(caughtTokens(template, ctx, scene.id), live.tokens, view.characters);
+  return inAreaEntries(caughtTokens(template, ctx, scene.id), live.tokens, view.characters, labels);
 }
 
 /**
@@ -354,7 +355,7 @@ function CastBlockView(props: Parameters<typeof RowCast>[0] & { spec: CastBlock 
     if (!preset || !sceneId) return;
     const scene = view.scenes[sceneId];
     if (!scene) return;
-    const areaEnv = { actions, view, scene, role: you.role, youId: you.memberId, area };
+    const areaEnv = { actions, view, labels, scene, role: you.role, youId: you.memberId, area };
     const from = resolvedChoice(areaEnv) ?? caster?.id ?? null;
     setDraft(areaEnv, presetDraft(preset, startDraft(areaEnv, from), from ?? undefined));
     ui.setTool("area");

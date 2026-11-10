@@ -94,7 +94,7 @@ function table(extra: Record<string, Token> = {}): Pick<RoomState, "tokens" | "c
   };
 }
 const pip = token("pip", { kind: "npc", name: "Pip", x: 6, y: 3, ownerIds: ["p1"], companion: { of: "thorn", turn: "shared" }, disposition: "ally" });
-const mine = (view: Pick<RoomState, "tokens" | "characters">, sceneId = "s1") => areaCreatures({ view, sceneId, you: PAT });
+const mine = (view: Pick<RoomState, "tokens" | "characters">, sceneId = "s1") => areaCreatures({ labels: new Map(), view, sceneId, you: PAT });
 const names = (list: readonly AreaCreature[]) => list.map((c) => c.name);
 const resolve = (view: Pick<RoomState, "tokens" | "characters">, choice: SavedChoice, selected: { id: string | null; fresh: boolean } = { id: null, fresh: false }, sceneId = "s1") =>
   savedChoice({ creatures: mine(view, sceneId), tokens: view.tokens, sceneId, choice, selected, role: "player" });
@@ -119,7 +119,7 @@ describe("the creatures an area may be cast from (3.1)", () => {
   test("a second token of one character reads Thorn 2, and the DM has none", () => {
     const view = table({ t2: token("t2", { kind: "pc", name: "Thorn", actor: { ref: "thorn" } }) });
     assert.deepEqual(names(mine(view)), ["Thorn", "Thorn 2"]);
-    assert.deepEqual(areaCreatures({ view, sceneId: "s1", you: DANA }), []);
+    assert.deepEqual(areaCreatures({ labels: new Map(), view, sceneId: "s1", you: DANA }), []);
   });
 
   test("a dying or dead creature is offered, but is not living", () => {
@@ -219,7 +219,7 @@ describe("what the control shows (3.3)", () => {
 
 describe("the control's form (3.1, 3.2)", () => {
   const offers = (view: Pick<RoomState, "tokens" | "characters">, d: AreaDraft | null, saved: string | null = null, you: typeof PAT | typeof DANA = PAT) =>
-    fromOffers({ creatures: areaCreatures({ view, sceneId: "s1", you }), draft: d, saved, view, sceneId: "s1", you });
+    fromOffers({ labels: new Map(), creatures: areaCreatures({ labels: new Map(), view, sceneId: "s1", you }), draft: d, saved, view, sceneId: "s1", you });
 
   test("one creature is a toggle, two a chip, and none a disabled toggle with its words", () => {
     const one = offers(table(), null, "t");

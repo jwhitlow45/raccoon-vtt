@@ -11,6 +11,7 @@ import { MEASURES, pickMeasure, rulerSlot } from "./measure/rulerStore.ts";
 import { BLANK_KINDS, placementSlot, setPending } from "./tokens/placement.ts";
 import { pickZone, trapSlot, ZONE_KINDS, zoneKinds } from "./traps/store.ts";
 import { sceneGrid } from "#shared/rules/grid.ts";
+import { labelsOf } from "../state/labels.ts";
 
 /**
  * Each tool's main choice, which a second press of the tool's key moves
@@ -86,7 +87,7 @@ function areaEnv(env: CycleEnv): AreaEnv | null {
   const s = env.getState();
   const scene = shownScene(s);
   if (!s.view || !scene || !s.you) return null;
-  return { actions: env.actions, view: s.view, scene, role: env.role, youId: s.you.memberId, area: env.scope.get(areaSlot) };
+  return { actions: env.actions, view: s.view, labels: labelsOf(s), scene, role: env.role, youId: s.you.memberId, area: env.scope.get(areaSlot) };
 }
 
 /**

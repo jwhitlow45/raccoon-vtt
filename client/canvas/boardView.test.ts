@@ -70,7 +70,7 @@ for (const key of ["area:a1", "trap:t1"]) for (const order of ["top-first", "iso
   const iso = p.tree(key);
   const move = p.tree("turnStart");
   const commitTrees = () => order === "top-first" ? p.commit(top, iso) : p.commit(iso, top);
-  const boxes = tokenBoxes([token("goblin", { x: 4, y: 0, name: "Goblin" })], 30, (text, px) => text.length * px * 0.58);
+  const boxes = tokenBoxes([token("goblin", { x: 4, y: 0, name: "Goblin" })], 30, (text, px) => text.length * px * 0.58, new Map());
   const topPills = [areaPill(boxes)];
   const isoPills = [areaPill([])];
   assert.notDeepEqual(topPills, isoPills, "a token over the area's default name spot distinguishes the two placements");

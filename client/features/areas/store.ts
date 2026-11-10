@@ -13,6 +13,7 @@ import { useRoomStore } from "../../state/view.ts";
 import { areaCreatures, choiceOf, draftCaster, savedChoice, seeSelection, type AreaCreature, type SavedChoice, type SelectionSeen } from "./caster.ts";
 import { areaContext } from "./coverage.ts";
 import { aoeFrame, draftTemplate, newDraft, templateInput, withShape, type AreaDraft, type DraftTemplate, type SnapMode } from "./placement.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * The area tool's state, which lives on this device only.
@@ -109,6 +110,7 @@ export const HANDLE_GAP_PX = 26;
 export type AreaEnv = {
   actions: RoomActions;
   view: RoomState;
+  labels: Labels;
   scene: Scene;
   role: "dm" | "player";
   youId: string;
@@ -169,8 +171,8 @@ export function startDraft(env: AreaEnv, casterId: string | null): AreaDraft {
 }
 
 /** The viewer's own creatures on this scene, which the From control offers (3.1). None for the DM. */
-export function yourCreatures(env: Pick<AreaEnv, "view" | "scene" | "role" | "youId">): AreaCreature[] {
-  return areaCreatures({ view: env.view, sceneId: env.scene.id, you: { memberId: env.youId, role: env.role } });
+export function yourCreatures(env: Pick<AreaEnv, "view" | "labels" | "scene" | "role" | "youId">): AreaCreature[] {
+  return areaCreatures({ labels: env.labels, view: env.view, sceneId: env.scene.id, you: { memberId: env.youId, role: env.role } });
 }
 
 /** Who a player's next area starts from now: the saved choice resolved against their creatures here (3.3 steps 2 and 3). */

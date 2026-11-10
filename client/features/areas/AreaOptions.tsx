@@ -75,6 +75,7 @@ import {
 } from "./store.ts";
 import { useLiveTokens } from "./useLiveTokens.ts";
 import { isHex, sceneGrid } from "#shared/rules/grid.ts";
+import { useLabels } from "../../state/labels.ts";
 
 /**
  * The area tool's options (docs/design/design-v1-tool-options.md 9.3): its line
@@ -120,9 +121,10 @@ export function AreaOptions(props: { role: "dm" | "player" }) {
   const sceneId = useRoomView((s) => s.sceneId);
   const youId = useRoomView((s) => s.you?.memberId);
   const actions = useRoomActions();
+  const labels = useLabels();
   const scene = sceneId ? view?.scenes[sceneId] : undefined;
   if (!view || !scene || !youId) return null;
-  const env: AreaEnv = { actions, view, scene, role: props.role, youId, area };
+  const env: AreaEnv = { actions, view, labels, scene, role: props.role, youId, area };
   if (st.draft && st.forTrap) return <TrapAreaOptions env={env} st={st} draft={st.draft} trapId={st.forTrap} />;
   if (st.draft) return <DraftOptions env={env} st={st} draft={st.draft} />;
   const selected = st.selectedId ? view.templates[st.selectedId] : undefined;
@@ -141,7 +143,7 @@ function InArea(props: { env: AreaEnv; t: AreaTemplateInput; moving: boolean; ti
   const ground = useLiveGround(env.scene, env.role);
   const ctx = contextFrom({ tokens: live.tokens, buildChunks: env.view.buildChunks, settings: env.view.meta.settings, live: ground }, env.scene, samplesNow(props.moving || live.moving), fog);
   const ids = caughtTokens(t, ctx, env.scene.id);
-  const entries = inAreaEntries(ids, live.tokens, env.view.characters);
+  const entries = inAreaEntries(ids, live.tokens, env.view.characters, env.labels);
   return (
     <>
       <strong>{props.title}</strong>
@@ -436,7 +438,7 @@ function IdleOptions(props: { env: AreaEnv; st: AreaToolState }) {
   const base = () => startDraft(env, resolvedChoice(env));
   const creatures = yourCreatures(env);
   const resolved = resolvedChoice(env, creatures);
-  const control = fromOffers({ creatures, draft: null, saved: resolved, view: env.view, sceneId: env.scene.id, you: { memberId: env.youId, role: env.role } });
+  const control = fromOffers({ labels: env.labels, creatures, draft: null, saved: resolved, view: env.view, sceneId: env.scene.id, you: { memberId: env.youId, role: env.role } });
   const casting = resolved !== null ? creatures.find((c) => c.tokenId === resolved) : undefined;
   const hint =
     control.form === "disabled"
@@ -458,6 +460,7 @@ function IdleOptions(props: { env: AreaEnv; st: AreaToolState }) {
 }
 
 function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft }) {
+  const labels = useLabels();
   const { env, st } = props;
   // A creature the draft names that left the scene or was deleted goes from it, and nothing stands in for it (3.3).
   const d = withoutDeparted(props.draft, (id) => env.view.tokens[id]?.sceneId === env.scene.id);
@@ -470,7 +473,7 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
   const casterId = draftCaster(d);
   const caster = casterId ? env.view.tokens[casterId] : undefined;
   const creatures = yourCreatures(env);
-  const control = fromOffers({ creatures, draft: d, saved: null, view: env.view, sceneId: env.scene.id, you: { memberId: env.youId, role: env.role } });
+  const control = fromOffers({ labels: env.labels, creatures, draft: d, saved: null, view: env.view, sceneId: env.scene.id, you: { memberId: env.youId, role: env.role } });
 
   let range: ReactNode = null;
   if (t && caster && !usesFrom(d.shape)) {
@@ -480,7 +483,7 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
     range = (
       <span style={{ color: over ? theme.color.warning : theme.color.textMuted }}>
         {" "}
-        · {ft} ft from {displayName(caster)}
+        · {ft} ft from {displayName(caster, labels)}
         {d.rangeFt !== undefined ? (over ? `, past its ${d.rangeFt} ft range` : ` of ${d.rangeFt} ft`) : ""}
       </span>
     );
@@ -493,7 +496,7 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
         tone: "hint",
         content: (
           <>
-            {st.pickCaster ? "Tap the caster." : `${caster ? `Cast by ${displayName(caster)}. ` : ""}${placementHint(d, castsYours(env, d, creatures))}`}
+            {st.pickCaster ? "Tap the caster." : `${caster ? `Cast by ${displayName(caster, labels)}. ` : ""}${placementHint(d, castsYours(env, d, creatures))}`}
             {note}
           </>
         ),
@@ -590,7 +593,7 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
         more(
           "caster",
           <OptButton pressed={st.pickCaster} onClick={() => env.area.store.setState({ pickCaster: !st.pickCaster })}>
-            {caster ? `Caster: ${displayName(caster)}` : "Set caster"}
+            {caster ? `Caster: ${displayName(caster, labels)}` : "Set caster"}
           </OptButton>,
         ),
         ...triggerSlots({ value: d.triggers, once: d.oncePerTurn, onChange: (triggers) => set({ triggers }), onOnce: (oncePerTurn) => set({ oncePerTurn }) }),
@@ -667,6 +670,7 @@ function TrapAreaOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDr
 }
 
 function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: AreaTemplate }) {
+  const labels = useLabels();
   const { env, st, template } = props;
   const ui = useRoomUi();
   const t = st.live ? ({ ...template, ...st.live } as AreaTemplate) : template;
@@ -681,7 +685,7 @@ function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: Are
   const ask = useAreaAsk(template);
   const by = (
     <>
-      {caster ? <span style={{ color: theme.color.textMuted }}> · cast by {displayName(caster)}</span> : null}
+      {caster ? <span style={{ color: theme.color.textMuted }}> · cast by {displayName(caster, labels)}</span> : null}
       {ask.asked ? <span style={{ color: theme.color.textMuted }}> · Saves asked</span> : null}
     </>
   );

@@ -543,7 +543,7 @@ describe("the In area list", () => {
       thorn: token("thorn", { name: "Thorn", disposition: "ally", actor: { ref: "c1" } }),
       g1: token("g1", { name: "Goblin", number: 1, actor: { inline: { life: "dead" } } as Token["actor"] }),
     };
-    const entries = inAreaEntries(["thorn", "g10", "g2", "g1", "missing"], tokens, {});
+    const entries = inAreaEntries(["thorn", "g10", "g2", "g1", "missing"], tokens, {}, new Map());
     assert.equal(inAreaText(entries), "Goblin 2, Goblin 10, Thorn (ally), Goblin 1 (dead)");
     assert.equal(inAreaText([]), "Nobody");
   });

@@ -23,6 +23,7 @@ import { areaLabelSpot, foggedCells, tokenBoxes, type Box } from "./labelSpot.ts
 import { areaOutline, liveOrigin, outlineBottom, outlineTop, type Outline } from "./placement.ts";
 import { samplesNow, useAreaScope } from "./store.ts";
 import { useLiveTokens } from "./useLiveTokens.ts";
+import { useLabels } from "../../state/labels.ts";
 
 /**
  * Placed areas on the board layer (design section 14.2): each one's
@@ -150,15 +151,16 @@ export function useAreaParts(
    * (labelSpot.ts). Never other areas' names, and the marker never reads
    * area pills either, so no two pills chase each other.
    */
+  const labels = useLabels();
   const others = useBoardPillsExcept("area:");
   const names = useContext(IsoNamesContext);
   const avoid = useMemo(
     () => [
-      ...(names ? [] : tokenBoxes(Object.values(tokens).filter((t) => !!t && t.sceneId === scene.id), scale, measureLabel)),
+      ...(names ? [] : tokenBoxes(Object.values(tokens).filter((t) => !!t && t.sceneId === scene.id), scale, measureLabel, labels)),
       // Each where the view could slide it (Pill.tsx pillReach), so a name never lands on a trap's name slid in from the edge.
       ...others.map((spec) => pillReach({ ...spec, scale })),
     ],
-    [tokens, scene.id, scale, others, names],
+    [tokens, scene.id, scale, others, names, labels],
   );
   // A player's names keep off the opaque fog as well, which would cut them off. The DM sees through it.
   const fogTiles = useTreeShownView((s) => s.floorView?.fogTiles ?? EMPTY_TILES);

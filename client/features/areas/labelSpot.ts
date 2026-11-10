@@ -4,6 +4,7 @@ import { decodeTile, getBit, TILE_CELLS } from "#shared/rules/fog.ts";
 import { boardSizes } from "../../lib/boardScale.ts";
 import { displayName, drawnAt, footprint } from "../../lib/scene.ts";
 import { DECOR_MIN_PX } from "../../lib/tokenView.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * Where a placed area's name sits so it keeps clear of the tokens, their
@@ -26,7 +27,7 @@ export type Point = { x: number; y: number };
  * its measured name. A token too small on screen for marks takes its body.
  * Each where the token is drawn (docs/design/design-v1-snap-off.md 6.2).
  */
-export function tokenBoxes(tokens: readonly Token[], scale: number, measure: (text: string, px: number) => number): Box[] {
+export function tokenBoxes(tokens: readonly Token[], scale: number, measure: (text: string, px: number) => number, labels: Labels): Box[] {
   const sizes = boardSizes(scale);
   const out: Box[] = [];
   for (const t of tokens) {
@@ -37,7 +38,7 @@ export function tokenBoxes(tokens: readonly Token[], scale: number, measure: (te
     const cx = x + fp.w / 2;
     const chips = sizes.chipPx / 2 / scale;
     out.push({ x0: x, y0: y - chips, x1: x + fp.w, y1: y });
-    const widthPx = Math.min(15 * sizes.namePx, Math.max(fp.w * scale, measure(displayName(t), sizes.namePx) + 4));
+    const widthPx = Math.min(15 * sizes.namePx, Math.max(fp.w * scale, measure(displayName(t, labels), sizes.namePx) + 4));
     const half = widthPx / 2 / scale;
     const top = y + fp.h + sizes.gapPx / scale;
     const tall = (2 * sizes.gapPx + sizes.barPx + Math.round(sizes.namePx * 1.17) + Math.round(sizes.hpPx * 1.17)) / scale;

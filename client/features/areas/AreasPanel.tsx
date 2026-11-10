@@ -19,6 +19,7 @@ import { canEdit, deleteTemplate, openDamage, samplesNow, useAreaScope, useAreaT
 import { useLiveTokens } from "./useLiveTokens.ts";
 import { useAreaAsk } from "../dice/cast/AreaAsk.tsx";
 import { useViewerFog } from "../../canvas/viewerFog.ts";
+import { useLabels } from "../../state/labels.ts";
 
 /**
  * Every area on the scene and who is in it, kept live as tokens move. This
@@ -32,6 +33,7 @@ import { useViewerFog } from "../../canvas/viewerFog.ts";
 const EMPTY: RoomState["templates"] = {};
 
 export default function AreasPanel(props: PanelProps) {
+  const labels = useLabels();
   const view = useRoomView((s) => s.floorView);
   const sceneId = useRoomView((s) => s.sceneId);
   const you = useRoomView((s) => s.you);
@@ -64,7 +66,7 @@ export default function AreasPanel(props: PanelProps) {
   if (you.role === "dm" && group) return <GroupSave parent="Areas" onBack={() => groupStore.setState({ shownIn: null })} areaIds={areaIds} />;
   const damaged = damageId ? templates[damageId] : undefined;
   if (you.role === "dm" && damaged && damaged.sceneId === scene.id) return <AreaSaveStart template={damaged} onDone={closeDamage} />;
-  const env = { actions, view, scene, role: you.role, youId: you.memberId, area };
+  const env = { actions, view, labels, scene, role: you.role, youId: you.memberId, area };
 
   if (list.length === 0) {
     return <Empty>No areas on this map. Pick the Area tool, then tap a token to cast from it or search a spell.</Empty>;
@@ -73,7 +75,7 @@ export default function AreasPanel(props: PanelProps) {
   return (
     <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(2) }}>
       {list.map((t) => {
-        const entries = inAreaEntries(caughtTokens(t, ctx, scene.id), live.tokens, view.characters);
+        const entries = inAreaEntries(caughtTokens(t, ctx, scene.id), live.tokens, view.characters, labels);
         const caster = t.casterId ? view.tokens[t.casterId] : undefined;
         const attached = t.attachedTo ? view.tokens[t.attachedTo] : undefined;
         const editable = canEdit(env, t);
@@ -96,7 +98,7 @@ export default function AreasPanel(props: PanelProps) {
             <div style={{ display: "flex", alignItems: "baseline", gap: theme.space(2), flexWrap: "wrap" }}>
               <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.strong, overflowWrap: "anywhere" }}>{areaTitle(t)}</span>
               <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>
-                {attached ? `on ${displayName(attached)}` : caster ? `cast by ${displayName(caster)}` : ""}
+                {attached ? `on ${displayName(attached, labels)}` : caster ? `cast by ${displayName(caster, labels)}` : ""}
                 {t.visibility === "dm" ? " · hidden from players" : ""}
               </span>
             </div>

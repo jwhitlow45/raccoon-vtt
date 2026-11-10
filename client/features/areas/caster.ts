@@ -22,6 +22,7 @@ import {
 } from "./placement.ts";
 import { placedAtPoint } from "./presets.ts";
 import type { Grid } from "#shared/rules/grid.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * Which token a new area starts from, and what a tap picks, for the area
@@ -50,11 +51,11 @@ export type AreaCreature = {
   living: boolean;
 };
 
-function creatureOf(view: Pick<RoomState, "characters">, t: Token, yours: boolean): AreaCreature {
+function creatureOf(view: Pick<RoomState, "characters">, t: Token, yours: boolean, labels: Labels): AreaCreature {
   const characterId = "ref" in t.actor ? t.actor.ref : undefined;
   const actor = characterId !== undefined ? view.characters[characterId]?.actor : "inline" in t.actor ? t.actor.inline : undefined;
   const kind = t.companion !== undefined ? "companion" : characterId !== undefined ? "character" : "other";
-  const c: AreaCreature = { tokenId: t.id, name: displayName(t), kind, yours, living: (shownLife(actor, t) ?? "alive") === "alive" };
+  const c: AreaCreature = { tokenId: t.id, name: displayName(t, labels), kind, yours, living: (shownLife(actor, t) ?? "alive") === "alive" };
   if (characterId !== undefined) c.characterId = characterId;
   return c;
 }
@@ -78,12 +79,12 @@ function numbered(list: readonly AreaCreature[]): AreaCreature[] {
  * does a dying or dead one, which is never the default. The DM has none:
  * the DM runs every token, so owning one says nothing about who casts.
  */
-export function areaCreatures(input: { view: Pick<RoomState, "tokens" | "characters">; sceneId: string; you: You }): AreaCreature[] {
+export function areaCreatures(input: { labels: Labels; view: Pick<RoomState, "tokens" | "characters">; sceneId: string; you: You }): AreaCreature[] {
   if (input.you.role === "dm") return [];
   const mine = Object.values(input.view.tokens).filter(
     (t): t is Token => t !== undefined && t.sceneId === input.sceneId && t.kind !== "object" && ownsToken(input.view, input.you.memberId, t),
   );
-  const list = mine.map((t) => creatureOf(input.view, t, true));
+  const list = mine.map((t) => creatureOf(input.view, t, true, input.labels));
   const rank = (c: AreaCreature) => (c.kind === "character" ? 0 : 1);
   list.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name) || a.tokenId.localeCompare(b.tokenId));
   return numbered(list);
@@ -168,6 +169,7 @@ export type FromControl =
   | { form: "chip"; offers: AreaCreature[]; on: string | null };
 
 export function fromOffers(input: {
+  labels: Labels;
   creatures: readonly AreaCreature[];
   draft: AreaDraft | null;
   saved: string | null;
@@ -180,7 +182,7 @@ export function fromOffers(input: {
   const own = draft ? (draftCaster(draft) ?? draft.lastCaster) : undefined;
   const ownToken = own !== undefined ? view.tokens[own] : undefined;
   if (ownToken && ownToken.sceneId === input.sceneId && !creatures.some((c) => c.tokenId === ownToken.id)) {
-    offers = numbered([...creatures, creatureOf(view, ownToken, false)].map(unnumbered(view)));
+    offers = numbered([...creatures, creatureOf(view, ownToken, false, input.labels)].map(unnumbered(view, input.labels)));
   }
   const shown = fromShows({ draft, saved: input.saved });
   const first = offers[0];
@@ -197,10 +199,10 @@ export function fromOffers(input: {
 }
 
 /** An offer under the name its token gives, before numbering, so a list joined by the area's caster numbers once. */
-function unnumbered(view: Pick<RoomState, "tokens">) {
+function unnumbered(view: Pick<RoomState, "tokens">, labels: Labels) {
   return (c: AreaCreature): AreaCreature => {
     const t = view.tokens[c.tokenId];
-    return t ? { ...c, name: displayName(t) } : c;
+    return t ? { ...c, name: displayName(t, labels) } : c;
   };
 }
 

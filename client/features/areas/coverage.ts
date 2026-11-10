@@ -20,6 +20,7 @@ import { auraClip } from "../../canvas/markStand.ts";
 import type { FogView } from "../../canvas/relief/fogView.ts";
 import { standingStretches } from "../../canvas/relief/runs.ts";
 import { displayName } from "../../lib/scene.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * The client's side of area coverage: the rules context for a scene, and
@@ -225,13 +226,14 @@ export function inAreaEntries(
   ids: readonly string[],
   tokens: Readonly<Record<string, Token | undefined>>,
   characters: Readonly<Record<string, Character | undefined>> | undefined,
+  labels: Labels,
 ): InAreaEntry[] {
   const entries: InAreaEntry[] = [];
   for (const id of ids) {
     const t = tokens[id];
     if (!t) continue;
     const actor = "inline" in t.actor ? t.actor.inline : characters?.[t.actor.ref]?.actor;
-    entries.push({ id, name: displayName(t), ally: t.disposition === "ally", dead: actor?.life === "dead" });
+    entries.push({ id, name: displayName(t, labels), ally: t.disposition === "ally", dead: actor?.life === "dead" });
   }
   const order = (e: InAreaEntry) => (e.dead ? 2 : e.ally ? 1 : 0);
   return entries.sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name, undefined, { numeric: true }));

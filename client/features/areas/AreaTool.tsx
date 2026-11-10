@@ -51,6 +51,7 @@ import {
 import { areaCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 import { sceneGrid } from "#shared/rules/grid.ts";
+import { labelsOf } from "../../state/labels.ts";
 
 /**
  * The area of effect tool (design section 9.3, features section 9).
@@ -99,7 +100,7 @@ const gestureSlot = scopeSlot(() => ({
 function envOf(ctx: ToolContext): AreaEnv | null {
   const s = ctx.getState();
   if (!s.floorView || !s.you) return null;
-  return { actions: ctx.actions, view: s.floorView, scene: ctx.scene, role: ctx.role, youId: s.you.memberId, area: ctx.scope.get(areaSlot) };
+  return { actions: ctx.actions, view: s.floorView, labels: labelsOf(s), scene: ctx.scene, role: ctx.role, youId: s.you.memberId, area: ctx.scope.get(areaSlot) };
 }
 
 function sceneToken(env: AreaEnv, id: string | null): AreaToken | undefined {
@@ -369,7 +370,7 @@ export const areaTool: ToolDef = {
       area.selection = seeSelection(area.selection, s.local.selectedIds);
       const saved = area.store.getState().saved;
       const next = savedChoice({
-        creatures: areaCreatures({ view: s.floorView, sceneId: ctx.scene.id, you: s.you }),
+        creatures: areaCreatures({ labels: labelsOf(s), view: s.floorView, sceneId: ctx.scene.id, you: s.you }),
         tokens: s.floorView.tokens,
         sceneId: ctx.scene.id,
         choice: saved,

@@ -9,34 +9,34 @@ const size = { width: 108, height: 30 };
 
 describe("where a placed area's name goes", () => {
   test("above the area in open ground", () => {
-    const spot = areaLabelSpot({ top: { x: 5, y: 2 }, bottom: { x: 5, y: 8 }, size, scale: 30, avoid: tokenBoxes([token("far", { x: 20, y: 20 })], 30, measure) });
+    const spot = areaLabelSpot({ top: { x: 5, y: 2 }, bottom: { x: 5, y: 8 }, size, scale: 30, avoid: tokenBoxes([token("far", { x: 20, y: 20 })], 30, measure, new Map()) });
     assert.deepEqual(spot, { x: 5, y: 2, place: "above", oneLine: false });
   });
 
   test("a nudged token is kept clear of where it is drawn (docs/design/design-v1-snap-off.md 6.2)", () => {
-    const [body] = tokenBoxes([token("n", { x: 4, y: 3, nudge: { x: 3, y: 2 } })], 30, measure);
+    const [body] = tokenBoxes([token("n", { x: 4, y: 3, nudge: { x: 3, y: 2 } })], 30, measure, new Map());
     assert.deepEqual(body, { x0: 4.375, y0: 3.25, x1: 5.375, y1: 4.25 });
   });
 
   test("below the area when a token's name label sits where the name would go", () => {
     // A goblin whose label hangs just above the area's top edge.
-    const avoid = tokenBoxes([token("gob", { x: 4, y: 0, number: 2 })], 30, measure);
+    const avoid = tokenBoxes([token("gob", { x: 4, y: 0, number: 2 })], 30, measure, new Map());
     const spot = areaLabelSpot({ top: { x: 5, y: 2 }, bottom: { x: 5, y: 8 }, size, scale: 30, avoid });
     assert.deepEqual(spot, { x: 5, y: 8, place: "below", oneLine: false });
   });
 
   test("stays above when below is more crowded", () => {
-    const avoid = tokenBoxes([token("a", { x: 4, y: 0 }), token("b", { x: 4, y: 8 }), token("c", { x: 5, y: 8 })], 30, measure);
+    const avoid = tokenBoxes([token("a", { x: 4, y: 0 }), token("b", { x: 4, y: 8 }), token("c", { x: 5, y: 8 })], 30, measure, new Map());
     assert.equal(areaLabelSpot({ top: { x: 5, y: 2 }, bottom: { x: 5, y: 8 }, size, scale: 30, avoid }).place, "above");
   });
 
   test("a token too small on screen for marks only takes its own body, a bigger one its chips and its label's band too", () => {
-    assert.equal(tokenBoxes([token("gob")], 5, measure).length, 1);
-    assert.equal(tokenBoxes([token("gob")], 30, measure).length, 3);
+    assert.equal(tokenBoxes([token("gob")], 5, measure, new Map()).length, 1);
+    assert.equal(tokenBoxes([token("gob")], 30, measure, new Map()).length, 3);
   });
 
   // Spirit Guardians around a PC in melee: a body over the middle of each edge, with room further along them.
-  const melee = () => tokenBoxes([token("over", { x: 4.5, y: 1 }), token("under", { x: 4.5, y: 7 })], 30, measure);
+  const melee = () => tokenBoxes([token("over", { x: 4.5, y: 1 }), token("under", { x: 4.5, y: 7 })], 30, measure, new Map());
   const edge = (dx: number, side: "top" | "bottom") => ({ x: 5 + dx, y: side === "top" ? 2 : 8 });
 
   test("slides along an edge before it covers a token", () => {
@@ -52,7 +52,7 @@ describe("where a placed area's name goes", () => {
   test("falls back to one cut line when the whole name has nowhere clear to go", () => {
     // Bodies all along both edges: the whole name has nowhere clear to go, so the smaller pill takes the least covered spot.
     const row = (y: number) => [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((x) => token(`t${x}-${y}`, { x, y }));
-    const avoid = tokenBoxes([...row(0.6), ...row(8.4)], 30, measure);
+    const avoid = tokenBoxes([...row(0.6), ...row(8.4)], 30, measure, new Map());
     const spot = areaLabelSpot({ top: { x: 5, y: 2 }, bottom: { x: 5, y: 8 }, reach: 3, edge, size: { width: 108, height: 44 }, oneLineSize: { width: 108, height: 26 }, scale: 30, avoid });
     assert.equal(spot.oneLine, true);
   });

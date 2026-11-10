@@ -7,6 +7,7 @@ import { NO_CREATURE } from "../../areas/FromControl.tsx";
 import { useOptionStore } from "../optionState.ts";
 import { useCastTracker } from "./alerts.ts";
 import { areaAskSpec, areaSpellName, castSendsSlot, openedBlock, pendingSend } from "./cast.ts";
+import { labelsOf } from "../../../state/labels.ts";
 
 /**
  * A player's Ask for saves on an area of their own (docs/design/design-v1-player-save-spell.md
@@ -25,12 +26,12 @@ export function useAreaAsk(template: Pick<AreaTemplate, "id" | "casterId" | "spe
   const asked = useRoomView((s) => (s.view ? askedArea(s.view, template.id) : false));
   const none = useRoomView((s) => {
     const { view, you } = s;
-    return !view || !you || areaCreatures({ view, sceneId: template.sceneId, you }).length === 0;
+    return !view || !you || areaCreatures({ labels: labelsOf(s), view, sceneId: template.sceneId, you }).length === 0;
   });
   const open = () => {
     const { view, you } = room.getState();
     if (!view || !you) return;
-    const spec = areaAskSpec({ creatures: areaCreatures({ view, sceneId: template.sceneId, you }), view, me: you.memberId, template, picked: options.getState().picked });
+    const spec = areaAskSpec({ creatures: areaCreatures({ labels: labelsOf(room.getState()), view, sceneId: template.sceneId, you }), view, me: you.memberId, template, picked: options.getState().picked });
     if (!spec) return;
     // A send of this area's that has not settled well comes back with its block, so the block offers Ask again, never a second roll.
     const pending = pendingSend({ spec, sends: sendStore.getState().sends, casts: view.casts, state: (id) => tracker.state(id) });
