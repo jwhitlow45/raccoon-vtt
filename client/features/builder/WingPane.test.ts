@@ -6,7 +6,7 @@ import { squareWingBase } from "../dungeon/handPlans.ts";
 import { wingPreviewOf } from "../dungeon/scratch.ts";
 import { DEFAULT_SETTINGS } from "../dungeon/settings.ts";
 
-const { forgetQuestion, wingPlanner } = await import("./WingPane.tsx");
+const { forgetQuestion, problemWords, wingPlanner } = await import("./WingPane.tsx");
 
 /*
  * The wing pane's parts that run without a page (docs/design: dungeon
@@ -76,4 +76,9 @@ test("closing the pane while the forget question shows answers it as Cancel, so 
   assert.equal(await yes, true);
   assert.equal(shown.at(-1), null, "the question goes once answered");
   again.close();
+});
+
+test("no way from the area names Reroll first, since another layout often finds one where the area already meets the wall", () => {
+  // LP37 polish: about one seed in six found no way that a Reroll then found.
+  for (const hex of [false, true]) assert.match(problemWords("noWay", hex), /^No way from the area to that wall\. Reroll, /);
 });

@@ -110,7 +110,7 @@ export function problemWords(problem: WingProblem, hex: boolean): string {
 
 export const WING_NEAR = "Something stands too near that wall for a doorway. Tap another wall.";
 export const WING_NO_STAIRS = "No room for stairs at that wall. Tap another wall.";
-export const WING_NO_WAY = "No way from the area to that wall. Tap a nearer wall or drag the area closer.";
+export const WING_NO_WAY = "No way from the area to that wall. Reroll, tap a nearer wall or drag the area closer.";
 export const WING_FULL = "This scene has too many walls and doors for a wing.";
 export const WING_HEX_TOO_MANY = "Too many rooms for the walls a hex scene holds. Try fewer rooms or Sparse.";
 
