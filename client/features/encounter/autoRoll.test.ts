@@ -61,7 +61,7 @@ const POISONED: AdvantageSource = { kind: "dis", from: "poisoned" };
 const ids = (groups: { rows: { entryId: string }[] }[]) => groups.map((g) => g.rows.map((r) => r.entryId));
 
 /** The rows as the tracker reads them, each with the initiative preset from the DM's view. */
-function rowsOf(state: RoomState, entries: readonly InitEntry[] = sortedEntries(state.encounter?.entries ?? []), name: (e: InitEntry) => string = (e) => entryName(state, e)) {
+function rowsOf(state: RoomState, entries: readonly InitEntry[] = sortedEntries(state.encounter?.entries ?? []), name: (e: InitEntry) => string = (e) => entryName(state, e, new Map())) {
   const dice = { you: { memberId: DM.memberId, role: "dm" as const }, view: state, srd: { monsters: null, rolls: null } };
   return rollRows(state, entries, name, (creature) => presetFor(dice, creature, { kind: "initiative" }, { rolls: null }));
 }

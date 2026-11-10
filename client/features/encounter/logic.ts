@@ -8,6 +8,7 @@ import { actsOnCharacterTurn } from "#shared/reducer/companions.ts";
 import { advantageHint, compareEntries, rowCharacter, rowGroup } from "#shared/rules/initiative.ts";
 import { displayName } from "../../lib/scene.ts";
 import { withheldFromEveryPlayer } from "../vision/union.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * The initiative tracker's decisions, kept free of React and the DOM so they
@@ -200,10 +201,10 @@ export function entryActor(view: TrackerView, entry: Pick<InitEntry, "tokenId" |
   return undefined;
 }
 
-export function entryName(view: TrackerView, entry: Pick<InitEntry, "tokenId" | "characterId" | "label">): string {
+export function entryName(view: TrackerView, entry: Pick<InitEntry, "tokenId" | "characterId" | "label">, labels: Labels): string {
   if (entry.tokenId !== undefined) {
     const token = view.tokens[entry.tokenId];
-    if (token) return displayName(token);
+    if (token) return displayName(token, labels);
     // A DM's view holds one scene's tokens, so a row can point at a creature on another one.
     return entry.label ?? "Creature on another scene";
   }
@@ -498,11 +499,13 @@ export function stripRows(input: {
 
 export type AddMode = "selected" | "scene" | "visible";
 
-function tokenOrder(a: Token, b: Token): number {
-  const an = displayName(a);
-  const bn = displayName(b);
-  if (an !== bn) return an < bn ? -1 : 1;
-  return a.id < b.id ? -1 : 1;
+function tokenOrder(labels: Labels): (a: Token, b: Token) => number {
+  return (a, b) => {
+    const an = displayName(a, labels);
+    const bn = displayName(b, labels);
+    if (an !== bn) return an < bn ? -1 : 1;
+    return a.id < b.id ? -1 : 1;
+  };
 }
 
 /**
@@ -519,7 +522,7 @@ function tokenOrder(a: Token, b: Token): number {
  * Tokens with a row in `fight` are left out: the view's fight, or one whose
  * start still waits for its answer (state/store.ts fightAhead).
  */
-export function addCandidates(view: RoomState, sceneId: string | null, mode: AddMode, selectedId: string | null, fight: { readonly entries: readonly Pick<InitEntry, "tokenId">[] } | null = view.encounter): Token[] {
+export function addCandidates(view: RoomState, sceneId: string | null, mode: AddMode, selectedId: string | null, labels: Labels, fight: { readonly entries: readonly Pick<InitEntry, "tokenId">[] } | null = view.encounter): Token[] {
   if (sceneId === null) return [];
   const taken = new Set((fight?.entries ?? []).map((e) => e.tokenId).filter((id) => id !== undefined));
   const out: Token[] = [];
@@ -535,16 +538,16 @@ export function addCandidates(view: RoomState, sceneId: string | null, mode: Add
     if (mode === "visible" && (token.visibility === "dm" || withheldFromEveryPlayer(view, token))) continue;
     out.push(token);
   }
-  return out.sort(tokenOrder);
+  return out.sort(tokenOrder(labels));
 }
 
 /** A player's own creatures on their scene that are not in the fight yet. */
-export function ownCandidates(view: Pick<RoomState, "tokens" | "characters" | "encounter">, memberId: string, sceneId: string | null): Token[] {
+export function ownCandidates(view: Pick<RoomState, "tokens" | "characters" | "encounter">, memberId: string, sceneId: string | null, labels: Labels): Token[] {
   if (sceneId === null) return [];
   const taken = new Set((view.encounter?.entries ?? []).map((e) => e.tokenId).filter((id) => id !== undefined));
   return Object.values(view.tokens)
     .filter((t) => t && t.sceneId === sceneId && t.kind !== "object" && !taken.has(t.id) && !actsOnCharacterTurn(t) && ownsEntry(view, memberId, { tokenId: t.id }))
-    .sort(tokenOrder);
+    .sort(tokenOrder(labels));
 }
 
 /**
@@ -556,12 +559,12 @@ export function ownCandidates(view: Pick<RoomState, "tokens" | "characters" | "e
  * only. A companion on another scene, or one the viewer cannot see, is not
  * in the copy, so it is not nested.
  */
-export function nestedCompanions(view: Pick<RoomState, "tokens">, entry: Pick<InitEntry, "tokenId" | "characterId">): Token[] {
+export function nestedCompanions(view: Pick<RoomState, "tokens">, entry: Pick<InitEntry, "tokenId" | "characterId">, labels: Labels): Token[] {
   const characterId = rowCharacter(view, entry);
   if (characterId === undefined) return [];
   return Object.values(view.tokens)
     .filter((t): t is Token => !!t && t.companion?.turn === "shared" && t.companion.of === characterId)
-    .sort(tokenOrder);
+    .sort(tokenOrder(labels));
 }
 
 /** New rows for tokens, cut into batches the op schema accepts. The reducer fills groups, hidden flags and scores. */

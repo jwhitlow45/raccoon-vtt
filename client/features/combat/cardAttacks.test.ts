@@ -51,8 +51,8 @@ describe("the turn card's gating", () => {
   const dmYou = { role: "dm" as const, memberId: "dm1" };
   test("a creature with attacks and no uses gets its card, counting them, and one with neither gets none", () => {
     const view = table();
-    const participants = turnParticipants(view);
-    const base = { view, you: dmYou, participants, uses: participants.map(() => []), loading: false, failed: false, dismissed: new Set<string>() };
+    const participants = turnParticipants(view, new Map());
+    const base = { labels: new Map(), view, you: dmYou, participants, uses: participants.map(() => []), loading: false, failed: false, dismissed: new Set<string>() };
     assert.equal(combatAlerts(base).turn, null, "no attacks known: as before, no card");
     const withAttacks = combatAlerts({ ...base, attacks: participants.map(() => 1) });
     assert.deepEqual([withAttacks.turn?.attacks, withAttacks.turn?.count, withAttacks.turn?.blocks.length], [1, 0, 1]);
@@ -61,16 +61,16 @@ describe("the turn card's gating", () => {
 
   test("while its attacks load the card keeps its place, and once loaded with none it goes", () => {
     const view = table();
-    const participants = turnParticipants(view);
-    const base = { view, you: dmYou, participants, uses: participants.map(() => []), dismissed: new Set<string>(), failed: false };
+    const participants = turnParticipants(view, new Map());
+    const base = { labels: new Map(), view, you: dmYou, participants, uses: participants.map(() => []), dismissed: new Set<string>(), failed: false };
     assert.ok(combatAlerts({ ...base, attacks: [null], loading: true }).turn, "loading: it stays");
     assert.equal(combatAlerts({ ...base, attacks: [null], loading: false }).turn, null);
   });
 
   test("a rolls table that failed keeps the card with its failure while its attacks cannot be known, uses loaded or not", () => {
     const view = table();
-    const participants = turnParticipants(view);
-    const base = { view, you: dmYou, participants, dismissed: new Set<string>(), attacks: [null], ...cardLoad({ loading: false, failed: false }, { loading: false, failed: true }) };
+    const participants = turnParticipants(view, new Map());
+    const base = { labels: new Map(), view, you: dmYou, participants, dismissed: new Set<string>(), attacks: [null], ...cardLoad({ loading: false, failed: false }, { loading: false, failed: true }) };
     const card = combatAlerts({ ...base, uses: [[]] }).turn;
     assert.ok(card, "uses loaded with none: it stays");
     assert.deepEqual([card.failed, card.loading, card.blocks.length], [true, false, 1], "failed, for AttackRows' reload");
@@ -89,8 +89,8 @@ describe("the turn card's gating", () => {
 
   test("each line says its own part's wait or failure: the uses never read as failed for the rolls table's sake", () => {
     const view = table();
-    const participants = turnParticipants(view);
-    const base = { view, you: dmYou, participants, dismissed: new Set<string>(), attacks: [null], uses: [null] };
+    const participants = turnParticipants(view, new Map());
+    const base = { labels: new Map(), view, you: dmYou, participants, dismissed: new Set<string>(), attacks: [null], uses: [null] };
     const lines = (uses: { loading: boolean; failed: boolean }, rolls: { loading: boolean; failed: boolean }, known = false) => {
       const card = combatAlerts({ ...base, ...cardLoad(uses, rolls) }).turn;
       assert.ok(card, "the card stays while its parts are unknown");
@@ -113,9 +113,9 @@ describe("the turn card's gating", () => {
 
   test("dismissed, it stays away for the turn as before", () => {
     const view = table();
-    const participants = turnParticipants(view);
-    const first = combatAlerts({ view, you: dmYou, participants, uses: [[]], attacks: [1], loading: false, failed: false, dismissed: new Set() }).turn!;
-    assert.equal(combatAlerts({ view, you: dmYou, participants, uses: [[]], attacks: [1], loading: false, failed: false, dismissed: new Set([first.id]) }).turn, null);
+    const participants = turnParticipants(view, new Map());
+    const first = combatAlerts({ labels: new Map(), view, you: dmYou, participants, uses: [[]], attacks: [1], loading: false, failed: false, dismissed: new Set() }).turn!;
+    assert.equal(combatAlerts({ labels: new Map(), view, you: dmYou, participants, uses: [[]], attacks: [1], loading: false, failed: false, dismissed: new Set([first.id]) }).turn, null);
   });
 });
 
@@ -123,13 +123,13 @@ describe("the turn card's results count from the turn's start", () => {
   const dmYou = { role: "dm" as const, memberId: "dm1" };
   const turnLine = (id: string, data: object): LogEntry => ({ id, at: "2026-11-06T20:00:00.000Z", kind: "event", data: { type: "turn", ...data } as never });
   const since = (view: RoomState) => {
-    const participants = turnParticipants(view);
-    return combatAlerts({ view, you: dmYou, participants, uses: participants.map(() => []), attacks: participants.map(() => 1), loading: false, failed: false, dismissed: new Set() }).turn?.since;
+    const participants = turnParticipants(view, new Map());
+    return combatAlerts({ labels: new Map(), view, you: dmYou, participants, uses: participants.map(() => []), attacks: participants.map(() => 1), loading: false, failed: false, dismissed: new Set() }).turn?.since;
   };
 
   test("a healthy lurker has no turn record, so its turn's start names the turn", () => {
     const view = table();
-    assert.equal(turnParticipants(view)[0]?.record, null, "the case under test: a landing creature without a record");
+    assert.equal(turnParticipants(view, new Map())[0]?.record, null, "the case under test: a landing creature without a record");
     view.encounter!.turnStart = { entryId: "e1", tokenId: "m1", sceneId: "s1", x: 5, y: 5, elevation: 0, seq: 10 };
     assert.equal(since(view), 10);
   });

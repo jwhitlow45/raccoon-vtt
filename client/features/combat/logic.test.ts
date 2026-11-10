@@ -459,8 +459,8 @@ const dmYou = { role: "dm" as const, memberId: "dm1" };
 const patYou = { role: "player" as const, memberId: "p1" };
 
 function cards(state: RoomState, you: typeof dmYou | typeof patYou, uses: (holder: string) => readonly LimitedUse[] | null = () => [], dismissed: ReadonlySet<string> = new Set()) {
-  const participants = turnParticipants(state).filter((p) => answersFor(state, you, p.target) || (you.role === "dm" && p.record?.life === "dying"));
-  return combatAlerts({ view: state, you, participants, uses: participants.map((p) => uses(p.holder)), loading: false, failed: false, dismissed });
+  const participants = turnParticipants(state, new Map()).filter((p) => answersFor(state, you, p.target) || (you.role === "dm" && p.record?.life === "dying"));
+  return combatAlerts({ labels: new Map(), view: state, you, participants, uses: participants.map((p) => uses(p.holder)), loading: false, failed: false, dismissed });
 }
 
 describe("the cards of a turn, from what the reducer wrote at its start", () => {
@@ -628,11 +628,11 @@ describe("the cards of a turn, from what the reducer wrote at its start", () => 
     const f = fight();
     while (f.active() !== "eg") f.run({ t: "encounter.next" });
     assert.deepEqual(
-      turnParticipants(f.state).map((p) => [p.holder, p.landing, p.record !== null]),
+      turnParticipants(f.state, new Map()).map((p) => [p.holder, p.landing, p.record !== null]),
       [["t:goblin", true, false]],
     );
     const marked = { ...f.state, encounter: { ...f.state.encounter!, entries: f.state.encounter!.entries.map((e) => (e.id === "eg" ? { ...e, markRound: f.state.encounter!.round } : e)) } };
-    assert.deepEqual(turnParticipants(marked), []);
+    assert.deepEqual(turnParticipants(marked, new Map()), []);
     // Another holder with a current record joins after the landing row's, sorted by holder.
     const ridden = structuredClone(f.state);
     (ridden.tokens.troll!.actor as { inline: Actor }).inline.turnRecord = { id: 99, entryId: "eg", round: ridden.encounter!.round, hp: 40, life: "alive" };
@@ -640,7 +640,7 @@ describe("the cards of a turn, from what the reducer wrote at its start", () => 
     ridden.characters.thorn!.actor.turnRecord = { id: 99, entryId: "eg", round: ridden.encounter!.round, hp: 0, life: "dying" };
     ridden.tokens.ant = token("ant", { name: "Giant Ant", actor: { inline: actor({ turnRecord: { id: 99, entryId: "eg", round: ridden.encounter!.round, hp: 20, life: "alive" } }) } });
     assert.deepEqual(
-      turnParticipants(ridden).map((p) => p.holder),
+      turnParticipants(ridden, new Map()).map((p) => p.holder),
       ["t:goblin", "c:thorn", "t:ant", "t:dragon", "t:troll"],
     );
     assert.equal(answersFor(ridden, patYou, { tokenId: "troll" }), false);

@@ -16,6 +16,7 @@ import type { PanelRoll } from "../dice/useDicePanel.ts";
 import { d20Text } from "../rolls/card.ts";
 import { askOp, targetRef, type AskCheck } from "../rolls/logic.ts";
 import { entryName } from "./logic.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * The fight alerts' cards that roll a save after the fact
@@ -94,8 +95,8 @@ export type SaveFacts = {
 
 type FactsView = Pick<RoomState, "tokens" | "characters" | "members" | "meta" | "scenes">;
 
-export function saveFacts(view: FactsView, target: ActorTarget): SaveFacts {
-  const name = entryName(view, target);
+export function saveFacts(view: FactsView, target: ActorTarget, labels: Labels): SaveFacts {
+  const name = entryName(view, target, labels);
   if ("characterId" in target) {
     const character = view.characters[target.characterId];
     const played = character !== undefined && anyPlayer(view, character.ownerIds);

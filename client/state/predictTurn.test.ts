@@ -108,8 +108,8 @@ function thornActor(view: RoomState) {
 /** The death save card the DM's device draws for Thorn, by its id, which keys on his record. */
 function thornCards(view: RoomState, dismissed: ReadonlySet<string> = new Set()): string[] {
   const you = { role: "dm" as const, memberId: "dm1" };
-  const participants = turnParticipants(view).filter((p) => answersFor(view, you, p.target) || p.record?.life === "dying");
-  return combatAlerts({ view, you, participants, uses: participants.map(() => []), loading: false, failed: false, dismissed }).deathSaves.map((c) => c.id);
+  const participants = turnParticipants(view, new Map()).filter((p) => answersFor(view, you, p.target) || p.record?.life === "dying");
+  return combatAlerts({ labels: new Map(), view, you, participants, uses: participants.map(() => []), loading: false, failed: false, dismissed }).deathSaves.map((c) => c.id);
 }
 
 for (const rows of ["token", "character"] as const) {

@@ -57,7 +57,7 @@ function only(view: RoomState): PendingSave {
 
 function input(view: RoomState, over: Partial<SaveCardInput> = {}): SaveCardInput {
   const pending = only(view);
-  return { pending, facts: saveFacts(view, pending.target), bonus: 1, loading: false, preset: NO_PRESET, failTapped: false, rolled: null, ...over };
+  return { pending, facts: saveFacts(view, pending.target, new Map()), bonus: 1, loading: false, preset: NO_PRESET, failTapped: false, rolled: null, ...over };
 }
 
 const actionsOf = (card: ReturnType<typeof saveCard>) => card.buttons.map((b) => b.text);
@@ -98,7 +98,7 @@ describe("save-ends cards", () => {
   test("a monster with Legendary Resistance left: a fail waits on Use Legendary Resistance or Accept failure", () => {
     const view = goblinRoom({ resist: { max: 3, used: 1 } });
     const pending = only(view);
-    assert.equal(saveFacts(view, pending.target).legendaryLeft, 2);
+    assert.equal(saveFacts(view, pending.target, new Map()).legendaryLeft, 2);
     assert.deepEqual(actionsOf(saveCard(input(view))), ["Roll +1", "Passed", "Failed", "Dismiss"]);
     assert.equal(failOp(pending, 2, "tag1"), null);
     assert.equal(landedOp(pending, 9, 2), null);
@@ -116,7 +116,7 @@ describe("save-ends cards", () => {
     assert.deepEqual(settleOp(pending, "resolved"), { t: "actor.saveDue", target: { tokenId: "g2" }, effectId: "e1", due: "5:0", state: "resolved" });
     // Used up: no choice is left, so a fail settles as it did before.
     const spent = goblinRoom({ resist: { max: 3, used: 3 } });
-    assert.equal(saveFacts(spent, only(spent).target).legendaryLeft, 0);
+    assert.equal(saveFacts(spent, only(spent).target, new Map()).legendaryLeft, 0);
   });
 
   test("a pass, typed or rolled, ends the effect, and the card's Dismiss settles it dismissed", () => {
@@ -274,7 +274,7 @@ describe("a save-ends card for a creature a player plays", () => {
     const view = room({ characters: { c1: character("c1", { name: "Bree", actor: actor({ effects: [frightened("e1", { id: "7:0", state: "pending" })] }) }) } });
     const pending = only(view);
     assert.deepEqual(pending.target, { characterId: "c1" });
-    assert.deepEqual(saveFacts(view, pending.target), { name: "Bree", played: true, askable: true, legendaryLeft: 0 });
+    assert.deepEqual(saveFacts(view, pending.target, new Map()), { name: "Bree", played: true, askable: true, legendaryLeft: 0 });
   });
 
   test("a creature is askable on any floor of the players' scene, not on another scene", () => {
@@ -283,9 +283,9 @@ describe("a save-ends card for a creature a player plays", () => {
     view.scenes.up = scene("up", { floor: { of: "s1", level: 1, name: "Upper floor" } });
     view.scenes.s2 = scene("s2");
     const target = only(view).target;
-    assert.equal(saveFacts(view, target).askable, true);
+    assert.equal(saveFacts(view, target, new Map()).askable, true);
     view.tokens.b1 = { ...view.tokens.b1!, sceneId: "s2" };
-    assert.equal(saveFacts(view, target).askable, false);
+    assert.equal(saveFacts(view, target, new Map()).askable, false);
   });
 });
 
@@ -438,7 +438,7 @@ describe("no outcome both removes an effect and deals damage", () => {
   test("the group save's Apply never sends remove, with damage, conditions and a save-ends rider on the page", () => {
     const view = room({ tokens: { g1: token("g1", { kind: "monster", name: "Goblin", actor: { inline: actor({ hp: { cur: 30, max: 30, temp: 0 } }) } }) } });
     const dice = { you: { memberId: "dm1", role: "dm" as const }, view, srd: { monsters: [], rolls: {} } };
-    const rows = groupRows(dice, ["g1"], { kind: "save", ability: "con" }, false);
+    const rows = groupRows(dice, ["g1"], { kind: "save", ability: "con" }, false, new Map());
     const page = mark(
       {
         ...newPage({

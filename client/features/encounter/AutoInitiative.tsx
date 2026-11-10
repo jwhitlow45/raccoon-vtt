@@ -26,6 +26,8 @@ import { modeIn, startStep, useAuto, useAutoStore, useRollBusy, useShownRoll, us
 import { useRowFacts, useSendAll, useSortedEntries } from "./hooks.ts";
 import { entryActor, entryName, sortedEntries } from "./logic.ts";
 import { RollBadge } from "./parts.tsx";
+import type { Labels } from "../../lib/labels.ts";
+import { labelsOf, useLabels } from "../../state/labels.ts";
 
 /**
  * The DM's auto initiative (features section 10, design 9.4): the controls
@@ -40,15 +42,16 @@ const INITIATIVE: D20Test = { kind: "initiative" };
 const NO_CREATURES: ActorTarget[] = [];
 
 /** The monster rows auto initiative can roll in a view, each with the initiative preset every d20 path reads. */
-function rowsIn(dice: DiceView, entries: readonly InitEntry[]) {
+function rowsIn(dice: DiceView, entries: readonly InitEntry[], labels: Labels) {
   // Magic Resistance bears only on saves against spells, so initiative never waits for the block that says whether a creature has it.
-  return rollRows(dice.view, entries, (e) => entryName(dice.view, e), (creature) => presetFor(dice, creature, INITIATIVE, { rolls: null }));
+  return rollRows(dice.view, entries, (e) => entryName(dice.view, e, labels), (creature) => presetFor(dice, creature, INITIATIVE, { rolls: null }));
 }
 
 /** The monster rows auto initiative can roll, from the DM's view. */
 function useRollRows(entries: readonly InitEntry[]) {
+  const labels = useLabels();
   const { dice } = useDiceView(NO_CREATURES);
-  return useMemo(() => (dice ? rowsIn(dice, entries) : { rows: [], skipped: [] }), [dice, entries]);
+  return useMemo(() => (dice ? rowsIn(dice, entries, labels) : { rows: [], skipped: [] }), [dice, entries, labels]);
 }
 
 /**
@@ -106,7 +109,7 @@ export function useStartFight(): (batches: readonly EntryInput[][], from: StartF
     const view = state.view;
     if (!view?.encounter || !state.you) return;
     const dice: DiceView = { you: state.you, view, sceneId: state.sceneId, srd: { monsters: null, rolls: null } };
-    const { rows } = rowsIn(dice, sortedEntries(view.encounter.entries));
+    const { rows } = rowsIn(dice, sortedEntries(view.encounter.entries), labelsOf(state));
     const toRoll = rowsToRoll(rows, false);
     // Nobody yet, a fight with no monster rows, or every monster already valued by its score: nothing to roll.
     if (toRoll.length === 0) return;

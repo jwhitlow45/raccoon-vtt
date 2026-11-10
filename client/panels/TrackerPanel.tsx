@@ -53,6 +53,7 @@ import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/v
 import { layoutSize } from "../features/device/layout.ts";
 import { uiScale } from "../features/device/settings.ts";
 import { TURN_SOUND, TURN_SOUND_HELP } from "../features/sound/panel/words.ts";
+import { useLabels } from "../state/labels.ts";
 
 /**
  * The initiative tracker (features section 10, design 9.4). Players roll at
@@ -288,6 +289,7 @@ function TurnWords(props: { shown: boolean; children: ReactNode }) {
 }
 
 function TurnControls(props: { compact: boolean; onCompactShown(): void; onContentChange(): void }) {
+  const labels = useLabels();
   const you = useYou();
   const actions = useRoomActions();
   const store = useRoomStore();
@@ -309,7 +311,7 @@ function TurnControls(props: { compact: boolean; onCompactShown(): void; onConte
   const active = entries.find((e) => e.id === activeEntryId);
   const status = turnStatus({ entries, activeEntryId, mine: facts.mine });
 
-  const line = whoseTurn({ dm: you.role === "dm", started, activeName: active ? entryName(facts.view, active) : null, yours: status === "yours" }).line;
+  const line = whoseTurn({ dm: you.role === "dm", started, activeName: active ? entryName(facts.view, active, labels) : null, yours: status === "yours" }).line;
   const ends = you.role === "dm" ? (activeEntryId === null ? "start" : "next") : status === "yours" || endTurn.waiting ? `end ${endTurn.waiting}` : "none";
   // Its figures are all one width, so only its length and whether time is up change the clock's.
   const clock = timer && active ? `${timer.over} ${clockText(timer).length}` : "none";
@@ -578,6 +580,7 @@ function ValueEntryFromView(props: { onDone(): void }) {
  * map, with the same mode or Shift.
  */
 function SelectedCreatures() {
+  const labels = useLabels();
   const ui = useRoomUi();
   const multi = useRoomView((s) => s.local.multi);
   const selectedIds = useRoomView((s) => s.local.selectedIds);
@@ -594,7 +597,7 @@ function SelectedCreatures() {
       {picked.length >= 2 ? (
         <>
           <span style={{ overflowWrap: "anywhere" }}>
-            <strong>{picked.length} selected:</strong> {picked.map((t) => displayName(t)).join(", ")}
+            <strong>{picked.length} selected:</strong> {picked.map((t) => displayName(t, labels)).join(", ")}
           </span>
           <GroupHpEntry tokens={picked} place="panel" />
           <Wrap>
@@ -604,7 +607,7 @@ function SelectedCreatures() {
           </Wrap>
         </>
       ) : multi ? (
-        <Help>{picked.length === 1 ? `${displayName(picked[0]!)} is picked. Tap more rows.` : "Tap rows to pick creatures."}</Help>
+        <Help>{picked.length === 1 ? `${displayName(picked[0]!, labels)} is picked. Tap more rows.` : "Tap rows to pick creatures."}</Help>
       ) : null}
     </Section>
   );
@@ -620,6 +623,7 @@ const NO_OPS: readonly number[] = [];
  * which reads both fog layers and the party's sight besides the tokens.
  */
 function useCandidates(selectedTokenId: string | null): Record<AddMode, Token[]> {
+  const labels = useLabels();
   const view = useRoomView((s) => s.view);
   const sceneId = useRoomView((s) => s.sceneId);
   // A start still waiting for its answer counts, so its creatures are not offered again.
@@ -628,9 +632,9 @@ function useCandidates(selectedTokenId: string | null): Record<AddMode, Token[]>
     () =>
       view
         ? {
-            selected: addCandidates(view, sceneId, "selected", selectedTokenId, fight),
-            scene: addCandidates(view, sceneId, "scene", selectedTokenId, fight),
-            visible: addCandidates(view, sceneId, "visible", selectedTokenId, fight),
+            selected: addCandidates(view, sceneId, "selected", selectedTokenId, labels, fight),
+            scene: addCandidates(view, sceneId, "scene", selectedTokenId, labels, fight),
+            visible: addCandidates(view, sceneId, "visible", selectedTokenId, labels, fight),
           }
         : NO_CANDIDATES,
     [view, sceneId, selectedTokenId, fight],
@@ -691,6 +695,7 @@ function StartFight(props: { selectedTokenId: string | null }) {
  * it could not read.
  */
 function AddButtons(props: { candidates: Record<AddMode, Token[]>; stateOf(tokens: readonly Token[]): JoinState; onAdd(tokens: Token[], from: StartFrom): void; rolling?: StartFrom | null; pressed?: StartFrom | "nobody" | null }) {
+  const labels = useLabels();
   const { candidates } = props;
   const selected = candidates.selected[0];
   const button = (tokens: Token[], from: StartFrom, words: ReactNode) => {
@@ -706,7 +711,7 @@ function AddButtons(props: { candidates: Record<AddMode, Token[]>; stateOf(token
   };
   return (
     <>
-      {button(candidates.selected, "selected", selected ? displayName(selected) : "Selected token")}
+      {button(candidates.selected, "selected", selected ? displayName(selected, labels) : "Selected token")}
       {button(candidates.scene, "scene", `Everyone here (${candidates.scene.length})`)}
       {button(candidates.visible, "visible", `Visible to players (${candidates.visible.length})`)}
     </>
@@ -833,13 +838,14 @@ function DmSettings() {
 
 /** A player adds their own creatures on the scene. The server answers before the row appears. */
 function JoinFight() {
+  const labels = useLabels();
   const you = useYou();
   const tokens = useRoomView((s) => s.view?.tokens);
   const characters = useRoomView((s) => s.view?.characters);
   const encounter = useRoomView((s) => s.view?.encounter ?? null);
   const sceneId = useRoomView((s) => s.sceneId);
   const own = useMemo(
-    () => ownCandidates({ tokens: tokens ?? {}, characters: characters ?? {}, encounter }, you.memberId, sceneId),
+    () => ownCandidates({ tokens: tokens ?? {}, characters: characters ?? {}, encounter }, you.memberId, sceneId, labels),
     [tokens, characters, encounter, you.memberId, sceneId],
   );
   if (own.length === 0) return null;
@@ -855,11 +861,12 @@ function JoinFight() {
 }
 
 function JoinButton(props: { token: Token }) {
+  const labels = useLabels();
   const actions = useRoomActions();
   const { send, waiting } = useSend();
   return (
     <Button size="sm" busy={waiting} onClick={() => send({ t: "encounter.add", entries: [{ id: actions.newId(), tokenId: props.token.id }] })}>
-      Add {displayName(props.token)}
+      Add {displayName(props.token, labels)}
     </Button>
   );
 }

@@ -183,7 +183,7 @@ describe("the group save page, offline, draws its setup and outcome off", () => 
     const kind = { kind: "save", ability: "dex" } as const;
     const page = {
       ...newPage({ id: "p", sceneId: "s1", source: { kind: "selection", tokenIds: ["g1"] }, test: kind, dc: 13, secret: false, spell: false, switches: { dcShown: true, resultShown: true }, outcome: { damage: "8d6 fire", conditions: ["prone"] } }),
-      rows: groupRows({ view, you: DM, srd: { monsters: [], rolls: {} } } as never, ["g1"], kind, false),
+      rows: groupRows({ view, you: DM, srd: { monsters: [], rolls: {} } } as never, ["g1"], kind, false, new Map()),
     };
     const scope = new RoomScope();
     // A server render reads a store's initial state.

@@ -34,6 +34,7 @@ import {
   type CardChip,
   type SaveAction,
 } from "./saveCards.ts";
+import { labelsOf, useLabels } from "../../state/labels.ts";
 
 /**
  * The DM's pending save-ends occurrences (docs/design/design-v1-roll-options.md
@@ -65,6 +66,7 @@ export function saveAlertId(pending: PendingSave): string {
  * goes as its op lands.
  */
 export function SaveEndsCard(props: { pending: PendingSave; onResult(text: string, suffix?: string): void }) {
+  const labels = useLabels();
   const { pending } = props;
   const root = useRef<HTMLElement>(null);
   const actions = useRoomActions();
@@ -98,7 +100,7 @@ export function SaveEndsCard(props: { pending: PendingSave; onResult(text: strin
     // Settled or asked meanwhile, from this device or another: the card that rolled no longer decides it.
     const now = pendingSaves(state).find((p) => p.effect.due.id === pending.effect.due.id);
     if (!now || now.request) return;
-    const nowFacts = saveFacts(state, now.target);
+    const nowFacts = saveFacts(state, now.target, labelsOf(room.getState()));
     const op = landedOp(now, total, nowFacts.legendaryLeft);
     if (!op) return;
     send.send(total >= now.effect.save.dc ? "pass" : "fail", [op]);
@@ -108,7 +110,7 @@ export function SaveEndsCard(props: { pending: PendingSave; onResult(text: strin
   });
 
   if (!view) return null;
-  const facts = saveFacts(view, pending.target);
+  const facts = saveFacts(view, pending.target, labels);
   const rolled = !pending.request && card.rolls[0] ? card.rolls[0].total : null;
   const model = saveCard({ pending, facts, bonus, typed: typed.typing, loading, preset, failTapped, rolled });
   const trouble = error ?? rollTrouble(card.receipt, card.unsent);

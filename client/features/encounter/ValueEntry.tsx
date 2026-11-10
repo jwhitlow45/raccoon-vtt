@@ -11,6 +11,7 @@ import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { takeOverPanelScroll } from "../panels.ts";
 import { entryName, groupEntries, valueChanges, valueText, type ValueField } from "./logic.ts";
 import { Portrait } from "./parts.tsx";
+import { useLabels } from "../../state/labels.ts";
 
 /**
  * The DM types every roll in one pass and saves them with one
@@ -20,6 +21,7 @@ import { Portrait } from "./parts.tsx";
  * rows already hold different values is never flattened by accident.
  */
 export function ValueEntry(props: { entries: InitEntry[]; onDone(): void }) {
+  const labels = useLabels();
   const { entries } = props;
   const actions = useRoomActions();
   const tokens = useRoomView((s) => s.view?.tokens);
@@ -58,13 +60,13 @@ export function ValueEntry(props: { entries: InitEntry[]; onDone(): void }) {
       if (rows.length > 1 && !split.has(group.key)) {
         const shared = rows.every((r) => r.value === first.value) ? valueText(first.value) : "";
         const token = first.tokenId !== undefined ? view.tokens[first.tokenId] : undefined;
-        const base = token?.name ?? entryName(view, first);
+        const base = token?.name ?? entryName(view, first, labels);
         out.push({ key: group.key, entryIds: group.entryIds, text: texts[group.key] ?? shared, label: base, first, count: rows.length });
         continue;
       }
       for (const row of rows) {
         const key = `entry:${row.id}`;
-        out.push({ key, entryIds: [row.id], text: texts[key] ?? valueText(row.value), label: entryName(view, row), first: row, count: 1 });
+        out.push({ key, entryIds: [row.id], text: texts[key] ?? valueText(row.value), label: entryName(view, row, labels), first: row, count: 1 });
       }
     }
     return out;

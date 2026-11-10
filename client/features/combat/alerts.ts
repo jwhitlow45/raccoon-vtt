@@ -22,6 +22,8 @@ import {
   type RegenerationPrompt,
 } from "./logic.ts";
 import { promptId, regenerationIn, turnId, useCreaturesUses, useDismissed } from "./state.ts";
+import type { Labels } from "../../lib/labels.ts";
+import { useLabels } from "../../state/labels.ts";
 
 /*
  * The cards a turn start brings to this device's alerts column
@@ -80,10 +82,11 @@ const NONE: CombatAlerts = { regenerations: [], deathSaves: [], recharges: [], t
 type You = { role: "dm" | "player"; memberId: string };
 
 export function useCombatAlerts(): CombatAlerts {
+  const labels = useLabels();
   const view = useRoomView((s) => s.view);
   const you = useRoomView((s) => s.you);
   const local = useDismissed();
-  const all = useMemo(() => (view ? turnParticipants(view) : []), [view]);
+  const all = useMemo(() => (view ? turnParticipants(view, labels) : []), [view, labels]);
   // The DM also gets a player's character's death save card (4.1), so the DM reads every creature of the turn.
   const shown = useMemo(() => (view && you ? all.filter((p) => answersFor(view, you, p.target) || (you.role === "dm" && p.record?.life === "dying")) : []), [view, you, all]);
   const targets = useMemo(() => shown.map((p) => p.target), [shown]);
@@ -93,6 +96,7 @@ export function useCombatAlerts(): CombatAlerts {
   const attacks = useMemo(() => targets.map((t) => (rolls.dice ? (creatureRolls(rolls.dice, t)?.named ?? null) : null)), [targets, rolls.dice]);
   if (!view || !you || shown.length === 0) return NONE;
   return combatAlerts({
+    labels,
     view,
     you,
     participants: shown,
@@ -125,6 +129,7 @@ export function blockLoad(model: Pick<TurnCardModel, "usesLoad" | "rollsFailed">
 
 /** The cards of the turn now for this viewer, free of React for its tests. */
 export function combatAlerts(input: {
+  labels: Labels;
   view: Pick<RoomState, "tokens" | "characters" | "encounter" | "meta" | "log">;
   you: You;
   participants: readonly Participant[];
@@ -177,7 +182,7 @@ export function combatAlerts(input: {
     if (!dismissed.has(id)) {
       const landing = input.participants.find((p) => p.landing);
       const entry = encounter.entries.find((e) => e.id === encounter.activeEntryId);
-      const name = landing?.name ?? (entry ? entryName(view, entry) : "This");
+      const name = landing?.name ?? (entry ? entryName(view, entry, input.labels) : "This");
       const since = turnSince(view, input.participants) ?? Number.POSITIVE_INFINITY;
       out.turn = { id, name, blocks, count: blocks.reduce((n, b) => n + b.count, 0), attacks: blocks.reduce((n, b) => n + b.attacks, 0), since, loading: input.loading, failed: input.failed, usesLoad: input.usesLoad ?? { loading: input.loading, failed: input.failed }, rollsFailed: input.rollsFailed ?? false };
     }

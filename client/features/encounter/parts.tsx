@@ -14,6 +14,7 @@ import { entryName, onAnotherScene, portraitDisposition, type HpView } from "./l
 import { clockText, type TimerState } from "./timer.ts";
 import { isAssetImage } from "#shared/imageRef.ts";
 import { IconDisk } from "../images/IconDisk.tsx";
+import { useLabels } from "../../state/labels.ts";
 
 /** The art inside an 18 px chip: as large as its height leaves room for, as the map's chips draw it. */
 const CHIP_ART = 14;
@@ -30,12 +31,13 @@ const CHIP_ART = 14;
  * sweep's disabled-look check reads, as the AC badge does (D-261101-344).
  */
 export function Portrait(props: { entry: Pick<InitEntry, "tokenId" | "characterId" | "label">; size: number; ring?: string; dim?: boolean; ink?: string }) {
+  const labels = useLabels();
   const { entry, size } = props;
   const assets = useAssets();
   const token = useRoomView((s) => (entry.tokenId !== undefined ? s.view?.tokens[entry.tokenId] : undefined));
   const characterId = entry.characterId ?? (token && "ref" in token.actor ? token.actor.ref : undefined);
   const character = useRoomView((s) => (characterId !== undefined ? s.view?.characters[characterId] : undefined));
-  const name = useRoomView((s) => (s.view ? entryName(s.view, entry) : ""));
+  const name = useRoomView((s) => (s.view ? entryName(s.view, entry, labels) : ""));
   const elsewhere = useRoomView((s) => (s.view ? onAnotherScene(s.view, entry) : false));
   const shown = token?.image ?? character?.defaultImage;
   const image = shown && isAssetImage(shown) ? shown : undefined;

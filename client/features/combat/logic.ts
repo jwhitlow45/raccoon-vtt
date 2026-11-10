@@ -7,6 +7,7 @@ import { damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import { marksTime } from "../attach/tags.ts";
 import { entryName, ownsEntry, playerOwnedEntry } from "../encounter/logic.ts";
 import { rechargeRange } from "../encounter/saveCards.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /*
  * The combat uses of a creature (docs/design/design-v1-combat-controls.md 4 to 6),
@@ -161,7 +162,7 @@ export type Participant = { target: ActorTarget; holder: string; name: string; r
  * holds whose record is current, a turn's companions and mounts. A player
  * holds records only for their own creatures, so they list no other.
  */
-export function turnParticipants(view: View): Participant[] {
+export function turnParticipants(view: View, labels: Labels): Participant[] {
   const encounter = view.encounter;
   if (!encounter?.activeEntryId) return [];
   const entry = encounter.entries.find((e) => e.id === encounter.activeEntryId);
@@ -172,7 +173,7 @@ export function turnParticipants(view: View): Participant[] {
     if (target && (("tokenId" in target && view.tokens[target.tokenId]) || ("characterId" in target && view.characters[target.characterId]))) {
       const holder = holderKey(view, target);
       seen.add(holder);
-      out.push({ target, holder, name: entryName(view, entry), record: currentRecord(encounter, actorOf(view, target)), landing: true });
+      out.push({ target, holder, name: entryName(view, entry, labels), record: currentRecord(encounter, actorOf(view, target)), landing: true });
     }
   }
   // Sorted by holder, so every device lists the turn's other creatures in one order.
@@ -186,7 +187,7 @@ export function turnParticipants(view: View): Participant[] {
     if (!("inline" in token.actor)) continue;
     const record = currentRecord(encounter, token.actor.inline);
     const holder = `t:${token.id}`;
-    if (record && !seen.has(holder)) others.push({ target: { tokenId: token.id }, holder, name: entryName(view, { tokenId: token.id }), record, landing: false });
+    if (record && !seen.has(holder)) others.push({ target: { tokenId: token.id }, holder, name: entryName(view, { tokenId: token.id }, labels), record, landing: false });
   }
   others.sort((a, b) => (a.holder < b.holder ? -1 : a.holder > b.holder ? 1 : 0));
   return [...out, ...others];

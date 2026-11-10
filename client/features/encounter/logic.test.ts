@@ -296,10 +296,10 @@ describe("whose row it is", () => {
 
   test("names come from the view, with numbers for duplicates", () => {
     const s = state();
-    assert.equal(entryName(s, { tokenId: "gob" }), "Goblin 2");
-    assert.equal(entryName(s, { characterId: "c1" }), "Thorn");
-    assert.equal(entryName(s, { tokenId: "elsewhere" }), "Creature on another scene");
-    assert.equal(entryName(s, { label: "Lair action" }), "Lair action");
+    assert.equal(entryName(s, { tokenId: "gob" }, new Map()), "Goblin 2");
+    assert.equal(entryName(s, { characterId: "c1" }, new Map()), "Thorn");
+    assert.equal(entryName(s, { tokenId: "elsewhere" }, new Map()), "Creature on another scene");
+    assert.equal(entryName(s, { label: "Lair action" }, new Map()), "Lair action");
   });
 
   test("a row whose token this view does not hold, and that has no label, is on another scene", () => {
@@ -320,8 +320,8 @@ describe("whose row it is", () => {
   test("a player adds only their own creatures that are not in the fight", () => {
     const s = state();
     s.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("e1", { tokenId: "familiar" })] };
-    assert.deepEqual(ownCandidates(s, "p1", "s1").map((t) => t.id), ["pc"]);
-    assert.deepEqual(ownCandidates(s, "p2", "s1"), []);
+    assert.deepEqual(ownCandidates(s, "p1", "s1", new Map()).map((t) => t.id), ["pc"]);
+    assert.deepEqual(ownCandidates(s, "p2", "s1", new Map()), []);
   });
 });
 
@@ -341,7 +341,7 @@ describe("adding tokens", () => {
   test("every creature on the scene, but not objects, the dead, other scenes or rows already in", () => {
     const s = scene();
     s.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("e", { tokenId: "a" })] };
-    assert.deepEqual(addCandidates(s, "s1", "scene", null).map((t) => t.id), ["hidden", "exempt", "b"]);
+    assert.deepEqual(addCandidates(s, "s1", "scene", null, new Map()).map((t) => t.id), ["hidden", "exempt", "b"]);
   });
 
   test("visible only leaves out hidden tokens and tokens withheld under the fog", () => {
@@ -349,9 +349,9 @@ describe("adding tokens", () => {
     s.scenes.s1!.fogEnabled = true;
     // Reveal the top-left tile only: a, hidden and chest stand in it, b and the giant in the dark.
     s.fogTiles["s1:0,0"] = { sceneId: "s1", tx: 0, ty: 0, rev: 0, bits: encodeTile(fullTileBits()) };
-    assert.deepEqual(addCandidates(s, "s1", "visible", null).map((t) => t.id), ["exempt", "a"]);
+    assert.deepEqual(addCandidates(s, "s1", "visible", null, new Map()).map((t) => t.id), ["exempt", "a"]);
     s.scenes.s1!.fogEnabled = false;
-    assert.deepEqual(addCandidates(s, "s1", "visible", null).map((t) => t.id), ["exempt", "a", "b"]);
+    assert.deepEqual(addCandidates(s, "s1", "visible", null, new Map()).map((t) => t.id), ["exempt", "a", "b"]);
   });
 
   test("visible only reads the fog players get, explored ground included, and the party's sight on a vision scene", () => {
@@ -359,20 +359,20 @@ describe("adding tokens", () => {
     s.scenes.s1!.fogEnabled = true;
     // The DM's own fog reveals nothing, and the party explored the top-left tile.
     s.exploredTiles = { "s1:0,0": { sceneId: "s1", tx: 0, ty: 0, rev: 0, bits: encodeTile(fullTileBits()) } };
-    assert.deepEqual(addCandidates(s, "s1", "visible", null).map((t) => t.id), ["exempt", "a"]);
+    assert.deepEqual(addCandidates(s, "s1", "visible", null, new Map()).map((t) => t.id), ["exempt", "a"]);
 
     // A dark scene with party vision: Thorn's torch lights the goblin beside it, and the other one stands in the dark.
     s.scenes.s1!.vision = { on: true, light: "dark" };
     s.tokens.pc = token("pc", { kind: "pc", name: "Thorn", ownerIds: ["p1"], x: 3, y: 1, light: { bright: 20, dim: 20 } });
     const dmView = projectState(s, DM, { sceneId: "s1" }) as unknown as RoomState;
-    assert.deepEqual(addCandidates(dmView, "s1", "visible", null).map((t) => t.id), ["exempt", "a", "pc"]);
+    assert.deepEqual(addCandidates(dmView, "s1", "visible", null, new Map()).map((t) => t.id), ["exempt", "a", "pc"]);
   });
 
   test("the selected token, even an object or a dead one", () => {
     const s = scene();
-    assert.deepEqual(addCandidates(s, "s1", "selected", "chest").map((t) => t.id), ["chest"]);
-    assert.deepEqual(addCandidates(s, "s1", "selected", "dead").map((t) => t.id), ["dead"]);
-    assert.deepEqual(addCandidates(s, "s1", "selected", null), []);
+    assert.deepEqual(addCandidates(s, "s1", "selected", "chest", new Map()).map((t) => t.id), ["chest"]);
+    assert.deepEqual(addCandidates(s, "s1", "selected", "dead", new Map()).map((t) => t.id), ["dead"]);
+    assert.deepEqual(addCandidates(s, "s1", "selected", null, new Map()), []);
   });
 
   test("large additions are cut into batches the op accepts", () => {
@@ -534,7 +534,7 @@ describe("a hidden creature revealed on its turn", () => {
       const view = projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState;
       const encounter = view.encounter!;
       const active = encounter.entries.find((e) => e.id === encounter.activeEntryId);
-      return whoseTurn({ dm: false, started: hasStarted(encounter), activeName: active ? entryName(view, active) : null, yours: false }).line;
+      return whoseTurn({ dm: false, started: hasStarted(encounter), activeName: active ? entryName(view, active, new Map()) : null, yours: false }).line;
     };
     state = apply(state, { t: "encounter.start", entries: [{ id: "e-pc", tokenId: "pc", value: 20 }, { id: "e-l", tokenId: "lurker", value: 10 }] });
     state = apply(state, { t: "encounter.next" }, DM, 2);
@@ -641,13 +641,13 @@ describe("companions in the tracker (docs/design/design-v1-combat-flow.md 3.6.7)
   test("Everyone here, Visible to players, Selected token, Join the fight and the group's Add to the fight leave out companions on their character's turn", () => {
     const state = party();
     for (const mode of ["scene", "visible"] as const) {
-      const ids = addCandidates(state, "s1", mode, null).map((t) => t.id);
+      const ids = addCandidates(state, "s1", mode, null, new Map()).map((t) => t.id);
       assert.ok(ids.includes("owl"), mode);
       for (const id of ["ws", "ash", "sw", "cyc"]) assert.ok(!ids.includes(id), `${mode} ${id}`);
     }
-    assert.deepEqual(addCandidates(state, "s1", "selected", "ws"), []);
-    assert.deepEqual(addCandidates(state, "s1", "selected", "owl").map((t) => t.id), ["owl"]);
-    assert.deepEqual(ownCandidates(state, "p1", "s1").map((t) => t.id).sort(), ["bt", "owl"]);
+    assert.deepEqual(addCandidates(state, "s1", "selected", "ws", new Map()), []);
+    assert.deepEqual(addCandidates(state, "s1", "selected", "owl", new Map()).map((t) => t.id), ["owl"]);
+    assert.deepEqual(ownCandidates(state, "p1", "s1", new Map()).map((t) => t.id).sort(), ["bt", "owl"]);
     const all = Object.values(state.tokens);
     assert.deepEqual(fightCandidates(all, null).map((t) => t.id).sort(), ["bt", "owl"]);
     const ops = fightOps(all, null, () => "n");
@@ -658,16 +658,16 @@ describe("companions in the tracker (docs/design/design-v1-combat-flow.md 3.6.7)
     const state = party();
     // The DM's view holds the tokens of the scene in view, so the spirit left on s2 is not in it.
     const dm = projectState(state, DM, { sceneId: "s1" }) as unknown as RoomState;
-    assert.deepEqual(nestedCompanions(dm, { tokenId: "bt" }).map((t) => t.id), ["ash", "ws"], "by name and shared only");
-    assert.deepEqual(nestedCompanions(dm, { characterId: "bree" }).map((t) => t.id), ["ash", "ws"], "a row with no token, by its character");
-    assert.deepEqual(nestedCompanions(dm, { tokenId: "bt", characterId: "cy" }).map((t) => t.id), ["ash", "ws"], "a mixed row nests its token's character's only");
-    assert.deepEqual(nestedCompanions(dm, { tokenId: "owl" }), [], "a token with its own actor has no character");
-    assert.deepEqual(nestedCompanions(dm, { tokenId: "gone" }), []);
+    assert.deepEqual(nestedCompanions(dm, { tokenId: "bt" }, new Map()).map((t) => t.id), ["ash", "ws"], "by name and shared only");
+    assert.deepEqual(nestedCompanions(dm, { characterId: "bree" }, new Map()).map((t) => t.id), ["ash", "ws"], "a row with no token, by its character");
+    assert.deepEqual(nestedCompanions(dm, { tokenId: "bt", characterId: "cy" }, new Map()).map((t) => t.id), ["ash", "ws"], "a mixed row nests its token's character's only");
+    assert.deepEqual(nestedCompanions(dm, { tokenId: "owl" }, new Map()), [], "a token with its own actor has no character");
+    assert.deepEqual(nestedCompanions(dm, { tokenId: "gone" }, new Map()), []);
     const p2 = projectState(state, { memberId: "p2", role: "player" }, { sceneId: "s1" }) as unknown as RoomState;
-    assert.deepEqual(nestedCompanions(p2, { tokenId: "bt" }).map((t) => t.id), ["ash", "ws"], "another player sees a party member's companions nested");
+    assert.deepEqual(nestedCompanions(p2, { tokenId: "bt" }, new Map()).map((t) => t.id), ["ash", "ws"], "another player sees a party member's companions nested");
     state.tokens.ws = { ...state.tokens.ws!, visibility: "dm" };
     const hidden = projectState(state, { memberId: "p2", role: "player" }, { sceneId: "s1" }) as unknown as RoomState;
-    assert.deepEqual(nestedCompanions(hidden, { tokenId: "bt" }).map((t) => t.id), ["ash"], "one they cannot see is not nested");
+    assert.deepEqual(nestedCompanions(hidden, { tokenId: "bt" }, new Map()).map((t) => t.id), ["ash"], "one they cannot see is not nested");
   });
 });
 

@@ -43,6 +43,7 @@ import { ReactionSwitch } from "./ReactionSection.tsx";
 import { CreatureUses, useUsesPresence } from "../combat/CombatUses.tsx";
 import { markChips } from "../combat/logic.ts";
 import { offersLair, useLairCounts } from "../combat/state.ts";
+import { useLabels } from "../../state/labels.ts";
 
 export type RowDrag = {
   /** Pointer handlers for the drag handle. Absent when the row has no tie to reorder. */
@@ -87,11 +88,12 @@ export function EntryRow(props: {
   drag: RowDrag | null;
   rowRef: Ref<HTMLLIElement>;
 }) {
+  const labels = useLabels();
   const { entry, active, role, mine } = props;
   const dm = role === "dm";
   // With typed totals off a player rolls their initiative and never types it (shared/permissions.ts playersTypeTotals).
   const typeTotals = useRoomView((s) => playersTypeTotals(s.view?.meta.settings ?? {}));
-  const name = useRoomView((s) => (s.view ? entryName(s.view, entry) : ""));
+  const name = useRoomView((s) => (s.view ? entryName(s.view, entry, labels) : ""));
   const token = useRoomView((s) => (entry.tokenId !== undefined ? s.view?.tokens[entry.tokenId] : undefined));
   const characterId = entry.characterId ?? (token && "ref" in token.actor ? token.actor.ref : undefined);
   const character = useRoomView((s) => (characterId !== undefined ? s.view?.characters[characterId] : undefined));
@@ -106,7 +108,7 @@ export function EntryRow(props: {
   const lineId = useId();
   // The companions listed under the row, and whose they are (docs/design/design-v1-combat-flow.md 3.6.7).
   const tokens = useRoomView((s) => s.view?.tokens);
-  const companions = useMemo(() => (tokens ? nestedCompanions({ tokens }, entry) : NO_COMPANIONS), [tokens, entry]);
+  const companions = useMemo(() => (tokens ? nestedCompanions({ tokens }, entry, labels) : NO_COMPANIONS), [tokens, entry]);
   const rowOwner = useRoomView((s) => {
     const id = s.view ? rowCharacter(s.view, entry) : undefined;
     return id !== undefined ? s.view?.characters[id]?.name : undefined;
@@ -116,11 +118,11 @@ export function EntryRow(props: {
   // A creature on another floor of the scene shown carries that floor's name after its other tags, and a tap shows that floor (docs/design/design-v1-floors.md 7.6).
   const floorName = useRoomView((s) => (token && s.view ? otherFloorName(s.view, token.sceneId, s.sceneId) : null));
   // A rider's mount and a controlled mount's rider, from the links in this copy (docs/design/design-v1-attach.md 4.5 and 7.1).
-  const link = useMemo(() => rowLink(tokens ?? {}, token), [tokens, token]);
+  const link = useMemo(() => rowLink(tokens ?? {}, token, labels), [tokens, token, labels]);
   // A controlled mount's row whose turn was its rider's this round only lets time pass for it, and reads muted.
   const muted = useRoomView((s) => marksTime(s.view?.encounter, entry));
   const encounter = useRoomView((s) => s.view?.encounter);
-  const moveAfter = useMemo(() => (dm && props.expanded && encounter ? moveAfterRider({ tokens: tokens ?? {}, encounter }, entry) : null), [dm, props.expanded, encounter, tokens, entry]);
+  const moveAfter = useMemo(() => (dm && props.expanded && encounter ? moveAfterRider({ tokens: tokens ?? {}, encounter }, entry, labels) : null), [dm, props.expanded, encounter, tokens, entry, labels]);
   const effects = actor?.effects ?? [];
   // Whoever rolls this creature's initiative sees the reminder: the DM for every row, a player for their own.
   const reminder = dm || mine ? rollReminder(entry, effects) : undefined;
@@ -358,6 +360,7 @@ const NO_HP: HpView = { kind: "none" };
  * Ready and its stat block.
  */
 function CompanionRow(props: { token: Token; characterName: string; entryId: string; role: "dm" | "player"; onShow(): void }) {
+  const labels = useLabels();
   const { token, role } = props;
   const dm = role === "dm";
   const [open, setOpen] = useState(false);
@@ -365,7 +368,7 @@ function CompanionRow(props: { token: Token; characterName: string; entryId: str
   const characters = useRoomView((s) => s.view?.characters);
   const playerOwned = useRoomView((s) => (s.view ? playerPlays(s.view, { token }) : false));
   const lineId = useId();
-  const name = displayName(token);
+  const name = displayName(token, labels);
   const actor = "inline" in token.actor ? (token.actor.inline as ProjectedActor) : undefined;
   const hp = hpLess(actor, token) ? NO_HP : hpView(actor);
   const ac = rowAc(actor, token);

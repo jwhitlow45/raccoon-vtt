@@ -84,6 +84,7 @@ import {
   type CardChip,
   type ConcentrationAction,
 } from "./saveCards.ts";
+import { labelsOf, useLabels } from "../../state/labels.ts";
 
 /** How long "Your turn" flares when a player's turn arrives. */
 const TURN_NOTICE_MS = 4_000;
@@ -205,6 +206,7 @@ export function useYourTurnNotice(): boolean {
  * player's End Turn beside it on their turn.
  */
 function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement>; fit: StripFit; onTurn?(turn: TurnFacts): void }) {
+  const labels = useLabels();
   const you = useYou();
   const turnSlot = useModalSlot("turn");
   const round = useRoomView((s) => s.view?.encounter?.round ?? null);
@@ -217,7 +219,7 @@ function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement>; fit: St
   const dm = you.role === "dm";
   const { current, next } = useMemo(() => stripRows({ dm, entries, activeEntryId, count: STRIP_FACES, skip: facts.skip }), [entries, activeEntryId, dm, facts.skip]);
   const yours = current !== null && facts.mine(current);
-  const { name, line } = whoseTurn({ dm, started, activeName: current ? entryName(facts.view, current) : null, yours });
+  const { name, line } = whoseTurn({ dm, started, activeName: current ? entryName(facts.view, current, labels) : null, yours });
   const onFloor = useTurnFloor(current);
   const timed = timer && current ? timer : null;
   useReportTurn(props.onTurn, { dm, round, current: current?.id ?? null, name, yours, endTurn: !dm && (yours || waiting), notice: props.notice, timer: timed, next });
@@ -298,6 +300,7 @@ function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement>; fit: St
  * the row's end.
  */
 function Band(props: { notice: boolean; onTurn?(turn: TurnFacts): void }) {
+  const labels = useLabels();
   const you = useYou();
   const turnSlot = useModalSlot("turn");
   const round = useRoomView((s) => s.view?.encounter?.round ?? null);
@@ -312,7 +315,7 @@ function Band(props: { notice: boolean; onTurn?(turn: TurnFacts): void }) {
   // As many as the top bar's chip has, for the facts it hears: the band shows fewer.
   const { current, next } = useMemo(() => stripRows({ dm, entries, activeEntryId, count: STRIP_FACES, skip: facts.skip }), [entries, activeEntryId, dm, facts.skip]);
   const yours = current !== null && facts.mine(current);
-  const { name, line } = whoseTurn({ dm, started, activeName: current ? entryName(facts.view, current) : null, yours });
+  const { name, line } = whoseTurn({ dm, started, activeName: current ? entryName(facts.view, current, labels) : null, yours });
   const onFloor = useTurnFloor(current);
   useReportTurn(props.onTurn, { dm, round, current: current?.id ?? null, name, yours, endTurn: !dm && (yours || waiting), notice: props.notice, timer: timer && current ? timer : null, next });
   if (round === null) return null;
@@ -639,6 +642,7 @@ type Notice = { id: string; text: string; suffix?: string; key?: Effect["key"] }
  * roll keeps its total.
  */
 function FightAlerts() {
+  const labels = useLabels();
   const { width, height } = useViewport();
   const panelOpen = useRoomView((s) => sheetOpen(s.local));
   const folded = useUnderSheet();
@@ -660,7 +664,7 @@ function FightAlerts() {
   const combat = useCombatAlerts();
   const local = useDismissed();
   // Keyed on the names, not the view, which changes with every op: the dock and Room read what this publishes.
-  const who = prompts.map((p) => entryName(view, p.target)).join("\n");
+  const who = prompts.map((p) => entryName(view, p.target, labels)).join("\n");
   /*
    * The dock's summary has no kind of its own for a save-ends, Regeneration
    * or recharge card (pages/fold.ts ColumnAlert), so they go as notices,
@@ -668,7 +672,7 @@ function FightAlerts() {
    * save and the turn card have kinds of their own (docs/design/design-v1-combat-controls.md 4.6).
    */
   const cardLines = [
-    ...saves.map((p) => `${saveAlertId(p)}\t${saveEndsWords(entryName(view, p.target), p.effect).head}`),
+    ...saves.map((p) => `${saveAlertId(p)}\t${saveEndsWords(entryName(view, p.target, labels), p.effect).head}`),
     ...combat.regenerations.map((c) => `${regenerationAlertId(c)}\t${regenerationText(c, combat.revives)}`),
     ...combat.recharges.map((c) => `${rechargeAlertId(c)}\t${rechargeWords(c.prompt.name, c.prompt.min)}`),
   ].join("\n");
@@ -1635,6 +1639,7 @@ function NextButton(props: { start: boolean; empty: boolean }) {
  * stays quiet, as the notice does on a reload.
  */
 function useTimeUp(): { text: string | null; key: string; dismiss(): void } {
+  const store = useRoomStore();
   const timer = useTurnTimer();
   const you = useYou();
   const facts = useRowFacts();
@@ -1654,7 +1659,7 @@ function useTimeUp(): { text: string | null; key: string; dismiss(): void } {
     // Long past the end already: the page opened late, so it stays quiet.
     if (left !== null && left < -5) return;
     announceTurn();
-    const who = you.role === "player" ? "your turn" : `${entryName(facts.view, active)}'s turn`;
+    const who = you.role === "player" ? "your turn" : `${entryName(facts.view, active, labelsOf(store.getState()))}'s turn`;
     setShown({ key, text: `Time is up for ${who}.` });
   }, [active, answers, over, left, key, you.role, facts.view]);
   return { text: shown && shown.key === key ? shown.text : null, key: `timeUp:${key}`, dismiss: () => setShown(null) };
@@ -1668,6 +1673,7 @@ function useTimeUp(): { text: string | null; key: string; dismiss(): void } {
  * reload or a second device shows the same cards.
  */
 function useLogAlerts() {
+  const store = useRoomStore();
   const log = useRoomView((s) => s.view?.log);
   const confirmedSeq = useConfirmedSeq();
   const you = useYou();
@@ -1698,7 +1704,7 @@ function useLogAlerts() {
       if (prompt && answersPrompt(view, you, prompt)) newPrompts.push(prompt);
       const expiry = expiryNotice(entry);
       if (expiry) {
-        const who = entryName(view, expiry.target);
+        const who = entryName(view, expiry.target, labelsOf(store.getState()));
         const what = effectChip({ key: expiry.key, ...(expiry.spell !== undefined ? { spell: expiry.spell } : {}) }).label;
         newNotices.push({ id: entry.id, text: `${what} ended on ${who}.`, key: expiry.key });
       }
@@ -1747,6 +1753,7 @@ function seqOf(entry: LogEntry): number {
  * Without the DC the total shows and Passed or Failed decide.
  */
 export function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone(): void; onResult(text: string, suffix?: string): void }) {
+  const labels = useLabels();
   const { prompt } = props;
   const root = useRef<HTMLElement>(null);
   const dm = useYou().role === "dm";
@@ -1754,7 +1761,7 @@ export function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone()
   const room = useRoomStore();
   const facts = useRowFacts();
   const blocked = useRollBlocked();
-  const name = entryName(facts.view, prompt.target);
+  const name = entryName(facts.view, prompt.target, labels);
   const actor = entryActor(facts.view, prompt.target);
   const effects = actor?.effects ?? [];
   const spell = effects.find((e) => e.key === "concentrating")?.spell;
