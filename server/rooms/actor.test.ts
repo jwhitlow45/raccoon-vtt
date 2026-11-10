@@ -258,16 +258,21 @@ async function hello(actor: RoomActor, conn: Connection, msg: Parameters<RoomAct
 async function answerTo(sent: ServerMessage[], n: number): Promise<Extract<ServerMessage, { t: "ev" }> | "stuck"> {
   const found = (): Extract<ServerMessage, { t: "ev" }> | undefined =>
     sent.find((m): m is Extract<ServerMessage, { t: "ev" }> => m.t === "ev" && ((m.acks?.includes(n) ?? false) || (m.rejects?.some((r) => r.n === n) ?? false)));
+  // The polling stops once `within` gives up, so a stuck answer fails its test rather than keeping the file running.
+  let looking = true;
   return within(
     2_000,
-    (async () => {
-      for (;;) {
+    (async (): Promise<Extract<ServerMessage, { t: "ev" }> | "stuck"> => {
+      while (looking) {
         const ev = found();
         if (ev) return ev;
         await new Promise((r) => setTimeout(r, 5));
       }
+      return "stuck";
     })(),
-  );
+  ).finally(() => {
+    looking = false;
+  });
 }
 
 describe("room actor commits", () => {
@@ -3550,8 +3555,8 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     try {
       const table = connect(actor, dm);
       const other = connect(actor, dm);
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(other.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, other.conn, { clientId: "c2", resumeFrom: 1 });
       let n = 0;
       const ask = async (ops: Op[], group: string, more: Partial<OpOf<"build.ask">> = {}) => {
         n++;
