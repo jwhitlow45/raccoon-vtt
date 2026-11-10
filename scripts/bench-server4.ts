@@ -278,6 +278,7 @@ export async function sitDown(state: RoomState, times?: SitDownTimes): Promise<T
   if (!actor) throw new Error("the bench room did not load");
   times?.load.push(performance.now() - t0);
   const sent: Table["sent"] = { last: 0, sender: null, senderMessages: [] };
+  const snapshotted = new Set<Connection>();
   const open = (memberId: string, role: "dm" | "player"): Connection => {
     let conn: Connection | null = null;
     const socket = {
@@ -287,6 +288,7 @@ export async function sitDown(state: RoomState, times?: SitDownTimes): Promise<T
       send: (text: string) => {
         sent.last = performance.now();
         if (conn === sent.sender) sent.senderMessages.push(text);
+        if (conn && text.startsWith('{"t":"snapshot"')) snapshotted.add(conn);
       },
       close: () => undefined,
       terminate: () => undefined,
@@ -303,6 +305,9 @@ export async function sitDown(state: RoomState, times?: SitDownTimes): Promise<T
     const start = performance.now();
     await actor.hello(conn, { clientId: "bench", resumeFrom: 1, sceneId: SCENE });
     await settle();
+    // A hello's snapshot is read at the next commit, a timer away. An op sent before it arrives goes unanswered.
+    for (let wait = 0; !snapshotted.has(conn) && wait < 2_000; wait++) await new Promise((resolve) => setTimeout(resolve, 1));
+    if (!snapshotted.has(conn)) throw new Error(`${conn.memberId} got no snapshot`);
     (i === 0 ? times?.first : times?.later)?.push(sent.last - start);
   }
   return table;
