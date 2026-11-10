@@ -270,9 +270,20 @@ export function PlayerRolls() {
       if (height > 0 && id !== undefined) setWhy((was) => measureWhy(el, id, zoom, was));
     };
     measure();
+    // Its parts too: at its cap the card keeps its size while its reason lines come and go (B53-SOL-05).
     const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
+    const watch = () => {
+      observer.disconnect();
+      observer.observe(el);
+      for (const child of el.children) observer.observe(child);
+    };
+    watch();
+    const parts = new MutationObserver(watch);
+    parts.observe(el, { childList: true });
+    return () => {
+      parts.disconnect();
+      observer.disconnect();
+    };
   }, [dockStore, atFoot, zoom, shown?.id]);
   useLayoutEffect(() => () => dockStore.setState({ foot: 0, footYields: false, cardAt: null }), [dockStore]);
   const foldsUnderSheet = cardFoldsUnderSheet({ width, height: size.height, wideMinWidth: theme.layout.wideMinWidth });
