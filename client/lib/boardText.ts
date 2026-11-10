@@ -120,7 +120,7 @@ export function labelStyle(
   };
 }
 
-/** The widest box a label in this style can draw: a whole name wraps to `wrapEm`, which grows with the token, and no shape passes `maxWidth`. */
+/** The widest box a label in this style can draw: a cut name stays within `maxWidth`, while a whole name wraps to `wrapEm`, which grows with the token and can be wider. */
 export function widestLabel(style: Pick<LabelStyle, "maxWidth" | "namePx" | "padX" | "room">): number {
   return Math.max(style.maxWidth, style.room.wrapEm * style.namePx + 2 * style.padX) + 2;
 }
