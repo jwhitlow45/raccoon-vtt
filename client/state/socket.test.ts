@@ -26,6 +26,7 @@ import {
   type SocketLike,
 } from "./socket.ts";
 import { LocalServer } from "../dev/localServer.ts";
+import { sceneGate } from "../lib/scene.ts";
 import { createRoomActions } from "./actions.ts";
 import { createRoomStore, OP_ANSWER_MS, refusalText } from "./store.ts";
 import { FakeClock } from "./testing.ts";
@@ -211,6 +212,36 @@ describe("states", () => {
     assert.equal(s.sockets[0]!.closedWith, 4000);
     s.clock.advance(250);
     assert.equal(s.sockets.length, 2);
+  });
+});
+
+describe("a page load while the room's database is out", () => {
+  test("the hello gets no frame, the map shows its loading indicator through each reconnect, and the snapshot after the commit lands opens the room", () => {
+    const s = setup();
+    const gate = () => {
+      const state = s.room.store.getState();
+      return sceneGate({ view: state.view, sceneId: state.sceneId, role: "dm" }).kind;
+    };
+    s.socket.start();
+    s.last().open();
+    const [hello] = s.last().take("hello");
+    assert.ok(hello?.t === "hello");
+    // The server answers a hello only once the commit before it lands, so while the database is out nothing comes.
+    assert.equal(gate(), "wait", "the map area draws Loading the scene…");
+    for (let i = 0; i < 3; i++) {
+      s.clock.advance(SNAPSHOT_DEADLINE_MS);
+      assert.equal(s.last().closedWith, 4000, "a hello unanswered for 5 s asks again on a new socket");
+      assert.equal(gate(), "wait");
+      assert.notEqual(s.conn(), "open");
+      s.clock.advance(10_000);
+      s.last().open();
+      const [again] = s.last().take("hello");
+      assert.equal(again?.t === "hello" ? again.clientId : null, hello.clientId, "the same client asks again");
+    }
+    assert.deepEqual(s.room.store.getState().toasts, [], "nothing reads as an error while it waits");
+    s.last().emit(s.snapshot());
+    assert.equal(s.conn(), "open");
+    assert.equal(gate(), "ready");
   });
 });
 
