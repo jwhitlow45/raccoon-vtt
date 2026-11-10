@@ -64,13 +64,18 @@ export function startChoices(saved: Choices | null, form: { w: number; h: number
   return { ...DEFAULT_CHOICES, across: clampSide(form.w), down: clampSide(form.h) };
 }
 
-/** The size choices, which a dialog aimed at a floor leaves as they were remembered when it opened (D-261110-185). */
-export type KeptSize = Pick<Choices, "size" | "across" | "down">;
+/**
+ * The size choices, which a dialog aimed at a floor leaves as they were
+ * remembered when it opened (D-261110-185), with the rooms remembered then
+ * and the count the dialog opened with, which the floor's size may have
+ * moved or clamped.
+ */
+export type KeptSize = Pick<Choices, "size" | "across" | "down" | "rooms"> & { opened: number };
 
 /** The size a floor's dialog keeps: the remembered one, or the defaults' when nothing was remembered. */
-export function keptSize(saved: Choices | null): KeptSize {
+export function keptSize(saved: Choices | null, opened: number): KeptSize {
   const c = saved ?? DEFAULT_CHOICES;
-  return { size: c.size, across: c.across, down: c.down };
+  return { size: c.size, across: c.across, down: c.down, rooms: c.rooms, opened };
 }
 
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem">;
@@ -117,10 +122,11 @@ export function loadChoices(roomId: string, storage: Storage | null = browserSto
  * Kept field by field, so no seed or anything else rides along. A storage
  * that refuses loses only the convenience. `size` is a floor's kept size,
  * written in place of the choices' own, so neither Make nor Cancel on a
- * floor changes the size the next New scene dungeon opens on. Rooms still at
- * the floor's default are kept at that size's default for the same reason:
- * the dialog saves as it opens, and a count saved beside another size would
- * read as typed (review FL3-OPUS-1).
+ * floor changes the size the next New scene dungeon opens on. Rooms the DM
+ * left as the dialog opened them, or at the floor's default, keep the count
+ * remembered with that size for the same reason: the dialog saves as it
+ * opens, and a count the floor moved or clamped would read as typed beside
+ * the other size (reviews FL3-OPUS-1 and 7).
  */
 export function saveChoices(roomId: string, c: Choices, storage: Storage | null = browserStorage(), size?: KeptSize): void {
   const kept: Choices = {
@@ -128,7 +134,7 @@ export function saveChoices(roomId: string, c: Choices, storage: Storage | null 
     size: size?.size ?? c.size,
     across: size?.across ?? c.across,
     down: size?.down ?? c.down,
-    rooms: size && c.rooms === roomsDefault(c) ? roomsDefault({ ...c, ...size }) : c.rooms,
+    rooms: size && (c.rooms === size.opened || c.rooms === roomsDefault(c)) ? size.rooms : c.rooms,
     density: c.density,
     corridors: c.corridors,
     wide: c.wide,

@@ -102,7 +102,7 @@ test("DG2C: the preview is asked for with the key only when DM key is on and not
  */
 test("FL3S: a floor's autosave writes every choice but the size, which keeps what was remembered as it opened", () => {
   assert.match(source, /startChoices\(saved, props\.form, props\.floor \? props\.form : undefined\)/);
-  assert.match(source, /kept: props\.floor \? keptSize\(saved\) : undefined/);
+  assert.match(source, /kept: props\.floor \? keptSize\(saved, choices\.rooms\) : undefined/);
   assert.match(source, /saveChoices\(props\.roomId, choices, undefined, start\.kept\)/);
 });
 

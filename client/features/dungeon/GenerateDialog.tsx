@@ -163,7 +163,8 @@ export function GenerateDialog(props: {
   // A floor opens at its own size and leaves the remembered size as it was when the dialog opened (D-261110-185).
   const [start] = useState(() => {
     const saved = loadChoices(props.roomId);
-    return { choices: startChoices(saved, props.form, props.floor ? props.form : undefined), kept: props.floor ? keptSize(saved) : undefined };
+    const choices = startChoices(saved, props.form, props.floor ? props.form : undefined);
+    return { choices, kept: props.floor ? keptSize(saved, choices.rooms) : undefined };
   });
   const [choices, setChoices] = useState<Choices>(start.choices);
   const [seedText, setSeedText] = useState(() => formatSeed(newSeed()));

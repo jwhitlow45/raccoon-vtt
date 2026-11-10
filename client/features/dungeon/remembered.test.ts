@@ -98,7 +98,7 @@ test("FL3S: on a floor 140 by 60 with a remembered Large crypt, the dialog opens
   assert.deepEqual([open.size, open.across, open.down, open.theme, open.dressing], ["custom", 100, 60, "crypt", "full"]);
   assert.deepEqual(sidesOf(open), { w: 100, h: 60 });
   assert.equal(open.rooms, roomsDefault(open), "rooms left at Large's default move to the floor's");
-  const kept = keptSize(saved);
+  const kept = keptSize(saved, open.rooms);
   // The dialog saves as it opens, so a Cancel at once leaves this.
   saveChoices("ROOM1", open, storage, kept);
   assert.equal(loadChoices("ROOM1", storage)!.rooms, large.rooms, "rooms at the floor's default are saved as Large's (review FL3-OPUS-1)");
@@ -120,5 +120,19 @@ test("FL3S: on a floor 140 by 60 with a remembered Large crypt, the dialog opens
 test("FL3S: a floor with nothing remembered opens on Custom at its size, clamped, and keeps the defaults' size", () => {
   const open = startChoices(null, { w: 30, h: 30 }, { w: 12, h: 300 });
   assert.deepEqual([open.size, open.across, open.down, open.theme], ["custom", 20, 100, DEFAULT_CHOICES.theme]);
-  assert.deepEqual(keptSize(null), { size: DEFAULT_CHOICES.size, across: DEFAULT_CHOICES.across, down: DEFAULT_CHOICES.down });
+  assert.deepEqual(keptSize(null, open.rooms), { size: DEFAULT_CHOICES.size, across: DEFAULT_CHOICES.across, down: DEFAULT_CHOICES.down, rooms: DEFAULT_CHOICES.rooms, opened: open.rooms });
+});
+
+test("FL3S: a typed 30 rooms on Large, clamped on a 30 by 30 floor, stays 30 beside Large unless the DM types another count (FL3-OPUS-7)", () => {
+  const storage = memory();
+  saveChoices("ROOM1", { ...withSize(DEFAULT_CHOICES, { size: "large" }), rooms: 30 }, storage);
+  const saved = loadChoices("ROOM1", storage)!;
+  assert.equal(saved.rooms, 30);
+  const open = startChoices(saved, { w: 30, h: 30 }, { w: 30, h: 30 });
+  assert.ok(open.rooms < 30, "the floor's dialog shows the count clamped to its cap");
+  const kept = keptSize(saved, open.rooms);
+  saveChoices("ROOM1", open, storage, kept);
+  assert.equal(loadChoices("ROOM1", storage)!.rooms, 30, "opened and cancelled: still 30");
+  saveChoices("ROOM1", { ...open, rooms: open.rooms - 1 }, storage, kept);
+  assert.equal(loadChoices("ROOM1", storage)!.rooms, open.rooms - 1, "a count typed in the dialog is remembered");
 });
