@@ -31,7 +31,7 @@ import { CloseWrites } from "./closeWrites.ts";
 import { CLOSE, clientKey, sessionOfKey, type ClientKey, type Connection } from "./connection.ts";
 import { counted } from "./counted.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
-import { cancelPreviews, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
+import { cancelLost, cancelPreviews, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
 import { exploreOp, floorsExplored } from "./explore.ts";
 import { buildSnapshot, publishBatch, takeKeptRejects, type Reject, type Restored, type Stamped } from "./fanout.ts";
 import type { SocketFilter } from "./gateway.ts";
@@ -2578,6 +2578,8 @@ export class RoomActor {
         this.#connections,
         (key) => this.#clients.get(key),
         (conn, delivered) => this.#sendHistory(conn, delivered),
+        // A preview over a creature or stairs the batch took from a screen's copy ends there now (docs/design/design-v1-floors.md phase 3, 4.4).
+        (conn, lost) => cancelLost(conn, lost, this.#connections),
       );
       // A batch that re-projects everything can take away what a held drag or live ruler showed (docs/design/design-v1-per-player-vision.md 7.2),
       // and so can one that changed the floors a socket holds (docs/design/design-v1-floors.md 8.1).

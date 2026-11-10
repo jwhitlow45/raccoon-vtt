@@ -8,6 +8,7 @@ import { opSchema, type Change, type Op, type ServerMessage } from "#shared/prot
 import { applyOp } from "#shared/reducer.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { withCellVision } from "#shared/perPlayerTestutil.ts";
+import { GROUND, UPPER, putOp, withStairs } from "#shared/floorLinksTestutil.ts";
 import { DM, P1, P2, actor, effect, entry, env, member, randomOp, randomState, reveal, rng, room, scene, template, token } from "#shared/testutil.ts";
 import { Connection } from "./connection.ts";
 import { exploreOp } from "./explore.ts";
@@ -374,5 +375,47 @@ describe("a per-player scene in the fan-out (docs/design/design-v1-per-player-vi
         assert.deepEqual(JSON.parse(JSON.stringify(v.view)), JSON.parse(JSON.stringify(projectState(result.state, v.conn.viewer, { sceneId: "s1" }))), v.conn.memberId);
       }
     });
+  });
+});
+
+describe("what left each copy, for the previews it ends (docs/design/design-v1-floors.md phase 3, 4.4, D-261110-180)", () => {
+  /** Tower with stairs from Ground floor up to Upper floor, which players have reached, a goblin on Ground and an imp on Upper. */
+  function stairs(): RoomState {
+    let s = withStairs();
+    s = { ...s, openFloors: { [UPPER]: { sceneId: UPPER, rev: 1 } } };
+    s = { ...s, tokens: { ...s.tokens, gob: token("gob", { sceneId: GROUND, x: 8, y: 8 }), imp: token("imp", { sceneId: UPPER, x: 9, y: 9 }) } };
+    return s;
+  }
+
+  test("`lost` is given each connection's deleted token and end keys after its `ev`, and is not called where nothing of either left", () => {
+    let state = stairs();
+    const viewers = [open(state, DM, GROUND), open(state, P1, GROUND), open(state, P2, GROUND)];
+    const got = new Map<string, string[][]>();
+    let seq = 800;
+    const step = (op: Op) => {
+      const before = state;
+      const result = applyOp(state, opSchema.parse(op), DM, env(++seq));
+      assert.ok(result.ok, result.ok ? "" : result.message);
+      state = result.state;
+      for (const v of viewers) v.inbox.length = 0;
+      const lost = (conn: Connection, keys: EntityKey[]) => {
+        // After the connection's `ev`, so the device drops the key first.
+        const v = viewers.find((x) => x.conn === conn)!;
+        assert.equal(v.inbox.at(-1)?.t, "ev", `${conn.memberId}: lost after the ev`);
+        got.set(`${conn.memberId}`, [...(got.get(conn.memberId) ?? []), keys]);
+      };
+      got.clear();
+      publishBatch({ pub: seq, before, after: state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined, undefined, lost);
+      return Object.fromEntries([...got].map(([id, lists]) => [id, lists.flat().sort()]));
+    };
+    assert.deepEqual(step({ t: "token.move", tokenId: "gob", x: 9, y: 8 }), {}, "a move takes nothing away");
+    assert.deepEqual(step({ t: "token.update", tokenId: "gob", patch: { visibility: "dm" } }), { p1: ["token:gob"], p2: ["token:gob"] }, "a Hide takes the goblin from the players' copies alone");
+    assert.deepEqual(step({ t: "token.update", tokenId: "gob", patch: { visibility: "all" } }), {}, "a Show brings it back");
+    assert.deepEqual(step({ t: "floorLink.delete", linkId: "l1" }), { dm1: ["floorLink:l1", "floorLink:l2"], p1: ["floorLink:l1", "floorLink:l2"], p2: ["floorLink:l1", "floorLink:l2"] }, "stairs removed leave every copy, the DM's too");
+    // A floor hidden from players again (a held-floor change, projected whole) takes its creatures and ends with it.
+    assert.deepEqual(step(putOp()), {}, "stairs placed again");
+    assert.deepEqual(step({ t: "floor.open", sceneId: UPPER, open: false }), { p1: ["floorLink:l2", "token:imp"], p2: ["floorLink:l2", "token:imp"] }, "Upper hidden: its imp and its end leave the players' copies");
+    // Fog over the goblin's square takes it from the players.
+    assert.deepEqual(step({ t: "scene.update", sceneId: GROUND, patch: { fogEnabled: true } } as Op), { p1: ["floorLink:l1", "token:gob"], p2: ["floorLink:l1", "token:gob"] }, "fog turned on takes what stands under it");
   });
 });

@@ -411,6 +411,9 @@ function keepRejects(conn: Connection, rejects: readonly Reject[]): void {
   kept.set(conn, [...(kept.get(conn) ?? []), ...rejects].slice(-MAX_KEPT_REFUSALS));
 }
 
+/** The kinds of key a preview's frame names (ephemeral.ts cancelLost): a drag's or a ruler's tokens, and a carried ruler's ends. */
+const NAMED_BY_PREVIEWS = new Set(["token", "floorLink"]);
+
 /**
  * Sends each connection its `ev` for the batch. Acks and refusals go to the
  * client's current socket only (`current`), never by socket identity, so a
@@ -424,12 +427,19 @@ function keepRejects(conn: Connection, rejects: readonly Reject[]): void {
  * log lines of a floor it gains or loses come and go with the floor
  * (docs/design/design-v1-floors.md 8.1). The answer says whether any did, so
  * the actor judges held previews again.
+ *
+ * `lost` is given, for each connection, the token and end keys whose
+ * deleted change the batch sent it, after its `ev` (docs/design/design-v1-floors.md
+ * phase 3, 4.4, D-261110-180): what left that screen's copy, by a Hide, a
+ * light, a door, fog or stairs removed, so the actor ends the previews
+ * there that name one (ephemeral.ts cancelLost).
  */
 export function publishBatch(
   batch: CommittedBatch,
   connections: Iterable<Connection>,
   current: (key: ClientKey) => Connection | undefined,
   history?: (conn: Connection, delivered: boolean) => void,
+  lost?: (conn: Connection, keys: EntityKey[]) => void,
 ): { heldChanged: boolean } {
   const all = [...connections];
   const live = all.filter((conn) => !conn.closed && conn.held !== null);
@@ -492,6 +502,10 @@ export function publishBatch(
     if (stamped?.length) msg.stamped = stamped;
     if (blocked?.length) msg.blocked = blocked;
     conn.send(msg);
+    if (lost) {
+      const gone = diff.changes.flatMap((c) => ("deleted" in c && NAMED_BY_PREVIEWS.has(parseKey(c.key)?.kind ?? "") ? [c.key] : []));
+      if (gone.length > 0) lost(conn, gone);
+    }
     history?.(conn, true);
   }
   return { heldChanged: changed.size > 0 };
