@@ -273,6 +273,22 @@ Some buttons stay off, with the reason under them. **Remove floor** is off on th
 
 In the Scenes list the tower is one row, "Tower · 3 floors". **Delete** reads "Delete Tower and its 3 floors", **Duplicate** copies them all, and **Move players here** starts the players on the floor you are looking at.
 
+### A floor from a file or a dungeon
+
+A cellar you mean to draw yourself starts well as a blank floor. A level that already exists as a map file, or one you would rather have laid out for you, starts better from its source. **Map**, under the floor rows, picks what **Add a floor above** and **Add a floor below** make: **Blank**, **VTT file** or **Dungeon**. It starts on Blank each time the group opens, so a press meant to add an empty floor never opens a file picker.
+
+![The Floors group of Tower on the DM's screen, with Map on VTT file and its help line under it, above Add a floor above and Add a floor below.](dm-guide/floors-map-choice.webp)
+
+**VTT file** takes a Universal VTT file from Dungeondraft, Dungeon Alchemist, Arkenforge or DungeonFog. Press an add, choose the file, and "Import a floor above Ground floor" opens on it. **Floor name** starts as the file's name cut to 40 characters, which a long file name may want shortened. **Add the floor** brings in the map at the file's size, its grid, walls, doors and lights, whatever size the floor beside has. The floor keeps the scene's grid shape and suggested view, and the floor beside's setting for walls blocking moves. How it starts lit follows a new scene made from the same file (see [Map phases, imports and exports](#map-phases-imports-and-exports)), so a map with lights of its own starts dark with party vision on, and **Like Ground floor** copies the floor beside's light and what players see instead. A phone takes files up to 40 MB, and a larger one is refused under the adds with the limit.
+
+**Dungeon** opens [Generate a dungeon](#generating-a-dungeon) aimed at the new floor. It opens on Custom at the floor beside's size, 20 to 100 squares a side, with the theme, rooms and other choices you used last. **Make the floor** adds a floor named for its theme, such as "Crypt", numbered when that name is taken, with its walls, doors and traps. The DM key goes to the Journal as a page titled for the floor, such as "Tower · Crypt 2 key". The size you pick here is not remembered, so the next dungeon for a new scene opens as it did before. A dungeon makes no stairs, so place them yourself.
+
+![Generate a dungeon above Ground floor, open on Custom at 20 by 20 squares, with a preview of two rooms joined by a corridor and Make the floor in the foot.](dm-guide/floors-dungeon-floor.webp)
+
+While the server makes a dungeon floor, **Hide** reads "Making the floor…" and the dialog stays open, because the floor and its key page have to land in one step of Setup history. After that one **Undo setup** takes back the floor and everything that came with it, whichever source it had. If the server refuses part of it or the connection drops, the dialog says whether the floor exists and what it may lack, and Undo setup takes back whatever arrived.
+
+Both sources add a floor the players have not reached, so nothing of it reaches their devices, not its name, its size or its map, until a party member goes there or you show it. A floor from a source counts as one of the scene's 8 floors and one of the room's 50 scenes, and it cannot go between two floors that stairs join. Both choices are off on a hex scene, since a file's walls and a generated dungeon lie on squares.
+
 ### Which floor each screen shows
 
 **Floor** appears in the top bar once a device holds more than one floor, with the name of the floor on screen. It opens the **Floors** menu, where a tap picks a floor. On a keyboard, `[` shows the floor below and `]` the floor above, and a note says so when there is none. Your screen shows the floor you pick. Each player's screen follows their character. When you move Thorn to the upper floor, Ana's screen goes with him and says "Thorn is on Upper floor. Showing Upper floor.", while Bree's stays downstairs with Bree. A player who picks another floor to look at sees **Viewing Ground floor**, with a button, **Back to Thorn**, that takes them back to their character. A table display shows the floor where most of the party stands, the lower one on a tie, or yours while it follows you.
@@ -285,7 +301,9 @@ In a fight, the tracker keeps every creature the players may see, whatever floor
 
 A character who climbs by [stairs or a ladder](#stairs-and-ladders) needs no help from you, but a character who has to cross floors another way asks you. Select the token and press **Move to floor…** in its action bar (**Floor…** where the row is short), or in the **More** sheet for a group. Pick the floor, and the creatures move to the same squares there, standing on that floor's ground, with what they carry, drag and their areas. It is one Undo step. A creature moved to another floor of its scene mid-turn keeps its **Moved** count, as a climb does, while a move to another scene starts it again.
 
-If the move would bring a party member onto a floor the players have not reached, the floor's row warns you first: "Players haven't reached Attic. Moving Thorn there opens it to them." Nothing asks for confirmation, so look before you tap. A floor the players have reached stays reached, and **Hide from players** closes it again if you opened it by mistake.
+The search offers the same move. With one creature selected, open it and type "move" or a floor's name, and **Move to Upper floor** appears near the top of the list, with the creature's name under it. Enter moves the creature at once and shows the floor. Shift+Enter selects and frames the creature instead, with Move to floor in its action bar.
+
+If the move would bring a party member onto a floor the players have not reached, the floor's row warns you first: "Players haven't reached Attic. Moving Thorn there opens it to them." In the search the warning stands under the floor's name as "Thorn · Opens Attic to players". Nothing asks for confirmation, so look before you tap. A floor the players have reached stays reached, and **Hide from players** closes it again if you opened it by mistake.
 
 ### Stairs and ladders
 
@@ -308,7 +326,7 @@ Tap an end while **Between floors** is open to open its pane. **Kind** turns sta
 
 ![Pat's phone after the climb: Upper floor's wooden boards, Thorn on the stairs' other end, the marker reading Moved 25 ft and 5 ft left, and the stairwell icon in the strip now Go down.](dm-guide/floors-climb-landed.webp)
 
-A climb is a leg of the turn and costs speed. Stairs cost the height between the two floors, 10 ft unless you set another under the floor's **Height above the floor below**. A ladder costs twice that, unless the creature has a Climb speed, and a prone creature pays one more foot for each foot. **Moved** keeps the feet of the floors a creature left, so after a 15 ft walk and stairs 10 ft high it reads "Moved 25 ft" upstairs. A ruler or a drag that ends on stairs reads as any walk and never routes through them.
+A climb is a leg of the turn and costs speed. Stairs cost the height between the two floors, 10 ft unless you set another under the floor's **Height above the floor below**. A ladder costs twice that, unless the creature has a Climb speed, and a prone creature pays one more foot for each foot. **Moved** keeps the feet of the floors a creature left, so after a 15 ft walk and stairs 10 ft high it reads "Moved 25 ft" upstairs. A drag that ends on stairs reads as any walk and never routes through them, and so does a walking ruler until you press **Up the stairs** (see [Measuring up the stairs](#measuring-up-the-stairs)).
 
 Some creatures cannot take the stairs, and the button says why:
 
@@ -316,13 +334,32 @@ Some creatures cannot take the stairs, and the button says why:
 - **Too big for these stairs. Squeeze to fit.** shows for a creature larger than the squares that could squeeze in. **Too big for these stairs.** shows for one that could not.
 - The button does not show for a creature only partly on the squares, in the air over them, or riding or carried by a creature the player can see, which takes the stairs for it, nor for a group selection.
 
-A player's climb waits for the server before it shows anything, since a player's device is not told the height of the floors. The button shows busy and a second press does nothing. The phone then follows the creature ("Thorn is on Upper floor. Showing Upper floor.") and focus moves to the button for the way back. Your own screen follows the climb at once.
+A player's climb waits for the server before it shows anything, since only your own device works a climb out. The button shows busy and a second press does nothing. The phone then follows the creature ("Thorn is on Upper floor. Showing Upper floor.") and focus moves to the button for the way back. Your own screen follows the climb at once.
 
 Landing sets off no trap or area reminder, so put a trap a square beyond the stairs if you want the party to meet it on arrival.
 
 A player's **Undo** takes a climb back down the same stairs, with what rode on the creature and its areas, and **Redo** takes it up again, while the stairs stand as they were. If you lock them, remove them or place them again in between, the undo answers "Could not undo moving Thorn up the stairs: the stairs changed." A later move of the creature refuses it too, so steps undo in order. When your own Undo or Redo would put something back that stairs now block, it keeps its step and says "The DM who placed them can remove them." Remove the stairs and the same Undo works. An Undo that would put removed stairs back where a wall, a pit or new ground now lies keeps its step too, and names what is in the way, such as "A wall crosses those squares on Upper floor.", so it works once that is cleared. An Undo or Redo that would put a floor back on a level another floor now holds keeps its step too, and says "A floor added or moved since holds Attic's place. Remove or move it, then Undo again." It names no floor, because adding a floor renumbers the others, so the one on that level may be an old floor pushed up. Free the level and the same Undo or Redo works. A backup and an import carry the stairs with the rest of the scene.
 
-**What players see.** A player sees an end only on a floor they hold and on ground they have seen. It reads "Up to Upper floor" where they hold that floor and "Stairs up" or "Ladder down" where they do not, which also tells them a floor lies next to this one. You see "Up to Attic · Not reached yet" on an end whose far floor the players have not reached. Neither the far end nor what stands on the far floor reaches a player, and the climb tells only the climber's owners how far they went.
+**What players see.** A player sees an end only on a floor they hold and on ground they have seen. It reads "Up to Upper floor" where they hold that floor and "Stairs up" or "Ladder down" where they do not, which also tells them a floor lies next to this one. You see "Up to Attic · Not reached yet" on an end whose far floor the players have not reached. Neither the far end nor what stands on the far floor reaches a player, and the climb tells only the climber's owners how far they went. A player who holds both floors of a pair also learns how high it climbs, so that a walking ruler can count it.
+
+### Measuring up the stairs
+
+A chase up a tower takes more than one measure: how far does the rogue get from the cellar door to the landing, with the climb counted? Set the Ruler to **Walking** (see [The Ruler](#the-ruler)), drag from the creature to the stairs or the ladder, and the ruler's row offers **Up the stairs**. It reads **Down the stairs**, **Up the ladder** or **Down the ladder** as the end leads, and shows the stairwell icon alone where the row is short. Press it, and the map shows the other floor while the ruler goes on from the landing. Tap to add stops there as on any floor.
+
+![Ana's phone with her Walking ruler from Thorn to the stairs on Ground floor: the label reads Walking 20 ft, the stairs are named Up to Upper floor, and Up the stairs leads the ruler's row.](dm-guide/floors-ruler-button.webp)
+
+![Ana's phone after the press: Upper floor under the Viewing notice, the ruler running on from the landing to a stop three squares east, and its label reading Walking 45 ft with 30 ft before this floor under it.](dm-guide/floors-ruler-carried.webp)
+
+The total counts the climb. Stairs cost the height of the floor above, 10 ft unless its page sets another, and a ladder costs twice that. The reading is the whole walk, "Walking 45 ft", with "30 ft before this floor" under it for the feet already measured on the floors left, and a terrain line such as "+10 ft for difficult terrain" joins it after a comma. The legs on the new floor are walked by a creature of the same size, squeezed if it landed squeezed, and the 5-10-5 diagonal count goes on across the stairs. A ruler leaves out crawling here as it does everywhere, so a prone creature's extra foot is not counted.
+
+The button is offered only for a climb that could happen. It waits until the walk is worked out, and it is off for locked stairs, for stairs to a floor the device does not hold, and for a creature that would have to squeeze to fit, as **Go up** is. A player's ruler, and yours once **Shared** is on, offers only stairs the players can see and counts no Climb speed. Your own ruler, before you share it, offers every stairs and counts a Climb speed, so a ladder costs once for a creature that climbs, and it stays private after it goes up. Turn **Shared** on before you press if the players should watch the climb.
+
+A ruler over stairs always walks, and it can't be kept. It crosses up to 8 stairs and sits on up to 50 creatures, and one that grows too long to send says "A ruler over stairs can't take more stops. Clear it to measure again." Only the button carries a ruler across floors. `[`, `]`, the Floors menu and following a creature end it, and so does starting a new ruler away from the landing.
+
+Where the players have not seen the landing, a shared ruler walks only the ground they have seen that joins it. A stop on unseen open ground reads as a straight distance, and a stop behind a wall whose way round they have not seen reads "No way through". Your own ruler reads all the ground.
+
+> [!NOTE]
+> A ruler carried over stairs reaches only the players who see the creature it started on and hold every floor it crossed. When that creature or those stairs leave a player's view, because you hid the creature, put a light out, closed a door or removed the stairs, the ruler ends on that player's screen at once.
 
 ### What players are sent
 
