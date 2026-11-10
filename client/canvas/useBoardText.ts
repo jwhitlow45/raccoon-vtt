@@ -2,7 +2,7 @@ import { useMemo, useRef } from "react";
 import type { Actor, Character } from "#shared/model.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import { boardSizes } from "../lib/boardScale.ts";
-import { focusLines, focusStyle, labelStyle, linesSize, placeLabels, showsNumberBadge, type Box, type LabelInput, type LabelLine, type Obstacle, type PlacedLabel } from "../lib/boardText.ts";
+import { focusLines, focusStyle, labelStyle, linesSize, placeLabels, showsNumberBadge, widestLabel, type Box, type LabelInput, type LabelLine, type Obstacle, type PlacedLabel } from "../lib/boardText.ts";
 import { drawnAt, footprint, type ViewToken } from "../lib/scene.ts";
 import { DECOR_MIN_PX, healthState, hpDisplay, type HpDisplay } from "../lib/tokenView.ts";
 import { pillReach } from "../features/measure/Pill.tsx";
@@ -93,9 +93,13 @@ export type BoardTextInput = {
   within?: Pick<Box, "x0" | "x1">;
 };
 
-/** How far off the screen a token can stand and still push a label onto it: a side label is up to its style's maxWidth wide, past the gap (boardText.ts). */
-export function edgeReach(sizes: { namePx: number; gapPx: number }): number {
-  return 15 * sizes.namePx + sizes.gapPx;
+/**
+ * How far off the screen a token can stand and still push a label onto it:
+ * the widest label its style draws (boardText.ts widestLabel, which grows with
+ * a large token's own width) past the gap.
+ */
+export function edgeReach(sizes: Parameters<typeof labelStyle>[0] & { gapPx: number }, tokenPx: number, scale: number): number {
+  return widestLabel(labelStyle(sizes, tokenPx, scale)) + sizes.gapPx;
 }
 
 export function useBoardText(input: BoardTextInput): Map<string, TokenText> {
@@ -129,10 +133,11 @@ export function useBoardText(input: BoardTextInput): Map<string, TokenText> {
       return (x0 < left && x1 > left) || (x0 < right && x1 > right);
     };
     if (![...layout.out].some(([id, text]) => crossing(id, text))) return layout.out;
-    const reach = edgeReach(layout.sizes);
     const near = tokens.filter((t) => {
       const m = layout.meta.get(t.id);
-      return m !== undefined && m.ox + m.widthPx > left - reach && m.ox < right + reach;
+      if (!m) return false;
+      const reach = edgeReach(layout.sizes, m.widthPx, scale);
+      return m.ox + m.widthPx > left - reach && m.ox < right + reach;
     });
     const edged = layoutBoardText({ tokens: near, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch, place, within: { x0: left, x1: right } }, edge.current);
     edge.current = edged.placed;

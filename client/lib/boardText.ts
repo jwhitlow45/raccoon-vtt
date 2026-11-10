@@ -116,6 +116,11 @@ export function labelStyle(
   };
 }
 
+/** The widest box a label in this style can draw: a whole name wraps to `wrapEm`, which grows with the token, and no shape passes `maxWidth`. */
+export function widestLabel(style: Pick<LabelStyle, "maxWidth" | "namePx" | "padX" | "room">): number {
+  return Math.max(style.maxWidth, style.room.wrapEm * style.namePx + 2 * style.padX) + 2;
+}
+
 /** The focus plate's style: the focus sizes, up to 16 ems a line, on a plate padded 6 px each side, the HP always on its own line. */
 export function focusStyle(sizes: Pick<BoardSizes, "focusNamePx" | "focusHpPx" | "gapPx" | "stepPx" | "unrounded">): LabelStyle {
   const padX = 6;

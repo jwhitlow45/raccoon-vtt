@@ -96,10 +96,24 @@ describe("a label beside the screen's edge as the screen moves (LP36-SOL-01, LP3
     }
   });
 
-  test("the reach covers the widest side label past its gap, at every zoom", () => {
-    for (const s of [10, 20, 40, 80, 160]) {
-      const sizes = boardSizes(s);
-      assert.ok(labelStyle(sizes, s, s).maxWidth + sizes.gapPx <= edgeReach(sizes) + 1e-9, `scale ${s}`);
+  test("the reach covers every label a token can draw, large tokens, side labels and HP lines included, as placed", () => {
+    const scale = 40;
+    const sizes = boardSizes(scale);
+    for (const cells of [1, 2, 3, 6, 12]) {
+      for (const hp of [null, "30/30"]) {
+        const wide = { ...token("big", { x: 20, y: 20 }), name: "Bree the Extraordinarily Long Named Wanderer of the Marsh", hp, sides: true, rank: 3 };
+        const box = { x0: 20 * scale, y0: 20 * scale, x1: (20 + cells) * scale, y1: (20 + cells) * scale };
+        const input = { ...wide, box, belowY: box.y1 + sizes.gapPx, aboveY: box.y0 - sizes.gapPx, style: labelStyle(sizes, cells * scale, scale) };
+        const reach = edgeReach(sizes, cells * scale, scale);
+        // Walls of obstacles above and below force the name to a side, where it can be widest.
+        const wall = (y0: number, y1: number) => ({ box: { x0: box.x0 - 2000, y0, x1: box.x1 + 2000, y1 }, kind: "pill" as const });
+        const blocked = [{ box, owner: "big", kind: "body" as const }, wall(box.y1, box.y1 + 400), wall(box.y0 - 400, box.y0)];
+        for (const obstacles of [[{ box, owner: "big", kind: "body" as const }], blocked]) {
+          const label = placeLabels([input], obstacles, measureLabel).get("big")!;
+          if (label.lines.length === 0) continue;
+          assert.ok(label.box.x0 >= box.x0 - reach && label.box.x1 <= box.x1 + reach, `${cells} cells, hp ${hp}: label ${JSON.stringify(label.box)} passes the reach ${reach} of ${JSON.stringify(box)}`);
+        }
+      }
     }
   });
 });
