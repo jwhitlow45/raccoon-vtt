@@ -11,10 +11,10 @@ import { actor, character, DM, env, P1, reveal } from "#shared/testutil.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { RoomScope } from "../../state/scope.ts";
 import type { ToolContext } from "../tools.ts";
-import { CARRIED_NO_KEEP, CARRIED_TOO_LONG, CARRIED_WALKS } from "../floors/linkWords.ts";
+import { CARRIED_NO_KEEP, CARRIED_STAIRS_GONE, CARRIED_TOO_LONG, CARRIED_WALKS } from "../floors/linkWords.ts";
 import { climbFeet, frameFits, priorOut, rulerAnchors, rulerFrame, shareLocked, stairsOffer, stairsPlan, stillCarried, type Carry, type Stairs } from "./carry.ts";
 import { tokenStop, type RulerState, type RulerStop } from "./ruler.ts";
-import { pickMeasure, publish, refuseKeep, restoreRuler, rulerActivated, rulerDeactivated, rulerSlot, takeStairs } from "./rulerStore.ts";
+import { endGoneCarry, pickMeasure, publish, refuseKeep, restoreRuler, rulerActivated, rulerDeactivated, rulerSlot, takeStairs } from "./rulerStore.ts";
 import { measureWalk, walkText, type WalkInput } from "./walkRuler.ts";
 
 /*
@@ -278,7 +278,7 @@ function fakeCtx(view: RoomState, role: "dm" | "player" = "dm") {
 }
 
 /** Thorn's ruler to the stairs, then a press, as the row and the board would make them. */
-function carryUp(s: RoomState, who = DM_OWN) {
+function carryUp(s: RoomState, who: { role: "dm" | "player"; share: boolean } = DM_OWN) {
   const f = fakeCtx(s, who.role);
   rulerActivated(f.ctx);
   const tool = f.scope.get(rulerSlot);
@@ -398,6 +398,37 @@ describe("a press, the switch and the edges (4.2, D-261110-078)", () => {
       assert.equal(f.tool.store.getState().carry?.prior.ft, 10 * n + 25);
     }
     assert.deepEqual(f.tool.store.getState().carry?.prior.ends, ["l1", "l2", "l1", "l2", "l1", "l2", "l1", "l2"]);
+  });
+
+  test("stairs a co-DM removed end the carried ruler on this device, with a word and an end frame, and a copy that still holds them leaves it", () => {
+    for (const who of [DM_OWN, DM_SHARED, PLAYER]) {
+      const s = stairsRoom();
+      const { ctx, tool, sent, said, state } = carryUp(s, who);
+      assert.equal(endGoneCarry(ctx), false, "the stairs are still there");
+      assert.ok(tool.store.getState().carry);
+      // Only the far end goes: the other end of the pair is not the one the ruler took.
+      const { l2, ...rest } = s.floorLinks!;
+      state.view = { ...s, floorLinks: rest } as RoomState;
+      assert.equal(endGoneCarry(ctx), false, "an end the ruler did not take");
+      const { l1, ...none } = s.floorLinks!;
+      state.view = { ...s, floorLinks: none } as RoomState;
+      assert.equal(endGoneCarry(ctx), true, who.role);
+      assert.deepEqual([tool.store.getState().ruler, tool.store.getState().carry], [null, null]);
+      assert.deepEqual(said, [CARRIED_STAIRS_GONE]);
+      assert.equal(sent[sent.length - 1]!.e.k, "rulerEnd");
+      assert.equal(endGoneCarry(ctx), false, "nothing left to end");
+    }
+  });
+
+  test("a copy that holds no ends yet, or a ruler that is not carried, is left alone", () => {
+    const s = stairsRoom();
+    const { ctx, tool, state } = carryUp(s);
+    state.view = { ...s, floorLinks: undefined } as unknown as RoomState;
+    assert.equal(endGoneCarry(ctx), false, "no ends field: the copy has not loaded");
+    state.view = { ...s, floorLinks: {} } as RoomState;
+    tool.store.setState({ carry: null });
+    assert.equal(endGoneCarry(ctx), false, "a plain ruler");
+    assert.ok(tool.store.getState().ruler);
   });
 
   test("Clear drops the carry with the ruler", () => {

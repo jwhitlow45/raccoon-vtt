@@ -147,6 +147,9 @@ export const CARRIED_NO_KEEP = "A ruler over stairs can't be kept.";
 /** Measure's Straight while a ruler is carried over stairs. */
 export const CARRIED_WALKS = "A ruler over stairs walks.";
 
+/** A ruler carried over stairs ends where a co-DM removes those stairs or this device loses them. */
+export const CARRIED_STAIRS_GONE = "The stairs this ruler took are gone.";
+
 /** The DM's Shared while a ruler carried private is on another floor. */
 export const SHARE_BEFORE_STAIRS = "Share it before it takes the stairs.";
 

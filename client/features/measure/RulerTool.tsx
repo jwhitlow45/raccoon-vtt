@@ -1,4 +1,4 @@
-import { useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { useDelayed } from "../../components/Loading.tsx";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
@@ -28,7 +28,7 @@ import {
   type RulerState,
   type RulerToken,
 } from "./ruler.ts";
-import { MEASURES, pickMeasure, publish, refuseKeep, restoreRuler, rulerActivated, rulerDeactivated, rulerSlot, shares, takeStairs, toggleShare } from "./rulerStore.ts";
+import { MEASURES, endGoneCarry, pickMeasure, publish, refuseKeep, restoreRuler, rulerActivated, rulerDeactivated, rulerSlot, shares, takeStairs, toggleShare } from "./rulerStore.ts";
 import { useHeldWalk, useWalkMeasure } from "./useWalkMeasure.ts";
 import { heldKey, walkShown, walkText, type WalkInput, type WalkMeasure } from "./walkRuler.ts";
 import { rulerCycle } from "../toolChoices.ts";
@@ -180,6 +180,12 @@ function RulerOptions(props: { role: "dm" | "player" }) {
   const kept = useKeptRulers(props.role);
   const stops = useMemo(() => (ruler ? allStops(ruler) : []), [ruler]);
   const carried = stillCarried(carry, stops);
+  // The whole copy's ends, not the floor shown's: a co-DM removing the stairs ends this device's carried ruler too.
+  const links = useRoomView((s) => s.view?.floorLinks);
+  useEffect(() => {
+    const ctx = tool.activeCtx;
+    if (ctx && carried) endGoneCarry(ctx);
+  }, [links, carried, tool]);
   const everything = props.role === "dm" && !share;
   // Only the DM's private carried ruler walks on with the real creature's speeds (4.2 The walk).
   const actor = useRoomView((s) => (carried && everything && s.view ? actorOfToken(s.view, carried.tokenId) : undefined));

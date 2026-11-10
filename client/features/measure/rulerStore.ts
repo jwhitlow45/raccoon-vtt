@@ -1,7 +1,7 @@
 import { createStore } from "zustand/vanilla";
 import type { SceneId } from "#shared/model.ts";
 import { scopeSlot, type RoomScope } from "../../state/scope.ts";
-import { CARRIED_NO_KEEP, CARRIED_TOO_LONG, CARRIED_WALKS } from "../floors/linkWords.ts";
+import { CARRIED_NO_KEEP, CARRIED_STAIRS_GONE, CARRIED_TOO_LONG, CARRIED_WALKS } from "../floors/linkWords.ts";
 import type { ToolContext } from "../tools.ts";
 import { frameFits, rulerFrame, shareLocked, stillCarried, type Carry } from "./carry.ts";
 import { allStops, type LastTap, type RulerGesture, type RulerState, type RulerStop } from "./ruler.ts";
@@ -125,6 +125,28 @@ export function refuseKeep(ctx: PublishCtx, ruler: RulerState | null): boolean {
   if (!kept || !stillCarried(carry, kept.stops)) return false;
   if (ruler) publish(ctx, ruler);
   ctx.ui?.notify(CARRIED_NO_KEEP);
+  return true;
+}
+
+/**
+ * A ruler carried over stairs ends when an end it took leaves this device's
+ * copy (a co-DM removed the stairs, or the floor was hidden from this
+ * player). Without this it keeps counting "before this floor" and goes out
+ * as shared while the server withholds every frame, since no device holds
+ * the gone end. Reads the whole copy, not the floor shown, which holds only
+ * that floor's ends. Returns whether it ended the ruler.
+ */
+export function endGoneCarry(ctx: PublishCtx & Pick<ToolContext, "getState">): boolean {
+  const tool = ctx.scope.get(rulerSlot);
+  const { ruler, carry } = tool.store.getState();
+  const links = ctx.getState().view?.floorLinks;
+  if (!ruler || !links) return false;
+  const carried = stillCarried(carry, ruler.stops);
+  if (!carried || carried.prior.ends.every((id) => links[id] !== undefined)) return false;
+  tool.gesture = null;
+  tool.lastTap = null;
+  publish(ctx, null);
+  ctx.ui?.notify(CARRIED_STAIRS_GONE);
   return true;
 }
 
