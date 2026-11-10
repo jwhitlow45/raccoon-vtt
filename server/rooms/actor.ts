@@ -280,6 +280,8 @@ type Command =
   /** The server's music tick (docs/design/design-v1-music.md 6.4), computed when the queue reaches it, never before. */
   | { t: "soundTick" };
 
+type StepCommand = Extract<Command, { t: "step" }>;
+
 /** The server's clock and the number clock, read together, once for each command (#moment). */
 type Moment = { now: number; number: number };
 
@@ -482,6 +484,8 @@ export class RoomActor {
   #numberClock: Clock;
   /** The clocks the command being handled read at its start, which its number, its lines' times and `lastOpAt` come from. */
   #moment: Moment | null = null;
+  /** Deletion steps waiting for the open batch to commit (#runStep), in the order they came. */
+  #parked: StepCommand[] = [];
   /**
    * Whether the room was loaded from a snapshot below COUNT_SNAPSHOT_VERSION
    * and still needs one at today's version, which its next commit carries
@@ -704,6 +708,7 @@ export class RoomActor {
       this.#inFlight === null &&
       this.#snapshotting === null &&
       this.#stepRunning === null &&
+      this.#parked.length === 0 &&
       this.#reading === null
     );
   }
@@ -891,13 +896,15 @@ export class RoomActor {
 
   /**
    * Runs a deletion step on this room's queue (docs/design/design-v1-dm-tools.md
-   * 3.19). The batch being staged is committed first and awaited, so the
+   * 3.19). A step that finds a batch being staged waits for that batch's own
+   * commit, at its tick, and runs once it lands with no batch open, so the
    * committed state `run` gets equals the staged one and nothing it relies
-   * on can still be abandoned. If that commit is still being retried when
-   * the room shuts down, the step is refused and runs nothing. While `run`
-   * is awaited the queue waits, so no op is applied meanwhile. The ids it
-   * returns as deleted are recorded under a new deletion generation, and a
-   * room that went read-only at its quota checks its size again at once.
+   * on can still be abandoned. Ops queued after it may join that batch
+   * meanwhile. If the room shuts down first, the step is refused once and
+   * runs nothing. While `run` is awaited the queue waits, so no op is
+   * applied meanwhile. The ids it returns as deleted are recorded under a
+   * new deletion generation, and a room that went read-only at its quota
+   * checks its size again at once.
    */
   deletionStep<T>(run: DeletionRun<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -909,11 +916,10 @@ export class RoomActor {
     });
   }
 
-  #runStep(cmd: Extract<Command, { t: "step" }>): void {
+  #runStep(cmd: StepCommand): void {
     if (this.#batch) {
-      // Flush first: the step goes back to the front and runs once the commit lands.
-      this.#queue.unshift(cmd);
-      this.#commitNow();
+      // The batch closes at its own tick, not because of the step (#runParked runs it after the commit).
+      this.#parked.push(cmd);
       return;
     }
     // Started in a microtask, so the queue is marked as held before `run` can settle, even by throwing at once.
@@ -932,6 +938,19 @@ export class RoomActor {
       }
       if (deleted > 0) await this.#checkQuota().catch((err: unknown) => this.#log.warn({ err, roomId: this.roomId }, "quota recheck failed"));
     });
+  }
+
+  /**
+   * Runs the first parked step once the commit it waited for has landed and
+   * no batch is open, so the committed state it reads is the staged one
+   * (#runStep). A batch opened meanwhile, as an ask read can open one during
+   * a commit, keeps it parked until that batch commits too. True when one
+   * started, which holds the queue.
+   */
+  #runParked(): boolean {
+    if (this.#parked.length === 0 || this.#batch || this.#inFlight || this.#stepRunning || this.#reading || this.#closed) return false;
+    this.#runStep(this.#parked.shift()!);
+    return true;
   }
 
   /** Keeps only the deleted ids an outstanding lookup, older than this deletion by construction, asked for. */
@@ -1101,6 +1120,8 @@ export class RoomActor {
         if (cmd.t === "read") cmd.run();
         if (cmd.t === "op" && cmd.lookup) this.#endLookup(cmd.lookup);
       }
+      // A step waiting for the batch below never runs: the room it would delete from is going.
+      for (const cmd of this.#parked.splice(0)) cmd.reject(new ActorClosedError(this.roomId));
       if (this.#batch && (opts.flush ?? true)) this.#commitNow();
       else if (this.#batch) {
         // Simulating a crash: the accumulating batch is lost like it would be.
@@ -1129,6 +1150,7 @@ export class RoomActor {
     this.#draining = true;
     try {
       while (this.#inFlight === null && this.#stepRunning === null && this.#reading === null && !this.#closed) {
+        if (this.#runParked()) break;
         const cmd = this.#queue.shift();
         if (!cmd) break;
         // Caught here and not by each caller: a drain also runs from a timer, a turn or a commit's end, where nothing else would catch it.
@@ -1170,7 +1192,7 @@ export class RoomActor {
    * What may not be: an op that threw after it was staged can lack its ack
    * details, its receipt and its undo step, so it is not on its sender's
    * stack. A deletion step is not refused here: its own failure is answered
-   * in #runStep, and its flush first (#commitNow) does not throw.
+   * in #runStep, and parking it behind a batch does not throw.
    */
   #commandFailed(cmd: Command, err: unknown, before: Batch | null, records: number): void {
     let keepOpen = false;
