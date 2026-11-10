@@ -19,7 +19,7 @@ around one table or some players join from elsewhere.
 are the ones [mvp.md](docs/design/mvp.md) lists today:
 
 - Join requests that the DM approves.
-- Several floors in one scene. Phases 1 and 2 are built: floors in a scene, a Floor button and menu, Move to floor for the DM, and stairs and ladders that players take themselves. Openings and falls, Universal VTT files onto a floor and sight between floors come next.
+- Several floors in one scene. Phases 1 to 3 are built: floors in a scene, a Floor button and menu, Move to floor for the DM, stairs and ladders that players take themselves, floors from Universal VTT files and generated dungeons, and the walking ruler over stairs. Openings and falls and sight between floors come next.
 - Animated maps. They are built, behind a switch the server's owner turns on.
 - A dungeon generator. It is built, on squares and hexes, with five themes, secret doors, lights, dressing, a DM key, edits to single rooms and adding a wing to an existing scene.
 - Weather overlays.
