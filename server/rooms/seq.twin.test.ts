@@ -162,9 +162,8 @@ class Twin {
 type Pair = [Twin, Twin];
 
 /**
- * The twins, opened, with P1's first chat taken in both: a room's first
- * commit explores what its loaded state shows, which a fixture never
- * explored, and that belongs to neither twin's own work.
+ * The twins, opened, with P1's first chat taken in both, whose batch
+ * explores the sight the fixture shows. The cold cases open without it.
  */
 async function twins(t: TestContext, opts: SeqTwinOptions = {}, options: Partial<ActorOptions> = {}, edit?: (state: RoomState) => void): Promise<Pair> {
   const w = seqTwins(opts);
@@ -349,6 +348,30 @@ describe("twin rooms give their devices the same frames", () => {
       same(pair, `${variant}, after the restart`);
       await both(pair, (twin) => twin.apply("p1", { t: "log.chat", text: "after" }));
       same(pair, `${variant}, after P1's chat`);
+    }
+  });
+
+  test("a room loaded with sight it never explored explores it at its first answer, alike whether P2's op on a token P1 never sees is taken or refused, and never at a tick before it", async (t) => {
+    const explores = (twin: Twin) => twin.db.stored.filter((op) => op.t === "sys.explore").length;
+    for (const variant of ["taken or refused", "a tick in one twin first"] as const) {
+      const familiar = variant === "taken or refused";
+      const w = seqTwins(familiar ? { familiar: true } : { music: true });
+      const options: Partial<ActorOptions> = familiar ? {} : { roomSound: true };
+      const pair: Pair = [await Twin.open(t, "door", w.door, options), await Twin.open(t, "rock", w.rock, options)];
+      if (familiar) {
+        await both(pair, (twin) => twin.send("p2", renameFamiliar));
+        const refusals = pair.map((twin) => twin.clients.p2.sent.filter((m) => m.t === "ev" && (m.rejects?.length ?? 0) > 0).length);
+        assert.deepEqual(refusals, [0, 1], `${variant}: the answers`);
+      } else {
+        await both(pair, (twin) => tick(twin, TRACK_END + 1_000));
+        assert.ok(pair[0].bookkeeping().includes("sys.sound") && !pair[1].bookkeeping().includes("sys.sound"), `${variant}: a tick in the door twin alone`);
+        assert.deepEqual(pair.map(explores), [0, 0], `${variant}: the tick explored nothing`);
+        same(pair, `${variant}, after the tick`);
+        await both(pair, (twin) => twin.apply("p1", { t: "log.chat", text: "after" }));
+      }
+      for (const twin of pair) assert.ok(explores(twin) > 0, `${variant}: ${twin.name}: the first answer explored the loaded sight`);
+      for (const twin of pair) assert.ok(twin.clients.p1.sent.some((m) => m.t === "ev" && m.changes.length > 0), `${variant}: ${twin.name}: P1 got the explored ground`);
+      same(pair, variant);
     }
   });
 

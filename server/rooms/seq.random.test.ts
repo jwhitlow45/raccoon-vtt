@@ -28,7 +28,10 @@ import { scopeObserver, ScopeClient, StoredRoomDb, until, type StoredRow } from 
  * reloads, room reloads through the stored room (a third with a snapshot
  * on the way down), and bursts of members' ops queued behind a held commit,
  * which the actor's own cap and walk rules split. A fifth of the runs cap
- * a batch at 3. Steps move the clock alike, and nothing else does.
+ * a batch at 3, and a third open cold: the tick, the image's delete and
+ * P2's op on the familiar come before any other answer, while the sight
+ * the fixture shows is still unexplored. Steps move the clock alike, and
+ * nothing else does.
  *
  * Whether P1's and the display's frames are compared is decided from the
  * server's layers alone, apart from anything compared: until either's
@@ -387,9 +390,21 @@ async function run(t: TestContext, seed: number, steps: number, counts: Counts):
   const w = seqTwins(opts);
   for (const s of [w.door, w.rock]) s.traps = { dart: structuredClone(DART) };
   const pair = [new Twin(t, "door", w.door, options), new Twin(t, "rock", w.rock, options)] as const;
+  // A third of the runs open cold: the room's own work and P2's op on the familiar come before any other answer, while
+  // the fixture's sight is still unexplored, and the frames compared from the first include them.
+  const opening: Step[] = [];
+  if (seed % 3 === 0) {
+    if (opts.music) opening.push({ k: "tick" });
+    if (opts.stamp) opening.push({ k: "image" });
+    if (opts.familiar) opening.push({ k: "op", who: "p2", op: { t: "token.update", tokenId: FAMILIAR, patch: { name: "Hoot" } } });
+  }
   for (const twin of pair) {
     await twin.load();
-    // The first commit explores what the fixture's state shows, which belongs to neither twin's own work. Then Bree in Q.
+    for (const step of opening) {
+      await take(twin, step, swept);
+      await twin.settle();
+    }
+    // P1's chat, then Bree in Q.
     await twin.clients.p1.apply({ t: "log.chat", text: "ready" });
     await twin.clients.dm.apply({ t: "token.move", tokenId: "b", ...IN_Q });
     await twin.settle();
