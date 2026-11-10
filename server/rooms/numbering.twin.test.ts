@@ -5,6 +5,7 @@ import { NUMBERS_MOST } from "#shared/numbering.ts";
 import type { RoomState, Scene, Token } from "#shared/model.ts";
 import { character, member, scene, token } from "#shared/testutil.ts";
 import { creature, each, inF, inR, make, move, numberingRoom, numbersIn, openRooms, patch, same, viewOf, type Room, type Rooms } from "./numberingTesting.ts";
+import type { Op } from "#shared/protocol.ts";
 
 /**
  * Creature numbers in rooms P1 cannot tell apart: room A and room B differ
@@ -460,6 +461,49 @@ describe("old rooms keep the numbers the party sees, once", () => {
     for (let i = 0; i < 100; i++) assert.equal(numbers[`m${pad(i)}a`], 1, `${names[i]} keeps its 1`);
     assert.equal(numbers[`m${pad(100)}a`], undefined, `${names[100]} reads plain`);
     assert.equal(numbers[`m${pad(100)}b`], undefined, `${names[100]}'s second reads plain`);
+  });
+});
+
+describe("a batch numbers what the party holds as it closes", () => {
+  // Ayla goes into room F and back in one batch, so the party's copy holds room A's Goblin there only between the two.
+  const there = inF(0);
+  const back = { x: 3, y: 3 };
+  const bursts: Array<[string, Op[]]> = [
+    ["two moves", [move("a", there), move("a", back)]],
+    ["two group moves", [{ t: "token.moveMany", moves: [{ tokenId: "a", ...there }] } as Op, { t: "token.moveMany", moves: [{ tokenId: "a", ...back }] } as Op]],
+  ];
+  for (const [kind, burst] of bursts) {
+    test(`${kind} of a party member into a room and back in one batch number nothing either room shows, and the next Goblin reads 2 in both, for P1 and the display`, async (t) => {
+      const hidden = { a: ["zq1"] };
+      // Batches wait as long as the app's, so both moves land in one.
+      const pair = await openRooms(t, ...states((s) => goblins(s, [["g1", inR(1)]]), (s) => goblins(s, [["zq1", inF(1)]])), { batchMs: 20 });
+      await each(pair, (room) => room.apply("p1", { t: "log.chat", text: "ready" }));
+      same(pair, "opened", hidden);
+      for (const room of pair) assert.deepEqual(await room.queue("dm2", burst), ["taken", "taken"], `${room.name}: both moves taken`);
+      same(pair, `${kind} there and back`, hidden);
+      assert.deepEqual(p1Numbers(pair, `${kind} there and back`), {});
+      assert.equal(pair[0].state.tokens.zq1!.met, undefined, "room A's Goblin in room F was never met");
+      await steps(pair, hidden, [["a Goblin made in sight", (room) => room.apply("dm", make("w", inR(0)))]]);
+      assert.deepEqual(p1Numbers(pair, "a Goblin made in sight"), { g1: 1, w: 2 });
+    });
+  }
+
+  test("a character's change before a walk in the same batch still gives its companion on another scene the 1 it lacked", async (t) => {
+    // On s2, out of the party's copy: Goblin 2, and the first-met Goblin, which met as P2's character's companion and took no 1.
+    const fixture = (s: RoomState) => {
+      s.characters.c2 = character("c2", { name: "Cora", ownerIds: ["p2"] });
+      s.tokens.x = creature("x", { x: 3, y: 3 }, { sceneId: "s2", met: 1, companion: { of: "c2", turn: "shared" } });
+      s.tokens.y = creature("y", { x: 5, y: 3 }, { sceneId: "s2", met: 1, number: 2 });
+      s.scenes.s2 = { ...s.scenes.s2!, numbers: { names: { Goblin: [1, 2] } } };
+      s.numbering = { rev: 0, groups: 1 };
+    };
+    const pair = await openRooms(t, ...states(fixture), { batchMs: 20 });
+    await each(pair, (room) => room.apply("p1", { t: "log.chat", text: "ready" }));
+    for (const room of pair) assert.equal(room.state.tokens.x!.number, undefined, `${room.name}: a companion P2 plays takes no 1`);
+    // No player plays Cora now, so her companion reads as a plain Goblin, and Ayla's move after it steps the batch in place.
+    for (const room of pair) assert.deepEqual(await room.queue("dm", [{ t: "character.update", characterId: "c2", patch: { ownerIds: [] } } as Op, move("a", { x: 3, y: 4 })]), ["taken", "taken"]);
+    same(pair, "the change and the walk");
+    for (const room of pair) assert.equal(room.state.tokens.x!.number, 1, `${room.name}: the first-met Goblin takes its 1 at the batch's close`);
   });
 });
 

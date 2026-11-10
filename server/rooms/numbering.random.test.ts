@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
 import { edge, paint } from "#shared/discoveryTestutil.ts";
-import { allKeys } from "#shared/project.ts";
+import { allKeys, partyHolds } from "#shared/project.ts";
 import type { RoomState, Scene, Token } from "#shared/model.ts";
-import { boardLabel, numberable, numberScope, previewNumbers, shownName } from "#shared/numbering.ts";
+import { boardLabel, memberOf, numberable, numberScope, previewNumbers, shownName } from "#shared/numbering.ts";
 import type { Op } from "#shared/protocol.ts";
 import { chance, character, comparable, int, member, pick, rng, scene } from "#shared/testutil.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -16,7 +16,7 @@ import { creature, inF, inR, liveIsFresh, make, move, numberingRoom, patch, Room
  * Creature numbers' random pair run: room A and room B take the same
  * random members' ops, and room A alone takes other DMs' ops on
  * creatures the party's copy never holds. After every step:
- * - I1: P1's raw frames are the same in both rooms.
+ * - I1: P1's and the display's raw frames are the same in both rooms.
  * - I2: no two members of a group share a number, and at most one has none.
  * - I3: every number a player frame carries is the table's, and no player
  *   frame holds a group mark, scene numbers or the group count.
@@ -28,6 +28,9 @@ import { creature, inF, inR, liveIsFresh, make, move, numberingRoom, patch, Room
  * - I7: a room loaded again from its rows holds the state it stopped with.
  * - I8: a meeting of every creature on the committed state finds nothing
  *   left to meet, so skipping a batch's meeting skipped nothing.
+ * - I9: a step of one batch meets only creatures the party holds as the
+ *   batch closes, or members it gives the 1 they lacked, so a walk's steps
+ *   inside a burst number nothing.
  * NUMBERING_RUNS sets the runs (the private gate runs 300) and
  * NUMBERING_FIRST the first seed. A run with ONE_SIDED=0 drops room A's own
  * steps.
@@ -62,7 +65,7 @@ function fixture(): RoomState {
   return s;
 }
 
-type Step = { k: "op"; who: Who; op: Op } | { k: "ops"; who: Who; ops: Op[] } | { k: "undo" | "redo"; who: Who } | { k: "reload" } | { k: "restart"; snapshot: boolean } | { k: "kind"; memberId: string; kind: "dm" | "player" };
+type Step = { k: "op"; who: Who; op: Op } | { k: "ops"; who: Who; ops: Op[] } | { k: "burst"; who: Who; ops: Op[] } | { k: "undo" | "redo"; who: Who } | { k: "reload" } | { k: "restart"; snapshot: boolean } | { k: "kind"; memberId: string; kind: "dm" | "player" };
 
 /** The creatures both rooms hold, by id, in order. */
 const shared = (state: RoomState) => Object.keys(state.tokens).filter((id) => !id.startsWith("zq") && state.tokens[id]!.kind !== "pc").sort();
@@ -73,7 +76,7 @@ function sharedStep(r: () => number, state: RoomState, other: RoomState, made: (
   // A companion made an object reads with no HP to players whoever plays it, so an object is made only of a creature both rooms hold alike as a companion or not.
   const alike = ids.filter((id) => JSON.stringify(state.tokens[id]!.companion) === JSON.stringify(other.tokens[id]?.companion));
   const anyAlike = () => (alike.length > 0 ? pick(r, alike) : "g0");
-  switch (int(r, 0, 19)) {
+  switch (int(r, 0, 20)) {
     case 0:
     case 1:
       return { k: "op", who: "p1", op: move("a", cell(r)) };
@@ -114,6 +117,13 @@ function sharedStep(r: () => number, state: RoomState, other: RoomState, made: (
       return { k: chance(r, 0.6) ? "undo" : "redo", who: alike.length === ids.length ? pick(r, ["dm", "dm", "p1"] as const) : "p1" };
     case 18:
       return { k: "reload" };
+    case 20: {
+      // Ops sent at once land in one batch, whose steps run in place before each walk and whose meeting runs at its close.
+      if (chance(r, 0.5)) return { k: "burst", who: "p1", ops: [move("a", cell(r)), move("a", cell(r)), ...(chance(r, 0.5) ? [move("a", cell(r))] : [])] };
+      const other = any();
+      const group: Op = { t: "token.moveMany", moves: [{ tokenId: "a", ...cell(r) }, ...(other === "a" ? [] : [{ tokenId: other, ...cell(r) }])] } as Op;
+      return { k: "burst", who: "dm", ops: [chance(r, 0.5) ? group : move("a", cell(r)), make(made(), cell(r), { name: pick(r, NAMES) }), move("a", cell(r))] };
+    }
     default:
       return chance(r, 0.5) ? { k: "restart", snapshot: chance(r, 0.4) } : { k: "op", who: "p1", op: move("a", cell(r)) };
   }
@@ -182,6 +192,8 @@ async function take(room: Room, step: Step): Promise<string> {
       await room.settle();
       return event.rejects?.find((x) => x.n === room.clients[step.who].n)?.code ?? "taken";
     }
+    case "burst":
+      return (await room.queue(step.who, step.ops)).join(",");
     case "ops": {
       const codes: string[] = [];
       for (const op of step.ops) {
@@ -273,6 +285,27 @@ function i4(room: Room, before: RoomState, fromSeq: number, where: string): numb
   return meets;
 }
 
+/**
+ * I9: each creature a one-batch step's meeting names is held by the party at
+ * the close, or was a member already, or is a member at the close with the
+ * group mark it had before the batch: a member owed its 1, as a creature
+ * that comes back into its group's scene is. A meeting that needs the party
+ * to hold the creature always writes a group mark the creature lacked.
+ */
+function i9(room: Room, before: RoomState, fromSeq: number, where: string): void {
+  const holds = partyHolds(room.state, {});
+  for (const row of room.rows.values()) {
+    const op = row.op as Op;
+    if (row.seq <= fromSeq || op.t !== "sys.meet") continue;
+    for (const id of op.tokenIds) {
+      const now = room.state.tokens[id];
+      const was = before.tokens[id];
+      const owed = now !== undefined && was?.met !== undefined && now.met === was.met && memberOf(room.state, now);
+      assert.ok((now !== undefined && holds(now)) || (was !== undefined && memberOf(before, was)) || owed, `${where}: ${room.name}: the meeting at row ${row.seq} names ${id}, which the party does not hold as the batch closes`);
+    }
+  }
+}
+
 /** I8: nothing on the committed state is left to meet. */
 function i8(room: Room, where: string): void {
   const state = room.state;
@@ -326,6 +359,7 @@ export async function numberingRun(t: TestContext, seed: number, steps: number, 
       i2(room, where);
       const k = pair.indexOf(room);
       if (step.k !== "restart") counts.meets += i4(room, befores[k]!.state, befores[k]!.seq, where);
+      if (step.k === "op" || step.k === "burst" || step.k === "undo" || step.k === "redo" || step.k === "kind") i9(room, befores[k]!.state, befores[k]!.seq, where);
       i5(room, where);
       liveIsFresh(room, "dm", where);
       i8(room, where);

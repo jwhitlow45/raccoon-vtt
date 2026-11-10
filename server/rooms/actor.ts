@@ -2543,6 +2543,7 @@ export class RoomActor {
     // A room whose replay failed keeps its stored tail for a fixed build and writes no row of its own: the next seq is one
     // that tail holds, or a gap in it.
     if (!this.replayFailed && (answeredSinceStep(batch) > 0 || batch.doors.length > batch.step.doors)) this.#explore(batch);
+    if (!this.replayFailed && (batch.answered > 0 || batch.doors.length > 0)) this.#meet(batch);
     batch.state = this.#staged.state;
     batch.seq = this.#staged.seq;
     this.#closeNumbers(batch, close);
@@ -2584,7 +2585,9 @@ export class RoomActor {
    * afresh starts afresh here too: the memory estimate, the state the
    * permission checks read as the batch's start, and the answers the cap
    * counts. The rows stored and the state left are those of a commit just
-   * before the walk, in one transaction.
+   * before the walk, in one transaction, but for its meeting: the meet
+   * step runs only at the close, on what the batch publishes (#meet),
+   * since the party may hold a creature here that no frame shows.
    */
   #stepInPlace(batch: Batch): void {
     // As #commitNow skips its own: the tail a failed replay left holds the next seq.
@@ -2616,6 +2619,7 @@ export class RoomActor {
    * loaded state never explored is explored at the room's first answer,
    * whatever that answer was. It runs before a walk that needs its sight
    * too (#stepInPlace), and each run reads from where the last one stopped.
+   * The meet step runs only at the close (#meet).
    */
   #explore(batch: Batch): void {
     try {
@@ -2631,23 +2635,27 @@ export class RoomActor {
         this.#fault("map step's forgetting failed", again, null);
       }
     }
-    this.#meet(batch);
   }
 
   /**
-   * The meet step (meet.ts, shared/numbering.ts), after the explore and
-   * map steps whose sight it reads: the creatures the party now holds
-   * beside another of their shown name take their numbers, by `sys.meet`
-   * ops at the end of the same batch, so no frame ever holds a number the
-   * party's copy does not give. Like the explore it is never refused and
-   * runs none of an op's checks: its writes spend a reserve every size
-   * check holds (sizeGuard.ts). A step that throws fails closed: it is
-   * logged and the batch commits with nothing numbered.
+   * The meet step (meet.ts, shared/numbering.ts), once at the batch's
+   * close, after the explore and map steps whose sight it reads: the
+   * creatures the party holds in the state the batch publishes, beside
+   * another of their shown name, take their numbers, by `sys.meet` ops at
+   * the end of the same batch, so no frame ever holds a number the party's
+   * copy does not give. Never inside the batch, as the steps before a walk
+   * run (#stepInPlace): the party may hold a creature there that no frame
+   * shows. It reads from the batch's start and every key the batch touched,
+   * whatever the steps' cursor, so a member's or character's change before
+   * a walk still counts. Like the explore it is never refused and runs none
+   * of an op's checks: its writes spend a reserve every size check holds
+   * (sizeGuard.ts). A step that throws fails closed: it is logged and the
+   * batch commits with nothing numbered.
    */
   #meet(batch: Batch): void {
     let ops: OpOf<"sys.meet">[];
     try {
-      ops = this.#opts.meetStep(batch.step.before, this.#staged.state, touchedSinceStep(batch));
+      ops = this.#opts.meetStep(batch.before, this.#staged.state, batch.touched);
     } catch (err) {
       this.#log.error({ err, roomId: this.roomId }, "meet step failed, the batch commits with nothing numbered");
       return;
