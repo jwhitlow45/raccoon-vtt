@@ -2234,11 +2234,11 @@ const stateClientOps = [
         /** The new floor's name, numbered while taken: "Crypt", then "Crypt 2" (docs/design/design-v1-floors.md phase 3, 3.2). Absent, "New floor" as before. */
         name: floorName.optional(),
         /**
-         * A floor from a file or a dungeon (phase 3, 3.1): its
-         * own size, background, grid look, automatic walls and map in place
-         * of the floor beside's. Fog and vision patch the copied ones, and
-         * the client names `byClock: false` whenever it sends a vision, so
-         * only an add without one keeps Time of day.
+         * A floor from a file or a dungeon (phase 3, 3.1): its own size,
+         * background, grid look, automatic walls and map in place of the
+         * floor beside's. Fog and vision patch the copied ones, and the
+         * client names `byClock: false` whenever it sends a vision, so only
+         * an add without one keeps Time of day.
          */
         own: z
           .strictObject({
