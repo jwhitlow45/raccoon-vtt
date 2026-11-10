@@ -255,6 +255,29 @@ describe("sending a wing", () => {
     assert.ok(!later.t.sent.some((s) => s.op.t === "journal.create" || s.op.t === "pin.put"), "a failed wing leaves no key");
   });
 
+  test("the first map op refused by the server with the rest taken is partial, and only every op refused adds nothing", async () => {
+    // Astra's sequence (DG3 review round 1): the lead op refused, every later one taken. A wing's later ops do not hang on its first, so they land.
+    const lead = await send();
+    const body = lead.m.made.ops.filter((op) => op.t !== "journal.create" && op.t !== "pin.put");
+    const rest = landAll(lead.m.base.state as RoomState, body.slice(1));
+    assert.ok(rest.ok, rest.ok ? "" : rest.why);
+    const walls = (room: RoomState) => Object.values(room.buildChunks).reduce((n, c) => n + (c?.walls?.length ?? 0), 0);
+    assert.ok(walls(rest.room) > walls(lead.m.base.state as RoomState), "not vacuous: the ops after the first change the scene");
+    answerAsks(lead.t, 0, () => ["taken"]);
+    await flush();
+    answerOps(lead.t, (_op, i) => (i === 0 ? "refused" : "taken"));
+    await flush();
+    assert.deepEqual(await lead.done, { k: "partial" } satisfies WingOutcome);
+    assert.ok(!lead.t.sent.some((s) => s.op.t === "journal.create" || s.op.t === "pin.put"), "a failed wing leaves no key");
+
+    const all = await send();
+    answerAsks(all.t, 0, () => ["taken"]);
+    await flush();
+    answerOps(all.t, () => "refused");
+    await flush();
+    assert.deepEqual(await all.done, { k: "none", lost: false } satisfies WingOutcome);
+  });
+
   test("lost answers: the wing's part of the scene compared with the scratch room, complete when it matches, else unconfirmed", async () => {
     for (const matches of [true, false]) {
       const { t, m, done } = await send();

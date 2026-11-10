@@ -494,7 +494,8 @@ async function sendWingOps(
   const body = made.ops.flatMap((op, i) => (isKeyOp(op) ? [] : [i]));
   const total = made.ops.length;
   let answers = NO_ANSWERS;
-  let first = "unknown" as OpAnswer;
+  // Set inside the callbacks, so it is typed wide rather than narrowed to its start.
+  let refusedAtInput = false as boolean;
   let keySent = false;
   onAnswered(0, total);
   await new Promise<void>((resolve) => {
@@ -513,7 +514,6 @@ async function sendWingOps(
     const hear = (i: number, a: OpAnswer) => {
       if (once.has(i)) return;
       once.add(i);
-      if (i === body[0]) first = a;
       answers = addAnswer(answers, a);
       answered++;
       onAnswered(answered, total);
@@ -532,8 +532,7 @@ async function sendWingOps(
     if (lead === undefined) return resolve();
     if (actions.dispatch(yes(made.ops[lead]!), opts(lead)) === null) {
       // Refused at input, nothing after it goes.
-      first = "refused";
-      answers = addAnswer(answers, "refused");
+      refusedAtInput = true;
       return resolve();
     }
     const ns = actions.dispatchMany ? actions.dispatchMany(rest.map((i) => ({ op: yes(made.ops[i]!), opts: opts(i) }))) : rest.map((i) => actions.dispatch(yes(made.ops[i]!), opts(i)));
@@ -541,7 +540,8 @@ async function sendWingOps(
       if (n === null) hear(rest[k]!, "refused");
     });
   });
-  if (first === "refused") return { k: "none", lost: false };
+  // Nothing was added only where nothing went, or the server refused every op. A wing's later ops do not hang on its first, as a new scene's hang on its create, so a refused first op with any other taken or unanswered is partial (DG3 review round 1).
+  if (refusedAtInput || (answers.refused > 0 && answers.taken === 0 && answers.unknown === 0)) return { k: "none", lost: false };
   if (answers.refused > 0) return { k: "partial" };
   if (answers.unknown === 0) return { k: "complete", checked: false };
   // Lost answers: the wing's part of the scene the server holds against the scratch room's, without the key where it never went.
