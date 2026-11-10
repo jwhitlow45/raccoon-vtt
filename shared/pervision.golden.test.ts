@@ -95,6 +95,10 @@ function seenBy(state: RoomState, viewer: Viewer, view: ProjectedState): string 
       return [id, { ...token, path: { ...path, stops: path.stops.map((stop, k) => (real && seenWhole(real, k, true) ? stop : (({ via: _via, ...rest }) => rest)(stop))) } }];
     }),
   );
+  // The historical build sent a caster the player cannot see as null. Now the copy leaves it out, as it leaves out a deleted one.
+  out.templates = Object.fromEntries(
+    Object.entries(view.templates).map(([id, template]) => [id, template.casterId === undefined && state.templates[id]?.casterId !== undefined ? { ...template, casterId: null } : template]),
+  );
   return stableStringify(out);
 }
 
