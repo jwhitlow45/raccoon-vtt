@@ -869,7 +869,7 @@ export async function popoverScrollbarLines(root: Locator, at: string): Promise<
 export type Box = { l: number; r: number; t: number; b: number };
 
 export type Finding = {
-  check: "center" | "pad" | "row" | "row-height" | "kind-height" | "kind-padding" | "kind-gap" | "edge" | "wrap-label" | "wrap-orphan";
+  check: "center" | "pad" | "row" | "row-height" | "kind-height" | "kind-padding" | "kind-gap" | "edge" | "wrap-label" | "wrap-orphan" | "corner";
   /** The element's tag, with its role when it has one. */
   role: string;
   /** Its accessible name, or the start of its text. */
@@ -911,6 +911,9 @@ type DomElement = DomNode & {
   children: ArrayLike<DomElement>;
   offsetWidth: number;
   offsetHeight: number;
+  offsetParent: DomElement | null;
+  /** The inline style, which is where this app sets a corner slot's insets. */
+  style: { getPropertyValue(name: string): string };
   /** The zoom the element is drawn at, every zoomed ancestor's taken together. */
   currentCSSZoom?: number;
   innerText?: string;
@@ -1695,6 +1698,38 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
             if (worded.length >= 2) judge(worded.map((x) => ({ c: x.c, lefts: [x.words!] })), worded.length === 2 ? 1 : 2, "most fills' words");
           }
         }
+      }
+    }
+
+    // 6. Corner slots: parts pinned to a corner of their box (an absolute part with one horizontal and one vertical inset) keep one inset from it,
+    // so two on a side sit the same distance from that edge and two on opposite sides the same distance from theirs. The insets are read from the
+    // inline style, since a computed inset is the used one even for `auto`, and the distance from where the parts are drawn.
+    const slots = all.flatMap((el) => {
+      const host = el.offsetParent;
+      if (!host || style(el).position !== "absolute") return [];
+      const set = (name: string) => !["", "auto"].includes(el.style.getPropertyValue(name).trim());
+      if (Number(set("left")) + Number(set("right")) !== 1 || Number(set("top")) + Number(set("bottom")) !== 1) return [];
+      const r = el.getBoundingClientRect();
+      const h = host.getBoundingClientRect();
+      const across = set("left") ? { side: "left", gap: r.left - h.left } : { side: "right", gap: h.right - r.right };
+      const down = set("top") ? { side: "top", gap: r.top - h.top } : { side: "bottom", gap: h.bottom - r.bottom };
+      return [{ el, host, across, down }];
+    });
+    for (const host of new Set(slots.map((s) => s.host))) {
+      const mine = slots.filter((s) => s.host === host);
+      for (const axis of ["across", "down"] as const) {
+        if (mine.length < 2) break;
+        const gaps = mine.map((s) => round(s[axis].gap));
+        if (round(spread(gaps)) <= LIMIT) continue;
+        push({
+          check: "corner",
+          role: roleOf(host),
+          name: nameOf(host),
+          offset: round(spread(gaps)),
+          box: union(mine.map((s) => rectOf(s.el))),
+          what: mine.map((s) => `${say(s.el)} ${s[axis].gap < 0 ? "past" : "at"} ${round(s[axis].gap)} from its ${s[axis].side}`).join(" | "),
+          detail: `corner parts keep one inset ${axis === "across" ? "from the sides" : "from the top and bottom"}`,
+        });
       }
     }
   }

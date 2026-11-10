@@ -3570,6 +3570,15 @@ const CASES = `
 <div data-case="kin-subgroup">
   <div style="display: grid; gap: 4px"><button>One</button><button>Two</button><button>Three</button><button style="height: 70px">Four<br>more</button><button style="height: 60px">Five<br>more</button></div>
 </div>
+<div data-case="corner-even">
+  <div style="position: relative; height: 120px"><button style="position: absolute; left: 8px; bottom: 8px">Look closer</button><button style="position: absolute; right: 8px; bottom: 8px">Reroll</button></div>
+</div>
+<div data-case="corner-high">
+  <div style="position: relative; height: 120px"><button style="position: absolute; left: 8px; bottom: 8px">Look closer</button><button style="position: absolute; right: 8px; bottom: 38px">Reroll</button></div>
+</div>
+<div data-case="corner-side-in">
+  <div style="position: relative; height: 120px"><button style="position: absolute; left: 8px; top: 8px">Drawing</button><button style="position: absolute; right: 24px; bottom: 8px">Reroll</button></div>
+</div>
 <div data-case="kin-lines">
   <div style="display: grid; gap: 4px"><button>One</button><button>Two</button><button style="height: 64px">Three<br>more</button></div>
 </div>
@@ -4298,6 +4307,10 @@ export function helperTest(): void {
       await caught("kin-icon", "kind-height");
       await caught("kin-subgroup", "kind-height");
       await passes("kin-lines");
+      // ALIGN-CORNER-SLOTS: parts pinned to a corner keep one inset. A Reroll raised 30 px above Look closer, or set in from its side, is caught.
+      await passes("corner-even");
+      await caught("corner-high", "corner");
+      await caught("corner-side-in", "corner");
       // List items that each hold one button are kin by what the button holds: a row with a line more is not compared, and a taller row of the same lines is caught.
       await passes("kin-held-lines");
       await caught("kin-held-tall", "kind-height");
