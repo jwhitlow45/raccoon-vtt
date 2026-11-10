@@ -11,7 +11,8 @@ import { checkLimits, exploredReserve, LIMITS, NO_ROOM_TO_EXPLORE, VIDEO_LIMITS 
 import { parseVideoGeometry, type VideoGeometry } from "#shared/videoGeometry.ts";
 import { ringed } from "#shared/logRings.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
-import { mapDiscoveryUpgrade, migrateSnapshot, needsMapDiscoveryUpgrade } from "#shared/migrate.ts";
+import { mapDiscoveryUpgrade, migrateSnapshot, needsMapDiscoveryUpgrade, needsNumberingUpgrade } from "#shared/migrate.ts";
+import { numberingUpgrade } from "#shared/reducer/numbering.ts";
 import { assetCreditSchema } from "#shared/protocol.ts";
 import { STARTER_KEY, type FoundWork, type StarterKind } from "#shared/starter.ts";
 import type { Member, RoomState, SoundFacts, VideoFacts } from "#shared/model.ts";
@@ -271,7 +272,7 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
     // The importer joins as one more member, so the limits are checked on the
     // room as it will be stored. A full roster plus the importer would make a
     // room that refuses every op, deletions included.
-    assertWithinLimits(finishState(withDiscoveryUpgrade(parsed.state, header.data.schemaVersion), dmMember, roomName));
+    assertWithinLimits(finishState(withNumberingUpgrade(withDiscoveryUpgrade(parsed.state, header.data.schemaVersion), header.data.schemaVersion), dmMember, roomName));
     // Imported lines keep their ops' seqs, so the room starts at the newest of them and its own lines sort after them.
     const startSeq = lastLineSeq(parsed.state);
     if (startSeq > IMPORT_LIMITS.lineSeq) throw new HttpError(400, "bad_room_json", { extra: { field: "state.log" } });
@@ -318,7 +319,7 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       // every sound's length from its row (docs/design/design-v1-music.md 6.7). The sound refill always runs after the remap,
       // which gives a sound whose file did not come through an id no row has, so the refill leaves it out with its places.
       const refilled = refillSoundFacts(refillMapVideos(remapState(incoming, { assets: assetIds, memberIds }), videoFacts), soundFacts);
-      const remapped = finishState(withDiscoveryUpgrade(refilled.state, header.data.schemaVersion), dmMember, roomName);
+      const remapped = finishState(withNumberingUpgrade(withDiscoveryUpgrade(refilled.state, header.data.schemaVersion), header.data.schemaVersion), dmMember, roomName);
       // The log's rings hold here as in any room, each ring its own newest (shared/logRings.ts), and the archive takes
       // the whole log, so Show older and a session's export reach every imported line.
       const state = { ...remapped, log: ringed(remapped.log, remapped.members) };
@@ -377,6 +378,18 @@ export function soundsLeftOut(file: RoomState, stored: RoomState): number {
  */
 export function withDiscoveryUpgrade(state: RoomState, schemaVersion: number): RoomState {
   return needsMapDiscoveryUpgrade(schemaVersion) ? mapDiscoveryUpgrade(state) : state;
+}
+
+/**
+ * A file's state with the numbering upgrade when the file is from before
+ * creature numbers the table gives (shared/reducer/numbering.ts), after
+ * its migration and the map discovery step, as a stored room takes it at
+ * load: the room is stored at today's version, which loadRoom never
+ * upgrades. A newer file holds its own marks and numbers, which the remap
+ * carries with the room's group count.
+ */
+export function withNumberingUpgrade(state: RoomState, schemaVersion: number): RoomState {
+  return needsNumberingUpgrade(schemaVersion) ? numberingUpgrade(state) : state;
 }
 
 function parseJson(buffer: Buffer, name: string): unknown {

@@ -74,7 +74,8 @@ describe("replaying stored ops", () => {
     const loaded = await loadRoom({ query, connect: () => Promise.reject(new Error("not used")) } as unknown as Pool, "R", (_seq, reason) => reasons.push(reason));
     assert.deepEqual(reasons, []);
     assert.equal(loaded?.seq, 3);
-    assert.deepEqual(loaded?.state.tokens.t1, token("t1", { rev: 2, name: "Dragon Turtle", actor: { inline: actor({ srdId: "dragon-turtle" }) } }));
+    // The numbering upgrade after the replay meets the turtle the party sees, alone, so it takes a mark and no number.
+    assert.deepEqual(loaded?.state.tokens.t1, token("t1", { rev: 3, met: 1, name: "Dragon Turtle", actor: { inline: actor({ srdId: "dragon-turtle" }) } }));
     assert.deepEqual(Object.keys(loaded?.state.srdImages ?? {}), ["dragon-turtle"]);
   });
 

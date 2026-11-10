@@ -1,7 +1,8 @@
 import type pg from "pg";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { dmNumbered, logsInIdOrder, whisperParties } from "#shared/logRings.ts";
-import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, MAP_DISCOVERY_OP_VERSION, OP_VERSION, SNAPSHOT_VERSION, mapDiscoveryUpgrade, migrateOp, migrateSnapshot, needsMapDiscoveryUpgrade, opMigrations, type MigrationStep } from "#shared/migrate.ts";
+import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, MAP_DISCOVERY_OP_VERSION, NUMBERING_OP_VERSION, OP_VERSION, SNAPSHOT_VERSION, mapDiscoveryUpgrade, migrateOp, migrateSnapshot, needsMapDiscoveryUpgrade, needsNumberingUpgrade, opMigrations, type MigrationStep } from "#shared/migrate.ts";
+import { numberingUpgrade } from "#shared/reducer/numbering.ts";
 import type { LogEntry, RoomState, SoundFacts, VideoFacts, Viewer } from "#shared/model.ts";
 import { checkedVideoFacts, opSchema, type Op, type OpType } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -173,6 +174,8 @@ export async function loadRoom(
   let replayed = 0;
   let lastNumber: number | null = null;
   let upgrade = needsMapDiscoveryUpgrade(row.schema_version);
+  // The numbering upgrade settles an older room's numbers once, at the same kind of point (shared/reducer/numbering.ts).
+  let numbering = needsNumberingUpgrade(row.schema_version);
   const ops = await pool.query<OpRow>(
     "select seq, at, actor_member_id, actor_role, op, op_version, pub from room_ops where room_id = $1 and seq > $2 order by seq",
     [roomId, snapshotSeq],
@@ -194,6 +197,10 @@ export async function loadRoom(
           state = mapDiscoveryUpgrade(state);
           upgrade = false;
         }
+        if (numbering && r.op_version >= NUMBERING_OP_VERSION) {
+          state = numberingUpgrade(state);
+          numbering = false;
+        }
         // The stored version goes in the envelope, so an older op keeps the rules it was applied under (shared/migrate.ts).
         const uncounted = !counted(stored.op.t, r.op_version);
         const result = applyOp(state, stored.op, { memberId: r.actor_member_id, role: r.actor_role }, { seq: number, at: r.at.toISOString(), opVersion: r.op_version, ...(uncounted ? { uncounted: true as const } : {}) });
@@ -213,6 +220,7 @@ export async function loadRoom(
     }
   }
   if (upgrade) state = mapDiscoveryUpgrade(state);
+  if (numbering) state = numberingUpgrade(state);
   let pub = row.pub === null || row.pub === undefined ? snapshotSeq : Number(row.pub);
   if (row.schema_version < COUNT_SNAPSHOT_VERSION) pub = Math.max(pub, snapshotSeq);
   for (const r of ops.rows) pub = Math.max(pub, rowNumber(r) ?? 0);

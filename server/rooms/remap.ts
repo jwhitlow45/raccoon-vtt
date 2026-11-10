@@ -277,6 +277,9 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   // The clock holds no id but its own, and each character's stamp names that one, so both come through as they are
   // (docs/design/design-v1-calendar.md 6.6). No clock stays no field.
   if (state.clock) out.clock = state.clock;
+  // The room's count of creature number groups is no entity id, so it comes through as it is, and so do the group ids
+  // creatures and scenes hold: a new group takes an id above every one the file holds (shared/numbering.ts).
+  if (state.numbering) out.numbering = state.numbering;
   /*
    * The library and the playlists come under new ids, each sound's file under
    * its new row's id (docs/design/design-v1-music.md 6.7). A sound whose file
