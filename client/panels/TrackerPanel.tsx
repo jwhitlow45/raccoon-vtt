@@ -11,7 +11,7 @@ import { Segmented } from "../components/Segmented.tsx";
 import { Switch } from "../components/Switch.tsx";
 import { useSoundOn, setSoundOn } from "../features/encounter/alerts.ts";
 import { AutoInitiativeControls, AutoInitiativeResult, useStartFight } from "../features/encounter/AutoInitiative.tsx";
-import { useStartRoll, useStartWaiting, type StartFrom } from "../features/encounter/autoState.ts";
+import { pressAfter, useStartRoll, useStartWaiting, type StartFrom, type StartPress } from "../features/encounter/autoState.ts";
 import { HpLog } from "../features/encounter/HpLog.tsx";
 import { setFollowTurn, useFollowTurn } from "../features/encounter/followTurn.ts";
 import { useAnyPending, useFightAhead, useRowFacts, useSend, useSortedEntries, useTurnTimer, useYou } from "../features/encounter/hooks.ts";
@@ -657,7 +657,8 @@ function useJoinBatches(candidates: Record<AddMode, Token[]>): { batches(tokens:
  * takes it, and the pressed button reads "Rolling…" until then
  * (AutoInitiative.tsx useStartFight). Off, or for Nobody yet, the pressed
  * button is busy until the server takes the start, since the fight shows
- * only then. Another button pressed meanwhile adds its creatures behind it.
+ * only then. Another button pressed meanwhile adds its creatures behind it,
+ * and the button whose start waits stays busy.
  */
 function StartFight(props: { selectedTokenId: string | null }) {
   const candidates = useCandidates(props.selectedTokenId);
@@ -665,12 +666,10 @@ function StartFight(props: { selectedTokenId: string | null }) {
   const startFight = useStartFight();
   const roll = useStartRoll();
   const rolling = useStartWaiting();
-  const [sent, setSent] = useState<{ from: StartFrom | "nobody"; ops: readonly number[] } | null>(null);
+  const [sent, setSent] = useState<StartPress<StartFrom | "nobody"> | null>(null);
   const waits = useAnyPending(sent?.ops ?? NO_OPS);
   const pressed = sent !== null && waits ? sent.from : null;
-  const press = (from: StartFrom | "nobody", ops: readonly number[] | null) => {
-    if (ops !== null && ops.length > 0) setSent({ from, ops });
-  };
+  const press = (from: StartFrom | "nobody", ops: readonly number[] | null) => setSent(pressAfter(sent, waits, from, ops));
   return (
     <Section label="New fight" search="tracker.new-fight" style={COLUMN}>
       <Wrap>

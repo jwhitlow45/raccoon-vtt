@@ -7,7 +7,7 @@ import { actor, apply, DM, room, token } from "#shared/testutil.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { OpAnswer } from "../../state/types.ts";
-import { startStep, type StartFrom, type StartWait } from "./autoState.ts";
+import { pressAfter, startStep, type StartFrom, type StartPress, type StartWait } from "./autoState.ts";
 
 /*
  * Roll monsters' Initiative as the fight starts (docs/design/design-v1-qol.md
@@ -277,6 +277,24 @@ describe("starting a fight (Q12)", () => {
       assert.equal(t.sent.length, 3);
       t.land();
       assert.deepEqual(t.store.getState().view.encounter?.entries.map((e) => e.tokenId).sort(), ["g1", "g2", "pc"]);
+    } finally {
+      t.done();
+    }
+  });
+
+  test("Everyone here pressed while Nobody yet's start waits leaves Nobody yet busy, and once that start is answered the next press is the busy one", () => {
+    const t = table({ switchOff: true, holds: true });
+    try {
+      const waits = (press: StartPress<StartFrom | "nobody"> | null) => press !== null && press.ops.some((n) => t.store.getState().pending.some((p) => p.n === n));
+      let busy = pressAfter<StartFrom | "nobody">(null, false, "nobody", t.start([], null));
+      assert.deepEqual(busy, { from: "nobody", ops: [1] });
+      busy = pressAfter(busy, waits(busy), "scene", t.start(BATCHES, "scene"));
+      assert.deepEqual(t.sent.map((s) => s.op.t), ["encounter.start", "encounter.add", "encounter.add"], "its rows went behind the start");
+      assert.deepEqual(busy, { from: "nobody", ops: [1] });
+      // The server refuses the start, and the adds behind it with it.
+      t.store.setState({ pending: [] });
+      busy = pressAfter(busy, waits(busy), "selected", t.start([[{ id: "e9", tokenId: "g1" }]], "selected"));
+      assert.deepEqual(busy, { from: "selected", ops: [4] });
     } finally {
       t.done();
     }

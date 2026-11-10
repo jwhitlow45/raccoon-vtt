@@ -120,6 +120,20 @@ export function useStartRoll(): { on: boolean; setOn(on: boolean): void } {
 /** The start button pressed: the selected token, everyone here or those visible to players. */
 export type StartFrom = "selected" | "scene" | "visible";
 
+/** A New fight button's press and the numbers of the ops it sent. */
+export type StartPress<F> = { from: F; ops: readonly number[] };
+
+/**
+ * The press whose New fight button reads busy once another is pressed: a
+ * press whose ops still wait keeps it, since a later press only sends its
+ * creatures behind that start (AutoInitiative.tsx useStartFight), and
+ * otherwise the press that sent something takes it.
+ */
+export function pressAfter<F>(held: StartPress<F> | null, heldWaits: boolean, from: F, ops: readonly number[] | null): StartPress<F> | null {
+  if (held !== null && heldWaits) return held;
+  return ops !== null && ops.length > 0 ? { from, ops } : held;
+}
+
 /**
  * A start that rolls once the server takes it (D-261106-118): its press,
  * the button, how many ops it sent (`encounter.start`, then each
