@@ -70,6 +70,14 @@ describe("H1's refusals on a hex scene", () => {
     assert.equal(decide({ ...ask([{ t: "build.paint", sceneId: "s2", terrain: "stone", cells: ["1,1"] }]), sceneId: "s2" } as Op), "ok", "on squares");
   });
 
+  test("phase 3: a wing's ask on hexes carries its free walls and stamps (dungeon generator phase 3, 5)", () => {
+    const ask = (ops: Op[]): Op => ({ t: "build.ask", sceneId: "s1", ops, part: 0 }) as Op;
+    const walls: Op = { t: "build.walls", sceneId: "s1", put: [wall] };
+    const stamps: Op = { t: "build.stamps", sceneId: "s1", put: [{ id: "st1", art: { key: "barrel" }, x: 3, y: 3, w: 1, h: 1, rotation: 0, z: 0, visibility: "all" }] };
+    assert.equal(decide(ask([walls, stamps, { t: "build.height", sceneId: "s1", cells: ["1,1"], height: 5 }])), "ok");
+    assert.equal(decide(ask([walls, { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["1,1"] }])), `invalid: ${ON_HEXES.build}`);
+  });
+
   test("lights, stamps, labels and Clear build stay", () => {
     const ops: Op[] = [
       { t: "build.label", sceneId: "s1", labelId: "l1", label: { x: 2, y: 2, text: "Crypt", size: 1 } },

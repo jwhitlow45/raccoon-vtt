@@ -12,6 +12,7 @@ import { CLASS_IDS } from "./rules/classResources.ts";
 import { DAMAGE_TYPES } from "./rules/damage.ts";
 import { cellIndexMost } from "./rules/grid.ts";
 import { sceneHexSpan } from "./rules/hex.ts";
+import type { JoinExpect, WingClear } from "./rules/wingClear.ts";
 import { DAYLIGHT_BOUNDS, yearDays } from "./calendar.ts";
 import {
   ABILITY_KEYS,
@@ -2158,6 +2159,44 @@ const buildEdgeOp = op("build.edge", {
 const buildHeightOp = op("build.height", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), height: z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT), forget });
 const buildStairsOp = op("build.stairs", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), up: stairDirection.nullable(), forget });
 const buildRoughOp = op("build.rough", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), on: z.boolean(), forget });
+// A wing's asks carry its free walls and stamps too (docs/design: dungeon generator phase 3, 5), so these two are named here.
+const buildWallsOp = op("build.walls", {
+  sceneId: id,
+  put: z.array(freeWall).max(LIMITS.freeWallsPerOp).optional(),
+  remove: z.array(z.strictObject({ cx: chunkIndex, cy: chunkIndex, id: freeWallId })).max(LIMITS.freeWallsPerOp).optional(),
+  forget,
+}).refine((o) => serializedBytes(o) <= LIMITS.freeWallsOpBytes, { message: `a free walls op is at most ${LIMITS.freeWallsOpBytes / 1024} KiB` });
+const buildStampsOp = op("build.stamps", {
+  sceneId: id,
+  put: z.array(stampInput).max(LIMITS.stampsPerOp).optional(),
+  remove: z.array(id).max(LIMITS.stampsPerOp).optional(),
+  forget,
+});
+
+/** Row runs a wing's hex floor goes as at most: a 100 by 100 area of rooms and corridors breaks into far fewer, and the ask's bytes bind first. */
+export const MAX_WING_FLOOR_RUNS = 4_000;
+const groundFt = z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT);
+/**
+ * What a wing's asks carry for the server's checks (shared/rules/wingClear.ts,
+ * docs/design: dungeon generator phase 3, 3.6): the join as the DM tapped it,
+ * the margin, the scene's automatic-wall rule, and on hexes the wing's floor
+ * as row runs on the last part.
+ */
+const joinExpect = z.discriminatedUnion("grid", [
+  z.strictObject({ grid: z.literal("squares"), edges: z.array(z.strictObject({ key: edgeKey, feature: edgeFeature.nullable(), ground: groundFt })).min(1).max(2) }),
+  z.strictObject({
+    grid: z.literal("hex"),
+    walls: z.array(z.strictObject({ cx: chunkIndex, cy: chunkIndex, id: freeWallId, a: latticePoint, b: latticePoint, f: wallFeature })).min(1).max(3),
+    ground: groundFt,
+  }),
+]) satisfies z.ZodType<JoinExpect>;
+const wingClear = z.strictObject({
+  margin: z.union([z.literal(2), z.literal(3)]),
+  join: joinExpect,
+  autoWalls,
+  floor: z.array(z.tuple([cellIndex, cellIndex, cellIndex]).refine(([, from, to]) => from <= to, { message: "a run ends after it starts" })).min(1).max(MAX_WING_FLOOR_RUNS).optional(),
+  inside: z.array(cellKey).min(1).max(2).optional(),
+}) satisfies z.ZodType<WingClear>;
 
 /**
  * The most ops one `build.ask` carries, and its bytes, so an ask with the
@@ -2585,19 +2624,9 @@ const stateClientOps = [
    * in its midpoint's chunk and replaces a wall of the same id there.
    * Removals apply first. The client batches an import under the byte bound.
    */
-  op("build.walls", {
-    sceneId: id,
-    put: z.array(freeWall).max(LIMITS.freeWallsPerOp).optional(),
-    remove: z.array(z.strictObject({ cx: chunkIndex, cy: chunkIndex, id: freeWallId })).max(LIMITS.freeWallsPerOp).optional(),
-    forget,
-  }).refine((o) => serializedBytes(o) <= LIMITS.freeWallsOpBytes, { message: `a free walls op is at most ${LIMITS.freeWallsOpBytes / 1024} KiB` }),
+  buildWallsOp,
   /** Stamps on the board layer. A put replaces a stamp of the same id on the same scene. Removals apply first. */
-  op("build.stamps", {
-    sceneId: id,
-    put: z.array(stampInput).max(LIMITS.stampsPerOp).optional(),
-    remove: z.array(id).max(LIMITS.stampsPerOp).optional(),
-    forget,
-  }),
+  buildStampsOp,
   /** Light sources, DM only in every wave. A put replaces a light of the same id on the same scene. Removals apply first. */
   op("build.lights", {
     sceneId: id,
@@ -2630,9 +2659,10 @@ const stateClientOps = [
    */
   op("build.ask", {
     sceneId: id,
-    ops: z.array(z.discriminatedUnion("t", [buildPaintOp, buildEraseOp, buildRectOp, buildEdgeOp, buildHeightOp, buildStairsOp, buildRoughOp])).min(1).max(MAX_ASK_OPS),
+    ops: z.array(z.discriminatedUnion("t", [buildPaintOp, buildEraseOp, buildRectOp, buildEdgeOp, buildHeightOp, buildStairsOp, buildRoughOp, buildWallsOp, buildStampsOp])).min(1).max(MAX_ASK_OPS),
     part: z.number().int().min(0).max(MAX_ASK_PARTS - 1),
     more: z.literal(true).optional(),
+    clear: wingClear.optional(),
   }).refine((o) => serializedBytes(o) <= MAX_ASK_BYTES, { message: `an ask is at most ${MAX_ASK_BYTES / 1024} KiB` }),
   /**
    * Opens, closes or locks one door (section 4.1), and for a secret door

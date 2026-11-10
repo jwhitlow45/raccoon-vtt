@@ -314,8 +314,8 @@ export const ON_HEXES = {
  * restore keeps the same line in the reducer (shared/reducer/misc.ts),
  * since two DMs can race a switch.
  */
-/** The build ops a builder ask may carry on a hex scene: those `hexPhaseFits` takes there. */
-const HEX_ASKS: ReadonlySet<string> = new Set(["build.erase", "build.rough", "build.height", "build.stairs"]);
+/** The build ops a builder ask may carry on a hex scene: those `hexPhaseFits` takes there, with a wing's free walls and stamps (docs/design: dungeon generator phase 3, 5). */
+const HEX_ASKS: ReadonlySet<string> = new Set(["build.erase", "build.rough", "build.height", "build.stairs", "build.walls", "build.stamps"]);
 
 function hexPhaseFits(op: Op, c: Check): Decision {
   const hex = (sceneId: string | undefined) => {

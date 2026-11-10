@@ -21,6 +21,10 @@ export type JoinExpect =
 /**
  * A wing ask's check: the margin in cells (3 on Wide), the join, the
  * scene's automatic-wall rule, and on hexes the wing's whole floor as row
- * runs (row, first and last key along it), carried on the last part only.
+ * runs, carried on the last part only. A run `[y, x0, x1]` is the scene
+ * keys "x0,y" to "x1,y". `inside` names the hexes inside a hex join by
+ * their keys, since a free wall's ends do not say which side is the room:
+ * the server reads their ground there, and a hex join without them reads
+ * as changed. Squares find the inside from the paint.
  */
-export type WingClear = { margin: 2 | 3; join: JoinExpect; autoWalls: AutoWalls; floor?: [row: number, from: number, to: number][] };
+export type WingClear = { margin: 2 | 3; join: JoinExpect; autoWalls: AutoWalls; floor?: [row: number, from: number, to: number][]; inside?: string[] };
