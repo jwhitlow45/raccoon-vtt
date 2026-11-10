@@ -14,6 +14,13 @@ export type SettingRowProps = {
   name: string;
   help?: ReactNode;
   wide?: boolean;
+  /**
+   * A control too big for a narrow row drops under the words rather than
+   * squeezing them: the words keep at least 8em, else the control wraps to
+   * a line of its own at the right. For a row of buttons, where `wide` would
+   * always put them under (LP36-A-FLR-1).
+   */
+  wraps?: boolean;
   disabled?: boolean;
   /** The room search's anchor id (features/search/entry.ts) on the whole row, so a landing shows the setting's name over its control and focuses the control. */
   search?: string;
@@ -53,7 +60,7 @@ export function SettingRow(props: SettingRowProps) {
   const ids: SettingIds = { nameId, helpId: props.help ? helpId : undefined };
   const row = {
     display: "flex",
-    flexWrap: props.wide ? "wrap" : "nowrap",
+    flexWrap: props.wide || props.wraps ? "wrap" : "nowrap",
     alignItems: "center",
     gap: `${theme.space(2)}px ${theme.space(3)}px`,
     minHeight: theme.touch,
@@ -105,8 +112,8 @@ export function SettingRow(props: SettingRowProps) {
   return (
     // Marked for the spacing check (e2e/helpers/spacing.ts), which holds a settings section's label one distance over its first row.
     <div data-setting-row="" data-search={props.search} style={row}>
-      <div style={{ flex: props.wide ? "1 1 100%" : "1 1 auto", minWidth: 0, display: "grid", gap: theme.space(0.5) }}>{words}</div>
-      <div style={{ flex: props.wide ? "1 1 100%" : "none", minWidth: 0, display: "flex", justifyContent: props.wide ? "flex-start" : "flex-end" }}>{control}</div>
+      <div style={{ flex: props.wide ? "1 1 100%" : props.wraps ? "1 1 8em" : "1 1 auto", minWidth: 0, display: "grid", gap: theme.space(0.5) }}>{words}</div>
+      <div style={{ flex: props.wide ? "1 1 100%" : "none", minWidth: 0, display: "flex", justifyContent: props.wide ? "flex-start" : "flex-end", ...(props.wraps ? { marginLeft: "auto" } : {}) }}>{control}</div>
     </div>
   );
 }

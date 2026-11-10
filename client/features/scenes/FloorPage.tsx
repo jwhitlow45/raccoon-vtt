@@ -72,7 +72,7 @@ export function FloorPage(props: { floor: Scene; selectName: boolean; onBack(): 
       </div>
       <FloorName key={floor.id} floor={floor} others={floors} select={props.selectName} inputId={nameId} />
       {level === 0 ? null : (
-        <SettingRow name="Height above the floor below" help={`${FLOOR_HEIGHT.min} to ${FLOOR_HEIGHT.max} ft, in steps of ${FLOOR_HEIGHT.step}.`} search="scenes.floor.height">
+        <SettingRow name="Height above the floor below" wraps help={`${FLOOR_HEIGHT.min} to ${FLOOR_HEIGHT.max} ft, in steps of ${FLOOR_HEIGHT.step}.`} search="scenes.floor.height">
           <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
             <Button size="sm" icon="minus" iconOnly="always" aria-label={`Lower ${floor.floor.name} by ${FLOOR_HEIGHT.step} feet`} disabled={stepHeight(height, -1) === null} onClick={() => setHeight(-1)} />
             <span aria-live="polite" style={{ minWidth: 48, textAlign: "center", fontVariantNumeric: "tabular-nums", fontSize: theme.font.input }}>
