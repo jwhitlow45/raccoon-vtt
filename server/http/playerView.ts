@@ -13,8 +13,9 @@ import type { RoomManager } from "../rooms/manager.ts";
  * The map export's player view (docs/design/design-v1-map-discovery.md 4 and 5.1):
  * one scene as the shared fog class holds it, every player who does not see
  * for themselves and a table display. The DM's own store holds the whole
- * build, which on a scene with fog on is more than players hold, so the
- * export asks the server for the players' share instead.
+ * build, which on a scene players get cut from held ground (heldGroundMap)
+ * is more than players hold, so the export asks the server for the
+ * players' share instead.
  *
  * `GET /api/rooms/:id/scenes/:sceneId/player-view`, DM only, answers 200
  * with `PlayerView` (below), `cache-control: no-store`. Refusals, as
@@ -32,9 +33,13 @@ import type { RoomManager } from "../rooms/manager.ts";
  * map step counts no sight there either (5.3).
  */
 export type PlayerView = {
-  /** The scene as players' copy holds it. With fog on its `autoWalls` is "off": the chunks carry the automatic walls players hold, in `auto`. */
+  /**
+   * The scene as players' copy holds it. Where their chunks are cut from held ground (heldGroundMap: fog on, or a
+   * square scene with fog off whose automatic walls are not "off"), its `autoWalls` is "off": the chunks carry the
+   * automatic walls players hold, in `auto`.
+   */
   scene: Scene;
-  /** By chunk key. With fog on each is a PlayerChunk (`known`, `auto`, `upDir`), stubs included, with fog off the flattened build. */
+  /** By chunk key. Cut from held ground, each is a PlayerChunk (`known`, `auto`, `upDir`), stubs included. Otherwise the flattened build. */
   buildChunks: Record<string, BuildChunk>;
   /** By id: those players hold, remembered ones as remembered. */
   labels: Record<string, Label>;
