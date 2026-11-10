@@ -111,8 +111,8 @@ export function TurnCard(props: { model: TurnCardModel; folded: boolean; foldabl
         ) : (
           <span style={{ flex: "1 1 auto", minWidth: 0, fontWeight: theme.weight.bold, overflowWrap: "anywhere" }}>{title}</span>
         )}
-        {/* Dismiss is the close every card and sheet draws (docs/design/design-v1-icons-2.md 4). */}
-        <Button size="sm" variant="quiet" icon="close" iconOnly="always" aria-label={`Dismiss ${title}`} onClick={props.onDismiss} style={{ flex: "none", marginLeft: "auto" }} />
+        {/* Dismiss is the close every card and sheet draws (docs/design/design-v1-icons-2.md 4). It stays at the top when a long name wraps, rather than floating mid-card (LP34-BAND-1). */}
+        <Button size="sm" variant="quiet" icon="close" iconOnly="always" aria-label={`Dismiss ${title}`} onClick={props.onDismiss} style={{ flex: "none", marginLeft: "auto", alignSelf: "flex-start" }} />
       </div>
       {model.blocks.map(({ participant, uses }) => {
         const load = blockLoad(model, uses !== null);
