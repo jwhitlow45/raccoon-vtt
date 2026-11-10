@@ -95,7 +95,7 @@ describe("the hex wall pass", () => {
 
   test("no wall stands inside a run, a near landing is walled from the corridor, and a far landing opens to it and to another run's far landing", () => {
     // A run along a row: near landing 5, a stair 6, far landing 7, then a corridor hex 8, and a second run's far landing below the corridor.
-    const [near, stair, far, corridor] = [5, 6, 7, 8].map((x) => at(ROWS, x, 5));
+    const [near, stair, far, corridor] = [5, 6, 7, 8].map((x) => at(ROWS, x, 5)) as [number, number, number, number];
     const beside = at(ROWS, 5, 4);
     const otherFar = at(ROWS, 8, 6);
     const space = spaces(ROWS, { [near]: RUN_SPACE + 1, [stair]: RUN_SPACE + 1, [far]: RUN_SPACE + 1, [corridor]: CORRIDOR_SPACE, [beside]: CORRIDOR_SPACE, [otherFar]: RUN_SPACE + 2 });
