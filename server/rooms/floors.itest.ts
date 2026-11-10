@@ -581,10 +581,17 @@ describe("stairs and ladders on the server (docs/design/design-v1-floors.md phas
     await ok(coSocket, { t: "build.edge", sceneId: r.upper, edges: [{ key: "4,3,w", feature: { kind: "wall" } }] } as Op);
     const head = await r.dmSocket.historyHead("setup", "undo");
     const answer = await r.dmSocket.apply({ t: "undo", head: head!, scope: "setup" } as Op);
-    assert.match(refused(answer), /^could not undo removing stairs to Upper floor: That would block the stairs to (Ground|Upper) floor\. The DM who placed them can remove them\.$/);
+    // The stairs are gone and the wall is what blocks them, so the words name the wall on its floor, not stairs to remove (FL2-OPUS-2).
+    assert.equal(refused(answer), `could not undo removing stairs to Upper floor: ${LINK_WORDS.wall("Upper floor")}`);
     assert.equal(live(t, r.roomId).floorLinks?.[r.link], undefined);
     assert.equal(await r.dmSocket.historyHead("setup", "undo"), head, "the step is kept");
     await ok(coSocket, { t: "build.edge", sceneId: r.upper, edges: [{ key: "4,3,w", feature: null }] } as Op);
+    // New ground of one height under them refuses it too, in the ground's words, and keeps the step.
+    await ok(coSocket, { t: "build.height", sceneId: r.ground, cells: ["3,3", "4,3"], height: 5 } as Op);
+    const raised = await r.dmSocket.apply({ t: "undo", head: head!, scope: "setup" } as Op);
+    assert.equal(refused(raised), "could not undo removing stairs to Upper floor: That would change the ground under the stairs to Upper floor.");
+    assert.equal(await r.dmSocket.historyHead("setup", "undo"), head, "the step is kept again");
+    await ok(coSocket, { t: "build.height", sceneId: r.ground, cells: ["3,3", "4,3"], height: 0 } as Op);
     await ok(r.dmSocket, { t: "undo", head: head!, scope: "setup" } as Op);
     assert.ok(live(t, r.roomId).floorLinks?.[r.link], "back once the wall is gone");
     coSocket.close();

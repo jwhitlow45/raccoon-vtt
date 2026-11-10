@@ -55,7 +55,7 @@ export const LINK_WORDS = {
   overEnd: (kind: Kind, floor: string) => `Those squares already have ${kind === "stairs" ? "stairs" : "a ladder"} to ${floor}.`,
   tooMany: (scene: string) => `${scene} has ${LIMITS.floorLinksPerScene} stairs and ladders, the most a scene can hold.`,
   notNext: "Stairs join a floor and the floor just above or below it.",
-  // A later edit floorProblem refuses (3), each ending in REMOVE_FIRST or REMOVE_BETWEEN, which isStairsRefusal reads.
+  // A later edit floorProblem refuses (3), each ending in one of STAIRS_ENDINGS, which isStairsRefusal reads.
   changeGround: (kind: Kind, floor: string) => `That would change the ground under the ${kind === "stairs" ? "stairs" : "ladder"} to ${floor}. ${removeFirst(kind)}`,
   block: (kind: Kind, floor: string) => `That would block the ${kind === "stairs" ? "stairs" : "ladder"} to ${floor}. ${removeFirst(kind)}`,
   between: (kind: Kind, lower: string, upper: string) =>
@@ -414,6 +414,36 @@ export function linkProblem(state: RoomState, draft: LinkDraft): string | null {
     if (pitUnder(state, floor.id, draft.rect) !== null) return LINK_WORDS.pit(name);
   }
   return null;
+}
+
+/**
+ * The words of a restore that stairs rules refuse where it would put back
+ * stairs that are not there now (8, FL2-OPUS-2), or null where it puts
+ * none back: no stairs stand to remove, so it names what is in their way,
+ * in the builder's words for the first rule those stairs would break as a
+ * new draft on the room as it is (`linkProblem`), on that end's own floor.
+ * Ground of one height that is no longer the height they stood on reads
+ * changeGround's first sentence. `restored` holds the values the restore
+ * writes under `floorLink:` keys.
+ */
+export function restoredLinkWords(state: RoomState, restored: readonly unknown[]): string | null {
+  const ends = restored
+    .filter((value): value is FloorLink => value !== null && typeof value === "object" && typeof (value as FloorLink).id === "string" && ownEntry(state.floorLinks, (value as FloorLink).id) === undefined)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const end of ends) {
+    const problem = linkProblem(state, { id: end.id, pairId: end.pair, sceneId: end.sceneId, to: end.to, rect: end.rect, kind: end.kind });
+    if (problem !== null) return problem;
+  }
+  for (const end of ends) {
+    if (rectGround(state.buildChunks, end.sceneId, end.rect) !== end.ground) return withoutEnding(LINK_WORDS.changeGround(end.kind, floorName(state, end.to)));
+  }
+  return null;
+}
+
+/** A stairs refusal without the sentence that says to remove them. */
+function withoutEnding(message: string): string {
+  for (const ending of STAIRS_ENDINGS) if (ending.test(message)) return message.replace(ending, "");
+  return message;
 }
 
 /** The DM's words for stairs that no longer fit their floors in a way no later edit of one floor explains, as a broken import. */

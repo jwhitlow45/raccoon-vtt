@@ -70,7 +70,7 @@ import { dmHistoryValues, dmPoseRestore } from "./undoDm.ts";
 import { retainedSaveOutcome } from "#shared/saveOutcomes.ts";
 import { soundDue, soundStep, type Playing } from "#shared/sound.ts";
 import { isPlayingRefusal } from "#shared/reducer/sound.ts";
-import { isStairsRefusal, restoreStairsWords } from "#shared/rules/floorLinks.ts";
+import { isStairsRefusal, restoredLinkWords, restoreStairsWords } from "#shared/rules/floorLinks.ts";
 import { ownEntry } from "#shared/records.ts";
 import { SAVE_CANNOT_REOPEN, type SaveOutcomeTransition } from "#shared/saveOutcomeContract.ts";
 
@@ -1667,8 +1667,11 @@ export class RoomActor {
     // phase 2, 8, D-261109-108), placed by another DM: once they go, the same Undo works.
     const stairs = isStairsRefusal(reason);
     if (step.id && !isPlayingRefusal(reason) && !(stairs && viewer.role === "dm")) this.#undo.consume(viewer.memberId, direction, scope, step.id);
+    if (!stairs) return reason;
+    // Stairs the restore would put back are not there to remove: the words name what stands in their way instead (FL2-OPUS-2).
+    const absent = restoredLinkWords(this.#staged.state, step.entries.filter((entry) => parseKey(entry.key)?.kind === "floorLink").map((entry) => entry.value));
     // Only history knows who placed the stairs, and it can be trimmed or lost, so a restore's words are true whoever did.
-    return stairs ? restoreStairsWords(reason) : reason;
+    return absent ?? restoreStairsWords(reason);
   }
 
   /** Which tokens a viewer sees in the staged room, as their undo's poses read links (undo.ts poseOf). */

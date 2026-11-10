@@ -15,6 +15,7 @@ import {
   linkProblem,
   pitUnder,
   rectGround,
+  restoredLinkWords,
   restoreStairsWords,
   standsOn,
   wallInside,
@@ -199,6 +200,23 @@ describe("the words (6.3, 7.3, 8)", () => {
     assert.equal(restoreStairsWords(block), "That would block the ladder to Attic. The DM who placed it can remove it.");
     assert.equal(restoreStairsWords(between), "Stairs join Ground floor and Upper floor. The DM who placed them can remove them.");
     assert.equal(restoreStairsWords("the stairs changed"), "the stairs changed");
+  });
+
+  test("a restore of stairs that are gone names what is in their way now, on that end's floor, and no stairs to remove (FL2-OPUS-2)", () => {
+    const s = withStairs();
+    const ends = [end(s, "l2"), end(s, "l1")];
+    const gone = run(s, { t: "floorLink.delete", linkId: "l1" });
+    assert.equal(restoredLinkWords(s, ends), null, "stairs that stand are the placer's to remove");
+    assert.equal(restoredLinkWords(gone, ends), null, "nothing in their way");
+    assert.equal(restoredLinkWords(gone, [null, undefined, "x"]), null);
+    assert.equal(restoredLinkWords(run(gone, edge(UPPER, "4,3,w")), ends), "A wall crosses those squares on Upper floor.");
+    assert.equal(restoredLinkWords(run(gone, edge(GROUND, "4,3,w")), ends), "A wall crosses those squares on Ground floor.");
+    assert.equal(restoredLinkWords(run(gone, raise(UPPER, ["3,3"], 5)), ends), "Those squares aren't one height on Upper floor.");
+    assert.equal(restoredLinkWords(run(gone, raise(GROUND, ["3,3", "4,3"], 5)), ends), "That would change the ground under the stairs to Upper floor.");
+    assert.equal(restoredLinkWords(run(gone, raise(UPPER, ["3,3", "4,3"], 5)), ends), "That would change the ground under the stairs to Ground floor.");
+    const other = run(gone, { t: "floorLink.put", link: { id: "m1", pairId: "m2", sceneId: GROUND, to: UPPER, rect: { x: 4, y: 3, w: 1, h: 1 }, kind: "ladder" } });
+    assert.equal(restoredLinkWords(other, ends), "Those squares already have a ladder to Upper floor.");
+    for (const words of [LINK_WORDS.wall("Upper floor"), "That would change the ground under the stairs to Upper floor."]) assert.equal(isStairsRefusal(words), false, words);
   });
 
   test("the climb's label and its refusals", () => {
