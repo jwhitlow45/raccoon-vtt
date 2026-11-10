@@ -528,6 +528,14 @@ Phase 3 is built: hex dungeons, Add a wing and per-room edits. It took no op, sn
 - **The camera.** As the pane opens, the map pans to the area and the join beside it and keeps its zoom.
 - **Floors on hexes.** A hex scene's Floors group takes a generated dungeon, lifting floors phase 3's hold (D-261110-075), so only VTT file stays off there.
 
+### After live play 37
+
+- **The stub's ground (D-261110-534).** A wing's stub crosses only open ground inside the box spanning the area and the join's approach, which is the area itself once the area holds the approach. Across the whole flood it could run round the joined room, rows outside the area, where the wing's rooms crowded the approach. An area dragged short of the wall still joins over the ground between, and with no way in the box the plan says No way, whose line now names Reroll first.
+- **The revealed warning (D-261110-521).** It reads the DM's reveal alone: ground the party only explored keeps the old ground in their remembered map.
+- **The picks (D-261110-524, D-261110-533).** Clearing the picks clears the row's note, and a tap near no wall clears the join while the pane is closed.
+- **The sheet (D-261110-523, D-261110-535).** Only the rows scroll, and a sheet too short for its header, two rows and the foot scrolls the header away with them.
+- **Names.** The pane's room panel names rooms W3 as the ghost does, its Done gives focus back to Edit rooms (D-261110-539), and a wing's Setup step reads "adding a wing to the scene Keep" (D-261110-536).
+
 ### Tests
 
 - **New files.** Generator: lattice, hexWalls, hex runs, fit, caps on hexes, hex plans, hex traps, edits and their property test, wing and its property test, and four golden plans (a hex Medium on rows, a hex Wide Crypt on columns, a square wing and an edited plan). Landing: hex and wing ops, previews, `sendWing` and its asks, the landed hex property test, and through the actor `dungeon.itest.ts`'s hex dungeon, `dungeon.wing.itest.ts` and `dungeon.hexsecret.test.ts` (leaf twins frame by frame on rows and columns, and the way in's sight). Shared: `wingClear`. Client: the shared choices, the room panel, the edits flow, the picked room, the wing pick, ghost, pane placement and ghost room tap.
