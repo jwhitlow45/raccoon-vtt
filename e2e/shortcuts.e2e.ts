@@ -1041,11 +1041,11 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await keyOn(dm, "v");
   });
 
-  test("tc-f. on a computer, B moves the builder's mode through all eleven and back to Brush, saying Walls and doors and Heights and stairs where the tiles show the slash, Shift+B goes to Stamp, focus on Terrain goes to the row's neighbor, and a shape room with corners and an open label pane hold", async () => {
+  test("tc-f. on a computer, B moves the builder's mode through all twelve and back to Brush, saying Walls and doors and Heights and stairs where the tiles show the slash, Shift+B goes to Add a wing, focus on Terrain goes to the row's neighbor, and a shape room with corners and an open label pane hold", async () => {
     await keyOn(dm, "b");
     await chipShows(dm, "Map builder", "Builder mode", "Brush");
     // By the names a screen reader says, the chip's and the status's, never "Walls slash doors" (FU32-SR-NAMES).
-    for (const mode of ["Rectangle room", "Shape room", "Erase", "Erase area", "Walls and doors", "Heights and stairs", "Difficult ground", "Label", "Lights", "Stamp", "Brush"]) {
+    for (const mode of ["Rectangle room", "Shape room", "Erase", "Erase area", "Walls and doors", "Heights and stairs", "Difficult ground", "Label", "Lights", "Stamp", "Add a wing", "Brush"]) {
       await keyOn(dm, "b");
       await chipShows(dm, "Map builder", "Builder mode", mode);
       await saidNow(dm, `Map builder: ${mode}`);
@@ -1063,7 +1063,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await dm.keyboard.press("Escape");
     await tiles.waitFor({ state: "detached" });
     await keyOn(dm, "Shift+B");
-    await chipShows(dm, "Map builder", "Builder mode", "Stamp");
+    await chipShows(dm, "Map builder", "Builder mode", "Add a wing");
     await keyOn(dm, "b");
     await chipShows(dm, "Map builder", "Builder mode", "Brush");
 
