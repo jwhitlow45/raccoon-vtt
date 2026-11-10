@@ -47,7 +47,8 @@ describe("an ask's projection", () => {
 
   test("the asker gets their asks with the targets they see, the area, and their own roll", () => {
     const p = view(table(), P1);
-    assert.deepEqual(p.casts.k1, table().casts.k1);
+    // A player's copy carries rev 0, whatever the stored rev.
+    assert.deepEqual(p.casts.k1, { ...table().casts.k1!, rev: 0 });
     assert.deepEqual(p.casts.k2?.targets, ["g1", "bree"], "the hidden goblin is cut");
     assert.deepEqual(castLines(p.log), ["41:0", "42:0"]);
   });

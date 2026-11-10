@@ -567,6 +567,11 @@ function assertNoWave5Leaks(state: RoomState, viewer: Viewer, p: ProjectedState,
   for (const [id, t] of Object.entries(p.tokens)) assert.equal(t.party === true, playersToken(state, state.tokens[id]!), `${label}: party flag of ${id}`);
 }
 
+/** A player's stamp as projectEntity gives it alone: a snapshot ranks it among its scene's stamps, and alone it reads rank 0. */
+function unranked(key: string, value: unknown): unknown {
+  return key.startsWith("stamp:") && value !== null && typeof value === "object" ? { ...value, z: 0 } : value;
+}
+
 describe("projection properties over random rooms", () => {
   test("FU39-OPUS-6: room metadata passes through while derived undo ids stay DM-only", () => {
     const state = room();
@@ -604,7 +609,7 @@ describe("projection properties over random rooms", () => {
             assert.equal(single, null);
             continue;
           }
-          assert.equal(stableStringify(single), stableStringify(inState), `seed ${seed} ${viewer.memberId} ${key}`);
+          assert.equal(stableStringify(single), stableStringify(unranked(key, inState)), `seed ${seed} ${viewer.memberId} ${key}`);
         }
       }
       for (const sceneId of ["s1", "s2"]) {
@@ -744,7 +749,7 @@ describe("projection properties over random rooms with a party that sees", () =>
           if (state.scenes[state.meta.playerSceneId!]?.vision?.on && !state.meta.view.blackout) checked++;
           for (const key of allKeys(state)) {
             if (key === keys.encounterHistory) continue;
-            assert.equal(stableStringify(projectEntity(key, state, viewer, { sceneId: "s2" })), stableStringify(readEntity(p as unknown as RoomState, key)), `seed ${seed} ${viewer.memberId} ${key}`);
+            assert.equal(stableStringify(projectEntity(key, state, viewer, { sceneId: "s2" })), stableStringify(unranked(key, readEntity(p as unknown as RoomState, key))), `seed ${seed} ${viewer.memberId} ${key}`);
           }
         }
       }

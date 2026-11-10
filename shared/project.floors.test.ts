@@ -358,7 +358,8 @@ describe("an ask whose floor stops being one goes with it, and the undo brings i
       assert.equal(sent?.onFloor, undefined, `${close.name}: the mark is the DM's`);
       const predicted = applyOp(device, asking, P1, env(seq++));
       assert.ok(predicted.ok);
-      assert.deepEqual(predicted.state.casts.k1, sent, `${close.name}: Ana's device predicts the ask as it is sent to her, unmarked`);
+      // The prediction counts its own write, and the copy sent carries rev 0, which replaces it at the confirm.
+      assert.deepEqual({ ...predicted.state.casts.k1!, rev: 0 }, sent, `${close.name}: Ana's device predicts the ask as it is sent to her, unmarked`);
       // A withdrawal is Ana's, while the owl is still hers.
       let closed = close.who === P1 ? by(P1)(state, close.op) : null;
       // 2. The DM brings the owl down and gives it to Bree.

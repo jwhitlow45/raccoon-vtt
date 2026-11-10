@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import type { RoomState, Token, Viewer } from "../model.ts";
 import { hash128, projectState, stableStringify } from "../project.ts";
+import { asPlayerCopy } from "../rankTestutil.ts";
 import { opSchema, type Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { derivedId } from "./duplicate.ts";
@@ -131,7 +132,7 @@ function script(): { who: Step["who"]; op: Op | ((prev: { inverse: unknown }) =>
 }
 
 function hashes(state: RoomState, log: unknown): { after: string; seen: string } {
-  return { after: hash128(stableStringify({ state, log })), seen: hash128(stableStringify(projectState(state, P1, { sceneId: "hex" }))) };
+  return { after: hash128(stableStringify({ state, log })), seen: hash128(stableStringify(asPlayerCopy(projectState(state, P1, { sceneId: "hex" })))) };
 }
 
 function record(): Fixture {

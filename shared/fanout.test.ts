@@ -83,7 +83,7 @@ function runSequence(seed: number, ops: number): { applied: number; refused: num
     for (const c of connections) {
       const next = new Map<EntityKey, unknown>();
       for (const key of candidates) next.set(key, projectEntity(key, result.state, c.viewer, { sceneId: c.sceneId }));
-      const diff = diffProjection(c.held, next);
+      const diff = diffProjection(c.held, withStampRanks(next, c.held, result.state, c.viewer, c.sceneId));
       c.held = diff.held;
       c.view = applyChanges(c.view, diff.changes);
       const fresh = projectState(result.state, c.viewer, { sceneId: c.sceneId });
@@ -97,6 +97,14 @@ function runSequence(seed: number, ops: number): { applied: number; refused: num
     state = result.state;
   }
   return { applied, refused };
+}
+
+/** The candidates' projections with a player's stamps at the ranks a fresh snapshot gives them, as the server's fan-out ranks each connection's stamps (server/rooms/fanout.ts), so every stamp the copy holds or gets is compared at its rank. */
+function withStampRanks(next: Map<EntityKey, unknown>, held: ReadonlyMap<EntityKey, unknown>, state: RoomState, viewer: Viewer, sceneId: string | null): Map<EntityKey, unknown> {
+  if (viewer.role === "dm") return next;
+  const stamps = projectState(state, viewer, { sceneId }).stamps;
+  const all = new Set([...next.keys(), ...[...held.keys()].filter((key) => key.startsWith("stamp:")), ...Object.keys(stamps).map((id) => keys.stamp(id))]);
+  return new Map([...all].sort().map((key) => [key, key.startsWith("stamp:") ? (stamps[key.slice("stamp:".length)] ?? null) : next.get(key)]));
 }
 
 describe("fan-out invariant", () => {

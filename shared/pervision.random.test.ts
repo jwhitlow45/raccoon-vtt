@@ -233,7 +233,7 @@ function run(seed: number, steps: number): { applied: number; perPlayer: number;
     for (const c of conns) {
       const next = new Map<EntityKey, unknown>();
       for (const key of candidates) next.set(key, projectEntity(key, after, c.viewer, { sceneId: c.sceneId }));
-      const diff = diffProjection(c.held, next);
+      const diff = diffProjection(c.held, withStampRanks(next, c.held, after, c.viewer, c.sceneId));
       c.held = diff.held;
       c.view = applyChanges(c.view, diff.changes);
       const fresh = projectState(after, c.viewer, { sceneId: c.sceneId });
@@ -265,6 +265,14 @@ function run(seed: number, steps: number): { applied: number; perPlayer: number;
     if (explore) assert.ok(batch(opSchema.parse(explore), DM, 101 + 2 * i, `${where}, then its explore`), `${where}: the explore step was refused`);
   }
   return { applied, perPlayer, lists, copies, holders };
+}
+
+/** The candidates' projections with a player's stamps at the ranks a fresh snapshot gives them, as the server's fan-out ranks each connection's stamps (server/rooms/fanout.ts), so every stamp the copy holds or gets is compared at its rank. */
+function withStampRanks(next: Map<EntityKey, unknown>, held: ReadonlyMap<EntityKey, unknown>, state: RoomState, viewer: Viewer, sceneId: string | null): Map<EntityKey, unknown> {
+  if (viewer.role === "dm") return next;
+  const stamps = projectState(state, viewer, { sceneId }).stamps;
+  const all = new Set([...next.keys(), ...[...held.keys()].filter((key) => key.startsWith("stamp:")), ...Object.keys(stamps).map((id) => keys.stamp(id))]);
+  return new Map([...all].sort().map((key) => [key, key.startsWith("stamp:") ? (stamps[key.slice("stamp:".length)] ?? null) : next.get(key)]));
 }
 
 describe("per-player vision over random rooms (docs/design/design-v1-per-player-vision.md section 10)", () => {

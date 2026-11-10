@@ -2911,14 +2911,96 @@ export function stampCells(stamp: Pick<Stamp, "x" | "y" | "w" | "h" | "rotation"
  * Stamps on the floors the viewer holds (docs/design/design-v1-maps-vision.md 3.5). A
  * player gets none the DM hid, and none whose box is fully under enabled
  * fog, as labels go, so a chest in an unexplored room is not in their data.
+ * This is the stored stamp a viewer is shown, the live one or the one
+ * their memory holds (shownByMemory), before a player's copy is made of it
+ * (rankedStamp).
  */
-function projectStampCtx(ctx: Ctx, stamp: Stamp): Stamp | null {
+function liveStampSource(ctx: Ctx, stamp: Stamp): Stamp | null {
   if (!ctx.floors.has(stamp.sceneId)) return null;
   if (ctx.viewer.role === "dm") return stamp;
   if (stamp.visibility === "dm") return null;
   const scene = ownEntry(ctx.state.scenes, stamp.sceneId);
   if (!scene || !scene.fogEnabled) return stamp;
   return shownByMemory(ctx, stamp.sceneId, "stamps", stamp.id, stamp);
+}
+
+/** The stored stamp a viewer is shown by id, live or remembered (liveStampSource), or null. */
+function stampSource(ctx: Ctx, id: string): Stamp | null {
+  const live = ownEntry(ctx.state.stamps, id);
+  return live ? liveStampSource(ctx, live) : (projectRememberedCtx(ctx, "stamps", id) as Stamp | null);
+}
+
+/*
+ * A player's stamp carries its rank in `z`: its place from 0 among the
+ * stamps of its scene that their copy holds, ordered by each one's stored
+ * `z`, then id. So the numbers a copy holds depend on its own stamps alone,
+ * and the stored `z` stays on the server (stampOrder).
+ *
+ * A copy whose rank nobody worked out reads 0 (projectEntity), so a path
+ * that skips ranking sends 0 and never the stored `z`. The snapshot ranks
+ * each scene (rankedStamps), and the fan-out keeps each connection's ranks
+ * (server/rooms/fanout.ts). Copies are kept per source and rank, so the
+ * same rank is the same object, hashed once, across connections and
+ * batches.
+ */
+const rankedCopies = new WeakMap<Stamp, Map<number, Stamp>>();
+const sourceOfCopy = new WeakMap<Stamp, Stamp>();
+
+/** A player's copy of a stamp at a rank, from the stored stamp or from another copy of it. */
+export function rankedStamp(stamp: Stamp, rank: number): Stamp {
+  const source = sourceOfCopy.get(stamp) ?? stamp;
+  if (source.rev === 0 && source.z === rank) return source;
+  const make = () => {
+    const copy: Stamp = { ...source, rev: 0, z: rank };
+    sourceOfCopy.set(copy, source);
+    return copy;
+  };
+  // A stamp an op is still writing may change, so its copies are not kept.
+  if (isWritable(source)) return make();
+  let byRank = rankedCopies.get(source);
+  if (!byRank) rankedCopies.set(source, (byRank = new Map()));
+  let copy = byRank.get(rank);
+  if (!copy) byRank.set(rank, (copy = make()));
+  return copy;
+}
+
+/** The order a player's copy of a stamp ranks by: the stored `z` of the stamp it was made from. Never sent. */
+export function stampOrder(stamp: Stamp): number {
+  return (sourceOfCopy.get(stamp) ?? stamp).z;
+}
+
+/** The ranks of one scene's stamps from their orders: by order, then id, from 0. */
+export function stampRanks(orders: ReadonlyMap<string, number>): Map<string, number> {
+  const ids = [...orders.keys()].sort((a, b) => orders.get(a)! - orders.get(b)! || (a < b ? -1 : a > b ? 1 : 0));
+  return new Map(ids.map((id, rank) => [id, rank]));
+}
+
+/** A player's stamps as their snapshot holds them, each ranked on its scene among the others the copy holds. */
+function rankedStamps(sources: Record<string, Stamp>): Record<string, Stamp> {
+  const byScene = new Map<string, Map<string, number>>();
+  for (const [id, stamp] of Object.entries(sources)) {
+    let orders = byScene.get(stamp.sceneId);
+    if (!orders) byScene.set(stamp.sceneId, (orders = new Map()));
+    orders.set(id, stamp.z);
+  }
+  const ranks = new Map<string, number>();
+  for (const orders of byScene.values()) for (const [id, rank] of stampRanks(orders)) ranks.set(id, rank);
+  const out: Record<string, Stamp> = {};
+  for (const [id, stamp] of Object.entries(sources)) out[id] = rankedStamp(stamp, ranks.get(id)!);
+  return out;
+}
+
+/** The viewer's stamps as a snapshot holds them: the DM's as stored, a player's ranked (rankedStamps). */
+function stampsCtx(ctx: Ctx): Record<string, Stamp> {
+  const sources = projectByMemoryCtx(ctx, "stamps", ctx.state.stamps, (st) => liveStampSource(ctx, st));
+  return ctx.viewer.role === "dm" ? sources : rankedStamps(sources);
+}
+
+/** A stamp by id as the viewer gets it alone: the DM's as stored, a player's at rank 0, since no scene was ranked for it. */
+function projectStampCtx(ctx: Ctx, id: string): Stamp | null {
+  const source = stampSource(ctx, id);
+  if (source === null || ctx.viewer.role === "dm") return source;
+  return rankedStamp(source, 0);
 }
 
 /**
@@ -4234,7 +4316,56 @@ function unmarked(token: ProjectedToken): ProjectedToken {
   return rest;
 }
 
+/*
+ * Every rev in a player's copy is 0, every kind's, as a token's and a
+ * chunk's always were (projectTokenCtx), so a write that leaves what a
+ * player holds as it was sends them nothing. A copy at rev 0 is kept per
+ * source object, so the fan-out's identity check and its hashes kept per object
+ * (server/rooms/fanout.ts) still hit.
+ */
+const zeroedCopies = new WeakMap<object, object>();
+
+function zeroed<T>(value: T): T {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return (value.some((v) => zeroed(v) !== v) ? value.map(zeroed) : value) as T;
+  const rev = (value as { rev?: unknown }).rev;
+  if (rev === undefined || rev === 0) return value;
+  // A value an op is still writing may change, so its copy is not kept.
+  if (isWritable(value)) return { ...value, rev: 0 };
+  let copy = zeroedCopies.get(value);
+  if (!copy) zeroedCopies.set(value, (copy = { ...value, rev: 0 }));
+  return copy as T;
+}
+
+/** The state's single values, each one entity; every other field of a projection is a record or a list of them. */
+const SINGLE_FIELDS = new Set(["meta", "encounter", "clock", "playing"]);
+
+/** A player's whole projection with every entity's rev 0 (zeroed). */
+function zeroedState(projected: ProjectedState): ProjectedState {
+  const out: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(projected)) {
+    if (value === null || typeof value !== "object" || Array.isArray(value) || SINGLE_FIELDS.has(field)) out[field] = zeroed(value);
+    else {
+      const record = value as Record<string, unknown>;
+      let changed: Record<string, unknown> | null = null;
+      for (const [id, entity] of Object.entries(record)) {
+        const z = zeroed(entity);
+        if (z === entity) continue;
+        changed ??= { ...record };
+        changed[id] = z;
+      }
+      out[field] = changed ?? record;
+    }
+  }
+  return out as unknown as ProjectedState;
+}
+
 function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
+  const value = projectEntityKindCtx(ctx, key);
+  return ctx.viewer.role === "dm" ? value : zeroed(value);
+}
+
+function projectEntityKindCtx(ctx: Ctx, key: EntityKey): unknown {
   const parsed = parseKey(key);
   if (!parsed) return null;
   const value = readEntity(ctx.state, key);
@@ -4295,7 +4426,7 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
     case "savedEncounter":
       return value ? projectSavedEncounterCtx(ctx, value as SavedEncounter) : null;
     case "stamp":
-      return value ? projectStampCtx(ctx, value as Stamp) : projectRememberedCtx(ctx, "stamps", parsed.id);
+      return projectStampCtx(ctx, parsed.id);
     case "light":
       return value ? projectLightCtx(ctx, value as Light) : null;
     case "journal":
@@ -4476,6 +4607,11 @@ export function projectState(state: RoomState, viewer: Viewer, opts: ProjectOpts
 }
 
 function projectStateCtx(ctx: Ctx): ProjectedState {
+  const out = projectStateKindsCtx(ctx);
+  return ctx.viewer.role === "dm" ? out : zeroedState(out);
+}
+
+function projectStateKindsCtx(ctx: Ctx): ProjectedState {
   const { state, viewer } = ctx;
   return {
     meta: projectMetaCtx(ctx),
@@ -4496,7 +4632,7 @@ function projectStateCtx(ctx: Ctx): ProjectedState {
     monsters: projectMap(state.monsters, (m) => projectMonsterCtx(ctx, m)),
     srdImages: projectMap(state.srdImages, (e) => projectSrdImageCtx(ctx, e)),
     savedEncounters: projectMap(state.savedEncounters, (e) => projectSavedEncounterCtx(ctx, e)),
-    stamps: projectByMemoryCtx(ctx, "stamps", state.stamps, (st) => projectStampCtx(ctx, st)),
+    stamps: stampsCtx(ctx),
     lights: projectMap(state.lights, (l) => projectLightCtx(ctx, l)),
     exploredTiles: projectMap(state.exploredTiles, (t) => projectExploredCtx(ctx, t)),
     journal: projectMap(state.journal, (page) => projectJournalCtx(ctx, page)),

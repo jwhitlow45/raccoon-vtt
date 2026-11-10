@@ -6,6 +6,7 @@ import type { RoomState, Viewer } from "./model.ts";
 import { canApply } from "./permissions.ts";
 import { opSchema, type Op } from "./protocol.ts";
 import { hash128, projectState, stableStringify, type ProjectedState } from "./project.ts";
+import { asPlayerCopy } from "./rankTestutil.ts";
 import { applyOp, type Env } from "./reducer.ts";
 import { seenWhole } from "./rules/path.ts";
 import { DOOR_COVER_OP_VERSION } from "./migrate.ts";
@@ -62,6 +63,12 @@ function stored(state: RoomState): string {
  * corners. Scenes with fog off stay byte for byte, and so does everything
  * else on those with it.
  */
+/** A viewer's projection as the fixture hashes it: a player's in the form this build sends it (rankTestutil.ts). */
+function copyOf(state: RoomState, viewer: Viewer, sceneId: string): ProjectedState {
+  const view = projectState(state, viewer, { sceneId });
+  return viewer.role === "dm" ? view : asPlayerCopy(view);
+}
+
 function seenBy(state: RoomState, viewer: Viewer, view: ProjectedState): string {
   if (viewer.role === "dm") {
     // Retained undo ids are derived view metadata absent from the historical build.
@@ -247,7 +254,7 @@ function run(seed: number): { input: string; output: string } {
       outputs.push(...answer(result.state, applyOp(result.state, undo, DM, env(1_000 + i))));
     }
     state = result.state;
-    for (const [viewer, sceneId] of VIEWS) outputs.push(hash128(seenBy(state, viewer, projectState(state, viewer, { sceneId }))));
+    for (const [viewer, sceneId] of VIEWS) outputs.push(hash128(seenBy(state, viewer, copyOf(state, viewer, sceneId))));
   }
   return { input: hash128(inputs.join("\n")), output: hash128(outputs.join("\n")) };
 }

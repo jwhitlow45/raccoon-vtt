@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { RoomState, Viewer } from "../model.ts";
 import { opSchema, type Op, type RestoreEntry } from "../protocol.ts";
 import { projectState } from "../project.ts";
+import { asPlayerCopy } from "../rankTestutil.ts";
 import { applyOp, type ApplyResult } from "../reducer.ts";
 
 /**
@@ -151,7 +152,9 @@ function viewsOf(state: RoomState): string[] {
   const mark = reparented(state) ? "reparented " : "";
   const views = (["dm1", "p1", "p2"] as const).map((who) => {
     try {
-      return mark + digest(canon(projectState(state, VIEWERS[who], { sceneId: null })));
+      const view = projectState(state, VIEWERS[who], { sceneId: null });
+      // A player's copy in the form this build sends it, recorded the same way (rankTestutil.ts).
+      return mark + digest(canon(who === "dm1" ? view : asPlayerCopy(view)));
     } catch (err) {
       return `threw ${(err as Error).message}`;
     }
