@@ -899,7 +899,7 @@ export async function createRoom(): Promise<void> {
   await ops.send({ t: "character.create", character: { id: run.thorn.characterId, name: "Thorn", size: "medium", ownerIds: [run.patId], actor: actor(24) } });
   const token = (id: string, extra: Record<string, unknown>) => ({ t: "token.create", token: { id, sceneId: run.sceneId, size: "medium", visibility: "all", ...extra } });
   await ops.send(token(run.thorn.id, { kind: "pc", name: "Thorn", x: 8, y: 8, disposition: "ally", actor: { ref: run.thorn.characterId } }));
-  for (const [i, id] of run.goblins.entries()) await ops.send(token(id, { kind: "monster", name: "Goblin", number: i + 1, x: 12 + i * 2, y: 9, disposition: "hostile", actor: { inline: actor(7) } }));
+  for (const [i, id] of run.goblins.entries()) await ops.send(token(id, { kind: "monster", name: "Goblin", x: 12 + i * 2, y: 9, disposition: "hostile", actor: { inline: actor(7) } }));
   for (const [i, id] of run.kept.entries()) {
     await ops.send({
       t: "drawing.create",

@@ -170,9 +170,10 @@ async function createRoom(): Promise<void> {
   await ops.send({ t: "character.create", character: { id: run.thorn, name: "Thorn", size: "medium", ownerIds: [], actor: actor() } });
   const token = (id: string, name: string, x: number, y: number, extra: Record<string, unknown> = {}) =>
     ops.send({ t: "token.create", token: { id, sceneId: run.mat, name, kind: "monster", x, y, size: "medium", visibility: "all", ownerIds: [], actor: { inline: actor() }, ...extra } });
-  await token(run.g1, "Goblin", 6, 6, { number: 1 });
-  await token(run.g2, "Goblin", 8, 6, { number: 2 });
-  await token(run.g3, "Goblin", 56, 36, { number: 3 });
+  // In the party's sight one after another, so the table numbers them 1, 2 and 3.
+  await token(run.g1, "Goblin", 6, 6);
+  await token(run.g2, "Goblin", 8, 6);
+  await token(run.g3, "Goblin", 56, 36);
   await token(run.boss, "Goblin Boss", 10, 8, { visibility: "dm" });
   await token(run.varo, "Count Varo", 12, 8, { kind: "npc", nameHidden: true, publicName: "Hooded figure" });
   await token(run.tBree, "Bree", 4, 4, { kind: "pc", ownerIds: [run.patId], actor: { ref: run.bree } });

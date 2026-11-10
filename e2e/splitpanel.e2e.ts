@@ -304,7 +304,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await ops.send({ t: "token.create", token: { id: run.thorn, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "pc", name: "Thorn", x: 4, y: 6, disposition: "ally", actor: { ref: run.thornChar } } });
     for (const [i, id] of run.goblins.entries()) {
       const at = i === 0 ? GOBLIN_AT : { x: 14 + (i % 4), y: 2 + Math.floor(i / 4) * 2 };
-      await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Goblin", number: i + 1, ...at, disposition: "hostile", actor: { inline: actor(10, { srdId: "goblin-warrior" }) } } });
+      await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Goblin", ...at, disposition: "hostile", actor: { inline: actor(10, { srdId: "goblin-warrior" }) } } });
     }
     // Words with no break in them, so the table is wider than any pane and scrolls sideways.
     const columns = Array.from({ length: 14 }, (_, i) => `Columnnumber${i + 1}withalongname`);

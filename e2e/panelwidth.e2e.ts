@@ -524,7 +524,7 @@ describe("raccoon-vtt: a side panel that resizes, and a sheet with a mouse", { t
       await wideOps.send({ t: "character.create", character: { id: wideRun.thornChar, name: "Thorn", size: "medium", ownerIds: [wideRun.patId], actor: fighter(24) } });
       await wideOps.send({ t: "token.create", token: { id: wideRun.thorn, sceneId: wideRun.sceneId, size: "medium", visibility: "all", kind: "pc", name: "Thorn", x: 4, y: 6, disposition: "ally", actor: { ref: wideRun.thornChar } } });
       for (const [i, id] of wideRun.goblins.entries()) {
-        await wideOps.send({ t: "token.create", token: { id, sceneId: wideRun.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Goblin", number: i + 1, x: 10 + (i % 3), y: 4 + Math.floor(i / 3), disposition: "hostile", actor: { inline: fighter(10, { srdId: "goblin-warrior" }) } } });
+        await wideOps.send({ t: "token.create", token: { id, sceneId: wideRun.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Goblin", x: 10 + (i % 3), y: 4 + Math.floor(i / 3), disposition: "hostile", actor: { inline: fighter(10, { srdId: "goblin-warrior" }) } } });
       }
       const upload = async (rgb: [number, number, number]) => {
         const res = await wideDmContext.request.put(`${server.origin}/api/rooms/${wideRun.roomId}/assets?kind=map`, { headers: { Origin: server.origin, "content-type": "image/png" }, data: await picture(rgb) });

@@ -791,7 +791,12 @@ export function panelFile(part: string | null, steps: () => void): void {
       await ops.send(token(run.bear.id, run.bear.at, { kind: "npc", name: "Brown Bear", disposition: "ally", ownerIds: [run.patId], actor: { inline: actor({ ac: 11, srdId: "brown-bear", speeds: { walk: 40, climb: 30 }, passivePerception: 13, hp: { cur: 22, max: 22, temp: 0 } }) } }));
       await ops.send(token(run.bree.id, run.bree.at, { kind: "pc", name: "Bree", disposition: "ally", ownerIds: [run.patId], actor: { ref: run.bree.characterId } }));
       await ops.send(token(run.dragon.id, run.dragon.at, { name: "Adult White Dragon", size: "huge", hpVisibility: "label", actor: { inline: actor({ ac: 18, srdId: "adult-white-dragon", speeds: { walk: 40, burrow: 30, fly: 80, swim: 40 }, passivePerception: 21, hp: { cur: 200, max: 200, temp: 0 } }) } }));
-      await ops.send(token(run.goblin.id, run.goblin.at, { name: "Goblin", number: 4, image: ICON, hpVisibility: "label", actor: { inline: actor({ ac: 15, srdId: "goblin-warrior", passivePerception: 9, hp: { cur: 10, max: 10, temp: 0 } }) } }));
+      // The goblin reads "Goblin 4": the table numbers creatures the party sees side by side, so three stand-ins meet the
+      // party first and leave once it has its number.
+      const standIns = [randomUUID(), randomUUID(), randomUUID()];
+      for (const id of standIns) await ops.send(token(id, run.goblin.at, { name: "Goblin", actor: { inline: actor() } }));
+      await ops.send(token(run.goblin.id, run.goblin.at, { name: "Goblin", image: ICON, hpVisibility: "label", actor: { inline: actor({ ac: 15, srdId: "goblin-warrior", passivePerception: 9, hp: { cur: 10, max: 10, temp: 0 } }) } }));
+      for (const id of standIns) await ops.send({ t: "token.delete", tokenId: id });
       await ops.send(token(run.bog.id, run.bog.at, { name: "Bog Thing", hpVisibility: "label", actor: { inline: actor({ ac: 13, monsterId: run.bog.monsterId, speeds: { walk: 20, swim: 20 }, hp: { cur: 30, max: 30, temp: 0 } }) } }));
       await ops.send(token(run.swift.id, run.swift.at, { kind: "npc", name: "Swift", hpVisibility: "label", actor: { inline: actor({ ac: 100, speeds: { walk: 1000, fly: 1000, swim: 1000, climb: 1000, burrow: 1000, hover: true }, passivePerception: 60, hp: { cur: 100000, max: 100000, temp: 0 } }) } }));
       await ops.send(token(run.soft.id, run.soft.at, { kind: "npc", name: "Soft", hpVisibility: "label", actor: { inline: actor({ ac: 9 }) } }));

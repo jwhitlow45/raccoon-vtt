@@ -6,6 +6,7 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { actor, bar, BOUNDS, browser, checks, columnOver, coveredIn, dm, dmCdp, dmSocket, EDGE_TOKENS, firstEmpty, frame, frameSteps, freeTop, hitAt, homeTokens, middle, oneMoveUp, openClear, openOn, openPanel, ops, panTo, panTwo, pat, patCdp, patContext, patOps, patSocket, PHONE, PHONES, type Placed, rectOf, restFile, run, server, setUp, shots, startCams, startProbe, steady, stopCams, stopProbe, tokenRect, view } from "./barrestRoom.ts";
 import { barControl, expandBar, multiSelect, pickTool, readCamera, sleep, Touches, touchSwipe, waitFor, wholeInReach } from "./harness.ts";
 import { openGroup } from "./helpers/groups.ts";
+import { boardLabel, numberScope, previewNumbers } from "../shared/numbering.ts";
 
 /**
  * The token action bar at rest on a phone held upright
@@ -25,6 +26,18 @@ import { openGroup } from "./helpers/groups.ts";
  * with the phone files, since the runs go one after another. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
  */
+
+/**
+ * Hides Goblin 2 from the party while a copy of it stands, and shows it
+ * again after. The table numbers creatures the party sees side by side,
+ * so a copy kept out of sight gives Goblin 2 no number, and it reads as
+ * before once the copy goes.
+ */
+async function outOfSight(hidden: boolean): Promise<void> {
+  const visibility = hidden ? "dm" : "all";
+  await ops.send({ t: "token.update", tokenId: run.goblin2.id, patch: { visibility } });
+  await waitFor(`Goblin 2 ${visibility}`, () => (dmSocket.state?.tokens[run.goblin2.id]?.visibility === visibility ? true : null));
+}
 
 restFile(null, () => {
   // ------------------------------------------------------------ br-f: the frame (lane F)
@@ -409,18 +422,21 @@ restFile(null, () => {
       assert.ok(oneMoveUp(plain), `a plain tap from the group did not move the map once: ${JSON.stringify(plain)}`);
 
       // A duplicate with the bar open opens its copy's bar, one request: the map moves once at most.
+      await outOfSight(true);
       const known = new Set(Object.keys(dmSocket.state?.tokens ?? {}));
       await startCams(dm);
       await (await barControl(bar(dm, "Goblin 2"), "Duplicate")).click();
       const copy = await waitFor("the copy", () => Object.keys(dmSocket.state?.tokens ?? {}).find((id) => !known.has(id)) ?? null);
       try {
-        await waitFor("the copy's bar", async () => ((await frame(dm).getAttribute("aria-label")) !== "Goblin 2 actions" ? true : null));
+        // The copy reads its bracketed number on the DM's board, which tells its bar from Goblin 2's.
+        const made = await waitFor("the copy's name", () => dmSocket.state?.tokens[copy]);
+        const label = `${boardLabel(previewNumbers(dmSocket.state!, numberScope(dmSocket.state!, made)), made, "dm")} actions`;
+        await waitFor("the copy's bar", async () => ((await frame(dm).getAttribute("aria-label")) === label ? true : null));
         const copied = await stopCams(dm);
         assert.ok(copied.length === 1 || oneMoveUp(copied), `the duplicate moved the map more than once: ${JSON.stringify(copied)}`);
       } finally {
         await ops.send({ t: "token.delete", tokenId: copy });
-        // The copy numbered Goblin 2 as its sibling, a number deleting the copy leaves, so the steps after read its name as it was.
-        await ops.send({ t: "token.update", tokenId: run.goblin2.id, patch: { number: null } });
+        await outOfSight(false);
       }
       await shots.take(dm, "br-f-8-group-to-token");
     });
@@ -2174,6 +2190,7 @@ restFile(null, () => {
       await shots.take(pat, "s2-bar-undo-focus");
 
       await setUp(dm, PHONES[0]);
+      await outOfSight(true);
       const goblin = await openBar(dm, run.goblin2);
       const known = new Set(Object.keys(dmSocket.state?.tokens ?? {}));
       const duplicate = await barControl(goblin, "Duplicate");
@@ -2182,13 +2199,13 @@ restFile(null, () => {
       const copy = await waitFor("the copy", () => Object.keys(dmSocket.state?.tokens ?? {}).find((id) => !known.has(id)) ?? null);
       try {
         const made = await waitFor("the copy's name", () => dmSocket.state?.tokens[copy]);
-        const name = made.number === undefined ? made.name : `${made.name} ${made.number}`;
+        const name = boardLabel(previewNumbers(dmSocket.state!, numberScope(dmSocket.state!, made)), made, "dm").replace(/[()]/g, "\\$&");
         await lands(dm, new RegExp(`^div ${name} actions$`), "Duplicate handed focus on to the copy's bar");
         await shots.take(dm, "s2-bar-duplicate-focus");
       } finally {
         await closeBars(dm);
         await ops.send({ t: "token.delete", tokenId: copy });
-        await ops.send({ t: "token.update", tokenId: run.goblin2.id, patch: { number: null } });
+        await outOfSight(false);
       }
     });
   });

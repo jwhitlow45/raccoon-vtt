@@ -1109,7 +1109,8 @@ panelFile(null, () => {
     try {
       await waitFor("the goblin hidden and locked", () => (dmSocket.state?.tokens[run.goblin.id]?.locked && dmSocket.state.tokens[run.goblin.id]?.nameHidden ? true : null));
       await tapToken(dm, run.goblin.at);
-      await bar(dm, "Goblin 4").getByRole("button", { name: "Details", exact: true }).click();
+      // Its number is the one the party read under its name, so with the name hidden, and the party never meeting it hidden, it reads "Goblin".
+      await bar(dm, "Goblin").getByRole("button", { name: "Details", exact: true }).click();
       const panel = tokenPanel(dm);
       await panel.locator("[data-kind-line]").first().waitFor();
       // Each tag: the words it shows, those a screen reader reads (a visually hidden part kept, at 1 px wide), its icon and its tooltip.

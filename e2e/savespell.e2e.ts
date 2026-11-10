@@ -70,8 +70,8 @@ const run = {
   thorn: { id: randomUUID(), x: 2, y: 5 },
   bree: { id: randomUUID(), x: 9, y: 5 },
   goblins: [
-    { id: randomUUID(), name: "Goblin 1", number: 1, x: 10, y: 6, visibility: "all" },
-    { id: randomUUID(), name: "Goblin 2", number: 2, x: 10, y: 4, visibility: "dm" },
+    { id: randomUUID(), name: "Goblin 1", x: 10, y: 6, visibility: "all" },
+    { id: randomUUID(), name: "Goblin 2", x: 10, y: 4, visibility: "dm" },
   ],
   /** Thorn's damage roll, as its line landed. */
   fire: 0,
@@ -302,9 +302,11 @@ describe("raccoon-vtt a player's save spell", { timeout: 600_000 }, () => {
     await ops.send(tokenOp(run.thorn.id, { kind: "pc", name: "Thorn", x: run.thorn.x, y: run.thorn.y, disposition: "ally", actor: { ref: run.thornChar } }));
     await ops.send(tokenOp(run.bree.id, { kind: "pc", name: "Bree", x: run.bree.x, y: run.bree.y, disposition: "ally", actor: { ref: run.breeChar } }));
     // Goblins linked to the SRD's Goblin Warrior, for its Dexterity save, hardy enough that 9d6 never takes one to 0.
+    // The table numbers creatures the party sees side by side, so both stand in sight, in order, before Goblin 2 hides.
     for (const g of run.goblins) {
-      await ops.send(tokenOp(g.id, { kind: "monster", name: "Goblin", number: g.number, x: g.x, y: g.y, visibility: g.visibility, disposition: "hostile", actor: { inline: actor({ srdId: "goblin-warrior" }) } }));
+      await ops.send(tokenOp(g.id, { kind: "monster", name: "Goblin", x: g.x, y: g.y, visibility: "all", disposition: "hostile", actor: { inline: actor({ srdId: "goblin-warrior" }) } }));
     }
+    for (const g of run.goblins) if (g.visibility !== "all") await ops.send({ t: "token.update", tokenId: g.id, patch: { visibility: g.visibility } });
     await pat.goto(`${server.origin}/r/${run.roomId}`);
     await waitFor("Pat's snapshot", () => patSocket.state?.tokens[run.goblins[0]!.id]);
     assert.equal(patSocket.state!.tokens[run.goblins[1]!.id], undefined, "the hidden goblin reached Pat");

@@ -79,7 +79,7 @@ function focused(page: Page): Promise<{ tag: string; role: string | null; name: 
 
 /** The QOL pass's tokens (docs/design/design-v1-qol.md 3, Q3, Q7 and Q13): four Goblin Warriors in a row, the fourth hidden, and Snik, a fifth by its block, renamed. */
 const qe = {
-  warriors: [1, 2, 3, 4].map((number) => ({ id: randomUUID(), name: "Goblin Warrior", number, x: 1 + number * 2, y: 2 })),
+  warriors: [1, 2, 3, 4].map((n) => ({ id: randomUUID(), name: "Goblin Warrior", x: 1 + n * 2, y: 2 })),
   snik: { id: randomUUID(), name: "Snik", x: 3, y: 5 },
 };
 
@@ -502,12 +502,14 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
 
   test("qe-1. four Goblin Warriors of the SRD's block, one hidden, and Snik, a fifth renamed, join the goblin, with this device's recent conditions forgotten", async () => {
     const hardy = { hp: { cur: 40, max: 40, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 2, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "", srdId: "goblin-warrior" };
-    const create = (t: { id: string; name: string; number?: number; x: number; y: number }, visibility: "all" | "dm") =>
+    const create = (t: { id: string; name: string; x: number; y: number }, visibility: "all" | "dm") =>
       ops.send({
         t: "token.create",
-        token: { id: t.id, sceneId: run.sceneId, size: "medium", visibility, kind: "monster", name: t.name, ...(t.number === undefined ? {} : { number: t.number }), x: t.x, y: t.y, disposition: "hostile", actor: { inline: hardy } },
+        token: { id: t.id, sceneId: run.sceneId, size: "medium", visibility, kind: "monster", name: t.name, x: t.x, y: t.y, disposition: "hostile", actor: { inline: hardy } },
       });
-    for (const [i, w] of qe.warriors.entries()) await create(w, i === 3 ? "dm" : "all");
+    // The table numbers creatures the party sees side by side, so all four meet the party, in order, before the fourth hides.
+    for (const w of qe.warriors) await create(w, "all");
+    await ops.send({ t: "token.update", tokenId: qe.warriors[3]!.id, patch: { visibility: "dm" } });
     await create(qe.snik, "all");
     await waitFor("the warriors and Snik in the DM's view", () => [...qe.warriors, qe.snik].every((t) => dmSocket.state?.tokens[t.id]) || null);
     // The device's recent conditions are read once a page loads (tokens/recentConditions.ts), so a reload starts them empty.
@@ -727,7 +729,7 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
       dm.evaluate(() => (globalThis as unknown as { document: { activeElement: { getAttribute(n: string): string | null } | null } }).document.activeElement?.getAttribute("data-bar-mode") ?? null),
     );
     const names = (await group.textContent()) ?? "";
-    const at = qe.warriors.map((w) => names.indexOf(`Goblin Warrior ${w.number}`));
+    const at = qe.warriors.map((_w, i) => names.indexOf(`Goblin Warrior ${i + 1}`));
     assert.ok(at.every((n) => n >= 0) && at.every((n, i) => i === 0 || n > at[i - 1]!), `the group names the four in number order: ${names}`);
 
     // The group bar's Save opens the group save page for the four, with its own ability picker.

@@ -12,6 +12,7 @@ import { build } from "vite";
 import { chromium, request as playwrightRequest, type APIRequestContext, type Browser, type BrowserContext, type ElementHandle, type Locator, type Page, type Route, type WebSocketRoute } from "playwright-core";
 import { ddbSheetUrl } from "../shared/ddb/link.ts";
 import { uuidv7 } from "../shared/ids.ts";
+import { boardLabel, numberScope, previewNumbers } from "../shared/numbering.ts";
 import { readDdbCharacter } from "../shared/ddb/read.ts";
 import { SKILLS } from "../shared/rules/skills.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monsters.ts";
@@ -2134,7 +2135,8 @@ async function patDiceScreens(sweep: Sweep, page: Page): Promise<void> {
  * an Adult Black Dragon's roll modes, card and every group unfolded,
  * Recent rolls, the sticky line after a roll, three selected with their
  * card and groups, and the notice of a group save left open. The dragon
- * stands on the map for these screens only.
+ * stands on the map for these screens only, made again each pass, so it
+ * reads the number the table gives it (dmName).
  */
 async function dmDiceScreens(sweep: Sweep, page: Page): Promise<void> {
   await ops.send({ t: "token.create", token: { id: run.ids.dragon, sceneId: run.sceneId, size: "huge", visibility: "all", kind: "monster", name: "Adult Black Dragon", ...DRAGON_AT, disposition: "hostile", actor: { inline: actor({ srdId: "adult-black-dragon" }) } } });
@@ -2146,11 +2148,11 @@ async function dmDiceScreens(sweep: Sweep, page: Page): Promise<void> {
     if (await visible(none)) await none.click();
     const done = page.getByRole("button", { name: "Done", exact: true });
     if (await visible(done)) await done.click();
-    const bar = await selectToken(page, "Adult Black Dragon", { x: DRAGON_AT.x + 1, y: DRAGON_AT.y + 1 });
+    const bar = await selectToken(page, dmName(run.ids.dragon), { x: DRAGON_AT.x + 1, y: DRAGON_AT.y + 1 });
     if (!bar) return sweep.missing(page, "dp-card-dragon", "a tap on the dragon opened no window");
     await (await barControl(bar, "Roll")).click();
     const host = await openDice(page);
-    await host.getByRole("region", { name: "Rolls for Adult Black Dragon" }).waitFor();
+    await host.getByRole("region", { name: `Rolls for ${dmName(run.ids.dragon)}` }).waitFor();
     await host.getByRole("button", { name: /^Rend/ }).first().waitFor();
     await unfoldAll(host.locator("[data-roll-options]"));
     await unfoldAll(host.locator("[data-dice-recent]"));
@@ -2170,7 +2172,7 @@ async function dmDiceScreens(sweep: Sweep, page: Page): Promise<void> {
 
     // Three selected: the dragon, still selected with its window open, the goblin and the kobold. A second tap on the dragon would let it go.
     await closeDiceSheet(page);
-    const again = page.getByRole("dialog", { name: "Adult Black Dragon actions" });
+    const again = page.getByRole("dialog", { name: `${dmName(run.ids.dragon)} actions` });
     if (!(await showsWithin(again, 3_000))) return sweep.missing(page, "dp-several", "the dragon's window closed with the Dice sheet");
     await (await barControl(again, "Multi-select")).click();
     // Two more creatures where the map shows them: the dragon's window covers some cells at some sizes.
@@ -2211,6 +2213,19 @@ async function dmDiceScreens(sweep: Sweep, page: Page): Promise<void> {
 // ------------------------------------------------------------ the combat controls (docs/design/design-v1-combat-controls.md 9)
 
 const RED_DRAGON = "Adult Red Dragon";
+/**
+ * A combat creature's name as the DM's board reads it now. Each pass makes
+ * the dragon and the troll again after the last pass deleted them, and the
+ * table never gives a deleted creature's number again, so from the second
+ * pass they read "Adult Red Dragon 2", "Troll 2" and on.
+ */
+function dmName(tokenId: string): string {
+  const state = dmSocket.state!;
+  const t = state.tokens[tokenId]!;
+  return boardLabel(previewNumbers(state, numberScope(state, t)), t, "dm");
+}
+const redDragon = () => dmName(run.ids.redDragon);
+const troll = () => dmName(run.ids.troll);
 /** The troll's cells, in the board's corner, clear of the traps and the dragon. */
 const TROLL_AT = { x: 1, y: 11 };
 /** Thorn's class resources: Rage from a preset read at level 5, so his level of 7 asks to update it, and a pool. */
@@ -2535,11 +2550,11 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
     await escapeAll(page);
   } else await sweep.missing(page, "cr-section-panel", "a tap on Thorn opened no window");
 
-  const { tracker, group } = await rowUses(page, RED_DRAGON);
+  const { tracker, group } = await rowUses(page, redDragon());
   await sweep.measure(page, "cu-row-uses", group);
   // The dragon's value is set, so its row's Roll waits in the options just opened (Row.tsx), its menu over the row.
-  const rowRoll = tracker.getByRole("button", { name: new RegExp(`^Roll [+−-]\\d+ Initiative for ${RED_DRAGON}, replacing \\d+$`) }).first();
-  await rollMenuScreen(sweep, page, "dpf1-menu-tracker", rowRoll, new RegExp(`^Roll options for Roll [+−-]\\d+ Initiative for ${RED_DRAGON}$`), rowRoll.locator("xpath=ancestor::li[1]"));
+  const rowRoll = tracker.getByRole("button", { name: new RegExp(`^Roll [+−-]\\d+ Initiative for ${redDragon()}, replacing \\d+$`) }).first();
+  await rollMenuScreen(sweep, page, "dpf1-menu-tracker", rowRoll, new RegExp(`^Roll options for Roll [+−-]\\d+ Initiative for ${redDragon()}$`), rowRoll.locator("xpath=ancestor::li[1]"));
   // Auto Initiative, its re-roll on so it has dice to roll, then off as it was.
   // Auto Initiative is the tracker's own section, outside the round's.
   const reroll = page.getByRole("checkbox", { name: "Re-roll monsters that have a value" }).filter({ visible: true }).first();
@@ -2564,18 +2579,18 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
   consoles.dm.expectSocketFailures = false;
   await closeSheets(page);
 
-  const dragon = await barUses(page, RED_DRAGON, { x: DRAGON_AT.x + 1, y: DRAGON_AT.y + 1 });
+  const dragon = await barUses(page, redDragon(), { x: DRAGON_AT.x + 1, y: DRAGON_AT.y + 1 });
   if (dragon) {
     await sweep.measure(page, "cu-bar-drawer", dragon.drawer);
     await closeBar(dragon.bar);
   } else await sweep.missing(page, "cu-bar-drawer", "a tap on the dragon opened no window");
 
   // The dragon's Uses in its Token panel, each count as pips at its title line's right end (docs/design/design-v1-monster-uses.md 3.1).
-  const dragonBar = await selectToken(page, RED_DRAGON, { x: DRAGON_AT.x + 1, y: DRAGON_AT.y + 1 });
+  const dragonBar = await selectToken(page, redDragon(), { x: DRAGON_AT.x + 1, y: DRAGON_AT.y + 1 });
   if (dragonBar) {
     await (await barControl(dragonBar, "Details")).click();
     const panel = page.getByRole("tabpanel", { name: sideTabName("Token") }).or(page.getByRole("region", { name: "Token", exact: true }));
-    await panel.getByRole("heading", { name: RED_DRAGON }).first().waitFor();
+    await panel.getByRole("heading", { name: redDragon() }).first().waitFor();
     const combat = panel.getByRole("button", { name: "Combat", exact: true });
     if ((await combat.getAttribute("aria-expanded")) === "false") await combat.click();
     const section = resourcesSection(panel);
@@ -2587,14 +2602,14 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
   } else await sweep.missing(page, "cu-panel-uses", "a tap on the dragon opened no window");
 
   // The row's chips for what the dragon spent, on their own line under its LA and LR.
-  const chips = (await openTracker(page)).locator("li[data-entry-row]").filter({ has: page.getByRole("button", { name: `${RED_DRAGON} options` }) }).locator("[data-spent-chips]");
+  const chips = (await openTracker(page)).locator("li[data-entry-row]").filter({ has: page.getByRole("button", { name: `${redDragon()} options` }) }).locator("[data-spent-chips]");
   await chips.getByText("Fire Breath used", { exact: true }).waitFor();
   await chips.scrollIntoViewIfNeeded();
   await sweep.measure(page, "cu-row-chips", chips);
   await closeSheets(page);
 
   await turnTo(run.fight.dragon);
-  const recharge = await alertCard(page, `Fire Breath can recharge (5–6). ${RED_DRAGON}`);
+  const recharge = await alertCard(page, `Fire Breath can recharge (5–6). ${redDragon()}`);
   if (recharge) {
     await sweep.measure(page, "cu-recharge", recharge);
     // Rolled, the card says how with Done (4.5).
@@ -2604,22 +2619,22 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
     await sweep.measure(page, "cu-recharge-rolled", recharge);
   } else await sweep.missing(page, "cu-recharge", "the dragon's turn showed no recharge card");
   await escapeAll(page);
-  let turn = await alertCard(page, `${RED_DRAGON}'s turn`);
+  let turn = await alertCard(page, `${redDragon()}'s turn`);
   if (turn && (await turn.getAttribute("data-turn-folded")) !== null) {
     await sweep.measure(page, "cu-turn-folded", turn);
-    await turn.getByRole("button", { name: `Show ${RED_DRAGON}'s turn` }).click();
-    turn = await alertCard(page, `${RED_DRAGON}'s turn`);
+    await turn.getByRole("button", { name: `Show ${redDragon()}'s turn` }).click();
+    turn = await alertCard(page, `${redDragon()}'s turn`);
   }
   if (turn) {
     await sweep.measure(page, "cu-turn", turn);
     // Folded back where it was folded, so the bar below decides its form.
-    const collapse = turn.getByRole("button", { name: `Collapse ${RED_DRAGON}'s turn` });
+    const collapse = turn.getByRole("button", { name: `Collapse ${redDragon()}'s turn` });
     if (await visible(collapse)) await collapse.click();
   } else await sweep.missing(page, "cu-turn", "the dragon's turn showed no turn card");
   await escapeAll(page);
   // Under the recharge card, then alone once Done puts that card away.
   await turnBesideBar(sweep, page);
-  const done = await alertCard(page, `Fire Breath can recharge (5–6). ${RED_DRAGON}`);
+  const done = await alertCard(page, `Fire Breath can recharge (5–6). ${redDragon()}`);
   if (done) {
     await done.getByRole("button", { name: "Done", exact: true }).click();
     await done.waitFor({ state: "detached" });
@@ -2628,13 +2643,13 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
   await turnBesideBar(sweep, page);
 
   await turnTo(run.fight.troll);
-  const regeneration = await alertCard(page, "Regeneration for Troll");
+  const regeneration = await alertCard(page, `Regeneration for ${troll()}`);
   if (regeneration) {
-    await regeneration.getByText("Troll is at 0 HP and regenerates 15 HP.", { exact: true }).waitFor();
+    await regeneration.getByText(`${troll()} is at 0 HP and regenerates 15 HP.`, { exact: true }).waitFor();
     await sweep.measure(page, "cu-regeneration", regeneration);
   } else await sweep.missing(page, "cu-regeneration", "the troll's turn at 0 HP showed no Regeneration card");
   await escapeAll(page);
-  const waits = await alertCard(page, "Death save for Troll");
+  const waits = await alertCard(page, `Death save for ${troll()}`);
   if (waits) {
     await waits.getByRole("status").getByText("Waiting for Regeneration", { exact: true }).waitFor();
     await sweep.measure(page, "cu-death-save-waits", waits);
@@ -2642,21 +2657,21 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
   await escapeAll(page);
 
   // Skipped, Regeneration leaves the troll's turn card a row with Reopen, and its death save rolls.
-  const skip = await alertCard(page, "Regeneration for Troll");
+  const skip = await alertCard(page, `Regeneration for ${troll()}`);
   if (skip) await skip.getByRole("button", { name: "Skip", exact: true }).click();
   await waitFor("Regeneration skipped", () => (trollRecord()?.settled?.regeneration?.state === "skipped" ? true : null));
   await escapeAll(page);
-  let trollTurn = await alertCard(page, "Troll's turn");
+  let trollTurn = await alertCard(page, `${troll()}'s turn`);
   if (trollTurn && (await trollTurn.getAttribute("data-turn-folded")) !== null) {
-    await trollTurn.getByRole("button", { name: "Show Troll's turn" }).click();
-    trollTurn = await alertCard(page, "Troll's turn");
+    await trollTurn.getByRole("button", { name: `Show ${troll()}'s turn` }).click();
+    trollTurn = await alertCard(page, `${troll()}'s turn`);
   }
   if (trollTurn) {
     await trollTurn.getByRole("button", { name: "Reopen: Regeneration skipped" }).waitFor();
     await sweep.measure(page, "cu-turn-skipped", trollTurn);
   } else await sweep.missing(page, "cu-turn-skipped", "a skipped Regeneration left no turn card");
   await escapeAll(page);
-  const rolled = await alertCard(page, "Death save for Troll");
+  const rolled = await alertCard(page, `Death save for ${troll()}`);
   if (rolled) {
     await rolled.getByRole("button", { name: "Roll", exact: true }).click();
     await rolled.getByRole("status").getByText(/^Rolled \d+/).waitFor();
@@ -2670,9 +2685,9 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
   await ops.send({ t: "actor.hp", target: { tokenId: run.ids.troll }, change: { kind: "damage", amount: 5, types: ["fire"] } });
   await turnTo(run.fight.thorn);
   await turnTo(run.fight.troll);
-  const alive = await alertCard(page, "Regeneration for Troll");
+  const alive = await alertCard(page, `Regeneration for ${troll()}`);
   if (alive) {
-    await alive.getByText("Troll regenerates 15 HP.", { exact: true }).waitFor();
+    await alive.getByText(`${troll()} regenerates 15 HP.`, { exact: true }).waitFor();
     await alive.getByText("Recorded Fire damage may stop Regeneration.", { exact: true }).waitFor();
     await sweep.measure(page, "cu-regeneration-alive", alive);
   } else await sweep.missing(page, "cu-regeneration-alive", "the troll's turn below its maximum showed no Regeneration card");
@@ -2721,7 +2736,7 @@ async function turnBesideBar(sweep: Sweep, page: Page): Promise<void> {
   // Where the column stands across, read before the bar opens, since the card may leave it.
   const lane = (await card.count()) > 0 ? await card.first().boundingBox() : null;
   if (!lane || !(await canvasAt(page, { x: DRAGON_AT.x + 1, y: DRAGON_AT.y + 1 }))) return;
-  const bar = await selectToken(page, RED_DRAGON, { x: DRAGON_AT.x + 1, y: DRAGON_AT.y + 1 });
+  const bar = await selectToken(page, redDragon(), { x: DRAGON_AT.x + 1, y: DRAGON_AT.y + 1 });
   if (!bar) return;
   // The card's form follows the bar's box once both are drawn.
   await page.waitForTimeout(400);
@@ -11171,10 +11186,10 @@ export function qolBarTests(): void {
   });
 }
 
-/** Two of the SRD's Goblin Warriors beside Thorn, for the turn card's attacks, Apply to, All of a kind and the group save (audit Q1, Q2, Q7, Q8). */
+/** Two of the SRD's Goblin Warriors beside Thorn, for the turn card's attacks, Apply to, All of a kind and the group save (audit Q1, Q2, Q7, Q8). They read the numbers the table gives them (dmName). */
 const QOL_WARRIORS = [
-  { id: randomUUID(), number: 1, name: "Goblin Warrior 1", at: { x: 8, y: 6 } },
-  { id: randomUUID(), number: 2, name: "Goblin Warrior 2", at: { x: 9, y: 5 } },
+  { id: randomUUID(), at: { x: 8, y: 6 } },
+  { id: randomUUID(), at: { x: 9, y: 5 } },
 ] as const;
 
 /** Three handout pictures for Handouts' Recent, uploaded once for the run: Recent keeps one entry for each picture. */
@@ -11223,10 +11238,10 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
   await escapeAll(page);
 
   // The turn card: folded to its row under 600 px, opened by Show (audit Q1).
-  let card = await alertCard(page, `${w1.name}'s turn`);
+  let card = await alertCard(page, `${dmName(w1.id)}'s turn`);
   if (card && (await card.getAttribute("data-turn-folded")) !== null) {
-    await card.getByRole("button", { name: `Show ${w1.name}'s turn` }).click();
-    card = await alertCard(page, `${w1.name}'s turn`);
+    await card.getByRole("button", { name: `Show ${dmName(w1.id)}'s turn` }).click();
+    card = await alertCard(page, `${dmName(w1.id)}'s turn`);
   }
   if (card) {
     const attacks = card.locator("[data-card-attacks]");
@@ -11239,14 +11254,14 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
       await card.locator("[data-apply-to]").first().waitFor();
       await sweep.measure(page, "qe-card-attacks", card);
     } else await sweep.missing(page, "qe-card-attacks", "the warrior's turn card lists no attacks");
-    const collapse = card.getByRole("button", { name: `Collapse ${w1.name}'s turn` });
+    const collapse = card.getByRole("button", { name: `Collapse ${dmName(w1.id)}'s turn` });
     if (await visible(collapse)) await collapse.click();
   } else await sweep.missing(page, "qe-card-attacks", "the warrior's turn showed no turn card");
   await escapeAll(page);
 
   // The Dice panel's newest roll: a formula with the warrior selected offers the selection (audit Q2).
   if (await canvasAt(page, w2.at)) {
-    const bar = await selectToken(page, w2.name, w2.at);
+    const bar = await selectToken(page, dmName(w2.id), w2.at);
     if (bar) {
       const dice = await openDice(page);
       const field = dice.getByLabel("Dice formula", { exact: true });
@@ -11284,7 +11299,7 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
 
   // The warrior's bar: All of a kind and Conditions with Recent first (audit Q7, Q13), then the token panel's picker.
   if (await canvasAt(page, w1.at)) {
-    const bar = await selectToken(page, w1.name, w1.at);
+    const bar = await selectToken(page, dmName(w1.id), w1.at);
     if (bar) {
       const all = bar.getByRole("button", { name: "All 2 Goblin Warriors", exact: true });
       if (!(await visible(all))) await expandBar(bar);
@@ -11318,7 +11333,7 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
         await escapeAll(page);
       } else await sweep.missing(page, "qe-panel-conditions", "the warrior's bar has no Details");
       if (!(await visible(bar))) {
-        if (!(await selectToken(page, w1.name, w1.at))) sweep.lines.push(`${sweep.at} qe-group-bar: the warrior's bar did not open again`);
+        if (!(await selectToken(page, dmName(w1.id), w1.at))) sweep.lines.push(`${sweep.at} qe-group-bar: the warrior's bar did not open again`);
       }
       if ((await visible(bar)) && !(await visible(all))) await expandBar(bar);
       if (await visible(all)) {
@@ -11459,7 +11474,7 @@ export function fu52Tests(): void {
     const lines: string[] = [];
     await freshDm();
     const twins = [randomUUID(), randomUUID()];
-    for (const [i, id] of twins.entries()) await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", number: i + 1, size: "medium", x: 8 + i, y: 6, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
+    for (const [i, id] of twins.entries()) await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", size: "medium", x: 8 + i, y: 6, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
     try {
       if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
       await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.ids.thorn, value: 12 }, ...twins.map((id) => ({ id: randomUUID(), tokenId: id, value: 7 }))] });
@@ -11494,7 +11509,7 @@ export function fu52Tests(): void {
     await freshDm();
     const warrior = QOL_WARRIORS[0];
     await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { level: 5, stats: FU52_WEAPONS } });
-    await ops.send({ t: "token.create", token: { id: warrior.id, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", number: warrior.number, size: "medium", ...warrior.at, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
+    await ops.send({ t: "token.create", token: { id: warrior.id, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", size: "medium", ...warrior.at, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
     await ops.send({ t: "room.update", settings: { playersApplyDamage: true } });
     try {
       await restartFight();
@@ -11555,7 +11570,7 @@ export function qolPanelTests(): void {
     const lines: string[] = [];
     try {
       if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-      for (const w of QOL_WARRIORS) await ops.send({ t: "token.create", token: { id: w.id, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", number: w.number, size: "medium", ...w.at, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
+      for (const w of QOL_WARRIORS) await ops.send({ t: "token.create", token: { id: w.id, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", size: "medium", ...w.at, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
       await ops.send({ t: "encounter.start", entries: [{ id: fightId, tokenId: QOL_WARRIORS[0].id, value: 20 }, { id: randomUUID(), tokenId: run.ids.thorn, value: 10 }, { id: randomUUID(), tokenId: QOL_WARRIORS[1].id, value: 5 }] });
       await ops.send({ t: "encounter.next" });
       await waitFor("the warrior's turn", () => (dmSocket.state?.encounter?.activeEntryId === fightId ? true : null));

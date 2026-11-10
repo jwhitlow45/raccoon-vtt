@@ -2063,7 +2063,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
      * goes unmeasured here (FU31 review F4).
      */
     const bosses = [
-      { id: randomUUID(), entryId: "fu31-boss-3", name: "Goblin Boss", hidden: false },
+      // A name no earlier step used: the table never gives a deleted creature's number again, so a second Goblin Boss would read "Goblin Boss 2".
+      { id: randomUUID(), entryId: "fu31-boss-3", name: "Orc Captain", hidden: false },
       { id: randomUUID(), entryId: "fu31-boss-4", name: "Goblin Warlord", hidden: true },
     ];
     // Hidden, Readied and its own Reaction used, under Bree's row.
@@ -2129,7 +2130,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const order = dmSocket.state?.meta.settings.playersSeeOrder ?? "all";
     // Players see the whole order, so the row is no secret and Lair is its only tag, as live play saw it.
     await ops.send({ t: "room.update", settings: { playersSeeOrder: "all" } });
-    await ops.send({ t: "token.create", token: { id: boss.id, sceneId: run.sceneId, kind: "monster", name: "Goblin Boss", size: "medium", x: 17, y: 15, visibility: "all", disposition: "hostile", actor: { inline: { ...actor(21), legendary: { actionsMax: 10, actionsUsed: 0, resistMax: 10, resistUsed: 1 } } } } });
+    // A name no earlier step used, as in fu31-b.
+    await ops.send({ t: "token.create", token: { id: boss.id, sceneId: run.sceneId, kind: "monster", name: "Troll Elder", size: "medium", x: 17, y: 15, visibility: "all", disposition: "hostile", actor: { inline: { ...actor(21), legendary: { actionsMax: 10, actionsUsed: 0, resistMax: 10, resistUsed: 1 } } } } });
     // Whatever the DM's copy holds yet: a refusal says no fight was left.
     await ops.send({ t: "encounter.end" }).catch(() => {});
     await ops.send({ t: "encounter.start", entries: [{ id: boss.entryId, tokenId: boss.id, value: 18 }, { id: "fu33-bree", tokenId: run.bree.id, value: 12 }] });
@@ -2141,7 +2143,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
         const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
         await setUp(dm, dmCdp, view);
         const tracker = await openTracker(dm);
-        const row = tracker.locator("li[data-entry-row]").filter({ has: dm.getByRole("button", { name: "Goblin Boss options", exact: true }) });
+        const row = tracker.locator("li[data-entry-row]").filter({ has: dm.getByRole("button", { name: "Troll Elder options", exact: true }) });
         const line = row.locator("[data-row-button]");
         for (const tag of ["Lair", "LA 10/10", "LR 9/10"]) await line.getByText(tag, { exact: true }).waitFor();
         await row.scrollIntoViewIfNeeded();

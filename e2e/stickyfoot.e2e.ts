@@ -170,7 +170,7 @@ describe("raccoon-vtt: sticky footers sit on their pane's foot", { timeout: 600_
     const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
     for (const [i, id] of run.goblins.entries()) {
-      await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Goblin", number: i + 1, x: 6 + 2 * i, y: 4, disposition: "hostile", actor: { inline: actor(10, { srdId: "goblin-warrior" }) } } });
+      await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Goblin", x: 6 + 2 * i, y: 4, disposition: "hostile", actor: { inline: actor(10, { srdId: "goblin-warrior" }) } } });
     }
     for (let i = 0; i < 40; i++) await ops.send({ t: "log.chat", text: `Aboleth ${i + 1} is back on their feet.` });
     await waitFor("the chat in the DM's view", () => ((dmSocket.state?.log.length ?? 0) >= 40 ? true : null));

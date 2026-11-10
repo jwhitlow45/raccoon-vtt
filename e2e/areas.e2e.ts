@@ -297,7 +297,7 @@ describe("raccoon-vtt an area from your character", { timeout: 900_000 }, () => 
     await ops.send({ t: "character.create", character: { id: run.thornChar, name: "Thorn", size: "medium", ownerIds: [run.patId], actor: actor() } });
     await ops.send(tokenOp(run.thorn, run.sceneId, { kind: "pc", name: "Thorn", ...AT.thorn, disposition: "ally", actor: { ref: run.thornChar } }));
     for (const [i, id] of run.goblins.entries()) {
-      await ops.send(tokenOp(id, run.sceneId, { kind: "monster", name: "Goblin", number: i + 1, ...AT.goblins[i]!, disposition: "hostile", actor: { inline: actor({ hp: { cur: 7, max: 7, temp: 0 } }) } }));
+      await ops.send(tokenOp(id, run.sceneId, { kind: "monster", name: "Goblin", ...AT.goblins[i]!, disposition: "hostile", actor: { inline: actor({ hp: { cur: 7, max: 7, temp: 0 } }) } }));
     }
     await pat.goto(`${server.origin}/r/${run.roomId}`);
     await kim.goto(`${server.origin}/r/${run.roomId}`);
