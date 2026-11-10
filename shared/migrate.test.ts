@@ -45,6 +45,7 @@ import {
   floorLinksOps,
   FLOOR_LINKS_OP_VERSION,
   FLOOR_LINKS_SNAPSHOT_VERSION,
+  FLOOR_SOURCE_OP_VERSION,
   seatsApart,
   hiddenTowStands,
   stopsStandClear,
@@ -2072,6 +2073,26 @@ describe("op version 58 and snapshot 45, stairs and ladders between floors (docs
   test("a build at 57 and 44 refuses a room from this one, so it never keeps creatures only stairs let reach a floor", () => {
     assert.throws(() => runMigrations(ops[0], 58, 57, opMigrations), /down/);
     assert.throws(() => runMigrations(room({ floorLinks: {} }), 45, 44, snapshotMigrations), /down/);
+  });
+});
+
+describe("op version 59, floors from a file or a dungeon (docs/design/design-v1-floors.md phase 3, 3.3)", () => {
+  const own = { bounds: { w: 40, h: 30 }, background: "#1b1b20", grid: { show: true, color: "#ffffff", opacity: 0.25, lineWidth: 1 }, autoWalls: "off" };
+  const sourced = { t: "scene.create", scene: { id: "n", name: "Tower", bounds: { w: 10, h: 10 } }, floor: { beside: "s1", side: "above", name: "Crypt", own } };
+  const blank = { t: "scene.create", scene: { id: "n", name: "Tower", bounds: { w: 10, h: 10 } }, floor: { beside: "s1", side: "above" } };
+
+  test("keeps stored adds unchanged through the identity step, and the snapshot version stays", () => {
+    assert.equal(FLOOR_SOURCE_OP_VERSION, 59);
+    assert.ok(OP_VERSION >= FLOOR_SOURCE_OP_VERSION);
+    assert.equal(SNAPSHOT_VERSION, FLOOR_LINKS_SNAPSHOT_VERSION, "no stored record changes shape");
+    assert.equal(runMigrations(blank, 58, 59, opMigrations), blank);
+    assert.equal(migrateOp(blank, 58), blank);
+    assert.equal(migrateOp(sourced, 59), sourced);
+    assert.ok(opSchema.safeParse(sourced).success);
+  });
+
+  test("a build at 58 refuses an op from this one, so it never replays a sourced add without its settings", () => {
+    assert.throws(() => runMigrations(sourced, 59, 58, opMigrations), /down/);
   });
 });
 
