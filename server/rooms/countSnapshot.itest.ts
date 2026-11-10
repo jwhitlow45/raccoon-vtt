@@ -15,8 +15,11 @@ import { startEngine, type Engine } from "./testing.ts";
 
 describe("the room count in Postgres", () => {
   let t: Engine;
+  // The rooms' clock, which only the steps move, and the numbers follow it as in production. It starts at the
+  // database's time, since a snapshot prunes covered rows by it.
+  const clock = { now: Date.now() };
   before(async () => {
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { now: () => clock.now, numberClock: () => clock.now, snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
   });
   after(() => t.close());
 
@@ -44,47 +47,55 @@ describe("the room count in Postgres", () => {
     return { roomId, owner, base, dmId };
   }
 
-  test("an old room's first commit, a refusal alone, stores the count and the snapshot at today's version, and a reload resumes from the count", async () => {
+  test("an old room's first commit, a refusal alone, stores the number and the snapshot at today's version, and a reload resumes past the number", async () => {
     const { roomId, owner, base } = await oldRoom();
+    clock.now += 1_000;
     const s = await t.connect(roomId, owner);
     const snap = await s.snapshot("c2");
-    assert.equal(snap.seq, base + 2, "an old room counts on from its last stored seq");
+    assert.ok(snap.seq >= clock.now, "an old room's first read is numbered at the clock");
+    clock.now += 1_000;
     const refused = await s.apply({ t: "undo", head: randomUUID() });
     assert.equal(refused.rejects?.length, 1);
-    assert.equal(refused.seq, base + 3);
+    assert.equal(refused.seq, clock.now, "the refusal takes the clock's number");
+    const refusedAt = clock.now;
     const stored = await t.pool.query<{ pub: string; seq: string; schema_version: number; state: RoomState }>(
       "select r.pub::text, s.seq::text, s.schema_version, s.state from rooms r join room_snapshots s on s.room_id = r.id where r.id = $1",
       [roomId],
     );
     const row = stored.rows[0]!;
-    assert.equal(row.pub, String(base + 3));
+    assert.equal(row.pub, String(refusedAt));
     assert.equal(row.schema_version, SNAPSHOT_VERSION);
     assert.equal(row.seq, String(base + 2), "the snapshot is the batch's state at the batch's seq");
     assert.throws(() => runMigrations(row.state, row.schema_version, COUNT_SNAPSHOT_VERSION - 1, snapshotMigrations), /down/, "an older build refuses it");
 
+    clock.now += 1_000;
     const chat = await s.apply({ t: "log.chat", text: "counted" });
-    assert.equal(chat.seq, base + 4);
+    assert.equal(chat.seq, clock.now);
+    const chatAt = clock.now;
     const ops = await t.pool.query<{ seq: string; pub: string | null; op_version: number }>("select seq::text, pub::text, op_version from room_ops where room_id = $1 order by seq", [roomId]);
     assert.deepEqual(ops.rows, [
       { seq: String(base + 1), pub: null, op_version: COUNT_OP_VERSION - 1 },
       { seq: String(base + 2), pub: null, op_version: COUNT_OP_VERSION - 1 },
-      { seq: String(base + 3), pub: String(base + 4), op_version: OP_VERSION },
+      { seq: String(base + 3), pub: String(chatAt), op_version: OP_VERSION },
     ]);
     const lines = await t.pool.query<{ id: string }>("select id from room_log where room_id = $1 and entry->>'text' = 'counted'", [roomId]);
-    assert.deepEqual(lines.rows.map((r) => r.id), [`${base + 4}:0`]);
+    assert.deepEqual(lines.rows.map((r) => r.id), [`${chatAt}:0`]);
 
     // A refusal after the last row, then a crash: the reload keeps it in the count, not the snapshot's seq.
+    clock.now += 1_000;
     const again = await s.apply({ t: "undo", head: randomUUID() });
-    assert.equal(again.seq, base + 5);
+    assert.equal(again.seq, clock.now);
     await t.manager.unload(roomId, 1012, false);
     await s.waitClosed();
     const loaded = await loadRoom(t.pool, roomId);
     assert.ok(loaded && !loaded.replayFailed);
     assert.equal(loaded.seq, base + 3);
-    assert.equal(loaded.pub, base + 5);
+    assert.equal(loaded.pub, again.seq);
+    clock.now += 1_000;
     const back = await t.connect(roomId, owner);
-    assert.equal((await back.snapshot("c3")).seq, base + 5);
-    assert.equal((await back.apply({ t: "log.chat", text: "after the reload" })).seq, base + 6);
+    assert.ok((await back.snapshot("c3")).seq >= clock.now, "the reload's read is numbered at the clock");
+    clock.now += 1_000;
+    assert.equal((await back.apply({ t: "log.chat", text: "after the reload" })).seq, clock.now);
   });
 
   test("a row at today's version replays at its own number, and one stored without a number stops the replay", async () => {

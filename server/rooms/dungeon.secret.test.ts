@@ -280,7 +280,8 @@ function catchUp(d: Device): void {
 }
 
 async function open(t: TestContext, state: RoomState, clock = { now: T0 }, reader = new FrameReader()): Promise<Twin> {
-  const h = await scopeActor(t, state, { mapStep, now: () => clock.now });
+  // Numbers follow the twins' own clock, as in production, so the frames compare with every number in them.
+  const h = await scopeActor(t, state, { mapStep, now: () => clock.now, numberClock: () => clock.now });
   const who = members(state);
   const dm = await h.connect(who.dm);
   const devices = new Map<string, Device>();

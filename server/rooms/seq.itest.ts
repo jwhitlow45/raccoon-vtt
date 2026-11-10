@@ -185,7 +185,7 @@ const sketch = { t: "drawing.create", drawing: { id: SKETCH, sceneId: "s1", kind
 
 describe("twin rooms on the database give their devices the same frames", () => {
   before(async () => {
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { now: () => clock.now, draw, snapshotOps: 1_000, snapshotIdleMs: 60_000, snapshotJson: heldBuild } } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { now: () => clock.now, numberClock: () => clock.now, draw, snapshotOps: 1_000, snapshotIdleMs: 60_000, snapshotJson: heldBuild } } });
   });
   after(() => t.close());
 
@@ -272,10 +272,13 @@ describe("twin rooms on the database give their devices the same frames", () => 
     const last = (twin: RoomTwin) => numbersIn(twin.watched.at(-1)!.frames).find((g) => g.what === "snapshot")?.n;
     const plainLast = (twin: RoomTwin) => numbersIn(twin.watched.flatMap((w) => w.frames)).filter((g) => g.what === "ev").at(-1)?.n;
     for (const [i, twin] of pair.entries()) {
-      assert.equal(last(twin), plainLast(plain[i]!), `${twin.name}: the snapshot after the last restart carries C1's last number`);
+      assert.ok(last(twin)! >= clock.now && last(twin)! > plainLast(plain[i]!)!, `${twin.name}: the snapshot after the last restart is numbered at its clock, past every number before it`);
       const { rows } = await t.pool.query<{ ids: string[] }>("select array_agg(id order by split_part(id, ':', 1)::bigint, split_part(id, ':', 2)::int) as ids from room_log where room_id = $1", [twin.roomId]);
       const { rows: plainRows } = await t.pool.query<{ ids: string[] }>("select array_agg(id order by split_part(id, ':', 1)::bigint, split_part(id, ':', 2)::int) as ids from room_log where room_id = $1", [plain[i]!.roomId]);
-      assert.deepEqual(rows[0]!.ids, plainRows[0]!.ids, `${twin.name}: the archive's line ids are C1's`);
+      // The rooms ran at other clock times, so their lines compare by place: the same lines, each numbered past the last.
+      const place = (ids: string[]) => ids.map((id) => id.split(":")[1]);
+      assert.deepEqual(place(rows[0]!.ids), place(plainRows[0]!.ids), `${twin.name}: the archive holds C1's lines`);
+      assert.ok(rows[0]!.ids.every((id, k) => k === 0 || Number(id.split(":")[0]) > Number(rows[0]!.ids[k - 1]!.split(":")[0])), `${twin.name}: each line's number is past the last`);
     }
   });
 
@@ -312,7 +315,7 @@ describe("twin rooms on the database give their devices the same frames", () => 
           mocked.mock.restore();
           for (const [i, twin] of pair.entries()) {
             const { state, pub, seq } = actorOf(twin).committed;
-            assert.equal(pub, before[i]! + 1, `${twin.name}: the op's answer moved the count once`);
+            assert.ok(pub === clock.now && pub > before[i]!, `${twin.name}: the op's answer took the clock's number`);
             assert.equal(state.drawings[SKETCH] !== undefined, when === "after", `${twin.name}: the op whole or not at all`);
             // A commit that saves the snapshot prunes the rows it covers, written at the steps' clock, so only the room saved
             // before still holds the op's row.
@@ -371,15 +374,16 @@ describe("twin rooms on the database give their devices the same frames", () => 
     clock.now = Math.max(clock.now, Date.now());
     const back = await t.connect(roomId, owner);
     const snap = await back.snapshot(randomUUID());
-    assert.equal(snap.seq, base + 3, "the room counts on from its last row");
+    assert.ok(snap.seq >= clock.now, "the room's first read is numbered at the clock");
+    clock.now += 1_000;
     const ev = await back.apply({ t: "log.chat", text: "new" });
-    assert.ok(ev.changes.some((c) => c.key === `log:${base + 4}:0`), `the next line is ${base + 4}:0`);
+    assert.ok(ev.changes.some((c) => c.key === `log:${clock.now}:0`), `the next line jumps from the count to the clock, ${clock.now}:0`);
     const stored = await t.pool.query<{ schema_version: number; seq: string }>("select schema_version, seq::text from room_snapshots where room_id = $1", [roomId]);
     assert.equal(stored.rows[0]!.schema_version, SNAPSHOT_VERSION, "the first commit saved the snapshot at today's format");
     const op = await t.pool.query<{ op_version: number; pub: string | null }>("select op_version, pub::text from room_ops where room_id = $1 and seq = $2", [roomId, base + 4]);
-    assert.deepEqual([op.rows[0]?.op_version, op.rows[0]?.pub], [OP_VERSION, String(base + 4)], "the new row carries its number");
+    assert.deepEqual([op.rows[0]?.op_version, op.rows[0]?.pub], [OP_VERSION, String(clock.now)], "the new row carries its number");
     const room = await t.pool.query<{ pub: string | null }>("select pub::text from rooms where id = $1", [roomId]);
-    assert.equal(room.rows[0]!.pub, String(base + 4), "the room's count is stored");
+    assert.equal(room.rows[0]!.pub, String(clock.now), "the room's number is stored");
     back.close();
     await back.waitClosed();
   });
@@ -434,13 +438,13 @@ describe("twin rooms on the database give their devices the same frames", () => 
     const pub = actor.committed.pub;
     clock.now += 1_000;
     assert.equal((await back.apply({ t: "log.chat", text: "read only" })).rejects?.length, 1);
-    assert.equal(actor.committed.pub, pub + 1, "the refusal moved the count");
+    assert.ok(actor.committed.pub === clock.now && actor.committed.pub > pub, "the refusal took the clock's number");
     assert.deepEqual(await read(), before, "and every read is as it was");
     back.close();
     await back.waitClosed();
   });
 
-  test("C18: refusals alone, then a shutdown with its snapshot and a restart, reload with the count that holds them, not the snapshot's seq", async () => {
+  test("C18: refusals alone, then a shutdown with its snapshot and a restart, reload with the number that holds them, not the snapshot's seq", async () => {
     const pair = await twins();
     const room = pair[0];
     const before = t.manager.get(room.roomId)!.committed.pub;
@@ -451,14 +455,15 @@ describe("twin rooms on the database give their devices the same frames", () => 
       assert.equal(ev.rejects?.length, 1, "refused");
     }
     await settle();
-    assert.equal(await room.count(), before + 3, "each refusal moved the stored count");
+    assert.ok((await room.count()) === clock.now && clock.now > before, "the last refusal's number is stored");
     await t.restart();
     const { rows } = await t.pool.query<{ seq: string }>("select seq::text from room_snapshots where room_id = $1", [room.roomId]);
     await room.connect();
     const snap = numbersIn(room.watched.at(-1)!.frames).find((g) => g.what === "snapshot")!.n;
-    assert.equal(snap, before + 3, "the reloaded count holds the refusals");
+    assert.ok(snap >= clock.now, "the reload numbers at or past the refusals");
     assert.notEqual(snap, Number(rows[0]!.seq), "and is not the snapshot's seq");
+    clock.now += 1_000;
     const ev = await room.apply("p1", { t: "log.chat", text: "after" });
-    assert.ok(ev.changes.some((c) => c.key === `log:${before + 4}:0`), "the next line numbers on from the refusals");
+    assert.ok(ev.changes.some((c) => c.key === `log:${clock.now}:0`), "the next line takes the clock's number, past the refusals");
   });
 });

@@ -377,8 +377,14 @@ describe("twin rooms give their devices the same frames", () => {
   });
 
   test("C15: C1 with a restart after each step, each writing its snapshot after the twins' own work differed, or replaying every row, gives the same frames and C1's numbers", async (t) => {
+    // C1 alone, its clock moved on after each step as a restart moves it, so its numbers are the ones to match.
     const plain = await twins(t);
-    await c1(plain);
+    await both(plain, async (twin) => {
+      for (const [who, op] of C1) {
+        await twin.apply(who, op);
+        twin.clock.now += 1_000;
+      }
+    });
     for (const snapshot of [true, false]) {
       const what = `C15, ${snapshot ? "with snapshots" : "replaying the rows"}`;
       const pair = await twins(t);
@@ -391,7 +397,7 @@ describe("twin rooms give their devices the same frames", () => {
       bookkeepingDiffers(pair, what);
       same(pair, what);
       for (const [i, twin] of pair.entries()) {
-        assert.equal(twin.actor.committed.pub, plain[i]!.actor.committed.pub, `${what}: ${twin.name}: the count is C1's without restarts`);
+        assert.equal(twin.db.pub, plain[i]!.db.pub, `${what}: ${twin.name}: the stored number is C1's without restarts`);
         if (snapshot) assert.ok(twin.db.snapshotWrites > 0 && twin.db.rows.every((r) => r.seq > twin.db.snapshot.seq), `${what}: ${twin.name}: the snapshots pruned the rows they cover`);
         else assert.ok(twin.db.snapshotWrites === 0 && twin.db.rows.length > C1.length, `${what}: ${twin.name}: every restart replayed the rows`);
       }
@@ -506,12 +512,12 @@ describe("an op that faults before its install or after it", () => {
             assert.equal(state.drawings[SKETCH], undefined, `${twin.name}: nothing of the op`);
             assert.equal(stored.length, 0, `${twin.name}: no row`);
             assert.equal(seq, before[i]!.seq, `${twin.name}: seq did not move`);
-            assert.equal(pub, before[i]!.pub + 1, `${twin.name}: the refusal moved the count once`);
+            assert.equal(pub, twin.clock.now, `${twin.name}: the refusal took the clock's number`);
             assert.ok(twin.clients.p1.sent.some((m) => m.t === "ev" && m.rejects?.some((r) => r.n === twin.clients.p1.n)), `${twin.name}: P1 was told`);
           } else {
             assert.ok(state.drawings[SKETCH], `${twin.name}: the whole op`);
             assert.equal(stored.length, 1, `${twin.name}: its row once`);
-            assert.equal(pub, before[i]!.pub + 1, `${twin.name}: the op took the count's next number`);
+            assert.equal(pub, twin.clock.now, `${twin.name}: the op took the clock's number`);
             // The row is still there unless the commit carried the snapshot, which then holds the op.
             if (barrier) assert.equal(twin.db.rows.find((r) => (r.op as { t: string }).t === "drawing.create")?.pub, pub, `${twin.name}: its row carries that number`);
             assert.ok(twin.clients.dm.sent.slice(dmFrom[i]).some(drawn), `${twin.name}: the DM's device got the drawing at once`);
@@ -675,7 +681,7 @@ describe("batches split by answers, whatever the room does on its own", () => {
     }
   });
 
-  test("C28: a tick at 0 ms and P1's chats at 15 and 25 ms commit together at 35 ms, as with no tick", async (t) => {
+  test("C28: a tick at 0 ms and P1's chats at 15 and 25 ms commit at the clock's 20 and 40 ms ticks, as with no tick", async (t) => {
     const pair = await twins(t, { music: true }, { roomSound: true, batchMs: 20 });
     const flush = async () => {
       for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
@@ -701,12 +707,14 @@ describe("batches split by answers, whatever the room does on its own", () => {
         twin.clock.now += 10;
         chat("at 25");
         await flush();
-        t.mock.timers.tick(9);
+        t.mock.timers.tick(14);
+        twin.clock.now += 14;
         await flush();
-        assert.deepEqual(acked(), [], `${twin.name}: nothing committed by 34 ms (${ticked} queued)`);
+        assert.deepEqual(acked().map((m) => m.acks), [[p1.n - 1]], `${twin.name}: the first chat at the 20 ms tick, the second not by 39 ms (${ticked} queued)`);
         t.mock.timers.tick(1);
+        twin.clock.now += 1;
         await flush();
-        assert.deepEqual(acked().map((m) => m.acks), [[p1.n - 1, p1.n]], `${twin.name}: both chats in one batch at 35 ms`);
+        assert.deepEqual(acked().map((m) => m.acks), [[p1.n - 1], [p1.n]], `${twin.name}: the second chat at the 40 ms tick`);
       } finally {
         t.mock.timers.reset();
       }

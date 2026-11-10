@@ -38,8 +38,10 @@ import { scopeObserver, ScopeClient, StoredRoomDb, until, type StoredRow } from 
  * class holds a square of room Q, the passage or beside them, every frame
  * each got is the same in both twins (I2). After every event, in every
  * run:
- * - I1: the count, the committed count and the stored `rooms.pub` are one
- *   number, the same in both twins.
+ * - I1: the stored `rooms.pub` is the same in both twins, and at most the
+ *   number the last frames carried, since a read hands out a number the
+ *   room does not store, and so does the music's tick heard only on the
+ *   DM's devices, which is why those numbers are not compared.
  * - I3: on each device a frame's `seq` never goes down, across page and
  *   room reloads, and no number a frame carries is above the newest `seq`.
  * - I4: every row the room stored on its own carries the count at its
@@ -434,9 +436,8 @@ async function run(t: TestContext, seed: number, steps: number, counts: Counts):
       counts.splits++;
     }
     // I1.
-    const pubs = pair.map((twin) => twin.actor.committed.pub);
-    assert.equal(pubs[0], pubs[1], `${where}: the twins' counts`);
-    for (const twin of pair) assert.equal(twin.db.pub, twin.actor.committed.pub, `${where}: ${twin.name}'s stored count is its count`);
+    assert.equal(pair[0].db.pub, pair[1].db.pub, `${where}: the twins' stored numbers`);
+    for (const twin of pair) assert.ok((twin.db.pub ?? 0) <= twin.actor.committed.pub, `${where}: ${twin.name}'s stored number is at most the number it handed out`);
     // The boundary, from the server's layers alone: P1's class and the display's, the party's, have held no square of Q or the passage.
     const states = pair.map((twin) => twin.actor.committed.state);
     for (const layer of new Set([classOfMember(states[0]!, "p1"), classOfMember(states[1]!, "p1"), null])) {
