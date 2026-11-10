@@ -194,23 +194,54 @@ export function wallInside(state: Pick<RoomState, "scenes" | "buildChunks">, sce
   const scene = ownEntry(state.scenes, sceneId);
   if (scene === undefined) return false;
   const stored = sceneWalls(scene, state.buildChunks).stored;
-  const g = sceneGrid(scene);
-  const crosses = isHex(g) ? hexRegion(g, rect) : (ax: number, ay: number, bx: number, by: number) => crossesInterior(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, ax, ay, bx, by);
+  const { box, crosses } = endRegion(sceneGrid(scene), rect);
+  const xy = stored.xy;
   for (let k = 0; k < stored.n; k++) {
     if ((stored.tags[k]! & RAISED) !== 0) continue;
-    if (crosses(stored.xy[4 * k]!, stored.xy[4 * k + 1]!, stored.xy[4 * k + 2]!, stored.xy[4 * k + 3]!)) return true;
+    const ax = xy[4 * k]!;
+    const ay = xy[4 * k + 1]!;
+    const bx = xy[4 * k + 2]!;
+    const by = xy[4 * k + 3]!;
+    // The floor check asks this of every end on every op that names the scene's floors, a token's move too, and
+    // nearly every wall lies far from the end: one whose box misses the squares' box cannot cross them, so the
+    // exact test runs only for the few beside them (FL2-OPUS-3, scripts/bench-floor-links.ts).
+    if ((ax < box.x0 && bx < box.x0) || (ax > box.x1 && bx > box.x1) || (ay < box.y0 && by < box.y0) || (ay > box.y1 && by > box.y1)) continue;
+    if (crosses(ax, ay, bx, by)) return true;
   }
   return false;
 }
 
+/** A box in the walls' units, and the test of a wall segment against the squares inside it. */
+export type EndRegion = { box: { x0: number; y0: number; x1: number; y1: number }; crosses: (ax: number, ay: number, bx: number, by: number) => boolean };
+
+/**
+ * `wallInside`'s exact test of one segment against an end's squares, and
+ * a box that holds them whole: `crosses` is false for every segment with
+ * both ends on one outer side of the box (floorLinks.prop.test.ts).
+ */
+export function endRegion(g: Grid, rect: CellRect): EndRegion {
+  if (isHex(g)) return hexRegion(g, rect);
+  const box = { x0: rect.x, y0: rect.y, x1: rect.x + rect.w, y1: rect.y + rect.h };
+  return { box, crosses: (ax, ay, bx, by) => crossesInterior(box.x0, box.y0, box.x1, box.y1, ax, ay, bx, by) };
+}
+
 /** The test of `wallInside` on hexes: a segment that enters a hex of the squares, or lies along a side two of them share. */
-function hexRegion(g: HexGrid, rect: CellRect): (ax: number, ay: number, bx: number, by: number) => boolean {
+function hexRegion(g: HexGrid, rect: CellRect): EndRegion {
   const held = new Set(rectKeys(rect));
   const hexes: Hex[] = [...held].map((key) => {
     const [col, row] = key.split(",").map(Number);
     return { col: col!, row: row! };
   });
   const polygons = hexes.map((h) => hexCorners(g, h).map((c) => cornerAt(g, c)));
+  const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for (const poly of polygons) {
+    for (const p of poly) {
+      box.x0 = Math.min(box.x0, p.x);
+      box.y0 = Math.min(box.y0, p.y);
+      box.x1 = Math.max(box.x1, p.x);
+      box.y1 = Math.max(box.y1, p.y);
+    }
+  }
   // Each side two held hexes share, once, as its two corners.
   const sides: [number, number, number, number][] = [];
   for (const [i, h] of hexes.entries()) {
@@ -225,7 +256,7 @@ function hexRegion(g: HexGrid, rect: CellRect): (ax: number, ay: number, bx: num
       if (held.has(hexKey(across)) && hexKey(h) < hexKey(across)) sides.push([a.x, a.y, b.x, b.y]);
     }
   }
-  return (ax, ay, bx, by) => polygons.some((poly) => crossesConvex(poly, ax, ay, bx, by)) || sides.some(([px, py, qx, qy]) => overlapsAlong(px, py, qx, qy, ax, ay, bx, by));
+  return { box, crosses: (ax, ay, bx, by) => polygons.some((poly) => crossesConvex(poly, ax, ay, bx, by)) || sides.some(([px, py, qx, qy]) => overlapsAlong(px, py, qx, qy, ax, ay, bx, by)) };
 }
 
 /**
