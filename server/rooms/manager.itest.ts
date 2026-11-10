@@ -5,7 +5,7 @@ import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { companionBlock } from "#shared/testutil.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
-import { startEngine, type Engine, type Socket } from "./testing.ts";
+import { numberOf, startEngine, type Engine, type Socket } from "./testing.ts";
 
 /**
  * Loading, unloading and eviction (design 10.5 and 16.2), the snapshot
@@ -130,7 +130,7 @@ describe("idle unload, snapshots and recovery", () => {
 
     const back = await t.connect(roomId, owner);
     const snap = await back.snapshot("c1", 6);
-    assert.equal(snap.seq, 5);
+    numberOf()(snap.seq, 5, "the snapshot's number");
     const state = snap.state as ProjectedState;
     assert.equal(state.tokens[goblinId]?.x, 4);
     assert.equal(state.log.length, 3);
@@ -178,7 +178,7 @@ describe("idle unload, snapshots and recovery", () => {
 
     const back = await t.connect(roomId, owner);
     const snap = await back.snapshot("c1", 4);
-    assert.equal(snap.seq, 6);
+    numberOf()(snap.seq, 6, "the snapshot's number");
     const vitals = (state: ProjectedState, id: string) => {
       const a = state.tokens[id]?.actor;
       assert.ok(a && "inline" in a);
@@ -230,7 +230,7 @@ describe("idle unload, snapshots and recovery", () => {
 
     const back = await t.connect(roomId, owner);
     const snap = await back.snapshot("c1", 4);
-    assert.equal(snap.seq, 6);
+    numberOf()(snap.seq, 6, "the snapshot's number");
     const stops = (state: ProjectedState) => state.tokens[thorn]!.path!.stops.map((stop) => ({ x: stop.x, uncounted: stop.uncounted === true, footprint: stop.footprint }));
     assert.deepEqual(
       stops(snap.state as ProjectedState),
@@ -309,7 +309,7 @@ describe("idle unload, snapshots and recovery", () => {
     const back = await t.connect(roomId, owner);
     const snap = await back.snapshot("c1", 2);
     // The room count stored with the chat's commit, not the seq the replay stopped at (counted.ts).
-    assert.equal(snap.seq, 1);
+    numberOf()(snap.seq, 1, "the snapshot's number");
     back.n = 1;
     const refused = await back.apply({ t: "log.chat", text: "nope" });
     assert.equal(refused.rejects?.[0]?.code, "quota");
@@ -343,7 +343,7 @@ describe("idle unload, snapshots and recovery", () => {
 
     const back = await t.connect(roomId, owner);
     const snap = await back.snapshot("c2");
-    assert.equal(snap.seq, 1);
+    numberOf()(snap.seq, 1, "the snapshot's number");
     assert.equal((snap.state as ProjectedState).members[samId]?.name, "Sam");
     const written = await back.apply({ t: "log.chat", text: "still writable" });
     assert.equal(written.rejects, undefined);

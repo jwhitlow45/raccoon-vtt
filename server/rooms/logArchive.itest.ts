@@ -13,7 +13,7 @@ import { CLOSE } from "./connection.ts";
 import { captureView, compareIds, LogHistory, type HistoryView } from "./logHistory.ts";
 import { LogScanBudget } from "./logScanBudget.ts";
 import { commitBatch, loadRoom, writeSnapshot, type OpRecord } from "./persistence.ts";
-import { failCommits, startEngine, type Engine } from "./testing.ts";
+import { failCommits, lineNumber, startEngine, type Engine } from "./testing.ts";
 
 /**
  * The log archive's writes and what they may decide (design 7.2 and 10.5):
@@ -50,13 +50,14 @@ describe("the log archive", () => {
     const { roomId } = await dm.createRoom("Short disk");
     const socket = await t.connect(roomId, dm);
     await socket.snapshot("dm");
-    const archived = async (seq: number) =>
-      (await t.pool.query<{ n: number }>("select count(*)::int as n from room_log where room_id = $1 and split_part(id, ':', 1) = $2", [roomId, String(seq)])).rows[0]!.n;
-    const ops = async (seq: number) => (await t.pool.query<{ n: number }>("select count(*)::int as n from room_ops where room_id = $1 and seq = $2", [roomId, seq])).rows[0]!.n;
+    const archived = async (number: number) =>
+      (await t.pool.query<{ n: number }>("select count(*)::int as n from room_log where room_id = $1 and split_part(id, ':', 1) = $2", [roomId, String(number)])).rows[0]!.n;
+    const ops = async (number: number) => (await t.pool.query<{ n: number }>("select count(*)::int as n from room_ops where room_id = $1 and pub = $2", [roomId, number])).rows[0]!.n;
+    // The chat's own number, which its row and its line's id carry.
     const chat = async (text: string) => {
       const ev = await socket.apply({ t: "log.chat", text });
       assert.ok(ev.acks?.length, `${text} was acknowledged`);
-      return ev.seq;
+      return lineNumber(ev);
     };
     let answer: () => Promise<boolean> = () => Promise.resolve(true);
     const disk = diskAnswer(() => answer());

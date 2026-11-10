@@ -14,6 +14,7 @@ import { Connection } from "./connection.ts";
 import type { RoomGateway } from "./gateway.ts";
 import type { Pool } from "./persistence.ts";
 import { DAY_MS, ReceiptBook, admissionCost, tagOf, type Receipt } from "./receipts.ts";
+import { STANDING_CLOCK } from "./undoScopeTesting.ts";
 
 /**
  * Receipts and admission (docs/design/design-v1-dice.md 1.2 and 4.4): the book's
@@ -246,6 +247,7 @@ describe("receipts and admission in the actor, randomized (docs/design/design-v1
         grantRecheckMs: 3_600_000,
         roomOpsPerSec: 1_000_000,
         now: () => clock,
+        numberClock: STANDING_CLOCK,
         receiptCaps: CAPS,
         draw: (sides) => {
           draws++;
@@ -280,6 +282,8 @@ describe("receipts and admission in the actor, randomized (docs/design/design-v1
         actor.attach(d.conn);
         const resumeFrom = Math.min(d.nextN, ...d.pending.keys());
         await actor.hello(d.conn, { clientId: d.clientId, resumeFrom });
+        // A device sends ops once its snapshot came, which the batch after the hello answers.
+        for (let i = 0; i < 500 && d.conn.held === null && !d.conn.closed; i++) await new Promise((resolve) => setTimeout(resolve, 1));
       };
 
       /**

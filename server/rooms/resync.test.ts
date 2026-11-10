@@ -18,6 +18,7 @@ import { SnapshotBudget } from "./budgets.ts";
 import { Connection } from "./connection.ts";
 import type { RoomGateway } from "./gateway.ts";
 import type { Pool } from "./persistence.ts";
+import { STANDING_CLOCK } from "./undoScopeTesting.ts";
 
 /**
  * The re-sync's race at the room actor (docs/design/design-v1-resync.md 4 and 5):
@@ -206,7 +207,7 @@ async function play(
     log: quiet,
     budget: new SnapshotBudget(),
     gateway: {} as RoomGateway,
-    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, ...options },
+    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, numberClock: STANDING_CLOCK, ...options },
   });
   assert.ok(actor);
   try {
@@ -214,6 +215,8 @@ async function play(
     const ana = device(actor, setup.ana, "player");
     await actor.hello(dm.conn, { clientId: "c1", resumeFrom: 1 });
     await actor.hello(ana.conn, { clientId: "c2", resumeFrom: 1 });
+    // Devices send ops once their snapshots came, which the batch after the hellos answers.
+    for (let i = 0; i < 500 && (dm.conn.held === null || ana.conn.held === null); i++) await new Promise((r) => setTimeout(r, 2));
     await run({ actor, dm, ana, id: setup.id });
   } finally {
     db.freeze();

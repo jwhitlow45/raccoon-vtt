@@ -10,7 +10,7 @@ import { RoomActor, type ActorDeps } from "./actor.ts";
 import { SnapshotBudget } from "./budgets.ts";
 import type { RoomGateway } from "./gateway.ts";
 import type { AssetFactRow } from "./persistence.ts";
-import { scopeFixture, scopeObserver, ScopeClient, UndoScopeDb, until } from "./undoScopeTesting.ts";
+import { scopeFixture, scopeObserver, ScopeClient, STANDING_CLOCK, StoredRoomDb, UndoScopeDb, until } from "./undoScopeTesting.ts";
 
 /**
  * The server moves the music on (docs/design/design-v1-music.md 6.4) and
@@ -57,8 +57,9 @@ function rows(): AssetFactRow[] {
 
 type Harness = { actor: RoomActor; db: UndoScopeDb; clock: { now: number }; warnings: string[] };
 
-async function load(t: TestContext, state: RoomState, opts: { roomSound?: boolean; lastActiveAt?: number; readOnly?: boolean } = {}): Promise<Harness> {
-  const db = new UndoScopeDb(state);
+/** `pub`: a stored room number to load with, on the clock's own numbers rather than a standing number clock. */
+async function load(t: TestContext, state: RoomState, opts: { roomSound?: boolean; lastActiveAt?: number; readOnly?: boolean; pub?: number } = {}): Promise<Harness> {
+  const db = opts.pub === undefined ? new UndoScopeDb(state) : new StoredRoomDb(state, { pub: opts.pub });
   db.assetRows = rows();
   const clock = { now: T0 };
   const warnings: string[] = [];
@@ -69,7 +70,7 @@ async function load(t: TestContext, state: RoomState, opts: { roomSound?: boolea
     log: { info() {}, warn(_o: unknown, message?: string) { warnings.push(String(message)); }, error() {}, debug() {} } as ActorDeps["log"],
     budget: new SnapshotBudget(),
     gateway: {} as RoomGateway,
-    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, roomSound: opts.roomSound ?? true, now: () => clock.now },
+    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, roomSound: opts.roomSound ?? true, now: () => clock.now, numberClock: opts.pub === undefined ? STANDING_CLOCK : () => clock.now },
   });
   assert.ok(actor);
   t.after(() => actor.shutdown({ code: 1012, snapshot: false }));
@@ -246,5 +247,16 @@ describe("sound's rules where ops arrive (6.2)", () => {
       const ev = await dm.send(op);
       assert.equal(ev.rejects?.[0]?.code, "quota", op.t);
     }
+  });
+});
+
+describe("a room whose numbers lead the clock", () => {
+  test("starts music at the server's clock, not at its numbers an hour ahead", async (t) => {
+    const f = library(playing(null));
+    const h = await load(t, f.state, { pub: T0 + 3_600_000 });
+    const dm = await ScopeClient.open(h.actor, f.dm, "dm", () => h.clock.now);
+    await dm.apply({ t: "music.play", run: "r1", playlistId: "night", order: ["a", "b", "c"], repeat: "all", fade: 5 });
+    assert.equal(h.actor.committed.state.playing?.music?.now.at, T0 + LEAD_MS);
+    assert.ok(h.actor.committed.pub > T0 + 3_600_000, "its numbers counted on from the stored one");
   });
 });

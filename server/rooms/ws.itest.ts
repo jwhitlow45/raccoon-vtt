@@ -9,7 +9,7 @@ import type { ProjectedState } from "#shared/project.ts";
 import { character, companionBlock, customMonster, token } from "#shared/testutil.ts";
 import { MAX_KEPT_REFUSALS, serverMessageSchema, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { sha256 } from "../auth/tokens.ts";
-import { failCommits, Socket, startEngine, type Engine } from "./testing.ts";
+import { failCommits, numberOf, Socket, startEngine, type Engine } from "./testing.ts";
 
 /**
  * The WebSocket flows of design section 18, against the real server on an
@@ -62,7 +62,8 @@ describe("websocket: hello, ops and acks", () => {
     const { roomId } = await dm.createRoom("Sync");
     const s = await t.connect(roomId, dm);
     const snap = await s.snapshot("c1");
-    assert.equal(snap.seq, 0);
+    const pin = numberOf();
+    pin(snap.seq, 0, "the snapshot's number");
     assert.equal(snap.watermark, 0);
     assert.equal(snap.you.role, "dm");
     const state = snap.state as ProjectedState;
@@ -73,7 +74,7 @@ describe("websocket: hello, ops and acks", () => {
     const n = s.op(op);
     const ev = await s.next("ev");
     assert.deepEqual(ev.acks, [n]);
-    assert.equal(ev.seq, 1);
+    pin(ev.seq, 1, "the frame's number");
     const upsert = ev.changes.find((c) => c.key === `token:${(op as { token: { id: string } }).token.id}`);
     assert.ok(upsert && "value" in upsert);
 
@@ -135,7 +136,7 @@ describe("websocket: hello, ops and acks", () => {
     s.close();
   });
 
-  test("a duplicate of a committed op is acked at once with an empty ev", async () => {
+  test("a duplicate of a committed op is acked with an empty ev", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom("Dup");
     const s = await t.connect(roomId, dm);
@@ -143,8 +144,9 @@ describe("websocket: hello, ops and acks", () => {
     const n = s.op({ t: "log.chat", text: "once" });
     await s.next("ev", (m) => m.acks?.includes(n) ?? false);
     s.op({ t: "log.chat", text: "once" }, n);
-    const again = await s.next("ev");
-    assert.deepEqual(again, { t: "ev", seq: 1, changes: [], acks: [n] });
+    const { seq, ...again } = await s.next("ev");
+    numberOf()(seq, 1, "the duplicate's frame");
+    assert.deepEqual(again, { t: "ev", changes: [], acks: [n] });
     const { rows } = await t.pool.query("select count(*)::int as n from room_ops where room_id = $1", [roomId]);
     assert.equal(rows[0].n, 1);
     s.close();
@@ -242,7 +244,7 @@ describe("websocket: reconnects and watermarks", () => {
   });
   after(() => t.close());
 
-  test("a duplicate of a staged op is acked only after the commit, on the client's new socket", async () => {
+  test("a client that reconnects while its op is staged gets its snapshot at the commit, with the op settled, and a resend of it is acked at the next close with no change", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom("Staged");
     const a = await t.connect(roomId, dm);
@@ -251,14 +253,16 @@ describe("websocket: reconnects and watermarks", () => {
     // The batch is open for 400 ms. Reconnect as the same client meanwhile.
     const b = await t.connect(roomId, dm);
     const snap = await b.snapshot("c1", n);
-    assert.equal(snap.watermark, 0);
+    assert.equal(snap.watermark, n);
+    assert.ok(JSON.stringify(snap.state).includes('"first"'), "the snapshot holds the op");
     b.op({ t: "log.chat", text: "first" }, n);
     assert.equal(await b.maybe("ev", () => true, 150), null);
     const ev = await b.next("ev", (m) => m.acks?.includes(n) ?? false);
-    assert.ok(ev.changes.some((c) => c.key.startsWith("log:")));
+    assert.deepEqual(ev.changes, []);
     // The old socket sees the change but never that client's ack.
     const old = await a.next("ev");
     assert.equal(old.acks, undefined);
+    assert.ok(old.changes.some((c) => c.key.startsWith("log:")));
     const { rows } = await t.pool.query("select count(*)::int as n from room_ops where room_id = $1", [roomId]);
     assert.equal(rows[0].n, 1);
     a.close();
@@ -326,7 +330,9 @@ describe("websocket: reconnects and watermarks", () => {
     assert.equal(snap.watermark, 3);
     assert.equal((snap.state as ProjectedState).log.length, 3);
     back.op({ t: "log.chat", text: "m1" }, 2);
-    assert.deepEqual(await back.next("ev"), { t: "ev", seq: 3, changes: [], acks: [2] });
+    const { seq, ...again } = await back.next("ev");
+    numberOf()(seq, 3, "the duplicate's frame");
+    assert.deepEqual(again, { t: "ev", changes: [], acks: [2] });
     back.n = 3;
     await back.apply({ t: "log.chat", text: "m3" });
     const { rows } = await t.pool.query("select count(*)::int as n from room_ops where room_id = $1", [roomId]);
@@ -354,7 +360,7 @@ describe("websocket: commit failures", () => {
       assert.equal(t.manager.degraded(), true);
       assert.deepEqual((await t.app.inject({ method: "GET", url: "/healthz" })).json(), { status: "degraded" });
       const ev = await s.next("ev", (m) => m.acks?.includes(n) ?? false);
-      assert.equal(ev.seq, 1);
+      numberOf()(ev.seq, 1, "the frame's number");
       assert.equal(flaky.remaining(), 0);
       assert.equal(t.manager.degraded(), false);
       assert.equal(await s.maybe("ev", () => true, 200), null);
@@ -371,10 +377,11 @@ describe("websocket: commit failures", () => {
     const { roomId } = await dm.createRoom("Unknown");
     const s = await t.connect(roomId, dm);
     await s.snapshot("c1");
+    const pin = numberOf();
     const flaky = failCommits(t.pool, ["committed"]);
     try {
       const ev = await s.apply({ t: "log.chat", text: "lost answer" });
-      assert.equal(ev.seq, 1);
+      pin(ev.seq, 1, "the first frame");
       assert.equal(flaky.remaining(), 0);
     } finally {
       flaky.restore();
@@ -382,7 +389,7 @@ describe("websocket: commit failures", () => {
     const flaky2 = failCommits(t.pool, ["rolledBack"]);
     try {
       const ev = await s.apply({ t: "log.chat", text: "dropped" });
-      assert.equal(ev.seq, 2);
+      pin(ev.seq, 2, "the second frame");
       assert.equal(flaky2.remaining(), 0);
     } finally {
       flaky2.restore();

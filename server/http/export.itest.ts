@@ -1050,7 +1050,7 @@ describe("an imported log in the archive (shared/logRings.ts)", () => {
       await benSocket.apply({ t: "log.whisper", to: [dmId], text: `Ben whispers ${e}` });
       await hurt(goblin, e * 10 + 3);
       await benSocket.apply({ t: "log.chat", text: `Ben ${e}` });
-      evenings.push(t.manager.get(roomId)!.committed.seq);
+      evenings.push(Math.max(...t.manager.get(roomId)!.committed.state.log.map((line) => Number(line.id.split(":")[0]))));
     }
     const sign = (e: LogEntry) => (e.kind === "event" ? `${e.data?.type} ${(e.data as { amount?: number }).amount ?? ""}` : `${e.kind} ${e.text}`);
     const before = { dm: (await pages(dm, roomId)).map(sign), ana: (await pages(ana, roomId)).map(sign), ben: (await pages(ben, roomId)).map(sign) };

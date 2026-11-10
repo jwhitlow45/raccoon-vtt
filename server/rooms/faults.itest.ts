@@ -5,8 +5,9 @@ import { uuidv7 } from "#shared/ids.ts";
 import type { Op, ServerMessage, ServerOnlyOp } from "#shared/protocol.ts";
 import { Connection } from "./connection.ts";
 import { mapStepOps, memoryGrowth } from "./remember.ts";
-import { failCommits, startEngine, type Engine, type Socket, type TestClient } from "./testing.ts";
+import { failCommits, REAL_NUMBERS, startEngine, type Engine, type Socket, type TestClient } from "./testing.ts";
 import { UndoStacks } from "./undo.ts";
+import { STANDING_CLOCK } from "./undoScopeTesting.ts";
 
 /**
  * A fault while the room engine works, on the real server and Postgres:
@@ -80,13 +81,14 @@ const actorOptions = {
     // A result the step cannot read, which fails past the step's own catch.
     return null as unknown as ReturnType<typeof mapStepOps>;
   },
-  now: () => {
-    // The actor's #reduce reads the clock only once it has staged an op, so this throws past staging.
-    if (faults.staged && /\bat (?:\w+\.)?#reduce \(/.test(new Error().stack ?? "")) {
+  // The op reads the number clock at the queue, and a new batch's timer reads it again only once the op is staged, so
+  // this throws past staging.
+  numberClock: () => {
+    if (faults.staged && /\bat (?:\w+\.)?#scheduleCommit \(/.test(new Error().stack ?? "")) {
       faults.staged = false;
       throw scriptedFault("staged op");
     }
-    return Date.now();
+    return REAL_NUMBERS ? Date.now() : STANDING_CLOCK();
   },
 };
 

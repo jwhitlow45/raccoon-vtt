@@ -10,6 +10,7 @@ import { SnapshotBudget } from "./budgets.ts";
 import { Connection } from "./connection.ts";
 import type { RoomGateway } from "./gateway.ts";
 import type { Pool } from "./persistence.ts";
+import { STANDING_CLOCK } from "./undoScopeTesting.ts";
 
 /**
  * A DM's view as a player in the room actor (docs/design/design-v1-per-player-vision.md
@@ -56,7 +57,7 @@ async function table(budget: SnapshotBudget) {
     log: quiet,
     budget,
     gateway: {} as RoomGateway,
-    options: { batchMs: 1, snapshotIdleMs: 60_000, grantRecheckMs: 60_000 },
+    options: { batchMs: 1, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, numberClock: STANDING_CLOCK },
   };
   const actor = await RoomActor.load(deps);
   assert.ok(actor);

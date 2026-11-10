@@ -175,6 +175,7 @@ describe("several floors on the server (docs/design/design-v1-floors.md 9)", () 
       const conn = new Connection(socket as never, { sessionId: uuidv7(), roomId: r.roomId, memberId: dmId, role: "dm" }, "203.0.113.9");
       assert.ok(actor.attach(conn));
       await actor.hello(conn, { clientId: uuidv7(), resumeFrom: 1 });
+      for (let i = 0; i < 400 && !sent.some((m) => m.t === "snapshot"); i++) await new Promise((resolve) => setTimeout(resolve, 5));
       void actor.op(conn, 1, { t: "log.chat", text: "one" });
       void actor.op(conn, 2, { t: "token.move", tokenId: gargoyle, x, y: 2 });
       const acked = (n: number) => sent.find((m) => m.t === "ev" && (m.acks ?? []).includes(n));

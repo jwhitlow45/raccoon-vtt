@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import { COUNT_OP_VERSION, OP_VERSION } from "#shared/migrate.ts";
+import { retainedSaveOutcome } from "#shared/saveOutcomes.ts";
 import { member } from "#shared/testutil.ts";
 import { clientOps, serverOnlyOps, type OpType } from "#shared/protocol.ts";
 import { twins } from "#shared/secretDoorTestutil.ts";
 import { counted } from "./counted.ts";
 import { forgetSceneOp } from "./remember.ts";
-import { scopeActor, scopeFixture } from "./undoScopeTesting.ts";
+import { restartStored, scopeActor, scopeFixture, StoredRoomDb, storedActor } from "./undoScopeTesting.ts";
 
 /**
  * The room count's classes (counted.ts): which ops move the count, frozen
@@ -82,5 +83,101 @@ describe("the server's own ops", () => {
     assert.equal(h.actor.committed.pub, first.seq);
     const second = await dm.apply({ t: "log.chat", text: "two" });
     assert.equal(second.seq, first.seq + 1);
+  });
+});
+
+/** A multiple of the batch window, so a frozen clock closes each batch at its own reading. */
+const T0 = Date.parse("2026-11-10T20:00:00.000Z");
+
+describe("numbers follow the number clock", () => {
+  test("a standing number clock counts by one and dates lines by the server's clock", async (t) => {
+    const f = scopeFixture();
+    const clock = T0 + 1_234;
+    const h = await scopeActor(t, f.state, { now: () => clock });
+    const dm = await h.connect(f.dm, "dm", () => clock);
+    const first = await dm.apply({ t: "log.chat", text: "one" });
+    const second = await dm.apply({ t: "log.chat", text: "two" });
+    assert.equal(second.seq, first.seq + 1);
+    const lines = h.actor.committed.state.log.slice(-2);
+    assert.deepEqual(lines.map((line) => line.id), [`${first.seq}:0`, `${second.seq}:0`]);
+    assert.deepEqual(lines.map((line) => line.at), [new Date(clock).toISOString(), new Date(clock).toISOString()]);
+  });
+
+  test("on the real clock an answer takes the clock, a line's time is its number, and answers in one millisecond count on by one", async (t) => {
+    const f = scopeFixture();
+    let clock = T0;
+    const h = await storedActor(t, new StoredRoomDb(f.state), { now: () => clock, numberClock: () => clock });
+    // Its snapshot was handed T0, the clock as the hello's batch closed.
+    const dm = await h.connect(f.dm, "dm", () => clock);
+    clock = T0 + 5;
+    const sent = [dm.send({ t: "log.chat", text: "a" }), dm.send({ t: "log.chat", text: "b" })];
+    await Promise.all(sent);
+    const [a, b] = h.actor.committed.state.log.slice(-2);
+    assert.deepEqual([a?.id, b?.id], [`${T0 + 5}:0`, `${T0 + 6}:0`]);
+    assert.deepEqual([a?.at, b?.at], [new Date(T0 + 5).toISOString(), new Date(T0 + 6).toISOString()]);
+    clock = T0 + 900;
+    await dm.apply({ t: "log.chat", text: "c" });
+    assert.equal(h.actor.committed.state.log.at(-1)?.id, `${T0 + 900}:0`);
+  });
+
+  test("a read, then a batch of a cleanup's remember alone, then a restart: the stored number never takes the number the read was handed, and every number after stays above it", async (t) => {
+    const room = twins({ cover: "auto", explore: true }).door;
+    let clock = T0;
+    const options = { now: () => clock, numberClock: () => clock };
+    const db = new StoredRoomDb(room);
+    const h = await storedActor(t, db, options);
+    const dm = await h.connect(room.members.dm1!, "dm", () => clock);
+    clock = T0 + 5;
+    await dm.apply({ t: "log.chat", text: "one" });
+    const stored = db.pub;
+    assert.equal(stored, T0 + 5);
+    // P1 opens the room at 50: a batch of that read alone hands P1 the clock, and stores nothing.
+    clock = T0 + 50;
+    const p1 = await h.connect(room.members.p1!, "player", () => clock);
+    const handed = p1.sent.find((m) => m.t === "snapshot")!.seq;
+    assert.equal(handed, T0 + 50);
+    assert.equal(db.pub, stored);
+    // A cleanup's remember at 60, in a batch of its own: its row and the room's stored number keep the number stored before the read.
+    clock = T0 + 60;
+    const rows = db.rows.length;
+    const forget = forgetSceneOp(h.actor.committed.state, "s1");
+    assert.ok(forget);
+    await h.actor.sys(forget);
+    const [remember] = db.rows.slice(rows);
+    assert.equal((remember?.op as { t?: string }).t, "sys.remember");
+    assert.equal(remember?.pub, stored, "a bookkeeping row's envelope is the stored number");
+    assert.equal(db.pub, stored, "a commit that answered nothing keeps the stored number");
+    // After a restart, P1's reconnect and chat are both above the number it was handed before.
+    const again = await restartStored(t, h, { snapshot: false }, options);
+    clock = T0 + 70;
+    const back = await again.connect(room.members.p1!, "player", () => clock);
+    const reconnected = back.sent.find((m) => m.t === "snapshot")!.seq;
+    const chat = await back.apply({ t: "log.chat", text: "back" });
+    assert.ok(reconnected > handed, `the reconnect's ${reconnected} is above ${handed}`);
+    assert.ok(Number(again.actor.committed.state.log.at(-1)!.id.split(":")[0]) > handed);
+    assert.ok(chat.seq > handed);
+  });
+
+  test("a room that loads with numbers an hour ahead warns once, counts on by one, and dates its lines by the clock", async (t) => {
+    const f = scopeFixture();
+    const clock = T0 + 5;
+    const ahead = clock + 3_600_000;
+    const warnings: { aheadMs?: number; message: string }[] = [];
+    const log = { info() {}, warn(o: { aheadMs?: number }, message?: string) { warnings.push({ ...o, message: String(message) }); }, error() {}, debug() {} };
+    const h = await storedActor(t, new StoredRoomDb(f.state, { pub: ahead }), { now: () => clock, numberClock: () => clock }, log as never);
+    const dm = await h.connect(f.dm, "dm", () => clock);
+    await dm.apply({ t: "log.chat", text: "one" });
+    await dm.apply({ t: "log.chat", text: "two" });
+    const warned = warnings.filter((w) => w.message === "room numbers are ahead of the server's clock: check the clock");
+    assert.deepEqual(warned.map((w) => w.aheadMs), [3_600_000]);
+    const lines = h.actor.committed.state.log.slice(-2);
+    assert.deepEqual(lines.map((line) => line.id), [`${ahead + 1}:0`, `${ahead + 2}:0`]);
+    assert.deepEqual(lines.map((line) => line.at), [new Date(clock).toISOString(), new Date(clock).toISOString()], "an hour ahead is no line's time");
+    // A group save's Apply is dated by the clock too, so its retention runs from now.
+    const id = uuidv7(clock);
+    await dm.apply({ t: "actor.outcome", label: "Fireball", plan: id, page: { id, expectRevision: 0 }, targets: [{ target: { tokenId: f.goblin }, amount: 3 }] });
+    const record = h.actor.committed.state.saveOutcomes?.[id];
+    assert.equal(record?.firstAppliedAt, new Date(clock).toISOString());
+    assert.ok(retainedSaveOutcome(h.actor.committed.state, id, new Date(clock + 60_000).toISOString()), "in retention a minute on");
   });
 });

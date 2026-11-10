@@ -20,8 +20,10 @@ function details(event: Event | undefined, expected: OpAcknowledgment[]): void {
 }
 
 async function ackActor(t: TestContext, state: RoomState, buffered = false) {
-  // The queue barrier flushes buffered batches explicitly, before the long batch timer can race the assertions.
-  const h = await scopeActor(t, state, buffered ? { batchMs: 60_000 } : {});
+  // A window long enough that the ops of one step of a test share a batch, and short enough that the reads it answers
+  // at its close come quickly. A deletion step runs only once the open batch has committed, so it is the barrier the
+  // assertions wait on.
+  const h = await scopeActor(t, state, buffered ? { batchMs: 300 } : {});
   return {
     ...h,
     connect: (who: Member) => h.connect(who, undefined, undefined, true),
@@ -179,8 +181,10 @@ test("transport duplicate acknowledgments do not invent or reclassify details", 
   details(await dm.apply({ t: "room.update", name: "Committed name" }), [{ n: 1, scope: "setup", changed: true }]);
   const before = h.actor.committed.state;
   const history = dm.history();
+  const heard = dm.sent.length;
   await h.actor.op(dm.conn, 1, { t: "token.move", tokenId: f.goblin, x: 8, y: 3 });
-  const duplicate = ack(dm, 1);
+  // Answered at the close of the batch it joins, as every read is.
+  const duplicate = await until(() => dm.sent.slice(heard).find((m): m is Event => m.t === "ev" && Boolean(m.acks?.includes(1))), "the duplicate's ack");
   assert.deepEqual(duplicate?.acks, [1]);
   assert.equal(duplicate?.ackDetails, undefined);
   assert.deepEqual(h.actor.committed.state, before, "a duplicate cannot apply the resent payload");
@@ -236,7 +240,10 @@ test("hello opt-in is per connection and legacy strict events and command queues
   assert.equal((await reconnected.apply({ t: "room.update", name: "No opt-in on reconnect" })).ackDetails, undefined);
   // Re-syncing the same connection also re-negotiates the capability.
   modern.conn.helloAllowed = true;
+  const snapshots = modern.sent.filter((m) => m.t === "snapshot").length;
   await h.actor.hello(modern.conn, { clientId: modern.clientId, resumeFrom: modern.n + 1 });
+  // A device sends ops once its snapshot came, which the batch after the hello answers.
+  await until(() => (modern.sent.filter((m) => m.t === "snapshot").length > snapshots ? true : undefined), "the resync's snapshot");
   assert.equal((await modern.apply({ t: "room.update", name: "No opt-in on resync" })).ackDetails, undefined);
 });
 

@@ -293,7 +293,12 @@ export type BatchWrite = {
   name?: string;
   /** False when the free-disk guard refused the batch's log rows (ArchiveGuard): the rest commits without them. */
   archive?: boolean;
-  /** The room count (counted.ts) after this batch, written as `rooms.pub` when the batch holds ops or watermarks. */
+  /**
+   * The room's stored number (counted.ts) after this batch, written as
+   * `rooms.pub` when the batch holds ops or watermarks. It is the number at
+   * the batch's close, never a higher one a device's read was handed, so a
+   * read is never made durable by the commit after it.
+   */
   pub?: number;
   /**
    * The room's snapshot at the batch's seq, built before the commit
@@ -315,10 +320,10 @@ export { CommitOutcomeUnknown };
  * them), the room's new name if it changed, the receipts of the tagged ops
  * it settles, and the client watermarks. Watermarks only ever move up.
  *
- * A batch that holds ops or watermarks writes the room count too, so a
- * restart resumes from it as it was when its answers went out, and so does
- * the snapshot a batch carries. One that holds neither answered nothing, and
- * its count is the one stored already.
+ * A batch that holds ops or watermarks writes the room's stored number
+ * too, so a restart resumes from it as it was when its answers went out, and
+ * so does the snapshot a batch carries. One that holds neither answered
+ * nothing, and its number is the one stored already.
  *
  * An error before COMMIT is a clean failure and is rethrown as it is. An
  * error from the COMMIT statement is wrapped, because the connection may

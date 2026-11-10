@@ -827,25 +827,31 @@ describe("history delivery windows and observer isolation", () => {
     }
   });
 
-  test("a snapshot and duplicate ack during the batch window expose only committed heads", async (t) => {
+  test("a snapshot and a duplicate ack asked for during the batch window come at its close, with the heads it committed", async (t) => {
     const f = scopeFixture();
-    // A long batch window lets the explicit queue barrier flush each batch without racing the timer.
-    const h = await scopeActor(t, f.state, { batchMs: 60_000 });
+    // A window long enough that the requests below come inside it. A deletion step runs only once the open batch has
+    // committed, so it is the barrier.
+    const h = await scopeActor(t, f.state, { batchMs: 300 });
     const dm = await h.connect(f.dm);
     const flush = () => h.actor.deletionStep(async () => ({ deleted: [], result: undefined }));
     await h.actor.op(dm.conn, ++dm.n, { t: "token.move", tokenId: f.goblin, x: 5, y: 3 });
     await flush();
     const before = dm.history();
+    const from = dm.sent.length;
     await h.actor.op(dm.conn, ++dm.n, { t: "token.update", tokenId: f.goblin, patch: { name: "Staged private label" } });
     await h.actor.op(dm.conn, 1, { t: "token.move", tokenId: f.goblin, x: 5, y: 3 });
-    assert.deepEqual(dm.history(), before, "a duplicate ack does not pair the old view with staged heads");
+    assert.deepEqual(dm.sent.slice(from), [], "nothing is answered inside the window");
     const joined = await h.connect(f.dm);
-    assert.equal(joined.history().serial, before.serial);
-    assert.deepEqual(joined.history().setup, before.setup);
-    assert.equal(joined.sent.find((m) => m.t === "snapshot")!.seq, before.seq);
     await flush();
-    assert.equal(joined.history().setup?.undo.depth, 1);
-    assert.ok(joined.history().serial > before.serial);
+    const duplicate = dm.sent.slice(from).find((m) => m.t === "ev" && m.acks?.includes(1));
+    assert.ok(duplicate && duplicate.t === "ev", "the duplicate is acked at the close");
+    const after = dm.history();
+    assert.equal(after.setup?.undo.depth, 1);
+    assert.ok(after.serial > before.serial);
+    assert.equal(after.seq, duplicate.seq, "the history after the duplicate's ack is the one its close committed");
+    assert.equal(joined.history().serial, after.serial);
+    assert.deepEqual(joined.history().setup, after.setup);
+    assert.equal(joined.sent.find((m) => m.t === "snapshot")!.seq, after.seq);
   });
 });
 

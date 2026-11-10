@@ -124,13 +124,15 @@ async function run(seed: number, steps: number, script?: readonly Action[]): Pro
       retryMaxMs: 20,
       snapshotIdleMs: 60_000,
       grantRecheckMs: 60_000,
-      now: () => {
-        // #reduce reads the clock only after an op is staged.
-        if (armed.staged && /\bat (?:\w+\.)?#reduce \(/.test(new Error().stack ?? "")) {
+      now: () => clock.t,
+      // A standing number clock (STANDING_CLOCK) that throws once when armed. The op reads it at the queue, and a new
+      // batch's timer reads it again only once the op is staged.
+      numberClock: () => {
+        if (armed.staged && /\bat (?:\w+\.)?#scheduleCommit \(/.test(new Error().stack ?? "")) {
           armed.staged = false;
           throw new Error("scripted staged fault");
         }
-        return clock.t;
+        return 0;
       },
       draw: (sides: number) => {
         if (armed.draw) {
@@ -164,6 +166,8 @@ async function run(seed: number, steps: number, script?: readonly Action[]): Pro
     device.sent = sent;
     device.sockets.push(entry);
     await actor!.hello(conn, { clientId: device.clientId, resumeFrom });
+    // A device sends its ops once its snapshot came, which the batch after the hello answers, or a while for one delayed.
+    for (let i = 0; i < 100 && conn.held === null && !conn.closed; i++) await new Promise((r) => setTimeout(r, 2));
   }
 
   async function device(who: Member): Promise<Device> {

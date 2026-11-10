@@ -45,6 +45,7 @@ import type { RoomGateway } from "./gateway.ts";
 import { checkWholeScenes, growthBound, measuredStateBytes, memoryReserves, memoryShare, memoryStateReserve, roomLevelBytes, SHARE_MARGIN, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { loadRoom, type Pool } from "./persistence.ts";
 import { SQUARES } from "../../shared/rules/grid.ts";
+import { STANDING_CLOCK } from "./undoScopeTesting.ts";
 
 /**
  * The actor's commit and replay failure paths (design 7.2 and 16.2), against
@@ -153,7 +154,7 @@ function deps(db: FakeDb, info: Partial<ActorDeps["info"]> = {}): ActorDeps {
     log: quiet,
     budget: new SnapshotBudget(),
     gateway: {} as RoomGateway,
-    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000 },
+    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, numberClock: STANDING_CLOCK },
   };
 }
 
@@ -243,6 +244,17 @@ function connect(actor: RoomActor, who: Member, role: "dm" | "player" = "dm"): {
   return { conn, sent };
 }
 
+/**
+ * A hello as a device sends it: a device sends ops only once its snapshot
+ * came, and a hello is answered at the close of the batch it joins. Waits
+ * until the socket holds that snapshot or closed, or a while for one the
+ * snapshot budget delays.
+ */
+async function hello(actor: RoomActor, conn: Connection, msg: Parameters<RoomActor["hello"]>[1]): Promise<void> {
+  await actor.hello(conn, msg);
+  for (let i = 0; i < 250 && conn.held === null && !conn.closed; i++) await new Promise((r) => setTimeout(r, 2));
+}
+
 async function answerTo(sent: ServerMessage[], n: number): Promise<Extract<ServerMessage, { t: "ev" }> | "stuck"> {
   const found = (): Extract<ServerMessage, { t: "ev" }> | undefined =>
     sent.find((m): m is Extract<ServerMessage, { t: "ev" }> => m.t === "ev" && ((m.acks?.includes(n) ?? false) || (m.rejects?.some((r) => r.n === n) ?? false)));
@@ -327,7 +339,7 @@ describe("replaying ops from before a rule tightened", () => {
       assert.deepEqual("inline" in goblin ? goblin.inline.effects.map((e) => [e.id, e.level]) : null, [["x", undefined], ["y", 0]]);
       // A new op is held to the rule, where it arrives.
       const table = connect(actor, dm);
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
       await actor.op(table.conn, 1, { t: "actor.effect.add", target, effect: { id: "z", key: "exhaustion", level: 7 } });
       const answer = await answerTo(table.sent, 1);
       assert.ok(answer !== "stuck");
@@ -368,7 +380,7 @@ describe("a room whose replay failed", () => {
     assert.ok(actor);
     try {
       const { conn, sent } = connect(actor, dm);
-      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conn, { clientId: "c1", resumeFrom: 1 });
       await actor.op(conn, 1, { t: "token.delete", tokenId });
       const ev = await answerTo(sent, 1);
       assert.notEqual(ev, "stuck");
@@ -395,7 +407,7 @@ describe("a room whose replay failed", () => {
     assert.ok(actor);
     try {
       const player = connect(actor, pc, "player");
-      await actor.hello(player.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, player.conn, { clientId: "c1", resumeFrom: 1 });
       await actor.op(player.conn, 1, { t: "cast.close", castId: "k1", end: "withdrawn" });
       const withdrawn = await answerTo(player.sent, 1);
       assert.ok(withdrawn !== "stuck" && withdrawn.rejects === undefined);
@@ -403,7 +415,7 @@ describe("a room whose replay failed", () => {
       const asked = await answerTo(player.sent, 2);
       assert.equal(asked !== "stuck" && asked.rejects?.[0]?.code, "quota");
       const desk = connect(actor, dm);
-      await actor.hello(desk.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, desk.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(desk.conn, 1, { t: "cast.close", castId: "k2", end: "dismissed" });
       const dismissed = await answerTo(desk.sent, 1);
       assert.ok(dismissed !== "stuck" && dismissed.rejects === undefined);
@@ -422,7 +434,7 @@ describe("a room whose replay failed", () => {
     assert.ok(actor);
     try {
       const { conn, sent } = connect(actor, dm);
-      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conn, { clientId: "c1", resumeFrom: 1 });
       await actor.op(conn, 1, { t: "token.delete", tokenId });
       const ev = await answerTo(sent, 1);
       assert.notEqual(ev, "stuck");
@@ -447,7 +459,7 @@ describe("a room whose replay failed", () => {
     assert.ok(actor);
     try {
       const { conn, sent } = connect(actor, dm);
-      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conn, { clientId: "c1", resumeFrom: 1 });
       await actor.op(conn, 1, { t: "scene.delete", sceneId: first });
       const refused = await answerTo(sent, 1);
       assert.ok(refused !== "stuck");
@@ -478,7 +490,7 @@ describe("op admission", () => {
     assert.ok(actor);
     try {
       const { conn, sent } = connect(actor, dm);
-      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conn, { clientId: "c1", resumeFrom: 1 });
       const image = { assetId: "0192f0aa-0000-4000-8000-000000000001", crop: { cx: 0, cy: 0, zoom: 1 } };
       await actor.op(conn, 1, { t: "token.update", tokenId, patch: { image } });
       assert.equal(db.assetLookups, 1);
@@ -505,7 +517,7 @@ describe("op admission", () => {
     assert.ok(actor);
     try {
       const { conn, sent } = connect(actor, dm);
-      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conn, { clientId: "c1", resumeFrom: 1 });
       const tokenId = uuidv7();
       const entryId = uuidv7();
       const encounterId = uuidv7();
@@ -576,7 +588,7 @@ describe("handout pages (docs/design/design-v1-pdf-handouts.md 3.1)", () => {
     assert.ok(actor);
     try {
       const { conn, sent } = connect(actor, dm);
-      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conn, { clientId: "c1", resumeFrom: 1 });
       const pages = [page(ids.first, 9, 9), page(ids.second), page(ids.first, 8192, 1)];
       await actor.op(conn, 1, { t: "handout.show", handout: { id: "h1", pages, title: "Strange letter", to: "all" } });
       const ev = await answerTo(sent, 1);
@@ -596,7 +608,7 @@ describe("handout pages (docs/design/design-v1-pdf-handouts.md 3.1)", () => {
     assert.ok(actor);
     try {
       const { conn, sent } = connect(actor, dm);
-      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conn, { clientId: "c1", resumeFrom: 1 });
       for (const [n, other] of [[1, uuidv7()], [2, ids.map]] as const) {
         await actor.op(conn, n, { t: "handout.show", handout: { id: `h${n}`, pages: [page(ids.first), page(other)], title: "Strange letter", to: "all" } });
         const ev = await answerTo(sent, n);
@@ -616,7 +628,7 @@ describe("handout pages (docs/design/design-v1-pdf-handouts.md 3.1)", () => {
     assert.ok(actor);
     try {
       const { conn, sent } = connect(actor, dm);
-      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conn, { clientId: "c1", resumeFrom: 1 });
       await actor.op(conn, 1, { t: "handoutDoc.create", doc: { id: "d1", title: "Strange letter", pages: [page(ids.second, 3, 3), page(ids.first)] } });
       const ev = await answerTo(sent, 1);
       assert.ok(ev !== "stuck" && ev.rejects === undefined);
@@ -634,7 +646,7 @@ describe("handout pages (docs/design/design-v1-pdf-handouts.md 3.1)", () => {
     assert.ok(actor);
     try {
       const { conn, sent } = connect(actor, dm);
-      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conn, { clientId: "c1", resumeFrom: 1 });
       await actor.op(conn, 1, { t: "handoutDoc.create", doc: { id: "d2", title: "Map pack", pages: [page(ids.second)] } });
       const refused = await answerTo(sent, 1);
       assert.ok(refused !== "stuck");
@@ -659,7 +671,7 @@ describe("handout pages (docs/design/design-v1-pdf-handouts.md 3.1)", () => {
     assert.ok(actor);
     try {
       const { conn, sent } = connect(actor, dm);
-      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conn, { clientId: "c1", resumeFrom: 1 });
       await actor.op(conn, 1, { t: "handout.show", handout: { id: "h1", pages: [page(ids.second)], title: "Strange letter", to: "all" } });
       const shown = await answerTo(sent, 1);
       assert.ok(shown !== "stuck");
@@ -685,7 +697,7 @@ describe("undo", () => {
     assert.ok(actor);
     try {
       const { conn, sent } = connect(actor, dm);
-      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conn, { clientId: "c1", resumeFrom: 1 });
       // A stroke across two chunks, flushed three times.
       await actor.op(conn, 1, { t: "build.paint", sceneId, terrain: "stone", cells: ["1,1"] }, "stroke");
       await actor.op(conn, 2, { t: "build.paint", sceneId, terrain: "stone", cells: ["2,1", "3,1"] }, "stroke");
@@ -715,7 +727,7 @@ describe("undo", () => {
     assert.ok(actor);
     try {
       const { conn, sent } = connect(actor, dm);
-      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conn, { clientId: "c1", resumeFrom: 1 });
       // As the Scenes panel sends a rename (client/features/scenes/folders.ts sendFolderRename): one op, under a group.
       await actor.op(conn, 1, { t: "scene.update", sceneId, patch: { folder: "Act two" } }, "rename");
       await sendWithHistory(actor, conn, 2, { t: "undo", scope: "setup" });
@@ -743,7 +755,7 @@ describe("undo", () => {
     assert.ok(actor);
     try {
       const { conn, sent } = connect(actor, dm);
-      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conn, { clientId: "c1", resumeFrom: 1 });
       await actor.op(conn, 1, { t: "encounter.start", entries: [{ id: uuidv7(), tokenId, value: 12 }] });
       // As the encounter builder sends it (client/features/encounters/drop.ts): the tokens, then their rows.
       const placed = [uuidv7(), uuidv7(), uuidv7()];
@@ -782,8 +794,8 @@ describe("undo answers", () => {
     try {
       const phone = connect(actor, dm);
       const laptop = connect(actor, other);
-      await actor.hello(phone.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(laptop.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, laptop.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(phone.conn, 1, { t: "token.move", tokenId, x: 2, y: 2 });
       await actor.op(phone.conn, 2, { t: "token.update", tokenId, patch: { name: "Snik" } });
       await actor.op(phone.conn, 3, { t: "token.move", tokenId, x: 3, y: 3 });
@@ -829,13 +841,13 @@ describe("undo answers", () => {
     try {
       const table = connect(actor, dm);
       const phones = [connect(actor, ayla, "player"), connect(actor, bram, "player")];
-      await actor.hello(table.conn, { clientId: "dm", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "dm", resumeFrom: 1 });
       const drawings: string[] = [];
       for (const [i, phone] of phones.entries()) {
         const who = i === 0 ? ayla : bram;
         const id = uuidv7();
         drawings.push(id);
-        await actor.hello(phone.conn, { clientId: who.name, resumeFrom: 1 });
+        await hello(actor, phone.conn, { clientId: who.name, resumeFrom: 1 });
         const drawing = { id, sceneId: mat, kind: "line" as const, points: [1, 1, 2, 2], style: { stroke: "#ffffff", width: 2, opacity: 1 }, ownerId: who.id, visibility: "all" as const };
         await actor.op(phone.conn, 1, { t: "drawing.create", drawing });
         await actor.op(phone.conn, 2, { t: "drawing.delete", drawingId: id });
@@ -875,8 +887,8 @@ describe("taking an HP change back from the log", () => {
     try {
       const table = connect(actor, dm);
       const phone = connect(actor, player, "player");
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       const goblinHp = () => {
         const a = actor.committed.state.tokens[tokenId]!.actor;
         return "inline" in a ? a.inline.hp.cur : -1;
@@ -943,7 +955,7 @@ describe("a condition the DM hid", () => {
     assert.ok(actor);
     try {
       const phone = connect(actor, player, "player");
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       const refusal = async (n: number, effectId: string, op: "update" | "remove") => {
         const target = { tokenId };
         await actor.op(phone.conn, n, op === "update" ? { t: "actor.effect.update", target, effectId, patch: { level: 2 } } : { t: "actor.effect.remove", target, effectId });
@@ -974,8 +986,8 @@ describe("a player's undo", () => {
     try {
       const table = connect(actor, dm);
       const phone = connect(actor, player, "player");
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(phone.conn, 1, { t: "token.move", tokenId, x: 5, y: 5 });
       await actor.op(table.conn, 1, { t: "actor.hp", target: { tokenId }, change: { kind: "damage", amount: 3 } });
       assert.notEqual(await answerTo(table.sent, 1), "stuck");
@@ -1019,7 +1031,7 @@ describe("a player's undo", () => {
     assert.ok(actor);
     try {
       const phone = connect(actor, player, "player");
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       const goblin = () => actor.committed.state.tokens[tokenId]!;
       await actor.op(phone.conn, 1, { t: "token.move", tokenId, x: 5, y: 5 });
       await actor.op(phone.conn, 2, { t: "token.update", tokenId, patch: { elevation: 10 } });
@@ -1050,7 +1062,7 @@ describe("a player's undo", () => {
     assert.ok(actor);
     try {
       const phone = connect(actor, player, "player");
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       const goblin = () => actor.committed.state.tokens[tokenId]!;
       await actor.op(phone.conn, 1, { t: "token.move", tokenId, x: 5, y: 5 });
       for (const [n, elevation] of [[2, 5], [3, 10], [4, 15]] as const) await actor.op(phone.conn, n, { t: "token.update", tokenId, patch: { elevation } });
@@ -1077,7 +1089,7 @@ describe("a player's undo", () => {
     assert.ok(actor);
     try {
       const phone = connect(actor, player, "player");
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(phone.conn, 1, { t: "token.update", tokenId, patch: { elevation: 10 } });
       await sendWithHistory(actor, phone.conn, 2, { t: "undo" });
       const undone = await answerTo(phone.sent, 2);
@@ -1104,8 +1116,8 @@ describe("a player's undo", () => {
     try {
       const phone = connect(actor, player, "player");
       const laptop = connect(actor, player, "player");
-      await actor.hello(phone.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(laptop.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, laptop.conn, { clientId: "c2", resumeFrom: 1 });
       const at = (id: string) => [actor.committed.state.tokens[id]!.x, actor.committed.state.tokens[id]!.y];
       const notNewest = { code: "invalid", message: "could not undo that move: it is no longer your newest change" };
 
@@ -1157,8 +1169,8 @@ describe("a player's undo", () => {
     try {
       const table = connect(actor, dm);
       const phone = connect(actor, player, "player");
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(phone.conn, 1, { t: "token.move", tokenId, x: 5, y: 5 });
       const crypt = uuidv7();
       await actor.op(table.conn, 1, { t: "scene.create", scene: { id: crypt, name: "Crypt", bounds: { w: 30, h: 30 } } });
@@ -1189,7 +1201,7 @@ describe("a player's undo", () => {
     assert.ok(actor);
     try {
       const phone = connect(actor, player, "player");
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(phone.conn, 1, { t: "token.move", tokenId, x: 5, y: 5 });
       await sendWithHistory(actor, phone.conn, 2, { t: "undo" });
       const undone = await answerTo(phone.sent, 2);
@@ -1212,8 +1224,8 @@ describe("undo and replay", () => {
     try {
       const phone = connect(actor, dm);
       const laptop = connect(actor, other);
-      await actor.hello(phone.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(laptop.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, laptop.conn, { clientId: "c2", resumeFrom: 1 });
       const sceneId = uuidv7();
       await actor.op(phone.conn, 1, { t: "scene.create", scene: { id: sceneId, name: "Crypt", bounds: { w: 30, h: 30 } } });
       assert.notEqual(await answerTo(phone.sent, 1), "stuck");
@@ -1253,8 +1265,8 @@ describe("the path of a turn and a player's undo", () => {
     try {
       const table = connect(actor, dm);
       const phone = connect(actor, player, "player");
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(table.conn, 1, { t: "encounter.start", entries: [{ id: uuidv7(), tokenId, value: 12 }] });
       await actor.op(table.conn, 2, { t: "encounter.next" });
       const goblin = () => actor.committed.state.tokens[tokenId]!;
@@ -1295,7 +1307,7 @@ describe("an area's damage", () => {
     assert.ok(actor);
     try {
       const table = connect(actor, dm);
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
       const hp = (id: string) => {
         const a = actor.committed.state.tokens[id]!.actor;
         return "inline" in a ? a.inline.hp : null;
@@ -1324,7 +1336,7 @@ describe("an area's damage", () => {
     assert.ok(actor);
     try {
       const table = connect(actor, dm);
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
       const hp = (id: string) => {
         const a = actor.committed.state.tokens[id]!.actor;
         return "inline" in a ? a.inline.hp : null;
@@ -1373,7 +1385,7 @@ describe("pit traps' walls counted ahead in the limits step (docs/design/design-
     assert.ok(actor);
     try {
       const { conn, sent } = connect(actor, dm);
-      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conn, { clientId: "c1", resumeFrom: 1 });
       let n = 0;
       const send = async (op: Op) => {
         await sendWithHistory(actor, conn, ++n, op);
@@ -1418,7 +1430,7 @@ describe("the split's caps in the limits step", () => {
     assert.ok(actor);
     try {
       const { conn, sent } = connect(actor, dm);
-      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conn, { clientId: "c1", resumeFrom: 1 });
       const pile = Array.from({ length: 300 }, (_, k) => wall(k, 10 + (k % 64) / 64, 10, 10 + ((k * 7) % 64) / 64, 11));
       await actor.op(conn, 1, { t: "build.walls", sceneId, put: pile.slice(0, 20) });
       await actor.op(conn, 2, { t: "build.walls", sceneId, put: pile });
@@ -1444,7 +1456,7 @@ describe("the split's caps in the limits step", () => {
     assert.ok(actor);
     try {
       const { conn, sent } = connect(actor, dm);
-      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conn, { clientId: "c1", resumeFrom: 1 });
       let n = 0;
       const send = async (op: Parameters<RoomActor["op"]>[2]) => {
         await sendWithHistory(actor, conn, ++n, op);
@@ -1487,8 +1499,8 @@ describe("the split's caps in the limits step", () => {
     try {
       const phone = connect(actor, dm);
       const laptop = connect(actor, other);
-      await actor.hello(phone.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(laptop.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, laptop.conn, { clientId: "c2", resumeFrom: 1 });
       // Two families of parallel walls on either side of the chunk border at x = 16. Each alone is fine, together they cross thousands of times.
       const west = Array.from({ length: 150 }, (_, k) => wall(k, 15, 10 + k / 64, 16.5, 10.5 + k / 64));
       const east = Array.from({ length: 150 }, (_, k) => wall(k, 15.5, 10.5 + k / 64, 17, 10 + k / 64));
@@ -1535,7 +1547,7 @@ describe("the pillar cap in the limits step", () => {
     assert.ok(actor);
     try {
       const conns = dms.map((m) => connect(actor, m));
-      for (const [i, c] of conns.entries()) await actor.hello(c.conn, { clientId: `c${i}`, resumeFrom: 1 });
+      for (const [i, c] of conns.entries()) await hello(actor, c.conn, { clientId: `c${i}`, resumeFrom: 1 });
       const counters = conns.map(() => 0);
       await run(actor, async (who, op) => {
         const n = ++counters[who]!;
@@ -1634,7 +1646,7 @@ describe("the door and window cap in the limits step", () => {
     assert.ok(actor);
     try {
       const conns = dms.map((m) => connect(actor, m));
-      for (const [i, c] of conns.entries()) await actor.hello(c.conn, { clientId: `c${i}`, resumeFrom: 1 });
+      for (const [i, c] of conns.entries()) await hello(actor, c.conn, { clientId: `c${i}`, resumeFrom: 1 });
       const counters = conns.map(() => 0);
       await run(actor, async (who, op) => {
         const n = ++counters[who]!;
@@ -1743,7 +1755,7 @@ describe("the drawn edge cap in the limits step", () => {
     assert.ok(actor);
     try {
       const conns = dms.map((m) => connect(actor, m));
-      for (const [i, c] of conns.entries()) await actor.hello(c.conn, { clientId: `c${i}`, resumeFrom: 1 });
+      for (const [i, c] of conns.entries()) await hello(actor, c.conn, { clientId: `c${i}`, resumeFrom: 1 });
       const counters = conns.map(() => 0);
       await run(actor, async (who, op) => {
         const n = ++counters[who]!;
@@ -1843,8 +1855,8 @@ describe("the explore step (docs/design/design-v1-maps-vision.md 4.3.3)", () => 
     try {
       const table = connect(actor, dm);
       const phone = connect(actor, player, "player");
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       const marks = { dm: table.sent.length, player: phone.sent.length };
       await actor.op(phone.conn, 1, { t: "token.move", tokenId: pcId, x: 20, y: 2 });
       assert.notEqual(await answerTo(phone.sent, 1), "stuck");
@@ -1932,8 +1944,8 @@ describe("the explore step (docs/design/design-v1-maps-vision.md 4.3.3)", () => 
     try {
       const table = connect(actor, dm);
       const phone = connect(actor, player, "player");
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       const snapshot = phone.sent.find((m) => m.t === "snapshot") as Extract<ServerMessage, { t: "snapshot" }>;
       const view = snapshot.state as { tokens: Record<string, unknown>; sight: Record<string, unknown> };
       assert.ok(view.tokens[goblinId], "the party sees the goblin");
@@ -1972,7 +1984,7 @@ describe("a walk on the scene where traps go off ends the batch staged before it
     const actor = await RoomActor.load({ ...base, options: { ...base.options, ...options } });
     assert.ok(actor);
     const table = connect(actor, dm);
-    await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+    await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
     const last = send(actor, table.conn);
     assert.notEqual(await answerTo(table.sent, last), "stuck");
     return { batches: batchesOf(db, commits), actor, db, sent: table.sent };
@@ -2097,8 +2109,8 @@ describe("a walk on the scene where traps go off ends the batch staged before it
       try {
         const table = connect(actor, dm);
         const laptop = connect(actor, dm);
-        await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
-        await actor.hello(laptop.conn, { clientId: "c2", resumeFrom: 1 });
+        await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
+        await hello(actor, laptop.conn, { clientId: "c2", resumeFrom: 1 });
         void actor.op(table.conn, 1, { t: "token.move", tokenId: pcId, x: 20, y: 2 });
         void actor.op(laptop.conn, 1, { t: "log.chat", text: "hi" });
         if (rate === "socket's") while (table.conn.opRate.wouldAllow()) table.conn.opRate.allow();
@@ -2157,7 +2169,7 @@ async function withRoom(
   assert.ok(actor);
   try {
     const table = connect(actor, dm);
-    await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+    await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
     let n = 0;
     await run(
       actor,
@@ -2320,9 +2332,9 @@ describe("a turn ended from two places at once", () => {
       const table = connect(actor, dm);
       const laptop = connect(actor, dm);
       const phone = connect(actor, player, "player");
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(laptop.conn, { clientId: "c2", resumeFrom: 1 });
-      await actor.hello(phone.conn, { clientId: "c3", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, laptop.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c3", resumeFrom: 1 });
       // Start, pressed twice: the fight starts on the first row.
       await Promise.all([actor.op(table.conn, 1, { t: "encounter.next", from: { entry: null, round: 1 } }), actor.op(table.conn, 2, { t: "encounter.next", from: { entry: null, round: 1 } })]);
       await taken(table.sent, 1);
@@ -2367,8 +2379,8 @@ describe("a turn ended from two places at once", () => {
     try {
       const table = connect(actor, dm);
       const laptop = connect(actor, dm);
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(laptop.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, laptop.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(table.conn, 1, { t: "encounter.next", from: { entry: null, round: 1 } });
       await taken(table.sent, 1);
       await Promise.all([actor.op(table.conn, 2, { t: "encounter.next", from: { entry: row, round: 1 } }), actor.op(laptop.conn, 1, { t: "encounter.next", from: { entry: row, round: 1 } })]);
@@ -2455,8 +2467,8 @@ describe("the lit token light cap in the limits step (docs/design/design-v1-maps
     assert.ok(actor);
     try {
       const conns = { dm: connect(actor, dm), player: connect(actor, player, "player") };
-      await actor.hello(conns.dm.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(conns.player.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, conns.dm.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, conns.player.conn, { clientId: "c2", resumeFrom: 1 });
       const counters = { dm: 0, player: 0 };
       await run(actor, async (who, op) => {
         const n = ++counters[who];
@@ -2553,7 +2565,7 @@ describe("the lit token light cap in the limits step (docs/design/design-v1-maps
     assert.ok(actor);
     try {
       const ana = connect(actor, room.ana, "player");
-      await actor.hello(ana.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, ana.conn, { clientId: "c2", resumeFrom: 1 });
       let n = 0;
       const send = async (op: unknown) => {
         n++;
@@ -2717,8 +2729,8 @@ describe("companion stat blocks at the room actor (docs/design/design-v1-compani
     assert.ok(actor);
     try {
       const sockets = { dm: connect(actor, dm), player: connect(actor, player, "player") };
-      await actor.hello(sockets.dm.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(sockets.player.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, sockets.dm.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, sockets.player.conn, { clientId: "c2", resumeFrom: 1 });
       await run(actor, sockets);
     } finally {
       db.freeze();
@@ -2984,8 +2996,8 @@ describe("a player's undo of getting on and off (docs/design/design-v1-attach.md
     try {
       const table = connect(actor, dm);
       const phone = connect(actor, player, "player");
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(table.conn, 1, { t: "encounter.start", entries: [{ id: "et", tokenId: "thorn", value: 20 }, { id: "eh", tokenId: "horse", value: 8 }] });
       await actor.op(table.conn, 2, { t: "encounter.next" });
       assert.notEqual(await answerTo(table.sent, 2), "stuck");
@@ -3049,7 +3061,7 @@ describe("traps in the actor (docs/design/design-v1-traps.md 6.5 and 6.7)", () =
     try {
       const sender = async (who: Member, role: "dm" | "player", client: string) => {
         const c = connect(actor, who, role);
-        await actor.hello(c.conn, { clientId: client, resumeFrom: 1 });
+        await hello(actor, c.conn, { clientId: client, resumeFrom: 1 });
         let n = 0;
         return async (op: TestOp, group?: string) => {
           n++;
@@ -3103,7 +3115,7 @@ describe("traps in the actor (docs/design/design-v1-traps.md 6.5 and 6.7)", () =
       assert.ok(actor);
       try {
         const { conn, sent } = connect(actor, pc, "player");
-        await actor.hello(conn, { clientId: "c2", resumeFrom: 1 });
+        await hello(actor, conn, { clientId: "c2", resumeFrom: 1 });
         await actor.op(conn, 1, { t: "token.move", tokenId: "thorn", x, y: 2 });
         const answer = await answerTo(sent, 1);
         assert.ok(answer !== "stuck" && answer.acks?.includes(1));
@@ -3255,7 +3267,7 @@ describe("a hidden line never changes whether a player's op passes (design 10.5,
     assert.ok(actor);
     try {
       const phone = connect(actor, room.pc, "player");
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(phone.conn, 1, move);
       const ev = await answerTo(phone.sent, 1);
       assert.ok(ev !== "stuck");
@@ -3330,8 +3342,8 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     try {
       const table = connect(actor, dm);
       const phone = connect(actor, player, "player");
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       const mark = phone.sent.length;
       await actor.op(table.conn, 1, { t: "build.paint", sceneId, terrain: "wood", cells: ["10,10"] });
       assert.notEqual(await answerTo(table.sent, 1), "stuck");
@@ -3364,7 +3376,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     assert.ok(actor);
     try {
       const phone = connect(actor, player, "player");
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(phone.conn, 1, { t: "token.move", tokenId: pcId, x: 80, y: 50 });
       const answer = await answerTo(phone.sent, 1);
       assert.ok(answer !== "stuck");
@@ -3448,11 +3460,11 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     try {
       // The room's first answer explores the sight the fixture shows, so another device's chat comes first.
       const first = connect(actor, dm);
-      await actor.hello(first.conn, { clientId: "c0", resumeFrom: 1 });
+      await hello(actor, first.conn, { clientId: "c0", resumeFrom: 1 });
       await actor.op(first.conn, 1, { t: "log.chat", text: "ready" });
       assert.notEqual(await answerTo(first.sent, 1), "stuck");
       const table = connect(actor, dm);
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
       // A gesture that fits: its ask is taken and changes nothing, and its ops apply.
       const small: OpOf<"build.paint">[] = [{ t: "build.paint", sceneId, terrain: "grass", cells: ["2,2"] }, { t: "build.paint", sceneId, terrain: "grass", cells: ["3,2"] }];
       const before = actor.committed.state;
@@ -3499,8 +3511,8 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     try {
       const table = connect(actor, dm);
       const phone = connect(actor, player, "player");
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       const bands: OpOf<"build.rect">[] = [0, 20, 40].map((y) => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y, w: 96, h: y === 40 ? 4 : 20 }));
       // Each part alone fits, and the parts together do not.
       await actor.op(table.conn, 1, { t: "build.ask", sceneId, ops: bands.slice(0, 1), part: 0, more: true }, "g1");
@@ -3593,7 +3605,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     assert.ok(actor);
     try {
       const table = connect(actor, dm);
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
       const band = (y: number, h: number): OpOf<"build.rect"> => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y, w: 96, h });
       const dab: OpOf<"build.paint"> = { t: "build.paint", sceneId, terrain: "wood", cells: ["1,41"] };
       const sent = [band(0, 20), band(20, 20), band(40, 4), dab];
@@ -3669,7 +3681,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     const first = await RoomActor.load(deps(db));
     assert.ok(first);
     const a = dmDevice(first, dm);
-    await first.hello(a.conn, { clientId: "c1", resumeFrom: 1 });
+    await hello(first, a.conn, { clientId: "c1", resumeFrom: 1 });
     await first.op(a.conn, 1, ask(0, bands.slice(0, 1), true), "g1");
     assert.equal(await outcome(a.sent, 1), "taken");
     // The room restarts: its chains lived only in memory. It replays what the first room stored, the explore of the sight
@@ -3681,7 +3693,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     try {
       const b = dmDevice(actor, dm, a.sessionId);
       // The fake database keeps no watermarks, so the device's numbers start again on the new room.
-      await actor.hello(b.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, b.conn, { clientId: "c1", resumeFrom: 1 });
       await actor.op(b.conn, 1, ask(1, bands.slice(1)), "g1");
       assert.equal(await outcome(b.sent, 1), lost, "the rest of the gesture after a restart");
       // Asked again from the start under a group of its own, the parts read on and the last answers for the whole.
@@ -3718,10 +3730,10 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       const ask = (part: number, ops: OpOf<"build.rect">[], more = false): Op => ({ t: "build.ask", sceneId, ops, part, ...(more ? { more: true as const } : {}) });
       const a = dmDevice(actor, dm);
       const b = dmDevice(actor, dm);
-      await actor.hello(a.conn, { clientId: "a", resumeFrom: 1 });
-      await actor.hello(b.conn, { clientId: "b", resumeFrom: 1 });
+      await hello(actor, a.conn, { clientId: "a", resumeFrom: 1 });
+      await hello(actor, b.conn, { clientId: "b", resumeFrom: 1 });
       const e = dmDevice(actor, dm);
-      await actor.hello(e.conn, { clientId: "e", resumeFrom: 1 });
+      await hello(actor, e.conn, { clientId: "e", resumeFrom: 1 });
       // Two devices' gestures left mid-way, and a third device's gesture refused.
       await actor.op(a.conn, 1, ask(0, bands.slice(0, 1), true), "g1");
       await actor.op(b.conn, 1, ask(0, bands.slice(0, 1), true), "g2");
@@ -3733,7 +3745,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       assert.deepEqual(actor.askState, { asking: 0, refused: 0, reading: false }, "nothing left of any");
       // A part read from a turn of its own, whose socket goes while it waits there, keeps no chain either.
       const f = dmDevice(actor, dm);
-      await actor.hello(f.conn, { clientId: "f", resumeFrom: 1 });
+      await hello(actor, f.conn, { clientId: "f", resumeFrom: 1 });
       await actor.op(f.conn, 1, ask(0, bands.slice(0, 1), true), "g7");
       assert.equal(actor.askState.reading, true, "the arrival's turn reads none of it");
       actor.detach(f.conn);
@@ -3741,7 +3753,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       assert.equal(actor.askState.asking, 0, "a gone socket's part");
       // Nor does a last part past the cap whose socket goes while it waits to be read (MD4-ASTRA-12).
       const g = dmDevice(actor, dm);
-      await actor.hello(g.conn, { clientId: "g", resumeFrom: 1 });
+      await hello(actor, g.conn, { clientId: "g", resumeFrom: 1 });
       await actor.op(g.conn, 1, ask(0, bands), "g8");
       assert.equal(actor.askState.reading, true);
       actor.detach(g.conn);
@@ -3749,7 +3761,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       assert.deepEqual(actor.askState, { asking: 0, refused: 0, reading: false }, "a gone socket's refused gesture");
       // The next op of another group ends a chain, and so does ASK_CHAIN_MS without its next part.
       const c = dmDevice(actor, dm);
-      await actor.hello(c.conn, { clientId: "c", resumeFrom: 1 });
+      await hello(actor, c.conn, { clientId: "c", resumeFrom: 1 });
       await actor.op(c.conn, 1, ask(0, bands.slice(0, 1), true), "g4");
       await outcome(c.sent, 1);
       assert.equal(actor.askState.asking, 1);
@@ -3760,7 +3772,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       await outcome(c.sent, 3);
       now += ASK_CHAIN_MS + 1;
       const d = dmDevice(actor, dm);
-      await actor.hello(d.conn, { clientId: "d", resumeFrom: 1 });
+      await hello(actor, d.conn, { clientId: "d", resumeFrom: 1 });
       await actor.op(d.conn, 1, { t: "build.paint", sceneId, terrain: "grass", cells: ["3,2"] });
       await outcome(d.sent, 1);
       assert.equal(actor.askState.asking, 0, "a chain left waiting, ended by anyone's next op");
@@ -3783,7 +3795,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     assert.ok(actor);
     try {
       const table = dmDevice(actor, dm);
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
       hold();
       // Ayla's step, which changes what the party sees, whose batch commits a millisecond on and waits at its COMMIT, then an ask read in turns meanwhile.
       await actor.op(table.conn, 1, { t: "token.move", tokenId: pcId, x: 89, y: 50 }, "g1");
@@ -3819,7 +3831,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     assert.ok(actor);
     try {
       const table = dmDevice(actor, dm);
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
       const remembered = () => actor.committed.state.memory?.[chunkKey(sceneId, 0, 0)]?.cells?.["11,10"] ?? null;
       hold();
       // The seen cell painted wood: its batch commits a millisecond on and waits at its COMMIT, while an ask reads and then begins the next batch.
@@ -3853,7 +3865,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     try {
       // FU39-C, FU34-OPUS-4: only the rate clock stops. The event loop still yields normally.
       const table = dmDevice(actor, dm, undefined, () => 0);
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
       // Held stone ground keeps every band's detailed comparisons active. Narrow bands
       // keep their combined memory growth below the cap, so the ask reads all 16.
       const bands: OpOf<"build.rect">[] = Array.from({ length: 16 }, (_, k) => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y: k, w: 96, h: 1 }));
@@ -3971,7 +3983,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       assert.ok(actor);
       try {
         const table = connect(actor, dm);
-        await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+        await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
         void actor.op(table.conn, 1, { t: "build.paint", sceneId, terrain: "wood", cells: ["10,10"] });
         await actor.op(table.conn, 2, { t: "build.paint", sceneId: other, terrain: "wood", cells: ["3,3"] });
         const ev = await answerTo(table.sent, 2);
@@ -4006,7 +4018,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     assert.ok(actor);
     try {
       const table = connect(actor, dm);
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
       await actor.op(table.conn, 1, { t: "build.paint", sceneId, terrain: "wood", cells: ["10,10"] });
       const ev = await answerTo(table.sent, 1);
       assert.ok(ev !== "stuck" && ev.acks?.includes(1), "the batch commits");
@@ -4038,7 +4050,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     assert.ok(actor);
     try {
       const table = connect(actor, dm);
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
       await actor.op(table.conn, 1, { t: "dice.roll", tag, to: "all", rolls: [{ formula: "1d20" }] });
       // Thrown before the op was staged, so it is refused and the socket stays (THROW-REFUSE).
       assert.equal(table.conn.closed, false, "the sender's socket stays open");
@@ -4087,7 +4099,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     const FAULT_WORDS = "That change could not be made: something went wrong on the server.";
     try {
       const first = open();
-      await actor.hello(first.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, first.conn, { clientId: "c1", resumeFrom: 1 });
       for (const n of [1, 2]) {
         await actor.op(first.conn, n, roll());
         assert.equal(words(await answerTo(first.sent, n), n), FAULT_WORDS, `fault ${n} is refused with the server's words`);
@@ -4107,7 +4119,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       assert.ok(!JSON.stringify(actor.committed.state).includes("sent while closing"), "nor applied");
       // The batch committed before the device came back, so its next socket starts after the refusal.
       const back = open();
-      await actor.hello(back.conn, { clientId: "c1", resumeFrom: 4 });
+      await hello(actor, back.conn, { clientId: "c1", resumeFrom: 4 });
       await actor.op(back.conn, 4, { t: "log.chat", text: "sent while closing" });
       const resent = await answerTo(back.sent, 4);
       assert.ok(resent !== "stuck" && resent.acks?.includes(4), "the resend is taken");
@@ -4167,7 +4179,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     const { db, actor, open, roll } = await faultRoom();
     try {
       const first = open();
-      await actor.hello(first.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, first.conn, { clientId: "c1", resumeFrom: 1 });
       for (const n of [1, 2]) {
         await actor.op(first.conn, n, roll());
         const ev = await answerTo(first.sent, n);
@@ -4182,14 +4194,14 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
         if (holding) throw new Error("connect ECONNREFUSED 127.0.0.1:5432");
       };
       const other = open({ session: uuidv7() });
-      await actor.hello(other.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, other.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(other.conn, 1, { t: "log.chat", text: "holds the queue" });
       await until(() => actor.retrying, "the commit retries");
       // The device sent its third while it held its snapshot, and a scene resync takes that snapshot before the op is read.
       await actor.op(first.conn, 3, roll());
       actor.scene(first.conn);
       assert.equal(first.conn.held, null, "the resync took the snapshot");
-      await actor.hello(first.conn, { clientId: "c1", resumeFrom: 4 });
+      await hello(actor, first.conn, { clientId: "c1", resumeFrom: 4 });
       holding = false;
       await until(() => first.conn.closed, "the socket closes");
       const kept = keptRefusal(first.sent, 3);
@@ -4208,13 +4220,13 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       const { db, actor, open, roll } = await faultRoom(new SnapshotBudget({ sessionCount: 1 }));
       try {
         const first = open();
-        await actor.hello(first.conn, { clientId: "c1", resumeFrom: 1 });
+        await hello(actor, first.conn, { clientId: "c1", resumeFrom: 1 });
         for (const n of [1, 2]) {
           await actor.op(first.conn, n, roll());
           assert.notEqual(await answerTo(first.sent, n), "stuck", `fault ${n} is answered`);
         }
         const back = open(failing ? { failing: "refusals" } : {});
-        await actor.hello(back.conn, { clientId: "c1", resumeFrom: 3 });
+        await hello(actor, back.conn, { clientId: "c1", resumeFrom: 3 });
         assert.ok(back.sent.some((m) => m.t === "wait") && back.conn.held === null, "its snapshot is delayed");
         // A crafted client need not wait for its snapshot to send.
         await actor.op(back.conn, 3, roll());
@@ -4260,7 +4272,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
         assert.ok(actor);
         try {
           const table = connect(actor, pat, "player");
-          await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+          await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
           await actor.op(table.conn, 1, op(sceneId));
           const ev = await answerTo(table.sent, 1);
           assert.ok(ev !== "stuck" && ev.rejects?.[0], `${what}: refused`);
@@ -4290,7 +4302,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     assert.ok(actor);
     try {
       const table = connect(actor, dm);
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
       // One batch: the goblin walks into the area, and Ayla is blinded, so the party sees nothing by the batch's end.
       void actor.op(table.conn, 1, { t: "token.move", tokenId: goblinId, x: 14, y: 2 });
       await actor.op(table.conn, 2, { t: "actor.effect.add", target: { characterId }, effect: { id: "b", key: "blinded" } });
@@ -4319,7 +4331,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     assert.ok(actor);
     try {
       const phone = connect(actor, player, "player");
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(phone.conn, 1, { t: "door.set", sceneId, door: { edge: "91,50,w" }, state: "open", by: pcId });
       const answer = await answerTo(phone.sent, 1);
       assert.ok(answer !== "stuck");
@@ -4360,8 +4372,8 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     try {
       const table = connect(actor, dm);
       const phone = connect(actor, player, "player");
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       // Prepare a redo while movement is unrestricted, so the unchanged closed-door control has the same history.
       await actor.op(phone.conn, 1, { t: "token.move", tokenId: pcId, x: 12, y: 5, ...(routed ? { route: [[12, 5, 0, 0]] } : {}) });
       const moved = await answerTo(phone.sent, 1);
@@ -4498,7 +4510,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     assert.ok(actor);
     try {
       const phone = connect(actor, player, "player");
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       // The device holds no heights there, so it sends the walk at 0 ft.
       await actor.op(phone.conn, 1, { t: "token.move", tokenId: pcId, x: 7, y: 14, elevation: 0 });
       const walked = await answerTo(phone.sent, 1);
@@ -4529,7 +4541,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       assert.equal(actor.committed.state.tokens[pcId]!.elevation, 20);
       // The DM's moves, and a player's where fog is off, whose copy holds the whole build, keep the height they send.
       const table = connect(actor, dm);
-      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
       await actor.op(table.conn, 1, { t: "token.move", tokenId: pcId, x: 8, y: 16, elevation: 25 });
       await answerTo(table.sent, 1);
       assert.equal(actor.committed.state.tokens[pcId]!.elevation, 25);
@@ -4570,7 +4582,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       assert.ok(actor);
       try {
         const phone = connect(actor, player, "player");
-        await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+        await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
         // The device holds no heights there, so it sends 0 ft.
         await sendWithHistory(actor, phone.conn, 1, op);
         const answer = await answerTo(phone.sent, 1);
@@ -4640,7 +4652,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     assert.ok(actor);
     try {
       const phone = connect(actor, player, "player");
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(phone.conn, 1, { t: "token.move", tokenId: pcId, x: 7, y: 14, elevation: 0 });
       const off = await answerTo(phone.sent, 1);
       assert.ok(off !== "stuck" && !off.rejects?.length, JSON.stringify(off !== "stuck" && off.rejects));
@@ -4669,7 +4681,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     assert.ok(actor);
     try {
       const phone = connect(actor, player, "player");
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(phone.conn, 1, { t: "token.move", tokenId: pcId, x: 5, y: 14, elevation: 0 });
       const moved = await answerTo(phone.sent, 1);
       assert.ok(moved !== "stuck" && !moved.rejects?.length, JSON.stringify(moved !== "stuck" && moved.rejects));
@@ -4698,7 +4710,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     assert.ok(actor);
     try {
       const phone = connect(actor, player, "player");
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(phone.conn, 1, { t: "token.detach", tokenId: pcId, x: 4, y: 13, elevation: 5 });
       const off = await answerTo(phone.sent, 1);
       assert.ok(off !== "stuck" && !off.rejects?.length, JSON.stringify(off !== "stuck" && off.rejects));
@@ -4723,7 +4735,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     assert.ok(actor);
     try {
       const phone = connect(actor, player, "player");
-      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(phone.conn, 1, { t: "door.set", sceneId, door: { edge: "91,50,w" }, state: "closed", by: pcId });
       const answer = await answerTo(phone.sent, 1);
       assert.ok(answer !== "stuck" && !answer.rejects?.length, JSON.stringify(answer !== "stuck" && answer.rejects));
@@ -4768,7 +4780,7 @@ for (const pendingCommit of [false, true]) test(`role resync clears all four his
   t.after(() => actor.shutdown({ code: 1012, snapshot: false }));
   const { conn, sent } = connect(actor, dm);
   const clientId = uuidv7();
-  await actor.hello(conn, { clientId, resumeFrom: 1 });
+  await hello(actor, conn, { clientId, resumeFrom: 1 });
   const history = () => historyMessageSchema.parse(sent.findLast((m) => m.t === "history"));
   let n = 0;
   const accepted = async (op: Op) => {
@@ -4802,7 +4814,7 @@ for (const pendingCommit of [false, true]) test(`role resync clears all four his
     })()), "changed");
     release();
     await actor.deletionStep(async () => ({ deleted: [], result: undefined }));
-    await actor.hello(conn, { clientId, resumeFrom: n + 1 });
+    await hello(actor, conn, { clientId, resumeFrom: n + 1 });
     const cleared = history();
     assert.deepEqual([cleared.play.undo.depth, cleared.play.redo.depth], [0, 0]);
     if (nextRole === "dm") assert.deepEqual([cleared.setup!.undo.depth, cleared.setup!.redo.depth], [0, 0]);
@@ -4824,7 +4836,7 @@ test("member kind changes clear disconnected DM histories before a player reconn
   assert.ok(actor);
   t.after(() => actor.shutdown({ code: 1012, snapshot: false }));
   const original = connect(actor, dm);
-  await actor.hello(original.conn, { clientId: uuidv7(), resumeFrom: 1 });
+  await hello(actor, original.conn, { clientId: uuidv7(), resumeFrom: 1 });
   await actor.op(original.conn, 1, { t: "token.move", tokenId, x: 2, y: 1 });
   assert.notEqual(await answerTo(original.sent, 1), "stuck");
   const head = historyMessageSchema.parse(original.sent.findLast((m) => m.t === "history")).play.undo.head;
@@ -4832,7 +4844,7 @@ test("member kind changes clear disconnected DM histories before a player reconn
   original.conn.close(1000);
   await actor.sys({ t: "sys.memberSetKind", memberId: dm.id, kind: "player" });
   const player = connect(actor, dm, "player");
-  await actor.hello(player.conn, { clientId: uuidv7(), resumeFrom: 1 });
+  await hello(actor, player.conn, { clientId: uuidv7(), resumeFrom: 1 });
   const history = historyMessageSchema.parse(player.sent.findLast((m) => m.t === "history"));
   assert.equal(history.play.undo.head, null);
   assert.equal(history.setup, undefined);

@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,6 +14,7 @@ import { TEST_DATABASE_URL, testConfig } from "../auth/testing.ts";
 import { applySchema } from "../db.ts";
 import type { Config } from "../config.ts";
 import type { RoomManager } from "./manager.ts";
+import { STANDING_CLOCK } from "./undoScopeTesting.ts";
 
 /**
  * The room engine's integration test kit: the whole app on the shared
@@ -50,6 +52,46 @@ export type Engine = {
   close(): Promise<void>;
 };
 
+/**
+ * Whether this run numbers rooms by the real clock, as production does
+ * (`ITEST_NUMBER_CLOCK=real`). By default the engine's rooms take a standing
+ * number clock (STANDING_CLOCK), so numbers count by one and each batch
+ * closes `batchMs` after it opens. The checks run the suite once each way.
+ */
+export const REAL_NUMBERS = process.env.ITEST_NUMBER_CLOCK === "real";
+
+/**
+ * A checker for the room numbers one test pins, in the order it reads them.
+ * Under the standing clock numbers count by one, so `pin(actual, n)` asserts
+ * that `actual` is `n`. Under the real clock they follow it and cannot be
+ * known ahead, so it asserts their order alone: a number pinned with a
+ * larger `n` than the one before is larger than every number pinned at that
+ * `n`, and one with a smaller `n` is smaller than all of them. Numbers
+ * pinned at the same `n` may differ under the real clock, since a frame
+ * carries the clock as its batch closes, past the answer it brings.
+ */
+export function numberOf(): (actual: number, n: number, what?: string) => void {
+  let group: { n: number; lo: number; hi: number } | null = null;
+  return (actual, n, what = "number") => {
+    if (!REAL_NUMBERS) {
+      assert.equal(actual, n, what);
+      return;
+    }
+    assert.ok(Number.isSafeInteger(actual) && actual > 0, `${what}: ${actual} is a number`);
+    if (group !== null && n > group.n) assert.ok(actual > group.hi, `${what}: ${actual} rises past ${group.hi}`);
+    if (group !== null && n < group.n) assert.ok(actual < group.lo, `${what}: ${actual} is below ${group.lo}`);
+    if (group === null || n !== group.n) group = { n, lo: actual, hi: actual };
+    else group = { n, lo: Math.min(group.lo, actual), hi: Math.max(group.hi, actual) };
+  };
+}
+
+/** The number an answered op took, read from the id of the log line it wrote. */
+export function lineNumber(ev: Extract<ServerMessage, { t: "ev" }>): number {
+  const line = ev.changes.find((c) => c.key.startsWith("log:"));
+  assert.ok(line, "the op wrote a line");
+  return Number(line.key.slice("log:".length).split(":")[0]);
+}
+
 export function randomIp(): string {
   const h = () => randomBytes(2).toString("hex");
   return `2001:db8:${h()}:${h()}::${h()}`;
@@ -66,7 +108,7 @@ export async function startEngine(opts: EngineOptions = {}): Promise<Engine> {
     const app = await buildApp({
       config,
       pool,
-      rooms: { idleUnloadMs: 200, ...opts.rooms },
+      rooms: { idleUnloadMs: 200, ...opts.rooms, actor: { ...(REAL_NUMBERS ? {} : { numberClock: STANDING_CLOCK }), ...opts.rooms?.actor } },
       ws: opts.ws,
       export: opts.export,
       assets: opts.assets,

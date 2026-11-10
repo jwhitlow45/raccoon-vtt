@@ -12,6 +12,7 @@ import { SnapshotBudget } from "./budgets.ts";
 import { Connection } from "./connection.ts";
 import type { RoomGateway } from "./gateway.ts";
 import type { Pool } from "./persistence.ts";
+import { STANDING_CLOCK } from "./undoScopeTesting.ts";
 
 /**
  * PROTO-IDS-ARRAY-IDS in the room: a live op that adds an effect or an
@@ -88,7 +89,7 @@ function load(db: FakeDb): Promise<RoomActor | null> {
     log: quiet,
     budget: new SnapshotBudget(),
     gateway: {} as RoomGateway,
-    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000 },
+    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, numberClock: STANDING_CLOCK },
   };
   return RoomActor.load(deps);
 }
@@ -119,6 +120,8 @@ describe("a live op that adds an array entry with a reserved id", () => {
     try {
       const { conn, sent } = connect(actor, dm);
       await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      // A device sends ops once its snapshot has come, which the batch after the hello answers.
+      for (let i = 0; i < 1000 && !sent.some((m) => m.t === "snapshot"); i++) await new Promise((r) => setTimeout(r, 2));
       const target = { tokenId };
       const ops = [
         { t: "actor.effect.add", target, effect: { id: "__proto__", key: "blessed" } },

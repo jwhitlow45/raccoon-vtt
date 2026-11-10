@@ -220,7 +220,7 @@ describe("the build and the write of that snapshot", () => {
     });
   }
 
-  test("a batch that answered nothing carries no snapshot, and the answer after it carries it", async (t) => {
+  test("a batch that answered nothing stores nothing and carries no snapshot, and the answer after it carries it", async (t) => {
     const f = scopeFixture();
     const sceneId = f.sceneId;
     const db = new StoredRoomDb(f.state, { version: OLD });
@@ -269,9 +269,8 @@ describe("the build and the write of that snapshot", () => {
       const next = began[i + 1] ?? now();
       return { rows: next.rows - b.rows, marks: next.marks - b.marks, snapshot: next.writes > b.writes };
     });
-    const empty = own.filter((c) => c.rows === 0 && c.marks === 0);
-    assert.ok(empty.length > 0, `a commit landed while the ask read and answered nothing: ${JSON.stringify(own)}`);
-    assert.ok(empty.every((c) => !c.snapshot), "no snapshot rode on a commit that answered nothing");
+    // The batch the reading began closes with nothing to store, so it opens no transaction at all and carries no snapshot.
+    assert.ok(own.every((c) => c.rows !== 0 || c.marks !== 0), `every commit that landed answered something: ${JSON.stringify(own)}`);
     assert.equal(db.snapshotWrites, 1);
     assert.ok(own.some((c) => c.snapshot && c.marks > 0), `the snapshot rode on the ask's answer: ${JSON.stringify(own)}`);
     assert.equal(db.pub, 3);

@@ -6,7 +6,7 @@ import { uuidv7 } from "#shared/ids.ts";
 import type { LogEntry } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { heldOpLines } from "../rooms/logHistory.ts";
-import { startEngine, type Engine } from "../rooms/testing.ts";
+import { lineNumber, startEngine, type Engine } from "../rooms/testing.ts";
 
 /**
  * The receipt lookup's archive reads (log history, server stage B): an op
@@ -67,7 +67,7 @@ describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
     assert.ok(rolled.acks?.length);
     await fill(roomId, dm);
     const state = t.manager.get(roomId)!.committed.state;
-    assert.equal(heldOpLines(state, { memberId: pipId, role: "player" }, rolled.seq), null, "the roll's lines have left the live log");
+    assert.equal(heldOpLines(state, { memberId: pipId, role: "player" }, lineNumber(rolled)), null, "the roll's lines have left the live log");
     const nulls = await t.pool.query("select 1 from room_log where room_id = $1 and seq is null", [roomId]);
     assert.equal(nulls.rowCount, 0, "this server wrote every row with its metadata");
 
@@ -96,7 +96,7 @@ describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
     const tag = uuidv7();
     const rolled = await pipSocket.apply({ t: "dice.roll", tag, to: "all", rolls: [{ formula: "1d20" }] } as Op);
     await fill(roomId, dm);
-    assert.equal(heldOpLines(t.manager.get(roomId)!.committed.state, { memberId: pipId, role: "player" }, rolled.seq), null);
+    assert.equal(heldOpLines(t.manager.get(roomId)!.committed.state, { memberId: pipId, role: "player" }, lineNumber(rolled)), null);
     const holder = await t.pool.connect();
     try {
       await holder.query("begin");
@@ -188,7 +188,7 @@ describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
       const parts = res.json<Lookup>().parts;
       assert.equal(parts.length, 1);
       const part = parts[0]!;
-      assert.ok(part.state === "committed" && part.seq === rolled.seq);
+      assert.ok(part.state === "committed" && part.seq === lineNumber(rolled));
       assert.equal(part.state === "committed" && part.lines.length, 1, "the op's line, from the state that holds it");
     } finally {
       beforeQuery = null;

@@ -94,12 +94,13 @@ describe("players' maps over the socket and the store", () => {
     await dmSocket.apply({ t: "token.move", tokenId: pc, x: 2, y: 5 });
     await sync();
     const mark = pipSeat.changes.length;
-    const paint = await dmSocket.apply({ t: "build.paint", sceneId, terrain: "wood", cells: ["14,5"] });
+    await dmSocket.apply({ t: "build.paint", sceneId, terrain: "wood", cells: ["14,5"] });
     await dmSocket.apply({ t: "build.edge", sceneId, edges: [{ key: "15,5,w", feature: { kind: "wall" } }] });
     await sync();
 
-    // The ev names the paint's number, the room count (counted.ts), which the map step's row right after it carries too.
-    const ops = await t.pool.query<{ t: string }>("select op->>'t' as t from room_ops where room_id = $1 and pub = $2 order by seq", [roomId, paint.seq]);
+    // The paint's number (counted.ts), which the map step's row right after it carries too.
+    const painted = await t.pool.query<{ pub: string }>("select pub::text from room_ops where room_id = $1 and op->>'t' = 'build.paint' order by seq desc limit 1", [roomId]);
+    const ops = await t.pool.query<{ t: string }>("select op->>'t' as t from room_ops where room_id = $1 and pub = $2 order by seq", [roomId, painted.rows[0]!.pub]);
     assert.deepEqual(ops.rows.map((r) => r.t), ["build.paint", "sys.remember"], "the map step ends the edit's own batch");
     const live = t.manager.get(roomId)!.committed.state;
     assert.equal(live.memory?.[chunkKey(sceneId, 0, 0)]?.cells?.["14,5"], "stone");

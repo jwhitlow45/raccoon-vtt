@@ -82,11 +82,13 @@ import { SAVE_CANNOT_REOPEN, type SaveOutcomeTransition } from "#shared/saveOutc
  * One queue carries ops, `hello`s and room-level commands. Each command is
  * handled synchronously against the staged state, so nothing can interleave
  * between a snapshot and the events after it. Ops accumulate in a batch
- * that commits in one transaction after 20 ms or at 50 ops. While a commit
- * is in flight the queue waits, so a batch is always built on the committed
- * state before it, and nothing is published or acknowledged until its rows
- * are durable. After the commit, every connection gets one `ev` with the
- * batch's changes for its viewer plus that client's acks and refusals.
+ * that commits in one transaction at the next 20 ms tick of the clock or at
+ * 50 answers. While a commit is in flight the queue waits, so a batch is
+ * always built on the committed state before it, and nothing is published
+ * or acknowledged until its rows are durable. After the commit, every
+ * connection gets one `ev` with the batch's changes for its viewer plus
+ * that client's acks and refusals, and every snapshot and resent ack the
+ * batch's devices asked for is answered then too.
  */
 export type Logger = Pick<FastifyBaseLogger, "info" | "warn" | "error" | "debug">;
 
@@ -103,6 +105,14 @@ export type ActorOptions = {
   retryBaseMs: number;
   retryMaxMs: number;
   now: Clock;
+  /**
+   * The clock room numbers follow (docs/design/design-v1-room-count.md): each
+   * number a device gets is at least its reading, and batches close on its
+   * grid of `batchMs`. Null reads `now`. Tests that pin small numbers pass
+   * one that stands still, so numbers count by one and a batch closes
+   * `batchMs` after it opens.
+   */
+  numberClock: Clock | null;
   /** The size guard's byte limits (design 10.5), lowered only by tests that fill a room. */
   sizeLimits: { stateLimit?: number; sceneLimit?: number };
   /** The dice's draw (docs/design/design-v1-dice.md 4.2). Only tests script it. */
@@ -144,6 +154,7 @@ export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   retryBaseMs: 250,
   retryMaxMs: 5_000,
   now: Date.now,
+  numberClock: null,
   sizeLimits: {},
   draw: serverDraw,
   receiptCaps: {},
@@ -210,8 +221,13 @@ type Watermark = { sessionId: string; clientId: string; staged: number; committe
  */
 type AskChain = { group: string; next: number; at: number; state: RoomState; totals: Map<string, number>; over: boolean; wing?: WingFootprint };
 
-/** An ask being read (#readAsk): the op and where its sender stands, its chain, the next of its ops to read, the context they read in, and a wing's refusal. */
-type AskRead = { key: ClientKey; wm: Watermark; n: number; op: OpOf<"build.ask">; group: string; viewer: Viewer; chain: AskChain; next: number; ctx: { seq: number; at: string }; refused?: string };
+/**
+ * An ask being read (#readAsk): the op and where its sender stands, its
+ * chain, the next of its ops to read, the context they read in, the
+ * clocks it arrived at, which its answer's number comes from, and a
+ * wing's refusal.
+ */
+type AskRead = { key: ClientKey; wm: Watermark; n: number; op: OpOf<"build.ask">; group: string; viewer: Viewer; chain: AskChain; next: number; ctx: { seq: number; at: string }; moment: Moment; refused?: string };
 
 /** How long a gesture's asks wait for their next part before the server lets them go (MD4-ASTRA-6): the device sends every part at once. */
 export const ASK_CHAIN_MS = 30_000;
@@ -222,6 +238,17 @@ export const ASK_CHAIN_MS = 30_000;
  * as a batch holding that op alone.
  */
 const ASK_TURN_MS = 8;
+
+/**
+ * How far a counted op's number may run ahead of the server's clock and
+ * still be its lines' time (#atOf). Answers that share a millisecond run
+ * ahead by one each, and a room whose numbers lead by more, after the clock
+ * was set back, dates its lines by the clock.
+ */
+const AT_LEAD_MS = 1_000;
+
+/** A room that loads with numbers this far ahead of the clock warns the operator once. */
+const NUMBERS_AHEAD_WARN_MS = 5 * 60_000;
 
 /** What a device is told when its op threw before it was staged (#commandFailed). */
 const OP_FAULT_WORDS = "That change could not be made: something went wrong on the server.";
@@ -253,6 +280,16 @@ type Command =
   /** The server's music tick (docs/design/design-v1-music.md 6.4), computed when the queue reaches it, never before. */
   | { t: "soundTick" };
 
+/** The server's clock and the number clock, read together, once for each command (#moment). */
+type Moment = { now: number; number: number };
+
+/**
+ * A request a batch answers at its close (#answerReads): a snapshot, the
+ * hello's or a delayed one's, or the ack of an op resent after its commit
+ * with the history after it.
+ */
+type Read = { conn: Connection; key: ClientKey; resent?: number };
+
 type Batch = {
   history?: Map<string, HistoryMessage>;
   before: RoomState;
@@ -277,21 +314,22 @@ type Batch = {
   /** The running estimate of each layer's memory through the batch, by layerKey (5.3, the ask): what it holds plus what each op could add. */
   estimate: Map<string, number>;
   watermarks: Map<ClientKey, number>;
-  hellos: Array<{ conn: Connection; key: ClientKey }>;
+  /** The requests answered once the batch commits, in the order they came. */
+  reads: Read[];
   /** Sockets that close once this batch is published to them, each with its refusal of its third fault (#closeOnPublish). */
   closing: Connection[];
   sys: Array<{ resolve: () => void; reject: (err: Error) => void }>;
   /** The receipts of the tagged ops this batch settles (docs/design/design-v1-dice.md 1.2), durable with it. */
   receipts: Receipt[];
   timer: NodeJS.Timeout | null;
-  /** Whether `timer` runs from the batch's first answer: one an uncounted op or a hello started runs again from it (#scheduleCommit). */
-  timedFromAnswer: boolean;
-  /** How many times the room count moved since the batch opened: its answers, taken or refused. */
+  /** How many members' ops the batch answered since it opened, taken or refused. */
   answered: number;
   state: RoomState;
   seq: number;
-  /** The room count as the batch began to commit, the number its frames carry. */
+  /** The number the batch's frames carry, fixed at its close (#closeNumbers). */
   pub: number;
+  /** The stored room number at its close, which the commit writes as `rooms.pub`. */
+  stored: number;
 };
 
 /** `number` is the one the op's envelope took (#reduce). */
@@ -421,16 +459,29 @@ export class RoomActor {
   #onIdle: ((actor: RoomActor) => void) | undefined;
   #closeWrites: CloseWrites;
   #committed: { state: RoomState; seq: number; pub: number; through: number };
+  /** The stored room number the last commit wrote, which an abandoned batch's answers go back to. */
+  #committedStored: number;
   #staged: { state: RoomState; seq: number };
   /**
-   * The room count (counted.ts): every number a device gets is made from it,
-   * and never from `seq`, which storage alone reads. It moves once for each
-   * member's op the room answers, taken or refused, and each member change
-   * applied over HTTP (#countAnswer, #reduce), and never for an op the
-   * server makes to keep its books. The two are never compared: the count
-   * runs ahead of `seq` by refusals and behind it by bookkeeping rows.
+   * The stored room number (counted.ts), which every row's envelope and
+   * `rooms.pub` are written from, never `seq`, which storage alone reads. It
+   * moves only for a member's op the room answers, taken or refused, and a
+   * member change applied over HTTP (#countAnswer, #reduce), and at the
+   * close of a batch that answered one (#closeNumbers), never for an op the
+   * server makes to keep its books. The two are never compared.
    */
   #pub: number;
+  /**
+   * The highest number any device was sent or any answer took, in memory
+   * only, so a device's read never moves what is stored. A counted answer
+   * takes the larger of this plus one and the number clock. It rises
+   * whenever #pub does, so it is never below it, and a load sets it to #pub:
+   * the clock has passed every number handed out before.
+   */
+  #handed: number;
+  #numberClock: Clock;
+  /** The clocks the command being handled read at its start, which its number, its lines' times and `lastOpAt` come from. */
+  #moment: Moment | null = null;
   /**
    * Whether the room was loaded from a snapshot below COUNT_SNAPSHOT_VERSION
    * and still needs one at today's version, which its next commit carries
@@ -556,6 +607,13 @@ export class RoomActor {
     this.#committed = { state: loaded.state, seq: loaded.seq, pub: loaded.pub, through: loaded.through };
     this.#staged = this.#committed;
     this.#pub = loaded.pub;
+    this.#handed = loaded.pub;
+    this.#committedStored = loaded.pub;
+    this.#numberClock = this.#opts.numberClock ?? this.#opts.now;
+    // A clock set back across a restart, or an imported file, leaves numbers ahead of it, and the room counts by one
+    // until the clock passes them. The operator is told once, as the room loads.
+    const aheadMs = loaded.pub - this.#numberClock();
+    if (aheadMs > NUMBERS_AHEAD_WARN_MS) this.#log.warn({ roomId: this.roomId, aheadMs }, "room numbers are ahead of the server's clock: check the clock");
     // A room whose replay failed writes no snapshot at all, so a fixed build can still rebuild it from its rows.
     this.#countSnapshotDue = !loaded.replayFailed && loaded.snapshotVersion < COUNT_SNAPSHOT_VERSION;
     this.#snapshotSeq = loaded.snapshotSeq;
@@ -1076,10 +1134,14 @@ export class RoomActor {
         // Caught here and not by each caller: a drain also runs from a timer, a turn or a commit's end, where nothing else would catch it.
         const batch = this.#batch;
         const records = batch?.ops.length ?? 0;
+        // One reading for the whole command, its fault's refusal included (#moment).
+        this.#moment = this.#clocks();
         try {
           this.#handle(cmd);
         } catch (err) {
           this.#commandFailed(cmd, err, batch, records);
+        } finally {
+          this.#moment = null;
         }
         if (this.#batch && this.#batch.answered >= this.#opts.maxBatchOps) this.#commitNow();
       }
@@ -1234,8 +1296,7 @@ export class RoomActor {
       case "hello":
         return this.#processHello(cmd);
       case "snapshot":
-        // A preview is never its client's current socket, and its key is its own (Connection.key).
-        if (!cmd.conn.closed && (cmd.conn.previewBy !== null || this.#clients.get(cmd.key) === cmd.conn)) this.#snapshot(cmd.conn, cmd.key);
+        if (this.#snapshotOwed(cmd.conn, cmd.key)) this.#readSnapshot(cmd.conn, cmd.key);
         return;
       case "sys":
         return this.#processSys(cmd);
@@ -1309,8 +1370,9 @@ export class RoomActor {
       return;
     }
     if (n <= wm.committed) {
-      conn.send({ t: "ev", seq: this.#committed.pub, changes: [], acks: [n] });
-      this.#sendHistory(conn);
+      // Answered at the batch's close like every read, with the history after it (#answerReads).
+      this.#ensureBatch().reads.push({ conn, key, resent: n });
+      this.#scheduleCommit();
       return;
     }
     if (n <= wm.staged) return;
@@ -1372,7 +1434,9 @@ export class RoomActor {
     let saveOutcomeMissing = false;
     // Lifecycle retention and the stored restore must use the same envelope
     // time, including an Undo that arrives exactly at the retention limit.
-    const at = new Date(this.#opts.now()).toISOString();
+    // Nothing between here and #reduce moves the numbers, so this is the
+    // number the op takes there.
+    const at = this.#atOf(this.#nextNumber());
     if (op.t === "undo" && op.log !== undefined) {
       // Taking an HP change back from the log (features section 10): not a
       // step of anyone's stack, but a restore built from the log line and
@@ -1848,7 +1912,8 @@ export class RoomActor {
       return;
     }
     // Read from a turn of its own, so no turn holds the end of what came before, such as an earlier part's answer, and an op of this one.
-    const read: AskRead = { key, wm, n, op, group, viewer, chain, next: 0, ctx: { seq: this.#nextNumber(), at: new Date(this.#opts.now()).toISOString() } };
+    const number = this.#nextNumber();
+    const read: AskRead = { key, wm, n, op, group, viewer, chain, next: 0, ctx: { seq: number, at: this.#atOf(number) }, moment: this.#now() };
     this.#reading = read;
     setImmediate(() => this.#readOn(read));
   }
@@ -1889,6 +1954,8 @@ export class RoomActor {
   /** The next turn of an ask being read, and its answer once read, after which the queue goes on. */
   #readOn(read: AskRead): void {
     if (this.#reading !== read || this.#closed) return;
+    // Its answer, or its fault's refusal, takes its number from when the ask came, as a queued command's does.
+    this.#moment = read.moment;
     try {
       if (!this.#readAsk(read)) {
         setImmediate(() => this.#readOn(read));
@@ -1914,6 +1981,8 @@ export class RoomActor {
       this.#fault("ask read failed", err, conn, "build.ask", keepOpen);
       // A batch the reading began (#memoryEstimate) would otherwise wait for another command to commit it.
       this.#scheduleCommit();
+    } finally {
+      this.#moment = null;
     }
     this.#drain();
   }
@@ -1946,20 +2015,23 @@ export class RoomActor {
   /**
    * Steps 7 and 8: reduce on the staged state, then check the limits on what
    * came out. `asks` refuses with FORGET_ASK an op that would pass a layer's
-   * cap. A counted op (counted.ts) reduces with the next number of the room
-   * count, an uncounted one with the count as it stands.
+   * cap. A counted op (counted.ts) reduces with the next number (#nextNumber)
+   * and the time made from it, an uncounted one with the stored number as
+   * it stands and the clock.
    *
    * An op that passes is installed in one step with nothing in it that can
    * throw, everything it needs made before: its row joins the batch with
-   * the staged state, `seq` and the count moving, and the fan-out's keys.
+   * the staged state, `seq` and the numbers moving, and the fan-out's keys.
    * So a throw before the install leaves no trace of the op and no gap in
-   * `seq`, and its refusal (#refuseFault) moves the count once. A throw
+   * `seq`, and its refusal (#refuseFault) takes a number once. A throw
    * after it keeps all of the op, its row once and its keys, whose number
    * #settleStaged settles, and the next op's numbers stay above it.
    */
-  #reduce(op: Op, viewer: Viewer, asks = false, at = new Date(this.#opts.now()).toISOString()): Reduced {
+  #reduce(op: Op, viewer: Viewer, asks = false, given?: string): Reduced {
     const counts = counted(op.t, OP_VERSION);
+    const moment = this.#now();
     const number = counts ? this.#nextNumber() : this.#pub;
+    const at = given ?? (counts ? this.#atOf(number) : new Date(moment.now).toISOString());
     const result = applyOp(this.#staged.state, op, viewer, counts ? { seq: number, at } : { seq: number, at, uncounted: true });
     if (!result.ok) return result;
     // The limits read the op as it would apply with no trap step: what a trap writes is reserved or counted ahead, so a
@@ -2017,7 +2089,7 @@ export class RoomActor {
     batch.ops.push(record);
     this.#staged = { state: result.state, seq };
     if (counts) {
-      this.#pub = number;
+      this.#pub = this.#handed = number;
       batch.answered++;
     }
     for (const key of result.touched) batch.touched.push(key);
@@ -2025,7 +2097,7 @@ export class RoomActor {
     if (result.rejudge) batch.rejudge = true;
     if (springing !== null) this.#sizes.grew(springing, grown);
     memory?.commit();
-    if (counts) this.lastOpAt = this.#opts.now();
+    if (counts) this.lastOpAt = moment.now;
     // An area's reminder is judged on the sight this op left, not cut to explored ground (pendingGround), so that sight
     // is explored at once: a later op in the batch that looks away must not leave the line resting on ground never held.
     if (result.log.some((e) => e.data?.type === "area")) this.#exploreNow(batch);
@@ -2048,21 +2120,50 @@ export class RoomActor {
     };
   }
 
-  /** The number the next counted op takes: the room count's next. A preflight that reads an op as it would apply reads it too. */
+  /**
+   * The number the next counted answer takes: the number clock as the
+   * command read it, or one past the highest number handed out when that is
+   * later, so numbers only ever rise. A preflight that reads an op as it
+   * would apply reads it too, in the same command, so it gets the same one.
+   */
   #nextNumber(): number {
-    return this.#pub + 1;
+    return Math.max(this.#handed + 1, this.#now().number);
   }
 
   /**
-   * An answer that stores no row of its own moves the room count, a refusal
-   * or a taken op answered without one, as #reduce moves it for an op it
+   * A counted op's time: its number as a date while that is the clock or up
+   * to AT_LEAD_MS ahead of it, so a line's time and number agree, and the
+   * clock otherwise. Under a standing number clock, and with numbers far
+   * ahead of a clock set back, lines are dated by the clock, which sound
+   * starts and save outcome retention read.
+   */
+  #atOf(number: number): string {
+    const now = this.#now().now;
+    const lead = number - now;
+    return new Date(lead >= 0 && lead <= AT_LEAD_MS ? number : now).toISOString();
+  }
+
+  /** The clocks the command being handled read, or a reading now for work outside a command. */
+  #now(): Moment {
+    return this.#moment ?? this.#clocks();
+  }
+
+  /** The server's clock and the number clock, read once when they are the same clock, so a number and its time agree. */
+  #clocks(): Moment {
+    const now = this.#opts.now();
+    return { now, number: this.#numberClock === this.#opts.now ? now : this.#numberClock() };
+  }
+
+  /**
+   * An answer that stores no row of its own takes a number, a refusal or a
+   * taken op answered without one, as #reduce gives one to an op it
    * installs. `lastOpAt`, which eviction reads, moves with it.
    */
   #countAnswer(batch: Batch): void {
-    const now = this.#opts.now();
-    this.#pub++;
+    const number = this.#nextNumber();
+    this.#pub = this.#handed = number;
     batch.answered++;
-    this.lastOpAt = now;
+    this.lastOpAt = this.#now().now;
   }
 
   #permissionDeps(viewer: Viewer, facts: Map<string, AssetFact>): PermissionDeps {
@@ -2178,17 +2279,14 @@ export class RoomActor {
     }
     const settled = cmd.resumeFrom - 1;
     if (settled > wm.committed) {
-      // The client says every lower n is settled: raise through the next
-      // batch and answer once that is durable, so the watermark it gets
-      // back is one it can rely on.
+      // The client says every lower n is settled: raise through the batch
+      // and answer once that is durable, so the watermark it gets back is
+      // one it can rely on.
       if (settled > wm.staged) wm.staged = settled;
       const batch = this.#ensureBatch();
       batch.watermarks.set(key, Math.max(batch.watermarks.get(key) ?? 0, wm.staged));
-      batch.hellos.push({ conn, key });
-      this.#scheduleCommit();
-      return;
     }
-    this.#snapshot(conn, key);
+    this.#readSnapshot(conn, key);
   }
 
   /**
@@ -2215,7 +2313,25 @@ export class RoomActor {
         return;
       }
     }
-    this.#snapshot(conn, key);
+    this.#readSnapshot(conn, key);
+  }
+
+  /**
+   * A snapshot asked for, by a hello or as a delayed one's wait ends, joins
+   * the open batch as a read (opening one if none is), and is built from
+   * the committed state once that batch commits, with its number
+   * (#answerReads). So each number a device gets is a tick at or after its
+   * own request, and a request waits behind a commit being retried, as an
+   * op does.
+   */
+  #readSnapshot(conn: Connection, key: ClientKey): void {
+    this.#ensureBatch().reads.push({ conn, key });
+    this.#scheduleCommit();
+  }
+
+  /** Whether a snapshot asked for on `conn` is still owed: a preview is never its client's current socket, and its key is its own (Connection.key). */
+  #snapshotOwed(conn: Connection, key: ClientKey): boolean {
+    return !conn.closed && (conn.previewBy !== null || this.#clients.get(key) === conn);
   }
 
   /** Whether a preview's player is still a player on the roster. One who is not ends the preview: another player means a new socket. */
@@ -2225,7 +2341,8 @@ export class RoomActor {
     return false;
   }
 
-  #snapshot(conn: Connection, key: ClientKey): void {
+  /** A snapshot of the committed state, sent at the close of the batch `pub` numbers (#answerReads), unless the snapshot budget delays it. */
+  #snapshot(conn: Connection, key: ClientKey, pub: number): void {
     if (conn.closed) return;
     const budgetKeys = this.#budget.keys(conn.sessionId, conn.ip, this.pinned);
     const delay = this.#budget.delay(budgetKeys);
@@ -2234,7 +2351,7 @@ export class RoomActor {
       return;
     }
     const wm = this.#watermarks.get(key);
-    const snapshot = buildSnapshot(this.#committed.state, this.#committed.pub, conn, wm?.committed ?? 0);
+    const snapshot = buildSnapshot(this.#committed.state, this.#handOut(pub), conn, wm?.committed ?? 0);
     // Ahead of the snapshot, which settles the ops they name with no answer, so the page says why each was refused.
     const refused = takeKeptRejects(conn);
     if (refused.length > 0) conn.send({ t: "refusals", rejects: refused });
@@ -2243,7 +2360,7 @@ export class RoomActor {
     conn.send({ t: "clock", at: new Date(this.#opts.now()).toISOString() });
     const bytes = conn.send(snapshot.message);
     conn.held = snapshot.held;
-    this.#sendHistory(conn);
+    this.#sendHistory(conn, pub);
     // A device that takes a snapshot drops every other screen's preview it showed (client/state/store.ts keepLocal), so
     // the server counts it as holding none, and an end it missed while it resynced leaves nothing behind (review
     // PV3-ASTRA-4).
@@ -2298,8 +2415,9 @@ export class RoomActor {
     if (!this.#batch) {
       // A batch begun while another commits, as an ask read in turns may begin one (MD4-ASTRA-10), starts where that one ends.
       const after = this.#inFlight;
+      const before = after?.state ?? this.#committed.state;
       this.#batch = {
-        before: after?.state ?? this.#committed.state,
+        before,
         ops: [],
         touched: [],
         global: false,
@@ -2314,26 +2432,26 @@ export class RoomActor {
         doors: [],
         estimate: new Map(),
         watermarks: new Map(),
-        hellos: [],
+        reads: [],
         closing: [],
         sys: [],
         receipts: [],
         timer: null,
-        timedFromAnswer: false,
         answered: 0,
-        state: after?.state ?? this.#committed.state,
+        state: before,
         seq: after?.seq ?? this.#committed.seq,
         pub: 0,
+        stored: 0,
       };
     }
     return this.#batch;
   }
 
   /**
-   * The batch commits once it holds `maxBatchOps` answers, or `batchMs`
-   * after its first answer. A batch an uncounted op or a hello opened runs a
-   * timer of its own until an answer joins it, which starts the timer again
-   * from that moment, so members' ops group by when they came alone.
+   * The batch commits at the next multiple of `batchMs` on the number
+   * clock, whoever opened it and whatever joined it, or at once when it
+   * holds `maxBatchOps` answers. A batch that could not close while another
+   * committed takes the next tick after that commit lands (#runCommit).
    */
   #scheduleCommit(): void {
     const batch = this.#batch;
@@ -2342,16 +2460,12 @@ export class RoomActor {
       this.#commitNow();
       return;
     }
-    if (batch.timer && !batch.timedFromAnswer && batch.answered > 0) {
-      clearTimeout(batch.timer);
-      batch.timer = null;
-    }
     if (!batch.timer) {
-      batch.timedFromAnswer = batch.answered > 0;
+      const into = ((this.#numberClock() % this.#opts.batchMs) + this.#opts.batchMs) % this.#opts.batchMs;
       batch.timer = setTimeout(() => {
         batch.timer = null;
         this.#commitNow();
-      }, this.#opts.batchMs);
+      }, this.#opts.batchMs - into);
     }
   }
 
@@ -2361,12 +2475,15 @@ export class RoomActor {
     this.#batch = null;
     if (batch.timer) clearTimeout(batch.timer);
     batch.timer = null;
+    // The clock as the batch closes, never the tick it was due at, and read before the steps below, whose work a
+    // number must not carry.
+    const close = this.#numberClock();
     // A room whose replay failed keeps its stored tail for a fixed build and writes no row of its own: the next seq is one
     // that tail holds, or a gap in it.
     if (!this.replayFailed && (batch.answered > 0 || batch.doors.length > 0)) this.#explore(batch);
     batch.state = this.#staged.state;
     batch.seq = this.#staged.seq;
-    batch.pub = this.#pub;
+    this.#closeNumbers(batch, close);
     try {
       batch.history = this.#undo.summaries();
     } catch (err) {
@@ -2377,6 +2494,23 @@ export class RoomActor {
     }
     this.#inFlight = batch;
     this.#inFlightDone = this.#runCommit(batch);
+  }
+
+  /**
+   * The close's numbers. The batch's frames carry the number clock as it
+   * closed, or the highest number handed out when that is later, so every
+   * number the batch's answers took is at or below its frames'. A batch
+   * that answered a member stores that number and hands it out, whether or
+   * not the member is still there to be sent it. One that answered no one
+   * stores nothing new and hands the number out only as one of its frames
+   * goes to a device (#handOut): a batch with a read always sends one, a
+   * tick or a cleanup only when someone holds what it changed.
+   */
+  #closeNumbers(batch: Batch, close: number): void {
+    batch.pub = Math.max(this.#handed, close);
+    if (batch.answered > 0) this.#pub = this.#handed = batch.pub;
+    else if (batch.reads.length > 0) this.#handed = batch.pub;
+    batch.stored = this.#pub;
   }
 
   /**
@@ -2477,7 +2611,8 @@ export class RoomActor {
    * Appends a server-made op to the batch on the staged state, as stored and
    * replayed, logging rather than refusing one that fails. False when it
    * failed, so the map step can fail closed. Both its kinds are uncounted
-   * (counted.ts): it reduces at the room count as it stands and leaves it.
+   * (counted.ts): it reduces at the stored number as it stands, never the
+   * higher one handed out, and moves neither.
    */
   #appendServerOp(batch: Batch, op: OpOf<"sys.explore"> | OpOf<"sys.remember">, what: string): boolean {
     // Never reached while #commitNow skips the explore there: the tail a failed replay left holds the next seq, or a gap.
@@ -2526,10 +2661,14 @@ export class RoomActor {
         message: r.message ?? null,
         at: new Date(r.at).toISOString(),
       })),
-      pub: batch.pub,
+      // The stored number, never the frames' when only a read or a tick raised them past it: a restart counts on from
+      // here, and the clock has passed any number handed out above it.
+      pub: batch.stored,
     };
     const release = await this.#countSnapshot(batch, write);
     const lines = batch.ops.some((r) => r.log.length > 0);
+    // A batch of reads alone writes nothing, so it waits only for the commit before it, which it could not close during.
+    const stores = write.ops.length > 0 || write.watermarks.length > 0 || batch.receipts.length > 0 || write.name !== undefined || write.snapshot !== undefined;
     let attempt = 0;
     // Once a COMMIT's answer is lost, the batch may be durable, so nothing is
     // written again until a read says whether it is. A failed read proves
@@ -2537,7 +2676,7 @@ export class RoomActor {
     // and fail on their keys forever. So the read is retried with the same
     // backoff until it answers.
     let outcomeUnknown = false;
-    for (;;) {
+    while (stores) {
       try {
         if (outcomeUnknown) {
           if (await batchCommitted(this.#pool, this.roomId, write)) {
@@ -2564,8 +2703,9 @@ export class RoomActor {
       }
     }
     this.retrying = false;
-    // A room whose replay failed applies no op, so its reads stay where its replay stopped while refusals move the count.
+    // A room whose replay failed applies no op, so its reads stay where its replay stopped while refusals take numbers.
     this.#committed = { state: batch.state, seq: batch.seq, pub: batch.pub, through: this.replayFailed ? this.#committed.through : batch.pub };
+    this.#committedStored = batch.stored;
     this.#committedHistory = batch.history ?? new Map();
     this.#receipts.committed(batch.receipts);
     for (const [key, n] of batch.watermarks) {
@@ -2580,9 +2720,13 @@ export class RoomActor {
     // caught here, each owed snapshot and resync on its own socket, and the rest sets timers or drains the queue, which
     // catches per command (#drain) and whose flush cannot throw (#commitNow).
     try {
+      // Read by the fan-out as it builds each frame, so the number is handed out only by a batch that sends one (#closeNumbers).
+      const handOut = () => this.#handOut(batch.pub);
       const published = publishBatch(
         {
-          pub: batch.pub,
+          get pub() {
+            return handOut();
+          },
           before: batch.before,
           after: batch.state,
           touched: batch.touched,
@@ -2597,7 +2741,7 @@ export class RoomActor {
         },
         this.#connections,
         (key) => this.#clients.get(key),
-        (conn, delivered) => this.#sendHistory(conn, delivered),
+        (conn, delivered) => this.#sendHistory(conn, batch.pub, delivered),
         // A preview over a creature or stairs the batch took from a screen's copy ends there now (docs/design/design-v1-floors.md phase 3, 4.4).
         (conn, lost) => cancelLost(conn, lost, this.#connections),
       );
@@ -2611,14 +2755,7 @@ export class RoomActor {
       for (const conn of this.#connections) conn.close(1011, "internal error");
     }
     for (const s of batch.sys) s.resolve();
-    for (const h of batch.hellos) {
-      if (h.conn.closed || this.#clients.get(h.key) !== h.conn || h.conn.held !== null) continue;
-      try {
-        this.#snapshot(h.conn, h.key);
-      } catch (err) {
-        this.#fault("snapshot failed", err, h.conn, "hello");
-      }
-    }
+    this.#answerReads(batch);
     // After the batch and any snapshot it owed them, so each of these sockets was sent its last refusal (#closeOnPublish).
     for (const conn of batch.closing) this.#closeWithKept(conn);
     // After the owed snapshots, so a device that just took one on a scene this batch deleted is sent back too.
@@ -2632,6 +2769,30 @@ export class RoomActor {
     this.#drain();
     // A batch begun while it committed, outside the queue, which nothing could schedule then: an ask read meanwhile (MD4-ASTRA-10).
     this.#scheduleCommit();
+  }
+
+  /**
+   * Answers the reads a batch carried, after its own frames, from the
+   * committed state it left and with its number: each snapshot still owed,
+   * and each resent op's ack with the history after it. A socket that went,
+   * or that is waiting for a snapshot again, is sent no ack: that snapshot's
+   * watermark settles the op.
+   */
+  #answerReads(batch: Batch): void {
+    for (const read of batch.reads) {
+      const { conn, key } = read;
+      try {
+        if (read.resent !== undefined) {
+          if (conn.closed || conn.closing || conn.held === null) continue;
+          conn.send({ t: "ev", seq: this.#handOut(batch.pub), changes: [], acks: [read.resent] });
+          this.#sendHistory(conn, batch.pub);
+        } else if (this.#snapshotOwed(conn, key) && conn.held === null) {
+          this.#snapshot(conn, key, batch.pub);
+        }
+      } catch (err) {
+        this.#fault("snapshot failed", err, conn, read.resent === undefined ? "hello" : "resend");
+      }
+    }
   }
 
   /**
@@ -2689,17 +2850,27 @@ export class RoomActor {
     return this.#checkQuota();
   }
 
-  /** Histories are frozen with the commit, so a delayed snapshot never pairs an old view with staged heads. */
-  #sendHistory(conn: Connection, delivered = true): void {
+  /**
+   * Histories are frozen with the commit, so a delayed snapshot never pairs
+   * an old view with staged heads. `pub` is the number of the batch whose
+   * close sends it, the one the frame just before it carries.
+   */
+  #sendHistory(conn: Connection, pub: number, delivered = true): void {
     if (conn.closed || conn.held === null || conn.display || conn.previewBy !== null) return;
     const stored = this.#committedHistory.get(conn.memberId);
     const empty = { undo: { head: null, depth: 0 }, redo: { head: null, depth: 0 } };
     const { setup, ...common } = stored ?? { t: "history" as const, epoch: this.#undo.epoch, seq: 0, serial: 0, watermark: 0, play: empty, setup: empty };
     if (!delivered && this.#sentHistory.get(conn) === common.serial) return;
-    if (!delivered) conn.send({ t: "ev", seq: this.#committed.pub, changes: [] });
+    if (!delivered) conn.send({ t: "ev", seq: this.#handOut(pub), changes: [] });
     const watermark = conn.key === null ? 0 : (this.#watermarks.get(conn.key)?.committed ?? 0);
-    conn.send({ ...common, seq: this.#committed.pub, watermark, ...(conn.role === "dm" ? { setup: setup ?? empty } : {}) });
+    conn.send({ ...common, seq: pub, watermark, ...(conn.role === "dm" ? { setup: setup ?? empty } : {}) });
     this.#sentHistory.set(conn, common.serial);
+  }
+
+  /** `pub` as it goes to a device: the highest number handed out takes it (#handed). */
+  #handOut(pub: number): number {
+    if (pub > this.#handed) this.#handed = pub;
+    return pub;
   }
 
   /** A batch that could not commit while the room was shutting down. Its clients still hold those ops and resend them. */
@@ -2707,7 +2878,8 @@ export class RoomActor {
     this.retrying = false;
     this.#log.error({ err, roomId: this.roomId, ops: batch.ops.length }, "batch abandoned at shutdown");
     this.#staged = this.#committed;
-    this.#pub = this.#committed.pub;
+    // The numbers it handed out stay handed out: only the stored one goes back.
+    this.#pub = this.#committedStored;
     // The batch's receipts go with it and give back their slots (docs/design/design-v1-dice.md 1.2). Their clients resend the ops.
     this.#receipts.abandoned(batch.receipts);
     for (const s of batch.sys) s.reject(new ActorClosedError(this.roomId));
