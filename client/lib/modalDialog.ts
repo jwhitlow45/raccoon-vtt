@@ -302,7 +302,7 @@ export function useSheetDialog(
     const hear = roundTrip ? deafToFocus() : null;
     stepping++;
     try {
-      // Dialogs a plain sheet's own controls opened stand above it, whatever order the sheet took its modal step in.
+      // Every open modal that is not a sheet stands above this one, whatever order the sheet took its modal step in.
       const above = steps[steps.length - 1] === "showModal" ? Array.from(document.querySelectorAll<HTMLDialogElement>('dialog[open][aria-modal="true"]:not([data-rvtt-sheet])')) : [];
       applySheetDialogSteps(el, steps, ledger);
       raiseModalsAbove(above, el, active);
