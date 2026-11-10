@@ -303,7 +303,7 @@ export function initials(name: string): string {
  * shows its shown name's ("G2" for an Orc shown as Goblin 2), and a DM's
  * preview its bracketed number without the brackets ("G3"), which the
  * caller draws outlined (`preview`) so it never reads as a number the
- * table gave (the creature numbers design, section 4).
+ * table gave (docs/design/design-v1-creature-numbers.md 5).
  */
 export function initialsOf(label: Label): { text: string; preview: boolean } {
   const shown = label.as ?? label.name;

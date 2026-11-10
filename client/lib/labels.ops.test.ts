@@ -15,8 +15,8 @@ import { labelsFor, labelSuffix, labelText, type Labels } from "./labels.ts";
 import { displayName } from "./scene.ts";
 
 /*
- * The ops a DM's screens build from creatures the label map names (the
- * creature numbers design, section 4): a cast's group save, whose caster
+ * The ops a DM's screens build from creatures the label map names
+ * (docs/design/design-v1-creature-numbers.md 5): a cast's group save, whose caster
  * the map names in brackets, group HP, a fight's rows and a duplicate.
  * With brackets on the DM's board, no op holds a bracketed number or a
  * disguise's bracketed name as the board shows them. A name that holds

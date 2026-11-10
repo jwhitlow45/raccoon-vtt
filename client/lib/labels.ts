@@ -2,7 +2,7 @@ import type { RoomState, Token, TokenId } from "#shared/model.ts";
 import { labelParts, labelText as sharedLabelText, nameEntry, NUMBER_NAMES_MOST, numberable, numbersOf, numberScope, previewNumbers, shownName, type TokenLabel } from "#shared/numbering.ts";
 
 /**
- * How a device names a creature (the creature numbers design, section 4):
+ * How a device names a creature (docs/design/design-v1-creature-numbers.md 5):
  * one label per token, made once per view by the store's label map
  * (state/labels.ts) and read by every screen through `displayName`.
  *
@@ -64,8 +64,8 @@ export type Labels = ReadonlyMap<string, Label>;
 /**
  * A token's label from the map, or from the token itself when the map has
  * none, as for a token copied outside the view. A copy's `number` is the
- * table's in every copy the server sends (the creature numbers design,
- * 3.4), so the fallback can only show less than the map would: no preview
+ * table's in every copy the server sends (docs/design/design-v1-creature-numbers.md
+ * 4), so the fallback can only show less than the map would: no preview
  * and no disguise.
  */
 export function labelOf(labels: Labels | undefined, token: { id?: string; name: string; number?: number }): Label {

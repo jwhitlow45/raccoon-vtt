@@ -5,7 +5,7 @@ import type { RoomView } from "./types.ts";
 import { useRoomView } from "./view.ts";
 
 /**
- * The room's label map (the creature numbers design, section 4, D-261110-316):
+ * The room's label map (docs/design/design-v1-creature-numbers.md 5):
  * made once per view and role, and kept by the view object itself, so every
  * store that draws a room (the live one, a player preview, a table display)
  * shares the one rule with nothing to fill in. Each entry keeps its object

@@ -1304,8 +1304,10 @@ export type Token = {
   /**
    * A creature or effect a character brings (docs/design/design-v1-combat-flow.md
    * 3.6): a familiar, a summon, a spell's weapon. Its owners are always its
-   * character's owners, it has no number, and it is never a PC. Players
-   * other than its owners get it only while the token is the party's.
+   * character's owners, and it is never a PC. It reads a number only while
+   * no player plays its character (docs/design/design-v1-creature-numbers.md
+   * 1). Players other than its owners get it only while the token is the
+   * party's.
    */
   companion?: Companion;
   /**

@@ -145,7 +145,7 @@ function firstTakesOne(tx: Tx, scopeId: string, g: number, metId: string): void 
 }
 
 /**
- * A restored creature's mark and number (docs: undo and redo are exact).
+ * A restored creature's mark and number (docs/design/design-v1-creature-numbers.md 7).
  * When the stored mark makes the stored value a member, of its scene's
  * group for its shown name, it takes that mark, and the stored number
  * unless the creature now is in that same group, whose number since is the
