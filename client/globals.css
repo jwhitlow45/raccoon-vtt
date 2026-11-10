@@ -538,9 +538,9 @@ select:disabled {
   }
 }
 
-/* Why a player's Roll waits (features/rolls/PlayerRolls.tsx) is a line under the row. A short sideways phone, where the card is
-   already tight, keeps it for screen readers only: a line more would fold the card. */
-@media (orientation: landscape) and (max-height: 500px) {
+/* Why a player's Roll waits (features/rolls/PlayerRolls.tsx) is a line under the row. A short screen, a sideways phone or a 568 px
+   one at 130%, where the card is already tight, keeps it for screen readers only: a line more would fold the card. */
+@media (max-height: 600px) {
   .rvtt-roll-why {
     position: absolute;
     width: 1px;

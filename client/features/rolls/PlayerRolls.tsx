@@ -1118,7 +1118,7 @@ function CreatureAnswer(props: {
                     />
                   </span>
                 </div>
-                {/* Shown, since a disabled Roll's title is no help on a phone. A short sideways phone keeps it for screen readers only, where a line more folds the card (globals.css, rvtt-roll-why). */}
+                {/* Shown, since a disabled Roll's title is no help on a phone. A short screen keeps it for screen readers only, where a line more folds the card (globals.css, rvtt-roll-why). */}
                 {waitsFor ? (
                   <div id={whyId} className="rvtt-roll-why" style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
                     {waitsFor}
