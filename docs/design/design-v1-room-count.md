@@ -150,10 +150,10 @@ The whole unit and integration suites run, with the tests that pinned a number c
 
 ## 8. As built
 
-- `#reduce` reads the clock for `lastOpAt` just after the install, with `grew` and the memory commit (D-261109-110).
+- `#reduce` sets `lastOpAt` just after the install, with `grew` and the memory commit, from the clocks its command was queued with (`#enqueue`), and a counted answer without a row sets it from the same reading (D-261109-110).
 - The barrier is `#countSnapshot`, built by the `snapshotJson` option, which only tests replace to make the build throw. Its gate (ops or watermarks) is in the actor, and `commitBatch` writes any snapshot it is given.
 - `CommittedBatch` carries `pub` and `HistoryView` carries `through`, and neither carries the storage `seq`. The sessions cache keys on the view's `through`, the number the read stops at: the stored number at the last commit, or where a failed replay stopped (D-261109-164).
-- The batch-end explore runs when the batch answered something (`answered > 0`) or holds door work, and the explore inside it needs an answer. A refusal therefore explores, and a batch that only keeps the room's books never does (D-261109-165).
+- The batch-end explore runs when the batch answered something since its steps last ran (`answeredSinceStep`, which reads the step cursor) or holds door work since then (`doors.length > step.doors`), and the explore inside it needs such an answer. A refusal therefore explores, and a batch that only keeps the room's books never does (D-261109-165).
 - A room whose replay failed skips the explore and the map step, and `#appendServerOp` refuses with an error log, so no server op writes into the failed tail. Its refusals still commit their count and watermarks (D-261109-186).
 - One helper, `#snapshotStored`, records a stored snapshot for a commit's barrier and for a snapshot written alone, and returns the quota check, which `#writeSnapshot` awaits.
 - The stored room fake is `StoredRoomDb`, with `storedActor` and `restartStored` in server/rooms/undoScopeTesting.ts. It keeps rows, the snapshot, watermarks, receipts and `rooms.pub`, and it refuses a stored row's `seq` at the INSERT statement, as the primary key does (D-261109-187).

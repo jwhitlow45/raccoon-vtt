@@ -1035,6 +1035,7 @@ A scene can have weather over its map: rain, snow, fog, falling leaves, ash or s
 - **Roll monsters' Initiative** (DM, Initiative panel): a switch under Start a fight with, on by default and kept on this device for each room. Help: "Auto Initiative rolls for every monster as the fight starts."
   - With it on, Everyone here, Visible to players and Selected token start the fight and then roll for the monster rows that have no value, by the tracker's sharing mode. The pressed button reads "Rolling…" until the server takes the start. Then the fight shows, and Auto Initiative reads "Rolling…", with every roll button waiting, until the totals land.
   - Starting a fight of any size is one Undo step, and its rolls are another, so Undo takes back the totals first, then the start.
+  - Another of these buttons pressed while the start waits adds its creatures behind the start, and they roll with the start's monsters.
   - Offline, the start waits with the rest, and the monsters roll once the server takes it.
   - With "Monsters use Initiative scores" on, the switch rolls only the monster rows still without a score, such as a custom monster, and with every row valued it rolls nothing.
 - The order runs high to low.
