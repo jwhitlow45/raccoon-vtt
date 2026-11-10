@@ -23,7 +23,7 @@ const { projectState } = await import("#shared/project.ts");
 const { hpDraftKey, hpDraftSlot } = await import("./hpDraft.ts");
 
 function render(access: "all" | "relative", vitals = { name: "Thorn", dead: false, max: 20 as number | undefined }, settings: { healRevives?: boolean } = {}, role: "dm" | "player" = "dm"): string {
-  const target = oneTarget({ tokenId: "t1" }, access, false, vitals);
+  const target = oneTarget({ tokenId: "t1" }, access, false, vitals, token("t1"));
   // HpEntry reads the room's actions only when a change is applied. The store gives the room's healing setting and the role, for the lines on the dead. The page's scope holds what a blackout keeps (hpDraft.ts).
   const store = createStore(() => ({ view: { meta: { settings } }, you: { role } }));
   const entry = createElement(HpEntry, { targets: [target], access, place: "bar" });
@@ -52,7 +52,7 @@ describe("the HP entry's modes are native radios", () => {
       monsters: { frost: customMonster("frost", { resistances: "Cold" }) },
       tokens: { a: token("a", { actor: { inline: actor({ monsterId: "frost" }) } }) },
     });
-    const target = oneTarget({ tokenId: "a" }, "all", false, { name: "Frost", dead: false, max: 20 });
+    const target = oneTarget({ tokenId: "a" }, "all", false, { name: "Frost", dead: false, max: 20 }, token("a"));
     const scope = new RoomScope();
     const chip = { amount: 11, parts: [{ amount: 11, type: "cold" as const }], lineId: "1:0", lineIds: ["1:0"], text: "Use 11 (Cold damage)", critical: false };
     scope.get(hpDraftSlot).set(hpDraftKey("bar", [target]), { mode: "damage", text: "11", crit: false, chip });
@@ -72,7 +72,7 @@ describe("the HP entry's modes are native radios", () => {
     });
     state.meta.settings.playersApplyDamage = true;
     for (const you of [DM, { memberId: "p1", role: "player" as const }]) for (const place of ["bar", "panel"] as const) {
-      const target = oneTarget({ tokenId: "a" }, "relative", false, { name: "Frost", dead: false, max: 20 });
+      const target = oneTarget({ tokenId: "a" }, "relative", false, { name: "Frost", dead: false, max: 20 }, token("a"));
       const scope = new RoomScope();
       scope.get(hpDraftSlot).set(hpDraftKey(place, [target]), { mode: "damage", text: "11 cold", crit: false });
       const store = createStore(() => ({ view: projectState(state, you, { sceneId: "s1" }), you }));
@@ -197,7 +197,7 @@ describe("the death save Roll while Regeneration is open", () => {
 test("FL-4 design: healing, temporary and set HP entries render the shared slip in bars and pages", () => {
   for (const place of ["bar", "panel"] as const) for (const [input, kind, words] of [["+5", "heal", "Heal 5"], ["t5", "temp", "Set Temporary HP to 5"], ["=20", "set", "Set HP to 20"]] as const) {
     const state = room({ tokens: { a: token("a", { actor: { inline: actor() } }) } });
-    const target = oneTarget({ tokenId: "a" }, "all", false, { name: "Guard", dead: false, max: 20 });
+    const target = oneTarget({ tokenId: "a" }, "all", false, { name: "Guard", dead: false, max: 20 }, token("a"));
     const scope = new RoomScope();
     scope.get(hpDraftSlot).set(hpDraftKey(place, [target]), { mode: "damage", text: input, crit: false });
     const store = createStore(() => ({ view: state, you: DM }));

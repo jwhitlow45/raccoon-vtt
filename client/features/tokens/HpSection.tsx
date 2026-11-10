@@ -52,8 +52,11 @@ export type HpAccessLevel = "all" | "relative" | "none";
  * The HP entry's target for a single creature: its name, life and maximum feed the entry's lines on the dead (groupHp.ts deadLines).
  * A token names its holder as the Fill chips do (targets.ts holderOf), so Apply marks the chip it filled from.
  */
+export function oneTarget(target: { tokenId: string }, access: HpAccessLevel, atZero: boolean, vitals: Pick<HpTarget, "name" | "dead" | "max">, token: Pick<Token, "id" | "actor">): HpTarget;
+export function oneTarget(target: { characterId: string }, access: HpAccessLevel, atZero: boolean, vitals: Pick<HpTarget, "name" | "dead" | "max">): HpTarget;
 export function oneTarget(target: ActorTarget, access: HpAccessLevel, atZero: boolean, vitals: Pick<HpTarget, "name" | "dead" | "max">, token?: Pick<Token, "id" | "actor">): HpTarget {
-  const holder = token ? holderOf(token) : "tokenId" in target ? `token:${target.tokenId}` : characterHolder(target.characterId);
+  // A token target needs its token, since whether it shows a character decides the holder (a guessed "token:<id>" would miss the character's chips).
+  const holder = "tokenId" in target ? holderOf(token!) : characterHolder(target.characterId);
   return { holder, target, access, atZero, ...vitals };
 }
 
@@ -485,6 +488,10 @@ export function HpSection(props: {
   const life = actor?.life ?? "alive";
   const atZero = !!hp && hp.cur === 0 && (life === "dying" || life === "stable");
 
+  const vitals = { name: props.name ?? "it", dead: life === "dead", max: hp?.max };
+  const entryTarget =
+    access.hp === "none" ? null : "characterId" in target ? oneTarget(target, access.hp, atZero, vitals) : props.token ? oneTarget(target, access.hp, atZero, vitals, props.token) : null;
+
   // No HP to show (hpLess): one line, and for a maximum of 0 the field that gives it HP, and nothing else.
   if (hpLess(actor, props.token)) {
     const effect = props.token?.companion !== undefined && props.token.kind === "object";
@@ -524,9 +531,7 @@ export function HpSection(props: {
         </div>
       )}
 
-      {access.hp !== "none" ? (
-        <HpEntry targets={[oneTarget(target, access.hp, atZero, { name: props.name ?? "it", dead: life === "dead", max: hp?.max }, props.token)]} access={access.hp} place="panel" />
-      ) : null}
+      {entryTarget && access.hp !== "none" ? <HpEntry targets={[entryTarget]} access={access.hp} place="panel" /> : null}
 
       {access.hp === "all" && hp ? (
         // Side by side at every width (docs/design/design-v1-token-panel.md 3.7): two equal columns, and where a column cannot hold a

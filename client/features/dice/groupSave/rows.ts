@@ -7,6 +7,7 @@ import { displayName } from "../../../lib/scene.ts";
 import { askTarget } from "../../rolls/logic.ts";
 import { creatureRolls, type DiceView } from "../creature.ts";
 import { presetFor } from "../presets.ts";
+import { holderOf } from "../targets.ts";
 
 /**
  * A group save's rows (docs/design/design-v1-roll-options.md 5.2 and 5.3): one per
@@ -67,7 +68,7 @@ export function groupRows(dice: DiceView, tokenIds: readonly string[], test: Gro
   for (const id of tokenIds) {
     const token: Token | undefined = state.tokens[id];
     if (!token) continue;
-    const holder = "ref" in token.actor ? `character:${token.actor.ref}` : `token:${token.id}`;
+    const holder = holderOf(token);
     if (seen.has(holder)) continue;
     seen.add(holder);
     const actor = "inline" in token.actor ? token.actor.inline : state.characters[token.actor.ref]?.actor;

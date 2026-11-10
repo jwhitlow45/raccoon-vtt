@@ -12,6 +12,7 @@ import { stateOf } from "./chain.ts";
 import { conditionSkip, damageWords, dealtTypes, parseParts, partAmounts, planTargets, rowDamage, worstCase, type OutcomeCondition, type PartAmount, type PlanRow } from "./outcome.ts";
 import { rowResult, type Mark, type RowBase } from "./rows.ts";
 import { parseDamageOverride } from "./damageInput.ts";
+import { holderOf } from "../targets.ts";
 
 /**
  * What the outcome does to each row (docs/design/design-v1-roll-options.md 5.4)
@@ -294,7 +295,7 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
     // A retained choice never transfers to another creature that now uses the
     // token. Deleted or moved creatures are excluded from the new plan.
     const token = dice.view.tokens[row.tokenId];
-    const holder = token && ("ref" in token.actor ? `character:${token.actor.ref}` : `token:${token.id}`);
+    const holder = token && holderOf(token);
     if (!token || token.sceneId !== page.sceneId || holder !== row.holder) continue;
     const state = stateOf(page, row);
     if (state.gone || state.mark === "skip") continue;
