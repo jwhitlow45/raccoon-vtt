@@ -8,6 +8,7 @@ import type { ServerMessage } from "#shared/protocol.ts";
 import { LEAD_MS, type MusicRun, type Playing, type Sound } from "#shared/sound.ts";
 import { RoomActor, type ActorDeps } from "./actor.ts";
 import { SnapshotBudget } from "./budgets.ts";
+import { Connection } from "./connection.ts";
 import type { RoomGateway } from "./gateway.ts";
 import type { AssetFactRow } from "./persistence.ts";
 import { scopeFixture, scopeObserver, ScopeClient, STANDING_CLOCK, StoredRoomDb, UndoScopeDb, until } from "./undoScopeTesting.ts";
@@ -144,6 +145,31 @@ describe("the server's tick (6.4)", () => {
     h.clock.now = T0 + SOUND_LIMITS.tickBackoffMs;
     await tickNow(h, f);
     assert.deepEqual(h.db.stored.at(-1), { t: "sys.sound", from: 5, music: null });
+  });
+
+  test("a tick queued behind a commit is worked out and dated when the queue reaches it, not when it was queued", async (t) => {
+    const f = library(playing(run()));
+    const h = await load(t, f.state, { pub: T0 });
+    const db = h.db as StoredRoomDb;
+    const dm = await ScopeClient.open(h.actor, f.dm, "dm", () => h.clock.now);
+    h.clock.now = T0 + 35_000;
+    let held = false;
+    let release!: () => void;
+    db.beforeCommit = () => {
+      if (held) return Promise.resolve();
+      held = true;
+      return new Promise<void>((resolve) => (release = resolve));
+    };
+    void dm.send({ t: "log.chat", text: "holds the queue" });
+    await until(() => (held ? true : undefined), "the commit held");
+    // A socket's coming places the timer afresh, and the tick due now waits in the queue behind the commit.
+    h.actor.attach(new Connection({ readyState: 1, OPEN: 1, CONNECTING: 0, send() {}, close() {}, terminate() {} } as never, { sessionId: uuidv7(), roomId: ROOM, memberId: f.player.id, role: "player", display: true }, "203.0.113.30"));
+    await until(() => (h.actor.queueLength > 0 ? true : undefined), "the tick queued");
+    h.clock.now = T0 + 35_050;
+    release();
+    const tick = await until(() => db.rows.find((row) => (row.op as { t?: string }).t === "sys.sound"), "the stored tick");
+    assert.deepEqual(tick.op, { t: "sys.sound", from: 4, music: { ...run(), next: { soundId: "b", at: T0 + 55_000 } } });
+    assert.equal(tick.at, new Date(T0 + 35_050).toISOString());
   });
 
   test("no tick runs while no socket is open, nor with the switch off", async (t) => {

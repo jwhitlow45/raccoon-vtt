@@ -298,3 +298,45 @@ describe("a read behind a commit that is retried", () => {
     assert.equal(snapshot.watermark, r.p1.n, "it holds the op the commit stored");
   });
 });
+
+describe("commands queued behind a commit", () => {
+  /**
+   * P1's two chats queued 10 ms apart while a commit holds the queue, with
+   * `between` of the DM's renames queued at the milliseconds between them,
+   * and the gap between the two chats' numbers once the commit lands.
+   */
+  async function gapAcross(t: TestContext, between: number): Promise<{ first: number; gap: number }> {
+    const r = await gridRoom(t);
+    let holding = false;
+    let release!: () => void;
+    r.db.beforeCommit = () => {
+      if (holding) return Promise.resolve();
+      holding = true;
+      return new Promise<void>((resolve) => (release = resolve));
+    };
+    r.clock.now = T0 + 1_005;
+    chat(r.p1, "opens a batch");
+    await until(() => (holding ? true : undefined), "the commit held");
+    r.clock.now = T0 + 1_100;
+    chat(r.p1, "first");
+    for (let i = 0; i < between; i++) {
+      r.clock.now = T0 + 1_101 + i;
+      void r.actor.op(r.dm.conn, ++r.dm.n, { t: "token.update", tokenId: r.f.goblin, patch: { name: `Goblin ${i}` } });
+    }
+    r.clock.now = T0 + 1_110;
+    chat(r.p1, "second");
+    assert.ok(r.actor.queueLength >= 2 + between, "everything waits behind the commit");
+    r.clock.now = T0 + 1_200;
+    release();
+    const numberOf = async (text: string) => Number((await until(() => r.actor.committed.state.log.find((line) => line.text === text), text)).id.split(":")[0]);
+    const first = await numberOf("first");
+    return { first, gap: (await numberOf("second")) - first };
+  }
+
+  test("each takes its number from when it came, so the gap between two of P1's is the time between them whether 0, 2 or 5 of the DM's ops came between", async (t) => {
+    const runs = [];
+    for (const between of [0, 2, 5]) runs.push(await gapAcross(t, between));
+    assert.deepEqual(runs.map((run) => run.first), [T0 + 1_100, T0 + 1_100, T0 + 1_100], "the first chat's number is the clock when it came, not when the commit landed");
+    assert.deepEqual(runs.map((run) => run.gap), [10, 10, 10]);
+  });
+});

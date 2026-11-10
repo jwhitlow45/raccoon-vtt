@@ -277,7 +277,7 @@ type Lookup = { gen: number; ids: ReadonlySet<string> };
 /** What a deletion step on a loaded room runs: see RoomActor.deletionStep. */
 export type DeletionRun<T> = (state: RoomState, seq: number) => Promise<{ deleted: readonly string[]; result: T }>;
 
-type Command =
+type Command = (
   | { t: "op"; conn: Connection; n: number; raw: unknown; group: string | undefined; groupScope: "setup" | undefined; facts: Map<string, AssetFact>; lookup: Lookup | null; admitted?: Admitted | null; requeued?: boolean }
   | { t: "hello"; conn: Connection; clientId: string; resumeFrom: number; sceneId: string | undefined; ackDetails: boolean; stored: number; fresh: boolean }
   | { t: "snapshot"; conn: Connection; key: ClientKey }
@@ -285,7 +285,11 @@ type Command =
   | { t: "read"; run: () => void }
   | { t: "step"; run: DeletionRun<unknown>; resolve: (value: unknown) => void; reject: (err: Error) => void }
   /** The server's music tick (docs/design/design-v1-music.md 6.4), computed when the queue reaches it, never before. */
-  | { t: "soundTick" };
+  | { t: "soundTick" }
+) & {
+  /** The clocks when it was queued (#enqueue), which it is handled with, however long it waited. */
+  moment?: Moment;
+};
 
 type StepCommand = Extract<Command, { t: "step" }>;
 
@@ -498,7 +502,7 @@ export class RoomActor {
    */
   #handed: number;
   #numberClock: Clock;
-  /** The clocks the command being handled read at its start, which its number, its lines' times and `lastOpAt` come from. */
+  /** The clocks the command being handled was queued with, which its number, its lines' times and `lastOpAt` come from. */
   #moment: Moment | null = null;
   /** Deletion steps waiting for the open batch to commit (#runStep), in the order they came. */
   #parked: StepCommand[] = [];
@@ -1157,6 +1161,10 @@ export class RoomActor {
   // The queue.
 
   #enqueue(cmd: Command): void {
+    // A command's number and times are its arrival's, so commands that waited behind a commit or a deletion step and
+    // are handled in one millisecond once it ends keep the times they came at. The music's tick reads the clock as the
+    // queue reaches it, since the step it works out is for that moment.
+    if (cmd.t !== "soundTick") cmd.moment = this.#clocks();
     this.#queue.push(cmd);
     this.#drain();
   }
@@ -1172,8 +1180,8 @@ export class RoomActor {
         // Caught here and not by each caller: a drain also runs from a timer, a turn or a commit's end, where nothing else would catch it.
         const batch = this.#batch;
         const records = batch?.ops.length ?? 0;
-        // One reading for the whole command, its fault's refusal included (#moment).
-        this.#moment = this.#clocks();
+        // One reading for the whole command, its fault's refusal included (#moment): the one it was queued with.
+        this.#moment = cmd.moment ?? this.#clocks();
         try {
           this.#handle(cmd);
         } catch (err) {
@@ -1996,7 +2004,7 @@ export class RoomActor {
   /** The next turn of an ask being read, and its answer once read, after which the queue goes on. */
   #readOn(read: AskRead): void {
     if (this.#reading !== read || this.#closed) return;
-    // Its answer, or its fault's refusal, takes its number from when the ask came, as a queued command's does.
+    // Its answer, or its fault's refusal, takes its number from when the ask came, as every queued command does (#enqueue).
     this.#moment = read.moment;
     try {
       if (!this.#readAsk(read)) {
