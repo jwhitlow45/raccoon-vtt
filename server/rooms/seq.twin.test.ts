@@ -621,6 +621,37 @@ describe("batches split by answers, whatever the room does on its own", () => {
     }
   });
 
+  test("C24: a burst behind a held commit whose area's reminder explores inside the batch in one twin alone splits alike at a cap of 3", async (t) => {
+    // An area that reminds when it comes onto a creature while a turn runs, away from everyone until the DM moves it.
+    const web = (s: RoomState) => void (s.templates.web = template("web", { shape: "sphere", size: 5, origin: { x: 8.5, y: 8.5, z: 0 }, triggers: ["enter"], ownerId: "dm1" }));
+    const pair = await twins(t, {}, { maxBatchOps: 3 }, web);
+    await both(pair, async (twin) => {
+      await twin.apply("dm", move("b", IN_Q.x, IN_Q.y));
+      await twin.apply("dm", { t: "encounter.start", entries: [{ id: "ea", tokenId: "a", value: 10 }] } as Op);
+      await twin.apply("dm", { t: "encounter.next" } as Op);
+    });
+    // The DM's paint past room Q's east wall widens what Bree sees there in the door twin, and in the twin of rock, where
+    // she stands in the rock, nothing. The area moved onto Ayla right after it reminds, and the room explores that sight
+    // then, before P1's chat in the same batch.
+    const ops: Array<[Who, Op]> = [
+      ["dm", { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["26,6"] }],
+      ["dm", { t: "template.update", templateId: "web", patch: { origin: { x: 4.5, y: 4.5, z: 0 } } } as Op],
+      ["p1", { t: "log.chat", text: "one" }],
+      ["p1", { t: "log.chat", text: "two" }],
+    ];
+    const kept = pair.map((twin) => twin.db.stored.length);
+    await both(pair, (twin) => burst(twin, ops));
+    const stored = pair.map((twin, i) => twin.db.stored.slice(kept[i]).map((op) => op.t));
+    const after = (list: string[]) => list.slice(list.indexOf("template.update") + 1, list.indexOf("template.update") + 3);
+    assert.deepEqual(after(stored[0]!), ["sys.explore", "log.chat"], `the door twin explored inside the batch, before P1's chat: ${stored[0]!.join(", ")}`);
+    assert.ok(after(stored[1]!)[0] === "log.chat" && !stored[1]!.includes("sys.explore"), `the twin of rock had nothing to explore: ${stored[1]!.join(", ")}`);
+    for (const twin of pair) assert.ok(twin.actor.committed.state.log.some((line) => line.data?.type === "area"), `${twin.name}: the area reminded`);
+    const groups = pair.map(ackGroups);
+    assert.deepEqual(groups[0], groups[1], "P1's acks come in the same groups");
+    assert.deepEqual(groups[0]!.slice(-2), [[2], [3]], "the cap closes the batch at its third answer");
+    same(pair, "C24, an area's reminder");
+  });
+
   test("C25: P1's walk after a lone tick, a lone cleanup remember, or P2's op taken or refused lands alike", async (t) => {
     const walk: [Who, Op] = ["p1", move("a", 5, 7)];
     // P1's own refusal first: an answer the batch holds without a row, which the walk's end of the batch must count.
