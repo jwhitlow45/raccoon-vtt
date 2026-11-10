@@ -11613,7 +11613,9 @@ function creatureNumberTests(): void {
           const panel = page.getByRole("tabpanel", { name: sideTabName("Token") }).or(page.getByRole("region", { name: "Token", exact: true }));
           const header = panel.locator("[data-creature-header]").first();
           await header.waitFor();
-          const name = (await header.locator("h3 [aria-hidden]").first().textContent()) ?? "";
+          // The shown words: the heading's text where it reads the same aloud, its hidden-from-readers part where it does not.
+          const heading = header.locator("h3").first();
+          const name = ((await heading.locator("[aria-hidden]").count()) > 0 ? await heading.locator("[aria-hidden]").first().textContent() : await heading.textContent()) ?? "";
           if (name !== c.reads) lines.push(`${sweep.at} numc1-header-${i}: the name reads "${name}", not "${c.reads}"`);
           if ((await header.locator("[data-name-help]").count()) !== 1) lines.push(`${sweep.at} numc1-header-${i}: no help line under the name`);
           // The picture's initials outlined, in the box filled ones take.
