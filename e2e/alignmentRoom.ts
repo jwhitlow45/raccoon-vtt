@@ -8168,6 +8168,14 @@ function floorsRootTests(): void {
           await rows.first().click();
           await root("page").waitFor();
           await sweep.measure(page, "floors-page", root("page"));
+          // measureAlignment centers, so a row that squeezed its words and ran past the page's side read as aligned (LP36-A-FLR-1).
+          await sweep.add(page, "floors-page-contained", await containmentLines(root("page"), `${sweep.at} floors-page`));
+          const heightName = root("page").locator('[data-search="scenes.floor.height"] > div > span').first();
+          const nameLines = await heightName.evaluate((el) => {
+            const win = globalThis as unknown as { getComputedStyle(e: unknown): { lineHeight: string } };
+            return Math.round((el as unknown as { getBoundingClientRect(): { height: number } }).getBoundingClientRect().height / Number.parseFloat(win.getComputedStyle(el).lineHeight));
+          });
+          await sweep.add(page, "floors-page-height-words", nameLines > 2 ? [`${sweep.at} floors-page: Height above the floor below wraps to ${nameLines} lines, its stepper squeezes the words`] : []);
           await shots.take(page, `alignment-${sweep.at}-floors-page`);
           await root("page").getByRole("button", { name: "Back to Floors" }).click();
           await rows.last().click();
