@@ -5,12 +5,16 @@ import { projectState } from "#shared/project.ts";
 import type { ClientOp, Op, ServerMessage } from "#shared/protocol.ts";
 import { TURN_OPS } from "#shared/reads.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { DM, actor, character, env, room, token } from "#shared/testutil.ts";
+import { DM, actor, character, customMonster, env, room, token } from "#shared/testutil.ts";
 import { LocalServer } from "../dev/localServer.ts";
 import { combatAlerts } from "../features/combat/alerts.ts";
 import { answersFor, openRecord, turnParticipants } from "../features/combat/logic.ts";
 import { turnOp } from "../features/encounter/logic.ts";
-import { createRoomStore, turnPending, type RoomStore } from "./store.ts";
+import { resolveLine, srdIndex } from "../features/encounters/draft.ts";
+import { dropPlan } from "../features/encounters/drop.ts";
+import { companionInput, joinFightOp, NEW_COMPANION, type CompanionDraft } from "../features/tokens/companions.ts";
+import { fightOps } from "../features/tokens/groupEdit.ts";
+import { createRoomStore, fightAhead, turnPending, type RoomStore } from "./store.ts";
 import { applyTestHistory, FakeClock, FakeOutbox } from "./testing.ts";
 import type { OpAnswer } from "./types.ts";
 
@@ -298,4 +302,71 @@ describe("two schedules that leave the same acknowledgements and copies", () => 
       });
     }
   }
+});
+
+describe("an action that adds creatures while a fight's start waits for its answer", () => {
+  const hoot: CompanionDraft = { ...NEW_COMPANION, name: "Hoot", hp: 1, ac: 11, turn: "own", turnPicked: true };
+
+  /** Two goblins, Bree's token and a cave lurker among the room's monsters, with no fight on. */
+  function noFight(): RoomState {
+    const state = room({
+      tokens: {
+        g1: token("g1", { name: "Goblin 1" }),
+        g2: token("g2", { name: "Goblin 2", x: 4, y: 2 }),
+        bt: token("bt", { kind: "pc", name: "Bree", x: 8, y: 2, actor: { ref: "bree" } }),
+      },
+      characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"] }) },
+    });
+    state.scenes.s1!.bounds = { w: 30, h: 30 };
+    state.monsters.mon1 = customMonster("mon1", { name: "Cave Lurker" });
+    return state;
+  }
+
+  test("the group bar's button, a saved encounter dropped into the fight and a new companion with its own turn each send an add behind the start, and the server takes them all", () => {
+    const s = setup(noFight());
+    s.connect();
+    let ids = 0;
+    const newId = () => `new-${++ids}`;
+    s.room.dispatch({ t: "encounter.start", entries: [{ id: "e-g1", tokenId: "g1" }, { id: "e-bree", tokenId: "bt" }] });
+    const view = s.state().view as unknown as RoomState;
+    assert.equal(view.encounter, null, "the start shows only once the server takes it");
+    assert.deepEqual(fightAhead(s.state())?.entries.map((e) => e.tokenId), ["g1", "bt"]);
+    // The group bar on both goblins: the one not in the start, as an add.
+    const bar = fightOps([view.tokens.g1!, view.tokens.g2!], fightAhead(s.state()), newId);
+    assert.deepEqual(bar, [{ t: "encounter.add", entries: [{ id: "new-1", tokenId: "g2" }] }]);
+    for (const op of bar) s.room.dispatch(op);
+    // A saved encounter placed with "Add them to the fight" on.
+    const drop = dropPlan({
+      monsters: [{ monsterId: "mon1", count: 1 }],
+      resolve: (m) => resolveLine(m, srdIndex([]), view.monsters),
+      state: { ...view, encounter: fightAhead(s.state()) },
+      scene: view.scenes.s1!,
+      center: { x: 12.5, y: 12.5 },
+      options: { hidden: false, addToFight: true },
+      newId,
+    });
+    assert.deepEqual(drop.ops.map((op) => op.t), ["token.create", "encounter.add"]);
+    for (const op of drop.ops) s.room.dispatch(op);
+    // Bree's new companion with a turn of its own.
+    const input = companionInput(hoot, { id: "hoot", sceneId: "s1", x: 9, y: 2, elevation: 0 }, view.characters.bree!);
+    const join = joinFightOp({ tokens: view.tokens, encounter: fightAhead(s.state()) }, input, "e-hoot");
+    assert.deepEqual(join, { t: "encounter.add", entries: [{ id: "e-hoot", tokenId: "hoot" }] });
+    s.room.dispatch({ t: "token.create", token: input });
+    s.room.dispatch(join!);
+    s.deliver();
+    assert.deepEqual(s.state().pending, [], "every op answered");
+    assert.deepEqual(s.state().refused, [], "none refused");
+    const lurker = drop.ops[0]!.t === "token.create" ? drop.ops[0]!.token.id : "";
+    assert.deepEqual(s.server.state.encounter?.entries.map((e) => e.tokenId).sort(), ["bt", "g1", "g2", "hoot", lurker].sort(), "one row each");
+  });
+
+  test("an end sent after the start leaves no fight on its way", () => {
+    const s = setup(noFight());
+    s.connect();
+    s.room.dispatch({ t: "encounter.start", entries: [{ id: "e-g1", tokenId: "g1" }] });
+    s.room.dispatch({ t: "encounter.add", entries: [{ id: "e-g2", tokenId: "g2" }] });
+    assert.deepEqual(fightAhead(s.state())?.entries.map((e) => e.tokenId), ["g1", "g2"]);
+    s.room.dispatch({ t: "encounter.end" });
+    assert.equal(fightAhead(s.state()), null);
+  });
 });

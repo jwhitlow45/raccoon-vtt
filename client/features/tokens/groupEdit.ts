@@ -3,6 +3,7 @@ import { actsOnCharacterTurn } from "#shared/reducer/companions.ts";
 import type { Character, Effect, Encounter, ImageRef, MemberId, Token } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { MAX_ENTRIES_PER_OP, type ActorTarget, type ClientOp, type EntryInput, type TokenGroupPatch } from "#shared/protocol.ts";
+import type { FightRows } from "../../state/store.ts";
 import { tokenAccess, type Role } from "./access.ts";
 
 /**
@@ -213,9 +214,11 @@ export function deleteButtonWords(armed: boolean, armedText?: string): { text: s
  * The selected tokens "Add to the fight" would add: those not in it yet,
  * objects left out, as the tracker's "Everyone here" and the group's
  * conditions leave them out. A box drawn over a fight often catches a
- * barrel or a marker, which takes no turn (LP5-ROLLS-7).
+ * barrel or a marker, which takes no turn (LP5-ROLLS-7). `encounter` is
+ * the fight with a start still on its way counted in (state/store.ts
+ * fightAhead).
  */
-export function fightCandidates<T extends Pick<Token, "id" | "kind"> & { companion?: Token["companion"] }>(tokens: readonly T[], encounter: Pick<Encounter, "entries"> | null | undefined): T[] {
+export function fightCandidates<T extends Pick<Token, "id" | "kind"> & { companion?: Token["companion"] }>(tokens: readonly T[], encounter: FightRows | null | undefined): T[] {
   const taken = new Set((encounter?.entries ?? []).map((e) => e.tokenId));
   // A companion that acts on its character's turn takes no row of its own (docs/design/design-v1-combat-flow.md 3.6.7).
   return tokens.filter((t) => t.kind !== "object" && !taken.has(t.id) && !actsOnCharacterTurn(t));
@@ -224,13 +227,14 @@ export function fightCandidates<T extends Pick<Token, "id" | "kind"> & { compani
 /**
  * "Add to the fight": rows for the creatures not in it yet (fightCandidates).
  * With no fight on, the same tap starts one with them, as the tracker's
- * "New fight" does. `mark` is the rule every path into a fight
+ * "New fight" does, and with a start still waiting for its answer it adds
+ * them behind it. `mark` is the rule every path into a fight
  * builds its rows by (combat/state.ts useFightJoin), which puts In lair on
  * a creature placed in its lair.
  */
 export function fightOps(
   tokens: readonly (Pick<Token, "id" | "kind"> & { companion?: Token["companion"] })[],
-  encounter: Pick<Encounter, "entries"> | null | undefined,
+  encounter: FightRows | null | undefined,
   newId: () => string,
   mark: (entry: EntryInput) => EntryInput = (entry) => entry,
 ): ClientOp[] {

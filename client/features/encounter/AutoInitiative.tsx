@@ -10,6 +10,7 @@ import { Help } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
+import { fightAhead } from "../../state/store.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import type { DiceView } from "../dice/creature.ts";
 import { presetFor } from "../dice/presets.ts";
@@ -86,9 +87,13 @@ function usePress(): (rows: readonly RollRow[], mode: RollMode, kept?: readonly 
  * totals are then their own step, as Auto Initiative's are, so Undo takes
  * back the totals, then the start. The wait lives in the room's auto state,
  * so closing the tracker never drops it, and every roll button waits on it
- * (useRollBusy). `start` returns false for a press it refused.
+ * (useRollBusy). A press while a start still waits for its answer sends
+ * its rows as adds behind it (state/store.ts fightAhead), since a start
+ * shows only once the server takes it and a second one would be refused.
+ * `start` returns the numbers of the ops it sent, none for a press with
+ * nothing to send, or null for a press it refused.
  */
-export function useStartFight(): (batches: readonly EntryInput[][], from: StartFrom | null) => boolean {
+export function useStartFight(): (batches: readonly EntryInput[][], from: StartFrom | null) => readonly number[] | null {
   const store = useAutoStore();
   const actions = useRoomActions();
   const room = useRoomStore();
@@ -113,21 +118,26 @@ export function useStartFight(): (batches: readonly EntryInput[][], from: StartF
   };
   return (batches, from) => {
     const [first = [], ...rest] = batches;
-    const ops: ClientOp[] = [{ t: "encounter.start", entries: first }, ...rest.map((entries): ClientOp => ({ t: "encounter.add", entries }))];
+    const behind = fightAhead(room.getState()) !== null;
+    const ops: ClientOp[] = behind
+      ? batches.filter((entries) => entries.length > 0).map((entries): ClientOp => ({ t: "encounter.add", entries }))
+      : [{ t: "encounter.start", entries: first }, ...rest.map((entries): ClientOp => ({ t: "encounter.add", entries }))];
     const group = actions.newId();
     // Nobody yet starts with no one, so nothing to roll.
     const rollsFrom = on && from !== null && first.length > 0 ? from : null;
     if (rollsFrom !== null) {
       // A second press while one waits, or while a roll still lands, sends nothing.
-      if (busy || store.getState().start !== null) return false;
+      if (busy || store.getState().start !== null) return null;
       step({ kind: "press", press: group, from: rollsFrom, ops: ops.length });
     }
+    const sent: number[] = [];
     ops.forEach((op, index) => {
       const onAnswer = rollsFrom !== null ? (answer: OpAnswer) => step({ kind: "answer", press: group, index, answer }) : undefined;
       const n = actions.dispatch(op, { group, ...(onAnswer ? { onAnswer } : {}) });
       if (n === null) onAnswer?.("refused");
+      else sent.push(n);
     });
-    return true;
+    return sent;
   };
 }
 

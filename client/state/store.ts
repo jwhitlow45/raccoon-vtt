@@ -8,7 +8,7 @@ import { uuidv7 } from "#shared/ids.ts";
 import { parseKey } from "#shared/keys.ts";
 import { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
 import { endSentence } from "#shared/logText.ts";
-import type { LogEntry, RoomState, SceneId, Viewer } from "#shared/model.ts";
+import type { InitEntry, LogEntry, RoomState, SceneId, Viewer } from "#shared/model.ts";
 import { mainFloorId } from "#shared/rules/floors.ts";
 import { applyChanges, projectLogEntry, type ProjectedState } from "#shared/project.ts";
 import {
@@ -499,6 +499,30 @@ function readKeys(op: ClientOp, state: RoomState): string[] {
 export function turnPending(s: { pending?: readonly { op: ClientOp }[]; confirmed?: ProjectedState | null }): boolean {
   const room = s.confirmed ?? {};
   return s.pending?.some((p) => holdsTurn(p.op, room)) ?? false;
+}
+
+/** A fight's rows as an action that adds creatures to it reads them: who has a row. */
+export type FightRows = { readonly entries: readonly Pick<InitEntry, "id" | "tokenId" | "characterId">[] };
+
+/**
+ * The fight the room holds once the ops still pending land, for an action
+ * that adds creatures to it: the view's fight, or, while a start waits for
+ * its answer, the rows of that start and of the adds sent behind it. A
+ * start shows only once the server takes it (holdsTurn), so an action that
+ * read the view alone would send a second start, which the server refuses,
+ * and leave its creatures out. Null with no fight on or on its way.
+ */
+export function fightAhead(s: { view?: { readonly encounter?: FightRows | null } | null; pending?: readonly { op: ClientOp }[] }): FightRows | null {
+  const shown = s.view?.encounter;
+  if (shown) return shown;
+  let rows: Pick<InitEntry, "id" | "tokenId" | "characterId">[] | null = null;
+  for (const { op } of s.pending ?? []) {
+    // A second start would be refused, since the first makes the fight, and an add with no fight before it too.
+    if (op.t === "encounter.start") rows ??= [...op.entries];
+    else if (op.t === "encounter.add") rows?.push(...op.entries);
+    else if (op.t === "encounter.end") rows = null;
+  }
+  return rows === null ? null : { entries: rows };
 }
 
 /**

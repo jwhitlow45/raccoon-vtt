@@ -14,7 +14,7 @@ import { AutoInitiativeControls, AutoInitiativeResult, useStartFight } from "../
 import { useStartRoll, useStartWaiting, type StartFrom } from "../features/encounter/autoState.ts";
 import { HpLog } from "../features/encounter/HpLog.tsx";
 import { setFollowTurn, useFollowTurn } from "../features/encounter/followTurn.ts";
-import { useRowFacts, useSend, useSortedEntries, useTurnTimer, useYou } from "../features/encounter/hooks.ts";
+import { useAnyPending, useFightAhead, useRowFacts, useSend, useSortedEntries, useTurnTimer, useYou } from "../features/encounter/hooks.ts";
 import {
   COMPACT_HEADER_PX,
   addCandidates,
@@ -613,6 +613,7 @@ function SelectedCreatures() {
 // ---------------------------------------------------------------- building the fight
 
 const NO_CANDIDATES: Record<AddMode, Token[]> = { selected: [], scene: [], visible: [] };
+const NO_OPS: readonly number[] = [];
 
 /**
  * The whole view, since "Visible to players" asks projection's own rule,
@@ -621,16 +622,18 @@ const NO_CANDIDATES: Record<AddMode, Token[]> = { selected: [], scene: [], visib
 function useCandidates(selectedTokenId: string | null): Record<AddMode, Token[]> {
   const view = useRoomView((s) => s.view);
   const sceneId = useRoomView((s) => s.sceneId);
+  // A start still waiting for its answer counts, so its creatures are not offered again.
+  const fight = useFightAhead();
   return useMemo(
     () =>
       view
         ? {
-            selected: addCandidates(view, sceneId, "selected", selectedTokenId),
-            scene: addCandidates(view, sceneId, "scene", selectedTokenId),
-            visible: addCandidates(view, sceneId, "visible", selectedTokenId),
+            selected: addCandidates(view, sceneId, "selected", selectedTokenId, fight),
+            scene: addCandidates(view, sceneId, "scene", selectedTokenId, fight),
+            visible: addCandidates(view, sceneId, "visible", selectedTokenId, fight),
           }
         : NO_CANDIDATES,
-    [view, sceneId, selectedTokenId],
+    [view, sceneId, selectedTokenId, fight],
   );
 }
 
@@ -652,7 +655,9 @@ function useJoinBatches(candidates: Record<AddMode, Token[]>): { batches(tokens:
  * The ways to start a fight, and "Roll monsters' Initiative" under them
  * (docs/design/design-v1-qol.md 3, Q12): on, a start rolls the monsters once the server
  * takes it, and the pressed button reads "Rolling…" until then
- * (AutoInitiative.tsx useStartFight).
+ * (AutoInitiative.tsx useStartFight). Off, or for Nobody yet, the pressed
+ * button is busy until the server takes the start, since the fight shows
+ * only then. Another button pressed meanwhile adds its creatures behind it.
  */
 function StartFight(props: { selectedTokenId: string | null }) {
   const candidates = useCandidates(props.selectedTokenId);
@@ -660,11 +665,17 @@ function StartFight(props: { selectedTokenId: string | null }) {
   const startFight = useStartFight();
   const roll = useStartRoll();
   const rolling = useStartWaiting();
+  const [sent, setSent] = useState<{ from: StartFrom | "nobody"; ops: readonly number[] } | null>(null);
+  const waits = useAnyPending(sent?.ops ?? NO_OPS);
+  const pressed = sent !== null && waits ? sent.from : null;
+  const press = (from: StartFrom | "nobody", ops: readonly number[] | null) => {
+    if (ops !== null && ops.length > 0) setSent({ from, ops });
+  };
   return (
     <Section label="New fight" search="tracker.new-fight" style={COLUMN}>
       <Wrap>
-        <AddButtons candidates={candidates} stateOf={join.stateOf} onAdd={(tokens, from) => startFight(join.batches(tokens), from)} rolling={rolling} />
-        <Button size="sm" onClick={() => startFight([], null)} style={GROW}>
+        <AddButtons candidates={candidates} stateOf={join.stateOf} onAdd={(tokens, from) => press(from, startFight(join.batches(tokens), from))} rolling={rolling} pressed={pressed} />
+        <Button size="sm" busy={pressed === "nobody"} onClick={() => press("nobody", startFight([], null))} style={GROW}>
           Nobody yet
         </Button>
       </Wrap>
@@ -680,14 +691,16 @@ function StartFight(props: { selectedTokenId: string | null }) {
  * not load (JoinFailed says so), so none adds a row marked off for a lair
  * it could not read.
  */
-function AddButtons(props: { candidates: Record<AddMode, Token[]>; stateOf(tokens: readonly Token[]): JoinState; onAdd(tokens: Token[], from: StartFrom): void; rolling?: StartFrom | null }) {
+function AddButtons(props: { candidates: Record<AddMode, Token[]>; stateOf(tokens: readonly Token[]): JoinState; onAdd(tokens: Token[], from: StartFrom): void; rolling?: StartFrom | null; pressed?: StartFrom | "nobody" | null }) {
   const { candidates } = props;
   const selected = candidates.selected[0];
   const button = (tokens: Token[], from: StartFrom, words: ReactNode) => {
     const state = props.stateOf(tokens);
     const rolling = props.rolling === from;
+    // Its own start's creatures are no longer offered once it is pressed, so it stays enabled while it waits and keeps its focus.
+    const waiting = rolling || props.pressed === from;
     return (
-      <Button size="sm" disabled={tokens.length === 0 || state === "failed"} busy={state === "loading" || rolling} onClick={() => props.onAdd(tokens, from)} style={GROW}>
+      <Button size="sm" disabled={!waiting && (tokens.length === 0 || state === "failed")} busy={state === "loading" || waiting} onClick={() => props.onAdd(tokens, from)} style={GROW}>
         {rolling ? "Rolling…" : words}
       </Button>
     );

@@ -20,7 +20,7 @@ import type { Resolved } from "./draft.ts";
 export type DropOptions = {
   /** Placed hidden from players, to reveal later, as the monster browser's toggle does. */
   hidden: boolean;
-  /** Also add them to the fight, when one is running. */
+  /** Also add them to the fight, when one is running or its start is on its way. */
   addToFight: boolean;
 };
 
@@ -34,7 +34,8 @@ export type DropPlan = {
 export function dropPlan(input: {
   monsters: readonly SavedEncounterMonster[];
   resolve(m: SavedEncounterMonster): Resolved;
-  state: Pick<RoomState, "tokens" | "monsters" | "srdImages" | "encounter"> & Partial<Pick<RoomState, "buildChunks">>;
+  /** `encounter` is the fight with a start still waiting for its answer counted in (state/store.ts fightAhead). */
+  state: Pick<RoomState, "tokens" | "monsters" | "srdImages"> & Partial<Pick<RoomState, "buildChunks">> & { encounter: object | null };
   scene: Pick<Scene, "id" | "bounds" | "gridShape">;
   center: Point;
   options: DropOptions;

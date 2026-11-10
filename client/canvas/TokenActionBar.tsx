@@ -25,7 +25,7 @@ import { useStartGroupSave, type StartInput } from "../features/dice/groupSave/s
 import { usePreview } from "../features/dm/previewContext.ts";
 import { tokenSizeLabel } from "../features/grid/words.ts";
 import { ViewAsButton } from "../features/dm/viewAs.tsx";
-import { useRowFacts, useSend, useSortedEntries } from "../features/encounter/hooks.ts";
+import { useFightAhead, useRowFacts, useSend, useSortedEntries } from "../features/encounter/hooks.ts";
 import { useEndTurn } from "../features/encounter/InitiativeStrip.tsx";
 import { turnStatus } from "../features/encounter/logic.ts";
 import { EndTurnPill } from "../features/encounter/parts.tsx";
@@ -711,6 +711,8 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
   const characters = useRoomView((s) => s.floorView?.characters ?? NO_CHARACTERS);
   const playersApplyDamage = useRoomView((s) => s.floorView?.meta.settings.playersApplyDamage ?? false);
   const encounter = useRoomView((s) => s.floorView?.encounter ?? null);
+  // A start still waiting for its answer counts, so the fight's button adds behind it rather than starting another.
+  const fight = useFightAhead();
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [more, setMore] = useState(false);
   const moreButton = useRef<HTMLButtonElement>(null);
@@ -727,10 +729,10 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
   const hidden = flagLit(tokens, "hidden");
   const locked = flagLit(tokens, "locked");
   // The rows join by the rule every path into a fight shares (combat/state.ts useFightJoin), reading their blocks for the DM only.
-  const joining = useMemo(() => (offers.dm ? fightCandidates(tokens, encounter) : []), [offers.dm, tokens, encounter]);
+  const joining = useMemo(() => (offers.dm ? fightCandidates(tokens, fight) : []), [offers.dm, tokens, fight]);
   const join = useFightJoin(joining);
   const joinState = join.stateOf(joining);
-  const outOfFight = fightCandidates(tokens, encounter).length;
+  const outOfFight = fightCandidates(tokens, fight).length;
   const scope = useRoomScope();
   const anyPlayed = useRoomView((s) => (s.floorView ? offersRequest(s.floorView, tokens) : false));
   const openRolls = useOpenRollOptions();
@@ -848,8 +850,8 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
               </BarButton>
             ) : null}
             {offers.dm && outOfFight > 0 ? (
-              <BarButton busy={joinState === "loading"} disabled={joinState === "failed"} onClick={() => send(fightOps(tokens, encounter, actions.newId, join.mark))}>
-                {encounter ? "Add to the fight" : "Start a fight"}
+              <BarButton busy={joinState === "loading"} disabled={joinState === "failed"} onClick={() => send(fightOps(tokens, fight, actions.newId, join.mark))}>
+                {fight ? "Add to the fight" : "Start a fight"}
               </BarButton>
             ) : null}
             {/* The three icon buttons wrap as one, so a row that runs out never leaves Clear alone across a line of its own (LP32-POLISH i). */}

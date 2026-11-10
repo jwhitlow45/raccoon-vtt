@@ -27,7 +27,8 @@ import { theme } from "../../lib/theme.ts";
 import { initials } from "../../lib/tokenView.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
-import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { fightAhead } from "../../state/store.ts";
+import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { usePanelHeader } from "../panels.ts";
 import type { TokenAccess } from "./access.ts";
 import { characterPageSlot, DISCARD, patchForm, useKeepDraft, useKeptDraft, useLeaveForm, usePendingNumbers, type LeaveFor } from "./characterPage.ts";
@@ -190,6 +191,7 @@ export function CompanionForm(props: {
   const sceneId = useRoomView((s) => s.sceneId);
   const dm = useRoomView((s) => s.you?.role === "dm");
   const actions = useRoomActions();
+  const room = useRoomStore();
   const ui = useRoomUi();
   const scope = useRoomScope();
   const pageStore = useScoped(characterPageSlot);
@@ -318,7 +320,7 @@ export function CompanionForm(props: {
       else setError("It may not have been added. Check the map before trying again.");
     };
     // An own-turn companion made mid-fight joins it in the same undo step. Its row's answer stays quiet: refused, as when the fight ended meanwhile, the companion waits in Join the fight.
-    const join = view ? joinFightOp(view, op.token, actions.newId()) : null;
+    const join = view ? joinFightOp({ tokens: view.tokens, encounter: fightAhead(room.getState()) }, op.token, actions.newId()) : null;
     const together = join ? { group: actions.newId() } : null;
     if (actions.dispatch(op, { onAnswer, quiet: true, ...together }) !== null) {
       setWaiting(true);

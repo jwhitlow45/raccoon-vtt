@@ -115,11 +115,16 @@ const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
 const { useStartFight } = await import("./AutoInitiative.tsx");
 const { useAutoStore, useRollBusy } = await import("./autoState.ts");
+const { useFightAhead } = await import("./hooks.ts");
 
 type Sent = { op: ClientOp; group?: string; onAnswer?: (answer: OpAnswer) => void };
 
-/** A DM's room with two goblins and a PC, the hook as the tracker calls it, and the ops it sends. */
-function table(opts: { switchOff?: boolean; scores?: boolean; connection?: string; unsent?: ClientOp["t"] } = {}) {
+/**
+ * A DM's room with two goblins and a PC, the hook as the tracker calls it,
+ * and the ops it sends. With `holds`, each op stays in the store's pending
+ * list as the room store keeps it until its answer.
+ */
+function table(opts: { switchOff?: boolean; scores?: boolean; connection?: string; unsent?: ClientOp["t"]; holds?: boolean } = {}) {
   const items = new Map<string, string>(opts.switchOff ? [["rvtt.autoInitiativeStart.r1", "off"]] : []);
   (globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => items.get(k) ?? null, setItem: (k: string, v: string) => void items.set(k, v) };
   let view = room({
@@ -131,7 +136,7 @@ function table(opts: { switchOff?: boolean; scores?: boolean; connection?: strin
   });
   if (opts.scores) view = { ...view, meta: { ...view.meta, settings: { ...view.meta.settings, monsterInitScore: true } } };
   const scope = new RoomScope();
-  const store = createStore(() => ({ view, roomId: "r1", connection: opts.connection ?? "open", you: DM, sceneId: "s1", local: { selectedIds: [], multi: false }, pending: [] }));
+  const store = createStore(() => ({ view, roomId: "r1", connection: opts.connection ?? "open", you: DM, sceneId: "s1", local: { selectedIds: [], multi: false }, pending: [] as { n: number; op: ClientOp }[] }));
   const sent: Sent[] = [];
   let ids = 0;
   const actions = {
@@ -140,6 +145,7 @@ function table(opts: { switchOff?: boolean; scores?: boolean; connection?: strin
       // A malformed op is never queued, so it has no answer to wait for.
       if (op.t === opts.unsent) return null;
       sent.push({ op, ...(o?.group ? { group: o.group } : {}), ...(o?.onAnswer ? { onAnswer: o.onAnswer } : {}) });
+      if (opts.holds) store.setState({ pending: [...store.getState().pending, { n: sent.length, op }] });
       return sent.length;
     },
   };
@@ -172,7 +178,15 @@ function table(opts: { switchOff?: boolean; scores?: boolean; connection?: strin
     draw(() => (out = useRollBusy()));
     return out;
   };
-  return { start: start!, auto: auto!, sent, store, land, done, busy };
+  /** The tokens with a row in the fight as an add reads it now (useFightAhead). */
+  const ahead = () => {
+    let out: (string | undefined)[] | null = null;
+    // Markup reads a store's first state, so the room's state now is made its first, as draw does for the auto store.
+    store.getInitialState = store.getState;
+    draw(() => (out = useFightAhead()?.entries.map((e) => e.tokenId) ?? null));
+    return out;
+  };
+  return { start: start!, auto: auto!, sent, store, land, done, busy, ahead };
 }
 
 const BATCHES = [[{ id: "e1", tokenId: "g1" }, { id: "e2", tokenId: "pc" }], [{ id: "e3", tokenId: "g2" }]];
@@ -181,12 +195,12 @@ describe("starting a fight (Q12)", () => {
   test("the start and every add batch go as one gesture, and once all are taken the monsters roll, behind the screen", () => {
     const t = table();
     try {
-      assert.equal(t.start(BATCHES, "scene"), true);
+      assert.deepEqual(t.start(BATCHES, "scene"), [1, 2], "the numbers of the ops it sent");
       assert.deepEqual(t.sent.map((s) => s.op.t), ["encounter.start", "encounter.add"]);
       assert.ok(t.sent[0]!.group && t.sent.every((s) => s.group === t.sent[0]!.group), "one group: one Play step");
       assert.equal(t.auto.getState().start?.from, "scene", "the pressed button waits");
       assert.equal(t.busy(), true, "and every roll button with it");
-      assert.equal(t.start(BATCHES, "visible"), false, "a second press while it waits sends nothing");
+      assert.equal(t.start(BATCHES, "visible"), null, "a second press while it waits sends nothing");
       assert.equal(t.sent.length, 2);
       t.land();
       t.sent[1]!.onAnswer!("taken");
@@ -247,6 +261,41 @@ describe("starting a fight (Q12)", () => {
       assert.equal(scores.auto.getState().last, null, "and no card, since nothing was pressed");
     } finally {
       scores.done();
+    }
+  });
+
+  test("a press while a start without a roll waits sends its rows as adds behind it, and Nobody yet then sends nothing", () => {
+    const t = table({ switchOff: true, holds: true });
+    try {
+      assert.equal(t.ahead(), null, "no fight on or on its way");
+      assert.deepEqual(t.start([[{ id: "e1", tokenId: "g1" }]], "selected"), [1]);
+      assert.deepEqual(t.ahead(), ["g1"], "the waiting start's rows");
+      assert.deepEqual(t.start([[{ id: "e2", tokenId: "pc" }], [{ id: "e3", tokenId: "g2" }]], "scene"), [2, 3]);
+      assert.deepEqual(t.ahead(), ["g1", "pc", "g2"], "and the adds behind it");
+      assert.deepEqual(t.sent.map((s) => s.op.t), ["encounter.start", "encounter.add", "encounter.add"], "no second start, which the server would refuse");
+      assert.deepEqual(t.start([], null), [], "Nobody yet behind a start has nothing to send");
+      assert.equal(t.sent.length, 3);
+      t.land();
+      assert.deepEqual(t.store.getState().view.encounter?.entries.map((e) => e.tokenId).sort(), ["g1", "g2", "pc"]);
+    } finally {
+      t.done();
+    }
+  });
+
+  test("Nobody yet waiting, then a press with the switch on: its rows go behind the start and roll once the server takes them", () => {
+    const t = table({ holds: true });
+    try {
+      assert.deepEqual(t.start([], null), [1]);
+      assert.equal(t.auto.getState().start, null, "Nobody yet rolls nothing");
+      assert.deepEqual(t.start(BATCHES, "scene"), [2, 3]);
+      assert.deepEqual(t.sent.map((s) => s.op.t), ["encounter.start", "encounter.add", "encounter.add"]);
+      assert.equal(t.auto.getState().start?.from, "scene", "the pressed button waits to roll");
+      t.land();
+      t.sent[1]!.onAnswer!("taken");
+      t.sent[2]!.onAnswer!("taken");
+      assert.equal(t.sent[3]?.op.t, "dice.roll", "the monsters rolled once their rows were taken");
+    } finally {
+      t.done();
     }
   });
 

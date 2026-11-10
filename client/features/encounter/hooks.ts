@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import type { ClientOp } from "#shared/protocol.ts";
 import { dispatchGesture } from "../../state/actions.ts";
+import { fightAhead, type FightRows } from "../../state/store.ts";
 import type { OpAnswer, RoomView } from "../../state/types.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { entryActor, isDefeated, ownsEntry, sortedEntries } from "./logic.ts";
@@ -39,6 +41,22 @@ export function useConfirmedSeq(): number {
 export function useAnyPending(ns: readonly number[]): boolean {
   return useRoomView((s) => ns.some((n) => isPending(s, n)));
 }
+
+/**
+ * The fight as an action that adds creatures to it reads it
+ * (state/store.ts fightAhead): the view's, or a start still waiting for
+ * its answer with the adds sent behind it.
+ */
+export function useFightAhead(): FightRows | null {
+  const encounter = useRoomView((s) => s.view?.encounter ?? null);
+  // Only the waiting ops that start, grow or end a fight, compared one by one, so other ops on their way render nothing here.
+  const pending = useRoomView(useShallow((s) => (s.view?.encounter ? NO_FIGHT_OPS : ((s as RoomView & PendingOps).pending ?? NO_FIGHT_OPS).filter((p) => FIGHT_OPS.has(p.op.t)))));
+  return useMemo(() => fightAhead({ view: { encounter }, pending }), [encounter, pending]);
+}
+
+type PendingOps = { pending?: readonly { op: ClientOp }[] };
+const FIGHT_OPS: ReadonlySet<ClientOp["t"]> = new Set<ClientOp["t"]>(["encounter.start", "encounter.add", "encounter.end"]);
+const NO_FIGHT_OPS: readonly { op: ClientOp }[] = [];
 
 /** Sends ops and reports whether the last one sent here is still unanswered. */
 export function useSend(): { send(op: ClientOp): void; waiting: boolean } {

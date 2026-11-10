@@ -516,10 +516,12 @@ function tokenOrder(a: Token, b: Token): number {
  * check alone would leave out every monster the party sees in explored
  * ground. On a per-player scene it is what any player sees, the union
  * (docs/design/design-v1-per-player-vision.md decision 14, vision/union.ts).
+ * Tokens with a row in `fight` are left out: the view's fight, or one whose
+ * start still waits for its answer (state/store.ts fightAhead).
  */
-export function addCandidates(view: RoomState, sceneId: string | null, mode: AddMode, selectedId: string | null): Token[] {
+export function addCandidates(view: RoomState, sceneId: string | null, mode: AddMode, selectedId: string | null, fight: { readonly entries: readonly Pick<InitEntry, "tokenId">[] } | null = view.encounter): Token[] {
   if (sceneId === null) return [];
-  const taken = new Set((view.encounter?.entries ?? []).map((e) => e.tokenId).filter((id) => id !== undefined));
+  const taken = new Set((fight?.entries ?? []).map((e) => e.tokenId).filter((id) => id !== undefined));
   const out: Token[] = [];
   for (const token of Object.values(view.tokens)) {
     if (!token || token.sceneId !== sceneId || taken.has(token.id)) continue;

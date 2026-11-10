@@ -7,6 +7,7 @@ import { rowCharacter } from "#shared/rules/initiative.ts";
 import { fitLine, type StatBlockMonster } from "#shared/srd/monsters.ts";
 import type { BlockLink } from "../monsters/statBlockLink.ts";
 import { footprint } from "../../lib/scene.ts";
+import type { FightRows } from "../../state/store.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { blankActor, firstFreeSpot, occupiedBoxes, sizeFootprint, spreadPositions, type Point } from "./factory.ts";
 
@@ -207,9 +208,10 @@ export function companionInput(
  * rolls or types it, as for any row of theirs. Null for a companion that
  * acts on its character's turn, with no fight, or while its character is
  * out of the fight, when it waits in Your creatures as any creature of
- * theirs does.
+ * theirs does. `encounter` is the fight with a start still waiting for its
+ * answer counted in (state/store.ts fightAhead), so the row goes behind it.
  */
-export function joinFightOp(view: Pick<RoomState, "tokens" | "encounter">, input: Pick<TokenInput, "id" | "kind" | "companion">, entryId: string): ClientOp | null {
+export function joinFightOp(view: Pick<RoomState, "tokens"> & { encounter: FightRows | null }, input: Pick<TokenInput, "id" | "kind" | "companion">, entryId: string): ClientOp | null {
   const of = input.companion?.of;
   if (input.companion?.turn !== "own" || input.kind === "object" || of === undefined || !view.encounter) return null;
   if (!view.encounter.entries.some((entry) => rowCharacter(view, entry) === of)) return null;

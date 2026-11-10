@@ -17,7 +17,10 @@ import { Row } from "../../components/Row.tsx";
 import { useUnsavedInput, useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
+import { fightAhead } from "../../state/store.ts";
+import type { RoomView } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
+import { useFightAhead } from "../encounter/hooks.ts";
 import { viewOf } from "../monsters/draft.ts";
 import { currentStageCamera } from "../scenes/stageCamera.ts";
 import type { Point } from "../tokens/factory.ts";
@@ -290,7 +293,8 @@ function PlaceSection(props: { draft: Draft; srd: SrdList; close: PanelClose }) 
   const scope = useRoomScope();
   const store = useRoomStore();
   const sceneName = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId]?.name : undefined));
-  const fighting = useRoomView((s) => (s.view?.encounter ?? null) !== null);
+  // A start still waiting for its answer counts, so the creatures join it behind the start.
+  const fighting = useFightAhead() !== null;
   const monsters = useRoomMonsters();
   const [hidden, setHidden] = useState(false);
   const [addToFight, setAddToFight] = useState(true);
@@ -305,8 +309,10 @@ function PlaceSection(props: { draft: Draft; srd: SrdList; close: PanelClose }) 
   const name = props.draft.name.trim() || "this encounter";
 
   /** The plan from the room as it is when the tokens go down, so a monster's image set in between is the one placed. */
-  const place = (state: Parameters<typeof dropPlan>[0]["state"] | null, scene: { id: string; bounds: { w: number; h: number } } | undefined, center: Point): string | null => {
-    if (!state || !scene) return null;
+  const place = (room: RoomView, scene: { id: string; bounds: { w: number; h: number } } | undefined, center: Point): string | null => {
+    const view = room.view;
+    if (!view || !scene) return null;
+    const state = { ...view, encounter: fightAhead(room) };
     const plan = dropPlan({ monsters: lines, resolve: (m) => resolveLine(m, srdById, state.monsters), state, scene, center, options, newId: actions.newId });
     return sendDrop(plan, actions);
   };
@@ -315,7 +321,7 @@ function PlaceSection(props: { draft: Draft; srd: SrdList; close: PanelClose }) 
     setPending(scope, {
       kind: "batch",
       what: hidden ? `${name}, hidden` : name,
-      place: (world, ctx) => place(ctx.getState().view, ctx.scene, world),
+      place: (world, ctx) => place(ctx.getState(), ctx.scene, world),
     });
     ui.setTool(PLACE_TOOL_ID);
     props.close({ placing: true });
@@ -329,7 +335,7 @@ function PlaceSection(props: { draft: Draft; srd: SrdList; close: PanelClose }) 
     const center = live
       ? groundAtMiddle(live)
       : { x: scene.bounds.w / 2, y: scene.bounds.h / 2 };
-    const placed = place(s.view, scene, center);
+    const placed = place(s, scene, center);
     if (!placed) return;
     ui.select(placed, { opens: true });
     props.close();
