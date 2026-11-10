@@ -125,7 +125,7 @@ const rowsOf = (db: StoredRoomDb): Omit<StoredRow, "opVersion">[] => db.rows.map
 
 /**
  * Runs the same rounds against both builds. Each round sends its events to
- * both, lets them run, then fires the round's batch timers; a held round
+ * both, lets them run, then fires the round's batch timers. A held round
  * keeps the commit its tick starts until a later round's events are queued.
  */
 async function race(t: TestContext, room: RoomState, rounds: Event[][], holds: ReadonlySet<number>, options: ActorDeps["options"] = {}): Promise<{ steps: Build; closes: Build }> {

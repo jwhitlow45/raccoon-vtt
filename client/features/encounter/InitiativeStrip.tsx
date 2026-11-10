@@ -1615,10 +1615,10 @@ function EndTurnButton(props: { stack?: boolean }) {
  * The DM's Next (chips C3), beside the chip and at the band's end. It
  * shares End turn's wait, so the chip's and the band's Next show busy
  * together and a second press on either while one waits sends nothing.
- * The N key and the tracker's Next send on their own, and each takes the
- * waiting Next's `from` (logic.ts turnOp), so the server moves the turn
- * once. Any turn change on its way makes it busy too (useTurnWait). Start stands in before the first
- * turn, as in the tracker, and an empty fight has nothing to start.
+ * Only the N key sends on its own, and it takes the waiting Next's `from`
+ * (logic.ts turnOp), so the server moves the turn once. Any turn change on
+ * its way makes it busy too (useTurnWait). Start stands in before the
+ * first turn, as in the tracker, and an empty fight has nothing to start.
  */
 function NextButton(props: { start: boolean; empty: boolean }) {
   const { end, waiting } = useEndTurn();

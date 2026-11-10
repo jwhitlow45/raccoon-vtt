@@ -4367,7 +4367,7 @@ function zeroed<T>(value: T): T {
   return copy as T;
 }
 
-/** The state's single values, each one entity; every other field of a projection is a record or a list of them. */
+/** The state's single values, each one entity. Every other field of a projection is a record or a list of them. */
 const SINGLE_FIELDS = new Set(["meta", "encounter", "clock", "playing"]);
 
 /** A player's whole projection with every entity's rev 0 (zeroed). */
