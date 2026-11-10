@@ -3371,6 +3371,11 @@ function scenesOf(op: Op, before: RoomState, after: RoomState, by: Viewer["role"
           parsed.kind === "pin" ||
           parsed.kind === "trap"
         ) {
+          // A player's undo or redo of a climb names neither floor (FL2-SOL-05): it moves creatures and their areas between
+          // two floors of one scene and raises no count a floor keeps for itself, so a floor's limits could only answer it
+          // from counts the player may not hold, as the far floor's would a climb (token.climb below). The scene's own
+          // counts, the size guard and the floor check read what the restore touched and do not start here.
+          if (op.climb && by === "player" && (parsed.kind === "token" || parsed.kind === "template")) continue;
           const restored = entry.value as { sceneId?: string } | null | undefined;
           if (restored?.sceneId) out.add(restored.sceneId);
           const current = readEntity(after, entry.key) as { sceneId?: string } | null;

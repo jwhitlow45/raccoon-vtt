@@ -2532,20 +2532,62 @@ describe("the lit token light cap in the limits step (docs/design/design-v1-maps
     }
   });
 
-  test("a player's climb onto a floor already past a cap of its own passes, the far floor's counts left unread", async () => {
-    const { state, dm, ana } = litTower();
-    // More traps than a floor holds, as a room made before traps met their cap can have.
+  /** The lit tower with `traps` plates on a floor, as many as a room made before traps met their cap can hold. */
+  function trapped(sceneId: string, traps: number): ReturnType<typeof litTower> {
+    const room = litTower();
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false };
-    let over = state;
-    for (let k = 0; k <= LIMITS.trapsPerScene; k++) {
-      const made = applyOp(over, { t: "trap.create", trap: { id: `plate${k}`, sceneId: UPPER, name: "Plate", zone: { cells: [{ x: 10 + (k % 10), y: 10 + Math.floor(k / 10), w: 1, h: 1 }] }, rig } } as Op, dmOf(dm), { seq: 50 + k, at: new Date().toISOString() });
-      assert.ok(made.ok);
-      over = made.state;
+    for (let k = 0; k < traps; k++) {
+      const made = applyOp(room.state, { t: "trap.create", trap: { id: `plate${k}`, sceneId, name: "Plate", visibility: "dm", zone: { cells: [{ x: 10 + (k % 10), y: 10 + Math.floor(k / 10), w: 1, h: 1 }] }, rig } } as Op, dmOf(room.dm), { seq: 50 + k, at: new Date().toISOString() });
+      assert.ok(made.ok, made.ok ? "" : made.message);
+      room.state = made.state;
     }
-    await withRoom(over, dm, ana, async (actor, send) => {
-      assert.equal(await send("player", climbUp), null);
-      assert.equal(actor.committed.state.tokens.thorn!.sceneId, UPPER);
-    });
+    return room;
+  }
+
+  /** A player's climb, Undo and Redo by its history, each answer's refusal or null, and Thorn's floor after each. */
+  async function climbUndoRedo(room: ReturnType<typeof litTower>): Promise<unknown[]> {
+    const out: unknown[] = [];
+    const db = new FakeDb({ state: room.state, dmGrants: [room.dm.id] });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const ana = connect(actor, room.ana, "player");
+      await actor.hello(ana.conn, { clientId: "c2", resumeFrom: 1 });
+      let n = 0;
+      const send = async (op: unknown) => {
+        n++;
+        await sendWithHistory(actor, ana.conn, n, op);
+        const answer = await answerTo(ana.sent, n);
+        assert.ok(answer !== "stuck");
+        const no = answer.rejects?.find((r) => r.n === n);
+        out.push([no ? [no.code, no.message] : null, actor.committed.state.tokens.thorn!.sceneId]);
+      };
+      const head = (direction: "undo" | "redo") => {
+        const history = ana.sent.filter((m): m is HistoryMessage => m.t === "history").at(-1);
+        return history?.play?.[direction].head?.id;
+      };
+      await send(climbUp);
+      await send({ t: "undo", head: head("undo") });
+      await send({ t: "redo", head: head("redo") });
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+    return out;
+  }
+
+  test("a player's climb, its Undo and its Redo answer alike whatever a floor they are taken to hides past its cap (FL2-SOL-05)", async () => {
+    const over = LIMITS.trapsPerScene + 1;
+    const plain = await climbUndoRedo(litTower());
+    assert.deepEqual(plain, [[null, UPPER], [null, GROUND], [null, UPPER]], "the climb, the undo and the redo all apply");
+    // Hidden plates upstairs: the climb and the redo take Thorn there, and the undo takes him from there.
+    assert.deepEqual(await climbUndoRedo(trapped(UPPER, over)), plain, "upstairs past its cap");
+    assert.deepEqual(await climbUndoRedo(trapped(UPPER, over - 1)), plain, "upstairs at its cap");
+  });
+
+  test("the same climb from a floor past its cap is refused as any move there is, and never reaches its undo", async () => {
+    const answers = await climbUndoRedo(trapped(GROUND, LIMITS.trapsPerScene + 1));
+    assert.deepEqual(answers[0], [["quota", `this scene can hold at most ${LIMITS.trapsPerScene} traps`], GROUND]);
   });
 });
 
