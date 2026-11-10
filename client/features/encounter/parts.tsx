@@ -337,14 +337,18 @@ export function EndTurnPill(props: { waiting: boolean; stack?: boolean; onClick(
  * (docs/design/design-v1-qol.md 4, C3): "Next", or "Start" before the first
  * turn. It is the End turn pill's outline twin, so a glance tells the DM's
  * button from a player's solid one. It sends what N and the tracker's Next
- * send, never predicted, and spins until the server moves the turn. As in
+ * send, never predicted. `busy` from the moment a turn change waits for
+ * its answer: `aria-busy`, and a tap does nothing, while the pill keeps its
+ * focus and its look, as the house busy button does. `spinner` once the
+ * wait shows, after the shared delay for a change sent elsewhere. As in
  * EndTurnPill the spinner stands in the words' place and the words stay,
  * unseen, so the pill keeps its width.
  */
-export function NextPill(props: { waiting: boolean; start: boolean; disabled?: boolean; onClick(): void }) {
+export function NextPill(props: { busy: boolean; spinner: boolean; start: boolean; disabled?: boolean; onClick(): void }) {
   const keys = useKeyHint("turn");
   const word = props.start ? "Start" : "Next";
-  const idle = props.disabled && !props.waiting;
+  const off = props.disabled === true && !props.busy;
+  const idle = off && !props.spinner;
   return (
     <button
       type="button"
@@ -353,9 +357,11 @@ export function NextPill(props: { waiting: boolean; start: boolean; disabled?: b
       aria-keyshortcuts={keys?.aria}
       // Its ring hugs the pill, as End turn's does.
       {...PILL_FOCUS}
-      onClick={props.onClick}
-      disabled={props.waiting || props.disabled}
-      aria-busy={props.waiting ? true : undefined}
+      onClick={() => {
+        if (!props.busy) props.onClick();
+      }}
+      disabled={off}
+      aria-busy={props.busy ? true : undefined}
       style={{
         // Positioned, so it stays above the phone band's own full-size tap target, which opens the tracker.
         position: "relative",
@@ -370,7 +376,7 @@ export function NextPill(props: { waiting: boolean; start: boolean; disabled?: b
         borderRadius: theme.radius.pill,
         background: "transparent",
         fontFamily: theme.font.body,
-        cursor: props.waiting || props.disabled ? "default" : "pointer",
+        cursor: props.busy || props.disabled ? "default" : "pointer",
       }}
     >
       <span
@@ -391,12 +397,12 @@ export function NextPill(props: { waiting: boolean; start: boolean; disabled?: b
         }}
       >
         <span style={{ position: "relative", display: "grid", placeItems: "center" }}>
-          {props.waiting ? (
+          {props.spinner ? (
             <span style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
               <Spinner label="Moving to the next turn" />
             </span>
           ) : null}
-          <span aria-hidden style={{ opacity: props.waiting ? 0 : 1 }}>{word}</span>
+          <span aria-hidden style={{ opacity: props.spinner ? 0 : 1 }}>{word}</span>
         </span>
       </span>
     </button>

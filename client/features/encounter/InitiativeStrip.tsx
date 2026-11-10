@@ -1622,9 +1622,9 @@ function EndTurnButton(props: { stack?: boolean }) {
  */
 function NextButton(props: { start: boolean; empty: boolean }) {
   const { end, waiting } = useEndTurn();
-  // A turn change sent from the tracker or a key makes it busy too, after the shared delay, and deaf at once.
+  // A turn change sent from the tracker or a key makes it busy at once, its spinner after the shared delay.
   const turnWait = useTurnWait();
-  return <NextPill waiting={waiting || turnWait.shown} start={props.start} disabled={props.empty} onClick={() => turnWait.waits || end()} />;
+  return <NextPill busy={waiting || turnWait.waits} spinner={waiting || turnWait.shown} start={props.start} disabled={props.empty} onClick={end} />;
 }
 
 /**

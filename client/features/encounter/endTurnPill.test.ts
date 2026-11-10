@@ -69,10 +69,52 @@ test("stacked, the words wrap onto two lines", () => {
 const { NextPill } = await import("./parts.tsx");
 for (const [name, markup] of [
   ["End turn", render({ waiting: false })],
-  ["Next", renderToStaticMarkup(createElement(NextPill, { waiting: false, start: false, onClick() {} }))],
+  ["Next", renderToStaticMarkup(createElement(NextPill, { busy: false, spinner: false, start: false, onClick() {} }))],
 ] as const) {
   test(`${name}'s focus ring goes on its pill, not its larger target`, () => {
     assert.match(markup, /^<button[^>]* data-pill-focus=""[^>]*><span data-pill=""/);
     assert.equal(markup.match(/data-pill=""/g)?.length, 1, "one pill takes the ring");
   });
 }
+
+/*
+ * The DM's Next while a turn change waits for its answer: busy from the
+ * moment it is sent, its spinner only after the shared delay, and, as the
+ * house busy button, enabled so it keeps its focus, with a tap doing
+ * nothing (D-261110-361).
+ */
+type Pill = { busy: boolean; spinner: boolean; disabled?: boolean };
+
+/** The pill's button as drawn, and how many taps on it reached its handler. */
+function nextPill(props: Pill): { markup: string; tap(): number } {
+  let taps = 0;
+  let button: { props: { onClick(): void } } | undefined;
+  function Probe() {
+    button = NextPill({ ...props, start: false, onClick: () => void taps++ }) as unknown as { props: { onClick(): void } };
+    return null;
+  }
+  renderToStaticMarkup(createElement(Probe));
+  return {
+    markup: renderToStaticMarkup(createElement(NextPill, { ...props, start: false, onClick() {} })),
+    tap: () => {
+      button!.props.onClick();
+      return taps;
+    },
+  };
+}
+
+test("the DM's Next is busy at once while a turn change waits, enabled and deaf to a tap, its spinner shown only once the wait shows", () => {
+  const waits = nextPill({ busy: true, spinner: false });
+  assert.match(waits.markup, /aria-busy="true"/);
+  assert.doesNotMatch(waits.markup, /<button[^>]* disabled=""/, "it stays enabled, so it keeps its focus");
+  assert.doesNotMatch(waits.markup, /Moving to the next turn/, "no spinner before the delay");
+  assert.equal(waits.tap(), 0, "a tap while it waits does nothing");
+  const shown = nextPill({ busy: true, spinner: true });
+  assert.match(shown.markup, /aria-label="Moving to the next turn"/);
+  assert.doesNotMatch(shown.markup, /<button[^>]* disabled=""/);
+  assert.equal(shown.tap(), 0);
+  const idle = nextPill({ busy: false, spinner: false });
+  assert.doesNotMatch(idle.markup, /aria-busy/);
+  assert.equal(idle.tap(), 1, "a tap when idle sends");
+  assert.match(nextPill({ busy: false, spinner: false, disabled: true }).markup, /<button[^>]* disabled=""/, "an empty fight's Start is off");
+});
