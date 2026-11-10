@@ -8,6 +8,7 @@ import { footprintGround } from "#shared/rules/heights.ts";
 import { carriedGroup } from "#shared/rules/attach.ts";
 import { ownEntry } from "#shared/records.ts";
 import { displayName } from "../../lib/scene.ts";
+import type { RoomActions } from "../../state/types.ts";
 
 /*
  * Move to floor (docs/design/design-v1-floors.md 7.4): the DM moves the
@@ -130,4 +131,34 @@ export function moveToFloorOps(view: Pick<RoomState, "buildChunks" | "tokens">, 
     ops.push({ t: "token.update", tokenId: token.id, patch: { sceneId: target.id, ...(elevation !== token.elevation ? { elevation } : {}) } });
   }
   return ops;
+}
+
+/**
+ * Sends a move to one floor of `floorChoices`: the list's tap and the search's row both run this, so they cannot
+ * drift apart. The move shows the floor at once, as the DM's view follows the creatures it moved (7.3). Returns the
+ * reason when the floor is off or the move has nothing to send, and sends nothing then. `onSettled` runs once every
+ * op has an answer.
+ */
+export function sendMoveToFloor(
+  actions: Pick<RoomActions, "dispatch" | "newId" | "showFloor">,
+  view: Pick<RoomState, "buildChunks" | "tokens">,
+  tokens: readonly Token[],
+  choice: Pick<FloorChoice, "floor" | "off">,
+  onSettled?: () => void,
+): string | null {
+  if (choice.off !== null) return choice.off;
+  const ops = moveToFloorOps(view, tokens, choice.floor);
+  if (ops.length === 0) return "Nothing to move";
+  const group = ops.length > 1 ? actions.newId() : undefined;
+  let waiting = 0;
+  const settle = () => {
+    if (--waiting > 0) return;
+    onSettled?.();
+  };
+  for (const op of ops) {
+    waiting += 1;
+    if (actions.dispatch(op, { ...(group !== undefined ? { group } : {}), onAnswer: settle }) === null) settle();
+  }
+  actions.showFloor(choice.floor.id);
+  return null;
 }

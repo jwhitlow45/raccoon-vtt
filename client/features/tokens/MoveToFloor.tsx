@@ -4,7 +4,7 @@ import { Spinner } from "../../components/Loading.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { FLOOR_ROOT_ATTR, FLOOR_ROOTS } from "../floors/ids.ts";
-import { floorChoices, moveToFloorOps } from "./moveToFloor.ts";
+import { floorChoices, sendMoveToFloor } from "./moveToFloor.ts";
 
 /** The words of the action bar's button and the More sheet's section: the bar says "Floor…" where its row is short. */
 export const MOVE_TO_FLOOR = "Move to floor…";
@@ -43,22 +43,12 @@ export function MoveToFloorList(props: { tokens: readonly Token[]; onMoved?(): v
   const go = (floorId: string) => {
     const choice = choices.find((c) => c.floor.id === floorId);
     if (!choice || choice.off !== null || moving !== null) return;
-    const ops = moveToFloorOps(view, props.tokens, choice.floor);
-    if (ops.length === 0) return;
-    const group = ops.length > 1 ? actions.newId() : undefined;
-    let waiting = 0;
-    const settle = () => {
-      if (--waiting > 0) return;
+    setMoving(floorId);
+    const refusal = sendMoveToFloor(actions, view, props.tokens, choice, () => {
       setMoving(null);
       props.onMoved?.();
-    };
-    setMoving(floorId);
-    for (const op of ops) {
-      waiting += 1;
-      if (actions.dispatch(op, { ...(group !== undefined ? { group } : {}), onAnswer: settle }) === null) settle();
-    }
-    // The DM's view follows the creatures it moved (7.3).
-    actions.showFloor(floorId);
+    });
+    if (refusal !== null) setMoving(null);
   };
 
   return (
