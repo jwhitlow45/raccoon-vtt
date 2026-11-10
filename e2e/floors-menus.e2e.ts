@@ -23,6 +23,9 @@ import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, type 
  *   names a floor.
  * - flrm-5: the search finds a token on another floor of the scene, tagged by its floor,
  *   and picking it shows its floor.
+ * - FL3M: with Thorn selected, the search lists a Move to row for each other floor, Attic's
+ *   saying it opens Attic to players, none for Ground, and Enter on Upper's row moves Thorn
+ *   and shows Upper. Pat's search lists no Move to row.
  * - flrm-6: no page logged an error.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus sixty, one file after another. The other
@@ -347,6 +350,31 @@ describe("The DM menu and the search on a scene of several floors", { concurrenc
     await dm.waitForTimeout(500);
     assert.ok(await dm.getByRole("dialog", { name: "Goblin actions" }).isVisible(), "the goblin's bar stays open after the switch");
     await shots.take(dm, "flrm-5-token-on-another-floor");
+  });
+
+  test("FL3M. with Thorn selected, the search lists Move to Upper floor and Move to Attic (opening Attic to players) but not Ground, and Enter moves Thorn and shows Upper", async () => {
+    await dmShows(run.ground, "ground floor");
+    await searchFor(dm, "thorn", `token:${run.tThorn}`);
+    await row(dm, `token:${run.tThorn}`).click();
+    await sheet(dm).waitFor({ state: "detached" });
+    const ids = await searchFor(dm, "move to", `moveToFloor:${run.attic}`);
+    assert.ok(ids.includes(`moveToFloor:${run.upper}`) && !ids.includes(`moveToFloor:${run.ground}`), ids.join(", "));
+    const attic = await row(dm, `moveToFloor:${run.attic}`).innerText();
+    assert.match(attic, /Move to Attic/);
+    assert.match(attic, /Thorn · Opens Attic to players/);
+    const upper = await row(dm, `moveToFloor:${run.upper}`).innerText();
+    assert.match(upper, /Move to Upper floor/);
+    assert.doesNotMatch(upper, /Opens/);
+    await shots.take(dm, "fl3m-move-to-rows");
+    await pickRow(dm, "move to upper floor", `moveToFloor:${run.upper}`);
+    await waitFor("Thorn on Upper", () => (dmSocket.state?.tokens[run.tThorn]?.sceneId === run.upper ? true : null));
+    await waitFor("the DM on Upper", async () => ((await dmOn(run.upper)) ? true : null), 20_000);
+    await searchFor(pat, "move to", null);
+    await pat.waitForTimeout(300);
+    const patIds = await pat.locator("[data-search-row]").evaluateAll((els) => els.map((e) => (e as unknown as DomNode).getAttribute("data-search-row") ?? ""));
+    assert.ok(!patIds.some((id) => id.startsWith("moveToFloor:")), patIds.join(", "));
+    await pat.keyboard.press("Escape");
+    await sheet(pat).waitFor({ state: "detached" });
   });
 
   test("flrm-6. no page logged an error", () => {
