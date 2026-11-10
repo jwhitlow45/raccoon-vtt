@@ -5,6 +5,7 @@ import { sortedEntries } from "../encounter/logic.ts";
 import { joinWords } from "../measure/movement.ts";
 import { displayName } from "../../lib/scene.ts";
 import { attachAllowed, type AttachViewer, type RightsView } from "./rights.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * The words a link adds to the token panel's name block and the tracker's
@@ -17,28 +18,28 @@ import { attachAllowed, type AttachViewer, type RightsView } from "./rights.ts";
 type Tokens = Readonly<Record<string, Token | undefined>>;
 
 /** What a carried token is to its holder, in the name block's words: "Riding Warhorse", "On Bree", "Dragged by Thorn". */
-export function linkTag(tokens: Tokens, token: Token): string | null {
+export function linkTag(tokens: Tokens, token: Token, labels: Labels): string | null {
   const holder = holderOf(tokens, token) as Token | undefined;
   const link = token.attached;
   if (!holder || !link) return null;
-  const name = displayName(holder);
+  const name = displayName(holder, labels);
   if (link.kind === "ride") return `Riding ${name}`;
   if (link.kind === "drag") return `Dragged by ${name}`;
   return `On ${name}`;
 }
 
 /** What a holder carries directly, by name in token id order: "Carries Bree and Torch". */
-export function carriesTag(tokens: Tokens, token: Token): string | null {
+export function carriesTag(tokens: Tokens, token: Token, labels: Labels): string | null {
   const names = (carriedIndex(tokens).get(token.id) ?? []).flatMap((id) => {
     const t = tokens[id];
-    return t ? [displayName(t)] : [];
+    return t ? [displayName(t, labels)] : [];
   });
   return names.length > 0 ? `Carries ${joinWords(names)}` : null;
 }
 
 /** The name block's link tags: what carries this token, then what it carries. */
-export function panelLinkTags(tokens: Tokens, token: Token): string[] {
-  return [linkTag(tokens, token), carriesTag(tokens, token)].filter((t): t is string => t !== null);
+export function panelLinkTags(tokens: Tokens, token: Token, labels: Labels): string[] {
+  return [linkTag(tokens, token, labels), carriesTag(tokens, token, labels)].filter((t): t is string => t !== null);
 }
 
 /**
@@ -49,10 +50,10 @@ export function panelLinkTags(tokens: Tokens, token: Token): string[] {
  */
 export type SteerChoice = { holderId: string; holderName: string; riderName: string; controlled: boolean };
 
-export function steerChoice(view: RightsView, viewer: AttachViewer, rider: Token): SteerChoice | null {
+export function steerChoice(view: RightsView, viewer: AttachViewer, rider: Token, labels: Labels): SteerChoice | null {
   const holder = holderOf(view.tokens, rider) as Token | undefined;
   if (!holder || rider.attached?.kind !== "ride" || !attachAllowed(view, viewer, "ride", rider, holder)) return null;
-  return { holderId: holder.id, holderName: displayName(holder), riderName: displayName(rider), controlled: rider.attached.steer === true };
+  return { holderId: holder.id, holderName: displayName(holder, labels), riderName: displayName(rider, labels), controlled: rider.attached.steer === true };
 }
 
 /**
@@ -94,11 +95,11 @@ export function controllingRider(tokens: Tokens, mount: Token): Token | undefine
 /** A tracker row's link words (4.5): a rider's "Riding Warhorse", and a controlled mount's "Controlled by Bree: ..." */
 export type RowLink = { riding: string | null; controlled: string | null };
 
-export function rowLink(tokens: Tokens, token: Token | undefined): RowLink {
+export function rowLink(tokens: Tokens, token: Token | undefined, labels: Labels): RowLink {
   if (!token) return { riding: null, controlled: null };
-  const riding = token.attached?.kind === "ride" ? linkTag(tokens, token) : null;
+  const riding = token.attached?.kind === "ride" ? linkTag(tokens, token, labels) : null;
   const rider = controllingRider(tokens, token);
-  const name = rider ? displayName(rider) : "";
+  const name = rider ? displayName(rider, labels) : "";
   return { riding, controlled: rider ? `Controlled by ${name}: moves and acts on ${name}'s turn (Dash, Disengage or Dodge)` : null };
 }
 
@@ -125,7 +126,7 @@ function riderRow(entries: readonly InitEntry[], rider: Token): InitEntry | unde
  * row is not the acting one, it has no controlling rider with a row and a
  * value, or it already stands right after that row with that value.
  */
-export function moveAfterRider(view: Pick<RoomState, "tokens" | "encounter">, entry: InitEntry): { riderName: string; ops: ClientOp[] } | null {
+export function moveAfterRider(view: Pick<RoomState, "tokens" | "encounter">, entry: InitEntry, labels: Labels): { riderName: string; ops: ClientOp[] } | null {
   const encounter = view.encounter;
   if (!encounter || encounter.activeEntryId !== entry.id || entry.tokenId === undefined) return null;
   const mount = view.tokens[entry.tokenId];
@@ -141,5 +142,5 @@ export function moveAfterRider(view: Pick<RoomState, "tokens" | "encounter">, en
   const ops: ClientOp[] = [{ t: "encounter.next", from: { entry: entry.id, round: encounter.round } }];
   if (entry.value !== value) ops.push({ t: "encounter.setValue", entryId: entry.id, value });
   ops.push({ t: "encounter.reorder", entryIds: ids, finished: { entryId: entry.id, round: encounter.round } });
-  return { riderName: displayName(rider), ops };
+  return { riderName: displayName(rider, labels), ops };
 }

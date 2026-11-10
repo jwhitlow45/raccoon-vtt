@@ -40,10 +40,10 @@ describe("getting off and letting go", () => {
   });
 
   test("the holder's line lets go of a creature it drags or carries and puts down an object, and leaves a rider to its own bar", () => {
-    assert.deepEqual(holderAction(goblin), { words: "Let go of Goblin 2", choice: "letGo" });
-    assert.deepEqual(holderAction(torch), { words: "Put down Torch", choice: "putDown" });
-    assert.equal(holderAction({ ...goblin, attached: { to: "horse", kind: "carry" } })?.words, "Let go of Goblin 2");
-    assert.equal(holderAction(rider), null);
+    assert.deepEqual(holderAction(goblin, new Map()), { words: "Let go of Goblin 2", choice: "letGo" });
+    assert.deepEqual(holderAction(torch, new Map()), { words: "Put down Torch", choice: "putDown" });
+    assert.equal(holderAction({ ...goblin, attached: { to: "horse", kind: "carry" } }, new Map())?.words, "Let go of Goblin 2");
+    assert.equal(holderAction(rider, new Map()), null);
   });
 
   test("Get off takes the first free spot beside the holder, east of its middle first, and never one on a creature the viewer sees", () => {

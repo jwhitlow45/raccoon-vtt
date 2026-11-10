@@ -153,7 +153,7 @@ describe("what a drag moves", () => {
     assert.equal(dragLead(SQUARES, tokens, steered).id, "horse");
     assert.equal(dragLead(SQUARES, tokens, free).id, "vex");
     assert.equal(dragLead(SQUARES, tokens, horse).id, "horse");
-    assert.equal(carriesText(horse, steered), "Warhorse carries Bree. Tap Get off to step down.");
+    assert.equal(carriesText(horse, steered, new Map()), "Warhorse carries Bree. Tap Get off to step down.");
   });
 
   test("a carried token that covers its holder drags the holder, up the chain while that holds", () => {
@@ -226,13 +226,13 @@ describe("tethers and the group line", () => {
   });
 
   test("a carried token names its holder, and a holder each token it carries, the dragged ones told apart", () => {
-    assert.deepEqual(groupLine(tokens, goblin).holder, { id: "thorn", text: "Dragged by Thorn" });
-    assert.deepEqual(groupLine(tokens, torch).holder, { id: "thorn", text: "On Thorn" });
-    const line = groupLine(tokens, thorn);
+    assert.deepEqual(groupLine(tokens, goblin, new Map()).holder, { id: "thorn", text: "Dragged by Thorn" });
+    assert.deepEqual(groupLine(tokens, torch, new Map()).holder, { id: "thorn", text: "On Thorn" });
+    const line = groupLine(tokens, thorn, new Map());
     assert.equal(line.holder, null);
     assert.deepEqual(line.carried.map((c) => [c.name, c.dragged]), [["Goblin 2", true], ["Torch", false]]);
-    assert.equal(reseatText(goblin, thorn), "You can only move Goblin 2 within 5 ft of Thorn.");
-    assert.equal(reseatText(torch, thorn), "You can only move Torch on Thorn.");
+    assert.equal(reseatText(goblin, thorn, new Map()), "You can only move Goblin 2 within 5 ft of Thorn.");
+    assert.equal(reseatText(torch, thorn, new Map()), "You can only move Torch on Thorn.");
   });
 });
 
@@ -244,9 +244,9 @@ describe("the bar's link words (docs/design/design-v1-look-pass-2.md 2.10)", () 
     const torch = token("torch", { name: "Torch", kind: "object", size: "tiny", x: 5, y: 5, attached: { to: "bree", kind: "carry" } });
     const goblin = token("goblin", { name: "Goblin", number: 2, x: 7, y: 5, attached: { to: "horse", kind: "drag" } });
     const all = byId(horse, bree, owl, torch, goblin);
-    const words = [bree, owl, torch, goblin].map((t) => groupLine(all, t).holder?.text);
+    const words = [bree, owl, torch, goblin].map((t) => groupLine(all, t, new Map()).holder?.text);
     assert.deepEqual(words, ["Riding Warhorse", "On Bree", "On Bree", "Dragged by Warhorse"]);
-    for (const t of [bree, owl, torch, goblin]) assert.equal(groupLine(all, t).holder?.text, linkTag(all, t), t.name);
+    for (const t of [bree, owl, torch, goblin]) assert.equal(groupLine(all, t, new Map()).holder?.text, linkTag(all, t, new Map()), t.name);
   });
 });
 

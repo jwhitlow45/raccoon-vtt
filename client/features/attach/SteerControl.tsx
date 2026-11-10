@@ -7,13 +7,15 @@ import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { useAttachViewer } from "./BarParts.tsx";
 import { waitsForServer } from "./list.ts";
 import { panelLinkTags, STEER_OPTIONS, steerChoice, steerOp, steerWords } from "./tags.ts";
+import { useLabels } from "../../state/labels.ts";
 
 type Steer = "controlled" | "independent";
 
 /** The token panel's link tags (docs/design/design-v1-attach.md 4.5): "Riding Warhorse", "Carries Bree and Torch". */
 export function usePanelLinkTags(token: Token): string[] {
+  const labels = useLabels();
   const tokens = useRoomView((s) => s.floorView?.tokens);
-  return useMemo(() => (tokens ? panelLinkTags(tokens, token) : []), [tokens, token]);
+  return useMemo(() => (tokens ? panelLinkTags(tokens, token, labels) : []), [tokens, token, labels]);
 }
 
 /**
@@ -28,10 +30,11 @@ export function usePanelLinkTags(token: Token): string[] {
  * the room's toast says why.
  */
 export function SteerControl(props: { token: Token }) {
+  const labels = useLabels();
   const { token } = props;
   const viewer = useAttachViewer();
   const view = useRoomView((s) => s.floorView);
-  const choice = useMemo(() => (view ? steerChoice(view, viewer, token) : null), [view, viewer, token]);
+  const choice = useMemo(() => (view ? steerChoice(view, viewer, token, labels) : null), [view, viewer, token, labels]);
   const actions = useRoomActions();
   // The choice sent and not yet answered: shown meanwhile, and no second change goes until it is.
   const [asked, setAsked] = useState<Steer | null>(null);

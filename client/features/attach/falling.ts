@@ -2,6 +2,7 @@ import type { Effect, RoomState, Token } from "#shared/model.ts";
 import { holderOf } from "#shared/rules/attach.ts";
 import { displayName } from "../../lib/scene.ts";
 import { askTarget, type AskFrom } from "../rolls/logic.ts";
+import { labelsFor, type Labels } from "../../lib/labels.ts";
 
 /**
  * The falling off reminder (docs/design/design-v1-attach.md 4.5), as plain
@@ -52,8 +53,8 @@ export function fallRisks(before: View, after: View): FallRisk[] {
   return out.sort((a, b) => (a.riderId < b.riderId ? -1 : a.riderId > b.riderId ? 1 : 0));
 }
 
-export function fallText(rider: Token, mount: Token): string {
-  return `${displayName(rider)} may fall off ${displayName(mount)}: DC 10 Dexterity save.`;
+export function fallText(rider: Token, mount: Token, labels: Labels): string {
+  return `${displayName(rider, labels)} may fall off ${displayName(mount, labels)}: DC 10 Dexterity save.`;
 }
 
 /**
@@ -83,9 +84,10 @@ export function fallReminders(now: FallWatch, prev: FallWatch): { text: string; 
   const before = prev.confirmed as RoomState | null | undefined;
   const after = now.confirmed as RoomState | null | undefined;
   if (!before || !after || before === after) return [];
+  const labels = labelsFor(after, "dm");
   return fallRisks(before, after).flatMap(({ riderId, mountId }) => {
     const rider = after.tokens[riderId];
     const mount = after.tokens[mountId];
-    return rider && mount ? [{ text: fallText(rider, mount), ask: fallAsk(after, rider) }] : [];
+    return rider && mount ? [{ text: fallText(rider, mount, labels), ask: fallAsk(after, rider) }] : [];
   });
 }

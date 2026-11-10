@@ -430,13 +430,13 @@ function builtStep(r: () => number, a: RoomState, b: RoomState, apart: ReadonlyS
   }
   if (n < 0.82) {
     // A token whose list offers something, as the bar shows Attach only then.
-    const listed = tokens.map((t) => ({ selected: t, rows: attachRows(copies[0], who, t.id) })).filter((x) => x.rows.length > 0);
+    const listed = tokens.map((t) => ({ selected: t, rows: attachRows(copies[0], who, t.id, new Map()) })).filter((x) => x.rows.length > 0);
     if (listed.length === 0) return null;
     const { selected, rows } = pick(r, listed);
     const key = pick(r, rows).key;
     const steer = chance(r, 0.5);
     const [oa, ob] = copies.map((copy) => {
-      const row = attachRows(copy, who, selected.id).find((x) => x.key === key);
+      const row = attachRows(copy, who, selected.id, new Map()).find((x) => x.key === key);
       return row ? (attachOp(row, steer) as Op) : null;
     });
     return { who, built: { what: "attach", a: oa!, b: ob! } };
@@ -1540,7 +1540,7 @@ describe("a player's own creature on a turn the DM hid reads its turn's earlier 
     for (const [where, at] of [["a step on", { x: 3, y: 4 }], ["in place", { x: 4, y: 4 }]] as const) {
       // A warhorse P1 plays, so P1 may move both.
       const ride = hiddenRide({ x: at.x, y: 6 }, { t: "token.move", tokenId: "bree", x: at.x, y: at.y }, { ownerIds: ["p1"] });
-      const row = attachRows(copyOf(ride.state, P1), P1, "bree").find((x) => x.kind === "ride" && x.holderId === "horse");
+      const row = attachRows(copyOf(ride.state, P1), P1, "bree", new Map()).find((x) => x.kind === "ride" && x.holderId === "horse");
       assert.ok(row, `${where}: her list offers Ride Warhorse`);
       const on = attachOp(row, false);
       assert.ok(canApply(on as Op, P1, ride.state, deps).ok, `${where}: the server takes it on her own turn`);
@@ -1634,7 +1634,7 @@ describe("a player's own creature on a turn the DM hid reads its turn's earlier 
         }
         const bree = copy.tokens.bree!;
         const riding = bree.attached?.to === "horse";
-        const row = riding ? undefined : attachRows(copy, P1, "bree").find((x) => x.kind === "ride" && x.holderId === "horse");
+        const row = riding ? undefined : attachRows(copy, P1, "bree", new Map()).find((x) => x.kind === "ride" && x.holderId === "horse");
         const ride: Op | null = row ? (attachOp(row, chance(r, 0.5)) as Op) : null;
         // The server takes a ride on her own turn whether or not she has moved, and refuses one on another's in the words a row
         // she sees would get, where no wall stops the step onto the seat first.

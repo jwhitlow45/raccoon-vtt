@@ -33,34 +33,34 @@ const t = (state: RoomState, id: string) => state.tokens[id]!;
 describe("the link's words in the panel and the tracker", () => {
   test("the name block names what carries a token and what it carries, by the names the viewer sees", () => {
     const state = stable();
-    assert.equal(linkTag(state.tokens, t(state, "bree")), "Riding Warhorse");
-    assert.equal(linkTag(state.tokens, t(state, "owl")), "On Bree", "a perch");
-    assert.equal(linkTag(state.tokens, t(state, "torch")), "On Bree", "a carry");
-    assert.equal(linkTag(state.tokens, t(state, "goblin")), "Dragged by Warhorse");
-    assert.equal(linkTag(state.tokens, t(state, "horse")), null);
-    assert.equal(carriesTag(state.tokens, t(state, "bree")), "Carries Owl and Torch");
-    assert.equal(carriesTag(state.tokens, t(state, "horse")), "Carries Bree and Goblin 2");
-    assert.deepEqual(panelLinkTags(state.tokens, t(state, "bree")), ["Riding Warhorse", "Carries Owl and Torch"]);
-    assert.deepEqual(panelLinkTags(state.tokens, t(state, "goblin")), ["Dragged by Warhorse"]);
+    assert.equal(linkTag(state.tokens, t(state, "bree"), new Map()), "Riding Warhorse");
+    assert.equal(linkTag(state.tokens, t(state, "owl"), new Map()), "On Bree", "a perch");
+    assert.equal(linkTag(state.tokens, t(state, "torch"), new Map()), "On Bree", "a carry");
+    assert.equal(linkTag(state.tokens, t(state, "goblin"), new Map()), "Dragged by Warhorse");
+    assert.equal(linkTag(state.tokens, t(state, "horse"), new Map()), null);
+    assert.equal(carriesTag(state.tokens, t(state, "bree"), new Map()), "Carries Owl and Torch");
+    assert.equal(carriesTag(state.tokens, t(state, "horse"), new Map()), "Carries Bree and Goblin 2");
+    assert.deepEqual(panelLinkTags(state.tokens, t(state, "bree"), new Map()), ["Riding Warhorse", "Carries Owl and Torch"]);
+    assert.deepEqual(panelLinkTags(state.tokens, t(state, "goblin"), new Map()), ["Dragged by Warhorse"]);
   });
 
   test("a player reads only the links their copy holds, and a hidden holder's name never", () => {
     const hidden = stable((s) => (s.tokens.horse = { ...s.tokens.horse!, visibility: "dm" }));
     const view = copyFor(hidden, P1);
-    assert.equal(linkTag(view.tokens, t(view, "bree")), null, "the holder is not in the copy, so neither is the link");
-    assert.deepEqual(panelLinkTags(view.tokens, t(view, "bree")), ["Carries Owl and Torch"]);
+    assert.equal(linkTag(view.tokens, t(view, "bree"), new Map()), null, "the holder is not in the copy, so neither is the link");
+    assert.deepEqual(panelLinkTags(view.tokens, t(view, "bree"), new Map()), ["Carries Owl and Torch"]);
     const masked = stable((s) => (s.tokens.horse = { ...s.tokens.horse!, nameHidden: true, publicName: "Big horse" }));
     const other = copyFor(masked, P2);
-    assert.equal(linkTag(other.tokens, t(other, "bree")), "Riding Big horse");
+    assert.equal(linkTag(other.tokens, t(other, "bree"), new Map()), "Riding Big horse");
   });
 
   test("a rider's row reads Riding, a controlled mount's row whose turn it shares, and an independent mount's nothing", () => {
     const state = stable();
-    assert.deepEqual(rowLink(state.tokens, t(state, "bree")), { riding: "Riding Warhorse", controlled: null });
-    assert.deepEqual(rowLink(state.tokens, t(state, "horse")), { riding: null, controlled: "Controlled by Bree: moves and acts on Bree's turn (Dash, Disengage or Dodge)" });
+    assert.deepEqual(rowLink(state.tokens, t(state, "bree"), new Map()), { riding: "Riding Warhorse", controlled: null });
+    assert.deepEqual(rowLink(state.tokens, t(state, "horse"), new Map()), { riding: null, controlled: "Controlled by Bree: moves and acts on Bree's turn (Dash, Disengage or Dodge)" });
     const free = stable((s) => (s.tokens.bree = { ...s.tokens.bree!, attached: { to: "horse", kind: "ride" } }));
-    assert.deepEqual(rowLink(free.tokens, t(free, "horse")), { riding: null, controlled: null });
-    assert.deepEqual(rowLink(free.tokens, undefined), { riding: null, controlled: null });
+    assert.deepEqual(rowLink(free.tokens, t(free, "horse"), new Map()), { riding: null, controlled: null });
+    assert.deepEqual(rowLink(free.tokens, undefined, new Map()), { riding: null, controlled: null });
   });
 
   test("a row reads muted only in the round its mount shared a rider's turn", () => {
@@ -89,7 +89,7 @@ describe("Move after Bree", () => {
     for (const between of [false, true]) {
       let state = fight({ value: 20 });
       if (between) state.encounter!.entries = state.encounter!.entries.map((e) => e.id === "i-gob" ? { ...e, value: 18 } : e);
-      const offer = moveAfterRider(state, row(state, "i-horse"));
+      const offer = moveAfterRider(state, row(state, "i-horse"), new Map());
       assert.ok(offer);
       let seq = 10;
       const run = (op: ClientOp) => {
@@ -109,7 +109,7 @@ describe("Move after Bree", () => {
 
   test("FU23A-AT-1: ending a last mount starts the next round and does not skip its new round's row", () => {
     let state = fight();
-    const offer = moveAfterRider(state, row(state, "i-horse"));
+    const offer = moveAfterRider(state, row(state, "i-horse"), new Map());
     assert.ok(offer);
     let seq = 10;
     for (const op of [...offer.ops, { t: "encounter.next" } as const]) {
@@ -127,7 +127,7 @@ describe("Move after Bree", () => {
     state.meta.settings = { ...state.meta.settings, skipDefeated: true };
     state.characters.bree = { ...state.characters.bree!, actor: actor({ life: "dead" }) };
     state.tokens.goblin = { ...state.tokens.goblin!, actor: { inline: actor({ life: "dead" }) } };
-    const offer = moveAfterRider(state, row(state, "i-horse"));
+    const offer = moveAfterRider(state, row(state, "i-horse"), new Map());
     assert.ok(offer);
     let seq = 10;
     for (const op of offer.ops) {
@@ -144,7 +144,7 @@ describe("Move after Bree", () => {
 
   test("on the mount's acting row, it takes its rider's value and goes right after the rider's row, as one gesture", () => {
     const state = fight();
-    const offer = moveAfterRider(state, row(state, "i-horse"));
+    const offer = moveAfterRider(state, row(state, "i-horse"), new Map());
     assert.ok(offer);
     assert.equal(offer.riderName, "Bree");
     assert.deepEqual(offer.ops, [
@@ -156,7 +156,7 @@ describe("Move after Bree", () => {
 
   test("a mount already right after its rider with its value needs nothing, and one with the value but out of place only the order", () => {
     const placed = fight({ value: 15, tieOrder: 1 });
-    assert.equal(moveAfterRider(placed, row(placed, "i-horse")), null);
+    assert.equal(moveAfterRider(placed, row(placed, "i-horse"), new Map()), null);
     const tied = stable((s) => {
       s.encounter = {
         rev: 1,
@@ -165,38 +165,38 @@ describe("Move after Bree", () => {
         entries: [entry("i-horse", { tokenId: "horse", value: 15, tieOrder: 0 }), entry("i-bree", { tokenId: "bree", value: 15, tieOrder: 1 }), entry("i-gob", { tokenId: "goblin", value: 12 })],
       } as Encounter;
     });
-    assert.deepEqual(moveAfterRider(tied, row(tied, "i-horse"))?.ops, [{ t: "encounter.next", from: { entry: "i-horse", round: 2 } }, { t: "encounter.reorder", entryIds: ["i-bree", "i-horse", "i-gob"], finished: { entryId: "i-horse", round: 2 } }]);
+    assert.deepEqual(moveAfterRider(tied, row(tied, "i-horse"), new Map())?.ops, [{ t: "encounter.next", from: { entry: "i-horse", round: 2 } }, { t: "encounter.reorder", entryIds: ["i-bree", "i-horse", "i-gob"], finished: { entryId: "i-horse", round: 2 } }]);
   });
 
   test("never on another row, a row not acting, a free ride, or a rider with no value", () => {
     const state = fight();
-    assert.equal(moveAfterRider(state, row(state, "i-bree")), null);
+    assert.equal(moveAfterRider(state, row(state, "i-bree"), new Map()), null);
     const waiting = fight({}, "i-gob");
-    assert.equal(moveAfterRider(waiting, row(waiting, "i-horse")), null);
+    assert.equal(moveAfterRider(waiting, row(waiting, "i-horse"), new Map()), null);
     const free = fight();
     free.tokens.bree = { ...free.tokens.bree!, attached: { to: "horse", kind: "ride" } };
-    assert.equal(moveAfterRider(free, row(free, "i-horse")), null);
+    assert.equal(moveAfterRider(free, row(free, "i-horse"), new Map()), null);
     const unrolled = fight();
     unrolled.encounter!.entries = unrolled.encounter!.entries.map((e) => (e.id === "i-bree" ? { ...e, value: null } : e));
-    assert.equal(moveAfterRider(unrolled, row(unrolled, "i-horse")), null);
+    assert.equal(moveAfterRider(unrolled, row(unrolled, "i-horse"), new Map()), null);
   });
 
   test("a rider listed by its character's row is found too", () => {
     const state = fight();
     state.encounter!.entries = state.encounter!.entries.map((e) => (e.id === "i-bree" ? entry("i-bree", { characterId: "bree", value: 15 }) : e));
-    assert.equal(moveAfterRider(state, row(state, "i-horse"))?.riderName, "Bree");
+    assert.equal(moveAfterRider(state, row(state, "i-horse"), new Map())?.riderName, "Bree");
   });
 });
 
 describe("the rider's Controlled or Independent", () => {
   test("whoever may attach the pair gets it, with the ride's control, and a change is a plain attach where the rider sits", () => {
     const state = stable((s) => (s.tokens.horse = { ...s.tokens.horse!, ownerIds: ["p1"] }));
-    assert.deepEqual(steerChoice(state, dm, t(state, "bree")), { holderId: "horse", holderName: "Warhorse", riderName: "Bree", controlled: true });
+    assert.deepEqual(steerChoice(state, dm, t(state, "bree"), new Map()), { holderId: "horse", holderName: "Warhorse", riderName: "Bree", controlled: true });
     const mine = copyFor(state, P1);
-    assert.equal(steerChoice(mine, p1, t(mine, "bree"))?.controlled, true);
+    assert.equal(steerChoice(mine, p1, t(mine, "bree"), new Map())?.controlled, true);
     const theirs = copyFor(state, P2);
-    assert.equal(steerChoice(theirs, p2, t(theirs, "bree")), null, "p2 may move neither");
-    assert.equal(steerChoice(state, dm, t(state, "owl")), null, "a perch has no control");
+    assert.equal(steerChoice(theirs, p2, t(theirs, "bree"), new Map()), null, "p2 may move neither");
+    assert.equal(steerChoice(state, dm, t(state, "owl"), new Map()), null, "a perch has no control");
     assert.deepEqual(steerOp(t(state, "bree"), "horse", false), { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", x: 5, y: 5, elevation: 0 });
     assert.deepEqual(steerOp(t(state, "bree"), "horse", true), { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", steer: true, x: 5, y: 5, elevation: 0 });
     // The op is one the server takes from the player it is offered to.
@@ -212,12 +212,12 @@ describe("the rider's Controlled or Independent", () => {
   test("a player loses it on the DM's horse, and in a fight off the rider's turn", () => {
     const state = stable();
     const view = copyFor(state, P1);
-    assert.equal(steerChoice(view, p1, t(view, "bree")), null, "the warhorse is the DM's");
+    assert.equal(steerChoice(view, p1, t(view, "bree"), new Map()), null, "the warhorse is the DM's");
     const owned = stable((s) => {
       s.tokens.horse = { ...s.tokens.horse!, ownerIds: ["p1"] };
       s.encounter = { rev: 1, round: 1, activeEntryId: "i-gob", entries: [entry("i-bree", { tokenId: "bree", value: 15 }), entry("i-gob", { tokenId: "goblin", value: 12 })] } as Encounter;
     });
     const fighting = copyFor(owned, P1);
-    assert.equal(steerChoice(fighting, p1, t(fighting, "bree")), null);
+    assert.equal(steerChoice(fighting, p1, t(fighting, "bree"), new Map()), null);
   });
 });

@@ -8,6 +8,7 @@ import { displayName } from "../../lib/scene.ts";
 import { dropView, walkerOf, walkersStop } from "../movement/drop.ts";
 import { detachAllowed, offersAttach, type AttachViewer, type RightsView } from "./rights.ts";
 import { walkersFor } from "./walk.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * Getting off and letting go (docs/design/design-v1-attach.md 4.3), as plain
@@ -49,11 +50,14 @@ export function barSlots(view: RightsView, viewer: AttachViewer, token: Token): 
  * gets Position on the goblin's panel with Let go for theirs, though the
  * goblin's own bar has no slot for them.
  */
+/** The check below asks whether a creature is held, never what to call it. */
+const NO_LABELS: Labels = new Map();
+
 export function attachControls(view: RightsView, viewer: AttachViewer, token: Token): boolean {
   if (barSlots(view, viewer, token).length > 0) return true;
   return (carriedIndex(view.tokens).get(token.id) ?? []).some((id) => {
     const held = view.tokens[id];
-    return held !== undefined && holderAction(held) !== null && detachAllowed(view, viewer, held);
+    return held !== undefined && holderAction(held, NO_LABELS) !== null && detachAllowed(view, viewer, held);
   });
 }
 
@@ -67,10 +71,10 @@ export const NO_ROOM_TO_GET_OFF = "No room to get off.";
  * of a creature it drags or carries, Put down of an object, and nothing for
  * a rider or a familiar, which gets off from its own bar.
  */
-export function holderAction(token: Token): { words: string; choice: "letGo" | "putDown" } | null {
+export function holderAction(token: Token, labels: Labels): { words: string; choice: "letGo" | "putDown" } | null {
   const link = token.attached;
   if (!link) return null;
-  const name = displayName(token);
+  const name = displayName(token, labels);
   if (!isCreature(token)) return { words: `Put down ${name}`, choice: "putDown" };
   if (link.kind === "drag" || link.kind === "carry") return { words: `Let go of ${name}`, choice: "letGo" };
   return null;

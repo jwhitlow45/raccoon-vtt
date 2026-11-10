@@ -20,6 +20,7 @@ import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { AttachSends, asksControl, attachOp, attachRows, emptyWords, waitsForServer, type AttachRow } from "./list.ts";
 import type { AttachViewer } from "./rights.ts";
 import { STEER_OPTIONS, steerWords } from "./tags.ts";
+import { useLabels } from "../../state/labels.ts";
 
 /**
  * Attach in the token's bar (docs/design/design-v1-attach.md 4.1): a popover from
@@ -35,6 +36,7 @@ export function AttachButton(props: { token: Token; onOpen?(open: boolean): void
 }
 
 function AttachPopover(props: { token: Token; onOpen?(open: boolean): void }) {
+  const labels = useLabels();
   const handle = usePopover({ kind: "dialog" });
   // Opened toward the larger room: a bar docked low opens it above, one hung high below.
   const [side, setSide] = useState<PopoverSide>("above");
@@ -62,7 +64,7 @@ function AttachPopover(props: { token: Token; onOpen?(open: boolean): void }) {
       >
         Attach
       </Button>
-      <Popover handle={handle} side={side} bound={viewportBound} title={`Attach ${displayName(props.token)}`}>
+      <Popover handle={handle} side={side} bound={viewportBound} title={`Attach ${displayName(props.token, labels)}`}>
         <AttachList token={props.token} capped onDone={() => handle.close("pick")} />
       </Popover>
     </>
@@ -70,6 +72,7 @@ function AttachPopover(props: { token: Token; onOpen?(open: boolean): void }) {
 }
 
 function AttachSheet(props: { token: Token }) {
+  const labels = useLabels();
   const opener = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   return (
@@ -78,7 +81,7 @@ function AttachSheet(props: { token: Token }) {
         Attach
       </Button>
       {open ? (
-        <SheetDialog title={`Attach ${displayName(props.token)}`} opener={opener} onClose={() => setOpen(false)} width={theme.layout.dialog.sm}>
+        <SheetDialog title={`Attach ${displayName(props.token, labels)}`} opener={opener} onClose={() => setOpen(false)} width={theme.layout.dialog.sm}>
           <AttachList token={props.token} onDone={() => setOpen(false)} />
         </SheetDialog>
       ) : null}
@@ -111,11 +114,12 @@ const ROW_DATA = { [ROW_ATTR]: "" };
  * span.
  */
 export function AttachList(props: { token: Token; capped?: boolean; onDone(): void }) {
+  const labels = useLabels();
   const actions = useRoomActions();
   const you = useRoomView((s) => s.you);
   const view = useRoomView((s) => s.floorView);
   const viewer = useMemo<AttachViewer>(() => ({ role: you?.role ?? "player", memberId: you?.memberId ?? null }), [you]);
-  const rows = useMemo(() => (view ? attachRows(view, viewer, props.token.id) : []), [view, viewer, props.token.id]);
+  const rows = useMemo(() => (view ? attachRows(view, viewer, props.token.id, labels) : []), [view, viewer, props.token.id]);
   const [riding, setRiding] = useState<string | null>(null);
   const [steer, setSteer] = useState<"controlled" | "independent">("controlled");
   const sends = useRef(new AttachSends());
@@ -192,7 +196,7 @@ export function AttachList(props: { token: Token; capped?: boolean; onDone(): vo
 
   const near = rows.filter((r) => !r.farther);
   const far = rows.filter((r) => r.farther);
-  const holderName = (row: AttachRow) => displayName(view?.tokens[row.holderId] ?? props.token);
+  const holderName = (row: AttachRow) => displayName(view?.tokens[row.holderId] ?? props.token, labels);
   const renderRow = (row: AttachRow) => {
     const open = riding === row.key;
     const rowBusy = pending === row.key;
@@ -221,7 +225,7 @@ export function AttachList(props: { token: Token; capped?: boolean; onDone(): vo
               options={STEER_OPTIONS}
               onChange={setSteer}
               even
-              description={steerWords(steer === "controlled", holderName(row), displayName(view?.tokens[row.carriedId] ?? props.token))}
+              description={steerWords(steer === "controlled", holderName(row), displayName(view?.tokens[row.carriedId] ?? props.token, labels))}
             />
             <Button size="sm" variant="primary" busy={rowBusy && busy} onClick={() => send(row, steer === "controlled")} style={{ justifySelf: "start" }}>
               Ride

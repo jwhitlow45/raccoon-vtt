@@ -9,6 +9,7 @@ import { displayName } from "../../lib/scene.ts";
 import { dropView, walkerOf, walkersStop } from "../movement/drop.ts";
 import { attachAllowed, grappledSeen, type AttachViewer } from "./rights.ts";
 import { walkersFor } from "./walk.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * The Attach list (docs/design/design-v1-attach.md 4.1), as plain functions for
@@ -86,7 +87,7 @@ function choicesFor(view: RoomState, selected: Token, other: Token, farther: boo
 }
 
 /** The rows for the selected token, nearest first, at most MAX_ROWS. */
-export function attachRows(view: RoomState, viewer: AttachViewer, selectedId: string): AttachRow[] {
+export function attachRows(view: RoomState, viewer: AttachViewer, selectedId: string, labels: Labels): AttachRow[] {
   const selected = view.tokens[selectedId];
   if (!selected) return [];
   const settings = view.meta.settings;
@@ -96,7 +97,7 @@ export function attachRows(view: RoomState, viewer: AttachViewer, selectedId: st
     if (!t || t.id === selected.id || t.sceneId !== selected.sceneId) continue;
     const feet = attachDistanceFt(gridOfToken(view, selected), settings, selected, t);
     if (feet > reach && (viewer.role !== "dm" || feet > FARTHER_FT)) continue;
-    others.push({ token: t, feet, name: displayName(t) });
+    others.push({ token: t, feet, name: displayName(t, labels) });
   }
   others.sort((a, b) => a.feet - b.feet || a.name.localeCompare(b.name) || (a.token.id < b.token.id ? -1 : 1));
   const near: AttachRow[] = [];
@@ -105,18 +106,18 @@ export function attachRows(view: RoomState, viewer: AttachViewer, selectedId: st
     const farther = feet > reach;
     for (const choice of choicesFor(view, selected, other, farther)) {
       const onOther = choice === "ride" || choice === "perch" || choice === "getOn";
-      const row = checkedRow(view, viewer, choice, onOther ? selected : other, onOther ? other : selected, other, name, farther);
+      const row = checkedRow(view, viewer, choice, onOther ? selected : other, onOther ? other : selected, other, name, farther, labels);
       if (row) (farther ? far : near).push(row);
     }
   }
   return [...near, ...far].slice(0, MAX_ROWS);
 }
 
-function checkedRow(view: RoomState, viewer: AttachViewer, choice: AttachChoice, carried: Token, holder: Token, other: Token, otherName: string, farther: boolean): AttachRow | null {
+function checkedRow(view: RoomState, viewer: AttachViewer, choice: AttachChoice, carried: Token, holder: Token, other: Token, otherName: string, farther: boolean, labels: Labels): AttachRow | null {
   const kind = KIND[choice];
   // Already joined so: nothing to choose.
   if (carried.attached?.to === holder.id && carried.attached.kind === kind) return null;
-  const names = { carried: displayName(carried), holder: displayName(holder) };
+  const names = { carried: displayName(carried, labels), holder: displayName(holder, labels) };
   if (kindRefusal(kind, carried, holder, names) !== null) return null;
   let at = { x: carried.x, y: carried.y, elevation: carried.elevation };
   if (onHolder(kind)) {

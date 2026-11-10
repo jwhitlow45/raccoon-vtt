@@ -5,6 +5,7 @@ import type { PlacedToken } from "#shared/rules/footprint.ts";
 import type { Grid } from "#shared/rules/grid.ts";
 import { displayName, drawnAt } from "../../lib/scene.ts";
 import { linkTag } from "./tags.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * What a group of attached tokens looks like on the map and moves like
@@ -247,8 +248,8 @@ export function pressLead<T extends Token>(
 }
 
 /** The words when a drag would move a mount the viewer may not move (4.2). */
-export function carriesText(mount: Token, rider: Token): string {
-  return `${displayName(mount)} carries ${displayName(rider)}. Tap Get off to step down.`;
+export function carriesText(mount: Token, rider: Token, labels: Labels): string {
+  return `${displayName(mount, labels)} carries ${displayName(rider, labels)}. Tap Get off to step down.`;
 }
 
 /**
@@ -310,13 +311,13 @@ function center(g: Grid, t: Token, p: { x: number; y: number }): { x: number; y:
  */
 export type GroupLine = { holder: { id: string; text: string } | null; carried: { id: string; name: string; token: Token; dragged: boolean }[] };
 
-export function groupLine(tokens: Tokens, token: Token): GroupLine {
+export function groupLine(tokens: Tokens, token: Token, labels: Labels): GroupLine {
   const holder = holderOf(tokens, token) as Token | undefined;
-  const text = holder ? linkTag(tokens, token) : null;
+  const text = holder ? linkTag(tokens, token, labels) : null;
   const up = holder && text !== null ? { id: holder.id, text } : null;
   const carried = (carriedIndex(tokens).get(token.id) ?? []).flatMap((id) => {
     const t = tokens[id];
-    return t ? [{ id, name: displayName(t), token: t, dragged: t.attached?.kind === "drag" }] : [];
+    return t ? [{ id, name: displayName(t, labels), token: t, dragged: t.attached?.kind === "drag" }] : [];
   });
   return { holder: up, carried };
 }
@@ -349,7 +350,7 @@ export function dragNamed<T extends Token>(g: Grid, tokens: Tokens, lead: T, fol
 }
 
 /** Why a player's drop of a token they may only re-seat is put back (6): it would leave its holder. */
-export function reseatText(carried: Token, holder: Token): string {
-  const where = carried.attached?.kind === "drag" ? `within 5 ft of ${displayName(holder)}` : `on ${displayName(holder)}`;
-  return `You can only move ${displayName(carried)} ${where}.`;
+export function reseatText(carried: Token, holder: Token, labels: Labels): string {
+  const where = carried.attached?.kind === "drag" ? `within 5 ft of ${displayName(holder, labels)}` : `on ${displayName(holder, labels)}`;
+  return `You can only move ${displayName(carried, labels)} ${where}.`;
 }

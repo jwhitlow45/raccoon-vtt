@@ -9,6 +9,7 @@ import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { barSlots, DETACH_WORDS, detachChoice, detachOp, getOffPlace, holderAction, NO_ROOM_TO_GET_OFF, type DetachChoice } from "./detach.ts";
 import { groupLine } from "./groups.ts";
 import { detachAllowed, type AttachViewer } from "./rights.ts";
+import { useLabels } from "../../state/labels.ts";
 
 /** Who is looking, as the attach rules read it. */
 export function useAttachViewer(): AttachViewer {
@@ -123,6 +124,7 @@ const IN_BAR: AttachFocus = { scope: "body", to: [BAR_FRAME] };
  * baseline.
  */
 export function GroupLine(props: { token: Token; focusTo?: AttachFocus; nameFocusTo?: AttachFocus }) {
+  const labels = useLabels();
   const { token } = props;
   const focusTo = props.focusTo ?? IN_BAR;
   // The Token panel sends a name press to the next creature's name, where Let go and Put down find the next control (D-261024-47).
@@ -132,7 +134,7 @@ export function GroupLine(props: { token: Token; focusTo?: AttachFocus; nameFocu
   const viewer = useAttachViewer();
   const view = useRoomView((s) => s.floorView);
   if (!view) return null;
-  const line = groupLine(view.tokens, token);
+  const line = groupLine(view.tokens, token, labels);
   if (!line.holder && line.carried.length === 0) return null;
   // A name here opens that token's bar in place of this one, and Put down or Let go takes its row away, so the
   // button pressed leaves the page with focus on it. Focus moves to the bar that stands then, as Revive's does.
@@ -156,7 +158,7 @@ export function GroupLine(props: { token: Token; focusTo?: AttachFocus; nameFocu
           </span>
           <div data-hold-names={h.key} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
             {h.tokens.map((c) => {
-              const action = holderAction(c.token);
+              const action = holderAction(c.token, labels);
               return (
                 <Fragment key={c.id}>
                   <Button size="sm" aria-label={`${HOLDS[h.key]} ${c.name}`} onClick={(e) => press(e.currentTarget, () => ui.select(c.id, { opens: true }), nameFocusTo)} style={IN_CELL}>
