@@ -35,7 +35,8 @@ import { DOOR_COVER_OP_VERSION } from "./migrate.ts";
 import { applyOp } from "./reducer.ts";
 import { visionRules, type PartySight, type VisionRules } from "./ruleHooks.ts";
 import { derivedId } from "./reducer/duplicate.ts";
-import { DM, P1, P2, actor, apply, chance, character, companionBlock, customMonster, member, deepClone, drawing, entry, env, imageRef, randomState, reveal, rng, room, srdImage, template, token } from "./testutil.ts";
+import { DM, P1, P2, actor, apply, chance, character, companionBlock, customMonster, member, deepClone, drawing, entry, env, imageRef, numbered, randomState, reveal, rng, room, srdImage, template, token } from "./testutil.ts";
+import { tableNumber } from "./numbering.ts";
 import { imageAssetId } from "./imageRef.ts";
 import { SQUARES } from "./rules/grid.ts";
 
@@ -265,8 +266,10 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
       if (t.companion && t.kind === "object" && "inline" in pt.actor) assert.equal(pt.actor.inline.life, "alive", `${label}: an effect companion's life of ${id}`);
       if (t.nameHidden) {
         assert.equal(pt.name, t.publicName ?? "Unknown creature", `${label}: hidden name of ${id} leaked`);
-        assert.ok(!("number" in pt), `${label}: number of ${id} with a hidden name leaked`);
       }
+      // A number counts only what the party met under the name players read, so a copy holds the table's alone.
+      assert.equal(pt.number, tableNumber(state, t), `${label}: number of ${id} is the table's`);
+      assert.ok(!("met" in pt), `${label}: a copy of ${id} holds no mark`);
       if ("inline" in pt.actor) {
         const a = pt.actor.inline;
         const access = hpAccess(state, viewer, holderOf(state, t));
@@ -598,6 +601,8 @@ describe("projection properties over random rooms", () => {
       const state = randomState(rng(seed));
       // Every room monster's token placed in its lair, the DM's alone as its link is (Actor.inLair). Set here, so the shared generators and their golden fixtures stay as they are.
       for (const t of Object.values(state.tokens)) if ("inline" in t.actor && t.actor.inline.monsterId !== undefined) t.actor.inline.inLair = true;
+      // Half the rooms have their numbered creatures met, so a copy holds the table's numbers as well as none.
+      if (seed % 2 === 0) numbered(state);
       // A table display is a player who owns nothing (docs/design/design-v1-dm-tools.md 3.1), whose projection no ownership widens.
       assert.equal(stableStringify(projectState(state, DISPLAY, { sceneId: "s2" })), stableStringify(projectState(state, { memberId: "p-nobody", role: "player" }, { sceneId: "s2" })), `seed ${seed} display`);
       for (const viewer of [P1, P2, DISPLAY]) {
@@ -616,7 +621,11 @@ describe("projection properties over random rooms", () => {
       for (const sceneId of ["s1", "s2"]) {
         const p = projectState(state, DM, { sceneId });
         for (const [id, t] of Object.entries(state.tokens)) {
-          assert.equal(p.tokens[id], t.sceneId === sceneId ? t : undefined, `seed ${seed} dm token ${id}`);
+          // The stored token itself, unless its stored number is not the table's, which the copy carries in its place.
+          const table = tableNumber(state, t);
+          if (t.sceneId !== sceneId) assert.equal(p.tokens[id], undefined, `seed ${seed} dm token ${id}`);
+          else if (table === t.number) assert.equal(p.tokens[id], t, `seed ${seed} dm token ${id}`);
+          else assert.deepEqual(p.tokens[id], (({ number: _stored, ...rest }) => (table === undefined ? rest : { ...rest, number: table }))(t), `seed ${seed} dm token ${id}`);
         }
         assert.equal(p.encounter, state.encounter);
         assert.equal(Object.keys(p.scenes).length, 2);
@@ -862,13 +871,20 @@ describe("specific rules", () => {
     assert.equal(p.tokens.gob!.name, "Unknown creature");
     state.tokens.gob!.number = 3;
     state.tokens.gob!.publicName = "Shadow";
-    assert.ok(!("number" in projectState(state, P2, { sceneId: "s1" }).tokens.gob!), "a hidden name sends no number");
+    assert.ok(!("number" in projectState(state, P2, { sceneId: "s1" }).tokens.gob!), "a number the table did not give reaches no one");
+    assert.ok(!("number" in projectState(state, DM, { sceneId: "s1" }).tokens.gob!));
+    state.tokens.gob!.met = 1;
+    const plain = state.scenes.s1!;
+    state.scenes.s1 = { ...plain, numbers: { names: { Shadow: [1, 3] } } };
+    assert.equal(projectState(state, P2, { sceneId: "s1" }).tokens.gob!.number, 3, "a hidden name's number is the table's, given under the name players read");
     assert.equal(projectState(state, DM, { sceneId: "s1" }).tokens.gob!.number, 3);
     state.tokens.gob!.nameHidden = false;
-    assert.equal(projectState(state, P2, { sceneId: "s1" }).tokens.gob!.number, 3);
+    assert.ok(!("number" in projectState(state, P2, { sceneId: "s1" }).tokens.gob!), "under its own name it is no member of that group");
     state.tokens.gob!.nameHidden = true;
     delete state.tokens.gob!.number;
     delete state.tokens.gob!.publicName;
+    delete state.tokens.gob!.met;
+    state.scenes.s1 = plain;
     assert.deepEqual(p.characters.c1!.actor.hp, { cur: 7, max: 20, temp: 0 });
     state.meta.settings.pcHpVisibleToParty = false;
     const party = projectState(state, P2, { sceneId: "s1" });

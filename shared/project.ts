@@ -90,6 +90,7 @@ import type { SegmentIndex } from "./rules/segments.ts";
 import { deriveWalls, indexBuild, sceneWalls, type WallSet } from "./rules/walls.ts";
 import { ownEntry } from "./records.ts";
 import { anyPlayer, playersToken } from "./players.ts";
+import { tableNumber } from "./numbering.ts";
 
 export { anyPlayer, playersToken };
 
@@ -1105,11 +1106,30 @@ export function rowSeenByNonOwners(state: RoomState, entry: InitEntry, env: Pick
 export type SeenMark = { seen?: true; seenBy?: string[] };
 
 export function seenMark(state: RoomState, token: Token, env: Pick<Env, "opVersion">, scope: "here" | "anywhere"): SeenMark {
+  return markWith(state, token, env, scope, () => sharedOf(state));
+}
+
+/**
+ * Whether the party's copy holds each creature it is asked of
+ * (shared/numbering.ts): its mark here says every viewer saw it, or names
+ * a sight holder on a scene where players see for themselves (seenMark).
+ * One reader for many creatures, so the shared fog and sight are read once.
+ */
+export function partyHolds(state: RoomState, env: Pick<Env, "opVersion">): (token: Token) => boolean {
+  let shared: Shared | undefined;
+  const once = () => (shared ??= sharedOf(state));
+  return (token) => {
+    const mark = markWith(state, token, env, "here", once);
+    return mark.seen === true || (mark.seenBy !== undefined && mark.seenBy.length > 0);
+  };
+}
+
+function markWith(state: RoomState, token: Token, env: Pick<Env, "opVersion">, scope: "here" | "anywhere", sharedNow: () => Shared): SeenMark {
   if (behindBlackout(state) || token.visibility === "dm" || onUnseenFloor(state, token)) return {};
   const here = playersSee(state, token.sceneId);
   if (scope === "here" && !here) return {};
   const revealed = revealSeenAnywhere(env.opVersion);
-  const shared = sharedOf(state);
+  const shared = sharedNow();
   if (!withheldFromPlayers(state, shared.fogged, shared.sight, token, revealed, sharedClip(env))) return { seen: true };
   if (!perPlayerScene(ownEntry(state.scenes, token.sceneId)) || sightOf(state) !== undefined) return {};
   if (!here) return { seenBy: [] };
@@ -1305,7 +1325,7 @@ export function projectToken(state: RoomState, viewer: Viewer, token: Token, opt
 function projectTokenCtx(ctx: Ctx, token: Token): ProjectedToken | null {
   if (!tokenVisibleTo(ctx, token)) return null;
   const marked = seenAllMarked(ownEntry(ctx.state.scenes, token.sceneId), ctx.viewer.role) && seenByAllCtx(ctx, token);
-  if (ctx.viewer.role === "dm") return marked ? markedCopy(token) : token;
+  if (ctx.viewer.role === "dm") return dmCopy(ctx.state, token, marked);
   const out = projectPlayerToken(ctx, token);
   if (marked) out.seenAll = true;
   return out;
@@ -1329,14 +1349,29 @@ function seenByAllCtx(ctx: Ctx, token: Token): boolean {
   return !withheldFromPlayers(ctx.state, shared.fogged, shared.sight, token, false, "build");
 }
 
-/* A DM's token with the mark, kept per token object, which is replaced and never changed, so the fan-out hashes it once. */
-const markedCopies = new WeakMap<Token, ProjectedToken>();
+/*
+ * A DM's token whose copy differs from it: with the seen mark, or with the
+ * table's number in place of the stored one (shared/numbering.ts
+ * tableNumber), so every copy's `number` is the one players read. Kept per
+ * token object, which is replaced and never changed, and per what differs,
+ * so the fan-out hashes each variant once. A member's kind change makes a
+ * companion numberable or not without replacing it, and picks the other.
+ */
+const dmCopies = new WeakMap<Token, Map<string, ProjectedToken>>();
 
-function markedCopy(token: Token): ProjectedToken {
-  let out = markedCopies.get(token);
+function dmCopy(state: RoomState, token: Token, marked: boolean): ProjectedToken {
+  const number = tableNumber(state, token);
+  if (!marked && number === token.number) return token;
+  const key = `${marked ? "seen" : ""}:${number ?? ""}`;
+  let variants = dmCopies.get(token);
+  let out = variants?.get(key);
   if (!out) {
-    out = { ...token, seenAll: true };
-    if (!isWritable(token)) markedCopies.set(token, out);
+    const { number: _stored, ...rest } = token;
+    out = { ...rest, ...(number !== undefined ? { number } : {}), ...(marked ? { seenAll: true as const } : {}) };
+    if (!isWritable(token)) {
+      if (!variants) dmCopies.set(token, (variants = new Map()));
+      variants.set(key, out);
+    }
   }
   return out;
 }
@@ -1346,8 +1381,11 @@ function projectPlayerToken(ctx: Ctx, token: Token): ProjectedToken {
   if (ownsToken(ctx.state, ctx.viewer, token)) {
     const actor = "inline" in token.actor ? { inline: projectActorOwner(token.actor.inline, heldClock(ctx.state, ctx.viewer)?.id) } : token.actor;
     // Owners get their token's light to change it. Party membership is the DM's mark (docs/design/design-v1-maps-vision.md 4.3.5).
-    const { partyVision: _partyVision, attached: _attached, ...own } = token;
+    // A creature's mark is the DM's, and its number the table's, which an owner reads as everyone does.
+    const { partyVision: _partyVision, attached: _attached, met: _met, number: _number, ...own } = token;
     const out: ProjectedToken = { ...own, rev: 0, actor, aboveFog };
+    const number = tableNumber(ctx.state, token);
+    if (number !== undefined) out.number = number;
     const link = linkShown(ctx, token);
     if (link) out.attached = link;
     if (playersToken(ctx.state, token)) out.party = true;
@@ -1382,8 +1420,9 @@ function projectPlayerToken(ctx: Ctx, token: Token): ProjectedToken {
   if (token.height !== undefined) out.height = token.height;
   // The note for everyone. The DM's own note is the actor's dmNotes, which no player projection carries.
   if (token.notes !== undefined) out.notes = token.notes;
-  // A hidden name's number would tell players it is one of a numbered group, and which one.
-  if (token.number !== undefined && !token.nameHidden) out.number = token.number;
+  // The table's number, a hidden name's too: it counts what the party met under the name players read.
+  const number = tableNumber(ctx.state, token);
+  if (number !== undefined) out.number = number;
   // Rings around a creature in sight say no more than the creature itself (features section 4).
   if (token.rangeRings !== undefined) out.rangeRings = token.rangeRings;
   // A squeeze changes the footprint every rule reads, so everyone who sees the creature gets it. Its light does not
