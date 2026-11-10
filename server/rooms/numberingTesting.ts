@@ -13,15 +13,15 @@ import { SnapshotBudget } from "./budgets.ts";
 import { Connection } from "./connection.ts";
 import { buildSnapshot } from "./fanout.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { ScopeClient, StoredRoomDb, type StoredRow } from "./undoScopeTesting.ts";
+import { scopeObserver, ScopeClient, StoredRoomDb, until, type StoredRow } from "./undoScopeTesting.ts";
 
 /**
  * Rooms for the creature number tests: the real actor on a stored room
  * (undoScopeTesting.ts StoredRoomDb), with the DM's, P1's and P2's
- * sockets. Two rooms take the same members' ops, and what each sent P1 is
- * scanned raw, then compared whole as a socket's bytes are, every key in
- * its order (shared/seqTestutil.ts FrameReader). Nothing here runs in the
- * app.
+ * sockets and the table display's. Two rooms take the same members' ops,
+ * and what each sent P1 and the display is scanned raw, then compared
+ * whole as a socket's bytes are, every key in its order
+ * (shared/seqTestutil.ts FrameReader). Nothing here runs in the app.
  */
 
 /** The DM, the second and third DMs some tests take steps with, and the two players. */
@@ -32,13 +32,16 @@ export const T0 = Date.parse("2026-11-10T20:00:00.000Z");
 const draw = (sides: number) => Math.ceil(sides / 2);
 
 /** A socket kept for reading: its label, its frames, and how many of them a check has read. */
-type Page = { label: string; client: ScopeClient; read: number };
+type Page = { label: string; sent: readonly unknown[]; read: number };
+
+/** The table display's member id. */
+const DISPLAY = "display:abcdefghijkl";
 
 export class Room {
   readonly name: string;
   readonly db: StoredRoomDb;
   readonly clock = { now: T0 };
-  /** P1's pages in order, each from its first frame, across page and room reloads. */
+  /** P1's pages and the display's in order, each from its first frame, across page and room reloads. */
   readonly pages: Page[] = [];
   /** What the actor logged at warn and error. */
   readonly logged: string[] = [];
@@ -84,7 +87,9 @@ export class Room {
     const clients = { dm: await open("dm"), p1: await open("p1"), p2: await open("p2") } as Record<Who, ScopeClient>;
     for (const dm of ["dm2", "dm3"] as const) if (this.state.members[dm]) clients[dm] = await open(dm);
     this.clients = clients;
-    this.pages.push({ label: `p1#${this.pages.length + 1}`, client: this.clients.p1, read: 0 });
+    this.pages.push({ label: `p1#${this.pages.length + 1}`, sent: this.clients.p1.sent, read: 0 });
+    const display = await scopeObserver(actor, { memberId: DISPLAY, role: "player", display: true });
+    this.pages.push({ label: `display#${this.pages.length + 1}`, sent: display.sent, read: 0 });
   }
 
   /** The room stops, as a deploy (with its snapshot) or a crash after its last commit, and loads again from what it stored. */
@@ -101,7 +106,7 @@ export class Room {
     this.clock.now += 1_000;
     this.actor.detach(this.clients.p1.conn);
     this.clients.p1 = await ScopeClient.open(this.actor, this.member("p1"), "player");
-    this.pages.push({ label: `p1#${this.pages.length + 1}`, client: this.clients.p1, read: 0 });
+    this.pages.push({ label: `p1#${this.pages.length + 1}`, sent: this.clients.p1.sent, read: 0 });
     await this.settle();
   }
 
@@ -110,6 +115,24 @@ export class Room {
     const event = await this.clients[who].send(op);
     await this.settle();
     return event;
+  }
+
+  /**
+   * A member's ops sent at once, each without waiting for the one before,
+   * so they land in one batch as a burst does, and each op's refusal code
+   * or "taken".
+   */
+  async queue(who: Who, ops: readonly Op[]): Promise<string[]> {
+    this.clock.now += 1_000;
+    const client = this.clients[who];
+    const ns = ops.map((op) => {
+      const n = ++client.n;
+      void this.actor.op(client.conn, n, op);
+      return n;
+    });
+    const events = await Promise.all(ns.map((n) => until(() => client.sent.find((m): m is Event => m.t === "ev" && Boolean(m.acks?.includes(n) || m.rejects?.some((r) => r.n === n))), `answer ${n}`)));
+    await this.settle();
+    return events.map((event, i) => event.rejects?.find((r) => r.n === ns[i])?.code ?? "taken");
   }
 
   async apply(who: Who, op: Op): Promise<Event> {
@@ -138,18 +161,18 @@ export class Room {
     for (const row of this.db.rows) this.rows.set(row.seq, row);
   }
 
-  /** P1's frames as one reader reads them, every page in order, each as sent with its keys in their order. */
+  /** P1's and the display's frames as one reader reads them, every page in order, each as sent with its keys in their order. */
   p1Frames(): string[] {
     const reader = new FrameReader();
-    return this.pages.flatMap((p) => p.client.sent.map((f) => `${p.label} ${reader.text(f)}`));
+    return this.pages.flatMap((p) => p.sent.map((f) => `${p.label} ${reader.text(f)}`));
   }
 
-  /** P1's frames no check has read yet, raw, each with its page, marked read. */
+  /** P1's and the display's frames no check has read yet, raw, each with its page, marked read. */
   unread(): Array<{ label: string; frame: unknown }> {
     const out: Array<{ label: string; frame: unknown }> = [];
     for (const p of this.pages) {
-      for (const frame of p.client.sent.slice(p.read)) out.push({ label: p.label, frame });
-      p.read = p.client.sent.length;
+      for (const frame of p.sent.slice(p.read)) out.push({ label: p.label, frame });
+      p.read = p.sent.length;
     }
     return out;
   }
@@ -197,11 +220,11 @@ function tokensIn(frame: unknown): Array<[string, Partial<Token>]> {
 }
 
 /**
- * Reads P1's new frames in one room, raw, before anything is compared:
- * none holds a creature's group mark, a scene's numbers or the room's
- * group count, or any of `hidden` (ids and names this room holds and P1's
- * copy never does), and every number a creature carries is the one the
- * table gives it in the room now.
+ * Reads P1's and the display's new frames in one room, raw, before
+ * anything is compared: none holds a creature's group mark, a scene's
+ * numbers or the room's group count, or any of `hidden` (ids and names
+ * this room holds and their copies never do), and every number a creature
+ * carries is the one the table gives it in the room now.
  */
 export function scanP1(room: Room, hidden: readonly string[], what: string): void {
   for (const { label, frame } of room.unread()) {
@@ -218,14 +241,14 @@ export function scanP1(room: Room, hidden: readonly string[], what: string): voi
   }
 }
 
-/** Scans both rooms' new frames raw (`hidden` by room), then compares P1's frames whole, key order included. */
+/** Scans both rooms' new frames raw (`hidden` by room), then compares P1's and the display's frames whole, key order included. */
 export function same(rooms: Rooms, what: string, hidden: { a?: readonly string[]; b?: readonly string[] } = {}): void {
   scanP1(rooms[0], hidden.a ?? [], what);
   scanP1(rooms[1], hidden.b ?? [], what);
   const frames = rooms.map((room) => room.p1Frames());
   const at = frames[0]!.findIndex((f, i) => f !== frames[1]![i]);
   const first = at < 0 ? "" : `, first apart at frame ${at}:\nA ${frames[0]![at] ?? "(none)"}\nB ${frames[1]![at] ?? "(none)"}`;
-  assert.ok(at < 0 && frames[0]!.length === frames[1]!.length, `${what}: P1 gets the same frames in both rooms${first}`);
+  assert.ok(at < 0 && frames[0]!.length === frames[1]!.length, `${what}: P1 and the display get the same frames in both rooms${first}`);
 }
 
 /** The view a socket holds: its last snapshot with every `ev` since folded in. */
