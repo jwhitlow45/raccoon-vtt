@@ -29,8 +29,9 @@ import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOption, pickTool, S
  * - D3FIX-1: on hexes Add the wing lands a Wide wing joined on a slanted
  *   side, whose three sides become its doors (DG3 review round 1).
  * - LP37FIX-1: a ghost room's panel names it as the ghost does, and Done
- *   gives focus back to Edit rooms. DGW-3 also finds the sheet's foot in
- *   sight as it opens, and its rows in reach.
+ *   gives focus back to Edit rooms.
+ * - LP37FIX-2: the first drag right after picking the mode draws the area.
+ *   DGW-3 also finds the sheet's foot in sight as it opens.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seventy. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
@@ -347,6 +348,24 @@ describe("raccoon-vtt Add a wing: the DM's mode, pane and ghost", { timeout: 900
     assert.equal(await pane().getByRole("button", { name: "Edit rooms" }).evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement), true, "Done gave focus back to Edit rooms");
     await dm.keyboard.press("Escape");
     await pane().waitFor({ state: "detached" });
+  });
+
+  test("LP37FIX-2. the first drag right after picking Add a wing draws its area, the picker closed by the pick", async () => {
+    // Live play 37 picked the tile by a script's click, which leaves the picker open, so its first press only closed the picker.
+    await pickOption(dm, TOOL, "Builder mode", "Brush");
+    // The drag's ends are read first, since reading them waits for a still camera, and the pick moves no camera.
+    const a = await pagePoint(dm, KEEP, { x: 22.5, y: 4.5 });
+    const b = await pagePoint(dm, KEEP, { x: 47.5, y: 29.5 });
+    const bar = dm.getByRole("toolbar", { name: `${TOOL} options` });
+    await bar.getByRole("button", { name: /^Builder mode:/ }).first().click();
+    await dm.getByRole("dialog", { name: "Builder mode" }).getByRole("radio", { name: /^Add a wing/ }).click();
+    // At once: no wait for the picker to go or the row to change.
+    await dm.mouse.move(a.x, a.y);
+    await dm.mouse.down();
+    await dm.mouse.move(a.x + (b.x - a.x) * 0.1, a.y + (b.y - a.y) * 0.1, { steps: 3 });
+    await dm.mouse.move(b.x, b.y, { steps: 12 });
+    await dm.mouse.up();
+    await lineIs(WING_TAP);
   });
 
   test("DGW-3. on a phone the pane is a bottom sheet of at most 60% of the height, and in line at 390 and 320 wide, 100% and 130%", async () => {
