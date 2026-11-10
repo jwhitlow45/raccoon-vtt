@@ -220,8 +220,10 @@ export type SnapshotBudgetLimits = {
 
 /*
  * The byte budgets hold ten of the largest DM snapshot a minute per session
- * and twenty per address: 6 MiB since companion stat blocks ride on top of
- * the 3 MiB for everything else (docs/design/design-v1-companion-stat-blocks.md 3.4).
+ * and twenty per session of a pinned room: 6 MiB since companion stat blocks
+ * ride on top of the 3 MiB for everything else
+ * (docs/design/design-v1-companion-stat-blocks.md 3.4). An address counts
+ * requests alone.
  */
 export const DEFAULT_SNAPSHOT_BUDGET: SnapshotBudgetLimits = {
   windowMs: 60_000,
@@ -236,9 +238,10 @@ type Spent = { at: number; bytes: number };
 
 /**
  * The snapshot budget (design 10.4): every snapshot the server builds counts
- * against its session and its IP. A request over budget is delayed, never
- * refused, until the oldest entries leave the window. For a pinned room the
- * IP part is counted per session, because its whole table shares one IP.
+ * against its session and its IP, the IP by count alone (keys). A request
+ * over budget is delayed, never refused, until the oldest entries leave the
+ * window. For a pinned room the IP part is counted per session, because its
+ * whole table shares one IP.
  *
  * The 30 s abuse rule is tracked per session: a request that is delayed
  * starts the clock, a request that goes through stops it, and a delayed
@@ -263,13 +266,19 @@ export class SnapshotBudget {
     return this.#spent.size + this.#overSince.size;
   }
 
+  /**
+   * The keys a session's snapshot counts against. An address shared by
+   * several sessions counts their requests and never their bytes, which
+   * each session's own key counts. A pinned room's second key, one for
+   * each session, counts both.
+   */
   keys(sessionId: string, ip: string, pinned: boolean): BudgetKey[] {
     const l = this.limits;
     return [
       { key: `s:${sessionId}`, maxCount: l.sessionCount, maxBytes: l.sessionBytes },
       pinned
         ? { key: `ps:${sessionId}`, maxCount: l.ipCount, maxBytes: l.ipBytes }
-        : { key: `ip:${ip}`, maxCount: l.ipCount, maxBytes: l.ipBytes },
+        : { key: `ip:${ip}`, maxCount: l.ipCount, maxBytes: Infinity },
     ];
   }
 

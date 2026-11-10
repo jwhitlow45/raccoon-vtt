@@ -154,7 +154,7 @@ describe("SnapshotBudget", () => {
     assert.equal(b.delay(keys), 0);
   });
 
-  test("the default takes ten of the largest DM snapshot, 6 MiB with companion blocks, a minute per session and twenty per address", () => {
+  test("the default takes ten of the largest DM snapshot, 6 MiB with companion blocks, a minute per session and twenty per pinned room's session", () => {
     const largest = LIMITS.projectedSceneBytes + LIMITS.companionBlocksBytes;
     assert.equal(DEFAULT_SNAPSHOT_BUDGET.sessionBytes, 10 * largest);
     assert.equal(DEFAULT_SNAPSHOT_BUDGET.ipBytes, 20 * largest);
@@ -175,7 +175,7 @@ describe("SnapshotBudget", () => {
     }
   });
 
-  test("bytes delay too, and a pinned room counts the IP share per session", () => {
+  test("bytes delay a session and a pinned room's share of it, and an address counts requests alone", () => {
     const c = clock(100_000);
     const b = new SnapshotBudget({ sessionBytes: 10_000, ipBytes: 15_000 }, c.now);
     const a = b.keys("s1", "ip1", false);
@@ -184,11 +184,32 @@ describe("SnapshotBudget", () => {
     assert.equal(b.delay(a), 0);
     b.record(a, 2_000);
     assert.ok(b.delay(a) > 0);
-    // The IP is shared: s2 is over the IP bytes after s1's 11,000 and its own.
+    // The address holds s1's 11,000 bytes and s2's 5,000, past its 15,000, and s2 still waits for nothing.
     b.record(other, 5_000);
-    assert.ok(b.delay(other) > 0);
+    assert.equal(b.delay(other), 0);
+    // A pinned room's share is per session and counts bytes: 16,000 is past it.
     const pinned = b.keys("s3", "ip1", true);
-    assert.equal(b.delay(pinned), 0);
+    b.record(pinned, 16_000);
+    assert.ok(b.delay(pinned) > 0);
+  });
+
+  test("a player's snapshot waits the same after the DM's 33 on its address, large or small", () => {
+    const waits = [1, 4].map((mib) => {
+      const c = clock(100_000);
+      const b = new SnapshotBudget({}, c.now);
+      // Eleven DM sessions of three snapshots each, so no session of theirs is past its own bytes.
+      for (let i = 0; i < 33; i++) {
+        b.record(b.keys(`dm${i % 11}`, "ip1", false), mib * 1024 * 1024);
+        c.tick(1_000);
+      }
+      const p1 = b.keys("p1", "ip1", false);
+      const before = b.delay(p1);
+      for (let i = 0; i < 7; i++) b.record(p1, 1_000);
+      return [before, b.delay(p1)];
+    });
+    assert.deepEqual(waits[0], waits[1]);
+    assert.equal(waits[0]![0], 0, "33 of 40 leave room for the player");
+    assert.ok(waits[0]![1]! > 0, "the address's 41st waits");
   });
 
   test("the abuse rule fires only for a session that keeps making new requests while over budget", () => {
