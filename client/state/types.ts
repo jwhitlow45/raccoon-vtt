@@ -1,7 +1,7 @@
 import type { HistoryActivation, HistoryCommand, HistoryView } from "./history.ts";
 import type { UndoGroupOptions } from "#shared/undoContract.ts";
 import type { MemberId, RoomState, SceneId } from "#shared/model.ts";
-import type { ClientOp, EphEvent, RefusalCode } from "#shared/protocol.ts";
+import type { ClientOp, EphEvent, EphEventOut, RefusalCode } from "#shared/protocol.ts";
 import type { ProjectedState } from "#shared/project.ts";
 import type { ConnectionState } from "../lib/connection.ts";
 import type { SceneLoad } from "./sceneLoad.ts";
@@ -18,7 +18,8 @@ export type You = { memberId: MemberId; role: "dm" | "player" };
 export type FloorFollow = { sceneId: SceneId | null; tokenId: string | null };
 
 type AoeEvent = Extract<EphEvent, { k: "aoe" }>;
-type RulerEvent = Extract<EphEvent, { k: "ruler" }>;
+/** A ruler as receivers get it: a carried one's `prior` without the creatures and ends it named for the server (docs/design/design-v1-floors.md phase 3, 4.2). */
+type RulerEvent = Extract<EphEventOut, { k: "ruler" }>;
 
 /**
  * Ephemeral previews by member (design section 7.6). `local` marks this

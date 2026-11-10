@@ -375,7 +375,7 @@ export type RoomStore = {
   /** Cancels the newest builder gesture waiting on its asks, as Undo does then. False when none waits. */
   cancelHeld(): boolean;
   /** Shows one of this device's own ephemeral events, as if it had come back from the server. It happened on the floor shown. */
-  recordLocalEph(e: EphEvent): void;
+  recordLocalEph(e: EphEventOut): void;
   /**
    * Shows another floor this device holds of the scene projected
    * (RoomActions.showFloor, docs/design/design-v1-floors.md 7.3): a DM's

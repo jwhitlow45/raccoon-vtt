@@ -59,6 +59,14 @@ describe("ephemeral lifecycle", () => {
     assert.equal(shown.view && "iso" in shown.view, false);
   });
 
+  test("a ruler carried over stairs keeps its prior, and a later frame without one drops it (docs/design/design-v1-floors.md phase 3, 4.2)", () => {
+    const prior = { ft: 25, diag: { h: 1, v: 0 }, walker: { size: "large" as const, squeeze: true as const } };
+    const carried = applyEph(EMPTY_EPHEMERAL, "p2", { k: "ruler", id: "r1", points: [{ x: 8.5, y: 3.5 }], shared: true, walk: true, prior }, 0, remote);
+    assert.deepEqual(carried.rulers["p2|r1"]?.prior, prior);
+    const fresh = applyEph(carried, "p2", { k: "ruler", id: "r1", points: [{ x: 2.5, y: 2.5 }], shared: true, walk: true }, 1, remote);
+    assert.equal(fresh.rulers["p2|r1"] && "prior" in fresh.rulers["p2|r1"], false);
+  });
+
   test("a reconnect keeps only this device's own previews", () => {
     let eph = applyEph(EMPTY_EPHEMERAL, "me", { k: "ruler", id: "r1", points: [{ x: 0, y: 0 }] }, 0, { local: true, role: "dm" });
     eph = applyEph(eph, "p2", { k: "ruler", id: "r2", points: [{ x: 0, y: 0 }] }, 0, remote);

@@ -26,6 +26,7 @@ import {
   type SocketLike,
 } from "./socket.ts";
 import { LocalServer } from "../dev/localServer.ts";
+import { createRoomActions } from "./actions.ts";
 import { createRoomStore, OP_ANSWER_MS, refusalText } from "./store.ts";
 import { FakeClock } from "./testing.ts";
 import { backoffDelay, BACKOFF_CAP_MS } from "./timing.ts";
@@ -1182,6 +1183,42 @@ describe("floors on the socket (docs/design/design-v1-floors.md 8.2, 10)", () =>
     assert.equal(s.room.store.getState().sceneLoad.requested, "keep");
     s.last().emit(s.snapshot("keep"));
     assert.deepEqual([s.room.store.getState().sceneId, s.room.store.getState().projectedSceneId], ["keepTop", "keep"]);
+  });
+
+  test("a ruler carried over stairs goes out naming its creatures and ends, and shows here and comes back without them (docs/design/design-v1-floors.md phase 3, 4.2)", () => {
+    const s = setup({ state: floors() });
+    s.socket.start();
+    s.connect(TOWER);
+    s.last().take();
+    const actions = createRoomActions(s.room, s.socket);
+    actions.sendEph({ k: "ruler", id: "r1", points: [{ x: 3, y: 3, tokenId: "g1" }, { x: 8.5, y: 3.5 }], shared: true, walk: true });
+    s.runFrames();
+    s.last().take();
+    const prior = { ft: 35, diag: { h: 0, v: 0 }, walker: { size: "medium" as const }, anchors: ["g1"], ends: ["l1"] };
+    s.room.showFloor(UPPER);
+    s.clock.advance(40);
+    actions.sendEph({ k: "ruler", id: "r1", points: [{ x: 8.5, y: 3.5 }], shared: true, walk: true, prior });
+    s.runFrames();
+    const out = s.last().take("eph");
+    assert.deepEqual(
+      out.map((m) => (m.t === "eph" ? [m.sceneId, m.e.k] : null)),
+      [
+        [TOWER, "rulerEnd"],
+        [UPPER, "ruler"],
+      ],
+    );
+    const carried = out[1]?.t === "eph" && out[1].e.k === "ruler" ? out[1].e.prior : undefined;
+    assert.deepEqual(carried, prior, "the server is sent the creatures and ends it judges the frame by");
+    const me = s.room.store.getState().you!.memberId;
+    const local = s.room.store.getState().ephemeralFloors[UPPER]?.rulers[`${me}|r1`];
+    assert.deepEqual(local?.prior, { ft: 35, diag: { h: 0, v: 0 }, walker: { size: "medium" } }, "recorded as receivers get it");
+    // As the server forwards it, through JSON and the server message schema.
+    const forwarded = { ft: 35, diag: { h: 0, v: 0 }, walker: { size: "custom" as const, w: 1, h: 3, squeeze: true as const } };
+    s.last().emit({ t: "eph", from: "p1", sceneId: UPPER, e: { k: "ruler", id: "r2", points: [{ x: 8.5, y: 4.5 }], shared: true, walk: true, prior: forwarded } });
+    assert.deepEqual(s.room.store.getState().ephemeralFloors[UPPER]?.rulers["p1|r2"]?.prior, forwarded);
+    // One that names its creatures or ends never matches the outbound schema, and is dropped whole.
+    s.last().emit({ t: "eph", from: "p1", sceneId: UPPER, e: { k: "ruler", id: "r3", points: [{ x: 8.5, y: 4.5 }], shared: true, walk: true, prior: { ...forwarded, anchors: ["g1"], ends: ["l1"] } } } as unknown as ServerMessage);
+    assert.equal(s.room.store.getState().ephemeralFloors[UPPER]?.rulers["p1|r3"], undefined);
   });
 
   test("an event keeps the floor it was made on, though the floor shown changes before it goes out", () => {

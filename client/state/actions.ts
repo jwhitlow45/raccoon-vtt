@@ -1,5 +1,5 @@
 import { uuidv7 } from "#shared/ids.ts";
-import { clientMessageSchema, type ClientOp, type EphEvent } from "#shared/protocol.ts";
+import { clientMessageSchema, outboundEph, type ClientOp, type EphEvent } from "#shared/protocol.ts";
 import { moveOps } from "../lib/group.ts";
 import type { RoomSocket } from "./socket.ts";
 import type { RoomStore } from "./store.ts";
@@ -52,7 +52,8 @@ export function createRoomActions(room: RoomStore, socket: Pick<RoomSocket, "sen
       }
       // Konva already draws this device's own drag under the finger.
       const drag = e.k === "dragStart" || e.k === "dragMove" || e.k === "dragEnd" || e.k === "dragCancel";
-      if (!drag) room.recordLocalEph(e);
+      // Recorded as receivers get it, so this device draws its own carried ruler as every other device does (docs/design/design-v1-floors.md phase 3, 4.2).
+      if (!drag) room.recordLocalEph(outboundEph(e));
       if (!opts?.localOnly) socket.sendEph(e);
     },
     switchScene: (sceneId) => socket.switchScene(sceneId),
