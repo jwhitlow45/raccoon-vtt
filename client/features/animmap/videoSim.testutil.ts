@@ -81,6 +81,8 @@ export class Compositor {
   droppedFrames = 0;
   #blocked = 0;
   #wrapped = false;
+  /** The loop of the frame last shown, or null before the first. */
+  #presentedLoop: number | null = null;
 
   constructor(content: Content, display: Display, r: () => number, struggle: Struggle = HEALTHY, start = 0) {
     const { pts, durationMs } = framesOf(content);
@@ -140,7 +142,6 @@ export class Compositor {
     }
     const arrived = index - from + 1;
     this.totalFrames += arrived;
-    if (this.#shown >= 0 && Math.floor(index / this.pts.length) > Math.floor(this.#shown / this.pts.length)) this.#wrapped = true;
     if (show < 0) {
       // Every frame since the last shown one was dropped: nothing new shows.
       this.droppedFrames += arrived;
@@ -150,6 +151,10 @@ export class Compositor {
     this.droppedFrames += arrived - 1;
     this.#shown = index;
     this.presentedFrames++;
+    // The wrap is the shown frame's loop, not the clock's: a decoder that dropped the new loop's first frames still shows the old loop's last one, and the media time only falls on the frame that follows.
+    const loop = Math.floor(show / this.pts.length);
+    if (this.#presentedLoop !== null && loop > this.#presentedLoop) this.#wrapped = true;
+    this.#presentedLoop = loop;
     if (this.#blocked > 0) {
       this.#blocked--;
       return null;

@@ -699,6 +699,11 @@ test("one sequence, when asked for", { skip: !ONE }, async () => {
   assert.deepEqual(await sequence(Number(ONE)), []);
 });
 
+// Found by CI: a wrap flagged on the old loop's last frame, so the next frame's fall in media time read as a backward draw.
+test("seed 123433975, whose decoder drops the first frames of a loop, draws no frame backward", { skip: Boolean(ONE) }, async () => {
+  assert.deepEqual(await sequence(123433975), []);
+});
+
 test("2,000 random sequences keep the board's invariants", { skip: Boolean(ONE) }, async () => {
   await fc.assert(
     fc.asyncProperty(fc.integer({ min: 1, max: 2 ** 31 - 1 }), async (seed) => {
