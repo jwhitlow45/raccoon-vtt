@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { before, describe, test } from "node:test";
 import type { Label, RoomState } from "#shared/model.ts";
 import { reveal } from "#shared/testutil.ts";
@@ -11,7 +10,7 @@ import { raised, world } from "../movement/testing.ts";
 import { measureLabel } from "./draw.ts";
 import { labelScreenBox } from "./labelPaneFrame.ts";
 import { labelShape } from "./labelShape.ts";
-import { labelLook, labelUnder } from "./labelTap.ts";
+import { fogBuilds, labelLook, labelUnder } from "./labelTap.ts";
 
 const CAM: Camera = { x: 500, y: 100, scale: 40 };
 const CRYPT: Label = { id: "l1", sceneId: "s1", x: 5.5, y: 4.5, text: "Crypt", size: 1, rev: 0 } as Label;
@@ -69,10 +68,10 @@ describe("a map label tapped in Isometric (docs/design/design-v1-isometric-view.
 });
 
 test("a press in Isometric builds the viewer's fog once for every label it tests (ISO34-OPUS-9)", () => {
-  const src = readFileSync(new URL("./labelTap.ts", import.meta.url), "utf8");
-  const under = src.slice(src.indexOf("export function labelUnder("), src.indexOf("export function tapMapLabel("));
-  assert.match(under, /const fog = viewerFog\(pick, ctx\.scene\.id\);\n\s*let hit: Label \| null = null;\n\s*for \(const label of /);
-  assert.match(under, /const look = labelLook\(pick, ctx\.scene\.id, label, fog\);/);
-  assert.equal(under.match(/new FogView|viewerFog\(/g)?.length, 1);
+  const state = roomWithLabel();
+  state.labels = { l1: CRYPT, l2: { ...CRYPT, id: "l2", x: 7.5, text: "Vault" } as Label, l3: { ...CRYPT, id: "l3", x: 9.5, text: "Well" } as Label };
+  const { ctx } = ctxFor(state, "dm");
+  const before = fogBuilds.count;
+  labelUnder(ctx, { x: 0, y: 0 }, { x: 0, y: 0 });
+  assert.equal(fogBuilds.count - before, 1);
 });
-

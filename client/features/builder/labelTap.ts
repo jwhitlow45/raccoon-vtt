@@ -25,8 +25,12 @@ export function labelLook(pick: BoardPick, sceneId: string, label: Pick<Label, "
   return { view: pick.view, upright: labelStands(fog, label, measureLabel), ground: drawnAt(pick, label) };
 }
 
+/** How many viewer fogs have been built: a press builds one for all its labels, which a test reads from the difference. */
+export const fogBuilds = { count: 0 };
+
 /** The viewer's fog on the board's scene, for the stand rule: one for every label a press tests. */
 function viewerFog(pick: BoardPick, sceneId: string): FogView {
+  fogBuilds.count++;
   return new FogView(pick.src?.fog ?? null, sceneId, pick.heights.bounds);
 }
 
