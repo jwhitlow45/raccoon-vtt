@@ -9,6 +9,7 @@ import type { LogEvent } from "#shared/model.ts";
 import { loadMonsters, monsterActor } from "#shared/srd/monsters.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { barControl, ConsoleWatch, openPage, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { openGroup } from "./helpers/groups.ts";
 
 /**
  * The combat flow (docs/design/design-v1-combat-flow.md section 8) on the real
@@ -2356,37 +2357,72 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     /*
      * Busy past the shared delay, the round header's spinners move nothing: at each width its findings while busy are the
      * ones it has idle. The width changes without a reload, since each reload is a snapshot on the DM's session, and
-     * Previous and Next take turns, so the run ends on Bree's turn again.
+     * Previous and Next take turns, so the run ends on Bree's turn again. Then the same at 130%, the interface size picked
+     * live in the Menu's This device for the same reason, with Next and Previous at each width so the turn ends where it
+     * began, and 100% picked again at the end.
      */
     const added: string[] = [];
     const findings = async (row: Locator, at: string) => alignmentLines(await measureAlignment(row), at).map((line) => line.slice(at.length));
+    const sizes = [[1440, 900], [390, 844], [320, 568]] as const;
+    /** The round header at this width, its tracker opened where a phone width closed it, with its layout settled. */
+    const headerAt = async (width: number, height: number): Promise<Locator> => {
+      await page.setViewportSize({ width, height });
+      const row = page.locator("[data-round-header]").first();
+      // A phone width shows the tracker as a sheet, which stays open from one width to the next.
+      if (!(await row.isVisible())) await openTracker(page);
+      // The new width's layout settles before the idle header is read.
+      await page.waitForTimeout(500);
+      return row;
+    };
+    /** One turn change held on the wire: the busy header's findings that the idle one lacks, then the answer. */
+    const busyAt = async (row: Locator, at: string, button: "Previous turn" | "Next", shot: string): Promise<void> => {
+      const press = button === "Next" ? row.getByRole("button", { name: "Next", exact: true }) : row.getByRole("button", { name: "Previous turn" });
+      const idle = new Set(await findings(row, at));
+      const was = dmSocket.state!.encounter!.activeEntryId;
+      wire.hold = /"t":"encounter\.(next|prev)"/;
+      try {
+        await press.click();
+        await waitFor(`the turn change on the wire at ${at}`, () => (wire.held.length === 1 ? true : null));
+        await row.locator('[aria-busy="true"] .rvtt-spin').first().waitFor({ timeout: 3_000 });
+        for (const line of await findings(row, at)) if (!idle.has(line)) added.push(`the round header, busy, at ${at}${line}`);
+        await shots.take(page, shot);
+      } finally {
+        release(wire);
+      }
+      await waitFor(`the turn moved at ${at}`, () => (dmSocket.state?.encounter?.activeEntryId !== was ? true : null));
+      await waitFor(`the header live again at ${at}`, async () => ((await row.locator('[aria-busy="true"]').count()) === 0 ? true : null), 3_000);
+    };
+    /** Picks an interface size live, in the side panel's Menu at the widest size, as a DM does there. */
+    const sizeTo = async (label: "100%" | "130%"): Promise<void> => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await openSideTab(page, "Menu");
+      const menu = page.getByRole("tabpanel", { name: sideTabName("Menu") });
+      const picker = menu.getByRole("radiogroup", { name: "Interface size" });
+      if (!(await picker.isVisible())) {
+        const back = menu.getByRole("button", { name: /^Back to Menu/ });
+        if (await back.isVisible()) await back.click();
+        await menu.getByRole("button", { name: /^This device/ }).click();
+        await openGroup(menu, "Interface size");
+      }
+      await picker.getByRole("radio", { name: label }).check({ force: true });
+      await waitFor(`the interface at ${label}`, async () => ((await picker.getByRole("radio", { name: label }).isChecked()) ? true : null));
+    };
     try {
-      for (const [i, [width, height]] of ([[1440, 900], [390, 844], [320, 568]] as const).entries()) {
-        const at = `${width} x ${height}`;
-        await page.setViewportSize({ width, height });
-        const row = page.locator("[data-round-header]").first();
-        // A phone width shows the tracker as a sheet, which stays open from one width to the next.
-        if (!(await row.isVisible())) await openTracker(page);
-        // The new width's layout settles before the idle header is read.
-        await page.waitForTimeout(500);
-        const press = i % 2 === 0 ? row.getByRole("button", { name: "Previous turn" }) : row.getByRole("button", { name: "Next", exact: true });
-        const idle = new Set(await findings(row, at));
-        const was = dmSocket.state!.encounter!.activeEntryId;
-        wire.hold = /"t":"encounter\.(next|prev)"/;
-        try {
-          await press.click();
-          await waitFor(`the turn change on the wire at ${at}`, () => (wire.held.length === 1 ? true : null));
-          await row.locator('[aria-busy="true"] .rvtt-spin').first().waitFor({ timeout: 3_000 });
-          for (const line of await findings(row, at)) if (!idle.has(line)) added.push(`the round header, busy, at ${at}${line}`);
-          await shots.take(page, `pd-1-busy-${width}x${height}`);
-        } finally {
-          release(wire);
-        }
-        await waitFor(`the turn moved at ${at}`, () => (dmSocket.state?.encounter?.activeEntryId !== was ? true : null));
-        await waitFor(`the header live again at ${at}`, async () => ((await row.locator('[aria-busy="true"]').count()) === 0 ? true : null), 3_000);
+      for (const [i, [width, height]] of sizes.entries()) {
+        const row = await headerAt(width, height);
+        await busyAt(row, `${width} x ${height}`, i % 2 === 0 ? "Previous turn" : "Next", `pd-1-busy-${width}x${height}`);
+      }
+      await sizeTo("130%");
+      for (const [width, height] of sizes) {
+        const at = `${width} x ${height} at 130%`;
+        const row = await headerAt(width, height);
+        await busyAt(row, at, "Next", `pd-1-busy-${width}x${height}-130-next`);
+        await busyAt(row, at, "Previous turn", `pd-1-busy-${width}x${height}-130-previous`);
       }
     } finally {
+      await sizeTo("100%");
       await page.setViewportSize({ width: 1440, height: 900 });
+      await openTracker(page);
     }
     assert.deepEqual(added, [], "the busy round header out of line where the idle one is not");
   });
@@ -2530,6 +2566,51 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       await ops.send({ t: "encounter.end" });
     } finally {
       await ops.send({ t: "room.update", settings: { monsterInitScore: false } });
+    }
+  });
+
+  test("pf2-1. with Roll monsters' Initiative off, Nobody yet held on the wire stays busy until the server takes the start, and Selected token pressed meanwhile adds the warrior behind it, one row", async () => {
+    const { page, wire } = qeDesk();
+    await ops.send({ t: "encounter.end" }).catch(() => {});
+    await waitFor("no fight", () => (dmSocket.state && !dmSocket.state.encounter ? true : null));
+    await openSideTab(page, "Initiative");
+    const roll = page.getByRole("switch", { name: /^Roll monsters' Initiative/ });
+    await roll.click();
+    await waitFor("the switch off", async () => ((await roll.getAttribute("aria-checked")) === "false" ? true : null));
+    try {
+      const tracker = page.getByRole("tabpanel", { name: sideTabName("Initiative") });
+      const selected = tracker.getByRole("button", { name: "Goblin Warrior", exact: true });
+      await tapCell(page, run.bounds, { x: 6, y: 5 });
+      await selected.waitFor();
+      const nobody = tracker.getByRole("button", { name: "Nobody yet", exact: true });
+      wire.hold = /"t":"encounter\.(start|add)"/;
+      try {
+        await nobody.click();
+        await waitFor("the start on the wire", () => (wire.held.length === 1 ? true : null));
+        await waitFor("Nobody yet busy", async () => ((await nobody.getAttribute("aria-busy")) === "true" ? true : null), 3_000);
+        assert.equal(await nobody.isDisabled(), false, "busy, not disabled, so it keeps its focus");
+        await nobody.dispatchEvent("click");
+        await page.waitForTimeout(300);
+        assert.equal(wire.held.length, 1, "a second tap on Nobody yet sent something");
+        // The fight shows only once the server takes the start, so New fight is still on screen, and the warrior's button adds.
+        await selected.click();
+        await waitFor("the warrior's row on the wire", () => (wire.held.length === 2 ? true : null));
+        assert.match(wire.held[0]!, /"t":"encounter\.start"/);
+        assert.match(wire.held[1]!, /"t":"encounter\.add"/, "a second start, which the server would refuse");
+        assert.ok(wire.held[1]!.includes(qe.warrior));
+        await shots.take(page, "pf2-1-start-held");
+      } finally {
+        release(wire);
+      }
+      await waitFor("the fight with the warrior", () => (dmSocket.state?.encounter?.entries.length === 1 ? true : null));
+      await page.waitForTimeout(300);
+      assert.deepEqual(dmSocket.state!.encounter!.entries.map((e) => e.tokenId), [qe.warrior], "one row, the warrior's");
+    } finally {
+      // The switch sits under New fight, which shows again once the fight is over.
+      await ops.send({ t: "encounter.end" }).catch(() => {});
+      await waitFor("no fight", () => (dmSocket.state && !dmSocket.state.encounter ? true : null));
+      if ((await roll.getAttribute("aria-checked")) === "false") await roll.click();
+      await waitFor("the switch on", async () => ((await roll.getAttribute("aria-checked")) === "true" ? true : null));
     }
   });
 
