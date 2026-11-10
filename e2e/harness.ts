@@ -889,6 +889,10 @@ export class OpSocket {
   private gone: string | null = null;
   private history: HistoryMessage | null;
   private readonly historyWaiters = new Set<() => void>();
+  /** Each op still waiting for its answer as it went out, so a retry sends it again under its number. */
+  private readonly unanswered = new Map<number, string>();
+  private resend: ReturnType<typeof setTimeout> | null = null;
+  private retries = 0;
 
   private constructor(ws: WebSocket, history: HistoryMessage | null) {
     this.ws = ws;
@@ -906,10 +910,11 @@ export class OpSocket {
         this.history = msg as HistoryMessage;
         for (const wake of [...this.historyWaiters]) wake();
       } else if (msg.t === "ev") {
+        if (msg.acks?.length) this.retries = 0;
         for (const n of msg.acks ?? []) this.waiting.get(n)?.resolve();
         for (const r of msg.rejects ?? []) this.waiting.get(r.n)?.reject(new Error(`op ${r.n} refused: ${r.code}: ${r.message}`));
       } else if (msg.t === "retry" && msg.n !== undefined) {
-        this.waiting.get(msg.n)?.reject(new Error(`op ${msg.n} asked to retry: ${msg.code}`));
+        this.retryFrom(msg.n);
       } else if (msg.t === "resync") {
         this.end(`the server resynced the op socket (${msg.reason ?? "no reason"})`);
       }
@@ -917,8 +922,27 @@ export class OpSocket {
     ws.on("close", (code, reason) => this.end(`the op socket closed with ${code}${reason.length ? ` (${reason.toString()})` : ""}`));
   }
 
+  /**
+   * A busy or gap answer asks for the op again, under its number, with
+   * every op sent after it, as the app does (client/state/store.ts
+   * retryOps): the answers to the rest of the burst ride on the resend
+   * already waiting, and each resend in a row waits longer. A run's setup
+   * sends faster than one socket's op rate whenever the room answers
+   * quickly, so it meets busy as a member's device can.
+   */
+  private retryFrom(n: number): void {
+    if (!this.unanswered.has(n) || this.resend) return;
+    this.resend = setTimeout(() => {
+      this.resend = null;
+      if (this.gone) return;
+      for (const [m, text] of [...this.unanswered].sort((a, b) => a[0] - b[0])) if (m >= n) this.ws.send(text);
+    }, Math.min(2_000, 200 * 2 ** this.retries++));
+  }
+
   private end(why: string): void {
     this.gone ??= why;
+    if (this.resend) clearTimeout(this.resend);
+    this.resend = null;
     for (const [n, w] of [...this.waiting]) w.reject(new Error(`op ${n} got no answer: ${this.gone}`));
     for (const wake of [...this.historyWaiters]) wake();
   }
@@ -989,15 +1013,19 @@ export class OpSocket {
         resolve: () => {
           clearTimeout(timer);
           this.waiting.delete(n);
+          this.unanswered.delete(n);
           resolve();
         },
         reject: (err) => {
           clearTimeout(timer);
           this.waiting.delete(n);
+          this.unanswered.delete(n);
           reject(err);
         },
       });
-      this.ws.send(JSON.stringify({ t: "op", n, op }));
+      const text = JSON.stringify({ t: "op", n, op });
+      this.unanswered.set(n, text);
+      this.ws.send(text);
     });
   }
 
