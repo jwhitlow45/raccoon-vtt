@@ -3,7 +3,9 @@ import { LIMITS } from "../limits.ts";
 import type { RoomState, Scene } from "../model.ts";
 import { FLOOR_HEIGHT, type OpOf } from "../protocol.ts";
 import { FLOOR_WORDS, floorsOf, startFloor, unhiddenPartyMember } from "../rules/floors.ts";
+import { HEX_ORIGIN, OWN_SQUARE_GRID, hexOriginBefore } from "../rules/grid.ts";
 import { ownEntry } from "../records.ts";
+import { patchedVision } from "./sceneVision.ts";
 import { invalid, type Tx } from "./tx.ts";
 
 /*
@@ -21,13 +23,26 @@ export const NEW_FLOOR = "New floor";
 /** The refusal of a floor op on a scene with one floor. */
 export const ONE_FLOOR = "this scene has one floor";
 
-/** The first of "New floor", "New floor 2", "New floor 3" and on that no floor of the scene has. */
-export function freeFloorName(taken: ReadonlySet<string>): string {
-  if (!taken.has(NEW_FLOOR)) return NEW_FLOOR;
+/**
+ * The first of `base`, "`base` 2", "`base` 3" and on that no floor of the
+ * scene has (docs/design/design-v1-floors.md phase 3, 3.2), so two DMs
+ * adding "Crypt" at once get "Crypt" and "Crypt 2". A numbered name cuts
+ * `base` by code point and trims it, so the whole fits the floor name
+ * limit and never splits a character.
+ */
+export function freeName(base: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(base)) return base;
+  const chars = Array.from(base);
   for (let n = 2; ; n++) {
-    const name = `${NEW_FLOOR} ${n}`;
+    const suffix = ` ${n}`;
+    const name = `${chars.slice(0, LIMITS.floorNameChars - suffix.length).join("").trim()}${suffix}`;
     if (!taken.has(name)) return name;
   }
+}
+
+/** The first of "New floor", "New floor 2", "New floor 3" and on that no floor of the scene has. */
+export function freeFloorName(taken: ReadonlySet<string>): string {
+  return freeName(NEW_FLOOR, taken);
 }
 
 /**
@@ -60,11 +75,45 @@ export function newFloorFrom(beside: Scene, id: string, name: string, main: Pick
   return scene;
 }
 
+/** A floor's own settings from a file or a dungeon (`scene.create`'s `floor.own`). */
+type OwnSettings = NonNullable<NonNullable<OpOf<"scene.create">["floor"]>["own"]>;
+
+/**
+ * A new floor with its source's own settings over those it copied
+ * (docs/design/design-v1-floors.md phase 3, 3.2, D-261110-074): the
+ * size, background, grid look and automatic walls, and the map and the
+ * file mark when given. The vision patches the copied one as `sceneUpdate`
+ * patches it, so Per player carries unless named and Time of day only
+ * while the source names none. The fog replaces the copied fog, and when
+ * absent a vision turned on turns it on, as `sceneUpdate` does. Walls
+ * block moves, grid shape and suggested view stay copied, so the two grid
+ * refusals `sceneCreate` makes hold here too.
+ */
+export function withOwnSettings(copied: Scene, own: OwnSettings): Scene {
+  const scene: Scene = { ...copied, bounds: own.bounds, background: own.background, grid: own.grid, autoWalls: own.autoWalls };
+  if (own.map !== undefined) scene.map = own.map;
+  if (own.gridFromFile) {
+    // A Universal VTT floor's walls stand in its file's squares (docs/design/design-v1-hex-grids.md HX-D13).
+    if (scene.gridShape !== undefined) throw invalid(OWN_SQUARE_GRID);
+    scene.gridFromFile = true;
+  }
+  if (own.vision !== undefined) {
+    scene.vision = patchedVision(copied.vision, own.vision);
+    if (own.vision.on && copied.vision?.on !== true && own.fogEnabled === undefined) scene.fogEnabled = true;
+  }
+  if (own.fogEnabled !== undefined) scene.fogEnabled = own.fogEnabled;
+  if (hexOriginBefore(scene)) throw invalid(HEX_ORIGIN);
+  return scene;
+}
+
 /**
  * Add a floor (`scene.create` with `floor`): the new floor goes just above
  * or below the one beside, every floor's level is renumbered, and on the
  * scene's first add the floor beside becomes the main floor, named by the
- * op or "Ground floor".
+ * op or "Ground floor". The new floor takes the op's name, numbered while
+ * taken, and a file's or a dungeon's own settings (phase 3, 3.2). An add
+ * stored without either replays as it always did, so no rule reads the op
+ * version.
  */
 export function floorAdd(tx: Tx, op: OpOf<"scene.create">): void {
   const add = op.floor;
@@ -76,7 +125,8 @@ export function floorAdd(tx: Tx, op: OpOf<"scene.create">): void {
   if (group.length >= LIMITS.floorsPerScene) throw invalid(FLOOR_WORDS.tooMany(main.name));
   const named: Scene = beside.floor ? beside : { ...beside, floor: { of: beside.id, level: 0, name: add.besideName ?? GROUND_FLOOR, height: FLOOR_HEIGHT.initial } };
   const floors = group.map((s) => (s.id === beside.id ? named : s));
-  const fresh = newFloorFrom(named, op.scene.id, freeFloorName(new Set(floors.map((s) => s.floor?.name ?? ""))), main);
+  const copied = newFloorFrom(named, op.scene.id, freeName(add.name ?? NEW_FLOOR, new Set(floors.map((s) => s.floor?.name ?? ""))), main);
+  const fresh = add.own === undefined ? copied : withOwnSettings(copied, add.own);
   floors.splice(floors.indexOf(named) + (add.side === "above" ? 1 : 0), 0, fresh);
   writeLevels(tx, floors, new Set([named.id, fresh.id]));
 }

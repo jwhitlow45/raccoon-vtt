@@ -6,7 +6,8 @@ import { opSchema, type Op, type RestoreEntry } from "../protocol.ts";
 import { applyOp, type Applied } from "../reducer.ts";
 import { floorProblem, floorsOf } from "../rules/floors.ts";
 import { DM, actor, character, entry, env, room, scene, token } from "../testutil.ts";
-import { GROUND_FLOOR, NEW_FLOOR, freeFloorName } from "./floors.ts";
+import { HEX_ORIGIN, OWN_SQUARE_GRID } from "../rules/grid.ts";
+import { GROUND_FLOOR, NEW_FLOOR, freeFloorName, freeName } from "./floors.ts";
 
 /*
  * The floors reducer (docs/design/design-v1-floors.md 6, 7.1, 9): adds, the
@@ -142,6 +143,164 @@ describe("adding floors (7.1, 9)", () => {
     const redo = run(back.state, { t: "sys.restore", entries: [...(back.inverse ?? [])], from: "redo" });
     assert.ok(redo.scenes.s1!.floor);
     assert.deepEqual(marked(redo), ["s1"]);
+  });
+});
+
+describe("floors from a file or a dungeon (phase 3, 3.1 to 3.3)", () => {
+  type Own = NonNullable<NonNullable<Extract<Op, { t: "scene.create" }>["floor"]>["own"]>;
+  const DUNGEON_GRID = { show: true, color: "#ffffff", opacity: 0.15, lineWidth: 1 };
+  const MAP = { assetId: "a1", widthPx: 2800, heightPx: 2100, cellPx: 70, originPx: { x: 0, y: 0 } };
+  const own = (over: Partial<Own> = {}): Own => ({ bounds: { w: 30, h: 30 }, background: "#141418", grid: DUNGEON_GRID, autoWalls: "all", ...over });
+  const sourced = (id: string, beside: string, floor: { name?: string; own?: Own }, side: "above" | "below" = "above"): Op => ({
+    t: "scene.create",
+    scene: { id, name: "Tower", bounds: { w: 10, h: 10 } },
+    floor: { beside, side, ...floor },
+  });
+  const withTower = (over: Partial<Scene> = {}) => room({ scenes: { s1: tower(over), s2: scene("s2", { order: 1 }) } });
+  const cp = (text: string) => Array.from(text).length;
+
+  test("a named add takes its name, and two DMs adding Crypt at once get Crypt and Crypt 2", () => {
+    const base = withTower();
+    const one = run(base, sourced("a", "s1", { name: "Crypt" }));
+    assert.deepEqual(names(one, "s1"), [GROUND_FLOOR, "Crypt"]);
+    const two = run(one, sourced("b", "s1", { name: "Crypt" }), DM2);
+    assert.deepEqual(names(two, "s1"), [GROUND_FLOOR, "Crypt 2", "Crypt"], "b lands second, just above Ground");
+    assert.equal(floorProblem(two, "s1"), null);
+  });
+
+  test("a taken name is cut by code point and trimmed to fit with its number", () => {
+    const long = "The Sunken Temple of the Serpent Lord Le";
+    assert.equal(cp(long), 40);
+    assert.equal(freeName(long, new Set([long])), "The Sunken Temple of the Serpent Lord 2");
+    assert.equal(freeName("Crypt", new Set(["Crypt", "Crypt 2"])), "Crypt 3");
+    assert.equal(freeName("Crypt", new Set(["Crypt 2"])), "Crypt", "a free name is kept as sent");
+    const full = "x".repeat(40);
+    assert.equal(freeName(full, new Set([full])), `${"x".repeat(38)} 2`);
+    assert.equal(cp(freeName(full, new Set([full]))), 40, "the numbered name fills the limit and no more");
+  });
+
+  test("a name whose 40th code point is a dragon is stored whole, and its numbered twin never splits a character", () => {
+    const dragon = `${"x".repeat(39)}\u{1F409}`;
+    assert.equal(dragon.length, 41, "41 UTF-16 units");
+    assert.ok(opSchema.safeParse(sourced("a", "s1", { name: dragon })).success, "floorName counts code points");
+    const one = run(withTower(), sourced("a", "s1", { name: dragon }));
+    assert.equal(one.scenes.a!.floor!.name, dragon);
+    const two = run(one, sourced("b", "a", { name: dragon }));
+    assert.equal(two.scenes.b!.floor!.name, `${"x".repeat(38)} 2`, "the dragon goes whole before the number");
+    const inside = `${"x".repeat(37)}\u{1F409}yy`;
+    assert.equal(freeName(inside, new Set([inside])), `${"x".repeat(37)}\u{1F409} 2`, "a cut by UTF-16 unit would split the dragon");
+    assert.ok(opSchema.safeParse(sourced("c", "b", { name: freeName(inside, new Set([inside])) })).success);
+  });
+
+  test("a file floor takes its size, background, grid look, automatic walls, map and mark, and keeps walls block moves and the suggested view", () => {
+    const state = run(
+      withTower({ bounds: { w: 12, h: 8 }, background: "#112233", autoWalls: "floor", blockMovement: true, suggestedView: "isometric", fogEnabled: false }),
+      sourced("up", "s1", { name: "Crypt level 2", own: own({ bounds: { w: 40, h: 30 }, background: "#1b1b20", grid: { show: true, color: "#ffffff", opacity: 0.25, lineWidth: 1 }, autoWalls: "off", map: MAP, gridFromFile: true }) }),
+    );
+    const { rev: _r, ...up } = state.scenes.up!;
+    assert.deepEqual(up, {
+      id: "up",
+      name: "Tower",
+      order: 0,
+      bounds: { w: 40, h: 30 },
+      grid: { show: true, color: "#ffffff", opacity: 0.25, lineWidth: 1 },
+      background: "#1b1b20",
+      fogEnabled: false,
+      wallsVersion: 0,
+      blockMovement: true,
+      autoWalls: "off",
+      suggestedView: "isometric",
+      map: MAP,
+      gridFromFile: true,
+      floor: { of: "s1", level: 1, name: "Crypt level 2", height: 10 },
+    });
+    assert.equal(floorProblem(state, "s1"), null);
+  });
+
+  test("a dungeon floor beside a floor with Automatic walls off keeps its automatic walls", () => {
+    const state = run(withTower({ autoWalls: "off" }), sourced("up", "s1", { name: "Crypt", own: own() }));
+    assert.equal(state.scenes.up!.autoWalls, "all");
+    assert.equal(run(withTower({ autoWalls: "off" }), add("blank", "s1")).scenes.blank!.autoWalls, "off", "a blank floor still copies it");
+  });
+
+  test("Like with its light untouched sends no fog or vision, so Per player and Time of day carry from the floor beside", () => {
+    const vision = { on: true, light: "dim" as const, perPlayer: true as const, byClock: true as const };
+    const state = run(withTower({ fogEnabled: true, vision }), sourced("up", "s1", { name: "Crypt", own: own() }));
+    assert.deepEqual(state.scenes.up!.vision, vision);
+    assert.equal(state.scenes.up!.fogEnabled, true);
+  });
+
+  test("a vision patches the copied one: Per player carries unless named, and byClock false clears Time of day", () => {
+    const beside = { fogEnabled: true, vision: { on: true, light: "dim" as const, perPlayer: true as const, byClock: true as const } };
+    const dark = run(withTower(beside), sourced("up", "s1", { own: own({ fogEnabled: true, vision: { on: true, light: "dark", byClock: false } }) }));
+    assert.deepEqual(dark.scenes.up!.vision, { on: true, light: "dark", perPlayer: true });
+    const party = run(withTower(beside), sourced("up", "s1", { own: own({ fogEnabled: true, vision: { on: true, light: "dark", perPlayer: false, byClock: false } }) }));
+    assert.deepEqual(party.scenes.up!.vision, { on: true, light: "dark" }, "a vision that names Per player off makes a whole-party floor");
+  });
+
+  test("fog: a sent fog replaces the copied one, and without one a vision turned on turns it on", () => {
+    const off = withTower({ fogEnabled: false });
+    assert.equal(run(off, sourced("up", "s1", { own: own({ vision: { on: true, light: "dark", byClock: false } }) })).scenes.up!.fogEnabled, true);
+    assert.equal(run(off, sourced("up", "s1", { own: own({ fogEnabled: false, vision: { on: true, light: "dark", byClock: false } }) })).scenes.up!.fogEnabled, false);
+    assert.equal(run(withTower({ fogEnabled: true }), sourced("up", "s1", { own: own({ fogEnabled: false }) })).scenes.up!.fogEnabled, false);
+  });
+
+  test("Keep it lit with the default New scenes beside an Explore floor on Time of day: vision off, fog on, no Time of day", () => {
+    const state = run(
+      withTower({ fogEnabled: true, vision: { on: true, light: "bright", byClock: true } }),
+      sourced("up", "s1", { name: "Crypt", own: own({ fogEnabled: true, vision: { on: false, light: "bright", byClock: false } }) }),
+    );
+    assert.deepEqual(state.scenes.up!.vision, { on: false, light: "bright" });
+    assert.equal(state.scenes.up!.fogEnabled, true);
+  });
+
+  test("a lit dungeon floor beside a floor on Time of day at noon starts Dark and stays Dark, while a Like floor follows the clock", () => {
+    let state = run(withTower({ fogEnabled: true, vision: { on: true, light: "dark", byClock: true } }), { t: "clock.start", id: "clock1", at: 12 * 3600, shown: true, calendar: { kind: "days" } });
+    assert.equal(state.scenes.s1!.vision!.light, "bright", "Ground follows the clock to noon");
+    state = run(state, sourced("crypt", "s1", { name: "Crypt", own: own({ fogEnabled: true, vision: { on: true, light: "dark", byClock: false } }) }));
+    state = run(state, sourced("like", "s1", { name: "Attic", own: own() }));
+    assert.deepEqual(state.scenes.crypt!.vision, { on: true, light: "dark" });
+    assert.deepEqual(state.scenes.like!.vision, { on: true, light: "bright", byClock: true });
+    state = run(state, { t: "clock.advance", by: 1800 });
+    assert.equal(state.scenes.crypt!.vision!.light, "dark", "the clock never relights it");
+  });
+
+  test("a preset equal to the floor beside holds whichever side of a co-DM's edit the add lands, while Like takes the floor beside as it is then", () => {
+    const explore = { fogEnabled: true, vision: { on: true, light: "bright" as const } };
+    const preset = sourced("p", "s1", { own: own({ fogEnabled: true, vision: { on: true, light: "bright", byClock: false } }) });
+    const like = sourced("l", "s1", { own: own() });
+    const edit: Op = { t: "scene.update", sceneId: "s1", patch: { fogEnabled: true, vision: { on: false, light: "bright" } } };
+    const before = run(run(run(withTower(explore), edit, DM2), preset), like);
+    assert.deepEqual([before.scenes.p!.vision, before.scenes.l!.vision], [{ on: true, light: "bright" }, { on: false, light: "bright" }]);
+    const after = run(run(run(withTower(explore), preset), like), edit, DM2);
+    assert.deepEqual([after.scenes.p!.vision, after.scenes.l!.vision], [{ on: true, light: "bright" }, { on: true, light: "bright" }]);
+  });
+
+  test("a file's grid on a hex floor and a hex floor's map starting before the image are refused, as a new scene's are", () => {
+    const hex = withTower({ gridShape: "hexRows" });
+    assert.equal(refusal(hex, sourced("up", "s1", { own: own({ map: MAP, gridFromFile: true }) })), OWN_SQUARE_GRID);
+    assert.equal(refusal(hex, sourced("up", "s1", { own: own({ map: { ...MAP, originPx: { x: -10, y: 0 } } }) })), HEX_ORIGIN);
+    assert.equal(run(hex, sourced("up", "s1", { own: own({ map: MAP }) })).scenes.up!.gridShape, "hexRows", "the shape stays copied");
+    assert.equal(opSchema.safeParse(sourced("up", "s1", { own: own({ gridFromFile: true }) })).success, false, "a file's grid comes with its map");
+  });
+
+  test("the undo of a file floor's add takes it away, and its redo brings it back with its own settings", () => {
+    const base = withTower();
+    const added = applied(base, sourced("up", "s1", { name: "Crypt level 2", own: own({ map: MAP, gridFromFile: true, autoWalls: "off" }) }));
+    const back = applied(added.state, { t: "sys.restore", entries: [...(added.inverse ?? [])], from: "undo" });
+    assert.equal(back.state.scenes.up, undefined);
+    assert.equal(back.state.scenes.s1!.floor, undefined);
+    const redo = run(back.state, { t: "sys.restore", entries: [...(back.inverse ?? [])], from: "redo" });
+    assert.deepEqual(redo.scenes.up, added.state.scenes.up);
+  });
+
+  test("a stored blank add replays at change format 58 as the live add makes it", () => {
+    const op = opSchema.parse(add("up", "s1"));
+    const stored = applyOp(withTower(), op, DM, { ...env(seq++), opVersion: 58 });
+    const live = applyOp(withTower(), op, DM, env(seq++));
+    assert.ok(stored.ok && live.ok);
+    assert.deepEqual(stored.state.scenes, live.state.scenes);
+    assert.equal(stored.state.scenes.up!.floor!.name, NEW_FLOOR);
   });
 });
 

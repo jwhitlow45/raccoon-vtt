@@ -2220,10 +2220,11 @@ const stateClientOps = [
      * Add a floor (docs/design/design-v1-floors.md 7.1, 9): the new scene
      * record is a floor of `beside`'s scene, just above or below it. The
      * reducer takes the record's id alone: its name is the scene's, its
-     * settings copy the floor beside (section 6), the floor gets a free
-     * name ("New floor", "New floor 2" and on) and every floor's level is
-     * renumbered. `besideName` names the floor beside on the scene's first
-     * add, "Ground floor" when absent, and is ignored after.
+     * settings copy the floor beside (section 6) where `own` does not name
+     * them, the floor gets `name` or "New floor", numbered while taken, and
+     * every floor's level is renumbered. `besideName` names the floor
+     * beside on the scene's first add, "Ground floor" when absent, and is
+     * ignored after.
      */
     floor: z
       .strictObject({
