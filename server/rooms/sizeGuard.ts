@@ -1133,15 +1133,17 @@ function sceneNumbering(scene: Scene): number {
   return WIDEST_REV_BYTES - serializedBytes(scene.rev) - numbers;
 }
 
-const numberingSums = new WeakMap<object, number>();
+const numberingSums = new WeakMap<(value: never) => number, WeakMap<object, number>>();
 
-/** Each value's part summed, kept per collection object, which is replaced and never changed. */
+/** Each value's part summed, kept per part and per collection object, which is replaced and never changed. */
 function numberingSum<T>(collection: Record<string, T>, part: (value: T) => number): number {
-  let bytes = numberingSums.get(collection);
+  let sums = numberingSums.get(part);
+  if (!sums) numberingSums.set(part, (sums = new WeakMap()));
+  let bytes = sums.get(collection);
   if (bytes === undefined) {
     bytes = 0;
     for (const value of Object.values(collection)) bytes += part(value);
-    if (!isWritable(collection)) numberingSums.set(collection, bytes);
+    if (!isWritable(collection)) sums.set(collection, bytes);
   }
   return bytes;
 }
