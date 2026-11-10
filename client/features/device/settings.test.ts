@@ -360,3 +360,31 @@ test("the tab row keeps every panel at first, stores only the ones left out, by 
   assert.deepEqual(s.parseTabRow('{"dm":["log",7,"Log","log","dice"],"player":"menu"}'), { dm: ["log", "dice"], player: [] }, "only panel ids, once each");
   for (const raw of ["", "{", "null", "[]", "7", '"log"']) assert.deepEqual(s.parseTabRow(raw), { dm: [], player: [] }, raw);
 });
+
+test("the map size asks for the touch screen query once a page and reads it as it changes (FU52PERF-LEFT)", async () => {
+  reset({ writes: true, reads: true });
+  const query = { matches: true };
+  let made = 0;
+  const g = globalThis as { matchMedia?: unknown; screen?: unknown };
+  g.matchMedia = (q: string) => {
+    assert.equal(q, "(pointer: coarse)");
+    made++;
+    return query;
+  };
+  g.screen = { width: 390, height: 844 };
+  try {
+    const s = await loadPage();
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const Board = () => createElement("i", null, s.useMapVariant());
+    const render = () => renderToStaticMarkup(createElement(Board));
+    assert.equal(render(), "<i>mobile</i>", "a phone's touch screen loads the phone size");
+    for (let i = 0; i < 20; i++) render();
+    query.matches = false;
+    assert.equal(render(), "<i>full</i>", "a pointer that is no longer coarse loads the full size");
+    assert.equal(made, 1, "one query for every render");
+  } finally {
+    delete g.matchMedia;
+    delete g.screen;
+  }
+});

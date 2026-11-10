@@ -229,6 +229,18 @@ export function mapVariantFor(input: { lowPower: boolean; setting: MapVariantSet
   return preferredMapVariant({ coarsePointer: input.coarsePointer, shortSidePx: input.shortSidePx, setting: input.setting });
 }
 
+/**
+ * The touch screen query, made once a page. Its `matches` follows the
+ * device as it changes, and making the query costs far more than reading
+ * it, which the board did on each render, every camera move's included.
+ */
+let coarseQuery: MediaQueryList | null | undefined;
+
+function coarsePointer(): boolean {
+  if (coarseQuery === undefined) coarseQuery = typeof matchMedia === "function" ? matchMedia("(pointer: coarse)") : null;
+  return coarseQuery?.matches ?? false;
+}
+
 /** The map size for this device as it is now. */
 export function useMapVariant(): "full" | "mobile" {
   const low = useLowPower();
@@ -236,7 +248,7 @@ export function useMapVariant(): "full" | "mobile" {
   return mapVariantFor({
     lowPower: low,
     setting: detail,
-    coarsePointer: typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches,
+    coarsePointer: coarsePointer(),
     shortSidePx: typeof screen === "undefined" ? 0 : Math.min(screen.width, screen.height),
   });
 }
