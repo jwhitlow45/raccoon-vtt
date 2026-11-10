@@ -647,7 +647,7 @@ function keptShape(input: LabelInput, levels: Template[][], kept: PlacedLabel): 
 }
 
 /** Whether `text` is a cut of the label's name as cutName makes them: the name cut, or a disguise's shown name cut after the name at its least. */
-function isCutOf(text: string, input: Pick<LabelInput, "name" | "tag">): boolean {
+export function isCutOf(text: string, input: Pick<LabelInput, "name" | "tag">): boolean {
   const name = input.name.trim();
   const tail = `${ELLIPSIS}${input.tag === undefined ? "" : labelSuffix(input.tag)}`;
   if (text.endsWith(tail) && isHeadOf(text.slice(0, text.length - tail.length), name, MIN_CUT_LETTERS)) return true;

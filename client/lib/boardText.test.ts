@@ -6,11 +6,13 @@ import { boardSizes, PIN_CELL_PX, TEXT_FLOOR_PX } from "./boardScale.ts";
 import {
   cutName,
   focusLines,
+  isCutOf,
   focusStyle,
   labelStyle,
   MIN_CUT_LETTERS,
   overlaps,
   placeLabels,
+  SHAPE_PX,
   showsNumberBadge,
   templates,
   wrapWhole,
@@ -159,6 +161,7 @@ describe("a DM's brackets and a disguise", () => {
   test("a disguise's bracket wraps between its words, never leaving \"(as\" or its number alone", () => {
     assert.deepEqual(wrapWhole("Orc", { as: "Goblin Warrior", number: 2 }, 90, 2, 12, measure), ["Orc (as Goblin", "Warrior 2)"]);
     assert.deepEqual(wrapWhole("Orc", { as: "Goblin", preview: 3 }, 200, 1, 12, measure), ["Orc (as Goblin (3))"]);
+    assert.equal(wrapWhole("Orc", { as: "Goblin Warrior", number: 12 }, 60, 4, 12, measure), null, "\"12)\" never takes a line alone");
   });
 
   test("the name is cut first, then the shown name inside its bracket, keeping its number", () => {
@@ -173,6 +176,17 @@ describe("a DM's brackets and a disguise", () => {
     const style = focusStyle(boardSizes(40));
     const lines = focusLines({ name: "Orc", tag: { as: "Grand Inquisitor Malachar the Unrelenting of the Thornwood Deeps and the Ashen Wastes Beyond", number: 12 }, hp: null, style }, measure).map((l) => l.text);
     assert.ok(lines.at(-1)!.endsWith(" 12)"), JSON.stringify(lines));
+    for (const line of lines) assert.ok(measure(line, SHAPE_PX) <= style.room.maxEm * SHAPE_PX, `"${line}" fits the plate`);
+  });
+
+  test("a layout knows its own cuts of a disguise, so it can keep them", () => {
+    const tag = { as: "Goblin Warrior", number: 2 };
+    assert.equal(isCutOf("Orc (as Gob… 2)", { name: "Orc", tag }), true);
+    assert.equal(isCutOf("Gobl… (as Goblin Warrior 2)", { name: "Goblin King", tag }), true);
+    assert.equal(isCutOf("Gobl… (as Gob… 2)", { name: "Goblin King", tag }), true);
+    assert.equal(isCutOf("Orc (as Go… 2)", { name: "Orc", tag }), false, "two letters is no cut");
+    assert.equal(isCutOf("Orc (as Gob… 3)", { name: "Orc", tag }), false, "another number");
+    assert.equal(isCutOf("Gobli… (3)", { name: "Goblin Warrior", tag: { preview: 3 } }), true);
   });
 
   test("a cut disguise keeps its shape when laid out again", () => {
