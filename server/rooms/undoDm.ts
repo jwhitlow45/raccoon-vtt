@@ -1,7 +1,8 @@
-import { parseKey, readEntity } from "#shared/keys.ts";
+import { keys, parseKey, readEntity } from "#shared/keys.ts";
 import type { RoomState, Token } from "#shared/model.ts";
 import { stableStringify } from "#shared/project.ts";
 import type { RestoreEntry } from "#shared/protocol.ts";
+import { ownEntry } from "#shared/records.ts";
 import { guardMatches } from "#shared/reducer/misc.ts";
 import { guardHash } from "#shared/reducer/tx.ts";
 
@@ -60,9 +61,13 @@ export function attributesConflict(conflict: HistoryConflict, values: DmHistoryV
   return guardHash(conflict.key, conflict.current) === guardHash(conflict.key, after);
 }
 
-/** Adapt only eligible existing tokens. All other inverses keep their original guards and remain in the atomic restore. */
+/**
+ * Adapt only eligible existing tokens. All other inverses keep their original guards and remain in the atomic restore.
+ * A token the restore puts on another floor or scene takes along the areas attached to it since the step
+ * (`areasAcross`), as the move itself took those attached then (shared/reducer/tokens.ts areasFollow).
+ */
 export function dmPoseRestore(state: RoomState, entries: readonly RestoreEntry[], values?: DmHistoryValues): RestoreEntry[] {
-  return entries.map((entry) => {
+  const adapted = entries.map((entry) => {
     if (!values?.poseKeys.has(entry.key)) return entry;
     const current = readEntity(state, entry.key) as Token | null;
     const saved = values.after[entry.key] as Token | null | undefined;
@@ -75,4 +80,38 @@ export function dmPoseRestore(state: RoomState, entries: readonly RestoreEntry[]
     }
     return { key: entry.key, value, expectHash: guardHash(entry.key, current) };
   });
+  // An area the step holds keeps the step's own entry and guard, so one changed since still answers as changed.
+  return [...adapted, ...areasAcross(state, adapted, new Set(entries.map((entry) => entry.key)))];
+}
+
+/**
+ * The areas a restore takes across with the creatures it puts on another
+ * floor (docs/design/design-v1-floors.md phase 2, 8, FL2-OPUS-1): every
+ * area that follows such a creature now and lies on the floor it stands on
+ * now, as its value now with only its floor changed. They are read from
+ * the room, not from the step, so one cast or attached since the step goes
+ * too, and one the DM moved onto another creature that crosses goes with
+ * that one: no area is left on a floor apart from what it follows. One
+ * gone, attached to a creature that stays or lying on another floor is not
+ * among them, so an area the player does not receive never answers.
+ * `skip` names areas the caller's own entries already write.
+ */
+export function areasAcross(state: RoomState, moved: readonly RestoreEntry[], skip: ReadonlySet<string> = new Set()): RestoreEntry[] {
+  const across = new Map<string, { now: string; back: string }>();
+  for (const entry of moved) {
+    if (parseKey(entry.key)?.kind !== "token" || !entry.value) continue;
+    const id = entry.key.slice("token:".length);
+    const now = ownEntry(state.tokens, id)?.sceneId;
+    const back = (entry.value as Token).sceneId;
+    if (now !== undefined && now !== back) across.set(id, { now, back });
+  }
+  if (across.size === 0) return [];
+  const out: RestoreEntry[] = [];
+  for (const current of Object.values(state.templates).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    const key = keys.template(current.id);
+    const follows = current.attachedTo === undefined ? undefined : across.get(current.attachedTo);
+    if (!follows || current.sceneId !== follows.now || skip.has(key)) continue;
+    out.push({ key, value: { ...current, sceneId: follows.back }, expectHash: guardHash(key, current) });
+  }
+  return out;
 }

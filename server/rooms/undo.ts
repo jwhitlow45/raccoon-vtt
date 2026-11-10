@@ -1,5 +1,5 @@
 import { parseKey, readEntity } from "#shared/keys.ts";
-import type { AreaTemplate, RoomState, Token } from "#shared/model.ts";
+import type { RoomState, Token } from "#shared/model.ts";
 import { MAX_KEPT_ROUTES, MAX_RESTORE_ENTRIES, onPlayerUndoStack, type Op, type OpOf, type RefusalCode, type RestoreEntry } from "#shared/protocol.ts";
 
 /** A route as `token.move` carries it. */
@@ -16,7 +16,7 @@ import { addTally, describeTally, type Tally } from "./undoLabels.ts";
 import { randomUUID } from "node:crypto";
 import type { HistoryBlocker, HistoryDirection, HistoryMessage, HistoryScope, ScopeHistory } from "#shared/undoContract.ts";
 import { undoScope } from "#shared/undoScope.ts";
-import { attributesConflict, historyConflicts, mergeDmHistory, type DmHistoryValues } from "./undoDm.ts";
+import { areasAcross, attributesConflict, historyConflicts, mergeDmHistory, type DmHistoryValues } from "./undoDm.ts";
 import type { SaveOutcomeIdentity } from "#shared/saveOutcomeContract.ts";
 
 /**
@@ -676,7 +676,6 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
   const tokens: { key: string; before: Token; current: Token; left: Pose | undefined }[] = [];
   const quiet: RestoreEntry[] = [];
   const quietIds: string[] = [];
-  const areas: RestoreEntry[] = [];
   const restoring = new Set<string>();
   for (const entry of step.entries) {
     const parsed = parseKey(entry.key);
@@ -688,11 +687,8 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
     const parsed = parseKey(entry.key);
     // An attach's rows and the turn's list stay as they are: the undo takes back the link and the seat only (docs/design/design-v1-attach.md 8.3).
     if (parsed?.kind === "encounter") continue;
-    // A climb's areas go back with the creatures they follow, once those are known (below).
-    if (step.climb && parsed?.kind === "template") {
-      areas.push(entry);
-      continue;
-    }
+    // A climb's areas go back with the creatures they follow now, read from the room once those are known (below), not from the step.
+    if (step.climb && parsed?.kind === "template") continue;
     if (parsed?.kind !== "token") return { ok: false, code: "invalid", message: "only token moves and resizes undo this way" };
     const current = state.tokens[parsed.id];
     const before = entry.value as Token | null | undefined;
@@ -717,7 +713,7 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
   const moved = [...tokens.map((t) => ({ key: t.key, value: putBack(t.current, t.before, (id) => state.tokens[id] !== undefined, crosses), expectHash: guardHash(t.key, t.current) })), ...quiet];
   return {
     ok: true,
-    entries: [...moved, ...areasBack(state, areas, moved)],
+    entries: [...moved, ...(step.climb ? areasAcross(state, moved) : [])],
     ...(quietIds.length > 0 ? { quiet: quietIds } : {}),
   };
 }
@@ -730,36 +726,6 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
  */
 function crossing(climb: ClimbRecord | undefined): (now: string, back: string) => boolean {
   return (now, back) => climb !== undefined && now !== back && ((now === climb.from && back === climb.to) || (now === climb.to && back === climb.from));
-}
-
-/**
- * The areas a climb's restore takes across (docs/design/design-v1-floors.md
- * phase 2, 8): each that follows a creature `moved` puts on the other floor,
- * on the floor that creature stands on now and was on that other floor
- * before, as its value now with only its floor changed. One the DM moved
- * onto another creature that crosses too goes with that one, so no area is
- * left on a floor apart from what it follows. Every other is left out
- * without a word, gone, attached to a creature that stays or on another
- * floor, whatever carries it, the climber included, so an area the player
- * does not receive never answers.
- */
-function areasBack(state: RoomState, areas: readonly RestoreEntry[], moved: readonly RestoreEntry[]): RestoreEntry[] {
-  const across = new Map<string, { now: string; back: string }>();
-  for (const entry of moved) {
-    const id = entry.key.slice("token:".length);
-    const now = state.tokens[id]?.sceneId;
-    const back = (entry.value as Token).sceneId;
-    if (now !== undefined && now !== back) across.set(id, { now, back });
-  }
-  const out: RestoreEntry[] = [];
-  for (const entry of areas) {
-    const current = ownEntry(state.templates, entry.key.slice("template:".length));
-    const before = entry.value as AreaTemplate | null | undefined;
-    const follows = current?.attachedTo === undefined ? undefined : across.get(current.attachedTo);
-    if (!current || !before || !follows || current.sceneId !== follows.now || before.sceneId !== follows.back) continue;
-    out.push({ key: entry.key, value: { ...current, sceneId: before.sceneId }, expectHash: guardHash(entry.key, current) });
-  }
-  return out;
 }
 
 /**

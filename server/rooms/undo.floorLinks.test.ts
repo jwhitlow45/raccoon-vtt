@@ -280,6 +280,68 @@ describe("what rode with the climber, and areas Ana does not receive (4, 8)", ()
     });
   }
 
+  /** An area cast on a creature where it stands now, by the DM or by Ana. */
+  const cast = (t: UndoTable, who: Viewer, on: string, visibility: "all" | "dm"): string => {
+    const holder = t.state.tokens[on]!;
+    return t.play(who, { t: "template.create", template: { id: "late", sceneId: holder.sceneId, shape: "sphere", size: 10, origin: { x: holder.x + 0.5, y: holder.y + 0.5, z: 0 }, yaw: 0, includeOrigin: true, color: "#ff8800", ownerId: who.memberId, visibility, attachedTo: on } });
+  };
+
+  for (const [on, visibility] of [
+    ["thorn", "all"],
+    ["thorn", "dm"],
+    ["pip", "all"],
+    ["pip", "dm"],
+    ["owl", "dm"],
+  ] as const) {
+    for (const from of ["undo", "redo"] as const) {
+      test(`an area ${visibility === "dm" ? "only the DM sees" : "everyone sees"}, attached to ${on} after the climb${from === "redo" ? "'s undo" : ""}, crosses with it on Ana's ${from} and back again (FL2-OPUS-1)`, () => {
+        const a = table({ tokens: { thorn: thornToken(), pip, owl: owl() } });
+        const b = table({ tokens: { thorn: thornToken(), pip, owl: owl() } });
+        twins(a, b, [(t) => t.play(ANA, climb()), ...(from === "redo" ? [(t: UndoTable) => t.undo(ANA)] : [])], "before the area");
+        const [here, there] = from === "undo" ? [UPPER, GROUND] : [GROUND, UPPER];
+        assert.equal(cast(a, DM, on, visibility), "ok");
+        assert.equal(a.state.templates.late!.sceneId, here);
+        const steps = from === "undo" ? backAndForth : [backAndForth[1]!, backAndForth[0]!, backAndForth[1]!, backAndForth[0]!];
+        for (const [i, step] of steps.entries()) {
+          // The room without the area answers alike, and where the area is the DM's alone every player's copy is the same too.
+          if (visibility === "dm") twins(a, b, [step], `step ${i + 1}`);
+          else assert.deepEqual([step(a), step(b)], ["ok", "ok"], `step ${i + 1}`);
+          const where = i % 2 === 0 ? there : here;
+          const late = a.state.templates.late!;
+          assert.deepEqual([a.state.tokens[on]!.sceneId, late.sceneId, late.attachedTo], [where, where, on], `step ${i + 1}: the area is on its creature's floor, still attached`);
+        }
+      });
+    }
+  }
+
+  test("Ana's own area on Thorn, cast upstairs, leaves the climb her next undo and goes down with him", () => {
+    const t = table();
+    assert.equal(t.play(ANA, climb()), "ok");
+    assert.equal(cast(t, ANA, "thorn", "all"), "ok");
+    assert.equal(t.stacks.peek("p1", "undo")?.label, UP, "a cast takes no undo step of hers");
+    assert.equal(t.undo(ANA), "ok");
+    assert.deepEqual([t.state.tokens.thorn!.sceneId, t.state.templates.late!.sceneId], [GROUND, GROUND]);
+    assert.equal(t.redo(ANA), "ok");
+    assert.deepEqual([t.state.tokens.thorn!.sceneId, t.state.templates.late!.sceneId], [UPPER, UPPER]);
+  });
+
+  for (const [name, move] of [
+    ["Move to floor", { t: "token.update", tokenId: "thorn", patch: { sceneId: UPPER } }],
+    ["climb", climb()],
+  ] as const) {
+    test(`the DM's undo and redo of a ${name} take along an area Ana cast on Thorn since, and one the step itself moved`, () => {
+      const t = table({ templates: { ward: area("ward", "thorn") } });
+      assert.equal(t.play(DM, move as Op), "ok");
+      assert.equal(cast(t, ANA, "thorn", "all"), "ok");
+      const floors = () => [t.state.tokens.thorn!.sceneId, t.state.templates.ward!.sceneId, t.state.templates.late!.sceneId];
+      assert.deepEqual(floors(), [UPPER, UPPER, UPPER]);
+      for (const [i, where] of [GROUND, UPPER, GROUND, UPPER].entries()) {
+        assert.equal(i % 2 === 0 ? t.undo(DM) : t.redo(DM), "ok", `step ${i + 1}`);
+        assert.deepEqual(floors(), [where, where, where], `step ${i + 1}`);
+      }
+    });
+  }
+
   test("the hidden owl taken off Thorn by the DM after the climb stays upstairs, with the answers of a room without it", () => {
     const a = table({ tokens: { thorn: thornToken(), owl: owl() }, templates: { aura: area("aura", "owl") } });
     const b = table({ tokens: { thorn: thornToken() } });
