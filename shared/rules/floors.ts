@@ -1,4 +1,4 @@
-import { parseKey, sightOf, writeEntity, type EntityKey } from "../keys.ts";
+import { parseKey, sightOf } from "../keys.ts";
 import { LIMITS } from "../limits.ts";
 import type { RoomState, Scene, SceneId, Token, Viewer } from "../model.ts";
 import type { ProjectOpts } from "../project.ts";
@@ -187,13 +187,22 @@ export const FLOOR_WORDS = {
  * failed, so the actor keeps the step and the same Undo or Redo works once the level is free.
  */
 export function levelTakenWords(state: RoomState, entries: readonly { key: string; value?: unknown }[], direction: HistoryDirection): string | null {
-  let restored = state;
-  for (const entry of entries) if (parseKey(entry.key) !== null) restored = writeEntity(restored, entry.key as EntityKey, entry.value ?? null);
-  const back = entries.flatMap((entry) => (parseKey(entry.key)?.kind === "scene" && entry.value ? [entry.value as Scene] : []));
-  const ids = new Set(back.map((s) => s.id));
-  for (const floor of back) {
-    if (!floor.floor) continue;
-    const held = floorsOf(restored, floor.floor.of ?? floor.id).some((s) => !ids.has(s.id) && s.floor?.level === floor.floor?.level);
+  // A restore can carry thousands of other records, and only its scenes can take a level, so the rest is never replayed (B53-SOL-01).
+  const writes: [SceneId, Scene | null][] = [];
+  for (const entry of entries) {
+    const parsed = parseKey(entry.key);
+    if (parsed?.kind === "scene") writes.push([parsed.id, (entry.value ?? null) as Scene | null]);
+  }
+  if (writes.length === 0) return null;
+  const scenes = { ...state.scenes };
+  for (const [id, scene] of writes) {
+    if (scene === null) delete scenes[id];
+    else scenes[id] = scene;
+  }
+  const ids = new Set(writes.map(([id]) => id));
+  for (const [, floor] of writes) {
+    if (!floor?.floor) continue;
+    const held = floorsOf({ scenes }, floor.floor.of ?? floor.id).some((s) => !ids.has(s.id) && s.floor?.level === floor.floor?.level);
     if (held) return `A floor added or moved since holds ${floor.floor.name}'s place. Remove or move it, then ${direction === "undo" ? "Undo" : "Redo"} again.`;
   }
   return null;

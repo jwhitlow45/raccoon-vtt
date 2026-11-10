@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { RoomState, Scene, Viewer } from "../model.ts";
 import { isPartyMember, ownsToken, projectState, viewerSceneId } from "../project.ts";
 import { applyOp } from "../reducer.ts";
-import { DM, P1, P2, character, env, randomState, rng, room, scene, token } from "../testutil.ts";
+import { DM, P1, P2, character, drawing, env, randomState, rng, room, scene, token } from "../testutil.ts";
 import { floorsOf, heldFloors, levelTakenWords, mainFloorId, onPlayersScene, openFloor, ownedBy, playersSee, sameScene, startFloor, unhiddenPartyMember } from "./floors.ts";
 
 /*
@@ -189,5 +189,28 @@ describe("an undo or redo that brings back a floor whose level another floor now
     assert.equal(levelTakenWords(pushedUp(), atticBack, "redo"), "A floor added or moved since holds Attic's place. Remove or move it, then Redo again.");
     const { a: _attic, ...free } = tower().scenes;
     assert.equal(levelTakenWords(tower({ scenes: free }), atticBack, "undo"), null, "the level is free");
+  });
+
+  test("reads none of a large restore's other records, and nothing of the room when it brings back no scene (B53-SOL-01)", () => {
+    const drawings = Object.fromEntries(Array.from({ length: 2_000 }, (_, i) => [`d${i}`, drawing(`d${i}`)]));
+    const lines = Object.keys(drawings).map((id) => ({ key: `drawing:${id}`, value: drawings[id] }));
+    // Every read of the room and of its drawings is counted: a restore replayed record by record copies both once a record.
+    let reads = 0;
+    const counted = <T extends object>(target: T): T =>
+      new Proxy(target, {
+        get: (t, key, receiver) => {
+          reads++;
+          return Reflect.get(t, key, receiver) as unknown;
+        },
+        ownKeys: (t) => {
+          reads++;
+          return Reflect.ownKeys(t);
+        },
+      });
+    const state = counted({ ...pushedUp(), drawings: counted(drawings) });
+    assert.equal(levelTakenWords(state, lines, "undo"), null);
+    assert.equal(reads, 0, "no scene comes back, so nothing is read");
+    assert.equal(levelTakenWords(state, [...lines, ...atticBack], "undo"), "A floor added or moved since holds Attic's place. Remove or move it, then Undo again.");
+    assert.ok(reads <= 2, `the scenes alone are read, not the drawings: ${reads} reads`);
   });
 });
