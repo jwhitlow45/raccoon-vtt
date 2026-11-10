@@ -1,6 +1,10 @@
 import { LIMITS } from "#shared/limits.ts";
+import type { RoomState } from "#shared/model.ts";
 import type { OpOf } from "#shared/protocol.ts";
+import { floorsOf } from "#shared/rules/floors.ts";
+import { ownEntry } from "#shared/records.ts";
 import { DEFAULT_GRID, MAT_BACKGROUND, type SceneInput } from "./create.ts";
+import { addBetweenRefusal, addRefusal } from "./floorWords.ts";
 
 /*
  * A floor from a Universal VTT file or a generated dungeon
@@ -61,4 +65,27 @@ export function floorCreateOf(scene: SceneInput, target: FloorTarget, name: stri
     scene: { id: scene.id, name: scene.name, bounds: scene.bounds },
     floor: { beside: target.beside, side: target.side, ...(floorName === "" ? {} : { name: floorName }), own },
   };
+}
+
+/** Why no floor can be added while the room holds the most scenes it may (3.5). */
+export const SCENES_FULL = `A room holds at most ${LIMITS.scenesPerRoom} scenes. Delete one to add another.`;
+
+/**
+ * Why a floor cannot go at `target` now, or null: the scene's floor count,
+ * stairs it would come between, and the room's scene count, each in the
+ * Floors group's words (3.5). The import and the generator ask on the
+ * latest view before an upload and again after it, so an add a change made
+ * meanwhile refuses sends nothing (3.6). A floor beside that is gone gives
+ * null, and the server's refusal says so.
+ */
+export function floorAddRefusal(view: Pick<RoomState, "scenes" | "floorLinks">, target: FloorTarget): string | null {
+  const beside = ownEntry(view.scenes, target.beside);
+  if (!beside) return null;
+  const floors = floorsOf(view, beside.id);
+  // Every floor carries the scene's name, as the Floors group reads it.
+  return (
+    addRefusal(floors.length, beside.name) ??
+    addBetweenRefusal(view, floors, beside.id, target.side) ??
+    (Object.keys(view.scenes).length >= LIMITS.scenesPerRoom ? SCENES_FULL : null)
+  );
 }
