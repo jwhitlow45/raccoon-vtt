@@ -130,8 +130,9 @@ const LinkMark = memo(function LinkMark(props: { link: FloorLink; scenes: Readon
     label === null || props.quiet || !trapNameShown(scale)
       ? null
       : { name: label, ...(props.notReached ? { value: NOT_REACHED } : {}), x: at.x, y: at.y, above: true, size: "map", small: true, maxLines: 1, stack: true };
-  const pill = top ? clearOfMarkers(top, nameAnchor(o, "bottom"), markers, scale) : null;
   const iso = useIsoGround();
+  // Every stage decides alike, from the top place's stand, so the ground and the overlay publish the same pill.
+  const pill = top ? clearOfMarkers(top, nameAnchor(o, "bottom"), markers, scale, iso, iso ? pillStands(iso.fog, { ...top, scale }) : true) : null;
   // The end lies on the ground: Top-down's board, or the isometric ground stage.
   const flat = iso === null || iso.place === "ground";
   const pillKey = pill ? JSON.stringify(pill) : "";

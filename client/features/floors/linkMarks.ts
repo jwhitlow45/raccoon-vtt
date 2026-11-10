@@ -5,6 +5,10 @@ import { footprintRect, occupiedHexes, type PlacedToken } from "#shared/rules/fo
 import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { hexKey } from "#shared/rules/hex.ts";
 import type { PillSpec } from "../../canvas/boardView.ts";
+import { viewPointOf } from "../../canvas/isoPlace.ts";
+import type { IsoGround } from "../../canvas/relief/context.ts";
+import type { Box } from "../../lib/boardText.ts";
+import { isometric, toView } from "../../lib/view.ts";
 import { pillReach } from "../measure/pillPlace.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import { pathNow } from "../measure/movement.ts";
@@ -77,17 +81,47 @@ export function quietLinks(view: Pick<RoomState, "tokens" | "encounter" | "scene
     .sort();
 }
 
+/** What places a pill in Isometric: the view's turn and the drawn ground. Null in Top-down. */
+export type DrawSpace = Pick<IsoGround, "turn" | "ground"> | null;
+
+/**
+ * A pill's box where it draws: in cells in Top-down, and in Isometric's view
+ * units otherwise. An upright pill stands at its point's drawn height, as
+ * MarkPill puts it. One lying flat on the ground under the fog covers the
+ * view's box round its corners at the ground's height, as the ground plane
+ * turns and squashes it.
+ */
+function drawnBox(p: PillSpec, scale: number, iso: DrawSpace, upright: boolean): Box {
+  if (!iso) return pillReach({ ...p, scale });
+  if (upright) {
+    const v = viewPointOf(iso, p);
+    return pillReach({ ...p, x: v.x, y: v.y, scale });
+  }
+  const b = pillReach({ ...p, scale });
+  const view = isometric(iso.turn);
+  const z = iso.ground(p.x, p.y);
+  const corners = [toView(view, { x: b.x0, y: b.y0 }, z), toView(view, { x: b.x1, y: b.y0 }, z), toView(view, { x: b.x0, y: b.y1 }, z), toView(view, { x: b.x1, y: b.y1 }, z)];
+  const xs = corners.map((c) => c.x);
+  const ys = corners.map((c) => c.y);
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+}
+
 /**
  * An end's name pill kept off the turn's marker (FL2-POLISH): the name hangs
  * over the end's top edge, and where its box meets a marker's it hangs
  * under the bottom edge (`bottom`) instead. Only the marker is read, never
  * another end's name or a trap's, so no two layers chase each other, and the
  * marker places itself from the creature alone (TurnStartLayer.tsx).
+ *
+ * The boxes meet or part where they draw, not on the map (B53-SOL-02): in
+ * Isometric the marker always stands upright on the overlay, and the name
+ * stands too where `upright` (the stand rule) or else lies flat, so two
+ * pills apart on the map can cover each other on screen, and the reverse.
  */
-export function clearOfMarkers(pill: PillSpec, bottom: { x: number; y: number }, markers: readonly PillSpec[], scale: number): PillSpec {
-  const mine = pillReach({ ...pill, scale });
+export function clearOfMarkers(pill: PillSpec, bottom: { x: number; y: number }, markers: readonly PillSpec[], scale: number, iso: DrawSpace = null, upright = true): PillSpec {
+  const mine = drawnBox(pill, scale, iso, upright);
   const meets = markers.some((m) => {
-    const b = pillReach({ ...m, scale });
+    const b = drawnBox(m, scale, iso, true);
     return Math.min(mine.x1, b.x1) > Math.max(mine.x0, b.x0) && Math.min(mine.y1, b.y1) > Math.max(mine.y0, b.y0);
   });
   return meets ? { ...pill, x: bottom.x, y: bottom.y, above: false, below: true } : pill;
