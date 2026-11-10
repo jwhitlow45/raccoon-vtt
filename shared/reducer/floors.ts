@@ -151,8 +151,9 @@ export function markOpened(tx: Tx, _before: RoomState): void {
  * write in the op's undo step, and the undo brings it back with the floor
  * (FLRBUILD-ASTRA-07, FLRBUILD-PRIV-04, FLRB-OPUS-09, D-261108-426). Its
  * mark keeps it from any player who never held that floor whatever becomes
- * of it (rules/floors.ts holdsRecordOn), so this keeps the room free of asks
- * on floors that are gone. An ask made on the scene before its first add
+ * of it (rules/floors.ts holdsRecordOn), so this drops them when their floor
+ * goes, and one an undo of an Apply brings back later stays the DM's alone
+ * by its mark, since this pass never sees it. An ask made on the scene before its first add
  * is unmarked and stays through that add's undo (D-261108-431).
  */
 export function dropFloorAsks(tx: Tx, before: RoomState): void {
