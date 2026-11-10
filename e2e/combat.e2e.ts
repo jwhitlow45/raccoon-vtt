@@ -2367,6 +2367,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
         const row = page.locator("[data-round-header]").first();
         // A phone width shows the tracker as a sheet, which stays open from one width to the next.
         if (!(await row.isVisible())) await openTracker(page);
+        // The new width's layout settles before the idle header is read.
+        await page.waitForTimeout(500);
         const press = i % 2 === 0 ? row.getByRole("button", { name: "Previous turn" }) : row.getByRole("button", { name: "Next", exact: true });
         const idle = new Set(await findings(row, at));
         const was = dmSocket.state!.encounter!.activeEntryId;
