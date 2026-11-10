@@ -6,7 +6,7 @@ import { keys } from "#shared/keys.ts";
 import type { Member, PlayerChunk, RoomState } from "#shared/model.ts";
 import { applyChanges, stableStringify, type ProjectedState } from "#shared/project.ts";
 import type { Change, Op } from "#shared/protocol.ts";
-import { TWIN_H, TWIN_W, twins, withoutRevs } from "#shared/secretDoorTestutil.ts";
+import { TWIN_H, TWIN_W, twins } from "#shared/secretDoorTestutil.ts";
 import { FrameReader, T0 } from "#shared/seqTestutil.ts";
 import type { RoomActor } from "./actor.ts";
 import type { Connection } from "./connection.ts";
@@ -317,7 +317,7 @@ describe("a covered door with fog off, through the room actor (D-261110-530)", (
           for (const word of DOOR_WORDS) assert.ok(!raw.includes(word), `${where}: ${label} got ${word}`);
         }
         const [a, b] = [await door.opened(), await rock.opened()];
-        assert.equal(stableStringify(withoutRevs(a)), stableStringify(withoutRevs(b)), `${where}: a device opening gets the twin of rock's copy`);
+        assert.equal(stableStringify(a), stableStringify(b), `${where}: a device opening gets the twin of rock's copy`);
       } else {
         // A step that changes nothing players hold, as floor after all does on these squares, sends them no frame.
         compared += compare(where, door, marks.get(door)!, doorway, marks.get(doorway)!, as);
