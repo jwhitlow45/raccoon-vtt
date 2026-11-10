@@ -3076,6 +3076,20 @@ export const serverOnlyOps = [
       .optional(),
   }).refine((o) => o.layers.length > 0 || o.forget !== undefined, { message: "nothing remembered" }),
   /**
+   * The creatures the party met at a batch's end (shared/numbering.ts), in
+   * id order, at most a scene's tokens: each takes its place in its shown
+   * name's group, and a number when the name has given one before. The
+   * actor appends it after the batch's explore step, and the reducer reads
+   * only the state, so replay never works out sight.
+   */
+  op("sys.meet", {
+    tokenIds: z
+      .array(id)
+      .min(1)
+      .max(LIMITS.tokensPerScene)
+      .refine((ids) => ids.every((tokenId, i) => i === 0 || ids[i - 1]! < tokenId), { message: "creatures met are listed once each, in id order" }),
+  }),
+  /**
    * A dice op as the server resolved it (docs/design/design-v1-dice.md 4.1): the
    * client op as it arrived, its `batch` (16 characters of the SHA-256 of
    * the roller and the tag), and one result per roll, in order, holding
@@ -3097,7 +3111,17 @@ export const serverOnlyOps = [
   }),
 ] as const;
 
-export const clientOpSchema = z.discriminatedUnion("t", [...stateClientOps, historyOpSchema]);
+/**
+ * The table gives creature numbers (shared/numbering.ts), so a client that
+ * sends one, `null` included, is refused. Only `clientOpSchema` refuses it:
+ * stored ops from before op version 60 carry numbers and replay through
+ * `opSchema` as they ran.
+ */
+export const NUMBER_FROM_TABLE = "creature numbers come from the table and cannot be set";
+
+export const clientOpSchema = z
+  .discriminatedUnion("t", [...stateClientOps, historyOpSchema])
+  .refine((op) => (op.t === "token.create" ? op.token.number === undefined : op.t === "token.update" ? op.patch.number === undefined : true), { message: NUMBER_FROM_TABLE });
 export const serverOnlyOpSchema = z.discriminatedUnion("t", [...serverOnlyOps]);
 export const opSchema = z.discriminatedUnion("t", [...stateClientOps, historyOpSchema, ...serverOnlyOps]);
 

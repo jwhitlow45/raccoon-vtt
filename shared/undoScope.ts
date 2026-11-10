@@ -169,6 +169,7 @@ export const UNDO_SCOPE_BY_OP = {
   "sys.remember": "none",
   "sys.dice": "none",
   "sys.sound": "none",
+  "sys.meet": "none",
 } as const satisfies Record<Op["t"], UndoScope | "fields">;
 
 const PLAY_TOKEN_FIELDS = new Set([

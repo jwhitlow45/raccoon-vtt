@@ -10,6 +10,7 @@ import {
   type FreeWall,
   type LogEntry,
   type MemoryChunk,
+  type Numbering,
   type RoomClock,
   type RoomMeta,
   type RoomState,
@@ -88,6 +89,8 @@ export type ParsedKey =
   | { kind: "clock" }
   /** What plays now (RoomState.playing), a singleton the server's ticks rewrite. */
   | { kind: "playing" }
+  /** The room's count of creature number groups (RoomState.numbering), a singleton only the server holds. */
+  | { kind: "numbering" }
   | { kind: "meta" };
 
 export type EntityKind = ParsedKey["kind"];
@@ -164,6 +167,7 @@ export const keys = {
   encounterHistory: "encounterHistory" as EntityKey,
   clock: "clock" as EntityKey,
   playing: "playing" as EntityKey,
+  numbering: "numbering" as EntityKey,
   meta: "meta" as EntityKey,
 };
 
@@ -263,7 +267,7 @@ const GRID_RE = /^(-?\d+),(-?\d+)$/;
 export function parseKey(key: EntityKey): ParsedKey | null {
   const colon = key.indexOf(":");
   if (colon < 0) {
-    if (key === "encounter" || key === "encounterHistory" || key === "clock" || key === "playing" || key === "meta") return { kind: key };
+    if (key === "encounter" || key === "encounterHistory" || key === "clock" || key === "playing" || key === "numbering" || key === "meta") return { kind: key };
     return null;
   }
   const kind = key.slice(0, colon);
@@ -533,6 +537,8 @@ export function readEntity(state: RoomState, key: EntityKey): unknown {
       return state.encounterHistory;
     case "clock":
       return state.clock ?? null;
+    case "numbering":
+      return state.numbering ?? null;
     case "meta":
       return state.meta;
   }
@@ -550,7 +556,7 @@ function withEntry<T>(map: Record<string, T>, id: string, value: T | null): Reco
  * mutated: only the top-level object and the one collection are copied.
  *
  * Removing a singleton empties it: the encounter becomes null, the history
- * becomes an empty list, and the clock's field goes. Removing the meta is refused, because a room always
+ * becomes an empty list, and the clock's and the numbering count's fields go. Removing the meta is refused, because a room always
  * has one. Log entries are kept in order and capped by the caller.
  */
 export function writeEntity(state: RoomState, key: EntityKey, value: unknown): RoomState {
@@ -679,6 +685,12 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
       // No clock is no field, as in a room from before it, so stopping one and its undo leave the room as it was.
       if (value !== null) return { ...state, clock: value as RoomClock };
       const { clock: _clock, ...rest } = state;
+      return rest;
+    }
+    case "numbering": {
+      // As the clock: none made is no field, as in a room from before numbers.
+      if (value !== null) return { ...state, numbering: value as Numbering };
+      const { numbering: _numbering, ...rest } = state;
       return rest;
     }
     case "meta":

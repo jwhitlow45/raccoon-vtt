@@ -46,6 +46,10 @@ import {
   FLOOR_LINKS_OP_VERSION,
   FLOOR_LINKS_SNAPSHOT_VERSION,
   FLOOR_SOURCE_OP_VERSION,
+  NUMBERING_OP_VERSION,
+  NUMBERING_SNAPSHOT_VERSION,
+  meetsNumbers,
+  needsNumberingUpgrade,
   seatsApart,
   hiddenTowStands,
   stopsStandClear,
@@ -2084,7 +2088,7 @@ describe("op version 59, floors from a file or a dungeon (docs/design/design-v1-
   test("keeps stored adds unchanged through the identity step, and the snapshot version stays", () => {
     assert.equal(FLOOR_SOURCE_OP_VERSION, 59);
     assert.ok(OP_VERSION >= FLOOR_SOURCE_OP_VERSION);
-    assert.equal(SNAPSHOT_VERSION, FLOOR_LINKS_SNAPSHOT_VERSION, "no stored record changes shape");
+    assert.equal(snapshotMigrations.find((step) => step.from === FLOOR_LINKS_SNAPSHOT_VERSION)?.to, NUMBERING_SNAPSHOT_VERSION, "no stored record changes shape at 59");
     assert.equal(runMigrations(blank, 58, 59, opMigrations), blank);
     assert.equal(migrateOp(blank, 58), blank);
     assert.equal(migrateOp(sourced, 59), sourced);
@@ -2093,6 +2097,39 @@ describe("op version 59, floors from a file or a dungeon (docs/design/design-v1-
 
   test("a build at 58 refuses an op from this one, so it never replays a sourced add without its settings", () => {
     assert.throws(() => runMigrations(sourced, 59, 58, opMigrations), /down/);
+  });
+});
+
+describe("op version 60 and snapshot 46, creature numbers the table gives", () => {
+  const create = { t: "token.create", token: { id: "g1", sceneId: "s1", kind: "monster", name: "Goblin", size: "medium", x: 1, y: 1, actor: { ref: "c1" }, number: 3 } };
+  const update = { t: "token.update", tokenId: "g1", patch: { number: null } };
+
+  test("keeps stored operations and snapshots unchanged through the identity steps, numbers included", () => {
+    assert.equal(NUMBERING_OP_VERSION, 60);
+    assert.equal(NUMBERING_SNAPSHOT_VERSION, 46);
+    assert.ok(OP_VERSION >= NUMBERING_OP_VERSION);
+    assert.ok(SNAPSHOT_VERSION >= NUMBERING_SNAPSHOT_VERSION);
+    for (const op of [create, update]) {
+      assert.equal(runMigrations(op, 59, 60, opMigrations), op);
+      assert.equal(migrateOp(op, 59), op);
+      assert.ok(opSchema.safeParse(op).success, op.t);
+    }
+    const meet = { t: "sys.meet", tokenIds: ["g1", "g2"] };
+    assert.equal(migrateOp(meet, 60), meet);
+    assert.ok(opSchema.safeParse(meet).success);
+    const state = room({ numbering: { rev: 1, groups: 1 } });
+    assert.equal(runMigrations(state, 45, 46, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 45), state);
+  });
+
+  test("gates the meeting rules at 60 and the upgrade below 46", () => {
+    assert.deepEqual([meetsNumbers(1), meetsNumbers(59), meetsNumbers(60), meetsNumbers(undefined)], [false, false, true, true]);
+    assert.deepEqual([needsNumberingUpgrade(1), needsNumberingUpgrade(45), needsNumberingUpgrade(46)], [true, true, false]);
+  });
+
+  test("a build at 59 and 45 refuses a room from this one", () => {
+    assert.throws(() => runMigrations(update, 60, 59, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 46, 45, snapshotMigrations), /down/);
   });
 });
 

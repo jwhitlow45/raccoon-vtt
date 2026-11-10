@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 45;
-export const OP_VERSION = 59;
+export const SNAPSHOT_VERSION = 46;
+export const OP_VERSION = 60;
 
 export type MigrationStep = {
   from: number;
@@ -282,6 +282,11 @@ export const snapshotMigrations: MigrationStep[] = [
   // on floors only stairs let them reach, drop the feet a turn took on floors left, and leave ends naming a floor it
   // removed.
   { from: 44, to: 45, apply: (state) => state },
+  // Creature numbers the table gives (NUMBERING_SNAPSHOT_VERSION): a token's `met`, a scene's `numbers` and the room's
+  // `numbering` are optional, and absent reads as none, so a v45 room is a v46 room as it is. The numbering upgrade
+  // (needsNumberingUpgrade) settles an older room's numbers once, after its stored ops replay, since it reads sight.
+  // The number moves so that an older build refuses a room this one saved, whose numbers it would not keep.
+  { from: 45, to: 46, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1420,6 +1425,22 @@ export const opMigrations: MigrationStep[] = [
     to: 59,
     apply: (op) => op,
   },
+  {
+    // Creature numbers the table gives (NUMBERING_OP_VERSION): `sys.meet`
+    // is a new op, which an older strict schema refuses. From this version
+    // `token.create` numbers nothing, a creature takes its number when the
+    // party first holds it beside another of its shown name, attaching a
+    // companion keeps its number, and a client's `token.create` or
+    // `token.update` that sends `number` is refused (clientOpSchema). Ops
+    // stored before keep `number` and replay as they ran, so the step is
+    // the identity.
+    // Deploy: back up the database just before, and reload open pages.
+    // Rollback needs the backup for a room with a v46 snapshot, which an
+    // older build refuses.
+    from: 59,
+    to: 60,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -1522,6 +1543,32 @@ export function floorLinksOps(opVersion: number | undefined): boolean {
 
 /** The first op version whose floor adds may carry a name and a file's or a dungeon's own settings (docs/design/design-v1-floors.md phase 3, 3.3). */
 export const FLOOR_SOURCE_OP_VERSION = 59;
+
+/** The first op version and snapshot version of creature numbers the table gives (shared/numbering.ts). */
+export const NUMBERING_OP_VERSION = 60;
+export const NUMBERING_SNAPSHOT_VERSION = 46;
+
+/**
+ * Whether the op numbers creatures as the table meets them: `token.create`
+ * numbers nothing and the creatures are numbered by `sys.meet`, attaching
+ * a companion keeps `met` and `number`, and undo guards leave both out.
+ * Ops stored before version 60 numbered at `token.create` and replay so.
+ * Live ops carry no stored version and take today's rule.
+ */
+export function meetsNumbers(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < NUMBERING_OP_VERSION);
+}
+
+/**
+ * Whether a room loaded from a snapshot of this version still needs the
+ * numbering upgrade, which settles the numbers of a room from before once
+ * (shared/reducer/numbering.ts numberingUpgrade). It runs where the map
+ * discovery upgrade runs, after the stored ops before version 60 replay,
+ * and a snapshot written after it records the result.
+ */
+export function needsNumberingUpgrade(snapshotVersion: number): boolean {
+  return snapshotVersion < NUMBERING_SNAPSHOT_VERSION;
+}
 
 /** The first op version of several floors in one scene (floorsOps). */
 export const FLOORS_OP_VERSION = 56;

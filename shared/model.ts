@@ -248,7 +248,25 @@ export type RoomState = {
    * need no migration.
    */
   floorLinks?: Record<FloorLinkId, FloorLink>;
+  /**
+   * Server only, `keys.numbering`: how many creature number groups the room
+   * has ever made (shared/numbering.ts). A new group takes the next id, so
+   * no id is used twice in the room, even after its scene is deleted. No
+   * copy holds it and an undo never writes it. Absent reads as none made.
+   */
+  numbering?: Numbering;
 };
+
+/** The room's count of creature number groups (RoomState.numbering). */
+export type Numbering = { rev: number; groups: number };
+
+/**
+ * A scene's creature numbers (Scene.numbers), by the shown name a creature
+ * carries (shared/numbering.ts shownName): the name's group id and how many
+ * numbers the name has given on the scene. An entry is never removed and
+ * never takes another group id, and its count never goes down.
+ */
+export type SceneNumbers = { names: Record<string, [g: number, n: number]> };
 
 /** One month of a Months calendar: its name and its length in days. */
 export type CalendarMonth = { name: string; days: number };
@@ -654,6 +672,12 @@ export type Scene = {
    * floors they hold, and only while they hold two or more.
    */
   floor?: SceneFloor;
+  /**
+   * DM only, on the main floor alone: the creature numbers the party has
+   * been given on the scene and all its floors (SceneNumbers). Absent reads
+   * as none given.
+   */
+  numbers?: SceneNumbers;
 };
 
 /**
@@ -1217,8 +1241,16 @@ export type Token = {
   ownerIds: MemberId[];
   actor: { ref: CharacterId } | { inline: Actor };
   hpVisibility: HpVisibility;
-  /** Auto-numbering for duplicates ("Goblin 3"). */
+  /**
+   * The creature's number among others of its shown name ("Goblin 3"),
+   * given when the party first holds it beside another of that name
+   * (shared/numbering.ts). It counts only beside a `met` that makes the
+   * creature a member of its name's group on its scene, and a number alone
+   * means nothing.
+   */
   number?: number;
+  /** DM only: the id of the number group the creature was met in (shared/numbering.ts memberOf). */
+  met?: number;
   /**
    * The token's note for everyone: every player who can see the token reads
    * it. Its note for the DM alone is its actor's `dmNotes`, which never

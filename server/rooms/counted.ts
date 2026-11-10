@@ -8,7 +8,7 @@ import type { OpType, ServerOnlyOp } from "#shared/protocol.ts";
  * gets is made from. Each member's op the room answers and each member
  * change applied over HTTP takes a new number: the server's clock, or one
  * past the last number when that is later (server/rooms/actor.ts). The
- * server's own ops that only keep the room's books, the explore, the map
+ * server's own ops that only keep the room's books, the explore, the meeting, the map
  * step's and the cleanup's remember, and the music's tick, reduce at the
  * stored number as it stands and never move it.
  *
@@ -27,6 +27,7 @@ const SERVER_ONLY: Record<ServerOnlyOp["t"], boolean> = {
   "sys.explore": false,
   "sys.remember": false,
   "sys.sound": false,
+  "sys.meet": false,
 };
 
 /**

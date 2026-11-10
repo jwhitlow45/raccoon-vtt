@@ -103,6 +103,8 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
     const parsed = parseKey(entry.key);
     if (!parsed) throw invalid(`unknown entity key ${entry.key}`);
     if (parsed.kind === "saveOutcome") throw invalid("save outcomes are never restored through entity entries");
+    // A group id is never used twice in the room, so its count only goes up (shared/numbering.ts).
+    if (parsed.kind === "numbering") throw invalid("the creature number count is never restored");
     if (parsed.kind === "log" || parsed.kind === "trapLog" || parsed.kind === "trapSeen") throw invalid("log entries are never restored");
     const current = tx.read(entry.key);
     before.set(entry.key, current);

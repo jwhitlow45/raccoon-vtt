@@ -8,6 +8,7 @@ import type {
   LogEntry,
   LogEvent,
   LineParts,
+  Numbering,
   RoomClock,
   RoomMeta,
   RoomState,
@@ -239,6 +240,11 @@ export class Tx {
       case "playing":
         // Absent and null are both silence (docs/design/design-v1-music.md 6.1). Its rev counts every write, which a tick's `from` names.
         this.state.playing = (next as RoomState["playing"]) ?? null;
+        break;
+      case "numbering":
+        // As the clock: none made is no field (keys.ts writeEntity).
+        if (next === null) delete this.state.numbering;
+        else this.state.numbering = next as Numbering;
         break;
       case "log":
       case "trapLog":
@@ -769,6 +775,7 @@ function mapIdOf(parsed: NonNullable<ReturnType<typeof parseKey>>): string {
     case "encounterHistory":
     case "clock":
     case "playing":
+    case "numbering":
     case "meta":
       throw new Error("singleton");
     default:

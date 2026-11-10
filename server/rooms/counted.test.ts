@@ -18,7 +18,7 @@ import { restartStored, scopeActor, scopeFixture, StoredRoomDb, storedActor, unt
  * when they apply.
  */
 
-const BOOKKEEPING = new Set<OpType>(["sys.explore", "sys.remember", "sys.sound"]);
+const BOOKKEEPING = new Set<OpType>(["sys.explore", "sys.remember", "sys.sound", "sys.meet"]);
 
 function typeOf(schema: unknown): OpType {
   const shape = (schema as { shape?: { t?: { value?: unknown } } }).shape;
@@ -30,8 +30,8 @@ function typeOf(schema: unknown): OpType {
 describe("the counted classes", () => {
   const types = [...new Set([...clientOps.map(typeOf), ...serverOnlyOps.map(typeOf)])];
 
-  test("every server-only type is classed, and only the server's explore, remember and music ops are uncounted", () => {
-    assert.deepEqual(serverOnlyOps.map(typeOf).sort(), ["sys.dice", "sys.explore", "sys.memberJoin", "sys.memberRemove", "sys.memberSetKind", "sys.remember", "sys.restore", "sys.sound"]);
+  test("every server-only type is classed, and only the server's explore, remember, music and meeting ops are uncounted", () => {
+    assert.deepEqual(serverOnlyOps.map(typeOf).sort(), ["sys.dice", "sys.explore", "sys.meet", "sys.memberJoin", "sys.memberRemove", "sys.memberSetKind", "sys.remember", "sys.restore", "sys.sound"]);
     assert.ok(types.length > 100, `every op type, ${types.length}`);
     for (const version of [COUNT_OP_VERSION, OP_VERSION]) {
       for (const type of types) assert.equal(counted(type, version), !BOOKKEEPING.has(type), `${type} at ${version}`);

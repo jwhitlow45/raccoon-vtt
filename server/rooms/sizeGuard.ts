@@ -1350,6 +1350,9 @@ function entryKeyBytes(key: EntityKey): number {
     case "encounter":
     case "encounterHistory":
       return 0;
+    // The count of creature number groups is outside every measure, as the save outcomes are.
+    case "numbering":
+      return 0;
     // The clock's field comes and goes with it, and so does what plays in a room from before sound (docs/design/design-v1-music.md 6.7).
     case "clock":
       return jsonKeyBytes("clock");

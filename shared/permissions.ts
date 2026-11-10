@@ -729,6 +729,9 @@ function forDm(op: Op, c: Check): Decision {
     case "sys.sound":
       // The actor's tick moves the music on (docs/design/design-v1-music.md 6.4).
       return refuse("forbidden", "the server moves the music on");
+    case "sys.meet":
+      // The actor gives creature numbers after each batch (shared/numbering.ts).
+      return refuse("forbidden", "the server gives creature numbers");
     case "sound.create":
       // A sound is a `sound` asset of this room, an MP3 the server checked (docs/design/design-v1-music.md 7.1).
       if (c.deps.roomSound === false) return refuse("invalid", SOUND_OFF);
@@ -1009,6 +1012,7 @@ function forPlayer(op: Op, c: Check): Decision {
     case "sys.memberRemove":
     case "sys.explore":
     case "sys.remember":
+    case "sys.meet":
     case "token.deleteMany":
     case "journal.create":
     case "journal.update":

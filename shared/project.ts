@@ -89,6 +89,9 @@ import { clipFootprint, seesCreature, sightClipOf, sightRect } from "./rules/vis
 import type { SegmentIndex } from "./rules/segments.ts";
 import { deriveWalls, indexBuild, sceneWalls, type WallSet } from "./rules/walls.ts";
 import { ownEntry } from "./records.ts";
+import { anyPlayer, playersToken } from "./players.ts";
+
+export { anyPlayer, playersToken };
 
 /**
  * Per-viewer projection (design section 7.3): the security boundary that
@@ -1254,15 +1257,6 @@ function playerSave(e: Effect): Effect {
 }
 
 /**
- * Whether a player, not a DM, is among these owners. A DM may own a
- * creature, and a player made DM keeps the ids of what they owned, so an
- * owner id alone does not make a creature a player's.
- */
-export function anyPlayer(state: Pick<RoomState, "members">, ids: readonly string[] | undefined): boolean {
-  return ids?.some((id) => ownEntry(state.members, id)?.kind === "player") ?? false;
-}
-
-/**
  * Whether a player plays the creature whose actor this token or character
  * holds, so its Ready action's trigger is the table's (publicEffects). A
  * player who owns any token of a character may change its effects
@@ -1274,18 +1268,6 @@ export function playerPlays(state: Pick<RoomState, "members" | "tokens">, holder
   if ("token" in holder) return anyPlayer(state, holder.token.ownerIds);
   const id = holder.character.id;
   return anyPlayer(state, holder.character.ownerIds) || Object.values(state.tokens).some((t) => "ref" in t.actor && t.actor.ref === id && anyPlayer(state, t.ownerIds));
-}
-
-/**
- * The derived `party` flag (docs/design/design-v1-dm-tools.md 3.1): a member of
- * kind player owns the token or its character. Not `playerOwned`, which
- * counts a DM owner too, and not `partyVision`, which lends sight without a
- * player. Who plays which character is no secret at the table.
- */
-export function playersToken(state: Pick<RoomState, "members" | "characters">, token: Pick<Token, "ownerIds" | "actor">): boolean {
-  if (anyPlayer(state, token.ownerIds)) return true;
-  const character = "ref" in token.actor ? ownEntry(state.characters, token.actor.ref) : undefined;
-  return character !== undefined && anyPlayer(state, character.ownerIds);
 }
 
 function projectActorPublic(actor: Actor, access: HpAccess, triggers: () => boolean, clockId: string | undefined, shownAlive = false): ProjectedActor {
@@ -3231,6 +3213,7 @@ export const SCENE_FOR_PLAYERS = {
   sound: "dm: the playlist and loops the scene starts, which players hear only once they play (docs/design/design-v1-music.md 6.5)",
   // Players learn a floor's place and name, never which floor is main or its height (docs/design/design-v1-floors.md 8, D-261102-492).
   floor: "changed: { level, name }, levels renumbered among the floors held, and only while two or more are held, with `unseen` on one no player sees (FLRBUILD-PRIV-03)",
+  numbers: "dm: the creature numbers each name has given, which players read only on the creatures they hold (shared/numbering.ts)",
 } as const satisfies Record<keyof Scene, PlayerField>;
 
 /** A scene as a player gets it: an allowlist, field by field as SCENE_FOR_PLAYERS rules, and only a floor they hold. */
@@ -4517,6 +4500,9 @@ function projectEntityKindCtx(ctx: Ctx, key: EntityKey): unknown {
       return ctx.viewer.role === "dm" ? value : null;
     case "playing":
       return projectPlayingCtx(ctx);
+    // The count of creature number groups is the server's alone, the DM's copy included (shared/numbering.ts).
+    case "numbering":
+      return null;
     case "meta":
       return projectMetaCtx(ctx);
   }
