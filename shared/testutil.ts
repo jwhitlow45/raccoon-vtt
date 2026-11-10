@@ -43,6 +43,7 @@ import {
 import { wallChunk } from "./keys.ts";
 import { gridOfToken, ownsToken } from "./project.ts";
 import { applyOp, type Env } from "./reducer.ts";
+import { numberable, numberScope, shownName } from "./numbering.ts";
 import { normalizeCompanionState } from "./reducer/companions.ts";
 import { hpUndoRestore } from "./reducer/hpUndo.ts";
 import type { Op } from "./protocol.ts";
@@ -346,6 +347,34 @@ export function room(overrides: Partial<RoomState> = {}): RoomState {
     memoryShared: {},
     ...overrides,
   };
+}
+
+/**
+ * Marks a fixture's numbered creatures as the table gives numbers: each
+ * numberable creature with a `number` joins its shown name's group on its
+ * scene, as a meeting would have left it, and the group counts up to the
+ * highest number it holds. Creatures without a number are left as they
+ * are. A fixture that writes numbers straight into the state runs it so
+ * they still read. Returns the state it changed.
+ */
+export function numbered(state: RoomState): RoomState {
+  const tokens = Object.values(state.tokens)
+    .filter((t) => t.number !== undefined && numberable(state, t))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  let groups = state.numbering?.groups ?? 0;
+  for (const t of tokens) {
+    const scopeId = numberScope(state, t);
+    const scene = state.scenes[scopeId];
+    assert.ok(scene, `numbered: ${t.id}'s scene ${scopeId}`);
+    const names = { ...scene.numbers?.names };
+    const name = shownName(t);
+    const entry = Object.hasOwn(names, name) ? names[name]! : ([++groups, 0] as [number, number]);
+    names[name] = [entry[0], Math.max(entry[1], t.number!)];
+    state.scenes[scopeId] = { ...scene, numbers: { names } };
+    state.tokens[t.id] = { ...t, met: entry[0] };
+  }
+  if (groups > 0) state.numbering = { rev: state.numbering?.rev ?? 0, groups };
+  return state;
 }
 
 /** Applies an op that must succeed and returns the new state. */
