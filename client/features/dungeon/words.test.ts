@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { entranceSide, fitLine, fogLine, makingLine, NO_FOG_WARNING, outcomeText, previewName, roomsHint, sizeLine, statusLine } from "./words.ts";
+import { keyTitle } from "./keyPage.ts";
+import { entranceSide, fitLine, floorHexNote, floorKeyName, floorOutcomeText, floorTitle, fogLine, MAKE_FLOOR, makingLine, MAKING_FLOOR, NO_FOG_WARNING, outcomeText, previewName, roomsHint, sizeLine, statusLine } from "./words.ts";
 
 test("DG-C: the size line in the room's feet per square", () => {
   assert.equal(sizeLine(30, 30, 5), "30 × 30 squares (150 by 150 ft)");
@@ -122,4 +123,37 @@ test("Make starts the scene dark under party vision for lit rooms, and Keep it l
   assert.equal(lit.vision, undefined, "Reveal by hand keeps no party vision");
   assert.deepEqual(startScene(scene, { preset: "explore" }, false).vision, { on: true, light: "bright" });
   assert.equal(startScene(scene, { preset: "all" }, false).fogEnabled, false);
+});
+
+// Generate a dungeon aimed at a floor (docs/design/design-v1-floors.md phase 3, 3.5 and 3.7).
+test("FL3S: a floor's title, Make, the busy Hide, the hex reason and the key page's title, from the stored name", () => {
+  assert.equal(floorTitle("below", "Ground floor"), "Generate a dungeon below Ground floor");
+  assert.equal(floorTitle("above", "Ground floor"), "Generate a dungeon above Ground floor");
+  assert.equal(MAKE_FLOOR, "Make the floor");
+  assert.equal(MAKING_FLOOR, "Making the floor…");
+  assert.equal(floorHexNote("Tower"), "Generated dungeons are squares for now, and Tower's floors are hexes.");
+  assert.equal(keyTitle(floorKeyName("Tower", "Crypt 2")), "Tower · Crypt 2 key");
+});
+
+test("FL3S: how Make of a floor ended names the floor as stored, and Remove floor always takes it back", () => {
+  assert.equal(floorOutcomeText({ k: "complete", checked: false }, "Crypt 2", "Tower", true).text, "Added Crypt 2 to Tower.");
+  assert.equal(floorOutcomeText({ k: "complete", checked: false }, "Crypt 2", "Tower", false).text, "Added Crypt 2 to Tower. Open Tower, then pick Crypt 2 in Floors.");
+  assert.equal(
+    floorOutcomeText({ k: "complete", checked: true }, "Crypt", "Tower", true).text,
+    "The connection dropped while making Crypt, but it is complete. Undo setup in Setup history takes it back, its key page perhaps as a step of its own, and Remove floor on its page always does.",
+  );
+  assert.equal(floorOutcomeText({ k: "none", lost: false }, "Crypt", "Tower", true).text, "The server refused the dungeon, so no floor was added.");
+  assert.equal(floorOutcomeText({ k: "none", lost: true }, "Crypt", "Tower", true).text, "The connection dropped, and no floor was added. Try again.");
+  assert.equal(
+    floorOutcomeText({ k: "partial" }, "Crypt", "Tower", true).text,
+    "The server refused part of Crypt, so it may be missing rooms, doors or traps. Undo setup in Setup history takes it back, its key page perhaps as a step of its own, and Remove floor on its page always does.",
+  );
+  assert.equal(
+    floorOutcomeText({ k: "unconfirmed" }, "Crypt", "Tower", true).text,
+    "The connection dropped while making Crypt, and it could not be confirmed complete. To start again, remove it with Remove floor on its page.",
+  );
+  assert.deepEqual(
+    (["none", "partial", "unconfirmed"] as const).map((k) => floorOutcomeText(k === "none" ? { k, lost: true } : { k }, "Crypt", "Tower", true).tone),
+    ["error", "error", "error"],
+  );
 });

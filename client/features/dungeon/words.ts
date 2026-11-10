@@ -1,4 +1,5 @@
 import { playersSeeFields, withPlayersSee, type NewScenePick, type SceneInput } from "../scenes/create.ts";
+import { openFloorLine } from "../scenes/floorWords.ts";
 import type { DungeonPlan } from "./plan.ts";
 import { versionChar } from "./seed.ts";
 import { litCount, raisedCount, secretCount, trapCount, type Theme } from "./settings.ts";
@@ -13,6 +14,10 @@ import type { Summary } from "./client.ts";
 
 export const GENERATE_LEAD = "Or start from a generated dungeon";
 export const HEX_NOTE = "Generated dungeons are squares for now. Pick Squares above to make one.";
+/** Why Dungeon is off in the Floors group's Map on a hex scene (docs/design/design-v1-floors.md phase 3, 3.5, D-261110-075). */
+export function floorHexNote(sceneName: string): string {
+  return `Generated dungeons are squares for now, and ${sceneName}'s floors are hexes.`;
+}
 
 export const THEME_HELP = {
   dungeon: "Stone and wood rooms, closed and locked doors, rubble and pits.",
@@ -194,5 +199,48 @@ export function outcomeText(outcome: DungeonOutcome, name: string, opened: boole
         text: `The connection dropped while making ${name}, and it could not be confirmed complete. To start again, Delete it from the scene's menu once the players are on another scene.${goTo}`,
         tone: "error",
       };
+  }
+}
+
+/*
+ * Generate a dungeon aimed at a floor (docs/design/design-v1-floors.md
+ * phase 3, 3.7): its title, Make's words, the key page's name and how Make
+ * ended, each naming the floor by the name the server stored, which the
+ * reducer numbers while taken ("Crypt 2").
+ */
+
+/** "Generate a dungeon below Ground floor". */
+export function floorTitle(side: "above" | "below", besideName: string): string {
+  return `Generate a dungeon ${side} ${besideName}`;
+}
+
+export const MAKE_SCENE = "Make the scene";
+export const MAKE_FLOOR = "Make the floor";
+/** Hide's busy words while the floor's create waits for its answer, when no close may split the floor from its key (D-261110-183). */
+export const MAKING_FLOOR = "Making the floor…";
+
+/** The key page's name for a floor, "Tower · Crypt 2", which keyTitle makes "Tower · Crypt 2 key". */
+export function floorKeyName(sceneName: string, floorName: string): string {
+  return `${sceneName} · ${floorName}`;
+}
+
+/**
+ * How Make of a floor ended, in one sentence. `name` is the floor's stored
+ * name, `scene` its scene's, and `opened` whether the floor is on screen.
+ * Remove floor on its page always takes it back. Undo setup does too,
+ * though a lost answer may leave its key page a step of its own.
+ */
+export function floorOutcomeText(outcome: DungeonOutcome, name: string, scene: string, opened: boolean): { text: string; tone: "info" | "error" } {
+  const goTo = opened ? "" : openFloorLine(scene, name);
+  const back = "Undo setup in Setup history takes it back, its key page perhaps as a step of its own, and Remove floor on its page always does.";
+  switch (outcome.k) {
+    case "complete":
+      return outcome.checked ? { text: `The connection dropped while making ${name}, but it is complete. ${back}${goTo}`, tone: "info" } : { text: `Added ${name} to ${scene}.${goTo}`, tone: "info" };
+    case "none":
+      return { text: outcome.lost ? "The connection dropped, and no floor was added. Try again." : "The server refused the dungeon, so no floor was added.", tone: "error" };
+    case "partial":
+      return { text: `The server refused part of ${name}, so it may be missing rooms, doors or traps. ${back}${goTo}`, tone: "error" };
+    case "unconfirmed":
+      return { text: `The connection dropped while making ${name}, and it could not be confirmed complete. To start again, remove it with Remove floor on its page.${goTo}`, tone: "error" };
   }
 }
