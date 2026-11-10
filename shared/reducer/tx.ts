@@ -812,6 +812,9 @@ function sameIds(a: string[] | undefined, b: string[] | undefined): boolean {
  * its scene, its level or its main floor, and a scene gaining or losing
  * floors, renumber every floor a player holds, so they are global, as an
  * add and a removal already are. A floor's name is its scene key's alone.
+ * Its height is global too (phase 3, 4.3): it is the `rise` a player's
+ * copy of each end of a climb up to it carries, and those are other keys.
+ * Heights change rarely, so the whole re-projection costs little.
  */
 function isGlobalChange(kind: string, prev: unknown, next: unknown): boolean {
   switch (kind) {
@@ -847,7 +850,8 @@ function isGlobalChange(kind: string, prev: unknown, next: unknown): boolean {
         (a.vision?.perPlayer === true) !== (b.vision?.perPlayer === true) ||
         a.gridShape !== b.gridShape ||
         a.floor?.level !== b.floor?.level ||
-        a.floor?.of !== b.floor?.of
+        a.floor?.of !== b.floor?.of ||
+        a.floor?.height !== b.floor?.height
       );
     }
     case "token": {

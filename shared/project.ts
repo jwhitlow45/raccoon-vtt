@@ -83,7 +83,7 @@ import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
 import { compareEntries, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
 import { legOnGround, pathThisTurn, seenWhole, stopsForNonOwners, stopsForOwners } from "./rules/path.ts";
 import { zoneFogged, zoneRanges } from "./rules/traps.ts";
-import { linkDir } from "./rules/floorLinks.ts";
+import { linkDir, linkHeight } from "./rules/floorLinks.ts";
 import { heldFloors, holdsRecordOn, playersSee, sameScene, unhiddenPartyMember, unseenFloor } from "./rules/floors.ts";
 import { clipFootprint, seesCreature, sightClipOf, sightRect } from "./rules/vision.ts";
 import type { SegmentIndex } from "./rules/segments.ts";
@@ -2927,9 +2927,9 @@ function projectStampCtx(ctx: Ctx, stamp: Stamp): Stamp | null {
  * DM every end as stored, a player one on revealed ground by the labels'
  * rule, as a found trap's zone, and never remembered. A player's is cut to
  * LINK_FOR_PLAYERS, with the way it leads worked out from the levels the
- * copy never gets. Permissions read the same answer (permissions.ts
- * climbCheck), so a climb on an end a player does not get answers as one
- * on no stairs. Nothing is kept between projections: `to` reads the
+ * copy never gets, and with `to` the climb's height. Permissions read the
+ * same answer (permissions.ts climbCheck), so a climb on an end a player
+ * does not get answers as one on no stairs. Nothing is kept between projections: `to` reads the
  * viewer's held floors, so a copy made for one viewer must never reach
  * another.
  */
@@ -2947,7 +2947,11 @@ function projectFloorLinkCtx(ctx: Ctx, link: FloorLink): FloorLink | ProjectedFl
   const out: ProjectedFloorLink = { id: link.id, rev: 0, sceneId: link.sceneId, rect: link.rect, kind: link.kind, dir };
   if (link.locked) out.locked = true;
   if (link.grid !== undefined) out.grid = link.grid;
-  if (ctx.floors.has(link.to)) out.to = link.to;
+  // The climb's height comes only with the far floor (phase 3, 4.3, D-261110-080), so a player learns it only while they hold both floors.
+  if (ctx.floors.has(link.to)) {
+    out.to = link.to;
+    out.rise = linkHeight(ctx.state, link);
+  }
   return out;
 }
 
@@ -2956,6 +2960,7 @@ export const LINK_FOR_PLAYERS = {
   id: "copied",
   rev: "zeroed",
   sceneId: "copied",
+  // `rise`, the climb's height, is added beside `dir` and comes exactly with `to` (phase 3, 4.3).
   to: "changed: only while the viewer holds that floor, since a floor not held sends no id",
   pair: "dm: a record of the far floor",
   rect: "copied",

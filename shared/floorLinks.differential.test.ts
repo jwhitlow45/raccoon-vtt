@@ -247,6 +247,47 @@ describe("the far end's record (4)", () => {
   });
 });
 
+describe("`rise`, the climb's height, comes with `to` (phase 3, 4.3, D-261110-080)", () => {
+  /**
+   * Ana holds Attic through her hidden owl, Bree and the display do not.
+   * Attic stands 10 ft above Upper floor in one room and 30 ft in the other.
+   */
+  function rooms(): { a: RoomState; b: RoomState } {
+    const owl = token("owl", { sceneId: ATTIC, kind: "npc", name: "Owl", ownerIds: ["p1"], visibility: "dm", x: 12, y: 12 });
+    const ladder = putOp({ id: "l3", pairId: "l4", sceneId: UPPER, to: ATTIC, rect: LADDER, kind: "ladder" });
+    const a = built(opened(tower({ tokens: { thorn: thornToken(), owl } }), UPPER), [putOp(), ladder]);
+    const b = built(opened(tower({ tokens: { thorn: thornToken(), owl } }), UPPER), [{ t: "scene.update", sceneId: ATTIC, patch: { floor: { height: 30 } } } as Op, putOp(), ladder]);
+    return { a, b };
+  }
+
+  /** Ana's copy without the ladder's `rise`, the one thing of Attic's height she may learn. */
+  const withoutRise = (copy: Record<string, unknown>): object => {
+    const links = Object.fromEntries(Object.entries((copy.floorLinks ?? {}) as Record<string, { sceneId: string; to?: string; rise?: number }>).map(([id, l]) => [id, l.to === ATTIC || l.sceneId === ATTIC ? { ...l, rise: "the ladder's" } : l]));
+    return { ...copy, floorLinks: links };
+  };
+
+  test("Attic 10 ft against 30 ft: Bree and the display observe the same, Ana differs in the ladder's `rise` alone, through locks, a walk, Upper's height and fog", () => {
+    const { a, b } = rooms();
+    const rise = (s: RoomState) => (projectState(s, ANA, { sceneId: null }) as unknown as RoomState).floorLinks!.l3 as { rise?: number };
+    assert.deepEqual([rise(a).rise, rise(b).rise], [10, 30], "Ana reads each room's climb, so the pair compares something");
+    checked({
+      name: "Attic's height",
+      a,
+      b,
+      equal: [BREE, DISPLAY],
+      apart: [{ who: ANA, strip: withoutRise }],
+      steps: [
+        { who: DM, op: { t: "floorLink.update", linkId: "l3", patch: { locked: true } }, note: "the ladder locked" },
+        walkStep({ who: ANA, tokenId: "thorn", to: { x: 6, y: 6 } }, "Thorn walks"),
+        { who: DM, op: { t: "scene.update", sceneId: UPPER, patch: { floor: { height: 20 } } } as Op, note: "Upper floor made 20 ft high" },
+        { who: DM, op: { t: "scene.update", sceneId: UPPER, patch: { fogEnabled: true } } as Op, note: "fog upstairs" },
+        { who: DM, op: { t: "fog.live", sceneId: UPPER, ops: [{ id: "r1", mode: "reveal", shape: { kind: "rect", x: 7, y: 7, w: 3, h: 3 } }] }, note: "the ladder's squares revealed" },
+        { who: DM, op: { t: "floorLink.update", linkId: "l3", patch: { locked: false } }, note: "unlocked" },
+      ],
+    });
+  });
+});
+
 describe("a holder or a passenger the requester does not receive (4, D-261109-018)", () => {
   test("Thorn riding a mount Ana does not receive climbs as with no mount: the same Go up, cost and copies", () => {
     const mounted = built(tower({ tokens: { thorn: thornToken({ attached: { to: "mount", kind: "ride" } }), mount: token("mount", { name: "Hidden mount", x: 3, y: 3, visibility: "dm" }) } }), [...fight("thorn"), putOp()]);

@@ -138,11 +138,13 @@ export function linkDir(state: Pick<RoomState, "scenes">, link: LinkEnd): "up" |
 /**
  * The height an end climbs (5.1, D-261109-100): the upper floor's
  * `floor.height`, FLOOR_HEIGHT.initial where it stores none, as the floor's
- * page reads it. Only the server's state and a DM's copy hold heights.
+ * page reads it. Only the server's state and a DM's copy hold heights, so a
+ * player's end carries its own as `rise` (phase 3, 4.3), read first.
  */
-export function linkHeight(state: Pick<RoomState, "scenes">, link: Pick<FloorLink, "sceneId" | "to">): number {
+export function linkHeight(state: Pick<RoomState, "scenes">, link: Pick<LinkEnd, "sceneId" | "to"> & { rise?: number }): number {
+  if (link.rise !== undefined) return link.rise;
   const here = ownEntry(state.scenes, link.sceneId)?.floor;
-  const there = ownEntry(state.scenes, link.to)?.floor;
+  const there = link.to === undefined ? undefined : ownEntry(state.scenes, link.to)?.floor;
   const upper = (there?.level ?? 0) > (here?.level ?? 0) ? there : here;
   return upper?.height ?? FLOOR_HEIGHT.initial;
 }

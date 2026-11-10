@@ -8,6 +8,7 @@ import type { FloorLink, RoomState, Token, Viewer } from "./model.ts";
 import { LINK_FOR_PLAYERS, allKeys, applyChanges, dependents, diffProjection, heldOf, projectEntity, projectState, stableStringify, type HeldEntry, type ProjectedState } from "./project.ts";
 import { opSchema, type Op } from "./protocol.ts";
 import { applyOp, type Applied } from "./reducer.ts";
+import { linkHeight } from "./rules/floorLinks.ts";
 import { heldFloors } from "./rules/floors.ts";
 import { DM, FULL_TILE_BITS, env, reveal, token } from "./testutil.ts";
 
@@ -75,8 +76,8 @@ describe("an end as each viewer gets it (4)", () => {
     const s = opened(withStairs(), UPPER);
     for (const viewer of PLAYERS) {
       const got = ends(s, viewer);
-      assert.deepEqual(got.l1, { id: "l1", rev: 0, sceneId: GROUND, to: UPPER, rect: { x: 3, y: 3, w: 2, h: 1 }, kind: "stairs", dir: "up" }, viewer.memberId);
-      assert.deepEqual(got.l2, { id: "l2", rev: 0, sceneId: UPPER, to: GROUND, rect: { x: 3, y: 3, w: 2, h: 1 }, kind: "stairs", dir: "down" }, viewer.memberId);
+      assert.deepEqual(got.l1, { id: "l1", rev: 0, sceneId: GROUND, to: UPPER, rect: { x: 3, y: 3, w: 2, h: 1 }, kind: "stairs", dir: "up", rise: 10 }, viewer.memberId);
+      assert.deepEqual(got.l2, { id: "l2", rev: 0, sceneId: UPPER, to: GROUND, rect: { x: 3, y: 3, w: 2, h: 1 }, kind: "stairs", dir: "down", rise: 10 }, viewer.memberId);
       agrees(s, viewer, null);
     }
   });
@@ -97,7 +98,7 @@ describe("an end as each viewer gets it (4)", () => {
     agrees(s, ANA, null);
   });
 
-  test("every field of an end reaches a player as LINK_FOR_PLAYERS says, and nothing else but `dir`", () => {
+  test("every field of an end reaches a player as LINK_FOR_PLAYERS says, and nothing else but `dir` and, with `to`, `rise`", () => {
     const s = run(withStairs(tower(), { kind: "ladder" }), { t: "floorLink.update", linkId: "l1", patch: { locked: true } });
     const stored: Required<FloorLink> = { ...s.floorLinks!.l1!, locked: true, grid: "hexRows" };
     const state = { ...s, floorLinks: { ...s.floorLinks!, l1: stored } };
@@ -110,8 +111,43 @@ describe("an end as each viewer gets it (4)", () => {
         else if (rule === "zeroed") assert.equal(copy[field], 0, `${field} is zeroed`);
         else assert.ok(!(field in copy), `${field} stays the DM's or waits for the far floor`);
       }
-      for (const field of Object.keys(copy)) assert.ok(field === "dir" || (field in LINK_FOR_PLAYERS && !LINK_FOR_PLAYERS[field as keyof FloorLink].startsWith("dm: ")), `${field} is in the list`);
+      for (const field of Object.keys(copy)) assert.ok(field === "dir" || (field === "rise" && "to" in copy) || (field in LINK_FOR_PLAYERS && !LINK_FOR_PLAYERS[field as keyof FloorLink].startsWith("dm: ")), `${field} is in the list`);
     }
+  });
+
+  /*
+   * `rise` (phase 3, 4.3, D-261110-080): the climb's height, the upper
+   * floor's, set where `to` is, so a player who does not hold the far floor
+   * learns nothing of it, and one who does prices the climb as the DM does.
+   */
+  test("`rise` comes exactly with `to`: the upper floor's height on both ends, none while the far floor is not held, and linkHeight reads it first", () => {
+    const tall = (state: RoomState, sceneId: string, height: number): RoomState => ({ ...state, scenes: { ...state.scenes, [sceneId]: { ...state.scenes[sceneId]!, floor: { ...state.scenes[sceneId]!.floor!, height } } } });
+    // Ground floor's own height never counts: the climb is to the upper floor.
+    const s = tall(tall(owlOn(ladderUp(opened(withStairs(), UPPER)), ATTIC), UPPER, 25), GROUND, 40);
+    const ana = ends(s, ANA) as Record<string, { to?: string; rise?: number }>;
+    assert.deepEqual([ana.l1?.rise, ana.l2?.rise, ana.l3?.rise, ana.l4?.rise], [25, 25, 10, 10], "each end of a climb carries the upper floor's height");
+    const bree = ends(s, BREE) as Record<string, { to?: string; rise?: number }>;
+    assert.deepEqual([bree.l1?.rise, bree.l2?.rise], [25, 25]);
+    assert.ok(bree.l3 && !("to" in bree.l3) && !("rise" in bree.l3), "Bree, who does not hold Attic, gets the ladder up with neither");
+    // Attic's height, against the same room with another, reaches Bree in no form.
+    assert.equal(stableStringify(copyOf(tall(s, ATTIC, 30), BREE)), stableStringify(copyOf(s, BREE)), "Attic 10 ft against 30 ft is one copy for Bree");
+    assert.notEqual(stableStringify(copyOf(tall(s, ATTIC, 30), ANA)), stableStringify(copyOf(s, ANA)), "and two for Ana, who holds it");
+    // A player's copy holds no floor heights, so the end's own `rise` is what linkHeight reads there.
+    const view = copyOf(s, ANA) as unknown as RoomState;
+    assert.ok(Object.values(view.scenes).every((scene) => scene.floor?.height === undefined), "a player's copy holds no floor height");
+    assert.equal(linkHeight(view, view.floorLinks!.l1!), 25);
+    assert.equal(linkHeight(s, s.floorLinks!.l1!), 25, "the server's state reads the upper floor");
+    assert.equal(linkHeight(s, { ...s.floorLinks!.l1!, rise: 15 } as FloorLink), 15, "an end's own rise first");
+    for (const viewer of PLAYERS) agrees(s, viewer, null);
+  });
+
+  test("a floor's height edit is a global change that reaches each holder's `rise`", () => {
+    const s = owlOn(ladderUp(opened(withStairs(), UPPER)), ATTIC);
+    const r = applied(s, { t: "scene.update", sceneId: ATTIC, patch: { floor: { height: 20 } } } as Op);
+    assert.ok(r.global, "a height edit re-projects everything (tx.ts isGlobalChange)");
+    assert.equal((ends(r.state, ANA).l3 as { rise?: number }).rise, 20);
+    assert.equal((ends(r.state, BREE).l3 as { rise?: number }).rise, undefined);
+    assert.ok(!applied(s, { t: "scene.update", sceneId: ATTIC, patch: { floor: { name: "Loft" } } } as Op).global, "a name alone is the scene key's");
   });
 
   test("swapping two linked floors' order turns every end's way for every holder", () => {
@@ -249,6 +285,7 @@ describe("a copy kept by changes stays the fresh projection (4: what re-projects
     assert.equal((((copies[0]!.view as unknown as RoomState).floorLinks ?? {}).l3 as { to?: string } | undefined)?.to, ATTIC, "Ana holds Attic");
     assert.equal((((copies[1]!.view as unknown as RoomState).floorLinks ?? {}).l3 as { to?: string } | undefined)?.to, undefined, "Bree does not");
     step({ t: "floorLink.update", linkId: "l4", patch: { locked: true } }, "the ladder locked from Attic's end");
+    step({ t: "scene.update", sceneId: ATTIC, patch: { floor: { height: 30 } } } as Op, "Attic made 30 ft high");
     step({ t: "floor.order", sceneId: GROUND, floors: [ATTIC, UPPER, GROUND] }, "the tower turned over");
     step({ t: "floor.order", sceneId: GROUND, floors: [GROUND, UPPER, ATTIC] }, "and back");
     step({ t: "floor.open", sceneId: ATTIC, open: true }, "Attic opened: Bree holds it now");
@@ -271,6 +308,7 @@ describe("a copy kept by changes stays the fresh projection (4: what re-projects
       | { k: "reveal"; floor: number; x: number; y: number }
       | { k: "order"; turn: number }
       | { k: "open"; floor: number; open: boolean }
+      | { k: "height"; floor: number; ft: number }
       | { k: "blackout"; on: boolean };
     const n = fc.nat({ max: 30 });
     const act: fc.Arbitrary<Act> = fc.oneof(
@@ -283,6 +321,7 @@ describe("a copy kept by changes stays the fresh projection (4: what re-projects
       { weight: 1, arbitrary: fc.record({ k: fc.constant("order" as const), turn: n }) },
       { weight: 1, arbitrary: fc.record({ k: fc.constant("open" as const), floor: n, open: fc.boolean() }) },
       { weight: 1, arbitrary: fc.record({ k: fc.constant("blackout" as const), on: fc.boolean() }) },
+      { weight: 1, arbitrary: fc.record({ k: fc.constant("height" as const), floor: n, ft: fc.integer({ min: 1, max: 8 }).map((k) => k * 5) }) },
     );
     const FLOORS = [GROUND, UPPER, ATTIC];
     let puts = 0;
@@ -343,6 +382,10 @@ describe("a copy kept by changes stays the fresh projection (4: what re-projects
               break;
             case "blackout":
               op = { t: "view.blackout", blackout: a.on };
+              break;
+            // The climb's height, which every holder of both floors gets as `rise` (phase 3, 4.3).
+            case "height":
+              op = { t: "scene.update", sceneId: FLOORS[a.floor % FLOORS.length]!, patch: { floor: { height: a.ft } } } as Op;
               break;
           }
           if (op === null) continue;
