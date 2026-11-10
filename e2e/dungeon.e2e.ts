@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
+import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import { versionChar } from "../client/features/dungeon/seed.ts";
 import { GENERATOR_VERSION } from "../client/features/dungeon/settings.ts";
@@ -1074,6 +1075,71 @@ describe("dungeon generator", { concurrency: false }, () => {
       await page.close();
     }
     assert.deepEqual(lines, []);
+  });
+
+  test("LP37FIX-3. on a phone nothing scrolled under the pinned preview shows above it, at 390 x 844 and 320 x 568, 100% and 130%", async () => {
+    const page = await dmContext.newPage();
+    const off: string[] = [];
+    try {
+      for (const scale of [1, 1.3]) {
+        for (const size of [PHONE, { width: 320, height: 568 }]) {
+          await page.setViewportSize(size);
+          if (!page.url().startsWith(server.origin)) await page.goto(server.origin);
+          await page.evaluate((v) => localStorage.setItem("rvtt.uiScale", v), String(scale));
+          await page.goto(dm.url());
+          await page.getByRole("status", { name: "Connected" }).first().waitFor();
+          const dialog = await openDialog(page);
+          await statusText(dialog);
+          const at = `${size.width} x ${size.height} at ${scale * 100}%`;
+          // The strip between the body's top and the preview pinned under its top padding, with the first Theme tile scrolled up under it so its top border falls in the strip.
+          const strip = await (await previewImg(dialog)).evaluate(async (img) => {
+            type Box = { parentElement: Box | null; firstElementChild: Box | null; scrollTop: number; clientTop: number; clientLeft: number; clientWidth: number; querySelector(s: string): Box | null; getBoundingClientRect(): { top: number; left: number } };
+            const style = (el: Box) => (globalThis as unknown as { getComputedStyle(e: Box): { position: string; overflowY: string } }).getComputedStyle(el);
+            const frame = () => new Promise((resolve) => (globalThis as unknown as { requestAnimationFrame(f: () => void): void }).requestAnimationFrame(() => resolve(null)));
+            let pin: Box | null = img as unknown as Box;
+            while (pin && style(pin).position !== "sticky") pin = pin.parentElement;
+            let body = pin?.parentElement ?? null;
+            while (body && style(body).overflowY !== "auto") body = body.parentElement;
+            const tile = body?.querySelector('[data-choice="theme"] input')?.parentElement ?? null;
+            const preview = pin?.firstElementChild ?? null;
+            if (!pin || !body || !tile || !preview) return null;
+            body.scrollTop = 200;
+            await frame();
+            const top = body.getBoundingClientRect().top + body.clientTop;
+            const bottom = preview.getBoundingClientRect().top;
+            body.scrollTop += tile.getBoundingClientRect().top - (top + bottom) / 2;
+            await frame();
+            const left = body.getBoundingClientRect().left + body.clientLeft;
+            return { x: left, y: top, width: body.clientWidth, height: preview.getBoundingClientRect().top - top, tile: tile.getBoundingClientRect().top - top };
+          });
+          assert.ok(strip && strip.height > 8, `the strip above the pinned preview at ${at}: ${JSON.stringify(strip)}`);
+          const spread = async () => {
+            const png = await page.screenshot({ clip: { x: strip.x, y: strip.y + 1, width: strip.width, height: strip.height - 2 } });
+            const { data, info } = await sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+            let most = 0;
+            for (let i = 0; i < info.width * info.height * 3; i++) most = Math.max(most, Math.abs(data[i]! - data[i % 3]!));
+            return most;
+          };
+          const covered = await spread();
+          if (covered > 8) off.push(`${at}: the strip above the preview shows what scrolls under it, colors ${covered} apart`);
+          // Not vacuous: pinned at the body's padding without the cover, as before, the tile's border shows in the strip.
+          await (await previewImg(dialog)).evaluate((img) => {
+            type Box = { parentElement: Box | null; style: { top: string; borderTop: string; marginTop: string } };
+            let pin: Box | null = img as unknown as Box;
+            while (pin && (globalThis as unknown as { getComputedStyle(e: Box): { position: string } }).getComputedStyle(pin).position !== "sticky") pin = pin.parentElement;
+            if (pin) Object.assign(pin.style, { top: "0px", borderTop: "none", marginTop: "0px" });
+          });
+          assert.ok((await spread()) > 8, `the tile shows in the strip without the cover at ${at}`);
+          if (size.width === 320 && scale === 1.3) await shots.take(page, "lp37fix-3-dialog-strip-uncovered-320-130");
+          await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+          await dialog.waitFor({ state: "detached" });
+        }
+      }
+    } finally {
+      await page.evaluate(() => localStorage.removeItem("rvtt.uiScale")).catch(() => {});
+      await page.close();
+    }
+    assert.deepEqual(off, []);
   });
 
   /*

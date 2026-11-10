@@ -76,8 +76,8 @@ export type DialogProps = {
   full?: boolean;
 };
 
-/** The scrolling body's padding, which `PINNED_FOOT` reaches into. */
-const BODY_PAD = theme.space(4);
+/** The scrolling body's padding, which `PINNED_FOOT` reaches into, and a row pinned to the body's top too. */
+export const BODY_PAD = theme.space(4);
 
 /** The footer status's share of its line's spare room under `statusGrow`, so far over a button's 1 that a button beside it grows by less than a pixel. */
 const STATUS_GROW = 999;

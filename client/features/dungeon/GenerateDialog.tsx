@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { GROUND_FLOOR } from "#shared/reducer/floors.ts";
 import { Button } from "../../components/Button.tsx";
-import { Dialog, PINNED_FOOT } from "../../components/Dialog.tsx";
+import { BODY_PAD, Dialog, PINNED_FOOT } from "../../components/Dialog.tsx";
 import { ErrorText } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help, Note } from "../../components/Panel.tsx";
@@ -536,9 +536,26 @@ export function GenerateDialog(props: {
         {/*
          * The preview stays in view while the choices scroll: beside them on a
          * wide card, in a column of its own placed at the left, and over them
-         * on a narrow one.
+         * on a narrow one. There its fill reaches up over the body's top
+         * padding as a border, so nothing scrolling under it shows above it,
+         * while its padding stays even round the preview.
          */}
-        <div style={layout.wide ? { position: "absolute", top: 0, left: 0, bottom: 0, width: layout.width } : { position: "sticky", top: 0, zIndex: 1, background: theme.color.surface, paddingBottom: theme.space(2), marginBottom: -theme.space(2) }}>
+        <div
+          style={
+            layout.wide
+              ? { position: "absolute", top: 0, left: 0, bottom: 0, width: layout.width }
+              : {
+                  position: "sticky",
+                  top: -BODY_PAD,
+                  zIndex: 1,
+                  background: theme.color.surface,
+                  borderTop: `${BODY_PAD}px solid ${theme.color.surface}`,
+                  marginTop: -BODY_PAD,
+                  paddingBottom: theme.space(2),
+                  marginBottom: -theme.space(2),
+                }
+          }
+        >
           {/* One place in the tree at either width, or crossing the breakpoint remounts the preview empty. */}
           <div style={layout.wide ? { position: "sticky", top: 0 } : undefined}>{previewBox}</div>
         </div>
