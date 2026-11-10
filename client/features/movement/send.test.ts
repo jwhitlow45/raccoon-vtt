@@ -18,6 +18,7 @@ function deps(where: Record<string, { sceneId: string; x: number; y: number }> =
       answers.push(opts?.onAnswer);
       return 40 + sent.length;
     },
+    labels: new Map(),
     newId: () => "group",
     note: (note) => notes.push(note),
     shownNote: () => notes.at(-1) ?? null,

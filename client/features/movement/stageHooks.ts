@@ -25,6 +25,7 @@ import { BOARD_WORK } from "./boardWork.ts";
 import type { RouteJob, RouteWork } from "./routeWork.ts";
 import { sendPlan } from "./send.ts";
 import { holdSlot, routeSlot, sameHold, stopNoteSlot, type DragRoute, type Hold as StoredHold } from "./store.ts";
+import { labelsOf } from "../../state/labels.ts";
 
 /** Where a drag's preview is held, and what holds it. */
 type Hold = { at: Point; blocker: Stop["blocker"] };
@@ -294,7 +295,7 @@ export function dragStops(deps: DragDeps): DragStops {
     if (!view || !target || walk !== w) return;
     const answer = w.drag.answer;
     const straight = w.straight?.pieces ? { to: w.straight.to, pieces: w.straight.pieces } : null;
-    const route: DragRoute = { tokenId: w.token.id, ...walkPreview({ view, token: w.token, target, answer, held: w.held, walkers: w.walkers, world: w.world, role, straight }), searching: answer.kind === "searching", waiting: w.waiting };
+    const route: DragRoute = { tokenId: w.token.id, ...walkPreview({ labels: labelsOf(store.getState()), view, token: w.token, target, answer, held: w.held, walkers: w.walkers, world: w.world, role, straight }), searching: answer.kind === "searching", waiting: w.waiting };
     setRoute(route);
     setLanding(route.tokenId, { ...route.to, ...(route.squeeze ? { squeeze: true } : {}) });
   };
@@ -415,6 +416,7 @@ export function dragStops(deps: DragDeps): DragStops {
   const attempts = new Map<string, number>();
   const send = (plan: DropPlan, onAnswer?: (op: ClientOp, answer: OpAnswer) => void): number[] =>
     sendPlan(plan, {
+      labels: labelsOf(store.getState()),
       dispatch: (op, opts) =>
         actions.dispatch(op, {
           ...opts,
@@ -546,7 +548,7 @@ export function dragStops(deps: DragDeps): DragStops {
               : undefined;
             const nowMode = dropMode(role, now.scenes[token.sceneId]);
             const searched = found(answer);
-            placed(now, namedFollower(now, cutForWalkers(now, token, planWalk(now, token, at, nowMode, searched, now.meta.settings.feetPerCell, account), walkersFor(now, token.id, role), nowMode), searched));
+            placed(now, namedFollower(now, labelsOf(store.getState()), cutForWalkers(now, token, planWalk(now, token, at, nowMode, searched, now.meta.settings.feetPerCell, account), walkersFor(now, token.id, role), nowMode), searched));
           });
         });
         // Still searching: the drop waits at the ghost, which says so.

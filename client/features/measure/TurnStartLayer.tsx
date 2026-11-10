@@ -17,6 +17,8 @@ import { halvedSpeeds, movementText, speedsLeft, trailSegments, turnTrail, type 
 import { pillPlace } from "./Pill.tsx";
 import type { DistanceRules } from "./ruler.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
+import { useLabels } from "../../state/labels.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * Where the active creature has been this turn (features sections 4 and
@@ -63,6 +65,7 @@ const DOT_PX = 3.5;
 const UNCOUNTED_OPACITY = 0.4;
 
 export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
+  const labels = useLabels();
   const encounter = useTreeShownView((s) => s.floorView?.encounter);
   const role = useTreeShownView((s) => s.you?.role ?? "player");
   const activeTokenId = useTreeShownView((s) => {
@@ -83,7 +86,7 @@ export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
   const token = mountTrail ? mount : rider;
   const trail = mountTrail ?? riderTrail;
   const speeds = useTreeShownView((s) => (token && s.floorView ? speedsOf(s.floorView, token) : undefined));
-  const second = mountTrail && rider ? riderLine(displayName(rider), riderTrail) : null;
+  const second = mountTrail && rider ? riderLine(displayName(rider, labels), riderTrail) : null;
   const templates = useTreeShownView((s) => s.floorView?.templates);
   const halved = useTreeShownView((s) => {
     // Only a viewer who knows the speeds reads them, and a Half Speed area halves them where the creature stands.
@@ -94,8 +97,8 @@ export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
   const marker = useMemo(() => {
     if (!trail || !token) return null;
     const moved = movementText(trail.movedFt, speedsLeft(halved ? halvedSpeeds(speeds) : speeds, token.elevation, trail.usedFt), trail.usedFt);
-    return markerPlace({ from: trail.from, token, value: second ? `${moved}\n${second}` : moved, scale, grid });
-  }, [trail, token, speeds, halved, scale, second, grid]);
+    return markerPlace({ from: trail.from, token, value: second ? `${moved}\n${second}` : moved, scale, grid, labels });
+  }, [trail, token, speeds, halved, scale, second, grid, labels]);
   // Token labels keep off the marker (useBoardText.ts).
   const spec = marker ? { x: marker.x, y: marker.y, value: marker.value, size: "screen" as const, small: true, below: marker.below, above: !marker.below } : null;
   const specKey = spec ? JSON.stringify(spec) : "";
@@ -122,11 +125,11 @@ export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
  * the token alone, never from where its label went, since the label keeps
  * off the marker (useBoardText.ts).
  */
-function markerPlace(input: { from: { x: number; y: number; w: number; h: number }; token: MovingToken & { name: string; number?: number }; value: string; scale: number; grid: Grid }) {
+function markerPlace(input: { from: { x: number; y: number; w: number; h: number }; token: MovingToken & { name: string; number?: number }; value: string; scale: number; grid: Grid; labels: Labels }) {
   const { from, token, value, scale } = input;
   const fp = footprintRect(input.grid, token);
   const sizes = boardSizes(scale);
-  const nameHalf = Math.min(measureLabel(displayName(token), sizes.namePx) / 2 + 4, 120) / scale;
+  const nameHalf = Math.min(measureLabel(displayName(token, input.labels), sizes.namePx) / 2 + 4, 120) / scale;
   const cx = fp.x + fp.w / 2;
   const band: Box = { x0: Math.min(fp.x, cx - nameHalf), y0: fp.y, x1: Math.max(fp.x + fp.w, cx + nameHalf), y1: fp.y + fp.h + (3 * sizes.namePx * 1.2 + 12) / scale };
   const at = (below: boolean) => {

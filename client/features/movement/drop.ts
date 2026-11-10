@@ -17,6 +17,7 @@ import type { WalkRoute } from "#shared/rules/walk.ts";
 import { routeLegCheck, type RouteWorld } from "#shared/rules/hexWalk.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
 import { displayName, snapPosition } from "../../lib/scene.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * Where a dropped token lands when walls, doors and ledges stop players'
@@ -989,10 +990,10 @@ export function moveOpsOf(moves: readonly Landed[]): ClientOp[] {
  * straight walk is, at the walker's own wall or where that creature meets
  * one, and naming it (docs/design/design-v1-attach.md 4.2, review LP12-AT-2).
  */
-export function namedFollower(state: DropView, plan: DropPlan, found: Found): DropPlan {
+export function namedFollower(state: DropView, labels: Labels, plan: DropPlan, found: Found): DropPlan {
   if (found.kind !== "none" || found.follower === undefined || !plan.stop) return plan;
   const follower = state.tokens[found.follower];
-  return { ...plan, stop: { ...plan.stop, searched: true, follower: follower ? displayName(follower) : "A creature you drag" } };
+  return { ...plan, stop: { ...plan.stop, searched: true, follower: follower ? displayName(follower, labels) : "A creature you drag" } };
 }
 
 /** What the map says while a drag is held at a wall or a ledge, or where a creature it drags finds no way through with it. */

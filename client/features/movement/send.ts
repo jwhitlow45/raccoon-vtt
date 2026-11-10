@@ -3,9 +3,12 @@ import { displayName } from "../../lib/scene.ts";
 import type { OnAnswer } from "../../state/types.ts";
 import { CUT_TEXT, GROUP_BLOCKED_TEXT, heldText, moveOpsOf, type DropPlan, type Point } from "./drop.ts";
 import type { StopNote } from "./teleport.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /** What sending a drop needs from the room and the page. */
 export type SendDeps = {
+  /** The labels at the moment of sending, which name the tokens a walk held. */
+  labels: Labels;
   dispatch(op: ClientOp, opts?: { group?: string; onAnswer?: OnAnswer }): number | null;
   newId(): string;
   /** Shows the note after a stopped walk. */
@@ -87,7 +90,7 @@ export function sendPlan(plan: DropPlan, deps: SendDeps): number[] {
     deps.note({ ...plan.stop, n });
     deps.showActions(false);
   }
-  const text = heldText(plan.held.map((h) => ({ name: displayName({ name: h.token.name ?? "A token", number: h.token.number }), blocker: h.blocker })));
+  const text = heldText(plan.held.map((h) => ({ name: displayName({ id: h.token.id, name: h.token.name ?? "A token", number: h.token.number }, deps.labels), blocker: h.blocker })));
   if (text) deps.notify(text);
   if (plan.cut) deps.notify(CUT_TEXT);
   sending = false;

@@ -524,7 +524,7 @@ describe("a lone drop walks its route (docs/design/design-v1-movement.md 3.1)", 
       assert.ok(ok.ok, ok.ok ? "" : ok.message);
     }
     const own = keyStep(w, held);
-    const preview = walkPreview({ view: seenRoom(view), token: hero, target, answer, held, world: seen, role: "player", straight: own.kind === "route" ? { to: held, pieces: own.route.pieces } : null });
+    const preview = walkPreview({ labels: new Map(), view: seenRoom(view), token: hero, target, answer, held, world: seen, role: "player", straight: own.kind === "route" ? { to: held, pieces: own.route.pieces } : null });
     assert.deepEqual(preview.to, { x: 5, y: 2 });
   });
 
@@ -596,7 +596,7 @@ describe("a lone drop walks its route (docs/design/design-v1-movement.md 3.1)", 
       const answer = r === null ? { kind: "open" as const } : r === "none" ? { kind: "none" as const, capped: false } : { kind: "route" as const, route: r };
       const held = goesStraight(seenRoom(view), mover, target, answer, 5) ? planLands(planOne(seenRoom(view), mover, raw, "walk"), mover) : null;
       const own = held ? keyStep(w, held) : null;
-      const preview = walkPreview({ view: seenRoom(view), token: mover, target, answer, held, world: seen, role: "player", straight: held && own?.kind === "route" ? { to: held, pieces: own.route.pieces } : null });
+      const preview = walkPreview({ labels: new Map(), view: seenRoom(view), token: mover, target, answer, held, world: seen, role: "player", straight: held && own?.kind === "route" ? { to: held, pieces: own.route.pieces } : null });
       const lands = move ? { x: move.x, y: move.y } : { x: mover.x, y: mover.y };
       assert.deepEqual(preview.to, lands, `${label}: the picture ends where the drop lands`);
       if (move?.route) assert.deepEqual(preview.corners, move.route.slice(0, -1).map(([x, y]) => ({ x, y })), `${label}: the picture's corners are the route's`);
@@ -653,7 +653,7 @@ describe("a lone drop walks its route (docs/design/design-v1-movement.md 3.1)", 
       if (press) continue;
       const held = planLands(plan, mover);
       const target = routeTarget(seenRoom(view), mover, raw);
-      const preview = walkPreview({ view: seenRoom(view), token: mover, target, answer: none, held, world: known, role: "player", straight: { to: held, pieces: own.kind === "route" ? own.route.pieces : [] } });
+      const preview = walkPreview({ labels: new Map(), view: seenRoom(view), token: mover, target, answer: none, held, world: known, role: "player", straight: { to: held, pieces: own.kind === "route" ? own.route.pieces : [] } });
       assert.equal(preview.read.dragFt, recordedCost(view, op!, "mover"), `${label}: the label reads what the move stores`);
     }
     assert.ok(routed > 300 && wholeLeg > 35 && rough > 200 && presses > 70, JSON.stringify({ routed, wholeLeg, rough, presses }));
@@ -674,7 +674,7 @@ describe("a lone drop walks its route (docs/design/design-v1-movement.md 3.1)", 
     const turn = onTurn({ ...state, tokens: { ogre } }, "ogre");
     const target = routeTarget(seenRoom(turn), ogre, { x: 9.5, y: 15.5 });
     const answer = { kind: "route" as const, route: { pieces: long, points: routePoints(turn.buildChunks, ownWalk(ogre), long, 0), endsBlocked: false } };
-    const preview = walkPreview({ view: seenRoom(turn, "dm"), token: turn.tokens.ogre!, target, answer, held: null, world: publicWorld(turn, ownWalk(ogre), { role: "dm" }), role: "dm" });
+    const preview = walkPreview({ labels: new Map(), view: seenRoom(turn, "dm"), token: turn.tokens.ogre!, target, answer, held: null, world: publicWorld(turn, ownWalk(ogre), { role: "dm" }), role: "dm" });
     assert.deepEqual([preview.cut, preview.read.dragFt], [true, recordedCost(turn, moveOpsOf(onGrid.moves)[0]!, "ogre", DM)]);
     // The 64th ends at y 13, half a square off it: the cut steps back to the 63rd.
     const offGrid = planWalk(seenRoom(state), ogre, { x: 9.5, y: 15.5 }, "free", { kind: "route", route: { pieces: [...above, ...down([12.5, 13, 13.5, 14, 14.5, 15, 15.5])] } }, 5);

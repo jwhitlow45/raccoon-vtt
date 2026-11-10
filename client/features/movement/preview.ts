@@ -11,6 +11,7 @@ import { seenIn, towingWord } from "../attach/walk.ts";
 import { cutPieces, dropGrid, dropLanding, routeLanding, samePose, walkerOf, walkStart, type DropState, type DropView, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
 import type { RouteAnswer } from "./routeDrag.ts";
 import type { DragRoute } from "./store.ts";
+import type { Labels } from "../../lib/labels.ts";
 
 /**
  * What a drag's frame tells others besides the token (6.5): the route's
@@ -85,7 +86,7 @@ export function speedsOf(view: RoomState, token: Token): Speeds | undefined {
 }
 
 /** The creature whose space the mover would end in at `at`, by the name this viewer sees (3.1): the rules say it can't willingly end its move there. */
-export function endsIn(view: RoomState, world: PublicWorld, token: Token, at: RoutePoint): string | null {
+export function endsIn(view: RoomState, world: PublicWorld, token: Token, at: RoutePoint, labels: Labels): string | null {
   const { w, h } = footprintSize(token);
   const lo = at.elevation;
   const hi = lo + tokenHeightFt(token, world.input.rules.feetPerCell);
@@ -97,7 +98,7 @@ export function endsIn(view: RoomState, world: PublicWorld, token: Token, at: Ro
     if (s.id === seat) continue;
     const overlaps = at.x < s.x1 - 1e-9 && at.x + w > s.x0 + 1e-9 && at.y < s.y1 - 1e-9 && at.y + h > s.y0 + 1e-9 && lo < s.hi && hi > s.lo;
     const other = view.tokens[s.id];
-    if (overlaps && other) return displayName(other);
+    if (overlaps && other) return displayName(other, labels);
   }
   return null;
 }
@@ -131,7 +132,7 @@ export function dismountOf(view: RoomState, token: Token, at: RoutePoint, role: 
  * holder's walk held where a creature it drags would meet a wall
  * (`walkers`, docs/design/design-v1-attach.md 4.2) is drawn and read to there.
  */
-export function walkPreview(input: { view: DropView; token: Token; target: Point & { squeeze?: boolean }; answer: RouteAnswer; held: Pose | null; walkers?: WalkersCut | null; world: PublicWorld | null; role: Role; straight?: { to: Pose; pieces: readonly RoutePiece[] } | null }): Pick<DragRoute, "to" | "squeeze" | "cut" | "corners" | "read" | "endsIn"> {
+export function walkPreview(input: { labels: Labels; view: DropView; token: Token; target: Point & { squeeze?: boolean }; answer: RouteAnswer; held: Pose | null; walkers?: WalkersCut | null; world: PublicWorld | null; role: Role; straight?: { to: Pose; pieces: readonly RoutePiece[] } | null }): Pick<DragRoute, "to" | "squeeze" | "cut" | "corners" | "read" | "endsIn"> {
   const { view, token, answer, world, role } = input;
   const fpc = view.meta.settings.feetPerCell;
   const walk = answer.kind === "route" ? routeLanding(view, token, input.target, answer.route.pieces, fpc) : null;
@@ -202,6 +203,6 @@ export function walkPreview(input: { view: DropView; token: Token; target: Point
     cut: walk?.cut === true,
     corners: pieces ? points.slice(1, -1).map((p) => ({ x: p.x, y: p.y })) : [],
     read,
-    endsIn: world ? endsIn(view, world, token, points[points.length - 1]!) : null,
+    endsIn: world ? endsIn(view, world, token, points[points.length - 1]!, input.labels) : null,
   };
 }
