@@ -438,11 +438,23 @@ describe("a press, the switch and the edges (4.2, D-261110-078)", () => {
     stop();
   });
 
-  test("a copy that holds no ends yet, or a ruler that is not carried, is left alone", () => {
+  test("the last stairs removed end the carried ruler, though the copy then holds no ends field", () => {
+    for (const who of [DM_OWN, DM_SHARED, PLAYER]) {
+      const s = stairsRoom();
+      const { ctx, tool, state, said } = carryUp(s, who);
+      const { floorLinks: _gone, ...noField } = s;
+      state.view = noField as RoomState;
+      assert.equal(endGoneCarry(ctx), true, who.role);
+      assert.deepEqual([tool.store.getState().ruler, tool.store.getState().carry], [null, null]);
+      assert.deepEqual(said, [CARRIED_STAIRS_GONE]);
+    }
+  });
+
+  test("a copy that has not loaded, or a ruler that is not carried, is left alone", () => {
     const s = stairsRoom();
     const { ctx, tool, state } = carryUp(s);
-    state.view = { ...s, floorLinks: undefined } as unknown as RoomState;
-    assert.equal(endGoneCarry(ctx), false, "no ends field: the copy has not loaded");
+    state.view = undefined as unknown as RoomState;
+    assert.equal(endGoneCarry(ctx), false, "no copy yet");
     state.view = { ...s, floorLinks: {} } as RoomState;
     tool.store.setState({ carry: null });
     assert.equal(endGoneCarry(ctx), false, "a plain ruler");

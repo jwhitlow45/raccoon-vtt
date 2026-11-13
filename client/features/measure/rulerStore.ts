@@ -141,7 +141,10 @@ export function endGoneCarry(ctx: PublishCtx & Pick<ToolContext, "getState">): b
   const tool = ctx.scope.get(rulerSlot);
   const { ruler, carry } = tool.store.getState();
   const { view } = ctx.getState();
-  const links = view?.floorLinks;
+  // A copy with no stairs left carries no floorLinks field at all (the
+  // projection drops an empty one), so only a copy that has not loaded is
+  // left alone.
+  const links = view ? (view.floorLinks ?? {}) : undefined;
   if (!ruler || !links) return false;
   const carried = stillCarried(carry, ruler.stops);
   if (!carried || carried.prior.ends.every((id) => links[id] !== undefined)) return false;
