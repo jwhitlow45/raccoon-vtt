@@ -7,7 +7,7 @@ import { scopeSlot } from "./scope.ts";
 import { uuidv7 } from "#shared/ids.ts";
 import { parseKey } from "#shared/keys.ts";
 import { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
-import { ID_RETRY_FAILED } from "#shared/limits.ts";
+import { ID_RETRY_FAILED, overNotice } from "#shared/limits.ts";
 import { endSentence } from "#shared/logText.ts";
 import type { InitEntry, LogEntry, RoomState, SceneId, Viewer } from "#shared/model.ts";
 import { mainFloorId } from "#shared/rules/floors.ts";
@@ -105,6 +105,7 @@ export const IDS_UNANSWERED_MS = 5_000;
 export const IDS_SETTLE_MS = 2 * 60_000;
 /** The store's own `time` and `ids` frames count their `k` from here, clear of the sound engine's, which counts up from 1. */
 const OWN_K = 2 ** 50;
+const MIB = 1024 * 1024;
 const MAX_TOASTS = 3;
 const SETUP_SAVED = "Saved. Undo in Setup history.";
 const TOO_LARGE_TO_UNDO = "This change is too large to undo.";
@@ -747,6 +748,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   let ownK = OWN_K;
   const idsTimer = new Timer(clock);
   const clockTimer = new Timer(clock);
+  /** The MiB the DM's over-limit notice last said on this page, or null while the room is under its far line. */
+  let overShown: number | null = null;
 
   const serverNow = () => {
     const offset = get().serverOffset;
@@ -1562,6 +1565,12 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       });
       tell(lost, () => "unknown", undefined, "snapshot");
       fresh.told();
+      // The DM is told once the room is past its far line, and again as the MiB over it changes (design 15).
+      const over = you.role === "dm" && msg.over ? Math.ceil(msg.over.bytes / MIB) : null;
+      if (over !== overShown) {
+        overShown = over;
+        if (over !== null) pushToast(overNotice(over));
+      }
       askIds();
       armSweep();
       flush();
