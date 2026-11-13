@@ -114,7 +114,7 @@ When you pick a tool, its options appear in a row just above the toolbar, and an
 
 **The top bar** holds **Undo** (`Ctrl+Z`) and **Redo** (`Ctrl+Shift+Z`), the two curved arrows (with Cmd in place of Ctrl on a Mac), which take back your own play and board changes one at a time and put them back again (saved definitions have their own history in the Menu, see [Undo, Redo and Setup history](#undo-redo-and-setup-history)). Beside them, **View** chooses whether your device shows the map from straight above or tilted, in the [isometric view](#the-isometric-view), and **Fit the map to the screen** (four corners, or the `0` key) brings the map back when you have panned or zoomed it out of sight. The speaker, right of the Now playing chip, is this device's volume: its icon shows muted, low or loud, and pressing it opens the volume controls (see [Music and sound](#music-and-sound)). `U` mutes or unmutes your own device at once, without touching what the players hear. On a computer, the last button in the top bar is **Full screen** (`W`), which gives the whole screen to the room. Press it or `W` again to leave. If the window is too narrow for the button, **This device** in the Menu has the same switch, and that is also where you find it on a tablet or an Android phone.
 
-Beside the room's name sit the **DM** chip, which opens a menu of the things you reach for during play (see [The DM menu](#the-dm-menu)), and **Players see black** while the screens are dark. As the bar fills, it gives up parts in a fixed order and gets them back as soon as there is room, and nothing it gives up is lost. **Search**, **Now playing** and **Floor** shrink to their icons, the **DM** chip to its dot, and a fight's next faces drop. The clock chip and then **Now playing** move into the DM menu, the **Phase** menu moves there as **Map phase**, and **Full screen** waits in **This device**. **View** and **Floor** fold into the Menu as rows of their own, and last of all the speaker leaves, and **Volume** leads the DM menu. While the screens are dark, **Players see black** becomes a crossed eye in the **DM** chip's place, which opens the DM menu with **End the blackout** at its top.
+Beside the room's name sit the **DM** chip, which opens a menu of the things you reach for during play (see [The DM menu](#the-dm-menu)), and **Players see black** while the screens are dark. As the bar fills, it gives up parts in a fixed order and gets them back as soon as there is room, and nothing it gives up is lost. **Search**, **Now playing** and **Floor** shrink to their icons, the **DM** chip to its dot, and a fight's next faces drop. The clock chip and then **Now playing** move into the DM menu, the **Phase** menu leaves for the DM menu's **Map phase**, and **Full screen** for its switch in **This device**. **View** and **Floor** fold into the Menu as rows of their own, and last of all the speaker leaves, and **Volume** leads the DM menu. While the screens are dark, **Players see black** becomes a crossed eye in the **DM** chip's place, which opens the DM menu with **End the blackout** at its top.
 
 **The Menu** panel holds the X-card, **Copy player link**, **Setup history**, **Members**, **Room settings**, **This device**, **DM guide**, **About** and **Leave room**, with the **View** and **Floor** rows above Setup history once the top bar has folded them in.
 
@@ -285,7 +285,7 @@ A cellar you mean to draw yourself starts well as a blank floor. A level that al
 
 **Dungeon** opens [Generate a dungeon](#generating-a-dungeon) aimed at the new floor. It opens on Custom at the floor beside's size, 20 to 100 squares a side, with the theme, rooms and other choices you used last. **Make the floor** adds a floor named for its theme, such as "Crypt", numbered when that name is taken, with its walls, doors and traps. The DM key goes to the Journal as a page titled for the floor, such as "Tower · Crypt 2 key". The size you pick here is not remembered, so the next dungeon for a new scene opens as it did before. A dungeon draws stairs up to its raised rooms but none to other floors, so join the new floor to its neighbor yourself with [stairs or a ladder](#stairs-and-ladders).
 
-![Generate a dungeon above Ground floor, open on Custom at 20 by 20 squares, with a preview of two rooms joined by a corridor and Make the floor in the foot.](dm-guide/floors-dungeon-floor.webp)
+![Generate a dungeon above Ground floor, open on Custom at 20 by 20 squares, with a preview of two rooms joined by a corridor, Edit rooms over its corner, and Make the floor in the foot.](dm-guide/floors-dungeon-floor.webp)
 
 While the server makes a dungeon floor, **Hide** reads "Making the floor…" and the dialog stays open for up to 30 seconds, so that the floor and its key page land in one step of Setup history. After that one **Undo setup** takes back the floor and everything that came with it, whichever source it had. If the server refuses part of it or the connection drops, the dialog says whether the floor exists and what it may lack, and Undo setup takes back whatever arrived. A dropped connection ends the wait at once and can leave the key page a step of its own, which takes a second Undo setup, while **Remove floor** on the floor's page always takes the whole floor back.
 
@@ -297,11 +297,15 @@ Both sources add a floor the players have not reached, so it stays yours until a
 
 ![Ana's phone while she looks at the ground floor: the notice Viewing Ground floor. with its Back to Thorn button under the top bar, and the Floor button in the bar.](dm-guide/floors-viewing.webp)
 
-In a fight, the tracker keeps every creature the players may see, whatever floor it stands on, and a creature off the floor on screen carries its floor's name as a tag. A tap on its row shows that floor and selects the creature, as a tap on its token does. The party panel says "On Upper floor" for a party member who stands there, and the turn chip names the floor of whoever is acting when it is another one. The map's **Find my token** goes through your tokens on every floor.
+In a fight, the tracker keeps every creature the players may see, whatever floor it stands on, and a creature off the floor on screen carries its floor's name as a tag. A tap on its row shows that floor and selects the creature, as a tap on its token does. The party panel says "On Upper floor" for a party member who stands there, and when whoever is acting stands on another floor, a screen reader hears that floor in the turn chip's name. The map's **Find my token** goes through your tokens on every floor.
+
+![The Initiative order in a fight across two floors of the Tower, the DM's screen on Ground floor: Thorn acts, his row tagged Upper floor, while the Goblin and Bree, on this floor, carry no floor tag, and Auto Initiative reads (0).](dm-guide/floors-tracker.webp)
 
 ### Moving between floors
 
 A character who climbs by [stairs or a ladder](#stairs-and-ladders) needs no help from you, but a character who has to cross floors another way asks you. Select the token and press **Move to floor…** in its action bar (**Floor…** where the row is short), or in the **More** sheet for a group. Pick the floor, and the creatures move to the same squares there, standing on that floor's ground, with what they carry, drag and their areas. A floor smaller than the one they leave may not reach their squares, and its row then reads "Outside Attic" and stays off. It is one Undo step. A creature moved to another floor of its scene mid-turn keeps its **Moved** count, as a climb does, while a move to another scene starts it again.
+
+![Thorn's action bar on Upper floor in a fight, with Move to floor pressed: the Attic row warns "Players haven't reached Attic. Moving Thorn there opens it to them." and Ground floor waits under it, beside Upper floor's page in the Scenes panel.](dm-guide/floors-move.webp)
 
 The search offers the same move. With one creature selected, open it and type "move" or a floor's name, and **Move to Upper floor** appears near the top of the list, with the creature's name under it. Enter moves the creature at once and shows the floor. Shift+Enter selects and frames the creature instead, with Move to floor in its action bar.
 
@@ -503,7 +507,7 @@ A scene won't change shape while it holds something laid out on its own cells, w
 
 The **Map builder** tool (`B`, behind **Setup** on a phone) lets you paint a map square by square: floors, walls and doors, heights, labels, lights and stamps. What sets a built map apart from a picture is that the app knows what each part of it is. Walls block movement, sight and areas, doors can be opened, closed and locked, and raised ground counts for movement, sight and areas. You can build a whole map from scratch, or build over a map image to show the app where the walls and cliffs in the art are.
 
-![The map builder: a crypt of stone rooms with automatic walls, doors, pillars, lights and stamps, with the Builder mode chip in the options row.](dm-guide/builder.webp)
+![The map builder on a crypt of stone rooms with doors, pillars, lights and stamps: the Builder mode menu open over the options row, its twelve modes from Brush to Add a wing, and the Skeleton's page in the Monsters panel beside the map.](dm-guide/builder.webp)
 
 Open the builder from the toolbar, or with **Open the builder** in the scene's **Walls and movement** settings. Then use **Builder mode** to choose what a tap or a drag does:
 
@@ -754,8 +758,10 @@ You set it in the **Light and weather** group of a scene's settings, under Light
 
 - Heavy rain, heavy snow and a sandstorm give Disadvantage on Wisdom (Perception) checks. A creature's roll option shows it ("Dis: Heavy rain"), the roller can change it as they can for a condition, and a roll request's card lists it.
 - Strong wind gives Disadvantage on an attack the app knows is made with a ranged weapon, such as a Shortbow or a character's Longbow. A weapon a player imported from D&D Beyond counts by what D&D Beyond says it is, so a magic bow with a name of its own still counts, and one imported before the app read this picks it up at the player's next re-sync. A thrown weapon, or a ranged attack the app cannot tell is a weapon (a spell-like Force Bolt, say), only gets a reminder, so you decide. So does a character's weapon the app cannot place, such as a Longsword, since the app cannot tell how the weapon was used.
-- You see all of this on the Dice panel before anyone rolls. A bow's Attack button shows Dis, and the line under the creature's attacks says why ("Longbow Dis: Strong wind") along with any reminder, such as the one for a thrown Javelin. When you roll one attack for several creatures at once, the same words appear under it.
-- Patchy fog and heavy fog only remind, because seeing through fog depends on what a creature is trying to see, which is a call for you. On the Dice panel their reminder sits under the name of the Skills group, heavy fog's also sits under the creature's attacks, and a roll request's card lists it too. Reminders from conditions show the same way, such as Frightened's under Saves and checks and under Skills, and its Initiative reminder under the Initiative button.
+- You see all of this on the Dice panel before anyone rolls. A bow's Attack button shows Dis, and the line under the name of the creature's **Actions** says why ("Longbow Dis: Strong wind") along with any reminder, such as the one for a thrown Javelin. When you roll one attack for several creatures at once, the same words appear under it.
+- Patchy fog and heavy fog only remind, because seeing through fog depends on what a creature is trying to see, which is a call for you. On the Dice panel their reminder sits under the name of the Skills group, heavy fog's also sits under the name of its **Actions**, and a roll request's card lists it too. Reminders from conditions show the same way, such as Frightened's under Saves and checks and under Skills, and its Initiative reminder under the Initiative button.
+
+![A forest map in a strong wind, Goblin Warrior 3 selected with its action bar open: in the Dice panel, "Shortbow Dis: Strong wind" stands under the name of its Actions, and the Shortbow's Attack carries a Dis tag, while the Scimitar's does not.](dm-guide/weather-dice.webp)
 
 Only creatures whose token stands on that scene are in its weather, so a character with no token there rolls as usual. While the weather has rules, the **Weather rules on rolls** switch says in one sentence what rolls here will do, and under it one line for each part of the weather gives the rule in the SRD's words, so you can see what a roll will do before anyone makes one. Heavy fog's line is in the warning color. When the party is indoors on a stormy scene, turn the switch off: the weather and its lines still show, and the switch says "Rolls here ignore these rules."
 
@@ -820,7 +826,7 @@ When you need a dungeon and don't have an evening to paint one, the app can draw
 
 **Starting.** Open **Scenes**, then **New scene**, and pick **Builder**. Under the row with **Create**, a line reads "Or start from a generated dungeon", with the **Generate a dungeon** button under it. The name you typed and your **Players see** choice come along into the dialog, so set them first if you want to. The dungeon takes the form's **Grid** too, so pick **Hex rows** or **Hex columns** there for a dungeon on hexes (see **On hexes** below).
 
-![The Generate a dungeon dialog on its default choices: the preview at the left with numbered rooms and the entrance ringed in white, Theme, Size, Rooms, Density, Corridors and Corridor width on the right, and "12 rooms (1 secret), 29 doors (3 locked, 1 secret), 2 traps." in the foot.](dm-guide/dungeon-generator.webp)
+![The Generate a dungeon dialog on its default choices: the preview at the left with numbered rooms, the entrance ringed in white and Edit rooms over its corner, Theme, Size, Rooms, Density, Corridors and Corridor width on the right, and "12 rooms, 29 doors (1 locked, 1 secret), 2 traps." in the foot.](dm-guide/dungeon-generator.webp)
 
 **The choices.** Each one redraws the preview a moment after you change it.
 
@@ -850,7 +856,7 @@ To move a slider, drag it or tap one of the marks under it. With a keyboard, the
 
 Whatever you choose, a room 6 squares across and down or larger may have a dais, a platform 5 feet up with a stair onto it, so you can have raised ground even with **Heights** at **Flat**.
 
-![The dialog scrolled to its last choices: Secret doors on Few, Lit rooms on Few with its line and the Keep it lit button, Dressing on Some and DM key switched on.](dm-guide/dungeon-generator-rows.webp)
+![The dialog scrolled to its last choices, beside the preview with Edit rooms over its corner: Secret doors on Few, Lit rooms on Few with its line and the Keep it lit button, Dressing on Some and DM key switched on.](dm-guide/dungeon-generator-rows.webp)
 
 **On hexes.** On **Hex rows** or **Hex columns** the generator draws each room and corridor with wall lines instead of painted floor, much as you would build it yourself on hexes: a wall or a door on every hex side between a room, a corridor, a flight of stairs and the rock. It plays like any generated dungeon. Doors open and lock, **Builder room** in the **Fog** tool reveals one room at a time, and a secret door is a plain piece of wall to your players until you mark it found. A few things change on hexes:
 
@@ -862,7 +868,7 @@ Whatever you choose, a room 6 squares across and down or larger may have a dais,
 
 ![Generate a dungeon on Hex rows: the preview of a dungeon drawn in wall lines on the dark board, its rooms numbered and the entrance ringed, and beside it Theme with the line about wall lines and difficult ground, Size with its count of hexes and rows, Rooms, Density, Corridors and Corridor width.](dm-guide/dungeon-hex.webp)
 
-**The preview.** The picture shows exactly what **Make the scene** will build, drawn the way Export as image draws a DM view, with each trap's zone hatched in red, a white ring round the entrance room, a small ring for each light and, with **DM key** on, the number of each room. In the foot, a line counts the rooms, doors and traps, such as "12 rooms (1 secret), 29 doors (3 locked, 1 secret), 2 traps." A Cave counts "no doors". After every change, **Make the scene** waits until the new picture is drawn, with "Drawing the dungeon…" in the corner of the preview meanwhile, so the dungeon you make is always the one in the picture.
+**The preview.** The picture shows exactly what **Make the scene** will build, drawn the way Export as image draws a DM view, with each trap's zone hatched in red, a white ring round the entrance room, a small ring for each light and, with **DM key** on, the number of each room. In the foot, a line counts the rooms, doors and traps, such as "12 rooms, 29 doors (1 locked, 1 secret), 2 traps." A Cave counts "no doors". After every change, **Make the scene** waits until the new picture is drawn, with "Drawing the dungeon…" in the corner of the preview meanwhile, so the dungeon you make is always the one in the picture.
 
 - If the size can't hold all the rooms you asked for, the line says so, for example "Fit 9 of 12 rooms. A larger size or fewer rooms fits them all."
 - When not even two rooms fit, the dialog says so and turns **Make the scene** off until you pick a larger size, fewer rooms or Sparse.
@@ -884,7 +890,7 @@ Your edits hold the dungeon's layout, so the rooms stay where they are while you
 
 **Making the scene.** Press **Make the scene**. A dungeon goes out as up to 100 changes, and past the 60 the server takes at once the rest follow at a steady pace. The foot counts the pieces as the server takes them ("Making the dungeon… 18 of 30"), and **Cancel** becomes **Hide**, which lets you close the dialog while it finishes. The choices, **Reroll** and the seed wait meanwhile, so nothing you touch can change a dungeon already on its way, though **Copy seed** still works. Once you close the dialog on a dungeon that was sent, the **New scene** form starts over, just as it does after **Create**, so you can't make an empty second scene with the same name by mistake. When it is done, the app opens the new scene on your screen with the **Map builder** picked, zoomed on the entrance room so you can see where the party comes in. Only your screen is framed that way: every other device opens it as it would open any Builder scene, so players never learn from it where the entrance is.
 
-![The new scene, opened on the entrance room: a corridor at its west end leads to the map's edge, a door in its east wall leads on to room 2, and each room carries a gold numbered pin. The Scenes panel shows Light on Dark and Players see on Explore.](dm-guide/dungeon-generator-made.webp)
+![The new scene, opened on the entrance room with the Map builder picked: stairs at its west end lead to the map's edge, a door in its east wall leads on toward room 2, and each room carries a gold numbered pin. The Scenes panel shows the floor adds and Light on Dark.](dm-guide/dungeon-generator-made.webp)
 
 If the connection is down when you press it, the foot says "Waiting for the server…", and the dungeon is sent when you are back online.
 
@@ -894,7 +900,7 @@ If the connection is down when you press it, the foot says "Waiting for the serv
 
 **The key.** With **DM key** on, the Journal gains a page named for the scene and ending in "key", in a folder called "Dungeon keys", and each room gets a numbered pin in your color, linked to that page. Only you see either. The page opens with how the dungeon was made, the choices and the size in feet, then gives one paragraph for each room, numbered from the entrance outward: its size, its height, its doors with where each leads and whether it is locked or secret, its dais, its light, its traps and a trinket from the SRD's Trinkets table, each used once. Tap a pin with **Select** to open its page.
 
-![The key in the Journal: the folder "Dungeon keys" holding "Sunken halls key", open to its opening lines about how the dungeon was made and then room 1, room 2 and room 3 with their doors and trinkets.](dm-guide/dungeon-generator-journal.webp)
+![The key in the Journal: "Sunken halls key", for the DM only, in Dungeon keys, open to its lines about how the dungeon was made, then rooms 1 to 4 with their sizes, doors and trinkets, beside the new scene and its numbered pins.](dm-guide/dungeon-generator-journal.webp)
 
 **Editing it.** Every builder mode edits a generated dungeon, **Fog** reveals it, and **Duplicate** and **Export as image** work as on any scene. On squares all of its walls are automatic, rising around the floor on their own rather than drawn, so a player's map never shows a wall that gives away a room they have not found yet. On hexes they are wall lines, one on each hex side, which **Walls/doors** edits as it does any wall you draw. Its furniture and lights are ordinary stamps and lights, so move or delete them as you would your own, and add monsters, more lights, stamps and labels as you would on a map you built yourself.
 
@@ -1146,6 +1152,8 @@ With no fight running, **New fight** offers you a choice of who is in it:
 - **Everyone here (N)**: every creature on the scene you are viewing, hidden ones included (their rows start hidden). Objects, the dead, and companions that act on their character's turn stay out. Companions that take their own turn come in.
 - **Visible to players (N)**: the same, but without hidden tokens or anything under fog or out of the party's sight.
 - **Nobody yet**: an empty fight to fill in later.
+
+![The Initiative panel with no fight running and Goblin Warrior 3 selected, its action bar open on the map: New fight offers Goblin Warrior 3, Everyone here (7), Visible to players (3) and Nobody yet, with Roll monsters' Initiative switched on under them.](dm-guide/initiative-start.webp)
 
 If you have two or more tokens selected on the map, their action bar also has **Start a fight**, or **Add to the fight** once a fight is running. While a fight runs, the panel's **More creatures** section offers the same three choices, so latecomers can join. Players add their own creatures with **Your creatures**.
 
@@ -1623,7 +1631,7 @@ Drag a token and drop it where the creature goes. As you drag, the app draws the
 
 The token walks the cheapest way to where you drop it. While **Walls and ledges block players' moves** is on, a wall, a closed door or a ledge makes the line bend along the way the creature would walk, through an open door or up the stairs, with a dot at each corner. With that setting off, walks ignore those barriers. Either way, the line goes around a patch of rubble when that costs less than wading through it. The label at the end of the line reads what the walk costs, and under that, what cost extra.
 
-![Mara dragged from the crypt's hall into the corridor: the yellow line bends at the corridor's mouth, and the label reads "45 ft · 15 ft left with Dash" with "+10 ft for difficult terrain" under it, for the two hatched squares of difficult ground.](dm-guide/movement.webp)
+![Mara dragged from the crypt's hall into the corridor: the yellow line bends at the corridor's mouth, and the label reads "45 ft · 15 ft left with Dash" with "+10 ft for difficult terrain" under it, for the two hatched squares of difficult ground, with a Hidden Pit marker in the chamber beyond.](dm-guide/movement.webp)
 
 Mara's Speed is 30 ft, so the 45 ft walk in the picture needs a Dash, and its line is yellow. [Difficult ground](#difficult-ground) lists everything that costs extra.
 
@@ -2113,6 +2121,8 @@ Changes to your library, playlists and scenes' sounds are in **Setup history**. 
 
 **What your players hear and see.** Each player's phone asks once, the first time there is something to hear, whether to play the room's sound. If everyone sits at one table and you play the sound from a speaker of your own, turn on **Only DM devices play** under Table sound. Players' phones and the table display then play nothing and never ask. To play it from the table display instead, leave it off and have each player answer **Stay muted**. Every device has its own volume, players' phones included. The speaker on the top bar opens the **Volume** slider, whose speaker icon mutes, then **Music**, **Background** and **Effects** levels for that device alone (Music and Background only while your server offers sound files), then the **Turn sound** and **Ping sound** switches, which play even while the device is muted. Press `U` to mute or unmute. Players never see your library, your playlists or what comes next. A player's Sound panel is listed while something plays that they hear, and one they have open stays until they close it. It shows what plays as a card. With **Players see what is playing** on, the card names the music and the background sounds playing now, and otherwise it only says "Music is playing". During a blackout players and the table display hear nothing, while your own device plays on.
 
+![The speaker beside the Now playing chip, pressed: its controls open under it with Volume at 100% and its speaker icon, which mutes, then Music, Background and Effects at 80%, a help line, and the Turn sound and Ping sound switches.](dm-guide/volume.webp)
+
 One thing to watch: if a laptop shows the table display in a window (**Open on this device**) and sends its sound to the TV, through an HDMI cable for one, your players hear your device's sound from the TV during a blackout too. A laptop playing on its own speakers is heard only at your seat.
 
 If the table needs a moment, the X-card's card gives you **Stop the sound** beside Pause the game.
@@ -2189,6 +2199,8 @@ With the clock running, Time's top shows the date, the time and the part of the 
 Each step applies at once on every device. A Short Rest never moves the clock on its own, so tap **1 hour** yourself when the party takes one. There is no step backward: if you tapped **8 hours** by mistake, press **Undo** in the top bar, which takes the step back, and to turn the clock back on purpose, use **Set the date and time**.
 
 On a computer, a small chip in the top bar shows the date and time, such as "Deepwinter 4, 6:10 AM", from 900 px of screen width. Press it and the four steps open under it, **10 minutes**, **1 hour**, **8 hours** and **To dawn**, with **Open Time** below them. The popover stays open for a second step, and the side panel keeps its tab. It leaves the bar early, right after **Search** shrinks to its icon and, in a fight, the next faces drop, and it comes back once the window is wider or the date is shorter. While it is off the bar, and always on a phone, the **DM** menu's **Time** item opens the same steps, as a sheet on a phone (see [The DM menu](#the-dm-menu)).
+
+![The clock chip pressed in the top bar, between the speaker and Undo: its popover reads "Day 3, 8:00 PM, Night" over 10 minutes, 1 hour, 8 hours, To dawn and Open Time.](dm-guide/time-chip.webp)
 
 ### Setting the date and time
 
