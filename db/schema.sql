@@ -380,3 +380,32 @@ alter table room_ops add column if not exists pub bigint;
 -- room no build with these numbers has committed yet, which counts on from
 -- its snapshot and stored rows.
 alter table rooms add column if not exists pub bigint;
+-- The ids of new things (server/rooms/createIds.ts): one row for every id an
+-- applied op brought, a device's or the server's, written in the transaction
+-- of the batch that applied it and rolled back with it. The room actor reads
+-- a row until `until`, the last moment the server's clock could take its id
+-- again, and a device asks after a reconnect whether the room holds its own
+-- id until `ask_until`. A row is deleted once it is past both. Not room
+-- state, never exported, and outside the storage quota.
+create table if not exists room_ids (
+  room_id text not null references rooms on delete cascade,
+  id text not null,
+  member_id text not null,
+  accepted_at timestamptz not null,
+  until timestamptz not null,
+  ask_until timestamptz not null,
+  primary key (room_id, id)
+);
+create index if not exists room_ids_member on room_ids (room_id, member_id, id);
+create index if not exists room_ids_until on room_ids (room_id, until);
+create index if not exists room_ids_ask_until on room_ids (ask_until);
+-- Facts about this server, written once: `ids_since` is when it first loaded
+-- a room on a build that keeps `room_ids`, which every room's id check reads.
+create table if not exists server_facts (
+  one boolean primary key default true check (one),
+  ids_since timestamptz not null
+);
+-- A damage roll's receipt names the ask for saves that took it, written in
+-- that ask's batch, so a roll goes with one ask for as long as its receipt
+-- lives (server/rooms/receipts.ts).
+alter table roll_receipts add column if not exists ask text;
