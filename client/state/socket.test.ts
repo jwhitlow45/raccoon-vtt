@@ -1344,3 +1344,30 @@ describe("floors on the socket (docs/design/design-v1-floors.md 8.2, 10)", () =>
     ]);
   });
 });
+
+describe("ids through the socket (docs/design/design-v1-player-limits.md 3.4)", () => {
+  test("a time answer dates the next new id, and an ids answer of not held sends the create again under a fresh id", () => {
+    const s = setup();
+    s.socket.start();
+    s.connect();
+    const at = Date.UTC(2026, 10, 13, 12);
+    s.last().emit({ t: "time", k: 1, at });
+    assert.equal(s.room.serverNow(), at);
+    const id = uuidv7(s.room.serverNow());
+    const { rev: _rev, fogExemptAuto: _auto, ...input } = token(id, { sceneId: "s1", name: "Goblin" });
+    s.room.dispatch({ t: "token.create", token: input } as ClientOp);
+    assert.equal(s.last().take("op").length, 1);
+    s.last().drop(1006);
+    s.clock.advance(10_000);
+    s.last().open();
+    s.last().take("hello");
+    // The server settled the create, and its refusal went with the old socket.
+    s.last().emit(s.snapshot("s1", 1));
+    const [ask] = s.last().take("ids") as Extract<ClientMessage, { t: "ids" }>[];
+    assert.deepEqual(ask?.ids, [id]);
+    s.last().emit({ t: "ids", k: ask!.k, held: [], notHeld: [id], pending: [] });
+    const [again] = s.last().take("op") as Extract<ClientMessage, { t: "op" }>[];
+    assert.equal(again?.n, 2);
+    assert.notEqual((again!.op as Extract<ClientOp, { t: "token.create" }>).token.id, id);
+  });
+});

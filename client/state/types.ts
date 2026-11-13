@@ -218,7 +218,22 @@ export type PendingOp = {
   quiet?: true;
   /** A gesture's last ask: the ops it holds until it is answered, none once the gesture was cancelled (DispatchOptions). */
   holds?: () => readonly ClientOp[];
+  /** Told the op's new ids, old to new, when the store made them again (DispatchOptions). */
+  onRemint?: OnRemint;
+  /** Sent again under fresh ids once, after the room refused its ids' time (client/state/ids.ts idTimeRefused). A second such refusal is told. */
+  retried?: true;
+  /** Waits, unsent, for a reading of the server's time, then takes fresh ids and goes. Nothing after it goes first. */
+  waitClock?: true;
 };
+
+/**
+ * Told when the store gave an op's new things fresh ids (client/state/ids.ts):
+ * its unsent create would have been refused for its ids' time after a
+ * reconnect, the room refused them once, or never recorded a create whose
+ * answer was lost. `ids` maps each old id to its new one. Whatever holds
+ * an old id on the page moves to the new one.
+ */
+export type OnRemint = (ids: ReadonlyMap<string, string>) => void;
 
 /**
  * Why the room closed for good (design section 7.1 close codes): the grant
@@ -687,7 +702,7 @@ export type RoomActions = {
    * undo takes the whole gesture back (design 7.7). `onAnswer` hears once
    * what became of it (OpAnswer).
    */
-  dispatch(op: ClientOp | HistoryCommand, opts?: UndoGroupOptions & { onAnswer?: OnAnswer; quiet?: boolean; holds?: () => readonly ClientOp[] }): number | null;
+  dispatch(op: ClientOp | HistoryCommand, opts?: UndoGroupOptions & { onAnswer?: OnAnswer; quiet?: boolean; holds?: () => readonly ClientOp[]; onRemint?: OnRemint }): number | null;
   /**
    * Queues several ops in order as `dispatch` queues each, with one view
    * rebuild for all, for a sender of many at once such as a generated
@@ -726,7 +741,7 @@ export type RoomActions = {
    * Absent where nothing waits, as on a preview.
    */
   holdBuild?(cancel: () => void): () => void;
-  /** A UUIDv7 for a create op (design section 6). */
+  /** A UUIDv7 for a create op (design section 6), dated by the server's time as the room reckons it. Made as its op is sent, never as an editor opens. */
   newId(): string;
   moveToken(tokenId: string, x: number, y: number): void;
   /** Moves several tokens at once, as one `token.moveMany` (lib/group.ts). */

@@ -7,6 +7,7 @@ import { scopeSlot } from "./scope.ts";
 import { uuidv7 } from "#shared/ids.ts";
 import { parseKey } from "#shared/keys.ts";
 import { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
+import { ID_RETRY_FAILED } from "#shared/limits.ts";
 import { endSentence } from "#shared/logText.ts";
 import type { InitEntry, LogEntry, RoomState, SceneId, Viewer } from "#shared/model.ts";
 import { mainFloorId } from "#shared/rules/floors.ts";
@@ -14,6 +15,7 @@ import { applyChanges, projectLogEntry, type ProjectedState } from "#shared/proj
 import {
   clientOpSchema,
   FORGET_ASK,
+  MAX_IDS_ASKED,
   type ClientMessage,
   type ClientOp,
   type EphEvent,
@@ -24,6 +26,7 @@ import {
 import { holdsTurn, opReads, reads, satisfies } from "#shared/reads.ts";
 import { applyOp } from "#shared/reducer.ts";
 import type { ConnectionState } from "../lib/connection.ts";
+import { freshIds, idTimeRefused, mintedOf, renamed, sentIdDead, unsentIdStale } from "./ids.ts";
 import { applyEph, clearTokens, floorEph, keepFloors, keepLocal, keepMembers, nextFloorExpiry, NO_FLOOR_EPHEMERAL, onEveryFloor, onFloor, sweepEph, type FloorEphemeral } from "./ephemeral.ts";
 import { SCENE_LOAD_IDLE, sceneLoadFailureText, stepSceneLoad, type SceneLoad, type SceneLoadEvent } from "./sceneLoad.ts";
 import { floorViewOf } from "./floorView.ts";
@@ -33,7 +36,7 @@ import { shareRecord, shareState } from "./share.ts";
 import { backoffDelay, realClock, Timer, type Clock } from "./timing.ts";
 import { addToSelection, bringToken, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
 import { canonicalPanelId, panelById } from "../features/panels.ts";
-import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type Ended, type LocalUi, type OnAnswer, type OpAnswer, type OpRefusal, type PanelHow, type PendingOp, type RoomView, type Toast, type ToastAction, type ToastDie, type ToastSends, type UnknownCause, type You, hasButtons } from "./types.ts";
+import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type Ended, type LocalUi, type OnAnswer, type OnRemint, type OpAnswer, type OpRefusal, type PanelHow, type PendingOp, type RoomView, type Toast, type ToastAction, type ToastDie, type ToastSends, type UnknownCause, type You, hasButtons } from "./types.ts";
 
 export type { PendingOp } from "./types.ts";
 
@@ -89,6 +92,19 @@ function editsIn(ops: readonly PendingOp[]): number {
 
 /** An op that has had no answer this long is resent with everything after it (design 7.4). */
 export const OP_ANSWER_MS = 10_000;
+/** How long an op waiting on a reading of the server's time waits before it takes fresh ids anyway (PendingOp.waitClock). */
+export const CLOCK_WAIT_MS = 2_000;
+/** How soon an `ids` ask goes again after an answer that says an id is pending, and after no answer at all. */
+export const IDS_AGAIN_MS = 1_000;
+export const IDS_UNANSWERED_MS = 5_000;
+/**
+ * How long a create whose answer a reconnect lost waits for the room's
+ * final word on its ids (receiveIds). Past it, it is unknown as before:
+ * the snapshot holds what it did, if anything.
+ */
+export const IDS_SETTLE_MS = 2 * 60_000;
+/** The store's own `time` and `ids` frames count their `k` from here, clear of the sound engine's, which counts up from 1. */
+const OWN_K = 2 ** 50;
 const MAX_TOASTS = 3;
 const SETUP_SAVED = "Saved. Undo in Setup history.";
 const TOO_LARGE_TO_UNDO = "This change is too large to undo.";
@@ -242,6 +258,12 @@ export type DispatchOptions = UndoGroupOptions & {
    * yes sends them.
    */
   holds?: () => readonly ClientOp[];
+  /**
+   * Told when the store gives the op's new things fresh ids (OnRemint): a
+   * sender that holds an id it made, such as an editor waiting on its
+   * save, moves to the new one.
+   */
+  onRemint?: OnRemint;
 };
 
 export type RoomStoreState = RoomView & {
@@ -418,6 +440,12 @@ export type RoomStore = {
   receiveXcard(at: string): void;
   /** The server's `clock` message, its time as it sent a snapshot: one more reading of how far its clock is from this page's. */
   receiveClock(at: string): void;
+  /** The server's answer to a `time` frame, its clock in ms: one more reading, which an op waiting to take fresh ids waits for (PendingOp.waitClock). */
+  receiveTime(at: number): void;
+  /** The server's answer to an `ids` ask: which of this member's uncertain creates the room recorded (design-v1-player-limits.md 3.4). */
+  receiveIds(msg: Extract<ServerMessage, { t: "ids" }>): void;
+  /** The server's time as this page reckons it (RoomView.serverOffset), never ahead of it, or the device's own clock before any reading. New ids are dated by it. */
+  serverNow(): number;
   /** The socket lost its snapshot (it closed, or the server asked for a resync): hold ops until the next snapshot. */
   suspend(): void;
   setConnection(state: ConnectionState): void;
@@ -705,6 +733,26 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
 
   const get = () => store.getState();
 
+  /** Ops written to a socket at least once, so a reconnect tells an uncertain send from one never sent (ids.ts sentIdDead). */
+  const wrote = new WeakSet<PendingOp>();
+  /**
+   * Creates whose answer a reconnect lost while its watermark covers them
+   * (docs/design/design-v1-player-limits.md 3.4): the room's record of this
+   * member's ids says whether each landed. Out of `pending`, since the
+   * server settled their numbers, and told nothing until that answer.
+   */
+  let settling: { p: PendingOp; since: number }[] = [];
+  /** The `ids` asks still unanswered, by `k`. */
+  const idsAsked = new Set<number>();
+  let ownK = OWN_K;
+  const idsTimer = new Timer(clock);
+  const clockTimer = new Timer(clock);
+
+  const serverNow = () => {
+    const offset = get().serverOffset;
+    return offset === undefined ? clock.now() : clock.elapsed() + offset;
+  };
+
   const retainedNotices = new Map<string, string>();
   const historyRefusals = new Map<string, { head: string; toast: number | null }>();
   const history = new HistoryController({
@@ -990,16 +1038,124 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
 
   // ------------------------------------------------------------ sending
 
-  /** Sends every op not yet sent on this socket, oldest first, and stops at the first that cannot go. */
+  /** Sends every op not yet sent on this socket, oldest first, and stops at the first that cannot go, or that waits on the server's time. */
   function flush(): void {
     if (!ready || !outbox || retryTimer.pending || disposed) return;
     const now = clock.now();
     for (const p of get().pending) {
+      if (p.waitClock) break;
       if (sentAt.has(p.n)) continue;
       if (!outbox.send(p.group === undefined ? { t: "op", n: p.n, op: p.op } : { t: "op", n: p.n, op: p.op, g: p.group, ...(p.groupScope ? { groupScope: p.groupScope } : {}) })) break;
       sentAt.set(p.n, now);
+      wrote.add(p);
     }
     armAnswerTimer();
+  }
+
+  // ------------------------------------------------------------ ids (docs/design/design-v1-player-limits.md 3.4)
+
+  /**
+   * Fresh ids for what `pick` names of each op in `list`, renamed in every
+   * op of it, with `told` telling each such op's sender and moving the
+   * selection, to call after the commit. An op whose own ids change is a
+   * new send: the copy that went out under the old ones, if any, can never
+   * be taken (ids.ts sentIdDead), so it is no longer one this page wrote.
+   * An op that only names them, as a move of a token made offline, keeps
+   * what it was.
+   */
+  function reminted(list: readonly PendingOp[], pick: (p: PendingOp) => readonly string[]): { list: readonly PendingOp[]; told: () => void } {
+    const now = serverNow();
+    const renames = new Map<string, string>();
+    const owners: { onRemint: OnRemint; ids: ReadonlyMap<string, string> }[] = [];
+    const own = new Set<PendingOp>();
+    for (const p of list) {
+      const ids = pick(p);
+      if (ids.length === 0) continue;
+      const fresh = freshIds(ids, now);
+      for (const [from, to] of fresh) renames.set(from, to);
+      own.add(p);
+      if (p.onRemint) owners.push({ onRemint: p.onRemint, ids: fresh });
+    }
+    if (renames.size === 0) return { list, told: () => {} };
+    const out = list.map((p) => {
+      const op = renamed(p.op, renames);
+      if (op === p.op) return p;
+      const next: PendingOp = { ...p, op };
+      if (wrote.has(p) && !own.has(p)) wrote.add(next);
+      return next;
+    });
+    const told = () => {
+      const local = get().local;
+      const selectedIds = renamed(local.selectedIds, renames);
+      const selectedId = local.selectedId === null ? null : (renames.get(local.selectedId) ?? local.selectedId);
+      if (selectedIds !== local.selectedIds || selectedId !== local.selectedId) setLocal({ ...local, selectedId, selectedIds });
+      for (const o of owners) o.onRemint(o.ids);
+    };
+    return { list: out, told };
+  }
+
+  /** `p` once it no longer waits on the server's time. */
+  function unwaited(p: PendingOp): PendingOp {
+    if (!p.waitClock) return p;
+    const { waitClock: _waited, ...rest } = p;
+    return rest;
+  }
+
+  /**
+   * The op again after the room refused its ids for their time or version
+   * (ids.ts idTimeRefused): once, at the end of the queue, waiting unsent
+   * for a reading of the server's time before it takes fresh ids
+   * (clockCame). Null once its one retry is spent, or for an op with no
+   * new things, which is refused as it stands.
+   */
+  function retryOf(p: PendingOp): PendingOp | null {
+    if (p.retried || mintedOf(p.op).length === 0) return null;
+    return { ...p, n: nextN++, retried: true, waitClock: true };
+  }
+
+  /** What a refusal of `p` reads as: one for its ids' time, once its retry is spent, in ID_RETRY_FAILED's words. */
+  function asTold(p: PendingOp | undefined, r: Reject): Reject {
+    return p && idTimeRefused(r) && mintedOf(p.op).length > 0 ? { ...r, message: ID_RETRY_FAILED } : r;
+  }
+
+  /** Asks for a reading of the server's time, for the ops waiting on one. Without an answer they go anyway once CLOCK_WAIT_MS has passed. */
+  function askTime(): void {
+    if (ready && outbox) outbox.send({ t: "time", k: ++ownK });
+    if (!clockTimer.pending) clockTimer.set(CLOCK_WAIT_MS, clockCame);
+  }
+
+  /** A reading of the server's time came, or the wait ran out: each op waiting on one takes fresh ids, and the queue goes on. */
+  function clockCame(): void {
+    clockTimer.clear();
+    const s = get();
+    if (!s.pending.some((p) => p.waitClock)) return;
+    const { list, told } = reminted(s.pending, (p) => (p.waitClock ? mintedOf(p.op) : []));
+    commit({ pending: list.map(unwaited) });
+    told();
+    flush();
+  }
+
+  /**
+   * Asks the room which of the creates still settling it recorded for this
+   * member (receiveIds), several frames for many. One that has waited
+   * IDS_SETTLE_MS for a final answer is unknown, as every op a reconnect
+   * settled was before. Without a socket the next snapshot asks.
+   */
+  function askIds(): void {
+    idsTimer.clear();
+    const now = clock.now();
+    const gave = settling.filter((x) => now - x.since >= IDS_SETTLE_MS);
+    if (gave.length > 0) {
+      settling = settling.filter((x) => !gave.includes(x));
+      tell(gave.map((x) => x.p), () => "unknown", undefined, "snapshot");
+    }
+    if (settling.length === 0 || !ready || !outbox) return;
+    const ids = [...new Set(settling.flatMap((x) => mintedOf(x.p.op)))];
+    for (let i = 0; i < ids.length; i += MAX_IDS_ASKED) {
+      const k = ++ownK;
+      if (outbox.send({ t: "ids", k, ids: ids.slice(i, i + MAX_IDS_ASKED) })) idsAsked.add(k);
+    }
+    idsTimer.set(IDS_UNANSWERED_MS, askIds);
   }
 
   function resendAll(): void {
@@ -1044,6 +1200,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     if (opts?.onAnswer !== undefined) pendingOp.onAnswer = opts.onAnswer;
     if (opts?.quiet === true) pendingOp.quiet = true;
     if (opts?.holds !== undefined) pendingOp.holds = opts.holds;
+    if (opts?.onRemint !== undefined) pendingOp.onRemint = opts.onRemint;
     return pendingOp;
   }
 
@@ -1327,13 +1484,34 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       // hand out an `n` the server already considers settled.
       nextN = Math.max(nextN, msg.watermark + 1);
       terminal = Math.max(terminal, msg.watermark);
-      const pending = s.pending.filter((p) => p.n > msg.watermark);
       // The snapshot holds what the server made of these, but not whether it refused one: an answer the server
       // sent was lost with the socket. One it kept while this socket held no snapshot came just ahead.
       const kept = keptRefusals;
       keptRefusals = new Map();
-      const refusedNow = s.pending.filter((p) => p.n <= msg.watermark && kept.has(p.n));
-      const lost = s.pending.filter((p) => p.n <= msg.watermark && !kept.has(p.n));
+      const retries: PendingOp[] = [];
+      const reasons = new Map<number, Reject>();
+      const refusedNow = s.pending.filter((p) => {
+        const r = p.n <= msg.watermark ? kept.get(p.n) : undefined;
+        if (!r) return false;
+        const again = idTimeRefused(r) ? retryOf(p) : null;
+        if (again) retries.push(again);
+        else reasons.set(p.n, asTold(p, r));
+        return again === null;
+      });
+      const settled = s.pending.filter((p) => p.n <= msg.watermark && !kept.has(p.n));
+      // A create whose answer was lost may have been refused, so the room's record of ids says whether it landed (askIds).
+      const uncertain = settled.filter((p) => mintedOf(p.op).length > 0);
+      const lost = settled.filter((p) => !uncertain.includes(p));
+      settling = [...settling, ...uncertain.map((p) => ({ p, since: clock.now() }))];
+      idsAsked.clear();
+      // The clock frame just ahead of every snapshot is a fresh reading of the server's time. An unsent op whose ids
+      // it would refuse, or nearly, takes fresh ones in place, so offline work goes as it was made, and so does one
+      // sent under ids that can never be taken. An uncertain send that could still land keeps its ids.
+      const now = serverNow();
+      const fresh = reminted([...s.pending.filter((p) => p.n > msg.watermark), ...retries], (p) =>
+        p.waitClock ? mintedOf(p.op) : mintedOf(p.op).filter((id) => (wrote.has(p) ? sentIdDead(id, now) : unsentIdStale(id, now))),
+      );
+      const pending = fresh.list.map(unwaited);
       sentAt.clear();
       retryTimer.clear();
       retryAttempt = 0;
@@ -1349,11 +1527,11 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       // ask again.
       const accessVersion = s.accessVersion + 1;
       const joinRequestsVersion = s.joinRequestsVersion + 1;
-      const settledAsk = askSettled(lost, pending);
+      const settledAsk = askSettled(settled, pending);
       let answered: Pick<RoomStoreState, "toasts" | "refused"> & Partial<Pick<RoomStoreState, "forgetAsk">> | Record<string, never> = {};
       if (refusedNow.length > 0) {
         // Read after askSettled, whose closing toast the store holds by then.
-        const notices = refusalNotices(refusedNow.map((p) => kept.get(p.n)!), s.pending, get().toasts);
+        const notices = refusalNotices(refusedNow.map((p) => reasons.get(p.n)!), s.pending, get().toasts);
         const ask = "forgetAsk" in settledAsk ? settledAsk.forgetAsk : (s.forgetAsk ?? null);
         answered = {
           toasts: notices.toasts,
@@ -1379,10 +1557,12 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       // Told after the commit, so a sender that looks at the view finds this snapshot in it, and the refused first,
       // as an answer that came settles its op before the snapshot settles the rest with none.
       tell(refusedNow, () => "refused", (p) => {
-        const r = kept.get(p.n)!;
+        const r = reasons.get(p.n)!;
         return { code: r.code, message: r.message, text: refusalText(r.code, r.message) };
       });
       tell(lost, () => "unknown", undefined, "snapshot");
+      fresh.told();
+      askIds();
       armSweep();
       flush();
     },
@@ -1394,6 +1574,17 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       const settled = new Set<number>(msg.acks ?? []);
       for (const r of msg.rejects ?? []) settled.add(r.n);
       for (const n of settled) terminal = Math.max(terminal, n);
+      // A create refused for its ids' time goes once more (retryOf), untold. Every other refusal is told.
+      const retries: PendingOp[] = [];
+      const retried = new Set<number>();
+      const rejects = (msg.rejects ?? []).flatMap((r) => {
+        const sent = s.pending.find((p) => p.n === r.n);
+        const again = sent && idTimeRefused(r) ? retryOf(sent) : null;
+        if (!again) return [asTold(sent, r)];
+        retries.push(again);
+        retried.add(r.n);
+        return [];
+      });
       let pending = s.pending;
       let refused = s.refused;
       let trapped = s.trapped;
@@ -1443,11 +1634,11 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
           const answer = undoAnswer(op.t, { what: restored.get(n) }, "scope" in op && op.scope === "setup" ? "setup" : "play");
           renew("discard" in op && op.discard ? "Discarded this step. The game stays as it is." : answer.text, answer.tone);
         }
-        const notices = refusalNotices(msg.rejects ?? [], pending, toasts);
+        const notices = refusalNotices(rejects, pending, toasts);
         toasts = notices.toasts;
         asks.push(...notices.asks);
-        pending = pending.filter((p) => !settled.has(p.n));
-        if (msg.rejects?.length) refused = [...(refused ?? []), ...msg.rejects.map((r) => r.n)].slice(-MAX_REFUSED);
+        pending = [...pending.filter((p) => !settled.has(p.n)), ...retries];
+        if (rejects.length) refused = [...(refused ?? []), ...rejects.map((r) => r.n)].slice(-MAX_REFUSED);
         if (msg.trapped?.length) trapped = [...(trapped ?? []), ...msg.trapped].slice(-MAX_REFUSED);
         for (const n of settled) sentAt.delete(n);
         retryAttempt = 0;
@@ -1477,9 +1668,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         serverOffset = withServerReading(serverOffset, (change.value as { at?: unknown } | null)?.at);
       }
       commit({ confirmed, seq: msg.seq, pending, refused, trapped, toasts, ephemeralFloors, projectedSceneId, forgetAsk, ...(serverOffset === s.serverOffset ? {} : { serverOffset }) });
-      const refusedNow = new Map((msg.rejects ?? []).map((r) => [r.n, { code: r.code, message: r.message, text: refusalText(r.code, r.message) }]));
+      const refusedNow = new Map(rejects.map((r) => [r.n, { code: r.code, message: r.message, text: refusalText(r.code, r.message) }]));
       tell(
-        s.pending.filter((p) => settled.has(p.n)),
+        s.pending.filter((p) => settled.has(p.n) && !retried.has(p.n)),
         (p) => (refusedNow.has(p.n) ? "refused" : "taken"),
         (p) => refusedNow.get(p.n),
         undefined,
@@ -1487,6 +1678,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         new Set(msg.blocked ?? []),
       );
       if (get().ephemeralFloors !== s.ephemeralFloors) armSweep();
+      if (retries.length > 0) askTime();
       armAnswerTimer();
     },
 
@@ -1547,6 +1739,42 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       if (serverOffset !== s.serverOffset) store.setState({ serverOffset });
     },
 
+    receiveTime(at) {
+      const s = get();
+      // As every reading, the highest offset wins: the network only delays one (withServerReading).
+      const serverOffset = Math.max(s.serverOffset ?? Number.NEGATIVE_INFINITY, at - clock.elapsed());
+      if (serverOffset !== s.serverOffset) store.setState({ serverOffset });
+      clockCame();
+    },
+
+    receiveIds(msg) {
+      if (!idsAsked.delete(msg.k)) return;
+      const held = new Set(msg.held);
+      const notHeld = new Set(msg.notHeld);
+      const landed: PendingOp[] = [];
+      const again: PendingOp[] = [];
+      settling = settling.filter(({ p }) => {
+        const ids = mintedOf(p.op);
+        // One op's ids are recorded together, as it applies, so one not held means none is.
+        if (ids.some((id) => notHeld.has(id))) again.push(p);
+        else if (ids.every((id) => held.has(id))) landed.push(p);
+        else return true;
+        return false;
+      });
+      if (again.length > 0) {
+        // Never recorded, so never taken: it goes again under fresh ids, at the end of the queue, with the work it holds.
+        const queued = again.map((p) => ({ ...p, n: nextN++ }));
+        const fresh = reminted([...get().pending, ...queued], (p) => (queued.includes(p) ? mintedOf(p.op) : []));
+        commit({ pending: fresh.list });
+        fresh.told();
+      }
+      tell(landed, () => "unknown", undefined, "snapshot");
+      if (settling.length > 0 && idsAsked.size === 0) idsTimer.set(IDS_AGAIN_MS, askIds);
+      flush();
+    },
+
+    serverNow,
+
     suspend() {
       ready = false;
       // History invalidation publishes synchronously too. Gate confirmed-state
@@ -1594,6 +1822,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       retryTimer.clear();
       answerTimer.clear();
       sweepTimer.clear();
+      idsTimer.clear();
+      clockTimer.clear();
       history.dispose();
     },
   };

@@ -674,6 +674,8 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     }
     const time = timeAnswer(json);
     if (time) {
+      // Any answer is a reading of the server's clock, whoever asked: new ids are dated by it.
+      room.receiveTime(time.at);
       for (const fn of [...timeListeners]) fn(time.k, time.at);
       return;
     }
@@ -739,6 +741,9 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
         return;
       case "refusals":
         room.keepRefusals(msg.rejects);
+        return;
+      case "ids":
+        room.receiveIds(msg);
         return;
       case "wait":
         // Only a request still waiting for its snapshot has a deadline to move.
