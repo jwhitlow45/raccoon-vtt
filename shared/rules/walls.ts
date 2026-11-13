@@ -14,6 +14,7 @@ import {
   boundsOf,
   contact,
   countSplit,
+  EXACT_PIECE,
   LATTICE,
   MAX_COORD,
   MOVEMENT,
@@ -845,7 +846,7 @@ class CandidateList {
   #tops = new Int16Array(256);
   #origin = new Int32Array(256);
   #n = 0;
-  /** `free` as segments.ts Candidates has it: 0 a grid segment, 1 a stored free wall, PIECE a held build's piece. */
+  /** `free` as segments.ts Candidates has it: 0 a grid segment, 1 a stored free wall, PIECE a held build's piece, EXACT_PIECE one put back on its wall. */
   add(ax: number, ay: number, bx: number, by: number, tags: number, free: number, top = 0, origin = NO_ORIGIN): void {
     if (this.#n === this.#tags.length) {
       const grow = <T extends Float64Array | Uint8Array | Int16Array | Int32Array>(a: T): T => {
@@ -1444,9 +1445,16 @@ function candidatesOf(build: BuildSource, grid: EdgeGrid): { stored: Candidates;
   const out = new CandidateList();
   gridCandidates(grid, out);
   pillarCandidates(grid.pillars, out);
-  // A held build's free walls are pieces, which the exact split and its count leave to a plain pass (segments.ts PIECE).
-  const kind = build.held ? PIECE : 1;
-  build.free.forEach(({ wall }, i) => out.add(wall.a[0], wall.a[1], wall.b[0], wall.b[1], tagsOf(wall.f), kind, 0, -2 - i));
+  // A held build's free walls are pieces, which the exact split and its count leave to a plain pass (segments.ts PIECE). On
+  // squares one whose rounding can be undone goes back on its stored wall, which the movement tests then read as the server does.
+  const squares = !isHex(grid.grid);
+  build.free.forEach(({ wall }, i) => {
+    const tags = tagsOf(wall.f);
+    const exact = build.held && squares ? unroundedPiece(wall) : null;
+    if (!build.held) out.add(wall.a[0], wall.a[1], wall.b[0], wall.b[1], tags, 1, 0, -2 - i);
+    else if (exact) out.add(exact[0], exact[1], exact[2], exact[3], tags, EXACT_PIECE, 0, -2 - i);
+    else out.add(wall.a[0], wall.a[1], wall.b[0], wall.b[1], tags, PIECE, 0, -2 - i);
+  });
   return out.done();
 }
 
@@ -1888,6 +1896,42 @@ export function floodHexRoom(
 export const PIECE_BAND = 2 / 10_000;
 /** How far from its ends a piece's band surely holds the exact wall: twice the band, past the rounding at either end. */
 export const PIECE_END_MARGIN = 4 / 10_000;
+/** How far rounding moves a piece's coordinate, at most (decision 2): half its band. */
+const PIECE_ROUNDING = PIECE_BAND / 2;
+
+/**
+ * The stored stretch a held build's piece on squares stands for, as
+ * [ax, ay, bx, by], where the device can undo its rounding exactly
+ * (decision 2, held.ts `rounded`), else null. The movement tests then read
+ * the piece as the server reads the wall, not by its band, so a player's
+ * walk on a copy cut from held ground goes where the DM's does, a point
+ * core held at a corridor's corner included (D-261113-040). Stored ends lie
+ * on the 1/64 lattice, and so does every cut on squares but a diagonal's
+ * crossing of a cell side. Rounding moves a coordinate at most 1/10000
+ * cell, off the lattice point it left and onto no other. So an end with
+ * both coordinates on the lattice was never moved: a stored end strictly
+ * inside a cell, an end of a visible door, which players get whole, or one
+ * the scene's side clamped back. On a piece along an axis every end is a
+ * lattice point, so each moved coordinate goes back to the one lattice
+ * point within 1/10000 cell of it. A diagonal's cut end lies off the
+ * lattice, so its piece keeps the band.
+ */
+export function unroundedPiece(wall: Pick<FreeWall, "a" | "b">): [number, number, number, number] | null {
+  const [ax, ay] = wall.a;
+  const [bx, by] = wall.b;
+  const onLattice = (v: number) => Number.isInteger(v * LATTICE);
+  if (onLattice(ax) && onLattice(ay) && onLattice(bx) && onLattice(by)) return [ax, ay, bx, by];
+  const alongY = ax === bx && onLattice(ax);
+  if (!alongY && !(ay === by && onLattice(ay))) return null;
+  // The slack covers only the double nearest a coordinate on the 1/10000 grid.
+  const back = (c: number): number | null => {
+    const v = Math.round(c * LATTICE) / LATTICE;
+    return Math.abs(c - v) <= PIECE_ROUNDING * (1 + 1e-6) ? v : null;
+  };
+  const [a, b] = alongY ? [back(ay), back(by)] : [back(ax), back(bx)];
+  if (a === null || b === null || a === b) return null;
+  return alongY ? [ax, a, bx, b] : [a, ay, b, by];
+}
 
 /**
  * The preview test (ASTRA-30): whether a core of half sides (hx, hy) swept

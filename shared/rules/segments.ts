@@ -41,6 +41,21 @@ export const SIGHT_POTENTIAL = 8;
  * own previews, and the server's exact walls decide every action.
  */
 export const PIECE = 2;
+/**
+ * A piece of a held build on squares that the device put back on its
+ * stored wall (walls.ts unroundedPiece), its ends on the lattice again. The
+ * movement tests read it exactly, as the server reads the wall, and the
+ * split and its count still take it as a piece: a copy holds a long wall
+ * as several pieces, so it could pass the caps the stored build is under,
+ * and a split over them leaves out free walls.
+ */
+export const EXACT_PIECE = 3;
+
+/** Whether a segment's `free` marks a held build's piece, rounded or put back. */
+export function heldPiece(free: number): boolean {
+  return free === PIECE || free === EXACT_PIECE;
+}
+
 /** How far from a piece the per-cell index still files it: the band the exact wall lies within (walls.ts PIECE_BAND). */
 const PIECE_REACH = 2 / 10_000;
 
@@ -153,7 +168,8 @@ export type Candidates = {
    * 1 for a free wall, which may cross or touch anything. 0 for a grid
    * segment or a pillar side: those meet each other only at grid points or
    * not at all, so they are split only where a free wall meets them.
-   * PIECE for a piece of a player's held build, off the lattice.
+   * PIECE for a piece of a player's held build, off the lattice, and
+   * EXACT_PIECE for one the device put back on it.
    */
   readonly free: Uint8Array;
   readonly n: number;
@@ -253,8 +269,8 @@ function forEachPair(c: Candidates, visit: (i: number, j: number, boxes: boolean
     const y0 = lo[4 * i + 1]!;
     const x1 = lo[4 * i + 2]!;
     const y1 = lo[4 * i + 3]!;
-    // A piece's ends lie off the lattice the counting sort files by, so the exact pass never meets it.
-    if (free[i] === PIECE || x1 < fx0 || x0 > fx1 || y1 < fy0 || y0 > fy1) {
+    // A rounded piece's ends lie off the lattice the counting sort files by, so the exact pass never meets it, and one put back stays out too (EXACT_PIECE).
+    if (heldPiece(free[i]!) || x1 < fx0 || x0 > fx1 || y1 < fy0 || y0 > fy1) {
       first[i] = 1;
       last[i] = 0;
       continue;
@@ -643,16 +659,17 @@ export function splitSegments(c: Candidates): Pieces {
   for (const list of members.values()) partitionLine(c, list, firstPoint, byPoint, P, emit);
 
   const split = { xy: outXy.data.slice(0, outXy.length), tags: Uint8Array.from(outTags), n: outTags.length };
-  return c.free.includes(PIECE) ? splitPieces(split, c) : split;
+  return c.free.some(heldPiece) ? splitPieces(split, c) : split;
 }
 
 /*
- * The plain pass for a held build's pieces (PIECE): the exact split above
- * has left them whole, so each piece is cut, and so is everything it
- * crosses, at their crossing, found by the exact predicate and placed by
- * one division, in a pass bucketed by cell. Two segments that only touch
- * stay whole, as a sweep handles a T. A device's area sweep alone reads
- * the result, to draw coverage: no rule the server keeps reads it.
+ * The plain pass for a held build's pieces (PIECE, EXACT_PIECE): the exact
+ * split above has left them whole, so each piece is cut, and so is
+ * everything it crosses, at their crossing, found by the exact predicate
+ * and placed by one division, in a pass bucketed by cell. Two segments
+ * that only touch stay whole, as a sweep handles a T. A device's area
+ * sweep alone reads the result, to draw coverage: no rule the server keeps
+ * reads it.
  */
 function splitPieces(split: Pieces, c: Candidates): Pieces {
   const xy: number[] = [];
@@ -665,7 +682,7 @@ function splitPieces(split: Pieces, c: Candidates): Pieces {
   }
   // splitSegments emits a lone segment whole and in order, so the pieces are among its output as they came. Mark them by position.
   const pieceKeys = new Set<string>();
-  for (let k = 0; k < c.n; k++) if (c.free[k] === PIECE) pieceKeys.add(`${c.xy[4 * k]},${c.xy[4 * k + 1]},${c.xy[4 * k + 2]},${c.xy[4 * k + 3]},${c.tags[k]}`);
+  for (let k = 0; k < c.n; k++) if (heldPiece(c.free[k]!)) pieceKeys.add(`${c.xy[4 * k]},${c.xy[4 * k + 1]},${c.xy[4 * k + 2]},${c.xy[4 * k + 3]},${c.tags[k]}`);
   for (let k = 0; k < split.n; k++) if (pieceKeys.has(`${xy[4 * k]},${xy[4 * k + 1]},${xy[4 * k + 2]},${xy[4 * k + 3]},${tags[k]}`)) isPiece[k] = true;
   const n = tags.length;
   const cuts: number[][] = Array.from({ length: n }, () => []);

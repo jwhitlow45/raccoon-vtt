@@ -6,7 +6,7 @@ import { projectState } from "../project.ts";
 import { P1 } from "../testutil.ts";
 import { encodeTile } from "./fog.ts";
 import { ownWalk, legBlocker, sweptTouches } from "./movement.ts";
-import { contact, PIECE } from "./segments.ts";
+import { contact, EXACT_PIECE, PIECE } from "./segments.ts";
 import { indexBuild, isPiece, LEDGE, pieceBlocks, pieceTouches, PIECE_BAND, sceneWalls, type WallSet } from "./walls.ts";
 import { token } from "../testutil.ts";
 
@@ -108,8 +108,11 @@ describe("the piece path (5.2, ASTRA-10, LK-30)", () => {
     const w = wallsOf(view(state));
     let n = 0;
     for (let k = 0; k < w.stored.n; k++) if (isPiece(w, k)) n++;
-    assert.ok(n >= 3);
+    // The diagonal's two pieces, cut at x = 4, keep their band. The upright wall is back on its stored wall (unroundedPiece).
+    assert.equal(n, 2);
     assert.equal(w.stored.free.filter((f) => f === PIECE).length, n);
+    const back = [...w.stored.free.keys()].filter((k) => w.stored.free[k] === EXACT_PIECE).map((k) => [...w.stored.xy.subarray(4 * k, 4 * k + 4)]);
+    assert.deepEqual(back, [[3.5, 0.25, 3.5, 3.75]]);
     const p = w.pieces;
     for (let i = 0; i < p.n; i++) {
       for (let j = i + 1; j < p.n; j++) {

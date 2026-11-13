@@ -299,6 +299,10 @@ export function pinches(segs: readonly (readonly [number, number, number, number
  * forgets to choose then errs only toward sending. A preview asks for the
  * other test by reading its build through `previewChunks`, which marks the
  * chunk collection itself, since that is what every rule passes along.
+ * On squares a piece whose rounding can be undone, one along an axis or
+ * with both ends where they were stored, is put back on its stored wall
+ * (walls.ts unroundedPiece, segments.ts EXACT_PIECE) and read exactly by
+ * both, as the server reads the wall.
  */
 
 type PieceTest = "gate" | "preview";
