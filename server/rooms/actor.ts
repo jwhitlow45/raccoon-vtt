@@ -2662,18 +2662,17 @@ export class RoomActor {
    * whatever the steps' cursor, so a member's or character's change before
    * a walk still counts. Like the explore it is never refused and runs none
    * of an op's checks: its writes spend a reserve every size check holds
-   * (sizeGuard.ts). A step that throws fails closed: it is logged and the
-   * batch commits with nothing numbered.
+   * (sizeGuard.ts). A step that throws fails closed, whether working out
+   * its ops or applying one: it is logged and the batch commits without
+   * them, since a throw out of the close would leave every answer of the
+   * batch unsent and nothing stored.
    */
   #meet(batch: Batch): void {
-    let ops: OpOf<"sys.meet">[];
     try {
-      ops = this.#opts.meetStep(batch.before, this.#staged.state, batch.touched);
+      for (const op of this.#opts.meetStep(batch.before, this.#staged.state, batch.touched)) this.#appendServerOp(batch, op, "meet step");
     } catch (err) {
       this.#log.error({ err, roomId: this.roomId }, "meet step failed, the batch commits with nothing numbered");
-      return;
     }
-    for (const op of ops) this.#appendServerOp(batch, op, "meet step");
   }
 
   /**
