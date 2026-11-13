@@ -486,6 +486,7 @@ Tiers:
 **Later**
 
 - Weather overlays.
+  - Built (docs/design/design-v1-weather.md). A scene's Light and weather group sets Clear, Rain, Snow, Fog, Falling leaves, Ash or Sand at a light or heavy strength, and a wind with its direction, drawn over the map for everyone on that scene and kept with the ground through a pan or zoom. Heavy rain, heavy snow and a sandstorm give Disadvantage on Wisdom (Perception) checks, and a strong wind on ranged weapon attacks, while fog only reminds. Weather never hides anything from players. Each device shows it Moving, Still or Off, and one that cannot keep up halves it, then holds it still.
 
 ## 12. Drawing, pings and annotation
 

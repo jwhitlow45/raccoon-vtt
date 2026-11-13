@@ -15,16 +15,19 @@ software for D&D groups playing the 2024 rules, made for phones first. New
 work favors what a group needs during a session, whether everyone sits
 around one table or some players join from elsewhere.
 
-**Build the features waiting in the "Later" tier,** as time allows. These
-are the ones [mvp.md](docs/design/mvp.md) lists today:
+**Finish the "Later" tier** of [mvp.md](docs/design/mvp.md). Most of it
+is built:
 
 - Join requests that the DM approves.
-- Several floors in one scene. Phases 1 to 3 are built: floors in a scene, a Floor button and menu, Move to floor for the DM, stairs and ladders that players take themselves, floors from Universal VTT files and generated dungeons, and the walking ruler over stairs. Openings and falls and sight between floors come next.
-- Animated maps. They are built, behind a switch the server's owner turns on.
-- A dungeon generator. It is built, on squares and hexes, with five themes, secret doors, lights, dressing, a DM key, edits to single rooms and adding a wing to an existing scene.
-- Weather overlays.
-- Ambient music and sound effects, kept in sync for everyone.
-- An in-game calendar and time of day.
+- Animated maps, behind a switch the server's owner turns on.
+- A dungeon generator, on squares and hexes, with five themes, secret doors, lights, dressing, a DM key, edits to single rooms and adding a wing to an existing scene.
+- Weather on the map, with its effect on rolls.
+- Music, background sounds and effects, kept in sync for everyone, behind the server's sound switch.
+- An in-game calendar and clock, with effects that last a length of time and light that follows the time of day.
+- Several floors in one scene: floors with a Floor button and menu, Move to floor for the DM, stairs and ladders that players take themselves, floors from Universal VTT files and generated dungeons, and the walking ruler over stairs.
+
+What remains of it is the next part of floors: openings and falls between
+floors, and sight from one floor to another.
 
 **Offer a desktop app.** A download for Windows, macOS and Linux that runs
 the server on the DM's own computer, so players on the same network join in
