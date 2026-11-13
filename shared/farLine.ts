@@ -1,3 +1,4 @@
+import type { LimitKind } from "./limits.ts";
 import { isPoseOp, type Op, type OpType } from "./protocol.ts";
 
 /**
@@ -236,4 +237,19 @@ function byFieldExempt(op: Op): boolean {
     default:
       return false;
   }
+}
+
+/** The op types that can put a thing into a seat's class: creates of tokens, areas, drawings and rows, an area attached or detached, and restores. */
+const SEAT_TYPES: ReadonlySet<OpType> = new Set<OpType>(["token.create", "template.create", "template.update", "drawing.create", "encounter.add", "undo", "redo", "sys.restore"]);
+
+/**
+ * The kind the live limits judge an op as (shared/limits.ts admitLimits).
+ * `restoresMove` says a restore takes back or brings back a move, which is
+ * bookkeeping as the move was. Any other restore meets the line as what it
+ * brings back would.
+ */
+export function opKind(op: Op, restoresMove = false): LimitKind {
+  const rule = farRule(op);
+  const far = FAR_TREATMENT[op.t] === "deletion" ? "deletion" : rule === "exempt" || (rule === "restore" && restoresMove) ? "exempt" : "meets";
+  return { far, seats: SEAT_TYPES.has(op.t) };
 }

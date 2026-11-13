@@ -1,5 +1,6 @@
 import { chunkKey, compareLogIds, doorChunk, holderChunkKey, holderTileKey, keys, parseKey, partsKey, readEntity, sightOf, tileKey, viewMapsOf, wallChunk, writeEntity, type EntityKey, type SightMap } from "./keys.ts";
 import { projectCorrection } from "./undoCorrection.ts";
+import type { SeatView } from "./limits.ts";
 import {
   CHUNK_CELLS,
   FOG_SUBCELLS,
@@ -1196,6 +1197,24 @@ export function areaSeenMark(at: RoomState, template: AreaTemplate, token: Token
 function tokenVisibleById(ctx: Ctx, tokenId: string, revealedSeen = false): boolean {
   const token = ownEntry(ctx.state.tokens, tokenId);
   return token !== undefined && tokenVisibleTo(ctx, token, revealedSeen);
+}
+
+/**
+ * The test of a player's own copy that player limits count by
+ * (shared/limits.ts SeatView): the creatures their projection holds, the
+ * rows their tracker shows and the floors they hold, each by the rule the
+ * projection itself reads, so a seat's count is the copy's.
+ */
+export function seatView(state: RoomState, memberId: string): SeatView {
+  const ctx = ctxOf(state, { memberId, role: "player" }, { sceneId: null });
+  return {
+    sees: (tokenId) => tokenVisibleById(ctx, tokenId),
+    showsRow: (entryId) => {
+      const entry = ctx.paused ? undefined : state.encounter?.entries.find((e) => e.id === entryId);
+      return entry !== undefined && entryShown(ctx, entry);
+    },
+    holds: (sceneId) => ctx.floors.has(sceneId),
+  };
 }
 
 /**

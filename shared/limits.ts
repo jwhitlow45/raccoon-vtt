@@ -1,6 +1,6 @@
 import { roomHandoutPages } from "./handouts.ts";
 import { isWritable } from "./writable.ts";
-import { CHUNK_CELLS, HEIGHTS_CHARS, type BuildChunk, type CompanionBlock, type CustomMonster, type JournalPage, type RoomState, type Scene, type Token } from "./model.ts";
+import { CHUNK_CELLS, HEIGHTS_CHARS, type BuildChunk, type Character, type CompanionBlock, type CustomMonster, type Drawing, type InitEntry, type JournalPage, type RoomState, type Scene, type Token } from "./model.ts";
 import { ownEntry } from "./records.ts";
 import { floorsOf, openFloor } from "./rules/floors.ts";
 import type { SoundUse } from "./sound.ts";
@@ -1092,7 +1092,16 @@ function companionBlockBytes(block: CompanionBlock): number {
  * that does totals the blocks by character again, each block's size
  * measured once.
  */
-const blockVerdicts = new WeakMap<object, LimitCheck>();
+const blockVerdicts = { today: new WeakMap<object, LimitCheck>(), player: new WeakMap<object, LimitCheck>(), dm: new WeakMap<object, LimitCheck>() };
+
+/**
+ * Whose limits a block verdict reads (player limits): `today` every cap
+ * over every block, as a room import checks it; `player` the caps on one
+ * block and on one character, whose blocks are all in its owners' copies;
+ * `dm` those and the room's totals over the blocks of characters no player
+ * owns, since players' characters keep their blocks within their own caps.
+ */
+type BlockRole = keyof typeof blockVerdicts;
 
 /**
  * Companion stat blocks (docs/design/design-v1-companion-stat-blocks.md 3.4): each
@@ -1102,24 +1111,30 @@ const blockVerdicts = new WeakMap<object, LimitCheck>();
  * character and go with theirs, so absolute caps refuse only an op that
  * adds to them.
  */
-function checkCompanionBlocks(state: RoomState): LimitCheck {
+function checkCompanionBlocks(state: RoomState, role: BlockRole = "today"): LimitCheck {
   const collection = state.companionBlocks;
-  const known = blockVerdicts.get(collection);
+  const known = blockVerdicts[role].get(collection);
   if (known) return known;
-  const verdict = companionBlocksVerdict(state);
-  if (!isWritable(collection)) blockVerdicts.set(collection, verdict);
+  const verdict = companionBlocksVerdict(state, role);
+  if (!isWritable(collection)) blockVerdicts[role].set(collection, verdict);
   return verdict;
 }
 
-function companionBlocksVerdict(state: RoomState): LimitCheck {
+/** Whether a player owns the block's character, so the room's totals leave the block to its character's caps (BlockRole `dm`). */
+function playersBlock(state: RoomState, block: CompanionBlock): boolean {
+  return (ownEntry(state.characters, block.characterId)?.ownerIds ?? []).some((id) => ownEntry(state.members, id)?.kind === "player");
+}
+
+function companionBlocksVerdict(state: RoomState, role: BlockRole): LimitCheck {
   const blocks = Object.values(state.companionBlocks).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  if (blocks.length > LIMITS.companionBlocksPerRoom) return over(`The room can hold at most ${n(LIMITS.companionBlocksPerRoom)} companion stat blocks. Delete one first.`);
+  const counted = role === "dm" ? blocks.filter((block) => !playersBlock(state, block)) : blocks;
+  if (role !== "player" && counted.length > LIMITS.companionBlocksPerRoom) return over(`The room can hold at most ${n(LIMITS.companionBlocksPerRoom)} companion stat blocks. Delete one first.`);
   const perCharacter = new Map<string, { count: number; bytes: number }>();
   let total = 0;
   for (const block of blocks) {
     const bytes = companionBlockBytes(block);
     if (bytes > LIMITS.companionBlockBytes) return over(`A stat block is at most ${n(LIMITS.companionBlockBytes / 1024)} KiB.`);
-    total += bytes;
+    if (role !== "dm" || !playersBlock(state, block)) total += bytes;
     const held = perCharacter.get(block.characterId) ?? { count: 0, bytes: 0 };
     held.count++;
     held.bytes += bytes;
@@ -1132,7 +1147,7 @@ function companionBlocksVerdict(state: RoomState): LimitCheck {
       return over(`${name}'s stat blocks can take at most ${n(LIMITS.companionBlockBytesPerCharacter / 1024)} KiB together. Delete one first.`);
     }
   }
-  if (total > LIMITS.companionBlocksBytes) return over(`The room can hold at most ${n(LIMITS.companionBlocksBytes / 1024 / 1024)} MiB of companion stat blocks. Delete one first.`);
+  if (role !== "player" && total > LIMITS.companionBlocksBytes) return over(`The room can hold at most ${n(LIMITS.companionBlocksBytes / 1024 / 1024)} MiB of companion stat blocks. Delete one first.`);
   return { ok: true };
 }
 
@@ -1415,7 +1430,7 @@ export type SeatView = {
 };
 export type SeatViewOf = (state: RoomState) => SeatView;
 
-/** What one member's seats count in a scope: `sceneId` names the floor, and tokens and riding areas count across its scene. */
+/** What one member's seats count in a scope: `sceneId` names the floor, tokens and riding areas count across its scene, and rows across the fight. */
 export type SeatCounts = Record<SeatName, number>;
 
 /** The things seats hold in one scene, for every member together, without the view test: the room caps count only the rest. */
@@ -1429,37 +1444,321 @@ export type SeatHeld = {
   casts: ReadonlySet<string>;
 };
 
-/** One member's seat counts in `sceneId`'s scopes, over the things their view of `state` holds. */
-export function seatCounts(state: RoomState, memberId: string, sceneId: string, view: SeatView): SeatCounts {
-  void state;
-  void memberId;
-  void sceneId;
-  void view;
-  throw new Error("seatCounts lands after the contract");
+/** The character whose owners a token's seat belongs to: its own character, or the one it is a companion of. Lent monsters have none. */
+function seatCharacter(state: RoomState, token: Token): Character | undefined {
+  const of = token.companion?.of ?? ("ref" in token.actor ? token.actor.ref : undefined);
+  return of === undefined ? undefined : ownEntry(state.characters, of);
 }
+
+/** Whether the row is one of the member's own: of a creature they own, directly or through its character, or of their character. */
+function ownsRow(state: RoomState, memberId: string, entry: InitEntry): boolean {
+  if (entry.characterId !== undefined) {
+    if (ownEntry(state.characters, entry.characterId)?.ownerIds.includes(memberId)) return true;
+  }
+  if (entry.tokenId === undefined) return false;
+  const token = ownEntry(state.tokens, entry.tokenId);
+  if (!token) return false;
+  return token.ownerIds.includes(memberId) || (seatCharacter(state, token)?.ownerIds.includes(memberId) ?? false);
+}
+
+/** The scene `sceneId` belongs to with all its floors, the scope of the token and riding area seats. */
+function sceneGroup(state: RoomState, sceneId: string): ReadonlySet<string> {
+  return new Set(floorsOf(state, sceneId).map((s) => s.id)).add(sceneId);
+}
+
+/** Whether the member's view holds a drawing: theirs to see on a held floor, with every creature it is kept on in sight. */
+function drawingHeld(drawing: Drawing, view: SeatView): boolean {
+  return drawing.visibility === "all" && view.holds(drawing.sceneId) && (drawing.anchors ?? []).every((id) => id === null || view.sees(id));
+}
+
+/** One member's seat counts in `sceneId`'s scopes, over the things their view of `state` holds. With no scene, only the rows. */
+export function seatCounts(state: RoomState, memberId: string, sceneId: string | null, view: SeatView): SeatCounts {
+  const counts: SeatCounts = { tokens: 0, ridingAreas: 0, freeAreas: 0, drawings: 0, pointValues: 0, rows: 0 };
+  for (const entry of state.encounter?.entries ?? []) if (ownsRow(state, memberId, entry) && view.showsRow(entry.id)) counts.rows++;
+  if (sceneId === null) return counts;
+  const group = sceneGroup(state, sceneId);
+  for (const token of Object.values(state.tokens)) {
+    if (!group.has(token.sceneId) || !seatCharacter(state, token)?.ownerIds.includes(memberId)) continue;
+    if (view.sees(token.id)) counts.tokens++;
+  }
+  for (const template of Object.values(state.templates)) {
+    if (template.ownerId !== memberId || template.visibility !== "all") continue;
+    if (template.attachedTo !== undefined) {
+      if (group.has(template.sceneId) && view.sees(template.attachedTo)) counts.ridingAreas++;
+    } else if (template.sceneId === sceneId && view.holds(sceneId)) counts.freeAreas++;
+  }
+  for (const drawing of Object.values(state.drawings)) {
+    if (drawing.ownerId !== memberId || drawing.sceneId !== sceneId || !drawingHeld(drawing, view)) continue;
+    counts.drawings++;
+    counts.pointValues += drawing.points.length;
+  }
+  return counts;
+}
+
+const SEAT_ORDER: readonly SeatName[] = ["tokens", "ridingAreas", "freeAreas", "drawings", "pointValues", "rows"];
 
 /**
  * A player's op against their seats: refused `quota` with that seat's
  * words when it raises a count past its seat. Only an op that puts a
  * thing into a seat's class raises one, so a member over a seat by the
- * DM's doing is refused only their next op into that class.
+ * DM's doing is refused only their next op into that class. Both counts
+ * read the member's own view of their state, so they are the copy's.
  */
-export function seatCheck(before: RoomState, after: RoomState, memberId: string, sceneId: string, viewOf: SeatViewOf): LimitCheck {
-  void before;
-  void after;
-  void memberId;
-  void sceneId;
-  void viewOf;
-  throw new Error("seatCheck lands after the contract");
+export function seatCheck(before: RoomState, after: RoomState, memberId: string, sceneId: string | null, viewOf: SeatViewOf): LimitCheck {
+  const now = seatCounts(after, memberId, sceneId, viewOf(after));
+  if (SEAT_ORDER.every((seat) => now[seat] <= SEAT[seat])) return { ok: true };
+  const was = seatCounts(before, memberId, sceneId, viewOf(before));
+  for (const seat of SEAT_ORDER) if (now[seat] > SEAT[seat] && now[seat] > was[seat]) return over(SEAT_FULL[seat]);
+  return { ok: true };
+}
+
+/** The first player owner by id of a thing several may own: its seat is theirs alone. */
+function firstPlayer(state: RoomState, ownerIds: readonly string[]): string | undefined {
+  let first: string | undefined;
+  for (const id of ownerIds) if (ownEntry(state.members, id)?.kind === "player" && (first === undefined || id < first)) first = id;
+  return first;
+}
+
+function byId<T extends { id: string }>(list: T[]): T[] {
+  return list.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/** Each member's things of one seat's class, first by id, up to `most` each. */
+function heldFirst<T extends { id: string }>(things: Iterable<T>, ownerOf: (thing: T) => string | undefined, most: number): T[] {
+  const per = new Map<string, number>();
+  const out: T[] = [];
+  for (const thing of byId([...things])) {
+    const owner = ownerOf(thing);
+    if (owner === undefined) continue;
+    const held = per.get(owner) ?? 0;
+    if (held >= most) continue;
+    per.set(owner, held + 1);
+    out.push(thing);
+  }
+  return out;
 }
 
 /**
- * The things seats hold in `sceneId`'s scopes: for each member, the first
+ * The things seats hold in `sceneId`'s scopes, or with no scene only the
+ * rows and asks: for each member, the first
  * by id of what their seats count, up to each seat's number, with no view
- * test. A thing with several player owners is its first owner's by id.
+ * test, so a seat-held thing out of its owner's sight for a moment is still
+ * that seat's. A thing with several player owners is its first owner's by id.
  */
-export function seatHeld(state: RoomState, sceneId: string): SeatHeld {
-  void state;
-  void sceneId;
-  throw new Error("seatHeld lands after the contract");
+export function seatHeld(state: RoomState, sceneId: string | null): SeatHeld {
+  const group: ReadonlySet<string> = sceneId === null ? new Set() : sceneGroup(state, sceneId);
+  const player = (id: string) => (ownEntry(state.members, id)?.kind === "player" ? id : undefined);
+  const tokens = heldFirst(
+    Object.values(state.tokens).filter((t) => group.has(t.sceneId)),
+    (t) => {
+      const character = seatCharacter(state, t);
+      return character ? firstPlayer(state, character.ownerIds) : undefined;
+    },
+    SEAT.tokens,
+  );
+  const riding = heldFirst(
+    Object.values(state.templates).filter((t) => t.attachedTo !== undefined && group.has(t.sceneId)),
+    (t) => player(t.ownerId),
+    SEAT.ridingAreas,
+  );
+  const free = heldFirst(
+    Object.values(state.templates).filter((t) => t.attachedTo === undefined && sceneId !== null && t.sceneId === sceneId),
+    (t) => player(t.ownerId),
+    SEAT.freeAreas,
+  );
+  const drawings = heldFirst(
+    Object.values(state.drawings).filter((d) => sceneId !== null && d.sceneId === sceneId),
+    (d) => player(d.ownerId),
+    SEAT.drawings,
+  );
+  const points = new Map<string, number>();
+  for (const d of drawings) points.set(d.ownerId, (points.get(d.ownerId) ?? 0) + d.points.length);
+  let pointValues = 0;
+  for (const held of points.values()) pointValues += Math.min(held, SEAT.pointValues);
+  const rows = heldFirst(
+    state.encounter?.entries ?? [],
+    (e) => {
+      const owners = new Set<string>();
+      for (const id of Object.keys(state.members)) if (ownsRow(state, id, e)) owners.add(id);
+      return firstPlayer(state, [...owners]);
+    },
+    SEAT.rows,
+  );
+  const casts = heldFirst(Object.values(state.casts), (c) => player(c.by), ASKS_PER_MEMBER_SCENE);
+  return {
+    tokens: new Set(tokens.map((t) => t.id)),
+    templates: new Set([...riding, ...free].map((t) => t.id)),
+    drawings: new Set(drawings.map((d) => d.id)),
+    pointValues,
+    rows: new Set(rows.map((r) => r.id)),
+    casts: new Set(casts.map((c) => c.id)),
+  };
+}
+
+/** Who sent an op, as the live limits read it: a player's seats need their member id and their own view. */
+export type LimitSender = { role: "dm" } | { role: "player"; memberId: string; viewOf: SeatViewOf };
+
+/**
+ * What kind of op the live limits judge (shared/farLine.ts opKind): a
+ * deletion meets no count, an exempt op no far line, and `seats` an op
+ * that can put a thing into a seat's class (a create, a restore, an area
+ * attached or detached).
+ */
+export type LimitKind = { far: "deletion" | "exempt" | "meets"; seats: boolean };
+
+/**
+ * The live limits on the state an op would produce, for one scene (or
+ * none), as the actor admits it. A player's op meets the public counts,
+ * the rules on one thing and their seats. The DM's meets the room caps
+ * over the rest, what no seat holds, and only when it adds to the total
+ * the cap counts. Both meet the far line unless the kind is exempt. A
+ * deletion meets nothing. `checkLimits` stays today's rules, which a room
+ * import may pass instead of the far line.
+ */
+export function admitLimits(state: RoomState, sceneId: string | null, before: RoomState, sender: LimitSender, kind: LimitKind): LimitCheck {
+  if (kind.far === "deletion") return { ok: true };
+  const near = sender.role === "player" ? playerLimits(state, sceneId, before, sender, kind) : restLimits(state, sceneId, before);
+  if (!near.ok) return near;
+  return kind.far === "meets" ? farLimits(state, sceneId, before) : { ok: true };
+}
+
+/** The limits a player's op meets besides the far line: the counts every copy holds, the rules on one thing, and their own seats. */
+function playerLimits(state: RoomState, sceneId: string | null, before: RoomState, sender: Extract<LimitSender, { role: "player" }>, kind: LimitKind): LimitCheck {
+  if (Object.keys(state.characters).length > LIMITS.charactersPerRoom) return roomFull(`${n(LIMITS.charactersPerRoom)} characters`);
+  if (Object.keys(state.members).length > LIMITS.membersPerRoom) return roomFull(`${n(LIMITS.membersPerRoom)} members`);
+  const blocks = checkCompanionBlocks(state, "player");
+  if (!blocks.ok) return blocks;
+  for (const scene of Object.values(state.scenes)) {
+    if (scene.bounds.w > LIMITS.sceneCells || scene.bounds.h > LIMITS.sceneCells) return over(`a scene is at most ${n(LIMITS.sceneCells)} cells a side`);
+  }
+  if (sceneId !== null) {
+    for (const d of Object.values(state.drawings)) {
+      if (d.sceneId === sceneId && d.points.length > LIMITS.drawingPointValues) return over(`a drawing has at most ${n(LIMITS.drawingPointValues)} point values`);
+    }
+  }
+  return kind.seats ? seatCheck(before, state, sender.memberId, sceneId, sender.viewOf) : { ok: true };
+}
+
+/** The counts one scene's caps read: tokens and areas across its floors, drawings and their point values on the floor. */
+type SceneCounts = { tokens: number; templates: number; drawings: number; points: number };
+
+function sceneCounts(state: RoomState, sceneId: string): SceneCounts {
+  const group = sceneGroup(state, sceneId);
+  const counts: SceneCounts = { tokens: 0, templates: 0, drawings: 0, points: 0 };
+  for (const t of Object.values(state.tokens)) if (group.has(t.sceneId)) counts.tokens++;
+  for (const t of Object.values(state.templates)) if (group.has(t.sceneId)) counts.templates++;
+  for (const d of Object.values(state.drawings)) {
+    if (d.sceneId !== sceneId) continue;
+    counts.drawings++;
+    counts.points += d.points.length;
+  }
+  return counts;
+}
+
+/** The counts no seat holds: the DM's part, which the room caps read. */
+function restOf(counts: SceneCounts, held: SeatHeld): SceneCounts {
+  return { tokens: counts.tokens - held.tokens.size, templates: counts.templates - held.templates.size, drawings: counts.drawings - held.drawings.size, points: counts.points - held.pointValues };
+}
+
+function rowCount(state: RoomState): number {
+  return state.encounter?.entries.length ?? 0;
+}
+
+/**
+ * Today's room caps for the DM and the server, over the rest: a count
+ * refuses only when the op adds to the total it counts and the rest is
+ * past the cap (D-261110-263), so a hide, a hand-over or a roster change
+ * never meets one, and a move into a full scene still does.
+ */
+function restLimits(state: RoomState, sceneId: string | null, before: RoomState): LimitCheck {
+  if (Object.keys(state.scenes).length > LIMITS.scenesPerRoom) return roomFull(`${n(LIMITS.scenesPerRoom)} scenes`);
+  if (Object.keys(state.characters).length > LIMITS.charactersPerRoom) return roomFull(`${n(LIMITS.charactersPerRoom)} characters`);
+  if (Object.keys(state.members).length > LIMITS.membersPerRoom) return roomFull(`${n(LIMITS.membersPerRoom)} members`);
+  if (Object.keys(state.handouts).length > LIMITS.handoutsPerRoom) return roomFull(`${n(LIMITS.handoutsPerRoom)} handouts`);
+  const monsters = checkMonsters(state);
+  if (!monsters.ok) return monsters;
+  if (Object.keys(state.srdImages).length > LIMITS.srdImagesPerRoom) return roomFull(`${n(LIMITS.srdImagesPerRoom)} SRD monster images`);
+  if (Object.keys(state.savedEncounters).length > LIMITS.savedEncountersPerRoom) return roomFull(`${n(LIMITS.savedEncountersPerRoom)} saved encounters`);
+  const roomHeld = seatHeld(state, sceneId);
+  const rows = rowCount(state);
+  if (rows > rowCount(before) && rows - roomHeld.rows.size > LIMITS.encounterRows) return roomFull(`${n(LIMITS.encounterRows)} initiative rows`);
+  const journal = checkJournal(state);
+  if (!journal.ok) return journal;
+  const blocks = checkCompanionBlocks(state, "dm");
+  if (!blocks.ok) return blocks;
+  const handoutPages = checkHandoutPages(state, before);
+  if (!handoutPages.ok) return handoutPages;
+  if (Object.keys(state.rolls).length > LIMITS.openRollsPerRoom) return over(`at most ${n(LIMITS.openRollsPerRoom)} roll requests can be open at once. Close one first`);
+  const casts = Object.keys(state.casts).length;
+  if (casts > Object.keys(before.casts).length && casts - roomHeld.casts.size > LIMITS.openCastsPerRoom) {
+    return over(`at most ${n(LIMITS.openCastsPerRoom)} asks for saves can wait at once. The DM resolves one first`);
+  }
+  for (const scene of Object.values(state.scenes)) {
+    if (scene.bounds.w > LIMITS.sceneCells || scene.bounds.h > LIMITS.sceneCells) return over(`a scene is at most ${n(LIMITS.sceneCells)} cells a side`);
+  }
+  if (sightHoldersRaised(state, before)) return over(SIGHT_HOLDERS_FULL);
+  if (sceneId === null) return { ok: true };
+  const now = sceneCounts(state, sceneId);
+  const was = sceneCounts(before, sceneId);
+  const rest = restOf(now, roomHeld);
+  for (const d of Object.values(state.drawings)) {
+    if (d.sceneId === sceneId && d.points.length > LIMITS.drawingPointValues) return over(`a drawing has at most ${n(LIMITS.drawingPointValues)} point values`);
+  }
+  if (now.tokens > was.tokens && rest.tokens > LIMITS.tokensPerScene) return sceneFull(`${n(LIMITS.tokensPerScene)} tokens`);
+  if (now.templates > was.templates && rest.templates > LIMITS.templatesPerScene) return sceneFull(`${n(LIMITS.templatesPerScene)} areas`);
+  if (now.drawings > was.drawings && rest.drawings > LIMITS.drawingsPerScene) return sceneFull(`${n(LIMITS.drawingsPerScene)} drawings`);
+  if (now.points > was.points && rest.points > LIMITS.drawingPointValuesPerScene) return sceneFull(`${n(LIMITS.drawingPointValuesPerScene)} drawing point values`);
+  let labels = 0;
+  for (const l of Object.values(state.labels)) if (l.sceneId === sceneId) labels++;
+  if (labels > LIMITS.labelsPerScene) return sceneFull(`${n(LIMITS.labelsPerScene)} labels`);
+  const draft = ownEntry(state.fogDrafts, sceneId);
+  if (draft && draft.ops.length > LIMITS.fogDraftOpsPerScene) return sceneFull(`${n(LIMITS.fogDraftOpsPerScene)} fog changes in its draft`);
+  return checkMapLimits(state, sceneId, before, "dm");
+}
+
+/** A far count: the DM's part rounded up to its step and the players' part exactly, so nothing reads the DM's part closer than a step. */
+function farCount(total: number, held: number): number {
+  return roundUp(total - held, FAR.countStep) + held;
+}
+
+/** The room's companion blocks, their count and bytes. The far line reads each rounded up to its step. */
+function blockTotals(state: RoomState): { count: number; bytes: number } {
+  let bytes = 0;
+  const blocks = Object.values(state.companionBlocks);
+  for (const block of blocks) bytes += companionBlockBytes(block);
+  return { count: blocks.length, bytes };
+}
+
+/**
+ * The far line's counts (FAR), for one scene or none, every room alike: a
+ * count refuses an op that adds to its total while the far count is past
+ * the line, with the cap's own words. Without `before`, as for a room
+ * import, the line is absolute. The byte lines are the size guard's
+ * (server/rooms/sizeGuard.ts).
+ */
+export function farLimits(state: RoomState, sceneId: string | null, before?: RoomState): LimitCheck {
+  const held = seatHeld(state, sceneId);
+  const rows = rowCount(state);
+  if ((!before || rows > rowCount(before)) && farCount(rows, held.rows.size) > FAR.rows) return roomFull(`${n(FAR.rows)} initiative rows`);
+  const casts = Object.keys(state.casts).length;
+  if ((!before || casts > Object.keys(before.casts).length) && farCount(casts, held.casts.size) > FAR.asks) {
+    return over(`at most ${n(FAR.asks)} asks for saves can wait at once. The DM resolves one first`);
+  }
+  const blocks = blockTotals(state);
+  const blocksBefore = before && before.companionBlocks !== state.companionBlocks ? blockTotals(before) : before ? blocks : undefined;
+  if ((!blocksBefore || blocks.count > blocksBefore.count) && roundUp(blocks.count, FAR.countStep) > FAR.blocks) {
+    return over(`The room can hold at most ${n(FAR.blocks)} companion stat blocks. Delete one first.`);
+  }
+  if ((!blocksBefore || blocks.bytes > blocksBefore.bytes) && roundUp(blocks.bytes, FAR.byteStep) > FAR.blockBytes) {
+    return over(`The room can hold at most ${n(FAR.blockBytes / MiB)} MiB of companion stat blocks. Delete one first.`);
+  }
+  if (sceneId === null) return { ok: true };
+  const now = sceneCounts(state, sceneId);
+  const was = before ? sceneCounts(before, sceneId) : undefined;
+  const grew = (key: keyof SceneCounts) => !was || now[key] > was[key];
+  if (grew("tokens") && farCount(now.tokens, held.tokens.size) > FAR.tokens) return sceneFull(`${n(FAR.tokens)} tokens`);
+  if (grew("templates") && farCount(now.templates, held.templates.size) > FAR.areas) return sceneFull(`${n(FAR.areas)} areas`);
+  if (grew("drawings") && farCount(now.drawings, held.drawings.size) > FAR.drawings) return sceneFull(`${n(FAR.drawings)} drawings`);
+  if (grew("points") && farCount(now.points, held.pointValues) > FAR.pointValues) return sceneFull(`${n(FAR.pointValues)} drawing point values`);
+  return { ok: true };
 }
