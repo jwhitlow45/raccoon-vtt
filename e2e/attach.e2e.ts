@@ -89,6 +89,20 @@ function tokenOp(id: string, extra: Record<string, unknown>) {
   return { t: "token.create", token: { id, sceneId: run.sceneId, size: "medium", visibility: "all", ...extra } };
 }
 
+/**
+ * The length of the walls a copy holds on a scene. A player's copy of a square
+ * scene with fog off is cut from held ground, as with fog on, so its walls come
+ * in pieces with ids of their own: a wait for the build compares length, not count.
+ */
+function wallLength(state: { buildChunks?: Record<string, { sceneId?: string; walls?: readonly { a: readonly number[]; b: readonly number[] }[] } | undefined> } | null, sceneId: string): number {
+  let length = 0;
+  for (const chunk of Object.values(state?.buildChunks ?? {})) {
+    if (chunk?.sceneId !== sceneId) continue;
+    for (const { a, b } of chunk.walls ?? []) length += Math.hypot(b[0]! - a[0]!, b[1]! - a[1]!);
+  }
+  return length;
+}
+
 function token(socket: SocketWatch, id: string): Token | undefined {
   return (socket.state as RoomState | null)?.tokens[id];
 }
@@ -1039,7 +1053,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
       await ops.send({ t: "token.attach", tokenId: keep.brom, to: keep.horse, kind: "ride", steer: true, ...seat, elevation: 0 });
       await ops.send({ t: "room.setPlayerScene", sceneId: keep.scene });
       await waitFor("Brom in Pat's copy", () => (token(patSocket, keep.brom)?.attached ? true : null));
-      await waitFor("the corridor's walls in Pat's copy", () => (Object.values((patSocket.state as RoomState | null)?.buildChunks ?? {}).reduce((n, c) => n + (c?.sceneId === keep.scene ? (c.walls?.length ?? 0) : 0), 0) === walls.length ? true : null));
+      await waitFor("the corridor's walls in Pat's copy", () => (wallLength(patSocket.state as RoomState | null, keep.scene) >= wallLength({ buildChunks: { all: { sceneId: keep.scene, walls } } }, keep.scene) - 1e-6 ? true : null));
       await pat.locator(".konvajs-content").first().waitFor();
       // On squares the finger lands up and left in the square, as a finger does.
       const goal = shape === "squares" ? { x: 10.2, y: 6.2 } : hexCenter(G, { col: 10, row: 6 });
@@ -1085,7 +1099,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await ops.send({ t: "token.attach", tokenId: keep.gob, to: keep.horse, kind: "drag", x: 1, y: 6, elevation: 0 });
     await ops.send({ t: "room.setPlayerScene", sceneId: keep.scene });
     await waitFor("Brom and the goblin in Pat's copy", () => (token(patSocket, keep.brom)?.attached && token(patSocket, keep.gob)?.attached ? true : null));
-    await waitFor("the corridor's walls in Pat's copy", () => (Object.values((patSocket.state as RoomState | null)?.buildChunks ?? {}).reduce((n, c) => n + (c?.sceneId === keep.scene ? (c.walls?.length ?? 0) : 0), 0) === walls.length ? true : null));
+    await waitFor("the corridor's walls in Pat's copy", () => (wallLength(patSocket.state as RoomState | null, keep.scene) >= wallLength({ buildChunks: { all: { sceneId: keep.scene, walls } } }, keep.scene) - 1e-6 ? true : null));
     await pat.locator(".konvajs-content").first().waitFor();
     const from = await pagePoint(pat, field, { x: at.x + 0.5, y: at.y + 0.5 });
     const to = await pagePoint(pat, field, { x: 10.2, y: 6.2 });
@@ -1137,7 +1151,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await ops.send({ t: "token.attach", tokenId: keep.gob, to: keep.horse, kind: "drag", ...gobAt, elevation: 0 });
     await ops.send({ t: "room.setPlayerScene", sceneId: keep.scene });
     await waitFor("the goblin in tow in Pat's copy", () => (token(patSocket, keep.gob)?.attached ? true : null));
-    await waitFor("the corridor's walls in Pat's copy", () => (Object.values((patSocket.state as RoomState | null)?.buildChunks ?? {}).reduce((n, c) => n + (c?.sceneId === keep.scene ? (c.walls?.length ?? 0) : 0), 0) === walls.length ? true : null));
+    await waitFor("the corridor's walls in Pat's copy", () => (wallLength(patSocket.state as RoomState | null, keep.scene) >= wallLength({ buildChunks: { all: { sceneId: keep.scene, walls } } }, keep.scene) - 1e-6 ? true : null));
     await pat.locator(".konvajs-content").first().waitFor();
     const from = await pagePoint(pat, field, { x: horseAt.x + 1, y: horseAt.y + 1 });
     const to = await pagePoint(pat, field, hexCenter(G, { col: 10, row: 6 }));
@@ -1187,7 +1201,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     }
     await ops.send({ t: "room.setPlayerScene", sceneId: keep.scene });
     await waitFor("both in tow in Pat's copy", () => (token(patSocket, keep.gob)?.attached && token(patSocket, keep.hob)?.attached ? true : null));
-    await waitFor("the corridor's walls in Pat's copy", () => (Object.values((patSocket.state as RoomState | null)?.buildChunks ?? {}).reduce((n, c) => n + (c?.sceneId === keep.scene ? (c.walls?.length ?? 0) : 0), 0) === walls.length ? true : null));
+    await waitFor("the corridor's walls in Pat's copy", () => (wallLength(patSocket.state as RoomState | null, keep.scene) >= wallLength({ buildChunks: { all: { sceneId: keep.scene, walls } } }, keep.scene) - 1e-6 ? true : null));
     await pat.locator(".konvajs-content").first().waitFor();
     const from = await pagePoint(pat, field, { x: horseAt.x + 1, y: horseAt.y + 1 });
     const to = await pagePoint(pat, field, hexCenter(G, { col: 10, row: 6 }));
@@ -1228,7 +1242,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await ops.send({ t: "trap.create", trap: { id: keep.net, sceneId: keep.scene, name: "Net", zone: { cells: [{ x: 4, y: 5, w: 1, h: 2 }] }, rig } });
     await ops.send({ t: "room.setPlayerScene", sceneId: keep.scene });
     await waitFor("Brom and the goblin in Pat's copy", () => (token(patSocket, keep.brom)?.attached && token(patSocket, keep.gob)?.attached ? true : null));
-    await waitFor("the corridor's walls in Pat's copy", () => (Object.values((patSocket.state as RoomState | null)?.buildChunks ?? {}).reduce((n, c) => n + (c?.sceneId === keep.scene ? (c.walls?.length ?? 0) : 0), 0) === walls.length ? true : null));
+    await waitFor("the corridor's walls in Pat's copy", () => (wallLength(patSocket.state as RoomState | null, keep.scene) >= wallLength({ buildChunks: { all: { sceneId: keep.scene, walls } } }, keep.scene) - 1e-6 ? true : null));
     await pat.locator(".konvajs-content").first().waitFor();
     const from = await pagePoint(pat, field, { x: at.x + 0.5, y: at.y + 0.5 });
     const to = await pagePoint(pat, field, { x: 10.2, y: 6.2 });
@@ -1272,7 +1286,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await ops.send({ t: "token.attach", tokenId: keep.gob, to: keep.horse, kind: "drag", x: 1, y: 4, elevation: 0 });
     await ops.send({ t: "room.setPlayerScene", sceneId: keep.scene });
     await waitFor("Brom and the goblin in Pat's copy", () => (token(patSocket, keep.brom)?.attached && token(patSocket, keep.gob)?.attached ? true : null));
-    await waitFor("the corridor's walls in Pat's copy", () => (Object.values((patSocket.state as RoomState | null)?.buildChunks ?? {}).reduce((n, c) => n + (c?.sceneId === keep.scene ? (c.walls?.length ?? 0) : 0), 0) === walls.length ? true : null));
+    await waitFor("the corridor's walls in Pat's copy", () => (wallLength(patSocket.state as RoomState | null, keep.scene) >= wallLength({ buildChunks: { all: { sceneId: keep.scene, walls } } }, keep.scene) - 1e-6 ? true : null));
     await pat.locator(".konvajs-content").first().waitFor();
     const from = await pagePoint(pat, field, { x: at.x + 0.5, y: at.y + 0.5 });
     const to = await pagePoint(pat, field, { x: 10.2, y: 6.2 });
