@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { historyCommandSchema, historyMessageSchema, opAcknowledgmentSchema, restoreHistoryFieldsSchema } from "./undoContract.ts";
 import { saveOutcomePageSchema, saveOutcomeTransitionSchema, savePageAskFieldsSchema, savePageCloseFieldsSchema, saveRechargeSpendSchema } from "./saveOutcomeContract.ts";
-import { LIMITS, MOST_SIGHT_HOLDERS, SOUND_LIMITS, VIDEO_LIMITS, serializedBytes, videoGeometryProblem } from "./limits.ts";
+import { LIMITS, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, SOUND_LIMITS, VIDEO_LIMITS, serializedBytes, videoGeometryProblem } from "./limits.ts";
 import { FADES, LEVEL_MAX, LEVEL_MIN, REPEATS, SOUND_USES, type QueueEdit } from "./sound.ts";
 import { ATTACH_KINDS } from "./rules/attach.ts";
 import { critBound } from "./dice/crit.ts";
@@ -2357,7 +2357,12 @@ const stateClientOps = [
       .max(LIMITS.membersPerRoom)
       .refine((ids) => new Set(ids).size === ids.length, { message: "a player is listed twice" }),
   }),
-  op("scene.delete", { sceneId: id }),
+  /**
+   * `leavePlayers` is the DM's yes to LEAVE_PLAYERS_ASK (shared/limits.ts):
+   * the delete of the players' own map, which leaves them on no map until
+   * the DM moves them. Without it that delete is refused as before.
+   */
+  op("scene.delete", { sceneId: id, leavePlayers: z.literal(true).optional() }),
   op("scene.reorder", { order: z.array(id).min(1).max(50) }),
   /**
    * The order of a scene's floors (docs/design/design-v1-floors.md 9): every
@@ -2534,6 +2539,13 @@ const stateClientOps = [
   op("actor.effect.update", {
     target: actorTarget,
     effectId: id,
+    /**
+     * A fresh id for the automatic Unconscious this update hides or edits
+     * (shared/rules/effects.ts): it goes on as an ordinary condition under
+     * `as`, so no hidden or edited automatic one ever exists. Refused on
+     * any other effect.
+     */
+    as: id.optional(),
     patch: z.strictObject({
       label: shortText.nullable().optional(),
       glyph: line(8).nullable().optional(),
@@ -2941,6 +2953,10 @@ const historyOpSchema = z.looseObject({ t: z.enum(["undo", "redo"]) }).pipe(hist
  * resolved form of undo and redo (design 7.7). A client that sends one is
  * refused by `clientOpSchema` before permissions ever see it.
  */
+/** The most areas, and the most rulers, one `sys.rideEnd` names. */
+export const RIDE_END_MOST = 1_000;
+const inIdOrder = (ids: readonly string[]) => ids.every((x, i) => i === 0 || ids[i - 1]! < x);
+
 export const serverOnlyOps = [
   op("sys.memberJoin", {
     member: z.strictObject({ id, name, color, kind: z.enum(["dm", "player"]), createdAt: z.string().max(40) }),
@@ -3088,6 +3104,30 @@ export const serverOnlyOps = [
       .min(1)
       .max(LIMITS.tokensPerScene)
       .refine((ids) => ids.every((tokenId, i) => i === 0 || ids[i - 1]! < tokenId), { message: "creatures met are listed once each, in id order" }),
+  }),
+  /**
+   * The areas and kept rulers players put on creatures their owners no
+   * longer see, found at a batch's close (server/rooms/rideEnd.ts), each
+   * list in id order. It removes exactly what a creature's delete removes
+   * of them, the area or the drawing alone, and writes no log line.
+   * Replay applies it as stored and never works out sight. A close that
+   * ends more appends several.
+   */
+  op("sys.rideEnd", {
+    templates: z.array(id).max(RIDE_END_MOST).refine(inIdOrder, { message: "areas ended are listed once each, in id order" }),
+    drawings: z.array(id).max(RIDE_END_MOST).refine(inIdOrder, { message: "rulers ended are listed once each, in id order" }),
+  }).refine((o) => o.templates.length + o.drawings.length > 0, { message: "nothing ended" }),
+  /**
+   * Each marked scene's fixed share of MARKED_POOL (shared/limits.ts),
+   * written once into its mark at the room's first load on this format
+   * and at an import. A share never moves again.
+   */
+  op("sys.share", {
+    shares: z
+      .array(z.strictObject({ sceneId: id, share: z.number().int().min(0).max(MARKED_SHARE_MOST) }))
+      .min(1)
+      .max(LIMITS.scenesPerRoom)
+      .refine((shares) => inIdOrder(shares.map((s) => s.sceneId)), { message: "scenes shared are listed once each, in id order" }),
   }),
   /**
    * A dice op as the server resolved it (docs/design/design-v1-dice.md 4.1): the
@@ -3489,6 +3529,9 @@ function withinEphBytes(e: unknown): boolean {
 
 // Client to server messages (design 7.1).
 
+/** The most ids one `ids` frame asks about. A device with more uncertain creates asks in several. */
+export const MAX_IDS_ASKED = 500;
+
 export const clientMessageSchema = z.discriminatedUnion("t", [
   z.strictObject({
     t: z.literal("hello"),
@@ -3511,6 +3554,13 @@ export const clientMessageSchema = z.discriminatedUnion("t", [
   z.strictObject({ t: z.literal("ping"), k: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }),
   /** A probe of the server's time (docs/design/design-v1-music.md 5.1), sent only while sound plays. */
   z.strictObject({ t: z.literal("time"), k: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }),
+  /**
+   * Whether the room recorded these ids of the sender's own creates, sent
+   * at reconnect for each create whose send is uncertain
+   * (docs/design/design-v1-player-limits.md 3.4). The answer covers only the
+   * asking member's own ids.
+   */
+  z.strictObject({ t: z.literal("ids"), k: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), ids: z.array(id).min(1).max(MAX_IDS_ASKED) }),
 ]);
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
 
@@ -3557,6 +3607,11 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
      */
     you: z.strictObject({ memberId: id, role: z.enum(["dm", "player", "display"]), sceneId: id.nullable() }),
     watermark: z.number().int().min(0),
+    /**
+     * DM sockets only, and only while the room is over its far line: by how
+     * many bytes (shared/limits.ts overNotice). Absent under the line.
+     */
+    over: z.strictObject({ bytes: z.number().int().min(1) }).optional(),
   }),
   z.strictObject({
     t: z.literal("ev"),
@@ -3623,6 +3678,20 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
    */
   z.strictObject({ t: z.literal("time"), k: z.number().int().min(0), at: z.number().int().min(0) }),
   z.strictObject({ t: z.literal("resync"), reason: z.string().max(80) }),
+  /**
+   * The answer to an `ids` ask, every asked id in one list: `held` the room
+   * recorded it for this member, so the create landed; `notHeld` it did
+   * not and never will, so the device mints a new id and sends again;
+   * `pending` an earlier op of this member may still commit, so the device
+   * asks again.
+   */
+  z.strictObject({
+    t: z.literal("ids"),
+    k: z.number().int().min(0),
+    held: z.array(id).max(MAX_IDS_ASKED),
+    notHeld: z.array(id).max(MAX_IDS_ASKED),
+    pending: z.array(id).max(MAX_IDS_ASKED),
+  }),
   /**
    * DM sockets only: something about getting into the room changed outside
    * its state (the player password, a DM device added or signed out), so
@@ -3706,3 +3775,205 @@ export type SearchResult = {
   original_height?: number;
   credit?: ImageCredit;
 };
+
+/**
+ * Where each op type carries ids (docs/design/design-v1-player-limits.md
+ * 3.4), for the actor's id gate. `minted` lists the fields that hold an
+ * id a device made for a new thing: a create's key, a row's id, a
+ * condition's id (single, group, inline and `as`), an ask's id. Those
+ * alone meet the gate: version 7, dated within ID_TIME of the server's
+ * clock, never held before, and recorded once the op applies. The rest
+ * carry none (`none`), bring back or copy ids the state held (`copied`:
+ * restores, and a duplicate's children, whose ids are derived from the
+ * copy's own), carry keys of the thing itself (`natural`: coordinates,
+ * SRD ids, the key an upsert replaces in place), or are the server's
+ * own (`server`), whose ids it mints itself and trusts.
+ *
+ * A type left out fails the typecheck, so a new op is classed when it is
+ * added.
+ */
+export type IdRule<T extends OpType> = "none" | "copied" | "natural" | "server" | { minted: (op: OpOf<T>) => readonly string[] };
+
+function inlineEffectIds(actor: { effects: readonly { id: string }[] } | { ref: string } | { inline: { effects: readonly { id: string }[] } }): string[] {
+  if ("effects" in actor) return actor.effects.map((e) => e.id);
+  if ("inline" in actor) return actor.inline.effects.map((e) => e.id);
+  return [];
+}
+
+export const ID_RULES: { readonly [T in OpType]: IdRule<T> } = {
+  "room.update": "none",
+  "room.setPlayerScene": "none",
+  "view.follow": "none",
+  "view.blackout": "none",
+  "member.update": "none",
+  "scene.create": { minted: (op) => [op.scene.id] },
+  "scene.update": "none",
+  "vision.holders": "none",
+  "scene.delete": "none",
+  "scene.reorder": "none",
+  "floor.order": "none",
+  "floor.open": "none",
+  "floorLink.put": { minted: (op) => [op.link.id, op.link.pairId] },
+  "floorLink.update": "none",
+  "floorLink.delete": "none",
+  "scene.setMap": "none",
+  "scene.setGrid": "none",
+  "scene.setPhase": "none",
+  // The copy's own id is the device's. Every thing it copies takes an id derived from that one (reducer/duplicate.ts derivedId).
+  "scene.duplicate": { minted: (op) => [op.newSceneId] },
+  "token.create": { minted: (op) => [op.token.id, ...inlineEffectIds(op.token.actor)] },
+  "token.update": "none",
+  "token.delete": "none",
+  "token.move": "none",
+  "token.moveMany": "none",
+  "token.countLeg": "none",
+  "token.climb": "none",
+  "token.attach": "none",
+  "token.detach": "none",
+  "actor.hp": "none",
+  // The DM's group save: its plan may be applied hours after it was made (saveOutcomeContract.ts), and its conditions keep the ids made with it.
+  "actor.outcome": "natural",
+  "actor.damageMany": "none",
+  "actor.deathSave": "none",
+  "actor.life": "none",
+  "actor.rest": "none",
+  "actor.effect.add": { minted: (op) => [op.effect.id] },
+  "actor.effect.update": { minted: (op) => (op.as !== undefined ? [op.as] : []) },
+  "actor.effect.remove": "none",
+  "actor.saveDue": "none",
+  "actor.use": "none",
+  "actor.prompt": "none",
+  "character.create": { minted: (op) => [op.character.id, ...inlineEffectIds(op.character.actor)] },
+  "character.update": "none",
+  "character.delete": "none",
+  "monster.create": { minted: (op) => [op.monster.id] },
+  "monster.update": "none",
+  "monster.delete": "none",
+  "monster.setSrdImage": "natural",
+  "companionBlock.create": { minted: (op) => [op.block.id] },
+  "companionBlock.update": "none",
+  "companionBlock.delete": "none",
+  "savedEncounter.create": { minted: (op) => [op.encounter.id] },
+  "savedEncounter.update": "none",
+  "savedEncounter.delete": "none",
+  "template.create": { minted: (op) => [op.template.id] },
+  "template.update": "none",
+  "template.delete": "none",
+  "drawing.create": { minted: (op) => [op.drawing.id] },
+  "drawing.delete": "none",
+  "drawing.clear": "none",
+  // Fog changes, the build and its labels, stamps and lights are the DM's, keyed by place or replaced in place by their key.
+  "fog.draft": "natural",
+  "fog.publish": "none",
+  "fog.discard": "none",
+  "fog.live": "natural",
+  "fog.reset": "none",
+  "build.paint": "natural",
+  "build.erase": "natural",
+  "build.rect": "natural",
+  "build.poly": "natural",
+  "build.edge": "natural",
+  "build.label": "natural",
+  "build.clear": "none",
+  "build.walls": "natural",
+  "build.stamps": "natural",
+  "build.lights": "natural",
+  "build.height": "natural",
+  "build.stairs": "natural",
+  "build.rough": "natural",
+  "build.ask": "natural",
+  "door.set": "none",
+  "trap.create": { minted: (op) => [op.trap.id] },
+  "trap.update": "none",
+  "trap.delete": "none",
+  "trap.spring": "none",
+  "trap.act": "none",
+  "trap.settle": "none",
+  "encounter.start": { minted: (op) => op.entries.map((e) => e.id) },
+  "encounter.end": "none",
+  "encounter.add": { minted: (op) => op.entries.map((e) => e.id) },
+  "encounter.remove": "none",
+  "encounter.setValue": "none",
+  "encounter.setValues": "none",
+  "encounter.reorder": "none",
+  "encounter.next": "none",
+  "encounter.prev": "none",
+  "encounter.update": "none",
+  "clock.start": { minted: (op) => [op.id] },
+  "clock.stop": "none",
+  "clock.update": "none",
+  "clock.set": "none",
+  "clock.advance": "none",
+  "sound.create": { minted: (op) => [op.id] },
+  "sound.update": "none",
+  "sound.delete": "none",
+  "playlist.create": { minted: (op) => [op.id] },
+  "playlist.update": "none",
+  "playlist.delete": "none",
+  "playlist.add": "none",
+  // A run's and a playing sound's ids name what plays now, and the next start replaces them.
+  "music.play": "natural",
+  "music.pause": "none",
+  "music.resume": "none",
+  "music.skip": "none",
+  "music.stop": "none",
+  "music.set": "none",
+  "music.queue": "none",
+  "music.jump": "none",
+  "loop.start": "natural",
+  "loop.set": "none",
+  "loop.stop": "none",
+  "effect.fire": "natural",
+  "sound.mix": "none",
+  "sound.scene": "natural",
+  "sound.stopAll": "none",
+  "log.chat": "none",
+  "log.whisper": "none",
+  "handout.show": { minted: (op) => [op.handout.id] },
+  "handout.close": "none",
+  "handoutDoc.create": { minted: (op) => [op.doc.id] },
+  "handoutDoc.delete": "none",
+  "token.updateMany": "none",
+  "token.deleteMany": "none",
+  "actor.effects": { minted: (op) => (op.add ?? []).map((a) => a.effect.id) },
+  // A page's blocks are keyed within the page, which its own create's id names.
+  "journal.create": { minted: (op) => [op.page.id] },
+  "journal.update": "natural",
+  "journal.reveal": "none",
+  "journal.delete": "none",
+  // A pin of the same id is replaced in place.
+  "pin.put": "natural",
+  "pin.remove": "none",
+  "roll.ask": { minted: (op) => [op.request.id] },
+  // A dice tag keys its receipt, and an answer sent again with it applies once (receipts.ts), so a tag is no create.
+  "roll.answer": "none",
+  "roll.reopen": "none",
+  "roll.change": "natural",
+  "roll.close": "none",
+  "cast.ask": { minted: (op) => [op.cast.id] },
+  "cast.close": "none",
+  "dice.roll": "none",
+  "roll.dice": "none",
+  "actor.deathRoll": "none",
+  "actor.rechargeRoll": "none",
+  undo: "copied",
+  redo: "copied",
+  "sys.memberJoin": "server",
+  "sys.memberSetKind": "server",
+  "sys.memberRemove": "server",
+  "sys.restore": "copied",
+  "sys.explore": "server",
+  "sys.remember": "server",
+  "sys.meet": "server",
+  "sys.rideEnd": "server",
+  "sys.share": "server",
+  "sys.sound": "server",
+  "sys.dice": "server",
+};
+
+/** The ids a device made for new things in `op` (ID_RULES), in the op's order, each once. */
+export function mintedIds(op: Op): string[] {
+  const rule = ID_RULES[op.t] as IdRule<OpType>;
+  if (typeof rule === "string") return [];
+  return [...new Set(rule.minted(op as never))];
+}

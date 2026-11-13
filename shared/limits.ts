@@ -1286,3 +1286,180 @@ export function utf8Bytes(text: string): number {
   }
   return bytes;
 }
+
+/*
+ * Player limits (docs/design/design-v1-player-limits.md). A player's op
+ * meets only limits whose every counted thing the player's own copy of the
+ * room holds: their seats, recomputed from the state and their own view on
+ * each op, and the far line. The room's caps above answer the DM and the
+ * server, over what no seat holds.
+ */
+
+/** A seat's number, each in its scope: the scene with its floors for tokens and riding areas, the floor for the rest, the fight for rows. */
+export const SEAT = {
+  tokens: 33,
+  ridingAreas: 20,
+  freeAreas: 40,
+  drawings: 400,
+  pointValues: 40_000,
+  rows: 40,
+} as const;
+
+export type SeatName = keyof typeof SEAT;
+
+/** The words of a refusal past a seat, shown after "Not saved.". They name the limit, never what the room holds. */
+export const SEAT_FULL: Record<SeatName, string> = {
+  tokens: `You can have ${n(SEAT.tokens)} tokens of your own on this map. Remove a companion first.`,
+  ridingAreas: `You can have ${n(SEAT.ridingAreas)} areas of your own on creatures here. Remove one first.`,
+  freeAreas: `You can have ${n(SEAT.freeAreas)} areas of your own here. Remove one first.`,
+  drawings: `You can have ${n(SEAT.drawings)} drawings of your own here. Remove one first.`,
+  pointValues: `Your drawings here can hold ${n(SEAT.pointValues)} point values. Remove one first.`,
+  rows: `You can have ${n(SEAT.rows)} rows of your own in this fight. Remove one first.`,
+};
+
+/** A player's row for their own creature the DM hid is refused `forbidden` with these words. */
+export const HIDDEN_ROW_REFUSED = "The DM adds a hidden creature to the fight.";
+/** A member past their ids in 30 minutes (ID_BUDGET). */
+export const IDS_TOO_FAST = "You are adding things very fast. Wait a few minutes.";
+/** A create still refused for its id's time after the device's one retry with a fresh id. */
+export const ID_RETRY_FAILED = "That could not be added. Try again.";
+/** The DM's 33rd hidden condition on one creature. */
+export const HIDDEN_EFFECTS_FULL = "at most 32 hidden effects per creature";
+/** The DM's confirm before deleting the map the players are on, sent as `leavePlayers` on a yes. */
+export const LEAVE_PLAYERS_ASK = "The players are on this map. Delete it and leave them with no map?";
+
+/** The DM's notice while the room is over its far line by `mib` MiB, rounded up (the DM's snapshot's `over`). */
+export function overNotice(mib: number): string {
+  return `This room is over its size limit by ${n(mib)} MiB. New things and edits that add to it are refused until that much is freed.`;
+}
+
+/** The most floors a scene holds, so the free areas a member can hold in one scene. */
+const FLOORS = LIMITS.floorsPerScene;
+/** A member's asks across one scene's floors: 3 a floor. */
+export const ASKS_PER_MEMBER_SCENE = LIMITS.castsPerMember * FLOORS;
+
+/**
+ * The far line: each room cap plus 50 full seats, in the cap's own scope,
+ * and the byte lines that bind before the counts. Every growing op meets
+ * it, a player's and the DM's alike, except the kinds shared/farLine.ts
+ * exempts. A count reads the DM's part rounded up to FAR.countStep and
+ * the players' part exactly, bytes to FAR.byteStep.
+ */
+export const FAR = {
+  tokens: LIMITS.tokensPerScene + LIMITS.membersPerRoom * SEAT.tokens,
+  areas: LIMITS.templatesPerScene + LIMITS.membersPerRoom * (SEAT.ridingAreas + FLOORS * SEAT.freeAreas),
+  drawings: LIMITS.drawingsPerScene + LIMITS.membersPerRoom * SEAT.drawings,
+  pointValues: LIMITS.drawingPointValuesPerScene + LIMITS.membersPerRoom * SEAT.pointValues,
+  rows: LIMITS.encounterRows + LIMITS.membersPerRoom * SEAT.rows,
+  asks: LIMITS.openCastsPerRoom + LIMITS.membersPerRoom * ASKS_PER_MEMBER_SCENE,
+  sceneBytes: 2 * LIMITS.projectedSceneBytes,
+  roomBytes: 11 * MiB,
+  blocks: 2 * LIMITS.companionBlocksPerRoom,
+  blockBytes: 2 * LIMITS.companionBlocksBytes,
+  countStep: 50,
+  byteStep: 256 * 1024,
+} as const;
+
+/** The far line's step: `value` rounded up to a multiple of `step`, so a far check reads the DM's part only in steps. */
+export function roundUp(value: number, step: number): number {
+  return Math.ceil(value / step) * step;
+}
+
+/** The room-wide pool for remembered maps on marked scenes, and the most one scene's share takes of it. */
+export const MARKED_POOL = 1.5 * MiB;
+export const MARKED_SHARE_MOST = 192 * 1024;
+
+/** The fight's history keeps at most this many bytes of steps, besides its 20 steps (reducer/encounter.ts MAX_HISTORY). */
+export const HISTORY_BYTES = 1 * MiB;
+
+/**
+ * Client-minted ids (shared/protocol.ts mintedIds): how far an id's own
+ * time may be ahead of the server's clock and behind it, how long its row
+ * answers a reconnect's ask, and how many a member may bring in a window.
+ */
+export const ID_TIME = { aheadMs: 5_000, behindMs: 30 * 60_000, askMs: 12 * 60 * 60_000 } as const;
+export const ID_BUDGET = { windowMs: 30 * 60_000, player: 2_000, dm: 20_000 } as const;
+
+/**
+ * Derived bounds (design section 8), with the values expected before the
+ * full fixture measures them. Nothing refuses by these: tests hold stored
+ * states, snapshots and buffers within them.
+ */
+export const HARD = {
+  /** The measured state at the room far line with its widest reserves, plus what sits outside the measure. */
+  storedBytes: 15.5 * MiB,
+  /** The largest room file an import takes (server/rooms/importRoom.ts). */
+  roomJsonBytes: 16 * MiB,
+  /** A socket's send buffer: the largest snapshot and 1 MiB (server/rooms/ws.ts). */
+  sendBufferBytes: 17 * MiB,
+  /** Rows of the fight, and every list keyed by a row. */
+  rows: FAR.rows,
+  /** Conditions on one creature: 32 shown, 32 hidden and the automatic Unconscious. */
+  effects: 65,
+  /** Creatures one group save selects. */
+  groupSaveTokens: FAR.tokens,
+  /** Rows of `room_ids` for 48 players and 2 DMs at the budget's full rate all day: gate rows, then recovery rows. */
+  gateRows: 272_000,
+  recoveryRows: 3_264_000,
+} as const;
+
+/**
+ * The test of a member's own copy of one state (shared/project.ts
+ * seatView): whether it holds a creature, shows a row, and holds a floor.
+ * A seat counts only what this view holds, so its count is the copy's.
+ */
+export type SeatView = {
+  sees(tokenId: string): boolean;
+  showsRow(entryId: string): boolean;
+  holds(sceneId: string): boolean;
+};
+export type SeatViewOf = (state: RoomState) => SeatView;
+
+/** What one member's seats count in a scope: `sceneId` names the floor, and tokens and riding areas count across its scene. */
+export type SeatCounts = Record<SeatName, number>;
+
+/** The things seats hold in one scene, for every member together, without the view test: the room caps count only the rest. */
+export type SeatHeld = {
+  tokens: ReadonlySet<string>;
+  templates: ReadonlySet<string>;
+  drawings: ReadonlySet<string>;
+  /** Point values of the held drawings on the floor `sceneId`. */
+  pointValues: number;
+  rows: ReadonlySet<string>;
+  casts: ReadonlySet<string>;
+};
+
+/** One member's seat counts in `sceneId`'s scopes, over the things their view of `state` holds. */
+export function seatCounts(state: RoomState, memberId: string, sceneId: string, view: SeatView): SeatCounts {
+  void state;
+  void memberId;
+  void sceneId;
+  void view;
+  throw new Error("seatCounts lands after the contract");
+}
+
+/**
+ * A player's op against their seats: refused `quota` with that seat's
+ * words when it raises a count past its seat. Only an op that puts a
+ * thing into a seat's class raises one, so a member over a seat by the
+ * DM's doing is refused only their next op into that class.
+ */
+export function seatCheck(before: RoomState, after: RoomState, memberId: string, sceneId: string, viewOf: SeatViewOf): LimitCheck {
+  void before;
+  void after;
+  void memberId;
+  void sceneId;
+  void viewOf;
+  throw new Error("seatCheck lands after the contract");
+}
+
+/**
+ * The things seats hold in `sceneId`'s scopes: for each member, the first
+ * by id of what their seats count, up to each seat's number, with no view
+ * test. A thing with several player owners is its first owner's by id.
+ */
+export function seatHeld(state: RoomState, sceneId: string): SeatHeld {
+  void state;
+  void sceneId;
+  throw new Error("seatHeld lands after the contract");
+}

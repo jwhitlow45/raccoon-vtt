@@ -322,7 +322,15 @@ export type SceneMark = { sceneId: SceneId; rev: number };
  * only the party's layer shares from then on, so holders' layers a switch
  * back to Per player brings take their whole caps.
  */
-export type ShareMark = SceneMark & { party?: true };
+export type ShareMark = SceneMark & {
+  party?: true;
+  /**
+   * The scene's fixed share in bytes of the room's pool for remembered maps
+   * (shared/limits.ts MARKED_POOL), written once by `sys.share`. Absent
+   * until then.
+   */
+  share?: number;
+};
 
 /**
  * One chunk of one layer's memory (docs/design/design-v1-map-discovery.md 5.3):

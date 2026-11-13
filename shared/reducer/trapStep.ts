@@ -102,7 +102,7 @@ export function trapSpring(tx: Tx, op: OpOf<"trap.spring">): void {
  * them out by type changes no stored room.
  */
 function turnStarted(tx: Tx, op: Op): string | null {
-  if (op.t === "encounter.prev" || op.t === "sys.restore" || op.t === "sys.explore" || op.t === "sys.remember" || op.t === "sys.sound" || op.t === "sys.meet") return null;
+  if (op.t === "encounter.prev" || op.t === "sys.restore" || op.t === "sys.explore" || op.t === "sys.remember" || op.t === "sys.sound" || op.t === "sys.meet" || op.t === "sys.rideEnd" || op.t === "sys.share") return null;
   const encounter = tx.state.encounter;
   const start = encounter?.turnStart;
   if (!encounter || !start || start.seq !== tx.env.seq || start.entryId !== encounter.activeEntryId) return null;

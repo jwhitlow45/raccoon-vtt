@@ -3,7 +3,7 @@ import { correctionLogEventSchema } from "#shared/undoContract.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
 import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, TURN_FLAGS, type MapPhase, type MapVideo, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
 import { chunkKey, holderChunkKey } from "#shared/keys.ts";
-import { LIMITS, MOST_SIGHT_HOLDERS, SOUND_LIMITS, serializedBytes, soundUseFits, videoGeometryProblem } from "#shared/limits.ts";
+import { LIMITS, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, SOUND_LIMITS, serializedBytes, soundUseFits, videoGeometryProblem } from "#shared/limits.ts";
 import { namesPrototypeMember } from "#shared/records.ts";
 import { lengthAs, type SoundUse } from "#shared/sound.ts";
 import { ATTACH_KINDS } from "#shared/rules/attach.ts";
@@ -382,7 +382,7 @@ const memoryChunks = (layer: "party" | "holder") =>
   });
 const sceneMark = z.strictObject({ sceneId: id, rev });
 /** A share mark, `party` once the scene folded (shared/model.ts ShareMark). */
-const shareMark = z.strictObject({ sceneId: id, rev, party: z.literal(true).optional() });
+const shareMark = z.strictObject({ sceneId: id, rev, party: z.literal(true).optional(), share: z.number().int().min(0).max(MARKED_SHARE_MOST).optional() });
 /** The scenes' marks, each under its own scene's id. */
 function marksOf<T extends z.ZodType<{ sceneId: string }>>(mark: T) {
   return z.record(z.string().min(1).max(120), mark).superRefine((marks, ctx) => {

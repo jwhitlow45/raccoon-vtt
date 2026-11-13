@@ -110,9 +110,11 @@ import {
   sysMemberJoin,
   sysMemberRemove,
   sysMemberSetKind,
+  sysShare,
   viewBlackout,
   viewFollow,
 } from "./reducer/room.ts";
+import { sysRideEnd } from "./reducer/rideEnd.ts";
 import {
   characterCreate,
   characterDelete,
@@ -548,6 +550,10 @@ function dispatch(tx: Tx, op: Op): void {
       return sysRemember(tx, op);
     case "sys.meet":
       return sysMeet(tx, op);
+    case "sys.rideEnd":
+      return sysRideEnd(tx, op);
+    case "sys.share":
+      return sysShare(tx, op);
     case "vision.holders":
       return visionHolders(tx, op);
     case "token.updateMany":

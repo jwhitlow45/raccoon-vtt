@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 46;
-export const OP_VERSION = 60;
+export const SNAPSHOT_VERSION = 47;
+export const OP_VERSION = 61;
 
 export type MigrationStep = {
   from: number;
@@ -287,6 +287,12 @@ export const snapshotMigrations: MigrationStep[] = [
   // (needsNumberingUpgrade) settles an older room's numbers once, after its stored ops replay, since it reads sight.
   // The number moves so that an older build refuses a room this one saved, whose numbers it would not keep.
   { from: 45, to: 46, apply: (state) => state },
+  // Player limits (PLAYER_LIMITS_SNAPSHOT_VERSION): a share mark's `share` is optional, and absent reads as not written
+  // yet, so a v46 room is a v47 room as it is. Old automatic Unconscious conditions are not converted here: the load
+  // converts them after the stored ops replay (persistence.ts), since a stored op may name one by its old id. The
+  // number moves so that an older build refuses a room this one saved, whose fixed shares and conditions it would not
+  // keep.
+  { from: 46, to: 47, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1441,6 +1447,24 @@ export const opMigrations: MigrationStep[] = [
     to: 60,
     apply: (op) => op,
   },
+  {
+    // Player limits (PLAYER_LIMITS_OP_VERSION): `sys.rideEnd` and
+    // `sys.share` are new server ops, and `actor.effect.update` may carry
+    // `as` and `scene.delete` `leavePlayers`, all of which an older strict
+    // schema refuses, so no stored op changes shape and the step is the
+    // identity. From this version (playerLimitsOps) conditions count by
+    // class with one automatic Unconscious, a player's clear and restore
+    // read their own copy, a player's row for their own hidden creature is
+    // refused, a derived id is never shaped as version 7, an ask goes with
+    // its caster, and the fight's history keeps to its bytes. Ops stored
+    // before replay as they ran.
+    // Deploy: back up the database just before, and reload open pages.
+    // Rollback needs the backup for a room with a v47 snapshot, which an
+    // older build refuses.
+    from: 60,
+    to: 61,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -1557,6 +1581,24 @@ export const NUMBERING_SNAPSHOT_VERSION = 46;
  */
 export function meetsNumbers(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < NUMBERING_OP_VERSION);
+}
+
+/** The first op version and snapshot version of player limits (shared/limits.ts SEAT). */
+export const PLAYER_LIMITS_OP_VERSION = 61;
+export const PLAYER_LIMITS_SNAPSHOT_VERSION = 47;
+
+/**
+ * Whether the op runs under player limits: conditions count shown and
+ * hidden apart with one automatic Unconscious (shared/rules/effects.ts), a
+ * player's clear and restore act on what their copy holds, a player's row
+ * for their own hidden creature is refused, `derivedId` never makes a
+ * version 7 shape, `dropCasterAsks` runs after every op, and the fight's
+ * history keeps within HISTORY_BYTES. Ops stored before version 61 met none
+ * of these and replay so. Live ops carry no stored version and take
+ * today's rule.
+ */
+export function playerLimitsOps(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < PLAYER_LIMITS_OP_VERSION);
 }
 
 /**

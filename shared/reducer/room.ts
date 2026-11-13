@@ -133,6 +133,19 @@ function privatePagesToDm(tx: Tx, memberId: string): void {
  * removed. Each collection is walked in id order, so a replay touches the
  * same keys in the same order.
  */
+/**
+ * `sys.share`: each marked scene's fixed share of the room's pool for
+ * remembered maps, written into its mark once. A scene that lost its mark
+ * since, or holds a share already, is skipped, so a share never moves.
+ * Bookkeeping: no undo brings a share back or takes it away.
+ */
+export function sysShare(tx: Tx, op: OpOf<"sys.share">): void {
+  for (const { sceneId, share } of op.shares) {
+    const mark = ownEntry(tx.state.memoryShared, sceneId);
+    if (mark && mark.share === undefined) tx.writeBookkeeping(keys.memoryShared(sceneId), { ...mark, share });
+  }
+}
+
 export function sysMemberRemove(tx: Tx, op: OpOf<"sys.memberRemove">): void {
   if (!ownEntry(tx.state.members, op.memberId)) throw gone("member");
   const byId = <T extends { id: string }>(items: Iterable<T>): T[] => [...items].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));

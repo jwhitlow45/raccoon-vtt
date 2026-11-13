@@ -732,6 +732,12 @@ function forDm(op: Op, c: Check): Decision {
     case "sys.meet":
       // The actor gives creature numbers after each batch (shared/numbering.ts).
       return refuse("forbidden", "the server gives creature numbers");
+    case "sys.rideEnd":
+      // The actor removes what players put on creatures they no longer see, at each batch's close (server/rooms/rideEnd.ts).
+      return refuse("forbidden", "the server removes areas and rulers on creatures out of sight");
+    case "sys.share":
+      // Shares of the remembered map pool are written once by the server (shared/limits.ts MARKED_POOL).
+      return refuse("forbidden", "the server writes shares of remembered maps");
     case "sound.create":
       // A sound is a `sound` asset of this room, an MP3 the server checked (docs/design/design-v1-music.md 7.1).
       if (c.deps.roomSound === false) return refuse("invalid", SOUND_OFF);
@@ -1013,6 +1019,8 @@ function forPlayer(op: Op, c: Check): Decision {
     case "sys.explore":
     case "sys.remember":
     case "sys.meet":
+    case "sys.rideEnd":
+    case "sys.share":
     case "token.deleteMany":
     case "journal.create":
     case "journal.update":
