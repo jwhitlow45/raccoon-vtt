@@ -1,7 +1,8 @@
 import { chunkOf, fogRoom, paint } from "./discoveryTestutil.ts";
 import type { AreaTemplate, RoomState, Stamp, Token } from "./model.ts";
 import { seqTwins, type SeqTwinOptions } from "./seqTestutil.ts";
-import { chance, character, drawing, int, rng, template, token } from "./testutil.ts";
+import { SEAT } from "./limits.ts";
+import { actor as actorOf, chance, character, drawing, entry as entryOf, int, member, rng, template, token } from "./testutil.ts";
 
 /**
  * Helpers for the twin tests of what a player's device receives
@@ -304,4 +305,52 @@ export function withUpper(state: RoomState, at: { x: number; y: number } = { x: 
     [STAIRS_DOWN]: { id: STAIRS_DOWN, rev: 0, sceneId: "up", to: "s1", pair: STAIRS_UP, rect, kind: "stairs", ground: 0, made: 1 },
   };
   return state;
+}
+
+/** A fixture id of the production shape, by kind letter and number, which no device mints. */
+const fixedId = (kind: string, i: number) => `0199f0a0-0000-7000-8${kind}00-${String(i).padStart(12, "0")}`;
+
+export type Seated = { players: string[]; characters: string[]; tokens: string[]; areas: string[]; drawings: string[]; rows: string[] };
+
+/**
+ * `players` players, p1 on, each playing one character with a token on
+ * s1 and every seat there full: 33 tokens (theirs and 32 companions), 20
+ * areas on that token, 40 free areas, `drawings` lines of 4 point values
+ * and, in a fight, 40 rows. The DM's own things are each test's.
+ */
+export function seated(state: RoomState, players: number, drawings = SEAT.drawings): Seated {
+  const out: Seated = { players: [], characters: [], tokens: [], areas: [], drawings: [], rows: [] };
+  state.encounter ??= { rev: 0, round: 1, activeEntryId: null, entries: [] };
+  for (let p = 1; p <= players; p++) {
+    const memberId = `p${p}`;
+    state.members[memberId] ??= member(memberId);
+    const characterId = fixedId("c", p);
+    state.characters[characterId] = character(characterId, { name: `Hero ${p}`, ownerIds: [memberId] });
+    out.players.push(memberId);
+    out.characters.push(characterId);
+    const pc = fixedId("a", p * 100);
+    state.tokens[pc] = token(pc, { kind: "pc", name: `Hero ${p}`, disposition: "ally", x: p % 40, y: 1, actor: { ref: characterId } });
+    out.tokens.push(pc);
+    for (let i = 1; i < SEAT.tokens; i++) {
+      const id = fixedId("a", p * 100 + i);
+      state.tokens[id] = token(id, { kind: "npc", name: "Wolf", disposition: "ally", x: p % 40, y: 2 + (i % 20), companion: { of: characterId, turn: "shared" }, actor: { inline: actorOf({ dmNotes: "" }) } });
+      out.tokens.push(id);
+    }
+    for (let i = 0; i < SEAT.ridingAreas + SEAT.freeAreas; i++) {
+      const id = fixedId("b", p * 100 + i);
+      state.templates[id] = template(id, { ownerId: memberId, origin: { x: (p % 40) + 0.5, y: 1.5, z: 0 }, size: 5, ...(i < SEAT.ridingAreas ? { attachedTo: pc } : {}) });
+      out.areas.push(id);
+    }
+    for (let i = 0; i < drawings; i++) {
+      const id = fixedId("d", p * 1_000 + i);
+      state.drawings[id] = drawing(id, { ownerId: memberId, points: [p % 40, 1, (p % 40) + 1, 2] });
+      out.drawings.push(id);
+    }
+    for (let i = 0; i < SEAT.rows; i++) {
+      const id = fixedId("e", p * 100 + i);
+      state.encounter.entries.push(entryOf(id, { tokenId: pc }));
+      out.rows.push(id);
+    }
+  }
+  return out;
 }
