@@ -599,8 +599,9 @@ describe("each asset comes from the job that made it", () => {
     mkdirSync(path.join(u.temp, "from/checksums"));
     writeFileSync(path.join(u.temp, "from/checksums/raccoon-vtt-1.2.3-desktop.sha256"), "list\n");
     mkdirSync(path.join(u.temp, "from/signatures"));
-    for (const f of ASSETS.filter((a) => !FILES.includes(a))) writeFileSync(path.join(u.temp, "from/signatures", f), "s");
-    const env = { CHECKSUMS_SHA256: sha("list\n"), ASSETS: ASSETS.join(" ") };
+    const signatures = ASSETS.filter((a) => !FILES.includes(a));
+    for (const f of signatures) writeFileSync(path.join(u.temp, "from/signatures", f), `signature of ${f}`);
+    const env = { CHECKSUMS_SHA256: sha("list\n"), ASSETS: ASSETS.join(" "), SIGNATURES: signatures.map((f) => `${f}=${sha(`signature of ${f}`)}`).join(" ") };
     const uploaded = take("upload", u.temp, u.targets, u.digests, env);
     assert.equal(uploaded.status, 0, uploaded.out);
     assert.deepEqual(readdirSync(path.join(u.temp, "assets")).toSorted(), ASSETS.toSorted());
@@ -615,6 +616,52 @@ describe("each asset comes from the job that made it", () => {
     rmSync(path.join(u.temp, "assets"), { recursive: true });
     const missing = take("upload", u.temp, u.targets, u.digests, env);
     assert.equal(missing.status, 1, missing.out);
+  });
+
+  /** The upload job's layout with every signature in place, each holding its own text, and the digests the sign job gave. */
+  function signedLayout() {
+    const u = layout();
+    mkdirSync(path.join(u.temp, "from/checksums"));
+    writeFileSync(path.join(u.temp, "from/checksums/raccoon-vtt-1.2.3-desktop.sha256"), "list\n");
+    mkdirSync(path.join(u.temp, "from/signatures"));
+    const signatures = ASSETS.filter((a) => !FILES.includes(a));
+    for (const f of signatures) writeFileSync(path.join(u.temp, "from/signatures", f), `signature of ${f}`);
+    const given = Object.fromEntries(signatures.map((f) => [f, sha(`signature of ${f}`)]));
+    const env = (g: Record<string, string>) => ({ CHECKSUMS_SHA256: sha("list\n"), ASSETS: ASSETS.join(" "), SIGNATURES: Object.entries(g).map(([f, d]) => `${f}=${d}`).join(" ") });
+    return { ...u, given, env };
+  }
+
+  test("the upload job takes each signature and the provenance only as the sign job made it", () => {
+    const cases: [string, (l: ReturnType<typeof signedLayout>) => void, RegExp][] = [
+      ["a replaced bundle", ({ temp }) => writeFileSync(path.join(temp, "from/signatures/latest.yml.sigstore.json"), "s"), new RegExp(`latest\\.yml\\.sigstore\\.json is not the file the job that made it gave: its sha256 is ${sha("s")}\\.`)],
+      ["a replaced provenance", ({ temp }) => writeFileSync(path.join(temp, "from/signatures/raccoon-vtt-1.2.3-desktop.intoto.jsonl"), "{}"), /raccoon-vtt-1\.2\.3-desktop\.intoto\.jsonl is not the file the job that made it gave/],
+      ["a bundle the sign job gave no digest for", ({ given }) => delete given["raccoon-vtt-1.2.3-desktop.sha256.sigstore.json"], /raccoon-vtt-1\.2\.3-desktop\.sha256\.sigstore\.json is not the file the job that made it gave/],
+      ["a digest given for another bundle", ({ given }) => (given["latest.yml.sigstore.json"] = given["latest-mac.yml.sigstore.json"] ?? "x"), /latest\.yml\.sigstore\.json is not the file the job that made it gave/],
+      ["no digests at all", ({ given }) => { for (const k of Object.keys(given)) delete given[k]; }, /is not the file the job that made it gave/],
+    ];
+    for (const [what, change, error] of cases) {
+      const l = signedLayout();
+      change(l);
+      const r = take("upload", l.temp, l.targets, l.digests, l.env(l.given));
+      assert.equal(r.status, 1, `${what}: ${r.out}`);
+      assert.equal(commands(r.out).length, 1, r.out);
+      assert.match(commands(r.out)[0]!, error, what);
+    }
+    const whole = signedLayout();
+    assert.equal(take("upload", whole.temp, whole.targets, whole.digests, whole.env(whole.given)).status, 0);
+  });
+
+  test("the sign job gives every signature's and the provenance's digest on", () => {
+    const temp = scratch();
+    mkdirSync(path.join(temp, "signatures"));
+    for (const f of ["a.exe.sigstore.json", "raccoon-vtt-1.2.3-desktop.intoto.jsonl"]) writeFileSync(path.join(temp, "signatures", f), f);
+    const r = runStep(stepScript("The signatures' digests", jobBlock("sign")), { RUNNER_TEMP: temp });
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(r.output, { sha256: `a.exe.sigstore.json=${sha("a.exe.sigstore.json")} raccoon-vtt-1.2.3-desktop.intoto.jsonl=${sha("raccoon-vtt-1.2.3-desktop.intoto.jsonl")}` });
+    const sign = jobBlock("sign");
+    assert.match(sign, /\n {4}outputs:\n {6}signatures: \$\{\{ steps\.signed\.outputs\.sha256 \}\}\n/);
+    assert.ok(sign.indexOf("- name: The provenance as a release asset") < sign.indexOf("- name: The signatures' digests"), "the digests cover the provenance too");
+    assert.match(jobBlock("upload"), /\n {10}SIGNATURES: \$\{\{ needs\.sign\.outputs\.signatures \}\}\n/);
   });
 
   test("the checksum list names every build file with its SHA-256, and gives its own digest on", () => {
