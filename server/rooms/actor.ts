@@ -2405,6 +2405,7 @@ export class RoomActor {
       },
       animatedMaps: this.#opts.animatedMaps,
       roomSound: this.#opts.roomSound,
+      rollTag: (memberId, tag) => this.#receipts.rollTag(memberId, tag),
     };
   }
 

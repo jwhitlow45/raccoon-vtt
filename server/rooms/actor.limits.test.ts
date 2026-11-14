@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import { FAR } from "#shared/limits.ts";
+import { ROLL_ASKED_ALREADY } from "#shared/permissions.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { scene, token } from "#shared/testutil.ts";
 import { farRoomBytes } from "./sizeGuard.ts";
@@ -126,5 +127,25 @@ describe("the op rates", () => {
     assert.equal(await sent(phone, chat), "busy", "the phone's own socket has room, the member's bucket none");
     const other = await h.connect(f.unrelated, "player", still);
     assert.equal(await sent(other, chat), "taken", "another player's own bucket");
+  });
+});
+
+describe("a damage roll's tag on an ask", () => {
+  test("is taken with the sender's own roll and once, and refused without it or a second time", async (t) => {
+    const f = scopeFixture();
+    const h = await scopeActor(t, f.state);
+    const player = await h.connect(f.player);
+    const other = await h.connect(f.unrelated, "player");
+    const ask = (tag: string) => ({ t: "cast.ask", cast: { id: uuidv7(), caster: f.pc, sceneId: f.sceneId, spell: "Fireball", targets: [f.goblin], damage: { tag, parts: 1 } } });
+    const roll = (tag: string) => ({ t: "dice.roll", tag, to: "all", rolls: [{ formula: "8d6" }] });
+    const used = `invalid: ${ROLL_ASKED_ALREADY}`;
+    const tag = uuidv7();
+    assert.equal(answer(await player.send(ask(tag))), used, "no roll under the tag");
+    assert.equal(answer(await other.send(roll(tag))), "taken");
+    assert.equal(answer(await player.send(ask(tag))), used, "another member's roll under the tag");
+    const own = uuidv7();
+    assert.equal(answer(await player.send(roll(own))), "taken");
+    assert.equal(answer(await player.send(ask(own))), "taken", "their own roll");
+    assert.equal(answer(await player.send(ask(own))), used, "the roll went with the first ask");
   });
 });
