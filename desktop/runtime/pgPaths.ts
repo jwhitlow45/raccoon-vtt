@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { lstat, readFile, readdir, readlink, symlink, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { DATA_DIR_ENV, DATA_LAYOUT, type Platform } from "../contract.ts";
 import { writeDurable } from "./durable.ts";
@@ -10,23 +10,26 @@ import { DatabaseFailed } from "./postgres.ts";
 
 /**
  * PostgreSQL's programs on Windows open every path through the ANSI code
- * page, the system's language for non-Unicode programs. A folder whose path
- * has a letter outside it, as under a profile named in Cyrillic on a Western
- * system, can't be opened at all (D-261113-219). So the data folder is handed
- * to PostgreSQL by the first of these the code page holds:
- * 1. its path as it is,
- * 2. its 8.3 short path, which Windows keeps on the system drive unless
- *    turned off there,
- * 3. a junction to it, in this user's own folder under RaccoonVTT's folder
- *    in ProgramData, which the installer makes.
- * The program folder may be given by its path or its short path only.
- *
- * The data folder's spelling is chosen once and kept in the data folder
- * (DATA_LAYOUT.pgLink), and every later start takes it before asking
- * Windows anything. PostgreSQL names its shared memory after the data
- * folder's path, and that name is how it finds a dead postmaster's processes
- * still attached before it starts another, so the spelling never changes
- * while the folder holds a database. One that stops working stops the start.
+ * page, the system's language for non-Unicode programs, so a folder whose
+ * path has a letter outside it, as under a profile named in Cyrillic on a
+ * Western system, can't be opened at all (D-261113-219). PostgreSQL also
+ * names its shared memory after the data folder's path, case and all, and
+ * that name is how it finds a dead postmaster's processes still attached
+ * before it starts another. So the path it is given for the data folder
+ * depends on the folder alone, the same at every start, whatever path,
+ * alias or case the start was handed:
+ * - The folder is its canonical path, as the lock takes it
+ *   (realpathSync.native: junctions, symlinks, 8.3 names and case resolved).
+ * - The data folder's record for that canonical path (DATA_LAYOUT.pgLink)
+ *   wins, and its path is handed on exactly.
+ * - Else an ASCII canonical path is given as it is.
+ * - Else a junction, `%ProgramData%\RaccoonVTT\<hash>\data`, where the hash
+ *   is of this user's SID and the canonical path, so a lost record finds the
+ *   same one. The installer makes RaccoonVTT's folder, and the app makes the
+ *   hash's folder this user's alone in one call.
+ * A database whose path can't be had again stops the start with words, and
+ * is never given a new one. The program folder is given by its path or its
+ * 8.3 short path.
  */
 
 const run = promisify(execFile);
@@ -41,14 +44,16 @@ export type AclRule = { sid: string; rights: number; inherit: number; propagate:
 export type AclFacts = { exists: boolean; directory: boolean; reparse: boolean; owner: string | null; protected: boolean; rules: AclRule[] };
 
 export type PgPathDeps = {
-  /** Reads a folder's path against the code page. Tests stand in a code page here. */
+  /** Reads the program folder's path against the code page. Tests stand in a code page here. */
   read(folder: string): Promise<FolderReading>;
-  /** Reads RaccoonVTT's folder in ProgramData. */
-  inspect(folder: string): Promise<AclFacts>;
+  /** Reads a folder's owner and ACL, and this user's SID. */
+  inspect(folder: string): Promise<{ user: string; facts: AclFacts }>;
   /** Makes a folder with this user's own security descriptor in one call, and reads what it got. */
   make(folder: string): Promise<{ user: string; facts: AclFacts }>;
   /** ProgramData, where the installer makes RaccoonVTT's folder. */
   programData: string | undefined;
+  /** Tests only: in place of realpathSync.native. */
+  canonical?: (path: string) => string;
   /** Tests only: runs between the junction and the last look at the key. */
   linked?: (folder: string) => Promise<void>;
 };
@@ -60,17 +65,14 @@ export type PgPaths = {
   notes: string[];
 };
 
-/** How the data folder is given to PostgreSQL. */
+/** How the data folder is given to PostgreSQL. Short is only ever read from an earlier build's record. */
 type Spelling = { how: "direct" } | { how: "short"; path: string } | { how: "junction"; folder: string; key: string };
 
-/** The spelling a start chose, and the data folder it was chosen for. */
+/** The spelling a start chose, and the canonical path of the data folder it was chosen for. */
 type LinkRecord = { data: string } & Spelling;
 
 /** RaccoonVTT's folder in ProgramData (desktop/build/programdata.ps1). */
 export const PROGRAMDATA_FOLDER = "RaccoonVTT";
-
-/** A user's folder in it: 16 random hex digits. */
-const USER_FOLDER = /^[0-9a-f]{16}$/;
 
 const KEY_FILE = "key";
 const SYSTEM = "S-1-5-18";
@@ -92,6 +94,11 @@ export function windowsDeps(): PgPathDeps {
 /** Plain ASCII, which every ANSI code page holds as it is. */
 function ascii(text: string): boolean {
   return /^[\x20-\x7e]*$/.test(text);
+}
+
+/** The junction's folder's name for this user and data folder: 16 hex digits of a SHA-256, the path case-folded as the lock folds it. */
+export function junctionName(user: string, canonical: string): string {
+  return createHash("sha256").update(`${user}\n${canonical.toLowerCase()}`, "utf8").digest("hex").slice(0, 16);
 }
 
 export async function pgPaths(
@@ -126,65 +133,182 @@ async function programSpelling(program: string, deps: PgPathDeps): Promise<strin
   );
 }
 
-/** The path PostgreSQL is given for the data folder: the one recorded, or one chosen now and recorded. */
+/** Windows' \\?\ prefix, which names the same path. */
+function plain(path: string): string {
+  return path.replace(/^\\\\\?\\(?!UNC\\)/, "");
+}
+
+/** The path PostgreSQL is given for the data folder (see the top of this file). */
 async function dataSpelling(data: string, recordFile: string, deps: PgPathDeps): Promise<string> {
-  if (ascii(data)) return data;
-  const recorded = await readRecord(recordFile);
+  const canonicalOf = (path: string) => plain((deps.canonical ?? realpathSync.native)(path));
+  const canonical = canonicalOf(data);
   const cluster = existsSync(join(data, DATA_LAYOUT.postgres));
-  if (recorded === "unreadable" && cluster) {
-    throw new DatabaseFailed(
-      `${basename(recordFile)} in the data folder, which says how PostgreSQL is given the folder, doesn't read, and RaccoonVTT gives it no other path while the folder holds a database. Restart the computer, then delete ${basename(recordFile)} and open RaccoonVTT again.`,
-    );
+  const recorded = await readRecord(recordFile);
+  const ours = recorded !== null && recorded !== "unreadable" && samePath(recorded.data, canonical) ? recorded : null;
+  if (ours !== null) {
+    const kept = await recordedSpelling(ours, canonical, cluster, recordFile, deps, canonicalOf);
+    if (kept !== null) return kept;
   }
-  if (recorded !== null && recorded !== "unreadable" && samePath(recorded.data, data)) {
-    const path = spellingPath(recorded, data);
-    const why = await unusable(recorded, data, deps.programData);
-    if (why === null) return path;
-    if (cluster) {
-      throw new DatabaseFailed(
-        `PostgreSQL was given this data folder as ${path}, and ${why}. RaccoonVTT gives it no other path while the folder holds a database, since a PostgreSQL still running from the old one could open the database twice. Restart the computer, then delete ${basename(recordFile)} in the data folder and open RaccoonVTT again.`,
-      );
-    }
-  }
-  const chosen = await choose(data, deps);
-  await writeDurable(recordFile, `${JSON.stringify({ data, ...chosen })}\n`, { platform: "win32" });
-  return spellingPath(chosen, data);
+  if (ascii(canonical)) return canonical;
+  // A record for another folder means this one was moved or copied. Windows
+  // moves no folder a process works in, and a copy is another folder, so its
+  // database may have a path of its own. With no record that reads, only a
+  // junction already there is the database's own.
+  const elsewhere = recorded !== null && recorded !== "unreadable" && ours === null;
+  return junctionSpelling(canonical, recordFile, deps, { mayMake: !cluster || elsewhere || ours !== null });
 }
 
-function spellingPath(spelling: Spelling, data: string): string {
-  if (spelling.how === "direct") return data;
-  if (spelling.how === "short") return spelling.path;
-  return join(spelling.folder, "data");
-}
-
-async function choose(data: string, deps: PgPathDeps): Promise<Spelling> {
-  const reading = await deps.read(data);
-  if (reading.fits) return { how: "direct" };
-  if (reading.short !== null && reading.shortFits) return { how: "short", path: reading.short };
-  return { how: "junction", ...(await junction(data, deps)) };
-}
-
-/** Why a recorded spelling no longer leads to the data folder, or null while it does. */
-async function unusable(spelling: Spelling, data: string, programData: string | undefined): Promise<string | null> {
-  if (spelling.how === "direct") return null;
-  if (spelling.how === "short") {
+/** The recorded spelling while it leads to the folder. Else null with no database, so a new one is chosen, and words with one. */
+async function recordedSpelling(
+  rec: LinkRecord,
+  canonical: string,
+  cluster: boolean,
+  recordFile: string,
+  deps: PgPathDeps,
+  canonicalOf: (path: string) => string,
+): Promise<string | null> {
+  if (rec.how === "direct") return rec.data;
+  if (rec.how === "short") {
+    let why: string | null;
     try {
-      return samePath(realpathSync.native(spelling.path), realpathSync.native(data)) ? null : `its short name ${spelling.path} leads elsewhere now`;
+      why = samePath(canonicalOf(rec.path), canonical) ? null : "leads elsewhere now";
     } catch {
-      return `its short name ${spelling.path} is gone`;
+      why = "is gone";
     }
+    if (why === null) return rec.path;
+    if (cluster) throw lost(rec.path, `the short name ${why}`);
+    return null;
   }
-  const parent = programData ? join(programData, PROGRAMDATA_FOLDER) : null;
-  if (parent === null || !samePath(dirname(spelling.folder), parent) || !USER_FOLDER.test(basename(spelling.folder))) {
-    return `${spelling.folder} is not a folder of this user's in RaccoonVTT's folder in ProgramData`;
-  }
-  if (!(await holdsKey(spelling.folder, spelling.key))) return `${spelling.folder} is gone or no longer holds its key`;
-  const link = join(spelling.folder, "data");
+  const link = join(rec.folder, "data");
+  if ((await holdsKey(rec.folder, rec.key)) && (await leadsTo(link, canonical))) return link;
+  return junctionSpelling(canonical, recordFile, deps, { mayMake: true, recorded: rec.folder, cluster });
+}
+
+function lost(path: string, why: string): DatabaseFailed {
+  return new DatabaseFailed(
+    `PostgreSQL was given this data folder as ${path}, and ${why}. RaccoonVTT gives a database no new path, since a PostgreSQL still running from the old one could open it twice. Make ${path} lead to this folder again, then open RaccoonVTT again.`,
+  );
+}
+
+/**
+ * The junction for this user and data folder, in RaccoonVTT's folder in
+ * ProgramData. A folder of that name already there is used only when this
+ * user owns it, its ACL is exactly the one the app gives, and its junction
+ * leads here, so another user who made it first can only stop the start. A
+ * missing one is made only when `mayMake`: with no database yet, for a moved
+ * or copied folder, or when the record names it.
+ */
+async function junctionSpelling(canonical: string, recordFile: string, deps: PgPathDeps, o: { mayMake: boolean; recorded?: string; cluster?: boolean }): Promise<string> {
+  const reinstall = (why: string) =>
+    new DatabaseFailed(
+      `PostgreSQL on Windows is given the data folder ${canonical}, whose path is not plain ASCII, through a junction in RaccoonVTT's folder in ProgramData, which ${why}. Reinstall RaccoonVTT, or set ${DATA_DIR_ENV} to a folder whose path is plain ASCII.`,
+    );
+  const programData = deps.programData;
+  if (!programData || !isAbsolute(programData) || !ascii(programData)) throw reinstall("has no plain path on this computer");
+  const parent = join(programData, PROGRAMDATA_FOLDER);
+  let user = "";
+  let problem: string | null;
   try {
-    return samePath(await readlink(link), data) ? null : `the junction ${link} leads elsewhere`;
-  } catch {
-    return `the junction ${link} is gone`;
+    const read = await deps.inspect(parent);
+    user = read.user;
+    problem = parentProblem(read.facts);
+  } catch (err) {
+    problem = `could not be read (${(err as Error).message})`;
   }
+  if (problem !== null) throw reinstall(problem);
+
+  const folder = join(parent, junctionName(user, canonical));
+  const link = join(folder, "data");
+  // An earlier build's record names a folder of another name, whose path the database had.
+  if (o.recorded !== undefined && !samePath(o.recorded, folder) && o.cluster) {
+    throw lost(join(o.recorded, "data"), `${o.recorded} is gone, no longer holds its key, or its junction leads elsewhere`);
+  }
+  const taken = (why: string) =>
+    new DatabaseFailed(
+      `PostgreSQL on Windows is given the data folder ${canonical} through the junction ${link}, and ${folder} is there but ${why}, so it is not used, and the database is never given another path. If another user made that folder, an administrator can remove it. Then open RaccoonVTT again.`,
+    );
+  let there: { user: string; facts: AclFacts };
+  try {
+    there = await deps.inspect(folder);
+  } catch (err) {
+    throw taken(`could not be read (${(err as Error).message})`);
+  }
+  if (there.facts.exists) {
+    const mine = folderProblem(there.facts, user);
+    if (mine !== null) throw taken(mine);
+    let to: string | null = null;
+    try {
+      to = await readlink(link);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw taken(`its junction can't be read (${(err as Error).message})`);
+    }
+    if (to !== null && !samePath(to, canonical)) throw taken(`its junction leads to ${to}`);
+    if (to === null) {
+      if (!o.mayMake) throw unrecorded(link);
+      await symlink(canonical, link, "junction");
+      if (!(await leadsTo(link, canonical))) throw taken("its junction leads elsewhere");
+    }
+    const key = (await readKey(folder)) ?? (await newKey(folder));
+    await writeRecord(recordFile, canonical, folder, key);
+    return link;
+  }
+  if (!o.mayMake) throw unrecorded(link);
+
+  const notMine = (why: string) =>
+    new DatabaseFailed(
+      `PostgreSQL on Windows is given the data folder ${canonical} through a junction in RaccoonVTT's folder in ProgramData. The folder made for it, ${folder}, ${why}, so it is not used. Restart the computer and open RaccoonVTT again.`,
+    );
+  let made: { user: string; facts: AclFacts };
+  try {
+    made = await deps.make(folder);
+  } catch (err) {
+    throw notMine(`could not be made (${(err as Error).message})`);
+  }
+  const mine = folderProblem(made.facts, user);
+  if (mine !== null) throw notMine(mine);
+  if (!(await plainAndEmpty(folder))) throw notMine("was not empty");
+  const key = await newKey(folder);
+  await symlink(canonical, link, "junction");
+  if (!(await leadsTo(link, canonical))) throw notMine("has a junction that leads elsewhere");
+  await deps.linked?.(folder);
+  // Once more, just before the data folder's record names the folder.
+  if (!(await holdsKey(folder, key))) throw notMine("no longer holds its key");
+  await writeRecord(recordFile, canonical, folder, key);
+  return link;
+}
+
+function unrecorded(link: string): DatabaseFailed {
+  return new DatabaseFailed(
+    `This data folder holds a database, and postgres-link.json, which says how PostgreSQL was given it, is gone or doesn't read, and the junction it would be given, ${link}, is not there either. RaccoonVTT gives a database no new path, since a PostgreSQL still running from the old one could open it twice. Put postgres-link.json back from a copy of the data folder, then open RaccoonVTT again.`,
+  );
+}
+
+async function writeRecord(file: string, canonical: string, folder: string, key: string): Promise<void> {
+  await writeDurable(file, `${JSON.stringify({ data: canonical, how: "junction", folder, key })}\n`, { platform: "win32" });
+}
+
+async function leadsTo(link: string, canonical: string): Promise<boolean> {
+  try {
+    return samePath(await readlink(link), canonical);
+  } catch {
+    return false;
+  }
+}
+
+async function readKey(folder: string): Promise<string | null> {
+  try {
+    const key = await readFile(join(folder, KEY_FILE), "utf8");
+    return /^[0-9a-f]{32}$/.test(key) ? key : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A new key, which no other user can read in this user's folder. */
+async function newKey(folder: string): Promise<string> {
+  const key = randomBytes(16).toString("hex");
+  await writeFile(join(folder, KEY_FILE), key, { flag: "w" });
+  return key;
 }
 
 function mapPath(path: string, aliases: [string, string][]): string {
@@ -228,7 +352,7 @@ export function parentProblem(facts: AclFacts): string | null {
   return null;
 }
 
-/** Why a folder just made is not this user's alone, or null when it is: owned by the user, its ACL only theirs, SYSTEM's and Administrators', each full control. */
+/** Why a folder is not this user's alone, or null when it is: owned by the user, its ACL only theirs, SYSTEM's and Administrators', each full control. */
 export function folderProblem(facts: AclFacts, user: string): string | null {
   if (!facts.exists || !facts.directory || facts.reparse) return "is not a plain folder";
   if (facts.owner !== user) return `is owned by ${facts.owner ?? "no one Windows names"}, not by this user, ${user}`;
@@ -239,49 +363,6 @@ export function folderProblem(facts: AclFacts, user: string): string | null {
     return `has entries for ${facts.rules.map((r) => r.sid).join(", ") || "no one"}, not only full control for this user, SYSTEM and Administrators`;
   }
   return null;
-}
-
-/**
- * This user's own folder for the junction, in RaccoonVTT's folder in
- * ProgramData. Windows makes it with its security descriptor in one call, so
- * no other user can open it in between, and then it is read back: kept only
- * when this user owns it and its ACL is exactly the one asked for. Only then
- * does it get the key, which no other user can read, and the junction.
- */
-async function junction(data: string, deps: PgPathDeps): Promise<{ folder: string; key: string }> {
-  const needs = `PostgreSQL can't open the data folder ${data} by its path, which has letters outside this computer's language for non-Unicode programs, and it has no short name that fits, so it is given to PostgreSQL through a junction in RaccoonVTT's folder in ProgramData`;
-  const reinstall = (why: string) => new DatabaseFailed(`${needs}, which ${why}. Reinstall RaccoonVTT, or set ${DATA_DIR_ENV} to a folder whose path has none of those letters.`);
-  const programData = deps.programData;
-  if (!programData || !isAbsolute(programData) || !ascii(programData)) throw reinstall("has no plain path on this computer");
-  const parent = join(programData, PROGRAMDATA_FOLDER);
-  let problem: string | null;
-  try {
-    problem = parentProblem(await deps.inspect(parent));
-  } catch (err) {
-    problem = `could not be read (${(err as Error).message})`;
-  }
-  if (problem !== null) throw reinstall(problem);
-
-  const folder = join(parent, randomBytes(8).toString("hex"));
-  const notMine = (why: string) => new DatabaseFailed(`${needs}. The folder made for the junction, ${folder}, ${why}, so it is not used. Restart the computer and open RaccoonVTT again.`);
-  let made: { user: string; facts: AclFacts };
-  try {
-    made = await deps.make(folder);
-  } catch (err) {
-    throw notMine(`could not be made (${(err as Error).message})`);
-  }
-  const mine = folderProblem(made.facts, made.user);
-  if (mine !== null) throw notMine(mine);
-  if (!(await plainAndEmpty(folder))) throw notMine("was not empty");
-  const key = randomBytes(16).toString("hex");
-  await writeFile(join(folder, KEY_FILE), key, { flag: "wx" });
-  const link = join(folder, "data");
-  await symlink(data, link, "junction");
-  if (!samePath(await readlink(link), data)) throw notMine("has a junction that leads elsewhere");
-  await deps.linked?.(folder);
-  // Once more, just before the data folder's record names the folder.
-  if (!(await holdsKey(folder, key))) throw notMine("no longer holds its key");
-  return { folder, key };
 }
 
 async function plainAndEmpty(folder: string): Promise<boolean> {
@@ -349,7 +430,11 @@ const FACTS = [
   "[pscustomobject]@{ exists = $true; directory = [bool]$i.PSIsContainer; reparse = [bool]($i.Attributes -band [System.IO.FileAttributes]::ReparsePoint); owner = $a.GetOwner([System.Security.Principal.SecurityIdentifier]).Value; protected = $a.AreAccessRulesProtected; rules = @($a.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object { [pscustomobject]@{ sid = $_.IdentityReference.Value; rights = [int]$_.FileSystemRights; inherit = [int]$_.InheritanceFlags; propagate = [int]$_.PropagationFlags; allow = ($_.AccessControlType -eq 'Allow'); inherited = $_.IsInherited } }) } }",
 ].join("; ");
 
-const INSPECT_FOLDER = [...PREFIX, FACTS, "[pscustomobject]@{ facts = (Facts $env:RACCOONVTT_FOLDER) } | ConvertTo-Json -Compress -Depth 6"].join("; ");
+const INSPECT_FOLDER = [
+  ...PREFIX,
+  FACTS,
+  "[pscustomobject]@{ user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; facts = (Facts $env:RACCOONVTT_FOLDER) } | ConvertTo-Json -Compress -Depth 6",
+].join("; ");
 
 /** .NET Framework's CreateDirectory(path, security) hands the security descriptor to Windows' CreateDirectory. It leaves a folder already there as it is, which the reading after it shows. */
 const MAKE_FOLDER = [
@@ -412,7 +497,7 @@ export function parseAclFacts(raw: unknown): AclFacts {
   };
 }
 
-/** A reading that fails says nothing fits. The first start then makes a junction, and later ones keep it. */
+/** A reading that fails says nothing fits, and the program folder is then given by neither way. */
 async function readFolder(folder: string): Promise<FolderReading> {
   try {
     return parseFolderReading(await powershell(READ_FOLDER, folder));
@@ -421,8 +506,10 @@ async function readFolder(folder: string): Promise<FolderReading> {
   }
 }
 
-async function inspectFolder(folder: string): Promise<AclFacts> {
-  return parseAclFacts((JSON.parse(await powershell(INSPECT_FOLDER, folder)) as { facts?: unknown }).facts);
+async function inspectFolder(folder: string): Promise<{ user: string; facts: AclFacts }> {
+  const row = JSON.parse(await powershell(INSPECT_FOLDER, folder)) as { user?: unknown; facts?: unknown };
+  if (typeof row.user !== "string") throw new Error("PowerShell named no user");
+  return { user: row.user, facts: parseAclFacts(row.facts) };
 }
 
 async function makeFolder(folder: string): Promise<{ user: string; facts: AclFacts }> {

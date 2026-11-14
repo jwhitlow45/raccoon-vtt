@@ -71,7 +71,7 @@ export const DATA_LAYOUT = {
   restoreJournal: "restore.json",
   /** The owner record: pid, start time and lock path of the supervisor that holds the lock (design 8.1). */
   ownerRecord: "supervisor.json",
-  /** Windows only, and only for a path PostgreSQL can't open: the folder under ProgramData with junctions to it (D-261113-219). */
+  /** Windows only, for a data folder whose canonical path is not plain ASCII: the path PostgreSQL is given for it, and its junction's key (D-261113-219). */
   pgLink: "postgres-link.json",
 } as const;
 
