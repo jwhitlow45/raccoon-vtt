@@ -14,6 +14,7 @@ import {
   APP_NAME,
   DATA_DIR_ENV,
   DATA_LAYOUT,
+  LOG_FILES,
   RESOURCES,
   RUNTIME_DIR,
   SHELL_ARGS,
@@ -60,7 +61,9 @@ import { defaultOut } from "./stage.ts";
  * a kernel setting, so they refuse to run outside CI.
  *
  * Each run copies its data folders' logs to `$RUNNER_TEMP/smoke-logs`
- * (desktop.yml keeps them when a smoke test fails).
+ * (desktop.yml keeps them when a smoke test fails): the supervisor's,
+ * PostgreSQL's, the app server's and the shell's. `headless` adds
+ * everything each supervisor printed, under printed/.
  */
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -86,6 +89,15 @@ function alive(pid: number): boolean {
     return true;
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** A file's last lines, or "" when it can't be read. */
+function logTail(file: string, lines: number): string {
+  try {
+    return readFileSync(file, "utf8").trimEnd().split(/\r?\n/).slice(-lines).join("\n");
+  } catch {
+    return "";
   }
 }
 
@@ -239,14 +251,27 @@ class Supervisor {
     const status = parseHeadlessLine(line);
     if (status) this.status = status;
     this.lines.push(line);
-    if (this.lines.length > 400) this.lines.shift();
+    if (this.lines.length > 2000) this.lines.shift();
   }
 
-  /** What went wrong, for an error: the status's words and the last lines the supervisor printed that are not statuses. */
+  /**
+   * What went wrong, for an error: the status's state, step and words, the
+   * last lines the supervisor printed that are not statuses, and the end
+   * of its supervisor.log, which names each part of a start as it begins.
+   */
   explain(): string {
     const error = this.status?.error ? errorText(this.status.error, this.status.appVersion, PLATFORM) : "no error reported";
-    const tail = this.lines.filter((l) => !l.startsWith("{")).slice(-20).join("\n");
-    return `${this.label}: state ${this.status?.state ?? "none"}, ${error}${tail ? `\n${tail}` : ""}`;
+    const step = this.status?.step ? `, step ${this.status.step}` : "";
+    const printed = this.lines.filter((l) => !l.startsWith("{")).slice(-20).join("\n");
+    const log = logTail(path.join(this.data, DATA_LAYOUT.logs, LOG_FILES.supervisor), 15);
+    return `${this.label}: state ${this.status?.state ?? "none"}${step}, ${error}${printed ? `\n${printed}` : ""}${log ? `\nsupervisor.log ends:\n${log}` : ""}`;
+  }
+
+  /** Everything it printed, statuses included, beside the logs desktop.yml keeps. */
+  keepPrinted(): void {
+    const dir = path.join(LOGS, "headless", "printed");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, `${this.label}.log`), `${this.lines.join("\n")}\n`);
   }
 
   async send(command: Command, timeoutMs = 300_000): Promise<unknown> {
@@ -521,7 +546,8 @@ async function headless(argv: readonly string[]): Promise<void> {
   const local = `http://localhost:${port}`;
   const start = (label: string, folder = data, env?: Record<string, string>) => new Supervisor(label, folder, { node, stage, postgres, port, env });
   const running = new Set<Supervisor>();
-  const started = (s: Supervisor) => (running.add(s), s);
+  const all: Supervisor[] = [];
+  const started = (s: Supervisor) => (running.add(s), all.push(s), s);
 
   try {
     let sup = started(start("first start"));
@@ -602,6 +628,7 @@ async function headless(argv: readonly string[]): Promise<void> {
     stopLeftPostgres(data, postgres);
     blocker?.close();
     keepLogs(data, "headless");
+    for (const s of all) s.keepPrinted();
   }
 }
 
