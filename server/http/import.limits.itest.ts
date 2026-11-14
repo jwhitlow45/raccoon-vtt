@@ -125,14 +125,18 @@ describe("an import and the player limits", () => {
     assert.deepEqual(list.filter((e) => source.has(e.id)).map((e) => e.id), [ZERO_HP_UNCONSCIOUS_ID]);
   });
 
-  test("a fight past today's 2,000 rows comes back, and one past the far rows is refused as too big", async () => {
+  test("a fight past today's 2,000 rows comes back, and a scene past the far tokens is refused as too big", async () => {
     const { file } = await exported(t.client(), "Rows");
-    const fight = (rows: number): RoomExport => ({ ...file, state: { ...file.state, encounter: { rev: 0, round: 1, activeEntryId: null, entries: Array.from({ length: rows }, () => entry(uuidv7(), { label: "Lair" })) } } });
-    const taken = await importFile(fight(LIMITS.encounterRows + 1));
+    const fight = { ...file, state: { ...file.state, encounter: { rev: 0, round: 1, activeEntryId: null, entries: Array.from({ length: LIMITS.encounterRows + 1 }, () => entry(uuidv7(), { label: "Lair" })) } } };
+    const taken = await importFile(fight);
     assert.equal(taken.status, 201, taken.reason);
     assert.equal((await stored(taken.roomId!)).encounter?.entries.length, LIMITS.encounterRows + 1);
-    const refused = await importFile(fight(FAR.rows + 1));
+    const sceneId = file.state.meta.playerSceneId!;
+    const goblin = Object.values(fullRoom({ members: 3 }).state.tokens).find((tk) => "inline" in tk.actor)!;
+    const crowd = Object.fromEntries(Array.from({ length: FAR.tokens + 1 }, () => uuidv7()).map((id) => [id, { ...goblin, id, sceneId }]));
+    const refused = await importFile({ ...file, state: { ...file.state, tokens: crowd } });
     assert.equal(refused.status, 413, refused.reason);
+    assert.match(refused.reason ?? "", /over_room_limits/);
   });
 
   test("a room at the far lines with 49 members comes back with what an import keeps", async () => {

@@ -45,11 +45,11 @@ describe("an import by today's checks or the far lines", () => {
   });
 
   test("takes asks, areas and drawings up to their far lines", () => {
-    // The DM's asks read in steps of 50 (FAR.countStep), so 1,200 of them are the most the line takes with no player's held.
-    const asks = room({ casts: Object.fromEntries(Array.from({ length: 1_200 }, (_, i) => [`a${i}`, castAsk(`a${i}`, { by: "dm1" })])) });
+    // The DM's asks read in steps of 50 (FAR.countStep), and the line is a whole step past today's 20.
+    const asks = room({ casts: Object.fromEntries(Array.from({ length: FAR.asks }, (_, i) => [`a${i}`, castAsk(`a${i}`, { by: "dm1" })])) });
     assert.doesNotThrow(() => assertWithinLimits(asks));
     asks.casts.extra = castAsk("extra", { by: "dm1" });
-    refusedWith(asks, /at most 1,220 asks for saves can wait at once/);
+    refusedWith(asks, new RegExp(`at most ${FAR.asks.toLocaleString("en-US")} asks for saves can wait at once`));
     const drawn = room();
     for (let i = 0; i < LIMITS.drawingsPerScene + 1; i++) drawn.drawings[`d${i}`] = drawing(`d${i}`);
     assert.doesNotThrow(() => assertWithinLimits(drawn));
