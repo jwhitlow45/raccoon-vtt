@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { realpathSync } from "node:fs";
 import { uptime } from "node:os";
 import { basename } from "node:path";
-import { bootId, bootTime, isAlive, parseStatusUid, parseWindowsProcess, processFacts, processStamp, processStart, selfIdentity, stillRunning } from "./processInfo.ts";
+import { bootId, bootTime, isAlive, linkedProgram, parseStatusUid, parseWindowsProcess, processFacts, processStamp, processStart, selfIdentity, stillRunning } from "./processInfo.ts";
 
 /**
  * A process is its pid, its start time and its boot (docs/design/design-v1-local-app.md
@@ -75,8 +75,11 @@ test("this boot began before this process, by less than the system's uptime", as
 });
 
 test("the readings that need no special rights parse: /proc's Uid line and Windows' CIM row", () => {
-  assert.equal(parseStatusUid("Name:\tpostgres\nUmask:\t0077\nState:\tS (sleeping)\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\n"), 1000);
+  assert.equal(parseStatusUid("Name:\tpostgres\nUmask:\t0077\nState:\tS (sleeping)\nUid:\t1000\t1000\t1000\t1000\nGid:\t1001\t1001\t1001\t1001\n"), 1000);
   assert.equal(parseStatusUid("Name:\tx\n"), null);
+  assert.equal(linkedProgram("/usr/lib/postgresql/17/bin/postgres (deleted)"), "/usr/lib/postgresql/17/bin/postgres");
+  assert.equal(linkedProgram("/opt/raccoonvtt/postgres/bin/postgres"), "/opt/raccoonvtt/postgres/bin/postgres");
+  assert.equal(linkedProgram("/opt/my (deleted) things/postgres"), "/opt/my (deleted) things/postgres");
   assert.deepEqual(parseWindowsProcess('{"name":"svchost.exe","created":"2026-11-14T07:13:25.1200000Z"}'), { exe: "svchost.exe", start: Date.parse("2026-11-14T07:13:25.120Z") });
   assert.deepEqual(parseWindowsProcess('{"name":"postgres.exe","created":""}'), { exe: "postgres.exe", start: null });
   assert.deepEqual(parseWindowsProcess(""), { exe: null, start: null });
