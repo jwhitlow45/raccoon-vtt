@@ -166,6 +166,14 @@ describe("squares: a ledge that closes the way holds the walk at its foot (D-261
     assert.deepEqual(drag.hold && [drag.hold.at.x, drag.hold.at.y, holdLabel(drag.hold.blocker, drag.hold.noWay === true)], [16, 4, "Ledge in the way"], "the board held him there too");
   });
 
+  test("past a pit 10 ft deep across the corridor on 10, 4, which no stairs leave: Thorn holds on its edge, not in it", () => {
+    const s = hall();
+    heights(s, { x: 10, y: 4, w: 1, h: 1 }, -10);
+    const { drag, note } = dropThorn(s, { x: 18, y: 4 });
+    assert.equal(note, "Ledge in the way. No stairs you have seen lead there.");
+    assert.deepEqual(drag.plan.moves.map((m) => [m.x, m.y]), [[9, 4]]);
+  });
+
   test("the DM's drag still lands on the rise", () => {
     const s = hall();
     heights(s, { x: 17, y: 1, w: 4, h: 8 }, 10);
