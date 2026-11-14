@@ -385,7 +385,9 @@ export type NetworkReach = z.infer<typeof NetworkReach>;
  * Every stop the window explains. `glibc` and `quarantine` come from the
  * shell, which sees the bundled programs fail to load, and `root` from
  * either. The shell also uses `serverCrashed`, with supervisor.log's last
- * line, when the supervisor itself exits on its own.
+ * line, when the supervisor itself exits on its own. `stalled` is a part of
+ * a start that took longer than its bound (runtime/supervisor.ts
+ * START_PARTS), with that part's words.
  */
 export const AppError = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("glibc") }),
@@ -404,6 +406,7 @@ export const AppError = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("newerData"), dataApp: AppVersion }),
   z.object({ kind: z.literal("noReadableBackup"), dataApp: AppVersion }),
   z.object({ kind: z.literal("backupBeforeUpdateFailed"), reason: z.string() }),
+  z.object({ kind: z.literal("stalled"), what: z.string(), seconds: z.number().int().positive() }),
 ]);
 export type AppError = z.infer<typeof AppError>;
 
@@ -868,6 +871,7 @@ export const ERROR_ACTIONS = {
   newerData: ["downloadLatest", "restoreBackup"],
   noReadableBackup: ["downloadLatest"],
   backupBeforeUpdateFailed: ["tryAgain", "startWithoutBackup"],
+  stalled: ["tryAgain", "showLogs"],
 } as const satisfies Record<AppError["kind"], readonly ErrorAction[]>;
 
 /** The words for a stop. `appVersion` is this build's, `platform` the computer's. */
@@ -908,5 +912,7 @@ export function errorText(error: AppError, appVersion: string, platform: Platfor
       return `No backup this version can read is on this computer. Install ${error.dataApp} or later to open your rooms.`;
     case "backupBeforeUpdateFailed":
       return `The backup before the update failed: ${clause(error.reason)}. Your rooms are untouched.`;
+    case "stalled":
+      return `RaccoonVTT gave up ${clause(error.what)} after ${error.seconds} s. The logs may say why.`;
   }
 }
