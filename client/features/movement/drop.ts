@@ -4,9 +4,9 @@ import { SOMETHING_BLOCKS, stopWords, WALL_IN_THE_WAY } from "#shared/permission
 import type { Blocker, BuildState, LegEnd } from "#shared/ruleHooks.ts";
 import type { DistanceSettings } from "#shared/rules/distance.ts";
 import { holderOf, linkHolds, onHolder, publicMembers, walkerFor, type SeenByAll } from "#shared/rules/attach.ts";
-import { anchorOfHex, canSqueeze, footprintSize, hexSqueezedSize, sizeCategory, snapStep, squeezedSize, type SizeCategory } from "#shared/rules/footprint.ts";
+import { anchorOfHex, canSqueeze, footprintRect, footprintSize, hexSqueezedSize, occupiedHexes, placedOnHex, sizeCategory, snapStep, squeezedSize, storedCenter, type PlacedToken, type SizeCategory } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
-import { hexAt, hexKey, hexNeighbors, type Hex } from "#shared/rules/hex.ts";
+import { hexAt, hexCenter, hexInScene, hexKey, hexNeighbors, type Hex } from "#shared/rules/hex.ts";
 import { deviceGround } from "#shared/rules/held.ts";
 import { footing } from "#shared/rules/heights.ts";
 import { coreBlocked, coreWalled, groundUnder, hexEndStand, hexFitWall, hexLegOf, hexLegStand, hexNarrow, hexStandHexes, hexStandInside, hexStandPlace, hexStartStand, hexWallsOf, landedElevation, landing, legSpots, legStop, offGridWallThrough, onSqueezedLattice, ownWalk, previewChunks, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type HexStand, type HexWalls, type Walker } from "#shared/rules/movement.ts";
@@ -17,6 +17,7 @@ import type { WalkRoute } from "#shared/rules/walk.ts";
 import { routeLegCheck, type RouteWorld } from "#shared/rules/hexWalk.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
 import { displayName, snapPosition } from "../../lib/scene.ts";
+import { dragWalkers } from "../attach/groups.ts";
 import type { Labels } from "../../lib/labels.ts";
 
 /**
@@ -272,9 +273,10 @@ export function squeezedSpot(state: DropView, token: DropToken, raw: Point, mode
  * lone drag led by a mount that was pressed on a token sitting on it, the
  * mount's box at that token's snapped box (`pressedAim`, D-261113-200),
  * with that token's dropped middle (`seat`, D-261029-57), which the
- * mount's stand keeps on it (`seatedStand`).
+ * mount's stand keeps on it (`seatedStand`), and that token's id
+ * (`seated`), whose own landing settles a tie between stands.
  */
-export type Aim = Point & { seat?: Point };
+export type Aim = Point & { seat?: Point; seated?: string };
 
 /**
  * The aim of a drag of `lead`, its box dropped at `at`, that was pressed on
@@ -301,7 +303,7 @@ export function pressedAim(state: DropView, lead: DropToken, pressed: DropToken 
   const size = footprintSize(pressed);
   const dropped = snapPosition(dropGrid(state, pressed), at.x + pressed.x - lead.x, at.y + pressed.y - lead.y, size);
   // From the snapped box and the stored places alone, so no trace of the pointer's fraction is left in the lead's box.
-  return { x: dropped.x - pressed.x + lead.x, y: dropped.y - pressed.y + lead.y, seat: { x: dropped.x + size.w / 2, y: dropped.y + size.h / 2 } };
+  return { x: dropped.x - pressed.x + lead.x, y: dropped.y - pressed.y + lead.y, seat: { x: dropped.x + size.w / 2, y: dropped.y + size.h / 2 }, seated: pressed.id };
 }
 
 function sitsOn(state: DropView, id: string, leadId: string): boolean {
@@ -330,14 +332,32 @@ function sitsOn(state: DropView, id: string, leadId: string): boolean {
  * it, and on open ground the mount stands where it was dropped, across the
  * edge of a rise as well. Null where no stand holds the middle, and the
  * drop goes as the mount's box dropped at `raw`.
+ *
+ * Full stands equally near the box tie (within `TIE`), as they do for a
+ * mount squeezed half a square off its rider's grid, or onto one hex. A
+ * rider off a mount that was squeezed takes the stand's top-left seat, on
+ * hexes the hex the mount counts its steps from (D-261029-80), so the
+ * first of them, top then left, put her a square or hex off the finger on
+ * open ground too (LP40-RIDER-1, D-261113-220). The tie goes to the first
+ * unless another lands the pressed token `seated` nearer the square or hex
+ * it is dropped on (`seatedLanding`).
  */
-function seatedStand(state: DropView, token: DropToken, raw: Point, seat: Point): Point | null {
+function seatedStand(state: DropView, token: DropToken, raw: Point, seat: Point, seated?: string): Point | null {
   const g = dropGrid(state, token);
   const walker = walkerOf(state, token);
   const size = footprintSize(token);
   const middle = { x: raw.x + size.w / 2, y: raw.y + size.h / 2 };
   const nearest = <T extends { at: Point; mid: Point }>(spots: T[]): T[] =>
     spots.sort((a, b) => (a.mid.x - middle.x) ** 2 + (a.mid.y - middle.y) ** 2 - ((b.mid.x - middle.x) ** 2 + (b.mid.y - middle.y) ** 2) || a.at.y - b.at.y || a.at.x - b.at.x);
+  const landsSeated = seatedLanding(state, token, seat, seated);
+  // The first that fits, the tie settled by where the pressed token lands.
+  const fitting = <T extends { at: Point; mid: Point }>(spots: readonly T[], fits: (c: T) => boolean): T | undefined => {
+    const first = spots.find(fits);
+    if (!first || !landsSeated) return first;
+    const far = (c: T) => Math.hypot(c.mid.x - middle.x, c.mid.y - middle.y);
+    const tied = spots.filter((c) => Math.abs(far(c) - far(first)) < TIE && fits(c));
+    return tied.length > 1 ? landsSeated(tied, first) : first;
+  };
   if (isHex(g)) {
     const t = hexWallsOf(state, walker);
     // The walls alone, as movement.ts coreWalled reads a stand on hexes.
@@ -348,7 +368,7 @@ function seatedStand(state: DropView, token: DropToken, raw: Point, seat: Point)
     const holding = (size: SizeCategory, squeezed: boolean) =>
       nearest([...refs.values()].map((ref): HexStand => ({ size, ref, squeezed })).filter((s) => hexStandHexes(g, s).some((h) => h.col === on.col && h.row === on.row)).map((s) => ({ at: hexStandPlace(g, token, s), mid: anchorOfHex(g, s.size, s.ref), s })));
     const fits = (s: HexStand, by: HexWalls | null) => !by || (hexStandInside(by, s) && hexFitWall(by, s) < 0);
-    const full = holding(sizeCategory(token), false).find((c) => fits(c.s, walled));
+    const full = fitting(holding(sizeCategory(token), false), (c) => fits(c.s, walled));
     if (full && fits(full.s, t)) return full.at;
     const small = canSqueeze(token) ? hexSqueezedSize(sizeCategory(token)) : null;
     const squeezed = small ? holding(small, true).find((c) => !t || hexNarrow(t, token, c.s)) : undefined;
@@ -357,7 +377,7 @@ function seatedStand(state: DropView, token: DropToken, raw: Point, seat: Point)
   const step = snapStep(token);
   const fullSpots: { at: Point; mid: Point }[] = [];
   for (const x of holdingStarts(seat.x, size.w, step)) for (const y of holdingStarts(seat.y, size.h, step)) fullSpots.push({ at: { x, y }, mid: { x: x + size.w / 2, y: y + size.h / 2 } });
-  const full = nearest(fullSpots).find((c) => !coreWalled(state, walkEnd(state, walker, c.at)));
+  const full = fitting(nearest(fullSpots), (c) => !coreWalled(state, walkEnd(state, walker, c.at)));
   if (full && !coreBlocked(state, walkEnd(state, walker, full.at))) return full.at;
   // A squeeze stands on whole squares, its sides one shorter where they reach two, centered in the full footprint.
   const small = squeezedSize(token);
@@ -367,6 +387,104 @@ function seatedStand(state: DropView, token: DropToken, raw: Point, seat: Point)
   }
   return nearest(squeezedSpots).find((c) => squeezeFits(state, walkEnd(state, walker, c.at)))?.at ?? full?.at ?? null;
 }
+
+/**
+ * How a tie between full stands of the mount `lead` goes for the token
+ * `seated` pressed on it, dropped with its middle at `seat`
+ * (`seatedStand`): to `first`, unless another of the `tied` stands lands
+ * that token nearer the square or hex it is dropped on and every creature
+ * the walk drags along stands clear there (`followersClear`), and then to
+ * the nearest such, on it where one does, ties kept in their order. So the
+ * goblin a rider drags out of a corridor's mouth is never left on the rock
+ * beside it for her to land under the finger. Each token in the mount's
+ * group lands carried by its move, on the seat the token it hangs from
+ * takes there (route.ts seatShift). Null with no such token.
+ */
+function seatedLanding(state: DropView, lead: DropToken, seat: Point, seated: string | undefined): (<T extends { at: Point }>(tied: readonly T[], first: T) => T) | null {
+  const pressed = seated !== undefined ? state.tokens[seated] : undefined;
+  if (!pressed) return null;
+  const g = dropGrid(state, lead);
+  const size = footprintSize(pressed);
+  const dropped = snapPosition(g, seat.x - size.w / 2, seat.y - size.h / 2, size);
+  const riders = ridersSeen(state, lead);
+  const memberOf = (id: string): Follower | undefined => state.tokens[id];
+  const walkers = dragWalkers(state.tokens, lead.id, state.seen);
+  const placeAt = (at: Point) => (id: string): Point => {
+    const t = state.tokens[id]!;
+    const shift = seatShift(g, lead, memberOf, id, at, false, riders);
+    return { x: t.x + at.x - lead.x + shift.x, y: t.y + at.y - lead.y + shift.y };
+  };
+  const far = (at: Point) => {
+    const lands = placeAt(at)(pressed.id);
+    return (lands.x - dropped.x) ** 2 + (lands.y - dropped.y) ** 2;
+  };
+  return (tied, first) => {
+    let best = first;
+    let closest = far(first.at);
+    for (const c of tied) {
+      const d = far(c.at);
+      if (d < closest - 1e-9 && followersClear(state, g, walkers, placeAt(c.at))) [best, closest] = [c, d];
+    }
+    return best;
+  };
+}
+
+/**
+ * Whether each creature in `walkers`, which a walk drags along, stands
+ * clear where the walk ends full size with every token in the group at
+ * `placeAt`: no wall or ledge on its step from its holder's place there to
+ * its own, and off its grid on squares none through its box, as the drop's
+ * own check of a walk's end reads it (`followersOf`). From its holder's
+ * place, not along its own walk, since a stand is chosen before the search
+ * finds the walk's corners: a goblin a rider drags off a squeezed mount,
+ * whose place lands on the rock beside a corridor's mouth, is caught here,
+ * and its walk there is the search's to judge.
+ */
+function followersClear(state: DropView, g: Grid, walkers: readonly Token[], placeAt: (id: string) => Point): boolean {
+  for (const w of walkers) {
+    const holder = w.attached ? state.tokens[w.attached.to] : undefined;
+    const bounds = state.scenes[w.sceneId]?.bounds;
+    if (!holder || !bounds) continue;
+    const { squeeze: _squeeze, ...full } = w;
+    const end = placeAt(w.id);
+    if (!inScene(g, bounds, { ...full, ...end })) return false;
+    const from = besideHolder(g, full, { size: holder.size, w: holder.w, h: holder.h, ...placeAt(holder.id) }, end);
+    const walking = ownWalk({ ...full, ...from, elevation: groundUnder(state.buildChunks, full, from) });
+    if (legStop(state, walking, { ...end, elevation: groundUnder(state.buildChunks, full, end), squeeze: false }) !== null) return false;
+    if (!isHex(g) && !fullStandClear(state, walking, end)) return false;
+  }
+  return true;
+}
+
+/** Whether every square or hex of a footprint lies on the scene, as the route search walks only there (walk.ts and hexWalk.ts). */
+function inScene(g: Grid, bounds: { w: number; h: number }, token: PlacedToken): boolean {
+  if (isHex(g)) return occupiedHexes(g, token).every((h) => hexInScene(g, bounds, h));
+  const r = footprintRect(g, token);
+  return r.x >= -1e-9 && r.y >= -1e-9 && r.x + r.w <= bounds.w + 1e-9 && r.y + r.h <= bounds.h + 1e-9;
+}
+
+/** Where `token`'s box stands on its holder's footprint `holder` nearest its place `to`: on squares slid inside it, on hexes on the holder's hex nearest its middle. */
+function besideHolder(g: Grid, token: PlacedToken, holder: PlacedToken, to: Point): Point {
+  const size = footprintSize(token);
+  if (isHex(g)) {
+    const middle = storedCenter({ ...token, ...to });
+    const far = (h: Hex) => (hexCenter(g, h).x - middle.x) ** 2 + (hexCenter(g, h).y - middle.y) ** 2;
+    const near = occupiedHexes(g, holder).sort((a, b) => far(a) - far(b))[0];
+    return near ? placedOnHex(g, token, near) : to;
+  }
+  const room = footprintSize(holder);
+  const inside = (v: number, lo: number, span: number) => Math.min(Math.max(v, lo), lo + Math.max(0, span));
+  return { x: inside(to.x, holder.x, room.w - size.w), y: inside(to.y, holder.y, room.h - size.h) };
+}
+
+/**
+ * How much nearer one of a mount's stands may be than another and still tie
+ * (`seatedStand`): hex corners, a Large stand's anchor, round to a 1/64
+ * lattice (hex.ts CORNER_LATTICE), so the three stands round one hex lie up
+ * to about that much apart in distance where the exact geometry has them
+ * equal. On squares equal distances are exact.
+ */
+const TIE = 1 / 64;
 
 /** The multiples of `step` a side of `length` can start at and still hold `p`, its far end open. */
 function holdingStarts(p: number, length: number, step: number): number[] {
@@ -385,7 +503,7 @@ function holdingStarts(p: number, length: number, step: number): number[] {
  * one (`seatedStand`).
  */
 export function planOne(state: DropView, token: DropToken, raw: Aim, mode: Exclude<DropMode, "teleport">): DropPlan {
-  const stand = raw.seat ? seatedStand(state, token, raw, raw.seat) : null;
+  const stand = raw.seat ? seatedStand(state, token, raw, raw.seat, raw.seated) : null;
   const squeezed = stand ? null : squeezedSpot(state, token, raw, mode);
   if (squeezed) return { moves: moved(token, squeezed) ? [landed(state, token, squeezed)] : [], stop: null, held: [] };
   const g = dropGrid(state, token);
@@ -817,7 +935,7 @@ function followersOf(state: WalkersState, lead: Walker, points: readonly RoutePo
 }
 
 /** The tokens sitting on the lead that every player sees, as the move seats them before the rest (route.ts fileOutOfReach). */
-function ridersSeen(state: WalkersState, lead: Walker & { id?: string }): Token[] {
+function ridersSeen(state: WalkersState, lead: { id?: string | undefined }): Token[] {
   const seen = state.seen;
   const holder = lead.id !== undefined ? state.tokens?.[lead.id] : undefined;
   if (!seen || !state.tokens || !holder || !seen(holder)) return [];

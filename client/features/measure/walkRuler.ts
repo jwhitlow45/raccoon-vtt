@@ -472,7 +472,7 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     // The start's offset, exactly, while the rider keeps its seat, and the new one once a squeeze has moved it.
     const by = Math.abs(now.x - shift.x) > 1e-6 || Math.abs(now.y - shift.y) > 1e-6 ? now : shift;
     // A drag from the rider aims the mount at the stand that keeps her middle on the stop (drop.ts Aim.seat, D-261029-57).
-    const raw: Aim = { x: stop.x - size.w / 2 + by.x, y: stop.y - size.h / 2 + by.y, ...(seated ? { seat: { x: stop.x, y: stop.y } } : {}) };
+    const raw: Aim = { x: stop.x - size.w / 2 + by.x, y: stop.y - size.h / 2 + by.y, ...(seated ? { seat: { x: stop.x, y: stop.y }, seated: anchor.id } : {}) };
     if (waiting) {
       legs.push(draw({ from: waiting, to: raw, corners: [], ft: 0, none: false, searching: true }, by));
       waiting = raw;
