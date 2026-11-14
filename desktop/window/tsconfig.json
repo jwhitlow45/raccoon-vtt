@@ -1,0 +1,13 @@
+// The window's page (design sections 3 and 9): React in a browser, built by
+// Vite, with the contract and the app's own theme and components.
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "lib": ["dom", "dom.iterable", "es2024"],
+    "types": ["vite/client"]
+  },
+  "include": ["**/*.ts", "**/*.tsx", "../contract.ts"]
+}

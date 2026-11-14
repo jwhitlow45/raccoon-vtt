@@ -30,6 +30,11 @@ dist
 # Local data a development server wrote: uploaded images and room exports.
 .data
 
+# The desktop app builds its own server tree (desktop/scripts/stage.ts), and
+# nothing in the image imports it: server code takes only types from
+# desktop/contract.ts, which Node erases before it runs.
+desktop
+
 # Tests never run in the image, and the runtime stage copies server/ and
 # shared/ whole, so leaving them out here keeps them out of production.
 **/*.test.ts

@@ -1,0 +1,16 @@
+// The supervisor, the shell's logic, the scripts and the desktop e2e files,
+// all on Node. No Electron types: only desktop/electron/ imports Electron
+// (tsconfig.electron.json), so the root typecheck needs no desktop packages
+// (D-261113-087). typeRoots keeps @types/node the root's, which matches the
+// bundled Node 24, whatever version Electron brings into desktop/node_modules.
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["es2024"],
+    "types": ["node"],
+    "typeRoots": ["../node_modules/@types"]
+  },
+  "include": ["contract.ts", "*.test.ts", "runtime/**/*.ts", "shell/**/*.ts", "scripts/**/*.ts", "e2e/**/*.ts"]
+}

@@ -29,6 +29,10 @@ and for how to use it, the [DM guide](../dm-guide.md).
 - [design-v1-room-count.md](design-v1-room-count.md): the room count, so that
   the numbers a player's device receives never reflect the server's private
   bookkeeping.
+- [design-v1-local-app.md](design-v1-local-app.md): RaccoonVTT on your own
+  computer, a desktop app for Windows, macOS and Linux that runs the server,
+  its database and its backups, with players on the same network joining in
+  their own browsers.
 
 ## Maps and the board
 

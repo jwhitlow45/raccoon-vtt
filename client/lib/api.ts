@@ -113,9 +113,28 @@ export type AssetRow = {
  * (docs/design/design-v1-animated-maps.md 1): off, the pickers take images
  * only and every map shows its still. `roomSound` is the ROOM_SOUND switch
  * (docs/design/design-v1-music.md 1): off, the server takes and serves no
- * sound file, and only the built-in effects play.
+ * sound file, and only the built-in effects play. `local` is null on a
+ * hosted server, and set by the desktop app (`LocalServerConfig`).
  */
-export type ServerConfig = { turnstileSiteKey: string | null; searchEnabled: boolean; animatedMaps: boolean; roomSound: boolean };
+export type ServerConfig = {
+  turnstileSiteKey: string | null;
+  searchEnabled: boolean;
+  animatedMaps: boolean;
+  roomSound: boolean;
+  local: LocalServerConfig | null;
+};
+/**
+ * The desktop app's part of GET /api/config, answered per request
+ * (docs/design/design-v1-local-app.md 4 and 5).
+ * - `shareOrigin`: the origin every link for another device names,
+ *   `http://<address>:<port>`, or null while players on the network can't
+ *   join, when links fall back to the page's own origin.
+ * - `createHere`: whether this device may make and import rooms, which only
+ *   the computer running the app may.
+ * - `hostPage`: `http://localhost:<port>/` when that computer opened the
+ *   network address, so Home can send it to its own page, else null.
+ */
+export type LocalServerConfig = { shareOrigin: string | null; createHere: boolean; hostPage: string | null };
 /**
  * POST /api/rooms/import's answer. `soundsLeftOut`: the sounds the import
  * dropped, with their places in playlists and scene sounds, because a
