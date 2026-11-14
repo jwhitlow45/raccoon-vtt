@@ -4,7 +4,7 @@ import { ID_TIME_REFUSED, uuidv7 } from "#shared/ids.ts";
 import type { ProjectedState } from "#shared/project.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
 import { Connection } from "./connection.ts";
-import { ID_TAKEN, SERVER_MEMBER } from "./createIds.ts";
+import { heldIds, ID_TAKEN, idRow, pruneIds, recordIds, SERVER_MEMBER } from "./createIds.ts";
 import { commitBatch, loadReceipts } from "./persistence.ts";
 import { startEngine, type Engine, type Socket, type TestClient } from "./testing.ts";
 
@@ -184,5 +184,22 @@ describe("a roll's receipt taken by an ask", () => {
     await commitBatch(t.pool, r.roomId, { ops: [], watermarks: [], receipts: [{ ...roll, seq: 2 }] });
     const again = await loadReceipts(t.pool, r.roomId, new Date(Date.now() - 60_000));
     assert.equal(again.find((x) => x.tag === roll.tag)?.ask, undefined);
+  });
+});
+
+describe("the id table's rows", () => {
+  test("a row past its id's time is kept until its ask time, so a device's ask still finds it held, and pruned after", async () => {
+    const r = await room("Ids kept");
+    const now = Date.now();
+    const id = uuidv7();
+    // Taken two hours ago: its id's time has passed and its ask time has not.
+    const row = idRow(id, r.anaId, now - 2 * 3_600_000, now - 2 * 3_600_000);
+    assert.ok(row.until < now && row.askUntil > now);
+    await recordIds(t.pool, r.roomId, [row]);
+    await pruneIds(t.pool, now, r.roomId);
+    await pruneIds(t.pool, now);
+    assert.deepEqual([...(await heldIds(t.pool, r.roomId, r.anaId, [id]))], [id]);
+    await pruneIds(t.pool, row.askUntil + 1, r.roomId);
+    assert.deepEqual([...(await heldIds(t.pool, r.roomId, r.anaId, [id]))], []);
   });
 });
