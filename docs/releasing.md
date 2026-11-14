@@ -2,7 +2,8 @@
 
 How a maintainer cuts a release: the version bump, the changelog, the tag,
 the Image workflow that builds, signs and publishes the image, the signed
-assets on the GitHub Release, and the Docker Hub overview.
+assets on the GitHub Release, the desktop app's installers, and the Docker
+Hub overview.
 
 ## Releasing
 
@@ -60,7 +61,9 @@ a read-only job generates the release notes, and a separate job creates the
 GitHub Release.
 An existing GitHub Release is left unchanged on a rerun. Last, the
 [Release assets](#release-assets) workflow signs the source archive and
-the SBOM and attaches them to the release with their provenance.
+the SBOM and attaches them to the release with their provenance, and the
+[Desktop](#desktop-assets) workflow builds the desktop app's installers,
+tests them on each system and attaches them, signed, with theirs.
 
 Tags only move forward, by what Docker Hub holds. A release always tags
 `X.Y.Z`. It moves `X.Y` and `latest` only when that tag does not exist yet
@@ -219,6 +222,105 @@ which read it, name the run's ref and commit, so for those assets they
 name `main`. The predicate is written by the signing workflow itself, and
 the certificate ties it to that workflow, so it can be trusted as far as
 that workflow can.
+
+### Desktop assets
+
+From v0.5.0 on, every GitHub Release carries the desktop app, which runs
+RaccoonVTT on one computer for players on the same network
+([design](design/design-v1-local-app.md)), from
+[`.github/workflows/desktop.yml`](../.github/workflows/desktop.yml):
+
+| Asset | What it is |
+| --- | --- |
+| `raccoon-vtt-X.Y.Z-windows-x64-setup.exe` | The Windows installer (NSIS), for Windows 10 or 11 on x64 |
+| `raccoon-vtt-X.Y.Z-macos-arm64.dmg`, `raccoon-vtt-X.Y.Z-macos-x64.dmg` | The macOS app, for macOS 15 or later on Apple silicon and on Intel |
+| `raccoon-vtt-X.Y.Z-linux-x86_64.AppImage`, `raccoon-vtt-X.Y.Z-linux-arm64.AppImage` | The Linux app for any distribution with glibc 2.36 or later |
+| `raccoon-vtt_X.Y.Z_amd64.deb`, `raccoon-vtt_X.Y.Z_arm64.deb` | The Linux package for Ubuntu 24.04 and Debian 12 or later |
+| `latest.yml`, `latest-linux.yml`, `latest-linux-arm64.yml` | What the Windows app and the AppImage read to update themselves |
+| `raccoon-vtt-X.Y.Z-desktop.sha256` | The SHA-256 of each file above |
+| `<file>.sigstore.json` | Each file's keyless Cosign signature, as a Sigstore bundle |
+| `raccoon-vtt-X.Y.Z-desktop.intoto.jsonl` | SLSA build provenance for all of them, signed by GitHub's artifact attestations |
+
+The Image workflow runs Desktop once it has created the release, beside
+Release assets. Desktop builds each installer on a GitHub runner of its own
+system and CPU (`windows-2025-vs2026`, `macos-15`, `macos-15-intel`,
+`ubuntu-24.04` and `ubuntu-24.04-arm`) and smoke-tests it there: the
+server and its PostgreSQL started, a room played from a browser at the
+runner's network address, a backup, a restore, and the installer
+installed, run and removed as a DM would (`desktop/scripts/smoke.ts`).
+Then it signs and attests every file and uploads them. Like Release
+assets, it only adds: a release that has every desktop asset is left as it
+is, one that has only some of them is refused, and its jobs are split the
+same way, each with only what it needs. The installers are not signed
+with an Apple or Windows identity yet, so a DM's first install follows the
+steps in the README, and the macOS app is signed ad hoc.
+
+For a release that lacks them, such as one whose run failed, run it by
+hand:
+
+1. In the Actions tab, open Desktop and choose Run workflow.
+2. Leave "Use workflow from" on `main`, enter the release's tag (`vX.Y.Z`)
+   under tag, leave ref empty and run it.
+
+A release made before v0.5.0 has no desktop app to build.
+
+A **dry run** builds and smoke-tests all five installers from a branch or
+commit without a release: enter it under ref and leave tag empty. It never
+signs or uploads, and keeps the installers and their checksum list as the
+run's artifacts for 7 days. The macOS installers are built only by release
+and dry runs, so do a dry run from the work's `ci/` branch before a release
+that changes the desktop app. A push to a `ci/` branch that changes
+`desktop/`, `server/`, `shared/`, `db/` or the package files runs the
+checks and the Windows x64 and Linux x64 installers on its own.
+
+The checks run what CI on Ubuntu cannot: the desktop packages' typecheck,
+the unit and integration tests on Windows, the server's integration tests
+against the bundled PostgreSQL, and the desktop app's own tests. On Windows
+they report failures without failing the run until they pass. Before the
+first desktop release, make them a gate: set `"report-only":false` for
+`windows-2025-vs2026` in the plan job's list of checks. Then check on a real Mac
+what CI cannot: download the arm64 DMG from a dry run in Safari, open the
+app, approve it with **Open Anyway**, and see the database start with no
+further prompt.
+
+Dependabot proposes updates to the desktop packages (`desktop/package.json`)
+apart from the server's. CI does not install them, so push an update's
+commit to a `ci/` branch and let Desktop pass before merging it.
+
+#### Verify the desktop assets
+
+Check an installer against the checksum list, then the list and the
+installer against their signatures, with
+[Cosign v3 or later](https://docs.sigstore.dev/cosign/verifying/verify/).
+Replace `X.Y.Z` with the release version and the installer's name with the
+one you downloaded:
+
+```sh
+sha256sum --check --ignore-missing raccoon-vtt-X.Y.Z-desktop.sha256
+cosign verify-blob raccoon-vtt-X.Y.Z-desktop.sha256 \
+  --bundle raccoon-vtt-X.Y.Z-desktop.sha256.sigstore.json \
+  --certificate-identity 'https://github.com/jwhitlow45/raccoon-vtt/.github/workflows/desktop.yml@refs/tags/vX.Y.Z' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+cosign verify-blob raccoon-vtt-X.Y.Z-windows-x64-setup.exe \
+  --bundle raccoon-vtt-X.Y.Z-windows-x64-setup.exe.sigstore.json \
+  --certificate-identity 'https://github.com/jwhitlow45/raccoon-vtt/.github/workflows/desktop.yml@refs/tags/vX.Y.Z' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+On macOS, `shasum -a 256 --check --ignore-missing` does what `sha256sum`
+does. Check an installer's provenance with the
+[GitHub CLI](https://cli.github.com/manual/gh_attestation_verify):
+
+```sh
+gh attestation verify raccoon-vtt-X.Y.Z-windows-x64-setup.exe \
+  --bundle raccoon-vtt-X.Y.Z-desktop.intoto.jsonl \
+  --repo jwhitlow45/raccoon-vtt \
+  --cert-identity 'https://github.com/jwhitlow45/raccoon-vtt/.github/workflows/desktop.yml@refs/tags/vX.Y.Z'
+```
+
+For assets added by a hand run from `main`, each identity ends in
+`@refs/heads/main` instead, and the provenance lists the tag's own commit
+as a second source, as for the [release assets](#verify-a-releases-assets).
 
 ### The Docker Hub overview
 
