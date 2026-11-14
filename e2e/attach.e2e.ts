@@ -1605,7 +1605,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   test("lp42fix-1. Wren's drag along the row past a goblin in room A holds before the orc in the corridor that the note names; then Bree, on the warhorse squeezed in the corridor's mouth, dropped on top of a rise no stairs reach, holds at its foot under the ledge's note (LP42-MOVE-1, D-261114-035)", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const field = { w: 24, h: 14 };
-    const keep = { scene: randomUUID(), horse: randomUUID(), bree: randomUUID(), wren: randomUUID(), gob: randomUUID(), orc: randomUUID() };
+    const keep = { scene: uuidv7(), horse: uuidv7(), bree: uuidv7(), wren: uuidv7(), gob: uuidv7(), orc: uuidv7() };
     await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "LP42 keep", bounds: field, fogEnabled: false } });
     await ops.send({ t: "scene.update", sceneId: keep.scene, patch: { blockMovement: true } });
     for (const [x, y, w, h] of [[2, 2, 6, 6], [8, 4, 6, 1], [13, 5, 1, 5], [10, 10, 8, 4]] as const) await ops.send({ t: "build.rect", sceneId: keep.scene, terrain: "stone", x, y, w, h });
