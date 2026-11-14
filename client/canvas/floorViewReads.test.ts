@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { describe, test } from "node:test";
 
 /*
@@ -37,6 +37,11 @@ const SKIPPED = new Set(["features/areas/reminders.ts", "features/attach/turns.t
 const FLOOR_SCOPED = "tokens|buildChunks|fogTiles|exploredTiles|labels|stamps|lights|pins|traps|templates|drawings|fogDrafts|holders|exploredBy|memory|memoryBy";
 const OFFENDING = new RegExp(`\\b(?:s|v)\\.view\\??\\.(?:${FLOOR_SCOPED})\\b|getState\\(\\)\\.view\\b`);
 
+/** The path under client/ with forward slashes, as the names above are written, on Windows too. */
+function rel(path: string): string {
+  return relative(CLIENT, path).split(sep).join("/");
+}
+
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
@@ -51,7 +56,7 @@ function boardFiles(): string[] {
     return statSync(full).isDirectory() ? sources(full).filter((p) => p.endsWith("Layer.tsx")) : [];
   });
   const all = new Set([...FOLDERS.flatMap((f) => sources(join(CLIENT, f))), ...layers, join(CLIENT, "features/encounters/drop.ts")]);
-  return [...all].filter((p) => !SKIPPED.has(relative(CLIENT, p))).sort();
+  return [...all].filter((p) => !SKIPPED.has(rel(p))).sort();
 }
 
 describe("the board reads the floor cut", () => {
@@ -61,14 +66,14 @@ describe("the board reads the floor cut", () => {
       readFileSync(file, "utf8")
         .split("\n")
         .forEach((line, i) => {
-          if (OFFENDING.test(line) && !/dragNotes/.test(file)) hits.push(`${relative(CLIENT, file)}:${i + 1}: ${line.trim()}`);
+          if (OFFENDING.test(line) && !/dragNotes/.test(file)) hits.push(`${rel(file)}:${i + 1}: ${line.trim()}`);
         });
     }
     assert.deepEqual(hits, []);
   });
 
   test("the scan finds the files it is meant to guard", () => {
-    const names = boardFiles().map((p) => relative(CLIENT, p));
+    const names = boardFiles().map(rel);
     for (const expected of ["canvas/Stage.tsx", "features/fog/FogLayer.tsx", "features/movement/stageHooks.ts", "features/encounters/drop.ts"]) assert.ok(names.includes(expected), expected);
   });
 });
