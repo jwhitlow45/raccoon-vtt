@@ -25,7 +25,9 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus thirty-four, and plus
  * thirty-five for the server that starts with the switch off. With no
- * private address on this computer the tests skip.
+ * private address on this computer the tests skip, except in CI or a run
+ * that names WebKit: those are there to prove the network cases, so they
+ * fail instead of passing having tested nothing.
  */
 
 const PORT = Number(process.env.E2E_PORT ?? 3100) + 34;
@@ -45,6 +47,7 @@ function lanAddress(): string | null {
 }
 
 const LAN = lanAddress();
+const LAN_REQUIRED = Boolean(process.env.CI) || BROWSERS.includes("webkit");
 const SIZES = [
   { name: "1440x900", width: 1440, height: 900, touch: false },
   { name: "390x844", width: 390, height: 844, touch: true },
@@ -58,6 +61,12 @@ const HOST_PAGE = "This is the computer running RaccoonVTT. Make rooms on its ow
 function launch(kind: string): Promise<Browser> {
   const type: BrowserType = kind === "webkit" ? webkit : chromium;
   return type.launch({ ...(kind === "webkit" ? {} : { channel: "chrome" }), headless: process.env.E2E_HEADED !== "1" });
+}
+
+if (LAN === null && LAN_REQUIRED) {
+  test("this computer has a private network address to test on", () => {
+    assert.fail(`No private IPv4 address on this computer, so nothing here would test the network. CI=${process.env.CI ?? ""}, E2E_BROWSERS=${BROWSERS.join(",")}.`);
+  });
 }
 
 for (const kind of BROWSERS) {
