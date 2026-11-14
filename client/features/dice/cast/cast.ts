@@ -10,7 +10,7 @@ import { damageTypeName } from "#shared/rules/damage.ts";
 import { AREA_SPELLS, type AreaSpell } from "#shared/srd/area-spells.ts";
 import { ABILITY_NAMES } from "#shared/rules/skills.ts";
 import { scopeSlot } from "../../../state/scope.ts";
-import type { OnAnswer } from "../../../state/types.ts";
+import type { OnAnswer, OnRemint } from "../../../state/types.ts";
 import type { AreaCreature } from "../../areas/caster.ts";
 import { areaTitle } from "../../areas/labels.ts";
 import { rollsOf } from "../logic.ts";
@@ -287,10 +287,12 @@ export type CastEnv = {
   store: StoreApi<CastSends>;
   tracker: Pick<ReceiptTracker, "sending" | "answer" | "forget" | "state" | "lookup">;
   connected(): boolean;
-  dispatch(op: ClientOp, opts: { quiet: true; onAnswer: OnAnswer }): number | null;
+  dispatch(op: ClientOp, opts: { quiet: true; onAnswer: OnAnswer; onRemint?: OnRemint }): number | null;
   /** Rolls the damage as a Dice panel roll: its tag and how many batches it went in, or null for nothing sent. */
   rollDamage(rolls: PanelRoll[], override?: RollModeOverride): { tag: string; parts: number } | null;
   newId(): string;
+  /** A send took a fresh id on the way (OnRemint): what shows it, such as the open block, follows it. */
+  renamed?(from: string, to: string): void;
   view(): Pick<RoomState, "casts"> | null;
   /** The unsettled sends, kept for a reload (castDraft). */
   save(sends: readonly CastSend[]): void;
@@ -346,11 +348,27 @@ export function askAgain(env: CastEnv, id: string, ask?: Omit<CastInput, "id" | 
 }
 
 function send(env: CastEnv, base: Omit<CastSend, "id">): string | null {
-  const id = env.newId();
+  // The ask's id is its receipt tag. The store may give it a fresh one on the way (docs/design/design-v1-player-limits.md
+  // 3.4), and the send, its receipt and what shows it move to that one, so its answer finds them.
+  let id = env.newId();
   const record: CastSend = { ...base, id };
   const op: ClientOp = { t: "cast.ask", cast: { ...base.ask, id, ...(base.damage ? { damage: base.damage } : {}) } };
   env.tracker.sending(id, 0);
   env.store.setState((s) => ({ sends: { ...s.sends, [id]: record } }));
+  const onRemint: OnRemint = (ids) => {
+    const was = id;
+    const next = ids.get(was);
+    if (next === undefined) return;
+    id = next;
+    env.tracker.forget(was, 0);
+    env.tracker.sending(next, 0);
+    env.store.setState((s) => {
+      const { [was]: kept, ...sends } = s.sends;
+      return kept ? { sends: { ...sends, [next]: { ...kept, id: next } } } : {};
+    });
+    env.renamed?.(was, next);
+    persist(env);
+  };
   const n = env.dispatch(op, {
     quiet: true,
     onAnswer: (answer, refusal, cause) => {
@@ -358,6 +376,7 @@ function send(env: CastEnv, base: Omit<CastSend, "id">): string | null {
       if (answer === "taken") env.notify(`Asked the DM for saves against ${base.spell}.`);
       persist(env);
     },
+    onRemint,
   });
   if (n === null) {
     // A roll that went without its ask is kept, so Ask again names it rather than rolling again.

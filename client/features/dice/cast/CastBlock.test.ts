@@ -264,7 +264,7 @@ test("cast damage menu keeps panel state, disables d20 damage modes and uses ord
     let env: ReturnType<typeof useCastEnv> | undefined;
     function Probe() { env = useCastEnv(); return null; }
     renderToStaticMarkup(createElement(RoomProvider, {
-      store: store as never, actions: { dispatch: (op: import("#shared/protocol.ts").ClientOp) => sent.push(op) } as never, ui: { notify() {} } as never, assets: { url: () => "" } as never,
+      store: store as never, actions: { dispatch: (op: import("#shared/protocol.ts").ClientOp) => sent.push(op), newId: () => "019a3df0-1000-7000-8000-00000000ca57" } as never, ui: { notify() {} } as never, assets: { url: () => "" } as never,
       children: createElement(RoomScopeProvider, { scope: ready.scope, children: createElement(Probe) }),
     }));
     assert.ok(env);
@@ -310,7 +310,7 @@ test("cast menu picks reach the damage invocation once before the unchanged ask"
       return null;
     }
     renderToStaticMarkup(createElement(RoomProvider, {
-      store: store as never, actions: { dispatch: (op: import("#shared/protocol.ts").ClientOp) => sent.push(op) } as never, ui: { notify() {} } as never, assets: { url: () => "" } as never,
+      store: store as never, actions: { dispatch: (op: import("#shared/protocol.ts").ClientOp) => sent.push(op), newId: () => "019a3df0-1000-7000-8000-00000000ca57" } as never, ui: { notify() {} } as never, assets: { url: () => "" } as never,
       children: createElement(RoomScopeProvider, { scope: ready.scope, children: createElement(Probe) }),
     }));
     assert.ok(source && pick);

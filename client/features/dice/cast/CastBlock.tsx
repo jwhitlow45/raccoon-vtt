@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, type RefObject } from "react";
 import { useStore } from "zustand";
 import type { NamedRoll } from "#shared/dice/bonus.ts";
-import { uuidv7 } from "#shared/ids.ts";
 import type { CastAsk, RoomState } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { useRollModeMenu } from "../useRollModeMenu.tsx";
@@ -79,24 +78,27 @@ export function useCastEnv(): CastEnv {
   const panel = useDicePanel();
   const throws = useScoped(throwHooksSlot);
   const roomId = useRoomView((s) => s.roomId);
+  const options = useOptionStore();
   return useMemo(
     () => ({
       store,
       tracker,
       connected: () => room.getState().connection === "open",
       dispatch: (op, opts) => actions.dispatch(op, opts),
+      renamed: (from, to) => followSend(options, from, to),
       rollDamage: (rolls, override) => {
         let parts = 0;
         // Thrown from the tapped button's place, as the row's Damage throws (docs/design/design-v1-roll-animation.md 3.1).
         const tag = panel.roll(rolls, { origin: throws.current?.origin(), parts: (n) => (parts = n), ...(override ? { override } : {}) });
         return tag === null ? null : { tag, parts };
       },
-      newId: uuidv7,
+      // Dated by the room's clock, as every new id (docs/design/design-v1-player-limits.md 3.4).
+      newId: () => actions.newId(),
       view: () => room.getState().view,
       save: (sends) => writeCastDraft(roomId, sends),
       notify: (text) => ui.notify(text, "info"),
     }),
-    [store, tracker, room, actions, ui, panel, throws, roomId],
+    [store, tracker, room, actions, ui, panel, throws, roomId, options],
   );
 }
 

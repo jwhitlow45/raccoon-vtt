@@ -8,7 +8,7 @@ import { projectState } from "#shared/project.ts";
 import { clientOpSchema, type ClientOp } from "#shared/protocol.ts";
 import { monsterView, statBlockOf } from "#shared/statBlock.ts";
 import { P1, castAsk, castTable, customMonster, diceLine, damageRoll, token } from "#shared/testutil.ts";
-import type { OnAnswer } from "../../../state/types.ts";
+import type { OnAnswer, OnRemint } from "../../../state/types.ts";
 import type { CastBlock } from "../optionState.ts";
 import { ReceiptTracker } from "../useReceipt.ts";
 import type { PanelRoll } from "../useDicePanel.ts";
@@ -214,7 +214,8 @@ describe("the block", () => {
 
 /** A fake page: what it sent, in order, and the answers it can give. */
 function page(view: RoomState = castTable()) {
-  const sent: { op: ClientOp; onAnswer: OnAnswer }[] = [];
+  const sent: { op: ClientOp; onAnswer: OnAnswer; onRemint?: OnRemint }[] = [];
+  const renamed: [string, string][] = [];
   const rolled: PanelRoll[][] = [];
   const toasts: string[] = [];
   const saved: unknown[][] = [];
@@ -228,7 +229,8 @@ function page(view: RoomState = castTable()) {
     store: createStore<CastSends>(() => ({ sends: {}, withdrawing: {} })),
     tracker,
     connected: () => connected,
-    dispatch: (op, opts) => (connected ? sent.push({ op, onAnswer: opts.onAnswer }) : null),
+    dispatch: (op, opts) => (connected ? sent.push({ op, onAnswer: opts.onAnswer, ...(opts.onRemint ? { onRemint: opts.onRemint } : {}) }) : null),
+    renamed: (from, to) => renamed.push([from, to]),
     rollDamage: (rolls) => {
       if (!connected) return null;
       rolled.push(rolls);
@@ -243,6 +245,7 @@ function page(view: RoomState = castTable()) {
   return {
     env,
     sent,
+    renamed,
     rolled,
     toasts,
     saved,
@@ -255,6 +258,20 @@ function page(view: RoomState = castTable()) {
 const input = (overrides: Partial<Parameters<typeof askFor>[1]> = {}) => ({ key: "c:thorn-c", spell: "Fireball", area: "a1", ask: { caster: "thorn", sceneId: "s1", spell: "Fireball", area: "a1" }, rolls: [fire], ...overrides });
 
 describe("the send", () => {
+  test("an ask the store sends under a fresh id is kept, tracked and shown under that id, and its answer lands there", () => {
+    const p = page();
+    const id = askFor(p.env, input({ rolls: null }));
+    const ask = p.sent.find((s) => s.op.t === "cast.ask")!;
+    ask.onRemint!(new Map([[id!, "ask-fresh"]]));
+    assert.deepEqual(Object.keys(p.env.store.getState().sends), ["ask-fresh"]);
+    assert.equal(p.env.store.getState().sends["ask-fresh"]?.id, "ask-fresh");
+    assert.equal(p.env.tracker.state("ask-fresh")?.state, "sending");
+    assert.equal(p.env.tracker.state(id!), null);
+    assert.deepEqual(p.renamed, [[id, "ask-fresh"]]);
+    ask.onAnswer("refused", { code: "quota", message: "full", text: "Not saved. Full." });
+    assert.equal(p.env.tracker.state("ask-fresh")?.state, "refused");
+  });
+
   test("rolls the damage first, then asks naming that roll and its batches, on the same socket and in that order", () => {
     const p = page();
     p.batches(2);
