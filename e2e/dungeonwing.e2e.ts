@@ -52,7 +52,7 @@ const BURROW = { w: 40, h: 40 };
 const TOOL = "Map builder";
 const ROWS: HexGrid = { shape: "hex", orient: "rows" };
 const WING_TAP = "Tap the wall the wing joins.";
-const WING_OFF = "Automatic walls are off on this scene, so a wing would stand without walls. Turn them on in Map and grid to add one.";
+const WING_OFF = "Automatic walls are off on this scene, so a wing would stand without walls. Turn them on in Walls and movement to add one.";
 const WING_HEX_COVERS = "On hexes the wing's area must not cover walls or other build.";
 
 /** The side of a hex toward its neighbor in direction d, from corner d+1 to d+2, as the walls read it. */

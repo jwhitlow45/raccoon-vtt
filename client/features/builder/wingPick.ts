@@ -34,7 +34,7 @@ export const WING_MAX_SIDE = 100;
 /** How far from a wall a tap still picks it: half a 44 px touch target. */
 export const WING_REACH_PX = 22;
 
-export const WING_OFF = "Automatic walls are off on this scene, so a wing would stand without walls. Turn them on in Map and grid to add one.";
+export const WING_OFF = "Automatic walls are off on this scene, so a wing would stand without walls. Turn them on in Walls and movement to add one.";
 export const WING_TAP = "Tap the wall the wing joins.";
 export const WING_HEX_COVERS = "On hexes the wing's area must not cover walls or other build.";
 export const WING_SIGHT = "The party can see part of the area or the wall it joins, so they see the wing appear there.";

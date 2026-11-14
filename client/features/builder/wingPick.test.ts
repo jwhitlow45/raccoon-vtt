@@ -138,7 +138,7 @@ describe("the wing mode's words", () => {
     assert.equal(wingOff({ autoWalls: "floor" }), null);
     assert.equal(wingOff({ autoWalls: "all" }), null);
     assert.equal(wingOff({}), null, "a scene from before automatic walls reads as all");
-    assert.equal(WING_OFF, "Automatic walls are off on this scene, so a wing would stand without walls. Turn them on in Map and grid to add one.");
+    assert.equal(WING_OFF, "Automatic walls are off on this scene, so a wing would stand without walls. Turn them on in Walls and movement to add one.");
   });
 
   test("the hint moves on from the drag to the tap to the area and join, in each grid's words", () => {
