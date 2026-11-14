@@ -340,7 +340,6 @@ jobs:
         run: |
           pnpm build
           node desktop/scripts/stage.ts
-          pnpm exec vite build --config desktop/window/vite.config.ts
           pnpm --dir desktop run build
           node desktop/build/pack.ts --dir
       # shell.e2e.ts opens the packaged app, and window.e2e.ts the window's
@@ -430,11 +429,11 @@ jobs:
       - name: Stage the app server
         run: node desktop/scripts/stage.ts
       - run: pnpm --dir desktop install --frozen-lockfile
-      # The window's page and the shell's bundles, then electron-builder
-      # with the staged server, Node and PostgreSQL (desktop/build/pack.ts).
+      # The shell's bundles and the window's page (desktop's own build
+      # makes both), then electron-builder with the staged server, Node and
+      # PostgreSQL (desktop/build/pack.ts).
       - name: Package
         run: |
-          pnpm exec vite build --config desktop/window/vite.config.ts
           pnpm --dir desktop run build
           node desktop/build/pack.ts
       # The files this target ships, as the plan names them, set apart from
