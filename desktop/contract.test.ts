@@ -48,6 +48,7 @@ const SAMPLE_ERRORS = {
   noReadableBackup: { kind: "noReadableBackup", dataApp: "0.6.0" },
   backupBeforeUpdateFailed: { kind: "backupBeforeUpdateFailed", reason: "the disk is full" },
   stalled: { kind: "stalled", what: "starting the database", seconds: 180 },
+  endUnconfirmed: { kind: "endUnconfirmed" },
 } as const satisfies { [K in AppError["kind"]]: Extract<AppError, { kind: K }> };
 
 /** Every string WORDS can produce, with sample arguments for its functions. */
@@ -255,6 +256,8 @@ test("every stop has words and its buttons, on every system", () => {
   );
   assert.equal(errorText(SAMPLE_ERRORS.stalled, "0.5.0", "win32"), "Starting the database has not reported progress for 180 s. RaccoonVTT goes on when it ends, and the logs may say why it is slow.");
   assert.deepEqual(ERROR_ACTIONS.stalled, ["showLogs"], "a stalled part is still waited for, so Try again has nothing to start");
+  assert.equal(errorText(SAMPLE_ERRORS.endUnconfirmed, "0.5.0", "win32"), "RaccoonVTT can't confirm that PostgreSQL has ended, so it keeps the data folder locked and keeps checking. The logs say why.");
+  assert.deepEqual(ERROR_ACTIONS.endUnconfirmed, ["showLogs"], "the lock stays until the end is proven, so there is nothing to try again");
 });
 
 test("counts read as words", () => {

@@ -432,14 +432,11 @@ function depsFor(world: World, inst: Instance, build: Omit<Build, "pgMajor">, ov
       bundledMajor: () => c(() => 17),
       dataMajor: () => c(() => (world.pg.inited ? 17 : null)),
       needsInit: () => !world.pg.inited,
-      init: h(
-        "pg.init",
-        (_signal?: AbortSignal) =>
-          c(() => {
-            holder("initdb");
-            world.pg.inited = true;
-          }),
-        0,
+      init: h("pg.init", () =>
+        c(() => {
+          holder("initdb");
+          world.pg.inited = true;
+        }),
       ),
       leftover: () => c(() => (world.pg.running ? { kind: "running" as const, pid: 99 } : { kind: "none" as const })),
       clearLeftover: () =>
@@ -459,7 +456,7 @@ function depsFor(world: World, inst: Instance, build: Omit<Build, "pgMajor">, ov
           }),
         0,
       ),
-      stop: () => c(() => void (world.pg.running = false)),
+      stop: h("pg.stop", () => c(() => void (world.pg.running = false))),
       alive: () => c(() => world.pg.running),
     },
     db: {

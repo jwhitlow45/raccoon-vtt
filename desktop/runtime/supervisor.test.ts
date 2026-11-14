@@ -363,11 +363,8 @@ test("a part past its bound shows stalled while the start keeps it, refuses Try 
 });
 
 test("Quit while a part is past its bound ends what can end early, waits for the rest, and lets the lock go only after", async () => {
-  // pg_ctl and initdb end early: nothing they would have done is done after the stop.
-  for (const [call, part, seed] of [
-    ["pg.start", "startDatabase", true],
-    ["pg.init", "initdb", false],
-  ] as const) {
+  // A starting PostgreSQL ends early: nothing it would have done is done after the stop.
+  for (const [call, part, seed] of [["pg.start", "startDatabase", true]] as const) {
     const world = new World();
     if (seed) world.seed();
     world.delays.set(call, [START_PARTS[part].ms + 300_000]);
@@ -384,6 +381,28 @@ test("Quit while a part is past its bound ends what can end early, waits for the
     assert.equal(world.pg.running, false, `${call}: nothing starts after the stop`);
     assert.equal(world.pg.inited, seed, `${call}: no initdb finished after the stop`);
     assert.deepEqual(world.violations, [], call);
+  }
+
+  // initdb is never cancelled (its restricted copy on Windows would outlive an end), so Quit waits for it with the lock held.
+  {
+    const world = new World();
+    world.delays.set("pg.init", [START_PARTS.initdb.ms + 120_000]);
+    const inst = new Instance(world);
+    void inst.sup.start();
+    await world.clock.advance(START_PARTS.initdb.ms + 1_000);
+    assert.equal(inst.latest()?.error?.kind, "stalled");
+    const id = inst.issue({ type: "stop" });
+    await world.clock.advance(100_000);
+    assert.equal(inst.answers.has(id), false, "Quit waits for initdb");
+    assert.equal(world.lockOwner, inst, "and keeps the lock meanwhile");
+    assert.equal(world.pg.inited, false);
+    await run(world, 60_000);
+    assert.equal(inst.answers.get(id)?.[0]?.ok, true);
+    assert.equal(inst.latest()?.state, "stopped");
+    assert.equal(world.pg.inited, true, "initdb ran to its end");
+    assert.equal(world.pg.running, false, "and nothing started after it");
+    assert.equal(world.lockOwner, null);
+    assert.deepEqual(world.violations, []);
   }
 
   // Opening the database can't end early, so Quit waits for it, keeps the lock meanwhile, and starts no part after it.
@@ -501,6 +520,27 @@ test("an undo held past its bound between its state read and its drop is never j
   assert.deepEqual([...world.dbs.keys()], [LIVE]);
   assert.equal(world.live().content, "orig", "the original is raccoon again");
   assert.deepEqual(world.violations, []);
+});
+
+test("while PostgreSQL's end can't be confirmed the status says so over the stop it holds, and a headless run waits on it", async () => {
+  const world = new World();
+  world.seed();
+  world.delays.set("pg.stop", [200_000]);
+  const inst = await started(world);
+  const id = inst.issue({ type: "stop" });
+  await world.clock.advance(1_000);
+  inst.sup.endUnconfirmed(true);
+  const shown = inst.latest()!;
+  assert.deepEqual([shown.state, shown.step, shown.error], ["error", null, { kind: "endUnconfirmed" }]);
+  assert.equal(endsHeadless(shown), false, "no stop: the lock is held until the end is proven");
+  await world.clock.advance(100_000);
+  assert.equal(inst.answers.has(id), false, "Quit waits for the proof");
+  assert.equal(world.lockOwner, inst);
+  inst.sup.endUnconfirmed(false);
+  assert.notEqual(inst.latest()?.error?.kind, "endUnconfirmed", "the status goes back to what the supervisor is doing");
+  await run(world, 120_000);
+  assert.equal(inst.latest()?.state, "stopped");
+  assert.equal(world.lockOwner, null);
 });
 
 test("a headless supervisor ends on a stop, never on a stalled part, which it waits out to running", async () => {

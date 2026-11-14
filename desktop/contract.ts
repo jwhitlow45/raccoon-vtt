@@ -389,7 +389,10 @@ export type NetworkReach = z.infer<typeof NetworkReach>;
  * a start that has gone past its bound with no progress reported
  * (runtime/supervisor.ts START_PARTS), with that part's words. The
  * supervisor still waits for it, and the start goes on when it ends, so it
- * is no stop at all, and offers no Try again.
+ * is no stop at all, and offers no Try again. Nor is `endUnconfirmed`:
+ * RaccoonVTT can't yet prove that no PostgreSQL it launched still runs
+ * (runtime/postgres.ts proveEnded), so it keeps the data folder locked and
+ * looks again until it can.
  */
 export const AppError = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("glibc") }),
@@ -409,6 +412,7 @@ export const AppError = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("noReadableBackup"), dataApp: AppVersion }),
   z.object({ kind: z.literal("backupBeforeUpdateFailed"), reason: z.string() }),
   z.object({ kind: z.literal("stalled"), what: z.string(), seconds: z.number().int().positive() }),
+  z.object({ kind: z.literal("endUnconfirmed") }),
 ]);
 export type AppError = z.infer<typeof AppError>;
 
@@ -883,6 +887,7 @@ export const ERROR_ACTIONS = {
   noReadableBackup: ["downloadLatest"],
   backupBeforeUpdateFailed: ["tryAgain", "startWithoutBackup"],
   stalled: ["showLogs"],
+  endUnconfirmed: ["showLogs"],
 } as const satisfies Record<AppError["kind"], readonly ErrorAction[]>;
 
 /** The words for a stop. `appVersion` is this build's, `platform` the computer's. */
@@ -925,5 +930,7 @@ export function errorText(error: AppError, appVersion: string, platform: Platfor
       return `The backup before the update failed: ${clause(error.reason)}. Your rooms are untouched.`;
     case "stalled":
       return `${capital(clause(error.what))} has not reported progress for ${error.seconds} s. RaccoonVTT goes on when it ends, and the logs may say why it is slow.`;
+    case "endUnconfirmed":
+      return "RaccoonVTT can't confirm that PostgreSQL has ended, so it keeps the data folder locked and keeps checking. The logs say why.";
   }
 }
