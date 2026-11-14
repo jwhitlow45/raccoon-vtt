@@ -501,6 +501,30 @@ for (const [name, g] of GRIDS) {
       assert.ok(![at("gob"), at("imp")].includes(at("rat")), "the rat on a hex of its own");
       assert.deepEqual(["gob", "imp", "rat"].map((id) => r.state.tokens[id]!.attached?.to), ["horse", "gob", "imp"]);
     });
+
+    test("backing up a corridor that folds onto itself, two goblins in tow, the second ends on a hex of the file clear of the warhorse, not on its start under it", () => {
+      // From the room round C, east four hexes, then a turn of 120 degrees, so the corridor's hexes 2 and 4 touch across the fold.
+      const C: Hex = { col: 15, row: 15 };
+      const step = (h: Hex, d: number) => hexNeighbors(g, h)[d % 6]!;
+      let h = step(step(step(C, 0), 0), 0);
+      const corridor: Hex[] = [h];
+      for (let k = 1; k < 8; k++) corridor.push((h = step(h, k < 4 ? 0 : 2)));
+      assert.equal(hexDistance(g, corridor[2]!, corridor[4]!), 1, "the fold");
+      const open = new Set(corridor.map(hexKey));
+      const solid = (q: Hex) => hexDistance(g, q, C) > 2 && !open.has(hexKey(q));
+      const s = hexWallRoom(g.orient === "rows" ? "hexRows" : "hexColumns", 32, 32, wallsRound(g, { w: 32, h: 32 }, solid));
+      const horse = onHex(g, "horse", "large", corridor[4]!, { name: "Warhorse", kind: "npc", ownerIds: ["p1"] });
+      s.tokens.horse = { ...horse, ...hexStandPlace(g, horse, { size: "medium", ref: corridor[4]!, squeezed: true }), squeeze: true };
+      for (const [id, k] of [["gob", 3], ["grik", 2]] as const) s.tokens[id] = onHex(g, id, "medium", corridor[k]!, { name: id, kind: "npc", ownerIds: ["p1"], attached: { to: "horse", kind: "drag" } });
+      const op = intoCorridor(g, s, corridor[2]!);
+      assert.ok(canApply(op, P1, s, { canUseAsset: () => true }).ok);
+      const r = applyOp(s, op, P1, env(1));
+      assert.ok(r.ok);
+      const at = ["horse", "gob", "grik"].map((id) => hexKey(occupiedHexes(g, r.state.tokens[id]!)[0]!));
+      assert.equal(at[0], hexKey(corridor[2]!), "the warhorse where it backed to");
+      assert.equal(new Set(at).size, 3, `each on a hex of its own: ${at.join(" ")}`);
+      assert.deepEqual(["gob", "grik"].map((id) => r.state.tokens[id]!.attached?.to), ["horse", "horse"]);
+    });
   });
 }
 
