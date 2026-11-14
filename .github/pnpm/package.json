@@ -1,0 +1,7 @@
+{
+  "name": "raccoonvtt-ci-pnpm",
+  "private": true,
+  "dependencies": {
+    "pnpm": "11.23.0"
+  }
+}

@@ -406,7 +406,8 @@ describe("tokens and permissions", () => {
       const token = (s: string) => /GH_TOKEN|GITHUB_TOKEN|github\.token|secrets\./.test(s);
       const withToken = list.filter(token);
       assert.equal(withToken.length, 1, `${job}: one step holds a token`);
-      assert.match(withToken[0]!, /^ {6}- name: Fetch Node and PostgreSQL\n {8}env:\n {10}GH_TOKEN: \$\{\{ github\.token \}\}\n {8}run: node desktop\/scripts\/fetch-runtime\.ts$/, job);
+      // A step's block ends with the comments on the step after it.
+      assert.match(withToken[0]!.replace(/(\n {6}#.*)+$/, ""), /^ {6}- name: Fetch Node and PostgreSQL\n {8}env:\n {10}GH_TOKEN: \$\{\{ github\.token \}\}\n {8}run: node desktop\/scripts\/fetch-runtime\.ts$/, job);
       const fetch = list.indexOf(withToken[0]!);
       const firstPnpm = list.findIndex((s) => /\bpnpm\b/.test(s.replace(/^ *#.*$/gm, "")) && !s.includes("pnpm/action-setup@"));
       assert.ok(fetch < firstPnpm, `${job}: the fetch runs before pnpm`);
@@ -435,18 +436,65 @@ describe("tokens and permissions", () => {
     }
   });
 
-  test("each job that sets pnpm up puts the pinned Node on the PATH first, so pnpm/action-setup never starts from @pnpm/exe, which has no macOS x64 binary", () => {
-    assert.ok(Number(/^ {2}NODE_VERSION: (\d+)\./m.exec(workflow)?.[1]) >= 23, "a Node pnpm/action-setup takes as new enough for the pnpm package");
-    const withPnpm = jobs.filter((job) => steps(job).some((s) => s.includes("pnpm/action-setup@")));
+  test("each job that sets pnpm up installs packageManager's pnpm from the pinned lock, after the pinned Node and the fetch, so no runner switches pnpm versions", () => {
+    // pnpm/action-setup starts from its own pnpm and switches through @pnpm/exe, which has no macOS x64 binary.
+    assert.doesNotMatch(workflow, /uses: pnpm\/action-setup@/);
+    const repo = (file: string) => JSON.parse(readFileSync(new URL(`../${file}`, import.meta.url), "utf8"));
+    const lock = repo(".github/pnpm/package-lock.json") as { packages: Record<string, { version?: string; resolved?: string; integrity?: string; dependencies?: Record<string, string> }> };
+    const pinned = lock.packages["node_modules/pnpm"]!;
+    assert.deepEqual(Object.keys(lock.packages), ["", "node_modules/pnpm"], "the pnpm package alone, which runs on Node and has no native binary");
+    for (const file of ["package.json", "desktop/package.json"]) assert.equal(repo(file).packageManager, `pnpm@${pinned.version}`, file);
+    assert.deepEqual(repo(".github/pnpm/package.json").dependencies, { pnpm: pinned.version });
+    assert.deepEqual(lock.packages[""]!.dependencies, { pnpm: pinned.version });
+    assert.equal(pinned.resolved, `https://registry.npmjs.org/pnpm/-/pnpm-${pinned.version}.tgz`);
+    assert.match(pinned.integrity!, /^sha512-[A-Za-z0-9+/]{86}==$/);
+
+    const code = (s: string) => s.replace(/^ *#.*$/gm, "");
+    const withPnpm = jobs.filter((job) => steps(job).some((s) => /\bpnpm\b/.test(code(s))));
     assert.deepEqual(withPnpm, ["checks", "build"]);
+    const setups = new Set<string>();
     for (const job of withPnpm) {
       const list = steps(job);
-      const pnpm = list.findIndex((s) => s.includes("pnpm/action-setup@"));
+      const setup = list.findIndex((s) => s.startsWith("      - name: Set up pnpm\n"));
       const node = list.findIndex((s) => s.includes("actions/setup-node@"));
-      assert.ok(node >= 0 && node < pnpm, `${job} sets Node up before pnpm`);
+      const fetch = list.findIndex((s) => s.startsWith("      - name: Fetch Node and PostgreSQL\n"));
+      const firstUse = list.findIndex((s, i) => i !== setup && /\bpnpm\b/.test(code(s)));
+      assert.ok(node >= 0 && node < fetch && fetch < setup && setup < firstUse, `${job}: Node, the fetch, then pnpm, then its first use`);
       assert.match(list[node]!, /node-version: \$\{\{ env\.NODE_VERSION \}\}/, job);
       assert.doesNotMatch(list[node]!, /cache: pnpm/, `${job}: setup-node's pnpm cache would need pnpm first`);
-      assert.doesNotMatch(list[pnpm]!, /standalone/, `${job} never asks for @pnpm/exe`);
+      setups.add(code(list[setup]!));
+    }
+    assert.equal(setups.size, 1, "every job sets pnpm up the same way");
+  });
+
+  test("Set up pnpm puts the pinned pnpm on the PATH only when both package.json files ask for its version", () => {
+    const script = stepScript("Set up pnpm");
+    assert.match(script, /npm ci --prefix "\$dir" --ignore-scripts/);
+    const repo = (version: string, desktop = version) => {
+      const dir = scratch();
+      mkdirSync(path.join(dir, ".github", "pnpm"), { recursive: true });
+      mkdirSync(path.join(dir, "desktop"));
+      for (const file of ["package.json", "package-lock.json"]) writeFileSync(path.join(dir, ".github", "pnpm", file), "{}");
+      writeFileSync(path.join(dir, "package.json"), JSON.stringify({ packageManager: `pnpm@${version}` }));
+      writeFileSync(path.join(dir, "desktop", "package.json"), JSON.stringify({ packageManager: `pnpm@${desktop}` }));
+      return dir;
+    };
+    // npm ci as a stand-in: it checks the lock was copied, and installs a pnpm that prints 11.23.0.
+    const npm = `[ "$1 $2" = "ci --prefix" ] && [ -f "$3/package-lock.json" ] || exit 9\nmkdir -p "$3/node_modules/.bin"\nprintf '#!/bin/sh\\necho 11.23.0\\n' > "$3/node_modules/.bin/pnpm"\nchmod +x "$3/node_modules/.bin/pnpm"\n`;
+    const setUp = (cwd: string) => {
+      const github = path.join(scratch(), "path");
+      writeFileSync(github, "");
+      const r = runStep(script, { GITHUB_PATH: github }, { npm }, cwd);
+      return { ...r, path: readFileSync(github, "utf8").trim() };
+    };
+    const good = setUp(repo("11.23.0"));
+    assert.equal(good.status, 0, good.out);
+    assert.equal(good.path, path.join(good.dir, "pnpm", "node_modules", ".bin"));
+    for (const [root, desktop] of [["11.25.0", "11.23.0"], ["11.23.0", "11.25.0"]] as const) {
+      const bad = setUp(repo(root, desktop));
+      assert.notEqual(bad.status, 0, `${root} and ${desktop}`);
+      assert.equal(bad.path, "", "nothing on the PATH");
+      assert.match(commands(bad.out).join("\n"), /^::error::(desktop\/)?package\.json asks for pnpm@11\.25\.0, and \.github\/pnpm\/package-lock\.json installs pnpm@11\.23\.0\.$/);
     }
   });
 
@@ -514,7 +562,7 @@ describe("the branch run", () => {
     const push = on.split("\n  push:\n")[1]!;
     assert.match(push, /^ {4}branches: \["ci\/\*\*"\]\n {4}paths:\n/);
     assert.doesNotMatch(push, /tags:/);
-    assert.deepEqual([...push.matchAll(/^ {6}- (.+)$/gm)].map((m) => m[1]), ["desktop/**", ".github/workflows/desktop.yml", "server/**", "shared/**", "db/**", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"]);
+    assert.deepEqual([...push.matchAll(/^ {6}- (.+)$/gm)].map((m) => m[1]), ["desktop/**", ".github/workflows/desktop.yml", ".github/pnpm/**", "server/**", "shared/**", "db/**", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"]);
   });
 
   test("a run by hand takes a tag or a ref, and a call from another workflow a tag", () => {
