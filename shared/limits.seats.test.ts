@@ -176,6 +176,22 @@ describe("the far line", () => {
     assert.equal(next.filter(Boolean).length, 0, "at the line the first row is refused");
   });
 
+  test("the DM keeps the room's 20 asks beside every seat full", () => {
+    const state = table();
+    const members = Object.fromEntries(Array.from({ length: LIMITS.membersPerRoom }, (_, i) => [`m${String(i).padStart(2, "0")}`, { id: `m${String(i).padStart(2, "0")}`, rev: 0, name: "m", color: "#ff0000", kind: "player" as const, createdAt: "2026-10-12T20:00:00.000Z" }]));
+    state.members = members;
+    state.casts = {};
+    let n = 0;
+    const next = () => `c${String(n++).padStart(5, "0")}`;
+    for (const id of Object.keys(members)) for (let i = 0; i < 24; i++) {
+      const key = next();
+      state.casts[key] = { id: key, rev: 0, by: id, caster: "hero", sceneId: "s1", spell: "x", targets: ["hero"], at: "2026-10-12T20:00:00.000Z" };
+    }
+    const before = structuredClone(state);
+    for (let i = 0; i < LIMITS.openCastsPerRoom; i++) state.casts[`z${i}`] = { id: `z${i}`, rev: 0, by: "dm1", caster: "hero", sceneId: "s1", spell: "x", targets: ["hero"], at: "2026-10-12T20:00:00.000Z" };
+    assert.deepEqual(farLimits(state, null, before), { ok: true });
+  });
+
   test("an import is held to it absolutely", () => {
     const state = table();
     state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: Array.from({ length: FAR.rows + 1 }, (_, i) => entry(`d${i}`, { label: "x" })) };

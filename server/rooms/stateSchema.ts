@@ -3,7 +3,7 @@ import { correctionLogEventSchema } from "#shared/undoContract.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
 import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, TURN_FLAGS, type MapPhase, type MapVideo, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
 import { chunkKey, holderChunkKey } from "#shared/keys.ts";
-import { LIMITS, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, SOUND_LIMITS, serializedBytes, soundUseFits, videoGeometryProblem } from "#shared/limits.ts";
+import { FAR, LIMITS, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, SOUND_LIMITS, serializedBytes, soundUseFits, videoGeometryProblem } from "#shared/limits.ts";
 import { namesPrototypeMember } from "#shared/records.ts";
 import { lengthAs, type SoundUse } from "#shared/sound.ts";
 import { ATTACH_KINDS } from "#shared/rules/attach.ts";
@@ -647,7 +647,7 @@ const encounter = z.strictObject({
   rev,
   round: z.number().int().min(0).max(100_000),
   activeEntryId: id.nullable(),
-  entries: z.array(entry).max(LIMITS.encounterRows),
+  entries: z.array(entry).max(FAR.rows),
   // Backups from before the turn-start marker have none.
   turnStart: turnStart.optional(),
   startSeq: z.number().int().min(0).optional(),
@@ -658,9 +658,9 @@ const effectStored = effectSchema;
 const encounterSnapshot = z.strictObject({
   encounter,
   effects: z.record(id, z.array(effectStored).max(EFFECTS_STORED_MOST)),
-  revealed: z.array(z.strictObject({ tokenId: id, visibility, fogExemptAuto: z.boolean() })).max(LIMITS.encounterRows),
+  revealed: z.array(z.strictObject({ tokenId: id, visibility, fogExemptAuto: z.boolean() })).max(FAR.rows),
   legendary: z.strictObject({ holderId: id, actionsUsed: z.number().int().min(0).max(10) }).optional(),
-  companionReactions: z.array(id).max(LIMITS.encounterRows).optional(),
+  companionReactions: z.array(id).max(FAR.rows).optional(),
   // What a turn start replaced for each of its creatures (docs/design/design-v1-combat-controls.md 3.3), none in backups from before it.
   turnUses: z
     .array(
@@ -672,12 +672,12 @@ const encounterSnapshot = z.strictObject({
         link: z.string().min(1).max(100).optional(),
       }),
     )
-    .max(LIMITS.encounterRows)
+    .max(FAR.rows)
     .optional(),
   // The row flags a Next changed (design 9.4), none in backups from before op version 21.
   turnFlags: z
     .array(z.strictObject({ entryId: id, flags: z.array(z.enum(TURN_FLAGS)).min(1).max(TURN_FLAGS.length) }))
-    .max(LIMITS.encounterRows)
+    .max(FAR.rows)
     .optional(),
   // What a Next changed in each creature's effects, and a turn whose row has left the fight (design 9.4, op version 21).
   effectChanges: z

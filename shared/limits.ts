@@ -1366,7 +1366,8 @@ export const FAR = {
   drawings: LIMITS.drawingsPerScene + LIMITS.membersPerRoom * SEAT.drawings,
   pointValues: LIMITS.drawingPointValuesPerScene + LIMITS.membersPerRoom * SEAT.pointValues,
   rows: LIMITS.encounterRows + LIMITS.membersPerRoom * SEAT.rows,
-  asks: LIMITS.openCastsPerRoom + LIMITS.membersPerRoom * ASKS_PER_MEMBER_SCENE,
+  // The DM's part is read in steps of 50, so the room's 20 asks take a whole step beside full seats.
+  asks: roundUp(LIMITS.openCastsPerRoom, 50) + LIMITS.membersPerRoom * ASKS_PER_MEMBER_SCENE,
   sceneBytes: 2 * LIMITS.projectedSceneBytes,
   roomBytes: 11 * MiB,
   blocks: 2 * LIMITS.companionBlocksPerRoom,
@@ -1396,9 +1397,11 @@ export const ID_TIME = { aheadMs: 5_000, behindMs: 30 * 60_000, askMs: 12 * 60 *
 export const ID_BUDGET = { windowMs: 30 * 60_000, player: 2_000, dm: 20_000 } as const;
 
 /**
- * Derived bounds (design section 8), with the values expected before the
- * full fixture measures them. Nothing refuses by these: tests hold stored
- * states, snapshots and buffers within them.
+ * Derived bounds (design section 8), held by the full fixture at every far
+ * line (server/rooms/limits.bounds.test.ts): its stored state measured
+ * 15.09 MiB and the sum of its parts' bounds 15.31 MiB, its export 15.09
+ * MiB, and the DM's largest snapshot 12.49 MiB. Nothing refuses by these:
+ * tests hold stored states, snapshots and buffers within them.
  */
 export const HARD = {
   /** The measured state at the room far line with its widest reserves, plus what sits outside the measure. */
