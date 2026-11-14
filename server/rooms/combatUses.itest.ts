@@ -30,11 +30,9 @@ async function send(socket: Socket, op: Op): Promise<{ ev: Ev; ok: boolean; mess
 describe("combat uses on the server", () => {
   let t: Engine;
   before(async () => {
-    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
     t = await startEngine({
       rooms: {
         actor: {
-          idGate: false,
           draw: (sides) => {
             stats.draws++;
             return Math.min(sides, 5);
@@ -54,7 +52,7 @@ describe("combat uses on the server", () => {
     const id = uuidv7();
     await dm.apply({ t: "token.create", token: { id, sceneId, kind: "monster", name: "Young Red Dragon", size: "large", x: 2, y: 2, actor: { inline } } } as Op);
     await dm.apply({ t: "actor.use", target: { tokenId: id }, use: { kind: "ability", key: "actions:fire-breath", name: "Fire Breath", limit: "recharge", max: 1, min: 5 } });
-    await dm.apply({ t: "encounter.start", entries: [{ id: "ed", tokenId: id, value: 20 }] });
+    await dm.apply({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: id, value: 20 }] });
     const next = await send(dm, { t: "encounter.next" });
     assert.ok(next.ok);
     const token = next.ev.changes.find((c) => c.key === `token:${id}`) as { value: { actor: { inline: { turnRecord?: { id: number; due?: string[] } } } } } | undefined;
@@ -94,7 +92,7 @@ describe("combat uses on the server", () => {
     await pip.snapshot(uuidv7());
     const id = uuidv7();
     await dm.apply({ t: "token.create", token: { id, sceneId, kind: "pc", name: "Thorn", size: "medium", x: 2, y: 2, ownerIds: [pipId], actor: { inline: { ...inline, hp: { cur: 0, max: 30, temp: 0 }, life: "dying" } } } } as Op);
-    await dm.apply({ t: "encounter.start", entries: [{ id: "et", tokenId: id, value: 12 }] });
+    await dm.apply({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: id, value: 12 }] });
     const next = await send(dm, { t: "encounter.next" });
     const token = next.ev.changes.find((c) => c.key === `token:${id}`) as { value: { actor: { inline: { turnRecord?: { id: number } } } } } | undefined;
     const record = token?.value.actor.inline.turnRecord?.id;
@@ -130,10 +128,11 @@ describe("combat uses on the server", () => {
     assert.ok(tokenIn(seen));
     assert.equal(tick({ tokens: { [id]: tokenIn(seen) } }), undefined, "the owner's copy holds no tick");
     const fight = (m: Ev) => m.changes.some((c) => c.key === "encounter");
-    await dm.apply({ t: "encounter.start", entries: [{ id: "ek", tokenId: id, value: 12, inLair: true }] });
+    const entryId = uuidv7();
+    await dm.apply({ t: "encounter.start", entries: [{ id: entryId, tokenId: id, value: 12, inLair: true }] });
     await pip.next("ev", fight);
 
-    const off = await send(dm, { t: "encounter.update", entryId: "ek", patch: { inLair: false } });
+    const off = await send(dm, { t: "encounter.update", entryId, patch: { inLair: false } });
     assert.ok(off.ok, off.message);
     const written = tokenIn(off.ev);
     assert.ok(written, "the switch writes the token");
@@ -150,9 +149,10 @@ describe("combat uses on the server", () => {
     const reloaded = await again.snapshot(uuidv7());
     assert.equal(tick(reloaded.state), undefined, "replay takes it off as the switch did");
     assert.equal((reloaded.state as ProjectedState).encounter, null);
-    const back = await send(again, { t: "encounter.start", entries: [{ id: "ek2", tokenId: id, value: 12 }] });
+    const second = uuidv7();
+    const back = await send(again, { t: "encounter.start", entries: [{ id: second, tokenId: id, value: 12 }] });
     assert.ok(back.ok, back.message);
-    const on = await send(again, { t: "encounter.update", entryId: "ek2", patch: { inLair: true } });
+    const on = await send(again, { t: "encounter.update", entryId: second, patch: { inLair: true } });
     assert.ok(on.ok, on.message);
     const pipAgain = await t.connect(roomId, pipClient);
     const pipSnap = await pipAgain.snapshot(uuidv7());

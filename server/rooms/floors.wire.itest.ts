@@ -195,8 +195,7 @@ async function players(t: Engine, r: Room, order: "ana first" | "bree first", pr
 describe("several floors over the wire (docs/design/design-v1-floors.md 8, the shipping gate)", () => {
   let t: Engine;
   before(async () => {
-    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
-    t = await startEngine({ env: { ANIMATED_MAPS: "1" }, rooms: { idleUnloadMs: 60_000, actor: { idGate: false } } });
+    t = await startEngine({ env: { ANIMATED_MAPS: "1" }, rooms: { idleUnloadMs: 60_000 } });
   });
   after(() => t.close());
 
@@ -435,7 +434,7 @@ describe("several floors over the wire (docs/design/design-v1-floors.md 8, the s
     const upper = await addFloor(r, r.ground, "above", "Upper floor");
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false };
     const plate = async (sceneId: string, y: number) => {
-      const id = `plate-${uuidv7()}`;
+      const id = uuidv7();
       await ok(r.dmSocket, { t: "trap.create", trap: { id, sceneId, name: "Plate", zone: { cells: [{ x: 5, y, w: 1, h: 1 }] }, rig } } as Op);
       return id;
     };
@@ -470,7 +469,7 @@ describe("several floors over the wire (docs/design/design-v1-floors.md 8, the s
     const upper = await addFloor(r, r.ground, "above", "Upper floor");
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false };
     const plate = async (sceneId: string) => {
-      const id = `plate-${uuidv7()}`;
+      const id = uuidv7();
       await ok(r.dmSocket, { t: "trap.create", trap: { id, sceneId, name: "Plate", zone: { cells: [{ x: 5, y: 5, w: 1, h: 1 }] }, rig } } as Op);
       return id;
     };
@@ -792,7 +791,7 @@ async function reconnectBoth(t: Engine, a: Compared, b: Compared, when: string):
 describe("a climb's undo and redo over the wire with passengers and areas players do not receive (phase 2, D-261109-137)", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { idGate: false } } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000 } });
   });
   after(() => t.close());
 
@@ -984,7 +983,7 @@ describe("a climb's undo and redo over the wire with passengers and areas player
 describe("floors phase 3 over the wire: the privacy twins (phase 3, 6)", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { idGate: false } } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000 } });
   });
   after(() => t.close());
 

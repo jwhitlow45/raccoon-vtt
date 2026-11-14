@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import { uuidv7 } from "#shared/ids.ts";
 import { OP_VERSION } from "#shared/migrate.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
@@ -89,8 +90,7 @@ describe("synced music and sound in a live room", () => {
   before(async () => {
     // These tests read music times off their own clock to the millisecond, so in either run of the suite numbers stand
     // still and every op's `at` is that clock.
-    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { idGate: false, snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, numberClock: STANDING_CLOCK, now: () => clock.now } } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, numberClock: STANDING_CLOCK, now: () => clock.now } } });
   });
   after(() => t.close());
 
@@ -290,7 +290,7 @@ describe("the queue in a live room", () => {
   const qclock = { now: Date.now() };
   let t: Engine;
   before(async () => {
-    t = await startEngine({ env: { ROOM_SOUND: "1" }, rooms: { idleUnloadMs: 60_000, actor: { idGate: false, snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, numberClock: STANDING_CLOCK, now: () => qclock.now } } });
+    t = await startEngine({ env: { ROOM_SOUND: "1" }, rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, numberClock: STANDING_CLOCK, now: () => qclock.now } } });
   });
   after(() => t.close());
 
@@ -334,6 +334,8 @@ describe("the queue in a live room", () => {
   }
 
   test("Pat gets nothing for a Play next before the reveal, then only the new next, unnamed, and the old next's file answers 404", async () => {
+    // Ids made at the room's clock, as a device makes them just before it sends them.
+    const S = { a: uuidv7(qclock.now), b: uuidv7(qclock.now), e: uuidv7(qclock.now), night: uuidv7(qclock.now) };
     const dmClient = t.client();
     const { roomId } = await dmClient.createRoom("Queue frames");
     const files: { id: string; audio: { ms: number } }[] = [];
@@ -353,17 +355,17 @@ describe("the queue in a live room", () => {
     const player = await t.connect(roomId, playerClient);
     await player.snapshot("pat");
     const pat = recorder(player);
-    for (const [id, f] of [["a", fa], ["b", fb], ["e", fe]] as const) assert.equal(refusal(await dm.apply({ t: "sound.create", id, assetId: f.id, name: `Secret ${id}`, use: "music", ms: f.audio.ms })), undefined);
-    assert.equal(refusal(await dm.apply({ t: "playlist.create", id: "night", name: "Night", sounds: ["a", "b"], repeat: "all", fade: 5 })), undefined);
+    for (const [id, f] of [[S.a, fa], [S.b, fb], [S.e, fe]] as const) assert.equal(refusal(await dm.apply({ t: "sound.create", id, assetId: f.id, name: `Secret ${id}`, use: "music", ms: f.audio.ms })), undefined);
+    assert.equal(refusal(await dm.apply({ t: "playlist.create", id: S.night, name: "Night", sounds: [S.a, S.b], repeat: "all", fade: 5 })), undefined);
     const ms = fa.audio.ms;
     const start = qclock.now;
-    assert.equal(refusal(await dm.apply({ t: "music.play", run: "q1", playlistId: "night", order: ["a", "b"], repeat: "all", fade: 5 })), undefined);
+    assert.equal(refusal(await dm.apply({ t: "music.play", run: "q1", playlistId: S.night, order: [S.a, S.b], repeat: "all", fade: 5 })), undefined);
     await pat.until((f) => (latest(f, "playing") && "value" in latest(f, "playing")! ? true : undefined), "the run");
     const read = (f: { id: string }) => playerClient.request("GET", `/api/assets/${f.id}/full`, undefined, { range: "bytes=0-99" });
 
     // Before the reveal: the order changes for the DM alone, so Pat's socket gets no frame at all.
     qclock.now = start + 10_000;
-    const early = await dm.apply({ t: "music.queue", from: "q1", edit: { t: "next", soundIds: ["e"] } });
+    const early = await dm.apply({ t: "music.queue", from: "q1", edit: { t: "next", soundIds: [S.e] } });
     assert.equal(refusal(early), undefined);
     assert.equal(await player.maybe("ev", (m) => m.seq === early.seq, 300), null, "no ev for Pat");
     pat.take();
@@ -378,21 +380,21 @@ describe("the queue in a live room", () => {
       return p && "value" in p && (p.value as Playing).music?.next ? (p.value as Playing) : undefined;
     }, "the reveal");
     const nextAt = start + 400 + ms - 5_000;
-    assert.deepEqual(revealed.music?.next, { soundId: "e", at: nextAt });
+    assert.deepEqual(revealed.music?.next, { soundId: S.e, at: nextAt });
     assert.equal((await read(fe)).statusCode, 206, "the revealed next's file is Pat's");
     assert.equal((await read(fb)).statusCode, 404);
 
     // Inside the window Play next b swaps the revealed next at the same start: one ev naming b and not e.
-    const swap = await dm.apply({ t: "music.queue", from: "q1", edit: { t: "next", soundIds: ["b"] } });
+    const swap = await dm.apply({ t: "music.queue", from: "q1", edit: { t: "next", soundIds: [S.b] } });
     assert.equal(refusal(swap), undefined);
     const frame = await pat.until((f) => f.find((m) => m.t === "ev" && m.seq === swap.seq), "the swap's frame");
     assert.ok(frame.t === "ev");
     const playing = frame.changes.find((c) => c.key === "playing");
     assert.ok(playing && "value" in playing);
-    assert.deepEqual((playing.value as Playing).music?.next, { soundId: "b", at: nextAt });
-    assert.deepEqual(frame.changes.find((c) => c.key === "sound:b"), { key: "sound:b", value: { id: "b", rev: 0, assetId: fb.id, ms: fb.audio.ms, use: "music" } }, "the new next, unnamed");
-    assert.deepEqual(frame.changes.find((c) => c.key === "sound:e"), { key: "sound:e", deleted: true }, "the old next leaves");
-    assert.ok(!JSON.stringify(frame.changes.filter((c) => c.key !== "sound:e")).includes('"e"'), "nothing else names e");
+    assert.deepEqual((playing.value as Playing).music?.next, { soundId: S.b, at: nextAt });
+    assert.deepEqual(frame.changes.find((c) => c.key === `sound:${S.b}`), { key: `sound:${S.b}`, value: { id: S.b, rev: 0, assetId: fb.id, ms: fb.audio.ms, use: "music" } }, "the new next, unnamed");
+    assert.deepEqual(frame.changes.find((c) => c.key === `sound:${S.e}`), { key: `sound:${S.e}`, deleted: true }, "the old next leaves");
+    assert.ok(!JSON.stringify(frame.changes.filter((c) => c.key !== `sound:${S.e}`)).includes(JSON.stringify(S.e)), "nothing else names e");
     assert.equal((await read(fe)).statusCode, 404, "the old next's file answers 404 again");
     assert.equal((await read(fb)).statusCode, 206);
 
@@ -495,6 +497,8 @@ describe("the queue in a live room", () => {
   });
 
   test("two DMs add to a playlist at once: both land on a 3-track one, and on a 99-track one the second is refused", async () => {
+    // Ids made at the room's clock, as a device makes them just before it sends them.
+    const S = { three: uuidv7(qclock.now), full: uuidv7(qclock.now) };
     const many = Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`z${i}`, sound(`z${i}`, `Many ${i}`, "music", 60_000, `00000000-0000-7000-8001-${String(i).padStart(12, "0")}`)]));
     const { roomId, dmKey, owner } = await queueRoom(many);
     const coClient = t.client();
@@ -503,15 +507,15 @@ describe("the queue in a live room", () => {
     await dm.snapshot("dm");
     const co = await t.connect(roomId, coClient);
     await co.snapshot("co");
-    assert.equal(refusal(await dm.apply({ t: "playlist.create", id: "three", name: "Three", sounds: ["a", "b", "c"], repeat: "off", fade: 0 })), undefined);
-    assert.equal(refusal(await dm.apply({ t: "playlist.create", id: "full", name: "Full", sounds: Object.keys(many).slice(0, 99), repeat: "off", fade: 0 })), undefined);
-    const [x, y] = [dm.op({ t: "playlist.add", id: "three", soundId: "d" }), co.op({ t: "playlist.add", id: "three", soundId: "e" })];
+    assert.equal(refusal(await dm.apply({ t: "playlist.create", id: S.three, name: "Three", sounds: ["a", "b", "c"], repeat: "off", fade: 0 })), undefined);
+    assert.equal(refusal(await dm.apply({ t: "playlist.create", id: S.full, name: "Full", sounds: Object.keys(many).slice(0, 99), repeat: "off", fade: 0 })), undefined);
+    const [x, y] = [dm.op({ t: "playlist.add", id: S.three, soundId: "d" }), co.op({ t: "playlist.add", id: S.three, soundId: "e" })];
     assert.deepEqual([...(await answers(dm, [x])), ...(await answers(co, [y]))], [undefined, undefined]);
-    assert.deepEqual([...t.manager.get(roomId)!.committed.state.playlists!.three!.sounds].sort(), ["a", "b", "c", "d", "e"]);
-    const [z1, z2] = [dm.op({ t: "playlist.add", id: "full", soundId: "z99" }), co.op({ t: "playlist.add", id: "full", soundId: "z100" })];
+    assert.deepEqual([...t.manager.get(roomId)!.committed.state.playlists![S.three]!.sounds].sort(), ["a", "b", "c", "d", "e"]);
+    const [z1, z2] = [dm.op({ t: "playlist.add", id: S.full, soundId: "z99" }), co.op({ t: "playlist.add", id: S.full, soundId: "z100" })];
     const both = [...(await answers(dm, [z1])), ...(await answers(co, [z2]))];
     assert.deepEqual(both.filter((m) => m !== undefined), ["A playlist holds 100 tracks at most."], "one lands, the other is refused");
-    assert.equal(t.manager.get(roomId)!.committed.state.playlists!.full!.sounds.length, 100);
+    assert.equal(t.manager.get(roomId)!.committed.state.playlists![S.full]!.sounds.length, 100);
     dm.close();
     co.close();
   });
@@ -565,11 +569,13 @@ describe("only DM devices play in a live room", () => {
   const dclock = { now: Date.now() };
   let t: Engine;
   before(async () => {
-    t = await startEngine({ env: { ROOM_SOUND: "1" }, rooms: { idleUnloadMs: 60_000, actor: { idGate: false, snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, numberClock: STANDING_CLOCK, now: () => dclock.now } } });
+    t = await startEngine({ env: { ROOM_SOUND: "1" }, rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, numberClock: STANDING_CLOCK, now: () => dclock.now } } });
   });
   after(() => t.close());
 
   test("the switch withdraws every sound from Pat and the display in one batch, then a play, a skip, a tick, a loop and an effect send them nothing, and every file 404s", async () => {
+    // Ids made at the room's clock, as a device makes them just before it sends them.
+    const S = { a: uuidv7(dclock.now), b: uuidv7(dclock.now), rain: uuidv7(dclock.now), boom: uuidv7(dclock.now), night: uuidv7(dclock.now) };
     const dmClient = t.client();
     const { roomId } = await dmClient.createRoom("Speaker");
     const files: Record<string, { id: string; audio: { ms: number } }> = {};
@@ -590,8 +596,8 @@ describe("only DM devices play in a live room", () => {
       return ev;
     };
     const uses = { a: "music", b: "music", rain: "loop", boom: "effect" } as const;
-    for (const [id, use] of Object.entries(uses)) await applied({ t: "sound.create", id, assetId: files[id]!.id, name: `Secret ${id}`, use, ms: files[id]!.audio.ms });
-    await applied({ t: "playlist.create", id: "night", name: "Night", sounds: ["a", "b"], repeat: "all", fade: 5 });
+    for (const [name, use] of Object.entries(uses)) await applied({ t: "sound.create", id: S[name as keyof typeof uses], assetId: files[name]!.id, name: `Secret ${name}`, use, ms: files[name]!.audio.ms });
+    await applied({ t: "playlist.create", id: S.night, name: "Night", sounds: [S.a, S.b], repeat: "all", fade: 5 });
     const player = await t.connect(roomId, playerClient);
     await player.snapshot("pat");
     const pat = recorder(player);
@@ -607,9 +613,9 @@ describe("only DM devices play in a live room", () => {
     ] as const;
 
     const start = dclock.now;
-    await applied({ t: "music.play", run: "d1", playlistId: "night", order: ["a", "b"], repeat: "all", fade: 5 });
-    await applied({ t: "loop.start", id: "loop1", soundId: "rain", volume: 70 });
-    for (const rec of [pat, screen]) await rec.until((f) => (latest(f, "sound:rain") && "value" in latest(f, "sound:rain")! ? true : undefined), "the loop");
+    await applied({ t: "music.play", run: "d1", playlistId: S.night, order: [S.a, S.b], repeat: "all", fade: 5 });
+    await applied({ t: "loop.start", id: "loop1", soundId: S.rain, volume: 70 });
+    for (const rec of [pat, screen]) await rec.until((f) => (latest(f, `sound:${S.rain}`) && "value" in latest(f, `sound:${S.rain}`)! ? true : undefined), "the loop");
     for (const [who, read] of readers) assert.equal((await read(files.a!.id)).statusCode, 206, `${who} reads the track that plays`);
 
     const on = await applied({ t: "room.update", settings: { soundDmOnly: true } });
@@ -617,7 +623,8 @@ describe("only DM devices play in a live room", () => {
       const frame = await rec.until((f) => f.find((m) => m.t === "ev" && m.seq === on.seq), `${who}'s frame for the switch`);
       assert.ok(frame.t === "ev");
       const sound = frame.changes.filter((c) => c.key === "playing" || c.key.startsWith("sound:")).sort((x, y) => x.key.localeCompare(y.key));
-      assert.deepEqual(sound, [{ key: "playing", deleted: true }, { key: "sound:a", deleted: true }, { key: "sound:rain", deleted: true }], `${who}: one batch withdraws everything`);
+      const gone = [{ key: "playing", deleted: true }, { key: `sound:${S.a}`, deleted: true }, { key: `sound:${S.rain}`, deleted: true }].sort((x, y) => x.key.localeCompare(y.key));
+      assert.deepEqual(sound, gone, `${who}: one batch withdraws everything`);
       const meta = frame.changes.find((c) => c.key === "meta");
       assert.ok(meta && "value" in meta && (meta.value as ProjectedState["meta"]).settings.soundDmOnly === true, `${who} gets the setting`);
       void sock;
@@ -626,13 +633,13 @@ describe("only DM devices play in a live room", () => {
 
     // While it is on, nothing the DM plays sends Pat or the display a frame: a play, a skip, the tick's reveal, a loop, effects.
     const seqs: number[] = [];
-    seqs.push((await applied({ t: "music.play", run: "d2", playlistId: "night", order: ["a", "b"], repeat: "all", fade: 5 })).seq);
+    seqs.push((await applied({ t: "music.play", run: "d2", playlistId: S.night, order: [S.a, S.b], repeat: "all", fade: 5 })).seq);
     seqs.push((await applied({ t: "music.skip", run: "d3" })).seq);
     dclock.now = start + 60_000 - 5_000 - 20_000 + 2_000;
     await applied({ t: "sound.mix", music: 70 });
     seqs.push((await applied({ t: "loop.stop", id: "loop1" })).seq);
-    seqs.push((await applied({ t: "loop.start", id: "loop2", soundId: "rain", volume: 30 })).seq);
-    seqs.push((await applied({ t: "effect.fire", id: "fx1", soundId: "boom" })).seq);
+    seqs.push((await applied({ t: "loop.start", id: "loop2", soundId: S.rain, volume: 30 })).seq);
+    seqs.push((await applied({ t: "effect.fire", id: "fx1", soundId: S.boom })).seq);
     seqs.push((await applied({ t: "effect.fire", id: "fx2", builtin: "click" })).seq);
     const deadline = Date.now() + 5_000;
     while (!t.manager.get(roomId)!.committed.state.playing?.music?.next && Date.now() < deadline) await delay(10);
@@ -687,12 +694,14 @@ describe("the next track's reveal after a change of crossfade", () => {
   const xclock = { now: Date.now() };
   let t: Engine;
   before(async () => {
-    t = await startEngine({ env: { ROOM_SOUND: "1" }, rooms: { idleUnloadMs: 60_000, actor: { idGate: false, snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, numberClock: STANDING_CLOCK, now: () => xclock.now } } });
+    t = await startEngine({ env: { ROOM_SOUND: "1" }, rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, numberClock: STANDING_CLOCK, now: () => xclock.now } } });
   });
   after(() => t.close());
   let level = 40;
 
   test("Crossfade 10 s set to Off just after the reveal withdraws the next track and its file from Pat, and the tick reveals it again 20 s before it starts", async () => {
+    // Ids made at the room's clock, as a device makes them just before it sends them.
+    const S = { a: uuidv7(xclock.now), b: uuidv7(xclock.now), night: uuidv7(xclock.now) };
     const dmClient = t.client();
     const { roomId } = await dmClient.createRoom("Crossfade");
     const files: { id: string; audio: { ms: number } }[] = [];
@@ -712,9 +721,9 @@ describe("the next track's reveal after a change of crossfade", () => {
       assert.equal(ev.rejects, undefined, op.t);
       return ev;
     };
-    await applied({ t: "sound.create", id: "a", assetId: fa.id, name: "First", use: "music", ms: fa.audio.ms });
-    await applied({ t: "sound.create", id: "b", assetId: fb.id, name: "Second", use: "music", ms: fb.audio.ms });
-    await applied({ t: "playlist.create", id: "night", name: "Night", sounds: ["a", "b"], repeat: "all", fade: 10 });
+    await applied({ t: "sound.create", id: S.a, assetId: fa.id, name: "First", use: "music", ms: fa.audio.ms });
+    await applied({ t: "sound.create", id: S.b, assetId: fb.id, name: "Second", use: "music", ms: fb.audio.ms });
+    await applied({ t: "playlist.create", id: S.night, name: "Night", sounds: [S.a, S.b], repeat: "all", fade: 10 });
     const player = await t.connect(roomId, playerClient);
     await player.snapshot("pat");
     const pat = recorder(player);
@@ -725,11 +734,11 @@ describe("the next track's reveal after a change of crossfade", () => {
     };
 
     const start = xclock.now + 400;
-    await applied({ t: "music.play", run: "x1", playlistId: "night", order: ["a", "b"], repeat: "all", fade: 10 });
+    await applied({ t: "music.play", run: "x1", playlistId: S.night, order: [S.a, S.b], repeat: "all", fade: 10 });
     const ms = fa.audio.ms;
     xclock.now = start + ms - 10_000 - 20_000 + 100;
     await applied({ t: "sound.mix", music: level++ });
-    assert.deepEqual(await pat.until((f) => nextOf(f) ?? undefined, "the reveal"), { soundId: "b", at: start + ms - 10_000 });
+    assert.deepEqual(await pat.until((f) => nextOf(f) ?? undefined, "the reveal"), { soundId: S.b, at: start + ms - 10_000 });
     assert.equal((await read(fb.id)).statusCode, 206);
 
     const set = await applied({ t: "music.set", fade: 0 });
@@ -738,12 +747,12 @@ describe("the next track's reveal after a change of crossfade", () => {
     const playing = frame.changes.find((c) => c.key === "playing");
     assert.ok(playing && "value" in playing);
     assert.equal((playing.value as Playing).music?.next, undefined, "it would start 30 s ahead");
-    assert.deepEqual(frame.changes.find((c) => c.key === "sound:b"), { key: "sound:b", deleted: true }, "its sound leaves in that batch");
+    assert.deepEqual(frame.changes.find((c) => c.key === `sound:${S.b}`), { key: `sound:${S.b}`, deleted: true }, "its sound leaves in that batch");
     assert.equal((await read(fb.id)).statusCode, 404);
 
     xclock.now = start + ms - 20_000 + 100;
     await applied({ t: "sound.mix", music: level++ });
-    assert.deepEqual(await pat.until((f) => nextOf(f) ?? undefined, "the reveal again"), { soundId: "b", at: start + ms });
+    assert.deepEqual(await pat.until((f) => nextOf(f) ?? undefined, "the reveal again"), { soundId: S.b, at: start + ms });
     assert.equal((await read(fb.id)).statusCode, 206);
     dm.close();
     player.close();

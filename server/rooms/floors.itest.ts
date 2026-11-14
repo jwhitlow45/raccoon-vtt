@@ -12,6 +12,7 @@ import { LINK_WORDS } from "#shared/rules/floorLinks.ts";
 import { floorProblem, floorsOf } from "#shared/rules/floors.ts";
 import { floorFullWords } from "./actor.ts";
 import { Connection } from "./connection.ts";
+import { ID_TAKEN } from "./createIds.ts";
 import type { RoomExport } from "./exportRoom.ts";
 import { loadRoom } from "./persistence.ts";
 import { startEngine, type Engine, type Socket, type TestClient } from "./testing.ts";
@@ -105,8 +106,7 @@ const live = (t: Engine, roomId: string): RoomState => t.manager.get(roomId)!.co
 describe("several floors on the server (docs/design/design-v1-floors.md 9)", () => {
   let t: Engine;
   before(async () => {
-    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { idGate: false, snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
   });
   after(() => t.close());
 
@@ -472,7 +472,7 @@ function refused(ev: Extract<ServerMessage, { t: "ev" }>): string {
 describe("stairs and ladders on the server (docs/design/design-v1-floors.md phase 2, lane FL2-C)", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { idGate: false, snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
   });
   after(() => t.close());
 
@@ -532,13 +532,16 @@ describe("stairs and ladders on the server (docs/design/design-v1-floors.md phas
     for (const id of Object.keys(state.scenes)) assert.equal(floorProblem(state, id), null);
   });
 
-  test("stairs removed and placed again with the same ids over a raised landing are other stairs: Ana's Undo answers the stairs changed (ASTRA-14)", async () => {
+  test("stairs removed cannot come back under their ids, and stairs placed again over a raised landing are other stairs: Ana's Undo answers the stairs changed (ASTRA-14)", async () => {
     const r = await stairsTower(t, "Placed again");
     await ok(r.anaSocket, { t: "token.move", tokenId: r.thorn, x: 3, y: 3 });
     await ok(r.anaSocket, { t: "token.climb", tokenId: r.thorn, linkId: r.link });
     await ok(r.dmSocket, { t: "floorLink.delete", linkId: r.link } as Op);
     await ok(r.dmSocket, { t: "build.height", sceneId: r.ground, cells: ["3,3", "4,3"], height: 5 } as Op);
-    await ok(r.dmSocket, { t: "floorLink.put", link: { id: r.link, pairId: r.pair, sceneId: r.ground, to: r.upper, rect: STAIRS, kind: "stairs" } } as Op);
+    const placed = (id: string, pairId: string) => ({ t: "floorLink.put", link: { id, pairId, sceneId: r.ground, to: r.upper, rect: STAIRS, kind: "stairs" } }) as Op;
+    // The room took these ids once (server/rooms/createIds.ts), so the stairs come back only under new ones.
+    assert.deepEqual((await r.dmSocket.apply(placed(r.link, r.pair))).rejects?.map((x) => [x.code, x.message]), [["gone", ID_TAKEN]]);
+    await ok(r.dmSocket, placed(uuidv7(), uuidv7()));
     const answer = await r.anaSocket.apply({ t: "undo", head: (await r.anaSocket.historyHead("play", "undo"))! } as Op);
     assert.equal(refused(answer), `could not undo moving Thorn up the stairs: ${LINK_WORDS.changed("stairs")}`);
     assert.equal(live(t, r.roomId).tokens[r.thorn]!.sceneId, r.upper);
@@ -572,8 +575,10 @@ describe("stairs and ladders on the server (docs/design/design-v1-floors.md phas
     await caraSocket.snapshot("cara");
     await ok(caraSocket, { t: "token.climb", tokenId: thorn, linkId: lower!.id });
     await ok(dm, { t: "floorLink.delete", linkId: lower!.id } as Op);
-    await ok(dm, { t: "floorLink.put", link: { id: lower!.id, pairId: upper!.id, sceneId: lower!.sceneId, to: upper!.sceneId, rect: STAIRS, kind: "stairs" } } as Op);
-    assert.ok(live(t, copyId).floorLinks![lower!.id]!.made > late, "placed again past the stamp");
+    // New ids: the room records those an import made as taken (server/rooms/createIds.ts).
+    const again = uuidv7();
+    await ok(dm, { t: "floorLink.put", link: { id: again, pairId: uuidv7(), sceneId: lower!.sceneId, to: upper!.sceneId, rect: STAIRS, kind: "stairs" } } as Op);
+    assert.ok(live(t, copyId).floorLinks![again]!.made > late, "placed again past the stamp");
     const answer = await caraSocket.apply({ t: "undo", head: (await caraSocket.historyHead("play", "undo"))! } as Op);
     assert.equal(refused(answer), `could not undo moving Thorn up the stairs: ${LINK_WORDS.changed("stairs")}`);
     caraSocket.close();
@@ -676,7 +681,7 @@ describe("stairs and ladders on the server (docs/design/design-v1-floors.md phas
     const r = await stairsTower(t, "Trap cap", false);
     r.anaSocket.close();
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false };
-    const plate = (i: number): Op => ({ t: "trap.create", trap: { id: `plate-${uuidv7()}`, sceneId: r.ground, name: "Plate", zone: { cells: [{ x: 10 + (i % 10), y: 10 + Math.floor(i / 10), w: 1, h: 1 }] }, rig } }) as Op;
+    const plate = (i: number): Op => ({ t: "trap.create", trap: { id: uuidv7(), sceneId: r.ground, name: "Plate", zone: { cells: [{ x: 10 + (i % 10), y: 10 + Math.floor(i / 10), w: 1, h: 1 }] }, rig } }) as Op;
     for (let i = 0; i < LIMITS.trapsPerScene; i++) await ok(r.dmSocket, plate(i));
     assert.match(refused(await r.dmSocket.apply(plate(LIMITS.trapsPerScene))), new RegExp(`at most ${LIMITS.trapsPerScene} traps`));
   });
@@ -714,7 +719,7 @@ describe("stairs and ladders on the server (docs/design/design-v1-floors.md phas
 describe("a scene's floors share one budget (docs/design/design-v1-floors.md 9, D-261102-485)", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { idGate: false } } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000 } });
   });
   after(() => t.close());
 

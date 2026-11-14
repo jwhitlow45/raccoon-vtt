@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import yauzl from "yauzl";
 import yazl from "yazl";
+import { uuidv7 } from "#shared/ids.ts";
 import { VIDEO_LIMITS } from "#shared/limits.ts";
 import type { MapVideo, RoomState, VideoFacts } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
@@ -121,8 +122,7 @@ describe("animated maps with the switch on", () => {
   let t: Engine;
   let scratch: string;
   before(async () => {
-    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
-    t = await startEngine({ rooms: { actor: { idGate: false } }, env: { ANIMATED_MAPS: "1" } });
+    t = await startEngine({ env: { ANIMATED_MAPS: "1" } });
     scratch = await mkdtemp(join(tmpdir(), "rvtt-animmap-"));
   });
   after(async () => {
@@ -306,7 +306,7 @@ describe("animated maps with the switch on", () => {
   });
 
   test("a live upload must leave 32 MiB of the quota free, and a delete frees it, its file to the trash as .webm", async () => {
-    const small = await startEngine({ rooms: { actor: { idGate: false } }, env: { ANIMATED_MAPS: "1", ROOM_QUOTA_MB: "40" } });
+    const small = await startEngine({ env: { ANIMATED_MAPS: "1", ROOM_QUOTA_MB: "40" } });
     try {
       const { dm, roomId, socket, sceneId, still } = await roomWithStill(small);
       const bytes = webmFile({ frameBytes: 1000 });
@@ -451,7 +451,7 @@ describe("turned, stretched and iPhone videos with the switch on", () => {
   let t: Engine;
   let scratch: string;
   before(async () => {
-    t = await startEngine({ rooms: { actor: { idGate: false } }, env: { ANIMATED_MAPS: "1" } });
+    t = await startEngine({ env: { ANIMATED_MAPS: "1" } });
     scratch = await mkdtemp(join(tmpdir(), "rvtt-amrotate-"));
   });
   after(async () => {
@@ -472,7 +472,7 @@ describe("turned, stretched and iPhone videos with the switch on", () => {
   /** A new scene in the DM's room with a still of the video's drawn size, and the video on it. */
   async function sceneWith(dm: TestClient, roomId: string, socket: Socket, videoId: string, size: [number, number]): Promise<string> {
     const still = await uploaded(dm, roomId, await solid(size[0], size[1], "#264").png().toBuffer(), { kind: "map", type: "image/png" });
-    const sceneId = randomUUID();
+    const sceneId = uuidv7();
     assert.deepEqual((await socket.apply({ t: "scene.create", scene: { id: sceneId, name: `Scene ${size.join("x")}`, bounds: { w: 10, h: 10 } } })).rejects ?? [], []);
     await setVideoMap(socket, sceneId, still.id, videoId, size);
     return sceneId;
@@ -643,8 +643,8 @@ describe("animated maps with the switch off (D-261102-510)", () => {
   let off: Engine;
   let on: Engine;
   before(async () => {
-    off = await startEngine({ rooms: { actor: { idGate: false } } });
-    on = await startEngine({ rooms: { actor: { idGate: false } }, env: { ANIMATED_MAPS: "1" } });
+    off = await startEngine();
+    on = await startEngine({ env: { ANIMATED_MAPS: "1" } });
   });
   after(async () => {
     await off.close();

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
+import { uuidv7 } from "#shared/ids.ts";
 import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
@@ -19,15 +20,15 @@ import { startEngine, type Engine } from "./testing.ts";
  */
 
 const S3 = { id: "0199f0a0-0000-7000-8000-000000000003", name: "Crypt", bounds: { w: 32, h: 32 }, fogEnabled: true, vision: { on: true, light: "dark" as const } };
-const S4 = { id: "0199f0a0-0000-7000-8000-000000000004", name: "Hall", bounds: { w: 20, h: 20 }, fogEnabled: true, vision: { on: true, light: "dim" as const } };
+// Made live, so its id is a version 7 id made now (server/rooms/createIds.ts). S3 is a stored op's and keeps its fixed id.
+const S4 = { id: uuidv7(), name: "Hall", bounds: { w: 20, h: 20 }, fogEnabled: true, vision: { on: true, light: "dim" as const } };
 const bits = Object.values(rasterizeFogOps({}, S3.id, S3.bounds, [{ id: "r", mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 4, h: 4 } }]))[0]!.bits;
 const marks = (state: RoomState) => Object.fromEntries(Object.entries(state.playedScenes ?? {}).map(([id, m]) => [id, m.rev]));
 
 describe("the map discovery upgrade over a stored room (ASTRA-31)", () => {
   let t: Engine;
   before(async () => {
-    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { idGate: false, snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
   });
   after(() => t.close());
 

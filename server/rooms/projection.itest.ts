@@ -60,8 +60,7 @@ async function setup(t: Engine, name: string): Promise<{ roomId: string; dm: Soc
 describe("projection over the socket", () => {
   let t: Engine;
   before(async () => {
-    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
-    t = await startEngine({ rooms: { actor: { idGate: false } } });
+    t = await startEngine();
   });
   after(() => t.close());
 
@@ -123,7 +122,7 @@ describe("projection over the socket", () => {
     assert.ok(tokenIn((await dm.apply(dragon.op)).changes, dragon.id));
     await dm.apply({ t: "fog.live", sceneId, ops: [{ id: "f2", mode: "reveal", shape: { kind: "rect", x: 8, y: 8, w: 5, h: 5 } }] });
     await dm.apply({ t: "token.move", tokenId: goblin.id, x: 3, y: 3 });
-    await dm.apply({ t: "encounter.start", entries: [{ id: "n1", tokenId: dragon.id, value: 20 }, { id: "n2", label: "Lair actions", value: 20 }] });
+    await dm.apply({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: dragon.id, value: 20 }, { id: uuidv7(), label: "Lair actions", value: 20 }] });
     dm.send({ t: "eph", sceneId, e: { k: "ping", x: 10, y: 10 } });
     assert.equal(await player.maybe("ev", () => true, 400), null);
     assert.equal(await player.maybe("eph", () => true, 300), null);

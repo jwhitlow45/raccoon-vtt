@@ -90,11 +90,9 @@ async function reconnect(t: Engine, roomId: string, client: TestClient): Promise
 describe("dice on the server", () => {
   let t: Engine;
   before(async () => {
-    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
     t = await startEngine({
       rooms: {
         actor: {
-          idGate: false,
           draw: (sides) => {
             actorStats.draws++;
             return 1 + (actorStats.draws % sides);
@@ -276,7 +274,7 @@ describe("dice on the server", () => {
 describe("a request's answer and a death save rolled on the server", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ rooms: { actor: { idGate: false } } });
+    t = await startEngine();
   });
   after(() => t.close());
 
@@ -285,12 +283,13 @@ describe("a request's answer and a death save rolled on the server", () => {
     const pip = room.players[0]!;
     const bree = uuidv7();
     await room.dm.apply({ t: "character.create", character: { id: bree, name: "Bree", size: "medium", ownerIds: [pip.id], actor: inline } } as Op);
-    await room.dm.apply({ t: "roll.ask", request: { id: "r1", test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 13, dcShown: true, resultShown: true, targets: [{ characterId: bree }] } } as Op);
+    const rollId = uuidv7();
+    await room.dm.apply({ t: "roll.ask", request: { id: rollId, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 13, dcShown: true, resultShown: true, targets: [{ characterId: bree }] } } as Op);
     const tag = uuidv7();
-    const op = { t: "roll.dice", tag, rollId: "r1", target: { characterId: bree }, bonus: 4 } as Op;
+    const op = { t: "roll.dice", tag, rollId, target: { characterId: bree }, bonus: 4 } as Op;
     const sent = await send(pip.socket, op);
     assert.deepEqual(sent.answer, { ok: true });
-    const target = (sent.ev.changes.find((c) => c.key === "roll:r1") as { value: { targets: { total?: number; dice?: unknown; typedBonus?: true; tag?: string }[] } } | undefined)?.value.targets[0];
+    const target = (sent.ev.changes.find((c) => c.key === `roll:${rollId}`) as { value: { targets: { total?: number; dice?: unknown; typedBonus?: true; tag?: string }[] } } | undefined)?.value.targets[0];
     assert.ok(target?.dice, "the player's own view holds the dice");
     assert.equal(target.typedBonus, true);
     assert.equal(target.tag, tag);
@@ -298,7 +297,7 @@ describe("a request's answer and a death save rolled on the server", () => {
     const again = await send(tab, op);
     assert.deepEqual(again.answer, { ok: true });
     assert.equal(again.ev.changes.length, 0, "nothing applied twice");
-    const second = await send(pip.socket, { t: "roll.dice", tag: uuidv7(), rollId: "r1", target: { characterId: bree }, bonus: 4 } as Op);
+    const second = await send(pip.socket, { t: "roll.dice", tag: uuidv7(), rollId, target: { characterId: bree }, bonus: 4 } as Op);
     assert.deepEqual(second.answer, { ok: false, code: "invalid", message: "It was answered meanwhile." });
     const lookup = (await pip.client.get(`/api/rooms/${room.roomId}/receipts/${tag}`)).json<Lookup>();
     assert.equal(lookup.parts[0]?.state, "committed");
@@ -350,7 +349,7 @@ describe("a request's answer and a death save rolled on the server", () => {
 describe("the day's caps and floods (docs/design/design-v1-dice.md 1.2 and 4.4)", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ rooms: { actor: { idGate: false } } });
+    t = await startEngine();
   });
   after(() => t.close());
 

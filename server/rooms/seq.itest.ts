@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, test } from "node:test";
+import { uuidv7 } from "#shared/ids.ts";
 import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
@@ -173,13 +174,11 @@ async function c1Moves(pair: Pair): Promise<void> {
 }
 
 /** P1's line drawn in room R, which moves no one's sight. */
-const SKETCH = "0199f0a0-0000-7000-8000-00000000d1d1";
-const sketch = { t: "drawing.create", drawing: { id: SKETCH, sceneId: "s1", kind: "line", points: [3, 3, 5, 5], style: { stroke: "#ffffff", width: 2, opacity: 1 }, ownerId: "p1", visibility: "all" } };
+const sketchOf = (id: string) => ({ t: "drawing.create", drawing: { id, sceneId: "s1", kind: "line", points: [3, 3, 5, 5], style: { stroke: "#ffffff", width: 2, opacity: 1 }, ownerId: "p1", visibility: "all" } });
 
 describe("twin rooms on the database give their devices the same frames", () => {
   before(async () => {
-    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { idGate: false, now: () => clock.now, numberClock: () => clock.now, draw, snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { now: () => clock.now, numberClock: () => clock.now, draw, snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
   });
   after(() => t.close());
 
@@ -303,12 +302,16 @@ describe("twin rooms on the database give their devices the same frames", () => 
           for (const twin of pair) assert.equal((await saved(twin)).schema_version, old, `${twin.name}: still at the format below the count's just before the fault`);
         }
         const before = pair.map((twin) => actorOf(twin).committed.pub);
+        // Made at the rooms' clock, as a device makes an id just before it sends it. The gate takes ids from the
+        // server's cutover on (server_facts), which this database may hold at today's time, so the clock reads today.
+        clock.now = Math.max(clock.now, Date.now());
+        const SKETCH = uuidv7(clock.now);
         const mocked = when === "before" ? tc.mock.method(SizeGuard.prototype, "check") : tc.mock.method(UndoStacks.prototype, "push");
         await step(pair, async (twin) => {
           mocked.mock.mockImplementationOnce(() => {
             throw new Error("a fault the test throws");
           });
-          twin.sockets.p1.op(sketch);
+          twin.sockets.p1.op(sketchOf(SKETCH));
         });
         mocked.mock.restore();
         for (const [i, twin] of pair.entries()) {

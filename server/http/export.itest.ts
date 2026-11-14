@@ -86,8 +86,7 @@ async function continueAs(t: Engine, client: TestClient, roomId: string, name: s
 describe("room export and import", () => {
   let t: Engine;
   before(async () => {
-    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
-    t = await startEngine({ rooms: { actor: { idGate: false } }, export: { perHour: 3 } });
+    t = await startEngine({ export: { perHour: 3 } });
   });
   after(() => t.close());
 
@@ -231,13 +230,15 @@ describe("room export and import", () => {
     const monsterId = uuidv7();
     const characterId = uuidv7();
     const tokenId = uuidv7();
+    const pageId = uuidv7();
+    const rollId = uuidv7();
     const ops: Record<string, unknown>[] = [
       { t: "monster.create", monster: { id: monsterId, ...blockOf(customMonster(monsterId)) } },
       { t: "character.create", character: { id: characterId, name: "Pip", size: "medium", ownerIds: [pipId], defaultImage: { icon: "lorc/wolf-head", color: "#336699" }, actor } },
       { t: "token.create", token: { id: tokenId, sceneId, kind: "monster", name: "Lurker", size: "medium", x: 2, y: 2, image: { icon: "delapouite/goblin-head", color: "#000000" }, actor: { inline: { ...actor, monsterId } } } },
-      { t: "journal.create", page: { id: "pg1", title: "For Pip", access: { member: pipId }, blocks: [{ id: "abcdefghijkl", text: "Hush.", secret: true }] } },
-      { t: "pin.put", pin: { id: "pin1", sceneId, x: 3, y: 3, color: "#ff8800", visibility: "all", pageId: "pg1" } },
-      { t: "roll.ask", request: { id: "r1", test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 12, dcShown: true, resultShown: true, targets: [{ characterId }] } },
+      { t: "journal.create", page: { id: pageId, title: "For Pip", access: { member: pipId }, blocks: [{ id: "abcdefghijkl", text: "Hush.", secret: true }] } },
+      { t: "pin.put", pin: { id: "pin1", sceneId, x: 3, y: 3, color: "#ff8800", visibility: "all", pageId } },
+      { t: "roll.ask", request: { id: rollId, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 12, dcShown: true, resultShown: true, targets: [{ characterId }] } },
       { t: "room.update", settings: { playersDraw: [pipId] } },
     ];
     for (const op of ops) {
@@ -247,7 +248,7 @@ describe("room export and import", () => {
     const res = await dm.get(`/api/rooms/${roomId}/export`);
     assert.equal(res.statusCode, 200, res.body);
     const room = JSON.parse((await unzip(res.rawPayload)).get("room.json")!.toString()) as RoomExport;
-    assert.ok(room.state.rolls.r1, "the export is the stored state, open requests included");
+    assert.ok(room.state.rolls[rollId], "the export is the stored state, open requests included");
 
     const importer = t.client();
     const imported = await importZip(importer, res.rawPayload);
@@ -258,7 +259,7 @@ describe("room export and import", () => {
     const state = (await copy.snapshot("i")).state as ProjectedState;
     const pip = Object.values(state.members).find((m) => m.name === "Pip")!;
     const [page] = Object.values(state.journal);
-    assert.ok(page && page.id !== "pg1");
+    assert.ok(page && page.id !== pageId);
     assert.deepEqual(page.access, { member: pip.id });
     assert.deepEqual(page.blocks, [{ id: "abcdefghijkl", text: "Hush.", secret: { revealed: false } }]);
     const [pin] = Object.values(state.pins);
@@ -377,7 +378,7 @@ describe("room export and import", () => {
     const fourth = await dm.get(`/api/rooms/${roomId}/export`);
     assert.equal(fourth.statusCode, 429);
     assert.ok(Number(fourth.headers["retry-after"]) > 0);
-    const limited = await startEngine({ rooms: { actor: { idGate: false } }, env: { ROOMS_PER_IP_PER_DAY: "1" } });
+    const limited = await startEngine({ env: { ROOMS_PER_IP_PER_DAY: "1" } });
     try {
       const c = limited.client();
       const { roomId: first } = await c.createRoom("One");
@@ -975,7 +976,7 @@ describe("room export and import", () => {
 describe("an imported log in the archive (shared/logRings.ts)", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ rooms: { actor: { idGate: false } } });
+    t = await startEngine();
   });
   after(() => t.close());
 
@@ -1203,7 +1204,7 @@ describe("an imported log in the archive (shared/logRings.ts)", () => {
 describe("room import with Turnstile", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ rooms: { actor: { idGate: false } }, env: { TURNSTILE_SECRET: "test-secret", TURNSTILE_SITE_KEY: "site-key" } });
+    t = await startEngine({ env: { TURNSTILE_SECRET: "test-secret", TURNSTILE_SITE_KEY: "site-key" } });
   });
   after(() => t.close());
 

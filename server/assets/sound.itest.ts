@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import yauzl from "yauzl";
 import yazl from "yazl";
+import { uuidv7 } from "#shared/ids.ts";
 import { SOUND_LIMITS } from "#shared/limits.ts";
 import type { RoomState, SoundFacts } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
@@ -106,8 +107,7 @@ async function storedState(t: Engine, roomId: string): Promise<RoomState> {
 describe("sound files with the switch on", () => {
   let t: Engine;
   before(async () => {
-    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
-    t = await startEngine({ rooms: { actor: { idGate: false } }, env: { ROOM_SOUND: "1" } });
+    t = await startEngine({ env: { ROOM_SOUND: "1" } });
   });
   after(async () => {
     await t.close();
@@ -235,7 +235,8 @@ describe("sound files with the switch on", () => {
     const s = await uploaded(dm, roomId, bytes);
     const socket = await t.connect(roomId, dm);
     await socket.snapshot("dm");
-    assert.equal((await socket.apply({ t: "sound.create", id: "rain", assetId: s.id, name: "Rain", use: "loop", ms: s.audio!.ms })).rejects, undefined);
+    const rain = uuidv7();
+    assert.equal((await socket.apply({ t: "sound.create", id: rain, assetId: s.id, name: "Rain", use: "loop", ms: s.audio!.ms })).rejects, undefined);
     const player = t.client();
     await player.join(roomId);
     const minted = await dm.post(`/api/rooms/${roomId}/display/code`);
@@ -245,7 +246,7 @@ describe("sound files with the switch on", () => {
     assert.equal((await read(player, s.id, { range: "bytes=0-99" })).statusCode, 404, "in the library only");
     assert.equal((await shown({ range: "bytes=0-99" })).statusCode, 404);
 
-    assert.equal((await socket.apply({ t: "loop.start", id: "loop1", soundId: "rain", volume: 70 })).rejects, undefined);
+    assert.equal((await socket.apply({ t: "loop.start", id: "loop1", soundId: rain, volume: 70 })).rejects, undefined);
     const part = await read(player, s.id, { range: "bytes=100-299" });
     assert.equal(part.statusCode, 206, part.body);
     assert.equal(part.headers["content-type"], "audio/mpeg");
@@ -313,7 +314,7 @@ describe("sound files with the switch on", () => {
   });
 
   test("a live upload must leave 32 MiB of the quota free, checked again at commit, while an image needs only the quota", async () => {
-    const small = await startEngine({ rooms: { actor: { idGate: false } }, env: { ROOM_SOUND: "1", ROOM_QUOTA_MB: "40" } });
+    const small = await startEngine({ env: { ROOM_SOUND: "1", ROOM_QUOTA_MB: "40" } });
     try {
       const dm = small.client();
       const { roomId } = await dm.createRoom();
@@ -384,12 +385,13 @@ describe("sound files with the switch on", () => {
     const rows = { rain: await uploaded(dm, roomId, files.rain), wind: await uploaded(dm, roomId, files.wind), boom: await uploaded(dm, roomId, files.boom) };
     const socket = await t.connect(roomId, dm);
     const sceneId = ((await socket.snapshot("dm")).state as ProjectedState).meta.playerSceneId!;
-    for (const [id, use] of [["rain", "loop"], ["wind", "loop"], ["boom", "effect"]] as const) {
-      assert.equal((await socket.apply({ t: "sound.create", id, assetId: rows[id].id, name: id, use, ms: rows[id].audio!.ms })).rejects, undefined, id);
+    const ids = { rain: uuidv7(), wind: uuidv7(), boom: uuidv7() };
+    for (const [name, use] of [["rain", "loop"], ["wind", "loop"], ["boom", "effect"]] as const) {
+      assert.equal((await socket.apply({ t: "sound.create", id: ids[name], assetId: rows[name].id, name, use, ms: rows[name].audio!.ms })).rejects, undefined, name);
     }
-    const places = { music: null, loops: [{ soundId: "rain", volume: 40 }, { soundId: "wind", volume: 50 }] };
+    const places = { music: null, loops: [{ soundId: ids.rain, volume: 40 }, { soundId: ids.wind, volume: 50 }] };
     assert.equal((await socket.apply({ t: "scene.update", sceneId, patch: { sound: places } })).rejects, undefined);
-    assert.equal((await socket.apply({ t: "loop.start", id: "loop1", soundId: "rain", volume: 70 })).rejects, undefined);
+    assert.equal((await socket.apply({ t: "loop.start", id: "loop1", soundId: ids.rain, volume: 70 })).rejects, undefined);
     socket.close();
     await socket.waitClosed();
 
@@ -398,8 +400,8 @@ describe("sound files with the switch on", () => {
     // A hand-edited room.json: a minute of music for a 10 s file, and another length for Rain. The rows' walks decide both.
     const room = JSON.parse(zip.get("room.json")!.toString()) as { state: RoomState };
     const sounds = room.state.sounds!;
-    sounds.boom = { ...sounds.boom!, use: "music", ms: 60_000 };
-    sounds.rain = { ...sounds.rain!, ms: 2_500 };
+    sounds[ids.boom] = { ...sounds[ids.boom]!, use: "music", ms: 60_000 };
+    sounds[ids.rain] = { ...sounds[ids.rain]!, ms: 2_500 };
     zip.set("room.json", Buffer.from(JSON.stringify(room)));
     const into = await imported(t, await zipOf(zip));
     assert.equal(into.soundsLeftOut, 2, "Wind's file and Boom's use, each once");
@@ -489,7 +491,7 @@ describe("sound files with the switch on", () => {
 
 describe("the sound check off the main thread (D-261102-539)", () => {
   test("while a check hangs, the server keeps answering, and the upload ends busy at the deadline with nothing stored", async () => {
-    const t = await startEngine({ rooms: { actor: { idGate: false } }, env: { ROOM_SOUND: "1" }, assets: { soundCheck: { workerUrl: HANG, deadlineMs: 1_500 } } });
+    const t = await startEngine({ env: { ROOM_SOUND: "1" }, assets: { soundCheck: { workerUrl: HANG, deadlineMs: 1_500 } } });
     try {
       // The DM and a player at one table, behind one address.
       const dm = t.client("2001:db8:5:5::5");
@@ -523,8 +525,8 @@ describe("sound files with the switch off (D-261102-513)", () => {
   let off: Engine;
   let on: Engine;
   before(async () => {
-    off = await startEngine({ rooms: { actor: { idGate: false } } });
-    on = await startEngine({ rooms: { actor: { idGate: false } }, env: { ROOM_SOUND: "1" } });
+    off = await startEngine();
+    on = await startEngine({ env: { ROOM_SOUND: "1" } });
   });
   after(async () => {
     await off.close();
