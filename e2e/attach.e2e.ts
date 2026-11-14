@@ -1484,4 +1484,56 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     for (const id of [keep.gob, keep.bree, keep.horse]) await ops.send({ t: "token.delete", tokenId: id });
     await ops.send({ t: "scene.delete", sceneId: keep.scene });
   });
+
+  /*
+   * Lane lp40fix's steps (lp40fix-): a rider dragged out of a squeezed mount
+   * lands under the finger (LP40-RIDER-1), where the tie between the
+   * mount's equally near stands went top then left and put her a square up
+   * and left of it, and a creature that closes the only way is named in the
+   * note (LP40-MOVE-2), where it named a wall that is not there.
+   */
+  test("lp40fix-1. Pat's finger drags Bree, on the warhorse squeezed in the keep's corridor and dragging a Grappled goblin, onto open floor at 5, 5: she lands under the finger, the goblin in tow; then Wren's drag into room B past an orc standing in the corridor says the orc is in the way (LP40-RIDER-1, LP40-MOVE-2)", async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    const field = { w: 24, h: 14 };
+    const keep = { scene: randomUUID(), horse: randomUUID(), bree: randomUUID(), gob: randomUUID(), wren: randomUUID(), orc: randomUUID() };
+    await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "LP40 keep", bounds: field, fogEnabled: false } });
+    await ops.send({ t: "scene.update", sceneId: keep.scene, patch: { blockMovement: true } });
+    // Live play 39's keep: room A, a corridor one square wide east along row 4 and south down column 13, and room B from row 10.
+    for (const [x, y, w, h] of [[2, 2, 6, 6], [8, 4, 6, 1], [13, 5, 1, 5], [10, 10, 8, 4]] as const) await ops.send({ t: "build.rect", sceneId: keep.scene, terrain: "stone", x, y, w, h });
+    // Where live play 40's chain left them on the row: the warhorse squeezed on 9, 4, Bree on it, the goblin she drags behind on 10, 4.
+    await ops.send({ t: "token.create", token: { id: keep.horse, sceneId: keep.scene, kind: "npc", name: "Warhorse", size: "large", x: 8, y: 3, disposition: "ally", visibility: "all", ownerIds: [run.patId], actor: { inline: actor({ speeds: { walk: 60 } }) } } });
+    await ops.send({ t: "token.move", tokenId: keep.horse, x: 8.5, y: 3.5, squeeze: true });
+    await ops.send({ t: "token.create", token: { id: keep.bree, sceneId: keep.scene, kind: "pc", name: "Bree", size: "medium", x: 9, y: 4, disposition: "ally", visibility: "all", ownerIds: [run.patId], actor: { inline: actor() } } });
+    await ops.send({ t: "token.attach", tokenId: keep.bree, to: keep.horse, kind: "ride", steer: true, x: 9, y: 4, elevation: 0 });
+    await ops.send({ t: "token.create", token: { id: keep.gob, sceneId: keep.scene, kind: "monster", name: "Goblin", size: "medium", x: 10, y: 4, disposition: "hostile", visibility: "all", actor: { inline: actor() } } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: keep.gob }, effect: { id: randomUUID(), key: "grappled" } });
+    await ops.send({ t: "token.attach", tokenId: keep.gob, to: keep.bree, kind: "drag", x: 10, y: 4, elevation: 0 });
+    await ops.send({ t: "room.setPlayerScene", sceneId: keep.scene });
+    await waitFor("Bree and the goblin in Pat's copy", () => (token(patSocket, keep.bree)?.attached && token(patSocket, keep.gob)?.attached && token(patSocket, keep.horse)?.squeeze ? true : null));
+    await waitFor("room B's last square in Pat's copy", () => (Object.values((patSocket.state as RoomState | null)?.buildChunks ?? {}).some((c) => c?.sceneId === keep.scene && c.cells["17,13"] === "stone") ? true : null));
+    await pat.locator(".konvajs-content").first().waitFor();
+    // Pressed on Bree's middle, lifted a little up and left of the middle of 5, 5, as a finger lands.
+    await touchSwipe(patCdp, await pagePoint(pat, field, { x: 9.5, y: 4.5 }), await pagePoint(pat, field, { x: 5.4, y: 5.4 }), { steps: 16, everyMs: 20 });
+    const out = await waitFor("the warhorse out of the corridor", () => {
+      const t = token(patSocket, keep.horse);
+      return t && t.x !== 8.5 ? t : null;
+    });
+    assert.deepEqual([out.x, out.y, out.squeeze], [5, 5, undefined], "full size on the stand that seats Bree on 5, 5");
+    assert.deepEqual([token(patSocket, keep.bree)?.x, token(patSocket, keep.bree)?.y, token(patSocket, keep.bree)?.attached?.to], [5, 5, keep.horse], "Bree under the finger, still riding");
+    await waitFor("the goblin beside Bree", () => (token(patSocket, keep.gob)?.x === 6 && token(patSocket, keep.gob)?.y === 5 && token(patSocket, keep.gob)?.attached?.to === keep.bree ? true : null));
+    await shots.take(pat, "lp40fix-rider-under-the-finger");
+    // An orc stands in the corridor down column 13, so Wren, in room A, has no way into room B.
+    await ops.send({ t: "token.create", token: { id: keep.orc, sceneId: keep.scene, kind: "monster", name: "Orc", size: "medium", x: 13, y: 7, disposition: "hostile", visibility: "all", actor: { inline: actor() } } });
+    await ops.send({ t: "token.create", token: { id: keep.wren, sceneId: keep.scene, kind: "pc", name: "Wren", size: "medium", x: 3, y: 3, disposition: "ally", visibility: "all", ownerIds: [run.patId], actor: { inline: actor() } } });
+    await waitFor("the orc and Wren in Pat's copy", () => (token(patSocket, keep.orc) && token(patSocket, keep.wren) ? true : null));
+    await touchSwipe(patCdp, await pagePoint(pat, field, { x: 3.5, y: 3.5 }), await pagePoint(pat, field, { x: 15.5, y: 12.5 }), { steps: 16, everyMs: 20 });
+    const note = pat.getByRole("status").filter({ hasText: /is in the way/ });
+    await note.waitFor();
+    assert.match(await note.innerText(), /^Orc( \d+)? is in the way\.$/, "the note names the orc, not a wall");
+    await shots.take(pat, "lp40fix-orc-in-the-way");
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
+    await waitFor("Pat back on the party's scene", () => ((patSocket.state as RoomState | null)?.meta.playerSceneId === run.sceneId ? true : null));
+    for (const id of [keep.gob, keep.bree, keep.horse, keep.wren, keep.orc]) await ops.send({ t: "token.delete", tokenId: id });
+    await ops.send({ t: "scene.delete", sceneId: keep.scene });
+  });
 });
