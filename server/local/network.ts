@@ -84,12 +84,12 @@ export function isLoopback(address: string | undefined): boolean {
  * friendly names ("vEthernet (WSL)", "VMware Network Adapter VMnet8",
  * "VirtualBox Host-Only Network", "ZeroTier One [...]"), so those are
  * matched by the words in them. Linux's libvirt, LXC, LXD, Podman and CNI
- * bridges, and macOS's bridge100 and up (Internet Sharing and virtual
- * machines) and Parallels' vnic, have MAC addresses of their own. macOS's
- * bridge0 is the Thunderbolt Bridge, a real cable to another computer, so
- * it stays.
+ * bridges and Parallels' vnic have MAC addresses of their own. macOS's
+ * bridge interfaces stay: bridge0 is the Thunderbolt Bridge, and bridge100
+ * and up serve Internet Sharing, whose devices may be the players, as well
+ * as virtual machines, which no name tells apart.
  */
-const OTHER_NETWORK = /^(docker|br-|veth|vethernet|vmnet|vboxnet|utun|tun|tap|wg|ppp|ipsec|tailscale|zt|virbr|lxcbr|lxdbr|podman|cni|bridge1\d\d|vnic)|vmware|virtualbox|zerotier|wireguard|wintun|tap-windows/i;
+const OTHER_NETWORK = /^(docker|br-|veth|vethernet|vmnet|vboxnet|utun|tun|tap|wg|ppp|ipsec|tailscale|zt|virbr|lxcbr|lxdbr|podman|cni|vnic)|vmware|virtualbox|zerotier|wireguard|wintun|tap-windows/i;
 
 /**
  * Whether an interface may hold the address shown to players (D-261113-085).
