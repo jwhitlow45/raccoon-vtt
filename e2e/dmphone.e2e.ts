@@ -7,6 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import { openGroup } from "./helpers/groups.ts";
 import { ConsoleWatch, OpSocket, openSceneGroup, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { boardLabel, numberScope, ownLabel, previewNumbers } from "../shared/numbering.ts";
 
 /**
  * A DM running a session from a phone, after the whole-app design pass
@@ -50,6 +51,23 @@ const run = {
   /** A creature concentrating on Hex, whose damage brings up a concentration check for the DM. */
   hag: "",
 };
+
+/**
+ * A creature's name as the DM's board and its bar read it now. The steps
+ * make a Scout, a Brute or a Zombie again after deleting the last, and the
+ * table never gives a deleted creature's number again, so from the second
+ * on they read "Scout 2", "Brute 2" and on.
+ */
+function boardName(tokenId: string): string {
+  const state = dmSocket.state!;
+  const t = state.tokens[tokenId]!;
+  return boardLabel(previewNumbers(state, numberScope(state, t)), t, "dm");
+}
+
+/** A creature's name as a trap's toast reads it for the DM: the log's, with the table's number alone. */
+function toastName(tokenId: string): string {
+  return ownLabel(null, dmSocket.state!.tokens[tokenId]!);
+}
 
 async function hurtHag(): Promise<void> {
   await ops.send({ t: "actor.hp", target: { tokenId: run.hag }, change: { kind: "damage", amount: 1 } });
@@ -755,7 +773,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       const p = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
       assert.equal(await hit(dm, p), "CANVAS", `${label}: the zombie is under something`);
       await dm.touchscreen.tap(p.x, p.y);
-      const bar = dm.getByRole("dialog", { name: "Zombie actions" });
+      const bar = dm.getByRole("dialog", { name: `${boardName(id)} actions` });
       await bar.waitFor();
       // Locked and Duplicate show their words on touch, which leaves their line room for the trash can and not for "Sure?".
       const trash = bar.getByRole("button", { name: "Delete", exact: true });
@@ -906,7 +924,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await dm.waitForTimeout(300);
       // Not the DM's own Set it off, which toasts nothing: the scout walks onto the plate.
       await ops.send({ t: "token.move", tokenId: walker, x: cell.x, y: cell.y });
-      const toast = dm.locator("[data-toast]").filter({ hasText: "Needle Plate went off: Scout." }).first();
+      const toast = dm.locator("[data-toast]").filter({ hasText: `Needle Plate went off: ${toastName(walker)}.` }).first();
       await toast.waitFor();
       const t = await rectOf(toast);
       const head = await rectOf(pane.locator("[data-sheet-grab]").first());
@@ -976,7 +994,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
         assert.ok(await wholeInReach(head.locator("strong").first()), `${label}: the pane's title is covered`);
         // A toast still shows over the pane, under its header.
         await ops.send({ t: "token.move", tokenId: walker, x: cell.x, y: cell.y });
-        const toast = dm.locator("[data-toast]").filter({ hasText: "Tripwire went off: Scout." }).first();
+        const toast = dm.locator("[data-toast]").filter({ hasText: `Tripwire went off: ${toastName(walker)}.` }).first();
         await toast.waitFor();
         await dm.waitForTimeout(200);
         assert.ok(await wholeInReach(toast.getByRole("button", { name: "Save and damage", exact: true })), `${label}: the toast's Save and damage is covered`);
@@ -1069,7 +1087,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       const whisper = dm.locator("[data-toast]").filter({ hasText: "Behind you!" });
       await whisper.first().waitFor();
       await ops.send({ t: "token.move", tokenId: walker, x: cell.x, y: cell.y });
-      const toast = dm.locator("[data-toast]").filter({ hasText: "Tripwire went off: Scout." }).first();
+      const toast = dm.locator("[data-toast]").filter({ hasText: `Tripwire went off: ${toastName(walker)}.` }).first();
       await toast.waitFor();
       await dm.waitForTimeout(200);
       const save = toast.getByRole("button", { name: "Save and damage", exact: true });
@@ -1123,7 +1141,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       const whisper = dm.locator("[data-toast]").filter({ hasText: "Over here!" });
       await whisper.waitFor();
       await ops.send({ t: "token.move", tokenId: walker, x: cell.x, y: cell.y });
-      const toast = dm.locator("[data-toast]").filter({ hasText: "Snare went off: Scout." }).first();
+      const toast = dm.locator("[data-toast]").filter({ hasText: `Snare went off: ${toastName(walker)}.` }).first();
       await toast.waitFor();
       const save = toast.getByRole("button", { name: "Save and damage", exact: true });
       await save.focus();
@@ -1166,7 +1184,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       // The trap's toast and its card come together. With no moment to wait for the card's measure, the toast stays at the notices' top, over the card, as a card measured late leaves it (review LP18-TO-5 places it under the card otherwise).
       await dm.evaluate(() => ((globalThis as unknown as { rvttToastCardMs?: number }).rvttToastCardMs = 0));
       await springs();
-      const toast = dm.locator("[data-toast]").filter({ hasText: "Tripstone went off: Scout." }).first();
+      const toast = dm.locator("[data-toast]").filter({ hasText: `Tripstone went off: ${toastName(walker)}.` }).first();
       await toast.waitFor();
       await dm.waitForTimeout(400);
       await whisperFromPat("Behind you!");
@@ -1249,7 +1267,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       const keptBefore = await rectOf(kept);
       await dm.evaluate(() => delete (globalThis as unknown as { rvttToastCardMs?: number }).rvttToastCardMs);
       await ops.send({ t: "token.move", tokenId: walker, x: cell.x, y: cell.y });
-      const toast = dm.locator("[data-toast]").filter({ hasText: "Stepstone went off: Scout." }).first();
+      const toast = dm.locator("[data-toast]").filter({ hasText: `Stepstone went off: ${toastName(walker)}.` }).first();
       const card = dm.getByRole("group", { name: "Stepstone went off" }).first();
       await toast.waitFor();
       await card.waitFor();
@@ -1350,7 +1368,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await ops.send({ t: "token.create", token: { id: brute, sceneId: run.sceneId, kind: "monster", name: "Brute", x: cell.x, y: cell.y, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
     await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Needle Plate", zone: { cells: [{ x: 1, y: 1, w: 1, h: 1 }] }, rig } });
     await waitFor("the brute and the trap in the DM's view", () => (dmSocket.state?.tokens[brute] && dmSocket.state.traps[trapId] ? true : null));
-    const bar = dm.getByRole("dialog", { name: "Brute actions" });
+    const bar = dm.getByRole("dialog", { name: `${boardName(brute)} actions` });
     try {
       await setUp({ width: 390, height: 844, scale: 1 });
       const p = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
@@ -1398,12 +1416,12 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await ops.send({ t: "token.create", token: { id: walker, sceneId: run.sceneId, kind: "monster", name: "Scout", x: 1, y: 4, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
     await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Needle Plate", zone: { cells: [{ x: 1, y: 1, w: 1, h: 1 }] }, rig } });
     await waitFor("the brute, the scout and the trap in the DM's view", () => (dmSocket.state?.tokens[brute] && dmSocket.state.tokens[walker] && dmSocket.state.traps[trapId] ? true : null));
-    const bar = dm.getByRole("dialog", { name: "Brute actions" });
+    const bar = dm.getByRole("dialog", { name: `${boardName(brute)} actions` });
     try {
       await setUp({ width: 390, height: 844, scale: 1 });
       // A move onto the plate toasts the DM, with Save and damage, and brings its card.
       await ops.send({ t: "token.move", tokenId: walker, x: 1, y: 1 });
-      const toast = dm.locator("[data-toast]").filter({ hasText: "Needle Plate went off: Scout." }).first();
+      const toast = dm.locator("[data-toast]").filter({ hasText: `Needle Plate went off: ${toastName(walker)}.` }).first();
       await toast.waitFor();
       await dm.getByRole("group", { name: "Needle Plate went off" }).first().waitFor({ state: "attached" });
       await dm.waitForTimeout(900);
@@ -1463,7 +1481,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await setUp({ width: 390, height: 844, scale: 1 });
     const at = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
     assert.equal(await hit(dm, at), "CANVAS", "the brute is under something");
-    const bar = dm.getByRole("dialog", { name: "Brute actions" });
+    const bar = dm.getByRole("dialog", { name: `${boardName(id)} actions` });
     return {
       id,
       at,
