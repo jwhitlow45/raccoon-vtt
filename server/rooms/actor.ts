@@ -28,7 +28,7 @@ import { renewOpenDisplay } from "../auth/displaySessions.ts";
 import { checkDisplayGrant, checkGrant } from "../auth/grants.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { roomStoredBytes } from "../assets/quota.ts";
-import { SnapshotBudget, TokenBucket, type Clock } from "./budgets.ts";
+import { OP_RATE, SnapshotBudget, TokenBucket, type Clock } from "./budgets.ts";
 import { CloseWrites } from "./closeWrites.ts";
 import { CLOSE, clientKey, sessionOfKey, type ClientKey, type Connection } from "./connection.ts";
 import { counted } from "./counted.ts";
@@ -599,6 +599,8 @@ export class RoomActor {
   #reading: AskRead | null = null;
   #sizes: SizeGuard;
   #roomRate: TokenBucket;
+  /** Each player member's op rate across their sockets, made at their first op (#rateOf). */
+  #memberRates = new Map<string, TokenBucket>();
   /** Each member's budget of block saves (docs/design/design-v1-companion-stat-blocks.md 3.5), made at their first save. */
   #blockSaves = new Map<string, TokenBucket>();
   /** Each member's budget of tagged ops (docs/design/design-v1-dice.md 4.4), by role, made at their first. */
@@ -919,7 +921,7 @@ export class RoomActor {
       // hold the pool connections this room's commits need. `busy` spends
       // no op number, so answering it ahead of the sequence checks is safe.
       // The op still counts toward the abuse rule, as it would in the queue.
-      if (!conn.opRate.wouldAllow() || this.#roomRate.tokens < 1) {
+      if (!conn.opRate.wouldAllow() || this.#rateOf(conn).tokens < 1) {
         if (conn.opRate.count()) conn.close(CLOSE.abuse, "op rate");
         else conn.send({ t: "retry", n, code: "busy" });
         return;
@@ -1510,7 +1512,7 @@ export class RoomActor {
     const n = cmd.n;
     // Ahead of every count it takes, and only for an op the rates below will let through, so one answered `busy` runs no
     // step. The walk's number and time are its arrival's (#moment), read before the steps' work.
-    if (n > wm.committed && n === wm.staged + 1 && conn.opRate.wouldAllow() && this.#roomRate.tokens >= 1 && this.#walkNeedsSteps(cmd.raw)) {
+    if (n > wm.committed && n === wm.staged + 1 && conn.opRate.wouldAllow() && this.#rateOf(conn).tokens >= 1 && this.#walkNeedsSteps(cmd.raw)) {
       if (this.#opts.walkCloses) {
         // The old order, for the tests that compare the two: the walk comes back to the front once the commit lands.
         this.#queue.unshift(cmd);
@@ -1537,7 +1539,7 @@ export class RoomActor {
       conn.send({ t: "retry", n, code: "gap" });
       return;
     }
-    if (!conn.opRate.allow() || !this.#roomRate.take()) {
+    if (!conn.opRate.allow() || !this.#rateOf(conn).take()) {
       conn.send({ t: "retry", n, code: "busy" });
       return;
     }
@@ -1572,13 +1574,13 @@ export class RoomActor {
     if (clientOp.t === "build.ask") {
       // An ask reads each op it carries as the op would apply, so it costs the sender's rate and the room's one op apiece (MD4-ASTRA-7).
       const more = clientOp.ops.length - 1;
-      if (more > 0 && (!conn.opRate.wouldAllow(more) || this.#roomRate.tokens < more)) {
+      if (more > 0 && (!conn.opRate.wouldAllow(more) || this.#rateOf(conn).tokens < more)) {
         conn.send({ t: "retry", n, code: "busy" });
         return;
       }
       if (more > 0) {
         conn.opRate.allow(more);
-        this.#roomRate.take(more);
+        this.#rateOf(conn).take(more);
       }
       this.#answerAsk(key, wm, n, clientOp, cmd.group, viewer);
       return;
@@ -1920,6 +1922,21 @@ export class RoomActor {
   #shows(viewer: Viewer): (tokenId: string) => boolean {
     const state = this.#staged.state;
     return (id) => viewer.role === "dm" || projectEntity(keys.token(id), state, viewer, { sceneId: state.meta.playerSceneId }) !== null;
+  }
+
+  /**
+   * The bucket an op spends beside its socket's: a player's spends their
+   * member's own, at one socket's numbers, and the DM's and the server's
+   * spend the room's.
+   */
+  #rateOf(conn: Connection): TokenBucket {
+    if (conn.viewer.role !== "player") return this.#roomRate;
+    let bucket = this.#memberRates.get(conn.viewer.memberId);
+    if (!bucket) {
+      bucket = new TokenBucket(OP_RATE.perSec, OP_RATE.burst, this.#opts.now);
+      this.#memberRates.set(conn.viewer.memberId, bucket);
+    }
+    return bucket;
   }
 
   #blockSaveBudget(memberId: string): TokenBucket {

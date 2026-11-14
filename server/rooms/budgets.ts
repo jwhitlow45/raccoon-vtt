@@ -113,6 +113,9 @@ export class FrameBudget {
   }
 }
 
+/** One socket's op rate, and a player member's across their sockets (actor.ts #rateOf). */
+export const OP_RATE = { perSec: 20, burst: 60 } as const;
+
 /**
  * The op rate of one socket (design 10.4): 20 per second with a burst of 60
  * answers `busy` beyond, and a socket that stays over three times its limit
@@ -128,8 +131,8 @@ export class OpRate {
   #now: Clock;
 
   constructor(now: Clock = Date.now, opts: { perSec?: number; burst?: number; holdMs?: number } = {}) {
-    const perSec = opts.perSec ?? 20;
-    this.#bucket = new TokenBucket(perSec, opts.burst ?? 60, now);
+    const perSec = opts.perSec ?? OP_RATE.perSec;
+    this.#bucket = new TokenBucket(perSec, opts.burst ?? OP_RATE.burst, now);
     this.#abuseAt = perSec * 3;
     this.#sustained = new SustainedViolation(opts.holdMs ?? 10_000, now);
     this.#now = now;

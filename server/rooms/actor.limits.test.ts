@@ -5,7 +5,7 @@ import { FAR } from "#shared/limits.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { scene, token } from "#shared/testutil.ts";
 import { farRoomBytes } from "./sizeGuard.ts";
-import { scopeActor, scopeFixture } from "./undoScopeTesting.ts";
+import { scopeActor, scopeFixture, until, type ScopeClient } from "./undoScopeTesting.ts";
 
 /*
  * How the room's ops meet the byte lines under player limits (actor.ts
@@ -90,5 +90,41 @@ describe("moving the players past the near line", () => {
     assert.equal(answer(await dm.send({ t: "room.setPlayerScene", sceneId: "small" })), "taken");
     assert.match(answer(await dm.send({ t: "room.setPlayerScene", sceneId: "large" })), /^quota: /);
     assert.equal(h.actor.committed.state.meta.playerSceneId, "small");
+  });
+});
+
+describe("the op rates", () => {
+  /** The answer to an op sent at the client's next number: "taken", "busy", or a refusal. */
+  async function sent(client: ScopeClient, op: unknown): Promise<string> {
+    const n = ++client.n;
+    await client.actor.op(client.conn, n, op);
+    return until(() => {
+      if (client.sent.some((m) => m.t === "retry" && m.n === n && m.code === "busy")) {
+        // Sent again at the same number, as a client does after `busy`.
+        client.n--;
+        return "busy";
+      }
+      const event = client.sent.find((m) => m.t === "ev" && (m.acks?.includes(n) || m.rejects?.some((r) => r.n === n)));
+      return event ? answer(event as never) : undefined;
+    }, `the answer to ${n}`);
+  }
+
+  test("a player's ops spend their member's bucket across their sockets, at one socket's numbers, and the room's bucket answers the DM alone", async (t) => {
+    const f = scopeFixture();
+    // Clocks that stand still, so no bucket refills. The room's burst is two.
+    const still = () => 0;
+    const h = await scopeActor(t, f.state, { roomOpsPerSec: 1, now: still });
+    const dm = await h.connect(f.dm, "dm", still);
+    const laptop = await h.connect(f.player, "player", still);
+    const phone = await h.connect(f.player, "player", still);
+    const chat = { t: "log.chat", text: "hi" };
+    assert.deepEqual([await sent(dm, chat), await sent(dm, chat), await sent(dm, chat)], ["taken", "taken", "busy"], "the room's two, then busy");
+    const answers: string[] = [];
+    for (let i = 0; i < 40; i++) answers.push(await sent(laptop, { t: "token.move", tokenId: f.pc, x: 8 + (i % 2), y: 3 }));
+    for (let i = 0; i < 20; i++) answers.push(await sent(phone, { t: "token.move", tokenId: f.pc, x: 8 + (i % 2), y: 4 }));
+    assert.deepEqual(answers, Array(60).fill("taken"), "a player's sixty across two sockets, the room's bucket spent");
+    assert.equal(await sent(phone, chat), "busy", "the phone's own socket has room, the member's bucket none");
+    const other = await h.connect(f.unrelated, "player", still);
+    assert.equal(await sent(other, chat), "taken", "another player's own bucket");
   });
 });
