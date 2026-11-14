@@ -21,13 +21,20 @@ export type Secrets = z.infer<typeof SecretsFile>;
 
 export class SecretsDamaged extends Error {}
 
-export async function loadSecrets(file: string, platform: Platform): Promise<Secrets> {
+/**
+ * `clusterExists` says the data folder already holds a database. Its
+ * password is in secrets.json alone, so a missing file there stops the start
+ * as a damaged one does, and nothing new is written: a new password could
+ * never log in, and a new key would hide every player link.
+ */
+export async function loadSecrets(file: string, platform: Platform, clusterExists = false): Promise<Secrets> {
   let text: string | null = null;
   try {
     text = await readFile(file, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
+  if (text === null && clusterExists) throw new SecretsDamaged("secrets.json can't be read");
   if (text === null) {
     const made: Secrets = { roomSecretKey: randomBytes(32).toString("base64"), databasePassword: randomBytes(32).toString("hex") };
     await writeDurable(file, `${JSON.stringify(made)}\n`, { mode: 0o600 });

@@ -42,3 +42,11 @@ test("a damaged file stops the start and is left as it was", async () => {
   await writeFile(file, "not json");
   await assert.rejects(loadSecrets(file, platform), SecretsDamaged);
 });
+
+test("a missing file beside an existing database stops the start the same way, and nothing is written", async () => {
+  const file = join(dir, "missing.json");
+  await assert.rejects(loadSecrets(file, platform, true), (err: Error) => err instanceof SecretsDamaged && err.message === "secrets.json can't be read");
+  await assert.rejects(readFile(file, "utf8"), { code: "ENOENT" });
+  // With no database yet, it is a first start.
+  assert.ok(await loadSecrets(file, platform, false));
+});
