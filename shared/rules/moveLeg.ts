@@ -1,4 +1,4 @@
-import { attaches, draggedWalkFull, floorsOps, followsInSingleFile, followsInSingleFileOnHexes, hiddenTowStands, seatsApart, seatsApartOnHexes, seatsFromSnappedFull, seatsOnSqueeze, walksRoutes } from "../migrate.ts";
+import { attaches, draggedWalkFull, floorsOps, followsHexByHex, followsInSingleFile, followsInSingleFileOnHexes, hiddenTowStands, seatsApart, seatsApartOnHexes, seatsFromSnappedFull, seatsOnSqueeze, walksRoutes } from "../migrate.ts";
 import type { RoomState, Token, Viewer } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
@@ -12,7 +12,7 @@ import { sameScene } from "./floors.ts";
 import { climbKeepsSqueeze } from "./floorLinks.ts";
 import { footing, footprintGround } from "./heights.ts";
 import { groundUnder, hexFullStop, landing, legSpots, legStop, offGridWallThrough, storedBuild, walkEnd, type MovingToken } from "./movement.ts";
-import { fileRoutes, followerTrace, hexFileClasses, hexFileRoutes, pieceReach, routeWalkers, walkSqueezes, type RoutePoint, type WalkTrace } from "./route.ts";
+import { fileRoutes, followerTrace, hexFileClasses, hexFileRoutes, latestAlong, pieceReach, routeWalkers, walkSqueezes, type FileAlong, type FilePoint as AlongPoint, type RoutePoint, type WalkTrace } from "./route.ts";
 import { ownEntry } from "../records.ts";
 
 /**
@@ -53,6 +53,14 @@ export type MovedToken = {
   squeezed?: true;
   /** Whether it walks in single file behind its group's lead (`singleFile`), so a trap's cut of the walk keeps its own walk (traps.ts cutOp). */
   file?: true;
+  /**
+   * How far along its group's lead's walk each point of `route` is reached,
+   * where the walk goes a point a hex (route.ts FileAlong): on hexes from
+   * op version 62 for a walk in single file, and for what follows one by
+   * it, so a trap's step and an area's sweep read each such walk at the
+   * lead's moments. None where `route` has a point per point of the lead's.
+   */
+  along?: readonly FileAlong[];
 };
 
 /**
@@ -299,10 +307,12 @@ function followGroup(before: RoomState, lead: MovedToken, members: readonly stri
  * from op version 38 on squares (route.ts fileRoutes, D-261101-250), where
  * every dragged member of the group goes, and from op version 51 on hexes
  * (route.ts hexFileRoutes, D-261107-172), where those of one hex go as each
- * class of them decides (route.ts hexFileClasses, D-261107-252). The
- * public ones go first. Null where they follow by their places.
+ * class of them decides (route.ts hexFileClasses, D-261107-252), and from
+ * op version 62 hex by hex from the hex the lead starts on (migrate.ts
+ * followsHexByHex). The public ones go first. Null where they follow by
+ * their places.
  */
-function singleFile(before: RoomState, lead: MovedToken, members: readonly string[], pub: (id: string) => boolean, env: Versioned): Map<string, Point[]> | null {
+function singleFile(before: RoomState, lead: MovedToken, members: readonly string[], pub: (id: string) => boolean, env: Versioned): Map<string, FilePoint[]> | null {
   if (lead.squeezed !== true || lead.how !== "walk" || lead.carriedBy !== undefined) return null;
   const scene = ownEntry(before.scenes, lead.from.sceneId);
   const standing = ownEntry(before.tokens, lead.tokenId);
@@ -315,7 +325,7 @@ function singleFile(before: RoomState, lead: MovedToken, members: readonly strin
   const rest = dragged.filter((t) => !pub(t.id));
   if (!isHex(g)) return fileRoutes(standing, lead.route, [shown, rest]);
   const classes = hexFileClasses(shown, rest);
-  return classes[0].length > 0 || classes[1].length > 0 ? hexFileRoutes(g, standing, lead.route, classes) : null;
+  return classes[0].length > 0 || classes[1].length > 0 ? hexFileRoutes(g, standing, lead.route, classes, followsHexByHex(env.opVersion)) : null;
 }
 
 /** Where each passenger of a holder sits apart from the others at point `i` of the holder's walk, by id, or null at a point where each takes its nearest alone. */
@@ -363,13 +373,19 @@ function endSeatsApart(before: RoomState, holder: MovedToken, members: readonly 
  * share of the way along its piece, and this walk stops as far along its
  * own, on its own lattice, short rather than past it. Taken whole where
  * the holder walked its whole walk. On hexes the share counts hex steps,
- * the holder in the file being of one hex as the creature is.
+ * the holder in the file being of one hex as the creature is. From op
+ * version 62 each walk on hexes goes a point a hex (route.ts FileAlong),
+ * each behind the one ahead of it by the hexes between their starts, so
+ * the same index is as many hex steps along, short of the holder's. Such
+ * walks differ in length, so each is read held at its end.
  */
-function behindStop(g: Grid, member: MovingToken, own: readonly FilePoint[], holderOwn: readonly Point[], walked: readonly Point[]): readonly FilePoint[] {
+function behindStop(g: Grid, member: MovingToken, mine: readonly FilePoint[], theirs: readonly FilePoint[], walked: readonly Point[]): readonly FilePoint[] {
   const m = walked.length - 1;
-  if (m === 0) return own.slice(0, 1);
+  if (m === 0) return mine.slice(0, 1);
+  const own = held(mine, walked.length)!;
+  const holderOwn = held(theirs, walked.length)!;
   const end = walked[m]!;
-  if (m === holderOwn.length - 1 && end.x === holderOwn[m]!.x && end.y === holderOwn[m]!.y) return own;
+  if (m === holderOwn.length - 1 && end.x === holderOwn[m]!.x && end.y === holderOwn[m]!.y) return mine;
   if (isHex(g)) {
     const hexOf = (p: Point) => tokenRefHex(g, { ...member, x: p.x, y: p.y });
     const whole = hexDistance(g, hexOf(holderOwn[m - 1]!), hexOf(holderOwn[m]!));
@@ -389,8 +405,8 @@ function behindStop(g: Grid, member: MovingToken, own: readonly FilePoint[], hol
   return [...own.slice(0, m), at];
 }
 
-/** A point of a walk in single file, at the height a trap's cut read it at where it carries one (`TRAP_CUT`). */
-type FilePoint = Point & { elevation?: number };
+/** A point of a walk in single file, at the height a trap's cut read it at where it carries one (`TRAP_CUT`), and how far along the lead's walk it is reached where it goes hex by hex. */
+type FilePoint = AlongPoint & { elevation?: number };
 
 /**
  * How a member follows: its single-file walk where it has one, else on a
@@ -417,11 +433,14 @@ function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: 
   const oy = member.y - holder.from.y;
   // A climb takes what sits on it up or down with it and lets go of what it drags, as a teleport does (docs/design/design-v1-floors.md phase 2, 3).
   if ((holder.how === "teleport" || holder.how === "climb") && !onHolder(kind)) return null;
-  // In single file, or on a trap's cut where the trap step judged it, its own walk, whatever its link (review FU45B-ASTRA-11).
-  const own = how.file ?? how.kept;
+  // In single file, or on a trap's cut where the trap step judged it, its own walk, whatever its link (review FU45B-ASTRA-11), held
+  // at its end past it: a walk hex by hex (route.ts FileAlong) may have fewer points than a holder's that goes so too.
+  const own = held(how.file ?? how.kept, holder.route.length);
   // Its holder's walk, held at its last point where the private pass stopped it short, so a walk of its own runs to its end: the
   // landing of one players see never reads the walls that stopped a holder they cannot see (review FU45B-ASTRA-12).
-  const along = own && own.length > holder.route.length ? [...holder.route, ...Array.from({ length: own.length - holder.route.length }, () => holder.route[holder.route.length - 1]!)] : holder.route;
+  const along = held(holder.route, own?.length ?? 0)!;
+  // How far along the lead's walk each point is reached, where a walk of its own or its holder's goes hex by hex.
+  const reached = own?.some((p) => p.along) ? alongOf(own) : holder.along ? held(holder.along, along.length) : undefined;
   if (holder.how === "scene" || onHolder(kind)) {
     // What sits on its holder keeps its height above it at every point, and a scene change takes all by the holder's change. On a
     // cut it lands where the stop judged it, and a holder players cannot see stops where that seat holds (traps.ts seatingWalk).
@@ -434,7 +453,7 @@ function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: 
     });
     if (!onHolder(kind) && floorChange(before, member, holder, env)) route[route.length - 1] = draggedOntoFloor(before.buildChunks, member, route[route.length - 1]!, holder.to.sceneId);
     const last = route[route.length - 1]!;
-    return { tokenId: member.id, from, to: { sceneId: holder.to.sceneId, ...last }, route, trace: followerTrace(member, route), how: holder.how, carriedBy: holder.tokenId, pass };
+    return { tokenId: member.id, from, to: { sceneId: holder.to.sceneId, ...last }, route, trace: followerTrace(member, route), how: holder.how, carriedBy: holder.tokenId, pass, ...(reached ? { along: reached } : {}) };
   }
   const chunks = before.buildChunks;
   // A holder walking off its own mount walks on the ground once clear of it (attach.ts walkerFor), and so does what it drags:
@@ -447,17 +466,59 @@ function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: 
     const ground = groundUnder(chunks, self, { x, y });
     return grounded ? ground : Math.max(member.elevation + (holderElevation - holder.from.elevation), ground);
   };
+  // The holder where each point is reached: at the same index, or on a walk hex by hex where the lead's walk is as far along, and
+  // where the walk ends as the holder ends it, since what it drags takes its holder's change all the way.
+  const final = along.length - 1;
+  const holderAt = reached && own?.some((p) => p.along) ? along.map((p, i) => (i === final ? p : { ...p, elevation: heightAlong(holder, reached[i]!) })) : along;
   let route: RoutePoint[] = [{ x: member.x, y: member.y, elevation: member.elevation }];
   // Its own walk where it has one, else the holder's offset by its place.
-  for (const [i, p] of along.entries()) {
+  for (const [i, p] of holderAt.entries()) {
     if (i === 0) continue;
     const at = own?.[i] ?? { x: p.x + ox, y: p.y + oy };
     // On a trap's cut, at the height the trap step had it, which a creature that has not moved yet keeps (review FU45B-ASTRA-06).
     route.push({ x: at.x, y: at.y, elevation: own?.[i]?.elevation ?? elevationAt(at.x, at.y, p.elevation) });
   }
-  if (!isPublic && byPlayer && holder.how === "walk") route = stoppedAtWalls(before, member, route, along, elevationAt, env, how.stands === true);
+  if (!isPublic && byPlayer && holder.how === "walk") route = stoppedAtWalls(before, member, route, holderAt, elevationAt, env, how.stands === true);
   const last = route[route.length - 1]!;
-  return { tokenId: member.id, from, to: { sceneId: member.sceneId, ...last }, route, trace: followerTrace(member, route), how: holder.how, carriedBy: holder.tokenId, pass, ...(how.file ? { file: true as const } : {}) };
+  return {
+    tokenId: member.id,
+    from,
+    to: { sceneId: member.sceneId, ...last },
+    route,
+    trace: followerTrace(member, route),
+    how: holder.how,
+    carriedBy: holder.tokenId,
+    pass,
+    ...(how.file ? { file: true as const } : {}),
+    ...(reached ? { along: reached.slice(0, route.length) } : {}),
+  };
+}
+
+/** How far along the lead's walk each point of a walk hex by hex is reached, a point a stop put off its own points taking the one before. */
+function alongOf(walk: readonly FilePoint[]): FileAlong[] {
+  const out: FileAlong[] = [];
+  for (const p of walk) out.push(p.along ?? out[out.length - 1] ?? [0, 0, 1]);
+  return out;
+}
+
+/** `walk` held at its last point up to `length` points, or as it is where it has as many. */
+function held<T>(walk: readonly T[] | undefined, length: number): readonly T[] | undefined {
+  if (!walk || walk.length >= length) return walk;
+  return [...walk, ...Array.from({ length: length - walk.length }, () => walk[walk.length - 1]!)];
+}
+
+/**
+ * A holder's height where its group's lead's walk is `at` (route.ts
+ * FileAlong): on a walk of its own hex by hex at its latest point reached
+ * by then, else between the points of the lead's piece by its share, as a
+ * walk's spots rise between them.
+ */
+function heightAlong(holder: MovedToken, at: FileAlong): number {
+  const route = holder.route;
+  if (holder.along) return route[Math.min(route.length - 1, latestAlong(holder.along.map((a) => ({ along: a })), at))]!.elevation;
+  const a = route[Math.min(at[0], route.length - 1)]!;
+  const b = route[Math.min(at[0] + 1, route.length - 1)]!;
+  return a.elevation + ((b.elevation - a.elevation) * at[1]) / (at[2] || 1);
 }
 
 /** A holder's move to another floor of the member's scene, by an op of the floors' version (migrate.ts floorsOps). */
@@ -556,7 +617,9 @@ export function checkSetReach(before: RoomState, token: Pick<Token, "id" | "scen
   // Infinite feet per square make every rise no reach.
   const perSquare = role === "player" && ownEntry(before.scenes, token.sceneId)?.fogEnabled === true ? Infinity : feetPerCell;
   let reach = 0;
-  for (let i = 1; i < route.length; i++) reach += Math.max(...walks.map((w) => pieceReach(w.route[i - 1]!, w.route[i]!, perSquare)));
+  // A walk in single file hex by hex has more points than the lead's (route.ts FileAlong), and its legs past them count too.
+  const legs = Math.max(...walks.map((w) => w.route.length));
+  for (let i = 1; i < legs; i++) reach += Math.max(...walks.map((w) => (i < w.route.length ? pieceReach(w.route[i - 1]!, w.route[i]!, perSquare) : 0)));
   return reach;
 }
 

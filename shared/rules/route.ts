@@ -192,6 +192,49 @@ export function fileShift(file: ReadonlyMap<string, readonly Point[]>, memberOf:
 }
 
 /**
+ * How far along its holder's walk a point of a walk in single file on hexes
+ * is reached, from op version 62 (`hexFileRoutes`, migrate.ts
+ * followsHexByHex): the holder's piece, 0 the first, and the share `k / n`
+ * of it walked by then, which a walk's spots order as progress
+ * (`WalkSpot`). Such a walk has a point a hex and so more points than the
+ * holder's walk, and whatever reads its points at a moment of the holder's
+ * walk, as a trap's step and an area's sweep do, finds them by this.
+ */
+export type FileAlong = readonly [piece: number, k: number, n: number];
+
+/** A point of a walk in single file, with how far along its holder's walk it is reached on hexes from op version 62 (`FileAlong`). */
+export type FilePoint = Point & { along?: FileAlong };
+
+/** Orders two `FileAlong` exactly: piece first, then `k / n` by cross-multiplying, as traps.ts compareProgress orders a walk's spots. */
+export function compareAlong(a: FileAlong, b: FileAlong): number {
+  if (a[0] !== b[0]) return a[0] - b[0];
+  const an = a[2] === 0 ? 1 : a[2];
+  const bn = b[2] === 0 ? 1 : b[2];
+  return a[1] * bn - b[1] * an;
+}
+
+/** The index of the latest of `walk`'s points reached at or before `at`, the start where none is: its points run in order along. */
+export function latestAlong(walk: readonly { along?: FileAlong | undefined }[], at: FileAlong): number {
+  let found = 0;
+  for (let j = 1; j < walk.length; j++) {
+    const own = walk[j]!.along;
+    if (!own || compareAlong(own, at) > 0) break;
+    found = j;
+  }
+  return found;
+}
+
+/** `fileShift` for the walks hex by hex: each member where its own walk has it at `at` along the holder's walk (`FileAlong`), and by `otherwise` with none. */
+export function fileShiftAlong(file: ReadonlyMap<string, readonly FilePoint[]>, memberOf: (id: string) => Point | undefined, at: FileAlong, otherwise: Point): (id: string) => Point {
+  return (id) => {
+    const walk = file.get(id);
+    const start = memberOf(id);
+    const there = walk?.[latestAlong(walk, at)];
+    return there && start ? { x: there.x - start.x, y: there.y - start.y } : otherwise;
+  };
+}
+
+/**
  * How far a group member stands from its place offset from the lead while
  * the lead's stored box is at `at`, squeezed there or not: by as much as
  * the token sitting on the lead it goes with moves seat there (attach.ts
@@ -342,14 +385,68 @@ export function hexFileClasses<T extends PlacedToken>(shown: readonly T[], hidde
  * last (moveLeg.ts follow reads past a shorter walk by the creature's
  * place). `lead` is the holder as it stands where the walk starts and
  * `points` its walk's points, its start first.
+ *
+ * With `byHex`, from op version 62 (LP40-HEXFILE-1, migrate.ts
+ * followsHexByHex), each creature walks from its own hex onto the holder's
+ * file hex where the walk starts, then along the hex lines the holder's
+ * reference hex walked, and its walk has a point a hex, each with how far
+ * along the holder's walk it is reached (`FileAlong`), and at least one per
+ * point of the holder's walk, holding its end. Each one after the first
+ * goes onto that start by the nearest hex one ahead of it in the file
+ * starts on, where that is nearer than the holder's, and that one's way on,
+ * so a second goblin in a corridor that zigzags walks the corridor's hexes
+ * behind the first, not the straight line two hexes long that cuts its
+ * rock, while two on either side of a holder in the open each go straight
+ * to it. A walk that skips the holder's start runs straight from the
+ * creature's hex to the holder's first corner, and in a corridor one hex
+ * wide that line cuts the rock where the holder turns: so did each leg
+ * tested straight between two corners, and a two-hex step there was
+ * refused however the first was walked. One point a hex leaves every leg
+ * one hex step, which every leg test and every reader of a walk's spots
+ * reads as it is walked.
  */
-export function hexFileRoutes(g: HexGrid, lead: PlacedToken, points: readonly Point[], classes: readonly (readonly (PlacedToken & { id: string })[])[]): Map<string, Point[]> {
-  const out = new Map<string, Point[]>();
+export function hexFileRoutes(g: HexGrid, lead: PlacedToken, points: readonly Point[], classes: readonly (readonly (PlacedToken & { id: string })[])[], byHex = false): Map<string, FilePoint[]> {
+  const out = new Map<string, FilePoint[]>();
   const n = points.length - 1;
   if (n < 1) return out;
   const stands = points.map((p, i) => hexStandAt(g, lead, p, i === 0 ? isSqueezed(lead) : i === n ? true : onSqueezedLattice(g, lead, p)));
   const fileHex = (i: number): Hex => stands[i]!.ref;
   const taken = new Set(hexStandHexes(g, stands[n]!).map(hexKey));
+  if (byHex) {
+    // The holder's hex steps on each piece, at least one, as its own spots count them (route.ts hexPiece).
+    const lines = Array.from({ length: n }, (_, i) => hexLine(g, fileHex(i), fileHex(i + 1)).slice(1));
+    const steps = (i: number) => Math.max(1, lines[i]!.length);
+    const end: FileAlong = [n - 1, steps(n - 1), steps(n - 1)];
+    // Those ahead in the file, the holder first: the hex each starts on and its hexes from there onto the holder's start.
+    const ahead: { hex: Hex; onto: readonly Hex[] }[] = [{ hex: fileHex(0), onto: [] }];
+    for (const members of classes) {
+      for (const member of fileOrder(lead, members)) {
+        const start = tokenRefHex(g, member);
+        // Onto the holder's start by the nearest start ahead of it, the holder's on a tie, then that one's way on from there.
+        const by = ahead.reduce((best, a) => (hexDistance(g, start, a.hex) < hexDistance(g, start, best.hex) ? a : best));
+        const onto = [...hexLine(g, start, by.hex).slice(1), ...by.onto];
+        ahead.push({ hex: start, onto });
+        // Up to the holder's first corner its hexes are reached evenly over the holder's first piece, as the straight walk there
+        // was, so a stop early on finds it near its start, and past it each hex as the holder's own hex there is reached.
+        const first = [...onto, ...lines[0]!];
+        const walked: { hex: Hex; along: FileAlong }[] = [{ hex: start, along: [0, 0, Math.max(1, first.length)] }];
+        first.forEach((hex, t) => walked.push({ hex, along: [0, t + 1, first.length] }));
+        lines.slice(1).forEach((line, i) => line.forEach((hex, k) => walked.push({ hex, along: [i + 1, k + 1, steps(i + 1)] })));
+        let last = 0;
+        for (let k = walked.length - 1; k > 0; k--) {
+          if (taken.has(hexKey(walked[k]!.hex))) continue;
+          last = k;
+          break;
+        }
+        const walk: FilePoint[] = walked.slice(0, last + 1).map((w, k) => ({ ...(k === 0 ? { x: member.x, y: member.y } : placedOnHex(g, member, w.hex)), along: w.along }));
+        const there = walk[walk.length - 1]!;
+        while (walk.length < n + 1) walk.push({ x: there.x, y: there.y, along: end });
+        out.set(member.id, walk);
+        taken.add(hexKey(walked[last]!.hex));
+      }
+    }
+    return out;
+  }
   for (const members of classes) {
     for (const member of fileOrder(lead, members)) {
       // Its walk's hexes in order, each with the piece of the holder's walk it lies on, 0 for its start.
