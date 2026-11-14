@@ -618,7 +618,7 @@ export function heardStop(state: DropView, walker: Walker, to: LegEnd, stopped: 
 }
 
 /** What a lone drag's route search answered for the drop's spot (routeDrag.ts): the straight leg, a route, or no route. */
-export type Found = { kind: "open" } | { kind: "route"; route: Pick<WalkRoute, "pieces"> } | { kind: "none"; capped: boolean; follower?: string; creature?: string };
+export type Found = { kind: "open" } | { kind: "route"; route: Pick<WalkRoute, "pieces">; ledge?: true } | { kind: "none"; capped: boolean; follower?: string; creature?: string };
 
 /**
  * The spot a lone drop's route aims at (docs/design/design-v1-movement.md 3.1):
@@ -651,16 +651,30 @@ export function routeTarget(state: DropView, token: DropToken, raw: Aim): Point 
  * piece end is such a spot.
  */
 export function cutRoute(state: DropView, token: DropToken, pieces: readonly RoutePiece[]): { pieces: RoutePiece[]; at: Point & { squeeze: boolean } } | null {
-  if (pieces.length <= MAX_ROUTE_PIECES) return null;
+  return pieces.length > MAX_ROUTE_PIECES ? standingEnd(state, token, pieces, MAX_ROUTE_PIECES) : null;
+}
+
+/**
+ * Where a walk the search held short of a ledge stands (RouteAnswer
+ * `ledge`, routeDrag.ts): its route cut at the last piece end the drop can
+ * land on, as `cutRoute` cuts a long one, no later than the 64th. Null
+ * where no piece end is such a spot.
+ */
+export function ledgeHold(state: DropView, token: DropToken, pieces: readonly RoutePiece[]): { pieces: RoutePiece[]; at: Point & { squeeze: boolean } } | null {
+  return standingEnd(state, token, pieces, Math.min(pieces.length, MAX_ROUTE_PIECES));
+}
+
+/** The walk along `pieces` cut at the last of its first `upTo` piece ends where the creature stands as a drop would (`cutRoute`), or null. */
+function standingEnd(state: DropView, token: DropToken, pieces: readonly RoutePiece[], upTo: number): { pieces: RoutePiece[]; at: Point & { squeeze: boolean } } | null {
   const grid = snapStep(token);
   const onGrid = (v: number, from: number) => Math.abs((v - from) / grid - Math.round((v - from) / grid)) < 1e-9;
   // Squeezed or not as the end of the walk up to each piece's end (walkerOf, movement.ts WalkEnd): off the holder for good once a stop before was clear of it.
   const walking = walkerOf(state, token);
-  const points = routePoints(state.buildChunks, walking, pieces.slice(0, MAX_ROUTE_PIECES), walking.elevation);
+  const points = routePoints(state.buildChunks, walking, pieces.slice(0, upTo), walking.elevation);
   const g = dropGrid(state, token);
   // A full stand off the grid of squares, as a creature that came out of a squeeze stands, takes no wall through its box on a walk the server checks (permissions.ts standCheck).
   const walks = dropMode(state.role, state.scenes[token.sceneId]) === "walk";
-  for (let k = MAX_ROUTE_PIECES; k > 0; k--) {
+  for (let k = upTo; k > 0; k--) {
     const [x, y] = pieces[k - 1]!;
     const at = { x, y };
     const end = walkEnd(state, walking, at, points.slice(1, k));
@@ -838,14 +852,19 @@ export const CUT_TEXT = "Stopped partway: the way there turns too often for one 
  * straight leg, as the DM's drop through a wall, it goes as the straight
  * leg alone.
  */
-export function planWalk(state: DropView, token: DropToken, raw: Aim, mode: Exclude<DropMode, "teleport">, found: Found, feetPerCell: number, account?: (to: Point) => Found, inTheWay?: (at: Point) => boolean): DropPlan {
-  const walk = found.kind === "route" ? routeLanding(state, token, routeTarget(state, token, raw), found.route.pieces, feetPerCell) : null;
+export function planWalk(state: DropView, token: DropToken, raw: Aim, mode: Exclude<DropMode, "teleport">, given: Found, feetPerCell: number, account?: (to: Point) => Found, inTheWay?: (at: Point) => boolean): DropPlan {
+  // A walk a ledge holds short is a player's: a free drop, the DM's, lands where it is dropped, as with no way at all.
+  const found: Found = given.kind === "route" && given.ledge && mode !== "walk" ? { kind: "none", capped: false } : given;
+  const ledge = found.kind === "route" && found.ledge === true;
+  const held = ledge ? ledgeHold(state, token, found.route.pieces) : null;
+  const walk = found.kind === "route" && (!ledge || held) ? routeLanding(state, token, held ? held.at : routeTarget(state, token, raw), held ? held.pieces : found.route.pieces, feetPerCell) : null;
   if (walk) {
     const move = landed(state, token, { ...walk.at, squeeze: walk.at.squeeze === true });
     const route = walk.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
-    return { moves: [{ ...move, route }], stop: null, held: [], ...(walk.cut ? { cut: true as const } : {}) };
+    return { moves: [{ ...move, route }], stop: ledge ? atLedge(state, token, raw, walk.at) : null, held: [], ...(walk.cut ? { cut: true as const } : {}) };
   }
   const straight = planOne(state, token, raw, mode);
+  if (ledge) straight.stop = atLedge(state, token, raw, straight.moves[0] ?? token);
   const plan = mode === "walk" && found.kind === "none" && found.creature !== undefined && inTheWay ? heldShortOfCreature(state, token, straight, raw, inTheWay) : straight;
   if (found.kind === "none" && plan.stop) plan.stop = { ...plan.stop, searched: true, ...(found.capped ? { capped: true as const } : {}) };
   const lands = plan.moves.length === 1 && account ? plan.moves[0]! : null;
@@ -856,6 +875,17 @@ export function planWalk(state: DropView, token: DropToken, raw: Aim, mode: Excl
     if (kept && !kept.cut) plan.moves = [{ ...lands, route: kept.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) }];
   }
   return plan;
+}
+
+/**
+ * The stop of a walk a ledge holds short of the spot it was dropped on
+ * (RouteAnswer `ledge`), wherever it ends: the ledge is what stops it,
+ * though the straight leg the drop would have taken met the corridor's
+ * wall first, so its note names the ledge (D-261114-036).
+ */
+function atLedge(state: DropView, token: DropToken, raw: Aim, at: Point): Stop {
+  const ghost = routeTarget(state, token, raw);
+  return { tokenId: token.id, sceneId: token.sceneId, blocker: "ledge", door: null, ghost: { x: ghost.x, y: ghost.y }, aim: { x: raw.x, y: raw.y }, at: { x: at.x, y: at.y }, searched: true };
 }
 
 /**

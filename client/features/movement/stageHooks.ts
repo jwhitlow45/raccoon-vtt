@@ -16,7 +16,7 @@ import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
-import { cutForWalkers, dropGrid, dropMode, dropView, goesStraight, heldShortOfCreature, keyStep, namedFollower, planGroup, planLands, planOne, planWalk, pressedAim, previewView, routeLanding, routeTarget, sameCut, samePose, type Aim, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
+import { cutForWalkers, dropGrid, dropMode, dropView, goesStraight, heldShortOfCreature, keyStep, ledgeHold, namedFollower, planGroup, planLands, planOne, planWalk, pressedAim, previewView, routeLanding, routeTarget, sameCut, samePose, type Aim, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
 import { frameFields as routeFrame, groupReading, walkPreview } from "./preview.ts";
 import { freeDrop, type FreeDrop } from "./free.ts";
 import { pressPlan, worldFor } from "./press.ts";
@@ -114,7 +114,7 @@ function sameBasis(a: Basis, b: Basis): boolean {
 
 /** The search's answer as the planner takes it, the creature that closes the way by its token, read from the world searched. A search still running has none yet. */
 function found(answer: Exclude<RouteAnswer, { kind: "searching" }>, world: PublicWorld | null): Found {
-  if (answer.kind !== "none") return answer.kind === "route" ? { kind: "route", route: answer.route } : answer;
+  if (answer.kind !== "none") return answer.kind === "route" ? { kind: "route", route: answer.route, ...(answer.ledge ? { ledge: true as const } : {}) } : answer;
   const { creature, ...none } = answer;
   const id = creature !== undefined ? world?.spaces[creature]?.id : undefined;
   return id !== undefined ? { ...none, creature: id } : none;
@@ -291,12 +291,29 @@ export function dragStops(deps: DragDeps): DragStops {
     setRoute(null);
   };
 
+  /** The last answer `shown` read, kept while the room and the token are the same, since the picture reads it every frame. */
+  let shownMemo: { answer: RouteAnswer; view: DropView; token: DropToken; target: Point; out: { answer: RouteAnswer; target: Point; ledge: Pose | null } } | null = null;
+  /**
+   * The answer and the spot the picture reads, as the drop goes (drop.ts
+   * planWalk): a walk a ledge holds short of `target` goes along its route
+   * to where it can stand at the ledge's foot (drop.ts ledgeHold), which is
+   * `ledge`, or as the straight leg where it can stand nowhere on it.
+   */
+  const shown = (view: DropView, token: DropToken, target: Point, answer: RouteAnswer): { answer: RouteAnswer; target: Point; ledge: Pose | null } => {
+    if (answer.kind !== "route" || !answer.ledge) return { answer, target, ledge: null };
+    if (dropMode(role, view.scenes[token.sceneId]) !== "walk") return { answer: { kind: "none", capped: false }, target, ledge: null };
+    if (shownMemo && shownMemo.answer === answer && shownMemo.view === view && shownMemo.token === token && samePose(shownMemo.target, target)) return shownMemo.out;
+    const held = ledgeHold(view, token, answer.route.pieces);
+    const out = held ? { answer: { ...answer, route: { ...answer.route, pieces: held.pieces } }, target: held.at, ledge: held.at.squeeze ? { x: held.at.x, y: held.at.y, squeeze: true as const } : { x: held.at.x, y: held.at.y } } : { answer: { kind: "none" as const, capped: false }, target, ledge: null };
+    shownMemo = { answer, view, token, target, out };
+    return out;
+  };
+
   /** The board's picture of the walk: the line, the label and, while a drop waits, the ghost's words. */
   const publish = (w: Walk) => {
     const view = pictureView(store.getState().floorView);
-    const target = w.target;
-    if (!view || !target || walk !== w) return;
-    const answer = w.drag.answer;
+    if (!view || !w.target || walk !== w) return;
+    const { answer, target } = shown(view, w.token, w.target, w.drag.answer);
     const straight = w.straight?.pieces ? { to: w.straight.to, pieces: w.straight.pieces } : null;
     const route: DragRoute = { tokenId: w.token.id, ...walkPreview({ labels: labelsOf(store.getState()), view, token: w.token, target, answer, held: w.held, walkers: w.walkers, world: w.world, role, straight }), searching: answer.kind === "searching", waiting: w.waiting };
     setRoute(route);
@@ -340,8 +357,8 @@ export function dragStops(deps: DragDeps): DragStops {
    * picture ends where that leg lands: held at the last clear spot before
    * the wall, squeezed, or snapped, the line and the label with it.
    */
-  const follow = (view: DropView, w: Walk | null, node: DragNode, token: DropToken, target: Point) => {
-    const answer: RouteAnswer = w ? w.drag.answer : { kind: "open" };
+  const follow = (view: DropView, w: Walk | null, node: DragNode, token: DropToken, aimed: Point) => {
+    const { answer, target, ledge } = shown(view, token, aimed, w ? w.drag.answer : { kind: "open" });
     const holdAt = (at: Pose | null, walkers: WalkersCut | null = null) => {
       if (!w || (samePose(w.held, at) && sameCut(w.walkers, walkers))) return;
       w.held = at;
@@ -352,9 +369,11 @@ export function dragStops(deps: DragDeps): DragStops {
     if (!raw || raw.tokenId !== token.id || !goesStraight(view, token, target, answer, view.meta.settings.feetPerCell)) {
       // The walk itself is clear: the preview, its line and its label stop where a creature it drags would meet a wall.
       const cut = raw?.tokenId === token.id && mode === "walk" && answer.kind !== "searching" ? walkersHold(view, token, target, answer.kind === "route" ? answer.route : null) : null;
-      if (cut) node.position(drawnThere(token, cut.at));
+      // A walk a ledge holds short of the finger's spot holds at the ledge's foot, and the mark says so (drop.ts planWalk's note).
+      const stop = cut ?? (ledge && { at: ledge, blocker: "ledge" as const });
+      if (stop) node.position(drawnThere(token, stop.at));
       holdAt(null, cut);
-      setHold(cut ? { tokenId: token.id, at: cut.at, blocker: cut.blocker } : null);
+      setHold(stop ? { tokenId: token.id, at: stop.at, blocker: stop.blocker } : null);
       if (w) goStraight(w, null);
       return;
     }
@@ -382,7 +401,9 @@ export function dragStops(deps: DragDeps): DragStops {
     holdAt(memo.lands, cut);
     // No way the creatures it drags can follow, or one that closes the way: the hold says so, and the drop's note names it (drop.ts namedFollower).
     const noWay = answer.kind === "none" && (answer.follower !== undefined || answer.creature !== undefined);
-    setHold(stop ? { tokenId: token.id, at: stop.at, blocker: stop.blocker, ...(noWay ? { noWay: true as const } : {}) } : null);
+    // A ledge holds the walk short though the straight leg meets a wall first, and the drop's note names the ledge (drop.ts atLedge).
+    const overLedge = mode === "walk" && w?.drag.answer.kind === "route" && w.drag.answer.ledge === true && !cut;
+    setHold(stop ? { tokenId: token.id, at: stop.at, blocker: overLedge ? "ledge" : stop.blocker, ...(noWay ? { noWay: true as const } : {}) } : null);
   };
 
   /** The preview again for the drag's answer now: held where its walk holds, and drawn. */

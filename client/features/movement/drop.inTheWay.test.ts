@@ -4,6 +4,7 @@ import type { RoomState, Token } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { hexCenter, type Hex } from "#shared/rules/hex.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, wallsRound } from "#shared/rules/hexWalls.testkit.ts";
+import { heights } from "#shared/discoveryTestutil.ts";
 import { actor, apply, P1, room, scene, token } from "#shared/testutil.ts";
 import { displayName } from "../../lib/scene.ts";
 import { labelsOf } from "../../state/labels.ts";
@@ -152,6 +153,24 @@ describe("squares: the walk stops before the creature the note names (LP41-MOVE-
     const s = blocked();
     const drag = dragOf(s, "dm", "thorn", { x: 12, y: 4 });
     assert.deepEqual(drag.plan.moves.map((m) => [m.x, m.y]), [[12, 4]]);
+  });
+});
+
+describe("squares: a ledge that closes the way holds the walk at its foot (D-261114-035, D-261114-036)", () => {
+  test("onto the top of a rise 10 ft high on the east room's squares 17 to 20, which no stairs reach: Thorn walks through the corridor to its foot and holds there, the note naming the ledge, where he held at the west room's wall under the wall's words", () => {
+    const s = hall();
+    heights(s, { x: 17, y: 1, w: 4, h: 8 }, 10);
+    const { drag, note } = dropThorn(s, { x: 18, y: 6 });
+    assert.equal(note, "Ledge in the way. No stairs you have seen lead there.");
+    assert.deepEqual(drag.plan.moves.map((m) => [m.x, m.y, m.route !== undefined]), [[16, 4, true]], "along the corridor to the rise's foot");
+    assert.deepEqual(drag.hold && [drag.hold.at.x, drag.hold.at.y, holdLabel(drag.hold.blocker, drag.hold.noWay === true)], [16, 4, "Ledge in the way"], "the board held him there too");
+  });
+
+  test("the DM's drag still lands on the rise", () => {
+    const s = hall();
+    heights(s, { x: 17, y: 1, w: 4, h: 8 }, 10);
+    const drag = dragOf(s, "dm", "thorn", { x: 18, y: 6 });
+    assert.deepEqual(drag.plan.moves.map((m) => [m.x, m.y]), [[18, 6]]);
   });
 });
 

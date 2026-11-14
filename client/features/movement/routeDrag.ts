@@ -4,7 +4,8 @@ import { hexLegOf, hexStandHexes } from "#shared/rules/movement.ts";
 import type { RoutePoint } from "#shared/rules/route.ts";
 import { WorkBudget, type WalkInput, type WalkRoute } from "#shared/rules/walk.ts";
 import { HexWalkSearch, HexWalkWorld, routeLegCheck, routeSearch, routeWorld, routeWorldUnits, type RouteLegCheck, type RouteSearch, type RouteWorld } from "#shared/rules/hexWalk.ts";
-import type { HexStand } from "#shared/rules/movement.ts";
+import { hexStandPlace, type HexStand } from "#shared/rules/movement.ts";
+import { snapStep } from "#shared/rules/footprint.ts";
 import type { RouteJob, RouteWork } from "./routeWork.ts";
 
 /**
@@ -29,9 +30,11 @@ import type { RouteJob, RouteWork } from "./routeWork.ts";
  * alone would go is `follower` (docs/design/design-v1-attach.md 4.2), and
  * else a creature the walker cannot pass that closes the way is `creature`,
  * by its place in the world's creatures (walkWorld.ts PublicWorld `spaces`
- * names it, LP40-MOVE-2).
+ * names it, LP40-MOVE-2). A route marked `ledge` goes only as far as a
+ * ledge lets the walk: no way reaches the spot, but one would over flat
+ * ground, so the walk holds short of the ledge (D-261114-035).
  */
-export type RouteAnswer = { kind: "open" } | { kind: "route"; route: WalkRoute } | { kind: "none"; capped: boolean; follower?: string; creature?: number } | { kind: "searching"; since: number };
+export type RouteAnswer = { kind: "open" } | { kind: "route"; route: WalkRoute; ledge?: true } | { kind: "none"; capped: boolean; follower?: string; creature?: number } | { kind: "searching"; since: number };
 
 export type Settled = Exclude<RouteAnswer, { kind: "searching" }>;
 
@@ -45,6 +48,8 @@ export class RouteDrag {
   #alone: RouteSearch | null = null;
   /** A search of `from`, the world a search found no way in, with the spaces of the creatures the walker cannot pass open: asked only then, to say whether one of them closes the way. */
   #open: { from: RouteWorld; search: RouteSearch } | null = null;
+  /** A search of `from`, the world a search found no way in, on its ground with every height flattened: asked only where no creature closes the way, to say whether a ledge does. */
+  #flat: { from: RouteWorld; search: RouteSearch } | null = null;
   #built = false;
   #target: Point | null = null;
   /** Whether the drop at the target ends squeezed, so what the walker drags follows it in single file (route.ts fileRoutes, hexFileRoutes). */
@@ -88,7 +93,7 @@ export class RouteDrag {
 
   /** Whether it holds any search state: a world, a search, work waiting or a drop waiting. */
   get holding(): boolean {
-    return this.#world !== null || this.#search !== null || this.#alone !== null || this.#open !== null || this.#queued || this.#landing !== null;
+    return this.#world !== null || this.#search !== null || this.#alone !== null || this.#open !== null || this.#flat !== null || this.#queued || this.#landing !== null;
   }
 
   /** The finger is over a new spot, the spot the drop would land on, squeezed there or not. Once the finger is up and a drop waits, it aims nowhere else. */
@@ -109,6 +114,7 @@ export class RouteDrag {
     this.#search = null;
     this.#alone = null;
     this.#open = null;
+    this.#flat = null;
     this.#built = false;
     this.#check = null;
     if (this.#target) this.#solve();
@@ -192,11 +198,52 @@ export class RouteDrag {
     return alone === "capped" ? this.#answered({ kind: "none", capped: true }) : this.#closed(this.#alone, to, budget);
   }
 
-  /** No way to `to` that `closed`, a search run out of states, could miss: the answer, naming the creature that closes the way where one does (`#inTheWay`). */
+  /**
+   * No way to `to` that `closed`, a search run out of states, could miss:
+   * the answer, naming the creature that closes the way where one does
+   * (`#inTheWay`), else the walk to the foot of a ledge that does
+   * (`#overLedge`).
+   */
   #closed(closed: RouteSearch, to: Point, budget: WorkBudget): boolean {
     const creature = this.#inTheWay(closed, to, budget);
     if (creature === "paused") return false;
-    return this.#answered({ kind: "none", capped: false, ...(creature !== null ? { creature } : {}) });
+    if (creature !== null) return this.#answered({ kind: "none", capped: false, creature });
+    const held = this.#overLedge(closed, to, budget);
+    if (held === "paused") return false;
+    return this.#answered(held ? { kind: "route", route: held, ledge: true } : { kind: "none", capped: false });
+  }
+
+  /**
+   * Where a ledge closes the way to `to` once the search `closed` finds
+   * none and no creature does: where a search of the same ground with
+   * every height flattened finds a way, the walk `closed` finds to the last
+   * spot of that way it reaches and may go on from, on the walker's own
+   * grid, the foot of a rise or the edge of a pit. A drop onto a level the
+   * walk cannot reach then holds there, where it held wherever the straight
+   * leg met a wall first, often in the corridor it came from, and said the
+   * wall stopped it (live play 42, D-261114-035, D-261114-036). Null where
+   * flat ground has no way either. Its search shares the drag's budget as
+   * the first one does.
+   */
+  #overLedge(closed: RouteSearch, to: Point, budget: WorkBudget): WalkRoute | null | "paused" {
+    const world = closed.world;
+    if (this.#flat?.from !== world) {
+      if (budget.spent) return "paused";
+      const flat = routeWorld(flattened(world.input));
+      budget.charge(routeWorldUnits(flat) + Math.ceil((flat.nx * flat.ny) / 400));
+      this.#flat = { from: world, search: routeSearch(flat) };
+    }
+    const search = this.#flat.search;
+    const result = search.settle(to, budget);
+    if (result === "paused") return "paused";
+    const way = result === "settled" ? search.traceTo(to, budget) : null;
+    if (way === "paused") return "paused";
+    if (!way) return null;
+    const step = snapStep(world.input.token);
+    const onGrid = (v: number, from: number) => Math.abs((v - from) / step - Math.round((v - from) / step)) < 1e-9;
+    const start = world.input.token;
+    const foot = spotsAlong(closed, way.points).findLast((s) => s.reached && s.open && (closed instanceof HexWalkSearch || (onGrid(s.at.x, start.x) && onGrid(s.at.y, start.y))));
+    return foot ? closed.traceTo(foot.at, budget) : null;
   }
 
   /**
@@ -323,6 +370,7 @@ export class RouteDrag {
     this.#search = null;
     this.#alone = null;
     this.#open = null;
+    this.#flat = null;
     this.#check = null;
   }
 }
@@ -360,10 +408,11 @@ function closingCreature(closed: RouteSearch, points: readonly RoutePoint[]): nu
  * creatures, or -1, read by the test the search itself stops at there
  * (walk.ts `blockedBy`, hexWalk.ts `endOnly`) on the footprint the search
  * reads there, squeezed where the walker squeezes (review LP40FIX-SOL-02),
- * whether `search` reaches it, and whether it is the walk's last.
+ * whether `search` reaches it, whether a walk may go on from it, not a pit
+ * or such a space, where it is, and whether it is the walk's last.
  */
-function spotsAlong(search: RouteSearch, points: readonly RoutePoint[]): { creature: number; reached: boolean; end: boolean }[] {
-  const spots: { creature: number; reached: boolean; end: boolean }[] = [];
+function spotsAlong(search: RouteSearch, points: readonly RoutePoint[]): { creature: number; reached: boolean; open: boolean; at: Point; end: boolean }[] {
+  const spots: { creature: number; reached: boolean; open: boolean; at: Point; end: boolean }[] = [];
   const last = points.length - 1;
   if (search instanceof HexWalkSearch) {
     const world = search.world;
@@ -371,7 +420,7 @@ function spotsAlong(search: RouteSearch, points: readonly RoutePoint[]): { creat
       const leg = hexLegOf(world.g, world.standOf(world.nodeAt(points[i - 1]!)), world.standOf(world.nodeAt(points[i]!)));
       for (let k = 1; k < leg.line.length; k++) {
         const stand = { size: leg.walk, ref: leg.line[k]!, squeezed: leg.squeezed };
-        spots.push({ creature: hexCreatureAt(world, stand), reached: search.isSettled(stand), end: i === last && k === leg.line.length - 1 });
+        spots.push({ creature: hexCreatureAt(world, stand), reached: search.isSettled(stand), open: !world.endOnly(stand), at: hexStandPlace(world.g, world.input.token, stand), end: i === last && k === leg.line.length - 1 });
       }
     }
     return spots;
@@ -386,7 +435,8 @@ function spotsAlong(search: RouteSearch, points: readonly RoutePoint[]): { creat
       const x = a.x + Math.round(((b.x - a.x) * k) / n / world.L) * world.L;
       const y = a.y + Math.round(((b.y - a.y) * k) / n / world.L) * world.L;
       const node = world.nodeAt({ x, y });
-      spots.push({ creature: world.blockedBy(x, y, node >= 0 ? world.elevationAt(node) : b.elevation), reached: search.isSettled({ x, y }), end: i === last && k === n });
+      const elevation = node >= 0 ? world.elevationAt(node) : b.elevation;
+      spots.push({ creature: world.blockedBy(x, y, elevation), reached: search.isSettled({ x, y }), open: !world.endOnly(x, y, elevation), at: { x, y }, end: i === last && k === n });
     }
   }
   return spots;
@@ -413,4 +463,18 @@ function hexCreatureAt(world: HexWalkWorld, stand: HexStand, only = -1): number 
   const under = new Set(hexStandHexes(world.g, stand).map(hexKey));
   const elevation = world.elevationOf(stand);
   return world.input.creatures.findIndex((c, k) => (only < 0 || k === only) && c.way === "blocked" && c.lo < elevation + world.height && elevation < c.hi && c.hexes?.some((h) => under.has(h)) === true);
+}
+
+/** The walk's world on its ground with every height and stair taken off its chunks: its walls, doors and creatures as they are, and no ledge. */
+function flattened(input: WalkInput): WalkInput {
+  const chunks: Record<string, (typeof input.build.buildChunks)[string]> = {};
+  for (const [key, chunk] of Object.entries(input.build.buildChunks)) {
+    if (!chunk || (chunk.heights === undefined && chunk.up === undefined)) {
+      chunks[key] = chunk;
+      continue;
+    }
+    const { heights: _heights, up: _up, ...flat } = chunk;
+    chunks[key] = flat;
+  }
+  return { ...input, build: { ...input.build, buildChunks: chunks } };
 }

@@ -205,6 +205,20 @@ describe("squares: a rider dragged out of a squeezed mount lands under the finge
     }
   });
 
+  test("onto the top of the rise from the mouth, which no stairs reach: the warhorse walks out to the rise's foot and holds there, and the note names the ledge (D-261114-035, D-261114-036)", () => {
+    for (const [x, y, horse] of [
+      [16, 11, [13.5, 10.5]],
+      [17, 12, [14.5, 11.5]],
+    ] as const) {
+      const s = keep({ x: 13, y: 9 }, { x: 13, y: 8 });
+      heights(s, { x: 16, y: 10, w: 2, h: 4 }, 10);
+      delete s.tokens.gob;
+      const { plan, after } = dropBree(s, { x: x + 0.5, y: y + 0.5 }, SQUARE_LIFTS);
+      assert.equal(sent(plan).note, "Ledge in the way. No stairs you have seen lead there.", `onto ${x}, ${y}`);
+      assert.deepEqual(at(after, "horse"), horse, `onto ${x}, ${y}: full size beside the rise`);
+    }
+  });
+
   test("a rise beside the floor: the DM's drag onto 15, 11 still lands Bree under the finger, the warhorse across the rise's edge as dropped", () => {
     const s = keep({ x: 13, y: 9 }, { x: 13, y: 8 });
     heights(s, { x: 16, y: 10, w: 2, h: 4 }, 10);
@@ -324,6 +338,18 @@ for (const [name, g] of [
         assert.deepEqual(hexOf(after, "bree"), [hexKey(at(2, 2))]);
       });
     }
+
+    test("onto the top of a rise with no stairs, from the corridor's end: the warhorse walks to the rise's foot at the corridor's mouth and holds there, and the note names the ledge, where it held in the corridor under the wall's words (D-261114-035, D-261114-036)", () => {
+      const s = keep(12, 11);
+      rise(s);
+      // On hex rows the rise is room B's far side, on hex columns its near side, so the foot is a hex into the room, or the room's first row.
+      const [goal, foot] = g.orient === "rows" ? [at(16, 5), at(14, 6)] : [at(14, 5), at(13, 6)];
+      for (const stored of [s, alone(s)]) {
+        const { plan, after } = dropBree(stored, hexCenter(g, goal), LIFTS);
+        assert.equal(sent(plan).note, "Ledge in the way. No stairs you have seen lead there.");
+        assert.deepEqual(hexOf(after, "bree"), [hexKey(foot)], stored === s ? "the goblin in tow" : "alone");
+      }
+    });
 
     test("the walking ruler from Bree reads the landing the drag makes, from the corridor's middle and from its end", () => {
       for (const [along, goblin, goal] of [[9, 10, at(5, 5)], [12, 11, at(14, 5)]] as const) {
