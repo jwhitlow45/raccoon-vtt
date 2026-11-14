@@ -427,3 +427,10 @@ test("the shell's log keeps early lines until it knows its folder, writes one li
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("the shell's log echoes each line as it is made, before it knows its folder too", () => {
+  const echoed: string[] = [];
+  const log = new ShellLog(() => new Date("2026-11-13T12:00:00Z"), (line) => echoed.push(line));
+  log.error("the supervisor exited (code 1, signal none)");
+  assert.deepEqual(echoed, ["2026-11-13T12:00:00.000Z error the supervisor exited (code 1, signal none)\n"]);
+});

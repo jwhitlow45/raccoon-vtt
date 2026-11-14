@@ -46,7 +46,7 @@ import { createWindow, fromWindow, lockDown, registerAppScheme, serveWindow } fr
 
 const platform = process.platform as Platform;
 const args = parseShellArgs(process.argv);
-const log = new ShellLog();
+const log = new ShellLog(undefined, args.smoke ? (line) => process.stderr.write(line) : null);
 
 /** How long --smoke waits for the supervisor to run before it fails (a first start runs initdb). */
 const SMOKE_TIMEOUT_MS = 4 * 60_000;
