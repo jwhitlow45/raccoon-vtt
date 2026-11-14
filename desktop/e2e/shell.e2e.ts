@@ -65,7 +65,7 @@ function builtApp(): string {
 /** Every process running a program from under `dir`: the shell, its helpers, the supervisor and PostgreSQL alike. */
 function processesUnder(dir: string): string[] {
   if (process.platform === "win32") {
-    const script = `$d = $env:RACCOON_E2E_DIR; Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($d, [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { "$($_.ProcessId) $($_.ExecutablePath)" }`;
+    const script = `$d = $env:RACCOON_E2E_DIR; Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($d, [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { "$($_.ProcessId) $(if ($_.CommandLine) { $_.CommandLine } else { $_.ExecutablePath })" }`;
     const out = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
       encoding: "utf8",
       env: { ...process.env, RACCOON_E2E_DIR: dir },
@@ -160,6 +160,22 @@ describe("the packed shell", () => {
     assert.match(last("supervisor.log"), /exiting with code 0$/);
     assert.match(last("postgres.log"), /database system is shut down$/);
   };
+  /** Every process under the copy ended, or the error names those left, with the logs' last lines. */
+  const allEnded = async (): Promise<void> => {
+    try {
+      await until("every process to end", async () => processesUnder(copy.app).length === 0, 30_000);
+    } catch (err) {
+      const tail = (file: string): string => {
+        try {
+          return readFileSync(join(data, "logs", file), "utf8").trimEnd().split(/\r?\n/).slice(-10).join("\n");
+        } catch {
+          return "(no file)";
+        }
+      };
+      const left = processesUnder(copy.app).join("\n");
+      throw new Error(`${(err as Error).message}. Left:\n${left}\nsupervisor.log ends:\n${tail("supervisor.log")}\nshell.log ends:\n${tail("shell.log")}`);
+    }
+  };
   const exited = (a: ElectronApplication) =>
     new Promise<number | null>((resolve) => {
       const child = a.process();
@@ -216,7 +232,8 @@ describe("the packed shell", () => {
         }
       }
     }
-    rmSync(work, { recursive: true, force: true });
+    // Windows ends a killed process after the call returns, and its files stay open until then.
+    rmSync(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
   });
 
   test("the tray holds its four items, and the switch shows the saved setting", { timeout: STEP_TIMEOUT }, async () => {
@@ -334,7 +351,7 @@ describe("the packed shell", () => {
     assert.equal(secondCode, 0, "the second launch hands over and exits");
     assert.equal(await done, 0);
     app = null;
-    await until("every process to end", async () => processesUnder(copy.app).length === 0, 30_000);
+    await allEnded();
     const log = readFileSync(join(data, "logs", "shell.log"), "utf8");
     assert.match(log, /quitting \(secondInstance\)/);
     assert.doesNotMatch(log, /did not report stopped/);
@@ -360,7 +377,7 @@ describe("the packed shell", () => {
     await clickTray("quit");
     assert.equal(await done, 0);
     app = null;
-    await until("every process to end", async () => processesUnder(copy.app).length === 0, 30_000);
+    await allEnded();
     const supervisorLog = readFileSync(join(data, "logs", "supervisor.log"), "utf8");
     if (FAKE) assert.match(supervisorLog, /command stop[\s\S]*channel closed/, "stop came first, then the channel closed");
     else stoppedCleanly();
@@ -377,7 +394,7 @@ describe("the packed shell", () => {
     // As taskkill /F does on Windows: no stop is sent, only the channel ends.
     process.kill(shellPid, "SIGKILL");
     app = null;
-    await until("every process to end", async () => processesUnder(copy.app).length === 0, 30_000);
+    await allEnded();
     if (FAKE) assert.match(readFileSync(join(data, "logs", "supervisor.log"), "utf8").trimEnd().split("\n").at(-1) ?? "", /channel closed$/);
     else stoppedCleanly();
   });
