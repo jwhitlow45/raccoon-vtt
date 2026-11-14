@@ -9,8 +9,8 @@ import { applyOp } from "../reducer.ts";
 import { movementRules } from "../ruleHooks.ts";
 import { hexPlacements, linkHolds, onHolder, seatedAt } from "../rules/attach.ts";
 import { occupiedHexes, placedOnHex } from "../rules/footprint.ts";
-import { hexKey, hexNeighbors, type Hex, type HexGrid } from "../rules/hex.ts";
-import { findRouteOn } from "../rules/hexWalk.ts";
+import { hexDistance, hexKey, hexNeighbors, type Hex, type HexGrid } from "../rules/hex.ts";
+import { findRouteOn, routeWorld } from "../rules/hexWalk.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, wallsRound } from "../rules/hexWalls.testkit.ts";
 import { planWalks, walkedIn } from "../rules/moveLeg.ts";
 import { hexStandAt, hexStandPlace, onSqueezedLattice, ownWalk } from "../rules/movement.ts";
@@ -38,6 +38,14 @@ import { chance, env, int, member, P1, P2, pick, rng, trap } from "../testutil.t
  * every player the same copy, log and undo mark, and the same seats to the
  * passengers they see. An op stored at version 50 walks none in single
  * file and seats each passenger on its nearest seat alone.
+ *
+ * From op version 62 (LP40-HEXFILE-1 and -2, migrate.ts followsHexByHex)
+ * the holder also starts squeezed inside a corridor one hex wide that runs
+ * straight, turns or zigzags, those it drags behind it there, and walks a
+ * few hexes on or back: every leg in single file is one hex step, none of
+ * those every player sees ends on a hex of the holder's, and the device's
+ * check of the walk (hexWalk.ts fileBlocked) holds the drag where the
+ * server refuses it.
  */
 
 type Case = { state: RoomState; op: OpOf<"token.move">; g: HexGrid };
@@ -145,6 +153,143 @@ function caseOf(seed: number, g: HexGrid): Case | null {
 }
 
 /**
+ * A holder squeezed inside a corridor one hex wide (LP40-HEXFILE-1): eleven
+ * hexes from 12, 12, each step straight on, a turn of a sixth now and then,
+ * or a zigzag between two directions all along, rock everywhere else. Up to
+ * three creatures of one hex stand behind it in the corridor, each dragged
+ * by the holder, the one before it, or a rider on the holder, some of them
+ * hidden, and a trap may stop the walk. The holder walks its own way a few
+ * hexes on or back, squeezed there.
+ */
+function insideCaseOf(seed: number, g: HexGrid): Case | null {
+  const r = rng(seed * 6007 + (g.orient === "rows" ? 3 : 4));
+  const shape = g.orient === "rows" ? "hexRows" : "hexColumns";
+  const zig = chance(r, 0.35);
+  let d = int(r, 0, 5);
+  const other = (d + pick(r, [1, 5])) % 6;
+  const path: Hex[] = [{ col: 12, row: 12 }];
+  for (let k = 1; k < 11; k++) {
+    const dir = zig ? (k % 2 === 0 ? other : d) : chance(r, 0.15) ? (d = (d + pick(r, [1, 5])) % 6) : d;
+    path.push(hexNeighbors(g, path[k - 1]!)[dir]!);
+  }
+  // One hex wide: no hex of it beside another but the ones before and after it.
+  for (let a = 0; a < path.length; a++) for (let b = a + 2; b < path.length; b++) if (hexDistance(g, path[a]!, path[b]!) <= 1) return null;
+  const open = new Set(path.map(hexKey));
+  const bounds = { w: 26, h: 26 };
+  const s = hexWallRoom(shape, bounds.w, bounds.h, wallsRound(g, bounds, (h) => !open.has(hexKey(h))));
+  s.members = { dm1: member("dm1", "dm"), p1: member("p1"), p2: member("p2") };
+  s.scenes.s1 = { ...s.scenes.s1!, fogEnabled: false };
+  const hidden = (p = 0.25): Partial<Token> => (chance(r, p) ? { visibility: "dm" } : {});
+  const k = int(r, 3, 7);
+  const horse = onHex(g, "horse", "large", path[k]!, { name: "Warhorse", kind: "npc", ownerIds: ["p1"] });
+  s.tokens.horse = { ...horse, ...hexStandPlace(g, horse, { size: "medium", ref: path[k]!, squeezed: true }), squeeze: true };
+  if (chance(r, 0.4)) s.tokens.rider0 = onHex(g, "rider0", "medium", path[k]!, { name: "Rider 0", kind: "pc", ownerIds: ["p1"], attached: { to: "horse", kind: "ride", steer: true }, ...hidden(0.2) });
+  const towed = int(r, 1, 3);
+  for (let i = 0; i < towed && k - 1 - i >= 0; i++) {
+    const by = i > 0 && chance(r, 0.3) ? `tow${i - 1}` : s.tokens.rider0 && chance(r, 0.3) ? "rider0" : "horse";
+    s.tokens[`tow${i}`] = onHex(g, `tow${i}`, pick(r, ["medium", "medium", "small", "tiny"] as const), path[k - 1 - i]!, { name: `Goblin ${i}`, kind: "npc", attached: { to: by, kind: "drag" }, ...hidden() });
+  }
+  if (chance(r, 0.35)) {
+    const h = path[int(r, 1, 10)]!;
+    s.traps.stop = trap("stop", { grid: shape, zone: { cells: [{ x: h.col, y: h.row, w: 1, h: 1 }] } });
+  }
+  const holds = Object.values(s.tokens).every((t) => !t!.attached || linkHolds(g, s.meta.settings, t!.attached.kind, t!, s.tokens[t!.attached.to]!));
+  if (!holds) return null;
+  const j = Math.min(9, Math.max(1, k + pick(r, [-2, -1, 1, 1, 2, 2, 3])));
+  if (j === k) return null;
+  const inside = hexStandPlace(g, s.tokens.horse, { size: "medium", ref: path[j]!, squeezed: true });
+  const found = findRouteOn({ ...groupWalkWorld(s, ownWalk(s.tokens.horse), { role: "player" }).input, towed: [] }, inside);
+  if (!found || found === "none") return null;
+  return { state: s, g, op: { t: "token.move", tokenId: "horse", ...inside, squeeze: true, route: found.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) } };
+}
+
+/** What the random walks met, so each test can ask for enough of the class. */
+type Tally = { taken: number; filed: number; refusedFar: number; cuts: number; hiddenFile: number; shared: number; held: number };
+
+/**
+ * One random move's checks: every token lands where the trap step had it,
+ * every public link that holds there holds after, every walk in single file
+ * of a player's move, cut or not, passes the leg test a hex step at a time,
+ * stands on its own anchors and, every player seeing it, ends off the
+ * holder's hexes, and reach is the link pass's own. The device's check of
+ * the walk holds the drag exactly where the server refuses it for one that
+ * cannot follow.
+ */
+function checkedMove(g: HexGrid, made: Case, at: string, tally: Tally): void {
+  const { state: s, op } = made;
+  const walks = planWalks(op, s, P1, {});
+  const walked = walkedIn(walks);
+  // The reach of each public creature in the file, as the link pass reads it where the uncut walk leaves them.
+  const ends = new Map(walks.map((m) => [m.tokenId, { ...s.tokens[m.tokenId]!, ...m.to, ...(m.tokenId === "horse" ? { squeeze: true as const } : {}) }]));
+  const far = walks.filter((m) => m.file === true && m.pass === "public" && !linkHolds(g, s.meta.settings, "drag", ends.get(m.tokenId)!, ends.get(s.tokens[m.tokenId]!.attached!.to) ?? s.tokens[s.tokens[m.tokenId]!.attached!.to]!));
+  const allowed = canApply(op, P1, s, { canUseAsset: () => true });
+  // The device's own check of the holder's way (routeDrag.ts inFile), on what Pat's copy holds.
+  const horse = s.tokens.horse!;
+  const points = [{ x: horse.x, y: horse.y }, ...(op.route ?? []).map(([x, y]) => ({ x, y }))];
+  const device = routeWorld(groupWalkWorld(s, ownWalk(horse), { role: "player" }).input).fileBlocked(points);
+  const cannot = !allowed.ok && allowed.message.endsWith("can't follow through there.");
+  // A wall on a walk in the file refuses in the wall's own words (permissions.ts draggedWalls), reach in these.
+  assert.ok(device === null || !allowed.ok, `${at}: the device holds a drag the server takes (${device})`);
+  assert.ok(!cannot || device !== null, `${at}: the device lets go a drag the server refuses (${allowed.ok ? "" : allowed.message})`);
+  if (device !== null) tally.held++;
+  if (!allowed.ok) {
+    if (cannot) {
+      tally.refusedFar++;
+      // From op version 62 every leg is one hex step the holder's own walk cleared, so only reach refuses one every player sees.
+      assert.ok(far.length > 0, `${at}: refused for reach the link pass keeps`);
+    }
+    return;
+  }
+  tally.taken++;
+  assert.deepEqual(far.map((m) => m.tokenId), [], `${at}: taken with one the link pass lets go`);
+  if (walks.some((m) => m.file === true)) tally.filed++;
+  if (walks.some((m) => m.file === true && m.pass === "private")) tally.hiddenFile++;
+  // Every walk in single file of the move as dispatch takes it, cut where a trap stops it, passes the leg test.
+  const cut = planTrapMove(op, s, P1, {}).op;
+  if (cut !== op) tally.cuts++;
+  const cutWalks = planWalks(cut, s, P1, {});
+  const cutWalked = walkedIn(cutWalks);
+  for (const m of cutWalks) {
+    if (m.file !== true || m.pass !== "public" || !cutWalked(m)) continue;
+    for (let i = 1; i < m.route.length; i++) assert.equal(movementRules.legBlocker(s, m.trace[i - 1]!, { ...m.route[i]!, squeeze: false }), null, `${at}: ${m.tokenId} leg ${i}`);
+  }
+  assert.ok(walks.every((m) => walked(m) || m.carriedBy !== undefined));
+  const r = applyOp(s, op, P1, env(5));
+  assert.ok(r.ok, at);
+  const landed = trapLandings(op, s, P1, {});
+  for (const [id, pose] of landed) {
+    // A passenger on a holder a cut lands squeezed short of its walk sits on the squeezed stand, where the trap step read it at
+    // its walk's spot there: a gap older than op 51, found here and left to its own fix (see the lane's report).
+    const link = s.tokens[id]!.attached;
+    if (cut !== op && link && onHolder(link.kind)) continue;
+    const t: Token = r.state.tokens[id]!;
+    assert.deepEqual([t.x, t.y, t.elevation], [pose.x, pose.y, pose.elevation], `${at}: ${id} where the trap step left it`);
+  }
+  linksKept(g, s, landed, r.state, at, new Set(walks.filter((m) => m.pass === "private").map((m) => m.tokenId)));
+  seatsKept(s, landed, r.state, at);
+  tally.shared += seatsApart(g, s, op, at);
+  const holderHexes = new Set(occupiedHexes(g, r.state.tokens.horse!).map(hexKey));
+  // Every point of a walk in single file stands on the creature's own anchors (route.ts hexFileRoutes, moveLeg.ts behindStop), a
+  // hex step from the one before.
+  for (const m of [...walks, ...cutWalks]) {
+    if (m.file !== true) continue;
+    for (const [i, p] of m.route.entries()) {
+      const t = { ...s.tokens[m.tokenId]!, x: p.x, y: p.y };
+      const there = placedOnHex(g, t, occupiedHexes(g, t)[0]!);
+      if (i > 0) assert.ok(Math.abs(there.x - p.x) < 1e-9 && Math.abs(there.y - p.y) < 1e-9, `${at}: ${m.tokenId} at ${p.x}, ${p.y} off its anchors`);
+      if (i > 0 && s.tokens[m.tokenId]!.size !== "large") assert.ok(hexDistance(g, occupiedHexes(g, { ...t, ...m.route[i - 1]! })[0]!, occupiedHexes(g, t)[0]!) <= 1, `${at}: ${m.tokenId} leg ${i} one hex step`);
+    }
+  }
+  // None every player sees in the file ends under the holder where the whole walk leaves it (LP40-HEXFILE-2). A trap that stops a
+  // large holder early may stand it on such a one's own start, where the stop keeps its spot (traps.ts fileApart), as before.
+  for (const m of walks) {
+    if (m.file !== true || m.pass !== "public" || cut !== op) continue;
+    const t = r.state.tokens[m.tokenId]!;
+    assert.ok(!occupiedHexes(g, t).some((h) => holderHexes.has(hexKey(h))), `${at}: ${m.tokenId} ends on the holder's hex`);
+  }
+}
+
+/**
  * Every player's copy of the scene, the tokens players see under a holder they cannot see left out: a hidden walk moves those
  * (the private pass's own reveal, docs/design/design-v1-attach.md 8.0), so a hidden twin may move them.
  */
@@ -164,12 +309,17 @@ function copies(s: RoomState, base: RoomState = s): string[] {
   });
 }
 
-/** Each link between two tokens every player sees that holds where the trap step leaves them still holds after the move. */
-function linksKept(g: HexGrid, before: RoomState, landed: ReadonlyMap<string, { x: number; y: number; elevation: number }>, after: RoomState, at: string): void {
+/**
+ * Each link between two tokens every player sees that holds where the trap
+ * step leaves them still holds after the move, but one under a holder
+ * players cannot see up its chain (`hidden`), which the private pass may
+ * let go where its walk leaves it, as any hidden creature in tow.
+ */
+function linksKept(g: HexGrid, before: RoomState, landed: ReadonlyMap<string, { x: number; y: number; elevation: number }>, after: RoomState, at: string, hidden: ReadonlySet<string> = new Set()): void {
   const poseOf = (id: string): Token => ({ ...before.tokens[id]!, ...landed.get(id) });
   for (const t of Object.values(before.tokens)) {
     const link = t?.attached;
-    if (!t || !link || t.visibility === "dm" || before.tokens[link.to]!.visibility === "dm") continue;
+    if (!t || !link || t.visibility === "dm" || before.tokens[link.to]!.visibility === "dm" || hidden.has(t.id)) continue;
     if (!linkHolds(g, before.meta.settings, link.kind, poseOf(t.id), poseOf(link.to))) continue;
     assert.equal(after.tokens[t.id]!.attached?.to, link.to, `${at}: ${t.id} still held by ${link.to}`);
   }
@@ -287,76 +437,33 @@ for (const [name, g] of [
 ] as const) {
   describe(`${name}: random walks in single file and riders apart (D-261107-172, D-261107-173)`, () => {
     test("every walk lands where the trap step had it, keeps its public links, passes the leg test, reads reach as the link pass does, and seats its passengers apart", () => {
-      let taken = 0;
-      let filed = 0;
-      let refusedFar = 0;
-      let cuts = 0;
-      let hiddenFile = 0;
-      let shared = 0;
+      const tally: Tally = { taken: 0, filed: 0, refusedFar: 0, cuts: 0, hiddenFile: 0, shared: 0, held: 0 };
       for (let seed = 1; seed <= 1000; seed++) {
         const made = caseOf(seed, g);
-        if (!made) continue;
-        const { state: s, op } = made;
-        const at = `${name} seed ${seed}: ${JSON.stringify(op)}`;
-        const walks = planWalks(op, s, P1, {});
-        const walked = walkedIn(walks);
-        // The reach of each public creature in the file, as the link pass reads it where the uncut walk leaves them.
-        const ends = new Map(walks.map((m) => [m.tokenId, { ...s.tokens[m.tokenId]!, ...m.to, ...(m.tokenId === "horse" ? { squeeze: true as const } : {}) }]));
-        const far = walks.filter((m) => m.file === true && m.pass === "public" && !linkHolds(g, s.meta.settings, "drag", ends.get(m.tokenId)!, ends.get(s.tokens[m.tokenId]!.attached!.to) ?? s.tokens[s.tokens[m.tokenId]!.attached!.to]!));
-        const allowed = canApply(op, P1, s, { canUseAsset: () => true });
-        if (!allowed.ok) {
-          if (allowed.message.endsWith("can't follow through there.")) {
-            refusedFar++;
-            assert.ok(far.length > 0, `${at}: refused for reach the link pass keeps`);
-          }
-          continue;
-        }
-        taken++;
-        assert.deepEqual(far.map((m) => m.tokenId), [], `${at}: taken with one the link pass lets go`);
-        if (walks.some((m) => m.file === true)) filed++;
-        if (walks.some((m) => m.file === true && m.pass === "private")) hiddenFile++;
-        // Every walk in single file of the move as dispatch takes it, cut where a trap stops it, passes the leg test.
-        const cut = planTrapMove(op, s, P1, {}).op;
-        if (cut !== op) cuts++;
-        const cutWalks = planWalks(cut, s, P1, {});
-        const cutWalked = walkedIn(cutWalks);
-        for (const m of cutWalks) {
-          if (m.file !== true || m.pass !== "public" || !cutWalked(m)) continue;
-          for (let i = 1; i < m.route.length; i++) assert.equal(movementRules.legBlocker(s, m.trace[i - 1]!, { ...m.route[i]!, squeeze: false }), null, `${at}: ${m.tokenId} leg ${i}`);
-        }
-        assert.ok(walks.every((m) => walked(m) || m.carriedBy !== undefined));
-        const r = applyOp(s, op, P1, env(5));
-        assert.ok(r.ok, at);
-        const landed = trapLandings(op, s, P1, {});
-        for (const [id, pose] of landed) {
-          // A passenger on a holder a cut lands squeezed short of its walk sits on the squeezed stand, where the trap step read it at
-          // its walk's spot there: a gap older than op 51, found here and left to its own fix (see the lane's report).
-          const link = s.tokens[id]!.attached;
-          if (cut !== op && link && onHolder(link.kind)) continue;
-          const t: Token = r.state.tokens[id]!;
-          assert.deepEqual([t.x, t.y, t.elevation], [pose.x, pose.y, pose.elevation], `${at}: ${id} where the trap step left it`);
-        }
-        linksKept(g, s, landed, r.state, at);
-        seatsKept(s, landed, r.state, at);
-        shared += seatsApart(g, s, op, at);
-        // Every point of a walk in single file stands on the creature's own anchors (route.ts hexFileRoutes, moveLeg.ts behindStop).
-        for (const m of [...walks, ...cutWalks]) {
-          if (m.file !== true) continue;
-          for (const p of m.route.slice(1)) {
-            const t = { ...s.tokens[m.tokenId]!, x: p.x, y: p.y };
-            const there = placedOnHex(g, t, occupiedHexes(g, t)[0]!);
-            assert.ok(Math.abs(there.x - p.x) < 1e-9 && Math.abs(there.y - p.y) < 1e-9, `${at}: ${m.tokenId} at ${p.x}, ${p.y} off its anchors`);
-          }
-        }
+        if (made) checkedMove(g, made, `${name} seed ${seed}: ${JSON.stringify(made.op)}`, tally);
       }
       // Enough of the class that the rules above meet it: moves taken, with walks in single file, hidden ones among them, trap cuts,
       // drags held for one the file leaves out of reach, and passengers sharing a hex where no placement is free.
-      assert.ok(taken >= 160, `moves taken: ${taken}`);
-      assert.ok(filed >= 145, `with walks in single file: ${filed}`);
-      assert.ok(hiddenFile >= 63, `with a hidden one in the file: ${hiddenFile}`);
-      assert.ok(cuts >= 45, `trap cuts: ${cuts}`);
-      assert.ok(refusedFar >= 56, `held for reach: ${refusedFar}`);
-      assert.ok(shared >= 18, `passengers sharing a hex: ${shared}`);
+      assert.ok(tally.taken >= 160, `moves taken: ${tally.taken}`);
+      assert.ok(tally.filed >= 145, `with walks in single file: ${tally.filed}`);
+      assert.ok(tally.hiddenFile >= 63, `with a hidden one in the file: ${tally.hiddenFile}`);
+      assert.ok(tally.cuts >= 45, `trap cuts: ${tally.cuts}`);
+      assert.ok(tally.refusedFar >= 56, `held for reach: ${tally.refusedFar}`);
+      assert.ok(tally.shared >= 18, `passengers sharing a hex: ${tally.shared}`);
+    });
+
+    test("from a start squeezed inside a corridor that turns or zigzags, a few hexes on or back: the same, every leg in the file one hex step and none every player sees left under the holder (LP40-HEXFILE-1, -2)", () => {
+      const tally: Tally = { taken: 0, filed: 0, refusedFar: 0, cuts: 0, hiddenFile: 0, shared: 0, held: 0 };
+      for (let seed = 1; seed <= 1000; seed++) {
+        const made = insideCaseOf(seed, g);
+        if (made) checkedMove(g, made, `${name} inside seed ${seed}: ${JSON.stringify(made.op)}`, tally);
+      }
+      // About 545 of 1,000 seeds on each layout: some 200 with a hidden one in the file, 18 to 30 trap cuts, 30 to 40 held for reach.
+      assert.ok(tally.taken >= 500, `moves taken: ${tally.taken}`);
+      assert.ok(tally.filed >= 500, `with walks in single file: ${tally.filed}`);
+      assert.ok(tally.hiddenFile >= 150, `with a hidden one in the file: ${tally.hiddenFile}`);
+      assert.ok(tally.cuts >= 15, `trap cuts: ${tally.cuts}`);
+      assert.ok(tally.refusedFar >= 25 && tally.held >= tally.refusedFar, `held for reach: ${tally.refusedFar}, by the device: ${tally.held}`);
     });
 
     test("twins that differ only in a hidden creature in tow or in walls no player sees give every player the same copy, log and undo mark, and the same seats", () => {
