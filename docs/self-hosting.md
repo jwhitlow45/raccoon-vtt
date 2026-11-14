@@ -1180,7 +1180,8 @@ by that clock.
 - On Windows and for the AppImage, **Install and restart** downloads the
   update, stops the app server and PostgreSQL cleanly, and runs the
   installer. The installer first asks the running copy to quit, waits up to
-  60 seconds for every process under its folder, and ends any left. The
+  60 seconds for RaccoonVTT's own programs under its folder, and ends any
+  left. The
   updater downloads over HTTPS from the release and checks each installer's
   SHA-512 from the release's `latest*.yml`. It refuses downgrades and
   prereleases and does not check the Sigstore bundles, so a compromised
@@ -1267,10 +1268,12 @@ The facts behind those words:
   they see its name and can ask to join, which the DM can turn away. They
   cannot create or import rooms, reach the database or use the window.
 - On Windows, which labels each network Public, Private or Domain, the app
-  server listens on this computer only whenever the network is Public or
-  Domain, has no profile, or the reading of it is stale, whatever the switch
-  says, and the window explains why. macOS and Linux have no such label, so
-  there the switch alone decides.
+  server listens on this computer only whenever the network carrying the
+  address players are shown is Public or Domain, has no profile, or the
+  reading of it is stale, whatever the switch says, and the window explains
+  why. On another network this computer is on, the private-only firewall
+  rule keeps players out, so leave Windows Firewall on. macOS and Linux have
+  no such label, so there the switch alone decides.
 - The Windows installer adds one Windows Firewall rule for the app server's
   program on private networks, and Windows blocks it on public and domain
   networks. The macOS application firewall is off by default, and when on it

@@ -1800,7 +1800,7 @@ For a DM who runs RaccoonVTT on one computer. [The README](README.md#run-it-on-y
   - Each backup in the list says whether it was by hand, daily or before an update. A backup this version can't read, because a newer version made it, has no Restore.
   - A restore shows its steps and refuses other changes until it ends, and players are disconnected meanwhile. A restore that is cut off is finished or undone at the next start.
 - It checks for updates at start and once a day (**Check for updates once a day** turns that off), and a banner says when one is out.
-  - On Windows and in the AppImage, **Install and restart** backs up first, then stops RaccoonVTT cleanly and installs. On macOS and in the deb, **Download** opens the release page.
+  - On Windows and in the AppImage, **Install and restart** downloads the update, stops RaccoonVTT cleanly and installs it. The new version backs up your rooms before it starts. On macOS and in the deb, **Download** opens the release page.
 - It refuses to open data a newer version saved, and offers the backups this version can read.
 - **Settings** holds the port (**Change port**), **Check for updates once a day** and **Open my browser when RaccoonVTT starts**, with **Show data folder** and **Show logs**.
 - Animated maps and uploaded sound are on.
