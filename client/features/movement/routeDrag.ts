@@ -458,7 +458,8 @@ function spotsAlong(search: RouteSearch, points: readonly RoutePoint[]): { creat
  */
 export function meetsCreature(world: RouteWorld, at: Point, k: number): boolean {
   const node = world.nodeAt(at);
-  if (node < 0) return false;
+  // A spot with no creature reads -1, so no creature (k -1) must meet nothing rather than every clear spot (review LP42R-4).
+  if (k < 0 || node < 0) return false;
   if (world instanceof HexWalkWorld) return hexCreatureAt(world, world.standOf(node), k) === k;
   return world.blockedBy(at.x, at.y, world.elevationAt(node), k) === k;
 }

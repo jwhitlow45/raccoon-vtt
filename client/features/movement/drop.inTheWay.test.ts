@@ -8,8 +8,11 @@ import { heights } from "#shared/discoveryTestutil.ts";
 import { actor, apply, P1, room, scene, token } from "#shared/testutil.ts";
 import { displayName } from "../../lib/scene.ts";
 import { labelsOf } from "../../state/labels.ts";
+import { routeWorld } from "#shared/rules/hexWalk.ts";
 import { dragOf } from "./dragTesting.ts";
 import { holdLabel, stopText } from "./drop.ts";
+import { worldFor } from "./press.ts";
+import { meetsCreature } from "./routeDrag.ts";
 
 /*
  * A creature a player's walk cannot pass that closes the only way
@@ -109,6 +112,14 @@ describe("squares: the creature named is the one that closes the way (LP41-MOVE-
       assert.equal(drag.plan.stop && stopText(drag.plan.stop), "Orc is in the way.", `the goblin on 4, ${y}`);
       assert.deepEqual(drag.plan.moves.map((m) => [m.x, m.y]), [[7.5, 3.5]], "squeezed into the corridor, short of the orc");
     }
+  });
+
+  test("no creature named meets no spot, a clear one included (review LP42R-4)", () => {
+    const s = hall({ orc: goblin("orc", 10, 4, { name: "Orc" }) });
+    const copy = projectState(s, P1, { sceneId: "s1" }) as unknown as RoomState;
+    const world = routeWorld(worldFor(copy, copy.tokens.thorn!, "player").input);
+    assert.equal(meetsCreature(world, { x: 3, y: 4 }, -1), false, "Thorn's own square, where no creature stands");
+    assert.equal(meetsCreature(world, { x: 10, y: 4 }, 0), true, "the orc's square, the orc named");
   });
 
   test("two goblins, one in the corridor and one beyond it in the east room's doorway: the first, which closes the way, is named", () => {
