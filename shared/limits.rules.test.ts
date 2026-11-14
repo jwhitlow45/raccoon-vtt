@@ -101,7 +101,7 @@ describe("asks", () => {
   test("a roll's tag is used once by its own receipt, whatever became of the ask that took it", () => {
     const ask = (id: string): Op => ({ t: "cast.ask", cast: { id, caster: "thorn", sceneId: "s1", spell: "Fireball", area: "a1", damage: { tag: "tag1", parts: 1 } } });
     const state = castTable();
-    const taken = (by: string | null | undefined): PermissionDeps => ({ ...deps, rollTakenBy: () => by });
+    const taken = (by: string | null | undefined): PermissionDeps => ({ ...deps, rollTag: (member) => (member !== "p1" || by === undefined ? null : { ask: by }) });
     assert.deepEqual(canApply(ask("k2"), P1, state, taken(null)), { ok: true }, "a free receipt");
     assert.deepEqual(canApply(ask("k2"), P1, state, taken("k2")), { ok: true }, "the same ask sent again");
     for (const by of ["k1", undefined]) assert.deepEqual(canApply(ask("k2"), P1, state, taken(by)), { ok: false, code: "invalid", message: ROLL_ASKED_ALREADY });

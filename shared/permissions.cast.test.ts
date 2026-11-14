@@ -66,10 +66,10 @@ describe("asking for saves", () => {
     const state = castTable({ casts: { k9: castAsk("k9", { by: "p2" }), k2: castAsk("k2", { by: "p2", damage: { tag: "dmg", parts: 1 } }) } });
     assert.equal(decide(state, targets(["g1", "g1"], { id: "k3" })), "invalid: a target is named twice");
     assert.equal(decide(state, ask()), GONE, "the id an open ask holds");
-    // The tag is the receipt's to answer (rollTakenBy), never an open ask's.
-    const taken = (tag: string) => (tag === "dmg" ? "k2" : null);
+    // The tag is the receipt's to answer (rollTag), never an open ask's.
+    const taken = (_member: string, tag: string) => ({ ask: tag === "dmg" ? "k2" : null });
     const d = (op: Op) => {
-      const r = canApply(op, P1, state, { ...deps, rollTakenBy: taken });
+      const r = canApply(op, P1, state, { ...deps, rollTag: taken });
       return r.ok ? "ok" : `${r.code}: ${r.message}`;
     };
     assert.equal(d(ask({ id: "k3", damage: { tag: "dmg", parts: 1 } })), `invalid: ${ROLL_ASKED_ALREADY}`);

@@ -108,14 +108,15 @@ export type PermissionDeps = {
    */
   roomSound?: boolean;
   /**
-   * Which ask took the sender's damage roll `tag` (docs/design/design-v1-player-limits.md
-   * 3.3), from the roll's own receipt (server/rooms/receipts.ts): the ask's
-   * id, null while no ask took it, or undefined when the sender holds no
-   * live receipt for the tag. The tag check reads nothing else, so an ask
-   * open, closed, hidden or gone answers alike. The actor always passes it.
-   * Without it, as on a device, the tag is not checked.
+   * Which ask took member `memberId`'s damage roll `tag`
+   * (docs/design/design-v1-player-limits.md 3.3), from the roll's own
+   * receipt (server/rooms/receipts.ts): `{ ask }` with the ask's id, or null
+   * while no ask took it, and null when the member holds no live receipt
+   * for the tag. The tag check reads nothing else, so an ask open, closed,
+   * hidden or gone answers alike. The actor always passes it. Without it,
+   * as on a device, the tag is not checked.
    */
-  rollTakenBy?: (tag: string) => string | null | undefined;
+  rollTag?: (memberId: string, tag: string) => { ask: string | null } | null;
 };
 
 export type Decision = { ok: true } | { ok: false; code: RefusalCode; message: string };
@@ -1826,8 +1827,8 @@ function castAskCheck(c: Check, op: OpOf<"cast.ask">, held: ReadonlySet<string>)
   // A roll's tag is used once, by its own receipt, which names the ask that took it. No stored ask is read, so the
   // answer is the sender's own history whatever became of that ask.
   const tag = input.damage?.tag;
-  const taken = tag !== undefined && c.deps.rollTakenBy ? c.deps.rollTakenBy(tag) : null;
-  if (taken === undefined || (taken !== null && taken !== input.id)) return refuse("invalid", ROLL_ASKED_ALREADY);
+  const receipt = tag !== undefined && c.deps.rollTag ? c.deps.rollTag(c.actor.memberId, tag) : { ask: null };
+  if (receipt === null || (receipt.ask !== null && receipt.ask !== input.id)) return refuse("invalid", ROLL_ASKED_ALREADY);
   // Only the asks the player holds count, as their block counts them, since one left on a floor they no longer hold is not theirs to withdraw.
   if (waitingAsks(c.state, c.actor).filter((ask) => holdsRecordOn(c.state, held, ask)).length >= LIMITS.castsPerMember) return refuse("quota", ASKS_WAITING);
   return OK;
