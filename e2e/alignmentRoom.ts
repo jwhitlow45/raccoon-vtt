@@ -8428,7 +8428,7 @@ function floorMarkerTests(): void {
     const lines: string[] = [];
     try {
       await ops.send({ t: "floorLink.put", link: { id: "fu53-c", pairId: "fu53-d", sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
-      await ops.send({ t: "token.create", token: { id: goblin, sceneId: tower, kind: "monster", name: "Goblin Warrior", number: 1, size: "medium", x: 6, y: 5, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
+      await ops.send({ t: "token.create", token: { id: goblin, sceneId: tower, kind: "monster", name: "Goblin Warrior", size: "medium", x: 6, y: 5, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
       if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
       await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: goblin, value: 20 }, { id: randomUUID(), tokenId: run.ids.thorn, value: 10 }] });
       await ops.send({ t: "encounter.next" });
@@ -8497,7 +8497,7 @@ function floorMarkerIsoTests(): void {
     };
     try {
       await ops.send({ t: "floorLink.put", link: { id: "b53-c", pairId: "b53-d", sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
-      await ops.send({ t: "token.create", token: { id: goblin, sceneId: tower, kind: "monster", name: "Goblin Warrior", number: 1, size: "medium", x: 6, y: 3, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
+      await ops.send({ t: "token.create", token: { id: goblin, sceneId: tower, kind: "monster", name: "Goblin Warrior", size: "medium", x: 6, y: 3, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
       // The step before restarts the room's fight, which the DM's copy may not show yet.
       await ops.send({ t: "encounter.end" }).catch(() => {});
       await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: goblin, value: 20 }, { id: randomUUID(), tokenId: run.ids.thorn, value: 10 }] });
@@ -8555,7 +8555,7 @@ function floorPillTests(): void {
     const lines: string[] = [];
     try {
       await ops.send({ t: "floorLink.put", link: { id: "fu53-a", pairId: "fu53-b", sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
-      await ops.send({ t: "token.create", token: { id: warrior, sceneId: tower, kind: "monster", name: "Goblin Warrior", number: 1, size: "medium", x: 6, y: 6, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
+      await ops.send({ t: "token.create", token: { id: warrior, sceneId: tower, kind: "monster", name: "Goblin Warrior", size: "medium", x: 6, y: 6, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
       for (const at of [...FU30_AT, { size: IC2_DESK, scale: 1 }]) {
         const page = await dmPageFor(at.size);
         page.setDefaultTimeout(10_000);
@@ -8573,7 +8573,7 @@ function floorPillTests(): void {
         console.log(`fu53-pill ${where}: ${JSON.stringify(pill)}`);
         // The bar of a creature standing on the stairs, with Go up in it (the strip's icon where the bar is short of room), measured as the sweep's own root.
         const sweep = new Sweep(`fu53-${atName(at)}`);
-        const bar = await selectToken(page, "Goblin Warrior 1", { x: 6, y: 6 });
+        const bar = await selectToken(page, "Goblin Warrior", { x: 6, y: 6 });
         if (!bar) await sweep.missing(page, "fu53-go-up", "a tap on the creature on the stairs opened no bar");
         else {
           const up = bar.locator('[data-climb="up"]:visible').first();
