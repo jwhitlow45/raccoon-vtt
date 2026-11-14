@@ -59,7 +59,7 @@ import { phaseMap, withPhaseLight } from "#shared/reducer/phases.ts";
 import { normalWeather } from "#shared/weather.ts";
 import { soundUseFits, stillFitsVideo } from "#shared/limits.ts";
 import { onPlayersScene } from "#shared/rules/floors.ts";
-import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
+import { bareAutomatic } from "#shared/rules/effects.ts";
 import { checkedVideoFacts } from "#shared/protocol.ts";
 import type { AssetKind } from "../assets/kinds.ts";
 import { SOUND_MEDIA, soundFactsOfRow } from "../assets/store.ts";
@@ -113,11 +113,6 @@ class Ids {
   has(id: string): boolean {
     return this.map.has(id);
   }
-}
-
-/** The automatic Unconscious as the HP step writes it: its id and key alone, shown (shared/rules/hp.ts). */
-function isBareAutomatic(e: Effect): boolean {
-  return e.id === ZERO_HP_UNCONSCIOUS_ID && e.key === "unconscious" && Object.entries(e).every(([k, v]) => k === "id" || k === "key" || v === undefined || (k === "hiddenFromPlayers" && v === false));
 }
 
 export function remapState(state: RoomState, opts: RemapOptions): RoomState {
@@ -207,7 +202,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   const effect = (holderId: string, withDue: Effect): Effect => {
     // An occurrence names a line of the old room's log, and the requests that answer it do not come through, so a save ends waits for the next turn end.
     const { due: _due, ...kept } = withDue;
-    const e = isBareAutomatic(kept) ? kept : { ...kept, id: effectIdOf(holderId, kept.id) };
+    const e = bareAutomatic(kept) ? kept : { ...kept, id: effectIdOf(holderId, kept.id) };
     if (!e.duration) return e;
     // One counting a row that did not come through pauses on its creature, as a removal pauses it, so none counts a row
     // the new room never holds.
