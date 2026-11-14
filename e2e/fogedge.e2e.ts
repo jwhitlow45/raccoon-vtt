@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -530,22 +530,22 @@ describe("raccoon-vtt the fog's edge", { timeout: 600_000 }, () => {
   });
 
   test("FE-3. the scene revealed: its map reaches the edge with at most a device pixel of fog, and the map past the edge stays fogged", async () => {
-    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: BOUNDS.w, h: BOUNDS.h } }] });
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: BOUNDS.w, h: BOUNDS.h } }] });
     await sweep("revealed");
     report("revealed");
     assert.deepEqual(misses, []);
   });
 
   test("FE-4. three columns and two rows revealed among fogged cells: every pixel whose center lies in a fogged sub-cell is the fog, at every zoom, pan, ratio and view", async () => {
-    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "hide", shape: { kind: "rect", x: 0, y: 0, w: BOUNDS.w, h: BOUNDS.h } }] });
-    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: SPLIT.map((rect) => ({ id: randomUUID(), mode: "reveal", shape: { kind: "rect", ...rect } })) });
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: uuidv7(), mode: "hide", shape: { kind: "rect", x: 0, y: 0, w: BOUNDS.w, h: BOUNDS.h } }] });
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: SPLIT.map((rect) => ({ id: uuidv7(), mode: "reveal", shape: { kind: "rect", ...rect } })) });
     await sweep("split");
     report("split");
     assert.deepEqual(misses, []);
   });
 
   test("FU40-B FE-5. party sight under the DM's fog keeps an even edge tint in Top-down and every isometric turn", async () => {
-    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "hide", shape: { kind: "rect", x: 0, y: 0, w: BOUNDS.w, h: BOUNDS.h } }] });
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: uuidv7(), mode: "hide", shape: { kind: "rect", x: 0, y: 0, w: BOUNDS.w, h: BOUNDS.h } }] });
     await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { vision: { on: true, light: "dark" } } });
     await sweepVeiled();
     report("veiled");

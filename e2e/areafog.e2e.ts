@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -105,7 +106,7 @@ const dmSocket = new SocketWatch("dm");
 const patSocket = new SocketWatch("pat");
 const consoles = { dm: new ConsoleWatch("dm"), pat: new ConsoleWatch("pat") };
 
-const run = { roomId: "", roomName: `E2E area over fog ${new Date().toISOString().slice(0, 19)}`, password: "", sceneId: "", goblin: randomUUID(), bree: randomUUID(), aura: randomUUID() };
+const run = { roomId: "", roomName: `E2E area over fog ${new Date().toISOString().slice(0, 19)}`, password: "", sceneId: "", goblin: uuidv7(), bree: uuidv7(), aura: uuidv7() };
 
 const ACTOR = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 12, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
 
@@ -162,8 +163,8 @@ async function setFog(layout: Layout): Promise<void> {
   if (JSON.stringify(layout.reveal) === revealed) return;
   revealed = JSON.stringify(layout.reveal);
   const before = JSON.stringify(patSocket.state?.fogTiles);
-  const hide = { id: randomUUID(), mode: "hide", shape: { kind: "rect", x: 0, y: 0, w: BOUNDS.w, h: BOUNDS.h } };
-  await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [hide, ...layout.reveal.map((r) => ({ id: randomUUID(), mode: "reveal", shape: { kind: "rect", ...r } }))] });
+  const hide = { id: uuidv7(), mode: "hide", shape: { kind: "rect", x: 0, y: 0, w: BOUNDS.w, h: BOUNDS.h } };
+  await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [hide, ...layout.reveal.map((r) => ({ id: uuidv7(), mode: "reveal", shape: { kind: "rect", ...r } }))] });
   await waitFor("the fog on Pat's page", () => JSON.stringify(patSocket.state?.fogTiles) !== before || null);
   await sleep(500);
 }
@@ -377,7 +378,7 @@ async function revealedSpot(page: Page): Promise<Spot> {
 
 /** Sends a shared Fireball from the DM every 400 ms until stopped, as a resting preview keeps itself alive. */
 function shareFromDm(layout: Layout = PAST_EDGE): () => void {
-  const id = randomUUID();
+  const id = uuidv7();
   const send = (e: Record<string, unknown>) => dmRaw.send(JSON.stringify({ t: "eph", sceneId: run.sceneId, e }));
   const frame = () => send({ k: "aoe", id, shape: "sphere", origin: { ...layout.origin, z: 0 }, yaw: 0, size: layout.size, shared: true });
   frame();
@@ -441,7 +442,7 @@ describe("raccoon-vtt an area aimed over a player's fog", { timeout: 600_000 }, 
     dmRaw = await openRaw(cookie);
     await ops.send({ t: "room.update", settings: { playersDraw: "all" } });
     await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { bounds: BOUNDS, fogEnabled: true } });
-    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: FOG_EDGE, h: BOUNDS.h } }] });
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: FOG_EDGE, h: BOUNDS.h } }] });
     await join(patContext, "Pat", "#30a46c");
     await pat.goto(`${server.origin}/r/${run.roomId}`);
     await waitFor("Pat's snapshot", () => patSocket.state?.scenes[run.sceneId]?.fogEnabled || null);

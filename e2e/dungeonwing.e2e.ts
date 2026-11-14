@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -227,9 +228,9 @@ describe("raccoon-vtt Add a wing: the DM's mode, pane and ghost", { timeout: 900
     const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
 
-    run.keepId = randomUUID();
-    run.ruinsId = randomUUID();
-    run.burrowId = randomUUID();
+    run.keepId = uuidv7();
+    run.ruinsId = uuidv7();
+    run.burrowId = uuidv7();
     await ops.send({ t: "scene.create", scene: { id: run.keepId, name: "Keep", bounds: KEEP, fogEnabled: false } });
     await ops.send({ t: "build.rect", sceneId: run.keepId, terrain: "stone", x: 4, y: 4, w: 9, h: 9 });
     // A wall drawn across the room between two floor cells, which is no join. A bare grid line there is no wall, and a tap on it is near none (LP39B-WING-1).

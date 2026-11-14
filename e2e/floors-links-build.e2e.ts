@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -188,7 +188,7 @@ describe("raccoon-vtt stairs and ladders: the DM's building side", { timeout: 90
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
     run.matId = dmSocket.state!.meta.playerSceneId!;
 
-    run.towerId = randomUUID();
+    run.towerId = uuidv7();
     await ops.send({ t: "scene.create", scene: { id: run.towerId, name: "Tower", bounds: BOUNDS, fogEnabled: false, blockMovement: false } });
     const panel = await scenesPanel(dm);
     await panel.getByRole("button", { name: /^Tower(?![A-Za-z])/ }).first().click();
@@ -205,8 +205,8 @@ describe("raccoon-vtt stairs and ladders: the DM's building side", { timeout: 90
     await dm.keyboard.press("Escape");
 
     // Two more floors: Upper floor and Attic, in order.
-    run.upperId = randomUUID();
-    run.atticId = randomUUID();
+    run.upperId = uuidv7();
+    run.atticId = uuidv7();
     await ops.send({ t: "scene.create", scene: { id: run.upperId, name: "Tower", bounds: BOUNDS }, floor: { beside: run.towerId, side: "above" } });
     await ops.send({ t: "scene.update", sceneId: run.upperId, patch: { floor: { name: "Upper floor" } } });
     await ops.send({ t: "scene.create", scene: { id: run.atticId, name: "Tower", bounds: BOUNDS }, floor: { beside: run.upperId, side: "above" } });
@@ -343,7 +343,7 @@ describe("raccoon-vtt stairs and ladders: the DM's building side", { timeout: 90
     await refuses({ x: 14, y: 5 }, { x: 15, y: 5 }, LINK_WORDS.twoHeights("Ground floor"));
     // A pit trap on the other floor.
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false, pit: { floor: -10 } };
-    await ops.send({ t: "trap.create", trap: { id: randomUUID(), sceneId: run.upperId, name: "Pit", zone: { cells: [{ x: 15, y: 8, w: 1, h: 1 }] }, rig } });
+    await ops.send({ t: "trap.create", trap: { id: uuidv7(), sceneId: run.upperId, name: "Pit", zone: { cells: [{ x: 15, y: 8, w: 1, h: 1 }] }, rig } });
     await refuses({ x: 14, y: 8 }, { x: 15, y: 8 }, LINK_WORDS.pit("Upper floor"));
     // Past the other floor's edge: Upper floor shrinks to 10 across, which the square at 12, 9 would not survive.
     await ops.send({ t: "floorLink.delete", linkId: endOn(run.towerId, 12, 9)!.id });

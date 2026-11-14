@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -83,14 +84,14 @@ const run = {
   roomName: `E2E floors links ${new Date().toISOString().slice(0, 19)}`,
   password: "",
   ground: "",
-  upper: randomUUID(),
-  attic: randomUUID(),
+  upper: uuidv7(),
+  attic: uuidv7(),
   anaId: "",
   breeId: "",
-  thorn: randomUUID(),
-  breeCharacter: randomUUID(),
-  tThorn: randomUUID(),
-  tBree: randomUUID(),
+  thorn: uuidv7(),
+  breeCharacter: uuidv7(),
+  tThorn: uuidv7(),
+  tBree: uuidv7(),
   // An end's id is plain, as a trap's.
   stairsDown: `s${randomUUID().slice(0, 8)}`,
   stairsUp: `s${randomUUID().slice(0, 8)}`,
@@ -295,7 +296,7 @@ describe("Go up and Go down, and the stairs on the board", { concurrency: false 
   });
 
   test("flrl-2. Ana walks Thorn 25 ft onto the stairs on his turn, and the DM's bar leads with Go up, named for Upper floor, in line", async () => {
-    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.tThorn, value: 20 }, { id: randomUUID(), tokenId: run.tBree, value: 10 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: run.tThorn, value: 20 }, { id: uuidv7(), tokenId: run.tBree, value: 10 }] });
     await ops.send({ t: "encounter.next" });
     await anaOps.send({ t: "token.move", tokenId: run.tThorn, ...STAIRS });
     await waitFor("Thorn on the stairs", () => (thornAt(dmSocket)?.x === STAIRS.x ? true : null));

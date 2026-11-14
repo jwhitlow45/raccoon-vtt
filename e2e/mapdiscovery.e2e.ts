@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -123,15 +124,15 @@ const run = {
   roomName: "The drowned king",
   password: "",
   halls: "",
-  reveal: randomUUID(),
-  mat: randomUUID(),
-  cavern: randomUUID(),
+  reveal: uuidv7(),
+  mat: uuidv7(),
+  cavern: uuidv7(),
   benId: "",
-  closet: randomUUID(),
-  bree: { halls: randomUUID(), reveal: randomUUID(), mat: randomUUID(), cavern: randomUUID(), closet: randomUUID() },
-  moleId: randomUUID(),
-  labelId: randomUUID(),
-  stampId: randomUUID(),
+  closet: uuidv7(),
+  bree: { halls: uuidv7(), reveal: uuidv7(), mat: uuidv7(), cavern: uuidv7(), closet: uuidv7() },
+  moleId: uuidv7(),
+  labelId: uuidv7(),
+  stampId: uuidv7(),
   /** Frames Ben's page and the display had received when the party left the hall (md-3) and when it saw it again (md-4). */
   leftAt: { ben: -1, tv: -1 },
   backAt: { ben: -1, tv: -1 },
@@ -416,7 +417,7 @@ describe("raccoon-vtt map discovery run", { timeout: 900_000 }, () => {
 
     // Reveal hall: fog on, party vision off.
     await ops.send({ t: "scene.create", scene: { id: run.reveal, name: "Reveal hall", bounds: REVEAL.bounds, fogEnabled: true, autoWalls: "off", blockMovement: true } });
-    await ops.send({ t: "fog.live", sceneId: run.reveal, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", ...REVEAL.revealed } }] });
+    await ops.send({ t: "fog.live", sceneId: run.reveal, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", ...REVEAL.revealed } }] });
     await ops.send({ t: "build.walls", sceneId: run.reveal, put: [{ ...REVEAL.astra, f: { kind: "wall" } }] });
     await ops.send({ t: "build.rect", sceneId: run.reveal, terrain: "dirt", ...REVEAL.east });
     await ops.send({ t: "build.edge", sceneId: run.reveal, edges: [{ key: REVEAL.door, feature: door }, { key: REVEAL.eastWall, feature: { kind: "wall" } }] });
@@ -727,7 +728,7 @@ describe("raccoon-vtt map discovery run", { timeout: 900_000 }, () => {
     assert.ok(!JSON.stringify(sockets.ben.state?.buildChunks).includes('"dirt"'), "floor painted under the fog reached Ben");
 
     run.eastAt = { ben: sockets.ben.received.length, tv: sockets.tv.received.length };
-    await ops.send({ t: "fog.live", sceneId: run.reveal, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 12, y: 0, w: 4, h: 12 } }] });
+    await ops.send({ t: "fog.live", sceneId: run.reveal, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: 12, y: 0, w: 4, h: 12 } }] });
     await waitFor("the east part on Ben's map", () => (cellIn(sockets.ben.state, run.reveal, 14, 4) === "dirt" && edgeIn(sockets.ben.state, run.reveal, REVEAL.eastWall) ? true : null));
     await shots.take(ben, "mapdiscovery-ben-reveal-hall-east");
   });

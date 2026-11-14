@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -63,13 +63,13 @@ const run = {
   password: "",
   dmKey: "",
   ground: "",
-  upper: randomUUID(),
-  attic: randomUUID(),
+  upper: uuidv7(),
+  attic: uuidv7(),
   patId: "",
-  thorn: randomUUID(),
-  tThorn: randomUUID(),
-  goblin: randomUUID(),
-  bat: randomUUID(),
+  thorn: uuidv7(),
+  tThorn: uuidv7(),
+  goblin: uuidv7(),
+  bat: uuidv7(),
 };
 
 /** The DM page's room socket, routed so a step can hold back the frames it sends. */

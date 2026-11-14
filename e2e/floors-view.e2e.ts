@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -80,15 +80,15 @@ const run = {
   roomName: `E2E floors view ${new Date().toISOString().slice(0, 19)}`,
   password: "",
   ground: "",
-  upper: randomUUID(),
-  attic: randomUUID(),
+  upper: uuidv7(),
+  attic: uuidv7(),
   upperMap: "",
   anaId: "",
   breeId: "",
-  thorn: randomUUID(),
-  breeCharacter: randomUUID(),
-  tThorn: randomUUID(),
-  tBree: randomUUID(),
+  thorn: uuidv7(),
+  breeCharacter: uuidv7(),
+  tThorn: uuidv7(),
+  tBree: uuidv7(),
 };
 
 type DomNode = { getAttribute(name: string): string | null };
@@ -424,7 +424,7 @@ describe("Which floor each device shows on a scene of several floors", { concurr
 
   test("flrv-6. on Thorn's turn while the DM shows Ground, the turn chip's name ends on Upper floor, and his tracker row names that floor and shows it on a tap", async () => {
     await showsFloor(dm, "Ground floor");
-    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.tThorn, value: 20 }, { id: randomUUID(), tokenId: run.tBree, value: 10 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: run.tThorn, value: 20 }, { id: uuidv7(), tokenId: run.tBree, value: 10 }] });
     await ops.send({ t: "encounter.next" });
     const turn = topBar(dm).locator('button[aria-label^="Initiative, round"]').first();
     await waitFor("the turn chip names Upper floor", async () => ((await turn.getAttribute("aria-label").catch(() => null))?.includes("Thorn's turn on Upper floor. Open the tracker.") ? true : null));
@@ -473,7 +473,7 @@ describe("Which floor each device shows on a scene of several floors", { concurr
     let below = run.attic;
     const more: string[] = [];
     for (let i = 4; i <= 8; i++) {
-      const id = randomUUID();
+      const id = uuidv7();
       await ops.send({ t: "scene.create", scene: { id, name: "Tower", bounds: BOUNDS }, floor: { beside: below, side: "above" } });
       await ops.send({ t: "scene.update", sceneId: id, patch: { floor: { name: `Floor ${i}` } } });
       more.push(id);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -76,7 +76,7 @@ const run = {
   /** The DM link, for a second DM session (amr-0). */
   dmLink: "",
   sceneId: "",
-  cryptId: randomUUID(),
+  cryptId: uuidv7(),
   patId: "",
   /** The WebM's asset row and its still, uploaded in am-0. */
   webm: null as VideoRow | null,
@@ -1131,8 +1131,8 @@ describe("animated maps", { concurrency: false }, () => {
     await boardSays(pat, "none");
     assert.equal((await probe(pat))!.withSrc, 0, "a still map frees the element");
     const phases = [
-      { id: randomUUID(), name: "Dry", assetId: plain.id, widthPx: plain.width, heightPx: plain.height },
-      { id: randomUUID(), name: "Flooded", assetId: mp4Still.id, widthPx: mp4Still.width, heightPx: mp4Still.height, video: videoMap(mp4Still, mp4).video },
+      { id: uuidv7(), name: "Dry", assetId: plain.id, widthPx: plain.width, heightPx: plain.height },
+      { id: uuidv7(), name: "Flooded", assetId: mp4Still.id, widthPx: mp4Still.width, heightPx: mp4Still.height, video: videoMap(mp4Still, mp4).video },
     ];
     await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { phases } });
     await sleep(300);
@@ -1677,8 +1677,8 @@ describe("animated maps", { concurrency: false }, () => {
     const mp4 = await uploadVideo(MP4);
     const mp4Still = await uploadStill(mp4.width, mp4.height);
     const phases = [
-      { id: randomUUID(), name: "Flooded", assetId: run.webmStill!.id, widthPx: run.webmStill!.width, heightPx: run.webmStill!.height, video: videoMap(run.webmStill!, run.webm!).video },
-      { id: randomUUID(), name: "Burning", assetId: mp4Still.id, widthPx: mp4Still.width, heightPx: mp4Still.height, video: videoMap(mp4Still, mp4).video },
+      { id: uuidv7(), name: "Flooded", assetId: run.webmStill!.id, widthPx: run.webmStill!.width, heightPx: run.webmStill!.height, video: videoMap(run.webmStill!, run.webm!).video },
+      { id: uuidv7(), name: "Burning", assetId: mp4Still.id, widthPx: mp4Still.width, heightPx: mp4Still.height, video: videoMap(mp4Still, mp4).video },
     ];
     await setVideoMap(run.sceneId, run.webmStill!, run.webm!);
     await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { phases } });
@@ -1714,7 +1714,7 @@ describe("animated maps", { concurrency: false }, () => {
     const [flooded, burning] = phases;
     await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { phases: [{ ...flooded!, name: "High water" }, burning!] } });
     await ops.step("undo", "setup");
-    const still = { id: randomUUID(), name: "Dry", assetId: run.webmStill!.id, widthPx: run.webmStill!.width, heightPx: run.webmStill!.height };
+    const still = { id: uuidv7(), name: "Dry", assetId: run.webmStill!.id, widthPx: run.webmStill!.width, heightPx: run.webmStill!.height };
     await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { phases: [flooded!, burning!, still] } });
     await ops.step("undo", "setup");
     await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { phases: [flooded!] } });
@@ -1725,7 +1725,7 @@ describe("animated maps", { concurrency: false }, () => {
     await assert.rejects(ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { phases: [flooded!, burning!] } }), /invalid: Animated maps are off on this server/);
     await ops.step("undo", "setup");
     await waitFor("the MP4 phase back by undo", () => ((dmSocket.state?.scenes[run.sceneId] as { phases?: unknown[] } | undefined)?.phases?.length === 2 ? true : null));
-    await ops.send({ t: "scene.duplicate", sceneId: run.sceneId, newSceneId: randomUUID(), name: "Flooded hall copy", include: { creatures: false, characters: false, fog: false, drawings: false } });
+    await ops.send({ t: "scene.duplicate", sceneId: run.sceneId, newSceneId: uuidv7(), name: "Flooded hall copy", include: { creatures: false, characters: false, fog: false, drawings: false } });
 
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label} errors`);
   });

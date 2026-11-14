@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -99,13 +99,13 @@ const run = {
   roomName: `E2E vision ${new Date().toISOString().slice(0, 19)}`,
   password: "",
   patId: "",
-  sceneId: randomUUID(),
-  thornId: randomUUID(),
-  goblinId: randomUUID(),
-  bossId: randomUUID(),
-  lightId: randomUUID(),
-  pinId: randomUUID(),
-  entryId: randomUUID(),
+  sceneId: uuidv7(),
+  thornId: uuidv7(),
+  goblinId: uuidv7(),
+  bossId: uuidv7(),
+  lightId: uuidv7(),
+  pinId: uuidv7(),
+  entryId: uuidv7(),
   /** pv4: the six players who join to fill the scene's list of who sees for themselves. */
   extraIds: [] as string[],
   /** The DM's frames from where the player's ruler began to where it ended, and the player's fog meanwhile, which nothing changes then. */

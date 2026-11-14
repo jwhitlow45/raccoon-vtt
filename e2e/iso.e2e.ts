@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
@@ -63,7 +63,7 @@ const run = {
   roomName: `E2E iso ${new Date().toISOString().slice(0, 19)}`,
   password: "",
   sceneId: "",
-  secondId: randomUUID(),
+  secondId: uuidv7(),
 };
 
 async function join(context: BrowserContext, name: string, color: string): Promise<string> {
@@ -403,7 +403,7 @@ async function pixelAt(page: Page, p: { x: number; y: number }): Promise<number[
 // ---------------------------------------------------------------- areas standing as their real shapes (lane ISOA-2)
 
 /** The cavern: fog on and all of it revealed to Pat, Pat's Thorn in his Spirit Guardians, a bat in a 20 ft sphere 10 ft up, and a goblin under a cone aimed 40 degrees up. */
-const cavern = { sceneId: "", thorn: randomUUID(), bat: randomUUID(), archer: randomUUID(), goblin: randomUUID(), sphere: randomUUID(), guardians: randomUUID(), cone: randomUUID(), secret: randomUUID(), field: "" };
+const cavern = { sceneId: "", thorn: uuidv7(), bat: uuidv7(), archer: uuidv7(), goblin: uuidv7(), sphere: uuidv7(), guardians: uuidv7(), cone: uuidv7(), secret: uuidv7(), field: "" };
 const SPHERE = "#3fa7ff";
 const GUARDIANS = "#8e4ec6";
 const CONE = "#f38400";
@@ -506,15 +506,15 @@ function groundRings(page: Page, color: string): Promise<number> {
 }
 
 /** The moving marks' room (lane ISO-3): a fogged hall with a goblin that wears an aura and a ring, and Pat's Bree with a ring of her own. */
-const hall = { sceneId: "", patId: "", goblin: randomUUID(), bree: randomUUID() };
+const hall = { sceneId: "", patId: "", goblin: uuidv7(), bree: uuidv7() };
 const AURA = "#e5484d";
 
 // ---------------------------------------------------------------- input (lane ISO-4)
 
-const BREE = randomUUID();
-const GRUM = randomUUID();
-const FRONT = randomUUID();
-const BEHIND = randomUUID();
+const BREE = uuidv7();
+const GRUM = uuidv7();
+const FRONT = uuidv7();
+const BEHIND = uuidv7();
 /** View units a cell of height lifts (client/lib/view.ts K). */
 const K = 0.8660254037844386;
 
@@ -533,7 +533,7 @@ async function setUpSteps(): Promise<void> {
   for (let y = 4; y < 8; y++) for (let x = 8; x < 12; x++) cells.push(`${x},${y}`);
   await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { fogEnabled: true, blockMovement: false, defaultView: { x: 8, y: 6, zoom: 40 } } });
   await ops.send({ t: "build.height", sceneId: run.sceneId, cells, height: 10 });
-  await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 20, h: 16 } }] });
+  await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 20, h: 16 } }] });
   await reopenRoom(pat);
   await reopenRoom(dm);
 }
@@ -1153,7 +1153,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
   });
 
   test("ISO-11. a map removed while Pat's Isometric shows is never read again: a raised cell revealed after shows the neutral side, and the bitmap is freed (ISO2-ASTRA-10)", async () => {
-    const vault = randomUUID();
+    const vault = uuidv7();
     const raised = "2,2";
     await ops.send({ t: "scene.create", scene: { id: vault, name: "The vault", bounds: { w: 8, h: 6 }, fogEnabled: true } });
     await ops.send({ t: "scene.update", sceneId: vault, patch: { suggestedView: "isometric" } });
@@ -1163,8 +1163,8 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       t: "fog.live",
       sceneId: vault,
       ops: [
-        { id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 8, h: 6 } },
-        { id: randomUUID(), mode: "hide", shape: { kind: "cells", cells: [raised] } },
+        { id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 8, h: 6 } },
+        { id: uuidv7(), mode: "hide", shape: { kind: "cells", cells: [raised] } },
       ],
     });
     // Pat's page counts the map bitmaps it makes and frees, and, once watching, every draw of one.
@@ -1208,7 +1208,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     // Past the frame that stopped drawing it.
     await pat.waitForTimeout(500);
     await pat.evaluate(() => void ((globalThis as unknown as { __isoGone: { watching: boolean } }).__isoGone.watching = true));
-    await ops.send({ t: "fog.live", sceneId: vault, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "cells", cells: [raised] } }] });
+    await ops.send({ t: "fog.live", sceneId: vault, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "cells", cells: [raised] } }] });
     await pat.waitForTimeout(800);
     assert.equal((await gone()).drawn, 0, "nothing drew or read the removed map's image");
     await waitFor("the removed map's bitmap freed, not held until the next map", async () => {
@@ -1224,19 +1224,19 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
   });
 
   test("ISO-30. Pat in Isometric on a fogged scene: a goblin the DM drags carries its range ring and its aura as moving marks, the aura clipped to Pat's revealed ground, and both lie on the ground again after the drop", async () => {
-    hall.sceneId = randomUUID();
+    hall.sceneId = uuidv7();
     const dmId = dmSocket.you!.memberId;
     hall.patId = patSocket.you!.memberId;
     await ops.send({ t: "scene.create", scene: { id: hall.sceneId, name: "The hall", bounds: { w: 16, h: 12 }, fogEnabled: true } });
     await ops.send({ t: "scene.update", sceneId: hall.sceneId, patch: { suggestedView: "isometric" } });
     // Revealed: columns 0 to 9. The goblin's aura reaches the fog past column 10.
-    await ops.send({ t: "fog.live", sceneId: hall.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 10, h: 12 } }] });
+    await ops.send({ t: "fog.live", sceneId: hall.sceneId, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 10, h: 12 } }] });
     const actor = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
     await ops.send({ t: "token.create", token: { id: hall.goblin, sceneId: hall.sceneId, kind: "monster", name: "Goblin", size: "medium", x: 6, y: 5, disposition: "hostile", visibility: "all", rangeRings: [15], actor: { inline: actor } } });
     await ops.send({ t: "token.create", token: { id: hall.bree, sceneId: hall.sceneId, kind: "monster", name: "Bree", size: "medium", x: 2, y: 8, disposition: "ally", visibility: "all", ownerIds: [hall.patId], rangeRings: [10], actor: { inline: actor } } });
     await ops.send({
       t: "template.create",
-      template: { id: randomUUID(), sceneId: hall.sceneId, shape: "emanation", size: 15, origin: { x: 6.5, y: 5.5, z: 0 }, yaw: 0, attachedTo: hall.goblin, includeOrigin: false, color: AURA, ownerId: dmId, visibility: "all" },
+      template: { id: uuidv7(), sceneId: hall.sceneId, shape: "emanation", size: 15, origin: { x: 6.5, y: 5.5, z: 0 }, yaw: 0, attachedTo: hall.goblin, includeOrigin: false, color: AURA, ownerId: dmId, visibility: "all" },
     });
     await ops.send({ t: "room.setPlayerScene", sceneId: hall.sceneId });
     await waitFor("Pat on the hall", () => (patSocket.state?.meta.playerSceneId === hall.sceneId ? true : null));
@@ -1499,7 +1499,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
 
   test("ISO-44. a label on the platform tapped with Select in Isometric opens its pane by the label as drawn", async () => {
     await dm.bringToFront();
-    const labelId = randomUUID();
+    const labelId = uuidv7();
     await ops.send({ t: "build.label", sceneId: run.sceneId, labelId, label: { x: 10.5, y: 6.5, text: "Altar", size: 1 } });
     await waitFor("the label on the DM's page", () => (dmSocket.state?.labels[labelId] ? true : null));
     await isoOn(dm, 0);
@@ -1546,7 +1546,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
 
   test("ISO-46. in Isometric the names of a crowd lay out in view space: none lies on another creature's standee", async () => {
     await dm.bringToFront();
-    const crowd = [[15, 10], [16, 11], [17, 12], [15, 12], [17, 10], [16, 13], [18, 11], [14, 11], [16, 9]].map(([x, y], i) => ({ id: randomUUID(), x: x!, y: y!, name: `Kob${i + 1}` }));
+    const crowd = [[15, 10], [16, 11], [17, 12], [15, 12], [17, 10], [16, 13], [18, 11], [14, 11], [16, 9]].map(([x, y], i) => ({ id: uuidv7(), x: x!, y: y!, name: `Kob${i + 1}` }));
     // Grum stands clear of the crowd, so only the crowd decides where its names go, and the DM's camera comes back to the scene's starting view.
     await ops.send({ t: "token.move", tokenId: GRUM, x: 2, y: 2, elevation: 0 });
     for (const k of crowd) await ops.send(tokenOp(k.id, { kind: "monster", name: k.name, x: k.x, y: k.y, disposition: "hostile" }));
@@ -1588,7 +1588,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
   });
 
   test("FU40-B ISO34-LABELS: area and trap names clear a raised token's drawn name at every turn", async () => {
-    const raised = randomUUID();
+    const raised = uuidv7();
     await ops.send(tokenOp(raised, { kind: "monster", name: "Raised", x: 10, y: 10, elevation: 20, disposition: "hostile" }));
     const readNames = async () => dm.evaluate(() => {
       type Rect = { x: number; y: number; width: number; height: number };
@@ -1608,8 +1608,8 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
         });
         const box = before.names.find((n) => n.name === "Raised")!.box;
         const point = toWorld(isometric(turn), { x: (box.x + box.width / 2 - before.x) / before.scale, y: (box.y + box.height - before.y) / before.scale } as ViewPoint);
-        const areaId = randomUUID();
-        const trapId = randomUUID().replaceAll("-", "").slice(0, 16);
+        const areaId = uuidv7();
+        const trapId = uuidv7();
         let areaCreated = false;
         let trapCreated = false;
         try {
@@ -1652,10 +1652,10 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
 
   test("ISO-47. a creature lying flat for Pat on a seen 10 ft top takes a press where its picture lies, up on the top", async () => {
     await pat.bringToFront();
-    const lurker = randomUUID();
+    const lurker = uuidv7();
     // A Large on the platform's corner, one sub-cell of its footprint hidden from the players: it lies flat for Pat.
     await ops.send(tokenOp(lurker, { kind: "monster", name: "Lurker", x: 10, y: 4, size: "large", disposition: "hostile" }));
-    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "hide", shape: { kind: "rect", x: 11.75, y: 5.75, w: 0.25, h: 0.25 } }] });
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: uuidv7(), mode: "hide", shape: { kind: "rect", x: 11.75, y: 5.75, w: 0.25, h: 0.25 } }] });
     await waitFor("the lurker on Pat's page", () => (patSocket.state?.tokens[lurker] ? true : null));
     await isoOn(pat, 0);
     await pat.waitForTimeout(400);
@@ -1676,7 +1676,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     assert.equal(await hitAt(0), false, "where it would lie at 0 takes nothing of it");
     await shots.take(pat, "iso-47-pat-flat-lurker-on-top");
     await ops.send({ t: "token.delete", tokenId: lurker });
-    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 11.75, y: 5.75, w: 0.25, h: 0.25 } }] });
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: 11.75, y: 5.75, w: 0.25, h: 0.25 } }] });
   });
 
   test("ISO-50. a key someone gave another shortcut before Q was Turn left's stays theirs: the sheet shows Turn left with no key, and its Reset takes Q back (D-261026-12)", async () => {
@@ -1738,12 +1738,12 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
   });
 
   test("ISOA-1. a 20 ft sphere 10 ft up stands as a sphere on Pat's phone and the DM's screen, a bat inside it drawn between its far and near bands at turns 0 and 2, its ring round its feet within 1 px", async () => {
-    cavern.sceneId = randomUUID();
+    cavern.sceneId = uuidv7();
     const dmId = dmSocket.you!.memberId;
     const patId = patSocket.you!.memberId;
     await ops.send({ t: "scene.create", scene: { id: cavern.sceneId, name: "The cavern", bounds: { w: 24, h: 20 }, fogEnabled: true } });
     await ops.send({ t: "scene.update", sceneId: cavern.sceneId, patch: { suggestedView: "isometric", defaultView: { x: 12, y: 9, zoom: 40 } } });
-    await ops.send({ t: "fog.live", sceneId: cavern.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 24, h: 20 } }] });
+    await ops.send({ t: "fog.live", sceneId: cavern.sceneId, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 24, h: 20 } }] });
     const actor = { hp: { cur: 9, max: 9, temp: 0 }, life: "alive", ac: 13, speeds: { walk: 30, fly: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
     const make = (id: string, name: string, x: number, y: number, extra: Record<string, unknown> = {}) =>
       ops.send({ t: "token.create", token: { id, sceneId: cavern.sceneId, kind: "monster", name, size: "medium", x, y, disposition: "hostile", visibility: "all", actor: { inline: actor }, ...extra } });
@@ -1880,7 +1880,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
   test("ISOA-8. security: one sub-cell fogged under the sphere's plan lays it flat on Pat's phone, the bat's ring back on the ground under the fog, and the DM's still stands", async () => {
     await pat.bringToFront();
     // A sub-cell inside the sphere's plan, clear of the bat.
-    await ops.send({ t: "fog.live", sceneId: cavern.sceneId, ops: [{ id: randomUUID(), mode: "hide", shape: { kind: "rect", x: 14.25, y: 9.25, w: 0.25, h: 0.25 } }] });
+    await ops.send({ t: "fog.live", sceneId: cavern.sceneId, ops: [{ id: uuidv7(), mode: "hide", shape: { kind: "rect", x: 14.25, y: 9.25, w: 0.25, h: 0.25 } }] });
     await layoutWhen(pat, "Pat's sphere flat", (x) => !x.standing.includes(cavern.sphere) && x.standing.includes(cavern.guardians));
     assert.equal((await boardLayout(pat))!.rings[cavern.bat], undefined);
     await waitFor("the bat's ring on Pat's ground", async () => ((await groundRings(pat, SPHERE)) >= 1 ? true : null));
@@ -1914,12 +1914,12 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       await preview.waitFor({ state: "detached" });
     }
     await layoutWhen(dm, "the DM's own board standing it", (x) => x.standing.includes(cavern.sphere));
-    await ops.send({ t: "fog.live", sceneId: cavern.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 14.25, y: 9.25, w: 0.25, h: 0.25 } }] });
+    await ops.send({ t: "fog.live", sceneId: cavern.sceneId, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: 14.25, y: 9.25, w: 0.25, h: 0.25 } }] });
     await layoutWhen(pat, "Pat's sphere standing again", (x) => x.standing.includes(cavern.sphere));
   });
 
   test("ISOA-10. sixty areas in view: the nearest to the middle the bars leave clear stand first, and \"Building area shapes…\" shows while any waits, clear of the bar and within 1 px", async () => {
-    cavern.field = randomUUID();
+    cavern.field = uuidv7();
     await ops.send({ t: "scene.create", scene: { id: cavern.field, name: "The field", bounds: { w: 80, h: 80 }, fogEnabled: false } });
     await ops.send({ t: "scene.update", sceneId: cavern.field, patch: { defaultView: { x: 40, y: 40, zoom: 12 } } });
     const dmId = dmSocket.you!.memberId;
@@ -1927,7 +1927,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     for (let i = 0; i < 60; i++) {
       const x = 12 + (i % 8) * 8;
       const y = 14 + Math.floor(i / 8) * 7;
-      const id = randomUUID();
+      const id = uuidv7();
       // Wholly above ground, so clipping cannot move a built sphere's middle and change its rank.
       ids.push({ id, x: (x - y) / Math.SQRT2, y: (x + y) / (2 * Math.SQRT2) - K * 6 });
       await ops.send({ t: "template.create", template: { id, sceneId: cavern.field, shape: "sphere", size: 20, origin: { x, y, z: 30 }, yaw: 0, includeOrigin: true, color: SPHERE, ownerId: dmId, visibility: "all" } });
@@ -1981,10 +1981,10 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       // Written for hex rows. Hex columns take the mirror, so every key and point swaps its axes.
       const key = (col: number, row: number) => (shape === "hexRows" ? `${col},${row}` : `${row},${col}`);
       const hex = (col: number, row: number): Hex => (shape === "hexRows" ? { col, row } : { col: row, row: col });
-      const sceneId = randomUUID();
-      const goblin = randomUUID();
-      const ogre = randomUUID();
-      const area = randomUUID();
+      const sceneId = uuidv7();
+      const goblin = uuidv7();
+      const ogre = uuidv7();
+      const area = uuidv7();
       await ops.send({ t: "scene.create", scene: { id: sceneId, name: `HXREL ${shape}`, bounds, fogEnabled: true, gridShape: shape } });
       await ops.send({ t: "scene.setMap", sceneId, map });
       await ops.send({ t: "scene.update", sceneId, patch: { blockMovement: false, defaultView: { x: 8, y: 8, zoom: 40 } } });
@@ -2010,7 +2010,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       await ops.send(tokenOp(ogre, { sceneId, kind: "monster", name: "Ogre", size: "large", ...placedOnHex(G, { size: "large", x: 0, y: 0 }, hex(3, 6)), elevation: 0, disposition: "hostile" }));
       await ops.send({ t: "template.create", template: { id: area, sceneId, shape: "sphere", size: 10, origin: { ...at(hex(6, 5)), z: 5 }, yaw: 0, includeOrigin: true, color: SPHERE, ownerId: dmId, visibility: "all" } });
       // Pat sees all but a strip on the right, where the hexes lie flat under the fog.
-      await ops.send({ t: "fog.live", sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: shape === "hexRows" ? { kind: "rect", x: 0, y: 0, w: 15, h: 16 } : { kind: "rect", x: 0, y: 0, w: 16, h: 15 } }] });
+      await ops.send({ t: "fog.live", sceneId, ops: [{ id: uuidv7(), mode: "reveal", shape: shape === "hexRows" ? { kind: "rect", x: 0, y: 0, w: 15, h: 16 } : { kind: "rect", x: 0, y: 0, w: 16, h: 15 } }] });
       await ops.send({ t: "room.setPlayerScene", sceneId });
       await waitFor(`Pat on ${shape}`, () => (patSocket.state?.meta.playerSceneId === sceneId ? true : null));
       await reopenRoom(pat);
@@ -2043,7 +2043,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       // Night, and Pat's scout who sees 30 ft in the dark. It looks over the hollow from its rim, then climbs to the goblin's terrace,
       // where Pat's board stands the goblin (seen from the ground beside the terrace, it lay flat). Past its sight there, the hollow
       // Pat saw stays, remembered, for the shots below.
-      const scout = randomUUID();
+      const scout = uuidv7();
       const scoutOp = tokenOp(scout, { sceneId, kind: "npc", name: "Scout", ...placedOnHex(G, { size: "medium", x: 0, y: 0 }, hex(12, 4)), ownerIds: [patSocket.you!.memberId], disposition: "ally" });
       scoutOp.token.actor.inline.senses = "Darkvision 30 ft.";
       await ops.send(scoutOp);
@@ -2288,8 +2288,8 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     };
 
     for (const shape of ["hexRows", "hexColumns", "squares"] as const) {
-      const sceneId = randomUUID();
-      const walker = randomUUID();
+      const sceneId = uuidv7();
+      const walker = uuidv7();
       await ops.send({ t: "scene.create", scene: { id: sceneId, name: `HXPERF2 ${shape}`, bounds, fogEnabled: true, ...(shape === "squares" ? {} : { gridShape: shape }) } });
       await ops.send({ t: "scene.setMap", sceneId, map });
       // Opens with a band of pits across the top of the screen, and the rest raised 5 to 15 ft in alternation.
@@ -2299,7 +2299,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       for (let y = 0; y < bounds.h; y++) for (let x = 0; x < bounds.w; x++) if (inScene(x, y)) raised[y >= 3 && y <= 5 ? -10 : [5, 10, 15][(x + 2 * y) % 3]!]!.push(`${x},${y}`);
       for (const [height, cells] of Object.entries(raised)) await ops.send({ t: "build.height", sceneId, cells, height: Number(height) });
       await ops.send(tokenOp(walker, { sceneId, kind: "npc", name: "Walker", size: "medium", x: 13, y: 12, disposition: "ally", ownerIds: [patSocket.you!.memberId] }));
-      await ops.send({ t: "fog.live", sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 22, h: 30 } }] });
+      await ops.send({ t: "fog.live", sceneId, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 22, h: 30 } }] });
       await ops.send({ t: "room.setPlayerScene", sceneId });
       await waitFor(`Pat on ${shape}`, () => (patSocket.state?.meta.playerSceneId === sceneId ? true : null));
 
@@ -2343,7 +2343,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       });
       await pan(pat, "touch", `${shape}, a fog reveal mid-pan`, {
         midway: async () => {
-          await ops.send({ t: "fog.live", sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 22, y: 0, w: 4, h: 30 } }] });
+          await ops.send({ t: "fog.live", sceneId, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: 22, y: 0, w: 4, h: 30 } }] });
           await nextFrames(pat, 6);
         },
       });
@@ -2413,7 +2413,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
      */
     {
       const deep = { w: 60, h: 60 };
-      const sceneId = randomUUID();
+      const sceneId = uuidv7();
       await ops.send({ t: "scene.create", scene: { id: sceneId, name: "HXPERF2 deep", bounds: deep, fogEnabled: false } });
       await ops.send({ t: "scene.setMap", sceneId, map: await uploadStripes(deep) });
       await ops.send({ t: "scene.update", sceneId, patch: { blockMovement: false, defaultView: { x: 40, y: 40, zoom: 40 } } });
@@ -2441,8 +2441,8 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
   });
 
   test("HXPERF2-2. the height readout on its cell through a pinch at 100% and 130%, a pin label kept in view at the screen's edge through a pan, and no pill of the hidden isometric tree rendered by a Top-down pan", async () => {
-    const sceneId = randomUUID();
-    const pinId = randomUUID();
+    const sceneId = uuidv7();
+    const pinId = uuidv7();
     const bounds = { w: 30, h: 30 };
     await ops.send({ t: "scene.create", scene: { id: sceneId, name: "HXPERF2 chrome", bounds, fogEnabled: false, gridShape: "hexRows" } });
     await ops.send({ t: "scene.update", sceneId, patch: { blockMovement: false, defaultView: { x: 12, y: 12, zoom: 40 } } });
@@ -2634,8 +2634,8 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
   });
 
   test("SO-ISO. a token placed between squares stands where it is drawn in Isometric, its dashed outline lies on the ground under the box the rules count it in, and an Alt-drag of a standee places it", async () => {
-    const sceneId = randomUUID();
-    const marker = randomUUID();
+    const sceneId = uuidv7();
+    const marker = uuidv7();
     await ops.send({ t: "scene.create", scene: { id: sceneId, name: "Snap off", bounds: { w: 16, h: 14 }, fogEnabled: false } });
     await ops.send({ t: "scene.update", sceneId, patch: { defaultView: { x: 8, y: 7, zoom: 40 } } });
     const actor = { hp: { cur: 9, max: 9, temp: 0 }, life: "alive", ac: 13, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
@@ -2714,8 +2714,8 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
 
   test("ISOD-1. stairs climb in steps in Isometric: a raised run and a sunk run as the generator lays them carry their spans, a tread's top and its riser show apart, a creature stands on its tread, and below 24 px a cell they lie plain again", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-    const sceneId = randomUUID();
-    const climber = randomUUID();
+    const sceneId = uuidv7();
+    const climber = uuidv7();
     const cells = (x0: number, y0: number, x1: number, y1: number) => {
       const out: string[] = [];
       for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) out.push(`${x},${y}`);
@@ -2780,7 +2780,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
 
   test("ISOD-2. doors stand in frames, and an open door's leaf stands upright on its hinge: wood above the hinge, no flat leaf or arc on the ground under it, a tap on the leaf opens the door's pill over the frame, and its Close closes the door", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-    const sceneId = randomUUID();
+    const sceneId = uuidv7();
     const cells: string[] = [];
     for (let y = 0; y < 10; y++) for (let x = 0; x < 12; x++) cells.push(`${x},${y}`);
     await ops.send({ t: "scene.create", scene: { id: sceneId, name: "ISOD doors", bounds: { w: 12, h: 10 }, fogEnabled: false } });
@@ -2886,7 +2886,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
 
   test("ISOD-3. a long wall's slabs and a long raised side show no line where one square meets the next, a side keeps its line where its foot changes, and below 24 px a cell the wall's planes show theirs again", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-    const sceneId = randomUUID();
+    const sceneId = uuidv7();
     const cells = (x0: number, y0: number, x1: number, y1: number) => {
       const out: string[] = [];
       for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) out.push(`${x},${y}`);
@@ -2956,7 +2956,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
   test("DG2M-ISO. a generated secret door stands on Pat's board as the automatic wall it reads as, level with the room's walls, then from the higher ground once the DM raises its room, not at all with only the raised side held, and on the DM's as the hidden door it is, which stands as a wall until found", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const d = SECRETS_DUNGEON;
-    const sceneId = randomUUID();
+    const sceneId = uuidv7();
     const door = d.ops.flatMap((op) => (op.t === "build.edge" ? op.edges : [])).find((e) => e.feature?.kind === "door" && e.feature.secret)!.key;
     const [dx, dy, side] = door.split(",") as [string, string, "n" | "w"];
     const [x, y] = [Number(dx), Number(dy)];
@@ -2970,7 +2970,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await ops.send({ t: "scene.create", scene: { id: sceneId, name: "DG2M secret door", bounds: { w: 50, h: 50 }, fogEnabled: true } });
     for (const op of d.ops) if (op.t === "build.paint" || op.t === "build.edge" || op.t === "build.height" || op.t === "build.stairs") await ops.send({ ...op, sceneId } as Op);
     await ops.send({ t: "scene.update", sceneId, patch: { suggestedView: "isometric", defaultView: { x: x + 0.5, y: y + 0.5, zoom: 48 } } });
-    await ops.send({ t: "fog.live", sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: x - 3, y: y - 3, w: 7, h: 7 } }] });
+    await ops.send({ t: "fog.live", sceneId, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: x - 3, y: y - 3, w: 7, h: 7 } }] });
     await ops.send({ t: "room.setPlayerScene", sceneId });
     await waitFor("DG2M: Pat on the dungeon", () => (patSocket.state?.meta.playerSceneId === sceneId ? true : null));
     await waitFor("DG2M: Pat's board in Isometric", async () => ((await shownView(pat)).startsWith("isometric") ? true : null));
@@ -2999,7 +2999,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await shots.take(pat, "dg2m-iso-2-secret-door-raised");
     // With only the raised side held, the room's own side is the wall, as beside rock: nothing stands on the door's line.
     const [ox, oy] = at(outside);
-    await ops.send({ t: "fog.live", sceneId, ops: [{ id: randomUUID(), mode: "hide", shape: { kind: "rect", x: ox, y: oy, w: 1, h: 1 } }] });
+    await ops.send({ t: "fog.live", sceneId, ops: [{ id: uuidv7(), mode: "hide", shape: { kind: "rect", x: ox, y: oy, w: 1, h: 1 } }] });
     await standing("DG2M: nothing stands with the corridor square unheld", (w) => w.length === 0);
     await shots.take(pat, "dg2m-iso-3-secret-door-near-only");
     // The DM's copy holds the door itself, which stands as a wall while hidden, not an automatic one.

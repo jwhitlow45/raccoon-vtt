@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -76,14 +77,14 @@ const run = {
   roomName: `E2E floors ruler ${new Date().toISOString().slice(0, 19)}`,
   password: "",
   ground: "",
-  upper: randomUUID(),
+  upper: uuidv7(),
   anaId: "",
   breeId: "",
   dmId: "",
-  thorn: randomUUID(),
-  breeCharacter: randomUUID(),
-  tThorn: randomUUID(),
-  tBree: randomUUID(),
+  thorn: uuidv7(),
+  breeCharacter: uuidv7(),
+  tThorn: uuidv7(),
+  tBree: uuidv7(),
   stairsDown: `s${randomUUID().slice(0, 8)}`,
   stairsUp: `s${randomUUID().slice(0, 8)}`,
 };
@@ -304,7 +305,7 @@ describe("the walking ruler over stairs", { concurrency: false }, () => {
   test("fl3r-4. an unexplored landing: a stop on revealed ground the landing joins walks, one past an unseen way round reads No way through", async () => {
     // Upper floor under the fog, revealed east of the stairs and above row 7, with a wall along x = 12 from the top to row 7.
     await ops.send({ t: "scene.update", sceneId: run.upper, patch: { fogEnabled: true, blockMovement: true } });
-    await ops.send({ t: "fog.live", sceneId: run.upper, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: STAIRS.x + 1, y: 0, w: BOUNDS.w - STAIRS.x - 1, h: 7 } }] });
+    await ops.send({ t: "fog.live", sceneId: run.upper, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: STAIRS.x + 1, y: 0, w: BOUNDS.w - STAIRS.x - 1, h: 7 } }] });
     await ops.send({ t: "build.edge", sceneId: run.upper, edges: Array.from({ length: 7 }, (_, y) => ({ key: `12,${y},w`, feature: { kind: "wall" as const } })) });
     await sleep(500);
     await pickTool(ana, "Ruler");

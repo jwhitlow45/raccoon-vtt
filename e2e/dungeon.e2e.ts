@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -113,11 +113,11 @@ const run = {
   password: "",
   firstSceneId: "",
   patId: "",
-  thornChar: randomUUID(),
-  thorn: randomUUID(),
+  thornChar: uuidv7(),
+  thorn: uuidv7(),
   sceneId: "",
   hexSceneId: "",
-  hexThorn: randomUUID(),
+  hexThorn: uuidv7(),
   /** What each measure found, for the report. */
   measured: [] as string[],
 };

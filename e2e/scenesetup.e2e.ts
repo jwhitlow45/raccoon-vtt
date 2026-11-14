@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -353,7 +353,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     await ops.send({
       t: "token.create",
       token: {
-        id: randomUUID(),
+        id: uuidv7(),
         sceneId: arena.id,
         kind: "npc",
         name: "Lantern bearer",
@@ -431,7 +431,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
   });
 
   test("ss-2. Like Crypt on a map image copies fog, party vision with its light and Sight, and movement, keeping floor walls, and a Universal VTT import starts on Explore", async () => {
-    run.cryptId = randomUUID();
+    run.cryptId = uuidv7();
     await ops.send({
       t: "scene.create",
       scene: { id: run.cryptId, name: "Crypt", bounds: { w: 20, h: 14 }, fogEnabled: true, vision: { on: true, light: "dark", perPlayer: true }, blockMovement: false },
@@ -594,7 +594,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     const image = sceneOf(run.caveId)!.map!;
     await ops.send({ t: "scene.setMap", sceneId: run.arenaId, map: image });
     const phase = { assetId: image.assetId, widthPx: image.widthPx, heightPx: image.heightPx };
-    await ops.send({ t: "scene.update", sceneId: run.arenaId, patch: { phases: [{ id: randomUUID(), name: "Day", ...phase }, { id: randomUUID(), name: "Night", ...phase }] } });
+    await ops.send({ t: "scene.update", sceneId: run.arenaId, patch: { phases: [{ id: uuidv7(), name: "Day", ...phase }, { id: uuidv7(), name: "Night", ...phase }] } });
     await waitFor("Arena's two phases", () => (sceneOf(run.arenaId)?.phases?.length === 2 ? true : null));
     await waitFor("the party's explored ground on Arena", () => explored(run.arenaId), 15_000);
     assert.equal(seeOf(run.arenaId)?.light, "bright");
@@ -618,7 +618,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
   test("ss-5. Like reads its scene once a map upload, a starter copy or an import is done: a change made meanwhile comes with it, and a scene deleted meanwhile leaves the room's choice, said in a toast", async () => {
     /** A scene to be Like, made on Explore and Dark, whole party, moves not blocked. */
     const source = async (name: string): Promise<string> => {
-      const id = randomUUID();
+      const id = uuidv7();
       await ops.send({ t: "scene.create", scene: { id, name, bounds: { w: 12, h: 10 }, fogEnabled: true, vision: { on: true, light: "dark" }, blockMovement: false } });
       await waitFor(`${name} in the DM's state`, () => sceneOf(id));
       return id;
@@ -1159,7 +1159,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     // 30 × 20 steps each: 30 × 20 squares, and on hexes the whole hexes they hold, never the steps.
     const made: { id: string; name: string; unit: string }[] = [];
     for (const [name, gridShape, unit] of [["Sizes squares", "squares", "squares"], ["Sizes hex rows", "hexRows", "hexes"], ["Sizes hex columns", "hexColumns", "hexes"]] as const) {
-      const id = randomUUID();
+      const id = uuidv7();
       await ops.send({ t: "scene.create", scene: { id, name, bounds: { w: 30, h: 20 }, gridShape, fogEnabled: true, blockMovement: false } });
       await waitFor(`${name} in the DM's state`, () => sceneOf(id));
       made.push({ id, name, unit });
@@ -1284,11 +1284,11 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
   });
 
   test("fu37b-2. a hex scene whose fog draft holds a Builder room keeps Squares off, naming the Fog tool's Builder room as its control does (GP4-GRIDSHAPE-WORDS)", async () => {
-    const id = randomUUID();
+    const id = uuidv7();
     await ops.send({ t: "scene.create", scene: { id, name: "Drafted hexes", bounds: { w: 20, h: 16 }, gridShape: "hexRows", fogEnabled: true, blockMovement: false } });
     await waitFor("the drafted hexes in the DM's state", () => sceneOf(id));
     // Hex keys in a draft, as a Builder room tap on a hex scene drafts them (client/features/fog/shapes.ts).
-    await ops.send({ t: "fog.draft", sceneId: id, add: [{ id: randomUUID(), mode: "reveal", shape: { kind: "cells", cells: ["5,5", "6,5"] } }] });
+    await ops.send({ t: "fog.draft", sceneId: id, add: [{ id: uuidv7(), mode: "reveal", shape: { kind: "cells", cells: ["5,5", "6,5"] } }] });
     // The DM's copy holds the draft of the scene they view.
     await view(id);
     await waitFor("the room in the draft", () => (dmSocket.state?.fogDrafts[id]?.ops.length === 1 ? true : null));

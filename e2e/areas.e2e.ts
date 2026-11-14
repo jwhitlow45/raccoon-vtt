@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -55,13 +55,13 @@ const run = {
   roomName: `E2E areas ${new Date().toISOString().slice(0, 19)}`,
   password: "",
   sceneId: "",
-  secondId: randomUUID(),
+  secondId: uuidv7(),
   patId: "",
   kimId: "",
-  thornChar: randomUUID(),
-  thorn: randomUUID(),
-  pip: randomUUID(),
-  goblins: [randomUUID(), randomUUID(), randomUUID()],
+  thornChar: uuidv7(),
+  thorn: uuidv7(),
+  pip: uuidv7(),
+  goblins: [uuidv7(), uuidv7(), uuidv7()],
 };
 
 /** Thorn at 3,5, Goblin 1 east of him in a cone's reach, Goblin 2 south-east and Goblin 3 further east. */
@@ -522,8 +522,8 @@ describe("raccoon-vtt an area from your character", { timeout: 900_000 }, () => 
 
   test("9. a second scene finds Thorn by his character, a deleted caster leaves no substitute, and a dead Thorn starts off", async () => {
     await ops.send({ t: "token.delete", tokenId: run.pip });
-    const second = randomUUID();
-    const goblin = randomUUID();
+    const second = uuidv7();
+    const goblin = uuidv7();
     await ops.send(tokenOp(second, run.secondId, { kind: "pc", name: "Thorn", ...AT.thorn, disposition: "ally", actor: { ref: run.thornChar } }));
     await ops.send(tokenOp(goblin, run.secondId, { kind: "monster", name: "Ghoul", ...AT.goblins[0]!, disposition: "hostile", actor: { inline: actor() } }));
     await ops.send({ t: "room.setPlayerScene", sceneId: run.secondId });
@@ -539,7 +539,7 @@ describe("raccoon-vtt an area from your character", { timeout: 900_000 }, () => 
     await pressSlot(pat, "cancel");
 
     // Ice Knife on the ghoul with From off, then Thorn deleted: still around the ghoul.
-    const third = randomUUID();
+    const third = uuidv7();
     await addThorn(third, run.secondId);
     await fromIs(pat, "From Thorn", "on");
     await spell(pat, "ice knife");
@@ -571,7 +571,7 @@ describe("raccoon-vtt an area from your character", { timeout: 900_000 }, () => 
 
     // A dead Thorn, after a reload, is off by default.
     await ops.send({ t: "actor.life", target: { characterId: run.thornChar }, life: "dead" });
-    await addThorn(randomUUID(), run.secondId);
+    await addThorn(uuidv7(), run.secondId);
     await pat.reload();
     await pat.getByRole("status", { name: "Connected" }).first().waitFor();
     await pickTool(pat, "Area");

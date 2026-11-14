@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -54,7 +54,7 @@ let ops: OpSocket;
 const dmSocket = new SocketWatch("dm");
 const consoles: ConsoleWatch[] = [];
 
-const run = { roomId: "", roomName: "The Sunken Keep", matId: "", towerId: "", thornId: randomUUID(), goblinId: randomUUID() };
+const run = { roomId: "", roomName: "The Sunken Keep", matId: "", towerId: "", thornId: uuidv7(), goblinId: uuidv7() };
 
 function state(): RoomState {
   return dmSocket.state as RoomState;
@@ -173,7 +173,7 @@ describe("raccoon-vtt several floors: the DM's building side", { timeout: 900_00
     run.matId = dmSocket.state!.meta.playerSceneId!;
 
     // Tower is prepared in private: the players stay on the mat.
-    run.towerId = randomUUID();
+    run.towerId = uuidv7();
     await ops.send({ t: "scene.create", scene: { id: run.towerId, name: "Tower", bounds: BOUNDS, fogEnabled: false, blockMovement: false } });
     await ops.send({ t: "token.create", token: creature(run.thornId, run.towerId, "Thorn", { partyVision: true, x: 4, y: 4 }) });
     await ops.send({ t: "token.create", token: creature(run.goblinId, run.towerId, "Goblin", { kind: "monster", x: 12, y: 5 }) });

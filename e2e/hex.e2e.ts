@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -91,41 +92,41 @@ const run = {
   /** The DM link's secret, which signs a second DM device in on a session of its own. */
   dmKey: "",
   sceneId: "",
-  goblin: randomUUID(),
-  ogre: randomUUID(),
-  entry: randomUUID(),
+  goblin: uuidv7(),
+  ogre: uuidv7(),
+  entry: uuidv7(),
   patId: "",
   benId: "",
-  thorn: randomUUID(),
-  bree: randomUUID(),
-  imp: randomUUID(),
-  fireball: randomUUID(),
-  guardians: randomUUID(),
+  thorn: uuidv7(),
+  bree: uuidv7(),
+  imp: uuidv7(),
+  fireball: uuidv7(),
+  guardians: uuidv7(),
   /** The battle mat HX4-1 makes through the new scene form, on the room's hex rows. */
   camp: "",
-  moor: randomUUID(),
+  moor: uuidv7(),
   /** Lane HX-6's hex scene (HX6-): Wall lines, difficult ground and a free door. */
-  hall: randomUUID(),
-  ash: randomUUID(),
+  hall: uuidv7(),
+  ash: uuidv7(),
   hallDoor: "hx6door00001",
   /** Lane HX-5's hex scene (HX5-): a wall of rock with a gap, and a one-row corridor. */
-  vault: randomUUID(),
-  vaultGob: randomUUID(),
-  vaultOgre: randomUUID(),
-  vaultEntry: randomUUID(),
+  vault: uuidv7(),
+  vaultGob: uuidv7(),
+  vaultOgre: uuidv7(),
+  vaultEntry: uuidv7(),
   /** HX7-'s Large pony and the Medium Kip who rides it, and the trap HX7-2 draws. */
-  pony: randomUUID(),
-  kip: randomUUID(),
+  pony: uuidv7(),
+  kip: uuidv7(),
   trapId: "",
   /** Lane HX-9b's hex scenes (HX9b-): a walled room on hex rows and one on hex columns. */
-  cellar: randomUUID(),
-  ossuary: randomUUID(),
-  cellarGob: randomUUID(),
-  cellarFar: randomUUID(),
+  cellar: uuidv7(),
+  ossuary: uuidv7(),
+  cellarGob: uuidv7(),
+  cellarFar: uuidv7(),
   cellarDoor: "hx9bdoor0001",
   /** HX9b-5's open 200 by 200 hex scene, and HX9b-6's square one with a builder floor of 6,000 squares. */
-  moorland: randomUUID(),
-  granary: randomUUID(),
+  moorland: uuidv7(),
+  granary: uuidv7(),
 };
 
 const ACTOR = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
@@ -244,7 +245,7 @@ async function isoNodeIs(page: Page, tokenId: string, want: "standee" | "flat" |
 
 /** Reveals one fog sub-cell, by a square inside it, since a fog shape takes the sub-cells whose middles it holds. */
 function revealSubcell(sx: number, sy: number) {
-  return { id: randomUUID(), mode: "reveal" as const, shape: { kind: "rect" as const, x: (sx + 0.25) / FOG_SUBCELLS, y: (sy + 0.25) / FOG_SUBCELLS, w: 0.5 / FOG_SUBCELLS, h: 0.5 / FOG_SUBCELLS } };
+  return { id: uuidv7(), mode: "reveal" as const, shape: { kind: "rect" as const, x: (sx + 0.25) / FOG_SUBCELLS, y: (sy + 0.25) / FOG_SUBCELLS, w: 0.5 / FOG_SUBCELLS, h: 0.5 / FOG_SUBCELLS } };
 }
 
 function creature(id: string, name: string, size: "tiny" | "medium" | "large", hex: Hex, extra: Record<string, unknown> = {}) {
@@ -794,7 +795,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await moveTo(run.goblin, "medium", { col: 9, row: 12 });
     await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { fogEnabled: true } });
     await ops.send({ t: "fog.reset", sceneId: run.sceneId, to: "hidden" });
-    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 6, h: 20 } }] });
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 6, h: 20 } }] });
     await waitFor("Thorn in Pat's copy", () => (patSocket.state?.tokens[run.thorn] ? true : null));
     await waitFor("the goblin and the imp out of Pat's copy", () => (!patSocket.state?.tokens[run.goblin] && !patSocket.state?.tokens[run.imp] ? true : null));
     await shots.take(pat, "hex-pat-fog-top-down");
@@ -812,7 +813,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await waitFor("the goblin in Pat's copy", () => (patSocket.state?.tokens[run.goblin] ? true : null));
     await isoNodeIs(pat, run.goblin, "flat", "the goblin lying flat on Pat's board");
     // Its whole hex and drawn box revealed: it stands.
-    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: mid.x - 0.75, y: mid.y - 0.75, w: 1.5, h: 1.5 } }] });
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: mid.x - 0.75, y: mid.y - 0.75, w: 1.5, h: 1.5 } }] });
     await isoNodeIs(pat, run.goblin, "standee", "the goblin standing on Pat's board");
     await shots.take(pat, "hex-pat-fog-isometric");
 
@@ -1105,7 +1106,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
 
   test("HX4-5. Room settings, the new scene form on hexes, a hex scene's settings, Line up grid's options, the builder's line and FU39-B-G1's token Size controls sit within 1 px at each size", async () => {
     const off: string[] = [];
-    const sizeToken = randomUUID();
+    const sizeToken = uuidv7();
     let phone: Awaited<ReturnType<typeof dmPhone>> | null = null;
     try {
       await ops.send({ t: "token.create", token: { id: sizeToken, sceneId: run.camp, kind: "monster", name: "FU39 Size token", size: "large", x: 4, y: 3, disposition: "hostile", visibility: "all", actor: { inline: ACTOR } } });
@@ -1464,6 +1465,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
   test("HX5-3. an ogre dragged into the one-row corridor squeezes onto one hex there, and one walked through it pays for each squeezed hex", async () => {
     await ops.send(creature(run.vaultOgre, "Vault ogre", "large", { col: 13, row: 13 }, { sceneId: run.vault }));
     await waitFor("the vault ogre", () => onVaultHex(run.vaultOgre, "large", { col: 13, row: 13 }));
+    run.vaultEntry = uuidv7();
     await ops.send({ t: "encounter.start", entries: [{ id: run.vaultEntry, tokenId: run.vaultOgre, value: 12 }] });
     await ops.send({ t: "encounter.next" });
     await waitFor("the ogre's turn", () => (dmSocket.state?.encounter?.activeEntryId === run.vaultEntry ? true : null));
@@ -1489,8 +1491,8 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
    * the goblin follows in single file, as the drag does.
    */
   test("rulesa-2. the walking ruler from a warhorse dragging a goblin into the one-row corridor reads the way the drag takes, squeezing and dragging named", async () => {
-    const horse = randomUUID();
-    const gob = randomUUID();
+    const horse = uuidv7();
+    const gob = uuidv7();
     await ops.send(creature(horse, "Vault warhorse", "large", { col: 12, row: 13 }, { sceneId: run.vault, kind: "npc", disposition: "ally" }));
     await ops.send(creature(gob, "Vault captive", "medium", { col: 12, row: 12 }, { sceneId: run.vault }));
     await waitFor("the warhorse and the captive", () => (onVaultHex(horse, "large", { col: 12, row: 13 }) && onVaultHex(gob, "medium", { col: 12, row: 12 }) ? true : null));
@@ -1606,7 +1608,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { fogEnabled: true, vision: { on: false, light: "dark" } } });
     await ops.send({ t: "fog.reset", sceneId: run.sceneId, to: "hidden" });
     await waitFor("fog on, vision off", () => (dmSocket.state?.scenes[run.sceneId]?.fogEnabled === true && dmSocket.state.scenes[run.sceneId]?.vision?.on === false) || null);
-    const plate = randomUUID().replace(/-/g, "").slice(0, 16);
+    const plate = uuidv7();
     const rig = { on: ["enter"], who: "party", floor: false, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false };
     await ops.send({ t: "trap.create", trap: { id: plate, sceneId: run.sceneId, name: "Buried plate", zone: { cells: [{ x: 2, y: 18, w: 2, h: 2 }] }, found: true, rig } });
     await waitFor("the plate on the DM's copy", () => dmSocket.state?.traps[plate]?.grid === "hexRows" || null);
@@ -1621,8 +1623,8 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     }
     for (let i = 0; i < around.length; i += 40) await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: around.slice(i, i + 40) });
     // A marker on revealed ground in the far corner: once Pat's copy holds it, Pat has had every op before it.
-    const marker = randomUUID();
-    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 26, y: 0, w: 4, h: 3 } }] });
+    const marker = uuidv7();
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: 26, y: 0, w: 4, h: 3 } }] });
     await ops.send(creature(marker, "Marker", "tiny", { col: 27, row: 1 }));
     await waitFor("Pat's copy after the reveal", () => patSocket.state?.tokens[marker] ?? null);
     assert.equal(patSocket.state!.traps[plate], undefined, "the ground beside its hexes revealed");
@@ -1940,7 +1942,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
    * on a scene of their own. A 10 ft terrace along row 8 from column 12,
    * reached by a stair on hex 11,8 facing east, its up side.
    */
-  const terrace = { scene: randomUUID(), gob: randomUUID(), entry: randomUUID(), pit: randomUUID(), thorn: randomUUID() };
+  const terrace = { scene: uuidv7(), gob: uuidv7(), entry: uuidv7(), pit: uuidv7(), thorn: uuidv7() };
   const TERRACE = [12, 13, 14, 15, 16].map((col) => ({ col, row: 8 }));
   const terraceChunk = () => dmSocket.state?.buildChunks[`${terrace.scene}:0,0`];
   const groundOf = (h: Hex) => {
@@ -2262,7 +2264,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
    */
 
   test("fu35a-1. Brom rides the warhorse into a one-hex corridor: he sits on its one hex there, and his torch lights the corridor for the party, so Pat sees the goblin down it", async () => {
-    const keep = { scene: randomUUID(), horse: randomUUID(), brom: randomUUID(), gob: randomUUID() };
+    const keep = { scene: uuidv7(), horse: uuidv7(), brom: uuidv7(), gob: uuidv7() };
     // A block of rock with a one-row corridor along row 14, the warhorse well west of it, a goblin in the dark down the corridor.
     const rock = (h: Hex) => h.col >= 16 && h.col <= 22 && h.row >= 11 && h.row <= 17 && h.row !== 14;
     await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "Keep", bounds: BOUNDS, gridShape: "hexRows" } });
@@ -2305,7 +2307,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
   });
 
   test("fu35a-2. on squares too (D-261029-53): Brom, on the warhorse's far lower square, rides into a corridor one square wide on its one square there, and Pat sees the goblin down it", async () => {
-    const keep = { scene: randomUUID(), horse: randomUUID(), brom: randomUUID(), gob: randomUUID() };
+    const keep = { scene: uuidv7(), horse: uuidv7(), brom: uuidv7(), gob: uuidv7() };
     await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "Square keep", bounds: BOUNDS } });
     await waitFor("the square keep in the DM's state", () => dmSocket.state?.scenes[keep.scene] ?? null);
     const panel = await openScenes(dm);

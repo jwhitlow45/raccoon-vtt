@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -111,15 +111,15 @@ const run = {
   benId: "",
   cyId: "",
   longId: "",
-  thornId: randomUUID(),
-  muleId: randomUUID(),
-  wagonId: randomUUID(),
-  ivyId: randomUUID(),
-  hawkId: randomUUID(),
-  breeId: randomUUID(),
-  goblinId: randomUUID(),
-  labelId: randomUUID(),
-  phases: { day: randomUUID(), night: randomUUID() },
+  thornId: uuidv7(),
+  muleId: uuidv7(),
+  wagonId: uuidv7(),
+  ivyId: uuidv7(),
+  hawkId: uuidv7(),
+  breeId: uuidv7(),
+  goblinId: uuidv7(),
+  labelId: uuidv7(),
+  phases: { day: uuidv7(), night: uuidv7() },
   /** The Night phase's map, which a player's copy of the scene shows once the DM switches to it (players hold no phase list). */
   nightMap: "",
   /** How many frames Ben's page and the display had received when Whole party pooled the maps (pv-7). */
@@ -678,9 +678,9 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
     await ops.send({
       t: "encounter.start",
       entries: [
-        { id: randomUUID(), tokenId: run.goblinId, value: 20 },
-        { id: randomUUID(), tokenId: run.thornId, value: 15 },
-        { id: randomUUID(), tokenId: run.breeId, value: 10 },
+        { id: uuidv7(), tokenId: run.goblinId, value: 20 },
+        { id: uuidv7(), tokenId: run.thornId, value: 15 },
+        { id: uuidv7(), tokenId: run.breeId, value: 10 },
       ],
     });
     await ops.send({ t: "encounter.next" });
@@ -1145,8 +1145,8 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
   });
 
   test("FU38-B: Attach stays above notices when a closed View as list mounts and unmounts", async () => {
-    const id = randomUUID();
-    const lantern = randomUUID();
+    const id = uuidv7();
+    const lantern = uuidv7();
     await ops.send(creature(lantern, "FU38 lantern", { x: 13, y: 1 }, { kind: "object", size: "tiny", visibility: "dm" }));
     // Attach lists what the selected token can carry, so select the porter beside the lantern.
     await ops.send(creature(id, "FU38 porter", MULE_AT, { kind: "npc", disposition: "ally", visibility: "dm", ownerIds: [run.benId, run.anaId] }));
@@ -1180,8 +1180,8 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
   });
 
   test("FU38-B: View as stays above notices when a closed Attach list unmounts and mounts", async () => {
-    const id = randomUUID();
-    const holder = randomUUID();
+    const id = uuidv7();
+    const holder = uuidv7();
     await ops.send(creature(holder, "FU38 porter", { x: 13, y: 1 }, { kind: "npc", visibility: "dm" }));
     await ops.send(creature(id, "FU38 lantern", MULE_AT, { kind: "object", size: "tiny", visibility: "dm", ownerIds: [run.benId, run.anaId] }));
     try {
@@ -1234,8 +1234,8 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
 
   test("pv-7b. in Isometric, per player: the DM's goblin on ground the party explored stands bright and a creature on ground nobody explored dims, and Ben's page stands neither (ISO5P2-FV-4)", async () => {
     // The pool left the goblin's ground in the party's explored layer, which the DM's map draws beside the DM's own (D-261026-18).
-    const imp = randomUUID();
-    const pc = randomUUID();
+    const imp = uuidv7();
+    const pc = uuidv7();
     await ops.send(creature(imp, "Imp", NOBODY_AT, { disposition: "hostile" }));
     // A wholly fogged unowned PC is withheld, and an owned PC stands above fog. This one straddles Bree's torchlight.
     await ops.send(creature(pc, "FU39-C flat control", FLAT_CONTROL_AT, { kind: "pc" }));

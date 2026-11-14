@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -63,7 +63,7 @@ let ops: OpSocket;
 const dmSocket = new SocketWatch("dm");
 const consoles: ConsoleWatch[] = [];
 
-const run = { roomId: "", roomName: "The Sunken Keep", matId: "", towerId: randomUUID(), hiveId: randomUUID(), file: "", bigFile: "" };
+const run = { roomId: "", roomName: "The Sunken Keep", matId: "", towerId: uuidv7(), hiveId: uuidv7(), file: "", bigFile: "" };
 
 function state(): RoomState {
   return dmSocket.state as RoomState;
@@ -291,7 +291,7 @@ describe("raccoon-vtt several floors: a floor from a file or a dungeon", { timeo
     // A co-DM fills Tower to its 8 floors meanwhile.
     const added: string[] = [];
     while (towerFloors().length < 8) {
-      const id = randomUUID();
+      const id = uuidv7();
       await ops.send({ t: "scene.create", scene: { id, name: "Tower", bounds: BOUNDS }, floor: { beside: run.towerId, side: "above" } });
       added.push(id);
       await waitFor("the co-DM's floor", () => (state().scenes[id] ? true : null));
