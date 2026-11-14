@@ -28,24 +28,34 @@ $security.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAcce
 # What is made in it, its maker's.
 $security.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($creatorOwner, 'FullControl', $all, 'InheritOnly', 'Allow')))
 
-# A plain folder that Administrators or SYSTEM own: no one else could have changed it.
+# A plain folder that Administrators or SYSTEM own, with exactly the ACL
+# above: protected, and those four entries, none inherited. Anything else may
+# have been open to another user, who could still hold it, so it is never
+# mended in place.
 function Test-Trusted([string]$folder) {
   $item = Get-Item -LiteralPath $folder -Force
   if (-not $item.PSIsContainer) { return $false }
   if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $false }
-  $owner = (Get-Acl -LiteralPath $folder).GetOwner([System.Security.Principal.SecurityIdentifier])
-  return ($owner -eq $admins) -or ($owner -eq $system)
+  $acl = Get-Acl -LiteralPath $folder
+  $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
+  if (-not (($owner -eq $admins) -or ($owner -eq $system))) { return $false }
+  if (-not $acl.AreAccessRulesProtected) { return $false }
+  $have = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+  $want = @($security.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+  if ($have.Count -ne $want.Count) { return $false }
+  foreach ($w in $want) {
+    $same = @($have | Where-Object { (-not $_.IsInherited) -and ($_.IdentityReference -eq $w.IdentityReference) -and ($_.FileSystemRights -eq $w.FileSystemRights) -and ($_.InheritanceFlags -eq $w.InheritanceFlags) -and ($_.PropagationFlags -eq $w.PropagationFlags) -and ($_.AccessControlType -eq $w.AccessControlType) })
+    if ($same.Count -ne 1) { return $false }
+  }
+  return $true
 }
 
 for ($try = 0; $try -lt 3; $try++) {
   # Get-Item sees a link that leads nowhere, where Test-Path would not.
   if (Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue) {
-    if (Test-Trusted $path) {
-      # An earlier install's: its ACL is set again, which also mends one an administrator changed.
-      Set-Acl -LiteralPath $path -AclObject $security
-      if (Test-Trusted $path) { exit 0 }
-    }
-    # Made by someone else, who may still hold it open: moved aside, never used or deleted.
+    # An earlier install's, kept as it is with every user's folder in it.
+    if (Test-Trusted $path) { exit 0 }
+    # Anything else is moved aside, never used, mended or deleted.
     Rename-Item -LiteralPath $path -NewName ('RaccoonVTT.untrusted-' + [DateTime]::UtcNow.Ticks)
     continue
   }
