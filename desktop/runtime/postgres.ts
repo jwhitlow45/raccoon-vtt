@@ -5,10 +5,10 @@ import { appendFile, open, readFile, readdir, realpath, rm, stat, writeFile } fr
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { Platform } from "../contract.ts";
-import { renameRetrying, syncDir, syncFile } from "./durable.ts";
+import { renameRetrying, syncDir, syncFile, writeDurable } from "./durable.ts";
 import { rotateIfLarge } from "./logs.ts";
 import { loopbackPort } from "./ports.ts";
-import { bootTime, isAlive, processFacts, processStamp, type ProcessFacts } from "./processInfo.ts";
+import { bootId, isAlive, processFacts, processStamp, type ProcessFacts } from "./processInfo.ts";
 
 /**
  * The bundled PostgreSQL (docs/design/design-v1-local-app.md 2, 6 and 8.1,
@@ -62,13 +62,18 @@ const CONF = [
 export type ProcessLookup = {
   stamp(pid: number): Promise<number | null>;
   facts(pid: number): Promise<ProcessFacts>;
-  bootTime(): Promise<number | null>;
+  /** This boot's id, or "" where the system has none (Windows) or won't say. */
+  bootId(): Promise<string>;
   /** This process's user, which a postmaster it may stop runs as too. Null on Windows. */
   uid: number | null;
 };
 
-/** How far before this boot's start, by the wall clock, a postmaster.pid must be to count as from an earlier boot. */
-export const BOOT_MARGIN_MS = 60_000;
+/**
+ * Beside postmaster.pid, the boot the last postmaster this app started ran
+ * in, written before it starts. A boot id never moves with the clock, where
+ * a boot time does when the clock is stepped.
+ */
+export const BOOT_RECORD = "raccoonvtt.boot";
 
 export type ClusterOptions = {
   binDir: string;
@@ -111,7 +116,7 @@ export class Cluster {
     this.proc = opts.proc ?? {
       stamp: (pid) => processStamp(pid, opts.platform),
       facts: (pid) => processFacts(pid, opts.platform),
-      bootTime: () => bootTime(opts.platform),
+      bootId: () => bootId(opts.platform),
       uid: process.getuid?.() ?? null,
     };
   }
@@ -208,11 +213,11 @@ export class Cluster {
    * same folder. So each answer needs evidence, in this order:
    * - `running`: the program is postgres and it is this folder's: on Linux
    *   its working folder is this one, elsewhere it started when the file says.
-   * - `stale`: the file is from before this boot, the program is known and
-   *   is not postgres, or it runs as another user.
+   * - `stale`: the boot recorded beside it is not this one, the program is
+   *   known and is not postgres, or it runs as another user.
    * - `uncertain`: anything else, a system that refused to say included.
-   * Running comes first, so a clock stepped since the start never makes this
-   * folder's live postmaster look like one from an earlier boot.
+   * Running comes first, so this folder's live postmaster is never taken for
+   * a stale one, whatever else is read.
    */
   async leftover(): Promise<Leftover> {
     let lines: string[];
@@ -240,16 +245,53 @@ export class Cluster {
         return { kind: "running", pid };
       }
     }
-    let boot: number | null = null;
-    try {
-      boot = await this.proc.bootTime();
-    } catch {
-      // Unknown: no evidence either way.
-    }
-    if (boot !== null && Number.isFinite(startedSec) && startedSec * 1000 < boot - BOOT_MARGIN_MS) return { kind: "stale" };
+    if (await this.fromEarlierBoot()) return { kind: "stale" };
     if (facts.exe !== null && !postgres) return { kind: "stale" };
     if (facts.uid !== null && this.proc.uid !== null && facts.uid !== this.proc.uid) return { kind: "stale" };
     return isAlive(pid) ? { kind: "uncertain", pid } : { kind: "stale" };
+  }
+
+  /**
+   * Whether postmaster.pid is from an earlier boot: a boot is recorded beside
+   * it and this boot is another. Windows has no boot id, so there the
+   * program's name is the evidence.
+   */
+  private async fromEarlierBoot(): Promise<boolean> {
+    let recorded: string;
+    try {
+      recorded = (await readFile(join(this.opts.pgData, BOOT_RECORD), "utf8")).trim();
+    } catch {
+      return false;
+    }
+    let current = "";
+    try {
+      current = await this.proc.bootId();
+    } catch {
+      // Unknown: no evidence either way.
+    }
+    return recorded !== "" && current !== "" && recorded !== current;
+  }
+
+  /**
+   * Records this boot beside the postmaster about to start. Any postmaster.pid
+   * is gone by now, so the next one the folder holds is from the boot
+   * recorded. With no id to write, the record goes, since an older one would
+   * name a boot this postmaster never ran in.
+   */
+  private async recordBoot(): Promise<void> {
+    let boot = "";
+    try {
+      boot = await this.proc.bootId();
+    } catch {
+      // No id: the record goes.
+    }
+    const file = join(this.opts.pgData, BOOT_RECORD);
+    if (boot !== "") {
+      await writeDurable(file, `${boot}\n`, { platform: this.opts.platform });
+    } else {
+      await rm(file, { force: true });
+      await syncDir(this.opts.pgData, { platform: this.opts.platform });
+    }
   }
 
   /** Only the lock holder calls this, and only when the supervisor that started it is gone (D-261113-093). */
@@ -276,6 +318,7 @@ export class Cluster {
    */
   async start(): Promise<number> {
     rotateIfLarge(this.opts.logFile);
+    await this.recordBoot();
     let lastError: DatabaseFailed | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
       const port = await (this.opts.pickPort ?? loopbackPort)();

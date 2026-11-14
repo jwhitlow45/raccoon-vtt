@@ -5,13 +5,14 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { after, describe, test } from "node:test";
 import { Platform } from "../contract.ts";
-import { Cluster, DatabaseFailed, uncertainWords, type ProcessLookup } from "./postgres.ts";
+import { BOOT_RECORD, Cluster, DatabaseFailed, uncertainWords, type ProcessLookup } from "./postgres.ts";
 
 /**
  * The cluster's own rules, with stand-ins for PostgreSQL's programs and for
  * the process readings (postgres.itest.ts runs the real ones): which
- * postmaster.pid may go, a stepped clock, the postmaster this process
- * started, and an init cut off before the app's settings.
+ * postmaster.pid may go, a stepped clock, the boot recorded beside it, the
+ * postmaster this process started, and an init cut off before the app's
+ * settings.
  */
 
 const platform = Platform.parse(process.platform);
@@ -50,10 +51,11 @@ async function programs(dir: string): Promise<{ bin: string; calls: () => Promis
 
 /**
  * What the system says about the pid: by default this computer's own
- * postgres, run as this user, started when postmaster.pid says, an hour into
- * this boot. `offsetMs` moves its start reading, as a clock step since does.
+ * postgres, run as this user, started when postmaster.pid says, in the boot
+ * "boot-now". `offsetMs` moves its start reading, as a clock step since does.
+ * `boot` is this boot's id, "" for none, or an error for a refused read.
  */
-type Look = { exe?: string | null; cwd?: string | null; uid?: number | null; offsetMs?: number; boot?: number | null; stamp?: () => Promise<number | null>; facts?: ProcessLookup["facts"] };
+type Look = { exe?: string | null; cwd?: string | null; uid?: number | null; offsetMs?: number; boot?: string | Error; stamp?: () => Promise<number | null>; facts?: ProcessLookup["facts"] };
 function lookup(o: Look = {}): ProcessLookup {
   return {
     stamp: o.stamp ?? (async () => 4242),
@@ -65,7 +67,10 @@ function lookup(o: Look = {}): ProcessLookup {
         uid: o.uid === undefined ? 501 : o.uid,
         start: Date.now() + (o.offsetMs ?? 0),
       })),
-    bootTime: async () => (o.boot === undefined ? Date.now() - 3_600_000 : o.boot),
+    bootId: async () => {
+      if (o.boot instanceof Error) throw o.boot;
+      return o.boot ?? "boot-now";
+    },
     uid: 501,
   };
 }
@@ -107,17 +112,34 @@ describe("a postmaster.pid found at a start", () => {
     assert.equal(await kind(lookup()), "stale", "a dead pid");
   });
 
-  test("a postmaster.pid from before this boot is stale, but this folder's live postmaster never is, whatever the clock says", async () => {
+  test("a postmaster.pid is from an earlier boot only when the boot recorded beside it is another, never by the clock", async () => {
     const dir = await folder();
-    const boot = Date.now() - 600_000;
-    const kind = async (look: Look, on: Platform) => (await cluster(dir, "/none", lookup({ boot, ...look }), { platform: on }).leftover()).kind;
-    await pidFile(dir, process.pid, Math.floor((boot - 2 * 3_600_000) / 1000));
-    assert.equal(await kind({ exe: null, uid: null }, "win32"), "stale", "its pid is someone else's now");
-    assert.equal(await kind({ offsetMs: -300_000 }, "darwin"), "stale", "another postgres, started in this boot");
-    assert.equal(await kind({ cwd: join(dir, "postgres") }, "linux"), "running", "Linux: this folder's postgres, the file written before a clock step");
-    await pidFile(dir, process.pid, Math.floor((boot - 30_000) / 1000));
-    assert.equal(await kind({ exe: null, uid: null }, "win32"), "uncertain", "within a minute of the boot is no evidence");
-    assert.equal(await kind({ exe: null, uid: null, boot: null }, "win32"), "uncertain", "no boot time read is no evidence");
+    const refused = { facts: async () => Promise.reject(Object.assign(new Error("EACCES: permission denied, readlink '/proc/1/exe'"), { code: "EACCES" })) };
+    const kind = async (look: Look, on: Platform = "linux") => (await cluster(dir, "/none", lookup({ ...refused, ...look }), { platform: on }).leftover()).kind;
+    const record = (id: string) => writeFile(join(dir, "postgres", BOOT_RECORD), `${id}\n`);
+    // Written 30 s into this boot, then the clock was stepped 120 s forward:
+    // by the wall clock the file is from before this boot.
+    const file = await pidFile(dir, process.pid, Math.floor((Date.now() - 150_000) / 1000));
+    assert.equal(await kind({}), "uncertain", "no boot recorded is no evidence");
+    await record("boot-now");
+    assert.equal(await kind({}), "uncertain", "this boot recorded, with the inspection refused");
+    assert.equal(await kind({}, "darwin"), "uncertain");
+    assert.equal(await kind({ boot: "" }), "uncertain", "this boot's id not read");
+    assert.equal(await kind({ boot: new Error("sysctl failed") }, "darwin"), "uncertain", "this boot's id refused");
+    const c = cluster(dir, "/none", lookup(refused), { platform: "linux" });
+    await assert.rejects(c.clearLeftover(await c.leftover()), DatabaseFailed);
+    assert.ok(existsSync(file), "the stepped clock never reaches the unlink");
+
+    await record("");
+    assert.equal(await kind({}), "uncertain", "an empty record is no evidence");
+    await record("boot-before");
+    assert.equal(await kind({ boot: "" }, "win32"), "uncertain", "Windows has no boot id, so its CIM name carries it");
+    assert.equal(await kind({ cwd: join(dir, "postgres"), facts: undefined }), "running", "Linux: this folder's postgres is running, whatever was recorded");
+    assert.equal(await kind({}), "stale", "a recorded boot that is not this one");
+    assert.equal(await kind({}, "darwin"), "stale");
+    const before = cluster(dir, "/none", lookup(refused), { platform: "linux" });
+    await before.clearLeftover(await before.leftover());
+    assert.equal(existsSync(file), false, "and only then does the file go");
   });
 
   test("an inspection the system refuses keeps the file, and the start stops with words", async () => {
@@ -175,6 +197,36 @@ describe("the postmaster this process started", { skip: posixOnly }, () => {
     assert.equal(found.kind, "stale");
     await c.clearLeftover(found);
     assert.deepEqual(await calls(), ["pg_ctl start"], "pg_ctl never ran against node");
+  });
+});
+
+describe("a start", { skip: posixOnly }, () => {
+  test("records this boot beside the postmaster before it starts, and with no boot id removes an older record", async () => {
+    const dir = await folder();
+    const { bin, calls } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const recorded = join(dir, "postgres", BOOT_RECORD);
+    const at: string[] = [];
+    const start = async (boot: string) => {
+      // The port is picked just before pg_ctl start runs.
+      const pickPort = async () => {
+        at.push(existsSync(recorded) ? (await readFile(recorded, "utf8")).trim() : "none");
+        return 41659;
+      };
+      const c = new Cluster({ ...cluster(dir, bin, lookup({ boot }), { platform: "darwin" }).opts, pickPort });
+      process.env.RVTT_FAKE_PID = String(process.pid);
+      try {
+        await c.start();
+      } finally {
+        delete process.env.RVTT_FAKE_PID;
+      }
+      await c.stop();
+    };
+    await start("boot-a");
+    await start("boot-b");
+    await start("");
+    assert.deepEqual(at, ["boot-a", "boot-b", "none"]);
+    assert.deepEqual(await calls(), ["pg_ctl start", "pg_ctl stop", "pg_ctl start", "pg_ctl stop", "pg_ctl start", "pg_ctl stop"]);
   });
 });
 

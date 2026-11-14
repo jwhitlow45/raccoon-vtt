@@ -158,36 +158,19 @@ export async function processFacts(pid: number, platform: Platform = process.pla
   return { ...(out ? parseWindowsProcess(out) : { exe: null, start: null }), cwd: null, uid: null };
 }
 
-let cachedBootTime: number | null = null;
-
-/**
- * When this boot began, in ms since the epoch, or null when it can't be
- * read: /proc/stat's btime, kern.boottime, or Windows' LastBootUpTime. Each
- * is reckoned from the wall clock, so a caller allows a margin.
- */
-export async function bootTime(platform: Platform = process.platform as Platform): Promise<number | null> {
-  if (cachedBootTime !== null) return cachedBootTime;
-  const read = await maybe(async () => {
-    if (platform === "linux") return Number(/^btime (\d+)$/m.exec(await readFile("/proc/stat", "utf8"))?.[1]) * 1000;
-    if (platform === "darwin") return Number(/sec = (\d+)/.exec((await run("/usr/sbin/sysctl", ["-n", "kern.boottime"])).stdout)?.[1]) * 1000;
-    const { stdout } = await run(powershell(), ["-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')"], { windowsHide: true });
-    return Date.parse(stdout.trim());
-  });
-  if (read !== null && Number.isFinite(read) && read > 0) cachedBootTime = read;
-  return cachedBootTime;
-}
-
 let cachedBoot: string | null = null;
 
-/** This boot, so a start time from a boot before never matches one now. */
+/**
+ * This boot, so a start time from a boot before never matches one now:
+ * Linux's boot_id or macOS's kern.bootsessionuuid, which no clock change
+ * moves. Windows has none and needs none (below).
+ */
 export async function bootId(platform: Platform = process.platform as Platform): Promise<string> {
   if (cachedBoot !== null) return cachedBoot;
   try {
     if (platform === "linux") cachedBoot = (await readFile("/proc/sys/kernel/random/boot_id", "utf8")).trim();
-    else if (platform === "darwin") {
-      const { stdout } = await run("/usr/sbin/sysctl", ["-n", "kern.boottime"]);
-      cachedBoot = /sec = (\d+)/.exec(stdout)?.[1] ?? "";
-    } else {
+    else if (platform === "darwin") cachedBoot = (await run("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"])).stdout.trim();
+    else {
       // Windows reports start times as absolute moments, so no boot is needed to tell two apart.
       cachedBoot = "";
     }
