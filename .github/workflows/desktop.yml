@@ -302,10 +302,15 @@ jobs:
             echo "::error::The checkout is $have, not $COMMIT, the commit the plan job read."
             exit 1
           fi
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      # Node first. pnpm/action-setup starts from @pnpm/exe when the Node
+      # on the PATH is older than 22.13, as on the macOS x64 image, and
+      # @pnpm/exe 11 has no macOS x64 binary, so its self-update stops
+      # there. With this Node it starts from the pnpm package, which runs
+      # on every runner and has no native binary to check.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - name: Fetch Node and PostgreSQL
         env:
           GH_TOKEN: ${{ github.token }}
@@ -413,10 +418,15 @@ jobs:
             echo "::error::The checkout is $have, not $COMMIT, the commit the plan job read."
             exit 1
           fi
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      # Node first. pnpm/action-setup starts from @pnpm/exe when the Node
+      # on the PATH is older than 22.13, as on the macOS x64 image, and
+      # @pnpm/exe 11 has no macOS x64 binary, so its self-update stops
+      # there. With this Node it starts from the pnpm package, which runs
+      # on every runner and has no native binary to check.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       # Each archive checked against desktop/pins.json, PostgreSQL's
       # provenance and floors, and on Windows the Visual C++ runtime beside
       # it (design section 3).
