@@ -12,11 +12,12 @@ import type { Clock, Timer } from "./clock.ts";
  * Private, which one long-lived hidden PowerShell reads every 5 s, printing
  * a full sample each time, changed or not.
  *
- * Any doubt closes: a sample is fresh for 15 s, and with none fresh (the
- * child hung, exited or printed something unreadable) the server binds
- * 127.0.0.1 and the child is started again after 1, 2 and 4 s, then every
- * 30 s. macOS and Linux have no such label, so there the switch alone
- * decides.
+ * Any doubt closes: a sample is fresh for 15 s, and an error line or
+ * output that does not read is no new sample. A child that exits or cannot
+ * start drops the sample at once, so the server binds 127.0.0.1 until a new
+ * child gives a new one. A child silent for 15 s is ended the same way.
+ * Children are started again after 1, 2 and 4 s, then every 30 s. macOS
+ * and Linux have no such label, so there the switch alone decides.
  */
 
 export const SAMPLE_EVERY_MS = 5_000;
@@ -128,13 +129,19 @@ export function networkReading(
   return { reach, host, share: primary, others };
 }
 
-export type WatchChild = { stdout: Readable | null; kill(): boolean; once(event: "exit", listener: () => void): unknown };
+export type WatchChild = {
+  stdout: Readable | null;
+  kill(): boolean;
+  once(event: "exit", listener: () => void): unknown;
+  /** A child that could not start (ENOENT, EACCES) says so here, and without a listener Node would throw it. */
+  once(event: "error", listener: (err: Error) => void): unknown;
+};
 
 export type WatcherDeps = {
   clock: Clock;
   spawn: () => WatchChild;
   log: (msg: string) => void;
-  /** Called when the latest sample changes, or stops being fresh. */
+  /** Called when the latest sample changes, stops being fresh, or is dropped on a failure. */
   onChange: () => void;
 };
 
@@ -199,7 +206,13 @@ export class ProfileWatcher {
 
   private launch(): void {
     if (this.stopped) return;
-    const child = this.deps.spawn();
+    let child: WatchChild;
+    try {
+      child = this.deps.spawn();
+    } catch (err) {
+      this.fail(`the watcher could not start: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
     this.child = child;
     this.childSeq = 0;
     this.startedAt = this.deps.clock.now();
@@ -216,10 +229,15 @@ export class ProfileWatcher {
     child.once("exit", () => {
       if (this.child === child) this.fail("the watcher exited");
     });
+    child.once("error", (err) => {
+      if (this.child === child) this.fail(`the watcher could not start: ${err.message}`);
+    });
   }
 
   private take(line: string): void {
     const sample = parseSample(line, this.deps.clock.now());
+    // An error line or one that does not read is no new sample (D-261113-094):
+    // the last good one closes the server when it is 15 s old.
     if (!sample) return;
     // A number that does not grow is a repeat, which proves the child no more alive than before.
     if (sample.seq <= this.childSeq) return;
@@ -244,15 +262,21 @@ export class ProfileWatcher {
     this.health = this.deps.clock.setTimeout(() => this.checkHealth(), 1_000);
   }
 
+  /**
+   * Its callers check the failing child is still the current one, so one
+   * child's exit and error never schedule two restarts. The sample goes
+   * before onChange, so the supervisor's next read is unknown and it binds
+   * 127.0.0.1 at once rather than when the last sample turns stale.
+   */
   private fail(why: string): void {
-    if (this.stopped || !this.child) return;
+    if (this.stopped) return;
     this.deps.log(`network profile watcher failed: ${why}`);
-    this.child.kill();
+    this.child?.kill();
     this.child = null;
-    if (this.wasFresh) {
-      this.wasFresh = false;
-      this.deps.onChange();
-    }
+    const had = this.sample !== null || this.wasFresh;
+    this.sample = null;
+    this.wasFresh = false;
+    if (had) this.deps.onChange();
     const delay = RESTART_DELAYS_MS[this.failures] ?? RESTART_LATER_MS;
     this.failures++;
     this.restart = this.deps.clock.setTimeout(() => this.launch(), delay);
