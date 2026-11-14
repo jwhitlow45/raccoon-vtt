@@ -780,9 +780,8 @@ describe("the room search's sweep", { concurrency: false }, () => {
       await ops.send({ t: "encounter.end" });
       await ops.send({ t: "clock.stop" });
       await ops.send({ t: "view.blackout", blackout: false });
-      // Shown again is a new showing, and a room takes each id once.
-      run.shown = uuidv7();
-      await ops.send({ t: "handout.show", handout: { id: run.shown, assetId: run.letter, title: "Belak's letter", to: "all" } });
+      // Shown again is a new showing, since a room takes each id once. `run.shown` keeps the id the room at rest offered Hide for, which se-s6 reads.
+      await ops.send({ t: "handout.show", handout: { id: uuidv7(), assetId: run.letter, title: "Belak's letter", to: "all" } });
       await ops.send({ t: "scene.delete", sceneId: run.caveTop });
       await ops.send({ t: "scene.delete", sceneId: run.caveLoft });
     }
