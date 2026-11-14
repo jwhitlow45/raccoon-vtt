@@ -114,3 +114,73 @@ describe("ROOM_SECRET_KEY", () => {
     }
   });
 });
+
+describe("local mode (docs/design/design-v1-local-app.md 4)", () => {
+  const key = Buffer.alloc(32, 9).toString("base64");
+  const local = { NODE_ENV: "production", RACCOON_MODE: "local", DATABASE_URL: "postgres://x@localhost/x", ROOM_SECRET_KEY: key, HOST: "127.0.0.1", PORT: "3170" };
+
+  test("hosted defaults are unchanged: no mode, an empty one and `server` are all hosted", () => {
+    for (const env of [base, { ...base, RACCOON_MODE: "" }, { ...base, RACCOON_MODE: "server" }]) {
+      const c = loadConfig(env);
+      assert.equal(c.local, false);
+      assert.equal(c.RACCOON_MODE, "server");
+      assert.equal(c.publicOrigin, "http://localhost:5173");
+    }
+    const production = {
+      NODE_ENV: "production",
+      DATABASE_URL: "postgres://x@localhost/x",
+      PUBLIC_ORIGIN: "https://vtt.example.com",
+      EGRESS_STRICT_PROXY: "http://egress:3128",
+      EGRESS_PUBLIC_PROXY: "http://egress:3129",
+      ROOM_SECRET_KEY: key,
+    };
+    const hosted = loadConfig(production);
+    assert.equal(hosted.local, false);
+    assert.equal(hosted.production, true);
+    assert.equal(hosted.publicOrigin, "https://vtt.example.com");
+    // The hosted requirements still stand without the mode.
+    assert.throws(() => loadConfig({ ...production, PUBLIC_ORIGIN: undefined }), /without PUBLIC_ORIGIN/);
+    assert.throws(() => loadConfig({ ...production, EGRESS_PUBLIC_PROXY: undefined }), /without EGRESS_PUBLIC_PROXY/);
+  });
+
+  test("starts as a production build whose origin is localhost on its port, with neither a public origin nor proxies", () => {
+    const c = loadConfig(local);
+    assert.equal(c.local, true);
+    assert.equal(c.production, true);
+    assert.equal(c.publicOrigin, "http://localhost:3170");
+    assert.deepEqual(c.roomSecretKey, Buffer.alloc(32, 9));
+    assert.equal(loadConfig({ ...local, HOST: "0.0.0.0", PORT: "3171" }).publicOrigin, "http://localhost:3171");
+    assert.equal(loadConfig({ ...local, PORT: "80" }).publicOrigin, "http://localhost", "a browser sends http's own port as nothing");
+  });
+
+  test("needs production, its own room key, and a HOST of 127.0.0.1 or 0.0.0.0", () => {
+    assert.throws(() => loadConfig({ ...local, NODE_ENV: "development" }), /NODE_ENV must be production/);
+    assert.throws(() => loadConfig({ ...local, NODE_ENV: undefined }), /NODE_ENV must be production/);
+    assert.throws(() => loadConfig({ ...local, ROOM_SECRET_KEY: undefined }), /ROOM_SECRET_KEY is required.*openssl rand -base64 32/);
+    for (const host of ["::", "10.0.0.5", "localhost", "0.0.0.0 "]) {
+      assert.throws(() => loadConfig({ ...local, HOST: host }), /HOST must be 127\.0\.0\.1 .* or 0\.0\.0\.0/, host);
+    }
+    assert.equal(loadConfig({ ...local, HOST: undefined }).HOST, "127.0.0.1", "the default HOST is loopback, which local mode takes");
+  });
+
+  test("refuses each hosted setting, naming it with its reason", () => {
+    const refused: Array<[Record<string, string>, RegExp]> = [
+      [{ PUBLIC_ORIGIN: "http://localhost:3170" }, /PUBLIC_ORIGIN is refused: local pages open at localhost/],
+      [{ TRUST_CF_CONNECTING_IP: "1" }, /TRUST_CF_CONNECTING_IP=1 is refused: a device on the network could claim 127\.0\.0\.1/],
+      [{ TURNSTILE_SITE_KEY: "k", TURNSTILE_SECRET: "s" }, /TURNSTILE_SITE_KEY is refused[^]*TURNSTILE_SECRET is refused/],
+      [{ ADMIN_PASSWORD_HASH: "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g" }, /ADMIN_PASSWORD_HASH is refused/],
+      [{ EGRESS_STRICT_PROXY: "http://egress:3128" }, /EGRESS_STRICT_PROXY is refused: local mode connects directly/],
+      [{ EGRESS_PUBLIC_PROXY: "http://egress:3129" }, /EGRESS_PUBLIC_PROXY is refused: local mode connects directly/],
+    ];
+    for (const [env, message] of refused) assert.throws(() => loadConfig({ ...local, ...env }), message, Object.keys(env).join());
+    // Off or empty, as compose passes unset, is not set.
+    assert.doesNotThrow(() => loadConfig({ ...local, TRUST_CF_CONNECTING_IP: "0", TURNSTILE_SITE_KEY: "", TURNSTILE_SECRET: "", ADMIN_PASSWORD_HASH: "" }));
+  });
+
+  test("lists every problem at once", () => {
+    assert.throws(
+      () => loadConfig({ ...local, HOST: "::", PUBLIC_ORIGIN: "https://vtt.example.com", TRUST_CF_CONNECTING_IP: "1" }),
+      (err: Error) => err.message.split("\n").length === 4 && /HOST/.test(err.message) && /PUBLIC_ORIGIN/.test(err.message) && /TRUST_CF/.test(err.message),
+    );
+  });
+});
