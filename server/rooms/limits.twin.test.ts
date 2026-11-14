@@ -338,6 +338,8 @@ describe("conditions answer P1 alike whatever the DM hid", () => {
     const since = marks(pair);
     await each(pair, (room) => room.apply("dm", heal));
     await each(pair, (room) => room.apply("dm", hit));
+    // A hit while dying adds no second one.
+    await each(pair, (room) => room.apply("dm", { t: "actor.hp", target: { characterId: AYLA }, change: { kind: "damage", amount: 1 } } as Op));
     sameSince(pair, since, "0 HP again");
     for (const room of pair) {
       const effects = room.state.characters[AYLA]!.actor.effects;
