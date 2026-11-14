@@ -238,9 +238,9 @@ export class AssetService {
     return hasFreeDisk(this.databaseDiskDir, this.minFreeBytes);
   }
 
-  /** The hourly budgets an upload spends (limits.ts hourlyChecks). */
-  hourlyChecks(sessionId: string, ip: string, roomId: string, kind?: AssetKind): Array<{ key: string; limit: number }> {
-    return hourlyChecks(sessionId, ip, roomId, kind);
+  /** The hourly budgets an upload spends (limits.ts hourlyChecks): a player's their own, the DM's the room's. */
+  hourlyChecks(sessionId: string, ip: string, roomId: string, kind?: AssetKind, player?: { memberId: string }): Array<{ key: string; limit: number }> {
+    return hourlyChecks(sessionId, ip, roomId, kind, player);
   }
 
   /** The hourly budgets a starter pick spends (limits.ts starterHourlyChecks). */

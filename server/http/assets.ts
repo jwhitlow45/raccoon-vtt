@@ -10,7 +10,6 @@ import { withInUse } from "../assets/cleanup.ts";
 import { AssetError, isAssetError } from "../assets/errors.ts";
 import { creditForImport } from "../assets/openverse.ts";
 import { ASSET_KINDS, KINDS, isVariant, type Variant } from "../assets/kinds.ts";
-import { hourlyChecks } from "../assets/limits.ts";
 import type { Reservation } from "../assets/quota.ts";
 import { mediaEtag, sendMedia, sendVariant } from "../assets/serve.ts";
 import { isCachedThumbnail } from "../assets/serpapi.ts";
@@ -142,7 +141,7 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
           await service.assertFreeDisk();
           const ip = ipKey(clientIp(req, trustCf));
           const player = grant.role === "dm" ? undefined : { memberId: grant.memberId };
-          const checks = hourlyChecks(grant.sessionId, ip, roomId, kind, player);
+          const checks = service.hourlyChecks(grant.sessionId, ip, roomId, kind, player);
           service.assertHourly(checks);
           // A video or a sound may take 15 minutes to arrive: its slot is the session's, so the table's other phones still upload.
           const perSession = kind === "video" || kind === "sound";
@@ -250,7 +249,7 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
       const ip = ipKey(clientIp(req, trustCf));
       // A URL import spends the shared budget whatever kind it asks for, so the thumbnails' larger one never pays for outbound fetches.
       const player = grant.role === "dm" ? undefined : { memberId: grant.memberId };
-      const checks = hourlyChecks(grant.sessionId, ip, roomId, undefined, player);
+      const checks = service.hourlyChecks(grant.sessionId, ip, roomId, undefined, player);
       service.assertHourly(checks);
       const releaseFetch = service.outbound.tryAcquire();
       if (!releaseFetch) throw new AssetError(503, "busy", { retryAfter: 2 });
