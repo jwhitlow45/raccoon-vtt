@@ -74,6 +74,12 @@ function dmSteps(r: Room): Array<[string, () => Op]> {
   ];
 }
 
+/** The DM's device starts again on a new socket, as it does when the server tells it to. */
+async function reopenDm(r: Room): Promise<void> {
+  r.actor.detach(r.clients.dm.conn);
+  r.clients.dm = await ScopeClient.open(r.actor, r.member("dm"), "dm");
+}
+
 /** The DM's undo of their newest step, in whichever history holds it, and its answer. */
 async function undoAnswer(r: Room): Promise<Answer> {
   const history = r.clients.dm.history();
@@ -137,20 +143,26 @@ describe("the DM's caps count what no seat holds", () => {
 });
 
 describe("the players' scene can be deleted with the DM's yes", () => {
-  test("D13: deleting the players' scene is refused without the confirm, taken with it leaving them on no scene, and its undo puts them back, across restarts", async (t) => {
+  test("D13: deleting the players' scene is refused without the confirm, taken with it leaving them on no scene, and its undo puts them back, each across a restart", async (t) => {
     const r = await opened(t, room());
     assert.deepEqual(await answer(r, "dm", { t: "scene.delete", sceneId: "s1" } as Op), { code: "invalid", message: MOVE_PLAYERS_FIRST });
     await r.restart(false);
     assert.equal(await answer(r, "dm", { t: "scene.delete", sceneId: "s1", leavePlayers: true } as Op), "taken");
     assert.equal(r.state.meta.playerSceneId, null, "the players are on no scene");
     assert.equal(r.state.scenes.s1, undefined, "the scene is gone");
-    await r.restart(false);
-    assert.equal(r.state.meta.playerSceneId, null, "still on no scene after a restart");
+    // The DM's device was on that map and is told to start again, as on any scene's delete.
+    assert.ok(r.clients.dm.sent.some((m) => m.t === "resync"), "the DM's device is told the scene went");
+    await reopenDm(r);
+    // Undo stacks live in memory, so the undo comes before the next restart.
     assert.equal(await undoAnswer(r), "taken");
     assert.ok(r.state.scenes.s1, "the undo brings the scene back");
     assert.equal(r.state.meta.playerSceneId, "s1", "and the players with it");
     await r.restart(false);
     assert.equal(r.state.meta.playerSceneId, "s1", "after a restart too");
+    await reopenDm(r);
+    assert.equal(await answer(r, "dm", { t: "scene.delete", sceneId: "s1", leavePlayers: true } as Op), "taken");
+    await r.restart(false);
+    assert.equal(r.state.meta.playerSceneId, null, "on no scene after a restart");
   });
 });
 

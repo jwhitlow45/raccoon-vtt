@@ -369,6 +369,8 @@ function withRiders(s: RoomState, onAyla = 0): void {
 const hideOgre = { t: "token.update", tokenId: OGRE, patch: { visibility: "dm" } } as Op;
 const deleteOgre: Op = { t: "token.delete", tokenId: OGRE };
 const clear: Op = { t: "drawing.clear", sceneId: "s1", scope: "own" };
+/** The DM renames room A's own creature, the first dmTokens gives it. */
+const renameShade = { t: "token.update", tokenId: apartId("tok", 0), patch: { name: `${APART}renamed` } } as Op;
 /** The ogre leaves P1's copy: hidden in A, deleted in B. */
 const ogreGoes = (room: Room): Op => (room.name === "A" ? hideOgre : deleteOgre);
 
@@ -420,9 +422,10 @@ describe("riders and clears act on P1's copy, alike whether the DM hid or delete
   });
 
   test("K4: P1 clears in the batch where the DM hides the ogre in A, and hides it and deletes the ruler in B, and the clear's undo brings back the line alone", async (t) => {
-    const pair = await open(t, alike((s) => withRiders(s)));
+    const pair = await open(t, rooms((s) => (withRiders(s), dmTokens(s, 1)), (s) => (withRiders(s), [])));
     for (const room of pair) {
-      const dm: Array<[Who, Op]> = room.name === "A" ? [["dm", hideOgre]] : [["dm", hideOgre], ["dm", { t: "drawing.delete", drawingId: RULER }]];
+      // Each room's batch holds two ops of the DM's, so the room's numbers match: A's second is on its own creature.
+      const dm: Array<[Who, Op]> = room.name === "A" ? [["dm", hideOgre], ["dm", renameShade]] : [["dm", hideOgre], ["dm", { t: "drawing.delete", drawingId: RULER }]];
       const answers = await together(room, [...dm, ["p1", clear]]);
       assert.equal(answers.at(-1), "taken", `${room.name}: the clear is taken`);
     }
@@ -433,7 +436,7 @@ describe("riders and clears act on P1's copy, alike whether the DM hid or delete
   });
 
   test("K4b: P1's undo of the ruler's own create in the batch where the DM hides it in A and deletes it in B answers the same in both", async (t) => {
-    const pair = await open(t, rooms(() => [], () => []));
+    const pair = await open(t, rooms((s) => dmTokens(s, 1), () => []));
     for (const room of pair) {
       const ruler = { id: mint.next(room), sceneId: "s1", kind: "ruler", points: [3.5, 3.5, 8.5, 4.5], anchors: [AYLA, OGRE], style: { stroke: "#ffffff", width: 3, opacity: 1 }, ownerId: "p1", visibility: "all" };
       await room.apply("p1", { t: "drawing.create", drawing: ruler } as Op);
@@ -442,7 +445,7 @@ describe("riders and clears act on P1's copy, alike whether the DM hid or delete
     for (const room of pair) {
       const head = room.clients.p1.head("play", "undo").id;
       const ruler = Object.values(room.state.drawings).find((d) => d.kind === "ruler")!.id;
-      const dm: Array<[Who, Op]> = room.name === "A" ? [["dm", hideOgre]] : [["dm", hideOgre], ["dm", { t: "drawing.delete", drawingId: ruler }]];
+      const dm: Array<[Who, Op]> = room.name === "A" ? [["dm", hideOgre], ["dm", renameShade]] : [["dm", hideOgre], ["dm", { t: "drawing.delete", drawingId: ruler }]];
       answers.push((await together(room, [...dm, ["p1", { t: "undo", scope: "play", head } as Op]])).at(-1)!);
     }
     assert.deepEqual(answers[0], answers[1], "P1's undo answers the same in both rooms");

@@ -184,14 +184,18 @@ describe("an id answers P1 alike whatever became of its thing", () => {
   });
 
   test("C6: P1's 2,001st id in 30 minutes meets the words in both, and the count stays alike after the DM hides half of P1's things in A, deletes them in B, and a restart", async (t) => {
-    const pair = await open(t);
-    // 32 conditions on Ayla in one op bring 32 ids, and their removal makes room for the next 32.
+    // Three characters of P1's, so one op can bring 32 conditions for each.
+    const heroes = [AYLA, "cade", "dara"];
+    const pair = await open(t, (s) => {
+      for (const id of heroes.slice(1)) s.characters[id] = character(id, { name: id, ownerIds: ["p1"] });
+    });
+    // 32 conditions on each of P1's characters in one op bring 96 ids, and their removal makes room for the next.
     const kept = 20;
     let brought = 0;
     while (brought < ID_BUDGET.player - kept) {
-      const n = Math.min(32, ID_BUDGET.player - kept - brought);
+      const n = Math.min(32 * heroes.length, ID_BUDGET.player - kept - brought);
       for (const room of pair) {
-        const effects = Array.from({ length: n }, () => ({ target: { characterId: AYLA }, effect: { id: mint.next(room), key: "blessed" } }));
+        const effects = Array.from({ length: n }, (_, i) => ({ target: { characterId: heroes[i % heroes.length]! }, effect: { id: mint.next(room), key: "blessed" } }));
         await room.apply("p1", { t: "actor.effects", add: effects } as Op);
         await room.apply("p1", { t: "actor.effects", remove: effects.map((e) => ({ target: e.target, effectId: e.effect.id })) } as Op);
       }
