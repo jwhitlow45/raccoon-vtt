@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createInitialState } from "#shared/initial.ts";
-import { LIMITS, serializedBytes } from "#shared/limits.ts";
+import { FAR, LIMITS, serializedBytes } from "#shared/limits.ts";
 import { migrateSnapshot } from "#shared/migrate.ts";
 import { MAX_PATH_STOPS } from "#shared/protocol.ts";
 import { canApply } from "#shared/permissions.ts";
@@ -11,15 +11,15 @@ import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
 describe("roomStateSchema", () => {
-  test("an encounter holds as many rows as the room's limit allows, so a big fight's backup imports", () => {
+  test("an encounter holds as many rows as the far line allows, so a big fight's backup imports", () => {
     const withRows = (count: number) => {
       const state = room();
       state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: Array.from({ length: count }, (_, i) => entry(`e${i}`, { label: `Row ${i}`, value: 10, tieOrder: i })) };
       return JSON.parse(JSON.stringify(state));
     };
     assert.ok(parseRoomState(withRows(601)).ok, "past the old bound of 600");
-    assert.ok(parseRoomState(withRows(LIMITS.encounterRows)).ok);
-    assert.equal(parseRoomState(withRows(LIMITS.encounterRows + 1)).ok, false);
+    assert.ok(parseRoomState(withRows(FAR.rows)).ok, "the room's cap and every member's seat of rows");
+    assert.equal(parseRoomState(withRows(FAR.rows + 1)).ok, false);
   });
 
   test("a new room lets a player create a character, and a stored room from before the setting still forbids it", () => {
