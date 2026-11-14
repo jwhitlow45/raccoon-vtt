@@ -435,6 +435,21 @@ describe("tokens and permissions", () => {
     }
   });
 
+  test("each job that sets pnpm up puts the pinned Node on the PATH first, so pnpm/action-setup never starts from @pnpm/exe, which has no macOS x64 binary", () => {
+    assert.ok(Number(/^ {2}NODE_VERSION: (\d+)\./m.exec(workflow)?.[1]) >= 23, "a Node pnpm/action-setup takes as new enough for the pnpm package");
+    const withPnpm = jobs.filter((job) => steps(job).some((s) => s.includes("pnpm/action-setup@")));
+    assert.deepEqual(withPnpm, ["checks", "build"]);
+    for (const job of withPnpm) {
+      const list = steps(job);
+      const pnpm = list.findIndex((s) => s.includes("pnpm/action-setup@"));
+      const node = list.findIndex((s) => s.includes("actions/setup-node@"));
+      assert.ok(node >= 0 && node < pnpm, `${job} sets Node up before pnpm`);
+      assert.match(list[node]!, /node-version: \$\{\{ env\.NODE_VERSION \}\}/, job);
+      assert.doesNotMatch(list[node]!, /cache: pnpm/, `${job}: setup-node's pnpm cache would need pnpm first`);
+      assert.doesNotMatch(list[pnpm]!, /standalone/, `${job} never asks for @pnpm/exe`);
+    }
+  });
+
   test("the package manager never runs in the plan, or after the builds", () => {
     for (const job of ["plan", "checksums", "sign", "upload"]) assert.doesNotMatch(jobBlock(job).replace(/^ *#.*$/gm, ""), /\bpnpm\b|setup-node|\bnode (desktop|scripts)\//, job);
   });
