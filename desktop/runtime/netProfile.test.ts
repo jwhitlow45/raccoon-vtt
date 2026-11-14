@@ -170,3 +170,84 @@ test("a repeated sample number proves nothing new, and a fresh child counts from
   await tick(clock, 250);
   assert.equal(w.latest()?.profiles[0]?.category, "Public");
 });
+
+/** What the supervisor binds on Windows with the switch on and players shown 10.0.0.20 (main.ts's network.read). */
+const bindOf = (w: ProfileWatcher, clock: FakeClock) => networkReading("win32", true, "10.0.0.20", [], () => profileReach(w.latest(), clock.now(), "10.0.0.20")).host;
+
+test("a watcher that exits drops its sample at once, so the bind is 127.0.0.1 right after and through the restart until a new sample", async () => {
+  const { clock, children, w, changes } = watcher();
+  w.start();
+  children[0]?.say(LINE(1));
+  await tick(clock, 250);
+  assert.equal(bindOf(w, clock), "0.0.0.0");
+  const before = changes();
+  children[0]?.emit("exit");
+  assert.equal(w.latest(), null);
+  assert.equal(bindOf(w, clock), "127.0.0.1", "closed before the last sample turns stale");
+  assert.equal(changes(), before + 1, "reported, so the supervisor binds again");
+  await tick(clock, 1_250);
+  assert.equal(children.length, 2, "started again after 1 s");
+  await tick(clock, 5_000);
+  assert.equal(bindOf(w, clock), "127.0.0.1", "the new child has said nothing yet");
+  children[1]?.say(LINE(1));
+  await tick(clock, 250);
+  assert.equal(bindOf(w, clock), "0.0.0.0");
+});
+
+test("an error line, or one that does not read, is no new sample: the last good one holds until it is 15 s old", async () => {
+  const { clock, children, w } = watcher();
+  w.start();
+  children[0]?.say(LINE(1));
+  await tick(clock, 250);
+  children[0]?.say(JSON.stringify({ seq: 2, error: "Access denied" }));
+  children[0]?.say("WARNING: something");
+  await tick(clock, 250);
+  assert.equal(bindOf(w, clock), "0.0.0.0");
+  assert.equal(children[0]?.killed, false);
+  await tick(clock, FRESH_MS);
+  assert.equal(bindOf(w, clock), "127.0.0.1");
+});
+
+test("a child that cannot start, at the first launch or after a good sample, is started again and never throws", async () => {
+  const { clock, children, w } = watcher();
+  w.start();
+  // An EventEmitter with no `error` listener throws this, as it would reach uncaughtException in the supervisor.
+  children[0]?.emit("error", Object.assign(new Error("spawn powershell.exe ENOENT"), { code: "ENOENT" }));
+  children[0]?.emit("exit");
+  assert.equal(w.latest(), null);
+  await tick(clock, 1_250);
+  assert.equal(children.length, 2, "one restart, though the child both erred and exited");
+  children[1]?.say(LINE(1));
+  await tick(clock, 250);
+  assert.equal(bindOf(w, clock), "0.0.0.0");
+  children[1]?.emit("error", Object.assign(new Error("spawn powershell.exe EACCES"), { code: "EACCES" }));
+  assert.equal(bindOf(w, clock), "127.0.0.1", "closed at once");
+  await tick(clock, 1_250);
+  assert.equal(children.length, 3, "a good sample reset the waits, so 1 s again");
+  await tick(clock, 1_000);
+  assert.equal(children.length, 3);
+
+  const clock2 = new FakeClock();
+  let calls = 0;
+  const later: FakeChild[] = [];
+  const thrown = new ProfileWatcher({
+    clock: clock2,
+    spawn: () => {
+      calls++;
+      if (calls === 1) throw new Error("spawn EACCES");
+      const c = new FakeChild();
+      later.push(c);
+      return c;
+    },
+    log: () => undefined,
+    onChange: () => undefined,
+  });
+  thrown.start();
+  await tick(clock2, 1_250);
+  assert.equal(calls, 2, "a spawn that throws is retried as one that errs");
+  later[0]?.say(LINE(1));
+  await tick(clock2, 250);
+  assert.equal(bindOf(thrown, clock2), "0.0.0.0");
+  thrown.stop();
+  w.stop();
+});
