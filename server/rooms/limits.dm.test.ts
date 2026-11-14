@@ -421,24 +421,24 @@ describe("a room past the far line on per-player sight alone", () => {
     assert.equal(await answer(r, "dm", goblin(r)), "taken", "the DM's create reads today's roster");
   });
 
-  test("D9: past the line at the widest, six joins change no answer of a player's", async (t) => {
-    const { rounds } = await beforeAndAfter(t, 13, ["a line", "character notes", "a move", "a whisper"]);
-    assert.deepEqual(rounds[1], rounds[0], "alike after six joins");
-  });
-
-  test("D9: past the line, a player's roll and chat line, which grow the room, are refused before six joins and after", async (t) => {
-    const { rounds } = await beforeAndAfter(t, 13, ["a roll", "a chat line"]);
+  test("D9: past the line, a player's roll and chat line, which grow the room, are refused", async (t) => {
+    const { rounds } = await beforeAndAfter(t, 13, ["a roll", "a chat line"], false);
     assert.deepEqual(rounds[0], [["a roll", "quota"], ["a chat line", "quota"]]);
-    assert.deepEqual(rounds[1], rounds[0], "alike after six joins");
   });
 
-  test("D9: inside the room's bookkeeping reserve, a player's line and character notes are refused and their move, roll, chat line and whisper taken, before six joins and after", async (t) => {
+  test("D9: inside the room's bookkeeping reserve, a player's line and character notes are refused and their move, roll, chat line and whisper taken", async (t) => {
     const reading = farRoomBytes(perPlayerRoom(11), true);
     assert.ok(reading > FAR.roomBytes - BOOKKEEPING_RESERVE.room && reading <= FAR.roomBytes, `11 scenes read inside the reserve at the widest: ${reading}`);
     const names = ["a line", "character notes", "a move", "a roll", "a chat line", "a whisper"];
-    const { rounds } = await beforeAndAfter(t, 11, names);
+    const { rounds } = await beforeAndAfter(t, 11, names, false);
     assert.deepEqual(rounds[0], names.map((what) => [what, what === "a line" || what === "character notes" ? "quota" : "taken"]));
-    assert.deepEqual(rounds[1], rounds[0], "alike after six joins");
+  });
+
+  test("D9: inside the room's reserve and past the line, six joins change no answer of a player's", async (t) => {
+    for (const scenes of [11, 13]) {
+      const { rounds } = await beforeAndAfter(t, scenes, ["a line", "character notes", "a move", "a roll", "a chat line", "a whisper"]);
+      assert.deepEqual(rounds[1], rounds[0], `${scenes} scenes: alike after six joins`);
+    }
   });
 });
 
