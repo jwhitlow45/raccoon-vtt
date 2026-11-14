@@ -26,7 +26,8 @@ const marks = (state: RoomState) => Object.fromEntries(Object.entries(state.play
 describe("the map discovery upgrade over a stored room (ASTRA-31)", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
+    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { idGate: false, snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
   });
   after(() => t.close());
 

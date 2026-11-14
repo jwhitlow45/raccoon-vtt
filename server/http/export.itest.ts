@@ -86,7 +86,8 @@ async function continueAs(t: Engine, client: TestClient, roomId: string, name: s
 describe("room export and import", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ export: { perHour: 3 } });
+    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
+    t = await startEngine({ rooms: { actor: { idGate: false } }, export: { perHour: 3 } });
   });
   after(() => t.close());
 
@@ -376,7 +377,7 @@ describe("room export and import", () => {
     const fourth = await dm.get(`/api/rooms/${roomId}/export`);
     assert.equal(fourth.statusCode, 429);
     assert.ok(Number(fourth.headers["retry-after"]) > 0);
-    const limited = await startEngine({ env: { ROOMS_PER_IP_PER_DAY: "1" } });
+    const limited = await startEngine({ rooms: { actor: { idGate: false } }, env: { ROOMS_PER_IP_PER_DAY: "1" } });
     try {
       const c = limited.client();
       const { roomId: first } = await c.createRoom("One");
@@ -974,7 +975,7 @@ describe("room export and import", () => {
 describe("an imported log in the archive (shared/logRings.ts)", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine();
+    t = await startEngine({ rooms: { actor: { idGate: false } } });
   });
   after(() => t.close());
 
@@ -1202,7 +1203,7 @@ describe("an imported log in the archive (shared/logRings.ts)", () => {
 describe("room import with Turnstile", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ env: { TURNSTILE_SECRET: "test-secret", TURNSTILE_SITE_KEY: "site-key" } });
+    t = await startEngine({ rooms: { actor: { idGate: false } }, env: { TURNSTILE_SECRET: "test-secret", TURNSTILE_SITE_KEY: "site-key" } });
   });
   after(() => t.close());
 

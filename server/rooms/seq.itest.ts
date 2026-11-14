@@ -178,7 +178,8 @@ const sketch = { t: "drawing.create", drawing: { id: SKETCH, sceneId: "s1", kind
 
 describe("twin rooms on the database give their devices the same frames", () => {
   before(async () => {
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { now: () => clock.now, numberClock: () => clock.now, draw, snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
+    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { idGate: false, now: () => clock.now, numberClock: () => clock.now, draw, snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
   });
   after(() => t.close());
 

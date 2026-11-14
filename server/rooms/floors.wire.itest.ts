@@ -195,7 +195,8 @@ async function players(t: Engine, r: Room, order: "ana first" | "bree first", pr
 describe("several floors over the wire (docs/design/design-v1-floors.md 8, the shipping gate)", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ env: { ANIMATED_MAPS: "1" }, rooms: { idleUnloadMs: 60_000 } });
+    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
+    t = await startEngine({ env: { ANIMATED_MAPS: "1" }, rooms: { idleUnloadMs: 60_000, actor: { idGate: false } } });
   });
   after(() => t.close());
 
@@ -791,7 +792,7 @@ async function reconnectBoth(t: Engine, a: Compared, b: Compared, when: string):
 describe("a climb's undo and redo over the wire with passengers and areas players do not receive (phase 2, D-261109-137)", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000 } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { idGate: false } } });
   });
   after(() => t.close());
 
@@ -983,7 +984,7 @@ describe("a climb's undo and redo over the wire with passengers and areas player
 describe("floors phase 3 over the wire: the privacy twins (phase 3, 6)", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000 } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { idGate: false } } });
   });
   after(() => t.close());
 

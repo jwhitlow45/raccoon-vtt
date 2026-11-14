@@ -106,7 +106,8 @@ async function storedState(t: Engine, roomId: string): Promise<RoomState> {
 describe("sound files with the switch on", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ env: { ROOM_SOUND: "1" } });
+    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
+    t = await startEngine({ rooms: { actor: { idGate: false } }, env: { ROOM_SOUND: "1" } });
   });
   after(async () => {
     await t.close();
@@ -312,7 +313,7 @@ describe("sound files with the switch on", () => {
   });
 
   test("a live upload must leave 32 MiB of the quota free, checked again at commit, while an image needs only the quota", async () => {
-    const small = await startEngine({ env: { ROOM_SOUND: "1", ROOM_QUOTA_MB: "40" } });
+    const small = await startEngine({ rooms: { actor: { idGate: false } }, env: { ROOM_SOUND: "1", ROOM_QUOTA_MB: "40" } });
     try {
       const dm = small.client();
       const { roomId } = await dm.createRoom();
@@ -488,7 +489,7 @@ describe("sound files with the switch on", () => {
 
 describe("the sound check off the main thread (D-261102-539)", () => {
   test("while a check hangs, the server keeps answering, and the upload ends busy at the deadline with nothing stored", async () => {
-    const t = await startEngine({ env: { ROOM_SOUND: "1" }, assets: { soundCheck: { workerUrl: HANG, deadlineMs: 1_500 } } });
+    const t = await startEngine({ rooms: { actor: { idGate: false } }, env: { ROOM_SOUND: "1" }, assets: { soundCheck: { workerUrl: HANG, deadlineMs: 1_500 } } });
     try {
       // The DM and a player at one table, behind one address.
       const dm = t.client("2001:db8:5:5::5");
@@ -522,8 +523,8 @@ describe("sound files with the switch off (D-261102-513)", () => {
   let off: Engine;
   let on: Engine;
   before(async () => {
-    off = await startEngine();
-    on = await startEngine({ env: { ROOM_SOUND: "1" } });
+    off = await startEngine({ rooms: { actor: { idGate: false } } });
+    on = await startEngine({ rooms: { actor: { idGate: false } }, env: { ROOM_SOUND: "1" } });
   });
   after(async () => {
     await off.close();

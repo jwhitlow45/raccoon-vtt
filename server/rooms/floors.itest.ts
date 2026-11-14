@@ -105,7 +105,8 @@ const live = (t: Engine, roomId: string): RoomState => t.manager.get(roomId)!.co
 describe("several floors on the server (docs/design/design-v1-floors.md 9)", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
+    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { idGate: false, snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
   });
   after(() => t.close());
 
@@ -471,7 +472,7 @@ function refused(ev: Extract<ServerMessage, { t: "ev" }>): string {
 describe("stairs and ladders on the server (docs/design/design-v1-floors.md phase 2, lane FL2-C)", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { idGate: false, snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
   });
   after(() => t.close());
 
@@ -713,7 +714,7 @@ describe("stairs and ladders on the server (docs/design/design-v1-floors.md phas
 describe("a scene's floors share one budget (docs/design/design-v1-floors.md 9, D-261102-485)", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000 } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { idGate: false } } });
   });
   after(() => t.close());
 

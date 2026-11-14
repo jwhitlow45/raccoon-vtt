@@ -90,9 +90,11 @@ async function reconnect(t: Engine, roomId: string, client: TestClient): Promise
 describe("dice on the server", () => {
   let t: Engine;
   before(async () => {
+    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
     t = await startEngine({
       rooms: {
         actor: {
+          idGate: false,
           draw: (sides) => {
             actorStats.draws++;
             return 1 + (actorStats.draws % sides);
@@ -274,7 +276,7 @@ describe("dice on the server", () => {
 describe("a request's answer and a death save rolled on the server", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine();
+    t = await startEngine({ rooms: { actor: { idGate: false } } });
   });
   after(() => t.close());
 
@@ -348,7 +350,7 @@ describe("a request's answer and a death save rolled on the server", () => {
 describe("the day's caps and floods (docs/design/design-v1-dice.md 1.2 and 4.4)", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine();
+    t = await startEngine({ rooms: { actor: { idGate: false } } });
   });
   after(() => t.close());
 

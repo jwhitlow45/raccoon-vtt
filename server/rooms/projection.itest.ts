@@ -60,7 +60,8 @@ async function setup(t: Engine, name: string): Promise<{ roomId: string; dm: Soc
 describe("projection over the socket", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine();
+    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
+    t = await startEngine({ rooms: { actor: { idGate: false } } });
   });
   after(() => t.close());
 

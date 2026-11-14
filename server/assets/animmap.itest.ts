@@ -121,7 +121,8 @@ describe("animated maps with the switch on", () => {
   let t: Engine;
   let scratch: string;
   before(async () => {
-    t = await startEngine({ env: { ANIMATED_MAPS: "1" } });
+    // Fixture ids in this file are not version 7 ids made just now, so its rooms' id gate is off (server/rooms/createIds.ts).
+    t = await startEngine({ rooms: { actor: { idGate: false } }, env: { ANIMATED_MAPS: "1" } });
     scratch = await mkdtemp(join(tmpdir(), "rvtt-animmap-"));
   });
   after(async () => {
@@ -305,7 +306,7 @@ describe("animated maps with the switch on", () => {
   });
 
   test("a live upload must leave 32 MiB of the quota free, and a delete frees it, its file to the trash as .webm", async () => {
-    const small = await startEngine({ env: { ANIMATED_MAPS: "1", ROOM_QUOTA_MB: "40" } });
+    const small = await startEngine({ rooms: { actor: { idGate: false } }, env: { ANIMATED_MAPS: "1", ROOM_QUOTA_MB: "40" } });
     try {
       const { dm, roomId, socket, sceneId, still } = await roomWithStill(small);
       const bytes = webmFile({ frameBytes: 1000 });
@@ -450,7 +451,7 @@ describe("turned, stretched and iPhone videos with the switch on", () => {
   let t: Engine;
   let scratch: string;
   before(async () => {
-    t = await startEngine({ env: { ANIMATED_MAPS: "1" } });
+    t = await startEngine({ rooms: { actor: { idGate: false } }, env: { ANIMATED_MAPS: "1" } });
     scratch = await mkdtemp(join(tmpdir(), "rvtt-amrotate-"));
   });
   after(async () => {
@@ -642,8 +643,8 @@ describe("animated maps with the switch off (D-261102-510)", () => {
   let off: Engine;
   let on: Engine;
   before(async () => {
-    off = await startEngine();
-    on = await startEngine({ env: { ANIMATED_MAPS: "1" } });
+    off = await startEngine({ rooms: { actor: { idGate: false } } });
+    on = await startEngine({ rooms: { actor: { idGate: false } }, env: { ANIMATED_MAPS: "1" } });
   });
   after(async () => {
     await off.close();
