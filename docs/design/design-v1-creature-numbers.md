@@ -1,6 +1,6 @@
 # Creature numbers
 
-Creatures that share a name read "Goblin 1", "Goblin 2" so that everyone at the table names the same one. From room format 46 and change format 60, the table gives those numbers: a creature takes its number when the party first sees it beside another creature of the name players read, and every device reads that number. The DM's board also shows, in brackets, the number a creature the party has not yet seen would take. This note gives the rules, what is stored, what each viewer reads, how older rooms come across, and where the build went its own way.
+Creatures that share a name read "Goblin 1", "Goblin 2" so that everyone at the table names the same one. From room format 46 and change format 60, the table gives those numbers: a creature takes its number when the party first sees it, counting every creature of the name players read that the party has seen on that scene, and every device reads that number. The DM's board also shows, in brackets, the number a creature the party has not yet seen would take. This note gives the rules, what is stored, what each viewer reads, how older rooms come across, and where the build went its own way.
 
 ## 1. Words
 

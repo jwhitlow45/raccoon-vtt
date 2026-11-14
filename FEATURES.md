@@ -585,10 +585,10 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 - What players see of a monster's HP, set per token: nothing, a label (Healthy, Bloodied, Dying, Dead), a bar, or the exact number.
 - A colored ring shows ally, neutral or hostile.
 - Creatures that share a name are numbered by what the party has seen (Goblin 1, Goblin 2). A token without a picture shows its initials, G1, G2 or "AR" for Ash Rider, the same on the board, in the tracker and in the Characters and Monsters panels.
-  - A creature takes its number when the party first sees it beside another creature of the name players read. One seen alone reads "Goblin", and once a second is seen they read Goblin 1 and Goblin 2.
+  - A creature takes its number when the party first sees it. The first of a name the party sees on a scene reads "Goblin". When they see a second, then or later, it reads Goblin 2, and the first reads Goblin 1 if it is still there.
   - Numbers follow the name players read: creatures whose names are hidden read "Unknown creature 1" and "Unknown creature 2", and an Orc shown to players as a Goblin is numbered among the Goblins.
   - A scene and its floors keep one set of numbers, and a number is never given twice there: after Goblin 3 is deleted, the next Goblin seen is Goblin 4.
-  - On the DM's board, a creature the party has not yet seen beside others of its name shows the number it would take in brackets, "Goblin (3)", with outlined initials, and its Token panel says "Not yet seen by the party. It takes this number when they see it, if they have seen no other first."
+  - On the DM's board, a creature the party has not yet seen shows in brackets the number it would take if the party saw it now, "Goblin (3)", and a lone creature of an unseen name shows none, with outlined initials, and its Token panel says "Not yet seen by the party. It takes this number when they see it, if they have seen no other first."
   - A creature shown to players under another name reads "Orc (as Goblin 2)" for the DM and its owners, with the initials players see, and its Token panel says "Players read Goblin 2."
   - Renamed and named back while the party watches, a creature takes the next number: "Goblin 2", "Orc 3", then "Goblin 4". Undo and Redo give the numbers back exactly.
   - A creature keeps its number when it is attached to a character, and a duplicate takes its own number when the party sees it. A companion of a character a player plays is never numbered.
