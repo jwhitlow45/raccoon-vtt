@@ -28,16 +28,18 @@ let common: Set<string> | undefined;
  * is refused along with `password1`. Loaded on first use, once.
  */
 function commonPasswords(): Set<string> {
-  if (!common) {
-    const text = readFileSync(new URL("./common-passwords.txt", import.meta.url), "utf8");
-    common = new Set(
-      text
-        .split("\n")
-        .filter((line) => line !== "" && !line.startsWith("#"))
-        .map((line) => line.toLowerCase()),
-    );
-  }
+  common ??= passwordList(readFileSync(new URL("./common-passwords.txt", import.meta.url), "utf8"));
   return common;
+}
+
+/** The list file's passwords, lowercased. A Windows checkout may have turned its line ends into CRLF, which must not end up in every entry. */
+export function passwordList(text: string): Set<string> {
+  return new Set(
+    text
+      .split(/\r?\n/)
+      .filter((line) => line !== "" && !line.startsWith("#"))
+      .map((line) => line.toLowerCase()),
+  );
 }
 
 export type PasswordProblem = "too_short" | "too_long" | "too_common";
