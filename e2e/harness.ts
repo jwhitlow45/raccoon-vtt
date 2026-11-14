@@ -20,7 +20,19 @@ import { coverBrowser, coverContext } from "./coverage.ts";
 
 export const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
-export type ServerOptions = { port: number; assetDir: string; databaseUrl: string };
+export type ServerOptions = {
+  port: number;
+  assetDir: string;
+  databaseUrl: string;
+  /**
+   * The desktop app's mode (docs/design/design-v1-local-app.md 4): a built
+   * app in local mode on `host`, with a test key and no PUBLIC_ORIGIN.
+   */
+  local?: { host: "127.0.0.1" | "0.0.0.0" };
+};
+
+/** A fixed 32-byte test key, base64, for local mode, which requires one. */
+const LOCAL_TEST_KEY = Buffer.alloc(32, 7).toString("base64");
 
 export type Server = {
   origin: string;
@@ -38,19 +50,25 @@ export type Server = {
  */
 export async function startServer(opts: ServerOptions): Promise<Server> {
   const origin = `http://localhost:${opts.port}`;
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    NODE_ENV: "development",
+    PORT: String(opts.port),
+    HOST: "127.0.0.1",
+    PUBLIC_ORIGIN: origin,
+    DATABASE_URL: opts.databaseUrl,
+    ASSET_DIR: opts.assetDir,
+    ROOMS_PER_IP_PER_DAY: "1000",
+    ROOMS_PER_DAY: "1000",
+  };
+  if (opts.local) {
+    Object.assign(env, { NODE_ENV: "production", RACCOON_MODE: "local", HOST: opts.local.host, ROOM_SECRET_KEY: LOCAL_TEST_KEY });
+    // Local mode refuses these, so a value from the shell must not reach it.
+    for (const name of ["PUBLIC_ORIGIN", "TRUST_CF_CONNECTING_IP", "TURNSTILE_SITE_KEY", "TURNSTILE_SECRET", "ADMIN_PASSWORD_HASH", "EGRESS_STRICT_PROXY", "EGRESS_PUBLIC_PROXY"]) delete env[name];
+  }
   const child: ChildProcess = spawn(process.execPath, ["server/main.ts"], {
     cwd: ROOT,
-    env: {
-      ...process.env,
-      NODE_ENV: "development",
-      PORT: String(opts.port),
-      HOST: "127.0.0.1",
-      PUBLIC_ORIGIN: origin,
-      DATABASE_URL: opts.databaseUrl,
-      ASSET_DIR: opts.assetDir,
-      ROOMS_PER_IP_PER_DAY: "1000",
-      ROOMS_PER_DAY: "1000",
-    },
+    env,
     stdio: ["ignore", "pipe", "pipe"],
   });
   let out = "";
