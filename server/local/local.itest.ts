@@ -425,6 +425,8 @@ describe("the supervisor's channel (IPC)", () => {
       assert.equal(c.messages.length, 0, "nothing is reported while both counts are 0");
       const socket = await Socket.open(`ws://127.0.0.1:${c.port}/ws?room=${roomId}`, { origin: `http://localhost:${c.port}`, cookie });
       await until(() => c.messages.length > 0, 12_000, "a status report");
+      // A tick past the report, with nothing changed, sends nothing more.
+      await new Promise((r) => setTimeout(r, 6_000));
       assert.deepEqual(c.messages, [{ type: "status", sockets: 1, remoteDevices: 0 }]);
       c.child.send({ type: "shutdown" });
       assert.equal((await socket.closed).code, 1012);
