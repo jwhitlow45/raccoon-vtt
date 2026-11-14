@@ -5,7 +5,7 @@ import type { Member, RoomState, Viewer } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { DM, env, member, room, scene, token } from "#shared/testutil.ts";
-import { farRoomBytes, growthBound, heldBytes, measuredStateBytes, overFarLine, PER_PLAYER_FULL, playerBlockBytes, SizeGuard, widestPerPlayerReserve } from "./sizeGuard.ts";
+import { farRoomBytes, growthBound, heldBytes, measuredStateBytes, overFarLine, PER_PLAYER_FULL, playerBlockBytes, projectedSceneBytes, roomLevelBytes, SizeGuard, widestPerPlayerReserve } from "./sizeGuard.ts";
 
 /*
  * The byte lines under player limits: the near lines (the guard's state and
@@ -76,6 +76,28 @@ describe("the near lines answer the DM alone, over the DM's part", () => {
     const state = room();
     state.characters.c1 = { id: "c1", rev: 0, ownerIds: ["p1"], name: "Ayla", size: "medium", actor: state.tokens.t1?.actor as never } as never;
     assert.equal(playerBlockBytes(state), 0);
+  });
+});
+
+describe("an exempt kind", () => {
+  test("meets no line, the DM's either, and its growth is counted, so the DM's next growing op past the line is refused", () => {
+    const base = room();
+    for (let i = 0; i < 10; i++) base.tokens[`g${i}`] = token(`g${i}`, { sceneId: "s1", x: i });
+    const label = "Frightened of the dark, the deep water and the thing that waits below the ford";
+    const conditions: Op = { t: "actor.effects", add: Object.keys(base.tokens).map((tokenId) => ({ target: { tokenId }, effect: { id: `e-${tokenId}`, key: "frightened", label } })) } as Op;
+    const after = applyOp(base, conditions, DM, env(9));
+    assert.ok(after.ok);
+    // A line halfway up what the conditions add to the tokens: the scene with its room-level part after them and its own
+    // part before them fits under it, and the scene after them does not.
+    const own = projectedSceneBytes(after.state, "s1") - projectedSceneBytes(base, "s1") - (roomLevelBytes(after.state) - roomLevelBytes(base));
+    assert.ok(own > 1_000, `the conditions add ${own} bytes to the tokens`);
+    const near = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: projectedSceneBytes(after.state, "s1") - Math.floor(own / 2) });
+    near.stateMeasured(measuredStateBytes(base), base);
+    // An op before them, so the guard's scene measures are of the room they start from.
+    assert.equal(judged(base, { t: "token.update", tokenId: "g9", patch: { name: "Wolf" } }, DM, near, "none").ok, true);
+    assert.deepEqual(judged(base, conditions, DM, near, "exempt"), { ok: true });
+    const note: Op = { t: "token.update", tokenId: "g0", patch: { notes: "A short note" } };
+    assert.equal(judged(after.state, note, DM, near, "none").ok, false);
   });
 });
 

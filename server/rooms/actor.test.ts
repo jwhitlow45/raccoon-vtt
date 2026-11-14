@@ -42,7 +42,7 @@ import { assertWithinLimits } from "./importRoom.ts";
 import { HttpError } from "../auth/http.ts";
 import { remapState } from "./remap.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { checkWholeScenes, discoveryReserve, growthBound, heldBytes, measuredStateBytes, memoryReserves, memoryShare, memoryStateReserve, numberingAdjust, roomLevelBytes, SCENE_MAPS_FULL, SHARE_MARGIN, SizeGuard, touchedScenes } from "./sizeGuard.ts";
+import { checkWholeScenes, discoveryReserve, growthBound, heldBytes, measuredStateBytes, memoryReserves, memoryShare, memoryStateReserve, numberingAdjust, roomLevelBytes, SHARE_MARGIN, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { loadRoom, type Pool } from "./persistence.ts";
 import { SQUARES } from "../../shared/rules/grid.ts";
 import { STANDING_CLOCK } from "./undoScopeTesting.ts";
@@ -2644,7 +2644,7 @@ describe("every op's growth counts on the scenes it wrote into (docs/design/desi
     return { state, sceneId, ids };
   }
 
-  test("conditions on inline actors, group edits, pins, pages and rolls are each held to the scene limit as they are applied", async () => {
+  test("group edits, pins, pages and roll asks are each held to the scene limit as they are applied", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
     const { state, sceneId, ids } = goblins(dm, player);
@@ -2653,19 +2653,16 @@ describe("every op's growth counts on the scenes it wrote into (docs/design/desi
     let n = 0;
     const next = (): Op => {
       n++;
-      switch (n % 6) {
-        case 0:
-          return { t: "actor.effects", add: ids.map((tokenId) => ({ target: { tokenId }, effect: { id: uuidv7(), key: "frightened", label: "Frightened of the dark" } })) };
+      // Conditions are an exempt kind (shared/farLine.ts), which no byte line refuses.
+      switch (n % 4) {
         case 1:
-          return { t: "token.updateMany", tokenIds: ids, patch: { image: { icon: "lorc/wolf-head", color: n % 4 === 1 ? "#336699" : "#99663300" } } };
+          return { t: "token.updateMany", tokenIds: ids, patch: { image: { icon: "lorc/wolf-head", color: n % 8 === 1 ? "#336699" : "#99663300" } } };
         case 2:
           return { t: "pin.put", pin: { id: uuidv7(), sceneId, x: 1, y: 1, label: "A pin with a long label", color: "#ff8800", visibility: "all" } };
         case 3:
           return { t: "journal.create", page: { id: uuidv7(), title: "Notes", access: "dm", blocks: [{ id: "abcdefghijkl", text: "n".repeat(60) }] } };
-        case 4:
-          return { t: "roll.ask", request: { id: uuidv7(), test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ tokenId: ids[1]! }] } };
         default:
-          return { t: "actor.effect.add", target: { tokenId: ids[2]! }, effect: { id: uuidv7(), key: "poisoned" } };
+          return { t: "roll.ask", request: { id: uuidv7(), test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ tokenId: ids[1]! }] } };
       }
     };
     await withRoom(
@@ -2690,7 +2687,7 @@ describe("every op's growth counts on the scenes it wrote into (docs/design/desi
     );
   });
 
-  test("conditions added to several creatures at once are refused when they would carry their scene past its limit", async () => {
+  test("conditions added to several creatures at once are taken past their scene's limit, and the growth they add refuses the next group edit there", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
     const { state, sceneId, ids } = goblins(dm, player);
@@ -2709,11 +2706,11 @@ describe("every op's growth counts on the scenes it wrote into (docs/design/desi
       state,
       dm,
       async (actor, send) => {
-        // Three effects of about 150 bytes each on the scene's tokens: past the 300 bytes left, though the op names no scene.
-        // What players' copies may add is all that carries it past the limit, so the DM reads the maps note.
-        assert.deepEqual(await send(frighten(long)), { code: "quota", message: SCENE_MAPS_FULL });
-        assert.ok(checkWholeScenes(actor.committed.state, sceneLimit).ok);
-        assert.equal(await send({ t: "actor.effects", add: [{ target: { tokenId: ids[0]! }, effect: { id: uuidv7(), key: "prone" } }] }), null, "one small one still fits");
+        // Three effects of about 150 bytes each on the scene's tokens, past the 300 bytes left: an exempt kind, taken.
+        assert.equal(await send(frighten(long)), null);
+        // The op named no scene, yet its growth was counted against the scene its tokens stand on.
+        const image = { t: "token.updateMany", tokenIds: ids, patch: { image: { icon: "lorc/wolf-head", color: "#336699" } } } as Op;
+        assert.equal((await send(image))?.code, "quota");
       },
       { sizeLimits: { sceneLimit } },
     );

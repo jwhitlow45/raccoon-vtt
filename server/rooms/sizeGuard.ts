@@ -116,8 +116,12 @@ function sceneFull(limit: number): LimitCheck {
 /** The last exact size, and how much the state may have grown since. */
 type Measure = { bytes: number; growth: number };
 
-/** How an op meets the far line (SizeGuard.check): not at all, with today's reserves, or with per-player vision's at their widest. */
-export type FarJudge = "none" | "today" | "widest" | "widestDm";
+/**
+ * How an op meets the byte lines (SizeGuard.check): an exempt kind meets
+ * none, and others the far line not at all, with today's reserves, or with
+ * per-player vision's at their widest.
+ */
+export type FarJudge = "exempt" | "none" | "today" | "widest" | "widestDm";
 
 /** The room measure's DM part: less what seats hold and players' companion blocks. */
 function dmRoomBytes(state: RoomState, measured: number): number {
@@ -229,12 +233,14 @@ export class SizeGuard {
    * counted. `far` says how the op meets the far line (#far): not at all,
    * with today's reserves, or with per-player vision's at their widest, a
    * player's op's always and the DM's that raise them (`widestDm`, refused
-   * in PER_PLAYER_FULL's words).
+   * in PER_PLAYER_FULL's words). An exempt kind (shared/farLine.ts opKind)
+   * meets no line, the DM's too, since what it can add is reserved within
+   * the room's bound: its growth is only counted.
    */
   check(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState, role: Viewer["role"] = "dm", far: FarJudge = "none"): LimitCheck {
     this.#refusedScene = null;
-    const near = role === "player" ? this.#account(next, sceneIds, growth, before) : this.#near(next, sceneIds, growth, before, role);
-    if (!near.ok || far === "none") return near;
+    const near = role === "player" || far === "exempt" ? this.#account(next, sceneIds, growth, before) : this.#near(next, sceneIds, growth, before, role);
+    if (!near.ok || far === "none" || far === "exempt") return near;
     return this.#far(next, sceneIds, before, far);
   }
 
@@ -380,7 +386,7 @@ export class SizeGuard {
    * to spare could pass the line. Called after the near check counted the
    * op's growth, so the bounds hold it.
    */
-  #far(next: RoomState, sceneIds: readonly string[], before: RoomState | undefined, far: Exclude<FarJudge, "none">): LimitCheck {
+  #far(next: RoomState, sceneIds: readonly string[], before: RoomState | undefined, far: Exclude<FarJudge, "none" | "exempt">): LimitCheck {
     const widest = far !== "today";
     const refused = (limit: number): LimitCheck => (far === "widestDm" ? { ok: false, code: "quota", message: PER_PLAYER_FULL } : roomFull(limit));
     const state = this.#state;
