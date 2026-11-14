@@ -73,7 +73,7 @@ describe("squares: a rider's drag aims its mount at the stand that keeps the rid
         for (const fy of offsets) {
           const middle = { x: 12 + fx, y: 10 + fy };
           const { view, horse, aim } = aimFor(s, middle);
-          assert.ok(Math.abs(aim.seat!.x - middle.x) < 1e-9 && Math.abs(aim.seat!.y - middle.y) < 1e-9, "the rider's dropped middle");
+          assert.deepEqual(aim.seat, { x: 12.5, y: 10.5 }, "the middle of the square the rider is dropped on (LP39B-MOVE-1)");
           const target = routeTarget(view, horse, aim);
           assert.equal(target.squeeze, true, `seat ${seat}: squeezed`);
           assert.deepEqual(footprintRect(SQUARES, { ...horse, x: target.x, y: target.y, squeeze: true }), { x: 12, y: 10, w: 1, h: 1 }, `seat ${seat}, middle ${middle.x}, ${middle.y}: on the rider's square`);

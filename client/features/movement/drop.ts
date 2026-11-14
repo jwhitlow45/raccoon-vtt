@@ -281,12 +281,24 @@ export type Aim = Point & { seat?: Point };
  * on the lead, up a chain of tokens each sitting on the next, as a press on
  * a rider of a controlled mount moves the mount (docs/design/design-v1-attach.md
  * 4.2). Its middle is where its own box would be dropped, by the lead's
- * box at the pointer's offset.
+ * box at the pointer's offset, snapped as a drop of that token alone snaps
+ * it, and the lead's box keeps its offset from that snapped box.
+ *
+ * So the aim reads the square or hex the pressed token is dropped on, not
+ * where in it the pointer let go (LP39B-MOVE-1). A mount squeezed in a
+ * corridor stands half a square off its rider's grid, so its box at the
+ * pointer's offset lies between four of its full stands, all equally near
+ * when the rider is dropped on a square's middle. Then a hair of the
+ * pointer chose among them: a touch's fraction of a pixel took one the
+ * creature the rider drags cannot follow from, and a mouse's whole pixel
+ * another it can.
  */
 export function pressedAim(state: DropView, lead: DropToken, pressed: DropToken | null | undefined, at: Point): Aim {
   if (!pressed || pressed.id === lead.id || !sitsOn(state, pressed.id, lead.id)) return { x: at.x, y: at.y };
   const size = footprintSize(pressed);
-  return { x: at.x, y: at.y, seat: { x: at.x + pressed.x - lead.x + size.w / 2, y: at.y + pressed.y - lead.y + size.h / 2 } };
+  const dropped = snapPosition(dropGrid(state, pressed), at.x + pressed.x - lead.x, at.y + pressed.y - lead.y, size);
+  // From the snapped box and the stored places alone, so no trace of the pointer's fraction is left in the lead's box.
+  return { x: dropped.x - pressed.x + lead.x, y: dropped.y - pressed.y + lead.y, seat: { x: dropped.x + size.w / 2, y: dropped.y + size.h / 2 } };
 }
 
 function sitsOn(state: DropView, id: string, leadId: string): boolean {
