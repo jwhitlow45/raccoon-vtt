@@ -618,12 +618,16 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
     await dialog.waitFor({ state: "detached" });
     await ops.send({ t: "view.blackout", blackout: false });
     await showsPage(3);
-    await ops.send({ t: "handout.show", handout: { id: handoutId, pages, title: "Ship's log", to: "all" } });
+    // A showing's id is taken once, so the DM shows it anew under a new id, as Recent does.
+    await ops.send({ t: "handout.close", handoutId });
+    await dialog.waitFor({ state: "detached" });
+    const anewId = uuidv7();
+    await ops.send({ t: "handout.show", handout: { id: anewId, pages, title: "Ship's log", to: "all" } });
     await showsPage(1);
     // Escape with the bar hidden closes the handout.
     await tv.keyboard.press("Escape");
     await dialog.waitFor({ state: "detached" });
-    await ops.send({ t: "handout.close", handoutId });
+    await ops.send({ t: "handout.close", handoutId: anewId });
 
     // A page that fails to load says so in its place, as one image does. Routing turns the cache off, so it is asked for again.
     const broken = `**/display/assets/${pages[2]!.assetId}/full`;
@@ -653,7 +657,7 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
   });
 
   test("vol-d. the display's Volume sets the level while sound plays, Off keeps it, and the menu's labels line up", async () => {
-    const soundId = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: "vol-d-music", name: "Volume test", use: "music", ms: 60_000 });
+    const soundId = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: uuidv7(), name: "Volume test", use: "music", ms: 60_000 });
     await ops.send({ t: "music.play", run: "vol-d-run", soundId, order: [soundId], repeat: "all", fade: 0 });
     // The engine waits for a tap on a display, as the card says.
     await tv.mouse.click(TV.width / 2, TV.height / 2);
