@@ -11,8 +11,8 @@ import { WORDS, type RaccoonLocal, type WindowState } from "../contract.ts";
 /**
  * The packed shell (design 12, LOCAL-4), driven through Playwright's
  * Electron support: the tray's items, the switch there and back, the
- * window's bridge, the single-instance lock's --quit, and Quit leaving no
- * process behind.
+ * window's bridge, the single-instance lock's --quit, Quit leaving no
+ * process behind, and a shell killed outright leaving none either.
  *
  * It runs against an `electron-builder --dir` build, by default the one
  * `node desktop/build/pack.ts --dir` leaves in desktop/out/dist, or the app
@@ -149,6 +149,16 @@ describe("the packed shell", () => {
       if (/Content.Security.Policy/i.test(message.text())) policyViolations.push(message.text());
     });
     await until("the supervisor to run", async () => (await state()).supervisor?.state === "running");
+  };
+  /**
+   * The real supervisor stopped as design 10 says: PostgreSQL shut down
+   * cleanly, then the supervisor itself exited with code 0. The stand-in
+   * has neither, and logs the channel closing instead.
+   */
+  const stoppedCleanly = () => {
+    const last = (file: string) => readFileSync(join(data, "logs", file), "utf8").trimEnd().split(/\r?\n/).at(-1) ?? "";
+    assert.match(last("supervisor.log"), /exiting with code 0$/);
+    assert.match(last("postgres.log"), /database system is shut down$/);
   };
   const exited = (a: ElectronApplication) =>
     new Promise<number | null>((resolve) => {
@@ -327,6 +337,8 @@ describe("the packed shell", () => {
     await until("every process to end", async () => processesUnder(copy.app).length === 0, 30_000);
     const log = readFileSync(join(data, "logs", "shell.log"), "utf8");
     assert.match(log, /quitting \(secondInstance\)/);
+    assert.doesNotMatch(log, /did not report stopped/);
+    if (!FAKE) stoppedCleanly();
   });
 
   test("--quit with nothing running exits at once and starts nothing", { timeout: STEP_TIMEOUT }, async () => {
@@ -351,5 +363,22 @@ describe("the packed shell", () => {
     await until("every process to end", async () => processesUnder(copy.app).length === 0, 30_000);
     const supervisorLog = readFileSync(join(data, "logs", "supervisor.log"), "utf8");
     if (FAKE) assert.match(supervisorLog, /command stop[\s\S]*channel closed/, "stop came first, then the channel closed");
+    else stoppedCleanly();
+    assert.doesNotMatch(readFileSync(join(data, "logs", "shell.log"), "utf8"), /did not report stopped/);
+  });
+
+  test("a shell killed outright leaves a supervisor that sees its channel close and stops as Quit does", { timeout: STEP_TIMEOUT }, async () => {
+    await launch();
+    assert.ok(app);
+    const shellPid = app.process().pid;
+    assert.ok(shellPid);
+    const supervisorPid = await app.evaluate(() => (globalThis as unknown as { raccoonShellForTests: ShellHandle }).raccoonShellForTests.supervisorPid());
+    assert.ok(supervisorPid, "the supervisor runs");
+    // As taskkill /F does on Windows: no stop is sent, only the channel ends.
+    process.kill(shellPid, "SIGKILL");
+    app = null;
+    await until("every process to end", async () => processesUnder(copy.app).length === 0, 30_000);
+    if (FAKE) assert.match(readFileSync(join(data, "logs", "supervisor.log"), "utf8").trimEnd().split("\n").at(-1) ?? "", /channel closed$/);
+    else stoppedCleanly();
   });
 });
