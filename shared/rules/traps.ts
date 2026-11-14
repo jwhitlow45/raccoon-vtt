@@ -12,7 +12,7 @@ import { footing, footprintGround, groundAt, sceneGround, standing } from "./hei
 import { pendingGround } from "./held.ts";
 import { planWalks, walkedIn, withTrapCut, type MovedToken } from "./moveLeg.ts";
 import { groundUnder, hexStandHexes, storedBuild, type HexWalls } from "./movement.ts";
-import { fileOrder, onTrace, routeLattice, routeStands, routeWalk, type PublicGround, type RoutePiece, type RoutePoint, type RouteSpot, type StandGroup, type StandRule, type WalkSpot } from "./route.ts";
+import { fileOrder, onTrace, routeLattice, routeStands, routeWalk, type FileAlong, type PublicGround, type RoutePiece, type RoutePoint, type RouteSpot, type StandGroup, type StandRule, type WalkSpot } from "./route.ts";
 import { APART, contact, orient } from "./segments.ts";
 import { sceneWalls } from "./walls.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
@@ -567,8 +567,16 @@ type Walk = {
   carriedOn: boolean;
   /** The direct holder's walk in this op, when it moves only because its holder does. */
   holder?: Walk;
-  /** Its spots: the group's own at its step plus this offset, or its own walk's with none. */
+  /**
+   * Its spots: the group's own at its step plus this offset, or its own
+   * walk's with none. A walk hex by hex (moveLeg.ts MovedToken `along`)
+   * has more points than its group's walk, so its spots carry the group's
+   * progress there (`alongProgress`), each moment reading it at its group's
+   * own, and `ownProgress` keeps where along its own route each lies.
+   */
   spots: readonly WalkSpot[];
+  /** Each spot's progress along its own route, where `spots` carry its group's instead (`alongProgress`). */
+  ownProgress?: readonly Progress[];
   /** Whether it walks a route of its own, not its group's walk offset by its place. */
   own: boolean;
   /** Whether players cannot see it and it seats, up a chain of seats, one they all see (`seatsOfSeen`). */
@@ -652,6 +660,18 @@ function sameRoute(a: readonly RoutePoint[], b: readonly RoutePoint[], ox: numbe
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i]!.x !== b[i]!.x + ox || a[i]!.y !== b[i]!.y + oy) return false;
   return true;
+}
+
+/**
+ * A spot's progress along its own route (`own`) as its group's progress,
+ * for a walk hex by hex whose points are reached `along` the lead's walk
+ * (moveLeg.ts MovedToken `along`): at a piece's end as its end point is,
+ * and before it as its start point is, so the spots stay in order.
+ */
+function alongProgress(along: readonly FileAlong[], own: Progress): [number, number, number] {
+  const [piece, k, n] = own;
+  const at = along[Math.min(along.length - 1, k >= n && n > 0 ? piece + 1 : piece)]!;
+  return [at[0], at[1], at[2]];
 }
 
 function twoSpots(route: readonly RoutePoint[]): WalkSpot[] {
@@ -739,6 +759,9 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
       const ox = token.x - headToken.x;
       const oy = token.y - headToken.y;
       const shared = e === head || sameRoute(e.route, head.route, ox, oy);
+      const ownSpots = shared ? null : e.how === "teleport" ? twoSpots(e.route) : routeWalk(grid, e.trace, build, mine);
+      // A walk hex by hex is read at its group's moments by how far along the lead's walk each of its points is reached.
+      const byHex = ownSpots && e.along && e.how !== "teleport" ? e.along : null;
       const walk: Walk = {
         token,
         entry: e,
@@ -748,7 +771,8 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
         carriedOn: linkSeen && kind !== undefined && onHolder(kind),
         ...(holder ? { holder } : {}),
         // A member on a route of its own is a creature its holder drags beside it, which walks as itself (moveLeg.ts stoppedAtWalls).
-        spots: shared ? base(mine) : e.how === "teleport" ? twoSpots(e.route) : routeWalk(grid, e.trace, build, mine),
+        spots: ownSpots ? (byHex ? ownSpots.map((spot) => ({ ...spot, progress: alongProgress(byHex, spot.progress) })) : ownSpots) : base(mine),
+        ...(byHex && ownSpots ? { ownProgress: ownSpots.map((spot) => spot.progress) } : {}),
         own: !shared,
         seatsSeen: seats.has(e.tokenId),
         ox: shared ? ox : 0,
@@ -850,7 +874,7 @@ function fileElevation(walk: Walk, holder: Walk, before: RoomState, j: number, a
   const up = holder.elevation(latestIndex(holder.spots, s.progress));
   const kind = walk.token.attached?.kind;
   if (kind !== undefined && onHolder(kind)) return up + (walk.token.elevation - holder.token.elevation);
-  const ground = groundUnder(before.buildChunks, walk.entry.trace[s.progress[0]]!, { x: at.x, y: at.y });
+  const ground = groundUnder(before.buildChunks, walk.entry.trace[(walk.ownProgress?.[j] ?? s.progress)[0]]!, { x: at.x, y: at.y });
   const grounded = footing(before.buildChunks, holder.entry.trace[0]!) === "ground";
   return grounded ? ground : Math.max(walk.token.elevation + (up - holder.token.elevation), ground);
 }
@@ -904,7 +928,7 @@ function squeezeRule(walk: Walk, ends: PlacedToken): (j: number) => boolean {
     if (j === last) return isSqueezed(ends);
     const spot = walk.spots[j]!;
     if (own && spot.squeezed !== undefined) return spot.squeezed;
-    const [piece, k, n] = spot.progress;
+    const [piece, k, n] = walk.ownProgress?.[j] ?? spot.progress;
     return isSqueezed(onTrace(walk.entry.trace, piece, k === n, ends));
   };
 }
@@ -1615,6 +1639,13 @@ function standSpots(walks: Walks, walk: Walk, before: RoomState, seen: (id: stri
     // A creature in single file walks its holder's middle, off its own grid behind a larger holder, so it is judged on its grid beside it.
     const own = walk.holder ? (snapsInFile(walks, walk) ? { ...full, snaps: true } : full) : { ...full, squeeze: walk.squeezeAtEnd };
     stands = routeStands(storedBuild(before, walks.opVersion), walk.entry.route, token, walk.group.step, own, head ? walk.group.base(walk.group.step) : undefined);
+    // A walk hex by hex reads its stands at its group's progress, as its spots do (`alongProgress`).
+    const along = walk.ownProgress ? walk.entry.along : undefined;
+    if (along) {
+      const inner = stands;
+      const at = inner.walk.map((w) => ({ progress: alongProgress(along, w.progress) }));
+      stands = { walk: at, spot: (i) => ({ ...inner.spot(i), progress: at[i]!.progress }) };
+    }
   }
   walks.stands.set(walk, stands);
   return stands;
@@ -1822,9 +1853,10 @@ function cutWalks(walks: Walks, named: string, stop: Stop, points: number, befor
     (inSingleFile(walk) ? file : kept).set(walk.token.id, route);
     landed.set(walk.token.id, route);
   }
-  for (const route of routes.values()) {
+  for (const [walk, route] of routes) {
     while (route.length < points) route.push(route[route.length - 1]!);
-    route.length = points;
+    // A walk hex by hex has more points than its holder's cut walk, which the move holds at its end (moveLeg.ts follow).
+    if (!walk.ownProgress) route.length = points;
   }
   return { file: file.size > 0 ? file : null, own: kept.size > 0 ? kept : null };
 }
@@ -2020,7 +2052,7 @@ function boxesOverlap(a: Rect | ReadonlySet<string>, b: Rect | ReadonlySet<strin
 /** A walk's own route to its spot `j`, that spot at the height the trap step had it at there, or to `moved` where a stop moves it off that spot. */
 function walkTo(walk: Walk, j: number, moved?: Token): RoutePoint[] {
   const spot = spotAt(walk, j);
-  const [piece, k] = spot.progress;
+  const [piece, k] = walk.ownProgress?.[j] ?? spot.progress;
   const route = walk.entry.route.slice(0, piece + 1).map(({ x, y, elevation }) => ({ x, y, elevation }));
   // Its spot where the stop leaves it, as high as the trap step had it there.
   if (k > 0) route.push(moved ? { x: moved.x, y: moved.y, elevation: moved.elevation } : { x: spot.x, y: spot.y, elevation: walk.elevation(j) });
