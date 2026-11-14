@@ -313,6 +313,8 @@ export const STATES: State[] = [
     roles: PLAYER_ONLY,
     tool: "Area",
     async enter(p) {
+      // Entered at each size, after the last size's Pip was deleted, and a room takes each id once.
+      run.pip = uuidv7();
       await ops.send({
         t: "token.create",
         token: { id: run.pip, sceneId: run.sceneId, kind: "npc", name: "Pip", size: "tiny", x: 6, y: 8, visibility: "all", disposition: "ally", companion: { of: run.thorn.characterId, turn: "shared" }, actor: { inline: actor(4) } },

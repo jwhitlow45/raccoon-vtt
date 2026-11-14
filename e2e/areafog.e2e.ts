@@ -612,6 +612,8 @@ describe("raccoon-vtt an area aimed over a player's fog", { timeout: 600_000 }, 
 
   test("AF-10. Pat places Fireball from the fog beside revealed ground: no pixel of its box changes with the hidden wall, in Top-down and Isometric, and the Areas panel lists the goblin it catches either way", async () => {
     await setFog(ORIGIN_IN_CELL);
+    // AF-7's goblin was deleted, and a room takes each id once.
+    run.goblin = uuidv7();
     await ops.send({ t: "token.create", token: { id: run.goblin, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Goblin", ...GOBLIN_AT, disposition: "hostile", actor: { inline: ACTOR } } });
     await waitFor("the goblin on Pat's page", () => patSocket.state?.tokens[run.goblin] ?? null);
     await viewAs(pat, "topDown");
