@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
-import { FAR } from "#shared/limits.ts";
+import { BOOKKEEPING_RESERVE, FAR } from "#shared/limits.ts";
 import { ROLL_ASKED_ALREADY } from "#shared/permissions.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { scene, token } from "#shared/testutil.ts";
@@ -10,10 +10,11 @@ import { scopeActor, scopeFixture, until, type ScopeClient } from "./undoScopeTe
 
 /*
  * How the room's ops meet the byte lines under player limits (actor.ts
- * #bytesMeet): past the far line, moves and deletions are taken and growing
- * edits refused, a player's alike; at the near line, moving the players to
- * a scene that reserves no more is taken, and to one that reserves more is
- * refused as before.
+ * #bytesMeet): past the far line, deletions and ops that add nothing are
+ * taken and every growing op refused, a move too, a player's alike; inside
+ * the bookkeeping reserve a growing move is taken where a create is
+ * refused; at the near line, moving the players to a scene that reserves no
+ * more is taken, and to one that reserves more is refused as before.
  */
 
 const MIB = 1024 * 1024;
@@ -36,7 +37,7 @@ const answer = (event: { rejects?: { n: number; code: string; message: string }[
 };
 
 describe("ops past the far line", () => {
-  test("moves, a deletion and an edit that adds nothing are taken, and creates and growing edits refused, a player's and the DM's alike", async (t) => {
+  test("a deletion and a move or edit that adds nothing are taken, and creates, growing edits and growing moves refused, a player's and the DM's alike", async (t) => {
     const f = filled(FAR.roomBytes + MIB);
     // A fight already running, its first row's turn on.
     const rows = [uuidv7(), uuidv7()];
@@ -51,9 +52,10 @@ describe("ops past the far line", () => {
     const dm = await h.connect(f.dm);
     const player = await h.connect(f.player, "player");
     const full = `quota: the room is full: it is at its ${Math.floor(FAR.roomBytes / MIB)} MiB size limit`;
-    // Moves to two-digit cells, so each grows the room by a byte: bookkeeping the bound reserves.
-    assert.equal(answer(await player.send({ t: "token.move", tokenId: f.pc, x: 12, y: 3 })), "taken", "a player's move");
-    assert.equal(answer(await dm.send({ t: "token.move", tokenId: f.goblin, x: 11, y: 4 })), "taken", "the DM's move");
+    // Moves to two-digit cells grow the room by a byte, and past the line every growing op is refused, bookkeeping too.
+    assert.equal(answer(await player.send({ t: "token.move", tokenId: f.pc, x: 12, y: 3 })), full, "a player's growing move");
+    assert.equal(answer(await dm.send({ t: "token.move", tokenId: f.goblin, x: 11, y: 4 })), full, "the DM's growing move");
+    assert.equal(answer(await player.send({ t: "token.move", tokenId: f.pc, x: 7, y: 3 })), "taken", "a player's move that adds nothing");
     const line = (id: string, ownerId: string) => ({ t: "drawing.create", drawing: { id, sceneId: f.sceneId, kind: "line", points: [0, 0, 2, 2], style: { stroke: "#ff0000", width: 2, opacity: 1 }, ownerId, visibility: "all" } });
     assert.equal(answer(await player.send(line(uuidv7(), f.player.id))), full, "a player's create");
     assert.equal(answer(await dm.send({ t: "token.update", tokenId: "n1", patch: { notes: "m".repeat(4_000) } })), "taken", "an edit that adds nothing");
@@ -65,6 +67,24 @@ describe("ops past the far line", () => {
     const logged = h.actor.committed.state.log.length;
     assert.equal(answer(await dm.send({ t: "encounter.remove", entryIds: [active] })), "taken", "the active row's removal");
     assert.ok(h.actor.committed.state.log.length > logged, "it wrote a line");
+  });
+});
+
+describe("ops inside the bookkeeping reserve", () => {
+  test("a growing move is taken, a create refused, a player's and the DM's alike", async (t) => {
+    // A room whose far reading sits inside the reserve, past the line less it and short of the line, at its widest and today's.
+    const f = filled(FAR.roomBytes - BOOKKEEPING_RESERVE.room - 4 * MIB);
+    assert.ok(farRoomBytes(f.state, false) <= FAR.roomBytes - BOOKKEEPING_RESERVE.room, "filled below the reserve");
+    for (let pad = 64 * 1024; farRoomBytes(f.state, false) <= FAR.roomBytes - BOOKKEEPING_RESERVE.room; pad += 64 * 1024) f.state.tokens.n0 = { ...f.state.tokens.n0!, notes: "p".repeat(pad) };
+    assert.ok(farRoomBytes(f.state, true) <= FAR.roomBytes, `${farRoomBytes(f.state, true)} short of the line`);
+    const h = await scopeActor(t, f.state, { sizeLimits: { stateLimit: 64 * MIB, sceneLimit: 64 * MIB } });
+    const dm = await h.connect(f.dm);
+    const player = await h.connect(f.player, "player");
+    const line = (id: string, ownerId: string) => ({ t: "drawing.create", drawing: { id, sceneId: f.sceneId, kind: "line", points: [0, 0, 2, 2], style: { stroke: "#ff0000", width: 2, opacity: 1 }, ownerId, visibility: "all" } });
+    assert.match(answer(await player.send(line(uuidv7(), f.player.id))), /^quota: the room is full/, "a player's create");
+    assert.match(answer(await dm.send(line(uuidv7(), f.dm.id))), /^quota: the room is full/, "the DM's create");
+    assert.equal(answer(await player.send({ t: "token.move", tokenId: f.pc, x: 12, y: 3 })), "taken", "a player's growing move");
+    assert.equal(answer(await dm.send({ t: "token.move", tokenId: f.goblin, x: 11, y: 4 })), "taken", "the DM's growing move");
   });
 });
 

@@ -2321,21 +2321,22 @@ export class RoomActor {
   }
 
   /**
-   * The byte lines an op meets (sizeGuard.ts): none for a deletion, an
-   * exempt kind (a move, a turn, HP, a roll, a chat line) or the server's
-   * own op, whoever sends it. A move of the players' scene that leaves the
-   * room's reserves no larger is never refused, so cleanup never needs new
-   * room. Any other player's op meets only the far line, with per-player
-   * vision's reserves at their widest. The DM's meets the near lines over
-   * their part and the far line, at the widest when the op raises them, so
-   * a lone DM cannot build what later joins would carry past it.
+   * The byte lines an op meets (sizeGuard.ts): none for a deletion or the
+   * server's own op. A move of the players' scene that leaves the room's
+   * reserves no larger is never refused, so cleanup never needs new room. A
+   * player's op meets only the far line, with per-player vision's reserves
+   * at their widest. The DM's meets the near lines over their part and the
+   * far line, at the widest when the op raises them, so a lone DM cannot
+   * build what later joins would carry past it. An exempt kind (a move, a
+   * turn, HP, a roll, a chat line), whoever sends it, meets the far line
+   * alone and reads it whole, past the reserve other ops stop short of.
    */
   #bytesMeet(op: Op, kind: LimitKind, viewer: Viewer, next: RoomState, grown: readonly string[], growth: number): LimitCheck {
     const before = this.#staged.state;
     if (kind.far === "deletion" || FAR_TREATMENT[op.t] === "server") return { ok: true };
     if (op.t === "room.setPlayerScene" && roomReserves(next) <= roomReserves(before)) return { ok: true };
-    const far: FarJudge = kind.far !== "meets" ? "exempt" : viewer.role === "player" ? "widest" : widestPerPlayerReserve(next) > widestPerPlayerReserve(before) ? "widestDm" : "today";
-    return this.#sizes.check(next, grown, growth, before, viewer.role, far);
+    const far: FarJudge = viewer.role === "player" ? "widest" : widestPerPlayerReserve(next) > widestPerPlayerReserve(before) ? "widestDm" : "today";
+    return this.#sizes.check(next, grown, growth, before, viewer.role, far, kind.far === "exempt");
   }
 
   /**

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { FAR, roundUp } from "#shared/limits.ts";
+import { BOOKKEEPING_RESERVE, FAR, roundUp } from "#shared/limits.ts";
 import type { Member, RoomState, Viewer } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -35,10 +35,10 @@ function filled(state: RoomState, bytes: number, ownerIds: string[] = []): RoomS
   return out;
 }
 
-function judged(state: RoomState, op: Op, viewer: Viewer, guard: SizeGuard, far: Parameters<SizeGuard["check"]>[5]) {
+function judged(state: RoomState, op: Op, viewer: Viewer, guard: SizeGuard, far: Parameters<SizeGuard["check"]>[5], exempt = false) {
   const r = applyOp(state, op, viewer, env(9));
   assert.ok(r.ok, r.ok ? "" : r.message);
-  return guard.check(r.state, ["s1"], growthBound(state, r.state, r.touched), state, viewer.role, far);
+  return guard.check(r.state, ["s1"], growthBound(state, r.state, r.touched), state, viewer.role, far, exempt);
 }
 
 describe("the near lines answer the DM alone, over the DM's part", () => {
@@ -95,7 +95,7 @@ describe("an exempt kind", () => {
     near.stateMeasured(measuredStateBytes(base), base);
     // An op before them, so the guard's scene measures are of the room they start from.
     assert.equal(judged(base, { t: "token.update", tokenId: "g9", patch: { name: "Wolf" } }, DM, near, "none").ok, true);
-    assert.deepEqual(judged(base, conditions, DM, near, "exempt"), { ok: true });
+    assert.deepEqual(judged(base, conditions, DM, near, "today", true), { ok: true });
     const note: Op = { t: "token.update", tokenId: "g0", patch: { notes: "A short note" } };
     assert.equal(judged(after.state, note, DM, near, "none").ok, false);
   });
@@ -112,10 +112,33 @@ describe("the far line", () => {
     guard.stateMeasured(measuredStateBytes(over), over);
     assert.ok(farRoomBytes(over, true) > FAR.roomBytes);
     assert.deepEqual(judged(over, line("d1"), P1, guard, "widest"), { ok: false, code: "quota", message: `the room is full: it is at its ${Math.floor(FAR.roomBytes / MIB)} MiB size limit` });
-    const under = nearFar(FAR.roomBytes - 2 * MIB);
+    const under = nearFar(FAR.roomBytes - BOOKKEEPING_RESERVE.room - 2 * MIB);
     const free = new SizeGuard();
     free.stateMeasured(measuredStateBytes(under), under);
     assert.deepEqual(judged(under, line("d1"), P1, free, "widest"), { ok: true });
+  });
+
+  test("an op that meets the line stops the bookkeeping reserve short of it, and an exempt kind goes on to the line itself", () => {
+    // A room whose far reading with today's reserves sits inside the reserve: past the line less it, short of the line.
+    const inside = nearFar(FAR.roomBytes - BOOKKEEPING_RESERVE.room - MIB);
+    for (let pad = 64 * 1024; farRoomBytes(inside, false) <= FAR.roomBytes - BOOKKEEPING_RESERVE.room; pad += 64 * 1024) inside.tokens.fill0 = { ...inside.tokens.fill0!, notes: "p".repeat(pad) };
+    const reading = farRoomBytes(inside, false);
+    assert.ok(reading > FAR.roomBytes - BOOKKEEPING_RESERVE.room && reading <= FAR.roomBytes, `${reading} inside the reserve`);
+    const guard = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: 64 * MIB });
+    guard.stateMeasured(measuredStateBytes(inside), inside);
+    assert.equal(judged(inside, line("d1"), P1, guard, "widest").ok, false, "a player's create");
+    assert.equal(judged(inside, { t: "token.update", tokenId: "fill1", patch: { notes: "m".repeat(8_000) } }, DM, guard, "today").ok, false, "the DM's growing note");
+    const prone: Op = { t: "actor.effect.add", target: { tokenId: "fill0" }, effect: { id: "e1", key: "prone" } } as Op;
+    assert.deepEqual(judged(inside, prone, DM, guard, "today", true), { ok: true }, "a condition, an exempt kind");
+  });
+
+  test("past the line an exempt kind that grows the room is refused, and one that adds nothing taken", () => {
+    const over = nearFar(FAR.roomBytes + 64 * 1024);
+    const guard = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: 64 * MIB });
+    guard.stateMeasured(measuredStateBytes(over), over);
+    const prone: Op = { t: "actor.effect.add", target: { tokenId: "fill0" }, effect: { id: "e1", key: "prone" } } as Op;
+    assert.equal(judged(over, prone, DM, guard, "today", true).ok, false, "a condition");
+    assert.deepEqual(judged(over, { t: "token.update", tokenId: "fill0", patch: { notes: "short" } }, DM, guard, "today", true), { ok: true }, "a shrink");
   });
 
   test("the reading holds the DM's part in steps: two rooms whose DM's parts differ inside one step read alike", () => {
