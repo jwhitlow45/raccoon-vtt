@@ -33,6 +33,10 @@ and for how to use it, the [DM guide](../dm-guide.md).
   each player's own limits on what they add, counted over their own copy of
   the room, with the DM's limits over the rest, a far size line for every
   room, and create ids taken once.
+- [design-v1-local-app.md](design-v1-local-app.md): RaccoonVTT on your own
+  computer, a desktop app for Windows, macOS and Linux that runs the server,
+  its database and its backups, with players on the same network joining in
+  their own browsers.
 
 ## Maps and the board
 
