@@ -344,7 +344,8 @@ function sitsOn(state: DropView, id: string, leadId: string): boolean {
  * unless another lands the pressed token `seated` nearer the square or hex
  * it is dropped on (`seatedLanding`), read only where stands tie, since a
  * drag aims every frame. `mode` is the drop's own, a player's walk or a
- * free drop, which decides whether what the mount drags is read there.
+ * free drop, which decides whether the mount's ledges and what it drags
+ * are read there.
  */
 function seatedStand(state: DropView, token: DropToken, raw: Point, seat: Point, seated: string | undefined, mode: Exclude<DropMode, "teleport">): Point | null {
   const g = dropGrid(state, token);
@@ -353,13 +354,13 @@ function seatedStand(state: DropView, token: DropToken, raw: Point, seat: Point,
   const middle = { x: raw.x + size.w / 2, y: raw.y + size.h / 2 };
   const nearest = <T extends { at: Point; mid: Point }>(spots: T[]): T[] =>
     spots.sort((a, b) => (a.mid.x - middle.x) ** 2 + (a.mid.y - middle.y) ** 2 - ((b.mid.x - middle.x) ** 2 + (b.mid.y - middle.y) ** 2) || a.at.y - b.at.y || a.at.x - b.at.x);
-  // The first that fits, the tie settled by where the pressed token lands.
-  const fitting = <T extends { at: Point; mid: Point }>(spots: readonly T[], fits: (c: T) => boolean): T | undefined => {
+  // The first that fits, the tie settled by where the pressed token lands and, on a player's walk, by where the mount can stand (`clear`).
+  const fitting = <T extends { at: Point; mid: Point }>(spots: readonly T[], fits: (c: T) => boolean, clear: (c: T) => boolean): T | undefined => {
     const first = spots.find(fits);
     if (!first || seated === undefined) return first;
     const far = (c: T) => Math.hypot(c.mid.x - middle.x, c.mid.y - middle.y);
     const tied = spots.filter((c) => Math.abs(far(c) - far(first)) < TIE && fits(c));
-    return tied.length > 1 ? seatedLanding(state, token, seat, seated, mode, tied, first) : first;
+    return tied.length > 1 ? seatedLanding(state, token, seat, seated, mode, tied, first, clear) : first;
   };
   if (isHex(g)) {
     const t = hexWallsOf(state, walker);
@@ -371,7 +372,11 @@ function seatedStand(state: DropView, token: DropToken, raw: Point, seat: Point,
     const holding = (size: SizeCategory, squeezed: boolean) =>
       nearest([...refs.values()].map((ref): HexStand => ({ size, ref, squeezed })).filter((s) => hexStandHexes(g, s).some((h) => h.col === on.col && h.row === on.row)).map((s) => ({ at: hexStandPlace(g, token, s), mid: anchorOfHex(g, s.size, s.ref), s })));
     const fits = (s: HexStand, by: HexWalls | null) => !by || (hexStandInside(by, s) && hexFitWall(by, s) < 0);
-    const full = fitting(holding(sizeCategory(token), false), (c) => fits(c.s, walled));
+    const full = fitting(
+      holding(sizeCategory(token), false),
+      (c) => fits(c.s, walled),
+      (c) => fits(c.s, t),
+    );
     if (full && fits(full.s, t)) return full.at;
     const small = canSqueeze(token) ? hexSqueezedSize(sizeCategory(token)) : null;
     const squeezed = small ? holding(small, true).find((c) => !t || hexNarrow(t, token, c.s)) : undefined;
@@ -380,7 +385,11 @@ function seatedStand(state: DropView, token: DropToken, raw: Point, seat: Point,
   const step = snapStep(token);
   const fullSpots: { at: Point; mid: Point }[] = [];
   for (const x of holdingStarts(seat.x, size.w, step)) for (const y of holdingStarts(seat.y, size.h, step)) fullSpots.push({ at: { x, y }, mid: { x: x + size.w / 2, y: y + size.h / 2 } });
-  const full = fitting(nearest(fullSpots), (c) => !coreWalled(state, walkEnd(state, walker, c.at)));
+  const full = fitting(
+    nearest(fullSpots),
+    (c) => !coreWalled(state, walkEnd(state, walker, c.at)),
+    (c) => !coreBlocked(state, walkEnd(state, walker, c.at)) && fullStandClear(state, walker, c.at),
+  );
   if (full && !coreBlocked(state, walkEnd(state, walker, full.at))) return full.at;
   // A squeeze stands on whole squares, its sides one shorter where they reach two, centered in the full footprint.
   const small = squeezedSize(token);
@@ -396,16 +405,25 @@ function seatedStand(state: DropView, token: DropToken, raw: Point, seat: Point,
  * `seated` pressed on it, dropped with its middle at `seat`
  * (`seatedStand`): to `first`, unless another of the `tied` stands lands
  * that token nearer the square or hex it is dropped on, and then to the
- * nearest such, on it where one does, ties kept in their order. On a
- * player's walk (`mode`) every creature the walk drags along must stand
- * clear there too (`followersClear`), so the goblin a rider drags out of a
- * corridor's mouth is never left on the rock beside it for her to land
- * under the finger, as that walk would be stopped. A free drop, the DM's,
- * never checks what it drags, so there she lands under the finger (review
- * LP40F-1). Each token in the mount's group lands carried by its move, on
- * the seat the token it hangs from takes there (route.ts seatShift).
+ * nearest such, on it where one does, ties kept in their order.
+ *
+ * On a player's walk (`mode`) only the stands where the mount stands clear
+ * of every ledge (`clear`, the test the walk's end meets) are in the tie
+ * where there are any: the first of them, top then left, unless another
+ * lands the token nearer with every creature the walk drags standing clear
+ * there too (`followersClear`). Else a stand across the edge of a rise
+ * beside the finger won, and the walk that could not end there was held at
+ * the corridor's wall (LP41-RIDER-1, D-261114-006), and the goblin a rider
+ * drags out of a corridor's mouth was left on the rock beside it
+ * (lp39fix-1). The first is kept where its creatures do not read clear,
+ * since that reading is a guess from the holder's place: a goblin it calls
+ * stuck below a rise may still follow onto it. A free drop, the DM's, lands
+ * a mount across a ledge as dropped and never checks what it drags, so
+ * there she lands under the finger (review LP40F-1). Each token in the
+ * mount's group lands carried by its move, on the seat the token it hangs
+ * from takes there (route.ts seatShift).
  */
-function seatedLanding<T extends { at: Point }>(state: DropView, lead: DropToken, seat: Point, seated: string, mode: Exclude<DropMode, "teleport">, tied: readonly T[], first: T): T {
+function seatedLanding<T extends { at: Point }>(state: DropView, lead: DropToken, seat: Point, seated: string, mode: Exclude<DropMode, "teleport">, tied: readonly T[], first: T, clear: (c: T) => boolean): T {
   const pressed = state.tokens[seated];
   if (!pressed) return first;
   const g = dropGrid(state, lead);
@@ -423,13 +441,18 @@ function seatedLanding<T extends { at: Point }>(state: DropView, lead: DropToken
     const lands = placeAt(at)(pressed.id);
     return (lands.x - dropped.x) ** 2 + (lands.y - dropped.y) ** 2;
   };
-  let best = first;
-  let closest = far(first.at);
-  for (const c of tied) {
-    const d = far(c.at);
-    if (d < closest - 1e-9 && followersClear(state, g, lead, c.at, walkers, placeAt(c.at))) [best, closest] = [c, d];
-  }
-  return best;
+  const nearestOf = (stands: readonly T[], may: (c: T) => boolean): T => {
+    let best = stands[0]!;
+    let closest = far(best.at);
+    for (const c of stands) {
+      const d = far(c.at);
+      if (d < closest - 1e-9 && may(c)) [best, closest] = [c, d];
+    }
+    return best;
+  };
+  const followed = (c: T) => followersClear(state, g, lead, c.at, walkers, placeAt(c.at));
+  const stands = mode === "walk" ? tied.filter(clear) : [];
+  return stands.length > 0 ? nearestOf(stands, followed) : nearestOf([first, ...tied], followed);
 }
 
 /**

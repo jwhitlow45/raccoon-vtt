@@ -1020,7 +1020,9 @@ export function coreBlocked(state: BuildState, end: WalkEnd): boolean {
  * `coreBlocked` by walls, doors, windows and pillars alone, every ledge
  * left out. A rider's drag picks its mount's full stand by it (client
  * drop.ts seatedStand), so a ledge never moves the mount off the box the
- * finger drops, and stays the drop's own landing's to judge.
+ * finger drops, and stays the drop's own landing's to judge. Only between
+ * stands equally near does a player's walk read the ledge, to take one the
+ * walk can end on (drop.ts seatedLanding, LP41-RIDER-1).
  */
 export function coreWalled(state: BuildState, end: WalkEnd): boolean {
   const { walker: token, at } = end;
