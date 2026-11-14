@@ -142,7 +142,7 @@ describe("an id answers P1 alike whatever became of its thing", () => {
     });
   });
 
-  test("C3: an id dated 4 seconds ahead, taken, its area hidden in A and deleted in B, answers gone after a restart a second later", async (t) => {
+  test("C3: an id dated 4 seconds ahead, taken, its area hidden in A and deleted in B, answers gone after a restart a second later, and ids past 5 seconds ahead are refused", async (t) => {
     const pair = await open(t);
     const made = ids(pair, 4_000);
     // Sent at once, so the id is still ahead of the clock when it arrives.
@@ -153,6 +153,11 @@ describe("an id answers P1 alike whatever became of its thing", () => {
     await each(pair, (room) => room.restart(false));
     assert.deepEqual(await reuse(pair, made, areaOp, "after the restart"), GONE);
     same(pair, "after the restart");
+    // One dated past the 5 seconds ahead is refused for its time, the DM's too.
+    assert.deepEqual(await bothAnswer(pair, "p1", (room) => areaOp(mint.next(room, 7_000)), "7 seconds ahead"), STALE);
+    const dmArea = (room: Room): Op => ({ t: "template.create", template: { ...(areaOp(mint.next(room, 60_000)) as Extract<Op, { t: "template.create" }>).template, ownerId: "dm1" } }) as Op;
+    assert.deepEqual(await bothAnswer(pair, "dm", dmArea, "the DM's a minute ahead"), STALE);
+    same(pair, "ahead of the clock");
   });
 
   test("C4: in the 30 minutes after this server first started on this build, an id dated before that start is refused in both, and one dated after it taken", async (t) => {
@@ -221,7 +226,7 @@ describe("an id answers P1 alike whatever became of its thing", () => {
     same(pair, "after the restart");
   });
 
-  test("C10: a create whose answer was lost, hidden in A and deleted in B, is held for P1's device at once and 6 hours later", async (t) => {
+  test("C10: a create whose answer was lost, hidden in A and deleted in B, is held for P1's device at once and 6 hours later, a restart between", async (t) => {
     const pair = await open(t);
     const made = ids(pair);
     for (const [i, room] of pair.entries()) await room.apply("p1", areaOp(made[i]!));
@@ -232,6 +237,8 @@ describe("an id answers P1 alike whatever became of its thing", () => {
       const answers: unknown[] = [];
       for (const [i, room] of pair.entries()) {
         room.clock.now += later;
+        // A restart prunes the rows past both their times, so a row still held answers through it.
+        if (later > 0) await room.restart(false);
         await room.reloadP1();
         answers.push(await askIds(room, [made[i]!]));
       }

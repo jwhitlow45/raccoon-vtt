@@ -160,8 +160,10 @@ export class IdTable {
       return { rows: [], rowCount: rows.length };
     }
     if (sql.startsWith("select id, member_id, accepted_at, until, ask_until from room_ids")) {
-      const [roomId, at] = params as [string, Date];
-      const rows = this.rows.filter((r) => r.roomId === roomId && r.until > at.getTime());
+      const [roomId, at] = params as [string, Date | undefined];
+      // Each condition only where the statement names it, so a statement that drops one is read as written.
+      const live = /until > \$2/.test(sql) && at !== undefined;
+      const rows = this.rows.filter((r) => r.roomId === roomId && (!live || r.until > at.getTime()));
       return { rows: rows.map((r) => ({ id: r.id, member_id: r.memberId, accepted_at: new Date(r.acceptedAt), until: new Date(r.until), ask_until: new Date(r.askUntil) })), rowCount: rows.length };
     }
     if (sql.startsWith("select id from room_ids")) {
@@ -171,8 +173,11 @@ export class IdTable {
     }
     if (sql.startsWith("delete from room_ids")) {
       const [at, roomId] = params as [Date, string | undefined];
+      const byUntil = /(^|[^_])until < \$1/.test(sql);
+      const byAsk = /ask_until < \$1/.test(sql);
+      const gone = (r: StoredId) => (!byUntil || r.until < at.getTime()) && (!byAsk || r.askUntil < at.getTime());
       const before = this.rows.length;
-      this.rows = this.rows.filter((r) => (roomId !== undefined && r.roomId !== roomId) || r.until >= at.getTime() || r.askUntil >= at.getTime());
+      this.rows = this.rows.filter((r) => (roomId !== undefined && r.roomId !== roomId) || !gone(r));
       return { rows: [], rowCount: before - this.rows.length };
     }
     if (sql.startsWith("insert into server_facts")) {
