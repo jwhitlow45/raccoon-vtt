@@ -1,13 +1,13 @@
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { appendFile, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { appendFile, open, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import type { Platform } from "../contract.ts";
 import { rotateIfLarge } from "./logs.ts";
 import { loopbackPort } from "./ports.ts";
-import { isAlive, processStart } from "./processInfo.ts";
+import { isAlive, processProgram, processStamp, processStart } from "./processInfo.ts";
 
 /**
  * The bundled PostgreSQL (docs/design/design-v1-local-app.md 2, 6 and 8.1,
@@ -57,6 +57,13 @@ const CONF = [
   "",
 ].join("\n");
 
+/** How the cluster tells its postmaster from a process that reused its pid (processInfo.ts). Tests stand in for a stepped clock here. */
+export type ProcessLookup = {
+  start(pid: number): Promise<number | null>;
+  stamp(pid: number): Promise<number | null>;
+  program(pid: number): Promise<{ exe: string | null; cwd: string | null; foreign: boolean }>;
+};
+
 export type ClusterOptions = {
   binDir: string;
   pgData: string;
@@ -65,16 +72,37 @@ export type ClusterOptions = {
   platform: Platform;
   /** Tests only: the port each start tries, in place of a free one the system picks. */
   pickPort?: () => Promise<number>;
+  /** Tests only: in place of processInfo.ts's readings. */
+  proc?: ProcessLookup;
 };
 
-export type Leftover = { kind: "none" } | { kind: "stale" } | { kind: "running"; pid: number };
+/**
+ * A postmaster.pid found at a start. `stale`: nothing of PostgreSQL's runs
+ * as its pid, so the file can go. `running`: this folder's postmaster.
+ * `uncertain`: something runs as its pid that may be this folder's
+ * postmaster, so the file stays and the start stops.
+ */
+export type Leftover = { kind: "none" } | { kind: "stale" } | { kind: "running"; pid: number } | { kind: "uncertain"; pid: number };
+
+/** The words a start stops with when postmaster.pid names a process that may still be this folder's PostgreSQL. */
+export function uncertainWords(pid: number): string {
+  return `postmaster.pid names process ${pid}, which still runs, and RaccoonVTT can't tell whether it is this folder's PostgreSQL. Restart the computer, then open RaccoonVTT again.`;
+}
 
 export class Cluster {
   readonly opts: ClusterOptions;
   port: number | null = null;
+  private readonly proc: ProcessLookup;
+  /** The postmaster this process started, by pid and a start reading no clock change moves. */
+  private started: { pid: number; stamp: number } | null = null;
 
   constructor(opts: ClusterOptions) {
     this.opts = opts;
+    this.proc = opts.proc ?? {
+      start: (pid) => processStart(pid, opts.platform),
+      stamp: (pid) => processStamp(pid, opts.platform),
+      program: (pid) => processProgram(pid, opts.platform),
+    };
   }
 
   program(name: string): string {
@@ -141,9 +169,14 @@ export class Cluster {
   }
 
   /**
-   * A postmaster.pid left behind. `running` only when its pid is alive and
-   * started when the file says, since a reused pid is someone else's
-   * process and must never be stopped.
+   * A postmaster.pid left behind, and what runs as its pid. A reused pid is
+   * someone else's process and must never be stopped, and the file of a
+   * postmaster still running must never go, or a second one could open the
+   * same folder. So the file is `stale` only when the pid is dead or plainly
+   * another program, and `running` only when the process is this folder's
+   * postmaster: on Linux its working folder is this one, elsewhere it is a
+   * postgres that started when the file says. A postgres that started at
+   * another time is `uncertain`: a clock stepped since then reads the same.
    */
   async leftover(): Promise<Leftover> {
     let lines: string[];
@@ -156,16 +189,33 @@ export class Cluster {
     const pid = Number(lines[0]);
     const startedSec = Number(lines[2]);
     if (!isAlive(pid)) return { kind: "stale" };
-    const start = await processStart(pid, this.opts.platform);
+    const program = await this.proc.program(pid);
+    // A postmaster works in its data folder, which no other process does.
+    if (program.cwd !== null) return program.cwd === (await realpath(this.opts.pgData)) ? { kind: "running", pid } : { kind: "stale" };
+    // This user's postmaster is never another user's process.
+    if (program.foreign) return { kind: "stale" };
+    if (program.exe !== null && !/^postgres(\.exe)?$/i.test(basename(program.exe.replaceAll("\\", "/")))) return { kind: "stale" };
+    const start = await this.proc.start(pid);
     // The file's time is the postmaster's own clock reading as it started, a moment after the system's.
-    if (start === null || !Number.isFinite(startedSec) || Math.abs(start / 1000 - startedSec) > 5) return { kind: "stale" };
-    return { kind: "running", pid };
+    if (start !== null && Number.isFinite(startedSec) && Math.abs(start / 1000 - startedSec) <= 5) return { kind: "running", pid };
+    return isAlive(pid) ? { kind: "uncertain", pid } : { kind: "stale" };
   }
 
   /** Only the lock holder calls this, and only when the supervisor that started it is gone (D-261113-093). */
   async clearLeftover(found: Leftover): Promise<void> {
     if (found.kind === "running") await this.stop();
     else if (found.kind === "stale") await rm(join(this.opts.pgData, "postmaster.pid"), { force: true });
+    else if (found.kind === "uncertain") throw new DatabaseFailed(uncertainWords(found.pid));
+  }
+
+  /** The pid postmaster.pid names, or null with no file. */
+  private async pidFilePid(): Promise<number | null> {
+    try {
+      const pid = Number((await readFile(join(this.opts.pgData, "postmaster.pid"), "utf8")).split(/\r?\n/)[0]);
+      return Number.isInteger(pid) && pid > 0 ? pid : null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -185,6 +235,9 @@ export class Cluster {
           windowsHide: true,
         });
         this.port = port;
+        const pid = await this.pidFilePid();
+        const stamp = pid === null ? null : await this.proc.stamp(pid);
+        this.started = pid !== null && stamp !== null ? { pid, stamp } : null;
         return port;
       } catch (err) {
         const lines = await linesSince(this.opts.logFile, offset);
@@ -201,13 +254,18 @@ export class Cluster {
   /**
    * A clean, fast shutdown: sessions are ended, and the log closes with a
    * checkpoint. pg_ctl signals whatever pid postmaster.pid names, so it runs
-   * only for a postmaster this has checked is one. A reused pid is never
-   * signalled, and nothing running is already the goal.
+   * only for a postmaster this has checked is one: the one this process
+   * started, still running with the start it had then, or one leftover()
+   * finds running. A reused pid is never signalled, and nothing running is
+   * already the goal.
    */
   async stop(): Promise<void> {
-    if ((await this.leftover()).kind === "running") {
+    const pid = await this.pidFilePid();
+    const mine = pid !== null && this.started?.pid === pid && (await this.proc.stamp(pid)) === this.started.stamp;
+    if (mine || (await this.leftover()).kind === "running") {
       await run(this.program("pg_ctl"), ["stop", "-D", this.opts.pgData, "-m", "fast", "-w", "-t", "60"], { env: pgEnv(), windowsHide: true });
     }
+    this.started = null;
     this.port = null;
   }
 
