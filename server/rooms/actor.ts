@@ -3669,14 +3669,6 @@ export function warnArchiveSkipped(log: Logger, roomId: string, now: number): vo
 
 const ARCHIVE_SKIPPED = "free disk is under the floor or could not be read, so log lines were not archived";
 
-/**
- * A room that went read-only at its quota is measured again as it loads,
- * before anyone can write to it: what the quota counts can have changed
- * since the flag was stored (the log archive once counted, and no longer
- * does), and a room nobody can write to might never get the op and
- * snapshot that would measure it otherwise. Only the stored quota flag
- * changes here. A failed replay keeps the room read-only on its own.
- */
 /** What the room reserves for players' explored ground and memory, every floor of the players' scene counted. */
 function roomReserves(state: RoomState): number {
   return exploredReserve(state) + memoryReserves(state).whole;
@@ -3700,6 +3692,14 @@ async function loadIds(pool: Pool, roomId: string, loaded: LoadedRoom, now: numb
   return { since, rows: [...rows, ...seeds.filter((r) => !stored.has(r.id))] };
 }
 
+/**
+ * A room that went read-only at its quota is measured again as it loads,
+ * before anyone can write to it: what the quota counts can have changed
+ * since the flag was stored (the log archive once counted, and no longer
+ * does), and a room nobody can write to might never get the op and
+ * snapshot that would measure it otherwise. Only the stored quota flag
+ * changes here. A failed replay keeps the room read-only on its own.
+ */
 async function recheckQuotaOnLoad(deps: ActorDeps, quotaBytes: number): Promise<RoomInfo> {
   const { info } = deps;
   if (!info.readOnly || quotaBytes <= 0) return info;

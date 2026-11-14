@@ -121,19 +121,6 @@ function privatePagesToDm(tx: Tx, memberId: string): void {
 }
 
 /**
- * A member leaves the roster for good (S-15). Nothing may name it as an
- * owner afterwards: it is dropped from every token's and character's
- * owners, and the drawings and areas it made go with it, since a single
- * owner cannot be cleared and nobody could act as it again. It is dropped
- * from every handout's recipients too, and a handout shown to nobody else
- * closes, since no player could see it and the DM would keep a dead one
- * open. A journal page private to it becomes the DM's (wave 5), and it
- * leaves the lists of who may move any token and who may draw. Its log
- * entries stay, as the record of what happened, and one more says it was
- * removed. Each collection is walked in id order, so a replay touches the
- * same keys in the same order.
- */
-/**
  * `sys.share`: each marked scene's fixed share of the room's pool for
  * remembered maps, written into its mark once. A scene that lost its mark
  * since, or holds a share already, is skipped, so a share never moves.
@@ -146,6 +133,19 @@ export function sysShare(tx: Tx, op: OpOf<"sys.share">): void {
   }
 }
 
+/**
+ * A member leaves the roster for good (S-15). Nothing may name it as an
+ * owner afterwards: it is dropped from every token's and character's
+ * owners, and the drawings and areas it made go with it, since a single
+ * owner cannot be cleared and nobody could act as it again. It is dropped
+ * from every handout's recipients too, and a handout shown to nobody else
+ * closes, since no player could see it and the DM would keep a dead one
+ * open. A journal page private to it becomes the DM's (wave 5), and it
+ * leaves the lists of who may move any token and who may draw. Its log
+ * entries stay, as the record of what happened, and one more says it was
+ * removed. Each collection is walked in id order, so a replay touches the
+ * same keys in the same order.
+ */
 export function sysMemberRemove(tx: Tx, op: OpOf<"sys.memberRemove">): void {
   if (!ownEntry(tx.state.members, op.memberId)) throw gone("member");
   const byId = <T extends { id: string }>(items: Iterable<T>): T[] => [...items].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
