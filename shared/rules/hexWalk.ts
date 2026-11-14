@@ -29,9 +29,10 @@ import {
   type HexWalls,
   type Walker,
 } from "./movement.ts";
-import { fileOutOfReach, fileShift, followedHeight, hexFileClasses, hexFileRoutes, seatShift, type FileEnd, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "./route.ts";
+import { fileOutOfReach, fileShift, fileShiftAlong, followedHeight, hexFileClasses, hexFileRoutes, seatShift, type FileAlong, type FileEnd, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "./route.ts";
 import { onHolder } from "./attach.ts";
 import { LegCheck, MAX_SETTLED, WalkSearch, WalkWorld, WorkBudget, worldUnits, type SettleResult, type Slice, type WalkInput, type WalkRoute } from "./walk.ts";
+import { followsHexByHex } from "../migrate.ts";
 import { ownEntry } from "../records.ts";
 
 /**
@@ -573,16 +574,27 @@ export class HexWalkWorld {
    * each piece by the leg test the server runs on it, and then each where
    * it ends by its own holder's reach (route.ts fileOutOfReach), as
    * permissions.ts draggedWalls judges them. Null when all of them follow,
-   * and where they do not walk in single file (`followsInFile`).
+   * and where they do not walk in single file (`followsInFile`). Each walks
+   * hex by hex from the hex the walker starts on, as today's move takes it
+   * (migrate.ts followsHexByHex), so each of its legs is one hex step, read
+   * at the moment of the walker's walk it is reached (route.ts FileAlong).
    */
   fileBlocked(points: readonly Point[]): string | null {
     if (!this.followsInFile) return null;
     const { token, build } = this.input;
     const g = this.g;
     const n = points.length - 1;
-    const file = hexFileRoutes(g, token, points, [this.#towed.map((t) => t.walker)]);
+    const file = hexFileRoutes(g, token, points, [this.#towed.map((t) => t.walker)], followsHexByHex(undefined));
     // The walker's height at point `k` of its walk, as it stands there: squeezed where the walk ends.
     const leadAt = (k: number) => this.elevationOf(k === n ? hexStandAt(g, token, points[k]!, true) : hexEndStand(g, token, points[k]!));
+    // Where the walker is and how high when its walk is `along` (route.ts FileAlong): between its piece's ends by its share, as the move reads it.
+    const leadAlong = (along: FileAlong) => {
+      const [piece, k, m] = along;
+      const share = m > 0 ? k / m : 0;
+      const a = points[piece]!;
+      const b = points[Math.min(n, piece + 1)]!;
+      return { shift: { x: a.x + (b.x - a.x) * share - token.x, y: a.y + (b.y - a.y) * share - token.y }, height: leadAt(piece) + (leadAt(Math.min(n, piece + 1)) - leadAt(piece)) * share };
+    };
     const ends = new Map<string, FileEnd>();
     for (const t of this.#towed) {
       const walk = file.get(t.walker.id);
@@ -592,13 +604,15 @@ export class HexWalkWorld {
       const at = (k: number): Walker => {
         if (k === 0) return t.walker;
         const p = walk[k]!;
-        const shift = fileShift(file, memberOf, k, { x: points[k]!.x - token.x, y: points[k]!.y - token.y });
-        const height = followedHeight(build.buildChunks, this.#lead, (m) => this.#members.get(m), t.walker.id, shift, leadAt(k));
+        // Its walk's end takes its holders where the walker's walk ends, as the move takes it along (moveLeg.ts follow).
+        const lead = p.along ? leadAlong(k === walk.length - 1 ? [n - 1, 1, 1] : p.along) : null;
+        const shift = p.along && lead ? fileShiftAlong(file, memberOf, p.along, lead.shift) : fileShift(file, memberOf, k, { x: points[k]!.x - token.x, y: points[k]!.y - token.y });
+        const height = followedHeight(build.buildChunks, this.#lead, (m) => this.#members.get(m), t.walker.id, shift, lead ? lead.height : leadAt(k));
         return { ...t.walker, x: p.x, y: p.y, elevation: height ?? hexesGround(build.buildChunks, token.sceneId, [tokenRefHex(g, { ...t.walker, ...p })]) };
       };
       const size = sizeCategory(t.walker);
       let from = at(0);
-      for (let k = 1; k <= n; k++) {
+      for (let k = 1; k < walk.length; k++) {
         const to = at(k);
         const line = hexLine(g, tokenRefHex(g, from), tokenRefHex(g, to));
         if (!line.every((ref) => this.standable({ size, ref })) || legStop(build, from, { x: to.x, y: to.y, elevation: to.elevation, squeeze: false }) !== null) return t.walker.id;
