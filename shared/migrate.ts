@@ -12,7 +12,7 @@ import { ownEntry } from "./records.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 47;
-export const OP_VERSION = 61;
+export const OP_VERSION = 62;
 
 export type MigrationStep = {
   from: number;
@@ -1465,6 +1465,22 @@ export const opMigrations: MigrationStep[] = [
     to: 61,
     apply: (op) => op,
   },
+  {
+    // Hex single file hex by hex (LP40-HEXFILE-1, HEX_FILE_OP_VERSION): no
+    // op changes shape, so the step is the identity. From this version, on
+    // hexes, a creature a holder drags in single file walks from its own
+    // hex onto the hex the holder starts on, then along the holder's own
+    // hex lines, one point a hex (`followsHexByHex`). Ops stored before
+    // walked it straight to the holder's first corner and replay so, and a
+    // stored restore's hash guards still match.
+    // Deploy: back up the database just before, and reload open pages,
+    // since an old page refuses a squeezed holder's next step round a turn
+    // by the old walk. Rollback needs the backup only for a room with
+    // version 62 ops after its last snapshot, which an older build refuses.
+    from: 61,
+    to: 62,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -2050,6 +2066,26 @@ export function seatsApart(opVersion: number | undefined): boolean {
  */
 export function followsInSingleFileOnHexes(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 51);
+}
+
+/** The first op version whose walks in single file on hexes go hex by hex (followsHexByHex). */
+export const HEX_FILE_OP_VERSION = 62;
+
+/**
+ * Whether, on hexes, a creature that follows its holder in single file
+ * (`followsInSingleFileOnHexes`) walks from its own hex onto the hex the
+ * holder's stand counts its steps from where the walk starts, then along
+ * the hex lines that hex walked, with one point a hex (LP40-HEXFILE-1,
+ * route.ts hexFileRoutes), so each of its legs is one hex step that every
+ * leg test and every reader of its walk reads as it is walked. A warhorse
+ * squeezed in a corridor one hex wide then takes the goblin it drags round
+ * a turn, and one that backs up a hex leaves the goblin behind it, not
+ * under it. Ops stored before version 62 walked each one straight from its
+ * own hex to the holder's first corner, and replay so. Live ops carry no
+ * stored version and take today's rule.
+ */
+export function followsHexByHex(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < HEX_FILE_OP_VERSION);
 }
 
 /**
