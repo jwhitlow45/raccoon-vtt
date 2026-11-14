@@ -393,11 +393,15 @@ export function hexFileClasses<T extends PlacedToken>(shown: readonly T[], hidde
  * along the holder's walk it is reached (`FileAlong`), and at least one per
  * point of the holder's walk, holding its end. Each one after the first
  * goes onto that start by the nearest hex one ahead of it in the file
- * starts on, where that is nearer than the holder's, and that one's way on,
- * so a second goblin in a corridor that zigzags walks the corridor's hexes
- * behind the first, not the straight line two hexes long that cuts its
- * rock, while two on either side of a holder in the open each go straight
- * to it. A walk that skips the holder's start runs straight from the
+ * starts on, where that is no farther than the holder's, the latest in the
+ * file of those as near, and that one's way on, so a second goblin in a
+ * corridor that zigzags walks the corridor's hexes behind the first, not
+ * the straight line two hexes long that cuts its rock, while two on either
+ * side of a holder in the open each go straight to it. Where the holder
+ * backs up a corridor that folds onto itself, the second goblin, a hex from
+ * both the first and the holder, then has the first's hex to end on, where
+ * a walk straight onto the holder's start was all taken and kept it on its
+ * start, under the holder. A walk that skips the holder's start runs straight from the
  * creature's hex to the holder's first corner, and in a corridor one hex
  * wide that line cuts the rock where the holder turns: so did each leg
  * tested straight between two corners, and a two-hex step there was
@@ -422,8 +426,8 @@ export function hexFileRoutes(g: HexGrid, lead: PlacedToken, points: readonly Po
     for (const members of classes) {
       for (const member of fileOrder(lead, members)) {
         const start = tokenRefHex(g, member);
-        // Onto the holder's start by the nearest start ahead of it, the holder's on a tie, then that one's way on from there.
-        const by = ahead.reduce((best, a) => (hexDistance(g, start, a.hex) < hexDistance(g, start, best.hex) ? a : best));
+        // Onto the holder's start by the nearest start ahead of it, the latest in the file on a tie, then that one's way on from there.
+        const by = ahead.reduce((best, a) => (hexDistance(g, start, a.hex) <= hexDistance(g, start, best.hex) ? a : best));
         const onto = [...hexLine(g, start, by.hex).slice(1), ...by.onto];
         ahead.push({ hex: start, onto });
         // Up to the holder's first corner its hexes are reached evenly over the holder's first piece, as the straight walk there
