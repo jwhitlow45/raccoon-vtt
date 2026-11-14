@@ -1,3 +1,5 @@
+import { copyText } from "../lib/clipboard.ts";
+import { useShareOrigin } from "../lib/shareOrigin.ts";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { Button } from "../components/Button.tsx";
@@ -62,6 +64,7 @@ export default function MenuPanel(props: PanelProps) {
   useLayoutEffect(() => {
     if (asking) question.current?.focus();
   }, [asking]);
+  const shareOrigin = useShareOrigin();
   const playerLink = useDmPlayerLink(roomId, role === "dm" && preview === null, page === null);
   // "Copied, with the password" would vouch for a link the server has since replaced.
   useEffect(() => setCopied(false), [playerLink]);
@@ -75,7 +78,7 @@ export default function MenuPanel(props: PanelProps) {
     return <Component {...props} />;
   }
 
-  const share = joinLinkToShare({ roomId, origin: location.origin, playerLink });
+  const share = joinLinkToShare({ roomId, origin: shareOrigin, playerLink });
   return (
     <nav aria-label="Room menu" style={{ display: "grid", gap: theme.space(2) }}>
       <XCardButton />
@@ -89,10 +92,7 @@ export default function MenuPanel(props: PanelProps) {
           size="sm"
           icon="copy"
           onClick={() => {
-            navigator.clipboard.writeText(share.url).then(
-              () => setCopied(true),
-              () => setCopied(false),
-            );
+            void copyText(share.url).then((result) => setCopied(result === "copied"));
           }}
         >
           {copied ? (share.withPassword ? "Copied, with the password" : "Copied") : share.label}

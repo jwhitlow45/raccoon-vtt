@@ -12,6 +12,7 @@ import { api, ApiError, type DmDevice, type DmInviteState } from "../../lib/api.
 import { forgetRoom, setHomeNotice } from "../../lib/knownRooms.ts";
 import { navigate } from "../../lib/navigation.ts";
 import { useUnsavedInput, useUnsavedSince } from "../../lib/sheetSwipe.ts";
+import { useShareOrigin } from "../../lib/shareOrigin.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { ConfirmAction, SecretLink } from "./controls.tsx";
@@ -286,7 +287,8 @@ function useCountdown(expiresAt: string) {
 
 function InviteCard(props: { link: string; expiresAt: string; used: boolean; minting: boolean; onDone(): void; onAnother(): void }) {
   const countdown = useCountdown(props.expiresAt);
-  const url = absoluteLink(props.link, location.origin);
+  const origin = useShareOrigin();
+  const url = absoluteLink(props.link, origin);
   return (
     <div
       style={{
@@ -357,7 +359,10 @@ export function DmDevices() {
   const busyRef = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
   const [invite, setInvite] = useState<{ link: string; expiresAt: string } | null>(null);
-  const [newLink, setNewLink] = useState<string | null>(null);
+  // The path, joined to the share origin on each render, so a new network address reaches a link already shown.
+  const [newPath, setNewPath] = useState<string | null>(null);
+  const shareOrigin = useShareOrigin();
+  const newLink = newPath === null ? null : absoluteLink(newPath, shareOrigin);
 
   // The error stays until a load succeeds, so a reload that fails while offline does not make it flicker.
   const load = useCallback(async () => {
@@ -484,7 +489,7 @@ export function DmDevices() {
             <div style={{ display: "grid", justifyItems: "center" }}>
               <QrCode value={newLink} label="QR code of the new DM link" />
             </div>
-            <Button size="sm" onClick={() => setNewLink(null)} style={{ justifySelf: "start" }}>
+            <Button size="sm" onClick={() => setNewPath(null)} style={{ justifySelf: "start" }}>
               I saved it
             </Button>
           </>
@@ -504,7 +509,7 @@ export function DmDevices() {
                 act(async () => {
                   const res = await api.replaceDmLink(roomId);
                   setInvite(null);
-                  setNewLink(absoluteLink(res.dmLink, location.origin));
+                  setNewPath(res.dmLink);
                   await load();
                 })
               }

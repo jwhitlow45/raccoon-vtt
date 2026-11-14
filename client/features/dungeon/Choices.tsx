@@ -6,6 +6,7 @@ import { Held } from "../../components/Held.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { Switch } from "../../components/Switch.tsx";
+import { copyText } from "../../lib/clipboard.ts";
 import { theme } from "../../lib/theme.ts";
 import { NumberInput } from "../scenes/controls.tsx";
 import { BAND_NAMES } from "../traps/rules.ts";
@@ -291,7 +292,7 @@ function SeedField(props: { row: SeedRow; disabled: boolean }) {
   const error = parsed.ok ? null : SEED_BAD;
   const note = parsed.ok && parsed.otherVersion ? SEED_OTHER_VERSION : SEED_HELP;
   const copy = () => {
-    if (seed !== null) void navigator.clipboard?.writeText(formatSeed(seed)).catch(() => {});
+    if (seed !== null) void copyText(formatSeed(seed));
   };
   return (
     <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>

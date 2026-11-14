@@ -2,6 +2,7 @@ import { useState } from "react";
 import { playerLink } from "#shared/playerLink.ts";
 import { Icon } from "../../components/Icon.tsx";
 import { QrCode } from "../../components/QrCode.tsx";
+import { useShareOrigin } from "../../lib/shareOrigin.ts";
 import { formatRoomId } from "../../lib/roomId.ts";
 import { theme } from "../../lib/theme.ts";
 import { SecretLink } from "./controls.tsx";
@@ -15,7 +16,8 @@ import { absoluteLink } from "./invite.ts";
  * panel, `md` on a page.
  */
 export function PlayerLinkShare(props: { roomId: string; password: string; size?: "md" | "sm" }) {
-  const url = absoluteLink(playerLink(props.roomId, props.password), location.origin);
+  const origin = useShareOrigin();
+  const url = absoluteLink(playerLink(props.roomId, props.password), origin);
   return (
     <div style={{ display: "grid", gap: theme.space(3) }}>
       <SecretLink value={url} label="Player link" size={props.size} />
