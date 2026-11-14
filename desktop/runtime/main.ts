@@ -149,6 +149,7 @@ async function restoreContext(build: Build): Promise<RestoreContext> {
       read: () => readJournal(paths.journal),
       write: (j: RestoreJournal) => writeJournal(paths.journal, j),
       delete: () => deleteJournal(paths.journal),
+      present: async () => existsSync(paths.journal),
     },
     fs: nodeImageFs,
     backupsDir: paths.backups,

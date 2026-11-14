@@ -287,6 +287,41 @@ describe("recover() from each state ends with old or restored data, alone", () =
     assert.deepEqual(model.log, []);
     assert.ok(journal.value);
   });
+  test("a restore.json that does not read is deleted, with a line in the log, only once the databases need nothing", async () => {
+    // The last one's undo deletes the journal as its own last step.
+    for (const [s, ownLine] of [
+      [{ R: ["old", null] }, true],
+      [{ R: ["old", null], N: ["empty", tag("restoring")] }, true],
+      [{ B: "old", N: ["restored", tag("restored")] }, false],
+    ] as const) {
+      const model = new Model();
+      seed(model, s as Parameters<typeof seed>[1]);
+      let present = true;
+      const damaged: JournalStore = {
+        read: async () => null,
+        write: async () => undefined,
+        delete: async () => {
+          model.log.push("delete restore.json");
+          present = false;
+        },
+        present: async () => present,
+      };
+      const lines: string[] = [];
+      const result = await recover(context(model, new MemoryJournal(), { journal: damaged, log: (l) => lines.push(l) }));
+      assert.equal(result.tangled, false);
+      assert.equal(present, false, JSON.stringify(s));
+      assert.equal(model.log.at(-1), "delete restore.json", "after every database step");
+      assert.equal(model.log.filter((l) => l === "delete restore.json").length, 1);
+      assert.deepEqual([...model.dbs.keys()], [LIVE]);
+      assert.equal(lines.includes("restore recovery: restore.json does not read and the databases need nothing, so it is deleted"), ownLine);
+    }
+    // Nothing there: nothing deleted.
+    const model = new Model();
+    seed(model, { R: ["old", null] });
+    let deleted = false;
+    await recover(context(model, new MemoryJournal(), { journal: { read: async () => null, write: async () => undefined, delete: async () => void (deleted = true), present: async () => false } }));
+    assert.equal(deleted, false);
+  });
   test("a new cluster asks for raccoon to be made", async () => {
     const model = new Model(null);
     const result = await recover(context(model, new MemoryJournal()));
