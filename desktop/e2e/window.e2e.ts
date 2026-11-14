@@ -33,7 +33,9 @@ const errors: string[] = [];
 const TYPES: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2" };
 
 before(async () => {
-  execFileSync("pnpm", ["exec", "vite", "build", "--config", "desktop/window/vite.config.ts"], { cwd: ROOT, stdio: "pipe" });
+  // Vite's own script on this Node, as desktop/package.json's build:window
+  // runs it: Windows starts pnpm only through its .cmd shim and a shell.
+  execFileSync(process.execPath, [path.join(ROOT, "node_modules", "vite", "bin", "vite.js"), "build", "--config", "desktop/window/vite.config.ts"], { cwd: ROOT, stdio: "pipe" });
   server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const file = path.join(OUT, url.pathname === "/" ? "index.html" : url.pathname);

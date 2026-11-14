@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
@@ -29,7 +30,7 @@ export default defineConfig({
   publicDir: false,
   plugins: [relativeFonts(), react()],
   build: {
-    outDir: new URL("../out/window", import.meta.url).pathname,
+    outDir: fileURLToPath(new URL("../out/window", import.meta.url)),
     emptyOutDir: true,
     sourcemap: false,
   },
