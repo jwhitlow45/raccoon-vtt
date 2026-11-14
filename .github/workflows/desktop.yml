@@ -336,6 +336,12 @@ jobs:
       - name: Integration tests on a throwaway cluster
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: node desktop/scripts/test-db.ts pnpm -s test:int
+      # RaccoonVTT's folder in ProgramData as the installer makes it, for
+      # postgres.itest.ts's junction. Windows PowerShell 5.1 by name: its
+      # .NET Framework makes a folder with its ACL in one call.
+      - name: RaccoonVTT's folder in ProgramData
+        if: ${{ runner.os == 'Windows' && !cancelled() && steps.install.outcome == 'success' }}
+        run: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File desktop/build/programdata.ps1
       - name: Desktop integration tests
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: pnpm -s test:desktop
@@ -478,6 +484,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private
+      # The supervisor's smoke test runs without the installer, and its data
+      # folder's path may need a junction there (desktop/build/programdata.ps1).
+      - name: RaccoonVTT's folder in ProgramData
+        if: runner.os == 'Windows'
+        run: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File desktop/build/programdata.ps1
       - name: Smoke test the supervisor
         run: node desktop/scripts/smoke.ts headless
       - name: Smoke test the installer

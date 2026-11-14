@@ -450,6 +450,21 @@ describe("tokens and permissions", () => {
     }
   });
 
+  test("each Windows job makes RaccoonVTT's folder in ProgramData as the installer does, by Windows PowerShell 5.1, before the tests and the smoke test that need it", () => {
+    const make = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File desktop/build/programdata.ps1";
+    for (const [job, before] of [
+      ["checks", "Desktop integration tests"],
+      ["build", "Smoke test the supervisor"],
+    ] as const) {
+      const list = steps(job);
+      const at = list.findIndex((s) => s.includes("- name: RaccoonVTT's folder in ProgramData"));
+      const need = list.findIndex((s) => s.includes(`- name: ${before}`));
+      assert.ok(at >= 0 && need > at, `${job} makes the folder before ${before}`);
+      assert.match(list[at]!, /if: \$\{\{ runner\.os == 'Windows'|if: runner\.os == 'Windows'/, `${job}: Windows only`);
+      assert.ok(list[at]!.includes(`run: ${make}`), `${job}: ${list[at]}`);
+    }
+  });
+
   test("the package manager never runs in the plan, or after the builds", () => {
     for (const job of ["plan", "checksums", "sign", "upload"]) assert.doesNotMatch(jobBlock(job).replace(/^ *#.*$/gm, ""), /\bpnpm\b|setup-node|\bnode (desktop|scripts)\//, job);
   });
