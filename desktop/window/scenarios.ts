@@ -125,6 +125,7 @@ export const SCENARIO_NAMES: readonly string[] = [
   "unreadable-backup",
   "starting-none",
   ...STEPS.map((s) => `step-${s}`),
+  "finishing-restore",
   ...REACH.map((r) => `reach-${r}`),
   ...RESTORE_STEPS.map((s) => `restoring-${s}`),
   ...Object.keys(ERRORS).map((e) => `error-${e}`),
@@ -162,7 +163,8 @@ export function scenario(name: string, now: number, platformOverride?: Platform)
   else if (name.startsWith("step-")) {
     const step = name.slice(5) as StatusStep;
     set({ state: SUP_STATE_OF_STEP[step] ?? "starting", step, port: step === "initdb" || step === "startDatabase" ? null : 3170, host: null, shareOrigin: null, network: "offline" });
-  } else if (name.startsWith("reach-")) {
+  } else if (name === "finishing-restore") set({ state: "recovering", step: "finishRestore", percent: 42, port: null, host: null, shareOrigin: null, network: "offline" });
+  else if (name.startsWith("reach-")) {
     const network = name.slice(6) as NetworkReach;
     set({ network, shareOrigin: null, host: network === "off" ? "127.0.0.1" : "0.0.0.0", otherAddresses: [], settings: { ...base.settings, networkPlay: network === "off" } });
   } else if (name.startsWith("restoring-")) {

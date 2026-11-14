@@ -230,13 +230,14 @@ const deps: SupervisorDeps = {
     bundledMajor: async () => (await theCluster()).bundledMajor(),
     dataMajor: async () => (await theCluster()).dataMajor(),
     needsInit: () => (cluster as Cluster).needsInit(),
-    init: async () => (await theCluster()).init(),
+    init: async (signal) => (await theCluster()).init(signal),
     leftover: async () => (await theCluster()).leftover(),
     clearLeftover: async (found) => (await theCluster()).clearLeftover(found),
-    async start() {
-      await (await theCluster()).start();
+    async start(signal) {
+      await (await theCluster()).start(signal);
     },
-    stop: async () => (await theCluster()).stop(),
+    // No cluster yet means this run never started PostgreSQL. One left by an earlier run is the next start's to deal with.
+    stop: async () => cluster?.stop(),
     alive: async () => (await theCluster()).running(),
   },
   db: {
@@ -265,7 +266,7 @@ const deps: SupervisorDeps = {
   },
   restore: {
     pending: async () => (await readJournal(paths.journal)) !== null || existsSync(paths.journal),
-    recover: async (build) => recover(await restoreContext(build)),
+    recover: async (build, job) => recover({ ...(await restoreContext(build)), ...(job ? { signal: job.signal, progress: job.progress } : {}) }),
     check: async (build, name) => checkRestorable(await restoreContext(build), name),
     run: async (build, name, checked, onStep) => runRestore(await restoreContext(build), name, checked, onStep),
   },

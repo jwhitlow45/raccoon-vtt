@@ -253,7 +253,8 @@ test("every stop has words and its buttons, on every system", () => {
     errorText(SAMPLE_ERRORS.databaseFailed, "0.5.0", "win32"),
     "The database did not start. The log says: FATAL:  could not create shared memory segment.",
   );
-  assert.equal(errorText(SAMPLE_ERRORS.stalled, "0.5.0", "win32"), "RaccoonVTT gave up starting the database after 180 s. The logs may say why.");
+  assert.equal(errorText(SAMPLE_ERRORS.stalled, "0.5.0", "win32"), "Starting the database has done nothing for 180 s. RaccoonVTT goes on when it ends, and the logs may say why it is slow.");
+  assert.deepEqual(ERROR_ACTIONS.stalled, ["showLogs"], "a stalled part is still waited for, so Try again has nothing to start");
 });
 
 test("counts read as words", () => {
