@@ -315,7 +315,10 @@ describe("random twin runs answer P1 alike", () => {
                   : ({ t: "token.create", token: { id: idAt(rr, room.clock.now), sceneId: "s1", kind: "monster", name: `${APART}new${i}s${step}k${k}`, size: "medium", ...cellIn(rr, F), visibility: "dm", actor: { inline: actor() } } } as Op);
               if (op.t === "token.create") hidden.ids.push(op.token.id, op.token.name);
               if (op.t === "token.update") hidden.names.push(op.patch.name!);
-              assert.equal(await answer(room, "dm", op), "taken", `I4: run ${run} step ${step}: ${room.name}'s own ${op.t}`);
+              const got = await answer(room, "dm", op);
+              // A twin filled to a cap refuses its own creates, so only deletions and renames must be taken.
+              if (op.t === "token.create") assert.ok(got === "taken" || (typeof got === "object" && got.code === "quota"), `run ${run} step ${step}: ${room.name}'s own create: ${JSON.stringify(got)}`);
+              else assert.equal(got, "taken", `I4: run ${run} step ${step}: ${room.name}'s own ${op.t}`);
             }
           }
           const meet = Math.max(pair[0].clock.now, pair[1].clock.now);

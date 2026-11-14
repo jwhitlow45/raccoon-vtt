@@ -184,7 +184,7 @@ describe("asks answer P1 alike whatever else is asked", () => {
       else room.clock.now += 1_000;
     }
     same(pair, "the caster handed on");
-    const again = (room: Room): Op => ({ t: "cast.ask", cast: { id: mint.next(room), caster: CADE, sceneId: "s1", spell: "Fireball", area } }) as Op;
+    const again = (room: Room): Op => ({ t: "cast.ask", cast: { id: mint.next(room), caster: CADE, sceneId: "s1", spell: "Fireball", targets: [OGRE] } }) as Op;
     assert.equal(await bothAnswer(pair, "p1", again, "P1 asks again"), "taken");
     assert.equal(await bothAnswer(pair, "p1", { t: "template.update", templateId: area, patch: { size: 15 } } as Op, "P1 edits the area"), "taken");
     const reuse = (room: Room): Op => ({ t: "cast.ask", cast: { id: mint.next(room), caster: CADE, sceneId: "s1", spell: "Fireball", targets: [OGRE], damage: { tag: tags[pair.indexOf(room as never)]!, parts: 1 } } }) as Op;
