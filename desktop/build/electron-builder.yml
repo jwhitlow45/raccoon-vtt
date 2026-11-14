@@ -1,0 +1,107 @@
+# electron-builder's settings for the desktop app (design 11). Build through
+# `node desktop/build/pack.ts`, which adds the staged app server and the
+# app's version from the repository's package.json.
+
+appId: io.github.jwhitlow45.raccoonvtt
+productName: RaccoonVTT
+copyright: RaccoonVTT contributors, AGPL-3.0-only
+
+directories:
+  # Relative to desktop/.
+  buildResources: build
+  output: out/dist
+
+# Inside app.asar: the shell's two bundles, the window's page and the tray's
+# icons. The bundles carry their packages, so no node_modules go in.
+files:
+  - package.json
+  - out/main/**
+  - out/preload/**
+  - out/window/**
+  - build/icons/tray*.png
+  - build/icons/icon.png
+asar: true
+
+# Beside app.asar in the resources folder, under the names the contract's
+# RESOURCES gives: the bundled Node and PostgreSQL that desktop:fetch put in
+# desktop/.runtime, their licenses, and (added by pack.ts) the staged
+# server. pack.ts refuses to build when either program is missing.
+extraResources:
+  - from: .runtime/node
+    to: node
+  - from: .runtime/postgres
+    to: postgres
+  - from: .runtime/licenses
+    to: licenses
+
+afterPack: build/afterPack.mjs
+
+# Where electron-updater looks (Windows and the AppImage). It also makes
+# electron-builder write latest.yml and latest-linux*.yml. desktop.yml
+# uploads the release's files itself, so a build never publishes.
+publish:
+  provider: github
+  owner: jwhitlow45
+  repo: raccoon-vtt
+  releaseType: release
+
+win:
+  target:
+    - target: nsis
+      arch: x64
+  icon: build/icons/icon.png
+
+# Per-machine, so one UAC prompt lets the installer add the firewall rule
+# (design 6). One click: no pages to step through.
+nsis:
+  oneClick: true
+  perMachine: true
+  include: build/installer.nsh
+  artifactName: raccoon-vtt-${version}-windows-${arch}-setup.${ext}
+  deleteAppDataOnUninstall: false
+
+mac:
+  target: dmg
+  icon: build/icons/icon-macos.png
+  category: public.app-category.role-playing-games
+  minimumSystemVersion: "15.0"
+  # The unsigned preview (design 11.6): afterPack.mjs signs the whole bundle
+  # ad hoc instead. Signing later sets an identity here, and the hardened
+  # runtime notarization needs.
+  identity: null
+  hardenedRuntime: false
+
+dmg:
+  artifactName: raccoon-vtt-${version}-macos-${arch}.${ext}
+
+linux:
+  target:
+    - AppImage
+    - deb
+  icon: build/icons/icon.png
+  executableName: raccoonvtt
+  category: Game
+  maintainer: RaccoonVTT <https://github.com/jwhitlow45/raccoon-vtt>
+  synopsis: A virtual tabletop for one D&D group, run on this computer
+
+appImage:
+  # x64 becomes x86_64 here, as AppImages are named.
+  artifactName: raccoon-vtt-${version}-linux-${arch}.${ext}
+
+deb:
+  packageName: raccoon-vtt
+  # x64 becomes amd64 here, as Debian names it.
+  artifactName: raccoon-vtt_${version}_${arch}.${ext}
+  # electron-builder's own list, plus the bundled PostgreSQL's glibc floor
+  # (design 3, D-261113-074).
+  depends:
+    - libc6 (>= 2.36)
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
