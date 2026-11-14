@@ -1,0 +1,331 @@
+# raccoon-vtt: player limits
+
+Status: built, 2026-11-14. It stepped OP_VERSION to 61 and SNAPSHOT_VERSION to 47 (`PLAYER_LIMITS_OP_VERSION` and `PLAYER_LIMITS_SNAPSHOT_VERSION` in shared/migrate.ts). Code is cited by function and file, not by line, since the room actor changes often. As built, near the end, lists where the build went its own way.
+
+The rule: a limit a player's op meets counts only what that player's own copy of the room holds, recomputed from the state and the player's own view on each op, and the answer the player gets is worked out from that copy, their own ops and the server's clock. Two rooms whose copies for a player match ("twins") answer that player alike. Nothing is stored about who made what, and nothing is ever removed to make room.
+
+## 1. The problem
+
+A player's op used to meet the room's own limits, and those counted everything the room stored. A scene held 200 areas, and the DM's hidden areas counted toward them. The fight held 2,000 rows, hidden ones included, and a creature 32 conditions, hidden ones included. The room's 8 MiB and a scene's 3 MiB counted every stored byte. A create whose id was in use was answered one way when its thing was hidden and another way when it was deleted. A player's clear and their undo acted on drawings the DM had hidden, a player's waiting asks counted asks their own device no longer showed, and every member's op spent one bucket for the room.
+
+So whether a player's op was taken, and the words it was answered with, could turn on what the player could not see, and a player who pressed against a limit could learn that hidden things were there. Twin rooms showed it: two rooms that differ only in a hidden area answered the same player's create differently once the scene was full.
+
+This design gives each player limits of their own (seats), counted over their own copy. The room's caps answer only the DM and the server, over what no seat holds, and a far line bounds the whole room for everyone. Create ids, conditions, clears, restores, asks, the op rate, remembered maps and uploads each get a rule that reads only what the player's copy holds.
+
+## 2. Every answer a player can get
+
+Refusals show after "Not saved." in the toast, except a `forbidden` one, which shows its sentence alone (client/state/store.ts `refusalText`).
+
+| Answer | Read before | Now | Words |
+| --- | --- | --- | --- |
+| Tokens, areas, drawings and point values on a scene | hidden ones | The player's seats (3.1) and the far line (5.3). The scene caps answer the DM | Each seat's sentence (3.1), and the far line's, such as "This scene can hold at most 2,150 tokens." |
+| Initiative rows | rows the player was not shown | Their own shown rows, 40 (3.3) | "You can have 40 rows of your own in this fight. Remove one first." |
+| A row for their own hidden creature | | Refused (3.3) | "The DM adds a hidden creature to the fight." |
+| Asks for saves: 3 a member, the area lock, the roll's tag | others' asks, and their own asks their copy no longer held | Only the asks their copy holds, and the roll's own receipt (3.3) | "You have 3 asks waiting. Withdraw one first.", "Saves asked. Withdraw to change it.", "That roll already went with another ask." |
+| Companion blocks, 600 and 3 MiB a room | other characters' blocks | Per character as before. The room totals answer the DM, and the far line everyone | "The room can hold at most 1,200 companion stat blocks. Delete one first." at the far line |
+| Conditions, 32 a creature | hidden ones | Shown and hidden counted apart (6.1) | "At most 32 effects per creature." |
+| Other room caps: scenes, handouts, monsters, journal pages, open roll requests, labels | the DM's things | Not run for a player (5.1) | |
+| Characters 50, members 50, characters a player 3 | the roster and characters, in every copy | As before | As before |
+| Wall pieces and sight pieces on a door's change | every door as it stood | Every door read as closed, so opening one never meets a cap (D-261110-348) | |
+| Room 8 MiB, scene 3 MiB | every stored byte | A player's op meets only the far line (5.3) | "The room is full: it is at its 11 MiB size limit." or "This scene is at its 6 MiB size limit." |
+| A create whose id is in use: keys, rows, conditions, asks | a hidden thing apart from a deleted one | One answer for both, from the record of ids (3.4) | `gone`, "That is not here." |
+| A player's clear, and the undo of their own create | drawings the DM hid | Only what their copy holds (3.5) | "It was changed since." |
+| A remembered map's share on a marked scene | the room's free bytes | Fixed shares of one pool (6.4) | None: a map past its cap forgets its oldest ground |
+| The op rate's `retry busy` | every member's ops | A bucket for each member (6.2) | None: the device sends again |
+| Uploads: the storage quota and uploads an hour | stored bytes and the DM's uploads | Refused for space only at the quota, and the member's own 30 an hour (6.5) | "This room is out of storage space. The DM can free some up." |
+| Import | | The DM's alone (8) | |
+
+## 3. What a player's op meets
+
+### 3.1 Seats
+
+A seat counts things the member **owns and their view holds**, in a scope where their view holds everything they own of that kind. `seatCounts` in shared/limits.ts counts with the member's `SeatView` (shared/project.ts `seatView`), the test their own projection uses: whether it sees a creature, shows a row and holds a floor. An area counts while its `visibility` is `all` and the creature it rides is seen. A drawing counts while its `visibility` is `all`, its floor is held and every creature it is kept on is seen (`drawingHeld`). So a rider whose creature goes out of sight leaves the count at that op, not at the batch's close, and the count equals the copy's after every op, in the middle of a batch too.
+
+An op meets a seat only when the member's own op puts a thing into that seat's class: a create, a restore that brings one back, and a `template.update` that attaches or detaches an area, which moves it between the riding and the free class (`SEAT_TYPES` in shared/farLine.ts). A move, a climb, an edit, another member's op and a character handed on never meet a count. `seatCheck` refuses `quota` with the seat's words only when the op raises a count past its seat, so a member over a seat because the DM made them more companions is refused only their next op into that class, and the words name the limit, not what they hold.
+
+| Seat | Scope | Counts | Number | Words |
+| --- | --- | --- | --- | --- |
+| Tokens | the scene, its floors together | tokens of characters the member owns and those characters' companions | 33 | "You can have 33 tokens of your own on this map. Remove a companion first." |
+| Riding areas | the scene, its floors together | the member's areas on a creature (`attachedTo`) | 20 | "You can have 20 areas of your own on creatures here. Remove one first." |
+| Free areas | the floor | the member's other areas | 40 | "You can have 40 areas of your own here. Remove one first." |
+| Drawings | the floor | the member's drawings, kept rulers included | 400 | "You can have 400 drawings of your own here. Remove one first." |
+| Point values | the floor | the sum over those drawings | 40,000 | "Your drawings here can hold 40,000 point values. Remove one first." |
+| Rows | the fight | rows of the member's own creatures and characters that their view shows | 40 | "You can have 40 rows of your own in this fight. Remove one first." |
+
+- **Per scene for what moves.** A player climbs their own creature and its areas go with it, so a count for each floor would be passed by create, climb and create again. A member holds every floor their own creature stands on, so their copy holds all their tokens in the scene, and 3.2 keeps every riding area on a creature they see. Free areas and drawings cannot change floor, so the floor is their scope.
+- **A loan never fills the token seat.** A monster the DM lends is neither a character's token nor a companion, so it counts toward the DM's rest (5.1). The rules on one floor stay: one token a character, 10 companions a character.
+- **No byte seat** (D-261110-260). The counts and the rules on one thing hold a player's size, so a move is never refused for a seat.
+
+### 3.2 A riding area or kept ruler ends with sight
+
+An area a player put on a creature, or a ruler a player kept on one, is removed when its owner can no longer see that creature: it went into fog or out of their own sight, the DM hid it, it went to a floor of the scene its owner does not hold, or it was deleted. One on the owner's own creature never ends this way. A marker on an ally or an enemy that leaves sight is gone, and its player places it again. The seat's count therefore never holds a thing its owner's copy lacks.
+
+At each batch's close, after the explore step and before the commit, `rideEndOps` (server/rooms/rideEnd.ts) finds every player-owned riding area and anchored drawing whose owner holds its floor, or whose creature left the floors of its scene that its owner holds, and whose creature that owner's view does not hold, a missing creature included. One server op, `sys.rideEnd { templates, drawings }`, removes them (shared/reducer/rideEnd.ts). An owner who holds no floor of that scene, as when the party left the map, keeps theirs until they hold it again, and behind a blackout nothing ends.
+
+`sys.rideEnd` removes exactly what a creature's delete removes: the area alone, the drawing alone. An ask that named the area stays without it, as after a creature's delete. It writes no log line and is uncounted, like `sys.explore`, so a hidden creature and a deleted one leave the same room in the owner's copy. An area the DM hid by itself (`visibility: "dm"`) is in no seat and is the DM's rest.
+
+### 3.3 Rows and asks
+
+- **Rows.** A player's `encounter.add` is refused when the rows of their own creatures and characters that their projected fight shows would pass 40.
+- **A row for their own hidden creature** (D-261110-416). A player's `encounter.add` that names their own token whose `visibility` is `dm` is refused `forbidden`: "The DM adds a hidden creature to the fight." The check comes after the sight and ownership checks, so a token the sender cannot see or does not own is answered as before, and only its owner reads these words. The DM adds the row, hidden, and it is revealed as any hidden creature's row is, by Next on its turn where the room reveals hidden combatants then. So no row is ever hidden from the player who added it, and the 40 counts every row a player adds.
+- **Asks.** A member's 3 waiting asks count the asks their copy holds: theirs, on a floor they hold, with a caster they still own (`waitingAsks` and `holdsRecordOn` in shared/permissions.ts). The area lock (`askedAreaRefusal`) reads only those asks too, so an ask their copy lost no longer locks an area they see, and `AREA_ASKED_DM` no longer reaches a player. A caster that climbs away leaves its asks behind, so a member holds at most 3 for each floor of a scene, 24 in all. Asks left on a scene the party left are the DM's rest.
+- **An ask goes with its caster.** After every op, beside `dropFloorAsks`, `dropCasterAsks` (shared/reducer/casts.ts) drops every ask whose caster is no longer in the state. One rule covers a dismissal, a delete of any kind, an undo of the caster's create and a member's removal. An ask stays when its caster is handed to another player, climbs to another floor or stays on a map the party left, and the DM dismisses it.
+- **A roll's tag goes with one ask.** The tag check reads no stored ask. The damage roll's receipt, the sender's own, records the id of the ask that took it (`roll_receipts.ask`, written in the ask's batch), and `PermissionDeps.rollTag(memberId, tag)` reads it. An ask whose tag's receipt names another ask, or whose tag has no live receipt of the sender, is refused "That roll already went with another ask.", whatever became of the other ask. The same ask sent again is answered by its own receipt.
+
+### 3.4 Create ids
+
+**The gate covers ids a device minted, and only those** (D-261110-421). `ID_RULES` in shared/protocol.ts classes every op type's ids: `minted` (a create's key, a row's id, a condition's id, single, group, inline and `as` of 6.1, an ask's id), `recorded` (a group save's conditions, section 16), `copied` (a restore's, a duplicate's children), `natural` (coordinates, SRD ids, a key an upsert replaces in place) and `server` (ids the server mints itself and trusts). A type left out fails the typecheck. From op 61 `derivedId` sets a version nibble that is never 7, so no derived id is shaped as a minted one. A scene duplicate gives the ordinary conditions of the creatures it copies fresh derived ids, as an import gives fresh ones, so a copy shares no such id with its source.
+
+`IdGate` in server/rooms/createIds.ts runs these steps over every minted id an op brings:
+
+1. **Version 7, at live admission only.** A new id must be a UUIDv7, so its time can be read. Stored rows replay as they were taken, so the protocol schema still takes every id it took before.
+2. **The clock.** With `t` the id's own time, it is refused when `t` is more than 5 seconds ahead of the server's clock or more than 30 minutes behind it (`ID_TIME`), and never before the cutover. The 5 seconds hold for players, DMs, the server's own ops and an import's ids.
+3. **The record.** One table outside the state, `room_ids (room_id, id, member_id, accepted_at, until, ask_until)`. Every minted id of an op that applied gets a row, written in the batch's own transaction and rolled back with it. An op the gate passed and a seat, a permission or a line then refused writes no row. `until = max(t, accepted_at) + 30 minutes + 5 seconds`, the last moment step 2 could take the id again, and the gate reads the row until then. `ask_until = accepted_at + 12 hours`, and a row answers the reconnect question below until then. A row is deleted past both.
+4. **One answer.** An id the state holds, hidden or not, or the table holds, answers `gone`. Hidden, deleted and long-gone ids answer alike, and nothing has to notice an id leaving the state.
+
+- **The cutover** (D-261110-398). `server_facts.ids_since`, one value for the whole server, is when it first loaded a room on this build. Ids dated before it are refused. A room whose snapshot is older than format 47 gives every version 7 id its state names a server row at each load until a snapshot of format 47 is written, so an id the room held at the update still answers `gone` once its thing is deleted.
+- **Restores bypass the gate.** An undo brings back its own id, whose row may still stand.
+- **The budget** (D-261110-400). A member brings at most 2,000 ids in any 30 minutes, a DM 20,000 (`ID_BUDGET`), counted over that member's rows by `accepted_at`, whatever became of their things since, so a restart reads it from the table. Past it: "You are adding things very fast. Wait a few minutes." The server's own ops have no budget.
+- **The table's size, derived and never enforced** (D-261110-401). For 48 players and 2 DMs at the budget's full rate all day: at most 272,000 rows the gate reads and 3,264,000 rows kept only for the reconnect question (`HARD.gateRows`, `HARD.recoveryRows`). No refusal reads either count.
+- **The device mints at send** (D-261110-333). An id is made when its op is first sent, never as an editor opens, and is dated by the room's reckoning of the server's clock (`RoomStore.serverNow`).
+- **An uncertain create is settled by its own row** (D-261110-430 to 432). At a reconnect the device asks, for each of its own creates whose send it cannot settle, whether `room_ids` holds that id for that member (the `ids` client frame). Held: it landed, whatever the DM did with it since, and it is not sent again. Not held: it is sent again under a fresh id, its dependents rewritten. The answer covers only the asking member's own ids, so twins answer alike. "Not held" is answered only once it is final: never while the member has an op staged or committing, while another open socket has the same session and client id, or while the op rate refuses. Until then the answer is "pending" and the device asks again.
+- **One retry.** A create refused by step 1 or 2 ("This page is out of date. Reload it and try again.", `ID_TIME_REFUSED`, code `invalid`) waits for a `time` answer, takes fresh ids and goes once more. A second such refusal shows "That could not be added. Try again." A page of this build so never shows the out-of-date words, which only a page open across the update can see (D-261114-011).
+- **Not exported.** An import gives every thing, row and condition a fresh id and records them as the server's (section 8).
+
+### 3.5 Clears and restores act on the copy
+
+A player's `drawing.clear` removes only their drawings their view holds (`drawingHeld`, 3.1), so a ruler kept on a creature out of sight stays, and its undo never holds what the copy lacked. A player's restore treats a current drawing their view does not hold as absent: hidden by the DM, kept on a creature the DM hid, or on a map the players left. Such a drawing answers "it was changed since", the answer for a deleted one, from the permission check once every entry has passed it, so the restore's other refusals still come first (D-261110-554). A restored kept ruler gets a create's anchor check. The only other player ops whose reducers loop a collection by owner are `character.delete`, whose owner's copy holds every token, companion and block it removes, and the server's `sys.memberRemove`.
+
+## 4. Seat numbers
+
+The numbers stand on measured sizes, test rooms and wide margins, never on a read of the live rooms (D-261110-332, 347).
+
+- **Measured.** A drawing is 245 bytes plus 5.7 for each point value (11,647 at the 2,000 a drawing holds). An area is 273, a token 553, and its owner may write notes of 4,000 characters on it. A row is 120 and a condition 61. A first move in a fight adds 120 bytes of path.
+- **Assumed play.** One to three characters' tokens and a few companions on a map, up to 5 areas, and tens of strokes of 40 to 400 point values. Seats are 8 to 10 times that, and the token seat is the floor rules summed: 3 characters, each with a token and 10 companions.
+- Characters and stat blocks are not cut: 3 characters a player, and 100 blocks and 512 KiB a character.
+
+## 5. The DM's side, and the bound
+
+### 5.1 Counts
+
+- `admitLimits` (shared/limits.ts) is the live admission. A **player's** op meets the public counts (characters, members), the rules on one thing (a scene's size, a drawing's 2,000 point values, a character's blocks) and their seats, nothing else (`playerLimits`).
+- For the **DM and the server** each count is over **the rest**, the things no seat holds (`restLimits`). `seatHeld` gives, in each seat's scope, the first things by id that the seat counts for each member, up to its number, without the view test, so a seat-held thing out of its owner's sight for a moment is still that seat's. A thing with several player owners is its first owner's by id.
+- **A count refuses a DM op only when the op adds to the total it counts** and the rest is past the cap (D-261110-263). A hide, a hand-over, a roster change and a scene change add nothing to a count.
+- **Deletions are exempt by kind** (D-261110-341, 439): every op the table of 5.4 calls a deletion meets no count and no byte line, near or far.
+- **Moving the players never needs new room** (D-261110-433). A `room.setPlayerScene` whose total reserves after it (memory and explored ground, every floor of the destination counted) are no larger than before it is never refused. One that raises them meets the near lines as before (`NO_ROOM_TO_EXPLORE`, `MEMORY_FULL`).
+- **The players' scene can be deleted, after a question** (D-261110-417, 443). `scene.delete` on the players' scene is still refused "Move the players to another scene first." unless the op carries `leavePlayers: true`, which the DM's device sends only from its question: "The players are on this map. Delete it and leave them with no map?" The delete then leaves `meta.playerSceneId` null, which holds no floor and reserves nothing, and players see "Waiting for the DM to pick a scene." until the DM moves them. Undo of the delete brings the scene back with the players on it. The floors' own refusals stay. So cleanup never fails, whatever the scene reserved.
+- **A move into a full scene is still refused**, since it adds to that scene's total.
+
+### 5.2 Bytes
+
+- `dmBytes` is the room's measure less the stored bytes of seat-held things, and for the room less the companion blocks of characters a player owns too (D-261110-346), so players' things never take the DM's room. Sizes are of the stored objects, cached per object, so a shrink or a delete by anyone lowers both sides alike.
+- **A player's op never meets the 8 MiB and 3 MiB lines.** The DM's op meets them over `dmBytes`, only when it grows the measure's total and `dmBytes` with its reserves is past the line after it. An op of an exempt kind (5.4) meets no near line, the DM's either (D-261110-555).
+- The DM's room block totals (600 blocks and 3 MiB over characters no player owns) refuse only an op that adds to the room's blocks (D-261114-014). What they read is kept per version of the blocks, the characters and the members, so a refusal names a character by its current name.
+
+### 5.3 The far line
+
+**One rule for every room** (D-261110-423): every growing op meets the far line, a player's and the DM's alike, with the words of the cap it meets, except the kinds 5.4 exempts. A room past the line is no freer than one under it.
+
+| Far line | Scope | Value (`FAR` in shared/limits.ts) |
+| --- | --- | --- |
+| Tokens | the scene | 500 + 50 x 33 = 2,150 |
+| Areas | the scene | 200 + 50 x (20 + 8 floors x 40) = 17,200 |
+| Drawings | the floor | 2,000 + 50 x 400 = 22,000 |
+| Point values | the floor | 100,000 + 50 x 40,000 = 2,100,000 |
+| Rows | the room | 2,000 + 50 x 40 = 4,000 |
+| Asks | the room | 50 + 50 x 24 = 1,250 |
+| Companion blocks | the room | 1,200 and 6 MiB |
+| Scene bytes | every scene | 6 MiB, twice the scene line |
+| Room bytes | the room | 11 MiB |
+
+- **Steps.** A far check reads the DM's part rounded up to a step and the players' seat-held part exactly. Counts: `roundUp(rest, 50) + seatHeld`. Room bytes: `roundUp(max(0, measured - seatHeldBytes + reserves), 256 KiB) + seatHeldBytes` (`farRoomBytes` in server/rooms/sizeGuard.ts), so players' companion blocks sit in the stepped part with the DM's (D-261114-013). Blocks: the total rounded up to 50 and to 256 KiB. A count far line is not reached by players alone while the DM's rest is within its cap, since full seats sum to the 50 members' share exactly.
+- **Bookkeeping's reserve.** An op that meets the line stops `BOOKKEEPING_RESERVE` short of it, 512 KiB of the room's 11 MiB and 256 KiB of a scene's 6 MiB (`farByteLine`). An exempt kind goes on to the line itself, so the table plays on where creates stop. Past the line every op that grows the measure is refused, bookkeeping too, so the stored state stays within `HARD.storedBytes`. A deletion meets no line.
+- **Per-player reserves at their widest for a player's op.** The room reading of a player's op holds per-player vision's layers for 6 players on every per-player scene and every list of who saw at 50 members, and the marked pool whole (6.4), so a join, a kind change and a removal move nothing in it. The near lines keep the reserves of the current roster, so no room became full at the update.
+- **A DM op that raises the widest reserves** (D-261110-402): a new per-player scene, the per-player switch on a scene or larger bounds on one is judged at the far line with the widest reserves, and refused in `PER_PLAYER_FULL`'s words. So a lone DM cannot build per-player scenes that later joins would carry past the bound. Every other DM op reads the far line with the reserves of the current roster.
+- **History is bounded by bytes** (D-261110-424). From op 61 the fight's history keeps at most 20 steps and at most `HISTORY_BYTES`, 1 MiB. A Next drops the oldest steps until the new one fits, and a step larger than the budget is not kept, so Previous then has nothing to go back to. In a normal fight, 12 rows at a few KiB a step, all 20 fit.
+- **A room past the line is told** (D-261110-403, 427). It can be past it on widest per-player layers alone, or arrive in a backup valid before this version. The server logs "room is over its far size limit: creates and growing edits are refused until it is smaller" as it loads. The DM's snapshot carries a field the DM's sockets alone get, `over: { bytes }`, absent under the line, and the DM's device shows it as one notice (section 15). Nothing goes in the room's log.
+
+### 5.4 Every op type and the far line
+
+`FAR_TREATMENT` in shared/farLine.ts holds every op type in shared/protocol.ts, `undo`, `redo` and the server's ops included, and a type left out fails the typecheck. `opKind` turns it into the kind `admitLimits` reads (D-261110-434).
+
+| Treatment | Op types | Why |
+| --- | --- | --- |
+| Deletion, never meets a line | `token.delete`, `token.deleteMany`, `scene.delete`, `character.delete`, `monster.delete`, `template.delete`, `drawing.delete`, `drawing.clear`, `handout.close`, `handoutDoc.delete`, `encounter.remove`, `encounter.end`, `fog.discard`, `build.clear`, `journal.delete`, `pin.remove`, `roll.close`, `cast.close`, `companionBlock.delete`, `music.stop`, `trap.delete`, `floorLink.delete`, `sound.delete`, `playlist.delete`, `savedEncounter.delete`, `loop.stop`, `sound.stopAll`, `music.pause` | They free or stop. Their turn lines are reserved (section 8) |
+| Bookkeeping, exempt by kind | Moves: `token.move`, `token.moveMany`, `token.climb`, `token.countLeg`, `token.attach`, `token.detach`. Turns: `encounter.next`, `encounter.prev`, `encounter.setValue`, `encounter.setValues`, `encounter.reorder`, `encounter.update`. HP and life: `actor.hp`, `actor.damageMany`, `actor.outcome`, `actor.life`, `actor.deathSave`, `actor.deathRoll`, `actor.rechargeRoll`, `actor.rest`, `actor.prompt`, `actor.saveDue`, `actor.use`. Conditions: `actor.effect.add`, `actor.effect.remove`, `actor.effect.update`, `actor.effects`. Rolls and talk: `dice.roll`, `roll.dice`, `roll.answer`, `roll.change`, `sys.dice`, `log.chat`, `log.whisper`. Table state: `door.set`, `view.follow`, `view.blackout`, `trap.act`, `trap.settle`, `trap.spring`, `clock.start`, `clock.stop`, `clock.set`, `clock.advance`, `scene.reorder`, `scene.setPhase`, `floor.order`, `floor.open`, `music.play`, `music.resume`, `music.skip`, `music.set`, `music.queue`, `music.jump`, `loop.start`, `loop.set`, `sound.mix`, `sound.scene`, `effect.fire` | Each writes fields of fixed width, rows of a ring, or a list with its own cap (65 conditions, 20 history steps and 1 MiB, 200 shared log lines, 20 open rolls of 50 answers) |
+| By field | `token.update`: exempt when `isPoseOp`, or when its patch's only key is `actor` holding only `hp`, `ac`, `speeds`, `senses`, `initBonus`, `passivePerception`, `srdId` or `wildShape`. `token.updateMany` and `character.update`: exempt on that actor rule. `template.update`: exempt when every key is `origin`, `faceOffset`, `anchor`, `yaw`, `pitch`, `size`, `width` or `height`. Every other patch meets the line, notes and a sheet link included | One op type carries bookkeeping and content, and each rule reads field names (D-261110-441, 442) |
+| Restore | `undo`, `redo`, `sys.restore`: as the kind of what they bring back. A restore whose step carries poses (a move's undo) or comes from a log line is exempt | A restored drawing meets its seat and the line |
+| Meets the line | Creates: `token.create`, `character.create`, `companionBlock.create`, `template.create`, `drawing.create`, `encounter.add`, `encounter.start`, `cast.ask`, `monster.create`, `scene.create`, `scene.duplicate`, `journal.create`, `handout.show`, `handoutDoc.create`, `pin.put`, `roll.ask`, `roll.reopen`, `savedEncounter.create`, `sound.create`, `playlist.create`, `playlist.add`, `trap.create`, `floorLink.put`. Content: `companionBlock.update`, `monster.update`, `monster.setSrdImage`, `journal.update`, `journal.reveal`, `savedEncounter.update`, `sound.update`, `playlist.update`, `trap.update`, `floorLink.update`, `member.update`, `clock.update`, `scene.update`, `scene.setMap`, `scene.setGrid`, `room.update`. Building: every `build.*` but `build.clear`, and `fog.draft`, `fog.publish`, `fog.live`, `fog.reset` | They add things or text |
+| Own rule | `room.setPlayerScene` (5.1). `vision.holders` and the per-player switch (5.3, the widest reserves) | |
+| The server's | `sys.explore`, `sys.remember`, `sys.sound`, `sys.memberJoin`, `sys.memberSetKind`, `sys.memberRemove`, `sys.rideEnd`, `sys.share`, `sys.meet` | Reserved, never refused for bytes. Their growth is counted on the guard's bounds |
+
+Wire frames (`hello`, `ev`, `snapshot`, `ping`, `ids` and the rest) are not ops.
+
+## 6. The other shared answers
+
+### 6.1 Conditions
+
+- **Two classes**, shown and `hiddenFromPlayers`, at most 32 each (`EFFECTS_PER_CLASS`), counted by one helper, `effectsFit` in shared/rules/effects.ts, that every writer calls: a condition's add and the update that flips its class, the group add, a create's inline conditions, Previous putting ended conditions back (skipping what does not fit), the DM's log undo and a restore. A player's add reads the shown count alone. A full shown class answers "At most 32 effects per creature.", and the DM's 33rd hidden one "At most 32 hidden effects per creature." Damage is never refused. The stored bound is 32 + 32 + 1 = 65 (`EFFECTS_STORED_MOST`).
+- **The automatic Unconscious is canonical** (D-261110-397, 408). It is the condition with `ZERO_HP_UNCONSCIOUS_ID`, always shown, always bare (the key alone, no label, spell or duration), and outside both counts (`bareAutomatic`). **Hiding or editing it makes it ordinary**: an `actor.effect.update` that names it must carry a fresh id in `as`, gated as 3.4, and the condition goes on under that id in its class's count (`AUTOMATIC_NEEDS_ID` otherwise). From op 61, at 0 HP a creature that has a shown `unconscious` condition gets nothing more, and any other gets the bare automatic one at the end of its list (`hpRules`). Healing takes off only the automatic one.
+- **Old rooms are converted at the version boundary** (D-261110-425, 426, 435, 440). In the room's load, after the stored tail of older ops replays and before the first op of version 61 (or after the tail when there is none), `automaticUpgrade` in server/rooms/persistence.ts converts every hidden or edited automatic Unconscious, never after a replay failure. Old ops that update, remove or restore it by its old id therefore replay as they ran. Its new id is `auto-unconscious:` and 64 hex characters of a hash of the holder's key and the old id (`convertedEffectId`), 81 characters. Old effect ids hold 1 to 64 characters and the gate refuses the long form from every device, since it is not version 7, so it can never meet another id, and it is the same on every load with no retry. The step converts actors on tokens and characters and the fight's history steps, with every reference to the id rewritten. The first commit after the load writes the room's snapshot at format 47.
+- **One effect id schema** (`effectId` in shared/protocol.ts): the old rule of 1 to 64 characters, or the exact 81-character form. Every place an effect is stored or named uses it: the effect record, `actor.effect.update`, `actor.effect.remove`, `actor.saveDue`, the group remove, outcome removals, roll-ending links, history steps and save-ending log data.
+- **Every writer normalizes** (D-261110-436). `normalEffects` gives a condition that holds the automatic id and is hidden or not bare its converted id, and keeps the first of an id held twice. So Previous, a log undo and a restore can never put a hidden or edited automatic Unconscious back, on the server or a device.
+
+| Path that copies conditions | Ordinary conditions | The bare automatic Unconscious |
+| --- | --- | --- |
+| A scene duplicate | fresh derived ids | keeps `ZERO_HP_UNCONSCIOUS_ID` |
+| An import (remap.ts) | fresh ids, every reference rewritten | keeps it |
+| A restore, undo or redo | their own ids, the gate bypassed | keeps it |
+| Previous and a log undo | their own ids, skipped where a class is full | keeps it, never a second |
+| A create with inline conditions | minted by the device, gated | cannot be named: the HP step adds it |
+| A companion from a block, a creature from a monster or a saved encounter, a change of shape | none: stat blocks hold no conditions | added by the HP step at 0 HP |
+
+So a duplicated creature at 0 HP has the one automatic Unconscious, healing it removes that, and a copy at both class limits holds 65 (D-261110-437).
+
+### 6.2 Op rate
+
+A player's op spends its socket's bucket and a bucket for its member, each 20 a second and 60 at once (`OP_RATE` in server/rooms/budgets.ts), across all that member's sockets, and never the room's (D-261110-268). A DM's and the server's ops spend the room's bucket of 60 a second. Another member's burst therefore never answers a player `retry busy`.
+
+### 6.3 Receipts
+
+A damage roll's receipt now names the ask for saves that took it, in the `ask` column of `roll_receipts`, written with the ask's batch, and the tag check of 3.3 reads it through `rollTag` in server/rooms/receipts.ts, a take staged in the open batch first. The daily roll counts stay as they were (D-261110-269).
+
+### 6.4 Remembered maps
+
+- **One pool for the room** (D-261110-390, 404). Scenes marked `memoryShared` (those that had fog and party vision on at the map discovery update or a room import) share `MARKED_POOL`, 1.5 MiB, together. At a room's first load on this format, one server op, `sys.share`, writes each marked scene's share into its mark: `min(192 KiB, floor(pool left / marked scenes without a share))`. A share never moves again, so deleting a marked scene changes no other scene's cap. `sys.share` is appended at a load whenever the stored shares differ from what the pool gives.
+- A sharing layer's cap is `min(MEMORY_CAP, floor(share / sharing layers))`. A scene whose mark is `party` shares only the party's layer, and its holders' layers take whole caps. The roster is in every copy, so a cap moves only with public facts.
+- **The pool counts against the far line only** (D-261110-340). The near lines reserve nothing for it, so no marked room became full at the update.
+- **The largest marked test room.** 20 marked per-player scenes, two players and 60 sharing layers measure 7,832,678 bytes. Each scene's share is 78,643 bytes and each layer's cap 26,214. Its far reading, 7,832,678 + 1,572,860 rounded up to its step, is 9,437,184, under 11,534,336 with 2 MiB to spare. Read with the widest per-player layers of 5.3, it stays under the far line with scenes up to 80 squares a side, and passes it from 96, where 5.3's rules govern it.
+- **What players lose.** A remembered map on a marked scene is capped at 26 KiB in a room with 20 marked scenes and two players, against 64 KiB as a whole cap, and a map held above its cap forgets its oldest tiles once at the update.
+
+### 6.5 Uploads
+
+A player's upload or link import is refused for space only when the room's stored bytes are already at its quota, at its reservation and again at its commit, never by its own size, other uploads in flight or a headroom (`RoomQuota.reserve` in server/assets/quota.ts). It spends a budget of its member's, 30 an hour, in place of the room's 120 (`hourlyChecks` in server/assets/limits.ts, D-261110-561). The session's 30 and the address's 60 stay, and so does a starter pick's budget. A DM's upload keeps the rules it had.
+
+## 7. Storage and versions
+
+- **One step each** (D-261110-406). Room format 47 is an identity step: a mark's `share` is optional, and absent reads as not written yet. The conversion of old automatic Unconscious conditions is not a migration, since it must run after the old tail replays (6.1). The number moves so that an older build refuses a room this one saved.
+- **Change format 61** is an identity step too: `sys.rideEnd` and `sys.share` are new server ops, and `actor.effect.update` may carry `as` and `scene.delete` `leavePlayers`, all of which an older strict schema refuses. From op 61 (`playerLimitsOps`): conditions by class with one automatic Unconscious, a player's clear and restore by their view, a player's row for their own hidden creature refused, `derivedId`'s nibble, `dropCasterAsks` and the history's byte budget. Older rows replay as they ran. Version 7 for new ids is the actor's rule, not the schema's.
+- **At the load boundary**, beside the conversion, `withCasterAsks` drops each ask whose caster the room no longer holds, so no live op's undo step holds their removal (D-261114-016).
+- **Two new tables**, `room_ids` and the one-row `server_facts`, and the column `roll_receipts.ask`, all in db/schema.sql, which applies itself. `room_ids` is written in the batch's own transaction. A room prunes its own rows past both times at its load, and the server's daily cleanup (`RoomManager.prune`) prunes every room's (D-261114-015). Neither table is room state, is exported or counts toward a room's storage quota.
+- **Not replayed, so no version:** seats, the split between player and DM limits, `dmBytes`, the far checks, the id gate and the member bucket.
+- The update note is in [docs/self-hosting.md](../self-hosting.md) under "Player limits".
+
+## 8. Derived bounds
+
+Measured on the full fixture (`fullRoom` and `measureBounds` in server/rooms/limitsTesting.ts, held by server/rooms/limits.bounds.test.ts): 50 members, one 200 x 200 scene at the scene line with 2,150 tokens, 4,000 rows, 1,202 asks, 20 open rolls of 50 answers, 200 shared roll lines at their widest, every ring outside the measures at its bytes, and companion blocks filling the room to its far reading (D-261110-278). `HARD` in shared/limits.ts holds the bounds, and tests hold stored states, snapshots and buffers within them. Nothing refuses by them.
+
+| Bound | Parts | Value |
+| --- | --- | --- |
+| Measured state | the room far line, its widest reserves inside it | 11 MiB |
+| Outside the measure | log rings that only some viewers read (2,949,120 bytes), the record of a turn's reminders (1,490,944), save outcomes (100 KiB), and a deletion's bookkeeping: a turn start and line for each row a delete ends, at most 100 for a group delete | about 4.3 MiB |
+| `HARD.storedBytes` | the two above | 15.5 MiB |
+| `HARD.roomJsonBytes`, the import's room file cap | stored bytes and the remap's growth | 16 MiB |
+| `HARD.sendBufferBytes`, a socket's send buffer (server/rooms/ws.ts) | the largest DM snapshot and 1 MiB | 17 MiB (was 7) |
+| Rows, and every list keyed by a row (server/rooms/stateSchema.ts) | far rows | 4,000 |
+| Conditions on one creature | 6.1 | 65 |
+| A group save's selection, a trap's source | far tokens | 2,150 (`HARD.groupSaveTokens`) |
+| `room_ids` | 3.4 | 272,000 gate rows and 3,264,000 rows for the reconnect question |
+
+- **Import** (D-261110-271, 407, 560). `assertWithinLimits` takes a file that passes the checks of the build before this one (`checkLimits`, unchanged), or the same checks with the far line's counts (`farLimits`, read without a state before, the DM's part in its steps) and the far byte lines in place of the caps they raise. Every backup that imported before still does. A file past both is refused with the far line's words. A room that then loads past the far line is told as 5.3 says. remap.ts gives every condition but the bare automatic Unconscious a fresh id, per creature, with every reference rewritten, and every id the remap made is recorded in `room_ids` as the server's in the transaction that writes the room's snapshot (D-261110-562).
+- A room of 20 empty per-player scenes that six joins would carry to 18 MiB cannot be built on this version, since the DM op that raises the widest reserves is refused (5.3).
+
+## 9. Twin tests
+
+Twins are one fixture with one hidden difference: the first player's copies start equal, and the test sends both rooms the same ops and compares that player's raw frames. "Same" means the player's answers and frames are equal. The harness is server/rooms/limitsTwinTesting.ts, whose stored test database keeps `room_ids` and `server_facts`, so the twins keep their id rows across restarts.
+
+## 10. Cases
+
+| Case | Twins or setup | Expected | Test |
+| --- | --- | --- | --- |
+| L1, L2, L4, L5 | 199 against 200 DM-only areas, and the same for tokens, drawings and point values. 1,999 against 2,000 hidden rows, then export and import. Blocks of other characters at 599 against 600. A room one op from 8 MiB, and a scene one op from 3 MiB, in one twin only | The player's op taken in both, the room imports | limits.twin, importRoom.test |
+| L3, L13 | 19 against 20 asks of others. The player's ask with its caster handed on in one twin and closed in the other. An old room whose ask's caster is gone in one twin | The same answers. The tag refused in both. The player's line and its undo taken in both, at first load and after a restart | limits.twin |
+| L3b, L3c | A companion made, asked three times and dismissed, 56 times over. A tag reused after its ask closed, was dismissed, expired, its caster handed on, and after a restart | Three stored asks at most. "That roll already went with another ask." each time | casts.test, receipts.test |
+| L6 | A walk, a climb, their undo and redo | Same | limits.twin |
+| L7, L7b to L7e | 31 shown and one hidden condition in one twin, the player adds one. 32 and 32, then 0 HP. The DM hides the automatic Unconscious in one twin and removes it in the other. An old room's tail that updates, removes and restores it, loaded twice. A room holding every hash-sized id. A creature at 0 HP and one at 65 duplicated, imported and restored | Taken in both. 65 stored. One bare automatic Unconscious at the end in each twin, the hidden one kept under its long id. The tail replays as it ran, the same ids both loads, no two conditions sharing an id | limits.twin, hp.test, persistence.test, encounter.test, duplicate.test, importRoom.itest |
+| L8 | The DM's ops empty the room's bucket in one twin | No `retry` for the player | limits.twin |
+| L9 | A player's door change at the wall and sight caps | Never `quota` | walls.test |
+| L12 | A marked room, hidden bytes in one twin, a remembering walk, a join, a `party` mark | The player's remembered map equal, the join taken | limits.twin |
+| K1, K1b, K3, K4, K4b, K7 | The player's area or kept ruler on a creature hidden in one twin and deleted in the other: creates and a clear in the same batch, with an ask on the area, after the party leaves and returns. The DM hides the player's drawing in one twin and deletes it in the other, and the player clears and undoes | The same answers and the same undo step, before and after the close. No area or ruler in either. The ask stays without its area. "It was changed since." in both | limits.twin |
+| K2, K5, K6, K8 | An ally walks out of the player's sight. A blackout over a riding area whose creature stays in sight. An area on the player's own creature the DM hides. An ally climbs to a floor the player does not hold | Removed. There when the blackout lifts. Stays. Removed | rideEnd.test |
+| C1 to C4 | The player reuses the id of their area, row, condition or ask, or another member's token they saw, hidden in one twin and deleted in the other: at once, after a restart, after 31 minutes. An id 4 seconds ahead. An id dated before the cutover. A group save's condition ids made hours before and 10 years ahead | `gone` in both, then the retry and its words after 31 minutes. Before the cutover refused in both. The late plan taken, the one far ahead refused, in both | ids.twin |
+| C5, C10, C12, C13 | A stat block edited 40 minutes, then saved. Strokes drawn 40 minutes offline. A create whose answer was lost, hidden in one twin and deleted in the other. A create sent with an old id whose refusal was lost. A reconnect while the create's batch is staged | Each saved once. Held, never sent twice. Not held: sent again under a fresh id, the work kept. "Pending", then held | e2e/limits.e2e.ts, store.test, ids.twin, ids.test |
+| C6 to C9, C11 | 2,001 ids in 30 minutes, then half hidden in one twin and half deleted in the other, and a restart. Stored rows with old ids replayed. A DM's id a minute ahead. A condition's id reused from a backup's source. Every op type through the gate | The budget's words at the 2,001st and the same count after. Replay as they ran. Refused. Not in the copy. Natural and derived keys pass and leave no row | ids.test, ids.twin, actor.test, importRoom.itest |
+| D1, D2 | 50 members with full seats on one scene, the DM's rest at each cap, at 8 and 3 MiB and at each far line: the DM creates, edits, hides, hands on, removes a member, and sends every deletion | Each answers as in the room without the seat-held things, and none of the latter is refused by a line | limits.dm |
+| D4, D5, D6, D8 | Six joins in a room at the far line with per-player scenes. Seven players with three characters at 512 KiB of blocks each. An old room at each old cap. The largest marked room at the update | Taken. The blocks far line refuses in its step while the DM's 8 MiB still takes the DM's adds. Loads, every DM op as before. Shares written once, every op taken | limits.dm |
+| D9 | A scene inside its bookkeeping reserve and past its line, the room inside its reserve and past it on per-player sight, before and after six joins, and every kind the client sends | The notice. Moves, turns, HP, conditions, rolls and chat taken inside the reserve, creates, notes and stat block saves refused. Past the line every growing op refused, deletions taken | limits.dm, e2e/limits.e2e.ts |
+| D10, D11, D13 | A lone DM adds per-player scenes toward the far line. A scene change at the near line. The DM moves the players to larger, played and smaller scenes, then deletes their scene with and without the question, undoes, with restarts between | Refused in `PER_PLAYER_FULL`'s words. As before. A move that raises the reserves meets the near lines, one that does not is never refused. The delete refused without `leavePlayers`, taken with it, and Undo puts the players back | limits.dm, e2e/limits.e2e.ts |
+| D12 | A fight at the far rows, 30 presses of Next | History never over 1 MiB or 20 steps | encounter.test |
+| A1 to A7 | The player at each seat adds one, then removes one. Creates and climbs to 33 tokens on a scene. Attaches and detaches at full seats. The DM lends 35 monsters. A walk, a group move, a climb, undo and redo at full seats. A row for their hidden token | The seat's words, then taken. The 34th refused wherever it is made. The entered seat's words. Taken. All taken. "The DM adds a hidden creature to the fight." | limits.test, encounter.test |
+
+## 11. The random twin test
+
+server/rooms/limits.random.test.ts runs random sequences: DM ops (hidden creates, hides, deletes, owner changes, moves between floors and scenes, roster and scene changes, blackouts, undo), the first and second players' ops (creates of every kind with fresh, reused and ahead-dated ids, attach, detach, edits, moves, climbs, clears, undo, redo), several ops in one batch, restarts, ticks and reloads, in twins that differ only in what the first player cannot see, with small seats.
+
+- **I1**: the first player's answers and frames are equal in the twins.
+- **I2**: after every op, mid-batch included, each of the first player's seat counts equals the count over their projected copy.
+- **I3**: after every close no player-owned rider exists whose owner holds its floor and does not see its creature.
+- **I4**: a DM op that adds nothing to a total, and every deletion, is never refused by a line, at any fill up to the far lines.
+- **I5**: for each player op type, its stored growth is recorded on the full fixture, and every state stays within `HARD`, joins included.
+- **I6**: no player op outside 3.1's list is refused with a seat's words.
+- **I7**: an id that ever left the state inside its window is never taken again, across restarts.
+
+Every rule has a mutant that fails a named test, among them a seat without the view test, a seat for each floor, a DM line without its total compare, a far check without its step, the id gate without the table, a row written for a refused create, the conversion run before the old tail, a second automatic Unconscious, an ask kept after its caster, and an uncertain create settled without its row. Two are equivalent in every fixture: a deletion meeting a byte line (no deletion grows a measure) and a roll refused at the far line (a roll inside the reserve is taken either way).
+
+## 12. What proves nothing older broke
+
+The whole unit and integration suites run. Tests that sent a player's op expecting a room cap's `quota` now send the DM's: sizeGuard.test 3, sizeGuard.floorLinks.test 1, sizeGuard.discovery.test 2 (its share tests rewritten as 3 on the fixed shares), actor.test 9, importRoom.test 1, importRoom.discovery.test 1 and assets.itest 1. importRoom.test and importRoom.discovery.test move 2 tests each from the old lines to the far lines, actor.test changes 2 for exempt kinds, and remap.combatUses.test and stateSchema.test find a condition by its label, its id now fresh. Unit tests that send fixture ids run with `idGate: false` (26 tests in 10 files), and 23 integration tests in 11 files and every end-to-end file send version 7 ids made at their room's clock. The twin and random tests of the room count, creature numbers and floors pass unchanged, since `sys.rideEnd` is uncounted and changes copies only as a delete does.
+
+## 13. Code by file
+
+| File | What it holds |
+| --- | --- |
+| shared/limits.ts | `SEAT`, `SEAT_FULL`, `FAR`, `HARD`, `BOOKKEEPING_RESERVE`, `MARKED_POOL`, `HISTORY_BYTES`, `ID_TIME`, `ID_BUDGET`, the words, `seatCounts`, `seatCheck`, `seatHeld`, `admitLimits`, `farLimits`, `farByteLine`, `farBytesOver` |
+| shared/farLine.ts | `FAR_TREATMENT`, `farRule`, `opKind` |
+| shared/project.ts | `seatView` |
+| shared/permissions.ts | rows, asks, the area lock and the tag check, restores by the view, `deleteCheck` with `leavePlayers` |
+| shared/protocol.ts | `ID_RULES`, `mintedIds`, `effectId`, the `ids` frame, the snapshot's `over` |
+| shared/rules/effects.ts, shared/rules/hp.ts | conditions by class, `normalEffects`, `convertedEffectId`, `hpRules` |
+| shared/reducer/rideEnd.ts, casts.ts, encounter.ts, duplicate.ts | `sys.rideEnd`, `dropCasterAsks`, the history's bytes, fresh derived condition ids |
+| shared/ids.ts, shared/migrate.ts | `isUuidv7`, `idTime`, `ID_TIME_REFUSED`, the version steps |
+| server/rooms/createIds.ts | `IdGate`, the rows, the seeding, `pruneIds` |
+| server/rooms/actor.ts, rideEnd.ts | the gate, the close step, the byte lines by role and kind, `over`, the member bucket |
+| server/rooms/sizeGuard.ts | `dmBytes`, `farRoomBytes`, the far check with its steps and widest reserves, the marked shares |
+| server/rooms/persistence.ts, receipts.ts | `automaticUpgrade`, `withCasterAsks`, `rollTag` and the receipt's ask |
+| server/rooms/importRoom.ts, remap.ts, ws.ts | import by either rule, fresh condition ids, the `ids` frame's route, the send buffer |
+| server/assets/quota.ts, limits.ts, server/http/assets.ts | uploads (6.5) |
+| db/schema.sql | `room_ids`, `server_facts`, `roll_receipts.ask` |
+| client/state/ids.ts, store.ts, actions.ts | ids at send by the room's clock, the reconnect rules, the one retry, the notice |
+| client/features/scenes/SceneMenu.tsx, afterDelete.ts | the question before the players' map goes |
+| server/rooms/limitsTesting.ts, limitsTwinTesting.ts | the full fixture and the twin harness |
+
+## 14. Performance
+
+The bench's far row (`--far` in scripts/bench-server4.ts) runs a dark scene without walls or lights at 2,150 tokens: a walk step 16.6 ms against its 16.7 ms budget, its fan-out 7.6 ms against 6.7 ms, the DM's first snapshot 54.1 ms against 166.7 ms, and a player's 7.1 ms. A scene of the heavy bench's walls and lights cannot hold the far tokens, since they pass the DM's scene line first. The `room_ids` write runs inside the batch's transaction.
+
+## 15. UI checklist
+
+- **Words shown** (D-261110-277, 334, 344): the six seat sentences of 3.1, "The DM adds a hidden creature to the fight.", "You are adding things very fast. Wait a few minutes.", "That could not be added. Try again.", "This page is out of date. Reload it and try again." and the DM's "At most 32 hidden effects per creature.", each in the existing toast after "Not saved.", the forbidden one alone.
+- **The DM's notice** (D-261110-403, 427): "This room is over its size limit by N MiB. New things and edits that add to it are refused until that much is freed." (`overNotice`), with N rounded up, as a toast when a DM device gets a snapshot that carries `over`, and again only when N changes. A table display and a DM's view as a player never get it.
+- **The question before the players' map goes** (D-261110-417, 443, 566): a dialog of its own over the scene menu, titled "Delete Crypt" or "Delete Tower and its 3 floors", with "The players are on this map. Delete it and leave them with no map?" as its body and Cancel's description, and Cancel and Delete. Focus starts on Cancel, so Enter keeps the map, Escape cancels, and a screen reader hears the question once. A Delete armed when the players arrive from another DM device disarms, so the next tap asks.
+- **The riding rule** has no words on screen.
+- **Loading**: the one retry of 3.4 keeps the op pending under the shared indicator. No new control, key or gesture, and no new DM panel (D-261110-276).
+- **Large sizes**: the longest limit toast wraps at 320 px and 130 percent, and the notice and the question are measured with `measureAlignment` at 1440, 390 and 320 px at 100 and 130 percent in e2e/limits.e2e.ts, all within 1 px. The alignment sweep covers neither the scene menu nor the question.
+
+## 16. As built
+
+- **Admission.** Live admission is `admitLimits`, beside an unchanged `checkLimits`, which an import's first rule reads (D-261110-551). `seatCheck` takes the state before too, since a seat refuses only an op that raises it. `seatView` lives in shared/project.ts beside the projection's own tests and takes the envelope, so the reducer's callers replay by version.
+- **The far line.** `FAR.asks` is 1,250, not the 1,220 the design summed: the room's 20 asks round up to the count's step of 50 beside full seats (D-261110-550). Bookkeeping's reserve is the room's and each scene's, not each creature's: a reserve for every creature's widest bookkeeping, about 320 KiB at the stored schema's widths, would fill a room at a few dozen creatures, so ops that meet the line stop `BOOKKEEPING_RESERVE` short and past the line every growing op is refused (D-261110-551 amended). The far line reads every scene, since the room-level part grows each scene's measure, and the far scene line reads the current roster's per-player reserve, the widest only in the room reading. Deletions' and server ops' growth, such as a join's per-player layers, is counted on the guard's bounds, so its fast path never skips an exact read after joins. `over` is set at each exact measure. Players' companion blocks count in the room's far reading inside the stepped part, and still leave the DM's near measure (D-261114-013).
+- **Kinds.** `sys.meet`, the creature numbers' server op, is a server op in the table, and `sys.dice` is bookkeeping. An exempt kind meets no near line for the DM either (D-261110-555).
+- **Ids.** `ID_RULES` leaves out of the gate a pin's id in `pin.put`, a fix-my-total ask's id in `roll.change`, music runs and playing ids, fog draft ids and the build's labels, stamps and lights, which are the DM's and are replaced in place or name what plays now (D-261110-553). A group save's conditions in `actor.outcome` are `recorded`: they keep the ids the plan was made with, each version 7 one gets a server row as it applies, outside every budget, and one dated more than 5 seconds past the server's clock is refused with the out-of-date words before admission, whether or not the room holds a row for it (D-261114-012, 027, 028). `server_facts.ids_since` is written at the first room load on this build, not at server start. A cutover ahead of the server's clock stays as it is, and each room load logs "the ids cutover is ahead of the server's clock: check the clock". Rows held past what the clock admits, an old room's seeded ids dated far ahead, wait apart from the gate's expiry order, and a member's budget forgets ids past its window once a minute (D-261114-015).
+- **The device.** An op never written to a socket takes fresh ids at a reconnect only when the room would refuse its ids by their time, or would within 5 minutes, so a short drop changes no id the page holds. One sent with no answer keeps its ids unless they are past the window for good (D-261110-563). A create the snapshot's watermark settled with no answer waits for the `ids` answer: held is told `unknown` as before, not held goes again at the end of the queue under fresh ids, pending asks again after 1 second, and 2 minutes with no final answer is `unknown` (D-261110-564). A later op already sent that names it may then be refused as gone. The one retry waits unsent for a `time` answer or 2 seconds. The companion stat block, a journal page, a new playlist and a placed area make their id as the first save goes, the PDF handout keeps its file-pick id and follows a fresh one, cast asks follow a fresh id in their send, receipt and block, and the store fills `as` for every control that edits the automatic Unconscious (D-261110-565). The server's out-of-date words were reworded for pages open across the update (D-261114-011).
+- **The close step** runs explore, then `rideEnd`, then the numbers' meet.
+- **Restores.** A player's restore answers "it was changed since" for any drawing their copy does not hold, after every entry's check, and the reducer's guard is unchanged (D-261110-554). A restore normalizes restored creatures' conditions from op 61.
+- **The fixture**, measured on this build: stored state 15,654,157 bytes (14.93 MiB), its export 15,654,411, the room's far reading 11,362,364 and the scene's 6,285,426, the DM's snapshot 12,927,262 (12.33 MiB). Beside the far counts and the widest shared ring, the scene line leaves the history 438,581 bytes. 4,001 rows is a schema refusal, so the import's 413 case uses tokens. The DM's caps case seats 48 players' tokens, areas and rows in full and the drawings of 12 of them in full, since every player's 400 drawings pass the 6 MiB far scene line by themselves (D-261110-567). The far line case uses rooms a backup valid before this version can be, not the full fixture (D-261110-568, D-261113-073).
+- **Per-op growth (I5)** on the full room at the far lines: `template.create`, `drawing.create`, `token.create`, `encounter.add` and `cast.ask` refused (0 bytes), and `actor.effect.add` +1,539 bytes, `character.update` (AC) +600, `token.move` 0, `actor.hp` +240, `dice.roll` -155 (the shared ring), `log.chat` +1,334.
+- **Twin details.** The op rate case compares the player's frames from the second after the DM's 120 ops (D-261110-569). K2 and K8 use the DM's ally, since a party member stays in the player's own sight. The harness is limitsTwinTesting.ts, apart from the full fixture's limitsTesting.ts (D-261110-570).
+- **End-to-end ids.** The e2e harness sets `server_facts.ids_since` on a fresh database, and fixtures that sent an id twice now make a fresh one at each create (D-261110-575, 576).
+
+## 17. Decisions
+
+D-261110-253 removes nothing to make room without someone who sees it choosing to. 254 and 258 replace the first draft's per-member account with limits scoped to what each member sees and owns, recomputed on each op. 255, 262, 336 and 337 end a player's riding area or kept ruler with sight, writing no line. 256, 263 and 341 add no refusal for a DM op that adds nothing and never refuse a deletion. 257 keeps what a player holds in normal play. 148, 259, 334 and 335 are the seat numbers, and 260 gives players no byte seat. 261, 331 and 339 are the far line, its steps and its widest reserves, and 340 counts the marked pool against it only. 265 and 342 make a player's clear and restore act on their copy. 266, 343, 397, 408, 409, 425, 426, 435, 436, 437 and 440 are the automatic Unconscious, its conversion and its id. 267, 390, 404 and 405 are the remembered maps' pool. 268 is the member's op rate, 269 keeps the daily roll counts, and 151 and 270 are uploads. 271 and 407 are the import. 273, 349, 371, 372 and 373 are asks. 274 and 416 are rows. 276 adds no DM panel. 277 and 344 are the words. 278 measures the bounds on full rooms, and 332 and 347 take seat numbers from test rooms. 330, 333, 374, 396, 398, 400, 401, 421, 430, 431 and 432 are the create ids. 346 leaves players' blocks out of the DM's measure, and 348 reads doors as closed. 402 judges a DM op that raises the widest reserves at the widest. 403, 423 and 427 are the one far-line rule and the DM's notice. 406 is the one format step each. 417, 433 and 443 are the scene change and the question before the players' map goes. 424 is the history's bytes. 434, 438, 439, 441 and 442 are the table of 5.4. 550 to 555, 560 to 570, 575 and 576 are the build choices in section 16, with D-261113-073 for the far line case. D-261114-011 rewords the out-of-date refusal, 012, 027 and 028 cover a group save's condition ids, 013 counts players' blocks in the room's far reading, 014 the DM's block totals, 015 the id gate's memory and the daily prune, and 016 old rooms' asks.

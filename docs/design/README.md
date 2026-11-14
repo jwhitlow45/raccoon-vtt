@@ -29,6 +29,10 @@ and for how to use it, the [DM guide](../dm-guide.md).
 - [design-v1-room-count.md](design-v1-room-count.md): the room count, so that
   the numbers a player's device receives never reflect the server's private
   bookkeeping.
+- [design-v1-player-limits.md](design-v1-player-limits.md): player limits,
+  each player's own limits on what they add, counted over their own copy of
+  the room, with the DM's limits over the rest, a far size line for every
+  room, and create ids taken once.
 
 ## Maps and the board
 
