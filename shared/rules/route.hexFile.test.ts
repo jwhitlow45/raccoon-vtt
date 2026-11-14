@@ -478,6 +478,29 @@ for (const [name, g] of GRIDS) {
       assert.equal(refOf(g, { size: "medium", ...rat.to }), hexKey(path[goblin]!), "the rat a hex behind it");
       legsClear(g, s, rat, "the rat");
     });
+
+    test("op 62: a hidden imp that a goblin two hexes out drags walks a shorter walk than the goblin, and the rat the imp drags still follows it, each behind the one before", () => {
+      // The DM's drag, since the goblin starts out of the warhorse's reach. The imp's walk from the mouth is shorter than the
+      // goblin's, so its move holds its last point as long as the goblin's lasts, and the rat behind it reads the imp's own walk
+      // held so (moveLeg.ts behindStop).
+      const { s, path } = keepOf(g, 1, 0, "horse");
+      const last = path[path.length - 1]!.row;
+      const inPath = new Set(path.map(hexKey));
+      const open = (h: Hex) => inPath.has(hexKey(h)) || !(h.col >= 7 && h.col <= 15 && h.row >= 1 && h.row <= last);
+      const mouth = path[0]!;
+      const ratAt = hexNeighbors(g, mouth).find((n) => open(n) && hexKey(n) !== hexKey(path[1]!))!;
+      const gobAt = hexNeighbors(g, ratAt).find((n) => open(n) && hexDistance(g, n, path[1]!) === 3)!;
+      s.tokens.gob = onHex(g, "gob", "medium", gobAt, { name: "Goblin", kind: "npc", ownerIds: ["p1"], attached: { to: "horse", kind: "drag" } });
+      s.tokens.imp = onHex(g, "imp", "medium", mouth, { name: "Imp", kind: "npc", visibility: "dm", attached: { to: "gob", kind: "drag" } });
+      s.tokens.rat = onHex(g, "rat", "medium", ratAt, { name: "Rat", kind: "npc", visibility: "dm", attached: { to: "imp", kind: "drag" } });
+      const r = applyOp(s, intoCorridor(g, s, path[2]!), DM, env(1));
+      assert.ok(r.ok);
+      const at = (id: string) => refOf(g, r.state.tokens[id]!);
+      assert.deepEqual([at("gob"), at("imp")], [hexKey(path[1]!), hexKey(mouth)], "the goblin on the hex the warhorse left, the imp where it stood behind it");
+      assert.equal(hexDistance(g, hexOf(g, r.state.tokens.rat!), mouth), 1, "the rat beside the imp");
+      assert.ok(![at("gob"), at("imp")].includes(at("rat")), "the rat on a hex of its own");
+      assert.deepEqual(["gob", "imp", "rat"].map((id) => r.state.tokens[id]!.attached?.to), ["horse", "gob", "imp"]);
+    });
   });
 }
 
