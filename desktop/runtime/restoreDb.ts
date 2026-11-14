@@ -77,7 +77,7 @@ export function clusterRestoreDb(cluster: Cluster): RestoreDb {
       );
     },
     async load(dumpFile) {
-      await cluster.client("pg_restore", [`--dbname=${RESTORING}`, "--no-owner", "--single-transaction", "--exit-on-error", dumpFile]);
+      await cluster.client("pg_restore", [`--dbname=${RESTORING}`, "--no-owner", "--single-transaction", "--exit-on-error", cluster.pgPath(dumpFile)]);
       await withClient(cluster.url(RESTORING), (c) => c.query("select count(*) from rooms"));
     },
     async stampRestored(build: Build, record: BackupRecord) {

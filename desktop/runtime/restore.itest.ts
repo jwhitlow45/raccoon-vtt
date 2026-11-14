@@ -405,6 +405,7 @@ describe("call order", () => {
     if (!checked.ok) return;
     const out = await runRestore(ctx, name, checked, () => undefined);
     assert.deepEqual(out, { ok: true });
+    assert.ok(t.given.includes(join(backups, name + BACKUP_SUFFIX.dump)), "pg_restore gets the dump by PostgreSQL's spelling of its path");
     const firstRename = calls.findIndex((c) => c.startsWith("db rename"));
     assert.ok(firstRename > 0, calls.join("\n"));
     for (const p of list) {

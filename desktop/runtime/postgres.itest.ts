@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import net from "node:net";
-import os, { tmpdir } from "node:os";
+import os, { devNull, tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
 import pg from "pg";
 import { Platform } from "../contract.ts";
 import { dataIdentity } from "./dataDir.ts";
 import { lockLocation } from "./lock.ts";
+import { pgPaths, windowsDeps } from "./pgPaths.ts";
 import { loopbackPort } from "./ports.ts";
 import { BOOT_RECORD, Cluster, DatabaseFailed, uncertainWords } from "./postgres.ts";
 import { bootId, isAlive, processFacts, processStamp } from "./processInfo.ts";
@@ -344,4 +345,62 @@ describe("a postmaster left running", { skip: platform === "win32" && "the Windo
     assert.ok(isAlive(postmaster), "stopping the refused supervisor leaves the first one's database alone");
     await first.stop();
   });
+});
+
+describe("on Windows, a data folder whose path PostgreSQL can't open", { skip: platform !== "win32" && "PostgreSQL opens paths in the ANSI code page on Windows only" }, () => {
+  test("Windows says é fits the runner's code page and Ж does not", async () => {
+    const dir = await dataDir();
+    const latin = join(dir, "Tést");
+    const awkward = join(dir, "RaccoonVTT Tést Жук");
+    await mkdir(latin);
+    await mkdir(awkward);
+    const deps = windowsDeps();
+    assert.equal((await deps.read(latin)).fits, true, "the runner's code page is cp1252");
+    const reading = await deps.read(awkward);
+    assert.equal(reading.fits, false);
+    if (reading.short !== null && reading.shortFits) assert.ok(existsSync(reading.short), reading.short);
+  });
+
+  for (const route of ["as Windows allows", "through a junction"] as const) {
+    test(`a cluster there is made, started, dumped, read back and stopped, ${route}`, async () => {
+      const dir = await dataDir();
+      const data = join(dir, "RaccoonVTT Tést Жук", "data");
+      await mkdir(join(data, "logs"), { recursive: true });
+      await mkdir(join(data, "backups"));
+      const record = join(data, "postgres-link.json");
+      const real = windowsDeps();
+      const deps = route === "through a junction" ? { ...real, read: async () => ({ fits: false, short: null, shortFits: false }) } : real;
+      const paths = await pgPaths({ data, program: postgresDir() }, record, platform, deps);
+      const linkFolder = existsSync(record) ? (JSON.parse(await readFile(record, "utf8")) as { folder: string }).folder : null;
+      if (route === "through a junction") assert.ok(linkFolder !== null);
+      try {
+        const c = new Cluster({
+          binDir: join(postgresDir(), "bin"),
+          pgData: join(data, "postgres"),
+          logFile: join(data, "logs", "postgres.log"),
+          password: "test-password-0123456789abcdef",
+          platform,
+          pgPath: paths.map,
+        });
+        await c.init();
+        await c.start();
+        try {
+          const dump = join(data, "backups", "x.dump");
+          await c.client("pg_dump", ["--dbname=postgres", "--format=custom", `--file=${c.pgPath(dump)}`]);
+          await c.readDump(["--list", `--file=${devNull}`, c.pgPath(dump)]);
+          assert.ok((await stat(dump)).size > 0);
+        } finally {
+          await c.stop();
+        }
+        assert.equal(existsSync(join(data, "postgres", "postmaster.pid")), false, "stopped cleanly");
+      } finally {
+        if (linkFolder !== null) {
+          // rmdir takes a junction away without following it.
+          await rmdir(join(linkFolder, "data"));
+          await rm(join(linkFolder, "key"));
+          await rmdir(linkFolder);
+        }
+      }
+    });
+  }
 });

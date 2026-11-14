@@ -25,18 +25,25 @@ export function postgresDir(): string {
 export type TestCluster = {
   cluster: Cluster;
   dir: string;
+  /** Each path the cluster was asked for PostgreSQL's spelling of, as pgPaths.ts gives one on Windows. */
+  given: string[];
   pool(database?: string): pg.Pool;
   stop(): Promise<void>;
 };
 
 export async function startTestCluster(prefix = "rvtt-cluster-"): Promise<TestCluster> {
   const dir = await mkdtemp(join(tmpdir(), prefix));
+  const given: string[] = [];
   const cluster = new Cluster({
     binDir: join(postgresDir(), "bin"),
     pgData: join(dir, "postgres"),
     logFile: join(dir, "postgres.log"),
     password: "test-password-0123456789abcdef",
     platform: Platform.parse(process.platform),
+    pgPath: (path) => {
+      given.push(path);
+      return path;
+    },
   });
   await cluster.init();
   await cluster.start();
@@ -44,6 +51,7 @@ export async function startTestCluster(prefix = "rvtt-cluster-"): Promise<TestCl
   return {
     cluster,
     dir,
+    given,
     pool(database = "postgres") {
       const p = new pg.Pool({ connectionString: cluster.url(database), max: 4 });
       p.on("error", () => undefined);
