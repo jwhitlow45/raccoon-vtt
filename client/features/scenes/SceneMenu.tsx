@@ -348,29 +348,44 @@ function DeleteScene(props: { scene: Scene; viewing: boolean; scenes: readonly S
         disabled={!next}
         onClick={press}
       />
-      {asking ? (
-        <Dialog
-          title={floorCount > 1 ? `Delete ${name} and its ${floorCount} floors` : `Delete ${name}`}
-          phone="sheet"
-          width="sm"
-          onClose={() => setAsking(false)}
-          footer={
-            <>
-              {/* Each fills the line it stands on, so the pair wrapped on a narrow phone keeps one edge (docs/design/design-v1-polish.md R6). */}
-              <Button autoFocus style={{ flex: "1 1 auto" }} onClick={() => setAsking(false)}>
-                Cancel
-              </Button>
-              <Button variant="danger" style={{ flex: "1 1 auto" }} onClick={() => remove(true)}>
-                Delete
-              </Button>
-            </>
-          }
-        >
-          <p data-leave-players style={{ margin: 0, overflowWrap: "anywhere" }}>
-            {LEAVE_PLAYERS_ASK}
-          </p>
-        </Dialog>
-      ) : null}
+      {asking ? <LeavePlayersAsk title={floorCount > 1 ? `Delete ${name} and its ${floorCount} floors` : `Delete ${name}`} onCancel={() => setAsking(false)} onDelete={() => remove(true)} /> : null}
     </div>
+  );
+}
+
+/**
+ * The question before the players' map goes (LEAVE_PLAYERS_ASK). The dialog
+ * takes the first focus as it opens, which reads its name. Cancel takes it
+ * next, once the dialog is open, and carries the question as its
+ * description, so a screen reader hears the question once and Enter keeps
+ * the map.
+ */
+function LeavePlayersAsk(props: { title: string; onCancel(): void; onDelete(): void }) {
+  const cancel = useRef<HTMLButtonElement>(null);
+  const words = useId();
+  // A passive effect, so it runs after the dialog's own layout effect has opened it: a closed dialog's button takes no focus.
+  useEffect(() => cancel.current?.focus({ preventScroll: true }), []);
+  return (
+    <Dialog
+      title={props.title}
+      phone="sheet"
+      width="sm"
+      onClose={props.onCancel}
+      footer={
+        <>
+          {/* Each fills the line it stands on, so the pair wrapped on a narrow phone keeps one edge (docs/design/design-v1-polish.md R6). */}
+          <Button ref={cancel} aria-describedby={words} style={{ flex: "1 1 auto" }} onClick={props.onCancel}>
+            Cancel
+          </Button>
+          <Button variant="danger" style={{ flex: "1 1 auto" }} onClick={props.onDelete}>
+            Delete
+          </Button>
+        </>
+      }
+    >
+      <p id={words} style={{ margin: 0, overflowWrap: "anywhere" }}>
+        {LEAVE_PLAYERS_ASK}
+      </p>
+    </Dialog>
   );
 }
