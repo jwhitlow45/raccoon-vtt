@@ -1802,6 +1802,7 @@ For a DM who runs RaccoonVTT on one computer. [The README](README.md#run-it-on-y
 - It checks for updates at start and once a day (**Check for updates once a day** turns that off), and a banner says when one is out.
   - On Windows and in the AppImage, **Install and restart** downloads the update, stops RaccoonVTT cleanly and installs it. The new version backs up your rooms before it starts. On macOS and in the deb, **Download** opens the release page.
 - It refuses to open data a newer version saved, and offers the backups this version can read.
+- While it starts, the window says which step it is on. A step that runs far past its usual time stops the start, says what it was doing, and offers **Try again** and **Show logs**, so a start never sits waiting for ever.
 - **Settings** holds the port (**Change port**), **Check for updates once a day** and **Open my browser when RaccoonVTT starts**, with **Show data folder** and **Show logs**.
 - Animated maps and uploaded sound are on.
 
