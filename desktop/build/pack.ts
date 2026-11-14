@@ -5,9 +5,10 @@
  *
  *   node desktop/build/pack.ts [--dir] [--stage <app-server folder>]
  *
- * It needs `pnpm build` (the web app), `pnpm desktop:fetch` (Node and
- * PostgreSQL in desktop/.runtime), desktop/scripts/stage.ts (the staged
- * server) and `pnpm --dir desktop build` (the shell and the window) first.
+ * It needs `pnpm build` (the web app), `pnpm desktop:fetch` (Node,
+ * PostgreSQL and their license notices in desktop/.runtime),
+ * desktop/scripts/stage.ts (the staged server) and `pnpm --dir desktop
+ * build` (the shell and the window) first.
  * `--dir` makes only the unpacked app, as the e2e test and the smoke test
  * use it. `--stage` names the staged server, by default where stage.ts puts
  * it: `$RUNNER_TEMP/raccoonvtt-stage/app-server`, or the same under the
@@ -40,6 +41,7 @@ export function missingPieces(stage: string, platform: Platform, exists: (path: 
   const needed = [
     join(DESKTOP, ".runtime", RESOURCES.node, serverBinaryName(platform)),
     join(DESKTOP, ".runtime", RESOURCES.postgres),
+    join(DESKTOP, ".runtime", RESOURCES.licenses),
     join(stage, SUPERVISOR_ENTRY),
     join(DESKTOP, "out", "main", "main.cjs"),
     join(DESKTOP, "out", "preload", "preload.cjs"),
