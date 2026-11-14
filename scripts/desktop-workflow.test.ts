@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
@@ -647,3 +647,12 @@ describe("Dependabot", () => {
   });
 });
 
+describe("image.yml's call", () => {
+  test("runs this workflow with the tag once image.yml's release job made the release", () => {
+    assert.ok(existsSync(new URL("../.github/workflows/desktop.yml", import.meta.url)));
+    const caller = jobBlock("desktop", read("image.yml"));
+    assert.match(caller, /^(?: {4}#.*\n)* {4}needs: release\n {4}if: github\.event_name == 'push' && github\.ref_type == 'tag' && needs\.release\.result == 'success'\n/);
+    assert.match(caller, /\n {4}permissions:\n {6}contents: write\n {6}id-token: write\n {6}attestations: write\n/);
+    assert.match(caller, /\n {4}uses: \.\/\.github\/workflows\/desktop\.yml\n {4}with:\n {6}tag: \$\{\{ github\.ref_name \}\}\n?$/);
+  });
+});
