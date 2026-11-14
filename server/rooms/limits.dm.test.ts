@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
-import { FAR, LIMITS, NO_ROOM_TO_EXPLORE, roundUp, SEAT } from "#shared/limits.ts";
+import { FAR, LIMITS, NO_ROOM_TO_EXPLORE, roundUp, SEAT, serializedBytes } from "#shared/limits.ts";
 import type { RoomState } from "#shared/model.ts";
 import { MOVE_PLAYERS_FIRST } from "#shared/permissions.ts";
 import type { Op } from "#shared/protocol.ts";
 import { idAt, seated, type Seated } from "#shared/privTestutil.ts";
-import { actor, castAsk, drawing, entry, member, rng, room, scene, template, token } from "#shared/testutil.ts";
-import { fullRoom } from "./limitsTesting.ts";
+import { actor, castAsk, character, companionBlock, drawing, entry, member, rng, room, scene, template, token } from "#shared/testutil.ts";
+import { PLAYER_LIMITS_SNAPSHOT_VERSION } from "#shared/migrate.ts";
+import { fullRoom, markedRoom } from "./limitsTesting.ts";
 import { answer, joinOp, Mint, type Answer } from "./limitsTwinTesting.ts";
 import { Room } from "./numberingTesting.ts";
 import { PER_PLAYER_FULL } from "./sizeGuard.ts";
@@ -22,8 +23,8 @@ import { ScopeClient, StoredRoomDb, storedActor } from "./undoScopeTesting.ts";
 const mint = new Mint();
 const PLAYERS = 48;
 
-async function opened(t: TestContext, state: RoomState, name = "R", options = {}): Promise<Room> {
-  const r = new Room(t, name, state, { idGate: true, ...options });
+async function opened(t: TestContext, state: RoomState, name = "R", options = {}, version?: number): Promise<Room> {
+  const r = new Room(t, name, state, { idGate: true, ...options }, version);
   await r.load();
   return r;
 }
@@ -253,5 +254,103 @@ describe("scene changes and per-player scenes", () => {
     const r = await opened(t, state, "R", { sizeLimits: { stateLimit: 400_000 } });
     assert.deepEqual(await answer(r, "dm", { t: "room.setPlayerScene", sceneId: "s2" }), { code: "quota", message: NO_ROOM_TO_EXPLORE });
     assert.equal(await answer(r, "dm", { t: "room.setPlayerScene", sceneId: "s1" }), "taken");
+  });
+});
+
+describe("rooms from before the update", () => {
+  test("D8: the marked room with 20 per-player scenes takes a growing DM edit, a player's create and a remembering walk, and writes each scene's share once", async (t) => {
+    const marked = markedRoom(48);
+    assert.ok(marked.under, "the fixture's room is under the far line at the widest");
+    const state = marked.state;
+    const [dmId, playerId] = Object.keys(state.members).sort();
+    const sceneIds = Object.keys(state.scenes).sort();
+    const first = sceneIds[0]!;
+    state.meta = { ...state.meta, playerSceneId: first };
+    state.characters.hero = character("hero", { name: "Hero", ownerIds: [playerId!] });
+    state.tokens.hero = token("hero", { kind: "pc", name: "Hero", sceneId: first, x: 5, y: 5, actor: { ref: "hero" } });
+    const clock = { now: Date.parse("2026-11-10T20:00:00.000Z") };
+    const { actor: r } = await storedActor(t, new StoredRoomDb(state, { version: PLAYER_LIMITS_SNAPSHOT_VERSION - 1 }), { idGate: true, now: () => clock.now });
+    const dm = await ScopeClient.open(r, state.members[dmId!]!, "dm");
+    const player = await ScopeClient.open(r, state.members[playerId!]!, "player");
+    const shares = () => sceneIds.map((id) => r.committed.state.memoryShared?.[id]?.share);
+    const ids = rng(808);
+    const steps: Array<[string, ScopeClient, () => Op]> = [
+      ["a growing DM edit", dm, () => ({ t: "token.update", tokenId: Object.keys(r.committed.state.tokens).find((id) => id.startsWith("note-"))!, patch: { name: "Wight" } }) as Op],
+      ["a player's create", player, () => ({ t: "drawing.create", drawing: { id: idAt(ids, clock.now), sceneId: first, kind: "line", points: [5, 5, 6, 6], style: { stroke: "#ffffff", width: 2, opacity: 1 }, ownerId: playerId!, visibility: "all" } }) as Op],
+      ["a remembering walk", player, () => ({ t: "token.move", tokenId: "hero", x: 20, y: 20 }) as Op],
+    ];
+    let written: Array<number | undefined> | null = null;
+    for (const [what, client, op] of steps) {
+      clock.now += 1_000;
+      await client.apply(op());
+      if (written === null) {
+        written = shares();
+        assert.ok(written.every((share) => typeof share === "number" && share > 0), `${what}: every marked scene has its share`);
+      }
+      assert.deepEqual(shares(), written, `${what}: the shares never move`);
+    }
+    // Deleting a marked scene the players cannot see moves no other scene's share.
+    clock.now += 1_000;
+    await dm.apply({ t: "scene.delete", sceneId: sceneIds.at(-1)! });
+    assert.deepEqual(shares().slice(0, -1), written!.slice(0, -1), "a marked scene's delete moves no other share");
+  });
+});
+
+describe("joins, blocks and old caps", () => {
+  test("D4: a room filled to the far line with per-player scenes takes six joins, and a player's create answers the same before and after them", async (t) => {
+    const state = room();
+    state.characters.hero = character("hero", { name: "Hero", ownerIds: ["p1"] });
+    state.tokens.hero = token("hero", { kind: "pc", name: "Hero", x: 5, y: 5, actor: { ref: "hero" } });
+    const r = await opened(t, state);
+    for (let i = 0; i < LIMITS.scenesPerRoom - 2; i++) {
+      const scene = { id: mint.next(r), name: `Crypt ${i}`, bounds: { w: LIMITS.sceneCells, h: LIMITS.sceneCells }, fogEnabled: true, vision: { on: true, light: "bright", perPlayer: true } };
+      if ((await answer(r, "dm", { t: "scene.create", scene } as Op)) !== "taken") break;
+    }
+    const line = (): Op => ({ t: "drawing.create", drawing: { id: mint.next(r), sceneId: "s1", kind: "line", points: [5, 5, 6, 6], style: { stroke: "#ffffff", width: 2, opacity: 1 }, ownerId: "p1", visibility: "all" } }) as Op;
+    const before = await answer(r, "p1", line());
+    for (let i = 0; i < 6; i++) {
+      await r.actor.sys(joinOp(mint.next(r), `Wren ${i}`));
+      await r.settle();
+    }
+    assert.equal(Object.values(r.state.members).filter((m) => m.name.startsWith("Wren")).length, 6, "the six joins are taken");
+    assert.deepEqual(await answer(r, "p1", line()), before, "the player's create answers as before the joins");
+  });
+
+  test("D5: seven players' stat blocks at the far line refuse a player's block save in its step, and the DM's adds are still taken", async (t) => {
+    const state = room();
+    for (let p = 3; p <= 7; p++) state.members[`p${p}`] = member(`p${p}`);
+    // Blocks of 21 characters, each about 16 KiB, until one more passes the far line's step.
+    const pad = { traits: [0, 1, 2, 3].map((i) => ({ name: `Pad ${i}`, text: "w".repeat(3_700) })) };
+    const heroes: string[] = [];
+    for (let p = 1; p <= 7; p++) {
+      for (let c = 0; c < 3; c++) {
+        const id = `hero${p}x${c}`;
+        state.characters[id] = character(id, { name: id, ownerIds: [`p${p}`] });
+        heroes.push(id);
+      }
+    }
+    const one = serializedBytes(companionBlock("blk00000", heroes[0]!, pad));
+    let bytes = 0;
+    for (let n = 0; bytes + one <= FAR.blockBytes - one; n++) {
+      const id = `blk${String(n).padStart(5, "0")}`;
+      state.companionBlocks[id] = companionBlock(id, heroes[n % heroes.length]!, pad);
+      bytes += serializedBytes(state.companionBlocks[id]);
+    }
+    const r = await opened(t, state);
+    const { rev: _rev, ...block } = companionBlock(mint.next(r), "hero1x0", pad);
+    assert.deepEqual(await answer(r, "p1", { t: "companionBlock.create", block } as Op), { code: "quota", message: `The room can hold at most ${FAR.blockBytes / (1024 * 1024)} MiB of companion stat blocks. Delete one first.` });
+    const goblin = { t: "token.create", token: { id: mint.next(r), sceneId: "s1", kind: "monster", name: "Goblin", size: "medium", x: 3, y: 3, actor: { inline: actor() } } } as Op;
+    assert.equal(await answer(r, "dm", goblin), "taken", "the DM's add is taken");
+  });
+
+  test("D6: an old room at each old cap loads, takes the DM's edits and refuses only what passes a cap, as before", async (t) => {
+    const { state } = dmRoom(AT_CAP, 0);
+    const r = await opened(t, state, "R", {}, PLAYER_LIMITS_SNAPSHOT_VERSION - 1);
+    assert.equal(await answer(r, "dm", { t: "token.update", tokenId: "dmt0", patch: { name: "Hobgoblin" } } as Op), "taken", "an edit");
+    assert.equal(await answer(r, "dm", { t: "token.move", tokenId: "dmt1", x: 10, y: 10 } as Op), "taken", "a move");
+    const goblin = { t: "token.create", token: { id: mint.next(r), sceneId: "s1", kind: "monster", name: "Goblin", size: "medium", x: 3, y: 3, actor: { inline: actor() } } } as Op;
+    assert.deepEqual(await answer(r, "dm", goblin), { code: "quota", message: `this scene can hold at most ${LIMITS.tokensPerScene} tokens` }, "a create past the cap");
+    assert.equal(await answer(r, "dm", { t: "token.delete", tokenId: "dmt2" }), "taken", "a delete");
+    assert.equal(await answer(r, "dm", goblin), "taken", "a create once there is room");
   });
 });
