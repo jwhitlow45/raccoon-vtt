@@ -322,16 +322,18 @@ export function roomMeasure(state: RoomState, stateLimit: number = FAR.roomBytes
   return bytes + explored + memory.whole + memory.sharing * memoryShare(stateLimit, bytes, explored, memory);
 }
 
-/** Companion blocks of the players' characters, each near its byte cap, until the room is at its line or the blocks at theirs. */
+/** Companion blocks of the players' characters, each near its byte cap, until the room is at its line or the blocks at theirs. Each character's stay within its own caps. */
 function fillBlocks(state: RoomState, limit: number): void {
   const characters = Object.keys(state.characters);
   const text = wide(1_200);
   const traits = [1, 2, 3].map(() => ({ name: wide(MAX_NAME), text }));
   let roomLeft = limit - roomMeasure(state, limit);
   let blocksLeft = FAR.blockBytes - serializedBytes(state.companionBlocks);
+  // As many to a character as its own caps take, then the next character's.
+  const perCharacter = Math.min(LIMITS.companionBlocksPerCharacter, Math.floor(LIMITS.companionBlockBytesPerCharacter / serializedBytes(companionBlock(longId("block", 0), characters[0]!, { name: wide(MAX_NAME), traits }))));
   for (let i = 0; i < FAR.blocks; i++) {
     const id = longId("block", i);
-    const characterId = characters[Math.floor(i / LIMITS.companionBlocksPerCharacter) % characters.length]!;
+    const characterId = characters[Math.floor(i / perCharacter) % characters.length]!;
     const block: CompanionBlock = companionBlock(id, characterId, { name: wide(MAX_NAME), traits });
     const bytes = serializedBytes({ [id]: block }) - 1;
     if (bytes > roomLeft || bytes > blocksLeft) break;
