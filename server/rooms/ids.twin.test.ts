@@ -249,6 +249,40 @@ describe("an id answers P1 alike whatever became of its thing", () => {
 });
 
 /** Each room's own count of its device's asks, as a device numbers them. */
+describe("an id the room has not stored answers P1 alike", () => {
+  test("C13: an ask while P1's create waits in its batch answers pending, then held once the batch is stored, in both", async (t) => {
+    const pair = await open(t);
+    const made = ids(pair);
+    const answers: unknown[] = [];
+    for (const [i, room] of pair.entries()) {
+      const id = made[i]!;
+      const named = (list: readonly string[]) => list.map((x) => (x === id ? "the id" : x));
+      const sent = room.clients.p1.send(areaOp(id));
+      const first = await askIds(room, [id]);
+      await sent;
+      await room.settle();
+      const second = await askIds(room, [id]);
+      answers.push([first, second].map((a) => ({ held: named(a.held), notHeld: named(a.notHeld), pending: named(a.pending) })));
+    }
+    assert.deepEqual(answers[0], [{ held: [], notHeld: [], pending: ["the id"] }, { held: ["the id"], notHeld: [], pending: [] }]);
+    assert.deepEqual(answers[1], answers[0]);
+  });
+
+  test("C13: a create the gate passed and the room refused leaves no row: its id answers not held, and the device's create under it again is taken, in both", async (t) => {
+    const pair = await open(t);
+    const made = ids(pair);
+    const theirs = (id: string): Op => {
+      const { rev: _rev, ...area } = template(id, { ownerId: "p2", origin: { x: 4.5, y: 4.5, z: 0 }, size: 5 });
+      return { t: "template.create", template: area } as Op;
+    };
+    const refused = await reuse(pair, made, theirs, "an area of another member's");
+    assert.notEqual(refused, "taken", "the room refuses it");
+    const asked = await Promise.all(pair.map((room, i) => askIds(room, [made[i]!])));
+    assert.deepEqual(asked.map((a) => [a.held.length, a.notHeld.length, a.pending.length]), [[0, 1, 0], [0, 1, 0]], "not held in both");
+    assert.equal(await reuse(pair, made, areaOp, "P1's own area under that id"), "taken");
+  });
+});
+
 const asks = new WeakMap<Room, number>();
 
 /** P1's device asks, on its newest socket, which of these ids of its own creates the room took, and the answer. */
