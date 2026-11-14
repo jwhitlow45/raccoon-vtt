@@ -207,7 +207,7 @@ export type Stop = {
   door: DoorRef | null;
   /** Where the player dropped the token, snapped: the ghost, and where "Teleport here" goes. */
   ghost: Point;
-  /** The drop's own unsnapped point, from which a teleport finds its squeezed spot as the drop does (`squeezedSpot`). */
+  /** The drop's own unsnapped point, from which a teleport finds its squeezed spot as the drop does (`squeezedSpot`), or for a mount aimed by the token pressed on it, its box at that token's snapped box (`Aim`). */
   aim: Point;
   /** Where the walk stopped, the start when it stopped at its first step. */
   at: Point;
@@ -269,9 +269,10 @@ export function squeezedSpot(state: DropView, token: DropToken, raw: Point, mode
 
 /**
  * Where a drop aims: the dragged token's box at the pointer, and for a
- * drag led by a mount that was pressed on a token sitting on it, that
- * token's dropped middle (`seat`, D-261029-57), which the mount's stand
- * keeps on it (`seatedStand`).
+ * lone drag led by a mount that was pressed on a token sitting on it, the
+ * mount's box at that token's snapped box (`pressedAim`, D-261113-200),
+ * with that token's dropped middle (`seat`, D-261029-57), which the
+ * mount's stand keeps on it (`seatedStand`).
  */
 export type Aim = Point & { seat?: Point };
 
@@ -291,7 +292,9 @@ export type Aim = Point & { seat?: Point };
  * when the rider is dropped on a square's middle. Then a hair of the
  * pointer chose among them: a touch's fraction of a pixel took one the
  * creature the rider drags cannot follow from, and a mouse's whole pixel
- * another it can.
+ * another it can. A group drag moves by the pointer's own offset instead,
+ * each token snapped by its own box (stageHooks.ts drop, review
+ * LP39FIX-SOL-01).
  */
 export function pressedAim(state: DropView, lead: DropToken, pressed: DropToken | null | undefined, at: Point): Aim {
   if (!pressed || pressed.id === lead.id || !sitsOn(state, pressed.id, lead.id)) return { x: at.x, y: at.y };
