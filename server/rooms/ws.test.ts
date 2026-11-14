@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { LIMITS, utf8Bytes } from "#shared/limits.ts";
+import { FAR, HARD, LIMITS, utf8Bytes } from "#shared/limits.ts";
 import { clientMessageSchema, clientOpSchema, MAX_HANDOUT_PAGE_PX } from "#shared/protocol.ts";
 import { DEFAULT_BUFFERED_LIMIT, MAX_FRAME_BYTES } from "./ws.ts";
 
@@ -37,9 +37,11 @@ describe("a frame holds the largest handout op", () => {
 });
 
 describe("the send buffer a slow socket may hold", () => {
-  test("is 1 MiB over the largest DM snapshot, its 3 MiB and the companion blocks' 3 MiB (docs/design/design-v1-companion-stat-blocks.md 3.4)", () => {
-    const largest = LIMITS.projectedSceneBytes + LIMITS.companionBlocksBytes;
-    assert.equal(largest, 6 * 1024 * 1024);
-    assert.equal(DEFAULT_BUFFERED_LIMIT, largest + 1024 * 1024);
+  test("is the derived bound, which holds a DM's snapshot of a room at the far line with 1 MiB to spare (docs/design/design-v1-player-limits.md 8)", () => {
+    assert.equal(DEFAULT_BUFFERED_LIMIT, HARD.sendBufferBytes);
+    // The scene at its far line and the companion stat blocks beside it, the most of the room's far line both take, and the
+    // DM's own lines outside the measures: the fixture's snapshot measures each (limits.bounds.test.ts).
+    const largest = FAR.roomBytes + LIMITS.dmLogLines * LIMITS.apartLineBytes + 2 * LIMITS.whisperBytesPerRoom / LIMITS.membersPerRoom + 100 * 1024;
+    assert.ok(largest + 1024 * 1024 <= DEFAULT_BUFFERED_LIMIT, `${largest}`);
   });
 });

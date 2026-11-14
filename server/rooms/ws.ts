@@ -2,6 +2,7 @@ import fastifyWebsocket from "@fastify/websocket";
 import type { FastifyInstance } from "fastify";
 import type { RawData, WebSocket } from "ws";
 import type { ApiErrorCode } from "#shared/apiErrors.ts";
+import { HARD } from "#shared/limits.ts";
 import { clientMessageSchema, type ClientMessage } from "#shared/protocol.ts";
 import { clientIp } from "../auth/clientIp.ts";
 import { renewClosedDisplay } from "../auth/displaySessions.ts";
@@ -63,11 +64,12 @@ export type WsOptions = {
 export const MAX_FRAME_BYTES = 64 * 1024;
 /**
  * The send buffer a socket may hold for `bufferedHoldMs` before it is
- * closed: 1 MiB over the largest DM snapshot, 6 MiB with companion stat
- * blocks (docs/design/design-v1-companion-stat-blocks.md 3.4), so one snapshot
- * alone never closes a slow socket.
+ * closed: 1 MiB over the largest DM snapshot (shared/limits.ts HARD), so
+ * one snapshot alone never closes a slow socket. A room at the far line
+ * sends its DM the scene, the companion stat blocks beside it and the DM's
+ * own log, about 12.5 MiB (server/rooms/limits.bounds.test.ts).
  */
-export const DEFAULT_BUFFERED_LIMIT = 7 * 1024 * 1024;
+export const DEFAULT_BUFFERED_LIMIT = HARD.sendBufferBytes;
 
 /** The grant a socket is bound to. A table display's has the role `'player'` and `display` set, and a DM's preview names the player it views as. */
 type SocketGrant = Omit<GrantContext, "role"> & { role: GrantContext["role"]; display: boolean; previewOf?: string };
