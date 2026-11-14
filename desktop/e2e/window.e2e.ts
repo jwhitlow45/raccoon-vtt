@@ -142,7 +142,7 @@ const ERROR_WORDS: Record<string, string[]> = {
   newerData: ["This data was last used by RaccoonVTT 0.6.0, which saves rooms in a newer format than this version (0.5.0) reads. Install 0.6.0 or later, or restore a backup made before that update.", "Download the latest version", "Restore a backup"],
   noReadableBackup: ["No backup this version can read is on this computer. Install 0.6.0 or later to open your rooms.", "Download the latest version"],
   backupBeforeUpdateFailed: ["The backup before the update failed: the disk is full. Your rooms are untouched.", "Try again", "Start without a backup"],
-  stalled: ["Starting the database has done nothing for 180 s. RaccoonVTT goes on when it ends, and the logs may say why it is slow.", "Show logs"],
+  stalled: ["Starting the database has not reported progress for 180 s. RaccoonVTT goes on when it ends, and the logs may say why it is slow.", "Show logs"],
 };
 for (const key of Object.keys(ERRORS)) EXPECT[`error-${key}`] = ERROR_WORDS[key] ?? [];
 
