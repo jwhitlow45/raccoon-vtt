@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { FastifyRequest } from "fastify";
-import { assertCookieSettings, cookieSettings, SESSION_MAX_AGE_S, SessionStore } from "./sessions.ts";
+import { assertCookieSettings, cookieSettings, displayCookieSettings, SESSION_MAX_AGE_S, SessionStore } from "./sessions.ts";
 import { isToken, randomToken, sha256, tokenMatches } from "./tokens.ts";
 
 describe("session cookie settings", () => {
@@ -32,6 +32,17 @@ describe("session cookie settings", () => {
   test("development accepts its own settings", () => {
     const dev = { production: false, publicOrigin: "http://localhost:5173" };
     assert.doesNotThrow(() => assertCookieSettings(dev, cookieSettings(dev)));
+  });
+  test("local mode, a production build over plain HTTP, uses rvtt and rvtt-display without Secure (docs/design/design-v1-local-app.md 6)", () => {
+    const local = { production: true, local: true, publicOrigin: "http://localhost:3170" };
+    assert.deepEqual(cookieSettings(local), { name: "rvtt", secure: false });
+    assert.deepEqual(displayCookieSettings(local), { name: "rvtt-display", secure: false });
+    assert.doesNotThrow(() => assertCookieSettings(local, cookieSettings(local)));
+    assert.doesNotThrow(() => assertCookieSettings(local, displayCookieSettings(local)));
+    // A Secure cookie would never come back over plain HTTP, so every sign-in would quietly fail.
+    assert.throws(() => assertCookieSettings(local, { name: "__Host-rvtt", secure: true }), /local mode with a Secure session cookie/);
+    assert.throws(() => assertCookieSettings(local, { name: "rvtt", secure: true }), /local mode with a Secure session cookie/);
+    assert.deepEqual(displayCookieSettings({ production: true, local: false }), { name: "__Host-rvtt-display", secure: true }, "hosted is unchanged");
   });
 });
 
