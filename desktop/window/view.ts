@@ -36,7 +36,7 @@ export function statusView(state: WindowState): StatusView {
     case "stopped":
       return { text: WORDS.steps.stopping, working: true };
     case "recovering":
-      return { text: WORDS.steps.finishRestore, working: true };
+      return { text: sup.percent === undefined ? WORDS.steps.finishRestore : WORDS.finishRestorePercent(sup.percent), working: true };
     case "restarting":
     case "starting":
     case "error":

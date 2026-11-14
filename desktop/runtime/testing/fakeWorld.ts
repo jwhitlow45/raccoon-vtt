@@ -119,6 +119,18 @@ export class World {
   portTaken = new Set<number>();
   /** Calls, by their name in SupervisorDeps ("pg.start"), that never settle, as a wait on Windows that never ends. */
   hangs = new Set<string>();
+  /**
+   * Calls, by the same names, that answer late: each call takes the next
+   * wait in its list, then has its effect, as work that resumes after its
+   * part's bound does. A call that takes a signal ends early when it aborts,
+   * with no effect, as a killed pg_ctl or initdb does.
+   */
+  delays = new Map<string, number[]>();
+  /** The images a backup lists, which a restore finished at start flushes one at a time, each taking `flushMs`. */
+  images: string[] = [];
+  flushMs = 0;
+  /** PostgreSQL's start launches it and then fails, as a pg_ctl whose own wait runs out does. */
+  startFailsAfterLaunch = false;
   /** Every line the supervisors logged. */
   logs: string[] = [];
   private nameSeq = 0;
@@ -263,11 +275,33 @@ export class Instance {
 
 function depsFor(world: World, inst: Instance, build: Omit<Build, "pgMajor">, overrides: SupervisorDeps["overrides"]): SupervisorDeps {
   const c = <T>(effect: () => T | Promise<T>): Promise<T> => inst.call(effect);
-  /** A call that never settles while the world hangs it. */
+  /**
+   * A call that never settles while the world hangs it, and that waits first
+   * when the world delays it. `signalAt` is where its signal is among its
+   * arguments, for a call that can end early.
+   */
   const h =
-    <A extends unknown[], T>(name: string, call: (...args: A) => Promise<T>) =>
-    (...args: A): Promise<T> =>
-      world.hangs.has(name) ? never() : call(...args);
+    <A extends unknown[], T>(name: string, call: (...args: A) => Promise<T>, signalAt?: number) =>
+    async (...args: A): Promise<T> => {
+      if (world.hangs.has(name)) return never();
+      const ms = world.delays.get(name)?.shift();
+      if (ms !== undefined) await pause(ms, signalAt === undefined ? undefined : (args[signalAt] as AbortSignal | undefined));
+      return call(...args);
+    };
+  const pause = (ms: number, signal?: AbortSignal): Promise<void> =>
+    new Promise((resolve, reject) => {
+      const ended = () => Object.assign(new Error("ended early"), { logLine: "ended early" });
+      if (signal?.aborted) return reject(ended());
+      const onAbort = (): void => {
+        timer.cancel();
+        reject(ended());
+      };
+      const timer = clock.setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
   const clock: Clock = {
     now: () => world.clock.now(),
     setTimeout: (fn, ms) => (inst.dead ? { cancel: () => undefined } : world.clock.setTimeout(() => void (inst.dead || fn()), ms)),
@@ -324,7 +358,7 @@ function depsFor(world: World, inst: Instance, build: Omit<Build, "pgMajor">, ov
         if (name === BEFORE && !(R && world.journal && R.tag?.id === world.journal.id)) world.violate("dropped raccoon_before_restore while raccoon was not this journal's");
         world.dbs.delete(name);
       }),
-    endSessions: () => c(() => world.needPg()),
+    endSessions: h("db.endSessions", () => c(() => world.needPg())),
     load: (dumpFile) =>
       c(() => {
         restoreGuard("load");
@@ -350,13 +384,17 @@ function depsFor(world: World, inst: Instance, build: Omit<Build, "pgMajor">, ov
       delete: () => c(() => void (world.journal = null)),
     },
     fs: {
-      size: (p) => c(() => (p.endsWith(".dump") ? 100 : null)),
+      size: (p) => c(() => (p.endsWith(".dump") ? 100 : world.images.length > 0 ? 1 : null)),
       isDir: () => c(() => true),
       mkdir: () => c(() => undefined),
       copy: () => c(() => undefined),
       rename: () => c(() => undefined),
       unlink: () => c(() => undefined),
-      syncFile: () => c(() => undefined),
+      syncFile: h("fs.syncFile", () =>
+        c(async () => {
+          if (world.flushMs > 0) await clock.sleep(world.flushMs);
+        }),
+      ),
       syncDir: () => c(() => undefined),
     },
     backupsDir: "/data/backups",
@@ -367,7 +405,7 @@ function depsFor(world: World, inst: Instance, build: Omit<Build, "pgMajor">, ov
     freeBytes: () => c(() => 1e12),
     floorBytes: 0,
     readRecord: (name) => c(() => world.backups.find((x) => x.name === name)?.record ?? null),
-    readList: (name) => c(() => (world.backups.some((x) => x.name === name) ? [] : null)),
+    readList: (name) => c(() => (world.backups.some((x) => x.name === name) ? [...world.images] : null)),
   });
 
   return {
@@ -394,24 +432,32 @@ function depsFor(world: World, inst: Instance, build: Omit<Build, "pgMajor">, ov
       bundledMajor: () => c(() => 17),
       dataMajor: () => c(() => (world.pg.inited ? 17 : null)),
       needsInit: () => !world.pg.inited,
-      init: () =>
-        c(() => {
-          holder("initdb");
-          world.pg.inited = true;
-        }),
+      init: h(
+        "pg.init",
+        (_signal?: AbortSignal) =>
+          c(() => {
+            holder("initdb");
+            world.pg.inited = true;
+          }),
+        0,
+      ),
       leftover: () => c(() => (world.pg.running ? { kind: "running" as const, pid: 99 } : { kind: "none" as const })),
       clearLeftover: () =>
         c(() => {
           if (world.lockOwner !== inst) world.violate("a leftover PostgreSQL stopped without the lock");
           world.pg.running = false;
         }),
-      start: h("pg.start", () =>
-        c(() => {
-          holder("PostgreSQL started");
-          if (world.pg.running) throw Object.assign(new Error("already running"), { logLine: "lock file postmaster.pid already exists" });
-          world.pg.running = true;
-          world.pg.epoch++;
-        }),
+      start: h(
+        "pg.start",
+        (_signal?: AbortSignal) =>
+          c(() => {
+            holder("PostgreSQL started");
+            if (world.pg.running) throw Object.assign(new Error("already running"), { logLine: "lock file postmaster.pid already exists" });
+            world.pg.running = true;
+            world.pg.epoch++;
+            if (world.startFailsAfterLaunch) throw Object.assign(new Error("pg_ctl: server did not start in time"), { logLine: "pg_ctl: server did not start in time" });
+          }),
+        0,
       ),
       stop: () => c(() => void (world.pg.running = false)),
       alive: () => c(() => world.pg.running),
@@ -445,7 +491,7 @@ function depsFor(world: World, inst: Instance, build: Omit<Build, "pgMajor">, ov
     },
     restore: {
       pending: h("restore.pending", () => c(() => world.journal !== null)),
-      recover: (b) => recover(ctx(b)),
+      recover: (b, job) => recover({ ...ctx(b), ...(job ? { signal: job.signal, progress: (done?: number, total?: number) => job.progress(done, total) } : {}) }),
       check: (b, name) => checkRestorable(ctx(b), name),
       run: async (b, name, checked, onStep) => {
         if (world.backupBy && !world.backupBy.dead) world.violate("a restore began during a backup");

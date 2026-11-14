@@ -65,11 +65,11 @@ export type SupervisorDeps = {
     bundledMajor(): Promise<number>;
     dataMajor(): Promise<number | null>;
     needsInit(): boolean;
-    init(): Promise<void>;
+    init(signal?: AbortSignal): Promise<void>;
     leftover(): Promise<Leftover>;
     clearLeftover(found: Leftover): Promise<void>;
-    /** Throws an error with `logLine` when the database does not start. */
-    start(): Promise<void>;
+    /** Throws an error with `logLine` when the database does not start, after stopping any postmaster it launched. */
+    start(signal?: AbortSignal): Promise<void>;
     stop(): Promise<void>;
     alive(): Promise<boolean>;
   };
@@ -83,7 +83,7 @@ export type SupervisorDeps = {
   };
   restore: {
     pending(): Promise<boolean>;
-    recover(build: Build): Promise<RecoveryResult>;
+    recover(build: Build, job?: PartJob): Promise<RecoveryResult>;
     check(build: Build, name: string): Promise<{ ok: true; record: BackupRecord; list: string[] } | { ok: false; refusal: Refusal }>;
     run(build: Build, name: string, checked: { record: BackupRecord; list: string[] }, onStep: (step: "images" | "database") => void): Promise<RestoreOutcome>;
   };
@@ -121,15 +121,20 @@ export const ADDRESS_WATCH_MS = 5_000;
 export const PORT_WAIT_MS = 5_000;
 
 /**
- * The parts of a start, each logged as it begins and bounded, so a wait
- * that never ends stops the start with words (a `stalled` error) and never
- * leaves it looking hung. Each bound is well past the part's slowest honest
- * run: PowerShell's cold start, initdb on a slow disk, pg_ctl's own 120 s
- * wait and the 30 s past it before postgres.ts ends pg_ctl, a restore's end
- * moving every image. Two waits have bounds of their own instead: the app
- * server's first answer (appServer.ts waitHealthy, 60 s, then a restart),
- * and the backup before an update, which is honest work for as long as the
- * data takes and whose step says what it is doing.
+ * The parts of a start, each logged as it begins. A part is never given up
+ * on: most of them change the data folder (initdb, PostgreSQL's start, a
+ * restore's end), so the start keeps its queue and the lock until the
+ * part's work has ended, and goes on when it does. Each has a bound well
+ * past its slowest honest run: PowerShell's cold start, initdb on a slow
+ * disk, pg_ctl's own 120 s wait and the 30 s past it before postgres.ts
+ * ends pg_ctl. Past it with nothing done, the window shows `stalled` with
+ * the part's words until the part ends. A part whose length grows with the
+ * data (`progress`, a restore's end, which flushes every image) is bounded
+ * by the time since its last step instead, and says how far it has got.
+ * Two waits have bounds of their own: the app server's first answer
+ * (appServer.ts waitHealthy, 60 s, then a restart), and the backup before
+ * an update, which is honest work for as long as the data takes and whose
+ * step says what it is doing (D-261114-023, 025).
  */
 export const START_PARTS = {
   lock: { words: "taking the data folder's lock", ms: 60_000 },
@@ -142,7 +147,7 @@ export const START_PARTS = {
   initdb: { words: "setting up the database", ms: 600_000 },
   startDatabase: { words: "starting the database", ms: 210_000 },
   restorePending: { words: "looking for an unfinished restore", ms: 30_000 },
-  recover: { words: "finishing an unfinished restore", ms: 600_000 },
+  recover: { words: "finishing an unfinished restore", ms: 120_000, progress: true },
   openDatabase: { words: "opening the database", ms: 60_000 },
   backups: { words: "listing the backups", ms: 60_000 },
   versionCheck: { words: "checking which version wrote the data", ms: 60_000 },
@@ -151,11 +156,13 @@ export const START_PARTS = {
   networkSample: { words: "reading the Windows network profile", ms: 30_000 },
   saveSettings: { words: "saving the settings", ms: 30_000 },
   stamp: { words: "writing this version's stamp", ms: 60_000 },
-} as const satisfies Record<string, { words: string; ms: number }>;
+} as const satisfies Record<string, { words: string; ms: number; progress?: true }>;
 export type StartPart = keyof typeof START_PARTS;
 
+/** What a part's work is handed: the stop's signal, which ends what can end early, and a progress call for a part that reports one. */
+export type PartJob = { signal: AbortSignal; progress(done?: number, total?: number): void };
+
 class Halt extends Error {}
-class Overran extends Error {}
 
 /** A notice without its number, which setNotice gives it. */
 type NoticeBody = Notice extends infer N ? (N extends Notice ? Omit<N, "seq"> : never) : never;
@@ -182,7 +189,12 @@ export class Supervisor {
   private backingUp = false;
   private lastBackup: string | null = null;
   private restoreStep: RestoreStep | null = null;
+  private percent: number | undefined = undefined;
   private lastEmitted = "";
+  /** The words of a part past its bound with nothing done, while the start still waits for it. */
+  private stalled: string | null = null;
+  /** Aborted by stop(), so the parts that can end early do. */
+  private readonly cancel = new AbortController();
 
   private lockHeld = false;
   private pgUp = false;
@@ -231,6 +243,7 @@ export class Supervisor {
       error: this.error,
       notice: this.notice,
       paths: this.d.paths,
+      ...(this.percent !== undefined ? { percent: this.percent } : {}),
     };
   }
 
@@ -250,21 +263,60 @@ export class Supervisor {
     this.emit();
   }
 
-  /** One part of a start (START_PARTS): logged as it begins, and stopping the start with its words when it overruns. */
-  private async part<T>(name: StartPart, work: () => Promise<T>): Promise<T> {
-    const { words, ms } = START_PARTS[name];
-    this.d.log(`start: ${words}`);
-    let overrun!: (err: Overran) => void;
-    const overran = new Promise<never>((_, reject) => (overrun = reject));
-    const timer = this.d.clock.setTimeout(() => overrun(new Overran()), ms);
+  /**
+   * One part of a start (START_PARTS), logged as it begins. Its work is
+   * always waited for. Past its bound with nothing done, the status shows
+   * `stalled` meanwhile, and the start goes back to its step when the part
+   * reports progress or ends. A stop makes the next part end the start.
+   */
+  private async part<T>(name: StartPart, work: (job: PartJob) => Promise<T>): Promise<T> {
+    if (this.stopping) throw new Halt("stopping");
+    const part: { words: string; ms: number; progress?: true } = START_PARTS[name];
+    this.d.log(`start: ${part.words}`);
+    const at = { state: this.state, step: this.step };
+    const watch: { timer: Timer | null; quiet: boolean } = { timer: null, quiet: false };
+    const arm = (): void => {
+      watch.timer?.cancel();
+      watch.timer = this.d.clock.setTimeout(() => {
+        if (this.stopping) return;
+        watch.quiet = true;
+        this.stalled = part.words;
+        this.d.log(`${part.words}: nothing done for ${part.ms / 1000} s, so the window says so, and the start waits for it`);
+        this.state = "error";
+        this.step = null;
+        this.error = { kind: "stalled", what: part.words, seconds: part.ms / 1000 };
+        this.emit();
+      }, part.ms);
+    };
+    const resume = (): void => {
+      if (!watch.quiet) return;
+      watch.quiet = false;
+      this.stalled = null;
+      if (!this.stopping) this.set(at.state, at.step);
+    };
+    const progress = (done?: number, total?: number): void => {
+      if (!part.progress) return;
+      resume();
+      if (done !== undefined && total !== undefined && total > 0) {
+        const percent = Math.min(100, Math.floor((done * 100) / total));
+        if (percent !== this.percent) {
+          this.percent = percent;
+          this.emit();
+        }
+      }
+      arm();
+    };
+    arm();
     try {
-      return await Promise.race([work(), overran]);
-    } catch (err) {
-      if (!(err instanceof Overran)) throw err;
-      this.d.log(`${words} did not finish in ${ms / 1000} s, so the start stops`);
-      this.fail({ kind: "stalled", what: words, seconds: ms / 1000 });
+      return await work({ signal: this.cancel.signal, progress });
     } finally {
-      timer.cancel();
+      watch.timer?.cancel();
+      if (watch.quiet) this.d.log(`${part.words} ended after all`);
+      resume();
+      if (this.percent !== undefined) {
+        this.percent = undefined;
+        this.emit();
+      }
     }
   }
 
@@ -317,6 +369,10 @@ export class Supervisor {
       await this.bootSteps();
     } catch (err) {
       if (err instanceof Halt) return;
+      if (this.stopping) {
+        this.d.log(`the start ended as RaccoonVTT stops: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
       this.d.log(`start failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
       this.report({ kind: "databaseFailed", logLine: (err as { logLine?: string }).logLine ?? (err instanceof Error ? err.message : String(err)) });
     }
@@ -349,13 +405,14 @@ export class Supervisor {
       }
       if (this.d.pg.needsInit()) {
         this.set("starting", "initdb");
-        await this.part("initdb", () => this.d.pg.init());
+        await this.part("initdb", (job) => this.d.pg.init(job.signal));
       }
       this.set("starting", "startDatabase");
       try {
-        await this.part("startDatabase", () => this.d.pg.start());
+        await this.part("startDatabase", (job) => this.d.pg.start(job.signal));
       } catch (err) {
         if (err instanceof Halt) throw err;
+        if (this.stopping) throw new Halt("stopping");
         this.fail({ kind: "databaseFailed", logLine: (err as { logLine?: string }).logLine ?? (err as Error).message });
       }
       this.pgUp = true;
@@ -364,7 +421,7 @@ export class Supervisor {
 
     if (!this.dbOpen) {
       if (await this.part("restorePending", () => this.d.restore.pending())) this.set("recovering", "finishRestore");
-      const rec = await this.part("recover", () => this.d.restore.recover(build));
+      const rec = await this.part("recover", (job) => this.d.restore.recover(build, job));
       if (rec.tangled) this.fail({ kind: "restoreTangled" });
       if (rec.notice && !(this.justRestored && rec.notice === "restoreFinished")) {
         const started = rec.backup ? backupNameTime(rec.backup) : null;
@@ -425,6 +482,7 @@ export class Supervisor {
     // Every server start writes this build's stamp first, in its own commit:
     // a running server may move rooms to its formats as they load (design 8.4).
     await this.part("stamp", () => this.d.db.writeStamp(build));
+    if (this.stopping) throw new Halt("stopping");
     this.set(step === "startServer" ? "starting" : "restarting", step);
     this.port = port;
     const handle = this.d.server.start(this.net.host, port);
@@ -736,6 +794,8 @@ export class Supervisor {
         return ok({ link: await this.d.rooms.newDmLink(port, cmd.roomId) });
       }
       case "retry":
+        // The start still waits for a stalled part, and goes on when it ends.
+        if (this.stalled !== null) return refuse({ error: "busy" });
         return this.enqueue(async () => {
           if (this.state === "error") {
             this.crashes = 0;
@@ -774,13 +834,20 @@ export class Supervisor {
   stop(): Promise<void> {
     this.stopping ??= (async () => {
       for (const timer of [this.crashTimer, this.backupTimer, this.pgTimer, this.addressTimer]) timer?.cancel();
+      // What can end early ends now: initdb, pg_ctl and a restore's end
+      // between its steps. The rest is waited for, since a start keeps the
+      // queue until its part's work has ended, and the lock goes only after.
+      this.cancel.abort();
       await this.enqueue(async () => {
         this.set("stopping", "stopping");
         if (this.networkStarted) this.d.network.stop();
         await this.stopServer();
         while (this.job) await this.job.catch(() => undefined);
         await this.closeDb();
-        if (this.pgUp) {
+        // Whenever the lock is held: a start that failed or was cancelled
+        // after pg_ctl ran may have left a postmaster pgUp never counted.
+        // pg.stop() stops only one it confirms is this folder's.
+        if (this.pgUp || this.lockHeld) {
           await this.d.pg.stop();
           this.pgUp = false;
         }

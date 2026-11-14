@@ -29,6 +29,8 @@ test("the status line says each step in the design's words", () => {
   assert.equal(statusView(state("step-closeToNetwork")).text, "Restarting so only this computer can open it");
   assert.equal(statusView(state("restoring-database")).text, "Restoring the database");
   assert.equal(statusView(state("starting-none")).text, "Starting RaccoonVTT");
+  assert.equal(statusView(state("finishing-restore")).text, "Finishing a restore, 42% done");
+  assert.equal(statusView(state("step-finishRestore")).text, "Finishing a restore");
   assert.ok(statusView(state("step-changePort")).working);
 });
 
