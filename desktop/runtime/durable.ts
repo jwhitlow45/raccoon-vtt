@@ -85,3 +85,45 @@ export async function removeDurable(path: string, opts: DurableOptions = {}): Pr
   }
   await syncDir(dirname(path), opts);
 }
+
+/** Codes Windows gives a rename while another program has a file in the tree open. */
+const RENAME_BUSY = new Set(["EPERM", "EACCES", "EBUSY"]);
+
+export type RenameRetry = {
+  platform?: NodeJS.Platform;
+  rename?: (from: string, to: string) => Promise<void>;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+  /** How long to keep trying, 30 s unless set. */
+  limitMs?: number;
+};
+
+/**
+ * A rename, tried again on Windows. Windows refuses to rename a folder while
+ * any file in it is open, and right after initdb writes a thousand files a
+ * real-time antivirus scan or the search indexer often has one open. So on
+ * EPERM, EACCES or EBUSY it waits 100 ms, then twice as long each time up to
+ * 2 s, for up to 30 s in all, as graceful-fs does. Other systems and other
+ * errors fail at once.
+ */
+export async function renameRetrying(from: string, to: string, opts: RenameRetry = {}): Promise<void> {
+  const platform = opts.platform ?? process.platform;
+  const doRename = opts.rename ?? rename;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const now = opts.now ?? Date.now;
+  const limit = opts.limitMs ?? 30_000;
+  const started = now();
+  let wait = 100;
+  for (;;) {
+    try {
+      await doRename(from, to);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code ?? "";
+      if (platform !== "win32" || !RENAME_BUSY.has(code) || now() - started + wait > limit) throw err;
+      await sleep(wait);
+      wait = Math.min(wait * 2, 2_000);
+    }
+  }
+}
+
