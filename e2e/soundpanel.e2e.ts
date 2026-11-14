@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -93,7 +93,7 @@ const run = {
   roomName: `E2E sound panel ${new Date().toISOString().slice(0, 19)}`,
   password: "",
   sceneA: "",
-  sceneB: randomUUID(),
+  sceneB: uuidv7(),
   sounds: {} as Record<string, string>,
   /** When the last X-card was sent: taps within 10 s of a room's card merge into it and show none. */
   xcardAt: 0,
@@ -144,7 +144,7 @@ async function createRoom(page: Page, context: BrowserContext, origin: string, n
 
 /** Uploads a sound file of frames of silence and creates its sound, as the DM's Add buttons do (4.2 step 6). */
 function addEntry(entry: (typeof LIBRARY)[number]): Promise<string> {
-  return addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: randomUUID(), name: entry.name, use: entry.use, ms: entry.ms });
+  return addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: uuidv7(), name: entry.name, use: entry.use, ms: entry.ms });
 }
 
 /** The DM's Sound panel, the side panel's tab on the desk, on its Now playing view unless `library` (docs/design/design-v1-sound-layout.md 4.1). */
@@ -509,10 +509,10 @@ describe("the Sound panel", { concurrency: false }, () => {
     // A track's page is a Sound subpage, reached from Library's More (docs/design/design-v1-sound-layout.md 4.5, design-v1-music-player.md 6.4).
     // Harbor is two minutes, so March, after it, is only queued until a seek near Harbor's end reveals it.
     run.sounds.Harbor = await addEntry({ name: "Harbor", use: "music", ms: 120_000 });
-    const queueId = randomUUID();
+    const queueId = uuidv7();
     const order = [run.sounds["The Prancing Pony"]!, run.sounds.Harbor, run.sounds.March!];
     await ops.send({ t: "playlist.create", id: queueId, name: "Harbor watch", sounds: order, repeat: "off", fade: 0 });
-    await ops.send({ t: "music.play", run: randomUUID(), playlistId: queueId, order, index: 1, repeat: "off", fade: 0 });
+    await ops.send({ t: "music.play", run: uuidv7(), playlistId: queueId, order, index: 1, repeat: "off", fade: 0 });
     await until("Harbor playing", () => playing()?.music?.now.soundId === run.sounds.Harbor);
     const lib = await soundPanel(dm, true);
     // The Prancing Pony is played under Repeat off: its delete goes ahead, the page goes back to Library, and the music plays on.
@@ -530,7 +530,7 @@ describe("the Sound panel", { concurrency: false }, () => {
     assert.equal(dmSocket.state?.sounds?.[run.sounds.March!]?.use, "music", "nothing sent");
     // Revealed as Harbor's next, it cannot go either.
     const current = playing()!.music!;
-    await ops.send({ t: "music.jump", run: randomUUID(), from: current.run, soundId: run.sounds.Harbor, ms: 110_000, on: run.sounds.Harbor });
+    await ops.send({ t: "music.jump", run: uuidv7(), from: current.run, soundId: run.sounds.Harbor, ms: 110_000, on: run.sounds.Harbor });
     await until("March revealed next", () => playing()?.music?.next?.soundId === run.sounds.March);
     await lib.getByRole("button", { name: "Delete", exact: true }).click();
     await lib.getByText("This track plays next. Take it out of Up next first.", { exact: true }).waitFor();

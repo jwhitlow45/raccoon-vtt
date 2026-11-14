@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -97,7 +97,7 @@ async function seed(): Promise<void> {
   for (const p of PLACES) for (const m of MOODS) if (names.length < 100) names.push(`${p} ${m}`);
   for (let i = 0; i < names.length; i++) {
     const a = assets[(i * 5) % assets.length]!;
-    const id = randomUUID();
+    const id = uuidv7();
     await ops.send({ t: "sound.create", id, assetId: a.id, name: names[i]!, use: "music", ms: a.ms });
     run.music.push(id);
   }
@@ -110,7 +110,7 @@ async function seed(): Promise<void> {
     ["Travel", [run.music[1]!, ...pick(60, 9)]],
     ["Boss themes", pick(90, 4)],
   ] as const) {
-    const id = randomUUID();
+    const id = uuidv7();
     await ops.send({ t: "playlist.create", id, name, sounds: [...sounds], repeat: "all", fade: 5 });
     run.playlists[name] = id;
   }
@@ -133,7 +133,7 @@ function nameOf(id: string): string {
 
 /** Tavern night from its third track, as the preview's room plays it. */
 async function playTavern(repeat: "all" | "one" | "off" = "all"): Promise<void> {
-  const id = randomUUID();
+  const id = uuidv7();
   await ops.send({ t: "music.play", run: id, playlistId: run.playlists["Tavern night"]!, order: run.tavern, index: 2, repeat, fade: 5 });
   // By its run's id, since a step before may have left the same playlist playing.
   await waitFor("Tavern night playing", () => (music()?.run === id ? true : null));
@@ -486,14 +486,14 @@ describe("the music player in the Sound panel", { concurrency: false }, () => {
     await dm.mouse.move(track.x + track.width * 0.2, y);
     await dm.mouse.down();
     for (let i = 1; i <= 4; i++) await dm.mouse.move(track.x + track.width * (0.2 + 0.03 * i), y);
-    await ops.send({ t: "music.jump", run: randomUUID(), from: music()!.run, soundId: other, ms: 0, on: playing });
+    await ops.send({ t: "music.jump", run: uuidv7(), from: music()!.run, soundId: other, ms: 0, on: playing });
     await panel.locator("[data-music-track]").filter({ hasText: nameOf(other) }).waitFor();
     for (let i = 5; i <= 10; i++) await dm.mouse.move(track.x + track.width * (0.2 + 0.03 * i), y);
     await dm.mouse.up();
     await sleep(800);
     assert.equal(sentOps(from, "music.jump").length, 0, "no seek on the track another DM started");
     assert.equal(music()!.now.soundId, other);
-    await ops.send({ t: "music.jump", run: randomUUID(), from: music()!.run, soundId: playing, ms: 0, on: other });
+    await ops.send({ t: "music.jump", run: uuidv7(), from: music()!.run, soundId: playing, ms: 0, on: other });
     await waitFor("back on the track the steps below seek", () => (music()?.now.soundId === playing ? true : null));
 
     // Repeat one: End is held a second short of the end, less the crossfade.
@@ -520,7 +520,7 @@ describe("the music player in the Sound panel", { concurrency: false }, () => {
       });
       await playTavern();
       const third = run.tavern[2]!;
-      await ops.send({ t: "music.jump", run: randomUUID(), from: music()!.run, soundId: third, ms: 40_000, on: third });
+      await ops.send({ t: "music.jump", run: uuidv7(), from: music()!.run, soundId: third, ms: 40_000, on: third });
       await waitFor("40 s into track 3", () => (music() && Date.now() - music()!.now.at > 39_000 ? true : null));
       await reload(slow);
       panel = await nowPlaying(slow);
@@ -672,7 +672,7 @@ describe("the music player in the Sound panel", { concurrency: false }, () => {
     // A crossfade that starts mid-drag ends the drag with nothing sent, though no frame marks it.
     const now = music()!;
     const lengthMs = dmSocket.state!.sounds![now.now.soundId]!.ms;
-    await ops.send({ t: "music.jump", run: randomUUID(), from: now.run, soundId: now.now.soundId, ms: lengthMs - 5_000 - 3_000, on: now.now.soundId });
+    await ops.send({ t: "music.jump", run: uuidv7(), from: now.run, soundId: now.now.soundId, ms: lengthMs - 5_000 - 3_000, on: now.now.soundId });
     const next = await waitFor("the next revealed", () => music()?.next ?? null);
     const before = await lines();
     from = dmSocket.sent.length;
@@ -700,7 +700,7 @@ describe("the music player in the Sound panel", { concurrency: false }, () => {
       for (let i = 1; i <= 10; i++) await dm.mouse.move(x, y0 + 8 + ((y1 - y0 - 8) * i) / 10);
       await dm.mouse.up();
     };
-    const fromTop = randomUUID();
+    const fromTop = uuidv7();
     await ops.send({ t: "music.play", run: fromTop, playlistId: run.playlists["Tavern night"]!, order: run.tavern, index: 0, repeat: "all", fade: 5 });
     await waitFor("Tavern night from its first track", () => (music()?.run === fromTop ? true : null));
     await panel.locator("[data-music-now]").filter({ hasText: "Tavern night · 1 of 12" }).waitFor();
@@ -857,7 +857,7 @@ describe("the music player in the Sound panel", { concurrency: false }, () => {
       return play;
     };
     // A spare track at Battle's end, which the other DM deletes while the draft holds it.
-    const spare = randomUUID();
+    const spare = uuidv7();
     await ops.send({ t: "sound.create", id: spare, assetId: await upload(95_000), name: "Spare track", use: "music", ms: 95_000 });
     await ops.send({ t: "playlist.add", id, soundId: spare });
     await waitFor("the spare in Battle", () => (stored()?.sounds.includes(spare) ? true : null));

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -53,7 +53,7 @@ const patSocket = new SocketWatch("pat");
 const dmConsole = new ConsoleWatch("dm");
 const patConsole = new ConsoleWatch("pat");
 
-const run = { roomId: "", roomName: `E2E daylight ${new Date().toISOString().slice(0, 19)}`, patId: "", sceneId: "", clockId: randomUUID() };
+const run = { roomId: "", roomName: `E2E daylight ${new Date().toISOString().slice(0, 19)}`, patId: "", sceneId: "", clockId: uuidv7() };
 
 const DESK = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };

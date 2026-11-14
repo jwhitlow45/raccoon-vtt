@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -66,7 +66,7 @@ const run = {
   roomId: "",
   roomName: `E2E time and sound ${new Date().toISOString().slice(0, 19)}`,
   password: "",
-  playlist: randomUUID(),
+  playlist: uuidv7(),
   music: [] as string[],
   names: [] as string[],
   tavern: [] as string[],
@@ -218,13 +218,13 @@ function nameOf(id: string): string {
 
 /** Tavern night from its first track. */
 async function playTavern(): Promise<void> {
-  const id = randomUUID();
+  const id = uuidv7();
   await ops.send({ t: "music.play", run: id, playlistId: run.playlist, order: run.tavern, index: 0, repeat: "all", fade: 5 });
   await waitFor("Tavern night playing", () => (dmSocket.state?.playing?.music?.run === id ? true : null));
 }
 
 async function startClock(shown = true): Promise<void> {
-  await ops.send({ t: "clock.start", id: randomUUID(), at: 2 * 86_400 + 20 * HOUR, shown, calendar: { kind: "days" } });
+  await ops.send({ t: "clock.start", id: uuidv7(), at: 2 * 86_400 + 20 * HOUR, shown, calendar: { kind: "days" } });
   await waitFor("a clock", () => (dmSocket.state?.clock ? true : null));
 }
 
@@ -313,10 +313,10 @@ async function focusOnMapOnceChipGoes(how: string, page: Page = dm): Promise<voi
 
 /** Rain, then Crowd a moment later, so the player's Background lists them in that order. */
 async function startLoops(): Promise<void> {
-  await ops.send({ t: "loop.start", id: randomUUID(), soundId: run.loop, volume: 80 });
+  await ops.send({ t: "loop.start", id: uuidv7(), soundId: run.loop, volume: 80 });
   await waitFor("Rain playing", () => (Object.keys(dmSocket.state?.playing?.loops ?? {}).length === 1 ? true : null));
   await dm.waitForTimeout(50);
-  await ops.send({ t: "loop.start", id: randomUUID(), soundId: run.crowd, volume: 80 });
+  await ops.send({ t: "loop.start", id: uuidv7(), soundId: run.crowd, volume: 80 });
   await waitFor("both loops playing", () => (Object.keys(dmSocket.state?.playing?.loops ?? {}).length === 2 ? true : null));
 }
 
@@ -395,14 +395,14 @@ describe("Time and Sound as panels", { concurrency: false }, () => {
     for (const p of PLACES) for (const m of MOODS) if (names.length < 100) names.push(`${p} ${m}`);
     for (let i = 0; i < names.length; i++) {
       const a = assets[i % assets.length]!;
-      const id = randomUUID();
+      const id = uuidv7();
       await ops.send({ t: "sound.create", id, assetId: a.id, name: names[i]!, use: "music", ms: a.ms });
       run.music.push(id);
     }
     run.names = names;
     run.tavern = run.music.slice(0, 12);
     await ops.send({ t: "playlist.create", id: run.playlist, name: "Tavern night", sounds: run.tavern, repeat: "all", fade: 5 });
-    run.loop = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: randomUUID(), name: "Rain", use: "loop", ms: 3_000 });
+    run.loop = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: uuidv7(), name: "Rain", use: "loop", ms: 3_000 });
     await waitFor("the library in the DM's copy", () => (Object.keys(dmSocket.state?.sounds ?? {}).length === 101 ? true : null));
 
     const headers = { Origin: server.origin, "content-type": "application/json" };
@@ -829,7 +829,7 @@ describe("Time and Sound as panels", { concurrency: false }, () => {
     await closeSheets();
     await playTavern();
     if (!run.crowd) {
-      run.crowd = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: randomUUID(), name: "Crowd", use: "loop", ms: 3_000 });
+      run.crowd = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: uuidv7(), name: "Crowd", use: "loop", ms: 3_000 });
       await waitFor("Crowd in the DM's copy", () => (dmSocket.state?.sounds?.[run.crowd] ? true : null));
     }
     for (const id of Object.keys(dmSocket.state?.playing?.loops ?? {})) await ops.send({ t: "loop.stop", id });
@@ -927,13 +927,13 @@ describe("Time and Sound as panels", { concurrency: false }, () => {
 
     // The one track ends under Repeat off, and the server's tick stops the run. Music is 30 s at least, so a jump starts it 4 s from its end.
     if (!run.lastCall) {
-      run.lastCall = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: randomUUID(), name: "Last call", use: "music", ms: 31_000 });
+      run.lastCall = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: uuidv7(), name: "Last call", use: "music", ms: 31_000 });
       await waitFor("Last call in the DM's copy", () => (dmSocket.state?.sounds?.[run.lastCall] ? true : null));
     }
-    const lastRun = randomUUID();
+    const lastRun = uuidv7();
     await ops.send({ t: "music.play", run: lastRun, soundId: run.lastCall, order: [run.lastCall], repeat: "off", fade: 0 });
     player = await openNowPlayer();
-    await ops.send({ t: "music.jump", run: randomUUID(), from: lastRun, soundId: run.lastCall, ms: dmSocket.state!.sounds![run.lastCall]!.ms - 4_000 });
+    await ops.send({ t: "music.jump", run: uuidv7(), from: lastRun, soundId: run.lastCall, ms: dmSocket.state!.sounds![run.lastCall]!.ms - 4_000 });
     assert.equal((await nowOpener().innerText()).trim(), "Last call");
     await waitFor("the track's end", () => (dmSocket.state?.playing?.music ? null : true), 20_000);
     await stoppedChip();

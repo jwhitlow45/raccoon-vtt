@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -61,7 +61,7 @@ const patSocket = new SocketWatch("pat");
 const dmConsole = new ConsoleWatch("dm");
 const patConsole = new ConsoleWatch("pat");
 
-const run = { roomId: "", roomName: `E2E clock ${new Date().toISOString().slice(0, 19)}`, patId: "", thorn: randomUUID(), bree: randomUUID() };
+const run = { roomId: "", roomName: `E2E clock ${new Date().toISOString().slice(0, 19)}`, patId: "", thorn: uuidv7(), bree: uuidv7() };
 
 const DESK = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
@@ -577,7 +577,7 @@ describe("the room clock's Time panel", () => {
     await panel.getByRole("button", { name: "Tap again to stop the clock", exact: true }).waitFor();
     await ops.send({ t: "clock.stop" });
     await panel.getByRole("button", { name: "Start the clock", exact: true }).waitFor();
-    await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * HOUR, shown: true, calendar: { kind: "days" } });
+    await ops.send({ t: "clock.start", id: uuidv7(), at: 8 * HOUR, shown: true, calendar: { kind: "days" } });
     await stop.waitFor();
     assert.equal(await panel.getByRole("button", { name: "Tap again to stop the clock", exact: true }).count(), 0, "a new clock's Stop is not armed");
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -63,10 +63,10 @@ const run = {
   roomName: `E2E weather ${new Date().toISOString().slice(0, 19)}`,
   password: "",
   sceneId: "",
-  cryptId: randomUUID(),
+  cryptId: uuidv7(),
   patId: "",
-  area: randomUUID(),
-  trap: randomUUID(),
+  area: uuidv7(),
+  trap: uuidv7(),
   /** What the run measured and did on its own, printed at the end: each page `moving` opened again, and the step-down's times in fu49perfc-1. */
   measured: [] as string[],
 };

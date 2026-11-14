@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -61,7 +61,7 @@ const dmConsole = new ConsoleWatch("dm");
 const patConsole = new ConsoleWatch("pat");
 const tvConsole = new ConsoleWatch("display");
 
-const run = { roomId: "", roomName: `E2E timed ${new Date().toISOString().slice(0, 19)}`, patId: "", thorn: randomUUID(), bree: randomUUID(), clockId: randomUUID() };
+const run = { roomId: "", roomName: `E2E timed ${new Date().toISOString().slice(0, 19)}`, patId: "", thorn: uuidv7(), bree: uuidv7(), clockId: uuidv7() };
 
 const DESK = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
@@ -353,7 +353,7 @@ describe("time spans on effects", () => {
     const span = { mode: "span", seconds: HOUR } as const;
     const turns = { mode: "rounds", rounds: 3, of: bree } as const;
     const add = async (key: "blessed" | "hasted", duration: typeof span | typeof turns): Promise<string> => {
-      const id = randomUUID();
+      const id = uuidv7();
       await ops.send({ t: "actor.effect.add", target: bree, effect: { id, key, duration } });
       await waitFor(`${key} on Bree`, () => (effectsOf(dmSocket, run.bree).some((e) => e.id === id) ? true : null));
       return id;
@@ -407,7 +407,7 @@ describe("time spans on effects", () => {
     assert.deepEqual(find(counted)?.duration, beforeCount, "an untouched Save keeps the count of turns");
 
     // An untouched Save never erases a duration another device added while the editor stayed open.
-    const plain = randomUUID();
+    const plain = uuidv7();
     await ops.send({ t: "actor.effect.add", target: bree, effect: { id: plain, key: "blessed" } });
     await waitFor("a plain Blessed", () => (find(plain) ? true : null));
     await open(plain);
