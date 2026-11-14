@@ -817,7 +817,8 @@ describe("time spans in a backup (docs/design/design-v1-calendar-c2c3.md 4.7)", 
     assert.deepEqual(bree!.actor.effects[0]!.ends, { span: 8 * H, at: 16 * H, clock: "clock-1" });
     const [gob] = Object.values(out.tokens);
     assert.deepEqual("inline" in gob!.actor ? gob!.actor.inline.effects[0]!.ends : null, { span: 60, at: 8 * H + 60, clock: "clock-1" });
-    assert.deepEqual(Object.values(out.encounterHistory[0]!.effects).flat().find((e) => e.id === "b")?.ends, { span: 60, at: 8 * H + 60, clock: "clock-1" });
+    // An import gives the condition a fresh id (remap.ts), so the saved step's copy is found by its kind.
+    assert.deepEqual(Object.values(out.encounterHistory[0]!.effects).flat().find((e) => e.key === "blessed")?.ends, { span: 60, at: 8 * H + 60, clock: "clock-1" });
   });
 
   test("an end is held to its bounds, with its time and clock both, and never beside a count of turns", () => {
