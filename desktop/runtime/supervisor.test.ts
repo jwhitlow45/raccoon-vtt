@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CRASH_RESTART_MS, START_PARTS, type StartPart } from "./supervisor.ts";
+import { CRASH_RESTART_MS, START_PARTS, endsHeadless, type StartPart } from "./supervisor.ts";
 import { BEFORE, LIVE } from "./restore.ts";
 import { BUILD, Instance, World } from "./testing/fakeWorld.ts";
 
@@ -501,4 +501,20 @@ test("an undo held past its bound between its state read and its drop is never j
   assert.deepEqual([...world.dbs.keys()], [LIVE]);
   assert.equal(world.live().content, "orig", "the original is raccoon again");
   assert.deepEqual(world.violations, []);
+});
+
+test("a headless supervisor ends on a stop, never on a stalled part, which it waits out to running", async () => {
+  // As main.ts's headless emitter decides: each status a run with no shell would print, and whether it ends there.
+  const { world, inst } = late("db.open", "openDatabase", 60_000);
+  await run(world, START_PARTS.openDatabase.ms + 90_000);
+  assert.ok(inst.statuses.some((s) => s.error?.kind === "stalled"), "the part stalled");
+  assert.deepEqual(inst.statuses.filter(endsHeadless), [], "and no status on the way would have ended a headless run");
+  assert.equal(inst.latest()?.state, "running");
+
+  const failed = new World();
+  failed.seed();
+  failed.startFailsAfterLaunch = true;
+  const stopped = await started(failed);
+  assert.equal(stopped.latest()?.error?.kind, "databaseFailed");
+  assert.equal(endsHeadless(stopped.latest()!), true, "a stop still ends it");
 });

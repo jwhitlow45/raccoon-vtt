@@ -386,9 +386,10 @@ export type NetworkReach = z.infer<typeof NetworkReach>;
  * shell, which sees the bundled programs fail to load, and `root` from
  * either. The shell also uses `serverCrashed`, with supervisor.log's last
  * line, when the supervisor itself exits on its own. `stalled` is a part of
- * a start that has gone past its bound with nothing done (runtime/supervisor.ts
- * START_PARTS), with that part's words. The supervisor still waits for it,
- * and the start goes on when it ends, so it offers no Try again.
+ * a start that has gone past its bound with no progress reported
+ * (runtime/supervisor.ts START_PARTS), with that part's words. The
+ * supervisor still waits for it, and the start goes on when it ends, so it
+ * is no stop at all, and offers no Try again.
  */
 export const AppError = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("glibc") }),
@@ -923,6 +924,6 @@ export function errorText(error: AppError, appVersion: string, platform: Platfor
     case "backupBeforeUpdateFailed":
       return `The backup before the update failed: ${clause(error.reason)}. Your rooms are untouched.`;
     case "stalled":
-      return `${capital(clause(error.what))} has done nothing for ${error.seconds} s. RaccoonVTT goes on when it ends, and the logs may say why it is slow.`;
+      return `${capital(clause(error.what))} has not reported progress for ${error.seconds} s. RaccoonVTT goes on when it ends, and the logs may say why it is slow.`;
   }
 }

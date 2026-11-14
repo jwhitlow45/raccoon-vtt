@@ -31,14 +31,14 @@ import { ProfileWatcher, firewallRule, networkReading, profileReach, spawnWatchC
 import { readOwner, writeOwner } from "./ownerRecord.ts";
 import { firstFreePort, portFree } from "./ports.ts";
 import { pgPaths, type PgPaths } from "./pgPaths.ts";
-import { Cluster, DATABASE } from "./postgres.ts";
+import { Cluster, DATABASE, dbConfig } from "./postgres.ts";
 import { selfIdentity, stillRunning } from "./processInfo.ts";
 import { checkRestorable, parseRecord, recover, runRestore, type CrashPoint, type RestoreContext, type RestoreHooks } from "./restore.ts";
 import { clusterRestoreDb, nodeImageFs } from "./restoreDb.ts";
 import { listRooms, newDmLink } from "./rooms.ts";
 import { loadSecrets, type Secrets } from "./secrets.ts";
 import { loadSettings, saveSettings } from "./settings.ts";
-import { Supervisor, type SupervisorDeps } from "./supervisor.ts";
+import { Supervisor, endsHeadless, type SupervisorDeps } from "./supervisor.ts";
 import { readStamp, roomsEmpty, stampOf, writeStamp, type Build } from "./versionGuard.ts";
 
 /**
@@ -121,12 +121,10 @@ async function theCluster(): Promise<Cluster> {
     password: secrets.databasePassword,
     platform,
     pgPath: pgFolders.map,
+    log,
   });
   return cluster;
 }
-
-/** A connection PostgreSQL has not finished in this long fails, so no query waits on one for ever. */
-const DB_CONNECT_LIMIT_MS = 30_000;
 
 let pool: pg.Pool | null = null;
 function thePool(): pg.Pool {
@@ -244,7 +242,7 @@ const deps: SupervisorDeps = {
     async open(create) {
       const c = await theCluster();
       if (create) {
-        const admin = new pg.Client({ connectionString: c.url("postgres"), connectionTimeoutMillis: DB_CONNECT_LIMIT_MS });
+        const admin = new pg.Client(dbConfig(c.url("postgres")));
         await admin.connect();
         try {
           await admin.query(`create database ${DATABASE} template template0`);
@@ -252,7 +250,7 @@ const deps: SupervisorDeps = {
           await admin.end();
         }
       }
-      pool = new pg.Pool({ connectionString: c.url(), max: 3, connectionTimeoutMillis: DB_CONNECT_LIMIT_MS });
+      pool = new pg.Pool({ ...dbConfig(c.url()), max: 3 });
       pool.on("error", (err) => log(`database connection failed: ${err.message}`));
     },
     async close() {
@@ -327,8 +325,8 @@ const deps: SupervisorDeps = {
     if (args.headless) console.log(headlessLine(status));
     if (status.state === "error") {
       log(`error: ${JSON.stringify(status.error)}`);
-      // With no shell to answer it, an error has no one to act on it.
-      if (!channel) void exit(1);
+      // With no shell to answer it, a stop has no one to act on it. A stalled part is still waited for.
+      if (!channel && endsHeadless(status)) void exit(1);
     }
   },
 };

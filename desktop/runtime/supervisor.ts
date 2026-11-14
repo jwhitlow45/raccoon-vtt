@@ -126,9 +126,11 @@ export const PORT_WAIT_MS = 5_000;
  * restore's end), so the start keeps its queue and the lock until the
  * part's work has ended, and goes on when it does. Each has a bound well
  * past its slowest honest run: PowerShell's cold start, initdb on a slow
- * disk, pg_ctl's own 120 s wait and the 30 s past it before postgres.ts
- * ends pg_ctl. Past it with nothing done, the window shows `stalled` with
- * the part's words until the part ends. A part whose length grows with the
+ * disk. Past it with no progress reported, the window shows `stalled` with
+ * the part's words until the part ends. Starting the database has no
+ * honest upper bound, since crash replay can run long on a slow disk
+ * (max_wal_size is a soft limit), so its bound only says it is slow
+ * (postgres.ts PG_CTL_WAIT_S). A part whose length grows with the
  * data (`progress`, a restore's end, which flushes every image) is bounded
  * by the time since its last step instead, and says how far it has got.
  * Two waits have bounds of their own: the app server's first answer
@@ -158,6 +160,15 @@ export const START_PARTS = {
   stamp: { words: "writing this version's stamp", ms: 60_000 },
 } as const satisfies Record<string, { words: string; ms: number; progress?: true }>;
 export type StartPart = keyof typeof START_PARTS;
+
+/**
+ * Whether a headless supervisor with no shell should end on this status: a
+ * stop, which needs someone to act on it. `stalled` is no stop, since the
+ * start still waits for its part and goes on when it ends.
+ */
+export function endsHeadless(status: SupervisorStatus): boolean {
+  return status.state === "error" && status.error?.kind !== "stalled";
+}
 
 /** What a part's work is handed: the stop's signal, which ends what can end early, and a progress call for a part that reports one. */
 export type PartJob = { signal: AbortSignal; progress(done?: number, total?: number): void };
@@ -281,7 +292,7 @@ export class Supervisor {
         if (this.stopping) return;
         watch.quiet = true;
         this.stalled = part.words;
-        this.d.log(`${part.words}: nothing done for ${part.ms / 1000} s, so the window says so, and the start waits for it`);
+        this.d.log(`${part.words}: no progress reported for ${part.ms / 1000} s, so the window says so, and the start waits for it`);
         this.state = "error";
         this.step = null;
         this.error = { kind: "stalled", what: part.words, seconds: part.ms / 1000 };
@@ -834,9 +845,10 @@ export class Supervisor {
   stop(): Promise<void> {
     this.stopping ??= (async () => {
       for (const timer of [this.crashTimer, this.backupTimer, this.pgTimer, this.addressTimer]) timer?.cancel();
-      // What can end early ends now: initdb, pg_ctl and a restore's end
-      // between its steps. The rest is waited for, since a start keeps the
-      // queue until its part's work has ended, and the lock goes only after.
+      // What can end early ends now: initdb, a starting PostgreSQL (stopped
+      // through pg_ctl stop) and a restore's end between its steps. The rest
+      // is waited for, since a start keeps the queue until its part's work
+      // has ended, and the lock goes only after.
       this.cancel.abort();
       await this.enqueue(async () => {
         this.set("stopping", "stopping");
