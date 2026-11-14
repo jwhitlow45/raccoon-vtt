@@ -222,11 +222,13 @@ export type SnapshotBudgetLimits = {
 };
 
 /*
- * The byte budgets hold ten of the largest DM snapshot a minute per session
- * and twenty per session of a pinned room: 6 MiB since companion stat blocks
- * ride on top of the 3 MiB for everything else
- * (docs/design/design-v1-companion-stat-blocks.md 3.4). An address counts
- * requests alone.
+ * The byte budgets hold ten of the largest DM snapshot under the DM's own
+ * limits a minute per session and twenty per session of a pinned room: 6
+ * MiB since companion stat blocks ride on top of the 3 MiB for everything
+ * else (docs/design/design-v1-companion-stat-blocks.md 3.4). Players' own
+ * things sit outside those limits, so a room at the far line sends its DM
+ * about 12.3 MiB (docs/design/design-v1-player-limits.md 8), and the
+ * budgets hold four and nine of those. An address counts requests alone.
  */
 export const DEFAULT_SNAPSHOT_BUDGET: SnapshotBudgetLimits = {
   windowMs: 60_000,

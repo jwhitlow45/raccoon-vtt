@@ -1470,9 +1470,9 @@ export const ID_BUDGET = { windowMs: 30 * 60_000, player: 2_000, dm: 20_000 } as
 /**
  * Derived bounds (design section 8), held by the full fixture at every far
  * line (server/rooms/limits.bounds.test.ts): its stored state measured
- * 15.09 MiB and the sum of its parts' bounds 15.31 MiB, its export 15.09
- * MiB, and the DM's largest snapshot 12.49 MiB. Nothing refuses by these:
- * tests hold stored states, snapshots and buffers within them.
+ * 14.93 MiB, its export 14.93 MiB, and the DM's largest snapshot 12.33
+ * MiB. Nothing refuses by these: tests hold stored states, snapshots and
+ * buffers within them.
  */
 export const HARD = {
   /** The measured state at the room far line with its widest reserves, plus what sits outside the measure. */

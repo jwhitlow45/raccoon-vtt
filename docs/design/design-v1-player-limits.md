@@ -301,7 +301,16 @@ The whole unit and integration suites run. Tests that sent a player's op expecti
 
 ## 14. Performance
 
-The bench's far row (`--far` in scripts/bench-server4.ts) runs a dark scene without walls or lights at 2,150 tokens: a walk step 16.6 ms against its 16.7 ms budget, its fan-out 7.6 ms against 6.7 ms, the DM's first snapshot 54.1 ms against 166.7 ms, and a player's 7.1 ms. A scene of the heavy bench's walls and lights cannot hold the far tokens, since they pass the DM's scene line first. The `room_ids` write runs inside the batch's transaction.
+The bench's far rows (`--far` in scripts/bench-server4.ts) run a dark scene without walls or lights at 2,150 tokens, against the laptop limits (the server budgets over 1.5). A scene of the heavy bench's walls and lights cannot hold the far tokens, since they pass the DM's scene line first. The `room_ids` write runs inside the batch's transaction, and no row times it alone.
+
+| Row | Limit | Build, 2026-11-13, load about 3 | Main b403bc33, 2026-11-14, load 5 to 10, six runs |
+| --- | --- | --- | --- |
+| A walk step, median | 16.7 ms | 16.6 ms | 29.6 to 35.8 ms |
+| Its fan-out, median | 6.7 ms | 7.6 ms | 13.4 to 16.5 ms |
+| The DM's first snapshot | 166.7 ms | 54.1 ms | 74.7 to 106.2 ms |
+| A player's first snapshot, median | 166.7 ms | 7.1 ms | 9.4 to 22.1 ms |
+
+Both runs shared the machine with other work, which the bench asks it not to, and the second ran beside about seven busy test processes on 15 cores. So neither is a gate reading: the walk and fan-out rows need a run on a quiet machine, or on the server with `--server`, to be judged.
 
 ## 15. UI checklist
 

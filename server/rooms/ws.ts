@@ -46,7 +46,7 @@ export type WsOptions = {
   caps?: Partial<SocketCaps>;
   /** Protocol-level ping interval (design 7.5): 30 s. */
   pingMs?: number;
-  /** A socket whose send buffer stays above this for `bufferedHoldMs` is closed (design 10.4): 7 MiB for 10 s. */
+  /** A socket whose send buffer stays above this for `bufferedHoldMs` is closed (design 10.4): HARD.sendBufferBytes, 17 MiB, for 10 s. */
   bufferedLimit?: number;
   bufferedHoldMs?: number;
   /** `scene` rate: 1 per 2 s per socket and 4 per 10 s per session. */
@@ -67,7 +67,7 @@ export const MAX_FRAME_BYTES = 64 * 1024;
  * closed: 1 MiB over the largest DM snapshot (shared/limits.ts HARD), so
  * one snapshot alone never closes a slow socket. A room at the far line
  * sends its DM the scene, the companion stat blocks beside it and the DM's
- * own log, about 12.5 MiB (server/rooms/limits.bounds.test.ts).
+ * own log, about 12.3 MiB (server/rooms/limits.bounds.test.ts).
  */
 export const DEFAULT_BUFFERED_LIMIT = HARD.sendBufferBytes;
 
