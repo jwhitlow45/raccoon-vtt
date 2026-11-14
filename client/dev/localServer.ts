@@ -394,6 +394,10 @@ export function localSocketFactory(options: LocalSocketOptions): {
         case "ping":
           this.emit({ t: "pong", k: msg.k });
           return;
+        case "ids":
+          // The fixture loses no answer, so a create a reconnect asks about went through.
+          this.emit({ t: "ids", k: msg.k, held: msg.ids, notHeld: [], pending: [] });
+          return;
         case "eph":
           return;
       }

@@ -128,6 +128,8 @@ function importAndReconnect(refuse: boolean) {
   assert.equal(rejects.length, refuse ? 1 : 0, "the server refused only what the test meant it to");
   store.suspend();
   store.applySnapshot(server.hello({ resumeFrom: store.prepareHello().resumeFrom, sceneId: "s1" }));
+  // The new scene's create was taken, as the room's record of ids tells a reconnect that asks (store.ts receiveIds).
+  for (const m of outbox.sent) if (m.t === "ids") store.receiveIds({ t: "ids", k: m.k, held: m.ids, notHeld: [], pending: [] });
   const open = () => store.applySnapshot(server.hello({ resumeFrom: store.prepareHello().resumeFrom, sceneId: IMPORTED }));
   return { store, plan, ops, answers: () => answers, open };
 }
