@@ -2,18 +2,19 @@ import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import type { Scene } from "#shared/model.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
 import { Button } from "../../components/Button.tsx";
+import { Dialog } from "../../components/Dialog.tsx";
 import { ErrorText, Input } from "../../components/Field.tsx";
 import { IconButton } from "../../components/IconButton.tsx";
 import { Spinner } from "../../components/Loading.tsx";
 import { Help } from "../../components/Panel.tsx";
-import { LIMITS } from "#shared/limits.ts";
+import { LEAVE_PLAYERS_ASK, LIMITS } from "#shared/limits.ts";
 import { UnsavedInput, useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { DUPLICATE_DEFAULTS, duplicateOp, fogHint, type DuplicateInclude } from "./duplicate.ts";
 import { cleanFolderName } from "./folders.ts";
-import { deleteBlocked, sceneAfterDelete } from "./afterDelete.ts";
+import { deleteBlocked, leavesPlayers, sceneAfterDelete } from "./afterDelete.ts";
 import { makeThumbnail, thumbsSlot } from "./thumbs.ts";
 import { CheckRow, SceneSheet, SheetRow } from "./SceneSheet.tsx";
 
@@ -281,15 +282,20 @@ function UpdateThumbnail(props: { scene: Scene; viewing: boolean }) {
  * second deletes. The row keeps its size armed, so the second tap lands on it.
  * A tap anywhere else, or the 4 seconds ConfirmButton allows, disarms it.
  *
- * The players' scene waits until they are moved. The players can arrive
- * while the menu is open, sent from another DM device, so the row then
- * turns unavailable rather than disabled, keeping the focus it has, and
- * disarms, so a second tap that was coming deletes nothing.
+ * On the players' map one tap asks instead (LEAVE_PLAYERS_ASK,
+ * docs/design/design-v1-player-limits.md 5.1): a yes deletes it and leaves
+ * them with no map until the DM moves them, and Undo brings it back with
+ * them on it. The question is a dialog of its own over the menu, so a screen
+ * reader reads it once as it opens, and focus starts on Cancel, so Enter
+ * keeps the map. The players can arrive while the menu is open, sent from
+ * another DM device, so an armed row disarms then, and the tap that was
+ * coming asks rather than deletes.
  */
 function DeleteScene(props: { scene: Scene; viewing: boolean; scenes: readonly Scene[]; onDone(): void }) {
   const { scene } = props;
   const actions = useRoomActions();
   const [armed, setArmed] = useState(false);
+  const [asking, setAsking] = useState(false);
   const row = useRef<HTMLDivElement>(null);
   const next = sceneAfterDelete(props.scenes, scene.id);
   const playerSceneId = useRoomView((s) => s.view?.meta.playerSceneId ?? null);
@@ -297,8 +303,8 @@ function DeleteScene(props: { scene: Scene; viewing: boolean; scenes: readonly S
   const floorKey = useRoomView((s) => (s.view ? floorsOf(s.view, scene.id).map((f) => f.id) : [scene.id]).join(","));
   const floorIds = floorKey.split(",");
   const floorCount = floorIds.length;
-  const blocked = deleteBlocked(props.scenes, scene.id, playerSceneId, floorIds);
-  const playersHere = next !== undefined && blocked !== null;
+  const blocked = deleteBlocked(props.scenes, scene.id);
+  const playersHere = leavesPlayers(scene.id, playerSceneId, floorIds);
   useEffect(() => {
     if (playersHere) setArmed(false);
   }, [playersHere]);
@@ -314,26 +320,57 @@ function DeleteScene(props: { scene: Scene; viewing: boolean; scenes: readonly S
       document.removeEventListener("pointerdown", away, true);
     };
   }, [armed]);
+  const remove = (leavePlayers: boolean) => {
+    if (!next) return;
+    actions.dispatch(leavePlayers ? { t: "scene.delete", sceneId: scene.id, leavePlayers: true } : { t: "scene.delete", sceneId: scene.id });
+    if (props.viewing) actions.switchScene(next.id);
+    props.onDone();
+  };
   const press = () => {
     if (!next || blocked !== null) return;
+    if (playersHere) {
+      setAsking(true);
+      return;
+    }
     if (!armed) {
       setArmed(true);
       return;
     }
-    actions.dispatch({ t: "scene.delete", sceneId: scene.id });
-    if (props.viewing) actions.switchScene(next.id);
-    props.onDone();
+    remove(false);
   };
+  const name = scene.name || "Untitled";
   return (
     <div ref={row} style={{ display: "grid" }}>
       <SheetRow
-        label={armed ? (floorCount > 1 ? `Delete ${scene.name || "Untitled"} and its ${floorCount} floors` : "Tap again to delete") : "Delete"}
+        label={armed ? (floorCount > 1 ? `Delete ${name} and its ${floorCount} floors` : "Tap again to delete") : "Delete"}
         hint={blocked ?? (floorCount > 1 ? "Removes every floor with its tokens, drawings, build and fog too." : "Removes its tokens, drawings, build and fog too.")}
         danger={armed ? "armed" : "rest"}
         disabled={!next}
-        unavailable={playersHere}
         onClick={press}
       />
+      {asking ? (
+        <Dialog
+          title={floorCount > 1 ? `Delete ${name} and its ${floorCount} floors` : `Delete ${name}`}
+          phone="sheet"
+          width="sm"
+          onClose={() => setAsking(false)}
+          footer={
+            <>
+              {/* Each fills the line it stands on, so the pair wrapped on a narrow phone keeps one edge (docs/design/design-v1-polish.md R6). */}
+              <Button autoFocus style={{ flex: "1 1 auto" }} onClick={() => setAsking(false)}>
+                Cancel
+              </Button>
+              <Button variant="danger" style={{ flex: "1 1 auto" }} onClick={() => remove(true)}>
+                Delete
+              </Button>
+            </>
+          }
+        >
+          <p data-leave-players style={{ margin: 0, overflowWrap: "anywhere" }}>
+            {LEAVE_PLAYERS_ASK}
+          </p>
+        </Dialog>
+      ) : null}
     </div>
   );
 }

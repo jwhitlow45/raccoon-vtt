@@ -8,6 +8,7 @@ import sharp from "sharp";
 import type { BuildChunk, RoomState, Scene, Stamp } from "#shared/model.ts";
 import { drawMap } from "../client/features/grid/synthetic.ts";
 import { uvttFile } from "../client/features/uvtt/synthetic.ts";
+import { LEAVE_PLAYERS_ASK } from "#shared/limits.ts";
 import { STARTER_STAMPS } from "#shared/starterStamps.ts";
 import { retainedGrid, starterMapScene } from "../client/features/starter/mapScene.ts";
 import { PALETTES } from "../client/lib/theme.ts";
@@ -777,25 +778,20 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     }
   });
 
-  test("lp9-a. the players' scene's Delete row waits until they are moved, says why, and keeps its focus", async () => {
-    // Deleting it sent them to the first scene in the list, which can be one the DM is preparing (LP9-PLAY-2).
+  test("lp9-a. the players' scene's Delete asks before it leaves them with no map, starting on Cancel, and Escape keeps the scene", async () => {
+    // Deleting it sent them to the first scene in the list, which can be one the DM is preparing (LP9-PLAY-2). It now asks once.
     const players = sceneOf(dmSocket.state, dmSocket.state!.meta.playerSceneId!)!;
     const menu = await openMenu(players.name);
     try {
-      const row = menu.getByRole("button", { name: /^Delete/ });
-      await menu.getByText("Move the players to another scene first.").waitFor();
-      // Playwright's isDisabled() counts aria-disabled too, so the native property is read.
-      assert.equal(await row.evaluate((el) => (el as unknown as { disabled: boolean }).disabled), false, "natively disabled, so a focused row would lose its focus");
-      assert.equal(await row.getAttribute("aria-disabled"), "true");
-      await row.focus();
-      await dm.keyboard.press("Enter");
-      // Forced, as Playwright waits for an aria-disabled button to be enabled before a click.
-      await row.click({ force: true });
-      await row.click({ force: true });
-      assert.equal(await menu.getByRole("button", { name: /^Tap again to delete/ }).count(), 0, "the row armed");
-      assert.equal(await row.evaluate((el) => el === el.ownerDocument.activeElement), true, "the row lost its focus");
-      assert.ok(sceneOf(dmSocket.state, players.id), "the players' scene was deleted");
+      await menu.getByRole("button", { name: /^Delete/ }).click();
+      const ask = dm.getByRole("dialog", { name: `Delete ${players.name}`, exact: true });
+      await ask.getByText(LEAVE_PLAYERS_ASK, { exact: true }).waitFor();
+      const cancel = ask.getByRole("button", { name: "Cancel", exact: true });
+      await waitFor("focus on Cancel", () => cancel.evaluate((el) => el === el.ownerDocument.activeElement || null));
       await shots.take(dm, "lp9-a-players-scene-delete");
+      await dm.keyboard.press("Escape");
+      await ask.waitFor({ state: "detached" });
+      assert.ok(sceneOf(dmSocket.state, players.id), "the players' scene is kept");
     } finally {
       await dm.keyboard.press("Escape");
       await menu.waitFor({ state: "detached" });

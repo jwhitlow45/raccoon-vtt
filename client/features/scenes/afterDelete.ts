@@ -1,5 +1,4 @@
 import type { Scene } from "#shared/model.ts";
-import { MOVE_PLAYERS_FIRST } from "#shared/permissions.ts";
 
 /**
  * The scene the DM's view goes to once one is deleted: the first of the rest
@@ -14,13 +13,23 @@ export const LAST_SCENE = "The last scene cannot be deleted.";
 
 /**
  * Why a scene cannot be deleted now, in the words both delete controls
- * show, or null when it can. The last scene never can. The players' scene
- * can once they are moved, since deleting it would send them to whichever
- * scene comes first, and the server refuses it with the same words. So can
- * a scene with floors, once they start on none of its floors (`floorIds`).
+ * show, or null when it can. Only the last scene never can. The players'
+ * scene can, once the DM says yes to leaving them with no map
+ * (leavesPlayers).
  */
-export function deleteBlocked(scenes: readonly Scene[], sceneId: string, playerSceneId: string | null, floorIds: readonly string[] = [sceneId]): string | null {
-  if (!sceneAfterDelete(scenes, sceneId)) return LAST_SCENE;
-  // Deleting a scene removes every floor, so the players may start on none of them (docs/design/design-v1-floors.md 7.1).
-  return playerSceneId !== null && (sceneId === playerSceneId || floorIds.includes(playerSceneId)) ? MOVE_PLAYERS_FIRST : null;
+export function deleteBlocked(scenes: readonly Scene[], sceneId: string): string | null {
+  return sceneAfterDelete(scenes, sceneId) ? null : LAST_SCENE;
+}
+
+/**
+ * Whether deleting a scene leaves the players with no map: they start on it
+ * or on one of its floors (`floorIds`), since a delete removes every floor
+ * (docs/design/design-v1-floors.md 7.1). Such a delete asks first
+ * (shared/limits.ts LEAVE_PLAYERS_ASK) and goes with `leavePlayers`, which
+ * the server needs before it deletes the players' map. It never sends them
+ * to whichever scene comes first, which could be one the DM prepares in
+ * private (LP9-PLAY-2).
+ */
+export function leavesPlayers(sceneId: string, playerSceneId: string | null, floorIds: readonly string[] = [sceneId]): boolean {
+  return playerSceneId !== null && (sceneId === playerSceneId || floorIds.includes(playerSceneId));
 }

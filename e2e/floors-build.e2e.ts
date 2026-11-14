@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
+import { LEAVE_PLAYERS_ASK } from "#shared/limits.ts";
 import type { RoomState, Scene } from "#shared/model.ts";
 import { floorRoot } from "../client/features/floors/ids.ts";
 import { ConsoleWatch, expandBar, OpSocket, openSceneGroup, openSideTab, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
@@ -369,13 +370,18 @@ describe("raccoon-vtt several floors: the DM's building side", { timeout: 900_00
     assert.equal(floorNamed("Ground floor")!.id, ground.id);
   });
 
-  test("FLRB-4. Delete from a scene's menu names the floors that go with it, and waits while the players start on one of them", async () => {
+  test("FLRB-4. Delete from a scene's menu names the floors that go with it, and asks while the players start on one of them", async () => {
     const panel = await scenesPanel(dm);
     await panel.getByRole("button", { name: "More for Tower" }).click();
     const sheet = dm.getByRole("dialog", { name: "Tower" });
     await sheet.waitFor();
-    // The players start on Ground, a floor of Tower.
-    await sheet.getByText("Move the players to another scene first.", { exact: true }).waitFor();
+    // The players start on Ground, a floor of Tower, so one tap asks before it leaves them with no map.
+    await sheet.getByRole("button", { name: /^Delete/ }).click();
+    const ask = dm.getByRole("dialog", { name: "Delete Tower and its 4 floors", exact: true });
+    await ask.getByText(LEAVE_PLAYERS_ASK, { exact: true }).waitFor();
+    await ask.getByRole("button", { name: "Cancel", exact: true }).click();
+    await ask.waitFor({ state: "detached" });
+    assert.equal(floorsOf("Tower").length, 4, "Cancel keeps it");
     await dm.keyboard.press("Escape");
     await ops.send({ t: "room.setPlayerScene", sceneId: run.matId });
     await panel.getByRole("button", { name: "More for Tower" }).click();
