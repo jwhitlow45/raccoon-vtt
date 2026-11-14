@@ -25,7 +25,7 @@ import { undoSetup } from "./helpers/undoScope.ts";
  * the room is over its size limit, and the DM's delete of the players' map
  * asks first, leaves them with no map on a yes, and Undo puts them back.
  * The notice, the longest limit's toast at 320 px and 130%, and the
- * delete's question at three sizes are measured.
+ * delete's question at three sizes and both interface sizes are measured.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus sixty-two, one file after
  * another as the others. The other environment variables are the smoke
@@ -418,22 +418,32 @@ describe("raccoon-vtt player limits on a device", { timeout: 600_000 }, () => {
       await ask.getByText(LEAVE_PLAYERS_ASK, { exact: true }).waitFor();
       return { menu, ask };
     };
+    const reopen = async (scale: number) => {
+      await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+      await dm.goto(`${server.origin}/r/${run.roomId}`);
+      await dm.locator(".konvajs-content").first().waitFor();
+    };
     try {
-      for (const size of [DESKTOP, PHONE, SMALL]) {
-        await dm.setViewportSize(size);
-        const { menu, ask } = await openAsk();
-        const cancel = ask.getByRole("button", { name: "Cancel", exact: true });
-        await waitFor("focus on Cancel", () => cancel.evaluate((el) => el === el.ownerDocument.activeElement || null));
-        off.push(...alignmentLines(await measureAlignment(ask), `the players' map delete question at ${size.width} x ${size.height}`));
-        await shots.take(dm, `lim-8-players-map-delete-${size.width}`);
-        // Escape answers no: the question goes, the menu stays, and so does the map.
-        await dm.keyboard.press("Escape");
-        await ask.waitFor({ state: "detached" });
-        await dm.keyboard.press("Escape");
-        await menu.waitFor({ state: "detached" });
+      for (const scale of [1, 1.3]) {
+        if (scale !== 1) await reopen(scale);
+        for (const size of [DESKTOP, PHONE, SMALL]) {
+          await dm.setViewportSize(size);
+          const { menu, ask } = await openAsk();
+          const cancel = ask.getByRole("button", { name: "Cancel", exact: true });
+          await waitFor("focus on Cancel", () => cancel.evaluate((el) => el === el.ownerDocument.activeElement || null));
+          const at = `${size.width} x ${size.height} at ${Math.round(scale * 100)}%`;
+          off.push(...alignmentLines(await measureAlignment(ask), `the players' map delete question at ${at}`));
+          await shots.take(dm, `lim-8-players-map-delete-${size.width}-${Math.round(scale * 100)}`);
+          // Escape answers no: the question goes, the menu stays, and so does the map.
+          await dm.keyboard.press("Escape");
+          await ask.waitFor({ state: "detached" });
+          await dm.keyboard.press("Escape");
+          await menu.waitFor({ state: "detached" });
+        }
       }
     } finally {
       await dm.setViewportSize(DESKTOP);
+      await reopen(1);
     }
     assert.deepEqual(off, [], "out of line by more than 1 px");
     assert.ok(dmSocket.state!.scenes[run.sceneId], "the map is kept");
