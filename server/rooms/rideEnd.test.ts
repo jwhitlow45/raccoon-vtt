@@ -3,7 +3,7 @@ import { describe, test, type TestContext } from "node:test";
 import type { RoomState } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { AYLA, BREE, limitsRoom, OGRE, STAIRS_UP, withUpper } from "#shared/privTestutil.ts";
-import { template } from "#shared/testutil.ts";
+import { template, token } from "#shared/testutil.ts";
 import { Room, viewOf } from "./numberingTesting.ts";
 
 /**
@@ -15,15 +15,24 @@ import { Room, viewOf } from "./numberingTesting.ts";
 const AREA = "0199f0a0-0000-7000-8000-00000000c101";
 
 async function opened(t: TestContext, state: RoomState): Promise<Room> {
-  const room = new Room(t, "R", state);
+  const room = new Room(t, "R", state, { idGate: true });
   await room.load();
   await room.apply("p1", { t: "log.chat", text: "ready" });
   return room;
 }
 
-/** The limits room with each player seeing for themselves, P1 through Ayla and P2 through Bree. */
+/** A guide the DM plays, an ally of the party but no party member, so only those who see it hold it. */
+const GUIDE = "guide";
+
+function withGuide(s: RoomState, at = { x: 5, y: 7 }): RoomState {
+  s.tokens[GUIDE] = token(GUIDE, { kind: "npc", name: "Guide", disposition: "ally", ...at });
+  return s;
+}
+
+/** The limits room with each player seeing for themselves, P1 through Ayla in room R and P2 through Bree in room F. */
 function ownSight(): RoomState {
   const s = limitsRoom();
+  s.tokens[BREE] = { ...s.tokens[BREE]!, x: 26, y: 5 };
   s.scenes.s1 = { ...s.scenes.s1!, vision: { on: true, light: "bright", perPlayer: true } };
   s.holders = { s1: { sceneId: "s1", rev: 0, entries: [{ memberId: "p1", on: true }, { memberId: "p2", on: true }] } };
   return s;
@@ -35,14 +44,15 @@ const areaOn = (s: RoomState, on: string): RoomState => {
 };
 
 describe("a rider ends with its owner's sight", () => {
-  test("K2: P1's area on Bree ends for everyone when Bree walks out of P1's own sight, while P2 still sees her", async (t) => {
-    const room = await opened(t, areaOn(ownSight(), BREE));
-    assert.ok(viewOf(room.clients.p2.sent).templates[AREA], "P2 holds the area before");
-    await room.apply("dm", { t: "token.move", tokenId: BREE, x: 26, y: 5 } as Op);
+  test("K2: P1's area on the DM's guide ends for everyone when the guide walks out of P1's own sight into P2's", async (t) => {
+    const room = await opened(t, areaOn(withGuide(ownSight()), GUIDE));
+    assert.ok(viewOf(room.clients.p1.sent).templates[AREA], "P1 holds the area before");
+    await room.apply("dm", { t: "token.move", tokenId: GUIDE, x: 27, y: 6 } as Op);
+    assert.ok(viewOf(room.clients.p2.sent).tokens[GUIDE], "P2 sees the guide");
+    assert.equal(viewOf(room.clients.p1.sent).tokens[GUIDE], undefined, "P1 does not");
     assert.equal(room.state.templates[AREA], undefined, "the area is removed");
-    assert.ok(viewOf(room.clients.p2.sent).tokens[BREE], "P2 still sees Bree");
     assert.equal(viewOf(room.clients.p2.sent).templates[AREA], undefined, "P2 sees the area go");
-    assert.equal(room.db.stored.at(-1)?.t, "sys.rideEnd", "the server's op removes it");
+    assert.ok(room.db.stored.some((op) => op.t === "sys.rideEnd"), "the server's op removes it");
   });
 
   test("K5: a blackout over a riding area whose creature stays in sight ends nothing, and the area is there when it lifts", async (t) => {
@@ -51,6 +61,7 @@ describe("a rider ends with its owner's sight", () => {
     assert.ok(room.state.templates[AREA], "the area stays behind the blackout");
     await room.apply("dm", { t: "view.blackout", blackout: false } as Op);
     assert.ok(viewOf(room.clients.p1.sent).templates[AREA], "P1 holds the area again");
+    assert.equal(room.db.stored.some((op) => op.t === "sys.rideEnd"), false, "nothing ends");
   });
 
   test("K6: an area on P1's own creature stays when the DM hides the creature", async (t) => {
@@ -59,10 +70,10 @@ describe("a rider ends with its owner's sight", () => {
     assert.ok(room.state.templates[AREA], "the area stays");
   });
 
-  test("K8: P1's area on Bree ends when Bree climbs to a floor P1 does not hold", async (t) => {
-    const room = await opened(t, areaOn(withUpper(limitsRoom(), { x: 3, y: 7 }), BREE));
-    await room.apply("p2", { t: "token.climb", tokenId: BREE, linkId: STAIRS_UP } as Op);
-    assert.equal(room.state.tokens[BREE]!.sceneId, "up", "Bree is on the Upper floor");
+  test("K8: P1's area on the guide ends when the guide climbs to a floor no creature of the party stands on", async (t) => {
+    const room = await opened(t, areaOn(withUpper(withGuide(limitsRoom()), { x: 5, y: 7 }), GUIDE));
+    await room.apply("dm", { t: "token.climb", tokenId: GUIDE, linkId: STAIRS_UP } as Op);
+    assert.equal(room.state.tokens[GUIDE]!.sceneId, "up", "the guide is on the Upper floor");
     assert.equal(room.state.templates[AREA], undefined, "the area is removed");
     assert.equal(viewOf(room.clients.p1.sent).templates[AREA], undefined, "P1's copy lets it go");
   });
