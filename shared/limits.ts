@@ -1085,14 +1085,26 @@ function companionBlockBytes(block: CompanionBlock): number {
   return bytes;
 }
 
+/** A count and the bytes of the blocks it counts. */
+type BlockTotals = { count: number; bytes: number };
+
+/**
+ * What the block caps read of a state: the first refusal of a block past
+ * its own size and of a character past its own caps, in the words naming
+ * the character as it is named now, and the totals of every block and of
+ * the blocks of characters no player owns (BlockRole `dm`).
+ */
+type BlockSummary = { block: string | null; character: string | null; all: BlockTotals; dm: BlockTotals };
+
 /*
- * The verdict for each version of the collection. An op that writes a
- * block copies the collection first (shared/writable.ts), so an op that
- * touches no block finds its verdict here and costs a lookup, while one
- * that does totals the blocks by character again, each block's size
+ * The summary for each version of the blocks, the characters and the
+ * members, which say whose each block is and its character's name. An op
+ * that writes any of them copies it first (shared/writable.ts), so an op
+ * that touches none finds its summary here and costs three lookups, while
+ * one that does totals the blocks by character again, each block's size
  * measured once.
  */
-const blockVerdicts = { today: new WeakMap<object, LimitCheck>(), player: new WeakMap<object, LimitCheck>(), dm: new WeakMap<object, LimitCheck>() };
+const blockSummaries = new WeakMap<object, WeakMap<object, WeakMap<object, BlockSummary>>>();
 
 /**
  * Whose limits a block verdict reads (player limits). `today` is every
@@ -1102,7 +1114,7 @@ const blockVerdicts = { today: new WeakMap<object, LimitCheck>(), player: new We
  * characters no player owns, since players' characters keep their blocks
  * within their own caps.
  */
-type BlockRole = keyof typeof blockVerdicts;
+type BlockRole = "today" | "player" | "dm";
 
 /**
  * Companion stat blocks (docs/design/design-v1-companion-stat-blocks.md 3.4): each
@@ -1110,15 +1122,37 @@ type BlockRole = keyof typeof blockVerdicts;
  * at most 600 and 3 MiB. Every refusal says what to do about blocks, since
  * the player who meets it can act on their own blocks. Blocks never change
  * character and go with theirs, so absolute caps refuse only an op that
- * adds to them.
+ * adds to them. The DM's room totals count only blocks of characters no
+ * player owns, which a hand-over changes with no block added, so they
+ * refuse only an op that adds to the room's blocks, with `before` the
+ * state the op started from.
  */
-function checkCompanionBlocks(state: RoomState, role: BlockRole = "today"): LimitCheck {
-  const collection = state.companionBlocks;
-  const known = blockVerdicts[role].get(collection);
+function checkCompanionBlocks(state: RoomState, role: BlockRole = "today", before?: RoomState): LimitCheck {
+  const now = blockSummary(state);
+  const was = role === "dm" && before ? blockSummary(before).all : null;
+  const counted = role === "dm" ? now.dm : now.all;
+  const grew = (key: keyof BlockTotals) => was === null || now.all[key] > was[key];
+  if (role !== "player" && counted.count > LIMITS.companionBlocksPerRoom && grew("count")) return over(`The room can hold at most ${n(LIMITS.companionBlocksPerRoom)} companion stat blocks. Delete one first.`);
+  if (now.block !== null) return over(now.block);
+  if (now.character !== null) return over(now.character);
+  if (role !== "player" && counted.bytes > LIMITS.companionBlocksBytes && grew("bytes")) return over(`The room can hold at most ${n(LIMITS.companionBlocksBytes / 1024 / 1024)} MiB of companion stat blocks. Delete one first.`);
+  return { ok: true };
+}
+
+function blockSummary(state: RoomState): BlockSummary {
+  const { companionBlocks: blocks, characters, members } = state;
+  const kept = !isWritable(blocks) && !isWritable(characters) && !isWritable(members);
+  const known = kept ? blockSummaries.get(blocks)?.get(characters)?.get(members) : undefined;
   if (known) return known;
-  const verdict = companionBlocksVerdict(state, role);
-  if (!isWritable(collection)) blockVerdicts[role].set(collection, verdict);
-  return verdict;
+  const summary = summarizeBlocks(state);
+  if (kept) {
+    let byCharacters = blockSummaries.get(blocks);
+    if (!byCharacters) blockSummaries.set(blocks, (byCharacters = new WeakMap()));
+    let byMembers = byCharacters.get(characters);
+    if (!byMembers) byCharacters.set(characters, (byMembers = new WeakMap()));
+    byMembers.set(members, summary);
+  }
+  return summary;
 }
 
 /** Whether a player owns the block's character, so the room's totals leave the block to its character's caps (BlockRole `dm`). */
@@ -1126,30 +1160,34 @@ function playersBlock(state: RoomState, block: CompanionBlock): boolean {
   return (ownEntry(state.characters, block.characterId)?.ownerIds ?? []).some((id) => ownEntry(state.members, id)?.kind === "player");
 }
 
-function companionBlocksVerdict(state: RoomState, role: BlockRole): LimitCheck {
+function summarizeBlocks(state: RoomState): BlockSummary {
   const blocks = Object.values(state.companionBlocks).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  const counted = role === "dm" ? blocks.filter((block) => !playersBlock(state, block)) : blocks;
-  if (role !== "player" && counted.length > LIMITS.companionBlocksPerRoom) return over(`The room can hold at most ${n(LIMITS.companionBlocksPerRoom)} companion stat blocks. Delete one first.`);
-  const perCharacter = new Map<string, { count: number; bytes: number }>();
-  let total = 0;
-  for (const block of blocks) {
-    const bytes = companionBlockBytes(block);
-    if (bytes > LIMITS.companionBlockBytes) return over(`A stat block is at most ${n(LIMITS.companionBlockBytes / 1024)} KiB.`);
-    if (role !== "dm" || !playersBlock(state, block)) total += bytes;
-    const held = perCharacter.get(block.characterId) ?? { count: 0, bytes: 0 };
+  const all: BlockTotals = { count: 0, bytes: 0 };
+  const dm: BlockTotals = { count: 0, bytes: 0 };
+  const perCharacter = new Map<string, BlockTotals>();
+  let block: string | null = null;
+  for (const one of blocks) {
+    const bytes = companionBlockBytes(one);
+    if (bytes > LIMITS.companionBlockBytes) block ??= `A stat block is at most ${n(LIMITS.companionBlockBytes / 1024)} KiB.`;
+    all.count++;
+    all.bytes += bytes;
+    if (!playersBlock(state, one)) {
+      dm.count++;
+      dm.bytes += bytes;
+    }
+    const held = perCharacter.get(one.characterId) ?? { count: 0, bytes: 0 };
     held.count++;
     held.bytes += bytes;
-    perCharacter.set(block.characterId, held);
+    perCharacter.set(one.characterId, held);
   }
+  let character: string | null = null;
   for (const [characterId, held] of perCharacter) {
     const name = ownEntry(state.characters, characterId)?.name ?? "A character";
-    if (held.count > LIMITS.companionBlocksPerCharacter) return over(`${name} can keep at most ${n(LIMITS.companionBlocksPerCharacter)} stat blocks. Delete one first.`);
-    if (held.bytes > LIMITS.companionBlockBytesPerCharacter) {
-      return over(`${name}'s stat blocks can take at most ${n(LIMITS.companionBlockBytesPerCharacter / 1024)} KiB together. Delete one first.`);
-    }
+    if (held.count > LIMITS.companionBlocksPerCharacter) character = `${name} can keep at most ${n(LIMITS.companionBlocksPerCharacter)} stat blocks. Delete one first.`;
+    else if (held.bytes > LIMITS.companionBlockBytesPerCharacter) character = `${name}'s stat blocks can take at most ${n(LIMITS.companionBlockBytesPerCharacter / 1024)} KiB together. Delete one first.`;
+    if (character !== null) break;
   }
-  if (role !== "player" && total > LIMITS.companionBlocksBytes) return over(`The room can hold at most ${n(LIMITS.companionBlocksBytes / 1024 / 1024)} MiB of companion stat blocks. Delete one first.`);
-  return { ok: true };
+  return { block, character, all, dm };
 }
 
 /**
@@ -1725,7 +1763,7 @@ function restLimits(state: RoomState, sceneId: string | null, before: RoomState)
   if (rows > rowCount(before) && rows - roomHeld.rows.size > LIMITS.encounterRows) return roomFull(`${n(LIMITS.encounterRows)} initiative rows`);
   const journal = checkJournal(state);
   if (!journal.ok) return journal;
-  const blocks = checkCompanionBlocks(state, "dm");
+  const blocks = checkCompanionBlocks(state, "dm", before);
   if (!blocks.ok) return blocks;
   const handoutPages = checkHandoutPages(state, before);
   if (!handoutPages.ok) return handoutPages;
