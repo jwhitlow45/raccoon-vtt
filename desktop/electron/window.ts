@@ -92,7 +92,9 @@ export function createWindow(preload: string, icon: string | undefined): Browser
     useContentSize: true,
     title: APP_NAME,
     show: false,
-    icon,
+    // Left out, not undefined, where the system takes the icon from the app
+    // itself: Electron warns about an icon that is neither a path nor an image.
+    ...(icon === undefined ? {} : { icon }),
     autoHideMenuBar: true,
     backgroundColor: PALETTES[nativeTheme.shouldUseDarkColors ? "dark" : "light"].bg,
     webPreferences: {
