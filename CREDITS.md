@@ -1056,6 +1056,18 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
+## The desktop app
+
+The desktop app (`desktop/`) packs code from these projects with RaccoonVTT. Each keeps its own license, and the installers ship their notices in `resources/licenses/`.
+
+- [Electron](https://www.electronjs.org), by the OpenJS Foundation and its contributors, under the [MIT License](https://github.com/electron/electron/blob/main/LICENSE). Electron carries Chromium and its own libraries, whose licenses it lists in `LICENSES.chromium.html` inside the app.
+- [electron-builder](https://www.electron.build) and electron-updater, by Vladimir Krivosheev and contributors, under the [MIT License](https://github.com/electron-userland/electron-builder/blob/master/LICENSE). They build the installers and update the Windows app and the AppImage.
+- [@electron/fuses](https://github.com/electron/fuses), by the Electron maintainers, under the [MIT License](https://github.com/electron/fuses/blob/main/LICENSE). It turns off the Electron features the app does not use.
+- [Node.js](https://nodejs.org) 24, by the Node.js contributors, under the [MIT License](https://github.com/nodejs/node/blob/main/LICENSE). The app runs its server with an official build of it, renamed `raccoonvtt-server`, with the third-party notices Node's license file lists.
+- [PostgreSQL](https://www.postgresql.org) 17, by the PostgreSQL Global Development Group, under the [PostgreSQL License](https://www.postgresql.org/about/licence/). The app bundles [theseus-rs/postgresql-binaries](https://github.com/theseus-rs/postgresql-binaries)' build of it, with the libraries that archive bundles, each under its own license, listed in the archive's SPDX file.
+- The Microsoft Visual C++ runtime (`MSVCP140.dll`, `VCRUNTIME140.dll` and `VCRUNTIME140_1.dll`), copied unchanged beside PostgreSQL in the Windows app under Microsoft's [redistribution terms](https://learn.microsoft.com/en-us/cpp/windows/determining-which-dlls-to-redistribute) for Visual Studio's runtime.
+- [NSIS](https://nsis.sourceforge.io), by Nullsoft and contributors, under the [zlib/libpng license](https://nsis.sourceforge.io/License), which makes the Windows installer.
+
 ## Sound encoder
 
 When the DM adds a sound that is not already a suitable MP3, the browser encodes it with [@breezystack/lamejs](https://www.npmjs.com/package/@breezystack/lamejs) 1.2.7, a JavaScript port of the LAME MP3 encoder whose source is at [github.com/shijinyu/lamejs](https://github.com/shijinyu/lamejs), used under the GNU Lesser General Public License v3.0. It ships as a chunk of its own, loaded only to convert a file, with a license banner naming it. The full LGPL-3.0 and GPL-3.0 texts are in `client/features/sound/upload/licenses/` and are served beside that chunk. Since the app's own source is public under the AGPL, anyone can rebuild it with a changed copy of the library (`docs/development.md` says how).

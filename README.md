@@ -68,7 +68,9 @@ server sets `ANIMATED_MAPS=1`, and uploaded sounds until it sets
 `ROOM_SOUND=1`. In production it runs with Docker Compose behind any HTTPS
 reverse proxy or tunnel that passes WebSockets through, reaches the
 internet only through an egress proxy, and backs up every night (04:00 UTC
-by default).
+by default). The desktop app runs the same server and a PostgreSQL 17 of its
+own on one computer, for players on the same network
+([Run it on your computer](#run-it-on-your-computer)).
 
 [FEATURES.md](FEATURES.md) lists everything it does today, by area, and the
 [DM guide](docs/dm-guide.md) teaches the DM tools step by step, from a
@@ -130,6 +132,65 @@ and `ROOM_SECRET_KEY`. `docker compose down` stops it and keeps your rooms.
 `docker compose down -v` deletes them too. To put it on the internet, follow
 [Self-hosting with the published image](#self-hosting-with-the-published-image).
 
+## Run it on your computer
+
+The desktop app runs RaccoonVTT on one computer, with a database of its own,
+and players on the same network join from their browsers. Installing it
+needs no Docker, Postgres, Node or terminal. It runs on Windows 10 or 11
+(x64), macOS 15 or later (Apple silicon and Intel), and Linux with glibc
+2.36 or later (x64 and arm64), which covers Ubuntu 24.04, Debian 12 and
+Fedora 37 and up. From v0.5.0 on, each
+[release](https://github.com/jwhitlow45/raccoon-vtt/releases) carries one
+download per system.
+
+The installers are not signed with an Apple or Windows identity yet, so each
+system asks you to approve the first run:
+
+- **Windows**: run `raccoon-vtt-X.Y.Z-windows-x64-setup.exe`. At "Windows
+  protected your PC", choose **More info**, then **Run anyway**. Then answer
+  **Yes** to the prompt for an unknown publisher. The installer adds a
+  Windows Firewall rule that lets devices on private networks reach
+  RaccoonVTT.
+- **macOS**: open `raccoon-vtt-X.Y.Z-macos-arm64.dmg` (Apple silicon) or
+  `raccoon-vtt-X.Y.Z-macos-x64.dmg` (Intel) and drag RaccoonVTT to
+  Applications, then open it. When "Apple could not verify..." appears,
+  choose **Done**. In System Settings, Privacy & Security, under Security,
+  press **Open Anyway** for RaccoonVTT and confirm with your password. If the
+  window then says macOS blocked part of RaccoonVTT, run this in Terminal and
+  open it again:
+
+  ```bash
+  xattr -dr com.apple.quarantine "/Applications/RaccoonVTT.app"
+  ```
+
+- **Linux**: on Ubuntu 24.04 or later and Debian 12 or later, install the
+  deb (`_arm64.deb` on an arm64 computer):
+
+  ```bash
+  sudo apt install ./raccoon-vtt_X.Y.Z_amd64.deb
+  ```
+
+  On other distributions, use the AppImage:
+
+  ```bash
+  chmod +x raccoon-vtt-X.Y.Z-linux-x86_64.AppImage
+  ./raccoon-vtt-X.Y.Z-linux-x86_64.AppImage
+  ```
+
+  It needs FUSE 2 (the `fuse2` or `libfuse2` package on most
+  distributions). On Ubuntu 24.04 its sandbox cannot start, so use the deb
+  there.
+
+Opening RaccoonVTT shows its window and opens your browser at
+`http://localhost:3170` (the next free port on the first run, if 3170 is
+taken). The window shows the address players type and its QR code, and
+**Players on this network can join** is on at first. Players open the
+address over plain HTTP, so play on a network you trust. What that means is
+in [what the desktop app guarantees](docs/self-hosting.md#what-the-desktop-app-guarantees).
+The DM guide's [Hosting from your computer](docs/dm-guide.md#hosting-from-your-computer)
+covers a night's play, and [docs/self-hosting.md](docs/self-hosting.md#the-desktop-app)
+covers where the data lives, backups, updates and going back.
+
 ## Self-hosting with the published image
 
 Each release is an image on Docker Hub, `docker.io/jwhitlow45/raccoon-vtt`,
@@ -173,7 +234,7 @@ has every step, including HTTPS, the firewall rules, updates and backups.
 - [docs/dm-guide.md](docs/dm-guide.md): the DM guide, also in the app.
 - [docs/self-hosting.md](docs/self-hosting.md): installing a server, its
   settings, HTTPS and the reverse proxy, updating, backups, verifying the
-  image and removing it.
+  image and removing it, and the desktop app's data, backups and updates.
 - [docs/operations.md](docs/operations.md): running it day to day: the admin
   commands, the admin page and the logs.
 - [docs/development.md](docs/development.md): local development, the checks

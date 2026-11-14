@@ -42,6 +42,8 @@ follows `PORT`.
 | `pnpm db:down` | stop the dev postgres, keeping its data |
 | `pnpm db:reset` | drop the dev database volume and start fresh |
 | `pnpm admin <command>` | the [admin commands](operations.md#admin-commands), against the dev database |
+| `pnpm test:desktop` | the desktop app's integration tests (`desktop/**/*.itest.ts`) one file at a time, on the real Node and PostgreSQL it ships: the lock, backups, restore, upgrade and the app server under the supervisor. Run `pnpm desktop:fetch` first. They use ports 40402 to 40459 |
+| `pnpm desktop:fetch` | `desktop/scripts/fetch-runtime.ts`: fills `desktop/.runtime/` with the Node and PostgreSQL the app bundles. See [The desktop app](#the-desktop-app) |
 | `pnpm test:backup` | the backup check (`scripts/backup-check.ts`): `docker/backup.sh` through its compose services, in a compose project and postgres of its own (port 5235). Needs Docker, takes about 5 minutes. Run it before a release that touches backups |
 
 `docker compose up --build raccoon` builds the production image from this
@@ -147,6 +149,53 @@ These are conventions that review looks for:
   no em dashes and no semicolons in prose. Contractions are fine. The rest of
   the rules for docs are in [Writing the docs](writing.md).
 
+## The desktop app
+
+The desktop app (`desktop/`, design in
+[design-v1-local-app.md](design/design-v1-local-app.md)) runs the server and a
+PostgreSQL of its own on one computer. Its code splits by what may import
+Electron. Only `desktop/electron/` imports `electron`, `electron-updater` or
+`@electron/*`, so `pnpm typecheck` and `pnpm test` need no desktop packages,
+and `desktop/shell/imports.test.ts` fails on any other file that does. The
+shell's logic is in `desktop/shell/`, the supervisor in `desktop/runtime/`,
+the window's page in `desktop/window/`, and what they share, including every
+word the window shows, in `desktop/contract.ts`. Server code may only
+`import type` from the contract, since the image holds no `desktop/`.
+
+`desktop/` is a pnpm project of its own, with its own lockfile, so the
+server's lockfile and image don't change. `pnpm --dir desktop install`
+installs Electron and electron-builder.
+
+| Command | What it does |
+| --- | --- |
+| `pnpm desktop:fetch` | downloads Node and PostgreSQL for this computer into `desktop/.runtime/`, checks each against the SHA-256 in `desktop/pins.json`, verifies PostgreSQL's provenance with `gh attestation verify` (needs the GitHub CLI and `GH_TOKEN`), prunes it and checks the floors. `--no-attestation` skips the provenance check for working offline, and CI never passes it |
+| `node desktop/scripts/test-db.ts pnpm test:int` | runs a command with `DATABASE_URL` pointing at a throwaway cluster from the fetched PostgreSQL, as CI does on Windows, where no database runs as a service |
+| `pnpm test:desktop` | the integration tests above |
+| `pnpm exec vite --config desktop/window/vite.config.ts` | the window's page on http://localhost:5174 with a fake bridge. `?scenario=<name>` picks a state (`running`, `no-rooms`, `update-install` and the rest of `desktop/window/scenarios.ts`) |
+| `node desktop/e2e/run.ts` | the desktop e2e files (`window.e2e.ts` and `shell.e2e.ts`), one at a time, each stopped whole if it hangs. Name files to run only those, such as `node desktop/e2e/run.ts window`. On Linux run it under `xvfb-run -a`. The window's file uses `E2E_PORT`, 40600 unless set |
+
+To build the app for this computer, run these in order. The last step makes
+the installer in `desktop/out/dist`, and `--dir` there makes only the
+unpacked app:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+pnpm desktop:fetch
+node desktop/scripts/stage.ts
+pnpm --dir desktop install --frozen-lockfile
+pnpm --dir desktop run build
+node desktop/build/pack.ts
+```
+
+`desktop/scripts/stage.ts` assembles the server in a folder outside the
+repository (printed when it ends), so pnpm sees no ancestor lockfile or
+`node_modules` and installs the production packages as a plain tree that
+electron-builder copies as it is. Packing for another system or CPU needs a
+computer of that kind, so CI builds each of the five installers on its own
+runner. [Desktop assets](releasing.md#desktop-assets) in releasing.md covers
+`desktop.yml`, its dry runs and how a release is checked.
+
 ## Continuous integration
 
 GitHub Actions runs [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
@@ -161,8 +210,9 @@ pull request from anywhere else, such as Dependabot's, runs everything.
 The **CI passed** job is the one status check `main`'s ruleset requires.
 It runs after every other job, however they ended, and fails unless each
 one passed or was skipped by the workflow's own design: **e2e-macos**
-while its list is empty or on a docs-only push, and every job in a pull
-request from one of this repository's `ci/` branches. In that pull request
+while its list is empty or on a docs-only push, **int-clock** and
+**lan-webkit** on a docs-only push, and every job in a pull request from one
+of this repository's `ci/` branches. In that pull request
 it is named **Tested by the push run** instead, so the only **CI passed**
 on the commit is the push run's, which ran the jobs. GitHub counts a skipped job as passed for a
 required check, and two checks with one name on a commit leave the result
@@ -177,6 +227,9 @@ been published successfully, and
 [Release assets](../.github/workflows/release-assets.yml) then attaches the
 signed source archive, SBOM and build provenance
 ([docs/releasing.md](releasing.md#release-assets)).
+[Desktop](../.github/workflows/desktop.yml) builds, checks and attaches the
+desktop installers to the release and runs on a `ci/` push that changes
+`desktop/` ([docs/releasing.md](releasing.md#desktop-assets)).
 
 These jobs run on Ubuntu:
 
@@ -185,6 +238,10 @@ These jobs run on Ubuntu:
   against a postgres service container like the one in `docker-compose.yml`.
 - **int-clock**: `pnpm test:int:clock`, on a postgres container of its own,
   once the build has said the push is not docs only.
+- **lan-webkit**: `e2e/local-lan.e2e.ts` in Chrome and Playwright's WebKit
+  (`E2E_BROWSERS=chromium,webkit`), on a postgres container of its own, once
+  the build has said the push is not docs only. It covers the desktop app's
+  web side over plain HTTP, where WebKit differs from Chrome.
 - **unit**: `pnpm test`, which needs no database.
 - **e2e**, 14 shards at once: each shard installs, downloads the build,
   gets a postgres service container of its own and runs its share of
@@ -233,7 +290,7 @@ lands, rewrite the list from a few green runs with
 `node scripts/e2e-durations.ts <run id> ...`, which reads those times
 through `gh`. The list holds CI seconds, the largest of the runs given, and
 the longest of the 14 shards plans about 16 minutes. A 15th shard would save
-about one minute of that, so the count stays. A run is 18 jobs and peaks at 16
+about one minute of that, so the count stays. A run is 20 jobs and peaks at 18
 at once, of the account's 20 Linux jobs, so a second run that overlaps it
 queues part of its shards.
 
@@ -263,7 +320,9 @@ It reads `E2E_PORT`, `DATABASE_URL` and `E2E_SCREENSHOT_DIR` as
 can run side by side on one machine when each has its own database and its
 own `E2E_PORT`, at least 60 apart: a file uses ports up to `E2E_PORT` plus
 51, the range leaves room for the next files' offsets, and the join limits
-count every run from one address in the database. On macOS, reserve port
+count every run from one address in the database. `e2e/local-lan.e2e.ts` is
+on `E2E_PORT` plus 34, and plus 35 for the server it restarts with Players on
+this network can join off. On macOS, reserve port
 7000 for AirPlay Receiver. Choose a whole 60-port range that excludes it,
 such as 7010 to 7069 with `E2E_PORT=7010`, then 7070 to 7129 with
 `E2E_PORT=7070`. Bases from 6941 through 7000 include port 7000 and must be
