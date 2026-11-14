@@ -642,19 +642,26 @@ async function runStampWalk(rows: Row[]): Promise<void> {
  * The far line's room (docs/design/design-v1-player-limits.md 8): the dark
  * scene at the far count of tokens, 2,150, the DM's creatures beside the
  * party's sources and every other one hidden, so each op's limits step
- * counts every seat across them and each fan-out projects them all. A
- * source walks 40 steps east, as on the stamp walk, and the table's first
- * snapshots are timed as it sits down.
+ * counts every seat across them and each fan-out projects them all. The
+ * scene keeps its sources and sight and leaves out its walls and lights,
+ * whose bytes with the far tokens would pass the scene line a DM's op
+ * meets. A source walks 40 steps east, as on the stamp walk, and the
+ * table's first snapshots are timed as it sits down.
  */
-async function runFar(rows: Row[]): Promise<void> {
-  clearVisionCache();
-  const room = benchRoom("dark", 5);
+export function farBenchRoom(): RoomState {
+  const room: RoomState = { ...benchRoom("dark", 5), buildChunks: {}, lights: {} };
   let seed = 23;
   const rand = () => ((seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 4294967296);
   for (let k = 0; Object.keys(room.tokens).length < FAR.tokens; k++) {
     const id = `far${String(k).padStart(4, "0")}`;
     room.tokens[id] = testToken(id, { sceneId: SCENE, name: "Goblin", x: 5 + Math.floor(rand() * 190), y: 5 + Math.floor(rand() * 190), visibility: k % 2 === 0 ? "dm" : "all", actor: { inline: testActor() } });
   }
+  return room;
+}
+
+async function runFar(rows: Row[]): Promise<void> {
+  clearVisionCache();
+  const room = farBenchRoom();
   const times: SitDownTimes = { load: [], first: [], later: [] };
   const table = await sitDown(room, times);
   checkMode(table.actor.committed.state, false);
@@ -663,7 +670,7 @@ async function runFar(rows: Row[]): Promise<void> {
     const t = table.actor.committed.state.tokens.pc11!;
     steps.push(await send(table, table.dm, { t: "token.move", tokenId: t.id, x: t.x + 1, y: t.y, teleport: "wall" }));
   }
-  const where = `dark scene, whole party, ${Object.keys(table.actor.committed.state.tokens).length} tokens`;
+  const where = `dark scene without walls or lights, whole party, ${Object.keys(table.actor.committed.state.tokens).length} tokens`;
   rows.push({ row: `A walk of 40 steps at the far count of tokens, ${where}`, budget: 25, ms: stats(steps.map((s) => s.total)), covers: "the DM's token.move one cell east, past any wall, with the limits step's seats and far counts over every token, median and max over the 40 steps" });
   rows.push({ row: `Fan-out for each step of that walk, ${where}`, budget: 10, ms: stats(steps.map((s) => s.fanout)), covers: "commit to the last frame, 7 sockets" });
   rows.push({ row: `The first snapshot at the far count of tokens, ${where}`, budget: 250, ms: stats(times.first), covers: "the DM's snapshot after a load: walls derived and sight computed from nothing" });
