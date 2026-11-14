@@ -8,9 +8,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 // Shipped code is what runs in the image or the browser. scripts/ is build tooling and is
-// reported on its own so it cannot hide a gap in the shipped figure.
+// reported on its own so it cannot hide a gap in the shipped figure. desktop/ is reported on
+// its own too: the desktop app's Electron code and window run outside these suites, and its
+// itests need the fetched runtime (pnpm test:desktop), so its figure covers what the unit
+// tests load.
 export const SHIPPED = ["server", "shared", "client"];
-export const AREAS = [...SHIPPED, "scripts"];
+export const AREAS = [...SHIPPED, "scripts", "desktop"];
 
 export type Totals = { found: number; hit: number };
 
@@ -22,6 +25,8 @@ export const TEST_SUPPORT_DIRS: readonly string[] = [
   "client/components/testing/",
   // The dev-only room, behind import.meta.env.DEV, so the production bundle drops it.
   "client/dev/",
+  // Fakes and child processes for the supervisor's tests.
+  "desktop/runtime/testing/",
 ];
 // What the name rule cannot see. A stale entry fails scripts/coverage.test.ts.
 export const TEST_SUPPORT_FILES: readonly string[] = [
@@ -32,6 +37,9 @@ export const TEST_SUPPORT_FILES: readonly string[] = [
   "shared/differential.ts",
   // Behind import.meta.env.DEV, like client/dev/.
   "client/features/vision/devFixture.ts",
+  // A sample status for the shell's tests, and the shell e2e's stand-in supervisor.
+  "desktop/shell/fixture.ts",
+  "desktop/e2e/shellFakeSupervisor.ts",
 ];
 
 const TEST_FILE = /\.(test|itest|e2e)\.tsx?$/;
@@ -344,6 +352,8 @@ function runSuite(lcovFile: string, concurrency: string[], globs: string[]): num
     "--test-coverage-include=shared/**",
     "--test-coverage-include=client/**",
     "--test-coverage-include=scripts/**",
+    "--test-coverage-include=desktop/**",
+    "--test-coverage-exclude=desktop/node_modules/**",
     "--test-coverage-exclude=**/*.test.ts",
     "--test-coverage-exclude=**/*.itest.ts",
     ...concurrency,
@@ -377,7 +387,7 @@ export function main(deps: Deps = defaults): number {
   try {
     const unit = join(dir, "unit.lcov");
     const int = join(dir, "int.lcov");
-    const unitStatus = deps.runSuite(unit, [], ["shared/**/*.test.ts", "server/**/*.test.ts", "client/**/*.test.ts", "scripts/**/*.test.ts", "e2e/**/*.test.ts"]);
+    const unitStatus = deps.runSuite(unit, [], ["shared/**/*.test.ts", "server/**/*.test.ts", "client/**/*.test.ts", "scripts/**/*.test.ts", "e2e/**/*.test.ts", "desktop/**/*.test.ts"]);
     // The integration tests share one database, so they run one file at a time.
     const intStatus = deps.runSuite(int, ["--test-concurrency=1"], ["server/**/*.itest.ts"]);
     const merged = mergeLcov([readFileSync(unit, "utf8"), readFileSync(int, "utf8")], deps.cwd);
