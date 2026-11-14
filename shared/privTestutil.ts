@@ -292,13 +292,13 @@ export function dmDrawings(state: RoomState, n: number, points = 4, sceneId = "s
 export const STAIRS_UP = "l1";
 export const STAIRS_DOWN = "l2";
 
-/** Gives the limits room an Upper floor above s1, with room R painted there too, and stairs under Ayla. */
-export function withUpper(state: RoomState): RoomState {
+/** Gives the limits room an Upper floor above s1, with room R painted there too, and stairs at a square, Ayla's unless told otherwise. */
+export function withUpper(state: RoomState, at: { x: number; y: number } = { x: 3, y: 3 }): RoomState {
   const ground = state.scenes.s1!;
   state.scenes.s1 = { ...ground, floor: { of: "s1", level: 0, name: "Ground floor", height: 10 } };
   state.scenes.up = { ...ground, id: "up", floor: { of: "s1", level: 1, name: "Upper floor", height: 10 } };
   for (let y = ROOM_R.y; y < ROOM_R.y + ROOM_R.h; y++) for (let x = ROOM_R.x; x < ROOM_R.x + ROOM_R.w; x++) chunkOf(state, "up", x, y).cells[`${x},${y}`] = "stone";
-  const rect = { x: 3, y: 3, w: 1, h: 1 };
+  const rect = { ...at, w: 1, h: 1 };
   state.floorLinks = {
     [STAIRS_UP]: { id: STAIRS_UP, rev: 0, sceneId: "s1", to: "up", pair: STAIRS_DOWN, rect, kind: "stairs", ground: 0, made: 1 },
     [STAIRS_DOWN]: { id: STAIRS_DOWN, rev: 0, sceneId: "up", to: "s1", pair: STAIRS_UP, rect, kind: "stairs", ground: 0, made: 1 },
