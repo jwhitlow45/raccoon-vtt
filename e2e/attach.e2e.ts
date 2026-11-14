@@ -1430,4 +1430,58 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     for (const id of [keep.gob, keep.thorn, keep.horse]) await ops.send({ t: "token.delete", tokenId: id });
     await ops.send({ t: "scene.delete", sceneId: keep.scene });
   });
+
+  /*
+   * Lane lp39fix's step (lp39fix-): a rider's touch drag plans as a mouse
+   * drag to the same square does (LP39B-MOVE-1). The warhorse squeezed in
+   * the corridor's mouth stands half a square off Bree's grid, so its box at
+   * her offset lay between four of its full stands. A finger lifted a hair
+   * right of the square's middle took the one the goblin cannot follow from,
+   * and the drop was refused, where a mouse a pixel left of it took the one
+   * it can.
+   */
+  test("lp39fix-1. Pat's finger drags Bree, on the warhorse squeezed in a corridor's mouth and dragging a Grappled goblin, onto the square below and right of the mouth, lifting a little down and right of its middle: the warhorse comes out full size as a mouse drop takes it, the goblin follows, and a second drag lands Bree under the finger (LP39B-MOVE-1)", async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    const field = { w: 24, h: 14 };
+    const keep = { scene: randomUUID(), horse: randomUUID(), bree: randomUUID(), gob: randomUUID() };
+    await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "LP39 keep", bounds: field, fogEnabled: false } });
+    await ops.send({ t: "scene.update", sceneId: keep.scene, patch: { blockMovement: true } });
+    // Live play 39's keep, walled by the build: room A, a corridor one square wide east along row 4 and south down column 13, and room B from row 10.
+    for (const [x, y, w, h] of [[2, 2, 6, 6], [8, 4, 6, 1], [13, 5, 1, 5], [10, 10, 8, 4]] as const) await ops.send({ t: "build.rect", sceneId: keep.scene, terrain: "stone", x, y, w, h });
+    // Where Pat's drags along the corridor left them: the warhorse squeezed on the mouth's square 13, 9, Bree on it, the goblin above.
+    await ops.send({ t: "token.create", token: { id: keep.horse, sceneId: keep.scene, kind: "npc", name: "Warhorse", size: "large", x: 12, y: 8, disposition: "ally", visibility: "all", ownerIds: [run.patId], actor: { inline: actor({ speeds: { walk: 60 } }) } } });
+    await ops.send({ t: "token.move", tokenId: keep.horse, x: 12.5, y: 8.5, squeeze: true });
+    await ops.send({ t: "token.create", token: { id: keep.bree, sceneId: keep.scene, kind: "pc", name: "Bree", size: "medium", x: 13, y: 9, disposition: "ally", visibility: "all", ownerIds: [run.patId], actor: { inline: actor() } } });
+    await ops.send({ t: "token.attach", tokenId: keep.bree, to: keep.horse, kind: "ride", steer: true, x: 13, y: 9, elevation: 0 });
+    await ops.send({ t: "token.create", token: { id: keep.gob, sceneId: keep.scene, kind: "monster", name: "Goblin", size: "medium", x: 13, y: 8, disposition: "hostile", visibility: "all", actor: { inline: actor() } } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: keep.gob }, effect: { id: randomUUID(), key: "grappled" } });
+    await ops.send({ t: "token.attach", tokenId: keep.gob, to: keep.bree, kind: "drag", x: 13, y: 8, elevation: 0 });
+    await ops.send({ t: "room.setPlayerScene", sceneId: keep.scene });
+    await waitFor("Bree and the goblin in Pat's copy", () => (token(patSocket, keep.bree)?.attached && token(patSocket, keep.gob)?.attached && token(patSocket, keep.horse)?.squeeze ? true : null));
+    await waitFor("room B's last square in Pat's copy", () => (Object.values((patSocket.state as RoomState | null)?.buildChunks ?? {}).some((c) => c?.sceneId === keep.scene && c.cells["17,13"] === "stone") ? true : null));
+    await pat.locator(".konvajs-content").first().waitFor();
+    // Pressed on Bree's middle, lifted a tenth of a square down and right of the middle of 14, 10, as a finger lands.
+    await touchSwipe(patCdp, await pagePoint(pat, field, { x: 13.5, y: 9.5 }), await pagePoint(pat, field, { x: 14.6, y: 10.6 }), { steps: 16, everyMs: 20 });
+    const out = await waitFor("the warhorse out of the mouth", () => {
+      const t = token(patSocket, keep.horse);
+      return t && t.y !== 8.5 ? t : null;
+    });
+    assert.deepEqual([out.x, out.y, out.squeeze], [13, 10, undefined], "full size on the stand a mouse drop takes, its top left square 13, 10");
+    assert.deepEqual([token(patSocket, keep.bree)?.x, token(patSocket, keep.bree)?.y, token(patSocket, keep.bree)?.attached?.to], [13, 10, keep.horse], "Bree still riding");
+    const gob = await waitFor("the goblin behind Bree", () => {
+      const t = token(patSocket, keep.gob);
+      return t && t.y !== 8 ? t : null;
+    });
+    assert.deepEqual([gob.x, gob.y, gob.attached?.to], [13, 9, keep.bree], "into the mouth, still in tow");
+    assert.equal(await pat.getByRole("status").filter({ hasText: /through there|Stopped at a wall/ }).count(), 0, "no note");
+    await shots.take(pat, "lp39fix-rider-out-of-the-mouth-by-touch");
+    // On the grid now, a drag of Bree onto 15, 12 lands her there, as the mouse's second drag did.
+    await touchSwipe(patCdp, await pagePoint(pat, field, { x: 13.5, y: 10.5 }), await pagePoint(pat, field, { x: 15.6, y: 12.6 }), { steps: 16, everyMs: 20 });
+    await waitFor("Bree on 15, 12", () => (token(patSocket, keep.bree)?.x === 15 && token(patSocket, keep.bree)?.y === 12 ? true : null));
+    assert.deepEqual([token(patSocket, keep.horse)?.x, token(patSocket, keep.horse)?.y, token(patSocket, keep.gob)?.attached?.to], [15, 12, keep.bree], "the warhorse under her, the goblin in tow");
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
+    await waitFor("Pat back on the party's scene", () => ((patSocket.state as RoomState | null)?.meta.playerSceneId === run.sceneId ? true : null));
+    for (const id of [keep.gob, keep.bree, keep.horse]) await ops.send({ t: "token.delete", tokenId: id });
+    await ops.send({ t: "scene.delete", sceneId: keep.scene });
+  });
 });
