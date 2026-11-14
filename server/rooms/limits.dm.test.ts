@@ -6,7 +6,7 @@ import { MOVE_PLAYERS_FIRST } from "#shared/permissions.ts";
 import type { Op } from "#shared/protocol.ts";
 import { seated, type Seated } from "#shared/privTestutil.ts";
 import { actor, castAsk, drawing, entry, member, room, scene, template, token } from "#shared/testutil.ts";
-import { answer, Mint, type Answer } from "./limitsTwinTesting.ts";
+import { answer, type Answer, joinOp, Mint } from "./limitsTwinTesting.ts";
 import { Room } from "./numberingTesting.ts";
 
 /**
@@ -125,7 +125,7 @@ describe("the DM's caps count what no seat holds", () => {
         ];
         for (const [step, op] of ops) assert.equal(await answer(r, "dm", op), "taken", `${what}: ${step}`);
         await r.actor.sys({ t: "sys.memberRemove", memberId: "p48" });
-        await r.actor.sys({ t: "sys.memberJoin", member: { ...member(mint.next(r)), name: "Wren" } });
+        await r.actor.sys(joinOp(mint.next(r), "Wren"));
         await r.settle();
         assert.equal(r.state.members.p48, undefined, `${what}: the member is removed`);
         assert.equal(Object.values(r.state.members).some((m) => m.name === "Wren"), true, `${what}: the join is taken`);

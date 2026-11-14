@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { TestContext } from "node:test";
 import type { RoomState } from "#shared/model.ts";
-import type { Op } from "#shared/protocol.ts";
+import type { Op, ServerOnlyOp } from "#shared/protocol.ts";
 import { hiddenIn, idAt, type Hidden } from "#shared/privTestutil.ts";
 import { rng } from "#shared/testutil.ts";
 import type { ActorOptions } from "./actor.ts";
@@ -98,4 +98,9 @@ export class Mint {
     if (!r) this.#sources.set(room, (r = rng(61)));
     return idAt(r, room.clock.now + aheadMs);
   }
+}
+
+/** The server's op for a player joining as `name`, as the join over HTTP applies it. */
+export function joinOp(id: string, name: string): ServerOnlyOp {
+  return { t: "sys.memberJoin", member: { id, name, color: "#3366ff", kind: "player", createdAt: new Date(0).toISOString() } };
 }

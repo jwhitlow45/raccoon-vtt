@@ -4,10 +4,11 @@ import { LIMITS, SEAT, SEAT_FULL } from "#shared/limits.ts";
 import { ROLL_ASKED_ALREADY } from "#shared/permissions.ts";
 import type { Effect, RoomState } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
-import { APART, apartId, AYLA, BREE, dmAreas, dmDrawings, dmTokens, limitsRoom, OGRE, STAIRS_UP, withUpper } from "#shared/privTestutil.ts";
+import { APART, apartId, AYLA, BREE, dmAreas, dmDrawings, dmTokens, limitsRoom, OGRE, ROOM_R, STAIRS_UP, withUpper } from "#shared/privTestutil.ts";
+import { lift, remember } from "#shared/discoveryTestutil.ts";
 import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
 import { actor, castAsk, character, companionBlock, drawing, effect, entry, member, template, token } from "#shared/testutil.ts";
-import { bothAnswer, Mint, openTwins, same, together, type Answer, type Twins } from "./limitsTwinTesting.ts";
+import { type Answer, bothAnswer, joinOp, Mint, openTwins, same, together, type Twins } from "./limitsTwinTesting.ts";
 import { each, type Room, type Who } from "./numberingTesting.ts";
 
 /**
@@ -240,6 +241,38 @@ describe("the op rate answers P1 alike", () => {
 function withDms(s: RoomState): void {
   for (const id of ["dm2", "dm3"]) s.members[id] = member(id, "dm");
 }
+
+describe("remembered maps answer P1 alike", () => {
+  test("L12: on a marked scene with bytes only the DM sees in A, P1's remembered room R is the same in both through a walk and a join, and so with a party mark", async (t) => {
+    for (const party of [false, true]) {
+      await t.test(party ? "a party mark" : "a mark", async (t) => {
+        // Ayla in room F, and the party's memory of room R as wood where it is stone now.
+        const remembered = (s: RoomState) => {
+          s.memoryShared = { s1: { sceneId: "s1", rev: 0, ...(party ? { party: true as const } : {}) } };
+          s.tokens[AYLA] = { ...s.tokens[AYLA]!, x: 26, y: 4 };
+          const cells: Record<string, "wood"> = {};
+          for (let y = 2; y < 10; y++) for (let x = 2; x < 12; x++) cells[`${x},${y}`] = "wood";
+          remember(s, null, 0, 0, { cells });
+          lift(s, "party", ROOM_R);
+        };
+        const notes = (s: RoomState) => dmTokens(s, 80).map((id) => ((s.tokens[id] = { ...s.tokens[id]!, notes: "x".repeat(4_000) }), id));
+        const built = rooms((s) => (remembered(s), notes(s)), (s) => (remembered(s), []));
+        // A room line low enough that the DM's notes in A leave it no free space to share, and B a whole cap.
+        const pair = await openTwins(t, built.a, built.b, built.hidden, { sizeLimits: { stateLimit: 400_000 } });
+        same(pair, "opened");
+        assert.equal(await bothAnswer(pair, "p1", { t: "token.move", tokenId: AYLA, x: 28, y: 6 } as Op, "a walk in room F"), "taken");
+        same(pair, "a walk in room F");
+        for (const room of pair) {
+          await room.actor.sys(joinOp(mint.next(room), "Wren"));
+          await room.settle();
+          assert.ok(Object.values(room.state.members).some((m) => m.name === "Wren"), `${room.name}: the join is taken`);
+        }
+        same(pair, "a join");
+        for (const room of pair) assert.ok(Object.keys(room.state.memory ?? {}).length > 0, `${room.name}: the party still remembers room R`);
+      });
+    }
+  });
+});
 
 /** Conditions on Ayla: shown ones alike in both rooms, hidden ones with ids only their room holds. */
 function withEffects(s: RoomState, shown: number, hidden: number): string[] {
