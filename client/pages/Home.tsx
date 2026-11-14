@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { generatePassphrase } from "#shared/passphrase.ts";
 import { Button } from "../components/Button.tsx";
 import { Checkbox } from "../components/Checkbox.tsx";
 import { Dialog } from "../components/Dialog.tsx";
+import { buttonLook } from "../components/looks.ts";
 import { Card, ErrorText, Field, Page } from "../components/Field.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { Notice } from "../components/Notice.tsx";
@@ -14,6 +15,8 @@ import { PlayerLinkShare } from "../features/dm/PlayerLinkShare.tsx";
 import { DOCS_PATH } from "../features/guide/docs.ts";
 import { ImportRoomCard } from "../features/settings/ImportRoomCard.tsx";
 import { api, ApiError } from "../lib/api.ts";
+import { copyText, SELECTED_NOTE, type CopyResult } from "../lib/clipboard.ts";
+import { useLocalConfig, useShareOrigin } from "../lib/shareOrigin.ts";
 import { rememberedName, rememberName } from "../lib/device.ts";
 import { checkStanding, forgetRoom, readKnownRooms, refreshRoom, rememberRoom, takeHomeNotice, type KnownRoom, type RoomStanding } from "../lib/knownRooms.ts";
 import { navigate } from "../lib/navigation.ts";
@@ -34,6 +37,8 @@ export function Home() {
   const [created, setCreated] = useState<{ roomId: string; dmLink: string; password: string } | null>(null);
   // Taken once per visit, so it is not shown again after a reload or a return.
   const [notice] = useState(takeHomeNotice);
+  // Until /api/config answers the cards show, since a hosted server is the common case and a flash of the other state is worse.
+  const { local } = useLocalConfig();
   if (created) return <DmLinkReveal {...created} />;
   return (
     <Page>
@@ -41,8 +46,14 @@ export function Home() {
       {notice ? <Notice role="status">{notice}</Notice> : null}
       <YourRooms />
       <JoinCard />
-      <CreateCard onCreated={setCreated} />
-      <ImportRoomCard onImported={setCreated} />
+      {local?.createHere === false ? (
+        <OtherDevice hostPage={local.hostPage} />
+      ) : (
+        <>
+          <CreateCard onCreated={setCreated} />
+          <ImportRoomCard onImported={setCreated} />
+        </>
+      )}
       <DmLinkEntry />
       <TableDisplayCard
         foot={
@@ -57,6 +68,44 @@ export function Home() {
         Docs
       </Button>
     </Page>
+  );
+}
+
+/**
+ * What replaces the create and import cards on a device that is not the
+ * computer running the desktop app, which alone makes rooms
+ * (docs/design/design-v1-local-app.md 5). When this is that computer opened
+ * by its network address, `hostPage` leads to its own page.
+ */
+function OtherDevice(props: { hostPage: string | null }) {
+  return (
+    <Card title="New rooms">
+      <p style={{ margin: 0, lineHeight: theme.leading.body }}>
+        {props.hostPage
+          ? "This is the computer running RaccoonVTT. Make rooms on its own page."
+          : "New rooms are made on the computer running RaccoonVTT. Join with the room's link, or its ID and password."}
+      </p>
+      {props.hostPage ? (
+        <a
+          href={props.hostPage}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            justifySelf: "start",
+            minHeight: theme.touch,
+            padding: `0 ${theme.space(3)}px`,
+            borderRadius: theme.radius.md,
+            fontSize: theme.font.body14,
+            fontWeight: theme.weight.strong,
+            textDecoration: "none",
+            ...buttonLook("secondary"),
+          }}
+        >
+          Open it
+        </a>
+      ) : null}
+    </Card>
   );
 }
 
@@ -370,19 +419,16 @@ function CreateCard(props: { onCreated(created: { roomId: string; dmLink: string
  * server owner for a new one. The checkbox makes saving it a deliberate step.
  */
 function DmLinkReveal(props: { roomId: string; dmLink: string; password: string }) {
-  const link = new URL(props.dmLink, location.origin).href;
+  const origin = useShareOrigin();
+  const link = new URL(props.dmLink, origin).href;
   const [saved, setSaved] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<CopyResult | "failed" | null>(null);
   const [qrShown, setQrShown] = useState(false);
+  const shown = useRef<HTMLElement>(null);
   const canShare = typeof navigator.share === "function";
 
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(link);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
+    setCopied(await copyText(link, shown.current));
   }
 
   return (
@@ -394,6 +440,7 @@ function DmLinkReveal(props: { roomId: string; dmLink: string; password: string 
       </p>
       <Card>
         <code
+          ref={shown}
           style={{
             display: "block",
             padding: theme.space(3),
@@ -409,7 +456,7 @@ function DmLinkReveal(props: { roomId: string; dmLink: string; password: string 
         </code>
         <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
           <Button icon="copy" onClick={() => void copy()}>
-            {copied ? "Copied" : "Copy link"}
+            {copied === "copied" ? "Copied" : "Copy link"}
           </Button>
           {canShare ? (
             <Button icon="share" onClick={() => void navigator.share({ title: "DM link", url: link }).catch(() => {})}>
@@ -417,6 +464,7 @@ function DmLinkReveal(props: { roomId: string; dmLink: string; password: string 
             </Button>
           ) : null}
         </div>
+        {copied === "selected" ? <Help>{SELECTED_NOTE}</Help> : null}
         {/* Folded away, so a player at the table scans the player link's code below, never this one. */}
         <details onToggle={(e) => setQrShown(e.currentTarget.open)}>
           {/*

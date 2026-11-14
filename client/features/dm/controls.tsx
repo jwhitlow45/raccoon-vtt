@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "../../components/Button.tsx";
 import { buttonLook } from "../../components/looks.ts";
+import { copyText, SELECTED_NOTE, type CopyResult } from "../../lib/clipboard.ts";
 import { theme } from "../../lib/theme.ts";
 
 /**
@@ -137,11 +138,15 @@ export function FileButton(props: { label: string; accept: string; disabled?: bo
  * `size` is `sm` in a panel.
  */
 export function SecretLink(props: { value: string; label: string; size?: "md" | "sm" }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<CopyResult | "failed" | null>(null);
+  const shown = useRef<HTMLElement>(null);
   const canShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
+  // The link may be replaced while shown, so a "Copied" would vouch for the old one.
+  useEffect(() => setCopied(null), [props.value]);
   return (
     <div style={{ display: "grid", gap: theme.space(2) }}>
       <code
+        ref={shown}
         aria-label={props.label}
         style={{
           display: "block",
@@ -162,13 +167,10 @@ export function SecretLink(props: { value: string; label: string; size?: "md" | 
           size={props.size}
           icon="copy"
           onClick={() => {
-            navigator.clipboard.writeText(props.value).then(
-              () => setCopied(true),
-              () => setCopied(false),
-            );
+            void copyText(props.value, shown.current).then(setCopied);
           }}
         >
-          {copied ? "Copied" : "Copy link"}
+          {copied === "copied" ? "Copied" : "Copy link"}
         </Button>
         {canShare ? (
           <Button size={props.size} icon="share" onClick={() => void navigator.share({ title: props.label, url: props.value }).catch(() => {})}>
@@ -176,6 +178,11 @@ export function SecretLink(props: { value: string; label: string; size?: "md" | 
           </Button>
         ) : null}
       </div>
+      {copied === "selected" ? (
+        <span role="status" style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
+          {SELECTED_NOTE}
+        </span>
+      ) : null}
     </div>
   );
 }
