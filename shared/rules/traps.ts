@@ -12,7 +12,7 @@ import { footing, footprintGround, groundAt, sceneGround, standing } from "./hei
 import { pendingGround } from "./held.ts";
 import { planWalks, walkedIn, withTrapCut, type MovedToken } from "./moveLeg.ts";
 import { groundUnder, hexStandHexes, storedBuild, type HexWalls } from "./movement.ts";
-import { fileOrder, onTrace, routeLattice, routeStands, routeWalk, type FileAlong, type PublicGround, type RoutePiece, type RoutePoint, type RouteSpot, type StandGroup, type StandRule, type WalkSpot } from "./route.ts";
+import { compareAlong, fileOrder, onTrace, routeLattice, routeStands, routeWalk, type FileAlong, type PublicGround, type RoutePiece, type RoutePoint, type RouteSpot, type StandGroup, type StandRule, type WalkSpot } from "./route.ts";
 import { APART, contact, orient } from "./segments.ts";
 import { sceneWalls } from "./walls.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
@@ -1761,7 +1761,7 @@ function cutOp(op: Op, walks: Walks, stops: ReadonlyMap<string, Stop>, before: R
       const cut = pieces.length > 0 ? { ...next, route: pieces as [number, number, number, 0 | 1][] } : next;
       // A walk with no route is one straight piece, so the cut walk has a point more than its pieces, and two at the least.
       const points = Math.max(pieces.length, 1) + 1;
-      const kept = cutWalks(walks, op.tokenId, stops.get(op.tokenId)!, points, before);
+      const kept = cutWalks(walks, op.tokenId, stops.get(op.tokenId)!, points, before, at.progress);
       return withTrapCut(cut, new Set(stops.keys()), kept.file, kept.own);
     }
     case "token.moveMany": {
@@ -1823,12 +1823,12 @@ function keepsOwn(walk: Walk): boolean {
  * with its holder's cut walk, holding at its spot once there. Null where
  * none walks so.
  */
-function cutWalks(walks: Walks, named: string, stop: Stop, points: number, before: RoomState): { file: Map<string, RoutePoint[]> | null; own: Map<string, RoutePoint[]> | null } {
+function cutWalks(walks: Walks, named: string, stop: Stop, points: number, before: RoomState, end?: Progress): { file: Map<string, CutPoint[]> | null; own: Map<string, CutPoint[]> | null } {
   const group = walks.groups.get(named);
   const own = stopsStandClear(walks.opVersion);
-  const file = new Map<string, RoutePoint[]>();
-  const kept = new Map<string, RoutePoint[]>();
-  const routes = new Map<Walk, RoutePoint[]>();
+  const file = new Map<string, CutPoint[]>();
+  const kept = new Map<string, CutPoint[]>();
+  const routes = new Map<Walk, CutPoint[]>();
   for (const walk of walks.all) {
     if (walk.group !== group) continue;
     const into = inSingleFile(walk) ? file : own && keepsOwn(walk) ? kept : null;
@@ -1857,12 +1857,33 @@ function cutWalks(walks: Walks, named: string, stop: Stop, points: number, befor
     while (route.length < points) route.push(route[route.length - 1]!);
     // A walk hex by hex has more points than its holder's cut walk, which the move holds at its end (moveLeg.ts follow).
     if (!walk.ownProgress) route.length = points;
+    // It is read at the cut walk's moments, as the cut op's own walk is (moveLeg.ts MovedToken `along`).
+    if (end) for (const [i, p] of route.entries()) if (p.along) route[i] = { ...p, along: cutAlong(p.along, end) };
   }
   return { file: file.size > 0 ? file : null, own: kept.size > 0 ? kept : null };
 }
 
+/**
+ * How far along a cut walk a point is reached that was reached `at` along
+ * the walk before the cut (moveLeg.ts MovedToken `along`), where `end` is
+ * the lead's progress at its stop, which its cut walk ends at (`cutRoute`):
+ * as it was on the pieces before the stop's, by its share of the part kept
+ * on the stop's own piece, and at the cut walk's end from the stop on. So
+ * a creature in single file hex by hex is read at the cut op's own moments,
+ * on the server and in the private pass alike, never past its lead's end.
+ */
+function cutAlong(at: FileAlong, end: Progress): FileAlong {
+  const [piece, k, n] = end;
+  if (compareAlong(at, end) >= 0) return k > 0 ? [piece, 1, 1] : piece > 0 ? [piece - 1, 1, 1] : [0, 0, 1];
+  if (at[0] < piece) return at;
+  return [piece, at[1] * n, (at[2] || 1) * k];
+}
+
+/** A point of a walk a trap's cut keeps, with how far along its group's walk it is reached where the walk goes hex by hex. */
+type CutPoint = RoutePoint & { along?: FileAlong };
+
 /** A walk's own route to its spot at the stop (`stopIndex`), that spot where and as high as the trap step had it there (`Stop.at`). */
-function walkToStop(walk: Walk, stop: Stop): RoutePoint[] {
+function walkToStop(walk: Walk, stop: Stop): CutPoint[] {
   return walkTo(walk, stopIndex(walk, stop), stop.at?.get(walk));
 }
 
@@ -2049,13 +2070,21 @@ function boxesOverlap(a: Rect | ReadonlySet<string>, b: Rect | ReadonlySet<strin
   return a.x < b.x + b.w - e && b.x < a.x + a.w - e && a.y < b.y + b.h - e && b.y < a.y + a.h - e;
 }
 
-/** A walk's own route to its spot `j`, that spot at the height the trap step had it at there, or to `moved` where a stop moves it off that spot. */
-function walkTo(walk: Walk, j: number, moved?: Token): RoutePoint[] {
+/**
+ * A walk's own route to its spot `j`, that spot at the height the trap step
+ * had it at there, or to `moved` where a stop moves it off that spot. A
+ * walk hex by hex keeps how far along its group's walk each point is
+ * reached, its spot at its group's progress there, so the cut op reads it
+ * at its lead's moments as the uncut one did (review HEXFILE-OPUS-1).
+ */
+function walkTo(walk: Walk, j: number, moved?: Token): CutPoint[] {
   const spot = spotAt(walk, j);
   const [piece, k] = walk.ownProgress?.[j] ?? spot.progress;
-  const route = walk.entry.route.slice(0, piece + 1).map(({ x, y, elevation }) => ({ x, y, elevation }));
+  const along = walk.ownProgress ? walk.entry.along : undefined;
+  const route: CutPoint[] = walk.entry.route.slice(0, piece + 1).map(({ x, y, elevation }, i) => ({ x, y, elevation, ...(along?.[i] ? { along: along[i] } : {}) }));
   // Its spot where the stop leaves it, as high as the trap step had it there.
-  if (k > 0) route.push(moved ? { x: moved.x, y: moved.y, elevation: moved.elevation } : { x: spot.x, y: spot.y, elevation: walk.elevation(j) });
+  const reached = along ? { along: spot.progress } : {};
+  if (k > 0) route.push(moved ? { x: moved.x, y: moved.y, elevation: moved.elevation, ...reached } : { x: spot.x, y: spot.y, elevation: walk.elevation(j), ...reached });
   else route[route.length - 1] = { ...route[route.length - 1]!, elevation: walk.elevation(j) };
   return route;
 }
@@ -2078,7 +2107,7 @@ function walkTo(walk: Walk, j: number, moved?: Token): RoutePoint[] {
  * lattice is its own anchors and a pose off its spot stands on a
  * neighboring hex, since a box half a square off an anchor snaps back.
  */
-function seatingWalk(walk: Walk, j: number, on: readonly { token: Token; at: RoutePoint }[], hexes = false): RoutePoint[] {
+function seatingWalk(walk: Walk, j: number, on: readonly { token: Token; at: RoutePoint }[], hexes = false): CutPoint[] {
   const lattice = routeLattice(walk.token);
   // From op version 51 a holder on hexes stands on its own anchors, and a pose off its spot is a neighboring hex's (D-261107-172).
   const g = walk.grid;

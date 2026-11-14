@@ -78,8 +78,13 @@ export type MovedToken = {
  */
 const TRAP_CUT: unique symbol = Symbol("trapCut");
 
-/** Walks a trap's cut keeps, by token id, each point at the height the trap step had it at. */
-type CutWalks = ReadonlyMap<string, readonly RoutePoint[]>;
+/**
+ * Walks a trap's cut keeps, by token id, each point at the height the trap
+ * step had it at, and on a walk hex by hex how far along the cut lead's
+ * walk it is reached (traps.ts cutAlong), so the cut op's walk is read at
+ * its lead's moments as the uncut op's was (review HEXFILE-OPUS-1).
+ */
+type CutWalks = ReadonlyMap<string, readonly FilePoint[]>;
 
 type TrapCut = { readonly [TRAP_CUT]?: { readonly stopped: ReadonlySet<string>; readonly file: CutWalks | null; readonly own: CutWalks | null } };
 
