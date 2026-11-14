@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { after, describe, test } from "node:test";
 import { Platform } from "../contract.ts";
 import { Cluster, DatabaseFailed, uncertainWords, type ProcessLookup } from "./postgres.ts";
@@ -70,7 +70,7 @@ function lookup(o: Look = {}): ProcessLookup {
   };
 }
 
-function cluster(dir: string, bin: string, proc: ProcessLookup, extra: { afterInitdb?: () => Promise<void>; platform?: Platform } = {}): Cluster {
+function cluster(dir: string, bin: string, proc: ProcessLookup, extra: { afterInitdb?: () => Promise<void>; platform?: Platform; renameDir?: (from: string, to: string) => Promise<void> } = {}): Cluster {
   return new Cluster({ binDir: bin, pgData: join(dir, "postgres"), logFile: join(dir, "postgres.log"), password: "pw", platform, pickPort: async () => 41659, proc, ...extra });
 }
 
@@ -215,4 +215,32 @@ describe("initdb", { skip: posixOnly }, () => {
     assert.deepEqual(names.filter((n) => n.startsWith("postgres.init-")), [], "the cut-off staging folder was moved aside");
     assert.equal(names.filter((n) => n.startsWith("postgres.incomplete-")).length, 1, "and never deleted");
   });
+
+  test("on Windows the staging folder's rename waits out a file another program holds open, and so does moving a cut-off one aside", async () => {
+    const dir = await folder();
+    const { bin } = await programs(dir);
+    // The stand-in initdb under Windows' name for it.
+    await writeFile(join(bin, "initdb.exe"), await readFile(join(bin, "initdb"), "utf8"), { mode: 0o755 });
+    await mkdir(join(dir, "postgres.init-left"));
+    let refusals = 0;
+    const renames: string[] = [];
+    const c = cluster(dir, bin, lookup(), {
+      platform: "win32",
+      renameDir: async (from, to) => {
+        renames.push(basename(from));
+        // Each folder's first two renames are refused, as while an antivirus scan holds a file in it.
+        if (renames.filter((n) => n === basename(from)).length <= 2) {
+          refusals++;
+          throw Object.assign(new Error("EPERM: operation not permitted, rename"), { code: "EPERM" });
+        }
+        await rename(from, to);
+      },
+    });
+    await c.init();
+    assert.equal(refusals, 4, "two for the cut-off folder moved aside, two for the staging folder");
+    assert.ok(existsSync(join(dir, "postgres", "PG_VERSION")));
+    assert.match(await readFile(join(dir, "postgres", "pg_hba.conf"), "utf8"), /^# Written by RaccoonVTT\./);
+    assert.equal((await readdir(dir)).filter((n) => n.startsWith("postgres.init-")).length, 0);
+  });
 });
+
