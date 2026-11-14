@@ -125,6 +125,9 @@ async function theCluster(): Promise<Cluster> {
   return cluster;
 }
 
+/** A connection PostgreSQL has not finished in this long fails, so no query waits on one for ever. */
+const DB_CONNECT_LIMIT_MS = 30_000;
+
 let pool: pg.Pool | null = null;
 function thePool(): pg.Pool {
   if (!pool) throw new Error("the database is not open");
@@ -240,7 +243,7 @@ const deps: SupervisorDeps = {
     async open(create) {
       const c = await theCluster();
       if (create) {
-        const admin = new pg.Client({ connectionString: c.url("postgres") });
+        const admin = new pg.Client({ connectionString: c.url("postgres"), connectionTimeoutMillis: DB_CONNECT_LIMIT_MS });
         await admin.connect();
         try {
           await admin.query(`create database ${DATABASE} template template0`);
@@ -248,7 +251,7 @@ const deps: SupervisorDeps = {
           await admin.end();
         }
       }
-      pool = new pg.Pool({ connectionString: c.url(), max: 3 });
+      pool = new pg.Pool({ connectionString: c.url(), max: 3, connectionTimeoutMillis: DB_CONNECT_LIMIT_MS });
       pool.on("error", (err) => log(`database connection failed: ${err.message}`));
     },
     async close() {
