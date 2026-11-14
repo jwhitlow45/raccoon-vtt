@@ -65,11 +65,19 @@ export function wall(state: RoomState, id: string, a: [number, number], b: [numb
   return w;
 }
 
-/** Sets cells' heights, writing each chunk's `heights` field. */
+/**
+ * Sets cells' heights, writing each chunk's `heights` field. On a hex scene
+ * the keys are hexes' columns and rows, and each chunk carries the scene's
+ * shape as `build.height` stamps it, or the hex walk would read the heights
+ * by hex while every footprint's ground read them as squares (live play 42,
+ * LP42-TEST-1).
+ */
 export function heights(state: RoomState, r: { x: number; y: number; w: number; h: number }, feet: number): void {
+  const shape = state.scenes.s1?.gridShape;
   for (let y = r.y; y < r.y + r.h; y++) {
     for (let x = r.x; x < r.x + r.w; x++) {
       const chunk = chunkAt(state, x, y);
+      if (shape === "hexRows" || shape === "hexColumns") chunk.grid = shape;
       const bytes = chunk.heights ? new Uint8Array(Buffer.from(chunk.heights, "base64")) : new Uint8Array(512);
       const k = (y - chunk.cy * CHUNK_CELLS) * CHUNK_CELLS + (x - chunk.cx * CHUNK_CELLS);
       const u = feet < 0 ? feet + 65536 : feet;

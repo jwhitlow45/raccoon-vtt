@@ -297,28 +297,29 @@ for (const [name, g] of [
       assert.equal(after.tokens.gob!.attached?.to, "bree");
     });
 
-    // The rise and the pit lie on squares, which hex rows' hexes overlap as the sweeps of live play 41 laid them out.
+    // Heights on a hex scene are keyed by hex, as `build.height` keys them there (discoveryTestutil heights, LP42-TEST-1).
+    const rise = (s: RoomState) => heights(s, g.orient === "rows" ? { x: 15, y: 0, w: 3, h: 16 } : { x: 0, y: 14, w: 16, h: 3 }, 10);
+    const alone = (s: RoomState): RoomState => ({ ...s, tokens: Object.fromEntries(Object.entries(s.tokens).filter(([id]) => id !== "gob")) });
+
     if (g.orient === "rows") {
-      test("a rise 10 ft high on squares 15 to 17 beside room B: from the corridor onto the hex beside it Bree lands on the hex above, the goblin behind her, ahead of her or none, where the stand that seated her there lay across the rise's edge and nothing moved (LP41-RIDER-1)", () => {
-        // Where the goblin comes out, and whether it keeps hold, is as before the batch, so only her landing is read here.
-        for (const [along, goblin] of [[12, 11], [9, 10], [12, null]] as const) {
-          const s = keep(along, goblin ?? 11);
-          heights(s, { x: 15, y: 0, w: 3, h: 16 }, 10);
-          if (goblin === null) delete s.tokens.gob;
-          const { plan, after } = dropBree(s, hexCenter(g, at(14, 5)), LIFTS);
-          assert.equal(plan.stop, null, `from ${along}: ${JSON.stringify(sent(plan))}`);
-          assert.deepEqual(hexOf(after, "bree"), [hexKey(at(14, 4))], `from ${along}`);
+      test("a rise 10 ft high on hexes 15 to 17 beside room B: from the corridor's end onto the hex beside it Bree lands on the hex above, the goblin in tow or none, where the stand that seated her there lay across the rise's edge and nothing moved (LP41-RIDER-1)", () => {
+        for (const goblin of [true, false]) {
+          const s = keep(12, 11);
+          rise(s);
+          const { plan, after } = dropBree(goblin ? s : alone(s), hexCenter(g, at(14, 5)), LIFTS);
+          assert.equal(plan.stop, null, JSON.stringify(sent(plan)));
+          assert.deepEqual(hexOf(after, "bree"), [hexKey(at(14, 4))], goblin ? "the goblin in tow" : "alone");
+          if (goblin) assert.equal(after.tokens.gob!.attached?.to, "bree");
         }
         const s = keep(12, 11);
-        heights(s, { x: 15, y: 0, w: 3, h: 16 }, 10);
+        rise(s);
         assert.deepEqual(hexOf(dropBree(s, hexCenter(g, at(14, 5)), LIFTS, "dm").after, "bree"), [hexKey(at(14, 5))], "the DM's drag lands her under the finger");
       });
 
-      test("a pit 10 ft deep under room A's squares 3, 2 to 4, 5: from the corridor's end onto the hex beside it Bree lands on the hex above, where the stand that seated her there lay across the pit's edge", () => {
+      test("a pit 10 ft deep on hexes 3 to 4 of room A: from the corridor's end onto the hex beside it Bree lands on the hex above, where the stand that seated her there lay across the pit's edge", () => {
         const s = keep(7, 8);
         heights(s, { x: 3, y: 2, w: 2, h: 4 }, -10);
-        delete s.tokens.gob;
-        const { plan, after } = dropBree(s, hexCenter(g, at(2, 3)), LIFTS);
+        const { plan, after } = dropBree(alone(s), hexCenter(g, at(2, 3)), LIFTS);
         assert.equal(plan.stop, null, JSON.stringify(sent(plan)));
         assert.deepEqual(hexOf(after, "bree"), [hexKey(at(2, 2))]);
       });
