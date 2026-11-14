@@ -699,11 +699,30 @@ export class WalkWorld {
       for (let cy = Math.max(0, Math.floor(y0 + EPS)); cy < Math.min(this.H, Math.ceil(y1 - EPS)); cy++)
         for (let cx = Math.max(0, Math.floor(x0 + EPS)); cx < Math.min(this.W, Math.ceil(x1 - EPS)); cx++) if ((this.flags[cy * this.W + cx]! & PIT) !== 0) return true;
     }
-    let blocked = false;
+    return this.blockedBy(x, y, elevation) >= 0;
+  }
+
+  /**
+   * The creature it cannot pass whose height it shares that the walker's
+   * footprint at a stored position lies over, as `endOnly` reads it, the
+   * squeezed footprint where it squeezes: the first by its place in the
+   * input's creatures, or -1. A device names it where it closes the way
+   * (routeDrag.ts, review LP40FIX-SOL-02).
+   */
+  blockedBy(x: number, y: number, elevation: number): number {
+    if (this.mode === "inside") return -1;
+    const box = this.#box(x, y, -2, this.#endBox);
+    const x0 = box[0]!;
+    const y0 = box[1]!;
+    const x1 = box[2]!;
+    const y1 = box[3]!;
+    let first = -1;
     this.#creaturesUnder(x0, y0, x1, y1, (c) => {
-      if (c.way === "blocked" && overlaps(c, x0, y0, x1, y1) && c.lo < elevation + this.height && elevation < c.hi) blocked = true;
+      if (c.way !== "blocked" || !overlaps(c, x0, y0, x1, y1) || !(c.lo < elevation + this.height && elevation < c.hi)) return;
+      const k = this.input.creatures.indexOf(c);
+      if (first < 0 || k < first) first = k;
     });
-    return blocked;
+    return first;
   }
 
   /**

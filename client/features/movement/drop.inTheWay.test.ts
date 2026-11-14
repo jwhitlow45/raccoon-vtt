@@ -87,6 +87,21 @@ describe("squares: the creature named is the one the squeezed walker meets", () 
   });
 });
 
+describe("squares: the creature named is the one under the footprint the search reads (review LP40FIX-SOL-02)", () => {
+  test("a Huge walker squeezing along a corridor two squares wide meets the Large orc in it, not the Large goblin the DM set in the rock beside it, which its full space overlaps there too", () => {
+    let s = room({ scenes: { s1: scene("s1", { bounds: { w: 22, h: 10 }, blockMovement: true }) } });
+    for (const [x, y, w, h] of [[1, 1, 6, 8], [7, 4, 8, 2], [15, 1, 6, 8]] as const) s = apply(s, { t: "build.rect", sceneId: "s1", terrain: "stone", x, y, w, h });
+    s.tokens = {
+      giant: token("giant", { size: "huge", x: 2, y: 3, name: "Giant", kind: "npc", disposition: "ally", ownerIds: ["p1"], actor: { inline: actor() } }),
+      gob: goblin("gob", 10, 2, { size: "large" }),
+      orc: goblin("orc", 10, 4, { name: "Orc", size: "large" }),
+    };
+    const copy = projectState(s, P1, { sceneId: "s1" }) as unknown as RoomState;
+    const drag = dragOf(copy, "player", "giant", { x: 17, y: 1 });
+    assert.equal(drag.plan.stop && stopText(drag.plan.stop), "Orc is in the way.");
+  });
+});
+
 for (const [name, g] of [
   ["hex rows", ROWS],
   ["hex columns", COLUMNS],

@@ -325,15 +325,14 @@ export class RouteDrag {
  * The first creature the walker cannot pass whose space a walk along
  * `points` goes on from, by its place in the creatures of `world`, which
  * holds their spaces closed: read at each step of each piece by the test
- * the search itself stops at there (walk.ts and hexWalk.ts `endOnly`),
- * leaving out the walk's last spot, since a walk may end in such a space.
- * Of the creatures under the walker there, one under the middle of its
- * footprint first, since a squeeze stands in the middle of it. Null where
- * the walk crosses none.
+ * the search itself stops at there (walk.ts `blockedBy`, hexWalk.ts
+ * `endOnly`), on the footprint the search reads there, squeezed where the
+ * walker squeezes (review LP40FIX-SOL-02), and leaving out the walk's last
+ * spot, since a walk may end in such a space. Null where the walk crosses
+ * none.
  */
 function crossedCreature(world: RouteWorld, points: readonly RoutePoint[]): number | null {
   const creatures = world.input.creatures;
-  const meets = (c: (typeof creatures)[number], elevation: number) => c.way === "blocked" && c.lo < elevation + world.height && elevation < c.hi;
   const last = points.length - 1;
   if (world instanceof HexWalkWorld) {
     for (let i = 1; i <= last; i++) {
@@ -344,7 +343,7 @@ function crossedCreature(world: RouteWorld, points: readonly RoutePoint[]): numb
         if (!world.endOnly(stand)) continue;
         const under = new Set(hexStandHexes(world.g, stand).map(hexKey));
         const elevation = world.elevationOf(stand);
-        const at = creatures.findIndex((c) => meets(c, elevation) && c.hexes?.some((h) => under.has(h)) === true);
+        const at = creatures.findIndex((c) => c.way === "blocked" && c.lo < elevation + world.height && elevation < c.hi && c.hexes?.some((h) => under.has(h)) === true);
         if (at >= 0) return at;
       }
     }
@@ -359,12 +358,7 @@ function crossedCreature(world: RouteWorld, points: readonly RoutePoint[]): numb
       const x = a.x + Math.round(((b.x - a.x) * k) / n / world.L) * world.L;
       const y = a.y + Math.round(((b.y - a.y) * k) / n / world.L) * world.L;
       const node = world.nodeAt({ x, y });
-      const elevation = node >= 0 ? world.elevationAt(node) : b.elevation;
-      if (!world.endOnly(x, y, elevation)) continue;
-      const mid = { x: x + world.w / 2, y: y + world.h / 2 };
-      const over = (c: (typeof creatures)[number]) => meets(c, elevation) && c.x0 < x + world.w - 1e-9 && x < c.x1 - 1e-9 && c.y0 < y + world.h - 1e-9 && y < c.y1 - 1e-9;
-      const middle = creatures.findIndex((c) => over(c) && c.x0 <= mid.x && mid.x < c.x1 && c.y0 <= mid.y && mid.y < c.y1);
-      const at = middle >= 0 ? middle : creatures.findIndex(over);
+      const at = world.blockedBy(x, y, node >= 0 ? world.elevationAt(node) : b.elevation);
       if (at >= 0) return at;
     }
   }
