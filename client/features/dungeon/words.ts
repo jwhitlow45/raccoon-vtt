@@ -203,18 +203,18 @@ export function outcomeText(outcome: DungeonOutcome, name: string, opened: boole
   switch (outcome.k) {
     case "complete":
       return outcome.checked
-        ? { text: `The connection dropped while making ${name}, but it is complete. Undo setup in Setup history usually takes it back, and Delete in the scene's menu always does, once the players are on another scene.${goTo}`, tone: "info" }
+        ? { text: `The connection dropped while making ${name}, but it is complete. Delete in the scene's menu always takes it back, and Undo setup in Setup history usually does once the players are on another scene.${goTo}`, tone: "info" }
         : { text: `Made ${name}.${goTo}`, tone: "info" };
     case "none":
       return { text: outcome.lost ? "The connection dropped, and no scene was made. Try again." : "The server refused the dungeon, so no scene was made.", tone: "error" };
     case "partial":
       return {
-        text: `The server refused part of ${name}, so it may be missing rooms, doors or traps. Once the players are on another scene, Undo setup in Setup history or Delete in the scene's menu takes it back.${goTo}`,
+        text: `The server refused part of ${name}, so it may be missing rooms, doors or traps. Delete in the scene's menu takes it back, and so does Undo setup in Setup history once the players are on another scene.${goTo}`,
         tone: "error",
       };
     case "unconfirmed":
       return {
-        text: `The connection dropped while making ${name}, and it could not be confirmed complete. To start again, Delete it from the scene's menu once the players are on another scene.${goTo}`,
+        text: `The connection dropped while making ${name}, and it could not be confirmed complete. To start again, Delete it from the scene's menu.${goTo}`,
         tone: "error",
       };
   }

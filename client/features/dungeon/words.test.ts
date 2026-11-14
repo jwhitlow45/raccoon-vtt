@@ -44,19 +44,24 @@ test("DG-C: Make's progress and every outcome in its sentence", () => {
   assert.equal(makingLine(18, 30), "Making the dungeon… 18 of 30");
   assert.deepEqual(outcomeText({ k: "complete", checked: false }, "Crypt", true), { text: "Made Crypt.", tone: "info" });
   assert.deepEqual(outcomeText({ k: "complete", checked: false }, "Crypt", false), { text: "Made Crypt. Open it from the Scenes panel.", tone: "info" });
-  assert.equal(outcomeText({ k: "complete", checked: true }, "Crypt", true).text, "The connection dropped while making Crypt, but it is complete. Undo setup in Setup history usually takes it back, and Delete in the scene's menu always does, once the players are on another scene.");
+  assert.equal(outcomeText({ k: "complete", checked: true }, "Crypt", true).text, "The connection dropped while making Crypt, but it is complete. Delete in the scene's menu always takes it back, and Undo setup in Setup history usually does once the players are on another scene.");
   assert.deepEqual(outcomeText({ k: "none", lost: false }, "Crypt", false), { text: "The server refused the dungeon, so no scene was made.", tone: "error" });
   assert.equal(outcomeText({ k: "none", lost: true }, "Crypt", false).text, "The connection dropped, and no scene was made. Try again.");
   assert.equal(
     outcomeText({ k: "partial" }, "Crypt", true).text,
-    "The server refused part of Crypt, so it may be missing rooms, doors or traps. Once the players are on another scene, Undo setup in Setup history or Delete in the scene's menu takes it back.",
+    "The server refused part of Crypt, so it may be missing rooms, doors or traps. Delete in the scene's menu takes it back, and so does Undo setup in Setup history once the players are on another scene.",
   );
   assert.equal(
     outcomeText({ k: "unconfirmed" }, "Crypt", false).text,
-    "The connection dropped while making Crypt, and it could not be confirmed complete. To start again, Delete it from the scene's menu once the players are on another scene. Open it from the Scenes panel.",
+    "The connection dropped while making Crypt, and it could not be confirmed complete. To start again, Delete it from the scene's menu. Open it from the Scenes panel.",
   );
-  // DG-R1-03: Undo setup and Delete are both refused for the players' scene, so every way back names moving them.
-  for (const o of [{ k: "partial" }, { k: "unconfirmed" }, { k: "complete", checked: true }] as const) assert.match(outcomeText(o, "Crypt", true).text, /once the players are on another scene/i, `${o.k}: Undo setup and Delete are refused for the players' scene`);
+  // DG-R1-03: Undo setup is refused for the players' scene, so wherever it is named it names moving them. Delete asks
+  // first there instead (docs/design/design-v1-player-limits.md 5.1), so it is never told to wait for them.
+  for (const [o, named] of [[{ k: "partial" }, 1], [{ k: "complete", checked: true }, 1], [{ k: "unconfirmed" }, 0]] as const) {
+    const text = outcomeText(o, "Crypt", true).text;
+    assert.equal(text.match(/once the players are on another scene/gi)?.length ?? 0, named, `${o.k}: only Undo setup waits for the players to move`);
+    if (named) assert.match(text, /Undo setup in Setup history (?:usually does )?once the players are on another scene\./, `${o.k}: Undo setup is refused for the players' scene`);
+  }
 });
 
 /*
