@@ -653,6 +653,30 @@ describe("a trap's cut keeps how far along the cut lead's walk each point of a w
       assert.deepEqual(after, before);
     });
 
+    test(`${name}: a stop trap on the hex the warhorse starts on stops it a hex in, and the goblin it drags from the open ground, which the trap step stops further along its own walk, is read no further than the warhorse's end (review HEXFILE-OPUS-5)`, () => {
+      // Two hexes out from the warhorse, on the open ground at the corridor's mouth.
+      const starts: Hex[] = g.orient === "rows" ? [{ col: 6, row: 7 }, { col: 6, row: 6 }, { col: 6, row: 5 }] : [{ col: 6, row: 6 }, { col: 6, row: 7 }];
+      for (const start of starts) {
+        for (const [who, actor] of [["Pat", P1], ["the DM", DM]] as const) {
+          const where = `from ${hexKey(start)}, ${who}`;
+          const { s, path } = keepOf(g, 1, 0, "horse");
+          s.tokens.gob = onHex(g, "gob", "medium", start, { name: "Goblin", kind: "npc", ownerIds: ["p1"], attached: { to: "horse", kind: "drag" } });
+          s.traps.stop = trap("stop", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", zone: { cells: [{ x: path[1]!.col, y: path[1]!.row, w: 1, h: 1 }] } });
+          const op = intoCorridor(g, s, path[7]!);
+          const cut = planTrapMove(op, s, actor, {}).op;
+          assert.notEqual(cut, op, `${where}: the trap cuts the move`);
+          const gob = planWalks(cut, s, actor, {}).find((m) => m.tokenId === "gob")!;
+          assert.ok(gob.along, `${where}: the cut walk goes hex by hex`);
+          for (const a of gob.along) assert.ok(compareAlong(a, [0, 1, 1]) <= 0, `${where}: ${a.join("/")} past the warhorse's end`);
+          const walks = trapWalks(cut, s, actor, {});
+          const end = walks.find((w) => w.tokenId === "horse")!.spots.at(-1)!.progress;
+          for (const spot of walks.find((w) => w.tokenId === "gob")!.spots) assert.ok(compareAlong(spot.progress, end) <= 0, `${where}: ${spot.progress.join("/")} not past ${end.join("/")}`);
+          // The reducer takes the op for each, its walk cut there as the trap step cut it.
+          assert.ok(applyOp(s, op, actor, env(1)).ok, where);
+        }
+      }
+    });
+
     test(`${name}: a hidden goblin's spots on the cut op's private pass never pass the end of the cut warhorse's walk`, () => {
       const { s, path } = keepOf(g, 1, 0, "horse");
       s.tokens.gob = { ...s.tokens.gob!, visibility: "dm" };
