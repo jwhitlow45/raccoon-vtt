@@ -41,9 +41,10 @@
 # (only desktop/electron/ imports Electron), typechecks the shell, and runs
 # the unit tests, the server's integration tests against a throwaway
 # PostgreSQL cluster made from the bundled binaries, the desktop
-# integration tests and the desktop e2e files. On Windows these start as
-# report-only and become a gate once green, before the first desktop
-# release (D-261113-097).
+# integration tests and the desktop e2e files. Every desktop check is a
+# gate, on Windows as everywhere. On Windows the app's own unit and
+# integration suites only report, since their CPU-time backstops can
+# overrun on a loaded runner (D-261114-034).
 #
 # Each job holds only what it needs. The plan, checks and build jobs only
 # read, and no step that runs pnpm or a package script holds a token:
@@ -218,10 +219,10 @@ jobs:
           ]')
           if [ "$MODE" = branch ]; then
             targets=$(jq -c 'map(select(.target == "windows-x64" or .target == "linux-x64"))' <<< "$all")
-            checks='[{"runner":"windows-2025-vs2026","report-only":true},{"runner":"ubuntu-24.04","report-only":false}]'
+            checks='[{"runner":"windows-2025-vs2026"},{"runner":"ubuntu-24.04"}]'
           else
             targets=$all
-            checks='[{"runner":"windows-2025-vs2026","report-only":true},{"runner":"macos-15","report-only":false}]'
+            checks='[{"runner":"windows-2025-vs2026"},{"runner":"macos-15"}]'
           fi
           files=$(jq -r --arg v "$VERSION" '[.[].files[]] + ["raccoon-vtt-\($v)-desktop.sha256"] | join(" ")' <<< "$all")
           assets="$files $(for f in $files; do printf '%s.sigstore.json ' "$f"; done)raccoon-vtt-$VERSION-desktop.intoto.jsonl"
@@ -268,7 +269,7 @@ jobs:
 
   # The checks ci.yml cannot run, since they need the desktop packages, the
   # bundled PostgreSQL or another system. Each test step runs even when an
-  # earlier one failed, so a report-only Windows run lists every failure.
+  # earlier one failed, so one run lists every failure.
   checks:
     needs: plan
     if: needs.plan.outputs.needed == 'true'
@@ -278,7 +279,6 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.checks) }}
     runs-on: ${{ matrix.runner }}
-    continue-on-error: ${{ matrix.report-only }}
     timeout-minutes: 75
     permissions:
       contents: read
@@ -341,16 +341,22 @@ jobs:
         run: pnpm exec tsc --noEmit -p desktop/tsconfig.electron.json
       # The whole suite on Linux. Elsewhere scripts/ and e2e/ are left out:
       # their unit tests check Linux CI tooling and start sh, docker or git.
+      # The app's own suites only report on Windows (D-261114-034).
       - name: Unit tests
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ runner.os == 'Windows' }}
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
             pnpm -s test
           else
-            node --test "shared/**/*.test.ts" "server/**/*.test.ts" "client/**/*.test.ts" "desktop/**/*.test.ts"
+            node --test "shared/**/*.test.ts" "server/**/*.test.ts" "client/**/*.test.ts"
           fi
+      - name: Desktop unit tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os != 'Linux' }}
+        run: node --test "desktop/**/*.test.ts"
       - name: Integration tests on a throwaway cluster
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ runner.os == 'Windows' }}
         run: node desktop/scripts/test-db.ts pnpm -s test:int
       # RaccoonVTT's folder in ProgramData as the installer makes it, for
       # postgres.itest.ts's junction. Windows PowerShell 5.1 by name: its
