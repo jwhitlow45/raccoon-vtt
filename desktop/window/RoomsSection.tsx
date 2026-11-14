@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../../client/components/Button.tsx";
 import { Loading } from "../../client/components/Loading.tsx";
 import { theme } from "../../client/lib/theme.ts";
@@ -7,10 +7,15 @@ import { formatRelative } from "./format.ts";
 import { Card, Confirm, Help, useAction } from "./ui.tsx";
 import { failureText, restoring, serverUp } from "./view.ts";
 
+/** How often the list is asked for again while the window shows. */
+export const ROOMS_REFRESH_MS = 10_000;
+
 /**
  * Rooms on this computer (design 8.6 and 9, item 4): each room's name and
  * when it was last played, and New DM link, which opens the new link in the
- * browser and never shows it here.
+ * browser and never shows it here. Rooms are made, renamed and deleted in
+ * the browser, which tells the window nothing, so the list is asked for
+ * again when the window comes forward and every 10 s while it shows.
  */
 export function RoomsSection(props: { sup: SupervisorStatus; bridge: RaccoonLocal; now: Date }) {
   const { sup, bridge } = props;
@@ -23,26 +28,62 @@ export function RoomsSection(props: { sup: SupervisorStatus; bridge: RaccoonLoca
   const [opened, setOpened] = useState(false);
   const [linking, setLinking] = useState<string | null>(null);
 
+  // Only the newest answer counts, so a slow one never puts back a list a newer one replaced.
+  const asked = useRef(0);
+  const [again, setAgain] = useState(0);
+  // The background list runs only once a list shows, so it never stands in for the first one.
+  const listed = useRef(false);
+  listed.current = up && rooms !== null;
+
   // Lists again whenever the server comes up, so a restore, a port change or a restart never leaves rooms from before it.
   useEffect(() => {
     if (!up) {
       setRooms(null);
       return;
     }
-    let live = true;
+    const mine = ++asked.current;
     setLoading(true);
     setFailure(null);
     bridge
       .listRooms()
       .then((result) => {
-        if (!live) return;
+        if (mine !== asked.current) return;
         if (result.ok) setRooms(result.value.rooms);
         else setFailure(failureText(result.failure, "rooms"));
       })
-      .catch(() => live && setFailure("RaccoonVTT did not answer. Try again."))
-      .finally(() => live && setLoading(false));
-    return () => void (live = false);
+      .catch(() => mine === asked.current && setFailure("RaccoonVTT did not answer. Try again."))
+      .finally(() => mine === asked.current && setLoading(false));
   }, [up, bridge, sup.port]);
+
+  // A quiet list in the background: the rows already shown stay until it
+  // answers, and a failed one leaves them as they were.
+  useEffect(() => {
+    if (!up || again === 0) return;
+    const mine = ++asked.current;
+    bridge
+      .listRooms()
+      .then((result) => {
+        if (mine !== asked.current || !result.ok) return;
+        setRooms(result.value.rooms);
+        setFailure(null);
+      })
+      .catch(() => undefined);
+  }, [again]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!up) return;
+    const ask = () => {
+      if (document.visibilityState === "visible" && listed.current) setAgain((n) => n + 1);
+    };
+    const timer = setInterval(ask, ROOMS_REFRESH_MS);
+    window.addEventListener("focus", ask);
+    document.addEventListener("visibilitychange", ask);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", ask);
+      document.removeEventListener("visibilitychange", ask);
+    };
+  }, [up]);
 
   const link = useAction(async (roomId: string) => {
     const result = await bridge.newDmLink(roomId);

@@ -314,6 +314,33 @@ describe("the desktop window page", { timeout: 900_000 }, () => {
     await ctx.close();
   });
 
+  test("a room made in the browser after the first empty list shows when the window comes forward, and within 10 s while it shows", async () => {
+    const ctx = await context();
+    const page = await ctx.newPage();
+    page.on("pageerror", (e) => errors.push(`rooms refresh: ${e.message}`));
+    await page.clock.install();
+    await page.goto(`http://127.0.0.1:${PORT}/?scenario=no-rooms`);
+    await page.locator("main").waitFor();
+    await page.getByText(WORDS.rooms.empty).waitFor();
+    // Time stands still from here, so only the focus, then runFor, can bring the list.
+    await page.clock.pauseAt(new Date((await page.evaluate("Date.now()")) as number + 1_000));
+    const lists = async () => (await calls(page)).filter((c) => c.method === "listRooms").length;
+    const first = await lists();
+    await page.evaluate(`window.fakeBridge.setRooms([{ id: "7K3M9PQR", name: "The Glass Tower", lastActiveAt: null }])`);
+    await page.evaluate("window.dispatchEvent(new Event('focus'))");
+    await page.getByText("The Glass Tower").waitFor();
+    assert.equal(await page.getByText(WORDS.rooms.empty).count(), 0);
+    assert.equal(await lists(), first + 1);
+    // No focus this time: the 10 s list finds a second room, with no spinner in place of the rows.
+    await page.evaluate(`window.fakeBridge.setRooms([{ id: "7K3M9PQR", name: "The Glass Tower", lastActiveAt: null }, { id: "4FH2KQ8T", name: "The Iron Keep", lastActiveAt: null }])`);
+    await page.clock.runFor(7_000);
+    assert.equal(await page.getByText("The Iron Keep").count(), 0);
+    await page.clock.runFor(3_000);
+    await page.getByText("The Iron Keep").waitFor();
+    assert.equal(await page.getByText("Loading rooms").count(), 0);
+    await ctx.close();
+  });
+
   test("Back up now shows busy, refuses a second press, and lists the new backup", async () => {
     const ctx = await context();
     const page = await open(ctx, "scenario=running");
