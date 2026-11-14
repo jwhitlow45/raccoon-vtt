@@ -9,7 +9,7 @@ import { isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { hexAt, hexCenter, hexInScene, hexKey, hexNeighbors, type Hex } from "#shared/rules/hex.ts";
 import { deviceGround } from "#shared/rules/held.ts";
 import { footing } from "#shared/rules/heights.ts";
-import { coreBlocked, coreWalled, groundUnder, hexEndStand, hexFitWall, hexLegOf, hexLegStand, hexNarrow, hexStandHexes, hexStandInside, hexStandPlace, hexStartStand, hexWallsOf, landedElevation, landing, legSpots, legStop, offGridWallThrough, onSqueezedLattice, ownWalk, previewChunks, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type HexStand, type HexWalls, type Walker } from "#shared/rules/movement.ts";
+import { coreBlocked, coreWalled, groundUnder, hexEndStand, hexFitWall, hexLegOf, hexLegSpots, hexLegStand, hexNarrow, hexStandHexes, hexStandInside, hexStandPlace, hexStartStand, hexWallsOf, landedElevation, landing, legSpots, legStop, offGridWallThrough, onSqueezedLattice, ownWalk, previewChunks, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type HexStand, type HexWalls, type Walker } from "#shared/rules/movement.ts";
 import { fileOutOfReach, fileRoutes, fileShift, followedHeight, followerTrace, hexFileClasses, hexFileRoutes, routeLattice, routePoints, routeStop, routeWalkers, seatShift, walkSqueezes, walkTrace, type FileEnd, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { followsInSingleFile, followsInSingleFileOnHexes } from "#shared/migrate.ts";
 import { checkSetReach } from "#shared/rules/moveLeg.ts";
@@ -838,23 +838,54 @@ export const CUT_TEXT = "Stopped partway: the way there turns too often for one 
  * straight leg, as the DM's drop through a wall, it goes as the straight
  * leg alone.
  */
-export function planWalk(state: DropView, token: DropToken, raw: Aim, mode: Exclude<DropMode, "teleport">, found: Found, feetPerCell: number, account?: (to: Point) => Found): DropPlan {
+export function planWalk(state: DropView, token: DropToken, raw: Aim, mode: Exclude<DropMode, "teleport">, found: Found, feetPerCell: number, account?: (to: Point) => Found, inTheWay?: (at: Point) => boolean): DropPlan {
   const walk = found.kind === "route" ? routeLanding(state, token, routeTarget(state, token, raw), found.route.pieces, feetPerCell) : null;
   if (walk) {
     const move = landed(state, token, { ...walk.at, squeeze: walk.at.squeeze === true });
     const route = walk.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
     return { moves: [{ ...move, route }], stop: null, held: [], ...(walk.cut ? { cut: true as const } : {}) };
   }
-  const plan = planOne(state, token, raw, mode);
+  const straight = planOne(state, token, raw, mode);
+  const plan = mode === "walk" && found.kind === "none" && found.creature !== undefined && inTheWay ? heldShortOfCreature(state, token, straight, raw, inTheWay) : straight;
   if (found.kind === "none" && plan.stop) plan.stop = { ...plan.stop, searched: true, ...(found.capped ? { capped: true as const } : {}) };
-  const straight = plan.moves.length === 1 && account ? plan.moves[0]! : null;
-  if (straight && !straight.route) {
-    const at = { x: straight.x, y: straight.y, ...(straight.squeeze ? { squeeze: true } : {}) };
+  const lands = plan.moves.length === 1 && account ? plan.moves[0]! : null;
+  if (lands && !lands.route) {
+    const at = { x: lands.x, y: lands.y, ...(lands.squeeze ? { squeeze: true } : {}) };
     const own = account!(at);
     const kept = own.kind === "route" ? routeLanding(state, token, at, own.route.pieces, feetPerCell) : null;
-    if (kept && !kept.cut) plan.moves = [{ ...straight, route: kept.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) }];
+    if (kept && !kept.cut) plan.moves = [{ ...lands, route: kept.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) }];
   }
   return plan;
+}
+
+/**
+ * A walk's straight drop, where the search names a creature that closes
+ * the way (`Found`), held short of the first creature on that leg the
+ * walker cannot pass, as it is held short of a wall (D-261114-007): at the
+ * leg's last spot before it where the walk may stand, by the drop's own
+ * landing rule. `inTheWay` says whether the walker standing at a spot
+ * would stand in such a creature's space, as the search reads the spot
+ * (routeDrag.ts creatureAt). The drop's own spot is left out, since a walk
+ * may end in such a space. Else the drop walked on through the creature
+ * its note named, as far as the wall beyond it (live play 41,
+ * LP41-MOVE-2). The move still needs nothing of the server: it is shorter.
+ */
+export function heldShortOfCreature(state: DropView, token: DropToken, plan: DropPlan, raw: Aim, inTheWay: (at: Point) => boolean): DropPlan {
+  const g = dropGrid(state, token);
+  const walker = walkerOf(state, token);
+  const now = plan.moves[0] ?? token;
+  const target = plan.stop?.ghost ?? { x: now.x, y: now.y };
+  const spots = isHex(g) ? hexLegSpots(g, walker, target).map((s) => s.at) : legSpots(walker, target);
+  const reached = spots.findIndex((p) => p.x === now.x && p.y === now.y);
+  const last = reached >= 0 ? reached : spots.length - 1;
+  const meets = spots.findIndex((p, k) => k >= 1 && k <= last && !(k === spots.length - 1 && p.x === target.x && p.y === target.y) && inTheWay(p));
+  if (meets < 0) return plan;
+  const before = spots[meets - 1]!;
+  const to = { x: before.x, y: before.y, elevation: dropLanding(state, token, before) };
+  const land = landing(state, walker, to, "walk");
+  const at = land.stopped ? standingBack(state, walker, to, land) : { x: land.x, y: land.y, squeeze: land.squeeze };
+  const stop: Stop = { tokenId: token.id, sceneId: token.sceneId, blocker: plan.stop?.blocker ?? "wall", door: null, ghost: target, aim: plan.stop?.aim ?? { x: raw.x, y: raw.y }, at: { x: at.x, y: at.y } };
+  return { ...plan, moves: moved(token, at) ? [landed(state, token, at)] : [], stop };
 }
 
 /**

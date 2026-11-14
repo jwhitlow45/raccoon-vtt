@@ -382,6 +382,20 @@ function spotsAlong(search: RouteSearch, points: readonly RoutePoint[]): { creat
   return spots;
 }
 
+/**
+ * The creature the walker cannot pass whose space it would stand in at the
+ * stored spot `at` of `world`, by its place in the world's creatures, or
+ * -1: read as the search reads a spot it may end in but never pass through
+ * (walk.ts `blockedBy`, hexWalk.ts `endOnly`), so a drop's straight walk
+ * is held short of it (drop.ts heldShortOfCreature).
+ */
+export function creatureAt(world: RouteWorld, at: Point): number {
+  const node = world.nodeAt(at);
+  if (node < 0) return -1;
+  if (world instanceof HexWalkWorld) return hexCreatureAt(world, world.standOf(node));
+  return world.blockedBy(at.x, at.y, world.elevationAt(node));
+}
+
 /** On hexes, the creature the walker cannot pass under the stand `stand` at its height there, or -1. */
 function hexCreatureAt(world: HexWalkWorld, stand: HexStand): number {
   if (!world.endOnly(stand)) return -1;

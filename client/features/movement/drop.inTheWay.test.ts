@@ -87,6 +87,45 @@ describe("squares: the creature named is the one that closes the way (LP41-MOVE-
   });
 });
 
+describe("squares: the walk stops before the creature the note names (LP41-MOVE-2, D-261114-007)", () => {
+  /** Thorn in the corridor on 8, 4, a hostile goblin beside him on 9, 4. */
+  const blocked = () => {
+    const s = hall({ gob: goblin("gob", 9, 4) });
+    s.tokens.thorn = { ...s.tokens.thorn!, x: 8 };
+    return s;
+  };
+
+  test("onto the east room, where the straight walk went on through the goblin to 12, 4 or 10, 4, Thorn stays on 8, 4, and the board held him there too", () => {
+    for (const to of [{ x: 16, y: 3 }, { x: 19, y: 2 }]) {
+      const { drag, note } = dropThorn(blocked(), to);
+      assert.equal(note, "Goblin is in the way.", `onto ${to.x}, ${to.y}`);
+      assert.deepEqual(drag.plan.moves, [], `onto ${to.x}, ${to.y}: no move`);
+      assert.deepEqual(drag.plan.stop?.at, { x: 8, y: 4 });
+      assert.deepEqual(drag.hold && [drag.hold.at.x, drag.hold.at.y], [8, 4], "the preview held on 8, 4");
+    }
+  });
+
+  test("along the corridor to 12, 4, a walk with no wall in its way: held on 8, 4 with the note, where it went through the goblin with none", () => {
+    const { drag, note } = dropThorn(blocked(), { x: 12, y: 4 });
+    assert.equal(note, "Goblin is in the way.");
+    assert.deepEqual(drag.plan.moves, []);
+  });
+
+  test("from 6, 4 in the west room's doorway, past the goblin on 9, 4: Thorn walks on to 8, 4, the square before it", () => {
+    const s = hall({ gob: goblin("gob", 9, 4) });
+    s.tokens.thorn = { ...s.tokens.thorn!, x: 6 };
+    const { drag, note } = dropThorn(s, { x: 12, y: 4 });
+    assert.equal(note, "Goblin is in the way.");
+    assert.deepEqual(drag.plan.moves.map((m) => [m.x, m.y]), [[8, 4]]);
+  });
+
+  test("the DM's drag still goes straight through", () => {
+    const s = blocked();
+    const drag = dragOf(s, "dm", "thorn", { x: 12, y: 4 });
+    assert.deepEqual(drag.plan.moves.map((m) => [m.x, m.y]), [[12, 4]]);
+  });
+});
+
 describe("squares: the creature named is the one the squeezed walker meets", () => {
   test("the warhorse squeezing along the corridor meets the orc in it, not the goblin the DM set in the rock beside it, which its full space overlaps there too", () => {
     const s = hall({
@@ -153,5 +192,11 @@ for (const [name, g] of [
 
   test(`${name}: a goblin in the west room on Thorn's way, the orc in the corridor: the orc is named (LP41-MOVE-1)`, () => {
     assert.equal(dropThorn(corridor(2, { gob: [4, "Goblin"], orc: [10, "Orc"] }), onto(at(16, 3))).note, "Orc is in the way.");
+  });
+
+  test(`${name}: Thorn in the corridor beside the goblin stays there, where the straight walk went on through it (LP41-MOVE-2)`, () => {
+    const { drag, note } = dropThorn(corridor(8, { gob: [9, "Goblin"] }), onto(at(16, 3)));
+    assert.equal(note, "Goblin is in the way.");
+    assert.deepEqual(drag.plan.moves, []);
   });
 }
