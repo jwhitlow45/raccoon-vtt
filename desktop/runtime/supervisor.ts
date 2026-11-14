@@ -264,7 +264,7 @@ export class Supervisor {
     } catch (err) {
       if (err instanceof Halt) return;
       this.d.log(`start failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
-      this.report({ kind: "databaseFailed", logLine: err instanceof Error ? err.message : String(err) });
+      this.report({ kind: "databaseFailed", logLine: (err as { logLine?: string }).logLine ?? (err instanceof Error ? err.message : String(err)) });
     }
   }
 
