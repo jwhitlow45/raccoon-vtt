@@ -1135,6 +1135,15 @@ holds:
   version does not know is kept, so going back to an older version and
   forward again loses no setting.
 - `restore.json`, only while a restore runs.
+- `postgres-link.json`, on Windows, when the folder's path has a letter outside
+  the computer's language for non-Unicode programs, as under a user name in
+  another script. PostgreSQL's Windows programs can't open such a path, so
+  RaccoonVTT gives them the folder's short name or, where there is none, a
+  junction in a folder of your own inside `C:\ProgramData\RaccoonVTT`. The
+  installer makes that folder, and no other user can open yours. The file
+  records which way was chosen, and every later start uses it. If that way
+  stops leading to the folder while it holds a database, the start stops and
+  says to restart the computer and delete the file.
 
 ### Backups
 
@@ -1217,8 +1226,9 @@ PostgreSQL majors.
 
 Removing the app leaves the data folder, whichever way it goes: the Windows
 uninstaller, dragging the app to the Trash, `apt remove` or deleting the
-AppImage. The Windows uninstaller also removes the firewall rule. To delete
-your rooms, or copy them, use **Show data folder**.
+AppImage. The Windows uninstaller also removes the firewall rule, and leaves
+`C:\ProgramData\RaccoonVTT` and the junctions in it. To delete your rooms,
+or copy them, use **Show data folder**.
 
 ### What the desktop app guarantees
 
