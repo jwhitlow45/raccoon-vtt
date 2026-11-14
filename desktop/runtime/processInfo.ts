@@ -14,6 +14,9 @@ import type { Platform } from "../contract.ts";
 
 const run = promisify(execFile);
 
+/** PowerShell's cold start on a busy computer takes seconds, so a reading still running after this has hung, and is ended. */
+const POWERSHELL_LIMIT_MS = 60_000;
+
 export type ProcessIdentity = { pid: number; start: number; boot: string };
 
 export function isAlive(pid: number): boolean {
@@ -70,7 +73,7 @@ export async function processStart(pid: number, platform: Platform = process.pla
     const { stdout } = await run(
       powershell(),
       ["-NoProfile", "-NonInteractive", "-Command", `(Get-Process -Id ${pid}).StartTime.ToUniversalTime().ToString('o')`],
-      { windowsHide: true },
+      { windowsHide: true, timeout: POWERSHELL_LIMIT_MS },
     );
     const t = Date.parse(stdout.trim());
     return Number.isNaN(t) ? null : t;
@@ -154,7 +157,7 @@ export async function processFacts(pid: number, platform: Platform = process.pla
   }
   // Win32_Process answers for every process without elevation, where Get-Process hides another user's path and start.
   const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($p) { [pscustomobject]@{ name = [string]$p.Name; created = $(if ($p.CreationDate) { $p.CreationDate.ToUniversalTime().ToString('o') } else { '' }) } | ConvertTo-Json -Compress }`;
-  const out = await maybe(async () => (await run(powershell(), ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true })).stdout);
+  const out = await maybe(async () => (await run(powershell(), ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true, timeout: POWERSHELL_LIMIT_MS })).stdout);
   return { ...(out ? parseWindowsProcess(out) : { exe: null, start: null }), cwd: null, uid: null };
 }
 

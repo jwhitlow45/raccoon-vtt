@@ -458,7 +458,7 @@ function powershellExe(): string {
 }
 
 async function powershell(script: string, folder: string): Promise<string> {
-  const { stdout } = await run(powershellExe(), ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, RACCOONVTT_FOLDER: folder }, windowsHide: true });
+  const { stdout } = await run(powershellExe(), ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, RACCOONVTT_FOLDER: folder }, windowsHide: true, timeout: 60_000 });
   return stdout.replace(/^\uFEFF/, "").trim();
 }
 

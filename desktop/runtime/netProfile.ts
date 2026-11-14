@@ -288,7 +288,8 @@ const run = promisify(execFile);
 /** Whether the installer's firewall rule is there (Windows only), for the window's Not working? fold. */
 export async function firewallRule(env: NodeJS.ProcessEnv = process.env): Promise<"present" | "missing" | null> {
   try {
-    await run(`${env.SystemRoot ?? "C:\\Windows"}\\System32\\netsh.exe`, ["advfirewall", "firewall", "show", "rule", "name=RaccoonVTT"], { windowsHide: true });
+    // Ended after 30 s, which reads as not knowing.
+    await run(`${env.SystemRoot ?? "C:\\Windows"}\\System32\\netsh.exe`, ["advfirewall", "firewall", "show", "rule", "name=RaccoonVTT"], { windowsHide: true, timeout: 30_000 });
     return "present";
   } catch (err) {
     // netsh answers 1 with "No rules match" when the rule is missing. Anything else is not knowing.
