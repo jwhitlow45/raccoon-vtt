@@ -5,7 +5,7 @@ import { anchorOfHex, canSqueeze, footprintRect, footprintSize, hexSqueezedSize,
 import type { Point } from "./geom.ts";
 import { footing, footprintGround, oppositeFacing, standing, type Standing } from "./heights.ts";
 import { standsAcrossBands } from "../migrate.ts";
-import { APART, contact, CROSS, MOVEMENT, onSegment, orient, PIECE } from "./segments.ts";
+import { APART, contact, CROSS, heldPiece, MOVEMENT, onSegment, orient, PIECE } from "./segments.ts";
 import { LEDGE, PIECE_BAND, pieceBlocks, pieceTouches, sceneWalls, type WallSet } from "./walls.ts";
 import { isHex, sceneGrid, SQUARES } from "./grid.ts";
 import { footprintHexes, hexCenter, hexInScene, hexKey, hexLine, hexNeighbors, referenceHex, snapAnchor, type Hex, type HexGrid } from "./hex.ts";
@@ -302,7 +302,8 @@ export function pinches(segs: readonly (readonly [number, number, number, number
  * On squares a piece whose rounding can be undone, one along an axis or
  * with both ends where they were stored, is put back on its stored wall
  * (walls.ts unroundedPiece, segments.ts EXACT_PIECE) and read exactly by
- * both, as the server reads the wall.
+ * both, as the server reads the wall, and the gate still lets the pieces
+ * of one wall leave together (`pieceRun`).
  */
 
 type PieceTest = "gate" | "preview";
@@ -459,7 +460,7 @@ function partClear(leg: Leg, segs: readonly number[], atStart: ReadonlySet<numbe
 /** The segments of `segs` the core touches where the leg starts, the runs of held pieces they belong to included for the gate (`pieceRun`). */
 function startSet(leg: Leg, segs: readonly number[]): Set<number> {
   const out = new Set(segs.filter((k) => meets(leg.walls, k, leg.test, leg.px, leg.py, leg.px, leg.py, leg.hx, leg.hy)));
-  if (leg.test === "gate") for (const k of [...out]) if (leg.walls.stored.free[k] === PIECE) for (const j of pieceRun(leg.walls, k)) out.add(j);
+  if (leg.test === "gate") for (const k of [...out]) if (heldPiece(leg.walls.stored.free[k]!)) for (const j of pieceRun(leg.walls, k)) out.add(j);
   return out;
 }
 
@@ -471,10 +472,13 @@ const pieceRuns = new WeakMap<WallSet, Map<number, readonly number[]>>();
  * line of the one it follows and of the same tags and kind. The server
  * holds that wall as one segment, so where the core touches any piece of
  * it as a leg starts, the gate lets the leg leave every piece of it, as
- * section 4.1 lets it leave the wall (MD4-ASTRA-1). Two walls drawn end to
- * end in one line read as one, which only lets the device send more. A
- * door never joins a run: players get doors whole, so a door is never a
- * piece of the wall beside it, and a closed door blocks as a wall does.
+ * section 4.1 lets it leave the wall (MD4-ASTRA-1). Pieces put back on
+ * their stored wall (EXACT_PIECE) join too: one wall across a split line
+ * comes back as two, end to end. Two walls drawn end to end in one line
+ * read as one, which only lets the device send more, so a preview, which
+ * must not, leaves runs out. A door never joins a run: players get doors
+ * whole, so a door is never a piece of the wall beside it, and a closed
+ * door blocks as a wall does.
  */
 function pieceRun(walls: WallSet, k: number): readonly number[] {
   let runs = pieceRuns.get(walls);
@@ -503,7 +507,7 @@ function pieceRun(walls: WallSet, k: number): readonly number[] {
       [bx, by],
     ] as const) {
       walls.storedIndex.query(ex - reach, ey - reach, ex + reach, ey + reach, MOVEMENT | LEDGE, (m) => {
-        if (run.includes(m) || free[m] !== PIECE || tags[m] !== tags[j] || kind(m) !== kind(j) || kind(m) === "door") return;
+        if (run.includes(m) || !heldPiece(free[m]!) || tags[m] !== tags[j] || kind(m) !== kind(j) || kind(m) === "door") return;
         const [cx, cy, dx, dy] = [xy[4 * m]!, xy[4 * m + 1]!, xy[4 * m + 2]!, xy[4 * m + 3]!];
         if ((near(cx, cy, ex, ey) || near(dx, dy, ex, ey)) && along(cx, cy) && along(dx, dy)) run.push(m);
       });
@@ -843,7 +847,7 @@ export function stepTester(state: BuildState, token: Walker): StepTester | null 
     if (hit || !blocksMove(set, k, floor)) return;
     if (!meets(set, k, test, px, py, qx, qy, hx, hy)) return;
     // partClear's first part: a segment the core touches where it starts may be left toward the start's side.
-    const atStart = meets(set, k, test, px, py, px, py, hx, hy) || (test === "gate" && set.stored.free[k] === PIECE && pieceRun(set, k).some((j) => j !== k && meets(set, j, test, px, py, px, py, hx, hy)));
+    const atStart = meets(set, k, test, px, py, px, py, hx, hy) || (test === "gate" && heldPiece(set.stored.free[k]!) && pieceRun(set, k).some((j) => j !== k && meets(set, j, test, px, py, px, py, hx, hy)));
     if (atStart && leaves(set, k, test, px, py, qx - px, qy - py)) return;
     hit = true;
   };
