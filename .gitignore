@@ -20,6 +20,12 @@ dist/
 # local data written by a development server
 .data/
 
+# The desktop app's builds, its downloaded Node and PostgreSQL, and its own
+# packages (desktop/ is a pnpm root of its own).
+desktop/out/
+desktop/.runtime/
+desktop/node_modules/
+
 # test and tool output
 test-results/
 playwright-report/

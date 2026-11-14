@@ -38,6 +38,7 @@ export const API_ERROR_CODES = [
   "dm_only",
   "fetch_failed",
   "forbidden",
+  "host_only",
   "import_entry_too_large",
   "import_too_large",
   "internal",
