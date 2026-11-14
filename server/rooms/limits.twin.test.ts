@@ -233,7 +233,11 @@ describe("the op rate answers P1 alike", () => {
     const answers: Answer[] = [];
     for (const room of pair) answers.push((await together(room, [["p1", { t: "log.chat", text: "now" }]], false))[0]!);
     assert.deepEqual(answers, ["taken", "taken"]);
-    same(pair, "P1's chat");
+    // The room's numbers count every member's op, so in the DM's busy millisecond A's number runs 120 ahead. A second on, they meet again.
+    for (const room of pair) room.clock.now += 1_000;
+    const since = marks(pair);
+    for (const room of pair) assert.equal((await together(room, [["p1", { t: "log.chat", text: "again" }]], false))[0], "taken");
+    sameSince(pair, since, "P1's next chat");
   });
 });
 
