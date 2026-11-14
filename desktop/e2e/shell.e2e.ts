@@ -387,7 +387,8 @@ describe("the packed shell", () => {
   test("a shell killed outright leaves a supervisor that sees its channel close and stops as Quit does", { timeout: STEP_TIMEOUT }, async () => {
     await launch();
     assert.ok(app);
-    const shellPid = app.process().pid;
+    // The shell's own pid: on Windows Playwright starts Electron through a shell (cmd.exe), and app.process() is that.
+    const shellPid = await app.evaluate(() => process.pid);
     assert.ok(shellPid);
     const supervisorPid = await app.evaluate(() => (globalThis as unknown as { raccoonShellForTests: ShellHandle }).raccoonShellForTests.supervisorPid());
     assert.ok(supervisorPid, "the supervisor runs");
