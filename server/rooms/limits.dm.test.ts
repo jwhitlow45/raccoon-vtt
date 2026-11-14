@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
-import { FAR, LIMITS, NO_ROOM_TO_EXPLORE, roundUp, SEAT, serializedBytes } from "#shared/limits.ts";
+import { BOOKKEEPING_RESERVE, FAR, LIMITS, NO_ROOM_TO_EXPLORE, roundUp, SEAT, serializedBytes } from "#shared/limits.ts";
 import type { Drawing, RoomState } from "#shared/model.ts";
 import { MOVE_PLAYERS_FIRST } from "#shared/permissions.ts";
 import { MAX_NOTES, type Op } from "#shared/protocol.ts";
@@ -11,7 +11,7 @@ import { markedRoom } from "./limitsTesting.ts";
 import { answer, joinOp, Mint, type Answer } from "./limitsTwinTesting.ts";
 import type { Who } from "./numberingTesting.ts";
 import { Room } from "./numberingTesting.ts";
-import { heldBytes, MEMORY_FULL, PER_PLAYER_FULL, projectedSceneBytes, sceneFullWords } from "./sizeGuard.ts";
+import { farRoomBytes, heldBytes, MEMORY_FULL, PER_PLAYER_FULL, projectedSceneBytes } from "./sizeGuard.ts";
 import { ScopeClient, StoredRoomDb, storedActor } from "./undoScopeTesting.ts";
 
 /**
@@ -157,6 +157,28 @@ describe("the DM's caps count what no seat holds", () => {
   });
 });
 
+describe("deletions meet no cap", () => {
+  test("D2: a room over a cap it holds as a whole, open rolls and a character's stat blocks, takes the DM's and a player's deletions, and refuses their creates", async (t) => {
+    const state = room();
+    state.characters.hero = character("hero", { name: "Hero", ownerIds: ["p1"] });
+    state.tokens.dmt0 = token("dmt0", { name: "Goblin", visibility: "dm", x: 30, y: 20 });
+    state.drawings.pd0 = drawing("pd0", { ownerId: "p1", points: [5, 5, 6, 6] });
+    for (let i = 0; i <= LIMITS.openRollsPerRoom; i++) {
+      state.rolls[`roll${i}`] = { id: `roll${i}`, rev: 0, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 15, dcShown: false, resultShown: false, note: "Dodge", at: "2026-11-10T20:00:00.000Z", targets: [] };
+    }
+    // The hero's blocks past their 512 KiB together, about 15 KiB each.
+    const pad = { traits: [0, 1, 2, 3].map((i) => ({ name: `Pad ${i}`, text: "w".repeat(3_700) })) };
+    for (let i = 0; serializedBytes(state.companionBlocks) <= LIMITS.companionBlockBytesPerCharacter; i++) state.companionBlocks[`blk${i}`] = companionBlock(`blk${i}`, "hero", pad);
+    const r = await opened(t, state);
+    assert.equal(await answer(r, "dm", { t: "token.delete", tokenId: "dmt0" }), "taken", "the DM's delete");
+    assert.equal(await answer(r, "p1", { t: "drawing.delete", drawingId: "pd0" }), "taken", "the player's delete");
+    const goblin = { t: "token.create", token: { id: mint.next(r), sceneId: "s1", kind: "monster", name: "Goblin", size: "medium", x: 3, y: 3, actor: { inline: actor() } } } as Op;
+    assert.equal(typeof (await answer(r, "dm", goblin)), "object", "the DM's create meets the rolls' cap");
+    const line = { t: "drawing.create", drawing: { id: mint.next(r), sceneId: "s1", kind: "line", points: [5, 5, 6, 6], style: { stroke: "#ffffff", width: 2, opacity: 1 }, ownerId: "p1", visibility: "all" } } as Op;
+    assert.equal(typeof (await answer(r, "p1", line)), "object", "the player's create meets the blocks' cap");
+  });
+});
+
 describe("the players' scene can be deleted with the DM's yes", () => {
   test("D13: deleting the players' scene is refused without the confirm, taken with it leaving them on no scene, and its undo puts them back, each across a restart", async (t) => {
     const r = await opened(t, room());
@@ -217,25 +239,32 @@ function padTo(state: RoomState, tokenId: string, part: "dm" | "held", target: n
 }
 
 /**
- * A room valid today whose players' scene is `over` bytes past its far
- * line, or one byte under it when `over` is -1: 48 players' token and area
- * seats, their lines, and the DM's things filling the DM's part to the top
- * of its step, so any growth of either part passes the line.
+ * A room valid today whose players' scene reads `reading` against its far
+ * line: 48 players' token and area seats, their lines, and the DM's things
+ * filling the DM's part to the top of its step, or to just past the bottom
+ * of one, where the DM's bookkeeping grows it without reading another
+ * step. The fight holds only the DM's rows, so a Next's step is small.
  */
-function farRoom(over: number): { state: RoomState; seats: Seated } {
+function farRoom(reading: number, dmAt: "top" | "bottom"): { state: RoomState; seats: Seated } {
   const state = room();
   for (let p = 3; p <= PLAYERS; p++) state.members[`p${p}`] = member(`p${p}`);
   const seats = seated(state, PLAYERS, 0);
   withRest(state, { tokens: 100, areas: 20, drawings: 1_999, rows: 20, asks: 0 });
-  state.encounter = { ...state.encounter!, activeEntryId: "dme0", started: true };
-  // The DM's part to the top of a step: lines out until it is under the top, then a note.
-  const dmLine = lineCost(state, "dm", drawing("dmdx", { ownerId: "dm1", visibility: "dm", points: [30, 20, 31, 21] }));
-  const top = Math.floor(farScene(state).dm / FAR.byteStep) * FAR.byteStep;
-  const out = Math.ceil((farScene(state).dm - top + 100) / dmLine);
-  withLines(state, [], Array.from({ length: out }, (_, k) => `dmd${1_998 - k}`));
-  padTo(state, "dmt99", "dm", top);
-  // The seats' part to the line, or past it by `over`: players' lines, then a note on a companion's token.
-  const held = FAR.sceneBytes - top + over;
+  state.encounter = { ...state.encounter!, entries: state.encounter!.entries.filter((e) => e.id.startsWith("dme")), activeEntryId: "dme0", started: true };
+  // The DM's part to its place in a step: lines out until it is under it, then a note.
+  const dmLine = lineCost(state, "dm", drawing("dmd9999", { ownerId: "dm1", visibility: "dm", points: [30, 20, 31, 21] }));
+  const dm = farScene(state).dm;
+  const floor = Math.floor(dm / FAR.byteStep) * FAR.byteStep;
+  const [target, step] = dmAt === "top" ? [floor, floor] : dm - floor > 200 ? [floor + 1, floor + FAR.byteStep] : [floor - FAR.byteStep + 1, floor];
+  let next = 1_998;
+  for (let i = 0; i < 5 && farScene(state).dm > target - 100; i++) {
+    const out = Math.ceil((farScene(state).dm - target + 100) / dmLine);
+    assert.ok(next - out >= 0, "the DM's lines reach the place");
+    withLines(state, [], Array.from({ length: out }, () => `dmd${next--}`));
+  }
+  padTo(state, "dmt99", "dm", target);
+  // The seats' part to the reading: players' lines, then a note on a companion's token.
+  const held = reading - step;
   const line = (p: number, i: number) => `pl${String(p).padStart(2, "0")}x${String(i).padStart(3, "0")}`;
   // Lines of 100 values each, so 46 players' seats hold the part in their counts. A two-digit owner's line is the largest.
   const points = Array.from({ length: 25 }, () => [10, 1, 11, 2]).flat();
@@ -250,55 +279,166 @@ function farRoom(over: number): { state: RoomState; seats: Seated } {
     }),
   );
   padTo(state, seats.tokens[SEAT.tokens * 3 + 1]!, "held", held);
-  assert.equal(roundUp(farScene(state).dm, FAR.byteStep) + farScene(state).held, FAR.sceneBytes + over, "the scene sits where it should against its far line");
+  assert.equal(roundUp(farScene(state).dm, FAR.byteStep) + farScene(state).held, reading, "the scene reads where it should against its far line");
   return { state, seats };
 }
 
+/** Each answer as taken or its refusal's code, so a case reads which ops pass without the words of each line. */
+function codes(got: ReadonlyArray<readonly [string, Answer]>): Array<[string, string]> {
+  return got.map(([what, a]) => [what, typeof a === "string" ? a : a.code]);
+}
+
+/** The ops of D9 on a far room, a player's and the DM's, each made when it is sent. */
+function farSteps(r: Room, seats: Seated): Record<string, [Who, () => Op]> {
+  const character = seats.characters[0]!;
+  const own = r.state.tokens[seats.tokens[0]!]!;
+  return {
+    "a create": ["dm", () => ({ t: "token.create", token: { id: mint.next(r), sceneId: "s1", kind: "monster", name: "Goblin", size: "medium", x: 1, y: 1, actor: { inline: actor() } } }) as Op],
+    "a creature's notes": ["dm", () => ({ t: "token.update", tokenId: "dmt1", patch: { notes: "A long note" } }) as Op],
+    "a player's line": ["p2", () => ({ t: "drawing.create", drawing: { id: mint.next(r), sceneId: "s1", kind: "line", points: [5, 5, 6, 6], style: { stroke: "#ffffff", width: 2, opacity: 1 }, ownerId: "p2", visibility: "all" } }) as Op],
+    "a character's notes": ["p1", () => ({ t: "character.update", characterId: character, patch: { actor: { notes: "A long note" } } }) as Op],
+    "a move": ["p1", () => ({ t: "token.move", tokenId: own.id, x: own.x, y: own.y + 1 }) as Op],
+    "the move's undo": ["p1", () => ({ t: "undo", scope: "play", head: r.clients.p1.head("play", "undo").id }) as Op],
+    Next: ["dm", () => ({ t: "encounter.next" }) as Op],
+    Previous: ["dm", () => ({ t: "encounter.prev" }) as Op],
+    HP: ["dm", () => ({ t: "actor.hp", target: { tokenId: "dmt2" }, change: { kind: "damage", amount: 3 } }) as Op],
+    "bulk damage": ["dm", () => ({ t: "actor.damageMany", hits: ["dmt3", "dmt4", "dmt5"].map((id) => ({ target: { tokenId: id }, amount: 2 })) }) as Op],
+    "down to 0": ["dm", () => ({ t: "actor.hp", target: { characterId: character }, change: { kind: "damage", amount: r.state.characters[character]!.actor.hp.cur } }) as Op],
+    "a death save": ["p1", () => ({ t: "actor.deathSave", target: { characterId: character }, ok: 1, fail: 0 }) as Op],
+    "a Revive": ["dm", () => ({ t: "actor.life", target: { characterId: character }, life: "alive" }) as Op],
+    "a condition": ["dm", () => ({ t: "actor.effect.add", target: { tokenId: "dmt6" }, effect: { id: mint.next(r), key: "prone" } }) as Op],
+    "an AC edit": ["p1", () => ({ t: "character.update", characterId: character, patch: { actor: { ac: 17 } } }) as Op],
+    "a roll": ["p1", () => ({ t: "dice.roll", tag: mint.next(r), to: "all", rolls: [{ formula: "1d20+5", label: "Check" }] }) as Op],
+    "a chat line": ["p1", () => ({ t: "log.chat", text: "Onward" })],
+    "a whisper": ["p1", () => ({ t: "log.whisper", to: ["dm1"], text: "A secret" }) as Op],
+    "a group delete": ["dm", () => ({ t: "token.deleteMany", tokenIds: ["dmt7", "dmt8"] }) as Op],
+    "the active row's removal": ["dm", () => ({ t: "encounter.remove", entryIds: [r.state.encounter!.activeEntryId!] }) as Op],
+  };
+}
+
+async function sendAll(r: Room, steps: Record<string, [Who, () => Op]>, names: readonly string[]): Promise<Array<[string, Answer]>> {
+  const got: Array<[string, Answer]> = [];
+  for (const what of names) {
+    const [who, op] = steps[what]!;
+    got.push([what, await answer(r, who, op())]);
+  }
+  return got;
+}
+
 /*
- * D9: a room valid today whose players' scene is past its far line, and
- * the same room one byte under it. Bookkeeping and deletions are taken in
- * both, and every op that adds things or text is refused in both, a
- * player's and the DM's alike. The refused ops go first, so the room one
- * byte under is still there when each is sent.
+ * D9, as amended by D-261113-073: ops that meet the far line stop short of
+ * it by the bookkeeping reserve, bookkeeping may fill the reserve, and past
+ * the line itself every op that grows the scene is refused, bookkeeping
+ * too. Deletions meet no line. The rooms are ones a backup valid today can
+ * be: the players' scene there on seats, the DM's part inside today's lines.
  */
-describe("a room past the far line goes on with play", () => {
-  test("D9: past the line and one byte under it, creates, notes and a player's line are refused, and moves, turns, HP, life, conditions, an AC edit, rolls, talk, an undo and a group delete taken", async (t) => {
-    const results: Array<Array<[string, Answer]>> = [];
-    for (const over of [256 * 1024, -1]) {
-      const { state, seats } = farRoom(over);
-      const r = await opened(t, state, over > 0 ? "past" : "under");
-      const character = seats.characters[0]!;
-      const own = state.tokens[seats.tokens[0]!]!;
-      const creatures = ["dmt1", "dmt2", "dmt3", "dmt4", "dmt5", "dmt6", "dmt7"];
-      const steps: Array<[string, Who, () => Op]> = [
-        ["a create", "dm", () => ({ t: "token.create", token: { id: mint.next(r), sceneId: "s1", kind: "monster", name: "Goblin", size: "medium", x: 1, y: 1, actor: { inline: actor() } } }) as Op],
-        ["a creature's notes", "dm", () => ({ t: "token.update", tokenId: creatures[0]!, patch: { notes: "A long note" } }) as Op],
-        ["a player's line", "p2", () => ({ t: "drawing.create", drawing: { id: mint.next(r), sceneId: "s1", kind: "line", points: [5, 5, 6, 6], style: { stroke: "#ffffff", width: 2, opacity: 1 }, ownerId: "p2", visibility: "all" } }) as Op],
-        ["a character's notes", "p1", () => ({ t: "character.update", characterId: character, patch: { actor: { notes: "A long note" } } }) as Op],
-        ["a move", "p1", () => ({ t: "token.move", tokenId: own.id, x: own.x, y: own.y + 1 }) as Op],
-        ["the move's undo", "p1", () => ({ t: "undo", scope: "play", head: r.clients.p1.head("play", "undo").id }) as Op],
-        ["Next", "dm", () => ({ t: "encounter.next" }) as Op],
-        ["Previous", "dm", () => ({ t: "encounter.prev" }) as Op],
-        ["HP", "dm", () => ({ t: "actor.hp", target: { tokenId: creatures[1]! }, change: { kind: "damage", amount: 3 } }) as Op],
-        ["bulk damage", "dm", () => ({ t: "actor.damageMany", hits: creatures.slice(2, 5).map((id) => ({ target: { tokenId: id }, amount: 2 })) }) as Op],
-        ["down to 0", "dm", () => ({ t: "actor.hp", target: { characterId: character }, change: { kind: "damage", amount: r.state.characters[character]!.actor.hp.cur } }) as Op],
-        ["a death save", "p1", () => ({ t: "actor.deathSave", target: { characterId: character }, ok: 1, fail: 0 }) as Op],
-        ["a Revive", "dm", () => ({ t: "actor.life", target: { characterId: character }, life: "alive" }) as Op],
-        ["a condition", "dm", () => ({ t: "actor.effect.add", target: { tokenId: creatures[5]! }, effect: { id: mint.next(r), key: "prone" } }) as Op],
-        ["an AC edit", "p1", () => ({ t: "character.update", characterId: character, patch: { actor: { ac: 17 } } }) as Op],
-        ["a roll", "p1", () => ({ t: "dice.roll", tag: mint.next(r), to: "all", rolls: [{ formula: "1d20+5", label: "Check" }] }) as Op],
-        ["a chat line", "p1", () => ({ t: "log.chat", text: "Onward" })],
-        ["a whisper", "p1", () => ({ t: "log.whisper", to: ["dm1"], text: "A secret" }) as Op],
-        ["a group delete", "dm", () => ({ t: "token.deleteMany", tokenIds: creatures.slice(6) }) as Op],
-      ];
-      const got: Array<[string, Answer]> = [];
-      for (const [what, who, op] of steps) got.push([what, await answer(r, who, op())]);
-      results.push(got);
-    }
-    assert.deepEqual(results[1], results[0], "one byte under the line answers as past it");
-    const full = { code: "quota", message: sceneFullWords(FAR.sceneBytes) };
+describe("a scene at its far line goes on with play", () => {
+  test("D9: inside the bookkeeping reserve, creates, notes and a player's line are refused, and moves, turns, HP, life, conditions, an AC edit, rolls, talk, an undo and a group delete taken", async (t) => {
+    const { state, seats } = farRoom(FAR.sceneBytes - BOOKKEEPING_RESERVE.scene + 1, "bottom");
+    const r = await opened(t, state, "reserve");
+    const steps = farSteps(r, seats);
     const refused = ["a create", "a creature's notes", "a player's line", "a character's notes"];
-    assert.deepEqual(results[0], results[0]!.map(([what]) => [what, refused.includes(what) ? full : "taken"]), "creates, notes and lines are refused in the scene's words, and the rest taken");
+    const got = codes(await sendAll(r, steps, Object.keys(steps)));
+    assert.deepEqual(got, Object.keys(steps).map((what) => [what, refused.includes(what) ? "quota" : "taken"]));
+  });
+
+  test("D9: past the line, creates, notes, a player's line, a condition, a chat line and a Next are refused, and a whisper, a group delete and the active row's removal taken", async (t) => {
+    const { state, seats } = farRoom(FAR.sceneBytes + 1, "top");
+    const r = await opened(t, state, "past");
+    const steps = farSteps(r, seats);
+    const names = ["a create", "a creature's notes", "a player's line", "a character's notes", "a condition", "a chat line", "Next", "a whisper", "a group delete", "the active row's removal"];
+    const taken = ["a whisper", "a group delete", "the active row's removal"];
+    const got = codes(await sendAll(r, steps, names));
+    assert.deepEqual(got, names.map((what) => [what, taken.includes(what) ? "taken" : "quota"]));
+  });
+
+  test("the scene's far line reads the DM's part by its step: two rooms whose DM parts differ inside one step answer a player's line alike", async (t) => {
+    const answers: Answer[] = [];
+    const steps: number[] = [];
+    for (const less of [0, 40]) {
+      const { state, seats } = farRoom(FAR.sceneBytes, "top");
+      // Fewer of the DM's creatures in the second room: its DM part is lower, in the same step.
+      const tokens = { ...state.tokens };
+      for (let i = 0; i < less; i++) delete tokens[`dmt${50 + i}`];
+      state.tokens = tokens;
+      steps.push(roundUp(farScene(state).dm, FAR.byteStep));
+      const r = await opened(t, state, `less ${less}`);
+      answers.push(await answer(r, "p2", farSteps(r, seats)["a player's line"]![1]()));
+    }
+    assert.equal(steps[1], steps[0], "both DM parts read one step");
+    assert.equal(typeof answers[0], "object", "the line passes the line");
+    assert.deepEqual(answers[1], answers[0], "the second room answers as the first");
+  });
+});
+
+/** A room whose only bulk is `scenes` empty per-player scenes of the widest size, with P1's hero on s1. */
+function perPlayerRoom(scenes: number): RoomState {
+  const state = room();
+  state.characters.hero = character("hero", { name: "Hero", ownerIds: ["p1"] });
+  state.tokens.hero = token("hero", { kind: "pc", name: "Hero", x: 5, y: 5, actor: { ref: "hero" } });
+  for (let i = 0; i < scenes; i++) {
+    state.scenes[`pp${i}`] = scene(`pp${i}`, { order: 10 + i, bounds: { w: LIMITS.sceneCells, h: LIMITS.sceneCells }, fogEnabled: true, vision: { on: true, light: "bright", perPlayer: true } });
+  }
+  return state;
+}
+
+/*
+ * D9 on the room's line: a room past it, or inside its bookkeeping reserve,
+ * on per-player sight's reserves alone, which a player's op reads at the
+ * widest and the DM's at today's roster. A join changes neither reading.
+ */
+describe("a room past the far line on per-player sight alone", () => {
+  const player = (r: Room): Record<string, [Who, () => Op]> => ({
+    "a line": ["p1", () => ({ t: "drawing.create", drawing: { id: mint.next(r), sceneId: "s1", kind: "line", points: [5, 5, 6, 6], style: { stroke: "#ffffff", width: 2, opacity: 1 }, ownerId: "p1", visibility: "all" } }) as Op],
+    "character notes": ["p1", () => ({ t: "character.update", characterId: "hero", patch: { actor: { notes: "A long note" } } }) as Op],
+    "a move": ["p1", () => ({ t: "token.move", tokenId: "hero", x: 6, y: 5 }) as Op],
+    "a roll": ["p1", () => ({ t: "dice.roll", tag: mint.next(r), to: "all", rolls: [{ formula: "1d20+5", label: "Check" }] }) as Op],
+    "a chat line": ["p1", () => ({ t: "log.chat", text: "Onward" })],
+    "a whisper": ["p1", () => ({ t: "log.whisper", to: ["dm1"], text: "A secret" }) as Op],
+  });
+  const goblin = (r: Room): Op => ({ t: "token.create", token: { id: mint.next(r), sceneId: "s1", kind: "monster", name: "Goblin", size: "medium", x: 1, y: 1, actor: { inline: actor() } } }) as Op;
+
+  /** The room with `scenes` per-player scenes, opened, and the player's answers to `names`, before six joins and after them unless `joins` is false. */
+  async function beforeAndAfter(t: TestContext, scenes: number, names: readonly string[], joins = true): Promise<{ r: Room; rounds: Array<Array<[string, string]>> }> {
+    const state = perPlayerRoom(scenes);
+    assert.ok(farRoomBytes(state, false) <= FAR.roomBytes - BOOKKEEPING_RESERVE.room, "today's roster reads under the line ops meet");
+    const r = await opened(t, state, `${scenes} scenes`);
+    const rounds: Array<Array<[string, string]>> = [];
+    for (const round of joins ? ["before the joins", "after them"] : ["without joins"]) {
+      if (round === "after them") {
+        for (let i = 0; i < 6; i++) await r.actor.sys(joinOp(mint.next(r), `Wren ${i}`));
+        await r.settle();
+      }
+      rounds.push(codes(await sendAll(r, player(r), names)));
+    }
+    return { r, rounds };
+  }
+
+  test("D9: past the line at the widest, a player's line and character notes are refused and their move and whisper taken, and the DM's create, read at today's roster, taken", async (t) => {
+    assert.ok(farRoomBytes(perPlayerRoom(13), true) > FAR.roomBytes, "13 scenes read past the line at the widest");
+    const { r, rounds } = await beforeAndAfter(t, 13, ["a line", "character notes", "a move", "a whisper"], false);
+    assert.deepEqual(rounds[0], [["a line", "quota"], ["character notes", "quota"], ["a move", "taken"], ["a whisper", "taken"]]);
+    assert.equal(await answer(r, "dm", goblin(r)), "taken", "the DM's create reads today's roster");
+  });
+
+  test("D9: past the line at the widest, six joins change no answer of a player's", async (t) => {
+    const { rounds } = await beforeAndAfter(t, 13, ["a line", "character notes", "a move", "a whisper"]);
+    assert.deepEqual(rounds[1], rounds[0], "alike after six joins");
+  });
+
+  test("D9: past the line, a player's roll and chat line, which grow the room, are refused before six joins and after", async (t) => {
+    const { rounds } = await beforeAndAfter(t, 13, ["a roll", "a chat line"]);
+    assert.deepEqual(rounds[0], [["a roll", "quota"], ["a chat line", "quota"]]);
+    assert.deepEqual(rounds[1], rounds[0], "alike after six joins");
+  });
+
+  test("D9: inside the room's bookkeeping reserve, a player's line and character notes are refused and their move, roll, chat line and whisper taken, before six joins and after", async (t) => {
+    const reading = farRoomBytes(perPlayerRoom(11), true);
+    assert.ok(reading > FAR.roomBytes - BOOKKEEPING_RESERVE.room && reading <= FAR.roomBytes, `11 scenes read inside the reserve at the widest: ${reading}`);
+    const names = ["a line", "character notes", "a move", "a roll", "a chat line", "a whisper"];
+    const { rounds } = await beforeAndAfter(t, 11, names);
+    assert.deepEqual(rounds[0], names.map((what) => [what, what === "a line" || what === "character notes" ? "quota" : "taken"]));
+    assert.deepEqual(rounds[1], rounds[0], "alike after six joins");
   });
 });
 
