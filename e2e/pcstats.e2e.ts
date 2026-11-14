@@ -915,9 +915,10 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
   });
 
   test("lp22-r1-a. a condition whose id holds a quote: Back from its form hands focus to its row, found by the id escaped (LP22-ASTRA-01)", async () => {
-    // An op may name an effect with any id of 1 to 64 characters.
+    // A new condition's own id is version 7, which holds no quote. A group save's conditions keep the ids made with its plan
+    // (shared/protocol.ts ID_RULES), and a room's stored ones keep theirs, so a row can still hold any id of 1 to 64 characters.
     const effectId = 'lp22 "r1" a';
-    await ops.send({ t: "actor.effect.add", target: { characterId: run.bree.characterId }, effect: { id: effectId, key: "blinded" } });
+    await ops.send({ t: "actor.outcome", plan: uuidv7(), targets: [{ target: { characterId: run.bree.characterId }, effects: [{ id: effectId, key: "blinded" }] }] });
     // A failure leaves Bree as the next step expects her, without Blinded (LP22-OPUS-6).
     try {
       const conditions = await breeConditions(ana);
