@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { appendFile, mkdir, open, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
+import type { ClientConfig } from "pg";
 import type { Platform } from "../contract.ts";
 import { renameRetrying, syncDir, syncFile, writeDurable } from "./durable.ts";
 import { rotateIfLarge } from "./logs.ts";
@@ -22,6 +23,23 @@ const run = promisify(execFile);
 
 export const DATABASE = "raccoon";
 export const USER = "raccoon";
+
+/** How long one statement of the supervisor's may run: its own are a few rows each. */
+export const DB_STATEMENT_MS = 60_000;
+/** A restore's statements: dropping or copying a whole database takes as long as the database is big. */
+export const RESTORE_STATEMENT_MS = 600_000;
+
+/**
+ * Every connection the supervisor opens to its cluster. A connection
+ * PostgreSQL has not finished in 30 s fails, and so does a statement it has
+ * not answered in `statementMs`: the server ends it (statement_timeout), and
+ * should the server not answer at all, the client gives up 10 s later
+ * (query_timeout). So no part of a start, and no Quit queued behind one,
+ * waits on the database for ever.
+ */
+export function dbConfig(connectionString: string, statementMs = DB_STATEMENT_MS): ClientConfig {
+  return { connectionString, connectionTimeoutMillis: 30_000, statement_timeout: statementMs, query_timeout: statementMs + 10_000 };
+}
 
 export class DatabaseFailed extends Error {
   readonly logLine: string;
@@ -91,8 +109,10 @@ export type ClusterOptions = {
   renameDir?: (from: string, to: string) => Promise<void>;
   /** Tests only: how long one pg_ctl start may run before it is ended. PG_CTL_START_LIMIT_MS by default. */
   startLimitMs?: number;
-  /** Tests only: the signal that ends pg_ctl, for a stand-in that still acts after it is told to end, as a Windows process can. SIGKILL by default. */
-  startKillSignal?: NodeJS.Signals;
+  /** Tests only: the signal that ends initdb and pg_ctl, for a stand-in that still acts after it is told to end, as a Windows process can. SIGKILL by default. */
+  killSignal?: NodeJS.Signals;
+  /** Where a program that will not end is reported. */
+  log?: (msg: string) => void;
   /** The path PostgreSQL's programs are given for one of these paths (pgPaths.ts). The path itself by default. */
   pgPath?: (path: string) => string;
 };
@@ -138,7 +158,7 @@ export class Cluster {
 
   /** The major version of the bundled programs, from `postgres --version`. */
   async bundledMajor(): Promise<number> {
-    const { stdout } = await run(this.program("postgres"), ["--version"], { env: pgEnv(), windowsHide: true });
+    const { stdout } = await run(this.program("postgres"), ["--version"], { env: pgEnv(), windowsHide: true, timeout: 30_000 });
     const major = Number(/\(PostgreSQL\) (\d+)/.exec(stdout)?.[1]);
     if (!Number.isInteger(major)) throw new Error(`postgres --version said: ${stdout.trim()}`);
     return major;
@@ -191,7 +211,7 @@ export class Cluster {
     const pwfile = `${this.opts.pgData}-pw-${randomBytes(6).toString("hex")}`;
     await writeFile(pwfile, `${this.opts.password}\n`, { mode: 0o600 });
     try {
-      await run(
+      await runToExit(
         this.program("initdb"),
         [
           `--pgdata=${this.pgPath(staging)}`,
@@ -203,12 +223,12 @@ export class Cluster {
           "--locale-provider=builtin",
           "--builtin-locale=C.UTF-8",
         ],
-        // A cancelled init ends initdb. The staging folder it leaves is moved aside by the next one.
-        { env: pgEnv({ LC_ALL: "C" }), windowsHide: true, maxBuffer: 16 * 1024 * 1024, ...(signal ? { signal } : {}) },
+        // A cancelled init ends initdb and waits for its exit. The staging folder it leaves is moved aside by the next one.
+        { env: pgEnv({ LC_ALL: "C" }), ...(signal ? { signal } : {}), ...(this.opts.killSignal ? { killSignal: this.opts.killSignal } : {}), ...(this.opts.log ? { log: this.opts.log } : {}) },
       );
     } catch (err) {
       const e = err as { stderr?: string; message: string };
-      const line = (e.stderr ?? e.message).trim().split(/\r?\n/).at(-1) ?? e.message;
+      const line = (e.stderr || e.message).trim().split(/\r?\n/).at(-1) || e.message;
       throw new DatabaseFailed(line);
     } finally {
       await rm(pwfile, { force: true });
@@ -331,51 +351,122 @@ export class Cluster {
   /**
    * pg_ctl start on a free loopback port, three tries, so another program
    * taking the port in between is no failure. A failure reports what this
-   * start wrote to the log, never an older run's last line. A start that
-   * fails, runs out of time or is cancelled stops any postmaster it launched
-   * before it answers, since nothing else owns that postmaster then.
+   * start wrote to the log, never an older run's last line.
+   *
+   * The postmaster an attempt launches is this start's until its end is
+   * seen (D-261114-029, 030). pg_ctl -w answers only once its postmaster is
+   * ready, has died, or its own wait ran out. So a cancel never ends
+   * pg_ctl: the postmaster is stopped as soon as postmaster.pid names it,
+   * and pg_ctl answers when it sees that. A postmaster still alive after
+   * pg_ctl gave up is waited for until it accepts connections or dies,
+   * however long its crash replay takes. Only a pg_ctl past its own wait by
+   * 30 s is ended, and then waited for.
    */
   async start(signal?: AbortSignal): Promise<number> {
     rotateIfLarge(this.opts.logFile);
     await this.recordBoot();
     let lastError: DatabaseFailed | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
+      if (signal?.aborted) break;
       const port = await (this.opts.pickPort ?? loopbackPort)();
       const offset = await sizeOf(this.opts.logFile);
-      try {
-        await runToExit(
-          this.program("pg_ctl"),
-          ["start", "-D", this.pgPath(this.opts.pgData), "-l", this.pgPath(this.opts.logFile), "-w", "-t", String(PG_CTL_WAIT_S), "-o", `-p ${port}`],
-          { env: pgEnv(), limitMs: this.opts.startLimitMs ?? PG_CTL_START_LIMIT_MS, ...(signal ? { signal } : {}), ...(this.opts.startKillSignal ? { killSignal: this.opts.startKillSignal } : {}) },
-        );
+      const pgCtl = runToExit(
+        this.program("pg_ctl"),
+        ["start", "-D", this.pgPath(this.opts.pgData), "-l", this.pgPath(this.opts.logFile), "-w", "-t", String(PG_CTL_WAIT_S), "-o", `-p ${port}`],
+        {
+          env: pgEnv(),
+          limitMs: this.opts.startLimitMs ?? PG_CTL_START_LIMIT_MS,
+          ...(this.opts.killSignal ? { killSignal: this.opts.killSignal } : {}),
+          ...(this.opts.log ? { log: this.opts.log } : {}),
+        },
+      );
+      const answered = pgCtl.then(
+        () => null,
+        (err: unknown) => err,
+      );
+      const stopping = signal ? this.stopOnCancel(signal, answered) : Promise.resolve();
+      const failure = await answered;
+      await stopping;
+      if (signal?.aborted) break;
+      if (failure === null || (await this.becameReady(signal))) {
         this.port = port;
         const pid = await this.pidFilePid();
         const stamp = pid === null ? null : await this.proc.stamp(pid);
         this.started = pid !== null && stamp !== null ? { pid, stamp } : null;
         return port;
-      } catch (err) {
-        // pg_ctl has exited by now (runToExit waits for that), so whatever it launched is in postmaster.pid.
-        await this.stopLaunched();
-        if (err instanceof Ended) throw new DatabaseFailed(err.message);
-        const lines = await linesSince(this.opts.logFile, offset);
-        const e = err as { stderr?: string; message?: string };
-        const said = (e.stderr ?? "").trim().split(/\r?\n/).at(-1) || (e.message ?? "").split(/\r?\n/)[0] || "pg_ctl start failed";
-        lastError = new DatabaseFailed(lines.at(-1) ?? said);
-        // PostgreSQL's last words for a taken port are "could not create any TCP/IP sockets", so every line counts.
-        if (!lines.some((line) => /could not bind|address already in use/i.test(line))) break;
       }
+      if (signal?.aborted) break;
+      await this.stopLaunched();
+      const lines = await linesSince(this.opts.logFile, offset);
+      if (failure instanceof Ended) {
+        lastError = new DatabaseFailed(failure.message);
+        break;
+      }
+      const e = failure as { stderr?: string; message?: string };
+      const said = (e.stderr ?? "").trim().split(/\r?\n/).at(-1) || (e.message ?? "").split(/\r?\n/)[0] || "pg_ctl start failed";
+      lastError = new DatabaseFailed(lines.at(-1) ?? said);
+      // PostgreSQL's last words for a taken port are "could not create any TCP/IP sockets", so every line counts.
+      if (!lines.some((line) => /could not bind|address already in use/i.test(line))) break;
+    }
+    if (signal?.aborted) {
+      await this.stopLaunched();
+      throw new DatabaseFailed("pg_ctl start was cancelled");
     }
     throw lastError ?? new DatabaseFailed("pg_ctl start failed");
   }
 
   /**
-   * After a start that failed, the postmaster it launched, if one still
-   * runs: pg_ctl's own wait can run out while the postmaster recovers, and
-   * ending pg_ctl leaves the postmaster running. It is stopped only once
-   * leftover() confirms it is this folder's postgres, and the start's own
-   * failure is what the caller hears, whatever this finds.
+   * On a cancel, stops the postmaster as soon as postmaster.pid names it,
+   * and keeps looking until pg_ctl has answered, which it does once it sees
+   * its postmaster end.
+   */
+  private async stopOnCancel(signal: AbortSignal, answered: Promise<unknown>): Promise<void> {
+    if (!signal.aborted) await new Promise<void>((resolve) => {
+      signal.addEventListener("abort", () => resolve(), { once: true });
+      void answered.then(() => resolve());
+    });
+    let done = false;
+    void answered.then(() => (done = true));
+    while (signal.aborted && !done) {
+      if (existsSync(join(this.opts.pgData, "postmaster.pid"))) await this.stopLaunched();
+      await Promise.race([answered, new Promise((resolve) => setTimeout(resolve, 100))]);
+    }
+  }
+
+  /**
+   * After pg_ctl gave up, the postmaster it launched, if one still runs: its
+   * crash replay can outlast any wait. It is waited for until postmaster.pid
+   * says it accepts connections (true) or it dies (false). A cancel stops it.
+   */
+  private async becameReady(signal: AbortSignal | undefined): Promise<boolean> {
+    const pidFile = join(this.opts.pgData, "postmaster.pid");
+    for (const until = Date.now() + LAUNCH_WAIT_MS; !existsSync(pidFile) && Date.now() < until; ) await new Promise((resolve) => setTimeout(resolve, 100));
+    const found = await this.leftover().catch((): Leftover => ({ kind: "none" }));
+    if (found.kind !== "running") return false;
+    this.opts.log?.(`PostgreSQL (pid ${found.pid}) still starts after pg_ctl stopped waiting, so the start waits for it`);
+    for (;;) {
+      if (signal?.aborted) return false;
+      if (!isAlive(found.pid)) return false;
+      const lines = await readFile(pidFile, "utf8").then((text) => text.split(/\r?\n/), () => [] as string[]);
+      if (Number(lines[0]) !== found.pid) return false;
+      // Line 8 of postmaster.pid is its state, "ready" once it accepts connections (PostgreSQL's LOCK_FILE_LINE_PM_STATUS).
+      if (lines[7]?.trim() === "ready") return true;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+
+  /**
+   * After a start that failed or was cancelled, the postmaster it launched,
+   * if one still runs: one a cancel left, or one that wrote postmaster.pid
+   * only after pg_ctl's exit. It is stopped only once leftover() confirms it
+   * is this folder's postgres, and the start's own failure is what the
+   * caller hears, whatever this finds.
    */
   private async stopLaunched(): Promise<void> {
+    // pg_ctl can be gone before the postmaster it launched has written
+    // postmaster.pid, so the file's absence is believed only after a moment.
+    const pidFile = join(this.opts.pgData, "postmaster.pid");
+    for (const until = Date.now() + LAUNCH_WAIT_MS; !existsSync(pidFile) && Date.now() < until; ) await new Promise((resolve) => setTimeout(resolve, 100));
     let found: Leftover;
     try {
       found = await this.leftover();
@@ -449,14 +540,24 @@ export class Cluster {
   }
 }
 
-/** pg_ctl start's own wait for the postmaster to be ready (-t), in seconds. */
-export const PG_CTL_WAIT_S = 120;
+/**
+ * pg_ctl start's own wait for the postmaster to be ready (-t), in seconds.
+ * Crash replay can take that long on a slow disk: max_wal_size is a soft
+ * limit, so it caps nothing. pg_ctl answers at once when the postmaster
+ * dies, so a long wait only waits on one that is alive and replaying, and
+ * the window says so meanwhile (a `stalled` part). A short one would stop
+ * the replay, and every Try again would replay from the same checkpoint.
+ */
+export const PG_CTL_WAIT_S = 1800;
 /** A pg_ctl start still running this long after its own wait has ended is ended. */
 export const PG_CTL_START_LIMIT_MS = (PG_CTL_WAIT_S + 30) * 1000;
 /** After a failed run's exit, how long its stderr's last words are waited for. */
 const STDERR_DRAIN_MS = 1_000;
-/** How long a run that was ended is given to report its exit. */
+/** How long a run that was ended is given to report its exit before that is logged, and how often again after. */
 const KILL_WAIT_MS = 10_000;
+const KILL_WAIT_AGAIN_MS = 60_000;
+/** After a pg_ctl start that failed, how long a postmaster it launched is given to write postmaster.pid. */
+const LAUNCH_WAIT_MS = 3_000;
 
 /** A run this ended: it took longer than its limit, or its caller cancelled it. */
 export class Ended extends Error {}
@@ -470,11 +571,18 @@ export class Ended extends Error {}
  * answers only once every pipe has closed, would wait until PostgreSQL
  * stops. So stdout gets no pipe at all, and stderr is read for a moment
  * after a failed exit and then let go. A run still going after `limitMs`,
- * or when `signal` aborts, is ended, and fails with words only once its
- * exit is seen, so its caller never looks for what it launched while it
- * could still launch it. Windows' TerminateProcess only begins the end.
+ * or when `signal` aborts, is ended, and answers only once its exit is
+ * seen, however long that takes, so its caller never looks for what it
+ * launched, or lets the data folder go, while it could still act. Windows'
+ * TerminateProcess only begins the end. An end not seen in 10 s is logged,
+ * and again each minute. This is the one way the cluster runs a program
+ * that changes the data folder (initdb and pg_ctl start).
  */
-export function runToExit(program: string, args: readonly string[], opts: { env: NodeJS.ProcessEnv; limitMs: number; signal?: AbortSignal; killSignal?: NodeJS.Signals }): Promise<void> {
+export function runToExit(
+  program: string,
+  args: readonly string[],
+  opts: { env: NodeJS.ProcessEnv; limitMs?: number; signal?: AbortSignal; killSignal?: NodeJS.Signals; log?: (msg: string) => void; endWaitMs?: number },
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, { env: opts.env, windowsHide: true, stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
@@ -491,7 +599,7 @@ export function runToExit(program: string, args: readonly string[], opts: { env:
       if (settled) return;
       settled = true;
       clearTimeout(limit);
-      clearTimeout(killWait);
+      clearInterval(killWait);
       opts.signal?.removeEventListener("abort", cancel);
       child.stderr.destroy();
       if (err) reject(err);
@@ -502,11 +610,16 @@ export function runToExit(program: string, args: readonly string[], opts: { env:
       ended = new Ended(why);
       clearTimeout(limit);
       child.kill(opts.killSignal ?? "SIGKILL");
-      const answer = ended;
-      killWait = setTimeout(() => settle(answer), KILL_WAIT_MS);
+      const endedAt = Date.now();
+      const report = (): void => opts.log?.(`${what} (pid ${child.pid}) has not ended ${Math.round((Date.now() - endedAt) / 1000)} s after it was ended, so the data folder stays locked until it does`);
+      killWait = setTimeout(() => {
+        report();
+        killWait = setInterval(report, KILL_WAIT_AGAIN_MS);
+      }, opts.endWaitMs ?? KILL_WAIT_MS);
     };
-    const what = `${basename(program)} ${args[0] ?? ""}`.trim();
-    const limit = setTimeout(() => end(`${what} did not finish in ${Math.round(opts.limitMs / 1000)} s`), opts.limitMs);
+    const what = `${basename(program)} ${args[0]?.startsWith("-") ? "" : (args[0] ?? "")}`.trim();
+    const limitMs = opts.limitMs;
+    const limit = limitMs === undefined ? undefined : setTimeout(() => end(`${what} did not finish in ${Math.round(limitMs / 1000)} s`), limitMs);
     const cancel = (): void => end(`${what} was cancelled`);
     if (opts.signal?.aborted) cancel();
     else opts.signal?.addEventListener("abort", cancel, { once: true });
