@@ -10,7 +10,8 @@ import type { StopNote } from "./teleport.ts";
  * writes it only when it changes, never on every pointer frame, and the
  * movement layer draws the red outline and the label from it. `noWay`
  * marks a drag that found no way a creature it drags beside it can follow
- * (drop.ts holdLabel, docs/design/design-v1-attach.md 4.2).
+ * (drop.ts holdLabel, docs/design/design-v1-attach.md 4.2), or a creature
+ * that closes the way (LP40-MOVE-2).
  */
 export type Hold = { tokenId: string; at: Point; blocker: StopBlocker; noWay?: true };
 

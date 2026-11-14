@@ -1159,7 +1159,7 @@ export function namedFollower(state: DropView, labels: Labels, plan: DropPlan, f
   return creature ? { ...plan, stop: { ...plan.stop, searched: true, creature: displayName(creature, labels) } } : plan;
 }
 
-/** What the map says while a drag is held at a wall or a ledge, or where a creature it drags finds no way through with it. */
+/** What the map says while a drag is held at a wall or a ledge, or where a creature it drags finds no way through with it, or a creature closes the way. */
 export function holdLabel(blocker: StopBlocker, noWay = false): string {
   if (noWay) return "No way through";
   return blocker === "wall" ? "Wall in the way" : blocker === "ledge" ? "Ledge in the way" : "Something in the way";
