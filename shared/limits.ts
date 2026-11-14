@@ -1464,6 +1464,15 @@ function ownsRow(state: RoomState, memberId: string, entry: InitEntry): boolean 
   return token.ownerIds.includes(memberId) || (seatCharacter(state, token)?.ownerIds.includes(memberId) ?? false);
 }
 
+/** Everyone ownsRow counts the row for: its character's owners, its creature's own and its creature's character's. */
+function rowOwners(state: RoomState, entry: InitEntry): string[] {
+  const out: string[] = [];
+  if (entry.characterId !== undefined) out.push(...(ownEntry(state.characters, entry.characterId)?.ownerIds ?? []));
+  const token = entry.tokenId === undefined ? undefined : ownEntry(state.tokens, entry.tokenId);
+  if (token) out.push(...token.ownerIds, ...(seatCharacter(state, token)?.ownerIds ?? []));
+  return out;
+}
+
 /** The scene `sceneId` belongs to with all its floors, the scope of the token and riding area seats. */
 function sceneGroup(state: RoomState, sceneId: string): ReadonlySet<string> {
   return new Set(floorsOf(state, sceneId).map((s) => s.id)).add(sceneId);
@@ -1580,11 +1589,7 @@ export function seatHeld(state: RoomState, sceneId: string | null): SeatHeld {
   for (const held of points.values()) pointValues += Math.min(held, SEAT.pointValues);
   const rows = heldFirst(
     state.encounter?.entries ?? [],
-    (e) => {
-      const owners = new Set<string>();
-      for (const id of Object.keys(state.members)) if (ownsRow(state, id, e)) owners.add(id);
-      return firstPlayer(state, [...owners]);
-    },
+    (e) => firstPlayer(state, rowOwners(state, e)),
     SEAT.rows,
   );
   const casts = heldFirst(Object.values(state.casts), (c) => player(c.by), ASKS_PER_MEMBER_SCENE);
