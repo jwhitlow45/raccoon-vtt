@@ -741,7 +741,7 @@ describe("the reducer projects only through calls that take the op's envelope", 
    * calls live projections. The reducer takes only these from it, each
    * read and found to project nothing, so the walk stops there.
    */
-  const FROM_PERMISSIONS = new Set(["ANSWERED_MEANWHILE", "ASK_CLOSED", "MOVE_PLAYERS_FIRST_BACK", "SETTLED_MEANWHILE", "expectOf", "fixPending", "playersTypeTotals", "promptRefusal"]);
+  const FROM_PERMISSIONS = new Set(["ANSWERED_MEANWHILE", "ASK_CLOSED", "CHANGED_SINCE", "MOVE_PLAYERS_FIRST_BACK", "SETTLED_MEANWHILE", "expectOf", "fixPending", "playersTypeTotals", "promptRefusal"]);
 
   type Import = { from: string; names: string[] };
   function importsOf(file: string): Import[] {

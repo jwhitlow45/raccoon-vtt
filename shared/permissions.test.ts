@@ -541,7 +541,7 @@ describe("areas and drawings", () => {
     assert.equal(code({ t: "sys.restore", entries: [{ key: "token:own", value: null, expectRev: 0 }], from: "undo" }, P1, state), "forbidden");
   });
 
-  test("a player's restore of a drawing off the player scene answers gone, whether that scene is there or deleted", () => {
+  test("a player's restore putting back a drawing off the player scene answers gone, whether that scene is there or deleted", () => {
     const state = setup();
     state.drawings.away = drawing("away", { ownerId: "p1", sceneId: "s2" });
     const restore = (entry: { key: string; value: unknown }): Op => ({ t: "sys.restore", entries: [entry], from: "undo", deps: true });
@@ -549,8 +549,8 @@ describe("areas and drawings", () => {
     assert.equal(code(restore({ key: "drawing:gone1", value: drawing("gone1", { ownerId: "p1" }) }), P1, state), "ok");
     assert.equal(code(restore({ key: "drawing:gone2", value: drawing("gone2", { ownerId: "p1", sceneId: "s2" }) }), P1, state), "gone");
     assert.equal(code(restore({ key: "drawing:gone3", value: drawing("gone3", { ownerId: "p1", sceneId: "deleted" }) }), P1, state), "gone");
-    // Taking back a drawing that now stands on another scene.
-    assert.equal(code(restore({ key: "drawing:away", value: null }), P1, state), "gone");
+    // Taking back a drawing that now stands on another scene answers as for a deleted one: the player's copy does not hold it.
+    assert.equal(code(restore({ key: "drawing:away", value: null }), P1, state), "invalid");
   });
 
   test("a player's kept ruler stands only on tokens they can see", () => {

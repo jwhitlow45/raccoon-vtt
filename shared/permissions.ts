@@ -134,6 +134,13 @@ export const NO_DRAWING = "The DM has not let you draw.";
 export const NO_DRAWING_BACK = "the DM has not let you draw";
 const NOT_YOURS = refuse("forbidden", "that is not yours");
 const GONE = refuse("gone", "that is not here");
+/**
+ * A restore's guard refusal. It does not say who: the change may have come
+ * from another DM, or from this DM's own other device, which is its own
+ * member with its own undo stack. The reducer's guard words it (reducer/misc.ts
+ * restore), and so does a player's restore of a drawing their copy does not hold.
+ */
+export const CHANGED_SINCE = "it was changed since";
 
 /** A token's light is its owners' to set (docs/design/design-v1-maps-vision.md 4.3.9). `partyVision` stays the DM's. */
 const OWNER_TOKEN_FIELDS = new Set(["image", "altImages", "rotation", "elevation", "name", "publicName", "notes", "rangeRings", "light"]);
@@ -1435,6 +1442,7 @@ function forPlayer(op: Op, c: Check): Decision {
       const quiet = new Set(op.quiet ?? []);
       // Under a climb, each branch below takes its change between the climb's two floors as a pose (8).
       const climbed = (current: { sceneId: string }, restored: { sceneId: string }) => climbMoves(op.climb, op.from, current, restored);
+      let unseen = false;
       for (const entry of op.entries) {
         if (entry.key.startsWith("token:")) {
           // An undo retraces a move that was allowed when made. A redo makes it again, so walls stop it as they would a new
@@ -1470,10 +1478,11 @@ function forPlayer(op: Op, c: Check): Decision {
         const found = ownEntry(c.state.drawings, entry.key.slice("drawing:".length));
         // Only on the scene the player holds, as a drawing op is, so an undo never writes off it and answers
         // the same whether a scene the players left is still there or was deleted since.
-        if ((before && !holds(before.sceneId)) || (found && !holds(found.sceneId))) return GONE;
-        // There, a drawing the sender's copy does not hold is absent to them, the DM's hidden one as a deleted one, and
-        // the reducer's guard then answers that it was changed since (reducer/misc.ts restore).
+        if (before && !holds(before.sceneId)) return GONE;
+        // A drawing the sender's copy does not hold, off those floors or hidden there, is absent to them, as a deleted one.
+        // The reducer's guard reads the room, where it may still match, so the answer for a deleted one is given here.
         const current = found && c.visible(entry.key) ? found : undefined;
+        if (found && !current) unseen = true;
         if (before && (before.ownerId !== c.actor.memberId || before.visibility !== "all")) return FORBIDDEN;
         if (current && (current.ownerId !== c.actor.memberId || current.visibility !== "all")) return FORBIDDEN;
         // A kept ruler put back stands only on creatures the sender sees on its floor, as a new one does.
@@ -1482,7 +1491,9 @@ function forPlayer(op: Op, c: Check): Decision {
         // Taking one away stays allowed.
         if (before && before.kind !== "ruler" && !drawsAllowed(c.state.meta.settings, c.actor.memberId)) return refuse("forbidden", NO_DRAWING_BACK);
       }
-      return OK;
+      // Last, as the reducer's guard comes after every entry's check here. Ids are never used twice, so a guard that expects
+      // no drawing never meets one the sender's copy does not hold.
+      return unseen ? refuse("invalid", CHANGED_SINCE) : OK;
     }
   }
 }

@@ -30,6 +30,14 @@ function twins(base: RoomState): [RoomState, RoomState] {
 describe("a player's clear and restore read their own copy", () => {
   const base = room({ drawings: { mine: drawing("mine"), other: drawing("other", { sceneId: "s1" }) } });
 
+  /** What P1 gets for a restore: the permission check's refusal, the reducer's, or taken. */
+  function answer(state: RoomState, op: Op): unknown {
+    const allowed = canApply(op, P1, state, deps);
+    if (!allowed.ok) return [allowed.code, allowed.message];
+    const r = run(state, op, P1);
+    return r.ok ? "taken" : [r.code, r.message];
+  }
+
   test("a clear takes only the drawings the copy holds, and an older op took them all", () => {
     const [a] = twins(base);
     const cleared = run(a, { t: "drawing.clear", sceneId: "s1", scope: "own" }, P1);
@@ -49,11 +57,34 @@ describe("a player's clear and restore read their own copy", () => {
   test("undoing their drawing's create answers that it was changed since, hidden or deleted alike", () => {
     const made = drawing("mine");
     const undo: Op = { t: "sys.restore", entries: [{ key: "drawing:mine", value: null, expectHash: guardHash("drawing:mine", made) }], from: "undo" };
-    for (const twin of twins(base)) {
-      assert.deepEqual(canApply(undo, P1, twin, deps), { ok: true });
-      const r = run(twin, undo, P1);
-      assert.deepEqual(r.ok ? null : [r.code, r.message], ["invalid", CHANGED_SINCE]);
-    }
+    for (const twin of twins(base)) assert.deepEqual(answer(twin, undo), ["invalid", CHANGED_SINCE]);
+  });
+
+  test("undoing a kept ruler's create answers that it was changed since, its creature hidden or the ruler deleted alike", () => {
+    const ruler = drawing("r", { kind: "ruler", anchors: ["orc", null], points: [0, 0, 2, 2] });
+    const undo: Op = { t: "sys.restore", entries: [{ key: "drawing:r", value: null, expectHash: guardHash("drawing:r", ruler) }], from: "undo" };
+    const hidden = room({ tokens: { orc: token("orc", { visibility: "dm" }) }, drawings: { r: ruler } });
+    const deleted = room({ tokens: { orc: token("orc", { visibility: "dm" }) } });
+    for (const twin of [hidden, deleted]) assert.deepEqual(answer(twin, undo), ["invalid", CHANGED_SINCE]);
+    assert.equal(answer(room({ tokens: { orc: token("orc") }, drawings: { r: ruler } }), undo), "taken");
+  });
+
+  test("undoing a create on a map the players left answers the same whether the drawing is still there or deleted", () => {
+    const made = drawing("mine");
+    const undo: Op = { t: "sys.restore", entries: [{ key: "drawing:mine", value: null, expectHash: guardHash("drawing:mine", made) }], from: "undo" };
+    const left = (drawings: RoomState["drawings"]) => {
+      const state = room({ drawings });
+      state.meta.playerSceneId = "s2";
+      return state;
+    };
+    assert.deepEqual(answer(left({ mine: made }), undo), ["invalid", CHANGED_SINCE]);
+    assert.deepEqual(answer(left({}), undo), ["invalid", CHANGED_SINCE]);
+  });
+
+  test("a restore's other refusals come first, the drawing hidden or deleted alike", () => {
+    const made = drawing("mine");
+    const undo: Op = { t: "sys.restore", entries: [{ key: "drawing:mine", value: null, expectHash: guardHash("drawing:mine", made) }, { key: "drawing:theirs", value: drawing("theirs", { ownerId: "p2" }) }], from: "undo" };
+    for (const twin of twins(base)) assert.deepEqual(answer(twin, undo), ["forbidden", "only the DM can do that"]);
   });
 
   test("a kept ruler put back stands only on creatures its player sees", () => {

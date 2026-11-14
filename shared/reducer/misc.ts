@@ -1,6 +1,6 @@
 import { keys, parseKey, readEntity, revOf, type EntityKey, type ParsedKey } from "../keys.ts";
 import { meetsNumbers, oldSrdIdGuards, playerLimitsOps, withOldSrdIds } from "../migrate.ts";
-import { MOVE_PLAYERS_FIRST_BACK } from "../permissions.ts";
+import { CHANGED_SINCE, MOVE_PLAYERS_FIRST_BACK } from "../permissions.ts";
 import type { AreaTemplate, BuildChunk, Character, CompanionBlock, Encounter, FogDraft, Handout, HandoutDoc, Pin, RoomState, Scene, Token, Trap } from "../model.ts";
 import type { OpOf, RestoreEntry } from "../protocol.ts";
 import { LIMITS } from "../limits.ts";
@@ -78,12 +78,8 @@ export function handoutDocDelete(tx: Tx, op: OpOf<"handoutDoc.delete">): void {
   tx.remove(keys.handoutDoc(op.docId));
 }
 
-/**
- * The guard refusal. It does not say who: the change may have come from
- * another DM, or from this DM's own other device, which is its own member
- * with its own undo stack.
- */
-export const CHANGED_SINCE = "it was changed since";
+/** The guard refusal, worded in permissions.ts, where a player's restore of a drawing they do not see answers it too. */
+export { CHANGED_SINCE };
 
 /** A restored creature's own conditions, normalized (rules/effects.ts normalEffects): the same object when nothing changes. */
 function withNormalEffects(key: string, value: Token | Character): Token | Character {
