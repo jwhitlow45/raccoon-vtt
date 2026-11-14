@@ -4,7 +4,7 @@ import { BOOKKEEPING_RESERVE, FAR, roundUp } from "#shared/limits.ts";
 import type { Member, RoomState, Viewer } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { DM, env, member, room, scene, token } from "#shared/testutil.ts";
+import { character, DM, env, member, room, scene, token } from "#shared/testutil.ts";
 import { farRoomBytes, growthBound, heldBytes, measuredStateBytes, overFarLine, PER_PLAYER_FULL, playerBlockBytes, projectedSceneBytes, roomLevelBytes, SizeGuard, widestPerPlayerReserve } from "./sizeGuard.ts";
 
 /*
@@ -130,6 +130,19 @@ describe("the far line", () => {
     assert.equal(judged(inside, { t: "token.update", tokenId: "fill1", patch: { notes: "m".repeat(8_000) } }, DM, guard, "today").ok, false, "the DM's growing note");
     const prone: Op = { t: "actor.effect.add", target: { tokenId: "fill0" }, effect: { id: "e1", key: "prone" } } as Op;
     assert.deepEqual(judged(inside, prone, DM, guard, "today", true), { ok: true }, "a condition, an exempt kind");
+  });
+
+  test("an op that grows the room-level part meets every scene's far line, though it touches none", () => {
+    const state = room();
+    // s1 alone past its far line with the DM's notes, the room well under its own.
+    for (let i = 0; i * 4_000 < FAR.sceneBytes + 256 * 1024; i++) state.tokens[`big${i}`] = token(`big${i}`, { sceneId: "s1", notes: "n".repeat(4_000) });
+    state.characters.c1 = character("c1", { ownerIds: ["p1"] });
+    assert.ok(farRoomBytes(state, false) < FAR.roomBytes - BOOKKEEPING_RESERVE.room);
+    const guard = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: 64 * MIB });
+    guard.stateMeasured(measuredStateBytes(state), state);
+    const notes = applyOp(state, { t: "character.update", characterId: "c1", patch: { actor: { notes: "A long note about the road" } } } as Op, DM, env(9));
+    assert.ok(notes.ok, notes.ok ? "" : notes.message);
+    assert.deepEqual(guard.check(notes.state, [], growthBound(state, notes.state, notes.touched), state, "dm", "today"), { ok: false, code: "quota", message: `this scene is at its ${FAR.sceneBytes / MIB} MiB size limit` });
   });
 
   test("past the line an exempt kind that grows the room is refused, and one that adds nothing taken", () => {

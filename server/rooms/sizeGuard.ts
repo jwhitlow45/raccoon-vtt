@@ -239,7 +239,7 @@ export class SizeGuard {
     this.#refusedScene = null;
     const near = role === "player" || exempt ? this.#account(next, sceneIds, growth, before) : this.#near(next, sceneIds, growth, before, role);
     if (!near.ok || far === "none") return near;
-    return this.#far(next, sceneIds, before, far, exempt ? "exempt" : "meets");
+    return this.#far(next, before, far, exempt ? "exempt" : "meets");
   }
 
   #near(next: RoomState, sceneIds: readonly string[], growth: number, before: RoomState | undefined, role: Viewer["role"]): LimitCheck {
@@ -377,14 +377,14 @@ export class SizeGuard {
   }
 
   /**
-   * The far line (shared/limits.ts FAR): the room's and each touched
+   * The far line (shared/limits.ts FAR): the room's and each
    * scene's reading, the DM's part with its reserves rounded up to
    * FAR.byteStep and what seats hold exactly, refuses an op that grows the
    * measure's total past it. Read exactly only once the bound with a step
    * to spare could pass the line. Called after the near check counted the
    * op's growth, so the bounds hold it.
    */
-  #far(next: RoomState, sceneIds: readonly string[], before: RoomState | undefined, far: Exclude<FarJudge, "none">, kind: "meets" | "exempt"): LimitCheck {
+  #far(next: RoomState, before: RoomState | undefined, far: Exclude<FarJudge, "none">, kind: "meets" | "exempt"): LimitCheck {
     const widest = far !== "today";
     const refused = (limit: number): LimitCheck => (far === "widestDm" ? { ok: false, code: "quota", message: PER_PLAYER_FULL } : roomFull(limit));
     const state = this.#state;
@@ -398,11 +398,11 @@ export class SizeGuard {
       this.#state = { bytes, growth: 0 };
     }
     const sceneLine = farByteLine(kind, "scene")!;
+    // Every scene, as the near check reads them: the room-level part (characters, the fight, the shared log) is in each
+    // scene's measure, so an op that grows it grows scenes it never touched.
     const room = roomLevelBytes(next);
     const scenes = this.#sceneMeasures(before ?? next);
-    const touched = new Set(sceneIds);
     for (const floors of sceneGroups(next)) {
-      if (!floors.some((scene) => touched.has(scene.id))) continue;
       const main = floors[0]!.floor?.of ?? floors[0]!.id;
       const sight = sum(floors, (scene) => sightReserve(scene) + perPlayerSceneReserve(next, scene));
       const explored = sum(floors, (scene) => exploredReserve(next, scene.id));

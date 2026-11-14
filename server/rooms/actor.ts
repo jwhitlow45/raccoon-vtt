@@ -3810,7 +3810,7 @@ function withFloorWords(op: Op, before: RoomState, refused: Extract<LimitCheck, 
   return beside ? { ...refused, message: floorFullWords(beside.name) } : refused;
 }
 
-/** The scenes whose per-scene limits an op can push, for checkLimits (design 10.5). */
+/** The scenes whose per-scene limits an op can push, for admitLimits (design 10.5). */
 function scenesOf(op: Op, before: RoomState, after: RoomState, by: Viewer["role"]): string[] {
   const out = new Set<string>();
   const tokenScene = (id: string) => {
