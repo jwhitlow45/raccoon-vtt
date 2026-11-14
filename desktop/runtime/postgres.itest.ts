@@ -11,8 +11,8 @@ import { Platform } from "../contract.ts";
 import { dataIdentity } from "./dataDir.ts";
 import { lockLocation } from "./lock.ts";
 import { loopbackPort } from "./ports.ts";
-import { Cluster, DatabaseFailed } from "./postgres.ts";
-import { isAlive } from "./processInfo.ts";
+import { Cluster, DatabaseFailed, uncertainWords } from "./postgres.ts";
+import { isAlive, processProgram, processStamp, processStart } from "./processInfo.ts";
 import { startTestCluster, type TestCluster } from "./testing/cluster.ts";
 import { killSupervisor, startSupervisor, type SupervisorRun } from "./testing/supervisorProcess.ts";
 
@@ -218,6 +218,31 @@ describe("the cluster", () => {
         return true;
       });
     }
+  });
+
+  test("a stepped clock (120 s) keeps the live postmaster and its postmaster.pid, and the one that started it still stops it", async () => {
+    const c = await cluster();
+    const pid = await c.cluster.postmasterPid();
+    assert.ok(pid !== null);
+    // Another reader of the same folder, where a clock step since the start
+    // moved the start reading and no working folder can be read (as on
+    // macOS and Windows).
+    const stepped = new Cluster({
+      ...c.cluster.opts,
+      proc: {
+        start: async (p) => ((await processStart(p, platform)) ?? 0) + 120_000,
+        stamp: (p) => processStamp(p, platform),
+        program: async (p) => ({ ...(await processProgram(p, platform)), cwd: null }),
+      },
+    });
+    const found = await stepped.leftover();
+    assert.deepEqual(found, { kind: "uncertain", pid });
+    await assert.rejects(stepped.clearLeftover(found), (err: unknown) => err instanceof DatabaseFailed && err.logLine === uncertainWords(pid));
+    assert.ok(isAlive(pid), "the postmaster runs on");
+    assert.ok(existsSync(join(c.dir, "postgres", "postmaster.pid")), "and its file stays");
+    await c.pool().query("select 1");
+    await c.cluster.stop();
+    assert.equal(isAlive(pid), false, "the cluster that started it stops it");
   });
 });
 

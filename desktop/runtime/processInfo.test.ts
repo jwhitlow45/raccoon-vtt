@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { test } from "node:test";
-import { bootId, isAlive, processStart, selfIdentity, stillRunning } from "./processInfo.ts";
+import { realpathSync } from "node:fs";
+import { basename } from "node:path";
+import { bootId, isAlive, processProgram, processStamp, processStart, selfIdentity, stillRunning } from "./processInfo.ts";
 
 /**
  * A process is its pid, its start time and its boot (docs/design/design-v1-local-app.md
@@ -42,4 +44,18 @@ test("this process's start time is the system's, and only the same pid, start an
   if (platform !== "win32") assert.equal(await stillRunning({ ...self, boot: `${await bootId(platform)}-before` }, platform), false, "a start in another boot");
   assert.equal(await stillRunning({ ...self, pid: await exitedPid() }, platform), false);
   assert.equal(await processStart(await exitedPid(), platform), null);
+});
+
+test("a process's stamp is steady while it runs, and gone with it, and its program names what runs", async () => {
+  const first = await processStamp(process.pid, platform);
+  assert.ok(first !== null);
+  assert.equal(await processStamp(process.pid, platform), first);
+  assert.equal((await selfIdentity(platform)).start, first, "records keep the stamp");
+  assert.equal(await processStamp(await exitedPid(), platform), null);
+  const program = await processProgram(process.pid, platform);
+  assert.match(basename((program.exe ?? "").replaceAll("\\", "/")).toLowerCase(), /^node(\.exe)?$/);
+  assert.equal(program.foreign, false);
+  // Only Linux says where a process works, which for a postmaster is its data folder.
+  if (platform === "linux") assert.equal(program.cwd, realpathSync(process.cwd()));
+  else assert.equal(program.cwd, null);
 });
