@@ -21,7 +21,7 @@ import {
 import { partySight, type VisionWorld } from "#shared/rules/vision.ts";
 import { groundAt } from "#shared/rules/heights.ts";
 import { sceneWalls, splitCheck, splitRefusal } from "#shared/rules/walls.ts";
-import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
+import { OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { MOVE_PLAYERS_FIRST, SOMETHING_BLOCKS_BACK } from "#shared/permissions.ts";
 import type { Actor, ClassResource, FreeWall, MapPhase, Member, PcStats, RoomState, Trap } from "#shared/model.ts";
 import { ASK_LOST, FORGET_ASK, type Op, type OpOf, type ServerMessage } from "#shared/protocol.ts";
@@ -42,7 +42,7 @@ import { assertWithinLimits } from "./importRoom.ts";
 import { HttpError } from "../auth/http.ts";
 import { remapState } from "./remap.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { checkWholeScenes, discoveryReserve, growthBound, measuredStateBytes, memoryReserves, memoryShare, memoryStateReserve, numberingAdjust, roomLevelBytes, SCENE_MAPS_FULL, SHARE_MARGIN, SizeGuard, touchedScenes } from "./sizeGuard.ts";
+import { checkWholeScenes, discoveryReserve, growthBound, heldBytes, measuredStateBytes, memoryReserves, memoryShare, memoryStateReserve, numberingAdjust, roomLevelBytes, SCENE_MAPS_FULL, SHARE_MARGIN, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { loadRoom, type Pool } from "./persistence.ts";
 import { SQUARES } from "../../shared/rules/grid.ts";
 import { STANDING_CLOCK } from "./undoScopeTesting.ts";
@@ -80,8 +80,12 @@ class FakeDb {
   #commits = 0;
   #verifies = 0;
 
-  constructor(opts: { state: RoomState; opRows?: unknown[]; dmGrants: string[]; assetRows?: FakeDb["assetRows"] }) {
+  /** The snapshot row's format, today's unless a test loads a room an older build saved. */
+  readonly version: number;
+
+  constructor(opts: { state: RoomState; opRows?: unknown[]; dmGrants: string[]; assetRows?: FakeDb["assetRows"]; version?: number }) {
     this.snapshot = { state: opts.state, seq: 0 };
+    this.version = opts.version ?? SNAPSHOT_VERSION;
     this.opRows = opts.opRows ?? [];
     this.dmGrants = opts.dmGrants;
     this.assetRows = opts.assetRows ?? [];
@@ -108,7 +112,7 @@ class FakeDb {
   }
 
   #answer(sql: string, params: unknown[]): Result {
-    if (sql.includes("from room_snapshots")) return { rows: [{ seq: String(this.snapshot.seq), state: this.snapshot.state, schema_version: SNAPSHOT_VERSION }] };
+    if (sql.includes("from room_snapshots")) return { rows: [{ seq: String(this.snapshot.seq), state: this.snapshot.state, schema_version: this.version }] };
     if (sql.includes("max(seq)")) {
       this.#verifies++;
       this.hooks.verify?.(this.#verifies);
@@ -2167,14 +2171,18 @@ describe("a walk on the scene where traps go off runs the steps of the batch sta
   }
 });
 
+/** A room's bytes as the DM's lines read them: without what players' seats hold (sizeGuard.ts heldBytes). */
+const dmPart = (s: RoomState): number => serializedBytes(s) - heldBytes(s);
+
 /** One DM driving a loaded room, op by op, with the refusal or null each op got. */
 async function withRoom(
   state: RoomState,
   dm: Member,
   run: (actor: RoomActor, send: (op: Parameters<RoomActor["op"]>[2]) => Promise<{ code: string; message: string } | null>, db: FakeDb) => Promise<void>,
   options: Partial<ActorDeps["options"]> = {},
+  version?: number,
 ): Promise<void> {
-  const db = new FakeDb({ state, dmGrants: [dm.id] });
+  const db = new FakeDb({ state, dmGrants: [dm.id], ...(version === undefined ? {} : { version }) });
   const base = deps(db);
   const actor = await RoomActor.load({ ...base, options: { ...base.options, ...options } });
   assert.ok(actor);
@@ -2207,7 +2215,7 @@ describe("the explored layer's reserve at a reduced room limit (docs/design/desi
     const { state, sceneId, otherSceneId, pcId, goblinId } = darkRoom(dm, player);
     // Room for the player scene's whole layer and players' memory of it (docs/design/design-v1-map-discovery.md 5.5) and a few
     // hundred bytes of play, and not for a second scene's layer.
-    const stateLimit = serializedBytes(state) + exploredReserve(state) + memoryStateReserve(state) + 600;
+    const stateLimit = dmPart(state) + exploredReserve(state) + memoryStateReserve(state) + 600;
     assert.ok(exploredReserve({ ...state, meta: { ...state.meta, playerSceneId: otherSceneId } }) > 1_200);
     await withRoom(
       state,
@@ -2215,7 +2223,7 @@ describe("the explored layer's reserve at a reduced room limit (docs/design/desi
       async (actor, send) => {
         const within = (when: string) => {
           const now = actor.committed.state;
-          const bytes = serializedBytes(now);
+          const bytes = dmPart(now);
           assert.ok(bytes + exploredReserve(now) + memoryStateReserve(now) <= stateLimit, `${when}: ${bytes} + ${exploredReserve(now)} over ${stateLimit}`);
         };
         assert.equal(await send({ t: "token.move", tokenId: pcId, x: 20, y: 2 }), null);
@@ -2223,7 +2231,7 @@ describe("the explored layer's reserve at a reduced room limit (docs/design/desi
         // An op that fits the room but not the room and the reserve is refused as a full room.
         const big: Op = { t: "token.update", tokenId: goblinId, patch: { notes: "n".repeat(700) } };
         const alone = applyOp(actor.committed.state, big, { memberId: dm.id, role: "dm" }, { seq: 1_000, at: new Date().toISOString() });
-        assert.ok(alone.ok && serializedBytes(alone.state) + memoryStateReserve(alone.state) <= stateLimit, "it fits without the reserve");
+        assert.ok(alone.ok && dmPart(alone.state) + memoryStateReserve(alone.state) <= stateLimit, "it fits without the reserve");
         assert.deepEqual(await send(big), { code: "quota", message: `the room is full: it is at its ${Math.floor(stateLimit / 1024 / 1024)} MiB size limit` });
 
         // Each hide where the party looks clears explored bits and the batch explores them again, so the tile's rev climbs by two.
@@ -2246,7 +2254,7 @@ describe("the explored layer's reserve at a reduced room limit (docs/design/desi
         const exported = JSON.parse(JSON.stringify(roomExport("TESTR00M", actor.committed.seq, actor.committed.state, [dm.id]))) as RoomExport;
         const imported = remapState(exported.state, { assets: new Map() });
         assert.equal(Object.keys(imported.exploredTiles).length, Object.keys(actor.committed.state.exploredTiles).length);
-        assert.ok(serializedBytes(imported) + exploredReserve(imported) + memoryStateReserve(imported) <= stateLimit);
+        assert.ok(dmPart(imported) + exploredReserve(imported) + memoryStateReserve(imported) <= stateLimit);
 
         assert.deepEqual(await send({ t: "room.setPlayerScene", sceneId: otherSceneId }), { code: "quota", message: NO_ROOM_TO_EXPLORE });
         assert.equal(actor.committed.state.meta.playerSceneId, sceneId);
@@ -2274,7 +2282,7 @@ describe("explore's growth under a scene ID that JSON escapes (docs/design/desig
       tokens: Object.fromEntries(Object.entries(room.state.tokens).map(([id, t]) => [id, t.sceneId === room.sceneId ? { ...t, sceneId } : t])),
     };
     // Creature numbers count at their widest (numberingAdjust).
-    const stateLimit = serializedBytes(state) + numberingAdjust(state) + exploredReserve(state) + memoryStateReserve(state) + 200;
+    const stateLimit = dmPart(state) + numberingAdjust(state) + exploredReserve(state) + memoryStateReserve(state) + 200;
     await withRoom(
       state,
       dm,
@@ -2287,12 +2295,12 @@ describe("explore's growth under a scene ID that JSON escapes (docs/design/desig
         // an unescaped key would leave out of the explored tile, so a guard counting it short would let this through unmeasured.
         const note = (n: number): Op => ({ t: "token.update", tokenId: room.goblinId, patch: { notes: "n".repeat(n) } });
         const room0 = actor.committed.state;
-        const spare = stateLimit - serializedBytes(room0) - numberingAdjust(room0) - exploredReserve(room0) - memoryStateReserve(room0);
+        const spare = stateLimit - dmPart(room0) - numberingAdjust(room0) - exploredReserve(room0) - memoryStateReserve(room0);
         assert.ok(spare >= 0 && spare < 300, `${spare} bytes spare`);
         assert.deepEqual(await send(note(spare + 150)), { code: "quota", message: `the room is full: it is at its ${Math.floor(stateLimit / 1024 / 1024)} MiB size limit` });
         assert.equal(await send(note(Math.max(0, spare - 40))), null, "an edit that fits still passes");
         const now = actor.committed.state;
-        assert.ok(serializedBytes(now) + numberingAdjust(now) + exploredReserve(now) + memoryStateReserve(now) <= stateLimit);
+        assert.ok(dmPart(now) + numberingAdjust(now) + exploredReserve(now) + memoryStateReserve(now) <= stateLimit);
       },
       { sizeLimits: { stateLimit } },
     );
@@ -2610,9 +2618,9 @@ describe("the lit token light cap in the limits step (docs/design/design-v1-maps
     assert.deepEqual(await climbUndoRedo(trapped(UPPER, over - 1)), plain, "upstairs at its cap");
   });
 
-  test("the same climb from a floor past its cap is refused as any move there is, and never reaches its undo", async () => {
+  test("the same climb from a floor past its cap is taken, as any player's move there is: the room's caps answer the DM", async () => {
     const answers = await climbUndoRedo(trapped(GROUND, LIMITS.trapsPerScene + 1));
-    assert.deepEqual(answers[0], [["quota", `this scene can hold at most ${LIMITS.trapsPerScene} traps`], GROUND]);
+    assert.deepEqual(answers[0], [null, UPPER]);
   });
 });
 
@@ -2714,11 +2722,12 @@ describe("every op's growth counts on the scenes it wrote into (docs/design/desi
 
 describe("companion stat blocks at the room actor (docs/design/design-v1-companion-stat-blocks.md 3.4 to 3.6)", () => {
   /** Bree, the player's character, with her token on the players' scene and one block. */
-  function breeRoom(dm: Member, player: Member): { state: RoomState; characterId: string; pcId: string } {
+  /** `owned` false leaves Bree with no player, so her block and token are the DM's part, which the room's state limit reads. */
+  function breeRoom(dm: Member, player: Member, owned = true): { state: RoomState; characterId: string; pcId: string } {
     const state = createInitialState({ roomName: "Familiars", dm });
     state.members[player.id] = player;
     const characterId = uuidv7();
-    state.characters[characterId] = testCharacter(characterId, { name: "Bree", ownerIds: [player.id] });
+    state.characters[characterId] = testCharacter(characterId, { name: "Bree", ownerIds: owned ? [player.id] : [] });
     const pcId = uuidv7();
     state.tokens[pcId] = testToken(pcId, { sceneId: state.meta.playerSceneId!, kind: "pc", name: "Bree", x: 2, y: 2, actor: { ref: characterId } });
     state.companionBlocks.moth = testBlock("moth", characterId);
@@ -2831,13 +2840,14 @@ describe("companion stat blocks at the room actor (docs/design/design-v1-compani
   test("a block save the room's state limit refuses says what to do about it, keeping the code, and other ops keep the guard's words", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
-    const { state, characterId, pcId } = breeRoom(dm, player);
+    // The DM's own block and token: the state limit answers the DM alone, over what no player's character holds.
+    const { state, characterId, pcId } = breeRoom(dm, player, false);
     const stateLimit = serializedBytes(state) + 2_500;
     await withSockets(
       state,
       dm,
       player,
-      async (actor, { player: p }) => {
+      async (actor, { dm: p }) => {
         // A small block fits, and one that carries the room past its limit does not.
         await actor.op(p.conn, 1, { t: "companionBlock.update", blockId: "moth", patch: { ac: 13 } });
         assert.equal(await answer(p.sent, 1), null);
@@ -2894,7 +2904,7 @@ describe("companion stat blocks at the room actor (docs/design/design-v1-compani
       state,
       dm,
       player,
-      async (actor, { player: p }) => {
+      async (actor, { dm: p }) => {
         await actor.op(p.conn, 1, pcStats({ saves: ["dex"] }, characterId));
         assert.deepEqual(await answer(p.sent, 1), { code: "quota", message: BLOCKS_AT_QUOTA });
         await actor.op(p.conn, 2, { t: "character.update", characterId, patch: { stats: null, name: "Bree" } });
@@ -2910,13 +2920,13 @@ describe("companion stat blocks at the room actor (docs/design/design-v1-compani
   test("a character's block save the room's state limit refuses says what to do about it", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
-    const { state, characterId } = breeRoom(dm, player);
+    const { state, characterId } = breeRoom(dm, player, false);
     const stateLimit = serializedBytes(state) + 2_500;
     await withSockets(
       state,
       dm,
       player,
-      async (actor, { player: p }) => {
+      async (actor, { dm: p }) => {
         const rolls = Array.from({ length: 30 }, (_, i) => ({ id: `r${i}`, name: "x".repeat(60), kind: "other", dice: [{ formula: "1d6".padEnd(40, " ") }] }));
         await actor.op(p.conn, 1, pcStats({ rolls }, characterId));
         assert.deepEqual(await answer(p.sent, 1), { code: "quota", message: BLOCKS_ROOM_TOO_FULL });
@@ -2965,7 +2975,7 @@ describe("companion stat blocks at the room actor (docs/design/design-v1-compani
   test("a sync the room's state limit or storage quota refuses reads in the blocks' words", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
-    const { state, characterId } = breeRoom(dm, player);
+    const { state, characterId } = breeRoom(dm, player, false);
     const stateLimit = serializedBytes(state) + 2_500;
     const big = resync(characterId, 6, true);
     assert.ok(serializedBytes(big) > 2_500, "the record alone is past the room's room to grow");
@@ -2973,7 +2983,7 @@ describe("companion stat blocks at the room actor (docs/design/design-v1-compani
       state,
       dm,
       player,
-      async (actor, { player: p }) => {
+      async (actor, { dm: p }) => {
         await actor.op(p.conn, 1, big);
         assert.deepEqual(await answer(p.sent, 1), { code: "quota", message: BLOCKS_ROOM_TOO_FULL });
         await actor.op(p.conn, 2, resync(characterId, 6));
@@ -3294,7 +3304,7 @@ describe("a hidden line never changes whether a player's op passes (design 10.5,
     }
   }
 
-  test("a player's move at the edge of either limit gets the same answer with and without a hidden area's reminder", async () => {
+  test("a player's move at the edge of either limit is taken with and without a hidden area's reminder: the near lines answer the DM alone", async () => {
     const away = glyphRoom(9.5);
     const into = glyphRoom(6.5);
     const viewer = { memberId: away.pc.id, role: "player" as const };
@@ -3318,7 +3328,7 @@ describe("a hidden line never changes whether a player's op passes (design 10.5,
       for (const limit of [lo - 1, lo]) {
         const answers = [await answer(away, { [which]: limit }), await answer(into, { [which]: limit })];
         assert.equal(answers[1], answers[0], `${which} ${limit}`);
-        assert.equal(answers[0] === "ok", limit === lo, `${which} ${limit}: ${answers[0]}`);
+        assert.equal(answers[0], "ok", `${which} ${limit}: a move meets no near line`);
       }
     }
   });
@@ -3943,13 +3953,11 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     });
   });
 
-  test("an op that lowers the room's share forgets whole tiles of every layer above it (5.5)", async () => {
+  test("a layer above its scene's fixed share forgets whole tiles at the room's first batch on this format, and the share holds however full the room grows (6.4)", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
     const { state, sceneId, goblinId } = discovery(dm, player);
-    // The scene shares the room's space, as it would after the upgrade, and the party remembers wood all over its west part.
     state.playedScenes = { [sceneId]: { sceneId, rev: 0 } };
-    state.memoryShared = { [sceneId]: { sceneId, rev: 0 } };
     state.memory = {};
     for (let cx = 0; cx < 4; cx++) {
       const cells: Record<string, "wood"> = {};
@@ -3957,25 +3965,28 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       state.memory[chunkKey(sceneId, cx, 0)] = { sceneId, cx, cy: 0, rev: 0, cells };
     }
     const held = layerCharge(state, state.scenes[sceneId]!, null);
-    const base = measuredStateBytes(state) + exploredReserve(state);
-    const stateLimit = base + held + 2_000;
+    // The scene's share, fixed below what the party remembers, as an update can leave it.
+    const share = Math.floor(held / 2);
+    state.memoryShared = { [sceneId]: { sceneId, rev: 0, share } };
+    const stateLimit = measuredStateBytes(state) + exploredReserve(state) + held + 2_000;
     await withRoom(
       state,
       dm,
       async (actor, send) => {
-        assert.ok(layerCharge(actor.committed.state, actor.committed.state.scenes[sceneId]!, null) === held, "it fits at load");
         assert.equal(await send({ t: "token.update", tokenId: goblinId, patch: { notes: "n".repeat(Math.floor(held / 2)) } }), null);
         const now = actor.committed.state;
-        const share = memoryShare(stateLimit, measuredStateBytes(now), exploredReserve(now), memoryReserves(now));
-        assert.ok(share < held, `the share fell to ${share}`);
         const charge = layerCharge(now, now.scenes[sceneId]!, null);
         assert.ok(charge <= share, `${charge} within ${share}`);
         // Ayla's sight adds tiles at her corner, so the forgotten ground is read tile by tile, its memory gone with it.
         const forgotten = [0, 1, 2, 3].filter((tx) => !now.exploredTiles[`${sceneId}:${tx},0`]);
         assert.ok(forgotten.length > 0, "a whole tile was forgotten");
         for (const tx of forgotten) assert.equal(now.memory?.[chunkKey(sceneId, tx, 0)], undefined, `tile ${tx},0 took its memory with it`);
+        // A growing edit moves no share.
+        assert.equal(await send({ t: "token.update", tokenId: goblinId, patch: { notes: "m".repeat(4_000) } }), null);
+        assert.equal(actor.committed.state.memoryShared?.[sceneId]?.share, share);
       },
-      { sizeLimits: { stateLimit } },
+      { sizeLimits: { stateLimit: stateLimit + held } },
+      PLAYER_LIMITS_SNAPSHOT_VERSION - 1,
     );
   });
 
@@ -4429,12 +4440,11 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     }
   });
 
-  test("a lowered share a failed step could not answer is answered by the next batch's step (MD3-D-8)", async () => {
+  test("a layer cap a failed step could not answer is answered by the next batch's step (MD3-D-8)", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
     const { state, sceneId, goblinId } = discovery(dm, player);
     state.playedScenes = { [sceneId]: { sceneId, rev: 0 } };
-    state.memoryShared = { [sceneId]: { sceneId, rev: 0 } };
     state.memory = {};
     for (let cx = 0; cx < 4; cx++) {
       const cells: Record<string, "wood"> = {};
@@ -4442,7 +4452,8 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       state.memory[chunkKey(sceneId, cx, 0)] = { sceneId, cx, cy: 0, rev: 0, cells };
     }
     const held = layerCharge(state, state.scenes[sceneId]!, null);
-    const stateLimit = measuredStateBytes(state) + exploredReserve(state) + held + 2_000;
+    const share = Math.floor(held / 2);
+    state.memoryShared = { [sceneId]: { sceneId, rev: 0, share } };
     // The step throws the first time it is asked to measure every layer, as a bug would.
     let failed = false;
     const mapStep: typeof mapStepOps = (input) => {
@@ -4456,16 +4467,18 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       state,
       dm,
       async (actor, send) => {
-        assert.equal(await send({ t: "token.update", tokenId: goblinId, patch: { notes: "n".repeat(Math.floor(held / 2)) } }), null);
-        assert.ok(failed, "the step failed in the batch that lowered the share");
-        const share = (s: RoomState) => memoryShare(stateLimit, measuredStateBytes(s), exploredReserve(s), memoryReserves(s));
-        assert.ok(layerCharge(actor.committed.state, actor.committed.state.scenes[sceneId]!, null) > share(actor.committed.state), "nothing it wrote on, so nothing forgotten yet");
-        // An op that leaves the room's size as it was, so no measure lowers the share again.
-        assert.equal(await send({ t: "token.update", tokenId: goblinId, patch: { notes: "m".repeat(Math.floor(held / 2)) } }), null);
+        // An op on another scene: the step of the room's first batch must measure every layer, and fails.
+        const other = Object.keys(actor.committed.state.scenes).find((id) => id !== sceneId)!;
+        assert.equal(await send({ t: "scene.update", sceneId: other, patch: { name: "Elsewhere" } }), null);
+        assert.ok(failed, "the step failed in the room's first batch");
+        assert.ok(layerCharge(actor.committed.state, actor.committed.state.scenes[sceneId]!, null) > share, "nothing it wrote on, so nothing forgotten yet");
+        assert.equal(await send({ t: "scene.update", sceneId: other, patch: { name: "Elsewhere again" } }), null);
         const now = actor.committed.state;
-        assert.ok(layerCharge(now, now.scenes[sceneId]!, null) <= share(now), "the next step measured every layer");
+        assert.ok(layerCharge(now, now.scenes[sceneId]!, null) <= share, "the next step measured every layer");
+        void goblinId;
       },
-      { sizeLimits: { stateLimit }, mapStep },
+      { mapStep },
+      PLAYER_LIMITS_SNAPSHOT_VERSION - 1,
     );
   });
 

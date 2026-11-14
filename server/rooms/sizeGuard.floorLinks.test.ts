@@ -6,7 +6,7 @@ import type { RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { DM } from "#shared/testutil.ts";
 import { MEMORY_CAP } from "./memorySize.ts";
-import { checkWholeScenes, growthBound, projectedSceneBytes, SizeGuard } from "./sizeGuard.ts";
+import { checkWholeScenes, growthBound, projectedSceneBytes, SizeGuard, heldBytes } from "./sizeGuard.ts";
 
 /**
  * Stairs and ladders in the size guard (docs/design/design-v1-floors.md
@@ -59,7 +59,8 @@ describe("the size guard on stairs and ladders", () => {
     const bound = growthBound(before, after, touched);
     const grew = projectedSceneBytes(after, GROUND) - projectedSceneBytes(before, GROUND);
     assert.ok(bound >= grew, `the bound ${bound} holds the measure's growth ${grew}`);
-    const guard = new SizeGuard({ stateLimit: 8 * 1024 * 1024, sceneLimit: projectedSceneBytes(after, GROUND) - 1 });
+    // The line reads the DM's part, without what players' seats hold.
+    const guard = new SizeGuard({ stateLimit: 8 * 1024 * 1024, sceneLimit: projectedSceneBytes(after, GROUND) - heldBytes(after, [GROUND]) - 1 });
     assert.equal(guard.check(before, [GROUND], 0, before).ok, true);
     assert.equal(guard.check(after, [GROUND, UPPER, ATTIC], bound, before).ok, false);
   });

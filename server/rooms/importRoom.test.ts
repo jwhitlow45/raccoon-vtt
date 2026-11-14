@@ -241,7 +241,7 @@ describe("wave 4 import limits (docs/design/design-v1-maps-vision.md 2.4)", () =
       () => assertWithinLimits(exploring),
       (err: unknown) => err instanceof HttpError && err.status === 413 && err.extra?.reason === NO_ROOM_TO_EXPLORE,
     );
-    assert.equal(new SizeGuard(FAR_GUARD).check(exploring, ["s1"], 0, undefined, "player").ok, false, "every op on it would be refused");
+    assert.equal(new SizeGuard(FAR_GUARD).check(exploring, ["s1"], 0, undefined, "dm").ok, false, "every DM op on it would be refused");
     // Past its sight's reserve too, the scene is simply full.
     const full = sceneOf(sceneLimit - sightReserve + 1);
     assert.throws(

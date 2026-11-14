@@ -2,7 +2,8 @@ import { chunkKey, holderChunkKey, holderTileKey, parseKey, readEntity, tileKey,
 import { lineAudience } from "#shared/logRings.ts";
 import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, UP_DIR_CHARS, type BuildChunk, type Encounter, type EncounterSnapshot, type LogEntry, type Token, type Trap } from "#shared/model.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
-import { exploredReserve, LIMITS, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, reservedExploreFloors, serializedBytes, utf8Bytes, WIDEST_REV, type LimitCheck } from "#shared/limits.ts";
+import { exploredReserve, FAR, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, reservedExploreFloors, roundUp, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type LimitCheck } from "#shared/limits.ts";
+import type { OpOf } from "#shared/protocol.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
 import { NUMBERS_MOST } from "#shared/numbering.ts";
 import { chunkPositions, heldGroundMap, perPlayerScene } from "#shared/project.ts";
@@ -115,6 +116,20 @@ function sceneFull(limit: number): LimitCheck {
 /** The last exact size, and how much the state may have grown since. */
 type Measure = { bytes: number; growth: number };
 
+/** How an op meets the far line (SizeGuard.check): not at all, with today's reserves, or with per-player vision's at their widest. */
+export type FarJudge = "none" | "today" | "widest" | "widestDm";
+
+/** The room measure's DM part: less what seats hold and players' companion blocks. */
+function dmRoomBytes(state: RoomState, measured: number): number {
+  return measured - heldBytes(state) - playerBlockBytes(state);
+}
+
+/** Whether the room's near measure with its reserves grows past what it was before the op. Without `before`, any op counts as growing. */
+function grewRoom(before: RoomState | undefined, after: number, unreserved?: ReadonlySet<string>): boolean {
+  if (before === undefined) return true;
+  return after > measuredStateBytes(before) + exploredReserve(before) + memoryReserves(before, unreserved).whole;
+}
+
 export class SizeGuard {
   readonly stateLimit: number;
   readonly sceneLimit: number;
@@ -122,24 +137,31 @@ export class SizeGuard {
   /** Each scene's own part (sceneOwnBytes), measured at the first check. */
   #scenes: Map<string, Measure> | null = null;
   /**
-   * The room-wide share of players' memory (docs/design/design-v1-map-discovery.md
-   * 5.5), worked out at the last exact measure and never on the growth
-   * bound, so it is a function of the stored state and that measure alone.
+   * The layer caps the map step last measured every layer against
+   * (capsKey), or null before it has: a marked scene's caps move only with
+   * its fixed share and the roster, and a room's first step measures every
+   * layer once, so a map held above its cap at the update forgets its
+   * oldest tiles then.
    */
-  #share = MEMORY_CAP;
-  /** The share fell since the actor last asked, so the map step measures every layer against it. */
-  #lowered = false;
+  #caps: string | null = null;
   #refusedScene: string | null = null;
+  /** By how many bytes the room is past the far line at its widest, at the last exact reading (overFarLine). */
+  #over = 0;
 
   constructor(opts: { stateLimit?: number; sceneLimit?: number } = {}) {
     this.stateLimit = opts.stateLimit ?? LIMITS.stateBytes;
     this.sceneLimit = opts.sceneLimit ?? LIMITS.projectedSceneBytes;
   }
 
-  /** An exact measurement from outside, such as the snapshot just written, and with the state it measured, the share it gives. */
+  /** An exact measurement from outside, such as the snapshot just written, and with the state it measured, how far it is past the far line. */
   stateMeasured(bytes: number, state?: RoomState): void {
     this.#state = { bytes, growth: 0 };
-    if (state) this.#setShare(memoryShare(this.stateLimit, bytes, exploredReserve(state), memoryReserves(state)));
+    if (state) this.#over = Math.max(0, farRoomBytes(state, true, bytes) - FAR.roomBytes);
+  }
+
+  /** By how many bytes the room was past the far line at its widest at the last exact reading, 0 under it (the DM's `over`). */
+  get over(): number {
+    return this.#over;
   }
 
   /**
@@ -152,31 +174,24 @@ export class SizeGuard {
     return this.#refusedScene;
   }
 
-  /** The room-wide share of players' memory now, in charged bytes per layer. */
+  /** The share a reserve reads a sharing layer at beside its own cap (layerCap): a whole cap, since marked scenes' shares are fixed. */
   get share(): number {
-    return this.#share;
+    return MEMORY_CAP;
   }
 
-  /** A layer's cap on a scene now (memoryCapOf), the party's when `layer` is null. */
+  /** A layer's cap on a scene now (layerCap), the party's when `layer` is null. */
   memoryCap(state: RoomState, scene: Scene, layer: Layer = null): number {
-    return memoryCapOf(state, scene, this.#share, layer);
+    return layerCap(state, scene, layer);
   }
 
-  /** Whether the share fell since the map step last answered it, without answering. */
-  get shareLowered(): boolean {
-    return this.#lowered;
+  /** Whether a layer cap may have fallen since the map step last measured every layer, so it measures every layer now. */
+  capsMoved(state: RoomState): boolean {
+    return this.#caps !== capsKey(state);
   }
 
-  /** Whether the share fell since the last ask, which the map step answers by forgetting every layer above it. */
-  takeShareLowered(): boolean {
-    const lowered = this.#lowered;
-    this.#lowered = false;
-    return lowered;
-  }
-
-  #setShare(share: number): void {
-    if (share < this.#share) this.#lowered = true;
-    this.#share = share;
+  /** The map step measured every layer against the caps of `state`. */
+  capsMeasured(state: RoomState): void {
+    this.#caps = capsKey(state);
   }
 
   /**
@@ -204,13 +219,26 @@ export class SizeGuard {
    * docs/design/design-v1-map-discovery.md 5.5).
    *
    * `role` is the sender's. Every op counts what players' copies may hold
-   * beyond the DM's (discoveryReserve), but a player's op on a scene that
-   * was over its limit with it before the op is judged without it, as
-   * before map discovery, so such a scene still takes their moves (5.5,
-   * D-261027-03). A DM's growing edit there gets SCENE_MAPS_FULL.
+   * beyond the DM's (discoveryReserve). A DM's growing edit on a scene over
+   * its limit only by that gets SCENE_MAPS_FULL.
+   *
+   * Player limits: these lines, the near ones, answer the DM and the server
+   * alone, over the DM's part (what no seat holds, and for the room less
+   * players' companion blocks), and refuse only an op that grows the
+   * measure's total. A player's op meets none of them: its growth is only
+   * counted. `far` says how the op meets the far line (#far): not at all,
+   * with today's reserves, or with per-player vision's at their widest, a
+   * player's op's always and the DM's that raise them (`widestDm`, refused
+   * in PER_PLAYER_FULL's words).
    */
-  check(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState, role: Viewer["role"] = "dm"): LimitCheck {
+  check(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState, role: Viewer["role"] = "dm", far: FarJudge = "none"): LimitCheck {
     this.#refusedScene = null;
+    const near = role === "player" ? this.#account(next, sceneIds, growth, before) : this.#near(next, sceneIds, growth, before, role);
+    if (!near.ok || far === "none") return near;
+    return this.#far(next, sceneIds, before, far);
+  }
+
+  #near(next: RoomState, sceneIds: readonly string[], growth: number, before: RoomState | undefined, role: Viewer["role"]): LimitCheck {
     const answer = this.#check(next, sceneIds, growth, before, role);
     if (answer.ok || before === undefined) return answer;
     const switched = Object.values(next.scenes).filter((scene) => perPlayerScene(scene) && !perPlayerScene(before.scenes[scene.id]));
@@ -263,19 +291,15 @@ export class SizeGuard {
     const reserve = exploredReserve(next);
     const memory = memoryReserves(next, unreserved);
     const state = this.#state;
-    let share = this.#share;
-    if (!state || state.bytes + state.growth + growth + reserve + memory.whole + memory.sharing * share > this.stateLimit) {
+    const share = MEMORY_CAP;
+    // A sharing layer reserves nothing here: the marked pool counts against the far line alone.
+    const held = memory.whole;
+    if (!state || state.bytes + state.growth + growth + reserve + held > this.stateLimit) {
       const bytes = measuredStateBytes(next);
-      share = memoryShare(this.stateLimit, bytes, reserve, memory);
-      const held = memory.whole + memory.sharing * share;
-      if (bytes + reserve + held > this.stateLimit) {
+      if (bytes + reserve + held > this.stateLimit && dmRoomBytes(next, bytes) + reserve + held > this.stateLimit && grewRoom(before, bytes + reserve + held, unreserved)) {
         return newlyExploring && bytes + held <= this.stateLimit ? { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE } : roomFull(this.stateLimit);
       }
-      const exact = share;
-      updates.push(() => {
-        this.stateMeasured(bytes);
-        this.#setShare(exact);
-      });
+      updates.push(() => this.stateMeasured(bytes));
     } else {
       updates.push(() => {
         state.growth += growth;
@@ -313,7 +337,7 @@ export class SizeGuard {
       const need = SHELL_BYTES + room + own + sight + explored + maps;
       const judged = maps === full ? "dm" : "player";
       const newHere = floors.some((scene) => exploring.has(scene.id));
-      if (need > this.sceneLimit && (before === undefined ? grown >= 0 || newHere : need > neededBefore(before, main, share, judged))) {
+      if (need > this.sceneLimit && need - heldBytes(next, [main]) > this.sceneLimit && (before === undefined ? grown >= 0 || newHere : need > neededBefore(before, main, share, judged))) {
         const exploringHere = newHere && SHELL_BYTES + room + own + sight + maps <= this.sceneLimit;
         this.#refusedScene = main;
         if (exploringHere) return { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE };
@@ -323,6 +347,68 @@ export class SizeGuard {
       updates.push(() => floors.forEach((scene, i) => scenes.set(scene.id, { bytes: owns[i]!, growth: 0 })));
     }
     for (const update of updates) update();
+    return { ok: true };
+  }
+
+  /**
+   * A player's op against the near lines: never refused, its growth only
+   * counted against the room's bound and its scenes', so the bounds stay
+   * upper bounds for the next op.
+   */
+  #account(next: RoomState, sceneIds: readonly string[], growth: number, before: RoomState | undefined): LimitCheck {
+    if (this.#state) this.#state.growth += growth;
+    const scenes = this.#sceneMeasures(before ?? next);
+    for (const sceneId of [...scenes.keys()]) if (!next.scenes[sceneId]) scenes.delete(sceneId);
+    const touched = new Set(sceneIds);
+    for (const floors of sceneGroups(next)) {
+      const grown = floors.findIndex((scene) => touched.has(scene.id));
+      if (grown < 0) continue;
+      for (const [i, scene] of floors.entries()) {
+        const measure = scenes.get(scene.id);
+        if (!measure) scenes.set(scene.id, { bytes: sceneOwnBytes(next, scene.id), growth: 0 });
+        else if (i === grown) measure.growth += growth;
+      }
+    }
+    return { ok: true };
+  }
+
+  /**
+   * The far line (shared/limits.ts FAR): the room's and each touched
+   * scene's reading, the DM's part with its reserves rounded up to
+   * FAR.byteStep and what seats hold exactly, refuses an op that grows the
+   * measure's total past it. Read exactly only once the bound with a step
+   * to spare could pass the line. Called after the near check counted the
+   * op's growth, so the bounds hold it.
+   */
+  #far(next: RoomState, sceneIds: readonly string[], before: RoomState | undefined, far: Exclude<FarJudge, "none">): LimitCheck {
+    const widest = far !== "today";
+    const refused = (limit: number): LimitCheck => (far === "widestDm" ? { ok: false, code: "quota", message: PER_PLAYER_FULL } : roomFull(limit));
+    const state = this.#state;
+    const reserves = farReserves(next, widest);
+    if (!state || state.bytes + state.growth + reserves + FAR.byteStep > FAR.roomBytes) {
+      const bytes = measuredStateBytes(next);
+      if (farRoomBytes(next, widest, bytes) > FAR.roomBytes && (before === undefined || bytes + reserves > measuredStateBytes(before) + farReserves(before, widest))) return refused(FAR.roomBytes);
+      this.#state = { bytes, growth: 0 };
+    }
+    const room = roomLevelBytes(next);
+    const scenes = this.#sceneMeasures(before ?? next);
+    const touched = new Set(sceneIds);
+    for (const floors of sceneGroups(next)) {
+      if (!floors.some((scene) => touched.has(scene.id))) continue;
+      const main = floors[0]!.floor?.of ?? floors[0]!.id;
+      const sight = sum(floors, (scene) => sightReserve(scene) + perPlayerSceneReserve(next, scene));
+      const explored = sum(floors, (scene) => exploredReserve(next, scene.id));
+      const maps = sum(floors, (scene) => discoveryReserve(next, scene, MEMORY_CAP));
+      const measures = floors.map((scene) => scenes.get(scene.id));
+      const measured = sum(measures, (measure) => (measure ? measure.bytes + measure.growth : 0));
+      if (measures.every((measure) => measure !== undefined) && SHELL_BYTES + room + measured + sight + explored + maps + FAR.byteStep <= FAR.sceneBytes) continue;
+      const need = SHELL_BYTES + room + sum(floors, (scene) => sceneOwnBytes(next, scene.id)) + sight + explored + maps;
+      const held = heldBytes(next, [main]);
+      if (roundUp(Math.max(0, need - held), FAR.byteStep) + held <= FAR.sceneBytes) continue;
+      if (before !== undefined && need <= neededBefore(before, main, MEMORY_CAP, "dm")) continue;
+      this.#refusedScene = main;
+      return far === "widestDm" ? { ok: false, code: "quota", message: PER_PLAYER_FULL } : sceneFull(FAR.sceneBytes);
+    }
     return { ok: true };
   }
 
@@ -1503,4 +1589,185 @@ function jsonKeyBytes(key: string): number {
 
 function sceneOf(value: unknown): unknown {
   return typeof value === "object" && value !== null && "sceneId" in value ? value.sceneId : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Player limits: the DM's part of each measure, the far line, and the fixed
+// shares of the marked scenes' pool (shared/limits.ts FAR, MARKED_POOL)
+
+/**
+ * The share of MARKED_POOL the room's marked scenes without one take now:
+ * what the pool has left after the shares written, split equally, at most
+ * MARKED_SHARE_MOST. Written shares never move, so a scene marked later
+ * takes its share from what is left.
+ */
+function unwrittenShare(state: RoomState): number {
+  let written = 0;
+  let unwritten = 0;
+  for (const mark of Object.values(state.memoryShared ?? {})) {
+    if (!state.scenes[mark.sceneId]) continue;
+    if (mark.share !== undefined) written += mark.share;
+    else unwritten++;
+  }
+  return unwritten === 0 ? 0 : Math.min(MARKED_SHARE_MOST, Math.floor(Math.max(0, MARKED_POOL - written) / unwritten));
+}
+
+/** A marked scene's share of the pool: the one written into its mark, or while none is, the one it would take now. */
+export function sceneShare(state: RoomState, scene: Scene): number {
+  const mark = state.memoryShared?.[scene.id];
+  if (mark === undefined) return 0;
+  return mark.share ?? unwrittenShare(state);
+}
+
+/** How many of a reserved scene's layers share its pool share: the party's, and its holders' unless the mark is the party's alone. */
+function sharingLayers(state: RoomState, scene: Scene): number {
+  return (sharesRoom(state, scene) ? 1 : 0) + (sharesRoom(state, scene, true) ? memoryLayerCount(state, scene) - 1 : 0);
+}
+
+/**
+ * A layer's cap on a scene now: a whole cap, or where the layer shares the
+ * scene's pool share, that share split over its sharing layers, at most a
+ * whole cap. Read from the mark and the roster, which every copy holds,
+ * and 0 where memory is not reserved, so the map step forgets it all.
+ */
+export function layerCap(state: RoomState, scene: Scene, layer: Layer = null): number {
+  if (!memoryReserved(state, scene)) return 0;
+  if (!sharesRoom(state, scene, layer !== null)) return MEMORY_CAP;
+  const layers = sharingLayers(state, scene);
+  return layers === 0 ? MEMORY_CAP : Math.min(MEMORY_CAP, Math.floor(sceneShare(state, scene) / layers));
+}
+
+/** Every marked scene's layer caps, read as one key, so a change of the roster or of a share shows as a change of caps. */
+export function capsKey(state: RoomState): string {
+  const parts: string[] = [];
+  for (const mark of Object.values(state.memoryShared ?? {}).sort((a, b) => (a.sceneId < b.sceneId ? -1 : 1))) {
+    const scene = state.scenes[mark.sceneId];
+    if (scene) parts.push(`${scene.id}:${layerCap(state, scene)}:${layerCap(state, scene, "holder")}`);
+  }
+  return parts.join(",");
+}
+
+/** The `sys.share` a room's first load on this format writes: each marked scene without a share takes its share of what the pool has left. */
+export function shareOp(state: RoomState): OpOf<"sys.share"> | null {
+  const unshared = Object.values(state.memoryShared ?? {})
+    .filter((mark) => state.scenes[mark.sceneId] !== undefined && mark.share === undefined)
+    .map((mark) => mark.sceneId)
+    .sort();
+  if (unshared.length === 0) return null;
+  const share = unwrittenShare(state);
+  return { t: "sys.share", shares: unshared.map((sceneId) => ({ sceneId, share })) };
+}
+
+/** Whether any scene keeps the marked pool's mark, so the far line holds the pool whole. */
+function marked(state: RoomState): boolean {
+  return Object.values(state.memoryShared ?? {}).some((mark) => state.scenes[mark.sceneId] !== undefined);
+}
+
+/** A member id as long as the server mints them (shared/ids.ts uuidv7), the shortest a full roster's widest slot holds. */
+const WIDEST_ID = "00000000-0000-7000-8000-000000000000";
+
+/**
+ * The roster at its widest for per-player vision's reserves: up to six
+ * players' ids, the longest first, each no shorter than a minted id, and
+ * the rest of the six slots minted ids, so a join, a kind change and a
+ * removal never widen it.
+ */
+function widestPlayerIds(members: RoomState["members"]): string[] {
+  const ids = rosterIds(members).players.slice(0, MOST_SIGHT_HOLDERS);
+  const out = ids.map((id, i) => (utf8Bytes(id) >= WIDEST_ID.length ? id : `${WIDEST_ID.slice(0, -2)}${String(i).padStart(2, "0")}`));
+  for (let i = out.length; i < MOST_SIGHT_HOLDERS; i++) out.push(`${WIDEST_ID.slice(0, -2)}${String(i).padStart(2, "0")}`);
+  return out;
+}
+
+/**
+ * What per-player vision adds to the stored state at its widest for any
+ * roster: on each per-player scene the party's layer and six players'
+ * layers, and every list of who saw as wide as six such ids. A player's far
+ * check holds it whole, so no join moves the answer.
+ */
+export function widestPerPlayerReserve(state: RoomState): number {
+  const players = widestPlayerIds(state.members);
+  let layers = 0;
+  for (const scene of Object.values(state.scenes)) {
+    if (!perPlayerScene(scene)) continue;
+    layers += layerEntries(widestLayer(scene, null));
+    for (const id of players) layers += layerEntries(widestLayer(scene, id));
+  }
+  const listExtra = players.reduce((sum, id) => sum + utf8Bytes(JSON.stringify(id)), 0) + players.length - 1;
+  return layers + storedLists(state).count * listExtra;
+}
+
+/** An entity's bytes as a map entry, its key and its comma. */
+function entityBytes(id: string, value: unknown): number {
+  return fieldBytes(id) + valueBytes(value) + 1;
+}
+
+/**
+ * The stored bytes of what seats hold in each scope (shared/limits.ts
+ * seatHeld), every scene's that holds something a player owns, and the
+ * rows and asks. Floors of one scene share their tokens and riding areas,
+ * counted once.
+ */
+export function heldBytes(state: RoomState, sceneIds?: readonly string[]): number {
+  const player = (id: string | undefined) => id !== undefined && state.members[id]?.kind === "player";
+  const floors = new Set<string>();
+  if (sceneIds) for (const id of sceneIds) for (const floor of floorsOf(state, id)) floors.add(floor.id);
+  else {
+    for (const t of Object.values(state.templates)) if (player(t.ownerId)) floors.add(t.sceneId);
+    for (const d of Object.values(state.drawings)) if (player(d.ownerId)) floors.add(d.sceneId);
+    // Any floor with a token: which tokens a seat holds is seatHeld's to say.
+    for (const t of Object.values(state.tokens)) floors.add(t.sceneId);
+  }
+  const tokens = new Set<string>();
+  const templates = new Set<string>();
+  const drawings = new Set<string>();
+  for (const floor of floors) {
+    if (!state.scenes[floor]) continue;
+    const held = seatHeld(state, floor);
+    for (const id of held.tokens) tokens.add(id);
+    for (const id of held.templates) templates.add(id);
+    for (const id of held.drawings) drawings.add(id);
+  }
+  let bytes = 0;
+  for (const id of tokens) bytes += entityBytes(id, state.tokens[id]);
+  for (const id of templates) bytes += entityBytes(id, state.templates[id]);
+  for (const id of drawings) bytes += entityBytes(id, state.drawings[id]);
+  if (sceneIds) return bytes;
+  const rest = seatHeld(state, null);
+  const entries = state.encounter?.entries ?? [];
+  for (const entry of entries) if (rest.rows.has(entry.id)) bytes += valueBytes(entry) + 1;
+  for (const id of rest.casts) bytes += entityBytes(id, state.casts[id]);
+  return bytes;
+}
+
+/** The companion blocks of characters a player owns, which the room's measure counts but the DM's part leaves to the blocks' own lines. */
+export function playerBlockBytes(state: RoomState): number {
+  let bytes = 0;
+  for (const [id, block] of Object.entries(state.companionBlocks)) {
+    const character = state.characters[block.characterId];
+    if (character && character.ownerIds.some((m) => state.members[m]?.kind === "player")) bytes += entityBytes(id, block);
+  }
+  return bytes;
+}
+
+/**
+ * The room far line's reading of a state (shared/limits.ts FAR): the DM's
+ * part with its reserves rounded up to FAR.byteStep, plus what seats hold
+ * exactly. `widest` holds per-player vision's reserves at their widest, a
+ * player's op's and a DM op's that raises them. The marked pool counts
+ * whole against this line alone.
+ */
+export function farRoomBytes(state: RoomState, widest: boolean, measured: number = measuredStateBytes(state)): number {
+  const held = heldBytes(state);
+  const reserves = farReserves(state, widest);
+  return roundUp(Math.max(0, measured - held - playerBlockBytes(state) + reserves), FAR.byteStep) + held;
+}
+
+function farReserves(state: RoomState, widest: boolean): number {
+  return exploredReserve(state) + memoryReserves(state).whole + (marked(state) ? MARKED_POOL : 0) + (widest ? Math.max(0, widestPerPlayerReserve(state) - perPlayerStoredReserve(state)) : 0);
+}
+
+/** By how many bytes a state is past the room far line at its widest, or 0 under it: the DM's snapshot's `over`. */
+export function overFarLine(state: RoomState): number {
+  return Math.max(0, farRoomBytes(state, true) - FAR.roomBytes);
 }

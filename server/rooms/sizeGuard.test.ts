@@ -11,7 +11,7 @@ import { sightEntryMaxBytes } from "#shared/rules/vision.ts";
 import { actor, character, companionBlock, room, scene, template, token } from "#shared/testutil.ts";
 import { exploreOp } from "./explore.ts";
 import { MEMORY_CAP } from "./memorySize.ts";
-import { checkWholeScenes, discoveryReserve, growthBound, measuredLog, memoryStateReserve, numberingAdjust, projectionNumbering, SCENE_MAPS_FULL, SizeGuard } from "./sizeGuard.ts";
+import { checkWholeScenes, discoveryReserve, growthBound, heldBytes, measuredLog, memoryStateReserve, numberingAdjust, projectionNumbering, SCENE_MAPS_FULL, SizeGuard } from "./sizeGuard.ts";
 
 const DM: Viewer = { memberId: "dm", role: "dm" };
 
@@ -99,7 +99,8 @@ describe("SizeGuard", () => {
   test("a token moved into another scene counts in full toward it, with the areas attached to it", () => {
     const before = room();
     before.tokens.t1 = token("t1", { name: "Owlbear".repeat(40), sceneId: "s1" });
-    before.templates.a1 = template("a1", { sceneId: "s1", attachedTo: "t1", label: "Moonbeam".repeat(40) });
+    // The DM's area: a player's would be their seat's, which the DM's part of the measure leaves out.
+    before.templates.a1 = template("a1", { sceneId: "s1", attachedTo: "t1", label: "Moonbeam".repeat(40), ownerId: "dm1" });
     const moved = applied(before, { t: "token.update", tokenId: "t1", patch: { sceneId: "s2" } });
     assert.equal(moved.state.templates.a1?.sceneId, "s2");
     const s2Before = projectionBytes(projectState(before, DM, { sceneId: "s2" }));
@@ -146,7 +147,8 @@ describe("SizeGuard's wave 4 reserves (docs/design/design-v1-maps-vision.md 2.4)
       // Creature numbers count at their widest beside the projection (numberingAdjust).
       const measured = projectionBytes(projectState(probe, DM, { sceneId })) + discoveryReserve(state, state.scenes[sceneId]!, MEMORY_CAP) + projectionNumbering(state, sceneId);
       const reserve = 13 * 13 * sightEntryMaxBytes(sceneId);
-      const explored = exploredReserve(state);
+      // The line reads the DM's part: the party's token is its player's seat's.
+      const explored = exploredReserve(state) - heldBytes(state, [sceneId]);
       const real = { ...visionRules };
       Object.assign(visionRules, {
         partySight: () => {
@@ -177,22 +179,26 @@ describe("SizeGuard's wave 4 reserves (docs/design/design-v1-maps-vision.md 2.4)
 
   test("an op that makes another scene explore is checked with that scene's reserve, and says what to do when only it does not fit", () => {
     const state = bright("s9");
+    // A small scene to move from, so the move raises the room's reserves: one that does not is never refused.
+    state.scenes.s9 = { ...state.scenes.s9!, bounds: { w: 20, h: 20 } };
+    state.tokens.pc = { ...state.tokens.pc!, x: 5, y: 5 };
     state.scenes.s8 = scene("s8", { bounds: { w: 200, h: 200 }, fogEnabled: true, vision: { on: true, light: "dark" } });
     const moved = { ...state, meta: { ...state.meta, playerSceneId: "s8" } };
     // Players' memory of the scene they move to is reserved at its cap (docs/design/design-v1-map-discovery.md 5.5), and
     // creature numbers count at their widest (numberingAdjust).
-    const bytes = serializedBytes(moved) + memoryStateReserve(moved) + numberingAdjust(moved);
+    // The line reads the DM's part: the party's token is its player's seat's.
+    const bytes = serializedBytes(moved) + memoryStateReserve(moved) + numberingAdjust(moved) - heldBytes(moved);
     const fits = new SizeGuard({ stateLimit: bytes + exploredReserve(moved) });
     assert.equal(fits.check(moved, [], 0, state).ok, true);
     const tight = new SizeGuard({ stateLimit: bytes + exploredReserve(moved) - 1 });
     assert.deepEqual(tight.check(moved, [], 0, state), { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE });
-    // The same room for any other op is simply full.
-    assert.match((tight.check(moved, [], 0, moved) as { message: string }).message, /^the room is full/);
+    // An op that adds nothing to the total passes, however full the room.
+    assert.deepEqual(tight.check(moved, [], 0, moved), { ok: true });
     // The projected check of the scene that starts exploring runs too, though the op never named it.
     // Creature numbers count at their widest beside the projection (numberingAdjust).
     const sceneBytes = projectionBytes(projectState({ ...moved, sight: {} } as unknown as RoomState, DM, { sceneId: "s8" })) + discoveryReserve(moved, moved.scenes.s8!, MEMORY_CAP) + projectionNumbering(moved, "s8");
     const sightReserve = 13 * 13 * sightEntryMaxBytes("s8");
-    const sceneTight = new SizeGuard({ sceneLimit: sceneBytes + sightReserve + exploredReserve(moved) - 1 });
+    const sceneTight = new SizeGuard({ sceneLimit: sceneBytes + sightReserve + exploredReserve(moved) - heldBytes(moved, ["s8"]) - 1 });
     assert.deepEqual(sceneTight.check(moved, [], 0, state), { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE });
   });
 

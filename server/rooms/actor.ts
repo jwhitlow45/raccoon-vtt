@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
-import { BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, checkLimits, LIMITS, ROLLING_TOO_FAST, SOUND_LIMITS, type LimitCheck } from "#shared/limits.ts";
+import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, LIMITS, ROLLING_TOO_FAST, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
+import { FAR_TREATMENT, opKind as limitKind } from "#shared/farLine.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
@@ -9,7 +10,7 @@ import { canApply, doorReachPassed, touchLanding, MOVE_PLAYERS_FIRST_BACK, type 
 import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { landedElevation } from "#shared/rules/movement.ts";
-import { gridOfToken, hashValue, inSightOfNonOwners, projectEntity, visibleAssetIds } from "#shared/project.ts";
+import { gridOfToken, hashValue, inSightOfNonOwners, projectEntity, seatView, visibleAssetIds } from "#shared/project.ts";
 import { ASK_LOST, clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, mintedIds, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
 import { addsReservedEntryId } from "#shared/reservedIds.ts";
 import { RESERVED_ID } from "#shared/reducer/tx.ts";
@@ -65,7 +66,7 @@ import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCa
 import { layerCharge } from "./memorySize.ts";
 import { forgetAllOps, forgetSceneOp, mapStepOps, memoryGrowth, type DoorTouch } from "./remember.ts";
 import { meetOps } from "./meet.ts";
-import { growthBound, measuredFromStored, scenesOverByNumbering, SizeGuard, touchedScenes } from "./sizeGuard.ts";
+import { growthBound, measuredFromStored, memoryReserves, scenesOverByNumbering, shareOp, SizeGuard, touchedScenes, widestPerPlayerReserve, type FarJudge } from "./sizeGuard.ts";
 import { climbOf, keptFrom, MOVED_SINCE, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf, wingLabel } from "./undoLabels.ts";
 import { undoScope } from "#shared/undoScope.ts";
@@ -300,6 +301,8 @@ type Command = (
   | { t: "soundTick" }
   /** A device's ask after a reconnect whether the room recorded its own uncertain creates' ids (#processIds). */
   | { t: "ids"; conn: Connection; k: number; ids: readonly string[] }
+  /** The marked scenes' fixed shares, written at a room's first load on this format (#processShare). */
+  | { t: "share" }
 ) & {
   /** The clocks when it was queued (#enqueue), which it is handled with, however long it waited. */
   moment?: Moment;
@@ -669,6 +672,11 @@ export class RoomActor {
     this.#opsSinceSnapshot = loaded.seq - loaded.snapshotSeq;
     this.#sizes = new SizeGuard(this.#opts.sizeLimits);
     this.#sizes.stateMeasured(measuredFromStored(loaded.stateBytes, loaded.state), loaded.state);
+    // A room this build saved keeps its layers within their caps already. One from before measures every layer once, so
+    // a map held above its scene's fixed share forgets its oldest tiles at the room's first batch.
+    if (loaded.snapshotVersion >= PLAYER_LIMITS_SNAPSHOT_VERSION) this.#sizes.capsMeasured(loaded.state);
+    // A room past the far line is told to its operator once, as it loads, and to its DM by the snapshot's `over`.
+    if (this.#sizes.over > 0) this.#log.warn({ roomId: this.roomId, overBytes: this.#sizes.over }, "room is over its far size limit: creates and growing edits are refused until it is smaller");
     // A room saved before creature numbers may hold a scene their reserve puts over its limit, so the operator is told
     // once for each, as the room loads, by ids alone.
     for (const sceneId of scenesOverByNumbering(loaded.state, this.#sizes.share, this.#sizes.sceneLimit)) {
@@ -721,6 +729,7 @@ export class RoomActor {
     // A room loaded long after its last commit starts silent, one loaded soon after catches up, and with the switch off
     // nothing that names a file plays (docs/design/design-v1-music.md 6.4). Its tick runs once now, sockets or none.
     if (!actor.replayFailed && soundOf(actor.#staged.state) !== null) actor.#enqueue({ t: "soundTick" });
+    if (!actor.replayFailed && shareOp(actor.#staged.state) !== null) actor.#enqueue({ t: "share" });
     return actor;
   }
 
@@ -1397,7 +1406,24 @@ export class RoomActor {
         return this.#processSoundTick();
       case "ids":
         return this.#processIds(cmd);
+      case "share":
+        return this.#processShare();
     }
+  }
+
+  /**
+   * Writes each marked scene's fixed share of the pool for remembered maps
+   * that has none yet (sizeGuard.ts shareOp), by one server op in a batch
+   * of its own, at a room's first load on this format. Reserved and never
+   * refused, as the map step's ops are.
+   */
+  #processShare(): void {
+    if (this.replayFailed) return;
+    const op = shareOp(this.#staged.state);
+    if (op === null) return;
+    const batch = this.#ensureBatch();
+    this.#appendServerOp(batch, op, "share");
+    this.#scheduleCommit();
   }
 
   /**
@@ -1809,7 +1835,8 @@ export class RoomActor {
     }
     // The DM's builder ops ask before players' remembered map is forgotten, unless sent with the yes (5.3).
     const asks = viewer.role === "dm" && ASK_OPS.has(op.t) && (op as { forget?: true }).forget !== true;
-    const reduced = this.#reduce(op, viewer, asks, at, minted);
+    // A step that takes back or brings back a move, or an HP change from the log, is bookkeeping as the change was.
+    const reduced = this.#reduce(op, viewer, asks, at, minted, step?.poses !== undefined || fromLog);
     if (!reduced.ok && reduced.code === "forget" && cmd.group !== undefined) this.#askRefused.set(key, cmd.group);
     if (!reduced.ok) {
       // A restore that failed says which step it was, so a refused undo is never a riddle.
@@ -2171,7 +2198,7 @@ export class RoomActor {
    * after it keeps all of the op, its row once and its keys, whose number
    * #settleStaged settles, and the next op's numbers stay above it.
    */
-  #reduce(op: Op, viewer: Viewer, asks = false, given?: string, minted: readonly string[] = []): Reduced {
+  #reduce(op: Op, viewer: Viewer, asks = false, given?: string, minted: readonly string[] = [], restoresBookkeeping = false): Reduced {
     const counts = counted(op.t, OP_VERSION);
     const moment = this.#now();
     const number = counts ? this.#nextNumber() : this.#pub;
@@ -2184,11 +2211,15 @@ export class RoomActor {
     if (!measured.ok) return measured;
     const sceneIds = scenesOf(op, this.#staged.state, measured.state, viewer.role);
     const before = this.#staged.state;
-    // `before` with no scene too, so a show past the room's handout pages says that showing counts them again.
-    const limits: LimitCheck = checkLimits(measured.state, sceneIds[0] ?? null, before, viewer.role);
+    // A player's op meets their seats over their own view and the far line, the DM's and the server's the caps over what
+    // no seat holds (shared/limits.ts admitLimits). `before` with no scene too, so a show past the room's handout pages
+    // says that showing counts them again.
+    const kind = limitKind(op, restoresBookkeeping);
+    const sender: LimitSender = viewer.role === "player" ? { role: "player", memberId: viewer.memberId, viewOf: (state) => seatView(state, viewer.memberId) } : { role: "dm" };
+    const limits: LimitCheck = admitLimits(measured.state, sceneIds[0] ?? null, before, sender, kind);
     if (!limits.ok) return limits;
     for (const sceneId of sceneIds.slice(1)) {
-      const more = checkLimits(measured.state, sceneId, before, viewer.role);
+      const more = admitLimits(measured.state, sceneId, before, sender, kind);
       if (!more.ok) return more;
     }
     // A scene's floors fit together after every op, undo, redo and restore (docs/design/design-v1-floors.md 9,
@@ -2213,7 +2244,7 @@ export class RoomActor {
     }
     // Every scene the op wrote into, read from what it touched, so no op's growth escapes its scenes' bounds.
     const grown = [...new Set([...sceneIds, ...touchedScenes(this.#staged.state, measured.state, measured.touched), ...touchedScenes(this.#staged.state, result.state, result.touched)])];
-    const size = this.#sizes.check(measured.state, grown, growthBound(this.#staged.state, measured.state, measured.touched), this.#staged.state, viewer.role);
+    const size = this.#bytesMeet(op, kind, viewer, measured.state, grown, growthBound(this.#staged.state, measured.state, measured.touched));
     // The state limit is what refuses a block save here, since the projected scene leaves blocks out: it says what to do.
     if (!size.ok) {
       const refused = withFloorWords(op, this.#staged.state, size, this.#sizes.refusedScene);
@@ -2268,6 +2299,23 @@ export class RoomActor {
       ...(result.trapped ? { trapped: true as const } : {}),
       ...(result.trapWrote ? { trapWrote: result.trapWrote } : {}),
     };
+  }
+
+  /**
+   * The byte lines an op meets (sizeGuard.ts): none for a deletion or the
+   * server's own op. A move of the players' scene that leaves the room's
+   * reserves no larger is never refused, so cleanup never needs new room. A
+   * player's op meets only the far line, with per-player vision's reserves
+   * at their widest. The DM's meets the near lines over their part, and the
+   * far line unless its kind is exempt, at the widest when the op raises
+   * them, so a lone DM cannot build what later joins would carry past it.
+   */
+  #bytesMeet(op: Op, kind: LimitKind, viewer: Viewer, next: RoomState, grown: readonly string[], growth: number): LimitCheck {
+    const before = this.#staged.state;
+    if (kind.far === "deletion" || FAR_TREATMENT[op.t] === "server") return { ok: true };
+    if (op.t === "room.setPlayerScene" && roomReserves(next) <= roomReserves(before)) return { ok: true };
+    const far: FarJudge = kind.far !== "meets" ? "none" : viewer.role === "player" ? "widest" : widestPerPlayerReserve(next) > widestPerPlayerReserve(before) ? "widestDm" : "today";
+    return this.#sizes.check(next, grown, growth, before, viewer.role, far);
   }
 
   /**
@@ -2503,13 +2551,16 @@ export class RoomActor {
     }
     const wm = this.#watermarks.get(key);
     const snapshot = buildSnapshot(this.#committed.state, this.#handOut(pub), conn, wm?.committed ?? 0);
+    // A DM's alone: by how much the room is past its far line at the last exact reading, absent under it.
+    const over = this.#sizes.over;
+    const message: ServerMessage = conn.role === "dm" && conn.previewBy === null && over > 0 ? { ...snapshot.message, over: { bytes: over } } : snapshot.message;
     // Ahead of the snapshot, which settles the ops they name with no answer, so the page says why each was refused.
     const refused = takeKeptRejects(conn);
     if (refused.length > 0) conn.send({ t: "refusals", rejects: refused });
     // Ahead of the snapshot, so the page has re-anchored its reckoning of this server's time before anything the
     // snapshot sets off can mint a first Apply (D-261031-181). Read after the build, so the network is all it trails by.
     conn.send({ t: "clock", at: new Date(this.#opts.now()).toISOString() });
-    const bytes = conn.send(snapshot.message);
+    const bytes = conn.send(message);
     conn.held = snapshot.held;
     this.#sendHistory(conn, pub);
     // A device that takes a snapshot drops every other screen's preview it showed (client/state/store.ts keepLocal), so
@@ -2793,14 +2844,15 @@ export class RoomActor {
    * out of their sight. Like the explore it is never refused and runs none
    * of an op's checks: memory counts at its caps, which every check
    * reserved, and the step keeps each layer within its cap by forgetting
-   * whole fog tiles. A share the size guard lowered since the last batch
-   * has every layer measured against it.
+   * whole fog tiles. A layer cap that may have fallen since the step last
+   * measured every layer (a marked scene's fixed share, a join) has every
+   * layer measured against it.
    */
   #remember(batch: Batch): void {
     let ops: ReturnType<typeof mapStepOps>;
     try {
       const after = this.#staged.state;
-      const lowered = this.#sizes.shareLowered;
+      const lowered = this.#sizes.capsMoved(after);
       ops = this.#opts.mapStep({
         before: batch.step.before,
         after,
@@ -2810,7 +2862,7 @@ export class RoomActor {
         everyLayer: lowered,
       });
       // Answered only once the step ran: a step that throws leaves the next batch's to measure every layer.
-      if (lowered) this.#sizes.takeShareLowered();
+      if (lowered) this.#sizes.capsMeasured(after);
     } catch (err) {
       // Fail closed (rule 9): the layers of the scenes the batch wrote on forget their ground rather than show the edit.
       this.#log.error({ err, roomId: this.roomId }, "map step failed, forgetting the scenes it wrote on");
@@ -3589,6 +3641,11 @@ const ARCHIVE_SKIPPED = "free disk is under the floor or could not be read, so l
  * snapshot that would measure it otherwise. Only the stored quota flag
  * changes here. A failed replay keeps the room read-only on its own.
  */
+/** What the room reserves for players' explored ground and memory, every floor of the players' scene counted. */
+function roomReserves(state: RoomState): number {
+  return exploredReserve(state) + memoryReserves(state).whole;
+}
+
 /**
  * The id gate's start (createIds.ts): the server's cutover, the room's gate
  * rows, and at a room's first load on this build rows for the ids its state

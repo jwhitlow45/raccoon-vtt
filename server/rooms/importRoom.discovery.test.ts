@@ -185,7 +185,7 @@ describe("players' memory through a room export and import", () => {
     assert.doesNotThrow(() => assertWithinLimits(state), "what the layer holds fits the room's free space");
     const load = new SizeGuard({ stateLimit: FAR.roomBytes, sceneLimit: FAR.sceneBytes });
     load.stateMeasured(measuredStateBytes(state), state);
-    assert.deepEqual([load.share, load.shareLowered], [1_000, true], "the load's first batch measures every layer against the lowered share");
+    assert.equal(load.capsMoved(state), true, "the load's first batch measures every layer against its scene's cap");
     // Free space just short of what the layer holds: refused.
     fillTo(charge - 1);
     assert.throws(
