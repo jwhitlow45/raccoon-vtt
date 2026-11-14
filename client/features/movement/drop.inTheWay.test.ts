@@ -114,6 +114,20 @@ describe("squares: the creature named is the one that closes the way (LP41-MOVE-
     }
   });
 
+  test("a warhorse, Large, toward the orc on the corridor's first square, a goblin on 6, 3 beside its mouth: it holds on 5, 3 before the orc, though its first spot over the orc is over the goblin too, which comes first among the creatures (review LP42R-5)", () => {
+    const s = hall({
+      horse: token("horse", { size: "large", x: 1, y: 3, name: "Warhorse", kind: "npc", disposition: "ally", ownerIds: ["p1"], actor: { inline: actor({ speeds: { walk: 60 } }) } }),
+      gob: goblin("gob", 6, 3),
+      orc: goblin("orc", 7, 4, { name: "Orc" }),
+    });
+    delete s.tokens.thorn;
+    const copy = projectState(s, P1, { sceneId: "s1" }) as unknown as RoomState;
+    const drag = dragOf(copy, "player", "horse", { x: 16.5, y: 3.5 });
+    assert.equal(drag.plan.stop && stopText(drag.plan.stop), "Orc is in the way.");
+    assert.deepEqual(drag.plan.moves.map((m) => [m.x, m.y]), [[5, 3]], "short of 5.5, 3.5, whose footprint lies over the goblin and the orc");
+    assert.deepEqual(drag.hold && [drag.hold.at.x, drag.hold.at.y], [5, 3]);
+  });
+
   test("no creature named meets no spot, a clear one included (review LP42R-4)", () => {
     const s = hall({ orc: goblin("orc", 10, 4, { name: "Orc" }) });
     const copy = projectState(s, P1, { sceneId: "s1" }) as unknown as RoomState;
