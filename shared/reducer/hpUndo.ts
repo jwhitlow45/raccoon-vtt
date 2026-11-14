@@ -1,7 +1,9 @@
 import { keys } from "../keys.ts";
 import type { Actor, DurationAnchor, Effect, HpRevert, InitEntry, LogEvent, RoomState, Vitals } from "../model.ts";
 import { stableStringify } from "../project.ts";
-import { MAX_EFFECTS, type RefusalCode, type RestoreEntry } from "../protocol.ts";
+import type { RefusalCode, RestoreEntry } from "../protocol.ts";
+import { HIDDEN_EFFECTS_FULL } from "../limits.ts";
+import { EFFECTS_PER_CLASS, effectsWithin } from "../rules/effects.ts";
 import { findEntryFor, pausedAnchorForEntry } from "../rules/durations.ts";
 import { hpLabel } from "../rules/hp.ts";
 import { CHANGED_SINCE } from "./misc.ts";
@@ -186,9 +188,14 @@ export function hpUndoRestore(state: RoomState, logId: string): HpUndo {
   const removed = new Set((data.revert.removed ?? []).map((e) => e.id));
   const anchors = data.revert.anchors;
   const actor = reopenedRegeneration(state, { ...reverted, effects: reverted.effects.map((e) => (removed.has(e.id) ? restoredEffect(state, e, anchors) : e)) }, data.revert.record);
-  // Conditions added since stay, so the ones coming back can pass the limit. The room could then not be exported and imported.
-  if (actor.effects.length > MAX_EFFECTS) return { ok: false, code: "quota", message: `at most ${MAX_EFFECTS} effects per creature`, event: data };
-  const value = holder.key.startsWith("token:") ? { ...holder.value, actor: { inline: actor } } : { ...holder.value, actor };
+  // Conditions added since stay, so the ones coming back can pass the limit. The room could then not be exported and
+  // imported. Each class has its own (rules/effects.ts), and the list is normalized as every writer stores it, so a
+  // hidden or edited automatic Unconscious comes back as the ordinary condition it became. Only a live undo builds this
+  // restore, and replay applies the restore as stored.
+  const fit = effectsWithin(holder.key, actor.effects);
+  if (!fit.ok) return { ok: false, code: "quota", message: fit.full === "hidden" ? HIDDEN_EFFECTS_FULL : `at most ${EFFECTS_PER_CLASS} effects per creature`, event: data };
+  const backed = { ...actor, effects: fit.effects };
+  const value = holder.key.startsWith("token:") ? { ...holder.value, actor: { inline: backed } } : { ...holder.value, actor: backed };
   return { ok: true, event: data, entries: [{ key: holder.key, value, expectHash: guardHash(holder.key, holder.value) }] };
 }
 

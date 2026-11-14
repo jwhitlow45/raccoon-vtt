@@ -1,6 +1,6 @@
-import { clockTicks, combatUses, healRevivesDead, reviveToOne } from "../migrate.ts";
+import { clockTicks, combatUses, healRevivesDead, playerLimitsOps, reviveToOne } from "../migrate.ts";
 import { CLOCK_TOO_FAR, clockNow } from "../calendar.ts";
-import { LIMITS } from "../limits.ts";
+import { HIDDEN_EFFECTS_FULL, LIMITS } from "../limits.ts";
 import type { Effect, EffectEnds, RoomState } from "../model.ts";
 import { heldClock } from "../project.ts";
 import { MAX_EFFECTS, type Op, type OpOf, type OutcomeDamage, type TurnDurationInput } from "../protocol.ts";
@@ -17,8 +17,11 @@ import {
   effectEvent,
   endConcentration,
   hpLabel,
+  ZERO_HP_UNCONSCIOUS_ID,
+  hpRules,
   type ActorEvent,
 } from "../rules/hp.ts";
+import { EFFECTS_PER_CLASS, effectsFit, effectsFitChanged, type EffectsFit } from "../rules/effects.ts";
 import { applyRest, restedResources } from "../rules/rest.ts";
 import { hpRevertOf } from "./hpUndo.ts";
 import { keys, parseKey } from "../keys.ts";
@@ -49,12 +52,12 @@ export function actorHp(tx: Tx, op: OpOf<"actor.hp">, context?: Omit<OutcomeDama
   }
   const r =
     c.kind === "damage"
-      ? applyDamage(resolved.actor, c.amount, resolved.kind, settings, c.crit ?? false)
+      ? applyDamage(resolved.actor, c.amount, resolved.kind, settings, c.crit ?? false, hpRules(tx.env.opVersion))
       : c.kind === "heal"
         ? applyHeal(resolved.actor, c.amount, revivesDead)
         : c.kind === "temp"
           ? applyTemp(resolved.actor, c.amount)
-          : applyHpSet(resolved.actor, c, resolved.kind, settings, revivesDead);
+          : applyHpSet(resolved.actor, c, resolved.kind, settings, revivesDead, hpRules(tx.env.opVersion));
   if (r.actor === resolved.actor) return;
   // Regeneration counts only types that dealt damage after defenses. Temporary HP that took the hit still count,
   // and a take back of the hit leaves them. Older ops carry their final types directly.
@@ -120,7 +123,7 @@ export function actorDeathSave(tx: Tx, op: OpOf<"actor.deathSave">): void {
 
 export function actorLife(tx: Tx, op: OpOf<"actor.life">): void {
   const resolved = tx.resolveActor(op.target);
-  const r = applyLife(resolved.actor, op.life, reviveToOne(tx.env.opVersion));
+  const r = applyLife(resolved.actor, op.life, reviveToOne(tx.env.opVersion), hpRules(tx.env.opVersion));
   tx.putActor(resolved, r.actor);
   tx.addActorEvents(resolved, r.events);
 }
@@ -152,10 +155,24 @@ function spanEnds(tx: Tx, seconds: number): EffectEnds {
   return { span: seconds, at, clock: clock.id };
 }
 
+/** The entity key a creature's converted conditions hash with (rules/effects.ts convertedEffectId). */
+export function holderKey(resolved: Pick<ResolvedActor, "holder" | "id">): string {
+  return resolved.holder === "token" ? keys.token(resolved.id) : keys.character(resolved.id);
+}
+
+/** A condition that does not fit its class, refused in the words of the class it would pass: a player's add reads only the shown one. */
+function effectsFull(fit: Extract<EffectsFit, { ok: false }>): Refuse {
+  return new Refuse("quota", fit.full === "hidden" ? HIDDEN_EFFECTS_FULL : `at most ${EFFECTS_PER_CLASS} effects per creature`);
+}
+
+/** The words of an edit of the automatic Unconscious without the fresh id it goes on under (rules/effects.ts). */
+export const AUTOMATIC_NEEDS_ID = "editing the automatic Unconscious needs a new id for it";
+
 export function effectAdd(tx: Tx, op: OpOf<"actor.effect.add">): void {
   const resolved = tx.resolveActor(op.target);
   const actor = resolved.actor;
-  if (actor.effects.length >= MAX_EFFECTS) throw new Refuse("quota", `at most ${MAX_EFFECTS} effects per creature`);
+  const byClass = playerLimitsOps(tx.env.opVersion);
+  if (!byClass && actor.effects.length >= MAX_EFFECTS) throw new Refuse("quota", `at most ${MAX_EFFECTS} effects per creature`);
   if (actor.effects.some((e) => e.id === op.effect.id)) throw invalid("effect already exists");
   const { duration, ...rest } = op.effect;
   const effect: Effect = stripUndefined(rest);
@@ -164,7 +181,9 @@ export function effectAdd(tx: Tx, op: OpOf<"actor.effect.add">): void {
     checkAnchor(tx, duration);
     effect.duration = resolveDuration(tx.state, duration);
   }
-  let next = { ...actor, effects: [...actor.effects, effect] };
+  const fit = byClass ? effectsFit(holderKey(resolved), actor.effects, [effect]) : { ok: true as const, effects: [...actor.effects, effect] };
+  if (!fit.ok) throw effectsFull(fit);
+  let next = { ...actor, effects: fit.effects };
   const events: ActorEvent[] = [effectEvent(effect, "add")];
   if (INCAPACITATING_KEYS.has(effect.key)) {
     const ended = endConcentration(next);
@@ -180,7 +199,15 @@ export function effectUpdate(tx: Tx, op: OpOf<"actor.effect.update">): void {
   const index = resolved.actor.effects.findIndex((e) => e.id === op.effectId);
   const current = resolved.actor.effects[index];
   if (!current) throw gone("effect");
+  const byClass = playerLimitsOps(tx.env.opVersion);
   const next: Effect = { ...current };
+  // Hiding or editing the automatic Unconscious makes it an ordinary condition under the fresh id the op brings, so
+  // none hidden or edited ever holds the automatic id.
+  if (byClass && current.id === ZERO_HP_UNCONSCIOUS_ID) {
+    if (op.as === undefined) throw invalid(AUTOMATIC_NEEDS_ID);
+    if (resolved.actor.effects.some((e) => e.id === op.as)) throw invalid("effect already exists");
+    next.id = op.as;
+  } else if (op.as !== undefined) throw invalid("only the automatic Unconscious takes a new id");
   const p = op.patch;
   if (p.hiddenFromPlayers !== undefined) next.hiddenFromPlayers = p.hiddenFromPlayers;
   if (p.triggerShown !== undefined) next.triggerShown = p.triggerShown;
@@ -207,9 +234,15 @@ export function effectUpdate(tx: Tx, op: OpOf<"actor.effect.update">): void {
     delete next.save;
     delete next.due;
   } else if (p.save !== undefined) next.save = p.save;
-  const effects = [...resolved.actor.effects];
-  effects[index] = next;
-  tx.putActor(resolved, { ...resolved.actor, effects });
+  if (!byClass) {
+    const effects = [...resolved.actor.effects];
+    effects[index] = next;
+    tx.putActor(resolved, { ...resolved.actor, effects });
+    return;
+  }
+  const fit = effectsFitChanged(holderKey(resolved), resolved.actor.effects, index, next);
+  if (!fit.ok) throw effectsFull(fit);
+  tx.putActor(resolved, { ...resolved.actor, effects: fit.effects });
 }
 
 /**

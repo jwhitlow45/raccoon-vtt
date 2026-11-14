@@ -28,7 +28,8 @@ import {
   unbindFromEntry,
   type StoredDuration,
 } from "../rules/durations.ts";
-import { attaches, clockTicks, combatUses, hiddenRowsShareNoMount, keepsLairTick, logsByAudience, marksHadTurn, mountsOnPlayerScene, revealsRowAnew, takesBackTurnOnly, timedEnds } from "../migrate.ts";
+import { attaches, clockTicks, combatUses, hiddenRowsShareNoMount, keepsLairTick, logsByAudience, marksHadTurn, mountsOnPlayerScene, playerLimitsOps, revealsRowAnew, takesBackTurnOnly, timedEnds } from "../migrate.ts";
+import { effectsFitAt } from "../rules/effects.ts";
 import { clockNow, fightSeconds } from "../calendar.ts";
 import { LIMITS } from "../limits.ts";
 import { holderOf } from "../rules/attach.ts";
@@ -808,8 +809,12 @@ function undoEffects(tx: Tx, change: EffectChange, before: readonly Effect[], kn
   // A time span the clock has since moved past stays ended, with no second line (docs/design/design-v1-calendar-c2c3.md 4.3).
   const clock = tx.state.clock;
   const now = clock && timedEnds(tx.env.opVersion) ? clockNow(clock, tx.state.encounter) : undefined;
+  // From op version 61 an ended condition comes back only while its class has room, and normalized as every writer
+  // stores it, so a hidden or edited automatic Unconscious comes back as the ordinary condition it became.
+  const byClass = playerLimitsOps(tx.env.opVersion);
+  const holder = ownEntry(tx.state.characters, change.holderId) ? keys.character(change.holderId) : keys.token(change.holderId);
   for (const { at, effect: ended } of [...(change.ended ?? [])].sort((a, b) => a.at - b.at)) {
-    if (next.length >= MAX_EFFECTS || next.some((e) => e.id === ended.id)) continue;
+    if ((!byClass && next.length >= MAX_EFFECTS) || next.some((e) => e.id === ended.id)) continue;
     // The step's own copy, which every rewrite of the history keeps counting a row of the step (companions.ts stepWithout, the import).
     const effect = before.find((e) => e.id === ended.id) ?? ended;
     if (clock && now !== undefined && endsDue(effect, clock, now)) continue;
@@ -822,7 +827,13 @@ function undoEffects(tx: Tx, change: EffectChange, before: readonly Effect[], kn
         break;
       }
     }
-    next = [...next.slice(0, place), countingRowInFight(tx.state, effect, known), ...next.slice(place)];
+    const back = countingRowInFight(tx.state, effect, known);
+    if (!byClass) {
+      next = [...next.slice(0, place), back, ...next.slice(place)];
+      continue;
+    }
+    const fit = effectsFitAt(holder, next, place, back);
+    if (fit.ok) next = fit.effects;
   }
   if (stableStringify(next) !== stableStringify(list)) restoreEffects(tx, change.holderId, next);
 }

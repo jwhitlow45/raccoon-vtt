@@ -50,6 +50,8 @@ export const MAX_CHAT = 1_000;
 export const MAX_NOTES = 4_000;
 export const MAX_OWNERS = 16;
 export const MAX_EFFECTS = 32;
+/** The most conditions a creature stores: 32 shown, 32 hidden and the automatic Unconscious (shared/rules/effects.ts). A create's actor still brings at most MAX_EFFECTS. */
+export const EFFECTS_STORED_MOST = 2 * MAX_EFFECTS + 1;
 /** The highest counter an effect holds (its `level`). Exhaustion's level stays 1 to 6 (shared/reducer/actors.ts). */
 export const MAX_EFFECT_LEVEL = 99;
 export const MAX_DRAWING_POINTS = 2_000;
@@ -120,6 +122,15 @@ const MULTI_LINE = /^[^\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]*$/u;
 const line = (max: number) => z.string().max(max).regex(SINGLE_LINE, "control characters are not allowed");
 
 const id = z.string().min(1).max(64);
+/**
+ * The id form of a converted automatic Unconscious (shared/rules/effects.ts
+ * convertedEffectId): 81 characters, longer than any other id, so no id
+ * held before can take it. No device mints one, and the id gate refuses it
+ * from every device, since it is not version 7.
+ */
+export const CONVERTED_EFFECT_ID = /^auto-unconscious:[0-9a-f]{64}$/;
+/** An effect's id wherever an effect is stored or named: any id, or the converted form. */
+const effectId = z.union([id, z.string().regex(CONVERTED_EFFECT_ID)]);
 /** A log entry's id, `"<seq>:<index>"` (shared/reducer/tx.ts). */
 const logId = z.string().regex(/^\d{1,18}:\d{1,6}$/);
 const name = z.string().min(1).max(MAX_NAME).regex(NAME_CHARS, "names cannot hold control or text direction characters");
@@ -246,7 +257,7 @@ const durationStored = z.strictObject({
 });
 
 const effectBase = {
-  id,
+  id: effectId,
   key: effectKey,
   label: shortText.optional(),
   glyph: line(8).optional(),
@@ -1630,7 +1641,7 @@ const rollRequestInput = z.strictObject({
   /** Public: what the request is for, so a player's card and the roll's test know a "save ends" save. */
   cause: z.literal("saveEnds").optional(),
   /** The DM's: the effect a pass removes and its save occurrence. The reducer holds it to one creature with that effect, asked once. */
-  ends: z.strictObject({ effect: id, occurrence: id }).optional(),
+  ends: z.strictObject({ effect: effectId, occurrence: id }).optional(),
 });
 /**
  * A stat block roll's key (shared/dice/named.ts blockActions): its section
@@ -2505,7 +2516,7 @@ const stateClientOps = [
           target: actorTarget,
           amount: z.number().int().min(1).max(100_000).optional(),
           effects: z.array(effectInput).min(1).max(LIMITS.outcomeEffectsEach).optional(),
-          remove: z.array(id).min(1).max(LIMITS.outcomeEffectsEach).optional(),
+          remove: z.array(effectId).min(1).max(LIMITS.outcomeEffectsEach).optional(),
           resist: z.literal(true).optional(),
           /** The damage types of the creature's adjusted parts above 0 (docs/design/design-v1-combat-controls.md 3.4). */
           types: damageTypes.optional(),
@@ -2538,7 +2549,7 @@ const stateClientOps = [
   op("actor.effect.add", { target: actorTarget, effect: effectInput }),
   op("actor.effect.update", {
     target: actorTarget,
-    effectId: id,
+    effectId,
     /**
      * A fresh id for the automatic Unconscious this update hides or edits
      * (shared/rules/effects.ts): it goes on as an ordinary condition under
@@ -2558,13 +2569,13 @@ const stateClientOps = [
       save: effectSave.nullable().optional(),
     }),
   }),
-  op("actor.effect.remove", { target: actorTarget, effectId: id }),
+  op("actor.effect.remove", { target: actorTarget, effectId }),
   /**
    * The DM settles a save-ends occurrence no request is linked to
    * (docs/design/design-v1-roll-options.md 6.1): Accept failure or Dismiss on the
    * card. `due` is the occurrence, so a tap on an older card changes nothing.
    */
-  op("actor.saveDue", { target: actorTarget, effectId: id, due: z.string().regex(/^\d{1,18}:\d{1,6}$/), state: z.enum(["resolved", "dismissed"]) }),
+  op("actor.saveDue", { target: actorTarget, effectId, due: z.string().regex(/^\d{1,18}:\d{1,6}$/), state: z.enum(["resolved", "dismissed"]) }),
   /**
    * Spends one of a creature's limited uses, or with `back` gives one back
    * (docs/design/design-v1-combat-controls.md 3.1): a legendary action, Legendary
@@ -2851,7 +2862,7 @@ const stateClientOps = [
   /** Effects added to and removed from several creatures in one step, each checked as its single op would be. */
   op("actor.effects", {
     add: z.array(z.strictObject({ target: actorTarget, effect: effectInput })).max(LIMITS.effectsPerManyOp).optional(),
-    remove: z.array(z.strictObject({ target: actorTarget, effectId: id })).max(LIMITS.effectsPerManyOp).optional(),
+    remove: z.array(z.strictObject({ target: actorTarget, effectId })).max(LIMITS.effectsPerManyOp).optional(),
   }).refine((o) => (o.add?.length ?? 0) + (o.remove?.length ?? 0) > 0, { message: "an effects op adds or removes something" }),
   /** Journal pages (section 3.7), all DM only. A page's blocks are bounded with the rest of the op. */
   op("journal.create", { page: journalPageInput }).refine((o) => serializedBytes(o) <= LIMITS.journalPageBytes, withinPageBytes),
@@ -3266,6 +3277,7 @@ export const fogOpSchema = fogOp;
 export const effectInputSchema = effectInput;
 /** A save-ends occurrence as an effect holds it, for a saved step's record of the ones a Next opened (server/rooms/stateSchema.ts). */
 export const effectDueSchema = effectDue;
+export const effectIdSchema = effectId;
 /** The turns a stored duration has left, for a saved step's record of the counts a Next lowered. */
 export const durationRemainingSchema = durationRemaining;
 /**
@@ -3279,7 +3291,7 @@ export const actorSchemaForImport = actorSchema.extend({
    * (docs/design/design-v1-calendar-c2c3.md 4.7). The stored state always holds
    * `at` and `clock`.
    */
-  effects: z.array(effectStored.extend({ ends: z.strictObject({ span: effectSpan, at: clockTime, clock: id }).optional() })).max(MAX_EFFECTS),
+  effects: z.array(effectStored.extend({ ends: z.strictObject({ span: effectSpan, at: clockTime, clock: id }).optional() })).max(EFFECTS_STORED_MOST),
   unshaped: z.strictObject({ ac: z.number().int().min(0).max(100), speeds, shapeTemp: z.literal(true).optional() }).optional(),
   /** The reducer writes these alone, so no op's actor carries them either (docs/design/design-v1-combat-controls.md 3.6). */
   uses: uses.optional(),

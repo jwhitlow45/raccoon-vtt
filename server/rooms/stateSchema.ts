@@ -23,7 +23,6 @@ import {
   diceSchemas,
   dmToolSchemas,
   rollAnswerSchemas,
-  MAX_EFFECTS,
   MAX_OWNERS,
   MAX_SCENE_CELLS,
   MAX_PATH_STOPS,
@@ -36,6 +35,8 @@ import {
   combatUseSchemas,
   durationRemainingSchema,
   effectDueSchema,
+  effectIdSchema,
+  EFFECTS_STORED_MOST,
   FLOOR_HEIGHT,
   areaSlows,
   areaTriggersSchema,
@@ -405,7 +406,7 @@ const feet = z.number().int().min(-100_000).max(100_000);
 const effectSchema = actorSchemaForImport.shape.effects.element
   .refine((e) => e.duration === undefined || e.ends === undefined, { message: "an effect lasts turns or a length of time, not both" })
   .transform(withLevelInRange);
-const actorStored = actorSchemaForImport.extend({ effects: z.array(effectSchema).max(MAX_EFFECTS) });
+const actorStored = actorSchemaForImport.extend({ effects: z.array(effectSchema).max(EFFECTS_STORED_MOST) });
 
 const pathStop = z.strictObject({
   x: coord,
@@ -656,7 +657,7 @@ const effectStored = effectSchema;
 
 const encounterSnapshot = z.strictObject({
   encounter,
-  effects: z.record(id, z.array(effectStored).max(32)),
+  effects: z.record(id, z.array(effectStored).max(EFFECTS_STORED_MOST)),
   revealed: z.array(z.strictObject({ tokenId: id, visibility, fogExemptAuto: z.boolean() })).max(LIMITS.encounterRows),
   legendary: z.strictObject({ holderId: id, actionsUsed: z.number().int().min(0).max(10) }).optional(),
   companionReactions: z.array(id).max(LIMITS.encounterRows).optional(),
@@ -683,13 +684,13 @@ const encounterSnapshot = z.strictObject({
     .array(
       z.strictObject({
         holderId: id,
-        ended: z.array(z.strictObject({ at: z.number().int().min(0).max(MAX_EFFECTS), effect: effectStored })).max(MAX_EFFECTS).optional(),
+        ended: z.array(z.strictObject({ at: z.number().int().min(0).max(EFFECTS_STORED_MOST), effect: effectStored })).max(EFFECTS_STORED_MOST).optional(),
         // A Next crosses each row's boundary once at most, so a count it lowered is one less (rules/durations.ts tickEffects).
         counted: z
-          .array(z.strictObject({ id, from: durationRemainingSchema, to: durationRemainingSchema }).refine((c) => c.to === c.from - 1, "a count a Next lowered is one less than it was"))
-          .max(MAX_EFFECTS)
+          .array(z.strictObject({ id: effectIdSchema, from: durationRemainingSchema, to: durationRemainingSchema }).refine((c) => c.to === c.from - 1, "a count a Next lowered is one less than it was"))
+          .max(EFFECTS_STORED_MOST)
           .optional(),
-        asked: z.array(z.strictObject({ id, from: effectDueSchema.nullable(), to: effectDueSchema })).max(MAX_EFFECTS).optional(),
+        asked: z.array(z.strictObject({ id: effectIdSchema, from: effectDueSchema.nullable(), to: effectDueSchema })).max(EFFECTS_STORED_MOST).optional(),
       }),
     )
     // One for each creature a Next changed, as `effects` holds them: up to every creature in the room, which the state's byte limit bounds.
@@ -754,7 +755,7 @@ const rollRequest = z.strictObject({
   note: shortText.optional(),
   spell: z.literal(true).optional(),
   cause: z.literal("saveEnds").optional(),
-  ends: z.strictObject({ effect: id, occurrence: id }).optional(),
+  ends: z.strictObject({ effect: effectIdSchema, occurrence: id }).optional(),
   at: iso,
   targets: z.array(rollTarget).min(1).max(LIMITS.rollTargets),
 });
@@ -822,8 +823,8 @@ const logEvent = z.discriminatedUnion("type", [
       .strictObject({
         before: vitals,
         after: vitals,
-        added: z.array(effectStored).max(32).optional(),
-        removed: z.array(effectStored).max(32).optional(),
+        added: z.array(effectStored).max(EFFECTS_STORED_MOST).optional(),
+        removed: z.array(effectStored).max(EFFECTS_STORED_MOST).optional(),
         anchors: z.record(id, z.union([z.strictObject({ tokenId: id }), z.strictObject({ characterId: id })])).optional(),
         shapeTemp: z.strictObject({ before: actorSchemaForImport.shape.srdId, after: actorSchemaForImport.shape.srdId }).optional(),
         record: combatUseSchemas.turnRecordId.optional(),
@@ -847,7 +848,7 @@ const logEvent = z.discriminatedUnion("type", [
   }),
   z.strictObject({ type: z.literal("effect"), ...holder, key: effectKey, action: z.enum(["add", "remove", "expire", "pause"]), spell: shortText.optional(), hidden: z.literal(true).optional() }),
   z.strictObject({ type: z.literal("concentration"), ...holder, dc: z.number().int().min(0).max(30).optional(), spell: shortText.optional(), ended: z.boolean().optional(), hidden: z.literal(true).optional(), exact: z.literal(true).optional() }),
-  z.strictObject({ type: z.literal("saveEnds"), ...holder, effectId: id, key: effectKey, ability: z.enum(ABILITY_KEYS), dc: z.number().int().min(1).max(50) }),
+  z.strictObject({ type: z.literal("saveEnds"), ...holder, effectId: effectIdSchema, key: effectKey, ability: z.enum(ABILITY_KEYS), dc: z.number().int().min(1).max(50) }),
   z.strictObject({ type: z.literal("deathSave"), ...holder, ok: z.number().int().min(0).max(3), fail: z.number().int().min(0).max(3), exact: z.literal(true).optional() }),
   z.strictObject({
     type: z.literal("rest"),

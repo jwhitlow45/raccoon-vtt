@@ -1,4 +1,5 @@
 import type { Actor, Effect, LifeState, LogEvent, RoomSettings, TokenKind } from "../model.ts";
+import { playerLimitsOps } from "../migrate.ts";
 
 /**
  * HP and life-state transitions (design section 9.6). Pure functions over an
@@ -92,8 +93,25 @@ export function isConcentrating(actor: Pick<Actor, "effects">): boolean {
   return actor.effects.some((e) => e.key === "concentrating");
 }
 
-function withUnconscious(actor: Actor): Actor {
-  if (actor.effects.some((e) => e.key === "unconscious")) return actor;
+/**
+ * Which rules add the automatic Unconscious (shared/migrate.ts
+ * playerLimitsOps). From op version 61 only a shown Unconscious stands in
+ * for it, so a condition the DM hid never changes what a creature's owner
+ * sees at 0 HP, and it is never added twice. Ops stored before read any
+ * Unconscious, hidden ones too, and replay so.
+ */
+export type HpRules = { shownUnconscious: boolean };
+export const HP_RULES: HpRules = { shownUnconscious: true };
+
+/** The HP rules an op of `opVersion` runs under. */
+export function hpRules(opVersion: number | undefined): HpRules {
+  return { shownUnconscious: playerLimitsOps(opVersion) };
+}
+
+function withUnconscious(actor: Actor, rules: HpRules): Actor {
+  if (!rules.shownUnconscious) {
+    if (actor.effects.some((e) => e.key === "unconscious")) return actor;
+  } else if (actor.effects.some((e) => e.id === ZERO_HP_UNCONSCIOUS_ID || (e.key === "unconscious" && !e.hiddenFromPlayers))) return actor;
   return { ...actor, effects: [...actor.effects, { id: ZERO_HP_UNCONSCIOUS_ID, key: "unconscious" }] };
 }
 
@@ -125,11 +143,11 @@ export function endConcentration(actor: Actor): HpResult {
   };
 }
 
-function setLife(actor: Actor, life: LifeState): HpResult {
+function setLife(actor: Actor, life: LifeState, rules: HpRules = HP_RULES): HpResult {
   const events: ActorEvent[] = [];
   let next: Actor = { ...actor, life };
   if (life === "dying") {
-    next = withUnconscious(next);
+    next = withUnconscious(next, rules);
   } else if (life === "dead") {
     // Unconscious belongs to dying (9.6). A dead creature keeps only the
     // conditions someone applied by hand.
@@ -147,11 +165,11 @@ function setLife(actor: Actor, life: LifeState): HpResult {
  * at 0. Monsters die when the room says so, and otherwise follow the PC rules
  * with death saves the DM enters.
  */
-function reachZero(actor: Actor, kind: TokenKind, settings: RoomSettings): HpResult {
+function reachZero(actor: Actor, kind: TokenKind, settings: RoomSettings, rules: HpRules): HpResult {
   if (kind === "object") return { actor, events: [] };
   const diesAtZero = (kind === "monster" || kind === "npc") && settings.monstersDieAtZero;
   if (diesAtZero) return setLife(actor, "dead");
-  const dying = setLife({ ...actor, deathSaves: { ok: 0, fail: 0 } }, "dying");
+  const dying = setLife({ ...actor, deathSaves: { ok: 0, fail: 0 } }, "dying", rules);
   // Falling Unconscious includes Incapacitated, which ends concentration.
   const ended = endConcentration(dying.actor);
   return { actor: ended.actor, events: [...dying.events, ...ended.events] };
@@ -163,6 +181,7 @@ export function applyDamage(
   kind: TokenKind,
   settings: RoomSettings,
   crit = false,
+  rules: HpRules = HP_RULES,
 ): HpResult {
   if (amount <= 0 || actor.life === "dead") return { actor, events: [] };
   const events: ActorEvent[] = [];
@@ -176,7 +195,7 @@ export function applyDamage(
     next = { ...next, hp: { ...next.hp, cur } };
     events.push({ type: "hp", change: "damage", amount, ...(crit ? { crit } : {}), label: hpLabel(next) });
     if (cur === 0) {
-      const zero = leftover >= next.hp.max && kind !== "object" ? setLife(next, "dead") : reachZero(next, kind, settings);
+      const zero = leftover >= next.hp.max && kind !== "object" ? setLife(next, "dead") : reachZero(next, kind, settings, rules);
       next = zero.actor;
       events.push(...zero.events);
       // The label event was logged before the life change, so refresh it.
@@ -201,7 +220,7 @@ export function applyDamage(
   }
   const fails = crit ? 2 : 1;
   if (next.life === "stable") {
-    const dying = setLife({ ...next, deathSaves: { ok: 0, fail: fails } }, "dying");
+    const dying = setLife({ ...next, deathSaves: { ok: 0, fail: fails } }, "dying", rules);
     next = dying.actor;
     events.push(...dying.events, { type: "deathSave", ok: 0, fail: fails });
   } else {
@@ -282,6 +301,7 @@ export function applyHpSet(
   kind: TokenKind,
   settings: RoomSettings,
   revivesDead = false,
+  rules: HpRules = HP_RULES,
 ): HpResult {
   const max = values.max ?? actor.hp.max;
   const requestedCur = values.cur ?? actor.hp.cur;
@@ -291,7 +311,7 @@ export function applyHpSet(
   const events: ActorEvent[] = [];
   if (actor.life !== "dead") {
     if (actor.hp.cur > 0 && cur === 0) {
-      const zero = reachZero(next, kind, settings);
+      const zero = reachZero(next, kind, settings, rules);
       next = zero.actor;
       events.push(...zero.events);
     } else if (comesBack(actor, cur, false)) {
@@ -330,7 +350,7 @@ export function applyDeathSaves(actor: Actor, ok: number, fail: number): HpResul
  * before op version 5 kept that HP, at least 1 (`toOne` false). A creature
  * already alive keeps its HP, at least 1, either way. Killing sets HP to 0.
  */
-export function applyLife(actor: Actor, life: LifeState, toOne = false): HpResult {
+export function applyLife(actor: Actor, life: LifeState, toOne = false, rules: HpRules = HP_RULES): HpResult {
   if (life === "alive") {
     const cur = toOne && actor.life !== "alive" ? 1 : Math.max(1, actor.hp.cur);
     const next = revive({ ...actor, hp: { ...actor.hp, cur } });
@@ -341,7 +361,7 @@ export function applyLife(actor: Actor, life: LifeState, toOne = false): HpResul
     return dead;
   }
   const down: Actor = { ...actor, hp: { ...actor.hp, cur: 0 }, deathSaves: life === "stable" ? { ok: 0, fail: 0 } : actor.deathSaves };
-  const result = setLife(down, life);
-  const stabilized = life === "stable" ? withUnconscious(result.actor) : result.actor;
+  const result = setLife(down, life, rules);
+  const stabilized = life === "stable" ? withUnconscious(result.actor, rules) : result.actor;
   return { actor: stabilized, events: result.events };
 }

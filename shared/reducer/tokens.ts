@@ -4,7 +4,7 @@ import type { Actor, AreaTemplate, Character, ClassResource, DdbSync, Drawing, P
 import { gridOfToken, inSightOfNonOwners, seenAtEvery, seenMark } from "../project.ts";
 import { MAX_RULER_STOPS, SYNC_AT_AHEAD, syncAtAhead, syncStamp, type ActorPatch, type CharacterPatch, type DdbSyncPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
-import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
+import { applyHpSet, hpRules, type ActorEvent } from "../rules/hp.ts";
 import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/footprint.ts";
 import { foldPrior, keepPrior, pathCounters, pathThisTurn, priorDiag, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
 import { sameScene } from "../rules/floors.ts";
@@ -156,7 +156,7 @@ export function applyActorPatch(tx: Tx, resolved: ResolvedActor, patch: ActorPat
   const events: ActorEvent[] = [];
   if (patch.hp) {
     const settings = tx.state.meta.settings;
-    const r = applyHpSet(actor, patch.hp, resolved.kind, settings, healRevivesDead(settings, tx.env.opVersion));
+    const r = applyHpSet(actor, patch.hp, resolved.kind, settings, healRevivesDead(settings, tx.env.opVersion), hpRules(tx.env.opVersion));
     actor = r.actor;
     events.push(...r.events);
   }
