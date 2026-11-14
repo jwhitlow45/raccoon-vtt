@@ -643,6 +643,16 @@ newest first.
 
 **Since v0.3.1**
 
+- **Single file hex by hex** ([design](design/design-v1-attach.md)):
+  change format 62. A creature dragged in single file on hexes now walks
+  onto the hex its holder sets out from and on along the holder's own hexes,
+  so it follows a holder squeezed in a corridor one hex wide round a turn.
+  No data migrates, and changes saved before replay as they ran. Until it
+  reloads, an old page plans such a drag by the old rule, so it can hold a
+  drag the server would take, and the server's answer moves the tokens
+  where they go. An older build refuses version 62 changes, so going back
+  needs the backups taken just before the update for a room with changes
+  after its last save.
 - **Player limits** ([design](design/design-v1-player-limits.md)): room format
   47, change format 61. The app adds the `room_ids` and `server_facts` tables
   and an `ask` column on `roll_receipts` at start, which older builds leave
