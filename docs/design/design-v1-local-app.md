@@ -503,6 +503,7 @@ Every place the build went its own way, with the reason, grouped by area.
 - Each of the 11 files (the installers, the three `latest*.yml` and the checksum list) gets a `.sigstore.json`, 23 assets in all. A dry run keeps the installers for 7 days as run artifacts. No signing environment is named yet.
 - macOS checks run the same unit set as Windows. `window.e2e.ts` and `shell.e2e.ts` run in the checks job through `desktop/e2e/run.ts` on port 40600, with shots kept on failure.
 - Packaging runs `pnpm --dir desktop run build`, which builds the shell and the window, then `node desktop/build/pack.ts`, and takes files from `desktop/out/dist`.
+- desktop.yml sets Node up before pnpm, unlike `ci.yml`. pnpm/action-setup starts from `@pnpm/exe` when the Node on the PATH is older than 22.13, as on the macOS x64 image, and `@pnpm/exe` 11 has no macOS x64 binary. With Node 24 first it starts from the `pnpm` package on every runner. `ci.yml` runs only on Linux and macOS arm64, which have the binary.
 - The smoke test runs one browser at a time and opens the DM link in WebKit at the network address. The image upload is a player's token upload through the page's own fetch, and Copy passes on "Copied" or the selected note. The cut-off restore uses `RESTORE_TEST_CRASH_AT=renamedLive`. Windows sets the runner's network profile to Private first, and `stage.ts` drops `node_modules/.bin` and pnpm's state files.
 - `ci.yml`'s header counts include `int-clock` and `lan-webkit`: 20 jobs, peaking at 18 Linux jobs.
 
