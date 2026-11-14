@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -92,11 +91,11 @@ const run = {
   breeCharacter: uuidv7(),
   tThorn: uuidv7(),
   tBree: uuidv7(),
-  // An end's id is plain, as a trap's.
-  stairsDown: `s${randomUUID().slice(0, 8)}`,
-  stairsUp: `s${randomUUID().slice(0, 8)}`,
-  ladderDown: `l${randomUUID().slice(0, 8)}`,
-  ladderUp: `l${randomUUID().slice(0, 8)}`,
+  // The ends' ids are made as their put is sent.
+  stairsDown: "",
+  stairsUp: "",
+  ladderDown: "",
+  ladderUp: "",
 };
 
 function actor(hp: number) {
@@ -273,6 +272,7 @@ describe("Go up and Go down, and the stairs on the board", { concurrency: false 
     await ops.send({ t: "token.create", token: { id: run.tThorn, sceneId: run.ground, kind: "pc", name: "Thorn", ownerIds: [run.anaId], actor: { ref: run.thorn }, ...START, ...at } });
     await ops.send({ t: "token.create", token: { id: run.tBree, sceneId: run.ground, kind: "pc", name: "Bree", ownerIds: [run.breeId], actor: { ref: run.breeCharacter }, x: 3, y: 8, ...at } });
     const one = (p: { x: number; y: number }) => ({ x: p.x, y: p.y, w: 1, h: 1 });
+    Object.assign(run, { stairsDown: uuidv7(), stairsUp: uuidv7(), ladderDown: uuidv7(), ladderUp: uuidv7() });
     await ops.send({ t: "floorLink.put", link: { id: run.stairsDown, pairId: run.stairsUp, sceneId: run.ground, to: run.upper, rect: one(STAIRS), kind: "stairs" } });
     await ops.send({ t: "floorLink.put", link: { id: run.ladderDown, pairId: run.ladderUp, sceneId: run.upper, to: run.attic, rect: one(LADDER), kind: "ladder" } });
     await waitFor("four ends in the DM's copy", () => (Object.keys(dmSocket.state?.floorLinks ?? {}).length === 4 ? true : null));

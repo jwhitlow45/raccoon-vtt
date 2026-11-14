@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -85,8 +84,9 @@ const run = {
   breeCharacter: uuidv7(),
   tThorn: uuidv7(),
   tBree: uuidv7(),
-  stairsDown: `s${randomUUID().slice(0, 8)}`,
-  stairsUp: `s${randomUUID().slice(0, 8)}`,
+  // The ends' ids are made as their put is sent.
+  stairsDown: "",
+  stairsUp: "",
 };
 
 function actor(hp: number) {
@@ -248,6 +248,7 @@ describe("the walking ruler over stairs", { concurrency: false }, () => {
     const at = { size: "medium", visibility: "all", disposition: "ally" } as const;
     await ops.send({ t: "token.create", token: { id: run.tThorn, sceneId: run.ground, kind: "pc", name: "Thorn", ownerIds: [run.anaId], actor: { ref: run.thorn }, ...START, ...at } });
     await ops.send({ t: "token.create", token: { id: run.tBree, sceneId: run.upper, kind: "pc", name: "Bree", ownerIds: [run.breeId], actor: { ref: run.breeCharacter }, ...BREE_AT, ...at } });
+    Object.assign(run, { stairsDown: uuidv7(), stairsUp: uuidv7() });
     await ops.send({ t: "floorLink.put", link: { id: run.stairsDown, pairId: run.stairsUp, sceneId: run.ground, to: run.upper, rect: { ...STAIRS, w: 1, h: 1 }, kind: "stairs" } });
     await waitFor("both ends in the DM's copy", () => (Object.keys(dmSocket.state?.floorLinks ?? {}).length === 2 ? true : null));
     await openRoom(ana, consoles.ana, anaSocket);

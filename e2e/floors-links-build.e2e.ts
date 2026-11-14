@@ -360,21 +360,25 @@ describe("raccoon-vtt stairs and ladders: the DM's building side", { timeout: 90
 
     // A 17th pair: the scene holds 16.
     const have = ends().length / 2;
+    const filled: string[] = [];
     for (let i = have; i < 16; i++) {
       const x = i % 8;
       const y = i < 8 ? 0 : 1;
-      await ops.send({ t: "floorLink.put", link: { id: `k${i}a`, pairId: `k${i}b`, sceneId: run.towerId, to: run.upperId, rect: { x: x * 2, y, w: 1, h: 1 }, kind: "stairs" } });
+      const id = uuidv7();
+      filled.push(id);
+      await ops.send({ t: "floorLink.put", link: { id, pairId: uuidv7(), sceneId: run.towerId, to: run.upperId, rect: { x: x * 2, y, w: 1, h: 1 }, kind: "stairs" } });
     }
     await waitFor("16 pairs", () => (ends().length === 32 ? true : null));
     await refuses({ x: 18, y: 9 }, { x: 19, y: 9 }, LINK_WORDS.tooMany("Tower"));
-    for (const l of ends().filter((e) => e.id.startsWith("k") && e.id.endsWith("a"))) await ops.send({ t: "floorLink.delete", linkId: l.id });
+    for (const id of filled) await ops.send({ t: "floorLink.delete", linkId: id });
   });
 
   test("FLRK-4. Add a floor above and below, Move up and Move down are off between floors that stairs join, with the stairs' words, and on again once they are removed", async () => {
     // One pair of stairs joins Ground floor and Upper floor.
     for (const l of ends()) if (state().floorLinks?.[l.id]) await ops.send({ t: "floorLink.delete", linkId: l.id }).catch(() => {});
     await waitFor("no ends", () => (ends().length === 0 ? true : null));
-    await ops.send({ t: "floorLink.put", link: { id: "j1", pairId: "j2", sceneId: run.towerId, to: run.upperId, rect: { x: 3, y: 3, w: 2, h: 1 }, kind: "stairs" } });
+    const stairs = uuidv7();
+    await ops.send({ t: "floorLink.put", link: { id: stairs, pairId: uuidv7(), sceneId: run.towerId, to: run.upperId, rect: { x: 3, y: 3, w: 2, h: 1 }, kind: "stairs" } });
     const joins = LINK_WORDS.between("stairs", "Ground floor", "Upper floor");
     await pickTool(dm, "Select");
     await showFloorNamed("Ground floor");
@@ -398,7 +402,7 @@ describe("raccoon-vtt stairs and ladders: the DM's building side", { timeout: 90
     await page.getByRole("button", { name: "Back to Floors" }).click();
 
     // With every pair removed, the adds are on again.
-    await ops.send({ t: "floorLink.delete", linkId: "j1" });
+    await ops.send({ t: "floorLink.delete", linkId: stairs });
     await waitFor("no ends", () => (ends().length === 0 ? true : null));
     await waitFor("Add a floor above on", async () => ((await above.isDisabled()) === false ? true : null));
   });
