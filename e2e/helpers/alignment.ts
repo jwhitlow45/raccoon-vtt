@@ -1472,10 +1472,15 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
       }
 
       // 1b. A painted box keeps the same room above and below its content.
-      // A box that opens with a pane's header row, its title beside its Close in a 48 px row, keeps a pane's 4 px top over that row, where the header check holds its Close and title to a map pane's (headerPlaces), as for a dialog. Its padding above is the pane's, not its foot's: a short title leaves Close's 44 px box as its top content, which read as the stop note's text 8 px off its middle (LP41-POLISH-STOPNOTE).
-      const head = el.children[0] ?? null;
-      const paneTop = head !== null && head.querySelector(":scope > strong") !== null && head.querySelector(":scope > button") !== null && num(style(head), "min-height") >= 48;
-      if (painted && !control && !band && !frame && !paneTop && height <= 200 && Math.abs(round(b.pad.t - b.pad.b)) > LIMIT) {
+      // The full stop note opens with a map pane's header (movement/StopNote.tsx PaneHeader), so it keeps a pane's 4 px top over that row, and the header check holds its Close and title to a map pane's (headerPlaces). Its padding above is the pane's, not its foot's: a short sentence leaves Close's 44 px box as its top content, which read as the note's text 8 px off its middle (LP41-POLISH-STOPNOTE). It alone is measured against those places, at every height: its top the pane's 4 px (SheetHeader.tsx PANE_FRAME_TOP), and its foot the 12 px its sides keep (StopNote.tsx PAD_FOOT). Every other box keeps the rule (review LP42R-1). A compact note lays its sentence in a body beside Close, and keeps the rule too.
+      const stopNote = el.matches("[data-stop-note]") && el.querySelector("[data-stop-note-body]") === null;
+      if (stopNote) {
+        const top = round(b.pad.t - 4 * zoomOf(el));
+        const foot = round(b.pad.b - b.pad.l);
+        if (Math.abs(top) > LIMIT || Math.abs(foot) > LIMIT || Math.abs(round(b.pad.r - b.pad.l)) > LIMIT) {
+          push({ check: "pad", role: roleOf(el), name: nameOf(el), offset: Math.abs(top) > LIMIT ? top : foot, box: b.border, what: `padding ${round(b.pad.t)} above, ${round(b.pad.b)} below, ${round(b.pad.l)} and ${round(b.pad.r)} at its sides, where a pane's header wants ${round(4 * zoomOf(el))} above and its sides' room below`, detail: "" });
+        }
+      } else if (painted && !control && !band && !frame && height <= 200 && Math.abs(round(b.pad.t - b.pad.b)) > LIMIT) {
         push({ check: "pad", role: roleOf(el), name: nameOf(el), offset: round(b.pad.t - b.pad.b), box: b.border, what: `padding ${round(b.pad.t)} above, ${round(b.pad.b)} below`, detail: "" });
       }
 
