@@ -181,7 +181,8 @@ export async function loadRoom(
   let upgrade = needsMapDiscoveryUpgrade(row.schema_version);
   // The numbering upgrade settles an older room's numbers once, at the same kind of point (shared/reducer/numbering.ts).
   let numbering = needsNumberingUpgrade(row.schema_version);
-  // So does the automatic Unconscious upgrade (automaticUpgrade), after the stored ops that may name its old id.
+  // So does the automatic Unconscious upgrade (automaticUpgrade), after the stored ops that may name its old id, with
+  // the asks whose caster is gone (withCasterAsks).
   let automatic = row.schema_version < PLAYER_LIMITS_SNAPSHOT_VERSION;
   const ops = await pool.query<OpRow>(
     "select seq, at, actor_member_id, actor_role, op, op_version, pub from room_ops where room_id = $1 and seq > $2 order by seq",
@@ -209,7 +210,7 @@ export async function loadRoom(
           numbering = false;
         }
         if (automatic && r.op_version >= PLAYER_LIMITS_OP_VERSION) {
-          state = automaticUpgrade(state);
+          state = withCasterAsks(automaticUpgrade(state));
           automatic = false;
         }
         // The stored version goes in the envelope, so an older op keeps the rules it was applied under (shared/migrate.ts).
@@ -233,7 +234,7 @@ export async function loadRoom(
   if (upgrade) state = mapDiscoveryUpgrade(state);
   if (numbering) state = numberingUpgrade(state);
   // Not after a replay failure, which serves the state as far as it got, read-only, and writes nothing.
-  if (automatic && !replayFailed) state = automaticUpgrade(state);
+  if (automatic && !replayFailed) state = withCasterAsks(automaticUpgrade(state));
   let pub = row.pub === null || row.pub === undefined ? snapshotSeq : Number(row.pub);
   if (row.schema_version < COUNT_SNAPSHOT_VERSION) pub = Math.max(pub, snapshotSeq);
   for (const r of ops.rows) pub = Math.max(pub, rowNumber(r) ?? 0);
@@ -261,6 +262,21 @@ function replayedThrough(state: RoomState, lastNumber: number | null, snapshotSe
   if (first === undefined || number === null || Number(first.seq) !== snapshotSeq + 1) return newestLine(state);
   const type = (first.op as { t?: unknown } | null)?.t;
   return typeof type === "string" && !counted(type as OpType, first.op_version) ? number : number - 1;
+}
+
+/**
+ * The state with every ask whose caster the room no longer holds dropped,
+ * as each op from op version 61 drops them (reducer/casts.ts
+ * dropCasterAsks), at the same version boundary of a room's load as the
+ * automatic upgrade. An older room can hold asks whose caster went before
+ * that rule. Left to the first live op, their removal would be in that
+ * op's undo step, a change its player may not take back. It reads nothing
+ * but the state, so two loads drop alike.
+ */
+export function withCasterAsks(state: RoomState): RoomState {
+  const casts = state.casts ?? {};
+  const kept = Object.entries(casts).filter(([, ask]) => ownEntry(state.tokens, ask.caster) !== undefined);
+  return kept.length === Object.keys(casts).length ? state : { ...state, casts: Object.fromEntries(kept) };
 }
 
 /**

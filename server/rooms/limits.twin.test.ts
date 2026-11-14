@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
 import { FAR, LIMITS, SEAT, SEAT_FULL } from "#shared/limits.ts";
+import { PLAYER_LIMITS_SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { ROLL_ASKED_ALREADY } from "#shared/permissions.ts";
 import type { Effect, RoomState } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
@@ -9,7 +10,7 @@ import { lift, remember } from "#shared/discoveryTestutil.ts";
 import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
 import { actor, castAsk, character, companionBlock, drawing, effect, entry, member, template, token } from "#shared/testutil.ts";
 import { bothAnswer, joinOp, marks, Mint, openTwins, same, sameSince, together, type Answer, type Twins } from "./limitsTwinTesting.ts";
-import { each, type Room, type Who } from "./numberingTesting.ts";
+import { each, openRooms, same as sameRooms, type Room, type Who } from "./numberingTesting.ts";
 
 /**
  * Player limits in rooms P1 cannot tell apart: room A and room B differ
@@ -464,5 +465,30 @@ describe("riders and clears act on P1's copy, alike whether the DM hid or delete
     await each(pair, (room) => room.apply("dm", ogreGoes(room)));
     same(pair, "the ogre goes");
     for (const room of pair) assert.equal(room.state.drawings[RULER], undefined, `${room.name}: the ruler is removed`);
+  });
+});
+
+describe("a room from before player limits answers P1 alike", () => {
+  test("L13: an ask in A alone whose caster the DM deleted before the update leaves P1's first line and its undo taken in both, after the first load and a restart", async (t) => {
+    const built = rooms((s) => {
+      s.casts[`${APART}ask`] = castAsk(`${APART}ask`, { by: "dm1", caster: `${APART}gone`, sceneId: "s1", area: undefined, targets: [OGRE] });
+      return [`${APART}ask`, `${APART}gone`];
+    });
+    const pair = await openRooms(t, built.a, built.b, {}, PLAYER_LIMITS_SNAPSHOT_VERSION - 1);
+    for (const restart of [false, true]) {
+      if (restart) await each(pair, (room) => room.restart(false));
+      const { rev: _rev, ...line } = drawing(`line-${restart}`, { ownerId: "p1" });
+      for (const room of pair) await room.apply("p1", { t: "drawing.create", drawing: line } as Op);
+      const answers: unknown[] = [];
+      for (const room of pair) {
+        room.clock.now += 1_000;
+        const p1 = room.clients.p1;
+        const event = await p1.send({ t: "undo", scope: "play", head: p1.head("play", "undo").id });
+        answers.push(event.rejects?.find((r) => r.n === p1.n) ?? "taken");
+        await room.settle();
+      }
+      assert.deepEqual(answers, ["taken", "taken"], restart ? "after a restart" : "at the first load");
+      sameRooms(pair, restart ? "after a restart" : "at the first load", built.hidden);
+    }
   });
 });
