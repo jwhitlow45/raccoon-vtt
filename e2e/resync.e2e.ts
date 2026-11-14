@@ -1086,8 +1086,8 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     const breeEffects = () => (dmSocket.state as { characters: Record<string, { actor: { effects: unknown[] } }> }).characters[run.bree.characterId]!.actor.effects.length;
     const before = { effects: breeEffects(), ana: consoles.ana.errors.length, cy: consoles.cy.errors.length, dm: consoles.dm.errors.length };
     for (const name of ["__proto__", "constructor"]) {
-      await assert.rejects(ops.send({ t: "actor.effect.add", target: { tokenId: run.bree.tokenId }, effect: { id: name, key: "blessed" } }), /That id was not made just now/, `an effect named ${name}`);
-      await assert.rejects(ops.send({ t: "encounter.start", entries: [{ id: name, tokenId: run.bree.tokenId, value: 12 }] }), /That id was not made just now/, `an entry named ${name}`);
+      await assert.rejects(ops.send({ t: "actor.effect.add", target: { tokenId: run.bree.tokenId }, effect: { id: name, key: "blessed" } }), /This page is out of date\. Reload it and try again\./, `an effect named ${name}`);
+      await assert.rejects(ops.send({ t: "encounter.start", entries: [{ id: name, tokenId: run.bree.tokenId, value: 12 }] }), /This page is out of date\. Reload it and try again\./, `an entry named ${name}`);
     }
     // An ordinary id still goes through, so the refusal is the id's and not the op's.
     await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: run.bree.tokenId, value: 12 }] });

@@ -38,9 +38,12 @@ export function idTime(id: string): number | null {
 /**
  * The words the room refuses a new thing's id with, code `invalid`, when
  * the id is not version 7 or its own time is too far from the server's
- * clock (shared/limits.ts ID_TIME). The device then reads the server's
- * time, makes the id again and sends once more (client/state/store.ts), so
- * these words reach no one. Only a second refusal is shown, in
- * ID_RETRY_FAILED's words.
+ * clock (shared/limits.ts ID_TIME). A page of this build then reads the
+ * server's time, makes the id again and sends once more
+ * (client/state/store.ts), and shows only a second refusal, in
+ * ID_RETRY_FAILED's words. A page opened before this build has no such
+ * retry and shows these words, for what it queued while the server was
+ * down and for each save of an editor it opened then, so they say what
+ * fixes it: a reload.
  */
-export const ID_TIME_REFUSED = "That id was not made just now. Make a new one.";
+export const ID_TIME_REFUSED = "This page is out of date. Reload it and try again.";
