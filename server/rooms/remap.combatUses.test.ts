@@ -244,17 +244,17 @@ describe("a saved step through an import keeps the turns that left the fight (de
 
     const kept = play(imported(onC), [PREV, PREV]);
     assert.equal(acting(kept), "A");
-    assert.deepEqual(cEffects(kept).map((e) => [e.id, e.duration?.anchor]), [["short", { entryId: bRow(kept) }]]);
+    assert.deepEqual(cEffects(kept).map((e) => [e.label, e.duration?.anchor]), [["Until B's turn", { entryId: bRow(kept) }]]);
 
     const removed = play(onC, [{ t: "encounter.remove", entryIds: ["eb"] }]);
     const paused = play(imported(removed), [PREV]);
     assert.equal(acting(paused), "A");
-    assert.deepEqual(cEffects(paused).map((e) => [e.id, e.duration?.anchor]), [["short", { tokenId: bToken(paused) }]]);
+    assert.deepEqual(cEffects(paused).map((e) => [e.label, e.duration?.anchor]), [["Until B's turn", { tokenId: bToken(paused) }]]);
     assert.deepEqual(strays(paused), []);
 
     const room2 = imported(removed);
     const readded = play(room2, [{ t: "encounter.add", entries: [{ id: "eb2", tokenId: bToken(room2), value: 15 }] }, PREV]);
-    assert.deepEqual(cEffects(readded).map((e) => [e.id, e.duration?.anchor]), [["short", { entryId: "eb2" }]]);
+    assert.deepEqual(cEffects(readded).map((e) => [e.label, e.duration?.anchor]), [["Until B's turn", { entryId: "eb2" }]]);
     assert.deepEqual(strays(readded), []);
   });
 

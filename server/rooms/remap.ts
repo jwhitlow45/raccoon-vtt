@@ -59,6 +59,7 @@ import { phaseMap, withPhaseLight } from "#shared/reducer/phases.ts";
 import { normalWeather } from "#shared/weather.ts";
 import { soundUseFits, stillFitsVideo } from "#shared/limits.ts";
 import { onPlayersScene } from "#shared/rules/floors.ts";
+import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
 import { checkedVideoFacts } from "#shared/protocol.ts";
 import type { AssetKind } from "../assets/kinds.ts";
 import { SOUND_MEDIA, soundFactsOfRow } from "../assets/store.ts";
@@ -112,6 +113,11 @@ class Ids {
   has(id: string): boolean {
     return this.map.has(id);
   }
+}
+
+/** The automatic Unconscious as the HP step writes it: its id and key alone, shown (shared/rules/hp.ts). */
+function isBareAutomatic(e: Effect): boolean {
+  return e.id === ZERO_HP_UNCONSCIOUS_ID && e.key === "unconscious" && Object.entries(e).every(([k, v]) => k === "id" || k === "key" || v === undefined || (k === "hiddenFromPlayers" && v === false));
 }
 
 export function remapState(state: RoomState, opts: RemapOptions): RoomState {
@@ -183,9 +189,25 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   entries.assign([...knownRows.values()].filter(cameThrough).map((e) => e.id));
 
   const memberList = (ids: string[]): string[] => ids.filter((id) => members.has(id)).map((id) => members.of(id));
-  const effect = (withDue: Effect): Effect => {
+  /*
+   * Every condition but the bare automatic Unconscious gets a fresh id, the
+   * same one wherever its creature's lists, the fight's history or a line
+   * name it, so an imported room shares no recent condition id with its
+   * source and none answers there as one already used (docs/design/design-v1-player-limits.md
+   * 3.4, 8). An id is its creature's own, so it is mapped per creature. The
+   * automatic one keeps its id in every copy, as a scene duplicate keeps it.
+   */
+  const effectIds = new Map<string, string>();
+  const effectIdOf = (holderId: string, id: string): string => {
+    const key = `${holderId}\n${id}`;
+    let mapped = effectIds.get(key);
+    if (mapped === undefined) effectIds.set(key, (mapped = newId()));
+    return mapped;
+  };
+  const effect = (holderId: string, withDue: Effect): Effect => {
     // An occurrence names a line of the old room's log, and the requests that answer it do not come through, so a save ends waits for the next turn end.
-    const { due: _due, ...e } = withDue;
+    const { due: _due, ...kept } = withDue;
+    const e = isBareAutomatic(kept) ? kept : { ...kept, id: effectIdOf(holderId, kept.id) };
     if (!e.duration) return e;
     // One counting a row that did not come through pauses on its creature, as a removal pauses it, so none counts a row
     // the new room never holds.
@@ -214,8 +236,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     if (kind === "block") return blocks.has(id) ? `block:${blocks.of(id)}` : undefined;
     return link;
   };
-  const actor = <A extends Pick<Actor, "effects" | "srdId" | "wildShape" | "monsterId" | "blockId" | "uses" | "turnRecord" | "hurt">>(a: A): A => {
-    const next: A = { ...a, effects: a.effects.map(effect) };
+  const actor = <A extends Pick<Actor, "effects" | "srdId" | "wildShape" | "monsterId" | "blockId" | "uses" | "turnRecord" | "hurt">>(a: A, holderId: string): A => {
+    const next: A = { ...a, effects: a.effects.map((e) => effect(holderId, e)) };
     delete next.turnRecord;
     delete next.hurt;
     if (a.monsterId !== undefined) {
@@ -439,7 +461,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     out.fogDrafts[sceneId] = { ...d, sceneId };
   }
   for (const c of Object.values(state.characters)) {
-    const next: Character = { ...c, id: characters.of(c.id), ownerIds: memberList(c.ownerIds), actor: actor(c.actor) };
+    const next: Character = { ...c, id: characters.of(c.id), ownerIds: memberList(c.ownerIds), actor: actor(c.actor, c.id) };
     if (c.defaultImage) {
       const mapped = image(c.defaultImage);
       if (mapped) next.defaultImage = mapped;
@@ -457,7 +479,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       id: tokens.of(t.id),
       sceneId: scenes.of(t.sceneId),
       ownerIds: memberList(t.ownerIds),
-      actor: "ref" in t.actor ? { ref: characters.of(t.actor.ref) } : { inline: actor(t.actor.inline) },
+      actor: "ref" in t.actor ? { ref: characters.of(t.actor.ref) } : { inline: actor(t.actor.inline, t.id) },
     };
     // A companion follows its character's new id, and is a plain token once its character did not come through.
     if (t.companion) {
@@ -534,7 +556,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     const effects: Record<string, Effect[]> = {};
     for (const [holderId, list] of Object.entries(snap.effects)) {
       const mapped = holder(holderId);
-      if (mapped) effects[mapped] = list.map(effect);
+      if (mapped) effects[mapped] = list.map((e) => effect(holderId, e));
     }
     const saved = encounter(snap.encounter);
     const next: EncounterSnapshot = {
@@ -568,9 +590,10 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     const changes = (snap.effectChanges ?? []).flatMap((change): EffectChange[] => {
       const holderId = holder(change.holderId);
       if (holderId === null) return [];
-      const { asked: _asked, ended, ...kept } = change;
+      const { asked: _asked, ended, counted, ...kept } = change;
       const out: EffectChange = { ...kept, holderId };
-      if (ended) out.ended = ended.map((e) => ({ at: e.at, effect: effect(e.effect) }));
+      if (ended) out.ended = ended.map((e) => ({ at: e.at, effect: effect(change.holderId, e.effect) }));
+      if (counted) out.counted = counted.map((c) => ({ ...c, id: effectIdOf(change.holderId, c.id) }));
       return out.ended || out.counted ? [out] : [];
     });
     if (changes.length > 0) next.effectChanges = changes;
@@ -661,12 +684,19 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
         if (data.characterId !== undefined) next.characterId = characters.of(data.characterId);
         return next;
       }
+      // A save that ends a condition names it by its creature's new id for it.
+      case "saveEnds": {
+        const holderId = data.tokenId ?? data.characterId;
+        const next = { ...data, ...(holderId !== undefined ? { effectId: effectIdOf(holderId, data.effectId) } : {}) };
+        if (data.tokenId !== undefined) next.tokenId = tokens.of(data.tokenId);
+        if (data.characterId !== undefined) next.characterId = characters.of(data.characterId);
+        return next;
+      }
       case "life":
       case "effect":
       case "concentration":
       case "deathSave":
       case "rest":
-      case "saveEnds":
       case "use": {
         const next = { ...data };
         if (data.tokenId !== undefined) next.tokenId = tokens.of(data.tokenId);
