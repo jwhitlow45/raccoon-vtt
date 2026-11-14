@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import { RESOURCES, RUNTIME_DIR as CONTRACT_RUNTIME_DIR, serverBinaryName as contractServerBinaryName } from "../contract.ts";
 import {
+  LICENSES_DIR,
   NODE_DIR,
   POSTGRES_DIR,
   RUNTIME_DIR,
@@ -25,6 +26,7 @@ import {
   pickRedistVersion,
   pruneTree,
   serverBinaryName,
+  writeLicenses,
   type PeInfo,
   type Scanned,
   type VcRuntimeDll,
@@ -268,6 +270,7 @@ test("the runtime's names match desktop/contract.ts", () => {
   assert.equal(RUNTIME_DIR, CONTRACT_RUNTIME_DIR);
   assert.equal(NODE_DIR, RESOURCES.node);
   assert.equal(POSTGRES_DIR, RESOURCES.postgres);
+  assert.equal(LICENSES_DIR, RESOURCES.licenses);
   for (const platform of ["win32", "darwin", "linux"] as const) assert.equal(serverBinaryName(platform), contractServerBinaryName(platform));
 });
 
@@ -310,6 +313,81 @@ describe("downloads", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+});
+
+describe("license notices", () => {
+  /** A repository root, Node's LICENSE and an unpacked PostgreSQL tree, as the archives hold them. */
+  async function sources(postgresFiles: Record<string, string>): Promise<{ dir: string; root: string; nodeLicense: string; postgres: string }> {
+    const dir = await mkdtemp(join(tmpdir(), "rvtt-licenses-"));
+    const write = async (path: string, text: string) => {
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, text);
+    };
+    await write(join(dir, "repo", "LICENSE"), "GNU AFFERO GENERAL PUBLIC LICENSE");
+    await write(join(dir, "node", "LICENSE"), "Node.js is licensed for use as follows");
+    for (const [rel, text] of Object.entries(postgresFiles)) await write(join(dir, "postgres", rel), text);
+    return { dir, root: join(dir, "repo"), nodeLicense: join(dir, "node", "LICENSE"), postgres: join(dir, "postgres") };
+  }
+  const ARCHIVE = {
+    COPYRIGHT: "PostgreSQL Database Management System",
+    LICENSE: "Copyright (c) 2024, Theseus",
+    "dependency-notices/openssl/copyright": "Apache License",
+    "dependency-notices/vcpkg/icu/copyright": "UNICODE LICENSE",
+    "bin/postgres": "a program, not a notice",
+  };
+
+  test("the fetch step writes RaccoonVTT's, Node's and PostgreSQL's notices with its bundled libraries', and nothing else", async () => {
+    const src = await sources(ARCHIVE);
+    try {
+      const out = join(src.dir, "runtime");
+      const written = await writeLicenses(out, src);
+      assert.deepEqual(written, [
+        "node/LICENSE",
+        "postgresql/COPYRIGHT",
+        "postgresql/LICENSE",
+        "postgresql/dependency-notices/openssl/copyright",
+        "postgresql/dependency-notices/vcpkg/icu/copyright",
+        "raccoonvtt/LICENSE",
+      ]);
+      assert.equal(await readFile(join(out, LICENSES_DIR, "postgresql", "COPYRIGHT"), "utf8"), ARCHIVE.COPYRIGHT);
+      assert.equal(await readFile(join(out, LICENSES_DIR, "node", "LICENSE"), "utf8"), "Node.js is licensed for use as follows");
+      assert.equal(await readFile(join(out, LICENSES_DIR, "raccoonvtt", "LICENSE"), "utf8"), "GNU AFFERO GENERAL PUBLIC LICENSE");
+    } finally {
+      await rm(src.dir, { recursive: true, force: true });
+    }
+  });
+
+  test("on Windows it adds the Visual C++ runtime's terms with the version shipped, and a second run leaves no stale notice", async () => {
+    const { LICENSE: _theseus, ...windowsArchive } = ARCHIVE;
+    const src = await sources(windowsArchive);
+    try {
+      const out = join(src.dir, "runtime");
+      await mkdir(join(out, LICENSES_DIR, "old"), { recursive: true });
+      await writeFile(join(out, LICENSES_DIR, "old", "NOTICE"), "from a run before");
+      const written = await writeLicenses(out, { ...src, vcRuntime: "14.51.36014.0" });
+      assert.ok(written.includes("vc-runtime/NOTICE.txt"));
+      assert.ok(!written.includes("postgresql/LICENSE"), "the Windows archive has no theseus LICENSE, and none is made up");
+      assert.ok(!written.some((f) => f.startsWith("old/")));
+      const notice = await readFile(join(out, LICENSES_DIR, "vc-runtime", "NOTICE.txt"), "utf8");
+      assert.match(notice, /MSVCP140\.dll, VCRUNTIME140\.dll, VCRUNTIME140_1\.dll in postgres\\bin/);
+      assert.match(notice, /version 14\.51\.36014\.0/);
+      assert.match(notice, /https:\/\/visualstudio\.microsoft\.com\/license-terms\//);
+      assert.doesNotMatch(notice, /[\u2014;]/, "house style: no em dash, no semicolon");
+    } finally {
+      await rm(src.dir, { recursive: true, force: true });
+    }
+  });
+
+  for (const missing of ["COPYRIGHT", "dependency-notices"]) {
+    test(`an archive without its ${missing} stops the build`, async () => {
+      const src = await sources(Object.fromEntries(Object.entries(ARCHIVE).filter(([rel]) => !rel.startsWith(missing))));
+      try {
+        await assert.rejects(writeLicenses(join(src.dir, "runtime"), src), new RegExp(`no ${missing}, so the app would ship without its license notices`));
+      } finally {
+        await rm(src.dir, { recursive: true, force: true });
+      }
+    });
+  }
 });
 
 describe("pruning", () => {

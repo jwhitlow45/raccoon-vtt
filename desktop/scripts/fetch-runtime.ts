@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createWriteStream, existsSync } from "node:fs";
-import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -28,6 +28,8 @@ import { parseArgs } from "node:util";
  *   postgres.targets[<key>] = { url, sha256, vcRuntimeMin? }   (vcRuntimeMin on win32-x64 only)
  *   floors = { macos, glibc }
  *
+ * It also writes `licenses/`, the notices the installer ships beside them.
+ *
  * A hash mismatch stops the build. PostgreSQL's provenance is checked with
  * `gh attestation verify`. `--no-attestation` skips that check for working
  * offline on a development machine, and CI never passes it. What is left
@@ -39,10 +41,12 @@ const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const PINS_FILE = fileURLToPath(new URL("../pins.json", import.meta.url));
 
 // Copies of desktop/contract.ts's names (RUNTIME_DIR, RESOURCES.node,
-// RESOURCES.postgres, serverBinaryName), which this script cannot import.
+// RESOURCES.postgres, RESOURCES.licenses, serverBinaryName), which this
+// script cannot import.
 export const RUNTIME_DIR = "desktop/.runtime";
 export const NODE_DIR = "node";
 export const POSTGRES_DIR = "postgres";
+export const LICENSES_DIR = "licenses";
 export function serverBinaryName(platform: string): string {
   return platform === "win32" ? "raccoonvtt-server.exe" : "raccoonvtt-server";
 }
@@ -525,6 +529,69 @@ export function pickCrtFolder(names: readonly string[]): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// License notices (design 13's CREDITS.md entry): the installer carries
+// them in `resources/licenses/`, which electron-builder fills from here.
+
+/** The Visual C++ runtime's terms, which come as no file beside the DLLs, so the notice names them. */
+export function vcRuntimeNotice(version: string): string {
+  return [
+    "Microsoft Visual C++ runtime",
+    "",
+    `${VC_RUNTIME_DLLS.join(", ")} in postgres\\bin are the Microsoft Visual C++`,
+    `runtime, version ${version}, copyright Microsoft Corporation. PostgreSQL`,
+    "needs them to run. They are redistributed unchanged under the",
+    "Distributable Code terms of the Microsoft Visual Studio license terms:",
+    "https://visualstudio.microsoft.com/license-terms/",
+    "",
+    "Microsoft lists them among the files an application may redistribute:",
+    "https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files",
+    "",
+  ].join("\n");
+}
+
+export type LicenseSources = {
+  /** The repository's root, whose LICENSE is RaccoonVTT's own. */
+  root: string;
+  /** The LICENSE from Node's archive, which covers Node and the libraries it bundles. */
+  nodeLicense: string;
+  /** The unpacked PostgreSQL tree. */
+  postgres: string;
+  /** The shipped Visual C++ runtime's version, on Windows only. */
+  vcRuntime?: string;
+};
+
+/**
+ * Writes `<out>/licenses/` afresh: RaccoonVTT's license, Node's, the
+ * PostgreSQL License (COPYRIGHT) with the archive's notices for the
+ * libraries it bundles, and on Windows the Visual C++ runtime's terms.
+ * PostgreSQL's notices are required, since its archive bundles OpenSSL,
+ * ICU and more whose licenses ask for them. theseus-rs's own LICENSE for
+ * its build scripts comes along where the archive has one. Answers the
+ * files written, by path from `licenses/` with forward slashes.
+ */
+export async function writeLicenses(out: string, from: LicenseSources): Promise<string[]> {
+  const dir = join(out, LICENSES_DIR);
+  await rm(dir, { recursive: true, force: true });
+  for (const required of [join(from.postgres, "COPYRIGHT"), join(from.postgres, "dependency-notices")]) {
+    if (!existsSync(required)) throw new Error(`PostgreSQL's archive has no ${basename(required)}, so the app would ship without its license notices.`);
+  }
+  await mkdir(join(dir, "raccoonvtt"), { recursive: true });
+  await copyFile(join(from.root, "LICENSE"), join(dir, "raccoonvtt", "LICENSE"));
+  await mkdir(join(dir, "node"), { recursive: true });
+  await copyFile(from.nodeLicense, join(dir, "node", "LICENSE"));
+  const pg = join(dir, "postgresql");
+  await mkdir(pg, { recursive: true });
+  await copyFile(join(from.postgres, "COPYRIGHT"), join(pg, "COPYRIGHT"));
+  if (existsSync(join(from.postgres, "LICENSE"))) await copyFile(join(from.postgres, "LICENSE"), join(pg, "LICENSE"));
+  await cp(join(from.postgres, "dependency-notices"), join(pg, "dependency-notices"), { recursive: true });
+  if (from.vcRuntime !== undefined) {
+    await mkdir(join(dir, "vc-runtime"), { recursive: true });
+    await writeFile(join(dir, "vc-runtime", "NOTICE.txt"), vcRuntimeNotice(from.vcRuntime));
+  }
+  return (await walkFiles(dir)).map((file) => relative(dir, file).split(sep).join("/"));
+}
+
+// ---------------------------------------------------------------------------
 // The run
 
 function run(cmd: string, args: readonly string[], env?: NodeJS.ProcessEnv): string {
@@ -697,6 +764,9 @@ export async function fetchRuntime(opts: FetchOptions): Promise<void> {
   if (!pgVersion.endsWith(`(PostgreSQL) ${wantPg}`)) throw new Error(`postgres --version says "${pgVersion}", not PostgreSQL ${wantPg}.`);
   const nodeVersion = run(binary, ["--version"]).trim();
   if (nodeVersion !== `v${pins.node.version}`) throw new Error(`The bundled Node says ${nodeVersion}, not v${pins.node.version}.`);
+
+  const notices = await writeLicenses(out, { root: ROOT, nodeLicense: join(nodeOut, "LICENSE"), postgres: pgOut, ...(vcRuntime ? { vcRuntime } : {}) });
+  console.log(`Wrote ${notices.length} license notices to ${LICENSES_DIR}/`);
 
   const runtime = {
     target: opts.target,
