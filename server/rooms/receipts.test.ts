@@ -468,3 +468,41 @@ describe("receipts and admission in the actor, randomized (docs/design/design-v1
     }
   });
 });
+
+describe("a damage roll taken by an ask for saves", () => {
+  const roll = (memberId: string, tag: string, at: number): Receipt => ({ memberId, tag, part: 0, state: "committed", seq: 1, at, player: true });
+
+  test("reads the sender's own live receipt alone: none, free, taken in a staged batch, and taken once that batch lands", () => {
+    let now = 1_000_000;
+    const book = new ReceiptBook(() => now);
+    assert.equal(book.rollTag("p1", "dmg"), null, "no receipt: the ask is refused");
+    const receipt = roll("p1", "dmg", now);
+    book.stage(receipt);
+    assert.deepEqual(book.rollTag("p1", "dmg"), { ask: null }, "a roll staged in the ask's own batch is free");
+    assert.equal(book.rollTag("p2", "dmg"), null, "another member's roll of the same tag is not theirs");
+    const take = book.take("p1", "dmg", "ask-1");
+    assert.deepEqual(book.rollTag("p1", "dmg"), { ask: "ask-1" });
+    book.committed([receipt], [take]);
+    assert.deepEqual(book.rollTag("p1", "dmg"), { ask: "ask-1" });
+    now += DAY_MS + 1;
+    assert.equal(book.rollTag("p1", "dmg"), null, "the tag lives as long as its receipt");
+  });
+
+  test("an ask's batch that never commits gives the roll back", () => {
+    const now = 1_000_000;
+    const book = new ReceiptBook(() => now);
+    const receipt = roll("p1", "dmg", now);
+    book.stage(receipt);
+    book.committed([receipt]);
+    const take = book.take("p1", "dmg", "ask-1");
+    book.abandoned([], [take]);
+    assert.deepEqual(book.rollTag("p1", "dmg"), { ask: null });
+  });
+
+  test("a stored receipt keeps the ask that took it across a load", () => {
+    const now = 1_000_000;
+    const book = new ReceiptBook(() => now);
+    book.load([{ ...roll("p1", "dmg", now - 1_000), ask: "ask-1" }]);
+    assert.deepEqual(book.rollTag("p1", "dmg"), { ask: "ask-1" });
+  });
+});

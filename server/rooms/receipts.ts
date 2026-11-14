@@ -36,7 +36,12 @@ export type Receipt = {
   at: number;
   /** Admitted from a player, so it counts against the player's share and the players' together. */
   player: boolean;
+  /** A damage roll's: the ask for saves that took it, by its id. A roll goes with one ask for as long as its receipt lives. */
+  ask?: string;
 };
+
+/** A roll's receipt taken by an ask for saves, staged with the ask's batch. */
+export type Take = { memberId: string; tag: string; part: number; ask: string };
 
 export type ReceiptCaps = { perDay: number; perPlayer: number; dmFloor: number };
 
@@ -76,6 +81,8 @@ export class ReceiptBook {
   #heldStart = 0;
   /** Receipts of admitted ops whose batch is not durable yet. */
   #staged = new Map<string, Receipt>();
+  /** Rolls taken by asks whose batch is not durable yet, by the roll's key. */
+  #takes = new Map<string, Take>();
   /** Held and staged, by member, and for players together. */
   #byMember = new Map<string, number>();
   #players = 0;
@@ -121,8 +128,8 @@ export class ReceiptBook {
     this.#count(receipt, 1);
   }
 
-  /** The batch holding these staged receipts is durable. */
-  committed(receipts: readonly Receipt[]): void {
+  /** The batch holding these staged receipts, and the takes of its asks, is durable. */
+  committed(receipts: readonly Receipt[], takes: readonly Take[] = []): void {
     for (const r of receipts) {
       const key = keyOf(r.memberId, r.tag, r.part);
       if (this.#staged.get(key) !== r) continue;
@@ -130,16 +137,47 @@ export class ReceiptBook {
       this.#count(r, -1);
       this.#hold(r);
     }
+    for (const t of takes) {
+      const key = keyOf(t.memberId, t.tag, t.part);
+      if (this.#takes.get(key) !== t) continue;
+      this.#takes.delete(key);
+      const held = this.#held.get(key);
+      if (held) held.ask = t.ask;
+    }
   }
 
-  /** The batch holding these staged receipts will never commit: they go, and give their slots back. */
-  abandoned(receipts: readonly Receipt[]): void {
+  /** The batch holding these staged receipts and takes will never commit: they go, and give their slots back. */
+  abandoned(receipts: readonly Receipt[], takes: readonly Take[] = []): void {
     for (const r of receipts) {
       const key = keyOf(r.memberId, r.tag, r.part);
       if (this.#staged.get(key) !== r) continue;
       this.#staged.delete(key);
       this.#count(r, -1);
     }
+    for (const t of takes) {
+      const key = keyOf(t.memberId, t.tag, t.part);
+      if (this.#takes.get(key) === t) this.#takes.delete(key);
+    }
+  }
+
+  /**
+   * What an ask for saves naming this member's damage roll by its tag
+   * reads: null when the member holds no live receipt of the roll, else the
+   * ask that took it, staged takes included, or null while none has. Only
+   * the sender's own receipts are read, so the answer is their own history.
+   */
+  rollTag(memberId: string, tag: string): { ask: string | null } | null {
+    const key = keyOf(memberId, tag, 0);
+    const receipt = this.find(memberId, tag, 0);
+    if (!receipt) return null;
+    return { ask: this.#takes.get(key)?.ask ?? receipt.ask ?? null };
+  }
+
+  /** An ask for saves takes this member's roll, staged with the ask's batch. The roll's receipt must be live (rollTag). */
+  take(memberId: string, tag: string, ask: string): Take {
+    const take: Take = { memberId, tag, part: 0, ask };
+    this.#takes.set(keyOf(memberId, tag, 0), take);
+    return take;
   }
 
   /** Receipts younger than 24 hours with the staged ones: the room's count against its cap. */

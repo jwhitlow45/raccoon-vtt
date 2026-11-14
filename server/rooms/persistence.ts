@@ -10,6 +10,7 @@ import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
 import { soundFactsOfRow, type AssetMedia } from "../assets/store.ts";
 import { CommitOutcomeUnknown, type Queryable } from "../auth/tx.ts";
 import { counted } from "./counted.ts";
+import { recordIds, type IdRow } from "./createIds.ts";
 
 /**
  * Everything the room engine reads from or writes to Postgres (design
@@ -286,13 +287,22 @@ export type ReceiptRow = {
   message: string | null;
   /** ISO time it was written. */
   at: string;
+  /** A damage roll's: the ask for saves that took it, null or absent while none has. */
+  ask?: string | null;
 };
+
+/** A roll's receipt taken by an ask for saves, written in the ask's batch. */
+export type ReceiptTake = { memberId: string; tag: string; part: number; ask: string };
 
 export type BatchWrite = {
   ops: readonly OpRecord[];
   watermarks: ReadonlyArray<WatermarkKey & { n: number }>;
   /** The receipts of the tagged ops this batch settles, written with them, so a settled op and its receipt are durable together. */
   receipts?: readonly ReceiptRow[];
+  /** The roll receipts this batch's asks for saves took, written after `receipts`, so a roll settled in the same batch is taken too. */
+  takes?: readonly ReceiptTake[];
+  /** The ids the batch's applied ops brought (createIds.ts), recorded with them and rolled back with them. */
+  ids?: readonly IdRow[];
   /**
    * The room's name after this batch, set only when an op in it renamed the
    * room. The join page, the DM link page and the admin CLI read `rooms.name`
@@ -380,7 +390,7 @@ export async function commitBatch(pool: Pool, roomId: string, batch: BatchWrite)
          select $1, m, t, p, s, q, c, g, a::timestamptz
          from unnest($2::text[], $3::text[], $4::int[], $5::text[], $6::bigint[], $7::text[], $8::text[], $9::text[]) as x(m, t, p, s, q, c, g, a)
          on conflict (room_id, member_id, tag, part) do update
-           set state = excluded.state, seq = excluded.seq, code = excluded.code, message = excluded.message, at = excluded.at`,
+           set state = excluded.state, seq = excluded.seq, code = excluded.code, message = excluded.message, at = excluded.at, ask = null`,
         [
           roomId,
           receipts.map((r) => r.memberId),
@@ -394,6 +404,16 @@ export async function commitBatch(pool: Pool, roomId: string, batch: BatchWrite)
         ],
       );
     }
+    const takes = batch.takes ?? [];
+    if (takes.length > 0) {
+      await client.query(
+        `update roll_receipts r set ask = x.a
+         from unnest($2::text[], $3::text[], $4::int[], $5::text[]) as x(m, t, p, a)
+         where r.room_id = $1 and r.member_id = x.m and r.tag = x.t and r.part = x.p`,
+        [roomId, takes.map((t) => t.memberId), takes.map((t) => t.tag), takes.map((t) => t.part), takes.map((t) => t.ask)],
+      );
+    }
+    if (batch.ids && batch.ids.length > 0) await recordIds(client, roomId, batch.ids);
     if (batch.watermarks.length > 0) {
       await client.query(
         `insert into client_watermarks (room_id, session_id, client_id, n, updated_at)
@@ -479,12 +499,12 @@ async function storeSnapshot(q: Queryable, roomId: string, seq: number, json: st
 
 /** The room's receipts written since `since`: those younger than 24 hours, which the actor holds in memory (docs/design/design-v1-dice.md 1.2). */
 export async function loadReceipts(pool: Pool, roomId: string, since: Date): Promise<ReceiptRow[]> {
-  const { rows } = await pool.query<{ member_id: string; tag: string; part: number; state: ReceiptRow["state"]; seq: string | null; code: string | null; message: string | null; at: Date }>(
-    `select member_id, tag, part, state, seq::text, code, message, at from roll_receipts
+  const { rows } = await pool.query<{ member_id: string; tag: string; part: number; state: ReceiptRow["state"]; seq: string | null; code: string | null; message: string | null; at: Date; ask?: string | null }>(
+    `select member_id, tag, part, state, seq::text, code, message, at, ask from roll_receipts
      where room_id = $1 and at > $2 order by at`,
     [roomId, since.toISOString()],
   );
-  return rows.map((r) => ({ memberId: r.member_id, tag: r.tag, part: r.part, state: r.state, seq: r.seq === null ? null : Number(r.seq), code: r.code, message: r.message, at: r.at.toISOString() }));
+  return rows.map((r) => ({ memberId: r.member_id, tag: r.tag, part: r.part, state: r.state, seq: r.seq === null ? null : Number(r.seq), code: r.code, message: r.message, at: r.at.toISOString(), ...(r.ask ? { ask: r.ask } : {}) }));
 }
 
 /** One member's receipts of one tag, every part, read by key: the lookup reads nothing of anyone else's. */
