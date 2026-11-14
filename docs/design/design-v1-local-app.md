@@ -443,4 +443,69 @@ Five rounds, each with Claude and Codex reviewers, every finding adopted. Round 
 
 ## As built
 
-LOCAL-7 writes this from the lanes' reports: every place the build went its own way, with the reason.
+Every place the build went its own way, with the reason, grouped by area.
+
+**The contract**
+- It also pins what the lanes share: the runtime folders (`desktop/.runtime/{node,postgres}` and the resources `node`, `postgres`, `app-server` and `licenses`), the server's file name `raccoonvtt-server[.exe]`, the supervisor's `--postgres <dir>` flag and the shell's `--smoke` and `--quit`. One place names each, so a lane cannot spell one differently.
+- Headless status lines are one JSON `SupervisorStatus` each, and the smoke test drives a headless supervisor over the shell's own channel, so it tests the code the shell uses.
+- The window's words gained what section 9 lacked, in its voice: "Rooms show here while RaccoonVTT runs.", "The backup failed: <reason>.", "The update failed: <reason>.", "Use a port from 1024 to 65535.", the footer "RaccoonVTT <version>", the singular quit line, the guard's confirmation and the Linux guard sentence. The window page added "Dismiss", "Loading rooms", "Loading backups", "RaccoonVTT did not answer. Try again.", "Before an update" for a backup with no target version, and a line on Backups while the database is down.
+- The port runs from 1024 to 65535. `settings.json` keeps keys it does not know, so going back to an older version and forward again loses no setting.
+- Every backup date shown is the backup's start. Network states read off, offline, public, domain, unknown and open.
+- Server code may import the contract only with `import type`, since the image holds no `desktop/`, and a test enforces it. `import { type X }` counts as a value import because it still loads the module.
+- `restore` answers once it starts, with a refusal at step 1 as a failure, and its end comes as a notice. `backupNow` answers when the backup ends.
+- The desktop tsconfigs set `typeRoots` to the root's types, so Electron's `@types/node` never replaces Node 24's.
+
+**The server in local mode**
+- Interface names never shown to players also include Windows' friendly names (vEthernet, VMware, VirtualBox, ZeroTier, WireGuard, Wintun, TAP-Windows) and docker's `br-` and `veth`, since a computer with those would otherwise offer a virtual address first.
+- The host-only guard runs in a route-level `onRequest` hook, so a create's JSON body is never parsed, and a refused import also sends `connection: close` so the body is not read on.
+- A WebSocket upgrade that the 421 Host check refuses has its socket ended in that hook. The socket plugin's own hook ends refused upgrades but runs later and never sees the request, so each refused upgrade held a socket open.
+- Host is matched lowercased and exactly, and Origin exactly, never through `new URL`, which turns `evil.example@localhost:P` into an allowed host. `::1` counts as this computer, while the peer filter admits only IPv4 loopback and private addresses, as section 6 lists.
+- `csrfAllowed` takes a policy or a string, and a string still means one exact origin, so the hosted cases are unchanged. `main.ts` writes the 5 s status interval itself, because code outside `desktop/` may only `import type` the contract. A supervisor that dies during boot still stops the server: the channel is checked once the server listens, and nothing binds after.
+- `buildApp` takes an optional `network` for tests and decorates `localNetwork` and `originPolicy` for the socket and room routes. The local part of `/api/config` is in `server/local/share.ts`.
+- `passwordList` is exported and splits on CRLF or LF, since a checkout with Windows line ends failed the common-password test. Test child processes start from the environment Windows needs (`SystemRoot`, `TEMP`, `TMP`).
+- Three `/api/config` assertions in the room integration tests gained `local: null`.
+
+**The client**
+- `useRoomConnection()` joined `client/state/view.ts`, since `useRoomView` throws outside a room and Home needs a read that does not.
+- Access keeps a new DM link as a path and joins it to the share origin on each render, so an address change reaches a link already shown. The menu's Copy ends as a plain failure when both ways fail, since the join link is not shown there as text. Other surfaces select the text they show.
+- `local-lan.e2e.ts` takes this computer's first private IPv4 as the network and skips with none. Home's two other-device states come from a routed `/api/config`, and a player moving a token and an address change with the tab open are not covered, but the switch off and on is, through a restart on the same port.
+- Hook renders without a browser use a placeholder origin and no snapshot.
+
+**The supervisor**
+- The bundled PostgreSQL runs with `timezone = 'UTC'`, as the hosted image does. The integration tests on it failed two join request tests in a zone with summer time, where `now() + 180 days` lands an hour off.
+- `postgres.log` (the `pg_ctl -l` file) rotates at 10 MB, 5 kept, before each start only, since `pg_ctl` holds it open while PostgreSQL runs. The other logs rotate as they write.
+- The owner record and the guard record hold pid, start time and boot id. A guard's owner removes it by renaming it aside first, so the path is never an empty folder that another rename could take, and a macOS bind that races a contender's unlink fails with EEXIST and counts as taken.
+- `pg_ctl stop` runs only once a real postmaster is confirmed (the pid alive with the pid file's start time), so a reused pid is never signalled. The 5 s watch checks the postmaster's pid alone, since a start time check costs a PowerShell run on Windows.
+- A folder left by a cut-off `initdb` is moved aside as `postgres.incomplete-<ms>` and never deleted. A damaged `secrets.json` stops the start, since a new key would orphan every player link.
+- On Windows the network profile of the network that carries the shown address decides, not any profile. The crash count is forgiven after 60 s up. A saved port that is still held is waited on for 5 s. A headless supervisor with no channel exits 1 on an error. A restore asked for during a backup waits for it. A restore that fails after the drop is finished in the same process by the next start's recovery.
+- `listBackups` orders by the record's start, since two backups in one second otherwise sort by their random part. A backup this version cannot read is listed but gets no Restore button in the window.
+- Test-only variables in `main.ts` (`RACCOONVTT_TEST_BUILD`, `RACCOONVTT_TEST_SERVER_ENTRY` and the `RESTORE_TEST_*` set) are read only by tests. `fetch-runtime.ts` has `--no-attestation` for working offline and writes `desktop/.runtime/runtime.json`.
+
+**The shell**
+- Pins: Electron 44.10.0, electron-builder 26.18.1, electron-updater 6.8.12 and @electron/fuses 2.1.3. There is no Vite Electron plugin: `vite.shell.config.ts` builds the main process and the preload as one CommonJS file each with their packages inside, so the app ships no `node_modules`. Electron 44 has no install script, so the workspace's allow list only denies electron-winstaller's.
+- `desktop/build/pack.ts` runs electron-builder. It adds the staged server by absolute path, since electron-builder reads a path in its file as one inside `desktop/`, and takes the version from the root `package.json`, so `desktop/package.json` stays at 0.0.0 and a release bumps one file. `--shell-only` packs without the runtime for the shell's e2e test.
+- `@electron/fuses` is imported in `desktop/build/` and reached by path from `desktop/e2e/`, so `imports.test.ts` allows `desktop/electron/`, `desktop/build/` and `desktop/e2e/`.
+- Quit from the tray and the app menu asks in a system message box while other devices are connected. The first-close notice shows once per user, kept in `shell.json` in Electron's profile, which Windows puts in `%LOCALAPPDATA%\RaccoonVTT\shell`. A new stop brings a hidden window back.
+- `installer.nsh` waits for and ends RaccoonVTT's programs by name under the install folder (the shell, the server, `postgres`, `pg_ctl`, `initdb`, `pg_dump`, `pg_restore`), not every process there. An uninstall during an update keeps the firewall rule, since the new installer adds it again.
+- macOS signs ad hoc with no hardened runtime, and `afterPack` signs the whole bundle after the fuses are set. The app id is `io.github.jwhitlow45.raccoonvtt`. The window uses its content size, so the page is exactly 440 x 720 and never under 400 x 560.
+- `--smoke` passes once the window has loaded and the supervisor reports running, then quits with 0. Any stop gives 1, with a limit of 4 minutes. The shell's log lines before the supervisor's first status, which names the data folder, stay in memory, so a supervisor that never starts leaves no `shell.log`.
+
+**The window**
+- A backup this version cannot read gets no row. The rooms and the backup list reload when the server comes up. `stopped` shows "Stopping". The Players card shows only while running or restarting and with no stop.
+- Open RaccoonVTT is disabled until the server answers, and takes focus the first time it is enabled if nothing else has it. During a restore every change refuses with "Not during a restore". The switch and the port change only while running.
+- The awake line follows `sockets`, the count the power blocker uses.
+- The status line, the Open button and the footer each sit in a box like the cards, so the alignment check sees one left edge. Confirmations use the app's dialog with its header off, named by the button's words, and "Restore a backup" on a stop scrolls to Backups and focuses the first Restore.
+- The fake bridge ships in the build as a chunk of its own, loaded only when there is no `window.raccoonLocal`. The test emulates zoom as a layout of W/zoom by H/zoom CSS pixels at a device scale of the zoom, which is what the shell's zoom factor gives.
+
+**Build and CI**
+- Windows jobs run on `windows-2025-vs2026`, not `windows-2025`: the Visual C++ runtime floor (14.51) needs the Visual Studio 2026 image's redistributable, the older image's is 14.44, and `windows-2025` was moving between the two.
+- A `checksums` job without a token runs on dry runs too. Each build job gives `sha256-<target>` outputs, and the checksums, sign and upload jobs take every file by name against them, so the hand-off is proven before a release.
+- Each of the 11 files (the installers, the three `latest*.yml` and the checksum list) gets a `.sigstore.json`, 23 assets in all. A dry run keeps the installers for 7 days as run artifacts. No signing environment is named yet.
+- macOS checks run the same unit set as Windows. `window.e2e.ts` and `shell.e2e.ts` run in the checks job through `desktop/e2e/run.ts` on port 40600, with shots kept on failure.
+- Packaging builds the window with `pnpm exec vite build --config desktop/window/vite.config.ts` and the shell with `pnpm --dir desktop run build` (which builds the window too), then runs `node desktop/build/pack.ts`, and takes files from `desktop/out/dist`.
+- The smoke test runs one browser at a time and opens the DM link in WebKit at the network address. The image upload is a player's token upload through the page's own fetch, and Copy passes on "Copied" or the selected note. The cut-off restore uses `RESTORE_TEST_CRASH_AT=renamedLive`. Windows sets the runner's network profile to Private first, and `stage.ts` drops `node_modules/.bin` and pnpm's state files.
+- `ci.yml`'s header counts include `int-clock` and `lan-webkit`: 20 jobs, peaking at 18 Linux jobs.
+
+**Not yet proven here**
+- Only CI can prove the Windows and Linux builds, the NSIS install over a running copy, the firewall rule, the Visual C++ DLLs loading from the app, `taskkill /F`, `--quit`, the uninstall, the deb with AppArmor, the AppImage, macOS x64 and Linux arm64, WebKit in `lan-webkit`, the named-pipe lock, the PowerShell watcher and Windows durability.
+- `desktop/.runtime/licenses`, which `electron-builder.yml` copies to `resources/licenses/`, is not made by any script yet, so an installer built now ships no notices.
