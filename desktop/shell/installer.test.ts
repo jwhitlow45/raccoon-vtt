@@ -151,7 +151,7 @@ const PS1 = PROGRAMDATA.split("\n").filter((l) => !l.trim().startsWith("#")).joi
 
 test("programdata.ps1 makes the folder with its security descriptor in one call, owned by Administrators, with an ACL of its own", () => {
   assert.equal(bracketProblem(PS1), null);
-  assert.ok(!/\bNew-Item\b|\bmkdir\b|\bmd\b|Remove-Item|icacls|Test-Path/i.test(PS1), "never made then tightened, never deleted, never found through a link");
+  assert.ok(!/\bNew-Item\b|\bmkdir\b|\bmd\b|Remove-Item|icacls|Test-Path|Set-Acl|SetAccessControl/i.test(PS1), "never made then tightened, never mended in place, never deleted, never found through a link");
   assert.match(PS1, /\[void\]\[System\.IO\.Directory\]::CreateDirectory\(\$path, \$security\)/);
   assert.match(PS1, /\$security\.SetOwner\(\$admins\)/);
   assert.match(PS1, /\$security\.SetAccessRuleProtection\(\$true, \$false\)/);
@@ -159,7 +159,16 @@ test("programdata.ps1 makes the folder with its security descriptor in one call,
   // Anything there that Administrators don't own, or that is a link, is moved aside and the loop makes a new one.
   assert.match(PS1, /Rename-Item -LiteralPath \$path -NewName \('RaccoonVTT\.untrusted-'/);
   assert.match(PS1, /if \(\$item\.Attributes -band \[System\.IO\.FileAttributes\]::ReparsePoint\) \{ return \$false \}/);
-  assert.match(PS1, /return \(\$owner -eq \$admins\) -or \(\$owner -eq \$system\)/);
+  assert.match(PS1, /if \(-not \(\(\$owner -eq \$admins\) -or \(\$owner -eq \$system\)\)\) \{ return \$false \}/);
+  // Trusted only with exactly the installer's ACL: protected, as many entries as it gives, each matched in every field, none inherited.
+  assert.match(PS1, /if \(-not \$acl\.AreAccessRulesProtected\) \{ return \$false \}/);
+  assert.match(PS1, /\$want = @\(\$security\.GetAccessRules\(\$true, \$true, \[System\.Security\.Principal\.SecurityIdentifier\]\)\)/);
+  assert.match(PS1, /if \(\$have\.Count -ne \$want\.Count\) \{ return \$false \}/);
+  for (const field of ["IdentityReference", "FileSystemRights", "InheritanceFlags", "PropagationFlags", "AccessControlType"]) assert.ok(PS1.includes(`($_.${field} -eq $w.${field})`), field);
+  assert.ok(PS1.includes("(-not $_.IsInherited)"));
+  assert.match(PS1, /if \(\$same\.Count -ne 1\) \{ return \$false \}/);
+  // A folder there is kept only when trusted, and anything else, an Administrators-owned folder with another ACL included, is moved aside.
+  assert.match(PS1, /if \(Get-Item -LiteralPath \$path -Force -ErrorAction SilentlyContinue\) \{\n\s*if \(Test-Trusted \$path\) \{ exit 0 \}\n\s*Rename-Item -LiteralPath \$path -NewName \('RaccoonVTT\.untrusted-' \+ \[DateTime\]::UtcNow\.Ticks\)\n\s*continue\n\s*\}/);
   assert.match(PS1, /\nexit 1\n?$/, "a folder never made right ends in failure");
   for (const condition of conditions(PS1)) assert.ok(!notAPipeline(condition), `if (${condition}) is not one pipeline`);
 });
