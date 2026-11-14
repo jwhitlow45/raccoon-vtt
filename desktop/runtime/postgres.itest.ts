@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os, { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +13,7 @@ import { lockLocation } from "./lock.ts";
 import { loopbackPort } from "./ports.ts";
 import { Cluster, DatabaseFailed, uncertainWords } from "./postgres.ts";
 import { isAlive, processProgram, processStamp, processStart } from "./processInfo.ts";
-import { startTestCluster, type TestCluster } from "./testing/cluster.ts";
+import { postgresDir, startTestCluster, type TestCluster } from "./testing/cluster.ts";
 import { killSupervisor, startSupervisor, type SupervisorRun } from "./testing/supervisorProcess.ts";
 
 /**
@@ -243,6 +243,45 @@ describe("the cluster", () => {
     await c.pool().query("select 1");
     await c.cluster.stop();
     assert.equal(isAlive(pid), false, "the cluster that started it stops it");
+  });
+
+  test("an init cut off after PG_VERSION and before the app's settings leaves no postgres/, and the next start makes it whole", async () => {
+    const dir = await dataDir();
+    const opts = {
+      binDir: join(postgresDir(), "bin"),
+      pgData: join(dir, "postgres"),
+      logFile: join(dir, "postgres.log"),
+      password: "test-password-0123456789abcdef",
+      platform,
+    };
+    const cut = new Cluster({
+      ...opts,
+      afterInitdb: async () => {
+        throw new Error("killed after initdb");
+      },
+    });
+    await assert.rejects(cut.init(), /killed after initdb/);
+    assert.equal(existsSync(opts.pgData), false);
+    const staging = (await readdir(dir)).filter((n) => n.startsWith("postgres.init-"));
+    assert.equal(staging.length, 1);
+    assert.ok(existsSync(join(dir, staging[0]!, "PG_VERSION")), "initdb wrote PG_VERSION before it was cut off");
+
+    const whole = new Cluster(opts);
+    assert.equal(whole.needsInit(), true);
+    await whole.init();
+    await whole.start();
+    try {
+      const client = new pg.Client({ connectionString: whole.url("postgres") });
+      await client.connect();
+      const show = async (name: string) => (await client.query<Record<string, string>>(`show ${name}`)).rows[0]?.[name];
+      assert.equal(await show("listen_addresses"), "127.0.0.1");
+      assert.equal(await show("TimeZone"), "UTC");
+      await client.end();
+    } finally {
+      await whole.stop();
+    }
+    assert.deepEqual((await readdir(dir)).filter((n) => n.startsWith("postgres.init-")), []);
+    assert.equal((await readdir(dir)).filter((n) => n.startsWith("postgres.incomplete-")).length, 1);
   });
 });
 
