@@ -23,6 +23,8 @@ import { readPlayerPassword, storePlayerPassword } from "../auth/playerSecret.ts
 import { dmLink } from "../auth/roomId.ts";
 import { createRoomRecord } from "../auth/roomRecords.ts";
 import { turnstileEnabled, verifyTurnstile } from "../auth/turnstile.ts";
+import { requireHostComputer } from "../local/guard.ts";
+import { localApiConfig } from "../local/share.ts";
 
 /**
  * Rooms: create, look up, delete, change the player password, show the
@@ -77,16 +79,20 @@ export async function registerRoomRoutes(app: FastifyInstance, kit: AuthKit): Pr
   await app.register(async (r) => {
     r.setErrorHandler(accessErrors);
     // The create form needs the Turnstile site key, which is public by design.
-    r.get("/api/config", async () => ({
+    r.get("/api/config", async (req) => ({
       turnstileSiteKey: turnstileEnabled(kit.config) ? (kit.config.TURNSTILE_SITE_KEY ?? null) : null,
       // Openverse needs no key, so image search is always there
       // (docs/design/design-v1-dm-tools.md 3.13). Kept for the picker, which reads it.
       searchEnabled: true,
       animatedMaps: animatedMapsOn(kit.config),
       roomSound: roomSoundOn(kit.config),
+      // The desktop app's links and Home cards, answered per device (docs/design/design-v1-local-app.md 4).
+      local: kit.config.local ? await localApiConfig(kit.config, app.localNetwork, req) : null,
     }));
 
-    r.post("/api/rooms", async (req, reply) => {
+    // Only the host computer makes rooms in local mode, refused before the
+    // body is read (docs/design/design-v1-local-app.md 6, D-261113-081).
+    r.post("/api/rooms", { onRequest: async (req) => requireHostComputer(kit.config, req) }, async (req, reply) => {
       const body = parseBody(CreateBody, req.body);
       const problem = passwordProblem(body.playerPassword);
       if (problem) throw new HttpError(400, "weak_password", { extra: { reason: problem } });

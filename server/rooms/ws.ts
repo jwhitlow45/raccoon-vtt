@@ -9,6 +9,7 @@ import { ipKey } from "../auth/ipKey.ts";
 import { parseRoomId } from "../auth/roomId.ts";
 import type { GrantContext } from "../auth/types.ts";
 import type { Config } from "../config.ts";
+import { thisComputer } from "../local/guard.ts";
 import type { RoomActor } from "./actor.ts";
 import { SlidingWindow, SocketRegistry, SustainedViolation, type Clock, type SocketCaps } from "./budgets.ts";
 import { CLOSE, Connection } from "./connection.ts";
@@ -20,7 +21,8 @@ import type { RoomManager } from "./manager.ts";
  * The WebSocket endpoint, `/ws?room=` (design sections 7.1, 7.2, 7.5, 7.6
  * and 10.4).
  *
- * Before the upgrade completes: an exact Origin match, the session cookie, a
+ * Before the upgrade completes: an allowed Origin (the exact public origin,
+ * or the desktop app's own, server/local/guard.ts), the session cookie, a
  * current-epoch grant for the room, and the socket caps. After it: the
  * socket is bound to that grant, the room loads (or the socket closes with
  * 4011), and every frame passes the budget before it is parsed.
@@ -77,6 +79,14 @@ declare module "fastify" {
     wsGrant: SocketGrant | null;
     wsIp: string | null;
   }
+  interface FastifyInstance {
+    /**
+     * The open sockets, and the distinct addresses other than this
+     * computer's holding one, for the desktop app's status
+     * (docs/design/design-v1-local-app.md 4).
+     */
+    openSockets(): { total: number; remoteDevices: number };
+  }
 }
 
 export async function registerWebSocket(app: FastifyInstance, deps: { manager: RoomManager; config: Config; options?: WsOptions }): Promise<void> {
@@ -113,6 +123,7 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
   });
   app.decorateRequest("wsGrant", null);
   app.decorateRequest("wsIp", null);
+  app.decorate("openSockets", () => ({ total: registry.total, remoteDevices: registry.remoteDevices((ip) => thisComputer(ip, app.localNetwork)) }));
 
   /**
    * Whether the room's roster holds a player with this id now. The room
@@ -135,7 +146,7 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
     {
       websocket: true,
       preHandler: async (req, reply) => {
-        if (req.headers.origin !== config.publicOrigin) return reply.code(403).send({ error: "cross_origin" satisfies ApiErrorCode });
+        if (!app.originPolicy.originAllowed(req.headers.origin)) return reply.code(403).send({ error: "cross_origin" satisfies ApiErrorCode });
         const query = req.query as { room?: unknown; as?: unknown };
         const roomId = parseRoomId(query.room);
         if (!roomId) return reply.code(404).send({ error: "room_not_found" satisfies ApiErrorCode });

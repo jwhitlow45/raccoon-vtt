@@ -27,6 +27,8 @@ import { registerRoomRoutes } from "./http/rooms.ts";
 import { registerSecurity } from "./http/security.ts";
 import { registerStatic } from "./http/static.ts";
 import { registerXCardRoutes } from "./http/xcard.ts";
+import { dropForeignPeer, originPolicy, type OriginPolicy } from "./local/guard.ts";
+import { network, type LocalNetwork } from "./local/network.ts";
 import { registerPlayerViewRoutes } from "./http/playerView.ts";
 import { registerDdbImportRoutes, type DdbImportOptions } from "./http/ddbImport.ts";
 import { TooBusyError } from "./rooms/errors.ts";
@@ -55,6 +57,8 @@ export type AppDeps = {
   assets?: AssetRouteOptions;
   /** The log archive reader's admission and batches, its metadata worker, and the receipt lookup's archive reads, for tests. */
   log?: Omit<LogRouteOptions, "pool"> & { migration?: Partial<Omit<MigrationOptions, "budget" | "guard">>; receipts?: Omit<ReceiptRouteOptions, "lines"> & Pick<ReceiptLinesOptions, "checkoutMs" | "queryMs" | "beforeQuery"> };
+  /** This computer's network addresses, for local mode's tests. Defaults to the system's own (server/local/network.ts). */
+  network?: LocalNetwork;
 };
 
 /**
@@ -79,7 +83,7 @@ const LOG_METADATA_CONNECT_MS = 5_000;
  * server/rooms/*). Add the registration here, one line per module, after
  * setupAuth: the rate limiter only covers routes registered after it.
  */
-export async function buildApp({ config, pool, gateway, hasher, access, rooms, ws, export: exportOptions, cleanup, ddb, assets, log }: AppDeps): Promise<FastifyInstance> {
+export async function buildApp({ config, pool, gateway, hasher, access, rooms, ws, export: exportOptions, cleanup, ddb, assets, log, network: localNet = network }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: config.NODE_ENV === "test" ? false : { level: config.production ? "info" : "debug" },
     // cloudflared keeps idle origin connections for 90 s. A shorter Node
@@ -105,8 +109,29 @@ export async function buildApp({ config, pool, gateway, hasher, access, rooms, w
     return reply.code(status).send({ error: "internal" satisfies ApiErrorCode });
   });
 
+  const policy = originPolicy(config, localNet);
+  app.decorate("localNetwork", localNet);
+  app.decorate("originPolicy", policy);
+
+  // The desktop app's server answers plain HTTP on a network
+  // (docs/design/design-v1-local-app.md 6). A peer outside the private
+  // ranges is closed before HTTP reads it, and a request naming a host
+  // other than this computer's own (a domain an attacker re-points here) is
+  // turned away before anything else sees it.
+  if (config.local) {
+    app.server.prependListener("connection", dropForeignPeer);
+    app.addHook("onRequest", async (req, reply) => {
+      if (policy.hostAllowed(req.headers.host)) return;
+      // A WebSocket upgrade's socket is out of the HTTP server's hands, and
+      // the socket layer, whose own hook would end it after any answer, has
+      // not seen the request yet, so it is ended here.
+      if (req.headers.upgrade !== undefined) reply.raw.once("finish", () => req.raw.socket.destroy());
+      return reply.code(421).send();
+    });
+  }
+
   // Headers and CSRF before anything else, so they cover every route.
-  registerSecurity(app, config);
+  registerSecurity(app, config, policy);
 
   const manager = new RoomManager({
     pool,
@@ -208,5 +233,9 @@ declare module "fastify" {
     rooms: RoomManager;
     /** The log archive's metadata worker, which server/main.ts starts once the server listens. */
     logMigration: LogHistoryMigration;
+    /** This computer's network addresses, which local mode's checks and links read. */
+    localNetwork: LocalNetwork;
+    /** The origins and hosts the app's own pages use (server/local/guard.ts). */
+    originPolicy: OriginPolicy;
   }
 }
