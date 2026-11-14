@@ -220,7 +220,8 @@ export function Library(props: { onOpenTrack(soundId: SoundId): void }) {
   const routedPlaylist = routed?.kind === "playlist" ? routed.id : null;
   const routedTrack = routed?.kind === "track" ? routed.id : null;
   const editPlaylist = (playlist: Playlist, mark: string) => openMaker(maker, draftOf(playlist), mark);
-  const newPlaylist = (mark: string, seed?: SoundId) => openMaker(maker, newDraft(actions.newId(), seed), mark);
+  // No id yet: the maker makes one as the first save goes.
+  const newPlaylist = (mark: string, seed?: SoundId) => openMaker(maker, newDraft("", seed), mark);
 
   const playlistItems = (p: Playlist): MenuItem[] => {
     const ids = playlistTracks(p, sounds).map((s) => s.id);

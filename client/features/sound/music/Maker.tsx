@@ -151,12 +151,28 @@ export function savedPlaylist(draft: MakerDraft, playlistId: string, stored: Pla
  * `onDone` hears the answer, with what was saved once the server took it.
  * A saved playlist with nothing changed sends nothing and is done at once.
  */
-export function saveDraft(actions: Pick<RoomActions, "dispatch" | "newId">, draft: MakerDraft, stored: Playlist | undefined, sounds: Sounds, onDone: (saved: Saved | null) => void): void {
+export function saveDraft(
+  actions: Pick<RoomActions, "dispatch" | "newId">,
+  draft: MakerDraft,
+  stored: Playlist | undefined,
+  sounds: Sounds,
+  onDone: (saved: Saved | null) => void,
+  onRemint?: (playlistId: string) => void,
+): void {
   const fields = savedFields(draft, sounds);
   if (draft.base === null || stored === undefined) {
-    const playlistId = draft.base === null ? draft.playlistId : actions.newId();
-    send(actions, { t: "playlist.create", id: playlistId, name: fields.name, sounds: fields.sounds, repeat: fields.repeat, fade: fields.fade, ...(fields.shuffle ? { shuffle: true as const } : null) }, (answer) =>
-      onDone(answer === "taken" ? { playlistId } : null),
+    // A new playlist's id is made as its first save goes (useMakerControl). The store may give it a fresh one on the
+    // way (OnRemint), and the answer names the one it was saved under.
+    let playlistId = draft.base === null && draft.playlistId !== "" ? draft.playlistId : actions.newId();
+    actions.dispatch(
+      { t: "playlist.create", id: playlistId, name: fields.name, sounds: fields.sounds, repeat: fields.repeat, fade: fields.fade, ...(fields.shuffle ? { shuffle: true as const } : null) },
+      {
+        onAnswer: (answer) => onDone(answer === "taken" ? { playlistId } : null),
+        onRemint: (ids) => {
+          playlistId = ids.get(playlistId) ?? playlistId;
+          onRemint?.(playlistId);
+        },
+      },
     );
     return;
   }
@@ -212,10 +228,18 @@ export function useMakerControl(input: {
   const save = (kind: "save" | "play", then: (saved: Saved) => void) => {
     if (draft === null || busy !== null) return;
     setBusy(kind);
-    saveDraft(actions, draft, input.stored, sounds, (saved) => {
+    // A new playlist takes its id as its first save goes, never as the maker opens (docs/design/design-v1-player-limits.md
+    // 3.4), and keeps it in the draft, so a save sent again after a lost answer makes one playlist.
+    const sending = draft.base === null && draft.playlistId === "" ? { ...draft, playlistId: actions.newId() } : draft;
+    if (sending !== draft) input.setDraft(sending);
+    const follow = (playlistId: string) => {
+      const now = latest.current.draft;
+      if (now && now.base === null) latest.current.setDraft({ ...now, playlistId });
+    };
+    saveDraft(actions, sending, input.stored, sounds, (saved) => {
       setBusy(null);
       if (saved) then(saved);
-    });
+    }, follow);
   };
   const play = () => {
     if (draft === null || busy !== null) return;

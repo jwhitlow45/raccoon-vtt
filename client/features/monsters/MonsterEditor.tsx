@@ -99,9 +99,17 @@ export function MonsterEditor(props: {
   const problems = useRef<HTMLDivElement>(null);
   // Past the saves budget, Save stays off until this moment (docs/design/design-v1-companion-stat-blocks.md 3.5).
   const [retryAt, setRetryAt] = useState<number | null>(null);
-  // A new block's id, chosen once, so a save sent again after a lost answer finds the first one rather than making two.
-  const [newBlockId] = useState(() => actions.newId());
-  const blockId = target?.existing?.id ?? newBlockId;
+  // A new block's id, made as its first save is sent and kept, so a save sent again after a lost answer finds the
+  // first one rather than making two. Never made as the editor opens: the room takes a new id only within minutes
+  // of its making (docs/design/design-v1-player-limits.md 3.4), and an editor can stay open far longer. Answers
+  // arrive between renders, so they read the ref, and the render reads the state.
+  const [newBlockId, setNewBlockId] = useState<string | null>(null);
+  const blockIdRef = useRef<string | null>(target?.existing?.id ?? null);
+  const blockId = target?.existing?.id ?? newBlockId ?? "";
+  const keepBlockId = (id: string) => {
+    blockIdRef.current = id;
+    setNewBlockId(id);
+  };
   // A block's save waits for its answer (blockSave.ts). The machine's state is read by answers that arrive between renders, so it lives in a ref.
   const machine = useRef<BlockSave>(openSave(target?.existing ? blockLines(target.existing) : null));
   const [held, setHeld] = useState(false);
@@ -147,7 +155,7 @@ export function MonsterEditor(props: {
   /** What the view holds of this block now, read from the store, since answers arrive between renders. */
   const live = (): BlockLive => {
     const s = store.getState();
-    const now = s.view?.companionBlocks?.[blockId];
+    const now = blockIdRef.current === null ? undefined : s.view?.companionBlocks?.[blockIdRef.current];
     return { stored: now ? blockLines(now) : undefined, snapshots: s.snapshots ?? 0 };
   };
   const commit = (next: BlockSave) => {
@@ -155,7 +163,10 @@ export function MonsterEditor(props: {
     setHeld(saveHeld(next));
     setChecking(next.unsure !== null);
   };
-  const saved = () => props.onSaved(blockId, store.getState().view?.companionBlocks?.[blockId]);
+  const saved = () => {
+    const id = blockIdRef.current ?? "";
+    props.onSaved(id, store.getState().view?.companionBlocks?.[id]);
+  };
   const show = (result: SaveResult) => {
     if (result.kind === "saved") {
       saved();
@@ -217,7 +228,8 @@ export function MonsterEditor(props: {
    */
   const saveBlock = (block: NonNullable<typeof target>) => {
     if (held || gone || retryAt !== null) return;
-    const checked = companionBlockInputSchema.safeParse({ id: blockId, characterId: block.character.id, ...(block.fromSrd ? { fromSrd: block.fromSrd } : {}), ...tidied });
+    const id = blockIdRef.current ?? actions.newId();
+    const checked = companionBlockInputSchema.safeParse({ id, characterId: block.character.id, ...(block.fromSrd ? { fromSrd: block.fromSrd } : {}), ...tidied });
     if (!checked.success) {
       setRefused(false);
       setErrors(issueText(checked.error.issues));
@@ -232,7 +244,7 @@ export function MonsterEditor(props: {
       saved();
       return;
     }
-    const op: ClientOp = intent.kind === "create" ? { t: "companionBlock.create", block: checked.data } : { t: "companionBlock.update", blockId, patch: intent.patch };
+    const op: ClientOp = intent.kind === "create" ? { t: "companionBlock.create", block: checked.data } : { t: "companionBlock.update", blockId: id, patch: intent.patch };
     const name = tidied.name;
     const onAnswer = (answer: OpAnswer, refusal?: OpRefusal, cause?: UnknownCause) => {
       if (!open.current) {
@@ -247,7 +259,13 @@ export function MonsterEditor(props: {
     setErrors([]);
     setRefused(false);
     // In "view as a player" nothing is sent: the preview says so, and the draft stays.
-    if (actions.dispatch(op, { onAnswer, quiet: true }) === null) return;
+    // The store gives the block a fresh id where the room would refuse this one (OnRemint), and the editor follows it.
+    const onRemint = (ids: ReadonlyMap<string, string>) => {
+      const next = blockIdRef.current === null ? undefined : ids.get(blockIdRef.current);
+      if (next) keepBlockId(next);
+    };
+    if (actions.dispatch(op, { onAnswer, quiet: true, onRemint }) === null) return;
+    if (blockIdRef.current === null) keepBlockId(id);
     commit(markSent(planned.save, intent));
   };
 

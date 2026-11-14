@@ -22,6 +22,9 @@ const EMPTY_MEMBERS: Record<string, Member> = {};
 
 type AccessMode = "dm" | "all" | "member";
 
+/** A stand-in id of a real one's length, for the size of a page whose id is made only as it is saved. */
+const SIZED_ID = "00000000-0000-7000-8000-000000000000";
+
 /**
  * A journal page's editor (docs/design/design-v1-dm-tools.md 3.7), for the DM:
  * full screen on a phone, a dialog from 600 px up. The title, the folder,
@@ -48,7 +51,16 @@ export function JournalEditor(props: { page: JournalPage | null; folders: readon
   const setDraft = (change: (d: PageDraft) => PageDraft) => setState((s) => editDraft(s, change));
   const [problems, setProblems] = useState<string[]>([]);
   const [leaving, setLeaving] = useState(false);
-  const pageId = useMemo(() => props.page?.id ?? actions.newId(), [props.page, actions]);
+  // A new page's id, made as its first save is sent and kept, so a save sent again after a lost answer edits the page
+  // the first one made. Never made as the editor opens: the room takes a new id only within minutes of its making
+  // (docs/design/design-v1-player-limits.md 3.4). Answers arrive between renders, so they read the ref.
+  const [newPageId, setNewPageId] = useState<string | null>(null);
+  const newPageRef = useRef<string | null>(null);
+  const keepPageId = (id: string) => {
+    newPageRef.current = id;
+    setNewPageId(id);
+  };
+  const pageId = props.page?.id ?? newPageId ?? "";
   // The page as it stands now: a new page once a save of it went through, or the page after other edits since this one opened.
   const live = useRoomView((s) => s.view?.journal[pageId]);
   const connected = useRoomView((s) => s.connection === "open");
@@ -63,7 +75,8 @@ export function JournalEditor(props: { page: JournalPage | null; folders: readon
     };
   }, []);
   const dirty = draftDirty(initial, draft);
-  const size = sizeNote(live ?? props.page, draft, pageId);
+  // An id's length counts toward the page's size, so a page not yet saved is sized as it will be sent.
+  const size = sizeNote(live ?? props.page, draft, pageId || SIZED_ID);
   const players = Object.values(members)
     .filter((m) => m.kind === "player")
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -97,13 +110,15 @@ export function JournalEditor(props: { page: JournalPage | null; folders: readon
   const save = () => {
     if (saving) return;
     // A new page whose earlier save went through, unheard, is now an edit of that page.
-    const result = saveDraft(props.page ?? live ?? null, draft, pageId, live ?? props.page);
+    const id = props.page?.id ?? newPageRef.current ?? actions.newId();
+    const savedId = () => props.page?.id ?? newPageRef.current ?? id;
+    const result = saveDraft(props.page ?? live ?? null, draft, id, live ?? props.page);
     if (result.kind === "invalid") {
       setProblems(result.problems);
       return;
     }
     if (result.kind === "unchanged") {
-      props.onSaved(pageId);
+      props.onSaved(savedId());
       return;
     }
     setProblems([]);
@@ -118,16 +133,22 @@ export function JournalEditor(props: { page: JournalPage | null; folders: readon
         }
         const outcome = saveAnswer(answer, refusal);
         if (outcome.kind === "saved") {
-          props.onSaved(pageId);
+          props.onSaved(savedId());
           return;
         }
         setState((s) => saveAnswered(s, outcome).state);
+      },
+      // The store gives the page a fresh id where the room would refuse this one (OnRemint), and the editor follows it.
+      onRemint: (ids) => {
+        const next = ids.get(savedId());
+        if (next && !props.page) keepPageId(next);
       },
     });
     if (n === null) {
       setState((s) => saveNotSent(s, "The page could not be sent. Your text is still here."));
       return;
     }
+    if (!props.page && newPageRef.current === null) keepPageId(id);
     setState(saveSent);
   };
 

@@ -3,7 +3,7 @@ import { roomHandoutPages } from "#shared/handouts.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { ClientOp, OpOf } from "#shared/protocol.ts";
 import type { AssetRow, UploadOptions } from "../../../lib/api.ts";
-import type { OnAnswer, OpAnswer, OpRefusal, RoomView, UnknownCause } from "../../../state/types.ts";
+import type { OnAnswer, OnRemint, OpAnswer, OpRefusal, RoomView, UnknownCause } from "../../../state/types.ts";
 import type { Encoded } from "./encode.ts";
 import {
   CANCEL_GRACE_MS,
@@ -89,7 +89,7 @@ export type JobDeps = {
   remember(row: AssetRow): void;
   deleteImages(ids: readonly string[]): Promise<Deleted>;
   listAssets(): Promise<readonly AssetRow[]>;
-  dispatch(op: ClientOp, opts: { quiet: true; onAnswer: OnAnswer }): number | null;
+  dispatch(op: ClientOp, opts: { quiet: true; onAnswer: OnAnswer; onRemint?: OnRemint }): number | null;
   room(): RoomRead;
   subscribe(listener: () => void): () => void;
   storage: LedgerStorage | null;
@@ -632,7 +632,15 @@ export class JobRunner implements JobControl {
       doc: { id: job.docId, title: job.title.trim(), pages: job.pages.map(({ assetId, width, height }) => ({ assetId, width, height })) },
     };
     this.#set({ phase: { k: "saving" } });
-    const n = this.#deps.dispatch(op, { quiet: true, onAnswer: this.#answer((answer, refusal, settled) => this.#saveAnswered(run, answer, refusal, settled)) });
+    // The store may give the handout a fresh id on the way (docs/design/design-v1-player-limits.md 3.4): the job, and
+    // the ledger a reload reads, follow it, so the check for a saved handout looks under the id it was saved by.
+    const onRemint: OnRemint = (ids) => {
+      const docId = ids.get(this.#job.docId);
+      if (docId === undefined) return;
+      this.#set({ docId });
+      this.#writeLedger();
+    };
+    const n = this.#deps.dispatch(op, { quiet: true, onAnswer: this.#answer((answer, refusal, settled) => this.#saveAnswered(run, answer, refusal, settled)), onRemint });
     if (n === null) this.#saveFailed(run, "The handout could not be sent.", false);
   }
 
@@ -675,8 +683,9 @@ export class JobRunner implements JobControl {
     if (this.#disposed) return;
     if (answer === "taken") return this.#savedOrCancel(true);
     if (answer === "refused") {
-      // A create sent again that had applied after all is refused as an id in use: the check finds it.
-      if (this.#resent && refusal?.code === "invalid" && this.#docSaved()) return this.#savedOrCancel(true);
+      // A create sent again that had applied after all is refused as an id in use, `gone` since ids are recorded
+      // (docs/design/design-v1-player-limits.md 3.4) and `invalid` before: the check finds it.
+      if (this.#resent && (refusal?.code === "invalid" || refusal?.code === "gone") && this.#docSaved()) return this.#savedOrCancel(true);
       if (this.#cancelling) return this.#finishCancel(false);
       return this.#saveFailed(run, refusal?.text ?? "The handout was not saved.", refusal?.code === "gone");
     }

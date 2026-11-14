@@ -137,7 +137,11 @@ export function draftOf(playlist: Playlist): MakerDraft {
   return { ...fields, playlistId: playlist.id, base: { ...fields, sounds: [...playlist.sounds], rev: playlist.rev }, tab: "tracks" };
 }
 
-/** A new playlist's draft, its id chosen now so a Create sent twice makes one, with a first track when it starts from one (New playlist with this track). */
+/**
+ * A new playlist's draft, with a first track when it starts from one (New
+ * playlist with this track). `playlistId` is "" until the maker's first
+ * save makes one and keeps it, so a Create sent twice makes one.
+ */
 export function newDraft(playlistId: string, seed?: SoundId): MakerDraft {
   return { name: "", sounds: seed ? [seed] : [], shuffle: false, repeat: "all", fade: 5, playlistId, base: null, tab: "tracks" };
 }

@@ -261,16 +261,30 @@ export function placeDraft(env: AreaEnv): void {
   if (!draft) return;
   const t = currentTemplate(env, draft);
   if (!t) return;
-  const template = templateInput(t, {
+  // The area takes its id as it is placed: the draft's names only its preview, and a draft can be aimed far longer
+  // than the room takes a new id after its making (docs/design/design-v1-player-limits.md 3.4).
+  const id = env.actions.newId();
+  const template = templateInput({ ...t, id }, {
     sceneId: env.scene.id,
     ownerId: env.youId,
     color: draft.color,
     spell: draft.spell,
     visibility: env.role === "dm" ? draft.visibility : "all",
   });
-  if (env.actions.dispatch({ t: "template.create", template }) === null) return;
+  let selected = id;
+  const placed = env.actions.dispatch({ t: "template.create", template }, {
+    onRemint: (ids) => {
+      const was = selected;
+      const next = ids.get(was);
+      if (next === undefined) return;
+      selected = next;
+      // The list of who is in the area follows the area, unless another was picked meanwhile.
+      if (env.area.store.getState().selectedId === was) env.area.store.setState({ selectedId: next });
+    },
+  });
+  if (placed === null) return;
   if (shared) env.actions.sendEph({ k: "aoeEnd", id: draft.id });
-  env.area.store.setState({ draft: null, shared: false, selectedId: t.id, live: null, query: "", pickCaster: false });
+  env.area.store.setState({ draft: null, shared: false, selectedId: id, live: null, query: "", pickCaster: false });
 }
 
 export function cancelDraft(env: AreaEnv): void {
