@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
@@ -11,7 +11,7 @@ import { Cluster, DatabaseFailed, uncertainWords, type ProcessLookup } from "./p
  * The cluster's own rules, with stand-ins for PostgreSQL's programs and for
  * the process readings (postgres.itest.ts runs the real ones): which
  * postmaster.pid may go, a stepped clock, the postmaster this process
- * started.
+ * started, and an init cut off before the app's settings.
  */
 
 const platform = Platform.parse(process.platform);
@@ -58,8 +58,8 @@ function lookup(over: Partial<ProcessLookup> & { offsetMs?: number } = {}): Proc
   };
 }
 
-function cluster(dir: string, bin: string, proc: ProcessLookup): Cluster {
-  return new Cluster({ binDir: bin, pgData: join(dir, "postgres"), logFile: join(dir, "postgres.log"), password: "pw", platform, pickPort: async () => 41659, proc });
+function cluster(dir: string, bin: string, proc: ProcessLookup, extra: { afterInitdb?: () => Promise<void> } = {}): Cluster {
+  return new Cluster({ binDir: bin, pgData: join(dir, "postgres"), logFile: join(dir, "postgres.log"), password: "pw", platform, pickPort: async () => 41659, proc, ...extra });
 }
 
 /** A postmaster.pid naming `pid`, written at `startedSec`. */
@@ -132,5 +132,33 @@ describe("the postmaster this process started", { skip: posixOnly }, () => {
     stamp = 9999;
     await c.stop();
     assert.deepEqual(await calls(), ["pg_ctl start"]);
+  });
+});
+
+describe("initdb", { skip: posixOnly }, () => {
+  test("an init cut off after PG_VERSION and before the app's settings leaves no postgres/, and the next one makes it whole", async () => {
+    const dir = await folder();
+    const { bin } = await programs(dir);
+    const cut = cluster(dir, bin, lookup(), {
+      afterInitdb: async () => {
+        throw new Error("killed");
+      },
+    });
+    assert.equal(cut.needsInit(), true);
+    await assert.rejects(cut.init(), /killed/);
+    assert.equal(existsSync(join(dir, "postgres")), false, "no folder passes for a cluster");
+    const staging = (await readdir(dir)).filter((n) => n.startsWith("postgres.init-"));
+    assert.equal(staging.length, 1);
+    assert.ok(existsSync(join(dir, staging[0]!, "PG_VERSION")), "initdb had written PG_VERSION");
+    assert.equal(cut.needsInit(), true, "the next start makes the cluster again");
+
+    const whole = cluster(dir, bin, lookup());
+    await whole.init();
+    assert.equal(whole.needsInit(), false);
+    assert.match(await readFile(join(dir, "postgres", "pg_hba.conf"), "utf8"), /^# Written by RaccoonVTT\./);
+    assert.match(await readFile(join(dir, "postgres", "postgresql.conf"), "utf8"), /listen_addresses = '127\.0\.0\.1'\nunix_socket_directories = ''/);
+    const names = await readdir(dir);
+    assert.deepEqual(names.filter((n) => n.startsWith("postgres.init-")), [], "the cut-off staging folder was moved aside");
+    assert.equal(names.filter((n) => n.startsWith("postgres.incomplete-")).length, 1, "and never deleted");
   });
 });

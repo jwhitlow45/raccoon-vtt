@@ -1,10 +1,11 @@
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { appendFile, open, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { appendFile, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { Platform } from "../contract.ts";
+import { syncDir, syncFile } from "./durable.ts";
 import { rotateIfLarge } from "./logs.ts";
 import { loopbackPort } from "./ports.ts";
 import { isAlive, processProgram, processStamp, processStart } from "./processInfo.ts";
@@ -74,6 +75,8 @@ export type ClusterOptions = {
   pickPort?: () => Promise<number>;
   /** Tests only: in place of processInfo.ts's readings. */
   proc?: ProcessLookup;
+  /** Tests only: runs between initdb and the app's own settings, where a test cuts the init off. */
+  afterInitdb?: () => Promise<void>;
 };
 
 /**
@@ -128,25 +131,41 @@ export class Cluster {
     }
   }
 
+  /** postgres/ appears only whole, so a folder without one has no cluster yet. */
   needsInit(): boolean {
-    return !existsSync(join(this.opts.pgData, "PG_VERSION"));
+    return !existsSync(this.opts.pgData);
+  }
+
+  /** A folder an earlier start left, renamed beside it, never deleted. */
+  private async moveAside(path: string): Promise<void> {
+    let aside = `${this.opts.pgData}.incomplete-${Date.now()}`;
+    while (existsSync(aside)) aside = `${this.opts.pgData}.incomplete-${Date.now()}-${randomBytes(3).toString("hex")}`;
+    await rename(path, aside);
   }
 
   /**
    * initdb with the C locale and the builtin C.UTF-8 provider, so neither
-   * text order nor messages depend on the computer's locale or ICU. A
-   * folder left by an initdb that was cut off is moved aside, never
-   * deleted, since initdb needs an empty one.
+   * text order nor messages depend on the computer's locale or ICU. It runs
+   * in a staging folder (postgres.init-<random>), which gets the app's own
+   * pg_hba.conf and settings, is flushed, and only then is renamed to
+   * postgres/: initdb writes PG_VERSION first, so a cut-off init or one cut
+   * off before the app's settings would otherwise pass for a cluster, and
+   * one on initdb's defaults would listen on a socket and ::1. Folders a
+   * cut-off init left are moved aside, never deleted.
    */
   async init(): Promise<void> {
-    if (existsSync(this.opts.pgData)) await rename(this.opts.pgData, `${this.opts.pgData}.incomplete-${Date.now()}`);
+    const parent = dirname(this.opts.pgData);
+    const stagingPrefix = `${basename(this.opts.pgData)}.init-`;
+    for (const name of await readdir(parent)) if (name.startsWith(stagingPrefix)) await this.moveAside(join(parent, name));
+    if (existsSync(this.opts.pgData)) await this.moveAside(this.opts.pgData);
+    const staging = join(parent, `${stagingPrefix}${randomBytes(6).toString("hex")}`);
     const pwfile = `${this.opts.pgData}-pw-${randomBytes(6).toString("hex")}`;
     await writeFile(pwfile, `${this.opts.password}\n`, { mode: 0o600 });
     try {
       await run(
         this.program("initdb"),
         [
-          `--pgdata=${this.opts.pgData}`,
+          `--pgdata=${staging}`,
           `--username=${USER}`,
           `--pwfile=${pwfile}`,
           "--auth=scram-sha-256",
@@ -164,8 +183,14 @@ export class Cluster {
     } finally {
       await rm(pwfile, { force: true });
     }
-    await writeFile(join(this.opts.pgData, "pg_hba.conf"), HBA);
-    await appendFile(join(this.opts.pgData, "postgresql.conf"), CONF);
+    await this.opts.afterInitdb?.();
+    await writeFile(join(staging, "pg_hba.conf"), HBA);
+    await appendFile(join(staging, "postgresql.conf"), CONF);
+    await syncFile(join(staging, "pg_hba.conf"));
+    await syncFile(join(staging, "postgresql.conf"));
+    await syncDir(staging);
+    await rename(staging, this.opts.pgData);
+    await syncDir(parent);
   }
 
   /**
