@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page, type Request } from "playwright-core";
+import pg from "pg";
 import WebSocket from "ws";
 import type { RoomState } from "#shared/model.ts";
 import { applyChanges, type ProjectedState } from "#shared/project.ts";
@@ -75,6 +76,16 @@ export async function startServer(opts: ServerOptions): Promise<Server> {
       throw new Error(`The server did not answer /healthz within 20 s:\n${out}`);
     }
     await sleep(100);
+  }
+
+  // Module-level ids are made before a fresh database's first room load would set the id cutover, so the cutover is set
+  // far in the past, as for a server that has run this build for a long time.
+  const seed = new pg.Client({ connectionString: opts.databaseUrl });
+  await seed.connect();
+  try {
+    await seed.query("insert into server_facts (one, ids_since) values (true, '2000-01-01T00:00:00Z') on conflict (one) do nothing");
+  } finally {
+    await seed.end();
   }
 
   return {
