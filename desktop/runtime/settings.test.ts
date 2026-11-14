@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -61,5 +61,26 @@ test("a log rotates at its size with 5 kept, and its last line reads as words", 
   await assert.rejects(stat(rotatedPath(path, 5)));
   assert.equal(await lastLogLine(path), "listen failed: EADDRINUSE");
   assert.equal(await lastLogLine(join(dir, "none.log")), "no log was written");
+  await rm(dir, { recursive: true });
+});
+
+test("a log line that cannot be written or rotated is dropped, never thrown, and the next one is written once it can be", async () => {
+  const dir = await folder();
+  // A file where the log's folder should be: the folder can't be made.
+  await writeFile(join(dir, "logs"), "not a folder");
+  const nowhere = new RotatingLog(join(dir, "logs", "server.log"));
+  assert.doesNotThrow(() => nowhere.line("lost"));
+  nowhere.close();
+
+  // A folder where the first rotated file goes: the rotation can't rename onto it.
+  const path = join(dir, "server.log");
+  await mkdir(join(rotatedPath(path, 1), "held"), { recursive: true });
+  const log = new RotatingLog(path, 30, 5);
+  log.line("first line, long enough");
+  assert.doesNotThrow(() => log.line("second line, past the size"));
+  await rm(rotatedPath(path, 1), { recursive: true });
+  log.line("third line, after the way is clear");
+  log.close();
+  assert.equal(await lastLogLine(path), "third line, after the way is clear");
   await rm(dir, { recursive: true });
 });
