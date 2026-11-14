@@ -64,10 +64,12 @@ export type WsOptions = {
 export const MAX_FRAME_BYTES = 64 * 1024;
 /**
  * The send buffer a socket may hold for `bufferedHoldMs` before it is
- * closed: 1 MiB over the largest DM snapshot (shared/limits.ts HARD), so
+ * closed: the bound on the largest DM snapshot, the room's stored bound
+ * (shared/limits.ts HARD), and 1 MiB more, rounded up to a whole MiB, so
  * one snapshot alone never closes a slow socket. A room at the far line
  * sends its DM the scene, the companion stat blocks beside it and the DM's
- * own log, about 12.3 MiB (server/rooms/limits.bounds.test.ts).
+ * own log, about 12.3 MiB in the full test room, below that bound
+ * (server/rooms/limits.bounds.test.ts).
  */
 export const DEFAULT_BUFFERED_LIMIT = HARD.sendBufferBytes;
 

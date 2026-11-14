@@ -227,8 +227,9 @@ export type SnapshotBudgetLimits = {
  * MiB since companion stat blocks ride on top of the 3 MiB for everything
  * else (docs/design/design-v1-companion-stat-blocks.md 3.4). Players' own
  * things sit outside those limits, so a room at the far line sends its DM
- * about 12.3 MiB (docs/design/design-v1-player-limits.md 8), and the
- * budgets hold four and nine of those. An address counts requests alone.
+ * about 12.3 MiB (docs/design/design-v1-player-limits.md 8), so a DM
+ * switching between scenes at their size line meets the session's budget
+ * after about four snapshots a minute. An address counts requests alone.
  */
 export const DEFAULT_SNAPSHOT_BUDGET: SnapshotBudgetLimits = {
   windowMs: 60_000,

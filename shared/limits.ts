@@ -1479,7 +1479,7 @@ export const HARD = {
   storedBytes: 15.5 * MiB,
   /** The largest room file an import takes (server/rooms/importRoom.ts). */
   roomJsonBytes: 16 * MiB,
-  /** A socket's send buffer: the largest snapshot and 1 MiB (server/rooms/ws.ts). */
+  /** A socket's send buffer (server/rooms/ws.ts): the stored bound, which a DM snapshot stays under, and 1 MiB more, rounded up to a whole MiB. The fixture's DM snapshot measures 12.33 MiB, below it. */
   sendBufferBytes: 17 * MiB,
   /** Rows of the fight, and every list keyed by a row. */
   rows: FAR.rows,

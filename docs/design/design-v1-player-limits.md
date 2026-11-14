@@ -221,7 +221,7 @@ Measured on the full fixture (`fullRoom` and `measureBounds` in server/rooms/lim
 | Outside the measure | log rings that only some viewers read (2,949,120 bytes), the record of a turn's reminders (1,490,944), save outcomes (100 KiB), and a deletion's bookkeeping: a turn start and line for each row a delete ends, at most 100 for a group delete | about 4.3 MiB |
 | `HARD.storedBytes` | the two above | 15.5 MiB |
 | `HARD.roomJsonBytes`, the import's room file cap | stored bytes and the remap's growth | 16 MiB |
-| `HARD.sendBufferBytes`, a socket's send buffer (server/rooms/ws.ts) | the largest DM snapshot and 1 MiB | 17 MiB (was 7) |
+| `HARD.sendBufferBytes`, a socket's send buffer (server/rooms/ws.ts) | the 15.5 MiB stored bound, which a DM snapshot stays under, and 1 MiB more, rounded up to a whole MiB. The fixture's DM snapshot measures 12.3 MiB, below it | 17 MiB (was 7) |
 | Rows, and every list keyed by a row (server/rooms/stateSchema.ts) | far rows | 4,000 |
 | Conditions on one creature | 6.1 | 65 |
 | A group save's selection, a trap's source | far tokens | 2,150 (`HARD.groupSaveTokens`) |
