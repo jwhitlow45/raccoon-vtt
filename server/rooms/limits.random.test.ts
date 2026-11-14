@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { LIMITS, SEAT_FULL, seatCounts, type SeatCounts } from "#shared/limits.ts";
+import { HARD, LIMITS, SEAT_FULL, seatCounts, serializedBytes, type SeatCounts } from "#shared/limits.ts";
 import type { InitEntry, RoomState, Token } from "#shared/model.ts";
 import { projectState, seatView, type ProjectedState } from "#shared/project.ts";
 import { mintedIds, opSchema, type Op } from "#shared/protocol.ts";
 import { APART, AYLA, BREE, dmAreas, dmDrawings, dmTokens, idAt, limitsRoom, OGRE, STAIRS_DOWN, STAIRS_UP, withUpper } from "#shared/privTestutil.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor, AT, character, chance, DM, entry, int, P1, P2, pick, rng, token } from "#shared/testutil.ts";
-import { answer, Mint, openTwins, same, together, type Answer } from "./limitsTwinTesting.ts";
+import { fullRoom } from "./limitsTesting.ts";
+import { answer, joinOp, Mint, openTwins, same, together, type Answer } from "./limitsTwinTesting.ts";
+import { ScopeClient, StoredRoomDb, storedActor, until } from "./undoScopeTesting.ts";
 import { each, viewOf, type Who as Member } from "./numberingTesting.ts";
 
 /**
@@ -355,5 +357,53 @@ describe("random twin runs answer P1 alike", () => {
         }
       });
     }
+  });
+});
+
+/*
+ * I5: on the full room at the far lines (limitsTesting.ts fullRoom, a
+ * roster one short of full so a join fits), one op of each kind a player
+ * sends, each answered by the room, with the stored growth it left. Every
+ * committed state stays within HARD.storedBytes, the join included.
+ */
+describe("the full room stays within its stored bound", () => {
+  test("I5: each kind of player op on the full room leaves the stored state within HARD.storedBytes, a join included", async (t) => {
+    const full = fullRoom({ members: LIMITS.membersPerRoom - 1 });
+    const clock = { now: Date.parse(AT) };
+    const { actor: room } = await storedActor(t, new StoredRoomDb(full.state), { idGate: true, now: () => clock.now });
+    const player = full.players[0]!;
+    const character = Object.values(full.state.characters).find((c) => c.ownerIds.includes(player))!;
+    const own = Object.values(full.state.tokens).find((x) => "ref" in x.actor && x.actor.ref === character.id)!;
+    const sender = await ScopeClient.open(room, full.state.members[player]!, "player");
+    const ids = rng(5_005);
+    const mint = () => idAt(ids, clock.now);
+    const ops: Array<[string, () => Op]> = [
+      ["template.create", () => ({ t: "template.create", template: { id: mint(), sceneId: full.sceneId, shape: "sphere", size: 5, origin: { x: own.x + 0.5, y: own.y + 0.5, z: 0 }, yaw: 0, includeOrigin: true, color: "#ff8800", ownerId: player, visibility: "all" } }) as Op],
+      ["drawing.create", () => ({ t: "drawing.create", drawing: { id: mint(), sceneId: full.sceneId, kind: "line", points: [own.x, own.y, own.x + 1, own.y], style: { stroke: "#ffffff", width: 2, opacity: 1 }, ownerId: player, visibility: "all" } }) as Op],
+      ["token.create", () => ({ t: "token.create", token: { id: mint(), sceneId: full.sceneId, kind: "npc", name: "Wolf", size: "medium", layer: "token", x: own.x + 1, y: own.y, actor: { inline: actor({ dmNotes: "" }) }, companion: { of: character.id, turn: "shared" } } }) as Op],
+      ["encounter.add", () => ({ t: "encounter.add", entries: [{ id: mint(), tokenId: own.id }] }) as Op],
+      ["cast.ask", () => ({ t: "cast.ask", cast: { id: mint(), caster: own.id, sceneId: full.sceneId, spell: "Moonbeam", targets: [own.id] } }) as Op],
+      ["actor.effect.add", () => ({ t: "actor.effect.add", target: { characterId: character.id }, effect: { id: mint(), key: "blessed" } }) as Op],
+      ["character.update", () => ({ t: "character.update", characterId: character.id, patch: { actor: { notes: "€".repeat(200) } } }) as Op],
+      ["token.move", () => ({ t: "token.move", tokenId: own.id, x: own.x, y: own.y + 1 }) as Op],
+      ["actor.hp", () => ({ t: "actor.hp", target: { characterId: character.id }, change: { kind: "damage", amount: 3 } }) as Op],
+      ["dice.roll", () => ({ t: "dice.roll", tag: mint(), to: "all", rolls: [{ formula: "1d20+5", label: "Check" }] }) as Op],
+      ["log.chat", () => ({ t: "log.chat", text: "€".repeat(500) })],
+    ];
+    const grew: string[] = [];
+    let before = serializedBytes(room.committed.state);
+    for (const [kind, op] of ops) {
+      clock.now += 1_000;
+      const event = await sender.send(op());
+      const refusal = event.rejects?.find((r) => r.n === sender.n);
+      const after = serializedBytes(room.committed.state);
+      grew.push(`${kind}: ${refusal ? `${refusal.code} (${refusal.message})` : "taken"}, ${after - before} bytes`);
+      assert.ok(after <= HARD.storedBytes, `I5: after ${kind} the stored state is ${after} bytes, within ${HARD.storedBytes}`);
+      before = after;
+    }
+    t.diagnostic(`I5 growth on the full room: ${grew.join("; ")}`);
+    await room.sys(joinOp(idAt(ids, clock.now), "Wren"));
+    await until(() => (Object.values(room.committed.state.members).some((m) => m.name === "Wren") ? true : undefined), "the join");
+    assert.ok(serializedBytes(room.committed.state) <= HARD.storedBytes, "I5: after the join the stored state is within HARD.storedBytes");
   });
 });
