@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { namedId, ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Deleting characters (features section 15), on the real server serving
@@ -345,13 +345,13 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     await ops.send({
       t: "encounter.start",
       entries: [
-        { id: "e-bree", tokenId: run.breeToken, value: 18 },
-        { id: "e-cyra", tokenId: run.cyraToken, value: 12 },
-        { id: "e-gob", tokenId: run.goblin, value: 8 },
+        { id: namedId("e-bree"), tokenId: run.breeToken, value: 18 },
+        { id: namedId("e-cyra"), tokenId: run.cyraToken, value: 12 },
+        { id: namedId("e-gob"), tokenId: run.goblin, value: 8 },
       ],
     });
     await ops.send({ t: "encounter.next" });
-    await waitFor("the fight in the DM's view, Bree acting", () => (dmSocket.state?.encounter?.activeEntryId === "e-bree" ? true : null));
+    await waitFor("the fight in the DM's view, Bree acting", () => (dmSocket.state?.encounter?.activeEntryId === namedId("e-bree") ? true : null));
 
     // A new device is answered 403 by GET /me before it joins, which Chrome logs. Pat joined by request, so this is only in case.
     patConsole.allow = [/status of 403 .*\/api\/rooms\/[0-9A-Z]{8}\/me\)$/];
@@ -432,9 +432,9 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     for (const id of [run.breeToken, run.breeOnTheRoad, run.wisp]) assert.equal(state.tokens[id], undefined, `token ${id} went with Bree`);
     assert.deepEqual(
       state.encounter?.entries.map((e) => e.id),
-      ["e-cyra", "e-gob"],
+      [namedId("e-cyra"), namedId("e-gob")],
     );
-    assert.equal(state.encounter?.activeEntryId, "e-cyra", "the turn passed on");
+    assert.equal(state.encounter?.activeEntryId, namedId("e-cyra"), "the turn passed on");
     await panel.getByText("Tap a token to see it here.").waitFor();
     // Bree's page went with Bree, back to the list. Pat's list in order: Bree, the unbroken long name, Cyra, ... So the next row is the long name's.
     await focusLands(pat, run.unbroken, "focus on the next row after the late answer");
@@ -645,7 +645,7 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
 
   test("s2-ch-a. Cyra's page in the fight: Combat runs Hit Points, Conditions, Uses with what it is for and Add, Reaction and Rest, for the DM and for Pat, whose Reaction used reaches the row and the folded summary; it lines up at 320 x 568 and 390 x 844 at 130% and 1280 x 800 (docs/design/design-v1-token-sections.md 3)", async () => {
     if (!dmSocket.state?.encounter?.entries.some((e) => e.tokenId === run.cyraToken)) {
-      await ops.send({ t: "encounter.start", entries: [{ id: "e-cyra-s2", tokenId: run.cyraToken, value: 12 }] });
+      await ops.send({ t: "encounter.start", entries: [{ id: namedId("e-cyra-s2"), tokenId: run.cyraToken, value: 12 }] });
     }
     const entry = await waitFor("Cyra's row", () => dmSocket.state?.encounter?.entries.find((e) => e.tokenId === run.cyraToken));
     const sectionIn = (scope: Locator, heading: string) => scope.locator(`xpath=.//section[*[self::h3 or self::h4][normalize-space()="${heading}"] or *[not(self::section)]/*[self::h3 or self::h4][normalize-space()="${heading}"]]`);

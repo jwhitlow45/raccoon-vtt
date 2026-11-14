@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { Effect } from "#shared/model.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { namedId, ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * Time spans on effects (docs/design/design-v1-calendar-c2c3.md 3), on the
@@ -288,9 +288,9 @@ describe("time spans on effects", () => {
   });
 
   test("tm-3. in a fight a 1 minute span ends as round 11 starts, and Previous brings it back", async () => {
-    await ops.send({ t: "encounter.start", entries: [{ id: "e-bree", characterId: run.bree, value: 20 }, { id: "e-thorn", characterId: run.thorn, value: 10 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: namedId("e-bree"), characterId: run.bree, value: 20 }, { id: namedId("e-thorn"), characterId: run.thorn, value: 10 }] });
     await ops.send({ t: "encounter.next" });
-    await waitFor("Bree acting in round 1", () => (dmSocket.state?.encounter?.activeEntryId === "e-bree" ? true : null));
+    await waitFor("Bree acting in round 1", () => (dmSocket.state?.encounter?.activeEntryId === namedId("e-bree") ? true : null));
 
     const panel = await openCard(dm, run.bree);
     const section = conditions(panel);
@@ -302,7 +302,7 @@ describe("time spans on effects", () => {
 
     // Two rows, so each round takes two turns: 18 more reach Bree in round 10, and two more start round 11.
     for (let i = 0; i < 18; i++) await ops.send({ t: "encounter.next" });
-    await waitFor("round 10 with Bree acting", () => (dmSocket.state?.encounter?.round === 10 && dmSocket.state.encounter.activeEntryId === "e-bree" ? true : null));
+    await waitFor("round 10 with Bree acting", () => (dmSocket.state?.encounter?.round === 10 && dmSocket.state.encounter.activeEntryId === namedId("e-bree") ? true : null));
     assert.equal(effectsOf(dmSocket, run.bree).length, 1, "still running in round 10");
     await ops.send({ t: "encounter.next" });
     await ops.send({ t: "encounter.next" });

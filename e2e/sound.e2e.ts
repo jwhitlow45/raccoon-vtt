@@ -6,7 +6,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { openGroup } from "./helpers/groups.ts";
-import { ConsoleWatch, OpSocket, openSideTab, Shots, sideTabName, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { namedId, ConsoleWatch, OpSocket, openSideTab, Shots, sideTabName, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { addSound, errors, inStep, IPHONE_AUDIO, musicVoice, readTap, roomSoundScript, SOUND_TAP, SOUND_TEST_FLAG, soundProbe, soundSays, tapGlitches, toneSound, uploadSound, type SoundProbe } from "./soundRoom.ts";
 
 /**
@@ -66,7 +66,7 @@ const run = {
   password: "",
   patId: "",
   runs: 0,
-  ids: { tavern: "snd-tavern", road: "snd-road", crypt: "snd-crypt", rain: "snd-rain", thunder: "snd-thunder", bell: "snd-bell" },
+  ids: { tavern: namedId("snd-tavern"), road: namedId("snd-road"), crypt: namedId("snd-crypt"), rain: namedId("snd-rain"), thunder: namedId("snd-thunder"), bell: namedId("snd-bell") },
   assets: {} as Record<string, string>,
 };
 
@@ -388,9 +388,9 @@ describe("synced music and sound", { concurrency: false }, () => {
     assert.ok(gap <= START_MS, `resumed within a second of each other (${gap.toFixed(0)} ms)`);
 
     // Forest road then Tavern night with a 5 s crossfade: revealed 20 s before Tavern's start, crossed from 26 s, promoted at its end.
-    await ops.send({ t: "playlist.create", id: "pl-road", name: "The road", sounds: [run.ids.road, run.ids.tavern], repeat: "off", fade: 5 });
+    await ops.send({ t: "playlist.create", id: namedId("pl-road"), name: "The road", sounds: [run.ids.road, run.ids.tavern], repeat: "off", fade: 5 });
     const startedAt = Date.now();
-    await ops.send({ t: "music.play", run: runId(), playlistId: "pl-road", order: [run.ids.road, run.ids.tavern], index: 0, repeat: "off", fade: 5 });
+    await ops.send({ t: "music.play", run: runId(), playlistId: namedId("pl-road"), order: [run.ids.road, run.ids.tavern], index: 0, repeat: "off", fade: 5 });
     await soundSays(pat, /^playing music/, 5_000);
     const both = await waitFor(
       "both tracks to sound on Pat's phone in the crossing",
@@ -419,10 +419,10 @@ describe("synced music and sound", { concurrency: false }, () => {
 
   test("sn-3. Pat's socket names no next track before its reveal, and with names shared only the music and loops playing now, never an effect", async () => {
     const before = patSocket.received.length;
-    await ops.send({ t: "playlist.create", id: "pl-crypt", name: "Below", sounds: [run.ids.road, run.ids.crypt], repeat: "off", fade: 2 });
+    await ops.send({ t: "playlist.create", id: namedId("pl-crypt"), name: "Below", sounds: [run.ids.road, run.ids.crypt], repeat: "off", fade: 2 });
     const startedAt = Date.now();
-    await ops.send({ t: "music.play", run: runId(), playlistId: "pl-crypt", order: [run.ids.road, run.ids.crypt], index: 0, repeat: "off", fade: 2 });
-    await ops.send({ t: "loop.start", id: "loop-rain", soundId: run.ids.rain, volume: 70 });
+    await ops.send({ t: "music.play", run: runId(), playlistId: namedId("pl-crypt"), order: [run.ids.road, run.ids.crypt], index: 0, repeat: "off", fade: 2 });
+    await ops.send({ t: "loop.start", id: namedId("loop-rain"), soundId: run.ids.rain, volume: 70 });
     await soundSays(pat, /^playing music loops:1/, 6_000);
     // Forest road is 31 s with a 2 s crossfade: the Crypt hymn starts at 29 s, revealed at 9 s.
     await sleep(Math.max(0, 7_000 - (Date.now() - startedAt)));
@@ -437,14 +437,14 @@ describe("synced music and sound", { concurrency: false }, () => {
 
     const named = patSocket.received.length;
     await ops.send({ t: "room.update", settings: { soundNames: true } });
-    await ops.send({ t: "effect.fire", id: "fx-names", soundId: run.ids.thunder });
+    await ops.send({ t: "effect.fire", id: namedId("fx-names"), soundId: run.ids.thunder });
     await waitFor("the names", () => (patSocket.received.slice(named).some((f) => f.includes("Forest road")) ? true : null), 5_000);
     await sleep(800);
     const withNames = patSocket.received.slice(named).join("\n");
     assert.ok(withNames.includes("Forest road") && withNames.includes("Rain"), "the music and the loop playing now are named");
     assert.ok(!withNames.includes("Thunder") && !withNames.includes("Crypt hymn") && !withNames.includes("Bell"), "never an effect's name or the next track's");
     await ops.send({ t: "room.update", settings: { soundNames: false } });
-    await ops.send({ t: "loop.stop", id: "loop-rain" });
+    await ops.send({ t: "loop.stop", id: namedId("loop-rain") });
   });
 
   test("sn-4. behind a blackout Pat's phone falls silent and never receives an effect fired there, the DM's page plays on, and Pat comes back in place", async () => {
@@ -455,30 +455,30 @@ describe("synced music and sound", { concurrency: false }, () => {
     await ops.send({ t: "view.blackout", blackout: true });
     await waitFor("Pat's sound to go", async () => ((await soundProbe(pat)).data === "playing" ? true : null), 5_000);
     await soundSays(dm, /^playing music/, 2_000);
-    await ops.send({ t: "effect.fire", id: "fx-dark", soundId: run.ids.bell });
-    await waitFor("the DM's page to start the bell", async () => ((await soundProbe(dm)).effects.started.some((e) => e.id === "fx-dark") ? true : null), 5_000);
+    await ops.send({ t: "effect.fire", id: namedId("fx-dark"), soundId: run.ids.bell });
+    await waitFor("the DM's page to start the bell", async () => ((await soundProbe(dm)).effects.started.some((e) => e.id === namedId("fx-dark")) ? true : null), 5_000);
     await sleep(1_000);
-    assert.ok(!patSocket.received.slice(before).some((f) => f.includes("fx-dark")), "the effect never reaches Pat");
-    assert.ok(!(await soundProbe(pat)).effects.started.some((e) => e.id === "fx-dark"));
+    assert.ok(!patSocket.received.slice(before).some((f) => f.includes(namedId("fx-dark"))), "the effect never reaches Pat");
+    assert.ok(!(await soundProbe(pat)).effects.started.some((e) => e.id === namedId("fx-dark")));
     await ops.send({ t: "view.blackout", blackout: false });
     await soundSays(pat, /^playing music/, 6_000);
     await inStep(pat, START_MS, 6_000);
     const { gap } = await placesTogether(dm, pat);
     assert.ok(gap <= START_MS, `back in place with the DM's page (${gap.toFixed(0)} ms)`);
-    assert.ok(!(await soundProbe(pat)).effects.started.some((e) => e.id === "fx-dark"), "and never later");
+    assert.ok(!(await soundProbe(pat)).effects.started.some((e) => e.id === namedId("fx-dark")), "and never later");
   });
 
   test("sn-5. Thunder plays on while nine more effects fire 200 ms apart, and after Stop all nothing starts, a phone's late decode included", async () => {
-    await ops.send({ t: "effect.fire", id: "fx-thunder", soundId: run.ids.thunder });
+    await ops.send({ t: "effect.fire", id: namedId("fx-thunder"), soundId: run.ids.thunder });
     for (let i = 0; i < 9; i++) {
       await sleep(200);
       await ops.send({ t: "effect.fire", id: `fx-b${i}`, builtin: (["click", "rumble", "crash", "whoosh", "hiss"] as const)[i % 5] });
     }
     await sleep(1_500);
     const mid = await soundProbe(pat);
-    assert.equal(mid.effects.started.filter((e) => e.id === "fx-thunder").length, 1, "Thunder started once");
+    assert.equal(mid.effects.started.filter((e) => e.id === namedId("fx-thunder")).length, 1, "Thunder started once");
     assert.ok(mid.effects.playing >= 1, "Thunder plays on, kept while it sounds");
-    assert.ok(patSocket.state?.playing?.effects.some((e) => e.id === "fx-thunder"), "its entry is kept past the newest 8");
+    assert.ok(patSocket.state?.playing?.effects.some((e) => e.id === namedId("fx-thunder")), "its entry is kept past the newest 8");
 
     // The bell's file answers late on Pat's phone, so Stop all comes while it decodes.
     await pat.route(`**/${run.assets[run.ids.bell]}/**`, async (route) => {
@@ -486,7 +486,7 @@ describe("synced music and sound", { concurrency: false }, () => {
       await route.continue();
     });
     try {
-      await ops.send({ t: "effect.fire", id: "fx-late", soundId: run.ids.bell });
+      await ops.send({ t: "effect.fire", id: namedId("fx-late"), soundId: run.ids.bell });
       await sleep(400);
       await ops.send({ t: "sound.stopAll" });
       await waitFor("everything to stop on Pat's phone", async () => {
@@ -495,7 +495,7 @@ describe("synced music and sound", { concurrency: false }, () => {
       }, 5_000);
       await sleep(3_000);
       const after = await soundProbe(pat);
-      assert.ok(!after.effects.started.some((e) => e.id === "fx-late"), "the late decode starts nothing");
+      assert.ok(!after.effects.started.some((e) => e.id === namedId("fx-late")), "the late decode starts nothing");
       assert.equal(after.effects.playing, 0);
     } finally {
       await pat.unroute(`**/${run.assets[run.ids.bell]}/**`);
@@ -880,18 +880,18 @@ describe("synced music and sound", { concurrency: false }, () => {
       // A play, a tick, a skip, a loop and an effect send Pat and the display no frame at all.
       const from = { pat: patSocket.received.length, tv: tvSocket.received.length };
       const started = Date.now();
-      await ops.send({ t: "music.play", run: runId(), playlistId: "pl-crypt", order: [run.ids.road, run.ids.crypt], index: 0, repeat: "all", fade: 0 });
+      await ops.send({ t: "music.play", run: runId(), playlistId: namedId("pl-crypt"), order: [run.ids.road, run.ids.crypt], index: 0, repeat: "all", fade: 0 });
       // Forest road is 31 s, so the tick reveals the Crypt hymn to the DM 11 s in.
       await waitFor("the tick's reveal", () => (dmSocket.state?.playing?.music?.next?.soundId === run.ids.crypt ? true : null), 15_000);
       console.log(`sn-10: the reveal ${Date.now() - started} ms in`);
       await ops.send({ t: "music.skip", run: dmSocket.state!.playing!.music!.run });
-      await ops.send({ t: "loop.start", id: "loop-dmonly", soundId: run.ids.rain, volume: 70 });
-      await ops.send({ t: "effect.fire", id: "fx-dmonly", soundId: run.ids.bell });
-      await waitFor("the DM's page to start the bell", async () => ((await soundProbe(dm)).effects.started.some((e) => e.id === "fx-dmonly") ? true : null), 5_000);
+      await ops.send({ t: "loop.start", id: namedId("loop-dmonly"), soundId: run.ids.rain, volume: 70 });
+      await ops.send({ t: "effect.fire", id: namedId("fx-dmonly"), soundId: run.ids.bell });
+      await waitFor("the DM's page to start the bell", async () => ((await soundProbe(dm)).effects.started.some((e) => e.id === namedId("fx-dmonly")) ? true : null), 5_000);
       await sleep(1_500);
       assert.deepEqual(evs(patSocket, from.pat), [], "no frame for Pat");
       assert.deepEqual(evs(tvSocket, from.tv), [], "no frame for the display");
-      assert.ok(dmSocket.state?.playing?.dmEffects?.some((e) => e.id === "fx-dmonly"), "the effect stays the DM's");
+      assert.ok(dmSocket.state?.playing?.dmEffects?.some((e) => e.id === namedId("fx-dmonly")), "the effect stays the DM's");
 
       // Off: Pat joins the music and the loop in place, the display takes this browser's sound back, and Hal and Ivy are asked.
       await ops.send({ t: "room.update", settings: { soundDmOnly: false } });
@@ -903,8 +903,8 @@ describe("synced music and sound", { concurrency: false }, () => {
       assert.ok(gap <= START_MS, `Pat in place with the display (${gap.toFixed(0)} ms)`);
       await askOf(hal).waitFor({ timeout: 5_000 });
       await askOf(ivy).waitFor({ timeout: 5_000 });
-      assert.ok(!(await soundProbe(pat)).effects.started.some((e) => e.id === "fx-dmonly"), "the effect fired while it was on never sounds on Pat's phone");
-      assert.ok(!patSocket.state?.playing?.effects.some((e) => e.id === "fx-dmonly"), "nor reaches it");
+      assert.ok(!(await soundProbe(pat)).effects.started.some((e) => e.id === namedId("fx-dmonly")), "the effect fired while it was on never sounds on Pat's phone");
+      assert.ok(!patSocket.state?.playing?.effects.some((e) => e.id === namedId("fx-dmonly")), "nor reaches it");
       await shots.take(hal, "sn-10-hal-asked-again");
 
       // The same open ask behind a blackout: it leaves unpassed and comes back once the blackout ends.
@@ -915,7 +915,7 @@ describe("synced music and sound", { concurrency: false }, () => {
     } finally {
       await ops.send({ t: "room.update", settings: { soundDmOnly: false } }).catch(() => {});
       await ops.send({ t: "view.blackout", blackout: false }).catch(() => {});
-      await ops.send({ t: "loop.stop", id: "loop-dmonly" }).catch(() => {});
+      await ops.send({ t: "loop.stop", id: namedId("loop-dmonly") }).catch(() => {});
       await tv?.close();
       await halContext.close();
       await ivyContext.close();
@@ -924,7 +924,7 @@ describe("synced music and sound", { concurrency: false }, () => {
 
   test("lp30fix-1. the server restarts while an iPhone's tap has its music and background sound still loading, and once back both play in step with no tap", async () => {
     await playTrack(run.ids.tavern, 0, "all");
-    await ops.send({ t: "loop.start", id: "loop-restart", soundId: run.ids.rain, volume: 70 });
+    await ops.send({ t: "loop.start", id: namedId("loop-restart"), soundId: run.ids.rain, volume: 70 });
     await soundSays(dm, /^playing music loops:1/, 6_000);
     const fayContext = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
     try {
@@ -961,14 +961,14 @@ describe("synced music and sound", { concurrency: false }, () => {
     } finally {
       await fayContext.close();
       // Only a server that came back takes it.
-      await ops.send({ t: "loop.stop", id: "loop-restart" }).catch(() => {});
+      await ops.send({ t: "loop.stop", id: namedId("loop-restart") }).catch(() => {});
     }
   });
 
   // In the quiet room: Gus's page alone plays the tone, into the tap.
   test("sndglitch-1. through a throttled network: once a track plays, nothing seeks it or changes its speed, through wakes, a small slip or a long stall, and the output has no click or dropout", async () => {
     const { room, ops: via } = await quietRoom();
-    const toneId = "snd-tone";
+    const toneId = namedId("snd-tone");
     const asset = await quietTone(via, toneId, "Tone", "music", 60);
     const gusContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, bypassCSP: true });
     try {
@@ -1047,8 +1047,8 @@ describe("synced music and sound", { concurrency: false }, () => {
   // In the quiet room: Hal's page alone plays, into the tap.
   test("sndfade-1. the music fades in over 2 s when it starts and when it resumes, and out over 2 s when it pauses and when the last track ends with nothing after it, as a background sound does", async () => {
     const { room, ops: via } = await quietRoom();
-    const toneId = "snd-tone-short";
-    const loopId = "snd-tone-loop";
+    const toneId = namedId("snd-tone-short");
+    const loopId = namedId("snd-tone-loop");
     await quietTone(via, toneId, "Short tone", "music", 32);
     await quietTone(via, loopId, "Tone loop", "loop", 10);
     const halContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, bypassCSP: true });
@@ -1075,9 +1075,9 @@ describe("synced music and sound", { concurrency: false }, () => {
       await sleep(1_000);
       // A background sound already fades in and out over 2 s: checked on its own span of the tap, at its own level.
       const loopFrom = await hal.evaluate(() => (globalThis as unknown as { __soundTap: { ctx: { currentTime: number } } }).__soundTap.ctx.currentTime);
-      await via.send({ t: "loop.start", id: "loop-tone", soundId: loopId, volume: 100 });
+      await via.send({ t: "loop.start", id: namedId("loop-tone"), soundId: loopId, volume: 100 });
       await sleep(6_000);
-      await via.send({ t: "loop.stop", id: "loop-tone" });
+      await via.send({ t: "loop.stop", id: namedId("loop-tone") });
       await sleep(3_000);
       const { quanta } = await readTap(hal);
       const ramps = fadeRamps(quanta.filter((q) => q.at < loopFrom));
@@ -1113,7 +1113,7 @@ describe("synced music and sound", { concurrency: false }, () => {
   // In the quiet room, with the short tone sndfade-1 plays, added here when it ran first: Ivy's page alone plays, into the tap.
   test("sndfade-2. music whose first load is held 3 s still fades in over 2 s once it sounds, not at full", async () => {
     const { room, ops: via } = await quietRoom();
-    const asset = await quietTone(via, "snd-tone-short", "Short tone", "music", 32);
+    const asset = await quietTone(via, namedId("snd-tone-short"), "Short tone", "music", 32);
     const ivyContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, bypassCSP: true });
     try {
       await ivyContext.addInitScript(SOUND_TEST_FLAG);
@@ -1129,7 +1129,7 @@ describe("synced music and sound", { concurrency: false }, () => {
       const ivy = await ivyContext.newPage();
       await openRoom(ivy, room);
       releaseAt = Date.now() + 3_500;
-      await playTrack("snd-tone-short", 0, "off", via);
+      await playTrack(namedId("snd-tone-short"), 0, "off", via);
       await sleep(10_000);
       await via.send({ t: "music.stop" });
       await sleep(3_000);

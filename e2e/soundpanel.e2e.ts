@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import { framesFor, silentFrames } from "#shared/audio/mp3Testutil.ts";
 import type { SoundUse } from "#shared/sound.ts";
-import { ConsoleWatch, openSceneGroup, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { namedId, ConsoleWatch, openSceneGroup, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { openGroup } from "./helpers/groups.ts";
 import { setupHistory } from "./helpers/undoScope.ts";
@@ -791,7 +791,7 @@ describe("the Sound panel", { concurrency: false }, () => {
       await card.waitFor();
       const stopSound = card.getByRole("button", { name: "Stop the sound", exact: true });
       assert.equal(await stopSound.count(), 0, "nothing sounds");
-      await ops.send({ t: "effect.fire", id: "mfa-gong", soundId: run.sounds.Gong! });
+      await ops.send({ t: "effect.fire", id: namedId("mfa-gong"), soundId: run.sounds.Gong! });
       await stopSound.waitFor();
       await shots.take(dm, "mfa-1-dm-xcard-effect");
       await stopSound.click();
@@ -816,7 +816,7 @@ describe("the Sound panel", { concurrency: false }, () => {
     run.xcardAt = Date.now();
     const card = dm.getByRole("dialog", { name: "X-card" });
     await card.waitFor();
-    await ops.send({ t: "effect.fire", id: "sfx-chime", soundId: run.sounds.Chime! });
+    await ops.send({ t: "effect.fire", id: namedId("sfx-chime"), soundId: run.sounds.Chime! });
     const stopSound = card.getByRole("button", { name: "Stop the sound", exact: true });
     await stopSound.waitFor();
     assert.equal(await stopAll.count(), 0, "a 3-second effect leaves the player's rows alone");

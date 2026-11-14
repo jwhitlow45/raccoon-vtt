@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { barControl, ConsoleWatch, OpSocket, pickTool, Shots, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
+import { namedId, barControl, ConsoleWatch, OpSocket, pickTool, Shots, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
 import { DEFAULT_SNAPSHOT_BUDGET } from "../server/rooms/budgets.ts";
 
 /**
@@ -1138,12 +1138,12 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
     await ops.send({
       t: "encounter.start",
       entries: [
-        { id: "e-thorn", tokenId: run.thornToken, value: 18 },
-        { id: "e-gob", tokenId: run.goblin, value: 8 },
+        { id: namedId("e-thorn"), tokenId: run.thornToken, value: 18 },
+        { id: namedId("e-gob"), tokenId: run.goblin, value: 8 },
       ],
     });
     await ops.send({ t: "encounter.next" });
-    await waitFor("Thorn's turn", () => (dmSocket.state?.encounter?.activeEntryId === "e-thorn" ? true : null));
+    await waitFor("Thorn's turn", () => (dmSocket.state?.encounter?.activeEntryId === namedId("e-thorn") ? true : null));
   });
 
   for (const view of VIEWS) {
@@ -1165,7 +1165,7 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
     // The turn strip in the band, where the Token sheet goes full and modal and the dialog it opens must stand over it (TOKEN-SHEET-BAND-DIALOG). D-261108-442 sent kb-15 to the bar's row, so this step forces the band with a turn timer run over.
     if (view.width > view.height) {
       test(`kb-15b. in the fight at ${viewName(view)} with the turn strip in the band, Add a class resource's Name and Add stand over the modal Token sheet and show whole over the keyboard`, async () => {
-        const turn = { entries: [{ id: "e-thorn", tokenId: run.thornToken, value: 18 }, { id: "e-gob", tokenId: run.goblin, value: 8 }] };
+        const turn = { entries: [{ id: namedId("e-thorn"), tokenId: run.thornToken, value: 18 }, { id: namedId("e-gob"), tokenId: run.goblin, value: 8 }] };
         await ops.send({ t: "room.update", settings: { turnTimerSec: 2 } });
         await ops.send({ t: "encounter.end" });
         await ops.send({ t: "encounter.start", ...turn });
@@ -1228,8 +1228,8 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
       });
     // Each Escape branch pinned to its turn: on the goblin's the strip shows Conditions to come back to, and on Thorn's own HP, Roll and End turn fill it.
     for (const [entryId, onStrip] of [
-      ["e-gob", true],
-      ["e-thorn", false],
+      [namedId("e-gob"), true],
+      [namedId("e-thorn"), false],
     ] as const) {
       if (dmSocket.state?.encounter?.activeEntryId !== entryId) await ops.send({ t: "encounter.next" });
       await waitFor(`${entryId}'s turn on Pat's page`, () => (patSocket.state?.encounter?.activeEntryId === entryId ? true : null));

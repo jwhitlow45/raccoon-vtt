@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { barControl, ConsoleWatch, openSideTab, OpSocket, pickTool, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { namedId, barControl, ConsoleWatch, openSideTab, OpSocket, pickTool, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Companion stat blocks end to end (docs/design/design-v1-companion-stat-blocks.md
@@ -670,14 +670,14 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
 
   test("7c. in a fight, the Owl's sub-row under Bree and then its own row offer Ana its stat block", async () => {
     const owl = companionOf("Owl")!;
-    await ops.send({ t: "encounter.start", entries: [{ id: "e-bree", tokenId: run.bree.tokenId, value: 15 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: namedId("e-bree"), tokenId: run.bree.tokenId, value: 15 }] });
     await openSideTab(ana, "Initiative");
     await ana.getByRole("button", { name: "Owl options" }).click();
     await ana.getByRole("button", { name: "Stat block", exact: true }).first().click();
     await tokenPanel(ana).getByText("Stat blocks from the System Reference Document 5.2.1").first().waitFor();
     await shots.take(ana, "companions-sub-row-stat-block");
     await ops.send({ t: "token.update", tokenId: owl.id, patch: { companion: { of: run.bree.characterId, turn: "own" } } });
-    await ops.send({ t: "encounter.add", entries: [{ id: "e-owl", tokenId: owl.id, value: 12 }] });
+    await ops.send({ t: "encounter.add", entries: [{ id: namedId("e-owl"), tokenId: owl.id, value: 12 }] });
     await openSideTab(ana, "Initiative");
     await ana.getByRole("button", { name: "Owl options" }).click();
     await ana.getByRole("button", { name: "Stat block", exact: true }).first().click();
@@ -687,7 +687,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
   });
 
   test("7d. a companion Ana adds with its own turn while Bree fights joins the fight in a row of its own, its initiative still to roll", async () => {
-    await ops.send({ t: "encounter.start", entries: [{ id: "e-bree-7d", tokenId: run.bree.tokenId, value: 15 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: namedId("e-bree-7d"), tokenId: run.bree.tokenId, value: 15 }] });
     try {
       await openCard(ana, run.bree.characterId);
       await ana.locator(`[data-opener="companion:${run.bree.characterId}"]`).click();
@@ -1375,7 +1375,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
   test("s2-co-a. in a fight, the Owl sharing Bree's turn holds a Reaction of its own in its Token panel's Combat, for the DM and for Ana, who marks it used without touching Bree's; it lines up at 320 x 568 and 390 x 844 at 130% and 1280 x 800 (docs/design/design-v1-token-sections.md 3.2)", async () => {
     const owl = companionOf("Owl")!;
     assert.equal(owl.companion?.turn, "shared");
-    await ops.send({ t: "encounter.start", entries: [{ id: "e-bree-s2", tokenId: run.bree.tokenId, value: 15 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: namedId("e-bree-s2"), tokenId: run.bree.tokenId, value: 15 }] });
     const { alignmentLines, measureAlignment } = await import("./helpers/alignment.ts");
     const off: string[] = [];
     const cdp = await anaContext.newCDPSession(ana);
@@ -1393,7 +1393,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
       const reaction = tokenPanel(ana).locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Reaction"]]');
       await reaction.getByRole("switch", { name: /^Reaction used/ }).click();
       await waitFor("the Owl's own Reaction spent", () => (companionOf("Owl")?.companion?.reactionUsed ? true : null));
-      assert.equal(dmSocket.state!.encounter!.entries.find((e) => e.id === "e-bree-s2")!.reactionUsed, false, "Bree's Reaction is untouched");
+      assert.equal(dmSocket.state!.encounter!.entries.find((e) => e.id === namedId("e-bree-s2"))!.reactionUsed, false, "Bree's Reaction is untouched");
       for (const view of [{ width: 320, height: 568, scale: 1.3 }, { width: 390, height: 844, scale: 1.3 }, { width: 1280, height: 800, scale: 1 }]) {
         await setUp(ana, cdp, view);
         await showCompanion(ana, "Owl");

@@ -1036,3 +1036,14 @@ export class OpSocket {
     this.ws.close(1000);
   }
 }
+
+const namedIds = new Map<string, string>();
+/** A version 7 id for a name a test spells out, the same each time the name is asked for. */
+export function namedId(name: string): string {
+  let id = namedIds.get(name);
+  if (id === undefined) {
+    id = uuidv7();
+    namedIds.set(name, id);
+  }
+  return id;
+}

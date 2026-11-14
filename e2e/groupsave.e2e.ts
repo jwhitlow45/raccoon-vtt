@@ -10,7 +10,7 @@ import { blockOf, customMonster } from "#shared/testutil.ts";
 import { PALETTES } from "../client/lib/theme.ts";
 import { alignmentLines, disabledLookLines, measureAlignment } from "./helpers/alignment.ts";
 import { OUTCOME_RESTORED, OUTCOME_UNDONE, OUTCOME_UNAVAILABLE, assertPrivateOutcome, openSaveDice, saveOutcomes } from "./helpers/saveOutcomes.ts";
-import { barControl, ConsoleWatch, diceFoldsOpen, multiSelect, OpSocket, openSideTab, reopenRoom, resultLine, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { namedId, barControl, ConsoleWatch, diceFoldsOpen, multiSelect, OpSocket, openSideTab, reopenRoom, resultLine, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * Roll options and the group save (docs/design/design-v1-roll-options.md 11), on

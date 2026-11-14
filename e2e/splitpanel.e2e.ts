@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, pagePoint, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
+import { namedId, ConsoleWatch, openSideTab, OpSocket, pagePoint, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
 
 /**
  * Two panels in the side panel (docs/design/design-v1-split-panel.md 12.2), on
@@ -315,7 +315,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await ops.send({ t: "journal.create", page: { id: run.lore, title: "Lore", access: "all", blocks: [block(`${prose}\n\n${table}\n\nThe end.`)] } });
     await ops.send({ t: "journal.create", page: { id: run.pinPage, title: "Old well", access: "dm", blocks: [] } });
     await ops.send({ t: "pin.put", pin: { id: run.pin, sceneId: run.sceneId, x: 22.5, y: 14.5, color: "#f7df00", label: "Old well", pageId: run.pinPage, visibility: "dm" } });
-    const entries = [{ id: "e-thorn", tokenId: run.thorn, value: 25 }, ...run.goblins.map((tokenId, i) => ({ id: `e-g${i}`, tokenId, value: 20 - i }))];
+    const entries = [{ id: namedId("e-thorn"), tokenId: run.thorn, value: 25 }, ...run.goblins.map((tokenId, i) => ({ id: namedId(`e-g${i}`), tokenId, value: 20 - i }))];
     await ops.send({ t: "encounter.start", entries });
     await ops.send({ t: "encounter.next" });
     for (let i = 0; i < 40; i++) await ops.send({ t: "log.chat", text: `Message ${i + 1} about the goblins and the citadel.` });

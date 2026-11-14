@@ -8,7 +8,7 @@ import { chromium, type Browser, type BrowserContext, type CDPSession, type Loca
 import type { LogEvent } from "#shared/model.ts";
 import { loadMonsters, monsterActor } from "#shared/srd/monsters.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { barControl, ConsoleWatch, openPage, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { namedId, barControl, ConsoleWatch, openPage, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { openGroup } from "./helpers/groups.ts";
 
 /**
@@ -543,13 +543,13 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await ops.send(token(run.chest, { kind: "object", name: "Chest", x: 3, y: 12, hpVisibility: "hidden", actor: { inline: actor(10, 12) } }));
     // Fourteen rows: Bree first, Cyra, then the goblins, with distinct values so the order is fixed.
     const entries = [
-      { id: "e-bree", tokenId: run.bree.id, value: 25 },
-      { id: "e-cy", tokenId: run.cyPc.id, value: 24 },
-      ...run.goblins.map((tokenId, i) => ({ id: `e-g${i}`, tokenId, value: 20 - i })),
+      { id: namedId("e-bree"), tokenId: run.bree.id, value: 25 },
+      { id: namedId("e-cy"), tokenId: run.cyPc.id, value: 24 },
+      ...run.goblins.map((tokenId, i) => ({ id: namedId(`e-g${i}`), tokenId, value: 20 - i })),
     ];
     await ops.send({ t: "encounter.start", entries });
     await ops.send({ t: "encounter.next" });
-    await waitFor("every row in the DM's view, Bree acting", () => (dmSocket.state?.encounter?.entries.length === 14 && dmSocket.state.encounter.activeEntryId === "e-bree" ? true : null));
+    await waitFor("every row in the DM's view, Bree acting", () => (dmSocket.state?.encounter?.entries.length === 14 && dmSocket.state.encounter.activeEntryId === namedId("e-bree") ? true : null));
 
     await ana.goto(`${server.origin}/r/${run.roomId}`);
     await ana.getByRole("status", { name: "Connected" }).first().waitFor();
@@ -559,8 +559,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
 
   test("1b. the new room keeps every goblin's place out of Ana's order and frames before its turn, and Everyone shows her the whole order (docs/design/design-v1-combat-flow.md 11)", async () => {
     await waitFor("Ana's order of the party alone", () => (anaSocket.state?.encounter?.entries.length === 2 ? true : null));
-    assert.deepEqual(anaSocket.state!.encounter!.entries.map((e) => e.id), ["e-bree", "e-cy"]);
-    assert.equal(anaSocket.state!.encounter!.activeEntryId, "e-bree");
+    assert.deepEqual(anaSocket.state!.encounter!.entries.map((e) => e.id), [namedId("e-bree"), namedId("e-cy")]);
+    assert.equal(anaSocket.state!.encounter!.activeEntryId, namedId("e-bree"));
     for (const i of run.goblins.keys()) assert.equal(anaSocket.everSaw(`"e-g${i}"`), false, `goblin ${i + 1}'s row reached Ana`);
     // The rest of this file reads the whole order, as a room from before the setting does.
     await ops.send({ t: "room.update", settings: { playersSeeOrder: "all" } });
@@ -757,7 +757,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       // Cyra's turn, with Ana's order scrolled, then Bree's again: "Your turn" takes its place over the body for a few seconds.
       await ops.send({ t: "encounter.next" });
       cyraActs = true;
-      await waitFor("Cyra's turn", () => (dmSocket.state?.encounter?.activeEntryId === "e-cy" ? true : null));
+      await waitFor("Cyra's turn", () => (dmSocket.state?.encounter?.activeEntryId === namedId("e-cy") ? true : null));
       await setUp(ana, anaCdp, view);
       await openTracker(ana);
       await modal(ana).waitFor();
@@ -1110,12 +1110,12 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     // A set row offers Roll only in its options, as "Roll again", so a stray tap never reorders the fight (W7B-P-6).
     const setRoll = dm.getByRole("button", { name: new RegExp(`^Roll [+−-]\\d+ Initiative for ${goblinName(0)}, replacing -?\\d+$`) });
     assert.equal(await setRoll.isVisible(), false, "a set row has no Roll beside its value");
-    await rollRow(dm, goblinName(0), "e-g0");
+    await rollRow(dm, goblinName(0), namedId("e-g0"));
     await dm.locator("[data-round-section]").getByText(/^Roll again, replaces -?\d+$/).first().waitFor();
     await openTracker(ana);
-    await rollRow(ana, "Bree", "e-bree");
+    await rollRow(ana, "Bree", namedId("e-bree"));
     // Bree leads the order again, as the steps after this one expect.
-    await ops.send({ t: "encounter.setValues", values: [{ entryId: "e-bree", value: 25 }] });
+    await ops.send({ t: "encounter.setValues", values: [{ entryId: namedId("e-bree"), value: 25 }] });
   });
 
   test("6. AC shields: the DM's on every living row, a player's on their own creatures only, and each row's description reads its AC and HP", async () => {
@@ -1314,9 +1314,9 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await shots.take(ana, "combat-spirit-options");
     // Bree's next turn: a Next for each of the fourteen rows brings the turn round to her again.
     const round = dmSocket.state!.encounter!.round;
-    assert.equal(dmSocket.state!.encounter!.activeEntryId, "e-bree");
+    assert.equal(dmSocket.state!.encounter!.activeEntryId, namedId("e-bree"));
     for (let i = 0; i < 14; i++) await ops.send({ t: "encounter.next" });
-    await waitFor("Bree's turn again", () => (dmSocket.state?.encounter?.activeEntryId === "e-bree" && dmSocket.state.encounter.round === round + 1 ? true : null));
+    await waitFor("Bree's turn again", () => (dmSocket.state?.encounter?.activeEntryId === namedId("e-bree") && dmSocket.state.encounter.round === round + 1 ? true : null));
     await waitFor("both cleared", () => (!spirit().companion?.reactionUsed && !effects().some((e) => e.key === "readied") ? true : null));
     // Readied again, and It fired from the token panel.
     await ana.getByRole("textbox", { name: "Trigger for the Ready action" }).last().fill("again");
@@ -1332,7 +1332,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await shots.take(ana, "combat-it-fired");
     await ana.getByRole("button", { name: "It fired: Reaction used" }).click();
     await waitFor("its own Reaction spent", () => (spirit().companion?.reactionUsed ? true : null));
-    assert.equal(dmSocket.state!.encounter!.entries.find((e) => e.id === "e-bree")!.reactionUsed, false, "Bree's Reaction is untouched");
+    assert.equal(dmSocket.state!.encounter!.entries.find((e) => e.id === namedId("e-bree"))!.reactionUsed, false, "Bree's Reaction is untouched");
     // Its player renames it in Token settings and edits its AC in Stats, both folded at the panel's foot.
     const panel = ana.getByRole("tabpanel", { name: "Token" });
     await openFold(panel, "Token settings");
@@ -1349,7 +1349,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     // On Bree's turn, End turn moves past Bree and the spirit both.
     await openTracker(ana);
     await ana.locator("[data-round-header]").getByRole("button", { name: "End turn" }).click();
-    await waitFor("Cyra's turn", () => (dmSocket.state?.encounter?.activeEntryId === "e-cy" ? true : null));
+    await waitFor("Cyra's turn", () => (dmSocket.state?.encounter?.activeEntryId === namedId("e-cy") ? true : null));
     await ops.send({ t: "encounter.prev" });
   });
 
@@ -1803,9 +1803,9 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await ops.send({ t: "room.update", settings: { playersSeeOrder: "party" } });
     const ogre = uuidv7();
     await ops.send({ t: "token.create", token: { id: ogre, sceneId: run.sceneId, size: "large", visibility: "all", kind: "monster", name: "Ogre", x: 20, y: 12, disposition: "hostile", actor: { inline: actor(59, 11) } } });
-    await ops.send({ t: "encounter.add", entries: [{ id: "e-ogre", tokenId: ogre, value: -5 }] });
-    await waitFor("the ogre's row for the DM", () => (dmSocket.state?.encounter?.entries.some((e) => e.id === "e-ogre") ? true : null));
-    assert.equal(anaSocket.everSaw('"e-ogre"'), false, "the ogre's row reached Ana before its turn");
+    await ops.send({ t: "encounter.add", entries: [{ id: namedId("e-ogre"), tokenId: ogre, value: -5 }] });
+    await waitFor("the ogre's row for the DM", () => (dmSocket.state?.encounter?.entries.some((e) => e.id === namedId("e-ogre")) ? true : null));
+    assert.equal(anaSocket.everSaw('namedId("e-ogre")'), false, "the ogre's row reached Ana before its turn");
     const tracker = await openTracker(ana);
     assert.equal(await tracker.getByRole("button", { name: /^Ogre[.,]/ }).count(), 0);
     // The DM's row says players do not see it yet, until its turn comes.
@@ -1813,22 +1813,22 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await rowButton(dm, "Ogre");
     const secret = async () => (await descriptions(dmCdp, /^Ogre[.,]/)).some((d) => d.includes("Secret until its turn"));
     await waitFor("the DM's tag on the ogre's row", async () => ((await secret()) ? true : null));
-    for (let step = 0; step < 20 && dmSocket.state?.encounter?.activeEntryId !== "e-ogre"; step++) {
+    for (let step = 0; step < 20 && dmSocket.state?.encounter?.activeEntryId !== namedId("e-ogre"); step++) {
       const was = dmSocket.state!.encounter!;
       await ops.send({ t: "encounter.next" });
       await waitFor("the DM's next turn", () => (dmSocket.state?.encounter?.activeEntryId !== was.activeEntryId || dmSocket.state?.encounter?.round !== was.round ? true : null));
-      if (dmSocket.state?.encounter?.activeEntryId !== "e-ogre") assert.equal(anaSocket.everSaw('"e-ogre"'), false, "the ogre's row reached Ana before its turn");
+      if (dmSocket.state?.encounter?.activeEntryId !== namedId("e-ogre")) assert.equal(anaSocket.everSaw('namedId("e-ogre")'), false, "the ogre's row reached Ana before its turn");
     }
-    assert.equal(dmSocket.state?.encounter?.activeEntryId, "e-ogre");
-    await waitFor("the ogre in Ana's order on its turn", () => (anaSocket.state?.encounter?.activeEntryId === "e-ogre" ? true : null));
+    assert.equal(dmSocket.state?.encounter?.activeEntryId, namedId("e-ogre"));
+    await waitFor("the ogre in Ana's order on its turn", () => (anaSocket.state?.encounter?.activeEntryId === namedId("e-ogre") ? true : null));
     const entries = anaSocket.state!.encounter!.entries;
-    assert.equal(entries.at(-1)?.id, "e-ogre", "last, in its place");
+    assert.equal(entries.at(-1)?.id, namedId("e-ogre"), "last, in its place");
     await rowButton(ana, "Ogre");
     await waitFor("the DM's tag gone from the ogre's row", async () => ((await secret()) ? null : true));
     // Its next turn keeps it there.
     await ops.send({ t: "encounter.next" });
-    await waitFor("the ogre's turn over", () => (anaSocket.state?.encounter?.activeEntryId !== "e-ogre" ? true : null));
-    assert.ok(anaSocket.state!.encounter!.entries.some((e) => e.id === "e-ogre"));
+    await waitFor("the ogre's turn over", () => (anaSocket.state?.encounter?.activeEntryId !== namedId("e-ogre") ? true : null));
+    assert.ok(anaSocket.state!.encounter!.entries.some((e) => e.id === namedId("e-ogre")));
     await ops.send({ t: "room.update", settings: { playersSeeOrder: "all" } });
   });
 
@@ -1866,9 +1866,9 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await ops.send(token(old, "Old Goblin", 13, block("goblin-warrior"), "small"));
     await ops.send({ t: "actor.use", target: { tokenId: old }, use: { kind: "ability", key: "actions:old-breath", name: "Old Breath", limit: "recharge", min: 5, max: 1 } });
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-    await ops.send({ t: "encounter.start", entries: [{ id: "e-wolf", tokenId: wolf, value: 20 }, { id: "e-limb", tokenId: limb, value: 10 }, { id: "e-old", tokenId: old, value: 5 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: namedId("e-wolf"), tokenId: wolf, value: 20 }, { id: namedId("e-limb"), tokenId: limb, value: 10 }, { id: namedId("e-old"), tokenId: old, value: 5 }] });
     await ops.send({ t: "encounter.next" });
-    await waitFor("the wolf's turn", () => (dmSocket.state?.encounter?.activeEntryId === "e-wolf" ? true : null));
+    await waitFor("the wolf's turn", () => (dmSocket.state?.encounter?.activeEntryId === namedId("e-wolf") ? true : null));
     try {
       await setUp(dm, dmCdp, { ...DESK, scale: 1 });
 
@@ -1938,7 +1938,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
 
       // The limb's turn: its Regeneration skipped, then Reopen, the turn card's only button, takes the card away with it: focus goes to the card it reopened.
       await ops.send({ t: "encounter.next" });
-      await waitFor("the limb's turn", () => (dmSocket.state?.encounter?.activeEntryId === "e-limb" ? true : null));
+      await waitFor("the limb's turn", () => (dmSocket.state?.encounter?.activeEntryId === namedId("e-limb") ? true : null));
       const regeneration = dm.getByRole("group", { name: "Regeneration for Troll Limb" });
       await regeneration.getByRole("button", { name: "Skip", exact: true }).click();
       await regeneration.waitFor({ state: "detached" });
@@ -1962,9 +1962,9 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await ops.send({ t: "token.create", token: { id: skitter, sceneId: run.sceneId, kind: "monster", name: "Skitter", size: "small", x: 19, y: 15, visibility: "all", disposition: "ally", companion: { of: run.bree.characterId, turn: "shared" }, actor: { inline: actor(11) } } });
     await ops.send({ t: "actor.use", target: { tokenId: skitter }, use: { kind: "ability", key: "actions:web", name: "Web", limit: "recharge", min: 5, max: 1 } });
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-    await ops.send({ t: "encounter.start", entries: [{ id: "s1-boss", tokenId: boss, value: 18 }, { id: "s1-bree", tokenId: run.bree.id, value: 12 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: namedId("s1-boss"), tokenId: boss, value: 18 }, { id: namedId("s1-bree"), tokenId: run.bree.id, value: 12 }] });
     await ops.send({ t: "encounter.next" });
-    await waitFor("the boss's turn", () => (dmSocket.state?.encounter?.activeEntryId === "s1-boss" ? true : null));
+    await waitFor("the boss's turn", () => (dmSocket.state?.encounter?.activeEntryId === namedId("s1-boss") ? true : null));
     /** Each control's top in the options, which stack in one column, so a top below another's is after it. */
     const tops = async (scope: Locator, parts: [string, Locator][]) => {
       const out: [string, number][] = [];
@@ -2064,8 +2064,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
      */
     const bosses = [
       // A name no earlier step used: the table never gives a deleted creature's number again, so a second Goblin Boss would read "Goblin Boss 2".
-      { id: uuidv7(), entryId: "fu31-boss-3", name: "Orc Captain", hidden: false },
-      { id: uuidv7(), entryId: "fu31-boss-4", name: "Goblin Warlord", hidden: true },
+      { id: uuidv7(), entryId: namedId("fu31-boss-3"), name: "Orc Captain", hidden: false },
+      { id: uuidv7(), entryId: namedId("fu31-boss-4"), name: "Goblin Warlord", hidden: true },
     ];
     // Hidden, Readied and its own Reaction used, under Bree's row.
     const hound = { id: uuidv7(), name: "Hound" };
@@ -2074,13 +2074,13 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     }
     await ops.send({ t: "token.create", token: { id: hound.id, sceneId: run.sceneId, kind: "monster", name: hound.name, size: "medium", x: 15, y: 15, visibility: "dm", disposition: "ally", companion: { of: run.bree.characterId, turn: "shared" }, actor: { inline: actor(11) } } });
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-    await ops.send({ t: "encounter.start", entries: [...bosses.map((b, i) => ({ id: b.entryId, tokenId: b.id, value: 18 - i })), { id: "fu31-bree", tokenId: run.bree.id, value: 12 }] });
+    await ops.send({ t: "encounter.start", entries: [...bosses.map((b, i) => ({ id: b.entryId, tokenId: b.id, value: 18 - i })), { id: namedId("fu31-bree"), tokenId: run.bree.id, value: 12 }] });
     for (const b of bosses) {
       await ops.send({ t: "encounter.update", entryId: b.entryId, patch: { reactionUsed: true, inLair: true, ...(b.hidden ? { hidden: true } : null) } });
       await ops.send({ t: "actor.effect.add", target: { tokenId: b.id }, effect: { id: uuidv7(), key: "readied", label: "if the door opens", duration: { mode: "turnStart", of: { entryId: b.entryId } } } });
     }
     await ops.send({ t: "token.update", tokenId: hound.id, patch: { companionReaction: true } });
-    await ops.send({ t: "actor.effect.add", target: { tokenId: hound.id }, effect: { id: uuidv7(), key: "readied", label: "if the door opens", duration: { mode: "turnStart", of: { entryId: "fu31-bree" } } } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: hound.id }, effect: { id: uuidv7(), key: "readied", label: "if the door opens", duration: { mode: "turnStart", of: { entryId: namedId("fu31-bree") } } } });
     const readied = (tokenId: string) => {
       const a = dmSocket.state?.tokens[tokenId]?.actor;
       return !!a && "inline" in a && a.inline.effects.some((e) => e.key === "readied");
@@ -2126,7 +2126,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
   });
 
   test("fu33-b. a legendary row in its lair, Lair its only tag beside LA 10/10 and LR 9/10, in line within 1 px at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%: at 390 x 844 LA with LR is alone under AC, HP and Lair by need, since Lair with them runs wider than the line, and Lair never stands alone where they fit beside it; and the check still flags a last part that could share its line (FU32-LAIR-ALONE)", async () => {
-    const boss = { id: uuidv7(), entryId: "fu33-boss" };
+    const boss = { id: uuidv7(), entryId: namedId("fu33-boss") };
     const order = dmSocket.state?.meta.settings.playersSeeOrder ?? "all";
     // Players see the whole order, so the row is no secret and Lair is its only tag, as live play saw it.
     await ops.send({ t: "room.update", settings: { playersSeeOrder: "all" } });
@@ -2134,7 +2134,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await ops.send({ t: "token.create", token: { id: boss.id, sceneId: run.sceneId, kind: "monster", name: "Troll Elder", size: "medium", x: 17, y: 15, visibility: "all", disposition: "hostile", actor: { inline: { ...actor(21), legendary: { actionsMax: 10, actionsUsed: 0, resistMax: 10, resistUsed: 1 } } } } });
     // Whatever the DM's copy holds yet: a refusal says no fight was left.
     await ops.send({ t: "encounter.end" }).catch(() => {});
-    await ops.send({ t: "encounter.start", entries: [{ id: boss.entryId, tokenId: boss.id, value: 18 }, { id: "fu33-bree", tokenId: run.bree.id, value: 12 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: boss.entryId, tokenId: boss.id, value: 18 }, { id: namedId("fu33-bree"), tokenId: run.bree.id, value: 12 }] });
     await ops.send({ t: "encounter.update", entryId: boss.entryId, patch: { inLair: true } });
     await waitFor("the boss in its lair", () => (dmSocket.state?.encounter?.entries.find((e) => e.id === boss.entryId)?.inLair ? true : null));
     const off: string[] = [];
@@ -2215,9 +2215,9 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     // Beside Bree, with a hidden goblin beside it, which only the DM's chips may name.
     await ops.send({ t: "token.create", token: { id: qe.warrior, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", size: "small", x: 6, y: 5, visibility: "all", disposition: "hostile", actor: { inline: block } } });
     await ops.send({ t: "token.create", token: { id: qe.lurker, sceneId: run.sceneId, kind: "monster", name: "Lurker", size: "small", x: 6, y: 6, visibility: "dm", disposition: "hostile", actor: { inline: block } } });
-    await ops.send({ t: "encounter.start", entries: [{ id: "qe-warrior", tokenId: qe.warrior, value: 15 }, { id: "qe-bree", tokenId: run.bree.id, value: 10 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: namedId("qe-warrior"), tokenId: qe.warrior, value: 15 }, { id: namedId("qe-bree"), tokenId: run.bree.id, value: 10 }] });
     await ops.send({ t: "encounter.next" });
-    await waitFor("the warrior's turn", () => (dmSocket.state?.encounter?.activeEntryId === "qe-warrior" ? true : null));
+    await waitFor("the warrior's turn", () => (dmSocket.state?.encounter?.activeEntryId === namedId("qe-warrior") ? true : null));
     // A second DM computer, its socket routed from the start so an op can wait on the wire.
     qe.context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     await qe.context.addCookies(await dmContext.cookies(server.origin));
@@ -2238,7 +2238,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     assert.equal(await attacks.locator("[data-card-result], [data-apply-to]").count(), 0, "a result under a row before anything was rolled this turn");
     await dm.getByRole("group", { name: "Goblin Warrior's attacks" }).waitFor();
     // A monster's turn card is the DM's: Ana's computer, in the same fight, draws none.
-    await waitFor("the warrior's turn on Ana's computer", () => (anaSocket.state?.encounter?.activeEntryId === "qe-warrior" ? true : null));
+    await waitFor("the warrior's turn on Ana's computer", () => (anaSocket.state?.encounter?.activeEntryId === namedId("qe-warrior") ? true : null));
     await ana.waitForTimeout(500);
     assert.equal(await ana.locator('[data-alert="turn"], [data-card-attacks]').count(), 0, "Ana's computer drew a turn card for the goblin");
     await shots.take(page, "qe-1-goblin-turn-card");
@@ -2329,7 +2329,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const previous = header.getByRole("button", { name: "Previous turn" });
     const acting = () => page.locator('[data-round-section] [aria-current="step"]').first().innerText();
     const before = dmSocket.state!.encounter!.activeEntryId;
-    assert.equal(before, "qe-warrior", "the case under test: the warrior acts");
+    assert.equal(before, namedId("qe-warrior"), "the case under test: the warrior acts");
     assert.match(await acting(), /Goblin Warrior/);
     const sent = sentOps(wire, "encounter.next");
     wire.hold = /"t":"encounter\.next"/;
@@ -2433,7 +2433,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const { page } = qeDesk();
     try {
       // Through Bree's turn, and any row her companions joined with, to the warrior's again.
-      for (let i = 0; i < 4 && !(dmSocket.state?.encounter?.activeEntryId === "qe-warrior" && dmSocket.state.encounter.round === 2); i++) {
+      for (let i = 0; i < 4 && !(dmSocket.state?.encounter?.activeEntryId === namedId("qe-warrior") && dmSocket.state.encounter.round === 2); i++) {
         const seq = dmSocket.state?.encounter?.activeEntryId;
         await ops.send({ t: "encounter.next" });
         await waitFor("the next turn", () => (dmSocket.state?.encounter?.activeEntryId !== seq ? true : null));

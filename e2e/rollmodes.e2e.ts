@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { barControl, ConsoleWatch, diceFoldsOpen, OpSocket, openSideTab, pickTool, reopenRoom, resultLine, resultLines, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, Touches, waitFor, type ResultLine, type Server, type TouchAt } from "./harness.ts";
+import { namedId, barControl, ConsoleWatch, diceFoldsOpen, OpSocket, openSideTab, pickTool, reopenRoom, resultLine, resultLines, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, Touches, waitFor, type ResultLine, type Server, type TouchAt } from "./harness.ts";
 
 /**
  * The one-roll mode menu (docs/design/design-v1-roll-mode-menu.md), its steps
@@ -1263,8 +1263,8 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
   });
 
   test("dpf1-11. the DM's goblin: Normal keeps a monster's dice secret by default though the panel's Secret is off, Roll instead offers the menu, and a held left button is only a click", async () => {
-    await ops.send({ t: "encounter.start", entries: [{ id: "e-goblin", tokenId: run.goblin.id, value: 12 }] });
-    await waitFor("the goblin's row", () => dmSocket.state?.encounter?.entries.some((e) => e.id === "e-goblin") || null);
+    await ops.send({ t: "encounter.start", entries: [{ id: namedId("e-goblin"), tokenId: run.goblin.id, value: 12 }] });
+    await waitFor("the goblin's row", () => dmSocket.state?.encounter?.entries.some((e) => e.id === namedId("e-goblin")) || null);
     try {
     const panel = await dmDiceFor(run.goblin, "Goblin");
     const secret = panel.getByRole("group", { name: "For the next roll" }).getByRole("button", { name: "Hide from players" });
@@ -1364,7 +1364,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
 
   test("dpf1-21. the tracker: a row's Roll offers every choice, Auto Initiative and a row's Roll Initiative show Secret off and stay secret, and the rows take the totals", async () => {
     await ops.send({ t: "room.update", settings: { monsterInitScore: false } });
-    await ops.send({ t: "encounter.start", entries: [{ id: "e-thorn", tokenId: run.thorn.id, value: null }, { id: "e-goblin", tokenId: run.goblin.id, value: null }, { id: "e-dragon", tokenId: run.dragon.id, value: null }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: namedId("e-thorn"), tokenId: run.thorn.id, value: null }, { id: namedId("e-goblin"), tokenId: run.goblin.id, value: null }, { id: namedId("e-dragon"), tokenId: run.dragon.id, value: null }] });
     await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === 3 ? true : null));
     try {
       const value = (entryId: string) => dmSocket.state?.encounter?.entries.find((e) => e.id === entryId)?.value ?? null;
@@ -1377,14 +1377,14 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       let op = await pickFrom(dm, dmSent, rowRoll, { what: "the goblin's row Roll", button: () => rowRoll, menu: /^Roll options for Roll [+−-]\d+ Initiative for Goblin$/, items: D20, hint: HINT.d20, help: ["Roll secretly: hide the dice from players."], pick: "Roll with Advantage", sends: { t: "dice.roll", mode: "adv", to: "dm" } }, "right");
       const line = await waitFor("the goblin's initiative line", () => dmSocket.state?.log.find((e) => e.data?.type === "dice" && e.data.tag === op.tag)?.data ?? null);
       const total = line.type === "dice" ? line.rolls[0]!.total : null;
-      await waitFor(`the goblin's row set to ${total}`, () => (value("e-goblin") === total ? true : null));
+      await waitFor(`the goblin's row set to ${total}`, () => (value(namedId("e-goblin")) === total ? true : null));
 
       // The DM's Roll Initiative in the dragon's options, beside its modifier: fixed secret.
       const options = tracker.getByRole("button", { name: "Dragon options" });
       if ((await options.getAttribute("aria-expanded")) !== "true") await options.click();
       const rowTool = tracker.getByRole("button", { name: "Roll Initiative", exact: true }).first();
       op = await pickFrom(dm, dmSent, rowTool, { what: "the dragon's Roll Initiative", button: () => rowTool, menu: /^Roll options for Initiative$/, items: D20_FIXED, hint: HINT.fixed, help: creature, pick: "Roll with Disadvantage", sends: { t: "dice.roll", mode: "dis", to: "dm" } }, "key");
-      await waitFor("the dragon's row set", () => (value("e-dragon") !== null ? true : null));
+      await waitFor("the dragon's row set", () => (value(namedId("e-dragon")) !== null ? true : null));
       // Its result in Auto Initiative's card keeps the badge it always had, Dis, and says no more (D-261030-584).
       const results = tracker.getByRole("region", { name: "Auto Initiative results" });
       await results.getByText("Dis", { exact: true }).first().waitFor();
@@ -1425,7 +1425,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       const mine = pTracker.getByRole("button", { name: /^Roll [+−-]\d+ Initiative for Thorn$/ }).first();
       if (!(await mine.isVisible())) await pTracker.getByRole("button", { name: "Thorn options" }).tap();
       await pickFrom(pat, patSent, mine, { what: "Pat's row Roll", button: () => mine, menu: /^Roll options for Roll [+−-]\d+ Initiative for Thorn$/, items: D20, hint: HINT.d20, help: ["Roll secretly: you and the DM see the result."], pick: "Roll with Disadvantage", sends: { t: "dice.roll", mode: "dis", to: "all" } }, "hold");
-      await waitFor("Thorn's row set", () => (value("e-thorn") !== null ? true : null));
+      await waitFor("Thorn's row set", () => (value(namedId("e-thorn")) !== null ? true : null));
       await shots.take(pat, "dpf1-21-pat-tracker");
       await pat.keyboard.press("Escape");
     } finally {
@@ -1501,7 +1501,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
   });
 
   test("dpf1-23. a fight's cards: Thorn's turn death save, the goblin's concentration and its save-ends each open a menu with Secret shown off, and the recharge card and Uses' recharge have none", async () => {
-    await ops.send({ t: "encounter.start", entries: [{ id: "e-thorn", tokenId: run.thorn.id, value: 20 }, { id: "e-goblin", tokenId: run.goblin.id, value: 15 }, { id: "e-dragon", tokenId: run.dragon.id, value: 10 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: namedId("e-thorn"), tokenId: run.thorn.id, value: 20 }, { id: namedId("e-goblin"), tokenId: run.goblin.id, value: 15 }, { id: namedId("e-dragon"), tokenId: run.dragon.id, value: 10 }] });
     await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === 3 ? true : null));
     const creature = ["Roll secretly: this roll's visibility is set by the creature."];
     // Taken off after: a failed save leaves the goblin Frightened, and each later end of its turn would bring a save-ends card of its own.
@@ -1517,8 +1517,8 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     try {
       // Thorn dying as his turn starts: Pat's card.
       await setDying(true);
-      await turnTo("e-goblin");
-      await turnTo("e-thorn");
+      await turnTo(namedId("e-goblin"));
+      await turnTo(namedId("e-thorn"));
       const deathCard = pat.getByRole("group", { name: "Death save for Thorn" }).filter({ visible: true }).first();
       if (!(await deathCard.isVisible().catch(() => false))) {
         const summary = pat.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ }).first();
@@ -1536,17 +1536,17 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       await pickFrom(dm, dmSent, conc.getByRole("button", { name: /^Roll [+−-]\d+$/ }), { what: "the concentration card", button: () => conc, menu: /^Roll options for Concentration save for Goblin$/, items: D20_FIXED, hint: HINT.fixed, help: creature, pick: "Roll with Disadvantage", sends: { t: "dice.roll", mode: "dis", to: "dm" } }, "right");
 
       // Frightened with a save that ends it, then the goblin's turn ends: the DM's save-ends card.
-      await turnTo("e-goblin");
+      await turnTo(namedId("e-goblin"));
       await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin.id }, effect: { id: fear, key: "frightened", save: { ability: "str", dc: 14 } } });
-      await turnTo("e-dragon");
+      await turnTo(namedId("e-dragon"));
       const ends = dm.locator('[data-alert-id^="saveEnds:"]').filter({ visible: true }).first();
       await ends.waitFor();
       await pickFrom(dm, dmSent, ends.getByRole("button", { name: /^Roll [+−-]\d+$/ }), { what: "the save-ends card", button: () => ends, menu: /^Roll options for Strength save, DC 14, ends it\. for Goblin$/, items: D20_FIXED, hint: HINT.fixed, help: creature, pick: "Roll with Advantage", sends: { t: "dice.roll", mode: "adv", to: "dm" } }, "key");
 
       // The dragon's breath used: its recharge card at its turn and Uses' Roll recharge take no menu.
       await ops.send({ t: "actor.use", target: { tokenId: run.dragon.id }, use: { kind: "ability", key: "actions:acid-breath", name: "Acid Breath", limit: "recharge", max: 1, min: 5, ifReady: true } });
-      await turnTo("e-thorn");
-      await turnTo("e-dragon");
+      await turnTo(namedId("e-thorn"));
+      await turnTo(namedId("e-dragon"));
       const recharge = dm.getByRole("group", { name: /^Acid Breath can recharge/ }).filter({ visible: true }).first();
       await recharge.waitFor();
       await watchContextMenus(dm);
@@ -1673,7 +1673,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     // Thorn dying: HP's Death Save menu in the DM's window stays open as another fight row changes (DPF1B-OPUS-03).
     // Its source once took in the whole fight. A request can only ask creatures players play, and Thorn is the only one here.
     try {
-      await ops.send({ t: "encounter.start", entries: [{ id: "e-thorn", tokenId: run.thorn.id, value: 20 }, { id: "e-goblin", tokenId: run.goblin.id, value: 15 }] });
+      await ops.send({ t: "encounter.start", entries: [{ id: namedId("e-thorn"), tokenId: run.thorn.id, value: 20 }, { id: namedId("e-goblin"), tokenId: run.goblin.id, value: 15 }] });
       await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === 2 ? true : null));
       await setDying(true);
       await dm.keyboard.press("Escape");
@@ -1686,8 +1686,8 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       await death.click({ button: "right" });
       const deathMenu = rollMenu(dm, /^Roll options for Death Save$/);
       await deathMenu.waitFor();
-      await ops.send({ t: "encounter.setValues", values: [{ entryId: "e-goblin", value: 3 }] });
-      await waitFor("the goblin's new value", () => (dmSocket.state?.encounter?.entries.find((e) => e.id === "e-goblin")?.value === 3 ? true : null));
+      await ops.send({ t: "encounter.setValues", values: [{ entryId: namedId("e-goblin"), value: 3 }] });
+      await waitFor("the goblin's new value", () => (dmSocket.state?.encounter?.entries.find((e) => e.id === namedId("e-goblin"))?.value === 3 ? true : null));
       await sleep(QUIET_MS);
       assert.ok(await deathMenu.isVisible(), "another row's value leaves the death save's menu open");
       await noRoll(dmSent, from, "the open death save menu while the fight changed");
@@ -1761,7 +1761,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
           const context = await browser.newContext({ viewport: size, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: "reduce" });
           try {
             // A fight of its own each time, since a turn takes one death save.
-            await ops.send({ t: "encounter.start", entries: [{ id: "e-thorn", tokenId: run.thorn.id, value: 20 }, { id: "e-goblin", tokenId: run.goblin.id, value: 15 }] });
+            await ops.send({ t: "encounter.start", entries: [{ id: namedId("e-thorn"), tokenId: run.thorn.id, value: 20 }, { id: namedId("e-goblin"), tokenId: run.goblin.id, value: 15 }] });
             await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === 2 ? true : null));
             await freshThorn();
             await context.addCookies(await patContext.cookies(server.origin));
@@ -1823,12 +1823,12 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
             await ops.send({ t: "actor.hp", target: { characterId: run.thornChar }, change: { kind: "heal", amount: 1 } });
 
             // A save-ends card is the DM's alone and goes as its roll lands, its result a passing notice (SaveEndsCard.tsx), so it has no settled result here.
-            await turnTo("e-goblin");
+            await turnTo(namedId("e-goblin"));
 
             // Dying as his turn starts: the death save card.
             await freshThorn();
             await setDying(true);
-            await turnTo("e-thorn");
+            await turnTo(namedId("e-thorn"));
             const death = await card("Death save for Thorn");
             await settle("the death save card", death, death.getByRole("button", { name: "Roll", exact: true }));
             await setDying(false);
@@ -2315,7 +2315,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
           await scrolls("hp", death, "middle", "Death Save");
           await setDying(false);
 
-          await ops.send({ t: "encounter.start", entries: [{ id: "e-thorn", tokenId: run.thorn.id, value: null }, { id: "e-goblin", tokenId: run.goblin.id, value: 15 }, { id: "e-dragon", tokenId: run.dragon.id, value: 3 }] });
+          await ops.send({ t: "encounter.start", entries: [{ id: namedId("e-thorn"), tokenId: run.thorn.id, value: null }, { id: namedId("e-goblin"), tokenId: run.goblin.id, value: 15 }, { id: namedId("e-dragon"), tokenId: run.dragon.id, value: 3 }] });
           await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === 3 ? true : null));
           await load();
           await page.getByRole("button", { name: /^Initiative, round/ }).first().tap();

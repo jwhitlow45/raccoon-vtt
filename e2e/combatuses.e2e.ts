@@ -12,7 +12,7 @@ import { loadMonsters, monsterActor, type SrdMonster } from "#shared/srd/monster
 import { blockOf, customMonster } from "#shared/testutil.ts";
 import { wrappedButtons } from "./helpers/wraps.ts";
 import { alignmentLines, measureAlignment, toastsUnderCards } from "./helpers/alignment.ts";
-import { barControl, ConsoleWatch, expandBar, OpSocket, openPage, openSideTab, Shots, sideTabName, SocketWatch, startServer, tapCell, untilReady, waitFor, type Server } from "./harness.ts";
+import { namedId, barControl, ConsoleWatch, expandBar, OpSocket, openPage, openSideTab, Shots, sideTabName, SocketWatch, startServer, tapCell, untilReady, waitFor, type Server } from "./harness.ts";
 
 /**
  * Combat uses (docs/design/design-v1-combat-controls.md 4 to 6 and 11), on the
@@ -468,10 +468,10 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await ops.send({
       t: "encounter.start",
       entries: [
-        { id: "e-thorn", tokenId: run.thornToken, value: 20 },
-        { id: "e-dragon", tokenId: run.dragon, value: 15 },
-        { id: "e-troll", tokenId: run.troll, value: 10 },
-        { id: "e-goblin", tokenId: run.goblin, value: 5 },
+        { id: namedId("e-thorn"), tokenId: run.thornToken, value: 20 },
+        { id: namedId("e-dragon"), tokenId: run.dragon, value: 15 },
+        { id: namedId("e-troll"), tokenId: run.troll, value: 10 },
+        { id: namedId("e-goblin"), tokenId: run.goblin, value: 5 },
       ],
     });
     await waitFor("the fight", () => deskSocket.state?.encounter);
@@ -486,7 +486,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
       await waitFor(`${watch.label}'s snapshot`, () => socket.state);
       watch.allow = [];
     }
-    await turnTo("e-thorn");
+    await turnTo(namedId("e-thorn"));
     assert.deepEqual(troll()?.hurt, ["fire"], "the troll's Fire is recorded");
   });
 
@@ -676,7 +676,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
   });
 
   test("cu-b-5. the dragon's turn: the recharge card on both DM devices, the turn card open on the desk and folded on the phone, one roll and its result after a reload", async () => {
-    await turnTo("e-dragon");
+    await turnTo(namedId("e-dragon"));
     const deskCard = desk.getByRole("group", { name: `Fire Breath can recharge (5–6). ${DRAGON}` });
     const phoneCard = phone.getByRole("group", { name: `Fire Breath can recharge (5–6). ${DRAGON}` });
     await deskCard.waitFor();
@@ -764,7 +764,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
   });
 
   test("cu-b-7. the troll's turn: Regeneration with its Fire noted, Apply heals it, and the next round Skip leaves Reopen on its turn card", async () => {
-    await turnTo("e-troll");
+    await turnTo(namedId("e-troll"));
     const card = desk.getByRole("group", { name: "Regeneration for Troll" });
     await card.getByText("Troll regenerates 15 HP.", { exact: true }).waitFor();
     await card.getByText("Recorded Fire damage may stop Regeneration.", { exact: true }).waitFor();
@@ -777,8 +777,8 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await card.getByRole("button", { name: "Done", exact: true }).click();
 
     await ops.send({ t: "actor.hp", target: { tokenId: run.troll }, change: { kind: "damage", amount: 20, types: ["acid"] } });
-    await turnTo("e-goblin");
-    await turnTo("e-troll");
+    await turnTo(namedId("e-goblin"));
+    await turnTo(namedId("e-troll"));
     const again = desk.getByRole("group", { name: "Regeneration for Troll" });
     await again.getByText("Recorded Acid damage may stop Regeneration.", { exact: true }).waitFor();
     await again.getByRole("button", { name: "Skip", exact: true }).click();
@@ -794,7 +794,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
   test("cu-b-8. Thorn at 0 HP: his death save card on Pat's phone and the DM's, settled once by Pat's roll", async () => {
     await ops.send({ t: "actor.hp", target: { characterId: run.thorn }, change: { kind: "damage", amount: 30 } });
     await waitFor("Thorn dying", () => (thorn()?.life === "dying" ? true : null));
-    await turnTo("e-thorn");
+    await turnTo(namedId("e-thorn"));
     const card = pat.getByRole("group", { name: "Death save for Thorn" });
     await card.getByText("Thorn is dying. Death save: 0 successes, 0 failures.", { exact: true }).waitFor();
     await desk.getByRole("group", { name: "Death save for Thorn" }).waitFor();
@@ -823,7 +823,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
   test("cu-b-9. every new screen in line at each size", async () => {
     // The dragon's turn again, with its breath used, for its cards.
     await ops.send({ t: "actor.use", target: { tokenId: run.dragon }, use: { kind: "ability", key: BREATH, name: "Fire Breath", limit: "recharge", max: 1, min: 5, ifReady: true } });
-    await turnTo("e-dragon");
+    await turnTo(namedId("e-dragon"));
     for (const [page, cdp, view] of [
       [desk, deskCdp, DESK],
       [desk, deskCdp, { ...DESK, scale: 1.3 }],
@@ -904,9 +904,9 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     const bar = phone.getByRole("dialog", { name: `${DRAGON} actions` });
     // The dragon's turn brings its turn card. The goblin's brings none, so there two notices stack alone.
     const cases = [
-      { lead: "notice", turnOf: "e-dragon", before: "e-thorn" },
-      { lead: "timeUp", turnOf: "e-dragon", before: "e-thorn" },
-      { lead: "notice", turnOf: "e-goblin", before: "e-troll" },
+      { lead: "notice", turnOf: namedId("e-dragon"), before: namedId("e-thorn") },
+      { lead: "timeUp", turnOf: namedId("e-dragon"), before: namedId("e-thorn") },
+      { lead: "notice", turnOf: namedId("e-goblin"), before: namedId("e-troll") },
     ] as const;
     try {
       for (const { lead, turnOf, before } of cases) {
@@ -918,7 +918,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
           await waitFor("Fire Breath ready", () => (dragon()?.uses?.[BREATH] === undefined ? true : null));
         }
         // Effects that end as the turn starts give the DM a notice each. A 4 s turn timer gives the time-up line 4 s into the turn.
-        const ending = turnOf === "e-goblin" ? (["blessed", "hasted"] as const) : (["blessed"] as const);
+        const ending = turnOf === namedId("e-goblin") ? (["blessed", "hasted"] as const) : (["blessed"] as const);
         if (lead === "notice") for (const key of ending) await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin }, effect: { id: uuidv7(), key, duration: { mode: "turnStart", of: { entryId: turnOf } } } });
         else await ops.send({ t: "room.update", settings: { turnTimerSec: 4 } });
         // The bar opens before the turn, since a notice lasts only 6 s.
@@ -928,9 +928,9 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
         await turnTo(turnOf);
         const line = alerts(phone, lead).first();
         await line.waitFor({ timeout: 15_000 });
-        const next = turnOf === "e-goblin" ? alerts(phone, "notice").nth(1) : alerts(phone, "turn");
+        const next = turnOf === namedId("e-goblin") ? alerts(phone, "notice").nth(1) : alerts(phone, "turn");
         await next.waitFor({ state: "attached" });
-        if (turnOf === "e-goblin") assert.equal(await alerts(phone, "turn").count(), 0, "the goblin's turn brought a turn card");
+        if (turnOf === namedId("e-goblin")) assert.equal(await alerts(phone, "turn").count(), 0, "the goblin's turn brought a turn card");
         // The column takes the bar's place once both are drawn.
         await phone.waitForTimeout(400);
         const box = await line.boundingBox();
@@ -963,7 +963,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
         // The fade's whole box at or below the line's foot, so it covers none of its words or its Dismiss (review CCB-ASTRA-08).
         assert.ok(fade === null || fade.top >= foot - 0.5, `${what}: the column's fade at ${fade?.top}-${fade?.bottom} lies over the line, whose foot is at ${foot}`);
         assert.ok(box.y < after.y, `${what}: the line at ${box.y} is not drawn above the card after it at ${after.y}`);
-        await measure(phone, line, `${lead} above ${turnOf === "e-goblin" ? "a second notice" : "the turn card"} at 844x390`);
+        await measure(phone, line, `${lead} above ${turnOf === namedId("e-goblin") ? "a second notice" : "the turn card"} at 844x390`);
         await shots.take(phone, `cu-b-${lead}-${turnOf}-sideways`);
         await closeBar(phone);
         if (lead === "timeUp") await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
@@ -1091,15 +1091,15 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await ops.send({
       t: "encounter.start",
       entries: [
-        { id: "fu26-dragon", tokenId: run.dragon, value: 19 },
-        { id: "fu26-thorn", tokenId: run.thornToken, value: 15 },
-        { id: "fu26-troll", tokenId: run.troll, value: 10 },
+        { id: namedId("fu26-dragon"), tokenId: run.dragon, value: 19 },
+        { id: namedId("fu26-thorn"), tokenId: run.thornToken, value: 15 },
+        { id: namedId("fu26-troll"), tokenId: run.troll, value: 10 },
       ],
     });
     await waitFor("the fight", () => (deskSocket.state?.encounter?.entries.length === 3 ? true : null));
-    await turnTo("fu26-thorn");
-    await ops.send({ t: "encounter.add", entries: [{ id: "fu26-goblin", tokenId: run.goblin, value: 12 }] });
-    await ops.send({ t: "encounter.setValue", entryId: "fu26-troll", value: 8 });
+    await turnTo(namedId("fu26-thorn"));
+    await ops.send({ t: "encounter.add", entries: [{ id: namedId("fu26-goblin"), tokenId: run.goblin, value: 12 }] });
+    await ops.send({ t: "encounter.setValue", entryId: namedId("fu26-troll"), value: 8 });
     const tracker = await openTracker(desk);
     const toggle = tracker.getByRole("button", { name: `${DRAGON} options` });
     if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
@@ -1108,14 +1108,14 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     const m = srd.find((x) => x.srdId === "adult-red-dragon")!;
 
     await desk.locator("[data-round-header]").first().getByRole("button", { name: "Previous turn" }).click();
-    await waitFor("the dragon's turn again", () => (deskSocket.state?.encounter?.activeEntryId === "fu26-dragon" ? true : null));
+    await waitFor("the dragon's turn again", () => (deskSocket.state?.encounter?.activeEntryId === namedId("fu26-dragon") ? true : null));
     const rows = (state: RoomState | null) => state?.encounter?.entries.map((e) => `${e.id}:${e.value}${e.inLair ? ":lair" : ""}`);
-    const want = ["fu26-dragon:19:lair", "fu26-thorn:15", "fu26-goblin:12", "fu26-troll:8"];
+    const want = [`${namedId("fu26-dragon")}:19:lair`, `${namedId("fu26-thorn")}:15`, `${namedId("fu26-goblin")}:12`, `${namedId("fu26-troll")}:8`];
     assert.deepEqual(rows(deskSocket.state), want);
     assert.equal(deskSocket.state?.encounter?.round, 1);
     assert.equal(dragon()?.legendary?.actionsMax, 4, "the lair's counts stay with the switch");
     assert.equal(dragon()?.xp, m.xpInLair);
-    await waitFor("the phone sees the same", () => (phoneSocket.state?.encounter?.activeEntryId === "fu26-dragon" && JSON.stringify(rows(phoneSocket.state)) === JSON.stringify(want) ? true : null));
+    await waitFor("the phone sees the same", () => (phoneSocket.state?.encounter?.activeEntryId === namedId("fu26-dragon") && JSON.stringify(rows(phoneSocket.state)) === JSON.stringify(want) ? true : null));
     await tracker.getByRole("button", { name: "Goblin options" }).waitFor();
     // The options closed, so the shot shows the four rows.
     if ((await toggle.getAttribute("aria-expanded")) === "true") await toggle.click();
@@ -1184,7 +1184,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
       await card.waitFor({ state: "detached" });
     };
     try {
-      await turnTo("fu26-goblin");
+      await turnTo(namedId("fu26-goblin"));
       await skip();
       // Dismissed on this device, the turn card takes its Reopen with it: the bar and the row still hold one.
       const turn = alerts(desk, "turn");
@@ -1213,7 +1213,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
 
       // Skipped again, then Next: its record is no longer current, so the row and the bar hold no Uses.
       await skip();
-      await turnTo("fu26-troll");
+      await turnTo(namedId("fu26-troll"));
       const tracker = await openTracker(desk);
       const toggle = tracker.getByRole("button", { name: "Goblin options" });
       if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
@@ -1343,7 +1343,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await waitFor("the goblin dying", () => (actorOf(deskSocket.state, run.goblin)?.life === "dying" ? true : null));
     const GOBLIN_AT = { x: 22, y: 5 };
     try {
-      await turnTo("fu26-goblin");
+      await turnTo(namedId("fu26-goblin"));
       // The desk puts both cards away, the death save's among them, so a Reopen brings back no card here.
       const save = desk.getByRole("group", { name: "Death save for Goblin" });
       await save.getByRole("button", { name: "Dismiss", exact: true }).click();
@@ -1378,7 +1378,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
       // Skipped again, then Next: the record is no longer current, and the panel's Uses goes.
       await ops.send({ t: "actor.prompt", target: { tokenId: run.goblin }, record, what: "deathSave", state: "skipped" });
       await uses.getByText("Death save skipped", { exact: true }).waitFor();
-      await turnTo("fu26-troll");
+      await turnTo(namedId("fu26-troll"));
       await uses.waitFor({ state: "detached" });
       assert.deepEqual(await combatSections(panel), ["Hit Points", "Conditions", "Reaction", "Range rings", "Rest"]);
     } finally {
@@ -1392,8 +1392,8 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
   test("mu-b. Restore is the hand correction: off while full and saying why on a tap, keeping its focus after the last restore; on another creature's turn it frees a spent Fiery Rays first, as before, and Undo takes back exactly the mis-tap; on the dragon's own turn it gives back one (docs/design/design-v1-monster-uses.md 3.3)", async () => {
     await setUp(desk, deskCdp, DESK);
     // The dragon's turn starts with its actions back and its marks gone, then another creature's turn lets it take them.
-    await turnTo("fu26-dragon");
-    await turnTo("fu26-thorn");
+    await turnTo(namedId("fu26-dragon"));
+    await turnTo(namedId("fu26-thorn"));
     await ops.send({ t: "token.update", tokenId: run.dragon, patch: { actor: { legendary: { ...dragon()!.legendary!, actionsUsed: 0, resistUsed: 0 } } } });
     const panel = await creaturePanel(desk, DRAGON, DRAGON_AT);
     const uses = sectionIn(panel, "Uses");
@@ -1439,7 +1439,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     assert.equal(await actions.getByRole("button", { name: /^Use Fiery Rays/ }).getAttribute("aria-disabled"), "true", "Fiery Rays waits for the dragon's turn again");
 
     // On its own turn its actions are off, and Restore still corrects a count set by hand, one at a time (MU-OPUS-09).
-    await turnTo("fu26-dragon");
+    await turnTo(namedId("fu26-dragon"));
     await ops.send({ t: "token.update", tokenId: run.dragon, patch: { actor: { legendary: { ...dragon()!.legendary!, actionsUsed: 1 } } } });
     await countShows(uses, "legendary", "3 of 4");
     assert.equal(await actions.getByRole("button", { name: /^Use Pounce/ }).getAttribute("aria-disabled"), "true", "no legendary action on its own turn");
@@ -1457,7 +1457,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
   test("mu-c. Pat, lent an Aboleth in the fight, reads its rows as the DM does: its counts as pips, with Use and Restore, and his Restore lands (docs/design/design-v1-monster-uses.md 3.5)", async () => {
     await ops.send({ t: "token.create", token: { id: run.aboleth, sceneId: run.sceneId, visibility: "all", kind: "monster", name: "Aboleth", size: "large", x: ABOLETH_AT.x, y: ABOLETH_AT.y, disposition: "hostile", ownerIds: [run.patId], actor: { inline: srdActor("aboleth") } } });
     await ops.send({ t: "token.create", token: { id: run.tarrasque, sceneId: run.sceneId, visibility: "all", kind: "monster", name: "Tarrasque", size: "gargantuan", x: TARRASQUE_AT.x, y: TARRASQUE_AT.y, disposition: "hostile", actor: { inline: srdActor("tarrasque") } } });
-    await ops.send({ t: "encounter.add", entries: [{ id: "mu-aboleth", tokenId: run.aboleth, value: 6 }, { id: "mu-tarrasque", tokenId: run.tarrasque, value: 4 }] });
+    await ops.send({ t: "encounter.add", entries: [{ id: namedId("mu-aboleth"), tokenId: run.aboleth, value: 6 }, { id: namedId("mu-tarrasque"), tokenId: run.tarrasque, value: 4 }] });
     await waitFor("both in the fight", () => (deskSocket.state?.encounter?.entries.length === 6 ? true : null));
     const blockOf = (id: string) => limitedUses(srd.find((x) => x.srdId === id)! as never);
     const lash = blockOf("aboleth").find((u) => u.name === "Lash")!;
@@ -1512,7 +1512,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
       });
       // The dragon's counts past 6 stand in words, the monster rows' own, beside Thorn's.
       await ops.send({ t: "token.update", tokenId: run.dragon, patch: { actor: { legendary: { actionsMax: 7, actionsUsed: 1, resistMax: 7, resistUsed: 0 } } } });
-      await turnTo("fu26-thorn");
+      await turnTo(namedId("fu26-thorn"));
       for (const view of [DESK, { ...DESK, scale: 1.3 }, PHONE, { ...PHONE, scale: 1.3 }, SMALL, { ...SMALL, scale: 1.3 }]) {
         const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
         const tag = `${view.width}-${Math.round(view.scale * 100)}`;

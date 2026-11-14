@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pickTool, reopenRoom, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { namedId, ConsoleWatch, OpSocket, pickTool, reopenRoom, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * Roll requests on phones (docs/design/design-v1-visual.md 3.3.1): the real
@@ -633,7 +633,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
       characterId: run.thornCharId,
       patch: { level: 1, stats: { abilities: { str: 10, dex: 16, con: 12, int: 10, wis: 12, cha: 10 }, saves: ["dex"], skills: {}, adjust: {}, defenses: {}, rolls: [] } },
     });
-    await ops.send({ t: "actor.effect.add", target: { characterId: run.thornCharId }, effect: { id: "fx-restrained", key: "restrained" } });
+    await ops.send({ t: "actor.effect.add", target: { characterId: run.thornCharId }, effect: { id: namedId("fx-restrained"), key: "restrained" } });
     await waitFor("Thorn's stat block on the player's phone", () => playerSocket.state?.characters[run.thornCharId]?.stats);
     await ask("save", "dex", 13);
     const c = card(player);
@@ -650,8 +650,8 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await c.getByLabel("Total Thorn rolled").fill("");
 
     // Stunned fails a Dexterity save whatever the roll: its Fail comes first.
-    await ops.send({ t: "actor.effect.remove", target: { characterId: run.thornCharId }, effectId: "fx-restrained" });
-    await ops.send({ t: "actor.effect.add", target: { characterId: run.thornCharId }, effect: { id: "fx-stunned", key: "stunned" } });
+    await ops.send({ t: "actor.effect.remove", target: { characterId: run.thornCharId }, effectId: namedId("fx-restrained") });
+    await ops.send({ t: "actor.effect.add", target: { characterId: run.thornCharId }, effect: { id: namedId("fx-stunned"), key: "stunned" } });
     await c.getByRole("button", { name: "Fail (Stunned)" }).waitFor();
     await c.getByText(/Stunned: this save fails whatever the roll\./).waitFor();
     await shots.take(player, "rolls-card-fail-stunned");
@@ -667,7 +667,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await closeAll();
 
     // A typed answer takes the roll row away.
-    await ops.send({ t: "actor.effect.remove", target: { characterId: run.thornCharId }, effectId: "fx-stunned" });
+    await ops.send({ t: "actor.effect.remove", target: { characterId: run.thornCharId }, effectId: namedId("fx-stunned") });
     await ask("check", "wis");
     await c.getByLabel("Total Thorn rolled").fill("12");
     await c.getByRole("button", { name: "Send", exact: true }).tap();

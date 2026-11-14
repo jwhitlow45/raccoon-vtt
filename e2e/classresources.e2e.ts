@@ -10,7 +10,7 @@ import { LIMITS } from "#shared/limits.ts";
 import type { ClassResource } from "#shared/model.ts";
 import { wrappedButtons } from "./helpers/wraps.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { barControl, ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { namedId, barControl, ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Class resources (docs/design/design-v1-combat-controls.md 7 and 11), on the
@@ -390,12 +390,12 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await ops.send({
       t: "encounter.start",
       entries: [
-        { id: "e-thorn", tokenId: run.thornToken, value: 18 },
-        { id: "e-gob", tokenId: run.goblin, value: 8 },
+        { id: namedId("e-thorn"), tokenId: run.thornToken, value: 18 },
+        { id: namedId("e-gob"), tokenId: run.goblin, value: 8 },
       ],
     });
     await ops.send({ t: "encounter.next" });
-    await waitFor("Thorn's turn", () => (dmSocket.state?.encounter?.activeEntryId === "e-thorn" ? true : null));
+    await waitFor("Thorn's turn", () => (dmSocket.state?.encounter?.activeEntryId === namedId("e-thorn") ? true : null));
     // The turn card is the combat surfaces' lane, so the token panel's row stands in for it here.
     const panel = await thornsPanel(pat);
     await section(panel).scrollIntoViewIfNeeded();

@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, readCamera, reopenRoom, Shots, SocketWatch, startServer, Touches, touchSwipe, waitFor, type Server } from "./harness.ts";
+import { namedId, ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, readCamera, reopenRoom, Shots, SocketWatch, startServer, Touches, touchSwipe, waitFor, type Server } from "./harness.ts";
 
 /**
  * A side panel that resizes, and a sheet a mouse can grow and shrink
@@ -545,7 +545,7 @@ describe("raccoon-vtt: a side panel that resizes, and a sheet with a mouse", { t
         },
       });
       await wideOps.send({ t: "clock.start", id: uuidv7(), at: 2 * 86_400 + 20 * 3600, shown: true, calendar: { kind: "days" } });
-      const entries = [{ id: "e-thorn", tokenId: wideRun.thorn, value: 25 }, ...wideRun.goblins.map((tokenId, i) => ({ id: `e-g${i}`, tokenId, value: 20 - i }))];
+      const entries = [{ id: namedId("e-thorn"), tokenId: wideRun.thorn, value: 25 }, ...wideRun.goblins.map((tokenId, i) => ({ id: namedId(`e-g${i}`), tokenId, value: 20 - i }))];
       await wideOps.send({ t: "encounter.start", entries });
       await wideOps.send({ t: "encounter.next" });
       await waitFor("the fight, the clock and the phases in the DM's view", () => (wideDmSocket.state?.encounter?.entries.length === 7 && wideDmSocket.state.clock && wideDmSocket.state.scenes[wideRun.sceneId]?.phases?.length === 2 ? true : null));
