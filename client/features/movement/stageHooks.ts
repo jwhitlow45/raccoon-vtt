@@ -20,7 +20,7 @@ import { cutForWalkers, dropGrid, dropMode, dropView, goesStraight, heldShortOfC
 import { frameFields as routeFrame, groupReading, walkPreview } from "./preview.ts";
 import { freeDrop, type FreeDrop } from "./free.ts";
 import { pressPlan, worldFor } from "./press.ts";
-import { creatureAt, RouteDrag, type RouteAnswer } from "./routeDrag.ts";
+import { meetsCreature, RouteDrag, type RouteAnswer } from "./routeDrag.ts";
 import { BOARD_WORK } from "./boardWork.ts";
 import type { RouteJob, RouteWork } from "./routeWork.ts";
 import { sendPlan } from "./send.ts";
@@ -205,7 +205,7 @@ export function dragStops(deps: DragDeps): DragStops {
    * across drags (walls.ts sceneWalls), so a frame costs at most one drop's
    * leg tests.
    */
-  let memo: { view: DropView; token: DropToken; qx: number; qy: number; mode: string; closedBy: RouteWorld | null; stop: Stop | null; lands: Pose } | null = null;
+  let memo: { view: DropView; token: DropToken; qx: number; qy: number; mode: string; closedBy: RouteWorld | null; named: number; stop: Stop | null; lands: Pose } | null = null;
   /**
    * The same for the creatures a holder drags beside it
    * (docs/design/design-v1-attach.md 4.2): where along the holder's walk to
@@ -363,12 +363,13 @@ export function dragStops(deps: DragDeps): DragStops {
     const hex = isHex(dropGrid(view, token));
     const qx = hex ? target.x : Math.floor(raw.x * 4);
     const qy = hex ? target.y : Math.floor(raw.y * 4);
-    // Past a creature that closes the way the walk holds short of it, as the drop does (drop.ts planWalk), read in the world searched.
-    const closedBy = mode === "walk" && answer.kind === "none" && answer.creature !== undefined ? (w?.drag.world ?? null) : null;
-    if (!memo || memo.view !== view || memo.token !== token || memo.qx !== qx || memo.qy !== qy || memo.mode !== mode || memo.closedBy !== closedBy) {
+    // Past the creature that closes the way the walk holds short of it, as the drop does (drop.ts planWalk), read in the world searched.
+    const named = answer.kind === "none" ? (answer.creature ?? -1) : -1;
+    const closedBy = mode === "walk" && named >= 0 ? (w?.drag.world ?? null) : null;
+    if (!memo || memo.view !== view || memo.token !== token || memo.qx !== qx || memo.qy !== qy || memo.mode !== mode || memo.closedBy !== closedBy || memo.named !== named) {
       const straight = planOne(view, token, raw, mode);
-      const plan = closedBy ? heldShortOfCreature(view, token, straight, raw, (at) => creatureAt(closedBy, at) >= 0) : straight;
-      memo = { view, token, qx, qy, mode, closedBy, stop: plan.stop, lands: planLands(plan, token) };
+      const plan = closedBy ? heldShortOfCreature(view, token, straight, raw, (at) => meetsCreature(closedBy, at, named)) : straight;
+      memo = { view, token, qx, qy, mode, closedBy, named, stop: plan.stop, lands: planLands(plan, token) };
     }
     if (w) goStraight(w, memo.lands);
     // The drop walks the straight leg to where it lands, along its own route once that is checked and taken (drop.ts
@@ -558,15 +559,16 @@ export function dragStops(deps: DragDeps): DragStops {
             const nowMode = dropMode(role, now.scenes[token.sceneId]);
             const searched = found(answer, world);
             // A straight drop past the creature named is held short of it (drop.ts heldShortOfCreature), read in the world searched.
+            const named = answer.kind === "none" ? (answer.creature ?? -1) : -1;
             let closedBy: RouteWorld | null = null;
             const inTheWay =
-              world && searched.kind === "none" && searched.creature !== undefined
+              world && named >= 0 && searched.kind === "none" && searched.creature !== undefined
                 ? (to: Point) => {
                     if (!closedBy) {
                       closedBy = routeWorld(world.input);
                       budget.charge(routeWorldUnits(closedBy));
                     }
-                    return creatureAt(closedBy, to) >= 0;
+                    return meetsCreature(closedBy, to, named);
                   }
                 : undefined;
             placed(now, namedFollower(now, labelsOf(store.getState()), cutForWalkers(now, token, planWalk(now, token, at, nowMode, searched, now.meta.settings.feetPerCell, account, inTheWay), walkersFor(now, token.id, role), nowMode), searched));

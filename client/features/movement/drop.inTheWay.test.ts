@@ -81,6 +81,20 @@ describe("squares: the creature named is the one that closes the way (LP41-MOVE-
     assert.equal(dropThorn(s).note, "Orc is in the way.", "onto the corner square too");
   });
 
+  test("the walk holds before the orc it names, not beside the goblin in the room: Thorn on 3, 4 or 2, 4, a goblin two squares or one ahead, lands on 9, 4, and the board held him there (LP42-MOVE-1)", () => {
+    for (const [from, gob] of [
+      [3, 5],
+      [2, 3],
+    ] as const) {
+      const s = hall({ gob: goblin("gob", gob, 4), orc: goblin("orc", 10, 4, { name: "Orc" }) });
+      s.tokens.thorn = { ...s.tokens.thorn!, x: from };
+      const { drag, note } = dropThorn(s, { x: 17, y: 4 });
+      assert.equal(note, "Orc is in the way.");
+      assert.deepEqual(drag.plan.moves.map((m) => [m.x, m.y]), [[9, 4]], `from ${from}, 4`);
+      assert.deepEqual(drag.hold && [drag.hold.at.x, drag.hold.at.y], [9, 4]);
+    }
+  });
+
   test("two goblins, one in the corridor and one beyond it in the east room's doorway: the first, which closes the way, is named", () => {
     const s = hall({ gob: goblin("gob", 10, 4), orc: goblin("orc", 15, 4, { name: "Orc" }) });
     assert.equal(dropThorn(s, { x: 18, y: 7 }).note, "Goblin is in the way.");
@@ -192,6 +206,14 @@ for (const [name, g] of [
 
   test(`${name}: a goblin in the west room on Thorn's way, the orc in the corridor: the orc is named (LP41-MOVE-1)`, () => {
     assert.equal(dropThorn(corridor(2, { gob: [4, "Goblin"], orc: [10, "Orc"] }), onto(at(16, 3))).note, "Orc is in the way.");
+  });
+
+  test(`${name}: along line 6 past a goblin in the west room, Thorn holds before the orc it names, not beside the goblin (LP42-MOVE-1)`, () => {
+    const { drag, note } = dropThorn(corridor(3, { gob: [5, "Goblin"], orc: [10, "Orc"] }), onto(at(17, 6)));
+    assert.equal(note, "Orc is in the way.");
+    const lands = drag.plan.moves[0];
+    assert.ok(lands, "he moves");
+    assert.deepEqual(hexCenter(g, at(9, 6)), { x: lands.x + 0.5, y: lands.y + 0.5 }, "on the hex before the orc");
   });
 
   test(`${name}: Thorn in the corridor beside the goblin stays there, where the straight walk went on through it (LP41-MOVE-2)`, () => {

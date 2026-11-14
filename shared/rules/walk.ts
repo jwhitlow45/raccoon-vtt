@@ -707,9 +707,11 @@ export class WalkWorld {
    * footprint at a stored position lies over, as `endOnly` reads it, the
    * squeezed footprint where it squeezes: the first by its place in the
    * input's creatures, or -1. A device names it where it closes the way
-   * (routeDrag.ts, review LP40FIX-SOL-02).
+   * (routeDrag.ts, review LP40FIX-SOL-02). With `only`, that creature alone
+   * is read, so a walk held short of the creature named is held short of
+   * it where another lies under the walker too (LP42-MOVE-1).
    */
-  blockedBy(x: number, y: number, elevation: number): number {
+  blockedBy(x: number, y: number, elevation: number, only = -1): number {
     if (this.mode === "inside") return -1;
     const box = this.#box(x, y, -2, this.#endBox);
     const x0 = box[0]!;
@@ -720,6 +722,7 @@ export class WalkWorld {
     this.#creaturesUnder(x0, y0, x1, y1, (c) => {
       if (c.way !== "blocked" || !overlaps(c, x0, y0, x1, y1) || !(c.lo < elevation + this.height && elevation < c.hi)) return;
       const k = this.input.creatures.indexOf(c);
+      if (only >= 0 && k !== only) return;
       if (first < 0 || k < first) first = k;
     });
     return first;

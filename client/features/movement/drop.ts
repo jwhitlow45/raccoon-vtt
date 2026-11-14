@@ -860,14 +860,16 @@ export function planWalk(state: DropView, token: DropToken, raw: Aim, mode: Excl
 
 /**
  * A walk's straight drop, where the search names a creature that closes
- * the way (`Found`), held short of the first creature on that leg the
- * walker cannot pass, as it is held short of a wall (D-261114-007): at the
- * leg's last spot before it where the walk may stand, by the drop's own
- * landing rule. `inTheWay` says whether the walker standing at a spot
- * would stand in such a creature's space, as the search reads the spot
- * (routeDrag.ts creatureAt). The drop's own spot is left out, since a walk
- * may end in such a space. Else the drop walked on through the creature
- * its note named, as far as the wall beyond it (live play 41,
+ * the way (`Found`), held short of that creature on the leg, as it is held
+ * short of a wall (D-261114-007): at the leg's last spot before it where
+ * the walk may stand, by the drop's own landing rule. `inTheWay` says
+ * whether the walker standing at a spot would stand in the named
+ * creature's space, as the search reads the spot (routeDrag.ts
+ * meetsCreature), and in no other's: a goblin in the open room before the
+ * corridor its orc closes held the walk beside it under the orc's name
+ * (live play 42, LP42-MOVE-1). The drop's own spot is left out, since a
+ * walk may end in such a space. Else the drop walked on through the
+ * creature its note named, as far as the wall beyond it (live play 41,
  * LP41-MOVE-2). The move still needs nothing of the server: it is shorter.
  */
 export function heldShortOfCreature(state: DropView, token: DropToken, plan: DropPlan, raw: Aim, inTheWay: (at: Point) => boolean): DropPlan {

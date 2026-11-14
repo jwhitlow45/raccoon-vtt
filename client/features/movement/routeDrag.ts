@@ -383,23 +383,24 @@ function spotsAlong(search: RouteSearch, points: readonly RoutePoint[]): { creat
 }
 
 /**
- * The creature the walker cannot pass whose space it would stand in at the
- * stored spot `at` of `world`, by its place in the world's creatures, or
- * -1: read as the search reads a spot it may end in but never pass through
- * (walk.ts `blockedBy`, hexWalk.ts `endOnly`), so a drop's straight walk
- * is held short of it (drop.ts heldShortOfCreature).
+ * Whether the walker standing at the stored spot `at` of `world` would
+ * stand in the space of creature `k`, by its place in the world's
+ * creatures, which it cannot pass: read as the search reads a spot it may
+ * end in but never pass through (walk.ts `blockedBy`, hexWalk.ts
+ * `endOnly`), so a drop's straight walk is held short of the creature its
+ * note names, and only that one (drop.ts heldShortOfCreature, LP42-MOVE-1).
  */
-export function creatureAt(world: RouteWorld, at: Point): number {
+export function meetsCreature(world: RouteWorld, at: Point, k: number): boolean {
   const node = world.nodeAt(at);
-  if (node < 0) return -1;
-  if (world instanceof HexWalkWorld) return hexCreatureAt(world, world.standOf(node));
-  return world.blockedBy(at.x, at.y, world.elevationAt(node));
+  if (node < 0) return false;
+  if (world instanceof HexWalkWorld) return hexCreatureAt(world, world.standOf(node), k) === k;
+  return world.blockedBy(at.x, at.y, world.elevationAt(node), k) === k;
 }
 
-/** On hexes, the creature the walker cannot pass under the stand `stand` at its height there, or -1. */
-function hexCreatureAt(world: HexWalkWorld, stand: HexStand): number {
+/** On hexes, the creature the walker cannot pass under the stand `stand` at its height there, the first or only `only`, or -1. */
+function hexCreatureAt(world: HexWalkWorld, stand: HexStand, only = -1): number {
   if (!world.endOnly(stand)) return -1;
   const under = new Set(hexStandHexes(world.g, stand).map(hexKey));
   const elevation = world.elevationOf(stand);
-  return world.input.creatures.findIndex((c) => c.way === "blocked" && c.lo < elevation + world.height && elevation < c.hi && c.hexes?.some((h) => under.has(h)) === true);
+  return world.input.creatures.findIndex((c, k) => (only < 0 || k === only) && c.way === "blocked" && c.lo < elevation + world.height && elevation < c.hi && c.hexes?.some((h) => under.has(h)) === true);
 }
