@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { HARD } from "#shared/limits.ts";
 import type { SaveOutcomeLedger, SaveOutcomeRecord } from "#shared/saveOutcomeContract.ts";
 import { castSeen, closeSettled, closeTheAsk, newPage, setDc, type Page } from "./chain.ts";
 import { castAsk } from "#shared/testutil.ts";
@@ -300,4 +301,14 @@ describe("Outcome restored once no Play step for it remains (LP27-A-GS-2, D-2611
     assert.equal(undone.reopen?.observed?.epoch, undefined, "an undone outcome keeps no epoch");
     assert.equal(noticeWords({ check: "unavailable", notice: OUTCOME_UNAVAILABLE }, { epoch: E2, undoSteps: 0 }), OUTCOME_UNAVAILABLE);
   });
+});
+
+test("a saved page keeps a selection of every token a scene can hold with players' seats full, and no more", () => {
+  const many = (n: number) => Array.from({ length: n }, (_, i) => `019a3df0-1000-7000-8000-${String(i).padStart(12, "0")}`);
+  const withSelection = (tokenIds: string[]) => {
+    const saved = start();
+    return draftOf({ ...saved, page: { ...saved.page, source: { kind: "selection", tokenIds } } });
+  };
+  assert.equal(saveDraftSchema.safeParse(withSelection(many(HARD.groupSaveTokens))).success, true);
+  assert.equal(saveDraftSchema.safeParse(withSelection(many(HARD.groupSaveTokens + 1))).success, false);
 });

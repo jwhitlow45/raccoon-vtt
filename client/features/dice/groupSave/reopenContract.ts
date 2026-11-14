@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LIMITS, serializedBytes } from "#shared/limits.ts";
+import { HARD, LIMITS, serializedBytes } from "#shared/limits.ts";
 import { ABILITY_KEYS, CONDITION_KEYS, SKILL_KEYS } from "#shared/model.ts";
 import {
   actorTargetSchema,
@@ -93,9 +93,10 @@ const withinDraftBytes = (value: unknown) => serializedBytes(value) <= SAVE_DRAF
 const byteLimit = { message: "a save draft exceeds its byte limit" };
 
 const source = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("selection"), tokenIds: z.array(id).max(LIMITS.tokensPerScene), live: z.literal(true).optional(), except: id.optional() }),
+  // A scene holds up to its far line of tokens, players' seats beside the DM's cap (shared/limits.ts FAR), and a group save can pick them all.
+  z.strictObject({ kind: z.literal("selection"), tokenIds: z.array(id).max(HARD.groupSaveTokens), live: z.literal(true).optional(), except: id.optional() }),
   z.strictObject({ kind: z.literal("area"), templateId: id }),
-  z.strictObject({ kind: z.literal("trap"), trapId: id, due: id, tokenIds: z.array(id).max(LIMITS.tokensPerScene) }),
+  z.strictObject({ kind: z.literal("trap"), trapId: id, due: id, tokenIds: z.array(id).max(HARD.groupSaveTokens) }),
 ]) satisfies z.ZodType<Page["source"]>;
 
 const fill = z.strictObject({
