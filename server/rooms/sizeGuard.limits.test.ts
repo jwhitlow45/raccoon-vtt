@@ -4,7 +4,7 @@ import { BOOKKEEPING_RESERVE, FAR, roundUp } from "#shared/limits.ts";
 import type { Member, RoomState, Viewer } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { character, DM, env, member, room, scene, token } from "#shared/testutil.ts";
+import { character, companionBlock, DM, env, member, room, scene, token } from "#shared/testutil.ts";
 import { farRoomBytes, growthBound, heldBytes, measuredStateBytes, overFarLine, PER_PLAYER_FULL, playerBlockBytes, projectedSceneBytes, roomLevelBytes, SizeGuard, widestPerPlayerReserve } from "./sizeGuard.ts";
 
 /*
@@ -116,6 +116,22 @@ describe("the far line", () => {
     const free = new SizeGuard();
     free.stateMeasured(measuredStateBytes(under), under);
     assert.deepEqual(judged(under, line("d1"), P1, free, "widest"), { ok: true });
+  });
+
+  test("players' companion blocks count in the far reading: past the line by them a player's op is refused, and the DM's notice counts them", () => {
+    const under = nearFar(FAR.roomBytes - BOOKKEEPING_RESERVE.room - 2 * MIB);
+    const before = farRoomBytes(under, true);
+    const state: RoomState = { ...under, characters: { ...under.characters, pc: character("pc", { ownerIds: ["p1"] }) }, companionBlocks: { ...under.companionBlocks } };
+    const traits = [1, 2, 3].map((i) => ({ name: `Trait ${i}`, text: "w".repeat(4_000) }));
+    for (let i = 0; playerBlockBytes(state) < 3 * MIB; i++) state.companionBlocks[`b${i}`] = companionBlock(`b${i}`, "pc", { traits });
+    const blocks = playerBlockBytes(state);
+    const reading = farRoomBytes(state, true);
+    assert.ok(Math.abs(reading - before - blocks) <= FAR.byteStep, `${reading} against ${before} and ${blocks} of blocks`);
+    const guard = new SizeGuard();
+    guard.stateMeasured(measuredStateBytes(state), state);
+    assert.equal(guard.over, overFarLine(state));
+    assert.ok(guard.over > 0 && Math.abs(guard.over - (before + blocks - FAR.roomBytes)) <= FAR.byteStep, `over by ${guard.over}`);
+    assert.deepEqual(judged(state, line("d1"), P1, guard, "widest"), { ok: false, code: "quota", message: `the room is full: it is at its ${Math.floor(FAR.roomBytes / MIB)} MiB size limit` });
   });
 
   test("an op that meets the line stops the bookkeeping reserve short of it, and an exempt kind goes on to the line itself", () => {

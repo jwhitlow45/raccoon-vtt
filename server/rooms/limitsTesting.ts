@@ -12,7 +12,7 @@ import { SAVE_OUTCOME_LEDGER_BYTES, SAVE_OUTCOME_RECORD_BYTES, SAVE_OUTCOME_RECO
 import { actor, castAsk, character, companionBlock, drawing, entry, room, scene, token } from "#shared/testutil.ts";
 import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION } from "./exportRoom.ts";
 import { remapState } from "./remap.ts";
-import { measuredLog, measuredStateBytes, memoryReserves, memoryShare, projectedSceneBytes } from "./sizeGuard.ts";
+import { farRoomBytes, measuredLog, measuredStateBytes, memoryReserves, memoryShare, projectedSceneBytes } from "./sizeGuard.ts";
 
 /*
  * The full fixture of the player limits' bounds (design section 8): a room
@@ -338,31 +338,40 @@ export function roomMeasure(state: RoomState, stateLimit: number = FAR.roomBytes
   return bytes + explored + memory.whole + memory.sharing * memoryShare(stateLimit, bytes, explored, memory);
 }
 
-/** Companion blocks of the players' characters, each near its byte cap, until the room is at its line or the blocks at theirs. Each character's stay within its own caps. */
+/**
+ * Companion blocks of the players' characters, each near its byte cap,
+ * until the room's far reading (farRoomBytes, the measure a player's op
+ * meets) is at its line or the blocks at theirs. Each character's stay
+ * within its own caps.
+ */
 function fillBlocks(state: RoomState, limit: number): void {
   const characters = Object.keys(state.characters);
   const text = wide(1_200);
   const traits = [1, 2, 3].map(() => ({ name: wide(MAX_NAME), text }));
-  let roomLeft = limit - roomMeasure(state, limit);
+  let measured = measuredStateBytes(state);
   let blocksLeft = FAR.blockBytes - serializedBytes(state.companionBlocks);
   // As many to a character as its own caps take, then the next character's.
   const perCharacter = Math.min(LIMITS.companionBlocksPerCharacter, Math.floor(LIMITS.companionBlockBytesPerCharacter / serializedBytes(companionBlock(longId("block", 0), characters[0]!, { name: wide(MAX_NAME), traits }))));
+  const added: string[] = [];
   for (let i = 0; i < FAR.blocks; i++) {
     const id = longId("block", i);
     const characterId = characters[Math.floor(i / perCharacter) % characters.length]!;
     const block: CompanionBlock = companionBlock(id, characterId, { name: wide(MAX_NAME), traits });
     const bytes = serializedBytes({ [id]: block }) - 1;
-    if (bytes > roomLeft || bytes > blocksLeft) break;
+    if (bytes > blocksLeft || farRoomBytes(state, true, measured + bytes) > limit) break;
     state.companionBlocks[id] = block;
-    roomLeft -= bytes;
+    added.push(id);
+    measured += bytes;
     blocksLeft -= bytes;
   }
+  // The running measure counts each block's bytes to within the comma between entries: the exact reading settles the last.
+  while (added.length > 0 && farRoomBytes(state, true) > limit) delete state.companionBlocks[added.pop()!];
 }
 
 export type Bounds = {
   /** The state as its snapshot row and an export write it. */
   stored: number;
-  /** The room line's measure, reserves included. */
+  /** The room far line's reading at its widest (farRoomBytes), the measure a player's op meets. */
   room: number;
   /** The players' scene as the scene line measures it. */
   scene: number;
@@ -390,7 +399,7 @@ export function measureBounds(full: FullRoom): Bounds {
   const shared = measuredLog(state.log);
   return {
     stored: serializedBytes(state),
-    room: roomMeasure(state),
+    room: farRoomBytes(state, true),
     scene: sceneMeasure(state, sceneId),
     privateLines: serializedBytes(state.log) - serializedBytes(shared),
     sharedLines: serializedBytes(shared),

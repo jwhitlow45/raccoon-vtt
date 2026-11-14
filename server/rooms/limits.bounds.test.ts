@@ -30,8 +30,9 @@ describe("a room at the far lines", () => {
     delete state.casts.more;
     assert.equal(Object.keys(state.rolls).length, LIMITS.openRollsPerRoom);
     assert.equal(Object.keys(state.members).length, LIMITS.membersPerRoom);
-    // One more block or drawing would pass the line, so each measure is within one of them.
-    assert.ok(bounds.room <= FAR.roomBytes && bounds.room > FAR.roomBytes - 16 * 1024, `room ${bounds.room}`);
+    // One more block or drawing would pass the line, so each measure is within one of them, the room's far reading
+    // within one of its steps too.
+    assert.ok(bounds.room <= FAR.roomBytes && bounds.room > FAR.roomBytes - FAR.byteStep - 16 * 1024, `room ${bounds.room}`);
     assert.ok(bounds.scene <= FAR.sceneBytes && bounds.scene > FAR.sceneBytes - 16 * 1024, `scene ${bounds.scene}`);
   });
 

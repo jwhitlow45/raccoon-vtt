@@ -388,7 +388,8 @@ export class SizeGuard {
 
   /**
    * The far line (shared/limits.ts FAR): the room's and each
-   * scene's reading, the DM's part with its reserves rounded up to
+   * scene's reading, all but what seats hold (for the room, players'
+   * companion blocks included) with its reserves rounded up to
    * FAR.byteStep and what seats hold exactly, refuses an op that grows the
    * measure's total past it. Read exactly only once the bound with a step
    * to spare could pass the line. Called after the near check counted the
@@ -404,7 +405,7 @@ export class SizeGuard {
       const bytes = measuredStateBytes(next);
       const held = heldBytes(next);
       const grew = before === undefined || bytes + reserves > measuredStateBytes(before) + farReserves(before, widest);
-      if (farBytesOver("room", kind, bytes - held - playerBlockBytes(next) + reserves, held, grew)) return refused(FAR.roomBytes);
+      if (farBytesOver("room", kind, bytes - held + reserves, held, grew)) return refused(FAR.roomBytes);
       this.#state = { bytes, growth: 0 };
     }
     const sceneLine = farByteLine(kind, "scene")!;
@@ -1758,7 +1759,11 @@ export function heldBytes(state: RoomState, sceneIds?: readonly string[]): numbe
   return bytes;
 }
 
-/** The companion blocks of characters a player owns, which the room's measure counts but the DM's part leaves to the blocks' own lines. */
+/**
+ * The companion blocks of characters a player owns, which the DM's near
+ * part of the room leaves out (dmRoomBytes), so players' blocks never take
+ * the DM's room. The far reading counts them with the rest.
+ */
 export function playerBlockBytes(state: RoomState): number {
   let bytes = 0;
   for (const [id, block] of Object.entries(state.companionBlocks)) {
@@ -1769,16 +1774,17 @@ export function playerBlockBytes(state: RoomState): number {
 }
 
 /**
- * The room far line's reading of a state (shared/limits.ts FAR): the DM's
- * part with its reserves rounded up to FAR.byteStep, plus what seats hold
- * exactly. `widest` holds per-player vision's reserves at their widest, a
- * player's op's and a DM op's that raises them. The marked pool counts
- * whole against this line alone.
+ * The room far line's reading of a state (shared/limits.ts FAR): all but
+ * what seats hold, players' companion blocks included, with its reserves
+ * rounded up to FAR.byteStep, plus what seats hold exactly. `widest` holds
+ * per-player vision's reserves at their widest, a player's op's and a DM
+ * op's that raises them. The marked pool counts whole against this line
+ * alone.
  */
 export function farRoomBytes(state: RoomState, widest: boolean, measured: number = measuredStateBytes(state)): number {
   const held = heldBytes(state);
   const reserves = farReserves(state, widest);
-  return roundUp(Math.max(0, measured - held - playerBlockBytes(state) + reserves), FAR.byteStep) + held;
+  return roundUp(Math.max(0, measured - held + reserves), FAR.byteStep) + held;
 }
 
 function farReserves(state: RoomState, widest: boolean): number {
