@@ -621,10 +621,22 @@ export function checkSetReach(before: RoomState, token: Pick<Token, "id" | "scen
   const walks = [lead, ...followGroup(before, lead, publicMembers(before.tokens, token.id, seen, new Set([token.id])), () => true, false, {})];
   // Infinite feet per square make every rise no reach.
   const perSquare = role === "player" && ownEntry(before.scenes, token.sceneId)?.fogEnabled === true ? Infinity : feetPerCell;
+  // Each walk's reach on each piece of the lead's walk, `sums[i]` on the piece its point i closes, which a point at a piece's start
+  // does for the piece before. A walk in single file hex by hex (route.ts FileAlong) has more points than the lead's, so its legs
+  // count on the lead's piece each ends on, never by index, where they would stand for later pieces and count those twice (review
+  // HEXFILE-OPUS-2).
+  const points = route.length;
+  const perPiece = walks.map((w) => {
+    const sums = new Array<number>(points).fill(0);
+    for (let k = 1; k < w.route.length; k++) {
+      const at = w.along?.[k];
+      const closes = at ? (at[1] === 0 && at[0] > 0 ? at[0] : at[0] + 1) : k;
+      sums[Math.min(closes, points - 1)]! += pieceReach(w.route[k - 1]!, w.route[k]!, perSquare);
+    }
+    return sums;
+  });
   let reach = 0;
-  // A walk in single file hex by hex has more points than the lead's (route.ts FileAlong), and its legs past them count too.
-  const legs = Math.max(...walks.map((w) => w.route.length));
-  for (let i = 1; i < legs; i++) reach += Math.max(...walks.map((w) => (i < w.route.length ? pieceReach(w.route[i - 1]!, w.route[i]!, perSquare) : 0)));
+  for (let i = 1; i < points; i++) reach += Math.max(...perPiece.map((sums) => sums[i]!));
   return reach;
 }
 
