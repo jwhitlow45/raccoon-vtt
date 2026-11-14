@@ -166,6 +166,17 @@ describe("squares: a rider dragged out of a squeezed mount lands under the finge
     assert.notDeepEqual(at(after, "bree"), [5, 5], "held short of the room");
   });
 
+  test("an orc in the row ahead of Bree, who drags the goblin behind her: onto room B the note names the orc, and the warhorse holds before it, where the note said a wall stopped it (LP42-MOVE-3)", () => {
+    const s = keep({ x: 9, y: 4 }, { x: 8, y: 4 });
+    s.tokens.orc = token("orc", { x: 12, y: 4, name: "Orc", kind: "monster", disposition: "hostile", actor: { inline: actor() } });
+    const copy = projectState(s, P1, { sceneId: "s1" }) as unknown as RoomState;
+    const horse = s.tokens.horse!;
+    const bree = s.tokens.bree!;
+    const plan = planOn(copy, { x: 12 - 0.5 + horse.x - bree.x + 0.5, y: 11 - 0.5 + horse.y - bree.y + 0.5 });
+    assert.equal(sent(plan).note, "Orc is in the way.");
+    for (const m of plan.moves) assert.ok(m.x + 2 <= 12, `held short of the orc: ${JSON.stringify(sent(plan))}`);
+  });
+
   test("a flying warhorse, Bree and the goblin she drags 5 ft up, a rise 2 ft high on 6, 5: onto 5, 5 she lands there, the goblin over the rise at 5 ft (review LP40FIX-SOL-01)", () => {
     const s = keep({ x: 9, y: 4 }, { x: 10, y: 4 });
     heights(s, { x: 6, y: 5, w: 1, h: 1 }, 2);

@@ -185,7 +185,11 @@ export class RouteDrag {
     const follower = world.tows ? this.#follower(world, to, budget) : null;
     if (follower === "paused") return false;
     if (follower) return this.#answered({ kind: "none", capped: false, follower });
-    return this.#closed(this.#search, to, budget);
+    if (!this.#alone) return this.#closed(this.#search, to, budget);
+    // The walker's own search, as a drop in single file reads it: the creatures it drags cannot follow past the one that closes the way either, so the creatures' spaces opened in their world find no way, and the note named a wall (live play 42, LP42-MOVE-3).
+    const alone = this.#alone.settle(to, budget);
+    if (alone === "paused") return false;
+    return alone === "capped" ? this.#answered({ kind: "none", capped: true }) : this.#closed(this.#alone, to, budget);
   }
 
   /** No way to `to` that `closed`, a search run out of states, could miss: the answer, naming the creature that closes the way where one does (`#inTheWay`). */
