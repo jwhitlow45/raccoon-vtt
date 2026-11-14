@@ -120,7 +120,42 @@ export const ADDRESS_WATCH_MS = 5_000;
 /** A port held by a server that is still shutting down (an older supervisor's) is waited on this long. */
 export const PORT_WAIT_MS = 5_000;
 
+/**
+ * The parts of a start, each logged as it begins and bounded, so a wait
+ * that never ends stops the start with words (a `stalled` error) and never
+ * leaves it looking hung. Each bound is well past the part's slowest honest
+ * run: PowerShell's cold start, initdb on a slow disk, pg_ctl's own 120 s
+ * wait and the 30 s past it before postgres.ts ends pg_ctl, a restore's end
+ * moving every image. Two waits have bounds of their own instead: the app
+ * server's first answer (appServer.ts waitHealthy, 60 s, then a restart),
+ * and the backup before an update, which is honest work for as long as the
+ * data takes and whose step says what it is doing.
+ */
+export const START_PARTS = {
+  lock: { words: "taking the data folder's lock", ms: 60_000 },
+  settings: { words: "reading the settings", ms: 30_000 },
+  firewall: { words: "checking the firewall rule", ms: 60_000 },
+  bundledMajor: { words: "finding the bundled PostgreSQL", ms: 120_000 },
+  dataMajor: { words: "reading the data's PostgreSQL version", ms: 30_000 },
+  leftover: { words: "checking for a PostgreSQL left running", ms: 120_000 },
+  clearLeftover: { words: "stopping a PostgreSQL left running", ms: 120_000 },
+  initdb: { words: "setting up the database", ms: 600_000 },
+  startDatabase: { words: "starting the database", ms: 210_000 },
+  restorePending: { words: "looking for an unfinished restore", ms: 30_000 },
+  recover: { words: "finishing an unfinished restore", ms: 600_000 },
+  openDatabase: { words: "opening the database", ms: 60_000 },
+  backups: { words: "listing the backups", ms: 60_000 },
+  versionCheck: { words: "checking which version wrote the data", ms: 60_000 },
+  port: { words: "checking the port", ms: 60_000 },
+  network: { words: "reading the network", ms: 30_000 },
+  networkSample: { words: "reading the Windows network profile", ms: 30_000 },
+  saveSettings: { words: "saving the settings", ms: 30_000 },
+  stamp: { words: "writing this version's stamp", ms: 60_000 },
+} as const satisfies Record<string, { words: string; ms: number }>;
+export type StartPart = keyof typeof START_PARTS;
+
 class Halt extends Error {}
+class Overran extends Error {}
 
 /** A notice without its number, which setNotice gives it. */
 type NoticeBody = Notice extends infer N ? (N extends Notice ? Omit<N, "seq"> : never) : never;
@@ -208,10 +243,29 @@ export class Supervisor {
   }
 
   private set(state: SupervisorState, step: StatusStep | null): void {
+    if (state !== this.state || step !== this.step) this.d.log(`status: ${state}${step ? `, ${step}` : ""}`);
     this.state = state;
     this.step = step;
     if (state !== "error") this.error = null;
     this.emit();
+  }
+
+  /** One part of a start (START_PARTS): logged as it begins, and stopping the start with its words when it overruns. */
+  private async part<T>(name: StartPart, work: () => Promise<T>): Promise<T> {
+    const { words, ms } = START_PARTS[name];
+    this.d.log(`start: ${words}`);
+    let overrun!: (err: Overran) => void;
+    const overran = new Promise<never>((_, reject) => (overrun = reject));
+    const timer = this.d.clock.setTimeout(() => overrun(new Overran()), ms);
+    try {
+      return await Promise.race([work(), overran]);
+    } catch (err) {
+      if (!(err instanceof Overran)) throw err;
+      this.d.log(`${words} did not finish in ${ms / 1000} s, so the start stops`);
+      this.fail({ kind: "stalled", what: words, seconds: ms / 1000 });
+    } finally {
+      timer.cancel();
+    }
   }
 
   /** Ends the current start in an error the window explains. The supervisor stays up for the DM's answer. */
@@ -272,35 +326,36 @@ export class Supervisor {
     if (this.restoreStep === null) this.set("starting", null);
     if (this.d.isRoot()) this.fail({ kind: "root" });
     if (!this.lockHeld) {
-      const lock = await this.d.lock.acquire();
+      const lock = await this.part("lock", () => this.d.lock.acquire());
       if (!lock.ok) this.fail(lock.error);
       this.lockHeld = true;
     }
-    this.settings ??= await this.d.settings.load();
+    this.settings ??= await this.part("settings", () => this.d.settings.load());
     if (!this.networkStarted) {
       this.networkStarted = true;
       this.d.network.start(() => void this.enqueue(() => this.networkChanged()));
-      this.firewall = await this.d.network.firewallRule();
+      this.firewall = await this.part("firewall", () => this.d.network.firewallRule());
     }
-    if (!this.build) this.build = { ...this.d.build, pgMajor: await this.d.pg.bundledMajor() };
+    if (!this.build) this.build = { ...this.d.build, pgMajor: await this.part("bundledMajor", () => this.d.pg.bundledMajor()) };
     const build = this.build;
 
     if (!this.pgUp) {
-      const dataMajor = await this.d.pg.dataMajor();
+      const dataMajor = await this.part("dataMajor", () => this.d.pg.dataMajor());
       if (dataMajor !== null && dataMajor !== build.pgMajor) this.fail({ kind: "pgMajor", dataMajor, bundledMajor: build.pgMajor });
-      const left = await this.d.pg.leftover();
+      const left = await this.part("leftover", () => this.d.pg.leftover());
       if (left.kind !== "none") {
         this.set("recovering", null);
-        await this.d.pg.clearLeftover(left);
+        await this.part("clearLeftover", () => this.d.pg.clearLeftover(left));
       }
       if (this.d.pg.needsInit()) {
         this.set("starting", "initdb");
-        await this.d.pg.init();
+        await this.part("initdb", () => this.d.pg.init());
       }
       this.set("starting", "startDatabase");
       try {
-        await this.d.pg.start();
+        await this.part("startDatabase", () => this.d.pg.start());
       } catch (err) {
+        if (err instanceof Halt) throw err;
         this.fail({ kind: "databaseFailed", logLine: (err as { logLine?: string }).logLine ?? (err as Error).message });
       }
       this.pgUp = true;
@@ -308,8 +363,8 @@ export class Supervisor {
     }
 
     if (!this.dbOpen) {
-      if (await this.d.restore.pending()) this.set("recovering", "finishRestore");
-      const rec = await this.d.restore.recover(build);
+      if (await this.part("restorePending", () => this.d.restore.pending())) this.set("recovering", "finishRestore");
+      const rec = await this.part("recover", () => this.d.restore.recover(build));
       if (rec.tangled) this.fail({ kind: "restoreTangled" });
       if (rec.notice && !(this.justRestored && rec.notice === "restoreFinished")) {
         const started = rec.backup ? backupNameTime(rec.backup) : null;
@@ -317,9 +372,9 @@ export class Supervisor {
         else this.setNotice({ kind: "restoreInterrupted" });
       }
       this.justRestored = false;
-      await this.d.db.open(rec.createLive);
+      await this.part("openDatabase", () => this.d.db.open(rec.createLive));
       this.dbOpen = true;
-      await this.refreshLastBackup();
+      await this.part("backups", () => this.refreshLastBackup());
     }
 
     if (!this.server) {
@@ -329,10 +384,10 @@ export class Supervisor {
   }
 
   private async versionChecks(build: Build): Promise<void> {
-    const verdict = judge(await this.d.db.readStamp(), await this.d.db.roomsEmpty(), build);
+    const verdict = await this.part("versionCheck", async () => judge(await this.d.db.readStamp(), await this.d.db.roomsEmpty(), build));
     if (verdict.kind === "noStamp") this.fail({ kind: "noStamp" });
     if (verdict.kind === "newer") {
-      const any = (await this.d.backups.list()).some((b) => readable(b.record, build));
+      const any = (await this.part("backups", () => this.d.backups.list())).some((b) => readable(b.record, build));
       this.fail(any ? { kind: "newerData", dataApp: verdict.dataApp } : { kind: "noReadableBackup", dataApp: verdict.dataApp });
     }
     if (verdict.kind === "update" && !this.skipBeforeUpdateBackup) {
@@ -349,26 +404,27 @@ export class Supervisor {
     const settings = this.settings as Settings;
     let port = this.d.overrides.port ?? settings.port;
     if (port === undefined) {
-      const first = await this.d.ports.firstFree(DEFAULT_PORT);
+      const first = await this.part("port", () => this.d.ports.firstFree(DEFAULT_PORT));
       if (first === null) this.fail({ kind: "databaseFailed", logLine: "no free port from 3170 up" });
       port = first;
       this.settings = { ...settings, port };
-      await this.d.settings.save(this.settings);
+      await this.part("saveSettings", () => this.d.settings.save(this.settings as Settings));
     }
-    if (!(await this.waitPortFree(port))) {
-      const next = (await this.d.ports.firstFree(port + 1)) ?? port;
+    const wanted = port;
+    if (!(await this.part("port", () => this.waitPortFree(wanted)))) {
+      const next = (await this.part("port", () => this.d.ports.firstFree(wanted + 1))) ?? wanted;
       this.port = null;
-      this.fail({ kind: "portInUse", port, next });
+      this.fail({ kind: "portInUse", port: wanted, next });
     }
-    this.net = await this.d.network.read(this.networkPlay());
+    this.net = await this.part("network", () => this.d.network.read(this.networkPlay()));
     if (this.d.platform === "win32" && !this.firstSampleWaited) {
       this.firstSampleWaited = true;
-      await this.d.network.firstSample();
-      this.net = await this.d.network.read(this.networkPlay());
+      await this.part("networkSample", () => this.d.network.firstSample());
+      this.net = await this.part("network", () => this.d.network.read(this.networkPlay()));
     }
     // Every server start writes this build's stamp first, in its own commit:
     // a running server may move rooms to its formats as they load (design 8.4).
-    await this.d.db.writeStamp(build);
+    await this.part("stamp", () => this.d.db.writeStamp(build));
     this.set(step === "startServer" ? "starting" : "restarting", step);
     this.port = port;
     const handle = this.d.server.start(this.net.host, port);
@@ -381,7 +437,8 @@ export class Supervisor {
       this.emit();
     });
     void handle.exited.then((exit) => this.serverExited(handle, exit));
-    const healthy = await this.d.server.healthy(port, handle);
+    this.d.log("start: waiting for the app server to answer");
+    const healthy = await this.d.server.healthy(wanted, handle);
     if (this.server !== handle) return;
     if (!healthy) {
       this.d.log("the app server did not answer /healthz");

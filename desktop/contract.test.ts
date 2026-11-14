@@ -47,6 +47,7 @@ const SAMPLE_ERRORS = {
   newerData: { kind: "newerData", dataApp: "0.6.0" },
   noReadableBackup: { kind: "noReadableBackup", dataApp: "0.6.0" },
   backupBeforeUpdateFailed: { kind: "backupBeforeUpdateFailed", reason: "the disk is full" },
+  stalled: { kind: "stalled", what: "starting the database", seconds: 180 },
 } as const satisfies { [K in AppError["kind"]]: Extract<AppError, { kind: K }> };
 
 /** Every string WORDS can produce, with sample arguments for its functions. */
@@ -252,6 +253,7 @@ test("every stop has words and its buttons, on every system", () => {
     errorText(SAMPLE_ERRORS.databaseFailed, "0.5.0", "win32"),
     "The database did not start. The log says: FATAL:  could not create shared memory segment.",
   );
+  assert.equal(errorText(SAMPLE_ERRORS.stalled, "0.5.0", "win32"), "RaccoonVTT gave up starting the database after 180 s. The logs may say why.");
 });
 
 test("counts read as words", () => {

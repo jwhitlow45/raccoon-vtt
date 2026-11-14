@@ -117,6 +117,10 @@ export class World {
   crashAfterMs: number | null = null;
   backupFails = false;
   portTaken = new Set<number>();
+  /** Calls, by their name in SupervisorDeps ("pg.start"), that never settle, as a wait on Windows that never ends. */
+  hangs = new Set<string>();
+  /** Every line the supervisors logged. */
+  logs: string[] = [];
   private nameSeq = 0;
 
   constructor(seed = 1) {
@@ -259,6 +263,11 @@ export class Instance {
 
 function depsFor(world: World, inst: Instance, build: Omit<Build, "pgMajor">, overrides: SupervisorDeps["overrides"]): SupervisorDeps {
   const c = <T>(effect: () => T | Promise<T>): Promise<T> => inst.call(effect);
+  /** A call that never settles while the world hangs it. */
+  const h =
+    <A extends unknown[], T>(name: string, call: (...args: A) => Promise<T>) =>
+    (...args: A): Promise<T> =>
+      world.hangs.has(name) ? never() : call(...args);
   const clock: Clock = {
     now: () => world.clock.now(),
     setTimeout: (fn, ms) => (inst.dead ? { cancel: () => undefined } : world.clock.setTimeout(() => void (inst.dead || fn()), ms)),
@@ -366,16 +375,17 @@ function depsFor(world: World, inst: Instance, build: Omit<Build, "pgMajor">, ov
     platform: world.platform,
     build,
     paths: { data: "/data", backups: "/data/backups", logs: "/data/logs" },
-    log: () => undefined,
+    log: (msg) => void world.logs.push(msg),
     overrides: { ...overrides },
     isRoot: () => false,
     lock: {
-      acquire: () =>
+      acquire: h("lock.acquire", () =>
         c(() => {
           if (world.lockOwner && !world.lockOwner.dead && world.lockOwner !== inst) return { ok: false as const, error: { kind: "alreadyRunning" as const } };
           world.lockOwner = inst;
           return { ok: true as const };
         }),
+      ),
       release: () => c(() => void (world.lockOwner === inst && (world.lockOwner = null))),
       deleteGuard: () => c(() => undefined),
     },
@@ -395,42 +405,46 @@ function depsFor(world: World, inst: Instance, build: Omit<Build, "pgMajor">, ov
           if (world.lockOwner !== inst) world.violate("a leftover PostgreSQL stopped without the lock");
           world.pg.running = false;
         }),
-      start: () =>
+      start: h("pg.start", () =>
         c(() => {
           holder("PostgreSQL started");
           if (world.pg.running) throw Object.assign(new Error("already running"), { logLine: "lock file postmaster.pid already exists" });
           world.pg.running = true;
           world.pg.epoch++;
         }),
+      ),
       stop: () => c(() => void (world.pg.running = false)),
       alive: () => c(() => world.pg.running),
     },
     db: {
-      open: (create) =>
+      open: h("db.open", (create: boolean) =>
         c(() => {
           world.needPg();
           if (create) world.dbs.set(LIVE, { content: "empty", tag: null, stamp: null, rooms: 0 });
         }),
+      ),
       close: () => c(() => undefined),
-      readStamp: () =>
+      readStamp: h("db.readStamp", () =>
         c(() => {
           world.needPg();
           return world.live().stamp;
         }),
+      ),
       roomsEmpty: () =>
         c(() => {
           world.needPg();
           return world.live().rooms === 0;
         }),
-      writeStamp: (b) =>
+      writeStamp: h("db.writeStamp", (b: Build) =>
         c(() => {
           world.needPg();
           holder("the stamp written");
           world.live().stamp = { app: b.app, snapshotVersion: b.snapshotVersion, opVersion: b.opVersion, pgMajor: b.pgMajor, writtenAt: new Date(world.clock.now()).toISOString() };
         }),
+      ),
     },
     restore: {
-      pending: () => c(() => world.journal !== null),
+      pending: h("restore.pending", () => c(() => world.journal !== null)),
       recover: (b) => recover(ctx(b)),
       check: (b, name) => checkRestorable(ctx(b), name),
       run: async (b, name, checked, onStep) => {
@@ -476,7 +490,7 @@ function depsFor(world: World, inst: Instance, build: Omit<Build, "pgMajor">, ov
           world.backups.push({ name, record });
           return { outcome: "good" as const, name, record };
         }),
-      list: () => c(() => [...world.backups]),
+      list: h("backups.list", () => c(() => [...world.backups])),
     },
     server: {
       start(host, port): ServerHandle {
@@ -510,16 +524,17 @@ function depsFor(world: World, inst: Instance, build: Omit<Build, "pgMajor">, ov
       start: (onChange) => void world.netListeners.push({ owner: inst, onChange }),
       stop: () => void (world.netListeners = world.netListeners.filter((l) => l.owner !== inst)),
       firstSample: () => c(() => undefined),
-      read: (networkPlay) =>
+      read: h("network.read", (networkPlay: boolean) =>
         c(() => {
           const reach = !networkPlay ? "off" : world.platform === "win32" ? world.profile : "open";
           const host = networkPlay && reach === "open" ? "0.0.0.0" : "127.0.0.1";
           return { reach, host, share: "10.0.0.20", others: [] } as const;
         }),
-      firewallRule: () => c(() => null),
+      ),
+      firewallRule: h("network.firewallRule", () => c(() => null)),
     },
     ports: {
-      free: (port) => c(() => !world.portTaken.has(port) && !world.servers.some((s) => s.alive && s.port === port)),
+      free: h("ports.free", (port: number) => c(() => !world.portTaken.has(port) && !world.servers.some((s) => s.alive && s.port === port))),
       firstFree: (from) =>
         c(() => {
           let p = from;

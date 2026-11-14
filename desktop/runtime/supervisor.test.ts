@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CRASH_RESTART_MS } from "./supervisor.ts";
+import { CRASH_RESTART_MS, START_PARTS, type StartPart } from "./supervisor.ts";
 import { BUILD, Instance, World } from "./testing/fakeWorld.ts";
 
 /**
@@ -291,4 +291,80 @@ test("a restore asked for during a backup waits for it, and a crash restart due 
   assert.equal(inst.latest()?.step, "running");
   assert.equal(world.serving().length, 1);
   assert.deepEqual(world.violations, []);
+});
+
+test("the log names each status and each part of a start as it begins", async () => {
+  const world = new World();
+  await started(world);
+  const at = (line: string) => {
+    const i = world.logs.indexOf(line);
+    assert.ok(i >= 0, `no "${line}" in ${JSON.stringify(world.logs)}`);
+    return i;
+  };
+  const order = [
+    "status: starting",
+    `start: ${START_PARTS.lock.words}`,
+    "status: starting, initdb",
+    `start: ${START_PARTS.initdb.words}`,
+    "status: starting, startDatabase",
+    `start: ${START_PARTS.startDatabase.words}`,
+    `start: ${START_PARTS.openDatabase.words}`,
+    `start: ${START_PARTS.versionCheck.words}`,
+    `start: ${START_PARTS.network.words}`,
+    `start: ${START_PARTS.stamp.words}`,
+    "status: starting, startServer",
+    "start: waiting for the app server to answer",
+    "status: running, running",
+  ].map(at);
+  assert.deepEqual(order, [...order].sort((a, b) => a - b));
+});
+
+test("a part of a start that never ends stops the start with its words at its bound, and Try again starts afresh", async () => {
+  const cases: [string, StartPart][] = [
+    ["lock.acquire", "lock"],
+    ["network.firewallRule", "firewall"],
+    ["pg.start", "startDatabase"],
+    ["restore.pending", "restorePending"],
+    ["db.open", "openDatabase"],
+    ["backups.list", "backups"],
+    ["db.readStamp", "versionCheck"],
+    ["ports.free", "port"],
+    ["network.read", "network"],
+    ["db.writeStamp", "stamp"],
+  ];
+  for (const [call, part] of cases) {
+    const world = new World();
+    world.seed();
+    world.settings = { ...world.settings, port: 3170 };
+    world.hangs.add(call);
+    const inst = new Instance(world);
+    void inst.sup.start();
+    const { words, ms } = START_PARTS[part];
+    await world.clock.advance(ms - 1_000);
+    assert.notEqual(inst.latest()?.state, "error", `${call}: stopped before its bound`);
+    await world.clock.advance(2_000);
+    assert.deepEqual(inst.latest()?.error, { kind: "stalled", what: words, seconds: ms / 1000 }, call);
+    assert.ok(world.logs.includes(`${words} did not finish in ${ms / 1000} s, so the start stops`), call);
+    world.hangs.clear();
+    assert.equal((await answer(world, inst, { type: "retry" })).ok, true, call);
+    await run(world, 5_000);
+    assert.equal(inst.latest()?.state, "running", `${call}: Try again after the stall`);
+    assert.equal(world.serving().length, 1, call);
+    assert.deepEqual(world.violations, [], call);
+  }
+});
+
+test("a stop asked for while a part of the start hangs answers once the part's bound ends it", async () => {
+  const world = new World();
+  world.seed();
+  world.hangs.add("db.open");
+  const inst = new Instance(world);
+  void inst.sup.start();
+  await world.clock.advance(1_000);
+  const id = inst.issue({ type: "stop" });
+  await world.clock.advance(START_PARTS.openDatabase.ms + 1_000);
+  assert.equal(inst.answers.get(id)?.[0]?.ok, true);
+  assert.equal(inst.latest()?.state, "stopped");
+  assert.equal(world.pg.running, false);
+  assert.equal(world.lockOwner, null);
 });
