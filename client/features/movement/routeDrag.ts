@@ -195,20 +195,26 @@ export class RouteDrag {
     // The walker's own search, as a drop in single file reads it: the creatures it drags cannot follow past the one that closes the way either, so the creatures' spaces opened in their world find no way, and the note named a wall (live play 42, LP42-MOVE-3).
     const alone = this.#alone.settle(to, budget);
     if (alone === "paused") return false;
-    return alone === "capped" ? this.#answered({ kind: "none", capped: true }) : this.#closed(this.#alone, to, budget);
+    return alone === "capped" ? this.#answered({ kind: "none", capped: true }) : this.#closed(this.#alone, to, budget, this.#search);
   }
 
   /**
    * No way to `to` that `closed`, a search run out of states, could miss:
    * the answer, naming the creature that closes the way where one does
    * (`#inTheWay`), else the walk to the foot of a ledge that does
-   * (`#overLedge`).
+   * (`#overLedge`), found by `walking`, a search run out of states too,
+   * the one whose routes the creatures the walker drags follow. The
+   * walker's own search would find a way to the foot that one of them
+   * meets a wall or a ledge on, so the walk is cut short of the foot
+   * (attach/walk.random.test.ts). A drop in single file, whose followers
+   * walk the walker's own way, names a creature only, as before
+   * (`walking` null).
    */
-  #closed(closed: RouteSearch, to: Point, budget: WorkBudget): boolean {
+  #closed(closed: RouteSearch, to: Point, budget: WorkBudget, walking: RouteSearch | null = closed): boolean {
     const creature = this.#inTheWay(closed, to, budget);
     if (creature === "paused") return false;
     if (creature !== null) return this.#answered({ kind: "none", capped: false, creature });
-    const held = this.#overLedge(closed, to, budget);
+    const held = walking ? this.#overLedge(walking, to, budget) : null;
     if (held === "paused") return false;
     return this.#answered(held ? { kind: "route", route: held, ledge: true } : { kind: "none", capped: false });
   }
@@ -327,7 +333,7 @@ export class RouteDrag {
     if (result === "paused") return false;
     const route = result === "settled" ? alone.traceTo(to, budget) : null;
     if (route === "paused") return false;
-    if (!route) return result === "unreachable" ? this.#closed(alone, to, budget) : this.#answered({ kind: "none", capped: result === "capped" });
+    if (!route) return result === "unreachable" ? this.#closed(alone, to, budget, null) : this.#answered({ kind: "none", capped: result === "capped" });
     const follower = world.fileBlocked(route.points);
     return this.#answered(follower === null ? { kind: "route", route } : { kind: "none", capped: false, follower });
   }

@@ -484,8 +484,10 @@ describe("a walk off a holder crosses only the ledges whose whole length lies in
     const state = cart();
     const drag = dragOf(copyFor(state, P1), "player", "bree", { x: 9, y: 6 });
     assert.equal(drag.answer.kind, "none");
-    assert.equal(drag.op && "route" in drag.op ? drag.op.route : undefined, undefined);
     const back: [number, number, number, 0 | 1][] = [[2, 4, 0, 0], [2, 5, 0, 0], [3, 6, 0, 0], [5, 6, 0, 0]];
+    // The step closes the way, so the drop walks back over the cart to its foot and holds there under the ledge's note (D-261114-035).
+    assert.deepEqual(drag.op, { t: "token.move", tokenId: "bree", x: 5, y: 6, route: back });
+    assert.equal(drag.plan.stop && stopText(drag.plan.stop), "Ledge in the way. No stairs you have seen lead there.");
     assert.equal(refusal({ t: "token.move", tokenId: "bree", x: 9, y: 6, elevation: 10, route: [...back, [6, 6, 0, 0], [9, 6, 0, 0]] }, state), LEDGE_IN_THE_WAY);
     // Back on the cart short of the step is a walk like any other.
     const short = dragOf(copyFor(state, P1), "player", "bree", { x: 5, y: 6 });
