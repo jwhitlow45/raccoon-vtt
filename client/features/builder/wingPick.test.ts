@@ -254,6 +254,26 @@ describe("a join on squares", () => {
     assert.equal(tapAt(view, s, { x: 30.5, y: 30.5 }, 0.2), null, "nothing within reach");
   });
 
+  test("a tap picks the nearest wall within reach, not the nearest grid line: a No wall edge is none, a window or a wall with no floor beside it is one (LP39B-WING-1)", () => {
+    const at = (input: Parameters<typeof chunksOf>[1], p: { x: number; y: number }) => {
+      const { view, scene: s } = squareRoom(input);
+      return tapAt(view, s, p, 0.5);
+    };
+    const edge = (key: string) => ({ ok: true, value: { grid: "squares", key } });
+    assert.equal(at({ cells: ROOM, edges: { "10,7,w": { kind: "none" } } }, { x: 9.95, y: 7.5 }), null, "No wall takes the automatic wall away, so the tap is near no wall");
+    const windowed = { cells: ROOM, edges: { "10,7,w": { kind: "window" } as EdgeFeature } };
+    assert.deepEqual(at(windowed, { x: 9.95, y: 7.5 }), edge("10,7,w"), "a window is picked");
+    assert.equal(problem(judge(windowed, "10,7,w")), JOIN_WORDS.window, "and says why it is no join");
+    // Drawn on open ground, unpainted on both sides: picked, and refused for want of floor.
+    for (const feature of [{ kind: "wall" }, { kind: "door", state: "closed", secret: false, discovered: false }] as EdgeFeature[]) {
+      const drawn = { cells: ROOM, edges: { "30,30,w": feature } };
+      assert.deepEqual(at(drawn, { x: 30.3, y: 30.5 }), edge("30,30,w"), `a drawn ${feature.kind} beside no floor is picked`);
+      assert.equal(problem(judge(drawn, "30,30,w")), JOIN_WORDS.squaresNone, `and the ${feature.kind} is no join`);
+    }
+    // The room's wall within reach wins over a nearer bare line inside the room.
+    assert.deepEqual(at({ cells: ROOM }, { x: 9.6, y: 7.85 }), edge("10,7,w"), "the wall 0.4 away, not the line 0.15 away");
+  });
+
   test("on a scene whose walls follow floor terrain the floor inside stands at 0 ft, raised or sunk refused", () => {
     for (const ft of [5, -5, -10]) {
       assert.equal(problem(judge({ cells: ROOM, heights: { "9,7": ft } }, "10,7,w", false, { autoWalls: "floor" })), JOIN_WORDS.floorRaised, `${ft} ft`);
