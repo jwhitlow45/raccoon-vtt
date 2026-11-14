@@ -313,15 +313,15 @@ const fixedId = (kind: string, i: number) => `0199f0a0-0000-7000-8${kind}00-${St
 export type Seated = { players: string[]; characters: string[]; tokens: string[]; areas: string[]; drawings: string[]; rows: string[] };
 
 /**
- * `players` players, p1 on, each playing one character with a token on
+ * `players` players, from p1 or `from` on, each playing one character with a token on
  * s1 and every seat there full: 33 tokens (theirs and 32 companions), 20
  * areas on that token, 40 free areas, `drawings` lines of 4 point values
  * and, in a fight, 40 rows. The DM's own things are each test's.
  */
-export function seated(state: RoomState, players: number, drawings = SEAT.drawings): Seated {
+export function seated(state: RoomState, players: number, drawings: number = SEAT.drawings, from = 1): Seated {
   const out: Seated = { players: [], characters: [], tokens: [], areas: [], drawings: [], rows: [] };
   state.encounter ??= { rev: 0, round: 1, activeEntryId: null, entries: [] };
-  for (let p = 1; p <= players; p++) {
+  for (let p = from; p < from + players; p++) {
     const memberId = `p${p}`;
     state.members[memberId] ??= member(memberId);
     const characterId = fixedId("c", p);

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
-import { LIMITS, SEAT, SEAT_FULL } from "#shared/limits.ts";
+import { FAR, LIMITS, SEAT, SEAT_FULL } from "#shared/limits.ts";
 import { ROLL_ASKED_ALREADY } from "#shared/permissions.ts";
 import type { Effect, RoomState } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
-import { APART, apartId, AYLA, BREE, dmAreas, dmDrawings, dmTokens, limitsRoom, OGRE, ROOM_R, STAIRS_UP, withUpper } from "#shared/privTestutil.ts";
+import { APART, apartId, AYLA, BREE, dmAreas, dmDrawings, dmTokens, limitsRoom, OGRE, ROOM_R, seated, STAIRS_UP, withUpper } from "#shared/privTestutil.ts";
 import { lift, remember } from "#shared/discoveryTestutil.ts";
 import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
 import { actor, castAsk, character, companionBlock, drawing, effect, entry, member, template, token } from "#shared/testutil.ts";
@@ -271,6 +271,20 @@ describe("remembered maps answer P1 alike", () => {
         for (const room of pair) assert.ok(Object.keys(room.state.memory ?? {}).length > 0, `${room.name}: the party still remembers room R`);
       });
     }
+  });
+});
+
+describe("the far line answers P1 alike inside one step of the DM's part", () => {
+  test("601 and 650 of the DM's creatures beside 46 players' full seats refuse P1's companion alike at the far line", async (t) => {
+    // 46 players' 33 tokens each, Ayla and Bree: 1,520 held by seats, 1,521 with P1's companion.
+    const fill = (s: RoomState, rest: number) => {
+      seated(s, 46, 0, 3);
+      // The ogre is the DM's too.
+      return dmTokens(s, rest - 1);
+    };
+    const pair = await open(t, rooms((s) => fill(s, 601), (s) => fill(s, 650)));
+    assert.deepEqual(await bothAnswer(pair, "p1", wolfOp, "P1's companion"), { code: "quota", message: `this scene can hold at most ${FAR.tokens.toLocaleString("en-US")} tokens` });
+    same(pair, "P1's companion");
   });
 });
 
