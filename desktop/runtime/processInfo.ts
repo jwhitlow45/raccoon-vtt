@@ -95,27 +95,79 @@ export async function processStamp(pid: number, platform: Platform = process.pla
 }
 
 /**
- * What runs as a pid, to tell PostgreSQL from a program that reused its
- * pid: the program's path, and on Linux its working folder, which for a
- * postmaster is its data folder. `foreign` when the system will not say,
- * as for another user's process. Null fields are unknown.
+ * What can be read about the process running as a pid without special
+ * rights, to tell PostgreSQL from a program that reused its pid. Each field
+ * is null when the system will not say, which is never taken as an answer.
+ * - `exe`: the program's path (Linux, macOS) or name (Windows).
+ * - `cwd`: Linux only, its working folder, which for a postmaster is its
+ *   data folder.
+ * - `uid`: macOS and Linux, the user it runs as.
+ * - `start`: when it started, in ms since the epoch, as processStart reads it.
  */
-export async function processProgram(pid: number, platform: Platform = process.platform as Platform): Promise<{ exe: string | null; cwd: string | null; foreign: boolean }> {
+export type ProcessFacts = { exe: string | null; cwd: string | null; uid: number | null; start: number | null };
+
+/** The Uid line's real uid from /proc/<pid>/status, which any user may read. */
+export function parseStatusUid(status: string): number | null {
+  const uid = Number(/^Uid:\s+(\d+)/m.exec(status)?.[1] ?? Number.NaN);
+  return Number.isInteger(uid) ? uid : null;
+}
+
+/** What `Get-CimInstance Win32_Process` said about one process, as the script below prints it. */
+export function parseWindowsProcess(stdout: string): Pick<ProcessFacts, "exe" | "start"> {
   try {
-    if (platform === "linux") {
-      const [exe, cwd] = await Promise.all([readlink(`/proc/${pid}/exe`), readlink(`/proc/${pid}/cwd`)]);
-      return { exe, cwd, foreign: false };
-    }
-    if (platform === "darwin") {
-      const { stdout } = await run("/bin/ps", ["-o", "comm=", "-p", String(pid)], { env: { ...process.env, LC_ALL: "C" } });
-      return { exe: stdout.trim() || null, cwd: null, foreign: false };
-    }
-    const { stdout } = await run(powershell(), ["-NoProfile", "-NonInteractive", "-Command", `(Get-Process -Id ${pid}).Path`], { windowsHide: true });
-    return { exe: stdout.trim() || null, cwd: null, foreign: false };
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    return { exe: null, cwd: null, foreign: code === "EACCES" || code === "EPERM" };
+    const row = JSON.parse(stdout.trim()) as { name?: unknown; created?: unknown };
+    const start = typeof row.created === "string" ? Date.parse(row.created) : Number.NaN;
+    return { exe: typeof row.name === "string" && row.name !== "" ? row.name : null, start: Number.isNaN(start) ? null : start };
+  } catch {
+    return { exe: null, start: null };
   }
+}
+
+/** Reads one fact, null when it can't be read for any reason, denied included. */
+async function maybe<T>(read: () => Promise<T>): Promise<T | null> {
+  try {
+    return await read();
+  } catch {
+    return null;
+  }
+}
+
+export async function processFacts(pid: number, platform: Platform = process.platform as Platform): Promise<ProcessFacts> {
+  if (platform === "linux") {
+    // A program replaced while it runs, as an update does, reads as "<path> (deleted)".
+    const exe = await maybe(async () => (await readlink(`/proc/${pid}/exe`)).replace(/ \(deleted\)$/, ""));
+    const cwd = await maybe(() => readlink(`/proc/${pid}/cwd`));
+    const uid = await maybe(async () => parseStatusUid(await readFile(`/proc/${pid}/status`, "utf8")));
+    return { exe, cwd, uid, start: await processStart(pid, platform) };
+  }
+  if (platform === "darwin") {
+    const ps = await maybe(async () => (await run("/bin/ps", ["-o", "uid=,comm=", "-p", String(pid)], { env: { ...process.env, LC_ALL: "C" } })).stdout.trim());
+    const m = ps ? /^(\d+)\s+(.+)$/.exec(ps) : null;
+    return { exe: m?.[2] ?? null, cwd: null, uid: m ? Number(m[1]) : null, start: await processStart(pid, platform) };
+  }
+  // Win32_Process answers for every process without elevation, where Get-Process hides another user's path and start.
+  const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($p) { [pscustomobject]@{ name = [string]$p.Name; created = $(if ($p.CreationDate) { $p.CreationDate.ToUniversalTime().ToString('o') } else { '' }) } | ConvertTo-Json -Compress }`;
+  const out = await maybe(async () => (await run(powershell(), ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true })).stdout);
+  return { ...(out ? parseWindowsProcess(out) : { exe: null, start: null }), cwd: null, uid: null };
+}
+
+let cachedBootTime: number | null = null;
+
+/**
+ * When this boot began, in ms since the epoch, or null when it can't be
+ * read: /proc/stat's btime, kern.boottime, or Windows' LastBootUpTime. Each
+ * is reckoned from the wall clock, so a caller allows a margin.
+ */
+export async function bootTime(platform: Platform = process.platform as Platform): Promise<number | null> {
+  if (cachedBootTime !== null) return cachedBootTime;
+  const read = await maybe(async () => {
+    if (platform === "linux") return Number(/^btime (\d+)$/m.exec(await readFile("/proc/stat", "utf8"))?.[1]) * 1000;
+    if (platform === "darwin") return Number(/sec = (\d+)/.exec((await run("/usr/sbin/sysctl", ["-n", "kern.boottime"])).stdout)?.[1]) * 1000;
+    const { stdout } = await run(powershell(), ["-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')"], { windowsHide: true });
+    return Date.parse(stdout.trim());
+  });
+  if (read !== null && Number.isFinite(read) && read > 0) cachedBootTime = read;
+  return cachedBootTime;
 }
 
 let cachedBoot: string | null = null;
