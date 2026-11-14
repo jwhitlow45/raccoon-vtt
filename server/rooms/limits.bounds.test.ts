@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { FAR, HARD, LIMITS, serializedBytes } from "#shared/limits.ts";
-import { apply } from "#shared/testutil.ts";
+import { FAR, farLimits, HARD, LIMITS, serializedBytes } from "#shared/limits.ts";
+import { apply, castAsk } from "#shared/testutil.ts";
 import { DEFAULT_BUFFERED_LIMIT } from "./ws.ts";
 import { fullRoom, markedRoom, measureBounds, roomMeasure } from "./limitsTesting.ts";
 
@@ -22,7 +22,12 @@ describe("a room at the far lines", () => {
   test("holds the far counts on one scene, and its measures are at the room and scene lines", () => {
     assert.equal(Object.keys(state.tokens).length, FAR.tokens);
     assert.equal(state.encounter?.entries.length, FAR.rows);
-    assert.equal(Object.keys(state.casts).length, FAR.asks);
+    // Asks stop where the far line's count does: the DM's part in steps of 50 beside the players' held ones.
+    assert.deepEqual([farLimits(state, null).ok, farLimits(state, full.sceneId).ok], [true, true]);
+    assert.ok(Object.keys(state.casts).length > FAR.asks - FAR.countStep, `${Object.keys(state.casts).length} asks`);
+    state.casts.more = castAsk("more", { by: full.dms[0]!, caster: Object.keys(state.tokens)[0]!, sceneId: full.sceneId, area: undefined, targets: [Object.keys(state.tokens)[0]!] });
+    assert.equal(farLimits(state, null).ok, false, "one more ask passes the line");
+    delete state.casts.more;
     assert.equal(Object.keys(state.rolls).length, LIMITS.openRollsPerRoom);
     assert.equal(Object.keys(state.members).length, LIMITS.membersPerRoom);
     // One more block or drawing would pass the line, so each measure is within one of them.

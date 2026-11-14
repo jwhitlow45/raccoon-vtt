@@ -1,4 +1,4 @@
-import { FAR, HISTORY_BYTES, LIMITS, MARKED_POOL, MOST_SIGHT_HOLDERS, exploredReserve, roundUp, serializedBytes } from "#shared/limits.ts";
+import { FAR, HISTORY_BYTES, LIMITS, MARKED_POOL, MOST_SIGHT_HOLDERS, exploredReserve, farLimits, roundUp, serializedBytes } from "#shared/limits.ts";
 import { holderTileKey, tileKey } from "#shared/keys.ts";
 import { DM_LINE_BASE, MAX_LOG, PARTY_LINE_BASE, PARTY_SLOT, memberRing, ringed, rosterRanks } from "#shared/logRings.ts";
 import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
@@ -157,15 +157,22 @@ function addHistory(state: RoomState, sceneId: string, limit: number): void {
   state.encounterHistory = Array.from({ length: 20 }, () => stepOf(rows));
 }
 
-/** The far asks, each by its caster's owner. */
+/**
+ * The asks at their far line as its check reads them: each by its caster's
+ * owner, as many as the far count takes, the DM's part in its steps of 50
+ * beside the players' held asks.
+ */
 function addAsks(state: RoomState, sceneId: string): void {
   const pcs = Object.values(state.tokens).filter((t) => t.kind === "pc");
+  const ids: string[] = [];
   for (let i = 0; i < FAR.asks; i++) {
     const id = longId("ask", i);
     const caster = pcs[i % pcs.length]!;
     const by = "ref" in caster.actor ? state.characters[caster.actor.ref]!.ownerIds[0]! : "";
     state.casts[id] = castAsk(id, { by, caster: caster.id, sceneId, spell: "Fireball", area: undefined, targets: [caster.id], at: AT });
+    ids.push(id);
   }
+  while (!farLimits(state, null).ok) delete state.casts[ids.pop()!];
 }
 
 /** The open rolls a room may hold, each with every target answered. */
