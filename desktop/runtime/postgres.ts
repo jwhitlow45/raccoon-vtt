@@ -91,6 +91,8 @@ export type ClusterOptions = {
   renameDir?: (from: string, to: string) => Promise<void>;
   /** Tests only: how long one pg_ctl start may run before it is ended. PG_CTL_START_LIMIT_MS by default. */
   startLimitMs?: number;
+  /** Tests only: the signal that ends pg_ctl, for a stand-in that still acts after it is told to end, as a Windows process can. SIGKILL by default. */
+  startKillSignal?: NodeJS.Signals;
   /** The path PostgreSQL's programs are given for one of these paths (pgPaths.ts). The path itself by default. */
   pgPath?: (path: string) => string;
 };
@@ -175,7 +177,7 @@ export class Cluster {
    * one on initdb's defaults would listen on a socket and ::1. Folders a
    * cut-off init left are moved aside, never deleted.
    */
-  async init(): Promise<void> {
+  async init(signal?: AbortSignal): Promise<void> {
     const parent = dirname(this.opts.pgData);
     const stagingPrefix = `${basename(this.opts.pgData)}.init-`;
     for (const name of await readdir(parent)) if (name.startsWith(stagingPrefix)) await this.moveAside(join(parent, name));
@@ -201,7 +203,8 @@ export class Cluster {
           "--locale-provider=builtin",
           "--builtin-locale=C.UTF-8",
         ],
-        { env: pgEnv({ LC_ALL: "C" }), windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
+        // A cancelled init ends initdb. The staging folder it leaves is moved aside by the next one.
+        { env: pgEnv({ LC_ALL: "C" }), windowsHide: true, maxBuffer: 16 * 1024 * 1024, ...(signal ? { signal } : {}) },
       );
     } catch (err) {
       const e = err as { stderr?: string; message: string };
@@ -328,9 +331,11 @@ export class Cluster {
   /**
    * pg_ctl start on a free loopback port, three tries, so another program
    * taking the port in between is no failure. A failure reports what this
-   * start wrote to the log, never an older run's last line.
+   * start wrote to the log, never an older run's last line. A start that
+   * fails, runs out of time or is cancelled stops any postmaster it launched
+   * before it answers, since nothing else owns that postmaster then.
    */
-  async start(): Promise<number> {
+  async start(signal?: AbortSignal): Promise<number> {
     rotateIfLarge(this.opts.logFile);
     await this.recordBoot();
     let lastError: DatabaseFailed | null = null;
@@ -341,7 +346,7 @@ export class Cluster {
         await runToExit(
           this.program("pg_ctl"),
           ["start", "-D", this.pgPath(this.opts.pgData), "-l", this.pgPath(this.opts.logFile), "-w", "-t", String(PG_CTL_WAIT_S), "-o", `-p ${port}`],
-          { env: pgEnv(), limitMs: this.opts.startLimitMs ?? PG_CTL_START_LIMIT_MS },
+          { env: pgEnv(), limitMs: this.opts.startLimitMs ?? PG_CTL_START_LIMIT_MS, ...(signal ? { signal } : {}), ...(this.opts.startKillSignal ? { killSignal: this.opts.startKillSignal } : {}) },
         );
         this.port = port;
         const pid = await this.pidFilePid();
@@ -349,7 +354,9 @@ export class Cluster {
         this.started = pid !== null && stamp !== null ? { pid, stamp } : null;
         return port;
       } catch (err) {
-        if (err instanceof Overran) throw new DatabaseFailed(err.message);
+        // pg_ctl has exited by now (runToExit waits for that), so whatever it launched is in postmaster.pid.
+        await this.stopLaunched();
+        if (err instanceof Ended) throw new DatabaseFailed(err.message);
         const lines = await linesSince(this.opts.logFile, offset);
         const e = err as { stderr?: string; message?: string };
         const said = (e.stderr ?? "").trim().split(/\r?\n/).at(-1) || (e.message ?? "").split(/\r?\n/)[0] || "pg_ctl start failed";
@@ -359,6 +366,28 @@ export class Cluster {
       }
     }
     throw lastError ?? new DatabaseFailed("pg_ctl start failed");
+  }
+
+  /**
+   * After a start that failed, the postmaster it launched, if one still
+   * runs: pg_ctl's own wait can run out while the postmaster recovers, and
+   * ending pg_ctl leaves the postmaster running. It is stopped only once
+   * leftover() confirms it is this folder's postgres, and the start's own
+   * failure is what the caller hears, whatever this finds.
+   */
+  private async stopLaunched(): Promise<void> {
+    let found: Leftover;
+    try {
+      found = await this.leftover();
+    } catch {
+      return;
+    }
+    if (found.kind !== "running") return;
+    try {
+      await run(this.program("pg_ctl"), ["stop", "-D", this.pgPath(this.opts.pgData), "-m", "fast", "-w", "-t", "60"], { env: pgEnv(), windowsHide: true, timeout: 90_000 });
+    } catch {
+      // The next start finds it, as leftover() reads it then.
+    }
   }
 
   /**
@@ -426,9 +455,11 @@ export const PG_CTL_WAIT_S = 120;
 export const PG_CTL_START_LIMIT_MS = (PG_CTL_WAIT_S + 30) * 1000;
 /** After a failed run's exit, how long its stderr's last words are waited for. */
 const STDERR_DRAIN_MS = 1_000;
+/** How long a run that was ended is given to report its exit. */
+const KILL_WAIT_MS = 10_000;
 
-/** A run ended for taking longer than its limit. */
-class Overran extends Error {}
+/** A run this ended: it took longer than its limit, or its caller cancelled it. */
+export class Ended extends Error {}
 
 /**
  * Runs a program to its exit, not to the close of its pipes, failing as
@@ -438,10 +469,12 @@ class Overran extends Error {}
  * stdout and stderr pipes for as long as it runs, and execFile, which
  * answers only once every pipe has closed, would wait until PostgreSQL
  * stops. So stdout gets no pipe at all, and stderr is read for a moment
- * after a failed exit and then let go. A run still going after `limitMs` is
- * ended and fails with words.
+ * after a failed exit and then let go. A run still going after `limitMs`,
+ * or when `signal` aborts, is ended, and fails with words only once its
+ * exit is seen, so its caller never looks for what it launched while it
+ * could still launch it. Windows' TerminateProcess only begins the end.
  */
-export function runToExit(program: string, args: readonly string[], opts: { env: NodeJS.ProcessEnv; limitMs: number }): Promise<void> {
+export function runToExit(program: string, args: readonly string[], opts: { env: NodeJS.ProcessEnv; limitMs: number; signal?: AbortSignal; killSignal?: NodeJS.Signals }): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, { env: opts.env, windowsHide: true, stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
@@ -452,20 +485,36 @@ export function runToExit(program: string, args: readonly string[], opts: { env:
     });
     child.stderr.once("close", () => (closed = true));
     let settled = false;
+    let ended: Ended | null = null;
+    let killWait: NodeJS.Timeout | undefined;
     const settle = (err: Error | null): void => {
       if (settled) return;
       settled = true;
       clearTimeout(limit);
+      clearTimeout(killWait);
+      opts.signal?.removeEventListener("abort", cancel);
       child.stderr.destroy();
       if (err) reject(err);
       else resolve();
     };
-    const limit = setTimeout(() => {
-      child.kill("SIGKILL");
-      settle(new Overran(`${basename(program)} ${args[0] ?? ""} did not finish in ${Math.round(opts.limitMs / 1000)} s`));
-    }, opts.limitMs);
-    child.once("error", (err) => settle(err));
+    const end = (why: string): void => {
+      if (settled || ended) return;
+      ended = new Ended(why);
+      clearTimeout(limit);
+      child.kill(opts.killSignal ?? "SIGKILL");
+      const answer = ended;
+      killWait = setTimeout(() => settle(answer), KILL_WAIT_MS);
+    };
+    const what = `${basename(program)} ${args[0] ?? ""}`.trim();
+    const limit = setTimeout(() => end(`${what} did not finish in ${Math.round(opts.limitMs / 1000)} s`), opts.limitMs);
+    const cancel = (): void => end(`${what} was cancelled`);
+    if (opts.signal?.aborted) cancel();
+    else opts.signal?.addEventListener("abort", cancel, { once: true });
+    child.once("error", (err) => settle(ended ?? err));
     child.once("exit", (code, signal) => {
+      // An exit before the limit is the run's own answer, so the limit can no longer replace its words.
+      clearTimeout(limit);
+      if (ended) return settle(ended);
       if (code === 0) return settle(null);
       const fail = (): void => settle(Object.assign(new Error(`${basename(program)} ended with ${code ?? signal}`), { stderr, code }));
       if (closed) return fail();
