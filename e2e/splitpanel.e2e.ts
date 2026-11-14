@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -51,13 +52,13 @@ const run = {
   bounds: { w: 30, h: 20 },
   patId: "",
   password: "",
-  thornChar: randomUUID(),
-  thorn: randomUUID(),
-  pip: randomUUID(),
-  goblins: Array.from({ length: GOBLINS }, () => randomUUID()),
-  lore: randomUUID(),
-  pinPage: randomUUID(),
-  pin: randomUUID(),
+  thornChar: uuidv7(),
+  thorn: uuidv7(),
+  pip: uuidv7(),
+  goblins: Array.from({ length: GOBLINS }, () => uuidv7()),
+  lore: uuidv7(),
+  pinPage: uuidv7(),
+  pin: uuidv7(),
 };
 
 /** Where Goblin 1 stands, and where to tap it. */

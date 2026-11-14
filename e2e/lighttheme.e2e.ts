@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -105,15 +105,15 @@ const run = {
   password: "",
   sceneId: "",
   patId: "",
-  thornChar: randomUUID(),
-  thorn: randomUUID(),
-  goblin: randomUUID(),
-  ally: randomUUID(),
-  neutral: randomUUID(),
-  monster: randomUUID(),
-  monsterBlock: randomUUID(),
-  trap: randomUUID(),
-  area: randomUUID(),
+  thornChar: uuidv7(),
+  thorn: uuidv7(),
+  goblin: uuidv7(),
+  ally: uuidv7(),
+  neutral: uuidv7(),
+  monster: uuidv7(),
+  monsterBlock: uuidv7(),
+  trap: uuidv7(),
+  area: uuidv7(),
   whiteMap: "",
 };
 
@@ -361,7 +361,7 @@ describe("the light theme", { concurrency: false }, () => {
         rig: { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: true, hits: { area: { shape: "cone", size: 15, origin: { x: 17, y: 3, z: 0 }, yaw: 90, includeOrigin: false } }, save: { ability: "dex", dc: 13, onPass: "half" }, damage: [{ formula: "2d6", type: "piercing" }], actions: [], find: [], notice: false },
       },
     });
-    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.thorn, value: 18 }, { id: randomUUID(), tokenId: run.goblin, value: 12 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: run.thorn, value: 18 }, { id: uuidv7(), tokenId: run.goblin, value: 12 }] });
     await ops.send({ t: "encounter.next" });
     await openRoom(dm, COMPUTER);
     await untilScheme(dm, "light", "the DM's room");
@@ -842,7 +842,7 @@ describe("the light theme", { concurrency: false }, () => {
         await pickTool(player, "Select");
         // The handout viewer, its card lower than the top: only its backdrop covers the band.
         if (!run.whiteMap) run.whiteMap = await uploadWhite("handout");
-        const handoutId = randomUUID();
+        const handoutId = uuidv7();
         await ops.send({ t: "handout.show", handout: { id: handoutId, assetId: run.whiteMap, title: "Plain letter", to: "all" } });
         const viewer = player.getByRole("dialog", { name: "Plain letter" });
         await viewer.waitFor();

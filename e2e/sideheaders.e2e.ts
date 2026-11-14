@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -292,9 +292,9 @@ describe("raccoon-vtt: the side panel's compact headers", { timeout: 900_000 }, 
     const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
     for (const [i, p] of PARTY.entries()) {
-      const id = randomUUID();
+      const id = uuidv7();
       await ops.send({ t: "character.create", character: { id, name: p.name, size: "medium", ownerIds: [run.patId], actor: actor(p.hp) } });
-      if (p.placed) await ops.send({ t: "token.create", token: { id: randomUUID(), sceneId: run.sceneId, size: "medium", visibility: "all", kind: "pc", name: p.name, x: 3 + i, y: 6, disposition: "ally", actor: { ref: id } } });
+      if (p.placed) await ops.send({ t: "token.create", token: { id: uuidv7(), sceneId: run.sceneId, size: "medium", visibility: "all", kind: "pc", name: p.name, x: 3 + i, y: 6, disposition: "ally", actor: { ref: id } } });
     }
     await waitFor("the party in the DM's view", () => (Object.keys(dmSocket.state?.characters ?? {}).length === PARTY.length ? true : null));
     await reloadAt(dm, 1, true);

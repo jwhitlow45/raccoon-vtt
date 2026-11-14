@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -67,10 +67,10 @@ const wideRun = {
   sceneId: "",
   patId: "",
   password: "",
-  thornChar: randomUUID(),
-  thorn: randomUUID(),
-  goblins: Array.from({ length: 6 }, () => randomUUID()),
-  phases: [randomUUID(), randomUUID()],
+  thornChar: uuidv7(),
+  thorn: uuidv7(),
+  goblins: Array.from({ length: 6 }, () => uuidv7()),
+  phases: [uuidv7(), uuidv7()],
 };
 
 function fighter(hp: number, extra: Record<string, unknown> = {}) {
@@ -198,8 +198,8 @@ const run = {
   password: "",
   sceneId: "",
   patId: "",
-  thorn: { id: randomUUID(), characterId: randomUUID() },
-  label: randomUUID(),
+  thorn: { id: uuidv7(), characterId: uuidv7() },
+  label: uuidv7(),
   bounds: { w: 30, h: 20 },
 };
 
@@ -544,7 +544,7 @@ describe("raccoon-vtt: a side panel that resizes, and a sheet with a mouse", { t
           ],
         },
       });
-      await wideOps.send({ t: "clock.start", id: randomUUID(), at: 2 * 86_400 + 20 * 3600, shown: true, calendar: { kind: "days" } });
+      await wideOps.send({ t: "clock.start", id: uuidv7(), at: 2 * 86_400 + 20 * 3600, shown: true, calendar: { kind: "days" } });
       const entries = [{ id: "e-thorn", tokenId: wideRun.thorn, value: 25 }, ...wideRun.goblins.map((tokenId, i) => ({ id: `e-g${i}`, tokenId, value: 20 - i }))];
       await wideOps.send({ t: "encounter.start", entries });
       await wideOps.send({ t: "encounter.next" });
@@ -1120,7 +1120,7 @@ describe("raccoon-vtt: a side panel that resizes, and a sheet with a mouse", { t
 
       // The roll card: Put away roll folds it as Later does.
       await setUp(player, { width: 500, height: 900 });
-      const request = randomUUID();
+      const request = uuidv7();
       await ops.send({ t: "roll.ask", request: { id: request, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
       const roll = player.getByRole("dialog", { name: "The DM asks for a roll" });
       const asked = player.getByRole("button", { name: /^Roll asked/ }).first();

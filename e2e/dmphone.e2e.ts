@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -302,7 +303,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     const text = Array.from({ length: 20 }, (_, i) => `Paragraph ${i + 1} of the citadel's long history.`).join("\n\n");
     for (let i = 1; i <= 16; i++) {
       const blockId = randomUUID().replace(/-/g, "").slice(0, 12);
-      await ops.send({ t: "journal.create", page: { id: randomUUID(), title: `Lore page ${String(i).padStart(2, "0")}`, access: "all", blocks: [{ id: blockId, text }] } });
+      await ops.send({ t: "journal.create", page: { id: uuidv7(), title: `Lore page ${String(i).padStart(2, "0")}`, access: "all", blocks: [{ id: blockId, text }] } });
     }
     await waitFor("the pages in the DM's view", () => Object.keys(dmSocket.state?.journal ?? {}).length >= 16 || null);
   });
@@ -329,7 +330,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     // Sorted by title, these land above every Lore page, far more than the sheet shows.
     for (let i = 1; i <= 12; i++) {
       const blockId = randomUUID().replace(/-/g, "").slice(0, 12);
-      await ops.send({ t: "journal.create", page: { id: randomUUID(), title: `Added page ${String(i).padStart(2, "0")}`, access: "all", blocks: [{ id: blockId, text: "Written at the table." }] } });
+      await ops.send({ t: "journal.create", page: { id: uuidv7(), title: `Added page ${String(i).padStart(2, "0")}`, access: "all", blocks: [{ id: blockId, text: "Written at the table." }] } });
     }
     await waitFor("the added pages in the DM's view", () => Object.keys(dmSocket.state?.journal ?? {}).length >= 28 || null);
     await dm.getByRole("button", { name: "Back to Journal" }).click();
@@ -357,18 +358,18 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     } finally {
       await pat.close();
     }
-    const characterId = randomUUID();
+    const characterId = uuidv7();
     const actor = { hp: { cur: 20, max: 20, temp: 0 }, life: "alive", ac: 14, speeds: { walk: 30 }, initBonus: 0, passivePerception: 12, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
     await ops.send({ t: "character.create", character: { id: characterId, name: "Thorn", size: "medium", ownerIds: [patId], actor } });
 
     // Three requests, oldest first: a Str save, a Dex save the DM marks passed, and a Wis save.
-    const ids = { str: randomUUID(), dex: randomUUID(), wis: randomUUID() };
+    const ids = { str: uuidv7(), dex: uuidv7(), wis: uuidv7() };
     for (const [ability, id] of Object.entries(ids)) {
       await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability }] }, dcShown: true, resultShown: true, targets: [{ characterId }] } });
       // Each asked at a time of its own, so the newest is certain.
       await dm.waitForTimeout(20);
     }
-    await ops.send({ t: "roll.answer", rollId: ids.dex, target: { characterId }, result: "pass", tag: randomUUID() });
+    await ops.send({ t: "roll.answer", rollId: ids.dex, target: { characterId }, result: "pass", tag: uuidv7() });
     const card = (test: string) => dm.getByRole("group", { name: `Roll request: ${test}` });
     await card("WIS save").waitFor();
 
@@ -391,9 +392,9 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
   test("6. with the turn's time up, the band keeps a few letters of the name and its Next disks on screen, giving the disks up first (LPD-DMPHONE-2)", async () => {
     const entries = [];
     for (let i = 1; i <= 5; i++) {
-      const id = randomUUID();
+      const id = uuidv7();
       await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name: `Goblin ${i}`, x: 4 + i, y: 6, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
-      entries.push({ id: randomUUID(), tokenId: id, value: 20 - i });
+      entries.push({ id: uuidv7(), tokenId: id, value: 20 - i });
     }
     await ops.send({ t: "room.update", settings: { turnTimerSec: 4 } });
     await ops.send({ t: "encounter.start", entries });
@@ -432,9 +433,9 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
 
   test("7. the docked bar and the alerts column share the right of the map: they never meet on its side, the column stays in the window, and every bar button takes a tap at 130% (LPD-DMPHONE-3, LPD-DMPHONE-4)", async () => {
     const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
-    const caster = randomUUID();
+    const caster = uuidv7();
     await ops.send({ t: "token.create", token: { id: caster, sceneId: run.sceneId, kind: "monster", name: "Hag", x: 1, y: 17, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: { ...goblin(), hp: { cur: 40, max: 40, temp: 0 } } } } });
-    await ops.send({ t: "actor.effect.add", target: { tokenId: caster }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: caster }, effect: { id: uuidv7(), key: "concentrating", spell: "Hex" } });
     run.hag = caster;
     for (const view of [
       { width: 844, height: 390, scale: 1 },
@@ -528,7 +529,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
 
     const thorn = Object.values(dmSocket.state!.characters).find((c) => c.name === "Thorn");
     assert.ok(thorn, "Thorn is not in the room");
-    const id = randomUUID();
+    const id = uuidv7();
     await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: thorn.id }] } });
     // A phone starts Preview folded (docs/design/design-v1-panel-groups.md 6.2).
     await openGroup(await openPanel(dm, "DM"), "Preview");
@@ -580,7 +581,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       assert.ok(card.top >= notice.bottom + 8 - 1, `${label}: the check runs under the notice: ${JSON.stringify({ notice, card })}`);
     };
     await clear("before the band");
-    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.hag, value: 12 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: run.hag, value: 12 }] });
     await dm.getByRole("button", { name: /^Initiative, round/ }).first().waitFor();
     await clear("with the band");
     await shots.take(dm, "dmphone-notice-band-column");
@@ -700,7 +701,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await dm.waitForTimeout(300);
     assert.equal(await dm.getByRole("dialog", { name: "Alerts" }).count(), 0, `${label}: the check did not open in the column, so the band has nothing to change`);
     assert.ok(await wholeInReach(check.getByRole("button", { name: "Passed", exact: true })), `${label}: Passed is cut off in the column`);
-    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.hag, value: 12 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: run.hag, value: 12 }] });
     await dm.getByRole("button", { name: /^Initiative, round/ }).first().waitFor();
     await dm.waitForTimeout(400);
     await shots.take(dm, "dmphone-check-band-arrives-320x420");
@@ -766,7 +767,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       { width: 844, height: 390, scale: 1, side: 47, bottom: 21 },
     ]) {
       const label = `${view.width} x ${view.height}`;
-      const id = randomUUID();
+      const id = uuidv7();
       await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name: "Zombie", x: cell.x, y: cell.y, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
       await waitFor(`${label}: the zombie in the DM's view`, () => dmSocket.state?.tokens[id] ?? null);
       await setUp(view);
@@ -804,7 +805,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
     // Left of the middle, clear of the alerts column down the right.
     const cell = { x: 3, y: Math.floor(bounds.h / 2) };
-    const trapId = randomUUID();
+    const trapId = uuidv7();
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
     await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Dart Plate", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
     await waitFor("the trap in the DM's view", () => dmSocket.state?.traps[trapId] ?? null);
@@ -868,7 +869,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await setUp({ width: 667, height: 375, scale: 1.3 });
     const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
     const cell = { x: 3, y: Math.floor(bounds.h / 2) };
-    const trapId = randomUUID();
+    const trapId = uuidv7();
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
     await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Loose Stone", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
     await waitFor("the trap in the DM's view", () => dmSocket.state?.traps[trapId] ?? null);
@@ -907,8 +908,8 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await setUp({ width: 390, height: 844, scale: 1 });
     const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
     const cell = { x: 3, y: Math.floor(bounds.h / 2) };
-    const trapId = randomUUID();
-    const walker = randomUUID();
+    const trapId = uuidv7();
+    const walker = uuidv7();
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
     await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Needle Plate", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
     await ops.send({ t: "token.create", token: { id: walker, sceneId: run.sceneId, kind: "monster", name: "Scout", x: cell.x, y: cell.y - 3, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
@@ -969,8 +970,8 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
         { width: 480, height: 320, scale: 1.3, side: 47, bottom: 21 },
       ]) {
         const label = `480 x 320 at 130%${view.side ? " with 47 px at the sides and 21 at the foot" : ""}`;
-        made.trapId = randomUUID();
-        made.walker = randomUUID();
+        made.trapId = uuidv7();
+        made.walker = uuidv7();
         const { trapId, walker } = made;
         await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Tripwire", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
         await ops.send({ t: "token.create", token: { id: walker, sceneId: run.sceneId, kind: "monster", name: "Scout", x: cell.x, y: cell.y - 3, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
@@ -1017,7 +1018,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await setUp({ width: 390, height: 844, scale: 1 });
     const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
     const cell = { x: 3, y: Math.floor(bounds.h / 2) };
-    const trapId = randomUUID();
+    const trapId = uuidv7();
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
     await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Needle Plate", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
     await waitFor("the trap in the DM's view", () => dmSocket.state?.traps[trapId] ?? null);
@@ -1066,9 +1067,9 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
     const cell = { x: 3, y: Math.floor(bounds.h / 2) };
     const spot = { x: 6, y: Math.floor(bounds.h / 2) };
-    const labelId = randomUUID();
-    const trapId = randomUUID();
-    const walker = randomUUID();
+    const labelId = uuidv7();
+    const trapId = uuidv7();
+    const walker = uuidv7();
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
     await ops.send({ t: "build.label", sceneId: run.sceneId, labelId, label: { x: spot.x + 0.5, y: spot.y + 0.5, text: "Gate", size: 1 } });
     await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Tripwire", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
@@ -1124,8 +1125,8 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await setUp({ width: 390, height: 844, scale: 1 });
     const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
     const cell = { x: 3, y: Math.floor(bounds.h / 2) };
-    const trapId = randomUUID();
-    const walker = randomUUID();
+    const trapId = uuidv7();
+    const walker = uuidv7();
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
     await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Snare", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
     await ops.send({ t: "token.create", token: { id: walker, sceneId: run.sceneId, kind: "monster", name: "Scout", x: cell.x, y: cell.y - 3, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
@@ -1168,8 +1169,8 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await setUp({ width: 390, height: 844, scale: 1 });
     const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
     const cell = { x: 3, y: Math.floor(bounds.h / 2) };
-    const trapId = randomUUID();
-    const walker = randomUUID();
+    const trapId = uuidv7();
+    const walker = uuidv7();
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
     await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Tripstone", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
     await ops.send({ t: "token.create", token: { id: walker, sceneId: run.sceneId, kind: "monster", name: "Scout", x: cell.x, y: cell.y - 3, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
@@ -1251,8 +1252,8 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await setUp({ width: 390, height: 844, scale: 1 });
     const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
     const cell = { x: 3, y: Math.floor(bounds.h / 2) };
-    const trapId = randomUUID();
-    const walker = randomUUID();
+    const trapId = uuidv7();
+    const walker = uuidv7();
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
     await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Stepstone", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
     await ops.send({ t: "token.create", token: { id: walker, sceneId: run.sceneId, kind: "monster", name: "Scout", x: cell.x, y: cell.y - 3, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
@@ -1362,8 +1363,8 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
     // Low on the map, where the strip opens over the brute and moves the map once to clear it.
     const cell = { x: Math.floor(bounds.w / 2), y: bounds.h - 2 };
-    const brute = randomUUID();
-    const trapId = randomUUID();
+    const brute = uuidv7();
+    const trapId = uuidv7();
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
     await ops.send({ t: "token.create", token: { id: brute, sceneId: run.sceneId, kind: "monster", name: "Brute", x: cell.x, y: cell.y, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
     await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Needle Plate", zone: { cells: [{ x: 1, y: 1, w: 1, h: 1 }] }, rig } });
@@ -1407,9 +1408,9 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
 
   test("lp19-bs3. at 390 x 844 a low token's strip that opens while a trap's toast stands under the alerts' card moves the map up once to clear it, never so far that the token's top passes the toast (review LP19-BS-3, docs/design/design-v1-bar-compact.md 3.6)", async () => {
     const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
-    const brute = randomUUID();
-    const walker = randomUUID();
-    const trapId = randomUUID();
+    const brute = uuidv7();
+    const walker = uuidv7();
+    const trapId = uuidv7();
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
     const cell = { x: Math.floor(bounds.w / 2), y: bounds.h - 2 };
     await ops.send({ t: "token.create", token: { id: brute, sceneId: run.sceneId, kind: "monster", name: "Brute", x: cell.x, y: cell.y, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
@@ -1475,7 +1476,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
   async function lowBrute(): Promise<{ id: string; at: { x: number; y: number }; bar: Locator; head: Locator; remove(): Promise<void> }> {
     const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
     const cell = { x: Math.floor(bounds.w / 2), y: bounds.h - 2 };
-    const id = randomUUID();
+    const id = uuidv7();
     await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name: "Brute", x: cell.x, y: cell.y, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
     await waitFor("the brute in the DM's view", () => dmSocket.state?.tokens[id] ?? null);
     await setUp({ width: 390, height: 844, scale: 1 });
@@ -1528,7 +1529,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     const brute = await lowBrute();
     const check = dm.locator('[data-alert="concentration"]').first();
     // A roll in step 13 may have ended the hag's Hex.
-    await ops.send({ t: "actor.effect.add", target: { tokenId: run.hag }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } }).catch(() => undefined);
+    await ops.send({ t: "actor.effect.add", target: { tokenId: run.hag }, effect: { id: uuidv7(), key: "concentrating", spell: "Hex" } }).catch(() => undefined);
     try {
       await dm.touchscreen.tap(brute.at.x, brute.at.y);
       await brute.bar.waitFor();
@@ -1563,9 +1564,9 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
   test("qe-1. in a fight the DM's band ends with Next, a 44 px target with the next faces beside it where they fit; held on the wire, a press shows it busy and a second sends nothing, and the answer moves the turn once (QOL audit Q4, chips C3)", async () => {
     const entries: { id: string; tokenId: string; value: number }[] = [];
     for (let i = 1; i <= 4; i++) {
-      const id = randomUUID();
+      const id = uuidv7();
       await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name: `Kobold ${i}`, x: 4 + i, y: 9, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
-      entries.push({ id: randomUUID(), tokenId: id, value: 20 - i });
+      entries.push({ id: uuidv7(), tokenId: id, value: 20 - i });
     }
     await ops.send({ t: "encounter.start", entries });
     await ops.send({ t: "encounter.next" });

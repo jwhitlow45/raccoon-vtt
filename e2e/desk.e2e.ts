@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -58,7 +59,7 @@ const run = {
   roomName: `E2E desk ${new Date().toISOString().slice(0, 19)}`,
   sceneId: "",
   bounds: { w: 0, h: 0 },
-  goblin: { id: randomUUID(), x: 0, y: 0 },
+  goblin: { id: uuidv7(), x: 0, y: 0 },
 };
 
 /** What has focus: its tag, role and name. */
@@ -79,8 +80,8 @@ function focused(page: Page): Promise<{ tag: string; role: string | null; name: 
 
 /** The QOL pass's tokens (docs/design/design-v1-qol.md 3, Q3, Q7 and Q13): four Goblin Warriors in a row, the fourth hidden, and Snik, a fifth by its block, renamed. */
 const qe = {
-  warriors: [1, 2, 3, 4].map((n) => ({ id: randomUUID(), name: "Goblin Warrior", x: 1 + n * 2, y: 2 })),
-  snik: { id: randomUUID(), name: "Snik", x: 3, y: 5 },
+  warriors: [1, 2, 3, 4].map((n) => ({ id: uuidv7(), name: "Goblin Warrior", x: 1 + n * 2, y: 2 })),
+  snik: { id: uuidv7(), name: "Snik", x: 3, y: 5 },
 };
 
 /** Clicks a token on the map and waits for its bar. */
@@ -287,7 +288,7 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
   });
 
   test("4. picking from More by keyboard a panel that shows a journal page keeps focus on More, and the selected token stays put", async () => {
-    await ops.send({ t: "journal.create", page: { id: randomUUID(), title: "Lore", access: "all", blocks: [{ id: randomUUID().replace(/-/g, "").slice(0, 12), text: "The citadel fell." }] } });
+    await ops.send({ t: "journal.create", page: { id: uuidv7(), title: "Lore", access: "all", blocks: [{ id: randomUUID().replace(/-/g, "").slice(0, 12), text: "The citadel fell." }] } });
     await openSideTab(dm, "Journal");
     await dm.getByRole("tabpanel", { name: sideTabName("Journal") }).getByRole("button", { name: /^Lore/ }).click();
     await dm.getByRole("heading", { name: "Lore" }).waitFor();

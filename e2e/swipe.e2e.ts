@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -52,13 +52,13 @@ const run = {
   password: "",
   sceneId: "",
   patId: "",
-  thorn: { id: randomUUID(), characterId: randomUUID(), x: 4, y: 3 },
-  goblins: [randomUUID(), randomUUID()],
-  entries: { thorn: randomUUID(), goblins: [randomUUID(), randomUUID()] },
+  thorn: { id: uuidv7(), characterId: uuidv7(), x: 4, y: 3 },
+  goblins: [uuidv7(), uuidv7()],
+  entries: { thorn: uuidv7(), goblins: [uuidv7(), uuidv7()] },
   bounds: { w: 30, h: 20 },
-  labels: [randomUUID(), randomUUID()],
-  pages: [randomUUID(), randomUUID(), randomUUID()],
-  pin: randomUUID(),
+  labels: [uuidv7(), uuidv7()],
+  pages: [uuidv7(), uuidv7(), uuidv7()],
+  pin: uuidv7(),
 };
 
 type Pt = { x: number; y: number };
@@ -939,7 +939,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await touchTap(playerCdp, player, await cellPoint(player, run.thorn));
     // Thorn's strip has no room for Multi-select after his HP entry, so it is behind Expand.
     await (await barControl(player.getByRole("dialog", { name: "Thorn actions" }), "Multi-select")).tap();
-    const request = randomUUID();
+    const request = uuidv7();
     await ops.send({ t: "roll.ask", request: { id: request, test: { kind: "save", choices: [{ ability: "con" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
     const card = player.getByRole("dialog", { name: "The DM asks for a roll" });
     // With its roll row the card no longer fits over Thorn's bar, so it starts folded behind Roll asked, whose tap brings it up on Multi-select's bar (docs/design/design-v1-roll-request.md 5.7).
@@ -1377,7 +1377,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
   });
 
   test("14. a grabber tops every sheet that swipes, in its header's top space with nothing moved, and no surface that does not swipe", async () => {
-    const light = randomUUID();
+    const light = uuidv7();
     await ops.send({ t: "build.lights", sceneId: run.sceneId, put: [{ id: light, x: 12.5, y: 6.5, bright: 5, dim: 5, on: true, walls: true, label: "Candle" }] });
 
     // The panel sheet at each phone size: one pill, the header 4 px taller than wave 6's 56 px for it, its buttons 10 px down, and Close by a tap.
@@ -1560,7 +1560,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     }
 
     // A player's roll card at a phone's foot has its pill. On a computer it is a card, with none.
-    const request = randomUUID();
+    const request = uuidv7();
     await ops.send({ t: "roll.ask", request: { id: request, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
     try {
       for (const view of [
@@ -1707,7 +1707,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       await pickTool(dm, "Select");
       // A player's roll card at a phone's foot: its question and Later stand the mask's 15 px under the card's top edge.
       await player.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.sheetHandle", "mask"));
-      const request = randomUUID();
+      const request = uuidv7();
       await ops.send({ t: "roll.ask", request: { id: request, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
       try {
         await setUp(player, { width: 375, height: 667, scale: 1 });
@@ -2311,7 +2311,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
   });
 
   test("fu43c-clone. measure capture copies on a long Journal page and a full Initiative list, with the copy budget", { skip: process.env.FU41_CLONE_MEASURE !== "1", timeout: 180_000 }, async () => {
-    const pageId = randomUUID();
+    const pageId = uuidv7();
     const records: { action: string; clones: number; ms: number; elements: number }[] = [];
     const measure = async (action: string, press: () => Promise<unknown>) => {
       const elements = await dm.locator("dialog[data-rvtt-sheet][open] [data-pane-body]").first().evaluate((el) => (el as unknown as { querySelectorAll(s: string): ArrayLike<unknown> }).querySelectorAll("*").length);
@@ -2358,7 +2358,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       assert.ok(reveal.clones > 0, "a 40-block page within the budget was not copied");
       await sheet.getByRole("button", { name: "Hide", exact: true }).waitFor();
       await sheet.getByRole("button", { name: "Close Journal" }).click();
-      const entries = Array.from({ length: LIMITS.encounterRows }, (_, i) => ({ id: randomUUID(), label: `FU43C row ${i + 1}`, value: 10 }));
+      const entries = Array.from({ length: LIMITS.encounterRows }, (_, i) => ({ id: uuidv7(), label: `FU43C row ${i + 1}`, value: 10 }));
       if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
       await ops.send({ t: "encounter.start", entries: entries.slice(0, 100) });
       for (let i = 100; i < entries.length; i += 100) await ops.send({ t: "encounter.add", entries: entries.slice(i, i + 100) });

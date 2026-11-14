@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -776,7 +776,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await optionsOf(dm, "Area").getByRole("button", { name: "Cancel", exact: true }).click();
 
     // A trap's area takes the next shape, and Save still puts it into the trap.
-    const trapId = randomUUID();
+    const trapId = uuidv7();
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
     await cycle.ops.send({ t: "trap.create", trap: { id: trapId, sceneId: cycle.sceneId, name: "Cycle Pit", zone: { cells: [{ x: 4, y: 4, w: 1, h: 1 }] }, rig } });
     await waitFor("the trap in the DM's view", () => dmSocket.state?.traps[trapId]);
@@ -1126,7 +1126,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await saidNow(dm, "Trap: Trip wire");
     await optionsOf(dm, "Trap").getByText("Drag from one end of the trip wire to the other.").first().waitFor();
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
-    const trapId = randomUUID();
+    const trapId = uuidv7();
     await cycle.ops!.send({ t: "trap.create", trap: { id: trapId, sceneId: cycle.sceneId, name: "Cycle Snare", zone: { cells: [{ x: 22, y: 3, w: 1, h: 1 }] }, rig } });
     await waitFor("the snare in the DM's view", () => dmSocket.state?.traps[trapId]);
     await clickCell(dm, { x: 22, y: 3 });
@@ -1174,7 +1174,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     assert.deepEqual({ placeholder: await search.getAttribute("placeholder"), keys: await search.getAttribute("aria-keyshortcuts") }, { placeholder: "Search the scene (/)", keys: "/" });
 
     // A token's bar: Hidden, Locked and Delete name H, L and the Delete keys, and keep their names.
-    const tokenId = randomUUID();
+    const tokenId = uuidv7();
     const goblin = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
     await cycle.ops!.send({ t: "token.create", token: { id: tokenId, sceneId: cycle.sceneId, kind: "monster", name: "Hint Goblin", size: "medium", x: 14, y: 10, disposition: "hostile", visibility: "all", actor: { inline: goblin } } });
     await waitFor("the goblin in the DM's view", () => dmSocket.state?.tokens[tokenId]);
@@ -1328,7 +1328,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
         return null;
       });
     const ground = cycle.sceneId;
-    const upper = randomUUID();
+    const upper = uuidv7();
     const name = dmSocket.state!.scenes[ground]!.name;
     await cycle.ops!.send({ t: "scene.create", scene: { id: upper, name, bounds: cycle.bounds }, floor: { beside: ground, side: "above", besideName: "Ground floor" } });
     await cycle.ops!.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor" } } });

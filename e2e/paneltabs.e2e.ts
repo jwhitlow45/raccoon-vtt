@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -51,10 +52,10 @@ const run = {
   bounds: { w: 30, h: 20 },
   patId: "",
   password: "",
-  goblin: randomUUID(),
-  lore: randomUUID(),
-  pinPage: randomUUID(),
-  pin: randomUUID(),
+  goblin: uuidv7(),
+  lore: uuidv7(),
+  pinPage: uuidv7(),
+  pin: uuidv7(),
 };
 
 // A DM always has Sound and Time. A player gets them only once the room plays sound or keeps time, which this room never does.

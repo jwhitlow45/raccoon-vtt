@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -84,9 +84,9 @@ const run = {
   sceneId: "",
   bounds: { w: 30, h: 20 },
   patId: "",
-  thorn: randomUUID(),
-  thornToken: randomUUID(),
-  goblin: randomUUID(),
+  thorn: uuidv7(),
+  thornToken: uuidv7(),
+  goblin: uuidv7(),
 };
 
 /** A phone and its keyboard. `native` opens the keyboard as a browser that resizes the page itself does: the page is made shorter, not only the visual viewport. */
@@ -579,7 +579,7 @@ async function sheetLifted(view: View): Promise<void> {
 async function rollCard(view: View, fight = true): Promise<void> {
   const where = `${fight ? "in the fight " : ""}at ${viewName(view)}`;
   await setUp(pat, view);
-  const id = randomUUID();
+  const id = uuidv7();
   await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 14, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn }] } });
   const card = pat.getByRole("dialog", { name: "The DM asks for a roll" });
   try {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -238,11 +239,11 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     password: "",
     sceneId: "",
     patId: "",
-    thorn: { id: randomUUID(), characterId: randomUUID(), entryId: randomUUID() },
-    goblin: { id: randomUUID(), entryId: randomUUID() },
-    hag: { id: randomUUID(), entryId: randomUUID() },
-    lore: randomUUID(),
-    phases: [randomUUID(), randomUUID()],
+    thorn: { id: uuidv7(), characterId: uuidv7(), entryId: uuidv7() },
+    goblin: { id: uuidv7(), entryId: uuidv7() },
+    hag: { id: uuidv7(), entryId: uuidv7() },
+    lore: uuidv7(),
+    phases: [uuidv7(), uuidv7()],
   };
 
   async function join(context: BrowserContext, name: string, color: string): Promise<string> {
@@ -339,7 +340,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await ops.send(token(run.thorn.id, { kind: "pc", name: "Thorn", x: 8, y: 6, disposition: "ally", actor: { ref: run.thorn.characterId } }));
     await ops.send(token(run.goblin.id, { kind: "monster", name: "Goblin 1", x: 12, y: 9, disposition: "hostile", actor: { inline: actor(7) } }));
     await ops.send(token(run.hag.id, { kind: "monster", name: "Hag", x: 3, y: 14, disposition: "hostile", actor: { inline: actor(900) } }));
-    await ops.send({ t: "actor.effect.add", target: { tokenId: run.hag.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: run.hag.id }, effect: { id: uuidv7(), key: "concentrating", spell: "Hex" } });
     await ops.send({ t: "journal.create", page: { id: run.lore, title: "Lore", access: "all", blocks: [{ id: randomUUID().replace(/-/g, "").slice(0, 12), text: "The citadel fell." }] } });
 
     // Two map phases on the scene, for the DM's Phase menu (case 9).
@@ -602,7 +603,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await reloadAt(player, 1.3);
     await pickTool(player, "Area");
     await options(player, "Area").waitFor();
-    const id = randomUUID();
+    const id = uuidv7();
     await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
     const card = player.getByRole("dialog", { name: "The DM asks for a roll" });
     const row = player.getByRole("button", { name: /^Roll asked/ });
@@ -837,7 +838,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await view(phone, phoneCdp, { width: 480, height: 320 }, { side: 47, bottom: 21 });
     await reloadAt(phone, 1.3);
     await startFight();
-    const id = randomUUID();
+    const id = uuidv7();
     const name = "Q".repeat(80);
     await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name, x: 20, y: 2, disposition: "hostile", actor: { inline: actor(9) } } });
     await ops.send({ t: "actor.hp", target: { tokenId: id }, change: { kind: "damage", amount: 1 } });
@@ -1399,7 +1400,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await reloadAt(player, 1.3);
     await endFight();
     await pickTool(player, "Ruler");
-    await ops.send({ t: "actor.effect.add", target: { tokenId: run.thorn.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Bless" } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: run.thorn.id }, effect: { id: uuidv7(), key: "concentrating", spell: "Bless" } });
     await ops.send({ t: "actor.hp", target: { tokenId: run.thorn.id }, change: { kind: "damage", amount: 1 } });
     const row = player.getByRole("button", { name: /^Concentration save/ });
     await row.waitFor();
@@ -1415,7 +1416,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     });
     await waitFor("the late arrival made inert", async () => ((await player.locator("#rvtt-e2e-late").evaluate((el) => (el as unknown as DomEl).closest("[inert]") !== null)) ? true : null), 3000);
     await player.locator("#rvtt-e2e-late").evaluate((el) => (el as unknown as { remove(): void }).remove());
-    const id = randomUUID();
+    const id = uuidv7();
     await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
     await waitFor("the roll on the player's side", () => playerSocket.state?.rolls[id]);
     await player.waitForTimeout(800);
@@ -1446,7 +1447,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await reloadAt(player, 1.3);
     await endFight();
     await pickTool(player, "Ruler");
-    const id = randomUUID();
+    const id = uuidv7();
     await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
     const card = player.getByRole("dialog", { name: "The DM asks for a roll" });
     const row = player.getByRole("button", { name: /^Roll asked/ });
@@ -1929,7 +1930,7 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
 
       run.handoutImage = await upload(dmContext, "handout", await widePicture());
       run.mapImage = await upload(dmContext, "map", await square([90, 140, 80]));
-      await ops.send({ t: "handout.show", handout: { id: randomUUID(), assetId: run.handoutImage, title: run.handoutTitle, to: "all" } });
+      await ops.send({ t: "handout.show", handout: { id: uuidv7(), assetId: run.handoutImage, title: run.handoutTitle, to: "all" } });
       for (const page of [desk, phone, tablet]) await loaded(popup(page), run.handoutTitle);
     });
 
@@ -2203,7 +2204,7 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
       // Each its own color, so neither is an image the room already holds.
       const tinted = (rgb: [number, number, number]) => sharp({ create: { width: 2000, height: 1000, channels: 3, background: { r: rgb[0], g: rgb[1], b: rgb[2] } } }).png().toBuffer();
       const [first, second] = [await upload(dmContext, "handout", await tinted([150, 60, 60])), await upload(dmContext, "handout", await tinted([60, 150, 60]))];
-      await ops.send({ t: "handout.show", handout: { id: randomUUID(), assetId: first, title: "The first page", to: [pat] } });
+      await ops.send({ t: "handout.show", handout: { id: uuidv7(), assetId: first, title: "The first page", to: [pat] } });
       const firstPopup = desk.getByRole("dialog", { name: "The first page" });
       await loaded(firstPopup, "The first page");
       await firstPopup.getByRole("button", { name: "Zoom in", exact: true }).focus();
@@ -2214,7 +2215,7 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
         await held;
         await route.continue();
       });
-      await ops.send({ t: "handout.show", handout: { id: randomUUID(), assetId: second, title: "The second page", to: [pat] } });
+      await ops.send({ t: "handout.show", handout: { id: uuidv7(), assetId: second, title: "The second page", to: [pat] } });
       const secondPopup = desk.getByRole("dialog", { name: "The second page" });
       await secondPopup.getByRole("status").filter({ hasText: "Loading the image…" }).waitFor();
       assert.equal(await secondPopup.getByRole("button", { name: "Zoom in", exact: true }).count(), 0, "the zoom buttons wait for the image");
@@ -2283,9 +2284,9 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
     sceneId: "",
     patId: "",
     quinnId: "",
-    cellarId: randomUUID(),
-    thorn: { id: randomUUID(), characterId: randomUUID() },
-    bree: { characterId: randomUUID() },
+    cellarId: uuidv7(),
+    thorn: { id: uuidv7(), characterId: uuidv7() },
+    bree: { characterId: uuidv7() },
   };
 
   /** The few DOM parts the page functions read, typed by hand: the e2e files compile without the DOM library. */

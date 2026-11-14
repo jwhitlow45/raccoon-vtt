@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -88,13 +88,13 @@ const run = {
   roomId: "",
   roomName: `E2E player phone ${new Date().toISOString().slice(0, 19)}`,
   sceneId: "",
-  thorn: { id: randomUUID(), characterId: randomUUID(), entryId: randomUUID() },
-  goblin: { id: randomUUID(), entryId: randomUUID() },
+  thorn: { id: uuidv7(), characterId: uuidv7(), entryId: uuidv7() },
+  goblin: { id: uuidv7(), entryId: uuidv7() },
   patId: "",
 };
 
 /** Pat's second character, for Find my token's second press (docs/design/design-v1-qol.md 3, Q5). */
-const qe = { wren: { id: randomUUID(), characterId: randomUUID() } };
+const qe = { wren: { id: uuidv7(), characterId: uuidv7() } };
 
 /** How many turn ops Pat's page has sent: End turn sends the tracker's Next. */
 function nextsSent(): number {
@@ -690,7 +690,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
 
   test("4. a total typed into the roll card, the choice picked and focus in the field survive turning the phone (LPD-PLAYER-1)", async () => {
     await setUp({ ...PORTRAIT, scale: 1 });
-    const id = randomUUID();
+    const id = uuidv7();
     await ops.send({
       t: "roll.ask",
       request: { id, test: { kind: "save", choices: [{ ability: "dex" }, { ability: "str" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] },
@@ -858,7 +858,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await shots.take(player, "playerphone-bar-left-of-sheet");
     await player.getByRole("button", { name: "Close Panels" }).tap();
 
-    const id = randomUUID();
+    const id = uuidv7();
     // A check for a Thorn with a stat block: a card with its roll row, a typed bonus or Fail without rolling no longer fits the
     // column on its side and folds behind the Roll asked row (docs/design/design-v1-roll-request.md 5.7), and this step is about the
     // card beside the bar. Step 8 takes the block away again.
@@ -889,7 +889,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
 
   test("8. by touch: a pan, a pinch and a held press leave the bar open, a quick tap off closes it, a token switches it, and the toolbar, the top bar and an alert card leave it", async () => {
     await setUp({ ...LANDSCAPE, scale: 1 });
-    const id = randomUUID();
+    const id = uuidv7();
     // A check, whose card fits the column on its side (step 7).
     await ops.send({ t: "roll.ask", request: { id, test: { kind: "check", choices: [{ ability: "con" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
     await card(player).waitFor();
@@ -937,7 +937,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
   });
 
   test("9. Multi-select by touch: a tap that moves under 8 px hides the bar and keeps the group, a box drag adds and shows it, and Back then ends the mode and stays in the room", async () => {
-    const extra = randomUUID();
+    const extra = uuidv7();
     await ops.send({ t: "token.create", token: { id: extra, sceneId: run.sceneId, kind: "monster", name: "Goblin 2", x: 3, y: 4, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: actor(7) } } });
     await waitFor("Goblin 2 on the player's map", () => playerSocket.state?.tokens[extra]);
     await setUp({ ...LANDSCAPE, scale: 1 });
@@ -1005,8 +1005,8 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await ops.send({
       t: "encounter.start",
       entries: [
-        { id: randomUUID(), tokenId: run.goblin.id, value: 18 },
-        { id: randomUUID(), tokenId: run.thorn.id, value: 15 },
+        { id: uuidv7(), tokenId: run.goblin.id, value: 18 },
+        { id: uuidv7(), tokenId: run.thorn.id, value: 15 },
       ],
     });
     // At 844 x 390 at 130% Multi-select's row stands in the toolbar's own row, so the bar has its 151 px and docks (docs/design/design-v1-tool-options.md 10.3).
@@ -1030,7 +1030,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       await touch([await cellPoint({ x: 8, y: 6 })]);
       const bar = player.getByRole("dialog", { name: "Thorn actions" });
       await (await barControl(bar, "Multi-select")).tap();
-      const id = randomUUID();
+      const id = uuidv7();
       await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
       // The roll's card yields to the compact bar at the screen's foot, or waits in the column, and either way the summary row stands for it.
       const row = player.getByRole("button", { name: /^Roll asked/ });
@@ -1089,7 +1089,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       await setUp(view);
       await touch([await cellPoint({ x: 8, y: 6 })]);
       await (await barControl(player.getByRole("dialog", { name: "Thorn actions" }), "Multi-select")).tap();
-      const id = randomUUID();
+      const id = uuidv7();
       try {
         await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
         await player.waitForTimeout(300);
@@ -1116,7 +1116,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       await setUp(view);
       await player.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Ruler" }).tap();
       await player.getByRole("toolbar", { name: "Ruler options" }).waitFor();
-      const id = randomUUID();
+      const id = uuidv7();
       try {
         await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
         await player.waitForTimeout(400);
@@ -1137,13 +1137,13 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         await ops.send({
           t: "encounter.start",
           entries: [
-            { id: randomUUID(), tokenId: run.goblin.id, value: 18 },
-            { id: randomUUID(), tokenId: run.thorn.id, value: 15 },
+            { id: uuidv7(), tokenId: run.goblin.id, value: 18 },
+            { id: uuidv7(), tokenId: run.thorn.id, value: 15 },
           ],
         });
       }
       await insets({ side: 47, bottom: 21 });
-      const id = randomUUID();
+      const id = uuidv7();
       try {
         await setUp({ width: 480, height: 320, scale: 1.3 });
         await player.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Ruler" }).tap();
@@ -1185,13 +1185,13 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         await ops.send({
           t: "encounter.start",
           entries: [
-            { id: randomUUID(), tokenId: run.goblin.id, value: 18 },
-            { id: randomUUID(), tokenId: run.thorn.id, value: 15 },
+            { id: uuidv7(), tokenId: run.goblin.id, value: 18 },
+            { id: uuidv7(), tokenId: run.thorn.id, value: 15 },
           ],
         });
       }
       await insets(view.insets);
-      const id = randomUUID();
+      const id = uuidv7();
       try {
         await setUp({ width: view.width, height: view.height, scale: 1.3 });
         await player.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Ruler" }).tap();
@@ -1221,7 +1221,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     const label = `480 x 320 at ${Math.round(scale * 100)}%`;
     // No insets: with a landscape phone's, the narrower column folds the chip into its summary row, which already puts the bar away.
     test(`16. with Multi-select's bar open over a roll chip, the chip's tap puts the bar away, keeping the group, and opens the card in reach with focus: ${label}`, async () => {
-      const id = randomUUID();
+      const id = uuidv7();
       try {
         await setUp({ width: 480, height: 320, scale });
         await touch([await cellPoint({ x: 8, y: 6 })]);
@@ -1259,7 +1259,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
   test("17. in a fight at 480 x 320 at 130% with Multi-select, after Later the chip, or the row that stands for it, shows whole and takes a tap without covering Actions, and opens the card", async () => {
     const label = "480 x 320 at 130% in a fight with Multi-select";
     await insets({ side: 47, bottom: 21 });
-    const id = randomUUID();
+    const id = uuidv7();
     try {
       await setUp({ width: 480, height: 320, scale: 1.3 });
       await touch([await cellPoint({ x: 8, y: 6 })]);
@@ -1270,8 +1270,8 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       await ops.send({
         t: "encounter.start",
         entries: [
-          { id: randomUUID(), tokenId: run.goblin.id, value: 18 },
-          { id: randomUUID(), tokenId: run.thorn.id, value: 15 },
+          { id: uuidv7(), tokenId: run.goblin.id, value: 18 },
+          { id: uuidv7(), tokenId: run.thorn.id, value: 15 },
         ],
       });
       await player.waitForTimeout(300);
@@ -1308,7 +1308,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     const shot = tool === "Ruler" ? "ruler" : "several";
     test(`18. on the player's own turn in a fight at 480 x 320 at 130%, with a roll put off with Later, End turn and the way back to the card are both whole in reach: ${tool}`, async () => {
       await insets({ side: 47, bottom: 21 });
-      const id = randomUUID();
+      const id = uuidv7();
       try {
         await setUp({ width: 480, height: 320, scale: 1.3 });
         if (tool === "Ruler") {
@@ -1324,8 +1324,8 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         await ops.send({
           t: "encounter.start",
           entries: [
-            { id: randomUUID(), tokenId: run.thorn.id, value: 18 },
-            { id: randomUUID(), tokenId: run.goblin.id, value: 15 },
+            { id: uuidv7(), tokenId: run.thorn.id, value: 18 },
+            { id: uuidv7(), tokenId: run.goblin.id, value: 15 },
           ],
         });
         await ops.send({ t: "encounter.next" });
@@ -1362,8 +1362,8 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     const shot = `480x320-${Math.round(scale * 100)}`;
     test(`19. with the kept rulers behind their chip and a roll put off with Later, the way back covers no control in the row nor ⋯, and the kept rulers in their pop-up are in reach: ${label}`, async () => {
       await insets({ side: 47, bottom: 21 });
-      const id = randomUUID();
-      const kept = Array.from({ length: 10 }, () => randomUUID());
+      const id = uuidv7();
+      const kept = Array.from({ length: 10 }, () => uuidv7());
       try {
         for (const [i, drawingId] of kept.entries()) {
           await ops.send({
@@ -1460,7 +1460,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     test(`bs-1. at ${label} Expand, just left of Close, grows Thorn's bar up from the strip's foot to show more of it with Thorn still on the map, Collapse brings the strip back, and a reload opens it resting (docs/design/design-v1-bar-compact.md 5)`, async () => {
       const KEY = "rvtt.tokenBarLarger";
       const target = { characterId: run.thorn.characterId };
-      const effects = MANY.map((key) => ({ id: randomUUID(), key }));
+      const effects = MANY.map((key) => ({ id: uuidv7(), key }));
       for (const effect of effects) await ops.send({ t: "actor.effect.add", target, effect });
       await setUp({ ...view, scale: 1 });
       let bar = player.getByRole("dialog", { name: "Thorn actions" });
@@ -1512,7 +1512,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
   test("bs-2. at 390 x 844 with the bar expanded, a drag of Thorn two cells down, under the bar's cover, hides his bar and shows it again expanded where it stood, at the height it had, and the map moves once to clear him (review BS-O2, D-261024-22, docs/design/design-v1-bar-compact.md 5.3)", async () => {
     const view = { width: 390, height: 844 };
     const target = { characterId: run.thorn.characterId };
-    const effects = MANY.map((key) => ({ id: randomUUID(), key }));
+    const effects = MANY.map((key) => ({ id: uuidv7(), key }));
     for (const effect of effects) await ops.send({ t: "actor.effect.add", target, effect });
     await setUp({ ...view, scale: 1 });
     let bar = player.getByRole("dialog", { name: "Thorn actions" });
@@ -1548,9 +1548,9 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
   test("bs-3. at 390 x 844 with Thorn's bar expanded, a tap on another token opens its bar expanded, Collapse rests it with the map where it stood, Multi-select pressed in the expanded bar rests it, and expanded again, the group's bar as Multi-select gathers the other token stays expanded, as does Thorn's as it lets go (reviews LP19-BS-1 and LP19-OPUS-4, D-261024-22, docs/design/design-v1-bar-compact.md 5.3)", async () => {
     const view = { width: 390, height: 844 };
     const target = { characterId: run.thorn.characterId };
-    const effects = MANY.map((key) => ({ id: randomUUID(), key }));
+    const effects = MANY.map((key) => ({ id: uuidv7(), key }));
     // A second token of Thorn's, a cell east of him, with his conditions and so his tall bar.
-    const echo = randomUUID();
+    const echo = uuidv7();
     for (const effect of effects) await ops.send({ t: "actor.effect.add", target, effect });
     await ops.send({ t: "token.create", token: { id: echo, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "pc", name: "Echo", x: 9, y: 6, disposition: "ally", actor: { ref: run.thorn.characterId } } });
     await setUp({ ...view, scale: 1 });
@@ -1637,9 +1637,9 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
   test("fu24r1-own. at 390 x 844 a whisper keeps above Thorn's expanded bar and stays where it is when another token's bar opens, expanded or after Close as the strip: an upright phone's bar never hangs over the toasts (review FU24-OPUS-1, docs/design/design-v1-bar-compact.md 3.5)", async () => {
     const view = { width: 390, height: 844 };
     const target = { characterId: run.thorn.characterId };
-    const effects = MANY.map((key) => ({ id: randomUUID(), key }));
+    const effects = MANY.map((key) => ({ id: uuidv7(), key }));
     // A scout on Thorn's row, whose bar for Pat is short.
-    const scout = randomUUID();
+    const scout = uuidv7();
     for (const effect of effects) await ops.send({ t: "actor.effect.add", target, effect });
     await ops.send({ t: "token.create", token: { id: scout, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Scout", x: 11, y: 6, disposition: "hostile", actor: { inline: actor(7) } } });
     await waitFor("the scout on the player's map", () => playerSocket.state?.tokens[scout]);
@@ -1832,7 +1832,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
   });
 
   test("lp32-1. an opened turn card on an upright phone stops above the bar a Fill chip opened, so the bar's Apply and End turn take a tap: Pat's own card at 390 x 844 and 320 x 568 at 100% and 130%, and a monster's card on the DM's phone over a token's bar (LP32-B-CARD-1)", async () => {
-    const warrior = { id: randomUUID(), entryId: randomUUID() };
+    const warrior = { id: uuidv7(), entryId: uuidv7() };
     const block = monsterActor((await loadMonsters()).find((m) => m.srdId === "goblin-warrior")!);
     await ops.send({ t: "character.update", characterId: run.thorn.characterId, patch: { level: 5, stats: THORN_WEAPONS } });
     await ops.send({ t: "token.create", token: { id: warrior.id, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", size: "small", x: 9, y: 6, visibility: "all", disposition: "hostile", actor: { inline: block } } });

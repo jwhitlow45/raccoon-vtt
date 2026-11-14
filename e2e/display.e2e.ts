@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -206,7 +206,7 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
     });
     assert.ok(res.ok(), `uploading the handout answered ${res.status()}`);
     run.handoutImage = ((await res.json()) as { id: string }).id;
-    const handoutId = randomUUID();
+    const handoutId = uuidv7();
     await ops.send({ t: "handout.show", handout: { id: handoutId, assetId: run.handoutImage, title: "Map of the crypt", to: "all" } });
 
     const img = tv.getByRole("dialog", { name: "Map of the crypt" }).getByRole("img", { name: "Map of the crypt" });
@@ -292,7 +292,7 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
     assert.equal(sent.status(), 204);
     const card = player.getByRole("dialog", { name: "X-card" });
     await card.waitFor();
-    const handoutId = randomUUID();
+    const handoutId = uuidv7();
     await ops.send({ t: "handout.show", handout: { id: handoutId, assetId: run.handoutImage, title: "Strange letter", to: "all" } });
     await waitFor("the handout in the player's view", () => playerSocket.state?.handouts[handoutId]);
     await player.waitForTimeout(500);
@@ -402,7 +402,7 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
   });
 
   test("6. the connection banner shows over a handout while the server is away", async () => {
-    const handoutId = randomUUID();
+    const handoutId = uuidv7();
     await ops.send({ t: "handout.show", handout: { id: handoutId, assetId: run.handoutImage, title: "Old letter", to: "all" } });
     await tv.getByRole("dialog", { name: "Old letter" }).waitFor();
     ops.close();
@@ -449,7 +449,7 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
       const answer = (await res.json()) as { id: string; width: number; height: number };
       pages.push({ assetId: answer.id, width: answer.width, height: answer.height });
     }
-    const handoutId = randomUUID();
+    const handoutId = uuidv7();
     await ops.send({ t: "handout.show", handout: { id: handoutId, pages, title: "Ship's log", to: "all" } });
 
     const dialog = tv.getByRole("dialog", { name: "Ship's log" });
@@ -629,7 +629,7 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
     const broken = `**/display/assets/${pages[2]!.assetId}/full`;
     await tv.route(broken, (route) => route.abort("connectionrefused"));
     tvConsole.allow = [/ERR_CONNECTION_REFUSED/];
-    const tornId = randomUUID();
+    const tornId = uuidv7();
     await ops.send({ t: "handout.show", handout: { id: tornId, pages: [pages[0], pages[2]], title: "Torn map", to: "all" } });
     const torn = tv.getByRole("dialog", { name: "Torn map" });
     await torn.getByText("Page 1 of 2", { exact: true }).waitFor();
