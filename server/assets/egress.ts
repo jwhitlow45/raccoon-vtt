@@ -14,10 +14,11 @@ import type { Config } from "../config.ts";
  * - `public` reaches any public host on 443 (squid port 3129), for URL
  *   imports.
  *
- * Production always goes through squid, and config.ts refuses to boot
- * without both proxy URLs. In development without squid both fall back to a
- * direct connection whose DNS lookup refuses every non-unicast address, so a
- * URL import on a development machine cannot reach the router or a local
+ * A hosted production server always goes through squid, and config.ts
+ * refuses to boot without both proxy URLs. In development without squid,
+ * and in the desktop app, both fall back to a direct connection whose DNS
+ * lookup refuses every non-unicast address, so a URL import on a
+ * development machine or a DM's computer cannot reach the router or a local
  * service either.
  * TLS verification stays on in every case.
  */
@@ -38,8 +39,14 @@ export function proxyAgent(uri: string, connectAnswerMs: number = CONNECT_ANSWER
   return new ProxyAgent({ uri, clientFactory: (origin, options) => new Pool(origin, { ...options, headersTimeout: connectAnswerMs }) });
 }
 
-export function createEgress(config: Pick<Config, "production" | "EGRESS_PUBLIC_PROXY" | "EGRESS_STRICT_PROXY">, opts: { connectAnswerMs?: number } = {}): Egress {
-  if (config.production && (!config.EGRESS_PUBLIC_PROXY || !config.EGRESS_STRICT_PROXY)) {
+export function createEgress(
+  config: Pick<Config, "production" | "EGRESS_PUBLIC_PROXY" | "EGRESS_STRICT_PROXY"> & Partial<Pick<Config, "local">>,
+  opts: { connectAnswerMs?: number } = {},
+): Egress {
+  // The desktop app has no squid beside it, so it goes direct through the
+  // guarded lookup, and config.ts refuses its proxy settings
+  // (docs/design/design-v1-local-app.md 4).
+  if (config.production && !config.local && (!config.EGRESS_PUBLIC_PROXY || !config.EGRESS_STRICT_PROXY)) {
     throw new Error("Production needs EGRESS_PUBLIC_PROXY and EGRESS_STRICT_PROXY.");
   }
   const connectAnswerMs = opts.connectAnswerMs ?? CONNECT_ANSWER_MS;

@@ -66,3 +66,23 @@ describe("a proxy that takes a CONNECT and never answers it", () => {
     }
   });
 });
+
+describe("createEgress's proxies", () => {
+  const proxies = { EGRESS_PUBLIC_PROXY: "http://egress:3129", EGRESS_STRICT_PROXY: "http://egress:3128" };
+
+  test("a hosted production server refuses to run without both", () => {
+    assert.throws(() => createEgress({ production: true }), /Production needs EGRESS_PUBLIC_PROXY and EGRESS_STRICT_PROXY/);
+    assert.throws(() => createEgress({ production: true, EGRESS_PUBLIC_PROXY: proxies.EGRESS_PUBLIC_PROXY }), /Production needs/);
+    return createEgress({ production: true, ...proxies }).close();
+  });
+
+  test("the desktop app runs without them, through the guarded direct connection (docs/design/design-v1-local-app.md 4)", async () => {
+    const egress = createEgress({ production: true, local: true });
+    try {
+      // The guarded lookup refuses a name that resolves to loopback before any connection.
+      await assert.rejects(request("https://localhost/x", { dispatcher: egress.public }), (err: unknown) => (err as { code?: string }).code === "EBLOCKED");
+    } finally {
+      await egress.close();
+    }
+  });
+});
