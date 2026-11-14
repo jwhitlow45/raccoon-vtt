@@ -32,6 +32,23 @@ export function testConfig(env: Record<string, string> = {}): Config {
   });
 }
 
+/**
+ * The environment a test's child process starts from: PATH, plus on Windows
+ * the variables no process there runs well without (Winsock reads
+ * SystemRoot, and temporary files need TEMP and TMP), as the desktop app's
+ * supervisor keeps them for its server (docs/design/design-v1-local-app.md 2).
+ */
+export function childEnv(env: Record<string, string>): Record<string, string> {
+  const kept: Record<string, string> = { PATH: process.env.PATH ?? "" };
+  if (process.platform === "win32") {
+    for (const name of ["SystemRoot", "TEMP", "TMP"]) {
+      const value = process.env[name];
+      if (value !== undefined) kept[name] = value;
+    }
+  }
+  return { ...kept, ...env };
+}
+
 /** A random address in 2001:db8::/32, the IPv6 documentation range. */
 export function randomIp(): string {
   const h = () => randomBytes(2).toString("hex");
