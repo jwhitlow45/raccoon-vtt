@@ -76,6 +76,8 @@ export type JournalStore = {
   read(): Promise<RestoreJournal | null>;
   write(journal: RestoreJournal): Promise<void>;
   delete(): Promise<void>;
+  /** Whether restore.json is there at all, read or not. */
+  present?(): Promise<boolean>;
 };
 
 /** The named moments a test can kill the supervisor at (RESTORE_TEST_CRASH_AT), or make fail. */
@@ -193,6 +195,13 @@ export async function recover(ctx: RestoreContext): Promise<RecoveryResult> {
     ctx.log(`restore recovery: ${action.do}${journal ? ` (journal ${journal.state})` : ""}`);
     switch (action.do) {
       case "nothing":
+        // Only `raccoon`, and no journal that reads. A restore.json still
+        // there is damaged and names nothing left to do, so it goes now that
+        // the databases say so, or every start would say it finishes a restore.
+        if (journal === null && (await ctx.journal.present?.())) {
+          ctx.log("restore recovery: restore.json does not read and the databases need nothing, so it is deleted");
+          await ctx.journal.delete();
+        }
         return { notice, backup, tangled: false, createLive: false };
       case "createLive":
         return { notice, backup, tangled: false, createLive: true };
