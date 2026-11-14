@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { SEAT_FULL, seatCounts, type SeatCounts } from "#shared/limits.ts";
+import { LIMITS, SEAT_FULL, seatCounts, type SeatCounts } from "#shared/limits.ts";
 import type { InitEntry, RoomState, Token } from "#shared/model.ts";
 import { projectState, seatView, type ProjectedState } from "#shared/project.ts";
 import { mintedIds, opSchema, type Op } from "#shared/protocol.ts";
-import { APART, AYLA, BREE, idAt, limitsRoom, OGRE, STAIRS_DOWN, STAIRS_UP, withUpper } from "#shared/privTestutil.ts";
+import { APART, AYLA, BREE, dmAreas, dmDrawings, dmTokens, idAt, limitsRoom, OGRE, STAIRS_DOWN, STAIRS_UP, withUpper } from "#shared/privTestutil.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor, AT, character, chance, DM, entry, int, P1, P2, pick, rng, token } from "#shared/testutil.ts";
 import { answer, Mint, openTwins, same, together, type Answer } from "./limitsTwinTesting.ts";
@@ -33,6 +33,7 @@ function start(r: () => number): RoomState {
   s.tokens[CADE] = token(CADE, { kind: "pc", name: "Cade", disposition: "ally", x: 5, y: 3, actor: { ref: CADE } });
   s.tokens.owl = token("owl", { kind: "npc", name: "Owl", disposition: "ally", x: 4, y: 7, companion: { of: BREE, turn: "shared" }, actor: { inline: actor({ dmNotes: "" }) } });
   s.tokens.shade = token("shade", { name: "Shade", visibility: "dm", x: 6, y: 5 });
+  s.tokens.guide = token("guide", { kind: "npc", name: "Guide", disposition: "ally", x: 6, y: 8 });
   for (let i = 0; i < int(r, 0, 19); i++) {
     const id = `0199f0a0-0000-7000-8000-0000000a${String(i).padStart(4, "0")}`;
     s.templates[id] = { id, rev: 0, sceneId: "s1", shape: "sphere", size: 5, origin: { x: 3.5, y: 3.5, z: 0 }, yaw: 0, includeOrigin: true, color: "#ff8800", ownerId: "p1", visibility: "all", ...(chance(r, 0.5) ? { attachedTo: pick(r, [AYLA, OGRE, BREE, "owl"]) } : {}) };
@@ -218,7 +219,8 @@ const TWIN_RUNS = Number(process.env.LIMITS_TWIN_RUNS ?? 4);
 const TWIN_STEPS = Number(process.env.LIMITS_TWIN_STEPS ?? 40);
 const SEAT_WORDS = new Set(Object.values(SEAT_FULL));
 const SEAT_KINDS = new Set(["token.create", "template.create", "template.update", "drawing.create", "encounter.add", "undo", "redo"]);
-const PUBLIC = [OGRE, BREE, "owl"];
+/** Creatures both players see and neither plays, which the DM may take out of every player's copy in two ways. */
+const PUBLIC = [OGRE, "guide"];
 
 /** One shared op of a player's, drawn from their own copy. */
 function drawFromCopy(r: () => number, copy: ProjectedState, who: "p1" | "p2", mint: () => string, left: readonly string[]): Op {
@@ -285,6 +287,11 @@ describe("random twin runs answer P1 alike", () => {
             s.tokens[id] = token(id, { name: `${APART}name${seed}x${i}`, visibility: "dm", ...cellIn(own, chance(own, 0.5) ? R : F) });
             ids.push(id, `${APART}name${seed}x${i}`);
           }
+          // One twin fills a room cap with the DM's things, so a player's op that read the cap would answer apart.
+          const fill = int(own, 0, 3);
+          if (fill === 1) ids.push(...dmAreas(s, LIMITS.templatesPerScene));
+          if (fill === 2) ids.push(...dmDrawings(s, LIMITS.drawingsPerScene));
+          if (fill === 3) ids.push(...dmTokens(s, LIMITS.tokensPerScene));
           return ids;
         };
         const pair = await openTwins(t, a, b, { a: apart(a, run * 2 + 1), b: apart(b, run * 2 + 2) });
@@ -336,7 +343,7 @@ describe("random twin runs answer P1 alike", () => {
             for (let k = 0; k < fresh; k++) shared.next(pair[1]);
             const answers: Answer[][] = [];
             for (const room of pair) answers.push(await together(room, sends));
-            assert.deepEqual(answers[0], answers[1], `I1: ${what}: the same answers in both twins`);
+            assert.deepEqual(answers[0], answers[1], `I1: ${what}: the same answers in both twins to ${JSON.stringify(sends)}`);
             for (const [k, [who, op]] of sends.entries()) {
               const got = answers[0]![k]!;
               if (typeof got === "object" && SEAT_WORDS.has(got.message)) assert.ok(SEAT_KINDS.has(op.t), `I6: ${what}: ${who}'s ${op.t} refused with a seat's words`);
