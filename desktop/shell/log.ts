@@ -14,9 +14,16 @@ export class ShellLog {
   #dir: string | null = null;
   #early: string[] = [];
   readonly #now: () => Date;
+  readonly #echo: ((line: string) => void) | null;
 
-  constructor(now: () => Date = () => new Date()) {
+  /**
+   * `echo` also gets every line as it is made. --smoke passes stderr, so a
+   * run that stops before the supervisor names the data folder still says
+   * why to whoever ran it.
+   */
+  constructor(now: () => Date = () => new Date(), echo: ((line: string) => void) | null = null) {
     this.#now = now;
+    this.#echo = echo;
   }
 
   /** The logs folder, once the supervisor has named it. Writes the lines kept so far. */
@@ -40,6 +47,7 @@ export class ShellLog {
     // One line per entry, whatever the message holds, so the last line of
     // the file is always a whole entry.
     const line = `${this.#now().toISOString()} ${level} ${message.replace(/\r?\n/g, " | ")}\n`;
+    this.#echo?.(line);
     if (this.#dir === null) {
       this.#early.push(line);
       if (this.#early.length > EARLY_LINES) this.#early.shift();
