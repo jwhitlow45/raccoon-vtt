@@ -33,6 +33,7 @@ import { CLOSE, clientKey, sessionOfKey, type ClientKey, type Connection } from 
 import { counted } from "./counted.ts";
 import { heldIds, idRow, IdGate, idsSince, loadIdRows, pruneIds, recordIds, seedRows, type IdRow } from "./createIds.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
+import { rideEndOps } from "./rideEnd.ts";
 import { cancelLost, cancelPreviews, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
 import { exploreOp, floorsExplored } from "./explore.ts";
 import { buildSnapshot, publishBatch, takeKeptRejects, type Reject, type Restored, type Stamped } from "./fanout.ts";
@@ -2635,6 +2636,7 @@ export class RoomActor {
     // A room whose replay failed keeps its stored tail for a fixed build and writes no row of its own: the next seq is one
     // that tail holds, or a gap in it.
     if (!this.replayFailed && (answeredSinceStep(batch) > 0 || batch.doors.length > batch.step.doors)) this.#explore(batch);
+    if (!this.replayFailed && (batch.ops.length > 0 || batch.answered > 0)) this.#rideEnd(batch);
     if (!this.replayFailed && (batch.answered > 0 || batch.doors.length > 0)) this.#meet(batch);
     batch.state = this.#staged.state;
     batch.seq = this.#staged.seq;
@@ -2755,6 +2757,24 @@ export class RoomActor {
   }
 
   /**
+   * The ride's end (rideEnd.ts), once at the batch's close, after the
+   * explore and map steps and before the meet step and the commit: every
+   * area or kept ruler a player put on a creature their own view no longer
+   * holds goes, by `sys.rideEnd` ops at the end of the same batch, so no
+   * frame carries one past the batch that hid its creature. It writes no
+   * line and runs none of an op's checks, since it only removes. A step that
+   * throws is logged and the batch commits without it: the next close
+   * finds the same riders.
+   */
+  #rideEnd(batch: Batch): void {
+    try {
+      for (const op of rideEndOps(this.#staged.state)) this.#appendServerOp(batch, op, "ride end");
+    } catch (err) {
+      this.#log.error({ err, roomId: this.roomId }, "ride end step failed, the batch commits without it");
+    }
+  }
+
+  /**
    * The explore step on the staged state now, inside the batch: before its end where an op wrote an area's reminder.
    * One op for each floor that explores (docs/design/design-v1-floors.md 7.5), each read off the state the one before
    * left, as it would be on its own.
@@ -2818,7 +2838,7 @@ export class RoomActor {
    * higher one handed out, and moves neither. A meeting names no scene, so
    * its growth goes to the floors of the creatures it wrote.
    */
-  #appendServerOp(batch: Batch, op: OpOf<"sys.explore"> | OpOf<"sys.remember"> | OpOf<"sys.meet">, what: string): boolean {
+  #appendServerOp(batch: Batch, op: OpOf<"sys.explore"> | OpOf<"sys.remember"> | OpOf<"sys.meet"> | OpOf<"sys.rideEnd"> | OpOf<"sys.share">, what: string): boolean {
     // Never reached while #commitNow skips the explore there: the tail a failed replay left holds the next seq, or a gap.
     if (this.replayFailed) {
       this.#log.error({ roomId: this.roomId }, `${what} op skipped, the room's replay failed`);
@@ -2843,7 +2863,7 @@ export class RoomActor {
     for (const key of result.touched) batch.touched.push(key);
     if (result.global) batch.global = true;
     if (result.rejudge) batch.rejudge = true;
-    this.#sizes.grew(grew, op.t === "sys.meet" ? creatureFloors(result.state, result.touched) : [op.sceneId]);
+    this.#sizes.grew(grew, op.t === "sys.meet" ? creatureFloors(result.state, result.touched) : op.t === "sys.rideEnd" || op.t === "sys.share" ? [] : [op.sceneId]);
     return true;
   }
 
