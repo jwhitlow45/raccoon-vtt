@@ -68,6 +68,8 @@ describe("runBackup", () => {
     assert.equal(record.images, 4);
     assert.ok(record.dbBytes > 1_000_000, `dbBytes ${record.dbBytes}`);
     assert.ok(record.dumpBytes > 0);
+    const part = join(backups, `${name}${BACKUP_SUFFIX.dump}.part`);
+    assert.equal(t.given.filter((p) => p === part).length, 3, "pg_dump writes the dump, and pg_restore reads it twice, by PostgreSQL's spelling of its path");
     const list = await readFileList(backups, name);
     assert.equal(list?.length, 4);
     for (const path of list ?? []) {

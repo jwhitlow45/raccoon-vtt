@@ -1,7 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { appendFile, open, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { Platform } from "../contract.ts";
@@ -89,6 +89,8 @@ export type ClusterOptions = {
   afterInitdb?: () => Promise<void>;
   /** Tests only: the folder renames, where a test stands in for a file another program holds open. */
   renameDir?: (from: string, to: string) => Promise<void>;
+  /** The path PostgreSQL's programs are given for one of these paths (pgPaths.ts). The path itself by default. */
+  pgPath?: (path: string) => string;
 };
 
 /**
@@ -122,7 +124,12 @@ export class Cluster {
   }
 
   program(name: string): string {
-    return join(this.opts.binDir, this.opts.platform === "win32" ? `${name}.exe` : name);
+    return join(this.pgPath(this.opts.binDir), this.opts.platform === "win32" ? `${name}.exe` : name);
+  }
+
+  /** The path PostgreSQL's programs are given for a path in the data folder or their own. */
+  pgPath(path: string): string {
+    return this.opts.pgPath?.(path) ?? path;
   }
 
   /** The major version of the bundled programs, from `postgres --version`. */
@@ -172,15 +179,20 @@ export class Cluster {
     for (const name of await readdir(parent)) if (name.startsWith(stagingPrefix)) await this.moveAside(join(parent, name));
     if (existsSync(this.opts.pgData)) await this.moveAside(this.opts.pgData);
     const staging = join(parent, `${stagingPrefix}${randomBytes(6).toString("hex")}`);
+    // Made here, empty, so initdb makes no folder itself. On Windows it would
+    // check each parent first, and its check of a junction (pgPaths.ts) reads
+    // the target back in the ANSI code page, which fails for the folders a
+    // junction stands in for.
+    await mkdir(staging, { mode: 0o700 });
     const pwfile = `${this.opts.pgData}-pw-${randomBytes(6).toString("hex")}`;
     await writeFile(pwfile, `${this.opts.password}\n`, { mode: 0o600 });
     try {
       await run(
         this.program("initdb"),
         [
-          `--pgdata=${staging}`,
+          `--pgdata=${this.pgPath(staging)}`,
           `--username=${USER}`,
-          `--pwfile=${pwfile}`,
+          `--pwfile=${this.pgPath(pwfile)}`,
           "--auth=scram-sha-256",
           "--encoding=UTF8",
           "--locale=C",
@@ -324,7 +336,7 @@ export class Cluster {
       const port = await (this.opts.pickPort ?? loopbackPort)();
       const offset = await sizeOf(this.opts.logFile);
       try {
-        await run(this.program("pg_ctl"), ["start", "-D", this.opts.pgData, "-l", this.opts.logFile, "-w", "-t", "120", "-o", `-p ${port}`], {
+        await run(this.program("pg_ctl"), ["start", "-D", this.pgPath(this.opts.pgData), "-l", this.pgPath(this.opts.logFile), "-w", "-t", "120", "-o", `-p ${port}`], {
           env: pgEnv(),
           windowsHide: true,
         });
@@ -357,7 +369,7 @@ export class Cluster {
     const pid = await this.pidFilePid();
     const mine = pid !== null && this.started?.pid === pid && (await this.proc.stamp(pid)) === this.started.stamp;
     if (mine || (await this.leftover()).kind === "running") {
-      await run(this.program("pg_ctl"), ["stop", "-D", this.opts.pgData, "-m", "fast", "-w", "-t", "60"], { env: pgEnv(), windowsHide: true });
+      await run(this.program("pg_ctl"), ["stop", "-D", this.pgPath(this.opts.pgData), "-m", "fast", "-w", "-t", "60"], { env: pgEnv(), windowsHide: true });
     }
     this.started = null;
     this.port = null;
