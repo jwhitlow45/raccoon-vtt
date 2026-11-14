@@ -10,7 +10,7 @@ import pg from "pg";
 import { Platform } from "../contract.ts";
 import { dataIdentity } from "./dataDir.ts";
 import { lockLocation } from "./lock.ts";
-import { pgPaths, windowsDeps } from "./pgPaths.ts";
+import { parentProblem, pgPaths, PROGRAMDATA_FOLDER, windowsDeps } from "./pgPaths.ts";
 import { loopbackPort } from "./ports.ts";
 import { BOOT_RECORD, Cluster, DatabaseFailed, uncertainWords } from "./postgres.ts";
 import { bootId, isAlive, processFacts, processStamp } from "./processInfo.ts";
@@ -361,6 +361,11 @@ describe("on Windows, a data folder whose path PostgreSQL can't open", { skip: p
     if (reading.short !== null && reading.shortFits) assert.ok(existsSync(reading.short), reading.short);
   });
 
+  test("RaccoonVTT's folder in ProgramData, as desktop.yml makes it with the installer's script, is one the app accepts", async () => {
+    const facts = await windowsDeps().inspect(join(process.env.ProgramData ?? "C:\\ProgramData", PROGRAMDATA_FOLDER));
+    assert.equal(parentProblem(facts), null, JSON.stringify(facts));
+  });
+
   for (const route of ["as Windows allows", "through a junction"] as const) {
     test(`a cluster there is made, started, dumped, read back and stopped, ${route}`, async () => {
       const dir = await dataDir();
@@ -371,8 +376,9 @@ describe("on Windows, a data folder whose path PostgreSQL can't open", { skip: p
       const real = windowsDeps();
       const deps = route === "through a junction" ? { ...real, read: async () => ({ fits: false, short: null, shortFits: false }) } : real;
       const paths = await pgPaths({ data, program: postgresDir() }, record, platform, deps);
-      const linkFolder = existsSync(record) ? (JSON.parse(await readFile(record, "utf8")) as { folder: string }).folder : null;
-      if (route === "through a junction") assert.ok(linkFolder !== null);
+      const chosen = JSON.parse(await readFile(record, "utf8")) as { how: string; folder?: string };
+      const linkFolder = chosen.how === "junction" ? chosen.folder! : null;
+      if (route === "through a junction") assert.ok(linkFolder !== null, JSON.stringify(chosen));
       try {
         const c = new Cluster({
           binDir: join(postgresDir(), "bin"),
@@ -393,6 +399,8 @@ describe("on Windows, a data folder whose path PostgreSQL can't open", { skip: p
           await c.stop();
         }
         assert.equal(existsSync(join(data, "postgres", "postmaster.pid")), false, "stopped cleanly");
+        const again = await pgPaths({ data, program: postgresDir() }, record, platform, { ...real, read: async () => assert.fail("the record comes first") });
+        assert.equal(again.map(join(data, "postgres")), paths.map(join(data, "postgres")), "the next start gives PostgreSQL the same path");
       } finally {
         if (linkFolder !== null) {
           // rmdir takes a junction away without following it.

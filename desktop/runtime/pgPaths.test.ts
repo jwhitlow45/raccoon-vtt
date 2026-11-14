@@ -2,17 +2,18 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { after, describe, test } from "node:test";
 import { DATA_DIR_ENV, Platform } from "../contract.ts";
-import { parseFolderReading, parseWhoamiSid, pgPaths, type FolderReading, type PgPathDeps } from "./pgPaths.ts";
+import { folderProblem, parentProblem, parseAclFacts, parseFolderReading, pgPaths, type AclFacts, type AclRule, type FolderReading, type PgPathDeps } from "./pgPaths.ts";
 import { Cluster, DatabaseFailed } from "./postgres.ts";
 
 /**
- * Which path PostgreSQL's programs get for a folder on Windows, with a
- * stand-in code page in place of Windows' own: Latin-1, as cp1252 holds,
- * so é fits and Ж doesn't. Junctions are symlinks here, which read back the
- * same way. desktop.yml's Windows smoke test runs the real ones.
+ * Which path PostgreSQL's programs get for a folder on Windows, with
+ * stand-ins for Windows' answers: a code page that holds Latin-1, as cp1252
+ * does, so é fits and Ж doesn't, short names as given, and the ACLs Get-Acl
+ * would read. Junctions are symlinks here, which read back the same way.
+ * desktop.yml's Windows smoke test and postgres.itest.ts run the real ones.
  */
 
 const platform = Platform.parse(process.platform);
@@ -27,216 +28,345 @@ async function folder(name = "rvtt-pgpaths-"): Promise<string> {
   return dir;
 }
 
-const latin1 = (path: string) => [...path].every((c) => c.codePointAt(0)! <= 0xff);
+const SYSTEM = "S-1-5-18";
+const ADMINS = "S-1-5-32-544";
+const USERS = "S-1-5-32-545";
+const CREATOR_OWNER = "S-1-3-0";
+const ME = "S-1-5-21-1-2-3-1001";
+const FULL = 0x1f01ff;
+const rule = (sid: string, rights: number, inherit: number, propagate = 0, more: Partial<AclRule> = {}): AclRule => ({ sid, rights, inherit, propagate, allow: true, inherited: false, ...more });
 
-/**
- * A Windows with a Latin-1 code page and the short names given. Each reading
- * and each folder restricted is counted. `meanwhile` is what another user
- * does to a new folder before its ACL shuts them out.
- */
-function windows(
-  programData: string | undefined,
-  shortNames: Record<string, string> = {},
-  meanwhile: (folder: string) => Promise<void> = async () => {},
-): PgPathDeps & { reads: string[]; restricted: string[] } {
-  const reads: string[] = [];
-  const restricted: string[] = [];
+/** RaccoonVTT's folder in ProgramData as desktop/build/programdata.ps1 makes it. */
+function installers(): AclFacts {
   return {
-    reads,
-    restricted,
-    programData,
-    restrict: async (folder) => {
-      await meanwhile(folder);
-      restricted.push(folder);
-    },
-    read: async (path): Promise<FolderReading> => {
-      reads.push(path);
-      const short = shortNames[path] ?? null;
-      return { fits: latin1(path), short, shortFits: short !== null && latin1(short) };
-    },
+    exists: true,
+    directory: true,
+    reparse: false,
+    owner: ADMINS,
+    protected: true,
+    rules: [rule(SYSTEM, FULL, 3), rule(ADMINS, FULL, 3), rule(USERS, 0x1 | 0x4 | 0x20 | 0x80 | 0x20000 | 0x100000, 0), rule(CREATOR_OWNER, FULL, 3, 2)],
   };
 }
 
-/** A data folder under a name with é and Ж, and a program folder whose path is ASCII. */
-async function setup(): Promise<{ root: string; data: string; program: string; record: string; programData: string }> {
+/** A folder made with this user's own security descriptor, as the app asks. */
+function mine(user = ME): AclFacts {
+  return { exists: true, directory: true, reparse: false, owner: user, protected: true, rules: [rule(user, FULL, 3), rule(SYSTEM, FULL, 3), rule(ADMINS, FULL, 3)] };
+}
+
+const latin1 = (path: string) => [...path].every((c) => c.codePointAt(0)! <= 0xff);
+
+type Windows = PgPathDeps & { reads: string[]; made: string[]; inspected: string[] };
+
+/**
+ * A Windows with a Latin-1 code page, the short names given, and
+ * RaccoonVTT's folder in ProgramData as its installer makes it. Each
+ * reading, folder made and look at the ACL is counted. `made` is the ACL a
+ * folder gets, `meanwhile` what happens to it before it is read.
+ */
+function windows(
+  programData: string | undefined,
+  o: {
+    short?: Record<string, string>;
+    read?: (path: string) => FolderReading;
+    parent?: AclFacts | Error;
+    made?: AclFacts | Error;
+    meanwhile?: (folder: string) => Promise<void>;
+    linked?: (folder: string) => Promise<void>;
+  } = {},
+): Windows {
+  const reads: string[] = [];
+  const made: string[] = [];
+  const inspected: string[] = [];
+  return {
+    reads,
+    made,
+    inspected,
+    programData,
+    read: async (path) => {
+      reads.push(path);
+      if (o.read) return o.read(path);
+      const short = o.short?.[path] ?? null;
+      return { fits: latin1(path), short, shortFits: short !== null && latin1(short) };
+    },
+    inspect: async (path) => {
+      inspected.push(path);
+      if (o.parent instanceof Error) throw o.parent;
+      return o.parent ?? installers();
+    },
+    make: async (path) => {
+      made.push(path);
+      if (o.made instanceof Error) throw o.made;
+      await mkdir(path);
+      await o.meanwhile?.(path);
+      return { user: ME, facts: o.made ?? mine() };
+    },
+    ...(o.linked ? { linked: o.linked } : {}),
+  };
+}
+
+/** A data folder under a name with é and Ж, a program folder whose path is ASCII, and ProgramData with RaccoonVTT's folder. */
+async function setup(): Promise<{ root: string; data: string; program: string; record: string; programData: string; parent: string }> {
   const root = await folder();
   const data = join(root, "RaccoonVTT Tést Жук", "data");
   const program = join(root, "Program Files", "RaccoonVTT", "resources", "postgres");
   const programData = join(root, "ProgramData");
-  for (const dir of [data, program, programData]) await mkdir(dir, { recursive: true });
-  return { root, data, program, record: join(data, "postgres-link.json"), programData };
+  const parent = join(programData, "RaccoonVTT");
+  for (const dir of [data, program, parent]) await mkdir(dir, { recursive: true });
+  return { root, data, program, record: join(data, "postgres-link.json"), programData, parent };
 }
 
+const record = async (file: string) => JSON.parse(await readFile(file, "utf8")) as Record<string, string>;
+const paths = (s: { data: string; program: string; record: string }, deps: PgPathDeps) => pgPaths({ data: s.data, program: s.program }, s.record, "win32", deps);
+
 describe("the paths PostgreSQL's programs are given", () => {
-  test("on macOS and Linux each is the path itself, and nothing is read", async () => {
+  test("on macOS and Linux each is the path itself, and nothing is read or recorded", async () => {
     const s = await setup();
     const deps = windows(s.programData);
     for (const on of ["darwin", "linux"] satisfies Platform[]) {
-      const paths = await pgPaths({ data: s.data, program: s.program }, s.record, on, deps);
-      assert.equal(paths.map(join(s.data, "postgres")), join(s.data, "postgres"));
+      const p = await pgPaths({ data: s.data, program: s.program }, s.record, on, deps);
+      assert.equal(p.map(join(s.data, "postgres")), join(s.data, "postgres"));
     }
     assert.deepEqual(deps.reads, []);
+    assert.equal(existsSync(s.record), false);
   });
 
-  test("on Windows a path the code page holds is given as it is: ASCII without asking, é once Windows says it fits", async () => {
+  test("on Windows an ASCII path is given as it is, without asking Windows or recording anything", async () => {
     const s = await setup();
+    const data = join(s.root, "data");
     const deps = windows(s.programData);
-    const data = join(s.root, "Données de José");
-    const paths = await pgPaths({ data, program: s.program }, s.record, "win32", deps);
-    assert.deepEqual(deps.reads, [data], "the ASCII program folder is never read");
-    assert.equal(paths.map(join(data, "postgres")), join(data, "postgres"));
-    assert.deepEqual(paths.notes, []);
-    assert.deepEqual(await readdir(s.programData), [], "no junction");
+    const p = await pgPaths({ data, program: s.program }, join(data, "postgres-link.json"), "win32", deps);
+    assert.equal(p.map(join(data, "postgres")), join(data, "postgres"));
+    assert.deepEqual([deps.reads, deps.made, p.notes], [[], [], []]);
+    assert.equal(existsSync(join(data, "postgres-link.json")), false);
   });
 
-  test("a path with a letter outside the code page is given by its 8.3 short path, when that fits", async () => {
+  test("a path the code page holds is given as it is, and that is recorded, so no later start asks again", async () => {
     const s = await setup();
-    const short = join(s.root, "RACCOO~1", "data");
-    const paths = await pgPaths({ data: s.data, program: s.program }, s.record, "win32", windows(s.programData, { [s.data]: short }));
-    assert.equal(paths.map(s.data), short);
-    assert.equal(paths.map(join(s.data, "postgres")), join(short, "postgres"));
-    assert.equal(paths.map(join(s.data, "logs", "postgres.log")), join(short, "logs", "postgres.log"));
-    assert.equal(paths.map(join(s.program, "bin")), join(s.program, "bin"), "the program folder fits as it is");
-    assert.equal(paths.map(join(s.root, "elsewhere")), join(s.root, "elsewhere"), "a path in neither folder is left alone");
-    assert.match(paths.notes.join("\n"), /by its short path/);
-    assert.deepEqual(await readdir(s.programData), []);
+    const data = join(s.root, "Données de José");
+    await mkdir(data);
+    const file = join(data, "postgres-link.json");
+    const deps = windows(s.programData);
+    const first = await pgPaths({ data, program: s.program }, file, "win32", deps);
+    assert.equal(first.map(join(data, "postgres")), join(data, "postgres"));
+    assert.deepEqual(deps.reads, [data], "the ASCII program folder is never read");
+    assert.deepEqual(await record(file), { data, how: "direct" });
+    await pgPaths({ data, program: s.program }, file, "win32", windows(s.programData, { read: () => assert.fail("asked again") }));
+    assert.deepEqual(await readdir(s.parent), [], "no junction");
   });
 
-  test("with no short name that fits, a junction in a folder of its own in ProgramData, the same one from start to start", async () => {
+  test("a path with a letter outside the code page is given by its 8.3 short path when that fits, recorded and kept", async () => {
+    const s = await setup();
+    const short = join(s.root, "RACCOO~1");
+    await symlink(dirname(s.data), short);
+    const shortData = join(short, "data");
+    const p = await paths(s, windows(s.programData, { short: { [s.data]: shortData } }));
+    assert.equal(p.map(s.data), shortData);
+    assert.equal(p.map(join(s.data, "postgres")), join(shortData, "postgres"));
+    assert.equal(p.map(join(s.data, "logs", "postgres.log")), join(shortData, "logs", "postgres.log"));
+    assert.equal(p.map(join(s.program, "bin")), join(s.program, "bin"), "the program folder fits as it is");
+    assert.equal(p.map(join(s.root, "elsewhere")), join(s.root, "elsewhere"), "a path in neither folder is left alone");
+    assert.deepEqual(await record(s.record), { data: s.data, how: "short", path: shortData });
+    const again = await paths(s, windows(s.programData, { read: () => assert.fail("asked again") }));
+    assert.equal(again.map(s.data), shortData);
+    assert.deepEqual(await readdir(s.parent), []);
+  });
+
+  test("with no short name that fits, a junction in this user's own folder in RaccoonVTT's folder in ProgramData, kept from start to start", async () => {
     const s = await setup();
     // A short name with a letter the code page lacks, as when 8.3 names are off and Windows hands back the long one.
-    const deps = windows(s.programData, { [s.data]: s.data });
-    const first = await pgPaths({ data: s.data, program: s.program }, s.record, "win32", deps);
-    const [made] = await readdir(s.programData);
-    assert.match(made ?? "", /^RaccoonVTT-[0-9a-f]{16}$/);
-    const folderMade = join(s.programData, made!);
-    assert.deepEqual(deps.restricted, [folderMade], "its ACL shut other users out");
-    const link = join(folderMade, "data");
+    const deps = windows(s.programData, { short: { [s.data]: s.data } });
+    const first = await paths(s, deps);
+    assert.deepEqual(deps.inspected, [s.parent], "the installer's folder is read before anything is made in it");
+    const [made] = await readdir(s.parent);
+    assert.match(made ?? "", /^[0-9a-f]{16}$/);
+    const own = join(s.parent, made!);
+    assert.deepEqual(deps.made, [own], "made by Windows with its security descriptor, never by mkdir");
+    const link = join(own, "data");
     assert.equal(first.map(join(s.data, "postgres")), join(link, "postgres"));
     assert.equal(await readlink(link), s.data);
     await writeFile(join(s.data, "probe"), "through the junction");
     assert.equal(await readFile(join(link, "probe"), "utf8"), "through the junction");
-    const recorded = JSON.parse(await readFile(s.record, "utf8")) as { folder: string; key: string };
-    assert.equal(recorded.folder, folderMade);
-    assert.equal(await readFile(join(folderMade, "key"), "utf8"), recorded.key);
-    assert.match(recorded.key, /^[0-9a-f]{32}$/);
-    assert.match(first.notes.join("\n"), /through the junction/);
+    const r = await record(s.record);
+    assert.deepEqual([r.data, r.how, r.folder], [s.data, "junction", own]);
+    assert.equal(await readFile(join(own, "key"), "utf8"), r.key);
+    assert.match(r.key ?? "", /^[0-9a-f]{32}$/);
+    assert.match(first.notes.join("\n"), /as .*data$/m);
 
-    const again = await pgPaths({ data: s.data, program: s.program }, s.record, "win32", deps);
+    const later = windows(s.programData, { read: () => assert.fail("asked again") });
+    const again = await paths(s, later);
     assert.equal(again.map(join(s.data, "postgres")), join(link, "postgres"), "the same path, so PostgreSQL's shared memory keeps its name");
-    assert.deepEqual(await readdir(s.programData), [made]);
-    assert.equal(deps.restricted.length, 1, "a folder reused is not made again");
-
-    await rm(folderMade, { recursive: true });
-    const remade = await pgPaths({ data: s.data, program: s.program }, s.record, "win32", deps);
-    assert.notEqual(remade.map(s.data), link, "a recorded folder that is gone is never made again by its name, which another user could have taken");
-    assert.equal(await readlink(remade.map(s.data)), s.data);
+    assert.deepEqual([later.inspected, later.made], [[], []]);
   });
 
-  test("a program folder PostgreSQL can't open gets its junction in the same folder", async () => {
+  test("a junction chosen once is kept, though the reading that chose it failed and a later one would fit", async () => {
     const s = await setup();
-    const program = join(s.root, "Программы", "RaccoonVTT", "resources", "postgres");
-    await mkdir(program, { recursive: true });
-    const paths = await pgPaths({ data: s.data, program }, s.record, "win32", windows(s.programData));
-    const [made] = await readdir(s.programData);
-    assert.equal(paths.map(join(program, "bin")), join(s.programData, made!, "postgres", "bin"));
-    assert.equal(paths.map(join(s.data, "postgres")), join(s.programData, made!, "data", "postgres"));
+    const data = join(s.root, "Données", "data");
+    await mkdir(data, { recursive: true });
+    const file = join(data, "postgres-link.json");
+    const failed = windows(s.programData, { read: () => ({ fits: false, short: null, shortFits: false }) });
+    const first = await pgPaths({ data, program: s.program }, file, "win32", failed);
+    assert.equal((await record(file)).how, "junction");
+    await mkdir(join(data, "postgres"));
+    const good = windows(s.programData);
+    const again = await pgPaths({ data, program: s.program }, file, "win32", good);
+    assert.equal(again.map(data), first.map(data));
+    assert.deepEqual(good.reads, [], "the record comes before any reading");
   });
 
-  test("a new folder another user added to, or made a link, before its ACL shut them out is never used", async () => {
+  test("while the folder holds a database, a recorded way that no longer leads to it stops the start, and no other is chosen", async () => {
     const s = await setup();
-    const theirs = await folder();
-    let turn = 0;
-    const deps = windows(s.programData, {}, async (made) => {
-      turn++;
-      if (turn === 1) await mkdir(join(made, "data"));
-      if (turn === 2) {
-        await rm(made, { recursive: true });
-        await symlink(theirs, made);
-      }
-    });
-    const paths = await pgPaths({ data: s.data, program: s.program }, s.record, "win32", deps);
-    assert.equal(deps.restricted.length, 3, "a third folder");
-    assert.equal(paths.map(s.data), join(deps.restricted[2]!, "data"));
-    assert.equal(await readlink(paths.map(s.data)), s.data);
-    assert.deepEqual(await readdir(theirs), [], "nothing was written through the other user's link");
-    assert.equal((JSON.parse(await readFile(s.record, "utf8")) as { folder: string }).folder, deps.restricted[2]);
-
-    const shut = windows(s.programData, {}, async () => {
-      throw new Error("icacls failed");
-    });
-    await rm(s.record);
-    await assert.rejects(pgPaths({ data: s.data, program: s.program }, s.record, "win32", shut), (err: unknown) => err instanceof DatabaseFailed && /icacls failed/.test(err.logLine));
-  });
-
-  test("a recorded folder is used only in ProgramData, by the app's name, as a plain folder holding the record's key, with junctions that lead to the folders", async () => {
-    const s = await setup();
-    const deps = windows(s.programData);
-    const elsewhere = await folder();
-    const key = "0123456789abcdef0123456789abcdef";
-    const make = async (dir: string, data: (link: string) => Promise<void>, withKey = key) => {
-      await mkdir(dir, { recursive: true });
-      await writeFile(join(dir, "key"), withKey);
-      await data(join(dir, "data"));
-      return dir;
-    };
-    const right = (link: string) => symlink(s.data, link);
-    const cases: [string, string][] = [
-      ["its junction leads elsewhere", await make(join(s.programData, "RaccoonVTT-00000000000000aa"), (l) => symlink(elsewhere, l))],
-      ["a plain folder where the junction should be", await make(join(s.programData, "RaccoonVTT-00000000000000bb"), (l) => mkdir(l).then(() => {}))],
-      ["outside ProgramData", await make(join(elsewhere, "RaccoonVTT-00000000000000cc"), right)],
-      ["not the app's name", await make(join(s.programData, "Something-else"), right)],
-      ["another key, as in a folder someone else made by that name", await make(join(s.programData, "RaccoonVTT-00000000000000dd"), right, "ffffffffffffffffffffffffffffffff")],
-    ];
-    const linkTo = await make(join(elsewhere, "keyed"), right);
-    const asLink = join(s.programData, "RaccoonVTT-00000000000000ee");
-    await symlink(linkTo, asLink);
-    cases.push(["a link to a folder that holds the key", asLink]);
-    for (const [what, recorded] of cases) {
-      await writeFile(s.record, `${JSON.stringify({ folder: recorded, key })}\n`);
-      const used = (await pgPaths({ data: s.data, program: s.program }, s.record, "win32", deps)).map(s.data);
-      assert.notEqual(used, join(recorded, "data"), what);
-      assert.equal(await readlink(used), s.data, `${what}: a new folder of its own`);
-      assert.notEqual((JSON.parse(await readFile(s.record, "utf8")) as { folder: string }).folder, recorded, what);
-    }
-    assert.equal(await readlink(join(cases[0]![1], "data")), elsewhere, "and the one that led elsewhere is left as it was");
-    const good = await make(join(s.programData, "RaccoonVTT-00000000000000ff"), right);
-    await writeFile(s.record, `${JSON.stringify({ folder: good, key })}\n`);
-    assert.equal((await pgPaths({ data: s.data, program: s.program }, s.record, "win32", deps)).map(s.data), join(good, "data"), "one that passes is used");
-    for (const text of ["not json", JSON.stringify({ folder: good }), JSON.stringify({ folder: good, key: "short" })]) {
-      await writeFile(s.record, text);
-      assert.notEqual((await pgPaths({ data: s.data, program: s.program }, s.record, "win32", deps)).map(s.data), join(good, "data"), `a record that does not read: ${text}`);
-    }
-  });
-
-  test("with no ProgramData to use, the start stops with words that name the folder and what to do", async () => {
-    const s = await setup();
-    const named = join(s.root, "Данные");
-    await mkdir(named);
-    for (const programData of [undefined, "ProgramData", named]) {
-      await assert.rejects(pgPaths({ data: s.data, program: s.program }, s.record, "win32", windows(programData)), (err: unknown) => {
-        assert.ok(err instanceof DatabaseFailed);
-        assert.ok(err.logLine.includes(s.data));
-        assert.ok(err.logLine.includes(DATA_DIR_ENV));
+    await paths(s, windows(s.programData));
+    const before = await readFile(s.record, "utf8");
+    const own = (await record(s.record)).folder!;
+    await mkdir(join(s.data, "postgres"));
+    const stops = async (what: string, change: () => Promise<void>, why: RegExp) => {
+      await change();
+      const kept = await readFile(s.record, "utf8");
+      const deps = windows(s.programData);
+      await assert.rejects(paths(s, deps), (err: unknown) => {
+        assert.ok(err instanceof DatabaseFailed, what);
+        assert.match(err.logLine, why, what);
+        assert.match(err.logLine, /Restart the computer, then delete postgres-link\.json/, what);
         assert.doesNotMatch(err.logLine, /[\u2014;]/);
         return true;
       });
+      assert.deepEqual([deps.reads, deps.made], [[], []], `${what}: nothing else was tried`);
+      assert.equal(await readFile(s.record, "utf8"), kept, `${what}: the record stays`);
+    };
+    await stops("the junction gone", () => rm(join(own, "data")), /the junction .* is gone/);
+    await symlink(s.root, join(own, "data"));
+    await stops("the junction leading elsewhere", async () => {}, /leads elsewhere/);
+    await stops("the key changed", () => writeFile(join(own, "key"), "f".repeat(32)), /no longer holds its key/);
+    await stops("the folder gone", () => rm(own, { recursive: true }), /is gone or no longer holds its key/);
+    const elsewhere = { ...JSON.parse(before), folder: join(s.root, "0123456789abcdef") };
+    await stops("a folder outside RaccoonVTT's", () => writeFile(s.record, JSON.stringify(elsewhere)), /is not a folder of this user's/);
+  });
+
+  test("a short name that is gone, or a record that doesn't read, stops a start whose folder holds a database", async () => {
+    const s = await setup();
+    const short = join(s.root, "RACCOO~1");
+    await symlink(dirname(s.data), short);
+    await paths(s, windows(s.programData, { short: { [s.data]: join(short, "data") } }));
+    await mkdir(join(s.data, "postgres"));
+    await rm(short);
+    await assert.rejects(paths(s, windows(s.programData)), /its short name .* is gone/);
+    await writeFile(s.record, "not json");
+    await assert.rejects(paths(s, windows(s.programData)), /postgres-link\.json in the data folder, .* doesn't read/);
+  });
+
+  test("with no database yet, a record that doesn't lead anywhere or doesn't read, or one made for another folder, is chosen again", async () => {
+    const s = await setup();
+    await paths(s, windows(s.programData));
+    const own = (await record(s.record)).folder!;
+    await rm(own, { recursive: true });
+    const again = await paths(s, windows(s.programData));
+    assert.notEqual((await record(s.record)).folder, own);
+    assert.equal(await readlink(again.map(s.data)), s.data);
+    await writeFile(s.record, "{");
+    await paths(s, windows(s.programData));
+    assert.equal((await record(s.record)).how, "junction");
+    await mkdir(join(s.data, "postgres"));
+    await writeFile(s.record, JSON.stringify({ data: join(s.root, "moved from here"), how: "short", path: join(s.root, "GONE~1") }));
+    const moved = windows(s.programData);
+    await paths(s, moved);
+    assert.deepEqual(moved.reads, [s.data], "a record for another folder, as after a move, says nothing of this one");
+  });
+
+  test("RaccoonVTT's folder in ProgramData not as its installer makes it stops the start with words to reinstall, and nothing is made in it", async () => {
+    const s = await setup();
+    const base = installers();
+    const without = (sid: string) => base.rules.filter((r) => r.sid !== sid);
+    const cases: [string, AclFacts | Error, RegExp][] = [
+      ["missing", { ...base, exists: false }, /is missing/],
+      ["a link", { ...base, reparse: true }, /is not a plain folder/],
+      ["owned by a user", { ...base, owner: "S-1-5-21-9-9-9-1002" }, /is owned by S-1-5-21-9-9-9-1002, not Administrators/],
+      ["taking ProgramData's ACL", { ...base, protected: false }, /takes its ACL from ProgramData/],
+      ["Everyone may write", { ...base, rules: [...base.rules, rule("S-1-1-0", FULL, 3)] }, /lets S-1-1-0 do more/],
+      ["Users may write files", { ...base, rules: [...without(USERS), rule(USERS, 0x1 | 0x2 | 0x4, 0)] }, /lets S-1-5-32-545 do more/],
+      ["Users' entry inherited by what is made", { ...base, rules: [...without(USERS), rule(USERS, 0x1 | 0x4, 3)] }, /lets S-1-5-32-545 do more/],
+      ["Users may delete", { ...base, rules: [...without(USERS), rule(USERS, 0x1 | 0x4 | 0x10000, 0)] }, /lets S-1-5-32-545 do more/],
+      ["CREATOR OWNER on the folder itself", { ...base, rules: [...without(CREATOR_OWNER), rule(CREATOR_OWNER, FULL, 3, 0)] }, /lets S-1-3-0 do more/],
+      ["a deny entry", { ...base, rules: [...base.rules, rule(USERS, 0x4, 0, 0, { allow: false })] }, /denies S-1-5-32-545/],
+      ["an inherited entry", { ...base, rules: [...base.rules, rule(SYSTEM, FULL, 3, 0, { inherited: true })] }, /inherits an entry for S-1-5-18/],
+      ["a generic right", { ...base, rules: [...without(USERS), rule(USERS, -0x80000000, 0)] }, /lets S-1-5-32-545 do more/],
+      ["unreadable", new Error("Access is denied"), /could not be read \(Access is denied\)/],
+    ];
+    for (const [what, parent, why] of cases) {
+      const deps = windows(s.programData, { parent });
+      await assert.rejects(paths(s, deps), (err: unknown) => {
+        assert.ok(err instanceof DatabaseFailed, what);
+        assert.match(err.logLine, why, what);
+        assert.match(err.logLine, /Reinstall RaccoonVTT, or set RACCOON_DATA_DIR/, what);
+        assert.ok(err.logLine.includes(s.data), what);
+        assert.doesNotMatch(err.logLine, /[\u2014;]/);
+        return true;
+      });
+      assert.deepEqual(deps.made, [], `${what}: nothing made in it`);
+      assert.equal(existsSync(s.record), false, what);
     }
-    assert.deepEqual(await readdir(named), [], "nothing made in a ProgramData PostgreSQL couldn't open either");
-    const program = join(s.root, "Программы");
-    await mkdir(program);
-    await assert.rejects(pgPaths({ data: join(s.root, "data"), program }, s.record, "win32", windows(undefined)), /Install RaccoonVTT in a folder/);
+    for (const programData of [undefined, "ProgramData", join(s.root, "Данные")]) {
+      const deps = windows(programData);
+      await assert.rejects(paths(s, deps), /has no plain path on this computer/);
+      assert.deepEqual(deps.inspected, []);
+    }
+    assert.equal(parentProblem(base), null, "the installer's own is fine");
+    assert.equal(parentProblem({ ...base, owner: SYSTEM }), null);
+  });
+
+  test("a folder made that is not this user's alone is never used, and the words name why", async () => {
+    const s = await setup();
+    const own = mine();
+    const cases: [string, Partial<Parameters<typeof windows>[1]>, RegExp][] = [
+      ["owned by another", { made: { ...own, owner: "S-1-5-21-9-9-9-1002" } }, /is owned by S-1-5-21-9-9-9-1002, not by this user, S-1-5-21-1-2-3-1001/],
+      ["inheriting", { made: { ...own, protected: false } }, /takes its ACL from RaccoonVTT's folder/],
+      ["Users too", { made: { ...own, rules: [...own.rules, rule(USERS, 0x1, 3)] } }, /has entries for .*S-1-5-32-545, not only full control/],
+      ["no SYSTEM", { made: { ...own, rules: [own.rules[0]!, own.rules[2]!, rule(USERS, FULL, 3)] } }, /not only full control/],
+      ["less than full control", { made: { ...own, rules: [rule(ME, 0x1f01bf, 3), own.rules[1]!, own.rules[2]!] } }, /not only full control/],
+      ["not inherited by what is made in it", { made: { ...own, rules: [rule(ME, FULL, 0), own.rules[1]!, own.rules[2]!] } }, /not only full control/],
+      ["a link", { made: { ...own, reparse: true } }, /is not a plain folder/],
+      ["not made", { made: new Error("Access to the path is denied") }, /could not be made \(Access to the path is denied\)/],
+      ["something already in it", { meanwhile: (f) => writeFile(join(f, "planted"), "x") }, /was not empty/],
+      ["its key changed before the record named it", { linked: (f) => writeFile(join(f, "key"), "0".repeat(32)) }, /no longer holds its key/],
+    ];
+    for (const [what, o, why] of cases) {
+      const deps = windows(s.programData, o);
+      await assert.rejects(paths(s, deps), (err: unknown) => {
+        assert.ok(err instanceof DatabaseFailed, what);
+        assert.match(err.logLine, why, what);
+        assert.ok(err.logLine.includes(deps.made[0]!), `${what}: names the folder`);
+        assert.doesNotMatch(err.logLine, /[\u2014;]/);
+        return true;
+      });
+      assert.equal(existsSync(s.record), false, `${what}: no record names it`);
+    }
+    assert.equal(folderProblem(own, ME), null, "this user's own is fine");
+  });
+
+  test("the program folder is given by its path or its short path, never a junction", async () => {
+    const s = await setup();
+    const latin = join(s.root, "Programmes à moi", "postgres");
+    const cyrillic = join(s.root, "Программы", "postgres");
+    for (const dir of [latin, cyrillic]) await mkdir(dir, { recursive: true });
+    const data = join(s.root, "data");
+    assert.equal((await pgPaths({ data, program: latin }, join(data, "x.json"), "win32", windows(s.programData))).map(join(latin, "bin")), join(latin, "bin"));
+    const short = join(s.root, "PROGRA~1", "postgres");
+    assert.equal((await pgPaths({ data, program: cyrillic }, join(data, "x.json"), "win32", windows(s.programData, { short: { [cyrillic]: short } }))).map(join(cyrillic, "bin")), join(short, "bin"));
+    const deps = windows(s.programData);
+    await assert.rejects(pgPaths({ data, program: cyrillic }, join(data, "x.json"), "win32", deps), /Install RaccoonVTT in a folder whose path has none of those letters/);
+    assert.deepEqual(deps.made, []);
   });
 
   test("a name under a folder that isn't ASCII is a bug, never handed on", async () => {
     const s = await setup();
-    const paths = await pgPaths({ data: s.data, program: s.program }, s.record, "win32", windows(s.programData, { [s.data]: join(s.root, "SHORT") }));
-    assert.throws(() => paths.map(join(s.data, "Жук.log")), /not ASCII/);
+    const short = join(s.root, "SHORT");
+    await symlink(dirname(s.data), short);
+    const p = await paths(s, windows(s.programData, { short: { [s.data]: join(short, "data") } }));
+    assert.throws(() => p.map(join(s.data, "Жук.log")), /not ASCII/);
   });
 });
 
-describe("Windows' reading of a folder", () => {
-  test("parses, and anything it can't read says nothing fits, so the folder gets a junction", () => {
+describe("Windows' readings", () => {
+  test("a folder's reading parses, and anything it can't read says nothing fits", () => {
     assert.deepEqual(parseFolderReading('\uFEFF{"fits":false,"short":"C:\\\\Users\\\\8B4A~1\\\\AppData","shortFits":true}\r\n'), {
       fits: false,
       short: "C:\\Users\\8B4A~1\\AppData",
@@ -245,14 +375,14 @@ describe("Windows' reading of a folder", () => {
     assert.deepEqual(parseFolderReading('{"fits":true,"short":"","shortFits":false}'), { fits: true, short: null, shortFits: false });
     assert.deepEqual(parseFolderReading('{"fits":false,"short":"","shortFits":true}'), { fits: false, short: null, shortFits: false }, "no short path never fits");
     assert.deepEqual(parseFolderReading(""), { fits: false, short: null, shortFits: false });
-    assert.deepEqual(parseFolderReading("Get-CimInstance : Access denied"), { fits: false, short: null, shortFits: false });
   });
 
-  test("this user's SID comes from whoami's line, whatever its code page did to the name", () => {
-    assert.equal(parseWhoamiSid('"desktop-7\\\x8a\x7e\x8d","S-1-5-21-3623811015-3361044348-30300820-1013"\r\n'), "S-1-5-21-3623811015-3361044348-30300820-1013");
-    assert.equal(parseWhoamiSid('"ci\\runneradmin","S-1-5-21-1-2-3-500"'), "S-1-5-21-1-2-3-500");
-    assert.equal(parseWhoamiSid("ERROR: access denied"), null);
-    assert.equal(parseWhoamiSid('"x","S-1-5-21-1-2-3-500" "y"'), null);
+  test("Get-Acl's facts parse, a list of one included, and whatever is missing reads as the safe answer", () => {
+    const one = parseAclFacts({ exists: true, directory: true, reparse: false, owner: ADMINS, protected: true, rules: { sid: SYSTEM, rights: FULL, inherit: 3, propagate: 0, allow: true, inherited: false } });
+    assert.deepEqual(one.rules, [rule(SYSTEM, FULL, 3)]);
+    assert.deepEqual(parseAclFacts({}), { exists: false, directory: false, reparse: true, owner: null, protected: false, rules: [] });
+    assert.deepEqual(parseAclFacts({ exists: true, rules: [{ sid: USERS }] }).rules, [{ sid: USERS, rights: 0, inherit: 0, propagate: 0, allow: false, inherited: true }]);
+    assert.deepEqual(parseAclFacts(null).exists, false);
   });
 });
 
