@@ -88,6 +88,27 @@ describe("ops inside the bookkeeping reserve", () => {
   });
 });
 
+describe("joins and the far line", () => {
+  test("six joins on per-player scenes change no answer of a player's op inside the bookkeeping reserve", async (t) => {
+    const f = scopeFixture();
+    for (let i = 0; i < 9; i++) f.state.scenes[`pp${i}`] = scene(`pp${i}`, { order: 5 + i, bounds: { w: 200, h: 200 }, fogEnabled: true, vision: { on: true, light: "dark", perPlayer: true } });
+    // The DM's notes until the reading at the widest sits inside the reserve.
+    f.state.tokens.pad = token("pad", { sceneId: "pp0", notes: "" });
+    for (let pad = 16 * 1024; farRoomBytes(f.state, true) <= FAR.roomBytes - BOOKKEEPING_RESERVE.room; pad += 16 * 1024) f.state.tokens.pad = { ...f.state.tokens.pad!, notes: "p".repeat(pad) };
+    assert.ok(farRoomBytes(f.state, true) <= FAR.roomBytes, `${farRoomBytes(f.state, true)} short of the line`);
+    const h = await scopeActor(t, f.state, { sizeLimits: { stateLimit: 64 * MIB, sceneLimit: 64 * MIB } });
+    const player = await h.connect(f.player, "player");
+    const line = () => ({ t: "drawing.create", drawing: { id: uuidv7(), sceneId: f.sceneId, kind: "line", points: [0, 0, 2, 2], style: { stroke: "#ff0000", width: 2, opacity: 1 }, ownerId: f.player.id, visibility: "all" } });
+    const answers = async () => [answer(await player.send(line())), answer(await player.send({ t: "token.move", tokenId: f.pc, x: 12, y: 3 }))];
+    const before = await answers();
+    assert.match(before[0]!, /^quota: the room is full/);
+    await player.send({ t: "token.move", tokenId: f.pc, x: 8, y: 3 });
+    // Each join stores the joiner's per-player layers, which the widest reading held already.
+    for (let i = 0; i < 6; i++) await h.actor.sys({ t: "sys.memberJoin", member: { id: uuidv7(), name: `Wren ${i}`, color: "#3366ff", kind: "player", createdAt: new Date(0).toISOString() } });
+    assert.deepEqual(await answers(), before);
+  });
+});
+
 describe("moving the players past the near line", () => {
   test("to a played scene that reserves no more is taken, and to a larger unplayed one is refused", async (t) => {
     const f = scopeFixture();

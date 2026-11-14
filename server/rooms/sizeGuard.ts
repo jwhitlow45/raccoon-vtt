@@ -242,6 +242,16 @@ export class SizeGuard {
     return this.#far(next, before, far, exempt ? "exempt" : "meets");
   }
 
+  /**
+   * Counts the growth of an op that meets no byte line, a deletion or the
+   * server's own op, so the room's and its scenes' bounds stay upper bounds:
+   * a join on per-player scenes grows the stored per-player layers, and a
+   * later check that read a stale bound would skip the exact read.
+   */
+  counted(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState): void {
+    this.#account(next, sceneIds, growth, before);
+  }
+
   #near(next: RoomState, sceneIds: readonly string[], growth: number, before: RoomState | undefined, role: Viewer["role"]): LimitCheck {
     const answer = this.#check(next, sceneIds, growth, before, role);
     if (answer.ok || before === undefined) return answer;

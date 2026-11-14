@@ -2333,8 +2333,10 @@ export class RoomActor {
    */
   #bytesMeet(op: Op, kind: LimitKind, viewer: Viewer, next: RoomState, grown: readonly string[], growth: number): LimitCheck {
     const before = this.#staged.state;
-    if (kind.far === "deletion" || FAR_TREATMENT[op.t] === "server") return { ok: true };
-    if (op.t === "room.setPlayerScene" && roomReserves(next) <= roomReserves(before)) return { ok: true };
+    if (kind.far === "deletion" || FAR_TREATMENT[op.t] === "server" || (op.t === "room.setPlayerScene" && roomReserves(next) <= roomReserves(before))) {
+      this.#sizes.counted(next, grown, growth, before);
+      return { ok: true };
+    }
     const far: FarJudge = viewer.role === "player" ? "widest" : widestPerPlayerReserve(next) > widestPerPlayerReserve(before) ? "widestDm" : "today";
     return this.#sizes.check(next, grown, growth, before, viewer.role, far, kind.far === "exempt");
   }
