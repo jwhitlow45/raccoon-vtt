@@ -34,7 +34,10 @@ import { playerLink } from "../shared/playerLink.ts";
  * through DirectGateway. Open sockets learn of a removed grant at their next
  * recheck instead (within 60 s, design section 10.2).
  */
-const USAGE = `Usage: node scripts/admin.ts <command>
+const USAGE = `Usage: node scripts/admin.ts [--no-schema] [--json] <command>
+
+  --no-schema                      leave the schema as it is, for a server already running it
+  --json                           print one JSON object (dm-link and list-rooms)
 
   dm-link <roomId>                 replace the DM link and print the new one
   list-rooms                       every room with last activity and size
@@ -143,7 +146,27 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(2)} GiB`;
 }
 
-async function main(args: string[]): Promise<void> {
+/**
+ * Leading flags, for the desktop app's supervisor (docs/design/design-v1-local-app.md 8.6),
+ * which runs this beside a running server. `--no-schema` skips applySchema:
+ * the server has applied it already, and each of its `alter table` lines
+ * takes an AccessExclusive lock that would stall play. `--json` prints one
+ * JSON object for the supervisor to read, in place of the lines for a person.
+ */
+function splitFlags(args: string[]): { noSchema: boolean; json: boolean; rest: string[] } {
+  let i = 0;
+  let noSchema = false;
+  let json = false;
+  for (; i < args.length; i++) {
+    if (args[i] === "--no-schema") noSchema = true;
+    else if (args[i] === "--json") json = true;
+    else break;
+  }
+  return { noSchema, json, rest: args.slice(i) };
+}
+
+async function main(argv: string[]): Promise<void> {
+  const { noSchema, json, rest: args } = splitFlags(argv);
   const [command, ...rest] = args;
   if (!command || command === "help" || command === "--help") {
     console.log(USAGE);
@@ -161,7 +184,7 @@ async function main(args: string[]): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new UsageError("DATABASE_URL is not set.");
   const pool = getPool(databaseUrl);
-  await applySchema(pool);
+  if (!noSchema) await applySchema(pool);
   const gateway = new DirectGateway(pool);
 
   try {
@@ -174,6 +197,10 @@ async function main(args: string[]): Promise<void> {
         await revokeGrants({ pool, gateway }, roomId, { by: "role", role: "dm" }, async (tx) => {
           key = (await replaceDmKey(tx, roomId)).key;
         });
+        if (json) {
+          console.log(JSON.stringify({ roomId, link: fullLink(dmLink(roomId, key)) }));
+          break;
+        }
         console.log(`New DM link for ${formatRoomId(roomId)}. Every other DM device is signed out.`);
         console.log(fullLink(dmLink(roomId, key)));
         break;
@@ -183,6 +210,11 @@ async function main(args: string[]): Promise<void> {
         // section 10.5), asset bytes plus the room's rows, and its log
         // archive, which the quota leaves out. The admin page lists the same.
         const rows = await listRoomsForAdmin(pool);
+        if (json) {
+          // JSON escapes a name from a stranger on its own, so names go out as they are.
+          console.log(JSON.stringify({ rooms: rows.map((r) => ({ id: r.id, name: r.name, lastActiveAt: r.lastActiveAt, bytes: r.bytes, pinned: r.pinned })) }));
+          break;
+        }
         if (rows.length === 0) console.log("No rooms.");
         for (const r of rows) {
           const pin = r.pinned ? "  pinned" : "";
