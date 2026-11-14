@@ -18,6 +18,8 @@
  * staged server, which sits outside the repository (electron-builder would
  * read an absolute path in the file as one inside desktop/), and the app's
  * version, which is the repository's own, so a release bumps one file.
+ * Once packed, it checks every file of the runtime and the staged server
+ * reached the app (desktop/scripts/packed.ts).
  *
  * `--shell-only` packs without Node, PostgreSQL or the staged server, for
  * the shell's e2e test, which puts a stand-in supervisor in a copy.
@@ -28,6 +30,7 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { build } from "electron-builder";
 import { RESOURCES, SUPERVISOR_ENTRY, serverBinaryName, type Platform } from "../contract.ts";
+import { filesMissing, packedResources, stagedResources } from "../scripts/packed.ts";
 
 const DESKTOP = resolve(import.meta.dirname, "..");
 const ROOT = resolve(DESKTOP, "..");
@@ -76,8 +79,22 @@ if (import.meta.main) {
     config: {
       extends: "build/electron-builder.yml",
       extraMetadata: { version },
-      extraResources: shellOnly ? [] : [{ from: stage, to: RESOURCES.appServer }],
+      extraResources: shellOnly ? [] : stagedResources(stage),
     },
   });
+  if (!shellOnly) {
+    const resources = packedResources(join(DESKTOP, "out", "dist"), platform, process.arch);
+    const copies: [string, string][] = [
+      [join(DESKTOP, ".runtime", RESOURCES.node), RESOURCES.node],
+      [join(DESKTOP, ".runtime", RESOURCES.postgres), RESOURCES.postgres],
+      [join(DESKTOP, ".runtime", RESOURCES.licenses), RESOURCES.licenses],
+      [stage, RESOURCES.appServer],
+    ];
+    const lost = copies.flatMap(([from, to]) => filesMissing(from, join(resources, to)).map((rel) => `${to}/${rel}`));
+    if (lost.length > 0) {
+      console.error(`The packed app in ${resources} lacks ${lost.length} files it should carry, such as:\n${lost.slice(0, 10).map((m) => `  ${m}`).join("\n")}`);
+      process.exit(1);
+    }
+  }
   for (const file of artifacts) console.log(file);
 }
