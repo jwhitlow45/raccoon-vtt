@@ -85,6 +85,18 @@ export function useRoomRoleIfAny(): { role: "dm" | "player"; display: boolean } 
   return ctx && role ? { role, display: ctx.display } : null;
 }
 
+/**
+ * The room's connection state, or null outside a room, for a control that
+ * also draws on Home (lib/shareOrigin.ts), where useRoomView would throw.
+ */
+export function useRoomConnection(): RoomView["connection"] | null {
+  const ctx = useContext(RoomContext);
+  const store = ctx?.store ?? null;
+  const subscribe = useCallback((listener: () => void) => (store ? store.subscribe(listener) : () => {}), [store]);
+  const read = () => (store ? store.getState().connection : null);
+  return useSyncExternalStore(subscribe, read, read);
+}
+
 /** The store itself, for code outside render that reads the latest state, such as a tool's pointer handler. */
 export function useRoomStore(): RoomViewStore {
   return useRoomContext().store;
