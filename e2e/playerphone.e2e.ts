@@ -93,6 +93,12 @@ const run = {
   patId: "",
 };
 
+/** New entry ids for Thorn and the goblin, for a fight after the first, since a room takes each id once. */
+function newEntryIds(): void {
+  run.thorn.entryId = uuidv7();
+  run.goblin.entryId = uuidv7();
+}
+
 /** Pat's second character, for Find my token's second press (docs/design/design-v1-qol.md 3, Q5). */
 const qe = { wren: { id: uuidv7(), characterId: uuidv7() } };
 
@@ -1773,6 +1779,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
   });
 
   test("qe-2. on Pat's own turn End turn also stands at the right end of Thorn's own bar, two-lined at 130%, and in the expanded bar: two presses there and on the strip send one Next, and it leaves once the turn moves on", async () => {
+    newEntryIds();
     await ops.send({ t: "encounter.start", entries: [{ id: run.goblin.entryId, tokenId: run.goblin.id, value: 18 }, { id: run.thorn.entryId, tokenId: run.thorn.id, value: 15 }] });
     await ops.send({ t: "encounter.next" });
     try {
@@ -1837,6 +1844,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await ops.send({ t: "character.update", characterId: run.thorn.characterId, patch: { level: 5, stats: THORN_WEAPONS } });
     await ops.send({ t: "token.create", token: { id: warrior.id, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", size: "small", x: 9, y: 6, visibility: "all", disposition: "hostile", actor: { inline: block } } });
     await ops.send({ t: "room.update", settings: { playersApplyDamage: true } });
+    newEntryIds();
     await ops.send({ t: "encounter.start", entries: [{ id: run.thorn.entryId, tokenId: run.thorn.id, value: 18 }, { id: warrior.entryId, tokenId: warrior.id, value: 10 }] });
     await ops.send({ t: "encounter.next" });
     await waitFor("Thorn's turn on Pat's page", () => playerSocket.state?.encounter?.activeEntryId === run.thorn.entryId || null);
@@ -1915,6 +1923,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
   test("lp32-9. a reload mid-turn keeps the turn card's results: Pat's Longsword attack and damage show under their row again with Apply to, said nowhere and toasted nowhere (LP32-B-CARD-2)", async () => {
     await ops.send({ t: "character.update", characterId: run.thorn.characterId, patch: { level: 5, stats: THORN_WEAPONS } });
     await ops.send({ t: "room.update", settings: { playersApplyDamage: true } });
+    newEntryIds();
     await ops.send({ t: "encounter.start", entries: [{ id: run.thorn.entryId, tokenId: run.thorn.id, value: 18 }, { id: run.goblin.entryId, tokenId: run.goblin.id, value: 10 }] });
     await ops.send({ t: "encounter.next" });
     await waitFor("Thorn's turn on Pat's page", () => playerSocket.state?.encounter?.activeEntryId === run.thorn.entryId || null);

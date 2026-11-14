@@ -54,7 +54,6 @@ const run = {
   patId: "",
   thorn: { id: uuidv7(), characterId: uuidv7(), x: 4, y: 3 },
   goblins: [uuidv7(), uuidv7()],
-  entries: { thorn: uuidv7(), goblins: [uuidv7(), uuidv7()] },
   bounds: { w: 30, h: 20 },
   labels: [uuidv7(), uuidv7()],
   pages: [uuidv7(), uuidv7(), uuidv7()],
@@ -595,9 +594,9 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await ops.send({
       t: "encounter.start",
       entries: [
-        { id: run.entries.goblins[0], tokenId: run.goblins[0], value: 12 },
-        { id: run.entries.goblins[1], tokenId: run.goblins[1], value: 12 },
-        { id: run.entries.thorn, tokenId: run.thorn.id, value: 5 },
+        { id: uuidv7(), tokenId: run.goblins[0], value: 12 },
+        { id: uuidv7(), tokenId: run.goblins[1], value: 12 },
+        { id: uuidv7(), tokenId: run.thorn.id, value: 5 },
       ],
     });
     sheet = await openPanel(dm, "Initiative");
@@ -905,8 +904,8 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await ops.send({
       t: "encounter.start",
       entries: [
-        { id: run.entries.goblins[0], tokenId: run.goblins[0], value: 18 },
-        { id: run.entries.thorn, tokenId: run.thorn.id, value: 15 },
+        { id: uuidv7(), tokenId: run.goblins[0], value: 18 },
+        { id: uuidv7(), tokenId: run.thorn.id, value: 15 },
       ],
     });
     await setUp(dm, { width: 375, height: 667, scale: 1 });
@@ -1159,8 +1158,8 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await ops.send({
       t: "encounter.start",
       entries: [
-        { id: run.entries.goblins[0], tokenId: run.goblins[0], value: 18 },
-        { id: run.entries.thorn, tokenId: run.thorn.id, value: 15 },
+        { id: uuidv7(), tokenId: run.goblins[0], value: 18 },
+        { id: uuidv7(), tokenId: run.thorn.id, value: 15 },
       ],
     });
     await setUp(dm, { width: 375, height: 667, scale: 1 });
@@ -1276,8 +1275,8 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await ops.send({
       t: "encounter.start",
       entries: [
-        { id: run.entries.goblins[0], tokenId: run.goblins[0], value: 18 },
-        { id: run.entries.thorn, tokenId: run.thorn.id, value: 15 },
+        { id: uuidv7(), tokenId: run.goblins[0], value: 18 },
+        { id: uuidv7(), tokenId: run.thorn.id, value: 15 },
       ],
     });
     try {
@@ -1448,8 +1447,8 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await ops.send({
       t: "encounter.start",
       entries: [
-        { id: run.entries.goblins[0], tokenId: run.goblins[0], value: 18 },
-        { id: run.entries.thorn, tokenId: run.thorn.id, value: 15 },
+        { id: uuidv7(), tokenId: run.goblins[0], value: 18 },
+        { id: uuidv7(), tokenId: run.thorn.id, value: 15 },
       ],
     });
     try {

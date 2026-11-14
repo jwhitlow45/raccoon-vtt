@@ -194,6 +194,8 @@ async function openAt(page: Page, size: { width: number; height: number }, scale
 
 async function startFight(): Promise<void> {
   await ops.send({ t: "encounter.end" }).catch(() => undefined);
+  // A room takes each id once, so every fight's entries are new.
+  for (const f of run.fight) f.entry = uuidv7();
   await ops.send({ t: "encounter.start", entries: run.fight.map((f) => ({ id: f.entry, tokenId: f.token, value: f.value })) });
   await ops.send({ t: "encounter.next" });
   await waitFor("Belak's turn", () => (dmSocket.state?.encounter?.activeEntryId === run.fight[0]!.entry ? true : null));

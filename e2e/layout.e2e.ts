@@ -265,6 +265,8 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
 
   async function startFight(first: "goblin" | "thorn" = "goblin"): Promise<void> {
     await ops.send({ t: "encounter.end" }).catch(() => undefined);
+    // A room takes each id once, so every fight's entries are new.
+    for (const who of [run.goblin, run.thorn, run.hag]) who.entryId = uuidv7();
     await ops.send({
       t: "encounter.start",
       entries: [

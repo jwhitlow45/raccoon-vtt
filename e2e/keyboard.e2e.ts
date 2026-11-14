@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { namedId, barControl, ConsoleWatch, OpSocket, pickTool, Shots, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, OpSocket, pickTool, Shots, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
 import { DEFAULT_SNAPSHOT_BUDGET } from "../server/rooms/budgets.ts";
 
 /**
@@ -88,6 +88,14 @@ const run = {
   thornToken: uuidv7(),
   goblin: uuidv7(),
 };
+
+/** The fight's entry ids, made again at each start, since a room takes each id once. */
+const fightIds = { thorn: "", gob: "" };
+function newFight(): { entries: { id: string; tokenId: string; value: number }[] } {
+  fightIds.thorn = uuidv7();
+  fightIds.gob = uuidv7();
+  return { entries: [{ id: fightIds.thorn, tokenId: run.thornToken, value: 18 }, { id: fightIds.gob, tokenId: run.goblin, value: 8 }] };
+}
 
 /** A phone and its keyboard. `native` opens the keyboard as a browser that resizes the page itself does: the page is made shorter, not only the visual viewport. */
 type View = { width: number; height: number; scale: number; keyboard: number; native?: boolean };
@@ -1135,15 +1143,9 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
   }
 
   test("kb-11. Thorn's turn in a fight: the alerts fold into the dock on a phone's sheet", async () => {
-    await ops.send({
-      t: "encounter.start",
-      entries: [
-        { id: namedId("e-thorn"), tokenId: run.thornToken, value: 18 },
-        { id: namedId("e-gob"), tokenId: run.goblin, value: 8 },
-      ],
-    });
+    await ops.send({ t: "encounter.start", ...newFight() });
     await ops.send({ t: "encounter.next" });
-    await waitFor("Thorn's turn", () => (dmSocket.state?.encounter?.activeEntryId === namedId("e-thorn") ? true : null));
+    await waitFor("Thorn's turn", () => (dmSocket.state?.encounter?.activeEntryId === fightIds.thorn ? true : null));
   });
 
   for (const view of VIEWS) {
@@ -1165,10 +1167,9 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
     // The turn strip in the band, where the Token sheet goes full and modal and the dialog it opens must stand over it (TOKEN-SHEET-BAND-DIALOG). D-261108-442 sent kb-15 to the bar's row, so this step forces the band with a turn timer run over.
     if (view.width > view.height) {
       test(`kb-15b. in the fight at ${viewName(view)} with the turn strip in the band, Add a class resource's Name and Add stand over the modal Token sheet and show whole over the keyboard`, async () => {
-        const turn = { entries: [{ id: namedId("e-thorn"), tokenId: run.thornToken, value: 18 }, { id: namedId("e-gob"), tokenId: run.goblin, value: 8 }] };
         await ops.send({ t: "room.update", settings: { turnTimerSec: 2 } });
         await ops.send({ t: "encounter.end" });
-        await ops.send({ t: "encounter.start", ...turn });
+        await ops.send({ t: "encounter.start", ...newFight() });
         await ops.send({ t: "encounter.next" });
         try {
           await addResource(view, "fight in the band", async () => {
@@ -1179,7 +1180,7 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
         } finally {
           await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
           await ops.send({ t: "encounter.end" });
-          await ops.send({ t: "encounter.start", ...turn });
+          await ops.send({ t: "encounter.start", ...newFight() });
           await ops.send({ t: "encounter.next" });
         }
       });
@@ -1227,16 +1228,16 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
         return { tag: el?.tagName ?? "", name: (el?.getAttribute("aria-label") ?? el?.textContent ?? "").trim(), value: el?.value ?? null, group: el?.closest('[role="group"]')?.getAttribute("aria-label") ?? null };
       });
     // Each Escape branch pinned to its turn: on the goblin's the strip shows Conditions to come back to, and on Thorn's own HP, Roll and End turn fill it.
-    for (const [entryId, onStrip] of [
-      [namedId("e-gob"), true],
-      [namedId("e-thorn"), false],
+    for (const [name, entryId, onStrip] of [
+      ["e-gob", fightIds.gob, true],
+      ["e-thorn", fightIds.thorn, false],
     ] as const) {
       if (dmSocket.state?.encounter?.activeEntryId !== entryId) await ops.send({ t: "encounter.next" });
-      await waitFor(`${entryId}'s turn on Pat's page`, () => (patSocket.state?.encounter?.activeEntryId === entryId ? true : null));
+      await waitFor(`${name}'s turn on Pat's page`, () => (patSocket.state?.encounter?.activeEntryId === entryId ? true : null));
       await setUp(pat, VIEWS[0]!);
       const bar = await thornsBar(pat);
-      assert.equal(await bar.getAttribute("data-bar-state"), "rest", `${entryId}: Thorn's bar opens as the strip`);
-      assert.equal(await bar.getByRole("button", { name: "Conditions", exact: true }).isVisible(), onStrip, `${entryId}: the strip ${onStrip ? "shows" : "has no"} Conditions`);
+      assert.equal(await bar.getAttribute("data-bar-state"), "rest", `${name}: Thorn's bar opens as the strip`);
+      assert.equal(await bar.getByRole("button", { name: "Conditions", exact: true }).isVisible(), onStrip, `${name}: the strip ${onStrip ? "shows" : "has no"} Conditions`);
 
       await pat.keyboard.press("c");
       await waitFor("the bar grown with Conditions open", async () => ((await bar.getAttribute("data-bar-state")) === "expanded" ? true : null));
@@ -1244,15 +1245,15 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
         const f = await focus();
         return f.name === "Blinded" && f.group === "Conditions" ? true : null;
       });
-      await shots.take(pat, `qe-1-c-on-strip-${entryId}`);
+      await shots.take(pat, `qe-1-c-on-strip-${name}`);
       await pat.keyboard.press("Escape");
       await waitFor("focus back on Conditions, as on a computer", async () => {
         const f = await focus();
         return f.tag === "BUTTON" && f.name === "Conditions" ? true : null;
       });
-      assert.equal(await bar.getByRole("group", { name: "Conditions", exact: true }).count(), 0, `${entryId}: Escape left the drawer open`);
-      assert.equal(await bar.getAttribute("data-bar-state"), onStrip ? "rest" : "expanded", `${entryId}: the bar after Escape, the strip ${onStrip ? "showing" : "without"} Conditions`);
-      assert.ok(await bar.isVisible(), `${entryId}: Escape in the drawer closed Thorn's bar`);
+      assert.equal(await bar.getByRole("group", { name: "Conditions", exact: true }).count(), 0, `${name}: Escape left the drawer open`);
+      assert.equal(await bar.getAttribute("data-bar-state"), onStrip ? "rest" : "expanded", `${name}: the bar after Escape, the strip ${onStrip ? "showing" : "without"} Conditions`);
+      assert.ok(await bar.isVisible(), `${name}: Escape in the drawer closed Thorn's bar`);
       await bar.getByRole("button", { name: "Close", exact: true }).first().tap();
       await bar.waitFor({ state: "detached" });
     }

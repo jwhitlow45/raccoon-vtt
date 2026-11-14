@@ -34,6 +34,9 @@ import { actor, applyInView, bar, combatSections, DESK, dm, dmCdp, dmConsole, dm
  * cannot stay in the top bar, which that design's own e2e reaches.
  */
 
+/** The entry ids of the s2-tp fight, made as it starts. */
+const s2 = { thorn: "", goblin: "", bree: "", dragon: "" };
+
 panelFile(null, () => {
   test("1. the DM's bar on an SRD goblin: the summary, the HP entry after it, the saves, Stat block and Details, and the buttons in two rows; the shield on the map", async () => {
     await setUp(dm, dmCdp, DESK, null);
@@ -1505,13 +1508,14 @@ panelFile(null, () => {
   });
 
   test("s2-tp-a. in a fight, the DM's goblin: Combat runs Hit Points, Conditions, Reaction, Range rings and Rest with no Uses; Reaction used set there shows on its row's tag, and Combat's folded summary says so to the DM and to Pat (docs/design/design-v1-token-sections.md 3.2)", async () => {
+    Object.assign(s2, { thorn: uuidv7(), goblin: uuidv7(), bree: uuidv7(), dragon: uuidv7() });
     await ops.send({
       t: "encounter.start",
       entries: [
-        { id: "s2-thorn", tokenId: run.thorn.id, value: 18 },
-        { id: "s2-goblin", tokenId: run.goblin.id, value: 12 },
-        { id: "s2-bree", characterId: run.bree.characterId, value: 10 },
-        { id: "s2-dragon", tokenId: run.dragon.id, value: 8 },
+        { id: s2.thorn, tokenId: run.thorn.id, value: 18 },
+        { id: s2.goblin, tokenId: run.goblin.id, value: 12 },
+        { id: s2.bree, characterId: run.bree.characterId, value: 10 },
+        { id: s2.dragon, tokenId: run.dragon.id, value: 8 },
       ],
     });
     await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === 4 ? true : null));
@@ -1534,7 +1538,7 @@ panelFile(null, () => {
     assert.equal(await reaction.getByRole("group", { name: "Goblin 4's reaction", exact: true }).count(), 1, "named for its creature");
     const used = reaction.getByRole("switch", { name: /^Reaction used/ });
     await used.click();
-    await waitFor("the row's Reaction used", () => (dmSocket.state?.encounter?.entries.find((e) => e.id === "s2-goblin")?.reactionUsed ? true : null));
+    await waitFor("the row's Reaction used", () => (dmSocket.state?.encounter?.entries.find((e) => e.id === s2.goblin)?.reactionUsed ? true : null));
     assert.equal(await used.getAttribute("aria-checked"), "true");
     await shots.take(dm, "s2-tp-goblin-reaction");
 
@@ -1564,11 +1568,11 @@ panelFile(null, () => {
     await waitFor("Pat's folded summary", async () => ((await foldedSummary(pat, "Combat")).text === "Healthy · Reaction used" ? true : null), 5_000).catch(async () => assert.fail(`Pat's summary reads "${(await foldedSummary(pat, "Combat")).text}"`));
     await shots.take(player, "s2-tp-pat-goblin-summary");
     await pat.getByRole("button", { name: "Combat", exact: true }).click();
-    await ops.send({ t: "encounter.update", entryId: "s2-goblin", patch: { reactionUsed: false } });
+    await ops.send({ t: "encounter.update", entryId: s2.goblin, patch: { reactionUsed: false } });
   });
 
   test("s2-tp-b. Pat on Thorn: Reaction with its player's words, and It fired from Conditions' Readied spends it there", async () => {
-    await ops.send({ t: "actor.effect.add", target: { characterId: run.thorn.characterId }, effect: { id: uuidv7(), key: "readied", label: "if the door opens", duration: { mode: "turnStart", of: { entryId: "s2-thorn" } } } });
+    await ops.send({ t: "actor.effect.add", target: { characterId: run.thorn.characterId }, effect: { id: uuidv7(), key: "readied", label: "if the door opens", duration: { mode: "turnStart", of: { entryId: s2.thorn } } } });
     await waitFor("Pat's copy holds Thorn's Ready", () => (playerSocket.state?.characters[run.thorn.characterId]?.actor.effects.some((e) => e.key === "readied") ? true : null));
     const panel = await panelOf(player, run.thorn.at, "Thorn");
     // A character's Uses always stands for its player, who adds class resources there.
@@ -1579,10 +1583,10 @@ panelFile(null, () => {
     assert.equal(await used.getAttribute("aria-checked"), "false");
     await sectionIn(panel, "Conditions").getByRole("button", { name: /if the door opens/ }).click();
     await panel.getByRole("button", { name: "It fired: Reaction used", exact: true }).click();
-    await waitFor("Thorn's Reaction spent", () => (dmSocket.state?.encounter?.entries.find((e) => e.id === "s2-thorn")?.reactionUsed ? true : null));
+    await waitFor("Thorn's Reaction spent", () => (dmSocket.state?.encounter?.entries.find((e) => e.id === s2.thorn)?.reactionUsed ? true : null));
     await waitFor("the section's switch on", async () => ((await used.getAttribute("aria-checked")) === "true" ? true : null), 5_000);
     await shots.take(player, "s2-tp-pat-thorn-reaction");
-    await ops.send({ t: "encounter.update", entryId: "s2-thorn", patch: { reactionUsed: false } });
+    await ops.send({ t: "encounter.update", entryId: s2.thorn, patch: { reactionUsed: false } });
   });
 
   test("s2-tp-c. Pat lent Bree's token, her row kept by her character: no Reaction, and Stats holds the bar's Size alone, which changes it, reads a Custom size in the bar's words, and goes while the token is locked", async () => {
@@ -1699,7 +1703,7 @@ panelFile(null, () => {
         await check(dm, groupIn(panel, "Token settings"), `the goblin's Token settings at ${at}`);
         await groupIn(panel, "Token settings").getByRole("button", { name: "Duplicate", exact: true }).scrollIntoViewIfNeeded();
         await shots.take(dm, `s2-tp-goblin-${view.width}-${Math.round(view.scale * 100)}`);
-        await ops.send({ t: "encounter.update", entryId: "s2-goblin", patch: { reactionUsed: true } });
+        await ops.send({ t: "encounter.update", entryId: s2.goblin, patch: { reactionUsed: true } });
         await panel.getByRole("button", { name: "Combat", exact: true }).click();
         await waitFor("the summary", async () => ((await foldedSummary(panel, "Combat")).text.includes("Reaction used") ? true : null), 5_000);
         const folded = await foldedSummary(panel, "Combat");
@@ -1707,7 +1711,7 @@ panelFile(null, () => {
         assert.ok(folded.width >= folded.floor - 0.5, `${at}: the summary under its 4em floor`);
         await check(dm, groupIn(panel, "Combat"), `the goblin's Combat folded at ${at}`);
         await panel.getByRole("button", { name: "Combat", exact: true }).click();
-        await ops.send({ t: "encounter.update", entryId: "s2-goblin", patch: { reactionUsed: false } });
+        await ops.send({ t: "encounter.update", entryId: s2.goblin, patch: { reactionUsed: false } });
 
         await setUp(player, playerCdp, view, null);
         const bree = await panelOf(player, run.bree.at, "Bree");
