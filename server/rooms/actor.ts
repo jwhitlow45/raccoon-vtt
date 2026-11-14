@@ -706,6 +706,10 @@ export class RoomActor {
     );
     this.#ids = new IdGate(this.#opts.now, ids.since);
     this.#ids.load(ids.rows);
+    // A clock set back after this server first started on this build leaves the cutover ahead of it, and every id
+    // dated before the cutover is refused until the clock passes it. The operator is told once, as the room loads.
+    const cutoverAheadMs = ids.since === null ? 0 : ids.since - this.#opts.now();
+    if (cutoverAheadMs > 0) this.#log.warn({ roomId: this.roomId, aheadMs: cutoverAheadMs }, "the ids cutover is ahead of the server's clock: check the clock");
     this.#recheckTimer = setInterval(() => void this.#recheckGrants(), this.#opts.grantRecheckMs);
     this.#recheckTimer.unref();
   }

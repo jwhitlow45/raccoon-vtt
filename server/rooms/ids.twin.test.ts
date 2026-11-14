@@ -196,6 +196,19 @@ describe("an id answers P1 alike whatever became of its thing", () => {
     same(pair, "around the start");
   });
 
+  test("C4: with the stored cutover ahead of a clock set back, an id dated before the cutover is refused in both, one after it taken, and the operator is told once a load", async (t) => {
+    const ahead = T0 + 10 * MINUTE;
+    const pair = await openTwins(t, limitsRoom(), limitsRoom(), {}, {}, { since: ahead });
+    assert.deepEqual(await bothAnswer(pair, "p1", (room) => areaOp(mint.next(room)), "made now, before the cutover"), STALE);
+    for (const room of pair) room.clock.now = ahead + 1_000;
+    assert.equal(await bothAnswer(pair, "p1", (room) => areaOp(mint.next(room)), "made once the clock passed it"), "taken");
+    same(pair, "around the cutover");
+    const told = (room: Room) => room.logged.filter((line) => line.startsWith("the ids cutover is ahead of the server's clock")).length;
+    assert.deepEqual(pair.map(told), [1, 1]);
+    await each(pair, (room) => room.restart(false));
+    assert.deepEqual(pair.map(told), [1, 1], "a load past the cutover tells nothing");
+  });
+
   test("C4: an id an old room holds, dated within the window, gets its row at the room's first load on this build, so it answers gone in both after the DM deletes its thing", async (t) => {
     const old = PLAYER_LIMITS_SNAPSHOT_VERSION - 1;
     const made = idAt(rng(404), T0 - 5 * MINUTE);
