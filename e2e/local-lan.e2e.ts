@@ -77,6 +77,15 @@ for (const kind of BROWSERS) {
       return startServer({ port, assetDir: path.join(work, "assets"), databaseUrl: DATABASE_URL, local: { host } });
     }
 
+    /** The same, or "" while the tab is still reconnecting and the panel is not ready, for a wait to try again. */
+    async function playerLinkWhenReady(page: Page): Promise<string> {
+      try {
+        return await playerLinkText(page);
+      } catch {
+        return "";
+      }
+    }
+
     /** The DM tab's Player link, shown, as the text it prints. */
     async function playerLinkText(page: Page): Promise<string> {
       await openSideTab(page, "DM");
@@ -148,11 +157,12 @@ for (const kind of BROWSERS) {
     test("ll-2. the switch off then on reaches the open DM tab without a reload", async () => {
       await dm.evaluate(() => ((globalThis as unknown as { __tabKept: boolean }).__tabKept = true));
       await server.stop();
+      // The tab sees the server go and comes back by itself once it answers.
       server = await start(PORT, "127.0.0.1");
-      await waitFor("the player link back on the page's own origin", async () => ((await playerLinkText(dm)).startsWith(`${localhost}/r/`) ? true : null), 40_000);
+      await waitFor("the player link back on the page's own origin", async () => ((await playerLinkWhenReady(dm)).startsWith(`${localhost}/r/`) ? true : null), 40_000);
       await server.stop();
       server = await start(PORT, "0.0.0.0");
-      await waitFor("the player link on the network address again", async () => ((await playerLinkText(dm)).startsWith(`${lanOrigin}/r/`) ? true : null), 40_000);
+      await waitFor("the player link on the network address again", async () => ((await playerLinkWhenReady(dm)).startsWith(`${lanOrigin}/r/`) ? true : null), 40_000);
       assert.equal(await dm.evaluate(() => (globalThis as unknown as { __tabKept?: boolean }).__tabKept), true, "the tab was never reloaded");
     });
 
@@ -193,6 +203,10 @@ for (const kind of BROWSERS) {
       try {
         const path = new URL(run.dmLink).pathname + new URL(run.dmLink).hash;
         await page.goto(`${lanOrigin}${path}`);
+        // A device with no member in the room picks who it is: a new DM member here.
+        await page.getByText("Is this you?", { exact: true }).waitFor();
+        await page.getByLabel("Your name").fill("Dana at the table");
+        await page.getByRole("button", { name: "Join as a new DM" }).click();
         await page.getByRole("status", { name: "Connected" }).first().waitFor({ timeout: 20_000 });
         // This computer opened its own network address, so Home leads back to localhost.
         await page.goto(`${lanOrigin}/`);
@@ -205,7 +219,7 @@ for (const kind of BROWSERS) {
         await playerLinkText(page);
         const copy = page.getByRole("button", { name: "Copy link" }).first();
         await copy.click();
-        await copy.filter({ hasText: "Copied" }).waitFor();
+        await page.getByRole("button", { name: "Copied" }).first().waitFor();
         // Neither way of copying works: the text is selected and the words say so.
         await page.evaluate(() => {
           (globalThis as unknown as { document: { execCommand: () => boolean } }).document.execCommand = () => false;
