@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { access } from "node:fs/promises";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { Readable } from "node:stream";
 import { after, before, describe, test } from "node:test";
 import type { FastifyInstance } from "fastify";
@@ -92,7 +92,7 @@ describe("upload", () => {
     assert.deepEqual(body.variants, ["full", "thumb"]);
     for (const v of ["full", "thumb"] as const) {
       const path = variantPath(join(dir), sha(tokenPng), "token", v, PIPELINE);
-      assert.ok(path.includes(`/${sha(tokenPng).slice(0, 2)}/${sha(tokenPng)}-token-${v}-v${PIPELINE}.webp`));
+      assert.ok(path.endsWith(sep + join(sha(tokenPng).slice(0, 2), `${sha(tokenPng)}-token-${v}-v${PIPELINE}.webp`)), path);
       assert.ok(await exists(path), path);
     }
     // Nothing is left in the temp folder.

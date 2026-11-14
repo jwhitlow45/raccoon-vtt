@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
 import { assetCreditSchema } from "#shared/protocol.ts";
 import { STARTER_KEY, STARTER_KINDS, indexWorks, starterAssetCredit, type StarterPack, type StarterWork } from "#shared/starter.ts";
 import { STARTER_PACKS } from "#shared/starterArt.ts";
 import { PLAYER_PICK_FLOOR_MS, StarterWorkError, noSoonerThan, shippedRoot, starterFilePath, starterGrid, workForKind, type FloorClock } from "./starter.ts";
 
-const root = join("/srv", "app", "dist");
+// Resolved, as starterCatalog resolves its root, so Windows gives it a drive.
+const root = resolve("/srv", "app", "dist");
 
 function work(over: Partial<StarterWork> = {}): StarterWork {
   return {
