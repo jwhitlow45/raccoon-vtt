@@ -2,7 +2,7 @@
 
 Status: built, 2026-11-14. It stepped OP_VERSION to 61 and SNAPSHOT_VERSION to 47 (`PLAYER_LIMITS_OP_VERSION` and `PLAYER_LIMITS_SNAPSHOT_VERSION` in shared/migrate.ts). Code is cited by function and file, not by line, since the room actor changes often. As built, near the end, lists where the build went its own way.
 
-The rule: a player's own limits count only what that player's own copy of the room holds, recomputed from the state and the player's own view on each op. As built, seats, rows, asks, create ids, conditions, clears and restores, the op rate and the roll tag each read only the player's own copy, their own ops and the server's clock. A create also meets the room's size line, the far line (5.3), which counts the whole room, and a player's upload meets the room's storage quota (6.5). A remembered map on a marked scene takes a share fixed at the update (6.4). Nothing is stored about who made what, and nothing is ever removed to make room.
+The rule: a player's own limits count only what that player's own copy of the room holds, recomputed from the state and the player's own view on each op. As built, seats, rows, asks, conditions, clears and restores, the op rate and the roll tag each read only the player's own copy, their own ops and the server's clock. A create id answers `gone` the same way whether its thing is hidden, deleted or long gone (3.4). A create also meets the room's size line, the far line (5.3), which counts the whole room, and a player's upload meets the room's storage quota (6.5). A remembered map on a marked scene takes a share fixed at the update (6.4). Nothing is stored about who made what, and nothing is ever removed to make room.
 
 ## 1. The problem
 
@@ -138,7 +138,7 @@ The numbers stand on measured sizes, test rooms and wide margins, never on a rea
 | Scene bytes | every scene | 6 MiB, twice the scene line |
 | Room bytes | the room | 11 MiB |
 
-- **Steps.** A far check compares the room's total, rounded up to a fixed step, with its line, and counts what seats hold exactly (`farLimits`, `farRoomBytes`, `farBytesOver`).
+- **Steps.** A far check rounds up to a fixed step what no seat holds, adds what seats hold exactly, and compares the sum with its line (`farBytesOver` in shared/limits.ts, with `farLimits` for counts and `farRoomBytes` for the room's bytes).
 - **Bookkeeping's reserve.** An op that meets the line stops `BOOKKEEPING_RESERVE` short of it, 512 KiB of the room's 11 MiB and 256 KiB of a scene's 6 MiB (`farByteLine`). An exempt kind goes on to the line itself, so the table plays on where creates stop. Past the line every op that grows the measure is refused, bookkeeping too, so the stored state stays within `HARD.storedBytes`. A deletion meets no line.
 - **Per-player reserves at their widest for a player's op.** The room reading of a player's op holds per-player vision's layers for 6 players on every per-player scene and every list of who saw at 50 members, and the marked pool whole (6.4), so a join, a kind change and a removal move nothing in it. The near lines keep the reserves of the current roster, so no room became full at the update.
 - **A DM op that raises the widest reserves** (D-261110-402): a new per-player scene, the per-player switch on a scene or larger bounds on one is judged at the far line with the widest reserves, and refused in `PER_PLAYER_FULL`'s words. So a lone DM cannot build per-player scenes that later joins would carry past the bound. Every other DM op reads the far line with the reserves of the current roster.
@@ -232,7 +232,7 @@ Measured on the full fixture (`fullRoom` and `measureBounds` in server/rooms/lim
 
 ## 9. Twin tests
 
-Twins are one fixture with one hidden difference: the first player's copies start equal, and the test sends both rooms the same ops and compares that player's raw frames. "Same" means the player's answers and frames are equal. A case near the room's size line keeps the room's total, rounded up to its step, equal in both twins. The harness is server/rooms/limitsTwinTesting.ts, whose stored test database keeps `room_ids` and `server_facts`, so the twins keep their id rows across restarts.
+Twins are one fixture with one hidden difference: the first player's copies start equal, and the test sends both rooms the same ops and compares that player's raw frames. "Same" means the player's answers and frames are equal. A case near the room's size line keeps what no seat holds, rounded up to its step, equal in both twins. The harness is server/rooms/limitsTwinTesting.ts, whose stored test database keeps `room_ids` and `server_facts`, so the twins keep their id rows across restarts.
 
 ## 10. Cases
 
