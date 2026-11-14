@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -43,9 +43,9 @@ const dmConsole = new ConsoleWatch("dm");
 const run = {
   roomId: "",
   roomName: `E2E encounters ${new Date().toISOString().slice(0, 19)}`,
-  keeper: randomUUID(),
-  warden: randomUUID(),
-  encounter: randomUUID(),
+  keeper: uuidv7(),
+  warden: uuidv7(),
+  encounter: uuidv7(),
 };
 
 const SIZES = [

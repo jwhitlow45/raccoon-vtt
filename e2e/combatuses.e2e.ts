@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { assertPrivateOutcome, saveOutcomes } from "./helpers/saveOutcomes.ts";
-import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -93,16 +92,16 @@ const run = {
   sceneId: "",
   bounds: { w: 30, h: 20 },
   patId: "",
-  thorn: randomUUID(),
-  thornToken: randomUUID(),
-  dragon: randomUUID(),
-  troll: randomUUID(),
-  goblin: randomUUID(),
-  lair: [randomUUID(), randomUUID(), randomUUID()],
-  dretch: randomUUID(),
+  thorn: uuidv7(),
+  thornToken: uuidv7(),
+  dragon: uuidv7(),
+  troll: uuidv7(),
+  goblin: uuidv7(),
+  lair: [uuidv7(), uuidv7(), uuidv7()],
+  dretch: uuidv7(),
   /** The monster Uses steps' creatures (mu-c, mu-d): an Aboleth lent to Pat, and a Tarrasque, whose Legendary Resistance counts 6. */
-  aboleth: randomUUID(),
-  tarrasque: randomUUID(),
+  aboleth: uuidv7(),
+  tarrasque: uuidv7(),
   /** The link that signs a device in as the DM, a session of its own (cu-b-1, cu-b-14). */
   dmLink: "",
 };
@@ -920,7 +919,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
         }
         // Effects that end as the turn starts give the DM a notice each. A 4 s turn timer gives the time-up line 4 s into the turn.
         const ending = turnOf === "e-goblin" ? (["blessed", "hasted"] as const) : (["blessed"] as const);
-        if (lead === "notice") for (const key of ending) await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin }, effect: { id: randomUUID(), key, duration: { mode: "turnStart", of: { entryId: turnOf } } } });
+        if (lead === "notice") for (const key of ending) await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin }, effect: { id: uuidv7(), key, duration: { mode: "turnStart", of: { entryId: turnOf } } } });
         else await ops.send({ t: "room.update", settings: { turnTimerSec: 4 } });
         // The bar opens before the turn, since a notice lasts only 6 s.
         await closeSheets(phone);
@@ -1577,7 +1576,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
   });
 
   test("lair46-a. a line ticked In its lair for a block with lair actions alone, placed with no fight on, joins the fight the tracker's New fight begins with In lair on, and the Monsters place card offers the box too, each in line at every size (LAIR-TICK-CARRY)", async () => {
-    const keeper = randomUUID();
+    const keeper = uuidv7();
     const from = sweep.length;
     await ops.send({ t: "monster.create", monster: { id: keeper, ...blockOf(customMonster(keeper, { name: "Crypt Keeper", traits: [{ name: "Lair Actions", text: "On initiative count 20, the dead stir." }] })) } });
     await waitFor("the room's monster", () => deskSocket.state?.monsters?.[keeper] ?? null);

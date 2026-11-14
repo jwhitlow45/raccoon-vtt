@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -75,12 +74,12 @@ const run = {
   patId: "",
   sceneId: "",
   bounds: { w: 30, h: 20 },
-  bree: { characterId: randomUUID(), id: randomUUID(), x: 4, y: 3 },
-  goblins: [6, 8, 10].map((x, i) => ({ id: randomUUID(), name: `Goblin ${i + 1}`, x, y: 3 })),
+  bree: { characterId: uuidv7(), id: uuidv7(), x: 4, y: 3 },
+  goblins: [6, 8, 10].map((x, i) => ({ id: uuidv7(), name: `Goblin ${i + 1}`, x, y: 3 })),
   /** A red dragon wyrmling, whose Fire Breath is a save action with its own Group save. */
-  dragon: { id: randomUUID(), name: "Wyrmling", x: 13, y: 3 },
+  dragon: { id: uuidv7(), name: "Wyrmling", x: 13, y: 3 },
   /** A wolf Pat owns that is neither her character nor a companion. */
-  wolf: { id: randomUUID(), name: "Wolf", x: 16, y: 3 },
+  wolf: { id: uuidv7(), name: "Wolf", x: 16, y: 3 },
   /** The goblins' save line and the damage line, read once each lands. */
   saves: [] as DiceRoll[],
   fire: 0,
@@ -861,7 +860,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
 
     // Two goblins Poisoned and one not: their modes differ, so a reader hears each total with its own mode, after the shown words.
     // An AC makes each result a verdict too, so the detailed words still need a second line here.
-    const poisons = run.goblins.slice(0, 2).map((g) => ({ token: g.id, effect: randomUUID() }));
+    const poisons = run.goblins.slice(0, 2).map((g) => ({ token: g.id, effect: uuidv7() }));
     try {
       for (const p of poisons) await ops.send({ t: "actor.effect.add", target: { tokenId: p.token }, effect: { id: p.effect, key: "poisoned" } });
       // Two of the three Poisoned bear on the attack, and its button's name says so (WXB-3) while its group keeps the plain name.

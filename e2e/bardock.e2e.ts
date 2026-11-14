@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -329,7 +329,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await player.evaluate((key) => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem(key), SPOT_KEY);
 
     // A concentration check for a goblin the DM answers for puts a card in the column, and a drop on it lands under it.
-    await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblins[0]!.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblins[0]!.id }, effect: { id: uuidv7(), key: "concentrating", spell: "Hex" } });
     await ops.send({ t: "actor.hp", target: { tokenId: run.goblins[0]!.id }, change: { kind: "damage", amount: 1 } });
     const prompt = dm.locator('[data-alert="concentration"]').first();
     await prompt.waitFor();
@@ -505,8 +505,8 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
   });
 
   test("6. in a fight with three concentration checks and a roll card, the bar and the column never meet, and a column the bar cuts short says Scroll for more", async () => {
-    await ops.send({ t: "encounter.start", entries: run.goblins.map((g, i) => ({ id: randomUUID(), tokenId: g.id, value: 15 - i })) });
-    for (const g of run.goblins) await ops.send({ t: "actor.effect.add", target: { tokenId: g.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } });
+    await ops.send({ t: "encounter.start", entries: run.goblins.map((g, i) => ({ id: uuidv7(), tokenId: g.id, value: 15 - i })) });
+    for (const g of run.goblins) await ops.send({ t: "actor.effect.add", target: { tokenId: g.id }, effect: { id: uuidv7(), key: "concentrating", spell: "Hex" } });
     await ops.send({ t: "roll.ask", request: { id: run.deskRoll, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
     for (const view of [
       { ...DESK, scale: 1 },
@@ -725,7 +725,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
 
   test("11. at 1180 x 390, a token opened from the outliner lands clear of a bar that sits beside the alerts", async () => {
     // A roll card at the column's head, taller than the room the bar would keep under it.
-    const ask = randomUUID();
+    const ask = uuidv7();
     await ops.send({ t: "roll.ask", request: { id: ask, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
     // A layout this short starts with the side panel hidden (docs/design/design-v1-layout-hierarchy.md 4.1), and this case keeps it shown beside the alerts.
     await sidePanelChoice(dm, "shown");
@@ -845,7 +845,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await below("before the band");
     const header = async () => (await rectOf(dm.locator("header").filter({ has: dm.locator("h1") }))).bottom;
     const without = await header();
-    await ops.send({ t: "encounter.start", entries: run.goblins.map((g, i) => ({ id: randomUUID(), tokenId: g.id, value: 15 - i })) });
+    await ops.send({ t: "encounter.start", entries: run.goblins.map((g, i) => ({ id: uuidv7(), tokenId: g.id, value: 15 - i })) });
     await waitFor("the turn band", async () => ((await header()) > without + 20 ? true : null));
     await below("with the band");
     await shots.take(dm, "bardock-summary-row-band-320x480");
@@ -906,7 +906,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     const before = (await buttonTops(patThorn, patLine))[0]! - (await barRect(player)).top;
     await clickCell(player, EMPTY);
     await barFrame(player).waitFor({ state: "detached" });
-    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.thorn.id, value: 20 }, ...run.goblins.map((g, i) => ({ id: randomUUID(), tokenId: g.id, value: 15 - i }))] });
+    await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: run.thorn.id, value: 20 }, ...run.goblins.map((g, i) => ({ id: uuidv7(), tokenId: g.id, value: 15 - i }))] });
     await ops.send({ t: "encounter.next" });
     await waitFor("Thorn's turn for Pat", () => (playerSocket.state?.encounter?.activeEntryId ? true : null));
     const to = { x: run.thorn.x + 1, y: run.thorn.y };
@@ -1127,7 +1127,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     }
     await sidePanelChoice(dm, null);
     // Stacked under a concentration check's card.
-    await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblins[0]!.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } }).catch(() => undefined);
+    await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblins[0]!.id }, effect: { id: uuidv7(), key: "concentrating", spell: "Hex" } }).catch(() => undefined);
     await setUp(dm, { ...DESK, scale: 1 }, null, huge);
     await ops.send({ t: "actor.hp", target: { tokenId: run.goblins[0]!.id }, change: { kind: "damage", amount: 1 } });
     const card = dm.locator('[data-alert="concentration"]').first();
@@ -1183,8 +1183,8 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await shots.take(dm, "token-window-stored-1100x700-at-130");
 
     // In a fight with three checks: the default spot with the stored size, after a resize dropped on the column, and at the smallest.
-    await ops.send({ t: "encounter.start", entries: run.goblins.map((g, i) => ({ id: randomUUID(), tokenId: g.id, value: 15 - i })) });
-    for (const g of run.goblins) await ops.send({ t: "actor.effect.add", target: { tokenId: g.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } }).catch(() => undefined);
+    await ops.send({ t: "encounter.start", entries: run.goblins.map((g, i) => ({ id: uuidv7(), tokenId: g.id, value: 15 - i })) });
+    for (const g of run.goblins) await ops.send({ t: "actor.effect.add", target: { tokenId: g.id }, effect: { id: uuidv7(), key: "concentrating", spell: "Hex" } }).catch(() => undefined);
     await setUp(dm, { ...DESK, scale: 1 }, null, '{"w":600,"h":500}');
     await damageGoblins();
     await dm.locator('[data-alert="concentration"]').nth(2).waitFor();
@@ -1212,7 +1212,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     // Goblin 3 with ten statuses: their chips wrap to fewer lines in a wider window, so its content grows shorter mid-drag.
     const goblin = run.goblins[2]!;
     const keys = ["prone", "poisoned", "blinded", "charmed", "deafened", "frightened", "grappled", "restrained", "stunned", "invisible"];
-    const ids = keys.map(() => randomUUID());
+    const ids = keys.map(() => uuidv7());
     for (const [i, key] of keys.entries()) await ops.send({ t: "actor.effect.add", target: { tokenId: goblin.id }, effect: { id: ids[i]!, key } });
     const view = { width: 1920, height: 1080, scale: 1 };
     /*
@@ -1255,8 +1255,8 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await setUp(dm, { ...DESK, scale: 1 });
   });
   test("pl2-b. on a phone at 390, 360 and 320 px, and 390 at 130%, a toast clears every drawn alert card and takes the cards' edges when below them, including as the screen turns (docs/design/design-v1-polish.md R9, PL2-ASTRA-02)", async () => {
-    await ops.send({ t: "encounter.start", entries: run.goblins.map((g, i) => ({ id: randomUUID(), tokenId: g.id, value: 15 - i })) });
-    for (const g of run.goblins) await ops.send({ t: "actor.effect.add", target: { tokenId: g.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } });
+    await ops.send({ t: "encounter.start", entries: run.goblins.map((g, i) => ({ id: uuidv7(), tokenId: g.id, value: 15 - i })) });
+    for (const g of run.goblins) await ops.send({ t: "actor.effect.add", target: { tokenId: g.id }, effect: { id: uuidv7(), key: "concentrating", spell: "Hex" } });
     const checks = dm.locator('[data-alert="concentration"]');
     const undoToast = async () => {
       // Moving the far goblin leaves the concentration checks alone.

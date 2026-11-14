@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -82,15 +82,15 @@ const run = {
   password: "",
   dmKey: "",
   citadel: "",
-  crypt: randomUUID(),
-  field: randomUUID(),
-  chamber: randomUUID(),
-  phases: [randomUUID(), randomUUID()] as const,
+  crypt: uuidv7(),
+  field: uuidv7(),
+  chamber: uuidv7(),
+  phases: [uuidv7(), uuidv7()] as const,
   patId: "",
   anaId: "",
   leeId: "",
-  thorn: randomUUID(),
-  wren: randomUUID(),
+  thorn: uuidv7(),
+  wren: uuidv7(),
   images: [] as string[],
 };
 
@@ -666,7 +666,7 @@ describe("The top bar's chips and their menus", { concurrency: false }, () => {
     await setTable(run.citadel, true);
     await dmViews(run.crypt);
     // A move to a scene that is gone, by the move's scene id spoiled on its way out.
-    const spoiled = randomUUID();
+    const spoiled = uuidv7();
     wire.spoil = (frame) => (frame.includes('"room.setPlayerScene"') ? frame.split(run.crypt).join(spoiled) : frame);
     try {
       let menu = await openMenu(dm, "blackout");
@@ -876,7 +876,7 @@ describe("The top bar's chips and their menus", { concurrency: false }, () => {
   });
 
   test("qc-9. the DM's clock chip at 1440 opens Time's four steps under it, each step one clock.advance with the popover still open and the side panel's tab kept, and Open Time opens the Time panel", async () => {
-    await ops.send({ t: "clock.start", id: randomUUID(), at: 4 * 86_400 + 20 * 3_600, shown: true, calendar: { kind: "days" } });
+    await ops.send({ t: "clock.start", id: uuidv7(), at: 4 * 86_400 + 20 * 3_600, shown: true, calendar: { kind: "days" } });
     const clockChip = chip(dm, "clock");
     await clockChip.waitFor();
     assert.equal(await clockChip.getAttribute("aria-haspopup"), "dialog");

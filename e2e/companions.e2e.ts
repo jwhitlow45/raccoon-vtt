@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -53,7 +53,7 @@ const run = {
   sceneId: "",
   anaId: "",
   cyId: "",
-  bree: { characterId: randomUUID(), tokenId: randomUUID() },
+  bree: { characterId: uuidv7(), tokenId: uuidv7() },
 };
 
 /** A stat block made up for this test, as a web page's copy gives it. */
@@ -274,9 +274,9 @@ const LINES = {
  * blocks of its own, made by the DM's ops. Returns their ids.
  */
 async function charactersCompanion(name: string, companion: string, at: { x: number; y: number }, blocks: string[]): Promise<{ characterId: string; tokenId: string; blockIds: string[] }> {
-  const characterId = randomUUID();
-  const tokenId = randomUUID();
-  const blockIds = blocks.map(() => randomUUID());
+  const characterId = uuidv7();
+  const tokenId = uuidv7();
+  const blockIds = blocks.map(() => uuidv7());
   await ops.send({ t: "character.create", character: { id: characterId, name, size: "medium", ownerIds: [run.anaId], actor: actor() } });
   for (const [i, blockName] of blocks.entries()) await ops.send({ t: "companionBlock.create", block: { ...LINES, id: blockIds[i]!, characterId, name: blockName } });
   await ops.send({
@@ -510,7 +510,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
   });
 
   test("6. a room monster made Bree's companion: the DM reads its block with the line that her players do not, and Ana's panel offers Attach", async () => {
-    const monsterId = randomUUID();
+    const monsterId = uuidv7();
     const hound = {
       id: monsterId,
       name: "Moon Hound",
@@ -539,7 +539,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
       legendaryActions: [],
     };
     await ops.send({ t: "monster.create", monster: hound });
-    const id = randomUUID();
+    const id = uuidv7();
     await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name: "Moon Hound", size: "medium", x: 9, y: 5, actor: { inline: actor({ ac: 13, monsterId }) } } });
     await ops.send({ t: "token.update", tokenId: id, patch: { companion: { of: run.bree.characterId, turn: "shared" }, disposition: "ally" } });
     await openSideTab(dm, "Characters");
@@ -602,7 +602,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     await ops.send({ t: "token.update", tokenId: hoot.id, patch: { size: "small", x: 5, y: 9, actor: { ac: 9 } } });
     await ops.send({ t: "actor.hp", target: { tokenId: hoot.id }, change: { kind: "set", cur: 5, max: 10 } });
     await ops.send({ t: "actor.hp", target: { tokenId: hoot.id }, change: { kind: "temp", amount: 3 } });
-    await ops.send({ t: "actor.effect.add", target: { tokenId: hoot.id }, effect: { id: randomUUID(), key: "frightened" } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: hoot.id }, effect: { id: uuidv7(), key: "frightened" } });
     await waitFor("Hoot hurt in the corridor", () => {
       const t = companionOf("Hoot");
       return t?.y === 9 && t.size === "small" && inline("Hoot")?.effects.length ? true : null;
@@ -1226,7 +1226,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     const spendBudget = async () => {
       let spent = false;
       for (let i = 0; i < 20 && !spent; i++) {
-        await anaOps.send({ t: "companionBlock.delete", blockId: randomUUID() }).catch((err: Error) => (spent = /Too many stat block saves/.test(err.message)));
+        await anaOps.send({ t: "companionBlock.delete", blockId: uuidv7() }).catch((err: Error) => (spent = /Too many stat block saves/.test(err.message)));
       }
       assert.ok(spent, "the budget ran out");
     };
@@ -1414,9 +1414,9 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
   test("s2-co-b. Ana dismisses a companion from its Token panel's Remove, the bar's own button: the first tap asks, the second takes it away, and it lines up at 320 x 568 and 390 x 844 at 130% and 1280 x 800. By keyboard, a refused dismissal leaves focus on Dismiss, a taken one hands it to the panel's empty line, and one with another token still selected hands it to that creature's name (D-261024-47)", async () => {
     const { alignmentLines, measureAlignment } = await import("./helpers/alignment.ts");
     const off: string[] = [];
-    const wisp = randomUUID();
-    const wisp2 = randomUUID();
-    const decoy = randomUUID();
+    const wisp = uuidv7();
+    const wisp2 = uuidv7();
+    const decoy = uuidv7();
     await ops.send({ t: "token.create", token: { id: wisp, sceneId: run.sceneId, kind: "npc", name: "Wisp", size: "small", x: 9, y: 9, visibility: "all", disposition: "ally", ownerIds: [run.anaId], companion: { of: run.bree.characterId, turn: "none" }, actor: { inline: actor() } } });
     // A token of the DM's, which Ana may not take away: the refused dismissal below is sent for it in Wisp's place.
     await ops.send({ t: "token.create", token: { id: decoy, sceneId: run.sceneId, kind: "monster", name: "Decoy", size: "medium", x: 11, y: 9, visibility: "all", disposition: "hostile", actor: { inline: actor() } } });

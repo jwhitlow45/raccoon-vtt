@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -84,7 +84,7 @@ const playerSocket = new SocketWatch("player");
 const dmConsole = new ConsoleWatch("dm");
 const playerConsole = new ConsoleWatch("player");
 
-const run = { roomId: "", roomName: `E2E dice ${new Date().toISOString().slice(0, 19)}`, password: "", patId: "", dmId: "", thornId: randomUUID() };
+const run = { roomId: "", roomName: `E2E dice ${new Date().toISOString().slice(0, 19)}`, password: "", patId: "", dmId: "", thornId: uuidv7() };
 let ops: OpSocket | undefined;
 
 const THORN_ACTOR = { hp: { cur: 44, max: 44, temp: 0 }, life: "alive", ac: 18, speeds: { walk: 30 }, initBonus: 0, passivePerception: 13, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
@@ -481,10 +481,10 @@ async function resultWords(page: Page): Promise<string | null> {
  * routed, so an apply can wait on the wire or reach the server spoiled.
  */
 const qe = {
-  thorn: randomUUID(),
-  lurker: randomUUID(),
-  goblinA: randomUUID(),
-  goblinB: randomUUID(),
+  thorn: uuidv7(),
+  lurker: uuidv7(),
+  goblinA: uuidv7(),
+  goblinB: uuidv7(),
   row: 0,
   context: null as BrowserContext | null,
   desk: null as Page | null,
@@ -558,9 +558,9 @@ async function patDamage(): Promise<number> {
  * character for Pat.
  */
 const trh = {
-  vexId: randomUUID(),
-  sprite: { monster: randomUUID(), token: randomUUID(), at: { x: 12, y: 2 } },
-  bramble: { token: randomUUID(), at: { x: 15, y: 2 } },
+  vexId: uuidv7(),
+  sprite: { monster: uuidv7(), token: uuidv7(), at: { x: 12, y: 2 } },
+  bramble: { token: uuidv7(), at: { x: 15, y: 2 } },
 };
 
 /** A room monster with a stat block and no lines under its six abilities, so its token's panel is short. */
@@ -1219,7 +1219,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
   });
 
   test("15. an answer sent from the panel shows in the header line with its label and no Again (LP7-DICE-10)", async () => {
-    await ops!.send({ t: "roll.ask", request: { id: randomUUID(), test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thornId }] } });
+    await ops!.send({ t: "roll.ask", request: { id: uuidv7(), test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thornId }] } });
     await openDicePhone(player);
     const cell = thornRolls(player).getByRole("button", { name: /^Dexterity save, answers the DM's request/ });
     await cell.scrollIntoViewIfNeeded();
@@ -1237,7 +1237,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
   test("16. the DM's Aboleth at 390 x 844, at 100% and 130%: no roll option's words run past its button, the group save's among them, and none leaves the panel", async () => {
     const sceneId = dmSocket.state!.meta.playerSceneId!;
     const bounds = dmSocket.state!.scenes[sceneId]!.bounds;
-    await ops!.send({ t: "token.create", token: { id: randomUUID(), sceneId, kind: "monster", name: "Aboleth", size: "large", x: 2, y: 2, visibility: "all", disposition: "hostile", actor: { inline: { ...THORN_ACTOR, srdId: "aboleth" } } } });
+    await ops!.send({ t: "token.create", token: { id: uuidv7(), sceneId, kind: "monster", name: "Aboleth", size: "large", x: 2, y: 2, visibility: "all", disposition: "hostile", actor: { inline: { ...THORN_ACTOR, srdId: "aboleth" } } } });
     for (const scale of [1, 1.3]) {
       const label = `390 x 844 at ${Math.round(scale * 100)}%`;
       await dm.setViewportSize({ width: 390, height: 844 });
@@ -1552,7 +1552,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     await bar.getByRole("button", { name: / below$/ }).click();
     await dm.getByRole("menu", { name: "Panel below" }).getByRole("menuitemradio", { name: sideTabName("Initiative") }).click();
     const aboleth = Object.values(dmSocket.state!.tokens).find((tk) => tk.name === "Aboleth")!;
-    await ops!.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: aboleth.id }] });
+    await ops!.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: aboleth.id }] });
     // Dice above throws a roll of its own, so the pane can hold the dice.
     await diceReady(dm, dmSocket);
     await watchThrow(dm);
@@ -1759,7 +1759,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       assert.deepEqual(await panelModes(player), { adv: true, dis: false, secret: true });
 
       // Restrained gives Disadvantage on Dexterity saves: the menu's Advantage cancels it, and the line says so.
-      const effectId = randomUUID();
+      const effectId = uuidv7();
       await ops!.send({ t: "actor.effect.add", target: { characterId: run.thornId }, effect: { id: effectId, key: "restrained" } });
       try {
         const save = thornRolls(player).getByRole("button", { name: /^Dexterity save/ });
@@ -1789,7 +1789,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     const longbow = { id: "r-longbow", name: "Longbow", kind: "weapon", ability: "dex", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d8", type: "piercing", mod: true }] };
     const javelin = { id: "r-javelin", name: "Javelin", kind: "weapon", ability: "str", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d6", type: "piercing", mod: true }] };
     await ops!.send({ t: "character.update", characterId: run.thornId, patch: { stats: { ...THORN_STATS, rolls: [...THORN_STATS.rolls, longbow, javelin] } } });
-    const tokenId = randomUUID();
+    const tokenId = uuidv7();
     try {
       await openDicePhone(player);
       const rolls = thornRolls(player);
@@ -1864,8 +1864,8 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     const INITIATIVE = "Frightened: Disadvantage on Initiative, a Dexterity check, while the source of fear is within line of sight.";
     // Clear of the Large Aboleth test 16 leaves at (2,2): the board draws tokens of one layer in id order, so a tap on both picks either.
     const at = { x: 5, y: 3 };
-    const tokenId = randomUUID();
-    const effectId = randomUUID();
+    const tokenId = uuidv7();
+    const effectId = uuidv7();
     const group = (rolls: Locator, name: string) => rolls.locator("[data-panel-group]").filter({ has: rolls.page().getByRole("button", { name, exact: true }) });
     // Said where a sighted player reads it before a tap, once in each group: never only in a button's name.
     const shown = async (rolls: Locator, where: string) => {
@@ -2073,7 +2073,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
   test("fu42b-hidden. a group save rolled in the side panel and hidden before its answer: a toast says it, and shown again the page holds the results and says nothing more (HIDDEN-WATCHERS)", async () => {
     const sceneId = dmSocket.state!.meta.playerSceneId!;
     const bounds = dmSocket.state!.scenes[sceneId]!.bounds;
-    const goblins = [{ id: randomUUID(), x: 6, y: 2 }, { id: randomUUID(), x: 8, y: 2 }];
+    const goblins = [{ id: uuidv7(), x: 6, y: 2 }, { id: uuidv7(), x: 8, y: 2 }];
     for (const [i, g] of goblins.entries()) {
       await ops!.send({ t: "token.create", token: { id: g.id, sceneId, kind: "monster", name: `Hidden goblin ${i + 1}`, size: "medium", x: g.x, y: g.y, visibility: "all", disposition: "hostile", actor: { inline: { ...THORN_ACTOR, srdId: "goblin-warrior" } } } });
     }
@@ -2313,7 +2313,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
   });
 
   test("qe-5b. a chip for a party member's character token leaves its row once Apply lands, so a second tap cannot fill and apply it again (LP34-HP-1)", async () => {
-    const wren = { character: randomUUID(), token: randomUUID() };
+    const wren = { character: uuidv7(), token: uuidv7() };
     await ops!.send({ t: "room.update", settings: { playersApplyDamage: true } });
     try {
       const sceneId = dmSocket.state!.meta.playerSceneId!;

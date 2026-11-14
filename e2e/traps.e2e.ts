@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { OUTCOME_RESTORED, OUTCOME_UNDONE, assertPrivateOutcome, dismissRedoToasts, saveOutcomes } from "./helpers/saveOutcomes.ts";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -62,8 +62,8 @@ const run = {
   password: "",
   sceneId: "",
   patId: "",
-  thornChar: randomUUID(),
-  thorn: randomUUID(),
+  thornChar: uuidv7(),
+  thorn: uuidv7(),
   trapId: "",
   /** The trap in the board's top right corner, under the alerts column (lp2-1a). */
   cornerId: "",
@@ -727,8 +727,8 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await dm.setViewportSize(DESKTOP);
     await reopenRoom(dm);
     await dm.locator(".konvajs-content").first().waitFor();
-    const goblin = randomUUID();
-    const pitId = randomUUID().replace(/-/g, "").slice(0, 16);
+    const goblin = uuidv7();
+    const pitId = uuidv7();
     await ops.send({ t: "token.create", token: { id: goblin, sceneId: run.sceneId, kind: "monster", name: "Goblin", size: "medium", visibility: "all", x: 1, y: 9, disposition: "hostile", actor: { inline: actor() } } });
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, pit: { floor: -10 }, hits: "trigger", actions: [], find: [], notice: false };
     await ops.send({ t: "trap.create", trap: { id: pitId, sceneId: run.sceneId, name: "Low Pit", zone: { cells: [{ x: 4, y: 9, w: 2, h: 2 }] }, rig } });
@@ -752,7 +752,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
 
   test("lp2-1a. a trap goes off while its pane is open as a card: at 1280 x 800, 844 x 390 and 820 x 1180, at 85% and 130%, the pane's header, Close and folds stay in reach and no card covers it, beside the lane or under the column's summary row, whose tap closes the pane and puts focus on the card (docs/design/design-v1-look-pass-2.md 2.8)", async () => {
     // In the board's top right corner, where the alerts column hangs, so its pane would meet the cards.
-    const cornerId = randomUUID().replace(/-/g, "").slice(0, 16);
+    const cornerId = uuidv7();
     run.cornerId = cornerId;
     const rig = { on: ["enter"], who: "any", floor: false, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
     await ops.send({ t: "trap.create", trap: { id: cornerId, sceneId: run.sceneId, name: "Corner Darts", zone: { cells: [{ x: 13, y: 1, w: 2, h: 1 }] }, rig } });
@@ -774,7 +774,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
         await tapCell(dm, BOUNDS, { x: 13, y: 1 });
         await pane(dm).getByText("Corner Darts", { exact: true }).first().waitFor();
         // A roll request open on the DM's desk as well, which the summary's words leave out and its +1 counts (LP16-PT-3).
-        const requestId = randomUUID();
+        const requestId = uuidv7();
         await ops.send({ t: "roll.ask", request: { id: requestId, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thornChar }] } });
         await ops.send({ t: "trap.spring", trapId: cornerId, tokenIds: [run.thorn] });
         await waitFor(`the springing waits, ${label}`, () => ((state(dmSocket)?.traps?.[cornerId]?.rig?.due?.length ?? 0) > 0 ? true : null));
@@ -1178,7 +1178,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
   test("pl1-a. a trap with every part filled lays out its rows level, as a card at 1440 x 900 and as a sheet at 320 x 568 at 130%: each remove beside its fields' first line, DC, On a pass and Uses left beside their labels, rounds beside its field, Set it off filling its line with every button's words on one line, and the last tick on its label's first line (docs/design/design-v1-polish.md R1 to R3)", async () => {
     // A door for the trap to lock, as an effect with a choice.
     await ops.send({ t: "build.edge", sceneId: run.sceneId, edges: [{ key: "12,9,w", feature: { kind: "door", state: "closed", secret: false, discovered: false } }] });
-    const needleId = randomUUID().replace(/-/g, "").slice(0, 16);
+    const needleId = uuidv7();
     await ops.send({
       t: "trap.create",
       trap: {
@@ -1261,7 +1261,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
   });
 
   test("dpfix-1. a new trap's pane on a 320 x 568 phone at 130%, every group folded: each header within 1 px, and a summary that fits beside its name keeps the name's line (HX7-4 on squares, docs/design/design-v1-design-pass.md 4.1)", async () => {
-    const bareId = randomUUID().replace(/-/g, "").slice(0, 16);
+    const bareId = uuidv7();
     const rig = { on: ["enter" as const], who: "party" as const, floor: true, resets: "never" as const, stops: false, foundOnSpring: true, hits: "zone" as const, actions: [], find: [], notice: false };
     await ops.send({ t: "trap.create", trap: { id: bareId, sceneId: run.sceneId, name: "Bare Trap", zone: { cells: [{ x: 10, y: 8, w: 1, h: 1 }] }, rig } });
     await waitFor("the bare trap on the DM's copy", () => state(dmSocket)?.traps?.[bareId] ?? null);

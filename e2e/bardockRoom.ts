@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -50,16 +50,16 @@ export const run = {
   roomName: `E2E bar dock ${new Date().toISOString().slice(0, 19)}`,
   sceneId: "",
   bounds: { w: 30, h: 20 },
-  thorn: { id: randomUUID(), characterId: randomUUID(), x: 4, y: 4 },
+  thorn: { id: uuidv7(), characterId: uuidv7(), x: 4, y: 4 },
   goblins: [
-    { id: randomUUID(), x: 6, y: 6 },
-    { id: randomUUID(), x: 8, y: 4 },
-    { id: randomUUID(), x: 4, y: 9 },
+    { id: uuidv7(), x: 6, y: 6 },
+    { id: uuidv7(), x: 8, y: 4 },
+    { id: uuidv7(), x: 4, y: 9 },
   ],
   /** Far in the map's bottom right, where the docked bar sits. */
-  far: { id: randomUUID(), x: 27, y: 17 },
+  far: { id: uuidv7(), x: 27, y: 17 },
   /** The roll asked of Thorn in step 6, which waits in the DM's column until step 10 closes it. */
-  deskRoll: randomUUID(),
+  deskRoll: uuidv7(),
 };
 
 export type Rect = { left: number; top: number; right: number; bottom: number };
@@ -342,9 +342,9 @@ export function computerSweepTest(SWEEP: readonly { width: number; height: numbe
 
     for (const fight of ["none", "checks"] as const) {
       if (fight === "checks") {
-        await ops.send({ t: "encounter.start", entries: run.goblins.map((g, i) => ({ id: randomUUID(), tokenId: g.id, value: 15 - i })) });
-        for (const g of run.goblins) await ops.send({ t: "actor.effect.add", target: { tokenId: g.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } }).catch(() => undefined);
-        await ops.send({ t: "roll.ask", request: { id: randomUUID(), test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+        await ops.send({ t: "encounter.start", entries: run.goblins.map((g, i) => ({ id: uuidv7(), tokenId: g.id, value: 15 - i })) });
+        for (const g of run.goblins) await ops.send({ t: "actor.effect.add", target: { tokenId: g.id }, effect: { id: uuidv7(), key: "concentrating", spell: "Hex" } }).catch(() => undefined);
+        await ops.send({ t: "roll.ask", request: { id: uuidv7(), test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
       }
       for (const scale of [1, 1.3]) {
         for (const stored of STORED) {

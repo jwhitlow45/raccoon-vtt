@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -73,10 +73,10 @@ const run = {
   bounds: { w: 30, h: 20 },
   patId: "",
   quinId: "",
-  thorn: randomUUID(),
-  thornToken: randomUUID(),
-  vex: randomUUID(),
-  goblin: randomUUID(),
+  thorn: uuidv7(),
+  thornToken: uuidv7(),
+  vex: uuidv7(),
+  goblin: uuidv7(),
 };
 
 type View = { width: number; height: number; scale: number };
@@ -760,7 +760,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
 
   test("lp22-cr-a. by keyboard on Thorn's token panel, Remove from a resource's Edit sheet and an answered level-up's Update each take their opener away, and focus goes to Add, never the page", async () => {
     await setUp(pat, patCdp, PHONE);
-    await ops.send({ t: "character.update", characterId: run.thorn, patch: { resources: [...stored(), { id: randomUUID(), name: "Lucky Knack", max: 2, reset: "long" }] } });
+    await ops.send({ t: "character.update", characterId: run.thorn, patch: { resources: [...stored(), { id: uuidv7(), name: "Lucky Knack", max: 2, reset: "long" }] } });
     await storedReads("Lucky Knack added", (list) => list.some((x) => x.name === "Lucky Knack"), true);
     const panel = await thornsPanel(pat);
     const uses = section(panel);
@@ -803,7 +803,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
   test("fu32-cr-a. by keyboard on Thorn's token panel, the Add sheet's Add that fills the list takes Add away for the limit's line, and focus goes to the section's first button, never the page (LP22-OPUS-5c)", async () => {
     await setUp(pat, patCdp, PHONE);
     const before = stored();
-    const fill = Array.from({ length: LIMITS.resourcesPerCharacter - 1 - before.length }, (_, i) => ({ id: randomUUID(), name: `Knack ${i + 1}`, max: 1, reset: "long" as const }));
+    const fill = Array.from({ length: LIMITS.resourcesPerCharacter - 1 - before.length }, (_, i) => ({ id: uuidv7(), name: `Knack ${i + 1}`, max: 1, reset: "long" as const }));
     try {
       await ops.send({ t: "character.update", characterId: run.thorn, patch: { resources: [...before, ...fill] } });
       await storedReads("one short of the limit", (list) => list.length, LIMITS.resourcesPerCharacter - 1);

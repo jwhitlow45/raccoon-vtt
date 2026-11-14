@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -59,12 +59,12 @@ const run = {
   password: "",
   patId: "",
   sceneId: "",
-  thornChar: randomUUID(),
-  thorn: { id: randomUUID(), x: 3, y: 3 },
-  wolf: { id: randomUUID(), x: 4, y: 3 },
+  thornChar: uuidv7(),
+  thorn: { id: uuidv7(), x: 3, y: 3 },
+  wolf: { id: uuidv7(), x: 4, y: 3 },
   /** The DM's NPC, lent to Pat: a token of its own, which folds with the monsters. */
-  sildar: { id: randomUUID(), x: 5, y: 3 },
-  goblin: { id: randomUUID(), x: 9, y: 3 },
+  sildar: { id: uuidv7(), x: 5, y: 3 },
+  goblin: { id: uuidv7(), x: 9, y: 3 },
 };
 
 function actor(over: Record<string, unknown> = {}) {
@@ -432,7 +432,7 @@ describe("raccoon-vtt dice folds", { timeout: 300_000 }, () => {
   test("df-5. an ask opens Thorn's folded Saves and checks once, folded again it stays folded through a tab pick, and the NPC's ask opens a monster's", async () => {
     const options = diceSheet(pat).locator("[data-roll-options]");
     assert.equal(await fold(options, "Saves and checks").getAttribute("aria-expanded"), "false");
-    await ask(randomUUID(), { characterId: run.thornChar }, "dex");
+    await ask(uuidv7(), { characterId: run.thornChar }, "dex");
     await waitFor("Saves and checks opened by the ask", async () => ((await fold(options, "Saves and checks").getAttribute("aria-expanded")) === "true" ? true : null));
     await options.getByRole("button", { name: /^Dexterity save, answers the DM's request/ }).waitFor();
     await shots.take(pat, "df-5-pat-390-ask-opens");
@@ -448,7 +448,7 @@ describe("raccoon-vtt dice folds", { timeout: 300_000 }, () => {
     await shots.take(pat, "df-5-pat-390-ask-folded");
 
     // The DM asks the NPC lent to Pat while Pat looks at Thorn: it opens Sildar's own group, a monster's, as Pat picks him.
-    await ask(randomUUID(), { tokenId: run.sildar.id }, "wis");
+    await ask(uuidv7(), { tokenId: run.sildar.id }, "wis");
     await pick(options, "Sildar");
     assert.equal(await fold(options, "Saves and checks").getAttribute("aria-expanded"), "true", "the NPC's Saves and checks opened");
     await options.getByRole("button", { name: /^Wisdom save, answers the DM's request/ }).waitFor();
@@ -688,7 +688,7 @@ describe("raccoon-vtt dice folds", { timeout: 300_000 }, () => {
     const save = options.getByRole("button", { name: /^Wisdom save/ });
     const menu = await keyMenu(pat, save, /^Roll options for Wisdom save, proficient$/);
     const sent = patDiceCount();
-    const id = randomUUID();
+    const id = uuidv7();
     await ask(id, { characterId: run.thornChar }, "wis");
     await menu.waitFor({ state: "detached" });
     await sleep(600);

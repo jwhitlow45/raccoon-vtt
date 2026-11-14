@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -60,7 +60,7 @@ export const patConsole = new ConsoleWatch("pat");
 
 /** A token placed in the room: its id, name, cell and side in cells. */
 export type Placed = { id: string; name: string; x: number; y: number; cells: number };
-export const placed = (name: string, x: number, y: number, cells = 1): Placed => ({ id: randomUUID(), name, x, y, cells });
+export const placed = (name: string, x: number, y: number, cells = 1): Placed => ({ id: uuidv7(), name, x, y, cells });
 
 export const run = {
   roomId: "",
@@ -68,7 +68,7 @@ export const run = {
   password: "",
   sceneId: "",
   patId: "",
-  thorn: { ...placed("Thorn", 15, 10), characterId: randomUUID(), entryId: randomUUID() },
+  thorn: { ...placed("Thorn", 15, 10), characterId: uuidv7(), entryId: uuidv7() },
   /** Below and right of Thorn. */
   goblin1: placed("Goblin 1", 17, 12),
   goblin2: placed("Goblin 2", 16, 13),
@@ -513,7 +513,7 @@ export const hexed = new Set<string>();
 export async function checks(goblins: Placed[]): Promise<void> {
   for (const g of goblins) {
     if (!hexed.has(g.id)) {
-      await ops.send({ t: "actor.effect.add", target: { tokenId: g.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } });
+      await ops.send({ t: "actor.effect.add", target: { tokenId: g.id }, effect: { id: uuidv7(), key: "concentrating", spell: "Hex" } });
       hexed.add(g.id);
     }
     await ops.send({ t: "actor.hp", target: { tokenId: g.id }, change: { kind: "damage", amount: 1 } });

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { keys } from "#shared/keys.ts";
 import { guardHash } from "#shared/reducer/tx.ts";
-import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -66,8 +65,8 @@ const run = {
   password: "",
   patId: "",
   sceneId: "",
-  thornCharId: randomUUID(),
-  thornId: randomUUID(),
+  thornCharId: uuidv7(),
+  thornId: uuidv7(),
   /** Requests asked and not closed yet, closed between steps so each starts clean. */
   open: [] as string[],
 };
@@ -103,7 +102,7 @@ function actor() {
 
 /** Asks Thorn for one roll, as the DM's sheet would, and waits until the player holds it. */
 async function ask(kind: "save" | "check", ability: Ability, dc?: number): Promise<string> {
-  const id = randomUUID();
+  const id = uuidv7();
   await ops.send({
     t: "roll.ask",
     request: { id, test: { kind, choices: [{ ability }] }, ...(dc !== undefined ? { dc } : {}), dcShown: true, resultShown: true, targets: [{ characterId: run.thornCharId }] },

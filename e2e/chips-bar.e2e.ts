@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -77,10 +77,10 @@ const run = {
   password: "",
   sceneId: "",
   patId: "",
-  thornChar: randomUUID(),
-  playlist: randomUUID(),
-  track: randomUUID(),
-  phases: [randomUUID(), randomUUID()] as const,
+  thornChar: uuidv7(),
+  playlist: uuidv7(),
+  track: uuidv7(),
+  phases: [uuidv7(), uuidv7()] as const,
   maps: [] as { id: string; width: number; height: number }[],
   /** The fight in its order: Belak, Thorn, then five goblins. */
   fight: [] as { token: string; entry: string; name: string; value: number }[],
@@ -351,10 +351,10 @@ describe("The top bar's give-way and Next", { concurrency: false }, () => {
     await ops.send({ t: "character.create", character: { id: run.thornChar, name: "Thorn", size: "medium", ownerIds: [run.patId], actor: actor(24) } });
     const names = [BELAK, "Thorn", "Goblin 1", "Goblin 2", "Goblin 3", "Goblin 4", "Goblin 5"];
     for (const [i, name] of names.entries()) {
-      const token = randomUUID();
+      const token = uuidv7();
       const pc = name === "Thorn";
       await ops.send({ t: "token.create", token: { id: token, sceneId: run.sceneId, size: "medium", visibility: "all", kind: pc ? "pc" : "monster", name, x: 3 + i, y: 4, disposition: pc ? "ally" : "hostile", actor: pc ? { ref: run.thornChar } : { inline: actor(20) } } });
-      run.fight.push({ token, entry: randomUUID(), name, value: 20 - i });
+      run.fight.push({ token, entry: uuidv7(), name, value: 20 - i });
     }
     await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: run.track, name: "Tavern at night", use: "music", ms: 120_000 });
     await ops.send({ t: "playlist.create", id: run.playlist, name: "Tavern night", sounds: [run.track], repeat: "all", fade: 5 });
@@ -416,7 +416,7 @@ describe("The top bar's give-way and Next", { concurrency: false }, () => {
       await blackout(false);
     });
     await phases(true);
-    await ops.send({ t: "clock.start", id: randomUUID(), at: 4 * 86_400 + 20 * 3_600, shown: true, calendar: { kind: "days" } });
+    await ops.send({ t: "clock.start", id: uuidv7(), at: 4 * 86_400 + 20 * 3_600, shown: true, calendar: { kind: "days" } });
     const rest = await partsHold(dm, ["chip:dm", "chip:clock", "search:field", "phase", "fullscreen"], [], "the bar at rest at 1440");
     assert.ok(rest.overflow <= 1, `the row overflows at rest by ${rest.overflow} px`);
     await startFight();
@@ -451,7 +451,7 @@ describe("The top bar's give-way and Next", { concurrency: false }, () => {
       await openAt(dm, DESK, 1);
       await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
     });
-    await ops.send({ t: "music.play", run: randomUUID(), playlistId: run.playlist, order: [run.track], index: 0, repeat: "all", fade: 5 });
+    await ops.send({ t: "music.play", run: uuidv7(), playlistId: run.playlist, order: [run.track], index: 0, repeat: "all", fade: 5 });
     await topBar(dm).locator('[data-chip="nowPlaying"]').first().waitFor();
     await ops.send({ t: "room.update", settings: { turnTimerSec: 2 } });
     await startFight();
@@ -539,7 +539,7 @@ describe("The top bar's give-way and Next", { concurrency: false }, () => {
       await ops.send({ t: "music.stop" }).catch(() => undefined);
       await openAt(dm, DESK, 1);
     });
-    await ops.send({ t: "music.play", run: randomUUID(), playlistId: run.playlist, order: [run.track], index: 0, repeat: "all", fade: 5 });
+    await ops.send({ t: "music.play", run: uuidv7(), playlistId: run.playlist, order: [run.track], index: 0, repeat: "all", fade: 5 });
     await openAt(dm, DESK, 1);
     const wide = await partsHold(dm, ["volume", "chip:nowPlaying:full"], [], "the speaker beside Now playing at 1440");
     assert.ok(wide.overflow <= 1, `the row overflows by ${wide.overflow} px (${wide.parts.join(", ")})`);

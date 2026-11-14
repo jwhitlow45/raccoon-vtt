@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -68,11 +68,11 @@ const run = {
   password: "",
   patId: "",
   sceneId: "",
-  thornChar: randomUUID(),
-  thorn: { id: randomUUID(), x: 3, y: 3 },
-  goblin: { id: randomUUID(), x: 9, y: 3 },
-  goblin2: { id: randomUUID(), x: 11, y: 3 },
-  dragon: { id: randomUUID(), x: 14, y: 6 },
+  thornChar: uuidv7(),
+  thorn: { id: uuidv7(), x: 3, y: 3 },
+  goblin: { id: uuidv7(), x: 9, y: 3 },
+  goblin2: { id: uuidv7(), x: 11, y: 3 },
+  dragon: { id: uuidv7(), x: 14, y: 6 },
 };
 
 function actor(over: Record<string, unknown> = {}) {
@@ -1109,7 +1109,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
   });
 
   test("dpf1-9. a request's answer keeps the request's visibility: Secret shows off with its reason, and Advantage answers once", async () => {
-    const id = randomUUID();
+    const id = uuidv7();
     await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: false, resultShown: true, targets: [{ characterId: run.thornChar }] } });
     await waitFor("the ask on Pat's page", () => patSocket.state?.rolls[id]);
     const sheet = await patDice();
@@ -1335,7 +1335,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
   });
 
   test("dpf1-20. a request's Roll on Pat's card and on the DM's live card: Secret shown off for the request's visibility, and the pick answers once, the DM's still guarded as unanswered", async () => {
-    const first = randomUUID();
+    const first = uuidv7();
     await ops.send({ t: "roll.ask", request: { id: first, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: false, resultShown: true, targets: [{ characterId: run.thornChar }] } });
     await waitFor("the ask on Pat's page", () => patSocket.state?.rolls[first]);
     const fixed = (what: string, menu: RegExp, pick: string, mode: string | null): Family => ({ what, button: () => pat.locator("x"), menu, items: D20_FIXED, hint: HINT.fixed, help: ["Roll secretly: request answers keep the request's visibility."], pick, sends: { t: "roll.dice", mode, to: null } });
@@ -1347,7 +1347,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     await waitFor("Pat's answer", () => (dmSocket.state?.rolls[first]?.targets[0]?.total !== undefined ? true : null));
     await ops.send({ t: "roll.close", rollIds: [first] });
 
-    const second = randomUUID();
+    const second = uuidv7();
     await ops.send({ t: "roll.ask", request: { id: second, test: { kind: "save", choices: [{ ability: "wis" }] }, dc: 13, dcShown: true, resultShown: true, targets: [{ characterId: run.thornChar }] } });
     const live = dm.getByRole("group", { name: "Roll request: WIS save, DC 13" }).filter({ visible: true }).first();
     await live.waitFor();
@@ -1505,8 +1505,8 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === 3 ? true : null));
     const creature = ["Roll secretly: this roll's visibility is set by the creature."];
     // Taken off after: a failed save leaves the goblin Frightened, and each later end of its turn would bring a save-ends card of its own.
-    const hex = randomUUID();
-    const fear = randomUUID();
+    const hex = uuidv7();
+    const fear = uuidv7();
     const turnTo = async (entryId: string) => {
       for (let i = 0; i < 6 && dmSocket.state?.encounter?.activeEntryId !== entryId; i++) {
         const e = dmSocket.state!.encounter!;
@@ -1811,7 +1811,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
             };
 
             // Concentration on a Hex, broken into by damage.
-            const hex = randomUUID();
+            const hex = uuidv7();
             await ops.send({ t: "actor.effect.add", target: { characterId: run.thornChar }, effect: { id: hex, key: "concentrating", spell: "Hex" } });
             await ops.send({ t: "actor.hp", target: { characterId: run.thornChar }, change: { kind: "damage", amount: 1 } });
             const concentration = await card("Concentration save for Thorn");
@@ -1907,7 +1907,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       for (const scale of [1, 1.3]) {
         const at = `${size.width}x${size.height} at ${scale * 100}%`;
         const context = await browser.newContext({ viewport: size, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: "reduce" });
-        const fear = randomUUID();
+        const fear = uuidv7();
         try {
           const entries = await startFight();
           await turnTo(entries.dragon);
@@ -2033,14 +2033,14 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     const breeContext = await browser.newContext();
     let breeOps: OpSocket | null = null;
     let patOps: OpSocket | null = null;
-    const wren = randomUUID();
-    const ash = randomUUID();
+    const wren = uuidv7();
+    const ash = uuidv7();
     const asks: string[] = [];
     const cookieOf = async (context: BrowserContext) => (await context.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     const help = ["Roll secretly: request answers keep the request's visibility."];
     /** Asks a DEX save of Thorn and `sibling`, and waits until `page`'s state has it. */
     const ask = async (sibling: string, socket: SocketWatch) => {
-      const id = randomUUID();
+      const id = uuidv7();
       asks.push(id);
       await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: false, resultShown: true, targets: [{ characterId: run.thornChar }, { characterId: sibling }] } });
       await waitFor("the ask", () => socket.state?.rolls[id]);
@@ -2091,7 +2091,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       let from = dmSent.ops.length;
       await dmRoll.click({ button: "right" });
       let menu = await opened(dm, dmRoll, dmFamily);
-      await answeredBeside(dm, dmSent, dmSocket, id, wren, menu, dmFamily, () => breeOps!.send({ t: "roll.dice", tag: randomUUID(), rollId: id, target: { characterId: wren } }), from);
+      await answeredBeside(dm, dmSent, dmSocket, id, wren, menu, dmFamily, () => breeOps!.send({ t: "roll.dice", tag: uuidv7(), rollId: id, target: { characterId: wren } }), from);
 
       // Pat's Dice and his card: Ash's row answered from his other device.
       for (const where of ["Dice", "card"] as const) {
@@ -2118,7 +2118,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
         await hold(patCdp, button);
         menu = await opened(pat, button, family);
         const answerId = id;
-        await answeredBeside(pat, patSent, patSocket, answerId, ash, menu, family, () => patOps!.send({ t: "roll.dice", tag: randomUUID(), rollId: answerId, target: { characterId: ash } }), from);
+        await answeredBeside(pat, patSent, patSocket, answerId, ash, menu, family, () => patOps!.send({ t: "roll.dice", tag: uuidv7(), rollId: answerId, target: { characterId: ash } }), from);
       }
     } finally {
       const open = asks.filter((id) => dmSocket.state?.rolls[id]);
@@ -2134,7 +2134,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
 
   test("fu41-b-escape. Escape closes a focused or pointer-opened menu before an expanded toast", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.thorn.id, value: 20 }, { id: randomUUID(), tokenId: run.goblin.id, value: 5 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: run.thorn.id, value: 20 }, { id: uuidv7(), tokenId: run.goblin.id, value: 5 }] });
     await ops.send({ t: "encounter.next" });
     let whisperer: OpSocket | null = null;
     try {
@@ -2445,8 +2445,8 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
 
   test("fl17-2. any pop-up, not only a roll's menu: on a phone, a roll card's Ask to change it menu stays open while a finger scrolls the card and closes once its button leaves the card's view (FL17-OPUS-01)", async () => {
     // Thorn's row first, over five more of Pat's creatures, so the card scrolls up past it. A drag down would be the card's own swipe, which folds it.
-    const kin = Array.from({ length: 5 }, () => randomUUID());
-    const id = randomUUID();
+    const kin = Array.from({ length: 5 }, () => uuidv7());
+    const id = uuidv7();
     const context = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: "reduce" });
     const faults: string[] = [];
     try {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -75,11 +75,11 @@ const run = {
   password: "",
   patId: "",
   sceneId: "",
-  thornChar: randomUUID(),
-  loneChar: randomUUID(),
-  thorn: { id: randomUUID(), x: 3, y: 3 },
-  goblin: { id: randomUUID(), x: 9, y: 3 },
-  wolf: { id: randomUUID(), x: 5, y: 3 },
+  thornChar: uuidv7(),
+  loneChar: uuidv7(),
+  thorn: { id: uuidv7(), x: 3, y: 3 },
+  goblin: { id: uuidv7(), x: 9, y: 3 },
+  wolf: { id: uuidv7(), x: 5, y: 3 },
 };
 
 function actor(over: Record<string, unknown> = {}) {
@@ -895,7 +895,7 @@ describe("raccoon-vtt rolling from a stat block", { timeout: 900_000 }, () => {
   });
 
   test("sbr-6. the DM asks Thorn for a Dex save: Save is tagged Asked, a tap answers it, and its options disable Secret", async () => {
-    const requestId = randomUUID();
+    const requestId = uuidv7();
     await ops.send({ t: "roll.ask", request: { id: requestId, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 12, dcShown: true, resultShown: true, targets: [{ characterId: run.thornChar }] } });
     await waitFor("the request on Pat's page", () => patSocket.state?.rolls[requestId] || null);
     const sheet = await patSheet();
@@ -974,7 +974,7 @@ describe("raccoon-vtt rolling from a stat block", { timeout: 900_000 }, () => {
 
   test("sbr-8. Initiative in a fight, a changed row and a score room: the row is set once, 'Not set' after a change, and the score is set with no dice", async () => {
     // Thorn's row starts at a value no d20 + 1 can reach, so the wait below cannot mistake a roll of 4 for no roll (SBR8-FLAKE).
-    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.thorn.id, value: 40 }, { id: randomUUID(), tokenId: run.goblin.id, value: 9 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: run.thorn.id, value: 40 }, { id: uuidv7(), tokenId: run.goblin.id, value: 9 }] });
     await waitFor("the fight", () => dmSocket.state?.encounter || null);
     const sheet = await patSheet();
     const view = sheet.locator("[data-pc-stats]");
@@ -1055,7 +1055,7 @@ describe("raccoon-vtt rolling from a stat block", { timeout: 900_000 }, () => {
     await monsters.getByRole("button", { name: /^Goblin/ }).first().click();
     await text(monsters, "the Monsters panel");
     // A companion block in the list on Thorn's page.
-    const blockId = randomUUID();
+    const blockId = uuidv7();
     await ops.send({
       t: "companionBlock.create",
       block: {
@@ -1087,7 +1087,7 @@ describe("raccoon-vtt rolling from a stat block", { timeout: 900_000 }, () => {
     const fold = characters.getByRole("button", { name: "Stat block", exact: true });
     if ((await fold.getAttribute("aria-expanded")) !== "true") await fold.click();
     await text(lone, "a DM's page for a character with no token in view");
-    const loneToken = randomUUID();
+    const loneToken = uuidv7();
     await ops.send(tokenOp(loneToken, { kind: "pc", name: "Lone", x: 12, y: 8, disposition: "ally", actor: { ref: run.loneChar } }));
     await waitFor("the boxes roll once a token stands in view", async () => ((await gridOf(lone).getAttribute("role")) === "group" ? true : null));
     await ops.send({ t: "token.delete", tokenId: loneToken });
@@ -1191,7 +1191,7 @@ describe("raccoon-vtt rolling from a stat block", { timeout: 900_000 }, () => {
   });
 
   test("sbr-13. Restrained Dex save, options Advantage: tagged Dis, rolled Normal and cancelled, and the description says so", async () => {
-    const effectId = randomUUID();
+    const effectId = uuidv7();
     await ops.send({ t: "actor.effect.add", target: { characterId: run.thornChar }, effect: { id: effectId, key: "restrained" } });
     try {
       const sheet = await patSheet();
@@ -1342,7 +1342,7 @@ describe("raccoon-vtt rolling from a stat block", { timeout: 900_000 }, () => {
   });
 
   test("sbr-18. while Poisoned, a plain tap on Strength check and a Roll with Disadvantage from its options both return Disadvantage but only the pick is worded, and Roll with Advantage at 320 x 568 at 130% drops its words where the line is short and keeps them in the description", async () => {
-    const effectId = randomUUID();
+    const effectId = uuidv7();
     await ops.send({ t: "actor.effect.add", target: { characterId: run.thornChar }, effect: { id: effectId, key: "poisoned" } });
     try {
       const sheet = await patSheet();
@@ -1641,7 +1641,7 @@ describe("raccoon-vtt rolling from a stat block", { timeout: 900_000 }, () => {
   });
 
   test("sbr-23. switching between two character pages through a companion link: a roll on one page leaves no result line and no voice on the other (SBR-SOL-003)", async () => {
-    const mira = { char: randomUUID(), token: randomUUID(), moth: randomUUID(), loneToken: randomUUID() };
+    const mira = { char: uuidv7(), token: uuidv7(), moth: uuidv7(), loneToken: uuidv7() };
     const at = { lone: { x: 14, y: 3 }, mira: { x: 16, y: 3 }, moth: { x: 16, y: 5 } };
     await dm.keyboard.press("Escape");
     await ops.send({ t: "character.create", character: { id: mira.char, name: "Mira", size: "medium", ownerIds: [], actor: actor(), level: 3, stats: THORN_STATS } });
@@ -1841,7 +1841,7 @@ describe("raccoon-vtt rolling from a stat block", { timeout: 900_000 }, () => {
   });
 
   test("fl20-2. at 320 x 568 at 130% a roll picked with Advantage keeps its label and its verdict and drops only the mode words, and at 390 x 844 the words show where they fit (LP27-A-BLOCK-2)", async () => {
-    const requestId = randomUUID();
+    const requestId = uuidv7();
     try {
       await patAt({ width: 320, height: 568 }, "1.3");
       let sheet = await patSheet();

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { OUTCOME_RESTORED, OUTCOME_UNDONE, assertPrivateOutcome, dismissRedoToasts, saveOutcomes } from "./helpers/saveOutcomes.ts";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -65,13 +65,13 @@ const run = {
   password: "",
   sceneId: "",
   patId: "",
-  thornChar: randomUUID(),
-  breeChar: randomUUID(),
-  thorn: { id: randomUUID(), x: 2, y: 5 },
-  bree: { id: randomUUID(), x: 9, y: 5 },
+  thornChar: uuidv7(),
+  breeChar: uuidv7(),
+  thorn: { id: uuidv7(), x: 2, y: 5 },
+  bree: { id: uuidv7(), x: 9, y: 5 },
   goblins: [
-    { id: randomUUID(), name: "Goblin 1", x: 10, y: 6, visibility: "all" },
-    { id: randomUUID(), name: "Goblin 2", x: 10, y: 4, visibility: "dm" },
+    { id: uuidv7(), name: "Goblin 1", x: 10, y: 6, visibility: "all" },
+    { id: uuidv7(), name: "Goblin 2", x: 10, y: 4, visibility: "dm" },
   ],
   /** Thorn's damage roll, as its line landed. */
   fire: 0,

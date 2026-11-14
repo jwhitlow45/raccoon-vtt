@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -57,13 +57,13 @@ const run = {
   roomName: `E2E combat ${new Date().toISOString().slice(0, 19)}`,
   sceneId: "",
   bounds: { w: 30, h: 20 },
-  otherSceneId: randomUUID(),
+  otherSceneId: uuidv7(),
   anaId: "",
   cyId: "",
-  bree: { id: randomUUID(), characterId: randomUUID() },
-  cyPc: { id: randomUUID(), characterId: randomUUID() },
-  goblins: Array.from({ length: 12 }, () => randomUUID()),
-  chest: randomUUID(),
+  bree: { id: uuidv7(), characterId: uuidv7() },
+  cyPc: { id: uuidv7(), characterId: uuidv7() },
+  goblins: Array.from({ length: 12 }, () => uuidv7()),
+  chest: uuidv7(),
 };
 
 type Rect = { left: number; top: number; right: number; bottom: number; width: number; height: number };
@@ -422,8 +422,8 @@ const qe = {
   desk: null as Page | null,
   wire: null as Wire | null,
   console: new ConsoleWatch("dm-desk"),
-  warrior: randomUUID(),
-  lurker: randomUUID(),
+  warrior: uuidv7(),
+  lurker: uuidv7(),
   kobolds: [] as string[],
 };
 
@@ -1746,7 +1746,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const rowOf = (tokenId: string) => dmSocket.state?.encounter?.entries.find((e) => e.tokenId === tokenId);
     const anaSees = (tokenId: string) => anaSocket.state?.encounter?.entries.some((e) => e.tokenId === tokenId) ?? false;
     const missing = pair.filter((id) => !rowOf(id));
-    if (missing.length > 0) await ops.send({ t: "encounter.add", entries: missing.map((tokenId) => ({ id: randomUUID(), tokenId, value: 5 })) });
+    if (missing.length > 0) await ops.send({ t: "encounter.add", entries: missing.map((tokenId) => ({ id: uuidv7(), tokenId, value: 5 })) });
     const hide = async () => {
       await dm.keyboard.press("Escape");
       await ops.send({ t: "token.updateMany", tokenIds: pair, patch: { visibility: "dm" } });
@@ -1801,7 +1801,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
 
   test("13i. back on the party alone, an ogre added mid-fight stays out of Ana's order and frames until its turn comes, then joins her tracker in its place (docs/design/design-v1-combat-flow.md 11)", async () => {
     await ops.send({ t: "room.update", settings: { playersSeeOrder: "party" } });
-    const ogre = randomUUID();
+    const ogre = uuidv7();
     await ops.send({ t: "token.create", token: { id: ogre, sceneId: run.sceneId, size: "large", visibility: "all", kind: "monster", name: "Ogre", x: 20, y: 12, disposition: "hostile", actor: { inline: actor(59, 11) } } });
     await ops.send({ t: "encounter.add", entries: [{ id: "e-ogre", tokenId: ogre, value: -5 }] });
     await waitFor("the ogre's row for the DM", () => (dmSocket.state?.encounter?.entries.some((e) => e.id === "e-ogre") ? true : null));
@@ -1857,9 +1857,9 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const srd = await loadMonsters();
     const block = (srdId: string) => monsterActor(srd.find((m) => m.srdId === srdId)!);
     // A wolf whose one use is Cold Breath, a troll limb with Regeneration alone, and a goblin with a mark its block no longer lists.
-    const wolf = randomUUID();
-    const limb = randomUUID();
-    const old = randomUUID();
+    const wolf = uuidv7();
+    const limb = uuidv7();
+    const old = uuidv7();
     const token = (id: string, name: string, x: number, actorOf: ReturnType<typeof block>, size = "medium") => ({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name, size, x, y: 15, visibility: "all", disposition: "hostile", actor: { inline: actorOf } } });
     await ops.send(token(wolf, "Winter Wolf", 5, block("winter-wolf"), "large"));
     await ops.send(token(limb, "Troll Limb", 9, { ...block("troll-limb"), hp: { cur: 1, max: block("troll-limb").hp.max, temp: 0 } }, "small"));
@@ -1956,8 +1956,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
   });
 
   test("s1-c-a. the DM's row options lead with the creature's uses, its counts of 10 in words at their title lines' right end, Reaction used and Ready, then the row's own from Row hidden from players to Remove, and a companion's sub-row lists its uses first, in line at 1280 x 800, 390 x 844 at 100% and 130% and 320 x 568 at 130%, the row's own line with its LA and LR together where they fit (docs/design/design-v1-token-sections.md 4, S1-ROW-1)", async () => {
-    const boss = randomUUID();
-    const skitter = randomUUID();
+    const boss = uuidv7();
+    const skitter = uuidv7();
     await ops.send({ t: "token.create", token: { id: boss, sceneId: run.sceneId, kind: "monster", name: "Goblin Boss", size: "medium", x: 17, y: 15, visibility: "all", disposition: "hostile", actor: { inline: { ...actor(21), legendary: { actionsMax: 10, actionsUsed: 3, resistMax: 10, resistUsed: 1 } } } } });
     await ops.send({ t: "token.create", token: { id: skitter, sceneId: run.sceneId, kind: "monster", name: "Skitter", size: "small", x: 19, y: 15, visibility: "all", disposition: "ally", companion: { of: run.bree.characterId, turn: "shared" }, actor: { inline: actor(11) } } });
     await ops.send({ t: "actor.use", target: { tokenId: skitter }, use: { kind: "ability", key: "actions:web", name: "Web", limit: "recharge", min: 5, max: 1 } });
@@ -2064,11 +2064,11 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
      */
     const bosses = [
       // A name no earlier step used: the table never gives a deleted creature's number again, so a second Goblin Boss would read "Goblin Boss 2".
-      { id: randomUUID(), entryId: "fu31-boss-3", name: "Orc Captain", hidden: false },
-      { id: randomUUID(), entryId: "fu31-boss-4", name: "Goblin Warlord", hidden: true },
+      { id: uuidv7(), entryId: "fu31-boss-3", name: "Orc Captain", hidden: false },
+      { id: uuidv7(), entryId: "fu31-boss-4", name: "Goblin Warlord", hidden: true },
     ];
     // Hidden, Readied and its own Reaction used, under Bree's row.
-    const hound = { id: randomUUID(), name: "Hound" };
+    const hound = { id: uuidv7(), name: "Hound" };
     for (const [i, b] of bosses.entries()) {
       await ops.send({ t: "token.create", token: { id: b.id, sceneId: run.sceneId, kind: "monster", name: b.name, size: "medium", x: 17 + 2 * i, y: 15, visibility: "all", disposition: "hostile", actor: { inline: { ...actor(21), legendary: { actionsMax: 10, actionsUsed: 3, resistMax: 10, resistUsed: 1 } } } } });
     }
@@ -2077,10 +2077,10 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await ops.send({ t: "encounter.start", entries: [...bosses.map((b, i) => ({ id: b.entryId, tokenId: b.id, value: 18 - i })), { id: "fu31-bree", tokenId: run.bree.id, value: 12 }] });
     for (const b of bosses) {
       await ops.send({ t: "encounter.update", entryId: b.entryId, patch: { reactionUsed: true, inLair: true, ...(b.hidden ? { hidden: true } : null) } });
-      await ops.send({ t: "actor.effect.add", target: { tokenId: b.id }, effect: { id: randomUUID(), key: "readied", label: "if the door opens", duration: { mode: "turnStart", of: { entryId: b.entryId } } } });
+      await ops.send({ t: "actor.effect.add", target: { tokenId: b.id }, effect: { id: uuidv7(), key: "readied", label: "if the door opens", duration: { mode: "turnStart", of: { entryId: b.entryId } } } });
     }
     await ops.send({ t: "token.update", tokenId: hound.id, patch: { companionReaction: true } });
-    await ops.send({ t: "actor.effect.add", target: { tokenId: hound.id }, effect: { id: randomUUID(), key: "readied", label: "if the door opens", duration: { mode: "turnStart", of: { entryId: "fu31-bree" } } } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: hound.id }, effect: { id: uuidv7(), key: "readied", label: "if the door opens", duration: { mode: "turnStart", of: { entryId: "fu31-bree" } } } });
     const readied = (tokenId: string) => {
       const a = dmSocket.state?.tokens[tokenId]?.actor;
       return !!a && "inline" in a && a.inline.effects.some((e) => e.key === "readied");
@@ -2126,7 +2126,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
   });
 
   test("fu33-b. a legendary row in its lair, Lair its only tag beside LA 10/10 and LR 9/10, in line within 1 px at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%: at 390 x 844 LA with LR is alone under AC, HP and Lair by need, since Lair with them runs wider than the line, and Lair never stands alone where they fit beside it; and the check still flags a last part that could share its line (FU32-LAIR-ALONE)", async () => {
-    const boss = { id: randomUUID(), entryId: "fu33-boss" };
+    const boss = { id: uuidv7(), entryId: "fu33-boss" };
     const order = dmSocket.state?.meta.settings.playersSeeOrder ?? "all";
     // Players see the whole order, so the row is no secret and Lair is its only tag, as live play saw it.
     await ops.send({ t: "room.update", settings: { playersSeeOrder: "all" } });
@@ -2457,7 +2457,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await ops.send({ t: "encounter.end" }).catch(() => {});
     // 90 kobolds, so every creature here makes more than the 100 rows one op may carry.
     for (let i = 0; i < 90; i++) {
-      const id = randomUUID();
+      const id = uuidv7();
       qe.kobolds.push(id);
       await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name: "Kobold", size: "small", x: i % 30, y: 15 + Math.floor(i / 30), visibility: "all", disposition: "hostile", actor: { inline: actor(5, 12) } } });
     }
@@ -2647,7 +2647,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
 
   test("lp32-3. Type several values puts focus in the first value field, whole in the panel's view under the round header, from a click and from the search's press (LP32-A-SRCH-3)", async () => {
     await ops.send({ t: "encounter.end" }).catch(() => {});
-    const rows = Array.from({ length: 14 }, (_, i) => ({ id: randomUUID(), label: `Bandit ${i + 1}`, value: 20 - i }));
+    const rows = Array.from({ length: 14 }, (_, i) => ({ id: uuidv7(), label: `Bandit ${i + 1}`, value: 20 - i }));
     await ops.send({ t: "encounter.start", entries: rows });
     await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === rows.length ? true : null));
     try {

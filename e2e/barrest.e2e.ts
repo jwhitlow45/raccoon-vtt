@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { describe, test } from "node:test";
 import type { Locator, Page } from "playwright-core";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
@@ -180,9 +180,9 @@ restFile(null, () => {
       await ops.send({
         t: "encounter.start",
         entries: [
-          { id: randomUUID(), tokenId: run.goblin1.id, value: 15 },
-          { id: randomUUID(), tokenId: run.goblin2.id, value: 12 },
-          { id: randomUUID(), tokenId: run.thorn.id, value: 5 },
+          { id: uuidv7(), tokenId: run.goblin1.id, value: 15 },
+          { id: uuidv7(), tokenId: run.goblin2.id, value: 12 },
+          { id: uuidv7(), tokenId: run.thorn.id, value: 5 },
         ],
       });
       try {
@@ -447,7 +447,7 @@ restFile(null, () => {
       const rollAsked = pat.getByRole("button", { name: /^Roll asked/ });
       const asked: string[] = [];
       const ask = async (): Promise<string> => {
-        const id = randomUUID();
+        const id = uuidv7();
         asked.push(id);
         await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
         return id;
@@ -473,8 +473,8 @@ restFile(null, () => {
         await ops.send({
           t: "encounter.start",
           entries: [
-            { id: randomUUID(), tokenId: run.goblin1.id, value: 15 },
-            { id: randomUUID(), tokenId: run.thorn.id, value: 5 },
+            { id: uuidv7(), tokenId: run.goblin1.id, value: 15 },
+            { id: uuidv7(), tokenId: run.thorn.id, value: 5 },
           ],
         });
         // The first Next starts the fight, and its turn band shows.
@@ -625,8 +625,8 @@ restFile(null, () => {
       await ops.send({
         t: "encounter.start",
         entries: [
-          { id: randomUUID(), tokenId: run.thorn.id, value: 20 },
-          { id: randomUUID(), tokenId: run.goblin1.id, value: 5 },
+          { id: uuidv7(), tokenId: run.thorn.id, value: 20 },
+          { id: uuidv7(), tokenId: run.goblin1.id, value: 5 },
         ],
       });
       // The first Next starts the fight on Thorn's turn, so End turn stands in the band.
@@ -708,8 +708,8 @@ restFile(null, () => {
         await dm.keyboard.press("Control+z");
         const error = dmRow(/ since\./);
         await error.waitFor({ timeout: 4_000 });
-        const trapId = randomUUID();
-        const walker = randomUUID();
+        const trapId = uuidv7();
+        const walker = uuidv7();
         const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
         await ops.send({ t: "token.create", token: { id: walker, sceneId: run.sceneId, kind: "monster", name: "Scout", x: 1, y: 4, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: actor(7, 15) } } });
         await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Needle Plate", zone: { cells: [{ x: 1, y: 1, w: 1, h: 1 }] }, rig } });
@@ -852,8 +852,8 @@ restFile(null, () => {
       await ops.send({
         t: "encounter.start",
         entries: [
-          { id: randomUUID(), tokenId: run.goblin1.id, value: 15 },
-          { id: randomUUID(), tokenId: run.thorn.id, value: 5 },
+          { id: uuidv7(), tokenId: run.goblin1.id, value: 15 },
+          { id: uuidv7(), tokenId: run.thorn.id, value: 5 },
         ],
       });
       // The first Next starts the fight on the goblin's turn, where Pat's column shows no card.
@@ -959,7 +959,7 @@ restFile(null, () => {
     test("br-f-16. a refusal in the scrolling strip brings its header and quick row into view as it comes, and a scroll down after it holds (5.4, review BB-OPUS-1)", async () => {
       await homeTokens();
       const card = pat.getByRole("dialog", { name: "The DM asks for a roll" });
-      const id = randomUUID();
+      const id = uuidv7();
       const refusal = "You can only deal damage to or heal this creature.";
       await ops.send({ t: "room.update", settings: { playersApplyDamage: true } });
       try {
@@ -995,7 +995,7 @@ restFile(null, () => {
       const card = pat.getByRole("dialog", { name: "The DM asks for a roll" });
       const asked: string[] = [];
       const ask = async () => {
-        const id = randomUUID();
+        const id = uuidv7();
         asked.push(id);
         await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
         await card.waitFor();
@@ -1109,8 +1109,8 @@ restFile(null, () => {
         await ops.send({
           t: "encounter.start",
           entries: [
-            { id: randomUUID(), tokenId: run.thorn.id, value: 20 },
-            { id: randomUUID(), tokenId: run.goblin1.id, value: 5 },
+            { id: uuidv7(), tokenId: run.thorn.id, value: 20 },
+            { id: uuidv7(), tokenId: run.goblin1.id, value: 5 },
           ],
         });
         // The first Next starts the fight on Thorn's turn, so End turn stands in the band.
@@ -1192,7 +1192,7 @@ restFile(null, () => {
       const card = pat.getByRole("dialog", { name: "The DM asks for a roll" });
       const thorn = bar(pat, "Thorn");
       const state = (s: string) => waitFor(`the bar's state ${s}`, async () => ((await thorn.getAttribute("data-bar-state")) === s ? true : null), 5_000);
-      const id = randomUUID();
+      const id = uuidv7();
       try {
         await setUp(pat, { width: 375, height: 667, scale: 1 });
         await openOn(pat, run.thorn);
@@ -1736,7 +1736,7 @@ restFile(null, () => {
         { view: { width: 320, height: 360, scale: 1.3 }, page: dm, label: "320 x 360 at 130%, F = 148" },
         { view: PHONES[1], page: pat, label: "375 x 667 with a roll card, F = 237" },
       ];
-      const card = randomUUID();
+      const card = uuidv7();
       try {
         for (const w of windows) {
           await setUp(w.page, w.view);
@@ -1772,7 +1772,7 @@ restFile(null, () => {
 
       // The DM's alerts from the strip's foot: a concentration check stands, its summary in the header, reached by scrolling back up.
       const caster = run.goblinLeft.id;
-      await ops.send({ t: "actor.effect.add", target: { tokenId: caster }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } });
+      await ops.send({ t: "actor.effect.add", target: { tokenId: caster }, effect: { id: uuidv7(), key: "concentrating", spell: "Hex" } });
       await setUp(dm, { width: 320, height: 360, scale: 1.3 });
       await ops.send({ t: "actor.hp", target: { tokenId: caster }, change: { kind: "damage", amount: 1 } });
       await dm.locator('[data-alert="concentration"]').first().waitFor({ state: "attached" });
