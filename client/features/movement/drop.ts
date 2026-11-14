@@ -342,23 +342,24 @@ function sitsOn(state: DropView, id: string, leadId: string): boolean {
  * first of them, top then left, put her a square or hex off the finger on
  * open ground too (LP40-RIDER-1, D-261113-220). The tie goes to the first
  * unless another lands the pressed token `seated` nearer the square or hex
- * it is dropped on (`seatedLanding`).
+ * it is dropped on (`seatedLanding`), read only where stands tie, since a
+ * drag aims every frame. `mode` is the drop's own, a player's walk or a
+ * free drop, which decides whether what the mount drags is read there.
  */
-function seatedStand(state: DropView, token: DropToken, raw: Point, seat: Point, seated?: string): Point | null {
+function seatedStand(state: DropView, token: DropToken, raw: Point, seat: Point, seated: string | undefined, mode: Exclude<DropMode, "teleport">): Point | null {
   const g = dropGrid(state, token);
   const walker = walkerOf(state, token);
   const size = footprintSize(token);
   const middle = { x: raw.x + size.w / 2, y: raw.y + size.h / 2 };
   const nearest = <T extends { at: Point; mid: Point }>(spots: T[]): T[] =>
     spots.sort((a, b) => (a.mid.x - middle.x) ** 2 + (a.mid.y - middle.y) ** 2 - ((b.mid.x - middle.x) ** 2 + (b.mid.y - middle.y) ** 2) || a.at.y - b.at.y || a.at.x - b.at.x);
-  const landsSeated = seatedLanding(state, token, seat, seated);
   // The first that fits, the tie settled by where the pressed token lands.
   const fitting = <T extends { at: Point; mid: Point }>(spots: readonly T[], fits: (c: T) => boolean): T | undefined => {
     const first = spots.find(fits);
-    if (!first || !landsSeated) return first;
+    if (!first || seated === undefined) return first;
     const far = (c: T) => Math.hypot(c.mid.x - middle.x, c.mid.y - middle.y);
     const tied = spots.filter((c) => Math.abs(far(c) - far(first)) < TIE && fits(c));
-    return tied.length > 1 ? landsSeated(tied, first) : first;
+    return tied.length > 1 ? seatedLanding(state, token, seat, seated, mode, tied, first) : first;
   };
   if (isHex(g)) {
     const t = hexWallsOf(state, walker);
@@ -394,23 +395,25 @@ function seatedStand(state: DropView, token: DropToken, raw: Point, seat: Point,
  * How a tie between full stands of the mount `lead` goes for the token
  * `seated` pressed on it, dropped with its middle at `seat`
  * (`seatedStand`): to `first`, unless another of the `tied` stands lands
- * that token nearer the square or hex it is dropped on and every creature
- * the walk drags along stands clear there (`followersClear`), and then to
- * the nearest such, on it where one does, ties kept in their order. So the
- * goblin a rider drags out of a corridor's mouth is never left on the rock
- * beside it for her to land under the finger. Each token in the mount's
- * group lands carried by its move, on the seat the token it hangs from
- * takes there (route.ts seatShift). Null with no such token.
+ * that token nearer the square or hex it is dropped on, and then to the
+ * nearest such, on it where one does, ties kept in their order. On a
+ * player's walk (`mode`) every creature the walk drags along must stand
+ * clear there too (`followersClear`), so the goblin a rider drags out of a
+ * corridor's mouth is never left on the rock beside it for her to land
+ * under the finger, as that walk would be stopped. A free drop, the DM's,
+ * never checks what it drags, so there she lands under the finger (review
+ * LP40F-1). Each token in the mount's group lands carried by its move, on
+ * the seat the token it hangs from takes there (route.ts seatShift).
  */
-function seatedLanding(state: DropView, lead: DropToken, seat: Point, seated: string | undefined): (<T extends { at: Point }>(tied: readonly T[], first: T) => T) | null {
-  const pressed = seated !== undefined ? state.tokens[seated] : undefined;
-  if (!pressed) return null;
+function seatedLanding<T extends { at: Point }>(state: DropView, lead: DropToken, seat: Point, seated: string, mode: Exclude<DropMode, "teleport">, tied: readonly T[], first: T): T {
+  const pressed = state.tokens[seated];
+  if (!pressed) return first;
   const g = dropGrid(state, lead);
   const size = footprintSize(pressed);
   const dropped = snapPosition(g, seat.x - size.w / 2, seat.y - size.h / 2, size);
   const riders = ridersSeen(state, lead);
   const memberOf = (id: string): Follower | undefined => state.tokens[id];
-  const walkers = dragWalkers(state.tokens, lead.id, state.seen);
+  const walkers = mode === "walk" ? dragWalkers(state.tokens, lead.id, state.seen) : [];
   const placeAt = (at: Point) => (id: string): Point => {
     const t = state.tokens[id]!;
     const shift = seatShift(g, lead, memberOf, id, at, false, riders);
@@ -420,15 +423,13 @@ function seatedLanding(state: DropView, lead: DropToken, seat: Point, seated: st
     const lands = placeAt(at)(pressed.id);
     return (lands.x - dropped.x) ** 2 + (lands.y - dropped.y) ** 2;
   };
-  return (tied, first) => {
-    let best = first;
-    let closest = far(first.at);
-    for (const c of tied) {
-      const d = far(c.at);
-      if (d < closest - 1e-9 && followersClear(state, g, lead, c.at, walkers, placeAt(c.at))) [best, closest] = [c, d];
-    }
-    return best;
-  };
+  let best = first;
+  let closest = far(first.at);
+  for (const c of tied) {
+    const d = far(c.at);
+    if (d < closest - 1e-9 && followersClear(state, g, lead, c.at, walkers, placeAt(c.at))) [best, closest] = [c, d];
+  }
+  return best;
 }
 
 /**
@@ -448,6 +449,7 @@ function seatedLanding(state: DropView, lead: DropToken, seat: Point, seated: st
  * judge.
  */
 function followersClear(state: DropView, g: Grid, lead: DropToken, at: Point, walkers: readonly Token[], placeAt: (id: string) => Point): boolean {
+  if (walkers.length === 0) return true;
   const chunks = state.buildChunks;
   const from: FollowLead = { id: lead.id, elevation: lead.elevation, grounded: footing(chunks, walkFrom(chunks, walkerOf(state, lead))) === "ground" };
   const leadNow = dropLanding(state, lead, at);
@@ -523,7 +525,8 @@ function holdingStarts(p: number, length: number, step: number): number[] {
  * one (`seatedStand`).
  */
 export function planOne(state: DropView, token: DropToken, raw: Aim, mode: Exclude<DropMode, "teleport">): DropPlan {
-  const stand = raw.seat ? seatedStand(state, token, raw, raw.seat, raw.seated) : null;
+  // The drop's own mode, by who drops it: a route's target is placed free (`routeTarget`), but a player's walk still reads what the mount drags.
+  const stand = raw.seat ? seatedStand(state, token, raw, raw.seat, raw.seated, dropMode(state.role, state.scenes[token.sceneId])) : null;
   const squeezed = stand ? null : squeezedSpot(state, token, raw, mode);
   if (squeezed) return { moves: moved(token, squeezed) ? [landed(state, token, squeezed)] : [], stop: null, held: [] };
   const g = dropGrid(state, token);

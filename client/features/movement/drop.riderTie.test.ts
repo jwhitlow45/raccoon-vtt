@@ -10,7 +10,7 @@ import { hexCenter, hexKey, type Hex } from "#shared/rules/hex.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, wallsRound } from "#shared/rules/hexWalls.testkit.ts";
 import { hexStandPlace } from "#shared/rules/movement.ts";
 import { WorkBudget } from "#shared/rules/walk.ts";
-import { actor, apply, env, P1, room, scene, token } from "#shared/testutil.ts";
+import { actor, apply, DM, env, P1, room, scene, token } from "#shared/testutil.ts";
 import { RoomScope } from "../../state/scope.ts";
 import { measureWalk } from "../measure/walkRuler.ts";
 import { moveOpsOf, stopText, type DropPlan } from "./drop.ts";
@@ -46,15 +46,15 @@ class Hand implements Frames {
   }
 }
 
-/** Pat's drag of the warhorse pressed on Bree, its node let go at `box`, as the board plans it on Pat's copy. */
-function planOn(copy: RoomState, box: { x: number; y: number }): DropPlan {
+/** A drag of the warhorse pressed on Bree, its node let go at `box`, as the board plans it on Pat's copy, or the DM's. */
+function planOn(copy: RoomState, box: { x: number; y: number }, role: DragDeps["role"] = "player"): DropPlan {
   const frames = new Hand();
   const stops = dragStops({
     store: { getState: () => ({ view: copy, floorView: copy }) } as unknown as DragDeps["store"],
     actions: { dispatch: () => 1, newId: () => "id" } as unknown as DragDeps["actions"],
     ui: { notify: () => {}, showActions: () => {} } as unknown as DragDeps["ui"],
     scope: new RoomScope(),
-    role: "player",
+    role,
     work: new RouteWork(frames, () => new WorkBudget({ limit: 100_000 })),
   });
   const horse = copy.tokens.horse!;
@@ -74,14 +74,14 @@ function planOn(copy: RoomState, box: { x: number; y: number }): DropPlan {
 /** What a plan sends and says. */
 const sent = (plan: DropPlan) => ({ moves: plan.moves, note: plan.stop && stopText(plan.stop) });
 
-/** The room once the server takes each op of the plan, as it must. */
-function served(stored: RoomState, plan: DropPlan): RoomState {
+/** The room once the server takes each op of the plan from `who`, as it must. */
+function served(stored: RoomState, plan: DropPlan, who = P1): RoomState {
   let s = stored;
   assert.ok(plan.moves.length > 0, `it moves: ${JSON.stringify(sent(plan))}`);
   for (const op of moveOpsOf(plan.moves)) {
-    const allowed = canApply(op, P1, s, { canUseAsset: () => true });
+    const allowed = canApply(op, who, s, { canUseAsset: () => true });
     assert.ok(allowed.ok, allowed.ok ? "" : allowed.message);
-    const r = applyOp(s, op, P1, env(1));
+    const r = applyOp(s, op, who, env(1));
     assert.ok(r.ok);
     s = r.state;
   }
@@ -93,14 +93,15 @@ function served(stored: RoomState, plan: DropPlan): RoomState {
  * hers, planned anywhere in that square or hex as a finger lifts and alike
  * by each lift point, then taken by the server.
  */
-function dropBree(stored: RoomState, middle: { x: number; y: number }, lifts: readonly (readonly [number, number])[]): { plan: DropPlan; after: RoomState } {
-  const copy = projectState(stored, P1, { sceneId: "s1" }) as unknown as RoomState;
+function dropBree(stored: RoomState, middle: { x: number; y: number }, lifts: readonly (readonly [number, number])[], role: DragDeps["role"] = "player"): { plan: DropPlan; after: RoomState } {
+  const who = role === "dm" ? DM : P1;
+  const copy = projectState(stored, who, { sceneId: "s1" }) as unknown as RoomState;
   const horse = stored.tokens.horse!;
   const bree = stored.tokens.bree!;
   const boxAt = (dx: number, dy: number) => ({ x: middle.x + dx - 0.5 + horse.x - bree.x, y: middle.y + dy - 0.5 + horse.y - bree.y });
-  const plan = planOn(copy, boxAt(0, 0));
-  for (const [dx, dy] of lifts) assert.deepEqual(sent(planOn(copy, boxAt(dx, dy))), sent(plan), `lifted ${dx}, ${dy} from the middle`);
-  return { plan, after: served(stored, plan) };
+  const plan = planOn(copy, boxAt(0, 0), role);
+  for (const [dx, dy] of lifts) assert.deepEqual(sent(planOn(copy, boxAt(dx, dy), role)), sent(plan), `lifted ${dx}, ${dy} from the middle`);
+  return { plan, after: served(stored, plan, who) };
 }
 
 const SQUARE_LIFTS = [-0.4, -0.1, 0.1, 0.4].flatMap((dx) => [-0.4, -0.1, 0.1, 0.4].map((dy) => [dx, dy] as const));
@@ -135,6 +136,12 @@ describe("squares: a rider dragged out of a squeezed mount lands under the finge
     const { plan, after } = dropBree(s, { x: 14.5, y: 10.5 }, SQUARE_LIFTS);
     assert.deepEqual(plan.moves.map((m) => [m.tokenId, m.x, m.y, m.squeeze]), [["horse", 13, 10, undefined]]);
     assert.deepEqual([at(after, "bree"), at(after, "gob")], [[13, 10], [13, 9]], "the goblin into the mouth behind her");
+  });
+
+  test("the mouth: the DM's drag onto 14, 10, which never checks the creatures it drags, lands Bree under the finger, the goblin carried onto the rock (review LP40F-1)", () => {
+    const { plan, after } = dropBree(keep({ x: 13, y: 9 }, { x: 13, y: 8 }), { x: 14.5, y: 10.5 }, SQUARE_LIFTS, "dm");
+    assert.deepEqual(plan.moves.map((m) => [m.tokenId, m.x, m.y, m.squeeze]), [["horse", 14, 10, undefined]]);
+    assert.deepEqual([at(after, "bree"), at(after, "gob")], [[14, 10], [14, 9]]);
   });
 
   test("the mouth: onto 14, 11 and onto 13, 10 she lands on the square she is dropped on, where the top-left stand put her a square up and left, or left the goblin in the rock", () => {
