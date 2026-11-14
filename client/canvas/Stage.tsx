@@ -88,6 +88,7 @@ import { dockSlot, foldsUnderSheet, sideSheetRoom } from "../pages/fold.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { dragLineSlot, placeFreelySlot } from "../state/store.ts";
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
+import { settleFollowers } from "./dropSettle.ts";
 import { barChrome, barCover, barDockSlot, clearAnchor, DOCK_MIN_WIDTH, keepsOpening, largerEach, pastBars, restingBar, stripSqueezed, type BarSubject } from "./barDock.ts";
 import { footAnchor, headAnchor } from "./anchors.ts";
 import { holdViewStill } from "./sceneCamera.ts";
@@ -1618,8 +1619,18 @@ export function MapStage(props: {
       const swallowed = view ? droppedIntoFog({ role: facts.role, view, moves: dropped }) : [];
       // What the party sees after it is the server's to say, on a vision scene: that note waits for the moves' answers.
       const watch = watchDrop({ role: facts.role, store: facts.store, moves: dropped, notify: (text) => uiRef.current.notify(text) });
-      // The moves land in the view before the spots go, so an aura on a token never jumps back.
-      const sent = dragStopsRef.current.send(plan, watch?.answer);
+      // The moves land in the view before the spots go, so an aura on a token never jumps back. Once each answer lands, the followers
+      // drawn by their holder's offset go where this copy holds them, which the server's walk may have left where they stood.
+      const sent = dragStopsRef.current.send(plan, (op, answer) => {
+        watch?.answer(op, answer);
+        settleFollowers(
+          followers.map((f) => ({ id: f.token.id, node: f.node })),
+          (id) => {
+            const now = tokensByIdRef.current.get(id);
+            return now && now.sceneId === token.sceneId ? drawnSpot(sceneGrid(sceneRef.current), now) : null;
+          },
+        );
+      });
       // A drop let go on its own box places the token in it, or puts it back on the grid, without a move.
       if (free.place) actions.dispatch(free.place);
       // Spoken, not shown (D-261102-536): the token already shows where it sits, and a toast after every free drop is noise. The tool's polite status is always on the page.
