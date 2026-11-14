@@ -39,23 +39,38 @@ export type SessionPurpose = "room" | "display";
 
 export type CookieSettings = { name: string; secure: boolean };
 
+/** Whether a server runs over https: a hosted production one, never development or the desktop app. */
+type CookieMode = Pick<Config, "production"> & Partial<Pick<Config, "local">>;
+
 /**
  * Production uses the `__Host-` prefix, which browsers accept only with
  * Secure, Path=/ and no Domain, so no subdomain or plain-http page can plant
  * or overwrite the cookie. Development over http://localhost cannot set a
- * Secure cookie, so it uses a plain name instead.
+ * Secure cookie, so it uses a plain name instead, and so does the desktop
+ * app, whose players reach it over plain HTTP on their network
+ * (docs/design/design-v1-local-app.md 6).
  */
-export function cookieSettings(config: Pick<Config, "production">): CookieSettings {
-  return config.production ? { name: "__Host-rvtt", secure: true } : { name: "rvtt", secure: false };
+export function cookieSettings(config: CookieMode): CookieSettings {
+  return config.production && !config.local ? { name: "__Host-rvtt", secure: true } : { name: "rvtt", secure: false };
 }
 
 /** The display session's cookie: a second name with the room cookie's attributes, so one browser can hold both. */
-export function displayCookieSettings(config: Pick<Config, "production">): CookieSettings {
-  return config.production ? { name: "__Host-rvtt-display", secure: true } : { name: "rvtt-display", secure: false };
+export function displayCookieSettings(config: CookieMode): CookieSettings {
+  return config.production && !config.local ? { name: "__Host-rvtt-display", secure: true } : { name: "rvtt-display", secure: false };
 }
 
-/** Refuses to boot a production server with development cookie settings. */
-export function assertCookieSettings(config: Pick<Config, "production" | "publicOrigin">, cookie: CookieSettings): void {
+/**
+ * Refuses to boot a production server with development cookie settings, and
+ * the desktop app with Secure ones, which no browser would ever send back
+ * over its plain HTTP.
+ */
+export function assertCookieSettings(config: Pick<Config, "production" | "publicOrigin"> & Partial<Pick<Config, "local">>, cookie: CookieSettings): void {
+  if (config.local) {
+    if ((cookie.name !== "rvtt" && cookie.name !== "rvtt-display") || cookie.secure) {
+      throw new Error("Refusing to start in local mode with a Secure session cookie, which plain HTTP never sends back.");
+    }
+    return;
+  }
   if (!config.production) return;
   if ((cookie.name !== "__Host-rvtt" && cookie.name !== "__Host-rvtt-display") || !cookie.secure) {
     throw new Error("Refusing to start in production with the development session cookie.");
