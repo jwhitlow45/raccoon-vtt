@@ -40,10 +40,12 @@ async function programs(dir: string): Promise<{ bin: string; calls: () => Promis
     `#!/bin/sh\necho "pg_ctl $1" >> '${log}'\nif [ "$1" = start ]; then printf '%s\\n%s\\n%s\\n5999\\n' "$RVTT_FAKE_PID" "$3" "$(date +%s)" > "$3/postmaster.pid"; fi\nif [ "$1" = stop ]; then rm -f "$3/postmaster.pid"; fi\n`,
     { mode: 0o755 },
   );
-  // initdb makes PG_VERSION first, as the real one does, then its own postgresql.conf.
+  // initdb makes PG_VERSION first, as the real one does, then its own
+  // postgresql.conf. It makes no folder, as the real one can't through a
+  // junction on Windows (pgPaths.ts), so the cluster gives it one.
   await writeFile(
     join(bin, "initdb"),
-    `#!/bin/sh\nfor a in "$@"; do case "$a" in --pgdata=*) d="\${a#--pgdata=}";; esac; done\nmkdir -p "$d"\necho 17 > "$d/PG_VERSION"\necho "# initdb's defaults" > "$d/postgresql.conf"\necho "local all all trust" > "$d/pg_hba.conf"\necho "initdb $d" >> '${log}'\n`,
+    `#!/bin/sh\nfor a in "$@"; do case "$a" in --pgdata=*) d="\${a#--pgdata=}";; esac; done\n[ -d "$d" ] || { echo "initdb: error: could not create directory \\"$d\\"" >&2; exit 1; }\necho 17 > "$d/PG_VERSION"\necho "# initdb's defaults" > "$d/postgresql.conf"\necho "local all all trust" > "$d/pg_hba.conf"\necho "initdb $d" >> '${log}'\n`,
     { mode: 0o755 },
   );
   return { bin, calls: async () => (await readFile(log, "utf8")).split("\n").filter(Boolean) };

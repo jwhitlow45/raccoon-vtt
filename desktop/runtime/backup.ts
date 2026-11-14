@@ -225,7 +225,7 @@ async function backupSteps(env: BackupEnv, kind: BackupKind, forVersion?: string
 
     // 3. The dump, of the exported snapshot, while the transaction that exported it stays open.
     try {
-      await env.cluster.client("pg_dump", ["--dbname=raccoon", "--format=custom", "--exclude-table=backup_runs", `--snapshot=${snapshot}`, `--file=${dumpPart}`]);
+      await env.cluster.client("pg_dump", ["--dbname=raccoon", "--format=custom", "--exclude-table=backup_runs", `--snapshot=${snapshot}`, `--file=${env.cluster.pgPath(dumpPart)}`]);
     } catch (err) {
       await client.query("rollback").catch(() => undefined);
       return fail("failed", `pg_dump failed: ${firstLine(err)}`);
@@ -240,8 +240,8 @@ async function backupSteps(env: BackupEnv, kind: BackupKind, forVersion?: string
 
   // 4. The whole archive read back, every table's data and not only the catalog.
   try {
-    await env.cluster.readDump(["--list", `--file=${devNull}`, dumpPart]);
-    await env.cluster.readDump([`--file=${devNull}`, dumpPart]);
+    await env.cluster.readDump(["--list", `--file=${devNull}`, env.cluster.pgPath(dumpPart)]);
+    await env.cluster.readDump([`--file=${devNull}`, env.cluster.pgPath(dumpPart)]);
   } catch (err) {
     return fail("failed", `the dump did not read back whole: ${firstLine(err)}`);
   }

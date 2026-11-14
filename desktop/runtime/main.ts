@@ -30,6 +30,7 @@ import { RotatingLog, lastLogLine } from "./logs.ts";
 import { ProfileWatcher, firewallRule, networkReading, profileReach, spawnWatchChild } from "./netProfile.ts";
 import { readOwner, writeOwner } from "./ownerRecord.ts";
 import { firstFreePort, portFree } from "./ports.ts";
+import { pgPaths, type PgPaths } from "./pgPaths.ts";
 import { Cluster, DATABASE } from "./postgres.ts";
 import { selfIdentity, stillRunning } from "./processInfo.ts";
 import { checkRestorable, parseRecord, recover, runRestore, type CrashPoint, type RestoreContext, type RestoreHooks } from "./restore.ts";
@@ -106,14 +107,20 @@ if (args.network !== undefined) {
 // first starts can never write two different passwords.
 let secrets: Secrets | null = null;
 let cluster: Cluster | null = null;
+let pgFolders: PgPaths | null = null;
 async function theCluster(): Promise<Cluster> {
   secrets ??= await loadSecrets(paths.secrets, platform, existsSync(paths.postgres));
+  if (!pgFolders) {
+    pgFolders = await pgPaths({ data: dataDir, program: postgresDir }, paths.pgLink, platform);
+    for (const note of pgFolders.notes) log(`PostgreSQL is given ${note}`);
+  }
   cluster ??= new Cluster({
     binDir: join(postgresDir, "bin"),
     pgData: paths.postgres,
     logFile: join(paths.logs, LOG_FILES.postgres),
     password: secrets.databasePassword,
     platform,
+    pgPath: pgFolders.map,
   });
   return cluster;
 }

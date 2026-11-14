@@ -62,6 +62,7 @@ export type DataPaths = {
   settingsBad: string;
   journal: string;
   owner: string;
+  pgLink: string;
 };
 
 export function dataPaths(root: string): DataPaths {
@@ -76,5 +77,6 @@ export function dataPaths(root: string): DataPaths {
     settingsBad: path.join(root, DATA_LAYOUT.settingsBad),
     journal: path.join(root, DATA_LAYOUT.restoreJournal),
     owner: path.join(root, DATA_LAYOUT.ownerRecord),
+    pgLink: path.join(root, DATA_LAYOUT.pgLink),
   };
 }

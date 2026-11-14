@@ -71,6 +71,8 @@ export const DATA_LAYOUT = {
   restoreJournal: "restore.json",
   /** The owner record: pid, start time and lock path of the supervisor that holds the lock (design 8.1). */
   ownerRecord: "supervisor.json",
+  /** Windows only, and only for a path PostgreSQL can't open: the folder under ProgramData with junctions to it (D-261113-219). */
+  pgLink: "postgres-link.json",
 } as const;
 
 /** Each process writes its own log, rotated at 10 MB with 5 kept (design 8.1). */
