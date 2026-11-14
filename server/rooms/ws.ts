@@ -245,6 +245,16 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
             }
             chain(() => room.op(conn, msg.n, msg.op, msg.g, msg.groupScope));
             return;
+          // A device's question after a reconnect: which of its own new things' ids the room took
+          // (docs/design/design-v1-player-limits.md 3.4). The room answers it in its queue, after the ops before it, so it
+          // waits behind them here as they do.
+          case "ids":
+            if (conn.helloCount === 0) {
+              conn.close(CLOSE.authFailure, "ids before hello");
+              return;
+            }
+            chain(() => room.ids(conn, msg));
+            return;
           case "eph":
             room.ephemeral(conn, msg);
             return;
