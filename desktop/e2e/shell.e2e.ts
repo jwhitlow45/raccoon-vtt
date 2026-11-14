@@ -4,7 +4,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { constants, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { _electron, type ElectronApplication, type Page } from "playwright-core";
 import { WORDS, type RaccoonLocal, type WindowState } from "../contract.ts";
 
@@ -26,7 +26,7 @@ import { WORDS, type RaccoonLocal, type WindowState } from "../contract.ts";
  * staged. Without it the copy runs the real supervisor, database and server.
  */
 
-const DESKTOP = new URL("..", import.meta.url).pathname;
+const DESKTOP = fileURLToPath(new URL("..", import.meta.url));
 
 /** The shell's test handle in its main process (desktop/electron/main.ts). */
 type MenuItemLike = { id: string; type: string; label: string; checked: boolean; enabled: boolean; click: () => void };
