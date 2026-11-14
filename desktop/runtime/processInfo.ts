@@ -112,6 +112,14 @@ export function parseStatusUid(status: string): number | null {
   return Number.isInteger(uid) ? uid : null;
 }
 
+/**
+ * The program /proc/<pid>/exe links to. A program replaced while it runs, as
+ * an update does, reads as "<path> (deleted)", and is still that program.
+ */
+export function linkedProgram(link: string): string {
+  return link.replace(/ \(deleted\)$/, "");
+}
+
 /** What `Get-CimInstance Win32_Process` said about one process, as the script below prints it. */
 export function parseWindowsProcess(stdout: string): Pick<ProcessFacts, "exe" | "start"> {
   try {
@@ -134,8 +142,7 @@ async function maybe<T>(read: () => Promise<T>): Promise<T | null> {
 
 export async function processFacts(pid: number, platform: Platform = process.platform as Platform): Promise<ProcessFacts> {
   if (platform === "linux") {
-    // A program replaced while it runs, as an update does, reads as "<path> (deleted)".
-    const exe = await maybe(async () => (await readlink(`/proc/${pid}/exe`)).replace(/ \(deleted\)$/, ""));
+    const exe = await maybe(async () => linkedProgram(await readlink(`/proc/${pid}/exe`)));
     const cwd = await maybe(() => readlink(`/proc/${pid}/cwd`));
     const uid = await maybe(async () => parseStatusUid(await readFile(`/proc/${pid}/status`, "utf8")));
     return { exe, cwd, uid, start: await processStart(pid, platform) };
