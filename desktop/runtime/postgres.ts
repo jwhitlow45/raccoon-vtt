@@ -89,6 +89,8 @@ export type ClusterOptions = {
   afterInitdb?: () => Promise<void>;
   /** Tests only: the folder renames, where a test stands in for a file another program holds open. */
   renameDir?: (from: string, to: string) => Promise<void>;
+  /** Tests only: how long one pg_ctl start may run before it is ended. PG_CTL_START_LIMIT_MS by default. */
+  startLimitMs?: number;
   /** The path PostgreSQL's programs are given for one of these paths (pgPaths.ts). The path itself by default. */
   pgPath?: (path: string) => string;
 };
@@ -336,16 +338,18 @@ export class Cluster {
       const port = await (this.opts.pickPort ?? loopbackPort)();
       const offset = await sizeOf(this.opts.logFile);
       try {
-        await run(this.program("pg_ctl"), ["start", "-D", this.pgPath(this.opts.pgData), "-l", this.pgPath(this.opts.logFile), "-w", "-t", "120", "-o", `-p ${port}`], {
-          env: pgEnv(),
-          windowsHide: true,
-        });
+        await runToExit(
+          this.program("pg_ctl"),
+          ["start", "-D", this.pgPath(this.opts.pgData), "-l", this.pgPath(this.opts.logFile), "-w", "-t", String(PG_CTL_WAIT_S), "-o", `-p ${port}`],
+          { env: pgEnv(), limitMs: this.opts.startLimitMs ?? PG_CTL_START_LIMIT_MS },
+        );
         this.port = port;
         const pid = await this.pidFilePid();
         const stamp = pid === null ? null : await this.proc.stamp(pid);
         this.started = pid !== null && stamp !== null ? { pid, stamp } : null;
         return port;
       } catch (err) {
+        if (err instanceof Overran) throw new DatabaseFailed(err.message);
         const lines = await linesSince(this.opts.logFile, offset);
         const e = err as { stderr?: string; message?: string };
         const said = (e.stderr ?? "").trim().split(/\r?\n/).at(-1) || (e.message ?? "").split(/\r?\n/)[0] || "pg_ctl start failed";
@@ -414,6 +418,65 @@ export class Cluster {
   async readDump(args: string[]): Promise<void> {
     await run(this.program("pg_restore"), args, { env: pgEnv(), windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
   }
+}
+
+/** pg_ctl start's own wait for the postmaster to be ready (-t), in seconds. */
+export const PG_CTL_WAIT_S = 120;
+/** A pg_ctl start still running this long after its own wait has ended is ended. */
+export const PG_CTL_START_LIMIT_MS = (PG_CTL_WAIT_S + 30) * 1000;
+/** After a failed run's exit, how long its stderr's last words are waited for. */
+const STDERR_DRAIN_MS = 1_000;
+
+/** A run ended for taking longer than its limit. */
+class Overran extends Error {}
+
+/**
+ * Runs a program to its exit, not to the close of its pipes, failing as
+ * execFile does with `stderr` and `code`. On Windows, pg_ctl starts the
+ * postmaster through cmd.exe with handle inheritance on
+ * (CreateProcessAsUser's bInheritHandles), so the postmaster holds pg_ctl's
+ * stdout and stderr pipes for as long as it runs, and execFile, which
+ * answers only once every pipe has closed, would wait until PostgreSQL
+ * stops. So stdout gets no pipe at all, and stderr is read for a moment
+ * after a failed exit and then let go. A run still going after `limitMs` is
+ * ended and fails with words.
+ */
+export function runToExit(program: string, args: readonly string[], opts: { env: NodeJS.ProcessEnv; limitMs: number }): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(program, args, { env: opts.env, windowsHide: true, stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    let closed = false;
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr = (stderr + chunk).slice(-8192);
+    });
+    child.stderr.once("close", () => (closed = true));
+    let settled = false;
+    const settle = (err: Error | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(limit);
+      child.stderr.destroy();
+      if (err) reject(err);
+      else resolve();
+    };
+    const limit = setTimeout(() => {
+      child.kill("SIGKILL");
+      settle(new Overran(`${basename(program)} ${args[0] ?? ""} did not finish in ${Math.round(opts.limitMs / 1000)} s`));
+    }, opts.limitMs);
+    child.once("error", (err) => settle(err));
+    child.once("exit", (code, signal) => {
+      if (code === 0) return settle(null);
+      const fail = (): void => settle(Object.assign(new Error(`${basename(program)} ended with ${code ?? signal}`), { stderr, code }));
+      if (closed) return fail();
+      // A postmaster still holding the pipe would keep it open, so the wait for its close is short.
+      const drain = setTimeout(fail, STDERR_DRAIN_MS);
+      child.stderr.once("close", () => {
+        clearTimeout(drain);
+        fail();
+      });
+    });
+  });
 }
 
 async function sizeOf(file: string): Promise<number> {
