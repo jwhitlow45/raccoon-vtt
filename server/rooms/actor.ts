@@ -667,7 +667,9 @@ export class RoomActor {
     const aheadMs = loaded.pub - this.#numberClock();
     if (aheadMs > NUMBERS_AHEAD_WARN_MS) this.#log.warn({ roomId: this.roomId, aheadMs }, "room numbers are ahead of the server's clock: check the clock");
     // A room whose replay failed writes no snapshot at all, so a fixed build can still rebuild it from its rows.
-    this.#countSnapshotDue = !loaded.replayFailed && loaded.snapshotVersion < NUMBERING_SNAPSHOT_VERSION;
+    // From the numbering upgrade on, and so for the automatic Unconscious upgrade (persistence.ts automaticUpgrade): a
+    // room loaded across it is saved with its first commit, so its converted ids are stored once.
+    this.#countSnapshotDue = !loaded.replayFailed && loaded.snapshotVersion < PLAYER_LIMITS_SNAPSHOT_VERSION;
     this.#snapshotSeq = loaded.snapshotSeq;
     this.#opsSinceSnapshot = loaded.seq - loaded.snapshotSeq;
     this.#sizes = new SizeGuard(this.#opts.sizeLimits);

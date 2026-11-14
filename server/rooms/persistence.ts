@@ -1,9 +1,13 @@
 import type pg from "pg";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { dmNumbered, logsInIdOrder, whisperParties } from "#shared/logRings.ts";
-import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, MAP_DISCOVERY_OP_VERSION, NUMBERING_OP_VERSION, OP_VERSION, SNAPSHOT_VERSION, mapDiscoveryUpgrade, migrateOp, migrateSnapshot, needsMapDiscoveryUpgrade, needsNumberingUpgrade, opMigrations, type MigrationStep } from "#shared/migrate.ts";
+import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, MAP_DISCOVERY_OP_VERSION, NUMBERING_OP_VERSION, OP_VERSION, PLAYER_LIMITS_OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, SNAPSHOT_VERSION, mapDiscoveryUpgrade, migrateOp, migrateSnapshot, needsMapDiscoveryUpgrade, needsNumberingUpgrade, opMigrations, type MigrationStep } from "#shared/migrate.ts";
+import { keys } from "#shared/keys.ts";
+import { ownEntry } from "#shared/records.ts";
+import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
+import { bareAutomatic, convertedEffectId, normalEffects } from "#shared/rules/effects.ts";
 import { numberingUpgrade } from "#shared/reducer/numbering.ts";
-import type { LogEntry, RoomState, SoundFacts, VideoFacts, Viewer } from "#shared/model.ts";
+import type { Effect, LogEntry, RoomState, SoundFacts, VideoFacts, Viewer } from "#shared/model.ts";
 import { checkedVideoFacts, opSchema, type Op, type OpType } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
@@ -177,6 +181,8 @@ export async function loadRoom(
   let upgrade = needsMapDiscoveryUpgrade(row.schema_version);
   // The numbering upgrade settles an older room's numbers once, at the same kind of point (shared/reducer/numbering.ts).
   let numbering = needsNumberingUpgrade(row.schema_version);
+  // So does the automatic Unconscious upgrade (automaticUpgrade), after the stored ops that may name its old id.
+  let automatic = row.schema_version < PLAYER_LIMITS_SNAPSHOT_VERSION;
   const ops = await pool.query<OpRow>(
     "select seq, at, actor_member_id, actor_role, op, op_version, pub from room_ops where room_id = $1 and seq > $2 order by seq",
     [roomId, snapshotSeq],
@@ -202,6 +208,10 @@ export async function loadRoom(
           state = numberingUpgrade(state);
           numbering = false;
         }
+        if (automatic && r.op_version >= PLAYER_LIMITS_OP_VERSION) {
+          state = automaticUpgrade(state);
+          automatic = false;
+        }
         // The stored version goes in the envelope, so an older op keeps the rules it was applied under (shared/migrate.ts).
         const uncounted = !counted(stored.op.t, r.op_version);
         const result = applyOp(state, stored.op, { memberId: r.actor_member_id, role: r.actor_role }, { seq: number, at: r.at.toISOString(), opVersion: r.op_version, ...(uncounted ? { uncounted: true as const } : {}) });
@@ -222,6 +232,8 @@ export async function loadRoom(
   }
   if (upgrade) state = mapDiscoveryUpgrade(state);
   if (numbering) state = numberingUpgrade(state);
+  // Not after a replay failure, which serves the state as far as it got, read-only, and writes nothing.
+  if (automatic && !replayFailed) state = automaticUpgrade(state);
   let pub = row.pub === null || row.pub === undefined ? snapshotSeq : Number(row.pub);
   if (row.schema_version < COUNT_SNAPSHOT_VERSION) pub = Math.max(pub, snapshotSeq);
   for (const r of ops.rows) pub = Math.max(pub, rowNumber(r) ?? 0);
@@ -249,6 +261,125 @@ function replayedThrough(state: RoomState, lastNumber: number | null, snapshotSe
   if (first === undefined || number === null || Number(first.seq) !== snapshotSeq + 1) return newestLine(state);
   const type = (first.op as { t?: unknown } | null)?.t;
   return typeof type === "string" && !counted(type as OpType, first.op_version) ? number : number - 1;
+}
+
+/**
+ * The automatic Unconscious upgrade (shared/rules/effects.ts): every stored
+ * effect that holds the automatic id but is hidden or not bare goes on
+ * under its converted id, an ordinary condition from then on, with every
+ * reference to it by id rewritten alike: the actors on tokens and
+ * characters, the fight's history steps (their effect lists, the effects a
+ * Next ended and the counts and saves it changed, the effects a turn's
+ * start removed), roll requests whose pass ends one, and save-ending lines.
+ * A reference by id to the automatic id can only name one that is not bare,
+ * since a bare one has no duration or save. Runs once, at the version
+ * boundary of a room's load, after the stored ops from before it replay,
+ * since those may name the old id. It reads nothing but the state, so two
+ * loads before the room is saved again convert alike.
+ */
+export function automaticUpgrade(state: RoomState): RoomState {
+  const holderOf = (id: string): string => (ownEntry(state.characters, id) ? keys.character(id) : keys.token(id));
+  const converted = (holder: string, id: string): string => (id === ZERO_HP_UNCONSCIOUS_ID ? convertedEffectId(holder, id) : id);
+  const effect = (holder: string, e: Effect): Effect => (e.id === ZERO_HP_UNCONSCIOUS_ID && !bareAutomatic(e) ? { ...e, id: convertedEffectId(holder, e.id) } : e);
+  const list = (holder: string, effects: readonly Effect[]): Effect[] => normalEffects(holder, effects);
+  let out = state;
+  const tokens: RoomState["tokens"] = {};
+  let tokensChanged = false;
+  for (const [id, token] of Object.entries(state.tokens)) {
+    if (!("inline" in token.actor)) {
+      tokens[id] = token;
+      continue;
+    }
+    const effects = list(keys.token(id), token.actor.inline.effects);
+    if (sameIds(effects, token.actor.inline.effects)) tokens[id] = token;
+    else {
+      tokens[id] = { ...token, actor: { inline: { ...token.actor.inline, effects } } };
+      tokensChanged = true;
+    }
+  }
+  if (tokensChanged) out = { ...out, tokens };
+  const characters: RoomState["characters"] = {};
+  let charactersChanged = false;
+  for (const [id, character] of Object.entries(state.characters)) {
+    const effects = list(keys.character(id), character.actor.effects);
+    if (sameIds(effects, character.actor.effects)) characters[id] = character;
+    else {
+      characters[id] = { ...character, actor: { ...character.actor, effects } };
+      charactersChanged = true;
+    }
+  }
+  if (charactersChanged) out = { ...out, characters };
+  if (state.encounterHistory.length > 0) {
+    out = {
+      ...out,
+      encounterHistory: state.encounterHistory.map((step) => ({
+        ...step,
+        effects: Object.fromEntries(Object.entries(step.effects).map(([id, effects]) => [id, list(holderOf(id), effects)])),
+        ...(step.effectChanges
+          ? {
+              effectChanges: step.effectChanges.map((change) => {
+                const holder = holderOf(change.holderId);
+                return {
+                  ...change,
+                  ...(change.ended ? { ended: change.ended.map((x) => ({ ...x, effect: effect(holder, x.effect) })) } : {}),
+                  ...(change.counted ? { counted: change.counted.map((x) => ({ ...x, id: converted(holder, x.id) })) } : {}),
+                  ...(change.asked ? { asked: change.asked.map((x) => ({ ...x, id: converted(holder, x.id) })) } : {}),
+                };
+              }),
+            }
+          : {}),
+        // A turn's start may keep the effects it removed whole in `removed`, which the stored schema takes.
+        ...(step.turnUses
+          ? {
+              turnUses: step.turnUses.map((uses) => {
+                const removed = (uses as { removed?: Effect[] }).removed;
+                return removed ? ({ ...uses, removed: removed.map((e) => effect(holderOf(uses.holderId), e)) } as typeof uses) : uses;
+              }),
+            }
+          : {}),
+      })),
+    };
+  }
+  const rolls: RoomState["rolls"] = {};
+  let rollsChanged = false;
+  for (const [id, roll] of Object.entries(state.rolls)) {
+    const target = roll.targets[0];
+    const holder = target?.characterId !== undefined ? keys.character(target.characterId) : target?.tokenId !== undefined ? keys.token(target.tokenId) : null;
+    if (roll.ends && roll.ends.effect === ZERO_HP_UNCONSCIOUS_ID && holder !== null) {
+      rolls[id] = { ...roll, ends: { ...roll.ends, effect: convertedEffectId(holder, roll.ends.effect) } };
+      rollsChanged = true;
+    } else rolls[id] = roll;
+  }
+  if (rollsChanged) out = { ...out, rolls };
+  // Save-ending lines name the effect by id, and an HP line keeps whole the effects its change added and removed, which a
+  // DM's undo from the log puts back.
+  const lines = (log: readonly LogEntry[]): LogEntry[] | null => {
+    let changed = false;
+    const next = log.map((line) => {
+      const data = line.data;
+      if (data?.type !== "saveEnds" && data?.type !== "hp") return line;
+      const holder = data.characterId !== undefined ? keys.character(data.characterId) : data.tokenId !== undefined ? keys.token(data.tokenId) : null;
+      if (holder === null) return line;
+      if (data.type === "saveEnds") {
+        if (data.effectId !== ZERO_HP_UNCONSCIOUS_ID) return line;
+        changed = true;
+        return { ...line, data: { ...data, effectId: convertedEffectId(holder, data.effectId) } };
+      }
+      const revert = data.revert;
+      if (!revert || ![...(revert.added ?? []), ...(revert.removed ?? [])].some((e) => e.id === ZERO_HP_UNCONSCIOUS_ID && !bareAutomatic(e))) return line;
+      changed = true;
+      const effects = (list: Effect[]) => list.map((e) => effect(holder, e));
+      return { ...line, data: { ...data, revert: { ...revert, ...(revert.added ? { added: effects(revert.added) } : {}), ...(revert.removed ? { removed: effects(revert.removed) } : {}) } } };
+    });
+    return changed ? next : null;
+  };
+  const log = lines(state.log);
+  if (log) out = { ...out, log };
+  return out;
+}
+
+function sameIds(a: readonly Effect[], b: readonly Effect[]): boolean {
+  return a.length === b.length && a.every((e, i) => e === b[i]);
 }
 
 /** The newest number any line of the state carries. */
