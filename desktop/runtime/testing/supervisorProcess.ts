@@ -72,14 +72,15 @@ export function startSupervisor(opts: SupervisorRunOptions): SupervisorRun {
       results.delete(parsed.data.id);
     }
   });
+  let alive = true;
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
     child.once("exit", (code, signal) => {
+      // Before the wake, so a waiter sees the exit and fails at once rather than at its time limit.
+      alive = false;
       for (const wake of [...waiters]) wake();
       resolve({ code, signal });
     });
   });
-  let alive = true;
-  void exited.then(() => (alive = false));
   let nextId = 1;
 
   const run: SupervisorRun = {

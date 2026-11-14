@@ -13,8 +13,9 @@ import { startSupervisor } from "./testing/supervisorProcess.ts";
  * (docs/design/design-v1-local-app.md 2, 4 and 8.6): it starts healthy with
  * the environment the supervisor builds from nothing, answers on loopback
  * only with the switch off, lists the computer's rooms and makes a new DM
- * link through scripts/admin.ts, moves to 0.0.0.0 and back with the switch,
- * and stops over its channel with nothing left running.
+ * link through scripts/admin.ts, moves to 0.0.0.0 and back with the switch
+ * where the network allows it, and stops over its channel with nothing left
+ * running.
  */
 
 const PORT = 40402;
@@ -55,9 +56,12 @@ test("the real app server runs under the supervisor, and stops cleanly over its 
     assert.ok(link.ok);
     assert.match((link.value as { link: string }).link, new RegExp(`^http://localhost:${PORT}/r/\\w{4}-\\w{4}#dm=`));
 
-    // The switch moves the server to every address and back, restarting it each time.
+    // The switch moves the server to every address and back, restarting it each time. Windows opens
+    // it only on a network marked Private (design 6), and a hosted runner's network is Public.
     assert.ok((await sup.command({ type: "setNetworkPlay", on: true })).ok);
-    await sup.waitFor("the server on every address", (s) => s.state === "running" && s.host === "0.0.0.0");
+    const on = await sup.waitFor("the switch on, with the network's reach", (s) => s.state === "running" && s.settings.networkPlay && s.network !== "off" && s.network !== "unknown");
+    const opens = process.platform !== "win32" || on.network === "open";
+    await sup.waitFor(opens ? "the server on every address" : "the server kept on loopback", (s) => s.state === "running" && s.host === (opens ? "0.0.0.0" : "127.0.0.1"));
     assert.ok((await sup.command({ type: "setNetworkPlay", on: false })).ok);
     await sup.waitFor("the server on loopback again", (s) => s.state === "running" && s.host === "127.0.0.1");
     assert.equal(JSON.parse(await readFile(join(data, "settings.json"), "utf8")).networkPlay, false);
@@ -69,6 +73,7 @@ test("the real app server runs under the supervisor, and stops cleanly over its 
     assert.match(serverLog, /shutting down/, "the server ran its own graceful shutdown");
     await assert.rejects(fetch(`http://127.0.0.1:${PORT}/healthz`), "nothing listens after the stop");
   } finally {
-    if (sup.child.exitCode === null) sup.child.kill("SIGKILL");
+    // A clean stop, so a failure leaves no PostgreSQL holding the data folder the after hook deletes.
+    await sup.stop().catch(() => undefined);
   }
 });
