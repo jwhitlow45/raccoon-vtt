@@ -643,6 +643,32 @@ newest first.
 
 **Since v0.3.1**
 
+- **Player limits** ([design](design/design-v1-player-limits.md)): room
+  format 47, change format 61. The app adds the `room_ids` and
+  `server_facts` tables and an `ask` column on `roll_receipts` at start,
+  which older builds leave alone. `room_ids` keeps the ids of new things
+  for up to 12 hours, and the daily cleanup deletes older rows. As a room
+  first loads on this version, each Unconscious condition a DM had hidden
+  or edited becomes an ordinary condition, and the scenes whose remembered
+  maps have shared the room's free space since the map discovery update or
+  an import get fixed shares of 1.5 MiB together, at most 192 KiB a scene,
+  so in a room with many such scenes a remembered map may forget its oldest
+  ground once. The room's first saved change removes each
+  area or kept ruler a player left on a creature that player can't see. A
+  room's stored state can now reach about 15.5 MiB and a DM's snapshot
+  about 12.5 MiB, so the server holds up to 17 MiB for one slow device (was
+  7 MiB). A room over its size limit logs "room is over its far size limit:
+  creates and growing edits are refused until it is smaller" as it loads.
+  New ids are checked against the server's clock: a clock set back to
+  before this version first loaded a room refuses every new thing until it
+  passes that time again, and each room logs "the ids cutover is ahead of
+  the server's clock: check the clock" as it loads. Until it reloads, an old
+  page may have what it adds refused with "This page is out of date. Reload
+  it and try again." and can't hide or edit the Unconscious that 0 HP adds,
+  and an old DM page can't load a room that is over its size limit. Reload
+  every open page, table displays included. Once this version has saved a
+  change to a room, an older build refuses that room and its backups, so
+  going back needs the backups taken just before the update.
 - **Creature numbers** ([design](design/design-v1-creature-numbers.md)):
   room format 46, change format 60. A creature now takes its number when the
   party first sees it beside another creature of its name, creatures whose
