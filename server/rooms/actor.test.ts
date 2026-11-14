@@ -154,7 +154,8 @@ function deps(db: FakeDb, info: Partial<ActorDeps["info"]> = {}): ActorDeps {
     log: quiet,
     budget: new SnapshotBudget(),
     gateway: {} as RoomGateway,
-    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, numberClock: STANDING_CLOCK },
+    // The id gate is off: these tests send fixture ids (createIds.ts).
+    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, numberClock: STANDING_CLOCK, idGate: false },
   };
 }
 

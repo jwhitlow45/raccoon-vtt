@@ -89,7 +89,8 @@ function load(db: FakeDb): Promise<RoomActor | null> {
     log: quiet,
     budget: new SnapshotBudget(),
     gateway: {} as RoomGateway,
-    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, numberClock: STANDING_CLOCK },
+    // The id gate is off: the reserved ids these tests send are not version 7 (createIds.ts).
+    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, numberClock: STANDING_CLOCK, idGate: false },
   };
   return RoomActor.load(deps);
 }

@@ -470,7 +470,8 @@ describe("scoped history through the room actor", () => {
     const f = scopeFixture();
     f.state.tokens[f.goblin] = token(f.goblin, { sceneId: f.sceneId, kind: "npc", name: "Warhorse", size: "large", x: 4, y: 4 });
     f.state.tokens[f.pc] = { ...f.state.tokens[f.pc]!, x: 4, y: 6 };
-    const h = await scopeActor(t, f.state);
+    // The id gate is off: the rows' ids are fixture ids (createIds.ts).
+    const h = await scopeActor(t, f.state, { idGate: false });
     const dm = await h.connect(f.dm);
     await dm.apply({ t: "encounter.start", entries: [{ id: "rider", tokenId: f.pc, value: 20 }, { id: "mount", tokenId: f.goblin, value: 8 }] });
     await dm.apply({ t: "encounter.next" });

@@ -69,7 +69,8 @@ class Twin {
       log: { info() {}, warn() {}, error() {}, debug() {} },
       budget: this.budget,
       gateway: {} as RoomGateway,
-      options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, snapshotOps: 1_000_000, draw, now: () => this.clock.now, ...this.#options },
+      // The id gate is off: the rooms run on a test clock their fixture ids are not dated by (createIds.ts).
+      options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, snapshotOps: 1_000_000, draw, now: () => this.clock.now, idGate: false, ...this.#options },
     } satisfies ActorDeps);
     assert.ok(actor);
     this.actor = actor;

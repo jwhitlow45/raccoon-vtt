@@ -71,7 +71,8 @@ async function load(t: TestContext, state: RoomState, opts: { roomSound?: boolea
     log: { info() {}, warn(_o: unknown, message?: string) { warnings.push(String(message)); }, error() {}, debug() {} } as ActorDeps["log"],
     budget: new SnapshotBudget(),
     gateway: {} as RoomGateway,
-    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, roomSound: opts.roomSound ?? true, now: () => clock.now, numberClock: opts.pub === undefined ? STANDING_CLOCK : () => clock.now },
+    // The id gate is off: the room runs on a test clock its fixture ids are not dated by (createIds.ts).
+    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, roomSound: opts.roomSound ?? true, now: () => clock.now, numberClock: opts.pub === undefined ? STANDING_CLOCK : () => clock.now, idGate: false },
   });
   assert.ok(actor);
   t.after(() => actor.shutdown({ code: 1012, snapshot: false }));

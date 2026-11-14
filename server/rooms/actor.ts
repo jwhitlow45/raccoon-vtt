@@ -2,7 +2,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, checkLimits, LIMITS, ROLLING_TOO_FAST, SOUND_LIMITS, type LimitCheck } from "#shared/limits.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
-import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
+import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { HandoutPage, LogEntry, MapVideo, RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply, doorReachPassed, touchLanding, MOVE_PLAYERS_FIRST_BACK, type PermissionDeps } from "#shared/permissions.ts";
@@ -10,7 +10,7 @@ import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { landedElevation } from "#shared/rules/movement.ts";
 import { gridOfToken, hashValue, inSightOfNonOwners, projectEntity, visibleAssetIds } from "#shared/project.ts";
-import { ASK_LOST, clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
+import { ASK_LOST, clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, mintedIds, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
 import { addsReservedEntryId } from "#shared/reservedIds.ts";
 import { RESERVED_ID } from "#shared/reducer/tx.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -31,6 +31,7 @@ import { SnapshotBudget, TokenBucket, type Clock } from "./budgets.ts";
 import { CloseWrites } from "./closeWrites.ts";
 import { CLOSE, clientKey, sessionOfKey, type ClientKey, type Connection } from "./connection.ts";
 import { counted } from "./counted.ts";
+import { heldIds, idRow, IdGate, idsSince, loadIdRows, pruneIds, recordIds, seedRows, type IdRow } from "./createIds.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { cancelLost, cancelPreviews, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
 import { exploreOp, floorsExplored } from "./explore.ts";
@@ -59,7 +60,7 @@ import {
   type ReceiptRow,
   type RoomInfo,
 } from "./persistence.ts";
-import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCaps } from "./receipts.ts";
+import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCaps, type Take } from "./receipts.ts";
 import { layerCharge } from "./memorySize.ts";
 import { forgetAllOps, forgetSceneOp, mapStepOps, memoryGrowth, type DoorTouch } from "./remember.ts";
 import { meetOps } from "./meet.ts";
@@ -149,6 +150,11 @@ export type ActorOptions = {
    * loads with any sound that names a file stopped.
    */
   roomSound: boolean;
+  /**
+   * The id gate (createIds.ts) on a new thing's id. Off only in tests that
+   * send fixture ids, which are not version 7, and then no id is recorded.
+   */
+  idGate: boolean;
 };
 
 export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
@@ -175,6 +181,7 @@ export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   archiveGuard: ARCHIVE_ALWAYS,
   animatedMaps: false,
   roomSound: false,
+  idGate: true,
 };
 
 export type ActorDeps = {
@@ -290,6 +297,8 @@ type Command = (
   | { t: "step"; run: DeletionRun<unknown>; resolve: (value: unknown) => void; reject: (err: Error) => void }
   /** The server's music tick (docs/design/design-v1-music.md 6.4), computed when the queue reaches it, never before. */
   | { t: "soundTick" }
+  /** A device's ask after a reconnect whether the room recorded its own uncertain creates' ids (#processIds). */
+  | { t: "ids"; conn: Connection; k: number; ids: readonly string[] }
 ) & {
   /** The clocks when it was queued (#enqueue), which it is handled with, however long it waited. */
   moment?: Moment;
@@ -347,6 +356,10 @@ type Batch = {
   sys: Array<{ resolve: () => void; reject: (err: Error) => void }>;
   /** The receipts of the tagged ops this batch settles (docs/design/design-v1-dice.md 1.2), durable with it. */
   receipts: Receipt[];
+  /** The roll receipts its asks for saves took, durable with it. */
+  takes: Take[];
+  /** The ids its applied ops brought (createIds.ts), recorded with it. */
+  ids: IdRow[];
   timer: NodeJS.Timeout | null;
   /** How many members' ops the batch answered since it opened, taken or refused. */
   answered: number;
@@ -588,6 +601,8 @@ export class RoomActor {
   #rollBudgets = new Map<string, TokenBucket>();
   /** Every receipt younger than 24 hours, and the staged ones (docs/design/design-v1-dice.md 1.2). */
   #receipts: ReceiptBook;
+  /** The ids of new things the room still refuses again, and the staged ones (createIds.ts). */
+  #ids: IdGate;
   #recheckTimer: NodeJS.Timeout | null = null;
   #reconciling: Promise<void> | null = null;
   #visibleCache = new Map<string, { seq: number; ids: Set<string> }>();
@@ -621,7 +636,7 @@ export class RoomActor {
   /** The run whose refused step was logged last, so a step that keeps failing logs once a run. */
   #soundRefusedRun: string | null | undefined = undefined;
 
-  private constructor(deps: ActorDeps, loaded: Pick<LoadedRoom, "state" | "seq" | "pub" | "through" | "snapshotSeq" | "snapshotVersion" | "replayFailed" | "stateBytes">, receipts: readonly ReceiptRow[]) {
+  private constructor(deps: ActorDeps, loaded: Pick<LoadedRoom, "state" | "seq" | "pub" | "through" | "snapshotSeq" | "snapshotVersion" | "replayFailed" | "stateBytes">, receipts: readonly ReceiptRow[], ids: { since: number | null; rows: readonly IdRow[] } = { since: null, rows: [] }) {
     this.roomId = deps.info.roomId;
     this.pinned = deps.info.pinned;
     this.createdIp = deps.info.createdIp;
@@ -672,8 +687,11 @@ export class RoomActor {
         ...(r.message !== null ? { message: r.message } : {}),
         at: Date.parse(r.at),
         player: loaded.state.members[r.memberId]?.kind !== "dm",
+        ...(r.ask ? { ask: r.ask } : {}),
       })),
     );
+    this.#ids = new IdGate(this.#opts.now, ids.since);
+    this.#ids.load(ids.rows);
     this.#recheckTimer = setInterval(() => void this.#recheckGrants(), this.#opts.grantRecheckMs);
     this.#recheckTimer.unref();
   }
@@ -694,8 +712,9 @@ export class RoomActor {
     if (!loaded) return null;
     // The receipts younger than 24 hours, so a restart keeps the duplicate rule and the day's caps (docs/design/design-v1-dice.md 1.2).
     const receipts = await loadReceipts(deps.pool, roomId, new Date(opts.now() - DAY_MS));
+    const ids = await loadIds(deps.pool, roomId, loaded, opts.now());
     const info = await recheckQuotaOnLoad(deps, opts.quotaBytes);
-    const actor = new RoomActor({ ...deps, info }, loaded, receipts);
+    const actor = new RoomActor({ ...deps, info }, loaded, receipts, ids);
     await actor.reconcileKinds();
     if (actor.#opsSinceSnapshot >= actor.#opts.snapshotOps) actor.#scheduleSnapshot();
     // A room loaded long after its last commit starts silent, one loaded soon after catches up, and with the switch off
@@ -1056,6 +1075,11 @@ export class RoomActor {
     this.#resync(conn, "scene");
   }
 
+  /** A device's `ids` ask after a reconnect, answered in queue order (#processIds). */
+  ids(conn: Connection, msg: { k: number; ids: readonly string[] }): void {
+    this.#enqueue({ t: "ids", conn, k: msg.k, ids: msg.ids });
+  }
+
   // Server-side commands.
 
   /** Applies a roster op through the queue and resolves once it is durable. */
@@ -1164,7 +1188,8 @@ export class RoomActor {
         // Simulating a crash: the accumulating batch is lost like it would be.
         if (this.#batch.timer) clearTimeout(this.#batch.timer);
         for (const s of this.#batch.sys) s.reject(new ActorClosedError(this.roomId));
-        this.#receipts.abandoned(this.#batch.receipts);
+        this.#receipts.abandoned(this.#batch.receipts, this.#batch.takes);
+        this.#ids.abandoned(this.#batch.ids);
         this.#batch = null;
       }
       if (this.#inFlightDone) await this.#inFlightDone;
@@ -1369,7 +1394,43 @@ export class RoomActor {
         return this.#runStep(cmd);
       case "soundTick":
         return this.#processSoundTick();
+      case "ids":
+        return this.#processIds(cmd);
     }
+  }
+
+  /**
+   * Which of a device's own uncertain creates the room recorded
+   * (createIds.ts heldIds): `held`, so it landed whatever became of it
+   * since, or `notHeld`, so the device sends it again under a new id. Read
+   * in queue order, after every op the device sent before it, and only
+   * once none of that member's ops is staged or committing and the
+   * device's old socket is closed, since an op from a closed socket is
+   * dropped and one from an open socket may still come. Until then every
+   * id answers `pending` and the device asks again. Only the sender's own
+   * ids are read. An ask spends the socket's op rate, as an op does, and
+   * one over it answers `pending`.
+   */
+  #processIds(cmd: Extract<Command, { t: "ids" }>): void {
+    const conn = cmd.conn;
+    if (conn.closed || conn.closing || conn.display || conn.previewBy !== null) return;
+    const key = conn.key;
+    const ids = [...new Set(cmd.ids)];
+    const pending = () => conn.send({ t: "ids", k: cmd.k, held: [], notHeld: [], pending: ids });
+    const memberId = conn.memberId;
+    const busy = (batch: Batch | null) => batch !== null && batch.ops.some((r) => r.actor !== SERVER_ACTOR && r.actor.memberId === memberId);
+    const oldOpen = [...this.#connections].some((c) => c !== conn && !c.closed && c.key === key);
+    if (key === null || !conn.opRate.allow() || busy(this.#batch) || busy(this.#inFlight) || oldOpen) {
+      pending();
+      return;
+    }
+    heldIds(this.#pool, this.roomId, memberId, ids).then(
+      (held) => conn.send({ t: "ids", k: cmd.k, held: ids.filter((id) => held.has(id)), notHeld: ids.filter((id) => !held.has(id)), pending: [] }),
+      (err: unknown) => {
+        this.#log.warn({ err, roomId: this.roomId }, "ids ask failed, answered pending");
+        pending();
+      },
+    );
   }
 
   /**
@@ -1648,6 +1709,16 @@ export class RoomActor {
       this.#refuse(key, wm, n, "quota", isBlockSave(op) ? BLOCKS_AT_QUOTA : "the room is full: it is at its storage quota, so only deletions are accepted");
       return;
     }
+    // The ids the device made for new things meet the gate (createIds.ts) after a receipt answered a resend and before
+    // admission, so an op it refuses spends no receipt. An undo or redo brings back ids the room took already.
+    const minted = this.#opts.idGate ? mintedIds(clientOp) : [];
+    if (minted.length > 0) {
+      const verdict = this.#ids.check(minted, { memberId: viewer.memberId, role: viewer.role });
+      if (!verdict.ok) {
+        this.#refuse(key, wm, n, verdict.code, verdict.message);
+        return;
+      }
+    }
     /*
      * Admission (docs/design/design-v1-dice.md 1.2), before any permission check, so an op that permissions refuse later has
      * paid for its receipt: the day's caps must have room for one more, then the member's budget is charged. A refusal
@@ -1737,7 +1808,7 @@ export class RoomActor {
     }
     // The DM's builder ops ask before players' remembered map is forgotten, unless sent with the yes (5.3).
     const asks = viewer.role === "dm" && ASK_OPS.has(op.t) && (op as { forget?: true }).forget !== true;
-    const reduced = this.#reduce(op, viewer, asks, at);
+    const reduced = this.#reduce(op, viewer, asks, at, minted);
     if (!reduced.ok && reduced.code === "forget" && cmd.group !== undefined) this.#askRefused.set(key, cmd.group);
     if (!reduced.ok) {
       // A restore that failed says which step it was, so a refused undo is never a riddle.
@@ -2099,7 +2170,7 @@ export class RoomActor {
    * after it keeps all of the op, its row once and its keys, whose number
    * #settleStaged settles, and the next op's numbers stay above it.
    */
-  #reduce(op: Op, viewer: Viewer, asks = false, given?: string): Reduced {
+  #reduce(op: Op, viewer: Viewer, asks = false, given?: string, minted: readonly string[] = []): Reduced {
     const counts = counted(op.t, OP_VERSION);
     const moment = this.#now();
     const number = counts ? this.#nextNumber() : this.#pub;
@@ -2157,9 +2228,15 @@ export class RoomActor {
     const batch = this.#ensureBatch();
     const seq = this.#staged.seq + 1;
     const record: OpRecord = { seq, pub: number, at, actor: viewer, op, log: result.log };
-    // The install.
+    // The install. The op's ids and the roll its ask took join the batch with it, so no op is stored without them.
     batch.ops.push(record);
     this.#staged = { state: result.state, seq };
+    if (minted.length > 0) {
+      const rows = minted.map((id) => idRow(id, viewer.memberId, moment.now));
+      this.#ids.stage(rows);
+      batch.ids.push(...rows);
+    }
+    if (op.t === "cast.ask" && op.cast.damage) batch.takes.push(this.#receipts.take(viewer.memberId, op.cast.damage.tag, op.cast.id));
     if (counts) {
       this.#pub = this.#handed = number;
       batch.answered++;
@@ -2510,6 +2587,8 @@ export class RoomActor {
         closing: [],
         sys: [],
         receipts: [],
+        takes: [],
+        ids: [],
         timer: null,
         answered: 0,
         state: before,
@@ -2786,6 +2865,8 @@ export class RoomActor {
         message: r.message ?? null,
         at: new Date(r.at).toISOString(),
       })),
+      takes: batch.takes,
+      ids: batch.ids,
       // The stored number, never the frames' when only a read or a tick raised them past it: a restart counts on from
       // here, and the clock has passed any number handed out above it.
       pub: batch.stored,
@@ -2839,7 +2920,8 @@ export class RoomActor {
     this.#committed = { state: batch.state, seq: batch.seq, pub: batch.pub, through: this.replayFailed ? this.#committed.through : batch.stored };
     this.#committedStored = batch.stored;
     this.#committedHistory = batch.history ?? new Map();
-    this.#receipts.committed(batch.receipts);
+    this.#receipts.committed(batch.receipts, batch.takes);
+    this.#ids.committed(batch.ids);
     for (const [key, n] of batch.watermarks) {
       const wm = this.#watermarks.get(key);
       if (wm && wm.committed < n) wm.committed = n;
@@ -3019,7 +3101,8 @@ export class RoomActor {
     // The numbers it handed out stay handed out: only the stored one goes back.
     this.#pub = this.#committedStored;
     // The batch's receipts go with it and give back their slots (docs/design/design-v1-dice.md 1.2). Their clients resend the ops.
-    this.#receipts.abandoned(batch.receipts);
+    this.#receipts.abandoned(batch.receipts, batch.takes);
+    this.#ids.abandoned(batch.ids);
     for (const s of batch.sys) s.reject(new ActorClosedError(this.roomId));
     this.#inFlight = null;
     this.#inFlightDone = null;
@@ -3486,6 +3569,24 @@ const ARCHIVE_SKIPPED = "free disk is under the floor or could not be read, so l
  * snapshot that would measure it otherwise. Only the stored quota flag
  * changes here. A failed replay keeps the room read-only on its own.
  */
+/**
+ * The id gate's start (createIds.ts): the server's cutover, the room's gate
+ * rows, and at a room's first load on this build rows for the ids its state
+ * holds that the clock could still pass, written now. Rows past both their
+ * times go first. A room whose replay failed writes nothing.
+ */
+async function loadIds(pool: Pool, roomId: string, loaded: LoadedRoom, now: number): Promise<{ since: number | null; rows: IdRow[] }> {
+  const since = await idsSince(pool, now);
+  const seeds = !loaded.replayFailed && loaded.snapshotVersion < PLAYER_LIMITS_SNAPSHOT_VERSION ? seedRows(loaded.state, now) : [];
+  if (!loaded.replayFailed) {
+    await recordIds(pool, roomId, seeds);
+    await pruneIds(pool, now, roomId);
+  }
+  const rows = await loadIdRows(pool, roomId, now);
+  const stored = new Set(rows.map((r) => r.id));
+  return { since, rows: [...rows, ...seeds.filter((r) => !stored.has(r.id))] };
+}
+
 async function recheckQuotaOnLoad(deps: ActorDeps, quotaBytes: number): Promise<RoomInfo> {
   const { info } = deps;
   if (!info.readOnly || quotaBytes <= 0) return info;
