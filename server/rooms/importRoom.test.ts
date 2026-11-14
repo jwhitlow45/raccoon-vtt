@@ -7,7 +7,7 @@ import { describe, test } from "node:test";
 import yauzl from "yauzl";
 import yazl from "yazl";
 import { HttpError } from "../auth/http.ts";
-import { exploredReserve, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes } from "#shared/limits.ts";
+import { exploredReserve, FAR, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes } from "#shared/limits.ts";
 import { projectState } from "#shared/project.ts";
 import { sightEntryMaxBytes } from "#shared/rules/vision.ts";
 import { splitRefusal } from "#shared/rules/walls.ts";
@@ -18,7 +18,10 @@ import { MANIFEST_VERSION, type ExportManifest, type ManifestAsset } from "./exp
 import { assertLinesNotAhead, assertWithinLimits, entryToFile, IMPORT_LIMITS, InflatedCounter, inflatedLimit, manifestGeometry, silenced, soundsLeftOut } from "./importRoom.ts";
 import { MEMORY_CAP } from "./memorySize.ts";
 import { lastLineSeq } from "./remap.ts";
-import { numberingAdjust, projectionNumbering, SizeGuard } from "./sizeGuard.ts";
+import { numberingAdjust, projectionNumbering, SizeGuard, sceneFullWords } from "./sizeGuard.ts";
+
+/** The guard at the far lines, which a file an import takes by them meets on its first ops. */
+const FAR_GUARD = { stateLimit: FAR.roomBytes, sceneLimit: FAR.sceneBytes };
 
 async function zipWith(name: string, data: Buffer): Promise<{ zip: yauzl.ZipFile; entry: yauzl.Entry }> {
   const out = new yazl.ZipFile();
@@ -206,7 +209,7 @@ describe("wave 4 import limits (docs/design/design-v1-maps-vision.md 2.4)", () =
 
   test("each scene is checked as the ops on it will be, its sight and exploration reserved, so an import never holds a scene that refuses its first move", () => {
     const DM_VIEW = { memberId: "dm1", role: "dm" as const };
-    const sceneLimit = LIMITS.projectedSceneBytes;
+    const sceneLimit = FAR.sceneBytes;
     const sightReserve = 13 * 13 * sightEntryMaxBytes("s1");
     /** The player scene's DM projection, sight left out, padded by one token's notes to `bytes`. */
     const sceneOf = (bytes: number): RoomState => {
@@ -226,24 +229,24 @@ describe("wave 4 import limits (docs/design/design-v1-maps-vision.md 2.4)", () =
     };
     const explored = exploredReserve(sceneOf(100_000));
     const fits = sceneOf(sceneLimit - sightReserve - explored);
-    assert.ok(serializedBytes(fits) < LIMITS.stateBytes);
+    assert.ok(serializedBytes(fits) < FAR.roomBytes);
     assert.doesNotThrow(() => assertWithinLimits(fits));
     // A player's first move there passes, and so does any op that leaves the scene as it is: what players' copies may hold
     // beyond the DM's (docs/design/design-v1-map-discovery.md 5.5) refuses only a DM's edit that grows it, as at the deploy.
-    assert.deepEqual(new SizeGuard().check(fits, ["s1"], 0, fits, "player"), { ok: true }, "the scene the import keeps takes its first move");
-    assert.deepEqual(new SizeGuard().check(fits, ["s1"], 0, fits), { ok: true }, "and an op that does not grow it");
+    assert.deepEqual(new SizeGuard(FAR_GUARD).check(fits, ["s1"], 0, fits, "player"), { ok: true }, "the scene the import keeps takes its first move");
+    assert.deepEqual(new SizeGuard(FAR_GUARD).check(fits, ["s1"], 0, fits), { ok: true }, "and an op that does not grow it");
     // A byte more, and the stored room still fits, but the scene's exploration does not: the DM reads what to do.
     const exploring = sceneOf(sceneLimit - sightReserve - explored + 1);
     assert.throws(
       () => assertWithinLimits(exploring),
       (err: unknown) => err instanceof HttpError && err.status === 413 && err.extra?.reason === NO_ROOM_TO_EXPLORE,
     );
-    assert.equal(new SizeGuard().check(exploring, ["s1"], 0, undefined, "player").ok, false, "every op on it would be refused");
+    assert.equal(new SizeGuard(FAR_GUARD).check(exploring, ["s1"], 0, undefined, "player").ok, false, "every op on it would be refused");
     // Past its sight's reserve too, the scene is simply full.
     const full = sceneOf(sceneLimit - sightReserve + 1);
     assert.throws(
       () => assertWithinLimits(full),
-      (err: unknown) => err instanceof HttpError && err.status === 413 && err.extra?.reason === "this scene is at its 3 MiB size limit",
+      (err: unknown) => err instanceof HttpError && err.status === 413 && err.extra?.reason === sceneFullWords(FAR.sceneBytes),
     );
     // Without vision there is nothing to reserve, and the same scene fits.
     full.scenes.s1 = { ...full.scenes.s1!, vision: { on: false, light: "dark" } };
@@ -254,8 +257,8 @@ describe("wave 4 import limits (docs/design/design-v1-maps-vision.md 2.4)", () =
     const reserve = exploredReserve(roomOf(1_000_000));
     assert.ok(reserve > 100_000);
     // Players' memory of the scene is reserved at its cap beside it (docs/design/design-v1-map-discovery.md 5.5).
-    assert.doesNotThrow(() => assertWithinLimits(roomOf(LIMITS.stateBytes - reserve - MEMORY_CAP)));
-    const tight = roomOf(LIMITS.stateBytes - reserve + 1);
+    assert.doesNotThrow(() => assertWithinLimits(roomOf(FAR.roomBytes - reserve - MEMORY_CAP)));
+    const tight = roomOf(FAR.roomBytes - reserve + 1);
     assert.throws(
       () => assertWithinLimits(tight),
       (err: unknown) => err instanceof HttpError && err.status === 413 && err.extra?.reason === NO_ROOM_TO_EXPLORE,

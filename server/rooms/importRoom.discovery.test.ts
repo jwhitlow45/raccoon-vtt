@@ -9,7 +9,7 @@ import { HttpError } from "../auth/http.ts";
 import { assertWithinLimits, MEMORY_TOO_LARGE, withDiscoveryUpgrade } from "./importRoom.ts";
 import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
 import { MEMORY_FULL, measuredStateBytes, memoryReserves, memoryShare, SHARE_MARGIN, SizeGuard } from "./sizeGuard.ts";
-import { exploredReserve, LIMITS } from "#shared/limits.ts";
+import { exploredReserve, FAR } from "#shared/limits.ts";
 import { remapState, type ImportedAsset } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
@@ -117,12 +117,12 @@ describe("players' memory through a room export and import", () => {
     state.playedScenes = marks;
     state.memoryShared = {};
     // Per-player scenes the players have been on, each reserving the party's cap and one for each of the six players.
-    for (let i = 0; measuredStateBytes(state) + exploredReserve(state) + memoryReserves(state).whole <= LIMITS.stateBytes; i++) {
+    for (let i = 0; measuredStateBytes(state) + exploredReserve(state) + memoryReserves(state).whole <= FAR.roomBytes; i++) {
       const id = `pp${i}`;
       state.scenes[id] = scene(id, { order: 10 + i, fogEnabled: true, vision: { on: true, light: "dark", perPlayer: true } });
       marks[id] = { sceneId: id, rev: 0 };
     }
-    assert.ok(measuredStateBytes(state) + exploredReserve(state) <= LIMITS.stateBytes, "the state itself fits");
+    assert.ok(measuredStateBytes(state) + exploredReserve(state) <= FAR.roomBytes, "the state itself fits");
     assert.throws(
       () => assertWithinLimits(state),
       (err: unknown) => err instanceof HttpError && err.status === 413 && err.extra?.reason === MEMORY_FULL,
@@ -176,14 +176,14 @@ describe("players' memory through a room export and import", () => {
     });
     const reserves = memoryReserves(state);
     const fillTo = (free: number) => {
-      const fill = LIMITS.stateBytes - exploredReserve(state) - reserves.whole - free - measuredStateBytes(state) + pads.reduce((n, p) => n + (p.notes ?? "").length, 0);
+      const fill = FAR.roomBytes - exploredReserve(state) - reserves.whole - free - measuredStateBytes(state) + pads.reduce((n, p) => n + (p.notes ?? "").length, 0);
       for (const [i, pad] of pads.entries()) pad.notes = "x".repeat(Math.floor(fill / 4) + (i === 0 ? fill % 4 : 0));
     };
     fillTo(SHARE_MARGIN + 1_000);
-    assert.equal(memoryShare(LIMITS.stateBytes, measuredStateBytes(state), exploredReserve(state), memoryReserves(state)), 1_000);
+    assert.equal(memoryShare(FAR.roomBytes, measuredStateBytes(state), exploredReserve(state), memoryReserves(state)), 1_000);
     assert.ok(charge > 1_000 && charge < MEMORY_CAP);
     assert.doesNotThrow(() => assertWithinLimits(state), "what the layer holds fits the room's free space");
-    const load = new SizeGuard();
+    const load = new SizeGuard({ stateLimit: FAR.roomBytes, sceneLimit: FAR.sceneBytes });
     load.stateMeasured(measuredStateBytes(state), state);
     assert.deepEqual([load.share, load.shareLowered], [1_000, true], "the load's first batch measures every layer against the lowered share");
     // Free space just short of what the layer holds: refused.

@@ -7,7 +7,7 @@ import type pg from "pg";
 import yauzl from "yauzl";
 import { z } from "zod";
 import { uuidv7 } from "#shared/ids.ts";
-import { checkLimits, exploredReserve, LIMITS, NO_ROOM_TO_EXPLORE, VIDEO_LIMITS } from "#shared/limits.ts";
+import { checkLimits, exploredReserve, FAR, HARD, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes, VIDEO_LIMITS } from "#shared/limits.ts";
 import { parseVideoGeometry, type VideoGeometry } from "#shared/videoGeometry.ts";
 import { ringed } from "#shared/logRings.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
@@ -78,7 +78,8 @@ export const IMPORT_LIMITS = {
   entries: 10_000,
   /** Assets the manifest may list. */
   assets: 5_000,
-  roomJsonBytes: 2 * LIMITS.stateBytes,
+  /** The largest room file a room this build holds writes (shared/limits.ts HARD). */
+  roomJsonBytes: HARD.roomJsonBytes,
   manifestBytes: 2 * 1024 * 1024,
   /**
    * The newest op seq a file's log lines may name. The room's own ops count
@@ -403,33 +404,57 @@ function parseJson(buffer: Buffer, name: string): unknown {
 /** The refusal of a file whose players' memory of a scene is larger than the room keeps it (docs/design/design-v1-map-discovery.md 5.5). */
 export const MEMORY_TOO_LARGE = "Players' remembered map of a scene in this file is larger than a room keeps.";
 
-/** The room limits of design 10.5 over the whole imported state. */
+/**
+ * The room limits of design 10.5 over the whole imported state: a file
+ * passes when it passes today's checks unchanged, or the same checks with
+ * the far lines in place of the caps they raise (docs/design/design-v1-player-limits.md
+ * 5.3, 8). So every backup that imports today still does, and so does
+ * every room this build can hold, whose players' seats sit above the room
+ * caps. A room that then loads past the far line is told so at its load.
+ * A file past both is refused with the far line's words, the line it would
+ * have to meet.
+ */
 export function assertWithinLimits(state: RoomState): void {
-  const over = (reason: string) => new HttpError(413, "over_room_limits", { extra: { reason } });
-  const room = checkLimits(state);
-  if (!room.ok) throw over(room.message);
+  if (limitsProblem(state, NEAR) === null) return;
+  const far = limitsProblem(state, FAR_LINES);
+  if (far !== null) throw new HttpError(413, "over_room_limits", { extra: { reason: far } });
+}
+
+/** The caps a check reads: today's room caps, or the far lines with their counts. */
+type Lines = { stateBytes: number; sceneBytes: number; far: boolean };
+const NEAR: Lines = { stateBytes: LIMITS.stateBytes, sceneBytes: LIMITS.projectedSceneBytes, far: false };
+const FAR_LINES: Lines = { stateBytes: FAR.roomBytes, sceneBytes: FAR.sceneBytes, far: true };
+
+/** The first limit the state passes under `lines`, in words for the DM, or null. */
+function limitsProblem(state: RoomState, lines: Lines): string | null {
+  const counted = lines.far ? farCountsProblem(state) : null;
+  if (counted !== null) return counted;
+  // At the far lines, the caps they raise are counted above, so the room caps read a state without the things they count.
+  const capped = lines.far ? withoutFarCounted(state) : state;
+  const room = checkLimits(capped);
+  if (!room.ok) return room.message;
   // The reducer keeps a room's waiting springings to its cap, and the size guard reserves exactly that many (docs/design/design-v1-traps.md 6.7).
   let waiting = 0;
   for (const trap of Object.values(state.traps ?? {})) waiting += trap.rig?.due?.length ?? 0;
-  if (waiting > LIMITS.trapDuePerRoom) throw over(`at most ${LIMITS.trapDuePerRoom} trap springings can wait for the DM at once`);
+  if (waiting > LIMITS.trapDuePerRoom) return `at most ${LIMITS.trapDuePerRoom} trap springings can wait for the DM at once`;
   for (const sceneId of Object.keys(state.scenes)) {
-    const scene = checkLimits(state, sceneId);
-    if (!scene.ok) throw over(scene.message);
+    const scene = checkLimits(capped, sceneId);
+    if (!scene.ok) return scene.message;
     // No op's limits step ever saw an imported scene's walls, so the split's caps are checked here
     // (docs/design/design-v1-maps-vision.md 2.1), with every pit's border counted ahead as the limits step
     // counts it, so no pit the room holds can open past them (docs/design/design-v1-traps.md 6.7).
     const counted = withPitsCounted(state, sceneId);
     const split = splitCheck(counted, sceneId);
-    if (!split.ok) throw over(split.message);
+    if (!split.ok) return split.message;
     const sight = sightPiecesCheck(counted, sceneId);
-    if (!sight.ok) throw over(sight.message);
+    if (!sight.ok) return sight.message;
   }
   const bytes = measuredStateBytes(state);
-  if (bytes > LIMITS.stateBytes) throw over("the room state is over 8 MiB");
+  if (bytes > lines.stateBytes) return `the room state is over ${lines.stateBytes / (1024 * 1024)} MiB`;
   // The player scene's explored layer must be able to grow to its full size (docs/design/design-v1-maps-vision.md 2.4).
-  if (bytes + exploredReserve(state) > LIMITS.stateBytes) throw over(NO_ROOM_TO_EXPLORE);
+  if (bytes + exploredReserve(state) > lines.stateBytes) return NO_ROOM_TO_EXPLORE;
   // And players' memory to its caps where a scene takes its whole cap: shares shrink to fit (docs/design/design-v1-map-discovery.md 5.5).
-  if (bytes + exploredReserve(state) + memoryReserves(state).whole > LIMITS.stateBytes) throw over(MEMORY_FULL);
+  if (bytes + exploredReserve(state) + memoryReserves(state).whole > lines.stateBytes) return MEMORY_FULL;
   // No measure reads memory, which counts at its caps, so each layer the file holds must lie within a whole cap, and hold
   // nothing where memory is not reserved (MD3-D-4). The layers that share the room's space count at what they hold, which
   // must fit beside the rest: not each at the share this state gives, since the import's remap grows the state a little and
@@ -443,13 +468,80 @@ export function assertWithinLimits(state: RoomState): void {
     const [sceneId, layer] = JSON.parse(key) as [string, string | null];
     const scene = state.scenes[sceneId];
     const charge = scene ? layerCharge(state, scene, layer) : Infinity;
-    if (!scene || charge > memoryCapOf(state, scene, MEMORY_CAP, layer)) throw over(MEMORY_TOO_LARGE);
+    if (!scene || charge > memoryCapOf(state, scene, MEMORY_CAP, layer)) return MEMORY_TOO_LARGE;
     if (memoryReserved(state, scene) && sharesRoom(state, scene, layer !== null)) shared += charge;
   }
-  if (bytes + exploredReserve(state) + memoryReserves(state).whole + shared > LIMITS.stateBytes) throw over(MEMORY_TOO_LARGE);
+  if (bytes + exploredReserve(state) + memoryReserves(state).whole + shared > lines.stateBytes) return MEMORY_TOO_LARGE;
   // Each scene as the ops on it will measure it, its sight and exploration reserved, so no imported scene refuses its first move.
-  const scenes = checkWholeScenes(state);
-  if (!scenes.ok) throw over(scenes.message);
+  const scenes = checkWholeScenes(state, lines.sceneBytes);
+  return scenes.ok ? null : scenes.message;
+}
+
+/**
+ * The counts the far lines raise, each against its far line in its cap's
+ * scope: a scene with its floors for tokens and areas, a floor for
+ * drawings and their point values, the room for rows, asks and companion
+ * stat blocks.
+ */
+function farCountsProblem(state: RoomState): string | null {
+  const count = (value: number) => value.toLocaleString("en-US");
+  if ((state.encounter?.entries.length ?? 0) > FAR.rows) return `The room is full: at most ${count(FAR.rows)} initiative rows.`;
+  if (Object.keys(state.casts).length > FAR.asks) return `at most ${count(FAR.asks)} asks for saves can wait at once`;
+  const blocks = Object.values(state.companionBlocks);
+  if (blocks.length > FAR.blocks || blocks.reduce((sum, b) => sum + serializedBytes(b), 0) > FAR.blockBytes) return "The room holds too many companion stat blocks.";
+  const groupOf = (sceneId: string) => state.scenes[sceneId]?.floor?.of ?? sceneId;
+  const tokens = new Map<string, number>();
+  const areas = new Map<string, number>();
+  const drawings = new Map<string, { count: number; points: number }>();
+  for (const t of Object.values(state.tokens)) tokens.set(groupOf(t.sceneId), (tokens.get(groupOf(t.sceneId)) ?? 0) + 1);
+  for (const t of Object.values(state.templates)) areas.set(groupOf(t.sceneId), (areas.get(groupOf(t.sceneId)) ?? 0) + 1);
+  for (const d of Object.values(state.drawings)) {
+    const held = drawings.get(d.sceneId) ?? { count: 0, points: 0 };
+    held.count++;
+    held.points += d.points.length;
+    drawings.set(d.sceneId, held);
+  }
+  if ([...tokens.values()].some((n) => n > FAR.tokens)) return `A scene is full: at most ${count(FAR.tokens)} tokens.`;
+  if ([...areas.values()].some((n) => n > FAR.areas)) return `A scene is full: at most ${count(FAR.areas)} areas.`;
+  if ([...drawings.values()].some((d) => d.count > FAR.drawings || d.points > FAR.pointValues)) return `A scene is full: at most ${count(FAR.drawings)} drawings or ${count(FAR.pointValues)} drawing point values.`;
+  return null;
+}
+
+/**
+ * The state as the room caps read it once the far lines counted what they
+ * raise: no rows, asks, tokens, areas or ordinary drawings. What the caps
+ * still read stays, so they answer as for the whole state: the companion
+ * stat blocks of the character their own caps refuse first, and a drawing
+ * past its own point values. The split's and sight's caps read the whole
+ * state, beside these.
+ */
+function withoutFarCounted(state: RoomState): RoomState {
+  return {
+    ...state,
+    encounter: state.encounter ? { ...state.encounter, entries: [] } : null,
+    casts: {},
+    templates: {},
+    tokens: {},
+    drawings: Object.fromEntries(Object.entries(state.drawings).filter(([, d]) => d.points.length > LIMITS.drawingPointValues)),
+    companionBlocks: largestCharacterBlocks(state),
+  };
+}
+
+/** The blocks of the character that holds the most of them by count or bytes, or that holds one past its own size: what a character's caps refuse first. */
+function largestCharacterBlocks(state: RoomState): RoomState["companionBlocks"] {
+  const byCharacter = new Map<string, RoomState["companionBlocks"]>();
+  for (const [id, b] of Object.entries(state.companionBlocks)) {
+    const held = byCharacter.get(b.characterId) ?? {};
+    held[id] = b;
+    byCharacter.set(b.characterId, held);
+  }
+  let worst: RoomState["companionBlocks"] = {};
+  for (const held of byCharacter.values()) {
+    const list = Object.values(held);
+    if (list.length > LIMITS.companionBlocksPerCharacter || list.some((b) => serializedBytes(b) > LIMITS.companionBlockBytes) || list.reduce((sum, b) => sum + serializedBytes(b), 0) > LIMITS.companionBlockBytesPerCharacter) return held;
+    if (list.length > Object.keys(worst).length) worst = held;
+  }
+  return worst;
 }
 
 /** An imported asset, with a video's or a sound's facts from the row its check made, for the refill after the remap. */
