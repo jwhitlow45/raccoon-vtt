@@ -48,6 +48,7 @@ You don't need most of the app on day one. Read the [Quick start](#quick-start),
   - [Outliner](#outliner)
   - [DM panel](#dm-panel)
   - [Letting players in by request](#letting-players-in-by-request)
+  - [Room limits](#room-limits)
   - [Characters and their stat blocks](#characters-and-their-stat-blocks)
   - [Companions](#companions)
   - [Ping, Look here and pins](#ping-look-here-and-pins)
@@ -253,7 +254,7 @@ If you replace the map image of the scene the players are on, they see the new i
 
 **Copying and organizing scenes.** Each scene's **⋯** menu (More for the scene) holds **Duplicate…**, **Move to folder…**, **Update thumbnail** and **Delete**. A duplicate always copies the map, its phases and the build, and lets you choose what else comes along: **Monsters, NPCs and objects** (on to begin with), **Player characters**, **Fog**, and **Drawings and placed areas**. Folders fold away with a tap, and players never see your folders or thumbnails. To change the order of the list, press **Reorder** at the top and move scenes and folders up or down.
 
-Delete asks you to tap twice: the first tap turns the row red and reads "Tap again to delete", and tapping anywhere else cancels it. It takes the scene's tokens, drawings, build and fog with it, and a room's last scene cannot be deleted. You can't delete the scene your players are on, either, so move them somewhere else first. Until then, its Delete reads "Move the players to another scene first." An **Undo setup** or **Redo setup** that would take the scene away says the same.
+Delete asks you to tap twice: the first tap turns the row red and reads "Tap again to delete", and tapping anywhere else cancels it. It takes the scene's tokens, drawings, build and fog with it, and a room's last scene cannot be deleted. On the scene your players are on, Delete asks first instead: "The players are on this map. Delete it and leave them with no map?" Cancel is the button ready to press, so a stray Enter keeps the map. Say yes and the players wait with no map ("Waiting for the DM to pick a scene.") until you move them, and **Undo setup** brings the scene back with them on it. This is the way to clear a map that is taking up room the table needs, though usually you will simply move the players on first. An **Undo setup** or **Redo setup** that would take away the players' scene is refused and asks you to move them first.
 
 Feet per square and the rule for diagonals aren't scene settings: they apply to the whole room. You'll find them under **Menu**, **Room settings**, **Grid and distance**.
 
@@ -1431,6 +1432,8 @@ Players don't get **Save and damage**. On their own area they get **Ask for save
 
 An Emanation cast from a token with **Moves with token** on (the default) is attached to that token. It follows the token around, and its "In area" list updates as creatures move in and out. Spirit Guardians, a Paladin's aura and the like work this way. You can't drag an attached area, so move its token instead.
 
+An area a player puts on someone else's creature, and a ruler a player keeps on one, lasts only while that player can see the creature. It is removed when the creature goes into the fog or out of that player's sight, when you hide it, when it goes to a floor that player isn't on, and, for a ruler, when the creature is deleted, so it never waits unseen for the creature to come back. If the rogue's player marked the ogre with an area to keep track of it and the ogre steps round a corner out of her sight, the marker goes, and she places it again once she sees the ogre. An area on the player's own creature, such as their cleric's Spirit Guardians, always stays. Nothing goes while you have a blackout on, and on a map the party has left, it goes once they come back and still can't see the creature. When you hide a creature to move it in secret, expect the players' markers on it to vanish.
+
 ### Height
 
 Every area is a shape in three dimensions, and every creature has a height that comes from its size. That means a 20 ft Fireball centered on the ground misses a Medium creature flying 25 ft up. The squares under the flier are still shaded, so trust the "In area" list, not the shading. To reach a flier, put the Sphere on its token, raise the **Elevation** before placing, or aim a Cone or Line upward. An area put down on a platform starts at the platform's height.
@@ -1683,7 +1686,7 @@ During a fight, the app keeps track of where the creature whose turn it is has g
 
 ### The Ruler
 
-**The Ruler** (`R`): drag to measure, and tap to add waypoints along the way. It shows the total and each leg ("35 ft (15 ft + 20 ft)"). Double-tap, or press **Keep**, to leave a ruler on the map, and remove kept rulers from the **Kept rulers** list. Your ruler is private until you turn on **Shared**, and Shared turns itself off each time you pick the Ruler again, so measuring to a hidden monster never gives it away. Players' rulers show to everyone, in each player's color. A point on raised ground stands on that ground, so the distance counts the height.
+**The Ruler** (`R`): drag to measure, and tap to add waypoints along the way. It shows the total and each leg ("35 ft (15 ft + 20 ft)"). Double-tap, or press **Keep**, to leave a ruler on the map, and remove kept rulers from the **Kept rulers** list. Your ruler is private until you turn on **Shared**, and Shared turns itself off each time you pick the Ruler again, so measuring to a hidden monster never gives it away. Players' rulers show to everyone, in each player's color, and a ruler a player keeps on a creature goes when they lose sight of it, as their areas on creatures do (see [Auras](#auras)). A point on raised ground stands on that ground, so the distance counts the height.
 
 **The walking ruler.** A straight line is the right measure for a spell's range, but not for how far a creature has to walk to get somewhere. For that, pick **Walking** instead of **Straight** in the Ruler's options, and your device remembers the choice. On a narrow phone the two fold into one button that reads **Line** or **Walk**, and a tap on it offers both. A walking ruler measures how far the creature it starts on would walk to each point, or a Medium creature when you start on empty ground. It counts difficult terrain and, while **Walls and ledges block players' moves** is on, goes around walls, through open doors and up stairs, as dragging the creature there would. The total reads "Walking 40 ft", with what cost extra under it when anything did, such as "+10 ft for difficult terrain" or "+20 ft for squeezing".
 
@@ -1976,6 +1979,14 @@ You can also ignore a request entirely: it ends by itself after 10 minutes, and 
 Asking has limits so that a stranger who knows your room's ID can't flood you with requests. At most 8 requests wait at once from one address and 50 in a room, and one address can ask 30 times an hour in your room (asks you let in don't count). After 20 asks in an hour, every newcomer has to pass a human check, if the server owner turned it on, and your devices stop toasting each request and tell you so once.
 
 If asking ever stops working for your table, switch Joining to **With the password, or by asking** and share the player link. A room you bring in from a backup file starts With the password, as a new room does, because the file doesn't carry the Joining setting.
+
+## Room limits
+
+Each player has limits of their own on what they add, so that one player can't fill the room for everyone else. On each map a player can have 33 tokens of their characters and companions and 20 areas on creatures, and on each floor 40 other areas and 400 drawings and kept rulers. In a fight they can have 40 rows of their own. The limits count only a player's own things that they can see, never creatures you lend them, and your own limits leave out whatever theirs hold, so their things never use up your room.
+
+**When a player reaches a limit.** They see which one and what to do, such as "Not saved. You can have 400 drawings of your own here. Remove one first.", and the fix is in their hands: they remove something of their own, or press **Clear mine** in the Draw tool's options to clear their drawings on that floor. You don't need to step in. A player who is over a limit because you gave them more companions keeps everything they have, and only their next add of that kind is refused.
+
+**When the room fills up.** A room holds up to 11 MiB, and each scene 6 MiB, of everyone's things together. As a room nears that, new things and edits that add stop first, with "Not saved. The room is full: it is at its 11 MiB size limit." or the scene's 6 MiB, while moves, turns, HP, conditions, rolls and chat carry on, so a fight in progress isn't cut short. When you or a player see that, make room: delete the scenes you have finished with, those on **Per player** sight above all, and the stat blocks, journal pages and drawings nobody needs. Deleting always works, even in a full room, and you can delete the map the players are on after a question (see [Scenes](#scenes)). If a room is ever over the line, as a large backup can bring it in, your devices say so when they open it: "This room is over its size limit by 2 MiB. New things and edits that add to it are refused until that much is freed."
 
 ## Characters and their stat blocks
 

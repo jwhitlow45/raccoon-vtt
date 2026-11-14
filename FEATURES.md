@@ -62,11 +62,31 @@ The app's Docs page (/docs) lists every written doc. To learn the tools as a DM,
 - "Enter a DM link or invite" on Home works in the installed iPhone app, which cannot open links itself.
 - If every DM device and the DM link are lost, the server owner can make a new DM link from the command line.
 
+### Room limits ([design](docs/design/design-v1-player-limits.md))
+
+- Each player has limits of their own on what they add, counted over only their own things that they can see. Reaching one, a player reads after "Not saved." which limit it is and what to remove:
+  - On a map, its floors together: 33 tokens of their characters and those characters' companions ("You can have 33 tokens of your own on this map. Remove a companion first."). A creature the DM lends them doesn't count.
+  - On a map, its floors together: 20 areas on creatures ("You can have 20 areas of your own on creatures here. Remove one first.").
+  - On each floor: 40 other areas ("You can have 40 areas of your own here. Remove one first.").
+  - On each floor: 400 drawings and kept rulers ("You can have 400 drawings of your own here. Remove one first."), with 40,000 point values between them ("Your drawings here can hold 40,000 point values. Remove one first.").
+  - In a fight: 40 rows of their own creatures and characters ("You can have 40 rows of your own in this fight. Remove one first.").
+- Only adding meets a player's limit: a new thing, an Undo that brings one back, and putting an area on a creature or taking it off. Moving, climbing and editing never do, so a player the DM gave more companions than their limit is refused only their next add.
+- A player can't add their own creature to the fight while the DM has it hidden: "The DM adds a hidden creature to the fight." The DM adds it, and "Reveal hidden combatants on their turn" decides when players see it.
+- A player adds at most 2,000 new things in 30 minutes, rows, conditions and asks included, and a DM 20,000: "Not saved. You are adding things very fast. Wait a few minutes."
+- The DM's own limits, such as a scene's 500 tokens and 200 areas, the room's 8 MiB and a scene's 3 MiB, count only what isn't within a player's limits, so players' things never use up the DM's room. They refuse only a change that adds to what they count, so hiding something, handing a character on and deleting always go through.
+- **Size limit**: a room holds up to 11 MiB, and each scene 6 MiB, of everyone's things together.
+  - New things and edits that add stop 512 KiB short of the room's limit and 256 KiB short of a scene's, while moves, turns, HP, conditions, rolls and chat go on to the limit itself, so play goes on once nothing new fits. Past it, every change that adds is refused, and deleting always works.
+  - A refusal reads "Not saved. The room is full: it is at its 11 MiB size limit." or "Not saved. This scene is at its 6 MiB size limit."
+  - Counts have a line of the same kind for everyone, such as 2,150 tokens a scene and 4,000 Initiative rows: "Not saved. This scene can hold at most 2,150 tokens."
+  - While the room is over it, a DM device shows "This room is over its size limit by 2 MiB. New things and edits that add to it are refused until that much is freed." as a toast when it loads the room, and again on a later load once the number has changed. A table display never shows it.
+
 ## Phones, tablets and connection
 
 - Every change shows on every device at once, and your own edits show before the server confirms them.
 - The connection mends itself. A dead connection is noticed within about 35 seconds. The app reconnects when the phone wakes or the network comes back, and catches up without a reload. Music and background sounds that a server restart cut off load again on their own once the room reconnects. Edits made offline are sent once it is back. A burst of large edits, such as two Builder rooms on a large map, goes out at the pace the server takes it, so every edit lands within a few seconds.
 - A small dot shows the connection. A banner appears only after a few seconds offline.
+- A page left open across an update of the server may refuse what it adds with "Not saved. This page is out of date. Reload it and try again.", and a reload sets it right.
+- Work made offline, or in an editor left open a long time, is saved once when it goes out. If the server still can't take it, the page says "Not saved. That could not be added. Try again."
 - A change the server fails to handle is refused with "That change could not be made: something went wrong on the server.", and the connection stays up, so the next change goes through. A device whose changes fail like this three times within a minute shows the third refusal too, then is disconnected and reconnects by itself.
 - On a short screen, a notice that lasts (Reconnecting, the Starting view bar, a part that did not load, "Viewing as") keeps to one line, its buttons in the same row and More to read the rest, so it never stands over the toolbar. Where even that leaves no room for a row of the tool's options, the options stand over it.
 - Other people's token drags move live, with their name over the token in their color.
@@ -349,7 +369,8 @@ All of this is the DM's.
 - Duplicate a scene from its menu, choosing what comes along: monsters, NPCs and objects, player characters, fog, and drawings and placed areas.
 - Folders: "Move to folder…" files a scene under a header that folds with a tap. Each scene shows a thumbnail of its map, redrawn when the DM leaves a scene they changed, or with "Update thumbnail".
   - The menu's last row, "Delete", removes the scene with its tokens, drawings, build and fog. It asks for a second tap on the same row first, and a tap anywhere else cancels it.
-  - The last scene in a room cannot be deleted, and neither can the scene the players are on until they are moved to another: its Delete, in the menu and at the end of the scene's settings, says "Move the players to another scene first." An Undo setup or Redo setup that would take it away says the same.
+  - The last scene in a room cannot be deleted. On the scene the players are on, Delete asks a question in place of the second tap, in a dialog titled "Delete Crypt" ("Delete Tower and its 3 floors" for a scene with floors): "The players are on this map. Delete it and leave them with no map?" Focus starts on Cancel, so Enter keeps the map.
+  - A yes leaves the players with no map, reading "Waiting for the DM to pick a scene.", until the DM moves them, and Undo setup brings the scene back with them on it. An Undo setup or Redo setup that would take the players' scene away is refused and says to move the players to another scene first.
   - Players never see folders or thumbnails.
 - Map phases: up to 7 other images of the same map (8 in all), such as day and night or on fire, that keep tokens and fog in place. A chip, or the Phase menu on a wide screen, switches with one tap. A phase can bring its own light level, so Night can make the scene dark. Players get only the phase showing, never the others or their names.
 - **Animated maps** ([design](docs/design/design-v1-animated-maps.md)), while the server's owner has turned them on: a WebM (VP8, VP9 or AV1), MP4 (H.264 or AV1) or MOV (H.264) of up to 64 MB, 1 second to 10 minutes, 60 frames a second and 3840 × 2160 (8.3 megapixels, no side over 4096), wherever a map image comes in: New scene's Map image, a scene's Map and grid, and Add a phase.
@@ -443,11 +464,11 @@ All of this is the DM's.
   - Edits stay on the DM's device, and Make the scene makes the dungeon as edited.
   - A screen reader hears the picked room in the preview's name ("Room 3 selected.") and each report once.
   - Layout: On a computer the panel takes the choices' column, and on a phone it stands under the preview.
-- **Make the scene** sends the dungeon as ordinary builder changes in one Setup step, so Undo setup in Setup history usually takes the whole dungeon back, and the scene's Delete always does once the players are on another scene.
+- **Make the scene** sends the dungeon as ordinary builder changes in one Setup step, so Undo setup in Setup history usually takes the whole dungeon back, and the scene's Delete always does.
   - A dungeon sends up to 100 changes. Past 60 at once the rest go out paced, and the foot counts every answer.
   - Each lit room's light stands with its stamp as a DM-only light with its SRD preset, shown in the Lights pane.
   - Undo setup takes the key page and the pins back with the dungeon, and Delete removes the scene and its pins but leaves the key page in the Journal, to be deleted there.
-  - Undo setup is refused for the players' scene just as Delete is, so move the players to another scene first for either.
+  - Undo setup is refused for the players' scene, so move the players to another scene first. The scene's Delete asks first there instead (see Scenes and maps).
   - Make the scene opens the scene with the Map builder picked, framed on the entrance room, on this device only, so every other device opens it as any Builder scene, and no starting view is stored.
   - The foot counts the answers ("Making the dungeon… 18 of 30") while Cancel becomes Hide, and says "Waiting for the server…" offline. The choices, Reroll and the seed wait while it sends, and after a refusal partway, so nothing changes the dungeon on its way (Copy seed still works).
   - Once the dialog closes on a dungeon sent, New scene's form starts over, so its Create makes no second scene.
@@ -717,6 +738,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
   - Moved to a server that ships the same work, it stays a starter pick there.
   - Picks have an hourly limit of their own, apart from uploads. The DM picking a work the room already holds costs nothing, and a player's pick always counts.
 - Crop to a circle with zoom and pan. The ring takes the disposition color.
+- A player's upload is refused for space only once the room is at its storage limit, and each player has 30 uploads and link imports an hour of their own.
 - The server checks, resizes and re-encodes every image and strips its metadata. A video is never re-encoded: the server reads only its headers, keeps what playback needs and zeroes the rest in place, location and names included.
 - The room's library keeps every image for reuse.
   - The DM's library marks images nothing uses as "Not in use" and deletes them one at a time or all at once ("Delete N not in use", under Cleanup at the foot), on a second tap. An image in use cannot be deleted. Undo cannot bring back a token or anything else whose image was deleted since.
@@ -759,6 +781,8 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 - A concentrating creature that takes damage gets a prompt with the DC (the higher of 10 and half the damage, at most 30). Its player reports pass or fail, or taps Roll. For a creature with no stat block, Roll d20 opens a bonus field on the card, beside Adv and Dis, and rolls with the bonus typed there.
 - A condition can end on a save at the end of each of its turns. The DM's reminder rolls it, for a creature with no stat block by Roll d20 and a bonus typed on the card, or asks a player, whose passing answer ends it. A failed one stays open for a corrected total or an allowed reroll. Players see which save ends it, never its DC.
 - The DM can hide a condition from players, the creature's owner included. The log hides it too.
+- A creature holds up to 32 conditions players can see and 32 hidden ones, counted apart. One more is refused with "Not saved. At most 32 effects per creature.", or for a hidden one "Not saved. At most 32 hidden effects per creature." Damage is never refused.
+- The Unconscious a creature gets as it falls to 0 HP and starts dying counts in neither, and healing takes it off. Hiding or editing it makes it an ordinary condition, which healing leaves, and at 0 HP the creature then gets the plain one again only while no Unconscious players can see is on it.
 
 ## Height and elevation
 
@@ -783,6 +807,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
   - It shows the total and each segment's length.
   - Players' rulers show to everyone in their color. The DM's stays private until shared.
   - A double tap keeps a ruler on the map, and the Kept rulers chip lists the kept ones, each removed by its row with the eraser. On a narrow phone, the DM's Clear shows as its eraser alone, so "Kept rulers" stays in the row.
+  - A player's kept ruler on a creature they can no longer see is removed, as their areas on creatures are (see Areas of effect).
   - A point on raised or lowered ground stands on it, so the distance counts the height. A player's ruler counts only ground they can see, and everyone reads the same numbers.
   - Its readings keep one size at every zoom, grow with the interface size, and stay clear of the top bar and the toolbar at the screen's edge.
 - The ruler's Measure chip chooses Straight or Walking, shown as Line or Walk where the row is short of room, and the device remembers it.
@@ -973,6 +998,8 @@ A scene can have weather over its map: rain, snow, fog, falling leaves, ash or s
 - Spell presets from SRD 5.2.1: search "fireball" and get a 20 ft Sphere.
 - A private preview shades the squares and lists who is in it ("In area (3): Goblin 1, Goblin 2, Thorn (ally)") before you place it. A Cone, Cube, Line or Emanation leaves its caster out unless you include it. A Sphere or Cylinder catches a caster inside it.
 - Auras stick to a token and move with it, such as Spirit Guardians or a Paladin's aura. The list of who is inside updates live.
+- A player's area on a creature, and a player's kept ruler that follows one, is removed once that player can no longer see the creature: it went into fog or out of their sight, the DM hid it, or it went to a floor that player isn't on. A kept ruler also goes when its creature is deleted. One on the player's own creature stays.
+  - Nothing ends during a blackout, and on a map the player has left it ends once they come back and still can't see the creature.
 - Placed areas stay until removed. They move, turn and resize, and show to everyone or to the DM only. Only the DM and the area's owner change one.
 - An area's name keeps clear of tokens and their names, and on a player's screen of fogged ground.
 - On a hex scene an area keeps its true shape and is graded per hex by the same rule (at least half the hex by default, "Which squares or hexes an area covers"), and the board shades the hexes it catches.
@@ -1236,7 +1263,7 @@ Every roll happens on the server, with a secure random source, so everyone sees 
   - For a creature a player plays, the DM's "Ask Bree to roll" switch starts on and asks its player for saves and checks.
   - A creature with no stat block, or a character whose numbers go only to the DM and its own players, still lists its saves, checks, skills and Initiative, with no bonus shown: a tap that asks its player needs nothing, and a roll made here takes a bonus typed above them ("STR d20", then "STR d20+3"), never an unknown +0.
   - A player's save spell or save action has **Ask for saves**, which opens a short block under its row: the save and DC, who it hits (the creatures selected, or everyone the player sees in an area placed from it, such as "In area (2): Goblin 1, Bree (ally)"), the casting level, and **Roll 9d6 Fire and ask**, which rolls the damage on the player's own dice in the same tap, or **Ask, the DM rolls**.
-  - The ask waits on the row, "Asked the DM for saves. Waiting.", with Withdraw, until the DM resolves it ("The DM resolved Fireball.") or sets it aside. A player has at most 3 asks waiting, and a room 20. Other players never learn of an ask, and a creature the player can't see never enters one.
+  - The ask waits on the row, "Asked the DM for saves. Waiting.", with Withdraw, until the DM resolves it ("The DM resolved Fireball.") or sets it aside. A player has at most 3 asks waiting on the floors they hold ("You have 3 asks waiting. Withdraw one first."), and an ask goes when its caster is deleted, or dismissed as a companion. Other players never learn of an ask, and a creature the player can't see never enters one.
   - Every roll there has the one-roll options, except Recharge and a save or check that asks the player.
   - Layout: A button's words wrap inside it, and a row's buttons share each line. Saves and checks are three across.
 - Skill check buttons keep each name and bonus on one line, including Animal Handling. Their equal columns widen or fall to one column as the panel narrows or the interface size grows.
