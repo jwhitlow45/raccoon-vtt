@@ -4,10 +4,12 @@ import { FAR, LIMITS, roundUp, SEAT } from "#shared/limits.ts";
 import type { RoomState } from "#shared/model.ts";
 import { MOVE_PLAYERS_FIRST } from "#shared/permissions.ts";
 import type { Op } from "#shared/protocol.ts";
-import { seated, type Seated } from "#shared/privTestutil.ts";
-import { actor, castAsk, drawing, entry, member, room, scene, template, token } from "#shared/testutil.ts";
+import { idAt, seated, type Seated } from "#shared/privTestutil.ts";
+import { actor, castAsk, drawing, entry, member, rng, room, scene, template, token } from "#shared/testutil.ts";
+import { fullRoom } from "./limitsTesting.ts";
 import { answer, joinOp, Mint, type Answer } from "./limitsTwinTesting.ts";
 import { Room } from "./numberingTesting.ts";
+import { ScopeClient, StoredRoomDb, storedActor } from "./undoScopeTesting.ts";
 
 /**
  * The DM's side of the player limits: the room caps count only what no
@@ -149,5 +151,65 @@ describe("the players' scene can be deleted with the DM's yes", () => {
     assert.equal(r.state.meta.playerSceneId, "s1", "and the players with it");
     await r.restart(false);
     assert.equal(r.state.meta.playerSceneId, "s1", "after a restart too");
+  });
+});
+
+/*
+ * D9: a room past the far line, by its companion blocks, and the same
+ * room at the line. Bookkeeping and deletions are taken in both, and
+ * every op that adds things or text is refused in both, a player's and
+ * the DM's alike.
+ */
+describe("a room past the far line goes on with play", () => {
+  test("D9: past the line and at it, moves, turns, HP, life, conditions, an AC edit, rolls, talk, an undo and a group delete are taken, and creates, notes and block saves refused", async (t) => {
+    const results: Array<Array<[string, string]>> = [];
+    for (const roomBytes of [FAR.roomBytes + 1024 * 1024, FAR.roomBytes]) {
+      const full = fullRoom({ roomBytes });
+      const clock = { now: Date.parse("2026-11-10T20:00:00.000Z") };
+      const { actor: r } = await storedActor(t, new StoredRoomDb(full.state), { idGate: true, now: () => clock.now });
+      const dmId = full.dms[0]!;
+      const playerId = full.players[0]!;
+      const dm = await ScopeClient.open(r, full.state.members[dmId]!, "dm");
+      const player = await ScopeClient.open(r, full.state.members[playerId]!, "player");
+      const character = Object.values(full.state.characters).find((c) => c.ownerIds.includes(playerId))!;
+      const own = Object.values(full.state.tokens).find((x) => "ref" in x.actor && x.actor.ref === character.id)!;
+      const creatures = Object.values(full.state.tokens).filter((x) => "inline" in x.actor && x.visibility === "all").map((x) => x.id);
+      const block = Object.values(full.state.companionBlocks)[0]!;
+      const ids = rng(9_009);
+      const mint = () => idAt(ids, clock.now);
+      const steps: Array<[string, "dm" | "player", () => Op, "taken" | "refused"]> = [
+        ["a move", "player", () => ({ t: "token.move", tokenId: own.id, x: own.x, y: own.y + 1 }) as Op, "taken"],
+        ["the move's undo", "player", () => ({ t: "undo", scope: "play", head: player.head("play", "undo").id }) as Op, "taken"],
+        ["Next", "dm", () => ({ t: "encounter.next" }) as Op, "taken"],
+        ["Previous", "dm", () => ({ t: "encounter.prev" }) as Op, "taken"],
+        ["HP", "dm", () => ({ t: "actor.hp", target: { tokenId: creatures[0]! }, change: { kind: "damage", amount: 3 } }) as Op, "taken"],
+        ["bulk damage", "dm", () => ({ t: "actor.damageMany", hits: creatures.slice(1, 4).map((id) => ({ target: { tokenId: id }, amount: 2 })) }) as Op, "taken"],
+        ["down to 0", "dm", () => ({ t: "actor.hp", target: { characterId: character.id }, change: { kind: "damage", amount: character.actor.hp.cur } }) as Op, "taken"],
+        ["a death save", "player", () => ({ t: "actor.deathSave", target: { characterId: character.id }, ok: 1, fail: 0 }) as Op, "taken"],
+        ["a Revive", "dm", () => ({ t: "actor.life", target: { characterId: character.id }, life: "alive" }) as Op, "taken"],
+        ["a condition", "dm", () => ({ t: "actor.effect.add", target: { tokenId: creatures[4]! }, effect: { id: mint(), key: "prone" } }) as Op, "taken"],
+        ["an AC edit", "player", () => ({ t: "character.update", characterId: character.id, patch: { actor: { ac: 17 } } }) as Op, "taken"],
+        ["a roll", "player", () => ({ t: "dice.roll", tag: mint(), to: "all", rolls: [{ formula: "1d20+5", label: "Check" }] }) as Op, "taken"],
+        ["a chat line", "player", () => ({ t: "log.chat", text: "Onward" }), "taken"],
+        ["a whisper", "player", () => ({ t: "log.whisper", to: [dmId], text: "A secret" }) as Op, "taken"],
+        ["a group delete", "dm", () => ({ t: "token.deleteMany", tokenIds: creatures.slice(5, 7) }) as Op, "taken"],
+        ["a create", "dm", () => ({ t: "token.create", token: { id: mint(), sceneId: full.sceneId, kind: "monster", name: "Goblin", size: "medium", x: 1, y: 1, actor: { inline: actor() } } }) as Op, "refused"],
+        ["a creature's notes", "dm", () => ({ t: "token.update", tokenId: creatures[8]!, patch: { notes: "A long note" } }) as Op, "refused"],
+        ["a character's notes", "player", () => ({ t: "character.update", characterId: character.id, patch: { actor: { notes: "A long note" } } }) as Op, "refused"],
+        ["a stat block update", "dm", () => ({ t: "companionBlock.update", blockId: block.id, patch: { name: "Moth" } }) as Op, "refused"],
+      ];
+      const got: Array<[string, string]> = [];
+      for (const [what, who, op, expected] of steps) {
+        clock.now += 1_000;
+        const client = who === "dm" ? dm : player;
+        const event = await client.send(op());
+        const refusal = event.rejects?.find((x) => x.n === client.n);
+        const kind = refusal === undefined ? "taken" : refusal.code === "quota" ? "refused" : `${refusal.code}: ${refusal.message}`;
+        got.push([what, kind]);
+        assert.equal(kind, expected, `${roomBytes > FAR.roomBytes ? "past the line" : "at the line"}: ${what}`);
+      }
+      results.push(got);
+    }
+    assert.deepEqual(results[0], results[1], "past the line and at it answer alike");
   });
 });
