@@ -1135,15 +1135,17 @@ holds:
   version does not know is kept, so going back to an older version and
   forward again loses no setting.
 - `restore.json`, only while a restore runs.
-- `postgres-link.json`, on Windows, when the folder's path has a letter outside
-  the computer's language for non-Unicode programs, as under a user name in
-  another script. PostgreSQL's Windows programs can't open such a path, so
-  RaccoonVTT gives them the folder's short name or, where there is none, a
-  junction in a folder of your own inside `C:\ProgramData\RaccoonVTT`. The
-  installer makes that folder, and no other user can open yours. The file
-  records which way was chosen, and every later start uses it. If that way
-  stops leading to the folder while it holds a database, the start stops and
-  says to restart the computer and delete the file.
+- `postgres-link.json`, on Windows, when the folder's path is not plain
+  ASCII, as under a user name with an accent or in another script.
+  PostgreSQL's Windows programs can't open every such path, so RaccoonVTT
+  gives them a junction to the folder, in a folder of your own inside
+  `C:\ProgramData\RaccoonVTT`. The installer makes that folder, and no other
+  user can open yours. The junction's name comes from your account and the
+  data folder's real path, so every start finds the same one, through any
+  shortcut or spelling of the path, and a lost `postgres-link.json` is made
+  again from it. If both are gone while the folder holds a database, the
+  start stops and asks you to put `postgres-link.json` back from a copy of
+  the data folder. A moved or copied data folder gets a junction of its own.
 
 ### Backups
 
