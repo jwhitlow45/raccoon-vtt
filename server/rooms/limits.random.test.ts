@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { seatCounts, type SeatCounts } from "#shared/limits.ts";
+import { SEAT_FULL, seatCounts, type SeatCounts } from "#shared/limits.ts";
 import type { InitEntry, RoomState, Token } from "#shared/model.ts";
 import { projectState, seatView, type ProjectedState } from "#shared/project.ts";
-import { opSchema, type Op } from "#shared/protocol.ts";
-import { AYLA, BREE, idAt, limitsRoom, OGRE, STAIRS_DOWN, STAIRS_UP, withUpper } from "#shared/privTestutil.ts";
+import { mintedIds, opSchema, type Op } from "#shared/protocol.ts";
+import { APART, AYLA, BREE, idAt, limitsRoom, OGRE, STAIRS_DOWN, STAIRS_UP, withUpper } from "#shared/privTestutil.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor, AT, character, chance, DM, entry, int, P1, P2, pick, rng, token } from "#shared/testutil.ts";
+import { answer, Mint, openTwins, same, together, type Answer } from "./limitsTwinTesting.ts";
+import { each, viewOf, type Who as Member } from "./numberingTesting.ts";
 
 /**
  * Random runs of the player limits: DM, P1 and P2 ops drawn from one
@@ -189,5 +191,162 @@ describe("a player's seats read their own copy", () => {
       }
     }
     assert.ok(applied > RUNS * STEPS * 0.3, `most drawn ops applied: ${applied}`);
+  });
+});
+
+/*
+ * The twin runs: room A and room B start alike but for what only the DM
+ * sees, and take the same shared events at the same clock times, P1's
+ * and P2's ops drawn from their own copies, which the twins hold alike.
+ * Between shared events each twin draws its own work on what only it
+ * holds, and some shared events take a public thing out of P1's copy in
+ * two ways, hidden in A and deleted in B. After every shared event:
+ *
+ * - I1: P1's answers and P1's and the display's frames are the same in
+ *   both twins, after each twin's frames are scanned raw for its own ids
+ *   and names.
+ * - I3: after every close, no area or kept ruler of a player's stands on
+ *   a creature its owner does not see while its owner holds its floor.
+ * - I4: the DM's deletions and hides of what only one twin holds are
+ *   never refused.
+ * - I6: no player op is refused with a seat's words unless it can put a
+ *   thing into a seat's class.
+ * - I7: an id that left P1's copy is never taken again.
+ */
+
+const TWIN_RUNS = Number(process.env.LIMITS_TWIN_RUNS ?? 4);
+const TWIN_STEPS = Number(process.env.LIMITS_TWIN_STEPS ?? 40);
+const SEAT_WORDS = new Set(Object.values(SEAT_FULL));
+const SEAT_KINDS = new Set(["token.create", "template.create", "template.update", "drawing.create", "encounter.add", "undo", "redo"]);
+const PUBLIC = [OGRE, BREE, "owl"];
+
+/** One shared op of a player's, drawn from their own copy. */
+function drawFromCopy(r: () => number, copy: ProjectedState, who: "p1" | "p2", mint: () => string, left: readonly string[]): Op {
+  const tokens = Object.keys(copy.tokens).sort();
+  const mine = who === "p1" ? [AYLA, CADE].filter((id) => copy.tokens[id]) : [BREE];
+  const self = mine.length > 0 ? pick(r, mine) : AYLA;
+  const at = copy.tokens[self] as Partial<Token> | undefined;
+  const scene = at?.sceneId ?? "s1";
+  const own = Object.values(copy.templates).filter((a) => a.ownerId === who).map((a) => a.id).sort();
+  const reused = left.length > 0 && chance(r, 0.15) ? pick(r, left) : null;
+  const id = () => reused ?? mint();
+  const kind = int(r, 0, 9);
+  if (kind <= 2) {
+    const rides = tokens.length > 0 && chance(r, 0.6) ? pick(r, tokens) : undefined;
+    const sceneOf = rides ? ((copy.tokens[rides] as Partial<Token>).sceneId ?? scene) : scene;
+    return { t: "template.create", template: { id: id(), sceneId: sceneOf, shape: "sphere", size: 5, origin: { x: 4.5, y: 4.5, z: 0 }, yaw: 0, includeOrigin: true, color: "#ff8800", ownerId: who, visibility: "all", ...(rides ? { attachedTo: rides } : {}) } } as Op;
+  }
+  if (kind === 3 && own.length > 0) return { t: "template.update", templateId: pick(r, own), patch: { attachedTo: tokens.length > 0 && chance(r, 0.5) ? pick(r, tokens) : null } } as Op;
+  if (kind === 4) {
+    const anchored = tokens.length > 0 && chance(r, 0.6) ? pick(r, tokens) : null;
+    return { t: "drawing.create", drawing: { id: id(), sceneId: scene, kind: anchored ? "ruler" : "line", points: [3.5, 3.5, 6.5, 4.5], style: { stroke: "#ffffff", width: 2, opacity: 1 }, ownerId: who, visibility: "all", ...(anchored ? { anchors: [self, anchored] } : {}) } } as Op;
+  }
+  if (kind === 5) return { t: "drawing.clear", sceneId: scene, scope: "own" };
+  if (kind === 6) return { t: "token.move", tokenId: self, ...cellIn(r, chance(r, 0.8) ? R : F) } as Op;
+  if (kind === 7) return { t: "token.climb", tokenId: self, linkId: scene === "up" ? STAIRS_DOWN : STAIRS_UP } as Op;
+  if (kind === 8 && copy.encounter) return { t: "encounter.add", entries: [{ id: id(), tokenId: self }] } as Op;
+  return {
+    t: "token.create",
+    token: { id: id(), sceneId: scene, kind: "npc", name: "Wolf", size: "medium", layer: "token", x: (at?.x ?? 4) + 1, y: at?.y ?? 3, actor: { inline: actor({ dmNotes: "" }) }, companion: { of: self === CADE ? CADE : who === "p1" ? AYLA : BREE, turn: "shared" } },
+  } as Op;
+}
+
+/** I3 on one twin's state. */
+function noUnseenRiders(state: RoomState, what: string): void {
+  for (const memberId of ["p1", "p2"]) {
+    const view = seatView(state, memberId);
+    for (const a of Object.values(state.templates)) {
+      if (a.ownerId !== memberId || a.attachedTo === undefined || a.visibility !== "all") continue;
+      const on = state.tokens[a.attachedTo];
+      if (on && on.sceneId !== a.sceneId) continue;
+      if (view.holds(a.sceneId)) assert.ok(view.sees(a.attachedTo), `${what}: ${memberId}'s area ${a.id} stands on ${a.attachedTo}, which they do not see`);
+    }
+    for (const d of Object.values(state.drawings)) {
+      if (d.ownerId !== memberId || !d.anchors || !view.holds(d.sceneId)) continue;
+      for (const id of d.anchors) if (id !== null) assert.ok(view.sees(id), `${what}: ${memberId}'s ruler ${d.id} stands on ${id}, which they do not see`);
+    }
+  }
+}
+
+describe("random twin runs answer P1 alike", () => {
+  test("I1, I3, I4, I6, I7: shared events with work apart between them give P1 the same answers and frames", async (t) => {
+    for (let run = 0; run < TWIN_RUNS; run++) {
+      await t.test(`run ${run}`, async (t) => {
+        const r = rng(4_200 + run);
+        const base = start(r);
+        const a = structuredClone(base);
+        const b = structuredClone(base);
+        // What only the DM sees, apart per twin: creatures named and drawn apart.
+        const apart = (s: RoomState, seed: number) => {
+          const own = rng(seed);
+          const ids: string[] = [];
+          for (let i = int(own, 0, 4); i > 0; i--) {
+            const id = `${APART}shade${seed}x${i}`;
+            s.tokens[id] = token(id, { name: `${APART}name${seed}x${i}`, visibility: "dm", ...cellIn(own, chance(own, 0.5) ? R : F) });
+            ids.push(id, `${APART}name${seed}x${i}`);
+          }
+          return ids;
+        };
+        const pair = await openTwins(t, a, b, { a: apart(a, run * 2 + 1), b: apart(b, run * 2 + 2) });
+        const shared = new Mint();
+        const own = [rng(run * 2 + 11), rng(run * 2 + 12)];
+        const left: string[] = [];
+        for (let step = 0; step < TWIN_STEPS; step++) {
+          // Each twin's own work first, then the clocks meet again.
+          for (const [i, room] of pair.entries()) {
+            const rr = own[i]!;
+            for (let k = int(rr, 0, 2); k > 0; k--) {
+              const hidden = pair.hidden[i]!;
+              const hiddenIds = hidden.ids.filter((id) => room.state.tokens[id]);
+              const op: Op =
+                hiddenIds.length > 0 && chance(rr, 0.7)
+                  ? chance(rr, 0.3)
+                    ? { t: "token.delete", tokenId: pick(rr, hiddenIds) }
+                    : ({ t: "token.update", tokenId: pick(rr, hiddenIds), patch: { name: `${APART}name${i}s${step}k${k}` } } as Op)
+                  : ({ t: "token.create", token: { id: idAt(rr, room.clock.now), sceneId: "s1", kind: "monster", name: `${APART}new${i}s${step}k${k}`, size: "medium", ...cellIn(rr, F), visibility: "dm", actor: { inline: actor() } } } as Op);
+              if (op.t === "token.create") hidden.ids.push(op.token.id, op.token.name);
+              if (op.t === "token.update") hidden.names.push(op.patch.name!);
+              assert.equal(await answer(room, "dm", op), "taken", `I4: run ${run} step ${step}: ${room.name}'s own ${op.t}`);
+            }
+          }
+          const meet = Math.max(pair[0].clock.now, pair[1].clock.now);
+          for (const room of pair) room.clock.now = meet;
+          const roll = int(r, 0, 19);
+          const what = `run ${run} step ${step}`;
+          if (roll === 0) {
+            await each(pair, (room) => room.restart(false));
+          } else if (roll === 1) {
+            await each(pair, (room) => room.reloadP1());
+          } else if (roll <= 3) {
+            // A public thing leaves P1's copy: hidden in A, deleted in B.
+            const id = pick(r, PUBLIC);
+            if (pair[0].state.tokens[id]?.visibility === "all" && pair[1].state.tokens[id]) {
+              left.push(...Object.values(pair[0].state.templates).filter((x) => x.attachedTo === id && x.ownerId === "p1").map((x) => x.id));
+              for (const room of pair) await together(room, [["dm", room.name === "A" ? ({ t: "token.update", tokenId: id, patch: { visibility: "dm" } } as Op) : { t: "token.delete", tokenId: id }]]);
+            }
+          } else {
+            const sends: Array<[Member, Op]> = [];
+            let fresh = 0;
+            for (let k = int(r, 1, 3); k > 0; k--) {
+              const who = pick(r, ["p1", "p1", "p2"] as const);
+              const copy = viewOf(pair[0].clients[who].sent);
+              sends.push([who, drawFromCopy(r, copy, who, () => (fresh++, shared.next(pair[0])), left)]);
+            }
+            // B's source draws as A's did, so the next ids are alike in both.
+            for (let k = 0; k < fresh; k++) shared.next(pair[1]);
+            const answers: Answer[][] = [];
+            for (const room of pair) answers.push(await together(room, sends));
+            assert.deepEqual(answers[0], answers[1], `I1: ${what}: the same answers in both twins`);
+            for (const [k, [who, op]] of sends.entries()) {
+              const got = answers[0]![k]!;
+              if (typeof got === "object" && SEAT_WORDS.has(got.message)) assert.ok(SEAT_KINDS.has(op.t), `I6: ${what}: ${who}'s ${op.t} refused with a seat's words`);
+              if (who === "p1" && mintedIds(op).some((id) => left.includes(id))) assert.notEqual(got, "taken", `I7: ${what}: an id that left P1's copy is taken again`);
+            }
+          }
+          same(pair, what);
+          for (const room of pair) noUnseenRiders(room.state, `I3: ${what}: ${room.name}`);
+        }
+      });
+    }
   });
 });
