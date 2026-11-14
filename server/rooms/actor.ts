@@ -1749,12 +1749,11 @@ export class RoomActor {
     // admission, so an op it refuses spends no receipt. An undo or redo brings back ids the room took already.
     const minted = this.#opts.idGate ? mintedIds(clientOp) : [];
     const recorded = this.#opts.idGate ? recordedIds(clientOp) : [];
-    if (minted.length > 0) {
-      const verdict = this.#ids.check(minted, { memberId: viewer.memberId, role: viewer.role });
-      if (!verdict.ok) {
-        this.#refuse(key, wm, n, verdict.code, verdict.message);
-        return;
-      }
+    // An op type's ids are minted or recorded (ID_RULES), never both.
+    const verdict = minted.length > 0 ? this.#ids.check(minted, { memberId: viewer.memberId, role: viewer.role }) : this.#ids.checkRecorded(recorded);
+    if (!verdict.ok) {
+      this.#refuse(key, wm, n, verdict.code, verdict.message);
+      return;
     }
     /*
      * Admission (docs/design/design-v1-dice.md 1.2), before any permission check, so an op that permissions refuse later has

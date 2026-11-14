@@ -60,6 +60,17 @@ describe("the id gate's shape and clock", () => {
     assert.equal(gate.check([uuidv7(T0 + MINUTE - 1)], player()).ok, false, "past the window the clock's 30 minutes refuse it");
   });
 
+  test("a recorded id may be dated any time before now, but no further ahead than a minted one, unless the room holds it already", () => {
+    const c = clock();
+    const gate = new IdGate(c.now);
+    assert.deepEqual(gate.checkRecorded([uuidv7(T0 - 3 * 60 * MINUTE), "e1"]), { ok: true });
+    assert.deepEqual(gate.checkRecorded([uuidv7(T0 + ID_TIME.aheadMs)]), { ok: true });
+    const ahead = uuidv7(T0 + ID_TIME.aheadMs + 1);
+    assert.deepEqual(gate.checkRecorded([ahead]), { ok: false, code: "invalid", message: ID_TIME_REFUSED });
+    gate.load(seedRows({ tokens: { [ahead]: {} } }, T0));
+    assert.deepEqual(gate.checkRecorded([ahead]), { ok: true }, "held already, so it gets no new row");
+  });
+
   test("every id of the op is read: one bad id refuses the op", () => {
     const c = clock();
     const gate = new IdGate(c.now);

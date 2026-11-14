@@ -167,6 +167,50 @@ describe("an id answers P1 alike whatever became of its thing", () => {
     sameSince(pair, after, "after a restart");
   });
 
+  test("C2: a group save's plan applied three hours after it was made is taken, and its condition's id gets the server's row in both", async (t) => {
+    const pair = await open(t);
+    const made = ids(pair, -3 * 60 * MINUTE);
+    const plans = ids(pair, -3 * 60 * MINUTE);
+    const outcome = (room: Room): Op => {
+      const i = pair.indexOf(room as never);
+      return { t: "actor.outcome", plan: plans[i]!, label: "Hold Person", targets: [{ target: { characterId: AYLA }, effects: [{ id: made[i]!, key: "paralyzed" }] }] } as Op;
+    };
+    assert.equal(await bothAnswer(pair, "dm", outcome, "the aged plan"), "taken");
+    same(pair, "the aged plan");
+    for (const [i, table] of pair.ids.entries()) assert.deepEqual(table.rows.filter((r) => r.id === made[i]).map((r) => r.memberId), ["server"], pair[i]!.name);
+  });
+
+  test("C2: a group save's plan applied again is answered once by its receipt, its condition given once and its row kept as it was", async (t) => {
+    const pair = await open(t);
+    const made = ids(pair);
+    const plans = ids(pair);
+    const outcome = (room: Room): Op => {
+      const i = pair.indexOf(room as never);
+      return { t: "actor.outcome", plan: plans[i]!, label: "Hold Person", targets: [{ target: { characterId: AYLA }, effects: [{ id: made[i]!, key: "paralyzed" }] }] } as Op;
+    };
+    assert.equal(await bothAnswer(pair, "dm", outcome, "the plan"), "taken");
+    const rows = pair.ids.map((table) => JSON.stringify(table.rows));
+    assert.equal(await bothAnswer(pair, "dm", outcome, "the plan again"), "taken");
+    same(pair, "the plan again");
+    for (const [i, room] of pair.entries()) {
+      assert.equal(room.state.characters[AYLA]!.actor.effects.filter((e) => e.id === made[i]).length, 1, `${room.name}: the condition once`);
+      assert.equal(JSON.stringify(pair.ids[i]!.rows), rows[i], `${room.name}: the rows as they were`);
+    }
+  });
+
+  test("C2: a group save whose condition's id is dated ten years ahead is refused in both with the words for an id not made just now, and gets no row", async (t) => {
+    const pair = await open(t);
+    const outcome = (aheadMs: number) => (room: Room): Op => ({ t: "actor.outcome", plan: mint.next(room), label: "Hold Person", targets: [{ target: { characterId: AYLA }, effects: [{ id: mint.next(room, aheadMs), key: "paralyzed" }] }] }) as Op;
+    const rowsBefore = pair.ids.map((table) => table.rows.length);
+    assert.deepEqual(await bothAnswer(pair, "dm", outcome(10 * 365 * 24 * 60 * MINUTE), "ten years ahead"), STALE);
+    // Made a second before it is sent, as Room.send moves the clock.
+    assert.deepEqual(await bothAnswer(pair, "dm", outcome(7_000), "6 seconds ahead"), STALE);
+    assert.deepEqual(pair.ids.map((table) => table.rows.length), rowsBefore, "no row");
+    for (const room of pair) assert.deepEqual(room.state.characters[AYLA]!.actor.effects, [], `${room.name}: no condition`);
+    assert.equal(await bothAnswer(pair, "dm", outcome(5_000), "4 seconds ahead"), "taken");
+    same(pair, "ahead of the clock");
+  });
+
   test("C3: an id dated 4 seconds ahead, taken, its area hidden in A and deleted in B, answers gone after a restart a second later, and ids past 5 seconds ahead are refused", async (t) => {
     const pair = await open(t);
     const made = ids(pair, 4_000);
