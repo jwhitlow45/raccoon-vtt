@@ -11,8 +11,8 @@ import { Platform } from "../contract.ts";
 import { dataIdentity } from "./dataDir.ts";
 import { lockLocation } from "./lock.ts";
 import { loopbackPort } from "./ports.ts";
-import { Cluster, DatabaseFailed, uncertainWords } from "./postgres.ts";
-import { bootTime, isAlive, processFacts, processStamp } from "./processInfo.ts";
+import { BOOT_RECORD, Cluster, DatabaseFailed, uncertainWords } from "./postgres.ts";
+import { bootId, isAlive, processFacts, processStamp } from "./processInfo.ts";
 import { postgresDir, startTestCluster, type TestCluster } from "./testing/cluster.ts";
 import { killSupervisor, startSupervisor, type SupervisorRun } from "./testing/supervisorProcess.ts";
 
@@ -235,12 +235,14 @@ describe("the cluster", () => {
           const facts = await processFacts(p, platform);
           return { ...facts, cwd: null, start: (facts.start ?? 0) + 120_000 };
         },
-        bootTime: () => bootTime(platform),
+        bootId: () => bootId(platform),
         uid: process.getuid?.() ?? null,
       },
     });
     const found = await stepped.leftover();
     assert.deepEqual(found, { kind: "uncertain", pid });
+    const recorded = (await readFile(join(c.dir, "postgres", BOOT_RECORD), "utf8").catch(() => "")).trim();
+    assert.equal(recorded, await bootId(platform), "the start recorded this boot, none on Windows");
     await assert.rejects(stepped.clearLeftover(found), (err: unknown) => err instanceof DatabaseFailed && err.logLine === uncertainWords(pid));
     assert.ok(isAlive(pid), "the postmaster runs on");
     assert.ok(existsSync(join(c.dir, "postgres", "postmaster.pid")), "and its file stays");
