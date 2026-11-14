@@ -1443,7 +1443,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   test("lp39fix-1. Pat's finger drags Bree, on the warhorse squeezed in a corridor's mouth and dragging a Grappled goblin, onto the square below and right of the mouth, lifting a little down and right of its middle: the warhorse comes out full size as a mouse drop takes it, the goblin follows, and a second drag lands Bree under the finger (LP39B-MOVE-1)", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const field = { w: 24, h: 14 };
-    const keep = { scene: randomUUID(), horse: randomUUID(), bree: randomUUID(), gob: randomUUID() };
+    const keep = { scene: uuidv7(), horse: uuidv7(), bree: uuidv7(), gob: uuidv7() };
     await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "LP39 keep", bounds: field, fogEnabled: false } });
     await ops.send({ t: "scene.update", sceneId: keep.scene, patch: { blockMovement: true } });
     // Live play 39's keep, walled by the build: room A, a corridor one square wide east along row 4 and south down column 13, and room B from row 10.
@@ -1454,7 +1454,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await ops.send({ t: "token.create", token: { id: keep.bree, sceneId: keep.scene, kind: "pc", name: "Bree", size: "medium", x: 13, y: 9, disposition: "ally", visibility: "all", ownerIds: [run.patId], actor: { inline: actor() } } });
     await ops.send({ t: "token.attach", tokenId: keep.bree, to: keep.horse, kind: "ride", steer: true, x: 13, y: 9, elevation: 0 });
     await ops.send({ t: "token.create", token: { id: keep.gob, sceneId: keep.scene, kind: "monster", name: "Goblin", size: "medium", x: 13, y: 8, disposition: "hostile", visibility: "all", actor: { inline: actor() } } });
-    await ops.send({ t: "actor.effect.add", target: { tokenId: keep.gob }, effect: { id: randomUUID(), key: "grappled" } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: keep.gob }, effect: { id: uuidv7(), key: "grappled" } });
     await ops.send({ t: "token.attach", tokenId: keep.gob, to: keep.bree, kind: "drag", x: 13, y: 8, elevation: 0 });
     await ops.send({ t: "room.setPlayerScene", sceneId: keep.scene });
     await waitFor("Bree and the goblin in Pat's copy", () => (token(patSocket, keep.bree)?.attached && token(patSocket, keep.gob)?.attached && token(patSocket, keep.horse)?.squeeze ? true : null));
@@ -1495,7 +1495,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   test("lp40fix-1. Pat's finger drags Bree, on the warhorse squeezed in the keep's corridor and dragging a Grappled goblin, onto open floor at 5, 5: she lands under the finger, the goblin in tow; then Wren's drag into room B past an orc standing in the corridor says the orc is in the way (LP40-RIDER-1, LP40-MOVE-2)", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const field = { w: 24, h: 14 };
-    const keep = { scene: randomUUID(), horse: randomUUID(), bree: randomUUID(), gob: randomUUID(), wren: randomUUID(), orc: randomUUID() };
+    const keep = { scene: uuidv7(), horse: uuidv7(), bree: uuidv7(), gob: uuidv7(), wren: uuidv7(), orc: uuidv7() };
     await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "LP40 keep", bounds: field, fogEnabled: false } });
     await ops.send({ t: "scene.update", sceneId: keep.scene, patch: { blockMovement: true } });
     // Live play 39's keep: room A, a corridor one square wide east along row 4 and south down column 13, and room B from row 10.
@@ -1506,7 +1506,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await ops.send({ t: "token.create", token: { id: keep.bree, sceneId: keep.scene, kind: "pc", name: "Bree", size: "medium", x: 9, y: 4, disposition: "ally", visibility: "all", ownerIds: [run.patId], actor: { inline: actor() } } });
     await ops.send({ t: "token.attach", tokenId: keep.bree, to: keep.horse, kind: "ride", steer: true, x: 9, y: 4, elevation: 0 });
     await ops.send({ t: "token.create", token: { id: keep.gob, sceneId: keep.scene, kind: "monster", name: "Goblin", size: "medium", x: 10, y: 4, disposition: "hostile", visibility: "all", actor: { inline: actor() } } });
-    await ops.send({ t: "actor.effect.add", target: { tokenId: keep.gob }, effect: { id: randomUUID(), key: "grappled" } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: keep.gob }, effect: { id: uuidv7(), key: "grappled" } });
     await ops.send({ t: "token.attach", tokenId: keep.gob, to: keep.bree, kind: "drag", x: 10, y: 4, elevation: 0 });
     await ops.send({ t: "room.setPlayerScene", sceneId: keep.scene });
     await waitFor("Bree and the goblin in Pat's copy", () => (token(patSocket, keep.bree)?.attached && token(patSocket, keep.gob)?.attached && token(patSocket, keep.horse)?.squeeze ? true : null));
