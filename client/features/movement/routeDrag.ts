@@ -328,18 +328,24 @@ export class RouteDrag {
  * spaces of the creatures the walker cannot pass open, by its place in the
  * creatures of the world `closed` searched, which holds them closed, run
  * out of states: the one under the last spot of the walk that `closed`
- * reaches before the walk goes on where it does not, since `closed` stops
- * there only because that space may be ended in and never passed through.
- * A creature the walk crosses in the open, which `closed` walks round, is
- * not it: a goblin standing in a room on the way to a corridor an orc
- * closes was named for the orc (live play 41, LP41-MOVE-1). Where the
- * spots do not show it, the first creature the walk crosses.
+ * reaches, where the walk leaves all it reaches for good, since `closed`
+ * stops there only because that space may be ended in and never passed
+ * through, or else under the spot after it. A creature the walk crosses in
+ * the open, which `closed` walks round, is not it: a goblin standing in a
+ * room on the way to a corridor an orc closes was named for the orc (live
+ * play 41, LP41-MOVE-1). Nor is the first spot `closed` does not reach:
+ * a Large walker steps half a square at a time, so inside the goblin's
+ * space are spots `closed` never reaches, though it reaches the far side
+ * (live play 42, LP42-MOVE-2). Where the spots do not show it, the first
+ * creature the walk crosses.
  */
 function closingCreature(closed: RouteSearch, points: readonly RoutePoint[]): number | null {
   const spots = spotsAlong(closed, points);
-  const k = spots.findIndex((s) => !s.reached);
-  const before = k > 0 ? spots[k - 1]!.creature : -1;
-  if (before >= 0) return before;
+  const k = spots.findLastIndex((s) => s.reached);
+  const at = k >= 0 ? spots[k]!.creature : -1;
+  if (at >= 0) return at;
+  const after = spots[k + 1];
+  if (after && !after.end && after.creature >= 0) return after.creature;
   const crossed = spots.find((s) => !s.end && s.creature >= 0);
   return crossed ? crossed.creature : null;
 }

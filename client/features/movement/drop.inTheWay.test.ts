@@ -95,6 +95,21 @@ describe("squares: the creature named is the one that closes the way (LP41-MOVE-
     }
   });
 
+  test("a warhorse, Large, walking from the west room past a goblin standing on its line: the orc is named, and the warhorse holds before it, where the goblin was named (LP42-MOVE-2)", () => {
+    for (const y of [4, 7]) {
+      const s = hall({
+        horse: token("horse", { size: "large", x: 1, y: 3, name: "Warhorse", kind: "npc", disposition: "ally", ownerIds: ["p1"], actor: { inline: actor({ speeds: { walk: 60 } }) } }),
+        gob: goblin("gob", 4, y),
+        orc: goblin("orc", 10, 4, { name: "Orc" }),
+      });
+      delete s.tokens.thorn;
+      const copy = projectState(s, P1, { sceneId: "s1" }) as unknown as RoomState;
+      const drag = dragOf(copy, "player", "horse", { x: 16.5, y: 3.5 });
+      assert.equal(drag.plan.stop && stopText(drag.plan.stop), "Orc is in the way.", `the goblin on 4, ${y}`);
+      assert.deepEqual(drag.plan.moves.map((m) => [m.x, m.y]), [[7.5, 3.5]], "squeezed into the corridor, short of the orc");
+    }
+  });
+
   test("two goblins, one in the corridor and one beyond it in the east room's doorway: the first, which closes the way, is named", () => {
     const s = hall({ gob: goblin("gob", 10, 4), orc: goblin("orc", 15, 4, { name: "Orc" }) });
     assert.equal(dropThorn(s, { x: 18, y: 7 }).note, "Goblin is in the way.");
