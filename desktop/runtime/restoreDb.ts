@@ -2,7 +2,7 @@ import { copyFile, mkdir, rename, stat, unlink } from "node:fs/promises";
 import pg from "pg";
 import type { BackupRecord } from "../contract.ts";
 import { syncDir, syncFile } from "./durable.ts";
-import type { Cluster } from "./postgres.ts";
+import { RESTORE_STATEMENT_MS, dbConfig, type Cluster } from "./postgres.ts";
 import { BEFORE, LIVE, RESTORING, parseTag, tagText, type DbName, type DbState, type ImageFs, type RestoreDb, type Tag } from "./restore.ts";
 import { readStamp, writeStampIn, type Build } from "./versionGuard.ts";
 
@@ -27,9 +27,14 @@ function literal(tag: Tag): string {
 }
 
 async function withClient<T>(url: string, work: (client: pg.Client) => Promise<T>): Promise<T> {
-  const client = new pg.Client({ connectionString: url });
+  const client = new pg.Client(dbConfig(url, RESTORE_STATEMENT_MS));
   client.on("error", () => undefined);
-  await client.connect();
+  try {
+    await client.connect();
+  } catch (err) {
+    await client.end().catch(() => undefined);
+    throw err;
+  }
   try {
     return await work(client);
   } finally {

@@ -12,7 +12,7 @@ import { dataIdentity } from "./dataDir.ts";
 import { lockLocation } from "./lock.ts";
 import { parentProblem, pgPaths, PROGRAMDATA_FOLDER, windowsDeps } from "./pgPaths.ts";
 import { loopbackPort } from "./ports.ts";
-import { BOOT_RECORD, Cluster, DatabaseFailed, uncertainWords } from "./postgres.ts";
+import { BOOT_RECORD, Cluster, DB_STATEMENT_MS, DatabaseFailed, RESTORE_STATEMENT_MS, dbConfig, uncertainWords } from "./postgres.ts";
 import { bootId, isAlive, processFacts, processStamp } from "./processInfo.ts";
 import { postgresDir, startTestCluster, type TestCluster } from "./testing/cluster.ts";
 import { killSupervisor, startSupervisor, type SupervisorRun } from "./testing/supervisorProcess.ts";
@@ -77,6 +77,35 @@ function deadPid(): Promise<number> {
 }
 
 describe("the cluster", () => {
+  test("a connected database that never answers a query fails the query at its bound, through the supervisor's connection settings", async () => {
+    const c = await cluster();
+    const holder = new pg.Client({ connectionString: c.cluster.url("postgres") });
+    await holder.connect();
+    try {
+      await holder.query("create table held (n int)");
+      await holder.query("begin");
+      await holder.query("lock table held in access exclusive mode");
+      // Its every query now waits on the lock, as a database that never answers does.
+      const waiting = new pg.Client(dbConfig(c.cluster.url("postgres"), 1_000));
+      await waiting.connect();
+      try {
+        const began = Date.now();
+        await assert.rejects(waiting.query("select count(*) from held"), /statement timeout/);
+        assert.ok(Date.now() - began < 5_000, `the query ended after ${Date.now() - began} ms`);
+      } finally {
+        await waiting.end();
+      }
+    } finally {
+      await holder.query("rollback").catch(() => undefined);
+      await holder.end();
+    }
+    const config = dbConfig("postgres://x");
+    assert.equal(config.connectionTimeoutMillis, 30_000);
+    assert.equal(config.statement_timeout, DB_STATEMENT_MS);
+    assert.ok((config.query_timeout ?? 0) > DB_STATEMENT_MS, "the client gives up only after the server should have");
+    assert.equal(dbConfig("postgres://x", RESTORE_STATEMENT_MS).statement_timeout, RESTORE_STATEMENT_MS);
+  });
+
   test("initdb uses the C locale and the builtin C.UTF-8 provider, and listens on loopback only with no socket file", async () => {
     const c = await cluster();
     const pool = c.pool();
