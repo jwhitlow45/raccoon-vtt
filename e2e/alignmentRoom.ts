@@ -2974,10 +2974,31 @@ async function patScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await sweep.pills(page, "drag-pills", { needPills: true });
   await page.mouse.up();
   const note = page.locator("[data-stop-note]");
-  if (await showsWithin(note.first(), 3_000)) await sweep.measure(page, "stop-note", note.first());
-  else await sweep.missing(page, "stop-note", "the walk into the wall showed no stop note");
+  if (await showsWithin(note.first(), 3_000)) {
+    await sweep.measure(page, "stop-note", note.first());
+    // The full note opens with a pane's header (StopNote.tsx PaneHeader), held to a map pane's place. A compact one lays its sentence in a scrolling body beside Close instead.
+    if ((await note.first().locator("[data-stop-note-body]").count()) === 0) await sweep.add(page, "stop-note-header", headerLines(await headerPlaces(note.first()), `${sweep.at} stop-note`));
+  } else await sweep.missing(page, "stop-note", "the walk into the wall showed no stop note");
   await escapeAll(page);
   await setWall(false);
+  await resetThorn();
+
+  // A drop onto a rise no stairs reach holds at its foot under the ledge's two-line sentence, whose header row is Close's 44 px box (lp42fix-align).
+  const rise = [16, 17, 18].flatMap((x) => [8, 9, 10].map((y) => `${x},${y}`));
+  await ops.send({ t: "build.height", sceneId: run.sceneId, cells: rise, height: 10 });
+  await ops.send({ t: "token.update", tokenId: run.ids.thorn, patch: { x: 11, y: 9, elevation: 0 } });
+  const onto = await pagePoint(page, BOUNDS, { x: 17.5, y: 9.5 });
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 12; i++) await page.mouse.move(from.x + ((onto.x - from.x) * i) / 12, from.y + ((onto.y - from.y) * i) / 12);
+  await page.mouse.up();
+  const ledgeNote = page.locator("[data-stop-note]").filter({ hasText: /^Ledge in the way\./ });
+  if (await showsWithin(ledgeNote.first(), 3_000)) {
+    await sweep.measure(page, "stop-note-ledge", ledgeNote.first());
+    if ((await ledgeNote.first().locator("[data-stop-note-body]").count()) === 0) await sweep.add(page, "stop-note-ledge-header", headerLines(await headerPlaces(ledgeNote.first()), `${sweep.at} stop-note-ledge`));
+  } else await sweep.missing(page, "stop-note-ledge", "the drop onto the rise showed no ledge note");
+  await escapeAll(page);
+  await ops.send({ t: "build.height", sceneId: run.sceneId, cells: rise, height: 0 });
   await resetThorn();
 
   // Pat's strip after his own move, Undo move in Roll's place where it fits (docs/design/design-v1-bar-compact.md 3.3), on the upright phones the design measured. The row is the strip's content, measured wherever the strip draws one.

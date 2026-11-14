@@ -1472,7 +1472,10 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
       }
 
       // 1b. A painted box keeps the same room above and below its content.
-      if (painted && !control && !band && !frame && height <= 200 && Math.abs(round(b.pad.t - b.pad.b)) > LIMIT) {
+      // A box that opens with a pane's header row, its title beside its Close in a 48 px row, keeps a pane's 4 px top over that row, where the header check holds its Close and title to a map pane's (headerPlaces), as for a dialog. Its padding above is the pane's, not its foot's: a short title leaves Close's 44 px box as its top content, which read as the stop note's text 8 px off its middle (LP41-POLISH-STOPNOTE).
+      const head = el.children[0] ?? null;
+      const paneTop = head !== null && head.querySelector(":scope > strong") !== null && head.querySelector(":scope > button") !== null && num(style(head), "min-height") >= 48;
+      if (painted && !control && !band && !frame && !paneTop && height <= 200 && Math.abs(round(b.pad.t - b.pad.b)) > LIMIT) {
         push({ check: "pad", role: roleOf(el), name: nameOf(el), offset: round(b.pad.t - b.pad.b), box: b.border, what: `padding ${round(b.pad.t)} above, ${round(b.pad.b)} below`, detail: "" });
       }
 
@@ -2056,7 +2059,8 @@ export async function pillLines(page: Page, screen: string, opts: { points?: rea
  * Where a pane's or window's header stands under its frame's top: its
  * Close's top and its title's middle, against where a map pane's header
  * puts them, a 44 px Close centered in a 48 px row under the frame's
- * border and top padding (components/SheetHeader.tsx). A sheet's header
+ * border and top padding (components/SheetHeader.tsx), or in the taller
+ * row a title of more lines makes. A sheet's header
  * that is its grab area stands lower by its pill's room, so its grabber
  * places it, not this check.
  */
@@ -2098,12 +2102,14 @@ function headerInPage(frames: DomElement[], rowPx: number): HeaderPlace[] {
     const holderZoom = zoomOf(holder);
     const inset = holder.getBoundingClientRect().top - box.top + ((parseFloat(style(holder).getPropertyValue("border-top-width")) || 0) + (parseFloat(style(holder).getPropertyValue("padding-top")) || 0)) * holderZoom;
     const c = close.getBoundingClientRect();
+    // A title of more lines than the 48 px row holds, as the stop note's whole sentence (movement/StopNote.tsx), grows the row to its own height, no more, and the row centers Close on it as on two lines (LP41-POLISH-STOPNOTE).
+    const rowHeight = Math.max(rowPx * zoom, title.getBoundingClientRect().height);
     out.push({
       frame: frame.getAttribute("aria-label") ?? title.textContent ?? "",
       close: round(c.top - box.top),
       title: round((lines.top + lines.bottom) / 2 - box.top),
-      wantClose: round(inset + (rowPx * zoom - c.height) / 2),
-      wantTitle: round(inset + (rowPx * zoom) / 2),
+      wantClose: round(inset + (rowHeight - c.height) / 2),
+      wantTitle: round(inset + rowHeight / 2),
     });
   }
   return out;
