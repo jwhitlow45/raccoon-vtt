@@ -4,7 +4,7 @@ import { heights, wall } from "#shared/discoveryTestutil.ts";
 import type { RoomState, Token } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { canApply } from "#shared/permissions.ts";
-import { footprintRect, occupiedHexes, placedOnHex } from "#shared/rules/footprint.ts";
+import { footprintRect, footprintSize, occupiedHexes, placedOnHex } from "#shared/rules/footprint.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { hexAt, hexCenter, hexKey, sceneHexes, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { findRouteOn } from "#shared/rules/hexWalk.ts";
@@ -646,3 +646,44 @@ describe("squares: a Huge mount into a corridor two squares wide, its rider lead
     assert.deepEqual([r.state.tokens.brom!.attached?.to, r.state.tokens.ana!.attached?.to, r.state.tokens.pris!.attached?.to], ["horse", "horse", "brom"]);
   });
 });
+
+/*
+ * A Large rider on a Huge mount on hexes (review LP39-R1-3). The rider's
+ * dropped box snaps to a Large anchor, the corner its three hexes share,
+ * so its middle, the seat, stands on that corner, and the hex the seat
+ * reads there is one of the three, pinned below as the build reads it
+ * (D-261113-200). The mount still lands where the rider's own drop puts
+ * the rider, all three of its hexes on the mount, from every seat it fits
+ * and wherever in them the finger lets go.
+ */
+for (const [name, g, seatHex] of [
+  ["hex rows", ROWS, "14,15"],
+  ["hex columns", COLUMNS, "15,14"],
+] as const) {
+  test(`${name}: a Large rider on a Huge mount lands on the hexes its own drop snaps to, from every seat it fits`, () => {
+    const s = room({ scenes: { s1: scene("s1", { gridShape: g.orient === "rows" ? "hexRows" : "hexColumns", bounds: { w: 30, h: 30 } }) } });
+    const horse = onHex(g, "horse", "huge", { col: 6, row: 6 }, { name: "Elephant", kind: "npc", ownerIds: ["p1"] });
+    const mount = occupiedHexes(g, horse).map(hexKey);
+    let seats = 0;
+    for (const ref of occupiedHexes(g, horse)) {
+      const rider = onHex(g, "rider", "large", ref, { name: "Ogre", kind: "pc", ownerIds: ["p1"], attached: { to: "horse", kind: "ride", steer: true } });
+      if (!occupiedHexes(g, rider).every((h) => mount.includes(hexKey(h)))) continue;
+      seats++;
+      const view = seenRoom({ ...s, tokens: { horse, rider } });
+      const goal = placedOnHex(g, rider, { col: 15, row: 14 });
+      const middle = { x: goal.x + footprintSize(rider).w / 2, y: goal.y + footprintSize(rider).h / 2 };
+      const goalHexes = occupiedHexes(g, { ...rider, ...goal }).map(hexKey);
+      for (const [dx, dy] of [[0, 0], [0.2, 0.15], [-0.25, 0.1], [0.1, -0.3]] as const) {
+        const at = `seat ${hexKey(ref)}, ${dx}, ${dy}`;
+        const aim = pressedAim(view, horse, rider, { x: goal.x + dx + horse.x - rider.x, y: goal.y + dy + horse.y - rider.y });
+        assert.ok(Math.abs(aim.seat!.x - middle.x) < 1e-9 && Math.abs(aim.seat!.y - middle.y) < 1e-9, `${at}: the seat on the anchor the rider's own drop snaps to`);
+        assert.equal(hexKey(hexAt(g, aim.seat!)), seatHex, `${at}: the hex the seat reads`);
+        const target = routeTarget(view, horse, aim);
+        assert.equal(target.squeeze, false, at);
+        const landed = occupiedHexes(g, { ...horse, x: target.x, y: target.y }).map(hexKey);
+        assert.ok(goalHexes.every((k) => landed.includes(k)), `${at}: ${goalHexes} on the mount's ${landed}`);
+      }
+    }
+    assert.equal(seats, 3, "the three seats a Large rider fits on");
+  });
+}
