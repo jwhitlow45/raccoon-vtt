@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { parentProblem, POWERSHELL_SCRIPTS, type AclRule } from "../runtime/pgPaths.ts";
 
 /**
  * desktop/build/installer.nsh builds PowerShell commands out of NSIS
@@ -13,6 +14,7 @@ import { readFileSync } from "node:fs";
  */
 
 const NSH = readFileSync(new URL("../build/installer.nsh", import.meta.url), "utf8");
+const PROGRAMDATA = readFileSync(new URL("../build/programdata.ps1", import.meta.url), "utf8");
 
 /** `!define NAME value`, the value in backticks, double quotes or bare. */
 function defines(text: string): Map<string, string> {
@@ -123,4 +125,96 @@ test("the installer goes on only when nothing runs, and stops with words when a 
   assert.equal(lines[boxes[0]! - 2], "${ElseIf} $R8 == 0");
   assert.equal(lines[boxes[1]! - 2], "${Else}");
   for (const at of boxes) assert.doesNotMatch(/"([^"]+)"/.exec(lines[at]!)?.[1] ?? "", /[\u2014;]/, "house style in the words");
+});
+
+test("the install makes RaccoonVTT's folder in ProgramData with programdata.ps1, run by Windows PowerShell's full path, and the uninstall leaves it", () => {
+  const body = /!macro customInstall\n([\s\S]*?)\n!macroend/.exec(NSH)?.[1];
+  assert.ok(body);
+  const lines = body.split("\n").map((l) => l.trim()).filter((l) => !l.startsWith(";"));
+  const at = lines.indexOf("InitPluginsDir");
+  assert.ok(at >= 0);
+  assert.deepEqual(lines.slice(at, at + 7), [
+    "InitPluginsDir",
+    'File "/oname=$PLUGINSDIR\\raccoonvtt-programdata.ps1" "${BUILD_RESOURCES_DIR}\\programdata.ps1"',
+    'nsExec::Exec /TIMEOUT=60000 `"$SYSDIR\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\\raccoonvtt-programdata.ps1"`',
+    "Pop $0",
+    "${If} $0 != 0",
+    'DetailPrint "RaccoonVTT could not make its folder in ProgramData (PowerShell: $0)."',
+    "${EndIf}",
+  ]);
+  const uninstall = /!macro customUnInstall\n([\s\S]*?)\n!macroend/.exec(NSH)?.[1] ?? "";
+  assert.doesNotMatch(uninstall.replace(/^\s*;.*$/gm, ""), /ProgramData|RMDir|programdata/i);
+});
+
+/** programdata.ps1's code, its comments left out. */
+const PS1 = PROGRAMDATA.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
+
+test("programdata.ps1 makes the folder with its security descriptor in one call, owned by Administrators, with an ACL of its own", () => {
+  assert.equal(bracketProblem(PS1), null);
+  assert.ok(!/\bNew-Item\b|\bmkdir\b|\bmd\b|Remove-Item|icacls|Test-Path/i.test(PS1), "never made then tightened, never deleted, never found through a link");
+  assert.match(PS1, /\[void\]\[System\.IO\.Directory\]::CreateDirectory\(\$path, \$security\)/);
+  assert.match(PS1, /\$security\.SetOwner\(\$admins\)/);
+  assert.match(PS1, /\$security\.SetAccessRuleProtection\(\$true, \$false\)/);
+  assert.match(PS1, /Join-Path \(\[Environment\]::GetFolderPath\('CommonApplicationData'\)\) 'RaccoonVTT'/);
+  // Anything there that Administrators don't own, or that is a link, is moved aside and the loop makes a new one.
+  assert.match(PS1, /Rename-Item -LiteralPath \$path -NewName \('RaccoonVTT\.untrusted-'/);
+  assert.match(PS1, /if \(\$item\.Attributes -band \[System\.IO\.FileAttributes\]::ReparsePoint\) \{ return \$false \}/);
+  assert.match(PS1, /return \(\$owner -eq \$admins\) -or \(\$owner -eq \$system\)/);
+  assert.match(PS1, /\nexit 1\n?$/, "a folder never made right ends in failure");
+  for (const condition of conditions(PS1)) assert.ok(!notAPipeline(condition), `if (${condition}) is not one pipeline`);
+});
+
+test("the ACL programdata.ps1 writes is the one the app accepts", () => {
+  const sids: Record<string, string> = {};
+  for (const m of PS1.matchAll(/^\$(\w+) = New-Object System\.Security\.Principal\.SecurityIdentifier '([^']+)'$/gm)) sids[m[1]!] = m[2]!;
+  const bits: Record<string, number> = {
+    FullControl: 0x1f01ff,
+    ListDirectory: 0x1,
+    WriteData: 0x2,
+    CreateDirectories: 0x4,
+    ReadExtendedAttributes: 0x8,
+    WriteExtendedAttributes: 0x10,
+    Traverse: 0x20,
+    DeleteSubdirectoriesAndFiles: 0x40,
+    ReadAttributes: 0x80,
+    WriteAttributes: 0x100,
+    Delete: 0x10000,
+    ReadPermissions: 0x20000,
+    ChangePermissions: 0x40000,
+    TakeOwnership: 0x80000,
+    Modify: 0x301bf,
+    Write: 0x116,
+  };
+  const rules: AclRule[] = [...PS1.matchAll(/FileSystemAccessRule\(\$(\w+), '([^']+)', (\$all|'None'), '(\w+)', 'Allow'\)/g)].map((m) => ({
+    sid: sids[m[1]!]!,
+    // .NET adds Synchronize to every allow entry.
+    rights: m[2]!.split(", ").reduce((sum, name) => {
+      assert.ok(name in bits, `a right this test doesn't know: ${name}`);
+      return sum | bits[name]!;
+    }, 0x100000),
+    inherit: m[3] === "$all" ? 3 : 0,
+    propagate: m[4] === "InheritOnly" ? 2 : 0,
+    allow: true,
+    inherited: false,
+  }));
+  assert.deepEqual(rules.map((r) => r.sid), ["S-1-5-18", "S-1-5-32-544", "S-1-5-32-545", "S-1-3-0"]);
+  assert.ok(rules.every((r) => Number.isFinite(r.rights)));
+  assert.equal(parentProblem({ exists: true, directory: true, reparse: false, owner: sids.admins!, protected: true, rules }), null);
+  const users = rules.find((r) => r.sid === "S-1-5-32-545")!;
+  assert.equal(users.inherit, 0, "users' entry is for the folder itself only");
+  assert.equal(users.rights & (0x2 | 0x10 | 0x40 | 0x100 | 0x10000 | 0x40000 | 0x80000), 0, "no file, delete, attribute writes, ACL or owner change");
+});
+
+test("the app's PowerShell scripts parse: balanced brackets, conditions that are one pipeline, no double quote, the folder from the environment", () => {
+  for (const [name, script] of Object.entries(POWERSHELL_SCRIPTS)) {
+    assert.ok(!script.includes('"'), name);
+    assert.equal(bracketProblem(script), null, name);
+    for (const condition of conditions(script)) assert.ok(!notAPipeline(condition), `${name}: if (${condition}) is not one pipeline`);
+    assert.match(script, /\$env:RACCOONVTT_FOLDER/, name);
+  }
+  const make = POWERSHELL_SCRIPTS.MAKE_FOLDER;
+  assert.ok(!/\bNew-Item\b|\bmkdir\b|icacls|Set-Acl/i.test(make), "made with its security descriptor, never tightened after");
+  assert.match(make, /\$s\.SetOwner\(\$u\); \$s\.SetAccessRuleProtection\(\$true, \$false\)/);
+  assert.match(make, /\[void\]\[System\.IO\.Directory\]::CreateDirectory\(\$env:RACCOONVTT_FOLDER, \$s\); \[pscustomobject\]@\{ user = \$u\.Value; facts = \(Facts \$env:RACCOONVTT_FOLDER\) \}/);
+  assert.match(make, /\$u = \[System\.Security\.Principal\.WindowsIdentity\]::GetCurrent\(\)\.User;[^]*CreateDirectory/, "this user's SID is read before the folder is made");
 });

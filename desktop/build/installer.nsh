@@ -93,11 +93,24 @@
   ${If} $0 != 0
     DetailPrint "Windows Firewall did not take RaccoonVTT's rule (netsh: $0)."
   ${EndIf}
+  ; RaccoonVTT's folder in ProgramData, where the app makes a user's own
+  ; folder for PostgreSQL's junction when it can't open that user's data
+  ; folder by its path (programdata.ps1). A failure only matters to such a
+  ; user, whose app then says to reinstall.
+  InitPluginsDir
+  File "/oname=$PLUGINSDIR\raccoonvtt-programdata.ps1" "${BUILD_RESOURCES_DIR}\programdata.ps1"
+  nsExec::Exec /TIMEOUT=60000 `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\raccoonvtt-programdata.ps1"`
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "RaccoonVTT could not make its folder in ProgramData (PowerShell: $0)."
+  ${EndIf}
 !macroend
 
 ; An update runs the old version's uninstaller before the new files go in,
 ; and the new installer adds the rule again, so the rule stays through it.
-; A real uninstall removes it.
+; A real uninstall removes it. RaccoonVTT's folder in ProgramData stays, as
+; data folders do: a junction in it is how PostgreSQL reaches a user's
+; database.
 !macro customUnInstall
   ${IfNot} ${isUpdated}
     nsExec::Exec `"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="RaccoonVTT"`
