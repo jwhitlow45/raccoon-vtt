@@ -1,0 +1,31 @@
+{
+  "name": "raccoon-vtt",
+  "productName": "RaccoonVTT",
+  "description": "A virtual tabletop for one D&D group, run on this computer for players on the same network.",
+  "author": "RaccoonVTT contributors",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/jwhitlow45/raccoon-vtt",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jwhitlow45/raccoon-vtt.git"
+  },
+  "type": "module",
+  "main": "out/main/main.cjs",
+  "scripts": {
+    "build:shell": "node ../node_modules/vite/bin/vite.js build -c vite.shell.config.ts --mode main && node ../node_modules/vite/bin/vite.js build -c vite.shell.config.ts --mode preload",
+    "build:window": "node ../node_modules/vite/bin/vite.js build -c window/vite.config.ts",
+    "build": "pnpm run build:shell && pnpm run build:window",
+    "icons": "node build/icons.ts",
+    "pack": "node build/pack.ts",
+    "typecheck": "node ../node_modules/typescript/bin/tsc --noEmit -p tsconfig.electron.json"
+  },
+  "devDependencies": {
+    "@electron/fuses": "2.1.3",
+    "electron": "44.10.0",
+    "electron-builder": "26.18.1",
+    "electron-updater": "6.8.12"
+  },
+  "packageManager": "pnpm@11.23.0"
+}
