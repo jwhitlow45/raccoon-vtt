@@ -612,9 +612,9 @@ describe("a postmaster by its command line", () => {
     assert.equal(postmasterOf("/opt/r/postgres/bin/postgres -D /data/Tést Жук/postgres.incomplete-17 -p 5", unix, "darwin"), false, "a folder beside it");
     assert.equal(postmasterOf("/opt/r/postgres/bin/postgres -D /DATA/Tést Жук/postgres -p 5", unix, "darwin"), false, "another case is another folder off Windows");
     assert.equal(postmasterOf("postgres: checkpointer", unix, "linux"), false, "a child, which renames itself");
-    const windows = ["C:\\Users\\Dm\\AppData\\Local\\RaccoonVTT\\postgres", "C:\\ProgramData\\RaccoonVTT\\j\\a1b2"];
+    const windows = ["D:\\Tables\\Dm\\RaccoonVTT\\postgres", "C:\\ProgramData\\RaccoonVTT\\j\\a1b2"];
     // pg_ctl writes the folder with forward slashes, and Windows paths ignore case.
-    assert.equal(postmasterOf('"C:\\Program Files\\RaccoonVTT\\resources\\postgres\\bin\\postgres.exe" -D "C:/Users/dm/AppData/Local/RaccoonVTT/postgres" -p 41659', windows, "win32"), true);
+    assert.equal(postmasterOf('"C:\\Program Files\\RaccoonVTT\\resources\\postgres\\bin\\postgres.exe" -D "D:/Tables/dm/RaccoonVTT/postgres" -p 41659', windows, "win32"), true);
     assert.equal(postmasterOf('"C:\\pg\\postgres.exe" -D "C:/ProgramData/RaccoonVTT/j/a1b2" -p 41659', windows, "win32"), true, "the junction PostgreSQL was given");
     assert.equal(postmasterOf('"C:\\pg\\pg_ctl.exe" start -D "C:/ProgramData/RaccoonVTT/j/a1b2" -l log', windows, "win32"), false);
     assert.equal(postmasterOf('"C:\\pg\\postgres.exe" --forkchild="checkpointer" 3', windows, "win32"), false);
