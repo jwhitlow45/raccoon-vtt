@@ -232,6 +232,8 @@ describe("raccoon-vtt Add a wing: the DM's mode, pane and ghost", { timeout: 900
     run.burrowId = randomUUID();
     await ops.send({ t: "scene.create", scene: { id: run.keepId, name: "Keep", bounds: KEEP, fogEnabled: false } });
     await ops.send({ t: "build.rect", sceneId: run.keepId, terrain: "stone", x: 4, y: 4, w: 9, h: 9 });
+    // A wall drawn across the room between two floor cells, which is no join. A bare grid line there is no wall, and a tap on it is near none (LP39B-WING-1).
+    await ops.send({ t: "build.edge", sceneId: run.keepId, edges: [{ key: "8,8,w", feature: { kind: "wall" } }] });
     await ops.send({ t: "scene.create", scene: { id: run.ruinsId, name: "Ruins", bounds: KEEP, autoWalls: "off" } });
     await ops.send({ t: "scene.create", scene: { id: run.burrowId, name: "Burrow", bounds: BURROW, gridShape: "hexRows" } });
     await ops.send({ t: "build.walls", sceneId: run.burrowId, put: hexWalls(ROWS, 10, 10, 4, 4) });
@@ -327,7 +329,7 @@ describe("raccoon-vtt Add a wing: the DM's mode, pane and ghost", { timeout: 900
     await pane().waitFor();
     await waitFor("the plan's counts", async () => (/rooms?\b.*doors?\b/.test(await pane().getByRole("status").innerText()) ? true : null));
     await pane().getByRole("button", { name: "Edit rooms" }).click();
-    // A tap that misses every room is judged as a join and refused, which leaves the pane as it was.
+    // A tap that misses every room is near no wall in the empty area, which leaves the pane as it was.
     const panel = pane().locator("[data-room-panel]");
     let opened = false;
     for (let j = 1; j < 8 && !opened; j++) {

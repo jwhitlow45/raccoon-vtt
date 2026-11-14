@@ -1,6 +1,6 @@
 import { sightOf, tileKey } from "#shared/keys.ts";
 import { CHUNK_CELLS, FOG_SUBCELLS, type BuildChunk, type CellRect, type EdgeFeature, type FreeWall, type RoomState, type Scene, type WallFeature } from "#shared/model.ts";
-import { autoWallBetween, autoWallsOf, FLOOR_TERRAINS } from "#shared/rules/autoWalls.ts";
+import { autoWallBetween, autoWallsOf, FLOOR_TERRAINS, paintedAt } from "#shared/rules/autoWalls.ts";
 import { decodeTile, TILE_SUB } from "#shared/rules/fog.ts";
 import { playersSee } from "#shared/rules/floors.ts";
 import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
@@ -12,7 +12,7 @@ import type { JoinExpect } from "#shared/rules/wingClear.ts";
 import type { WingBase } from "../dungeon/plan.ts";
 import { distance, TAP_SLOP_PX } from "../../lib/gestures.ts";
 import type { ToolContext, ToolPointer, ToolPointerHandlers } from "../tools.ts";
-import { edgeDistance, edgeInBounds, nearestEdge, nearestFreeWall, type Bounds, type Point } from "./cells.ts";
+import { edgeDistance, edgeInBounds, nearestFreeWall, type Bounds, type Point } from "./cells.ts";
 import { builderSlot, type WingPicks } from "./store.ts";
 import { ghostRoomAt } from "./wingGhost.ts";
 
@@ -216,18 +216,53 @@ type View = Pick<RoomState, "buildChunks">;
 type JoinScene = Pick<Scene, "id" | "bounds" | "gridShape" | "autoWalls">;
 
 /**
- * What a tap at a point picks (3.1): on squares the nearest grid edge
- * within `reach` cells, or the line saying a free wall there will not do;
- * on hexes the nearest free wall within reach. Null where nothing is near.
+ * What a tap at a point picks (3.1): the wall nearest it within `reach`
+ * cells. On squares that is a grid edge with a wall on it
+ * (`walledEdgeNear`), or the line saying a free wall there will not do,
+ * and on hexes a free wall. Null where no wall is near, which the row
+ * takes as a tap near no wall (D-261110-533).
+ *
+ * The reach is from a wall, not from any grid line (LP39B-WING-1). At a
+ * fit view a square is 6 to 17 px, so 22 px from the nearest grid line
+ * took in every tap, and one in open ground was judged as a bare edge that
+ * is no join, kept the join and asked for a wall beside Generate a wing.
  */
 export function tapAt(view: View, scene: JoinScene, p: Point, reach: number): Judged<WingTap> | null {
   const chunks = sceneChunks(view.buildChunks, scene.id);
   const free = nearestFreeWall(chunks, p, reach);
   if (isHex(sceneGrid(scene))) return free ? { ok: true, value: { grid: "hex", cx: free.cx, cy: free.cy, id: free.wall.id } } : null;
-  const key = nearestEdge(p, scene.bounds);
-  const edge = key !== null && edgeDistance(key, p) <= reach ? key : null;
-  if (free && (edge === null || free.distance < edgeDistance(edge, p))) return { ok: false, problem: JOIN_WORDS.squaresFree };
-  return edge === null ? null : { ok: true, value: { grid: "squares", key: edge } };
+  const edge = walledEdgeNear(view, scene, p, reach);
+  if (free && (edge === null || free.distance < edge.distance)) return { ok: false, problem: JOIN_WORDS.squaresFree };
+  return edge === null ? null : { ok: true, value: { grid: "squares", key: edge.key } };
+}
+
+/**
+ * The grid edge nearest `p` within `reach` cells that has a wall on it: a
+ * wall, door or window drawn there, or an automatic wall between its two
+ * cells that no "No wall" takes away. A window counts, so its tap says why
+ * it is no join.
+ */
+function walledEdgeNear(view: View, scene: JoinScene, p: Point, reach: number): { key: string; distance: number } | null {
+  const rule = autoWallsOf(scene);
+  const walled = (key: string): boolean => {
+    const [x, y] = keyXY(key);
+    const feature = chunkAt(view.buildChunks, scene.id, x, y)?.edges[key];
+    if (feature) return feature.kind !== "none";
+    const [one, two] = edgeCells(key);
+    return autoWallBetween(rule, paintedAt(view.buildChunks, scene.id, ...one), paintedAt(view.buildChunks, scene.id, ...two));
+  };
+  let best: { key: string; distance: number } | null = null;
+  // A north edge x,y,n runs from x to x + 1 along the line y, and a west edge x,y,w from y to y + 1 down the line x.
+  for (let y = Math.floor(p.y - reach) - 1; y <= Math.ceil(p.y + reach); y++) {
+    for (let x = Math.floor(p.x - reach) - 1; x <= Math.ceil(p.x + reach); x++) {
+      for (const key of [`${x},${y},n`, `${x},${y},w`]) {
+        if (!edgeInBounds(key, scene.bounds)) continue;
+        const distance = edgeDistance(key, p);
+        if (distance <= reach && (best === null || distance < best.distance) && walled(key)) best = { key, distance };
+      }
+    }
+  }
+  return best;
 }
 
 /**

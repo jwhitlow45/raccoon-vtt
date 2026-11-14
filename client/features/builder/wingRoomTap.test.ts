@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 import type { RoomState, Scene } from "#shared/model.ts";
+import { apply, room, scene } from "#shared/testutil.ts";
 import { RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions, RoomView } from "../../state/types.ts";
@@ -86,6 +87,52 @@ test("with the pane open, a tap near no wall keeps the pane's join and says noth
   const s = store.getState();
   assert.equal(s.wing, PICKS);
   assert.equal(s.note, null);
+});
+
+/*
+ * The same at a fit view (LP39B-WING-1): live play 39's Keep, 60 by 40 with
+ * a 9 by 9 room, at 10 px a square. A tap reached 22 px from any grid line,
+ * so every tap there was on a bare edge that is no join: it kept the join
+ * and asked for a wall beside Generate a wing. The reach is from a wall.
+ */
+const KEEP = apply(room({ scenes: { s1: scene("s1", { bounds: { w: 60, h: 40 } }) } }), { t: "build.rect", sceneId: "s1", terrain: "stone", x: 4, y: 4, w: 9, h: 9 });
+const FIT = 10;
+/** A tap at a world point on the Keep at 10 px a square, its area dragged first. */
+function tapKeep(x: number, y: number): void {
+  ctx = { ...ctx, scene: KEEP.scenes.s1!, getState: () => ({ floorView: KEEP }) as unknown as RoomView, camera: () => ({ x: 0, y: 0, scale: FIT }) };
+  const pointer = withWingMode({});
+  const p = { screen: { x: x * FIT, y: y * FIT }, world: { x, y } } as ToolPointer;
+  pointer.down?.(p, ctx);
+  pointer.up?.(p, ctx);
+}
+const KEEP_AREA = { x: 22, y: 4, w: 26, h: 26 };
+
+test("at a fit view, a tap 2 px off the room's east wall joins it, and with the pane closed a tap in open ground clears the join and the note", () => {
+  const store = ctx.scope.get(builderSlot).store;
+  store.setState({ wingOpen: false, wingEdit: false, wingGhost: null, wing: { sceneId: "s1", area: KEEP_AREA, tap: null, join: null }, note: null });
+  tapKeep(13.2, 8.5);
+  assert.deepEqual(store.getState().wing?.tap, { grid: "squares", key: "13,8,w" }, "the room's east wall");
+  assert.notEqual(store.getState().wing?.join, null);
+  // A square's middle in open ground, as live play 39 tapped it, and one a quarter square off a grid line.
+  for (const [x, y] of [[30.5, 36.5], [30.25, 36.5]] as const) {
+    tapKeep(13.2, 8.5);
+    tapKeep(x, y);
+    const s = store.getState();
+    assert.deepEqual([s.wing?.area, s.wing?.tap, s.wing?.join, s.note], [KEEP_AREA, null, null, null], `${x}, ${y}: the join cleared, the row's own line asking for a wall`);
+  }
+});
+
+test("at a fit view, with the pane open a tap in open ground keeps the pane's join and clears the note, and a grid line between two floor squares is no wall either", () => {
+  const store = ctx.scope.get(builderSlot).store;
+  store.setState({ wingOpen: false, wingEdit: false, wingGhost: null, wing: { sceneId: "s1", area: KEEP_AREA, tap: null, join: null }, note: null });
+  tapKeep(13.2, 8.5);
+  const joined = store.getState().wing;
+  store.setState({ wingOpen: true, note: "Tap a wall or door between floor and empty ground." });
+  for (const [x, y] of [[30.5, 36.5], [8, 8.5]] as const) {
+    tapKeep(x, y);
+    assert.deepEqual(store.getState().wing, joined, `${x}, ${y}: the pane's join stays`);
+    assert.equal(store.getState().note, null, `${x}, ${y}: and nothing claims otherwise`);
+  }
 });
 
 test("Add a wing's picks cleared, as an added wing clears them, clear the note too", () => {
