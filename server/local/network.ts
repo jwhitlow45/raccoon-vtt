@@ -83,9 +83,13 @@ export function isLoopback(address: string | undefined): boolean {
  * tunnels. The design names the Linux and macOS prefixes. Windows shows
  * friendly names ("vEthernet (WSL)", "VMware Network Adapter VMnet8",
  * "VirtualBox Host-Only Network", "ZeroTier One [...]"), so those are
- * matched by the words in them.
+ * matched by the words in them. Linux's libvirt, LXC, LXD, Podman and CNI
+ * bridges, and macOS's bridge100 and up (Internet Sharing and virtual
+ * machines) and Parallels' vnic, have MAC addresses of their own. macOS's
+ * bridge0 is the Thunderbolt Bridge, a real cable to another computer, so
+ * it stays.
  */
-const OTHER_NETWORK = /^(docker|br-|veth|vethernet|vmnet|vboxnet|utun|tun|tap|wg|ppp|ipsec|tailscale|zt)|vmware|virtualbox|zerotier|wireguard|wintun|tap-windows/i;
+const OTHER_NETWORK = /^(docker|br-|veth|vethernet|vmnet|vboxnet|utun|tun|tap|wg|ppp|ipsec|tailscale|zt|virbr|lxcbr|lxdbr|podman|cni|bridge1\d\d|vnic)|vmware|virtualbox|zerotier|wireguard|wintun|tap-windows/i;
 
 /**
  * Whether an interface may hold the address shown to players (D-261113-085).

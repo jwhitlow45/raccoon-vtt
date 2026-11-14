@@ -44,7 +44,7 @@ describe("address ranges", () => {
 
 describe("eligible interfaces", () => {
   test("a computer's own Wi-Fi and Ethernet, on every system", () => {
-    for (const name of ["en0", "en7", "eth0", "enp3s0", "wlan0", "wlp2s0", "Wi-Fi", "Ethernet", "Ethernet 2", "WLAN"]) assert.equal(eligible(name, { mac: MAC }), true, name);
+    for (const name of ["en0", "en7", "eth0", "enp3s0", "wlan0", "wlp2s0", "Wi-Fi", "Ethernet", "Ethernet 2", "WLAN", "bridge0"]) assert.equal(eligible(name, { mac: MAC }), true, name);
   });
 
   test("not a bridge, a virtual machine's network or a tunnel, by name, including Windows' friendly names", () => {
@@ -71,6 +71,14 @@ describe("eligible interfaces", () => {
       "zt7nnig26",
       "ZeroTier One [8056c2e21c000001]",
       "OpenVPN Wintun",
+      "virbr0",
+      "lxcbr0",
+      "lxdbr0",
+      "podman0",
+      "cni0",
+      "bridge100",
+      "bridge101",
+      "vnic0",
     ];
     for (const name of names) assert.equal(eligible(name, { mac: MAC }), false, name);
   });
