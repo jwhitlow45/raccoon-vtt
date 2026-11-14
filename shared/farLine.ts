@@ -5,8 +5,9 @@ import { isPoseOp, type Op, type OpType } from "./protocol.ts";
  * How each op type meets the far line (shared/limits.ts FAR,
  * docs/design/design-v1-player-limits.md 5.4). Deletions free or stop, and
  * never meet a line. Bookkeeping writes fields of fixed width, rows of a
- * ring or lists with their own caps, which the bound reserves at their
- * widest, so it is exempt by kind. `byField` types carry bookkeeping and
+ * ring or lists with their own caps, so it is exempt by kind from the
+ * counts, and in bytes goes on past where creates stop into the reserve
+ * kept for it (shared/limits.ts BOOKKEEPING_RESERVE) up to the line itself. `byField` types carry bookkeeping and
  * content in one op and are judged by the fields they name. Every other
  * growing op meets the line. `own` types keep their own rules: a move of
  * the players' scene meets the near reserves, and who sees for themselves

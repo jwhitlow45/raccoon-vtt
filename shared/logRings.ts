@@ -97,8 +97,9 @@ export const DM_LINE_BASE = 900_000;
  * creature, which with its effects at their shortest takes about 3.4 KB.
  * Player limits keep that bound: a creature holds up to 65 conditions and
  * a room's measure reaches 11 MiB at the far line (shared/limits.ts FAR),
- * but an effect a turn ends carries a duration and its anchor's row, about
- * 168 bytes with ids as devices mint them, so 11 MiB holds about 65,000.
+ * which conditions meet too (BOOKKEEPING_RESERVE), but an effect a turn
+ * ends carries a duration and its anchor's row, about 168 bytes with ids
+ * as devices mint them, so 11 MiB holds about 65,000.
  */
 export const PARTY_LINE_BASE = 100_000;
 export const PARTY_SLOT = (DM_LINE_BASE - PARTY_LINE_BASE) / LIMITS.membersPerRoom;

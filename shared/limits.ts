@@ -1377,6 +1377,38 @@ export const FAR = {
   byteStep: 256 * 1024,
 } as const;
 
+/**
+ * Bytes inside the far line that only bookkeeping may fill (design 5.3
+ * and 8). An op that meets the line stops this much short of it, and an
+ * exempt kind, a move, a turn, HP, a condition, a roll or a line of talk,
+ * goes on until the line itself, so the table plays on where creates stop.
+ * Past the line every growing op is refused, bookkeeping too, so the
+ * stored state stays within HARD.storedBytes. Reserving each creature's
+ * widest bookkeeping instead (a path, 65 conditions and use marks at the
+ * stored schema's widths, about 320 KiB) would fill the room at a few
+ * dozen creatures, so the reserve is the room's and each scene's.
+ */
+export const BOOKKEEPING_RESERVE = { room: 512 * 1024, scene: 256 * 1024 } as const;
+
+/** The far byte line an op of `kind` reads in `scope`, or null for a deletion, which meets none. */
+export function farByteLine(kind: LimitKind["far"], scope: "room" | "scene"): number | null {
+  if (kind === "deletion") return null;
+  const line = scope === "room" ? FAR.roomBytes : FAR.sceneBytes;
+  return kind === "meets" ? line - BOOKKEEPING_RESERVE[scope] : line;
+}
+
+/**
+ * Whether the far line refuses an op of `kind` in `scope`: its reading, the
+ * DM's part with its reserves rounded up to FAR.byteStep and the players'
+ * seat-held bytes exactly, is past the line the kind reads, and the op grew
+ * the measure's total. The size guard reads it for the room and for each
+ * scene an op touches (server/rooms/sizeGuard.ts).
+ */
+export function farBytesOver(scope: "room" | "scene", kind: LimitKind["far"], dmPart: number, held: number, grew: boolean): boolean {
+  const line = farByteLine(kind, scope);
+  return line !== null && grew && roundUp(Math.max(0, dmPart), FAR.byteStep) + held > line;
+}
+
 /** The far line's step: `value` rounded up to a multiple of `step`, so a far check reads the DM's part only in steps. */
 export function roundUp(value: number, step: number): number {
   return Math.ceil(value / step) * step;
