@@ -10,7 +10,7 @@ import { PLAYER_LIMITS_SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { fullRoom, markedRoom } from "./limitsTesting.ts";
 import { answer, joinOp, Mint, type Answer } from "./limitsTwinTesting.ts";
 import { Room } from "./numberingTesting.ts";
-import { PER_PLAYER_FULL } from "./sizeGuard.ts";
+import { MEMORY_FULL, PER_PLAYER_FULL } from "./sizeGuard.ts";
 import { ScopeClient, StoredRoomDb, storedActor } from "./undoScopeTesting.ts";
 
 /**
@@ -245,15 +245,42 @@ describe("scene changes and per-player scenes", () => {
     assert.ok(answers.length - 1 < 15, `the far line at the widest refuses early: ${answers.length - 1} scenes taken`);
   });
 
-  test("D11: a scene change in a room at its near line answers as today, its reserve refusal included, and a move back to the played scene is taken", async (t) => {
-    const state = room();
-    state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true, vision: { on: true, light: "bright" } };
-    state.scenes.s2 = { ...state.scenes.s2!, fogEnabled: true, vision: { on: true, light: "bright" }, bounds: { w: LIMITS.sceneCells, h: LIMITS.sceneCells } };
-    state.playedScenes = { s1: { sceneId: "s1", rev: 0 } };
-    for (let i = 0; i < 60; i++) state.tokens[`dmt${i}`] = token(`dmt${i}`, { name: "Goblin", visibility: "dm", notes: "x".repeat(4_000) });
-    const r = await opened(t, state, "R", { sizeLimits: { stateLimit: 400_000 } });
-    assert.deepEqual(await answer(r, "dm", { t: "room.setPlayerScene", sceneId: "s2" }), { code: "quota", message: NO_ROOM_TO_EXPLORE });
-    assert.equal(await answer(r, "dm", { t: "room.setPlayerScene", sceneId: "s1" }), "taken");
+  test("D11, D13: near its line a move that raises the reserves answers as today, the smaller unplayed scene included, and past it a move that does not is still taken, a restart between each", async (t) => {
+    /** Explore on s1 (the players' scene) and three more: a large and a small unplayed one and a played one, with the DM's notes filling the room. */
+    const scenes = (notes: number) => {
+      const state = room();
+      const vision = { on: true, light: "bright" as const };
+      state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true, vision };
+      state.scenes.s2 = { ...state.scenes.s2!, fogEnabled: true, vision, bounds: { w: LIMITS.sceneCells, h: LIMITS.sceneCells } };
+      state.scenes.s3 = scene("s3", { order: 2, fogEnabled: true, vision, bounds: { w: 20, h: 20 } });
+      state.scenes.s4 = scene("s4", { order: 3, fogEnabled: true, vision, bounds: { w: 40, h: 30 } });
+      state.playedScenes = { s1: { sceneId: "s1", rev: 0 }, s4: { sceneId: "s4", rev: 0 } };
+      for (let i = 0; i < notes; i++) state.tokens[`dmt${i}`] = token(`dmt${i}`, { name: "Goblin", visibility: "dm", notes: "x".repeat(4_000) });
+      return state;
+    };
+    const cases: Array<[string, number, Array<[string, Answer | "refused"]>]> = [
+      [
+        "at its line",
+        50,
+        [
+          ["s2", { code: "quota", message: NO_ROOM_TO_EXPLORE }],
+          ["s3", { code: "quota", message: MEMORY_FULL }],
+          ["s4", "taken"],
+          ["s1", "taken"],
+        ],
+      ],
+      // Past the lowered line the DM's notes alone fill the room: only moves that add no reserve are taken.
+      ["past its line", 80, [["s2", "refused"], ["s3", "refused"], ["s4", "taken"], ["s1", "taken"]]],
+    ];
+    for (const [what, notes, moves] of cases) {
+      const r = await opened(t, scenes(notes), what, { sizeLimits: { stateLimit: 400_000 } });
+      for (const [to, expected] of moves) {
+        const got = await answer(r, "dm", { t: "room.setPlayerScene", sceneId: to });
+        if (expected === "refused") assert.equal(typeof got === "object" && got.code, "quota", `${what}: to ${to}`);
+        else assert.deepEqual(got, expected, `${what}: to ${to}`);
+        await r.restart(false);
+      }
+    }
   });
 });
 
