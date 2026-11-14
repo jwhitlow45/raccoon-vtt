@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { lstatSync, mkdirSync, statSync } from "node:fs";
 import { mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import net from "node:net";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { z } from "zod";
 import type { Platform } from "../contract.ts";
 import { type ProcessIdentity, stillRunning } from "./processInfo.ts";
@@ -90,6 +90,8 @@ function darwinUserTempDir(): string | null {
  * and $XDG_RUNTIME_DIR names, used by its fixed name. macOS: the per-user
  * temp folder a GUI app gets as $TMPDIR. Where neither works, or the path
  * would pass the system's limit, ~/.cache/RaccoonVTT. Never the shared /tmp.
+ * Those socket paths join with POSIX separators on any host, so the tests
+ * that model Linux and macOS also hold when they run on Windows.
  */
 export function lockLocation(hash: string, deps: LocationDeps): { path: string } | { error: "pathTooLong" } {
   const name = `raccoonvtt-${hash}`;
@@ -97,7 +99,7 @@ export function lockLocation(hash: string, deps: LocationDeps): { path: string }
   const limit = SOCKET_PATH_LIMIT[deps.platform] ?? 103;
   const isPrivate = deps.ownPrivateDir ?? ((dir: string) => ownPrivateDir(dir, deps.uid));
   const fits = (dir: string): string | null => {
-    const path = join(dir, `${name}.sock`);
+    const path = posix.join(dir, `${name}.sock`);
     return Buffer.byteLength(path) <= limit ? path : null;
   };
   const preferred = deps.runtimeDir ? deps.runtimeDir() : deps.platform === "linux" ? `/run/user/${deps.uid}` : darwinUserTempDir();
@@ -105,7 +107,7 @@ export function lockLocation(hash: string, deps: LocationDeps): { path: string }
     const path = fits(preferred);
     if (path) return { path };
   }
-  const fallback = join(deps.home, ".cache", "RaccoonVTT");
+  const fallback = posix.join(deps.home, ".cache", "RaccoonVTT");
   const path = fits(fallback);
   if (!path) return { error: "pathTooLong" };
   (deps.makeFallbackDir ?? ((dir: string) => mkdirSync(dir, { recursive: true, mode: 0o700 })))(fallback);
