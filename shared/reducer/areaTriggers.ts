@@ -466,6 +466,18 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
   const at = (walk: MovedToken, piece: number, f: number): { spot: RoutePoint; piece: number; end: boolean; squeezed?: boolean } => {
     const points = walk.route;
     const g = gridOf(walk);
+    if (walk.along) {
+      // A walk in single file hex by hex has more points than the lead's (route.ts FileAlong), so each moment reads it at its
+      // latest point reached by then along the lead's walk, as the trap step does.
+      const lead = routed ? piece - 1 : 0;
+      let j = 0;
+      for (let k = 1; k < points.length; k++) {
+        const [p, s, n] = walk.along[k] ?? walk.along[walk.along.length - 1]!;
+        if (p > lead || (p === lead && s / (n || 1) > f + 1e-9)) break;
+        j = k;
+      }
+      return { spot: points[j]!, piece: Math.max(0, j - 1), end: j > 0 };
+    }
     if (!routed && g.shape === "hex") {
       const a = points[0]!;
       const b = points[points.length - 1]!;
