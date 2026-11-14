@@ -7,7 +7,7 @@ import type pg from "pg";
 import yauzl from "yauzl";
 import { z } from "zod";
 import { uuidv7 } from "#shared/ids.ts";
-import { checkLimits, exploredReserve, FAR, HARD, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes, VIDEO_LIMITS } from "#shared/limits.ts";
+import { checkLimits, exploredReserve, FAR, farLimits, HARD, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes, VIDEO_LIMITS } from "#shared/limits.ts";
 import { parseVideoGeometry, type VideoGeometry } from "#shared/videoGeometry.ts";
 import { ringed } from "#shared/logRings.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
@@ -477,33 +477,12 @@ function limitsProblem(state: RoomState, lines: Lines): string | null {
   return scenes.ok ? null : scenes.message;
 }
 
-/**
- * The counts the far lines raise, each against its far line in its cap's
- * scope: a scene with its floors for tokens and areas, a floor for
- * drawings and their point values, the room for rows, asks and companion
- * stat blocks.
- */
+/** The counts the far lines raise, each against its far line in its cap's scope, read as the far check of a live op reads them without a state before (shared/limits.ts farLimits). */
 function farCountsProblem(state: RoomState): string | null {
-  const count = (value: number) => value.toLocaleString("en-US");
-  if ((state.encounter?.entries.length ?? 0) > FAR.rows) return `The room is full: at most ${count(FAR.rows)} initiative rows.`;
-  if (Object.keys(state.casts).length > FAR.asks) return `at most ${count(FAR.asks)} asks for saves can wait at once`;
-  const blocks = Object.values(state.companionBlocks);
-  if (blocks.length > FAR.blocks || blocks.reduce((sum, b) => sum + serializedBytes(b), 0) > FAR.blockBytes) return "The room holds too many companion stat blocks.";
-  const groupOf = (sceneId: string) => state.scenes[sceneId]?.floor?.of ?? sceneId;
-  const tokens = new Map<string, number>();
-  const areas = new Map<string, number>();
-  const drawings = new Map<string, { count: number; points: number }>();
-  for (const t of Object.values(state.tokens)) tokens.set(groupOf(t.sceneId), (tokens.get(groupOf(t.sceneId)) ?? 0) + 1);
-  for (const t of Object.values(state.templates)) areas.set(groupOf(t.sceneId), (areas.get(groupOf(t.sceneId)) ?? 0) + 1);
-  for (const d of Object.values(state.drawings)) {
-    const held = drawings.get(d.sceneId) ?? { count: 0, points: 0 };
-    held.count++;
-    held.points += d.points.length;
-    drawings.set(d.sceneId, held);
+  for (const sceneId of [null, ...Object.keys(state.scenes)]) {
+    const far = farLimits(state, sceneId);
+    if (!far.ok) return far.message;
   }
-  if ([...tokens.values()].some((n) => n > FAR.tokens)) return `A scene is full: at most ${count(FAR.tokens)} tokens.`;
-  if ([...areas.values()].some((n) => n > FAR.areas)) return `A scene is full: at most ${count(FAR.areas)} areas.`;
-  if ([...drawings.values()].some((d) => d.count > FAR.drawings || d.points > FAR.pointValues)) return `A scene is full: at most ${count(FAR.drawings)} drawings or ${count(FAR.pointValues)} drawing point values.`;
   return null;
 }
 

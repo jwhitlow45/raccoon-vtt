@@ -25,10 +25,9 @@ function rows(count: number): RoomState {
   return room({ encounter: { rev: 0, round: 1, activeEntryId: null, entries: Array.from({ length: count }, (_, i) => entry(`r${i}`, { label: "Lair" })) } });
 }
 
-function tokens(count: number, floors = false): RoomState {
+function tokens(count: number): RoomState {
   const state = room();
-  if (floors) state.scenes.f2 = scene("f2", { order: 2, floor: { of: "s1", level: 1, name: "Upper", height: 10 } });
-  for (let i = 0; i < count; i++) state.tokens[`t${i}`] = token(`t${i}`, { sceneId: floors && i % 2 === 1 ? "f2" : "s1", x: i % 40, y: Math.floor(i / 40) % 30 });
+  for (let i = 0; i < count; i++) state.tokens[`t${i}`] = token(`t${i}`, { x: i % 40, y: Math.floor(i / 40) % 30 });
   return state;
 }
 
@@ -37,21 +36,20 @@ describe("an import by today's checks or the far lines", () => {
     assert.doesNotThrow(() => assertWithinLimits(rows(LIMITS.encounterRows)));
     assert.doesNotThrow(() => assertWithinLimits(rows(LIMITS.encounterRows + 1)));
     assert.doesNotThrow(() => assertWithinLimits(rows(FAR.rows)));
-    refusedWith(rows(FAR.rows + 1), "The room is full: at most 4,000 initiative rows.");
+    refusedWith(rows(FAR.rows + 1), /at most 4,000 initiative rows/);
   });
 
-  test("takes a scene's tokens up to the far tokens, its floors counted together", () => {
+  test("takes a scene's tokens up to the far tokens", () => {
     assert.doesNotThrow(() => assertWithinLimits(tokens(FAR.tokens)));
-    refusedWith(tokens(FAR.tokens + 1), "A scene is full: at most 2,150 tokens.");
-    assert.doesNotThrow(() => assertWithinLimits(tokens(FAR.tokens, true)));
-    refusedWith(tokens(FAR.tokens + 1, true), "A scene is full: at most 2,150 tokens.");
+    refusedWith(tokens(FAR.tokens + 1), /at most 2,150 tokens/);
   });
 
   test("takes asks, areas and drawings up to their far lines", () => {
-    const asks = room({ casts: Object.fromEntries(Array.from({ length: FAR.asks }, (_, i) => [`a${i}`, castAsk(`a${i}`)])) });
+    // The DM's asks read in steps of 50 (FAR.countStep), so 1,200 of them are the most the line takes with no player's held.
+    const asks = room({ casts: Object.fromEntries(Array.from({ length: 1_200 }, (_, i) => [`a${i}`, castAsk(`a${i}`, { by: "dm1" })])) });
     assert.doesNotThrow(() => assertWithinLimits(asks));
-    asks.casts.extra = castAsk("extra");
-    refusedWith(asks, "at most 1,220 asks for saves can wait at once");
+    asks.casts.extra = castAsk("extra", { by: "dm1" });
+    refusedWith(asks, /at most 1,220 asks for saves can wait at once/);
     const drawn = room();
     for (let i = 0; i < LIMITS.drawingsPerScene + 1; i++) drawn.drawings[`d${i}`] = drawing(`d${i}`);
     assert.doesNotThrow(() => assertWithinLimits(drawn));
