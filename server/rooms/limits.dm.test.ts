@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
-import { FAR, LIMITS, roundUp, SEAT } from "#shared/limits.ts";
+import { FAR, LIMITS, NO_ROOM_TO_EXPLORE, roundUp, SEAT } from "#shared/limits.ts";
 import type { RoomState } from "#shared/model.ts";
 import { MOVE_PLAYERS_FIRST } from "#shared/permissions.ts";
 import type { Op } from "#shared/protocol.ts";
@@ -9,6 +9,7 @@ import { actor, castAsk, drawing, entry, member, rng, room, scene, template, tok
 import { fullRoom } from "./limitsTesting.ts";
 import { answer, joinOp, Mint, type Answer } from "./limitsTwinTesting.ts";
 import { Room } from "./numberingTesting.ts";
+import { PER_PLAYER_FULL } from "./sizeGuard.ts";
 import { ScopeClient, StoredRoomDb, storedActor } from "./undoScopeTesting.ts";
 
 /**
@@ -223,5 +224,34 @@ describe("a room past the far line goes on with play", () => {
       results.push(got);
     }
     assert.deepEqual(results[0], results[1], "past the line and at it answer alike");
+  });
+});
+
+describe("scene changes and per-player scenes", () => {
+  test("D10: a lone DM adding per-player scenes is refused in the per-player words where the widest reserves would pass the far line", async (t) => {
+    const r = await opened(t, room());
+    const answers: Answer[] = [];
+    for (let i = 0; i < LIMITS.scenesPerRoom - 2; i++) {
+      const scene = { id: mint.next(r), name: `Crypt ${i}`, bounds: { w: LIMITS.sceneCells, h: LIMITS.sceneCells }, fogEnabled: true, vision: { on: true, light: "bright", perPlayer: true } };
+      const got = await answer(r, "dm", { t: "scene.create", scene } as Op);
+      answers.push(got);
+      if (got !== "taken") break;
+    }
+    const refused = answers.at(-1);
+    assert.deepEqual(refused, { code: "quota", message: PER_PLAYER_FULL }, `refused after ${answers.length - 1} scenes`);
+    // Six players' widest layers on every such scene, not the two on the roster: the roster's two take 19 such scenes to the
+    // 8 MiB line, and six at the 11 MiB line about 9.
+    assert.ok(answers.length - 1 < 15, `the far line at the widest refuses early: ${answers.length - 1} scenes taken`);
+  });
+
+  test("D11: a scene change in a room at its near line answers as today, its reserve refusal included, and a move back to the played scene is taken", async (t) => {
+    const state = room();
+    state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true, vision: { on: true, light: "bright" } };
+    state.scenes.s2 = { ...state.scenes.s2!, fogEnabled: true, vision: { on: true, light: "bright" }, bounds: { w: LIMITS.sceneCells, h: LIMITS.sceneCells } };
+    state.playedScenes = { s1: { sceneId: "s1", rev: 0 } };
+    for (let i = 0; i < 60; i++) state.tokens[`dmt${i}`] = token(`dmt${i}`, { name: "Goblin", visibility: "dm", notes: "x".repeat(4_000) });
+    const r = await opened(t, state, "R", { sizeLimits: { stateLimit: 400_000 } });
+    assert.deepEqual(await answer(r, "dm", { t: "room.setPlayerScene", sceneId: "s2" }), { code: "quota", message: NO_ROOM_TO_EXPLORE });
+    assert.equal(await answer(r, "dm", { t: "room.setPlayerScene", sceneId: "s1" }), "taken");
   });
 });
