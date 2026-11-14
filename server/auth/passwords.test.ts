@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { BusyError, PasswordHasher, passwordProblem, Semaphore } from "./passwords.ts";
+import { BusyError, PasswordHasher, passwordList, passwordProblem, Semaphore } from "./passwords.ts";
 
 describe("password policy", () => {
   test("needs at least 8 characters, counted as code points", () => {
@@ -22,6 +22,13 @@ describe("password policy", () => {
 
   test("refuses absurd lengths", () => {
     assert.equal(passwordProblem("a".repeat(129)), "too_long");
+  });
+
+  test("reads the list the same with CRLF line ends, as a Windows checkout may write it", () => {
+    const lines = ["# The header", "password", "Baseball1", "qwertyuiop", ""];
+    const expected = new Set(["password", "baseball1", "qwertyuiop"]);
+    assert.deepEqual(passwordList(lines.join("\n")), expected);
+    assert.deepEqual(passwordList(lines.join("\r\n")), expected);
   });
 });
 
