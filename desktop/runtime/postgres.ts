@@ -539,9 +539,11 @@ export class Cluster {
    * Proof, by process identity, that no postmaster of this data folder runs:
    * after a pg_ctl start that failed or was cancelled, and at a stop once
    * this process has launched one. pg_ctl starts the postmaster before
-   * postmaster.pid exists, and on Windows a pg_ctl ended at its limit leaves
-   * the restricted copy of itself running, so neither the file nor pg_ctl's
-   * exit is evidence. Each postmaster found is stopped (endPass), and the
+   * postmaster.pid exists, and on Windows a pg_ctl ended at its limit
+   * leaves the cmd.exe it started the postmaster through, and the
+   * postmaster, running, so neither the file nor pg_ctl's exit is evidence.
+   * The listing finds that postmaster as postgres.exe whatever started it.
+   * Each postmaster found is stopped (endPass), and the
    * listing is read again until it shows none. No timer ends this: while
    * the listing fails, or a postmaster outlives its kill, the lock stays
    * held and the status says RaccoonVTT can't confirm PostgreSQL ended
