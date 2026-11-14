@@ -143,6 +143,7 @@ const ERROR_WORDS: Record<string, string[]> = {
   noReadableBackup: ["No backup this version can read is on this computer. Install 0.6.0 or later to open your rooms.", "Download the latest version"],
   backupBeforeUpdateFailed: ["The backup before the update failed: the disk is full. Your rooms are untouched.", "Try again", "Start without a backup"],
   stalled: ["Starting the database has not reported progress for 180 s. RaccoonVTT goes on when it ends, and the logs may say why it is slow.", "Show logs"],
+  endUnconfirmed: ["RaccoonVTT can't confirm that PostgreSQL has ended, so it keeps the data folder locked and keeps checking. The logs say why.", "Show logs"],
 };
 for (const key of Object.keys(ERRORS)) EXPECT[`error-${key}`] = ERROR_WORDS[key] ?? [];
 

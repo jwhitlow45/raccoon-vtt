@@ -93,6 +93,7 @@ export const ERRORS: Record<string, AppError> = {
   noReadableBackup: { kind: "noReadableBackup", dataApp: "0.6.0" },
   backupBeforeUpdateFailed: { kind: "backupBeforeUpdateFailed", reason: "the disk is full" },
   stalled: { kind: "stalled", what: "starting the database", seconds: 180 },
+  endUnconfirmed: { kind: "endUnconfirmed" },
 };
 
 /** Errors only the shell can raise, so they show with no supervisor status. */

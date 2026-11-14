@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile, readlink } from "node:fs/promises";
+import { readFile, readdir, readlink } from "node:fs/promises";
 import { promisify } from "node:util";
 import type { Platform } from "../contract.ts";
 
@@ -194,4 +194,68 @@ export async function stillRunning(id: ProcessIdentity, platform: Platform = pro
   if ((await bootId(platform)) !== id.boot) return false;
   const start = await processStamp(id.pid, platform);
   return start !== null && start === id.start;
+}
+
+/** A process as a listing shows it: its pid, and its command line with the arguments joined by spaces. */
+export type ListedProcess = { pid: number; commandLine: string };
+
+/** `ps -o pid=,command=` lines. */
+export function parsePsList(stdout: string): ListedProcess[] {
+  const out: ListedProcess[] = [];
+  for (const line of stdout.split("\n")) {
+    const m = /^\s*(\d+) (.*)$/.exec(line);
+    if (m) out.push({ pid: Number(m[1]), commandLine: m[2] as string });
+  }
+  return out;
+}
+
+/** The script's JSON array of `{ pid, line }`. Anything else is a listing that failed. */
+export function parseWindowsList(stdout: string): ListedProcess[] {
+  const rows: unknown = JSON.parse(stdout.trim());
+  if (!Array.isArray(rows)) throw new Error(`the process listing was not a list: ${stdout.trim().slice(0, 200)}`);
+  return rows.map((row: { pid?: unknown; line?: unknown }) => {
+    if (typeof row?.pid !== "number" || typeof row.line !== "string") throw new Error(`the process listing had a row it can't read: ${JSON.stringify(row)}`);
+    return { pid: row.pid, commandLine: row.line };
+  });
+}
+
+/**
+ * The processes running now, with their command lines, to tell a process
+ * by what it is rather than by a pid a file names. Linux reads each
+ * /proc/<pid>/cmdline, exact bytes. macOS reads ps in a UTF-8 locale: in the
+ * C locale ps escapes every other byte, so a data folder named "Tést" would
+ * never match. Windows asks Win32_Process for postgres.exe alone, and
+ * leaves out a process whose command line it can't read: that is another
+ * user's, so nothing this user started. A listing that fails throws, since
+ * it proves nothing either way.
+ */
+export async function listProcesses(platform: Platform = process.platform as Platform): Promise<ListedProcess[]> {
+  if (platform === "linux") {
+    const out: ListedProcess[] = [];
+    for (const name of await readdir("/proc")) {
+      if (!/^\d+$/.test(name)) continue;
+      let raw: Buffer;
+      try {
+        raw = await readFile(`/proc/${name}/cmdline`);
+      } catch {
+        // It ended between the folder's listing and this read.
+        continue;
+      }
+      const args = raw.toString("utf8").replace(/\0+$/, "");
+      if (args !== "") out.push({ pid: Number(name), commandLine: args.split("\0").join(" ") });
+    }
+    return out;
+  }
+  if (platform === "darwin") {
+    const { stdout } = await run("/bin/ps", ["-ww", "-axo", "pid=,command="], { env: { ...process.env, LC_ALL: "en_US.UTF-8" }, maxBuffer: 64 * 1024 * 1024, timeout: 30_000 });
+    return parsePsList(stdout);
+  }
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false",
+    "$rows = @(Get-CimInstance Win32_Process -Filter \"Name = 'postgres.exe'\" | Where-Object { $_.CommandLine } | ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; line = [string]$_.CommandLine } })",
+    "ConvertTo-Json -Compress -InputObject $rows",
+  ].join("; ");
+  const { stdout } = await run(powershell(), ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true, timeout: POWERSHELL_LIMIT_MS, maxBuffer: 16 * 1024 * 1024 });
+  return parseWindowsList(stdout);
 }

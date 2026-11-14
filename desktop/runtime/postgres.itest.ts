@@ -106,6 +106,14 @@ describe("the cluster", () => {
     assert.equal(dbConfig("postgres://x", RESTORE_STATEMENT_MS).statement_timeout, RESTORE_STATEMENT_MS);
   });
 
+  test("the process listing knows the running postmaster by its command line, as the one postmaster.pid names, and the stop proves it ended", async () => {
+    const c = await cluster();
+    const pid = Number((await readFile(join(c.dir, "postgres", "postmaster.pid"), "utf8")).split(/\r?\n/)[0]);
+    assert.deepEqual(await c.cluster.postmasters(), [pid], "this folder's postmaster, and no other postgres process");
+    await c.cluster.stop();
+    assert.deepEqual(await c.cluster.postmasters(), []);
+  });
+
   test("initdb uses the C locale and the builtin C.UTF-8 provider, and listens on loopback only with no socket file", async () => {
     const c = await cluster();
     const pool = c.pool();

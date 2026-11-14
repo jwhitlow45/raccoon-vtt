@@ -65,11 +65,13 @@ export type SupervisorDeps = {
     bundledMajor(): Promise<number>;
     dataMajor(): Promise<number | null>;
     needsInit(): boolean;
-    init(signal?: AbortSignal): Promise<void>;
+    /** Never cancelled: a Quit waits for it (postgres.ts init). */
+    init(): Promise<void>;
     leftover(): Promise<Leftover>;
     clearLeftover(found: Leftover): Promise<void>;
-    /** Throws an error with `logLine` when the database does not start, after stopping any postmaster it launched. */
+    /** Throws an error with `logLine` when the database does not start, only once no postmaster it launched runs. */
     start(signal?: AbortSignal): Promise<void>;
+    /** Answers only once no postmaster this process launched runs, however long that takes to confirm. */
     stop(): Promise<void>;
     alive(): Promise<boolean>;
   };
@@ -164,10 +166,11 @@ export type StartPart = keyof typeof START_PARTS;
 /**
  * Whether a headless supervisor with no shell should end on this status: a
  * stop, which needs someone to act on it. `stalled` is no stop, since the
- * start still waits for its part and goes on when it ends.
+ * start still waits for its part and goes on when it ends, and nor is
+ * `endUnconfirmed`, which holds the lock until PostgreSQL's end is proven.
  */
 export function endsHeadless(status: SupervisorStatus): boolean {
-  return status.state === "error" && status.error?.kind !== "stalled";
+  return status.state === "error" && status.error?.kind !== "stalled" && status.error?.kind !== "endUnconfirmed";
 }
 
 /** What a part's work is handed: the stop's signal, which ends what can end early, and a progress call for a part that reports one. */
@@ -204,6 +207,8 @@ export class Supervisor {
   private lastEmitted = "";
   /** The words of a part past its bound with nothing done, while the start still waits for it. */
   private stalled: string | null = null;
+  /** Set while the cluster can't confirm that PostgreSQL ended (postgres.ts proveEnded), which holds the lock. */
+  private endUnconfirmedOn = false;
   /** Aborted by stop(), so the parts that can end early do. */
   private readonly cancel = new AbortController();
 
@@ -235,9 +240,11 @@ export class Supervisor {
   // Status
 
   status(): SupervisorStatus {
+    // An unconfirmed end shows over whatever the supervisor is doing, which waits on it.
+    const unconfirmed = this.endUnconfirmedOn;
     return {
-      state: this.state,
-      step: this.step,
+      state: unconfirmed ? "error" : this.state,
+      step: unconfirmed ? null : this.step,
       appVersion: this.d.build.app,
       settings: { ...(this.settings ?? DEFAULT_SETTINGS), networkPlay: this.networkPlay(), ...(this.d.overrides.port ? { port: this.d.overrides.port } : {}) },
       port: this.port,
@@ -251,11 +258,23 @@ export class Supervisor {
       backingUp: this.backingUp,
       lastBackup: this.lastBackup,
       restore: this.restoreStep,
-      error: this.error,
+      error: unconfirmed ? { kind: "endUnconfirmed" } : this.error,
       notice: this.notice,
       paths: this.d.paths,
       ...(this.percent !== undefined ? { percent: this.percent } : {}),
     };
+  }
+
+  /**
+   * The cluster says whether it can confirm that PostgreSQL ended. While it
+   * can't, the status says so, and the start or the stop waiting on it
+   * holds the lock.
+   */
+  endUnconfirmed(on: boolean): void {
+    if (on === this.endUnconfirmedOn) return;
+    this.endUnconfirmedOn = on;
+    this.d.log(on ? "status: PostgreSQL's end can't be confirmed, so the data folder stays locked" : "status: PostgreSQL's end is confirmed");
+    this.emit();
   }
 
   private emit(): void {
@@ -416,7 +435,7 @@ export class Supervisor {
       }
       if (this.d.pg.needsInit()) {
         this.set("starting", "initdb");
-        await this.part("initdb", (job) => this.d.pg.init(job.signal));
+        await this.part("initdb", () => this.d.pg.init());
       }
       this.set("starting", "startDatabase");
       try {
@@ -845,10 +864,11 @@ export class Supervisor {
   stop(): Promise<void> {
     this.stopping ??= (async () => {
       for (const timer of [this.crashTimer, this.backupTimer, this.pgTimer, this.addressTimer]) timer?.cancel();
-      // What can end early ends now: initdb, a starting PostgreSQL (stopped
-      // through pg_ctl stop) and a restore's end between its steps. The rest
-      // is waited for, since a start keeps the queue until its part's work
-      // has ended, and the lock goes only after.
+      // What can end early ends now: a starting PostgreSQL (stopped by
+      // process identity) and a restore's end between its steps. The rest,
+      // initdb included, is waited for, since a start keeps the queue until
+      // its part's work has ended, and the lock goes only after PostgreSQL's
+      // end is proven (pg.stop()).
       this.cancel.abort();
       await this.enqueue(async () => {
         this.set("stopping", "stopping");

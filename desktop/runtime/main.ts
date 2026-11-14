@@ -122,6 +122,7 @@ async function theCluster(): Promise<Cluster> {
     platform,
     pgPath: pgFolders.map,
     log,
+    unconfirmed: (on) => supervisor.endUnconfirmed(on),
   });
   return cluster;
 }
@@ -228,7 +229,7 @@ const deps: SupervisorDeps = {
     bundledMajor: async () => (await theCluster()).bundledMajor(),
     dataMajor: async () => (await theCluster()).dataMajor(),
     needsInit: () => (cluster as Cluster).needsInit(),
-    init: async (signal) => (await theCluster()).init(signal),
+    init: async () => (await theCluster()).init(),
     leftover: async () => (await theCluster()).leftover(),
     clearLeftover: async (found) => (await theCluster()).clearLeftover(found),
     async start(signal) {

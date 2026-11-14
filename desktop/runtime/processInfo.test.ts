@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { realpathSync } from "node:fs";
 import { uptime } from "node:os";
 import { basename } from "node:path";
-import { bootId, isAlive, linkedProgram, parseStatusUid, parseWindowsProcess, processFacts, processStamp, processStart, selfIdentity, stillRunning } from "./processInfo.ts";
+import { bootId, isAlive, linkedProgram, listProcesses, parsePsList, parseStatusUid, parseWindowsList, parseWindowsProcess, processFacts, processStamp, processStart, selfIdentity, stillRunning } from "./processInfo.ts";
 
 /**
  * A process is its pid, its start time and its boot (docs/design/design-v1-local-app.md
@@ -82,4 +82,28 @@ test("the readings that need no special rights parse: /proc's Uid line and Windo
   assert.deepEqual(parseWindowsProcess('{"name":"postgres.exe","created":""}'), { exe: "postgres.exe", start: null });
   assert.deepEqual(parseWindowsProcess(""), { exe: null, start: null });
   assert.deepEqual(parseWindowsProcess("Get-CimInstance : Access denied"), { exe: null, start: null });
+});
+
+test("the process listing shows a process's whole command line, a folder named in any script included", { skip: platform === "win32" && "Windows lists postgres.exe alone" }, async () => {
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => undefined, 5000)", "--", "-D", "/data/Tést Жук/postgres"], { stdio: "ignore" });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const listed = (await listProcesses(platform)).find((p) => p.pid === child.pid);
+    assert.ok(listed, "the child is listed");
+    assert.ok(listed.commandLine.endsWith(" -D /data/Tést Жук/postgres"), listed.commandLine);
+  } finally {
+    child.kill("SIGKILL");
+  }
+});
+
+test("a listing reads ps's lines, and Windows' JSON list, and refuses anything else as a failed listing", () => {
+  assert.deepEqual(parsePsList("  12 /opt/pg/bin/postgres -D /d/postgres -p 5\n345 sh\n\n"), [
+    { pid: 12, commandLine: "/opt/pg/bin/postgres -D /d/postgres -p 5" },
+    { pid: 345, commandLine: "sh" },
+  ]);
+  assert.deepEqual(parseWindowsList("[]\r\n"), []);
+  assert.deepEqual(parseWindowsList('[{"pid":7,"line":"\\"C:\\\\pg\\\\postgres.exe\\" -D \\"C:/d/postgres\\""}]'), [{ pid: 7, commandLine: '"C:\\pg\\postgres.exe" -D "C:/d/postgres"' }]);
+  assert.throws(() => parseWindowsList('{"pid":7,"line":"x"}'), /not a list/);
+  assert.throws(() => parseWindowsList('[{"pid":"7","line":"x"}]'), /can't read/);
+  assert.throws(() => parseWindowsList(""));
 });
