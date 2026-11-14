@@ -122,17 +122,19 @@ export class IdGate {
 
   /**
    * The clock's one check on ids recorded without the gate (shared/protocol.ts
-   * ID_RULES `recorded`): a version 7 id the room holds no row for may be
-   * dated any time before now, as a group save's plan applied long after it
-   * was made, but no further ahead than a minted id may be. So no row one
-   * gets is held past a minted id's, and only an old room's first load
-   * (seedRows) holds rows longer.
+   * ID_RULES `recorded`): a version 7 id may be dated any time before now,
+   * as a group save's plan applied long after it was made, but no further
+   * ahead than a minted id may be. So no row one gets is held past a minted
+   * id's, and only an old room's first load (seedRows) holds rows longer.
+   * Like step 2 it reads no row, since it runs before the sender's
+   * permissions: a plan applied again is answered by its receipt before
+   * the gate.
    */
   checkRecorded(ids: readonly string[]): IdVerdict {
     const latest = this.#now() + ID_TIME.aheadMs;
     for (const id of ids) {
       const time = idTime(id);
-      if (time !== null && time > latest && !this.taken(id)) return { ok: false, code: "invalid", message: ID_TIME_REFUSED };
+      if (time !== null && time > latest) return { ok: false, code: "invalid", message: ID_TIME_REFUSED };
     }
     return { ok: true };
   }

@@ -270,6 +270,21 @@ describe("an id answers P1 alike whatever became of its thing", () => {
     same(pair, "the old id");
   });
 
+  test("C4: P1's group save naming a hidden condition's id dated ten years ahead, which an old room keeps in A alone and seeds at its first load, answers alike in both, at once and after a restart", async (t) => {
+    const old = PLAYER_LIMITS_SNAPSHOT_VERSION - 1;
+    const far = idAt(rng(405), T0 + 10 * 365 * 24 * 60 * MINUTE);
+    const a = limitsRoom();
+    a.characters[AYLA] = { ...a.characters[AYLA]!, actor: { ...a.characters[AYLA]!.actor, effects: [{ id: far, key: "frightened", hiddenFromPlayers: true }] } };
+    const pair = await openTwins(t, a, limitsRoom(), { a: [far] }, {}, { version: old, since: T0 - 60 * MINUTE });
+    assert.deepEqual(pair.ids.map((table) => table.rows.some((r) => r.id === far)), [true, false], "the seed is A's alone");
+    const outcome = (room: Room): Op => ({ t: "actor.outcome", plan: mint.next(room), label: "Hold Person", targets: [{ target: { characterId: AYLA }, effects: [{ id: far, key: "paralyzed" }] }] }) as Op;
+    assert.deepEqual(await bothAnswer(pair, "p1", outcome, "at once"), STALE);
+    same(pair, "at once");
+    await each(pair, (room) => room.restart(false));
+    assert.deepEqual(await bothAnswer(pair, "p1", outcome, "after a restart"), STALE);
+    same(pair, "after a restart");
+  });
+
   test("C6: P1's 2,001st id in 30 minutes meets the words in both, and the count stays alike after the DM hides half of P1's things in A, deletes them in B, and a restart", async (t) => {
     // Three characters of P1's, so one op can bring 32 conditions for each.
     const heroes = [AYLA, "cade", "dara"];
