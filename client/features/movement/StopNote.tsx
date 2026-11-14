@@ -146,7 +146,7 @@ export function StopNoteHost(props: { scene: Scene; chrome: ChromeCamera; viewpo
   // The whole sentence, wrapped: it says what stopped the walk. It alone is the status a screen reader hears when the note comes, not Close or the help.
   const status = (
     <span role="status" aria-live="polite">
-      {stopText({ blocker: note.blocker, door: noteDoor(chunks, note.sceneId, note.door, fog, sceneGrid(props.scene)), searched: note.searched, capped: note.capped, follower: note.follower })}
+      {stopText({ blocker: note.blocker, door: noteDoor(chunks, note.sceneId, note.door, fog, sceneGrid(props.scene)), searched: note.searched, capped: note.capped, follower: note.follower, creature: note.creature })}
     </span>
   );
   // The note's one action, so the primary (docs/design/design-v1-visual.md 2.3). The help is its description, read with it.

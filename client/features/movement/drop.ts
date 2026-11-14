@@ -218,6 +218,8 @@ export type Stop = {
   capped?: true;
   /** The creature the walker drags beside it that cannot follow where the walker alone would go, by the name players see (docs/design/design-v1-attach.md 4.2). */
   follower?: string;
+  /** Else a creature the walker cannot pass whose space closes the only way (docs/design/design-v1-movement.md 4.3), by the name the board shows this viewer. */
+  creature?: string;
   /** Where a free drop let the token go between squares, which "Teleport here" lands it at (free.ts). */
   drawnAt?: Point;
 };
@@ -572,7 +574,7 @@ export function heardStop(state: DropView, walker: Walker, to: LegEnd, stopped: 
 }
 
 /** What a lone drag's route search answered for the drop's spot (routeDrag.ts): the straight leg, a route, or no route. */
-export type Found = { kind: "open" } | { kind: "route"; route: Pick<WalkRoute, "pieces"> } | { kind: "none"; capped: boolean; follower?: string };
+export type Found = { kind: "open" } | { kind: "route"; route: Pick<WalkRoute, "pieces"> } | { kind: "none"; capped: boolean; follower?: string; creature?: string };
 
 /**
  * The spot a lone drop's route aims at (docs/design/design-v1-movement.md 3.1):
@@ -661,7 +663,7 @@ type Landing = { pieces: RoutePiece[]; at: Point & { squeeze?: boolean }; points
  * search found no route, or one `routeLanding` will not take. The board's
  * picture and the drop read it alike.
  */
-export function goesStraight(state: DropView, token: DropToken, target: Point & { squeeze?: boolean }, answer: Found | { kind: "searching" }, feetPerCell: number): boolean {
+export function goesStraight(state: DropView, token: DropToken, target: Point & { squeeze?: boolean }, answer: Exclude<Found, { kind: "none" }> | { kind: "none" | "searching" }, feetPerCell: number): boolean {
   return answer.kind === "none" || (answer.kind === "route" && !routeLanding(state, token, target, answer.route.pieces, feetPerCell));
 }
 
@@ -1122,11 +1124,18 @@ export function moveOpsOf(moves: readonly Landed[]): ClientOp[] {
  * walker drags beside it cannot follow (Found `follower`): held where the
  * straight walk is, at the walker's own wall or where that creature meets
  * one, and naming it (docs/design/design-v1-attach.md 4.2, review LP12-AT-2).
+ * Else, where a creature the walker cannot pass closes the way (Found
+ * `creature`), naming that one as the board shows it to this viewer, since
+ * a wall named there is not what stops the walk (LP40-MOVE-2).
  */
 export function namedFollower(state: DropView, labels: Labels, plan: DropPlan, found: Found): DropPlan {
-  if (found.kind !== "none" || found.follower === undefined || !plan.stop) return plan;
-  const follower = state.tokens[found.follower];
-  return { ...plan, stop: { ...plan.stop, searched: true, follower: follower ? displayName(follower, labels) : "A creature you drag" } };
+  if (found.kind !== "none" || !plan.stop) return plan;
+  if (found.follower !== undefined) {
+    const follower = state.tokens[found.follower];
+    return { ...plan, stop: { ...plan.stop, searched: true, follower: follower ? displayName(follower, labels) : "A creature you drag" } };
+  }
+  const creature = found.creature !== undefined ? state.tokens[found.creature] : undefined;
+  return creature ? { ...plan, stop: { ...plan.stop, searched: true, creature: displayName(creature, labels) } } : plan;
 }
 
 /** What the map says while a drag is held at a wall or a ledge, or where a creature it drags finds no way through with it. */
@@ -1140,10 +1149,12 @@ export function holdLabel(blocker: StopBlocker, noWay = false): string {
  * whose search found no way says so (docs/design/design-v1-movement.md 3.1),
  * after "Too far to work out a way around" when the search gave up, and
  * names the creature it drags that cannot follow when that is why
- * (docs/design/design-v1-attach.md 4.2).
+ * (docs/design/design-v1-attach.md 4.2), or the creature that closes the
+ * way.
  */
-export function stopText(stop: Pick<Stop, "blocker" | "door" | "searched" | "capped" | "follower">): string {
+export function stopText(stop: Pick<Stop, "blocker" | "door" | "searched" | "capped" | "follower" | "creature">): string {
   if (stop.follower !== undefined) return `${stop.follower} can't follow through there.`;
+  if (stop.creature !== undefined) return `${stop.creature} is in the way.`;
   const far = stop.capped ? "Too far to work out a way around. " : "";
   if (stop.blocker === "unknown") return `${far}${SOMETHING_BLOCKS}`;
   if (stop.door) return `${far}A door is in the way. Tap it to open.`;

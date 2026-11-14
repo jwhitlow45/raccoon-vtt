@@ -112,9 +112,12 @@ function sameBasis(a: Basis, b: Basis): boolean {
 
 
 
-/** The search's answer as the planner takes it. A search still running has none yet. */
-function found(answer: Exclude<RouteAnswer, { kind: "searching" }>): Found {
-  return answer.kind === "route" ? { kind: "route", route: answer.route } : answer;
+/** The search's answer as the planner takes it, the creature that closes the way by its token, read from the world searched. A search still running has none yet. */
+function found(answer: Exclude<RouteAnswer, { kind: "searching" }>, world: PublicWorld | null): Found {
+  if (answer.kind !== "none") return answer.kind === "route" ? { kind: "route", route: answer.route } : answer;
+  const { creature, ...none } = answer;
+  const id = creature !== undefined ? world?.spaces[creature]?.id : undefined;
+  return id !== undefined ? { ...none, creature: id } : none;
 }
 
 
@@ -373,8 +376,8 @@ export function dragStops(deps: DragDeps): DragStops {
     const stop: Hold | null = cut ?? memo.stop;
     if (stop) node.position(drawnThere(token, stop.at));
     holdAt(memo.lands, cut);
-    // No way the creatures it drags can follow: the hold says so, and the drop's note names the one left behind (drop.ts namedFollower).
-    const noWay = answer.kind === "none" && answer.follower !== undefined;
+    // No way the creatures it drags can follow, or one that closes the way: the hold says so, and the drop's note names it (drop.ts namedFollower).
+    const noWay = answer.kind === "none" && (answer.follower !== undefined || answer.creature !== undefined);
     setHold(stop ? { tokenId: token.id, at: stop.at, blocker: stop.blocker, ...(noWay ? { noWay: true as const } : {}) } : null);
   };
 
@@ -550,7 +553,7 @@ export function dragStops(deps: DragDeps): DragStops {
                 }
               : undefined;
             const nowMode = dropMode(role, now.scenes[token.sceneId]);
-            const searched = found(answer);
+            const searched = found(answer, world);
             placed(now, namedFollower(now, labelsOf(store.getState()), cutForWalkers(now, token, planWalk(now, token, at, nowMode, searched, now.meta.settings.feetPerCell, account), walkersFor(now, token.id, role), nowMode), searched));
           });
         });
