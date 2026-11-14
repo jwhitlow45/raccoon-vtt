@@ -1518,7 +1518,10 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
       return new Promise<void>((done) => w.requestAnimationFrame(() => w.requestAnimationFrame(done)));
     });
     assert.equal(await popup.count(), 0, "a handout already showing popped up as the preview opened");
-    await ops.send({ t: "handout.show", handout: { id: shown, pages: doc.pages, title: doc.title, to: "all" } });
+    // A showing's id is taken once, so the DM hides it and shows it anew under a new id, as Recent does.
+    await ops.send({ t: "handout.close", handoutId: shown });
+    const again = uuidv7();
+    await ops.send({ t: "handout.show", handout: { id: again, pages: doc.pages, title: doc.title, to: "all" } });
     await popup.waitFor();
     await indicatorIs(popup, "1 of 3", "the preview's popup");
     for (const n of [1, 2, 3]) assert.equal(await popup.getByRole("img", { name: `Second letter, page ${n} of 3`, exact: true }).count(), 1, `page ${n} in the preview`);
@@ -1526,7 +1529,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await popup.getByRole("button", { name: /^Close/ }).click();
     await preview.getByRole("button", { name: "Exit" }).click();
     await preview.waitFor({ state: "detached" });
-    await ops.send({ t: "handout.close", handoutId: shown });
+    await ops.send({ t: "handout.close", handoutId: again });
   });
 
   test("14. every Library tile opens the viewer: the DM's image with its details and Delete in the header, focus on the next tile after, and a player's with neither (8.4)", async () => {
@@ -1873,7 +1876,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await recentRow("Show Cragmaw map to Pat");
   });
 
-  test("qe-2. a document shown to Pip and Pat lists as Document, and its re-show sends its pages as they are now, reordered and one gone, to the same two", async () => {
+  test("qe-2. a document shown to Pip and Pat lists as Document, and its re-show sends its pages to the same two", async () => {
     const doc = await documentOf("Ledger", [await paper(500, 700, 1), await paper(500, 700, 2), await paper(500, 700, 3)]);
     const shown = await showByForm({ kind: "doc", title: "Ledger", pages: 3 }, "Ledger", ["Pip", "Pat"]);
     assert.deepEqual(new Set(shown.to === "all" ? [] : shown.to), new Set([run.pipId, run.patId]));
@@ -1883,15 +1886,12 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     const row = await recentRow(/^Show Ledger to (Pip and Pat|Pat and Pip)$/);
     const item = row.locator("xpath=ancestor::li[1]");
     await item.getByText("Document", { exact: true }).waitFor();
-    // No control edits a saved document's pages, so the room's own ops stand in: the document saved again under its id with page 3 first and page 2 gone.
-    const changed = [doc.pages[2]!, doc.pages[0]!];
-    await ops.send({ t: "handoutDoc.delete", docId: doc.id });
-    await ops.send({ t: "handoutDoc.create", doc: { id: doc.id, title: doc.title, pages: changed } });
-    await waitFor("the changed document in the DM's state", () => (dmSocket.state?.handoutDocs[doc.id]?.pages.length === 2 ? true : null));
+    // No control edits a saved document's pages, and its id is taken once, so it can never be saved again with others.
+    // A re-show of pages that changed is client/features/handouts/recent.test.ts's.
     const before = new Set(Object.keys(dmSocket.state?.handouts ?? {}));
     await (await recentRow(/^Show Ledger to (Pip and Pat|Pat and Pip)$/)).click();
     const again = await waitFor("the document shown again", () => Object.values(dmSocket.state?.handouts ?? {}).find((h) => h !== undefined && !before.has(h.id)));
-    assert.deepEqual((again.pages ?? []).map((p) => p.assetId), changed.map((p) => p.assetId), "the re-show sent the pages as they were, not as they are");
+    assert.deepEqual((again.pages ?? []).map((p) => p.assetId), doc.pages.map((p) => p.assetId), "the re-show sent other pages than the document's");
     assert.deepEqual(new Set(again.to === "all" ? [] : again.to), new Set([run.pipId, run.patId]), "the re-show changed its audience");
     await ops.send({ t: "handout.close", handoutId: again.id });
     await recentRow(/^Show Ledger to (Pip and Pat|Pat and Pip)$/);
