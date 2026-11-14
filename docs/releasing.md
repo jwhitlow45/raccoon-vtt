@@ -275,13 +275,12 @@ checks and the Windows x64 and Linux x64 installers on its own.
 
 The checks run what CI on Ubuntu cannot: the desktop packages' typecheck,
 the unit and integration tests on Windows, the server's integration tests
-against the bundled PostgreSQL, and the desktop app's own tests. On Windows
-they report failures without failing the run until they pass. Before the
-first desktop release, make them a gate: set `"report-only":false` for
-`windows-2025-vs2026` in the plan job's list of checks. Then check on a real Mac
-what CI cannot: download the arm64 DMG from a dry run in Safari, open the
-app, approve it with **Open Anyway**, and see the database start with no
-further prompt.
+against the bundled PostgreSQL, and the desktop app's own tests. A
+failure fails the run, except in the app's own unit and integration
+suites on Windows, which only report. Before the first desktop release,
+check on a real Mac what CI cannot: download the arm64 DMG from a dry run
+in Safari, open the app, approve it with **Open Anyway**, and see the
+database start with no further prompt.
 
 Dependabot proposes updates to the desktop packages (`desktop/package.json`)
 apart from the server's. CI does not install them, so push an update's
