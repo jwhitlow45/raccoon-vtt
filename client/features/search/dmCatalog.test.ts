@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { preloadLazies, type Network } from "../../lib/retryableLazy.ts";
@@ -98,6 +98,11 @@ describe("nothing but dmCatalog.ts imports catalog/dm.ts, and nothing but catalo
   ].map((f) => resolve(client, f));
   const SPEC = /\b(?:import|export)\s+(?:type\s+)?(?:[^'";]*?\bfrom\s*)?["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/g;
 
+  /** The path under client/ with forward slashes, as the expected names are written, on Windows too. */
+  function rel(path: string): string {
+    return relative(client, path).split(sep).join("/");
+  }
+
   function sources(dir: string): string[] {
     const out: string[] = [];
     for (const d of readdirSync(dir, { withFileTypes: true })) {
@@ -132,7 +137,7 @@ describe("nothing but dmCatalog.ts imports catalog/dm.ts, and nothing but catalo
   test("only dmCatalog.ts refers to it, by one dynamic import", () => {
     const found: string[] = [];
     for (const path of sources(client)) {
-      for (const ref of references(path, readFileSync(path, "utf8"))) found.push(`${relative(client, path)} ${ref.dynamic ? "dynamic" : "static"}`);
+      for (const ref of references(path, readFileSync(path, "utf8"))) found.push(`${rel(path)} ${ref.dynamic ? "dynamic" : "static"}`);
     }
     assert.deepEqual(found, ["features/search/dmCatalog.ts dynamic"]);
   });
@@ -141,9 +146,9 @@ describe("nothing but dmCatalog.ts imports catalog/dm.ts, and nothing but catalo
     for (const file of DM_ENTRY_FILES) {
       const found: string[] = [];
       for (const path of sources(client)) {
-        for (const ref of references(path, readFileSync(path, "utf8"), file)) found.push(`${relative(client, path)} ${ref.dynamic ? "dynamic" : "static"}`);
+        for (const ref of references(path, readFileSync(path, "utf8"), file)) found.push(`${rel(path)} ${ref.dynamic ? "dynamic" : "static"}`);
       }
-      assert.deepEqual(found, ["features/search/catalog/dm.ts static"], relative(client, file));
+      assert.deepEqual(found, ["features/search/catalog/dm.ts static"], rel(file));
     }
   });
 });
