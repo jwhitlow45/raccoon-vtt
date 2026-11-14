@@ -123,6 +123,14 @@ export type RestoreContext = {
   floorBytes: number;
   readRecord(name: string): Promise<BackupRecord | null>;
   readList?(name: string): Promise<string[] | null>;
+  /**
+   * Called after each image and each database step, with how far a run of
+   * image calls has got, so a caller can tell slow work from work that has
+   * stopped, and say how far it is.
+   */
+  progress?(done?: number, total?: number): void;
+  /** Ends recovery between two steps, each of which a crash could end at too. */
+  signal?: AbortSignal;
 };
 
 // ---------------------------------------------------------------------------
@@ -190,6 +198,8 @@ export async function recover(ctx: RestoreContext): Promise<RecoveryResult> {
   const first = await ctx.journal.read();
   const backup = first?.backup ?? null;
   for (let step = 0; step < 12; step++) {
+    ctx.signal?.throwIfAborted();
+    ctx.progress?.();
     const journal = await ctx.journal.read();
     const action = planRecovery(await ctx.db.state(), journal);
     ctx.log(`restore recovery: ${action.do}${journal ? ` (journal ${journal.state})` : ""}`);
@@ -219,19 +229,17 @@ export async function recover(ctx: RestoreContext): Promise<RecoveryResult> {
         notice = "restoreFinished";
         break;
       case "dropRestoring":
-        await ctx.db.endSessions([RESTORING]);
-        await ctx.db.drop(RESTORING);
+        await guarded(ctx, [RESTORING], (s) => s.live !== null && s.restoring !== null && !s.before, () => ctx.db.drop(RESTORING));
         break;
       case "renameBeforeBack":
-        await ctx.db.endSessions([BEFORE, RESTORING]);
-        await ctx.db.rename(BEFORE, LIVE);
-        if (action.dropRestoring) await ctx.db.drop(RESTORING);
-        if (action.deleteJournal) await ctx.journal.delete();
-        notice = "restoreInterrupted";
+        if (await guarded(ctx, [BEFORE, RESTORING], (s) => s.live === null && s.before, () => ctx.db.rename(BEFORE, LIVE))) {
+          if (action.dropRestoring) await guarded(ctx, [RESTORING], (s) => s.live !== null && s.restoring !== null && !s.before, () => ctx.db.drop(RESTORING));
+          if (action.deleteJournal) await ctx.journal.delete();
+          notice = "restoreInterrupted";
+        }
         break;
       case "renameRestoringToLive":
-        await ctx.db.endSessions([RESTORING]);
-        await ctx.db.rename(RESTORING, LIVE);
+        await guarded(ctx, [RESTORING], (s) => s.live === null && s.restoring?.tag?.kind === "restored", () => ctx.db.rename(RESTORING, LIVE));
         break;
       case "finish":
         await checkImagesForFinish(ctx, journal);
@@ -265,6 +273,26 @@ async function checkImagesForFinish(ctx: RestoreContext, journal: RestoreJournal
 
 // ---------------------------------------------------------------------------
 // Steps
+
+/**
+ * A drop or rename recovery makes, run only if the databases still are what
+ * it was chosen from, read again after the sessions are ended and just
+ * before it. A state read before an await can be out of date by then, and
+ * a drop chosen from one could take the only copy of the data. Answers
+ * whether it ran. The supervisor never runs two recoveries at once, so this
+ * is the second guard, not the first (D-261114-026).
+ */
+async function guarded(ctx: RestoreContext, sessions: DbName[], still: (s: DbState) => boolean, act: () => Promise<void>): Promise<boolean> {
+  await ctx.db.endSessions(sessions);
+  const s = await ctx.db.state();
+  if (!still(s)) {
+    ctx.log(`restore recovery: the databases changed since the step was chosen, so it is skipped: ${JSON.stringify(s)}`);
+    return false;
+  }
+  await act();
+  ctx.progress?.();
+  return true;
+}
 
 async function writeJournal(ctx: RestoreContext, journal: RestoreJournal): Promise<void> {
   if (ctx.hooks.dropJournalWrite?.(journal.state)) {
@@ -301,12 +329,20 @@ async function missingFolders(fs: ImageFs, dir: string): Promise<string[]> {
  * to the first that existed (D-261113-100, 108). Answers the images found
  * in neither place.
  */
-export async function placeImages(ctx: Pick<RestoreContext, "fs" | "assetsDir" | "backupsDir">, list: readonly string[]): Promise<string[]> {
+export async function placeImages(ctx: Pick<RestoreContext, "fs" | "assetsDir" | "backupsDir" | "progress" | "signal">, list: readonly string[]): Promise<string[]> {
   const { fs } = ctx;
   const store = join(ctx.backupsDir, BACKUP_STORE);
   const created: string[] = [];
   const missing: string[] = [];
+  // Each image counts twice, once placed and once flushed.
+  const total = list.length * 2;
+  let done = 0;
+  const tick = (): void => {
+    ctx.signal?.throwIfAborted();
+    ctx.progress?.(++done, total);
+  };
   for (const path of list) {
+    tick();
     const target = join(ctx.assetsDir, path);
     const want = await fs.size(join(store, path));
     const have = await fs.size(target);
@@ -328,7 +364,12 @@ export async function placeImages(ctx: Pick<RestoreContext, "fs" | "assetsDir" |
     await fs.rename(temp, target);
   }
   const present = list.filter((p) => !missing.includes(p));
-  for (const path of present) await fs.syncFile(join(ctx.assetsDir, path));
+  done += missing.length;
+  for (const path of present) {
+    ctx.signal?.throwIfAborted();
+    await fs.syncFile(join(ctx.assetsDir, path));
+    ctx.progress?.(++done, total);
+  }
   for (const dir of new Set(present.map((p) => dirname(join(ctx.assetsDir, p))))) await fs.syncDir(dir);
   for (const folder of created) await fs.syncDir(dirname(folder));
   return missing;
@@ -453,12 +494,8 @@ async function cleanUpBeforeSwap(ctx: RestoreContext): Promise<void> {
 async function stepSix(ctx: RestoreContext, journal: RestoreJournal): Promise<void> {
   await writeJournal(ctx, { ...journal, state: "finishing" });
   await ctx.hooks.at("finishing");
-  const s = await ctx.db.state();
-  if (s.before && s.live?.tag?.id === journal.id) {
-    await ctx.db.endSessions([BEFORE]);
-    await ctx.db.drop(BEFORE);
-    await ctx.hooks.at("dropped");
-  }
+  const ours = (s: DbState) => s.before && s.live?.tag?.id === journal.id;
+  if (ours(await ctx.db.state()) && (await guarded(ctx, [BEFORE], ours, () => ctx.db.drop(BEFORE)))) await ctx.hooks.at("dropped");
   await ctx.db.setTag(LIVE, { kind: "finished", id: journal.id });
   await ctx.hooks.at("finished");
   await ctx.journal.delete();
@@ -469,22 +506,21 @@ async function stepSix(ctx: RestoreContext, journal: RestoreJournal): Promise<vo
 async function undo(ctx: RestoreContext, journal: RestoreJournal | null): Promise<void> {
   if (journal) await writeJournal(ctx, { ...journal, state: "undoing" });
   await ctx.hooks.at("undoing");
+  const restoredBesideOriginal = (s: DbState) => s.live !== null && s.before && s.live.tag?.kind === "restored";
+  const originalAlone = (s: DbState) => s.live === null && s.before;
   let s = await ctx.db.state();
-  if (s.live && s.before && s.live.tag?.kind === "restored") {
-    await ctx.db.endSessions([LIVE]);
-    await ctx.db.drop(LIVE);
-    await ctx.hooks.at("undoDropped");
+  if (restoredBesideOriginal(s)) {
+    if (await guarded(ctx, [LIVE], restoredBesideOriginal, () => ctx.db.drop(LIVE))) await ctx.hooks.at("undoDropped");
     s = await ctx.db.state();
   }
-  if (!s.live && s.before) {
-    await ctx.db.endSessions([BEFORE]);
-    await ctx.db.rename(BEFORE, LIVE);
-    await ctx.hooks.at("undoRenamed");
+  if (originalAlone(s)) {
+    if (await guarded(ctx, [BEFORE], originalAlone, () => ctx.db.rename(BEFORE, LIVE))) await ctx.hooks.at("undoRenamed");
+    s = await ctx.db.state();
   }
-  if (s.restoring) {
-    await ctx.db.endSessions([RESTORING]);
-    await ctx.db.drop(RESTORING);
-    await ctx.hooks.at("undoDroppedRestoring");
+  // The leftover goes only once the original is back as raccoon.
+  const leftover = (x: DbState) => x.restoring !== null && x.live !== null && !x.before;
+  if (leftover(s)) {
+    if (await guarded(ctx, [RESTORING], leftover, () => ctx.db.drop(RESTORING))) await ctx.hooks.at("undoDroppedRestoring");
   }
   await ctx.journal.delete();
 }
