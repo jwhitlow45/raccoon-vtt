@@ -1,7 +1,7 @@
-import { paint } from "./discoveryTestutil.ts";
+import { chunkOf, fogRoom, paint } from "./discoveryTestutil.ts";
 import type { AreaTemplate, RoomState, Stamp, Token } from "./model.ts";
 import { seqTwins, type SeqTwinOptions } from "./seqTestutil.ts";
-import { chance, int, rng, template, token } from "./testutil.ts";
+import { chance, character, drawing, int, rng, template, token } from "./testutil.ts";
 
 /**
  * Helpers for the twin tests of what a player's device receives
@@ -215,4 +215,93 @@ export class StampCopy {
     }
     return out;
   }
+}
+
+/**
+ * A version 7 id dated `ms`, its other bits drawn from `r`, so two twins
+ * that mint at the same clock time from sources seeded alike get the same
+ * id, as a device minting at send does.
+ */
+export function idAt(r: () => number, ms: number): string {
+  const hex = (n: number) => Array.from({ length: n }, () => int(r, 0, 15).toString(16)).join("");
+  const time = Math.floor(ms).toString(16).padStart(12, "0");
+  return `${time.slice(0, 8)}-${time.slice(8, 12)}-7${hex(3)}-${"89ab"[int(r, 0, 3)]}${hex(3)}-${hex(12)}`;
+}
+
+/** Ids and names only one twin of the player limits tests holds carry this, which no frame's text holds by chance. */
+export const APART = "zq";
+
+/** The party's room R, where Ayla (P1's) and Bree (P2's) stand with a goblin, and room F, apart from it behind rock. */
+export const ROOM_R = { x: 2, y: 2, w: 10, h: 8 } as const;
+export const ROOM_F = { x: 24, y: 2, w: 10, h: 8 } as const;
+
+/** A cell in room R or F by column and row inside it. */
+export const inRoomR = (i: number, j = 0) => ({ x: 7 + i, y: 3 + j });
+export const inRoomF = (i: number, j = 0) => ({ x: 26 + i, y: 3 + j });
+
+/** P1's character Ayla and P2's Bree, each with a token of the same id in room R. */
+export const AYLA = "ayla";
+export const BREE = "bree";
+/** An ogre in room R that every player sees, alone of its name, so it carries no number. */
+export const OGRE = "ogre";
+
+/**
+ * The room of the player limits twins: party sight on the players' scene
+ * s1, rooms R and F painted apart so sight in R never reaches F, P1's
+ * Ayla and P2's Bree as characters with tokens in R, and an ogre in R.
+ * Each twin adds what P1 never sees.
+ */
+export function limitsRoom(): RoomState {
+  const state = fogRoom({ vision: true });
+  paint(state, ROOM_R);
+  paint(state, ROOM_F);
+  state.characters[AYLA] = character(AYLA, { name: "Ayla", ownerIds: ["p1"] });
+  state.characters[BREE] = character(BREE, { name: "Bree", ownerIds: ["p2"] });
+  state.tokens[AYLA] = token(AYLA, { kind: "pc", name: "Ayla", disposition: "ally", x: 3, y: 3, actor: { ref: AYLA } });
+  state.tokens[BREE] = token(BREE, { kind: "pc", name: "Bree", disposition: "ally", x: 3, y: 7, actor: { ref: BREE } });
+  state.tokens[OGRE] = token(OGRE, { name: "Ogre", x: 8, y: 4 });
+  return { ...state, playedScenes: { s1: { sceneId: "s1", rev: 0 } } };
+}
+
+/** An id only one twin holds, `zq` and a number, padded so no two share a prefix the scan could mistake. */
+export const apartId = (what: string, i: number) => `${APART}${what}${String(i).padStart(5, "0")}`;
+
+/** `n` areas only the DM sees on a scene, on its first floor. */
+export function dmAreas(state: RoomState, n: number, sceneId = "s1"): string[] {
+  const ids = Array.from({ length: n }, (_, i) => apartId("area", i));
+  for (const id of ids) state.templates[id] = template(id, { sceneId, ownerId: "dm1", visibility: "dm", origin: { x: 28.5, y: 5.5, z: 0 }, size: 5 });
+  return ids;
+}
+
+/** `n` creatures only the DM sees, in room F. */
+export function dmTokens(state: RoomState, n: number, sceneId = "s1"): string[] {
+  const ids = Array.from({ length: n }, (_, i) => apartId("tok", i));
+  for (const [i, id] of ids.entries()) state.tokens[id] = token(id, { sceneId, name: `${APART}shade`, visibility: "dm", x: 26 + (i % 6), y: 3 + (Math.floor(i / 6) % 6) });
+  return ids;
+}
+
+/** `n` drawings only the DM sees, of `points` point values each. */
+export function dmDrawings(state: RoomState, n: number, points = 4, sceneId = "s1"): string[] {
+  const ids = Array.from({ length: n }, (_, i) => apartId("drw", i));
+  const values = Array.from({ length: points }, (_, i) => 26 + (i % 6));
+  for (const id of ids) state.drawings[id] = drawing(id, { sceneId, ownerId: "dm1", visibility: "dm", points: values });
+  return ids;
+}
+
+/** Stairs from Ayla's square on s1 up to the Upper floor of s1's scene, and back down. */
+export const STAIRS_UP = "l1";
+export const STAIRS_DOWN = "l2";
+
+/** Gives the limits room an Upper floor above s1, with room R painted there too, and stairs under Ayla. */
+export function withUpper(state: RoomState): RoomState {
+  const ground = state.scenes.s1!;
+  state.scenes.s1 = { ...ground, floor: { of: "s1", level: 0, name: "Ground floor", height: 10 } };
+  state.scenes.up = { ...ground, id: "up", floor: { of: "s1", level: 1, name: "Upper floor", height: 10 } };
+  for (let y = ROOM_R.y; y < ROOM_R.y + ROOM_R.h; y++) for (let x = ROOM_R.x; x < ROOM_R.x + ROOM_R.w; x++) chunkOf(state, "up", x, y).cells[`${x},${y}`] = "stone";
+  const rect = { x: 3, y: 3, w: 1, h: 1 };
+  state.floorLinks = {
+    [STAIRS_UP]: { id: STAIRS_UP, rev: 0, sceneId: "s1", to: "up", pair: STAIRS_DOWN, rect, kind: "stairs", ground: 0, made: 1 },
+    [STAIRS_DOWN]: { id: STAIRS_DOWN, rev: 0, sceneId: "up", to: "s1", pair: STAIRS_UP, rect, kind: "stairs", ground: 0, made: 1 },
+  };
+  return state;
 }
