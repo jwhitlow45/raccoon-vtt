@@ -34,6 +34,7 @@ import { withTx } from "../auth/tx.ts";
 import { warnArchiveSkipped, type Logger } from "./actor.ts";
 import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION, assetFileName, withoutSound } from "./exportRoom.ts";
 import type { RoomGateway } from "./gateway.ts";
+import { idRow, recordIds, SERVER_MEMBER } from "./createIds.ts";
 import { archiveAdmitted, archiveLines } from "./persistence.ts";
 import { lastLineSeq, refillMapVideos, refillSoundFacts, remapState, type ImportedAsset } from "./remap.ts";
 import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
@@ -319,7 +320,15 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       // refills then overwrite every map's and phase's video from its row (docs/design/design-v1-animated-maps.md 9.3), and
       // every sound's length from its row (docs/design/design-v1-music.md 6.7). The sound refill always runs after the remap,
       // which gives a sound whose file did not come through an id no row has, so the refill leaves it out with its places.
-      const refilled = refillSoundFacts(refillMapVideos(remapState(incoming, { assets: assetIds, memberIds }), videoFacts), soundFacts);
+      // Every id the remap makes is the server's own, recorded with the room as an op's would be, so no device can bring one
+      // of them again while it is dated near the clock (docs/design/design-v1-player-limits.md 3.4).
+      const minted: string[] = [];
+      const newId = () => {
+        const id = uuidv7();
+        minted.push(id);
+        return id;
+      };
+      const refilled = refillSoundFacts(refillMapVideos(remapState(incoming, { assets: assetIds, memberIds, newId }), videoFacts), soundFacts);
       const remapped = finishState(withNumberingUpgrade(withDiscoveryUpgrade(refilled.state, header.data.schemaVersion), header.data.schemaVersion), dmMember, roomName);
       // The log's rings hold here as in any room, each ring its own newest (shared/logRings.ts), and the archive takes
       // the whole log, so Show older and a session's export reach every imported line.
@@ -343,6 +352,8 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       if (!archive) warnArchiveSkipped(deps.log, roomId, Date.now());
       await withTx(deps.pool, async (tx) => {
         await deps.gateway.createRoom(roomId, state, tx, startSeq);
+        const now = Date.now();
+        await recordIds(tx, roomId, minted.map((id) => idRow(id, SERVER_MEMBER, now)));
         if (archive) await archiveLines(tx, roomId, remapped.log);
         await markDmMembers(tx, roomId, oldDms);
         if (hooks.afterImages) await hooks.afterImages(tx, room);
