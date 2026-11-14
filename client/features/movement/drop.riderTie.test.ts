@@ -104,6 +104,14 @@ function dropBree(stored: RoomState, middle: { x: number; y: number }, lifts: re
   return { plan, after: served(stored, plan, who) };
 }
 
+/** What a player's drop of Bree with her box's middle at `middle` says, planned on Pat's copy: for a drop that stops where it starts. */
+function noteOf(stored: RoomState, middle: { x: number; y: number }): string | null {
+  const copy = projectState(stored, P1, { sceneId: "s1" }) as unknown as RoomState;
+  const horse = stored.tokens.horse!;
+  const bree = stored.tokens.bree!;
+  return sent(planOn(copy, { x: middle.x - 0.5 + horse.x - bree.x, y: middle.y - 0.5 + horse.y - bree.y })).note;
+}
+
 const SQUARE_LIFTS = [-0.4, -0.1, 0.1, 0.4].flatMap((dx) => [-0.4, -0.1, 0.1, 0.4].map((dy) => [dx, dy] as const));
 
 describe("squares: a rider dragged out of a squeezed mount lands under the finger (LP40-RIDER-1)", () => {
@@ -189,6 +197,9 @@ describe("squares: a rider dragged out of a squeezed mount lands under the finge
 
   test("a rise 10 ft high on 16, 10 to 17, 13: from the mouth onto the floor beside it Bree lands a square left, the goblin in tow or none, where the stand that seated her there lay across the rise's edge and nothing moved (LP41-RIDER-1, D-261114-006)", () => {
     // With the goblin, 15, 10 still says it cannot follow, as before the batch: on every stand by it the goblin would stand in the rock.
+    const towing = keep({ x: 13, y: 9 }, { x: 13, y: 8 });
+    heights(towing, { x: 16, y: 10, w: 2, h: 4 }, 10);
+    assert.equal(noteOf(towing, { x: 15.5, y: 10.5 }), "Goblin can't follow through there.", "onto 15, 10 with the goblin (review LP41F-S-2)");
     for (const [goblin, drops] of [
       [true, [[15, 11, [14, 11]], [15, 12, [14, 12]], [15, 13, [14, 12]]]],
       [false, [[15, 10, [14, 10]], [15, 11, [14, 11]], [15, 12, [14, 12]], [15, 13, [14, 12]]]],
@@ -228,6 +239,9 @@ describe("squares: a rider dragged out of a squeezed mount lands under the finge
 
   test("a pit 10 ft deep on 2, 6 to 3, 7: from the row onto the floor above it Bree lands a square up, the goblin in tow or none, where the stand that seated her there lay across the pit's edge and the walk held at the corridor's end (LP41-RIDER-1)", () => {
     // With the goblin, 2, 5 still says it cannot follow, as before the batch: on 2, 4 the goblin behind her would stand in the rock.
+    const towing = keep({ x: 10, y: 4 }, { x: 9, y: 4 });
+    heights(towing, { x: 2, y: 6, w: 2, h: 2 }, -10);
+    assert.equal(noteOf(towing, { x: 2.5, y: 5.5 }), "Goblin can't follow through there.", "onto 2, 5 with the goblin (review LP41F-S-2)");
     for (const [goblin, drops] of [
       [true, [[3, [3, 4]]]],
       [false, [[2, [2, 4]], [3, [3, 4]]]],

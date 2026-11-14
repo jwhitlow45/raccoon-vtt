@@ -332,8 +332,10 @@ function sitsOn(state: DropView, id: string, leadId: string): boolean {
  * dragged into a corridor one wide takes its mount in, where the mount's
  * box at the offset lay across the corridor's wall or on the rock beside
  * it, and on open ground the mount stands where it was dropped, across the
- * edge of a rise as well. Null where no stand holds the middle, and the
- * drop goes as the mount's box dropped at `raw`.
+ * edge of a rise as well, but where equally near stands tie on a player's
+ * walk, which takes one clear of the edge (`seatedLanding`). Null where no
+ * stand holds the middle, and the drop goes as the mount's box dropped at
+ * `raw`.
  *
  * Full stands equally near the box tie (within `TIE`), as they do for a
  * mount squeezed half a square off its rider's grid, or onto one hex. A
@@ -452,7 +454,7 @@ function seatedLanding<T extends { at: Point }>(state: DropView, lead: DropToken
   };
   const followed = (c: T) => followersClear(state, g, lead, c.at, walkers, placeAt(c.at));
   const stands = mode === "walk" ? tied.filter(clear) : [];
-  return stands.length > 0 ? nearestOf(stands, followed) : nearestOf([first, ...tied], followed);
+  return nearestOf(stands.length > 0 ? stands : tied, followed);
 }
 
 /**
