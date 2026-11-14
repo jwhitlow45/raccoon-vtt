@@ -1,6 +1,8 @@
 # Every check on pushes to main or ci/ branches, and on pull requests to
-# main: typecheck, integration tests, unit tests, and e2e files in 14 shards.
-# That is 18 jobs with the build and the CI passed job. One run peaks at 16
+# main: typecheck, integration tests (twice, the second on the real clock),
+# unit tests, e2e files in 14 shards, and the desktop app's LAN file in
+# Chromium and WebKit. That is 20 jobs with the build and the CI passed job,
+# and e2e-macos when it has files. One run peaks at 18
 # Linux jobs of the account's 20, so a run that overlaps it queues part of
 # its shards: a single run's speed was chosen over two runs at full speed at
 # once.
@@ -365,14 +367,96 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # e2e/local-lan.e2e.ts, the desktop app's local mode at this runner's LAN
+  # address over plain HTTP, in Chromium and again in WebKit
+  # (docs/design/design-v1-local-app.md, section 6). Over plain HTTP WebKit
+  # sends no Sec-Fetch-Site, so only WebKit shows that a player's join from
+  # another device passes the Origin check with the real origin its
+  # referrer policy lets it send. The e2e shards run the same file in
+  # Chromium alone. Skipped for a docs-only push, as the shards skip all but
+  # the guide.
+  lan-webkit:
+    needs: build
+    if: ${{ needs.build.outputs.docs-only != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      # The same database as the e2e shards'.
+      postgres:
+        image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+        env:
+          POSTGRES_USER: raccoon
+          POSTGRES_PASSWORD: raccoon
+          POSTGRES_DB: raccoon
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U raccoon -d raccoon"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://raccoon:raccoon@localhost:5434/raccoon
+      E2E_SCREENSHOT_DIR: test-results/e2e-screenshots
+      E2E_BROWSERS: chromium,webkit
+    steps:
+      # As in the e2e job: 5 minutes inside the job's limit.
+      - name: Deadline for the shard
+        run: echo "E2E_DEADLINE=$(( $(date +%s) + (30 - 5) * 60 ))" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+      # The e2e job's step, word for word (scripts/ci-workflow.test.ts).
+      - name: Roboto as the system font
+        run: |
+          deb=fonts-roboto-unhinted_0~20170802-3_all.deb
+          pool=ubuntu/pool/universe/f/fonts-roboto
+          curl -fsS --max-time 5 -o "$RUNNER_TEMP/$deb" "http://azure.archive.ubuntu.com/$pool/$deb" || curl -fsS --retry 3 --max-time 60 -o "$RUNNER_TEMP/$deb" "http://archive.ubuntu.com/$pool/$deb"
+          echo "21852f3ef1a13ae4cb9cfabd89a3cd0b3979f189bd14801d3010e8a7da3bff0e  $RUNNER_TEMP/$deb" | sha256sum -c --quiet -
+          dpkg-deb -x "$RUNNER_TEMP/$deb" "$RUNNER_TEMP/roboto"
+          mkdir -p ~/.local/share/fonts ~/.config/fontconfig
+          cp -r "$RUNNER_TEMP/roboto/usr/share/fonts/truetype/roboto" ~/.local/share/fonts/
+          cp e2e/fonts.conf ~/.config/fontconfig/fonts.conf
+          fc-cache ~/.local/share/fonts
+          test "$(fc-match --format='%{family}' sans-serif)" = Roboto
+      # Chromium is the runner image's Google Chrome, as in the shards.
+      # WebKit is Playwright's own build for the lockfile's playwright-core,
+      # with the system packages it needs.
+      - run: google-chrome --version
+      - name: WebKit and its system packages
+        run: pnpm exec playwright-core install --with-deps webkit
+      - name: e2e/local-lan.e2e.ts in Chromium and WebKit
+        id: shard
+        run: node scripts/e2e-shard.ts 1 1 --only local-lan --deadline "$E2E_DEADLINE"
+      - name: Keep logs and screenshots
+        if: ${{ always() && (steps.shard.outcome != 'success' || steps.shard.outputs.reran == 'true') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lan-webkit
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
   # The one check main's ruleset requires, by the name CI passed. It runs
   # however the other jobs ended, cancelled included, since a required job
   # that is skipped counts as passed (GitHub's "Handling skipped but required
   # checks", https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks#handling-skipped-but-required-checks:
   # "A job is skipped by a conditional: The job reports 'Success'"). It fails
   # unless each job passed or was skipped by this file's own design:
-  # e2e-macos while e2e/macos-only.json is empty or on a docs-only push, and
-  # every job in a pull request from this repository's own ci/ branch.
+  # e2e-macos while e2e/macos-only.json is empty or on a docs-only push,
+  # int-clock and lan-webkit on a docs-only push, and every job in a pull
+  # request from this repository's own ci/ branch.
   #
   # In that pull request it takes another name, so the only CI passed on the
   # commit is the push run's, which ran the jobs. Two checks of one name on a
@@ -381,7 +465,7 @@ jobs:
   # otherwise add a passing one.
   ci-passed:
     name: ${{ startsWith(github.head_ref, 'ci/') && github.event.pull_request.head.repo.full_name == github.repository && 'Tested by the push run' || 'CI passed' }}
-    needs: [build, typecheck-int, int-clock, unit, e2e, e2e-macos]
+    needs: [build, typecheck-int, int-clock, unit, e2e, e2e-macos, lan-webkit]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -396,6 +480,7 @@ jobs:
           UNIT: ${{ needs.unit.result }}
           E2E: ${{ needs.e2e.result }}
           E2E_MACOS: ${{ needs.e2e-macos.result }}
+          LAN_WEBKIT: ${{ needs.lan-webkit.result }}
           MACOS_FILES: ${{ needs.build.outputs.macos-files }}
           DOCS_ONLY: ${{ needs.build.outputs.docs-only }}
         run: |
@@ -408,12 +493,12 @@ jobs:
             macos_by_design=true
           fi
           failed=""
-          for pair in "build=$BUILD" "typecheck-int=$TYPECHECK_INT" "int-clock=$INT_CLOCK" "unit=$UNIT" "e2e=$E2E" "e2e-macos=$E2E_MACOS"; do
+          for pair in "build=$BUILD" "typecheck-int=$TYPECHECK_INT" "int-clock=$INT_CLOCK" "unit=$UNIT" "e2e=$E2E" "e2e-macos=$E2E_MACOS" "lan-webkit=$LAN_WEBKIT"; do
             job=${pair%%=*}
             result=${pair#*=}
             if [ "$result" = success ]; then continue; fi
             if [ "$job" = e2e-macos ] && [ "$result" = skipped ] && [ "$macos_by_design" = true ]; then continue; fi
-            if [ "$job" = int-clock ] && [ "$result" = skipped ] && [ "$BUILD" = success ] && [ "$DOCS_ONLY" = true ]; then continue; fi
+            if { [ "$job" = int-clock ] || [ "$job" = lan-webkit ]; } && [ "$result" = skipped ] && [ "$BUILD" = success ] && [ "$DOCS_ONLY" = true ]; then continue; fi
             failed="$failed $job ($result)"
           done
           if [ -n "$failed" ]; then

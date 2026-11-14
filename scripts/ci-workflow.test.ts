@@ -40,9 +40,9 @@ function gateScript(): string {
   return body.join("\n");
 }
 
-type Results = { build: string; "typecheck-int": string; "int-clock": string; unit: string; e2e: string; "e2e-macos": string };
+type Results = { build: string; "typecheck-int": string; "int-clock": string; unit: string; e2e: string; "e2e-macos": string; "lan-webkit": string };
 
-const PASSED: Results = { build: "success", "typecheck-int": "success", "int-clock": "success", unit: "success", e2e: "success", "e2e-macos": "skipped" };
+const PASSED: Results = { build: "success", "typecheck-int": "success", "int-clock": "success", unit: "success", e2e: "success", "e2e-macos": "skipped", "lan-webkit": "success" };
 
 /** The gate run with these job results and build outputs, as GitHub's default bash runs a step. */
 function gate(results: Results, outputs: { macosFiles?: string; docsOnly?: string; pushTested?: boolean } = {}): { status: number | null; out: string } {
@@ -57,6 +57,7 @@ function gate(results: Results, outputs: { macosFiles?: string; docsOnly?: strin
       UNIT: results.unit,
       E2E: results.e2e,
       E2E_MACOS: results["e2e-macos"],
+      LAN_WEBKIT: results["lan-webkit"],
       MACOS_FILES: outputs.macosFiles ?? "0",
       DOCS_ONLY: outputs.docsOnly ?? "false",
     },
@@ -86,6 +87,17 @@ describe("CI passed", () => {
     assert.match(r.out, /^::error::Not every job passed: int-clock \(skipped\)\.$/m);
   });
 
+  test("passes a docs-only push, which skips the LAN file in WebKit, and fails any other that skips it", () => {
+    assert.equal(gate({ ...PASSED, "lan-webkit": "skipped" }, { docsOnly: "true" }).status, 0);
+    const r = gate({ ...PASSED, "lan-webkit": "skipped" });
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /^::error::Not every job passed: lan-webkit \(skipped\)\.$/m);
+    // A docs-only skip counts only when the build that decided it passed.
+    const broken = gate({ ...PASSED, build: "failure", "lan-webkit": "skipped" }, { docsOnly: "true" });
+    assert.equal(broken.status, 1, broken.out);
+    assert.match(broken.out, / lan-webkit \(skipped\)/);
+  });
+
   test("fails when e2e-macos was skipped though it had files to run", () => {
     const r = gate(PASSED, { macosFiles: "2" });
     assert.equal(r.status, 1, r.out);
@@ -93,12 +105,12 @@ describe("CI passed", () => {
   });
 
   test("fails a failed build and names every job it took down, e2e-macos's skip included", () => {
-    const r = gate({ ...PASSED, build: "failure", "int-clock": "skipped", e2e: "skipped" });
+    const r = gate({ ...PASSED, build: "failure", "int-clock": "skipped", e2e: "skipped", "lan-webkit": "skipped" });
     assert.equal(r.status, 1, r.out);
-    assert.match(r.out, /^::error::Not every job passed: build \(failure\) int-clock \(skipped\) e2e \(skipped\) e2e-macos \(skipped\)\.$/m);
+    assert.match(r.out, /^::error::Not every job passed: build \(failure\) int-clock \(skipped\) e2e \(skipped\) e2e-macos \(skipped\) lan-webkit \(skipped\)\.$/m);
   });
 
-  for (const job of ["build", "typecheck-int", "int-clock", "unit", "e2e", "e2e-macos"] as const) {
+  for (const job of ["build", "typecheck-int", "int-clock", "unit", "e2e", "e2e-macos", "lan-webkit"] as const) {
     for (const result of ["failure", "cancelled", "skipped"]) {
       if (job === "e2e-macos" && result === "skipped") continue;
       test(`fails when ${job} ended ${result}`, () => {
@@ -110,7 +122,7 @@ describe("CI passed", () => {
   }
 
   test("passes a pull request from this repository's ci/ branch, where every job skipped", () => {
-    const skipped = { build: "skipped", "typecheck-int": "skipped", "int-clock": "skipped", unit: "skipped", e2e: "skipped", "e2e-macos": "skipped" };
+    const skipped = { build: "skipped", "typecheck-int": "skipped", "int-clock": "skipped", unit: "skipped", e2e: "skipped", "e2e-macos": "skipped", "lan-webkit": "skipped" };
     const r = gate(skipped, { macosFiles: "", docsOnly: "", pushTested: true });
     assert.equal(r.status, 0, r.out);
     assert.match(r.out, /push run/);
@@ -152,5 +164,46 @@ describe("ci.yml's jobs", () => {
       assert.match(block, /^ {4}needs: build\n/, `${job} needs the build`);
       assert.doesNotMatch(/^ {4}if: (.*)$/m.exec(block)?.[1] ?? "", /always\(\)|cancelled\(\)/, `${job} would run without the build`);
     }
+  });
+});
+
+describe("the lan-webkit job", () => {
+  /** A step's `run:` script within one job, as GitHub hands it to bash. */
+  function stepIn(job: string, name: string): string {
+    const lines = jobBlock(job).split("\n");
+    const at = lines.findIndex((l) => l.trim() === `- name: ${name}`);
+    assert.ok(at >= 0, `${job} has no step named "${name}"`);
+    const run = lines.findIndex((l, i) => i > at && /^ +run: /.test(l));
+    const first = lines[run]!.trim();
+    if (first !== "run: |") return first.slice("run: ".length);
+    const indent = lines[run + 1]!.length - lines[run + 1]!.trimStart().length;
+    const body: string[] = [];
+    for (const line of lines.slice(run + 1)) {
+      if (line.trim() !== "" && line.length - line.trimStart().length < indent) break;
+      body.push(line.slice(indent));
+    }
+    return body.join("\n");
+  }
+
+  test("runs e2e/local-lan.e2e.ts after the build in Chromium and WebKit, skipped only for a docs-only push", () => {
+    const block = jobBlock("lan-webkit");
+    assert.match(block, /^ {4}needs: build\n {4}if: \$\{\{ needs\.build\.outputs\.docs-only != 'true' \}\}\n/);
+    assert.match(block, /\n {6}E2E_BROWSERS: chromium,webkit\n/);
+    assert.equal(stepIn("lan-webkit", "e2e/local-lan.e2e.ts in Chromium and WebKit"), 'node scripts/e2e-shard.ts 1 1 --only local-lan --deadline "$E2E_DEADLINE"');
+  });
+
+  test("installs WebKit with its system packages before the run, and sets fonts as the e2e shards do", () => {
+    const block = jobBlock("lan-webkit");
+    assert.equal(stepIn("lan-webkit", "WebKit and its system packages"), "pnpm exec playwright-core install --with-deps webkit");
+    assert.ok(block.indexOf("- run: pnpm install --frozen-lockfile") < block.indexOf("- name: WebKit and its system packages"));
+    assert.ok(block.indexOf("- name: WebKit and its system packages") < block.indexOf("- name: e2e/local-lan.e2e.ts in Chromium and WebKit"));
+    assert.equal(stepIn("lan-webkit", "Roboto as the system font"), stepIn("e2e", "Roboto as the system font"));
+    assert.ok(block.includes("name: dist\n          path: dist\n"), "the job runs the build's bundle");
+  });
+
+  test("reports inside its own limit, as the e2e shards do", () => {
+    const block = jobBlock("lan-webkit");
+    const limit = /\n {4}timeout-minutes: (\d+)\n/.exec(`\n${block}`)?.[1];
+    assert.equal(stepIn("lan-webkit", "Deadline for the shard"), `echo "E2E_DEADLINE=$(( $(date +%s) + (${limit} - 5) * 60 ))" >> "$GITHUB_ENV"`);
   });
 });
