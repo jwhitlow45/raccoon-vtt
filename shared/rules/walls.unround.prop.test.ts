@@ -6,7 +6,7 @@ import type { FreeWall, RoomState, Token, WallFeature } from "../model.ts";
 import { projectState } from "../project.ts";
 import { holds } from "../propertyTestutil.ts";
 import { P1, room, scene, token } from "../testutil.ts";
-import { legStop, ownWalk, previewChunks } from "./movement.ts";
+import { legStop, ownWalk, previewChunks, stepTester, straightClear } from "./movement.ts";
 import { contact, CROSS, EXACT_PIECE, LATTICE, PIECE } from "./segments.ts";
 import { sceneWalls, unroundedPiece } from "./walls.ts";
 
@@ -109,15 +109,76 @@ const anyWall = fc.tuple(coord(W), coord(H), fc.integer({ min: -22, max: 22 }), 
 
 const nonZero = (w: { a: [number, number]; b: [number, number] }) => w.a[0] !== w.b[0] || w.a[1] !== w.b[1];
 
-/** Whether a segment lies on stored wall `w`: on its line, between its ends. */
-function along(w: { a: [number, number]; b: [number, number] }, [ax, ay, bx, by]: Seg): boolean {
-  const ex = w.b[0] - w.a[0];
-  const ey = w.b[1] - w.a[1];
-  // In lattice units every product here is a whole number below 2^53, so the test is exact.
+type Wall = { a: [number, number]; b: [number, number] };
+
+/** Whether stored wall `w` lies on the line through a segment. In lattice units every product is a whole number below 2^53, so it is exact. */
+function onLine(w: Wall, [ax, ay, bx, by]: Seg): boolean {
   const L = LATTICE;
-  const on = (x: number, y: number) => ex * L * ((y - w.a[1]) * L) - ey * L * ((x - w.a[0]) * L) === 0;
-  const t = (x: number, y: number) => ((x - w.a[0]) * ex + (y - w.a[1]) * ey) / (ex * ex + ey * ey);
-  return on(ax, ay) && on(bx, by) && t(ax, ay) >= 0 && t(ax, ay) <= 1 && t(bx, by) >= 0 && t(bx, by) <= 1;
+  const side = (x: number, y: number) => (bx - ax) * L * ((y - ay) * L) - (by - ay) * L * ((x - ax) * L);
+  return side(w.a[0], w.a[1]) === 0 && side(w.b[0], w.b[1]) === 0;
+}
+
+/**
+ * Whether a segment lies on the stored walls: inside the union of those on
+ * its line, since the cut joins collinear walls that touch or overlap
+ * before it cuts them (held.ts joinPieces).
+ */
+function onWalls(walls: readonly Wall[], seg: Seg): boolean {
+  const [ax, ay, bx, by] = seg;
+  const t = (x: number, y: number) => (ax === bx ? y : x);
+  const spans = walls.filter((w) => onLine(w, seg)).map((w): [number, number] => [Math.min(t(...w.a), t(...w.b)), Math.max(t(...w.a), t(...w.b))]);
+  const lo = Math.min(t(ax, ay), t(bx, by));
+  const hi = Math.max(t(ax, ay), t(bx, by));
+  return union(spans).some(([u, v]) => u <= lo && hi <= v);
+}
+
+/** Whether two of the walls lie on one line and touch or overlap there, so a copy cannot tell them from one wall. */
+function joined(walls: readonly Wall[]): boolean {
+  return walls.some((w, i) =>
+    walls.some((v, j) => {
+      if (j <= i || !onLine(v, [w.a[0], w.a[1], w.b[0], w.b[1]])) return false;
+      const t = (p: [number, number]) => (w.a[0] === w.b[0] ? p[1] : p[0]);
+      return Math.max(Math.min(t(w.a), t(w.b)), Math.min(t(v.a), t(v.b))) <= Math.min(Math.max(t(w.a), t(w.b)), Math.max(t(v.a), t(v.b)));
+    }),
+  );
+}
+
+/** Property runs: enough that the default seed meets a creature leaving a wall the split cut in two (WALLCUT-SOL-1). */
+const RUNS = 600;
+
+type Leg = { size: Token["size"]; from: { x: number; y: number }; to: { x: number; y: number } };
+
+/**
+ * Legs on the stored build and on a copy that holds every wall, each read
+ * by the whole leg test, its straight path alone and a route's step. The
+ * gate stops a leg as the stored build does where no two walls on one line
+ * touch, and never where the stored build lets it go: it lets the pieces of
+ * one wall leave together, and a copy cannot tell one wall cut at a split
+ * line from two drawn end to end. A preview stops it wherever the stored
+ * build does.
+ */
+function sameLegs(walls: readonly Wall[], legs: readonly Leg[]): void {
+  const s = stored(walls, false);
+  const copy = copyOf(s);
+  const preview = { ...copy, buildChunks: previewChunks(copy.buildChunks) };
+  const oneWallEach = !joined(walls);
+  for (const { size, from, to } of legs) {
+    const walker = ownWalk(token("t", { sceneId: "s1", size, x: from.x, y: from.y }));
+    const end = { ...to, elevation: 0 };
+    const tests: [string, (state: RoomState) => boolean][] = [
+      ["legStop", (state) => legStop(state, walker, end) === null],
+      ["straightClear", (state) => straightClear(state, walker, end)],
+      ["stepTester", (state) => stepTester(state, walker)!.clear(from.x, from.y, to.x, to.y)],
+    ];
+    for (const [name, clear] of tests) {
+      const at = `${name}, ${size} from ${from.x}, ${from.y} to ${to.x}, ${to.y}, walls ${JSON.stringify(walls.map((w) => [...w.a, ...w.b]))}`;
+      const exact = clear(s);
+      const gate = clear(copy);
+      if (oneWallEach) assert.equal(gate, exact, `the gate, ${at}`);
+      else if (exact) assert.ok(gate, `the gate lets go what the stored build does, ${at}`);
+      if (clear(preview)) assert.ok(exact, `a preview lets go only what the stored build does, ${at}`);
+    }
+  }
 }
 
 /** A union of intervals, merged where they touch or overlap. */
@@ -130,6 +191,49 @@ function union(spans: [number, number][]): [number, number][] {
   }
   return out;
 }
+
+describe("a creature leaving a wall the split cut in two (WALLCUT-SOL-1, WALLCUT-OPUS-F1)", () => {
+  const along = (walls: Wall[], size: Token["size"], from: { x: number; y: number }, to: { x: number; y: number }) => {
+    const s = stored(walls, false);
+    const copy = copyOf(s);
+    const walker = ownWalk(token("t", { sceneId: "s1", size, x: from.x, y: from.y }));
+    const end = { ...to, elevation: 0 };
+    const read = (state: RoomState) => [legStop(state, walker, end) === null, straightClear(state, walker, end), stepTester(state, walker)!.clear(from.x, from.y, to.x, to.y)];
+    return { stored: read(s), gate: read(copy), preview: read({ ...copy, buildChunks: previewChunks(copy.buildChunks) }) };
+  };
+
+  test("the gate lets the pieces of one wall leave together, as the server lets the wall go, by the leg, its straight path and a route's step", () => {
+    const cases: [Wall, Token["size"], { x: number; y: number }, { x: number; y: number }][] = [
+      // Reviewers' cases: on y = 5 across x = 4, on x = 6 across y = 4, and the default seed's of 2026-11-14 across x = 12.
+      [{ a: [0, 5], b: [8, 5] }, "large", { x: 2, y: 4 }, { x: 3, y: 4.25 }],
+      [{ a: [0, 5], b: [8, 5] }, "large", { x: 2, y: 4 }, { x: 3, y: 4.5 }],
+      [{ a: [6, 2], b: [6, 6] }, "large", { x: 5, y: 1.5 }, { x: 4.5, y: 3 }],
+      [{ a: [6, 2], b: [6, 6] }, "huge", { x: 4.5, y: 0.5 }, { x: 4, y: 3 }],
+      [{ a: [10, 10], b: [16.25, 10] }, "huge", { x: 13.5, y: 8 }, { x: 14, y: 7.5 }],
+    ];
+    for (const [w, size, from, to] of cases) {
+      const r = along([w], size, from, to);
+      const at = `${size} from ${from.x}, ${from.y} to ${to.x}, ${to.y} off ${JSON.stringify(w)}`;
+      assert.deepEqual(r.stored, [true, true, true], `the stored wall lets it go, ${at}`);
+      assert.deepEqual(r.gate, r.stored, `the gate, ${at}`);
+    }
+  });
+
+  test("two walls drawn end to end on a split line read as one for the gate, which sends, and as two for a preview, as the server holds them", () => {
+    const r = along([{ a: [0, 5], b: [4, 5] }, { a: [4, 5], b: [8, 5] }], "large", { x: 2, y: 4 }, { x: 3, y: 4.25 });
+    assert.deepEqual([r.stored[0], r.gate[0], r.preview[0]], [false, true, false]);
+  });
+});
+
+test("a piece cut from collinear walls joined first lies on their union (WALLCUT-SOL-2)", () => {
+  const walls: Wall[] = [
+    { a: [0, 20], b: [4.25, 20] },
+    { a: [4.015625, 20], b: [4.265625, 20] },
+  ];
+  const back = piecesOf(copyOf(stored(walls, false))).map(unroundedPiece);
+  assert.deepEqual(sorted(back.map((b) => b!)), sorted([[0, 20, 4, 20], [4, 20, 4.265625, 20]]));
+  for (const b of back) assert.ok(onWalls(walls, b!), `${b}`);
+});
 
 describe("pieces put back on their stored walls (property)", () => {
   test("a piece put back lies on the lattice and on a stored wall, every piece along an axis is put back, and with fog off they cover each line as its walls do", () => {
@@ -144,7 +248,7 @@ describe("pieces put back on their stored walls (property)", () => {
           if (axis) assert.ok(r, `an axis piece is put back: ${JSON.stringify([p.a, p.b])}`);
           if (!r) continue;
           assert.ok(r.every((v) => Number.isInteger(v * LATTICE)), `on the lattice: ${r}`);
-          assert.ok(walls.some((w) => along(w, r)), `on a stored wall: ${r} from ${JSON.stringify([p.a, p.b])}`);
+          assert.ok(onWalls(walls, r), `on the stored walls: ${r} from ${JSON.stringify([p.a, p.b])}`);
           back.push(r);
         }
         if (fog !== false) return;
@@ -163,28 +267,22 @@ describe("pieces put back on their stored walls (property)", () => {
         for (const r of back) file(r, "back");
         for (const [key, line] of lines) assert.deepEqual(union(line.back), union(line.walls), key);
       }),
-      200,
+      RUNS,
     );
   });
 
-  test("on a copy that holds every wall, each one along an axis or inside one band, a leg is stopped as on the stored build, for the gate and a preview alike", () => {
+  test("on a copy that holds every wall, each one along an axis or inside one band, the gate stops a leg as the stored build does, and a preview at least as often", () => {
     const size = fc.constantFrom<Token["size"]>("small", "medium", "large", "huge");
     const half = (max: number) => fc.integer({ min: 0, max: max * 2 }).map((v) => v / 2);
     const leg = fc.record({ size, x: half(W - 4), y: half(H - 4), dx: fc.integer({ min: -8, max: 8 }), dy: fc.integer({ min: -8, max: 8 }) });
     holds(
       fc.property(fc.array(fc.oneof(axisWall, bandDiagonal).filter(nonZero), { minLength: 1, maxLength: 12 }), fc.array(leg, { minLength: 1, maxLength: 8 }), (walls, legs) => {
-        const s = stored(walls, false);
-        const copy = copyOf(s);
-        for (const g of legs) {
-          const walker = ownWalk(token("t", { sceneId: "s1", size: g.size, x: g.x, y: g.y }));
-          const to = { x: Math.min(Math.max(g.x + g.dx / 2, 0), W - 4), y: Math.min(Math.max(g.y + g.dy / 2, 0), H - 4), elevation: 0 };
-          const exact = legStop(s, walker, to) === null;
-          const at = `${g.size} from ${g.x}, ${g.y} to ${to.x}, ${to.y}`;
-          assert.equal(legStop(copy, walker, to) === null, exact, `the gate, ${at}`);
-          assert.equal(legStop({ ...copy, buildChunks: previewChunks(copy.buildChunks) }, walker, to) === null, exact, `a preview, ${at}`);
-        }
+        sameLegs(
+          walls,
+          legs.map((g) => ({ size: g.size, from: { x: g.x, y: g.y }, to: { x: Math.min(Math.max(g.x + g.dx / 2, 0), W - 4), y: Math.min(Math.max(g.y + g.dy / 2, 0), H - 4) } })),
+        );
       }),
-      150,
+      RUNS,
     );
   });
 });
