@@ -107,7 +107,7 @@ if (args.network !== undefined) {
 let secrets: Secrets | null = null;
 let cluster: Cluster | null = null;
 async function theCluster(): Promise<Cluster> {
-  secrets ??= await loadSecrets(paths.secrets, platform);
+  secrets ??= await loadSecrets(paths.secrets, platform, existsSync(paths.postgres));
   cluster ??= new Cluster({
     binDir: join(postgresDir, "bin"),
     pgData: paths.postgres,
