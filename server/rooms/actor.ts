@@ -1,5 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
+import { idTime } from "#shared/ids.ts";
 import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, LIMITS, ROLLING_TOO_FAST, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
 import { FAR_TREATMENT, opKind as limitKind } from "#shared/farLine.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
@@ -11,7 +12,7 @@ import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { landedElevation } from "#shared/rules/movement.ts";
 import { gridOfToken, hashValue, inSightOfNonOwners, projectEntity, seatView, visibleAssetIds } from "#shared/project.ts";
-import { ASK_LOST, clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, mintedIds, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
+import { ASK_LOST, clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, mintedIds, recordedIds, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
 import { addsReservedEntryId } from "#shared/reservedIds.ts";
 import { RESERVED_ID } from "#shared/reducer/tx.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -32,7 +33,7 @@ import { OP_RATE, SnapshotBudget, TokenBucket, type Clock } from "./budgets.ts";
 import { CloseWrites } from "./closeWrites.ts";
 import { CLOSE, clientKey, sessionOfKey, type ClientKey, type Connection } from "./connection.ts";
 import { counted } from "./counted.ts";
-import { heldIds, idRow, IdGate, idsSince, loadIdRows, pruneIds, recordIds, seedRows, type IdRow } from "./createIds.ts";
+import { heldIds, idRow, IdGate, idsSince, loadIdRows, pruneIds, recordIds, seedRows, SERVER_MEMBER, type IdRow } from "./createIds.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { rideEndOps } from "./rideEnd.ts";
 import { cancelLost, cancelPreviews, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
@@ -1743,6 +1744,7 @@ export class RoomActor {
     // The ids the device made for new things meet the gate (createIds.ts) after a receipt answered a resend and before
     // admission, so an op it refuses spends no receipt. An undo or redo brings back ids the room took already.
     const minted = this.#opts.idGate ? mintedIds(clientOp) : [];
+    const recorded = this.#opts.idGate ? recordedIds(clientOp) : [];
     if (minted.length > 0) {
       const verdict = this.#ids.check(minted, { memberId: viewer.memberId, role: viewer.role });
       if (!verdict.ok) {
@@ -1840,7 +1842,7 @@ export class RoomActor {
     // The DM's builder ops ask before players' remembered map is forgotten, unless sent with the yes (5.3).
     const asks = viewer.role === "dm" && ASK_OPS.has(op.t) && (op as { forget?: true }).forget !== true;
     // A step that takes back or brings back a move, or an HP change from the log, is bookkeeping as the change was.
-    const reduced = this.#reduce(op, viewer, asks, at, minted, step?.poses !== undefined || fromLog);
+    const reduced = this.#reduce(op, viewer, asks, at, minted, step?.poses !== undefined || fromLog, recorded);
     if (!reduced.ok && reduced.code === "forget" && cmd.group !== undefined) this.#askRefused.set(key, cmd.group);
     if (!reduced.ok) {
       // A restore that failed says which step it was, so a refused undo is never a riddle.
@@ -2217,7 +2219,7 @@ export class RoomActor {
    * after it keeps all of the op, its row once and its keys, whose number
    * #settleStaged settles, and the next op's numbers stay above it.
    */
-  #reduce(op: Op, viewer: Viewer, asks = false, given?: string, minted: readonly string[] = [], restoresBookkeeping = false): Reduced {
+  #reduce(op: Op, viewer: Viewer, asks = false, given?: string, minted: readonly string[] = [], restoresBookkeeping = false, recorded: readonly string[] = []): Reduced {
     const counts = counted(op.t, OP_VERSION);
     const moment = this.#now();
     const number = counts ? this.#nextNumber() : this.#pub;
@@ -2282,8 +2284,14 @@ export class RoomActor {
     // The install. The op's ids and the roll its ask took join the batch with it, so no op is stored without them.
     batch.ops.push(record);
     this.#staged = { state: result.state, seq };
-    if (minted.length > 0) {
-      const rows = minted.map((id) => idRow(id, viewer.memberId, moment.now));
+    // Ids recorded without the gate are the server's rows, outside every budget and every device's ask. Only a version 7
+    // id the gate does not hold yet gets one: no other can come back in a live create, and a plan applied again keeps
+    // its first row's time.
+    const rows = [
+      ...minted.map((id) => idRow(id, viewer.memberId, moment.now)),
+      ...recorded.filter((id) => idTime(id) !== null && !this.#ids.taken(id)).map((id) => idRow(id, SERVER_MEMBER, moment.now)),
+    ];
+    if (rows.length > 0) {
       this.#ids.stage(rows);
       batch.ids.push(...rows);
     }

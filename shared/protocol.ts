@@ -3799,12 +3799,16 @@ export type SearchResult = {
  * restores, and a duplicate's children, whose ids are derived from the
  * copy's own), carry keys of the thing itself (`natural`: coordinates,
  * SRD ids, the key an upsert replaces in place), or are the server's
- * own (`server`), whose ids it mints itself and trusts.
+ * own (`server`), whose ids it mints itself and trusts. `recorded` lists
+ * ids a device made for new things that the gate does not read, since
+ * they may be applied long after they were made, but that are recorded
+ * like any taken id, so a later create that brings one again meets its
+ * row.
  *
  * A type left out fails the typecheck, so a new op is classed when it is
  * added.
  */
-export type IdRule<T extends OpType> = "none" | "copied" | "natural" | "server" | { minted: (op: OpOf<T>) => readonly string[] };
+export type IdRule<T extends OpType> = "none" | "copied" | "natural" | "server" | { minted: (op: OpOf<T>) => readonly string[] } | { recorded: (op: OpOf<T>) => readonly string[] };
 
 function inlineEffectIds(actor: { effects: readonly { id: string }[] } | { ref: string } | { inline: { effects: readonly { id: string }[] } }): string[] {
   if ("effects" in actor) return actor.effects.map((e) => e.id);
@@ -3844,7 +3848,7 @@ export const ID_RULES: { readonly [T in OpType]: IdRule<T> } = {
   "token.detach": "none",
   "actor.hp": "none",
   // The DM's group save: its plan may be applied hours after it was made (saveOutcomeContract.ts), and its conditions keep the ids made with it.
-  "actor.outcome": "natural",
+  "actor.outcome": { recorded: (op) => op.targets.flatMap((item) => (item.effects ?? []).map((e) => e.id)) },
   "actor.damageMany": "none",
   "actor.deathSave": "none",
   "actor.life": "none",
@@ -3986,6 +3990,13 @@ export const ID_RULES: { readonly [T in OpType]: IdRule<T> } = {
 /** The ids a device made for new things in `op` (ID_RULES), in the op's order, each once. */
 export function mintedIds(op: Op): string[] {
   const rule = ID_RULES[op.t] as IdRule<OpType>;
-  if (typeof rule === "string") return [];
+  if (typeof rule === "string" || !("minted" in rule)) return [];
   return [...new Set(rule.minted(op as never))];
+}
+
+/** The ids of new things in `op` that are recorded without meeting the gate (ID_RULES `recorded`), in the op's order, each once. */
+export function recordedIds(op: Op): string[] {
+  const rule = ID_RULES[op.t] as IdRule<OpType>;
+  if (typeof rule === "string" || !("recorded" in rule)) return [];
+  return [...new Set(rule.recorded(op as never))];
 }

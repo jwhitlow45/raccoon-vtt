@@ -142,6 +142,31 @@ describe("an id answers P1 alike whatever became of its thing", () => {
     });
   });
 
+  test("C2: a condition a group save gave P1's character, hidden in A and removed in B, answers its id gone in both, at once and after a restart", async (t) => {
+    const pair = await open(t);
+    // The DM's device makes the plan's condition ids when it plans the save, version 7 at the room's clock.
+    const made = ids(pair);
+    const outcome = (id: string): Op => ({ t: "actor.outcome", plan: mint.next(pair[0]), label: "Hold Person", targets: [{ target: { characterId: AYLA }, effects: [{ id, key: "paralyzed" }] }] }) as Op;
+    for (const [i, room] of pair.entries()) await room.apply("dm", outcome(made[i]!));
+    same(pair, "P1 sees the condition");
+    for (const [i, room] of pair.entries()) {
+      await room.apply(
+        "dm",
+        room.name === "A"
+          ? ({ t: "actor.effect.update", target: { characterId: AYLA }, effectId: made[i]!, patch: { hiddenFromPlayers: true } } as Op)
+          : { t: "actor.effect.remove", target: { characterId: AYLA }, effectId: made[i]! },
+      );
+    }
+    const add = (id: string): Op => ({ t: "actor.effect.add", target: { characterId: AYLA }, effect: { id, key: "blessed" } }) as Op;
+    const since = marks(pair);
+    assert.deepEqual(await reuse(pair, made, add, "the condition's id"), GONE);
+    sameSince(pair, since, "the condition's id");
+    await each(pair, (room) => room.restart(false));
+    const after = marks(pair);
+    assert.deepEqual(await reuse(pair, made, add, "after a restart"), GONE);
+    sameSince(pair, after, "after a restart");
+  });
+
   test("C3: an id dated 4 seconds ahead, taken, its area hidden in A and deleted in B, answers gone after a restart a second later, and ids past 5 seconds ahead are refused", async (t) => {
     const pair = await open(t);
     const made = ids(pair, 4_000);
