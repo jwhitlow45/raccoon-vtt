@@ -71,7 +71,7 @@ export class WindowLimiter {
   }
 }
 
-const HOURLY = { session: 30, ip: 60, room: 120 } as const;
+const HOURLY = { session: 30, ip: 60, room: 120, member: 30 } as const;
 
 /**
  * Scene thumbnails have a budget of their own. A DM device draws and
@@ -129,8 +129,13 @@ export function starterHourlyChecks(sessionId: string, ip: string, roomId: strin
  * session and per room: only a DM may upload one, and a DM session needs
  * the DM link. A URL import passes no kind, so it always spends the shared
  * budget and the larger ones never pay for outbound fetches.
+ *
+ * A player's upload spends a budget of their member's, 30 an hour, in place
+ * of the room's (docs/design/design-v1-player-limits.md 6.5), so what the
+ * DM uploaded never decides whether a player's upload is taken. A new
+ * session is the same member, so the member's budget still holds.
  */
-export function hourlyChecks(sessionId: string, ip: string, roomId: string, kind?: AssetKind): Array<{ key: string; limit: number }> {
+export function hourlyChecks(sessionId: string, ip: string, roomId: string, kind?: AssetKind, player?: { memberId: string }): Array<{ key: string; limit: number }> {
   if (kind === "thumb") {
     return [
       { key: `thumb:s:${sessionId}`, limit: THUMB_HOURLY.session },
@@ -152,6 +157,6 @@ export function hourlyChecks(sessionId: string, ip: string, roomId: string, kind
   return [
     { key: `s:${sessionId}`, limit: HOURLY.session },
     { key: `ip:${ip}`, limit: HOURLY.ip },
-    { key: `r:${roomId}`, limit: HOURLY.room },
+    player ? { key: `m:${roomId}:${player.memberId}`, limit: HOURLY.member } : { key: `r:${roomId}`, limit: HOURLY.room },
   ];
 }

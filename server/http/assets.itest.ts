@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -386,10 +386,32 @@ describe("quota", () => {
     const small = await buildAssetApp({ pool, config: testConfig(quotaDir.dir, { ROOM_QUOTA_MB: "1" }), auth });
     try {
       const roomId = await room();
-      const player = auth.allow(roomId, "player");
-      const res = await upload(small, roomId, player, "token", Buffer.alloc(2 * 1024 * 1024, 1));
+      const dm = auth.allow(roomId, "dm");
+      const res = await upload(small, roomId, dm, "token", Buffer.alloc(2 * 1024 * 1024, 1));
       assert.equal(res.statusCode, 413);
       assert.equal(res.headers.connection, "close");
+    } finally {
+      await small.close();
+      await quotaDir.cleanup();
+    }
+  });
+
+  test("a player's upload is refused for space only once the room is at its quota, whatever the DM stored (docs/design/design-v1-player-limits.md 6.5)", async () => {
+    const quotaDir = await tempDir();
+    const small = await buildAssetApp({ pool, config: testConfig(quotaDir.dir, { ROOM_QUOTA_MB: "1" }), auth });
+    try {
+      const roomId = await room();
+      // The DM's handouts, stored a few bytes under the quota.
+      const stored = (bytes: number) =>
+        pool.query("insert into assets (id, room_id, sha256, kind, pipeline, width, height, bytes, variants) values ($1, $2, $3, 'handout', 1, 1, 1, $4, '{}')", [randomUUID(), roomId, createHash("sha256").update(String(bytes)).digest(), bytes]);
+      await stored(1024 * 1024 - 64);
+      const dm = auth.allow(roomId, "dm");
+      assert.equal((await upload(small, roomId, dm, "token", otherPng)).statusCode, 413, "the DM's needs room beside what is stored");
+      const player = auth.allow(roomId, "player");
+      assert.equal((await upload(small, roomId, player, "token", otherPng)).statusCode, 200, "a player's goes up while the room is under its quota");
+      await pool.query("delete from assets where room_id = $1", [roomId]);
+      await stored(1024 * 1024);
+      assert.equal((await upload(small, roomId, player, "token", tokenPng)).statusCode, 413, "and is refused once it is at it");
     } finally {
       await small.close();
       await quotaDir.cleanup();

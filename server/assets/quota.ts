@@ -78,16 +78,24 @@ export class RoomQuota {
     return this.#reserved.get(roomId) ?? 0;
   }
 
-  /** Reserves `bytes` for the room, or answers 413 when they, and `headroom` beside them, do not fit. */
-  async reserve(roomId: string, bytes: number, opts: { headroom?: number } = {}): Promise<Reservation> {
-    const headroom = opts.headroom ?? 0;
+  /**
+   * Reserves `bytes` for the room, or answers 413 when they, and `headroom`
+   * beside them, do not fit. A player's upload is refused only once the
+   * room is already at its quota (docs/design/design-v1-player-limits.md
+   * 6.5): what else is stored or on its way is the DM's as often as not, so
+   * how near the room is never decides a player's answer. The quota can
+   * then be passed by what players' uploads in flight bring, which their
+   * upload slots and hourly budgets bound.
+   */
+  async reserve(roomId: string, bytes: number, opts: { headroom?: number; player?: boolean } = {}): Promise<Reservation> {
+    const headroom = opts.player ? 0 : (opts.headroom ?? 0);
     return this.#locks.run(roomId, async () => {
       const stored = await this.#storedBytes(roomId);
-      if (stored + this.reservedBytes(roomId) + bytes + headroom > this.quotaBytes) {
+      if (opts.player ? stored >= this.quotaBytes : stored + this.reservedBytes(roomId) + bytes + headroom > this.quotaBytes) {
         throw new AssetError(413, "quota_exceeded", { closeConnection: true });
       }
       this.#add(roomId, bytes);
-      return new Reservation(this, roomId, bytes, headroom);
+      return new Reservation(this, roomId, bytes, headroom, opts.player === true);
     });
   }
 
@@ -96,7 +104,10 @@ export class RoomQuota {
     return this.#locks.run(res.roomId, async () => {
       if (res.released) throw new Error("reservation already released");
       // A live upload with headroom checks again however its size came out (AMBUILD-SOL-004): uploads reserved after it and the room's own writes may have taken its headroom since.
-      if (finalBytes > res.bytes || res.headroom > 0) {
+      if (res.player) {
+        // A player's is refused here, as at its reservation, only once the room is at its quota.
+        if ((await this.#storedBytes(res.roomId)) >= this.quotaBytes) throw new AssetError(413, "quota_exceeded");
+      } else if (finalBytes > res.bytes || res.headroom > 0) {
         const stored = await this.#storedBytes(res.roomId);
         const others = this.reservedBytes(res.roomId) - res.bytes;
         if (stored + others + finalBytes + res.headroom > this.quotaBytes) {
@@ -132,14 +143,17 @@ export class Reservation {
   readonly bytes: number;
   /** The quota this upload must leave free beside itself. */
   readonly headroom: number;
+  /** A player's upload, refused only once the room is at its quota. */
+  readonly player: boolean;
   released = false;
   #quota: RoomQuota;
 
-  constructor(quota: RoomQuota, roomId: string, bytes: number, headroom = 0) {
+  constructor(quota: RoomQuota, roomId: string, bytes: number, headroom = 0, player = false) {
     this.#quota = quota;
     this.roomId = roomId;
     this.bytes = bytes;
     this.headroom = headroom;
+    this.player = player;
   }
 
   /**
