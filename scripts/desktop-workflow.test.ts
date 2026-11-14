@@ -103,7 +103,7 @@ const FILES = [
 const ASSETS = [...FILES, ...FILES.map((f) => `${f}.sigstore.json`), "raccoon-vtt-1.2.3-desktop.intoto.jsonl"];
 
 type Target = { target: string; runner: string; files: string };
-type Check = { runner: string; "report-only": boolean };
+type Check = { runner: string };
 
 function plan(mode: string) {
   const r = runStep(stepScript("The targets and the assets"), { MODE: mode, VERSION: "1.2.3" });
@@ -218,7 +218,7 @@ describe("the targets", () => {
         ["linux-x64", "ubuntu-24.04"],
         ["linux-arm64", "ubuntu-24.04-arm"],
       ]);
-      assert.deepEqual(p.checks, [{ runner: "windows-2025-vs2026", "report-only": true }, { runner: "macos-15", "report-only": false }]);
+      assert.deepEqual(p.checks, [{ runner: "windows-2025-vs2026" }, { runner: "macos-15" }]);
     }
   });
 
@@ -236,9 +236,18 @@ describe("the targets", () => {
     assert.match(jobBlock("build"), /\n {8}include: \$\{\{ fromJSON\(needs\.plan\.outputs\.targets\) \}\}\n/);
   });
 
-  test("the Windows checks are report-only, and the rest are a gate", () => {
-    assert.match(jobBlock("checks"), /\n {4}continue-on-error: \$\{\{ matrix\.report-only \}\}\n/);
+  test("every desktop check is a gate, on Windows too, where only the app's own unit and integration suites report", () => {
     assert.doesNotMatch(jobBlock("build"), /continue-on-error/);
+    const [head] = jobBlock("checks").split("\n    steps:\n");
+    assert.doesNotMatch(head!, /continue-on-error/, "never the whole job");
+    const lenient = steps("checks").filter((s) => s.includes("continue-on-error"));
+    assert.deepEqual(lenient.map((s) => s.match(/- name: (.+)/)?.[1]), ["Unit tests", "Integration tests on a throwaway cluster"]);
+    for (const s of lenient) assert.match(s, /\n {8}continue-on-error: \$\{\{ runner\.os == 'Windows' \}\}\n/);
+    // Off Linux the app's units leave desktop/ out, and the desktop units run in a step of their own.
+    assert.doesNotMatch(stepScript("Unit tests").split("else")[1]!, /desktop/);
+    assert.equal(stepScript("Desktop unit tests"), 'node --test "desktop/**/*.test.ts"');
+    assert.match(steps("checks").find((s) => s.includes("- name: Desktop unit tests"))!, /runner\.os != 'Linux'/, "Linux runs them in pnpm test");
+    assert.deepEqual(plan("branch").checks, [{ runner: "windows-2025-vs2026" }, { runner: "ubuntu-24.04" }]);
   });
 
   test("the assets are design 11.5's names, with a signature for each file and one provenance", () => {
