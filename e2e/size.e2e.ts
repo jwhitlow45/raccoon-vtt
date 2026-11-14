@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -67,12 +67,12 @@ const run = {
   sceneId: "",
   bounds: { w: 0, h: 0 },
   sceneName: "",
-  goblin: { id: randomUUID(), x: 0, y: 0 },
-  orc: { id: randomUUID(), x: 0, y: 0 },
+  goblin: { id: uuidv7(), x: 0, y: 0 },
+  orc: { id: uuidv7(), x: 0, y: 0 },
   /** Thorn's companion, whose panel offers the picker with its numbers step. */
-  pip: { id: randomUUID(), x: 0, y: 0 },
+  pip: { id: uuidv7(), x: 0, y: 0 },
   /** A stamp's cell, clear of the tokens, so a tap there selects the stamp. */
-  stamp: { id: randomUUID(), x: 0, y: 0 },
+  stamp: { id: uuidv7(), x: 0, y: 0 },
   handoutImage: "",
   handoutPages: [] as { assetId: string; width: number; height: number }[],
   uvttFile: path.join(work, "Small_hall.dd2vtt"),
@@ -80,7 +80,7 @@ const run = {
   xcardAt: 0,
   /** Three music tracks and their playlist, which the playlist maker's step opens. */
   tracks: [] as string[],
-  playlist: randomUUID(),
+  playlist: uuidv7(),
 };
 
 function actor() {
@@ -416,7 +416,7 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
 
     const cookie = (await context.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
-    const characterId = randomUUID();
+    const characterId = uuidv7();
     const cx = Math.floor(run.bounds.w / 2);
     const cy = Math.floor(run.bounds.h / 2);
     // The orc stands left of the goblin, clear of the bar a selected goblin opens beside itself.
@@ -424,7 +424,7 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
     run.orc = { ...run.orc, x: cx - 3, y: cy };
     await ops.send({ t: "character.create", character: { id: characterId, name: "Thorn", size: "medium", ownerIds: [patId], actor: actor() } });
     const token = (id: string, extra: Record<string, unknown>) => ({ t: "token.create", token: { id, sceneId: run.sceneId, size: "medium", visibility: "all", ...extra } });
-    await ops.send(token(randomUUID(), { kind: "pc", name: "Thorn", x: cx - 1, y: cy - 3, disposition: "ally", actor: { ref: characterId } }));
+    await ops.send(token(uuidv7(), { kind: "pc", name: "Thorn", x: cx - 1, y: cy - 3, disposition: "ally", actor: { ref: characterId } }));
     await ops.send(token(run.goblin.id, { kind: "monster", name: "Goblin", x: run.goblin.x, y: run.goblin.y, disposition: "hostile", actor: { inline: actor() } }));
     await ops.send(token(run.orc.id, { kind: "monster", name: "Orc", x: run.orc.x, y: run.orc.y, disposition: "hostile", actor: { inline: actor() } }));
     run.pip = { ...run.pip, x: cx + 2, y: cy - 3 };
@@ -439,7 +439,7 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
     assert.ok(track.ok(), `uploading a track answered ${track.status()}`);
     const assetId = ((await track.json()) as { id: string }).id;
     for (const name of ["The Prancing Pony", "Road to Phandalin", "A track with a name long enough to wrap at a phone's width"]) {
-      const id = randomUUID();
+      const id = uuidv7();
       await ops.send({ t: "sound.create", id, assetId, name, use: "music", ms: 31_000 });
       run.tracks.push(id);
     }
@@ -671,7 +671,7 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await player.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
         await reopenRoom(player);
         await player.getByRole("status", { name: "Connected" }).first().waitFor();
-        const handoutId = randomUUID();
+        const handoutId = uuidv7();
         const title = `A letter, ${label}`;
         await ops.send({ t: "handout.show", handout: { id: handoutId, assetId: run.handoutImage, title, to: "all" } });
         const letter = player.getByRole("dialog", { name: title });
@@ -683,7 +683,7 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await ops.send({ t: "handout.close", handoutId });
 
         // A handout of three pages: its page row and zoom buttons inside the card and apart.
-        const pagesId = randomUUID();
+        const pagesId = uuidv7();
         const pagesTitle = `Three pages, ${label}`;
         await ops.send({ t: "handout.show", handout: { id: pagesId, pages: run.handoutPages, title: pagesTitle, to: "all" } });
         const pages = player.getByRole("dialog", { name: pagesTitle });
@@ -831,7 +831,7 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
 
   test("lp2-3a-size. on a 320 x 568 phone at 100% and 130%, the Attach sheet's rows span it, a long name wraps whole, and nothing in it scrolls sideways (docs/design/design-v1-look-pass-2.md 2.5)", async () => {
     // A cart with a long name beside the goblin, so its row must wrap to read whole.
-    const cart = randomUUID();
+    const cart = uuidv7();
     await ops.send({ t: "token.create", token: { id: cart, sceneId: run.sceneId, size: "large", visibility: "all", kind: "object", layer: "object", name: "Treasure chest of the drowned king", x: run.goblin.x, y: run.goblin.y + 1, actor: { inline: actor() } } });
     await waitFor("the cart in the DM's view", () => socket.state?.tokens[cart] ?? null);
     for (const scale of [1, 1.3]) {

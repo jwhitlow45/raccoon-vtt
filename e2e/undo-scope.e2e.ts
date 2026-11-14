@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -18,7 +19,7 @@ const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@loc
 const SHOT_DIR = process.env.E2E_SCREENSHOT_DIR ?? "test-results/e2e-screenshots";
 const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
 const work = mkdtempSync(path.join(tmpdir(), "raccoon-undo-scope-"));
-const ids = { bree: randomUUID(), pc: randomUUID(), goblin: randomUUID(), moth: randomUUID() };
+const ids = { bree: uuidv7(), pc: uuidv7(), goblin: uuidv7(), moth: uuidv7() };
 const roomName = `Undo scope ${randomUUID()}`;
 const password = "undo-scope-owlbear-wand";
 let server: Server;
@@ -282,7 +283,7 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
   test("undo-scope-1-notices: Evasion, formulas and companion action text notify only the owner with Actor unchanged", async () => {
     const patches = [
       { evasion: true },
-      { rolls: [{ id: randomUUID(), name: "Arcane bolt", kind: "spell", dice: [{ formula: "2d6+3", type: "fire" }] }] },
+      { rolls: [{ id: uuidv7(), name: "Arcane bolt", kind: "spell", dice: [{ formula: "2d6+3", type: "fire" }] }] },
     ];
     for (const patch of patches) {
       const actorBefore = structuredClone(bree().actor);
@@ -522,8 +523,8 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
 
   test("undo-scope-2-forget: Setup Undo and Redo ask against current map memory, cancel and stale yes preserve it", async () => {
     for (const direction of ["undo", "redo"] as const) {
-      const cavern = randomUUID();
-      const tokenId = randomUUID();
+      const cavern = uuidv7();
+      const tokenId = uuidv7();
       const name = `Remembered cavern ${direction}`;
       await coWire.apply({ t: "scene.create", scene: { id: cavern, name, bounds: { w: 80, h: 64 }, fogEnabled: true, autoWalls: "all", blockMovement: true, vision: { on: true, light: "bright" } } });
       for (let y = 0; y < 64; y += 16) await coWire.apply({ t: "build.rect", sceneId: cavern, terrain: "stone", x: 0, y, w: 80, h: 16 });
@@ -535,7 +536,7 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
         await waitFor("players leave the remembered cavern", () => owner().watch.state?.meta.playerSceneId === sceneId);
       };
       await visitAndLeave();
-      await dmWire.apply({ t: "build.rect", sceneId: cavern, terrain: "wood", x: 0, y: 0, w: 80, h: 16 }, { g: randomUUID(), groupScope: "setup" });
+      await dmWire.apply({ t: "build.rect", sceneId: cavern, terrain: "wood", x: 0, y: 0, w: 80, h: 16 }, { g: uuidv7(), groupScope: "setup" });
       if (direction === "redo") await dmWire.restore("setup");
       // Refresh the remembered baseline without changing the target's guarded build chunk.
       await visitAndLeave();

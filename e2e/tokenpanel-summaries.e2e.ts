@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { test } from "node:test";
 import type { Locator } from "playwright-core";
 import { expandBar, openSideTab, waitFor } from "./harness.ts";
@@ -29,8 +29,8 @@ panelFile("life, conditions, fight buttons and quick numbers", () => {
   });
 
   test("fu31-i. a counted condition's row is as tall as a plain one: Exhaustion 2 with its − and + beside Poisoned, on the goblin and on a desk on Thorn's page, in line within 1 px at live play 22's sizes (LP22-ALIGN-5, FU31 review F8)", async () => {
-    const added = [randomUUID(), randomUUID()];
-    const thorn = [randomUUID(), randomUUID()];
+    const added = [uuidv7(), uuidv7()];
+    const thorn = [uuidv7(), uuidv7()];
     await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin.id }, effect: { id: added[0]!, key: "exhaustion", level: 2 } });
     await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin.id }, effect: { id: added[1]!, key: "poisoned" } });
     await ops.send({ t: "actor.effect.add", target: { characterId: run.thorn.characterId }, effect: { id: thorn[0]!, key: "exhaustion", level: 2 } });
@@ -83,7 +83,7 @@ panelFile("life, conditions, fight buttons and quick numbers", () => {
   });
 
   test("fu31-m. the item after Passive Perception sits beside it wherever it fits: the panel's header for the dragon and Swift, and the window's summary for a five-speed scout with its Sheet link, at 1280 x 800, 390 x 844 and 480 x 320 at 130%, and the scout at 390 x 844 at 130% and 320 x 568 (FU31 review F1)", async () => {
-    const scout = { id: randomUUID(), at: cell(6, 4) };
+    const scout = { id: uuidv7(), at: cell(6, 4) };
     await ops.send({ t: "token.create", token: { id: scout.id, sceneId: run.sceneId, size: "medium", visibility: "all", x: scout.at.x, y: scout.at.y, disposition: "hostile", kind: "monster", name: "Climbing Scout", actor: { inline: actor({ ac: 14, speeds: { walk: 40, burrow: 20, climb: 40, fly: 80, swim: 30 }, passivePerception: 23, sheetUrl: SHEET }) } } });
     await waitFor("the scout", () => dmSocket.state?.tokens[scout.id]);
     const off: string[] = [];

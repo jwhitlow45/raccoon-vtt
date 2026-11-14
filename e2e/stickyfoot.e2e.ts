@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -46,7 +46,7 @@ const run = {
   roomName: `E2E sticky foot ${new Date().toISOString().slice(0, 19)}`,
   sceneId: "",
   bounds: { w: 30, h: 20 },
-  goblins: [randomUUID(), randomUUID()],
+  goblins: [uuidv7(), uuidv7()],
 };
 
 type Rect = { top: number; bottom: number; left: number; right: number; width: number; height: number };

@@ -1,6 +1,6 @@
 import { damageSummaryAlignment } from "./helpers/damageSummary.ts";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { test } from "node:test";
 import type { Locator, Page } from "playwright-core";
 import { INTER_FAMILY } from "../client/lib/interFont.ts";
@@ -1172,7 +1172,7 @@ panelFile(null, () => {
 
   test("9c. sizes on the fly (docs/design/design-v1-token-window.md 8): the DM's steps and Stats, Pat's growth away from walls and back, no room in a corridor, undo keeping damage, an unchecked scene, a locked and a Custom token, a turn's trail kept through a resize, and the row on phones", async () => {
     const SIZES = { w: 20, h: 14 };
-    const sizes = { sceneId: randomUUID(), thorn: randomUUID(), goblin: randomUUID(), owl: randomUUID() };
+    const sizes = { sceneId: uuidv7(), thorn: uuidv7(), goblin: uuidv7(), owl: uuidv7() };
     const wall = { kind: "wall" } as const;
     const edges: { key: string; feature: typeof wall }[] = [];
     // A corner at (4, 4): walls down the west side of column 4 and along the north side of row 4.
@@ -1327,7 +1327,7 @@ panelFile(null, () => {
     await until("Thorn Medium after Custom", sizes.thorn, { x: 4, y: 4, size: "medium" });
 
     // In a fight on his turn: 15 ft moved, then Huge, and the trail still reads 15 ft for Pat, the DM, and Pat again after a reload.
-    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: sizes.thorn, value: 20 }, { id: randomUUID(), tokenId: sizes.owl, value: 10 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: sizes.thorn, value: 20 }, { id: uuidv7(), tokenId: sizes.owl, value: 10 }] });
     await ops.send({ t: "encounter.next" });
     await waitFor("Thorn's turn for Pat", () => (playerSocket.state?.encounter?.activeEntryId ? true : null));
     const from = await pagePoint(player, SIZES, { x: 4.5, y: 4.5 });
@@ -1420,7 +1420,7 @@ panelFile(null, () => {
     await setUp(dm, dmCdp, DESK, null);
     const sceneId = dmSocket.you?.sceneId ?? run.sceneId;
     const bounds = dmSocket.state!.scenes[sceneId]!.bounds;
-    const id = randomUUID();
+    const id = uuidv7();
     await ops.send({ t: "token.create", token: { id, sceneId, size: "medium", visibility: "all", x: 1, y: 1, disposition: "hostile", kind: "monster", name: "Starter wolf", actor: { inline: actor() } } });
     await waitFor("the token in the DM's view", () => dmSocket.state?.tokens[id]);
     const at = await pagePoint(dm, bounds, { x: 1.5, y: 1.5 });
@@ -1568,7 +1568,7 @@ panelFile(null, () => {
   });
 
   test("s2-tp-b. Pat on Thorn: Reaction with its player's words, and It fired from Conditions' Readied spends it there", async () => {
-    await ops.send({ t: "actor.effect.add", target: { characterId: run.thorn.characterId }, effect: { id: randomUUID(), key: "readied", label: "if the door opens", duration: { mode: "turnStart", of: { entryId: "s2-thorn" } } } });
+    await ops.send({ t: "actor.effect.add", target: { characterId: run.thorn.characterId }, effect: { id: uuidv7(), key: "readied", label: "if the door opens", duration: { mode: "turnStart", of: { entryId: "s2-thorn" } } } });
     await waitFor("Pat's copy holds Thorn's Ready", () => (playerSocket.state?.characters[run.thorn.characterId]?.actor.effects.some((e) => e.key === "readied") ? true : null));
     const panel = await panelOf(player, run.thorn.at, "Thorn");
     // A character's Uses always stands for its player, who adds class resources there.

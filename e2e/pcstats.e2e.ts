@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -51,7 +51,7 @@ const run = {
   password: "",
   sceneId: "",
   anaId: "",
-  bree: { characterId: randomUUID(), tokenId: randomUUID() },
+  bree: { characterId: uuidv7(), tokenId: uuidv7() },
 };
 
 /** An invented D&D Beyond character in the shape of the service's JSON, with only the fields the reader reads. */
@@ -952,8 +952,8 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
 
   test("lp22-r1-c. by keyboard in a fight, Save on Readied's form hands focus to its row, and It fired, which takes the row away, to Add (LP22-OPUS-5)", async () => {
     const characterId = run.bree.characterId;
-    const entryId = randomUUID();
-    const effectId = randomUUID();
+    const entryId = uuidv7();
+    const effectId = uuidv7();
     await ops.send({ t: "encounter.start", entries: [{ id: entryId, tokenId: run.bree.tokenId, value: 12 }] });
     const readied = () => (anaSocket.state?.characters[characterId]?.actor.effects ?? []).some((e) => e.key === "readied");
     // A failure ends the fight and takes Readied off Bree, as It fired would have (LP22-OPUS-6).
@@ -1024,7 +1024,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
   });
 
   test("lp22-r1-f. by keyboard on a character with no block, Take a shape moves to the fold's row with the shape and focus goes to the Stat block's fold, and Save on a first block leaves it on Edit, where Add a stat block stood, never the page (LP22-OPUS-2)", async () => {
-    const cal = { characterId: randomUUID(), tokenId: randomUUID() };
+    const cal = { characterId: uuidv7(), tokenId: uuidv7() };
     await ops.send({ t: "character.create", character: { id: cal.characterId, name: "Cal", size: "medium", ownerIds: [], actor: actor() } });
     // Cal is this step's alone, so he goes at its end, whether it passes or not, and his token with him (LP22-OPUS-6).
     try {

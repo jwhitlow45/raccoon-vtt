@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -58,23 +58,23 @@ export const run = {
   roomName: `E2E token panel ${new Date().toISOString().slice(0, 19)}`,
   sceneId: "",
   patId: "",
-  thorn: { id: randomUUID(), characterId: randomUUID(), at: cell(0, 1) },
-  bear: { id: randomUUID(), at: cell(2, 1) },
-  bree: { id: randomUUID(), characterId: randomUUID(), at: cell(4, 1) },
-  dragon: { id: randomUUID(), at: cell(6, 1) },
-  goblin: { id: randomUUID(), at: cell(0, 4) },
-  bog: { id: randomUUID(), monsterId: randomUUID(), at: cell(2, 4) },
-  swift: { id: randomUUID(), at: cell(4, 4) },
-  soft: { id: randomUUID(), at: cell(0, 7) },
-  villager: { id: randomUUID(), at: cell(2, 7) },
-  chest: { id: randomUUID(), at: cell(4, 7) },
-  ogre: { id: randomUUID(), at: cell(6, 6) },
+  thorn: { id: uuidv7(), characterId: uuidv7(), at: cell(0, 1) },
+  bear: { id: uuidv7(), at: cell(2, 1) },
+  bree: { id: uuidv7(), characterId: uuidv7(), at: cell(4, 1) },
+  dragon: { id: uuidv7(), at: cell(6, 1) },
+  goblin: { id: uuidv7(), at: cell(0, 4) },
+  bog: { id: uuidv7(), monsterId: uuidv7(), at: cell(2, 4) },
+  swift: { id: uuidv7(), at: cell(4, 4) },
+  soft: { id: uuidv7(), at: cell(0, 7) },
+  villager: { id: uuidv7(), at: cell(2, 7) },
+  chest: { id: uuidv7(), at: cell(4, 7) },
+  ogre: { id: uuidv7(), at: cell(6, 6) },
   /** Linked to a room monster deleted since. */
-  mire: { id: randomUUID(), monsterId: randomUUID(), at: cell(8, 4) },
+  mire: { id: uuidv7(), monsterId: uuidv7(), at: cell(8, 4) },
   /** At 0 of 0 HP, like Spiritual Weapon: HP-less. */
-  weapon: { id: randomUUID(), at: cell(8, 8) },
+  weapon: { id: uuidv7(), at: cell(8, 8) },
   /** A name of 80 characters. */
-  herald: { id: randomUUID(), at: cell(0, 9), name: "Herald of the Ninefold Crown and Keeper of the Long Night's Unbroken Silver Seal".slice(0, 80) },
+  herald: { id: uuidv7(), at: cell(0, 9), name: "Herald of the Ninefold Crown and Keeper of the Long Night's Unbroken Silver Seal".slice(0, 80) },
 };
 
 export function actor(over: Record<string, unknown> = {}) {
@@ -793,7 +793,7 @@ export function panelFile(part: string | null, steps: () => void): void {
       await ops.send(token(run.dragon.id, run.dragon.at, { name: "Adult White Dragon", size: "huge", hpVisibility: "label", actor: { inline: actor({ ac: 18, srdId: "adult-white-dragon", speeds: { walk: 40, burrow: 30, fly: 80, swim: 40 }, passivePerception: 21, hp: { cur: 200, max: 200, temp: 0 } }) } }));
       // The goblin reads "Goblin 4": the table numbers creatures the party sees side by side, so three stand-ins meet the
       // party first and leave once it has its number.
-      const standIns = [randomUUID(), randomUUID(), randomUUID()];
+      const standIns = [uuidv7(), uuidv7(), uuidv7()];
       for (const id of standIns) await ops.send(token(id, run.goblin.at, { name: "Goblin", actor: { inline: actor() } }));
       await ops.send(token(run.goblin.id, run.goblin.at, { name: "Goblin", image: ICON, hpVisibility: "label", actor: { inline: actor({ ac: 15, srdId: "goblin-warrior", passivePerception: 9, hp: { cur: 10, max: 10, temp: 0 } }) } }));
       for (const id of standIns) await ops.send({ t: "token.delete", tokenId: id });

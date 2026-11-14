@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { test } from "node:test";
 import { barControl, openSideTab, waitFor } from "./harness.ts";
 import { openGroup } from "./helpers/groups.ts";
@@ -8,7 +8,7 @@ import { actor, atLp22Sizes, bar, cell, DESK, dm, dmCdp, dmSocket, focusedText, 
 /** FU39-C: a separate room for focus and group lines (CISPEED-F6, E2E-SPLIT). */
 panelFile("focus and group lines", () => {
   test("fu31-l. by keyboard on a desk, the DM's Delete this token hands focus to the empty panel's line (LP22-SECT-1)", async () => {
-    const doomed = { id: randomUUID(), at: cell(6, 4) };
+    const doomed = { id: uuidv7(), at: cell(6, 4) };
     await setUp(dm, dmCdp, DESK, null);
     await ops.send({ t: "token.create", token: { id: doomed.id, sceneId: run.sceneId, size: "medium", visibility: "all", x: doomed.at.x, y: doomed.at.y, disposition: "hostile", kind: "monster", name: "Doomed Wolf", actor: { inline: actor({ ac: 13, srdId: "wolf", hp: { cur: 11, max: 11, temp: 0 } }) } } });
     await waitFor("the doomed wolf", () => dmSocket.state?.tokens[doomed.id]);
@@ -28,7 +28,7 @@ panelFile("focus and group lines", () => {
   });
 
   test("fu31-d. by keyboard on a desk, Back to Medium in Stats hands focus to the Size field that stays (LP22-SECT-3)", async () => {
-    const wolf = { id: randomUUID(), at: cell(6, 4) };
+    const wolf = { id: uuidv7(), at: cell(6, 4) };
     await setUp(dm, dmCdp, DESK, null);
     // Small here, and Medium by its block.
     await ops.send({ t: "token.create", token: { id: wolf.id, sceneId: run.sceneId, size: "small", visibility: "all", x: wolf.at.x, y: wolf.at.y, disposition: "hostile", kind: "monster", name: "Small Wolf", actor: { inline: actor({ ac: 13, srdId: "wolf", hp: { cur: 11, max: 11, temp: 0 } }) } } });
@@ -115,7 +115,7 @@ panelFile("focus and group lines", () => {
   });
 
   test("fu31-g. a Stat block's Copy, Change and Detach leave no button alone under the others and all fill the lines they take: Pat's wolf companion and the DM's goblin, in line within 1 px at live play 22's sizes (LP22-ALIGN-3, FU31 review F9)", async () => {
-    const wolf = { id: randomUUID(), at: cell(6, 4) };
+    const wolf = { id: uuidv7(), at: cell(6, 4) };
     await ops.send({ t: "token.create", token: { id: wolf.id, sceneId: run.sceneId, size: "medium", visibility: "all", x: wolf.at.x, y: wolf.at.y, disposition: "ally", kind: "monster", name: "Wolf", companion: { of: run.thorn.characterId, turn: "shared" }, actor: { inline: actor({ ac: 13, srdId: "wolf", hp: { cur: 11, max: 11, temp: 0 } }) } } });
     await waitFor("Pat's wolf", () => playerSocket.state?.tokens[wolf.id]);
     try {

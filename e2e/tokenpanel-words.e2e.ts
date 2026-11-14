@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { test } from "node:test";
 import type { Locator } from "playwright-core";
 import { waitFor } from "./harness.ts";
@@ -10,7 +10,7 @@ import { actor, cell, DESK, dm, dmCdp, dmSocket, groupIn, measureIn, ops, panelF
 /** FU39-C: a separate room for wrapped kind and size words (CISPEED-F6, E2E-SPLIT). */
 panelFile("wrapped kind and size words", () => {
   test("fu33-a. no unit or word stands alone on a wrapped last line: the kind lines of the hound, a companion, and of the goblin, Thorn and the bear, and Pat's locked Size in his Stats, in line within 1 px at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%, and the hound's and Pat's line with the window narrowed 1 px at a time from 430 to 320 px (FU32-FT-ALONE)", async () => {
-    const hound = { id: randomUUID(), at: cell(6, 4) };
+    const hound = { id: uuidv7(), at: cell(6, 4) };
     await ops.send({ t: "token.create", token: { id: hound.id, sceneId: run.sceneId, size: "medium", visibility: "all", x: hound.at.x, y: hound.at.y, disposition: "ally", kind: "monster", name: "Hound", companion: { of: run.thorn.characterId, turn: "shared" }, actor: { inline: actor({ ac: 13, hp: { cur: 11, max: 11, temp: 0 } }) } } });
     await ops.send({ t: "token.update", tokenId: run.thorn.id, patch: { locked: true } });
     await waitFor("the hound, and Thorn locked for Pat", () => (dmSocket.state?.tokens[hound.id] && playerSocket.state?.tokens[run.thorn.id]?.locked ? true : null));

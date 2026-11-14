@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -68,11 +68,11 @@ const run = {
   sceneId: "",
   patId: "",
   samId: "",
-  goblin: randomUUID(),
-  bree: randomUUID(),
-  pony: randomUUID(),
-  sam: randomUUID(),
-  imp: randomUUID(),
+  goblin: uuidv7(),
+  bree: uuidv7(),
+  pony: uuidv7(),
+  sam: uuidv7(),
+  imp: uuidv7(),
 };
 
 function actor() {
@@ -669,7 +669,7 @@ describe("raccoon-vtt snap off", { timeout: 600_000 }, () => {
    */
   test("snapfix2-1. a placed ogre dragged into a corridor one square wide shows its outline on the one square it squeezes into, ordinary or with Alt (SNAPBUILD-ASTRA-04)", async () => {
     await closeBars(dm);
-    const ogre = randomUUID();
+    const ogre = uuidv7();
     // The rock runs from x 6 to 14 but for a corridor along row 6, so the tokens there move out of it first.
     await ops.send({ t: "token.move", tokenId: run.bree, x: 0, y: 0 });
     await ops.send({ t: "token.move", tokenId: run.sam, x: 0, y: 10 });

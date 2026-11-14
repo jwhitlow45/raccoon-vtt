@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -76,7 +76,7 @@ const run = {
   password: "",
   sceneId: "",
   anaId: "",
-  bree: { characterId: randomUUID(), tokenId: randomUUID() },
+  bree: { characterId: uuidv7(), tokenId: uuidv7() },
 };
 
 /* Invented D&D Beyond characters, in the service's JSON shape, with only the paths the reader reads (shared/ddb/read.ts). */
@@ -1090,7 +1090,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
       await assert.rejects(ops.send({ t: "encounter.start", entries: [{ id: name, tokenId: run.bree.tokenId, value: 12 }] }), /that id is reserved/, `an entry named ${name}`);
     }
     // An ordinary id still goes through, so the refusal is the id's and not the op's.
-    await ops.send({ t: "encounter.start", entries: [{ id: "pid-entry", tokenId: run.bree.tokenId, value: 12 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: run.bree.tokenId, value: 12 }] });
     await ana.getByText("The fight has not started yet").first().waitFor();
     await cy.getByText("The fight has not started yet").first().waitFor();
     await ops.send({ t: "encounter.end" });

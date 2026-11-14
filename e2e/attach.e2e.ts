@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -61,14 +61,14 @@ const run = {
   sceneId: "",
   patId: "",
   samId: "",
-  thornChar: randomUUID(),
-  breeChar: randomUUID(),
-  thorn: randomUUID(),
-  horse: randomUUID(),
-  bree: randomUUID(),
-  goblin: randomUUID(),
-  fanatic: randomUUID(),
-  imp: randomUUID(),
+  thornChar: uuidv7(),
+  breeChar: uuidv7(),
+  thorn: uuidv7(),
+  horse: uuidv7(),
+  bree: uuidv7(),
+  goblin: uuidv7(),
+  fanatic: uuidv7(),
+  imp: uuidv7(),
 };
 
 function actor(over: Record<string, unknown> = {}) {
@@ -267,10 +267,10 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await ops.send({
       t: "encounter.start",
       entries: [
-        { id: randomUUID(), tokenId: run.thorn, value: 18 },
-        { id: randomUUID(), tokenId: run.goblin, value: 14 },
-        { id: randomUUID(), tokenId: run.horse, value: 12 },
-        { id: randomUUID(), tokenId: run.bree, value: 6 },
+        { id: uuidv7(), tokenId: run.thorn, value: 18 },
+        { id: uuidv7(), tokenId: run.goblin, value: 14 },
+        { id: uuidv7(), tokenId: run.horse, value: 12 },
+        { id: uuidv7(), tokenId: run.bree, value: 6 },
       ],
     });
     await ops.send({ t: "encounter.next" });
@@ -424,7 +424,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     // The ring of cells around the horse's 2 x 2, each taken by a goblin, so Thorn has nowhere to get off to.
     const ring: { x: number; y: number }[] = [];
     for (let x = horse.x - 1; x <= horse.x + 2; x++) for (let y = horse.y - 1; y <= horse.y + 2; y++) if (x < horse.x || x > horse.x + 1 || y < horse.y || y > horse.y + 1) ring.push({ x, y });
-    const crowd = ring.map(() => randomUUID());
+    const crowd = ring.map(() => uuidv7());
     for (const [i, at] of ring.entries()) await ops.send(tokenOp(crowd[i]!, { kind: "monster", name: `Crowd ${i + 1}`, x: at.x, y: at.y, disposition: "hostile", actor: { inline: actor() } }));
     try {
       await waitFor("the crowd on Pat's phone", () => (crowd.every((id) => token(patSocket, id)) ? true : null));
@@ -473,7 +473,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   });
 
   test("at-5. the DM marks the goblin Grappled, and Sam on a desktop drags it with Bree from the Attach popover", async () => {
-    await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin }, effect: { id: randomUUID(), key: "grappled" } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin }, effect: { id: uuidv7(), key: "grappled" } });
     await waitFor("Sam's copy of the Grappled goblin", () => {
       const g = token(samSocket, run.goblin);
       return g && "inline" in g.actor && g.actor.inline.effects.some((e) => e.key === "grappled");
@@ -494,10 +494,10 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   });
 
   test("at-6-fu20a. the DM drags a mule by its middle while it carries a lamp and a chest and an owl perches on it: all four go, and a press near the mule's edge on the lamp takes the lamp alone (review LP12-AT-3)", async () => {
-    const mule = randomUUID();
-    const lamp = randomUUID();
-    const chest = randomUUID();
-    const owl = randomUUID();
+    const mule = uuidv7();
+    const lamp = uuidv7();
+    const chest = uuidv7();
+    const owl = uuidv7();
     await ops.send(tokenOp(mule, { kind: "npc", name: "Mule", x: 2, y: 9, disposition: "ally", actor: { inline: actor() } }));
     // Three of the mule's four quarters, as the live play's carrier had them.
     await ops.send(tokenOp(lamp, { kind: "object", name: "Lamp", size: "tiny", x: 2.5, y: 9, actor: { inline: actor() } }));
@@ -542,11 +542,11 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   });
 
   test("lp15-at-2. the DM taps a Ride row at the foot of an Attach pop-up longer than its box: the question and its Ride scroll into view, clear of \"Scroll for more\" (review LP15-FU-5)", async () => {
-    const scout = randomUUID();
+    const scout = uuidv7();
     await ops.send(tokenOp(scout, { kind: "npc", name: "Scout", x: 1, y: 1, disposition: "ally", actor: { inline: actor() } }));
     // Mules all round her, near and farther away, so the DM's list outgrows the pop-up.
     for (const [i, [x, y]] of [[2, 0], [2, 2], [0, 2], [4, 0], [4, 2], [6, 0], [6, 2], [0, 4]].entries()) {
-      await ops.send(tokenOp(randomUUID(), { kind: "npc", name: `Mule ${i + 1}`, size: "large", x, y, disposition: "ally", actor: { inline: actor() } }));
+      await ops.send(tokenOp(uuidv7(), { kind: "npc", name: `Mule ${i + 1}`, size: "large", x, y, disposition: "ally", actor: { inline: actor() } }));
     }
     await waitFor("the scout on the DM's map", () => token(dmSocket, scout));
     await dm.keyboard.press("Escape");
@@ -612,13 +612,13 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   });
 
   test("pl2-a. on the DM's phone at 390 and 360 px, and 390 at 130%, a hobgoblin carrying a lantern and dragging a prisoner: its window's line gives each kind a row, the word first and its names beside it on the word's line (docs/design/design-v1-polish.md R5)", async () => {
-    const hobgoblin = randomUUID();
-    const lantern = randomUUID();
-    const prisoner = randomUUID();
+    const hobgoblin = uuidv7();
+    const lantern = uuidv7();
+    const prisoner = uuidv7();
     await ops.send(tokenOp(hobgoblin, { kind: "monster", name: "Hobgoblin", x: 9, y: 1, disposition: "hostile", actor: { inline: actor() } }));
     await ops.send(tokenOp(lantern, { kind: "object", name: "Lantern", size: "tiny", x: 9, y: 1.5, actor: { inline: actor({ hp: { cur: 1, max: 1, temp: 0 } }) } }));
     await ops.send(tokenOp(prisoner, { kind: "npc", name: "Prisoner", x: 10, y: 1, disposition: "neutral", actor: { inline: actor() } }));
-    await ops.send({ t: "actor.effect.add", target: { tokenId: prisoner }, effect: { id: randomUUID(), key: "grappled" } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: prisoner }, effect: { id: uuidv7(), key: "grappled" } });
     await ops.send({ t: "token.attach", tokenId: lantern, to: hobgoblin, kind: "carry", x: 9, y: 1.5, elevation: 0 });
     await ops.send({ t: "token.attach", tokenId: prisoner, to: hobgoblin, kind: "drag", x: 10, y: 1, elevation: 0 });
     await waitFor("the hobgoblin's load", () => (token(dmSocket, lantern)?.attached?.to === hobgoblin && token(dmSocket, prisoner)?.attached?.to === hobgoblin) || null);
@@ -721,13 +721,13 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   });
 
   test("pl2-d. an ogre carrying a chest with a long name and dragging a creature named in one long word, on the DM's phone at 320 px at 130% and at 360 px: each name and action keeps inside its cell, its words wrapping there, and each word stands on its first name's first line (PL2-ASTRA-03)", async () => {
-    const ogre = randomUUID();
-    const chest = randomUUID();
-    const captive = randomUUID();
+    const ogre = uuidv7();
+    const chest = uuidv7();
+    const captive = uuidv7();
     await ops.send(tokenOp(ogre, { kind: "monster", name: "Ogre", size: "large", x: 12, y: 0, disposition: "hostile", actor: { inline: actor() } }));
     await ops.send(tokenOp(chest, { kind: "object", name: "Chest of the Drowned Archduke", size: "tiny", x: 12, y: 1.5, actor: { inline: actor({ hp: { cur: 5, max: 5, temp: 0 } }) } }));
     await ops.send(tokenOp(captive, { kind: "npc", name: "Bogglethwaitesonofgrimblethorn", x: 14, y: 0, disposition: "neutral", actor: { inline: actor() } }));
-    await ops.send({ t: "actor.effect.add", target: { tokenId: captive }, effect: { id: randomUUID(), key: "grappled" } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: captive }, effect: { id: uuidv7(), key: "grappled" } });
     await ops.send({ t: "token.attach", tokenId: chest, to: ogre, kind: "carry", x: 12, y: 1.5, elevation: 0 });
     await ops.send({ t: "token.attach", tokenId: captive, to: ogre, kind: "drag", x: 14, y: 0, elevation: 0 });
     await waitFor("the ogre's load", () => (token(dmSocket, chest)?.attached?.to === ogre && token(dmSocket, captive)?.attached?.to === ogre) || null);
@@ -781,8 +781,8 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   });
 
   test("lp21-at-keys. by keyboard on the DM's desktop, a carried crate's holder link hands focus to the porter's bar that replaces it, Put down to that bar as its row goes, and the crate's own Put down to the crate's bar (LP21-BAR-2)", async () => {
-    const porter = randomUUID();
-    const crate = randomUUID();
+    const porter = uuidv7();
+    const crate = uuidv7();
     // Cells 7 and 10, which the earlier steps leave empty: at-6's mule ends where its drag left it, near the map's left.
     await ops.send(tokenOp(porter, { kind: "npc", name: "Porter", x: 7, y: 10, disposition: "neutral", actor: { inline: actor() } }));
     await ops.send(tokenOp(crate, { kind: "object", name: "Crate", size: "tiny", x: 7, y: 10.5, actor: { inline: actor({ hp: { cur: 1, max: 1, temp: 0 } }) } }));
@@ -842,7 +842,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
 
   describe("s2-at: the Token panel's Position holds the bar's attach controls (docs/design/design-v1-token-sections.md 3.3)", () => {
     /** A field of its own, where the party goes for these steps: Thorn, a goblin named Scamp and Pat's pony, nothing else near. */
-    const field = { sceneId: randomUUID(), thorn: randomUUID(), scamp: randomUUID(), pony: randomUUID(), bounds: { w: 10, h: 8 } };
+    const field = { sceneId: uuidv7(), thorn: uuidv7(), scamp: uuidv7(), pony: uuidv7(), bounds: { w: 10, h: 8 } };
     const THORN_AT = { x: 2, y: 3 };
     const SCAMP_AT = { x: 3, y: 3 };
     const PONY_AT = { x: 2, y: 4 };
@@ -1036,7 +1036,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     const G: HexGrid = { shape: "hex", orient: "rows" };
     const field = { w: 20, h: 12 };
     for (const shape of ["squares", "hexRows"] as const) {
-      const keep = { scene: randomUUID(), horse: randomUUID(), brom: randomUUID() };
+      const keep = { scene: uuidv7(), horse: uuidv7(), brom: uuidv7() };
       await ops.send({ t: "scene.create", scene: { id: keep.scene, name: `FU36A ${shape}`, bounds: field, fogEnabled: false, ...(shape === "hexRows" ? { gridShape: "hexRows" } : {}) } });
       await ops.send({ t: "scene.update", sceneId: keep.scene, patch: { blockMovement: true } });
       // Rock from x 6 to 14 but for a corridor along row 6, in runs of at most 8 cells on squares, round its hexes on hex rows.
@@ -1085,7 +1085,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   test("fu45b-1. Pat drags Brom on the warhorse, which drags a goblin, into a corridor one square wide: the goblin follows it in single file, right behind the squeezed warhorse, Brom on its square (D-261101-250)", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const field = { w: 20, h: 12 };
-    const keep = { scene: randomUUID(), horse: randomUUID(), brom: randomUUID(), gob: randomUUID() };
+    const keep = { scene: uuidv7(), horse: uuidv7(), brom: uuidv7(), gob: uuidv7() };
     await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "FU45B squares", bounds: field, fogEnabled: false } });
     await ops.send({ t: "scene.update", sceneId: keep.scene, patch: { blockMovement: true } });
     // Rock from x 6 to 14 but for a corridor along row 6, in runs of at most 8 cells.
@@ -1135,7 +1135,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const G: HexGrid = { shape: "hex", orient: "rows" };
     const field = { w: 20, h: 12 };
-    const keep = { scene: randomUUID(), horse: randomUUID(), gob: randomUUID() };
+    const keep = { scene: uuidv7(), horse: uuidv7(), gob: uuidv7() };
     await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "Rules A hex rows", bounds: field, fogEnabled: false, gridShape: "hexRows" } });
     await ops.send({ t: "scene.update", sceneId: keep.scene, patch: { blockMovement: true } });
     // Rock from column 7 to 12 but for a corridor along row 6.
@@ -1183,7 +1183,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const G: HexGrid = { shape: "hex", orient: "rows" };
     const field = { w: 20, h: 12 };
-    const keep = { scene: randomUUID(), horse: randomUUID(), gob: randomUUID(), hob: randomUUID() };
+    const keep = { scene: uuidv7(), horse: uuidv7(), gob: uuidv7(), hob: uuidv7() };
     await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "LP33 fix hex rows", bounds: field, fogEnabled: false, gridShape: "hexRows" } });
     await ops.send({ t: "scene.update", sceneId: keep.scene, patch: { blockMovement: true } });
     const solid = (h: Hex) => h.col >= 7 && h.col <= 12 && h.row !== 6;
@@ -1226,7 +1226,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   test("fu48m-1. Pat drags Brom on the warhorse, which drags a goblin, toward a corridor one square wide over a net at its mouth: the net stops the warhorse squeezed at the mouth, and the goblin stops on the square behind it, not on the warhorse's (TRAP-STOP-STACK)", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const field = { w: 20, h: 12 };
-    const keep = { scene: randomUUID(), horse: randomUUID(), brom: randomUUID(), gob: randomUUID(), net: randomUUID() };
+    const keep = { scene: uuidv7(), horse: uuidv7(), brom: uuidv7(), gob: uuidv7(), net: uuidv7() };
     await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "FU48M squares", bounds: field, fogEnabled: false } });
     await ops.send({ t: "scene.update", sceneId: keep.scene, patch: { blockMovement: true } });
     // Rock from x 6 to 14 but for a corridor along row 6, in runs of at most 8 cells.
@@ -1269,7 +1269,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   test("fu44b-1. Pat drags Brom on the warhorse, which drags a goblin that cannot fall in behind it, into a corridor one square wide: the warhorse stops at 4, 5 clear of the rock, the note names the goblin, and the server refuses Pat's move to 4.5, 5 across the wall (LP28-B-RIDE-1)", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const field = { w: 20, h: 12 };
-    const keep = { scene: randomUUID(), horse: randomUUID(), brom: randomUUID(), gob: randomUUID() };
+    const keep = { scene: uuidv7(), horse: uuidv7(), brom: uuidv7(), gob: uuidv7() };
     await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "FU44B squares", bounds: field, fogEnabled: false } });
     await ops.send({ t: "scene.update", sceneId: keep.scene, patch: { blockMovement: true } });
     // Rock from x 6 to 14 but for a corridor along row 6, in runs of at most 8 cells.
@@ -1339,7 +1339,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   test("drag46-1. the DM drags Brom, riding the warhorse, so its box lies across the edge of a rise 10 ft up: it lands there, 10 ft up, as a drag of the warhorse does, and Pat's same drag holds at the ledge and says so", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const field = { w: 20, h: 12 };
-    const keep = { scene: randomUUID(), horse: randomUUID(), brom: randomUUID() };
+    const keep = { scene: uuidv7(), horse: uuidv7(), brom: uuidv7() };
     await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "Drag46 rise", bounds: field, fogEnabled: false } });
     await waitFor("the rise's scene in the DM's copy", () => dmSocket.state?.scenes[keep.scene] ?? null);
     // The DM's copy holds the build of the scene in view, so the DM opens it before its ground goes up.
@@ -1391,7 +1391,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   test("drag46-2. the DM's walking ruler from the warhorse, which drags a goblin, into a corridor one square wide of plain stone takes the way in the goblin follows in single file and names only squeezing", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const field = { w: 28, h: 14 };
-    const keep = { scene: randomUUID(), horse: randomUUID(), thorn: randomUUID(), gob: randomUUID() };
+    const keep = { scene: uuidv7(), horse: uuidv7(), thorn: uuidv7(), gob: uuidv7() };
     await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "Drag46 narrow way", bounds: field, fogEnabled: false, blockMovement: true } });
     await waitFor("the narrow way in the DM's copy", () => dmSocket.state?.scenes[keep.scene] ?? null);
     await dmViews(keep.scene);

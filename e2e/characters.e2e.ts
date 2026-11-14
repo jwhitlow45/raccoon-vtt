@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -73,25 +73,25 @@ const run = {
   roomId: "",
   roomName: `E2E characters ${new Date().toISOString().slice(0, 19)}`,
   sceneId: "",
-  roadId: randomUUID(),
+  roadId: uuidv7(),
   bounds: { w: 30, h: 20 },
   patId: "",
   quinId: "",
-  bree: randomUUID(),
-  breeToken: randomUUID(),
-  breeOnTheRoad: randomUUID(),
-  wisp: randomUUID(),
-  cyra: randomUUID(),
-  cyraToken: randomUUID(),
-  dax: randomUUID(),
-  wren: randomUUID(),
-  zed: randomUUID(),
-  spaced: randomUUID(),
-  unbroken: randomUUID(),
-  sharedLong: randomUUID(),
+  bree: uuidv7(),
+  breeToken: uuidv7(),
+  breeOnTheRoad: uuidv7(),
+  wisp: uuidv7(),
+  cyra: uuidv7(),
+  cyraToken: uuidv7(),
+  dax: uuidv7(),
+  wren: uuidv7(),
+  zed: uuidv7(),
+  spaced: uuidv7(),
+  unbroken: uuidv7(),
+  sharedLong: uuidv7(),
   rueId: "",
-  yew: randomUUID(),
-  goblin: randomUUID(),
+  yew: uuidv7(),
+  goblin: uuidv7(),
 };
 
 const WARNING = "Deleting Bree also removes its token here, 1 companion and its place in the fight, and any other token, companion or place in the fight it has. This cannot be undone.";

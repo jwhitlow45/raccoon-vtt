@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -45,10 +45,10 @@ const run = {
   roomName: `E2E regress ${new Date().toISOString().slice(0, 19)}`,
   password: "",
   patId: "",
-  sceneId: randomUUID(),
-  thornId: randomUUID(),
-  litId: randomUUID(),
-  darkId: randomUUID(),
+  sceneId: uuidv7(),
+  thornId: uuidv7(),
+  litId: uuidv7(),
+  darkId: uuidv7(),
 };
 
 /** Whether any Konva circle on the page is filled with this color, such as a ping's center dot. */
@@ -234,7 +234,7 @@ describe("raccoon-vtt older features on a wave 4 build", { timeout: 180_000 }, (
   });
 
   test("5. a creature carrying its own light into the dark gets no note, since the party still sees it, and its bar's Undo move is named by its words", async () => {
-    const lanternId = randomUUID();
+    const lanternId = uuidv7();
     await ops.send({
       t: "token.create",
       token: { id: lanternId, sceneId: run.sceneId, kind: "monster", name: "Lantern goblin", size: "medium", x: 11, y: 4, visibility: "all", disposition: "hostile", actor: { inline: actor() }, light: { bright: 5, dim: 5 } },
