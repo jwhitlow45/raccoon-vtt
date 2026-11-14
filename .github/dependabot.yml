@@ -23,6 +23,29 @@ updates:
       npm-major:
         patterns: ["*"]
         update-types: [major]
+  # The desktop app's own packages (Electron and the packaging tools), a pnpm
+  # root of its own with its own lockfile. ci.yml never installs them, and
+  # desktop.yml runs on ci/ branches only, so push an update's commit to a
+  # ci/ branch and let desktop.yml pass before merging it. The Node and
+  # PostgreSQL the app bundles are pinned in desktop/pins.json and updated
+  # by hand.
+  - package-ecosystem: npm
+    directory: /desktop
+    cooldown:
+      default-days: 14
+    schedule:
+      interval: weekly
+      day: wednesday
+      time: "02:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    groups:
+      desktop-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      desktop-major:
+        patterns: ["*"]
+        update-types: [major]
   - package-ecosystem: github-actions
     directory: /
     cooldown:
