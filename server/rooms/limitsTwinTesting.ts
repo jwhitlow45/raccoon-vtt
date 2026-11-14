@@ -6,7 +6,8 @@ import { hiddenIn, idAt, type Hidden } from "#shared/privTestutil.ts";
 import { FrameReader } from "#shared/seqTestutil.ts";
 import { rng } from "#shared/testutil.ts";
 import type { ActorOptions } from "./actor.ts";
-import { each, openRooms, Room, same as sameFrames, type Event, type Rooms, type Who } from "./numberingTesting.ts";
+import type { Pool } from "./persistence.ts";
+import { each, Room, same as sameFrames, type Event, type Rooms, type Who } from "./numberingTesting.ts";
 import { until } from "./undoScopeTesting.ts";
 
 /**
@@ -21,11 +22,19 @@ import { until } from "./undoScopeTesting.ts";
 /** An op's answer: "taken", "retry" when the room asked the device to send it again later, or its refusal's code and words. */
 export type Answer = "taken" | "retry" | { code: string; message: string };
 
-export type Twins = Rooms & { hidden: [Hidden, Hidden] };
+export type Twins = Rooms & { hidden: [Hidden, Hidden]; ids: [IdTable, IdTable] };
 
 /** Opens room A and room B with P1's first chat taken in each, whose batch explores what the fixture shows. */
-export async function openTwins(t: TestContext, a: RoomState, b: RoomState, hidden: { a?: string[]; b?: string[] } = {}, options: Partial<ActorOptions> = {}): Promise<Twins> {
-  const pair = (await openRooms(t, a, b, options)) as Twins;
+/** The stored room's snapshot format, and the cutover the server stored before these rooms first load. */
+export type Stored = { version?: number; since?: number };
+
+export async function openTwins(t: TestContext, a: RoomState, b: RoomState, hidden: { a?: string[]; b?: string[] } = {}, options: Partial<ActorOptions> = {}, stored: Stored = {}): Promise<Twins> {
+  // The rooms check every new thing's id: each test mints its own at the rooms' clock.
+  const opts = { idGate: true, ...options };
+  const pair = [new Room(t, "A", a, opts, stored.version), new Room(t, "B", b, opts, stored.version)] as unknown as Twins;
+  pair.ids = [new IdTable().attach(pair[0]), new IdTable().attach(pair[1])];
+  for (const table of pair.ids) table.since = stored.since ?? null;
+  for (const room of pair) await room.load();
   pair.hidden = [{ ids: [...(hidden.a ?? [])], names: [] }, { ids: [...(hidden.b ?? [])], names: [] }];
   await each(pair, (room) => room.apply("p1", { t: "log.chat", text: "ready" }));
   return pair;
@@ -126,4 +135,88 @@ export function sameSince(pair: Twins, since: Marks, what: string): void {
     return frames.map(([label, f]) => `${label} ${reader.text(f)}`);
   });
   assert.deepEqual(texts[0], texts[1], `${what}: P1 and the display get the same frames in both rooms`);
+}
+
+/** One row of `room_ids` as the stand-in keeps it. */
+export type StoredId = { roomId: string; id: string; memberId: string; acceptedAt: number; until: number; askUntil: number };
+
+/**
+ * `room_ids` and `server_facts` for a room on the stand-in database
+ * (undoScopeTesting.ts StoredRoomDb), which keeps neither: rows land at
+ * their batch's commit and outlive restarts, as Postgres keeps them, and
+ * `since` is the cutover the server stored on its first start.
+ */
+export class IdTable {
+  rows: StoredId[] = [];
+  since: number | null = null;
+
+  /** The rows of the statements createIds.ts runs, or null for any other statement. */
+  answer(sql: string, params: unknown[], staged: StoredId[] | null): { rows: unknown[]; rowCount: number } | null {
+    if (sql.startsWith("insert into room_ids")) {
+      const [roomId, ids, members, accepted, until, ask] = params as [string, string[], string[], string[], string[], string[]];
+      const rows = ids.map((id, i) => ({ roomId, id, memberId: members[i]!, acceptedAt: Date.parse(accepted[i]!), until: Date.parse(until[i]!), askUntil: Date.parse(ask[i]!) }));
+      if (staged) staged.push(...rows);
+      else this.#put(rows);
+      return { rows: [], rowCount: rows.length };
+    }
+    if (sql.startsWith("select id, member_id, accepted_at, until, ask_until from room_ids")) {
+      const [roomId, at] = params as [string, Date];
+      const rows = this.rows.filter((r) => r.roomId === roomId && r.until > at.getTime());
+      return { rows: rows.map((r) => ({ id: r.id, member_id: r.memberId, accepted_at: new Date(r.acceptedAt), until: new Date(r.until), ask_until: new Date(r.askUntil) })), rowCount: rows.length };
+    }
+    if (sql.startsWith("select id from room_ids")) {
+      const [roomId, memberId, ids] = params as [string, string, string[]];
+      const rows = this.rows.filter((r) => r.roomId === roomId && r.memberId === memberId && ids.includes(r.id));
+      return { rows: rows.map((r) => ({ id: r.id })), rowCount: rows.length };
+    }
+    if (sql.startsWith("delete from room_ids")) {
+      const [at, roomId] = params as [Date, string | undefined];
+      const before = this.rows.length;
+      this.rows = this.rows.filter((r) => (roomId !== undefined && r.roomId !== roomId) || r.until >= at.getTime() || r.askUntil >= at.getTime());
+      return { rows: [], rowCount: before - this.rows.length };
+    }
+    if (sql.startsWith("insert into server_facts")) {
+      this.since ??= (params[0] as Date).getTime();
+      return { rows: [], rowCount: 1 };
+    }
+    if (sql.startsWith("select ids_since from server_facts")) return { rows: this.since === null ? [] : [{ ids_since: new Date(this.since) }], rowCount: 1 };
+    return null;
+  }
+
+  #put(rows: StoredId[]): void {
+    for (const row of rows) if (!this.rows.some((r) => r.roomId === row.roomId && r.id === row.id)) this.rows.push(row);
+  }
+
+  /**
+   * Puts the table in front of a room's stand-in database, for every load
+   * from now on. A transaction's rows wait for its COMMIT, and a ROLLBACK
+   * drops them, as the batch's own transaction does.
+   */
+  attach(room: Room): this {
+    const db = room.db;
+    const base = db.pool.bind(db);
+    db.pool = (): Pool => {
+      const pool = base();
+      const query = async (text: string, params: unknown[] = []) => this.answer(text.trim(), params, null) ?? pool.query(text, params);
+      const connect = async () => {
+        const client = await pool.connect();
+        let staged: StoredId[] = [];
+        return {
+          release: () => client.release(),
+          query: async (text: string, params: unknown[] = []) => {
+            const sql = text.trim();
+            if (sql === "begin" || sql === "rollback") staged = [];
+            if (sql === "commit") {
+              const result = await client.query(text, params);
+              this.#put(staged.splice(0));
+              return result;
+            }
+            return this.answer(sql, params, staged) ?? client.query(text, params);
+          },
+        };
+      };
+      return { query, connect } as unknown as Pool;
+    };
+    return this;
+  }
 }

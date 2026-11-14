@@ -20,7 +20,7 @@ const mint = new Mint();
 const PLAYERS = 48;
 
 async function opened(t: TestContext, state: RoomState, name = "R", options = {}): Promise<Room> {
-  const r = new Room(t, name, state, options);
+  const r = new Room(t, name, state, { idGate: true, ...options });
   await r.load();
   return r;
 }
