@@ -425,24 +425,42 @@ function seatedLanding(state: DropView, lead: DropToken, seat: Point, seated: st
     let closest = far(first.at);
     for (const c of tied) {
       const d = far(c.at);
-      if (d < closest - 1e-9 && followersClear(state, g, walkers, placeAt(c.at))) [best, closest] = [c, d];
+      if (d < closest - 1e-9 && followersClear(state, g, lead, c.at, walkers, placeAt(c.at))) [best, closest] = [c, d];
     }
     return best;
   };
 }
 
 /**
- * Whether each creature in `walkers`, which a walk drags along, stands
- * clear where the walk ends full size with every token in the group at
- * `placeAt`: no wall or ledge on its step from its holder's place there to
- * its own, and off its grid on squares none through its box, as the drop's
- * own check of a walk's end reads it (`followersOf`). From its holder's
- * place, not along its own walk, since a stand is chosen before the search
- * finds the walk's corners: a goblin a rider drags off a squeezed mount,
- * whose place lands on the rock beside a corridor's mouth, is caught here,
- * and its walk there is the search's to judge.
+ * Whether each creature in `walkers`, which a walk of `lead` to the stand
+ * at `at` drags along, stands clear where the walk ends full size with
+ * every token in the group at `placeAt`: no wall or ledge on its step from
+ * its holder's place there to its own, and off its grid on squares none
+ * through its box, as the drop's own check of a walk's end reads it
+ * (`followersOf`). Each stands at the height the move gives it there, on
+ * its own ground behind a holder on the ground, else carried by its
+ * holder's change of height (route.ts followedHeight), so a goblin a flying
+ * mount's rider drags passes over a rise it would meet on foot (review
+ * LP40FIX-SOL-01). From its holder's place, not along its own walk, since a
+ * stand is chosen before the search finds the walk's corners: a goblin a
+ * rider drags off a squeezed mount, whose place lands on the rock beside a
+ * corridor's mouth, is caught here, and its walk there is the search's to
+ * judge.
  */
-function followersClear(state: DropView, g: Grid, walkers: readonly Token[], placeAt: (id: string) => Point): boolean {
+function followersClear(state: DropView, g: Grid, lead: DropToken, at: Point, walkers: readonly Token[], placeAt: (id: string) => Point): boolean {
+  const chunks = state.buildChunks;
+  const from: FollowLead = { id: lead.id, elevation: lead.elevation, grounded: footing(chunks, walkFrom(chunks, walkerOf(state, lead))) === "ground" };
+  const leadNow = dropLanding(state, lead, at);
+  const memberOf = (id: string): Follower | undefined => state.tokens[id];
+  // Each member's height where `spot` puts the member `id` and the move puts the rest.
+  const heightAt = (id: string, spot: Point, ground: number) => {
+    const moved = (m: string) => {
+      const t = state.tokens[m]!;
+      const p = m === id ? spot : placeAt(m);
+      return { x: p.x - t.x, y: p.y - t.y };
+    };
+    return followedHeight(chunks, from, memberOf, id, moved, leadNow) ?? ground;
+  };
   for (const w of walkers) {
     const holder = w.attached ? state.tokens[w.attached.to] : undefined;
     const bounds = state.scenes[w.sceneId]?.bounds;
@@ -450,9 +468,9 @@ function followersClear(state: DropView, g: Grid, walkers: readonly Token[], pla
     const { squeeze: _squeeze, ...full } = w;
     const end = placeAt(w.id);
     if (!inScene(g, bounds, { ...full, ...end })) return false;
-    const from = besideHolder(g, full, { size: holder.size, w: holder.w, h: holder.h, ...placeAt(holder.id) }, end);
-    const walking = ownWalk({ ...full, ...from, elevation: groundUnder(state.buildChunks, full, from) });
-    if (legStop(state, walking, { ...end, elevation: groundUnder(state.buildChunks, full, end), squeeze: false }) !== null) return false;
+    const beside = besideHolder(g, full, { size: holder.size, w: holder.w, h: holder.h, ...placeAt(holder.id) }, end);
+    const walking = followerTrace(full, [{ ...beside, elevation: heightAt(w.id, beside, groundUnder(chunks, full, beside)) }])[0]!;
+    if (legStop(state, walking, { ...end, elevation: heightAt(w.id, end, groundUnder(chunks, full, end)), squeeze: false }) !== null) return false;
     if (!isHex(g) && !fullStandClear(state, walking, end)) return false;
   }
   return true;

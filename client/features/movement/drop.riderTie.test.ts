@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { heights } from "#shared/discoveryTestutil.ts";
 import type { RoomState } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
@@ -148,6 +149,16 @@ describe("squares: a rider dragged out of a squeezed mount lands under the finge
     const { plan, after } = dropBree(keep({ x: 10, y: 4 }, { x: 9, y: 4 }), { x: 7.5, y: 4.5 }, SQUARE_LIFTS);
     assert.deepEqual(plan.moves.map((m) => [m.tokenId, m.x, m.y]), [["horse", 6, 4]]);
     assert.deepEqual([at(after, "bree"), at(after, "gob")], [[6, 4], [5, 4]]);
+  });
+
+  test("a flying warhorse, Bree and the goblin she drags 5 ft up, a rise 2 ft high on 6, 5: onto 5, 5 she lands there, the goblin over the rise at 5 ft (review LP40FIX-SOL-01)", () => {
+    const s = keep({ x: 9, y: 4 }, { x: 10, y: 4 });
+    heights(s, { x: 6, y: 5, w: 1, h: 1 }, 2);
+    s.tokens.horse = { ...s.tokens.horse!, elevation: 5, actor: { inline: actor({ speeds: { walk: 60, fly: 60 } }) } };
+    for (const id of ["bree", "gob"]) s.tokens[id] = { ...s.tokens[id]!, elevation: 5 };
+    const { after } = dropBree(s, { x: 5.5, y: 5.5 }, SQUARE_LIFTS);
+    assert.deepEqual([at(after, "horse"), at(after, "bree"), at(after, "gob")], [[5, 5], [5, 5], [6, 5]]);
+    assert.deepEqual([after.tokens.bree!.elevation, after.tokens.gob!.elevation], [5, 5], "still 5 ft up");
   });
 
   test("the walking ruler from Bree reads the landing the drag makes", () => {
