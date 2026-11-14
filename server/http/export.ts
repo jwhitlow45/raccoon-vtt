@@ -1,6 +1,6 @@
 import { unlink } from "node:fs/promises";
 import { PassThrough } from "node:stream";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { ApiErrorCode } from "#shared/apiErrors.ts";
 import { roomSoundOn } from "../config.ts";
@@ -13,6 +13,7 @@ import { passwordProblem } from "../auth/passwords.ts";
 import { storePlayerPassword } from "../auth/playerSecret.ts";
 import { dmLink, formatRoomId } from "../auth/roomId.ts";
 import { verifyTurnstile } from "../auth/turnstile.ts";
+import { requireHostComputer } from "../local/guard.ts";
 import { buildExportZip, exportableState, roomExport, roomManifest } from "../rooms/exportRoom.ts";
 import { importRoom, IMPORT_LIMITS } from "../rooms/importRoom.ts";
 import type { RoomManager } from "../rooms/manager.ts";
@@ -171,7 +172,19 @@ export async function registerExportRoutes(app: FastifyInstance, kit: AuthKit, d
       throw err;
     });
 
-    scope.post("/api/rooms/import", async (req, reply) => {
+    // Only the host computer imports rooms in local mode. Refused first,
+    // before the form, the limits and the body, and the connection closes
+    // so the zip is never read (docs/design/design-v1-local-app.md 6, D-261113-081).
+    const hostOnly = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+      try {
+        requireHostComputer(kit.config, req);
+      } catch (err) {
+        reply.header("connection", "close");
+        throw err;
+      }
+    };
+
+    scope.post("/api/rooms/import", { onRequest: hostOnly }, async (req, reply) => {
       const form = parseForm(req);
       const problem = passwordProblem(form.playerPassword);
       if (problem) throw new HttpError(400, "weak_password", { extra: { reason: problem } });
