@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { originPolicy } from "../local/guard.ts";
 import { contentSecurityPolicy, csrfAllowed, securityHeaders } from "./security.ts";
 
 const ORIGIN = "https://vtt.example.com";
@@ -52,5 +53,45 @@ describe("security headers", () => {
     assert.equal(h["referrer-policy"], "no-referrer");
     assert.equal(h["x-content-type-options"], "nosniff");
     assert.equal(h["permissions-policy"], "camera=(), microphone=(), geolocation=()");
+  });
+});
+
+describe("local mode (docs/design/design-v1-local-app.md 6.2)", () => {
+  const P = 3170;
+  const policy = originPolicy({ local: true, publicOrigin: `http://localhost:${P}`, PORT: P, HOST: "0.0.0.0" }, { localAddresses: () => ["10.0.0.5"] });
+  const post = (headers: Record<string, string>) => ({ method: "POST", headers });
+
+  test("without Sec-Fetch-Site, as over plain HTTP, any of the app's own origins passes", () => {
+    for (const origin of [`http://localhost:${P}`, `http://127.0.0.1:${P}`, `http://10.0.0.5:${P}`]) assert.equal(csrfAllowed(post({ origin }), policy), true, origin);
+  });
+
+  test("`Origin: null`, a foreign origin and no origin are refused", () => {
+    for (const origin of ["null", "http://evil.example", `http://10.0.0.6:${P}`, `https://localhost:${P}`]) assert.equal(csrfAllowed(post({ origin }), policy), false, origin);
+    assert.equal(csrfAllowed(post({}), policy), false);
+  });
+
+  test("Sec-Fetch-Site, when a browser sends it, still decides", () => {
+    assert.equal(csrfAllowed(post({ "sec-fetch-site": "same-origin" }), policy), true);
+    assert.equal(csrfAllowed(post({ "sec-fetch-site": "same-site", origin: `http://localhost:${P}` }), policy), false);
+    assert.equal(csrfAllowed(post({ "sec-fetch-site": "cross-site", origin: `http://10.0.0.5:${P}` }), policy), false);
+  });
+
+  test("a hosted policy is the one exact origin, as a string is", () => {
+    const hosted = originPolicy({ local: false, publicOrigin: ORIGIN, PORT: 3000, HOST: "0.0.0.0" });
+    assert.equal(csrfAllowed(post({ origin: ORIGIN }), hosted), true);
+    assert.equal(csrfAllowed(post({ origin: "null" }), hosted), false);
+    assert.equal(csrfAllowed(post({ origin: `http://localhost:${P}` }), hosted), false);
+  });
+
+  test("the referrer policy is same-origin, so WebKit sends the real origin, and there is no HSTS over plain HTTP", () => {
+    const h = securityHeaders({ production: true, local: true, TURNSTILE_SECRET: undefined });
+    assert.equal(h["referrer-policy"], "same-origin");
+    assert.equal(h["strict-transport-security"], undefined);
+  });
+
+  test("hosted keeps no-referrer, with HSTS in production", () => {
+    const h = securityHeaders({ production: true, local: false, TURNSTILE_SECRET: undefined });
+    assert.equal(h["referrer-policy"], "no-referrer");
+    assert.equal(h["strict-transport-security"], "max-age=31536000");
   });
 });

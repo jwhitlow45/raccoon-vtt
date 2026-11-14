@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { ApiErrorCode } from "#shared/apiErrors.ts";
 import type { Config } from "../config.ts";
 import { turnstileEnabled } from "../auth/turnstile.ts";
+import { originPolicy, type OriginPolicy } from "../local/guard.ts";
 import { THUMBNAIL_CSP_SOURCES } from "#shared/searchThumbnails.ts";
 
 /**
@@ -49,15 +50,21 @@ export function contentSecurityPolicy(turnstile: boolean): string {
   return directives.join("; ");
 }
 
-export function securityHeaders(config: Pick<Config, "production" | "TURNSTILE_SECRET">): Record<string, string> {
+export function securityHeaders(config: Pick<Config, "production" | "TURNSTILE_SECRET"> & Partial<Pick<Config, "local">>): Record<string, string> {
   return {
     "content-security-policy": contentSecurityPolicy(turnstileEnabled(config)),
-    "referrer-policy": "no-referrer",
+    // Over plain HTTP no browser sends Sec-Fetch-Site, and under no-referrer
+    // WebKit sends `Origin: null` on a same-origin unsafe fetch, which the
+    // CSRF check must refuse. With same-origin every browser sends the real
+    // origin, and a link to another site still carries no referrer
+    // (docs/design/design-v1-local-app.md 4, D-261113-080).
+    "referrer-policy": config.local ? "same-origin" : "no-referrer",
     "x-content-type-options": "nosniff",
     "permissions-policy": "camera=(), microphone=(), geolocation=()",
     // Only over https. Sent from http://localhost it would pin a developer's
-    // browser to https for a year on a host that has none.
-    ...(config.production ? { "strict-transport-security": "max-age=31536000" } : {}),
+    // browser to https for a year on a host that has none, and the desktop
+    // app has no https at all.
+    ...(config.production && !config.local ? { "strict-transport-security": "max-age=31536000" } : {}),
   };
 }
 
@@ -65,25 +72,28 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 /**
  * Whether a state-changing request provably comes from our own pages. Every
- * browser the app supports sends Sec-Fetch-Site, and only a same-origin
- * fetch says `same-origin`. A client that omits it must instead present the
- * exact public origin. SameSite=Strict already keeps the cookie off
- * cross-site requests, so this is the second lock on the same door.
+ * browser the app supports sends Sec-Fetch-Site over https, and only a
+ * same-origin fetch says `same-origin`. A client that omits it, as every
+ * browser does over plain HTTP, must instead present an allowed origin:
+ * the exact public origin, or in local mode one of the app's own
+ * (server/local/guard.ts), never `null`. A string is the one exact origin.
+ * SameSite=Strict already keeps the cookie off cross-site requests, so this
+ * is the second lock on the same door.
  */
-export function csrfAllowed(req: Pick<FastifyRequest, "method" | "headers">, publicOrigin: string): boolean {
+export function csrfAllowed(req: Pick<FastifyRequest, "method" | "headers">, policy: Pick<OriginPolicy, "originAllowed"> | string): boolean {
   if (SAFE_METHODS.has(req.method)) return true;
   const site = req.headers["sec-fetch-site"];
   if (site !== undefined) return site === "same-origin";
-  return req.headers.origin === publicOrigin;
+  return typeof policy === "string" ? req.headers.origin === policy : policy.originAllowed(req.headers.origin);
 }
 
-export function registerSecurity(app: FastifyInstance, config: Config): void {
+export function registerSecurity(app: FastifyInstance, config: Config, policy: OriginPolicy = originPolicy(config)): void {
   const headers = securityHeaders(config);
 
   // Set first, so any route can still override one for its own response.
   app.addHook("onRequest", async (req, reply) => {
     reply.headers(headers);
-    if (!csrfAllowed(req, config.publicOrigin)) {
+    if (!csrfAllowed(req, policy)) {
       return reply.code(403).send({ error: "cross_origin" satisfies ApiErrorCode });
     }
   });
