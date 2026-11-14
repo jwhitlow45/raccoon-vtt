@@ -31,7 +31,7 @@ import {
 import { attaches, clockTicks, combatUses, hiddenRowsShareNoMount, keepsLairTick, logsByAudience, marksHadTurn, mountsOnPlayerScene, playerLimitsOps, revealsRowAnew, takesBackTurnOnly, timedEnds } from "../migrate.ts";
 import { effectsFitAt } from "../rules/effects.ts";
 import { clockNow, fightSeconds } from "../calendar.ts";
-import { LIMITS } from "../limits.ts";
+import { HISTORY_BYTES, LIMITS, serializedBytes } from "../limits.ts";
 import { holderOf } from "../rules/attach.ts";
 import { activeRowShownTo, inSightOfNonOwners, rowSeenByNonOwners, rowSeenMark, seenByNonOwners, seenMark, stableStringify } from "../project.ts";
 import { effectEvent } from "../rules/hp.ts";
@@ -529,8 +529,40 @@ export function encounterNext(tx: Tx, op: OpOf<"encounter.next">): void {
   // After the mounts join, which are the turn's creatures too (docs/design/design-v1-combat-controls.md 2.3).
   if (combat) startTurn(tx, turned, landing, snapshot);
   if (takesBackTurnOnly(tx.env.opVersion)) snapshot.turnFlags = flagsChanged(encounter.entries, turned.entries);
-  tx.write(keys.encounterHistory, [...tx.state.encounterHistory, snapshot].slice(-MAX_HISTORY));
+  tx.write(keys.encounterHistory, playerLimitsOps(tx.env.opVersion) ? keptHistory(tx.state.encounterHistory, snapshot) : [...tx.state.encounterHistory, snapshot].slice(-MAX_HISTORY));
   tx.addEvent({ type: "turn", entryId: step.landing, round, ...rowSeenMark(tx.state, landing, tx.env) });
+}
+
+/** Sizes of history steps already measured. A stored step is never changed in place, so its size stands. */
+const stepSizes = new WeakMap<object, number>();
+
+function stepBytes(step: EncounterSnapshot): number {
+  let bytes = stepSizes.get(step);
+  if (bytes === undefined) {
+    bytes = serializedBytes(step);
+    stepSizes.set(step, bytes);
+  }
+  return bytes;
+}
+
+/**
+ * The history after a Next keeps `step` on its newest MAX_HISTORY steps
+ * and within HISTORY_BYTES, dropping the oldest until it fits. A step past
+ * the budget alone is not kept, and none before it, so Previous then has
+ * nothing to go back to. From op version 61, so the fight's history is
+ * bounded by bytes as well as steps (shared/limits.ts HARD).
+ */
+export function keptHistory(history: readonly EncounterSnapshot[], step: EncounterSnapshot): EncounterSnapshot[] {
+  let bytes = stepBytes(step);
+  if (bytes > HISTORY_BYTES) return [];
+  const kept: EncounterSnapshot[] = [step];
+  for (let i = history.length - 1; i >= 0 && kept.length < MAX_HISTORY; i--) {
+    const older = history[i]!;
+    bytes += stepBytes(older);
+    if (bytes > HISTORY_BYTES) break;
+    kept.unshift(older);
+  }
+  return kept;
 }
 
 /**

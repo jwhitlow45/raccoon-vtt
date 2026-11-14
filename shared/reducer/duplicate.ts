@@ -6,7 +6,8 @@ import { footprintRect } from "../rules/footprint.ts";
 import { sortedById } from "./tokens.ts";
 import { copyMemory } from "./memory.ts";
 import { invalid, type Env, type Tx } from "./tx.ts";
-import { meetsNumbers } from "../migrate.ts";
+import { meetsNumbers, playerLimitsOps } from "../migrate.ts";
+import { bareAutomatic } from "../rules/effects.ts";
 import { withoutTurnScoped } from "./uses.ts";
 import { ownEntry } from "../records.ts";
 import { floorsOf } from "../rules/floors.ts";
@@ -41,7 +42,7 @@ export function sceneDuplicate(tx: Tx, op: OpOf<"scene.duplicate">): void {
   if (ownEntry(tx.state.scenes, op.newSceneId)) throw invalid("scene already exists");
   const s = tx.state;
   const to = op.newSceneId;
-  const copyId = (id: string) => derivedId(to, id);
+  const copyId = (id: string) => derivedId(to, id, tx.env.opVersion);
   const fresh = (collection: Record<string, unknown>, id: string) => {
     if (collection[id] !== undefined) throw invalid("a copied id is taken");
     return id;
@@ -88,7 +89,7 @@ export function sceneDuplicate(tx: Tx, op: OpOf<"scene.duplicate">): void {
 /** One floor's contents onto its copy: the build and the records on it, the tokens `copied` names, and the fog and drawings the op asks for. */
 function copyFloor(tx: Tx, op: OpOf<"scene.duplicate">, from: string, to: string, copied: ReadonlyMap<string, string>): void {
   const s = tx.state;
-  const copyId = (id: string) => derivedId(op.newSceneId, id);
+  const copyId = (id: string) => derivedId(op.newSceneId, id, tx.env.opVersion);
   const fresh = (collection: Record<string, unknown>, id: string) => {
     if (collection[id] !== undefined) throw invalid("a copied id is taken");
     return id;
@@ -134,7 +135,10 @@ function copyFloor(tx: Tx, op: OpOf<"scene.duplicate">, from: string, to: string
       // (docs/design/design-v1-combat-controls.md 2.4): the original's turn record would count as the copy's while the
       // original's row acts. The token bar's Duplicate makes a new creature instead, so its uses start empty.
       const actor = withoutTurnScoped(token.actor.inline);
-      next.actor = { inline: { ...actor, effects: actor.effects.map((e) => pausedOn(e, id)) } };
+      // From op version 61 the copy's conditions take fresh ids derived from the copy's own, so it shares none with its
+      // source, but the bare automatic Unconscious keeps its id in every copy (rules/effects.ts).
+      const rekeyed = playerLimitsOps(tx.env.opVersion) ? actor.effects.map((e) => (bareAutomatic(e) ? e : { ...e, id: derivedId(id, e.id, tx.env.opVersion) })) : actor.effects;
+      next.actor = { inline: { ...actor, effects: rekeyed.map((e) => pausedOn(e, id)) } };
     }
     tx.write(keys.token(id), next);
   }
@@ -256,11 +260,15 @@ export function copyFogEnabled(original: Pick<Scene, "map" | "fogEnabled">, incl
 /**
  * A copy's id: the 128-bit hash of the new scene's id and the original's,
  * as a UUID. Both ids go in as a JSON pair, so no two pairs hash the same
- * text.
+ * text. From op version 61 its version digit is 8, a custom UUID, so no
+ * derived id ever has a device's version 7 shape and none can pass the id
+ * gate as a mint (shared/protocol.ts ID_RULES). Ops stored before took the
+ * hash's digit and replay so.
  */
-export function derivedId(sceneId: string, originalId: string): string {
+export function derivedId(sceneId: string, originalId: string, opVersion?: number): string {
   const h = hash128(JSON.stringify([sceneId, originalId]));
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  const third = playerLimitsOps(opVersion) ? `8${h.slice(13, 16)}` : h.slice(12, 16);
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${third}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
 /** A trap's action on the copy: a light or stamp on its copy, a token on its copy or dropped, a door as it is. */

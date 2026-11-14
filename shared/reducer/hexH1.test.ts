@@ -50,7 +50,9 @@ type Fixture = { build: string; state: RoomState; steps: Step[] };
 const FIXTURE = new URL("./hexH1.fixture.json", import.meta.url);
 const ROWS = gridOfShape("hexRows") as HexGrid;
 const COLUMNS = gridOfShape("hexColumns") as HexGrid;
-const envelope = (i: number) => ({ seq: 1000 + i, at: new Date(Date.UTC(2026, 9, 28, 0, 0, i)).toISOString() });
+// At op version 60, the last before player limits, whose copies take derived ids of another shape: the file holds what
+// the steps did then, and every rule it reads is the same at 60 as live.
+const envelope = (i: number) => ({ seq: 1000 + i, at: new Date(Date.UTC(2026, 9, 28, 0, 0, i)).toISOString(), opVersion: 60 });
 const viewer = (who: Step["who"]): Viewer => (who === "dm" ? DM : P1);
 
 function start(): RoomState {
