@@ -440,6 +440,23 @@ describe("tokens and permissions", () => {
   });
 });
 
+describe("the packaging steps", () => {
+  const desktopBuild = JSON.parse(readFileSync(new URL("../desktop/package.json", import.meta.url), "utf8")).scripts as Record<string, string>;
+  test("desktop's own build makes the shell and the window, so each job builds the window once, before it packs", () => {
+    assert.match(desktopBuild.build ?? "", /\bbuild:shell\b.*\bbuild:window\b/);
+    assert.match(desktopBuild["build:window"] ?? "", /window\/vite\.config\.ts/);
+    for (const step of ["The app the desktop e2e files open", "Package"]) {
+      const script = stepScript(step);
+      const lines = script.split("\n");
+      assert.equal(lines.filter((l) => l.includes("vite")).length, 0, `${step} runs vite only through desktop's build`);
+      assert.equal(lines.filter((l) => l.trim() === "pnpm --dir desktop run build").length, 1, `${step} builds desktop once`);
+      const build = lines.findIndex((l) => l.trim() === "pnpm --dir desktop run build");
+      const pack = lines.findIndex((l) => l.trim().startsWith("node desktop/build/pack.ts"));
+      assert.ok(build >= 0 && pack > build, `${step} builds before it packs`);
+    }
+  });
+});
+
 describe("Windows", () => {
   test("every job that can run on Windows turns off CRLF checkouts before it checks out", () => {
     for (const job of jobs) {
