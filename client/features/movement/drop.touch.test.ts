@@ -129,3 +129,49 @@ describe("a touch drag of a rider plans as a mouse drag to the same square does 
     });
   }
 });
+
+/*
+ * A group drag pressed on a token sitting on its lead moves every token by
+ * the pointer's own offset, each snapped by its own box (review
+ * LP39FIX-SOL-01). The rider's snapped seat is a lone drag's aim, and as a
+ * group's offset it moved them all a square where they had not gone.
+ */
+describe("a group drag pressed on a token sitting on its lead moves by the pointer's own offset (LP39FIX-SOL-01)", () => {
+  /** The DM's group drag of `ids`, led by `leadId` and pressed on `pressedId`, the lead's node let go at `box`. */
+  function groupDrop(s: RoomState, leadId: string, pressedId: string, ids: readonly string[], box: { x: number; y: number }): DropPlan {
+    const frames = new Hand();
+    const stops = dragStops({
+      store: { getState: () => ({ view: s, floorView: s }) } as unknown as DragDeps["store"],
+      actions: { dispatch: () => 1, newId: () => "id" } as unknown as DragDeps["actions"],
+      ui: { notify: () => {}, showActions: () => {} } as unknown as DragDeps["ui"],
+      scope: new RoomScope(),
+      role: "dm",
+      work: new RouteWork(frames, () => new WorkBudget({ limit: 100_000 })),
+    });
+    const lead = s.tokens[leadId]!;
+    stops.start(lead.id, s.tokens[pressedId]);
+    let plan: DropPlan | null = null;
+    stops.drop({ x: () => box.x, y: () => box.y, position: () => {} }, lead, ids.map((id) => s.tokens[id]!), (p) => (plan = p));
+    for (let i = 0; i < 50 && !plan; i++) frames.frame();
+    assert.ok(plan, "the drop landed");
+    return plan;
+  }
+  const lands = (plan: DropPlan) => plan.moves.map((m) => [m.tokenId, m.x, m.y]);
+
+  test("a Tiny owl perched on its selected holder, pressed and dragged three tenths of a square, moves no one", () => {
+    const s = room({ scenes: { s1: scene("s1", { bounds: { w: 20, h: 20 } }) } });
+    s.tokens = {
+      holder: token("holder", { x: 3, y: 3, name: "Ana", kind: "pc", ownerIds: ["p1"] }),
+      owl: token("owl", { size: "tiny", x: 3.5, y: 3.5, name: "Pip", kind: "npc", attached: { to: "holder", kind: "perch" } }),
+      other: token("other", { x: 8, y: 8, name: "Thorn", kind: "pc", ownerIds: ["p1"] }),
+    };
+    assert.deepEqual(lands(groupDrop(s, "holder", "owl", ["holder", "other"], { x: 3.3, y: 3.3 })), [], "each box snaps back to its own square");
+    assert.deepEqual(lands(groupDrop(s, "holder", "owl", ["holder", "other"], { x: 3.7, y: 3.3 })), [["holder", 4, 3], ["other", 9, 8]], "and a square east once the pointer is past half");
+  });
+
+  test("the warhorse squeezed in the corridor's mouth, pressed on Bree and dragged nine tenths of a square, lands where its own box snaps", () => {
+    const s = keep(false);
+    s.tokens.pip = token("pip", { x: 15, y: 11, name: "Pip", kind: "npc", ownerIds: ["p1"] });
+    assert.deepEqual(lands(groupDrop(s, "horse", "bree", ["horse", "pip"], { x: 13.4, y: 9.4 })), [["horse", 13, 9], ["pip", 16, 12]], "not a square farther, by Bree's snapped square");
+  });
+});

@@ -511,7 +511,8 @@ export function dragStops(deps: DragDeps): DragStops {
           land(NOTHING, { place: null, placed: false });
           return;
         }
-        const at: Aim = spot ?? aimAt(view, token, ruled(token, letGo, free));
+        const pointed = ruled(token, letGo, free);
+        const at: Aim = spot ?? aimAt(view, token, pointed);
         const mode = dropMode(role, view.scenes[token.sceneId]);
         const lead = view.tokens[token.id] ?? token;
         const placed = (now: DropView, plan: DropPlan) => {
@@ -522,7 +523,9 @@ export function dragStops(deps: DragDeps): DragStops {
         const w = group.length > 1 ? null : walkFor(view, token);
         if (!w) {
           reset();
-          placed(view, group.length > 1 ? planGroup(view, group, at.x - token.x, at.y - token.y, mode, walkersOfGroup(view, group, role)) : planOne(view, token, at, mode));
+          // A group moves by the pointer's own offset, each token snapped by its own box. The snapped seat of a token pressed on
+          // the lead is a lone drag's aim (drop.ts pressedAim), and as a group's offset it moved them all (review LP39FIX-SOL-01).
+          placed(view, group.length > 1 ? planGroup(view, group, pointed.x - token.x, pointed.y - token.y, mode, walkersOfGroup(view, group, role)) : planOne(view, token, at, mode));
           return;
         }
         const target = routeTarget(view, token, at);
