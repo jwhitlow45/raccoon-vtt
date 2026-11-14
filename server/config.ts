@@ -11,6 +11,12 @@ import { z } from "zod";
  * for the WebSocket Origin check and CSRF, both egress proxies, so no
  * outbound request can ever go direct, and the key that keeps each room's
  * player password readable for its DM.
+ *
+ * Local mode (`RACCOON_MODE=local`, docs/design/design-v1-local-app.md 4) is
+ * the desktop app's server: a built app on one computer, answering plain
+ * HTTP at `localhost` and at that computer's own network addresses. It turns
+ * off what assumes one HTTPS origin behind a proxy, and refuses the hosted
+ * settings that would contradict that.
  */
 /** Compose passes an unset variable as an empty string, which means the same as leaving it out. */
 function emptyAsUnset<T extends z.ZodType>(schema: T) {
@@ -19,6 +25,8 @@ function emptyAsUnset<T extends z.ZodType>(schema: T) {
 
 const Env = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+  /** `local` only from the desktop app's supervisor and the e2e harness (design 4, D-261113-054). */
+  RACCOON_MODE: emptyAsUnset(z.enum(["server", "local"]).default("server")),
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().default("127.0.0.1"),
   DATABASE_URL: z.string().min(1),
@@ -83,6 +91,8 @@ export function roomSoundOn(config: Pick<Config, "ROOM_SOUND">): boolean {
 
 export type Config = z.infer<typeof Env> & {
   production: boolean;
+  /** The desktop app's server (RACCOON_MODE=local). Always production too. */
+  local: boolean;
   publicOrigin: string;
   /** AES-256-GCM key for the stored player passwords (server/auth/playerSecret.ts). */
   roomSecretKey: Buffer;
@@ -104,7 +114,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
   const c = parsed.data;
   const production = c.NODE_ENV === "production";
-  if (production) {
+  const local = c.RACCOON_MODE === "local";
+  if (local) {
+    checkLocal(c);
+  } else if (production) {
     const missing = (["PUBLIC_ORIGIN", "EGRESS_STRICT_PROXY", "EGRESS_PUBLIC_PROXY", "ROOM_SECRET_KEY"] as const).filter((k) => !c[k]);
     if (missing.length > 0) {
       const hint = missing.includes("ROOM_SECRET_KEY") ? ` ROOM_SECRET_KEY is ${KEY_HINT}.` : "";
@@ -121,13 +134,40 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     throw new Error("Set both OPENVERSE_CLIENT_ID and OPENVERSE_CLIENT_SECRET, or neither.");
   }
   // Development serves the SPA through Vite on 5173, which proxies to this
-  // server, so that is the origin a browser presents.
-  const publicOrigin = c.PUBLIC_ORIGIN === undefined ? "http://localhost:5173" : originOf(c.PUBLIC_ORIGIN);
+  // server, so that is the origin a browser presents. Local mode's own pages
+  // open at localhost, and server/local/guard.ts adds the network addresses.
+  const publicOrigin = local ? new URL(`http://localhost:${c.PORT}`).origin : c.PUBLIC_ORIGIN === undefined ? "http://localhost:5173" : originOf(c.PUBLIC_ORIGIN);
   // The key's text is dropped once decoded, so nothing that prints the
   // config can print it.
   const { ROOM_SECRET_KEY: keyText, ...rest } = c;
   const roomSecretKey = keyText ? secretKeyOf(keyText) : DEVELOPMENT_ROOM_SECRET_KEY;
-  return { ...rest, production, publicOrigin, roomSecretKey };
+  return { ...rest, production, local, publicOrigin, roomSecretKey };
+}
+
+/**
+ * Local mode's own rules. It is a built app, so production, with its own
+ * room key. It binds loopback alone or every IPv4 address, nothing between,
+ * since its Host and Origin lists are built from those two. And each hosted
+ * setting below would either break plain HTTP or let a device on the network
+ * past a check, so it stops the boot with its reason rather than being
+ * ignored (D-261113-054).
+ */
+function checkLocal(c: z.infer<typeof Env>): void {
+  const problems: string[] = [];
+  if (c.NODE_ENV !== "production") problems.push("NODE_ENV must be production: local mode is the built app.");
+  if (!c.ROOM_SECRET_KEY) problems.push(`ROOM_SECRET_KEY is required. It is ${KEY_HINT}.`);
+  if (c.HOST !== "127.0.0.1" && c.HOST !== "0.0.0.0") problems.push(`HOST must be 127.0.0.1 (only this computer) or 0.0.0.0 (players on this network), not ${c.HOST}.`);
+  const refused: Array<[string, boolean, string]> = [
+    ["PUBLIC_ORIGIN", c.PUBLIC_ORIGIN !== undefined, "local pages open at localhost and this computer's network addresses, on PORT."],
+    ["TRUST_CF_CONNECTING_IP=1", c.TRUST_CF_CONNECTING_IP === "1", "a device on the network could claim 127.0.0.1 with the header."],
+    ["TURNSTILE_SITE_KEY", Boolean(c.TURNSTILE_SITE_KEY), "only this computer makes rooms, so there is no challenge to show."],
+    ["TURNSTILE_SECRET", Boolean(c.TURNSTILE_SECRET), "only this computer makes rooms, so there is no challenge to check."],
+    ["ADMIN_PASSWORD_HASH", c.ADMIN_PASSWORD_HASH !== undefined, "the desktop app's window lists the rooms, and an admin page would be open to the network."],
+    ["EGRESS_STRICT_PROXY", c.EGRESS_STRICT_PROXY !== undefined, "local mode connects directly and refuses every address that is not public."],
+    ["EGRESS_PUBLIC_PROXY", c.EGRESS_PUBLIC_PROXY !== undefined, "local mode connects directly and refuses every address that is not public."],
+  ];
+  for (const [name, set, reason] of refused) if (set) problems.push(`${name} is refused: ${reason}`);
+  if (problems.length > 0) throw new Error(`RACCOON_MODE=local refuses to start:\n${problems.map((p) => `- ${p}`).join("\n")}`);
 }
 
 /**
