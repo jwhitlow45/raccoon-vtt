@@ -842,6 +842,12 @@ export class HexWalkSearch {
     }
   }
 
+  /** Whether the stand `s` is settled: once `settle` finds a spot unreachable, every stand the search can reach is (walk.ts WalkSearch isSettled). */
+  isSettled(s: Pick<HexStand, "ref" | "squeezed">): boolean {
+    const n = this.world.nodeOf(s);
+    return n >= 0 && this.#best[n]! >= 0;
+  }
+
   /** The state of a node at a residue, before the walk's holder or past it, or -1. */
   #find(node: number, v: number, pre: boolean): number {
     return v === this.#v0 && !pre ? this.#dense[node]! : (this.#sparse.get((node * 2 * this.#S + v) * 2 + (pre ? 1 : 0)) ?? -1);

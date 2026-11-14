@@ -3,7 +3,8 @@ import { hexKey } from "#shared/rules/hex.ts";
 import { hexLegOf, hexStandHexes } from "#shared/rules/movement.ts";
 import type { RoutePoint } from "#shared/rules/route.ts";
 import { WorkBudget, type WalkInput, type WalkRoute } from "#shared/rules/walk.ts";
-import { HexWalkWorld, routeLegCheck, routeSearch, routeWorld, routeWorldUnits, type RouteLegCheck, type RouteSearch, type RouteWorld } from "#shared/rules/hexWalk.ts";
+import { HexWalkSearch, HexWalkWorld, routeLegCheck, routeSearch, routeWorld, routeWorldUnits, type RouteLegCheck, type RouteSearch, type RouteWorld } from "#shared/rules/hexWalk.ts";
+import type { HexStand } from "#shared/rules/movement.ts";
 import type { RouteJob, RouteWork } from "./routeWork.ts";
 
 /**
@@ -184,25 +185,26 @@ export class RouteDrag {
     const follower = world.tows ? this.#follower(world, to, budget) : null;
     if (follower === "paused") return false;
     if (follower) return this.#answered({ kind: "none", capped: false, follower });
-    return this.#closed(world, to, budget);
+    return this.#closed(this.#search, to, budget);
   }
 
-  /** No way to `to` in `world` that the search could miss: the answer, naming the creature that closes the way where one does (`#inTheWay`). */
-  #closed(world: RouteWorld, to: Point, budget: WorkBudget): boolean {
-    const creature = this.#inTheWay(world, to, budget);
+  /** No way to `to` that `closed`, a search run out of states, could miss: the answer, naming the creature that closes the way where one does (`#inTheWay`). */
+  #closed(closed: RouteSearch, to: Point, budget: WorkBudget): boolean {
+    const creature = this.#inTheWay(closed, to, budget);
     if (creature === "paused") return false;
     return this.#answered({ kind: "none", capped: false, ...(creature !== null ? { creature } : {}) });
   }
 
   /**
-   * The creature that closes the way to `to` once the search in `world`
+   * The creature that closes the way to `to` once the search `closed`
    * finds none: where a search with the spaces of the creatures the walker
-   * cannot pass open finds a way, the first of them that way goes on from
-   * (`crossedCreature`), by its place in the world's creatures. Null where
-   * that way is closed too. Its search shares the drag's budget as the
-   * first one does.
+   * cannot pass open finds a way, the one that way meets where it leaves
+   * all that `closed` reaches (`closingCreature`), by its place in the
+   * world's creatures. Null where that way is closed too. Its search shares
+   * the drag's budget as the first one does.
    */
-  #inTheWay(world: RouteWorld, to: Point, budget: WorkBudget): number | null | "paused" {
+  #inTheWay(closed: RouteSearch, to: Point, budget: WorkBudget): number | null | "paused" {
+    const world = closed.world;
     const creatures = world.input.creatures;
     if (!creatures.some((c) => c.way === "blocked")) return null;
     if (this.#open?.from !== world) {
@@ -216,7 +218,7 @@ export class RouteDrag {
     if (result === "paused") return "paused";
     const route = result === "settled" ? search.traceTo(to, budget) : null;
     if (route === "paused") return "paused";
-    return route ? crossedCreature(world, route.points) : null;
+    return route ? closingCreature(closed, route.points) : null;
   }
 
   /**
@@ -274,7 +276,7 @@ export class RouteDrag {
     if (result === "paused") return false;
     const route = result === "settled" ? alone.traceTo(to, budget) : null;
     if (route === "paused") return false;
-    if (!route) return result === "unreachable" ? this.#closed(alone.world, to, budget) : this.#answered({ kind: "none", capped: result === "capped" });
+    if (!route) return result === "unreachable" ? this.#closed(alone, to, budget) : this.#answered({ kind: "none", capped: result === "capped" });
     const follower = world.fileBlocked(route.points);
     return this.#answered(follower === null ? { kind: "route", route } : { kind: "none", capped: false, follower });
   }
@@ -322,45 +324,68 @@ export class RouteDrag {
 }
 
 /**
- * The first creature the walker cannot pass whose space a walk along
- * `points` goes on from, by its place in the creatures of `world`, which
- * holds their spaces closed: read at each step of each piece by the test
- * the search itself stops at there (walk.ts `blockedBy`, hexWalk.ts
- * `endOnly`), on the footprint the search reads there, squeezed where the
- * walker squeezes (review LP40FIX-SOL-02), and leaving out the walk's last
- * spot, since a walk may end in such a space. Null where the walk crosses
- * none.
+ * The creature that closes the way along `points`, a walk found with the
+ * spaces of the creatures the walker cannot pass open, by its place in the
+ * creatures of the world `closed` searched, which holds them closed, run
+ * out of states: the one under the last spot of the walk that `closed`
+ * reaches before the walk goes on where it does not, since `closed` stops
+ * there only because that space may be ended in and never passed through.
+ * A creature the walk crosses in the open, which `closed` walks round, is
+ * not it: a goblin standing in a room on the way to a corridor an orc
+ * closes was named for the orc (live play 41, LP41-MOVE-1). Where the
+ * spots do not show it, the first creature the walk crosses.
  */
-function crossedCreature(world: RouteWorld, points: readonly RoutePoint[]): number | null {
-  const creatures = world.input.creatures;
+function closingCreature(closed: RouteSearch, points: readonly RoutePoint[]): number | null {
+  const spots = spotsAlong(closed, points);
+  const k = spots.findIndex((s) => !s.reached);
+  const before = k > 0 ? spots[k - 1]!.creature : -1;
+  if (before >= 0) return before;
+  const crossed = spots.find((s) => !s.end && s.creature >= 0);
+  return crossed ? crossed.creature : null;
+}
+
+/**
+ * Each spot a walk along `points` steps onto after its start, in order:
+ * the creature it cannot pass there, by its place in the world's
+ * creatures, or -1, read by the test the search itself stops at there
+ * (walk.ts `blockedBy`, hexWalk.ts `endOnly`) on the footprint the search
+ * reads there, squeezed where the walker squeezes (review LP40FIX-SOL-02),
+ * whether `search` reaches it, and whether it is the walk's last.
+ */
+function spotsAlong(search: RouteSearch, points: readonly RoutePoint[]): { creature: number; reached: boolean; end: boolean }[] {
+  const spots: { creature: number; reached: boolean; end: boolean }[] = [];
   const last = points.length - 1;
-  if (world instanceof HexWalkWorld) {
+  if (search instanceof HexWalkSearch) {
+    const world = search.world;
     for (let i = 1; i <= last; i++) {
       const leg = hexLegOf(world.g, world.standOf(world.nodeAt(points[i - 1]!)), world.standOf(world.nodeAt(points[i]!)));
-      const end = i === last ? leg.line.length - 1 : leg.line.length;
-      for (let k = 1; k < end; k++) {
+      for (let k = 1; k < leg.line.length; k++) {
         const stand = { size: leg.walk, ref: leg.line[k]!, squeezed: leg.squeezed };
-        if (!world.endOnly(stand)) continue;
-        const under = new Set(hexStandHexes(world.g, stand).map(hexKey));
-        const elevation = world.elevationOf(stand);
-        const at = creatures.findIndex((c) => c.way === "blocked" && c.lo < elevation + world.height && elevation < c.hi && c.hexes?.some((h) => under.has(h)) === true);
-        if (at >= 0) return at;
+        spots.push({ creature: hexCreatureAt(world, stand), reached: search.isSettled(stand), end: i === last && k === leg.line.length - 1 });
       }
     }
-    return null;
+    return spots;
   }
+  const world = search.world;
   for (let i = 1; i <= last; i++) {
     const a = points[i - 1]!;
     const b = points[i]!;
     const n = Math.max(1, Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / world.L));
-    for (let k = 1; k <= (i === last ? n - 1 : n); k++) {
+    for (let k = 1; k <= n; k++) {
       // On the walker's lattice, as a cut of a piece steps it (drop.ts walkersStop).
       const x = a.x + Math.round(((b.x - a.x) * k) / n / world.L) * world.L;
       const y = a.y + Math.round(((b.y - a.y) * k) / n / world.L) * world.L;
       const node = world.nodeAt({ x, y });
-      const at = world.blockedBy(x, y, node >= 0 ? world.elevationAt(node) : b.elevation);
-      if (at >= 0) return at;
+      spots.push({ creature: world.blockedBy(x, y, node >= 0 ? world.elevationAt(node) : b.elevation), reached: search.isSettled({ x, y }), end: i === last && k === n });
     }
   }
-  return null;
+  return spots;
+}
+
+/** On hexes, the creature the walker cannot pass under the stand `stand` at its height there, or -1. */
+function hexCreatureAt(world: HexWalkWorld, stand: HexStand): number {
+  if (!world.endOnly(stand)) return -1;
+  const under = new Set(hexStandHexes(world.g, stand).map(hexKey));
+  const elevation = world.elevationOf(stand);
+  return world.input.creatures.findIndex((c) => c.way === "blocked" && c.lo < elevation + world.height && elevation < c.hi && c.hexes?.some((h) => under.has(h)) === true);
 }

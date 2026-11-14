@@ -73,6 +73,20 @@ describe("squares: a creature that closes the only way is named (LP40-MOVE-2)", 
   });
 });
 
+describe("squares: the creature named is the one that closes the way (LP41-MOVE-1)", () => {
+  test("a hostile goblin in the west room on Thorn's line, the orc in the corridor: the note names the orc, since the walk goes round the goblin", () => {
+    const s = hall({ gob: goblin("gob", 4, 4), orc: goblin("orc", 10, 4, { name: "Orc" }) });
+    s.tokens.thorn = { ...s.tokens.thorn!, x: 2 };
+    assert.equal(dropThorn(s, { x: 18, y: 7 }).note, "Orc is in the way.");
+    assert.equal(dropThorn(s).note, "Orc is in the way.", "onto the corner square too");
+  });
+
+  test("two goblins, one in the corridor and one beyond it in the east room's doorway: the first, which closes the way, is named", () => {
+    const s = hall({ gob: goblin("gob", 10, 4), orc: goblin("orc", 15, 4, { name: "Orc" }) });
+    assert.equal(dropThorn(s, { x: 18, y: 7 }).note, "Goblin is in the way.");
+  });
+});
+
 describe("squares: the creature named is the one the squeezed walker meets", () => {
   test("the warhorse squeezing along the corridor meets the orc in it, not the goblin the DM set in the rock beside it, which its full space overlaps there too", () => {
     const s = hall({
@@ -123,5 +137,21 @@ for (const [name, g] of [
       const { note } = dropThorn(s, { x: c.x - 0.5, y: c.y - 0.5 });
       assert.equal(note, hostile ? "Goblin is in the way." : null);
     }
+  });
+
+  /** The corridor one hex wide, Thorn on `thorn` along it and the creatures `others` by where they stand along line 6. */
+  const corridor = (thorn: number, others: Record<string, [number, string]>): RoomState => {
+    const s = hexWallRoom(g.orient === "rows" ? "hexRows" : "hexColumns", wide.w, wide.h, wallsRound(g, wide, solid));
+    s.tokens.thorn = onHex(g, "thorn", "medium", at(thorn, 6), { name: "Thorn", kind: "pc", disposition: "ally", ownerIds: ["p1"], actor: { inline: actor() } });
+    for (const [id, [along, label]] of Object.entries(others)) s.tokens[id] = onHex(g, id, "medium", at(along, 6), { name: label, kind: "monster", disposition: "hostile", actor: { inline: actor() } });
+    return s;
+  };
+  const onto = (h: Hex) => {
+    const c = hexCenter(g, h);
+    return { x: c.x - 0.5, y: c.y - 0.5 };
+  };
+
+  test(`${name}: a goblin in the west room on Thorn's way, the orc in the corridor: the orc is named (LP41-MOVE-1)`, () => {
+    assert.equal(dropThorn(corridor(2, { gob: [4, "Goblin"], orc: [10, "Orc"] }), onto(at(16, 3))).note, "Orc is in the way.");
   });
 }
