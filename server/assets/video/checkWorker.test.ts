@@ -72,7 +72,8 @@ describe("the check in a worker thread", () => {
   });
 
   // Root reads and writes through a 0o000 or 0o444 mode, so these two cases cannot fail as asked (AMBUILD-OPUS-R2-01).
-  test("a file the check may not open or write fails as its own error, not as an unreadable video (AM-R1-06)", { skip: process.getuid?.() === 0 }, async () => {
+  // On Windows a mode only sets the read-only flag, so no file is unreadable to its owner.
+  test("a file the check may not open or write fails as its own error, not as an unreadable video (AM-R1-06)", { skip: process.getuid?.() === 0 || process.platform === "win32" }, async () => {
     // A file the sniff may not open fails inside the guard that turns a parse's errors into bad_video, and still passes as itself.
     const unreadable = join(dir, "unreadable.webm");
     await writeFile(unreadable, webmFile());
