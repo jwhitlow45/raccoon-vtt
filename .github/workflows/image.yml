@@ -529,3 +529,19 @@ jobs:
     uses: ./.github/workflows/release-assets.yml
     with:
       tag: ${{ github.ref_name }}
+
+  desktop:
+    # The desktop app's installers, signed, with their provenance
+    # (desktop.yml), once the release exists, beside release-assets and
+    # after Docker Hub. It builds and smoke-tests all five targets first, so
+    # it ends well after the image is out. Its jobs narrow these permissions
+    # each to what it needs.
+    needs: release
+    if: github.event_name == 'push' && github.ref_type == 'tag' && needs.release.result == 'success'
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/desktop.yml
+    with:
+      tag: ${{ github.ref_name }}
