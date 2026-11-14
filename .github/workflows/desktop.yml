@@ -1,0 +1,936 @@
+# Builds the desktop app, RaccoonVTT on your own computer
+# (docs/design/design-v1-local-app.md, section 11), tests it on each system
+# it runs on, and on a release attaches its installers to the GitHub Release,
+# signed, with their build provenance (docs/releasing.md, "Desktop assets"):
+#
+#   raccoon-vtt-X.Y.Z-windows-x64-setup.exe     Windows 10 or 11, x64 (NSIS)
+#   raccoon-vtt-X.Y.Z-macos-arm64.dmg           macOS 15 or later, Apple silicon
+#   raccoon-vtt-X.Y.Z-macos-x64.dmg             macOS 15 or later, Intel
+#   raccoon-vtt-X.Y.Z-linux-x86_64.AppImage     Linux with glibc 2.36 or later
+#   raccoon-vtt-X.Y.Z-linux-arm64.AppImage
+#   raccoon-vtt_X.Y.Z_amd64.deb                 Ubuntu 24.04 and Debian 12 or later
+#   raccoon-vtt_X.Y.Z_arm64.deb
+#   latest.yml, latest-linux.yml, latest-linux-arm64.yml
+#                                               the feeds the Windows app and the AppImage update from
+#   raccoon-vtt-X.Y.Z-desktop.sha256            the SHA-256 of each file above
+#   <each file above>.sigstore.json             its keyless Cosign signature bundle
+#   raccoon-vtt-X.Y.Z-desktop.intoto.jsonl      SLSA build provenance of them all, signed
+#
+# It runs three ways, and the plan job says which:
+#
+# - A release run: image.yml calls it with the tag once the tag's GitHub
+#   Release exists, or a maintainer runs it by hand from main with `tag`, to
+#   add the assets to a release that lacks them. It checks out the tag and
+#   nothing else, builds and smoke-tests all five targets, then signs,
+#   attests and uploads. It only adds: a release that holds every desktop
+#   asset is left as it is, and one that holds only some of them is
+#   refused, so an asset is never replaced.
+# - A dry run: by hand with `ref`, a branch or a commit, and no `tag`. It
+#   builds and smoke-tests all five targets from that ref and keeps the
+#   installers as the run's artifacts for a week. Its sign and upload jobs
+#   never run, so nothing it makes can reach a release. Before the first
+#   desktop release, this is how the macOS builds are tried, from the
+#   desktop work's ci/ branch.
+# - A branch run: a push to a ci/ branch that changes the desktop app, the
+#   server or the packages. The checks, and the build and smoke tests for
+#   Linux x64 and Windows x64, keeping nothing. macOS runs only on release
+#   and dry runs (D-261113-065), since macOS runners are far slower and
+#   fewer.
+#
+# The checks job installs the desktop packages, which ci.yml never does
+# (only desktop/electron/ imports Electron), typechecks the shell, and runs
+# the unit tests, the server's integration tests against a throwaway
+# PostgreSQL cluster made from the bundled binaries, the desktop
+# integration tests and the desktop e2e files. On Windows these start as
+# report-only and become a gate once green, before the first desktop
+# release (D-261113-097).
+#
+# Each job holds only what it needs. The plan, checks and build jobs only
+# read, and no step that runs pnpm or a package script holds a token:
+# actions/checkout keeps no credentials, and GH_TOKEN is set only on the
+# step that fetches Node and PostgreSQL (desktop/scripts/fetch-runtime.ts,
+# Node's built-ins only), which runs before anything is installed. The
+# checksums job holds no token, sign may sign and attest but not write the
+# release, and upload may write the release but not sign. Each build job
+# gives the SHA-256 of every file it made as a job output, under its
+# target's own name, and each job after it takes every file by name from
+# the job that made it and checks it against that digest: any job that runs
+# a package's code holds the runner's artifact token, which can replace
+# another job's artifact. Only GitHub's own actions run in the jobs after
+# the builds, and Cosign comes from the checksum-pinned download image.yml
+# uses.
+#
+# The installers ship unsigned, as a preview (D-261113-050). Signing with an
+# Apple or Windows identity comes later, in a protected desktop-signing
+# environment like dockerhub (design 11.6).
+name: Desktop
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The release's tag, vX.Y.Z.
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: A release run for this tag, vX.Y.Z, from main. Leave empty for a dry run.
+        type: string
+        default: ""
+      ref:
+        description: A dry run from this branch or commit, which never signs or uploads. Leave empty for a release run.
+        type: string
+        default: ""
+  push:
+    branches: ["ci/**"]
+    paths:
+      - desktop/**
+      - .github/workflows/desktop.yml
+      - server/**
+      - shared/**
+      - db/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+
+permissions: {}
+
+# A newer push to a ci/ branch replaces that branch's run in progress. A
+# release run and a dry run are never cancelled.
+concurrency:
+  group: desktop-${{ inputs.tag || inputs.ref || github.ref }}
+  cancel-in-progress: ${{ !inputs.tag && !inputs.ref }}
+
+env:
+  # As in ci.yml: the Node of the production image, which the desktop app
+  # bundles too (desktop/pins.json).
+  NODE_VERSION: 24.21.0
+
+jobs:
+  # What this run builds, from what, and for a release, whether the release
+  # still needs the desktop assets. The inputs reach the scripts only
+  # through the environment, and are checked before anything uses them.
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+      checkout: ${{ steps.mode.outputs.checkout }}
+      commit: ${{ steps.source.outputs.commit }}
+      version: ${{ steps.source.outputs.version }}
+      targets: ${{ steps.targets.outputs.targets }}
+      checks: ${{ steps.targets.outputs.checks }}
+      assets: ${{ steps.targets.outputs.assets }}
+      needed: ${{ steps.release.outputs.needed }}
+    steps:
+      - name: The kind of run
+        id: mode
+        env:
+          TAG: ${{ inputs.tag }}
+          DRY_REF: ${{ inputs.ref }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          # A value as one line of a workflow command: % and line breaks escaped.
+          plain() { local s=${1//"%"/%25}; s=${s//$'\r'/%0D}; printf '%s' "${s//$'\n'/%0A}"; }
+          if [ -n "$TAG" ] && [ -n "$DRY_REF" ]; then
+            echo "::error::Give a tag for a release run or a ref for a dry run, not both."
+            exit 1
+          fi
+          if [ -n "$TAG" ]; then
+            if ! [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::The tag is '$(plain "$TAG")', not vX.Y.Z."
+              exit 1
+            fi
+            mode=release
+            checkout="refs/tags/$TAG"
+          elif [ -n "$DRY_REF" ]; then
+            if ! [[ $DRY_REF =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || [[ $DRY_REF == *..* ]]; then
+              echo "::error::The ref is '$(plain "$DRY_REF")', not a branch name or a commit."
+              exit 1
+            fi
+            mode=dry
+            checkout=$DRY_REF
+          elif [ "$EVENT" = push ]; then
+            mode=branch
+            checkout=$SHA
+          else
+            echo "::error::A run by hand needs a tag, for a release run, or a ref, for a dry run."
+            exit 1
+          fi
+          {
+            echo "mode=$mode"
+            echo "checkout=$checkout"
+          } >> "$GITHUB_OUTPUT"
+          echo "A $mode run of $checkout."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ steps.mode.outputs.checkout }}
+      # Every later job checks out the same commit, so a branch that moves
+      # during the run changes nothing, and a release builds the tag's own
+      # version.
+      - name: The commit and its version
+        id: source
+        env:
+          MODE: ${{ steps.mode.outputs.mode }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          plain() { local s=${1//"%"/%25}; s=${s//$'\r'/%0D}; printf '%s' "${s//$'\n'/%0A}"; }
+          version=$(jq -r .version package.json)
+          if ! [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::package.json's version is '$(plain "$version")', not X.Y.Z."
+            exit 1
+          fi
+          if [ "$MODE" = release ] && [ "v$version" != "$TAG" ]; then
+            echo "::error::package.json at $TAG says the version is $version."
+            exit 1
+          fi
+          commit=$(git rev-parse HEAD)
+          {
+            echo "version=$version"
+            echo "commit=$commit"
+          } >> "$GITHUB_OUTPUT"
+          echo "Version $version at $commit."
+      # The one list of the targets and the files each makes (design 11.1 and
+      # 11.5). A branch run builds Linux x64 and Windows x64 only, and checks
+      # on Ubuntu where the others check on macOS. Windows runs on the image
+      # with Visual Studio 2026, named rather than windows-2025, which moves
+      # between images: its Visual C++ redistributable is 14.51, as new as
+      # the runtime the pinned PostgreSQL was linked against (desktop/pins.json
+      # vcRuntimeMin), and the Visual Studio 2022 image's is 14.44.
+      - name: The targets and the assets
+        id: targets
+        env:
+          MODE: ${{ steps.mode.outputs.mode }}
+          VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          all=$(jq -cn --arg v "$VERSION" '[
+            {target: "windows-x64", runner: "windows-2025-vs2026", files: ["raccoon-vtt-\($v)-windows-x64-setup.exe", "latest.yml"]},
+            {target: "macos-arm64", runner: "macos-15", files: ["raccoon-vtt-\($v)-macos-arm64.dmg"]},
+            {target: "macos-x64", runner: "macos-15-intel", files: ["raccoon-vtt-\($v)-macos-x64.dmg"]},
+            {target: "linux-x64", runner: "ubuntu-24.04", files: ["raccoon-vtt-\($v)-linux-x86_64.AppImage", "raccoon-vtt_\($v)_amd64.deb", "latest-linux.yml"]},
+            {target: "linux-arm64", runner: "ubuntu-24.04-arm", files: ["raccoon-vtt-\($v)-linux-arm64.AppImage", "raccoon-vtt_\($v)_arm64.deb", "latest-linux-arm64.yml"]}
+          ]')
+          if [ "$MODE" = branch ]; then
+            targets=$(jq -c 'map(select(.target == "windows-x64" or .target == "linux-x64"))' <<< "$all")
+            checks='[{"runner":"windows-2025-vs2026","report-only":true},{"runner":"ubuntu-24.04","report-only":false}]'
+          else
+            targets=$all
+            checks='[{"runner":"windows-2025-vs2026","report-only":true},{"runner":"macos-15","report-only":false}]'
+          fi
+          files=$(jq -r --arg v "$VERSION" '[.[].files[]] + ["raccoon-vtt-\($v)-desktop.sha256"] | join(" ")' <<< "$all")
+          assets="$files $(for f in $files; do printf '%s.sigstore.json ' "$f"; done)raccoon-vtt-$VERSION-desktop.intoto.jsonl"
+          {
+            echo "targets=$(jq -c 'map(.files |= join(" "))' <<< "$targets")"
+            echo "checks=$checks"
+            echo "assets=$assets"
+          } >> "$GITHUB_OUTPUT"
+          echo "Builds $(jq -r 'map(.target) | join(", ")' <<< "$targets"). Checks on $(jq -r 'map(.runner) | join(", ")' <<< "$checks")."
+      - name: What the release holds
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ steps.mode.outputs.mode }}
+          TAG: ${{ inputs.tag }}
+          ASSETS: ${{ steps.targets.outputs.assets }}
+        run: |
+          plain() { local s=${1//"%"/%25}; s=${s//$'\r'/%0D}; printf '%s' "${s//$'\n'/%0A}"; }
+          if [ "$MODE" != release ]; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            echo "A $MODE run attaches nothing to a release."
+            exit 0
+          fi
+          read -ra assets <<< "$ASSETS"
+          if ! held=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>&1); then
+            echo "::error::Could not read the GitHub Release $TAG: $(plain "$held")"
+            exit 1
+          fi
+          present=()
+          for asset in "${assets[@]}"; do
+            if grep -Fxq -- "$asset" <<< "$held"; then present+=("$asset"); fi
+          done
+          if [ "${#present[@]}" -eq "${#assets[@]}" ]; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "The GitHub Release $TAG already has every desktop asset. Leaving it unchanged."
+            exit 0
+          fi
+          if [ "${#present[@]}" -gt 0 ]; then
+            echo "::error::The GitHub Release $TAG already has ${present[*]}, but not every desktop asset. An asset is never replaced: delete those on the release's page, then run this again."
+            exit 1
+          fi
+          echo "needed=true" >> "$GITHUB_OUTPUT"
+          echo "The GitHub Release $TAG has none of the desktop assets yet: making them."
+
+  # The checks ci.yml cannot run, since they need the desktop packages, the
+  # bundled PostgreSQL or another system. Each test step runs even when an
+  # earlier one failed, so a report-only Windows run lists every failure.
+  checks:
+    needs: plan
+    if: needs.plan.outputs.needed == 'true'
+    name: checks (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.checks) }}
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.report-only }}
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Git for Windows checks text out with CRLF line endings, which the
+      # tests that read the repository's own files do not expect.
+      - name: Check out with LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.plan.outputs.checkout }}
+      - name: The commit is the plan's
+        env:
+          COMMIT: ${{ needs.plan.outputs.commit }}
+        run: |
+          have=$(git rev-parse HEAD)
+          if [ "$have" != "$COMMIT" ]; then
+            echo "::error::The checkout is $have, not $COMMIT, the commit the plan job read."
+            exit 1
+          fi
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Fetch Node and PostgreSQL
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node desktop/scripts/fetch-runtime.ts
+      - name: Install
+        id: install
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir desktop install --frozen-lockfile
+      - name: Typecheck the shell
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm exec tsc --noEmit -p desktop/tsconfig.electron.json
+      # The whole suite on Linux. Elsewhere scripts/ and e2e/ are left out:
+      # their unit tests check Linux CI tooling and start sh, docker or git.
+      - name: Unit tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            pnpm -s test
+          else
+            node --test "shared/**/*.test.ts" "server/**/*.test.ts" "client/**/*.test.ts" "desktop/**/*.test.ts"
+          fi
+      - name: Integration tests on a throwaway cluster
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: node desktop/scripts/test-db.ts pnpm -s test:int
+      - name: Desktop integration tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm -s test:desktop
+      - name: The app the desktop e2e files open
+        id: app
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          pnpm build
+          node desktop/scripts/stage.ts
+          pnpm exec vite build --config desktop/window/vite.config.ts
+          pnpm --dir desktop run build
+          node desktop/build/pack.ts --dir
+      # shell.e2e.ts opens the packaged app, and window.e2e.ts the window's
+      # page in Chrome with its fake bridge, on E2E_PORT. Linux has no
+      # display on a runner, so Electron draws into Xvfb.
+      - name: Desktop e2e files
+        id: e2e
+        if: ${{ !cancelled() && steps.app.outcome == 'success' }}
+        env:
+          E2E_PORT: "40600"
+          E2E_SCREENSHOT_DIR: test-results/desktop-e2e-screenshots
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a node desktop/e2e/run.ts
+          else
+            node desktop/e2e/run.ts
+          fi
+      - name: Keep the desktop e2e shots
+        if: ${{ always() && steps.e2e.outcome == 'failure' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-e2e-${{ matrix.runner }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # One installer build per target, each on a native runner of its own
+  # system and CPU, so pnpm installs that machine's prebuilt sharp and
+  # argon2, and each smoke test runs where its installer runs.
+  build:
+    needs: plan
+    if: needs.plan.outputs.needed == 'true'
+    name: build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.targets) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    # Each target's own output, which only its own job sets. A matrix job
+    # keeps one value per output name, so each target needs a name of its
+    # own, and a job sets only its own.
+    outputs:
+      sha256-windows-x64: ${{ steps.files.outputs.sha256-windows-x64 }}
+      sha256-macos-arm64: ${{ steps.files.outputs.sha256-macos-arm64 }}
+      sha256-macos-x64: ${{ steps.files.outputs.sha256-macos-x64 }}
+      sha256-linux-x64: ${{ steps.files.outputs.sha256-linux-x64 }}
+      sha256-linux-arm64: ${{ steps.files.outputs.sha256-linux-arm64 }}
+    env:
+      TARGET: ${{ matrix.target }}
+      FILES: ${{ matrix.files }}
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - name: Check out with LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.plan.outputs.checkout }}
+      - name: The commit is the plan's
+        env:
+          COMMIT: ${{ needs.plan.outputs.commit }}
+        run: |
+          have=$(git rev-parse HEAD)
+          if [ "$have" != "$COMMIT" ]; then
+            echo "::error::The checkout is $have, not $COMMIT, the commit the plan job read."
+            exit 1
+          fi
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # Each archive checked against desktop/pins.json, PostgreSQL's
+      # provenance and floors, and on Windows the Visual C++ runtime beside
+      # it (design section 3).
+      - name: Fetch Node and PostgreSQL
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node desktop/scripts/fetch-runtime.ts
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Stage the app server
+        run: node desktop/scripts/stage.ts
+      - run: pnpm --dir desktop install --frozen-lockfile
+      # The window's page and the shell's bundles, then electron-builder
+      # with the staged server, Node and PostgreSQL (desktop/build/pack.ts).
+      - name: Package
+        run: |
+          pnpm exec vite build --config desktop/window/vite.config.ts
+          pnpm --dir desktop run build
+          node desktop/build/pack.ts
+      # The files this target ships, as the plan names them, set apart from
+      # everything else electron-builder wrote. The smoke tests then install
+      # these very files.
+      - name: The files and their digests
+        id: files
+        run: |
+          mkdir -p "$RUNNER_TEMP/assets"
+          pairs=()
+          for file in $FILES; do
+            if [ -L "desktop/out/dist/$file" ] || ! [ -f "desktop/out/dist/$file" ]; then
+              echo "::error::electron-builder made no desktop/out/dist/$file."
+              exit 1
+            fi
+            cp -- "desktop/out/dist/$file" "$RUNNER_TEMP/assets/$file"
+            sum=$(node -e 'process.stdout.write(require("node:crypto").createHash("sha256").update(require("node:fs").readFileSync(process.argv[1])).digest("hex"))' "$RUNNER_TEMP/assets/$file")
+            pairs+=("$file=$sum")
+            echo "$file: $(wc -c < "$RUNNER_TEMP/assets/$file" | tr -d ' ') bytes, sha256 $sum."
+          done
+          echo "sha256-$TARGET=${pairs[*]}" >> "$GITHUB_OUTPUT"
+      - name: Browsers for the smoke tests
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            pnpm exec playwright-core install --with-deps chromium webkit
+          else
+            pnpm exec playwright-core install chromium webkit
+          fi
+      # Windows calls a runner's network public, where the app lets no
+      # player join, so the smoke test's players need it private.
+      - name: A private network
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private
+      - name: Smoke test the supervisor
+        run: node desktop/scripts/smoke.ts headless
+      - name: Smoke test the installer
+        run: |
+          case $TARGET in
+            windows-*) node desktop/scripts/smoke.ts windows "$RUNNER_TEMP/assets/raccoon-vtt-$VERSION-windows-x64-setup.exe" ;;
+            macos-*) node desktop/scripts/smoke.ts macos "$RUNNER_TEMP/assets/raccoon-vtt-$VERSION-$TARGET.dmg" ;;
+            linux-x64) node desktop/scripts/smoke.ts linux "$RUNNER_TEMP/assets/raccoon-vtt_${VERSION}_amd64.deb" "$RUNNER_TEMP/assets/raccoon-vtt-$VERSION-linux-x86_64.AppImage" ;;
+            linux-arm64) node desktop/scripts/smoke.ts linux "$RUNNER_TEMP/assets/raccoon-vtt_${VERSION}_arm64.deb" "$RUNNER_TEMP/assets/raccoon-vtt-$VERSION-linux-arm64.AppImage" ;;
+            *) echo "::error::No smoke test for $TARGET."; exit 1 ;;
+          esac
+      - name: Keep the smoke tests' logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-logs-${{ matrix.target }}
+          path: ${{ runner.temp }}/smoke-logs/
+          if-no-files-found: ignore
+          retention-days: 14
+      # A branch run keeps nothing. A dry run keeps its installers for a
+      # week, for a try on a real computer, and a release run for the jobs
+      # that sign and upload them.
+      - name: Keep the files for the jobs after
+        if: needs.plan.outputs.mode != 'branch'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-${{ matrix.target }}
+          path: ${{ runner.temp }}/assets/
+          if-no-files-found: error
+          retention-days: ${{ needs.plan.outputs.mode == 'dry' && 7 || 1 }}
+
+  # Every build's files, checked against the digests its job gave, and the
+  # list of their SHA-256 sums. It runs on dry runs too, so the way files
+  # pass from job to job is proven before a release relies on it.
+  checksums:
+    needs: [plan, build]
+    if: needs.plan.outputs.mode != 'branch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions: {}
+    outputs:
+      sha256: ${{ steps.list.outputs.sha256 }}
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-windows-x64
+          path: ${{ runner.temp }}/from/windows-x64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-macos-arm64
+          path: ${{ runner.temp }}/from/macos-arm64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-macos-x64
+          path: ${{ runner.temp }}/from/macos-x64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-linux-x64
+          path: ${{ runner.temp }}/from/linux-x64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-linux-arm64
+          path: ${{ runner.temp }}/from/linux-arm64
+      # Each artifact is downloaded into a folder of its own and must hold
+      # exactly the files the plan names for its target, as regular files,
+      # each with the digest its own build job gave.
+      - name: Take each job's files
+        env:
+          TARGETS: ${{ needs.plan.outputs.targets }}
+          DIGESTS: ${{ toJSON(needs.build.outputs) }}
+        run: |
+          shopt -s nullglob dotglob
+          # take <artifact folder> <file=sha256>...: the folder holds exactly these files, as regular files, with these digests.
+          take() {
+            local from="$RUNNER_TEMP/from/$1" pair file sum have
+            shift
+            local held=("$from"/*)
+            if [ -L "$from" ] || [ "${#held[@]}" -ne "$#" ]; then
+              echo "::error::The desktop-${from##*/} artifact must hold ${*%%=*}, and nothing else."
+              exit 1
+            fi
+            for pair in "$@"; do
+              file=${pair%%=*}
+              sum=${pair#*=}
+              if [ -L "$from/$file" ] || ! [ -f "$from/$file" ]; then
+                echo "::error::The desktop-${from##*/} artifact's $file is missing or not a regular file."
+                exit 1
+              fi
+              have=$(sha256sum < "$from/$file")
+              have=${have%% *}
+              if [ "$have" != "$sum" ]; then
+                echo "::error::$file is not the file the job that made it gave: its sha256 is $have."
+                exit 1
+              fi
+              cp -- "$from/$file" "$RUNNER_TEMP/assets/$file"
+            done
+          }
+          # The plan's files for a target, each with the digest its build job gave, as take wants them.
+          built() {
+            local files pairs file pair sum out=()
+            files=$(jq -r --arg t "$1" '.[] | select(.target == $t) | .files' <<< "$TARGETS")
+            pairs=$(jq -r --arg k "sha256-$1" '.[$k] // ""' <<< "$DIGESTS")
+            for file in $files; do
+              sum=""
+              for pair in $pairs; do
+                if [ "${pair%%=*}" = "$file" ]; then sum=${pair#*=}; fi
+              done
+              out+=("$file=$sum")
+            done
+            echo "${out[*]}"
+          }
+          mkdir -p "$RUNNER_TEMP/assets"
+          for target in windows-x64 macos-arm64 macos-x64 linux-x64 linux-arm64; do
+            read -ra files <<< "$(built "$target")"
+            take "$target" "${files[@]}"
+          done
+      - name: The checksum list
+        id: list
+        run: |
+          cd "$RUNNER_TEMP/assets"
+          list="raccoon-vtt-$VERSION-desktop.sha256"
+          sha256sum -- * > "$RUNNER_TEMP/$list"
+          mv "$RUNNER_TEMP/$list" "$list"
+          cat "$list"
+          sum=$(sha256sum < "$list")
+          echo "sha256=${sum%% *}" >> "$GITHUB_OUTPUT"
+          for file in *; do echo "$file: $(wc -c < "$file") bytes."; done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-checksums
+          path: ${{ runner.temp }}/assets/raccoon-vtt-${{ needs.plan.outputs.version }}-desktop.sha256
+          if-no-files-found: error
+          retention-days: ${{ needs.plan.outputs.mode == 'dry' && 7 || 1 }}
+
+  # A release run only: a dry run has no tag, so this and upload never run
+  # for it.
+  sign:
+    needs: [plan, checks, build, checksums]
+    if: inputs.tag != '' && needs.plan.outputs.mode == 'release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-windows-x64
+          path: ${{ runner.temp }}/from/windows-x64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-macos-arm64
+          path: ${{ runner.temp }}/from/macos-arm64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-macos-x64
+          path: ${{ runner.temp }}/from/macos-x64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-linux-x64
+          path: ${{ runner.temp }}/from/linux-x64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-linux-arm64
+          path: ${{ runner.temp }}/from/linux-arm64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-checksums
+          path: ${{ runner.temp }}/from/checksums
+      # As in the checksums job, with the checksum list as the checksums job gave it.
+      - name: Take each job's files
+        env:
+          TARGETS: ${{ needs.plan.outputs.targets }}
+          DIGESTS: ${{ toJSON(needs.build.outputs) }}
+          CHECKSUMS_SHA256: ${{ needs.checksums.outputs.sha256 }}
+        run: |
+          shopt -s nullglob dotglob
+          # take <artifact folder> <file=sha256>...: the folder holds exactly these files, as regular files, with these digests.
+          take() {
+            local from="$RUNNER_TEMP/from/$1" pair file sum have
+            shift
+            local held=("$from"/*)
+            if [ -L "$from" ] || [ "${#held[@]}" -ne "$#" ]; then
+              echo "::error::The desktop-${from##*/} artifact must hold ${*%%=*}, and nothing else."
+              exit 1
+            fi
+            for pair in "$@"; do
+              file=${pair%%=*}
+              sum=${pair#*=}
+              if [ -L "$from/$file" ] || ! [ -f "$from/$file" ]; then
+                echo "::error::The desktop-${from##*/} artifact's $file is missing or not a regular file."
+                exit 1
+              fi
+              have=$(sha256sum < "$from/$file")
+              have=${have%% *}
+              if [ "$have" != "$sum" ]; then
+                echo "::error::$file is not the file the job that made it gave: its sha256 is $have."
+                exit 1
+              fi
+              cp -- "$from/$file" "$RUNNER_TEMP/assets/$file"
+            done
+          }
+          # The plan's files for a target, each with the digest its build job gave, as take wants them.
+          built() {
+            local files pairs file pair sum out=()
+            files=$(jq -r --arg t "$1" '.[] | select(.target == $t) | .files' <<< "$TARGETS")
+            pairs=$(jq -r --arg k "sha256-$1" '.[$k] // ""' <<< "$DIGESTS")
+            for file in $files; do
+              sum=""
+              for pair in $pairs; do
+                if [ "${pair%%=*}" = "$file" ]; then sum=${pair#*=}; fi
+              done
+              out+=("$file=$sum")
+            done
+            echo "${out[*]}"
+          }
+          mkdir -p "$RUNNER_TEMP/assets"
+          for target in windows-x64 macos-arm64 macos-x64 linux-x64 linux-arm64; do
+            read -ra files <<< "$(built "$target")"
+            take "$target" "${files[@]}"
+          done
+          take checksums "raccoon-vtt-$VERSION-desktop.sha256=$CHECKSUMS_SHA256"
+      # The same download and checksum as image.yml's (scripts/desktop-workflow.test.ts keeps them equal).
+      - name: Install Cosign
+        run: |
+          curl -fsSL --retry 3 --max-time 60 --output "$RUNNER_TEMP/cosign" \
+            https://github.com/sigstore/cosign/releases/download/v3.0.6/cosign-linux-amd64
+          echo "c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74  $RUNNER_TEMP/cosign" | sha256sum -c --quiet -
+          chmod +x "$RUNNER_TEMP/cosign"
+      # Keyless: the certificate names this workflow and the run's ref, and
+      # each signature is logged in Sigstore's public transparency log. The
+      # bundles go in a folder of their own, so the provenance below covers
+      # the signed files alone. Up to three tries each, as image.yml signs
+      # the image.
+      - name: Sign each file
+        run: |
+          mkdir -p "$RUNNER_TEMP/signatures"
+          cd "$RUNNER_TEMP/assets"
+          for file in *; do
+            for attempt in 1 2 3; do
+              if "$RUNNER_TEMP/cosign" sign-blob --yes --bundle "$RUNNER_TEMP/signatures/$file.sigstore.json" "$file"; then
+                break
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "::error::Could not sign $file after three attempts."
+                exit 1
+              fi
+              sleep $((attempt * 5))
+            done
+          done
+      # release-assets.yml's predicate (scripts/desktop-workflow.test.ts keeps
+      # them equal but for the builder's file name): GitHub's own, plus the
+      # tag's commit where the run is not the tag's own, as in a hand run
+      # from main.
+      - name: The provenance predicate
+        env:
+          COMMIT: ${{ needs.plan.outputs.commit }}
+        run: |
+          if ! [[ $COMMIT =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::The tagged commit is '$COMMIT', not a full commit SHA."
+            exit 1
+          fi
+          workflow=${GITHUB_WORKFLOW_REF#"$GITHUB_REPOSITORY/"}
+          jq -n \
+            --arg repository "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" --arg ref "$GITHUB_REF" --arg sha "$GITHUB_SHA" \
+            --arg path "${workflow%%@*}" --arg event "$GITHUB_EVENT_NAME" --arg repository_id "$GITHUB_REPOSITORY_ID" \
+            --arg owner_id "$GITHUB_REPOSITORY_OWNER_ID" --arg runner "$RUNNER_ENVIRONMENT" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg tag "refs/tags/v$VERSION" --arg commit "$COMMIT" '
+            {
+              buildDefinition: {
+                buildType: "https://actions.github.io/buildtypes/workflow/v1",
+                externalParameters: { workflow: { ref: $ref, repository: $repository, path: $path } },
+                internalParameters: {
+                  github: { event_name: $event, repository_id: $repository_id, repository_owner_id: $owner_id, runner_environment: $runner }
+                },
+                resolvedDependencies: (
+                  [{ uri: "git+\($repository)@\($ref)", digest: { gitCommit: $sha } }]
+                  + (if $tag == $ref and $commit == $sha then [] else [{ uri: "git+\($repository)@\($tag)", digest: { gitCommit: $commit } }] end)
+                )
+              },
+              runDetails: {
+                builder: { id: "\($repository)/.github/workflows/desktop.yml@\($ref)" },
+                metadata: { invocationId: "\($repository)/actions/runs/\($run)/attempts/\($attempt)" }
+              }
+            }' > "$RUNNER_TEMP/provenance.json"
+          jq -c .buildDefinition.resolvedDependencies "$RUNNER_TEMP/provenance.json"
+      - name: Attest the build provenance
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/assets/*
+          predicate-type: https://slsa.dev/provenance/v1
+          predicate-path: ${{ runner.temp }}/provenance.json
+      - name: The provenance as a release asset
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: cp "$BUNDLE" "$RUNNER_TEMP/signatures/raccoon-vtt-$VERSION-desktop.intoto.jsonl"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-signatures
+          path: ${{ runner.temp }}/signatures/
+          if-no-files-found: error
+          retention-days: 1
+
+  upload:
+    needs: [plan, build, checksums, sign]
+    if: inputs.tag != '' && needs.plan.outputs.mode == 'release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    # One upload per tag at a time, none cancelled, so a second run reads
+    # what the first uploaded before it decides anything.
+    concurrency:
+      group: desktop-assets-${{ inputs.tag }}
+      cancel-in-progress: false
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-windows-x64
+          path: ${{ runner.temp }}/from/windows-x64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-macos-arm64
+          path: ${{ runner.temp }}/from/macos-arm64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-macos-x64
+          path: ${{ runner.temp }}/from/macos-x64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-linux-x64
+          path: ${{ runner.temp }}/from/linux-x64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-linux-arm64
+          path: ${{ runner.temp }}/from/linux-arm64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-checksums
+          path: ${{ runner.temp }}/from/checksums
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-signatures
+          path: ${{ runner.temp }}/from/signatures
+      # As in the sign job, so the files published are the very ones it
+      # signed, each from the job that made it. The signatures check
+      # themselves: a replaced bundle fails `cosign verify-blob`.
+      - name: Take each job's files
+        env:
+          TARGETS: ${{ needs.plan.outputs.targets }}
+          DIGESTS: ${{ toJSON(needs.build.outputs) }}
+          CHECKSUMS_SHA256: ${{ needs.checksums.outputs.sha256 }}
+          ASSETS: ${{ needs.plan.outputs.assets }}
+        run: |
+          shopt -s nullglob dotglob
+          # take <artifact folder> <file=sha256>...: the folder holds exactly these files, as regular files, with these digests.
+          take() {
+            local from="$RUNNER_TEMP/from/$1" pair file sum have
+            shift
+            local held=("$from"/*)
+            if [ -L "$from" ] || [ "${#held[@]}" -ne "$#" ]; then
+              echo "::error::The desktop-${from##*/} artifact must hold ${*%%=*}, and nothing else."
+              exit 1
+            fi
+            for pair in "$@"; do
+              file=${pair%%=*}
+              sum=${pair#*=}
+              if [ -L "$from/$file" ] || ! [ -f "$from/$file" ]; then
+                echo "::error::The desktop-${from##*/} artifact's $file is missing or not a regular file."
+                exit 1
+              fi
+              have=$(sha256sum < "$from/$file")
+              have=${have%% *}
+              if [ "$have" != "$sum" ]; then
+                echo "::error::$file is not the file the job that made it gave: its sha256 is $have."
+                exit 1
+              fi
+              cp -- "$from/$file" "$RUNNER_TEMP/assets/$file"
+            done
+          }
+          # The plan's files for a target, each with the digest its build job gave, as take wants them.
+          built() {
+            local files pairs file pair sum out=()
+            files=$(jq -r --arg t "$1" '.[] | select(.target == $t) | .files' <<< "$TARGETS")
+            pairs=$(jq -r --arg k "sha256-$1" '.[$k] // ""' <<< "$DIGESTS")
+            for file in $files; do
+              sum=""
+              for pair in $pairs; do
+                if [ "${pair%%=*}" = "$file" ]; then sum=${pair#*=}; fi
+              done
+              out+=("$file=$sum")
+            done
+            echo "${out[*]}"
+          }
+          mkdir -p "$RUNNER_TEMP/assets"
+          for target in windows-x64 macos-arm64 macos-x64 linux-x64 linux-arm64; do
+            read -ra files <<< "$(built "$target")"
+            take "$target" "${files[@]}"
+          done
+          take checksums "raccoon-vtt-$VERSION-desktop.sha256=$CHECKSUMS_SHA256"
+          # The signing job's bundles, one per file taken above, and the provenance.
+          signatures=()
+          for file in "$RUNNER_TEMP"/assets/*; do
+            signatures+=("${file##*/}.sigstore.json")
+          done
+          signatures+=("raccoon-vtt-$VERSION-desktop.intoto.jsonl")
+          from="$RUNNER_TEMP/from/signatures"
+          held=("$from"/*)
+          if [ -L "$from" ] || [ "${#held[@]}" -ne "${#signatures[@]}" ]; then
+            echo "::error::The desktop-signatures artifact must hold ${signatures[*]}, and nothing else."
+            exit 1
+          fi
+          for file in "${signatures[@]}"; do
+            if [ -L "$from/$file" ] || ! [ -f "$from/$file" ]; then
+              echo "::error::The desktop-signatures artifact's $file is missing or not a regular file."
+              exit 1
+            fi
+            cp -- "$from/$file" "$RUNNER_TEMP/assets/$file"
+          done
+          # Exactly the plan's assets, no more and no fewer.
+          taken=$(cd "$RUNNER_TEMP/assets" && printf '%s\n' * | sort)
+          wanted=$(tr ' ' '\n' <<< "$ASSETS" | sort)
+          if [ "$taken" != "$wanted" ]; then
+            echo "::error::The files taken are not the release's desktop assets: $(comm -3 <(echo "$taken") <(echo "$wanted") | tr -d '\t' | tr '\n' ' ')"
+            exit 1
+          fi
+      # What the release holds is read again here: another run may have
+      # added assets since the plan job looked. gh refuses to replace an
+      # asset without --clobber, which this never passes.
+      - name: Upload to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          ASSETS: ${{ needs.plan.outputs.assets }}
+        run: |
+          plain() { local s=${1//"%"/%25}; s=${s//$'\r'/%0D}; printf '%s' "${s//$'\n'/%0A}"; }
+          read -ra assets <<< "$ASSETS"
+          if ! held=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>&1); then
+            echo "::error::Could not read the GitHub Release $TAG: $(plain "$held")"
+            exit 1
+          fi
+          present=()
+          for asset in "${assets[@]}"; do
+            if grep -Fxq -- "$asset" <<< "$held"; then present+=("$asset"); fi
+          done
+          if [ "${#present[@]}" -eq "${#assets[@]}" ]; then
+            echo "The GitHub Release $TAG got every desktop asset from another run meanwhile. Leaving it unchanged."
+            exit 0
+          fi
+          if [ "${#present[@]}" -gt 0 ]; then
+            echo "::error::The GitHub Release $TAG already has ${present[*]}, but not every desktop asset. An asset is never replaced: delete those on the release's page, then run this again."
+            exit 1
+          fi
+          cd "$RUNNER_TEMP/assets"
+          for asset in "${assets[@]}"; do echo "$asset: $(wc -c < "$asset") bytes."; done
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" "${assets[@]}"
+          echo "Attached to $TAG: ${assets[*]}."
