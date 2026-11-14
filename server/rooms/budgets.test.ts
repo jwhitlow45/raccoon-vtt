@@ -244,4 +244,25 @@ describe("SocketRegistry", () => {
     releases[0]!();
     assert.equal(r.total, 0);
   });
+
+  test("remoteDevices counts each other address once, and never this computer's loopback or network address (D-261113-095)", () => {
+    const r = new SocketRegistry();
+    const own = new Set(["127.0.0.1", "10.0.0.5"]);
+    const isThisComputer = (ip: string) => own.has(ip);
+    assert.equal(r.remoteDevices(isThisComputer), 0);
+    // The DM's tabs at localhost and at the LAN address on the host.
+    const dm = [r.open("dm", "r1", "127.0.0.1"), r.open("dm", "r1", "127.0.0.1"), r.open("dm2", "r1", "10.0.0.5")];
+    assert.equal(r.remoteDevices(isThisComputer), 0);
+    const phone = r.open("p1", "r1", "10.0.0.20");
+    r.open("p1", "r2", "10.0.0.20");
+    const tablet = r.open("p2", "r1", "172.16.0.7");
+    assert.equal(r.remoteDevices(isThisComputer), 2);
+    assert.equal(r.total, 6);
+    tablet();
+    assert.equal(r.remoteDevices(isThisComputer), 1);
+    phone();
+    assert.equal(r.remoteDevices(isThisComputer), 1, "one socket from that address is still open");
+    for (const release of dm) release();
+    assert.equal(r.remoteDevices(isThisComputer), 1);
+  });
 });

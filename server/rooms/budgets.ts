@@ -387,6 +387,18 @@ export class SocketRegistry {
     return this.#total;
   }
 
+  /**
+   * The number of distinct addresses holding a socket that `isThisComputer`
+   * rejects: the other devices the desktop app's window counts, so the DM's
+   * own tabs on that computer never count, whichever address they opened
+   * (docs/design/design-v1-local-app.md 4, D-261113-095).
+   */
+  remoteDevices(isThisComputer: (ip: string) => boolean): number {
+    let count = 0;
+    for (const ip of this.#byIp.keys()) if (!isThisComputer(ip)) count++;
+    return count;
+  }
+
   canOpen(sessionId: string, roomId: string, ip: string): boolean {
     const c = this.caps;
     return (
