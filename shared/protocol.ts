@@ -3691,11 +3691,11 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
   z.strictObject({ t: z.literal("time"), k: z.number().int().min(0), at: z.number().int().min(0) }),
   z.strictObject({ t: z.literal("resync"), reason: z.string().max(80) }),
   /**
-   * The answer to an `ids` ask, every asked id in one list: `held` the room
-   * recorded it for this member, so the create landed; `notHeld` it did
-   * not and never will, so the device mints a new id and sends again;
-   * `pending` an earlier op of this member may still commit, so the device
-   * asks again.
+   * The answer to an `ids` ask, every asked id in one list. `held`: the
+   * room recorded it for this member, so the create landed. `notHeld`: it
+   * did not and never will, so the device mints a new id and sends again.
+   * `pending`: an earlier op of this member may still commit, so the
+   * device asks again.
    */
   z.strictObject({
     t: z.literal("ids"),

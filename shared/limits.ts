@@ -1095,11 +1095,12 @@ function companionBlockBytes(block: CompanionBlock): number {
 const blockVerdicts = { today: new WeakMap<object, LimitCheck>(), player: new WeakMap<object, LimitCheck>(), dm: new WeakMap<object, LimitCheck>() };
 
 /**
- * Whose limits a block verdict reads (player limits): `today` every cap
- * over every block, as a room import checks it; `player` the caps on one
- * block and on one character, whose blocks are all in its owners' copies;
- * `dm` those and the room's totals over the blocks of characters no player
- * owns, since players' characters keep their blocks within their own caps.
+ * Whose limits a block verdict reads (player limits). `today` is every
+ * cap over every block, as a room import checks it. `player` is the caps
+ * on one block and on one character, whose blocks are all in its owners'
+ * copies. `dm` is those and the room's totals over the blocks of
+ * characters no player owns, since players' characters keep their blocks
+ * within their own caps.
  */
 type BlockRole = keyof typeof blockVerdicts;
 
@@ -1675,7 +1676,7 @@ function rowCount(state: RoomState): number {
 /**
  * Today's room caps for the DM and the server, over the rest: a count
  * refuses only when the op adds to the total it counts and the rest is
- * past the cap (D-261110-263), so a hide, a hand-over or a roster change
+ * past the cap, so a hide, a hand-over or a roster change
  * never meets one, and a move into a full scene still does.
  */
 function restLimits(state: RoomState, sceneId: string | null, before: RoomState): LimitCheck {
