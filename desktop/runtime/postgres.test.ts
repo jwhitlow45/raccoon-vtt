@@ -135,6 +135,17 @@ describe("the postmaster this process started", { skip: posixOnly }, () => {
   });
 });
 
+describe("the data folder's postgres/", () => {
+  test("a postgres/ folder is a cluster, so one that is there is never made again, whatever it holds", async () => {
+    const dir = await folder();
+    const c = cluster(dir, "/none", lookup());
+    assert.equal(c.needsInit(), true);
+    await mkdir(join(dir, "postgres"));
+    await writeFile(join(dir, "postgres", "postgresql.conf"), "# not PostgreSQL's own folder\n");
+    assert.equal(c.needsInit(), false, "the start then fails with the log's words, and nothing is moved or made");
+  });
+});
+
 describe("initdb", { skip: posixOnly }, () => {
   test("an init cut off after PG_VERSION and before the app's settings leaves no postgres/, and the next one makes it whole", async () => {
     const dir = await folder();
