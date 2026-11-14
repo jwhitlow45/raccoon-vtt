@@ -1,4 +1,4 @@
-import { FAR, HISTORY_BYTES, LIMITS, MARKED_POOL, MOST_SIGHT_HOLDERS, exploredReserve, farLimits, roundUp, serializedBytes } from "#shared/limits.ts";
+import { FAR, HISTORY_BYTES, LIMITS, MARKED_POOL, MOST_SIGHT_HOLDERS, exploredReserve, roundUp, seatHeld, serializedBytes } from "#shared/limits.ts";
 import { holderTileKey, tileKey } from "#shared/keys.ts";
 import { DM_LINE_BASE, MAX_LOG, PARTY_LINE_BASE, PARTY_SLOT, memberRing, ringed, rosterRanks } from "#shared/logRings.ts";
 import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
@@ -141,6 +141,13 @@ function addFight(state: RoomState, sceneId: string): void {
   const first = entries[0]!;
   const t = state.tokens[first.tokenId!]!;
   state.encounter = { rev: 0, round: 1, activeEntryId: first.id, entries, turnStart: { entryId: first.id, tokenId: t.id, sceneId, x: t.x, y: t.y, elevation: 0 } };
+  // The rows stop where the far count does: the DM's own rows, last, are cut to the step beside the players' held ones.
+  state.encounter.entries = entries.slice(0, atFarCount(FAR.rows, seatHeld(state, null).rows.size));
+}
+
+/** The most things the far count takes beside `held` of the players': the DM's part in whole steps (shared/limits.ts farLimits). */
+function atFarCount(line: number, held: number): number {
+  return held + Math.floor((line - held) / FAR.countStep) * FAR.countStep;
 }
 
 /**
@@ -172,7 +179,9 @@ function addAsks(state: RoomState, sceneId: string): void {
     state.casts[id] = castAsk(id, { by, caster: caster.id, sceneId, spell: "Fireball", area: undefined, targets: [caster.id], at: AT });
     ids.push(id);
   }
-  while (!farLimits(state, null).ok) delete state.casts[ids.pop()!];
+  const held = seatHeld(state, null).casts;
+  const rest = ids.filter((id) => !held.has(id));
+  for (const id of rest.slice(atFarCount(FAR.asks, held.size) - held.size)) delete state.casts[id];
 }
 
 /** The open rolls a room may hold, each with every target answered. */
