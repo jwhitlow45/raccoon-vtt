@@ -454,14 +454,17 @@ export class Cluster {
     });
     let done = false;
     void answered.then(() => (done = true));
-    const asked = new Set<number>();
+    const asked: Asked = new Map();
     while (signal.aborted && !done) {
+      let wait = 250;
       try {
         await this.endPass(asked);
       } catch (err) {
         this.cantConfirm(`the process listing failed: ${(err as Error).message}`);
+        // A listing that failed is not tried again at once: on Windows each one is a new PowerShell.
+        wait = this.opts.listRetryMs ?? LIST_RETRY_MS;
       }
-      await Promise.race([answered, sleep(250)]);
+      await Promise.race([answered, sleep(wait)]);
     }
   }
 
@@ -503,18 +506,24 @@ export class Cluster {
 
   /**
    * One look at the processes. A postmaster of this folder that
-   * postmaster.pid names is asked to stop through pg_ctl, once, and one the
-   * file does not name, or one still there after that, is killed. Every pid
-   * signalled is one the listing has just shown to be this folder's
-   * postmaster, never one on the file's word alone. Answers how many it
-   * found, and throws when the listing fails.
+   * postmaster.pid names is asked to stop through pg_ctl, fast first, then
+   * immediate, which still ends its children and waits for them (LA-27).
+   * One still there after both, or one the file does not name, which has
+   * launched no children yet, is killed. Every pid signalled is one the
+   * listing has just shown to be this folder's postmaster, never one on the
+   * file's word alone. Answers how many it found and when it first
+   * signalled one, and throws when the listing fails.
    */
-  private async endPass(asked: Set<number>): Promise<number> {
+  private async endPass(asked: Asked): Promise<{ found: number; signalled: number | null }> {
     const found = await this.postmasters();
+    let signalled: number | null = null;
     for (const pid of found) {
-      if (!asked.has(pid) && (await this.pidFilePid()) === pid) {
-        asked.add(pid);
-        await this.pgCtlStop().catch((err: unknown) => this.opts.log?.(`pg_ctl stop of PostgreSQL (pid ${pid}) failed: ${(err as Error).message.split(/\r?\n/)[0]}`));
+      signalled ??= Date.now();
+      const tried = asked.get(pid);
+      if (tried !== "kill" && (await this.pidFilePid()) === pid) {
+        const mode = tried === undefined ? "fast" : "immediate";
+        asked.set(pid, mode === "fast" ? "fast" : "kill");
+        await this.pgCtlStop(mode).catch((err: unknown) => this.opts.log?.(`pg_ctl stop -m ${mode} of PostgreSQL (pid ${pid}) failed: ${(err as Error).message.split(/\r?\n/)[0]}`));
         continue;
       }
       try {
@@ -523,7 +532,7 @@ export class Cluster {
         if ((err as NodeJS.ErrnoException).code !== "ESRCH") this.opts.log?.(`PostgreSQL (pid ${pid}) could not be ended: ${(err as Error).message}`);
       }
     }
-    return found.length;
+    return { found: found.length, signalled };
   }
 
   /**
@@ -538,25 +547,31 @@ export class Cluster {
    * held and the status says RaccoonVTT can't confirm PostgreSQL ended
    * (D-261114-045, 046).
    */
-  private async proveEnded(): Promise<void> {
-    const asked = new Set<number>();
-    const since = Date.now();
+  private async proveEnded(asked: Asked = new Map()): Promise<void> {
+    // When the first signal went out. A postmaster has outlived its end only
+    // when a listing taken 10 s or more after that still shows it, so a slow
+    // but clean first pg_ctl stop never reads as one (LA-28).
+    let firstSignal: number | null = null;
     for (;;) {
-      let found: number;
+      const listedAt = Date.now();
+      let pass: { found: number; signalled: number | null };
       try {
-        found = await this.endPass(asked);
+        pass = await this.endPass(asked);
       } catch (err) {
         this.cantConfirm(`the process listing failed: ${(err as Error).message}`);
         await sleep(this.opts.listRetryMs ?? LIST_RETRY_MS);
         continue;
       }
-      if (found === 0) {
+      if (pass.found === 0) {
         if (this.unsure) this.opts.log?.("PostgreSQL is confirmed ended, so the data folder can be let go");
         if (this.unsure) this.opts.unconfirmed?.(false);
         this.unsure = null;
         return;
       }
-      if (Date.now() - since >= (this.opts.unsureAfterMs ?? UNSURE_AFTER_MS)) this.cantConfirm(`${found} PostgreSQL process${found === 1 ? "" : "es"} of this data folder still run after being ended`);
+      if (firstSignal !== null && listedAt - firstSignal >= (this.opts.unsureAfterMs ?? UNSURE_AFTER_MS)) {
+        this.cantConfirm(`${pass.found} PostgreSQL process${pass.found === 1 ? "" : "es"} of this data folder still run after being ended`);
+      }
+      firstSignal ??= pass.signalled;
       await sleep(250);
     }
   }
@@ -574,8 +589,9 @@ export class Cluster {
     }
   }
 
-  private async pgCtlStop(): Promise<void> {
-    await run(this.program("pg_ctl"), ["stop", "-D", this.pgPath(this.opts.pgData), "-m", "fast", "-w", "-t", "60"], { env: pgEnv(), windowsHide: true, timeout: 90_000 });
+  /** pg_ctl stop -w: it answers once the postmaster has removed postmaster.pid, the last thing it does as it ends. */
+  private async pgCtlStop(mode: "fast" | "immediate" = "fast"): Promise<void> {
+    await run(this.program("pg_ctl"), ["stop", "-D", this.pgPath(this.opts.pgData), "-m", mode, "-w", "-t", "60"], { env: pgEnv(), windowsHide: true, timeout: 90_000 });
   }
 
   /**
@@ -599,10 +615,17 @@ export class Cluster {
     }
     this.started = null;
     this.port = null;
-    // Whatever pg_ctl stop said, a process that launched a postmaster lets go only once a listing shows none of this folder's.
+    // pg_ctl stop -w on the postmaster this process started is proof on its
+    // own: pg_ctl answers only once that postmaster has removed
+    // postmaster.pid, which it does at its very end after its children,
+    // and start() proved the end of every attempt that failed. So a process
+    // listing that keeps failing never keeps a clean Quit from finishing
+    // (LA-26, D-261114-057).
+    if (mine && !failed) return;
+    // Anything else lets go only once a listing shows no postmaster of this folder.
     if (this.launched) {
       if (failed) this.opts.log?.(`pg_ctl stop failed: ${(failed as Error).message.split(/\r?\n/)[0]}`);
-      return this.proveEnded();
+      return this.proveEnded(failed && pid !== null ? new Map([[pid, "fast"]]) : undefined);
     }
     if (failed) throw failed;
   }
@@ -666,6 +689,9 @@ const KILL_WAIT_MS = 10_000;
 const KILL_WAIT_AGAIN_MS = 60_000;
 /** How long a process listing that failed waits before the next. */
 const LIST_RETRY_MS = 10_000;
+
+/** What each postmaster found has been asked so far: pg_ctl stop -m fast, then -m immediate, after which only a kill is left. */
+type Asked = Map<number, "fast" | "kill">;
 /** How long a postmaster may take to end after it was stopped or killed before the status says its end can't be confirmed. */
 const UNSURE_AFTER_MS = 10_000;
 

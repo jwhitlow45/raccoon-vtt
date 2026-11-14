@@ -48,8 +48,11 @@ async function programs(dir: string): Promise<{ bin: string; calls: () => Promis
   // RVTT_FAKE_PIDAFTER s, marked starting, then ready after
   // RVTT_FAKE_READYAFTER s (never when unset), naming RVTT_FAKE_TAKENBY's
   // pid then instead of its own when that is set, and lives RVTT_FAKE_LIFE
-  // s. It ignores SIGTERM when RVTT_FAKE_STUBBORN is set. pg_ctl stop ends
-  // it. RVTT_FAKE_PGCTL says what pg_ctl does meanwhile: "wait" as -w does
+  // s. It ignores SIGTERM when RVTT_FAKE_STUBBORN is set, and ends on
+  // SIGUSR1 after writing "immediate" beside postgres/, standing in for
+  // SIGQUIT. pg_ctl stop -m fast sends it SIGTERM, -m immediate SIGUSR1,
+  // after RVTT_FAKE_SLOWSTOP s, and as -w does fails when it still runs a
+  // second later. RVTT_FAKE_PGCTL says what pg_ctl does meanwhile: "wait" as -w does
   // (exit 0 once ready, 1 once the postmaster is gone), "fail" (exit 1 at
   // once, as when its own wait runs out), "failsoon" (exit 1 after 0.3 s),
   // or "hang".
@@ -59,6 +62,7 @@ async function programs(dir: string): Promise<{ bin: string; calls: () => Promis
       "#!/bin/sh",
       `d="$2"`,
       `if [ -n "$RVTT_FAKE_STUBBORN" ]; then trap '' TERM; fi`,
+      `trap 'echo ended > "$(dirname "$d")/immediate"; exit 0' USR1`,
       `sleep "\${RVTT_FAKE_PIDAFTER:-0}"`,
       `started=$(date +%s)`,
       `w() { printf '%s\\n%s\\n%s\\n5999\\n\\n\\n\\n%s\\n' "$2" "$d" "$started" "$1" > "$d/postmaster.pid"; }`,
@@ -74,9 +78,10 @@ async function programs(dir: string): Promise<{ bin: string; calls: () => Promis
     join(bin, "pg_ctl"),
     [
       "#!/bin/sh",
-      `echo "pg_ctl $1" >> '${log}'`,
+      `if [ "$1" = stop ] && [ "$5" = immediate ]; then echo "pg_ctl stop immediate" >> '${log}'; else echo "pg_ctl $1" >> '${log}'; fi`,
       `if [ "$1" = start ] && [ -z "$RVTT_FAKE_CHILD" ]; then printf '%s\\n%s\\n%s\\n5999\\n' "$RVTT_FAKE_PID" "$3" "$(date +%s)" > "$3/postmaster.pid"; fi`,
-      `if [ "$1" = stop ] && [ -n "$RVTT_FAKE_CHILD" ]; then kill "$(head -1 "$3/postmaster.pid")"; fi`,
+      `if [ "$1" = stop ] && [ -n "$RVTT_FAKE_SLOWSTOP" ]; then sleep "$RVTT_FAKE_SLOWSTOP"; fi`,
+      `if [ "$1" = stop ] && [ -n "$RVTT_FAKE_CHILD" ]; then p=$(head -1 "$3/postmaster.pid"); if [ "$5" = immediate ]; then kill -USR1 "$p"; else kill "$p"; fi; n=0; while kill -0 "$p" 2>/dev/null && [ "$n" -lt 10 ]; do sleep 0.1; n=$((n + 1)); done; if kill -0 "$p" 2>/dev/null; then echo "pg_ctl: server does not shut down" >&2; exit 1; fi; fi`,
       `if [ "$1" = stop ]; then rm -f "$3/postmaster.pid"; fi`,
       `if [ "$1" = start ] && [ -n "$RVTT_FAKE_HOLD" ]; then sleep 30 & echo $! > "$RVTT_FAKE_HOLD"; fi`,
       `if [ "$1" = start ] && [ -n "$RVTT_FAKE_CHILD" ]; then "$(dirname "$0")/postgres" -D "$3" & c=$!; echo $c > "$RVTT_FAKE_CHILD"; fi`,
@@ -508,18 +513,114 @@ describe("a start", { skip: posixOnly }, () => {
     assert.deepEqual(unconfirmed, [true, false]);
   });
 
-  test("a stop after this process launched PostgreSQL ends a postmaster that pg_ctl stop left running, by its identity, before it answers", { timeout: 20_000 }, async () => {
+  /** A start reading that differs at every read, so the postmaster running is never the one this process started. */
+  const neverMine = (): (() => Promise<number>) => {
+    let n = 0;
+    return async () => ++n;
+  };
+
+  /** Runs `work` with the stand-in's variables set, as they were for the start. */
+  async function withVars<T>(vars: Record<string, string>, work: () => Promise<T>): Promise<T> {
+    Object.assign(process.env, vars);
+    try {
+      return await work();
+    } finally {
+      for (const key of Object.keys(vars)) delete process.env[key];
+    }
+  }
+
+  test("a stop of a postmaster it can't count as its own proves the end by identity, though pg_ctl stop said it ended", { timeout: 20_000 }, async () => {
     const dir = await folder();
     const { bin, calls } = await programs(dir);
     await mkdir(join(dir, "postgres"));
     const postmaster = join(dir, "postmaster.child");
-    const c = cluster(dir, bin, lookup(), { platform: "darwin" });
+    const c = cluster(dir, bin, lookup({ stamp: neverMine() }), { platform: "darwin" });
     const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_READYAFTER: "0.3" });
     assert.equal(error, null);
     // With RVTT_FAKE_CHILD gone, the stand-in pg_ctl stop removes postmaster.pid and ends nothing.
     await c.stop();
     assert.equal(await ended(await pid(postmaster)), true, "the stop answered only once its postmaster had ended");
     assert.deepEqual(await calls(), STOPPED);
+  });
+
+  test("a pg_ctl stop -w that ended the postmaster this process started is proof, so a listing that always fails never holds that Quit", { timeout: 20_000 }, async () => {
+    const dir = await folder();
+    const { bin, calls } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const postmaster = join(dir, "postmaster.child");
+    let listed = 0;
+    const unconfirmed: boolean[] = [];
+    const proc: ProcessLookup = {
+      ...lookup(),
+      list: async () => {
+        listed++;
+        throw new Error("Get-CimInstance failed");
+      },
+    };
+    const c = new Cluster({ ...cluster(dir, bin, proc, { platform: "darwin" }).opts, unconfirmed: (on) => unconfirmed.push(on) });
+    const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_READYAFTER: "0.3" });
+    assert.equal(error, null);
+    await withVars({ RVTT_FAKE_CHILD: postmaster }, () => c.stop());
+    assert.equal(await ended(await pid(postmaster)), true);
+    assert.equal(listed, 0, "no listing was needed");
+    assert.deepEqual(unconfirmed, []);
+    assert.deepEqual(await calls(), STOPPED);
+  });
+
+  test("a postmaster the fast stop leaves running is stopped immediate, which ends its children, before any kill", { timeout: 20_000 }, async () => {
+    const dir = await folder();
+    const { bin, calls } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const postmaster = join(dir, "postmaster.child");
+    const c = cluster(dir, bin, lookup(), { platform: "darwin" });
+    const vars = { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_STUBBORN: "1" };
+    const { error, pid } = await startWith(dir, c, { ...vars, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_READYAFTER: "0.3" });
+    assert.equal(error, null);
+    await withVars(vars, () => c.stop());
+    assert.equal(await ended(await pid(postmaster)), true);
+    assert.ok(existsSync(join(dir, "immediate")), "it ended through the immediate stop, not a kill");
+    assert.deepEqual(await calls(), ["pg_ctl start", "pg_ctl stop", "pg_ctl stop immediate"]);
+  });
+
+  test("a slow but clean first pg_ctl stop never reads as a postmaster that outlived its end", { timeout: 20_000 }, async () => {
+    const dir = await folder();
+    const { bin, calls } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const postmaster = join(dir, "postmaster.child");
+    const unconfirmed: boolean[] = [];
+    // Neither its own nor confirmed by leftover() (no program name), so the stop leaves it to the proof, whose first pass stops it.
+    const c = new Cluster({ ...cluster(dir, bin, lookup({ stamp: neverMine(), exe: null }), { platform: "darwin" }).opts, unsureAfterMs: 300, unconfirmed: (on) => unconfirmed.push(on) });
+    const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_READYAFTER: "0.3" });
+    assert.equal(error, null);
+    await withVars({ RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_SLOWSTOP: "1" }, () => c.stop());
+    assert.equal(await ended(await pid(postmaster)), true);
+    assert.deepEqual(await calls(), STOPPED);
+    assert.deepEqual(unconfirmed, [], "a pg_ctl stop of 1 s, past a 0.3 s bound, is no postmaster that outlived its end");
+  });
+
+  test("a cancel whose listing fails waits a retry's length before the next, not a quarter second", { timeout: 20_000 }, async () => {
+    const dir = await folder();
+    const { bin } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const postmaster = join(dir, "postmaster.child");
+    let failing = true;
+    let failed = 0;
+    const proc: ProcessLookup = {
+      ...lookup(),
+      list: async () => {
+        if (!failing) return listProcesses();
+        failed++;
+        throw new Error("Get-CimInstance failed");
+      },
+    };
+    const c = new Cluster({ ...cluster(dir, bin, proc, { platform: "darwin" }).opts, listRetryMs: 1_000 });
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 100);
+    setTimeout(() => (failing = false), 2_600);
+    const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait" }, abort.signal);
+    assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
+    assert.ok(failed <= 4, `${failed} listings in 2.5 s while they failed`);
+    assert.equal(await ended(await pid(postmaster)), true);
   });
 });
 
