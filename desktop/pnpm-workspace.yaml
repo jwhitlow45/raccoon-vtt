@@ -1,0 +1,9 @@
+# desktop/ is a pnpm root of its own (design 11.2): the repository's workspace
+# never adopts it, so Electron and the packaging tools never reach the
+# server's lockfile, SBOM or image.
+#
+# Electron fetches its binary on first use and has no install script, so no
+# package here needs one. electron-winstaller builds Squirrel installers,
+# which this app does not make (it ships NSIS), so its script stays off.
+allowBuilds:
+  electron-winstaller: false
