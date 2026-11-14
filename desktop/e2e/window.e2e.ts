@@ -75,12 +75,14 @@ async function context(look: Partial<Look> = {}): Promise<BrowserContext> {
   });
 }
 
-async function open(ctx: BrowserContext, query: string): Promise<Page> {
+/** A page on a scenario. `at` fixes the page's clock there, while its timers run on. */
+async function open(ctx: BrowserContext, query: string, at?: Date): Promise<Page> {
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`${query}: ${e.message}`));
   page.on("console", (m) => {
     if (m.type() === "error" && !m.location().url.endsWith("/favicon.ico")) errors.push(`${query}: ${m.text()}`);
   });
+  if (at) await page.clock.setFixedTime(at);
   await page.goto(`http://127.0.0.1:${PORT}/?${query}`);
   await page.locator("main").waitFor();
   return page;
@@ -149,10 +151,15 @@ describe("the desktop window page", { timeout: 900_000 }, () => {
   });
 
   test("every state shows its words, in both themes, and is shot once", async () => {
+    // The scenarios date their rooms and backups from now, so at noon "2
+    // hours ago" is today and "30 hours ago" is yesterday. Run just after
+    // midnight, the page would rightly call both a day older.
+    const noon = new Date();
+    noon.setHours(12, 0, 0, 0);
     for (const scheme of SCHEMES) {
       const ctx = await context({ scheme });
       for (const name of SCENARIO_NAMES) {
-        const page = await open(ctx, `scenario=${name}`);
+        const page = await open(ctx, `scenario=${name}`, noon);
         assert.equal(await page.evaluate("document.documentElement.dataset.rvttScheme"), scheme, `${name} follows the system's ${scheme} theme`);
         const body = await text(page);
         for (const words of EXPECT[name]!) assert.ok(body.includes(words), `${name} (${scheme}): missing "${words}" in: ${body.slice(0, 400)}`);
