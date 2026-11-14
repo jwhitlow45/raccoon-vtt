@@ -75,6 +75,7 @@ export function useShareOrigin(): string {
       return () => void listeners.delete(listener);
     },
     () => view,
+    () => null,
   );
   const connection = useRoomConnection();
   useEffect(() => {
@@ -95,7 +96,8 @@ export function useShareOrigin(): string {
   useEffect(() => {
     if (connection === "open" && view?.local) void refreshShareOrigin();
   }, [connection]);
-  return shareOriginOf(current, location.origin);
+  // A render outside a browser (the unit tests' server render) has no page origin to name.
+  return shareOriginOf(current, typeof location === "undefined" ? "http://localhost" : location.origin);
 }
 
 /** The local part of the answer, for pages that need more than the origin (Home's other-device states). */
@@ -106,6 +108,7 @@ export function useLocalConfig(): { loaded: boolean; local: LocalServerConfig | 
       return () => void listeners.delete(listener);
     },
     () => view,
+    () => null,
   );
   useEffect(() => {
     if (view === null) void refreshShareOrigin();
