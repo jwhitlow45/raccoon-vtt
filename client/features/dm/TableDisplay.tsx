@@ -6,6 +6,7 @@ import { Group, Help } from "../../components/Panel.tsx";
 import { QrCode } from "../../components/QrCode.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { api, ApiError, type DisplayCode } from "../../lib/api.ts";
+import { useShareOrigin } from "../../lib/shareOrigin.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { formatDisplayCode } from "../display/logic.ts";
@@ -147,7 +148,8 @@ const CODE_PX = 36;
 /** The code large enough to read across a room and type with a remote, with its link and QR code. */
 function CodeCard(props: { code: DisplayCode; minting: boolean; onAnother(): void; onDone(): void }) {
   const countdown = useCountdown(props.code.expiresAt);
-  const url = absoluteLink(props.code.link, location.origin);
+  const origin = useShareOrigin();
+  const url = absoluteLink(props.code.link, origin);
   return (
     <div style={{ display: "grid", gap: theme.space(3), padding: theme.space(3), borderRadius: theme.radius.md, border: `${theme.line.border}px solid ${theme.color.border}`, background: theme.color.bg }}>
       {countdown.expired ? (
