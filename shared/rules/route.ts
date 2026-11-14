@@ -382,8 +382,7 @@ export function hexFileClasses<T extends PlacedToken>(shown: readonly T[], hidde
  * no hex with the holder's last stand or with those ahead of it, its start
  * where none is. The walk keeps one point per point of the holder's walk:
  * one that ends before the holder's last corner holds its end there to the
- * last (moveLeg.ts follow reads past a shorter walk by the creature's
- * place). `lead` is the holder as it stands where the walk starts and
+ * last (moveLeg.ts follow holds a shorter walk at its end). `lead` is the holder as it stands where the walk starts and
  * `points` its walk's points, its start first.
  *
  * With `byHex`, from op version 62 (LP40-HEXFILE-1, migrate.ts
