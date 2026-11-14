@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { overNotice } from "#shared/limits.ts";
+import { HIDDEN_EFFECTS_FULL, HIDDEN_ROW_REFUSED, IDS_TOO_FAST, overNotice, SEAT_FULL } from "#shared/limits.ts";
 import type { Viewer } from "#shared/model.ts";
 import type { ServerMessage } from "#shared/protocol.ts";
 import { DM, P1, room } from "#shared/testutil.ts";
 import { LocalServer } from "../dev/localServer.ts";
-import { createRoomStore } from "./store.ts";
+import { createRoomStore, refusalText } from "./store.ts";
 import { FakeClock, FakeOutbox } from "./testing.ts";
 
 type Snapshot = Extract<ServerMessage, { t: "snapshot" }>;
@@ -52,5 +52,17 @@ describe("the DM's notice of a room over its size limit (docs/design/design-v1-p
     const s = setup(P1);
     s.snapshot(5 * MiB);
     assert.deepEqual(s.shown(), []);
+  });
+});
+
+describe("the words of player limits in the toast (docs/design/design-v1-player-limits.md 15)", () => {
+  test("each seat's, the ids', and the DM's hidden conditions' words follow Not saved.", () => {
+    for (const words of Object.values(SEAT_FULL)) assert.equal(refusalText("quota", words), `Not saved. ${words}`);
+    assert.equal(refusalText("quota", IDS_TOO_FAST), `Not saved. ${IDS_TOO_FAST}`);
+    assert.equal(refusalText("quota", HIDDEN_EFFECTS_FULL), "Not saved. At most 32 hidden effects per creature.");
+  });
+
+  test("a player's row for their own hidden creature reads as the refusal it is", () => {
+    assert.equal(refusalText("forbidden", HIDDEN_ROW_REFUSED), HIDDEN_ROW_REFUSED);
   });
 });
