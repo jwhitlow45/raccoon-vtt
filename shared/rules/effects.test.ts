@@ -103,6 +103,16 @@ describe("the automatic Unconscious", () => {
     assert.ok(effectsFit(HOLDER, [], [{ id: ZERO_HP_UNCONSCIOUS_ID, key: "unconscious" }]).ok);
   });
 
+  test("a restore that brings back a hidden automatic Unconscious stores it under its converted id", () => {
+    const state = hero([]);
+    const back = { ...state.characters.c1!, actor: { ...state.characters.c1!.actor, effects: [{ id: ZERO_HP_UNCONSCIOUS_ID, key: "unconscious" as const, hiddenFromPlayers: true }] } };
+    const r = run(state, { t: "sys.restore", entries: [{ key: "character:c1", value: back }], from: "undo" });
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    assert.deepEqual(effectsOf(r.state).map((e) => e.id), [convertedEffectId(HOLDER, ZERO_HP_UNCONSCIOUS_ID)]);
+    const old = run(state, { t: "sys.restore", entries: [{ key: "character:c1", value: back }], from: "undo" }, DM, 60);
+    assert.ok(old.ok && effectsOf(old.state)[0]!.id === ZERO_HP_UNCONSCIOUS_ID, "an older op replays as stored");
+  });
+
   test("a converted id is 81 characters of a fixed form, the same each time, apart for each creature, and never version 7", () => {
     const id = convertedEffectId(HOLDER, ZERO_HP_UNCONSCIOUS_ID);
     assert.equal(id.length, 81);

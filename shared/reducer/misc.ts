@@ -1,11 +1,12 @@
 import { keys, parseKey, readEntity, revOf, type EntityKey, type ParsedKey } from "../keys.ts";
-import { meetsNumbers, oldSrdIdGuards, withOldSrdIds } from "../migrate.ts";
+import { meetsNumbers, oldSrdIdGuards, playerLimitsOps, withOldSrdIds } from "../migrate.ts";
 import { MOVE_PLAYERS_FIRST_BACK } from "../permissions.ts";
-import type { AreaTemplate, BuildChunk, CompanionBlock, Encounter, FogDraft, Handout, HandoutDoc, Pin, RoomState, Scene, Token, Trap } from "../model.ts";
+import type { AreaTemplate, BuildChunk, Character, CompanionBlock, Encounter, FogDraft, Handout, HandoutDoc, Pin, RoomState, Scene, Token, Trap } from "../model.ts";
 import type { OpOf, RestoreEntry } from "../protocol.ts";
 import { LIMITS } from "../limits.ts";
 import { allKeys, gridOfToken } from "../project.ts";
 import { holderOf, linkHolds } from "../rules/attach.ts";
+import { normalEffects } from "../rules/effects.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
 import { restoreRefusal, restoredHolds, sceneHolds } from "../rules/grid.ts";
 import { turnUnderWay } from "../rules/path.ts";
@@ -84,6 +85,21 @@ export function handoutDocDelete(tx: Tx, op: OpOf<"handoutDoc.delete">): void {
  */
 export const CHANGED_SINCE = "it was changed since";
 
+/** A restored creature's own conditions, normalized (rules/effects.ts normalEffects): the same object when nothing changes. */
+function withNormalEffects(key: string, value: Token | Character): Token | Character {
+  if ("sceneId" in value) {
+    if (!("inline" in value.actor)) return value;
+    const effects = normalEffects(key, value.actor.inline.effects);
+    return sameIds(effects, value.actor.inline.effects) ? value : { ...value, actor: { inline: { ...value.actor.inline, effects } } };
+  }
+  const effects = normalEffects(key, value.actor.effects);
+  return sameIds(effects, value.actor.effects) ? value : { ...value, actor: { ...value.actor, effects } };
+}
+
+function sameIds(a: readonly { id: string }[], b: readonly { id: string }[]): boolean {
+  return a.length === b.length && a.every((e, i) => e.id === b[i]!.id);
+}
+
 /**
  * An absolute restore (design 7.7). Every entry's guard is checked before
  * anything is written, so a restore applies entirely or not at all. A
@@ -133,6 +149,9 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
       scenesWritten.add(parsed.id);
     }
     if (marksFit && parsed?.kind === "token" && value !== null) value = keepNumbering(marksFit, value as Token, ownEntry(tx.state.tokens, parsed.id));
+    // A restore stores conditions as every writer does (rules/effects.ts), so none puts back a hidden or edited automatic
+    // Unconscious. From op version 61, and ops stored before replay as stored.
+    if (value !== null && (parsed?.kind === "token" || parsed?.kind === "character") && playerLimitsOps(tx.env.opVersion)) value = withNormalEffects(entry.key, value as Token | Character);
     tx.write(entry.key, value);
   }
   // A scene a restore takes away takes the party's explored layer with it, as bookkeeping (docs/design/design-v1-maps-vision.md
