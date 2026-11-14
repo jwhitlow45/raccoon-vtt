@@ -8,7 +8,7 @@ import type { Platform } from "../contract.ts";
 import { syncDir, syncFile } from "./durable.ts";
 import { rotateIfLarge } from "./logs.ts";
 import { loopbackPort } from "./ports.ts";
-import { isAlive, processProgram, processStamp, processStart } from "./processInfo.ts";
+import { bootTime, isAlive, processFacts, processStamp, type ProcessFacts } from "./processInfo.ts";
 
 /**
  * The bundled PostgreSQL (docs/design/design-v1-local-app.md 2, 6 and 8.1,
@@ -58,12 +58,17 @@ const CONF = [
   "",
 ].join("\n");
 
-/** How the cluster tells its postmaster from a process that reused its pid (processInfo.ts). Tests stand in for a stepped clock here. */
+/** How the cluster tells its postmaster from a process that reused its pid (processInfo.ts). Tests stand in for the system here. */
 export type ProcessLookup = {
-  start(pid: number): Promise<number | null>;
   stamp(pid: number): Promise<number | null>;
-  program(pid: number): Promise<{ exe: string | null; cwd: string | null; foreign: boolean }>;
+  facts(pid: number): Promise<ProcessFacts>;
+  bootTime(): Promise<number | null>;
+  /** This process's user, which a postmaster it may stop runs as too. Null on Windows. */
+  uid: number | null;
 };
+
+/** How far before this boot's start, by the wall clock, a postmaster.pid must be to count as from an earlier boot. */
+export const BOOT_MARGIN_MS = 60_000;
 
 export type ClusterOptions = {
   binDir: string;
@@ -80,10 +85,10 @@ export type ClusterOptions = {
 };
 
 /**
- * A postmaster.pid found at a start. `stale`: nothing of PostgreSQL's runs
- * as its pid, so the file can go. `running`: this folder's postmaster.
- * `uncertain`: something runs as its pid that may be this folder's
- * postmaster, so the file stays and the start stops.
+ * A postmaster.pid found at a start. `stale`: the evidence says nothing of
+ * this folder's runs as its pid, so the file can go. `running`: this
+ * folder's postmaster. `uncertain`: something runs as its pid that may be
+ * this folder's postmaster, so the file stays and the start stops.
  */
 export type Leftover = { kind: "none" } | { kind: "stale" } | { kind: "running"; pid: number } | { kind: "uncertain"; pid: number };
 
@@ -102,9 +107,10 @@ export class Cluster {
   constructor(opts: ClusterOptions) {
     this.opts = opts;
     this.proc = opts.proc ?? {
-      start: (pid) => processStart(pid, opts.platform),
       stamp: (pid) => processStamp(pid, opts.platform),
-      program: (pid) => processProgram(pid, opts.platform),
+      facts: (pid) => processFacts(pid, opts.platform),
+      bootTime: () => bootTime(opts.platform),
+      uid: process.getuid?.() ?? null,
     };
   }
 
@@ -195,13 +201,16 @@ export class Cluster {
 
   /**
    * A postmaster.pid left behind, and what runs as its pid. A reused pid is
-   * someone else's process and must never be stopped, and the file of a
+   * someone else's process and must never be signalled, and the file of a
    * postmaster still running must never go, or a second one could open the
-   * same folder. So the file is `stale` only when the pid is dead or plainly
-   * another program, and `running` only when the process is this folder's
-   * postmaster: on Linux its working folder is this one, elsewhere it is a
-   * postgres that started when the file says. A postgres that started at
-   * another time is `uncertain`: a clock stepped since then reads the same.
+   * same folder. So each answer needs evidence, in this order:
+   * - `running`: the program is postgres and it is this folder's: on Linux
+   *   its working folder is this one, elsewhere it started when the file says.
+   * - `stale`: the file is from before this boot, the program is known and
+   *   is not postgres, or it runs as another user.
+   * - `uncertain`: anything else, a system that refused to say included.
+   * Running comes first, so a clock stepped since the start never makes this
+   * folder's live postmaster look like one from an earlier boot.
    */
   async leftover(): Promise<Leftover> {
     let lines: string[];
@@ -214,15 +223,30 @@ export class Cluster {
     const pid = Number(lines[0]);
     const startedSec = Number(lines[2]);
     if (!isAlive(pid)) return { kind: "stale" };
-    const program = await this.proc.program(pid);
-    // A postmaster works in its data folder, which no other process does.
-    if (program.cwd !== null) return program.cwd === (await realpath(this.opts.pgData)) ? { kind: "running", pid } : { kind: "stale" };
-    // This user's postmaster is never another user's process.
-    if (program.foreign) return { kind: "stale" };
-    if (program.exe !== null && !/^postgres(\.exe)?$/i.test(basename(program.exe.replaceAll("\\", "/")))) return { kind: "stale" };
-    const start = await this.proc.start(pid);
-    // The file's time is the postmaster's own clock reading as it started, a moment after the system's.
-    if (start !== null && Number.isFinite(startedSec) && Math.abs(start / 1000 - startedSec) <= 5) return { kind: "running", pid };
+    let facts: ProcessFacts;
+    try {
+      facts = await this.proc.facts(pid);
+    } catch {
+      facts = { exe: null, cwd: null, uid: null, start: null };
+    }
+    const postgres = facts.exe !== null && /^postgres(\.exe)?$/i.test(basename(facts.exe.replaceAll("\\", "/")));
+    if (postgres) {
+      if (this.opts.platform === "linux") {
+        if (facts.cwd !== null && facts.cwd === (await realpath(this.opts.pgData))) return { kind: "running", pid };
+      } else if (facts.start !== null && Number.isFinite(startedSec) && Math.abs(facts.start / 1000 - startedSec) <= 5) {
+        // The file's time is the postmaster's own clock reading as it started, a moment after the system's.
+        return { kind: "running", pid };
+      }
+    }
+    let boot: number | null = null;
+    try {
+      boot = await this.proc.bootTime();
+    } catch {
+      // Unknown: no evidence either way.
+    }
+    if (boot !== null && Number.isFinite(startedSec) && startedSec * 1000 < boot - BOOT_MARGIN_MS) return { kind: "stale" };
+    if (facts.exe !== null && !postgres) return { kind: "stale" };
+    if (facts.uid !== null && this.proc.uid !== null && facts.uid !== this.proc.uid) return { kind: "stale" };
     return isAlive(pid) ? { kind: "uncertain", pid } : { kind: "stale" };
   }
 

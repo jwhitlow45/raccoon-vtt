@@ -12,7 +12,7 @@ import { dataIdentity } from "./dataDir.ts";
 import { lockLocation } from "./lock.ts";
 import { loopbackPort } from "./ports.ts";
 import { Cluster, DatabaseFailed, uncertainWords } from "./postgres.ts";
-import { isAlive, processProgram, processStamp, processStart } from "./processInfo.ts";
+import { bootTime, isAlive, processFacts, processStamp } from "./processInfo.ts";
 import { postgresDir, startTestCluster, type TestCluster } from "./testing/cluster.ts";
 import { killSupervisor, startSupervisor, type SupervisorRun } from "./testing/supervisorProcess.ts";
 
@@ -230,9 +230,13 @@ describe("the cluster", () => {
     const stepped = new Cluster({
       ...c.cluster.opts,
       proc: {
-        start: async (p) => ((await processStart(p, platform)) ?? 0) + 120_000,
         stamp: (p) => processStamp(p, platform),
-        program: async (p) => ({ ...(await processProgram(p, platform)), cwd: null }),
+        facts: async (p) => {
+          const facts = await processFacts(p, platform);
+          return { ...facts, cwd: null, start: (facts.start ?? 0) + 120_000 };
+        },
+        bootTime: () => bootTime(platform),
+        uid: process.getuid?.() ?? null,
       },
     });
     const found = await stepped.leftover();
