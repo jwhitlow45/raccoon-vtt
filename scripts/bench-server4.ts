@@ -29,6 +29,7 @@
  *   node scripts/bench-server4.ts --ask   (the builder's ask rows alone, whole party and per player)
  *   node scripts/bench-server4.ts --numbers   (creature numbers' row BN1 alone)
  *   node scripts/bench-server4.ts --stamps   (the walk bringing stamps into view alone)
+ *   node scripts/bench-server4.ts --far   (the far count of tokens' walk and first snapshots alone)
  *   Add --revision <full commit id> to tie the output to the measured checkout.
  *
  * Then the bright and dark scenes again per player
@@ -54,6 +55,7 @@
 import { chunkKey, holderChunkKey, holderTileKey, tileKey, wallChunk } from "../shared/keys.ts";
 import { SNAPSHOT_VERSION } from "../shared/migrate.ts";
 import { DEFAULT_SETTINGS, FOG_SUBCELLS, type BuildChunk, type EdgeFeature, type FreeWall, type Member, type MemoryChunk, type RoomState, type TerrainId, type Token } from "../shared/model.ts";
+import { FAR } from "../shared/limits.ts";
 import { MAX_ASK_OPS, type Op, type ServerMessage } from "../shared/protocol.ts";
 import { uuidv7 } from "../shared/ids.ts";
 import { encodeTile, fullTileBits, TILE_SUB } from "../shared/rules/fog.ts";
@@ -637,6 +639,39 @@ async function runStampWalk(rows: Row[]): Promise<void> {
 }
 
 /*
+ * The far line's room (docs/design/design-v1-player-limits.md 8): the dark
+ * scene at the far count of tokens, 2,150, the DM's creatures beside the
+ * party's sources and every other one hidden, so each op's limits step
+ * counts every seat across them and each fan-out projects them all. A
+ * source walks 40 steps east, as on the stamp walk, and the table's first
+ * snapshots are timed as it sits down.
+ */
+async function runFar(rows: Row[]): Promise<void> {
+  clearVisionCache();
+  const room = benchRoom("dark", 5);
+  let seed = 23;
+  const rand = () => ((seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 4294967296);
+  for (let k = 0; Object.keys(room.tokens).length < FAR.tokens; k++) {
+    const id = `far${String(k).padStart(4, "0")}`;
+    room.tokens[id] = testToken(id, { sceneId: SCENE, name: "Goblin", x: 5 + Math.floor(rand() * 190), y: 5 + Math.floor(rand() * 190), visibility: k % 2 === 0 ? "dm" : "all", actor: { inline: testActor() } });
+  }
+  const times: SitDownTimes = { load: [], first: [], later: [] };
+  const table = await sitDown(room, times);
+  checkMode(table.actor.committed.state, false);
+  const steps: Timing[] = [];
+  for (let k = 0; k < 40; k++) {
+    const t = table.actor.committed.state.tokens.pc11!;
+    steps.push(await send(table, table.dm, { t: "token.move", tokenId: t.id, x: t.x + 1, y: t.y, teleport: "wall" }));
+  }
+  const where = `dark scene, whole party, ${Object.keys(table.actor.committed.state.tokens).length} tokens`;
+  rows.push({ row: `A walk of 40 steps at the far count of tokens, ${where}`, budget: 25, ms: stats(steps.map((s) => s.total)), covers: "the DM's token.move one cell east, past any wall, with the limits step's seats and far counts over every token, median and max over the 40 steps" });
+  rows.push({ row: `Fan-out for each step of that walk, ${where}`, budget: 10, ms: stats(steps.map((s) => s.fanout)), covers: "commit to the last frame, 7 sockets" });
+  rows.push({ row: `The first snapshot at the far count of tokens, ${where}`, budget: 250, ms: stats(times.first), covers: "the DM's snapshot after a load: walls derived and sight computed from nothing" });
+  rows.push({ row: `Each player's first snapshot at the far count of tokens, ${where}`, budget: 250, ms: stats(times.later), covers: "a player's snapshot with sight" });
+  await table.actor.shutdown({ code: 1012, snapshot: false });
+}
+
+/*
  * A routed walk across three areas that remind on entering, during the
  * walker's turn (docs/design/design-v1-per-player-vision.md 8.1): the reminders
  * judge who saw each crossing at its moment along the walk, which on a
@@ -935,6 +970,7 @@ export async function runServerBench(): Promise<Row[]> {
     await runFogOff("dark", rows);
     await runFreeLight(5, true, rows);
     rows.push(...(await runDiscoveryBench()));
+    await runFar(rows);
   } finally {
     untime();
   }
@@ -1126,6 +1162,7 @@ if (argv[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts
       await runAsk(true, rows);
     }
     if (argv.includes("--stamps")) await runStampWalk(rows);
-    console.log(formatServerBench(argv.includes("--ask") || argv.includes("--stamps") ? rows : argv.includes("--discovery") ? await runDiscoveryBench() : await runServerBench(), argv.includes("--server"), revision));
+    if (argv.includes("--far")) await runFar(rows);
+    console.log(formatServerBench(argv.includes("--ask") || argv.includes("--stamps") || argv.includes("--far") ? rows : argv.includes("--discovery") ? await runDiscoveryBench() : await runServerBench(), argv.includes("--server"), revision));
   }
 }
