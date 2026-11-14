@@ -208,7 +208,11 @@ const run = {
     wrenChar: uuidv7(),
     wren: uuidv7(),
   },
-  /** The combat screens' fight: its rows, Thorn's first. The second icon pass's fight takes the goblin and Wren too. */
+  /**
+   * The combat screens' fight: its rows, Thorn's first. The second icon pass's fight takes the goblin and Wren too.
+   * Each start makes its rows under new ids, as each pass makes the wolf, the dragons and the troll of `ids` again:
+   * a room takes an id once, so one whose row or token was deleted is never taken again.
+   */
   fight: { thorn: uuidv7(), dragon: uuidv7(), troll: uuidv7(), goblin: uuidv7(), wren: uuidv7() },
   traps: { pit: uuidv7(), needle: uuidv7(), door: uuidv7(), wire: uuidv7() },
   /** The room's DM link, which newDmSession signs in by. */
@@ -2078,6 +2082,7 @@ async function rollMenuScreen(sweep: Sweep, page: Page, screen: string, button: 
  * these screens only, so no other screen meets it.
  */
 async function patDiceScreens(sweep: Sweep, page: Page): Promise<void> {
+  run.ids.wolf = uuidv7();
   await ops.send({ t: "token.create", token: { id: run.ids.wolf, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Wolf", x: 2, y: 2, disposition: "ally", ownerIds: [run.patId], companion: { of: run.ids.thornChar, turn: "shared" }, actor: { inline: actor({ srdId: "wolf" }) } } });
   await waitFor("the wolf on Pat's page", () => (dmSocket.state?.tokens[run.ids.wolf] ? true : null));
   try {
@@ -2138,6 +2143,7 @@ async function patDiceScreens(sweep: Sweep, page: Page): Promise<void> {
  * reads the number the table gives it (dmName).
  */
 async function dmDiceScreens(sweep: Sweep, page: Page): Promise<void> {
+  run.ids.dragon = uuidv7();
   await ops.send({ t: "token.create", token: { id: run.ids.dragon, sceneId: run.sceneId, size: "huge", visibility: "all", kind: "monster", name: "Adult Black Dragon", ...DRAGON_AT, disposition: "hostile", actor: { inline: actor({ srdId: "adult-black-dragon" }) } } });
   await waitFor("the dragon on the DM's page", () => (dmSocket.state?.tokens[run.ids.dragon] ? true : null));
   try {
@@ -2262,6 +2268,9 @@ async function combatStart(): Promise<void> {
   if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
   await ops.send({ t: "room.update", settings: { monstersDieAtZero: false } });
   const monster = (id: string, extra: Record<string, unknown>) => ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, visibility: "all", kind: "monster", disposition: "hostile", ...extra } });
+  run.ids.redDragon = uuidv7();
+  run.ids.troll = uuidv7();
+  Object.assign(run.fight, { thorn: uuidv7(), dragon: uuidv7(), troll: uuidv7() });
   await monster(run.ids.redDragon, { name: RED_DRAGON, size: "huge", ...DRAGON_AT, actor: { inline: srdActor("adult-red-dragon") } });
   await monster(run.ids.troll, { name: "Troll", size: "large", ...TROLL_AT, actor: { inline: srdActor("troll", 10) } });
   await ops.send({ t: "actor.hp", target: { tokenId: run.ids.troll }, change: { kind: "damage", amount: 10, types: ["fire"] } });
@@ -3060,6 +3069,7 @@ async function ic2Start(): Promise<void> {
   await ops.send({ t: "token.update", tokenId: run.ids.goblin, patch: { visibility: "dm", locked: true, nameHidden: true } });
   // The goblin's turn comes at every size for the alert lines, and must leave it hidden.
   await ops.send({ t: "room.update", settings: { turnTimerSec: 0, revealHiddenOnTurn: false } });
+  Object.assign(run.fight, { thorn: uuidv7(), goblin: uuidv7(), wren: uuidv7() });
   await ops.send({
     t: "encounter.start",
     entries: [
@@ -8298,12 +8308,14 @@ function floorLinkBuildTests(): void {
         if (page.url().startsWith(server.origin)) await page.evaluate(() => localStorage.removeItem("rvtt.sceneSettingsFolds"));
         await openAt(page, at.size, at.scale);
         await waitFor("the DM's snapshot", () => dmSocket.state);
+        // The stairs are put and removed at each size, so each size's pair takes new ids.
+        const stairs = uuidv7();
         try {
           await viewScene(await openDmPanel(page, "Scenes"), tower);
           await closeSheets(page);
           await escapeAll(page);
           // Put while the page is open, so it reads the pair as an op's event and never depends on what a snapshot holds.
-          await ops.send({ t: "floorLink.put", link: { id: "flrk-a", pairId: "flrk-b", sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
+          await ops.send({ t: "floorLink.put", link: { id: stairs, pairId: uuidv7(), sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
 
           // The builder's row in Between floors, and each choice open.
           await pickTool(page, "Map builder");
@@ -8362,7 +8374,7 @@ function floorLinkBuildTests(): void {
           await root("page").getByRole("button", { name: "Back to Floors" }).click();
           await closeSheets(page);
         } finally {
-          await ops.send({ t: "floorLink.delete", linkId: "flrk-a" }).catch(() => {});
+          await ops.send({ t: "floorLink.delete", linkId: stairs }).catch(() => {});
           await escapeAll(page);
         }
         console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
@@ -8426,7 +8438,7 @@ function floorMarkerTests(): void {
     await ops.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor" } } });
     const lines: string[] = [];
     try {
-      await ops.send({ t: "floorLink.put", link: { id: "fu53-c", pairId: "fu53-d", sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
+      await ops.send({ t: "floorLink.put", link: { id: uuidv7(), pairId: uuidv7(), sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
       await ops.send({ t: "token.create", token: { id: goblin, sceneId: tower, kind: "monster", name: "Goblin Warrior", size: "medium", x: 6, y: 5, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
       if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
       await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: goblin, value: 20 }, { id: uuidv7(), tokenId: run.ids.thorn, value: 10 }] });
@@ -8495,7 +8507,7 @@ function floorMarkerIsoTests(): void {
       await page.getByRole("button", { name: `View: ${name}` }).waitFor();
     };
     try {
-      await ops.send({ t: "floorLink.put", link: { id: "b53-c", pairId: "b53-d", sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
+      await ops.send({ t: "floorLink.put", link: { id: uuidv7(), pairId: uuidv7(), sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
       await ops.send({ t: "token.create", token: { id: goblin, sceneId: tower, kind: "monster", name: "Goblin Warrior", size: "medium", x: 6, y: 3, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
       // The step before restarts the room's fight, which the DM's copy may not show yet.
       await ops.send({ t: "encounter.end" }).catch(() => {});
@@ -8553,7 +8565,7 @@ function floorPillTests(): void {
     await ops.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor" } } });
     const lines: string[] = [];
     try {
-      await ops.send({ t: "floorLink.put", link: { id: "fu53-a", pairId: "fu53-b", sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
+      await ops.send({ t: "floorLink.put", link: { id: uuidv7(), pairId: uuidv7(), sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
       await ops.send({ t: "token.create", token: { id: warrior, sceneId: tower, kind: "monster", name: "Goblin Warrior", size: "medium", x: 6, y: 6, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
       for (const at of [...FU30_AT, { size: IC2_DESK, scale: 1 }]) {
         const page = await dmPageFor(at.size);
@@ -11185,11 +11197,12 @@ export function qolBarTests(): void {
   });
 }
 
-/** Two of the SRD's Goblin Warriors beside Thorn, for the turn card's attacks, Apply to, All of a kind and the group save (audit Q1, Q2, Q7, Q8). They read the numbers the table gives them (dmName). */
-const QOL_WARRIORS = [
+type QolWarrior = { id: string; readonly at: { readonly x: number; readonly y: number } };
+/** Two of the SRD's Goblin Warriors beside Thorn, for the turn card's attacks, Apply to, All of a kind and the group save (audit Q1, Q2, Q7, Q8). They read the numbers the table gives them (dmName). Each test that puts them on the map gives them new ids first, since a room takes an id once. */
+const QOL_WARRIORS: readonly [QolWarrior, QolWarrior] = [
   { id: uuidv7(), at: { x: 8, y: 6 } },
   { id: uuidv7(), at: { x: 9, y: 5 } },
-] as const;
+];
 
 /** Three handout pictures for Handouts' Recent, uploaded once for the run: Recent keeps one entry for each picture. */
 let qolHandouts: [string, string, string] | null = null;
@@ -11507,6 +11520,7 @@ export function fu52Tests(): void {
     const lines: string[] = [];
     await freshDm();
     const warrior = QOL_WARRIORS[0];
+    warrior.id = uuidv7();
     await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { level: 5, stats: FU52_WEAPONS } });
     await ops.send({ t: "token.create", token: { id: warrior.id, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", size: "medium", ...warrior.at, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
     await ops.send({ t: "room.update", settings: { playersApplyDamage: true } });
@@ -11644,6 +11658,7 @@ export function qolPanelTests(): void {
     const lines: string[] = [];
     try {
       if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+      for (const w of QOL_WARRIORS) w.id = uuidv7();
       for (const w of QOL_WARRIORS) await ops.send({ t: "token.create", token: { id: w.id, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", size: "medium", ...w.at, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
       await ops.send({ t: "encounter.start", entries: [{ id: fightId, tokenId: QOL_WARRIORS[0].id, value: 20 }, { id: uuidv7(), tokenId: run.ids.thorn, value: 10 }, { id: uuidv7(), tokenId: QOL_WARRIORS[1].id, value: 5 }] });
       await ops.send({ t: "encounter.next" });
