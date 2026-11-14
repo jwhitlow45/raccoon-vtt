@@ -41,6 +41,9 @@ export function idRow(id: string, memberId: string, acceptedAt: number, time: nu
   return { id, memberId, acceptedAt, until: Math.max(time, acceptedAt) + ID_HELD_MS, askUntil: acceptedAt + ID_TIME.askMs };
 }
 
+/** How often the gate forgets members' ids past the budget's window, beside its own reads of a member's budget. */
+const BUDGET_SWEEP_MS = 60_000;
+
 /** Who brings the ids: a member's budget is by their role, and the server has none. */
 export type IdSender = { memberId: string; role: "player" | "dm" } | "server";
 
@@ -58,10 +61,19 @@ export class IdGate {
   /** The same rows in the order they came, which expiry walks from the front. */
   #order: IdRow[] = [];
   #start = 0;
+  /**
+   * Committed rows held past what an id the clock admits is held for, by
+   * id, with `until`: an id dated far ahead, as a hash id of an old room's
+   * state can be, seeded at its first load. Kept out of `#order`, where
+   * one would hold back every row after it for as long.
+   */
+  #far = new Map<string, number>();
+  #farNext = Infinity;
   /** Rows of ops staged in batches not yet durable. */
   #staged = new Map<string, IdRow>();
   /** When each member's rows of the last window were taken, held and staged, oldest first. */
   #byMember = new Map<string, number[]>();
+  #sweptAt = -Infinity;
   /** The cutover, or null where it could not be read, as with a test's stand-in pool. */
   readonly since: number | null;
 
@@ -73,8 +85,7 @@ export class IdGate {
   /** The room's gate rows as stored, at load. */
   load(rows: readonly IdRow[]): void {
     for (const row of [...rows].sort((a, b) => a.acceptedAt - b.acceptedAt)) {
-      this.#held.set(row.id, row.until);
-      this.#order.push(row);
+      this.#hold(row);
       this.#count(row);
     }
   }
@@ -82,7 +93,7 @@ export class IdGate {
   /** Whether step 4 reads this id as taken: a staged row, or a committed one before its `until`. */
   taken(id: string): boolean {
     this.#expire();
-    return this.#staged.has(id) || (this.#held.get(id) ?? 0) > this.#now();
+    return this.#staged.has(id) || Math.max(this.#held.get(id) ?? 0, this.#far.get(id) ?? 0) > this.#now();
   }
 
   /**
@@ -123,8 +134,7 @@ export class IdGate {
     for (const row of rows) {
       if (this.#staged.get(row.id) !== row) continue;
       this.#staged.delete(row.id);
-      this.#held.set(row.id, row.until);
-      this.#order.push(row);
+      this.#hold(row);
     }
   }
 
@@ -156,6 +166,26 @@ export class IdGate {
     return this.#staged.size;
   }
 
+  /** Committed rows held in memory, for the tests. */
+  get heldCount(): number {
+    return this.#held.size + this.#far.size;
+  }
+
+  /** Members whose ids of the last window the budget still keeps, for the tests. */
+  get budgetMembers(): number {
+    return this.#byMember.size;
+  }
+
+  #hold(row: IdRow): void {
+    if (row.until - row.acceptedAt <= ID_HELD_MS + ID_TIME.aheadMs) {
+      this.#held.set(row.id, row.until);
+      this.#order.push(row);
+      return;
+    }
+    this.#far.set(row.id, Math.max(row.until, this.#far.get(row.id) ?? 0));
+    this.#farNext = Math.min(this.#farNext, row.until);
+  }
+
   #count(row: IdRow): void {
     if (row.memberId === SERVER_MEMBER) return;
     let times = this.#byMember.get(row.memberId);
@@ -168,6 +198,9 @@ export class IdGate {
    * Rows past `until` leave memory in the order they came. One a few
    * seconds later than the row after it holds that one back as long, which
    * changes no answer: step 2 refuses an id before step 4 reads its row.
+   * A row held far longer waits apart (`#far`), and a member's budget
+   * forgets ids past its window, so neither keeps memory for a member who
+   * never sends again.
    */
   #expire(): void {
     const now = this.#now();
@@ -180,6 +213,17 @@ export class IdGate {
     if (this.#start > 1024 && this.#start * 2 > this.#order.length) {
       this.#order = this.#order.slice(this.#start);
       this.#start = 0;
+    }
+    if (this.#farNext <= now) {
+      this.#farNext = Infinity;
+      for (const [id, until] of this.#far) {
+        if (until <= now) this.#far.delete(id);
+        else this.#farNext = Math.min(this.#farNext, until);
+      }
+    }
+    if (now - this.#sweptAt >= BUDGET_SWEEP_MS) {
+      this.#sweptAt = now;
+      for (const memberId of [...this.#byMember.keys()]) this.spent(memberId);
     }
   }
 }

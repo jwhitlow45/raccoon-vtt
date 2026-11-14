@@ -92,6 +92,34 @@ describe("the id gate's rows", () => {
     assert.equal(ID_HELD_MS, ID_TIME.behindMs + ID_TIME.aheadMs);
   });
 
+  test("a row dated far ahead holds its id until its own time, and holds no later row in memory past its time", () => {
+    const c = clock();
+    const gate = new IdGate(c.now);
+    // A hash id of version 7 shape, thousands of years ahead, as an old room's state can hold, seeded at the first load.
+    const far = "ffffffff-ffff-7fff-bfff-ffffffffffff";
+    gate.load(seedRows({ tokens: { [far]: {} } }, T0));
+    for (let i = 0; i < 100; i++) take(gate, [uuidv7(T0 + i)], "p1", T0 + i);
+    assert.equal(gate.heldCount, 101);
+    c.add(ID_HELD_MS + 1_000);
+    assert.equal(gate.taken(far), true, "the far id stays taken");
+    assert.equal(gate.heldCount, 1, "the rows past their time leave memory");
+    c.add(1e15);
+    assert.equal(gate.taken(far), false, "past its own time");
+    assert.equal(gate.heldCount, 0);
+  });
+
+  test("members who never send again leave the budget's memory once their window has passed", () => {
+    const c = clock();
+    const gate = new IdGate(c.now);
+    for (let m = 0; m < 5; m++) take(gate, [uuidv7(T0)], `gone${m}`, T0);
+    assert.equal(gate.taken(uuidv7(T0)), false);
+    assert.equal(gate.budgetMembers, 5);
+    c.add(ID_BUDGET.windowMs + MINUTE);
+    take(gate, [uuidv7(c.now())], "p1", c.now());
+    assert.equal(gate.taken(uuidv7(c.now())), false);
+    assert.equal(gate.budgetMembers, 1, "only the member who sent in the window");
+  });
+
   test("a batch that never commits frees its ids and gives its budget back", () => {
     const c = clock();
     const gate = new IdGate(c.now);
