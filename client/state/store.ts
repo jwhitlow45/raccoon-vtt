@@ -11,6 +11,7 @@ import { ID_RETRY_FAILED, overNotice } from "#shared/limits.ts";
 import { endSentence } from "#shared/logText.ts";
 import type { InitEntry, LogEntry, RoomState, SceneId, Viewer } from "#shared/model.ts";
 import { mainFloorId } from "#shared/rules/floors.ts";
+import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
 import { applyChanges, projectLogEntry, type ProjectedState } from "#shared/project.ts";
 import {
   clientOpSchema,
@@ -1191,6 +1192,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       pushToast("Only a DM can declare a grouped setup change.");
       return null;
     }
+    // Hiding or editing the automatic Unconscious makes it an ordinary condition under a fresh id, which the room asks of
+    // the device (docs/design/design-v1-player-limits.md 6.1). One rule here covers every control that edits a condition.
+    if (op.t === "actor.effect.update" && op.effectId === ZERO_HP_UNCONSCIOUS_ID && op.as === undefined) op = { ...op, as: uuidv7(serverNow()) };
     const parsed = op.t === "undo" || op.t === "redo" ? historyCommandSchema.safeParse(op) : clientOpSchema.safeParse(op);
     if (!parsed.success) {
       console.error("raccoon: refusing to send a malformed op", op, parsed.error);

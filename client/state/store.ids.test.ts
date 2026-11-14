@@ -4,7 +4,8 @@ import { ID_TIME_REFUSED, idTime } from "#shared/ids.ts";
 import { ID_RETRY_FAILED } from "#shared/limits.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import type { ClientMessage, ClientOp, ServerMessage } from "#shared/protocol.ts";
-import { DM, room, token } from "#shared/testutil.ts";
+import { actor, DM, room, token } from "#shared/testutil.ts";
+import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
 import { LocalServer } from "../dev/localServer.ts";
 import { createRoomActions } from "./actions.ts";
 import { CLOCK_WAIT_MS, createRoomStore, IDS_AGAIN_MS, IDS_SETTLE_MS, type RoomStore } from "./store.ts";
@@ -316,5 +317,18 @@ describe("a create refused for its ids' time goes once more (3.4)", () => {
     assert.equal(heard.heard[0]?.answer, "refused");
     assert.deepEqual(s.sentOps(), []);
     assert.deepEqual(s.state().toasts.map((t) => t.text), ["Not saved. You can have 33 tokens of your own on this map. Remove a companion first."]);
+  });
+});
+
+describe("the automatic Unconscious, hidden or edited, goes on under a fresh id (6.1)", () => {
+  test("an edit of it carries a new id dated by the room's clock, and an edit of any other condition carries none", () => {
+    const effects = [{ id: ZERO_HP_UNCONSCIOUS_ID, key: "unconscious" as const }, { id: "bless-1", key: "blessed" as const }];
+    const s = setup(room({ tokens: { g1: token("g1", { actor: { inline: actor({ hp: { cur: 0, max: 7, temp: 0 }, effects }) } }) } }));
+    s.connect();
+    s.room.dispatch({ t: "actor.effect.update", target: { tokenId: "g1" }, effectId: ZERO_HP_UNCONSCIOUS_ID, patch: { hiddenFromPlayers: true } });
+    s.room.dispatch({ t: "actor.effect.update", target: { tokenId: "g1" }, effectId: "bless-1", patch: { hiddenFromPlayers: true } });
+    const [edit, other] = s.sentOps().map((m) => m.op as Extract<ClientOp, { t: "actor.effect.update" }>);
+    assert.equal(idTime(edit!.as ?? ""), T0);
+    assert.equal(other!.as, undefined);
   });
 });
