@@ -158,6 +158,14 @@ describe("squares: a rider dragged out of a squeezed mount lands under the finge
     assert.deepEqual([at(after, "bree"), at(after, "gob")], [[6, 4], [5, 4]]);
   });
 
+  test("a hostile orc standing in the row's mouth: onto 5, 5 the stand that seats her there needs a way the orc closes, so the drop stops and names the orc, where the top-left stand's way squeezed past it (D-261113-224, design 4.3)", () => {
+    const s = keep({ x: 10, y: 4 }, { x: 9, y: 4 });
+    s.tokens.orc = token("orc", { x: 7, y: 4, name: "Orc", kind: "monster", disposition: "hostile", actor: { inline: actor() } });
+    const { plan, after } = dropBree(s, { x: 5.5, y: 5.5 }, SQUARE_LIFTS);
+    assert.equal(sent(plan).note, "Orc is in the way.");
+    assert.notDeepEqual(at(after, "bree"), [5, 5], "held short of the room");
+  });
+
   test("a flying warhorse, Bree and the goblin she drags 5 ft up, a rise 2 ft high on 6, 5: onto 5, 5 she lands there, the goblin over the rise at 5 ft (review LP40FIX-SOL-01)", () => {
     const s = keep({ x: 9, y: 4 }, { x: 10, y: 4 });
     heights(s, { x: 6, y: 5, w: 1, h: 1 }, 2);
@@ -235,12 +243,16 @@ for (const [name, g] of [
       assert.equal(after.tokens.gob!.attached?.to, "bree");
     });
 
-    test("the walking ruler from Bree reads the landing the drag makes", () => {
-      const goal = at(5, 5);
-      const m = measureWalk({ view: keep(9, 10), sceneId: "s1", stops: [{ x: 0, y: 0, tokenId: "bree" }, hexCenter(g, goal)], viewer: { role: "player" }, everything: false })!;
-      const leg = m.legs[0]!;
-      assert.equal(leg.none, false);
-      assert.equal(hexKey(occupiedHexes(g, { size: "medium", ...leg.to })[0]!), hexKey(goal));
+    test("the walking ruler from Bree reads the landing the drag makes, from the corridor's middle and from its end", () => {
+      for (const [along, goblin, goal] of [[9, 10, at(5, 5)], [12, 11, at(14, 5)]] as const) {
+        const s = keep(along, goblin);
+        const { after } = dropBree(s, hexCenter(g, goal), []);
+        const m = measureWalk({ view: s, sceneId: "s1", stops: [{ x: 0, y: 0, tokenId: "bree" }, hexCenter(g, goal)], viewer: { role: "player" }, everything: false })!;
+        const leg = m.legs[0]!;
+        assert.equal(leg.none, false);
+        assert.equal(hexKey(occupiedHexes(g, { size: "medium", ...leg.to })[0]!), hexOf(after, "bree")[0], `to ${hexKey(goal)}: the leg ends where the drag lands her`);
+        assert.equal(hexOf(after, "bree")[0], hexKey(goal));
+      }
     });
   });
 }
