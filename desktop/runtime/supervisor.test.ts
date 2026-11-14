@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CRASH_RESTART_MS, START_PARTS, type StartPart } from "./supervisor.ts";
+import { BEFORE, LIVE } from "./restore.ts";
 import { BUILD, Instance, World } from "./testing/fakeWorld.ts";
 
 /**
@@ -319,7 +320,18 @@ test("the log names each status and each part of a start as it begins", async ()
   assert.deepEqual(order, [...order].sort((a, b) => a - b));
 });
 
-test("a part of a start that never ends stops the start with its words at its bound, and Try again starts afresh", async () => {
+/** A world whose start goes as far as `call`, which answers `lateMs` past its part's bound. */
+function late(call: string, part: StartPart, lateMs = 30_000): { world: World; inst: Instance } {
+  const world = new World();
+  world.seed();
+  world.settings = { ...world.settings, port: 3170 };
+  world.delays.set(call, [START_PARTS[part].ms + lateMs]);
+  const inst = new Instance(world);
+  void inst.sup.start();
+  return { world, inst };
+}
+
+test("a part past its bound shows stalled while the start keeps it, refuses Try again, and the start goes on when the part answers late", async () => {
   const cases: [string, StartPart][] = [
     ["lock.acquire", "lock"],
     ["network.firewallRule", "firewall"],
@@ -333,38 +345,160 @@ test("a part of a start that never ends stops the start with its words at its bo
     ["db.writeStamp", "stamp"],
   ];
   for (const [call, part] of cases) {
-    const world = new World();
-    world.seed();
-    world.settings = { ...world.settings, port: 3170 };
-    world.hangs.add(call);
-    const inst = new Instance(world);
-    void inst.sup.start();
+    const { world, inst } = late(call, part);
     const { words, ms } = START_PARTS[part];
     await world.clock.advance(ms - 1_000);
-    assert.notEqual(inst.latest()?.state, "error", `${call}: stopped before its bound`);
+    assert.notEqual(inst.latest()?.state, "error", `${call}: stalled before its bound`);
     await world.clock.advance(2_000);
     assert.deepEqual(inst.latest()?.error, { kind: "stalled", what: words, seconds: ms / 1000 }, call);
-    assert.ok(world.logs.includes(`${words} did not finish in ${ms / 1000} s, so the start stops`), call);
-    world.hangs.clear();
-    assert.equal((await answer(world, inst, { type: "retry" })).ok, true, call);
-    await run(world, 5_000);
-    assert.equal(inst.latest()?.state, "running", `${call}: Try again after the stall`);
+    const retry = await answer(world, inst, { type: "retry" }, 100);
+    assert.deepEqual(retry, { ok: false, failure: { error: "busy" } }, `${call}: Try again waits for the part`);
+    await run(world, 30_000);
+    assert.equal(inst.latest()?.state, "running", `${call}: the start goes on once the part answers`);
+    assert.equal(world.pg.epoch, 1, `${call}: PostgreSQL started once`);
     assert.equal(world.serving().length, 1, call);
+    assert.ok(world.logs.includes(`${words} ended after all`), call);
     assert.deepEqual(world.violations, [], call);
   }
 });
 
-test("a stop asked for while a part of the start hangs answers once the part's bound ends it", async () => {
+test("Quit while a part is past its bound ends what can end early, waits for the rest, and lets the lock go only after", async () => {
+  // pg_ctl and initdb end early: nothing they would have done is done after the stop.
+  for (const [call, part, seed] of [
+    ["pg.start", "startDatabase", true],
+    ["pg.init", "initdb", false],
+  ] as const) {
+    const world = new World();
+    if (seed) world.seed();
+    world.delays.set(call, [START_PARTS[part].ms + 300_000]);
+    const inst = new Instance(world);
+    void inst.sup.start();
+    await world.clock.advance(START_PARTS[part].ms + 1_000);
+    assert.equal(inst.latest()?.error?.kind, "stalled", call);
+    const stalledAt = inst.statuses.length;
+    assert.equal((await answer(world, inst, { type: "stop" }, 5_000)).ok, true, `${call}: Quit answers without waiting out the part`);
+    assert.equal(inst.latest()?.state, "stopped", call);
+    assert.ok(!inst.statuses.slice(stalledAt).some((s) => s.error !== null && s.error.kind !== "stalled"), `${call}: a start ended by Quit reports no error`);
+    assert.equal(world.lockOwner, null, call);
+    await world.clock.advance(400_000);
+    assert.equal(world.pg.running, false, `${call}: nothing starts after the stop`);
+    assert.equal(world.pg.inited, seed, `${call}: no initdb finished after the stop`);
+    assert.deepEqual(world.violations, [], call);
+  }
+
+  // Opening the database can't end early, so Quit waits for it, keeps the lock meanwhile, and starts no part after it.
+  {
+    const { world, inst } = late("db.open", "openDatabase", 200_000);
+    await world.clock.advance(START_PARTS.openDatabase.ms + 1_000);
+    assert.equal(inst.latest()?.error?.kind, "stalled");
+    const id = inst.issue({ type: "stop" });
+    await world.clock.advance(100_000);
+    assert.equal(inst.answers.has(id), false, "Quit waits for the open");
+    assert.equal(world.lockOwner, inst, "and keeps the lock meanwhile");
+    await run(world, 120_000);
+    assert.equal(inst.answers.get(id)?.[0]?.ok, true);
+    assert.equal(inst.latest()?.state, "stopped");
+    assert.equal(world.lockOwner, null);
+    assert.equal(world.pg.running, false);
+    assert.ok(!world.logs.includes(`start: ${START_PARTS.backups.words}`), "no part begins once Quit is asked");
+    assert.deepEqual(world.violations, []);
+  }
+
+  // The stamp is the last part: once it ends, the server is not started for a Quit already asked.
+  {
+    const { world, inst } = late("db.writeStamp", "stamp", 200_000);
+    await world.clock.advance(START_PARTS.stamp.ms + 1_000);
+    const id = inst.issue({ type: "stop" });
+    await run(world, 220_000);
+    assert.equal(inst.answers.get(id)?.[0]?.ok, true);
+    assert.equal(world.serverStarts.length, 0, "no app server started after Quit");
+    assert.equal(world.lockOwner, null);
+    assert.deepEqual(world.violations, []);
+  }
+});
+
+test("a start that fails after PostgreSQL launched, then Quit, leaves no PostgreSQL running", async () => {
   const world = new World();
   world.seed();
-  world.hangs.add("db.open");
-  const inst = new Instance(world);
-  void inst.sup.start();
-  await world.clock.advance(1_000);
-  const id = inst.issue({ type: "stop" });
-  await world.clock.advance(START_PARTS.openDatabase.ms + 1_000);
-  assert.equal(inst.answers.get(id)?.[0]?.ok, true);
-  assert.equal(inst.latest()?.state, "stopped");
+  world.startFailsAfterLaunch = true;
+  const inst = await started(world);
+  assert.equal(inst.latest()?.error?.kind, "databaseFailed");
+  assert.equal(world.pg.running, true, "the launched postmaster outlived the failed start");
+  assert.equal((await answer(world, inst, { type: "stop" })).ok, true);
   assert.equal(world.pg.running, false);
   assert.equal(world.lockOwner, null);
+});
+
+test("a restore finished at start that keeps flushing never shows stalled, however long it takes, and says how far it is", async () => {
+  const world = new World();
+  world.seed();
+  const name = world.backupName();
+  const live = world.live();
+  world.backups.push({ name, record: { started: "2026-11-01T04:00:00.000Z", finished: "2026-11-01T04:00:05.000Z", kind: "daily", dataApp: BUILD.app, snapshotVersion: BUILD.snapshotVersion, opVersion: BUILD.opVersion, pgMajor: 17, dumpBytes: 100, dbBytes: 1000, images: 0 } });
+  const id = "a".repeat(32);
+  live.tag = { kind: "restored", id };
+  world.journal = { id, backup: name, state: "finishing" };
+  // 8,000 images at 100 ms a flush: 800 s, past the 600 s a fixed bound once gave the whole part.
+  world.images = Array.from({ length: 8_000 }, (_, i) => `token/${String(i).padStart(4, "0")}.png`);
+  world.flushMs = 100;
+  const inst = new Instance(world);
+  void inst.sup.start();
+  const percents = new Set<number>();
+  for (let t = 0; t < 900_000 && inst.latest()?.state !== "running"; t += 10_000) {
+    await world.clock.advance(10_000);
+    const s = inst.latest();
+    assert.notEqual(s?.error?.kind, "stalled", `stalled at ${t / 1000} s though it kept flushing`);
+    if (s?.percent !== undefined) percents.add(s.percent);
+  }
+  assert.equal(inst.latest()?.state, "running");
+  assert.equal(world.journal, null);
+  assert.ok(percents.size >= 5 && Math.max(...percents) >= 90, `the status said how far it was: ${[...percents].join(", ")}`);
+  assert.equal(inst.latest()?.percent, undefined, "and stops saying so once it is done");
+
+  // One flush that hangs past the bound does show it, and the start goes on when it ends.
+  const slow = new World();
+  slow.seed();
+  slow.backups.push(world.backups[0]!);
+  slow.live().tag = { kind: "restored", id };
+  slow.journal = { id, backup: name, state: "finishing" };
+  slow.images = ["token/one.png", "token/two.png"];
+  slow.flushMs = 30_000;
+  slow.delays.set("fs.syncFile", [START_PARTS.recover.ms + 60_000]);
+  const waiting = new Instance(slow);
+  void waiting.sup.start();
+  await slow.clock.advance(START_PARTS.recover.ms + 5_000);
+  assert.deepEqual(waiting.latest()?.error, { kind: "stalled", what: START_PARTS.recover.words, seconds: START_PARTS.recover.ms / 1000 });
+  // The held flush ends near 210 s (held 180 s, then its own 30 s), and the next takes 30 s more: the stall clears as the work moves again.
+  await slow.clock.advance(100_000);
+  assert.equal(waiting.latest()?.state, "recovering", "back to its step while the next flush runs");
+  assert.equal(waiting.latest()?.error, null);
+  await run(slow, 70_000);
+  assert.equal(waiting.latest()?.state, "running");
+  assert.deepEqual(slow.violations, []);
+});
+
+test("an undo held past its bound between its state read and its drop is never joined by a second recovery, and the original survives", async () => {
+  const world = new World();
+  world.seed();
+  const original = world.live();
+  original.content = "orig";
+  const id = "b".repeat(32);
+  world.dbs.set(BEFORE, original);
+  world.dbs.set(LIVE, { content: "restored", tag: { kind: "restored", id }, stamp: original.stamp, rooms: 1 });
+  world.journal = { id, backup: "raccoon-2026-11-01-040000-abcd1234", state: "undoing" };
+  // The first walker's first session end answers 700 s late, past the 600 s a fixed bound once gave recovery.
+  world.delays.set("db.endSessions", [700_000]);
+  const inst = new Instance(world);
+  void inst.sup.start();
+  await world.clock.advance(START_PARTS.recover.ms + 5_000);
+  assert.equal(inst.latest()?.error?.kind, "stalled");
+  assert.deepEqual(await answer(world, inst, { type: "retry" }, 100), { ok: false, failure: { error: "busy" } });
+  await world.clock.advance(500_000);
+  // Try again again at 625 s, once a fixed 600 s bound would have let go of the first, which is still held.
+  assert.deepEqual(await answer(world, inst, { type: "retry" }, 100), { ok: false, failure: { error: "busy" } });
+  await run(world, 120_000);
+  assert.equal(inst.latest()?.state, "running");
+  assert.deepEqual([...world.dbs.keys()], [LIVE]);
+  assert.equal(world.live().content, "orig", "the original is raccoon again");
+  assert.deepEqual(world.violations, []);
 });

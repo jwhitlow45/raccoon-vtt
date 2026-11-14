@@ -386,8 +386,9 @@ export type NetworkReach = z.infer<typeof NetworkReach>;
  * shell, which sees the bundled programs fail to load, and `root` from
  * either. The shell also uses `serverCrashed`, with supervisor.log's last
  * line, when the supervisor itself exits on its own. `stalled` is a part of
- * a start that took longer than its bound (runtime/supervisor.ts
- * START_PARTS), with that part's words.
+ * a start that has gone past its bound with nothing done (runtime/supervisor.ts
+ * START_PARTS), with that part's words. The supervisor still waits for it,
+ * and the start goes on when it ends, so it offers no Try again.
  */
 export const AppError = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("glibc") }),
@@ -436,6 +437,8 @@ export type Notice = z.infer<typeof Notice>;
  *   blocker. `remoteDevices` counts other devices, for the window and Quit.
  * - `lastBackup`: the newest good backup's start, null when there is none.
  * - `restore`: the step while a restore runs.
+ * - `percent`: how far a part of a start whose length grows with the data
+ *   has got, while one runs (a restore finished at start). Absent otherwise.
  */
 export const SupervisorStatus = z.object({
   state: SupervisorState,
@@ -456,6 +459,7 @@ export const SupervisorStatus = z.object({
   error: AppError.nullable(),
   notice: Notice.nullable(),
   paths: z.object({ data: z.string(), backups: z.string(), logs: z.string() }),
+  percent: z.number().int().min(0).max(100).optional(),
 });
 export type SupervisorStatus = z.infer<typeof SupervisorStatus>;
 
@@ -683,6 +687,10 @@ declare global {
 // Words (design 9, Exact words)
 
 /** A clause from a log or a reason, ready to end a sentence with one full stop. */
+function capital(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 function clause(text: string): string {
   return text.trim().replace(/[.\s]+$/, "");
 }
@@ -704,6 +712,8 @@ export const WORDS = {
     closeToNetwork: "Restarting so only this computer can open it",
     changePort: "Changing the port",
   } satisfies Record<StatusStep, string>,
+  /** The status line while a restore is finished at start, with how far it has got. */
+  finishRestorePercent: (percent: number) => `Finishing a restore, ${percent}% done`,
 
   players: {
     heading: "Players join at",
@@ -871,7 +881,7 @@ export const ERROR_ACTIONS = {
   newerData: ["downloadLatest", "restoreBackup"],
   noReadableBackup: ["downloadLatest"],
   backupBeforeUpdateFailed: ["tryAgain", "startWithoutBackup"],
-  stalled: ["tryAgain", "showLogs"],
+  stalled: ["showLogs"],
 } as const satisfies Record<AppError["kind"], readonly ErrorAction[]>;
 
 /** The words for a stop. `appVersion` is this build's, `platform` the computer's. */
@@ -913,6 +923,6 @@ export function errorText(error: AppError, appVersion: string, platform: Platfor
     case "backupBeforeUpdateFailed":
       return `The backup before the update failed: ${clause(error.reason)}. Your rooms are untouched.`;
     case "stalled":
-      return `RaccoonVTT gave up ${clause(error.what)} after ${error.seconds} s. The logs may say why.`;
+      return `${capital(clause(error.what))} has done nothing for ${error.seconds} s. RaccoonVTT goes on when it ends, and the logs may say why it is slow.`;
   }
 }

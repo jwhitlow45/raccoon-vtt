@@ -122,6 +122,7 @@ const EXPECT: Record<string, string[]> = {
   "notice-restoreFinished": ["The restore of the backup from Nov 9 at"],
 };
 for (const [step, words] of Object.entries(WORDS.steps)) EXPECT[`step-${step}`] = [words];
+EXPECT["finishing-restore"] = ["Finishing a restore, 42% done"];
 for (const [reach, words] of Object.entries(WORDS.players.reach)) EXPECT[`reach-${reach}`] = [words];
 for (const [step, words] of Object.entries(WORDS.backups.steps)) EXPECT[`restoring-${step}`] = [words, WORDS.notDuringRestore];
 const ERROR_WORDS: Record<string, string[]> = {
@@ -141,7 +142,7 @@ const ERROR_WORDS: Record<string, string[]> = {
   newerData: ["This data was last used by RaccoonVTT 0.6.0, which saves rooms in a newer format than this version (0.5.0) reads. Install 0.6.0 or later, or restore a backup made before that update.", "Download the latest version", "Restore a backup"],
   noReadableBackup: ["No backup this version can read is on this computer. Install 0.6.0 or later to open your rooms.", "Download the latest version"],
   backupBeforeUpdateFailed: ["The backup before the update failed: the disk is full. Your rooms are untouched.", "Try again", "Start without a backup"],
-  stalled: ["RaccoonVTT gave up starting the database after 180 s. The logs may say why.", "Try again", "Show logs"],
+  stalled: ["Starting the database has done nothing for 180 s. RaccoonVTT goes on when it ends, and the logs may say why it is slow.", "Show logs"],
 };
 for (const key of Object.keys(ERRORS)) EXPECT[`error-${key}`] = ERROR_WORDS[key] ?? [];
 
