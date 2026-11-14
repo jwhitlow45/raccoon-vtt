@@ -142,6 +142,14 @@ describe("the packed shell", () => {
     }, id);
   };
   const policyViolations: string[] = [];
+  /**
+   * The flags a launch of our own needs beside Playwright's. Playwright adds
+   * --no-sandbox on Linux, and so must we: this unpacked copy in a temporary
+   * folder has no AppArmor profile, and Ubuntu 24.04 lets only a profiled
+   * program make the namespaces Chromium's sandbox needs, so Electron aborts
+   * at start. The deb's profile and the sandbox are the smoke test's to prove.
+   */
+  const ownLaunch = (...args: string[]) => [...(process.platform === "linux" ? ["--no-sandbox"] : []), `--user-data-dir=${profile}`, ...args];
   const launch = async () => {
     app = await _electron.launch({ executablePath: copy.exe, args: [`--user-data-dir=${profile}`], env: env(), timeout: TIMEOUT });
     page = await app.firstWindow({ timeout: TIMEOUT });
@@ -346,7 +354,7 @@ describe("the packed shell", () => {
     assert.ok(app);
     const running = app;
     const done = exited(running);
-    const second = spawn(copy.exe, [`--user-data-dir=${profile}`, "--quit"], { env: env(), stdio: "ignore" });
+    const second = spawn(copy.exe, ownLaunch("--quit"), { env: env(), stdio: "ignore" });
     const secondCode = await new Promise<number | null>((resolve) => second.once("exit", resolve));
     assert.equal(secondCode, 0, "the second launch hands over and exits");
     assert.equal(await done, 0);
@@ -360,7 +368,7 @@ describe("the packed shell", () => {
 
   test("--quit with nothing running exits at once and starts nothing", { timeout: STEP_TIMEOUT }, async () => {
     const started = Date.now();
-    const lone = spawn(copy.exe, [`--user-data-dir=${profile}`, "--quit"], { env: env(), stdio: "ignore" });
+    const lone = spawn(copy.exe, ownLaunch("--quit"), { env: env(), stdio: "ignore" });
     const code = await new Promise<number | null>((resolve) => lone.once("exit", resolve));
     assert.equal(code, 0);
     assert.ok(Date.now() - started < 15_000, `took ${Date.now() - started} ms`);
