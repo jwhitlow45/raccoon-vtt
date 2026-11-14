@@ -87,6 +87,7 @@ on:
     paths:
       - desktop/**
       - .github/workflows/desktop.yml
+      - .github/pnpm/**
       - server/**
       - shared/**
       - db/**
@@ -302,19 +303,34 @@ jobs:
             echo "::error::The checkout is $have, not $COMMIT, the commit the plan job read."
             exit 1
           fi
-      # Node first. pnpm/action-setup starts from @pnpm/exe when the Node
-      # on the PATH is older than 22.13, as on the macOS x64 image, and
-      # @pnpm/exe 11 has no macOS x64 binary, so its self-update stops
-      # there. With this Node it starts from the pnpm package, which runs
-      # on every runner and has no native binary to check.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - name: Fetch Node and PostgreSQL
         env:
           GH_TOKEN: ${{ github.token }}
         run: node desktop/scripts/fetch-runtime.ts
+      # pnpm exactly as packageManager names it, which npm installs from
+      # .github/pnpm/package-lock.json and its pinned integrity, so no later
+      # step switches pnpm versions. pnpm/action-setup starts from a pnpm of
+      # its own and switches through @pnpm/exe, which has no macOS x64
+      # binary (D-261114-022). It comes after the fetch, the one step with a
+      # token, as every install does.
+      - name: Set up pnpm
+        run: |
+          dir="$RUNNER_TEMP/pnpm"
+          mkdir -p "$dir"
+          cp .github/pnpm/package.json .github/pnpm/package-lock.json "$dir/"
+          npm ci --prefix "$dir" --ignore-scripts --no-audit --no-fund
+          have="pnpm@$(cd "$dir" && node_modules/.bin/pnpm --version)"
+          for manifest in package.json desktop/package.json; do
+            want=$(node -p 'require(require("node:path").resolve(process.argv[1])).packageManager' "$manifest")
+            if [ "$want" != "$have" ]; then
+              echo "::error::$manifest asks for $want, and .github/pnpm/package-lock.json installs $have."
+              exit 1
+            fi
+          done
+          node -p 'require("node:path").resolve(process.argv[1])' "$dir/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Install
         id: install
         run: |
@@ -424,15 +440,9 @@ jobs:
             echo "::error::The checkout is $have, not $COMMIT, the commit the plan job read."
             exit 1
           fi
-      # Node first. pnpm/action-setup starts from @pnpm/exe when the Node
-      # on the PATH is older than 22.13, as on the macOS x64 image, and
-      # @pnpm/exe 11 has no macOS x64 binary, so its self-update stops
-      # there. With this Node it starts from the pnpm package, which runs
-      # on every runner and has no native binary to check.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       # Each archive checked against desktop/pins.json, PostgreSQL's
       # provenance and floors, and on Windows the Visual C++ runtime beside
       # it (design section 3).
@@ -440,6 +450,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node desktop/scripts/fetch-runtime.ts
+      # pnpm exactly as packageManager names it, which npm installs from
+      # .github/pnpm/package-lock.json and its pinned integrity, so no later
+      # step switches pnpm versions. pnpm/action-setup starts from a pnpm of
+      # its own and switches through @pnpm/exe, which has no macOS x64
+      # binary (D-261114-022). It comes after the fetch, the one step with a
+      # token, as every install does.
+      - name: Set up pnpm
+        run: |
+          dir="$RUNNER_TEMP/pnpm"
+          mkdir -p "$dir"
+          cp .github/pnpm/package.json .github/pnpm/package-lock.json "$dir/"
+          npm ci --prefix "$dir" --ignore-scripts --no-audit --no-fund
+          have="pnpm@$(cd "$dir" && node_modules/.bin/pnpm --version)"
+          for manifest in package.json desktop/package.json; do
+            want=$(node -p 'require(require("node:path").resolve(process.argv[1])).packageManager' "$manifest")
+            if [ "$want" != "$have" ]; then
+              echo "::error::$manifest asks for $want, and .github/pnpm/package-lock.json installs $have."
+              exit 1
+            fi
+          done
+          node -p 'require("node:path").resolve(process.argv[1])' "$dir/node_modules/.bin" >> "$GITHUB_PATH"
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - name: Stage the app server
