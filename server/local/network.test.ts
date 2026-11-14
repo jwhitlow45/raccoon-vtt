@@ -44,7 +44,7 @@ describe("address ranges", () => {
 
 describe("eligible interfaces", () => {
   test("a computer's own Wi-Fi and Ethernet, on every system", () => {
-    for (const name of ["en0", "en7", "eth0", "enp3s0", "wlan0", "wlp2s0", "Wi-Fi", "Ethernet", "Ethernet 2", "WLAN", "bridge0"]) assert.equal(eligible(name, { mac: MAC }), true, name);
+    for (const name of ["en0", "en7", "eth0", "enp3s0", "wlan0", "wlp2s0", "Wi-Fi", "Ethernet", "Ethernet 2", "WLAN", "bridge0", "bridge100", "bridge101"]) assert.equal(eligible(name, { mac: MAC }), true, name);
   });
 
   test("not a bridge, a virtual machine's network or a tunnel, by name, including Windows' friendly names", () => {
@@ -76,8 +76,6 @@ describe("eligible interfaces", () => {
       "lxdbr0",
       "podman0",
       "cni0",
-      "bridge100",
-      "bridge101",
       "vnic0",
     ];
     for (const name of names) assert.equal(eligible(name, { mac: MAC }), false, name);
@@ -129,6 +127,10 @@ describe("localAddresses", () => {
 });
 
 describe("primaryAddress (D-261113-085)", () => {
+  test("a Mac sharing its connection over Wi-Fi, with bridge100 its only private network, shows that address", async () => {
+    assert.equal(await fixed({ lo0: [v4("127.0.0.1")], bridge100: [v4(C_BLOCK(2, 1))] }, null).primaryAddress(), C_BLOCK(2, 1));
+  });
+
   test("the default route's address when its interface is eligible, even when it is not the first", () => {
     const net = fixed({ eth0: [v4("10.0.0.3")], wlan0: [v4("172.16.0.8")] }, "172.16.0.8");
     return net.primaryAddress().then((a) => assert.equal(a, "172.16.0.8"));
