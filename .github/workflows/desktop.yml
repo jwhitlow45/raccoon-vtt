@@ -614,6 +614,8 @@ jobs:
     permissions:
       id-token: write
       attestations: write
+    outputs:
+      signatures: ${{ steps.signed.outputs.sha256 }}
     env:
       VERSION: ${{ needs.plan.outputs.version }}
     steps:
@@ -770,6 +772,18 @@ jobs:
         env:
           BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: cp "$BUNDLE" "$RUNNER_TEMP/signatures/raccoon-vtt-$VERSION-desktop.intoto.jsonl"
+      # Each signature's and the provenance's SHA-256 as a job output, as the
+      # build jobs give theirs, so the upload job publishes these very files.
+      - name: The signatures' digests
+        id: signed
+        run: |
+          cd "$RUNNER_TEMP/signatures"
+          pairs=()
+          for file in *; do
+            sum=$(sha256sum < "$file")
+            pairs+=("$file=${sum%% *}")
+          done
+          echo "sha256=${pairs[*]}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-signatures
@@ -821,13 +835,16 @@ jobs:
           name: desktop-signatures
           path: ${{ runner.temp }}/from/signatures
       # As in the sign job, so the files published are the very ones it
-      # signed, each from the job that made it. The signatures check
-      # themselves: a replaced bundle fails `cosign verify-blob`.
+      # signed, each from the job that made it. The signatures and the
+      # provenance are held to the digests the sign job gave, so a replaced
+      # one stops the upload. Nothing here runs `cosign verify-blob`: that is
+      # for anyone who downloads them (docs/releasing.md).
       - name: Take each job's files
         env:
           TARGETS: ${{ needs.plan.outputs.targets }}
           DIGESTS: ${{ toJSON(needs.build.outputs) }}
           CHECKSUMS_SHA256: ${{ needs.checksums.outputs.sha256 }}
+          SIGNATURES: ${{ needs.sign.outputs.signatures }}
           ASSETS: ${{ needs.plan.outputs.assets }}
         run: |
           shopt -s nullglob dotglob
@@ -876,25 +893,22 @@ jobs:
             take "$target" "${files[@]}"
           done
           take checksums "raccoon-vtt-$VERSION-desktop.sha256=$CHECKSUMS_SHA256"
-          # The signing job's bundles, one per file taken above, and the provenance.
-          signatures=()
+          # The signing job's bundles, one per file taken above, and the
+          # provenance, each with the digest the signing job gave.
+          names=()
           for file in "$RUNNER_TEMP"/assets/*; do
-            signatures+=("${file##*/}.sigstore.json")
+            names+=("${file##*/}.sigstore.json")
           done
-          signatures+=("raccoon-vtt-$VERSION-desktop.intoto.jsonl")
-          from="$RUNNER_TEMP/from/signatures"
-          held=("$from"/*)
-          if [ -L "$from" ] || [ "${#held[@]}" -ne "${#signatures[@]}" ]; then
-            echo "::error::The desktop-signatures artifact must hold ${signatures[*]}, and nothing else."
-            exit 1
-          fi
-          for file in "${signatures[@]}"; do
-            if [ -L "$from/$file" ] || ! [ -f "$from/$file" ]; then
-              echo "::error::The desktop-signatures artifact's $file is missing or not a regular file."
-              exit 1
-            fi
-            cp -- "$from/$file" "$RUNNER_TEMP/assets/$file"
+          names+=("raccoon-vtt-$VERSION-desktop.intoto.jsonl")
+          signed=()
+          for name in "${names[@]}"; do
+            sum=""
+            for pair in $SIGNATURES; do
+              if [ "${pair%%=*}" = "$name" ]; then sum=${pair#*=}; fi
+            done
+            signed+=("$name=$sum")
           done
+          take signatures "${signed[@]}"
           # Exactly the plan's assets, no more and no fewer.
           taken=$(cd "$RUNNER_TEMP/assets" && printf '%s\n' * | sort)
           wanted=$(tr ' ' '\n' <<< "$ASSETS" | sort)
