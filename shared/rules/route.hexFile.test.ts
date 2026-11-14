@@ -14,7 +14,8 @@ import { findRouteOn } from "./hexWalk.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, sideWall, wallsRound } from "./hexWalls.testkit.ts";
 import { checkSetReach, planMove, planWalks } from "./moveLeg.ts";
 import { hexStandAt, hexStandHexes, hexStandPlace, ownWalk } from "./movement.ts";
-import { hexFileClasses, hexFileRoutes, pieceReach, routeWalkers, seatShift } from "./route.ts";
+import { compareAlong, hexFileClasses, hexFileRoutes, pieceReach, routeWalkers, seatShift } from "./route.ts";
+import { planTrapMove, trapWalks } from "./traps.ts";
 import { groupWalkWorld } from "./walkWorld.ts";
 
 /**
@@ -554,7 +555,7 @@ describe("a walk hex by hex's moments (route.ts FileAlong)", () => {
     assert.deepEqual(gob.route.map((p) => p.elevation), [10, 7.5, 5, 0]);
   });
 
-  test("the cap on a route's reach counts each leg of a walk hex by hex past the holder's own points", () => {
+  test("the cap on a route's reach counts a walk hex by hex on the holder's pieces its legs end on, so the goblin's three legs and the warhorse's piece of three hexes count once (review HEXFILE-OPUS-2)", () => {
     const { s, path } = keepOf(ROWS, 1, 0, "horse");
     const op = intoCorridor(ROWS, s, path[4]!);
     const horse = s.tokens.horse!;
@@ -562,9 +563,33 @@ describe("a walk hex by hex's moments (route.ts FileAlong)", () => {
     const trace = routeWalkers(s.buildChunks, ownWalk(horse), op.route!, 0);
     const gob = planWalks(op, s, P1, {}).find((m) => m.tokenId === "gob")!.route;
     assert.equal(gob.length, 4, "a point a hex, two more than the warhorse's walk");
-    // The warhorse's one piece of three hexes, then the goblin's two legs past it, one hex each.
-    const past = pieceReach(gob[1]!, gob[2]!, fpc) + pieceReach(gob[2]!, gob[3]!, fpc);
-    assert.equal(checkSetReach(s, horse, trace, () => true, fpc, "player", true), pieceReach(trace[0]!, trace[1]!, fpc) + past);
+    // The warhorse's one piece of three hexes, and the goblin's three legs of one hex each, all on that piece.
+    const legs = pieceReach(gob[0]!, gob[1]!, fpc) + pieceReach(gob[1]!, gob[2]!, fpc) + pieceReach(gob[2]!, gob[3]!, fpc);
+    assert.equal(checkSetReach(s, horse, trace, () => true, fpc, "player", true), Math.max(pieceReach(trace[0]!, trace[1]!, fpc), legs));
+  });
+});
+
+describe("the cap on a route's reach over a walk hex by hex round a corner (review HEXFILE-OPUS-2)", () => {
+  test("the goblin's legs onto the warhorse's start and along its first piece count on that piece, and those past the corner on the next", () => {
+    const { s, path } = keepOf(ROWS, 1, 0, "horse");
+    const op = intoCorridor(ROWS, s, path[7]!);
+    assert.equal(op.route!.length, 2, "two pieces, round the corner");
+    const horse = s.tokens.horse!;
+    const fpc = s.meta.settings.feetPerCell;
+    const trace = routeWalkers(s.buildChunks, ownWalk(horse), op.route!, 0);
+    const gob = planWalks(op, s, P1, {}).find((m) => m.tokenId === "gob")!.route;
+    // Its legs to the corridor's hexes 1 to 4 lie on the warhorse's first piece, which ends on hex 4, and the rest on its second.
+    const corner = path.findIndex((h) => hexKey(h) === hexKey(path[4]!));
+    let first = 0;
+    let second = 0;
+    for (let k = 1; k < gob.length; k++) {
+      const on = path.findIndex((h) => hexKey(h) === hexKey(hexOf(ROWS, gob[k]!)));
+      if (on <= corner) first += pieceReach(gob[k - 1]!, gob[k]!, fpc);
+      else second += pieceReach(gob[k - 1]!, gob[k]!, fpc);
+    }
+    assert.ok(first > 0 && second > 0, `legs on both pieces: ${first} and ${second}`);
+    const lead = (i: number) => pieceReach(trace[i]!, trace[i + 1]!, fpc);
+    assert.equal(checkSetReach(s, horse, trace, () => true, fpc, "player", true), Math.max(lead(0), first) + Math.max(lead(1), second));
   });
 });
 
@@ -583,6 +608,66 @@ describe("an area's sweep reads a walk hex by hex at the lead's moments (areaTri
     const entered = r.log.flatMap((e) => (e.data?.type === "area" && e.data.trigger === "enter" ? [e.data.tokenId] : []));
     assert.ok(entered.includes("gob"), `entered: ${entered.join(", ")}`);
   });
+});
+
+describe("a trap's cut keeps how far along the cut lead's walk each point of a walk hex by hex is reached (traps.ts cutAlong, review HEXFILE-OPUS-1)", () => {
+  for (const [name, g] of GRIDS) {
+    test(`${name}: a stop trap at the corridor's hex 5 stops the warhorse, and the goblin it drags still enters a sphere on hex 3 that it walks through`, () => {
+      const { s, path } = keepOf(g, 1, 0, "horse");
+      s.templates.orb = template("orb", { shape: "sphere", size: 5, origin: { ...hexCenter(g, path[3]!), z: 0 }, triggers: ["enter"], spell: "Orb" });
+      s.encounter = { rev: 0, round: 1, activeEntryId: "e1", entries: [entry("e1", { tokenId: "horse", value: 15 })] };
+      s.traps.stop = trap("stop", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", zone: { cells: [{ x: path[5]!.col, y: path[5]!.row, w: 1, h: 1 }] } });
+      const op = intoCorridor(g, s, path[7]!);
+      const cut = planTrapMove(op, s, DM, {}).op;
+      assert.notEqual(cut, op, "the trap cuts the move");
+      const gob = planWalks(cut, s, DM, {}).find((m) => m.tokenId === "gob")!;
+      assert.ok(gob.along && gob.route.length > 3, "the cut op's walk goes hex by hex, more points than the warhorse's cut walk");
+      const r = applyOp(s, op, DM, env(1));
+      assert.ok(r.ok);
+      assert.equal(refOf(g, r.state.tokens.gob!), hexKey(path[4]!), "the goblin stops behind the warhorse, past the sphere");
+      const entered = r.log.flatMap((e) => (e.data?.type === "area" && e.data.trigger === "enter" ? [e.data.tokenId] : []));
+      assert.ok(entered.includes("gob"), `entered: ${entered.join(", ")}`);
+    });
+
+    test(`${name}: a stop trap at the corridor's hex 6, partway along the warhorse's second piece: each spot of the goblin's cut walk is read where the warhorse stands as it did there on the walk before the cut`, () => {
+      const { s, path } = keepOf(g, 1, 0, "horse");
+      s.traps.stop = trap("stop", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", zone: { cells: [{ x: path[6]!.col, y: path[6]!.row, w: 1, h: 1 }] } });
+      const op = intoCorridor(g, s, path[7]!);
+      const cut = planTrapMove(op, s, DM, {}).op;
+      assert.notEqual(cut, op, "the trap cuts the move");
+      // Each of the goblin's spots with the warhorse's latest spot at or before its moment, as the trap step reads them.
+      const pairs = (o: Parameters<typeof trapWalks>[0]) => {
+        const walks = trapWalks(o, s, DM, {});
+        const lead = walks.find((w) => w.tokenId === "horse")!.spots;
+        return walks
+          .find((w) => w.tokenId === "gob")!
+          .spots.map((spot) => {
+            let at = 0;
+            for (let j = 1; j < lead.length && compareAlong(lead[j]!.progress, spot.progress) <= 0; j++) at = j;
+            return `${hexKey(hexOf(g, spot))} with the warhorse at ${lead[at]!.x.toFixed(3)}, ${lead[at]!.y.toFixed(3)}`;
+          });
+      };
+      const after = pairs(cut);
+      const before = pairs(op).slice(0, after.length);
+      assert.ok(after.length > 5, "the goblin walks past the warhorse's first corner before the stop");
+      assert.deepEqual(after, before);
+    });
+
+    test(`${name}: a hidden goblin's spots on the cut op's private pass never pass the end of the cut warhorse's walk`, () => {
+      const { s, path } = keepOf(g, 1, 0, "horse");
+      s.tokens.gob = { ...s.tokens.gob!, visibility: "dm" };
+      s.traps.stop = trap("stop", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", zone: { cells: [{ x: path[6]!.col, y: path[6]!.row, w: 1, h: 1 }] } });
+      const op = intoCorridor(g, s, path[7]!);
+      const cut = planTrapMove(op, s, P1, {}, () => false).op;
+      assert.notEqual(cut, op, "the trap cuts the move");
+      const walks = trapWalks(cut, s, P1, {});
+      const spots = (id: string) => walks.find((w) => w.tokenId === id)!.spots.map((spot) => spot.progress);
+      const end = spots("horse").at(-1)!;
+      const goblin = spots("gob");
+      assert.ok(goblin.length > 2, "the goblin walks");
+      for (const at of goblin) assert.ok(compareAlong(at, end) <= 0, `${at.join("/")} not past ${end.join("/")}`);
+    });
+  }
 });
 
 describe("change format 62 (HEX_FILE_OP_VERSION)", () => {
