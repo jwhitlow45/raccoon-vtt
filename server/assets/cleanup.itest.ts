@@ -124,7 +124,8 @@ describe("image cleanup", () => {
     assert.ok(await exists(trashed(img, "token", "thumb")));
   });
 
-  test("files the app writes, and their folders, are readable by others, as the backup's user reads them", async () => {
+  // Windows has no POSIX mode bits to read, and its backups run as the DM's own user (docs/design/design-v1-local-app.md 8.2).
+  test("files the app writes, and their folders, are readable by others, as the backup's user reads them", { skip: process.platform === "win32" }, async () => {
     const { roomId, socket, dm } = await room();
     const img = await upload(dm, roomId, "map", randomColor(), 300);
     socket.close();

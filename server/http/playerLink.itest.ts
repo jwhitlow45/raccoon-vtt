@@ -11,7 +11,7 @@ import pg from "pg";
 import yauzl from "yauzl";
 import { playerLink, readPlayerFragment } from "#shared/playerLink.ts";
 import { ipKey } from "../auth/ipKey.ts";
-import { startTestApp, type TestApp } from "../auth/testing.ts";
+import { childEnv, startTestApp, type TestApp } from "../auth/testing.ts";
 import { startEngine, TEST_DATABASE_URL, type Engine, type Socket, type TestClient } from "../rooms/testing.ts";
 
 /**
@@ -240,8 +240,7 @@ describe("the server's log", () => {
     const origin = `http://127.0.0.1:${port}`;
     const child = spawn(process.execPath, ["server/main.ts"], {
       cwd: ROOT,
-      env: {
-        PATH: process.env.PATH ?? "",
+      env: childEnv({
         NODE_ENV: "development",
         DATABASE_URL: TEST_DATABASE_URL,
         HOST: "127.0.0.1",
@@ -252,7 +251,7 @@ describe("the server's log", () => {
         ROOMS_PER_DAY: "1000000",
         ROOMS_PER_IP_PER_DAY: "1000",
         ROOM_SECRET_KEY: randomBytes(32).toString("base64"),
-      },
+      }),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let output = "";

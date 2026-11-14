@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { verify } from "@node-rs/argon2";
 import type { RoomState } from "#shared/model.ts";
 import { readPlayerFragment } from "#shared/playerLink.ts";
-import { startTestApp, TEST_DATABASE_URL, type TestApp } from "./testing.ts";
+import { childEnv, startTestApp, TEST_DATABASE_URL, type TestApp } from "./testing.ts";
 
 const run = promisify(execFile);
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -15,7 +15,7 @@ async function admin(...args: string[]): Promise<{ stdout: string; stderr: strin
   try {
     const { stdout, stderr } = await run(process.execPath, ["scripts/admin.ts", ...args], {
       cwd: ROOT,
-      env: { PATH: process.env.PATH ?? "", DATABASE_URL: TEST_DATABASE_URL, PUBLIC_ORIGIN: "https://vtt.example.com" },
+      env: childEnv({ DATABASE_URL: TEST_DATABASE_URL, PUBLIC_ORIGIN: "https://vtt.example.com" }),
     });
     return { stdout, stderr, code: 0 };
   } catch (err) {
@@ -124,7 +124,7 @@ describe("scripts/admin.ts", () => {
 
   test("hash-password refuses short, common and mismatched passwords, and prints a line .env takes as it is", async () => {
     const hash = async (input: string) => {
-      const child = execFile(process.execPath, ["scripts/admin.ts", "hash-password"], { cwd: ROOT, env: { PATH: process.env.PATH ?? "" } });
+      const child = execFile(process.execPath, ["scripts/admin.ts", "hash-password"], { cwd: ROOT, env: childEnv({}) });
       child.stdin?.end(input);
       return new Promise<{ stdout: string; stderr: string; code: number }>((resolve) => {
         let stdout = "";

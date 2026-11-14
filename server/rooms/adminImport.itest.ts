@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { ProjectedState } from "#shared/project.ts";
 import { solid } from "../assets/testImages.ts";
+import { childEnv } from "../auth/testing.ts";
 import { startEngine, TEST_DATABASE_URL, type Engine } from "./testing.ts";
 
 const run = promisify(execFile);
@@ -40,7 +41,7 @@ describe("scripts/admin.ts import", () => {
 
     const out = await run(process.execPath, ["scripts/admin.ts", "import", path, "Restorer"], {
       cwd: ROOT,
-      env: { PATH: process.env.PATH ?? "", DATABASE_URL: TEST_DATABASE_URL, ASSET_DIR: t.assetDir, PUBLIC_ORIGIN: "https://vtt.example.com" },
+      env: childEnv({ DATABASE_URL: TEST_DATABASE_URL, ASSET_DIR: t.assetDir, PUBLIC_ORIGIN: "https://vtt.example.com" }),
     });
     assert.equal(await readFile(inFlight, "utf8"), "partial upload", "the server's temporary files are untouched");
     assert.deepEqual(
@@ -69,7 +70,7 @@ describe("scripts/admin.ts import", () => {
     socket.close();
     const bad = (await run(process.execPath, ["scripts/admin.ts", "import", join(t.assetDir, "missing.zip")], {
       cwd: ROOT,
-      env: { PATH: process.env.PATH ?? "", DATABASE_URL: TEST_DATABASE_URL, ASSET_DIR: t.assetDir },
+      env: childEnv({ DATABASE_URL: TEST_DATABASE_URL, ASSET_DIR: t.assetDir }),
     }).catch((err: unknown) => err)) as { code?: number; stderr?: string };
     assert.equal(bad.code, 2);
     assert.match(bad.stderr ?? "", /bad_zip/);

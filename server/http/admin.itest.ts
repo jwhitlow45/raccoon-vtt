@@ -14,6 +14,7 @@ import { solid } from "../assets/testImages.ts";
 import { PasswordHasher } from "../auth/passwords.ts";
 import { setTurnstileDispatcherForTests } from "../auth/turnstile.ts";
 import { CLOSE } from "../rooms/connection.ts";
+import { childEnv } from "../auth/testing.ts";
 import { randomIp, startEngine, type Engine, type TestClient } from "../rooms/testing.ts";
 import { backupWarning, type AdminRoom, type AdminStorage, type BackupRun } from "./admin.ts";
 
@@ -240,7 +241,7 @@ describe("the admin page", () => {
       const before = await roomPhysicalBytes(t.pool, roomId);
       const cli = await run(process.execPath, ["scripts/admin.ts", "list-rooms"], {
         cwd: fileURLToPath(new URL("../../", import.meta.url)),
-        env: { PATH: process.env.PATH ?? "", DATABASE_URL: t.config.DATABASE_URL },
+        env: childEnv({ DATABASE_URL: t.config.DATABASE_URL }),
       });
       stdout = cli.stdout;
       line = stdout.split("\n").find((l) => l.startsWith(`${roomId.slice(0, 4)}-${roomId.slice(4)} `));
