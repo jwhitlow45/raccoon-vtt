@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -58,9 +58,9 @@ const run = {
   roomName: `E2E fold ${new Date().toISOString().slice(0, 19)}`,
   sceneId: "",
   bounds: { w: 0, h: 0 },
-  thorn: { id: randomUUID(), characterId: randomUUID(), x: 0, y: 0 },
-  goblins: [randomUUID(), randomUUID(), randomUUID()],
-  entries: { thorn: randomUUID(), goblins: [randomUUID(), randomUUID(), randomUUID()] },
+  thorn: { id: uuidv7(), characterId: uuidv7(), x: 0, y: 0 },
+  goblins: [uuidv7(), uuidv7(), uuidv7()],
+  entries: { thorn: uuidv7(), goblins: [uuidv7(), uuidv7(), uuidv7()] },
 };
 
 const SCALES = [0.85, 1, 1.15, 1.3] as const;
@@ -542,7 +542,7 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     // Frightened on Thorn until the end of the next goblin's turn, which ends one turn on: an effect set to end with the turn of the creature acting runs to the end of its next one.
     const active = () => dmSocket.state?.encounter?.activeEntryId;
     assert.equal(active(), run.entries.thorn, "Thorn's turn, as test 5 left it");
-    await ops.send({ t: "actor.effect.add", target: { characterId: run.thorn.characterId }, effect: { id: randomUUID(), key: "frightened", duration: { mode: "turnEnd", of: { entryId: run.entries.goblins[1] } } } });
+    await ops.send({ t: "actor.effect.add", target: { characterId: run.thorn.characterId }, effect: { id: uuidv7(), key: "frightened", duration: { mode: "turnEnd", of: { entryId: run.entries.goblins[1] } } } });
     await waitFor("Thorn frightened", () => (dmSocket.state?.characters[run.thorn.characterId]?.actor.effects.some((e) => e.key === "frightened") ? true : null));
     await ops.send({ t: "encounter.next" });
     await ops.send({ t: "encounter.next" });
@@ -606,12 +606,12 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
   test("8. 320 x 480 at 130%: three concentration checks, a roll request and a selected token still dock above a 120 px sheet", async () => {
     await setUp(dm, dmCdp, { width: 320, height: 480, scale: 1.3 });
     for (const id of run.goblins) {
-      await ops.send({ t: "actor.effect.add", target: { tokenId: id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } });
+      await ops.send({ t: "actor.effect.add", target: { tokenId: id }, effect: { id: uuidv7(), key: "concentrating", spell: "Hex" } });
       await ops.send({ t: "actor.hp", target: { tokenId: id }, change: { kind: "damage", amount: 2 } });
     }
     await ops.send({
       t: "roll.ask",
-      request: { id: randomUUID(), test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: false, resultShown: false, targets: [{ tokenId: run.thorn.id }] },
+      request: { id: uuidv7(), test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: false, resultShown: false, targets: [{ tokenId: run.thorn.id }] },
     });
     await dm.locator('[data-alert="concentration"]').nth(2).waitFor();
     await assertBarInWindow(dm, "DM, 320 x 480 at 130%");
@@ -763,7 +763,7 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
       for (const ability of ["str", "dex", "con"] as const) {
         await ops.send({
           t: "roll.ask",
-          request: { id: randomUUID(), test: { kind: "check", choices: [{ ability }] }, dcShown: true, resultShown: true, targets: [{ tokenId: run.thorn.id }] },
+          request: { id: uuidv7(), test: { kind: "check", choices: [{ ability }] }, dcShown: true, resultShown: true, targets: [{ tokenId: run.thorn.id }] },
         });
       }
       await setUp(player, playerCdp, { width: 844, height: 390, scale: 1 });
@@ -889,7 +889,7 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
   test("fu21b-3. the dock's alerts summary, tapped with a token's bar folded under the sheet, hands focus to the check it names and to nothing on the way (FU20B-OP-12)", async () => {
     // Still 820 x 1180 from the steps before, which resized rather than reloaded for the server's snapshot budget.
     const goblin = run.goblins[0]!;
-    await ops.send({ t: "actor.effect.add", target: { tokenId: goblin }, effect: { id: randomUUID(), key: "concentrating", spell: "Bless" } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: goblin }, effect: { id: uuidv7(), key: "concentrating", spell: "Bless" } });
     await ops.send({ t: "actor.hp", target: { tokenId: goblin }, change: { kind: "damage", amount: 1 } });
     await dm.locator('[data-alert="concentration"]').first().waitFor();
     await tapThorn(dm);

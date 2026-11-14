@@ -2,7 +2,6 @@ import { UndoWire, setupHistory } from "./helpers/undoScope.ts";
 import { damageSummaryAlignment } from "./helpers/damageSummary.ts";
 import { OUTCOME_RESTORED, OUTCOME_UNAVAILABLE, OUTCOME_UNDONE } from "./helpers/saveOutcomes.ts";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -191,27 +190,27 @@ const run = {
   sceneId: "",
   patId: "",
   ids: {
-    thornChar: randomUUID(),
-    thorn: randomUUID(),
-    horse: randomUUID(),
-    torch: randomUUID(),
-    kobold: randomUUID(),
-    cart: randomUUID(),
-    goblin: randomUUID(),
-    lantern: randomUUID(),
-    prisoner: randomUUID(),
-    boss: randomUUID(),
-    mule: randomUUID(),
-    dragon: randomUUID(),
-    wolf: randomUUID(),
-    redDragon: randomUUID(),
-    troll: randomUUID(),
-    wrenChar: randomUUID(),
-    wren: randomUUID(),
+    thornChar: uuidv7(),
+    thorn: uuidv7(),
+    horse: uuidv7(),
+    torch: uuidv7(),
+    kobold: uuidv7(),
+    cart: uuidv7(),
+    goblin: uuidv7(),
+    lantern: uuidv7(),
+    prisoner: uuidv7(),
+    boss: uuidv7(),
+    mule: uuidv7(),
+    dragon: uuidv7(),
+    wolf: uuidv7(),
+    redDragon: uuidv7(),
+    troll: uuidv7(),
+    wrenChar: uuidv7(),
+    wren: uuidv7(),
   },
   /** The combat screens' fight: its rows, Thorn's first. The second icon pass's fight takes the goblin and Wren too. */
-  fight: { thorn: randomUUID(), dragon: randomUUID(), troll: randomUUID(), goblin: randomUUID(), wren: randomUUID() },
-  traps: { pit: randomUUID(), needle: randomUUID(), door: randomUUID(), wire: randomUUID() },
+  fight: { thorn: uuidv7(), dragon: uuidv7(), troll: uuidv7(), goblin: uuidv7(), wren: uuidv7() },
+  traps: { pit: uuidv7(), needle: uuidv7(), door: uuidv7(), wire: uuidv7() },
   /** The room's DM link, which newDmSession signs in by. */
   dmLink: "",
 };
@@ -527,14 +526,14 @@ async function patCrosses(): Promise<void> {
 /** Ends the fight and starts it again on Thorn's turn. It returns the new fight's first entry, for a caller that reads the DM's socket after it (fightSeen). */
 async function restartFight(): Promise<string> {
   if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-  const first = randomUUID();
+  const first = uuidv7();
   await ops.send({
     t: "encounter.start",
     entries: [
       { id: first, tokenId: run.ids.thorn, value: 18 },
-      { id: randomUUID(), tokenId: run.ids.goblin, value: 14 },
-      { id: randomUUID(), tokenId: run.ids.horse, value: 12 },
-      { id: randomUUID(), tokenId: run.ids.boss, value: 9 },
+      { id: uuidv7(), tokenId: run.ids.goblin, value: 14 },
+      { id: uuidv7(), tokenId: run.ids.horse, value: 12 },
+      { id: uuidv7(), tokenId: run.ids.boss, value: 9 },
     ],
   });
   await ops.send({ t: "encounter.next" });
@@ -591,7 +590,7 @@ async function refusedUndo(page: Page, mine: OpSocket, theirs: OpSocket): Promis
 
 /** A roll of Perception with its d20, by `who`'s token, which every viewer sees. */
 function rollFor(socket: OpSocket, who: string): Promise<unknown> {
-  return socket.send({ t: "dice.roll", tag: randomUUID(), to: "all", rolls: [{ formula: "1d20+3", label: "Perception", creature: { tokenId: who } }] });
+  return socket.send({ t: "dice.roll", tag: uuidv7(), to: "all", rolls: [{ formula: "1d20+3", label: "Perception", creature: { tokenId: who } }] });
 }
 
 /** A pane's fields' notes as they show for a cleared name and dice that do not read, each left by Enter, and then those fields as they were. */
@@ -1456,7 +1455,7 @@ async function lagoonScene(): Promise<{ sceneId: string; videoId: string }> {
   };
   const video = await put("video", "video/webm", webm);
   const still = await put("map", "image/png", await sharp({ create: { width: video.width, height: video.height, channels: 3, background: { r: 40, g: 90, b: 110 } } }).png().toBuffer());
-  const id = randomUUID();
+  const id = uuidv7();
   await ops.send({ t: "scene.create", scene: { id, name: "Lagoon", bounds: { w: 16, h: 9 }, background: "#2b2b31", fogEnabled: false, autoWalls: "floor", blockMovement: true } });
   // The client sends the video's id with the upload answer's facts, which the server fills again from the row (design 9.2).
   await ops.send({
@@ -1588,7 +1587,7 @@ async function uploadSilence(name: string, ms: number, kbps?: number): Promise<s
 async function soundsReady(): Promise<NonNullable<typeof soundLibrary>> {
   if (soundLibrary) return soundLibrary;
   const add = async (name: string, use: "music" | "loop" | "effect", ms: number) => {
-    const id = randomUUID();
+    const id = uuidv7();
     await ops.send({ t: "sound.create", id, assetId: await uploadSilence(name, ms), name, use, ms });
     return id;
   };
@@ -1596,7 +1595,7 @@ async function soundsReady(): Promise<NonNullable<typeof soundLibrary>> {
   const music = [await add("The Prancing Pony at midnight", "music", 31_000), await add("Road", "music", 32_000)];
   const loops = [await add("Rain on the cobblestones", "loop", 3_000), await add("Crowd", "loop", 3_000)];
   const effect = await add("Thunder", "effect", 1_000);
-  const playlist = randomUUID();
+  const playlist = uuidv7();
   await ops.send({ t: "playlist.create", id: playlist, name: "Tavern night", sounds: music, repeat: "all", fade: 5 });
   soundLibrary = { playlist, music, loops, effect };
   return soundLibrary;
@@ -1606,8 +1605,8 @@ async function soundsReady(): Promise<NonNullable<typeof soundLibrary>> {
 async function soundPlaying(): Promise<void> {
   const lib = await soundsReady();
   await ops.send({ t: "sound.stopAll" });
-  await ops.send({ t: "music.play", run: randomUUID(), playlistId: lib.playlist, order: lib.music, index: 0, repeat: "all", fade: 5 });
-  for (const soundId of lib.loops) await ops.send({ t: "loop.start", id: randomUUID(), soundId, volume: 70 });
+  await ops.send({ t: "music.play", run: uuidv7(), playlistId: lib.playlist, order: lib.music, index: 0, repeat: "all", fade: 5 });
+  for (const soundId of lib.loops) await ops.send({ t: "loop.start", id: uuidv7(), soundId, volume: 70 });
 }
 
 /** A section of the Sound panel, or any other section or group, by its label. */
@@ -2882,7 +2881,7 @@ async function playerRequestCard(page: Page): Promise<Locator | null> {
 
 /** Pat's ask card, as the DM asks for Thorn's save: Thorn has no stat block, so the card's roll row holds the bonus field and the extra dice. */
 async function askScreen(sweep: Sweep, page: Page): Promise<void> {
-  const id = randomUUID();
+  const id = uuidv7();
   await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 14, dcShown: true, resultShown: true, targets: [{ characterId: run.ids.thornChar }] } });
   const card = await playerRequestCard(page);
   if (card) {
@@ -3051,13 +3050,13 @@ async function ic2Start(): Promise<void> {
   await resetThorn();
   const stats = (wis: number) => ({ abilities: { str: 16, dex: 12, con: 14, int: 10, wis, cha: 10 }, saves: ["str", "con"], skills: { athletics: "prof" }, spellAbility: "wis", rolls: [] });
   await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { level: 7, stats: stats(12) } });
-  await ops.send({ t: "actor.effect.add", target: { characterId: run.ids.thornChar }, effect: { id: randomUUID(), key: "hexed", level: 3 } });
+  await ops.send({ t: "actor.effect.add", target: { characterId: run.ids.thornChar }, effect: { id: uuidv7(), key: "hexed", level: 3 } });
   await ops.send({ t: "character.create", character: { id: run.ids.wrenChar, name: "Wren", size: "medium", ownerIds: [run.patId], actor: actor({ hp: { cur: 22, max: 22, temp: 0 } }) } });
   await ops.send({ t: "character.update", characterId: run.ids.wrenChar, patch: { level: 4, knownForms: ["wolf", "brown-bear", "giant-spider", "riding-horse"], stats: stats(16) } });
   await ops.send({ t: "token.create", token: { id: run.ids.wren, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "pc", name: "Wren", ...WREN_AT, disposition: "ally", actor: { ref: run.ids.wrenChar } } });
-  await ops.send({ t: "actor.effect.add", target: { characterId: run.ids.wrenChar }, effect: { id: randomUUID(), key: "exhaustion", level: 2 } });
+  await ops.send({ t: "actor.effect.add", target: { characterId: run.ids.wrenChar }, effect: { id: uuidv7(), key: "exhaustion", level: 2 } });
   // A chip with no number, which draws its art (docs/design/design-v1-icons-2.md 4).
-  await ops.send({ t: "actor.effect.add", target: { characterId: run.ids.wrenChar }, effect: { id: randomUUID(), key: "poisoned" } });
+  await ops.send({ t: "actor.effect.add", target: { characterId: run.ids.wrenChar }, effect: { id: uuidv7(), key: "poisoned" } });
   await ops.send({ t: "token.update", tokenId: run.ids.goblin, patch: { visibility: "dm", locked: true, nameHidden: true } });
   // The goblin's turn comes at every size for the alert lines, and must leave it hidden.
   await ops.send({ t: "room.update", settings: { turnTimerSec: 0, revealHiddenOnTurn: false } });
@@ -3456,7 +3455,7 @@ async function ic2Screens(sweep: Sweep, page: Page, size: Size, scale: number): 
     } else await sweep.missing(page, "ic2-party", "no party bar");
   }
   // Rows for two of Pat's characters off this scene, which draw as off: Ash's initials and Bryn's faded portrait, dead (LOOK1-OPUS-08). The bar on a computer, the Party panel on a phone.
-  const off = { ash: randomUUID(), bryn: randomUUID() };
+  const off = { ash: uuidv7(), bryn: uuidv7() };
   await ops.send({ t: "character.create", character: { id: off.ash, name: "Ash", size: "medium", ownerIds: [run.patId], actor: actor({ hp: { cur: 12, max: 20, temp: 0 } }) } });
   await ops.send({ t: "character.create", character: { id: off.bryn, name: "Bryn", size: "medium", ownerIds: [run.patId], actor: actor({ hp: { cur: 0, max: 20, temp: 0 }, life: "dead" }) } });
   try {
@@ -3470,7 +3469,7 @@ async function ic2Screens(sweep: Sweep, page: Page, size: Size, scale: number): 
   }
 
   // The alert lines' leads: time up on the goblin's turn, and an effect that ended as it did.
-  await ops.send({ t: "actor.effect.add", target: { tokenId: run.ids.goblin }, effect: { id: randomUUID(), key: "frightened", duration: { mode: "turnEnd", of: { entryId: run.fight.goblin } } } });
+  await ops.send({ t: "actor.effect.add", target: { tokenId: run.ids.goblin }, effect: { id: uuidv7(), key: "frightened", duration: { mode: "turnEnd", of: { entryId: run.fight.goblin } } } });
   await ops.send({ t: "room.update", settings: { turnTimerSec: 2 } });
   await turnTo(run.fight.goblin);
   await page.locator('[data-alert="timeUp"]').first().waitFor({ state: "attached", timeout: 10_000 }).catch(() => {});
@@ -4781,12 +4780,12 @@ export function roomTest(): void {
     await ops.send(tok(ids.horse, { kind: "npc", name: "Warhorse", size: "large", x: 6, y: 5, disposition: "ally", ownerIds: [run.patId], actor: { inline: actor({ speeds: { walk: 60 } }) } }));
     await ops.send(tok(ids.torch, { kind: "object", name: "Torch", size: "tiny", x: 4.5, y: 6, disposition: "neutral", actor: { inline: actor({ hp: { cur: 1, max: 1, temp: 0 } }) } }));
     await ops.send(tok(ids.kobold, { kind: "monster", name: "Kobold", size: "small", x: 4, y: 4, disposition: "hostile", actor: { inline: actor({ hp: { cur: 5, max: 5, temp: 0 } }) } }));
-    await ops.send({ t: "actor.effect.add", target: { tokenId: ids.kobold }, effect: { id: randomUUID(), key: "grappled" } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: ids.kobold }, effect: { id: uuidv7(), key: "grappled" } });
     await ops.send(tok(ids.cart, { kind: "object", name: "Cart", size: "large", x: 3, y: 7, disposition: "neutral", actor: { inline: actor({ hp: { cur: 20, max: 20, temp: 0 } }) } }));
     await ops.send(tok(ids.goblin, { kind: "monster", name: "Goblin", x: 9, y: 3, disposition: "hostile", actor: { inline: actor() } }));
     await ops.send(tok(ids.lantern, { kind: "object", name: "Lantern", size: "tiny", x: 9.5, y: 3.5, disposition: "neutral", actor: { inline: actor({ hp: { cur: 1, max: 1, temp: 0 } }) } }));
     await ops.send(tok(ids.prisoner, { kind: "npc", name: "Prisoner", x: 10, y: 3, disposition: "neutral", actor: { inline: actor({ hp: { cur: 4, max: 4, temp: 0 } }) } }));
-    await ops.send({ t: "actor.effect.add", target: { tokenId: ids.prisoner }, effect: { id: randomUUID(), key: "grappled" } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: ids.prisoner }, effect: { id: uuidv7(), key: "grappled" } });
     await ops.send({ t: "token.attach", tokenId: ids.lantern, to: ids.goblin, kind: "carry", x: 9.5, y: 3.5, elevation: 0 });
     await ops.send({ t: "token.attach", tokenId: ids.prisoner, to: ids.goblin, kind: "drag", x: 10, y: 3, elevation: 0 });
     await ops.send(tok(ids.boss, { kind: "monster", name: "Goblin Boss of the Sunless Citadel", x: 15, y: 11, disposition: "hostile", actor: { inline: actor() } }));
@@ -4872,7 +4871,7 @@ export function roomTest(): void {
   });
 }
 
-const FL7 = { monster: randomUUID(), token: randomUUID(), companion: randomUUID(), block: randomUUID(), dragon: randomUUID() };
+const FL7 = { monster: uuidv7(), token: uuidv7(), companion: uuidv7(), block: uuidv7(), dragon: uuidv7() };
 const FL7_MONSTER_AT = { x: 1, y: 2 };
 const FL7_COMPANION_AT = { x: 2, y: 2 };
 const FL7_DRAGON_AT = { x: 1, y: 8 };
@@ -5123,7 +5122,7 @@ async function proficiencyRequests(sweep: Sweep, page: Page, shot: (page: Page, 
   await escapeAll(pat);
   await closeSheets(page);
   await escapeAll(page);
-  const id = randomUUID();
+  const id = uuidv7();
   await ops.send({ t: "roll.ask", request: { id, test: { kind: "check", choices: [{ ability: "wis", skill: "perception" }] }, dc: 14, dcShown: true, resultShown: true, targets: [{ characterId: run.ids.thornChar }] } });
   try {
     const card = await playerRequestCard(pat);
@@ -5157,7 +5156,7 @@ async function proficiencyRequests(sweep: Sweep, page: Page, shot: (page: Page, 
     await proficiencyScreen(sweep, page, "dm-request", dmCard, toggle);
     // Thorn still waits: the DM's Roll for him, its menu over the card, marks and all.
     await rollMenuScreen(sweep, page, "dpf1-menu-dm-request", dmCard.getByRole("button", { name: /^Roll .+ for Thorn/ }).first(), /^Roll options for Roll .+ for Thorn/, dmCard, () => alertCard(page, title));
-    await patOps.send({ t: "roll.dice", tag: randomUUID(), rollId: id, target: { characterId: run.ids.thornChar } });
+    await patOps.send({ t: "roll.dice", tag: uuidv7(), rollId: id, target: { characterId: run.ids.thornChar } });
     await waitFor("fl7: the player's rolled answer", () => dmSocket.state?.rolls[id]?.targets[0]?.dice);
     await dmCard.getByText(/^rolled \d+ \(/).waitFor();
     await sweep.measure(page, "fl7-dm-answer", toggle);
@@ -5172,7 +5171,7 @@ async function proficiencyRequests(sweep: Sweep, page: Page, shot: (page: Page, 
   } finally {
     await ops.send({ t: "roll.close", rollIds: [id] });
   }
-  const choiceId = randomUUID();
+  const choiceId = uuidv7();
   await ops.send({ t: "roll.ask", request: { id: choiceId, test: { kind: "check", choices: [{ ability: "wis", skill: "perception" }, { ability: "wis", skill: "animal-handling" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.ids.thornChar }] } });
   try {
     const card = await playerRequestCard(pat);
@@ -5193,12 +5192,12 @@ async function proficiencyResults(sweep: Sweep, page: Page, shot: (page: Page, n
   await escapeAll(page);
   await openPanel(page, "Token");
   const roll = { formula: "1d20+8", label: "Perception check", creature: { characterId: run.ids.thornChar } };
-  await patOps.send({ t: "dice.roll", tag: randomUUID(), to: "all", rolls: [roll] });
+  await patOps.send({ t: "dice.roll", tag: uuidv7(), to: "all", rolls: [roll] });
   // A natural 20 or 1 adds its verdict after the words, for a screen reader.
   const toast = page.locator("[data-toast]").filter({ hasText: /for Thorn, Perception check\./ }).filter({ visible: true }).last();
   await noMarks(sweep, page, "toast", toast);
   await shot(page, "toast-one-roll");
-  await patOps.send({ t: "dice.roll", tag: randomUUID(), to: "all", rolls: [roll, roll] });
+  await patOps.send({ t: "dice.roll", tag: uuidv7(), to: "all", rolls: [roll, roll] });
   const several = page.locator("[data-toast]").filter({ hasText: /rolled 2 Perception checks\./ }).filter({ visible: true }).last();
   assert.match((await several.textContent()) ?? "", /^[^\n]*rolled 2 Perception checks\.( Natural (20|1)\.)?$/, "fl7: the toast's words, no line per roll");
   const lines = await several.evaluate((node) => {
@@ -5278,7 +5277,7 @@ async function proficiencyGroup(sweep: Sweep, page: Page, shot: (page: Page, nam
 async function proficiencyEncounter(sweep: Sweep, page: Page, shot: (page: Page, name: string) => Promise<void>): Promise<void> {
   await closeSheets(page);
   await escapeAll(page);
-  const concentration = randomUUID();
+  const concentration = uuidv7();
   await ops.send({ t: "actor.effect.add", target: { tokenId: FL7.token }, effect: { id: concentration, key: "concentrating", spell: "Hex" } });
   await ops.send({ t: "actor.hp", target: { tokenId: FL7.token }, change: { kind: "damage", amount: 1 } });
   const card = await alertCard(page, "Concentration save for FL7 Monster");
@@ -5291,9 +5290,9 @@ async function proficiencyEncounter(sweep: Sweep, page: Page, shot: (page: Page,
   await ops.send({ t: "actor.effect.remove", target: { tokenId: FL7.token }, effectId: concentration });
   await escapeAll(page);
   await ops.send({ t: "encounter.end" });
-  await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: FL7.token, value: 20 }, { id: randomUUID(), tokenId: run.ids.thorn, value: 10 }] });
+  await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: FL7.token, value: 20 }, { id: uuidv7(), tokenId: run.ids.thorn, value: 10 }] });
   await ops.send({ t: "encounter.next" });
-  const effectId = randomUUID();
+  const effectId = uuidv7();
   await ops.send({ t: "actor.effect.add", target: { tokenId: FL7.token }, effect: { id: effectId, key: "frightened", save: { ability: "str", dc: 14 } } });
   await ops.send({ t: "encounter.next" });
   const waiting = page.locator('[data-alert-id^="saveEnds:"]').first();
@@ -6149,7 +6148,7 @@ export function restScrollsTest(): void {
       ] as const) {
         const at = `${size.name}${scale === 1 ? "" : "-130"}`;
         await openAt(pat, size, scale);
-        const id = randomUUID();
+        const id = uuidv7();
         if (card) {
           await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.ids.thornChar }] } });
           await pat.getByRole("dialog", { name: "The DM asks for a roll" }).waitFor();
@@ -6352,7 +6351,7 @@ export function fu30Tests(): void {
 
   test(`fu30-b. the token window's summary lines leave no unit alone: the saves three and three, and Speed, Passive Perception and the sheet link together, for an adult red dragon, a mage, a panther and Thorn as the DM and Pat see him, expanded on phones and in More stats where the bar is short, and beside a sideways phone's sheet with the elevation badge, within ${LIMIT_PX} px (LP21-BAR-3, D-261024-42, FU30-OPUS-3)`, async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-    const made = { dragon: randomUUID(), mage: randomUUID(), panther: randomUUID(), scout: randomUUID() };
+    const made = { dragon: uuidv7(), mage: uuidv7(), panther: uuidv7(), scout: uuidv7() };
     const creatures = [
       { id: made.dragon, name: "Summary Dragon", size: "huge", at: { x: 16, y: 8 }, tap: { x: 17, y: 9 }, actor: srdActor("adult-red-dragon"), saves: true },
       { id: made.mage, name: "Summary Mage", size: "medium", at: { x: 1, y: 9 }, tap: { x: 1, y: 9 }, actor: srdActor("mage"), saves: true },
@@ -6906,7 +6905,7 @@ const WING_KEEP = { w: 40, h: 30 };
 
 async function wingKeepScene(): Promise<string> {
   if (wingKeepId) return wingKeepId;
-  const id = randomUUID();
+  const id = uuidv7();
   await ops.send({ t: "scene.create", scene: { id, name: "Wing keep", bounds: WING_KEEP, fogEnabled: false } });
   await ops.send({ t: "build.rect", sceneId: id, terrain: "stone", x: 4, y: 4, w: 9, h: 9 });
   await waitFor("the wing keep", () => dmSocket.state?.scenes[id] ?? null);
@@ -6982,7 +6981,7 @@ async function clockScreens(sweep: Sweep, page: Page, desk: boolean): Promise<vo
   await start.getByRole("button", { name: "Start the clock", exact: true }).waitFor();
   await sweep.measure(page, "ck-time-start", start);
 
-  await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
+  await ops.send({ t: "clock.start", id: uuidv7(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
   const panel = await openPanel(page, "Time");
   await panel.getByRole("button", { name: "Set the date and time…", exact: true }).waitFor();
   await panel.getByRole("button", { name: "Other amount…", exact: true }).click();
@@ -7081,7 +7080,7 @@ export function clockTests(): void {
       else await sweep.missing(pat, one.root, `a reload asking for ${one.title} with nothing shared showed no line`);
     }
     try {
-      await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
+      await ops.send({ t: "clock.start", id: uuidv7(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
       await ops.send({ t: "sound.stopAll" });
       for (const at of FU30_AT) {
         const sweep = new Sweep(atName(at));
@@ -7107,7 +7106,7 @@ export function clockTests(): void {
   test(`ck-c. time spans: the add form with its Duration choices and the Other row refused, an effect row reading its end in and out of a fight for the DM and for Pat, the display's date and time chip, and a step that ends an effect with the notice showing, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
     const lines: string[] = [];
     try {
-      await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
+      await ops.send({ t: "clock.start", id: uuidv7(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
       for (const at of FU30_AT) {
         const sweep = new Sweep(atName(at));
         const page = await dmPageFor(at.size);
@@ -7140,7 +7139,7 @@ export function clockTests(): void {
   test(`ck-d. a step from the clock chip's popover that ends an effect: the popover and the expiry notice never overlap, at 1440 x 900 at 100% and 130%`, async () => {
     const lines: string[] = [];
     try {
-      await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
+      await ops.send({ t: "clock.start", id: uuidv7(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
       for (const at of FU30_AT.filter((x) => x.size.width === 1440)) {
         const sweep = new Sweep(atName(at));
         const page = await dmPageFor(at.size);
@@ -7150,7 +7149,7 @@ export function clockTests(): void {
         // A step that ends Thorn's effect: the popover and the notice it brings never overlap.
           await closeSheets(page);
           await escapeAll(page);
-          await ops.send({ t: "actor.effect.add", target: { characterId: run.ids.thornChar }, effect: { id: randomUUID(), key: "blessed", duration: { mode: "span", seconds: 600 } } });
+          await ops.send({ t: "actor.effect.add", target: { characterId: run.ids.thornChar }, effect: { id: uuidv7(), key: "blessed", duration: { mode: "span", seconds: 600 } } });
           const clock = barChip(page, "clock");
           await clock.click();
           const popover = page.getByRole("dialog", { name: "Time", exact: true }).filter({ has: page.locator("[data-chip-time]") });
@@ -7205,7 +7204,7 @@ async function daylightScreens(sweep: Sweep, page: Page): Promise<void> {
   await escapeAll(page);
   if (dmSocket.state?.clock) await ops.send({ t: "clock.stop" });
   await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { vision: { on: true, light: "bright", byClock: true } } });
-  await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
+  await ops.send({ t: "clock.start", id: uuidv7(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
   const scenes = await openDmPanel(page, "Scenes");
   const light = sceneGroup(scenes, "Light and weather");
   await light.getByRole("radio", { name: "Time of day", exact: true }).waitFor();
@@ -7219,7 +7218,7 @@ async function daylightScreens(sweep: Sweep, page: Page): Promise<void> {
   await ops.send({ t: "clock.stop" });
   await help("The clock is stopped");
   await sweep.measure(page, "dl-light-stopped", light);
-  await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
+  await ops.send({ t: "clock.start", id: uuidv7(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
 
   await closeSheets(page);
   const panel = await openPanel(page, "Time");
@@ -7324,11 +7323,11 @@ async function timedScreens(sweep: Sweep, page: Page, who: "dm" | "pat"): Promis
   await sweep.measure(page, `${root}-form-longest`, section);
   await section.getByRole("button", { name: "Back", exact: true }).click();
 
-  await ops.send({ t: "actor.effect.add", target: { characterId: run.ids.thornChar }, effect: { id: randomUUID(), key: "blessed", duration: { mode: "span", seconds: 3_600 } } });
+  await ops.send({ t: "actor.effect.add", target: { characterId: run.ids.thornChar }, effect: { id: uuidv7(), key: "blessed", duration: { mode: "span", seconds: 3_600 } } });
   await section.getByText(/^Lasts 1 hour, to /).first().waitFor();
   await sweep.measure(page, `${root}-row`, section);
   if (who === "dm" && !dmSocket.state?.encounter) {
-    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), characterId: run.ids.thornChar, value: 12 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), characterId: run.ids.thornChar, value: 12 }] });
     await ops.send({ t: "encounter.next" });
     await section.getByText(/^Lasts 1 hour, to the start of round /).first().waitFor();
     await sweep.measure(page, "tm-dm-row-fight", section);
@@ -7415,7 +7414,7 @@ async function caveScene(): Promise<string> {
   const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=map`, { headers: { Origin: server.origin, "content-type": "image/png" }, data });
   assert.ok(res.ok(), `the upload answered ${res.status()}`);
   const map = (await res.json()) as { id: string; width: number; height: number };
-  const id = randomUUID();
+  const id = uuidv7();
   await ops.send({ t: "scene.create", scene: { id, name: "Open cave", bounds: { w: 10, h: 8 }, background: "#2b2b31", fogEnabled: true, autoWalls: "off", blockMovement: false, vision: { on: true, light: "bright" } } });
   await ops.send({ t: "scene.setMap", sceneId: id, map: { assetId: map.id, widthPx: map.width, heightPx: map.height, cellPx: 50, originPx: { x: 0, y: 0 } } });
   caveId = id;
@@ -7478,7 +7477,7 @@ export function panelGroupTests(): void {
           const time = await openPanel(page, "Time");
           await time.getByRole("button", { name: "Start the clock", exact: true }).waitFor();
           await groups(sweep, page, "pg-time-no-clock", time, time, false);
-          await ops.send({ t: "clock.start", id: randomUUID(), at: 2 * 86_400 + 20 * 3_600, shown: false, calendar: { kind: "days" } });
+          await ops.send({ t: "clock.start", id: uuidv7(), at: 2 * 86_400 + 20 * 3_600, shown: false, calendar: { kind: "days" } });
           await time.getByRole("button", { name: "Set the date and time…", exact: true }).waitFor();
           await groups(sweep, page, "pg-time-clock", time, time, false);
           await shots.take(page, `alignment-${sweep.at}-pg-time-clock`);
@@ -7733,8 +7732,8 @@ export function panelGroupTests(): void {
 export function fu32Tests(): void {
   test(`fu32-a. a short label stands beside its Stepper or choices wherever both fit: the Monsters place card's How many, an area's group save's Slot level, and a companion's It is in Add a companion and its token's Companion group, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (FU31-STEPPER-ROWS)`, async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-    const hound = randomUUID();
-    const fireball = randomUUID();
+    const hound = uuidv7();
+    const fireball = uuidv7();
     const lines: string[] = [];
     try {
       await ops.send({ t: "token.create", token: { id: hound, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Hound", ...HOUND_AT, disposition: "ally", ownerIds: [run.patId], companion: { of: run.ids.thornChar, turn: "shared" }, actor: { inline: actor({ srdId: "mastiff" }) } } });
@@ -7849,7 +7848,7 @@ async function cryptScene(): Promise<string> {
   };
   const day = await upload([90, 80, 70]);
   const night = await upload([30, 34, 60]);
-  const id = randomUUID();
+  const id = uuidv7();
   await ops.send({ t: "scene.create", scene: { id, name: "Crypt", bounds: { w: 10, h: 8 }, background: "#2b2b31", fogEnabled: true, autoWalls: "floor", blockMovement: true, vision: { on: false, light: "bright" } } });
   await ops.send({ t: "scene.setMap", sceneId: id, map: { assetId: day.id, widthPx: day.width, heightPx: day.height, cellPx: 50, originPx: { x: 0, y: 0 } } });
   await ops.send({
@@ -7857,8 +7856,8 @@ async function cryptScene(): Promise<string> {
     sceneId: id,
     patch: {
       phases: [
-        { id: randomUUID(), name: "Day", assetId: day.id, widthPx: day.width, heightPx: day.height },
-        { id: randomUUID(), name: "Night", assetId: night.id, widthPx: night.width, heightPx: night.height, light: "dark" },
+        { id: uuidv7(), name: "Day", assetId: day.id, widthPx: day.width, heightPx: day.height },
+        { id: uuidv7(), name: "Night", assetId: night.id, widthPx: night.width, heightPx: night.height, light: "dark" },
       ],
     },
   });
@@ -7871,7 +7870,7 @@ let hexCryptId: string | null = null;
 
 async function hexCryptScene(crypt: string): Promise<string> {
   if (hexCryptId) return hexCryptId;
-  const id = randomUUID();
+  const id = uuidv7();
   await ops.send({ t: "scene.duplicate", sceneId: crypt, newSceneId: id, name: "Hex crypt", include: { creatures: false, characters: false, fog: false, drawings: false } });
   await ops.send({ t: "scene.update", sceneId: id, patch: { gridShape: "hexRows" } });
   hexCryptId = id;
@@ -8146,15 +8145,15 @@ export function sceneSettingsTests(): void {
 function floorsRootTests(): void {
   test(`flr-a. the Floors group folded and open, a floor's page, Floor and its menu or the Menu row, and Move to floor's list, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
     await newDmSession();
-    const tower = randomUUID();
-    const upper = randomUUID();
-    const scout = randomUUID();
+    const tower = uuidv7();
+    const upper = uuidv7();
+    const scout = uuidv7();
     await ops.send({ t: "scene.create", scene: { id: tower, name: "Tower", bounds: BOUNDS, background: "#2b2b31" } });
     await ops.send({ t: "scene.create", scene: { id: upper, name: "Tower", bounds: BOUNDS }, floor: { beside: tower, side: "above" } });
     await ops.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor" } } });
     await ops.send({ t: "token.create", token: { id: scout, sceneId: tower, kind: "npc", name: "Scout", size: "medium", x: 5, y: 5, visibility: "all", actor: { inline: actor() } } });
     // Attic is a floor of the players' scene they have not reached, which the DM menu on it must say.
-    const attic = randomUUID();
+    const attic = uuidv7();
     await ops.send({ t: "scene.create", scene: { id: attic, name: "Tower", bounds: BOUNDS }, floor: { beside: upper, side: "above" } });
     await ops.send({ t: "scene.update", sceneId: attic, patch: { floor: { name: "Attic" } } });
     await ops.send({ t: "room.setPlayerScene", sceneId: tower });
@@ -8282,9 +8281,9 @@ function floorsRootTests(): void {
 function floorLinkBuildTests(): void {
   test(`flrk-a. the Map builder's row in Between floors with Kind and To, an end's pane, and the floors group and page where stairs turn the adds and moves off, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
     await newDmSession();
-    const tower = randomUUID();
-    const upper = randomUUID();
-    const attic = randomUUID();
+    const tower = uuidv7();
+    const upper = uuidv7();
+    const attic = uuidv7();
     await ops.send({ t: "scene.create", scene: { id: tower, name: "Tower", bounds: BOUNDS, background: "#2b2b31" } });
     await ops.send({ t: "scene.create", scene: { id: upper, name: "Tower", bounds: BOUNDS }, floor: { beside: tower, side: "above" } });
     await ops.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor" } } });
@@ -8419,9 +8418,9 @@ async function boardPillBoxes(page: Page): Promise<{ text: string; l: number; t:
 function floorMarkerTests(): void {
   test("fu53-marker. a stairs end's name keeps clear of the turn marker beside it at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%", async () => {
     await newDmSession();
-    const tower = randomUUID();
-    const upper = randomUUID();
-    const goblin = randomUUID();
+    const tower = uuidv7();
+    const upper = uuidv7();
+    const goblin = uuidv7();
     await ops.send({ t: "scene.create", scene: { id: tower, name: "Tower", bounds: BOUNDS, background: "#2b2b31" } });
     await ops.send({ t: "scene.create", scene: { id: upper, name: "Tower", bounds: BOUNDS }, floor: { beside: tower, side: "above" } });
     await ops.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor" } } });
@@ -8430,7 +8429,7 @@ function floorMarkerTests(): void {
       await ops.send({ t: "floorLink.put", link: { id: "fu53-c", pairId: "fu53-d", sceneId: tower, to: upper, rect: { x: 6, y: 6, w: 2, h: 1 }, kind: "stairs" } });
       await ops.send({ t: "token.create", token: { id: goblin, sceneId: tower, kind: "monster", name: "Goblin Warrior", size: "medium", x: 6, y: 5, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
       if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-      await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: goblin, value: 20 }, { id: randomUUID(), tokenId: run.ids.thorn, value: 10 }] });
+      await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: goblin, value: 20 }, { id: uuidv7(), tokenId: run.ids.thorn, value: 10 }] });
       await ops.send({ t: "encounter.next" });
       await ops.send({ t: "token.move", tokenId: goblin, x: 9, y: 5 });
       for (const at of FU30_AT) {
@@ -8479,9 +8478,9 @@ function floorMarkerTests(): void {
 function floorMarkerIsoTests(): void {
   test("b53fix-marker-iso. in Isometric a stairs end's name keeps clear of the turn marker that stands over it on screen, at 1440 x 900", async () => {
     await newDmSession();
-    const tower = randomUUID();
-    const upper = randomUUID();
-    const goblin = randomUUID();
+    const tower = uuidv7();
+    const upper = uuidv7();
+    const goblin = uuidv7();
     await ops.send({ t: "scene.create", scene: { id: tower, name: "Tower", bounds: BOUNDS, background: "#2b2b31" } });
     await ops.send({ t: "scene.create", scene: { id: upper, name: "Tower", bounds: BOUNDS }, floor: { beside: tower, side: "above" } });
     await ops.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor" } } });
@@ -8500,7 +8499,7 @@ function floorMarkerIsoTests(): void {
       await ops.send({ t: "token.create", token: { id: goblin, sceneId: tower, kind: "monster", name: "Goblin Warrior", size: "medium", x: 6, y: 3, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
       // The step before restarts the room's fight, which the DM's copy may not show yet.
       await ops.send({ t: "encounter.end" }).catch(() => {});
-      await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: goblin, value: 20 }, { id: randomUUID(), tokenId: run.ids.thorn, value: 10 }] });
+      await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: goblin, value: 20 }, { id: uuidv7(), tokenId: run.ids.thorn, value: 10 }] });
       await ops.send({ t: "encounter.next" });
       await ops.send({ t: "token.move", tokenId: goblin, x: 9, y: 3 });
       page.setDefaultTimeout(10_000);
@@ -8546,9 +8545,9 @@ function floorMarkerIsoTests(): void {
 function floorPillTests(): void {
   test("fu53-pill. the DM's stairs pill keeps Up to Upper floor whole beside Not reached yet, and the bar of a creature on the stairs with Go up, at 1280 x 800, 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%", async () => {
     await newDmSession();
-    const tower = randomUUID();
-    const upper = randomUUID();
-    const warrior = randomUUID();
+    const tower = uuidv7();
+    const upper = uuidv7();
+    const warrior = uuidv7();
     await ops.send({ t: "scene.create", scene: { id: tower, name: "Tower", bounds: BOUNDS, background: "#2b2b31" } });
     await ops.send({ t: "scene.create", scene: { id: upper, name: "Tower", bounds: BOUNDS }, floor: { beside: tower, side: "above" } });
     await ops.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor" } } });
@@ -8792,8 +8791,8 @@ export function md4Tests(): void {
   test(`md4-a. the Map builder's row with its note that the party sees where the DM builds, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design/design-v1-map-discovery.md 9)`, async () => {
     await newDmSession();
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-    const cave = randomUUID();
-    const scout = randomUUID();
+    const cave = uuidv7();
+    const scout = uuidv7();
     const lines: string[] = [];
     let page: Page | null = null;
     try {
@@ -8849,8 +8848,8 @@ export function md4Tests(): void {
   test(`md4-b. the forget question, asked before Clear build clears a cavern the party saw past what players' remembered map can keep, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px, Escape answering no and the build left whole (docs/design/design-v1-map-discovery.md 9)`, async () => {
     await newDmSession();
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-    const cavern = randomUUID();
-    const scout = randomUUID();
+    const cavern = uuidv7();
+    const scout = uuidv7();
     const bounds = { w: 80, h: 64 };
     const lines: string[] = [];
     let page: Page | null = null;
@@ -8928,7 +8927,7 @@ export function undoScopeAlignmentTests(names: readonly string[]): void {
         });
         await openAt(page, size, scale);
         const wire = await UndoWire.open({ origin: server.origin, roomId: run.roomId, cookie: await cookieOf(dmContext) });
-        const characterId = randomUUID();
+        const characterId = uuidv7();
         try {
           await wire.apply({ t: "character.create", character: { id: characterId, name: "Bree, keeper of the western beacon and the lanterns along the harbor", size: "medium", ownerIds: [], actor: actor() } });
           await wire.apply({ t: "character.update", characterId, patch: { actor: { ac: 19 } } });
@@ -9236,7 +9235,7 @@ export function undoSaveAlignmentTests(names: readonly string[]): void {
         const thornAsk = (but: readonly string[]) => Object.values(dmSocket.state?.rolls ?? {}).find((ask) => !but.includes(ask.id) && ask.targets.some(isThorn)) ?? null;
         const answer = async (rollId: string, total: number) => {
           const target = dmSocket.state!.rolls[rollId]!.targets.find(isThorn)!;
-          await patOps.send({ t: "roll.answer", rollId, target: target.characterId ? { characterId: target.characterId } : { tokenId: target.tokenId! }, total, tag: randomUUID() });
+          await patOps.send({ t: "roll.answer", rollId, target: target.characterId ? { characterId: target.characterId } : { tokenId: target.tokenId! }, total, tag: uuidv7() });
           await waitFor(`Pat's ${total} on the DM's copy`, () => dmSocket.state?.rolls[rollId]?.targets.some((t) => t.total === total) || null);
         };
         /**
@@ -10016,11 +10015,11 @@ async function nightWatchReady(): Promise<NonNullable<typeof nightWatch>> {
   const assetId = await uploadSilence("Night watch", ms, 64);
   const order = [...lib.music];
   for (const name of NIGHT_WATCH) {
-    const id = randomUUID();
+    const id = uuidv7();
     await ops.send({ t: "sound.create", id, assetId, name, use: "music", ms });
     order.push(id);
   }
-  const playlist = randomUUID();
+  const playlist = uuidv7();
   await ops.send({ t: "playlist.create", id: playlist, name: "Night watch", sounds: order, repeat: "all", fade: 5 });
   nightWatch = { playlist, order };
   return nightWatch;
@@ -10208,7 +10207,7 @@ export function musicPlayerAlignmentTests(): void {
           if (at.scale === 1) await shots.take(page, `alignment-${sweep.at}-${what}`);
         };
         // Night watch from its third track, so Up next holds the two after it and Played the two before it under Repeat off (music-player 4.3).
-        const runId = randomUUID();
+        const runId = uuidv7();
         await ops.send({ t: "music.play", run: runId, playlistId: night.playlist, order: night.order, index: 2, repeat: "all", fade: 5 });
         await waitFor("Night watch playing", () => (dmSocket.state?.playing?.music?.run === runId ? true : null));
         try {
@@ -10359,9 +10358,9 @@ export function musicPlayerAlignmentTests(): void {
         const chip = page.locator('header[data-rvtt-topbar] [data-chip="nowPlaying"]');
         const state = (want: string) => waitFor(`the chip ${want}`, async () => ((await chip.getAttribute("data-chip-state")) === want ? true : null), 5_000);
         try {
-          const runId = randomUUID();
+          const runId = uuidv7();
           await ops.send({ t: "music.play", run: runId, playlistId: night.playlist, order: night.order, index: 2, repeat: "all", fade: 5 });
-          for (const soundId of lib.loops) await ops.send({ t: "loop.start", id: randomUUID(), soundId, volume: 70 });
+          for (const soundId of lib.loops) await ops.send({ t: "loop.start", id: uuidv7(), soundId, volume: 70 });
           await waitFor("music and two loops playing", () => (dmSocket.state?.playing?.music?.run === runId && Object.keys(dmSocket.state.playing.loops ?? {}).length === lib.loops.length ? true : null));
           // At 100% the chip has room from 700 px. On an upright phone the speaker beside it takes its room, since a phone's chip leaves before the gaps tighten (docs/design/design-v1-volume.md 3), and at 130% a bar holding the room's fight may give it way into the DM menu, as at the smallest bars (SL-C, design-v1-qol.md 4, The give-way, step 6).
           const shown = await showsWithin(chip, 5_000);
@@ -10594,7 +10593,7 @@ let openFieldId: string | null = null;
 /** A scene with fog off and no vision, so moving the players there asks first (vision/moveWarning.ts). Made once for the run. */
 async function openFieldScene(): Promise<string> {
   if (openFieldId) return openFieldId;
-  const id = randomUUID();
+  const id = uuidv7();
   await ops.send({ t: "scene.create", scene: { id, name: "Open field", bounds: { w: 10, h: 8 }, background: "#2b2b31", fogEnabled: false, autoWalls: "floor", blockMovement: true, vision: { on: false, light: "bright" } } });
   openFieldId = id;
   return id;
@@ -10824,7 +10823,7 @@ async function qolElsewhereScreens(sweep: Sweep, page: Page, frames: SocketHold,
   menu = await openChipMenu(page, "dm", "dm");
   if (menu) {
     // A scene id the server has never had makes it refuse the move, so the item says why in its place.
-    const nowhere = randomUUID();
+    const nowhere = uuidv7();
     frames.spoil = (frame) => (frame.includes('"room.setPlayerScene"') ? frame.split(scenes.crypt).join(nowhere) : frame);
     try {
       const move = chipItem(menu, "movePlayers");
@@ -11035,7 +11034,7 @@ export function qolBarTests(): void {
     await freshDm();
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     await playersHome();
-    await ops.send({ t: "clock.start", id: randomUUID(), at: 20 * 3_600, shown: true, calendar: { kind: "days" } });
+    await ops.send({ t: "clock.start", id: uuidv7(), at: 20 * 3_600, shown: true, calendar: { kind: "days" } });
     const lines: string[] = [];
     try {
       for (const at of FU30_AT) {
@@ -11136,8 +11135,8 @@ export function qolBarTests(): void {
     await freshDm();
     const lines: string[] = [];
     try {
-      await ops.send({ t: "clock.start", id: randomUUID(), at: 20 * 3_600, shown: true, calendar: { kind: "days" } });
-      await ops.send({ t: "music.play", run: randomUUID(), playlistId: lib.playlist, order: lib.music, index: 0, repeat: "all", fade: 5 });
+      await ops.send({ t: "clock.start", id: uuidv7(), at: 20 * 3_600, shown: true, calendar: { kind: "days" } });
+      await ops.send({ t: "music.play", run: uuidv7(), playlistId: lib.playlist, order: lib.music, index: 0, repeat: "all", fade: 5 });
       await ops.send({ t: "room.update", settings: { turnTimerSec: 2 } });
       await fightSeen(await restartFight());
       const boss = await waitFor("the boss's row in the fight", () => (dmSocket.state?.encounter?.activeEntryId ? dmSocket.state.encounter.entries.find((e) => e.tokenId === run.ids.boss)?.id ?? null : null));
@@ -11188,8 +11187,8 @@ export function qolBarTests(): void {
 
 /** Two of the SRD's Goblin Warriors beside Thorn, for the turn card's attacks, Apply to, All of a kind and the group save (audit Q1, Q2, Q7, Q8). They read the numbers the table gives them (dmName). */
 const QOL_WARRIORS = [
-  { id: randomUUID(), at: { x: 8, y: 6 } },
-  { id: randomUUID(), at: { x: 9, y: 5 } },
+  { id: uuidv7(), at: { x: 8, y: 6 } },
+  { id: uuidv7(), at: { x: 9, y: 5 } },
 ] as const;
 
 /** Three handout pictures for Handouts' Recent, uploaded once for the run: Recent keeps one entry for each picture. */
@@ -11279,7 +11278,7 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
   // Pat's damage roll toasts on the DM's page while Dice is not on screen, with chips for Thorn's enemies (audit Q2).
   if (wide) await openPanel(page, "Initiative");
   await dismissToasts(page);
-  await patOps.send({ t: "dice.roll", tag: randomUUID(), to: "all", rolls: [{ formula: "1d8+3", label: "Longsword damage", creature: { tokenId: run.ids.thorn } }] });
+  await patOps.send({ t: "dice.roll", tag: uuidv7(), to: "all", rolls: [{ formula: "1d8+3", label: "Longsword damage", creature: { tokenId: run.ids.thorn } }] });
   const toast = page.locator("[data-toast]").filter({ hasText: /^Pat rolled \d+/ }).filter({ visible: true });
   if (await showsWithin(toast.first(), 5_000)) {
     const sends = toast.first().locator("[data-toast-sends]");
@@ -11473,11 +11472,11 @@ export function fu52Tests(): void {
   test(`fu52-values. Type several values in the Initiative panel, its rows with a portrait, Split, the sign and the box, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
     const lines: string[] = [];
     await freshDm();
-    const twins = [randomUUID(), randomUUID()];
+    const twins = [uuidv7(), uuidv7()];
     for (const [i, id] of twins.entries()) await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", size: "medium", x: 8 + i, y: 6, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
     try {
       if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-      await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.ids.thorn, value: 12 }, ...twins.map((id) => ({ id: randomUUID(), tokenId: id, value: 7 }))] });
+      await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: run.ids.thorn, value: 12 }, ...twins.map((id) => ({ id: uuidv7(), tokenId: id, value: 7 }))] });
       for (const at of FU30_AT) {
         const sweep = new Sweep(`fu52-${atName(at)}`);
         const page = await dmPageFor(at.size);
@@ -11570,9 +11569,9 @@ export function fu52Tests(): void {
  * them, so n is what the DM's board gives (dmName).
  */
 const NUMC1_CREATURES = [
-  { id: randomUUID(), name: "Goblin", at: { x: 17, y: 11 }, shape: /^Goblin \((\d+)\)$/ },
-  { id: randomUUID(), name: "Goblin", at: { x: 18, y: 11 }, shape: /^Goblin \((\d+)\)$/ },
-  { id: randomUUID(), name: "Orc", publicName: "Goblin", at: { x: 18, y: 12 }, shape: /^Orc \(as Goblin \((\d+)\)\)$/ },
+  { id: uuidv7(), name: "Goblin", at: { x: 17, y: 11 }, shape: /^Goblin \((\d+)\)$/ },
+  { id: uuidv7(), name: "Goblin", at: { x: 18, y: 11 }, shape: /^Goblin \((\d+)\)$/ },
+  { id: uuidv7(), name: "Orc", publicName: "Goblin", at: { x: 18, y: 12 }, shape: /^Orc \(as Goblin \((\d+)\)\)$/ },
 ] as const;
 
 function creatureNumberTests(): void {
@@ -11641,12 +11640,12 @@ export function qolPanelTests(): void {
     await freshDm();
     await playersHome();
     const pictures = await qolHandoutPictures();
-    const fightId = randomUUID();
+    const fightId = uuidv7();
     const lines: string[] = [];
     try {
       if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
       for (const w of QOL_WARRIORS) await ops.send({ t: "token.create", token: { id: w.id, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", size: "medium", ...w.at, visibility: "all", disposition: "hostile", actor: { inline: srdActor("goblin-warrior") } } });
-      await ops.send({ t: "encounter.start", entries: [{ id: fightId, tokenId: QOL_WARRIORS[0].id, value: 20 }, { id: randomUUID(), tokenId: run.ids.thorn, value: 10 }, { id: randomUUID(), tokenId: QOL_WARRIORS[1].id, value: 5 }] });
+      await ops.send({ t: "encounter.start", entries: [{ id: fightId, tokenId: QOL_WARRIORS[0].id, value: 20 }, { id: uuidv7(), tokenId: run.ids.thorn, value: 10 }, { id: uuidv7(), tokenId: QOL_WARRIORS[1].id, value: 5 }] });
       await ops.send({ t: "encounter.next" });
       await waitFor("the warrior's turn", () => (dmSocket.state?.encounter?.activeEntryId === fightId ? true : null));
       for (const at of FU30_AT) {

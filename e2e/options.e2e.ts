@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { after, before, describe, test } from "node:test";
 import type { Locator, Page } from "playwright-core";
 import { openSideTab, pagePoint, pickTool, Touches, waitFor, wholeInReach } from "./harness.ts";
@@ -306,7 +306,7 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     // At 480 x 320 at 130% in a fight, the shape popover still shows its title and a row.
     await reloadAt(dm, 1.3);
     await view(dm, dmCdp, SIZES[4]!);
-    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.goblins[0]!, value: 12 }] });
+    await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: run.goblins[0]!, value: 12 }] });
     await selectTool(dm, "a");
     await options(dm).getByRole("button", { name: /^Shape:/ }).tap();
     const shape = dm.getByRole("dialog", { name: "Shape" });
@@ -383,7 +383,7 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
   });
 
   test("4c. a scene change closes an open popover: a chip's and ⋯", async () => {
-    const other = randomUUID();
+    const other = uuidv7();
     await ops.send({ t: "scene.create", scene: { id: other, name: "Elsewhere", bounds: { w: 10, h: 10 }, background: "#2b2b31", fogEnabled: false, autoWalls: "off" } });
     await reloadAt(player, 1);
     await view(player, playerCdp, SIZES[1]!);
@@ -930,7 +930,7 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     await key(dm, "v");
     // Off the map, so no hovered token shows its plate.
     await dm.mouse.move(1, 1);
-    const trapId = randomUUID();
+    const trapId = uuidv7();
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false };
     // Goblin 3 stands at (16, 9). The trap's top edge is two rows under it, so its name stands where the goblin's label would hang ("Pois30/30arts").
     await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Poison darts", zone: { cells: [{ x: 15, y: 11, w: 3, h: 2 }] }, rig } });

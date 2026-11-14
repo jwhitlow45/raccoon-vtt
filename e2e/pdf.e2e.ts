@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -123,14 +124,14 @@ async function documentOf(title: string, pages: Buffer[]): Promise<Doc> {
     const { assetId, width, height } = await uploadHandout(p);
     rows.push({ assetId, width, height });
   }
-  const doc = { id: randomUUID(), title, pages: rows };
+  const doc = { id: uuidv7(), title, pages: rows };
   await ops.send({ t: "handoutDoc.create", doc });
   return doc;
 }
 
 /** Shows a document's pages to everyone under a new handout id, as Show a handout does. */
 async function show(doc: Doc, to: "all" | string[] = "all"): Promise<string> {
-  const id = randomUUID();
+  const id = uuidv7();
   await ops.send({ t: "handout.show", handout: { id, pages: doc.pages, title: doc.title, to } });
   return id;
 }
@@ -1557,7 +1558,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     const actor = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
     await ops.send({
       t: "token.create",
-      token: { id: randomUUID(), sceneId: dmSocket.state!.meta.playerSceneId, size: "medium", visibility: "all", kind: "monster", name: "Statue", x: 2, y: 2, image: { assetId: tokenId, crop: { cx: 0, cy: 0, zoom: 1 } }, actor: { inline: actor } },
+      token: { id: uuidv7(), sceneId: dmSocket.state!.meta.playerSceneId, size: "medium", visibility: "all", kind: "monster", name: "Statue", x: 2, y: 2, image: { assetId: tokenId, crop: { cx: 0, cy: 0, zoom: 1 } }, actor: { inline: actor } },
     });
     await phoneLibrary(phone);
     const tokens = phone.getByRole("list", { name: "Token images in this room" });
@@ -1708,7 +1709,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     const actor = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
     await ops.send({
       t: "token.create",
-      token: { id: randomUUID(), sceneId: dmSocket.state!.meta.playerSceneId, size: "medium", visibility: "all", kind: "monster", name: "Gargoyle", x: 3, y: 2, image: { assetId: imageId, crop: { cx: 0, cy: 0, zoom: 1 } }, actor: { inline: actor } },
+      token: { id: uuidv7(), sceneId: dmSocket.state!.meta.playerSceneId, size: "medium", visibility: "all", kind: "monster", name: "Gargoyle", x: 3, y: 2, image: { assetId: imageId, crop: { cx: 0, cy: 0, zoom: 1 } }, actor: { inline: actor } },
     });
 
     // Only the list's GET fails: uploads go to the same path with PUT.

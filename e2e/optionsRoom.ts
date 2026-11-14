@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -137,14 +138,14 @@ export const run = {
   roomName: `E2E options ${new Date().toISOString().slice(0, 19)}`,
   sceneId: "",
   patId: "",
-  thorn: { id: randomUUID(), characterId: randomUUID() },
+  thorn: { id: uuidv7(), characterId: uuidv7() },
   /** Thorn's companion and a scene to send Thorn to, for the From control's chip and its disabled form (docs/design/design-v1-area-from-character.md 6). */
-  pip: randomUUID(),
-  away: randomUUID(),
-  goblins: [randomUUID(), randomUUID(), randomUUID()],
-  kept: Array.from({ length: 10 }, () => randomUUID()),
-  stamp: randomUUID(),
-  page: randomUUID(),
+  pip: uuidv7(),
+  away: uuidv7(),
+  goblins: [uuidv7(), uuidv7(), uuidv7()],
+  kept: Array.from({ length: 10 }, () => uuidv7()),
+  stamp: uuidv7(),
+  page: uuidv7(),
   map: { assetId: "", widthPx: 0, heightPx: 0 },
 };
 

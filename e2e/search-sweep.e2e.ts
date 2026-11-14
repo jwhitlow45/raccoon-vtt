@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -80,19 +80,19 @@ const run = {
   password: "",
   dmKey: "",
   mat: "",
-  cave: randomUUID(),
-  caveLoft: randomUUID(),
-  caveTop: randomUUID(),
-  day: randomUUID(),
-  night: randomUUID(),
-  bree: randomUUID(),
-  thorn: randomUUID(),
-  tBree: randomUUID(),
-  goblin: randomUUID(),
-  drums: randomUUID(),
-  song: randomUUID(),
+  cave: uuidv7(),
+  caveLoft: uuidv7(),
+  caveTop: uuidv7(),
+  day: uuidv7(),
+  night: uuidv7(),
+  bree: uuidv7(),
+  thorn: uuidv7(),
+  tBree: uuidv7(),
+  goblin: uuidv7(),
+  drums: uuidv7(),
+  song: uuidv7(),
   letter: "",
-  shown: randomUUID(),
+  shown: uuidv7(),
   patId: "",
 };
 
@@ -132,7 +132,7 @@ async function dmContext(options: Parameters<Browser["newContext"]>[0]): Promise
   await context.addInitScript(WINDOWS);
   const res = await context.request.post(`${server.origin}/api/rooms/${run.roomId}/dm`, { headers: { Origin: server.origin }, data: { key: run.dmKey, memberId: dmSocket.you?.memberId } });
   assert.ok(res.ok(), `the DM link answered ${res.status()}`);
-  sessions.set(context, randomUUID());
+  sessions.set(context, uuidv7());
   return context;
 }
 
@@ -187,7 +187,7 @@ async function createRoom(): Promise<void> {
   await ops.send({ t: "token.create", token: { id: run.tBree, sceneId: run.mat, name: "Bree", kind: "pc", x: 4, y: 4, size: "medium", visibility: "all", ownerIds: [run.patId], actor: { ref: run.bree } } });
   await addSound({ context: desk, origin: server.origin, roomId: run.roomId, ops, id: run.song, name: "Tavern song", use: "music", ms: 31_000 });
   await ops.send({ t: "playlist.create", id: run.drums, name: "Goblin war drums", sounds: [run.song], repeat: "all", fade: 0 });
-  await ops.send({ t: "music.play", run: randomUUID(), playlistId: run.drums, order: [run.song], index: 0, repeat: "all", fade: 0 });
+  await ops.send({ t: "music.play", run: uuidv7(), playlistId: run.drums, order: [run.song], index: 0, repeat: "all", fade: 0 });
   const day = await upload("map", { r: 200, g: 190, b: 160 }, { w: 200, h: 140 });
   const night = await upload("map", { r: 30, g: 30, b: 60 }, { w: 200, h: 140 });
   await ops.send({ t: "scene.setMap", sceneId: run.mat, map: { assetId: day, widthPx: 200, heightPx: 140, cellPx: 10, originPx: { x: 0, y: 0 } } });
@@ -740,8 +740,8 @@ describe("the room search's sweep", { concurrency: false }, () => {
   });
 
   test("se-s4. as the DM in a fight, with a clock running, a blackout on and the camera on another scene's middle floor, every entry offered lands on its control, at a desk and on a phone", async () => {
-    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.goblin, value: 15 }, { id: randomUUID(), tokenId: run.tBree, value: 12 }] });
-    await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
+    await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: run.goblin, value: 15 }, { id: uuidv7(), tokenId: run.tBree, value: 12 }] });
+    await ops.send({ t: "clock.start", id: uuidv7(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
     await ops.send({ t: "view.blackout", blackout: true });
     await ops.send({ t: "handout.close", handoutId: run.shown });
     const recent = JSON.stringify([{ kind: "image", assetId: run.letter, title: "Belak's letter", to: "all", at: Date.now() }]);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -219,7 +219,7 @@ describe("raccoon-vtt notes and pins on a wave 5 build", { timeout: 180_000 }, (
   test("4. a pin's page deleted on the DM's other device while its pane is open leaves the pane with no page and DM only on (LP5-NOTES-1)", async () => {
     const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     otherDevice = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
-    const pageId = randomUUID();
+    const pageId = uuidv7();
     await otherDevice.send({ t: "journal.create", page: { id: pageId, title: "Pat's dream", access: { member: run.patId }, blocks: [{ id: "dreamblock01", text: "You dream of a well." }] } });
     const pin = dmSocket.state!.pins[run.pinId]!;
     await otherDevice.send({ t: "pin.put", pin: { id: pin.id, sceneId: pin.sceneId, x: pin.x, y: pin.y, color: pin.color, label: "Older well", pageId, visibility: "all" } });
@@ -249,7 +249,7 @@ describe("raccoon-vtt notes and pins on a wave 5 build", { timeout: 180_000 }, (
   });
 
   test("5. Back from a page the player had not read returns focus to its row, which no longer says New (DATA-01)", async () => {
-    const pageId = randomUUID();
+    const pageId = uuidv7();
     await otherDevice!.send({ t: "journal.create", page: { id: pageId, title: "Town crier", access: "all", blocks: [{ id: "crierblock01", text: "The ferry is shut until the flood goes down." }] } });
     await waitFor("the new page for the player", () => playerSocket.state?.journal[pageId] ?? null);
     await openPhonePanel(player, "Journal");
@@ -262,7 +262,7 @@ describe("raccoon-vtt notes and pins on a wave 5 build", { timeout: 180_000 }, (
   });
 
   test("6. of two pages with one title, Back returns focus to the one the player opened (DATA-01)", async () => {
-    const ids = [randomUUID(), randomUUID()];
+    const ids = [uuidv7(), uuidv7()];
     for (const [i, id] of ids.entries()) {
       await otherDevice!.send({ t: "journal.create", page: { id, title: "Rumors", access: "all", blocks: [{ id: `rumorblock0${i}`, text: `Rumor number ${i + 1}.` }] } });
     }
@@ -280,7 +280,7 @@ describe("raccoon-vtt notes and pins on a wave 5 build", { timeout: 180_000 }, (
   });
 
   test("7. Back from a page the DM renamed returns focus to its row under the new title, moved in the list (DATA-01)", async () => {
-    const pageId = randomUUID();
+    const pageId = uuidv7();
     await otherDevice!.send({ t: "journal.create", page: { id: pageId, title: "Ferry toll", access: "dm", blocks: [] } });
     await waitFor("the page in the DM's state", () => dmSocket.state?.journal[pageId] ?? null);
     await openSideTab(dm, "Journal");
@@ -312,7 +312,7 @@ describe("raccoon-vtt notes and pins on a wave 5 build", { timeout: 180_000 }, (
   });
 
   test("8. on a computer, a page deleted from inside it gives focus to the Journal tab, not the page body (DATA-01)", async () => {
-    const pageId = randomUUID();
+    const pageId = uuidv7();
     await otherDevice!.send({ t: "journal.create", page: { id: pageId, title: "Lost letter", access: "dm", blocks: [] } });
     await waitFor("the page in the DM's state", () => dmSocket.state?.journal[pageId] ?? null);
     await openSideTab(dm, "Journal");

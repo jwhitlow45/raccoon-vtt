@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -39,7 +39,7 @@ const dmSocket = new SocketWatch("dm");
 const anaSocket = new SocketWatch("ana");
 const consoles = { dm: new ConsoleWatch("dm"), ana: new ConsoleWatch("ana") };
 
-const run = { roomId: "", roomName: `E2E fu28 forms ${new Date().toISOString().slice(0, 19)}`, password: "", anaId: "", bree: randomUUID() };
+const run = { roomId: "", roomName: `E2E fu28 forms ${new Date().toISOString().slice(0, 19)}`, password: "", anaId: "", bree: uuidv7() };
 const ABILITIES = { str: 10, dex: 14, con: 14, int: 10, wis: 16, cha: 8 };
 const FORMS = ["wolf", "brown-bear", "black-bear", "giant-eagle"];
 const SIZES = [

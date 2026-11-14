@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1000,7 +1001,7 @@ export class OpSocket {
       this.historyWaiters.add(check);
       check();
     });
-    const head = summary[scope]?.[t].head?.id ?? randomUUID();
+    const head = summary[scope]?.[t].head?.id ?? uuidv7();
     return this.send({ t, head, ...(scope === "setup" ? { scope } : {}) });
   }
 

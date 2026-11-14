@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -67,11 +68,11 @@ const run = {
   password: "",
   patId: "",
   sceneId: "",
-  thornCharId: randomUUID(),
-  thornId: randomUUID(),
-  goblinId: randomUUID(),
-  shadowId: randomUUID(),
-  pageId: randomUUID(),
+  thornCharId: uuidv7(),
+  thornId: uuidv7(),
+  goblinId: uuidv7(),
+  shadowId: uuidv7(),
+  pageId: uuidv7(),
   goblinImage: "",
   shadowImage: "",
   rollId: "",

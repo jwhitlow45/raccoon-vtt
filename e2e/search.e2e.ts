@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -90,26 +91,26 @@ const run = {
   password: "",
   dmKey: "",
   mat: "",
-  cave: randomUUID(),
-  crypt: randomUUID(),
-  day: randomUUID(),
-  night: randomUUID(),
-  bree: randomUUID(),
-  thorn: randomUUID(),
-  tBree: randomUUID(),
-  g1: randomUUID(),
-  g2: randomUUID(),
-  g3: randomUUID(),
-  boss: randomUUID(),
-  varo: randomUUID(),
-  villain: randomUUID(),
-  lore: randomUUID(),
-  drums: randomUUID(),
-  song: randomUUID(),
+  cave: uuidv7(),
+  crypt: uuidv7(),
+  day: uuidv7(),
+  night: uuidv7(),
+  bree: uuidv7(),
+  thorn: uuidv7(),
+  tBree: uuidv7(),
+  g1: uuidv7(),
+  g2: uuidv7(),
+  g3: uuidv7(),
+  boss: uuidv7(),
+  varo: uuidv7(),
+  villain: uuidv7(),
+  lore: uuidv7(),
+  drums: uuidv7(),
+  song: uuidv7(),
   letter: "",
   cryptMap: "",
   townMap: "",
-  townShown: randomUUID(),
+  townShown: uuidv7(),
   patId: "",
   leeId: "",
 };
@@ -435,7 +436,7 @@ async function routedDm(): Promise<Routed> {
         const msg = JSON.parse(m) as { t?: string; op?: { t?: string; sceneId?: string } };
         // A scene the server has never had, as one a co-DM deleted is to it: the move is refused `gone`.
         if (msg.t === "op" && msg.op?.t === "room.setPlayerScene") {
-          msg.op.sceneId = randomUUID();
+          msg.op.sceneId = uuidv7();
           upstream.send(JSON.stringify(msg));
           return;
         }
@@ -783,7 +784,7 @@ describe("the room search", { concurrency: false }, () => {
     await movePlayersTo(run.mat);
     const routed = await routedDm();
     const page = routed.page;
-    const open = randomUUID();
+    const open = uuidv7();
     try {
       await ops.send({ t: "scene.create", scene: { id: open, name: "Open field", bounds: { w: 10, h: 10 }, fogEnabled: false } });
       await viewScene(page, open);
@@ -851,7 +852,7 @@ describe("the room search", { concurrency: false }, () => {
       await fresh(page);
 
       // A co-DM deletes the scene while the DM's Show players is on its way.
-      const doomed = randomUUID();
+      const doomed = uuidv7();
       await ops.send({ t: "scene.create", scene: { id: doomed, name: "Doomed hall", bounds: { w: 10, h: 10 }, fogEnabled: true } });
       await viewScene(page, doomed);
       await openSearch(page);
@@ -1227,7 +1228,7 @@ describe("the room search", { concurrency: false }, () => {
     await viewer.first().waitFor();
     await dm.keyboard.press("Escape");
     await viewer.first().waitFor({ state: "detached" });
-    const docId = randomUUID();
+    const docId = uuidv7();
     await ops.send({ t: "handoutDoc.create", doc: { id: docId, title: "Ship manifest", pages: [{ assetId: run.cryptMap, width: 60, height: 80 }] } });
     await waitFor("the document", () => (dmSocket.state?.handoutDocs?.[docId] ? true : null));
     await pick(dm, "ship manifest", `handout:doc:${docId}`);
