@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -49,8 +49,8 @@ const run = {
   patId: "",
   firstSceneId: "",
   pastedSceneId: "",
-  thorn: { characterId: randomUUID() },
-  goblin: { id: randomUUID(), at: { x: 3, y: 3 } },
+  thorn: { characterId: uuidv7() },
+  goblin: { id: uuidv7(), at: { x: 3, y: 3 } },
 };
 
 /** A pasted file as the test hands it to the page. */

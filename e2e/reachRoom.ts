@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -73,10 +73,10 @@ export const run = {
   roomName: `E2E reach ${new Date().toISOString().slice(0, 19)}`,
   sceneId: "",
   patId: "",
-  thorn: { id: randomUUID(), characterId: randomUUID(), entryId: randomUUID() },
-  goblin: { id: randomUUID(), entryId: randomUUID() },
-  hag: { id: randomUUID(), entryId: randomUUID() },
-  kept: Array.from({ length: 10 }, () => randomUUID()),
+  thorn: { id: uuidv7(), characterId: uuidv7() },
+  goblin: { id: uuidv7() },
+  hag: { id: uuidv7() },
+  kept: Array.from({ length: 10 }, () => uuidv7()),
 };
 
 export function actor(hp: number) {
@@ -274,13 +274,14 @@ export async function setFight(fight: Fight): Promise<void> {
   // Ending a fight that is not running is refused, which is fine here.
   await ops.send({ t: "encounter.end" }).catch(() => undefined);
   if (fight === "none") return;
-  // The DM's goblin acts first in a plain fight; Thorn first on the player's own turn.
+  // The DM's goblin acts first in a plain fight; Thorn first on the player's own turn. Each fight's rows take new
+  // ids, as the room takes an id once (server/rooms/createIds.ts).
   await ops.send({
     t: "encounter.start",
     entries: [
-      { id: run.goblin.entryId, tokenId: run.goblin.id, value: fight === "own turn" ? 10 : 18 },
-      { id: run.thorn.entryId, tokenId: run.thorn.id, value: fight === "own turn" ? 18 : 15 },
-      { id: run.hag.entryId, tokenId: run.hag.id, value: 5 },
+      { id: uuidv7(), tokenId: run.goblin.id, value: fight === "own turn" ? 10 : 18 },
+      { id: uuidv7(), tokenId: run.thorn.id, value: fight === "own turn" ? 18 : 15 },
+      { id: uuidv7(), tokenId: run.hag.id, value: 5 },
     ],
   });
   await ops.send({ t: "encounter.next" });
@@ -495,7 +496,7 @@ export async function createRoom(): Promise<void> {
   await ops.send(token(run.thorn.id, { kind: "pc", name: "Thorn", x: 8, y: 6, disposition: "ally", actor: { ref: run.thorn.characterId } }));
   await ops.send(token(run.goblin.id, { kind: "monster", name: "Goblin 1", x: 12, y: 9, disposition: "hostile", actor: { inline: actor(7) } }));
   await ops.send(token(run.hag.id, { kind: "monster", name: "Hag", x: 3, y: 14, disposition: "hostile", actor: { inline: actor(900) } }));
-  await ops.send({ t: "actor.effect.add", target: { tokenId: run.hag.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } });
+  await ops.send({ t: "actor.effect.add", target: { tokenId: run.hag.id }, effect: { id: uuidv7(), key: "concentrating", spell: "Hex" } });
   for (const [i, id] of run.kept.entries()) {
     await ops.send({
       t: "drawing.create",
@@ -522,7 +523,7 @@ export function playerRollTest(scale: (typeof SCALES)[number]): void {
     let steps = 0;
     for (const fight of FIGHTS) {
       await setFight(fight);
-      const id = randomUUID();
+      const id = uuidv7();
       await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
       await waitFor("the roll on the player's side", () => playerSocket.state?.rolls[id]);
       for (const notice of ["none", "reconnecting"] as const) {
