@@ -314,7 +314,7 @@ describe("the desktop window page", { timeout: 900_000 }, () => {
     await ctx.close();
   });
 
-  test("a room made in the browser after the first empty list shows when the window comes forward, and within 10 s while it shows", async () => {
+  test("a room made in the browser after the first empty list shows when the window comes forward or is shown, and no timer asks", async () => {
     const ctx = await context();
     const page = await ctx.newPage();
     page.on("pageerror", (e) => errors.push(`rooms refresh: ${e.message}`));
@@ -322,22 +322,40 @@ describe("the desktop window page", { timeout: 900_000 }, () => {
     await page.goto(`http://127.0.0.1:${PORT}/?scenario=no-rooms`);
     await page.locator("main").waitFor();
     await page.getByText(WORDS.rooms.empty).waitFor();
-    // Time stands still from here, so only the focus, then runFor, can bring the list.
+    // Time stands still from here, so only the window's own events can bring the list.
     await page.clock.pauseAt(new Date((await page.evaluate("Date.now()")) as number + 1_000));
     const lists = async () => (await calls(page)).filter((c) => c.method === "listRooms").length;
     const first = await lists();
     await page.evaluate(`window.fakeBridge.setRooms([{ id: "7K3M9PQR", name: "The Glass Tower", lastActiveAt: null }])`);
+    await page.clock.runFor(60_000);
+    assert.equal(await lists(), first, "a minute with the window up asks nothing");
     await page.evaluate("window.dispatchEvent(new Event('focus'))");
     await page.getByText("The Glass Tower").waitFor();
     assert.equal(await page.getByText(WORDS.rooms.empty).count(), 0);
     assert.equal(await lists(), first + 1);
-    // No focus this time: the 10 s list finds a second room, with no spinner in place of the rows.
+    // Shown again, as a window brought back from the tray is: the list is asked for, the rows stay meanwhile.
     await page.evaluate(`window.fakeBridge.setRooms([{ id: "7K3M9PQR", name: "The Glass Tower", lastActiveAt: null }, { id: "4FH2KQ8T", name: "The Iron Keep", lastActiveAt: null }])`);
-    await page.clock.runFor(7_000);
-    assert.equal(await page.getByText("The Iron Keep").count(), 0);
-    await page.clock.runFor(3_000);
+    await page.evaluate("document.dispatchEvent(new Event('visibilitychange'))");
     await page.getByText("The Iron Keep").waitFor();
     assert.equal(await page.getByText("Loading rooms").count(), 0);
+    await ctx.close();
+  });
+
+  test("a first room list that failed is asked for again when the window comes forward", async () => {
+    const ctx = await context();
+    const page = await open(ctx, "scenario=running");
+    await page.getByText("The Sunken Library").waitFor();
+    // The server goes and comes back, and its first list fails.
+    await page.evaluate("window.fakeBridge.fail('listRooms', { error: 'failed', reason: 'the database did not answer' })");
+    await page.evaluate("window.fakeBridge.patchSupervisor({ state: 'restarting', step: 'changePort' })");
+    await page.getByText(WORDS.rooms.notRunning).waitFor();
+    await page.evaluate("window.fakeBridge.patchSupervisor({ state: 'running', step: 'running' })");
+    const failed = page.getByRole("alert").filter({ hasText: "the database did not answer" });
+    await failed.waitFor();
+    assert.equal(await page.getByText("The Sunken Library").count(), 0);
+    await page.evaluate("window.dispatchEvent(new Event('focus'))");
+    await page.getByText("The Sunken Library").waitFor();
+    assert.equal(await failed.count(), 0, "the failure goes once a list comes");
     await ctx.close();
   });
 

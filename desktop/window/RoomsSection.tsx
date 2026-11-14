@@ -7,15 +7,14 @@ import { formatRelative } from "./format.ts";
 import { Card, Confirm, Help, useAction } from "./ui.tsx";
 import { failureText, restoring, serverUp } from "./view.ts";
 
-/** How often the list is asked for again while the window shows. */
-export const ROOMS_REFRESH_MS = 10_000;
-
 /**
  * Rooms on this computer (design 8.6 and 9, item 4): each room's name and
  * when it was last played, and New DM link, which opens the new link in the
  * browser and never shows it here. Rooms are made, renamed and deleted in
  * the browser, which tells the window nothing, so the list is asked for
- * again when the window comes forward and every 10 s while it shows.
+ * again when the window comes forward or is shown, and so is a first list
+ * that failed. No timer asks: each list runs the admin script, which sizes
+ * every room's history on the database players are using.
  */
 export function RoomsSection(props: { sup: SupervisorStatus; bridge: RaccoonLocal; now: Date }) {
   const { sup, bridge } = props;
@@ -31,9 +30,10 @@ export function RoomsSection(props: { sup: SupervisorStatus; bridge: RaccoonLoca
   // Only the newest answer counts, so a slow one never puts back a list a newer one replaced.
   const asked = useRef(0);
   const [again, setAgain] = useState(0);
-  // The background list runs only once a list shows, so it never stands in for the first one.
+  // The background list runs only once the first has answered, rows or a
+  // failure, so it never stands in for a first list still on its way.
   const listed = useRef(false);
-  listed.current = up && rooms !== null;
+  listed.current = up && (rooms !== null || failure !== null);
 
   // Lists again whenever the server comes up, so a restore, a port change or a restart never leaves rooms from before it.
   useEffect(() => {
@@ -55,8 +55,8 @@ export function RoomsSection(props: { sup: SupervisorStatus; bridge: RaccoonLoca
       .finally(() => mine === asked.current && setLoading(false));
   }, [up, bridge, sup.port]);
 
-  // A quiet list in the background: the rows already shown stay until it
-  // answers, and a failed one leaves them as they were.
+  // A quiet list in the background: the rows or the failure already shown
+  // stay until it answers, and a failed one leaves them as they were.
   useEffect(() => {
     if (!up || again === 0) return;
     const mine = ++asked.current;
@@ -75,11 +75,9 @@ export function RoomsSection(props: { sup: SupervisorStatus; bridge: RaccoonLoca
     const ask = () => {
       if (document.visibilityState === "visible" && listed.current) setAgain((n) => n + 1);
     };
-    const timer = setInterval(ask, ROOMS_REFRESH_MS);
     window.addEventListener("focus", ask);
     document.addEventListener("visibilitychange", ask);
     return () => {
-      clearInterval(timer);
       window.removeEventListener("focus", ask);
       document.removeEventListener("visibilitychange", ask);
     };
