@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import pg from "pg";
-import { BACKUP_STORE, BACKUP_SUFFIX, Platform, type RestoreJournal, type SupervisorStatus } from "../contract.ts";
+import { BACKUP_STORE, BACKUP_SUFFIX, LOG_FILES, Platform, type RestoreJournal, type SupervisorStatus } from "../contract.ts";
 import { listBackups, readFileList, runBackup } from "./backup.ts";
 import { deleteJournal, readJournal, writeJournal } from "./journal.ts";
 import { Cluster } from "./postgres.ts";
@@ -80,7 +80,11 @@ async function crashThenStart(env: Record<string, string>): Promise<SupervisorSt
   if (first !== null) assert.equal(first.ok, true, JSON.stringify(first));
   const exit = await run.exited;
   current = null;
-  assert.equal(exit.signal, "SIGKILL", `the supervisor was meant to die at ${env.RESTORE_TEST_CRASH_AT}: ${run.output().slice(-2000)}`);
+  const meant = `the supervisor was meant to die at ${env.RESTORE_TEST_CRASH_AT}: ${run.output().slice(-2000)}`;
+  // Windows has no signals: a process that kills itself ends with code 1.
+  assert.deepEqual(exit, process.platform === "win32" ? { code: 1, signal: null } : { code: null, signal: "SIGKILL" }, meant);
+  const said = await readFile(join(data, "logs", LOG_FILES.supervisor), "utf8");
+  assert.ok(said.trimEnd().endsWith(`killed at the restore point ${env.RESTORE_TEST_CRASH_AT}, for a test`), meant);
   return (await startAndWait()).status;
 }
 
