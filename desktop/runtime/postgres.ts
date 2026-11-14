@@ -1,11 +1,11 @@
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { appendFile, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, open, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { Platform } from "../contract.ts";
-import { syncDir, syncFile } from "./durable.ts";
+import { renameRetrying, syncDir, syncFile } from "./durable.ts";
 import { rotateIfLarge } from "./logs.ts";
 import { loopbackPort } from "./ports.ts";
 import { bootTime, isAlive, processFacts, processStamp, type ProcessFacts } from "./processInfo.ts";
@@ -82,6 +82,8 @@ export type ClusterOptions = {
   proc?: ProcessLookup;
   /** Tests only: runs between initdb and the app's own settings, where a test cuts the init off. */
   afterInitdb?: () => Promise<void>;
+  /** Tests only: the folder renames, where a test stands in for a file another program holds open. */
+  renameDir?: (from: string, to: string) => Promise<void>;
 };
 
 /**
@@ -146,7 +148,7 @@ export class Cluster {
   private async moveAside(path: string): Promise<void> {
     let aside = `${this.opts.pgData}.incomplete-${Date.now()}`;
     while (existsSync(aside)) aside = `${this.opts.pgData}.incomplete-${Date.now()}-${randomBytes(3).toString("hex")}`;
-    await rename(path, aside);
+    await renameRetrying(path, aside, { platform: this.opts.platform, ...(this.opts.renameDir ? { rename: this.opts.renameDir } : {}) });
   }
 
   /**
@@ -195,7 +197,7 @@ export class Cluster {
     await syncFile(join(staging, "pg_hba.conf"));
     await syncFile(join(staging, "postgresql.conf"));
     await syncDir(staging);
-    await rename(staging, this.opts.pgData);
+    await renameRetrying(staging, this.opts.pgData, { platform: this.opts.platform, ...(this.opts.renameDir ? { rename: this.opts.renameDir } : {}) });
     await syncDir(parent);
   }
 
