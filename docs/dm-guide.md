@@ -52,6 +52,7 @@ You don't need most of the app on day one. Read the [Quick start](#quick-start),
   - [Companions](#companions)
   - [Ping, Look here and pins](#ping-look-here-and-pins)
   - [The table display](#the-table-display)
+  - [Hosting from your computer](#hosting-from-your-computer)
   - [Music and sound](#music-and-sound)
   - [Time and the calendar](#time-and-the-calendar)
   - [The Log and its history](#the-log-and-its-history)
@@ -2090,6 +2091,38 @@ If your group plays around a table, a TV can show the players' view of the map, 
 The display shows the players' scene the way the players see it: fog, party vision, tokens, shared areas, drawings, pings and rulers, and handouts shown to everyone. On a scene where each player sees for themselves, it shows only what the creatures that share sight with the party see (see [Sight for each player](#sight-for-each-player)). Panels, chat and the Initiative strip stay off it, and to show whose turn it is, tap the display and turn on **Show whose turn it is**. **Show the date and time**, beside it, adds a pill such as "Day 4, 6:00 AM, Dawn" under the turn. Both start off, the display remembers them, and the date shows only while you share the clock with players and no blackout is on.
 
 To have the display show what your own screen shows, turn on **Show my view on the table display** in the DM panel, then tap the display and pick **Follow the DM**. The display's menu also has its own **View**, so the TV can show the map in Isometric while your screen stays Top-down, or the other way round (see [The isometric view](#the-isometric-view)). On the display, tap the screen and use **Volume** to set how loud the room's sound is on that TV. **Off** keeps the last level, so the next level you pick returns the sound. A room can have up to 4 displays.
+
+## Hosting from your computer
+
+If your group plays around one table, or in one house, you can run RaccoonVTT on your own computer with the desktop app and skip the server. Everyone joins in their own browser over your Wi-Fi, and your rooms, images and backups stay on your computer. A group that plays from different homes needs a hosted server instead, because the desktop app is not meant to be reached over the internet (see [self-hosting](self-hosting.md)).
+
+Opening the app shows a small window and opens your own browser at `http://localhost:3170`. That browser is where you run the game, as on any server. The window is where you run the app.
+
+![The desktop app's window: Running, the address players open with its QR code and the Players on this network can join switch on, the Open RaccoonVTT button, and the first rooms on this computer.](dm-guide/desktop-window.webp)
+
+**Getting players in.** The window's **Players join at** card shows the address and its QR code. A player scans the code with their phone's camera, or types the address (something like `http://10.0.0.20:3170`), and lands on Home. From there they join as on any server, with the room's link or with its ID and password, or by asking you to let them in (see [Letting players in by request](#letting-players-in-by-request)). The card also counts the other devices connected, leaving out your own tabs on this computer. Links and QR codes inside a room, such as the player link and invites, carry the same address, and they follow it if your network gives the computer a new one.
+
+Phones may show "Not secure" beside the address, because the connection is plain HTTP, and a player who has turned on their browser's strictest setting gets a warning page they can click through. The connection is not encrypted, so someone on your network who can watch its traffic can read a room's password or take over a session. Play on a network you trust, and pick a long room password. The [guarantees](self-hosting.md#what-the-desktop-app-guarantees) say exactly what is and is not protected.
+
+![Home on a phone at the computer's network address: Join a room, then a New rooms card saying new rooms are made on the computer running RaccoonVTT, then Enter a DM link or invite.](dm-guide/local-join-only.webp)
+
+A device on the network can join and play but cannot make or import a room. Only the computer running RaccoonVTT can, so a guest on your Wi-Fi can't fill your disk with rooms. If you open the network address in a browser on the host computer itself, Home says so and offers **Open it**, which goes to the page where you make rooms.
+
+![Home opened on the host computer by its network address: the New rooms card says this is the computer running RaccoonVTT, with an Open it button.](dm-guide/local-host-page.webp)
+
+**The switch.** **Players on this network can join** is on at first. Turn it off on any network you don't trust, such as a hotel's or a school's, and only this computer can open RaccoonVTT until you turn it back on. Phones reconnect within a few seconds of the switch turning on. On Windows, a network that Windows calls public, or a work network, never lets players in. The window says so and, for a public network, tells you where to set the network profile to Private if you trust it.
+
+**Your DM link.** Open it only on this computer when you can. Over the network it travels unencrypted, and whoever captures it gets full control of the room, deleting it included. The browser on your computer talks to RaccoonVTT over `localhost`, which never leaves the machine. If you need the DM link on a tablet, that tablet is on the same open connection as your players.
+
+**Keeping the computer awake.** While any device is connected, RaccoonVTT keeps the computer from sleeping, and the window says so. Closing a laptop's lid still puts it to sleep and drops every player, so leave the lid open. A table display (see [The table display](#the-table-display)) can't keep its screen on at the network address, so turn off the TV's own sleep timer.
+
+**When a phone can't connect.** Open **Not working?** in the window. The usual causes are a phone on another network, since guest Wi-Fi often keeps devices apart, and a VPN on the computer that blocks players, which you can turn off or let reach the local network. The fold also lists any other addresses the computer answers at. On Linux with a firewall running, it gives the command that opens the port, and on Windows it says when the Firewall rule is missing and a reinstall adds it.
+
+**Quitting.** Closing the window on Windows or macOS keeps RaccoonVTT running in the notification area or the menu bar, so the game goes on, and the first close says so once. On Linux, closing minimizes the window. **Quit** in the window, or in the tray menu, stops everything cleanly. While other devices are connected it asks first, since quitting ends the game for them.
+
+**Backups and a bad night.** RaccoonVTT backs up your rooms and images every 24 hours it runs, before every update, and when you press **Back up now**. The window's **Backups** card lists them, and **Restore** puts one back, with every room as it was then. Anything changed since is lost, and players are disconnected while it restores, so do it between sessions. Pick the last backup from before the mistake, not the newest one. The date the list shows is when the backup started. The [self-hosting guide](self-hosting.md#backups) says what is kept and how long.
+
+**A new DM link.** If you cleared your browser or lost a DM link, **Rooms on this computer** lists every room with **New DM link**. It asks first, because every device signed in as DM in that room is signed out, co-DMs become players, and unused DM invites stop working. The new link opens in your browser.
 
 ## Music and sound
 

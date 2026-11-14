@@ -1,16 +1,19 @@
 # Self-hosting
 
-There are two ways to run RaccoonVTT on your own server, and the first is
-simpler:
+There are three ways to run RaccoonVTT, and the first is the simplest way
+to run a server:
 
 - [Self-hosting with the published image](#self-hosting-with-the-published-image)
   runs the image each release publishes.
 - [Deploying](#deploying) builds the image on the server from a copy of the
   repository. The published image's steps refer back to it for the parts
   the two share.
+- [The desktop app](#the-desktop-app) runs RaccoonVTT on one Windows, macOS
+  or Linux computer, for players on the same network. It has its own backups
+  and updates, below.
 
-[Updating](#updating) and [Backups](#backups) cover both. Running the site
-day to day, its admin commands, admin page and logs, is in
+[Updating](#updating) and [Backups](#backups) cover the two server ways.
+Running a server day to day, its admin commands, admin page and logs, is in
 [operations.md](operations.md).
 
 ## Deploying
@@ -1069,3 +1072,211 @@ cd ~/raccoon-vtt
 docker compose -f docker-compose.server.yml exec -T postgres pg_dump -U raccoon -d raccoon --format=custom > raccoon-db-$(date +%F).dump
 docker compose -f docker-compose.server.yml exec -T raccoon tar -C /data/assets --exclude=./tmp --exclude=./trash -czf - . > raccoon-assets-$(date +%F).tgz
 ```
+
+## The desktop app
+
+The desktop app runs four programs on one computer. A shell (Electron) holds
+the window, the tray icon and the updater. A supervisor, which runs under
+the bundled Node 24 renamed `raccoonvtt-server` so Task Manager and firewall
+prompts name the app, owns the data folder, starts PostgreSQL 17, runs the
+backups and restores, and starts the app server. The app server is the same
+`server/main.ts` a hosted server runs, in local mode, and is the only
+program players reach. PostgreSQL listens on this computer's loopback
+address only, on a free port it picks at each start, so a PostgreSQL that
+already runs on 5432 never matters.
+
+A hosted server leaves `RACCOON_MODE` unset. `local` is the desktop app's
+own mode, which refuses `PUBLIC_ORIGIN`, the egress proxies, Turnstile, the
+admin page and `TRUST_CF_CONNECTING_IP=1`.
+
+It runs on Windows 10 or 11 (x64), macOS 15 or later (Apple silicon and
+Intel), and Linux with glibc 2.36 or later (x64 and arm64). The
+[README](../README.md#run-it-on-your-computer) has the download and the steps
+for the unsigned installers.
+
+### Where the data lives
+
+Every start takes a lock on the data folder, so a second copy of RaccoonVTT on
+the same folder stops with "RaccoonVTT is already running with this data
+folder." The folder is:
+
+| System | Data folder |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%\RaccoonVTT\data` |
+| macOS | `~/Library/Application Support/RaccoonVTT/data` |
+| Linux | `${XDG_DATA_HOME:-~/.local/share}/RaccoonVTT`, shared by the AppImage and the deb |
+
+`--data <folder>` or the `RACCOON_DATA_DIR` environment variable names
+another. The window's **Show data folder** and **Show logs** open it. It
+holds:
+
+- `postgres/`, the database cluster.
+- `assets/`, the uploaded images, map videos and sounds.
+- `backups/`, described below.
+- `logs/`, with `server.log`, `supervisor.log`, `shell.log` and
+  `postgres.log`, each kept to 10 MB with 5 kept.
+- `secrets.json`, which holds `ROOM_SECRET_KEY` and the database password.
+  The data folder is mode 0700 and `secrets.json` 0600 on macOS and Linux,
+  and Windows keeps the per-user ACL of `%LOCALAPPDATA%`. Neither secret
+  reaches a log, the window or a backup.
+- `settings.json`, with these keys:
+
+  | Key | Default | What it does |
+  | --- | --- | --- |
+  | `port` | unset | The port, from 1024 to 65535. The first start picks 3170 or the next free port and saves it. The window's **Change port** changes it. |
+  | `networkPlay` | `true` | **Players on this network can join**. Off, the app server answers only this computer. |
+  | `checkUpdates` | `true` | **Check for updates once a day**. |
+  | `openBrowser` | `true` | **Open my browser when RaccoonVTT starts**. |
+  | `animatedMaps` | `true` | Map videos. A hosted server starts with them off because of a CDN's terms and metered bandwidth, and a home computer has neither. |
+  | `roomSound` | `true` | Uploaded sound, on for the same reason. |
+
+  Quit RaccoonVTT before editing the file by hand. A file that cannot be read
+  is replaced by the defaults and kept as `settings.json.bad`, and a key this
+  version does not know is kept, so going back to an older version and
+  forward again loses no setting.
+- `restore.json`, only while a restore runs.
+
+### Backups
+
+The window's **Backups** card lists them. A backup runs on **Back up now**,
+before an update (below), and in the background: once the server is up, and
+again every 24 hours while RaccoonVTT runs, whenever the newest good backup
+is more than a day old. It is not a nightly job, so a computer that is off
+at night backs up the next time it runs.
+
+Each backup is a consistent dump of the database taken in one transaction,
+read back whole before it counts, plus every image the dump names, copied
+into one store that all backups share. A backup that fails deletes nothing.
+Retention keeps the newest 7 daily or by-hand backups, the newest of each of
+the last 4 weeks, and the newest 3 made before an update, and it prunes the
+images that no kept backup lists. A backup always leaves 2 GiB free on the
+disk and ends as partial when it cannot.
+
+A backup holds no secrets and no settings. `ROOM_SECRET_KEY` stays in
+`secrets.json`, so after a restore on the same computer DMs still see their
+player links. **Show backups folder** opens `backups/`.
+
+**Restore** puts back the database and the images of one backup, and loses
+every change made since it. Players are disconnected while it runs, and
+**Rooms on this computer** and **Back up now** refuse with "Not during a
+restore". Restore needs free space of the backup's database size plus
+2 GiB, and refuses a backup that a newer version made or one whose images are
+missing from the store. It builds the restored database beside the live one
+and swaps them by renaming, so the original is dropped only once the restored
+data is complete and in place. A restore that is cut off by a crash or power
+loss is finished or undone at the next start, and the window says which:
+"A restore was interrupted, and nothing changed." or "The restore of the
+backup from <date> finished." The live data is either the old or the
+restored, whole.
+
+### Updates and going back
+
+RaccoonVTT checks GitHub for a newer release at start and once a day, sending
+only the request and a `RaccoonVTT/X.Y.Z` user agent. The window shows a
+banner when one is out. The same check compares the response's date with the
+computer's clock and warns past 2 minutes, since the Log numbers its lines
+by that clock.
+
+- On Windows and for the AppImage, **Install and restart** downloads the
+  update, stops the app server and PostgreSQL cleanly, and runs the
+  installer. The installer first asks the running copy to quit, waits up to
+  60 seconds for every process under its folder, and ends any left. The
+  updater downloads over HTTPS from the release and checks each installer's
+  SHA-512 from the release's `latest*.yml`. It refuses downgrades and
+  prereleases and does not check the Sigstore bundles, so a compromised
+  GitHub account could ship an update, as it could ship an image.
+- On macOS and for the deb, which cannot update themselves, the banner's
+  **Download** opens the release page.
+
+The first start after an update takes a backup labeled "Before the update to
+X.Y.Z" before it touches the data. If that backup fails, nothing starts, and
+the window offers **Try again** or **Start without a backup**, which asks
+first, since going back would then lose every change since the last backup.
+
+Going back is stricter than the server's rules in
+[Going back to an older build](#going-back-to-an-older-build). The database
+records the app version, the room format and the change format that last
+ran over it. When either format is newer than the build you are running,
+nothing starts, and the window names the version that wrote the data and
+offers **Download the latest version** and **Restore a backup**. That list
+holds only the backups this version can read, the before-update backup among
+them. Restoring it brings back its own record, so this version then starts,
+and every change since that update is lost. With no readable backup left,
+the window offers only the download. Any format step blocks going back, even
+where a server allows it after a clean stop. An older build whose formats
+match starts normally. A data folder made by another PostgreSQL major than
+the build ships is refused in the same way, with words that name both.
+
+### Moving rooms and removing it
+
+Room export and import move a room between the desktop app and a server, as
+between two servers: **Download a backup** in Room settings, and **Import
+from a backup** on Home. The data folder is not portable across systems or
+PostgreSQL majors.
+
+Removing the app leaves the data folder, whichever way it goes: the Windows
+uninstaller, dragging the app to the Trash, `apt remove` or deleting the
+AppImage. The Windows uninstaller also removes the firewall rule. To delete
+your rooms, or copy them, use **Show data folder**.
+
+### What the desktop app guarantees
+
+Only devices with a private network address can open RaccoonVTT, and only
+while Players on this network can join is on. Rooms can be made only on this
+computer. The database, backups and settings are reachable only from this
+computer. Nobody can see a room without its link or password or the DM
+letting them in, and a room's password is guarded only by a limit on guesses
+from each address, so pick a long one. The connection isn't encrypted:
+someone on your network who can watch or change its traffic can read a
+password, change what a device shows, or take over a player's or DM's
+session. Use it on a network you trust, open your DM link only on this
+computer when you can, and turn the switch off on any other network.
+
+The facts behind those words:
+
+- With the switch on, the app server listens on every IPv4 address and closes
+  any connection from outside the private ranges of RFC 1918 before it reads
+  a request. A forwarded port, a public address, carrier-grade NAT, Tailscale
+  and link-local addresses are all refused. A private address proves a device
+  is on some private network, not on this Wi-Fi: a routed private network,
+  a VPN or a proxy can present one, so the network the computer is on has to
+  be one you trust. With the switch off, it listens on this computer only.
+- Every request must name a host this computer answers to, so a domain
+  pointed at this computer by an attacker gets `421`. Every unsafe request and
+  WebSocket upgrade must come from this computer's own origins, and
+  `Origin: null` is never allowed.
+- Room creation and import accept only a request whose socket address is
+  loopback, checked before the body is read. The window's controls travel by
+  Electron's own channel to the supervisor, which nothing on the network can
+  reach.
+- Players join with the room's link (`/r/<id>#pw=<password>`, the password in
+  the fragment, so it never reaches a request line or a log) or with its ID
+  and password. Local mode has no Turnstile keys, so guessing a password is
+  limited per address only, and a device on a network can take many
+  addresses. A password found on the common list is refused.
+- Session cookies are HttpOnly and SameSite=Strict, without Secure, which
+  plain HTTP needs. A cookie belongs to a host name and not a port, so any
+  other service on this computer, at `localhost` or its network address, on
+  any port, receives the RaccoonVTT cookies the visitor's browser holds.
+- A session is a bearer token. A captured DM cookie or DM link is full
+  control of that room, deleting it included. That covers a DM link opened on
+  a tablet over the network. The DM's own browser reaches the app server by
+  `localhost`, which never leaves the computer.
+- A person on the network who is not a player can open the address and see
+  Home, the join pages, the starter art and `/healthz`. With a room's ID
+  they see its name and can ask to join, which the DM can turn away. They
+  cannot create or import rooms, reach the database or use the window.
+- On Windows, which labels each network Public, Private or Domain, the app
+  server listens on this computer only whenever the network is Public or
+  Domain, has no profile, or the reading of it is stale, whatever the switch
+  says, and the window explains why. macOS and Linux have no such label, so
+  there the switch alone decides.
+- The Windows installer adds one Windows Firewall rule for the app server's
+  program on private networks, and Windows blocks it on public and domain
+  networks. The macOS application firewall is off by default, and when on it
+  asks once per build. On Linux, with a firewall running, allow the port
+  with `sudo ufw allow 3170/tcp`.
+- The window loads only its own page under a strict content security
+  policy, with no Node access, and the shell checks every call it makes.
+  The Electron fuses that run Node from an environment variable or a
+  debugger argument are off.

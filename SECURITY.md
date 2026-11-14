@@ -11,6 +11,18 @@ Only the latest release receives security fixes. Self-hosters should follow
 the [Updating](docs/self-hosting.md#updating) section of docs/self-hosting.md to keep their installation
 current.
 
+## The desktop app
+
+The desktop app serves players over plain HTTP on the local network, so a
+person who can watch or change that network's traffic can read a room's
+password or take over a session. That is how it is designed, and the
+guarantees it does make are in
+[docs/self-hosting.md](docs/self-hosting.md#what-the-desktop-app-guarantees).
+A report that breaks one of them is a vulnerability: a device outside the
+private network ranges that gets a response, a room created or imported from
+another device, or anything on the network reaching the database, the
+backups or the window's controls.
+
 ## Report a vulnerability
 
 Report it privately through GitHub's private vulnerability reporting, at

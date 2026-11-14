@@ -1773,6 +1773,38 @@ Search finds a panel, a setting, an action, a key, or a thing in the room, and e
   - Under 600 px wide the search is the phone's sheet over the whole screen.
   - Layout: The dialog is 640 px wide and the top bar's field is 240 px.
 
+## On your own computer
+
+For a DM who runs RaccoonVTT on one computer. [The README](README.md#run-it-on-your-computer) has the download and the install steps, [docs/self-hosting.md](docs/self-hosting.md#the-desktop-app) the data folder, backups and updates, and the DM guide's [Hosting from your computer](docs/dm-guide.md#hosting-from-your-computer) a night's play.
+
+- The desktop app runs RaccoonVTT on one Windows, macOS or Linux computer, and players on the same network join in their own browsers.
+  - It runs on Windows 10 or 11, macOS 15 or later, and Linux with glibc 2.36 or later.
+  - Opening it shows its window and opens the DM's browser at `http://localhost:3170`. When 3170 is taken, the first start picks the next free port and keeps it.
+- The window shows the address players open and its QR code, with **Players on this network can join**, on by default.
+  - A count shows how many other devices are connected, and leaves out the DM's own tabs on this computer.
+  - With the switch off, only this computer can open RaccoonVTT.
+  - On a network Windows calls public, or a work network, players can't join, and the window says why.
+  - **Not working?** lists what to check: devices must be on the same network (guest Wi-Fi often keeps them apart), a VPN on this computer can block players, and the computer's other addresses. On Linux it gives the `ufw` command that opens the port, and on Windows it says when the Firewall rule is missing.
+  - The window follows the system's light or dark theme. It zooms from 100% to 150% with Ctrl and plus or minus (Cmd on macOS), and Ctrl+0 (Cmd+0) goes back to 100%.
+- **Rooms on this computer** lists each room with **New DM link**, which asks first and then opens the new link in the browser.
+- Only the computer running it can make or import rooms. Other devices join with a room's link, or its ID and password.
+  - On another device, Home says "New rooms are made on the computer running RaccoonVTT. Join with the room's link, or its ID and password."
+  - On the computer itself, opened by its network address, Home says "This is the computer running RaccoonVTT. Make rooms on its own page." with **Open it**.
+- Links and QR codes in the app name the computer's network address, and follow it when it changes or when the switch turns on or off. This covers the DM link, the player link, invites and the table display's link.
+- On another device, Copy works without a secure connection. When the browser refuses it, the link is selected and the page says "Selected. Use your device's Copy." Share hides.
+- The computer stays awake while devices are connected. Closing a laptop's lid still puts it to sleep. A table display on the network can't keep its own screen on, so turn off the TV's sleep.
+- Closing the window on Windows or macOS keeps RaccoonVTT running in the notification area or menu bar, and the first close says so once. On Linux it minimizes the window.
+  - The tray menu has **Open window**, **Open RaccoonVTT in the browser**, **Players on this network can join** and **Quit RaccoonVTT**. Opening RaccoonVTT again while it runs brings its window back and opens the browser.
+  - **Quit** asks first while other devices are connected, then stops the database cleanly before RaccoonVTT closes.
+- It backs up rooms and images every day it runs, before every update, and on **Back up now**, and **Restore** puts any backup back.
+  - Each backup in the list says whether it was by hand, daily or before an update. A backup this version can't read, because a newer version made it, has no Restore.
+  - A restore shows its steps and refuses other changes until it ends, and players are disconnected meanwhile. A restore that is cut off is finished or undone at the next start.
+- It checks for updates at start and once a day (**Check for updates once a day** turns that off), and a banner says when one is out.
+  - On Windows and in the AppImage, **Install and restart** backs up first, then stops RaccoonVTT cleanly and installs. On macOS and in the deb, **Download** opens the release page.
+- It refuses to open data a newer version saved, and offers the backups this version can read.
+- **Settings** holds the port (**Change port**), **Check for updates once a day** and **Open my browser when RaccoonVTT starts**, with **Show data folder** and **Show logs**.
+- Animated maps and uploaded sound are on.
+
 ## Shortcuts
 
 `?` shows the list for your role, and so does Menu, This device, "Show the shortcuts". It lists the keys, then what a key or another mouse button does with a click, a drag or the wheel (on a device with a mouse or trackpad), then the keys that work inside one part of the room. A plain click, tap, drag or pinch is described with its feature above. The tables below list the default keys. On a device with a keyboard, Change in the list gives any single key of the Keys table another letter, digit or symbol, kept on that device alone, and Reset all keys brings the defaults back. A key you gave a shortcut stays yours when a new shortcut comes with that key as its default: the new one shows "No key" until you change it or press its Reset, which takes the key back and returns yours to its default. Each button that does what a key does names its key, as this device has it, on a device with a mouse, a trackpad or a keyboard: in its tooltip, as "Fog (F)", "Undo your last play or board change (Ctrl+Z)", "Change the view (I)", a token's "Hidden (H)" or the handout viewer's "Zoom in (+)", "Zoom out (-)" and "Reset zoom (0)", and in its words where they already name what it does and the key fits, as the View menu's "Turn left (Q)" and "Turn right (E)", This device's "Show the shortcuts (?)" and the outliner's "Search the scene (/)". Where the View button folds into the Menu, its View row names I. A screen reader hears the key apart from the name. A touch screen names no keys until a key is pressed on a keyboard joined to it, and then names them all at once. "View as a player" names none of the room's keys, which it does not answer.
