@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { realpathSync } from "node:fs";
 import { uptime } from "node:os";
 import { basename } from "node:path";
-import { bootId, bootTime, isAlive, linkedProgram, parseStatusUid, parseWindowsProcess, processFacts, processStamp, processStart, selfIdentity, stillRunning } from "./processInfo.ts";
+import { bootId, isAlive, linkedProgram, parseStatusUid, parseWindowsProcess, processFacts, processStamp, processStart, selfIdentity, stillRunning } from "./processInfo.ts";
 
 /**
  * A process is its pid, its start time and its boot (docs/design/design-v1-local-app.md
@@ -66,12 +66,10 @@ test("a process's stamp is steady while it runs, and gone with it, and its progr
   assert.deepEqual(await processFacts(await exitedPid(), platform).then((f) => [f.exe, f.uid, f.start]), [null, null, null], "a process that is gone says nothing");
 });
 
-test("this boot began before this process, by less than the system's uptime", async () => {
-  const boot = await bootTime(platform);
-  assert.ok(boot !== null);
-  const started = (await processStart(process.pid, platform))!;
-  assert.ok(boot <= started + 2_000, `boot ${boot}, process ${started}`);
-  assert.ok(Math.abs(Date.now() - uptime() * 1000 - boot) < 120_000, "about now less the uptime");
+test("this boot has an id that no clock moves, on Linux and macOS, and none on Windows", async () => {
+  const id = await bootId(platform);
+  if (platform === "win32") assert.equal(id, "");
+  else assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "boot_id or kern.bootsessionuuid, a UUID");
 });
 
 test("the readings that need no special rights parse: /proc's Uid line and Windows' CIM row", () => {
