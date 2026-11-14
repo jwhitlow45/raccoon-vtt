@@ -55,7 +55,21 @@ export class RotatingLog {
     this.keep = keep;
   }
 
+  /**
+   * A line that cannot be written is dropped, and the next one opens the
+   * file again. A full disk is when backups and restores fail, and a log
+   * line that threw there would skip their clean-up, or stop the supervisor
+   * without stopping PostgreSQL.
+   */
   write(text: string): void {
+    try {
+      this.append(text);
+    } catch {
+      this.close();
+    }
+  }
+
+  private append(text: string): void {
     if (this.fd === null) {
       mkdirSync(dirname(this.path), { recursive: true });
       this.fd = openSync(this.path, "a", 0o600);
@@ -63,7 +77,7 @@ export class RotatingLog {
     }
     const bytes = Buffer.from(text, "utf8");
     if (this.size > 0 && this.size + bytes.length > this.maxBytes) {
-      closeSync(this.fd);
+      this.close();
       rotate(this.path, this.keep);
       this.fd = openSync(this.path, "a", 0o600);
       this.size = 0;
@@ -77,8 +91,13 @@ export class RotatingLog {
   }
 
   close(): void {
-    if (this.fd !== null) closeSync(this.fd);
+    const fd = this.fd;
     this.fd = null;
+    try {
+      if (fd !== null) closeSync(fd);
+    } catch {
+      // Already closed, or the disk is gone: there is nothing left to do.
+    }
   }
 }
 
