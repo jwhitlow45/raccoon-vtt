@@ -202,4 +202,19 @@ describe("the id table's rows", () => {
     await pruneIds(t.pool, row.askUntil + 1, r.roomId);
     assert.deepEqual([...(await heldIds(t.pool, r.roomId, r.anaId, [id]))], []);
   });
+
+  test("the server's daily cleanup deletes the rows past both their times, of a loaded room and of one not loaded, and keeps the rest", async () => {
+    const loaded = await room("Ids loaded");
+    const { roomId: idle } = await t.client().createRoom("Ids not loaded");
+    assert.deepEqual([t.manager.loadedRoomIds.includes(loaded.roomId), t.manager.loadedRoomIds.includes(idle)], [true, false]);
+    const now = Date.now();
+    const made = { past: uuidv7(), asked: uuidv7(), live: uuidv7() };
+    // Taken 13 hours ago, past its ask time too. Taken two hours ago, its ask time still ahead. Taken just now.
+    const stored = [idRow(made.past, SERVER_MEMBER, now - 13 * 3_600_000, now - 13 * 3_600_000), idRow(made.asked, SERVER_MEMBER, now - 2 * 3_600_000, now - 2 * 3_600_000), idRow(made.live, SERVER_MEMBER, now)];
+    for (const roomId of [loaded.roomId, idle]) await recordIds(t.pool, roomId, stored);
+    await t.manager.prune();
+    for (const roomId of [loaded.roomId, idle]) {
+      assert.deepEqual([(await rows(roomId, made.past)).length, (await rows(roomId, made.asked)).length, (await rows(roomId, made.live)).length], [0, 1, 1], roomId === idle ? "the room not loaded" : "the loaded room");
+    }
+  });
 });

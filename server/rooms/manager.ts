@@ -9,6 +9,7 @@ import { TooBusyError } from "./errors.ts";
 import { RoomNotFoundError } from "./gateway.ts";
 
 export { TooBusyError } from "./errors.ts";
+import { pruneIds } from "./createIds.ts";
 import { pruneReceipts, pruneWatermarks, roomInfo, type RoomInfo } from "./persistence.ts";
 
 /**
@@ -101,7 +102,7 @@ export class RoomManager {
     this.options = { ...DEFAULT_MANAGER_OPTIONS, ...deps.options };
     this.budget = new SnapshotBudget(this.options.snapshotBudget, this.options.now);
     this.gateway = new ActorGateway(this, deps.pool);
-    this.#pruneTimer = setInterval(() => void this.#prune(), DAY_MS);
+    this.#pruneTimer = setInterval(() => void this.prune(), DAY_MS);
     this.#pruneTimer.unref();
   }
 
@@ -385,7 +386,8 @@ export class RoomManager {
     }, this.options.idleUnloadMs);
   }
 
-  async #prune(): Promise<void> {
+  /** The daily cleanup of rows past their use, of every room, loaded or not. */
+  async prune(): Promise<void> {
     try {
       const n = await pruneWatermarks(this.#pool);
       if (n > 0) this.#log.info({ rows: n }, "pruned stale client watermarks");
@@ -397,6 +399,13 @@ export class RoomManager {
       if (n > 0) this.#log.info({ rows: n }, "pruned old roll receipts");
     } catch (err) {
       this.#log.warn({ err }, "receipt prune failed");
+    }
+    // A room loaded again prunes its own rows then, and one that never is keeps them until this.
+    try {
+      const n = await pruneIds(this.#pool, this.options.now());
+      if (n > 0) this.#log.info({ rows: n }, "pruned old id rows");
+    } catch (err) {
+      this.#log.warn({ err }, "id row prune failed");
     }
   }
 }
