@@ -564,3 +564,89 @@ describe("checkRestorable (step 1)", () => {
     assert.equal((await checkRestorable(ctx, NAME)).ok, true);
   });
 });
+
+describe("two recoveries at once (D-261114-026)", () => {
+  /** The model with one call held until `gate` opens, the first time it is made. */
+  function holding(model: Model, gate: Promise<void>): RestoreDb {
+    let held = false;
+    return {
+      state: () => model.state(),
+      createRestoring: (t) => model.createRestoring(t),
+      setTag: (n, t) => model.setTag(n, t),
+      rename: (a, b) => model.rename(a, b),
+      drop: (n) => model.drop(n),
+      load: () => model.load(),
+      stampRestored: () => model.stampRestored(),
+      endSessions: async () => {
+        if (!held) {
+          held = true;
+          await gate;
+        }
+        await model.endSessions();
+      },
+    };
+  }
+
+  test("an undo held between its state read and its drop, while a second recovery puts the original back, never drops the original", async () => {
+    const model = new Model();
+    seed(model, { R: ["restored", tag("restored")], B: "old" });
+    const journal = new MemoryJournal();
+    journal.value = j("undoing");
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    const first = recover(context(model, journal, { db: holding(model, gate) }));
+    await new Promise((resolve) => setImmediate(resolve));
+    // The second runs whole meanwhile: the restored copy goes, the original comes back as raccoon.
+    await recover(context(model, journal));
+    assert.deepEqual([...model.dbs.keys()], [LIVE]);
+    open();
+    await first;
+    assert.deepEqual([...model.dbs.keys()], [LIVE]);
+    assert.equal(model.dbs.get(LIVE)?.content, "old", "the original survives the first recovery's stale step");
+    assert.equal(model.log.filter((l) => l === `drop ${LIVE}`).length, 1, "raccoon was dropped once, as the restored copy");
+  });
+
+  test("a rename held while a second recovery renames first is skipped, not repeated over the database already there", async () => {
+    const model = new Model();
+    seed(model, { B: "old" });
+    const journal = new MemoryJournal();
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    const first = recover(context(model, journal, { db: holding(model, gate) }));
+    await new Promise((resolve) => setImmediate(resolve));
+    await recover(context(model, journal));
+    open();
+    await first;
+    assert.deepEqual([...model.dbs.keys()], [LIVE]);
+    assert.equal(model.dbs.get(LIVE)?.content, "old");
+  });
+});
+
+describe("recovery's progress and its end between steps", () => {
+  const sized: ImageFs = { ...memFs, size: async () => 1 };
+
+  test("placeImages counts each image placed and flushed, so a long run shows how far it is", async () => {
+    const seen: string[] = [];
+    await placeImages({ fs: sized, assetsDir: "/assets", backupsDir: "/backups", progress: (done, total) => seen.push(`${done}/${total}`) }, ["a", "b", "c"]);
+    assert.deepEqual(seen, ["1/6", "2/6", "3/6", "4/6", "5/6", "6/6"]);
+  });
+
+  test("a cancelled recovery ends before its next image or step, and changes nothing more", async () => {
+    const abort = new AbortController();
+    const synced: string[] = [];
+    const fs: ImageFs = { ...sized, syncFile: async (p) => void synced.push(p) };
+    let ticks = 0;
+    const progress = () => {
+      if (++ticks === 4) abort.abort();
+    };
+    await assert.rejects(placeImages({ fs, assetsDir: "/assets", backupsDir: "/backups", progress, signal: abort.signal }, ["a", "b", "c"]), { name: "AbortError" });
+    assert.equal(synced.length, 1, "one flush, then the end");
+
+    const model = new Model();
+    seed(model, { B: "old" });
+    const done = new AbortController();
+    done.abort();
+    await assert.rejects(recover(context(model, new MemoryJournal(), { signal: done.signal })), { name: "AbortError" });
+    assert.deepEqual([...model.dbs.keys()], [BEFORE], "nothing was renamed");
+  });
+});
