@@ -1,5 +1,6 @@
 // The shell's main and preload, which import Electron, with the logic and
-// the contract they use. It needs desktop/node_modules, so only desktop.yml's
+// the contract they use, and the build scripts, which import
+// electron-builder. It needs desktop/node_modules, so only desktop.yml's
 // checks job runs it, never the root typecheck (D-261113-087).
 {
   "extends": "../tsconfig.base.json",
@@ -10,5 +11,5 @@
     "types": ["node"],
     "typeRoots": ["../node_modules/@types"]
   },
-  "include": ["contract.ts", "electron/**/*.ts", "shell/**/*.ts", "vite.shell.config.ts"]
+  "include": ["contract.ts", "electron/**/*.ts", "shell/**/*.ts", "build/**/*.ts", "vite.shell.config.ts"]
 }
