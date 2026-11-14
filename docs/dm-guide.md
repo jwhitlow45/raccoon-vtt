@@ -995,7 +995,7 @@ Filters stay on for this room on this device, and the encounter builder shares t
 4. For a monster with a lair, tick **In its lair** to give it the extra legendary uses and XP it has in its lair, or, for one whose stat block lists lair actions alone, the Lair tag in a fight (see [In its lair](#in-its-lair)).
 5. Press **Place on the map** (or **Place 4 on the map**), then tap the map. The copies spread out to the nearest free squares around your tap.
 
-The copies are numbered for you: "Goblin Warrior 1", "Goblin Warrior 2" and so on. Each token placed is its own undo step.
+The copies are numbered as the party meets them: one seen alone reads "Goblin Warrior", and once the party sees two together they read "Goblin Warrior 1" and "Goblin Warrior 2". Until then your map shows in brackets the number a copy would take, so hidden copies read "Goblin Warrior (1)", "Goblin Warrior (2)" and so on, and a copy takes a number of its own the first time the party sees it beside another of its name. Each token placed is its own undo step.
 
 **Your room's own monsters.** **New monster** opens the editor for a monster of your own. If the monster is in a book your group owns, **Paste a stat block** opens the editor with a box to paste its text into, and **Read the stat block** fills in the fields from it. It reads both the 2024 and 2014 layouts, and lists anything it had to guess ("No Initiative was given, so it is the Dexterity modifier."). Check the fields, then press **Save**. Room monsters stay in this room and its backups, and players never see their stat blocks. To start from an SRD monster instead, open its page and press **Copy to this room's monsters and edit**.
 
