@@ -891,7 +891,7 @@ export async function measureSnapshot(input: { origin: string; roomId: string; c
 export class OpSocket {
   private readonly ws: WebSocket;
   private next = 1;
-  private readonly waiting = new Map<number, { resolve(): void; reject(err: Error): void }>();
+  private readonly waiting = new Map<number, { t: string; resolve(): void; reject(err: Error): void }>();
   /**
    * Why the server will answer nothing more, once it closed the socket or
    * resynced it (a resynced socket hears nothing until a new hello, which
@@ -924,7 +924,10 @@ export class OpSocket {
       } else if (msg.t === "ev") {
         if (msg.acks?.length) this.retries = 0;
         for (const n of msg.acks ?? []) this.waiting.get(n)?.resolve();
-        for (const r of msg.rejects ?? []) this.waiting.get(r.n)?.reject(new Error(`op ${r.n} refused: ${r.code}: ${r.message}`));
+        for (const r of msg.rejects ?? []) {
+          const w = this.waiting.get(r.n);
+          w?.reject(new Error(`op ${r.n} (${w.t}) refused: ${r.code}: ${r.message}`));
+        }
       } else if (msg.t === "retry" && msg.n !== undefined) {
         this.retryFrom(msg.n);
       } else if (msg.t === "resync") {
@@ -1023,6 +1026,7 @@ export class OpSocket {
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`op ${n} (${String(op.t)}) got no answer within 10 s`)), 10_000);
       this.waiting.set(n, {
+        t: String(op.t),
         resolve: () => {
           clearTimeout(timer);
           this.waiting.delete(n);
