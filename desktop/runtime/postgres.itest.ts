@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, rmdir, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os, { devNull, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -362,53 +362,55 @@ describe("on Windows, a data folder whose path PostgreSQL can't open", { skip: p
   });
 
   test("RaccoonVTT's folder in ProgramData, as desktop.yml makes it with the installer's script, is one the app accepts", async () => {
-    const facts = await windowsDeps().inspect(join(process.env.ProgramData ?? "C:\\ProgramData", PROGRAMDATA_FOLDER));
+    const { facts } = await windowsDeps().inspect(join(process.env.ProgramData ?? "C:\\ProgramData", PROGRAMDATA_FOLDER));
     assert.equal(parentProblem(facts), null, JSON.stringify(facts));
   });
 
-  for (const route of ["as Windows allows", "through a junction"] as const) {
-    test(`a cluster there is made, started, dumped, read back and stopped, ${route}`, async () => {
-      const dir = await dataDir();
-      const data = join(dir, "RaccoonVTT Tést Жук", "data");
-      await mkdir(join(data, "logs"), { recursive: true });
-      await mkdir(join(data, "backups"));
-      const record = join(data, "postgres-link.json");
-      const real = windowsDeps();
-      const deps = route === "through a junction" ? { ...real, read: async () => ({ fits: false, short: null, shortFits: false }) } : real;
-      const paths = await pgPaths({ data, program: postgresDir() }, record, platform, deps);
-      const chosen = JSON.parse(await readFile(record, "utf8")) as { how: string; folder?: string };
-      const linkFolder = chosen.how === "junction" ? chosen.folder! : null;
-      if (route === "through a junction") assert.ok(linkFolder !== null, JSON.stringify(chosen));
+  test("a cluster there is made, started, dumped, read back and stopped through its junction, and every later start gives PostgreSQL the same path", async () => {
+    const dir = await dataDir();
+    const data = join(dir, "RaccoonVTT Tést Жук", "data");
+    await mkdir(join(data, "logs"), { recursive: true });
+    await mkdir(join(data, "backups"));
+    const record = join(data, "postgres-link.json");
+    const deps = windowsDeps();
+    const paths = await pgPaths({ data, program: postgresDir() }, record, platform, deps);
+    const chosen = JSON.parse(await readFile(record, "utf8")) as { how: string; folder: string };
+    assert.equal(chosen.how, "junction");
+    try {
+      const c = new Cluster({
+        binDir: join(postgresDir(), "bin"),
+        pgData: join(data, "postgres"),
+        logFile: join(data, "logs", "postgres.log"),
+        password: "test-password-0123456789abcdef",
+        platform,
+        pgPath: paths.map,
+      });
+      await c.init();
+      await c.start();
       try {
-        const c = new Cluster({
-          binDir: join(postgresDir(), "bin"),
-          pgData: join(data, "postgres"),
-          logFile: join(data, "logs", "postgres.log"),
-          password: "test-password-0123456789abcdef",
-          platform,
-          pgPath: paths.map,
-        });
-        await c.init();
-        await c.start();
-        try {
-          const dump = join(data, "backups", "x.dump");
-          await c.client("pg_dump", ["--dbname=postgres", "--format=custom", `--file=${c.pgPath(dump)}`]);
-          await c.readDump(["--list", `--file=${devNull}`, c.pgPath(dump)]);
-          assert.ok((await stat(dump)).size > 0);
-        } finally {
-          await c.stop();
-        }
-        assert.equal(existsSync(join(data, "postgres", "postmaster.pid")), false, "stopped cleanly");
-        const again = await pgPaths({ data, program: postgresDir() }, record, platform, { ...real, read: async () => assert.fail("the record comes first") });
-        assert.equal(again.map(join(data, "postgres")), paths.map(join(data, "postgres")), "the next start gives PostgreSQL the same path");
+        const dump = join(data, "backups", "x.dump");
+        await c.client("pg_dump", ["--dbname=postgres", "--format=custom", `--file=${c.pgPath(dump)}`]);
+        await c.readDump(["--list", `--file=${devNull}`, c.pgPath(dump)]);
+        assert.ok((await stat(dump)).size > 0);
       } finally {
-        if (linkFolder !== null) {
-          // rmdir takes a junction away without following it.
-          await rmdir(join(linkFolder, "data"));
-          await rm(join(linkFolder, "key"));
-          await rmdir(linkFolder);
-        }
+        await c.stop();
       }
-    });
-  }
+      assert.equal(existsSync(join(data, "postgres", "postmaster.pid")), false, "stopped cleanly");
+      const want = paths.map(join(data, "postgres"));
+      const again = async (handed: string) => (await pgPaths({ data: handed, program: postgresDir() }, join(handed, "postgres-link.json"), platform, deps)).map(join(handed, "postgres"));
+      assert.equal(await again(data), want, "by the record");
+      await unlink(record);
+      assert.equal(await again(data), want, "with the record lost, the same junction is found again");
+      const alias = join(dir, "alias");
+      await symlink(data, alias, "junction");
+      assert.equal(await again(alias), want, "through another junction to the folder");
+      assert.equal(await again(data.toUpperCase()), want, "in another case");
+    } finally {
+      // rmdir takes a junction away without following it.
+      await rmdir(join(chosen.folder, "data"));
+      await rm(join(chosen.folder, "key"));
+      await rmdir(chosen.folder);
+      await rmdir(join(dir, "alias")).catch(() => undefined);
+    }
+  });
 });
