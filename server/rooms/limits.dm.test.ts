@@ -6,7 +6,7 @@ import { MOVE_PLAYERS_FIRST } from "#shared/permissions.ts";
 import type { Op } from "#shared/protocol.ts";
 import { seated, type Seated } from "#shared/privTestutil.ts";
 import { actor, castAsk, drawing, entry, member, room, scene, template, token } from "#shared/testutil.ts";
-import { answer, type Answer, joinOp, Mint } from "./limitsTwinTesting.ts";
+import { answer, joinOp, Mint, type Answer } from "./limitsTwinTesting.ts";
 import { Room } from "./numberingTesting.ts";
 
 /**

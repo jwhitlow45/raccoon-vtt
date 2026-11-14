@@ -3,6 +3,7 @@ import type { TestContext } from "node:test";
 import type { RoomState } from "#shared/model.ts";
 import type { Op, ServerOnlyOp } from "#shared/protocol.ts";
 import { hiddenIn, idAt, type Hidden } from "#shared/privTestutil.ts";
+import { FrameReader } from "#shared/seqTestutil.ts";
 import { rng } from "#shared/testutil.ts";
 import type { ActorOptions } from "./actor.ts";
 import { each, openRooms, Room, same as sameFrames, type Event, type Rooms, type Who } from "./numberingTesting.ts";
@@ -103,4 +104,26 @@ export class Mint {
 /** The server's op for a player joining as `name`, as the join over HTTP applies it. */
 export function joinOp(id: string, name: string): ServerOnlyOp {
   return { t: "sys.memberJoin", member: { id, name, color: "#3366ff", kind: "player", createdAt: new Date(0).toISOString() } };
+}
+
+/** How many frames each of a room's pages holds now, for `sameSince`. */
+export type Marks = [number[], number[]];
+
+export function marks(pair: Twins): Marks {
+  return [pair[0].pages.map((p) => p.sent.length), pair[1].pages.map((p) => p.sent.length)];
+}
+
+/**
+ * P1's and the display's frames since the marks, scanned raw for each
+ * room's own ids, then compared whole: for a step after one the rooms
+ * were meant to answer apart, as a DM's two different ops.
+ */
+export function sameSince(pair: Twins, since: Marks, what: string): void {
+  const texts = pair.map((room, i) => {
+    const frames = room.pages.flatMap((p, k) => p.sent.slice(since[i]![k] ?? 0).map((f) => [p.label, f] as const));
+    assert.deepEqual(hiddenIn(frames.map(([, f]) => f), pair.hidden[i]!), [], `${what}: ${room.name}: no frame names what only this room holds`);
+    const reader = new FrameReader();
+    return frames.map(([label, f]) => `${label} ${reader.text(f)}`);
+  });
+  assert.deepEqual(texts[0], texts[1], `${what}: P1 and the display get the same frames in both rooms`);
 }

@@ -8,7 +8,7 @@ import { APART, apartId, AYLA, BREE, dmAreas, dmDrawings, dmTokens, limitsRoom, 
 import { lift, remember } from "#shared/discoveryTestutil.ts";
 import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
 import { actor, castAsk, character, companionBlock, drawing, effect, entry, member, template, token } from "#shared/testutil.ts";
-import { type Answer, bothAnswer, joinOp, Mint, openTwins, same, together, type Twins } from "./limitsTwinTesting.ts";
+import { bothAnswer, joinOp, marks, Mint, openTwins, same, sameSince, together, type Answer, type Twins } from "./limitsTwinTesting.ts";
 import { each, type Room, type Who } from "./numberingTesting.ts";
 
 /**
@@ -320,10 +320,11 @@ describe("conditions answer P1 alike whatever the DM hid", () => {
     }
     // The fresh id the hidden one took is A's alone.
     pair.hidden[0].ids.push(...pair[0].state.characters[AYLA]!.actor.effects.filter((e) => e.hiddenFromPlayers && e.id !== ZERO_HP_UNCONSCIOUS_ID).map((e) => e.id));
-    same(pair, "hidden in A, removed in B");
+    // The DM's two ops differ: a removal writes its line, a hide none. From here on both rooms answer alike.
+    const since = marks(pair);
     await each(pair, (room) => room.apply("dm", heal));
     await each(pair, (room) => room.apply("dm", hit));
-    same(pair, "0 HP again");
+    sameSince(pair, since, "0 HP again");
     for (const room of pair) {
       const effects = room.state.characters[AYLA]!.actor.effects;
       const auto = effects.filter((e) => e.id === ZERO_HP_UNCONSCIOUS_ID);
@@ -332,7 +333,7 @@ describe("conditions answer P1 alike whatever the DM hid", () => {
       assert.deepEqual(Object.keys(auto[0]!).sort(), ["id", "key"], `${room.name}: bare`);
     }
     await each(pair, (room) => room.apply("p1", { t: "actor.effect.remove", target: { characterId: AYLA }, effectId: ZERO_HP_UNCONSCIOUS_ID }));
-    same(pair, "P1 removes the shown one");
+    sameSince(pair, since, "P1 removes the shown one");
   });
 });
 
