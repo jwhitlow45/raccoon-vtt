@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { test } from "node:test";
 import { realpathSync } from "node:fs";
+import { uptime } from "node:os";
 import { basename } from "node:path";
 import { bootId, isAlive, processProgram, processStamp, processStart, selfIdentity, stillRunning } from "./processInfo.ts";
 
@@ -51,6 +52,8 @@ test("a process's stamp is steady while it runs, and gone with it, and its progr
   assert.ok(first !== null);
   assert.equal(await processStamp(process.pid, platform), first);
   assert.equal((await selfIdentity(platform)).start, first, "records keep the stamp");
+  // Linux counts it from boot, which no clock step moves, so it is less than the system's uptime.
+  if (platform === "linux") assert.ok(first <= uptime() * 1000 + 1_000, `${first} ms`);
   assert.equal(await processStamp(await exitedPid(), platform), null);
   const program = await processProgram(process.pid, platform);
   assert.match(basename((program.exe ?? "").replaceAll("\\", "/")).toLowerCase(), /^node(\.exe)?$/);
