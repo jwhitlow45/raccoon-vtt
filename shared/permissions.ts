@@ -4,7 +4,7 @@ import { eventLines } from "./logRings.ts";
 import type { Actor, AreaTemplate, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, MapVideo, PromptKey, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
 import { MAX_ROUTE_REACH, syncStampFits, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
 import { gridOfToken, hash128, heldFreeDoor, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, shownFreeWall, stableStringify, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
-import { CHARACTER_CHANGED, LIMITS, stillFitsVideo } from "./limits.ts";
+import { CHARACTER_CHANGED, HIDDEN_ROW_REFUSED, LIMITS, stillFitsVideo } from "./limits.ts";
 import { referencedVideoIds, restoreAddedAssets } from "./referencedAssets.ts";
 import { handoutPages } from "./handouts.ts";
 import { movementRules, type Blocker, type LegEnd } from "./ruleHooks.ts";
@@ -107,6 +107,15 @@ export type PermissionDeps = {
    * refused for the switch.
    */
   roomSound?: boolean;
+  /**
+   * Which ask took the sender's damage roll `tag` (docs/design/design-v1-player-limits.md
+   * 3.3), from the roll's own receipt (server/rooms/receipts.ts): the ask's
+   * id, null while no ask took it, or undefined when the sender holds no
+   * live receipt for the tag. The tag check reads nothing else, so an ask
+   * open, closed, hidden or gone answers alike. The actor always passes it.
+   * Without it, as on a device, the tag is not checked.
+   */
+  rollTakenBy?: (tag: string) => string | null | undefined;
 };
 
 export type Decision = { ok: true } | { ok: false; code: RefusalCode; message: string };
@@ -774,7 +783,7 @@ function forDm(op: Op, c: Check): Decision {
     }
     case "scene.delete":
       // Here, where ops arrive, never in the reducer: a stored delete of the players' scene from before the rule still replays, moving them on as it did.
-      return deleteCheck(c, op.sceneId);
+      return deleteCheck(c, op.sceneId, op.leavePlayers === true);
     case "floor.open":
       return op.open ? OK : hideCheck(c, op.sceneId);
     case "scene.setMap":
@@ -926,15 +935,18 @@ function pageReader(c: Check, access: JournalAccess): Decision {
  * set of floors it takes, refused while it holds the start floor, and a
  * removal while an unhidden party member stands on the floor. A delete of
  * a scene with floors takes every floor, whoever stands on them, as a
- * delete of any scene takes what is on it.
+ * delete of any scene takes what is on it. With `leavePlayers`, the DM's
+ * yes to LEAVE_PLAYERS_ASK, a delete of the players' own scene is taken
+ * and leaves them on no scene, so a full room can always clear its live
+ * map. A removal of one floor still refuses its start floor.
  */
-function deleteCheck(c: Check, sceneId: string): Decision {
+function deleteCheck(c: Check, sceneId: string, leavePlayers: boolean): Decision {
   const scene = ownEntry(c.state.scenes, sceneId);
   if (!scene) return OK;
   const set = deleteSet(c.state, scene);
   const removal = scene.floor !== undefined && scene.floor.of !== scene.id;
   const start = startFloor(c.state);
-  if (start !== null && set.some((s) => s.id === start)) return refuse("invalid", removal ? FLOOR_REFUSALS.removeStart : MOVE_PLAYERS_FIRST);
+  if (start !== null && set.some((s) => s.id === start) && (removal || !leavePlayers)) return refuse("invalid", removal ? FLOOR_REFUSALS.removeStart : MOVE_PLAYERS_FIRST);
   if (removal && partyOn(c.state, scene.id)) return refuse("invalid", FLOOR_REFUSALS.removeParty(scene.floor!.name));
   return OK;
 }
@@ -1341,8 +1353,12 @@ function forPlayer(op: Op, c: Check): Decision {
         if (c.state.encounter.entries.some((e) => e.id === entry.id)) return GONE;
         if (entry.hidden || entry.groupKey !== undefined) return refuse("forbidden", "players add plain rows");
         if (entry.tokenId !== undefined) {
-          if (!c.visibleToken(entry.tokenId)) return GONE;
+          const token = c.visibleToken(entry.tokenId);
+          if (!token) return GONE;
           if (!c.ownsTokenId(entry.tokenId)) return NOT_YOURS;
+          // The DM adds a creature it hides, hidden, so no row is ever born hidden from its own adder.
+          // Only an owner gets here, whose copy holds the creature's visibility, so the answer is the copy's.
+          if (token.visibility === "dm") return refuse("forbidden", HIDDEN_ROW_REFUSED);
         } else if (entry.characterId !== undefined) {
           if (!ownEntry(c.state.characters, entry.characterId)) return GONE;
           if (!c.ownsCharacterId(entry.characterId)) return NOT_YOURS;
@@ -1450,12 +1466,17 @@ function forPlayer(op: Op, c: Check): Decision {
         }
         if (!entry.key.startsWith("drawing:")) return FORBIDDEN;
         const before = entry.value as Drawing | null | undefined;
-        const current = ownEntry(c.state.drawings, entry.key.slice("drawing:".length));
+        const found = ownEntry(c.state.drawings, entry.key.slice("drawing:".length));
         // Only on the scene the player holds, as a drawing op is, so an undo never writes off it and answers
         // the same whether a scene the players left is still there or was deleted since.
-        if ((before && !holds(before.sceneId)) || (current && !holds(current.sceneId))) return GONE;
+        if ((before && !holds(before.sceneId)) || (found && !holds(found.sceneId))) return GONE;
+        // There, a drawing the sender's copy does not hold is absent to them, the DM's hidden one as a deleted one, and
+        // the reducer's guard then answers that it was changed since (reducer/misc.ts restore).
+        const current = found && c.visible(entry.key) ? found : undefined;
         if (before && (before.ownerId !== c.actor.memberId || before.visibility !== "all")) return FORBIDDEN;
         if (current && (current.ownerId !== c.actor.memberId || current.visibility !== "all")) return FORBIDDEN;
+        // A kept ruler put back stands only on creatures the sender sees on its floor, as a new one does.
+        if (before?.anchors?.some((id) => id !== null && c.visibleToken(id)?.sceneId !== before.sceneId)) return GONE;
         // Putting a drawing back draws it again, so it needs the permission a new one does (docs/design/design-v1-dm-tools.md 2.6).
         // Taking one away stays allowed.
         if (before && before.kind !== "ruler" && !drawsAllowed(c.state.meta.settings, c.actor.memberId)) return refuse("forbidden", NO_DRAWING_BACK);
@@ -1744,9 +1765,12 @@ export const AREA_ASKED_DM = "Saves were asked for this area. The DM can dismiss
  * longer theirs to withdraw.
  */
 function askedAreaRefusal(c: Check, templateId: string): Decision | null {
-  const asks = Object.values(c.state.casts).filter((ask) => ask.area === templateId);
-  if (asks.length === 0) return null;
-  return refuse("forbidden", asks.some((ask) => c.ownsTokenId(ask.caster)) ? AREA_ASKED : AREA_ASKED_DM);
+  // Only the asks the sender's copy holds lock it (shared/project.ts projectCastCtx): on a floor they hold, of a caster
+  // they own. An ask their copy lost, its caster handed on or gone, locks nothing they could see.
+  const held = heldFloors(c.state, c.actor, c.opts);
+  if (held.size === 0) return null;
+  const asks = Object.values(c.state.casts).filter((ask) => ask.area === templateId && holdsRecordOn(c.state, held, ask) && c.ownsTokenId(ask.caster));
+  return asks.length === 0 ? null : refuse("forbidden", AREA_ASKED);
 }
 
 /** Whether an open ask for saves names this area, which locks it for its player (docs/design/design-v1-player-save-spell.md 5.4). */
@@ -1799,8 +1823,11 @@ function castAskCheck(c: Check, op: OpOf<"cast.ask">, held: ReadonlySet<string>)
     }
     if (new Set(input.targets).size !== input.targets.length) return refuse("invalid", "a target is named twice");
   }
+  // A roll's tag is used once, by its own receipt, which names the ask that took it. No stored ask is read, so the
+  // answer is the sender's own history whatever became of that ask.
   const tag = input.damage?.tag;
-  if (tag !== undefined && Object.values(c.state.casts).some((ask) => ask.damage?.tag === tag)) return refuse("invalid", ROLL_ASKED_ALREADY);
+  const taken = tag !== undefined && c.deps.rollTakenBy ? c.deps.rollTakenBy(tag) : null;
+  if (taken === undefined || (taken !== null && taken !== input.id)) return refuse("invalid", ROLL_ASKED_ALREADY);
   // Only the asks the player holds count, as their block counts them, since one left on a floor they no longer hold is not theirs to withdraw.
   if (waitingAsks(c.state, c.actor).filter((ask) => holdsRecordOn(c.state, held, ask)).length >= LIMITS.castsPerMember) return refuse("quota", ASKS_WAITING);
   return OK;

@@ -14,7 +14,7 @@ import {
 } from "./reducer/actors.ts";
 import { remindAfter, remindTurnEnd } from "./reducer/areaTriggers.ts";
 import { linkPass, settleMounts, tokenAttach, tokenDetach } from "./reducer/attach.ts";
-import { attaches, floorLinksOps, floorsOps, followsDaylight, timedEnds, trapsGoOff, writesUndoCorrections } from "./migrate.ts";
+import { attaches, floorLinksOps, floorsOps, followsDaylight, playerLimitsOps, timedEnds, trapsGoOff, writesUndoCorrections } from "./migrate.ts";
 import { clockCorrection, correctionViews } from "./undoCorrection.ts";
 import { clockAdvance, clockSet, clockStart, clockStop, clockUpdate, followDaylight } from "./reducer/clock.ts";
 import {
@@ -84,7 +84,7 @@ import { actorEffects, tokenDeleteMany, tokenUpdateMany } from "./reducer/many.t
 import { pinPut, pinRemove } from "./reducer/pins.ts";
 import { actorSaveDue, endSaves, rollAnswer, rollAsk, rollChange, rollClose, rollReopen } from "./reducer/rolls.ts";
 import { actorOutcome } from "./reducer/outcome.ts";
-import { castAsk, castClose } from "./reducer/casts.ts";
+import { castAsk, castClose, dropCasterAsks } from "./reducer/casts.ts";
 import { capRestoredDues, trapAct, trapCreate, trapDelete, trapSettle, trapUpdate } from "./reducer/traps.ts";
 import { noticeStep } from "./reducer/trapNotice.ts";
 import { planBefore, trapSpring, trapStep, type TrapWrites } from "./reducer/trapStep.ts";
@@ -208,6 +208,8 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
       // Stairs go with a floor they join, inside the op's undo step (docs/design/design-v1-floors.md phase 2, 3).
       if (floorLinksOps(env.opVersion)) dropFloorLinks(tx, state);
     }
+    // An ask goes with its caster (reducer/casts.ts).
+    if (playerLimitsOps(env.opVersion)) dropCasterAsks(tx);
     // Every op's dispatch ends with the links that no longer hold coming loose (docs/design/design-v1-attach.md 5.2).
     if (attaches(env.opVersion)) {
       linkPass(tx);

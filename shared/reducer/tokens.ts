@@ -1,9 +1,9 @@
 import { keys } from "../keys.ts";
-import { attaches, floorLinksOps, healRevivesDead, keepsLairTick, meetsNumbers, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers, syncsFromDdb, walksRoutes } from "../migrate.ts";
+import { attaches, floorLinksOps, healRevivesDead, keepsLairTick, meetsNumbers, oneLinkPerActor, playerLimitsOps, resizeStop, shapeKeepsOwnNumbers, syncsFromDdb, walksRoutes } from "../migrate.ts";
 import type { Actor, AreaTemplate, Character, ClassResource, DdbSync, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
-import { gridOfToken, inSightOfNonOwners, seenAtEvery, seenMark } from "../project.ts";
+import { gridOfToken, inSightOfNonOwners, seatView, seenAtEvery, seenMark } from "../project.ts";
 import { MAX_RULER_STOPS, SYNC_AT_AHEAD, syncAtAhead, syncStamp, type ActorPatch, type CharacterPatch, type DdbSyncPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
-import { LIMITS, serializedBytes } from "../limits.ts";
+import { LIMITS, drawingHeld, serializedBytes } from "../limits.ts";
 import { applyHpSet, hpRules, type ActorEvent } from "../rules/hp.ts";
 import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/footprint.ts";
 import { foldPrior, keepPrior, pathCounters, pathThisTurn, priorDiag, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
@@ -1013,11 +1013,20 @@ export function drawingDelete(tx: Tx, op: OpOf<"drawing.delete">): void {
   tx.remove(keys.drawing(op.drawingId));
 }
 
+/**
+ * From op version 61 a player's clear takes only their drawings their own
+ * copy holds (shared/limits.ts drawingHeld), so a drawing the DM hid, or a
+ * kept ruler on a creature out of their sight, stays, and the clear's undo
+ * never brings back what the copy lacked. Ops stored before cleared every
+ * drawing of theirs and replay so.
+ */
 export function drawingClear(tx: Tx, op: OpOf<"drawing.clear">): void {
   tx.scene(op.sceneId);
+  const view = tx.actor.role === "player" && playerLimitsOps(tx.env.opVersion) ? seatView(tx.state, tx.actor.memberId, tx.env) : null;
   for (const drawing of sortedById(Object.values(tx.state.drawings))) {
     if (drawing.sceneId !== op.sceneId) continue;
     if (op.scope === "own" && drawing.ownerId !== tx.actor.memberId) continue;
+    if (view && !drawingHeld(drawing, view)) continue;
     tx.remove(keys.drawing(drawing.id));
   }
 }

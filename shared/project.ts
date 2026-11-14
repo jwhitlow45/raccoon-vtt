@@ -1205,8 +1205,8 @@ function tokenVisibleById(ctx: Ctx, tokenId: string, revealedSeen = false): bool
  * rows their tracker shows and the floors they hold, each by the rule the
  * projection itself reads, so a seat's count is the copy's.
  */
-export function seatView(state: RoomState, memberId: string): SeatView {
-  const ctx = ctxOf(state, { memberId, role: "player" }, { sceneId: null });
+export function seatView(state: RoomState, memberId: string, env: Pick<Env, "opVersion"> = {}): SeatView {
+  const ctx = ctxOf(state, { memberId, role: "player" }, { sceneId: null }, clipsByHeldWalls(env.opVersion));
   return {
     sees: (tokenId) => tokenVisibleById(ctx, tokenId),
     showsRow: (entryId) => {

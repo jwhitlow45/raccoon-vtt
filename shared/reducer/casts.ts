@@ -117,3 +117,20 @@ function rolledOf(tx: Tx, ask: CastAsk, caster: Token | undefined): CastRolled[]
   }
   return out;
 }
+
+/**
+ * From op version 61 every op ends by dropping each ask whose caster is no
+ * longer in the room, as a removed floor's asks are dropped (floors.ts
+ * dropFloorAsks), inside the op's own undo step. One rule after every op
+ * covers each way a caster leaves: a dismissal, a delete of it, of its
+ * group, its character or its scene, an undo of its create, a member's
+ * removal. So no ask outlives its caster unseen.
+ */
+export function dropCasterAsks(tx: Tx): void {
+  // Rooms from before asks hold no collection of them.
+  const asks = Object.values(tx.state.casts ?? {});
+  if (asks.length === 0) return;
+  for (const ask of asks.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    if (!ownEntry(tx.state.tokens, ask.caster)) tx.remove(keys.cast(ask.id));
+  }
+}

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { LIMITS, checkLimits } from "./limits.ts";
 import type { RoomState, Viewer } from "./model.ts";
-import { AREA_ASKED, AREA_ASKED_DM, ASKS_WAITING, ASK_CLOSED, DM_RUNS_GROUP_SAVE, ONLY_ITS_PLAYER_WITHDRAWS, ROLL_ASKED_ALREADY, canApply, waitingAsks } from "./permissions.ts";
+import { AREA_ASKED, ASKS_WAITING, ASK_CLOSED, DM_RUNS_GROUP_SAVE, ONLY_ITS_PLAYER_WITHDRAWS, ROLL_ASKED_ALREADY, canApply, waitingAsks } from "./permissions.ts";
 import type { CastInput, Op } from "./protocol.ts";
 import { DM, P1, P2, castAsk, castTable, token } from "./testutil.ts";
 
@@ -62,12 +62,18 @@ describe("asking for saves", () => {
     assert.equal(decide(paused, ask()), GONE);
   });
 
-  test("a target named twice, a taken id and a roll another open ask holds are refused", () => {
+  test("a target named twice, a taken id and a roll its receipt says another ask took are refused", () => {
     const state = castTable({ casts: { k9: castAsk("k9", { by: "p2" }), k2: castAsk("k2", { by: "p2", damage: { tag: "dmg", parts: 1 } }) } });
     assert.equal(decide(state, targets(["g1", "g1"], { id: "k3" })), "invalid: a target is named twice");
     assert.equal(decide(state, ask()), GONE, "the id an open ask holds");
-    assert.equal(decide(state, ask({ id: "k3", damage: { tag: "dmg", parts: 1 } })), `invalid: ${ROLL_ASKED_ALREADY}`);
-    assert.equal(decide(state, ask({ id: "k3", damage: { tag: "other", parts: 1 } })), "ok");
+    // The tag is the receipt's to answer (rollTakenBy), never an open ask's.
+    const taken = (tag: string) => (tag === "dmg" ? "k2" : null);
+    const d = (op: Op) => {
+      const r = canApply(op, P1, state, { ...deps, rollTakenBy: taken });
+      return r.ok ? "ok" : `${r.code}: ${r.message}`;
+    };
+    assert.equal(d(ask({ id: "k3", damage: { tag: "dmg", parts: 1 } })), `invalid: ${ROLL_ASKED_ALREADY}`);
+    assert.equal(d(ask({ id: "k3", damage: { tag: "other", parts: 1 } })), "ok");
   });
 
   test("the cap of 3 counts only the member's asks whose caster exists and they own now", () => {
@@ -135,17 +141,17 @@ describe("an asked area", () => {
     assert.equal(decide(castTable(), { t: "template.delete", templateId: "a1" }), "ok", "with no ask open");
   });
 
-  test("stays fixed when its owner can no longer withdraw the ask, and says the DM can dismiss it (SSB-O-3)", () => {
+  test("is free once its owner's copy no longer holds the ask: its caster gone or passed to another player", () => {
     const gone = open();
     delete gone.tokens.thorn;
     assert.equal(decide(gone, { t: "cast.close", castId: "k1", end: "withdrawn" }), `gone: ${ASK_CLOSED}`, "its caster is gone, so no withdraw");
-    assert.equal(decide(gone, { t: "template.update", templateId: "a1", patch: { size: 30 } }), `forbidden: ${AREA_ASKED_DM}`);
-    assert.equal(decide(gone, { t: "template.delete", templateId: "a1" }), `forbidden: ${AREA_ASKED_DM}`);
+    assert.equal(decide(gone, { t: "template.update", templateId: "a1", patch: { size: 30 } }), "ok");
+    assert.equal(decide(gone, { t: "template.delete", templateId: "a1" }), "ok");
     const passed = open();
     passed.characters["thorn-c"]!.ownerIds = ["p2"];
     assert.equal(decide(passed, { t: "cast.close", castId: "k1", end: "withdrawn" }), `gone: ${ASK_CLOSED}`, "Thorn passed to another player");
-    assert.equal(decide(passed, { t: "template.delete", templateId: "a1" }), `forbidden: ${AREA_ASKED_DM}`);
-    assert.equal(decide(passed, { t: "cast.close", castId: "k1", end: "dismissed" }, DM), "ok", "the DM's Dismiss frees it");
+    assert.equal(decide(passed, { t: "template.delete", templateId: "a1" }), "ok");
+    assert.equal(decide(passed, { t: "cast.close", castId: "k1", end: "dismissed" }, DM), "ok", "the DM's Dismiss still closes it");
   });
 
   test("is not locked for the DM, and a hidden area still answers as missing", () => {

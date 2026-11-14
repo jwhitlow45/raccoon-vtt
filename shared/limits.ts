@@ -1467,7 +1467,7 @@ function sceneGroup(state: RoomState, sceneId: string): ReadonlySet<string> {
 }
 
 /** Whether the member's view holds a drawing: theirs to see on a held floor, with every creature it is kept on in sight. */
-function drawingHeld(drawing: Drawing, view: SeatView): boolean {
+export function drawingHeld(drawing: Drawing, view: SeatView): boolean {
   return drawing.visibility === "all" && view.holds(drawing.sceneId) && (drawing.anchors ?? []).every((id) => id === null || view.sees(id));
 }
 

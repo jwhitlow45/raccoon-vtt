@@ -434,7 +434,8 @@ describe("removing and deleting floors (7.1, 9, D-261102-493)", () => {
     assert.deepEqual(Object.keys(removed.state.casts).sort(), ["k2", "k3"], "the ask on Upper goes, the others stay");
     assert.deepEqual(Object.keys(undo(removed.state, removed.inverse).casts).sort(), ["k1", "k2", "k3"]);
     const deleted = applied(state, { t: "scene.delete", sceneId: "s1" });
-    assert.deepEqual(Object.keys(deleted.state.casts), ["k3"], "a delete of the scene takes the asks on every floor");
+    // From op version 61 an ask also goes with its caster (reducer/casts.ts dropCasterAsks), and the owl stood on the scene.
+    assert.deepEqual(Object.keys(deleted.state.casts), [], "a delete of the scene takes the asks on every floor, and the one its caster made");
     const plain = applied({ ...state, casts: { k3: ask("k3", "s2") }, meta: { ...state.meta, playerSceneId: "s1" } }, { t: "scene.delete", sceneId: "s2" });
     assert.deepEqual(Object.keys(plain.state.casts), ["k3"], "a scene without floors keeps its asks, as before floors");
   });

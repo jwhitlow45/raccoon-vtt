@@ -1,5 +1,5 @@
 import { keys } from "../keys.ts";
-import { discoversMap } from "../migrate.ts";
+import { discoversMap, playerLimitsOps } from "../migrate.ts";
 import type { Encounter, GridShape, MemberId, PathStop, RoomSettings, RoomState, Scene, TurnStart } from "../model.ts";
 import type { OpOf } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
@@ -348,7 +348,10 @@ export function sceneDelete(tx: Tx, op: OpOf<"scene.delete">): void {
   // On the server, only a delete stored before canApply refused the players' scene (permissions.ts MOVE_PLAYERS_FIRST) reaches this, and replays as it did.
   // A DM's pending delete, replayed with no canApply over a view where the players have since moved here (client/state/store.ts replayPending), reaches it too until the server refuses it.
   // The players go to a main floor, the first scene left in the Scenes panel (docs/design/design-v1-floors.md 8.3).
-  if (start !== null && set.some((scene) => scene.id === start)) {
+  // From op version 61 the DM's confirmed delete of their scene leaves them on no scene, whose undo puts them back.
+  if (start !== null && set.some((scene) => scene.id === start) && op.leavePlayers === true && playerLimitsOps(tx.env.opVersion)) {
+    tx.write(keys.meta, { ...tx.state.meta, playerSceneId: null });
+  } else if (start !== null && set.some((scene) => scene.id === start)) {
     const remaining = Object.values(tx.state.scenes)
       .filter((s) => s.floor?.of === undefined || s.floor.of === s.id)
       .sort((a, b) => a.order - b.order);
