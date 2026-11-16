@@ -610,6 +610,51 @@ describe("an area's sweep reads a walk hex by hex at the lead's moments (areaTri
   });
 });
 
+describe("an area's sweep reads a walk hex by hex at its height between its points (areaTriggers.ts alongGroups, review HEXFILE-ASTRA-2)", () => {
+  for (const [name, g] of GRIDS) {
+    test(`${name}: a warhorse coming down from 40 ft to the ground drags the goblin down through a sphere at 10 ft on the corridor's hex 3, and the goblin enters it`, () => {
+      for (const [who, actor] of [["Pat", P1], ["the DM", DM]] as const) {
+        const { s, path } = keepOf(g, 1, 0, "horse");
+        s.tokens.horse = { ...s.tokens.horse!, elevation: 40 };
+        s.tokens.gob = { ...s.tokens.gob!, elevation: 40 };
+        s.templates.orb = template("orb", { shape: "sphere", size: 5, origin: { ...hexCenter(g, path[3]!), z: 10 }, triggers: ["enter"], spell: "Orb" });
+        s.encounter = { rev: 0, round: 1, activeEntryId: "e1", entries: [entry("e1", { tokenId: "horse", value: 15 })] };
+        const op = { ...intoCorridor(g, s, path[4]!), elevation: 0 };
+        const allowed = canApply(op, actor, s, { canUseAsset: () => true });
+        assert.ok(allowed.ok, `${who}: ${allowed.ok ? "" : allowed.message}`);
+        const gob = planWalks(op, s, actor, {}).find((m) => m.tokenId === "gob")!;
+        assert.deepEqual(gob.route.map((p) => p.elevation), [40, 30, 20, 0], `${who}: the goblin comes down with the warhorse`);
+        const r = applyOp(s, op, actor, env(1));
+        assert.ok(r.ok);
+        const entered = r.log.flatMap((e) => (e.data?.type === "area" && e.data.trigger === "enter" ? [e.data.tokenId] : []));
+        assert.ok(entered.includes("gob"), `${who}: entered ${entered.join(", ")}`);
+      }
+    });
+  }
+});
+
+describe("a walk hex by hex never shares its lead's spots, whose moments are not its own (traps.ts walksOf, review HEXFILE-ASTRA-1)", () => {
+  for (const [name, g] of GRIDS) {
+    test(`${name}: a hex on, the goblin enters a stop trap on the warhorse's start hex halfway along, so the trap stops the warhorse there`, () => {
+      for (const [who, actor] of [["Pat", P1], ["the DM", DM]] as const) {
+        const { s, path } = keepOf(g, 1, 0, "horse");
+        s.traps.stop = trap("stop", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", zone: { cells: [{ x: path[1]!.col, y: path[1]!.row, w: 1, h: 1 }] } });
+        const op = intoCorridor(g, s, path[2]!);
+        const allowed = canApply(op, actor, s, { canUseAsset: () => true });
+        assert.ok(allowed.ok, `${who}: ${allowed.ok ? "" : allowed.message}`);
+        const gob = trapWalks(op, s, actor, {}).find((w) => w.tokenId === "gob")!;
+        const onTrap = gob.spots.find((spot) => hexKey(hexOf(g, spot)) === hexKey(path[1]!))!;
+        assert.equal(compareAlong(onTrap.progress, [0, 1, 2]), 0, `${who}: on the trap at ${onTrap.progress.join("/")}, halfway along`);
+        assert.notEqual(planTrapMove(op, s, actor, {}).op, op, `${who}: the trap cuts the move`);
+        const r = applyOp(s, op, actor, env(1));
+        assert.ok(r.ok);
+        const at = ["horse", "gob"].map((id) => hexKey(occupiedHexes(g, r.state.tokens[id]!)[0]!));
+        assert.deepEqual(at, [hexKey(path[1]!), hexKey(path[0]!)], `${who}: the warhorse stopped where it set out, the goblin back on its own start`);
+      }
+    });
+  }
+});
+
 describe("a trap's cut keeps how far along the cut lead's walk each point of a walk hex by hex is reached (traps.ts cutAlong, review HEXFILE-OPUS-1)", () => {
   for (const [name, g] of GRIDS) {
     test(`${name}: a stop trap at the corridor's hex 5 stops the warhorse, and the goblin it drags still enters a sphere on hex 3 that it walks through`, () => {
