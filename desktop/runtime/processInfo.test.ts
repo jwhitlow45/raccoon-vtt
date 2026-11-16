@@ -118,7 +118,7 @@ test("a listing reads ps's lines, and Windows' JSON list, and refuses anything e
   assert.throws(() => parseWindowsList(listing(1, [row(9, "postgres.exe", null)])), /^Error: postgres\.exe \(pid 9\) runs in this session and its command line can't be read$/);
   assert.throws(() => parseWindowsList(listing(1, [row(9, "POSTGRES.EXE", "")])), /pid 9/, "an empty one too, and the name in any case");
   // Services in session 0, another user's session, and a cmd.exe with more rights than this user's are skipped.
-  assert.deepEqual(parseWindowsList(listing(1, [row(10, "postgres.exe", null, 0), row(11, "postgres.exe", null, 2), row(12, "cmd.exe", null, 1)])), []);
+  assert.deepEqual(parseWindowsList(listing(1, [row(10, "postgres.exe", null, 0), row(11, "postgres.exe", null, 2), row(12, "cmd.exe", null, 1), row(13, "pg_ctl.exe", null, 1)])), []);
   assert.deepEqual(parseWindowsList(listing(0, [row(10, "postgres.exe", null, 0)])), [], "session 0 is skipped though this runs in it, as a CI runner's service does");
   assert.throws(() => parseWindowsList(listing(1, [{ ...row(7, "postgres.exe", "x"), exe: 7 }])), /can't read/);
   assert.throws(() => parseWindowsList(listing(1, [{ ...row(7, "postgres.exe", "x"), session: "1" }])), /can't read/);
@@ -126,7 +126,7 @@ test("a listing reads ps's lines, and Windows' JSON list, and refuses anything e
   assert.throws(() => parseWindowsList('{"rows":[]}'), /not a list/);
   assert.throws(() => parseWindowsList(listing(1, [{ pid: "7", name: "postgres.exe", line: "x", session: 1 }])), /can't read/);
   assert.throws(() => parseWindowsList(""));
-  assert.match(WINDOWS_LIST_SCRIPT, /Name = 'postgres\.exe' OR Name = 'cmd\.exe'/, "the launcher is asked for");
+  assert.match(WINDOWS_LIST_SCRIPT, /Name = 'postgres\.exe' OR Name = 'cmd\.exe' OR Name = 'pg_ctl\.exe'/, "the launcher and pg_ctl are asked for");
   assert.match(WINDOWS_LIST_SCRIPT, /exe = \$_\.ExecutablePath; session = \[int\]\$_\.SessionId/);
   assert.match(WINDOWS_LIST_SCRIPT, /session = \[System\.Diagnostics\.Process\]::GetCurrentProcess\(\)\.SessionId/);
 });
