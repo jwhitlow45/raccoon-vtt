@@ -235,65 +235,77 @@ function stopNote(text: string) {
   return player.locator("[data-stop-note]").filter({ has: player.getByRole("status").filter({ hasText: text }) });
 }
 
-/**
- * Brings up the stopped walk's note at `size` at 130%, by step 9's walk into
- * the platform's wall again, and checks it keeps between the bars: Close,
- * Teleport here and the note's top and foot each take a tap, as a finger's
- * would. `more` checks the note further. Then 390 x 844 at 100% again.
- */
-async function stopNoteAt(size: { width: number; height: number }, shot: string, more?: (note: Locator) => Promise<void>): Promise<void> {
-  await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+/** The player's page at `size` with the interface at `scale`, reloaded so the board reads both. */
+async function playerAt(size: { width: number; height: number }, scale: string): Promise<void> {
+  await player.evaluate((s) => localStorage.setItem("rvtt.uiScale", s), scale);
   await player.setViewportSize(size);
   await player.reload();
   await player.getByRole("status", { name: "Connected" }).first().waitFor();
   await player.locator(".konvajs-content").first().waitFor();
-  // Back west of the platform's wall, then the walk of step 9 again.
-  await ops.send({ t: "token.move", tokenId: run.thornId, x: 7, y: 14, elevation: 10 });
-  await thornAt({ x: 7, y: 14, elevation: 10 });
-  await player.waitForTimeout(500);
-  await dragCells(player, BOUNDS, { x: 7, y: 14 }, { x: 10, y: 14 });
-  await thornAt({ x: 8, y: 14, elevation: 10 });
-  const note = player.locator("[data-stop-note]");
-  await note.getByRole("button", { name: "Teleport here" }).waitFor();
-  await player.waitForTimeout(300);
-  /** Whether a tap at a point lands inside `target`. */
-  const lands = (target: string, x: number, y: number) =>
-    player.evaluate(
-      ([sel, px, py]) => {
-        const doc = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): { closest(s: string): unknown } | null } }).document;
-        return doc.elementFromPoint(px, py)?.closest(sel) != null;
-      },
-      [target, x, y] as const,
-    );
-  const inReach = async (when: string) => {
-    const box = (await note.boundingBox())!;
-    const buttons: { name: string; b: { x: number; y: number; width: number; height: number } }[] = [];
-    for (const name of ["Close", "Teleport here"]) {
-      const b = (await note.getByRole("button", { name, exact: true }).boundingBox())!;
-      assert.ok(await lands("[data-stop-note] button", b.x + b.width / 2, b.y + b.height / 2), `${name} takes a tap at its middle${when}`);
-      buttons.push({ name, b });
+}
+
+/**
+ * Brings up the stopped walk's note at `size` at 130%, by step 9's walk
+ * across the platform's wall again, and checks it keeps between the bars:
+ * Close, Teleport here and the note's top and foot each take a tap, as a
+ * finger's would. `more` checks the note further. Then 390 x 844 at 100%
+ * again, also after a check fails: at these sizes a square is a few pixels
+ * wide, so the next steps' drags of one square would read as taps and fail
+ * too (rel42, mv-2).
+ */
+async function stopNoteAt(size: { width: number; height: number }, shot: string, more?: (note: Locator) => Promise<void>): Promise<void> {
+  await playerAt(size, "1.3");
+  try {
+    // Back west of the platform's wall, then the walk of step 9 again. Since step 9's teleport the party has seen the ground round the
+    // platform, so on flat ground there is a way round the wall's north end, and the platform's edge there closes it: Thorn holds on the
+    // edge at the wall's end, 10 ft up, under the ledge's words, not down the stair and round on the ground (D-261114-036, D-261115-030).
+    await ops.send({ t: "token.move", tokenId: run.thornId, x: 7, y: 14, elevation: 10 });
+    await thornAt({ x: 7, y: 14, elevation: 10 });
+    await player.waitForTimeout(500);
+    await dragCells(player, BOUNDS, { x: 7, y: 14 }, { x: 10, y: 14 });
+    await thornAt({ x: 8, y: 12, elevation: 10 });
+    const note = player.locator("[data-stop-note]");
+    await stopNote("Ledge in the way. No stairs you have seen lead there.").getByRole("button", { name: "Teleport here" }).waitFor();
+    await player.waitForTimeout(300);
+    /** Whether a tap at a point lands inside `target`. */
+    const lands = (target: string, x: number, y: number) =>
+      player.evaluate(
+        ([sel, px, py]) => {
+          const doc = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): { closest(s: string): unknown } | null } }).document;
+          return doc.elementFromPoint(px, py)?.closest(sel) != null;
+        },
+        [target, x, y] as const,
+      );
+    const inReach = async (when: string) => {
+      const box = (await note.boundingBox())!;
+      const buttons: { name: string; b: { x: number; y: number; width: number; height: number } }[] = [];
+      for (const name of ["Close", "Teleport here"]) {
+        const b = (await note.getByRole("button", { name, exact: true }).boundingBox())!;
+        assert.ok(await lands("[data-stop-note] button", b.x + b.width / 2, b.y + b.height / 2), `${name} takes a tap at its middle${when}`);
+        buttons.push({ name, b });
+      }
+      // Their whole touch areas, not only their middles, stay apart, so a tap at Close's edge never lands on Teleport here (review LP2L2-ASTRA-3).
+      const [c, t] = buttons.map((x) => x.b);
+      const apart = c!.x + c!.width <= t!.x + 0.5 || t!.x + t!.width <= c!.x + 0.5 || c!.y + c!.height <= t!.y + 0.5 || t!.y + t!.height <= c!.y + 0.5;
+      assert.ok(apart, `Close ${JSON.stringify(c)} and Teleport here ${JSON.stringify(t)} overlap${when}`);
+      // Its top and its foot are the note's own, not under the top bar or the toolbar.
+      assert.ok(await lands("[data-stop-note]", box.x + box.width / 2, box.y + 3), `the note's top is in reach${when}`);
+      assert.ok(await lands("[data-stop-note]", box.x + box.width / 2, box.y + box.height - 3), `the note's foot is in reach, not under the toolbar${when}`);
+    };
+    await inReach("");
+    await shots.take(player, shot);
+    if (more) {
+      await more(note);
+      await inReach(", after the further checks");
     }
-    // Their whole touch areas, not only their middles, stay apart, so a tap at Close's edge never lands on Teleport here (review LP2L2-ASTRA-3).
-    const [c, t] = buttons.map((x) => x.b);
-    const apart = c!.x + c!.width <= t!.x + 0.5 || t!.x + t!.width <= c!.x + 0.5 || c!.y + c!.height <= t!.y + 0.5 || t!.y + t!.height <= c!.y + 0.5;
-    assert.ok(apart, `Close ${JSON.stringify(c)} and Teleport here ${JSON.stringify(t)} overlap${when}`);
-    // Its top and its foot are the note's own, not under the top bar or the toolbar.
-    assert.ok(await lands("[data-stop-note]", box.x + box.width / 2, box.y + 3), `the note's top is in reach${when}`);
-    assert.ok(await lands("[data-stop-note]", box.x + box.width / 2, box.y + box.height - 3), `the note's foot is in reach, not under the toolbar${when}`);
-  };
-  await inReach("");
-  await shots.take(player, shot);
-  if (more) {
-    await more(note);
-    await inReach(", after the further checks");
+    await note.getByRole("button", { name: "Close" }).click();
+    await note.waitFor({ state: "detached" });
+  } catch (err) {
+    // The check's own failure is the one to report, not a failure to resize after it.
+    await playerAt({ width: 390, height: 844 }, "1").catch(() => undefined);
+    throw err;
   }
-  await note.getByRole("button", { name: "Close" }).click();
-  await note.waitFor({ state: "detached" });
-  await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
-  await player.setViewportSize({ width: 390, height: 844 });
-  await player.reload();
-  await player.getByRole("status", { name: "Connected" }).first().waitFor();
-  await player.locator(".konvajs-content").first().waitFor();
+  await playerAt({ width: 390, height: 844 }, "1");
 }
 
 async function closeNote(text: string): Promise<void> {
