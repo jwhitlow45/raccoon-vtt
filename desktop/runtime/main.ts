@@ -33,6 +33,7 @@ import { firstFreePort, portFree } from "./ports.ts";
 import { pgPaths, type PgPaths } from "./pgPaths.ts";
 import { Cluster, DATABASE, dbConfig } from "./postgres.ts";
 import { selfIdentity, stillRunning } from "./processInfo.ts";
+import { sendToShell } from "./shellChannel.ts";
 import { checkRestorable, parseRecord, recover, runRestore, type CrashPoint, type RestoreContext, type RestoreHooks } from "./restore.ts";
 import { clusterRestoreDb, nodeImageFs } from "./restoreDb.ts";
 import { listRooms, newDmLink } from "./rooms.ts";
@@ -333,11 +334,7 @@ const deps: SupervisorDeps = {
 };
 
 function send(message: SupervisorToShell): void {
-  try {
-    process.send?.(message);
-  } catch {
-    // The shell is gone, and the disconnect handler stops everything.
-  }
+  sendToShell(process, message);
 }
 
 const supervisor = new Supervisor(deps);
@@ -372,7 +369,10 @@ process.on("message", (message: unknown) => {
 });
 // A closed channel stops everything the same way, so the shell's end (even
 // taskkill /F) never leaves PostgreSQL or the server behind for long.
-process.on("disconnect", () => void exit(0));
+process.on("disconnect", () => {
+  log("channel closed");
+  void exit(0);
+});
 process.on("SIGINT", () => void exit(0));
 process.on("SIGTERM", () => void exit(0));
 process.on("uncaughtException", (err) => {
