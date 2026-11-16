@@ -573,7 +573,7 @@ export class Cluster {
     for (const p of await this.list()) {
       if (p.pid === process.pid) continue;
       const kind = await postmasterKind(p, folders, this.opts.platform, programs);
-      if (kind !== null) found.push({ pid: p.pid, exact: kind === "exact", commandLine: p.commandLine, pgCtl: kind === "pgctl" });
+      if (kind !== null) found.push({ pid: p.pid, exact: kind === "exact", commandLine: p.commandLine, pgCtl: kind === "pgctl", exe: p.exe ?? null });
     }
     return found;
   }
@@ -860,7 +860,7 @@ const KILL_WAIT_AGAIN_MS = 60_000;
 const LIST_RETRY_MS = 10_000;
 
 /** A process the listing may count as a postmaster of this folder, and whether it is exactly one (postmasterKind). */
-export type Postmaster = { pid: number; exact: boolean; commandLine: string; pgCtl: boolean };
+export type Postmaster = { pid: number; exact: boolean; commandLine: string; pgCtl: boolean; exe: string | null };
 
 /** What each postmaster found has been asked so far, by pid, and when: pg_ctl stop -m fast, then -m immediate, again each minute. */
 type Asked = Map<number, { mode: "fast" | "immediate"; at: number }>;
@@ -897,8 +897,9 @@ async function realOrNull(path: string): Promise<string | null> {
  *   with the exe link on the bundled postgres. macOS has the joined line
  *   only, so the whole of it must be that, anchored at both ends, and E is
  *   the bundled postgres by real path. Windows has the program's path and
- *   the command line cmd.exe gives it: "E" -D "F" -p N, and the spaces the
- *   redirections leave. On POSIX the shell pg_ctl execs through is the same
+ *   the command line cmd.exe gives it, which joins the program and its
+ *   arguments with a space of its own and keeps the spaces the
+ *   redirections leave: `"E"  -D "F" -p N `, as a Windows runner showed. On POSIX the shell pg_ctl execs through is the same
  *   process a moment earlier, so its exact command counts too. On Windows
  *   the cmd.exe it starts the postmaster through, `"COMSPEC" /C ""E" -D "F"
  *   -p N < "nul" >> "log" 2>&1"`, is another process, which may yet start
@@ -966,7 +967,7 @@ export async function postmasterKind(
         if (await isPgCtl(pgCtl[1])) return "pgctl";
       }
     } else if (win) {
-      if (new RegExp(`^"[^"]+" -D "${f}" -p \\d+ *$`, "i").test(line)) {
+      if (new RegExp(`^"[^"]+" +-D "${f}" -p \\d+ *$`, "i").test(line)) {
         shaped = true;
         if (p.exe != null && same(await real(p.exe), programs.postgres)) return "exact";
       }

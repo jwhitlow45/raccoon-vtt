@@ -106,12 +106,14 @@ describe("the cluster", () => {
     assert.equal(dbConfig("postgres://x", RESTORE_STATEMENT_MS).statement_timeout, RESTORE_STATEMENT_MS);
   });
 
-  test("the process listing knows the running postmaster, the one postmaster.pid names, as exactly what pg_ctl starts, and the stop proves it ended", async () => {
+  test("the process listing knows the running postmaster, the one postmaster.pid names, as exactly what pg_ctl starts, and the stop proves it ended", async (t) => {
     const c = await cluster();
     const pid = Number((await readFile(join(c.dir, "postgres", "postmaster.pid"), "utf8")).split(/\r?\n/)[0]);
     // A child forked that moment carries the postmaster's command line until it renames itself, so it may be listed too, and exact too.
     const found = await c.cluster.postmasters();
-    const listing = JSON.stringify(found);
+    // What this system reports, each row with its command line and program, beside the bundled postgres's real path, printed on every run.
+    const listing = `${JSON.stringify(found)}, bundled postgres ${await realpath(join(postgresDir(), "bin", platform === "win32" ? "postgres.exe" : "postgres"))}, data folder ${join(c.dir, "postgres")}`;
+    t.diagnostic(`listing: ${listing}`);
     assert.equal(found.find((p) => p.pid === pid)?.exact, true, `this folder's postmaster, exactly as pg_ctl starts it: ${listing}`);
     assert.deepEqual(found.filter((p) => !p.exact), [], "nothing that only names the folder");
     // On Windows the cmd.exe pg_ctl started it through waits on it, and is exactly pg_ctl's launcher.
