@@ -10,13 +10,12 @@ import { DM, entry, env, P1, template, token, trap } from "../testutil.ts";
 import { linkHolds } from "./attach.ts";
 import { footprintSize, occupiedHexes, placedOnHex } from "./footprint.ts";
 import { hexCenter, hexDistance, hexKey, hexLine, hexNeighbors, type Hex, type HexGrid } from "./hex.ts";
-import { findRouteOn } from "./hexWalk.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, sideWall, wallsRound } from "./hexWalls.testkit.ts";
 import { checkSetReach, planMove, planWalks } from "./moveLeg.ts";
 import { hexStandAt, hexStandHexes, hexStandPlace, ownWalk } from "./movement.ts";
 import { compareAlong, fileHeightsAlong, hexFileClasses, hexFileRoutes, pieceReach, routeWalkers, seatShift } from "./route.ts";
 import { planTrapMove, trapLandings, trapWalks } from "./traps.ts";
-import { groupWalkWorld } from "./walkWorld.ts";
+import { intoCorridor, keepOf } from "../reducer/hexFile.testkit.ts";
 
 /**
  * Single file on hexes (RIDE-SINGLE-FILE-HEX, D-261107-172, D-261107-252,
@@ -51,14 +50,6 @@ function corridorRoom(g: HexGrid, d: number): { s: RoomState; step: (h: Hex, k: 
   return { s: hexWallRoom(shape, bounds.w, bounds.h, wallsRound(g, bounds, solid)), step, S };
 }
 
-/** The holder's own way to `ref`, squeezed there, as the device's search finds it alone. */
-function intoCorridor(g: HexGrid, s: RoomState, ref: Hex): OpOf<"token.move"> {
-  const horse = s.tokens.horse!;
-  const inside = hexStandPlace(g, horse, { size: hexStandAt(g, horse, horse, true).size, ref, squeezed: true });
-  const found = findRouteOn({ ...groupWalkWorld(s, ownWalk(horse), { role: "player" }).input, towed: [] }, inside);
-  assert.ok(found && found !== "none", "a way in for the holder alone");
-  return { t: "token.move", tokenId: "horse", ...inside, squeeze: true, route: found.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) };
-}
 
 /** The hexes round a holder's footprint that lie off the rock, farthest from `goal` first: where a creature it drags stands behind it. */
 function behind(g: HexGrid, s: RoomState, holder: Token, goal: Hex, open: (h: Hex) => boolean): Hex[] {
@@ -338,40 +329,6 @@ describe("a hidden creature in the file a wall stops on hexes (moveLeg.ts behind
   });
 });
 
-/**
- * Live play 40's keep (LP40-HEXFILE-1 and -2): a corridor one hex wide east
- * from 7, 6 for five hexes along line 6, then four hexes down, rock round
- * it, open ground west of it. On hex rows the way down zigzags, and on hex
- * columns line 6 does. The warhorse stands squeezed on the corridor's hex
- * `at`, and the goblin is dragged from the hex `goblin` by the warhorse, or
- * by Bree riding it.
- */
-function keepOf(g: HexGrid, at: number, goblin: number, by: "horse" | "bree"): { s: RoomState; path: Hex[] } {
-  const bounds = { w: 22, h: 16 };
-  const path: Hex[] = [];
-  const step = (from: Hex, pick: (n: Hex) => number) => [...hexNeighbors(g, from)].sort((a, b) => pick(a) - pick(b))[0]!;
-  let h: Hex = { col: 7, row: 6 };
-  for (let i = 0; i < 5; i++) {
-    path.push(h);
-    h = step(h, (n) => -(n.col * 10) + Math.abs(n.row - 6) * 100);
-  }
-  const corner = path[4]!;
-  h = corner;
-  for (let i = 0; i < 4; i++) {
-    h = step(h, (n) => -(n.row * 10) + Math.abs(n.col - corner.col) * 3 - n.col * 0.01);
-    path.push(h);
-  }
-  const inPath = new Set(path.map(hexKey));
-  const last = path[path.length - 1]!.row;
-  const solid = (q: Hex) => q.col >= 7 && q.col <= 15 && q.row >= 1 && q.row <= last && !inPath.has(hexKey(q));
-  const s = hexWallRoom(g.orient === "rows" ? "hexRows" : "hexColumns", bounds.w, bounds.h, wallsRound(g, bounds, solid));
-  const on = path[at]!;
-  const horse = onHex(g, "horse", "large", on, { name: "Warhorse", kind: "npc", ownerIds: ["p1"] });
-  s.tokens.horse = { ...horse, ...hexStandPlace(g, horse, { size: "medium", ref: on, squeezed: true }), squeeze: true };
-  if (by === "bree") s.tokens.bree = onHex(g, "bree", "medium", on, { name: "Bree", kind: "pc", ownerIds: ["p1"], attached: { to: "horse", kind: "ride", steer: true } });
-  s.tokens.gob = onHex(g, "gob", "medium", path[goblin]!, { name: "Goblin", kind: "npc", ownerIds: ["p1"], attached: { to: by, kind: "drag" } });
-  return { s, path };
-}
 
 /** Each leg of the goblin's walk as the server's move takes it along: one hex step, clear by the leg test. */
 function legsClear(g: HexGrid, s: RoomState, gob: { route: readonly { x: number; y: number }[]; trace: readonly unknown[] }, at: string): void {
