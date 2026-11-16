@@ -1030,7 +1030,7 @@ function followersOf(state: WalkersState, lead: Walker, points: readonly RoutePo
     linked.flatMap((w) => {
       const own = file?.get(w.id);
       if (!own?.some((p) => p.along)) return [];
-      const heights = fileHeightsAlong(state.buildChunks, from, memberOf, file!, w.id, points, lead);
+      const heights = fileHeightsAlong(state.buildChunks, from, memberOf, file!, w.id, points);
       const route = own.map((p, j): RoutePoint => (j === 0 ? { x: w.x, y: w.y, elevation: w.elevation } : { x: p.x, y: p.y, elevation: heights[j] ?? groundUnder(state.buildChunks, followerTrace(w, [w])[0]!, p) }));
       // Its leg to point j ends within the holder's piece to its point `piece + 1`, and only its start is reached before any.
       const piece = own.map((p) => (p.along && p.along[1] > 0 ? p.along[0] + 1 : 0));

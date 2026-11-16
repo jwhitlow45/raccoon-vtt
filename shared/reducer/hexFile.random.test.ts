@@ -632,7 +632,7 @@ for (const [name, g] of [
             const memberOf = (id: string) => s.tokens[id];
             for (const m of plan) {
               if (!m.along || !file.has(m.tokenId)) continue;
-              const device = fileHeightsAlong(s.buildChunks, { id: "horse", elevation: horse.elevation, grounded: up === 0 }, memberOf, file, m.tokenId, lead, horse);
+              const device = fileHeightsAlong(s.buildChunks, { id: "horse", elevation: horse.elevation, grounded: up === 0 }, memberOf, file, m.tokenId, lead);
               const at = `${kind}seed ${seed}, ${up} to ${down} ft, ${m.tokenId}`;
               assert.equal(device.length, m.route.length, `${at}: as many points`);
               for (let j = 1; j < m.route.length; j++) {

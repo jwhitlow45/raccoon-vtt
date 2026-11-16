@@ -213,17 +213,6 @@ export function compareAlong(a: FileAlong, b: FileAlong): number {
   return a[1] * bn - b[1] * an;
 }
 
-/** The index of the latest of `walk`'s points reached at or before `at`, the start where none is: its points run in order along. */
-export function latestAlong(walk: readonly { along?: FileAlong | undefined }[], at: FileAlong): number {
-  let found = 0;
-  for (let j = 1; j < walk.length; j++) {
-    const own = walk[j]!.along;
-    if (!own || compareAlong(own, at) > 0) break;
-    found = j;
-  }
-  return found;
-}
-
 /** Where a walk is when its group's lead's walk is some way along: on its leg from point `leg` to the next, `k / n` of the way. */
 export type LegAt = { leg: number; k: number; n: number };
 
@@ -272,14 +261,14 @@ export function pointAt(route: readonly RoutePoint[], at: FileAlong, along?: rea
  * at the point's moment (`pointAt`), its last point at its holder's last,
  * its walk held at its end to its holder's length as the move holds it. A
  * goblin that comes down to its holder's end height before the lead ends
- * then takes a rat it drags down with it on the device too. Where a chain
- * runs through one dragged by its place, or leaves `memberOf`, each point
- * is read where the lead's walk, which started at `origin`, is as far
- * along, the last where it ends, at the height its holders up the chain
- * give it there (`followedHeight`), `startOf` being where each starts.
- * Null at the start and at a point whose height is not followed, which
- * each caller reads on its ground. The list can run past the walk's own
- * points, as the move's walk does.
+ * then takes a rat it drags down with it on the device too. The device's
+ * file takes every creature the walk drags or none of them
+ * (`hexFileClasses`), and a public creature's holders are public, so each
+ * creature up a chain `memberOf` holds is the lead, sits on its holder, or
+ * walks in the file. Null at the start, and at each point of a chain that
+ * leaves `memberOf`, whose height is not followed and each caller reads on
+ * its ground. The list can run past the walk's own points, as the move's
+ * walk does.
  */
 export function fileHeightsAlong(
   chunks: BuildState["buildChunks"],
@@ -288,8 +277,6 @@ export function fileHeightsAlong(
   file: ReadonlyMap<string, readonly FilePoint[]>,
   id: string,
   lead: readonly RoutePoint[],
-  origin: Point,
-  startOf: (id: string) => Point | undefined = memberOf,
 ): (number | null)[] {
   const held = <T>(list: readonly T[], i: number): T => list[Math.min(i, list.length - 1)]!;
   // Each walk's heights from its start, and how far along the lead's walk it reaches each point where it goes hex by hex.
@@ -325,24 +312,7 @@ export function fileHeightsAlong(
     return out;
   };
   const walked = walkOf(id);
-  if (walked) return walked.heights.map((h, j) => (j === 0 ? null : h));
-  const walk = file.get(id) ?? [];
-  const n = lead.length - 1;
-  return walk.map((p, j) => {
-    if (j === 0 || !p.along) return null;
-    const at = pointAt(lead, j === walk.length - 1 ? [n - 1, 1, 1] : p.along);
-    return followedHeight(chunks, from, memberOf, id, fileShiftAlong(file, startOf, p.along, { x: at.x - origin.x, y: at.y - origin.y }), at.elevation);
-  });
-}
-
-/** `fileShift` for the walks hex by hex: each member where its own walk has it at `at` along the holder's walk (`FileAlong`), and by `otherwise` with none. */
-export function fileShiftAlong(file: ReadonlyMap<string, readonly FilePoint[]>, memberOf: (id: string) => Point | undefined, at: FileAlong, otherwise: Point): (id: string) => Point {
-  return (id) => {
-    const walk = file.get(id);
-    const start = memberOf(id);
-    const there = walk?.[latestAlong(walk, at)];
-    return there && start ? { x: there.x - start.x, y: there.y - start.y } : otherwise;
-  };
+  return walked ? walked.heights.map((h, j) => (j === 0 ? null : h)) : (file.get(id) ?? []).map(() => null);
 }
 
 /**

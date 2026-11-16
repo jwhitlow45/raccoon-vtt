@@ -721,7 +721,7 @@ describe("a chained follower's heights on a walk hex by hex, the server's and th
       const memberOf = (id: string) => s.tokens[id];
       for (const id of ["gob", "rat"]) {
         const served = walks.find((m) => m.tokenId === id)!.route.map((p) => p.elevation);
-        const device = fileHeightsAlong(s.buildChunks, { id: "horse", elevation: 40, grounded: false }, memberOf, file, id, lead, horse);
+        const device = fileHeightsAlong(s.buildChunks, { id: "horse", elevation: 40, grounded: false }, memberOf, file, id, lead);
         const read = served.map((h, j) => (j === 0 ? h : device[j]!));
         assert.deepEqual(read.map((h) => Math.round(h * 1e6) / 1e6), served.map((h) => Math.round(h * 1e6) / 1e6), `${id}: the device's heights ${read.join(", ")}, the move's ${served.join(", ")}`);
         assert.ok(served.some((h) => h > 0 && h < 40), `${id}: some height between, ${served.join(", ")}`);
@@ -746,7 +746,7 @@ describe("the device reads a chained follower through its own holder's walk, whi
     const file = hexFileRoutes(g, horse, lead, [[s.tokens.gob!, s.tokens.rat!]], true);
     const rat = walks.find((m) => m.tokenId === "rat")!.route.map((p) => Math.round(p.elevation * 1e9) / 1e9);
     assert.deepEqual(rat, [40, 20, 0], "the rat comes down as the goblin does");
-    const device = fileHeightsAlong(s.buildChunks, { id: "horse", elevation: 40, grounded: false }, (id) => s.tokens[id], file, "rat", lead, horse);
+    const device = fileHeightsAlong(s.buildChunks, { id: "horse", elevation: 40, grounded: false }, (id) => s.tokens[id], file, "rat", lead);
     assert.deepEqual(device.map((h, j) => (j === 0 ? rat[0] : Math.round(h! * 1e9) / 1e9)), rat, "the device's heights, the move's");
   });
 });
