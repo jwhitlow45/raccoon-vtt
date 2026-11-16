@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { BOOKKEEPING_RESERVE, FAR, KEPT_FOR_PLAYERS, KEPT_FOR_PLAYERS_FULL, roundUp } from "#shared/limits.ts";
-import type { Actor, Member, RoomState, Viewer } from "#shared/model.ts";
-import type { Op } from "#shared/protocol.ts";
+import type { Actor, Member, PcStats, RoomState, Viewer } from "#shared/model.ts";
+import { MAX_NOTES, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { projectState, stableStringify } from "#shared/project.ts";
 import { actor, castAsk, character, companionBlock, DM, drawing, effect, entry, env, member, room, scene, template, token } from "#shared/testutil.ts";
@@ -380,7 +380,7 @@ describe("LP43-PRIV-2: a player's exact part holds their own things only as thei
 });
 
 describe("LP43-PRIV-3: behind a blackout a player's exact part holds nothing", () => {
-  test("P1's own ask or a DM's of the same bytes: P1's copy holds neither, so the exact parts are equal and empty", () => {
+  test("P1's own ask or a DM's of the same bytes: P1's copy holds neither, so the exact parts are equal and hold no ask", () => {
     const twin = (by: string) => {
       const state = ownTable(0);
       // A DM whose id is as long as P1's.
@@ -392,8 +392,9 @@ describe("LP43-PRIV-3: behind a blackout a player's exact part holds nothing", (
     const [own, dms] = [twin("p1"), twin("d1")];
     assert.equal(copyOf(own), copyOf(dms), "P1's copies are equal");
     assert.equal(measuredStateBytes(own), measuredStateBytes(dms), "the rooms store the same bytes");
-    assert.equal(ownHeldBytes(own, "p1"), 0, "P1's own ask behind a blackout");
-    assert.equal(ownHeldBytes(dms, "p1"), 0, "the DM's");
+    assert.equal(ownHeldBytes(own, "p1"), ownHeldBytes(dms, "p1"), "P1's own ask behind a blackout, or the DM's");
+    // A blackout keeps their member and characters, which are not scene data, and drops every ask.
+    assert.equal(ownHeldBytes(own, "p1"), ownHeldBytes({ ...own, casts: {} }, "p1"), "as no ask at all");
   });
 });
 
@@ -404,8 +405,11 @@ describe("LP43R2-1: the room the DM's adds leave the players", () => {
     const base = room();
     base.characters.c1 = character("c1", { ownerIds: ["p1"] });
     base.tokens.hero = token("hero", { kind: "pc", actor: { ref: "c1" }, ownerIds: ["p1"], x: 2, y: 2 });
-    // P2's one area, exact in the DM's reading and stepped in P1's.
-    base.templates.a2 = template("a2", { ownerId: "p2" });
+    // P2's one area, exact in the DM's reading and stepped in P1's, sized so it is 150 bytes more than what P1's reading
+    // alone holds exactly, their member and character, which the DM's reading steps.
+    base.templates.a2 = template("a2", { ownerId: "p2", label: "" });
+    base.templates.a2 = template("a2", { ownerId: "p2", label: "y".repeat(150 - (heldBytes(base) - ownHeldBytes(base, "p1"))) });
+    assert.equal(heldBytes(base) - ownHeldBytes(base, "p1"), 150);
     // P1's own area sized so what seats hold sits 100 bytes under a whole step. The DM's last add then leaves 100 bytes
     // of the DM's room, and P1's reading rounds P2's area up to a whole step, the most a reading rounds.
     base.templates.a1 = template("a1", { label: "" });
@@ -446,5 +450,120 @@ describe("LP43R2-1: the room the DM's adds leave the players", () => {
     };
     assert.ok(takesArea(left - 1024), "P1's area 1 KiB under what P1 keeps");
     assert.ok(!takesArea(left + 1024), "P1's area 1 KiB over it");
+  });
+});
+
+/** P1's character's stat block with `chars` characters of roll names, 60 to a roll. */
+function statsWith(chars: number): PcStats {
+  const rolls: PcStats["rolls"] = [];
+  for (let i = 0; i * 60 < chars; i++) rolls.push({ id: `roll${i}`, name: "r".repeat(Math.min(60, chars - i * 60)), kind: "other" } as PcStats["rolls"][number]);
+  const abilities = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
+  return { abilities, saves: [], skills: {}, adjust: {}, defenses: {}, rolls } as PcStats;
+}
+
+describe("LP44-PRIV-1: a player's own adds off the floors never move their stepped part", () => {
+  /** What P1's own ops grow off the floors, each a sweep of `most` characters, and the length the line sits at. */
+  const SWEEPS: Record<string, { most: number; grow: (state: RoomState, chars: number) => RoomState }> = {
+    "their character's notes": { most: 4_000, grow: (s, chars) => ({ ...s, characters: { ...s.characters, c1: { ...s.characters.c1!, actor: { ...s.characters.c1!.actor, notes: "n".repeat(chars) } } } }) },
+    "their character's sheet": { most: 490, grow: (s, chars) => ({ ...s, characters: { ...s.characters, c1: { ...s.characters.c1!, actor: { ...s.characters.c1!.actor, sheetUrl: `https://${"s".repeat(chars)}` } } } }) },
+    "their character's stat block": { most: 2_400, grow: (s, chars) => ({ ...s, characters: { ...s.characters, c1: { ...s.characters.c1!, stats: statsWith(chars) } } }) },
+    "their character's companion block": { most: 4_000, grow: (s, chars) => ({ ...s, companionBlocks: { ...s.companionBlocks, b1: { ...s.companionBlocks.b1!, traits: [{ name: "Notes", text: "t".repeat(chars) }] } } }) },
+  };
+  /** Changes outside P1's copy, each about 100 bytes. */
+  const HIDDEN: Record<string, (state: RoomState) => RoomState> = {
+    "100 bytes of the DM's notes on a creature": (s) => ({ ...s, tokens: { ...s.tokens, g1: { ...s.tokens.g1!, actor: { inline: actor({ dmNotes: "d".repeat(100) }) } } } }),
+    "a condition the DM hid": (s) => ({ ...s, tokens: { ...s.tokens, g1: { ...s.tokens.g1!, actor: { inline: actor({ dmNotes: "", effects: [effect("e1", { key: "custom", label: "h".repeat(50), hiddenFromPlayers: true })] }) } } } }),
+    "100 bytes of P2's character notes": (s) => ({ ...s, characters: { ...s.characters, c2: { ...s.characters.c2!, actor: { ...s.characters.c2!.actor, notes: "q".repeat(100) } } } }),
+  };
+
+  /** P1 plays Hero (c1) with an area and a companion block, P2 plays Bree (c2), and the DM's goblin stands on s1. */
+  function table(): RoomState {
+    const base = room();
+    base.characters.c1 = character("c1", { ownerIds: ["p1"], actor: actor({ notes: "", dmNotes: "" }) });
+    base.characters.c2 = character("c2", { name: "Bree", ownerIds: ["p2"], actor: actor({ notes: "", dmNotes: "" }) });
+    base.tokens.hero = token("hero", { kind: "pc", actor: { ref: "c1" }, ownerIds: ["p1"], x: 2, y: 2 });
+    base.tokens.g1 = token("g1", { x: 6, y: 6, actor: { inline: actor({ dmNotes: "" }) } });
+    base.templates.a1 = template("a1", { label: "" });
+    base.companionBlocks = { b1: { ...companionBlock("b1", "c1"), traits: [] } };
+    return base;
+  }
+
+  /** The first length of a sweep P1's far reading refuses: P1's answers are monotone in the length, so it says every answer. */
+  function firstRefused(what: string, sweep: (typeof SWEEPS)[string], state: RoomState): number {
+    const takes = (chars: number) => {
+      const next = sweep.grow(state, chars);
+      const guard = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: 64 * MIB });
+      guard.stateMeasured(measuredStateBytes(state), state);
+      return guard.check(next, ["s1"], Math.max(0, measuredStateBytes(next) - measuredStateBytes(state)), state, "player", "widest", false, "p1").ok;
+    };
+    let [taken, refused] = [0, sweep.most];
+    assert.ok(takes(taken) && !takes(refused), `${what}: the sweep holds the line`);
+    while (refused - taken > 1) {
+      const mid = Math.floor((taken + refused) / 2);
+      if (takes(mid)) taken = mid;
+      else refused = mid;
+    }
+    return refused;
+  }
+
+  /** The twins of `shown`, P1's own area sized so the line sits halfway through each sweep, answer P1's every length alike. */
+  function assertSweepsAlike(shown: RoomState, sweeps: ReadonlyArray<string>, exactOf: (state: RoomState) => number): void {
+    for (const what of sweeps) {
+      const sweep = SWEEPS[what]!;
+      const sized = (state: RoomState): RoomState => {
+        const exact = exactOf(sweep.grow(state, 0));
+        return { ...state, templates: { ...state.templates, a1: template("a1", { label: "x".repeat(FAR.byteStep - Math.floor(sweep.most / 2) - exact) }) } };
+      };
+      const rooms: Array<[string, RoomState]> = [["shown", sized(shown)], ...Object.entries(HIDDEN).map(([name, hide]) => [name, sized(hide(shown))] as [string, RoomState])];
+      const [base0, ...apart] = rooms.map(([name, state]) => [name, firstRefused(what, sweep, state)] as const);
+      for (const [name, at] of apart) assert.equal(at, base0![1], `${what}: with ${name}, P1's first length refused`);
+      for (const [name, state] of rooms.slice(1)) assert.equal(copyOf(state), copyOf(rooms[0]![1]), `${what}: P1's copy is the same with ${name}`);
+    }
+  }
+
+  test("twin rooms apart only outside P1's copy answer P1's every length of each alike, the line inside each sweep", () => {
+    const players = FAR.roomBytes - BOOKKEEPING_RESERVE.room;
+    const base = table();
+    // The DM's notes, then a pad on s2 that leaves P1's stepped part 600 bytes under its step's edge below the line, so
+    // no hidden change takes it past the edge.
+    const edge = players - FAR.byteStep;
+    const stepped = (state: RoomState) => {
+      const exact = ownHeldBytes(state, "p1");
+      return farRoomBytes(state, true, measuredStateBytes(state), exact) - exact;
+    };
+    const filledBase = filled(base, fillFor(base, edge) - 2 * FAR.byteStep);
+    const padded = (n: number): RoomState => ({ ...filledBase, tokens: { ...filledBase.tokens, pad: token("pad", { sceneId: "s2", notes: "p".repeat(n) }) } });
+    let [lo, hi] = [0, 4 * FAR.byteStep];
+    assert.ok(stepped(padded(lo)) <= edge && stepped(padded(hi)) > edge);
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (stepped(padded(mid)) <= edge) lo = mid;
+      else hi = mid;
+    }
+    assertSweepsAlike(padded(lo - 600), Object.keys(SWEEPS), (state) => ownHeldBytes(state, "p1"));
+  });
+
+  test("a scene's reading holds the room-level part of P1's exact part too, so the twins answer alike at the scene's line", () => {
+    // s1 filled with the DM's notes to P1's scene line, the room's far under its own. A companion block counts only in the
+    // room's reading, so the scene's sweeps are the room-level ones.
+    const players = FAR.sceneBytes - BOOKKEEPING_RESERVE.scene;
+    const edge = players - FAR.byteStep;
+    const base = table();
+    const stepped = (state: RoomState) => roundUp(projectedSceneBytes(state, "s1") - ownHeldBytes(state, "p1", ["s1"]), FAR.byteStep);
+    const onScene = (bytes: number): RoomState => {
+      const out = { ...base, tokens: { ...base.tokens } };
+      for (let i = 0; i * MAX_NOTES < bytes; i++) out.tokens[`sf${String(i).padStart(5, "0")}`] = token(`sf${String(i).padStart(5, "0")}`, { x: 20, y: 20, notes: "n".repeat(Math.min(MAX_NOTES, bytes - i * MAX_NOTES)) });
+      return out;
+    };
+    let [lo, hi] = [0, players];
+    assert.ok(stepped(onScene(lo)) <= edge && stepped(onScene(hi)) > edge);
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (stepped(onScene(mid)) <= edge) lo = mid;
+      else hi = mid;
+    }
+    const shown = onScene(lo - 600);
+    assert.ok(farRoomBytes(shown, true, measuredStateBytes(shown), ownHeldBytes(shown, "p1")) < FAR.roomBytes - BOOKKEEPING_RESERVE.room - 2 * FAR.byteStep, "the room's reading is far under its line");
+    assertSweepsAlike(shown, ["their character's notes", "their character's sheet", "their character's stat block"], (state) => ownHeldBytes(state, "p1", ["s1"]));
   });
 });

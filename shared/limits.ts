@@ -1533,8 +1533,13 @@ export type SeatView = {
   copy(kind: CopiedKind, id: string): unknown;
 };
 
-/** The kinds of thing a player's far line can hold exactly: their creatures, areas, drawings, rows and asks. */
-export type CopiedKind = "token" | "template" | "drawing" | "row" | "cast";
+/**
+ * The kinds of thing a player's far line can hold exactly: what their own
+ * ops can grow, their creatures, areas, drawings, rows and asks, their
+ * characters' stat blocks for companions, their member, their characters,
+ * the roll requests their copy holds, and the log's lines.
+ */
+export type CopiedKind = "token" | "template" | "drawing" | "row" | "cast" | "companionBlock" | "member" | "character" | "roll" | "log";
 export type SeatViewOf = (state: RoomState) => SeatView;
 
 /** What one member's seats count in a scope: `sceneId` names the floor, tokens and riding areas count across its scene, and rows across the fight. */
@@ -1549,6 +1554,9 @@ export type SeatHeld = {
   pointValues: number;
   rows: ReadonlySet<string>;
   casts: ReadonlySet<string>;
+  /** Companion blocks held exactly, and their bytes as the far line's block measure counts them. */
+  blocks: ReadonlySet<string>;
+  blockBytes: number;
 };
 
 /** The character whose owners a token's seat belongs to: its own character, or the one it is a companion of. Lent monsters have none. */
@@ -1716,18 +1724,23 @@ export function seatHeld(state: RoomState, sceneId: string | null): SeatHeld {
     pointValues,
     rows: new Set(rows.map((r) => r.id)),
     casts: new Set(casts.map((c) => c.id)),
+    // The DM's reading of the blocks rounds them all, as before seats.
+    blocks: new Set(),
+    blockBytes: 0,
   };
 }
 
 /** A player's own things that their copy holds (ownHeld), by id, each as the copy holds it. */
-export type OwnHeld = Record<CopiedKind, ReadonlyMap<string, unknown>>;
+export type OwnHeld = Record<"token" | "template" | "drawing" | "row" | "cast" | "companionBlock", ReadonlyMap<string, unknown>>;
 
 /**
  * What a player's own copy holds of their own seat things on `floors`, and
- * of their rows and asks, each as the copy holds it (SeatView `copy`). A
- * player's far line holds only these exactly, in count and in bytes, and
- * rounds all the rest into the stepped part: other players' seat things,
- * and whatever the copy leaves out of their own (LP43-PRIV-1, D-261116-015).
+ * of their rows, asks and characters' companion blocks, each as the copy
+ * holds it (SeatView `copy`). A player's far counts hold only these
+ * exactly, and the far bytes these and the rest their own ops grow
+ * (server/rooms/sizeGuard.ts ownCopyBytes). Each rounds all the rest into
+ * the stepped part: other players' seat things, and whatever the copy
+ * leaves out of their own (LP43-PRIV-1, D-261116-015 and 026).
  * The copy is the projection's own, so every rule it reads applies, a
  * blackout's included, and nothing the copy does not show moves that
  * player's answer. seatHeld, which the DM's lines read, has no view test and
@@ -1744,11 +1757,13 @@ export function ownHeld(state: RoomState, memberId: string, view: SeatView, floo
     return out;
   };
   return {
-    token: copies("token", Object.values(state.tokens), (t) => floors.has(t.sceneId) && (seatCharacter(state, t)?.ownerIds.includes(memberId) ?? false)),
+    // Their seat's and any they own outright, a creature the DM lent them included, as every owner may write to theirs.
+    token: copies("token", Object.values(state.tokens), (t) => floors.has(t.sceneId) && (t.ownerIds.includes(memberId) || (seatCharacter(state, t)?.ownerIds.includes(memberId) ?? false))),
     template: copies("template", Object.values(state.templates), (t) => floors.has(t.sceneId) && t.ownerId === memberId),
     drawing: copies("drawing", Object.values(state.drawings), (d) => floors.has(d.sceneId) && d.ownerId === memberId),
     row: copies("row", state.encounter?.entries ?? [], (e) => ownsRow(state, memberId, e)),
     cast: copies("cast", Object.values(state.casts), (c) => c.by === memberId),
+    companionBlock: copies("companionBlock", Object.values(state.companionBlocks), (b) => ownEntry(state.characters, b.characterId)?.ownerIds.includes(memberId) ?? false),
   };
 }
 
@@ -1758,7 +1773,9 @@ function playerFarHeld(state: RoomState, sceneId: string | null, memberId: strin
   const drawings = [...own.drawing].filter(([id]) => state.drawings[id]!.sceneId === sceneId);
   const pointValues = drawings.reduce((sum, [, copy]) => sum + (copy as Drawing).points.length, 0);
   const ids = (copies: ReadonlyMap<string, unknown>) => new Set(copies.keys());
-  return { tokens: ids(own.token), templates: ids(own.template), drawings: new Set(drawings.map(([id]) => id)), pointValues, rows: ids(own.row), casts: ids(own.cast) };
+  let blockBytes = 0;
+  for (const copy of own.companionBlock.values()) blockBytes += companionBlockBytes(copy as CompanionBlock);
+  return { tokens: ids(own.token), templates: ids(own.template), drawings: new Set(drawings.map(([id]) => id)), pointValues, rows: ids(own.row), casts: ids(own.cast), blocks: ids(own.companionBlock), blockBytes };
 }
 
 /** Who sent an op, as the live limits read it: a player's seats need their member id and their own view. */
@@ -1924,10 +1941,10 @@ export function farLimits(state: RoomState, sceneId: string | null, before?: Roo
   }
   const blocks = blockTotals(state);
   const blocksBefore = before && before.companionBlocks !== state.companionBlocks ? blockTotals(before) : before ? blocks : undefined;
-  if ((!blocksBefore || blocks.count > blocksBefore.count) && roundUp(blocks.count, FAR.countStep) > FAR.blocks) {
+  if ((!blocksBefore || blocks.count > blocksBefore.count) && farCount(blocks.count, held.blocks.size) > FAR.blocks) {
     return over(`The room can hold at most ${n(FAR.blocks)} companion stat blocks. Delete one first.`);
   }
-  if ((!blocksBefore || blocks.bytes > blocksBefore.bytes) && roundUp(blocks.bytes, FAR.byteStep) > FAR.blockBytes) {
+  if ((!blocksBefore || blocks.bytes > blocksBefore.bytes) && roundUp(Math.max(0, blocks.bytes - held.blockBytes), FAR.byteStep) + held.blockBytes > FAR.blockBytes) {
     return over(`The room can hold at most ${n(FAR.blockBytes / MiB)} MiB of companion stat blocks. Delete one first.`);
   }
   if (sceneId === null) return { ok: true };

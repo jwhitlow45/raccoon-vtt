@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { opKind } from "./farLine.ts";
-import { FAR, LIMITS, SEAT, SEAT_FULL, admitLimits, farLimits, seatCheck, seatCounts, seatHeld, type LimitSender } from "./limits.ts";
+import { FAR, LIMITS, SEAT, SEAT_FULL, admitLimits, farLimits, seatCheck, seatCounts, seatHeld, serializedBytes, type LimitSender } from "./limits.ts";
 import type { RoomState } from "./model.ts";
 import { seatView } from "./project.ts";
 import type { Op } from "./protocol.ts";
-import { castAsk, character, drawing, entry, room, scene, template, token } from "./testutil.ts";
+import { castAsk, character, companionBlock, drawing, entry, room, scene, template, token } from "./testutil.ts";
 
 const P1: LimitSender = { role: "player", memberId: "p1", viewOf: (state) => seatView(state, "p1") };
 const DM: LimitSender = { role: "dm" };
@@ -440,4 +440,73 @@ test("LP43-PRIV-1: P1's own area the DM hid counts as their copy has it, so hidd
   }
   assert.deepEqual(apart, [], "alike inside every step");
   assert.ok(answers[0] && !answers.at(-1), "the window holds the line");
+});
+
+describe("LP44-PRIV-1: a player's own companion blocks never move their far blocks lines", () => {
+  /** The table with P2's Bree (c2), whose blocks P1's copy does not hold, and `ghosts` characters of the DM's for the DM's blocks. */
+  const blocksRoom = (ghosts: number): RoomState => {
+    const state = table();
+    state.characters.c2 = character("c2", { name: "Bree", ownerIds: ["p2"] });
+    for (let i = 0; i < ghosts; i++) state.characters[`dm${pad(i)}`] = character(`dm${pad(i)}`, { name: `Ghost ${i}`, ownerIds: [] });
+    state.companionBlocks = {};
+    return state;
+  };
+  const block = (id: string, characterId: string, chars: number) => companionBlock(id, characterId, { traits: [{ name: "Notes", text: "t".repeat(chars) }] });
+  const withBlock = (state: RoomState, id: string, characterId: string, chars: number): RoomState => ({ ...state, companionBlocks: { ...state.companionBlocks, [id]: block(id, characterId, chars) } });
+
+  test("the count: P1's every add of a block answers alike whether P2 has one block more", () => {
+    // The DM's 1,129 blocks and P2's 1 or 2 leave the stepped count inside the step under 1,150, so P1's own blocks meet
+    // the line of 1,200 at their 51st, and P1's 100 adds sweep two steps of it.
+    const answers = [1, 2].map((p2) => {
+      let state = blocksRoom(12);
+      for (let i = 0; i < 1_129; i++) state.companionBlocks[`dmb${pad(i)}`] = block(`dmb${pad(i)}`, `dm${pad(i % 12)}`, 0);
+      for (let i = 0; i < p2; i++) state.companionBlocks[`p2b${i}`] = block(`p2b${i}`, "c2", 0);
+      const out: boolean[] = [];
+      for (let n = 1; n <= 100; n++) {
+        const next = withBlock(state, `p1b${pad(n)}`, "c1", 0);
+        out.push(admitLimits(next, "s1", state, P1, CREATE).ok);
+        state = next;
+      }
+      return out;
+    });
+    assert.deepEqual(answers[1], answers[0]);
+    assert.equal(answers[0]!.indexOf(false), 50, "P1's 51st block is the first refused");
+  });
+
+  test("the bytes: P1's every length of their own block answers alike whether P2's block is 100 bytes longer", () => {
+    // The DM's blocks leave the stepped bytes 600 under 23 steps, so P1's own blocks meet the 6 MiB line at one step of
+    // their own. P1's 20 blocks hold that less 2,000 bytes, and their last block's text sweeps 4,000 characters across it.
+    const step = FAR.byteStep;
+    const bytesOf = (id: string, characterId: string, chars: number) => serializedBytes(block(id, characterId, chars));
+    const overhead = (id: string, characterId: string) => bytesOf(id, characterId, 0);
+    let base = withBlock(blocksRoom(16), "p2b", "c2", 0);
+    const stepped = () => Object.values(base.companionBlocks).reduce((sum, b) => sum + serializedBytes(b), 0);
+    const target = 23 * step - 600;
+    for (let i = 0; stepped() + 13_000 < target; i++) base = withBlock(base, `dmb${pad(i)}`, `dm${pad(i % 16)}`, 13_000 - overhead(`dmb${pad(i)}`, `dm${pad(i % 16)}`));
+    base = withBlock(base, "dmlast", "dm00015", target - stepped() - overhead("dmlast", "dm00015"));
+    assert.equal(stepped(), target);
+    const sweptOverhead = overhead("p1last", "c1");
+    let own = step - 2_000 - sweptOverhead;
+    for (let i = 0; i < 20; i++) {
+      const chars = i < 19 ? Math.floor(own / (20 - i)) - overhead(`p1b${pad(i)}`, "c1") : own - overhead(`p1b${pad(i)}`, "c1");
+      own -= bytesOf(`p1b${pad(i)}`, "c1", chars);
+      base = withBlock(base, `p1b${pad(i)}`, "c1", chars);
+    }
+    assert.equal(own, 0);
+    const first = (state: RoomState) => {
+      const before = withBlock(state, "p1last", "c1", 0);
+      const takes = (chars: number) => admitLimits(withBlock(before, "p1last", "c1", chars), "s1", before, P1, CREATE).ok;
+      let [taken, refused] = [0, 4_000];
+      assert.ok(takes(taken) && !takes(refused), "the sweep holds the line");
+      while (refused - taken > 1) {
+        const mid = Math.floor((taken + refused) / 2);
+        if (takes(mid)) taken = mid;
+        else refused = mid;
+      }
+      return refused;
+    };
+    const longer = withBlock(base, "p2b", "c2", 100);
+    assert.equal(first(longer), first(base));
+    assert.equal(first(base), 2_001, "P1's own blocks meet the line at one step of their own");
+  });
 });
