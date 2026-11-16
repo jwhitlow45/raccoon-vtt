@@ -1,7 +1,7 @@
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { constants, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { constants, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -62,7 +62,7 @@ function builtApp(): string {
   return join(dist, arm ? "linux-arm64-unpacked" : "linux-unpacked");
 }
 
-/** Every process running a program from under `dir`: the shell, its helpers, the supervisor and PostgreSQL alike. */
+/** Every process running a program from under `dir`: the shell, its helpers, the supervisor and PostgreSQL alike, renamed children included. */
 function processesUnder(dir: string): string[] {
   if (process.platform === "win32") {
     const script = `$d = $env:RACCOON_E2E_DIR; Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($d, [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { "$($_.ProcessId) $(if ($_.CommandLine) { $_.CommandLine } else { $_.ExecutablePath })" }`;
@@ -72,9 +72,21 @@ function processesUnder(dir: string): string[] {
     });
     return out.split(/\r?\n/).filter((l) => l.trim());
   }
-  return execFileSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" })
+  const named = execFileSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" })
     .split("\n")
     .filter((l) => l.includes(dir));
+  if (process.platform !== "linux") return named;
+  // Linux also by the program each runs, so a PostgreSQL child that renamed itself ("postgres: checkpointer") counts too.
+  const seen = new Set(named.map((l) => l.trim().split(" ")[0]));
+  for (const pid of readdirSync("/proc").filter((n) => /^\d+$/.test(n) && !seen.has(n))) {
+    try {
+      if (!readlinkSync(`/proc/${pid}/exe`).startsWith(dir)) continue;
+      named.push(`${pid} ${readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ").trim()}`);
+    } catch {
+      // Another user's, or ended since the listing.
+    }
+  }
+  return named;
 }
 
 async function until<T>(what: string, check: () => Promise<T | null | undefined | false>, timeout = TIMEOUT): Promise<T> {
