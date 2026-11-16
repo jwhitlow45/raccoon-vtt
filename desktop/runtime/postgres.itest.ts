@@ -206,7 +206,7 @@ describe("the cluster", () => {
       await c.cluster.start();
       const pid = await c.cluster.postmasterPid();
       assert.ok(pid !== null && pid !== sleeper.pid);
-      assert.deepEqual(await c.cluster.leftover(), { kind: "running", pid });
+      assert.deepEqual(await c.cluster.leftover(), { kind: "running", pid, stamp: await processStamp(pid) });
     } finally {
       sleeper.kill("SIGKILL");
     }

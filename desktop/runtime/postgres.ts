@@ -145,7 +145,7 @@ export type ClusterOptions = {
  * folder's postmaster. `uncertain`: something runs as its pid that may be
  * this folder's postmaster, so the file stays and the start stops.
  */
-export type Leftover = { kind: "none" } | { kind: "stale" } | { kind: "running"; pid: number } | { kind: "uncertain"; pid: number };
+export type Leftover = { kind: "none" } | { kind: "stale" } | { kind: "running"; pid: number; stamp: number | null } | { kind: "uncertain"; pid: number };
 
 /** The words a start stops with when postmaster.pid names a process that may still be this folder's PostgreSQL. */
 export function uncertainWords(pid: number): string {
@@ -316,6 +316,8 @@ export class Cluster {
     const pid = Number(lines[0]);
     const startedSec = Number(lines[2]);
     if (!isAlive(pid)) return { kind: "stale" };
+    // Read before what it runs, so a pid reused in between leaves a reading that never matches the later process.
+    const stamp = await this.proc.stamp(pid).catch(() => null);
     let facts: ProcessFacts;
     try {
       facts = await this.proc.facts(pid);
@@ -325,10 +327,10 @@ export class Cluster {
     const postgres = facts.exe !== null && /^postgres(\.exe)?$/i.test(basename(facts.exe.replaceAll("\\", "/")));
     if (postgres) {
       if (this.opts.platform === "linux") {
-        if (facts.cwd !== null && facts.cwd === (await realpath(this.opts.pgData))) return { kind: "running", pid };
+        if (facts.cwd !== null && facts.cwd === (await realpath(this.opts.pgData))) return { kind: "running", pid, stamp };
       } else if (facts.start !== null && Number.isFinite(startedSec) && Math.abs(facts.start / 1000 - startedSec) <= 5) {
         // The file's time is the postmaster's own clock reading as it started, a moment after the system's.
-        return { kind: "running", pid };
+        return { kind: "running", pid, stamp };
       }
     }
     if (await this.fromEarlierBoot()) return { kind: "stale" };
@@ -410,24 +412,25 @@ export class Cluster {
     return typeof named === "number" ? named : null;
   }
 
-  /** Keeps a postmaster's identity until PostgreSQL's end is proven (known). */
-  private async remember(pid: number, stamp?: number | null): Promise<void> {
-    this.known.set(pid, stamp !== undefined ? stamp : await this.proc.stamp(pid).catch(() => null));
+  /**
+   * Keeps a postmaster's identity until PostgreSQL's end is proven (known),
+   * from a start reading already taken, so keeping one never waits on the
+   * system. A pid already kept keeps its reading, unless a readable one
+   * that differs shows a later postmaster on that pid.
+   */
+  private remember(pid: number, stamp: number | null): void {
+    if (!this.known.has(pid) || (stamp !== null && stamp !== this.known.get(pid))) this.known.set(pid, stamp);
   }
 
   /**
-   * The remembered postmasters that still run as the process remembered:
-   * the same start reading, or one that can't be read. A pid alive with
-   * another start reading is a later process.
+   * Whether a listed process is a remembered postmaster still running as it
+   * was remembered: the same start reading, or one that can't be read on
+   * either side. A pid with another reading is a later process (LA-27).
    */
-  private async stillKnown(): Promise<Set<number>> {
-    const kept = new Set<number>();
-    for (const [pid, stamp] of this.known) {
-      if (!isAlive(pid)) continue;
-      const now = await this.proc.stamp(pid).catch(() => null);
-      if (stamp === null || now === null || now === stamp) kept.add(pid);
-    }
-    return kept;
+  private spares(p: Postmaster): boolean {
+    if (!this.known.has(p.pid)) return false;
+    const was = this.known.get(p.pid) ?? null;
+    return was === null || p.stamp === null || p.stamp === was;
   }
 
   /**
@@ -481,7 +484,7 @@ export class Cluster {
         const pid = await this.pidFilePid();
         const stamp = pid === null ? null : await this.proc.stamp(pid);
         this.started = pid !== null && stamp !== null ? { pid, stamp } : null;
-        if (pid !== null) await this.remember(pid, stamp);
+        if (pid !== null) this.remember(pid, stamp);
         return port;
       }
       if (signal?.aborted) break;
@@ -540,23 +543,24 @@ export class Cluster {
     let said = false;
     for (;;) {
       if (signal?.aborted) return false;
-      let live: number[];
+      let live: Postmaster[];
       try {
-        live = (await this.postmasters()).map((p) => p.pid);
+        live = await this.postmasters();
       } catch {
         return false;
       }
       if (live.length === 0) return false;
-      if (!said) this.opts.log?.(`PostgreSQL (pid ${live.join(", ")}) still starts after pg_ctl stopped waiting, so the start waits for it`);
+      if (!said) this.opts.log?.(`PostgreSQL (pid ${live.map((p) => p.pid).join(", ")}) still starts after pg_ctl stopped waiting, so the start waits for it`);
       said = true;
       const lines = await readFile(join(this.opts.pgData, "postmaster.pid"), "utf8").then(
         (text) => text.split(/\r?\n/),
         () => [] as string[],
       );
-      const named = Number(lines[0]);
-      if (live.includes(named)) await this.remember(named);
+      const named = live.find((p) => p.pid === Number(lines[0]));
+      // The listing's own reading, so each poll keeps the identity it has rather than reading it again.
+      if (named) this.remember(named.pid, named.stamp);
       // Line 8 of postmaster.pid is its state, "ready" once it accepts connections (PostgreSQL's LOCK_FILE_LINE_PM_STATUS).
-      if (live.includes(named) && lines[7]?.trim() === "ready") return true;
+      if (named && lines[7]?.trim() === "ready") return true;
       await sleep(250);
     }
   }
@@ -573,7 +577,7 @@ export class Cluster {
     for (const p of await this.list()) {
       if (p.pid === process.pid) continue;
       const kind = await postmasterKind(p, folders, this.opts.platform, programs);
-      if (kind !== null) found.push({ pid: p.pid, exact: kind === "exact", commandLine: p.commandLine, pgCtl: kind === "pgctl", exe: p.exe ?? null });
+      if (kind !== null) found.push({ pid: p.pid, exact: kind === "exact", commandLine: p.commandLine, pgCtl: kind === "pgctl", exe: p.exe ?? null, stamp: p.stamp ?? null });
     }
     return found;
   }
@@ -614,32 +618,36 @@ export class Cluster {
    * alone. A process that only may be one is never signalled, and the end
    * can't be confirmed while it runs.
    *
-   * A pass reads which remembered postmasters still run, then takes one
-   * listing and one read of postmaster.pid, the read after the listing,
-   * since no file yet is the evidence that a postmaster has forked no child
-   * and must be fresh at the kill. Every kill, and the check for a running
-   * named postmaster beside it, uses only them, and happens before anything
-   * else is waited for. A pg_ctl stop, which can take a minute, ends the
-   * pass, so no row is signalled after its process may have ended and its
-   * pid been reused (ASTRA-22). Answers how many it found and when it first
+   * A pass takes one listing, whose rows carry their start readings, and
+   * one read of postmaster.pid, the read after the listing, since no file
+   * yet is the evidence that a postmaster has forked no child and must be
+   * fresh at the kill. Every kill, the check for a running named postmaster
+   * beside it, which postmasters are remembered, and the pg_ctl stop of an
+   * exact one use only them, with nothing else waited for in between, so
+   * none acts on a process that may have ended and its pid been reused
+   * meanwhile (ASTRA-22). A pg_ctl stop, which can take a minute, ends the
+   * pass. A loose one the file names is stopped only once leftover()
+   * confirms it as it reads the file again, with the same start reading,
+   * and then at once. Answers how many it found and when it first
    * signalled one, and throws when the listing fails.
    */
   private async endPass(asked: Asked, during: "cancel" | "proof"): Promise<{ found: number; exact: number; signalled: number | null }> {
-    const kept = await this.stillKnown();
     const found = await this.postmasters();
     const named = await this.pidFileNames();
-    const namedRuns = found.some((p) => p.exact && p.pid === named);
+    const namedRow = found.find((p) => p.exact && p.pid === named);
+    const namedRuns = namedRow !== undefined;
     if (named === "unknown" && found.some((p) => p.exact)) this.cantConfirm("postmaster.pid can't be read, so no PostgreSQL process is signalled");
     let signalled: number | null = null;
-    type Stop = { pid: number; mode: "fast" | "immediate"; again: boolean; exact: boolean };
+    type Stop = { pid: number; mode: "fast" | "immediate"; again: boolean; exact: boolean; stamp: number | null };
     /** pg_ctl stop -m fast for a pid the file names, -m immediate once that was asked, again each minute after. */
-    const due = (pid: number, exact: boolean): Stop | null => {
+    const due = ({ pid, exact, stamp }: Postmaster): Stop | null => {
       const tried = asked.get(pid);
       if (tried?.mode === "immediate" && Date.now() - tried.at < (this.opts.immediateAgainMs ?? IMMEDIATE_AGAIN_MS)) return null;
-      return { pid, mode: tried === undefined ? "fast" : "immediate", again: tried?.mode === "immediate", exact };
+      return { pid, mode: tried === undefined ? "fast" : "immediate", again: tried?.mode === "immediate", exact, stamp };
     };
     let stop: Stop | null = null;
-    for (const { pid, exact, commandLine, pgCtl } of found) {
+    for (const row of found) {
+      const { pid, exact, commandLine, pgCtl } = row;
       if (pgCtl) {
         // During a cancel the pg_ctl start this process runs is one of these, and the proof after it counts any left.
         if (during === "proof") this.cantConfirm(`pg_ctl start (pid ${pid}) for this data folder still runs and may yet start PostgreSQL, so it is waited for and never signalled: ${commandLine}`, pid);
@@ -648,25 +656,27 @@ export class Cluster {
       if (!exact) {
         this.cantConfirm(`process ${pid} names this data folder as its PostgreSQL would, but is not exactly what pg_ctl starts, so it is never signalled: ${commandLine}`, pid);
         // Its postmaster spelled in a way the exact form misses would never end: one the file names is stopped, once leftover() confirms it (LA-30).
-        if (pid === named) stop = due(pid, false);
+        if (pid === named) stop = due(row);
         continue;
       }
       signalled ??= Date.now();
       if (pid === named) {
-        stop = due(pid, true);
+        stop = due(row);
         continue;
       }
-      if (named === "unknown" || kept.has(pid) || namedRuns) continue;
+      if (named === "unknown" || this.spares(row) || namedRuns) continue;
       try {
         process.kill(pid, "SIGKILL");
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== "ESRCH") this.opts.log?.(`PostgreSQL (pid ${pid}) could not be ended: ${(err as Error).message}`);
       }
     }
-    if (typeof named === "number" && found.some((p) => p.exact && p.pid === named) && !kept.has(named)) await this.remember(named);
+    if (namedRow) this.remember(namedRow.pid, namedRow.stamp);
     if (stop && !stop.exact) {
+      // leftover() reads postmaster.pid and the process again, and the pg_ctl stop follows at once.
       const left = await this.leftover().catch(() => null);
-      if (left?.kind === "running" && left.pid === stop.pid) await this.remember(stop.pid);
+      const same = left?.kind === "running" && left.pid === stop.pid && left.stamp !== null && (stop.stamp === null || left.stamp === stop.stamp);
+      if (same) this.remember(stop.pid, left.stamp);
       else stop = null;
     }
     if (stop) {
@@ -764,13 +774,15 @@ export class Cluster {
       // A postmaster.pid that can't be read stops no PostgreSQL directly, and leaves the end to the proof below.
       try {
         const found = await this.leftover();
-        if (found.kind === "running") target = found.pid;
+        if (found.kind === "running") {
+          target = found.pid;
+          this.remember(found.pid, found.stamp);
+        }
       } catch (err) {
         unread = err;
       }
     }
     if (target !== null) {
-      if (!mine) await this.remember(target);
       try {
         await this.pgCtlStop();
       } catch (err) {
@@ -860,7 +872,8 @@ const KILL_WAIT_AGAIN_MS = 60_000;
 const LIST_RETRY_MS = 10_000;
 
 /** A process the listing may count as a postmaster of this folder, and whether it is exactly one (postmasterKind). */
-export type Postmaster = { pid: number; exact: boolean; commandLine: string; pgCtl: boolean; exe: string | null };
+/** A process the listing found that may be this folder's postmaster, with its start reading from that listing (null where the system won't say). */
+export type Postmaster = { pid: number; exact: boolean; commandLine: string; pgCtl: boolean; exe: string | null; stamp: number | null };
 
 /** What each postmaster found has been asked so far, by pid, and when: pg_ctl stop -m fast, then -m immediate, again each minute. */
 type Asked = Map<number, { mode: "fast" | "immediate"; at: number }>;
@@ -907,8 +920,10 @@ async function realOrNull(path: string): Promise<string | null> {
  * - `pgctl`: the bundled pg_ctl, by real path, running `start -D F`. On
  *   POSIX pg_ctl forks before it execs /bin/sh, and until the exec the
  *   child is pg_ctl itself (pg_ctl.c start_postmaster). On Windows pg_ctl
- *   runs again as a restricted copy, which outlives a pg_ctl ended at its
- *   limit. Either may yet start a postmaster, so it counts as running, and
+ *   never runs a copy of itself (it starts the postmaster through a
+ *   restricted cmd.exe), so one listed there is a pg_ctl start for this
+ *   folder that is not this process's own, such as one a previous
+ *   supervisor left. Either may yet start a postmaster, so it counts as running, and
  *   it is never signalled. It is never `exact`, so it is never the running
  *   named postmaster a fork child is spared beside.
  * - `loose`: anything else whose command line names the folder after
