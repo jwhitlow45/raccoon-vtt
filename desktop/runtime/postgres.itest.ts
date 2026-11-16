@@ -33,7 +33,8 @@ const supervisors: SupervisorRun[] = [];
 after(async () => {
   for (const s of supervisors) await s.stop().catch(() => undefined);
   for (const c of clusters) await c.stop();
-  for (const dir of temps) await rm(dir, { recursive: true, force: true });
+  // Retried as removeStopped does, since a postgres.exe just ended and its cmd.exe still hold logs/postgres.log for a moment on Windows.
+  for (const dir of temps) await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 async function dataDir(): Promise<string> {
