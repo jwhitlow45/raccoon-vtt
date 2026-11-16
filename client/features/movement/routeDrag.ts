@@ -224,12 +224,17 @@ export class RouteDrag {
    * none and no creature does: where a search of the same ground with
    * every height flattened finds a way, the walk `closed` finds to the last
    * spot of that way it reaches and may go on from, on the walker's own
-   * grid, the foot of a rise or the edge of a pit. A drop onto a level the
-   * walk cannot reach then holds there, where it held wherever the straight
-   * leg met a wall first, often in the corridor it came from, and said the
-   * wall stopped it (live play 42, D-261114-035, D-261114-036). Null where
-   * flat ground has no way either. Its search shares the drag's budget as
-   * the first one does.
+   * grid, standing between the walker's level and the drop's, the foot of
+   * a rise or the edge of a pit. A drop onto a level the walk cannot reach
+   * then holds there, where it held wherever the straight leg met a wall
+   * first, often in the corridor it came from, and said the wall stopped
+   * it (live play 42, D-261114-035, D-261114-036). A spot of the way below
+   * both levels or above both is no such foot: the walk reaches it only by
+   * stairs off the way and would climb back from it, as from one half of
+   * a platform split by a wall, down its stair and round to the ground
+   * under the other half, 10 ft below where it started and where it was
+   * dropped (D-261115-030). Null where flat ground has no way either. Its
+   * search shares the drag's budget as the first one does.
    */
   #overLedge(closed: RouteSearch, to: Point, budget: WorkBudget): WalkRoute | null | "paused" {
     const world = closed.world;
@@ -248,7 +253,11 @@ export class RouteDrag {
     const step = snapStep(world.input.token);
     const onGrid = (v: number, from: number) => Math.abs((v - from) / step - Math.round((v - from) / step)) < 1e-9;
     const start = world.input.token;
-    const foot = spotsAlong(closed, way.points).findLast((s) => s.reached && s.open && (closed instanceof HexWalkSearch || (onGrid(s.at.x, start.x) && onGrid(s.at.y, start.y))));
+    const spots = spotsAlong(closed, way.points);
+    const from = startLevel(closed);
+    const aim = spots.at(-1)?.elevation ?? from;
+    const between = (e: number) => e >= Math.min(from, aim) && e <= Math.max(from, aim);
+    const foot = spots.findLast((s) => s.reached && s.open && between(s.elevation) && (closed instanceof HexWalkSearch || (onGrid(s.at.x, start.x) && onGrid(s.at.y, start.y))));
     return foot ? closed.traceTo(foot.at, budget) : null;
   }
 
@@ -415,10 +424,11 @@ function closingCreature(closed: RouteSearch, points: readonly RoutePoint[]): nu
  * (walk.ts `blockedBy`, hexWalk.ts `endOnly`) on the footprint the search
  * reads there, squeezed where the walker squeezes (review LP40FIX-SOL-02),
  * whether `search` reaches it, whether a walk may go on from it, not a pit
- * or such a space, where it is, and whether it is the walk's last.
+ * or such a space, where it is, the walker's elevation there, and whether
+ * it is the walk's last.
  */
-function spotsAlong(search: RouteSearch, points: readonly RoutePoint[]): { creature: number; reached: boolean; open: boolean; at: Point; end: boolean }[] {
-  const spots: { creature: number; reached: boolean; open: boolean; at: Point; end: boolean }[] = [];
+function spotsAlong(search: RouteSearch, points: readonly RoutePoint[]): { creature: number; reached: boolean; open: boolean; at: Point; elevation: number; end: boolean }[] {
+  const spots: { creature: number; reached: boolean; open: boolean; at: Point; elevation: number; end: boolean }[] = [];
   const last = points.length - 1;
   if (search instanceof HexWalkSearch) {
     const world = search.world;
@@ -426,7 +436,7 @@ function spotsAlong(search: RouteSearch, points: readonly RoutePoint[]): { creat
       const leg = hexLegOf(world.g, world.standOf(world.nodeAt(points[i - 1]!)), world.standOf(world.nodeAt(points[i]!)));
       for (let k = 1; k < leg.line.length; k++) {
         const stand = { size: leg.walk, ref: leg.line[k]!, squeezed: leg.squeezed };
-        spots.push({ creature: hexCreatureAt(world, stand), reached: search.isSettled(stand), open: !world.endOnly(stand), at: hexStandPlace(world.g, world.input.token, stand), end: i === last && k === leg.line.length - 1 });
+        spots.push({ creature: hexCreatureAt(world, stand), reached: search.isSettled(stand), open: !world.endOnly(stand), at: hexStandPlace(world.g, world.input.token, stand), elevation: world.elevationOf(stand), end: i === last && k === leg.line.length - 1 });
       }
     }
     return spots;
@@ -442,10 +452,17 @@ function spotsAlong(search: RouteSearch, points: readonly RoutePoint[]): { creat
       const y = a.y + Math.round(((b.y - a.y) * k) / n / world.L) * world.L;
       const node = world.nodeAt({ x, y });
       const elevation = node >= 0 ? world.elevationAt(node) : b.elevation;
-      spots.push({ creature: world.blockedBy(x, y, elevation), reached: search.isSettled({ x, y }), open: !world.endOnly(x, y, elevation), at: { x, y }, end: i === last && k === n });
+      spots.push({ creature: world.blockedBy(x, y, elevation), reached: search.isSettled({ x, y }), open: !world.endOnly(x, y, elevation), at: { x, y }, elevation, end: i === last && k === n });
     }
   }
   return spots;
+}
+
+/** The walker's elevation where `search` starts, read as `spotsAlong` reads each spot's. */
+function startLevel(search: RouteSearch): number {
+  if (search instanceof HexWalkSearch) return search.world.elevationOf(search.world.start);
+  const world = search.world;
+  return world.startNode >= 0 ? world.elevationAt(world.startNode) : world.input.token.elevation;
 }
 
 /**

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { RoomState, Token } from "#shared/model.ts";
+import type { FreeWall, RoomState, Token } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import { hexCenter, type Hex } from "#shared/rules/hex.ts";
-import { COLUMNS, hexWallRoom, onHex, ROWS, wallsRound } from "#shared/rules/hexWalls.testkit.ts";
-import { heights } from "#shared/discoveryTestutil.ts";
+import { hexCenter, hexNeighbors, type Hex } from "#shared/rules/hex.ts";
+import { COLUMNS, hexWallRoom, onHex, ROWS, sideWall, wallsRound } from "#shared/rules/hexWalls.testkit.ts";
+import { heights, stairs } from "#shared/discoveryTestutil.ts";
 import { actor, apply, P1, room, scene, token } from "#shared/testutil.ts";
 import { displayName } from "../../lib/scene.ts";
 import { labelsOf } from "../../state/labels.ts";
@@ -199,6 +199,44 @@ describe("squares: a ledge that closes the way holds the walk at its foot (D-261
     assert.deepEqual(drag.plan.moves.map((m) => [m.x, m.y]), [[9, 4]]);
   });
 
+  test("onto the top of a rise in two steps, 10 ft on the east room's squares 17 and 18 and 20 ft on 19 and 20, a stair up onto the first only: Thorn walks up it and holds at the foot of the second, 10 ft up", () => {
+    const s = hall();
+    heights(s, { x: 17, y: 1, w: 2, h: 8 }, 10);
+    heights(s, { x: 19, y: 1, w: 2, h: 8 }, 20);
+    stairs(s, [[16, 4]], "a");
+    const { drag, note } = dropThorn(s, { x: 20, y: 4 });
+    assert.equal(note, "Ledge in the way. No stairs you have seen lead there.");
+    assert.deepEqual(drag.plan.moves.map((m) => [m.x, m.y, m.elevation]), [[18, 4, 10]]);
+  });
+
+  /** The vision run's vault (e2e/vision.e2e.ts): a platform 10 ft up on squares 6 to 11 of rows 12 to 17, a wall down column 9's west side splitting its top, Thorn on its west half on 7, 14, and with `stair` a stair up onto it from 5, 14. */
+  const vault = (stair: boolean): RoomState => {
+    let s = room({ scenes: { s1: scene("s1", { bounds: { w: 16, h: 20 }, blockMovement: true, autoWalls: "off" }) } });
+    s = apply(s, { t: "build.edge", sceneId: "s1", edges: [12, 13, 14, 15, 16, 17].map((y) => ({ key: `9,${y},w`, feature: { kind: "wall" } })) });
+    heights(s, { x: 6, y: 12, w: 6, h: 6 }, 10);
+    if (stair) stairs(s, [[5, 14]], "a");
+    s.tokens = { thorn: token("thorn", { x: 7, y: 14, elevation: 10, name: "Thorn", kind: "pc", disposition: "ally", ownerIds: ["p1"], actor: { inline: actor() } }) };
+    return s;
+  };
+
+  test("across the platform's wall onto its east half, which no stairs reach: Thorn holds at the wall's end on the platform's edge, 10 ft up, stair or none, where with the stair he walked down it and round to the ground under the east half (D-261115-030)", () => {
+    const down = dropThorn(vault(true), { x: 4, y: 14 });
+    assert.deepEqual([down.note, down.drag.plan.moves.map((m) => [m.x, m.y, m.elevation])], [null, [[4, 14, 0]]], "the stair takes him down to the ground");
+    for (const stair of [true, false]) {
+      for (const [to, edge] of [
+        [{ x: 10, y: 14 }, [8, 12]],
+        [{ x: 10, y: 16 }, [8, 17]],
+      ] as const) {
+        const where = `onto ${to.x}, ${to.y} ${stair ? "with" : "without"} the stair`;
+        const { drag, note } = dropThorn(vault(stair), to);
+        assert.equal(note, "Ledge in the way. No stairs you have seen lead there.", where);
+        // A landing at his own height carries none.
+        assert.deepEqual(drag.plan.moves.map((m) => [m.x, m.y, m.elevation ?? 10]), [[...edge, 10]], where);
+        assert.deepEqual(drag.hold && [drag.hold.at.x, drag.hold.at.y], [...edge], `${where}: the board held him there too`);
+      }
+    }
+  });
+
   test("the DM's drag still lands on the rise", () => {
     const s = hall();
     heights(s, { x: 17, y: 1, w: 4, h: 8 }, 10);
@@ -287,5 +325,43 @@ for (const [name, g] of [
     const { drag, note } = dropThorn(corridor(8, { gob: [9, "Goblin"] }), onto(at(16, 3)));
     assert.equal(note, "Goblin is in the way.");
     assert.deepEqual(drag.plan.moves, []);
+  });
+
+  test(`${name}: across a wall onto a platform's far half, which no stairs reach, Thorn holds at the wall's end on the platform's edge, 10 ft up, stair or none, where with the stair he walked down it and round to the ground under the far half (D-261115-030)`, () => {
+    /** A platform 10 ft up on 6 to 11 along and 12 to 17 across, walls between its hexes up to 8 along and those past it, Thorn on 7, 14, and with `stair` a stair up onto it from 5, 14. */
+    const vault = (stair: boolean): RoomState => {
+      const alongOf = (h: Hex) => (g.orient === "rows" ? h.col : h.row);
+      const acrossOf = (h: Hex) => (g.orient === "rows" ? h.row : h.col);
+      const walls: FreeWall[] = [];
+      for (let across = 12; across <= 17; across++)
+        for (const along of [9, 10]) {
+          const h = at(along, across);
+          hexNeighbors(g, h).forEach((n, d) => {
+            if (alongOf(n) <= 8 && acrossOf(n) >= 12 && acrossOf(n) <= 17) walls.push(sideWall(g, h, d));
+          });
+        }
+      const s = g.orient === "rows" ? hexWallRoom("hexRows", 16, 22, walls) : hexWallRoom("hexColumns", 22, 16, walls);
+      // Heights on a hex scene are keyed by hex (discoveryTestutil heights).
+      heights(s, g.orient === "rows" ? { x: 6, y: 12, w: 6, h: 6 } : { x: 12, y: 6, w: 6, h: 6 }, 10);
+      if (stair) {
+        const foot = at(5, 14);
+        stairs(s, [[foot.col, foot.row]], String(hexNeighbors(g, foot).findIndex((n) => alongOf(n) === 6 && acrossOf(n) === 14)));
+      }
+      s.tokens.thorn = onHex(g, "thorn", "medium", at(7, 14), { elevation: 10, name: "Thorn", kind: "pc", disposition: "ally", ownerIds: ["p1"], actor: { inline: actor() } });
+      return s;
+    };
+    const down = dropThorn(vault(true), onto(at(4, 14)));
+    assert.deepEqual([down.note, down.drag.plan.moves.map((m) => [m.x, m.y, m.elevation])], [null, [[onto(at(4, 14)).x, onto(at(4, 14)).y, 0]]], "the stair takes him down to the ground");
+    for (const stair of [true, false]) {
+      for (const [to, edge] of [
+        [at(10, 14), at(8, 12)],
+        [at(10, 16), at(8, 17)],
+      ] as const) {
+        const where = `onto ${to.col}, ${to.row} ${stair ? "with" : "without"} the stair`;
+        const { drag, note } = dropThorn(vault(stair), onto(to));
+        assert.equal(note, "Ledge in the way. No stairs you have seen lead there.", where);
+        assert.deepEqual(drag.plan.moves.map((m) => [m.x, m.y, m.elevation ?? 10]), [[onto(edge).x, onto(edge).y, 10]], where);
+      }
+    }
   });
 }
