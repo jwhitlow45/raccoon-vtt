@@ -187,8 +187,10 @@ describe("retention", () => {
   test("old backups go, record first, and store files no kept list names with them", async () => {
     const all = await listBackups(backups);
     assert.ok(all.length >= 5);
-    // A store file no list names, as a pruned backup leaves.
-    const orphan = join(backups, BACKUP_STORE, "ff", `${"f".repeat(64)}-map-full-v1.webp`);
+    // A store file no list names, as a pruned backup leaves, in a shard no other store file uses: an image's hash is random, so a fixed shard could hold a kept image.
+    const used = new Set((await storeFiles()).map((path) => path.slice(0, 2)));
+    const shard = Array.from({ length: 256 }, (_, n) => n.toString(16).padStart(2, "0")).find((s) => !used.has(s)) as string;
+    const orphan = join(backups, BACKUP_STORE, shard, `${shard}${"f".repeat(62)}-map-full-v1.webp`);
     await mkdir(dirname(orphan), { recursive: true });
     await writeFile(orphan, "x");
     // Far in the future, every daily and by-hand backup is past the last 4 weeks but the newest 7.
