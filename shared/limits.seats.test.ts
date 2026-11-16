@@ -5,7 +5,7 @@ import { FAR, LIMITS, SEAT, SEAT_FULL, admitLimits, farLimits, seatCheck, seatCo
 import type { RoomState } from "./model.ts";
 import { seatView } from "./project.ts";
 import type { Op } from "./protocol.ts";
-import { character, drawing, entry, room, scene, template, token } from "./testutil.ts";
+import { castAsk, character, drawing, entry, room, scene, template, token } from "./testutil.ts";
 
 const P1: LimitSender = { role: "player", memberId: "p1", viewOf: (state) => seatView(state, "p1") };
 const DM: LimitSender = { role: "dm" };
@@ -169,6 +169,10 @@ describe("the DM's caps over the rest", () => {
     const upper = withAdded(state, (s) => { for (let i = 31; i <= SEAT.freeAreas; i++) s.templates[`pu${pad(i)}`] = template(`pu${pad(i)}`, { sceneId: "up" }); });
     assert.equal(seatHeld(upper, "up").templates.size, SEAT.freeAreas);
     assert.equal(admitLimits(withAdded(upper, (s) => { s.templates.dmz = template("dmz", { ownerId: "dm1", visibility: "dm" }); }), "s1", upper, DM, CREATE).ok, false, "one past the seat on Upper is the DM's");
+    // A seat for each floor, not one 40 for the scene: 31 upstairs and 18 on the ground are all held.
+    const both = withAdded(state, (s) => { for (let i = 0; i < 18; i++) s.templates[`pg${pad(i)}`] = template(`pg${pad(i)}`); });
+    assert.equal(seatHeld(both, "s1").templates.size, 49);
+    assert.deepEqual(admitLimits(withAdded(both, (s) => { s.templates.dmz = template("dmz", { ownerId: "dm1", visibility: "dm" }); }), "s1", both, DM, CREATE), { ok: true }, "the DM's 200th beside both floors' areas");
   });
 
   test("a thing several players own is held by its first owner by id", () => {
@@ -217,9 +221,11 @@ describe("the far line", () => {
     assert.deepEqual(farLimits(state, null, before), { ok: true });
   });
 
-  test("LP43-LIMITS-1: a player's free areas on another floor are held, not in the DM's part the line rounds up", () => {
-    // The DM's part a whole number of steps and the seats' part exact, so the reading after the player's op is the line.
+  test("LP43-LIMITS-1: a player's own free areas on another floor they hold count exactly, not in the part the line rounds up", () => {
+    // The rest a whole number of steps and the player's own part exact, so the reading after their op is the line. Their
+    // companion upstairs means they hold Upper, so their copy holds their areas there.
     const state = keep();
+    companions(state, 1, "up", 900);
     for (let i = 0; i < 31; i++) state.templates[`pu${pad(i)}`] = template(`pu${pad(i)}`, { sceneId: "up" });
     for (let i = 0; i < 18; i++) state.templates[`pg${pad(i)}`] = template(`pg${pad(i)}`);
     const dmPart = FAR.areas - FAR.countStep;
@@ -236,4 +242,144 @@ describe("the far line", () => {
     state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: Array.from({ length: FAR.rows + 1 }, (_, i) => entry(`d${i}`, { label: "x" })) };
     assert.equal(farLimits(state, null).ok, false);
   });
+});
+
+/** A room's collections as new objects, as an op leaves them, so nothing read from the last state is taken for this one. */
+function fresh(state: RoomState): RoomState {
+  return { ...state, tokens: { ...state.tokens }, templates: { ...state.templates }, drawings: { ...state.drawings }, casts: { ...state.casts }, encounter: state.encounter ? { ...state.encounter, entries: [...state.encounter.entries] } : null };
+}
+
+/**
+ * P1's create in twin rooms that differ only in whose one thing P1 cannot
+ * see is, P2's or the DM's, at every fill from `from` to `to` of the DM's
+ * hidden things of its class. The window holds the far count's line and a
+ * whole step below it, so the DM's part meets every place in its step.
+ */
+function twinAnswers(build: (owner: "p2" | "dm1") => RoomState, fill: (s: RoomState, i: number) => void, create: (s: RoomState) => void, [from, to]: [number, number]): Array<[boolean, boolean]> {
+  const rooms = (["p2", "dm1"] as const).map((owner) => {
+    const state = build(owner);
+    for (let i = 0; i < from; i++) fill(state, i);
+    return state;
+  });
+  const out: Array<[boolean, boolean]> = [];
+  for (let i = from; i < to; i++) {
+    const [a, b] = rooms.map((state) => {
+      fill(state, i);
+      const after = fresh(state);
+      create(after);
+      return admitLimits(after, "s1", fresh(state), P1, CREATE).ok;
+    });
+    out.push([a!, b!]);
+  }
+  return out;
+}
+
+/** The twins answer alike at every fill, and the window meets the line: the first create taken, the last refused. */
+function assertTwinsAlike(answers: Array<[boolean, boolean]>, what: string): void {
+  const apart = answers.findIndex(([a, b]) => a !== b);
+  assert.equal(apart, -1, `${what}: the twins answer apart ${apart} into the window`);
+  assert.ok(answers[0]![0] && !answers.at(-1)![0], `${what}: the window holds the line`);
+}
+
+describe("LP43-PRIV-1: a player's far counts never read whose an unseen thing is", () => {
+  /** The fills around `line` for a room that holds `base` of the class besides the DM's fill and P1's create. */
+  const around = (line: number, base: number): [number, number] => [line - base - FAR.countStep - 2, line - base + 1];
+  const withP2Upstairs = (state: RoomState) => {
+    state.characters = { ...state.characters, c2: character("c2", { ownerIds: ["p2"] }) };
+    state.tokens.p2up = token("p2up", { kind: "pc", sceneId: "up", actor: { ref: "c2" }, ownerIds: ["p2"] });
+    return state;
+  };
+  const dmArea = (s: RoomState, i: number) => (s.templates[`dm${pad(i)}`] = template(`dm${pad(i)}`, { ownerId: "dm1", visibility: "dm" }));
+  const p1Area = (s: RoomState) => (s.templates.pz = template("pz"));
+
+  test("an area on an upper floor P1 has never held, P2's or the DM's", () => {
+    const build = (owner: "p2" | "dm1") => {
+      const state = keep();
+      state.templates.zup = template("zup", { sceneId: "up", ownerId: owner });
+      return state;
+    };
+    assertTwinsAlike(twinAnswers(build, dmArea, p1Area, around(FAR.areas, 1)), "a free area");
+  });
+
+  test("an area riding P2's creature upstairs, P2's or the DM's", () => {
+    const build = (owner: "p2" | "dm1") => {
+      const state = withP2Upstairs(keep());
+      state.templates.zup = template("zup", { sceneId: "up", ownerId: owner, attachedTo: "p2up" });
+      return state;
+    };
+    assertTwinsAlike(twinAnswers(build, dmArea, p1Area, around(FAR.areas, 1)), "a riding area");
+  });
+
+  test("a token upstairs, P2's companion or the DM's creature", () => {
+    const build = (owner: "p2" | "dm1") => {
+      const state = withP2Upstairs(keep());
+      state.tokens.zup = owner === "p2" ? token("zup", { sceneId: "up", companion: { of: "c2", turn: "own" }, ownerIds: ["p2"] }) : token("zup", { sceneId: "up" });
+      return state;
+    };
+    const dmToken = (s: RoomState, i: number) => (s.tokens[`dm${pad(i)}`] = token(`dm${pad(i)}`, { visibility: "dm", x: 30, y: 20 }));
+    assertTwinsAlike(twinAnswers(build, dmToken, (s) => companions(s, 1, "s1", 900), around(FAR.tokens, 3)), "a token");
+  });
+
+  test("a drawing the DM hid on P1's floor, P2's or the DM's", () => {
+    const build = (owner: "p2" | "dm1") => {
+      const state = keep();
+      state.drawings.zhid = drawing("zhid", { ownerId: owner, visibility: "dm" });
+      return state;
+    };
+    const dmDrawing = (s: RoomState, i: number) => (s.drawings[`dm${pad(i)}`] = drawing(`dm${pad(i)}`, { ownerId: "dm1", visibility: "dm" }));
+    assertTwinsAlike(twinAnswers(build, dmDrawing, (s) => (s.drawings.pz = drawing("pz")), around(FAR.drawings, 1)), "a drawing");
+  });
+
+  test("a hidden row of a hidden creature, P2's or the DM's", () => {
+    const build = (owner: "p2" | "dm1") => {
+      const state = keep();
+      state.tokens.zhid = token("zhid", { visibility: "dm", ownerIds: owner === "p2" ? ["p2"] : [] });
+      state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("zrow", { tokenId: "zhid", hidden: true })] };
+      return state;
+    };
+    const dmRow = (s: RoomState, i: number) => s.encounter!.entries.push(entry(`dm${pad(i)}`, { label: "Goblin", hidden: true }));
+    assertTwinsAlike(twinAnswers(build, dmRow, (s) => s.encounter!.entries.push(entry("pz", { characterId: "c1" })), around(FAR.rows, 1)), "a row");
+  });
+
+  test("an ask upstairs for P2's creature, P2's or the DM's", () => {
+    const build = (owner: "p2" | "dm1") => {
+      const state = withP2Upstairs(keep());
+      state.casts = { zask: castAsk("zask", { by: owner, caster: "p2up", sceneId: "up", area: undefined, targets: ["p2up"] }) };
+      return state;
+    };
+    const dmAsk = (s: RoomState, i: number) => (s.casts[`dm${pad(i)}`] = castAsk(`dm${pad(i)}`, { by: "dm1", caster: "hero", area: undefined, targets: ["hero"] }));
+    assertTwinsAlike(twinAnswers(build, dmAsk, (s) => (s.casts.pz = castAsk("pz", { by: "p1", caster: "hero", area: undefined, targets: ["hero"] })), around(FAR.asks, 1)), "an ask");
+  });
+});
+
+test("LP43-PRIV-1: P1's own area the DM hid counts as their copy has it, so hidden and deleted answer alike wherever the DM's part keeps its step", () => {
+  // Hidden, the area is in the stepped part, as a deleted one is not: the twins may part only where that one area crosses
+  // a step's edge, the far line's own grain. Counted exactly as P1's, it would part them where P1's 49 others put the
+  // line inside a step. P1 holds Upper by a companion there.
+  const own = (s: RoomState) => {
+    companions(s, 1, "up", 900);
+    for (let i = 0; i < 30; i++) s.templates[`pg${pad(i)}`] = template(`pg${pad(i)}`);
+    for (let i = 0; i < 19; i++) s.templates[`pu${pad(i)}`] = template(`pu${pad(i)}`, { sceneId: "up" });
+    return s;
+  };
+  const rooms = [own(keep()), own(keep())];
+  rooms[0]!.templates.mine = template("mine", { visibility: "dm" });
+  const [from, to] = [FAR.areas - 50 - FAR.countStep - 3, FAR.areas - 50 + 1];
+  const dmArea = (s: RoomState, i: number) => (s.templates[`dm${pad(i)}`] = template(`dm${pad(i)}`, { ownerId: "dm1", visibility: "dm" }));
+  for (const s of rooms) for (let i = 0; i < from; i++) dmArea(s, i);
+  const apart: number[] = [];
+  const answers: boolean[] = [];
+  for (let i = from; i < to; i++) {
+    const [hidden, deleted] = rooms.map((s) => {
+      dmArea(s, i);
+      const after = fresh(s);
+      after.templates.pz = template("pz");
+      return admitLimits(after, "s1", fresh(s), P1, CREATE).ok;
+    });
+    answers.push(deleted!);
+    // The DM's fill is i + 1 areas, and the hidden one makes the stepped part one more.
+    if ((i + 1) % FAR.countStep !== 0 && hidden !== deleted) apart.push(i);
+  }
+  assert.deepEqual(apart, [], "alike inside every step");
+  assert.ok(answers[0] && !answers.at(-1), "the window holds the line");
 });

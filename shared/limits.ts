@@ -2,7 +2,7 @@ import { roomHandoutPages } from "./handouts.ts";
 import { isWritable } from "./writable.ts";
 import { CHUNK_CELLS, HEIGHTS_CHARS, type AreaTemplate, type BuildChunk, type Character, type CompanionBlock, type CustomMonster, type Drawing, type InitEntry, type JournalPage, type RoomState, type Scene, type Token } from "./model.ts";
 import { ownEntry } from "./records.ts";
-import { floorsOf, openFloor } from "./rules/floors.ts";
+import { floorsOf, holdsRecordOn, openFloor } from "./rules/floors.ts";
 import type { SoundUse } from "./sound.ts";
 import { drawnSize, type VideoGeometry, type VideoShape } from "./videoGeometry.ts";
 
@@ -1577,21 +1577,29 @@ export function drawingHeld(drawing: Drawing, view: SeatView): boolean {
   return drawing.visibility === "all" && view.holds(drawing.sceneId) && (drawing.anchors ?? []).every((id) => id === null || view.sees(id));
 }
 
+/** Whether a member's copy holds a token of their seat's: of a character they own, or its companion, and in their sight. */
+function ownTokenHeld(state: RoomState, memberId: string, token: Token, view: SeatView): boolean {
+  return (seatCharacter(state, token)?.ownerIds.includes(memberId) ?? false) && view.sees(token.id);
+}
+
+/** Whether a member's copy holds an area of theirs: on a creature they see, or loose on a floor they hold. */
+function ownAreaHeld(template: AreaTemplate, memberId: string, view: SeatView): boolean {
+  if (template.ownerId !== memberId || template.visibility !== "all") return false;
+  return template.attachedTo !== undefined ? view.sees(template.attachedTo) : view.holds(template.sceneId);
+}
+
 /** One member's seat counts in `sceneId`'s scopes, over the things their view of `state` holds. With no scene, only the rows. */
 export function seatCounts(state: RoomState, memberId: string, sceneId: string | null, view: SeatView): SeatCounts {
   const counts: SeatCounts = { tokens: 0, ridingAreas: 0, freeAreas: 0, drawings: 0, pointValues: 0, rows: 0 };
   for (const entry of state.encounter?.entries ?? []) if (ownsRow(state, memberId, entry) && view.showsRow(entry.id)) counts.rows++;
   if (sceneId === null) return counts;
   const group = sceneGroup(state, sceneId);
-  for (const token of Object.values(state.tokens)) {
-    if (!group.has(token.sceneId) || !seatCharacter(state, token)?.ownerIds.includes(memberId)) continue;
-    if (view.sees(token.id)) counts.tokens++;
-  }
+  for (const token of Object.values(state.tokens)) if (group.has(token.sceneId) && ownTokenHeld(state, memberId, token, view)) counts.tokens++;
   for (const template of Object.values(state.templates)) {
-    if (template.ownerId !== memberId || template.visibility !== "all") continue;
+    if (!ownAreaHeld(template, memberId, view)) continue;
     if (template.attachedTo !== undefined) {
-      if (group.has(template.sceneId) && view.sees(template.attachedTo)) counts.ridingAreas++;
-    } else if (template.sceneId === sceneId && view.holds(sceneId)) counts.freeAreas++;
+      if (group.has(template.sceneId)) counts.ridingAreas++;
+    } else if (template.sceneId === sceneId) counts.freeAreas++;
   }
   for (const drawing of Object.values(state.drawings)) {
     if (drawing.ownerId !== memberId || drawing.sceneId !== sceneId || !drawingHeld(drawing, view)) continue;
@@ -1701,6 +1709,50 @@ export function seatHeld(state: RoomState, sceneId: string | null): SeatHeld {
   };
 }
 
+/** A player's own things that their copy holds (ownHeld), by id. */
+export type OwnHeld = { tokens: ReadonlySet<string>; templates: ReadonlySet<string>; drawings: ReadonlySet<string>; rows: ReadonlySet<string>; casts: ReadonlySet<string> };
+
+/** Whether a member owns a creature as their copy reads it (shared/project.ts ownsToken): its own owners, or its character's. */
+function ownsCreature(state: RoomState, memberId: string, tokenId: string): boolean {
+  const token = ownEntry(state.tokens, tokenId);
+  if (!token) return false;
+  return token.ownerIds.includes(memberId) || ("ref" in token.actor && (ownEntry(state.characters, token.actor.ref)?.ownerIds.includes(memberId) ?? false));
+}
+
+/**
+ * What a player's own copy holds of their own seat things on `floors`, and
+ * their rows and asks (LP43-PRIV-1): each seat's class by the seat's own
+ * test, with no cap, and the asks their ask limit counts. A player's far
+ * line holds only these exactly and rounds all the rest, other players'
+ * seat things too, into the stepped part, so whose an unseen thing is never
+ * moves that player's answer. seatHeld, which the DM's lines read, has no
+ * view test and holds every player's things, so it would.
+ */
+export function ownHeld(state: RoomState, memberId: string, view: SeatView, floors: ReadonlySet<string>): OwnHeld {
+  const ids = <T extends { id: string }>(things: Iterable<T>, keep: (thing: T) => boolean): Set<string> => {
+    const out = new Set<string>();
+    for (const thing of things) if (keep(thing)) out.add(thing.id);
+    return out;
+  };
+  const heldFloors = new Set(Object.keys(state.scenes).filter((id) => view.holds(id)));
+  return {
+    tokens: ids(Object.values(state.tokens), (t) => floors.has(t.sceneId) && ownTokenHeld(state, memberId, t, view)),
+    templates: ids(Object.values(state.templates), (t) => floors.has(t.sceneId) && ownAreaHeld(t, memberId, view)),
+    drawings: ids(Object.values(state.drawings), (d) => floors.has(d.sceneId) && d.ownerId === memberId && drawingHeld(d, view)),
+    rows: ids(state.encounter?.entries ?? [], (e) => ownsRow(state, memberId, e) && view.showsRow(e.id)),
+    // As their limit of 3 waiting asks counts them (shared/permissions.ts waitingAsks): theirs, with a caster they own, on a floor they hold.
+    casts: ids(Object.values(state.casts), (c) => c.by === memberId && ownsCreature(state, memberId, c.caster) && holdsRecordOn(state, heldFloors, c)),
+  };
+}
+
+/** A player's far counts' exact part in `sceneId`'s scopes, as seatHeld's: their own copy's own things (ownHeld). */
+function playerFarHeld(state: RoomState, sceneId: string | null, memberId: string, view: SeatView): SeatHeld {
+  const own = ownHeld(state, memberId, view, sceneId === null ? new Set() : sceneGroup(state, sceneId));
+  const drawings = [...own.drawings].filter((id) => state.drawings[id]!.sceneId === sceneId);
+  const pointValues = drawings.reduce((sum, id) => sum + state.drawings[id]!.points.length, 0);
+  return { tokens: own.tokens, templates: own.templates, drawings: new Set(drawings), pointValues, rows: own.rows, casts: own.casts };
+}
+
 /** Who sent an op, as the live limits read it: a player's seats need their member id and their own view. */
 export type LimitSender = { role: "dm" } | { role: "player"; memberId: string; viewOf: SeatViewOf };
 
@@ -1723,9 +1775,21 @@ export type LimitKind = { far: "deletion" | "exempt" | "meets"; seats: boolean }
  */
 export function admitLimits(state: RoomState, sceneId: string | null, before: RoomState, sender: LimitSender, kind: LimitKind): LimitCheck {
   if (kind.far === "deletion") return { ok: true };
+  if (sender.role === "player") sender = { ...sender, viewOf: viewsOnce(sender.viewOf) };
   const near = sender.role === "player" ? playerLimits(state, sceneId, before, sender, kind) : restLimits(state, sceneId, before);
-  if (!near.ok) return near;
-  return kind.far === "meets" ? farLimits(state, sceneId, before) : { ok: true };
+  if (!near.ok || kind.far !== "meets") return near;
+  // A player's far counts hold exactly only their own copy's own things, the DM's every seat's (LP43-PRIV-1).
+  return farLimits(state, sceneId, before, sender.role === "player" ? playerFarHeld(state, sceneId, sender.memberId, sender.viewOf(state)) : seatHeld(state, sceneId));
+}
+
+/** A view of each state built at most once, since a player's seats and far counts read the same one. */
+function viewsOnce(viewOf: SeatViewOf): SeatViewOf {
+  const views = new WeakMap<RoomState, SeatView>();
+  return (state) => {
+    let view = views.get(state);
+    if (!view) views.set(state, (view = viewOf(state)));
+    return view;
+  };
 }
 
 /** The limits a player's op meets besides the far line: the counts every copy holds, the rules on one thing, and their own seats. */
@@ -1839,11 +1903,11 @@ function blockTotals(state: RoomState): { count: number; bytes: number } {
  * The far line's counts (FAR), for one scene or none, every room alike: a
  * count refuses an op that adds to its total while the far count is past
  * the line, with the cap's own words. Without `before`, as for a room
- * import, the line is absolute. The byte lines are the size guard's
- * (server/rooms/sizeGuard.ts).
+ * import, the line is absolute. `held` is the exact part: every seat's
+ * (seatHeld) for the DM and an import, a player's own copy's for their op.
+ * The byte lines are the size guard's (server/rooms/sizeGuard.ts).
  */
-export function farLimits(state: RoomState, sceneId: string | null, before?: RoomState): LimitCheck {
-  const held = seatHeld(state, sceneId);
+export function farLimits(state: RoomState, sceneId: string | null, before?: RoomState, held: SeatHeld = seatHeld(state, sceneId)): LimitCheck {
   const rows = rowCount(state);
   if ((!before || rows > rowCount(before)) && farCount(rows, held.rows.size) > FAR.rows) return roomFull(`${n(FAR.rows)} initiative rows`);
   const casts = Object.keys(state.casts).length;

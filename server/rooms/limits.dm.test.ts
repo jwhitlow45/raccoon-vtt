@@ -5,13 +5,14 @@ import type { Drawing, RoomState } from "#shared/model.ts";
 import { MOVE_PLAYERS_FIRST, MOVE_PLAYERS_FIRST_BACK } from "#shared/permissions.ts";
 import { MAX_NOTES, type Op } from "#shared/protocol.ts";
 import { idAt, seated, type Seated } from "#shared/privTestutil.ts";
-import { actor, castAsk, character, companionBlock, drawing, entry, member, rng, room, scene, template, token } from "#shared/testutil.ts";
+import { actor, castAsk, character, companionBlock, drawing, entry, env, member, rng, room, scene, template, token } from "#shared/testutil.ts";
 import { PLAYER_LIMITS_SNAPSHOT_VERSION } from "#shared/migrate.ts";
+import { applyOp } from "#shared/reducer.ts";
 import { markedRoom } from "./limitsTesting.ts";
 import { answer, joinOp, Mint, type Answer } from "./limitsTwinTesting.ts";
 import type { Who } from "./numberingTesting.ts";
 import { Room } from "./numberingTesting.ts";
-import { farRoomBytes, heldBytes, MEMORY_FULL, PER_PLAYER_FULL, projectedSceneBytes } from "./sizeGuard.ts";
+import { farRoomBytes, growthBound, heldBytes, measuredStateBytes, MEMORY_FULL, ownHeldBytes, PER_PLAYER_FULL, projectedSceneBytes, SizeGuard } from "./sizeGuard.ts";
 import { ScopeClient, StoredRoomDb, storedActor } from "./undoScopeTesting.ts";
 
 /**
@@ -213,6 +214,8 @@ describe("the players' scene can be deleted with the DM's yes", () => {
     assert.equal(r.state.meta.playerSceneId, "s1", "Undo setup puts the players back");
     const redo = await answer(r, "dm", { t: "redo", scope: "setup", head: r.clients.dm.head("setup", "redo").id } as Op);
     assert.deepEqual(redo, { code: "invalid", message: `could not redo deleting the scene Keep: ${MOVE_PLAYERS_FIRST_BACK}` });
+    // Dropped, as every refused redo is: its guard on where the players are refuses it once they move (D-261116-013).
+    assert.equal(r.clients.dm.history().setup?.redo.head ?? null, null, "the Redo setup step is gone");
     assert.ok(r.state.scenes.s1 && r.state.scenes.up, "the Keep keeps both floors");
     assert.equal(r.state.meta.playerSceneId, "s1", "with the players on it");
     await r.restart(false);
@@ -241,6 +244,12 @@ describe("the players' scene can be deleted with the DM's yes", () => {
 function farScene(state: RoomState): { dm: number; held: number } {
   const held = heldBytes(state, ["s1"]);
   return { dm: projectedSceneBytes(state, "s1") - held, held };
+}
+
+/** The players' scene as a player's far line reads it: all but their own copy's own things by its step, those exactly. */
+function playerScene(state: RoomState, memberId: string): number {
+  const own = ownHeldBytes(state, memberId, ["s1"]);
+  return roundUp(projectedSceneBytes(state, "s1") - own, FAR.byteStep) + own;
 }
 
 /**
@@ -368,7 +377,14 @@ async function sendAll(r: Room, steps: Record<string, [Who, () => Op]>, names: r
  */
 describe("a scene at its far line goes on with play", () => {
   test("D9: inside the bookkeeping reserve, creates, notes and a player's line are refused, and moves, turns, HP, life, conditions, an AC edit, rolls, talk, an undo and a group delete taken", async (t) => {
-    const { state, seats } = farRoom(FAR.sceneBytes - BOOKKEEPING_RESERVE.scene + 1, "bottom");
+    // The DM's reading at the top of the reserve, whose DM part sits just past a step's bottom. A player's reading holds
+    // only their own things exactly and steps the rest (LP43-PRIV-1), so it lies inside the reserve below it, a player's
+    // own things short of the top.
+    const { state, seats } = farRoom(FAR.sceneBytes, "bottom");
+    for (const p of ["p1", "p2"]) {
+      const reading = playerScene(state, p);
+      assert.ok(reading > FAR.sceneBytes - BOOKKEEPING_RESERVE.scene && reading <= FAR.sceneBytes - 16 * 1024, `${p}'s reading ${reading} inside the reserve, room to spare for their bookkeeping`);
+    }
     const r = await opened(t, state, "reserve");
     const steps = farSteps(r, seats);
     const refused = ["a create", "a creature's notes", "a player's line", "a character's notes"];
@@ -465,8 +481,9 @@ describe("a room past the far line on per-player sight alone", () => {
     });
     assert.ok(scenes !== undefined, "a room inside the kept 1 MiB");
     const state = perPlayerRoom(scenes);
-    // A second scene the party explores, so moving the players there raises the room's reserves.
+    // A second scene the party explores, so moving the players there raises the room's reserves, and a goblin of the DM's.
     state.scenes.s2 = { ...state.scenes.s2!, fogEnabled: true, vision: { on: true, light: "bright" } };
+    state.tokens.gob = token("gob", { name: "Goblin", x: 9, y: 9 });
     const r = await opened(t, state, "kept");
     assert.deepEqual(codes(await sendAll(r, player(r), ["a line", "a move", "a chat line"])), [["a line", "taken"], ["a move", "taken"], ["a chat line", "taken"]], "the player's adds go on");
     assert.ok(farRoomBytes(r.state, false) <= playersLine - KEPT_FOR_PLAYERS, "today's roster reads under the DM's line, where the DM's adds went on before");
@@ -477,8 +494,13 @@ describe("a room past the far line on per-player sight alone", () => {
     assert.equal(await answer(r, "dm", { t: "token.move", tokenId: "hero", x: 7, y: 5 } as Op), "taken", "the DM's move");
     assert.equal(await answer(r, "dm", { t: "actor.effect.add", target: { tokenId: "hero" }, effect: { id: mint.next(r), key: "prone" } } as Op), "taken", "the DM's condition");
     assert.equal(await answer(r, "dm", { t: "log.chat", text: "Onward" }), "taken", "the DM's chat line");
+    assert.equal(await answer(r, "dm", { t: "vision.holders", sceneId: "pp1", on: ["p1"] } as Op), "taken", "who sees for themselves, which spends room for the players' play");
+    assert.equal(await answer(r, "dm", { t: "token.delete", tokenId: "gob" }), "taken", "the goblin's delete");
+    const undoGoblin = () => answer(r, "dm", { t: "undo", scope: "play", head: r.clients.dm.head("play", "undo").id } as Op);
+    assert.deepEqual(await undoGoblin(), { code: "quota", message: `could not undo deleting Goblin: ${KEPT_FOR_PLAYERS_FULL}` }, "the DM's Undo that brings it back adds");
     assert.equal(await answer(r, "dm", { t: "scene.delete", sceneId: "pp0" }), "taken", "a scene's delete");
-    assert.equal(await answer(r, "dm", goblin(r)), "taken", "and the DM's create once the room is freed");
+    assert.equal(await undoGoblin(), "taken", "the same Undo once the room is freed");
+    assert.equal(await answer(r, "dm", goblin(r)), "taken", "and the DM's create");
   });
 
   test("D9: past the line, a player's roll and chat line, which grow the room, are refused", async (t) => {
@@ -653,5 +675,57 @@ describe("joins, blocks and old caps", () => {
     assert.deepEqual(await answer(r, "dm", goblin), { code: "quota", message: `this scene can hold at most ${LIMITS.tokensPerScene} tokens` }, "a create past the cap");
     assert.equal(await answer(r, "dm", { t: "token.delete", tokenId: "dmt2" }), "taken", "a delete");
     assert.equal(await answer(r, "dm", goblin), "taken", "a create once there is room");
+  });
+});
+
+describe("LP43-PRIV-1: a player's far reading through the actor", () => {
+  test("twins whose one difference is an upstairs area's owner, P2 or the DM, answer P1's line alike where holding every seat exactly would part them", async (t) => {
+    const twin = (owner: string, notes: number) => {
+      const state = room();
+      // A DM whose id is as long as P2's, as every member's minted id is, so the twins store the same bytes.
+      state.members.d2 = member("d2", "dm");
+      state.scenes = { ...state.scenes, s1: scene("s1", { name: "Tower", floor: { of: "s1", level: 0, name: "Ground" } }), up: scene("up", { name: "Tower", order: 1, floor: { of: "s1", level: 1, name: "Upper" } }) };
+      state.characters.hero = character("hero", { name: "Hero", ownerIds: ["p1"] });
+      state.tokens.hero = token("hero", { kind: "pc", name: "Hero", x: 5, y: 5, actor: { ref: "hero" } });
+      state.templates.zup = template("zup", { sceneId: "up", ownerId: owner, label: "x".repeat(200) });
+      // The DM's notes on scenes of their own, 100 creatures a scene, and one creature's notes as the fine pad.
+      for (let i = 0; i * 4_000 < notes; i++) {
+        const sceneId = `f${Math.floor(i / 100)}`;
+        state.scenes[sceneId] ??= scene(sceneId, { order: 10 + Math.floor(i / 100) });
+        state.tokens[`fill${i}`] = token(`fill${i}`, { sceneId, notes: "n".repeat(Math.min(4_000, notes - i * 4_000)) });
+      }
+      return state;
+    };
+    const padded = (state: RoomState, pad: number): RoomState => ({ ...state, tokens: { ...state.tokens, pad: token("pad", { sceneId: "f0", notes: "p".repeat(pad) }) } });
+    const line = (id: string): Op => ({ t: "drawing.create", drawing: { id, sceneId: "s1", kind: "line", points: [5, 5, 6, 6], style: { stroke: "#ffffff", width: 2, opacity: 1 }, ownerId: "p1", visibility: "all" } }) as Op;
+    // The guard as the build before this fix judged P1: every seat's things exact, whoever's they are.
+    const everySeat = (state: RoomState) => {
+      const guard = new SizeGuard();
+      guard.stateMeasured(measuredStateBytes(state), state);
+      const r = applyOp(state, line("01a1c70b-0000-7000-8000-000000000000"), { memberId: "p1", role: "player" }, env(9));
+      assert.ok(r.ok);
+      return guard.check(r.state, ["s1"], growthBound(state, r.state, r.touched), state, "player", "widest").ok;
+    };
+    const target = FAR.roomBytes - BOOKKEEPING_RESERVE.room - 512 * 1024;
+    let notes = target;
+    for (let i = 0; i < 3; i++) notes -= farRoomBytes(twin("d2", notes), true) - target;
+    const twins = { p2: twin("p2", notes), d2: twin("d2", notes) };
+    let [lo, hi] = [0, 1024 * 1024];
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (everySeat(padded(twins.d2, mid))) lo = mid;
+      else hi = mid;
+    }
+    const apart: number[] = [];
+    for (let pad = hi - 800; pad <= hi + 800; pad += 32) if (everySeat(padded(twins.p2, pad)) !== everySeat(padded(twins.d2, pad))) apart.push(pad);
+    assert.ok(apart.length > 2, "holding every seat exactly parts the twins near the line");
+    const pad = apart[Math.floor(apart.length / 2)]!;
+    const answers: Answer[] = [];
+    for (const owner of ["p2", "d2"] as const) {
+      const r = await opened(t, padded(twins[owner], pad), owner);
+      answers.push(await answer(r, "p1", line(mint.next(r))));
+    }
+    assert.ok(answers[0] === "taken" || (typeof answers[0] === "object" && answers[0].code === "quota"), `P1's line reaches the far line, not another refusal: ${JSON.stringify(answers[0])}`);
+    assert.deepEqual(answers[0], answers[1], `P1's line answers alike at pad ${pad}`);
   });
 });

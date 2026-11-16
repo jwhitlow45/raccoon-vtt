@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { BOOKKEEPING_RESERVE, FAR, roundUp } from "#shared/limits.ts";
+import { BOOKKEEPING_RESERVE, FAR, KEPT_FOR_PLAYERS, KEPT_FOR_PLAYERS_FULL, roundUp } from "#shared/limits.ts";
 import type { Member, RoomState, Viewer } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { character, companionBlock, DM, env, member, room, scene, token } from "#shared/testutil.ts";
+import { character, companionBlock, DM, env, member, room, scene, template, token } from "#shared/testutil.ts";
 import { farRoomBytes, growthBound, heldBytes, measuredStateBytes, overFarLine, PER_PLAYER_FULL, playerBlockBytes, projectedSceneBytes, roomLevelBytes, SizeGuard, widestPerPlayerReserve } from "./sizeGuard.ts";
 
 /*
@@ -221,5 +221,64 @@ describe("the far line", () => {
     const fine = new SizeGuard();
     fine.stateMeasured(measuredStateBytes(under), under);
     assert.equal(fine.over, 0);
+  });
+});
+
+/** How many bytes of the DM's notes `filled` adds to `base` for its far reading at the widest to be about `target`, the fill's own overhead measured out. */
+function fillFor(base: RoomState, target: number): number {
+  let fill = target - farRoomBytes(base, true);
+  for (let i = 0; i < 3; i++) fill -= farRoomBytes(filled(base, fill), true) - target;
+  return fill;
+}
+
+/** A player's op as the actor judges it at the far line: at the widest, holding exactly only their own copy's own things. */
+function playerJudged(state: RoomState, op: Op, memberId: string): ReturnType<SizeGuard["check"]> {
+  const guard = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: 64 * MIB });
+  guard.stateMeasured(measuredStateBytes(state), state);
+  const r = applyOp(state, op, { memberId, role: "player" }, env(9));
+  assert.ok(r.ok, r.ok ? "" : r.message);
+  return guard.check(r.state, ["s1"], growthBound(state, r.state, r.touched), state, "player", "widest", false, memberId);
+}
+
+describe("LP43-PRIV-1: a player's far reading never reads whose an unseen thing is", () => {
+  test("twin rooms whose one difference is an upstairs area's owner, P2 or the DM, answer P1's line alike at every fill around the line", () => {
+    const twin = (owner: string) => {
+      const base = room();
+      // A DM whose id is as long as P2's, as every member's minted id is, so the twins store the same bytes.
+      base.members.d2 = member("d2", "dm");
+      base.scenes = { ...base.scenes, s1: scene("s1", { floor: { of: "s1", level: 0, name: "Ground" } }), up: scene("up", { order: 1, floor: { of: "s1", level: 1, name: "Upper" } }) };
+      base.characters.c1 = character("c1", { ownerIds: ["p1"] });
+      base.tokens.hero = token("hero", { kind: "pc", actor: { ref: "c1" }, ownerIds: ["p1"], x: 2, y: 2 });
+      base.templates = { zup: template("zup", { sceneId: "up", ownerId: owner, label: "x".repeat(200) }) };
+      return base;
+    };
+    // The same fill in both, read off the DM's twin.
+    const fill = fillFor(twin("d2"), FAR.roomBytes - BOOKKEEPING_RESERVE.room - MIB);
+    const rooms = [filled(twin("p2"), fill), filled(twin("d2"), fill)];
+    const area = measuredStateBytes(rooms[0]!) - measuredStateBytes({ ...rooms[0]!, templates: {} });
+    const padded = (state: RoomState, n: number): RoomState => ({ ...state, tokens: { ...state.tokens, pad: token("pad", { sceneId: "f0", notes: "p".repeat(n) }) } });
+    const takes = (state: RoomState, n: number) => playerJudged(padded(state, n), line(`d${n}`), "p1").ok;
+    // Where P1's line stops being taken in the DM's twin, then every 32 bytes across twice the area's bytes each side of it.
+    let [lo, hi] = [0, 2 * MIB];
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (takes(rooms[1]!, mid)) lo = mid;
+      else hi = mid;
+    }
+    const apart: number[] = [];
+    for (let n = hi - 2 * area; n <= hi + 2 * area; n += 32) if (takes(rooms[0]!, n) !== takes(rooms[1]!, n)) apart.push(n);
+    assert.deepEqual(apart, [], `the twins answer apart at pads ${apart.slice(0, 5).join(", ")} (the area is ${area} bytes)`);
+    assert.ok(takes(rooms[0]!, hi - 2 * area) && !takes(rooms[0]!, hi + 2 * area), "the window holds the line");
+  });
+
+  test("LIMITS-2: a player's add reads the players' line, never the DM's 1 MiB sooner one", () => {
+    // P1's reading between the DM's line and the players': P1's line taken, the DM's growing note refused in the kept words.
+    const state = filled(room(), fillFor(room(), FAR.roomBytes - BOOKKEEPING_RESERVE.room - KEPT_FOR_PLAYERS / 2));
+    const reading = farRoomBytes(state, true);
+    assert.ok(reading > FAR.roomBytes - BOOKKEEPING_RESERVE.room - KEPT_FOR_PLAYERS && reading < FAR.roomBytes - BOOKKEEPING_RESERVE.room - FAR.byteStep, `${reading} inside the kept 1 MiB`);
+    assert.deepEqual(playerJudged(state, line("d1"), "p1"), { ok: true }, "P1's line");
+    const guard = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: 64 * MIB });
+    guard.stateMeasured(measuredStateBytes(state), state);
+    assert.deepEqual(judged(state, { t: "token.update", tokenId: "fill1", patch: { notes: "m".repeat(8_000) } }, DM, guard, "dmAdd"), { ok: false, code: "quota", message: KEPT_FOR_PLAYERS_FULL }, "the DM's growing note");
   });
 });

@@ -2362,7 +2362,7 @@ export class RoomActor {
     // player's then lack. The DM's bookkeeping, a move of the players and who sees for themselves (`own`) spend room for the
     // players' own play, so they read today's roster and the players' line, as before.
     const far: FarJudge = viewer.role === "player" ? "widest" : widestPerPlayerReserve(next) > widestPerPlayerReserve(before) ? "widestDm" : kind.far === "exempt" || FAR_TREATMENT[op.t] === "own" ? "today" : "dmAdd";
-    return this.#sizes.check(next, grown, growth, before, viewer.role, far, kind.far === "exempt");
+    return this.#sizes.check(next, grown, growth, before, viewer.role, far, kind.far === "exempt", viewer.role === "player" ? viewer.memberId : undefined);
   }
 
   /**

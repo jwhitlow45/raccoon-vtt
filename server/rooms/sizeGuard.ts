@@ -2,11 +2,11 @@ import { chunkKey, holderChunkKey, holderTileKey, parseKey, readEntity, tileKey,
 import { lineAudience } from "#shared/logRings.ts";
 import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, UP_DIR_CHARS, type BuildChunk, type Encounter, type EncounterSnapshot, type LogEntry, type Token, type Trap } from "#shared/model.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
-import { exploredReserve, FAR, farByteLine, farBytesOver, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, reservedExploreFloors, roundUp, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type LimitCheck } from "#shared/limits.ts";
+import { exploredReserve, FAR, farByteLine, farBytesOver, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, reservedExploreFloors, roundUp, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type LimitCheck, type OwnHeld } from "#shared/limits.ts";
 import type { OpOf } from "#shared/protocol.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
 import { NUMBERS_MOST } from "#shared/numbering.ts";
-import { chunkPositions, heldGroundMap, perPlayerScene } from "#shared/project.ts";
+import { chunkPositions, heldGroundMap, perPlayerScene, seatView } from "#shared/project.ts";
 import { keepsMemory, type Layer } from "#shared/reducer/memory.ts";
 import { floorsOf, onPlayersScene } from "#shared/rules/floors.ts";
 import { encodeTile, fullTileBits, tilesAcross } from "#shared/rules/fog.ts";
@@ -240,12 +240,14 @@ export class SizeGuard {
    * BOOKKEEPING_RESERVE short of it (shared/limits.ts farByteLine), so what
    * bookkeeping adds stays within the room's stored bound. The DM's adds
    * (`widestDm` and `dmAdd`) stop KEPT_FOR_PLAYERS sooner on the room's.
+   * `player` is a player sender's member id, whose far reading holds only
+   * their own copy's own things exactly.
    */
-  check(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState, role: Viewer["role"] = "dm", far: FarJudge = "none", exempt = false): LimitCheck {
+  check(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState, role: Viewer["role"] = "dm", far: FarJudge = "none", exempt = false, player?: string): LimitCheck {
     this.#refusedScene = null;
     const near = role === "player" || exempt ? this.#account(next, sceneIds, growth, before) : this.#near(next, sceneIds, growth, before, role);
     if (!near.ok || far === "none") return near;
-    return this.#far(next, before, far, exempt ? "exempt" : "meets");
+    return this.#far(next, before, far, exempt ? "exempt" : "meets", player);
   }
 
   /**
@@ -403,15 +405,18 @@ export class SizeGuard {
    * KEPT_FOR_PLAYERS before the players' on the room, and one that only the
    * kept room stops says so (KEPT_FOR_PLAYERS_FULL).
    */
-  #far(next: RoomState, before: RoomState | undefined, far: Exclude<FarJudge, "none">, kind: "meets" | "exempt"): LimitCheck {
+  #far(next: RoomState, before: RoomState | undefined, far: Exclude<FarJudge, "none">, kind: "meets" | "exempt", player: string | undefined): LimitCheck {
     const widest = far !== "today";
     const line = far === "widestDm" || far === "dmAdd" ? "dm" : "players";
+    // A player's reading holds exactly only their own copy's own things, so whose an unseen thing is never moves their
+    // answer (LP43-PRIV-1). The DM's holds every seat's.
+    const heldOf = (state: RoomState, sceneIds?: readonly string[]) => (player === undefined ? heldBytes(state, sceneIds) : ownHeldBytes(state, player, sceneIds));
     const state = this.#state;
     const reserves = farReserves(next, widest);
     const roomLine = farByteLine(kind, "room", line)!;
     if (!state || state.bytes + state.growth + reserves + FAR.byteStep > roomLine) {
       const bytes = measuredStateBytes(next);
-      const held = heldBytes(next);
+      const held = heldOf(next);
       const grew = before === undefined || bytes + reserves > measuredStateBytes(before) + farReserves(before, widest);
       const dmPart = bytes - held + reserves;
       if (farBytesOver("room", kind, line, dmPart, held, grew)) {
@@ -434,7 +439,7 @@ export class SizeGuard {
       const measured = sum(measures, (measure) => (measure ? measure.bytes + measure.growth : 0));
       if (measures.every((measure) => measure !== undefined) && SHELL_BYTES + room + measured + sight + explored + maps + FAR.byteStep <= sceneLine) continue;
       const need = SHELL_BYTES + room + sum(floors, (scene) => sceneOwnBytes(next, scene.id)) + sight + explored + maps;
-      const held = heldBytes(next, [main]);
+      const held = heldOf(next, [main]);
       const grew = before === undefined || need > neededBefore(before, main, MEMORY_CAP, "dm");
       if (!farBytesOver("scene", kind, line, need - held, held, grew)) continue;
       this.#refusedScene = main;
@@ -1736,8 +1741,8 @@ function entityBytes(id: string, value: unknown): number {
 /**
  * The stored bytes of what seats hold in each scope (shared/limits.ts
  * seatHeld), every scene's that holds something a player owns, and the
- * rows and asks. Floors of one scene share their tokens and riding areas,
- * counted once.
+ * rows and asks. Floors of one scene share their tokens and areas, since
+ * seatHeld holds them for the scene's every floor, so each counts once.
  */
 export function heldBytes(state: RoomState, sceneIds?: readonly string[]): number {
   const player = (id: string | undefined) => id !== undefined && state.members[id]?.kind === "player";
@@ -1759,15 +1764,32 @@ export function heldBytes(state: RoomState, sceneIds?: readonly string[]): numbe
     for (const id of held.templates) templates.add(id);
     for (const id of held.drawings) drawings.add(id);
   }
+  const rest = sceneIds ? null : seatHeld(state, null);
+  return bytesOfHeld(state, { tokens, templates, drawings, rows: rest?.rows ?? new Set(), casts: rest?.casts ?? new Set() });
+}
+
+/**
+ * The stored bytes of a player's own things that their copy holds
+ * (shared/limits.ts ownHeld) on the floors of `sceneIds`, or on every floor
+ * with their rows and asks: the exact part of that player's far reading,
+ * whose rest is stepped (LP43-PRIV-1).
+ */
+export function ownHeldBytes(state: RoomState, memberId: string, sceneIds?: readonly string[]): number {
+  const floors = new Set<string>();
+  if (sceneIds) for (const id of sceneIds) for (const floor of floorsOf(state, id)) floors.add(floor.id);
+  else for (const id of Object.keys(state.scenes)) floors.add(id);
+  const own = ownHeld(state, memberId, seatView(state, memberId), floors);
+  return bytesOfHeld(state, sceneIds ? { ...own, rows: new Set(), casts: new Set() } : own);
+}
+
+/** The stored bytes of held things by id, each as its map's entry, and the rows as the fight's list's. */
+function bytesOfHeld(state: RoomState, held: OwnHeld): number {
   let bytes = 0;
-  for (const id of tokens) bytes += entityBytes(id, state.tokens[id]);
-  for (const id of templates) bytes += entityBytes(id, state.templates[id]);
-  for (const id of drawings) bytes += entityBytes(id, state.drawings[id]);
-  if (sceneIds) return bytes;
-  const rest = seatHeld(state, null);
-  const entries = state.encounter?.entries ?? [];
-  for (const entry of entries) if (rest.rows.has(entry.id)) bytes += valueBytes(entry) + 1;
-  for (const id of rest.casts) bytes += entityBytes(id, state.casts[id]);
+  for (const id of held.tokens) bytes += entityBytes(id, state.tokens[id]);
+  for (const id of held.templates) bytes += entityBytes(id, state.templates[id]);
+  for (const id of held.drawings) bytes += entityBytes(id, state.drawings[id]);
+  for (const entry of state.encounter?.entries ?? []) if (held.rows.has(entry.id)) bytes += valueBytes(entry) + 1;
+  for (const id of held.casts) bytes += entityBytes(id, state.casts[id]);
   return bytes;
 }
 
