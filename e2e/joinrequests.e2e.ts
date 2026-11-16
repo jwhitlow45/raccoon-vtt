@@ -19,7 +19,7 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * player link, the switch to With the password ends a waiting request,
  * two DM devices answer one request at once, and an unanswered request
  * expires on a second server started with a short request life. Then the
- * review's fixes (lane joinfix, labels jf-): a request found on load that
+ * review's fixes (labels jf-): a request found on load that
  * Back leaves, "Requests are off" once requests are on again, the carry-on
  * list after a password join, a let-in held up in the database, and a room
  * that is really full. lp30fix-2: a page left on "Requests are off" offers

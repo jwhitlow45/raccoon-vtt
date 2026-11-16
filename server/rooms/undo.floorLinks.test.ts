@@ -11,8 +11,7 @@ import { describeOp } from "./undoLabels.ts";
 import { UndoTable } from "./undoTesting.ts";
 
 /**
- * A climb's undo and redo (docs/design/design-v1-floors.md phase 2, 8,
- * lane FL2-C), through the room actor's own steps (undoTesting.ts): the
+ * A climb's undo and redo (docs/design/design-v1-floors.md phase 2, 8), through the room actor's own steps (undoTesting.ts): the
  * step keeps the stairs it took, never merges, and its restore carries
  * them, so the climber, what rode with it and their areas cross back and
  * forth between the climb's two floors and nowhere else. Twin rooms that

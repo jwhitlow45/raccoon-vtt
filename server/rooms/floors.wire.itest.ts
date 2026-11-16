@@ -14,8 +14,7 @@ import { buildSnapshot } from "./fanout.ts";
 import { Socket, startEngine, type Engine, type TestClient } from "./testing.ts";
 
 /**
- * Several floors over real sockets (docs/design/design-v1-floors.md 8 and 15,
- * lane FLR-C), the shipping gate: every frame each recipient is sent, the
+ * Several floors over real sockets (docs/design/design-v1-floors.md 8 and 15), the shipping gate: every frame each recipient is sent, the
  * DM, two players, a table display and a DM's view as a player, through the
  * actor and the fan-out. A floor a recipient does not hold sends nothing:
  * no record, id, name, level, token, row or line. And after every step each
@@ -780,7 +779,7 @@ async function reconnectBoth(t: Engine, a: Compared, b: Compared, when: string):
 
 /**
  * A climb's undo and redo twins over the wire (docs/design/design-v1-floors.md
- * phase 2, 4 and 8, lane FL2-C, D-261109-137): two rooms alike but for a
+ * phase 2, 4 and 8, D-261109-137): two rooms alike but for a
  * hidden owl perched on Thorn, a DM-only area on the owl and one on Thorn,
  * none of which Ana or Bree receives. Ana climbs, the DM may change one of
  * them unseen, and Ana's Undo and Redo go back and forth twice. Each
@@ -970,7 +969,7 @@ describe("a climb's undo and redo over the wire with passengers and areas player
 
 /**
  * Floors phase 3's privacy twins over the wire (docs/design/design-v1-floors.md
- * phase 3, 6, T1 to T6, lane FL3-B). Each pair of rooms differs only in
+ * phase 3, 6, T1 to T6). Each pair of rooms differs only in
  * what a player may not learn: a floor from a file or a dungeon against a
  * blank one, a climb's height, a carried ruler's walker, or stairs under
  * the fog. Every frame each player and the display is sent, and the room

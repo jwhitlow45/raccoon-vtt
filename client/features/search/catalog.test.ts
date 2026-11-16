@@ -21,7 +21,7 @@ import { MENU_PAGES, recordId, routeFolds } from "./route.ts";
 import { DM_VIEW, keysOf, PAT_VIEW, seededRoom, towerRoom, towerView, viewOf } from "./search.testutil.ts";
 
 /*
- * The catalogs lanes S2a and S2b write (docs/design/design-v1-qol.md 5, What
+ * The search catalogs write (docs/design/design-v1-qol.md 5, What
  * keeps it current, its unit test): ids unique, every route's panel, page and
  * fold real, every entry a player may not reach in the DM's catalog, every
  * kind of DM menu item a row with a twin, and every anchor the catalogs route

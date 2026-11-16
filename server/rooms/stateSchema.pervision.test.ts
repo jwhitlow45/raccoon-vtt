@@ -12,7 +12,7 @@ import { parseRoomState } from "./stateSchema.ts";
 
 /**
  * Per-player vision's stored fields (docs/design/design-v1-per-player-vision.md
- * 6.7, lane PV1): the Sight row's flag, the holder lists, each holder's
+ * 6.7): the Sight row's flag, the holder lists, each holder's
  * layer and the lists of who saw, each bounded as the reducer writes it.
  */
 function perPlayer(): RoomState {

@@ -414,7 +414,7 @@ describe("the map step", () => {
     });
   });
 
-  test("a label moved onto remembered ground from ground they never held comes back as absent (MD2-LK-8, MD1's undo case)", () => {
+  test("a label moved onto remembered ground from ground they never held comes back as absent (MD2-LK-8, map discovery's undo case)", () => {
     withCellVision(() => {
       const left = leftCrypt();
       const made = batch(left, [{ t: "build.label", sceneId: "s1", labelId: "lb2", label: { x: 40, y: 25, text: "Trap", size: 1 } }]).state;

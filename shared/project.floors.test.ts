@@ -27,8 +27,7 @@ import { trapsLiveOn } from "./rules/traps.ts";
 import { DM, FULL_TILE_BITS, P1, P2, character, drawing, entry, env, imageRef, member, reveal, room, scene, template, token, trap } from "./testutil.ts";
 
 /**
- * The projection of a scene with floors (docs/design/design-v1-floors.md 8,
- * lane FLR-B): each viewer's snapshot and per-key answers cover the floors
+ * The projection of a scene with floors (docs/design/design-v1-floors.md 8): each viewer's snapshot and per-key answers cover the floors
  * they hold and nothing else, levels renumbered among those held, the
  * marks and `floor.of` the DM's, `partyFloors` a display's, and the seen
  * marks asking whether players see a floor.

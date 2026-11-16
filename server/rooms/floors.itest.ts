@@ -469,7 +469,7 @@ function refused(ev: Extract<ServerMessage, { t: "ev" }>): string {
   return ev.rejects![0]!.message;
 }
 
-describe("stairs and ladders on the server (docs/design/design-v1-floors.md phase 2, lane FL2-C)", () => {
+describe("stairs and ladders on the server (docs/design/design-v1-floors.md phase 2)", () => {
   let t: Engine;
   before(async () => {
     t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });

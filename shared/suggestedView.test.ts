@@ -11,7 +11,7 @@ import { apply, DM, P1, room, scene } from "./testutil.ts";
 
 /**
  * A scene's suggested view and the table display's `iso`
- * (docs/design/design-v1-isometric-view.md 4.2 and 7, lane ISO-1).
+ * (docs/design/design-v1-isometric-view.md 4.2 and 7).
  */
 
 const suggest = (suggestedView: "topDown" | "isometric", sceneId = "s1"): Op => ({ t: "scene.update", sceneId, patch: { suggestedView } });

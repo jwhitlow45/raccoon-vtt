@@ -56,7 +56,7 @@ describe("the camera scan (section 4.1)", () => {
   });
 
   test("each pattern catches the hand-written forms the rename replaced", () => {
-    // The lines as they stood before the rename (lane ISO-1), one or more for each pattern.
+    // The lines as they stood before the rename, one or more for each pattern.
     const before = [
       "const hit = pinUnder(view, sceneRef.current, { x: stage.x(), y: stage.y(), scale: stage.scaleX() || 1 }, p);",
       "const e = viewEvent({ x: stage.x(), y: stage.y(), scale: stage.scaleX(), width: stage.width(), height: stage.height() });",

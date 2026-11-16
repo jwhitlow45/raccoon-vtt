@@ -16,7 +16,7 @@ import { exploreOp } from "./explore.ts";
 
 /**
  * The explore step on a per-player scene (docs/design/design-v1-per-player-vision.md
- * 6.1 and 6.3, lane PV3), on real sight: the shared sight into the party's
+ * 6.1 and 6.3), on real sight: the shared sight into the party's
  * layer, each holder's own sight into theirs, and the joins the holder list
  * gains, ticked by the cap in force.
  */

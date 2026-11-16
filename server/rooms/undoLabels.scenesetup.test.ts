@@ -6,7 +6,7 @@ import { apply, room, scene } from "#shared/testutil.ts";
 import { UndoStacks } from "./undo.ts";
 import { describeOp, tallyOf } from "./undoLabels.ts";
 
-/** Scene setup's undo names (docs/design/design-v1-map-discovery.md 8.1 and 8.3, lane MS1). */
+/** Scene setup's undo names (docs/design/design-v1-map-discovery.md 8.1 and 8.3). */
 
 const inverse = (n: number): RestoreEntry[] => [{ key: `scene:x${n}`, value: null, expectRev: n }];
 const copy = { fogEnabled: true, vision: { on: true, light: "dark" as const, perPlayer: false } };

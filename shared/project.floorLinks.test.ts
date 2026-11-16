@@ -14,7 +14,7 @@ import { DM, FULL_TILE_BITS, env, reveal, token } from "./testutil.ts";
 
 /*
  * Stairs and ladders in a viewer's copy (docs/design/design-v1-floors.md
- * phase 2, 4, lane FL2-B): the DM gets every end on the scene's floors as
+ * phase 2, 4): the DM gets every end on the scene's floors as
  * stored, a player an end on a floor they hold and on revealed ground, cut
  * to ProjectedFloorLink, with `to` only while they hold that floor. Each
  * key the fan-out projects alone agrees with the snapshot, and a copy kept

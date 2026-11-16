@@ -13,7 +13,7 @@ import { SQUARES } from "./rules/grid.ts";
 /**
  * Per-player vision's projection and what a device reads from it
  * (docs/design/design-v1-per-player-vision.md 6.2, 6.3, 6.6 and security rules 1,
- * 3, 7 and 10, lane PV1), by the stub sight of perPlayerTestutil.ts. p1 and
+ * 3, 7 and 10), by the stub sight of perPlayerTestutil.ts. p1 and
  * p2 see for themselves on a dark scene with fog, p1's layer reveals the
  * north west room and p2's the one south east of it, and p3 holds no sight.
  */

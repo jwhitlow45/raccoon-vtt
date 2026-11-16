@@ -8,7 +8,7 @@ import { Socket, startEngine, type Engine, type TestClient } from "./testing.ts"
 
 /**
  * View as a player's socket (docs/design/design-v1-per-player-vision.md 7.4,
- * security rule 8, lane PV3): `/ws?as=<memberId>` opens only for a DM grant
+ * security rule 8): `/ws?as=<memberId>` opens only for a DM grant
  * and a player of the roster, is read only, never takes its DM's
  * acknowledgments, is in no presence list, and never carries a whisper its
  * DM is not party to, live or in an older log page.

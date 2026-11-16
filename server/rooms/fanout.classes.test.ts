@@ -14,7 +14,7 @@ import { buildSnapshot, candidateKeys, previewOmits, publishBatch, type Committe
 
 /**
  * The fan-out's projection classes (docs/design/design-v1-per-player-vision.md
- * 6.9, lane PV3) against projecting every viewer alone: over random
+ * 6.9) against projecting every viewer alone: over random
  * per-player rooms and ops, each socket's `ev` from the classes is
  * byte for byte the one it would get were nothing shared, and applying it
  * to the socket's snapshot gives that viewer's fresh projection.

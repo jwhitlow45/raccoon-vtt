@@ -1025,7 +1025,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   });
 
   /*
-   * Lane FU36-A's step (fu36a-): a rider's drag aims its mount at the stand
+   * The fu36a- step: a rider's drag aims its mount at the stand
    * that keeps the rider's dropped middle on it (D-261029-57), so from a seat
    * other than the mount's first one a drag into a corridor one wide takes
    * the mount in, squeezed, with the rider on its square or hex, where the
@@ -1077,7 +1077,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   });
 
   /*
-   * Lane FU44-B's step (fu44b-): a mount dragging a creature into a corridor
+   * The fu44b- step: a mount dragging a creature into a corridor
    * one square wide stops where every walker may stand (LP28-B-RIDE-1). It
    * stopped at x 4.5, its box across the corridor's west wall, and the
    * server took a player's move there.
@@ -1125,7 +1125,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   });
 
   /*
-   * Lane rules-A's step (rulesa-): single file on hexes (RIDE-SINGLE-FILE-HEX,
+   * The rulesa- step: single file on hexes (RIDE-SINGLE-FILE-HEX,
    * D-261107-172). A warhorse dragging a goblin that stands off the
    * corridor's line went in alone before, the goblin by its place against
    * the rock, so the drag held at the mouth. From op version 51 the goblin
@@ -1175,7 +1175,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   });
 
   /*
-   * Lane LP33-FIX's step (lp33fix-): the hex twin of fu44b-1. A second
+   * The lp33fix- step: the hex twin of fu44b-1. A second
    * creature in tow that cannot fall in behind the warhorse held the drag
    * at its start on hexes, and the ruler read 0 ft (LP33-B-HEX-1).
    */
@@ -1327,7 +1327,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   }
 
   /*
-   * Lane 46C's steps (drag46-), two movement bugs guide pass 6 found. A
+   * The drag46- steps, two movement bugs guide pass 6 found. A
    * rider's drag picks its mount's stand by walls alone, so where the box
    * at the finger's offset lies across the edge of a rise the mount goes as
    * that box goes: the DM's drop lands it across the edge and a player's
@@ -1432,7 +1432,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   });
 
   /*
-   * Lane lp39fix's step (lp39fix-): a rider's touch drag plans as a mouse
+   * The lp39fix- step: a rider's touch drag plans as a mouse
    * drag to the same square does (LP39B-MOVE-1). The warhorse squeezed in
    * the corridor's mouth stands half a square off Bree's grid, so its box at
    * her offset lay between four of its full stands. A finger lifted a hair
@@ -1486,7 +1486,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   });
 
   /*
-   * Lane lp40fix's steps (lp40fix-): a rider dragged out of a squeezed mount
+   * The lp40fix- steps: a rider dragged out of a squeezed mount
    * lands under the finger (LP40-RIDER-1), where the tie between the
    * mount's equally near stands went top then left and put her a square up
    * and left of it, and a creature that closes the only way is named in the
@@ -1538,7 +1538,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   });
 
   /*
-   * Lane lp41fix's step (lp41fix-): a rider dragged out of a squeezed mount
+   * The lp41fix- step: a rider dragged out of a squeezed mount
    * onto the floor beside a rise lands beside it (LP41-RIDER-1), where the
    * tie took the mount's stand across the rise's edge and nothing moved, the
    * note names the orc that closes the corridor, not a goblin the walk goes
@@ -1596,7 +1596,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   });
 
   /*
-   * Lane lp42fix's step (lp42fix-): a walk past a goblin in the room holds
+   * The lp42fix- step: a walk past a goblin in the room holds
    * before the orc its note names (LP42-MOVE-1), where it held beside the
    * goblin, and a rider dropped on top of a rise no stairs reach walks out
    * to its foot under the ledge's note (D-261114-035, D-261114-036), where

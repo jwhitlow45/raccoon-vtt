@@ -14,7 +14,7 @@ import { historyOf, playControl, setupHistory } from "./helpers/undoScope.ts";
 import { chooseStarterWork, starterWork } from "./starterPick.ts";
 
 /**
- * Scene setup (docs/design/design-v1-map-discovery.md 8, lane MS1): what players
+ * Scene setup (docs/design/design-v1-map-discovery.md 8): what players
  * see of a scene, chosen once. The real server serves the production build
  * to a DM on a computer, in a room made as a DM makes one, so it starts on
  * Explore for new scenes.

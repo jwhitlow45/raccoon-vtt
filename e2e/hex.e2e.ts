@@ -24,23 +24,22 @@ import { undoSetup } from "./helpers/undoScope.ts";
 import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
 
 /**
- * The board on a hex scene (docs/design/design-v1-hex-grids.md 10, lane HX-3):
+ * The board on a hex scene (docs/design/design-v1-hex-grids.md 10):
  * hex lines in the scene's 22 rows, a goblin dropped between hexes landing
  * on the nearest one, a drag of 4 hexes on its turn reading 20 ft, the
  * arrow keys in both views, the Straight ruler, an area's limit line, the
  * export's words, and those screens measured for alignment. A player on a
  * phone sees the same lines.
  *
- * The room's battle mat is switched to hex rows by an op. Lane HX-4's
- * steps (HX4-) then make hex scenes through the settings: the room's New
+ * The room's battle mat is switched to hex rows by an op. The HX4- steps then make hex scenes through the settings: the room's New
  * scenes grid, the new scene form, a scene's Grid shape and its refusal,
  * Line up grid's box on a hex map, no "square" on a hex scene's screens,
- * and those screens' alignment. Lane HX-6's steps (HX6-) build a hex
+ * and those screens' alignment. The HX6- steps build a hex
  * scene of its own: Wall lines tapped and dragged, a free door's states,
  * Remove and undo, difficult ground by hexes, Erase by hexes, a player's
  * creature opening a free door from a hex beside it, and those screens'
- * alignment. Lane HX-7's steps (HX7-) ride, carry and trap on hexes.
- * Lane HX-9b's steps (HX9b-) reveal rooms on hex scenes: a room of hexes
+ * alignment. The HX7- steps ride, carry and trap on hexes.
+ * The HX9b- steps reveal rooms on hex scenes: a room of hexes
  * closed by free walls and a door, revealed through the Fog tool's Builder
  * room and shown to Pat, the door open and shut, a room on hex columns,
  * the Fog tool's options measured, the whole of the largest open hex scene
@@ -105,11 +104,11 @@ const run = {
   /** The battle mat HX4-1 makes through the new scene form, on the room's hex rows. */
   camp: "",
   moor: uuidv7(),
-  /** Lane HX-6's hex scene (HX6-): Wall lines, difficult ground and a free door. */
+  /** The HX6- hex scene: Wall lines, difficult ground and a free door. */
   hall: uuidv7(),
   ash: uuidv7(),
   hallDoor: "hx6door00001",
-  /** Lane HX-5's hex scene (HX5-): a wall of rock with a gap, and a one-row corridor. */
+  /** The HX5- hex scene: a wall of rock with a gap, and a one-row corridor. */
   vault: uuidv7(),
   vaultGob: uuidv7(),
   vaultOgre: uuidv7(),
@@ -118,7 +117,7 @@ const run = {
   pony: uuidv7(),
   kip: uuidv7(),
   trapId: "",
-  /** Lane HX-9b's hex scenes (HX9b-): a walled room on hex rows and one on hex columns. */
+  /** The HX9b- hex scenes: a walled room on hex rows and one on hex columns. */
   cellar: uuidv7(),
   ossuary: uuidv7(),
   cellarGob: uuidv7(),
@@ -1484,7 +1483,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
   });
 
   /*
-   * Lane rules-A's step (rulesa-): the walking ruler reads single file
+   * The rulesa- step: the walking ruler reads single file
    * (RULER-SINGLE-FILE, D-261107-174). From a warhorse dragging a goblin,
    * a leg into the vault's one-row corridor searched with the goblin by its
    * place and found no way. It now takes the warhorse's own way in, where
@@ -1531,7 +1530,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
   });
 
   /*
-   * Lane HX-7's steps (HX7-): riding and traps on hexes, phase H2. A Medium
+   * The HX7- steps: riding and traps on hexes, phase H2. A Medium
    * gets on a Large pony from the Attach list and off beside it, the Trap
    * tool draws a trap of hexes that Thorn's walk sets off, a found trap of
    * hexes stays from Pat while ground beside its hexes is revealed and
@@ -1938,7 +1937,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
   });
 
   /*
-   * Lane HX-8's steps (HX8-): heights, stairs and pits on hexes, phase H3,
+   * The HX8- steps: heights, stairs and pits on hexes, phase H3,
    * on a scene of their own. A 10 ft terrace along row 8 from column 12,
    * reached by a stair on hex 11,8 facing east, its up side.
    */
@@ -2257,7 +2256,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
   });
 
   /*
-   * Lane FU35-A's steps (fu35a-): a rider on a Large mount squeezed into a
+   * The fu35a- steps: a rider on a Large mount squeezed into a
    * corridor one hex or one square wide sits on the mount's one hex or
    * square there (D-261029-52, D-261029-53), so the rider's own torch
    * lights the corridor and the party sees down it.

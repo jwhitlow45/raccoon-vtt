@@ -15,7 +15,7 @@ import { undoSetup } from "./helpers/undoScope.ts";
 
 /**
  * Several floors, phase 3: a floor from a Universal VTT file or a generated
- * dungeon (docs/design/design-v1-floors.md phase 3, 3.5 to 3.7, lane FL3-C),
+ * dungeon (docs/design/design-v1-floors.md phase 3, 3.5 to 3.7),
  * in a room made as a DM makes one.
  *
  * - FL3S-1: on a computer, Map's VTT file makes Add a floor above open the

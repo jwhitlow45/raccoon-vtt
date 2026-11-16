@@ -30,7 +30,7 @@ import {
 import { flatHeights, groundAtMiddle, liveOfStage, pickGround, TOP_DOWN, toView, toWorld, viewBox } from "./view.ts";
 
 /**
- * The rename's differential test (lane ISO-1): with Isometric out of reach,
+ * The rename's differential test: with Isometric out of reach,
  * every screen's camera math gives the very numbers it gave before the
  * rename. `before` holds the code as it stood then, copied as it was, and
  * each case compares it with the call site's path today, exactly.
@@ -140,7 +140,7 @@ const stage = (scale = between(MIN_SCALE, 400)): Stage => {
 
 const ROUNDS = 2000;
 
-describe("the rename keeps every screen's numbers (lane ISO-1)", () => {
+describe("the rename keeps every screen's numbers", () => {
   test("a map point to the screen and back, and a press's point, as worldToScreen and screenToWorld gave them", () => {
     for (let i = 0; i < ROUNDS; i++) {
       const cam = camera();

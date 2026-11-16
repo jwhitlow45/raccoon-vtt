@@ -15,7 +15,7 @@ import { DM, P1, P2, apply, deepClone, env, member, reveal, room, token } from "
 
 /**
  * Per-player vision's generators for the shared differential test
- * (docs/design/design-v1-per-player-vision.md section 10, lane PV1): pairs of
+ * (docs/design/design-v1-per-player-vision.md section 10): pairs of
  * rooms on a per-player scene that differ only in what Thorn's player's
  * creatures see or explored, so every other player and a table display
  * must observe the same of every drag and op. Then the co-owners' route

@@ -13,7 +13,7 @@ import { exploreOp } from "./explore.ts";
 
 /**
  * Drag frames and live rulers on a per-player scene
- * (docs/design/design-v1-per-player-vision.md 7.2 and 7.5, lane PV3): each player
+ * (docs/design/design-v1-per-player-vision.md 7.2 and 7.5): each player
  * judged by their own sight with vision on and their own fog with fog
  * alone, nothing withheld with both off, and previews held across a batch
  * that re-projects everything judged again.

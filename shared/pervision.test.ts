@@ -11,7 +11,7 @@ import { DM, apply, env, member, refused, room, scene, token } from "./testutil.
 
 /**
  * Per-player vision's contract and memory in the reducer
- * (docs/design/design-v1-per-player-vision.md 6.1, 6.3 and 6.7, lane PV1): the
+ * (docs/design/design-v1-per-player-vision.md 6.1, 6.3 and 6.7): the
  * merge rule, the holder list and its joins, every layer under hides and
  * resets, the fold back to Whole party, copies and removals, and members
  * leaving.

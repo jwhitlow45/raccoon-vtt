@@ -7,7 +7,7 @@ import { parseRoomState } from "./stateSchema.ts";
 import { describeOp } from "./undoLabels.ts";
 import { UndoTable } from "./undoTesting.ts";
 
-/** A scene's weather in stored state, a backup's import and the undo stack (docs/design/design-v1-weather.md 9, lane WX-A). */
+/** A scene's weather in stored state, a backup's import and the undo stack (docs/design/design-v1-weather.md 9). */
 describe("a scene's weather, stored, imported and undone", () => {
   const road = (weather?: SceneWeather) => room({ scenes: { s1: scene("s1", { name: "Forest road", ...(weather ? { weather } : {}) }) } });
 

@@ -103,7 +103,7 @@ export type Catalog = {
    * Entries made from the room now, each running a menu item's own function
    * (design-v1-qol.md 5, Acting): the DM menu's items from `dmMenuSections` in the DM's
    * catalog, and a player's You menu items from `youMenuSections` in
-   * everyone's, gated there by role. Lane S2a writes both.
+   * everyone's, gated there by role. The catalogs write both.
    */
   items?(ctx: SearchContext): readonly CatalogEntry[];
 };

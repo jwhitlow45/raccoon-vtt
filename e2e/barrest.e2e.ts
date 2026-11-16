@@ -40,7 +40,7 @@ async function outOfSight(hidden: boolean): Promise<void> {
 }
 
 restFile(null, () => {
-  // ------------------------------------------------------------ br-f: the frame (lane F)
+  // ------------------------------------------------------------ br-f: the frame
 
   frameSteps(() => {
     test("br-f-1. at 390 x 844 the strip opens at 662 to 776 on its first frame, and pans, a pinch and a tap on another token leave its box", async () => {

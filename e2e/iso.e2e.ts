@@ -14,8 +14,7 @@ import { placedOnHex } from "../shared/rules/footprint.ts";
 import { cornerAt, hexCenter, hexCorners, hexInScene, hexNeighbors, type Hex, type HexGrid } from "../shared/rules/hex.ts";
 
 /**
- * The isometric view's choice (docs/design/design-v1-isometric-view.md 7 and 8,
- * lane ISO-5): the View button and its menu, a scene's Suggested view,
+ * The isometric view's choice (docs/design/design-v1-isometric-view.md 7 and 8): the View button and its menu, a scene's Suggested view,
  * the keys I, Q and E, and the table display's rows. A DM on a computer,
  * Pat on a phone and a TV.
  *
@@ -25,7 +24,7 @@ import { cornerAt, hexCenter, hexCorners, hexInScene, hexNeighbors, type Hex, ty
  * A plain browser checks that the choice is there without it.
  *
  * The ISOA steps are areas standing as their real shapes
- * (docs/design/design-v1-iso-area-shapes.md 8, lane ISOA-2), read through the
+ * (docs/design/design-v1-iso-area-shapes.md 8), read through the
  * hook's layout of the board (relief/isoTest.ts): which areas stand, the
  * order their bands and the standees draw in, and the rings at bases.
  *
@@ -255,7 +254,7 @@ function boardScale(page: Page): Promise<number> {
 
 /**
  * What the visible isometric board draws, read from Konva's own nodes
- * (lane ISO-3): on the ground stage, which never listens, and on the main
+ *: on the ground stage, which never listens, and on the main
  * stage's drag layer and overlay. A ring's line is a Shape dashed 8 by 5
  * (measure/ringScene.ts), an aura's shading a Shape filled in its color,
  * and a pill a Label with its words. `clipped` counts the aura's shadings
@@ -358,7 +357,7 @@ async function standeeAt(page: Page, tokenId: string): Promise<{ x: number; y: n
 }
 
 
-// ---------------------------------------------------------------- raised hexes (lane HXREL-1)
+// ---------------------------------------------------------------- raised hexes
 
 /** The map's stripes, one cell wide down the scene, so a pixel names the world column it came from. */
 const STRIPES: readonly [number, number, number][] = [
@@ -400,7 +399,7 @@ async function pixelAt(page: Page, p: { x: number; y: number }): Promise<number[
   return sum.map((v) => v / n);
 }
 
-// ---------------------------------------------------------------- areas standing as their real shapes (lane ISOA-2)
+// ---------------------------------------------------------------- areas standing as their real shapes
 
 /** The cavern: fog on and all of it revealed to Pat, Pat's Thorn in his Spirit Guardians, a bat in a 20 ft sphere 10 ft up, and a goblin under a cone aimed 40 degrees up. */
 const cavern = { sceneId: "", thorn: uuidv7(), bat: uuidv7(), archer: uuidv7(), goblin: uuidv7(), sphere: uuidv7(), guardians: uuidv7(), cone: uuidv7(), secret: uuidv7(), field: "" };
@@ -505,11 +504,11 @@ function groundRings(page: Page, color: string): Promise<number> {
   }, color);
 }
 
-/** The moving marks' room (lane ISO-3): a fogged hall with a goblin that wears an aura and a ring, and Pat's Bree with a ring of her own. */
+/** The moving marks' room: a fogged hall with a goblin that wears an aura and a ring, and Pat's Bree with a ring of her own. */
 const hall = { sceneId: "", patId: "", goblin: uuidv7(), bree: uuidv7() };
 const AURA = "#e5484d";
 
-// ---------------------------------------------------------------- input (lane ISO-4)
+// ---------------------------------------------------------------- input
 
 const BREE = uuidv7();
 const GRUM = uuidv7();
@@ -1297,7 +1296,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await pat.mouse.move(at.x + 20, at.y, { steps: 3 });
     await pat.mouse.move(at.x + 70, at.y + 10, { steps: 10 });
     try {
-      // This device's own drag moves its marks with the standee (lane ISO-4), so its frames redraw the drag layer alone.
+      // This device's own drag moves its marks with the standee, so its frames redraw the drag layer alone.
       const m = await waitFor("Bree's ring moving in Pat's drag layer", async () => {
         const marks = await isoMarks(pat, AURA);
         return marks && marks.drag.rings >= 1 && marks.drag.uprightTexts.includes("10 ft") ? marks : null;
@@ -1383,7 +1382,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await waitFor("Pat back on the first scene", () => (patSocket.state?.meta.playerSceneId === run.sceneId ? true : null));
   });
 
-  // ---------------------------------------------------------------- input (lane ISO-4, docs/design/design-v1-isometric-view.md 6)
+  // ---------------------------------------------------------------- input (docs/design/design-v1-isometric-view.md 6)
 
   test("ISO-40. Pat drags in Isometric: up a revealed platform to its top at 10 ft, and a Large across a ledge stays under the finger, each moving in the drag layer", async () => {
     const patId = patSocket.you!.memberId;

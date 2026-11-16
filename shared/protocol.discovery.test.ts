@@ -6,7 +6,7 @@ import { FORGET_ASK, clientOpSchema, opSchema, refusalCodes, serverMessageSchema
 
 /**
  * Map discovery's contract on the wire (docs/design/design-v1-map-discovery.md
- * 5.3, 6, 8.2 and 13, lane MD1): the map step's `sys.remember`, a builder
+ * 5.3, 6, 8.2 and 13): the map step's `sys.remember`, a builder
  * op's and an undo's `forget`, the DM-only refusal, a stopped walk's
  * `blocked`, a teleport past something unseen, and the room's default for
  * new scenes.

@@ -13,7 +13,7 @@ import { undoSetup } from "./helpers/undoScope.ts";
 
 /**
  * Stairs and ladders, the DM's building side (docs/design/design-v1-floors.md
- * phase 2, 7 and 14, lane FL2-E), in a room made as a DM makes one, on a
+ * phase 2, 7 and 14), in a room made as a DM makes one, on a
  * computer.
  *
  * - FLRK-1: Between floors is no builder mode on a scene of one floor and is

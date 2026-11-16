@@ -17,7 +17,7 @@ import { DM, P1, chance, comparable, deepClone, env, int, pick, rng } from "./te
 
 /**
  * The property tests of map discovery (docs/design/design-v1-map-discovery.md
- * section 13, lane MD2): random rooms of 1 to 8 players, per-player scenes
+ * section 13): random rooms of 1 to 8 players, per-player scenes
  * and whole-party ones, with random builds (painted rooms on chunk borders
  * beside unbuilt chunks, walls, doors, secret doors and windows, free walls
  * crossing chunks, heights, stair runs, labels and stamps, both automatic

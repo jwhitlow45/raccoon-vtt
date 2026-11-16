@@ -43,7 +43,7 @@ const LINE = { margin: 0, lineHeight: theme.leading.body, overflowWrap: "anywher
  * `space(2)` apart, and `space(4)` between sections. The review draws its
  * own, since its labels take an id, `tabIndex` and focus that the
  * re-sync's focus rule needs (docs/design/design-v1-resync.md 3.6), which
- * `Section` does not offer (docs/design/design-v1-look-pass-2.md 3, lane 3).
+ * `Section` does not offer (docs/design/design-v1-look-pass-2.md 3).
  */
 const SECTION = { display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), minWidth: 0 } as const;
 

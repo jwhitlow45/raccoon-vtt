@@ -13,17 +13,17 @@ import { lookOf } from "../client/features/weather/looks.ts";
 import { particleCount, WRAP_MARGIN } from "../client/features/weather/sim.ts";
 
 /**
- * Weather over the map (docs/design/design-v1-weather.md, lane WX-C): the
+ * Weather over the map (docs/design/design-v1-weather.md): the
  * layer, its one clock and where it sits, This device's choice, the table
  * display's menu, and the places it waits. Weather is set through the DM's
- * socket, so no step needs the DM's fold (WX-D's steps drive that).
+ * socket, so no step needs the DM's fold (the weather menu steps drive that).
  *
  * The weather canvas is read through its test hooks
  * (features/weather/WeatherLayer.tsx): `data-weather` ("rain heavy strong",
  * set on a change), and the `weatherTicks` and `weatherCameraDraws`
  * properties, counted apart. The weather's own flag adds what each draw
  * drew: up to 64 marks seen, each its center before sway and its drawn
- * center, and the marks seen by their alpha (the wz steps, lane wxbuild,
+ * center, and the marks seen by their alpha (the wz steps,
  * docs/design/design-v1-weather-zoom.md).
  *
  * The map is the starter Cavern Battlemap (public/starter, CC0), 2,000 px

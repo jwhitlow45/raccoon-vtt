@@ -11,7 +11,7 @@ import { parseRoomState } from "./stateSchema.ts";
 
 /**
  * Map discovery's stored fields (docs/design/design-v1-map-discovery.md 5.3 and
- * 5.5, lane MD1): each layer's memory, by the bounds the map step's ops
+ * 5.5): each layer's memory, by the bounds the map step's ops
  * are held to, the scenes' marks, the room's default for new scenes and
  * the teleport line past what a player could not see. A stored chunk is
  * never a player's copy, so its player-only fields are refused.
@@ -47,7 +47,7 @@ function remembering(): RoomState {
 
 const parsed = (state: unknown) => parseRoomState(JSON.parse(JSON.stringify(state)));
 
-describe("the stored-state schema and map discovery (lane MD1)", () => {
+describe("the stored-state schema and map discovery", () => {
   test("takes each layer's memory, the marks, the default for new scenes and an unseen teleport, as stored", () => {
     const state = remembering();
     const out = parsed(state);

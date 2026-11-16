@@ -585,7 +585,7 @@ const NOT_ANCHORED: readonly { surface: string; line: RegExp; why: string }[] = 
 ];
 
 /**
- * Controls still waiting for an entry, as lane S2b left them: the Start
+ * Controls still waiting for an entry, as the search catalogs left them: the Start
  * the clock form's own controls, which Start the clock goes to as a whole.
  */
 const NOT_PLACED_YET: readonly { surface: string; line: RegExp; why: string }[] = [

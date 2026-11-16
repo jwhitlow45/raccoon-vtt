@@ -9,7 +9,7 @@ import sharp from "sharp";
 import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
- * The fog's edge (fast lane FE): where the scene's edge falls inside a
+ * The fog's edge: where the scene's edge falls inside a
  * device pixel, the fog frame past the scene and the fog image each cover
  * only part of that pixel, and two partial covers once let the map show
  * through as a hairline at some zooms (client/canvas/FogShape.tsx).

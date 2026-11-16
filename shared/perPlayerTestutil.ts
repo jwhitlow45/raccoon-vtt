@@ -14,7 +14,7 @@ import { SQUARES } from "./rules/grid.ts";
 
 /**
  * Per-player vision's test world (docs/design/design-v1-per-player-vision.md
- * section 10, lane PV1): stub rules through `visionRules`, a reference
+ * section 10): stub rules through `visionRules`, a reference
  * explore step, random rooms and ops, and an oracle that works out from
  * nothing what each viewer may be given. Not a test file itself.
  *

@@ -13,7 +13,7 @@ import { undoSetup } from "./helpers/undoScope.ts";
 
 /**
  * Several floors, the DM's building side (docs/design/design-v1-floors.md
- * 7.1 and 7.4, lane FLR-E), in a room made as a DM makes one, on a computer.
+ * 7.1 and 7.4), in a room made as a DM makes one, on a computer.
  *
  * - FLRB-1: a scene with one floor lists none and offers the two adds.
  *   Add a floor above names the scene's first floor "Ground floor" and the new

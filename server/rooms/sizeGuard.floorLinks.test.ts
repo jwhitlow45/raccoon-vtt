@@ -10,7 +10,7 @@ import { checkWholeScenes, growthBound, projectedSceneBytes, SizeGuard, heldByte
 
 /**
  * Stairs and ladders in the size guard (docs/design/design-v1-floors.md
- * phase 2, 2, lane FL2-C): a scene's measure counts both ends of every
+ * phase 2, 2): a scene's measure counts both ends of every
  * pair, which a DM's projection of any of its floors holds, and the bound
  * of an op that places a pair holds the measure's growth.
  */

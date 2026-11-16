@@ -9,7 +9,7 @@ import { guardHash } from "./reducer/tx.ts";
 import { apply, DM, P1, room, scene } from "./testutil.ts";
 import { DEFAULT_TOWARD, WEATHER_KINDS, WEATHER_PROBLEMS, normalWeather, sceneWeatherSchema, weatherName, weatherParts, weatherProblem, type SceneWeather } from "./weather.ts";
 
-/** A scene's weather, its one stored form and who receives it (docs/design/design-v1-weather.md 9, lane WX-A). */
+/** A scene's weather, its one stored form and who receives it (docs/design/design-v1-weather.md 9). */
 
 const WINDS = [undefined, "moderate", "strong"] as const;
 

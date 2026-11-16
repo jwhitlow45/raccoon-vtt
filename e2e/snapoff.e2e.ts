@@ -660,7 +660,7 @@ describe("raccoon-vtt snap off", { timeout: 600_000 }, () => {
   });
 
   /*
-   * Lane snapfix2's step (snapfix2-): a Large ogre placed 2/8 right of its
+   * The snapfix2- step: a Large ogre placed 2/8 right of its
    * spot, dragged into a corridor one square wide, squeezes in at (9.5, 5.5),
    * where it holds the square (10, 6) alone. Parked mid-drag, ordinary and
    * with Alt, its outline stands on that square, never on the 2 x 2 box

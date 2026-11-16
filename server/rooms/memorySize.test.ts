@@ -9,7 +9,7 @@ import { chunkCharge, entryCharge, keyBytes, memoryCollectionKey, pieceBytes, wa
 /**
  * What players' maps cost (docs/design/design-v1-map-discovery.md 5.5): each free
  * wall at its largest form by its own spans (LK-36), and each memory entry
- * at no less than its own bytes, which MD1's bounds on a fold rest on.
+ * at no less than its own bytes, which map discovery's bounds on a fold rest on.
  */
 
 const SQUARE_SCENE: Scene = scene("s1", { bounds: { w: 200, h: 200 }, fogEnabled: true });
@@ -41,7 +41,7 @@ describe("a free wall's largest form (LK-36, ASTRA-29, ASTRA-32)", () => {
   });
 });
 
-describe("memory's charge (5.5, MD1's byte bounds)", () => {
+describe("memory's charge (5.5, map discovery's byte bounds)", () => {
   /** A random chunk of memory, every kind of entry, with ids and keys of the widest lengths the schema allows. */
   function randomChunk(r: () => number, layer: string | undefined): MemoryChunk {
     const cx = int(r, 0, 14);

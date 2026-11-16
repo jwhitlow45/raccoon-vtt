@@ -33,7 +33,7 @@ import { labelsOf } from "../../state/labels.ts";
  * into a match.
  */
 
-/** Where a record opens: a panel's page by kind and id, "scene:<id>", which the route (lane S1's `openAt`) reads back. */
+/** Where a record opens: a panel's page by kind and id, "scene:<id>", which the route (`openAt`) reads back. */
 export function recordPage(kind: "scene" | "srd" | "monster" | "playlist" | "track" | "page" | "handout" | "doc" | "character", id: string): string {
   return `${kind}:${id}`;
 }

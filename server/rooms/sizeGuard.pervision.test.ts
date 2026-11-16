@@ -13,7 +13,7 @@ import { growthBound, measuredFromStored, measuredStateBytes, numberingAdjust, P
 
 /**
  * The size guard on per-player vision (docs/design/design-v1-per-player-vision.md
- * 6.8, lane PV3): no measure reads a list of who saw or a layer's
+ * 6.8): no measure reads a list of who saw or a layer's
  * contents, each counts at its widest instead, the widest covers the real
  * bytes, the switch to Per player is refused in the DM's words when the
  * room cannot hold it, and a pair of rooms a few bytes under the limit

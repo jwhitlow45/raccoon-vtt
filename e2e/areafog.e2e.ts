@@ -11,7 +11,7 @@ import WebSocket from "ws";
 import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickTool, Shots, sideTabName, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
- * An area being aimed over a player's fog (lane AF): the area tool's own
+ * An area being aimed over a player's fog: the area tool's own
  * preview and the previews other members share draw above the fog, in
  * Top-down's overlay and in Isometric's drag layer, and their shading
  * shows only on ground the player's fog reveals. On a player's device it

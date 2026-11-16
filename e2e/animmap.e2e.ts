@@ -13,10 +13,10 @@ import { openGroup } from "./helpers/groups.ts";
 /**
  * Animated maps (docs/design/design-v1-animated-maps.md): a WebM or MP4 on
  * a map's rectangle, drawn by the board's map layer in the still's place.
- * Lane AM-C's steps (am-2 to am-8 and am-12) drive playback on the board,
- * Still, Low power and reduced motion, and the table display. Lane AM-D's
+ * The playback steps (am-2 to am-8 and am-12) drive playback on the board,
+ * Still, Low power and reduced motion, and the table display. The upload steps
  * (am-1 and am-9 to am-11) drive the DM's upload, the refusals, the Library
- * and Use the still only. Lane AR-B's (amr-1 to amr-7,
+ * and Use the still only. The turned-video steps (amr-1 to amr-7,
  * docs/design/design-v1-video-turns.md 14) upload turned, mirrored,
  * stretched and cropped videos and an iPhone MOV, and check the map shows
  * them upright, the still and the video alike. hs-1 checks that an HEVC
@@ -500,7 +500,7 @@ describe("animated maps", { concurrency: false }, () => {
   });
 
   /*
-   * Lane AM-D's steps (am-1 and am-9 to am-11): the DM's upload through each
+   * The upload steps (am-1 and am-9 to am-11): the DM's upload through each
    * form, the refusals, the still pick, Use the still only and the Library.
    * Their helpers load here, so the file's import block stays the board
    * lane's.
@@ -855,7 +855,7 @@ describe("animated maps", { concurrency: false }, () => {
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged no errors");
   });
 
-  // am-1 (lane AM-D): the DM adds a WebM through the New scene form.
+  // am-1: the DM adds a WebM through the New scene form.
 
   test("am-2. the players' scene plays its video in the map layer under the fog and tokens, at most 32 draws in any second, and nothing but the ground shows outside the scene", async () => {
     await setVideoMap(run.sceneId, run.webmStill!, run.webm!);
@@ -1403,7 +1403,7 @@ describe("animated maps", { concurrency: false }, () => {
   });
 
   /*
-   * Lane AR-B's steps (amr-1 to amr-7, docs/design/design-v1-video-turns.md
+   * The turned-video steps (amr-1 to amr-7, docs/design/design-v1-video-turns.md
    * 14): each turned, mirrored or stretched fixture becomes a new scene's
    * map through the New scene form, so its still is read from the stored
    * copy. The map layer is sampled where the pattern's first bar, last bar
@@ -1670,7 +1670,7 @@ describe("animated maps", { concurrency: false }, () => {
     await adm.context().close();
   });
 
-  // am-9 to am-11 (lane AM-D): the refusals, the Library and Use the still only.
+  // am-9 to am-11: the refusals, the Library and Use the still only.
 
   test("am-12. with the server's switch off, maps show their stills, video uploads and bytes are refused, a new video is invalid, and edits and undos of the room's own videos pass", async () => {
     // Made while the switch is on: a scene whose two phases are the WebM and the MP4.

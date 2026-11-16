@@ -8,7 +8,7 @@ import { MADE_MOST, parseRoomState } from "./stateSchema.ts";
 
 /**
  * Stairs and ladders in a backup (docs/design/design-v1-floors.md phase 2,
- * 3 and 5, lane FL2-C): the stored-state schema takes each end and a
+ * 3 and 5): the stored-state schema takes each end and a
  * path's `prior` strictly, the floor check holds the ends to their floors
  * wherever they point, and the import gives them new ids, keeps their
  * stamps, and starts its op sequence past the newest of them.

@@ -16,7 +16,7 @@ import { DM, env, reveal, template, token } from "./testutil.ts";
 
 /*
  * Stairs and ladders' privacy twins (docs/design/design-v1-floors.md phase
- * 2, 4, lane FL2-B): pairs of rooms that differ only in what a player may
+ * 2, 4): pairs of rooms that differ only in what a player may
  * not learn, the same steps made in both, and each player's answers and
  * copy compared (shared/differential.ts). Then the fan-out's frames, sent
  * to sockets opened in both orders, which must name no floor a socket

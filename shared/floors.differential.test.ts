@@ -8,7 +8,7 @@ import { DM, P1, P2, actor, apply, character, member, room, scene, token, trap }
 
 /**
  * Several floors' generators for the shared differential test
- * (docs/design/design-v1-floors.md 15, lane FLR-B): pairs of rooms, one with a
+ * (docs/design/design-v1-floors.md 15): pairs of rooms, one with a
  * floor of the players' scene they have not reached and one without it,
  * and a pair whose rooms differ only in what the DM did on such a floor.
  * Every recipient each pair names must start equal and observe the same of

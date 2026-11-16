@@ -14,7 +14,7 @@ import { openGroup } from "./helpers/groups.ts";
 import { ConsoleWatch, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
- * The light theme (docs/design/design-v1-light-theme.md 13, lane LT-D): the
+ * The light theme (docs/design/design-v1-light-theme.md 13): the
  * canvas never reads a CSS variable (lt-0), the Theme row and every open
  * page following it (lt-1), the board drawn the same in both (lt-2), the
  * contrast sweep over every surface, the board and its rings included

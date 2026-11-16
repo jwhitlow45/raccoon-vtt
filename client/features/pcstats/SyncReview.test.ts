@@ -93,7 +93,7 @@ describe("the review's markup", () => {
   });
 });
 
-describe("the review's spacing and chevrons (docs/design/design-v1-look-pass-2.md 2.5 and 3, lane 3)", () => {
+describe("the review's spacing and chevrons (docs/design/design-v1-look-pass-2.md 2.5 and 3)", () => {
   const typed = () => bree({ ...empty(), spellAbility: "cha", abilities: { ...empty().abilities, wis: 12 } });
   const fill = () => fillOf({ spellAbility: "wis", abilities: { ...empty().abilities, wis: 16 } });
   const rowStyles = (html: string) => [...html.matchAll(/data-sync-row="[^"]+" style="([^"]+)"/g)].map((m) => m[1]);

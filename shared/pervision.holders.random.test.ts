@@ -11,7 +11,7 @@ import { DM, chance, env, int, member, pick, rng, room, scene } from "./testutil
 /**
  * The holder list's joins and picks, every layer under hides and resets,
  * and the fold, over many random sequences of ops
- * (docs/design/design-v1-per-player-vision.md 6.1 and 6.3, lane PV1). Each
+ * (docs/design/design-v1-per-player-vision.md 6.1 and 6.3). Each
  * applied op is checked against these invariants:
  *
  * - L1, the list: no player twice, at most 6 on, only members on the

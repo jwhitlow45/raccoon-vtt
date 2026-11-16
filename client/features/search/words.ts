@@ -129,7 +129,7 @@ export const KIND_LABEL: Readonly<Record<SearchKind, string>> = {
 /** A token's kind in its row, "Monster on Battle mat", as the Outliner words it (outliner/rows.ts). */
 export const TOKEN_KIND_WORD: Readonly<Record<Token["kind"], string>> = { pc: "Character", npc: "NPC", monster: "Monster", object: "Object" };
 
-/** The words the index writes into rows from the room (index.ts). The sheet's own words are lane S3's. */
+/** The words the index writes into rows from the room (index.ts). The sheet's own words live in the sheet. */
 export const ROW_WORDS = {
   /** A DM's hidden token, after its name. */
   hidden: "Hidden",

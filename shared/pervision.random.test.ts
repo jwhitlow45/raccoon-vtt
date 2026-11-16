@@ -13,7 +13,7 @@ import { DM, chance, entry, env, int, pick, rng, template, token } from "./testu
 
 /**
  * The property test of per-player vision (docs/design/design-v1-per-player-vision.md
- * section 10, lane PV1): random rooms of 1 to 8 players, per-player scenes
+ * section 10): random rooms of 1 to 8 players, per-player scenes
  * and whole-party ones, under random ops and their undo, with the server's
  * explore step after each, by the stub rules of perPlayerTestutil.ts. After
  * every batch, for every viewer, these hold:

@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { room, scene } from "#shared/testutil.ts";
 import { describeOp } from "./undoLabels.ts";
 
-/** Per-player vision's undo names (docs/design/design-v1-per-player-vision.md 6.7, lane PV1). */
+/** Per-player vision's undo names (docs/design/design-v1-per-player-vision.md 6.7). */
 describe("undo step labels, per-player vision", () => {
   const whole = room({ scenes: { s1: scene("s1", { name: "Goblin cave", vision: { on: true, light: "bright" } }) } });
   const perPlayer = room({ scenes: { s1: scene("s1", { name: "Goblin cave", vision: { on: true, light: "bright", perPlayer: true } }) } });

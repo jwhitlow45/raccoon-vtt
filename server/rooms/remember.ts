@@ -689,7 +689,7 @@ class LayerStep {
    * remembered box does, since they see it is gone from there. Without an
    * entry, it showed where the layer held its box before, and nothing
    * otherwise, so one put back onto remembered ground out of sight comes
-   * back as absent there (MD1's undo case).
+   * back as absent there (map discovery's undo case).
    */
   mark(e: MarkElement, changed: boolean): void {
     const box = (v: Mark) => (e.field === "labels" ? labelCells(v as Label) : stampCells(v as Stamp));

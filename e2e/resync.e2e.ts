@@ -454,7 +454,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     const review = ana.getByRole("dialog", { name: "Import review" });
     assert.equal(await readLine(review), "Read from D&D Beyond: Bree Tallow, level 5.");
     assert.equal(anaDdb.last(), NUMBER);
-    // Its header's Back says where it goes, as the re-sync's review does (docs/design/design-v1-look-pass-2.md 3, lane 3).
+    // Its header's Back says where it goes, as the re-sync's review does (docs/design/design-v1-look-pass-2.md 3).
     await review.getByRole("button", { name: "Back to the D&D Beyond link", exact: true }).waitFor();
     // With no record the editor fills, and lists each value of the block it would replace.
     await review.getByRole("heading", { name: "Overwritten changes (1)", exact: true }).waitFor();

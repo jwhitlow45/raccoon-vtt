@@ -13,7 +13,7 @@ import { startEngine, type Engine, type TestClient } from "./testing.ts";
 
 /**
  * A scene's weather over the socket, in Postgres and through a backup
- * (docs/design/design-v1-weather.md 7, 9.3 and 9.4, lane WX-A).
+ * (docs/design/design-v1-weather.md 7, 9.3 and 9.4).
  */
 
 async function unzip(buffer: Buffer): Promise<Map<string, Buffer>> {

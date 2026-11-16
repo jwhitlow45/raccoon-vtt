@@ -3,7 +3,7 @@ import type { IconName } from "../../components/Icon.tsx";
 
 /**
  * The room search's entry and its anchors (docs/design/design-v1-qol.md 5, What keeps it current),
- * fixed first (lane Q0) so the lanes that fill the search read one shape:
+ * fixed first so the lanes that fill the search read one shape:
  * S0 the matcher, the index and the empty catalogs, S1 the route, S2 the
  * entries and the controls' `search` ids, S3 the sheet. Types and the id
  * rule only. What matches, ranks and acts is theirs.
@@ -56,7 +56,7 @@ export type SearchRoute = {
  * kind runs what its own surface runs: a press goes through the real
  * control, a condition through the picker's op, and a DM menu item or a
  * You menu item through the item's own run function, found by its id in
- * `dmMenuSections` or `youMenuSections` (pages/chipMenus.ts, lane QC-A).
+ * `dmMenuSections` or `youMenuSections` (pages/chipMenus.ts).
  */
 export type SearchAct =
   | { t: "open"; route: SearchRoute }
@@ -109,7 +109,7 @@ export type SearchEntry = {
 /**
  * The attribute an anchor carries. The kit's Group, Switch, Checkbox,
  * Segmented, Field and Button, and features/tokens/ui.tsx's fields, take
- * an optional `search` prop that sets it (lane S2a). The route finds the
+ * an optional `search` prop that sets it. The route finds the
  * control by it alone, never by its words, which broke on rows that start
  * with initials or headers that carry a summary.
  */

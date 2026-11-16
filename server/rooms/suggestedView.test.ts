@@ -5,7 +5,7 @@ import { parseRoomState } from "./stateSchema.ts";
 import { describeOp } from "./undoLabels.ts";
 import { UndoTable } from "./undoTesting.ts";
 
-/** A scene's suggested view in stored state and on the undo stack (docs/design/design-v1-isometric-view.md 7, lane ISO-1). */
+/** A scene's suggested view in stored state and on the undo stack (docs/design/design-v1-isometric-view.md 7). */
 describe("a scene's suggested view, stored and undone", () => {
   const crypt = () => room({ scenes: { s1: scene("s1", { name: "Crypt" }) } });
 

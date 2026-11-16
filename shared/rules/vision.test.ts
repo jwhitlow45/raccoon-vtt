@@ -1167,7 +1167,7 @@ describe("what the vision cache keeps alive", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Sight holders (docs/design/design-v1-per-player-vision.md 6.1, lane PV2)
+// Sight holders (docs/design/design-v1-per-player-vision.md 6.1)
 
 /** The players asked about, and null for the shared sight that every other viewer has. */
 const HOLDERS = ["p1", "p2", "p3", "p4"] as const;

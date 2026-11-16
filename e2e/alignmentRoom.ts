@@ -4442,7 +4442,7 @@ export function helperTest(): void {
       // pe1: a picture drawn in CSS and hidden from screen readers keeps its own height beside a button, as an svg does. A box with words beside one is still held to its height.
       await passes("picture-drawn-row");
       await caught("box-beside-button", "row-height");
-      // A check item in a menu is one box to the eye, as a menu item is, so a group holding Follow me with its note beside its words keeps the edge its words set (lane QC-A's DM menu). Moved, it is caught.
+      // A check item in a menu is one box to the eye, as a menu item is, so a group holding Follow me with its note beside its words keeps the edge its words set (the DM menu). Moved, it is caught.
       await passes("menu-check-note");
       await caught("menu-check-note-drift", "edge");
       // Painted rows stacked together share their fills' edge and their words' edge.

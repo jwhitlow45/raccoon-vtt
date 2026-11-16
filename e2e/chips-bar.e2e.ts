@@ -627,7 +627,7 @@ describe("The top bar's give-way and Next", { concurrency: false }, () => {
   });
 
   /**
-   * Lane LP33-FIX (LP33-B-CHIP-1): Pat's chip on a 390 x 844 phone at 130% with
+   * Follow-up LP33-B-CHIP-1: Pat's chip on a 390 x 844 phone at 130% with
    * an 80 character room name drew her name as a 3 px stroke. Its dot form
    * takes over where less than a letter and its ellipsis would show.
    */

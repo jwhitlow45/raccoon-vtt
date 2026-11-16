@@ -95,7 +95,7 @@ export function openAt(scope: RoomScope, ui: Pick<RoomUi, "openPanel">, route: S
   return true;
 }
 
-/** The route to Sound's Now playing at its top, as the Now playing chip's Open Sound opens it (lane SL-C). */
+/** The route to Sound's Now playing at its top, as the Now playing chip's Open Sound opens it. */
 export const NOW_PLAYING: SearchRoute = Object.freeze({ panel: SOUND_PANEL, page: "now" });
 
 /* Pages. */

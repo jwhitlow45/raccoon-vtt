@@ -5,7 +5,7 @@ import { RULES_TEXT } from "../srd/rules-text.ts";
 import { WEATHER_KINDS, weatherProblem, type SceneWeather } from "../weather.ts";
 import { isWeatherRuleKey, WEATHER_RULES, WEATHER_RULE_KEYS, WEATHER_RULE_NAMES, weatherHasRules, weatherPreset, weatherReminders, weatherRuleLines } from "./weather.ts";
 
-/** Weather's roll rules (docs/design/design-v1-weather.md 2, lane WX-A). */
+/** Weather's roll rules (docs/design/design-v1-weather.md 2). */
 
 /** The SRD's apostrophes and quotation marks are curly, the rules' quotes straight. */
 function plain(text: string): string {

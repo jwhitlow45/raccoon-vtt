@@ -3,8 +3,8 @@ import { MOVING_PLAYERS } from "../features/scenes/movePlayers.ts";
 /**
  * The words of the top bar's chips and their menus
  * (docs/design/design-v1-qol.md 4, Words, with 3, Q11's whole-document
- * showings), keyed, so the menus (lane QC-A), the search's rows for menu
- * items (S2) and the tests read the same text. Declared first by lane Q0. A
+ * showings), keyed, so the menus, the search's rows for menu
+ * items (S2) and the tests read the same text. Declared first for the search entries. A
  * word with a name, a title or a scene in it takes it as an argument.
  */
 

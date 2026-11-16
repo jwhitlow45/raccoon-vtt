@@ -10,7 +10,7 @@ import { DM, chance, env, int, member, pick, rng, room, scene } from "../testuti
 
 /**
  * A state machine of players' memory (docs/design/design-v1-map-discovery.md 5.3
- * and 5.4, lane MD1) against a plain model: random runs of the map step's
+ * and 5.4) against a plain model: random runs of the map step's
  * `sys.remember` and its forgetting, explores, hides, Fog all, vision and
  * fog off and on, the switch to Per player and the fold back, picks of who
  * sees for themselves, the scene shrinking and growing, the DM moving,
@@ -544,7 +544,7 @@ function orBits(state: RoomState, who: Layer, t: { tx: number; ty: number; bits:
   return next;
 }
 
-describe("players' memory as a state machine against a plain model (lane MD1)", () => {
+describe("players' memory as a state machine against a plain model", () => {
   test("random runs keep M1 to M5 after every step", () => {
     for (let seed = 1; seed <= 200; seed++) run(seed, 80);
   });
