@@ -7,7 +7,7 @@ import { basename, join } from "node:path";
 import { after, describe, test } from "node:test";
 import { Platform } from "../contract.ts";
 import { BOOT_RECORD, Cluster, DatabaseFailed, Ended, pgEnv, postmasterKind, runToExit, uncertainWords, type ProcessLookup, type Programs } from "./postgres.ts";
-import { isAlive, listProcesses, systemShell, type ListedProcess } from "./processInfo.ts";
+import { isAlive, listProcesses, processStamp, systemShell, type ListedProcess } from "./processInfo.ts";
 
 /**
  * The cluster's own rules, with stand-ins for PostgreSQL's programs and for
@@ -114,14 +114,15 @@ async function programs(dir: string): Promise<{ bin: string; calls: () => Promis
 /**
  * What the system says about the pid: by default this computer's own
  * postgres, run as this user, started when postmaster.pid says, in the boot
- * "boot-now". `offsetMs` moves its start reading, as a clock step since does.
- * `boot` is this boot's id, "" for none, or an error for a refused read.
+ * "boot-now", with the start reading this computer gives, the one its
+ * listing carries too. `offsetMs` moves its start, as a clock step since
+ * does. `boot` is this boot's id, "" for none, or an error for a refused read.
  */
 type Look = { exe?: string | null; cwd?: string | null; uid?: number | null; offsetMs?: number; boot?: string | Error; stamp?: () => Promise<number | null>; facts?: ProcessLookup["facts"] };
 function lookup(o: Look = {}): ProcessLookup {
   return {
     list: asStarted,
-    stamp: o.stamp ?? (async () => 4242),
+    stamp: o.stamp ?? ((pid: number) => processStamp(pid)),
     facts:
       o.facts ??
       (async () => ({
@@ -147,7 +148,7 @@ function lookup(o: Look = {}): ProcessLookup {
 async function asStarted(): Promise<ListedProcess[]> {
   return (await listProcesses()).map((p) => {
     const run = /^\/bin\/sh (\S+\/bin\/(?:postgres -D|pg_ctl start -D) .*)$/.exec(p.commandLine)?.[1];
-    return run === undefined ? p : { pid: p.pid, commandLine: run };
+    return run === undefined ? p : { pid: p.pid, commandLine: run, stamp: p.stamp ?? null };
   });
 }
 
@@ -637,6 +638,21 @@ describe("a start", { skip: posixOnly }, () => {
     assert.deepEqual(await calls(), STOPPED);
   });
 
+  test("a loosely listed postmaster the file names is never stopped when leftover() reads another start than the listing did", { timeout: 30_000 }, async () => {
+    const dir = await folder();
+    const { bin, calls } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const postmaster = join(dir, "postmaster.child");
+    // leftover() reads a start the listing's row does not have, as for a pid reused between the two.
+    const c = cluster(dir, bin, { ...lookup({ stamp: async () => 1 }), list: () => listProcesses() }, { platform: "darwin" });
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 500);
+    const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_LIFE: "3" }, abort.signal);
+    assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
+    assert.equal(await ended(await pid(postmaster)), true, "it ended on its own");
+    assert.deepEqual(await calls(), ["pg_ctl start"], "no pg_ctl stop went out");
+  });
+
   test("the shell pg_ctl execs the postmaster from is ended only on pg_ctl's exact command, and holds the start while it runs", { timeout: 20_000 }, async () => {
     const dir = await folder();
     const { bin } = await programs(dir);
@@ -877,6 +893,48 @@ describe("a start", { skip: posixOnly }, () => {
     assert.ok(listings >= 2, "a new pass took a new listing");
   });
 
+  test("a pass stops the postmaster it lists with nothing read in between, so a pid reused meanwhile is never the one pg_ctl stop reaches", { timeout: 20_000 }, async () => {
+    const dir = await folder();
+    const { bin, calls } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const postmaster = join(dir, "postmaster.child");
+    // The program that takes the postmaster's pid, as postmaster.pid will name it, once a read of its start would let it.
+    const other = spawn(process.execPath, ["-e", "setInterval(() => undefined, 1000)"], { stdio: "ignore" });
+    strays.push(other.pid as number);
+    let listedInStop = false;
+    let reused = false;
+    let reads = 0;
+    const proc: ProcessLookup = {
+      ...lookup({ exe: null }),
+      // Every reading differs, so the postmaster is never counted as the one this process started, and a read after the stop's first listing is slow, and in it the postmaster ends and its pid is reused.
+      stamp: async () => {
+        if (listedInStop && !reused) {
+          reused = true;
+          end(Number((await readFile(postmaster, "utf8")).trim()));
+          await pidFile(dir, other.pid as number);
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        return ++reads;
+      },
+      list: async () => {
+        const rows = await asStarted();
+        if (stopping) listedInStop = true;
+        return rows;
+      },
+    };
+    let stopping = false;
+    // Neither its own nor confirmed by leftover() (no program name), so the stop leaves it to the proof, whose first pass stops it through pg_ctl.
+    const c = cluster(dir, bin, proc, { platform: "darwin" });
+    const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_READYAFTER: "0.3" });
+    assert.equal(error, null);
+    stopping = true;
+    await withVars({ RVTT_FAKE_CHILD: postmaster }, () => c.stop());
+    assert.equal(await ended(await pid(postmaster)), true);
+    assert.deepEqual(await calls(), STOPPED);
+    assert.equal(other.signalCode, null, "pg_ctl stop never reached the program that took the pid");
+    assert.equal(reused, false, "nothing was read between the listing and the stop");
+  });
+
   test("the postmaster this process started is never killed though its postmaster.pid can't be read, or is gone, before the stop", { timeout: 20_000 }, async () => {
     const dir = await folder();
     const { bin, calls } = await programs(dir);
@@ -919,8 +977,9 @@ describe("a start", { skip: posixOnly }, () => {
     await mkdir(join(dir, "postgres"));
     const postmaster = join(dir, "postmaster.child");
     let reads = 0;
-    // The start reading recorded at the start, and another at every read after, as for a process that reused the pid.
-    const c = cluster(dir, bin, lookup({ stamp: async () => (++reads === 1 ? 1 : 2) }), { platform: "darwin" });
+    // The start reading recorded at the start, and another in the listing and at every read after, as for a process that reused the pid.
+    const proc: ProcessLookup = { ...lookup({ stamp: async () => (++reads === 1 ? 1 : 2) }), list: async () => (await asStarted()).map((p) => ({ ...p, stamp: 2 })) };
+    const c = cluster(dir, bin, proc, { platform: "darwin" });
     const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_READYAFTER: "0.3" });
     assert.equal(error, null);
     const child = await pid(postmaster);
@@ -946,7 +1005,8 @@ describe("a start", { skip: posixOnly }, () => {
     const postmaster = join(dir, "postmaster.child");
     let reads = 0;
     const listing = counted();
-    const c = cluster(dir, bin, { ...lookup({ stamp: async () => (++reads === 1 ? 1 : null) }), list: listing.list }, { platform: "darwin" });
+    // The listing can't read its start either.
+    const c = cluster(dir, bin, { ...lookup({ stamp: async () => (++reads === 1 ? 1 : null) }), list: async () => (await listing.list()).map((p) => ({ ...p, stamp: null })) }, { platform: "darwin" });
     const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_READYAFTER: "0.3" });
     assert.equal(error, null);
     const child = await pid(postmaster);
@@ -1242,7 +1302,7 @@ describe("a postmaster by its command line", () => {
     for (const [what, p] of winCases) assert.equal(await kind(p, folders, "win32"), "loose", `Windows: ${what}`);
   });
 
-  test("the bundled pg_ctl starting this folder is pg_ctl, which may yet start one: before its fork execs the shell, or as Windows' restricted copy", async () => {
+  test("the bundled pg_ctl starting this folder is pg_ctl, which may yet start one: before its fork execs the shell, or on Windows as a pg_ctl start not this process's own", async () => {
     const data = ["/data/Tést Жук/postgres"];
     const argv = ["/opt/r/postgres/bin/pg_ctl", "start", "-D", "/data/Tést Жук/postgres", "-l", "/data/Tést Жук/logs/postgres.log", "-w", "-t", "1800", "-o", "-p 41659"];
     assert.equal(await kind(args(argv, unix.pgCtl), data, "linux"), "pgctl", "Linux: its arguments, and its exe link on the bundled pg_ctl");
