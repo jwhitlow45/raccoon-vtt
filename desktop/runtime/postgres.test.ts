@@ -715,15 +715,28 @@ describe("a start", { skip: posixOnly }, () => {
     const postmaster = join(dir, "postmaster.child");
     const said: string[] = [];
     const unconfirmed: boolean[] = [];
-    const c = new Cluster({ ...cluster(dir, bin, lookup(), { platform: "darwin" }).opts, unsureAfterMs: 300, immediateAgainMs: 1_000, log: (m) => said.push(m), unconfirmed: (on) => unconfirmed.push(on) });
+    // A child the postmaster has just forked, listed with its command line, as one is until it renames itself.
+    const forked = spawn(process.execPath, ["-e", "setInterval(() => undefined, 1000)"], { stdio: "ignore" });
+    strays.push(forked.pid as number);
+    let forking = false;
+    const proc: ProcessLookup = {
+      ...lookup(),
+      list: async () => [
+        ...(await asStarted()),
+        ...(forking && forked.exitCode === null && forked.signalCode === null ? [{ pid: forked.pid as number, commandLine: `${join(bin, "postgres")} -D ${join(dir, "postgres")} -p 41659` }] : []),
+      ],
+    };
+    const c = new Cluster({ ...cluster(dir, bin, proc, { platform: "darwin" }).opts, unsureAfterMs: 300, immediateAgainMs: 1_000, log: (m) => said.push(m), unconfirmed: (on) => unconfirmed.push(on) });
     const vars = { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_DEAF: "1" };
     const { error, pid } = await startWith(dir, c, { ...vars, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_READYAFTER: "0.3" });
     assert.equal(error, null);
     const child = await pid(postmaster);
+    forking = true;
     let stopped = false;
     const stopping = withVars(vars, () => c.stop()).then(() => (stopped = true));
     await new Promise((resolve) => setTimeout(resolve, 5_000));
     assert.equal(isAlive(child), true, "it was never killed");
+    assert.equal(forked.signalCode, null, "nor was the child it forked, while it runs named");
     assert.equal(stopped, false, "the stop holds while it runs");
     assert.deepEqual(unconfirmed, [true]);
     const asked = await calls();
@@ -739,6 +752,7 @@ describe("a start", { skip: posixOnly }, () => {
     process.kill(child, "SIGKILL");
     await stopping;
     assert.deepEqual(unconfirmed, [true, false]);
+    assert.equal(forked.signalCode, "SIGKILL", "with no postmaster named that runs, the one left is killed");
   });
 
   test("a slow but clean first pg_ctl stop never reads as a postmaster that outlived its end", { timeout: 20_000 }, async () => {
