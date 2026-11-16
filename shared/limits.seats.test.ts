@@ -20,6 +20,16 @@ function table(overrides: Partial<RoomState> = {}): RoomState {
   });
 }
 
+/** The table with s1 as the Keep's ground floor and `up` as its Upper floor. */
+function keep(): RoomState {
+  return table({ scenes: { s1: scene("s1", { floor: { of: "s1", level: 0, name: "Ground" } }), up: scene("up", { order: 1, floor: { of: "s1", level: 1, name: "Upper" } }), s2: scene("s2", { order: 2 }) } });
+}
+
+/** An index as fixed-width digits, so ids sort by it. */
+function pad(i: number): string {
+  return String(i).padStart(5, "0");
+}
+
 function companions(state: RoomState, count: number, sceneId = "s1", from = 0): void {
   for (let i = from; i < from + count; i++) state.tokens[`k${String(i).padStart(3, "0")}`] = token(`k${String(i).padStart(3, "0")}`, { sceneId, companion: { of: "c1", turn: "own" }, ownerIds: ["p1"], x: 1 + (i % 30), y: 1 + Math.floor(i / 30) });
 }
@@ -146,6 +156,21 @@ describe("the DM's caps over the rest", () => {
     assert.deepEqual(admitLimits(deleted, "s1", one, DM, { far: "deletion", seats: false }), { ok: true });
   });
 
+  test("LP43-LIMITS-1: a player's free areas on another floor of the scene leave the DM all 200 of theirs on this one", () => {
+    const state = keep();
+    for (let i = 0; i < 31; i++) state.templates[`pu${pad(i)}`] = template(`pu${pad(i)}`, { sceneId: "up" });
+    for (let i = 0; i < LIMITS.templatesPerScene - 1; i++) state.templates[`dm${pad(i)}`] = template(`dm${pad(i)}`, { ownerId: "dm1", visibility: "dm" });
+    assert.equal(seatHeld(state, "s1").templates.size, 31, "the free areas on Upper are held from the ground floor");
+    const last = withAdded(state, (s) => { s.templates.dmz = template("dmz", { ownerId: "dm1", visibility: "dm" }); });
+    assert.deepEqual(admitLimits(last, "s1", state, DM, CREATE), { ok: true }, "the DM's 200th");
+    const past = withAdded(last, (s) => { s.templates.dmzz = template("dmzz", { ownerId: "dm1", visibility: "dm" }); });
+    assert.equal(admitLimits(past, "s1", last, DM, CREATE).ok, false, "the DM's 201st");
+    // Each floor holds 40 of the member's: the 41st on Upper is the DM's rest, so the DM's 200th passes the cap.
+    const upper = withAdded(state, (s) => { for (let i = 31; i <= SEAT.freeAreas; i++) s.templates[`pu${pad(i)}`] = template(`pu${pad(i)}`, { sceneId: "up" }); });
+    assert.equal(seatHeld(upper, "up").templates.size, SEAT.freeAreas);
+    assert.equal(admitLimits(withAdded(upper, (s) => { s.templates.dmz = template("dmz", { ownerId: "dm1", visibility: "dm" }); }), "s1", upper, DM, CREATE).ok, false, "one past the seat on Upper is the DM's");
+  });
+
   test("a thing several players own is held by its first owner by id", () => {
     const state = table({ characters: { c1: character("c1", { ownerIds: ["p2", "p1"] }) } });
     const held = seatHeld(state, "s1");
@@ -190,6 +215,20 @@ describe("the far line", () => {
     const before = structuredClone(state);
     for (let i = 0; i < LIMITS.openCastsPerRoom; i++) state.casts[`z${i}`] = { id: `z${i}`, rev: 0, by: "dm1", caster: "hero", sceneId: "s1", spell: "x", targets: ["hero"], at: "2026-10-12T20:00:00.000Z" };
     assert.deepEqual(farLimits(state, null, before), { ok: true });
+  });
+
+  test("LP43-LIMITS-1: a player's free areas on another floor are held, not in the DM's part the line rounds up", () => {
+    // The DM's part a whole number of steps and the seats' part exact, so the reading after the player's op is the line.
+    const state = keep();
+    for (let i = 0; i < 31; i++) state.templates[`pu${pad(i)}`] = template(`pu${pad(i)}`, { sceneId: "up" });
+    for (let i = 0; i < 18; i++) state.templates[`pg${pad(i)}`] = template(`pg${pad(i)}`);
+    const dmPart = FAR.areas - FAR.countStep;
+    for (let i = 0; i < dmPart; i++) state.templates[`dm${pad(i)}`] = template(`dm${pad(i)}`, { ownerId: "dm1", visibility: "dm" });
+    assert.equal(dmPart + 31 + 19, FAR.areas, "the reading after the op is the line");
+    const one = withAdded(state, (s) => { s.templates.pgz = template("pgz"); });
+    assert.deepEqual(admitLimits(one, "s1", state, P1, CREATE), { ok: true }, "the player's 19th on the ground floor");
+    const more = withAdded(one, (s) => { s.templates.pgzz = template("pgzz"); });
+    assert.equal(admitLimits(more, "s1", one, P1, CREATE).ok, false, "and the next passes the line");
   });
 
   test("an import is held to it absolutely", () => {

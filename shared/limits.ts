@@ -1,6 +1,6 @@
 import { roomHandoutPages } from "./handouts.ts";
 import { isWritable } from "./writable.ts";
-import { CHUNK_CELLS, HEIGHTS_CHARS, type BuildChunk, type Character, type CompanionBlock, type CustomMonster, type Drawing, type InitEntry, type JournalPage, type RoomState, type Scene, type Token } from "./model.ts";
+import { CHUNK_CELLS, HEIGHTS_CHARS, type AreaTemplate, type BuildChunk, type Character, type CompanionBlock, type CustomMonster, type Drawing, type InitEntry, type JournalPage, type RoomState, type Scene, type Token } from "./model.ts";
 import { ownEntry } from "./records.ts";
 import { floorsOf, openFloor } from "./rules/floors.ts";
 import type { SoundUse } from "./sound.ts";
@@ -1644,11 +1644,15 @@ export function seatHeld(state: RoomState, sceneId: string | null): SeatHeld {
     (t) => player(t.ownerId),
     SEAT.ridingAreas,
   );
-  const free = heldFirst(
-    Object.values(state.templates).filter((t) => t.attachedTo === undefined && sceneId !== null && t.sceneId === sceneId),
-    (t) => player(t.ownerId),
-    SEAT.freeAreas,
-  );
+  // A floor's seat, held on every floor of the scene, since the caps count areas across its floors together.
+  const freeByFloor = new Map<string, AreaTemplate[]>();
+  for (const t of Object.values(state.templates)) {
+    if (t.attachedTo !== undefined || !group.has(t.sceneId)) continue;
+    const list = freeByFloor.get(t.sceneId);
+    if (list) list.push(t);
+    else freeByFloor.set(t.sceneId, [t]);
+  }
+  const free = [...freeByFloor.values()].flatMap((areas) => heldFirst(areas, (t) => player(t.ownerId), SEAT.freeAreas));
   const drawings = heldFirst(
     Object.values(state.drawings).filter((d) => sceneId !== null && d.sceneId === sceneId),
     (d) => player(d.ownerId),
