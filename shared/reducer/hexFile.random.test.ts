@@ -11,12 +11,13 @@ import { hexPlacements, linkHolds, onHolder, seatedAt } from "../rules/attach.ts
 import { occupiedHexes, placedOnHex } from "../rules/footprint.ts";
 import { hexDistance, hexKey, hexNeighbors, type Hex, type HexGrid } from "../rules/hex.ts";
 import { findRouteOn, routeWorld } from "../rules/hexWalk.ts";
+import { fileHeightsAlong, hexFileClasses, hexFileRoutes } from "../rules/route.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, wallsRound } from "../rules/hexWalls.testkit.ts";
 import { planWalks, walkedIn } from "../rules/moveLeg.ts";
 import { hexStandAt, hexStandPlace, onSqueezedLattice, ownWalk } from "../rules/movement.ts";
 import { planTrapMove, trapLandings } from "../rules/traps.ts";
 import { groupWalkWorld } from "../rules/walkWorld.ts";
-import { chance, env, int, member, P1, P2, pick, rng, trap } from "../testutil.ts";
+import { chance, DM, env, int, member, P1, P2, pick, rng, trap } from "../testutil.ts";
 
 /**
  * Random walks in single file on hexes (RIDE-SINGLE-FILE-HEX and
@@ -594,6 +595,57 @@ for (const [name, g] of [
         compared++;
       }
       assert.ok(compared >= 10, `pairs compared: ${compared}`);
+    });
+
+    test("raised 40 ft and brought down to the ground or to 25 ft, or climbing from the ground to 30 ft: the device reads every point of every walk hex by hex at the height the move gives it (review HEXFILE-OPUS-9)", () => {
+      let walks = 0;
+      let points = 0;
+      for (const [kind, made] of [
+        ["", caseOf],
+        ["inside ", insideCaseOf],
+      ] as const) {
+        for (let seed = 1; seed <= 1000; seed++) {
+          const room = made(seed, g);
+          if (!room) continue;
+          for (const [up, down] of [
+            [40, 0],
+            [40, 25],
+            [0, 30],
+          ] as const) {
+            const s = structuredClone(room.state);
+            for (const t of Object.values(s.tokens)) {
+              if (!t) continue;
+              t.elevation += up;
+              // Every one seen, as the device's walkers are.
+              t.visibility = "all";
+            }
+            delete s.traps.stop;
+            delete s.traps.floor;
+            const op = { ...room.op, elevation: down };
+            const plan = planWalks(op, s, DM, {});
+            const lead = plan.find((m) => m.tokenId === "horse")?.route;
+            if (!lead) continue;
+            const horse = s.tokens.horse!;
+            const members = new Set(plan.map((m) => m.tokenId));
+            const dragged = Object.values(s.tokens).filter((t): t is Token => t?.attached?.kind === "drag" && members.has(t.id));
+            const file = hexFileRoutes(g, horse, lead, [hexFileClasses(dragged, [])[0]], true);
+            const memberOf = (id: string) => s.tokens[id];
+            for (const m of plan) {
+              if (!m.along || !file.has(m.tokenId)) continue;
+              const device = fileHeightsAlong(s.buildChunks, { id: "horse", elevation: horse.elevation, grounded: up === 0 }, memberOf, file, m.tokenId, lead, horse);
+              const at = `${kind}seed ${seed}, ${up} to ${down} ft, ${m.tokenId}`;
+              assert.equal(device.length, m.route.length, `${at}: as many points`);
+              for (let j = 1; j < m.route.length; j++) {
+                if (device[j] === null) continue;
+                assert.ok(Math.abs(device[j]! - m.route[j]!.elevation) < 1e-6, `${at}, point ${j}: the device ${device[j]}, the move ${m.route[j]!.elevation}`);
+                points++;
+              }
+              walks++;
+            }
+          }
+        }
+      }
+      assert.ok(walks >= 3000 && points >= 15000, `walks ${walks}, points ${points}`);
     });
   });
 }
