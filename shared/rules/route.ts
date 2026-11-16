@@ -258,10 +258,10 @@ export function pointAt(route: readonly RoutePoint[], at: FileAlong, along?: rea
  * on the leg of its route it is on then (`pointAt`). The one reading of a
  * walk with moments of its own at a moment of its lead's walk: the move's
  * heights (moveLeg.ts heightAlong), the area sweep (areaTriggers.ts
- * alongGroups), the trap step's moments, the heights its triggers read at
- * each spot and its holders' heights (traps.ts placedIn, elevationRule,
- * holderHeight) and the device (`fileHeightsAlong`) all read it, so none
- * can take another rule for one kind of walk (review HEXFILE-ASTRA-7).
+ * alongGroups), the trap step's moments and the heights its triggers read
+ * at each spot (traps.ts placedIn, elevationRule) and the device
+ * (`fileHeightsAlong`) all read it, so none can take another rule for one
+ * kind of walk (review HEXFILE-ASTRA-7).
  */
 export function walkAt(walk: { readonly route: readonly RoutePoint[]; readonly along?: readonly FileAlong[] | undefined }, at: FileAlong): RoutePoint {
   return pointAt(walk.route, at, walk.along);

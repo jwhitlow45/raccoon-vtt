@@ -881,15 +881,14 @@ function inFile(walk: Walk): boolean {
  * as `elevationOnStep` reads a shared walk: what rides takes its holder's
  * change, and a dragged creature its own ground behind a holder on the
  * ground, else the holder's change but never below the ground. The holder
- * is read at its latest spot at the same progress, but under a walk hex by
- * hex (`ownProgress`) at `moment`, by default the spot's own, between the
- * ends of the leg of its own walk it is on then (route.ts walkAt), as the
- * move and the area sweep read it (moveLeg.ts heightAlong): at its latest
- * spot a holder coming down read higher than the move takes it, so a trap
- * read the creature too high and a cut left it above its holder (review
- * HEXFILE-OPUS-10, HEXFILE-ASTRA-3). `at` is where it stands there, its
- * spot but where a stop snaps it to its grid (`stopPose`), and `up` its
- * holder's height where a stop leaves the holder (`stoodAt`).
+ * is read at its latest spot at the same progress. A walk hex by hex is
+ * judged so only where a stop leaves it (`Walk.heightAt`), at `up`, its
+ * holder's height where the stop leaves the holder (`stoodAt`): while it
+ * walks every reader takes the move's own reading of it (route.ts walkAt,
+ * `elevationRule`), where its holder at its latest spot read a holder
+ * coming down higher than the move takes it (review HEXFILE-OPUS-10,
+ * HEXFILE-ASTRA-3). `at` is where it stands there, its spot but where a
+ * stop snaps it to its grid (`stopPose`).
  */
 function fileElevation(walk: Walk, holder: Walk, before: RoomState, j: number, at: { x: number; y: number } = walk.spots[j]!, up: number = holderHeight(walk, holder, j)): number {
   const s = walk.spots[j]!;
@@ -902,8 +901,7 @@ function fileElevation(walk: Walk, holder: Walk, before: RoomState, j: number, a
 
 /** A walk in single file's holder's height at the moment the walk reaches its spot `j` (`fileElevation`). */
 function holderHeight(walk: Walk, holder: Walk, j: number): number {
-  const s = walk.spots[j]!;
-  return walk.ownProgress ? walkAt(holder.entry, s.progress).elevation : holder.elevation(latestIndex(holder.spots, s.progress));
+  return holder.elevation(latestIndex(holder.spots, walk.spots[j]!.progress));
 }
 
 /** A walk's elevation at spot `j` of its group's own walk at `step`, by attach's rule, its holder read at the same spot. */
