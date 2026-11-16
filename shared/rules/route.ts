@@ -264,13 +264,22 @@ export function pointAt(route: readonly RoutePoint[], at: FileAlong, along?: rea
 
 /**
  * The device's heights for the walk in single file hex by hex of member
- * `id` (hexWalk.ts fileBlocked, drop.ts): each point after its start where
- * the lead's walk `lead`, which started at `origin`, is as far along as the
- * point is reached (`pointAt`), the last where it ends, at the height its
- * holders up the chain give it there (`followedHeight`), as the move takes
- * it along (moveLeg.ts follow). `startOf` is where each member starts, by
- * default `memberOf`'s. Null at its start and at a point whose height is
- * not followed, which each caller reads on its ground.
+ * `id` (hexWalk.ts fileBlocked, drop.ts), worked out as the move works
+ * them out (moveLeg.ts follow), holder before member, so the device and
+ * the server read each point alike (review HEXFILE-OPUS-9): the lead at
+ * the heights of its walk `lead`, what rides at its holder's heights by
+ * its own change, and one walking hex by hex at its holder's heights read
+ * at the point's moment (`pointAt`), its last point at its holder's last,
+ * its walk held at its end to its holder's length as the move holds it. A
+ * goblin that comes down to its holder's end height before the lead ends
+ * then takes a rat it drags down with it on the device too. Where a chain
+ * runs through one dragged by its place, or leaves `memberOf`, each point
+ * is read where the lead's walk, which started at `origin`, is as far
+ * along, the last where it ends, at the height its holders up the chain
+ * give it there (`followedHeight`), `startOf` being where each starts.
+ * Null at the start and at a point whose height is not followed, which
+ * each caller reads on its ground. The list can run past the walk's own
+ * points, as the move's walk does.
  */
 export function fileHeightsAlong(
   chunks: BuildState["buildChunks"],
@@ -282,6 +291,41 @@ export function fileHeightsAlong(
   origin: Point,
   startOf: (id: string) => Point | undefined = memberOf,
 ): (number | null)[] {
+  const held = <T>(list: readonly T[], i: number): T => list[Math.min(i, list.length - 1)]!;
+  // Each walk's heights from its start, and how far along the lead's walk it reaches each point where it goes hex by hex.
+  type Walked = { heights: readonly number[]; along?: readonly FileAlong[] };
+  const known = new Map<string, Walked | null>();
+  const walkOf = (m: string): Walked | null => {
+    if (m === from.id) return { heights: lead.map((p) => p.elevation) };
+    if (known.has(m)) return known.get(m)!;
+    known.set(m, null);
+    const member = memberOf(m);
+    const link = member?.attached;
+    const up = member && link ? walkOf(link.to) : null;
+    const holder = link && link.to !== from.id ? memberOf(link.to) : undefined;
+    const upFrom = holder ? holder.elevation : from.elevation;
+    const walk = file.get(m);
+    let out: Walked | null = null;
+    if (member && link && up && onHolder(link.kind)) out = { heights: up.heights.map((h) => h + (member.elevation - upFrom)), ...(up.along ? { along: up.along } : {}) };
+    else if (member && link && up && walk?.some((p) => p.along)) {
+      const length = Math.max(walk.length, up.heights.length);
+      const route = up.heights.map((elevation): RoutePoint => ({ x: 0, y: 0, elevation }));
+      const grounded = holder ? footing(chunks, followerTrace(holder, [holder])[0]!) === "ground" : from.grounded;
+      const self = followerTrace(member, [member])[0]!;
+      const along = Array.from({ length }, (_, i): FileAlong => held(walk, i).along ?? [0, 0, 1]);
+      const heights = along.map((at, i) => {
+        if (i === 0) return member.elevation;
+        const now = i === length - 1 ? held(up.heights, i) : pointAt(route, at, up.along).elevation;
+        const ground = groundUnder(chunks, self, held(walk, i));
+        return grounded ? ground : Math.max(member.elevation + (now - upFrom), ground);
+      });
+      out = { heights, along };
+    }
+    known.set(m, out);
+    return out;
+  };
+  const walked = walkOf(id);
+  if (walked) return walked.heights.map((h, j) => (j === 0 ? null : h));
   const walk = file.get(id) ?? [];
   const n = lead.length - 1;
   return walk.map((p, j) => {
