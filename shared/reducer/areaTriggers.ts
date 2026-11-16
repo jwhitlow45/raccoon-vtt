@@ -6,7 +6,7 @@ import { convexHull, creaturesInArea, resolveArea, type AreaContext, type AreaTe
 import { walkerFor } from "../rules/attach.ts";
 import { describeMove, type MovedToken } from "../rules/moveLeg.ts";
 import { cornerAt, hexAt, hexCenter, hexCorners, type Hex, type HexGrid } from "../rules/hex.ts";
-import { hexPiece, legAt, pieceReach, placedOnTrace, pointAt, routePoints, type FileAlong, type HexPiece, type RoutePoint } from "../rules/route.ts";
+import { hexPiece, legAt, pieceReach, placedOnTrace, routePoints, walkAt, type FileAlong, type HexPiece, type RoutePoint } from "../rules/route.ts";
 import { footprintRect, isSqueezed, occupiedHexes, occupiedRange, type PlacedToken } from "../rules/footprint.ts";
 import type { Point, Rect } from "../rules/geom.ts";
 import { convexLive, fogClassOf, pendingGround } from "../rules/held.ts";
@@ -476,7 +476,7 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
       const t = k / n;
       if (t <= 1e-9 || g.shape !== "hex") return { spot: points[leg]!, piece: Math.max(0, leg - 1), end: leg > 0 };
       const hp = routedPieceOf(g, walk, leg + 1);
-      return { spot: { ...hp.at(t), elevation: pointAt(points, now, walk.along).elevation }, piece: leg, end: t >= 1, squeezed: hp.squeezedAt(t) };
+      return { spot: { ...hp.at(t), elevation: walkAt(walk, now).elevation }, piece: leg, end: t >= 1, squeezed: hp.squeezedAt(t) };
     }
     if (!routed && g.shape === "hex") {
       const a = points[0]!;

@@ -252,13 +252,29 @@ export function pointAt(route: readonly RoutePoint[], at: FileAlong, along?: rea
 }
 
 /**
+ * Where a walk the move takes along is when its group's lead's walk is `at`
+ * along (`FileAlong`), by its own moments where it has them, from op version
+ * 62 (moveLeg.ts MovedToken `along`, migrate.ts followsHexByHex): its point
+ * on the leg of its route it is on then (`pointAt`). The one reading of a
+ * walk with moments of its own at a moment of its lead's walk: the move's
+ * heights (moveLeg.ts heightAlong), the area sweep (areaTriggers.ts
+ * alongGroups), the trap step's moments, the heights its triggers read at
+ * each spot and its holders' heights (traps.ts placedIn, elevationRule,
+ * holderHeight) and the device (`fileHeightsAlong`) all read it, so none
+ * can take another rule for one kind of walk (review HEXFILE-ASTRA-7).
+ */
+export function walkAt(walk: { readonly route: readonly RoutePoint[]; readonly along?: readonly FileAlong[] | undefined }, at: FileAlong): RoutePoint {
+  return pointAt(walk.route, at, walk.along);
+}
+
+/**
  * The device's heights for the walk in single file hex by hex of member
  * `id` (hexWalk.ts fileBlocked, drop.ts), worked out as the move works
  * them out (moveLeg.ts follow), holder before member, so the device and
  * the server read each point alike (review HEXFILE-OPUS-9): the lead at
  * the heights of its walk `lead`, what rides at its holder's heights by
  * its own change, and one walking hex by hex at its holder's heights read
- * at the point's moment (`pointAt`), its last point at its holder's last,
+ * at the point's moment (`walkAt`), its last point at its holder's last,
  * its walk held at its end to its holder's length as the move holds it. A
  * goblin that comes down to its holder's end height before the lead ends
  * then takes a rat it drags down with it on the device too. The device's
@@ -302,7 +318,7 @@ export function fileHeightsAlong(
       const along = Array.from({ length }, (_, i): FileAlong => held(walk, i).along ?? [0, 0, 1]);
       const heights = along.map((at, i) => {
         if (i === 0) return member.elevation;
-        const now = i === length - 1 ? held(up.heights, i) : pointAt(route, at, up.along).elevation;
+        const now = i === length - 1 ? held(up.heights, i) : walkAt({ route, along: up.along }, at).elevation;
         const ground = groundUnder(chunks, self, held(walk, i));
         return grounded ? ground : Math.max(member.elevation + (now - upFrom), ground);
       });
