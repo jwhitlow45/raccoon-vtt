@@ -206,29 +206,56 @@ async function releaseGuard(guard: string): Promise<void> {
   await rm(aside, { recursive: true, force: true });
 }
 
-async function readGuard(guard: string): Promise<z.infer<typeof GuardRecord> | "unreadable" | "gone"> {
-  let text: string;
-  try {
-    text = await readFile(join(guard, "owner.json"), "utf8");
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") {
-      // The guard went between our look and our read, or holds no record.
-      try {
-        statSync(guard);
-        return "unreadable";
-      } catch {
-        return "gone";
-      }
+/** How a guard is read, so a test can replay a race. */
+export type GuardIo = { readRecord: (guard: string) => Promise<string>; exists: (guard: string) => boolean };
+
+const guardIo: GuardIo = {
+  readRecord: (guard) => readFile(join(guard, "owner.json"), "utf8"),
+  exists: (guard) => {
+    try {
+      statSync(guard);
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw err;
     }
-    return "unreadable";
+  },
+};
+
+/** How many times a guard that is there without its record is read before it counts as unreadable. */
+export const GUARD_READS = 3;
+
+/**
+ * The guard's owner record. A guard is made whole by one rename, so one
+ * found there without its record was swapped between the read and the look:
+ * its owner moved it aside, and another contender's took its place. That
+ * newer guard is read again at once, a few times at most and never after a
+ * wait, and only one that stays without a record is unreadable.
+ */
+export async function readGuard(guard: string, io: GuardIo = guardIo): Promise<z.infer<typeof GuardRecord> | "unreadable" | "gone"> {
+  for (let read = 0; read < GUARD_READS; read++) {
+    let text: string;
+    try {
+      text = await io.readRecord(guard);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "unreadable";
+      let there: boolean;
+      try {
+        there = io.exists(guard);
+      } catch {
+        return "unreadable";
+      }
+      if (!there) return "gone";
+      continue;
+    }
+    try {
+      const parsed = GuardRecord.safeParse(JSON.parse(text));
+      return parsed.success ? parsed.data : "unreadable";
+    } catch {
+      return "unreadable";
+    }
   }
-  try {
-    const parsed = GuardRecord.safeParse(JSON.parse(text));
-    return parsed.success ? parsed.data : "unreadable";
-  } catch {
-    return "unreadable";
-  }
+  return "unreadable";
 }
 
 export async function acquireLock(path: string, opts: LockOptions): Promise<LockOutcome> {
