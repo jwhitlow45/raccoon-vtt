@@ -12,7 +12,7 @@ import { sameScene } from "./floors.ts";
 import { climbKeepsSqueeze } from "./floorLinks.ts";
 import { footing, footprintGround } from "./heights.ts";
 import { groundUnder, hexFullStop, landing, legSpots, legStop, offGridWallThrough, storedBuild, walkEnd, type MovingToken } from "./movement.ts";
-import { fileRoutes, followerTrace, hexFileClasses, hexFileRoutes, latestAlong, pieceReach, routeWalkers, walkSqueezes, type FileAlong, type FilePoint as AlongPoint, type RoutePoint, type WalkTrace } from "./route.ts";
+import { fileRoutes, followerTrace, hexFileClasses, hexFileRoutes, pieceReach, pointAt, routeWalkers, walkSqueezes, type FileAlong, type FilePoint as AlongPoint, type RoutePoint, type WalkTrace } from "./route.ts";
 import { ownEntry } from "../records.ts";
 
 /**
@@ -514,16 +514,16 @@ function held<T>(walk: readonly T[] | undefined, length: number): readonly T[] |
 
 /**
  * A holder's height where its group's lead's walk is `at` (route.ts
- * FileAlong): on a walk of its own hex by hex at its latest point reached
- * by then, else between the points of the lead's piece by its share, as a
- * walk's spots rise between them.
+ * FileAlong): between the ends of the leg it is on then (route.ts
+ * pointAt), on a walk of its own hex by hex by how far the lead has gone
+ * between the moments it reaches them, else between the points of the
+ * lead's piece by its share, as a walk's spots rise between them. The
+ * device reads a holder up the chain so (route.ts fileHeightsAlong), so a
+ * rat a dragged goblin drags comes down with them on the server as on the
+ * device (review HEXFILE-OPUS-8).
  */
 function heightAlong(holder: MovedToken, at: FileAlong): number {
-  const route = holder.route;
-  if (holder.along) return route[Math.min(route.length - 1, latestAlong(holder.along.map((a) => ({ along: a })), at))]!.elevation;
-  const a = route[Math.min(at[0], route.length - 1)]!;
-  const b = route[Math.min(at[0] + 1, route.length - 1)]!;
-  return a.elevation + ((b.elevation - a.elevation) * at[1]) / (at[2] || 1);
+  return pointAt(holder.route, at, holder.along).elevation;
 }
 
 /** A holder's move to another floor of the member's scene, by an op of the floors' version (migrate.ts floorsOps). */
