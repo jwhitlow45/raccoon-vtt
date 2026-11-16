@@ -1028,9 +1028,11 @@ function followersOf(state: WalkersState, lead: Walker, points: readonly RoutePo
   // holder's piece each leg ends on.
   const byHex = new Map(
     linked.flatMap((w) => {
-      const own = file?.get(w.id);
-      if (!own?.some((p) => p.along)) return [];
+      const walk = file?.get(w.id);
+      if (!walk?.some((p) => p.along)) return [];
       const heights = fileHeightsAlong(state.buildChunks, from, memberOf, file!, w.id, points);
+      // Held at its end to as many points as its heights, as the move holds it to its holder's walk (moveLeg.ts follow).
+      const own = heights.length > walk.length ? [...walk, ...Array.from({ length: heights.length - walk.length }, () => walk[walk.length - 1]!)] : walk;
       const route = own.map((p, j): RoutePoint => (j === 0 ? { x: w.x, y: w.y, elevation: w.elevation } : { x: p.x, y: p.y, elevation: heights[j] ?? groundUnder(state.buildChunks, followerTrace(w, [w])[0]!, p) }));
       // Its leg to point j ends within the holder's piece to its point `piece + 1`, and only its start is reached before any.
       const piece = own.map((p) => (p.along && p.along[1] > 0 ? p.along[0] + 1 : 0));

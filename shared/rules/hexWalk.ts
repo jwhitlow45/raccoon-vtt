@@ -597,15 +597,17 @@ export class HexWalkWorld {
       // Each spot as the move takes it along: at the height its holders' walk gives it there (route.ts fileHeightsAlong), on its
       // ground where that is not followed.
       const along = walk.some((p) => p.along) ? fileHeightsAlong(build.buildChunks, this.#lead, (m) => this.#members.get(m), file, t.walker.id, walked) : null;
+      // Held at its end to as many points as its heights, as the move holds it to its holder's walk (moveLeg.ts follow).
+      const count = Math.max(walk.length, along?.length ?? 0);
       const at = (k: number): Walker => {
         if (k === 0) return t.walker;
-        const p = walk[k]!;
+        const p = walk[Math.min(k, walk.length - 1)]!;
         const height = along ? along[k]! : followedHeight(build.buildChunks, this.#lead, (m) => this.#members.get(m), t.walker.id, fileShift(file, memberOf, k, { x: points[k]!.x - token.x, y: points[k]!.y - token.y }), leadAt(k));
         return { ...t.walker, x: p.x, y: p.y, elevation: height ?? hexesGround(build.buildChunks, token.sceneId, [tokenRefHex(g, { ...t.walker, ...p })]) };
       };
       const size = sizeCategory(t.walker);
       let from = at(0);
-      for (let k = 1; k < walk.length; k++) {
+      for (let k = 1; k < count; k++) {
         const to = at(k);
         const line = hexLine(g, tokenRefHex(g, from), tokenRefHex(g, to));
         if (!line.every((ref) => this.standable({ size, ref })) || legStop(build, from, { x: to.x, y: to.y, elevation: to.elevation, squeeze: false }) !== null) return t.walker.id;
