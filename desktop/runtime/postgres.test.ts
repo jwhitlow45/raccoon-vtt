@@ -924,6 +924,8 @@ describe("a postmaster by its command line", () => {
       ["the launcher exec'ing another program", line(`/bin/sh -c ${exec("/usr/local/bin/postgres", "/data/postgres")}`), "darwin"],
     ];
     for (const [what, p, on] of cases) assert.equal(await kind(p, data, on), "loose", what);
+    const spaced = args([unix.postgres!, "-D", "/data/Tést", "Жук/postgres", "-p", "5"], unix.postgres);
+    assert.equal(await kind(spaced, ["/data/Tést Жук/postgres"], "linux"), "loose", "Linux: the folder's name split across two arguments, which a joined line can't tell apart");
     const folders = ["C:\\data\\postgres"];
     const winCases: [string, ListedProcess][] = [
       ["another cluster, in a folder whose name starts with this one's", line('"C:/pg/postgres.exe" -D "C:/data/postgres other" -p 5', windows.postgres)],
