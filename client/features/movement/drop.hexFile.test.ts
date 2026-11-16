@@ -7,11 +7,15 @@ import { applyOp } from "#shared/reducer.ts";
 import { occupiedHexes } from "#shared/rules/footprint.ts";
 import { hexCenter, hexKey, hexNeighbors, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, wallsRound } from "#shared/rules/hexWalls.testkit.ts";
-import { hexStandPlace } from "#shared/rules/movement.ts";
+import { findRouteOn, routeWorld } from "#shared/rules/hexWalk.ts";
+import { planWalks } from "#shared/rules/moveLeg.ts";
+import { hexStandAt, hexStandPlace, ownWalk } from "#shared/rules/movement.ts";
 import { WorkBudget } from "#shared/rules/walk.ts";
+import { groupWalkWorld } from "#shared/rules/walkWorld.ts";
 import { actor, env, P1 } from "#shared/testutil.ts";
 import { RoomScope } from "../../state/scope.ts";
-import { moveOpsOf, stopText, type DropPlan } from "./drop.ts";
+import { walkersFor } from "../attach/walk.ts";
+import { cutForWalkers, dropView, moveOpsOf, stopText, type DropPlan } from "./drop.ts";
 import { RouteWork, type Frames } from "./routeWork.ts";
 import { dragStops, type DragDeps } from "./stageHooks.ts";
 
@@ -165,3 +169,33 @@ for (const [name, g] of [
     });
   });
 }
+
+describe("the board holds a walk in single file hex by hex to as many points as its heights, as the move holds it (drop.ts followersOf, hexWalk.ts fileBlocked, review HEXFILE-ASTRA-5)", () => {
+  for (const [name, g] of [
+    ["hex rows", ROWS],
+    ["hex columns", COLUMNS],
+  ] as const) {
+    test(`${name}: the warhorse flies down from 40 ft into the corridor dragging the goblin, which drags a rat from the corridor's mouth, and the board lets the drop go where the server takes the move`, () => {
+      const { s, path } = keep(g, 1, 0, "horse");
+      s.tokens.rat = onHex(g, "rat", "tiny", path[0]!, { name: "Rat", kind: "npc", ownerIds: ["p1"], attached: { to: "gob", kind: "drag" } });
+      for (const id of Object.keys(s.tokens)) s.tokens[id] = { ...s.tokens[id]!, elevation: 40 };
+      const horse = s.tokens.horse!;
+      const inside = hexStandPlace(g, horse, { size: hexStandAt(g, horse, horse, true).size, ref: path[4]!, squeezed: true });
+      const found = findRouteOn({ ...groupWalkWorld(s, ownWalk(horse), { role: "player" }).input, towed: [] }, inside);
+      assert.ok(found && found !== "none", "a way in for the warhorse alone");
+      const route = found.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
+      const op = { t: "token.move" as const, tokenId: "horse", ...inside, squeeze: true as const, elevation: 0, route };
+      const allowed = canApply(op, P1, s, { canUseAsset: () => true });
+      assert.ok(allowed.ok, allowed.ok ? "" : allowed.message);
+      // The rat's walk has fewer points than the goblin's, which the move holds it to at its end, coming down there.
+      const rat = planWalks(op, s, P1, {}).find((m) => m.tokenId === "rat")!;
+      assert.deepEqual(rat.route.map((p) => Math.round(p.elevation * 1e9) / 1e9), [40, 30, 20, 0]);
+      const copy = projectState(s, P1, { sceneId: "s1" }) as unknown as RoomState;
+      const plan: DropPlan = { moves: [{ tokenId: "horse", x: inside.x, y: inside.y, elevation: 0, squeeze: true, route }], stop: null, held: [] };
+      const cut = cutForWalkers(dropView(copy, "player"), copy.tokens.horse!, plan, walkersFor(copy, "horse", "player"), "walk");
+      assert.equal(cut.stop, null, `the drop's own check: ${JSON.stringify(cut.stop)}`);
+      const points = [{ x: horse.x, y: horse.y }, ...route.map(([x, y]) => ({ x, y }))];
+      assert.equal(routeWorld(groupWalkWorld(copy, ownWalk(copy.tokens.horse!), { role: "player" }).input).fileBlocked(points), null, "the route search's own check");
+    });
+  }
+});
