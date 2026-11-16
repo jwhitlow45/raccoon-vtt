@@ -2017,6 +2017,8 @@ On `SIGTERM`, in order:
 
 All of this happens within 25 s.
 
+**As built.** Step 1 is Fastify's: from the start of the close it answers each new request with 503 and closes its connection, while the server keeps listening until the sockets of step 2 have closed. The socket layer's preClose (server/rooms/ws.ts) first drops the upgrade listener, so a page reconnecting at once on 1012 is such a request too. With the listener in place Fastify sends that 503 before any hook runs, `@fastify/websocket` never destroys the refused socket, and the socket stays half open once the page hangs up. The server's close waits for every connection, and steps 3 and 4 run only after it, so in live play 44 every stop with two devices on waited out the 25 s and saved no room (LP44-OPS-1). Once the sockets have closed or been cut off, every HTTP connection closes too, a request in flight included, since one still running when the server stops listening keeps its connection through the 95 s keep-alive. Each step logs its end with the ms since the stop began, from "shutting down" to "shut down", and a stop that reaches 25 s logs "shutdown did not finish in time: forced exit" and exits 1, as a failed stop does. server/shutdown.itest.ts stops the real server with a phone slow to answer, a page reconnecting and fetching through the stop, and an upload in flight.
+
 ### 15.5 Configuration
 
 | Variable | Required | Purpose |
