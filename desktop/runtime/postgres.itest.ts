@@ -106,11 +106,16 @@ describe("the cluster", () => {
     assert.equal(dbConfig("postgres://x", RESTORE_STATEMENT_MS).statement_timeout, RESTORE_STATEMENT_MS);
   });
 
-  test("the process listing knows the running postmaster by its command line, as the one postmaster.pid names, and the stop proves it ended", async () => {
+  test("the process listing knows the running postmaster, the one postmaster.pid names, as exactly what pg_ctl starts, and the stop proves it ended", async () => {
     const c = await cluster();
     const pid = Number((await readFile(join(c.dir, "postgres", "postmaster.pid"), "utf8")).split(/\r?\n/)[0]);
-    // A child forked that moment carries the postmaster's command line until it renames itself, so it may be listed too.
-    assert.ok((await c.cluster.postmasters()).some((p) => p.pid === pid), "this folder's postmaster");
+    // A child forked that moment carries the postmaster's command line until it renames itself, so it may be listed too, and exact too.
+    const found = await c.cluster.postmasters();
+    const listing = JSON.stringify(found);
+    assert.equal(found.find((p) => p.pid === pid)?.exact, true, `this folder's postmaster, exactly as pg_ctl starts it: ${listing}`);
+    assert.deepEqual(found.filter((p) => !p.exact), [], "nothing that only names the folder");
+    // On Windows the cmd.exe pg_ctl started it through waits on it, and is exactly pg_ctl's launcher.
+    if (platform === "win32") assert.ok(found.some((p) => p.pid !== pid && p.exact && /cmd\.exe/i.test(p.commandLine)), `the launcher: ${listing}`);
     await c.cluster.stop();
     assert.deepEqual(await c.cluster.postmasters(), []);
   });
