@@ -822,7 +822,8 @@ describe("a start", { skip: posixOnly }, () => {
     let stopped = false;
     const stopping = withVars(vars, () => c.stop()).then(() => (stopped = true));
     try {
-      await until("the end unconfirmed, and immediate asked again", async () => unconfirmed.length > 0 && (await calls()).filter((call) => call === "pg_ctl stop immediate").length >= 2);
+      // A stop that ends early ends each wait too, so a killed postmaster fails on the check that names it.
+      await until("the end unconfirmed, and immediate asked again", async () => stopped || (unconfirmed.length > 0 && (await calls()).filter((call) => call === "pg_ctl stop immediate").length >= 2));
       assert.equal(isAlive(child), true, "it was never killed");
       assert.equal(forked.signalCode, null, "nor was the child it forked, while it runs named");
       assert.equal(stopped, false, "the stop holds while it runs");
@@ -834,7 +835,7 @@ describe("a start", { skip: posixOnly }, () => {
       // With its postmaster.pid gone it is no longer named, but it was, so it may have children, and it ends itself within a minute.
       await rm(join(dir, "postgres", "postmaster.pid"));
       const seen = listings;
-      await until("two passes without the file", () => listings >= seen + 2);
+      await until("two passes without the file", () => listings >= seen + 2 || stopped);
       assert.equal(isAlive(child), true, "a postmaster the file once named is never killed");
       assert.equal(stopped, false);
     } finally {
@@ -894,11 +895,12 @@ describe("a start", { skip: posixOnly }, () => {
     let stopped = false;
     const stopping = c.stop().then(() => (stopped = true));
     try {
-      await until("two passes while the file can't be read", () => listing.count() >= 2);
+      // A stop that ends early ends each wait too, so a killed postmaster fails on the check that names it.
+      await until("two passes while the file can't be read", () => listing.count() >= 2 || stopped);
       assert.equal(isAlive(child), true, "never killed while postmaster.pid can't be read");
       await rmdir(file);
       const seen = listing.count();
-      await until("two passes without the file, and the end unconfirmed", () => listing.count() >= seen + 2 && unconfirmed.length > 0);
+      await until("two passes without the file, and the end unconfirmed", () => (listing.count() >= seen + 2 && unconfirmed.length > 0) || stopped);
       assert.equal(isAlive(child), true, "nor once it is gone");
       assert.equal(stopped, false, "the stop holds while it runs");
       assert.deepEqual(unconfirmed, [true]);
@@ -921,11 +923,20 @@ describe("a start", { skip: posixOnly }, () => {
     const c = cluster(dir, bin, lookup({ stamp: async () => (++reads === 1 ? 1 : 2) }), { platform: "darwin" });
     const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_READYAFTER: "0.3" });
     assert.equal(error, null);
+    const child = await pid(postmaster);
     await rm(join(dir, "postgres", "postmaster.pid"));
-    const began = Date.now();
-    await c.stop();
-    assert.ok(Date.now() - began < 10_000, "the stop did not wait on it");
-    assert.equal(await ended(await pid(postmaster)), true, "an exact postmaster no record spares and no file names is killed");
+    const stopping = c.stop();
+    let bound: NodeJS.Timeout | undefined;
+    try {
+      // Bounded below the test's timeout, so a stop that waits on it fails on this check.
+      const done = await Promise.race([stopping.then(() => true), new Promise<boolean>((resolve) => (bound = setTimeout(() => resolve(false), 10_000)))]);
+      assert.equal(done, true, "the stop did not wait on it");
+      assert.equal(await ended(child), true, "an exact postmaster no record spares and no file names is killed");
+    } finally {
+      clearTimeout(bound);
+      end(child);
+      await stopping;
+    }
   });
 
   test("a kept pid whose start reading can't be read now is still spared", { timeout: 15_000 }, async () => {
@@ -940,9 +951,11 @@ describe("a start", { skip: posixOnly }, () => {
     assert.equal(error, null);
     const child = await pid(postmaster);
     await rm(join(dir, "postgres", "postmaster.pid"));
-    const stopping = c.stop();
+    let stopped = false;
+    const stopping = c.stop().then(() => (stopped = true));
     try {
-      await until("three passes", () => listing.count() >= 3);
+      // A stop that ends early ends the wait too, so a killed postmaster fails on the check that names it.
+      await until("three passes", () => listing.count() >= 3 || stopped);
       assert.equal(isAlive(child), true, "never killed");
     } finally {
       end(child);
