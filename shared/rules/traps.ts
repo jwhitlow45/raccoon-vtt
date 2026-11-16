@@ -1541,6 +1541,19 @@ export function trapMoments(op: Op, before: TrapRoom, actor: Viewer, env: { opVe
   return (p) => roomAt(momentAt(before, walks.byId, p, new Map())).tokens;
 }
 
+/**
+ * Each walk's height at each of its spots as the trap step's triggers judge
+ * it there, a floor's contact included (`walkEvents`), by token id, for the
+ * tests.
+ */
+export function trapSpotHeights(op: Op, before: TrapRoom, actor: Viewer, env: { opVersion?: number }): Map<string, number[]> {
+  const sceneId = walkScene(op, before);
+  if (sceneId === null || !walkOp(op)) return new Map();
+  const entries = trapPlan(op, before, actor, env).filter((e) => e.from.sceneId === sceneId && e.to.sceneId === sceneId);
+  const walks = walksOf(op, before, entries, seenByAll(before, env), env.opVersion);
+  return new Map(walks.all.map((w) => [w.token.id, w.spots.map((_, j) => w.elevation(j))]));
+}
+
 function spotAt(walk: Walk, j: number): { x: number; y: number; progress: Progress } {
   const s = walk.spots[j]!;
   return { x: s.x + walk.ox, y: s.y + walk.oy, progress: s.progress };

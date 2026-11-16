@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { CreatureSize, RoomState, Token } from "../model.ts";
 import { canApply } from "../permissions.ts";
 import type { OpOf } from "../protocol.ts";
-import { followsHexByHex, HEX_FILE_OP_VERSION, OP_VERSION, opMigrations, runMigrations } from "../migrate.ts";
+import { followsHexByHex, HEX_FILE_OP_VERSION, OP_VERSION, opMigrations, runMigrations, stopsLandNamed } from "../migrate.ts";
 import { applyOp } from "../reducer.ts";
 import { movementRules } from "../ruleHooks.ts";
 import { DM, entry, env, P1, template, token, trap } from "../testutil.ts";
@@ -14,7 +14,7 @@ import { COLUMNS, hexWallRoom, onHex, ROWS, sideWall, wallsRound } from "./hexWa
 import { checkSetReach, planMove, planWalks } from "./moveLeg.ts";
 import { hexStandAt, hexStandHexes, hexStandPlace, ownWalk } from "./movement.ts";
 import { compareAlong, fileHeightsAlong, hexFileClasses, hexFileRoutes, pieceReach, pointAt, routeWalkers, seatShift } from "./route.ts";
-import { planTrapMove, trapLandings, trapWalks } from "./traps.ts";
+import { planTrapMove, trapLandings, trapMoments, trapSpotHeights, trapWalks } from "./traps.ts";
 import { intoCorridor, keepOf } from "../reducer/hexFile.testkit.ts";
 
 /**
@@ -801,6 +801,9 @@ describe("a stop lands what rides the named token, and what that drags, where th
         assert.equal(r.state.tokens.gob!.attached?.to, "bree", `${who}: Bree still drags the goblin`);
         const landed = trapLandings(op, s, actor, {});
         for (const id of ["horse", "bree", "gob"]) assert.equal(landed.get(id)!.elevation, r.state.tokens[id]!.elevation, `${who}: ${id} where the trap step lands it`);
+        // Before op 62 (migrate.ts stopsLandNamed) the trap step landed Bree by the warhorse's stop spot as it had it there, above the
+        // ground the cut lands the warhorse on, as it ran.
+        assert.ok(trapLandings(op, s, actor, { opVersion: 61 }).get("bree")!.elevation > 0, `${who}: op 61 lands Bree as it ran`);
       }
     });
   }
@@ -834,6 +837,52 @@ describe("the trap step reads a walk hex by hex where the move has it at the mom
           const sprung = planTrapMove(op, s, actor, {}).springings.find((x) => x.trap.id === "ball")!;
           assert.deepEqual(sprung.by, ["gob", "horse"], `${at}: the warhorse and the goblin set it off`);
           assert.deepEqual(sprung.hits, hits, `${at}: hits ${JSON.stringify(sprung.hits)}`);
+        }
+      }
+    });
+  }
+});
+
+describe("the trap step reads a walk the move takes along by its holder's moments where the move has it, in the file or not (traps.ts placedIn, elevationRule, review HEXFILE-ASTRA-7)", () => {
+  for (const [name, g] of GRIDS) {
+    test(`${name}: a hidden ogre the goblin drags behind the warhorse coming down from 40 ft into the keep is hit by a sphere at 7 ft over the corridor's hex 1, where the move has it as the warhorse sets the trap off`, () => {
+      for (const [who, actor] of [["Pat", P1], ["the DM", DM]] as const) {
+        for (const v of [61, 62]) {
+          const at = `${who}, op ${v}`;
+          const { s, path } = keepOf(g, 1, 0, "horse");
+          s.tokens.horse = { ...s.tokens.horse!, elevation: 40 };
+          s.tokens.gob = { ...s.tokens.gob!, elevation: 40 };
+          s.tokens.ogre = { ...onHex(g, "ogre", "large", { col: 6, row: 6 }, { name: "Ogre", kind: "npc", visibility: "dm", attached: { to: "gob", kind: "drag" } }), elevation: 40 };
+          assert.ok(linkHolds(g, s.meta.settings, "drag", s.tokens.ogre, s.tokens.gob), `${at}: the goblin drags the ogre`);
+          const { shape, size, origin, yaw, includeOrigin } = template("ball", { shape: "sphere", size: 5, origin: { ...hexCenter(g, path[1]!), z: 7 }, includeOrigin: true });
+          s.traps.ball = trap("ball", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", zone: { cells: [{ x: path[3]!.col, y: path[3]!.row, w: 1, h: 1 }] }, rig: { on: ["enter"], who: "any", floor: false, resets: "never", stops: false, foundOnSpring: true, hits: { area: { shape, size, origin, yaw, includeOrigin } }, actions: [], find: [], notice: false } });
+          const op = { ...intoCorridor(g, s, path[4]!), elevation: 0 };
+          const allowed = canApply(op, actor, s, { canUseAsset: () => true });
+          assert.ok(allowed.ok, `${at}: ${allowed.ok ? "" : allowed.message}`);
+          const ogre = planWalks(op, s, actor, { opVersion: v }).find((m) => m.tokenId === "ogre")!;
+          const sprung = planTrapMove(op, s, actor, { opVersion: v }).springings.find((x) => x.trap.id === "ball")!;
+          assert.deepEqual(sprung.by, ["horse"], `${at}: the warhorse sets it off`);
+          if (v === 61) {
+            // Before op 62 the ogre walked by its place, one leg, and the trap step read it on its start.
+            assert.equal(ogre.along, undefined, `${at}: no moments of its own`);
+            assert.deepEqual(sprung.hits, [], `${at}: as it ran`);
+            continue;
+          }
+          assert.ok(ogre.along, `${at}: the goblin's moments`);
+          if (actor === P1) {
+            // Pat's move stops a creature players cannot see at the rock, here at its start, as it was.
+            assert.deepEqual(ogre.route.map((p) => p.elevation), [40], `${at}: the ogre stays at 40 ft on its start`);
+            assert.deepEqual(sprung.hits, [], `${at}: out of the sphere`);
+            continue;
+          }
+          assert.deepEqual(ogre.route.map((p) => p.elevation), [40, 30, 20, 0], `${at}: the ogre comes down with the goblin`);
+          const moment = [0, 2, 3] as const;
+          assert.ok(Math.abs(pointAt(ogre.route, moment, ogre.along).elevation - 20 / 3) < 1e-9, `${at}: the move has it at 6.67 ft at 0/2/3`);
+          assert.ok(Math.abs(trapMoments(op, s, actor, {})(moment).ogre!.elevation - 20 / 3) < 1e-9, `${at}: and so does the trap step, not at 20 ft on its latest point`);
+          assert.deepEqual(sprung.hits, ["ogre"], `${at}: the sphere hits it`);
+          const heights = trapSpotHeights(op, s, actor, {}).get("ogre")!;
+          const spots = trapWalks(op, s, actor, {}).find((w) => w.tokenId === "ogre")!.spots;
+          assert.deepEqual(heights, spots.map((p) => pointAt(ogre.route, p.progress, ogre.along).elevation), `${at}: its triggers read it at each spot where the move has it`);
         }
       }
     });
@@ -958,6 +1007,7 @@ describe("change format 62 (HEX_FILE_OP_VERSION)", () => {
     assert.ok(OP_VERSION >= 62);
     assert.equal(runMigrations(op, 61, 62, opMigrations), op);
     assert.deepEqual([followsHexByHex(1), followsHexByHex(61), followsHexByHex(62), followsHexByHex(undefined)], [false, false, true, true]);
+    assert.deepEqual([stopsLandNamed(1), stopsLandNamed(61), stopsLandNamed(62), stopsLandNamed(undefined)], [false, false, true, true]);
     assert.throws(() => runMigrations(op, 62, 61, opMigrations), /down/);
   });
 });
