@@ -224,6 +224,73 @@ export function latestAlong(walk: readonly { along?: FileAlong | undefined }[], 
   return found;
 }
 
+/** Where a walk is when its group's lead's walk is some way along: on its leg from point `leg` to the next, `k / n` of the way. */
+export type LegAt = { leg: number; k: number; n: number };
+
+/**
+ * Where a walk of `points` points is when its group's lead's walk is `at`
+ * along (`FileAlong`). A walk hex by hex reaches each point at a moment of
+ * its own (`along`), so it is on the leg whose ends it reaches before and
+ * after `at`, as far along that leg as the lead has gone between those two
+ * moments. Any other walk reaches its point i as the lead reaches its own,
+ * so `at` names its leg and its share. On its last point it stands there.
+ * The server's heights (moveLeg.ts heightAlong), the area sweep
+ * (areaTriggers.ts alongGroups) and the device (`fileHeightsAlong`) read
+ * a walk at a moment by this one rule, so none reads a height between two
+ * points the others do not (review HEXFILE-OPUS-8).
+ */
+export function legAt(points: number, at: FileAlong, along?: readonly FileAlong[]): LegAt {
+  const last = points - 1;
+  if (!along) {
+    const leg = Math.min(at[0], last);
+    return leg < last ? { leg, k: at[1], n: at[2] || 1 } : { leg, k: 0, n: 1 };
+  }
+  const of = (j: number) => along[Math.min(j, along.length - 1)]!;
+  let leg = 0;
+  for (let j = 1; j < points && compareAlong(of(j), at) <= 1e-9; j++) leg = j;
+  if (leg >= last) return { leg: last, k: 0, n: 1 };
+  const value = (a: FileAlong) => a[0] + a[1] / (a[2] || 1);
+  const span = value(of(leg + 1)) - value(of(leg));
+  return span > 1e-9 ? { leg, k: Math.min(span, Math.max(0, value(at) - value(of(leg)))), n: span } : { leg, k: 0, n: 1 };
+}
+
+/** A walk's point when its lead's walk is `at` along (`legAt`): between its leg's ends by how far along the leg it is, height and all. */
+export function pointAt(route: readonly RoutePoint[], at: FileAlong, along?: readonly FileAlong[]): RoutePoint {
+  const { leg, k, n } = legAt(route.length, at, along);
+  const a = route[leg]!;
+  const b = route[Math.min(route.length - 1, leg + 1)]!;
+  return { x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n, elevation: a.elevation + ((b.elevation - a.elevation) * k) / n };
+}
+
+/**
+ * The device's heights for the walk in single file hex by hex of member
+ * `id` (hexWalk.ts fileBlocked, drop.ts): each point after its start where
+ * the lead's walk `lead`, which started at `origin`, is as far along as the
+ * point is reached (`pointAt`), the last where it ends, at the height its
+ * holders up the chain give it there (`followedHeight`), as the move takes
+ * it along (moveLeg.ts follow). `startOf` is where each member starts, by
+ * default `memberOf`'s. Null at its start and at a point whose height is
+ * not followed, which each caller reads on its ground.
+ */
+export function fileHeightsAlong(
+  chunks: BuildState["buildChunks"],
+  from: FollowLead,
+  memberOf: (id: string) => Follower | undefined,
+  file: ReadonlyMap<string, readonly FilePoint[]>,
+  id: string,
+  lead: readonly RoutePoint[],
+  origin: Point,
+  startOf: (id: string) => Point | undefined = memberOf,
+): (number | null)[] {
+  const walk = file.get(id) ?? [];
+  const n = lead.length - 1;
+  return walk.map((p, j) => {
+    if (j === 0 || !p.along) return null;
+    const at = pointAt(lead, j === walk.length - 1 ? [n - 1, 1, 1] : p.along);
+    return followedHeight(chunks, from, memberOf, id, fileShiftAlong(file, startOf, p.along, { x: at.x - origin.x, y: at.y - origin.y }), at.elevation);
+  });
+}
+
 /** `fileShift` for the walks hex by hex: each member where its own walk has it at `at` along the holder's walk (`FileAlong`), and by `otherwise` with none. */
 export function fileShiftAlong(file: ReadonlyMap<string, readonly FilePoint[]>, memberOf: (id: string) => Point | undefined, at: FileAlong, otherwise: Point): (id: string) => Point {
   return (id) => {
