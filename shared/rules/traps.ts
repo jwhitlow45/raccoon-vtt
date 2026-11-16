@@ -2,7 +2,7 @@ import { CHUNK_CELLS, FOG_SUBCELLS, MIN_HEIGHT_FT, type BuildChunk, type CellRec
 import { chunkKey, wallMidpoint } from "../keys.ts";
 import { gridOfScene, playersToken, seenByNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
-import { fileStandsSnapped, followsInSingleFileOnHexes, stopsByCoveredSquares, stopsFileApart, stopsOnPublicGround, stopsOnTrap, stopsStandClear, stopsStandFullSize } from "../migrate.ts";
+import { fileStandsSnapped, followsHexByHex, followsInSingleFileOnHexes, stopsByCoveredSquares, stopsFileApart, stopsOnPublicGround, stopsOnTrap, stopsStandClear, stopsStandFullSize } from "../migrate.ts";
 import { isWritable } from "../writable.ts";
 import { creaturesInArea, type AreaToken } from "./aoe.ts";
 import { holderOf, insideHolder, linkHolds, onHolder, seatHolds, walkerFor } from "./attach.ts";
@@ -987,37 +987,48 @@ function placedAt(walk: Walk, j: number): Token {
 }
 
 /**
- * The token as it stands on spot `j` where a stop leaves it, `index`
- * giving the spot the stop leaves each walk on: a walk hex by hex level
- * with its holder where the stop lands the holder (`Walk.heightAt`,
- * `landedHeight`), since it may have reached that spot earlier and its
- * holder may land short of the stop's moment, at the stand before it
- * (review HEXFILE-OPUS-10, HEXFILE-ASTRA-4), else as at spot `j`
+ * The token as it stands on spot `j` where a stop leaves it (`StopRead`): a
+ * walk hex by hex level with its holder where the stop lands the holder
+ * (`Walk.heightAt`, `landedHeight`), since it may have reached that spot
+ * earlier and its holder may land short of the stop's moment, at the stand
+ * before it (review HEXFILE-OPUS-10, HEXFILE-ASTRA-4), else as at spot `j`
  * (`placedAt`). One that has not left its start keeps its own height there
  * (review FU45B-ASTRA-06). Walks hex by hex are on hexes, where no stop
  * moves a walk off its spot (`stopPose`).
  */
-function stoodAt(walk: Walk, j: number, index: (w: Walk) => number): Token {
+function stoodAt(walk: Walk, j: number, read: StopRead): Token {
   const at = placedAt(walk, j);
   const holder = walk.holder;
   if (!walk.heightAt || j === 0 || !holder) return at;
-  return { ...at, elevation: walk.heightAt(j, landedHeight(holder, index)) };
+  return { ...at, elevation: walk.heightAt(j, landedHeight(holder, read)) };
 }
 
 /**
- * A walk's height where a stop lands it, holder before member, as the cut
- * and the move then land it (moveLeg.ts follow): one the cut keeps a walk
- * of its own for, and the named token, on its spot at the stop
- * (`walkToStop`, cutOp), a walk hex by hex level with its holder there
- * (`stoodAt`), and what rides with no such walk by its holder's change, as
- * a hidden rider walking its own lattice lands on its holder however its
- * own spots fall.
+ * The token as a stop leaves it on its spot `j` (`stoodAt`), from op
+ * version 62 at the height it lands at (`landedHeight`), so what rides the
+ * named token lands on it where the cut lands it, on a squeezed footprint's
+ * ground too (review HEXFILE-ASTRA-6).
  */
-function landedHeight(walk: Walk, index: (w: Walk) => number): number {
+function stoppedAt(walk: Walk, j: number, read: StopRead): Token {
+  const at = stoodAt(walk, j, read);
+  return read.lands !== undefined ? { ...at, elevation: landedHeight(walk, read, j) } : at;
+}
+
+/**
+ * A walk's height where a stop lands it on its spot `j`, holder before
+ * member, as the cut and the move then land it (moveLeg.ts follow): the
+ * named token where the cut lands it (`StopRead.lands`), one the cut keeps a
+ * walk of its own for on its spot at the stop (`walkToStop`), a walk hex by
+ * hex level with its holder there (`stoodAt`), and what rides with no such
+ * walk by its holder's change, as a hidden rider walking its own lattice
+ * lands on its holder however its own spots fall.
+ */
+function landedHeight(walk: Walk, read: StopRead, j = read.index(walk)): number {
+  if (read.lands !== undefined && walk.token.id === walk.group.named) return read.lands;
   const holder = walk.holder;
   const kind = walk.token.attached?.kind;
-  if (holder && kind !== undefined && onHolder(kind) && !walk.heightAt && !inSingleFile(walk) && !keepsOwn(walk)) return landedHeight(holder, index) + (walk.token.elevation - holder.token.elevation);
-  return stoodAt(walk, index(walk), index).elevation;
+  if (holder && kind !== undefined && onHolder(kind) && !walk.heightAt && !inSingleFile(walk) && !keepsOwn(walk)) return landedHeight(holder, read) + (walk.token.elevation - holder.token.elevation);
+  return stoodAt(walk, j, read).elevation;
 }
 
 /** Each walk's token as the last moment placed it, which a walk stopped or ended stands at for every moment after. */
@@ -1363,7 +1374,21 @@ export type MovePlan = { springings: Springing[]; op: Op };
  * a walk stands at its spot there where that is not the spot itself: one
  * in single file on its snapped stand, and what rides on it (`stopPose`).
  */
-type Stop = { until: Progress; s: Progress; back?: ReadonlyMap<Walk, number>; at?: ReadonlyMap<Walk, Token> };
+type Stop = { until: Progress; s: Progress; back?: ReadonlyMap<Walk, number>; at?: ReadonlyMap<Walk, Token>; lands?: number };
+
+/**
+ * How a stop leaves its group's walks, as the poses it leaves them in read
+ * it: the spot of its own walk each stands on (`stopIndex`), and from op
+ * version 62 (migrate.ts followsHexByHex) the height the cut lands the named
+ * token at (`namedLanding`), which a walk on the ground squeezed short of
+ * its end takes off its squeezed footprint, not its spot's.
+ */
+type StopRead = { index: (w: Walk) => number; lands?: number };
+
+/** How `stop` leaves its group's walks (`StopRead`). */
+function readOf(stop: Stop): StopRead {
+  return { index: (w) => stopIndex(w, stop), ...(stop.lands !== undefined ? { lands: stop.lands } : {}) };
+}
 
 /**
  * The trap step's plan of a move (13.2 step 1): both passes, their events,
@@ -1393,7 +1418,7 @@ export function trapLandings(op: Op, before: TrapRoom, actor: Viewer, env: { opV
     const stop = parts.stops.get(walk.group.named);
     const moved = stop?.at?.get(walk);
     if (moved) out.set(walk.token.id, { x: moved.x, y: moved.y, elevation: moved.elevation });
-    else pose(stop ? stoodAt(walk, stopIndex(walk, stop), (w) => stopIndex(w, stop)) : placedAt(walk, walk.spots.length - 1));
+    else pose(stop ? stoppedAt(walk, stopIndex(walk, stop), readOf(stop)) : placedAt(walk, walk.spots.length - 1));
   }
   for (const walk of (parts.rest ?? parts.walks).all) if (!walk.isPublic) pose(placedAt(walk, walk.spots.length - 1));
   // A stop that stands the named token squeezed short of its walk's end lands it on the ground under its squeezed footprint, as
@@ -1442,8 +1467,10 @@ function trapMoveParts(op: Op, before: TrapRoom, actor: Viewer, env: { opVersion
         const s = forward ? stopAt(walks, group, event.at, before, seen, pit ? { walk: hit.walk, over: pit } : null) : stopBefore(walks, group, event.at, before, seen);
         // A stop where the group was going anyway changes nothing, so it is no stop (6.5).
         if (compareProgress(s, endOf(group)) >= 0) continue;
-        const back = fileApart(walks, group, s, before, seen);
-        const stop: Stop = { until: forward ? s : event.at, s, ...(back ? { back } : {}) };
+        // From op version 62 every pose the stop leaves reads the named token where its cut lands it (cutOp).
+        const lands = followsHexByHex(walks.opVersion) ? namedLanding(op, walks, group.named, s, before, seen)?.elevation : undefined;
+        const back = fileApart(walks, group, s, before, seen, lands);
+        const stop: Stop = { until: forward ? s : event.at, s, ...(back ? { back } : {}), ...(lands !== undefined ? { lands } : {}) };
         const at = stopPoses(walks, group, stop, before, seen);
         stops.set(group.named, at ? { ...stop, at } : stop);
       }
@@ -1794,7 +1821,7 @@ function movedIn(m: Moment, walk: Walk): Token | undefined {
  */
 function placedIn(m: Moment, walk: Walk): Token {
   const stop = m.stops.get(walk.group.named);
-  if (stop && compareProgress(m.p, stop.until) > 0) return stoodAt(walk, stopIndex(walk, stop), (w) => stopIndex(w, stop));
+  if (stop && compareProgress(m.p, stop.until) > 0) return stoppedAt(walk, stopIndex(walk, stop), readOf(stop));
   const at = placedAt(walk, latestIndex(walk.spots, m.p));
   return walk.heightAt ? { ...at, elevation: pointAt(walk.entry.route, m.p, walk.entry.along).elevation } : at;
 }
@@ -1822,19 +1849,7 @@ function roomAt(m: Moment): RoomState {
 function cutOp(op: Op, walks: Walks, stops: ReadonlyMap<string, Stop>, before: RoomState, seen: (id: string) => boolean): Op {
   const landing = (named: string): (RouteSpot & { elevation: number }) | null => {
     const stop = stops.get(named);
-    const group = walks.groups.get(named);
-    const walk = walks.byId.get(named);
-    if (!stop || !group || !walk || walk.teleport) return null;
-    const token = walkerFor(before, walk.token, (t) => seen(t.id), { opVersion: walks.opVersion, to: walk.entry.to });
-    const squeeze = op.t === "token.move" && op.tokenId === named && op.squeeze === true;
-    // The named token's own walk, as its stop's search read it when it walks as the group's head.
-    const stands = walk.holder ? routeStands(storedBuild(before, walks.opVersion), group.head.route, token, group.step, { squeeze, ...standRule(walks, before, walk.token.sceneId) }) : standSpots(walks, walk, before, seen);
-    if (stands.walk.length === 0) return null;
-    const i = latestIndex(stands.walk, stop.s);
-    const at = stands.spot(i);
-    // A walk on the ground reads the ground under the footprint its trace has there (route.ts routeWalk), and a stop squeezed there lands on the ground under the squeezed one, as every landing does (movement's landedElevation).
-    if (!at.squeezed || i === stands.walk.length - 1 || footing(before.buildChunks, token) !== "ground") return at;
-    return { ...at, elevation: footprintGround(before.buildChunks, { ...token, x: at.x, y: at.y, squeeze: true }) };
+    return stop ? namedLanding(op, walks, named, stop.s, before, seen) : null;
   };
   switch (op.t) {
     case "token.move": {
@@ -1869,6 +1884,29 @@ function cutOp(op: Op, walks: Walks, stops: ReadonlyMap<string, Stop>, before: R
     default:
       return op;
   }
+}
+
+/**
+ * Where a stop at `s` lands its group's named token (cutOp): on the spot of
+ * its own walk there, as its stop's search read it when it walks as the
+ * group's head, and a walk on the ground squeezed there on the ground under
+ * its squeezed footprint, as every landing is. Null for a teleport, or
+ * with no spot.
+ */
+function namedLanding(op: Op, walks: Walks, named: string, s: Progress, before: RoomState, seen: (id: string) => boolean): (RouteSpot & { elevation: number }) | null {
+  const group = walks.groups.get(named);
+  const walk = walks.byId.get(named);
+  if (!group || !walk || walk.teleport) return null;
+  const token = walkerFor(before, walk.token, (t) => seen(t.id), { opVersion: walks.opVersion, to: walk.entry.to });
+  const squeeze = op.t === "token.move" && op.tokenId === named && op.squeeze === true;
+  // The named token's own walk, as its stop's search read it when it walks as the group's head.
+  const stands = walk.holder ? routeStands(storedBuild(before, walks.opVersion), group.head.route, token, group.step, { squeeze, ...standRule(walks, before, walk.token.sceneId) }) : standSpots(walks, walk, before, seen);
+  if (stands.walk.length === 0) return null;
+  const i = latestIndex(stands.walk, s);
+  const at = stands.spot(i);
+  // A walk on the ground reads the ground under the footprint its trace has there (route.ts routeWalk), and a stop squeezed there lands on the ground under the squeezed one, as every landing does (movement's landedElevation).
+  if (!at.squeezed || i === stands.walk.length - 1 || footing(before.buildChunks, token) !== "ground") return at;
+  return { ...at, elevation: footprintGround(before.buildChunks, { ...token, x: at.x, y: at.y, squeeze: true }) };
 }
 
 /** Whether a walk is one in single file (moveLeg.ts singleFile). */
@@ -1933,7 +1971,7 @@ function cutWalks(walks: Walks, named: string, stop: Stop, points: number, befor
     const riders = seated.get(walk.token.id);
     if (walk.isPublic || !riders) continue;
     const on = riders.flatMap((t) => (landed.has(t.id) ? [{ token: t, at: landed.get(t.id)!.at(-1)! }] : []));
-    const route = seatingWalk(walk, stopIndex(walk, stop), on, isHex(walk.grid) && followsInSingleFileOnHexes(walks.opVersion), (w) => stopIndex(w, stop));
+    const route = seatingWalk(walk, stopIndex(walk, stop), on, isHex(walk.grid) && followsInSingleFileOnHexes(walks.opVersion), readOf(stop));
     routes.set(walk, route);
     (inSingleFile(walk) ? file : kept).set(walk.token.id, route);
     landed.set(walk.token.id, route);
@@ -1969,7 +2007,7 @@ type CutPoint = RoutePoint & { along?: FileAlong };
 
 /** A walk's own route to its spot at the stop (`stopIndex`), that spot where and as high as the trap step had it there (`Stop.at`). */
 function walkToStop(walk: Walk, stop: Stop): CutPoint[] {
-  return walkTo(walk, stopIndex(walk, stop), stop.at?.get(walk), (w) => stopIndex(w, stop));
+  return walkTo(walk, stopIndex(walk, stop), stop.at?.get(walk), readOf(stop));
 }
 
 /** A walk's spot at its group's stop: its latest at or before it, or the one it stepped back to (`fileApart`). */
@@ -2005,7 +2043,7 @@ function stopIndex(walk: Walk, stop: Stop): number {
  * What one met on the way up to the stop still counts, since it walked
  * there before it stepped back. Undefined where nothing steps back.
  */
-function fileApart(walks: Walks, group: Group, s: Progress, before: RoomState, seen: (id: string) => boolean): Map<Walk, number> | undefined {
+function fileApart(walks: Walks, group: Group, s: Progress, before: RoomState, seen: (id: string) => boolean, lands?: number): Map<Walk, number> | undefined {
   if (!stopsFileApart(walks.opVersion)) return undefined;
   const lead = walks.byId.get(group.named);
   const file = walks.all.filter((w) => w.group === group && inSingleFile(w));
@@ -2039,7 +2077,8 @@ function fileApart(walks: Walks, group: Group, s: Progress, before: RoomState, s
   };
   const settings = before.meta.settings;
   // Where each stands at its spot, on its snapped stand in the file (`stopPose`).
-  const poseAt = (w: Walk, j: number) => stopPose(walks, w, j, indexOf, before, seen) ?? stoodAt(w, j, indexOf);
+  const read: StopRead = { index: indexOf, ...(lands !== undefined ? { lands } : {}) };
+  const poseAt = (w: Walk, j: number) => stopPose(walks, w, j, read, before, seen) ?? stoppedAt(w, j, read);
   const drags = (w: Walk) => !inSingleFile(w) || !w.holder || linkHolds(w.grid, settings, "drag", poseAt(w, indexOf(w)), poseAt(w.holder, indexOf(w.holder)));
   // The latest spot of its walk at or before the stop that it may stop at in its holder's reach, the stop's spot without one.
   const inReach = (w: Walk) => {
@@ -2109,9 +2148,9 @@ function fileApart(walks: Walks, group: Group, s: Progress, before: RoomState, s
  * single file whose spot there is a stand only on its snapped spot
  * (route.ts StandRule.snaps) stands on that, at the height its rule gives
  * it there (`fileElevation`), and what rides on it, all the way up, moves
- * with it. `index` is the spot the stop leaves each holder on.
+ * with it. `read` gives the spot the stop leaves each holder on.
  */
-function stopPose(walks: Walks, walk: Walk, j: number, index: (w: Walk) => number, before: RoomState, seen: (id: string) => boolean): Token | undefined {
+function stopPose(walks: Walks, walk: Walk, j: number, read: StopRead, before: RoomState, seen: (id: string) => boolean): Token | undefined {
   const holder = walk.holder;
   if (!holder) return undefined;
   if (inSingleFile(walk)) {
@@ -2123,22 +2162,22 @@ function stopPose(walks: Walks, walk: Walk, j: number, index: (w: Walk) => numbe
   }
   const kind = walk.token.attached?.kind;
   if (keepsOwn(walk) || kind === undefined || !onHolder(kind)) return undefined;
-  const h = index(holder);
-  const up = stopPose(walks, holder, h, index, before, seen);
+  const h = read.index(holder);
+  const up = stopPose(walks, holder, h, read, before, seen);
   if (!up) return undefined;
-  const was = stoodAt(holder, h, index);
-  const own = stoodAt(walk, j, index);
+  const was = stoodAt(holder, h, read);
+  const own = stoodAt(walk, j, read);
   return { ...own, x: own.x + (up.x - was.x), y: own.y + (up.y - was.y), elevation: own.elevation + (up.elevation - was.elevation) };
 }
 
 /** Where a stop leaves each walk of its group off its spot (`stopPose`), or undefined where it leaves each on its spot. */
 function stopPoses(walks: Walks, group: Group, stop: Stop, before: RoomState, seen: (id: string) => boolean): Map<Walk, Token> | undefined {
   if (!fileStandsSnapped(walks.opVersion)) return undefined;
-  const index = (w: Walk) => stopIndex(w, stop);
+  const read = readOf(stop);
   const out = new Map<Walk, Token>();
   for (const walk of walks.all) {
     if (walk.group !== group) continue;
-    const moved = stopPose(walks, walk, index(walk), index, before, seen);
+    const moved = stopPose(walks, walk, read.index(walk), read, before, seen);
     if (moved) out.set(walk, moved);
   }
   return out.size > 0 ? out : undefined;
@@ -2165,14 +2204,14 @@ function boxesOverlap(a: Rect | ReadonlySet<string>, b: Rect | ReadonlySet<strin
  * giving each walk's spot at the stop, since it may have reached that spot
  * earlier (`stoodAt`, review HEXFILE-OPUS-10, HEXFILE-ASTRA-4).
  */
-function walkTo(walk: Walk, j: number, moved?: Token, index?: (w: Walk) => number): CutPoint[] {
+function walkTo(walk: Walk, j: number, moved?: Token, read?: StopRead): CutPoint[] {
   const spot = spotAt(walk, j);
   const [piece, k] = walk.ownProgress?.[j] ?? spot.progress;
   const along = walk.ownProgress ? walk.entry.along : undefined;
   const route: CutPoint[] = walk.entry.route.slice(0, piece + 1).map(({ x, y, elevation }, i) => ({ x, y, elevation, ...(along?.[i] ? { along: along[i] } : {}) }));
   // Its spot where the stop leaves it, as high as the trap step had it there.
   const reached = along ? { along: spot.progress } : {};
-  const height = index ? stoodAt(walk, j, index).elevation : walk.elevation(j);
+  const height = read ? stoodAt(walk, j, read).elevation : walk.elevation(j);
   if (k > 0) route.push(moved ? { x: moved.x, y: moved.y, elevation: moved.elevation, ...reached } : { x: spot.x, y: spot.y, elevation: height, ...reached });
   else route[route.length - 1] = { ...route[route.length - 1]!, elevation: height };
   return route;
@@ -2196,7 +2235,7 @@ function walkTo(walk: Walk, j: number, moved?: Token, index?: (w: Walk) => numbe
  * lattice is its own anchors and a pose off its spot stands on a
  * neighboring hex, since a box half a square off an anchor snaps back.
  */
-function seatingWalk(walk: Walk, j: number, on: readonly { token: Token; at: RoutePoint }[], hexes = false, index?: (w: Walk) => number): CutPoint[] {
+function seatingWalk(walk: Walk, j: number, on: readonly { token: Token; at: RoutePoint }[], hexes = false, read?: StopRead): CutPoint[] {
   const lattice = routeLattice(walk.token);
   // From op version 51 a holder on hexes stands on its own anchors, and a pose off its spot is a neighboring hex's (D-261107-172).
   const g = walk.grid;
@@ -2218,8 +2257,8 @@ function seatingWalk(walk: Walk, j: number, on: readonly { token: Token; at: Rou
   for (let d = 1; d <= reach; d++) near.push(j - d, j + d);
   const fits = near.filter((k) => k >= 0 && k < walk.spots.length && seats(spotAt(walk, k)));
   const k = fits.find((i) => onLattice(spotAt(walk, i))) ?? fits[0];
-  if (k !== undefined) return walkTo(walk, k, undefined, index);
-  const route = walkTo(walk, j, undefined, index);
+  if (k !== undefined) return walkTo(walk, k, undefined, read);
+  const route = walkTo(walk, j, undefined, read);
   const at = route[route.length - 1]!;
   const off: { x: number; y: number }[] = [];
   // Along one axis before both, or on hexes each neighboring hex in the lattice's order.
