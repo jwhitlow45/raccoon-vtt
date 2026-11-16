@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { BOOKKEEPING_RESERVE, FAR, KEPT_FOR_PLAYERS, KEPT_FOR_PLAYERS_FULL, roundUp } from "#shared/limits.ts";
-import type { Member, RoomState, Viewer } from "#shared/model.ts";
+import type { Actor, Member, RoomState, Viewer } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { character, companionBlock, DM, env, member, room, scene, template, token } from "#shared/testutil.ts";
-import { farRoomBytes, growthBound, heldBytes, measuredStateBytes, overFarLine, PER_PLAYER_FULL, playerBlockBytes, projectedSceneBytes, roomLevelBytes, SizeGuard, widestPerPlayerReserve } from "./sizeGuard.ts";
+import { projectState, stableStringify } from "#shared/project.ts";
+import { actor, castAsk, character, companionBlock, DM, drawing, effect, entry, env, member, room, scene, template, token } from "#shared/testutil.ts";
+import { farRoomBytes, growthBound, heldBytes, measuredStateBytes, overFarLine, ownHeldBytes, PER_PLAYER_FULL, playerBlockBytes, projectedSceneBytes, roomLevelBytes, SizeGuard, widestPerPlayerReserve } from "./sizeGuard.ts";
 
 /*
  * The byte lines under player limits: the near lines (the guard's state and
@@ -280,5 +281,118 @@ describe("LP43-PRIV-1: a player's far reading never reads whose an unseen thing 
     const guard = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: 64 * MIB });
     guard.stateMeasured(measuredStateBytes(state), state);
     assert.deepEqual(judged(state, { t: "token.update", tokenId: "fill1", patch: { notes: "m".repeat(8_000) } }, DM, guard, "dmAdd"), { ok: false, code: "quota", message: KEPT_FOR_PLAYERS_FULL }, "the DM's growing note");
+  });
+});
+
+/**
+ * P1's own things of every class on s1, two DM creatures P1 cannot see, so
+ * a twin may name them where P1's copy leaves them out, and the DM's pad on
+ * s2, a scene P1 never holds.
+ */
+function ownTable(pad: number): RoomState {
+  const state = room();
+  state.characters.c1 = character("c1", { ownerIds: ["p1"] });
+  state.tokens.hero = token("hero", { kind: "pc", actor: { ref: "c1" }, ownerIds: ["p1"], x: 2, y: 2 });
+  state.tokens.pet = token("pet", { companion: { of: "c1", turn: "own" }, ownerIds: ["p1"], x: 4, y: 2, actor: { inline: actor({ dmNotes: "" }) } });
+  for (const id of ["hidden-dm-creature-one", "hidden-dm-creature-two"]) state.tokens[id] = token(id, { visibility: "dm", x: 20, y: 20 });
+  state.templates.a1 = template("a1", { label: "Fireball" });
+  state.drawings.d1 = drawing("d1", { anchors: ["hero", null], points: [2.5, 2.5, 9, 9] });
+  state.casts.k1 = castAsk("k1", { caster: "hero", area: "a1", targets: ["hero"] });
+  state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("r1", { tokenId: "hero" })] };
+  state.tokens.pad = token("pad", { sceneId: "s2", notes: "p".repeat(pad) });
+  return state;
+}
+
+/** P1's companion's actor with `patch`. */
+function petActor(state: RoomState, patch: Partial<Actor>): void {
+  const pet = state.tokens.pet!;
+  if (!("inline" in pet.actor)) throw new Error("the companion keeps its own actor");
+  state.tokens.pet = { ...pet, actor: { inline: { ...pet.actor.inline, ...patch } } };
+}
+
+/** Changes to P1's own things that P1's copy never shows (shared/project.ts), each only adding stored bytes. */
+const UNSHOWN: Record<string, (state: RoomState) => void> = {
+  "a DM's note on P1's companion": (s) => petActor(s, { dmNotes: "d".repeat(400) }),
+  "a condition the DM hid on it": (s) => petActor(s, { effects: [effect("e1", { key: "custom", label: "h".repeat(400), hiddenFromPlayers: true })] }),
+  "the room monster it was placed from, and its lair": (s) => petActor(s, { monsterId: "m".repeat(300), inLair: true }),
+  "the targets of P1's ask that P1 cannot see": (s) => (s.casts.k1 = { ...s.casts.k1!, targets: ["hero", "hidden-dm-creature-one", "hidden-dm-creature-two"] }),
+  "the caster of P1's area that P1 cannot see": (s) => (s.templates.a1 = { ...s.templates.a1!, casterId: "hidden-dm-creature-one" }),
+  "the DM's label and marks on P1's row": (s) => (s.encounter = { ...s.encounter!, entries: [entry("r1", { tokenId: "hero", label: "l".repeat(300), groupKey: "g".repeat(100), hadTurn: true })] }),
+  "where the anchored stop of P1's ruler was kept": (s) => (s.drawings.d1 = { ...s.drawings.d1!, points: [123.456789012345, 987.654321098765, 9, 9] }),
+  "how often the DM wrote to P1's creature": (s) => (s.tokens.hero = { ...s.tokens.hero!, rev: 123_456_789 }),
+  "how often the DM wrote to P1's area": (s) => (s.templates.a1 = { ...s.templates.a1!, rev: 123_456_789 }),
+};
+
+/** A twin of `shown` with `unshown` applied and the DM's pad trimmed by what it stores, so both store the same bytes. */
+function unshownTwin(shown: RoomState, unshown: (state: RoomState) => void): { twin: RoomState; bytes: number } {
+  const twin = structuredClone(shown);
+  unshown(twin);
+  const bytes = measuredStateBytes(twin) - measuredStateBytes(shown);
+  const pad = shown.tokens.pad!.notes!.length;
+  assert.ok(bytes > 0 && bytes <= pad, `the change stores ${bytes} bytes the pad gives back`);
+  twin.tokens.pad = { ...twin.tokens.pad!, notes: "p".repeat(pad - bytes) };
+  return { twin, bytes };
+}
+
+function copyOf(state: RoomState): string {
+  return stableStringify(projectState(state, P1, { sceneId: null }));
+}
+
+describe("LP43-PRIV-2: a player's exact part holds their own things only as their copy shows them", () => {
+  for (const [what, unshown] of Object.entries(UNSHOWN)) {
+    test(`${what}: the twins' copies, stored bytes and P1's exact parts are equal`, () => {
+      const shown = ownTable(4_000);
+      const { twin } = unshownTwin(shown, unshown);
+      assert.equal(copyOf(twin), copyOf(shown), "P1's copies are equal");
+      assert.equal(measuredStateBytes(twin), measuredStateBytes(shown), "the rooms store the same bytes");
+      assert.ok(ownHeldBytes(shown, "p1") > 0, "P1 holds their own things exactly");
+      assert.equal(ownHeldBytes(twin, "p1"), ownHeldBytes(shown, "p1"), "the room's exact part");
+      assert.equal(ownHeldBytes(twin, "p1", ["s1"]), ownHeldBytes(shown, "p1", ["s1"]), "the scene's exact part");
+    });
+  }
+
+  test("twin rooms with every unshown change or none answer P1's line alike at every fill around the line", () => {
+    const shown = ownTable(20_000);
+    let hidden = shown;
+    let unshownBytes = 0;
+    for (const unshown of Object.values(UNSHOWN)) {
+      const { twin, bytes } = unshownTwin(hidden, unshown);
+      hidden = twin;
+      unshownBytes += bytes;
+    }
+    assert.equal(copyOf(hidden), copyOf(shown), "P1's copies are equal");
+    const fill = fillFor(shown, FAR.roomBytes - BOOKKEEPING_RESERVE.room - MIB);
+    const rooms = [filled(shown, fill), filled(hidden, fill)];
+    const padded = (state: RoomState, n: number): RoomState => ({ ...state, tokens: { ...state.tokens, more: token("more", { sceneId: "f0", notes: "q".repeat(n) }) } });
+    const takes = (state: RoomState, n: number) => playerJudged(padded(state, n), line(`d${n}`), "p1").ok;
+    let [lo, hi] = [0, 2 * MIB];
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (takes(rooms[0]!, mid)) lo = mid;
+      else hi = mid;
+    }
+    // Held exactly, the unshown bytes would part the twins just above the line or up to a step below it.
+    const apart: number[] = [];
+    for (let n = hi - 512; n <= hi + 512; n += 32) if (takes(rooms[0]!, n) !== takes(rooms[1]!, n)) apart.push(n);
+    assert.deepEqual(apart, [], `the twins answer apart at pads ${apart.slice(0, 5).join(", ")} (the unshown changes store ${unshownBytes} bytes)`);
+    assert.ok(unshownBytes > 512 && takes(rooms[0]!, hi - 512) && !takes(rooms[0]!, hi + 512), "the window holds the line");
+  });
+});
+
+describe("LP43-PRIV-3: behind a blackout a player's exact part holds nothing", () => {
+  test("P1's own ask or a DM's of the same bytes: P1's copy holds neither, so the exact parts are equal and empty", () => {
+    const twin = (by: string) => {
+      const state = ownTable(0);
+      // A DM whose id is as long as P1's.
+      state.members.d1 = member("d1", "dm");
+      state.casts = { k1: castAsk("k1", { by, caster: "hero", area: undefined, targets: ["hero"] }) };
+      state.meta = { ...state.meta, view: { follow: false, blackout: true } };
+      return state;
+    };
+    const [own, dms] = [twin("p1"), twin("d1")];
+    assert.equal(copyOf(own), copyOf(dms), "P1's copies are equal");
+    assert.equal(measuredStateBytes(own), measuredStateBytes(dms), "the rooms store the same bytes");
+    assert.equal(ownHeldBytes(own, "p1"), 0, "P1's own ask behind a blackout");
+    assert.equal(ownHeldBytes(dms, "p1"), 0, "the DM's");
   });
 });

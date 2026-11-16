@@ -2,7 +2,7 @@ import { chunkKey, holderChunkKey, holderTileKey, parseKey, readEntity, tileKey,
 import { lineAudience } from "#shared/logRings.ts";
 import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, UP_DIR_CHARS, type BuildChunk, type Encounter, type EncounterSnapshot, type LogEntry, type Token, type Trap } from "#shared/model.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
-import { exploredReserve, FAR, farByteLine, farBytesOver, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, reservedExploreFloors, roundUp, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type LimitCheck, type OwnHeld } from "#shared/limits.ts";
+import { exploredReserve, FAR, farByteLine, farBytesOver, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, reservedExploreFloors, roundUp, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type LimitCheck, type SeatView } from "#shared/limits.ts";
 import type { OpOf } from "#shared/protocol.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
 import { NUMBERS_MOST } from "#shared/numbering.ts";
@@ -408,9 +408,10 @@ export class SizeGuard {
   #far(next: RoomState, before: RoomState | undefined, far: Exclude<FarJudge, "none">, kind: "meets" | "exempt", player: string | undefined): LimitCheck {
     const widest = far !== "today";
     const line = far === "widestDm" || far === "dmAdd" ? "dm" : "players";
-    // A player's reading holds exactly only their own copy's own things, so whose an unseen thing is never moves their
-    // answer (LP43-PRIV-1). The DM's holds every seat's.
-    const heldOf = (state: RoomState, sceneIds?: readonly string[]) => (player === undefined ? heldBytes(state, sceneIds) : ownHeldBytes(state, player, sceneIds));
+    // A player's reading holds exactly only their own copy's own things, as the copy holds them (LP43-PRIV-1, ownCopyBytes),
+    // built once for the room and every scene it reads. The DM's holds every seat's.
+    let own: OwnCopyBytes | undefined;
+    const heldOf = (state: RoomState, sceneIds?: readonly string[]) => (player === undefined ? heldBytes(state, sceneIds) : ownHeldBytes(state, player, sceneIds, (own ??= ownCopyBytes(state, player))));
     const state = this.#state;
     const reserves = farReserves(next, widest);
     const roomLine = farByteLine(kind, "room", line)!;
@@ -1764,33 +1765,48 @@ export function heldBytes(state: RoomState, sceneIds?: readonly string[]): numbe
     for (const id of held.templates) templates.add(id);
     for (const id of held.drawings) drawings.add(id);
   }
-  const rest = sceneIds ? null : seatHeld(state, null);
-  return bytesOfHeld(state, { tokens, templates, drawings, rows: rest?.rows ?? new Set(), casts: rest?.casts ?? new Set() });
+  let bytes = 0;
+  for (const id of tokens) bytes += entityBytes(id, state.tokens[id]);
+  for (const id of templates) bytes += entityBytes(id, state.templates[id]);
+  for (const id of drawings) bytes += entityBytes(id, state.drawings[id]);
+  if (sceneIds) return bytes;
+  const rest = seatHeld(state, null);
+  const entries = state.encounter?.entries ?? [];
+  for (const entry of entries) if (rest.rows.has(entry.id)) bytes += valueBytes(entry) + 1;
+  for (const id of rest.casts) bytes += entityBytes(id, state.casts[id]);
+  return bytes;
 }
+
+/** A player's own things as their copy holds them (ownCopyBytes): the bytes on each floor, and of their rows and asks. */
+export type OwnCopyBytes = { floors: ReadonlyMap<string, number>; rowsAndAsks: number };
 
 /**
- * The stored bytes of a player's own things that their copy holds
- * (shared/limits.ts ownHeld) on the floors of `sceneIds`, or on every floor
- * with their rows and asks: the exact part of that player's far reading,
- * whose rest is stepped (LP43-PRIV-1).
+ * The bytes of a player's own things that their copy holds (shared/limits.ts
+ * ownHeld), each as the copy holds it, so whatever the copy leaves out stays
+ * in the stepped part with the DM's (D-261116-015). A copy can run a few
+ * bytes over its stored thing, since the projection adds `aboveFog` and the
+ * table number. That moves those bytes into the exact part and never lowers
+ * the reading under the stored total.
  */
-export function ownHeldBytes(state: RoomState, memberId: string, sceneIds?: readonly string[]): number {
-  const floors = new Set<string>();
-  if (sceneIds) for (const id of sceneIds) for (const floor of floorsOf(state, id)) floors.add(floor.id);
-  else for (const id of Object.keys(state.scenes)) floors.add(id);
-  const own = ownHeld(state, memberId, seatView(state, memberId), floors);
-  return bytesOfHeld(state, sceneIds ? { ...own, rows: new Set(), casts: new Set() } : own);
+export function ownCopyBytes(state: RoomState, memberId: string, view: SeatView = seatView(state, memberId)): OwnCopyBytes {
+  const own = ownHeld(state, memberId, view, new Set(Object.keys(state.scenes)));
+  const floors = new Map<string, number>();
+  const on = (sceneId: string, bytes: number) => floors.set(sceneId, (floors.get(sceneId) ?? 0) + bytes);
+  for (const [id, copy] of own.token) on(state.tokens[id]!.sceneId, entityBytes(id, copy));
+  for (const [id, copy] of own.template) on(state.templates[id]!.sceneId, entityBytes(id, copy));
+  for (const [id, copy] of own.drawing) on(state.drawings[id]!.sceneId, entityBytes(id, copy));
+  let rowsAndAsks = 0;
+  for (const copy of own.row.values()) rowsAndAsks += valueBytes(copy) + 1;
+  for (const [id, copy] of own.cast) rowsAndAsks += entityBytes(id, copy);
+  return { floors, rowsAndAsks };
 }
 
-/** The stored bytes of held things by id, each as its map's entry, and the rows as the fight's list's. */
-function bytesOfHeld(state: RoomState, held: OwnHeld): number {
-  let bytes = 0;
-  for (const id of held.tokens) bytes += entityBytes(id, state.tokens[id]);
-  for (const id of held.templates) bytes += entityBytes(id, state.templates[id]);
-  for (const id of held.drawings) bytes += entityBytes(id, state.drawings[id]);
-  for (const entry of state.encounter?.entries ?? []) if (held.rows.has(entry.id)) bytes += valueBytes(entry) + 1;
-  for (const id of held.casts) bytes += entityBytes(id, state.casts[id]);
-  return bytes;
+/** The exact part of a player's far reading (ownCopyBytes): on the floors of `sceneIds`, or on every floor with their rows and asks. */
+export function ownHeldBytes(state: RoomState, memberId: string, sceneIds?: readonly string[], own: OwnCopyBytes = ownCopyBytes(state, memberId)): number {
+  if (!sceneIds) return own.rowsAndAsks + sum([...own.floors.values()], (bytes) => bytes);
+  const floors = new Set<string>();
+  for (const id of sceneIds) for (const floor of floorsOf(state, id)) floors.add(floor.id);
+  return sum([...floors], (id) => own.floors.get(id) ?? 0);
 }
 
 /**

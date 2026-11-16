@@ -1207,6 +1207,7 @@ function tokenVisibleById(ctx: Ctx, tokenId: string, revealedSeen = false): bool
  */
 export function seatView(state: RoomState, memberId: string, env: Pick<Env, "opVersion"> = {}): SeatView {
   const ctx = ctxOf(state, { memberId, role: "player" }, { sceneId: null }, clipsByHeldWalls(env.opVersion));
+  let encounter: ProjectedEncounter | null | undefined;
   return {
     sees: (tokenId) => tokenVisibleById(ctx, tokenId),
     showsRow: (entryId) => {
@@ -1214,6 +1215,11 @@ export function seatView(state: RoomState, memberId: string, env: Pick<Env, "opV
       return entry !== undefined && entryShown(ctx, entry);
     },
     holds: (sceneId) => ctx.floors.has(sceneId),
+    copy: (kind, id) => {
+      if (kind !== "row") return projectEntityCtx(ctx, keys[kind](id));
+      if (encounter === undefined) encounter = projectEntityCtx(ctx, keys.encounter) as ProjectedEncounter | null;
+      return encounter?.entries.find((e) => e.id === id) ?? null;
+    },
   };
 }
 

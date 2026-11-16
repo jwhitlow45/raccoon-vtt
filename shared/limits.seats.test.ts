@@ -352,6 +352,64 @@ describe("LP43-PRIV-1: a player's far counts never read whose an unseen thing is
   });
 });
 
+describe("LP43-PRIV-3: behind a blackout P1's copy holds none of their own things, so P1's own and the DM's answer alike", () => {
+  // The twins differ in whose one thing is, P1's or the DM's. While the DM blacks the table out P1's copy holds
+  // neither, on a scene without floors too, so neither is in P1's exact part.
+  const dark = (state: RoomState): RoomState => ({ ...state, meta: { ...state.meta, view: { follow: false, blackout: true } } });
+  const around = (line: number, base: number): [number, number] => [line - base - FAR.countStep - 2, line - base + 1];
+
+  test("an ask", () => {
+    const build = (owner: "p2" | "dm1") => {
+      const state = dark(table());
+      state.casts = { zask: castAsk("zask", { by: owner === "p2" ? "p1" : "dm1", caster: "hero", area: undefined, targets: ["hero"] }) };
+      return state;
+    };
+    const dmAsk = (s: RoomState, i: number) => (s.casts[`dm${pad(i)}`] = castAsk(`dm${pad(i)}`, { by: "dm1", caster: "hero", area: undefined, targets: ["hero"] }));
+    const p1Ask = (s: RoomState) => (s.casts.pz = castAsk("pz", { by: "p1", caster: "hero", area: undefined, targets: ["hero"] }));
+    assertTwinsAlike(twinAnswers(build, dmAsk, p1Ask, around(FAR.asks, 2)), "an ask");
+  });
+
+  test("a token", () => {
+    const build = (owner: "p2" | "dm1") => {
+      const state = dark(table());
+      state.tokens.zone = owner === "p2" ? token("zone", { companion: { of: "c1", turn: "own" }, ownerIds: ["p1"] }) : token("zone");
+      return state;
+    };
+    const dmToken = (s: RoomState, i: number) => (s.tokens[`dm${pad(i)}`] = token(`dm${pad(i)}`, { visibility: "dm", x: 30, y: 20 }));
+    assertTwinsAlike(twinAnswers(build, dmToken, (s) => companions(s, 1, "s1", 900), around(FAR.tokens, 3)), "a token");
+  });
+
+  test("an area", () => {
+    const build = (owner: "p2" | "dm1") => {
+      const state = dark(table());
+      state.templates.zone = template("zone", { ownerId: owner === "p2" ? "p1" : "dm1" });
+      return state;
+    };
+    const dmArea = (s: RoomState, i: number) => (s.templates[`dm${pad(i)}`] = template(`dm${pad(i)}`, { ownerId: "dm1", visibility: "dm" }));
+    assertTwinsAlike(twinAnswers(build, dmArea, (s) => (s.templates.pz = template("pz")), around(FAR.areas, 2)), "an area");
+  });
+
+  test("a drawing", () => {
+    const build = (owner: "p2" | "dm1") => {
+      const state = dark(table());
+      state.drawings.zone = drawing("zone", { ownerId: owner === "p2" ? "p1" : "dm1" });
+      return state;
+    };
+    const dmDrawing = (s: RoomState, i: number) => (s.drawings[`dm${pad(i)}`] = drawing(`dm${pad(i)}`, { ownerId: "dm1", visibility: "dm" }));
+    assertTwinsAlike(twinAnswers(build, dmDrawing, (s) => (s.drawings.pz = drawing("pz")), around(FAR.drawings, 2)), "a drawing");
+  });
+
+  test("a row", () => {
+    const build = (owner: "p2" | "dm1") => {
+      const state = dark(table());
+      state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [owner === "p2" ? entry("zone", { tokenId: "hero" }) : entry("zone", { label: "Goblin" })] };
+      return state;
+    };
+    const dmRow = (s: RoomState, i: number) => s.encounter!.entries.push(entry(`dm${pad(i)}`, { label: "Goblin", hidden: true }));
+    assertTwinsAlike(twinAnswers(build, dmRow, (s) => s.encounter!.entries.push(entry("pz", { characterId: "c1" })), around(FAR.rows, 2)), "a row");
+  });
+});
+
 test("LP43-PRIV-1: P1's own area the DM hid counts as their copy has it, so hidden and deleted answer alike wherever the DM's part keeps its step", () => {
   // Hidden, the area is in the stepped part, as a deleted one is not: the twins may part only where that one area crosses
   // a step's edge, the far line's own grain. Counted exactly as P1's, it would part them where P1's 49 others put the

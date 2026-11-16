@@ -2,7 +2,7 @@ import { roomHandoutPages } from "./handouts.ts";
 import { isWritable } from "./writable.ts";
 import { CHUNK_CELLS, HEIGHTS_CHARS, type AreaTemplate, type BuildChunk, type Character, type CompanionBlock, type CustomMonster, type Drawing, type InitEntry, type JournalPage, type RoomState, type Scene, type Token } from "./model.ts";
 import { ownEntry } from "./records.ts";
-import { floorsOf, holdsRecordOn, openFloor } from "./rules/floors.ts";
+import { floorsOf, openFloor } from "./rules/floors.ts";
 import type { SoundUse } from "./sound.ts";
 import { drawnSize, type VideoGeometry, type VideoShape } from "./videoGeometry.ts";
 
@@ -1519,12 +1519,18 @@ export const HARD = {
  * The test of a member's own copy of one state (shared/project.ts
  * seatView): whether it holds a creature, shows a row, and holds a floor.
  * A seat counts only what this view holds, so its count is the copy's.
+ * `copy` is one thing as the copy holds it, or null where it holds none: a
+ * player's far line holds exactly only these (ownHeld).
  */
 export type SeatView = {
   sees(tokenId: string): boolean;
   showsRow(entryId: string): boolean;
   holds(sceneId: string): boolean;
+  copy(kind: CopiedKind, id: string): unknown;
 };
+
+/** The kinds of thing a player's far line can hold exactly: their creatures, areas, drawings, rows and asks. */
+export type CopiedKind = "token" | "template" | "drawing" | "row" | "cast";
 export type SeatViewOf = (state: RoomState) => SeatView;
 
 /** What one member's seats count in a scope: `sceneId` names the floor, tokens and riding areas count across its scene, and rows across the fight. */
@@ -1709,48 +1715,46 @@ export function seatHeld(state: RoomState, sceneId: string | null): SeatHeld {
   };
 }
 
-/** A player's own things that their copy holds (ownHeld), by id. */
-export type OwnHeld = { tokens: ReadonlySet<string>; templates: ReadonlySet<string>; drawings: ReadonlySet<string>; rows: ReadonlySet<string>; casts: ReadonlySet<string> };
-
-/** Whether a member owns a creature as their copy reads it (shared/project.ts ownsToken): its own owners, or its character's. */
-function ownsCreature(state: RoomState, memberId: string, tokenId: string): boolean {
-  const token = ownEntry(state.tokens, tokenId);
-  if (!token) return false;
-  return token.ownerIds.includes(memberId) || ("ref" in token.actor && (ownEntry(state.characters, token.actor.ref)?.ownerIds.includes(memberId) ?? false));
-}
+/** A player's own things that their copy holds (ownHeld), by id, each as the copy holds it. */
+export type OwnHeld = Record<CopiedKind, ReadonlyMap<string, unknown>>;
 
 /**
  * What a player's own copy holds of their own seat things on `floors`, and
- * their rows and asks (LP43-PRIV-1): each seat's class by the seat's own
- * test, with no cap, and the asks their ask limit counts. A player's far
- * line holds only these exactly and rounds all the rest, other players'
- * seat things too, into the stepped part, so whose an unseen thing is never
- * moves that player's answer. seatHeld, which the DM's lines read, has no
- * view test and holds every player's things, so it would.
+ * of their rows and asks, each as the copy holds it (SeatView `copy`). A
+ * player's far line holds only these exactly, in count and in bytes, and
+ * rounds all the rest into the stepped part: other players' seat things,
+ * and whatever the copy leaves out of their own (LP43-PRIV-1, D-261116-015).
+ * The copy is the projection's own, so every rule it reads applies, a
+ * blackout's included, and nothing the copy does not show moves that
+ * player's answer. seatHeld, which the DM's lines read, has no view test and
+ * holds every player's stored things, so it would.
  */
 export function ownHeld(state: RoomState, memberId: string, view: SeatView, floors: ReadonlySet<string>): OwnHeld {
-  const ids = <T extends { id: string }>(things: Iterable<T>, keep: (thing: T) => boolean): Set<string> => {
-    const out = new Set<string>();
-    for (const thing of things) if (keep(thing)) out.add(thing.id);
+  const copies = <T extends { id: string }>(kind: CopiedKind, things: Iterable<T>, own: (thing: T) => boolean): Map<string, unknown> => {
+    const out = new Map<string, unknown>();
+    for (const thing of things) {
+      if (!own(thing)) continue;
+      const copy = view.copy(kind, thing.id);
+      if (copy !== null) out.set(thing.id, copy);
+    }
     return out;
   };
-  const heldFloors = new Set(Object.keys(state.scenes).filter((id) => view.holds(id)));
   return {
-    tokens: ids(Object.values(state.tokens), (t) => floors.has(t.sceneId) && ownTokenHeld(state, memberId, t, view)),
-    templates: ids(Object.values(state.templates), (t) => floors.has(t.sceneId) && ownAreaHeld(t, memberId, view)),
-    drawings: ids(Object.values(state.drawings), (d) => floors.has(d.sceneId) && d.ownerId === memberId && drawingHeld(d, view)),
-    rows: ids(state.encounter?.entries ?? [], (e) => ownsRow(state, memberId, e) && view.showsRow(e.id)),
-    // As their limit of 3 waiting asks counts them (shared/permissions.ts waitingAsks): theirs, with a caster they own, on a floor they hold.
-    casts: ids(Object.values(state.casts), (c) => c.by === memberId && ownsCreature(state, memberId, c.caster) && holdsRecordOn(state, heldFloors, c)),
+    token: copies("token", Object.values(state.tokens), (t) => floors.has(t.sceneId) && (seatCharacter(state, t)?.ownerIds.includes(memberId) ?? false)),
+    template: copies("template", Object.values(state.templates), (t) => floors.has(t.sceneId) && t.ownerId === memberId),
+    drawing: copies("drawing", Object.values(state.drawings), (d) => floors.has(d.sceneId) && d.ownerId === memberId),
+    row: copies("row", state.encounter?.entries ?? [], (e) => ownsRow(state, memberId, e)),
+    cast: copies("cast", Object.values(state.casts), (c) => c.by === memberId),
   };
 }
 
 /** A player's far counts' exact part in `sceneId`'s scopes, as seatHeld's: their own copy's own things (ownHeld). */
 function playerFarHeld(state: RoomState, sceneId: string | null, memberId: string, view: SeatView): SeatHeld {
   const own = ownHeld(state, memberId, view, sceneId === null ? new Set() : sceneGroup(state, sceneId));
-  const drawings = [...own.drawings].filter((id) => state.drawings[id]!.sceneId === sceneId);
-  const pointValues = drawings.reduce((sum, id) => sum + state.drawings[id]!.points.length, 0);
-  return { tokens: own.tokens, templates: own.templates, drawings: new Set(drawings), pointValues, rows: own.rows, casts: own.casts };
+  const drawings = [...own.drawing].filter(([id]) => state.drawings[id]!.sceneId === sceneId);
+  const pointValues = drawings.reduce((sum, [, copy]) => sum + (copy as Drawing).points.length, 0);
+  const ids = (copies: ReadonlyMap<string, unknown>) => new Set(copies.keys());
+  return { tokens: ids(own.token), templates: ids(own.template), drawings: new Set(drawings.map(([id]) => id)), pointValues, rows: ids(own.row), casts: ids(own.cast) };
 }
 
 /** Who sent an op, as the live limits read it: a player's seats need their member id and their own view. */
