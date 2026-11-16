@@ -196,8 +196,14 @@ export async function stillRunning(id: ProcessIdentity, platform: Platform = pro
   return start !== null && start === id.start;
 }
 
-/** A process as a listing shows it: its pid, and its command line with the arguments joined by spaces. */
-export type ListedProcess = { pid: number; commandLine: string };
+/**
+ * A process as a listing shows it: its pid, and its command line with the
+ * arguments joined by spaces. Linux also gives the arguments themselves,
+ * so where one ends is never a guess, and the program it runs
+ * (/proc/<pid>/exe). Windows gives the program too (ExecutablePath). Each
+ * is null where the system won't say.
+ */
+export type ListedProcess = { pid: number; commandLine: string; argv?: string[]; exe?: string | null };
 
 /** `ps -o pid=,command=` lines. */
 export function parsePsList(stdout: string): ListedProcess[] {
@@ -209,25 +215,28 @@ export function parsePsList(stdout: string): ListedProcess[] {
   return out;
 }
 
-/** The script's JSON array of `{ pid, line }`. Anything else is a listing that failed. */
+/** The script's JSON array of `{ pid, line, exe }`. Anything else is a listing that failed. */
 export function parseWindowsList(stdout: string): ListedProcess[] {
   const rows: unknown = JSON.parse(stdout.trim());
   if (!Array.isArray(rows)) throw new Error(`the process listing was not a list: ${stdout.trim().slice(0, 200)}`);
-  return rows.map((row: { pid?: unknown; line?: unknown }) => {
-    if (typeof row?.pid !== "number" || typeof row.line !== "string") throw new Error(`the process listing had a row it can't read: ${JSON.stringify(row)}`);
-    return { pid: row.pid, commandLine: row.line };
+  return rows.map((row: { pid?: unknown; line?: unknown; exe?: unknown }) => {
+    if (typeof row?.pid !== "number" || typeof row.line !== "string" || (row.exe != null && typeof row.exe !== "string")) {
+      throw new Error(`the process listing had a row it can't read: ${JSON.stringify(row)}`);
+    }
+    return { pid: row.pid, commandLine: row.line, exe: typeof row.exe === "string" ? row.exe : null };
   });
 }
 
 /**
  * The processes running now, with their command lines, to tell a process
  * by what it is rather than by a pid a file names. Linux reads each
- * /proc/<pid>/cmdline, exact bytes. macOS reads ps in a UTF-8 locale: in the
- * C locale ps escapes every other byte, so a data folder named "Tést" would
- * never match. Windows asks Win32_Process for postgres.exe alone, and
- * leaves out a process whose command line it can't read: that is another
- * user's, so nothing this user started. A listing that fails throws, since
- * it proves nothing either way.
+ * /proc/<pid>/cmdline, exact bytes split at its NULs, and the program its
+ * exe link names. macOS reads ps in a UTF-8 locale: in the C locale ps
+ * escapes every other byte, so a data folder named "Tést" would never
+ * match. Windows asks Win32_Process for postgres.exe alone, with its
+ * program, and leaves out a process whose command line it can't read:
+ * that is another user's, so nothing this user started. A listing that
+ * fails throws, since it proves nothing either way.
  */
 export async function listProcesses(platform: Platform = process.platform as Platform): Promise<ListedProcess[]> {
   if (platform === "linux") {
@@ -242,7 +251,11 @@ export async function listProcesses(platform: Platform = process.platform as Pla
         continue;
       }
       const args = raw.toString("utf8").replace(/\0+$/, "");
-      if (args !== "") out.push({ pid: Number(name), commandLine: args.split("\0").join(" ") });
+      if (args === "") continue;
+      const argv = args.split("\0");
+      // Another user's exe link can't be read, which only means it is no program of this user's.
+      const exe = await maybe(async () => linkedProgram(await readlink(`/proc/${name}/exe`)));
+      out.push({ pid: Number(name), commandLine: argv.join(" "), argv, exe });
     }
     return out;
   }
@@ -253,7 +266,7 @@ export async function listProcesses(platform: Platform = process.platform as Pla
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false",
-    "$rows = @(Get-CimInstance Win32_Process -Filter \"Name = 'postgres.exe'\" | Where-Object { $_.CommandLine } | ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; line = [string]$_.CommandLine } })",
+    "$rows = @(Get-CimInstance Win32_Process -Filter \"Name = 'postgres.exe'\" | Where-Object { $_.CommandLine } | ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; line = [string]$_.CommandLine; exe = $_.ExecutablePath } })",
     "ConvertTo-Json -Compress -InputObject $rows",
   ].join("; ");
   const { stdout } = await run(powershell(), ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true, timeout: POWERSHELL_LIMIT_MS, maxBuffer: 16 * 1024 * 1024 });

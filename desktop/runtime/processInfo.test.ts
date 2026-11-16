@@ -91,6 +91,11 @@ test("the process listing shows a process's whole command line, a folder named i
     const listed = (await listProcesses(platform)).find((p) => p.pid === child.pid);
     assert.ok(listed, "the child is listed");
     assert.ok(listed.commandLine.endsWith(" -D /data/Tést Жук/postgres"), listed.commandLine);
+    if (platform === "linux") {
+      // Linux keeps each argument whole, spaces and all, and names the program.
+      assert.deepEqual(listed.argv?.slice(-2), ["-D", "/data/Tést Жук/postgres"]);
+      assert.equal(listed.exe, realpathSync(process.execPath));
+    }
   } finally {
     child.kill("SIGKILL");
   }
@@ -102,7 +107,9 @@ test("a listing reads ps's lines, and Windows' JSON list, and refuses anything e
     { pid: 345, commandLine: "sh" },
   ]);
   assert.deepEqual(parseWindowsList("[]\r\n"), []);
-  assert.deepEqual(parseWindowsList('[{"pid":7,"line":"\\"C:\\\\pg\\\\postgres.exe\\" -D \\"C:/d/postgres\\""}]'), [{ pid: 7, commandLine: '"C:\\pg\\postgres.exe" -D "C:/d/postgres"' }]);
+  assert.deepEqual(parseWindowsList('[{"pid":7,"line":"\\"C:\\\\pg\\\\postgres.exe\\" -D \\"C:/d/postgres\\"","exe":"C:\\\\pg\\\\postgres.exe"}]'), [{ pid: 7, commandLine: '"C:\\pg\\postgres.exe" -D "C:/d/postgres"', exe: "C:\\pg\\postgres.exe" }]);
+  assert.deepEqual(parseWindowsList('[{"pid":7,"line":"x","exe":null}]'), [{ pid: 7, commandLine: "x", exe: null }], "a program Windows won't name");
+  assert.throws(() => parseWindowsList('[{"pid":7,"line":"x","exe":7}]'), /can't read/);
   assert.throws(() => parseWindowsList('{"pid":7,"line":"x"}'), /not a list/);
   assert.throws(() => parseWindowsList('[{"pid":"7","line":"x"}]'), /can't read/);
   assert.throws(() => parseWindowsList(""));
