@@ -42,7 +42,7 @@ follows `PORT`.
 | `pnpm db:down` | stop the dev postgres, keeping its data |
 | `pnpm db:reset` | drop the dev database volume and start fresh |
 | `pnpm admin <command>` | the [admin commands](operations.md#admin-commands), against the dev database |
-| `pnpm test:desktop` | the desktop app's integration tests (`desktop/**/*.itest.ts`) one file at a time, on the real Node and PostgreSQL it ships: the lock, backups, restore, upgrade and the app server under the supervisor. Run `pnpm desktop:fetch` first. They use ports 40402 to 40459 |
+| `pnpm test:desktop` | the desktop app's integration tests (`desktop/**/*.itest.ts`) one file at a time, on the real Node and PostgreSQL it ships: the lock, backups, restore, upgrade and the app server under the supervisor. Run `pnpm desktop:fetch` first. They use ports 30402 to 30459 |
 | `pnpm desktop:fetch` | `desktop/scripts/fetch-runtime.ts`: fills `desktop/.runtime/` with the Node and PostgreSQL the app bundles. See [The desktop app](#the-desktop-app) |
 | `pnpm test:backup` | the backup check (`scripts/backup-check.ts`): `docker/backup.sh` through its compose services, in a compose project and postgres of its own (port 5235). Needs Docker, takes about 5 minutes. Run it before a release that touches backups |
 
@@ -172,7 +172,7 @@ installs Electron and electron-builder.
 | `node desktop/scripts/test-db.ts pnpm test:int` | runs a command with `DATABASE_URL` pointing at a throwaway cluster from the fetched PostgreSQL, as CI does on Windows, where no database runs as a service |
 | `pnpm test:desktop` | the integration tests above |
 | `pnpm exec vite --config desktop/window/vite.config.ts` | the window's page on http://localhost:5174 with a fake bridge. `?scenario=<name>` picks a state (`running`, `no-rooms`, `update-install` and the rest of `desktop/window/scenarios.ts`) |
-| `node desktop/e2e/run.ts` | the desktop e2e files (`window.e2e.ts` and `shell.e2e.ts`), one at a time, each stopped whole if it hangs. Name files to run only those, such as `node desktop/e2e/run.ts window`. On Linux run it under `xvfb-run -a`. The window's file uses `E2E_PORT`, 40600 unless set |
+| `node desktop/e2e/run.ts` | the desktop e2e files (`window.e2e.ts` and `shell.e2e.ts`), one at a time, each stopped whole if it hangs. Name files to run only those, such as `node desktop/e2e/run.ts window`. On Linux run it under `xvfb-run -a`. The window's file uses `E2E_PORT`, 30600 unless set |
 
 To build the app for this computer, run these in order. The last step makes
 the installer in `desktop/out/dist`, and `--dir` there makes only the
