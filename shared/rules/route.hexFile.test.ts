@@ -708,6 +708,11 @@ describe("a trap's cut keeps how far along the cut lead's walk each point of a w
           s.tokens.gob = onHex(g, "gob", "medium", start, { name: "Goblin", kind: "npc", ownerIds: ["p1"], attached: { to: "horse", kind: "drag" } });
           s.traps.stop = trap("stop", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", zone: { cells: [{ x: path[1]!.col, y: path[1]!.row, w: 1, h: 1 }] } });
           const op = intoCorridor(g, s, path[7]!);
+          const allowed = canApply(op, actor, s, { canUseAsset: () => true });
+          // Pat's own drag from 6, 7 on hex rows is refused: the goblin's walk from there onto the warhorse's hex cuts the rock
+          // beside the corridor's mouth. Every other start, and the DM's from each, is taken.
+          if (actor === P1 && g.orient === "rows" && hexKey(start) === "6,7") assert.deepEqual(allowed, { ok: false, code: "forbidden", message: "A wall is in the way." }, where);
+          else assert.ok(allowed.ok, `${where}: ${allowed.ok ? "" : allowed.message}`);
           const cut = planTrapMove(op, s, actor, {}).op;
           assert.notEqual(cut, op, `${where}: the trap cuts the move`);
           const gob = planWalks(cut, s, actor, {}).find((m) => m.tokenId === "gob")!;
