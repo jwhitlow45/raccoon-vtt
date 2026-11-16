@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { realpathSync } from "node:fs";
 import { uptime } from "node:os";
 import { basename } from "node:path";
-import { bootId, isAlive, linkedProgram, listProcesses, parseCreated, parseProcStat, parsePsList, parsePsStart, parseStatusUid, parseWindowsList, parseWindowsProcess, processFacts, processStamp, procHidesPids, processStart, selfIdentity, stillRunning, systemShell, WINDOWS_LIST_SCRIPT, type ListedProcess, type ProcFiles } from "./processInfo.ts";
+import { bootId, isAlive, linkedProgram, listProcesses, parseCreated, parseProcStat, parsePsFacts, parsePsList, parsePsStart, parseStatusUid, parseWindowsList, parseWindowsProcess, processFacts, processStamp, procHidesPids, processStart, selfIdentity, stillRunning, systemShell, WINDOWS_LIST_SCRIPT, type ListedProcess, type ProcFiles } from "./processInfo.ts";
 
 /**
  * A process is its pid, its start time and its boot (docs/design/design-v1-local-app.md
@@ -60,6 +60,7 @@ test("a process's stamp is steady while it runs, and gone with it, and its progr
   if (platform !== "win32") assert.equal(facts.uid, process.getuid?.());
   else assert.equal(facts.uid, null);
   assert.ok(facts.start !== null && Math.abs(facts.start - (await processStart(process.pid, platform))!) < 2_000);
+  assert.equal(facts.stamp, first, "its stamp is processStamp's, from the same read as its program");
   // Only Linux says where a process works, which for a postmaster is its data folder.
   if (platform === "linux") assert.equal(facts.cwd, realpathSync(process.cwd()));
   else assert.equal(facts.cwd, null);
@@ -112,10 +113,15 @@ test("the readings that need no special rights parse: /proc's Uid line and Windo
   assert.equal(linkedProgram("/usr/lib/postgresql/17/bin/postgres (deleted)"), "/usr/lib/postgresql/17/bin/postgres");
   assert.equal(linkedProgram("/opt/raccoonvtt/postgres/bin/postgres"), "/opt/raccoonvtt/postgres/bin/postgres");
   assert.equal(linkedProgram("/opt/my (deleted) things/postgres"), "/opt/my (deleted) things/postgres");
-  assert.deepEqual(parseWindowsProcess('{"name":"svchost.exe","created":"2026-11-14T07:13:25.1200000Z"}'), { exe: "svchost.exe", start: Date.parse("2026-11-14T07:13:25.120Z") });
-  assert.deepEqual(parseWindowsProcess('{"name":"postgres.exe","created":""}'), { exe: "postgres.exe", start: null });
-  assert.deepEqual(parseWindowsProcess(""), { exe: null, start: null });
-  assert.deepEqual(parseWindowsProcess("Get-CimInstance : Access denied"), { exe: null, start: null });
+  const created = Date.parse("2026-11-14T07:13:25.120Z");
+  assert.deepEqual(parseWindowsProcess('{"name":"svchost.exe","created":"2026-11-14T07:13:25.1200000Z"}'), { exe: "svchost.exe", start: created, stamp: created });
+  assert.deepEqual(parseWindowsProcess('{"name":"postgres.exe","created":""}'), { exe: "postgres.exe", start: null, stamp: null });
+  assert.deepEqual(parseWindowsProcess(""), { exe: null, start: null, stamp: null });
+  assert.deepEqual(parseWindowsProcess("Get-CimInstance : Access denied"), { exe: null, start: null, stamp: null });
+  // macOS: one ps call gives its user, its start, which is its stamp too, and its program.
+  const lstart = Date.UTC(2026, 10, 2, 5, 12, 3);
+  assert.deepEqual(parsePsFacts("  UID STARTED                      COMM\n  501 Mon Nov  2 05:12:03 2026     /opt/r/postgres/bin/postgres\n"), { exe: "/opt/r/postgres/bin/postgres", uid: 501, start: lstart, stamp: lstart });
+  assert.deepEqual(parsePsFacts("  UID STARTED                      COMM\n"), { exe: null, uid: null, start: null, stamp: null }, "a process that is gone");
 });
 
 test("the process listing shows a process's whole command line, a folder named in any script included", { skip: platform === "win32" && "Windows lists postgres.exe alone" }, async () => {
@@ -218,6 +224,29 @@ test("Linux: a command line that can't be read is a process gone only when the e
   await assert.rejects(list({ 53: fail("EIO") }, { 53: 1000 }, hidden), /process 53/, "any other error still fails it");
   await assert.rejects(list({ 54: fail("EPERM") }, { 54: 1000 }), /process 54/, "and without hidepid, so does EPERM");
   await assert.rejects(list({ 55: fail("EPERM") }, { 55: 1000 }, fail("EACCES")), /process 55/, "and when mountinfo can't be read");
+});
+
+test("Linux: a process's facts and its start come from one process, and one that changed while it was read says nothing", async () => {
+  const stat = (ticks: number) => Buffer.from(`41 (postgres) S ${Array(18).fill("0").join(" ")} ${ticks} 0 0`);
+  /** /proc for pid 41, whose start reads as each of `starts` in turn. */
+  const files = (starts: number[]): ProcFiles => {
+    let read = 0;
+    return {
+      readdir: async () => [],
+      readFile: async (path) => {
+        if (path === "/proc/41/stat") return stat(starts[Math.min(read++, starts.length - 1)] as number);
+        if (path === "/proc/41/status") return Buffer.from("Name:\tpostgres\nUid:\t1000\t1000\t1000\t1000\n");
+        if (path === "/proc/stat") return Buffer.from("cpu 0\nbtime 1700000000\n");
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      },
+      readlink: async (path) => (path.endsWith("/exe") ? "/opt/r/postgres/bin/postgres" : "/data/postgres"),
+      stat: async () => ({ uid: 1000 }),
+      uid: 1000,
+    };
+  };
+  assert.deepEqual(await processFacts(41, "linux", files([500])), { exe: "/opt/r/postgres/bin/postgres", cwd: "/data/postgres", uid: 1000, start: 1700000000_000 + 5000, stamp: 5000 });
+  // The pid was reused between the reads, so the program and folder may be either process's.
+  assert.deepEqual(await processFacts(41, "linux", files([500, 600])), { exe: null, cwd: null, uid: null, start: null, stamp: null });
 });
 
 test("Linux: /proc's hidepid, read from mountinfo", () => {

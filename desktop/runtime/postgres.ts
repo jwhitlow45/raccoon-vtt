@@ -145,7 +145,7 @@ export type ClusterOptions = {
  * folder's postmaster. `uncertain`: something runs as its pid that may be
  * this folder's postmaster, so the file stays and the start stops.
  */
-export type Leftover = { kind: "none" } | { kind: "stale" } | { kind: "running"; pid: number; stamp: number | null } | { kind: "uncertain"; pid: number };
+export type Leftover = { kind: "none" } | { kind: "stale" } | { kind: "running"; pid: number; stamp: number } | { kind: "uncertain"; pid: number };
 
 /** The words a start stops with when postmaster.pid names a process that may still be this folder's PostgreSQL. */
 export function uncertainWords(pid: number): string {
@@ -316,21 +316,20 @@ export class Cluster {
     const pid = Number(lines[0]);
     const startedSec = Number(lines[2]);
     if (!isAlive(pid)) return { kind: "stale" };
-    // Read before what it runs, so a pid reused in between leaves a reading that never matches the later process.
-    const stamp = await this.proc.stamp(pid).catch(() => null);
     let facts: ProcessFacts;
     try {
       facts = await this.proc.facts(pid);
     } catch {
-      facts = { exe: null, cwd: null, uid: null, start: null };
+      facts = { exe: null, cwd: null, uid: null, start: null, stamp: null };
     }
     const postgres = facts.exe !== null && /^postgres(\.exe)?$/i.test(basename(facts.exe.replaceAll("\\", "/")));
-    if (postgres) {
+    // The start reading kept for it comes from the same read as the program it runs (processFacts), so it is the confirmed process's own, and one without a reading is no confirmed postmaster.
+    if (postgres && facts.stamp !== null) {
       if (this.opts.platform === "linux") {
-        if (facts.cwd !== null && facts.cwd === (await realpath(this.opts.pgData))) return { kind: "running", pid, stamp };
+        if (facts.cwd !== null && facts.cwd === (await realpath(this.opts.pgData))) return { kind: "running", pid, stamp: facts.stamp };
       } else if (facts.start !== null && Number.isFinite(startedSec) && Math.abs(facts.start / 1000 - startedSec) <= 5) {
         // The file's time is the postmaster's own clock reading as it started, a moment after the system's.
-        return { kind: "running", pid, stamp };
+        return { kind: "running", pid, stamp: facts.stamp };
       }
     }
     if (await this.fromEarlierBoot()) return { kind: "stale" };
@@ -698,7 +697,7 @@ export class Cluster {
     if (stop && !stop.exact) {
       // leftover() reads postmaster.pid and the process again, and the pg_ctl stop follows at once.
       const left = await this.leftover().catch(() => null);
-      const same = left?.kind === "running" && left.pid === stop.pid && left.stamp !== null && (stop.stamp === null || left.stamp === stop.stamp);
+      const same = left?.kind === "running" && left.pid === stop.pid && (stop.stamp === null || left.stamp === stop.stamp);
       if (same) this.remember(stop.pid, left.stamp);
       else stop = null;
     }
