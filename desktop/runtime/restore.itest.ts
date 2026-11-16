@@ -13,6 +13,7 @@ import { clusterRestoreDb, nodeImageFs } from "./restoreDb.ts";
 import { postgresDir, startTestCluster, type TestCluster } from "./testing/cluster.ts";
 import { addImage, createRoom, missingImages, query, restoreDatabases, roomNames, supervisorDbUrl } from "./testing/dataFixture.ts";
 import { startSupervisor, type SupervisorRun } from "./testing/supervisorProcess.ts";
+import { TEST_PORTS } from "./testing/testPorts.ts";
 import { writeStamp, type Build } from "./versionGuard.ts";
 
 /**
@@ -25,7 +26,7 @@ import { writeStamp, type Build } from "./versionGuard.ts";
  * calls, and the cases of their own under the table.
  */
 
-const PORT = 40431;
+const PORT = TEST_PORTS.restore;
 const NAME = "raccoon-backup";
 let data: string;
 let backup: string;

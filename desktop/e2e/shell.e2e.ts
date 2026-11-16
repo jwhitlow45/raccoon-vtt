@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { _electron, type ElectronApplication, type Page } from "playwright-core";
 import { WORDS, type RaccoonLocal, type WindowState } from "../contract.ts";
+import { TEST_PORTS } from "../runtime/testing/testPorts.ts";
 
 /**
  * The packed shell (design 12, LOCAL-4), driven through Playwright's
@@ -38,7 +39,7 @@ type ShellHandle = {
 /** The window's page, seen from inside it. */
 type PageGlobals = { raccoonLocal?: RaccoonLocal; require?: unknown; process?: unknown };
 const FAKE = process.env.RACCOON_SHELL_E2E_FAKE === "1";
-const PORT = Number(process.env.E2E_PORT ?? 40500);
+const PORT = Number(process.env.E2E_PORT ?? TEST_PORTS.shellE2e);
 const TIMEOUT = FAKE ? 30_000 : 180_000;
 /** Each test's bound, so a shell that never does its part fails the test rather than hanging the run. */
 const STEP_TIMEOUT = TIMEOUT + 60_000;

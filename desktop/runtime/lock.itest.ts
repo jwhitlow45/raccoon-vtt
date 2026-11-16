@@ -11,6 +11,7 @@ import { dataIdentity } from "./dataDir.ts";
 import { guardPath, lockLocation } from "./lock.ts";
 import { ROOT } from "./testing/cluster.ts";
 import { startSupervisor } from "./testing/supervisorProcess.ts";
+import { TEST_PORTS } from "./testing/testPorts.ts";
 
 /**
  * One supervisor per data folder, with real processes
@@ -336,7 +337,7 @@ describe("two supervisors on one folder", { skip: !unix && "symlinked data folde
     const alias = join(dirname(data), `${basename(data)}-alias`);
     await symlink(data, alias);
     temps.push(alias);
-    const first = startSupervisor({ data, port: 40410 });
+    const first = startSupervisor({ data, port: TEST_PORTS.lockFirst });
     let second: ReturnType<typeof startSupervisor> | null = null;
     let client: pg.Client | null = null;
     try {
@@ -360,7 +361,7 @@ describe("two supervisors on one folder", { skip: !unix && "symlinked data folde
         }
       })();
 
-      second = startSupervisor({ data, dataArg: alias, port: 40411 });
+      second = startSupervisor({ data, dataArg: alias, port: TEST_PORTS.lockSecond });
       const refused = await second.waitFor("an error", (s) => s.state === "error", 120_000);
       assert.deepEqual(refused.error, { kind: "alreadyRunning" });
       await new Promise((r) => setTimeout(r, 1_000));
