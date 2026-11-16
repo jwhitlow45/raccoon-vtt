@@ -16,6 +16,7 @@ import { BOOT_RECORD, Cluster, DB_STATEMENT_MS, DatabaseFailed, RESTORE_STATEMEN
 import { bootId, isAlive, processFacts, processStamp } from "./processInfo.ts";
 import { postgresDir, startTestCluster, type TestCluster } from "./testing/cluster.ts";
 import { killSupervisor, startSupervisor, type SupervisorRun } from "./testing/supervisorProcess.ts";
+import { TEST_PORTS } from "./testing/testPorts.ts";
 
 /**
  * The bundled PostgreSQL with its real programs (docs/design/design-v1-local-app.md
@@ -341,7 +342,7 @@ describe("the cluster", () => {
 describe("a postmaster left running", { skip: platform === "win32" && "the Windows smoke test kills the shell and checks what is left" }, () => {
   test("the next supervisor stops the one a killed supervisor left, starts its own, and the data folder is private", async () => {
     const data = await dataDir();
-    const first = supervisor(data, 40412);
+    const first = supervisor(data, TEST_PORTS.postgresLeftFirst);
     await first.waitFor("running", (s) => s.state === "running", 120_000);
     if (platform !== "win32") {
       assert.equal((await stat(data)).mode & 0o777, 0o700, "the data folder is 0700");
@@ -351,7 +352,7 @@ describe("a postmaster left running", { skip: platform === "win32" && "the Windo
     await killSupervisor(first);
     assert.ok(isAlive(left), "a killed supervisor leaves its postmaster running");
 
-    const second = supervisor(data, 40413);
+    const second = supervisor(data, TEST_PORTS.postgresLeftNext);
     await second.waitFor("running", (s) => s.state === "running", 120_000);
     assert.equal(isAlive(left), false, "the old postmaster was stopped");
     const now = await postmasterPid(data);
@@ -367,7 +368,7 @@ describe("a postmaster left running", { skip: platform === "win32" && "the Windo
 
   test("while the supervisor named in supervisor.json still runs, a second one that got a lock ends as already running and touches nothing", async () => {
     const data = await dataDir();
-    const first = supervisor(data, 40414);
+    const first = supervisor(data, TEST_PORTS.postgresOwnerFirst);
     await first.waitFor("running", (s) => s.state === "running", 120_000);
     const postmaster = await postmasterPid(data);
     const owner = await readFile(join(data, "supervisor.json"), "utf8");
@@ -377,7 +378,7 @@ describe("a postmaster left running", { skip: platform === "win32" && "the Windo
     if ("error" in at) throw new Error("this machine's lock path is too long");
     await unlink(at.path);
 
-    const second = supervisor(data, 40415);
+    const second = supervisor(data, TEST_PORTS.postgresOwnerSecond);
     const refused = await second.waitFor("an error", (s) => s.state === "error", 120_000);
     assert.deepEqual(refused.error, { kind: "alreadyRunning" });
     assert.equal(await postmasterPid(data), postmaster, "the first postmaster was not stopped");

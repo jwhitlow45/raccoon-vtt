@@ -7,6 +7,7 @@ import { after, test } from "node:test";
 import { isAlive } from "./processInfo.ts";
 import { createRoom, supervisorDbUrl } from "./testing/dataFixture.ts";
 import { startSupervisor } from "./testing/supervisorProcess.ts";
+import { TEST_PORTS } from "./testing/testPorts.ts";
 
 /**
  * The supervisor with the real app server, server/main.ts in local mode
@@ -18,7 +19,7 @@ import { startSupervisor } from "./testing/supervisorProcess.ts";
  * running.
  */
 
-const PORT = 40402;
+const PORT = TEST_PORTS.appServer;
 const dirs: string[] = [];
 after(async () => {
   for (const dir of dirs) await rm(dir, { recursive: true, force: true });
