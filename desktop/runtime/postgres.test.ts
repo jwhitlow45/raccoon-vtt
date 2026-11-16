@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { after, describe, test } from "node:test";
@@ -485,6 +485,25 @@ describe("a start", { skip: posixOnly }, () => {
       assert.equal(c.port, null);
     });
   }
+
+  test("a postmaster is known by its program's real path, though the cluster was given the programs through a link", { timeout: 15_000 }, async () => {
+    const dir = await folder();
+    const { bin, calls } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    // As /var is /private/var on macOS, and an AppImage's or a translocated app's folder is a mount of another.
+    await mkdir(join(dir, "linked"));
+    const link = join(dir, "linked", "bin");
+    await symlink(bin, link);
+    const postmaster = join(dir, "postmaster.child");
+    const c = cluster(dir, link, lookup(), { platform: "darwin" });
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 100);
+    const { ms, error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_PIDAFTER: "0.8" }, abort.signal);
+    assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
+    assert.ok(ms < 8_000, `the start answered after ${ms} ms`);
+    assert.equal(await ended(await pid(postmaster)), true, "the postmaster it launched was killed as exactly this folder's");
+    assert.deepEqual(await calls(), KILLED);
+  });
 
   test("a start whose process listing fails holds on, says it can't confirm PostgreSQL ended, and answers once a listing proves it", { timeout: 20_000 }, async () => {
     const dir = await folder();
