@@ -24,6 +24,7 @@ import { spawnAppServer, waitHealthy } from "./appServer.ts";
 import { FREE_FLOOR_BYTES, freeBytesOf, listBackups, runBackup } from "./backup.ts";
 import { realClock } from "./clock.ts";
 import { dataIdentity, dataPaths, ensureDataDir, resolveDataDir } from "./dataDir.ts";
+import { closeInheritedSockets } from "./inheritedSockets.ts";
 import { deleteJournal, readJournal, writeJournal } from "./journal.ts";
 import { acquireLock, deleteGuardFolder, lockLocation, type HeldLock } from "./lock.ts";
 import { RotatingLog, lastLogLine } from "./logs.ts";
@@ -76,6 +77,8 @@ if (!channel && !args.headless) {
   console.error("Run RaccoonVTT from its app. To run this without it: --headless --data <folder>");
   process.exit(2);
 }
+// First, so neither this process nor any it starts holds the shell's channels to its renderers open (inheritedSockets.ts).
+const inheritedSockets = closeInheritedSockets(platform);
 
 const dataDir = resolveDataDir(args.data, platform, process.env, os.homedir());
 await ensureDataDir(dataDir, platform);
@@ -85,6 +88,7 @@ const supervisorLog = new RotatingLog(join(paths.logs, LOG_FILES.supervisor));
 const serverLog = new RotatingLog(join(paths.logs, LOG_FILES.server));
 const log = (msg: string): void => supervisorLog.line(`${new Date().toISOString()} ${msg}`);
 log(`starting, pid ${process.pid}, data ${dataDir}`);
+if (inheritedSockets.length > 0) log(`closed ${inheritedSockets.length} sockets inherited from the shell`);
 
 /** Beside app-server/ in the installed app, or the fetched runtime in the repository. */
 const postgresDir =
