@@ -557,13 +557,17 @@ export class Cluster {
    * each minute, a retry and never evidence, and the end stays unconfirmed
    * meanwhile (proveEnded). One the file named once and no longer does is
    * left too: a postmaster whose postmaster.pid is gone or names another
-   * ends itself within a minute (RecheckDataDirLockFile). Only one the file
-   * has never named is killed, since it has launched no children yet. Every
-   * pid signalled is one the listing has just shown to be exactly this
-   * folder's postmaster, never one on the file's word alone. A process that
-   * only may be one is never signalled, and the end can't be confirmed
-   * while it runs. Answers how many it found and when it first signalled
-   * one, and throws when the listing fails.
+   * ends itself within a minute (RecheckDataDirLockFile). Nor is one killed
+   * beside the running postmaster the file names: that is a child it has
+   * just forked, which carries its command line until it renames itself,
+   * or on Windows the cmd.exe it runs under, which ends with it. Only one
+   * the file has never named, while it names none that runs, is killed,
+   * since it has launched no children yet. Every pid signalled is one the
+   * listing has just shown to be exactly this folder's postmaster, never
+   * one on the file's word alone. A process that only may be one is never
+   * signalled, and the end can't be confirmed while it runs. Answers how
+   * many it found and when it first signalled one, and throws when the
+   * listing fails.
    */
   private async endPass(asked: Asked): Promise<{ found: number; exact: number; signalled: number | null }> {
     const found = await this.postmasters();
@@ -575,7 +579,8 @@ export class Cluster {
       }
       signalled ??= Date.now();
       const tried = asked.get(pid);
-      if ((await this.pidFilePid()) === pid) {
+      const named = await this.pidFilePid();
+      if (named === pid) {
         const now = Date.now();
         if (tried?.mode === "immediate" && now - tried.at < (this.opts.immediateAgainMs ?? IMMEDIATE_AGAIN_MS)) continue;
         if (tried?.mode === "immediate") this.opts.log?.(`PostgreSQL (pid ${pid}) still runs after pg_ctl stop -m immediate, so it is asked again`);
@@ -584,7 +589,7 @@ export class Cluster {
         await this.pgCtlStop(mode).catch((err: unknown) => this.opts.log?.(`pg_ctl stop -m ${mode} of PostgreSQL (pid ${pid}) failed: ${(err as Error).message.split(/\r?\n/)[0]}`));
         continue;
       }
-      if (tried !== undefined) continue;
+      if (tried !== undefined || found.some((p) => p.exact && p.pid === named)) continue;
       try {
         process.kill(pid, "SIGKILL");
       } catch (err) {
