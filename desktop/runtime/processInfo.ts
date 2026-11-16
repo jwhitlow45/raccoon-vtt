@@ -287,23 +287,51 @@ function gone(err: unknown): boolean {
 }
 
 /**
+ * Whether /proc is mounted with hidepid, from /proc/self/mountinfo: then
+ * reading another process's files takes a ptrace check, which this user's
+ * own processes that can't be dumped fail too. hidepid=0 or off is none.
+ */
+export function procHidesPids(mountinfo: string): boolean {
+  let hides = false;
+  for (const line of mountinfo.split("\n")) {
+    const [mount, source] = line.split(" - ");
+    if (source === undefined || mount?.split(" ")[4] !== "/proc" || source.split(" ")[0] !== "proc") continue;
+    // A later mount over /proc is the one in force.
+    const hidepid = /(?:^|[ ,])hidepid=([^ ,]+)/.exec(line)?.[1];
+    hides = hidepid !== undefined && hidepid !== "0" && hidepid !== "off";
+  }
+  return hides;
+}
+
+/**
  * Whether a process whose command line can't be read may be this user's,
- * so a listing without it would prove nothing. Any error but its end, such
- * as EACCES under hidepid=1 or for a process that can't be dumped, is
- * settled by who owns /proc/<pid>, which hidepid=1 still lets anyone stat:
- * another user's or root's is skipped, since PostgreSQL never runs as root,
- * and a process that can't be dumped shows as root's. /proc/<pid>/status is
+ * so a listing without it would prove nothing. Any error but its end is
+ * settled by who owns /proc/<pid>, which anyone may stat under hidepid=1.
+ * /proc/<pid> itself keeps the process's effective uid even when it can't
+ * be dumped, where the files inside show as root's (fs/proc/base.c,
+ * task_dump_owner), so the stat says whose it is. Another user's or root's
+ * is skipped, since PostgreSQL never runs as root. /proc/<pid>/status is
  * never read for this, since hidepid=1 hides it for every other user's
  * process, so every listing would fail.
+ *
+ * Under hidepid, this user's own processes that can't be dumped, such as
+ * ssh-agent and Chromium's sandboxed ones, refuse their command line with
+ * EPERM or EACCES, and are skipped too (LA-31): PostgreSQL never makes
+ * itself one (its only prctl is PR_SET_PDEATHSIG), so its command line
+ * stays readable. Without hidepid, or with any other error, a process of
+ * this user's still fails the listing.
  */
-async function mayBeOurs(pid: string, err: unknown, files: ProcFiles): Promise<boolean> {
+async function mayBeOurs(pid: string, err: unknown, files: ProcFiles, hidesPids: () => Promise<boolean>): Promise<boolean> {
   if (gone(err)) return false;
+  let uid: number;
   try {
-    const { uid } = await files.stat(`/proc/${pid}`);
-    return files.uid === null || uid === files.uid;
+    ({ uid } = await files.stat(`/proc/${pid}`));
   } catch (statErr) {
     return !gone(statErr);
   }
+  if (files.uid !== null && uid !== files.uid) return false;
+  const code = (err as NodeJS.ErrnoException).code;
+  return !((code === "EPERM" || code === "EACCES") && (await hidesPids()));
 }
 
 /**
@@ -321,13 +349,16 @@ async function mayBeOurs(pid: string, err: unknown, files: ProcFiles): Promise<b
 export async function listProcesses(platform: Platform = process.platform as Platform, files: ProcFiles = procFiles): Promise<ListedProcess[]> {
   if (platform === "linux") {
     const out: ListedProcess[] = [];
+    let hides: Promise<boolean> | null = null;
+    // Read once a listing needs it, and taken as no hidepid when it can't be read, which holds rather than skips.
+    const hidesPids = (): Promise<boolean> => (hides ??= files.readFile("/proc/self/mountinfo").then((raw) => procHidesPids(raw.toString("utf8")), () => false));
     for (const name of await files.readdir("/proc")) {
       if (!/^\d+$/.test(name)) continue;
       let raw: Buffer;
       try {
         raw = await files.readFile(`/proc/${name}/cmdline`);
       } catch (err) {
-        if (await mayBeOurs(name, err, files)) throw new Error(`process ${name} runs as this user and its command line can't be read: ${(err as Error).message}`);
+        if (await mayBeOurs(name, err, files, hidesPids)) throw new Error(`process ${name} runs as this user and its command line can't be read: ${(err as Error).message}`);
         continue;
       }
       const args = raw.toString("utf8").replace(/\0+$/, "");

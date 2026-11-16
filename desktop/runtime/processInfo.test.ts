@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { realpathSync } from "node:fs";
 import { uptime } from "node:os";
 import { basename } from "node:path";
-import { bootId, isAlive, linkedProgram, listProcesses, parsePsList, parseStatusUid, parseWindowsList, parseWindowsProcess, processFacts, processStamp, processStart, selfIdentity, stillRunning, WINDOWS_LIST_SCRIPT, type ProcFiles } from "./processInfo.ts";
+import { bootId, isAlive, linkedProgram, listProcesses, parsePsList, parseStatusUid, parseWindowsList, parseWindowsProcess, processFacts, processStamp, procHidesPids, processStart, selfIdentity, stillRunning, WINDOWS_LIST_SCRIPT, type ProcFiles } from "./processInfo.ts";
 
 /**
  * A process is its pid, its start time and its boot (docs/design/design-v1-local-app.md
@@ -135,10 +135,14 @@ test("Linux: a command line that can't be read is a process gone only when the e
   const fail = (code: string): Error => Object.assign(new Error(`${code}: the read failed`), { code });
   const statted: string[] = [];
   /** /proc with each pid's command line or the error reading it gives, and the owner stat gives its folder. */
-  const list = (cmdlines: Record<string, string | Error>, owners: Record<string, number | Error> = {}) => {
+  const list = (cmdlines: Record<string, string | Error>, owners: Record<string, number | Error> = {}, mountinfo: string | Error = fail("ENOENT")) => {
     const files: ProcFiles = {
       readdir: async () => ["self", "stat", ...Object.keys(cmdlines)],
       readFile: async (path) => {
+        if (path === "/proc/self/mountinfo") {
+          if (mountinfo instanceof Error) throw mountinfo;
+          return Buffer.from(mountinfo);
+        }
         const read = cmdlines[path.split("/")[2] ?? ""];
         if (read === undefined || read instanceof Error) throw read ?? fail("ENOENT");
         return Buffer.from(`${read.split(" ").join("\0")}\0`);
@@ -165,4 +169,25 @@ test("Linux: a command line that can't be read is a process gone only when the e
   await assert.rejects(list({ 31: fail("EIO") }, { 31: 1000 }), /process 31/);
   // Who owns it can't be read either: no answer, so no proof.
   await assert.rejects(list({ 40: fail("EACCES") }, { 40: fail("EACCES") }), /process 40/);
+
+  // Under hidepid this user's own processes that can't be dumped refuse with EPERM or EACCES, and PostgreSQL is never one.
+  const hidden = "22 28 0:21 / /proc rw,nosuid,nodev,noexec,relatime shared:13 - proc proc rw,hidepid=invisible\n";
+  assert.deepEqual(await list({ 50: fail("EPERM"), 51: fail("EACCES"), 52: "sh" }, { 50: 1000, 51: 1000 }, hidden), [{ pid: 52, commandLine: "sh", argv: ["sh"], exe: null }]);
+  await assert.rejects(list({ 53: fail("EIO") }, { 53: 1000 }, hidden), /process 53/, "any other error still fails it");
+  await assert.rejects(list({ 54: fail("EPERM") }, { 54: 1000 }), /process 54/, "and without hidepid, so does EPERM");
+  await assert.rejects(list({ 55: fail("EPERM") }, { 55: 1000 }, fail("EACCES")), /process 55/, "and when mountinfo can't be read");
+});
+
+test("Linux: /proc's hidepid, read from mountinfo", () => {
+  const proc = (options: string, at = "/proc") => `22 28 0:21 / ${at} rw,nosuid,nodev,noexec,relatime shared:13 - proc proc ${options}`;
+  assert.equal(procHidesPids(`${proc("rw,hidepid=2")}\n`), true);
+  assert.equal(procHidesPids(proc("rw,hidepid=noaccess,gid=4")), true);
+  assert.equal(procHidesPids(proc("rw,hidepid=invisible")), true);
+  assert.equal(procHidesPids(proc("rw")), false);
+  assert.equal(procHidesPids(proc("rw,hidepid=0")), false);
+  assert.equal(procHidesPids(proc("rw,hidepid=off")), false);
+  assert.equal(procHidesPids(proc("rw,hidepid=2", "/srv/proc")), false, "another mount of proc");
+  assert.equal(procHidesPids(`${proc("rw,hidepid=2")}\n${proc("rw")}`), false, "the later mount over /proc is in force");
+  assert.equal(procHidesPids("25 28 0:22 / /sys rw - sysfs sysfs rw,hidepid=2"), false);
+  assert.equal(procHidesPids(""), false);
 });
