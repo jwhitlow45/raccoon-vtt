@@ -64,7 +64,7 @@ The app's Docs page (/docs) lists every written doc. To learn the tools as a DM,
 
 ### Room limits ([design](docs/design/design-v1-player-limits.md))
 
-- Each player has limits of their own on what they add, counted over only their own things that they can see. Reaching one, a player reads after "Not saved." which limit it is and what to remove:
+- Each player has limits of their own on what they add, counted over only their own things that they can see. Reaching one, a player reads which limit it is and what to remove, in the toast after "Not saved.", or in Add a companion as the form's red line, without "Not saved.":
   - On a map, its floors together: 33 tokens of their characters and those characters' companions ("You can have 33 tokens of your own on this map. Remove a companion first."). A creature the DM lends them doesn't count.
   - On a map, its floors together: 20 areas on creatures ("You can have 20 areas of your own on creatures here. Remove one first.").
   - On each floor: 40 other areas ("You can have 40 areas of your own here. Remove one first.").
@@ -73,10 +73,11 @@ The app's Docs page (/docs) lists every written doc. To learn the tools as a DM,
 - Only adding meets a player's limit: a new thing, an Undo that brings one back, and putting an area on a creature or taking it off. Moving, climbing and editing never do, so a player the DM gave more companions than their limit is refused only their next add.
 - A player can't add their own creature to the fight while the DM has it hidden: "The DM adds a hidden creature to the fight." The DM adds it, and "Reveal hidden combatants on their turn" decides when players see it.
 - A player adds at most 2,000 new things in 30 minutes, rows, conditions and asks included, and a DM 20,000: "Not saved. You are adding things very fast. Wait a few minutes."
-- The DM's own limits, such as a scene's 500 tokens and 200 areas, the room's 8 MiB and a scene's 3 MiB, count only what isn't within a player's limits, so players' things never use up the DM's room. They refuse only a change that adds to what they count, so hiding something, handing a character on and deleting always go through.
+- The DM's own limits, such as a scene's 500 tokens and 200 areas, the room's 8 MiB and a scene's 3 MiB, count only what isn't within a player's limits, so players' things never use up the DM's room, on whichever floor of a map they lie. They refuse only a change that adds to what they count, so hiding something, handing a character on and deleting always go through.
 - **Size limit**: a room holds up to 11 MiB, and each scene 6 MiB, of everyone's things together.
   - New things and edits that add stop 512 KiB short of the room's limit and 256 KiB short of a scene's, while moves, turns, HP, conditions, rolls and chat go on to the limit itself, so play goes on once nothing new fits. Past it, every change that adds is refused, and deleting always works.
   - A refusal reads "Not saved. The room is full: it is at its 11 MiB size limit." or "Not saved. This scene is at its 6 MiB size limit."
+  - The room keeps its last 1 MiB for what the players add. The DM's new things and edits that add stop 1 MiB sooner than a player's, both counting room for six players' maps on every Per player scene, so Per player scenes and the DM's own things never leave the players unable to add. The DM reads "Not saved. The room is full: it keeps its last 1 MiB for what the players add.", or the 11 MiB words once a player's add would be refused too.
   - Counts have a line of the same kind for everyone, such as 2,150 tokens a scene and 4,000 Initiative rows: "Not saved. This scene can hold at most 2,150 tokens."
   - While the room is over it, a DM device shows "This room is over its size limit by 2 MiB. New things and edits that add to it are refused until that much is freed." as a toast when it loads the room, and again on a later load once the number has changed. A table display never shows it.
 
@@ -370,7 +371,8 @@ All of this is the DM's.
 - Folders: "Move to folder…" files a scene under a header that folds with a tap. Each scene shows a thumbnail of its map, redrawn when the DM leaves a scene they changed, or with "Update thumbnail".
   - The menu's last row, "Delete", removes the scene with its tokens, drawings, build and fog. It asks for a second tap on the same row first, and a tap anywhere else cancels it.
   - The last scene in a room cannot be deleted. On the scene the players are on, Delete asks a question in place of the second tap, in a dialog titled "Delete Crypt" ("Delete Tower and its 3 floors" for a scene with floors): "The players are on this map. Delete it and leave them with no map?" Focus starts on Cancel, so Enter keeps the map.
-  - A yes leaves the players with no map, reading "Waiting for the DM to pick a scene.", until the DM moves them, and Undo setup brings the scene back with them on it. An Undo setup or Redo setup that would take the players' scene away is refused and says to move the players to another scene first.
+  - A yes leaves the players with no map, reading "Waiting for the DM to pick a scene.", until the DM moves them, and Undo setup brings the scene back with them on it. An Undo setup or Redo setup that would take the players' scene away is refused and says to move the players to another scene first. That includes a Redo setup of the delete after Undo setup brought them back.
+  - Where the DM's own move of the players onto that scene is still in their Play history, Undo setup names that step instead: "Undo the play step first: moving players to the scene Tavern." Otherwise it says to move the players.
   - Players never see folders or thumbnails.
 - Map phases: up to 7 other images of the same map (8 in all), such as day and night or on fire, that keep tokens and fog in place. A chip, or the Phase menu on a wide screen, switches with one tap. A phase can bring its own light level, so Night can make the scene dark. Players get only the phase showing, never the others or their names.
 - **Animated maps** ([design](docs/design/design-v1-animated-maps.md)), while the server's owner has turned them on: a WebM (VP8, VP9 or AV1), MP4 (H.264 or AV1) or MOV (H.264) of up to 64 MB, 1 second to 10 minutes, 60 frames a second and 3840 × 2160 (8.3 megapixels, no side over 4096), wherever a map image comes in: New scene's Map image, a scene's Map and grid, and Add a phase.
@@ -468,7 +470,7 @@ All of this is the DM's.
   - A dungeon sends up to 100 changes. Past 60 at once the rest go out paced, and the foot counts every answer.
   - Each lit room's light stands with its stamp as a DM-only light with its SRD preset, shown in the Lights pane.
   - Undo setup takes the key page and the pins back with the dungeon, and Delete removes the scene and its pins but leaves the key page in the Journal, to be deleted there.
-  - Undo setup is refused for the players' scene, so move the players to another scene first. The scene's Delete asks first there instead (see Scenes and maps).
+  - Undo setup is refused for the players' scene, saying to move the players to another scene first, or to undo the play step that moved them there (see Scenes and maps). The scene's Delete asks first there instead.
   - Make the scene opens the scene with the Map builder picked, framed on the entrance room, on this device only, so every other device opens it as any Builder scene, and no starting view is stored.
   - The foot counts the answers ("Making the dungeon… 18 of 30") while Cancel becomes Hide, and says "Waiting for the server…" offline. The choices, Reroll and the seed wait while it sends, and after a refusal partway, so nothing changes the dungeon on its way (Copy seed still works).
   - Once the dialog closes on a dungeon sent, New scene's form starts over, so its Create makes no second scene.
@@ -2098,7 +2100,7 @@ While this sheet has focus, outside text fields. Separate key presses wait for t
 
 - Room settings, Backup: "Download a backup" saves the whole room as one .zip file, with every scene, token, character, journal page and image, starter picks and their credits included. At most 4 an hour. It holds the Log's newest lines, not all of its history: Export in the Log saves that as text, and the server's nightly backups keep it whole.
 - Home, "Import a room": "Import from a backup" makes a new room from that file, on this server or another, up to 95 MB. The server owner can import a bigger one from the command line. A backup whose images are more than a room may store on this server is refused whole, saying so. A room imported from a backup file starts With the password, as a new room does, since Joining is not part of the file.
-- A room backup carries its videos, and an import checks each one again. While animated maps are off, an import keeps each map's still image and skips its video. A video counts toward the room's storage. An upload must leave 32 MB of the room's storage free. An import needs only the room's storage.
+- A room backup carries its videos, and an import checks each one again. While animated maps are off, an import keeps each map's still image and skips its video. A video counts toward the room's storage. The DM's video upload must leave 32 MB of the room's storage free, while a player's upload needs only the room under its storage limit (see Images and art). An import needs only the room's storage.
 - A backup carries the room's sounds while Include sounds is on (on at first), which says how much they add. Off, the backup holds no sound file and nothing about sound but Only DM devices play: no library, playlists or scene sounds. An imported room starts silent, keeps its sounds, playlists and scene sounds, checks each file again, and says how many sounds it left out. While sound files are off, a backup leaves sounds out and an import keeps nothing about sound but Only DM devices play.
 
 ## Running the server
