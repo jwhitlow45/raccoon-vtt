@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { after, describe, test } from "node:test";
 import { Platform } from "../contract.ts";
-import { BOOT_RECORD, Cluster, DatabaseFailed, Ended, postmasterKind, runToExit, uncertainWords, type ProcessLookup, type Programs } from "./postgres.ts";
-import { isAlive, listProcesses, type ListedProcess } from "./processInfo.ts";
+import { BOOT_RECORD, Cluster, DatabaseFailed, Ended, pgEnv, postmasterKind, runToExit, uncertainWords, type ProcessLookup, type Programs } from "./postgres.ts";
+import { isAlive, listProcesses, systemShell, type ListedProcess } from "./processInfo.ts";
 
 /**
  * The cluster's own rules, with stand-ins for PostgreSQL's programs and for
@@ -565,6 +565,58 @@ describe("a start", { skip: posixOnly }, () => {
     for (const child of loose) assert.match(said.join("\n"), new RegExp(`process ${child.pid} names this data folder .*: \\S.* -D ${pg}`), "the log names each, with its command line");
   });
 
+  test("the shell pg_ctl execs the postmaster from is ended only on pg_ctl's exact command, and holds the start while it runs", { timeout: 20_000 }, async () => {
+    const dir = await folder();
+    const { bin } = await programs(dir);
+    const pg = join(dir, "postgres");
+    await mkdir(pg);
+    const idle = () => spawn(process.execPath, ["-e", "setInterval(() => undefined, 1000)"], { stdio: "ignore" });
+    const exact = idle();
+    const loose = idle();
+    for (const child of [exact, loose]) strays.push(child.pid as number);
+    let exactEnded: number | null = null;
+    const began = Date.now();
+    exact.once("exit", () => (exactEnded = Date.now() - began));
+    // Each stands in for the shell, listed as pg_ctl's command: one for the bundled postgres, one for another.
+    const shell = (program: string) => `/bin/sh -c exec "${program}" -D "${pg}" -p 5 < "/dev/null" >> "${join(dir, "postgres.log")}" 2>&1`;
+    const proc: ProcessLookup = {
+      ...lookup(),
+      list: async () => [
+        ...(await asStarted()),
+        ...(exact.exitCode === null && exact.signalCode === null ? [{ pid: exact.pid as number, commandLine: shell(join(bin, "postgres")) }] : []),
+        ...(loose.exitCode === null && loose.signalCode === null ? [{ pid: loose.pid as number, commandLine: shell(join(dir, "other", "postgres")) }] : []),
+      ],
+    };
+    const unconfirmed: boolean[] = [];
+    const c = new Cluster({ ...cluster(dir, bin, proc, { platform: "darwin" }).opts, unconfirmed: (on) => unconfirmed.push(on) });
+    let looseAlive = false;
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 100);
+    setTimeout(() => {
+      looseAlive = loose.exitCode === null && loose.signalCode === null;
+      loose.kill("SIGKILL");
+    }, 2_000);
+    const { ms, error } = await startWith(dir, c, { RVTT_FAKE_PID: DEAD, RVTT_FAKE_FAIL: "1" }, abort.signal);
+    assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
+    assert.equal(exact.signalCode, "SIGKILL", "the exact one was killed");
+    assert.ok(exactEnded !== null && exactEnded < 2_000, `it ended ${exactEnded} ms in`);
+    assert.equal(looseAlive, true, "the other was never signalled");
+    assert.ok(ms >= 2_000, `answered after ${ms} ms, while the other ran`);
+    assert.deepEqual(unconfirmed, [true, false]);
+  });
+
+  test("on Windows the cmd.exe pg_ctl starts the postmaster through counts as one of this folder's", async () => {
+    const dir = await folder();
+    const pg = join(dir, "postgres");
+    const rows: ListedProcess[] = [
+      { pid: 7, commandLine: `"C:/pg/postgres.exe" -D "${pg}" -p 5  `, exe: "C:\\pg\\postgres.exe" },
+      { pid: 8, commandLine: `"${systemShell()}" /C ""C:/pg/postgres.exe" -D "${pg}" -p 5 < "nul" >> "${join(dir, "postgres.log")}" 2>&1"`, exe: systemShell() },
+      { pid: 9, commandLine: `"${systemShell()}" /C ""C:/pg/postgres.exe" -D "${pg}.incomplete-5" -p 5 < "nul" 2>&1"`, exe: systemShell() },
+    ];
+    const c = cluster(dir, "/none", { ...lookup(), list: async () => rows }, { platform: "win32" });
+    assert.deepEqual((await c.postmasters()).map((p) => p.pid), [7, 8]);
+  });
+
   /** A start reading that differs at every read, so the postmaster running is never the one this process started. */
   const neverMine = (): (() => Promise<number>) => {
     let n = 0;
@@ -759,8 +811,10 @@ describe("a program the cluster ends", { skip: posixOnly }, () => {
 describe("a postmaster by its command line", () => {
   const unix: Programs = { postgres: "/opt/r/postgres/bin/postgres", shell: "/usr/bin/dash" };
   const windows: Programs = { postgres: "C:\\Program Files\\RaccoonVTT\\resources\\postgres\\bin\\postgres.exe", shell: "C:\\Windows\\System32\\cmd.exe" };
-  // Each path stands for its own real path here, as the bundled program's does.
-  const kind = (p: ListedProcess, folders: string[], on: Platform) => postmasterKind(p, folders, on, on === "win32" ? windows : unix, async (path) => path);
+  // Each path stands for its own real path here, as the bundled program's does, with Windows' separators on Windows.
+  const kind = (p: ListedProcess, folders: string[], on: Platform) => postmasterKind(p, folders, on, on === "win32" ? windows : unix, async (path) => (on === "win32" ? path.replaceAll("/", "\\") : path));
+  /** The cmd.exe pg_ctl starts the postmaster through on Windows, as pg_ctl writes its command. */
+  const launcher = (program: string, folder: string) => `"C:\\Windows\\System32\\cmd.exe" /C ""${program}" -D "${folder}" -p 41659 < "nul" >> "D:\\Tables\\Dm\\RaccoonVTT\\logs\\postgres.log" 2>&1"`;
   const line = (commandLine: string, exe: string | null = null): ListedProcess => ({ pid: 7, commandLine, exe });
   const args = (argv: string[], exe: string | null): ListedProcess => ({ pid: 7, commandLine: argv.join(" "), argv, exe });
   const exec = (program: string, folder: string) => `exec "${program}" -D "${folder}" -p 41659 < "/dev/null" >> "${folder}.log" 2>&1`;
@@ -779,6 +833,8 @@ describe("a postmaster by its command line", () => {
     const exe = "C:\\PROGRAM FILES\\RaccoonVTT\\resources\\postgres\\bin\\postgres.exe";
     assert.equal(await kind(line('"C:/Program Files/RaccoonVTT/resources/postgres/bin/postgres.exe" -D "D:/Tables/dm/RaccoonVTT/postgres" -p 41659   ', exe), folders, "win32"), "exact", "Windows: forward slashes, and case ignored");
     assert.equal(await kind(line('"C:/PROGRA~1/RaccoonVTT/resources/postgres/bin/postgres.exe" -D "C:/ProgramData/RaccoonVTT/a1b2/data/postgres" -p 41659', exe), folders, "win32"), "exact", "Windows: the junction PostgreSQL was given");
+    const program = "C:/Program Files/RaccoonVTT/resources/postgres/bin/postgres.exe";
+    assert.equal(await kind(line(launcher(program, "D:/Tables/Dm/RaccoonVTT/postgres"), "C:\\WINDOWS\\system32\\cmd.exe"), folders, "win32"), "exact", "Windows: the launcher, run by Windows' own cmd.exe");
   });
 
   test("anything else that names the folder after postgres and -D is loose, so it counts as running and is never signalled", async () => {
@@ -805,6 +861,9 @@ describe("a postmaster by its command line", () => {
       ["pg_ctl's form, run by another postgres.exe", line('"C:/pg/postgres.exe" -D "C:/data/postgres" -p 5', "C:\\pg\\postgres.exe")],
       ["pg_ctl's form, its program unreadable", line('"C:/pg/postgres.exe" -D "C:/data/postgres" -p 5', null)],
       ["an argument pg_ctl never adds", line('"C:/pg/postgres.exe" -D "C:/data/postgres" -p 5 -c fsync=off', windows.postgres)],
+      ["the launcher's command, run by another program than Windows' cmd.exe", line(launcher("C:/Program Files/RaccoonVTT/resources/postgres/bin/postgres.exe", "C:/data/postgres"), "C:\\tools\\cmd.exe")],
+      ["the launcher starting another postgres.exe", line(launcher("C:/pg/postgres.exe", "C:/data/postgres"), windows.shell)],
+      ["the launcher's command with more after it", line(`${launcher("C:/Program Files/RaccoonVTT/resources/postgres/bin/postgres.exe", "C:/data/postgres")} & echo`, windows.shell)],
     ];
     for (const [what, p] of winCases) assert.equal(await kind(p, folders, "win32"), "loose", `Windows: ${what}`);
   });
@@ -818,6 +877,28 @@ describe("a postmaster by its command line", () => {
     const folders = ["C:\\ProgramData\\RaccoonVTT\\a1b2\\data\\postgres"];
     assert.equal(await kind(line('"C:\\pg\\pg_ctl.exe" start -D "C:/ProgramData/RaccoonVTT/a1b2/data/postgres" -l log', windows.postgres), folders, "win32"), null);
     assert.equal(await kind(line('"C:\\pg\\postgres.exe" --forkchild="checkpointer" 3', windows.postgres), folders, "win32"), null);
+  });
+});
+
+describe("the environment PostgreSQL's programs get", () => {
+  test("has no PG variable, and on Windows COMSPEC names Windows' own cmd.exe, in one spelling, whatever the caller's said", () => {
+    const comspec = Object.keys(process.env).find((key) => /^comspec$/i.test(key)) ?? "ComSpec";
+    const saved = process.env[comspec];
+    try {
+      Object.assign(process.env, { PGHOST: "elsewhere", pgpassfile: "elsewhere", [comspec]: "C:\\tools\\other.exe" });
+      const win = pgEnv({ LC_ALL: "C" }, "win32");
+      assert.deepEqual(Object.entries(win).filter(([key]) => /^comspec$/i.test(key)), [["COMSPEC", systemShell()]]);
+      assert.deepEqual(Object.keys(win).filter((key) => /^PG/i.test(key)), []);
+      assert.equal(win.LC_ALL, "C");
+      const mac = pgEnv({}, "darwin");
+      assert.deepEqual(Object.entries(mac).filter(([key]) => /^comspec$/i.test(key)), [[comspec, "C:\\tools\\other.exe"]], "off Windows it is left as it was");
+      assert.deepEqual(Object.keys(mac).filter((key) => /^PG/i.test(key)), []);
+    } finally {
+      delete process.env.PGHOST;
+      delete process.env.pgpassfile;
+      if (saved === undefined) delete process.env[comspec];
+      else process.env[comspec] = saved;
+    }
   });
 });
 

@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { realpathSync } from "node:fs";
 import { uptime } from "node:os";
 import { basename } from "node:path";
-import { bootId, isAlive, linkedProgram, listProcesses, parsePsList, parseStatusUid, parseWindowsList, parseWindowsProcess, processFacts, processStamp, processStart, selfIdentity, stillRunning, type ProcFiles } from "./processInfo.ts";
+import { bootId, isAlive, linkedProgram, listProcesses, parsePsList, parseStatusUid, parseWindowsList, parseWindowsProcess, processFacts, processStamp, processStart, selfIdentity, stillRunning, WINDOWS_LIST_SCRIPT, type ProcFiles } from "./processInfo.ts";
 
 /**
  * A process is its pid, its start time and its boot (docs/design/design-v1-local-app.md
@@ -106,13 +106,29 @@ test("a listing reads ps's lines, and Windows' JSON list, and refuses anything e
     { pid: 12, commandLine: "/opt/pg/bin/postgres -D /d/postgres -p 5" },
     { pid: 345, commandLine: "sh" },
   ]);
-  assert.deepEqual(parseWindowsList("[]\r\n"), []);
-  assert.deepEqual(parseWindowsList('[{"pid":7,"line":"\\"C:\\\\pg\\\\postgres.exe\\" -D \\"C:/d/postgres\\"","exe":"C:\\\\pg\\\\postgres.exe"}]'), [{ pid: 7, commandLine: '"C:\\pg\\postgres.exe" -D "C:/d/postgres"', exe: "C:\\pg\\postgres.exe" }]);
-  assert.deepEqual(parseWindowsList('[{"pid":7,"line":"x","exe":null}]'), [{ pid: 7, commandLine: "x", exe: null }], "a program Windows won't name");
-  assert.throws(() => parseWindowsList('[{"pid":7,"line":"x","exe":7}]'), /can't read/);
-  assert.throws(() => parseWindowsList('{"pid":7,"line":"x"}'), /not a list/);
-  assert.throws(() => parseWindowsList('[{"pid":"7","line":"x"}]'), /can't read/);
+  // WINDOWS_LIST_SCRIPT's object: this session, and each postgres.exe and cmd.exe with its session.
+  const listing = (session: number, rows: object[]) => JSON.stringify({ session, rows });
+  const row = (pid: number, name: string, line: string | null, session = 1, exe: string | null = `C:\\pg\\${name}`) => ({ pid, name, line, exe, session });
+  assert.deepEqual(parseWindowsList(`${listing(1, [])}\r\n`), []);
+  assert.deepEqual(parseWindowsList(listing(1, [row(7, "postgres.exe", '"C:/pg/postgres.exe" -D "C:/d/postgres" -p 5  ')])), [{ pid: 7, commandLine: '"C:/pg/postgres.exe" -D "C:/d/postgres" -p 5  ', exe: "C:\\pg\\postgres.exe" }]);
+  assert.deepEqual(parseWindowsList(listing(1, [row(7, "postgres.exe", "x", 1, null)])), [{ pid: 7, commandLine: "x", exe: null }], "a program Windows won't name");
+  const launcher = '"C:\\Windows\\System32\\cmd.exe" /C ""C:/pg/postgres.exe" -D "C:/d/postgres" -p 5 < "nul" >> "C:\\d\\logs\\postgres.log" 2>&1"';
+  assert.deepEqual(parseWindowsList(listing(1, [row(8, "cmd.exe", launcher)])), [{ pid: 8, commandLine: launcher, exe: "C:\\pg\\cmd.exe" }], "the launcher is listed");
+  // A command line Windows won't give: a postgres.exe in this session may be this user's, so the listing fails and names it.
+  assert.throws(() => parseWindowsList(listing(1, [row(9, "postgres.exe", null)])), /^Error: postgres\.exe \(pid 9\) runs in this session and its command line can't be read$/);
+  assert.throws(() => parseWindowsList(listing(1, [row(9, "POSTGRES.EXE", "")])), /pid 9/, "an empty one too, and the name in any case");
+  // Services in session 0, another user's session, and a cmd.exe with more rights than this user's are skipped.
+  assert.deepEqual(parseWindowsList(listing(1, [row(10, "postgres.exe", null, 0), row(11, "postgres.exe", null, 2), row(12, "cmd.exe", null, 1)])), []);
+  assert.deepEqual(parseWindowsList(listing(0, [row(10, "postgres.exe", null, 0)])), [], "session 0 is skipped though this runs in it, as a CI runner's service does");
+  assert.throws(() => parseWindowsList(listing(1, [{ ...row(7, "postgres.exe", "x"), exe: 7 }])), /can't read/);
+  assert.throws(() => parseWindowsList(listing(1, [{ ...row(7, "postgres.exe", "x"), session: "1" }])), /can't read/);
+  assert.throws(() => parseWindowsList('[{"pid":7,"line":"x"}]'), /not a list/, "the bare array an older script printed");
+  assert.throws(() => parseWindowsList('{"rows":[]}'), /not a list/);
+  assert.throws(() => parseWindowsList(listing(1, [{ pid: "7", name: "postgres.exe", line: "x", session: 1 }])), /can't read/);
   assert.throws(() => parseWindowsList(""));
+  assert.match(WINDOWS_LIST_SCRIPT, /Name = 'postgres\.exe' OR Name = 'cmd\.exe'/, "the launcher is asked for");
+  assert.match(WINDOWS_LIST_SCRIPT, /exe = \$_\.ExecutablePath; session = \[int\]\$_\.SessionId/);
+  assert.match(WINDOWS_LIST_SCRIPT, /session = \[System\.Diagnostics\.Process\]::GetCurrentProcess\(\)\.SessionId/);
 });
 
 test("Linux: a command line that can't be read is a process gone only when the error says so, and fails the listing when /proc says it is this user's", async () => {
