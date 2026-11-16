@@ -554,7 +554,7 @@ describe("a start", { skip: posixOnly }, () => {
 
   test("a process that names this folder as a postmaster would, but is not exactly what pg_ctl starts, is never signalled, and holds the start until it ends", { timeout: 20_000 }, async () => {
     const dir = await folder();
-    const { bin } = await programs(dir);
+    const { bin, calls } = await programs(dir);
     const pg = join(dir, "postgres");
     await mkdir(pg);
     // pg_ctl's exact command, run by another program than the bundled postgres.
@@ -571,7 +571,8 @@ describe("a start", { skip: posixOnly }, () => {
     for (const child of loose) strays.push(child.pid as number);
     const said: string[] = [];
     const unconfirmed: boolean[] = [];
-    const c = new Cluster({ ...cluster(dir, bin, lookup(), { platform: "darwin" }).opts, log: (m) => said.push(m), unconfirmed: (on) => unconfirmed.push(on) });
+    // postmaster.pid names one of them, which leftover() knows is no postgres.
+    const c = new Cluster({ ...cluster(dir, bin, lookup({ exe: process.execPath }), { platform: "darwin" }).opts, log: (m) => said.push(m), unconfirmed: (on) => unconfirmed.push(on) });
     const alive: boolean[] = [];
     const abort = new AbortController();
     setTimeout(() => abort.abort(), 300);
@@ -581,12 +582,29 @@ describe("a start", { skip: posixOnly }, () => {
         child.kill("SIGKILL");
       }
     }, 2_500);
-    const { ms, error } = await startWith(dir, c, { RVTT_FAKE_FAIL: "1" }, abort.signal);
+    const { ms, error } = await startWith(dir, c, { RVTT_FAKE_PID: String(loose[1]?.pid), RVTT_FAKE_FAIL: "1" }, abort.signal);
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
     assert.deepEqual(alive, [true, true, true], "none of them was signalled");
     assert.ok(ms >= 2_500, `answered after ${ms} ms, while they ran`);
     assert.deepEqual(unconfirmed, [true, false]);
+    assert.deepEqual(await calls(), ["pg_ctl start"], "nor asked to stop, though the file names one");
     for (const child of loose) assert.match(said.join("\n"), new RegExp(`process ${child.pid} names this data folder .*: \\S.* -D ${pg}`), "the log names each, with its command line");
+  });
+
+  test("a postmaster only loosely listed, which postmaster.pid names and leftover() confirms, is stopped through pg_ctl and never killed", { timeout: 15_000 }, async () => {
+    const dir = await folder();
+    const { bin, calls } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const postmaster = join(dir, "postmaster.child");
+    // The listing as it is, so the stand-in reads `/bin/sh <bin>/postgres ...`, as a postmaster the exact form misses would.
+    const c = cluster(dir, bin, { ...lookup(), list: () => listProcesses() }, { platform: "darwin" });
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 500);
+    const { ms, error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_LIFE: "8" }, abort.signal);
+    assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
+    assert.ok(ms < 5_000, `the start answered after ${ms} ms`);
+    assert.equal(await ended(await pid(postmaster)), true);
+    assert.deepEqual(await calls(), STOPPED);
   });
 
   test("the shell pg_ctl execs the postmaster from is ended only on pg_ctl's exact command, and holds the start while it runs", { timeout: 20_000 }, async () => {

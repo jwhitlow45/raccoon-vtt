@@ -631,7 +631,14 @@ export class Cluster {
     const namedRuns = found.some((p) => p.exact && p.pid === named);
     if (named === "unknown" && found.some((p) => p.exact)) this.cantConfirm("postmaster.pid can't be read, so no PostgreSQL process is signalled");
     let signalled: number | null = null;
-    let stop: { pid: number; mode: "fast" | "immediate"; again: boolean } | null = null;
+    type Stop = { pid: number; mode: "fast" | "immediate"; again: boolean; exact: boolean };
+    /** pg_ctl stop -m fast for a pid the file names, -m immediate once that was asked, again each minute after. */
+    const due = (pid: number, exact: boolean): Stop | null => {
+      const tried = asked.get(pid);
+      if (tried?.mode === "immediate" && Date.now() - tried.at < (this.opts.immediateAgainMs ?? IMMEDIATE_AGAIN_MS)) return null;
+      return { pid, mode: tried === undefined ? "fast" : "immediate", again: tried?.mode === "immediate", exact };
+    };
+    let stop: Stop | null = null;
     for (const { pid, exact, commandLine, pgCtl } of found) {
       if (pgCtl) {
         // During a cancel the pg_ctl start this process runs is one of these, and the proof after it counts any left.
@@ -640,14 +647,13 @@ export class Cluster {
       }
       if (!exact) {
         this.cantConfirm(`process ${pid} names this data folder as its PostgreSQL would, but is not exactly what pg_ctl starts, so it is never signalled: ${commandLine}`, pid);
+        // Its postmaster spelled in a way the exact form misses would never end: one the file names is stopped, once leftover() confirms it (LA-30).
+        if (pid === named) stop = due(pid, false);
         continue;
       }
       signalled ??= Date.now();
-      const tried = asked.get(pid);
       if (pid === named) {
-        if (tried?.mode !== "immediate" || Date.now() - tried.at >= (this.opts.immediateAgainMs ?? IMMEDIATE_AGAIN_MS)) {
-          stop = { pid, mode: tried === undefined ? "fast" : "immediate", again: tried?.mode === "immediate" };
-        }
+        stop = due(pid, true);
         continue;
       }
       if (named === "unknown" || kept.has(pid) || namedRuns) continue;
@@ -658,6 +664,11 @@ export class Cluster {
       }
     }
     if (typeof named === "number" && found.some((p) => p.exact && p.pid === named) && !kept.has(named)) await this.remember(named);
+    if (stop && !stop.exact) {
+      const left = await this.leftover().catch(() => null);
+      if (left?.kind === "running" && left.pid === stop.pid) await this.remember(stop.pid);
+      else stop = null;
+    }
     if (stop) {
       const { pid, mode } = stop;
       if (stop.again) this.opts.log?.(`PostgreSQL (pid ${pid}) still runs after pg_ctl stop -m immediate, so it is asked again`);
