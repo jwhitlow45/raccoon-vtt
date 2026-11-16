@@ -758,7 +758,9 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
       const mine = pub || e.file === true || seats.has(e.tokenId) ? step : routeLattice(token);
       const ox = token.x - headToken.x;
       const oy = token.y - headToken.y;
-      const shared = e === head || sameRoute(e.route, head.route, ox, oy);
+      // A walk hex by hex reaches its points at moments of its own (moveLeg.ts MovedToken `along`), so it never shares the lead's
+      // spots, even where its points are the lead's offset by its place (review HEXFILE-ASTRA-1).
+      const shared = e === head || (!e.along && sameRoute(e.route, head.route, ox, oy));
       const ownSpots = shared ? null : e.how === "teleport" ? twoSpots(e.route) : routeWalk(grid, e.trace, build, mine);
       // A walk hex by hex is read at its group's moments by how far along the lead's walk each of its points is reached.
       const byHex = ownSpots && e.along && e.how !== "teleport" ? e.along : null;
