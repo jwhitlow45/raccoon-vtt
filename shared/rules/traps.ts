@@ -2,7 +2,7 @@ import { CHUNK_CELLS, FOG_SUBCELLS, MIN_HEIGHT_FT, type BuildChunk, type CellRec
 import { chunkKey, wallMidpoint } from "../keys.ts";
 import { gridOfScene, playersToken, seenByNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
-import { fileStandsSnapped, followsHexByHex, followsInSingleFileOnHexes, stopsByCoveredSquares, stopsFileApart, stopsOnPublicGround, stopsOnTrap, stopsStandClear, stopsStandFullSize } from "../migrate.ts";
+import { fileStandsSnapped, followsInSingleFileOnHexes, stopsByCoveredSquares, stopsFileApart, stopsLandNamed, stopsOnPublicGround, stopsOnTrap, stopsStandClear, stopsStandFullSize } from "../migrate.ts";
 import { isWritable } from "../writable.ts";
 import { creaturesInArea, type AreaToken } from "./aoe.ts";
 import { holderOf, insideHolder, linkHolds, onHolder, seatHolds, walkerFor } from "./attach.ts";
@@ -1383,7 +1383,7 @@ type Stop = { until: Progress; s: Progress; back?: ReadonlyMap<Walk, number>; at
 /**
  * How a stop leaves its group's walks, as the poses it leaves them in read
  * it: the spot of its own walk each stands on (`stopIndex`), and from op
- * version 62 (migrate.ts followsHexByHex) the height the cut lands the named
+ * version 62 (migrate.ts stopsLandNamed) the height the cut lands the named
  * token at (`namedLanding`), which a walk on the ground squeezed short of
  * its end takes off its squeezed footprint, not its spot's.
  */
@@ -1472,7 +1472,7 @@ function trapMoveParts(op: Op, before: TrapRoom, actor: Viewer, env: { opVersion
         // A stop where the group was going anyway changes nothing, so it is no stop (6.5).
         if (compareProgress(s, endOf(group)) >= 0) continue;
         // From op version 62 every pose the stop leaves reads the named token where its cut lands it (cutOp).
-        const lands = followsHexByHex(walks.opVersion) ? namedLanding(op, walks, group.named, s, before, seen)?.elevation : undefined;
+        const lands = stopsLandNamed(walks.opVersion) ? namedLanding(op, walks, group.named, s, before, seen)?.elevation : undefined;
         const back = fileApart(walks, group, s, before, seen, lands);
         const stop: Stop = { until: forward ? s : event.at, s, ...(back ? { back } : {}), ...(lands !== undefined ? { lands } : {}) };
         const at = stopPoses(walks, group, stop, before, seen);

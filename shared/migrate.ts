@@ -1470,9 +1470,12 @@ export const opMigrations: MigrationStep[] = [
     // op changes shape, so the step is the identity. From this version, on
     // hexes, a creature a holder drags in single file walks from its own
     // hex onto the hex the holder starts on, then along the holder's own
-    // hex lines, one point a hex (`followsHexByHex`). Ops stored before
-    // walked it straight to the holder's first corner and replay so, and a
-    // stored restore's hash guards still match.
+    // hex lines, one point a hex (`followsHexByHex`). On any grid a trap's
+    // stop lands what rides the named token, and what that drags, where
+    // the cut lands the named token (`stopsLandNamed`). Ops stored before
+    // walked it straight to the holder's first corner, landed riders at the
+    // named token's stop spot, and replay so, and a stored restore's hash
+    // guards still match.
     // Deploy: back up the database just before, and reload open pages,
     // since an old page refuses a squeezed holder's next step round a turn
     // by the old walk. Rollback needs the backup only for a room with
@@ -2068,7 +2071,7 @@ export function followsInSingleFileOnHexes(opVersion: number | undefined): boole
   return !(opVersion !== undefined && opVersion < 51);
 }
 
-/** The first op version whose walks in single file on hexes go hex by hex (followsHexByHex). */
+/** The first op version whose walks in single file on hexes go hex by hex (followsHexByHex), and whose stops land what rides the named token where the cut lands it (stopsLandNamed). */
 export const HEX_FILE_OP_VERSION = 62;
 
 /**
@@ -2085,6 +2088,21 @@ export const HEX_FILE_OP_VERSION = 62;
  * stored version and take today's rule.
  */
 export function followsHexByHex(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < HEX_FILE_OP_VERSION);
+}
+
+/**
+ * Whether a trap's stop lands what rides its group's named token, and what
+ * that drags, where the stop's cut lands the named token, on any grid
+ * (traps.ts namedLanding and stoppedAt, review HEXFILE-ASTRA-6): every pose
+ * the stop leaves, its landings and the moments after it, so a full-size
+ * warhorse a stop lands squeezed on lower ground takes Bree riding it and
+ * the goblin she drags down with it. Ops stored before version 62 read the
+ * named token at its stop spot's height as the trap step had it, which can
+ * stand above the ground the cut lands it on, and replay so. Live ops
+ * carry no stored version and take today's rule.
+ */
+export function stopsLandNamed(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < HEX_FILE_OP_VERSION);
 }
 
