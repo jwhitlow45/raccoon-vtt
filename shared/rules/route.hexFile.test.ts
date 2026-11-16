@@ -15,7 +15,7 @@ import { COLUMNS, hexWallRoom, onHex, ROWS, sideWall, wallsRound } from "./hexWa
 import { checkSetReach, planMove, planWalks } from "./moveLeg.ts";
 import { hexStandAt, hexStandHexes, hexStandPlace, ownWalk } from "./movement.ts";
 import { compareAlong, fileHeightsAlong, hexFileClasses, hexFileRoutes, pieceReach, routeWalkers, seatShift } from "./route.ts";
-import { planTrapMove, trapWalks } from "./traps.ts";
+import { planTrapMove, trapLandings, trapWalks } from "./traps.ts";
 import { groupWalkWorld } from "./walkWorld.ts";
 
 /**
@@ -654,6 +654,56 @@ describe("an area's sweep reads a walk hex by hex at its height between its poin
   }
 });
 
+describe("the trap step reads a walk hex by hex's height with its holder at its own moment (traps.ts fileElevation, review HEXFILE-OPUS-10, HEXFILE-ASTRA-3)", () => {
+  for (const [name, g] of GRIDS) {
+    test(`${name}: a stop trap on the corridor's hex 2 or 3 under a warhorse flying down from 40 ft: the goblin it drags lands level with it, as the trap step's landings say`, () => {
+      for (const [where, h] of [["hex 2", 2], ["hex 3", 3]] as const) {
+        for (const [who, actor] of [["Pat", P1], ["the DM", DM]] as const) {
+          const at = `${where}, ${who}`;
+          const { s, path } = keepOf(g, 1, 0, "horse");
+          s.tokens.horse = { ...s.tokens.horse!, elevation: 40 };
+          s.tokens.gob = { ...s.tokens.gob!, elevation: 40 };
+          s.traps.stop = trap("stop", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", zone: { cells: [{ x: path[h]!.col, y: path[h]!.row, w: 1, h: 1 }] }, rig: { on: ["enter"], who: "any", floor: false, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false } });
+          const op = { ...intoCorridor(g, s, path[4]!), elevation: 0 };
+          const allowed = canApply(op, actor, s, { canUseAsset: () => true });
+          assert.ok(allowed.ok, `${at}: ${allowed.ok ? "" : allowed.message}`);
+          assert.notEqual(planTrapMove(op, s, actor, {}).op, op, `${at}: the trap cuts the move`);
+          const r = applyOp(s, op, actor, env(1));
+          assert.ok(r.ok);
+          const [horse, gob] = [r.state.tokens.horse!, r.state.tokens.gob!];
+          assert.ok(horse.elevation > 0 && horse.elevation < 40, `${at}: the warhorse stops in the air, at ${horse.elevation}`);
+          assert.ok(Math.abs(gob.elevation - horse.elevation) < 1e-9, `${at}: the goblin at ${gob.elevation}, the warhorse at ${horse.elevation}`);
+          const landed = trapLandings(op, s, actor, {});
+          for (const id of ["horse", "gob"]) {
+            const stored: Token = r.state.tokens[id]!;
+            const want = landed.get(id)!;
+            assert.deepEqual([stored.x, stored.y, Math.round(stored.elevation * 1e9) / 1e9], [want.x, want.y, Math.round(want.elevation * 1e9) / 1e9], `${at}: ${id} where the trap step lands it`);
+          }
+        }
+      }
+    });
+
+    test(`${name}: a trap on the corridor's hex 1 whose sphere hangs at 30 ft hits the goblin there, at the height the move gives it as it comes down`, () => {
+      for (const [who, actor] of [["Pat", P1], ["the DM", DM]] as const) {
+        const { s, path } = keepOf(g, 1, 0, "horse");
+        s.tokens.horse = { ...s.tokens.horse!, elevation: 40 };
+        s.tokens.gob = { ...s.tokens.gob!, elevation: 40 };
+        const { shape, size, origin, yaw, includeOrigin } = template("ball", { shape: "sphere", size: 5, origin: { ...hexCenter(g, path[1]!), z: 30 }, includeOrigin: true });
+        s.traps.ball = trap("ball", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", zone: { cells: [{ x: path[1]!.col, y: path[1]!.row, w: 1, h: 1 }] }, rig: { on: ["enter"], who: "any", floor: false, resets: "never", stops: false, foundOnSpring: true, hits: { area: { shape, size, origin, yaw, includeOrigin } }, actions: [], find: [], notice: false } });
+        const op = { ...intoCorridor(g, s, path[4]!), elevation: 0 };
+        const allowed = canApply(op, actor, s, { canUseAsset: () => true });
+        assert.ok(allowed.ok, `${who}: ${allowed.ok ? "" : allowed.message}`);
+        const gob = planWalks(op, s, actor, {}).find((m) => m.tokenId === "gob")!;
+        const onTrap = gob.route.findIndex((p) => hexKey(hexOf(g, p)) === hexKey(path[1]!));
+        assert.equal(gob.route[onTrap]!.elevation, 30, `${who}: the move takes the goblin onto the trap's hex at 30 ft`);
+        const sprung = planTrapMove(op, s, actor, {}).springings.find((x) => x.trap.id === "ball" && x.by.includes("gob"))!;
+        assert.ok(sprung, `${who}: the goblin sets it off`);
+        assert.deepEqual(sprung.hits, ["gob"], `${who}: and its sphere hits it, ${JSON.stringify(sprung)}`);
+      }
+    });
+  }
+});
+
 describe("a chained follower's heights on a walk hex by hex, the server's and the device's (route.ts legAt, review HEXFILE-OPUS-8)", () => {
   for (const [name, g] of GRIDS) {
     test(`${name}: a warhorse flying down from 40 ft drags the goblin, which drags a rat from the corridor's mouth, and the device reads each at the height the move gives it`, () => {
@@ -678,6 +728,27 @@ describe("a chained follower's heights on a walk hex by hex, the server's and th
       }
     });
   }
+});
+
+describe("the device reads a chained follower through its own holder's walk, which ends before the lead's (route.ts fileHeightsAlong, review HEXFILE-OPUS-9)", () => {
+  test("hex columns: the goblin comes down to the ground on its last hex before the warhorse ends, and the rat it drags from the corridor's hex 1 comes down with it on the device as on the server", () => {
+    const g = COLUMNS;
+    const { s, path } = keepOf(g, 2, 0, "horse");
+    s.tokens.horse = { ...s.tokens.horse!, elevation: 40 };
+    s.tokens.gob = { ...s.tokens.gob!, elevation: 40 };
+    s.tokens.rat = { ...onHex(g, "rat", "tiny", path[1]!, { name: "Rat", kind: "npc", ownerIds: ["p1"], attached: { to: "gob", kind: "drag" } }), elevation: 40 };
+    const op = { ...intoCorridor(g, s, path[4]!), elevation: 0 };
+    const allowed = canApply(op, P1, s, { canUseAsset: () => true });
+    assert.ok(allowed.ok, allowed.ok ? "" : allowed.message);
+    const walks = planWalks(op, s, P1, {});
+    const lead = walks.find((m) => m.tokenId === "horse")!.route;
+    const horse = s.tokens.horse!;
+    const file = hexFileRoutes(g, horse, lead, [[s.tokens.gob!, s.tokens.rat!]], true);
+    const rat = walks.find((m) => m.tokenId === "rat")!.route.map((p) => Math.round(p.elevation * 1e9) / 1e9);
+    assert.deepEqual(rat, [40, 20, 0], "the rat comes down as the goblin does");
+    const device = fileHeightsAlong(s.buildChunks, { id: "horse", elevation: 40, grounded: false }, (id) => s.tokens[id], file, "rat", lead, horse);
+    assert.deepEqual(device.map((h, j) => (j === 0 ? rat[0] : Math.round(h! * 1e9) / 1e9)), rat, "the device's heights, the move's");
+  });
 });
 
 describe("a walk hex by hex never shares its lead's spots, whose moments are not its own (traps.ts walksOf, review HEXFILE-ASTRA-1)", () => {
