@@ -1497,6 +1497,19 @@ export function trapWalks(op: Op, before: TrapRoom, actor: Viewer, env: { opVers
     .sort((a, b) => cmp(a.tokenId, b.tokenId));
 }
 
+/**
+ * The room's tokens as a springing of a move at progress `p` reads them
+ * (5.6), each token the move walks where the trap step has it then, before
+ * any stop: what an area's hits read (`trapHits`), for the tests.
+ */
+export function trapMoments(op: Op, before: TrapRoom, actor: Viewer, env: { opVersion?: number }): (p: Progress) => RoomState["tokens"] {
+  const sceneId = walkScene(op, before);
+  if (sceneId === null || !walkOp(op)) return () => before.tokens;
+  const entries = trapPlan(op, before, actor, env).filter((e) => e.from.sceneId === sceneId && e.to.sceneId === sceneId);
+  const walks = walksOf(op, before, entries, seenByAll(before, env), env.opVersion);
+  return (p) => roomAt(momentAt(before, walks.byId, p, new Map())).tokens;
+}
+
 function spotAt(walk: Walk, j: number): { x: number; y: number; progress: Progress } {
   const s = walk.spots[j]!;
   return { x: s.x + walk.ox, y: s.y + walk.oy, progress: s.progress };

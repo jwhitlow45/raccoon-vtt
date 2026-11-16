@@ -13,7 +13,7 @@ import { hexCenter, hexDistance, hexKey, hexLine, hexNeighbors, type Hex, type H
 import { COLUMNS, hexWallRoom, onHex, ROWS, sideWall, wallsRound } from "./hexWalls.testkit.ts";
 import { checkSetReach, planMove, planWalks } from "./moveLeg.ts";
 import { hexStandAt, hexStandHexes, hexStandPlace, ownWalk } from "./movement.ts";
-import { compareAlong, fileHeightsAlong, hexFileClasses, hexFileRoutes, pieceReach, routeWalkers, seatShift } from "./route.ts";
+import { compareAlong, fileHeightsAlong, hexFileClasses, hexFileRoutes, pieceReach, pointAt, routeWalkers, seatShift } from "./route.ts";
 import { planTrapMove, trapLandings, trapWalks } from "./traps.ts";
 import { intoCorridor, keepOf } from "../reducer/hexFile.testkit.ts";
 
@@ -640,6 +640,25 @@ describe("the trap step reads a walk hex by hex's height with its holder at its 
       }
     });
 
+    test(`${name}: a floor trap on the warhorse's start hex, raised 35 ft: the goblin the warhorse brings down from 40 ft lands on that floor as it passes, and sets the trap off there`, () => {
+      const { s: keep, path } = keepOf(g, 1, 0, "horse");
+      const raised = applyOp(keep, { t: "build.height", sceneId: "s1", cells: [hexKey(path[1]!)], height: 35 }, DM, env(1));
+      assert.ok(raised.ok);
+      const s = raised.state;
+      for (const id of ["horse", "gob"]) s.tokens[id] = { ...keep.tokens[id]!, elevation: 40 };
+      s.traps.floor = trap("floor", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", zone: { cells: [{ x: path[1]!.col, y: path[1]!.row, w: 1, h: 1 }] }, rig: { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false } });
+      const op = { ...intoCorridor(g, s, path[4]!), elevation: 0 };
+      const pat = canApply(op, P1, s, { canUseAsset: () => true });
+      assert.deepEqual(pat.ok ? null : pat.message, "A ledge is in the way.", "Pat's drop off the raised hex is held");
+      const dm = canApply(op, DM, s, { canUseAsset: () => true });
+      assert.ok(dm.ok, dm.ok ? "" : dm.message);
+      // The warhorse is at 30 ft as the goblin reaches its start a quarter of the way, so the goblin stands on the floor there.
+      const gob = planWalks(op, s, DM, {}).find((m) => m.tokenId === "gob")!;
+      assert.deepEqual(gob.route.map((p) => p.elevation), [40, 35, 20, 0]);
+      const sprung = planTrapMove(op, s, DM, {}).springings.find((x) => x.trap.id === "floor");
+      assert.deepEqual(sprung?.by, ["gob"], "the goblin on the raised floor sets it off");
+    });
+
     test(`${name}: a trap on the corridor's hex 1 whose sphere hangs at 30 ft hits the goblin there, at the height the move gives it as it comes down`, () => {
       for (const [who, actor] of [["Pat", P1], ["the DM", DM]] as const) {
         const { s, path } = keepOf(g, 1, 0, "horse");
@@ -706,6 +725,84 @@ describe("the device reads a chained follower through its own holder's walk, whi
     const device = fileHeightsAlong(s.buildChunks, { id: "horse", elevation: 40, grounded: false }, (id) => s.tokens[id], file, "rat", lead);
     assert.deepEqual(device.map((h, j) => (j === 0 ? rat[0] : Math.round(h! * 1e9) / 1e9)), rat, "the device's heights, the move's");
   });
+});
+
+/** A trap on hex `at` of the keep's corridor that stops a walk, flying or not. */
+function stopTrap(g: HexGrid, at: Hex) {
+  return trap("stop", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", zone: { cells: [{ x: at.col, y: at.row, w: 1, h: 1 }] }, rig: { on: ["enter"], who: "any", floor: false, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false } });
+}
+
+describe("a stop stands each walk hex by hex level with its holder where the stop leaves that, holder before member (traps.ts stoodAt, review HEXFILE-ASTRA-4)", () => {
+  for (const [name, g] of GRIDS) {
+    test(`${name}: a warhorse flying down from 40 ft lands on its stand before a stop trap's moment, and the goblin it drags and the rat the goblin drags land level with it`, () => {
+      const cases = [
+        { where: "the goblin from beside the corridor's mouth, the trap on hex 1", trapAt: 1, rat: false, lands: 80 / 3 },
+        { where: "the goblin dragging a rat, the trap on hex 3", trapAt: 3, rat: true, lands: 40 / 3 },
+      ];
+      for (const c of cases) {
+        for (const [who, actor] of [["Pat", P1], ["the DM", DM]] as const) {
+          const at = `${c.where}, ${who}`;
+          const { s, path } = keepOf(g, 1, 0, "horse");
+          if (!c.rat) s.tokens.gob = { ...s.tokens.gob!, ...placedOnHex(g, s.tokens.gob!, { col: 6, row: 6 }) };
+          else s.tokens.rat = onHex(g, "rat", "tiny", g.orient === "rows" ? { col: 6, row: 7 } : { col: 6, row: 6 }, { name: "Rat", kind: "npc", ownerIds: ["p1"], attached: { to: "gob", kind: "drag" } });
+          for (const id of Object.keys(s.tokens)) s.tokens[id] = { ...s.tokens[id]!, elevation: 40 };
+          s.traps.stop = stopTrap(g, path[c.trapAt]!);
+          const op = { ...intoCorridor(g, s, path[4]!), elevation: 0 };
+          const allowed = canApply(op, actor, s, { canUseAsset: () => true });
+          assert.ok(allowed.ok, `${at}: ${allowed.ok ? "" : allowed.message}`);
+          assert.notEqual(planTrapMove(op, s, actor, {}).op, op, `${at}: the trap cuts the move`);
+          const r = applyOp(s, op, actor, env(1));
+          assert.ok(r.ok);
+          const horse = r.state.tokens.horse!;
+          assert.ok(Math.abs(horse.elevation - c.lands) < 1e-9, `${at}: the warhorse lands at ${horse.elevation}`);
+          for (const [id, holder] of [["gob", "horse"], ...(c.rat ? [["rat", "gob"]] : [])] as const) {
+            const [t, h] = [r.state.tokens[id]!, r.state.tokens[holder]!];
+            assert.ok(Math.abs(t.elevation - h.elevation) < 1e-9, `${at}: ${id} at ${t.elevation}, its holder at ${h.elevation}`);
+          }
+          const landed = trapLandings(op, s, actor, {});
+          for (const id of Object.keys(r.state.tokens)) {
+            const stored: Token = r.state.tokens[id]!;
+            const want = landed.get(id)!;
+            assert.deepEqual([stored.x, stored.y, Math.round(stored.elevation * 1e9) / 1e9], [want.x, want.y, Math.round(want.elevation * 1e9) / 1e9], `${at}: ${id} where the trap step lands it`);
+          }
+        }
+      }
+    });
+  }
+});
+
+describe("the trap step reads a walk hex by hex where the move has it at the moment, waiting on its last hex too (traps.ts placedIn, review HEXFILE-OPUS-11)", () => {
+  for (const [name, g] of GRIDS) {
+    test(`${name}: an imp ahead of the warhorse in the corridor goes back onto the hex the warhorse leaves and waits there while the warhorse comes down from 40 ft, and a trap's sphere over that hex hits it at the height the move has it`, () => {
+      // Where Pat's drag takes the warhorse two hexes on in two pieces, the second coming down.
+      const [k, to] = g.orient === "rows" ? [5, 7] : [2, 4];
+      for (const [who, actor] of [["Pat", P1], ["the DM", DM]] as const) {
+        for (const [z, hits] of [[25, ["imp"]], [40, []]] as const) {
+          const at = `${who}, the sphere at ${z} ft`;
+          const { s, path } = keepOf(g, k, k - 1, "horse");
+          s.tokens.imp = onHex(g, "imp", "small", path[k + 1]!, { name: "Imp", kind: "npc", ownerIds: ["p1"], attached: { to: "horse", kind: "drag" } });
+          for (const id of Object.keys(s.tokens)) s.tokens[id] = { ...s.tokens[id]!, elevation: 40 };
+          const { shape, size, origin, yaw, includeOrigin } = template("ball", { shape: "sphere", size: 5, origin: { ...hexCenter(g, path[k]!), z }, includeOrigin: true });
+          // It springs as the warhorse and the goblin reach the hex the imp started on, the warhorse's first piece done.
+          s.traps.ball = trap("ball", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", zone: { cells: [{ x: path[k + 1]!.col, y: path[k + 1]!.row, w: 1, h: 1 }] }, rig: { on: ["enter"], who: "any", floor: false, resets: "never", stops: false, foundOnSpring: true, hits: { area: { shape, size, origin, yaw, includeOrigin } }, actions: [], find: [], notice: false } });
+          const op = { ...intoCorridor(g, s, path[to]!), elevation: 0 };
+          const allowed = canApply(op, actor, s, { canUseAsset: () => true });
+          assert.ok(allowed.ok, `${at}: ${allowed.ok ? "" : allowed.message}`);
+          const walks = planWalks(op, s, actor, {});
+          assert.equal(walks.find((m) => m.tokenId === "horse")!.route.length, 3, `${at}: the warhorse walks two pieces`);
+          const imp = walks.find((m) => m.tokenId === "imp")!;
+          const last = imp.route.length - 1;
+          assert.equal(hexKey(hexOf(g, imp.route[1]!)), hexKey(path[k]!), `${at}: the imp goes onto the hex the warhorse leaves`);
+          assert.ok(imp.route.slice(1).every((p) => p.x === imp.route[1]!.x && p.y === imp.route[1]!.y), `${at}: and waits there to the end`);
+          assert.equal(imp.route[last]!.elevation, 0, `${at}: down to the ground with the warhorse`);
+          assert.ok(Math.abs(pointAt(imp.route, [0, 1, 1], imp.along).elevation - 80 / 3) < 1e-9, `${at}: the move has it at 26.67 ft as the warhorse's first piece ends`);
+          const sprung = planTrapMove(op, s, actor, {}).springings.find((x) => x.trap.id === "ball")!;
+          assert.deepEqual(sprung.by, ["gob", "horse"], `${at}: the warhorse and the goblin set it off`);
+          assert.deepEqual(sprung.hits, hits, `${at}: hits ${JSON.stringify(sprung.hits)}`);
+        }
+      }
+    });
+  }
 });
 
 describe("a walk hex by hex never shares its lead's spots, whose moments are not its own (traps.ts walksOf, review HEXFILE-ASTRA-1)", () => {

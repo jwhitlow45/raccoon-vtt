@@ -9,16 +9,17 @@ import { applyOp } from "../reducer.ts";
 import { movementRules } from "../ruleHooks.ts";
 import { hexPlacements, linkHolds, onHolder, seatedAt } from "../rules/attach.ts";
 import { occupiedHexes, placedOnHex } from "../rules/footprint.ts";
-import { hexDistance, hexKey, hexNeighbors, type HexGrid } from "../rules/hex.ts";
+import { hexCenter, hexDistance, hexKey, hexNeighbors, type HexGrid } from "../rules/hex.ts";
 import { routeWorld } from "../rules/hexWalk.ts";
-import { fileHeightsAlong, hexFileClasses, hexFileRoutes } from "../rules/route.ts";
+import { compareAlong, fileHeightsAlong, followerTrace, hexFileClasses, hexFileRoutes, pointAt } from "../rules/route.ts";
 import { COLUMNS, onHex, ROWS } from "../rules/hexWalls.testkit.ts";
 import { planWalks, walkedIn } from "../rules/moveLeg.ts";
-import { onSqueezedLattice, ownWalk } from "../rules/movement.ts";
-import { planTrapMove, trapLandings } from "../rules/traps.ts";
+import { groundUnder, onSqueezedLattice, ownWalk } from "../rules/movement.ts";
+import { footing } from "../rules/heights.ts";
+import { planTrapMove, trapHits, trapLandings, trapMoments, trapWalks } from "../rules/traps.ts";
 import { groupWalkWorld } from "../rules/walkWorld.ts";
-import { chance, DM, env, int, P1, P2, pick, rng, trap } from "../testutil.ts";
-import { caseOf, insideCaseOf, type Case } from "./hexFile.testkit.ts";
+import { chance, DM, env, int, P1, P2, pick, rng, template, trap } from "../testutil.ts";
+import { caseOf, insideCaseOf, raised, withImpAhead, withMouse, withStop, type Case } from "./hexFile.testkit.ts";
 
 /**
  * Random walks in single file on hexes (RIDE-SINGLE-FILE-HEX and
@@ -280,6 +281,19 @@ function hiddenTwin(g: HexGrid, s: RoomState, r: () => number): RoomState | null
   return holds ? twin : null;
 }
 
+/** The holder raised 40 ft and brought down to the ground or to 25 ft, or climbing from the ground to 30 ft, as feet up and down. */
+const HEIGHTS = [
+  [40, 0],
+  [40, 25],
+  [0, 30],
+] as const;
+
+/** A sphere 5 ft round a creature's hex's middle at height `z`, as a trap's hits read an area. */
+function ballAt(g: HexGrid, t: Token, z: number) {
+  const { shape, size, origin, yaw, includeOrigin } = template("ball", { shape: "sphere", size: 5, origin: { ...hexCenter(g, occupiedHexes(g, t)[0]!), z }, includeOrigin: true });
+  return { shape, size, origin, yaw, includeOrigin };
+}
+
 for (const [name, g] of [
   ["hex rows", ROWS],
   ["hex columns", COLUMNS],
@@ -494,6 +508,107 @@ for (const [name, g] of [
         }
       }
       assert.ok(walks >= 3000 && points >= 15000, `walks ${walks}, points ${points}`);
+    });
+
+    test("raised 40 ft and brought down to the ground or to 25 ft, or climbing from the ground to 30 ft, a stop trap on the way, an imp ahead of the holder on some: after every trap cut each walk hex by hex that left its start stands level with its holder where the cut leaves that (review HEXFILE-ASTRA-4)", () => {
+      let cuts = 0;
+      let checked = 0;
+      for (const [kind, made] of [
+        ["", caseOf],
+        ["inside ", insideCaseOf],
+      ] as const) {
+        for (let seed = 1; seed <= 400; seed++) {
+          const room = made(seed, g);
+          if (!room) continue;
+          for (const [ahead, start] of [
+            ["", room],
+            ["imp ahead, ", withImpAhead(room, seed)],
+            ["mouse in tow, ", withMouse(room, seed)],
+          ] as const) {
+            if (!start) continue;
+            for (const [up, down] of HEIGHTS) {
+              const { state: s, op } = withStop(raised(start, up, down), seed);
+              for (const [who, actor] of [
+                ["Pat", P1],
+                ["the DM", DM],
+              ] as const) {
+                if (!canApply(op, actor, s, { canUseAsset: () => true }).ok) continue;
+                const cut = planTrapMove(op, s, actor, {}).op;
+                if (cut === op) continue;
+                cuts++;
+                const r = applyOp(s, op, actor, env(5));
+                assert.ok(r.ok);
+                const walks = planWalks(cut, s, actor, {});
+                for (const m of walks) {
+                  const holder = walks.find((h) => h.tokenId === m.carriedBy);
+                  if (!m.along || !holder) continue;
+                  const [was, now] = [s.tokens[m.tokenId]!, r.state.tokens[m.tokenId]!];
+                  // One that never left its start keeps its own height there (review FU45B-ASTRA-06).
+                  if (now.x === was.x && now.y === was.y) continue;
+                  const [held, holds] = [s.tokens[holder.tokenId]!, r.state.tokens[holder.tokenId]!];
+                  const link = was.attached!;
+                  // Attach's rule (docs/design/design-v1-attach.md 5.1) from where the cut leaves its holder.
+                  const ground = groundUnder(s.buildChunks, followerTrace(was, [was])[0]!, now);
+                  const want = onHolder(link.kind) ? holds.elevation + (was.elevation - held.elevation) : footing(s.buildChunks, holder.trace[0]!) === "ground" ? ground : Math.max(was.elevation + (holds.elevation - held.elevation), ground);
+                  assert.ok(Math.abs(now.elevation - want) < 1e-9, `${kind}seed ${seed}, ${ahead}${up} to ${down} ft, ${who}: ${m.tokenId} at ${now.elevation}, level with ${holder.tokenId} at ${holds.elevation} is ${want}`);
+                  checked++;
+                }
+              }
+            }
+          }
+        }
+      }
+      assert.ok(cuts >= 800 && checked >= 1200, `cuts ${cuts}, walks checked ${checked}`);
+    });
+
+    test("raised 40 ft and brought down to the ground or to 25 ft, or climbing from the ground to 30 ft, an imp ahead of the holder on some: at every moment a walk hex by hex waits on its last hex, the trap step has it where the move and the area sweep do, and an area's hits read it there (review HEXFILE-OPUS-11)", () => {
+      let checked = 0;
+      let moving = 0;
+      for (const [kind, made] of [
+        ["", caseOf],
+        ["inside ", insideCaseOf],
+      ] as const) {
+        for (let seed = 1; seed <= 400; seed++) {
+          const room = made(seed, g);
+          if (!room) continue;
+          for (const [ahead, start] of [
+            ["", room],
+            ["imp ahead, ", withImpAhead(room, seed)],
+            ["mouse in tow, ", withMouse(room, seed)],
+          ] as const) {
+            if (!start) continue;
+            for (const [up, down] of HEIGHTS) {
+              const { state: s, op } = raised(start, up, down);
+              const walks = planWalks(op, s, DM, {});
+              const at = trapMoments(op, s, DM, {});
+              const moments = trapWalks(op, s, DM, {}).flatMap((w) => w.spots.map((p) => p.progress));
+              for (const m of walks) {
+                if (!m.along || m.carriedBy === undefined) continue;
+                // The first point of the run it ends on, where it reaches its last hex.
+                let k = m.route.length - 1;
+                while (k > 0 && m.route[k - 1]!.x === m.route[k]!.x && m.route[k - 1]!.y === m.route[k]!.y) k--;
+                // One that never left its start keeps its own height there (review FU45B-ASTRA-06).
+                if (k === 0) continue;
+                const reached = m.along[k]!;
+                for (const p of moments) {
+                  if (compareAlong(p, reached) < 0) continue;
+                  const want = pointAt(m.route, p, m.along);
+                  const t = at(p)[m.tokenId]!;
+                  const where = `${kind}seed ${seed}, ${ahead}${up} to ${down} ft, ${m.tokenId} at ${p.join("/")}`;
+                  assert.ok(Math.abs(t.x - want.x) < 1e-9 && Math.abs(t.y - want.y) < 1e-9 && Math.abs(t.elevation - want.elevation) < 1e-9, `${where}: the trap step at ${t.x}, ${t.y}, ${t.elevation}, the move at ${want.x}, ${want.y}, ${want.elevation}`);
+                  checked++;
+                  // Where the move has it still coming down or going up there, a sphere round that height catches it.
+                  if (Math.abs(want.elevation - m.route[m.route.length - 1]!.elevation) < 1e-6) continue;
+                  moving++;
+                  const ball = trap("ball", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", rig: { on: ["enter"], who: "any", floor: false, resets: "never", stops: false, foundOnSpring: true, hits: { area: { ...ballAt(g, t, want.elevation + 0.5) } }, actions: [], find: [], notice: false } });
+                  assert.ok(trapHits(ball, { ...s, tokens: at(p) }, []).includes(m.tokenId), `${where}: a sphere round ${want.elevation} ft misses it`);
+                }
+              }
+            }
+          }
+        }
+      }
+      assert.ok(checked >= 15000 && moving >= 100, `moments checked ${checked}, with the move still taking it up or down ${moving}`);
     });
   });
 }

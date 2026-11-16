@@ -4,7 +4,7 @@ import type { RoomState, Token } from "../model.ts";
 import type { OpOf } from "../protocol.ts";
 import { hexPlacements, linkHolds } from "../rules/attach.ts";
 import { occupiedHexes, placedOnHex } from "../rules/footprint.ts";
-import { hexDistance, hexKey, hexNeighbors, type Hex, type HexGrid } from "../rules/hex.ts";
+import { hexDistance, hexKey, hexLine, hexNeighbors, type Hex, type HexGrid } from "../rules/hex.ts";
 import { findRouteOn } from "../rules/hexWalk.ts";
 import { hexWallRoom, onHex, wallsRound } from "../rules/hexWalls.testkit.ts";
 import { hexStandAt, hexStandPlace, ownWalk } from "../rules/movement.ts";
@@ -170,6 +170,84 @@ export function insideCaseOf(seed: number, g: HexGrid): Case | null {
   const found = findRouteOn({ ...groupWalkWorld(s, ownWalk(s.tokens.horse), { role: "player" }).input, towed: [] }, inside);
   if (!found || found === "none") return null;
   return { state: s, g, op: { t: "token.move", tokenId: "horse", ...inside, squeeze: true, route: found.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) } };
+}
+
+/**
+ * `made` with every token raised `up` feet and the holder's walk ending
+ * `down` feet up: flying down to the ground or part way, or climbing from
+ * the ground.
+ */
+export function raised(made: Case, up: number, down: number): Case {
+  const state = structuredClone(made.state);
+  for (const t of Object.values(state.tokens)) if (t) t.elevation += up;
+  return { ...made, state, op: { ...made.op, elevation: down } };
+}
+
+/** The hexes the holder's reference hex passes on its walk, its start first. */
+function walkHexes(made: Case): Hex[] {
+  const { g, op } = made;
+  const horse = made.state.tokens.horse!;
+  const corners = [horse, ...(op.route ?? []).map(([x, y]) => ({ ...horse, x, y }))].map((t) => occupiedHexes(g, t)[0]!);
+  return corners.flatMap((h, i) => (i === 0 ? [h] : hexLine(g, corners[i - 1]!, h).slice(1)));
+}
+
+/**
+ * `made` with an imp on the hex ahead of the holder on its walk, which the
+ * holder or its steering rider drags: it walks back onto the hex the holder
+ * leaves and waits there while the holder walks on, its walk held at its
+ * end (route.ts hexFileRoutes). Null where that hex is taken or the link
+ * would not hold.
+ */
+export function withImpAhead(made: Case, seed: number): Case | null {
+  const { g } = made;
+  const r = rng(seed * 4793 + (g.orient === "rows" ? 5 : 6));
+  const ahead = walkHexes(made)[1];
+  if (!ahead) return null;
+  const s = structuredClone(made.state);
+  if (Object.values(s.tokens).some((t) => t && occupiedHexes(g, t).some((h) => hexKey(h) === hexKey(ahead)))) return null;
+  const by = s.tokens.rider0 && chance(r, 0.3) ? "rider0" : "horse";
+  const imp = onHex(g, "imp", pick(r, ["small", "tiny", "medium"] as const), ahead, { name: "Imp", kind: "npc", attached: { to: by, kind: "drag" }, ...(chance(r, 0.2) ? { visibility: "dm" as const } : {}) });
+  s.tokens.imp = { ...imp, elevation: s.tokens[by]!.elevation };
+  return linkHolds(g, s.meta.settings, "drag", s.tokens.imp, s.tokens[by]!) ? { ...made, state: s } : null;
+}
+
+/**
+ * `made` with a Tiny mouse on the hex of a creature of one hex the holder
+ * drags, which that one drags in turn: a chain whose last walk is shorter
+ * than its holder's, which the move holds at its end to its holder's
+ * length (moveLeg.ts follow). Null where none is of one hex.
+ */
+export function withMouse(made: Case, seed: number): Case | null {
+  const { g } = made;
+  const r = rng(seed * 2969 + (g.orient === "rows" ? 9 : 10));
+  const s = structuredClone(made.state);
+  const horse = occupiedHexes(g, s.tokens.horse!)[0]!;
+  const near = (t: Token) => hexDistance(g, occupiedHexes(g, t)[0]!, horse);
+  const tows = Object.values(s.tokens)
+    .filter((t): t is Token => t !== undefined && t.attached?.kind === "drag" && t.size !== "large" && t.size !== "huge")
+    .sort((a, b) => near(a) - near(b) || (a.id < b.id ? -1 : 1));
+  if (tows.length === 0) return null;
+  // Mostly the one nearest the holder, whose walk is the longest of the file.
+  const by = chance(r, 0.7) ? tows[0]! : pick(r, tows);
+  s.tokens.mouse = { ...onHex(g, "mouse", "tiny", occupiedHexes(g, by)[0]!, { name: "Mouse", kind: "npc", attached: { to: by.id, kind: "drag" }, ...(by.visibility === "dm" ? { visibility: "dm" as const } : {}) }), elevation: by.elevation };
+  return linkHolds(g, s.meta.settings, "drag", s.tokens.mouse, by) ? { ...made, state: s } : null;
+}
+
+/**
+ * `made` with a trap that stops a walk in the air as on the floor: its own
+ * stop trap so, or one on a hex of the holder's way past its start.
+ */
+export function withStop(made: Case, seed: number): Case {
+  const { g } = made;
+  const r = rng(seed * 3571 + (g.orient === "rows" ? 7 : 8));
+  const s = structuredClone(made.state);
+  const own = s.traps.stop;
+  const hexes = walkHexes(made).slice(1);
+  const h = hexes[int(r, 0, hexes.length - 1)];
+  const zone = own ? own.zone : h ? { cells: [{ x: h.col, y: h.row, w: 1, h: 1 }] } : null;
+  if (!zone) return made;
+  s.traps.stop = trap("stop", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", zone, rig: { on: ["enter"], who: "any", floor: false, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false } });
+  return { ...made, state: s };
 }
 
 /** The holder's own way to `ref`, squeezed there, as the device's search finds it alone, or null where it finds none. */
