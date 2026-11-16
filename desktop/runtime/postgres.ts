@@ -9,7 +9,7 @@ import type { Platform } from "../contract.ts";
 import { renameRetrying, syncDir, syncFile, writeDurable } from "./durable.ts";
 import { rotateIfLarge } from "./logs.ts";
 import { loopbackPort } from "./ports.ts";
-import { bootId, isAlive, listProcesses, processFacts, processStamp, type ListedProcess, type ProcessFacts } from "./processInfo.ts";
+import { bootId, isAlive, listProcesses, processFacts, processStamp, systemShell, type ListedProcess, type ProcessFacts } from "./processInfo.ts";
 
 /**
  * The bundled PostgreSQL (docs/design/design-v1-local-app.md 2, 6 and 8.1,
@@ -49,12 +49,20 @@ export class DatabaseFailed extends Error {
   }
 }
 
-/** The environment PostgreSQL's programs get: the caller's, without any PG* variable that could point them elsewhere. */
-export function pgEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+/**
+ * The environment PostgreSQL's programs get: the caller's, without any PG*
+ * variable that could point them elsewhere. On Windows COMSPEC is Windows'
+ * own cmd.exe, whatever the caller's says: pg_ctl starts the postmaster
+ * through the program COMSPEC names (pg_ctl.c start_postmaster), and the
+ * process listing knows that launcher by its program (postmasterKind).
+ */
+export function pgEnv(extra: Record<string, string> = {}, platform: Platform = process.platform as Platform): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (!/^PG/i.test(key)) env[key] = value;
+    // Windows names are any case, and a second spelling would be a second variable.
+    if (!/^PG/i.test(key) && !(platform === "win32" && /^COMSPEC$/i.test(key))) env[key] = value;
   }
+  if (platform === "win32") env.COMSPEC = systemShell();
   return { ...env, ...extra };
 }
 
@@ -172,6 +180,11 @@ export class Cluster {
     return join(this.pgPath(this.opts.binDir), this.opts.platform === "win32" ? `${name}.exe` : name);
   }
 
+  /** The environment this cluster's programs run with (pgEnv), for the platform it runs as. */
+  private env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+    return pgEnv(extra, this.opts.platform);
+  }
+
   /** The path PostgreSQL's programs are given for a path in the data folder or their own. */
   pgPath(path: string): string {
     return this.opts.pgPath?.(path) ?? path;
@@ -179,7 +192,7 @@ export class Cluster {
 
   /** The major version of the bundled programs, from `postgres --version`. */
   async bundledMajor(): Promise<number> {
-    const { stdout } = await run(this.program("postgres"), ["--version"], { env: pgEnv(), windowsHide: true, timeout: 30_000 });
+    const { stdout } = await run(this.program("postgres"), ["--version"], { env: this.env(), windowsHide: true, timeout: 30_000 });
     const major = Number(/\(PostgreSQL\) (\d+)/.exec(stdout)?.[1]);
     if (!Number.isInteger(major)) throw new Error(`postgres --version said: ${stdout.trim()}`);
     return major;
@@ -250,7 +263,7 @@ export class Cluster {
           "--locale-provider=builtin",
           "--builtin-locale=C.UTF-8",
         ],
-        { env: pgEnv({ LC_ALL: "C" }), ...(this.opts.log ? { log: this.opts.log } : {}) },
+        { env: this.env({ LC_ALL: "C" }), ...(this.opts.log ? { log: this.opts.log } : {}) },
       );
     } catch (err) {
       const e = err as { stderr?: string; message: string };
@@ -404,7 +417,7 @@ export class Cluster {
         this.program("pg_ctl"),
         ["start", "-D", this.pgPath(this.opts.pgData), "-l", this.pgPath(this.opts.logFile), "-w", "-t", String(PG_CTL_WAIT_S), "-o", `-p ${port}`],
         {
-          env: pgEnv(),
+          env: this.env(),
           limitMs: this.opts.startLimitMs ?? PG_CTL_START_LIMIT_MS,
           ...(this.opts.killSignal ? { killSignal: this.opts.killSignal } : {}),
           ...(this.opts.log ? { log: this.opts.log } : {}),
@@ -521,11 +534,12 @@ export class Cluster {
   /** The bundled postgres and the shell pg_ctl starts it through, by real path, read again until both are known. */
   private async programs(): Promise<Programs> {
     if (this.programsFound) return this.programsFound;
+    const win = this.opts.platform === "win32";
     const found: Programs = {
-      postgres: await realOrNull(join(this.opts.binDir, this.opts.platform === "win32" ? "postgres.exe" : "postgres")),
-      shell: this.opts.platform === "win32" ? null : await realOrNull("/bin/sh"),
+      postgres: await realOrNull(join(this.opts.binDir, win ? "postgres.exe" : "postgres")),
+      shell: await realOrNull(win ? systemShell() : "/bin/sh"),
     };
-    if (found.postgres !== null && (found.shell !== null || this.opts.platform === "win32")) this.programsFound = found;
+    if (found.postgres !== null && found.shell !== null) this.programsFound = found;
     return found;
   }
 
@@ -630,7 +644,7 @@ export class Cluster {
 
   /** pg_ctl stop -w: it answers once the postmaster has removed postmaster.pid, the last thing it does as it ends. */
   private async pgCtlStop(mode: "fast" | "immediate" = "fast"): Promise<void> {
-    await run(this.program("pg_ctl"), ["stop", "-D", this.pgPath(this.opts.pgData), "-m", mode, "-w", "-t", "60"], { env: pgEnv(), windowsHide: true, timeout: 90_000 });
+    await run(this.program("pg_ctl"), ["stop", "-D", this.pgPath(this.opts.pgData), "-m", mode, "-w", "-t", "60"], { env: this.env(), windowsHide: true, timeout: 90_000 });
   }
 
   /**
@@ -698,7 +712,7 @@ export class Cluster {
   async client(name: "pg_dump" | "pg_restore", args: string[]): Promise<{ stdout: string; stderr: string }> {
     if (this.port === null) throw new Error("the database is not running");
     return run(this.program(name), ["--host=127.0.0.1", `--port=${this.port}`, `--username=${USER}`, "--no-password", ...args], {
-      env: pgEnv({ PGPASSWORD: this.opts.password }),
+      env: this.env({ PGPASSWORD: this.opts.password }),
       windowsHide: true,
       maxBuffer: 64 * 1024 * 1024,
     });
@@ -706,7 +720,7 @@ export class Cluster {
 
   /** pg_restore reading a dump without a server, to check it reads back whole. */
   async readDump(args: string[]): Promise<void> {
-    await run(this.program("pg_restore"), args, { env: pgEnv(), windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+    await run(this.program("pg_restore"), args, { env: this.env(), windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
   }
 }
 
@@ -767,7 +781,10 @@ async function realOrNull(path: string): Promise<string | null> {
  *   the bundled postgres by real path. Windows has the program's path and
  *   the command line cmd.exe gives it: "E" -D "F" -p N, and the spaces the
  *   redirections leave. On POSIX the shell pg_ctl execs through is the same
- *   process a moment earlier, so its exact command counts too.
+ *   process a moment earlier, so its exact command counts too. On Windows
+ *   the cmd.exe it starts the postmaster through, `"COMSPEC" /C ""E" -D "F"
+ *   -p N < "nul" >> "log" 2>&1"`, is another process, which may yet start
+ *   one, so its exact command, run by Windows' own cmd.exe, is exact too.
  * - `loose`: anything else whose command line names the folder after
  *   postgres and -D, as a postmaster's would. It may be this folder's
  *   PostgreSQL spelled in a way the exact form misses, so it counts as
@@ -813,9 +830,16 @@ export async function postmasterKind(
         shaped = true;
         if (await isPostgres(run[1])) return "exact";
       }
-    } else if (win && new RegExp(`^"[^"]+" -D "${f}" -p \\d+ *$`, "i").test(line)) {
-      shaped = true;
-      if (p.exe != null && same(await real(p.exe), programs.postgres)) return "exact";
+    } else if (win) {
+      if (new RegExp(`^"[^"]+" -D "${f}" -p \\d+ *$`, "i").test(line)) {
+        shaped = true;
+        if (p.exe != null && same(await real(p.exe), programs.postgres)) return "exact";
+      }
+      const launch = new RegExp(`^"[^"]+" /C ""([^"]+)" -D "${f}" -p \\d+ < "nul"(?: >> "[^"]*")? 2>&1"$`, "i").exec(line);
+      if (launch) {
+        shaped = true;
+        if (p.exe != null && same(await real(p.exe), programs.shell) && (await isPostgres(launch[1]))) return "exact";
+      }
     }
   }
   if (shaped) return "loose";
