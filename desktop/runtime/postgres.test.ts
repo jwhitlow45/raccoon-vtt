@@ -868,6 +868,41 @@ describe("a start", { skip: posixOnly }, () => {
     assert.deepEqual(await calls(), ["pg_ctl start"], "pg_ctl stop had no file to go by");
   });
 
+  test("a kept pid that now runs with another start reading is a later process, so the record no longer spares it", { timeout: 15_000 }, async () => {
+    const dir = await folder();
+    const { bin } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const postmaster = join(dir, "postmaster.child");
+    let reads = 0;
+    // The start reading recorded at the start, and another at every read after, as for a process that reused the pid.
+    const c = cluster(dir, bin, lookup({ stamp: async () => (++reads === 1 ? 1 : 2) }), { platform: "darwin" });
+    const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_READYAFTER: "0.3" });
+    assert.equal(error, null);
+    await rm(join(dir, "postgres", "postmaster.pid"));
+    const began = Date.now();
+    await c.stop();
+    assert.ok(Date.now() - began < 5_000, "the stop did not wait on it");
+    assert.equal(await ended(await pid(postmaster)), true, "an exact postmaster no record spares and no file names is killed");
+  });
+
+  test("a kept pid whose start reading can't be read now is still spared", { timeout: 15_000 }, async () => {
+    const dir = await folder();
+    const { bin } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const postmaster = join(dir, "postmaster.child");
+    let reads = 0;
+    const c = cluster(dir, bin, lookup({ stamp: async () => (++reads === 1 ? 1 : null) }), { platform: "darwin" });
+    const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_READYAFTER: "0.3" });
+    assert.equal(error, null);
+    const child = await pid(postmaster);
+    await rm(join(dir, "postgres", "postmaster.pid"));
+    const stopping = c.stop();
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    assert.equal(isAlive(child), true, "never killed");
+    process.kill(child, "SIGKILL");
+    await stopping;
+  });
+
   test("a postmaster a cancel saw named is never killed once its postmaster.pid is gone, though both stops failed", { timeout: 20_000 }, async () => {
     const dir = await folder();
     const { bin, calls } = await programs(dir);
