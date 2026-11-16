@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { ChildProcess } from "node:child_process";
+import { ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { after, describe, test } from "node:test";
 import { Platform } from "../contract.ts";
-import { BOOT_RECORD, Cluster, DatabaseFailed, Ended, postmasterOf, runToExit, uncertainWords, type ProcessLookup } from "./postgres.ts";
-import { listProcesses } from "./processInfo.ts";
+import { BOOT_RECORD, Cluster, DatabaseFailed, Ended, postmasterKind, runToExit, uncertainWords, type ProcessLookup, type Programs } from "./postgres.ts";
+import { isAlive, listProcesses, type ListedProcess } from "./processInfo.ts";
 
 /**
  * The cluster's own rules, with stand-ins for PostgreSQL's programs and for
@@ -43,8 +43,8 @@ async function programs(dir: string): Promise<{ bin: string; calls: () => Promis
   // ends, writing its own pid there and its log saying PostgreSQL is ready.
   //
   // With RVTT_FAKE_CHILD it launches a postmaster of its own, as
-  // `postgres -D <folder>` so a process listing knows it as real pg_ctl's,
-  // and writes its pid there. The postmaster writes postmaster.pid after
+  // `postgres -D <folder> -p <port>` as real pg_ctl does, so a process
+  // listing knows it as pg_ctl's (asStarted), and writes its pid there. The postmaster writes postmaster.pid after
   // RVTT_FAKE_PIDAFTER s, marked starting, then ready after
   // RVTT_FAKE_READYAFTER s (never when unset), naming RVTT_FAKE_TAKENBY's
   // pid then instead of its own when that is set, and lives RVTT_FAKE_LIFE
@@ -84,7 +84,8 @@ async function programs(dir: string): Promise<{ bin: string; calls: () => Promis
       `if [ "$1" = stop ] && [ -n "$RVTT_FAKE_CHILD" ]; then p=$(head -1 "$3/postmaster.pid"); if [ "$5" = immediate ]; then kill -USR1 "$p"; else kill "$p"; fi; n=0; while kill -0 "$p" 2>/dev/null && [ "$n" -lt 10 ]; do sleep 0.1; n=$((n + 1)); done; if kill -0 "$p" 2>/dev/null; then echo "pg_ctl: server does not shut down" >&2; exit 1; fi; fi`,
       `if [ "$1" = stop ]; then rm -f "$3/postmaster.pid"; fi`,
       `if [ "$1" = start ] && [ -n "$RVTT_FAKE_HOLD" ]; then sleep 30 & echo $! > "$RVTT_FAKE_HOLD"; fi`,
-      `if [ "$1" = start ] && [ -n "$RVTT_FAKE_CHILD" ]; then "$(dirname "$0")/postgres" -D "$3" & c=$!; echo $c > "$RVTT_FAKE_CHILD"; fi`,
+      // $10 is -o's "-p <port>", split in two as pg_ctl's own shell splits it.
+      `if [ "$1" = start ] && [ -n "$RVTT_FAKE_CHILD" ]; then "$(dirname "$0")/postgres" -D "$3" \${10} & c=$!; echo $c > "$RVTT_FAKE_CHILD"; fi`,
       `if [ "$RVTT_FAKE_PGCTL" = wait ]; then while kill -0 $c 2>/dev/null; do [ "$(sed -n 8p "$3/postmaster.pid" 2>/dev/null)" = ready ] && exit 0; sleep 0.1; done; echo "pg_ctl: could not start server" >&2; exit 1; fi`,
       `if [ "$RVTT_FAKE_PGCTL" = fail ]; then echo "pg_ctl: server did not start in time" >&2; exit 1; fi`,
       `if [ "$RVTT_FAKE_PGCTL" = failsoon ]; then sleep 0.3; echo "pg_ctl: could not start server" >&2; exit 1; fi`,
@@ -116,6 +117,7 @@ async function programs(dir: string): Promise<{ bin: string; calls: () => Promis
 type Look = { exe?: string | null; cwd?: string | null; uid?: number | null; offsetMs?: number; boot?: string | Error; stamp?: () => Promise<number | null>; facts?: ProcessLookup["facts"] };
 function lookup(o: Look = {}): ProcessLookup {
   return {
+    list: asStarted,
     stamp: o.stamp ?? (async () => 4242),
     facts:
       o.facts ??
@@ -131,6 +133,19 @@ function lookup(o: Look = {}): ProcessLookup {
     },
     uid: 501,
   };
+}
+
+/**
+ * This computer's processes, as the listing would show the stand-in
+ * postmaster were it PostgreSQL's. The stand-in is a script, so the system
+ * lists it after its shell, `/bin/sh <bin>/postgres -D ...`, where the
+ * postmaster pg_ctl starts is the program itself.
+ */
+async function asStarted(): Promise<ListedProcess[]> {
+  return (await listProcesses()).map((p) => {
+    const run = /^\/bin\/sh (\S+\/bin\/postgres -D .*)$/.exec(p.commandLine)?.[1];
+    return run === undefined ? p : { pid: p.pid, commandLine: run };
+  });
 }
 
 function cluster(dir: string, bin: string, proc: ProcessLookup, extra: { afterInitdb?: () => Promise<void>; platform?: Platform; renameDir?: (from: string, to: string) => Promise<void> } = {}): Cluster {
@@ -479,7 +494,7 @@ describe("a start", { skip: posixOnly }, () => {
       ...lookup(),
       list: async () => {
         if (failing) throw new Error("Get-CimInstance failed");
-        return listProcesses();
+        return asStarted();
       },
     };
     const c = new Cluster({ ...cluster(dir, bin, proc, { platform: "darwin" }).opts, listRetryMs: 100, unconfirmed: (on) => unconfirmed.push(on) });
@@ -496,12 +511,12 @@ describe("a start", { skip: posixOnly }, () => {
     const dir = await folder();
     const { bin } = await programs(dir);
     await mkdir(join(dir, "postgres"));
-    // A postmaster of this folder that no kill reaches: the listing names it, and nothing runs as its pid.
+    // Exactly this folder's postmaster, which no kill reaches: the listing names it, and nothing runs as its pid.
     let ghost = true;
     const unconfirmed: boolean[] = [];
     const proc: ProcessLookup = {
       ...lookup(),
-      list: async () => [...(await listProcesses()), ...(ghost ? [{ pid: Number(DEAD), commandLine: `/opt/pg/bin/postgres -D ${join(dir, "postgres")} -p 5` }] : [])],
+      list: async () => [...(await asStarted()), ...(ghost ? [{ pid: Number(DEAD), commandLine: `${join(bin, "postgres")} -D ${join(dir, "postgres")} -p 5` }] : [])],
     };
     const c = new Cluster({ ...cluster(dir, bin, proc, { platform: "darwin" }).opts, unsureAfterMs: 500, unconfirmed: (on) => unconfirmed.push(on) });
     const abort = new AbortController();
@@ -511,6 +526,43 @@ describe("a start", { skip: posixOnly }, () => {
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
     assert.ok(ms >= 2_500, `answered after ${ms} ms, while the listing still showed a postmaster`);
     assert.deepEqual(unconfirmed, [true, false]);
+  });
+
+  test("a process that names this folder as a postmaster would, but is not exactly what pg_ctl starts, is never signalled, and holds the start until it ends", { timeout: 20_000 }, async () => {
+    const dir = await folder();
+    const { bin } = await programs(dir);
+    const pg = join(dir, "postgres");
+    await mkdir(pg);
+    // pg_ctl's exact command, run by another program than the bundled postgres.
+    await mkdir(join(dir, "other", "bin"), { recursive: true });
+    await writeFile(join(dir, "other", "bin", "postgres"), "#!/bin/sh\nwhile :; do sleep 0.2; done\n", { mode: 0o755 });
+    const idle = "setInterval(() => undefined, 1000)";
+    const loose = [
+      spawn(join(dir, "other", "bin", "postgres"), ["-D", pg, "-p", "5"], { stdio: "ignore" }),
+      // A tool or a search that names the folder.
+      spawn(process.execPath, ["-e", idle, "postgres", "-D", pg], { stdio: "ignore" }),
+      // Another cluster, in a folder whose name starts with this one's.
+      spawn(process.execPath, ["-e", idle, "postgres", "-D", `${pg} other`, "-p", "5"], { stdio: "ignore" }),
+    ];
+    for (const child of loose) strays.push(child.pid as number);
+    const said: string[] = [];
+    const unconfirmed: boolean[] = [];
+    const c = new Cluster({ ...cluster(dir, bin, lookup(), { platform: "darwin" }).opts, log: (m) => said.push(m), unconfirmed: (on) => unconfirmed.push(on) });
+    const alive: boolean[] = [];
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 300);
+    setTimeout(() => {
+      for (const child of loose) {
+        alive.push(isAlive(child.pid as number));
+        child.kill("SIGKILL");
+      }
+    }, 2_500);
+    const { ms, error } = await startWith(dir, c, { RVTT_FAKE_FAIL: "1" }, abort.signal);
+    assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
+    assert.deepEqual(alive, [true, true, true], "none of them was signalled");
+    assert.ok(ms >= 2_500, `answered after ${ms} ms, while they ran`);
+    assert.deepEqual(unconfirmed, [true, false]);
+    for (const child of loose) assert.match(said.join("\n"), new RegExp(`process ${child.pid} names this data folder .*: \\S.* -D ${pg}`), "the log names each, with its command line");
   });
 
   /** A start reading that differs at every read, so the postmaster running is never the one this process started. */
@@ -608,7 +660,7 @@ describe("a start", { skip: posixOnly }, () => {
     const proc: ProcessLookup = {
       ...lookup(),
       list: async () => {
-        if (!failing) return listProcesses();
+        if (!failing) return asStarted();
         failed++;
         throw new Error("Get-CimInstance failed");
       },
@@ -705,20 +757,67 @@ describe("a program the cluster ends", { skip: posixOnly }, () => {
 });
 
 describe("a postmaster by its command line", () => {
-  test("is postgres with -D and this folder, as pg_ctl starts it on each system, and never pg_ctl or a folder beside it", () => {
-    const unix = ["/data/Tést Жук/postgres"];
-    assert.equal(postmasterOf("/opt/r/postgres/bin/postgres -D /data/Tést Жук/postgres -p 41659", unix, "darwin"), true);
-    assert.equal(postmasterOf('/bin/sh -c exec "/opt/r/postgres/bin/postgres" -D "/data/Tést Жук/postgres" -p 41659 < "/dev/null" >> "log" 2>&1', unix, "linux"), true, "the shell pg_ctl execs it from");
-    assert.equal(postmasterOf("/opt/r/postgres/bin/pg_ctl start -D /data/Tést Жук/postgres -l log -w", unix, "darwin"), false, "pg_ctl itself");
-    assert.equal(postmasterOf("/opt/r/postgres/bin/postgres -D /data/Tést Жук/postgres.incomplete-17 -p 5", unix, "darwin"), false, "a folder beside it");
-    assert.equal(postmasterOf("/opt/r/postgres/bin/postgres -D /DATA/Tést Жук/postgres -p 5", unix, "darwin"), false, "another case is another folder off Windows");
-    assert.equal(postmasterOf("postgres: checkpointer", unix, "linux"), false, "a child, which renames itself");
-    const windows = ["D:\\Tables\\Dm\\RaccoonVTT\\postgres", "C:\\ProgramData\\RaccoonVTT\\j\\a1b2"];
-    // pg_ctl writes the folder with forward slashes, and Windows paths ignore case.
-    assert.equal(postmasterOf('"C:\\Program Files\\RaccoonVTT\\resources\\postgres\\bin\\postgres.exe" -D "D:/Tables/dm/RaccoonVTT/postgres" -p 41659', windows, "win32"), true);
-    assert.equal(postmasterOf('"C:\\pg\\postgres.exe" -D "C:/ProgramData/RaccoonVTT/j/a1b2" -p 41659', windows, "win32"), true, "the junction PostgreSQL was given");
-    assert.equal(postmasterOf('"C:\\pg\\pg_ctl.exe" start -D "C:/ProgramData/RaccoonVTT/j/a1b2" -l log', windows, "win32"), false);
-    assert.equal(postmasterOf('"C:\\pg\\postgres.exe" --forkchild="checkpointer" 3', windows, "win32"), false);
+  const unix: Programs = { postgres: "/opt/r/postgres/bin/postgres", shell: "/usr/bin/dash" };
+  const windows: Programs = { postgres: "C:\\Program Files\\RaccoonVTT\\resources\\postgres\\bin\\postgres.exe", shell: "C:\\Windows\\System32\\cmd.exe" };
+  // Each path stands for its own real path here, as the bundled program's does.
+  const kind = (p: ListedProcess, folders: string[], on: Platform) => postmasterKind(p, folders, on, on === "win32" ? windows : unix, async (path) => path);
+  const line = (commandLine: string, exe: string | null = null): ListedProcess => ({ pid: 7, commandLine, exe });
+  const args = (argv: string[], exe: string | null): ListedProcess => ({ pid: 7, commandLine: argv.join(" "), argv, exe });
+  const exec = (program: string, folder: string) => `exec "${program}" -D "${folder}" -p 41659 < "/dev/null" >> "${folder}.log" 2>&1`;
+
+  test("is exact only as pg_ctl starts it, run by the bundled program, on each system", async () => {
+    const data = ["/data/Tést Жук/postgres"];
+    const cases: [string, ListedProcess, Platform][] = [
+      ["macOS: the whole line", line("/opt/r/postgres/bin/postgres -D /data/Tést Жук/postgres -p 41659"), "darwin"],
+      ["macOS: the shell pg_ctl execs it from", line(`/bin/sh -c ${exec("/opt/r/postgres/bin/postgres", "/data/Tést Жук/postgres")}`), "darwin"],
+      ["Linux: its arguments, and its exe link on the bundled program", args(["/opt/r/postgres/bin/postgres", "-D", "/data/Tést Жук/postgres", "-p", "41659"], unix.postgres), "linux"],
+      ["Linux: the shell pg_ctl execs it from", args(["/bin/sh", "-c", exec("/opt/r/postgres/bin/postgres", "/data/Tést Жук/postgres")], unix.shell), "linux"],
+    ];
+    for (const [what, p, on] of cases) assert.equal(await kind(p, data, on), "exact", what);
+    const folders = ["D:\\Tables\\Dm\\RaccoonVTT\\postgres", "C:\\ProgramData\\RaccoonVTT\\a1b2\\data\\postgres"];
+    // cmd.exe gives postgres.exe the command without its redirections, and the spaces before them stay.
+    const exe = "C:\\PROGRAM FILES\\RaccoonVTT\\resources\\postgres\\bin\\postgres.exe";
+    assert.equal(await kind(line('"C:/Program Files/RaccoonVTT/resources/postgres/bin/postgres.exe" -D "D:/Tables/dm/RaccoonVTT/postgres" -p 41659   ', exe), folders, "win32"), "exact", "Windows: forward slashes, and case ignored");
+    assert.equal(await kind(line('"C:/PROGRA~1/RaccoonVTT/resources/postgres/bin/postgres.exe" -D "C:/ProgramData/RaccoonVTT/a1b2/data/postgres" -p 41659', exe), folders, "win32"), "exact", "Windows: the junction PostgreSQL was given");
+  });
+
+  test("anything else that names the folder after postgres and -D is loose, so it counts as running and is never signalled", async () => {
+    const data = ["/data/postgres"];
+    const cases: [string, ListedProcess, Platform][] = [
+      ["another cluster, in a folder whose name starts with this one's", line("postgres -D /data/postgres other -p 5"), "darwin"],
+      ["the same with every argument kept apart", args(["/opt/r/postgres/bin/postgres", "-D", "/data/postgres other", "-p", "5"], unix.postgres), "linux"],
+      ["a tool that names the folder", line("node /x/tool.js postgres -D /data/postgres"), "darwin"],
+      ["the tool on Linux", args(["node", "/x/tool.js", "postgres", "-D", "/data/postgres"], "/usr/bin/node"), "linux"],
+      ["a search", line("grep -r postgres -D /data/postgres"), "darwin"],
+      ["a search on Linux", args(["grep", "-r", "postgres", "-D", "/data/postgres"], "/usr/bin/grep"), "linux"],
+      ["macOS: pg_ctl's form at the end, another program first", line("node /x/tool.js postgres -D /data/postgres -p 5"), "darwin"],
+      ["macOS: pg_ctl's form naming another postgres", line("/usr/local/bin/postgres -D /data/postgres -p 5"), "darwin"],
+      ["macOS: an argument pg_ctl never adds", line("/opt/r/postgres/bin/postgres -D /data/postgres -p 5 -c fsync=off"), "darwin"],
+      ["Linux: pg_ctl's arguments, run by another program", args(["/opt/r/postgres/bin/postgres", "-D", "/data/postgres", "-p", "5"], "/usr/bin/node"), "linux"],
+      ["Linux: pg_ctl's arguments, the exe link unreadable", args(["/opt/r/postgres/bin/postgres", "-D", "/data/postgres", "-p", "5"], null), "linux"],
+      ["Linux: the launcher's command, run by another program", args(["/bin/sh", "-c", exec("/opt/r/postgres/bin/postgres", "/data/postgres")], "/usr/bin/node"), "linux"],
+      ["the launcher exec'ing another program", line(`/bin/sh -c ${exec("/usr/local/bin/postgres", "/data/postgres")}`), "darwin"],
+    ];
+    for (const [what, p, on] of cases) assert.equal(await kind(p, data, on), "loose", what);
+    const folders = ["C:\\data\\postgres"];
+    const winCases: [string, ListedProcess][] = [
+      ["another cluster, in a folder whose name starts with this one's", line('"C:/pg/postgres.exe" -D "C:/data/postgres other" -p 5', windows.postgres)],
+      ["pg_ctl's form, run by another postgres.exe", line('"C:/pg/postgres.exe" -D "C:/data/postgres" -p 5', "C:\\pg\\postgres.exe")],
+      ["pg_ctl's form, its program unreadable", line('"C:/pg/postgres.exe" -D "C:/data/postgres" -p 5', null)],
+      ["an argument pg_ctl never adds", line('"C:/pg/postgres.exe" -D "C:/data/postgres" -p 5 -c fsync=off', windows.postgres)],
+    ];
+    for (const [what, p] of winCases) assert.equal(await kind(p, folders, "win32"), "loose", `Windows: ${what}`);
+  });
+
+  test("is no postmaster at all for pg_ctl itself, a folder beside it, another case off Windows, or a child that renamed itself", async () => {
+    const data = ["/data/Tést Жук/postgres"];
+    assert.equal(await kind(line("/opt/r/postgres/bin/pg_ctl start -D /data/Tést Жук/postgres -l log -w"), data, "darwin"), null, "pg_ctl itself");
+    assert.equal(await kind(line("/opt/r/postgres/bin/postgres -D /data/Tést Жук/postgres.incomplete-17 -p 5"), data, "darwin"), null, "a folder beside it");
+    assert.equal(await kind(line("/opt/r/postgres/bin/postgres -D /DATA/Tést Жук/postgres -p 5"), data, "darwin"), null, "another case is another folder off Windows");
+    assert.equal(await kind(args(["postgres: checkpointer "], unix.postgres), data, "linux"), null, "a child, which renames itself");
+    const folders = ["C:\\ProgramData\\RaccoonVTT\\a1b2\\data\\postgres"];
+    assert.equal(await kind(line('"C:\\pg\\pg_ctl.exe" start -D "C:/ProgramData/RaccoonVTT/a1b2/data/postgres" -l log', windows.postgres), folders, "win32"), null);
+    assert.equal(await kind(line('"C:\\pg\\postgres.exe" --forkchild="checkpointer" 3', windows.postgres), folders, "win32"), null);
   });
 });
 
