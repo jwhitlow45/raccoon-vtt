@@ -434,6 +434,28 @@ export class Cluster {
   }
 
   /**
+   * Remembered postmasters the listing did not show that still run as
+   * remembered, or that may (LA-33): a listing can miss one, as macOS ps
+   * prints "(postgres)" for a process whose arguments it can't read. A pid
+   * alive with the reading it had holds the proof, and so does one whose
+   * reading can't be read now or wasn't then, as uncertain, since the lock
+   * goes only on positive evidence. A pid with another reading is a later
+   * process and holds nothing. Each one held is named in the log.
+   */
+  private async unlistedKnown(listed: Postmaster[]): Promise<number> {
+    let held = 0;
+    for (const [pid, was] of this.known) {
+      if (listed.some((p) => p.pid === pid) || !isAlive(pid)) continue;
+      const now = await this.proc.stamp(pid).catch(() => null);
+      if (was !== null && now !== null && now !== was) continue;
+      held++;
+      const how = was !== null && now === was ? "with the start it had" : "and its start can't be read, so it may be";
+      this.cantConfirm(`PostgreSQL (pid ${pid}), which this process started or saw named, still runs ${how}, though the listing does not show it`, pid);
+    }
+    return held;
+  }
+
+  /**
    * pg_ctl start on a free loopback port, three tries, so another program
    * taking the port in between is no failure. A failure reports what this
    * start wrote to the log, never an older run's last line.
@@ -628,8 +650,9 @@ export class Cluster {
    * meanwhile (ASTRA-22). A pg_ctl stop, which can take a minute, ends the
    * pass. A loose one the file names is stopped only once leftover()
    * confirms it as it reads the file again, with the same start reading,
-   * and then at once. Answers how many it found and when it first
-   * signalled one, and throws when the listing fails.
+   * and then at once. During a proof, remembered postmasters the listing
+   * missed are looked for last (unlistedKnown). Answers how many it found
+   * and when it first signalled one, and throws when the listing fails.
    */
   private async endPass(asked: Asked, during: "cancel" | "proof"): Promise<{ found: number; exact: number; signalled: number | null }> {
     const found = await this.postmasters();
@@ -685,7 +708,8 @@ export class Cluster {
       asked.set(pid, { mode, at: Date.now() });
       await this.pgCtlStop(mode).catch((err: unknown) => this.opts.log?.(`pg_ctl stop -m ${mode} of PostgreSQL (pid ${pid}) failed: ${(err as Error).message.split(/\r?\n/)[0]}`));
     }
-    return { found: found.length, exact: found.filter((p) => p.exact).length, signalled };
+    const missed = during === "proof" ? await this.unlistedKnown(found) : 0;
+    return { found: found.length + missed, exact: found.filter((p) => p.exact).length + missed, signalled };
   }
 
   /**
