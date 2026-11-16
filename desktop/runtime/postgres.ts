@@ -519,7 +519,7 @@ export class Cluster {
     while (signal.aborted && !done) {
       let wait = 250;
       try {
-        await this.endPass(asked);
+        await this.endPass(asked, "cancel");
       } catch (err) {
         this.cantConfirm(`the process listing failed: ${(err as Error).message}`);
         // A listing that failed is not tried again at once: on Windows each one is a new PowerShell.
@@ -573,20 +573,21 @@ export class Cluster {
     for (const p of await this.list()) {
       if (p.pid === process.pid) continue;
       const kind = await postmasterKind(p, folders, this.opts.platform, programs);
-      if (kind !== null) found.push({ pid: p.pid, exact: kind === "exact", commandLine: p.commandLine });
+      if (kind !== null) found.push({ pid: p.pid, exact: kind === "exact", commandLine: p.commandLine, pgCtl: kind === "pgctl" });
     }
     return found;
   }
 
-  /** The bundled postgres and the shell pg_ctl starts it through, by real path, read again until both are known. */
+  /** The bundled postgres and pg_ctl, and the shell pg_ctl starts postgres through, by real path, read again until all are known. */
   private async programs(): Promise<Programs> {
     if (this.programsFound) return this.programsFound;
     const win = this.opts.platform === "win32";
     const found: Programs = {
       postgres: await realOrNull(join(this.opts.binDir, win ? "postgres.exe" : "postgres")),
       shell: await realOrNull(win ? systemShell() : "/bin/sh"),
+      pgCtl: await realOrNull(join(this.opts.binDir, win ? "pg_ctl.exe" : "pg_ctl")),
     };
-    if (found.postgres !== null && found.shell !== null) this.programsFound = found;
+    if (found.postgres !== null && found.shell !== null && found.pgCtl !== null) this.programsFound = found;
     return found;
   }
 
@@ -623,7 +624,7 @@ export class Cluster {
    * pid been reused (ASTRA-22). Answers how many it found and when it first
    * signalled one, and throws when the listing fails.
    */
-  private async endPass(asked: Asked): Promise<{ found: number; exact: number; signalled: number | null }> {
+  private async endPass(asked: Asked, during: "cancel" | "proof"): Promise<{ found: number; exact: number; signalled: number | null }> {
     const kept = await this.stillKnown();
     const found = await this.postmasters();
     const named = await this.pidFileNames();
@@ -631,7 +632,12 @@ export class Cluster {
     if (named === "unknown" && found.some((p) => p.exact)) this.cantConfirm("postmaster.pid can't be read, so no PostgreSQL process is signalled");
     let signalled: number | null = null;
     let stop: { pid: number; mode: "fast" | "immediate"; again: boolean } | null = null;
-    for (const { pid, exact, commandLine } of found) {
+    for (const { pid, exact, commandLine, pgCtl } of found) {
+      if (pgCtl) {
+        // During a cancel the pg_ctl start this process runs is one of these, and the proof after it counts any left.
+        if (during === "proof") this.cantConfirm(`pg_ctl start (pid ${pid}) for this data folder still runs and may yet start PostgreSQL, so it is waited for and never signalled: ${commandLine}`, pid);
+        continue;
+      }
       if (!exact) {
         this.cantConfirm(`process ${pid} names this data folder as its PostgreSQL would, but is not exactly what pg_ctl starts, so it is never signalled: ${commandLine}`, pid);
         continue;
@@ -684,7 +690,7 @@ export class Cluster {
       const listedAt = Date.now();
       let pass: { found: number; exact: number; signalled: number | null };
       try {
-        pass = await this.endPass(asked);
+        pass = await this.endPass(asked, "proof");
       } catch (err) {
         this.cantConfirm(`the process listing failed: ${(err as Error).message}`);
         await sleep(this.opts.listRetryMs ?? LIST_RETRY_MS);
@@ -843,7 +849,7 @@ const KILL_WAIT_AGAIN_MS = 60_000;
 const LIST_RETRY_MS = 10_000;
 
 /** A process the listing may count as a postmaster of this folder, and whether it is exactly one (postmasterKind). */
-export type Postmaster = { pid: number; exact: boolean; commandLine: string };
+export type Postmaster = { pid: number; exact: boolean; commandLine: string; pgCtl: boolean };
 
 /** What each postmaster found has been asked so far, by pid, and when: pg_ctl stop -m fast, then -m immediate, again each minute. */
 type Asked = Map<number, { mode: "fast" | "immediate"; at: number }>;
@@ -858,8 +864,8 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** The real paths of the bundled postgres and of the shell pg_ctl starts it through, null where one can't be read. */
-export type Programs = { postgres: string | null; shell: string | null };
+/** The real paths of the bundled postgres, the shell pg_ctl starts it through, and pg_ctl, null where one can't be read. */
+export type Programs = { postgres: string | null; shell: string | null; pgCtl: string | null };
 
 /** A file's real path, every link and alias resolved, or null when it can't be read. */
 async function realOrNull(path: string): Promise<string | null> {
@@ -886,6 +892,13 @@ async function realOrNull(path: string): Promise<string | null> {
  *   the cmd.exe it starts the postmaster through, `"COMSPEC" /C ""E" -D "F"
  *   -p N < "nul" >> "log" 2>&1"`, is another process, which may yet start
  *   one, so its exact command, run by Windows' own cmd.exe, is exact too.
+ * - `pgctl`: the bundled pg_ctl, by real path, running `start -D F`. On
+ *   POSIX pg_ctl forks before it execs /bin/sh, and until the exec the
+ *   child is pg_ctl itself (pg_ctl.c start_postmaster). On Windows pg_ctl
+ *   runs again as a restricted copy, which outlives a pg_ctl ended at its
+ *   limit. Either may yet start a postmaster, so it counts as running, and
+ *   it is never signalled. It is never `exact`, so it is never the running
+ *   named postmaster a fork child is spared beside.
  * - `loose`: anything else whose command line names the folder after
  *   postgres and -D, as a postmaster's would. It may be this folder's
  *   PostgreSQL spelled in a way the exact form misses, so it counts as
@@ -903,11 +916,12 @@ export async function postmasterKind(
   platform: Platform,
   programs: Programs,
   real: (path: string) => Promise<string | null> = realOrNull,
-): Promise<"exact" | "loose" | null> {
+): Promise<"exact" | "pgctl" | "loose" | null> {
   const win = platform === "win32";
   const fold = (text: string): string => (win ? text.replaceAll("\\", "/") : text);
   const same = (a: string | null | undefined, b: string | null): boolean => a != null && b !== null && (win ? a.toLowerCase() === b.toLowerCase() : a === b);
   const isPostgres = async (path: string | undefined): Promise<boolean> => path !== undefined && same(await real(path), programs.postgres);
+  const isPgCtl = async (path: string | null | undefined): Promise<boolean> => path != null && same(await real(path), programs.pgCtl);
   const line = fold(p.commandLine);
   const trimmed = folders.map((f) => fold(f).replace(/(.)\/+$/, "$1"));
   let shaped = false;
@@ -925,11 +939,20 @@ export async function postmasterKind(
         shaped = true;
         if (same(p.exe, programs.shell) && (await isPostgres(launch[1]))) return "exact";
       }
+      if (a[1] === "start" && a[2] === "-D" && a[3] === folder) {
+        shaped = true;
+        if (same(p.exe, programs.pgCtl)) return "pgctl";
+      }
     } else if (platform === "darwin") {
       const run = new RegExp(`^(.+) -D ${f} -p \\d+$`).exec(line) ?? new RegExp(`^/bin/sh -c ${sh}$`).exec(line);
       if (run) {
         shaped = true;
         if (await isPostgres(run[1])) return "exact";
+      }
+      const pgCtl = new RegExp(`^(.+) start -D ${f}(?: |$)`).exec(line);
+      if (pgCtl) {
+        shaped = true;
+        if (await isPgCtl(pgCtl[1])) return "pgctl";
       }
     } else if (win) {
       if (new RegExp(`^"[^"]+" -D "${f}" -p \\d+ *$`, "i").test(line)) {
@@ -940,6 +963,10 @@ export async function postmasterKind(
       if (launch) {
         shaped = true;
         if (p.exe != null && same(await real(p.exe), programs.shell) && (await isPostgres(launch[1]))) return "exact";
+      }
+      if (new RegExp(`^(?:"[^"]+"|\\S+) start -D (?:"${f}"|${f})(?: |$)`, "i").test(line)) {
+        shaped = true;
+        if (await isPgCtl(p.exe)) return "pgctl";
       }
     }
   }

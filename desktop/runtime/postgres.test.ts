@@ -140,13 +140,13 @@ function lookup(o: Look = {}): ProcessLookup {
 
 /**
  * This computer's processes, as the listing would show the stand-in
- * postmaster were it PostgreSQL's. The stand-in is a script, so the system
- * lists it after its shell, `/bin/sh <bin>/postgres -D ...`, where the
- * postmaster pg_ctl starts is the program itself.
+ * postmaster and pg_ctl were they PostgreSQL's. Each stand-in is a script,
+ * so the system lists it after its shell, `/bin/sh <bin>/postgres -D ...`,
+ * where the program pg_ctl starts, or pg_ctl itself, is listed alone.
  */
 async function asStarted(): Promise<ListedProcess[]> {
   return (await listProcesses()).map((p) => {
-    const run = /^\/bin\/sh (\S+\/bin\/postgres -D .*)$/.exec(p.commandLine)?.[1];
+    const run = /^\/bin\/sh (\S+\/bin\/(?:postgres -D|pg_ctl start -D) .*)$/.exec(p.commandLine)?.[1];
     return run === undefined ? p : { pid: p.pid, commandLine: run };
   });
 }
@@ -472,10 +472,12 @@ describe("a start", { skip: posixOnly }, () => {
       const { bin, calls } = await programs(dir);
       await mkdir(join(dir, "postgres"));
       const postmaster = join(dir, "postmaster.child");
-      const c = cluster(dir, bin, lookup(), { platform: "darwin" });
+      const unconfirmed: boolean[] = [];
+      const c = new Cluster({ ...cluster(dir, bin, lookup(), { platform: "darwin" }).opts, unconfirmed: (on) => unconfirmed.push(on) });
       const abort = new AbortController();
       setTimeout(() => abort.abort(), abortMs);
       const { ms, error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, ...vars }, abort.signal);
+      assert.deepEqual(unconfirmed, [], "the pg_ctl start the cancel waits on is no doubt about the end");
       assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
       assert.ok(ms < 8_000, `the start answered after ${ms} ms`);
       // Checked here, before anything of the test's own ends them.
@@ -627,6 +629,38 @@ describe("a start", { skip: posixOnly }, () => {
     assert.deepEqual(unconfirmed, [true, false]);
   });
 
+  test("a pg_ctl start left running after pg_ctl answered, as its fork before the shell, holds the start and is never signalled", { timeout: 20_000 }, async () => {
+    const dir = await folder();
+    const { bin } = await programs(dir);
+    const pg = join(dir, "postgres");
+    await mkdir(pg);
+    const stage = spawn(process.execPath, ["-e", "setInterval(() => undefined, 1000)"], { stdio: "ignore" });
+    strays.push(stage.pid as number);
+    const proc: ProcessLookup = {
+      ...lookup(),
+      list: async () => [
+        ...(await asStarted()),
+        ...(stage.exitCode === null && stage.signalCode === null ? [{ pid: stage.pid as number, commandLine: `${join(bin, "pg_ctl")} start -D ${pg} -l ${join(dir, "postgres.log")} -w -t 1800 -o -p 5` }] : []),
+      ],
+    };
+    const said: string[] = [];
+    const unconfirmed: boolean[] = [];
+    const c = new Cluster({ ...cluster(dir, bin, proc, { platform: "darwin" }).opts, log: (m) => said.push(m), unconfirmed: (on) => unconfirmed.push(on) });
+    let alive: boolean | null = null;
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 100);
+    setTimeout(() => {
+      alive = stage.exitCode === null && stage.signalCode === null;
+      stage.kill("SIGKILL");
+    }, 2_000);
+    const { ms, error } = await startWith(dir, c, { RVTT_FAKE_PID: DEAD, RVTT_FAKE_FAIL: "1" }, abort.signal);
+    assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
+    assert.equal(alive, true, "never signalled");
+    assert.ok(ms >= 2_000, `answered after ${ms} ms, while it ran`);
+    assert.deepEqual(unconfirmed, [true, false]);
+    assert.match(said.join("\n"), new RegExp(`pg_ctl start \\(pid ${stage.pid}\\) for this data folder still runs and may yet start PostgreSQL`));
+  });
+
   test("on Windows the cmd.exe pg_ctl starts the postmaster through counts as one of this folder's", async () => {
     const dir = await folder();
     const pg = join(dir, "postgres");
@@ -635,8 +669,9 @@ describe("a start", { skip: posixOnly }, () => {
       { pid: 8, commandLine: `"${systemShell()}" /C ""C:/pg/postgres.exe" -D "${pg}" -p 5 < "nul" >> "${join(dir, "postgres.log")}" 2>&1"`, exe: systemShell() },
       { pid: 9, commandLine: `"${systemShell()}" /C ""C:/pg/postgres.exe" -D "${pg}.incomplete-5" -p 5 < "nul" 2>&1"`, exe: systemShell() },
     ];
+    rows.push({ pid: 10, commandLine: `"C:/pg/pg_ctl.exe" start -D "${pg}" -l log -w`, exe: "C:\\pg\\pg_ctl.exe" });
     const c = cluster(dir, "/none", { ...lookup(), list: async () => rows }, { platform: "win32" });
-    assert.deepEqual((await c.postmasters()).map((p) => p.pid), [7, 8]);
+    assert.deepEqual((await c.postmasters()).map((p) => p.pid), [7, 8, 10], "and so does pg_ctl.exe starting it");
   });
 
   /** A start reading that differs at every read, so the postmaster running is never the one this process started. */
@@ -1014,8 +1049,12 @@ describe("a program the cluster ends", { skip: posixOnly }, () => {
 });
 
 describe("a postmaster by its command line", () => {
-  const unix: Programs = { postgres: "/opt/r/postgres/bin/postgres", shell: "/usr/bin/dash" };
-  const windows: Programs = { postgres: "C:\\Program Files\\RaccoonVTT\\resources\\postgres\\bin\\postgres.exe", shell: "C:\\Windows\\System32\\cmd.exe" };
+  const unix: Programs = { postgres: "/opt/r/postgres/bin/postgres", shell: "/usr/bin/dash", pgCtl: "/opt/r/postgres/bin/pg_ctl" };
+  const windows: Programs = {
+    postgres: "C:\\Program Files\\RaccoonVTT\\resources\\postgres\\bin\\postgres.exe",
+    shell: "C:\\Windows\\System32\\cmd.exe",
+    pgCtl: "C:\\Program Files\\RaccoonVTT\\resources\\postgres\\bin\\pg_ctl.exe",
+  };
   // Each path stands for its own real path here, as the bundled program's does, with Windows' separators on Windows.
   const kind = (p: ListedProcess, folders: string[], on: Platform) => postmasterKind(p, folders, on, on === "win32" ? windows : unix, async (path) => (on === "win32" ? path.replaceAll("/", "\\") : path));
   /** The cmd.exe pg_ctl starts the postmaster through on Windows, as pg_ctl writes its command. */
@@ -1075,14 +1114,32 @@ describe("a postmaster by its command line", () => {
     for (const [what, p] of winCases) assert.equal(await kind(p, folders, "win32"), "loose", `Windows: ${what}`);
   });
 
-  test("is no postmaster at all for pg_ctl itself, a folder beside it, another case off Windows, or a child that renamed itself", async () => {
+  test("the bundled pg_ctl starting this folder is pg_ctl, which may yet start one: before its fork execs the shell, or as Windows' restricted copy", async () => {
     const data = ["/data/Tést Жук/postgres"];
-    assert.equal(await kind(line("/opt/r/postgres/bin/pg_ctl start -D /data/Tést Жук/postgres -l log -w"), data, "darwin"), null, "pg_ctl itself");
+    const argv = ["/opt/r/postgres/bin/pg_ctl", "start", "-D", "/data/Tést Жук/postgres", "-l", "/data/Tést Жук/logs/postgres.log", "-w", "-t", "1800", "-o", "-p 41659"];
+    assert.equal(await kind(args(argv, unix.pgCtl), data, "linux"), "pgctl", "Linux: its arguments, and its exe link on the bundled pg_ctl");
+    assert.equal(await kind(args(argv, "/usr/lib/postgresql/17/bin/pg_ctl"), data, "linux"), "loose", "Linux: another pg_ctl counts, but is no stage of this app's");
+    assert.equal(await kind(args(argv, null), data, "linux"), "loose", "Linux: an exe link that can't be read");
+    assert.equal(await kind(line(argv.join(" ")), data, "darwin"), "pgctl", "macOS: the line names the bundled pg_ctl");
+    assert.equal(await kind(line(["/usr/local/bin/pg_ctl", ...argv.slice(1)].join(" ")), data, "darwin"), "loose", "macOS: another pg_ctl");
+    assert.equal(await kind(line("/opt/r/postgres/bin/pg_ctl stop -D /data/Tést Жук/postgres -m fast -w -t 60"), data, "darwin"), null, "pg_ctl stop starts nothing");
+    assert.equal(await kind(line("/opt/r/postgres/bin/pg_ctl start -D /data/Tést Жук/postgres.incomplete-17 -l log"), data, "darwin"), null, "a folder beside it");
+    assert.equal(await kind(args(["/opt/r/postgres/bin/pg_ctl", "stop", "-D", "/data/Tést Жук/postgres"], unix.pgCtl), data, "linux"), null);
+    const folders = ["C:\\Users\\Dm\\AppData\\Local\\RaccoonVTT\\data\\postgres"];
+    // As Node writes the command line: an argument quoted only when it holds a space.
+    const win = '"C:\\Program Files\\RaccoonVTT\\resources\\postgres\\bin\\pg_ctl.exe" start -D C:\\Users\\Dm\\AppData\\Local\\RaccoonVTT\\data\\postgres -l C:\\Users\\Dm\\AppData\\Local\\RaccoonVTT\\data\\logs\\postgres.log -w -t 1800 -o "-p 41659"';
+    assert.equal(await kind(line(win, "C:\\PROGRAM FILES\\RaccoonVTT\\resources\\postgres\\bin\\pg_ctl.exe"), folders, "win32"), "pgctl", "Windows: its program, case ignored");
+    assert.equal(await kind(line(win.replace("-D C:", '-D "C:').replace("\\postgres -l", '\\postgres" -l'), windows.pgCtl), folders, "win32"), "pgctl", "Windows: the folder quoted");
+    assert.equal(await kind(line(win, "C:\\pg\\pg_ctl.exe"), folders, "win32"), "loose", "Windows: another pg_ctl.exe");
+  });
+
+  test("is no postmaster at all for a folder beside it, another case off Windows, or a child that renamed itself", async () => {
+    const data = ["/data/Tést Жук/postgres"];
     assert.equal(await kind(line("/opt/r/postgres/bin/postgres -D /data/Tést Жук/postgres.incomplete-17 -p 5"), data, "darwin"), null, "a folder beside it");
     assert.equal(await kind(line("/opt/r/postgres/bin/postgres -D /DATA/Tést Жук/postgres -p 5"), data, "darwin"), null, "another case is another folder off Windows");
     assert.equal(await kind(args(["postgres: checkpointer "], unix.postgres), data, "linux"), null, "a child, which renames itself");
     const folders = ["C:\\ProgramData\\RaccoonVTT\\a1b2\\data\\postgres"];
-    assert.equal(await kind(line('"C:\\pg\\pg_ctl.exe" start -D "C:/ProgramData/RaccoonVTT/a1b2/data/postgres" -l log', windows.postgres), folders, "win32"), null);
+    assert.equal(await kind(line('"C:\\pg\\pg_ctl.exe" stop -D "C:/ProgramData/RaccoonVTT/a1b2/data/postgres" -m fast', windows.pgCtl), folders, "win32"), null);
     assert.equal(await kind(line('"C:\\pg\\postgres.exe" --forkchild="checkpointer" 3', windows.postgres), folders, "win32"), null);
   });
 });
