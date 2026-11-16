@@ -2,14 +2,16 @@ import assert from "node:assert/strict";
 import { wall } from "../discoveryTestutil.ts";
 import type { RoomState, Token } from "../model.ts";
 import type { OpOf } from "../protocol.ts";
-import { hexPlacements, linkHolds } from "../rules/attach.ts";
+import { applyOp } from "../reducer.ts";
+import { hexPlacements, linkHolds, onHolder } from "../rules/attach.ts";
 import { occupiedHexes, placedOnHex } from "../rules/footprint.ts";
+import { footprintGround } from "../rules/heights.ts";
 import { hexDistance, hexKey, hexLine, hexNeighbors, type Hex, type HexGrid } from "../rules/hex.ts";
 import { findRouteOn } from "../rules/hexWalk.ts";
 import { hexWallRoom, onHex, wallsRound } from "../rules/hexWalls.testkit.ts";
 import { hexStandAt, hexStandPlace, ownWalk } from "../rules/movement.ts";
 import { groupWalkWorld } from "../rules/walkWorld.ts";
-import { chance, int, member, pick, rng, trap } from "../testutil.ts";
+import { chance, DM, env, int, member, pick, rng, trap } from "../testutil.ts";
 
 /*
  * The random rooms of hexFile.random.test.ts, which the board's own random
@@ -231,6 +233,42 @@ export function withMouse(made: Case, seed: number): Case | null {
   const by = chance(r, 0.7) ? tows[0]! : pick(r, tows);
   s.tokens.mouse = { ...onHex(g, "mouse", "tiny", occupiedHexes(g, by)[0]!, { name: "Mouse", kind: "npc", attached: { to: by.id, kind: "drag" }, ...(by.visibility === "dm" ? { visibility: "dm" as const } : {}) }), elevation: by.elevation };
   return linkHolds(g, s.meta.settings, "drag", s.tokens.mouse, by) ? { ...made, state: s } : null;
+}
+
+/**
+ * `made` with ground raised 5 or 10 ft on one to three hexes under the
+ * holder's start or beside its way, every creature on the ground it
+ * stands over and what rides by as much as its holder: a stop can then land
+ * the holder squeezed on lower ground than its full footprint read there
+ * (review HEXFILE-ASTRA-6). Null where a link would not hold.
+ */
+export function withRises(made: Case, seed: number): Case | null {
+  const { g } = made;
+  const r = rng(seed * 6151 + (g.orient === "rows" ? 11 : 12));
+  const near = new Map<string, Hex>();
+  for (const h of [...occupiedHexes(g, made.state.tokens.horse!), ...walkHexes(made).flatMap((w) => hexNeighbors(g, w))]) near.set(hexKey(h), h);
+  const hexes = [...near.values()];
+  let s = made.state;
+  for (let i = int(r, 1, 3); i > 0; i--) {
+    const raised = applyOp(s, { t: "build.height", sceneId: "s1", cells: [hexKey(pick(r, hexes))], height: pick(r, [5, 10]) }, DM, env(1));
+    if (!raised.ok) return null;
+    s = raised.state;
+  }
+  const tokens = structuredClone(made.state.tokens);
+  const was = made.state.tokens;
+  // Holders before what rides them, so each rider keeps its height over its holder.
+  const settle = (id: string): void => {
+    const t = tokens[id]!;
+    const link = t.attached;
+    if (link && onHolder(link.kind) && tokens[link.to]) {
+      settle(link.to);
+      t.elevation = tokens[link.to]!.elevation + (was[id]!.elevation - was[link.to]!.elevation);
+    } else t.elevation = Math.max(was[id]!.elevation, footprintGround(s.buildChunks, t));
+  };
+  for (const id of Object.keys(tokens)) settle(id);
+  const state = { ...s, tokens };
+  const holds = Object.values(tokens).every((t) => !t!.attached || linkHolds(g, state.meta.settings, t!.attached.kind, t!, tokens[t!.attached.to]!));
+  return holds ? { ...made, state } : null;
 }
 
 /**

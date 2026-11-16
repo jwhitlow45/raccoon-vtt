@@ -4,22 +4,22 @@ import { wall } from "../discoveryTestutil.ts";
 import type { RoomState, Token, Viewer } from "../model.ts";
 import { canApply } from "../permissions.ts";
 import { projectState, stableStringify } from "../project.ts";
-import type { OpOf } from "../protocol.ts";
+import type { Op, OpOf } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { movementRules } from "../ruleHooks.ts";
 import { hexPlacements, linkHolds, onHolder, seatedAt } from "../rules/attach.ts";
 import { occupiedHexes, placedOnHex } from "../rules/footprint.ts";
-import { hexCenter, hexDistance, hexKey, hexNeighbors, type HexGrid } from "../rules/hex.ts";
+import { hexCenter, hexDistance, hexKey, hexNeighbors, type Hex, type HexGrid } from "../rules/hex.ts";
 import { routeWorld } from "../rules/hexWalk.ts";
 import { compareAlong, fileHeightsAlong, followerTrace, hexFileClasses, hexFileRoutes, pointAt } from "../rules/route.ts";
 import { COLUMNS, onHex, ROWS } from "../rules/hexWalls.testkit.ts";
 import { planWalks, walkedIn } from "../rules/moveLeg.ts";
 import { groundUnder, onSqueezedLattice, ownWalk } from "../rules/movement.ts";
-import { footing } from "../rules/heights.ts";
+import { footing, footprintGround } from "../rules/heights.ts";
 import { planTrapMove, trapHits, trapLandings, trapMoments, trapWalks } from "../rules/traps.ts";
 import { groupWalkWorld } from "../rules/walkWorld.ts";
 import { chance, DM, env, int, P1, P2, pick, rng, template, trap } from "../testutil.ts";
-import { caseOf, insideCaseOf, raised, withImpAhead, withMouse, withStop, type Case } from "./hexFile.testkit.ts";
+import { caseOf, insideCaseOf, keepOf, raised, wayInto, withImpAhead, withMouse, withRises, withStop, type Case } from "./hexFile.testkit.ts";
 
 /**
  * Random walks in single file on hexes (RIDE-SINGLE-FILE-HEX and
@@ -281,6 +281,31 @@ function hiddenTwin(g: HexGrid, s: RoomState, r: () => number): RoomState | null
   return holds ? twin : null;
 }
 
+/**
+ * After a trap's cut `cut` of a move in `s`, which left `after`: each walk
+ * hex by hex that left its start stands level with its holder where the cut
+ * leaves that, by attach's rule (docs/design/design-v1-attach.md 5.1). One
+ * that never left its start keeps its own height there (review
+ * FU45B-ASTRA-06). How many it checked.
+ */
+function levelWithHolders(s: RoomState, cut: Op, after: RoomState, actor: Viewer, at: string): number {
+  let checked = 0;
+  const walks = planWalks(cut, s, actor, {});
+  for (const m of walks) {
+    const holder = walks.find((h) => h.tokenId === m.carriedBy);
+    if (!m.along || !holder) continue;
+    const [was, now] = [s.tokens[m.tokenId]!, after.tokens[m.tokenId]!];
+    if (now.x === was.x && now.y === was.y) continue;
+    const [held, holds] = [s.tokens[holder.tokenId]!, after.tokens[holder.tokenId]!];
+    const link = was.attached!;
+    const ground = groundUnder(s.buildChunks, followerTrace(was, [was])[0]!, now);
+    const want = onHolder(link.kind) ? holds.elevation + (was.elevation - held.elevation) : footing(s.buildChunks, holder.trace[0]!) === "ground" ? ground : Math.max(was.elevation + (holds.elevation - held.elevation), ground);
+    assert.ok(Math.abs(now.elevation - want) < 1e-9, `${at}: ${m.tokenId} at ${now.elevation}, level with ${holder.tokenId} at ${holds.elevation} is ${want}`);
+    checked++;
+  }
+  return checked;
+}
+
 /** The holder raised 40 ft and brought down to the ground or to 25 ft, or climbing from the ground to 30 ft, as feet up and down. */
 const HEIGHTS = [
   [40, 0],
@@ -524,9 +549,11 @@ for (const [name, g] of [
             ["", room],
             ["imp ahead, ", withImpAhead(room, seed)],
             ["mouse in tow, ", withMouse(room, seed)],
+            ["ground raised, ", withRises(room, seed)],
           ] as const) {
             if (!start) continue;
-            for (const [up, down] of HEIGHTS) {
+            // On raised ground a walk on the ground too, where a stop can land the holder squeezed on lower ground.
+            for (const [up, down] of ahead === "ground raised, " ? [[0, 0] as const, ...HEIGHTS] : HEIGHTS) {
               const { state: s, op } = withStop(raised(start, up, down), seed);
               for (const [who, actor] of [
                 ["Pat", P1],
@@ -538,27 +565,79 @@ for (const [name, g] of [
                 cuts++;
                 const r = applyOp(s, op, actor, env(5));
                 assert.ok(r.ok);
-                const walks = planWalks(cut, s, actor, {});
-                for (const m of walks) {
-                  const holder = walks.find((h) => h.tokenId === m.carriedBy);
-                  if (!m.along || !holder) continue;
-                  const [was, now] = [s.tokens[m.tokenId]!, r.state.tokens[m.tokenId]!];
-                  // One that never left its start keeps its own height there (review FU45B-ASTRA-06).
-                  if (now.x === was.x && now.y === was.y) continue;
-                  const [held, holds] = [s.tokens[holder.tokenId]!, r.state.tokens[holder.tokenId]!];
-                  const link = was.attached!;
-                  // Attach's rule (docs/design/design-v1-attach.md 5.1) from where the cut leaves its holder.
-                  const ground = groundUnder(s.buildChunks, followerTrace(was, [was])[0]!, now);
-                  const want = onHolder(link.kind) ? holds.elevation + (was.elevation - held.elevation) : footing(s.buildChunks, holder.trace[0]!) === "ground" ? ground : Math.max(was.elevation + (holds.elevation - held.elevation), ground);
-                  assert.ok(Math.abs(now.elevation - want) < 1e-9, `${kind}seed ${seed}, ${ahead}${up} to ${down} ft, ${who}: ${m.tokenId} at ${now.elevation}, level with ${holder.tokenId} at ${holds.elevation} is ${want}`);
-                  checked++;
-                }
+                checked += levelWithHolders(s, cut, r.state, actor, `${kind}seed ${seed}, ${ahead}${up} to ${down} ft, ${who}`);
               }
             }
           }
         }
       }
       assert.ok(cuts >= 800 && checked >= 1200, `cuts ${cuts}, walks checked ${checked}`);
+    });
+
+    test("a full-size warhorse beside the keep's mouth with ground raised round it, Bree riding, the goblin she or the warhorse drags and a rat behind it or not, on their ground or level with the warhorse, walking into the corridor onto the ground: after every trap cut each walk hex by hex stands level with its holder where the cut leaves that, and every token where the trap step lands it (review HEXFILE-ASTRA-6)", () => {
+      let cuts = 0;
+      let checked = 0;
+      const shape = g.orient === "rows" ? "hexRows" : "hexColumns";
+      for (const at of [
+        { col: 5, row: 6 },
+        { col: 5, row: 5 },
+        { col: 4, row: 6 },
+        { col: 5, row: 7 },
+      ]) {
+        const { path } = keepOf(g, 0, 0, "bree");
+        // One hex raised 10 ft under the warhorse, beside it or on the corridor's first hexes, or two beside it.
+        const near = new Map<string, Hex>();
+        for (const h of occupiedHexes(g, onHex(g, "horse", "large", at))) for (const n of [h, ...hexNeighbors(g, h)]) near.set(hexKey(n), n);
+        for (const h of path.slice(0, 3)) near.set(hexKey(h), h);
+        for (const rises of [...[...near.values()].map((h) => [h]), [{ col: 5, row: 7 }, { col: 8, row: 7 }]]) {
+          for (const by of ["bree", "horse"] as const) {
+            for (const rat of [false, true]) {
+              for (const level of [false, true]) {
+                for (const t of [1, 2, 3]) {
+                  let s = keepOf(g, 0, 0, "bree").s;
+                  for (const h of rises) {
+                    const r = applyOp(s, { t: "build.height", sceneId: "s1", cells: [hexKey(h)], height: 10 }, DM, env(1));
+                    assert.ok(r.ok);
+                    s = r.state;
+                  }
+                  const horse = onHex(g, "horse", "large", at, { name: "Warhorse", kind: "npc", ownerIds: ["p1"] });
+                  const up = footprintGround(s.buildChunks, horse);
+                  const on = (t: Token) => ({ ...t, elevation: level ? up : footprintGround(s.buildChunks, t) });
+                  s.tokens = {
+                    horse: { ...horse, elevation: up },
+                    bree: { ...onHex(g, "bree", "medium", at, { name: "Bree", kind: "pc", ownerIds: ["p1"], attached: { to: "horse", kind: "ride", steer: true } }), elevation: up },
+                    gob: on(onHex(g, "gob", "medium", at, { name: "Goblin", kind: "npc", ownerIds: ["p1"], attached: { to: by, kind: "drag" } })),
+                    ...(rat ? { rat: on(onHex(g, "rat", "tiny", at, { name: "Rat", kind: "npc", ownerIds: ["p1"], attached: { to: "gob", kind: "drag" } })) } : {}),
+                  };
+                  if (!Object.values(s.tokens).every((x) => !x!.attached || linkHolds(g, s.meta.settings, x!.attached.kind, x!, s.tokens[x!.attached.to]!))) continue;
+                  s.traps.stop = trap("stop", { grid: shape, zone: { cells: [{ x: path[t]!.col, y: path[t]!.row, w: 1, h: 1 }] }, rig: { on: ["enter"], who: "any", floor: false, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false } });
+                  const way = wayInto(g, s, path[4]!);
+                  if (!way) continue;
+                  const op = { ...way, elevation: 0 };
+                  for (const [who, actor] of [
+                    ["Pat", P1],
+                    ["the DM", DM],
+                  ] as const) {
+                    if (!canApply(op, actor, s, { canUseAsset: () => true }).ok) continue;
+                    const cut = planTrapMove(op, s, actor, {}).op;
+                    if (cut === op) continue;
+                    cuts++;
+                    const r = applyOp(s, op, actor, env(5));
+                    assert.ok(r.ok);
+                    const where = `the warhorse on ${at.col}, ${at.row}, raised ${rises.map((h) => `${h.col}, ${h.row}`).join(" and ")}, dragged by ${by}${rat ? ", a rat" : ""}${level ? ", level" : ""}, the trap on hex ${t}, ${who}`;
+                    checked += levelWithHolders(s, cut, r.state, actor, where);
+                    for (const [id, pose] of trapLandings(op, s, actor, {})) {
+                      const stored = r.state.tokens[id]!;
+                      assert.ok(Math.abs(stored.elevation - pose.elevation) < 1e-9, `${where}: ${id} stored at ${stored.elevation}, landed at ${pose.elevation}`);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      assert.ok(cuts >= 1800 && checked >= 2700, `cuts ${cuts}, walks checked ${checked}`);
     });
 
     test("raised 40 ft and brought down to the ground or to 25 ft, or climbing from the ground to 30 ft, an imp ahead of the holder on some: at every moment the trap step has each walk hex by hex at the height the move and the area sweep have it, on its way to its first hex and never leaving its start too, where it waits on its last hex at their place as well, and an area's hits read it there (review HEXFILE-OPUS-11, HEXFILE-OPUS-12)", () => {
