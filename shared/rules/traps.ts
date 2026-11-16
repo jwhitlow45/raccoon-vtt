@@ -1784,18 +1784,19 @@ function movedIn(m: Moment, walk: Walk): Token | undefined {
 /**
  * Where a walk stands at the moment on its spot: after its group's stop
  * where the stop leaves it (`stoodAt`), else on its latest spot. A walk hex
- * by hex that has left its start is there at the height the move has it
- * then, between the ends of the leg of its own walk it is on (route.ts
- * pointAt), as the move and the area sweep read it: a goblin waiting on its
- * last hex while the warhorse it follows comes on down comes down with it
- * (review HEXFILE-OPUS-11).
+ * by hex is there at the height the move has it then, between the ends of
+ * the leg of its own walk it is on (route.ts pointAt), as the move and the
+ * area sweep read it: a goblin waiting on its last hex while the warhorse
+ * it follows comes on down comes down with it (review HEXFILE-OPUS-11), and
+ * so does one on its way to its first hex, or one that never leaves its
+ * start (review HEXFILE-OPUS-12). Only where a stop lands one that has not
+ * left its start does it keep its own height (`stoodAt`).
  */
 function placedIn(m: Moment, walk: Walk): Token {
   const stop = m.stops.get(walk.group.named);
   if (stop && compareProgress(m.p, stop.until) > 0) return stoodAt(walk, stopIndex(walk, stop), (w) => stopIndex(w, stop));
-  const j = latestIndex(walk.spots, m.p);
-  const at = placedAt(walk, j);
-  return walk.heightAt && j > 0 ? { ...at, elevation: pointAt(walk.entry.route, m.p, walk.entry.along).elevation } : at;
+  const at = placedAt(walk, latestIndex(walk.spots, m.p));
+  return walk.heightAt ? { ...at, elevation: pointAt(walk.entry.route, m.p, walk.entry.along).elevation } : at;
 }
 
 function tokenAt(m: Moment, id: string): Token | undefined {
