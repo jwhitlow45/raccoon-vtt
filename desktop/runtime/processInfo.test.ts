@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { realpathSync } from "node:fs";
 import { uptime } from "node:os";
 import { basename } from "node:path";
-import { bootId, isAlive, linkedProgram, listProcesses, parsePsList, parseStatusUid, parseWindowsList, parseWindowsProcess, processFacts, processStamp, processStart, selfIdentity, stillRunning } from "./processInfo.ts";
+import { bootId, isAlive, linkedProgram, listProcesses, parsePsList, parseStatusUid, parseWindowsList, parseWindowsProcess, processFacts, processStamp, processStart, selfIdentity, stillRunning, type ProcFiles } from "./processInfo.ts";
 
 /**
  * A process is its pid, its start time and its boot (docs/design/design-v1-local-app.md
@@ -113,4 +113,40 @@ test("a listing reads ps's lines, and Windows' JSON list, and refuses anything e
   assert.throws(() => parseWindowsList('{"pid":7,"line":"x"}'), /not a list/);
   assert.throws(() => parseWindowsList('[{"pid":"7","line":"x"}]'), /can't read/);
   assert.throws(() => parseWindowsList(""));
+});
+
+test("Linux: a command line that can't be read is a process gone only when the error says so, and fails the listing when /proc says it is this user's", async () => {
+  const fail = (code: string): Error => Object.assign(new Error(`${code}: the read failed`), { code });
+  const statted: string[] = [];
+  /** /proc with each pid's command line or the error reading it gives, and the owner stat gives its folder. */
+  const list = (cmdlines: Record<string, string | Error>, owners: Record<string, number | Error> = {}) => {
+    const files: ProcFiles = {
+      readdir: async () => ["self", "stat", ...Object.keys(cmdlines)],
+      readFile: async (path) => {
+        const read = cmdlines[path.split("/")[2] ?? ""];
+        if (read === undefined || read instanceof Error) throw read ?? fail("ENOENT");
+        return Buffer.from(`${read.split(" ").join("\0")}\0`);
+      },
+      readlink: async () => Promise.reject(fail("EACCES")),
+      stat: async (path) => {
+        statted.push(path);
+        const owner = owners[path.split("/")[2] ?? ""] ?? fail("ENOENT");
+        if (owner instanceof Error) throw owner;
+        return { uid: owner };
+      },
+      uid: 1000,
+    };
+    return listProcesses("linux", files);
+  };
+  // Gone: never asked about, though its pid would be this user's now.
+  assert.deepEqual(await list({ 10: fail("ENOENT"), 11: fail("ESRCH"), 12: "sh -c x" }, { 10: 1000, 11: 1000 }), [{ pid: 12, commandLine: "sh -c x", argv: ["sh", "-c", "x"], exe: null }]);
+  assert.deepEqual(statted, [], "an ended process is never looked up");
+  // Another user's, or root's, as hidepid=1 or a process that can't be dumped refuse them: skipped.
+  assert.deepEqual(await list({ 20: fail("EACCES"), 21: fail("EPERM"), 22: fail("EACCES") }, { 20: 1001, 21: 0, 22: fail("ESRCH") }), []);
+  assert.deepEqual(statted, ["/proc/20", "/proc/21", "/proc/22"], "/proc/<pid> itself, never its status file");
+  // This user's: without it the listing proves nothing.
+  await assert.rejects(list({ 30: fail("EACCES") }, { 30: 1000 }), /^Error: process 30 runs as this user and its command line can't be read: EACCES/);
+  await assert.rejects(list({ 31: fail("EIO") }, { 31: 1000 }), /process 31/);
+  // Who owns it can't be read either: no answer, so no proof.
+  await assert.rejects(list({ 40: fail("EACCES") }, { 40: fail("EACCES") }), /process 40/);
 });

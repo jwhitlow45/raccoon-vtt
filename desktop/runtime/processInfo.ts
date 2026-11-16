@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile, readdir, readlink } from "node:fs/promises";
+import { readFile, readdir, readlink, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import type { Platform } from "../contract.ts";
 
@@ -227,6 +227,50 @@ export function parseWindowsList(stdout: string): ListedProcess[] {
   });
 }
 
+/** The /proc reads the Linux listing makes, which tests replace to give the errors a system can. */
+export type ProcFiles = {
+  readdir(path: string): Promise<string[]>;
+  readFile(path: string): Promise<Buffer>;
+  readlink(path: string): Promise<string>;
+  stat(path: string): Promise<{ uid: number }>;
+  /** This process's user. */
+  uid: number | null;
+};
+
+const procFiles: ProcFiles = {
+  readdir: (path) => readdir(path),
+  readFile: (path) => readFile(path),
+  readlink: (path) => readlink(path),
+  stat: (path) => stat(path),
+  uid: process.getuid?.() ?? null,
+};
+
+/** Whether a read failed because the process ended between the folder's listing and the read. */
+function gone(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ESRCH";
+}
+
+/**
+ * Whether a process whose command line can't be read may be this user's,
+ * so a listing without it would prove nothing. Any error but its end, such
+ * as EACCES under hidepid=1 or for a process that can't be dumped, is
+ * settled by who owns /proc/<pid>, which hidepid=1 still lets anyone stat:
+ * another user's or root's is skipped, since PostgreSQL never runs as root,
+ * and a process that can't be dumped shows as root's. /proc/<pid>/status is
+ * never read for this, since hidepid=1 hides it for every other user's
+ * process, so every listing would fail.
+ */
+async function mayBeOurs(pid: string, err: unknown, files: ProcFiles): Promise<boolean> {
+  if (gone(err)) return false;
+  try {
+    const { uid } = await files.stat(`/proc/${pid}`);
+    return files.uid === null || uid === files.uid;
+  } catch (statErr) {
+    return !gone(statErr);
+  }
+}
+
 /**
  * The processes running now, with their command lines, to tell a process
  * by what it is rather than by a pid a file names. Linux reads each
@@ -236,25 +280,26 @@ export function parseWindowsList(stdout: string): ListedProcess[] {
  * match. Windows asks Win32_Process for postgres.exe alone, with its
  * program, and leaves out a process whose command line it can't read:
  * that is another user's, so nothing this user started. A listing that
- * fails throws, since it proves nothing either way.
+ * fails throws, since it proves nothing either way, and so does a Linux
+ * listing with a process of this user's it can't read (mayBeOurs).
  */
-export async function listProcesses(platform: Platform = process.platform as Platform): Promise<ListedProcess[]> {
+export async function listProcesses(platform: Platform = process.platform as Platform, files: ProcFiles = procFiles): Promise<ListedProcess[]> {
   if (platform === "linux") {
     const out: ListedProcess[] = [];
-    for (const name of await readdir("/proc")) {
+    for (const name of await files.readdir("/proc")) {
       if (!/^\d+$/.test(name)) continue;
       let raw: Buffer;
       try {
-        raw = await readFile(`/proc/${name}/cmdline`);
-      } catch {
-        // It ended between the folder's listing and this read.
+        raw = await files.readFile(`/proc/${name}/cmdline`);
+      } catch (err) {
+        if (await mayBeOurs(name, err, files)) throw new Error(`process ${name} runs as this user and its command line can't be read: ${(err as Error).message}`);
         continue;
       }
       const args = raw.toString("utf8").replace(/\0+$/, "");
       if (args === "") continue;
       const argv = args.split("\0");
       // Another user's exe link can't be read, which only means it is no program of this user's.
-      const exe = await maybe(async () => linkedProgram(await readlink(`/proc/${name}/exe`)));
+      const exe = await maybe(async () => linkedProgram(await files.readlink(`/proc/${name}/exe`)));
       out.push({ pid: Number(name), commandLine: argv.join(" "), argv, exe });
     }
     return out;
