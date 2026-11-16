@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { realpathSync } from "node:fs";
 import { uptime } from "node:os";
 import { basename } from "node:path";
-import { bootId, isAlive, linkedProgram, listProcesses, parsePsList, parseStatusUid, parseWindowsList, parseWindowsProcess, processFacts, processStamp, procHidesPids, processStart, selfIdentity, stillRunning, WINDOWS_LIST_SCRIPT, type ProcFiles } from "./processInfo.ts";
+import { bootId, isAlive, linkedProgram, listProcesses, parseCreated, parseProcStat, parsePsList, parsePsStart, parseStatusUid, parseWindowsList, parseWindowsProcess, processFacts, processStamp, procHidesPids, processStart, selfIdentity, stillRunning, systemShell, WINDOWS_LIST_SCRIPT, type ListedProcess, type ProcFiles } from "./processInfo.ts";
 
 /**
  * A process is its pid, its start time and its boot (docs/design/design-v1-local-app.md
@@ -72,6 +72,40 @@ test("this boot has an id that no clock moves, on Linux and macOS, and none on W
   else assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "boot_id or kern.bootsessionuuid, a UUID");
 });
 
+test("a listing's start reading is the one processStamp gives for the same live process, so a remembered postmaster is known again", { timeout: 120_000 }, async () => {
+  // Windows lists only PostgreSQL's programs and cmd.exe, so there the process is a cmd.exe, which waits on its input.
+  const child =
+    platform === "win32"
+      ? spawn(systemShell(), ["/d", "/k"], { stdio: ["pipe", "ignore", "ignore"], windowsHide: true })
+      : spawn(process.execPath, ["-e", "setTimeout(() => undefined, 60_000)"], { stdio: "ignore" });
+  try {
+    const pid = child.pid as number;
+    let listed: ListedProcess | undefined;
+    // A process just started may not be listed yet.
+    for (let tries = 0; listed === undefined && tries < 20; tries++) {
+      listed = (await listProcesses(platform)).find((p) => p.pid === pid);
+      if (listed === undefined) await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    assert.ok(listed, "the child is listed");
+    const stamp = await processStamp(pid, platform);
+    assert.notEqual(stamp, null);
+    assert.equal(listed.stamp, stamp);
+  } finally {
+    child.kill("SIGKILL");
+  }
+});
+
+test("each start reading has one parser, for the listing and processStamp alike", () => {
+  // Field 22 after the name, which may hold spaces and parentheses, in ticks of 10 ms.
+  assert.equal(parseProcStat(`41 (post gres) (x)) S ${Array(18).fill("0").join(" ")} 12345 0 0`), 123450);
+  assert.equal(parseProcStat("41 (sh) S"), null);
+  assert.equal(parsePsStart("Mon Nov  2 05:12:03 2026    "), Date.UTC(2026, 10, 2, 5, 12, 3));
+  assert.equal(parsePsStart(""), null);
+  assert.equal(parseCreated("2026-11-14T07:13:25.1234560Z"), Date.parse("2026-11-14T07:13:25.123Z"));
+  assert.equal(parseCreated(""), null);
+  assert.equal(parseCreated(undefined), null);
+});
+
 test("the readings that need no special rights parse: /proc's Uid line and Windows' CIM row", () => {
   assert.equal(parseStatusUid("Name:\tpostgres\nUmask:\t0077\nState:\tS (sleeping)\nUid:\t1000\t1000\t1000\t1000\nGid:\t1001\t1001\t1001\t1001\n"), 1000);
   assert.equal(parseStatusUid("Name:\tx\n"), null);
@@ -102,18 +136,22 @@ test("the process listing shows a process's whole command line, a folder named i
 });
 
 test("a listing reads ps's lines, and Windows' JSON list, and refuses anything else as a failed listing", () => {
-  assert.deepEqual(parsePsList("  12 /opt/pg/bin/postgres -D /d/postgres -p 5\n345 sh\n\n"), [
-    { pid: 12, commandLine: "/opt/pg/bin/postgres -D /d/postgres -p 5" },
-    { pid: 345, commandLine: "sh" },
+  // ps pads the start to its column, so each command is read from where its header starts, its own leading spaces kept.
+  const ps = ["  PID STARTED                      COMMAND", "   12 Mon Nov  2 05:12:03 2026     /opt/pg/bin/postgres -D /d/postgres -p 5", "  345 Tue Nov 10 08:54:48 2026      sh -c x", ""].join("\n");
+  assert.deepEqual(parsePsList(ps), [
+    { pid: 12, commandLine: "/opt/pg/bin/postgres -D /d/postgres -p 5", stamp: Date.UTC(2026, 10, 2, 5, 12, 3) },
+    { pid: 345, commandLine: " sh -c x", stamp: Date.UTC(2026, 10, 10, 8, 54, 48) },
   ]);
+  assert.throws(() => parsePsList("12 sh\n"), /no COMMAND column/);
   // WINDOWS_LIST_SCRIPT's object: this session, and each postgres.exe and cmd.exe with its session.
   const listing = (session: number, rows: object[]) => JSON.stringify({ session, rows });
-  const row = (pid: number, name: string, line: string | null, session = 1, exe: string | null = `C:\\pg\\${name}`) => ({ pid, name, line, exe, session });
+  const row = (pid: number, name: string, line: string | null, session = 1, exe: string | null = `C:\\pg\\${name}`) => ({ pid, name, line, exe, created: "2026-11-14T07:13:25.1234560Z", session });
+  const created = Date.parse("2026-11-14T07:13:25.123Z");
   assert.deepEqual(parseWindowsList(`${listing(1, [])}\r\n`), []);
-  assert.deepEqual(parseWindowsList(listing(1, [row(7, "postgres.exe", '"C:/pg/postgres.exe" -D "C:/d/postgres" -p 5  ')])), [{ pid: 7, commandLine: '"C:/pg/postgres.exe" -D "C:/d/postgres" -p 5  ', exe: "C:\\pg\\postgres.exe" }]);
-  assert.deepEqual(parseWindowsList(listing(1, [row(7, "postgres.exe", "x", 1, null)])), [{ pid: 7, commandLine: "x", exe: null }], "a program Windows won't name");
+  assert.deepEqual(parseWindowsList(listing(1, [row(7, "postgres.exe", '"C:/pg/postgres.exe" -D "C:/d/postgres" -p 5  ')])), [{ pid: 7, commandLine: '"C:/pg/postgres.exe" -D "C:/d/postgres" -p 5  ', exe: "C:\\pg\\postgres.exe", stamp: created }]);
+  assert.deepEqual(parseWindowsList(listing(1, [{ ...row(7, "postgres.exe", "x", 1, null), created: "" }])), [{ pid: 7, commandLine: "x", exe: null, stamp: null }], "a program and a start Windows won't give");
   const launcher = '"C:\\Windows\\System32\\cmd.exe" /C ""C:/pg/postgres.exe" -D "C:/d/postgres" -p 5 < "nul" >> "C:\\d\\logs\\postgres.log" 2>&1"';
-  assert.deepEqual(parseWindowsList(listing(1, [row(8, "cmd.exe", launcher)])), [{ pid: 8, commandLine: launcher, exe: "C:\\pg\\cmd.exe" }], "the launcher is listed");
+  assert.deepEqual(parseWindowsList(listing(1, [row(8, "cmd.exe", launcher)])), [{ pid: 8, commandLine: launcher, exe: "C:\\pg\\cmd.exe", stamp: created }], "the launcher is listed");
   // A command line Windows won't give: a postgres.exe in this session may be this user's, so the listing fails and names it.
   assert.throws(() => parseWindowsList(listing(1, [row(9, "postgres.exe", null)])), /^Error: postgres\.exe \(pid 9\) runs in this session and its command line can't be read$/);
   assert.throws(() => parseWindowsList(listing(1, [row(9, "POSTGRES.EXE", "")])), /pid 9/, "an empty one too, and the name in any case");
@@ -122,12 +160,13 @@ test("a listing reads ps's lines, and Windows' JSON list, and refuses anything e
   assert.deepEqual(parseWindowsList(listing(0, [row(10, "postgres.exe", null, 0)])), [], "session 0 is skipped though this runs in it, as a CI runner's service does");
   assert.throws(() => parseWindowsList(listing(1, [{ ...row(7, "postgres.exe", "x"), exe: 7 }])), /can't read/);
   assert.throws(() => parseWindowsList(listing(1, [{ ...row(7, "postgres.exe", "x"), session: "1" }])), /can't read/);
+  assert.throws(() => parseWindowsList(listing(1, [{ ...row(7, "postgres.exe", "x"), created: 7 }])), /can't read/);
   assert.throws(() => parseWindowsList('[{"pid":7,"line":"x"}]'), /not a list/, "the bare array an older script printed");
   assert.throws(() => parseWindowsList('{"rows":[]}'), /not a list/);
   assert.throws(() => parseWindowsList(listing(1, [{ pid: "7", name: "postgres.exe", line: "x", session: 1 }])), /can't read/);
   assert.throws(() => parseWindowsList(""));
   assert.match(WINDOWS_LIST_SCRIPT, /Name = 'postgres\.exe' OR Name = 'cmd\.exe' OR Name = 'pg_ctl\.exe'/, "the launcher and pg_ctl are asked for");
-  assert.match(WINDOWS_LIST_SCRIPT, /exe = \$_\.ExecutablePath; session = \[int\]\$_\.SessionId/);
+  assert.match(WINDOWS_LIST_SCRIPT, /exe = \$_\.ExecutablePath; created = \$\(if \(\$_\.CreationDate\) \{ \$_\.CreationDate\.ToUniversalTime\(\)\.ToString\('o'\) \} else \{ '' \}\); session = \[int\]\$_\.SessionId/);
   assert.match(WINDOWS_LIST_SCRIPT, /session = \[System\.Diagnostics\.Process\]::GetCurrentProcess\(\)\.SessionId/);
 });
 
@@ -143,8 +182,11 @@ test("Linux: a command line that can't be read is a process gone only when the e
           if (mountinfo instanceof Error) throw mountinfo;
           return Buffer.from(mountinfo);
         }
-        const read = cmdlines[path.split("/")[2] ?? ""];
+        const pid = path.split("/")[2] ?? "";
+        const read = cmdlines[pid];
         if (read === undefined || read instanceof Error) throw read ?? fail("ENOENT");
+        // Its start, field 22, in ticks: the pid itself.
+        if (path.endsWith("/stat")) return Buffer.from(`${pid} (x) S ${Array(18).fill("0").join(" ")} ${pid} 0 0`);
         return Buffer.from(`${read.split(" ").join("\0")}\0`);
       },
       readlink: async () => Promise.reject(fail("EACCES")),
@@ -159,7 +201,7 @@ test("Linux: a command line that can't be read is a process gone only when the e
     return listProcesses("linux", files);
   };
   // Gone: never asked about, though its pid would be this user's now.
-  assert.deepEqual(await list({ 10: fail("ENOENT"), 11: fail("ESRCH"), 12: "sh -c x" }, { 10: 1000, 11: 1000 }), [{ pid: 12, commandLine: "sh -c x", argv: ["sh", "-c", "x"], exe: null }]);
+  assert.deepEqual(await list({ 10: fail("ENOENT"), 11: fail("ESRCH"), 12: "sh -c x" }, { 10: 1000, 11: 1000 }), [{ pid: 12, commandLine: "sh -c x", argv: ["sh", "-c", "x"], exe: null, stamp: 120 }]);
   assert.deepEqual(statted, [], "an ended process is never looked up");
   // Another user's, or root's, as hidepid=1 or a process that can't be dumped refuse them: skipped.
   assert.deepEqual(await list({ 20: fail("EACCES"), 21: fail("EPERM"), 22: fail("EACCES") }, { 20: 1001, 21: 0, 22: fail("ESRCH") }), []);
@@ -172,7 +214,7 @@ test("Linux: a command line that can't be read is a process gone only when the e
 
   // Under hidepid this user's own processes that can't be dumped refuse with EPERM or EACCES, and PostgreSQL is never one.
   const hidden = "22 28 0:21 / /proc rw,nosuid,nodev,noexec,relatime shared:13 - proc proc rw,hidepid=invisible\n";
-  assert.deepEqual(await list({ 50: fail("EPERM"), 51: fail("EACCES"), 52: "sh" }, { 50: 1000, 51: 1000 }, hidden), [{ pid: 52, commandLine: "sh", argv: ["sh"], exe: null }]);
+  assert.deepEqual(await list({ 50: fail("EPERM"), 51: fail("EACCES"), 52: "sh" }, { 50: 1000, 51: 1000 }, hidden), [{ pid: 52, commandLine: "sh", argv: ["sh"], exe: null, stamp: 520 }]);
   await assert.rejects(list({ 53: fail("EIO") }, { 53: 1000 }, hidden), /process 53/, "any other error still fails it");
   await assert.rejects(list({ 54: fail("EPERM") }, { 54: 1000 }), /process 54/, "and without hidepid, so does EPERM");
   await assert.rejects(list({ 55: fail("EPERM") }, { 55: 1000 }, fail("EACCES")), /process 55/, "and when mountinfo can't be read");

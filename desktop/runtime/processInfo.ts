@@ -42,15 +42,44 @@ export function systemShell(): string {
 }
 
 /**
- * When a Linux process started, in ms since boot. Field 22 counts clock
- * ticks since boot, at USER_HZ, 100 on every platform the app ships for. The
- * name in field 2 may hold spaces and parentheses, so fields are counted from
- * its last ")".
+ * When a Linux process started, in ms since boot, from its /proc/<pid>/stat.
+ * Field 22 counts clock ticks since boot, at USER_HZ, 100 on every platform
+ * the app ships for. The name in field 2 may hold spaces and parentheses, so
+ * fields are counted from its last ")". The listing reads it with the same
+ * parser, so its readings and processStamp's are one quantity.
  */
-async function linuxSinceBoot(pid: number): Promise<number | null> {
-  const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+export function parseProcStat(stat: string): number | null {
   const ticks = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]);
   return Number.isFinite(ticks) ? ticks * 10 : null;
+}
+
+async function linuxSinceBoot(pid: number): Promise<number | null> {
+  return parseProcStat(await readFile(`/proc/${pid}/stat`, "utf8"));
+}
+
+/**
+ * The environment ps runs in: UTF-8, since in the C locale ps escapes every
+ * other byte, so a data folder named "Tést" would never match, and UTC, so
+ * the start it prints, with no zone name, is read as UTC whatever the zone.
+ */
+const PS_ENV = { LC_ALL: "en_US.UTF-8", TZ: "UTC" };
+
+/** ps's lstart as it prints it in PS_ENV, in ms since the epoch, for processStart and the listing alike. */
+export function parsePsStart(text: string): number | null {
+  const t = Date.parse(`${text.trim()} UTC`);
+  return Number.isNaN(t) ? null : t;
+}
+
+/** PowerShell that prints a Win32_Process's CreationDate in UTC, or "" when it has none. */
+function createdOf(row: string): string {
+  return `$(if (${row}.CreationDate) { ${row}.CreationDate.ToUniversalTime().ToString('o') } else { '' })`;
+}
+
+/** A CreationDate as createdOf prints it, in ms since the epoch, for processStart and the listing alike. */
+export function parseCreated(value: unknown): number | null {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const t = Date.parse(value.trim());
+  return Number.isNaN(t) ? null : t;
 }
 
 /**
@@ -71,17 +100,16 @@ export async function processStart(pid: number, platform: Platform = process.pla
     if (platform === "darwin") {
       // ps prints the start in its own time zone and no zone name, so it is
       // asked for UTC and read as UTC, and a zone change never moves it.
-      const { stdout } = await run("/bin/ps", ["-o", "lstart=", "-p", String(pid)], { env: { ...process.env, LC_ALL: "C", TZ: "UTC" } });
-      const t = Date.parse(`${stdout.trim()} UTC`);
-      return Number.isNaN(t) ? null : t;
+      const { stdout } = await run("/bin/ps", ["-o", "lstart=", "-p", String(pid)], { env: { ...process.env, ...PS_ENV } });
+      return parsePsStart(stdout);
     }
+    // Win32_Process's CreationDate, as the listing reads it, and which it gives for every process without elevation.
     const { stdout } = await run(
       powershell(),
-      ["-NoProfile", "-NonInteractive", "-Command", `(Get-Process -Id ${pid}).StartTime.ToUniversalTime().ToString('o')`],
+      ["-NoProfile", "-NonInteractive", "-Command", `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($p) { ${createdOf("$p")} }`],
       { windowsHide: true, timeout: POWERSHELL_LIMIT_MS },
     );
-    const t = Date.parse(stdout.trim());
-    return Number.isNaN(t) ? null : t;
+    return parseCreated(stdout);
   } catch {
     return null;
   }
@@ -132,8 +160,7 @@ export function linkedProgram(link: string): string {
 export function parseWindowsProcess(stdout: string): Pick<ProcessFacts, "exe" | "start"> {
   try {
     const row = JSON.parse(stdout.trim()) as { name?: unknown; created?: unknown };
-    const start = typeof row.created === "string" ? Date.parse(row.created) : Number.NaN;
-    return { exe: typeof row.name === "string" && row.name !== "" ? row.name : null, start: Number.isNaN(start) ? null : start };
+    return { exe: typeof row.name === "string" && row.name !== "" ? row.name : null, start: parseCreated(row.created) };
   } catch {
     return { exe: null, start: null };
   }
@@ -161,7 +188,7 @@ export async function processFacts(pid: number, platform: Platform = process.pla
     return { exe: m?.[2] ?? null, cwd: null, uid: m ? Number(m[1]) : null, start: await processStart(pid, platform) };
   }
   // Win32_Process answers for every process without elevation, where Get-Process hides another user's path and start.
-  const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($p) { [pscustomobject]@{ name = [string]$p.Name; created = $(if ($p.CreationDate) { $p.CreationDate.ToUniversalTime().ToString('o') } else { '' }) } | ConvertTo-Json -Compress }`;
+  const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($p) { [pscustomobject]@{ name = [string]$p.Name; created = ${createdOf("$p")} } | ConvertTo-Json -Compress }`;
   const out = await maybe(async () => (await run(powershell(), ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true, timeout: POWERSHELL_LIMIT_MS })).stdout);
   return { ...(out ? parseWindowsProcess(out) : { exe: null, start: null }), cwd: null, uid: null };
 }
@@ -205,31 +232,42 @@ export async function stillRunning(id: ProcessIdentity, platform: Platform = pro
  * A process as a listing shows it: its pid, and its command line with the
  * arguments joined by spaces. Linux also gives the arguments themselves,
  * so where one ends is never a guess, and the program it runs
- * (/proc/<pid>/exe). Windows gives the program too (ExecutablePath). Each
- * is null where the system won't say.
+ * (/proc/<pid>/exe). Windows gives the program too (ExecutablePath).
+ * `stamp` is its start reading, the very quantity processStamp gives, read
+ * in the same listing, so nothing need be read again between the listing
+ * and acting on it. Each is null where the system won't say.
  */
-export type ListedProcess = { pid: number; commandLine: string; argv?: string[]; exe?: string | null };
+export type ListedProcess = { pid: number; commandLine: string; argv?: string[]; exe?: string | null; stamp?: number | null };
 
-/** `ps -o pid=,command=` lines. */
+/**
+ * `ps -ww -axo pid,lstart,command` in PS_ENV. ps pads the start to its
+ * column's width, so each command is read from where the COMMAND header
+ * starts, never after the run of spaces, which a command may begin with.
+ */
 export function parsePsList(stdout: string): ListedProcess[] {
+  const [header = "", ...lines] = stdout.split("\n");
+  const at = header.indexOf("COMMAND");
+  if (at < 0) throw new Error(`the process listing had no COMMAND column: ${header.slice(0, 200)}`);
   const out: ListedProcess[] = [];
-  for (const line of stdout.split("\n")) {
-    const m = /^\s*(\d+) (.*)$/.exec(line);
-    if (m) out.push({ pid: Number(m[1]), commandLine: m[2] as string });
+  for (const line of lines) {
+    const m = /^\s*(\d+) (.*)$/.exec(line.slice(0, at));
+    if (m) out.push({ pid: Number(m[1]), commandLine: line.slice(at), stamp: parsePsStart(m[2] as string) });
   }
   return out;
 }
 
 /**
  * The Windows listing: each postgres.exe, each cmd.exe, which pg_ctl
- * starts the postmaster through, and each pg_ctl.exe, whose restricted
- * copy may yet start one, with its command line, program and session, and
- * the session this runs in, as one JSON object.
+ * starts the postmaster through, and each pg_ctl.exe, which may be a
+ * pg_ctl start for this folder that is not this process's own, such as one
+ * a previous supervisor left, with its command line, program, start
+ * (CreationDate) and session, and the session this runs in, as one JSON
+ * object.
  */
 export const WINDOWS_LIST_SCRIPT = [
   "$ErrorActionPreference = 'Stop'",
   "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false",
-  "$rows = @(Get-CimInstance Win32_Process -Filter \"Name = 'postgres.exe' OR Name = 'cmd.exe' OR Name = 'pg_ctl.exe'\" | ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; name = [string]$_.Name; line = $_.CommandLine; exe = $_.ExecutablePath; session = [int]$_.SessionId } })",
+  `$rows = @(Get-CimInstance Win32_Process -Filter "Name = 'postgres.exe' OR Name = 'cmd.exe' OR Name = 'pg_ctl.exe'" | ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; name = [string]$_.Name; line = $_.CommandLine; exe = $_.ExecutablePath; created = ${createdOf("$_")}; session = [int]$_.SessionId } })`,
   "ConvertTo-Json -Compress -Depth 4 -InputObject ([pscustomobject]@{ session = [System.Diagnostics.Process]::GetCurrentProcess().SessionId; rows = $rows })",
 ].join("; ");
 
@@ -241,20 +279,21 @@ export const WINDOWS_LIST_SCRIPT = [
  * proof that PostgreSQL ended while it runs, and the log names its pid.
  * One in another session is skipped, and so is one in session 0, where
  * services run. A cmd.exe or pg_ctl.exe like that is skipped too: pg_ctl
- * runs its copy and its launcher with this user's rights or fewer, so
- * their lines can be read.
+ * runs as this user, and the cmd.exe it starts the postmaster through runs
+ * with this user's rights or fewer (a restricted token), so their lines
+ * can be read.
  */
 export function parseWindowsList(stdout: string): ListedProcess[] {
   const listing: unknown = JSON.parse(stdout.trim());
   const { session, rows } = (listing ?? {}) as { session?: unknown; rows?: unknown };
   if (typeof session !== "number" || !Array.isArray(rows)) throw new Error(`the process listing was not a list: ${stdout.trim().slice(0, 200)}`);
   const out: ListedProcess[] = [];
-  for (const row of rows as { pid?: unknown; name?: unknown; line?: unknown; exe?: unknown; session?: unknown }[]) {
-    if (typeof row?.pid !== "number" || typeof row.name !== "string" || typeof row.session !== "number" || (row.line != null && typeof row.line !== "string") || (row.exe != null && typeof row.exe !== "string")) {
+  for (const row of rows as { pid?: unknown; name?: unknown; line?: unknown; exe?: unknown; created?: unknown; session?: unknown }[]) {
+    if (typeof row?.pid !== "number" || typeof row.name !== "string" || typeof row.session !== "number" || (row.line != null && typeof row.line !== "string") || (row.exe != null && typeof row.exe !== "string") || (row.created != null && typeof row.created !== "string")) {
       throw new Error(`the process listing had a row it can't read: ${JSON.stringify(row)}`);
     }
     if (typeof row.line === "string" && row.line !== "") {
-      out.push({ pid: row.pid, commandLine: row.line, exe: typeof row.exe === "string" ? row.exe : null });
+      out.push({ pid: row.pid, commandLine: row.line, exe: typeof row.exe === "string" ? row.exe : null, stamp: parseCreated(row.created) });
     } else if (/^postgres\.exe$/i.test(row.name) && row.session === session && row.session !== 0) {
       throw new Error(`postgres.exe (pid ${row.pid}) runs in this session and its command line can't be read`);
     }
@@ -341,7 +380,8 @@ async function mayBeOurs(pid: string, err: unknown, files: ProcFiles, hidesPids:
  * exe link names. macOS reads ps in a UTF-8 locale: in the C locale ps
  * escapes every other byte, so a data folder named "Tést" would never
  * match. Windows asks Win32_Process for postgres.exe, the cmd.exe pg_ctl
- * starts it through and pg_ctl.exe, with their programs (parseWindowsList). A
+ * starts it through and pg_ctl.exe, with their programs (parseWindowsList).
+ * Each row carries its start reading, as processStamp reads it. A
  * listing that fails throws, since it proves nothing either way, and so
  * does one with a process that may be this user's whose command line it
  * can't read (mayBeOurs, parseWindowsList).
@@ -354,6 +394,8 @@ export async function listProcesses(platform: Platform = process.platform as Pla
     const hidesPids = (): Promise<boolean> => (hides ??= files.readFile("/proc/self/mountinfo").then((raw) => procHidesPids(raw.toString("utf8")), () => false));
     for (const name of await files.readdir("/proc")) {
       if (!/^\d+$/.test(name)) continue;
+      // Its start is read before its command line, so a pid reused between the reads can only pair a later command line with the earlier start, which never matches the later process.
+      const stamp = await maybe(async () => parseProcStat((await files.readFile(`/proc/${name}/stat`)).toString("utf8")));
       let raw: Buffer;
       try {
         raw = await files.readFile(`/proc/${name}/cmdline`);
@@ -366,12 +408,12 @@ export async function listProcesses(platform: Platform = process.platform as Pla
       const argv = args.split("\0");
       // Another user's exe link can't be read, which only means it is no program of this user's.
       const exe = await maybe(async () => linkedProgram(await files.readlink(`/proc/${name}/exe`)));
-      out.push({ pid: Number(name), commandLine: argv.join(" "), argv, exe });
+      out.push({ pid: Number(name), commandLine: argv.join(" "), argv, exe, stamp });
     }
     return out;
   }
   if (platform === "darwin") {
-    const { stdout } = await run("/bin/ps", ["-ww", "-axo", "pid=,command="], { env: { ...process.env, LC_ALL: "en_US.UTF-8" }, maxBuffer: 64 * 1024 * 1024, timeout: 30_000 });
+    const { stdout } = await run("/bin/ps", ["-ww", "-axo", "pid,lstart,command"], { env: { ...process.env, ...PS_ENV }, maxBuffer: 64 * 1024 * 1024, timeout: 30_000 });
     return parsePsList(stdout);
   }
   const { stdout } = await run(powershell(), ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_LIST_SCRIPT], { windowsHide: true, timeout: POWERSHELL_LIMIT_MS, maxBuffer: 16 * 1024 * 1024 });
