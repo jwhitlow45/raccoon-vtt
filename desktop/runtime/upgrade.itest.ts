@@ -32,6 +32,11 @@ async function start(build: TestBuild): Promise<{ run: SupervisorRun; status: Su
   return { run, status };
 }
 
+/** The supervisor's error and its last output, for a check that failed on a runner to say why. */
+function why(run: SupervisorRun, status: SupervisorStatus): string {
+  return `the supervisor's error: ${JSON.stringify(status.error)}, its output ends:\n${run.output().slice(-3000)}`;
+}
+
 async function stop(): Promise<void> {
   const run = current;
   current = null;
@@ -62,7 +67,7 @@ after(async () => {
 describe("updates and going back", () => {
   test("a first start stamps the data with its build", async () => {
     const { run, status } = await start(OLD);
-    assert.equal(status.state, "running");
+    assert.equal(status.state, "running", why(run, status));
     // The first start's daily backup holds the data before any room, which a later test restores.
     await run.waitFor("the first daily backup", (s) => s.lastBackup !== null && !s.backingUp);
     await createRoom(await supervisorDbUrl(data), "Old room");
@@ -71,7 +76,7 @@ describe("updates and going back", () => {
 
   test("a new version backs up first, with the old data's formats, then stamps and starts", async () => {
     const { run, status } = await start(NEW);
-    assert.equal(status.state, "running");
+    assert.equal(status.state, "running", why(run, status));
     assert.ok(run.statuses.some((s) => s.step === "backupBeforeUpdate"));
     const before = (await listBackups(join(data, "backups"))).filter((b) => b.record.kind === "before-update");
     assert.equal(before.length, 1);
@@ -141,7 +146,7 @@ describe("updates and going back", () => {
 
   test("an older build with the same formats starts, after its own backup", async () => {
     const { run, status } = await start(OLDER_SAME_FORMATS);
-    assert.equal(status.state, "running");
+    assert.equal(status.state, "running", why(run, status));
     assert.ok(run.statuses.some((s) => s.step === "backupBeforeUpdate"));
     assert.ok((await listBackups(join(data, "backups"))).some((b) => b.record.forVersion === "0.4.9" && b.record.dataApp === "0.5.0"));
     assert.deepEqual(await stamp(), { app: "0.4.9", snapshot_version: 46, op_version: 60 });
