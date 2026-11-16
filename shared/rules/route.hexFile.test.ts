@@ -14,7 +14,7 @@ import { findRouteOn } from "./hexWalk.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, sideWall, wallsRound } from "./hexWalls.testkit.ts";
 import { checkSetReach, planMove, planWalks } from "./moveLeg.ts";
 import { hexStandAt, hexStandHexes, hexStandPlace, ownWalk } from "./movement.ts";
-import { compareAlong, hexFileClasses, hexFileRoutes, pieceReach, routeWalkers, seatShift } from "./route.ts";
+import { compareAlong, fileHeightsAlong, hexFileClasses, hexFileRoutes, pieceReach, routeWalkers, seatShift } from "./route.ts";
 import { planTrapMove, trapWalks } from "./traps.ts";
 import { groupWalkWorld } from "./walkWorld.ts";
 
@@ -628,6 +628,53 @@ describe("an area's sweep reads a walk hex by hex at its height between its poin
         assert.ok(r.ok);
         const entered = r.log.flatMap((e) => (e.data?.type === "area" && e.data.trigger === "enter" ? [e.data.tokenId] : []));
         assert.ok(entered.includes("gob"), `${who}: entered ${entered.join(", ")}`);
+      }
+    });
+
+    test(`${name}: round the corner the goblin reaches its last hex, the corridor's hex 5, before the warhorse ends, taking the ground the warhorse ends on, and enters a sphere at 10 ft there on the way down`, () => {
+      for (const [who, actor] of [["Pat", P1], ["the DM", DM]] as const) {
+        const { s, path } = keepOf(g, 1, 0, "horse");
+        s.tokens.horse = { ...s.tokens.horse!, elevation: 40 };
+        s.tokens.gob = { ...s.tokens.gob!, elevation: 40 };
+        s.templates.orb = template("orb", { shape: "sphere", size: 5, origin: { ...hexCenter(g, path[5]!), z: 10 }, triggers: ["enter"], spell: "Orb" });
+        s.encounter = { rev: 0, round: 1, activeEntryId: "e1", entries: [entry("e1", { tokenId: "horse", value: 15 })] };
+        const op = { ...intoCorridor(g, s, path[6]!), elevation: 0 };
+        const allowed = canApply(op, actor, s, { canUseAsset: () => true });
+        assert.ok(allowed.ok, `${who}: ${allowed.ok ? "" : allowed.message}`);
+        const gob = planWalks(op, s, actor, {}).find((m) => m.tokenId === "gob")!;
+        assert.equal(hexKey(hexOf(g, gob.route.at(-1)!)), hexKey(path[5]!), `${who}: it ends on the corridor's hex 5`);
+        assert.ok(compareAlong(gob.along!.at(-1)!, [1, 1, 1]) < 0, `${who}: it gets there at ${gob.along!.at(-1)!.join("/")}, before the warhorse ends`);
+        assert.deepEqual([gob.route.at(-2)!.elevation, gob.route.at(-1)!.elevation], [40, 0], `${who}: down from 40 ft to the ground on its last leg`);
+        const r = applyOp(s, op, actor, env(1));
+        assert.ok(r.ok);
+        const entered = r.log.flatMap((e) => (e.data?.type === "area" && e.data.trigger === "enter" ? [e.data.tokenId] : []));
+        assert.ok(entered.includes("gob"), `${who}: entered ${entered.join(", ")}`);
+      }
+    });
+  }
+});
+
+describe("a chained follower's heights on a walk hex by hex, the server's and the device's (route.ts legAt, review HEXFILE-OPUS-8)", () => {
+  for (const [name, g] of GRIDS) {
+    test(`${name}: a warhorse flying down from 40 ft drags the goblin, which drags a rat from the corridor's mouth, and the device reads each at the height the move gives it`, () => {
+      const { s, path } = keepOf(g, 1, 0, "horse");
+      s.tokens.horse = { ...s.tokens.horse!, elevation: 40 };
+      s.tokens.gob = { ...s.tokens.gob!, elevation: 40 };
+      const mouth = hexNeighbors(g, path[0]!).find((n) => !path.some((p) => hexKey(p) === hexKey(n)) && n.col < 7 && hexDistance(g, n, path[1]!) === 2)!;
+      s.tokens.rat = { ...onHex(g, "rat", "tiny", mouth, { name: "Rat", kind: "npc", ownerIds: ["p1"], attached: { to: "gob", kind: "drag" } }), elevation: 40 };
+      const op = { ...intoCorridor(g, s, path[4]!), elevation: 0 };
+      assert.ok(canApply(op, P1, s, { canUseAsset: () => true }).ok);
+      const walks = planWalks(op, s, P1, {});
+      const lead = walks.find((m) => m.tokenId === "horse")!.route;
+      const horse = s.tokens.horse!;
+      const file = hexFileRoutes(g, horse, lead, [[s.tokens.gob!, s.tokens.rat!]], true);
+      const memberOf = (id: string) => s.tokens[id];
+      for (const id of ["gob", "rat"]) {
+        const served = walks.find((m) => m.tokenId === id)!.route.map((p) => p.elevation);
+        const device = fileHeightsAlong(s.buildChunks, { id: "horse", elevation: 40, grounded: false }, memberOf, file, id, lead, horse);
+        const read = served.map((h, j) => (j === 0 ? h : device[j]!));
+        assert.deepEqual(read.map((h) => Math.round(h * 1e6) / 1e6), served.map((h) => Math.round(h * 1e6) / 1e6), `${id}: the device's heights ${read.join(", ")}, the move's ${served.join(", ")}`);
+        assert.ok(served.some((h) => h > 0 && h < 40), `${id}: some height between, ${served.join(", ")}`);
       }
     });
   }
