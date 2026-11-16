@@ -165,6 +165,14 @@ export class Cluster {
   private unsure: { since: number; logged: number; named: Set<number> } | null = null;
   /** The real paths postmasterKind compares programs by, once both have been read. */
   private programsFound: Programs | null = null;
+  /**
+   * Every postmaster this process started, or saw postmaster.pid name while
+   * it ran, by pid and start reading (null where that could not be read),
+   * kept until a stop or a proof shows no PostgreSQL of this folder runs.
+   * None is ever killed, file or no file, since it may have children
+   * (LA-27).
+   */
+  private readonly known = new Map<number, number | null>();
 
   constructor(opts: ClusterOptions) {
     this.opts = opts;
@@ -379,14 +387,47 @@ export class Cluster {
     else if (found.kind === "uncertain") throw new DatabaseFailed(uncertainWords(found.pid));
   }
 
-  /** The pid postmaster.pid names, or null with no file. */
-  private async pidFilePid(): Promise<number | null> {
+  /**
+   * The pid postmaster.pid names, "absent" with no file, or "unknown" when
+   * it can't be read or does not read as a pid, as while an antivirus scan
+   * holds it on Windows or as the postmaster is writing it. Unknown is no
+   * evidence that the file names no one, so it never permits a kill.
+   */
+  private async pidFileNames(): Promise<number | "absent" | "unknown"> {
+    let text: string;
     try {
-      const pid = Number((await readFile(join(this.opts.pgData, "postmaster.pid"), "utf8")).split(/\r?\n/)[0]);
-      return Number.isInteger(pid) && pid > 0 ? pid : null;
-    } catch {
-      return null;
+      text = await readFile(join(this.opts.pgData, "postmaster.pid"), "utf8");
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "unknown";
     }
+    const pid = Number(text.split(/\r?\n/)[0]);
+    return Number.isInteger(pid) && pid > 0 ? pid : "unknown";
+  }
+
+  /** The pid postmaster.pid names, or null when there is no file or it can't be read. */
+  private async pidFilePid(): Promise<number | null> {
+    const named = await this.pidFileNames();
+    return typeof named === "number" ? named : null;
+  }
+
+  /** Keeps a postmaster's identity until PostgreSQL's end is proven (known). */
+  private async remember(pid: number, stamp?: number | null): Promise<void> {
+    this.known.set(pid, stamp !== undefined ? stamp : await this.proc.stamp(pid).catch(() => null));
+  }
+
+  /**
+   * The remembered postmasters that still run as the process remembered:
+   * the same start reading, or one that can't be read. A pid alive with
+   * another start reading is a later process.
+   */
+  private async stillKnown(): Promise<Set<number>> {
+    const kept = new Set<number>();
+    for (const [pid, stamp] of this.known) {
+      if (!isAlive(pid)) continue;
+      const now = await this.proc.stamp(pid).catch(() => null);
+      if (stamp === null || now === null || now === stamp) kept.add(pid);
+    }
+    return kept;
   }
 
   /**
@@ -440,6 +481,7 @@ export class Cluster {
         const pid = await this.pidFilePid();
         const stamp = pid === null ? null : await this.proc.stamp(pid);
         this.started = pid !== null && stamp !== null ? { pid, stamp } : null;
+        if (pid !== null) await this.remember(pid, stamp);
         return port;
       }
       if (signal?.aborted) break;
@@ -511,8 +553,10 @@ export class Cluster {
         (text) => text.split(/\r?\n/),
         () => [] as string[],
       );
+      const named = Number(lines[0]);
+      if (live.includes(named)) await this.remember(named);
       // Line 8 of postmaster.pid is its state, "ready" once it accepts connections (PostgreSQL's LOCK_FILE_LINE_PM_STATUS).
-      if (live.includes(Number(lines[0])) && lines[7]?.trim() === "ready") return true;
+      if (live.includes(named) && lines[7]?.trim() === "ready") return true;
       await sleep(250);
     }
   }
@@ -555,32 +599,36 @@ export class Cluster {
    * own exit proves its children ended, where a kill of it would leave them
    * running and unseen. One still there after both is asked immediate again
    * each minute, a retry and never evidence, and the end stays unconfirmed
-   * meanwhile (proveEnded). One the file named once and no longer does is
-   * left too: a postmaster whose postmaster.pid is gone or names another
-   * ends itself within a minute (RecheckDataDirLockFile). Nor is one killed
-   * beside the running postmaster the file names: that is a child it has
-   * just forked, which carries its command line until it renames itself,
-   * or on Windows the cmd.exe it runs under, which ends with it. Only one
-   * the file has never named, while it names none that runs, is killed,
-   * since it has launched no children yet. Every pid signalled is one the
-   * listing has just shown to be exactly this folder's postmaster, never
-   * one on the file's word alone. A process that only may be one is never
-   * signalled, and the end can't be confirmed while it runs.
+   * meanwhile (proveEnded). Nor is a postmaster killed that this process
+   * started or saw the file name (known), whether the file is now gone,
+   * unreadable or names another: a postmaster whose postmaster.pid is gone
+   * or names another ends itself within a minute (RecheckDataDirLockFile).
+   * Nor is one killed beside the running postmaster the file names: that
+   * is a child it has just forked, which carries its command line until it
+   * renames itself, or on Windows the cmd.exe it runs under, which ends
+   * with it. Only an exact one that is none of these, while the file can be
+   * read and names none that runs, is killed, since it has launched no
+   * children yet. Every pid signalled is one the listing has just shown to
+   * be exactly this folder's postmaster, never one on the file's word
+   * alone. A process that only may be one is never signalled, and the end
+   * can't be confirmed while it runs.
    *
-   * A pass takes one listing and one read of postmaster.pid, the read
-   * after the listing, since no file yet is the evidence that a postmaster
-   * has forked no child and must be fresh at the kill. Every kill, and the
-   * check for a running named postmaster beside it, uses only them, and
-   * happens before anything else is waited for. A pg_ctl stop, which can
-   * take a minute, ends the pass, so no row is signalled after its process
-   * may have ended and its pid been reused (ASTRA-22). Answers how many it
-   * found and when it first signalled one, and throws when the listing
-   * fails.
+   * A pass reads which remembered postmasters still run, then takes one
+   * listing and one read of postmaster.pid, the read after the listing,
+   * since no file yet is the evidence that a postmaster has forked no child
+   * and must be fresh at the kill. Every kill, and the check for a running
+   * named postmaster beside it, uses only them, and happens before anything
+   * else is waited for. A pg_ctl stop, which can take a minute, ends the
+   * pass, so no row is signalled after its process may have ended and its
+   * pid been reused (ASTRA-22). Answers how many it found and when it first
+   * signalled one, and throws when the listing fails.
    */
   private async endPass(asked: Asked): Promise<{ found: number; exact: number; signalled: number | null }> {
+    const kept = await this.stillKnown();
     const found = await this.postmasters();
-    const named = await this.pidFilePid();
+    const named = await this.pidFileNames();
     const namedRuns = found.some((p) => p.exact && p.pid === named);
+    if (named === "unknown" && found.some((p) => p.exact)) this.cantConfirm("postmaster.pid can't be read, so no PostgreSQL process is signalled");
     let signalled: number | null = null;
     let stop: { pid: number; mode: "fast" | "immediate"; again: boolean } | null = null;
     for (const { pid, exact, commandLine } of found) {
@@ -596,13 +644,14 @@ export class Cluster {
         }
         continue;
       }
-      if (tried !== undefined || namedRuns) continue;
+      if (named === "unknown" || kept.has(pid) || namedRuns) continue;
       try {
         process.kill(pid, "SIGKILL");
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== "ESRCH") this.opts.log?.(`PostgreSQL (pid ${pid}) could not be ended: ${(err as Error).message}`);
       }
     }
+    if (typeof named === "number" && found.some((p) => p.exact && p.pid === named) && !kept.has(named)) await this.remember(named);
     if (stop) {
       const { pid, mode } = stop;
       if (stop.again) this.opts.log?.(`PostgreSQL (pid ${pid}) still runs after pg_ctl stop -m immediate, so it is asked again`);
@@ -642,6 +691,7 @@ export class Cluster {
         continue;
       }
       if (pass.found === 0) {
+        this.known.clear();
         if (this.unsure) this.opts.log?.("PostgreSQL is confirmed ended, so the data folder can be let go");
         if (this.unsure) this.opts.unconfirmed?.(false);
         this.unsure = null;
@@ -691,7 +741,19 @@ export class Cluster {
     const pid = await this.pidFilePid();
     const mine = pid !== null && this.started?.pid === pid && (await this.proc.stamp(pid)) === this.started.stamp;
     let failed: unknown = null;
-    if (mine || (await this.leftover()).kind === "running") {
+    let unread: unknown = null;
+    let target = mine ? pid : null;
+    if (!mine) {
+      // A postmaster.pid that can't be read stops no PostgreSQL directly, and leaves the end to the proof below.
+      try {
+        const found = await this.leftover();
+        if (found.kind === "running") target = found.pid;
+      } catch (err) {
+        unread = err;
+      }
+    }
+    if (target !== null) {
+      if (!mine) await this.remember(target);
       try {
         await this.pgCtlStop();
       } catch (err) {
@@ -706,13 +768,18 @@ export class Cluster {
     // and start() proved the end of every attempt that failed. So a process
     // listing that keeps failing never keeps a clean Quit from finishing
     // (LA-26, D-261114-057).
-    if (mine && !failed) return;
+    if (mine && !failed) {
+      this.known.clear();
+      return;
+    }
     // Anything else lets go only once a listing shows no postmaster of this folder.
     if (this.launched) {
       if (failed) this.opts.log?.(`pg_ctl stop failed: ${(failed as Error).message.split(/\r?\n/)[0]}`);
-      return this.proveEnded(failed && pid !== null ? new Map([[pid, { mode: "fast", at: Date.now() }]]) : undefined);
+      if (unread) this.opts.log?.(`postmaster.pid can't be read: ${(unread as Error).message}`);
+      return this.proveEnded(failed && target !== null ? new Map([[target, { mode: "fast", at: Date.now() }]]) : undefined);
     }
     if (failed) throw failed;
+    if (unread) throw unread;
   }
 
   /**
