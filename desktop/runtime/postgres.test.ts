@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, rmdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { after, describe, test } from "node:test";
@@ -783,6 +783,112 @@ describe("a start", { skip: posixOnly }, () => {
     assert.deepEqual(await calls(), STOPPED);
     assert.equal(other.signalCode, null, "the row from before the stop was never signalled");
     assert.ok(listings >= 2, "a new pass took a new listing");
+  });
+
+  test("the postmaster this process started is never killed though its postmaster.pid can't be read, or is gone, before the stop", { timeout: 20_000 }, async () => {
+    const dir = await folder();
+    const { bin, calls } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const postmaster = join(dir, "postmaster.child");
+    const unconfirmed: boolean[] = [];
+    const c = new Cluster({ ...cluster(dir, bin, lookup(), { platform: "darwin" }).opts, unsureAfterMs: 300, unconfirmed: (on) => unconfirmed.push(on) });
+    const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_READYAFTER: "0.3" });
+    assert.equal(error, null);
+    const child = await pid(postmaster);
+    const file = join(dir, "postgres", "postmaster.pid");
+    // A file that can't be read, as while an antivirus scan holds it on Windows.
+    await rm(file);
+    await mkdir(file);
+    let stopped = false;
+    const stopping = c.stop().then(() => (stopped = true));
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    assert.equal(isAlive(child), true, "never killed while postmaster.pid can't be read");
+    await rmdir(file);
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    assert.equal(isAlive(child), true, "nor once it is gone");
+    assert.equal(stopped, false, "the stop holds while it runs");
+    assert.deepEqual(unconfirmed, [true]);
+    // It ends on its own, as a postmaster does within a minute of losing its postmaster.pid.
+    process.kill(child, "SIGKILL");
+    await stopping;
+    assert.deepEqual(unconfirmed, [true, false]);
+    assert.deepEqual(await calls(), ["pg_ctl start"], "pg_ctl stop had no file to go by");
+  });
+
+  test("a postmaster a cancel saw named is never killed once its postmaster.pid is gone, though both stops failed", { timeout: 20_000 }, async () => {
+    const dir = await folder();
+    const { bin, calls } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const postmaster = join(dir, "postmaster.child");
+    const c = cluster(dir, bin, lookup(), { platform: "darwin" });
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 300);
+    // By then the fast stop and the immediate one have failed.
+    setTimeout(() => void rm(join(dir, "postgres", "postmaster.pid")), 3_000);
+    let alive: boolean | null = null;
+    setTimeout(() => {
+      void readFile(postmaster, "utf8").then((text) => {
+        const child = Number(text.trim());
+        alive = isAlive(child);
+        process.kill(child, "SIGKILL");
+      });
+    }, 4_500);
+    const vars = { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_DEAF: "1" };
+    const { error } = await startWith(dir, c, { ...vars, RVTT_FAKE_PGCTL: "wait" }, abort.signal);
+    assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
+    assert.equal(alive, true, "never killed with its file gone");
+    assert.deepEqual((await calls()).slice(0, 3), ["pg_ctl start", "pg_ctl stop", "pg_ctl stop immediate"]);
+  });
+
+  test("a postmaster the start waited on as named is never killed once its postmaster.pid is gone", { timeout: 20_000 }, async () => {
+    const dir = await folder();
+    const { bin, calls } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const postmaster = join(dir, "postmaster.child");
+    const c = cluster(dir, bin, lookup(), { platform: "darwin" });
+    const abort = new AbortController();
+    // pg_ctl gives up at once, heard a second later, as its postmaster holds its stderr. The postmaster, named but never ready, is then waited on until the cancel.
+    setTimeout(() => void rm(join(dir, "postgres", "postmaster.pid")), 1_800);
+    setTimeout(() => abort.abort(), 2_000);
+    let alive: boolean | null = null;
+    setTimeout(() => {
+      void readFile(postmaster, "utf8").then((text) => {
+        const child = Number(text.trim());
+        alive = isAlive(child);
+        process.kill(child, "SIGKILL");
+      });
+    }, 3_500);
+    const { error } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "fail" }, abort.signal);
+    assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
+    assert.equal(alive, true, "never killed with its file gone");
+    assert.deepEqual(await calls(), ["pg_ctl start"]);
+  });
+
+  test("a postmaster.pid that can't be read never lets a cancel kill the postmaster it can't rule out", { timeout: 20_000 }, async () => {
+    const dir = await folder();
+    const { bin, calls } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const file = join(dir, "postgres", "postmaster.pid");
+    await mkdir(file);
+    const postmaster = join(dir, "postmaster.child");
+    const unconfirmed: boolean[] = [];
+    const c = new Cluster({ ...cluster(dir, bin, lookup(), { platform: "darwin" }).opts, unconfirmed: (on) => unconfirmed.push(on) });
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 100);
+    let alive: boolean | null = null;
+    setTimeout(() => {
+      void readFile(postmaster, "utf8").then((text) => {
+        alive = isAlive(Number(text.trim()));
+        return rmdir(file);
+      });
+    }, 2_000);
+    const { ms, error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_PIDAFTER: "10" }, abort.signal);
+    assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
+    assert.equal(alive, true, "not killed while postmaster.pid could not be read");
+    assert.ok(ms >= 2_000 && ms < 8_000, `answered after ${ms} ms`);
+    assert.equal(await ended(await pid(postmaster)), true, "killed once the file was surely absent");
+    assert.deepEqual(await calls(), KILLED);
+    assert.deepEqual(unconfirmed, [true, false]);
   });
 
   test("a slow but clean first pg_ctl stop never reads as a postmaster that outlived its end", { timeout: 20_000 }, async () => {
