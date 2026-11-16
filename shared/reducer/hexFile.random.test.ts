@@ -561,8 +561,9 @@ for (const [name, g] of [
       assert.ok(cuts >= 800 && checked >= 1200, `cuts ${cuts}, walks checked ${checked}`);
     });
 
-    test("raised 40 ft and brought down to the ground or to 25 ft, or climbing from the ground to 30 ft, an imp ahead of the holder on some: at every moment a walk hex by hex waits on its last hex, the trap step has it where the move and the area sweep do, and an area's hits read it there (review HEXFILE-OPUS-11)", () => {
+    test("raised 40 ft and brought down to the ground or to 25 ft, or climbing from the ground to 30 ft, an imp ahead of the holder on some: at every moment the trap step has each walk hex by hex at the height the move and the area sweep have it, on its way to its first hex and never leaving its start too, where it waits on its last hex at their place as well, and an area's hits read it there (review HEXFILE-OPUS-11, HEXFILE-OPUS-12)", () => {
       let checked = 0;
+      let waiting = 0;
       let moving = 0;
       for (const [kind, made] of [
         ["", caseOf],
@@ -584,19 +585,21 @@ for (const [name, g] of [
               const moments = trapWalks(op, s, DM, {}).flatMap((w) => w.spots.map((p) => p.progress));
               for (const m of walks) {
                 if (!m.along || m.carriedBy === undefined) continue;
-                // The first point of the run it ends on, where it reaches its last hex.
+                // The first point of the run it ends on, where it reaches its last hex, its start for one that never leaves it.
                 let k = m.route.length - 1;
                 while (k > 0 && m.route[k - 1]!.x === m.route[k]!.x && m.route[k - 1]!.y === m.route[k]!.y) k--;
-                // One that never left its start keeps its own height there (review FU45B-ASTRA-06).
-                if (k === 0) continue;
                 const reached = m.along[k]!;
                 for (const p of moments) {
-                  if (compareAlong(p, reached) < 0) continue;
                   const want = pointAt(m.route, p, m.along);
                   const t = at(p)[m.tokenId]!;
                   const where = `${kind}seed ${seed}, ${ahead}${up} to ${down} ft, ${m.tokenId} at ${p.join("/")}`;
-                  assert.ok(Math.abs(t.x - want.x) < 1e-9 && Math.abs(t.y - want.y) < 1e-9 && Math.abs(t.elevation - want.elevation) < 1e-9, `${where}: the trap step at ${t.x}, ${t.y}, ${t.elevation}, the move at ${want.x}, ${want.y}, ${want.elevation}`);
+                  assert.ok(Math.abs(t.elevation - want.elevation) < 1e-9, `${where}: the trap step at ${t.elevation} ft, the move at ${want.elevation} ft`);
                   checked++;
+                  // Between its hexes the trap step has it on its latest one, so its place is the move's once it waits on its last.
+                  if (compareAlong(p, reached) >= 0) {
+                    assert.ok(Math.abs(t.x - want.x) < 1e-9 && Math.abs(t.y - want.y) < 1e-9, `${where}: the trap step at ${t.x}, ${t.y}, the move at ${want.x}, ${want.y}`);
+                    waiting++;
+                  }
                   // Where the move has it still coming down or going up there, a sphere round that height catches it.
                   if (Math.abs(want.elevation - m.route[m.route.length - 1]!.elevation) < 1e-6) continue;
                   moving++;
@@ -608,7 +611,7 @@ for (const [name, g] of [
           }
         }
       }
-      assert.ok(checked >= 15000 && moving >= 100, `moments checked ${checked}, with the move still taking it up or down ${moving}`);
+      assert.ok(checked >= 140000 && waiting >= 35000 && moving >= 70000, `moments checked ${checked}, waiting on its last hex ${waiting}, with the move still taking it up or down ${moving}`);
     });
   });
 }
