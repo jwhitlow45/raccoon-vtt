@@ -24,7 +24,7 @@ import { splitCheck } from "#shared/rules/walls.ts";
 import { pitsMoved, withPitsCounted } from "#shared/rules/pitCount.ts";
 import { trapsLiveOn } from "#shared/rules/traps.ts";
 import { JOIN_CHANGED, joinChanged, WING_MOVED, wingClash, wingFootprint, type WingFootprint } from "#shared/rules/wingClear.ts";
-import { floorProblem, levelTakenWords, mainFloorId } from "#shared/rules/floors.ts";
+import { floorProblem, levelTakenWords, mainFloorId, startFloor } from "#shared/rules/floors.ts";
 import { renewOpenDisplay } from "../auth/displaySessions.ts";
 import { checkDisplayGrant, checkGrant } from "../auth/grants.ts";
 import type { RoomGateway } from "./gateway.ts";
@@ -1715,6 +1715,15 @@ export class RoomActor {
         } else {
           saveOutcomeMissing = true;
         }
+      }
+      // The reducer refuses a restore that takes the players' floor away (misc.ts checkReferences), but reads where they
+      // are after the restore's writes. The redo of a delete that left them on no scene writes that too, so it would pass
+      // there and take their scene again (LP43-SCENE-1). Read on the room as it stands, here only, so stored restores
+      // replay as they ran.
+      if (takesPlayersFloor(this.#staged.state, entries)) {
+        const reason = this.#failedHistory(viewer, op.t, historyScope, step, "invalid", MOVE_PLAYERS_FIRST_BACK);
+        this.#refuse(key, wm, n, "invalid", `could not ${op.t} ${step.label}: ${reason}`);
+        return;
       }
       // A DM's restore carries the head its command named, which its clock line carries, so the sending device knows the line
       // for its own (docs/design/design-v1-calendar-c2c3.md 4.6). A second command naming that head in this batch is refused above.
@@ -3814,6 +3823,14 @@ function floorsWritten(touched: readonly EntityKey[], sceneIds: readonly string[
  */
 export function floorFullWords(scene: string): string {
   return `${scene} is too full for another floor. Delete unused floors or clear some of the build.`;
+}
+
+/** Whether a restore's entries remove the floor the players are on in `before`, the room it would apply to. */
+function takesPlayersFloor(before: RoomState, entries: readonly RestoreEntry[]): boolean {
+  const start = startFloor(before);
+  if (start === null || !ownEntry(before.scenes, start)) return false;
+  const key = keys.scene(start);
+  return entries.some((entry) => entry.key === key && entry.value == null);
 }
 
 /** A size refusal as the DM reads it: an add of a floor that the scene's own budget refused (`scene`, SizeGuard.refusedScene) says so, and any other stays. */

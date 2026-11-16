@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
 import { BOOKKEEPING_RESERVE, FAR, LIMITS, NO_ROOM_TO_EXPLORE, roundUp, SEAT, serializedBytes } from "#shared/limits.ts";
 import type { Drawing, RoomState } from "#shared/model.ts";
-import { MOVE_PLAYERS_FIRST } from "#shared/permissions.ts";
+import { MOVE_PLAYERS_FIRST, MOVE_PLAYERS_FIRST_BACK } from "#shared/permissions.ts";
 import { MAX_NOTES, type Op } from "#shared/protocol.ts";
 import { idAt, seated, type Seated } from "#shared/privTestutil.ts";
 import { actor, castAsk, character, companionBlock, drawing, entry, member, rng, room, scene, template, token } from "#shared/testutil.ts";
@@ -200,6 +200,40 @@ describe("the players' scene can be deleted with the DM's yes", () => {
     assert.equal(await answer(r, "dm", { t: "scene.delete", sceneId: "s1", leavePlayers: true } as Op), "taken");
     await r.restart(false);
     assert.equal(r.state.meta.playerSceneId, null, "on no scene after a restart");
+  });
+
+  test("LP43-SCENE-1: Redo setup of that delete, once Undo setup put the players back on the scene, is refused and leaves them there", async (t) => {
+    const state = room();
+    state.scenes.s1 = scene("s1", { name: "Keep", floor: { of: "s1", level: 0, name: "Ground floor", height: 10 } });
+    state.scenes.up = scene("up", { name: "Keep", order: 2, floor: { of: "s1", level: 1, name: "Upper", height: 10 } });
+    const r = await opened(t, state);
+    assert.equal(await answer(r, "dm", { t: "scene.delete", sceneId: "s1", leavePlayers: true } as Op), "taken");
+    await reopenDm(r);
+    assert.equal(await undoAnswer(r), "taken");
+    assert.equal(r.state.meta.playerSceneId, "s1", "Undo setup puts the players back");
+    const redo = await answer(r, "dm", { t: "redo", scope: "setup", head: r.clients.dm.head("setup", "redo").id } as Op);
+    assert.deepEqual(redo, { code: "invalid", message: `could not redo deleting the scene Keep: ${MOVE_PLAYERS_FIRST_BACK}` });
+    assert.ok(r.state.scenes.s1 && r.state.scenes.up, "the Keep keeps both floors");
+    assert.equal(r.state.meta.playerSceneId, "s1", "with the players on it");
+    await r.restart(false);
+    assert.ok(r.state.scenes.s1 && r.state.scenes.up && r.state.meta.playerSceneId === "s1", "after a restart too");
+  });
+
+  test("LP43-SCENE-1: Undo setup of a scene the players are on is refused, naming the DM's own move of them when their history holds it", async (t) => {
+    const state = room();
+    state.members.dm2 = member("dm2", "dm");
+    const r = await opened(t, state);
+    const tavern = (name: string): Op => ({ t: "scene.create", scene: { id: mint.next(r), name, bounds: { w: 20, h: 20 } } }) as Op;
+    assert.equal(await answer(r, "dm", tavern("Tavern")), "taken");
+    const tavernId = Object.values(r.state.scenes).find((s) => s.name === "Tavern")!.id;
+    assert.equal(await answer(r, "dm2", { t: "room.setPlayerScene", sceneId: tavernId }), "taken");
+    const head = () => ({ t: "undo", scope: "setup", head: r.clients.dm.head("setup", "undo").id }) as Op;
+    assert.deepEqual(await answer(r, "dm", head()), { code: "invalid", message: `could not undo adding the scene Tavern: ${MOVE_PLAYERS_FIRST_BACK}` }, "another DM moved them");
+    assert.equal(await answer(r, "dm", tavern("Inn")), "taken");
+    const innId = Object.values(r.state.scenes).find((s) => s.name === "Inn")!.id;
+    assert.equal(await answer(r, "dm", { t: "room.setPlayerScene", sceneId: innId }), "taken");
+    assert.deepEqual(await answer(r, "dm", head()), { code: "invalid", message: "could not undo adding the scene Inn: Undo the play step first: moving players to the scene Inn" }, "the DM's own move");
+    assert.ok(r.state.scenes[innId] && r.state.meta.playerSceneId === innId, "the Inn stays, with the players on it");
   });
 });
 
