@@ -935,6 +935,77 @@ describe("a start", { skip: posixOnly }, () => {
     assert.equal(reused, false, "nothing was read between the listing and the stop");
   });
 
+  /** A deaf postmaster the stop can't end, which the listing stops showing once the stop begins, read afterwards as `then` says. */
+  async function unlisted(then: "same" | "unreadable" | "another"): Promise<{ stopped: () => boolean; stopping: Promise<unknown>; child: number; said: string[]; unconfirmed: boolean[] }> {
+    const dir = await folder();
+    const { bin } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const postmaster = join(dir, "postmaster.child");
+    let hidden: number | null = null;
+    let reading: "real" | typeof then = "real";
+    const said: string[] = [];
+    const unconfirmed: boolean[] = [];
+    const proc: ProcessLookup = {
+      ...lookup(),
+      stamp: async (pid) => (reading === "real" || reading === "same" ? processStamp(pid) : reading === "unreadable" ? null : 1),
+      // A listing that misses it, as macOS ps does for a process whose arguments it can't read, and the readings after that.
+      list: async () => {
+        const rows = await asStarted();
+        if (hidden === null) return rows;
+        reading = then;
+        return rows.filter((p) => p.pid !== hidden);
+      },
+    };
+    const c = new Cluster({ ...cluster(dir, bin, proc, { platform: "darwin" }).opts, unsureAfterMs: 300, log: (m) => said.push(m), unconfirmed: (on) => unconfirmed.push(on) });
+    const vars = { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_DEAF: "1" };
+    const { error, pid } = await startWith(dir, c, { ...vars, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_READYAFTER: "0.3" });
+    assert.equal(error, null);
+    const child = await pid(postmaster);
+    hidden = child;
+    let stopped = false;
+    const stopping = withVars(vars, () => c.stop()).then(() => (stopped = true));
+    return { stopped: () => stopped, stopping, child, said, unconfirmed };
+  }
+
+  test("a remembered postmaster the listing misses, alive with the start it had, holds the proof until it ends", { timeout: 30_000 }, async () => {
+    const { stopped, stopping, child, said, unconfirmed } = await unlisted("same");
+    try {
+      await until("the end unconfirmed", () => unconfirmed.length > 0 || stopped());
+      assert.equal(stopped(), false, "the stop holds while it runs");
+      assert.match(said.join("\n"), new RegExp(`PostgreSQL \\(pid ${child}\\), which this process started or saw named, still runs with the start it had, though the listing does not show it`));
+      assert.equal(isAlive(child), true, "never killed");
+    } finally {
+      end(child);
+      await stopping;
+    }
+    assert.deepEqual(unconfirmed, [true, false]);
+  });
+
+  test("a remembered postmaster the listing misses, alive with a start that can't be read, holds the proof too, as uncertain", { timeout: 30_000 }, async () => {
+    const { stopped, stopping, child, said, unconfirmed } = await unlisted("unreadable");
+    try {
+      await until("the end unconfirmed", () => unconfirmed.length > 0 || stopped());
+      assert.equal(stopped(), false, "the stop holds while it may run");
+      assert.match(said.join("\n"), new RegExp(`PostgreSQL \\(pid ${child}\\), which this process started or saw named, still runs and its start can't be read, so it may be, though the listing does not show it`));
+    } finally {
+      end(child);
+      await stopping;
+    }
+    assert.deepEqual(unconfirmed, [true, false]);
+  });
+
+  test("a remembered pid the listing misses, alive with another start, is a later process and holds nothing", { timeout: 30_000 }, async () => {
+    const { stopping, child, said, unconfirmed } = await unlisted("another");
+    try {
+      await stopping;
+      assert.equal(isAlive(child), true, "the stop let go while that process still runs, and never signalled it");
+      assert.doesNotMatch(said.join("\n"), new RegExp(`pid ${child}\\), which this process`));
+      assert.deepEqual(unconfirmed, []);
+    } finally {
+      end(child);
+    }
+  });
+
   test("the postmaster this process started is never killed though its postmaster.pid can't be read, or is gone, before the stop", { timeout: 20_000 }, async () => {
     const dir = await folder();
     const { bin, calls } = await programs(dir);
