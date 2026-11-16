@@ -467,16 +467,27 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
     const points = walk.route;
     const g = gridOf(walk);
     if (walk.along) {
-      // A walk in single file hex by hex has more points than the lead's (route.ts FileAlong), so each moment reads it at its
-      // latest point reached by then along the lead's walk, as the trap step does.
+      // A walk in single file hex by hex has more points than the lead's (route.ts FileAlong), so each moment finds its leg by
+      // how far along the lead's walk it reaches each point, and reads it on that leg as a routed walk's piece is read, its hex
+      // line and its height by how far the lead has gone between the leg's moments, so a drop down through an area on its
+      // last leg meets it as a lone walk's would (review HEXFILE-ASTRA-2).
       const lead = routed ? piece - 1 : 0;
+      const along = (k: number) => {
+        const [p, s, n] = walk.along![k] ?? walk.along![walk.along!.length - 1]!;
+        return p + s / (n || 1);
+      };
+      const now = lead + f;
       let j = 0;
       for (let k = 1; k < points.length; k++) {
-        const [p, s, n] = walk.along[k] ?? walk.along[walk.along.length - 1]!;
-        if (p > lead || (p === lead && s / (n || 1) > f + 1e-9)) break;
+        if (along(k) > now + 1e-9) break;
         j = k;
       }
-      return { spot: points[j]!, piece: Math.max(0, j - 1), end: j > 0 };
+      const next = points[j + 1];
+      const span = next ? along(j + 1) - along(j) : 0;
+      const t = span > 1e-9 ? Math.min(1, (now - along(j)) / span) : 0;
+      if (!next || t <= 1e-9 || g.shape !== "hex") return { spot: points[j]!, piece: Math.max(0, j - 1), end: j > 0 };
+      const hp = routedPieceOf(g, walk, j + 1);
+      return { spot: { ...hp.at(t), elevation: lerp(points[j]!.elevation, next.elevation, t) }, piece: j, end: t >= 1, squeezed: hp.squeezedAt(t) };
     }
     if (!routed && g.shape === "hex") {
       const a = points[0]!;
