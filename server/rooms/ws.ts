@@ -103,16 +103,37 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
       request.log.warn({ err: error }, "websocket error");
       socket.terminate();
     },
-    // Shutdown step 2 (design 15.4): every socket closes with 1012 before the
-    // actors finish their commits. A client slow to answer is cut off after a
-    // moment. Otherwise the server's close waits out ws's 30 s close timeout,
-    // past the deploy's own limit, and the socket's last-seen stamp would
-    // start after the pool had ended (server/shutdown.ts).
+    // Shutdown steps 1 and 2 (design 15.4). The server's close waits for every
+    // connection to end, and the rooms save their snapshots only after it, so
+    // nothing may keep one open (LP44-OPS-1).
+    //
+    // While it closes, Fastify answers each new request with 503 and closes
+    // its connection. An upgrade gets that 503 before any hook runs, so the
+    // plugin's hook that destroys a refused upgrade's socket never runs, and
+    // a page reconnecting at once on 1012 would leave a socket half open
+    // after it hangs up. With the upgrade listener gone, as the plugin's own
+    // preClose leaves it, Node hands such a request to Fastify as an
+    // ordinary one.
+    //
+    // Every socket then closes with 1012 before the actors finish their
+    // commits. A client slow to answer is cut off after a moment. Otherwise
+    // the server's close waits out ws's 30 s close timeout, past the deploy's
+    // own limit, and the socket's last-seen stamp would start after the pool
+    // had ended (server/shutdown.ts). Once the sockets have closed, so does
+    // every HTTP connection, a request in flight included: one still running
+    // as the server stops listening keeps its connection, which then waits
+    // out the 95 s keep-alive.
     preClose(done) {
+      const started = Date.now();
+      this.server.removeAllListeners("upgrade");
       const open = [...this.websocketServer.clients];
       for (const client of open) client.close(CLOSE.restarting, "restarting");
       this.websocketServer.close();
-      void socketsClosed(open, opts.closeGraceMs ?? 2_000).then(() => done());
+      void socketsClosed(open, opts.closeGraceMs ?? 2_000).then((cutOff) => {
+        this.server.closeAllConnections();
+        this.log.info({ sockets: open.length, cutOff, ms: Date.now() - started }, "shutdown: sockets and connections closed");
+        done();
+      });
     },
   });
   app.decorateRequest("wsGrant", null);
@@ -393,16 +414,19 @@ function rawToString(data: RawData): string {
 
 /**
  * Resolves once every socket has closed, cutting off those still open after
- * `graceMs`. The socket layer's own close listener was added first, so a
- * socket's close writes have started by the time it counts as closed here.
+ * `graceMs`, with how many it cut off. The socket layer's own close listener
+ * was added first, so a socket's close writes have started by the time it
+ * counts as closed here.
  */
-async function socketsClosed(sockets: WebSocket[], graceMs: number): Promise<void> {
-  if (sockets.length === 0) return;
+async function socketsClosed(sockets: WebSocket[], graceMs: number): Promise<number> {
+  if (sockets.length === 0) return 0;
   const closed = Promise.all(sockets.map((socket) => new Promise<void>((resolve) => socket.once("close", () => resolve()))));
-  if (await within(closed, graceMs)) return;
-  for (const socket of sockets) socket.terminate();
+  if (await within(closed, graceMs)) return 0;
+  const late = sockets.filter((socket) => socket.readyState !== socket.CLOSED);
+  for (const socket of late) socket.terminate();
   // A socket cut off reports its close a moment later.
   await within(closed, 1_000);
+  return late.length;
 }
 
 async function within(work: Promise<unknown>, ms: number): Promise<boolean> {
