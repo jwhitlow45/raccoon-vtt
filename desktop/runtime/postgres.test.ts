@@ -44,13 +44,15 @@ async function programs(dir: string): Promise<{ bin: string; calls: () => Promis
   //
   // With RVTT_FAKE_CHILD it launches a postmaster of its own, as
   // `postgres -D <folder> -p <port>` as real pg_ctl does, so a process
-  // listing knows it as pg_ctl's (asStarted), and writes its pid there. The postmaster writes postmaster.pid after
-  // RVTT_FAKE_PIDAFTER s, marked starting, then ready after
-  // RVTT_FAKE_READYAFTER s (never when unset), naming RVTT_FAKE_TAKENBY's
-  // pid then instead of its own when that is set, and lives RVTT_FAKE_LIFE
-  // s. It ignores SIGTERM when RVTT_FAKE_STUBBORN is set, and ends on
-  // SIGUSR1 after writing "immediate" beside postgres/, standing in for
-  // SIGQUIT. pg_ctl stop -m fast sends it SIGTERM, -m immediate SIGUSR1,
+  // listing knows it as pg_ctl's (asStarted), and writes its pid there.
+  // The postmaster writes postmaster.pid after RVTT_FAKE_PIDAFTER s,
+  // marked starting, then ready after RVTT_FAKE_READYAFTER s (never when
+  // unset), naming RVTT_FAKE_TAKENBY's pid then instead of its own when
+  // that is set, and lives RVTT_FAKE_LIFE s. It ignores SIGTERM when
+  // RVTT_FAKE_STUBBORN is set, and ends on SIGUSR1 after writing
+  // "immediate" beside postgres/, standing in for SIGQUIT, unless
+  // RVTT_FAKE_DEAF is set, which ignores both, as a postmaster whose child
+  // is stuck in the kernel does. pg_ctl stop -m fast sends it SIGTERM, -m immediate SIGUSR1,
   // after RVTT_FAKE_SLOWSTOP s, and as -w does fails when it still runs a
   // second later. RVTT_FAKE_PGCTL says what pg_ctl does meanwhile: "wait" as -w does
   // (exit 0 once ready, 1 once the postmaster is gone), "fail" (exit 1 at
@@ -63,6 +65,7 @@ async function programs(dir: string): Promise<{ bin: string; calls: () => Promis
       `d="$2"`,
       `if [ -n "$RVTT_FAKE_STUBBORN" ]; then trap '' TERM; fi`,
       `trap 'echo ended > "$(dirname "$d")/immediate"; exit 0' USR1`,
+      `if [ -n "$RVTT_FAKE_DEAF" ]; then trap '' TERM USR1; fi`,
       `sleep "\${RVTT_FAKE_PIDAFTER:-0}"`,
       `started=$(date +%s)`,
       `w() { printf '%s\\n%s\\n%s\\n5999\\n\\n\\n\\n%s\\n' "$2" "$d" "$started" "$1" > "$d/postmaster.pid"; }`,
@@ -684,6 +687,39 @@ describe("a start", { skip: posixOnly }, () => {
     assert.equal(await ended(await pid(postmaster)), true);
     assert.ok(existsSync(join(dir, "immediate")), "it ended through the immediate stop, not a kill");
     assert.deepEqual(await calls(), ["pg_ctl start", "pg_ctl stop", "pg_ctl stop immediate"]);
+  });
+
+  test("a postmaster postmaster.pid names is never killed though both pg_ctl stops fail: it is asked immediate again, and the stop holds until it ends", { timeout: 20_000 }, async () => {
+    const dir = await folder();
+    const { bin, calls } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const postmaster = join(dir, "postmaster.child");
+    const said: string[] = [];
+    const unconfirmed: boolean[] = [];
+    const c = new Cluster({ ...cluster(dir, bin, lookup(), { platform: "darwin" }).opts, unsureAfterMs: 300, immediateAgainMs: 1_000, log: (m) => said.push(m), unconfirmed: (on) => unconfirmed.push(on) });
+    const vars = { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_DEAF: "1" };
+    const { error, pid } = await startWith(dir, c, { ...vars, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_READYAFTER: "0.3" });
+    assert.equal(error, null);
+    const child = await pid(postmaster);
+    let stopped = false;
+    const stopping = withVars(vars, () => c.stop()).then(() => (stopped = true));
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
+    assert.equal(isAlive(child), true, "it was never killed");
+    assert.equal(stopped, false, "the stop holds while it runs");
+    assert.deepEqual(unconfirmed, [true]);
+    const asked = await calls();
+    assert.deepEqual(asked.slice(0, 3), ["pg_ctl start", "pg_ctl stop", "pg_ctl stop immediate"]);
+    assert.ok(asked.slice(3).length >= 1 && asked.slice(3).every((call) => call === "pg_ctl stop immediate"), `then only immediate again: ${asked.join(", ")}`);
+    assert.match(said.join("\n"), new RegExp(`PostgreSQL \\(pid ${child}\\) still runs after pg_ctl stop -m immediate, so it is asked again`));
+    // With its postmaster.pid gone it is no longer named, but it was, so it may have children, and it ends itself within a minute.
+    await rm(join(dir, "postgres", "postmaster.pid"));
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    assert.equal(isAlive(child), true, "a postmaster the file once named is never killed");
+    assert.equal(stopped, false);
+    // It ends as a postmaster in immediate mode does once its children have.
+    process.kill(child, "SIGKILL");
+    await stopping;
+    assert.deepEqual(unconfirmed, [true, false]);
   });
 
   test("a slow but clean first pg_ctl stop never reads as a postmaster that outlived its end", { timeout: 20_000 }, async () => {

@@ -125,6 +125,8 @@ export type ClusterOptions = {
   listRetryMs?: number;
   /** Tests only: how long a postmaster may outlive its end before the status says it can't be confirmed. UNSURE_AFTER_MS by default. */
   unsureAfterMs?: number;
+  /** Tests only: how often a postmaster still running after pg_ctl stop -m immediate is asked again. IMMEDIATE_AGAIN_MS by default. */
+  immediateAgainMs?: number;
   /** Where a program that will not end, and a PostgreSQL that can't be confirmed ended, are reported. */
   log?: (msg: string) => void;
   /**
@@ -408,6 +410,8 @@ export class Cluster {
     rotateIfLarge(this.opts.logFile);
     await this.recordBoot();
     let lastError: DatabaseFailed | null = null;
+    // One record for the whole start, so a postmaster a cancel asked to stop is never asked again from the start, or killed.
+    const asked: Asked = new Map();
     for (let attempt = 0; attempt < 3; attempt++) {
       if (signal?.aborted) break;
       const port = await (this.opts.pickPort ?? loopbackPort)();
@@ -427,7 +431,7 @@ export class Cluster {
         () => null,
         (err: unknown) => err,
       );
-      const stopping = signal ? this.stopOnCancel(signal, answered) : Promise.resolve();
+      const stopping = signal ? this.stopOnCancel(signal, answered, asked) : Promise.resolve();
       const failure = await answered;
       await stopping;
       if (signal?.aborted) break;
@@ -439,7 +443,7 @@ export class Cluster {
         return port;
       }
       if (signal?.aborted) break;
-      await this.proveEnded();
+      await this.proveEnded(asked);
       const lines = await linesSince(this.opts.logFile, offset);
       if (failure instanceof Ended) {
         lastError = new DatabaseFailed(failure.message);
@@ -452,7 +456,7 @@ export class Cluster {
       if (!lines.some((line) => /could not bind|address already in use/i.test(line))) break;
     }
     if (signal?.aborted) {
-      await this.proveEnded();
+      await this.proveEnded(asked);
       throw new DatabaseFailed("pg_ctl start was cancelled");
     }
     throw lastError ?? new DatabaseFailed("pg_ctl start failed");
@@ -463,14 +467,13 @@ export class Cluster {
    * soon as it finds one, and keeps looking until pg_ctl has answered, which
    * it does once it sees its postmaster end.
    */
-  private async stopOnCancel(signal: AbortSignal, answered: Promise<unknown>): Promise<void> {
+  private async stopOnCancel(signal: AbortSignal, answered: Promise<unknown>, asked: Asked): Promise<void> {
     if (!signal.aborted) await new Promise<void>((resolve) => {
       signal.addEventListener("abort", () => resolve(), { once: true });
       void answered.then(() => resolve());
     });
     let done = false;
     void answered.then(() => (done = true));
-    const asked: Asked = new Map();
     while (signal.aborted && !done) {
       let wait = 250;
       try {
@@ -546,14 +549,21 @@ export class Cluster {
   /**
    * One look at the processes. A postmaster of this folder that
    * postmaster.pid names is asked to stop through pg_ctl, fast first, then
-   * immediate, which still ends its children and waits for them (LA-27).
-   * One still there after both, or one the file does not name, which has
-   * launched no children yet, is killed. Every pid signalled is one the
-   * listing has just shown to be exactly this folder's postmaster, never
-   * one on the file's word alone. A process that only may be one is never
-   * signalled, and the end can't be confirmed while it runs. Answers how
-   * many it found and when it first signalled one, and throws when the
-   * listing fails.
+   * immediate, and is never killed (LA-27). In immediate mode the postmaster
+   * kills each child still there after 5 s and exits only once it has none
+   * (postmaster.c, SIGKILL_CHILDREN_AFTER_SECS and PM_NO_CHILDREN), so its
+   * own exit proves its children ended, where a kill of it would leave them
+   * running and unseen. One still there after both is asked immediate again
+   * each minute, a retry and never evidence, and the end stays unconfirmed
+   * meanwhile (proveEnded). One the file named once and no longer does is
+   * left too: a postmaster whose postmaster.pid is gone or names another
+   * ends itself within a minute (RecheckDataDirLockFile). Only one the file
+   * has never named is killed, since it has launched no children yet. Every
+   * pid signalled is one the listing has just shown to be exactly this
+   * folder's postmaster, never one on the file's word alone. A process that
+   * only may be one is never signalled, and the end can't be confirmed
+   * while it runs. Answers how many it found and when it first signalled
+   * one, and throws when the listing fails.
    */
   private async endPass(asked: Asked): Promise<{ found: number; exact: number; signalled: number | null }> {
     const found = await this.postmasters();
@@ -565,12 +575,16 @@ export class Cluster {
       }
       signalled ??= Date.now();
       const tried = asked.get(pid);
-      if (tried !== "kill" && (await this.pidFilePid()) === pid) {
+      if ((await this.pidFilePid()) === pid) {
+        const now = Date.now();
+        if (tried?.mode === "immediate" && now - tried.at < (this.opts.immediateAgainMs ?? IMMEDIATE_AGAIN_MS)) continue;
+        if (tried?.mode === "immediate") this.opts.log?.(`PostgreSQL (pid ${pid}) still runs after pg_ctl stop -m immediate, so it is asked again`);
         const mode = tried === undefined ? "fast" : "immediate";
-        asked.set(pid, mode === "fast" ? "fast" : "kill");
+        asked.set(pid, { mode, at: now });
         await this.pgCtlStop(mode).catch((err: unknown) => this.opts.log?.(`pg_ctl stop -m ${mode} of PostgreSQL (pid ${pid}) failed: ${(err as Error).message.split(/\r?\n/)[0]}`));
         continue;
       }
+      if (tried !== undefined) continue;
       try {
         process.kill(pid, "SIGKILL");
       } catch (err) {
@@ -587,12 +601,12 @@ export class Cluster {
    * postmaster.pid exists, and on Windows a pg_ctl ended at its limit
    * leaves the cmd.exe it started the postmaster through, and the
    * postmaster, running, so neither the file nor pg_ctl's exit is evidence.
-   * The listing finds that postmaster as postgres.exe whatever started it.
-   * Each postmaster found is stopped (endPass), and the listing is read
-   * again until it shows none. No timer ends this: while the listing
-   * fails, a postmaster outlives its kill, or a process that only may be
-   * one runs, the lock stays held and the status says RaccoonVTT can't
-   * confirm PostgreSQL ended (D-261114-045, 046).
+   * The listing finds that postmaster as postgres.exe, and the cmd.exe
+   * too while it runs. Each postmaster found is stopped (endPass), and the
+   * listing is read again until it shows none. No timer ends this: while
+   * the listing fails, a postmaster outlives its stop or kill, or a
+   * process that only may be one runs, the lock stays held and the status
+   * says RaccoonVTT can't confirm PostgreSQL ended (D-261114-045, 046).
    */
   private async proveEnded(asked: Asked = new Map()): Promise<void> {
     // When the first signal went out. A postmaster has outlived its end only
@@ -678,7 +692,7 @@ export class Cluster {
     // Anything else lets go only once a listing shows no postmaster of this folder.
     if (this.launched) {
       if (failed) this.opts.log?.(`pg_ctl stop failed: ${(failed as Error).message.split(/\r?\n/)[0]}`);
-      return this.proveEnded(failed && pid !== null ? new Map([[pid, "fast"]]) : undefined);
+      return this.proveEnded(failed && pid !== null ? new Map([[pid, { mode: "fast", at: Date.now() }]]) : undefined);
     }
     if (failed) throw failed;
   }
@@ -746,8 +760,10 @@ const LIST_RETRY_MS = 10_000;
 /** A process the listing may count as a postmaster of this folder, and whether it is exactly one (postmasterKind). */
 export type Postmaster = { pid: number; exact: boolean; commandLine: string };
 
-/** What each postmaster found has been asked so far: pg_ctl stop -m fast, then -m immediate, after which only a kill is left. */
-type Asked = Map<number, "fast" | "kill">;
+/** What each postmaster found has been asked so far, by pid, and when: pg_ctl stop -m fast, then -m immediate, again each minute. */
+type Asked = Map<number, { mode: "fast" | "immediate"; at: number }>;
+/** How often a postmaster still running after pg_ctl stop -m immediate is asked again. */
+const IMMEDIATE_AGAIN_MS = 60_000;
 /** How long a postmaster may take to end after it was stopped or killed before the status says its end can't be confirmed. */
 const UNSURE_AFTER_MS = 10_000;
 
