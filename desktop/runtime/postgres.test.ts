@@ -755,6 +755,36 @@ describe("a start", { skip: posixOnly }, () => {
     assert.equal(forked.signalCode, "SIGKILL", "with no postmaster named that runs, the one left is killed");
   });
 
+  test("a pass never signals a row of its listing after waiting on a pg_ctl stop, by which time the pid may be another program's", { timeout: 20_000 }, async () => {
+    const dir = await folder();
+    const { bin, calls } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const postmaster = join(dir, "postmaster.child");
+    // Listed beside the named postmaster with its exact command, as a child it has just forked is, and by the next listing an unrelated program with that pid.
+    const other = spawn(process.execPath, ["-e", "setInterval(() => undefined, 1000)"], { stdio: "ignore" });
+    strays.push(other.pid as number);
+    let stopping = false;
+    let listings = 0;
+    const proc: ProcessLookup = {
+      ...lookup({ stamp: neverMine(), exe: null }),
+      list: async () => {
+        const rows = await asStarted();
+        if (!stopping || ++listings > 1) return rows;
+        return [...rows, { pid: other.pid as number, commandLine: `${join(bin, "postgres")} -D ${join(dir, "postgres")} -p 41659` }];
+      },
+    };
+    // Neither its own nor confirmed by leftover(), so the stop leaves it to the proof, whose first pass stops it through pg_ctl.
+    const c = cluster(dir, bin, proc, { platform: "darwin" });
+    const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_READYAFTER: "0.3" });
+    assert.equal(error, null);
+    stopping = true;
+    await withVars({ RVTT_FAKE_CHILD: postmaster }, () => c.stop());
+    assert.equal(await ended(await pid(postmaster)), true);
+    assert.deepEqual(await calls(), STOPPED);
+    assert.equal(other.signalCode, null, "the row from before the stop was never signalled");
+    assert.ok(listings >= 2, "a new pass took a new listing");
+  });
+
   test("a slow but clean first pg_ctl stop never reads as a postmaster that outlived its end", { timeout: 20_000 }, async () => {
     const dir = await folder();
     const { bin, calls } = await programs(dir);

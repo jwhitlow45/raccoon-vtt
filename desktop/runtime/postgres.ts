@@ -565,13 +565,24 @@ export class Cluster {
    * since it has launched no children yet. Every pid signalled is one the
    * listing has just shown to be exactly this folder's postmaster, never
    * one on the file's word alone. A process that only may be one is never
-   * signalled, and the end can't be confirmed while it runs. Answers how
-   * many it found and when it first signalled one, and throws when the
-   * listing fails.
+   * signalled, and the end can't be confirmed while it runs.
+   *
+   * A pass takes one listing and one read of postmaster.pid, the read
+   * after the listing, since no file yet is the evidence that a postmaster
+   * has forked no child and must be fresh at the kill. Every kill, and the
+   * check for a running named postmaster beside it, uses only them, and
+   * happens before anything else is waited for. A pg_ctl stop, which can
+   * take a minute, ends the pass, so no row is signalled after its process
+   * may have ended and its pid been reused (ASTRA-22). Answers how many it
+   * found and when it first signalled one, and throws when the listing
+   * fails.
    */
   private async endPass(asked: Asked): Promise<{ found: number; exact: number; signalled: number | null }> {
     const found = await this.postmasters();
+    const named = await this.pidFilePid();
+    const namedRuns = found.some((p) => p.exact && p.pid === named);
     let signalled: number | null = null;
+    let stop: { pid: number; mode: "fast" | "immediate"; again: boolean } | null = null;
     for (const { pid, exact, commandLine } of found) {
       if (!exact) {
         this.cantConfirm(`process ${pid} names this data folder as its PostgreSQL would, but is not exactly what pg_ctl starts, so it is never signalled: ${commandLine}`, pid);
@@ -579,22 +590,24 @@ export class Cluster {
       }
       signalled ??= Date.now();
       const tried = asked.get(pid);
-      const named = await this.pidFilePid();
-      if (named === pid) {
-        const now = Date.now();
-        if (tried?.mode === "immediate" && now - tried.at < (this.opts.immediateAgainMs ?? IMMEDIATE_AGAIN_MS)) continue;
-        if (tried?.mode === "immediate") this.opts.log?.(`PostgreSQL (pid ${pid}) still runs after pg_ctl stop -m immediate, so it is asked again`);
-        const mode = tried === undefined ? "fast" : "immediate";
-        asked.set(pid, { mode, at: now });
-        await this.pgCtlStop(mode).catch((err: unknown) => this.opts.log?.(`pg_ctl stop -m ${mode} of PostgreSQL (pid ${pid}) failed: ${(err as Error).message.split(/\r?\n/)[0]}`));
+      if (pid === named) {
+        if (tried?.mode !== "immediate" || Date.now() - tried.at >= (this.opts.immediateAgainMs ?? IMMEDIATE_AGAIN_MS)) {
+          stop = { pid, mode: tried === undefined ? "fast" : "immediate", again: tried?.mode === "immediate" };
+        }
         continue;
       }
-      if (tried !== undefined || found.some((p) => p.exact && p.pid === named)) continue;
+      if (tried !== undefined || namedRuns) continue;
       try {
         process.kill(pid, "SIGKILL");
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== "ESRCH") this.opts.log?.(`PostgreSQL (pid ${pid}) could not be ended: ${(err as Error).message}`);
       }
+    }
+    if (stop) {
+      const { pid, mode } = stop;
+      if (stop.again) this.opts.log?.(`PostgreSQL (pid ${pid}) still runs after pg_ctl stop -m immediate, so it is asked again`);
+      asked.set(pid, { mode, at: Date.now() });
+      await this.pgCtlStop(mode).catch((err: unknown) => this.opts.log?.(`pg_ctl stop -m ${mode} of PostgreSQL (pid ${pid}) failed: ${(err as Error).message.split(/\r?\n/)[0]}`));
     }
     return { found: found.length, exact: found.filter((p) => p.exact).length, signalled };
   }
