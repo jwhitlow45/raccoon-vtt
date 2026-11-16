@@ -151,8 +151,10 @@ export class Cluster {
   private readonly list: () => Promise<ListedProcess[]>;
   /** Whether this process ever ran pg_ctl start, so a stop proves every postmaster it may have launched ended. */
   private launched = false;
-  /** Since when the end of PostgreSQL can't be confirmed, and when that was last logged. */
-  private unsure: { since: number; logged: number } | null = null;
+  /** Since when the end of PostgreSQL can't be confirmed, when that was last logged, and each process already named in the log. */
+  private unsure: { since: number; logged: number; named: Set<number> } | null = null;
+  /** The real paths postmasterKind compares programs by, once both have been read. */
+  private programsFound: Programs | null = null;
 
   constructor(opts: ClusterOptions) {
     this.opts = opts;
@@ -378,10 +380,11 @@ export class Cluster {
    * start wrote to the log, never an older run's last line.
    *
    * The postmaster an attempt launches is this start's until its end is
-   * proven (D-261114-030, 045). It is known by what it is, a `postgres`
-   * whose command line names this folder, from a process listing, never by
-   * a pid a file names. A cancel never ends pg_ctl: the postmasters the
-   * listing finds are stopped, and pg_ctl answers when it sees its own end.
+   * proven (D-261114-030, 045). It is known by what it is, exactly the
+   * command pg_ctl starts for this folder run by the bundled postgres
+   * (postmasterKind), from a process listing, never by a pid a file names.
+   * A cancel never ends pg_ctl: the postmasters the listing finds are
+   * stopped, and pg_ctl answers when it sees its own end.
    * A postmaster still alive after pg_ctl gave up is waited for until it
    * accepts connections or dies, however long its crash replay takes. Only
    * a pg_ctl past its own wait by 30 s is ended, and then waited for. After
@@ -481,7 +484,7 @@ export class Cluster {
       if (signal?.aborted) return false;
       let live: number[];
       try {
-        live = await this.postmasters();
+        live = (await this.postmasters()).map((p) => p.pid);
       } catch {
         return false;
       }
@@ -498,10 +501,32 @@ export class Cluster {
     }
   }
 
-  /** The pids of the postmasters of this data folder running now, from the process listing. Throws when the listing fails. */
-  async postmasters(): Promise<number[]> {
+  /**
+   * The processes running now that may be a postmaster of this data folder,
+   * from the process listing, each with whether it is exactly one pg_ctl
+   * started (postmasterKind). Throws when the listing fails.
+   */
+  async postmasters(): Promise<Postmaster[]> {
     const folders = [...new Set([this.pgPath(this.opts.pgData), this.opts.pgData])];
-    return (await this.list()).filter((p) => p.pid !== process.pid && postmasterOf(p.commandLine, folders, this.opts.platform)).map((p) => p.pid);
+    const programs = await this.programs();
+    const found: Postmaster[] = [];
+    for (const p of await this.list()) {
+      if (p.pid === process.pid) continue;
+      const kind = await postmasterKind(p, folders, this.opts.platform, programs);
+      if (kind !== null) found.push({ pid: p.pid, exact: kind === "exact", commandLine: p.commandLine });
+    }
+    return found;
+  }
+
+  /** The bundled postgres and the shell pg_ctl starts it through, by real path, read again until both are known. */
+  private async programs(): Promise<Programs> {
+    if (this.programsFound) return this.programsFound;
+    const found: Programs = {
+      postgres: await realOrNull(join(this.opts.binDir, this.opts.platform === "win32" ? "postgres.exe" : "postgres")),
+      shell: this.opts.platform === "win32" ? null : await realOrNull("/bin/sh"),
+    };
+    if (found.postgres !== null && (found.shell !== null || this.opts.platform === "win32")) this.programsFound = found;
+    return found;
   }
 
   /**
@@ -510,14 +535,20 @@ export class Cluster {
    * immediate, which still ends its children and waits for them (LA-27).
    * One still there after both, or one the file does not name, which has
    * launched no children yet, is killed. Every pid signalled is one the
-   * listing has just shown to be this folder's postmaster, never one on the
-   * file's word alone. Answers how many it found and when it first
-   * signalled one, and throws when the listing fails.
+   * listing has just shown to be exactly this folder's postmaster, never
+   * one on the file's word alone. A process that only may be one is never
+   * signalled, and the end can't be confirmed while it runs. Answers how
+   * many it found and when it first signalled one, and throws when the
+   * listing fails.
    */
-  private async endPass(asked: Asked): Promise<{ found: number; signalled: number | null }> {
+  private async endPass(asked: Asked): Promise<{ found: number; exact: number; signalled: number | null }> {
     const found = await this.postmasters();
     let signalled: number | null = null;
-    for (const pid of found) {
+    for (const { pid, exact, commandLine } of found) {
+      if (!exact) {
+        this.cantConfirm(`process ${pid} names this data folder as its PostgreSQL would, but is not exactly what pg_ctl starts, so it is never signalled: ${commandLine}`, pid);
+        continue;
+      }
       signalled ??= Date.now();
       const tried = asked.get(pid);
       if (tried !== "kill" && (await this.pidFilePid()) === pid) {
@@ -532,7 +563,7 @@ export class Cluster {
         if ((err as NodeJS.ErrnoException).code !== "ESRCH") this.opts.log?.(`PostgreSQL (pid ${pid}) could not be ended: ${(err as Error).message}`);
       }
     }
-    return { found: found.length, signalled };
+    return { found: found.length, exact: found.filter((p) => p.exact).length, signalled };
   }
 
   /**
@@ -543,11 +574,11 @@ export class Cluster {
    * leaves the cmd.exe it started the postmaster through, and the
    * postmaster, running, so neither the file nor pg_ctl's exit is evidence.
    * The listing finds that postmaster as postgres.exe whatever started it.
-   * Each postmaster found is stopped (endPass), and the
-   * listing is read again until it shows none. No timer ends this: while
-   * the listing fails, or a postmaster outlives its kill, the lock stays
-   * held and the status says RaccoonVTT can't confirm PostgreSQL ended
-   * (D-261114-045, 046).
+   * Each postmaster found is stopped (endPass), and the listing is read
+   * again until it shows none. No timer ends this: while the listing
+   * fails, a postmaster outlives its kill, or a process that only may be
+   * one runs, the lock stays held and the status says RaccoonVTT can't
+   * confirm PostgreSQL ended (D-261114-045, 046).
    */
   private async proveEnded(asked: Asked = new Map()): Promise<void> {
     // When the first signal went out. A postmaster has outlived its end only
@@ -556,7 +587,7 @@ export class Cluster {
     let firstSignal: number | null = null;
     for (;;) {
       const listedAt = Date.now();
-      let pass: { found: number; signalled: number | null };
+      let pass: { found: number; exact: number; signalled: number | null };
       try {
         pass = await this.endPass(asked);
       } catch (err) {
@@ -570,22 +601,28 @@ export class Cluster {
         this.unsure = null;
         return;
       }
-      if (firstSignal !== null && listedAt - firstSignal >= (this.opts.unsureAfterMs ?? UNSURE_AFTER_MS)) {
-        this.cantConfirm(`${pass.found} PostgreSQL process${pass.found === 1 ? "" : "es"} of this data folder still run after being ended`);
+      if (pass.exact > 0 && firstSignal !== null && listedAt - firstSignal >= (this.opts.unsureAfterMs ?? UNSURE_AFTER_MS)) {
+        this.cantConfirm(`${pass.exact} PostgreSQL process${pass.exact === 1 ? "" : "es"} of this data folder still run after being ended`);
       }
       firstSignal ??= pass.signalled;
       await sleep(250);
     }
   }
 
-  /** The end of PostgreSQL can't be confirmed yet: the status says so at once, and the log each minute. */
-  private cantConfirm(why: string): void {
+  /**
+   * The end of PostgreSQL can't be confirmed yet: the status says so at
+   * once, and the log each minute, and at once for a process (`pid`) it
+   * has not named yet.
+   */
+  private cantConfirm(why: string, pid?: number): void {
     const now = Date.now();
     if (!this.unsure) {
-      this.unsure = { since: now, logged: 0 };
+      this.unsure = { since: now, logged: 0, named: new Set() };
       this.opts.unconfirmed?.(true);
     }
-    if (now - this.unsure.logged >= 60_000) {
+    const fresh = pid !== undefined && !this.unsure.named.has(pid);
+    if (pid !== undefined) this.unsure.named.add(pid);
+    if (fresh || now - this.unsure.logged >= 60_000) {
       this.unsure.logged = now;
       this.opts.log?.(`RaccoonVTT can't confirm PostgreSQL has ended (${why}), so the data folder stays locked while it looks again`);
     }
@@ -692,6 +729,9 @@ const KILL_WAIT_AGAIN_MS = 60_000;
 /** How long a process listing that failed waits before the next. */
 const LIST_RETRY_MS = 10_000;
 
+/** A process the listing may count as a postmaster of this folder, and whether it is exactly one (postmasterKind). */
+export type Postmaster = { pid: number; exact: boolean; commandLine: string };
+
 /** What each postmaster found has been asked so far: pg_ctl stop -m fast, then -m immediate, after which only a kill is left. */
 type Asked = Map<number, "fast" | "kill">;
 /** How long a postmaster may take to end after it was stopped or killed before the status says its end can't be confirmed. */
@@ -703,21 +743,84 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** The real paths of the bundled postgres and of the shell pg_ctl starts it through, null where one can't be read. */
+export type Programs = { postgres: string | null; shell: string | null };
+
+/** A file's real path, every link and alias resolved, or null when it can't be read. */
+async function realOrNull(path: string): Promise<string | null> {
+  try {
+    return await realpath(path);
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Whether a command line is a postmaster of one of `folders`, as pg_ctl
- * starts one: the postgres program, then -D and the folder, which pg_ctl
- * quotes. On Windows pg_ctl writes the folder with forward slashes
- * (canonicalize_path), and paths ignore case. The folder must end where
- * the argument does, so postgres.incomplete-<ms> beside it is another one.
- * pg_ctl's own command line has its verb before -D, so it never matches.
+ * How a listed process stands to the PostgreSQL of one of `folders`:
+ * - `exact`: pg_ctl's own command for that folder, run by the bundled
+ *   postgres. pg_ctl starts it as `exec "E" -D "F" -p N` through /bin/sh,
+ *   or through cmd.exe on Windows, where E is the program's real path
+ *   (pg_ctl.c start_postmaster, `-D "%s" ` and the `-o` it is given).
+ *   Linux keeps the arguments apart, so it needs exactly E, -D, F, -p and N,
+ *   with the exe link on the bundled postgres. macOS has the joined line
+ *   only, so the whole of it must be that, anchored at both ends, and E is
+ *   the bundled postgres by real path. Windows has the program's path and
+ *   the command line cmd.exe gives it: "E" -D "F" -p N, and the spaces the
+ *   redirections leave. On POSIX the shell pg_ctl execs through is the same
+ *   process a moment earlier, so its exact command counts too.
+ * - `loose`: anything else whose command line names the folder after
+ *   postgres and -D, as a postmaster's would. It may be this folder's
+ *   PostgreSQL spelled in a way the exact form misses, so it counts as
+ *   running, but it is never signalled, since it may as well be a search
+ *   that names the folder or another cluster in a folder whose name starts
+ *   with this one's.
+ * Programs are compared by real path, never as written: /var against
+ * /private/var, an AppImage's mount and App Translocation all give one
+ * program two spellings. On Windows pg_ctl writes the folder with forward
+ * slashes (canonicalize_path), and paths ignore case.
  */
-export function postmasterOf(commandLine: string, folders: readonly string[], platform: Platform): boolean {
-  const fold = (text: string): string => (platform === "win32" ? text.replaceAll("\\", "/") : text);
-  const line = fold(commandLine);
-  return folders.some((folder) => {
-    const path = escapeRegExp(fold(folder).replace(/(.)\/+$/, "$1"));
-    return new RegExp(`(?:^|[/"\\s])postgres(?:\\.exe)?"?\\s+-D\\s+"?${path}(?:"|\\s|$)`, platform === "win32" ? "i" : "").test(line);
-  });
+export async function postmasterKind(
+  p: ListedProcess,
+  folders: readonly string[],
+  platform: Platform,
+  programs: Programs,
+  real: (path: string) => Promise<string | null> = realOrNull,
+): Promise<"exact" | "loose" | null> {
+  const win = platform === "win32";
+  const fold = (text: string): string => (win ? text.replaceAll("\\", "/") : text);
+  const same = (a: string | null | undefined, b: string | null): boolean => a != null && b !== null && (win ? a.toLowerCase() === b.toLowerCase() : a === b);
+  const isPostgres = async (path: string | undefined): Promise<boolean> => path !== undefined && same(await real(path), programs.postgres);
+  const line = fold(p.commandLine);
+  const trimmed = folders.map((f) => fold(f).replace(/(.)\/+$/, "$1"));
+  let shaped = false;
+  for (const folder of trimmed) {
+    const f = escapeRegExp(folder);
+    const sh = `exec "([^"]+)" -D "${f}" -p \\d+ < "/dev/null"(?: >> "[^"]*")? 2>&1`;
+    if (platform === "linux" && p.argv) {
+      const a = p.argv;
+      if (a.length === 5 && a[1] === "-D" && a[2] === folder && a[3] === "-p" && /^\d+$/.test(a[4] ?? "")) {
+        shaped = true;
+        if (same(p.exe, programs.postgres)) return "exact";
+      }
+      const launch = a.length === 3 && a[0] === "/bin/sh" && a[1] === "-c" ? new RegExp(`^${sh}$`).exec(a[2] ?? "") : null;
+      if (launch) {
+        shaped = true;
+        if (same(p.exe, programs.shell) && (await isPostgres(launch[1]))) return "exact";
+      }
+    } else if (platform === "darwin") {
+      const run = new RegExp(`^(.+) -D ${f} -p \\d+$`).exec(line) ?? new RegExp(`^/bin/sh -c ${sh}$`).exec(line);
+      if (run) {
+        shaped = true;
+        if (await isPostgres(run[1])) return "exact";
+      }
+    } else if (win && new RegExp(`^"[^"]+" -D "${f}" -p \\d+ *$`, "i").test(line)) {
+      shaped = true;
+      if (p.exe != null && same(await real(p.exe), programs.postgres)) return "exact";
+    }
+  }
+  if (shaped) return "loose";
+  const named = trimmed.some((folder) => new RegExp(`(?:^|[/"\\s])postgres(?:\\.exe)?"?\\s+-D\\s+"?${escapeRegExp(folder)}(?:"|\\s|$)`, win ? "i" : "").test(line));
+  return named ? "loose" : null;
 }
 
 /** A run this ended: it took longer than its limit. */

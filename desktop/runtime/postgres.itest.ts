@@ -110,7 +110,7 @@ describe("the cluster", () => {
     const c = await cluster();
     const pid = Number((await readFile(join(c.dir, "postgres", "postmaster.pid"), "utf8")).split(/\r?\n/)[0]);
     // A child forked that moment carries the postmaster's command line until it renames itself, so it may be listed too.
-    assert.ok((await c.cluster.postmasters()).includes(pid), "this folder's postmaster");
+    assert.ok((await c.cluster.postmasters()).some((p) => p.pid === pid), "this folder's postmaster");
     await c.cluster.stop();
     assert.deepEqual(await c.cluster.postmasters(), []);
   });
