@@ -306,8 +306,11 @@ async function backupSteps(env: BackupEnv, kind: BackupKind, forVersion?: string
   return { outcome: "good", name, record };
 }
 
+/** How retention lists the store's folders, so a test can replay what Windows lists. */
+export type RetentionIo = { readdir: (path: string) => Promise<string[]> };
+
 /** Deletes backups retention drops, record first so a half-deleted backup never counts, then store files no kept list names. */
-export async function applyRetention(backupsDir: string, now: number): Promise<string[]> {
+export async function applyRetention(backupsDir: string, now: number, io: RetentionIo = { readdir: (path) => readdir(path) }): Promise<string[]> {
   const backups = await listBackups(backupsDir);
   const { keep, drop } = retention(
     backups.map((b) => ({ name: b.name, kind: b.record.kind, started: Date.parse(b.record.started) })),
@@ -327,12 +330,21 @@ export async function applyRetention(backupsDir: string, now: number): Promise<s
   }
   const store = join(backupsDir, BACKUP_STORE);
   const held: string[] = [];
-  for (const shard of await readdir(store).catch(() => [] as string[])) {
-    for (const file of await readdir(join(store, shard)).catch(() => [] as string[])) held.push(`${shard}/${file}`);
+  for (const shard of await io.readdir(store).catch(() => [] as string[])) {
+    for (const file of await io.readdir(join(store, shard)).catch(() => [] as string[])) held.push(`${shard}/${file}`);
   }
-  for (const path of unlistedStoreFiles(held, lists)) await rm(join(store, path), { force: true });
-  for (const shard of await readdir(store).catch(() => [] as string[])) {
-    if ((await readdir(join(store, shard)).catch(() => ["x"])).length === 0) await rm(join(store, shard), { recursive: true, force: true });
+  const removed = new Set<string>();
+  for (const path of unlistedStoreFiles(held, lists)) {
+    await rm(join(store, path), { force: true });
+    removed.add(path);
+  }
+  // A shard goes once it lists nothing but files this pass removed, and never while it lists one this pass did not delete.
+  // Windows lists a deleted file until another process that holds it, such as an antivirus scan of a file just written, lets go, so an empty listing alone would keep the folder.
+  for (const shard of await io.readdir(store).catch(() => [] as string[])) {
+    const left = await io.readdir(join(store, shard)).catch(() => null);
+    if (left === null || left.some((file) => !removed.has(`${shard}/${file}`))) continue;
+    // Node retries a removal Windows refuses while that file is held, and a shard still refused is removed by the next backup's pass.
+    await rm(join(store, shard), { recursive: true, force: true, maxRetries: 5 }).catch(() => undefined);
   }
   return drop;
 }
