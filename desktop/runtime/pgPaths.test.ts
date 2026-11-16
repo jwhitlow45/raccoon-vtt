@@ -480,7 +480,7 @@ describe("the cluster", { skip: platform === "win32" && "the stand-in programs a
       platform: "darwin",
       pickPort: async () => 41658,
       pgPath: map,
-      proc: { stamp: async () => 1, facts: async () => ({ exe: null, cwd: null, uid: null, start: null }), bootId: async () => "", uid: null },
+      proc: { stamp: async () => 1, facts: async () => ({ exe: null, cwd: null, uid: null, start: null, stamp: null }), bootId: async () => "", uid: null },
     });
     await mkdir(join(s.data, "logs"));
     await c.init();

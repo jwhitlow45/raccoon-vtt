@@ -125,11 +125,13 @@ function lookup(o: Look = {}): ProcessLookup {
     stamp: o.stamp ?? ((pid: number) => processStamp(pid)),
     facts:
       o.facts ??
-      (async () => ({
+      (async (pid: number) => ({
         exe: o.exe === undefined ? "/opt/raccoonvtt/postgres/bin/postgres" : o.exe,
         cwd: o.cwd ?? null,
         uid: o.uid === undefined ? 501 : o.uid,
         start: Date.now() + (o.offsetMs ?? 0),
+        // The start reading from the same read, as processFacts gives it.
+        stamp: await (o.stamp ? o.stamp() : processStamp(pid)),
       })),
     bootId: async () => {
       if (o.boot instanceof Error) throw o.boot;
@@ -213,6 +215,9 @@ describe("a postmaster.pid found at a start", () => {
       ["Linux: postgres whose working folder can't be read", "linux", { cwd: null }, "uncertain"],
       ["nothing could be read, as when every read is refused", "linux", { exe: null, uid: null }, "uncertain"],
       ["Windows: nothing could be read", "win32", { exe: null, uid: null }, "uncertain"],
+      // No start reading from the read that named the program, as when the pid changed hands while it was read.
+      ["a postgres whose start reading the same read could not give", "darwin", { stamp: async () => null }, "uncertain"],
+      ["Linux: postgres working in this folder, with no start reading", "linux", { cwd: pg, stamp: async () => null }, "uncertain"],
     ];
     for (const [what, on, look, want] of cases) assert.equal(await kind(lookup(look), on), want, what);
     await pidFile(dir, 2 ** 30);
@@ -273,7 +278,7 @@ describe("the postmaster this process started", { skip: posixOnly }, () => {
     const { bin, calls } = await programs(dir);
     await mkdir(join(dir, "postgres"));
     let offsetMs = 0;
-    const c = cluster(dir, bin, lookup({ facts: async () => ({ exe: "/opt/raccoonvtt/postgres/bin/postgres", cwd: null, uid: 501, start: Date.now() + offsetMs }) }), { platform: "darwin" });
+    const c = cluster(dir, bin, lookup({ facts: async () => ({ exe: "/opt/raccoonvtt/postgres/bin/postgres", cwd: null, uid: 501, start: Date.now() + offsetMs, stamp: 1 }) }), { platform: "darwin" });
     process.env.RVTT_FAKE_PID = String(process.pid);
     try {
       await c.start();
@@ -645,6 +650,22 @@ describe("a start", { skip: posixOnly }, () => {
     const postmaster = join(dir, "postmaster.child");
     // leftover() reads a start the listing's row does not have, as for a pid reused between the two.
     const c = cluster(dir, bin, { ...lookup({ stamp: async () => 1 }), list: () => listProcesses() }, { platform: "darwin" });
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 500);
+    const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_LIFE: "3" }, abort.signal);
+    assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
+    assert.equal(await ended(await pid(postmaster)), true, "it ended on its own");
+    assert.deepEqual(await calls(), ["pg_ctl start"], "no pg_ctl stop went out");
+  });
+
+  test("a loosely listed postmaster the file names is never stopped when what leftover() confirms is a later process on that pid", { timeout: 30_000 }, async () => {
+    const dir = await folder();
+    const { bin, calls } = await programs(dir);
+    await mkdir(join(dir, "postgres"));
+    const postmaster = join(dir, "postmaster.child");
+    // The pid is reused just before leftover() reads it: another cluster's postgres, started a second later, close enough to the file's time to pass for it.
+    const replaced: ProcessLookup["facts"] = async (pid) => ({ exe: "/opt/other/postgres/bin/postgres", cwd: null, uid: 501, start: Date.now() + 1_000, stamp: ((await processStamp(pid)) ?? 0) + 1_000 });
+    const c = cluster(dir, bin, { ...lookup({ facts: replaced }), list: () => listProcesses() }, { platform: "darwin" });
     const abort = new AbortController();
     setTimeout(() => abort.abort(), 500);
     const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_LIFE: "3" }, abort.signal);

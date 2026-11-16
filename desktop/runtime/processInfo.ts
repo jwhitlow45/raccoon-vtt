@@ -139,8 +139,16 @@ export async function processStamp(pid: number, platform: Platform = process.pla
  *   data folder.
  * - `uid`: macOS and Linux, the user it runs as.
  * - `start`: when it started, in ms since the epoch, as processStart reads it.
+ * - `stamp`: its start reading, the quantity processStamp gives.
+ * The facts come from one read of one process, so the start and the stamp
+ * describe the very process the program and user are of: macOS and Windows
+ * read them in one query, and Linux reads /proc/<pid>/stat before and after
+ * the rest, and a process that changed between says nothing.
  */
-export type ProcessFacts = { exe: string | null; cwd: string | null; uid: number | null; start: number | null };
+export type ProcessFacts = { exe: string | null; cwd: string | null; uid: number | null; start: number | null; stamp: number | null };
+
+/** What a process that is gone, or changed while it was read, says. */
+const NO_FACTS: ProcessFacts = { exe: null, cwd: null, uid: null, start: null, stamp: null };
 
 /** The Uid line's real uid from /proc/<pid>/status, which any user may read. */
 export function parseStatusUid(status: string): number | null {
@@ -156,14 +164,22 @@ export function linkedProgram(link: string): string {
   return link.replace(/ \(deleted\)$/, "");
 }
 
-/** What `Get-CimInstance Win32_Process` said about one process, as the script below prints it. */
-export function parseWindowsProcess(stdout: string): Pick<ProcessFacts, "exe" | "start"> {
+/** What `Get-CimInstance Win32_Process` said about one process, as the script below prints it. Its CreationDate is both its start and its stamp. */
+export function parseWindowsProcess(stdout: string): Pick<ProcessFacts, "exe" | "start" | "stamp"> {
   try {
     const row = JSON.parse(stdout.trim()) as { name?: unknown; created?: unknown };
-    return { exe: typeof row.name === "string" && row.name !== "" ? row.name : null, start: parseCreated(row.created) };
+    const start = parseCreated(row.created);
+    return { exe: typeof row.name === "string" && row.name !== "" ? row.name : null, start, stamp: start };
   } catch {
-    return { exe: null, start: null };
+    return { exe: null, start: null, stamp: null };
   }
+}
+
+/** `ps -o uid,lstart,comm` for one process in PS_ENV: its user, its start, which is its stamp too, and its program. */
+export function parsePsFacts(stdout: string): Pick<ProcessFacts, "exe" | "uid" | "start" | "stamp"> {
+  const row = psRows(stdout, "COMM")[0];
+  if (!row) return { exe: null, uid: null, start: null, stamp: null };
+  return { exe: row.rest === "" ? null : row.rest, uid: row.n, start: row.start, stamp: row.start };
 }
 
 /** Reads one fact, null when it can't be read for any reason, denied included. */
@@ -175,22 +191,27 @@ async function maybe<T>(read: () => Promise<T>): Promise<T | null> {
   }
 }
 
-export async function processFacts(pid: number, platform: Platform = process.platform as Platform): Promise<ProcessFacts> {
+export async function processFacts(pid: number, platform: Platform = process.platform as Platform, files: ProcFiles = procFiles): Promise<ProcessFacts> {
   if (platform === "linux") {
-    const exe = await maybe(async () => linkedProgram(await readlink(`/proc/${pid}/exe`)));
-    const cwd = await maybe(() => readlink(`/proc/${pid}/cwd`));
-    const uid = await maybe(async () => parseStatusUid(await readFile(`/proc/${pid}/status`, "utf8")));
-    return { exe, cwd, uid, start: await processStart(pid, platform) };
+    const stamp = async (): Promise<number | null> => maybe(async () => parseProcStat((await files.readFile(`/proc/${pid}/stat`)).toString("utf8")));
+    // Its start is read before and after the rest, and only the same reading both times shows they are one process's: a pid reused in between gets another start.
+    const before = await stamp();
+    const exe = await maybe(async () => linkedProgram(await files.readlink(`/proc/${pid}/exe`)));
+    const cwd = await maybe(() => files.readlink(`/proc/${pid}/cwd`));
+    const uid = await maybe(async () => parseStatusUid((await files.readFile(`/proc/${pid}/status`)).toString("utf8")));
+    const after = await stamp();
+    if (before === null || after !== before) return NO_FACTS;
+    const btime = await maybe(async () => Number(/^btime (\d+)$/m.exec((await files.readFile("/proc/stat")).toString("utf8"))?.[1]));
+    return { exe, cwd, uid, start: btime !== null && Number.isFinite(btime) ? btime * 1000 + before : null, stamp: before };
   }
   if (platform === "darwin") {
-    const ps = await maybe(async () => (await run("/bin/ps", ["-o", "uid=,comm=", "-p", String(pid)], { env: { ...process.env, LC_ALL: "C" } })).stdout.trim());
-    const m = ps ? /^(\d+)\s+(.+)$/.exec(ps) : null;
-    return { exe: m?.[2] ?? null, cwd: null, uid: m ? Number(m[1]) : null, start: await processStart(pid, platform) };
+    const out = await maybe(async () => parsePsFacts((await run("/bin/ps", ["-o", "uid,lstart,comm", "-p", String(pid)], { env: { ...process.env, ...PS_ENV } })).stdout));
+    return { ...(out ?? { exe: null, uid: null, start: null, stamp: null }), cwd: null };
   }
   // Win32_Process answers for every process without elevation, where Get-Process hides another user's path and start.
   const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($p) { [pscustomobject]@{ name = [string]$p.Name; created = ${createdOf("$p")} } | ConvertTo-Json -Compress }`;
   const out = await maybe(async () => (await run(powershell(), ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true, timeout: POWERSHELL_LIMIT_MS })).stdout);
-  return { ...(out ? parseWindowsProcess(out) : { exe: null, start: null }), cwd: null, uid: null };
+  return { ...(out ? parseWindowsProcess(out) : { exe: null, start: null, stamp: null }), cwd: null, uid: null };
 }
 
 let cachedBoot: string | null = null;
@@ -240,20 +261,26 @@ export async function stillRunning(id: ProcessIdentity, platform: Platform = pro
 export type ListedProcess = { pid: number; commandLine: string; argv?: string[]; exe?: string | null; stamp?: number | null };
 
 /**
- * `ps -ww -axo pid,lstart,command` in PS_ENV. ps pads the start to its
- * column's width, so each command is read from where the COMMAND header
- * starts, never after the run of spaces, which a command may begin with.
+ * The rows of a ps call in PS_ENV whose columns are a number, lstart, and
+ * a last one named `last`. ps pads the start to its column's width, so the
+ * last column is read from where its header starts, never after the run of
+ * spaces, which a command may begin with.
  */
-export function parsePsList(stdout: string): ListedProcess[] {
+function psRows(stdout: string, last: string): { n: number; start: number | null; rest: string }[] {
   const [header = "", ...lines] = stdout.split("\n");
-  const at = header.indexOf("COMMAND");
-  if (at < 0) throw new Error(`the process listing had no COMMAND column: ${header.slice(0, 200)}`);
-  const out: ListedProcess[] = [];
+  const at = header.indexOf(last);
+  if (at < 0) throw new Error(`ps printed no ${last} column: ${header.slice(0, 200)}`);
+  const out: { n: number; start: number | null; rest: string }[] = [];
   for (const line of lines) {
     const m = /^\s*(\d+) (.*)$/.exec(line.slice(0, at));
-    if (m) out.push({ pid: Number(m[1]), commandLine: line.slice(at), stamp: parsePsStart(m[2] as string) });
+    if (m) out.push({ n: Number(m[1]), start: parsePsStart(m[2] as string), rest: line.slice(at) });
   }
   return out;
+}
+
+/** `ps -ww -axo pid,lstart,command`: each process's pid, start reading and command line. */
+export function parsePsList(stdout: string): ListedProcess[] {
+  return psRows(stdout, "COMMAND").map((row) => ({ pid: row.n, commandLine: row.rest, stamp: row.start }));
 }
 
 /**

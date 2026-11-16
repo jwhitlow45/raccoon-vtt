@@ -438,7 +438,7 @@ function depsFor(world: World, inst: Instance, build: Omit<Build, "pgMajor">, ov
           world.pg.inited = true;
         }),
       ),
-      leftover: () => c(() => (world.pg.running ? { kind: "running" as const, pid: 99, stamp: null } : { kind: "none" as const })),
+      leftover: () => c(() => (world.pg.running ? { kind: "running" as const, pid: 99, stamp: 1 } : { kind: "none" as const })),
       clearLeftover: () =>
         c(() => {
           if (world.lockOwner !== inst) world.violate("a leftover PostgreSQL stopped without the lock");
