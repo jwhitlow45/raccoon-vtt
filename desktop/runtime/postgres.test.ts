@@ -1187,6 +1187,11 @@ describe("a postmaster by its command line", () => {
     const exe = "C:\\PROGRAM FILES\\RaccoonVTT\\resources\\postgres\\bin\\postgres.exe";
     assert.equal(await kind(line('"C:/Program Files/RaccoonVTT/resources/postgres/bin/postgres.exe" -D "D:/Tables/dm/RaccoonVTT/postgres" -p 41659   ', exe), folders, "win32"), "exact", "Windows: forward slashes, and case ignored");
     assert.equal(await kind(line('"C:/PROGRA~1/RaccoonVTT/resources/postgres/bin/postgres.exe" -D "C:/ProgramData/RaccoonVTT/a1b2/data/postgres" -p 41659', exe), folders, "win32"), "exact", "Windows: the junction PostgreSQL was given");
+    // The line a Windows runner's real cluster gave (desktop.yml, run 43819273555), its temp folder here under the runner's work folder: cmd.exe joins the program and its arguments with a space of its own.
+    const runner = { postgres: "D:\\a\\raccoon-vtt\\raccoon-vtt\\desktop\\.runtime\\postgres\\bin\\postgres.exe", shell: windows.shell, pgCtl: null };
+    const seen = line('"D:/a/raccoon-vtt/raccoon-vtt/desktop/.runtime/postgres/bin/postgres.exe"  -D "D:/a/_temp/RUNNER~1/rvtt-pg-cluster-eGhFsG/postgres" -p 62353 ', runner.postgres);
+    const temp = ["D:\\a\\_temp\\RUNNER~1\\rvtt-pg-cluster-eGhFsG\\postgres"];
+    assert.equal(await postmasterKind(seen, temp, "win32", runner, async (path) => path.replaceAll("/", "\\")), "exact", "Windows: the runner's postmaster");
     const program = "C:/Program Files/RaccoonVTT/resources/postgres/bin/postgres.exe";
     assert.equal(await kind(line(launcher(program, "D:/Tables/Dm/RaccoonVTT/postgres"), "C:\\WINDOWS\\system32\\cmd.exe"), folders, "win32"), "exact", "Windows: the launcher, run by Windows' own cmd.exe");
   });
