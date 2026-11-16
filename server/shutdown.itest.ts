@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
-import type { Socket as NetSocket } from "node:net";
+import { createConnection, createServer, type Socket as NetSocket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import pg from "pg";
+import WebSocket from "ws";
 import { buildApp } from "./app.ts";
 import { ipKey } from "./auth/ipKey.ts";
 import { testConfig } from "./auth/testing.ts";
@@ -20,7 +23,8 @@ import { closeServer } from "./shutdown.ts";
  * socket's session gets its last sight stamped, a slow client's included,
  * and nothing writes through the pool after it ends. The app here has a
  * pool of its own, which the shutdown ends, and a second pool checks the
- * rows and cleans up.
+ * rows and cleans up. The last test stops `server/main.ts` in a process of
+ * its own, as a deploy does, so its exit code and time are the real ones.
  */
 
 const config = testConfig({ TRUST_CF_CONNECTING_IP: "1" });
@@ -178,4 +182,183 @@ test("a shutdown during a log backfill batch stops it: the backend is told to st
   assert.deepEqual(left, { backends: 0, locks: 0 }, "no backend or room lock of the backfill outlives the shutdown");
   const nulls = await check.query<{ n: number }>("select count(*)::int as n from room_log where room_id = $1 and seq is null", [roomId]);
   assert.equal(nulls.rows[0]!.n, 61, "the cut batch completed nothing");
+});
+
+/** A port that was free a moment ago, for a server in a process of its own. */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      server.close(() => resolve(port));
+    });
+    server.on("error", reject);
+  });
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("a deploy's stop of the real server with a DM and a player on exits 0 within 5 s and saves the room at its last op (LP44-OPS-1)", { timeout: 60_000 }, async () => {
+  const port = await freePort();
+  const origin = `http://127.0.0.1:${port}`;
+  const child = spawn(process.execPath, ["server/main.ts"], {
+    cwd: fileURLToPath(new URL("..", import.meta.url)),
+    env: {
+      PATH: process.env.PATH ?? "",
+      NODE_ENV: "development",
+      DATABASE_URL: config.DATABASE_URL,
+      HOST: "127.0.0.1",
+      PORT: String(port),
+      PUBLIC_ORIGIN: origin,
+      ASSET_DIR: join(assetDir, "server"),
+      TRUST_CF_CONNECTING_IP: "1",
+      ROOMS_PER_DAY: "1000000",
+      ROOMS_PER_IP_PER_DAY: "1000",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = "";
+  child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString("utf8")));
+  child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString("utf8")));
+  const exited = new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
+  try {
+    for (const deadline = Date.now() + 20_000; !/listening/i.test(output); await sleep(50)) {
+      if (Date.now() > deadline || child.exitCode !== null) assert.fail(`the server did not start:\n${output}`);
+    }
+
+    // A device keeps its own address and cookie, as a browser does.
+    const device = () => {
+      const ip = randomIp();
+      ips.push(ip);
+      let cookie = "";
+      const headers = (): Record<string, string> => ({ origin, "sec-fetch-site": "same-origin", "cf-connecting-ip": ip, "user-agent": userAgent, ...(cookie ? { cookie } : {}) });
+      return {
+        headers,
+        async call(method: string, path: string, body?: unknown): Promise<Response> {
+          const res = await fetch(`${origin}${path}`, {
+            method,
+            headers: { ...headers(), ...(body ? { "content-type": "application/json" } : {}) },
+            body: body ? JSON.stringify(body) : undefined,
+          });
+          const session = res.headers.getSetCookie().find((c) => c.startsWith("rvtt="));
+          if (session) cookie = session.split(";")[0] ?? "";
+          return res;
+        },
+      };
+    };
+    const dm = device();
+    const player = device();
+    const created = await dm.call("POST", "/api/rooms", { name: "Stop", playerPassword: "owlbear-druid-wand", dmName: "Dungeon Master" });
+    assert.equal(created.status, 201, await created.clone().text());
+    const { roomId } = (await created.json()) as { roomId: string };
+    rooms.push(roomId);
+    const asked = await player.call("POST", `/api/rooms/${roomId}/join`, { password: "owlbear-druid-wand" });
+    assert.equal(asked.status, 200, await asked.clone().text());
+    const { ticket } = (await asked.json()) as { ticket: string };
+    assert.equal((await player.call("POST", `/api/rooms/${roomId}/join/complete`, { ticket, name: "Pip", color: "#3e8ef7" })).status, 200);
+
+    const wsUrl = `ws://127.0.0.1:${port}/ws?room=${roomId}`;
+    const dmSocket = await Socket.open(wsUrl, dm.headers());
+    await dmSocket.snapshot(randomBytes(8).toString("hex"));
+    const playerSocket = await Socket.open(wsUrl, player.headers());
+    await playerSocket.snapshot(randomBytes(8).toString("hex"));
+    for (const text of ["The door creaks.", "Roll initiative.", "Pip goes first."]) {
+      const ev = await dmSocket.apply({ t: "log.chat", text });
+      assert.equal(ev.rejects?.length ?? 0, 0);
+    }
+    const seqOf = async (sql: string): Promise<number | null> => (await check.query<{ seq: number | null }>(sql, [roomId])).rows[0]?.seq ?? null;
+    const lastSeq = await seqOf("select max(seq)::int as seq from room_ops where room_id = $1");
+    assert.ok(lastSeq !== null && ((await seqOf("select seq::int from room_snapshots where room_id = $1")) ?? -1) < lastSeq, "the room's snapshot is behind its last op before the stop");
+
+    // The player's phone is slow: it reads nothing until the server cuts it off, and it is part way through sending a token picture.
+    (playerSocket.ws as unknown as { _socket: NetSocket })._socket.pause();
+    const upload = createConnection(port, "127.0.0.1");
+    upload.on("error", () => undefined);
+    const uploadClosed = new Promise<void>((resolve) => upload.once("close", () => resolve()));
+    await new Promise<void>((resolve) => upload.once("connect", () => resolve()));
+    let uploadAnswer = "";
+    upload.on("data", (chunk: Buffer) => (uploadAnswer += chunk.toString("latin1")));
+    const head = [`PUT /api/rooms/${roomId}/assets?kind=token HTTP/1.1`, `host: 127.0.0.1:${port}`, "content-type: image/png", "content-length: 1048576"];
+    for (const [name, value] of Object.entries(player.headers())) head.push(`${name}: ${value}`);
+    upload.write(`${head.join("\r\n")}\r\n\r\n`);
+    upload.write(Buffer.alloc(64 * 1024));
+    await sleep(300);
+    assert.equal(uploadAnswer, "", "the upload is still being read when the stop comes");
+
+    // The DM's page tries again the moment its socket closes with 1012, then backs off from 250 ms as
+    // client/state/socket.ts does, until the server stops listening. Meanwhile its fetches go on.
+    const reconnects: string[] = [];
+    const reconnecting = dmSocket.closed.then(async ({ code }) => {
+      assert.equal(code, 1012);
+      for (let attempt = 0; attempt < 8 && reconnects.at(-1) !== "ECONNREFUSED"; attempt++) {
+        if (attempt > 0) await sleep(250 * 2 ** (attempt - 1));
+        reconnects.push(
+          await new Promise<string>((resolve) => {
+            const ws = new WebSocket(wsUrl, { headers: dm.headers() });
+            ws.once("open", () => {
+              ws.terminate();
+              resolve("open");
+            });
+            ws.once("error", (err: Error & { code?: string }) => resolve(err.code ?? err.message));
+          }),
+        );
+      }
+    });
+    let fetching = true;
+    const fetched: Array<number | "gone"> = [];
+    const fetches = (async () => {
+      while (fetching && fetched.at(-1) !== "gone") {
+        try {
+          const res = await dm.call("GET", `/api/rooms/${roomId}/me`);
+          await res.arrayBuffer();
+          fetched.push(res.status);
+        } catch {
+          fetched.push("gone");
+        }
+        await sleep(20);
+      }
+    })();
+    await sleep(100);
+
+    const started = Date.now();
+    child.kill("SIGTERM");
+    const code = await exited;
+    const took = Date.now() - started;
+    fetching = false;
+    await Promise.all([reconnecting, fetches]);
+    const lines = output.split("\n").flatMap((line) => {
+      try {
+        return [JSON.parse(line) as { msg?: string; sockets?: number; cutOff?: number }];
+      } catch {
+        return [];
+      }
+    });
+    const steps = lines.map((line) => line.msg ?? "").filter((msg) => msg.startsWith("shut"));
+    assert.equal(code, 0, `the stop's exit code, after ${took} ms: ${steps.join(", ")}`);
+    assert.ok(took < 5_000, `the stop took ${took} ms`);
+    assert.equal(await seqOf("select seq::int from room_snapshots where room_id = $1"), lastSeq, "the stop saved the room at its last op");
+    assert.deepEqual(steps, [
+      "shutting down",
+      "shutdown: sockets and connections closed",
+      "shutdown: server closed",
+      "shutdown: rooms closed",
+      "shutdown: socket writes settled",
+      "shutdown: pool closed",
+      "shut down",
+    ]);
+    const sockets = lines.find((line) => line.msg === "shutdown: sockets and connections closed");
+    assert.deepEqual({ sockets: sockets?.sockets, cutOff: sockets?.cutOff }, { sockets: 2, cutOff: 1 }, "both sockets closed, the slow phone's cut off");
+    // What the stop met: the DM's page tried again while the player's phone held up the close and was refused, and the upload was cut off.
+    assert.ok(reconnects.includes("Unexpected server response: 503"), `the DM's page reconnected during the close: ${reconnects.join(", ")}`);
+    assert.ok(!reconnects.includes("open"), "no socket opened during the stop");
+    assert.ok(fetched.includes(200), `the DM's fetches before the stop: ${fetched.join(", ")}`);
+    await uploadClosed;
+    assert.equal(uploadAnswer, "", "the upload was cut off unanswered");
+    dmSocket.ws.terminate();
+    playerSocket.ws.terminate();
+  } finally {
+    if (child.exitCode === null) child.kill("SIGKILL");
+    await exited;
+  }
 });
