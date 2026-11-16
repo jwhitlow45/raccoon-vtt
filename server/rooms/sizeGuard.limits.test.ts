@@ -396,3 +396,55 @@ describe("LP43-PRIV-3: behind a blackout a player's exact part holds nothing", (
     assert.equal(ownHeldBytes(dms, "p1"), 0, "the DM's");
   });
 });
+
+describe("LP43R2-1: the room the DM's adds leave the players", () => {
+  test("at the DM's last add a player keeps more than KEPT_FOR_PLAYERS less one step, a join's bytes aside, and the worst case comes within a few KiB of it", () => {
+    const players = FAR.roomBytes - BOOKKEEPING_RESERVE.room;
+    const dmLine = players - KEPT_FOR_PLAYERS;
+    const base = room();
+    base.characters.c1 = character("c1", { ownerIds: ["p1"] });
+    base.tokens.hero = token("hero", { kind: "pc", actor: { ref: "c1" }, ownerIds: ["p1"], x: 2, y: 2 });
+    // P2's one area, exact in the DM's reading and stepped in P1's.
+    base.templates.a2 = template("a2", { ownerId: "p2" });
+    // P1's own area sized so what seats hold sits 100 bytes under a whole step. The DM's last add then leaves 100 bytes
+    // of the DM's room, and P1's reading rounds P2's area up to a whole step, the most a reading rounds.
+    base.templates.a1 = template("a1", { label: "" });
+    base.templates.a1 = template("a1", { label: "x".repeat(FAR.byteStep - 100 - heldBytes(base)) });
+    assert.equal(heldBytes(base) % FAR.byteStep, FAR.byteStep - 100);
+    // The DM's notes to two steps under the DM's line, then the largest pad the DM's line takes: its part ends on a step's edge.
+    const below = filled(base, fillFor(base, dmLine) - 2 * FAR.byteStep);
+    const at = (n: number): RoomState => ({ ...below, tokens: { ...below.tokens, pad: token("pad", { sceneId: "s2", notes: "n".repeat(n) }) } });
+    const dmTakes = (state: RoomState) => farRoomBytes(state, true) <= dmLine;
+    let [lo, hi] = [0, 4 * FAR.byteStep];
+    assert.ok(dmTakes(at(lo)) && !dmTakes(at(hi)));
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (dmTakes(at(mid))) lo = mid;
+      else hi = mid;
+    }
+    const last = at(lo);
+    const guard = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: 64 * MIB });
+    guard.stateMeasured(measuredStateBytes(last), last);
+    const goblin = { t: "token.create", token: { id: "dmnew", sceneId: "s2", kind: "monster", name: "Goblin", size: "medium", x: 3, y: 3, actor: { inline: actor() } } } as Op;
+    assert.deepEqual(judged(last, goblin, DM, guard, "dmAdd"), { ok: false, code: "quota", message: KEPT_FOR_PLAYERS_FULL }, "the DM's next add");
+    const keeps = (state: RoomState) => players - farRoomBytes(state, true, measuredStateBytes(state), ownHeldBytes(state, "p1"));
+    const kept = keeps(last);
+    assert.ok(kept > KEPT_FOR_PLAYERS - FAR.byteStep && kept < KEPT_FOR_PLAYERS - FAR.byteStep + 4 * 1024, `the worst case: P1 keeps ${kept} bytes`);
+    // A player joins: their bytes come out of what P1 keeps, and the rounding P1 reads never takes more than its step.
+    const joined: RoomState = { ...last, members: { ...last.members, p3: member("p3") } };
+    const join = measuredStateBytes(joined) - measuredStateBytes(last);
+    const left = keeps(joined);
+    assert.ok(left > KEPT_FOR_PLAYERS - FAR.byteStep - join, `after a join of ${join} bytes P1 keeps ${left} bytes`);
+    // The guard reads the same: P1's own area of 1 KiB under what P1 keeps is taken, and of 1 KiB over it refused.
+    const withArea = (label: string): RoomState => ({ ...joined, templates: { ...joined.templates, a3: template("a3", { label }) } });
+    const overhead = measuredStateBytes(withArea("")) - measuredStateBytes(joined);
+    const takesArea = (bytes: number) => {
+      const next = withArea("y".repeat(bytes - overhead));
+      const judge = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: 64 * MIB });
+      judge.stateMeasured(measuredStateBytes(joined), joined);
+      return judge.check(next, ["s1"], measuredStateBytes(next) - measuredStateBytes(joined), joined, "player", "widest", false, "p1").ok;
+    };
+    assert.ok(takesArea(left - 1024), "P1's area 1 KiB under what P1 keeps");
+    assert.ok(!takesArea(left + 1024), "P1's area 1 KiB over it");
+  });
+});

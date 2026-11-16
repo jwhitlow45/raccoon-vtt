@@ -1829,10 +1829,10 @@ export function playerBlockBytes(state: RoomState): number {
  * rounded up to FAR.byteStep, plus what seats hold exactly. `widest` holds
  * per-player vision's reserves at their widest, a player's op's and a DM
  * op's that raises them. The marked pool counts whole against this line
- * alone.
+ * alone. A player's reading passes their own exact part as `held`
+ * (ownHeldBytes).
  */
-export function farRoomBytes(state: RoomState, widest: boolean, measured: number = measuredStateBytes(state)): number {
-  const held = heldBytes(state);
+export function farRoomBytes(state: RoomState, widest: boolean, measured: number = measuredStateBytes(state), held: number = heldBytes(state)): number {
   const reserves = farReserves(state, widest);
   return roundUp(Math.max(0, measured - held + reserves), FAR.byteStep) + held;
 }

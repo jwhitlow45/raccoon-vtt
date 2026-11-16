@@ -1435,9 +1435,13 @@ export const BOOKKEEPING_RESERVE = { room: 512 * 1024, scene: 256 * 1024 } as co
  * always keep this much once the DM's per-player scenes or own things stop.
  * Measured on live play 43's repro (server/rooms/limits.itest.ts), a
  * session of 5 areas and 50 strokes of 200 point values for each of six
- * players takes 418 KiB, so the players keep about two sessions' room,
- * less up to one step the far line rounds by. A scene keeps more already:
- * the DM's own part of it stops at the 3 MiB scene line, half its far line.
+ * players takes 418 KiB. Each player keeps more than this less one step,
+ * 0.75 MiB or close to two sessions (D-261116-016): the DM's adds stop with
+ * the stored bytes and reserves at least this far under the players' line,
+ * and a reading rounds its stepped part up by less than a step whoever's
+ * things it holds exactly. Joins and the DM's play after that spend their
+ * own bytes of it. A scene keeps more already: the DM's own part of it
+ * stops at the 3 MiB scene line, half its far line.
  */
 export const KEPT_FOR_PLAYERS = 1 * MiB;
 
