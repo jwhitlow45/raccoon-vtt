@@ -10,7 +10,7 @@ import { hexAt, hexCenter, hexInScene, hexKey, hexNeighbors, type Hex } from "#s
 import { deviceGround } from "#shared/rules/held.ts";
 import { footing } from "#shared/rules/heights.ts";
 import { coreBlocked, coreWalled, groundUnder, hexEndStand, hexFitWall, hexLegOf, hexLegSpots, hexLegStand, hexNarrow, hexStandHexes, hexStandInside, hexStandPlace, hexStartStand, hexWallsOf, landedElevation, landing, legSpots, legStop, offGridWallThrough, onSqueezedLattice, ownWalk, previewChunks, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type HexStand, type HexWalls, type Walker } from "#shared/rules/movement.ts";
-import { fileOutOfReach, fileRoutes, fileShift, fileShiftAlong, followedHeight, followerTrace, hexFileClasses, hexFileRoutes, routeLattice, routePoints, routeStop, routeWalkers, seatShift, walkSqueezes, walkTrace, type FileAlong, type FileEnd, type FilePoint, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
+import { fileHeightsAlong, fileOutOfReach, fileRoutes, fileShift, followedHeight, followerTrace, hexFileClasses, hexFileRoutes, routeLattice, routePoints, routeStop, routeWalkers, seatShift, walkSqueezes, walkTrace, type FileEnd, type FilePoint, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { followsHexByHex, followsInSingleFile, followsInSingleFileOnHexes } from "#shared/migrate.ts";
 import { checkSetReach } from "#shared/rules/moveLeg.ts";
 import type { WalkRoute } from "#shared/rules/walk.ts";
@@ -1024,27 +1024,14 @@ function followersOf(state: WalkersState, lead: Walker, points: readonly RoutePo
     };
     return { spot, trace: followerTrace(w, [{ x: w.x, y: w.y, elevation: w.elevation }, ...points.slice(1).map((p, k) => spot(p, squeezes[k + 1]!, k + 1))]) };
   });
-  // Where the holder is when its walk is `along` (route.ts FileAlong): between its piece's ends by its share, as the move reads it.
-  const leadAlong = (along: FileAlong): RoutePoint => {
-    const [piece, k, n] = along;
-    const share = n > 0 ? k / n : 0;
-    const a = points[piece]!;
-    const b = points[Math.min(points.length - 1, piece + 1)]!;
-    return { x: a.x + (b.x - a.x) * share, y: a.y + (b.y - a.y) * share, elevation: a.elevation + (b.elevation - a.elevation) * share };
-  };
-  // Each walk in single file hex by hex, at the height the move takes it along each hex, and the holder's piece each leg ends on.
+  // Each walk in single file hex by hex, at the height the move takes it along each hex (route.ts fileHeightsAlong), and the
+  // holder's piece each leg ends on.
   const byHex = new Map(
     linked.flatMap((w) => {
       const own = file?.get(w.id);
       if (!own?.some((p) => p.along)) return [];
-      const route = own.map((p, j): RoutePoint => {
-        if (j === 0) return { x: w.x, y: w.y, elevation: w.elevation };
-        // Its walk's end takes its holders where the holder's walk ends, as the move takes it along (moveLeg.ts follow).
-        const at = leadAlong(j === own.length - 1 ? [points.length - 2, 1, 1] : p.along!);
-        const shift = { x: at.x - lead.x, y: at.y - lead.y };
-        const height = followedHeight(state.buildChunks, from, memberOf, w.id, fileShiftAlong(file!, memberOf, p.along!, shift), at.elevation);
-        return { x: p.x, y: p.y, elevation: height ?? groundUnder(state.buildChunks, followerTrace(w, [w])[0]!, p) };
-      });
+      const heights = fileHeightsAlong(state.buildChunks, from, memberOf, file!, w.id, points, lead);
+      const route = own.map((p, j): RoutePoint => (j === 0 ? { x: w.x, y: w.y, elevation: w.elevation } : { x: p.x, y: p.y, elevation: heights[j] ?? groundUnder(state.buildChunks, followerTrace(w, [w])[0]!, p) }));
       // Its leg to point j ends within the holder's piece to its point `piece + 1`, and only its start is reached before any.
       const piece = own.map((p) => (p.along && p.along[1] > 0 ? p.along[0] + 1 : 0));
       return [[w.id, { route, trace: followerTrace(w, route), piece }] as const];

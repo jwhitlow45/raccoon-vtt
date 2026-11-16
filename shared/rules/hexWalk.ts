@@ -29,7 +29,7 @@ import {
   type HexWalls,
   type Walker,
 } from "./movement.ts";
-import { fileOutOfReach, fileShift, fileShiftAlong, followedHeight, hexFileClasses, hexFileRoutes, seatShift, type FileAlong, type FileEnd, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "./route.ts";
+import { fileHeightsAlong, fileOutOfReach, fileShift, followedHeight, hexFileClasses, hexFileRoutes, seatShift, type FileEnd, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "./route.ts";
 import { onHolder } from "./attach.ts";
 import { LegCheck, MAX_SETTLED, WalkSearch, WalkWorld, WorkBudget, worldUnits, type SettleResult, type Slice, type WalkInput, type WalkRoute } from "./walk.ts";
 import { followsHexByHex } from "../migrate.ts";
@@ -587,27 +587,20 @@ export class HexWalkWorld {
     const file = hexFileRoutes(g, token, points, [this.#towed.map((t) => t.walker)], followsHexByHex(undefined));
     // The walker's height at point `k` of its walk, as it stands there: squeezed where the walk ends.
     const leadAt = (k: number) => this.elevationOf(k === n ? hexStandAt(g, token, points[k]!, true) : hexEndStand(g, token, points[k]!));
-    // Where the walker is and how high when its walk is `along` (route.ts FileAlong): between its piece's ends by its share, as the move reads it.
-    const leadAlong = (along: FileAlong) => {
-      const [piece, k, m] = along;
-      const share = m > 0 ? k / m : 0;
-      const a = points[piece]!;
-      const b = points[Math.min(n, piece + 1)]!;
-      return { shift: { x: a.x + (b.x - a.x) * share - token.x, y: a.y + (b.y - a.y) * share - token.y }, height: leadAt(piece) + (leadAt(Math.min(n, piece + 1)) - leadAt(piece)) * share };
-    };
+    // The walker's walk, each point at its height there, which a walk hex by hex reads at each of its own points' moments.
+    const walked = points.map((p, k) => ({ x: p.x, y: p.y, elevation: leadAt(k) }));
     const ends = new Map<string, FileEnd>();
     for (const t of this.#towed) {
       const walk = file.get(t.walker.id);
       if (!walk) continue;
       const memberOf = (m: string) => (m === t.walker.id ? t.walker : this.#members.get(m));
-      // Each spot as the move takes it along: at the height its holders' walk gives it there, on its ground where that is not followed.
+      // Each spot as the move takes it along: at the height its holders' walk gives it there (route.ts fileHeightsAlong), on its
+      // ground where that is not followed.
+      const along = walk.some((p) => p.along) ? fileHeightsAlong(build.buildChunks, this.#lead, (m) => this.#members.get(m), file, t.walker.id, walked, token, memberOf) : null;
       const at = (k: number): Walker => {
         if (k === 0) return t.walker;
         const p = walk[k]!;
-        // Its walk's end takes its holders where the walker's walk ends, as the move takes it along (moveLeg.ts follow).
-        const lead = p.along ? leadAlong(k === walk.length - 1 ? [n - 1, 1, 1] : p.along) : null;
-        const shift = p.along && lead ? fileShiftAlong(file, memberOf, p.along, lead.shift) : fileShift(file, memberOf, k, { x: points[k]!.x - token.x, y: points[k]!.y - token.y });
-        const height = followedHeight(build.buildChunks, this.#lead, (m) => this.#members.get(m), t.walker.id, shift, lead ? lead.height : leadAt(k));
+        const height = along ? along[k]! : followedHeight(build.buildChunks, this.#lead, (m) => this.#members.get(m), t.walker.id, fileShift(file, memberOf, k, { x: points[k]!.x - token.x, y: points[k]!.y - token.y }), leadAt(k));
         return { ...t.walker, x: p.x, y: p.y, elevation: height ?? hexesGround(build.buildChunks, token.sceneId, [tokenRefHex(g, { ...t.walker, ...p })]) };
       };
       const size = sizeCategory(t.walker);
