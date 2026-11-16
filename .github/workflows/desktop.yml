@@ -382,7 +382,7 @@ jobs:
         id: e2e
         if: ${{ !cancelled() && steps.app.outcome == 'success' }}
         env:
-          E2E_PORT: "40600"
+          E2E_PORT: "30600"
           E2E_SCREENSHOT_DIR: test-results/desktop-e2e-screenshots
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
