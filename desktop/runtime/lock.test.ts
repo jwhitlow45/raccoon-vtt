@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { guardPath, lockLocation, type LocationDeps } from "./lock.ts";
+import { GUARD_READS, guardPath, lockLocation, readGuard, type GuardIo, type LocationDeps } from "./lock.ts";
 
 /**
  * Where the lock lives (docs/design/design-v1-local-app.md 8.1,
@@ -79,4 +79,59 @@ test("Windows uses a named pipe, which Windows removes with its owner", () => {
 
 test("the guard sits beside the socket", () => {
   assert.equal(guardPath("/run/user/1000/raccoonvtt-0123456789abcdef.sock"), "/run/user/1000/raccoonvtt-0123456789abcdef.sock.recover");
+});
+
+const RECORD = { pid: 41, start: 7, boot: "boot-1" };
+const noRecord = (): Error => Object.assign(new Error("no owner.json"), { code: "ENOENT" });
+
+/** A guard read that replays its steps in order: a record's text, or the error its read meets. */
+function replay(reads: (string | Error)[], there: boolean[]): GuardIo & { reads: () => number; looks: () => number } {
+  let read = 0;
+  let look = 0;
+  return {
+    readRecord: async () => {
+      const next = reads[Math.min(read++, reads.length - 1)];
+      if (next instanceof Error) throw next;
+      return next as string;
+    },
+    exists: () => there[Math.min(look++, there.length - 1)] as boolean,
+    reads: () => read,
+    looks: () => look,
+  };
+}
+
+test("a guard swapped between the read and the look is read again, and is the newer owner's", async () => {
+  // Its owner moved it aside as it was read, and another contender's guard took its place before the look.
+  const io = replay([noRecord(), JSON.stringify(RECORD)], [true]);
+  assert.deepEqual(await readGuard("/run/user/1000/x.sock.recover", io), RECORD);
+  assert.deepEqual([io.reads(), io.looks()], [2, 1]);
+});
+
+test("a guard that stays without its record is unreadable after a bounded number of reads, one after another", async () => {
+  const io = replay([noRecord()], [true]);
+  assert.equal(await readGuard("/run/user/1000/x.sock.recover", io), "unreadable");
+  assert.equal(io.reads(), GUARD_READS);
+});
+
+test("a guard gone at the look is gone, at the first read or a later one", async () => {
+  assert.equal(await readGuard("/g", replay([noRecord()], [false])), "gone");
+  assert.equal(await readGuard("/g", replay([noRecord()], [true, false])), "gone");
+});
+
+test("a read that fails otherwise, a look that fails, or a record that is no record is unreadable at once", async () => {
+  const denied = Object.assign(new Error("denied"), { code: "EACCES" });
+  const blind: GuardIo = {
+    ...replay([noRecord(), JSON.stringify(RECORD)], [true]),
+    exists: () => {
+      throw denied;
+    },
+  };
+  for (const io of [
+    replay([denied, JSON.stringify(RECORD)], [true]),
+    blind,
+    replay(["{", JSON.stringify(RECORD)], [true]),
+    replay([JSON.stringify({ pid: 41 }), JSON.stringify(RECORD)], [true]),
+  ]) {
+    assert.equal(await readGuard("/g", io), "unreadable");
+  }
 });
