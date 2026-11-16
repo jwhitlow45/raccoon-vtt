@@ -7,6 +7,7 @@ import { BACKUP_SUFFIX, type BackupSummary, type SupervisorStatus } from "../con
 import { listBackups } from "./backup.ts";
 import { createRoom, query, roomNames, supervisorDbUrl } from "./testing/dataFixture.ts";
 import { startSupervisor, type SupervisorRun } from "./testing/supervisorProcess.ts";
+import { TEST_PORTS } from "./testing/testPorts.ts";
 
 /**
  * Updates and going back (docs/design/design-v1-local-app.md 8.4), with real
@@ -15,7 +16,7 @@ import { startSupervisor, type SupervisorRun } from "./testing/supervisorProcess
  * the stops for a missing stamp and another PostgreSQL major.
  */
 
-const PORT = 40432;
+const PORT = TEST_PORTS.upgrade;
 type TestBuild = { app: string; snapshotVersion: number; opVersion: number };
 const OLD: TestBuild = { app: "0.4.0", snapshotVersion: 40, opVersion: 50 };
 const NEW: TestBuild = { app: "0.5.0", snapshotVersion: 46, opVersion: 60 };

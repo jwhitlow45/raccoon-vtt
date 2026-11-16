@@ -9,12 +9,13 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 import { alignmentLines, measureAlignment } from "../../e2e/helpers/alignment.ts";
 import { ERRORS, SCENARIO_NAMES } from "../window/scenarios.ts";
 import { WORDS } from "../contract.ts";
+import { TEST_PORTS } from "../runtime/testing/testPorts.ts";
 
 /**
  * The window's page (design 9) in Chromium, against its production build
  * with the fake bridge: every state and word, both themes, three sizes at two
  * zooms with the alignment check, keys and focus, and busy buttons. It runs
- * on E2E_PORT (default 40600) and takes its shots from E2E_SCREENSHOT_DIR.
+ * on E2E_PORT (default 30600) and takes its shots from E2E_SCREENSHOT_DIR.
  *
  * Zoom is the layout the shell's zoom factor gives: a window of W x H at
  * 130% lays the page out in W/1.3 x H/1.3 CSS pixels, drawn 1.3 times larger.
@@ -23,7 +24,7 @@ import { WORDS } from "../contract.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const OUT = path.join(ROOT, "desktop/out/window");
-const PORT = Number(process.env.E2E_PORT ?? 40600);
+const PORT = Number(process.env.E2E_PORT ?? TEST_PORTS.windowE2e);
 const SHOTS = process.env.E2E_SCREENSHOT_DIR ?? null;
 
 let server: Server;
