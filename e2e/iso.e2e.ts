@@ -14,9 +14,9 @@ import { placedOnHex } from "../shared/rules/footprint.ts";
 import { cornerAt, hexCenter, hexCorners, hexInScene, hexNeighbors, type Hex, type HexGrid } from "../shared/rules/hex.ts";
 
 /**
- * The isometric view's choice (docs/design/design-v1-isometric-view.md 7 and 8): the View button and its menu, a scene's Suggested view,
- * the keys I, Q and E, and the table display's rows. A DM on a computer,
- * Pat on a phone and a TV.
+ * The isometric view's choice (docs/design/design-v1-isometric-view.md 7 and
+ * 8): the View button and its menu, a scene's Suggested view, the keys I, Q and
+ * E, and the table display's rows. A DM on a computer, Pat on a phone and a TV.
  *
  * Every page offers Isometric (client/features/view/store.ts isoReady).
  * The DM's and Pat's pages also carry the test flag, which installs the
@@ -253,12 +253,12 @@ function boardScale(page: Page): Promise<number> {
 }
 
 /**
- * What the visible isometric board draws, read from Konva's own nodes
- *: on the ground stage, which never listens, and on the main
- * stage's drag layer and overlay. A ring's line is a Shape dashed 8 by 5
- * (measure/ringScene.ts), an aura's shading a Shape filled in its color,
- * and a pill a Label with its words. `clipped` counts the aura's shadings
- * under a group with a clip, as one moving over fog draws.
+ * What the visible isometric board draws, read from Konva's own nodes on the
+ * ground stage, which never listens, and on the main stage's drag layer and
+ * overlay. A ring's line is a Shape dashed 8 by 5 (measure/ringScene.ts), an
+ * aura's shading a Shape filled in its color, and a pill a Label with its
+ * words. `clipped` counts the aura's shadings under a
+ * group with a clip, as one moving over fog draws.
  */
 type IsoMarks = { ground: { rings: number; aura: number; texts: string[] }; drag: { rings: number; texts: string[]; uprightTexts: string[]; circles: number }; overlay: { rings: number; aura: number; clipped: number; texts: string[] } };
 

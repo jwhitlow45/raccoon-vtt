@@ -14,12 +14,13 @@ import { buildSnapshot } from "./fanout.ts";
 import { Socket, startEngine, type Engine, type TestClient } from "./testing.ts";
 
 /**
- * Several floors over real sockets (docs/design/design-v1-floors.md 8 and 15), the shipping gate: every frame each recipient is sent, the
- * DM, two players, a table display and a DM's view as a player, through the
- * actor and the fan-out. A floor a recipient does not hold sends nothing:
- * no record, id, name, level, token, row or line. And after every step each
- * socket's view, its snapshot with every `ev` since folded in, is exactly a
- * fresh snapshot of the committed room (the oracle of 8.1).
+ * Several floors over real sockets (docs/design/design-v1-floors.md 8 and 15),
+ * the shipping gate: every frame each recipient is sent, the DM, two players, a
+ * table display and a DM's view as a player, through the actor and the fan-out.
+ * A floor a recipient does not hold sends nothing: no record, id, name, level,
+ * token, row or line. And after every step each socket's view, its snapshot
+ * with every `ev` since folded in, is exactly a fresh snapshot of the committed
+ * room (the oracle of 8.1).
  */
 
 const inline = (senses = "") => ({

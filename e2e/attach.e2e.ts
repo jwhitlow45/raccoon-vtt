@@ -580,7 +580,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await dm.keyboard.press("Escape");
   });
 
-  test("lp2-3c-keys. in the DM's pop-up for the scout, Down, Up, Home and End move through the near rows and Farther away as one list, wrapping at the ends (docs/design/design-v1-look-pass-2.md 3, lane 3)", async () => {
+  test("lp2-3c-keys. in the DM's pop-up for the scout, Down, Up, Home and End move through the near rows and Farther away as one list, wrapping at the ends (docs/design/design-v1-look-pass-2.md 3)", async () => {
     const b = await select(dm, "Scout", { x: 1, y: 1 });
     await (await barControl(b, "Attach")).click();
     const popover = dm.getByRole("dialog", { name: "Attach Scout" });

@@ -2,11 +2,9 @@ import type { AdvantageSource } from "#shared/dice/formula.ts";
 import type { IconName } from "../../components/Icon.tsx";
 
 /**
- * The room search's entry and its anchors (docs/design/design-v1-qol.md 5, What keeps it current),
- * fixed first so the lanes that fill the search read one shape:
- * S0 the matcher, the index and the empty catalogs, S1 the route, S2 the
- * entries and the controls' `search` ids, S3 the sheet. Types and the id
- * rule only. What matches, ranks and acts is theirs.
+ * The room search's entry and its anchors (docs/design/design-v1-qol.md 5, What
+ * keeps it current), fixed first so the code that fills the search reads one
+ * shape. Types and the id rule only. What matches, ranks and acts is theirs.
  */
 
 /**
@@ -36,7 +34,7 @@ export type SearchKind =
 /**
  * Where a result goes (design-v1-qol.md 5, The route, D-261106-150): a panel, perhaps one
  * of its pages, a fold on the way to open for now, and the control there by
- * its anchor id, pressed or only focused. S1's `openAt` takes it as is.
+ * its anchor id, pressed or only focused. The route's `openAt` takes it as is.
  */
 export type SearchRoute = {
   /** A panel's id, as `PANELS` names it (features/panels.ts). */

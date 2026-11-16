@@ -502,8 +502,7 @@ describe("animated maps", { concurrency: false }, () => {
   /*
    * The upload steps (am-1 and am-9 to am-11): the DM's upload through each
    * form, the refusals, the still pick, Use the still only and the Library.
-   * Their helpers load here, so the file's import block stays the board
-   * lane's.
+   * Their helpers load here, so the file's import block stays the board's.
    */
   /** The words the steps look for (client/features/animmap words.ts, upload.ts and firstFrame.ts, whose unit tests pin them). The client's modules need a DOM, so they are not imported here. */
   const AMD_WORDS = {

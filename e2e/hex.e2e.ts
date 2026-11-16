@@ -31,20 +31,20 @@ import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
  * export's words, and those screens measured for alignment. A player on a
  * phone sees the same lines.
  *
- * The room's battle mat is switched to hex rows by an op. The HX4- steps then make hex scenes through the settings: the room's New
- * scenes grid, the new scene form, a scene's Grid shape and its refusal,
- * Line up grid's box on a hex map, no "square" on a hex scene's screens,
- * and those screens' alignment. The HX6- steps build a hex
- * scene of its own: Wall lines tapped and dragged, a free door's states,
- * Remove and undo, difficult ground by hexes, Erase by hexes, a player's
- * creature opening a free door from a hex beside it, and those screens'
- * alignment. The HX7- steps ride, carry and trap on hexes.
- * The HX9b- steps reveal rooms on hex scenes: a room of hexes
- * closed by free walls and a door, revealed through the Fog tool's Builder
- * room and shown to Pat, the door open and shut, a room on hex columns,
- * the Fog tool's options measured, the whole of the largest open hex scene
- * drafted in messages that each fit a socket frame, and a room sent in
- * several ops counted and taken back as one edit, on hexes and squares.
+ * The room's battle mat is switched to hex rows by an op. The HX4- steps then
+ * make hex scenes through the settings: the room's New scenes grid, the new
+ * scene form, a scene's Grid shape and its refusal, Line up grid's box on a hex
+ * map, no "square" on a hex scene's screens, and those screens' alignment. The
+ * HX6- steps build a hex scene of its own: Wall lines tapped and dragged, a
+ * free door's states, Remove and undo, difficult ground by hexes, Erase by
+ * hexes, a player's creature opening a free door from a hex beside it, and
+ * those screens' alignment. The HX7- steps ride, carry and trap on hexes. The
+ * HX9b- steps reveal rooms on hex scenes: a room of hexes closed by free walls
+ * and a door, revealed through the Fog tool's Builder room and shown to Pat,
+ * the door open and shut, a room on hex columns, the Fog tool's options
+ * measured, the whole of the largest open hex scene drafted in messages that
+ * each fit a socket frame, and a room sent in several ops counted and taken
+ * back as one edit, on hexes and squares.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus 31. The
  * other environment variables are the smoke run's (smoke.e2e.ts).

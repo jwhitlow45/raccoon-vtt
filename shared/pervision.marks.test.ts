@@ -11,11 +11,12 @@ import { visionRules } from "./ruleHooks.ts";
 import { DM, apply, entry, env, member, room, scene, template, token } from "./testutil.ts";
 
 /**
- * Per-player vision's marks (docs/design/design-v1-per-player-vision.md 6.5), by the stub sight of perPlayerTestutil.ts: each source sees 3
- * cells out. Thorn is p1's, at the west, Bree p2's, at the south west, a
- * friendly scout every player shares sight with stands east, and p3 owns
- * nothing. p1 and p2 see for themselves. A goblin stands where only Thorn
- * sees it, an ogre where only the scout does, and a wolf where no one does.
+ * Per-player vision's marks (docs/design/design-v1-per-player-vision.md 6.5),
+ * by the stub sight of perPlayerTestutil.ts: each source sees 3 cells out.
+ * Thorn is p1's, at the west, Bree p2's, at the south west, a friendly scout
+ * every player shares sight with stands east, and p3 owns nothing. p1 and p2
+ * see for themselves. A goblin stands where only Thorn sees it, an ogre where
+ * only the scout does, and a wolf where no one does.
  */
 const THORN: Viewer = { memberId: "p1", role: "player" };
 const BREE: Viewer = { memberId: "p2", role: "player" };

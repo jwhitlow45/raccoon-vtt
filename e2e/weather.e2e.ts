@@ -16,7 +16,7 @@ import { particleCount, WRAP_MARGIN } from "../client/features/weather/sim.ts";
  * Weather over the map (docs/design/design-v1-weather.md): the
  * layer, its one clock and where it sits, This device's choice, the table
  * display's menu, and the places it waits. Weather is set through the DM's
- * socket, so no step needs the DM's fold (the weather menu steps drive that).
+ * socket, so no step needs the DM's fold (the wx-ui- steps in scenesetup.e2e.ts and dice.e2e.ts drive that).
  *
  * The weather canvas is read through its test hooks
  * (features/weather/WeatherLayer.tsx): `data-weather` ("rain heavy strong",
