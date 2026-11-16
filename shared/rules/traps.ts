@@ -12,7 +12,7 @@ import { footing, footprintGround, groundAt, sceneGround, standing } from "./hei
 import { pendingGround } from "./held.ts";
 import { planWalks, walkedIn, withTrapCut, type MovedToken } from "./moveLeg.ts";
 import { groundUnder, hexStandHexes, storedBuild, type HexWalls } from "./movement.ts";
-import { compareAlong, fileOrder, onTrace, pointAt, routeLattice, routeStands, routeWalk, type FileAlong, type PublicGround, type RoutePiece, type RoutePoint, type RouteSpot, type StandGroup, type StandRule, type WalkSpot } from "./route.ts";
+import { compareAlong, fileOrder, onTrace, routeLattice, routeStands, routeWalk, walkAt, type FileAlong, type PublicGround, type RoutePiece, type RoutePoint, type RouteSpot, type StandGroup, type StandRule, type WalkSpot } from "./route.ts";
 import { APART, contact, orient } from "./segments.ts";
 import { sceneWalls } from "./walls.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
@@ -816,7 +816,10 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
  * walks a route of its own, is judged by the same rule at its own spots,
  * its holder read at the same moment (`fileElevation`), so the trap step
  * reads it at the height the move takes it along at (review
- * FU45B-ASTRA-06).
+ * FU45B-ASTRA-06). A walk hex by hex, from op version 62, is at each spot
+ * where the move has it at that spot's moment (route.ts walkAt), in the
+ * file or not, as every reader of the trap step reads it while it walks
+ * (review HEXFILE-ASTRA-7).
  *
  * What is carried or rides all the way up adds its holders' changes to the
  * group's walk, in the order `elevationOnStep` adds them, so a walk of 500
@@ -826,6 +829,7 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
 function elevationRule(walk: Walk, before: RoomState, shared: boolean): (j: number) => number {
   const last = walk.spots.length - 1;
   const own = walk.spots;
+  if (walk.ownProgress) return (j) => (j === 0 ? walk.token.elevation : j === last ? walk.entry.to.elevation : walkAt(walk.entry, own[j]!.progress).elevation);
   if (!shared) {
     const holder = walk.holder;
     if (!holder || !inFile(walk)) return (j) => (j === 0 ? walk.token.elevation : j === last ? walk.entry.to.elevation : own[j]!.elevation);
@@ -879,7 +883,7 @@ function inFile(walk: Walk): boolean {
  * ground, else the holder's change but never below the ground. The holder
  * is read at its latest spot at the same progress, but under a walk hex by
  * hex (`ownProgress`) at `moment`, by default the spot's own, between the
- * ends of the leg of its own walk it is on then (route.ts pointAt), as the
+ * ends of the leg of its own walk it is on then (route.ts walkAt), as the
  * move and the area sweep read it (moveLeg.ts heightAlong): at its latest
  * spot a holder coming down read higher than the move takes it, so a trap
  * read the creature too high and a cut left it above its holder (review
@@ -899,7 +903,7 @@ function fileElevation(walk: Walk, holder: Walk, before: RoomState, j: number, a
 /** A walk in single file's holder's height at the moment the walk reaches its spot `j` (`fileElevation`). */
 function holderHeight(walk: Walk, holder: Walk, j: number): number {
   const s = walk.spots[j]!;
-  return walk.ownProgress ? pointAt(holder.entry.route, s.progress, holder.entry.along).elevation : holder.elevation(latestIndex(holder.spots, s.progress));
+  return walk.ownProgress ? walkAt(holder.entry, s.progress).elevation : holder.elevation(latestIndex(holder.spots, s.progress));
 }
 
 /** A walk's elevation at spot `j` of its group's own walk at `step`, by attach's rule, its holder read at the same spot. */
@@ -1812,18 +1816,20 @@ function movedIn(m: Moment, walk: Walk): Token | undefined {
  * Where a walk stands at the moment on its spot: after its group's stop
  * where the stop leaves it (`stoodAt`), else on its latest spot. A walk hex
  * by hex is there at the height the move has it then, between the ends of
- * the leg of its own walk it is on (route.ts pointAt), as the move and the
- * area sweep read it: a goblin waiting on its last hex while the warhorse
- * it follows comes on down comes down with it (review HEXFILE-OPUS-11), and
- * so does one on its way to its first hex, or one that never leaves its
- * start (review HEXFILE-OPUS-12). Only where a stop lands one that has not
- * left its start does it keep its own height (`stoodAt`).
+ * the leg of its own walk it is on (route.ts walkAt), as the move and the
+ * area sweep read it, in the file or not: a goblin waiting on its last hex
+ * while the warhorse it follows comes on down comes down with it (review
+ * HEXFILE-OPUS-11), and so does one on its way to its first hex, or one
+ * that never leaves its start (review HEXFILE-OPUS-12), and a hidden ogre
+ * too big for the file that the goblin drags along by the goblin's moments
+ * (review HEXFILE-ASTRA-7). Only where a stop lands one that has not left
+ * its start does it keep its own height (`stoodAt`).
  */
 function placedIn(m: Moment, walk: Walk): Token {
   const stop = m.stops.get(walk.group.named);
   if (stop && compareProgress(m.p, stop.until) > 0) return stoppedAt(walk, stopIndex(walk, stop), readOf(stop));
   const at = placedAt(walk, latestIndex(walk.spots, m.p));
-  return walk.heightAt ? { ...at, elevation: pointAt(walk.entry.route, m.p, walk.entry.along).elevation } : at;
+  return walk.ownProgress ? { ...at, elevation: walkAt(walk.entry, m.p).elevation } : at;
 }
 
 function tokenAt(m: Moment, id: string): Token | undefined {
