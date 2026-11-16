@@ -2,7 +2,7 @@ import { chunkKey, holderChunkKey, holderTileKey, parseKey, readEntity, tileKey,
 import { lineAudience } from "#shared/logRings.ts";
 import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, UP_DIR_CHARS, type BuildChunk, type Encounter, type EncounterSnapshot, type LogEntry, type Token, type Trap } from "#shared/model.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
-import { exploredReserve, FAR, farByteLine, farBytesOver, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, reservedExploreFloors, roundUp, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type LimitCheck } from "#shared/limits.ts";
+import { exploredReserve, FAR, farByteLine, farBytesOver, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, reservedExploreFloors, roundUp, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type LimitCheck } from "#shared/limits.ts";
 import type { OpOf } from "#shared/protocol.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
 import { NUMBERS_MOST } from "#shared/numbering.ts";
@@ -116,8 +116,13 @@ function sceneFull(limit: number): LimitCheck {
 /** The last exact size, and how much the state may have grown since. */
 type Measure = { bytes: number; growth: number };
 
-/** How an op meets the far line (SizeGuard.check): not at all, with today's reserves, or with per-player vision's at their widest. */
-export type FarJudge = "none" | "today" | "widest" | "widestDm";
+/**
+ * How an op meets the far line (SizeGuard.check): not at all, with today's
+ * reserves, or with per-player vision's at their widest. A DM's op that
+ * raises those (`widestDm`) and the DM's other adds (`dmAdd`) read the
+ * room's line KEPT_FOR_PLAYERS sooner (shared/limits.ts).
+ */
+export type FarJudge = "none" | "today" | "widest" | "widestDm" | "dmAdd";
 
 /** The room measure's DM part: less what seats hold and players' companion blocks. */
 function dmRoomBytes(state: RoomState, measured: number): number {
@@ -233,7 +238,8 @@ export class SizeGuard {
    * opKind) meets no near line, the DM's either, its growth only counted,
    * and reads the far line itself, where an op that meets the line stops
    * BOOKKEEPING_RESERVE short of it (shared/limits.ts farByteLine), so what
-   * bookkeeping adds stays within the room's stored bound.
+   * bookkeeping adds stays within the room's stored bound. The DM's adds
+   * (`widestDm` and `dmAdd`) stop KEPT_FOR_PLAYERS sooner on the room's.
    */
   check(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState, role: Viewer["role"] = "dm", far: FarJudge = "none", exempt = false): LimitCheck {
     this.#refusedScene = null;
@@ -393,22 +399,28 @@ export class SizeGuard {
    * FAR.byteStep and what seats hold exactly, refuses an op that grows the
    * measure's total past it. Read exactly only once the bound with a step
    * to spare could pass the line. Called after the near check counted the
-   * op's growth, so the bounds hold it.
+   * op's growth, so the bounds hold it. The DM's adds read the DM's line,
+   * KEPT_FOR_PLAYERS before the players' on the room, and one that only the
+   * kept room stops says so (KEPT_FOR_PLAYERS_FULL).
    */
   #far(next: RoomState, before: RoomState | undefined, far: Exclude<FarJudge, "none">, kind: "meets" | "exempt"): LimitCheck {
     const widest = far !== "today";
-    const refused = (limit: number): LimitCheck => (far === "widestDm" ? { ok: false, code: "quota", message: PER_PLAYER_FULL } : roomFull(limit));
+    const line = far === "widestDm" || far === "dmAdd" ? "dm" : "players";
     const state = this.#state;
     const reserves = farReserves(next, widest);
-    const roomLine = farByteLine(kind, "room")!;
+    const roomLine = farByteLine(kind, "room", line)!;
     if (!state || state.bytes + state.growth + reserves + FAR.byteStep > roomLine) {
       const bytes = measuredStateBytes(next);
       const held = heldBytes(next);
       const grew = before === undefined || bytes + reserves > measuredStateBytes(before) + farReserves(before, widest);
-      if (farBytesOver("room", kind, bytes - held + reserves, held, grew)) return refused(FAR.roomBytes);
+      const dmPart = bytes - held + reserves;
+      if (farBytesOver("room", kind, line, dmPart, held, grew)) {
+        if (far === "widestDm") return { ok: false, code: "quota", message: PER_PLAYER_FULL };
+        return line === "dm" && !farBytesOver("room", kind, "players", dmPart, held, grew) ? { ok: false, code: "quota", message: KEPT_FOR_PLAYERS_FULL } : roomFull(FAR.roomBytes);
+      }
       this.#state = { bytes, growth: 0 };
     }
-    const sceneLine = farByteLine(kind, "scene")!;
+    const sceneLine = farByteLine(kind, "scene", line)!;
     // Every scene, as the near check reads them: the room-level part (characters, the fight, the shared log) is in each
     // scene's measure, so an op that grows it grows scenes it never touched.
     const room = roomLevelBytes(next);
@@ -424,7 +436,7 @@ export class SizeGuard {
       const need = SHELL_BYTES + room + sum(floors, (scene) => sceneOwnBytes(next, scene.id)) + sight + explored + maps;
       const held = heldBytes(next, [main]);
       const grew = before === undefined || need > neededBefore(before, main, MEMORY_CAP, "dm");
-      if (!farBytesOver("scene", kind, need - held, held, grew)) continue;
+      if (!farBytesOver("scene", kind, line, need - held, held, grew)) continue;
       this.#refusedScene = main;
       return far === "widestDm" ? { ok: false, code: "quota", message: PER_PLAYER_FULL } : sceneFull(FAR.sceneBytes);
     }

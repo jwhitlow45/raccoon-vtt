@@ -1428,22 +1428,45 @@ export const FAR = {
  */
 export const BOOKKEEPING_RESERVE = { room: 512 * 1024, scene: 256 * 1024 } as const;
 
-/** The far byte line an op of `kind` reads in `scope`, or null for a deletion, which meets none. */
-export function farByteLine(kind: LimitKind["far"], scope: "room" | "scene"): number | null {
+/**
+ * Bytes under the room's far line that the DM's adds leave to the
+ * players' (D-261116-008): a DM's op that meets the line stops this much
+ * before a player's does, read at the same widest reserves, so the players
+ * always keep this much once the DM's per-player scenes or own things stop.
+ * Measured on live play 43's repro (server/rooms/limits.itest.ts), a
+ * session of 5 areas and 50 strokes of 200 point values for each of six
+ * players takes 418 KiB, so the players keep about two sessions' room,
+ * less up to one step the far line rounds by. A scene keeps more already:
+ * the DM's own part of it stops at the 3 MiB scene line, half its far line.
+ */
+export const KEPT_FOR_PLAYERS = 1 * MiB;
+
+/** The DM's refusal of an add that only the room kept for the players stops. */
+export const KEPT_FOR_PLAYERS_FULL = `the room is full: it keeps its last ${n(KEPT_FOR_PLAYERS / MiB)} MiB for what the players add`;
+
+/**
+ * The far byte line an op of `kind` reads in `scope`, or null for a
+ * deletion, which meets none. `whose` is the DM's line for the DM's adds,
+ * which stops KEPT_FOR_PLAYERS sooner on the room's, or the players' line
+ * for every other op, the DM's bookkeeping and a move of the players
+ * included (server/rooms/actor.ts bytesMeet).
+ */
+export function farByteLine(kind: LimitKind["far"], scope: "room" | "scene", whose: "dm" | "players"): number | null {
   if (kind === "deletion") return null;
   const line = scope === "room" ? FAR.roomBytes : FAR.sceneBytes;
-  return kind === "meets" ? line - BOOKKEEPING_RESERVE[scope] : line;
+  if (kind === "exempt") return line;
+  return line - BOOKKEEPING_RESERVE[scope] - (whose === "dm" && scope === "room" ? KEPT_FOR_PLAYERS : 0);
 }
 
 /**
- * Whether the far line refuses an op of `kind` in `scope`: its reading, the
- * DM's part with its reserves rounded up to FAR.byteStep and the players'
- * seat-held bytes exactly, is past the line the kind reads, and the op grew
- * the measure's total. The size guard reads it for the room and for each
- * scene an op touches (server/rooms/sizeGuard.ts).
+ * Whether the far line refuses an op of `kind` in `scope` on `whose` line
+ * (farByteLine): its reading, the DM's part with its reserves rounded up to
+ * FAR.byteStep and the players' seat-held bytes exactly, is past the line,
+ * and the op grew the measure's total. The size guard reads it for the
+ * room and for each scene an op touches (server/rooms/sizeGuard.ts).
  */
-export function farBytesOver(scope: "room" | "scene", kind: LimitKind["far"], dmPart: number, held: number, grew: boolean): boolean {
-  const line = farByteLine(kind, scope);
+export function farBytesOver(scope: "room" | "scene", kind: LimitKind["far"], whose: "dm" | "players", dmPart: number, held: number, grew: boolean): boolean {
+  const line = farByteLine(kind, scope, whose);
   return line !== null && grew && roundUp(Math.max(0, dmPart), FAR.byteStep) + held > line;
 }
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
-import { BOOKKEEPING_RESERVE, FAR, LIMITS, NO_ROOM_TO_EXPLORE, roundUp, SEAT, serializedBytes } from "#shared/limits.ts";
+import { BOOKKEEPING_RESERVE, FAR, KEPT_FOR_PLAYERS, KEPT_FOR_PLAYERS_FULL, LIMITS, NO_ROOM_TO_EXPLORE, roundUp, SEAT, serializedBytes } from "#shared/limits.ts";
 import type { Drawing, RoomState } from "#shared/model.ts";
 import { MOVE_PLAYERS_FIRST, MOVE_PLAYERS_FIRST_BACK } from "#shared/permissions.ts";
 import { MAX_NOTES, type Op } from "#shared/protocol.ts";
@@ -418,8 +418,9 @@ function perPlayerRoom(scenes: number): RoomState {
 
 /*
  * D9 on the room's line: a room past it, or inside its bookkeeping reserve,
- * on per-player sight's reserves alone, which a player's op reads at the
- * widest and the DM's at today's roster. A join changes neither reading.
+ * on per-player sight's reserves alone, which a player's op and the DM's
+ * add read at the widest, and the DM's bookkeeping at today's roster. A
+ * join changes neither reading.
  */
 describe("a room past the far line on per-player sight alone", () => {
   const player = (r: Room): Record<string, [Who, () => Op]> => ({
@@ -448,11 +449,36 @@ describe("a room past the far line on per-player sight alone", () => {
     return { r, rounds };
   }
 
-  test("D9: past the line at the widest, a player's line and character notes are refused and their move and whisper taken, and the DM's create, read at today's roster, taken", async (t) => {
+  test("D9: past the line at the widest, a player's line and character notes are refused and their move and whisper taken, and the DM's create, read at the widest too, refused", async (t) => {
     assert.ok(farRoomBytes(perPlayerRoom(13), true) > FAR.roomBytes, "13 scenes read past the line at the widest");
     const { r, rounds } = await beforeAndAfter(t, 13, ["a line", "character notes", "a move", "a whisper"], false);
     assert.deepEqual(rounds[0], [["a line", "quota"], ["character notes", "quota"], ["a move", "taken"], ["a whisper", "taken"]]);
-    assert.equal(await answer(r, "dm", goblin(r)), "taken", "the DM's create reads today's roster");
+    assert.deepEqual(await answer(r, "dm", goblin(r)), { code: "quota", message: `the room is full: it is at its ${FAR.roomBytes / (1024 * 1024)} MiB size limit` }, "the DM's create reads the widest");
+  });
+
+  test("LP43-LIMITS-2: inside the 1 MiB the room keeps for the players, the DM's adds are refused in its words and a player's line taken, with the DM's bookkeeping, a move of the players and deletes", async (t) => {
+    // The fewest scenes whose widest reading leaves the players less than 1 MiB and at least a step.
+    const playersLine = FAR.roomBytes - BOOKKEEPING_RESERVE.room;
+    const scenes = [8, 9, 10, 11, 12].find((n) => {
+      const reading = farRoomBytes(perPlayerRoom(n), true);
+      return reading > playersLine - KEPT_FOR_PLAYERS && reading <= playersLine - FAR.byteStep;
+    });
+    assert.ok(scenes !== undefined, "a room inside the kept 1 MiB");
+    const state = perPlayerRoom(scenes);
+    // A second scene the party explores, so moving the players there raises the room's reserves.
+    state.scenes.s2 = { ...state.scenes.s2!, fogEnabled: true, vision: { on: true, light: "bright" } };
+    const r = await opened(t, state, "kept");
+    assert.deepEqual(codes(await sendAll(r, player(r), ["a line", "a move", "a chat line"])), [["a line", "taken"], ["a move", "taken"], ["a chat line", "taken"]], "the player's adds go on");
+    assert.ok(farRoomBytes(r.state, false) <= playersLine - KEPT_FOR_PLAYERS, "today's roster reads under the DM's line, where the DM's adds went on before");
+    assert.equal(await answer(r, "dm", { t: "room.setPlayerScene", sceneId: "s2" }), "taken", "moving the players onto a scene they explore, which spends room for their play");
+    assert.equal(await answer(r, "dm", { t: "room.setPlayerScene", sceneId: "s1" }), "taken", "and back");
+    assert.deepEqual(await answer(r, "dm", goblin(r)), { code: "quota", message: KEPT_FOR_PLAYERS_FULL }, "the DM's create");
+    assert.deepEqual(await answer(r, "dm", { t: "token.update", tokenId: "hero", patch: { notes: "A long note about the road" } } as Op), { code: "quota", message: KEPT_FOR_PLAYERS_FULL }, "the DM's growing note");
+    assert.equal(await answer(r, "dm", { t: "token.move", tokenId: "hero", x: 7, y: 5 } as Op), "taken", "the DM's move");
+    assert.equal(await answer(r, "dm", { t: "actor.effect.add", target: { tokenId: "hero" }, effect: { id: mint.next(r), key: "prone" } } as Op), "taken", "the DM's condition");
+    assert.equal(await answer(r, "dm", { t: "log.chat", text: "Onward" }), "taken", "the DM's chat line");
+    assert.equal(await answer(r, "dm", { t: "scene.delete", sceneId: "pp0" }), "taken", "a scene's delete");
+    assert.equal(await answer(r, "dm", goblin(r)), "taken", "and the DM's create once the room is freed");
   });
 
   test("D9: past the line, a player's roll and chat line, which grow the room, are refused", async (t) => {

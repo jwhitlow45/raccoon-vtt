@@ -2357,7 +2357,11 @@ export class RoomActor {
       this.#sizes.counted(next, grown, growth, before);
       return { ok: true };
     }
-    const far: FarJudge = viewer.role === "player" ? "widest" : widestPerPlayerReserve(next) > widestPerPlayerReserve(before) ? "widestDm" : "today";
+    // The DM's other adds read the room as a player's do, at the widest, on the DM's line, so the room kept for the players
+    // (shared/limits.ts KEPT_FOR_PLAYERS) is there whatever the roster: read at today's, the DM's adds could fill what a
+    // player's then lack. The DM's bookkeeping, a move of the players and who sees for themselves (`own`) spend room for the
+    // players' own play, so they read today's roster and the players' line, as before.
+    const far: FarJudge = viewer.role === "player" ? "widest" : widestPerPlayerReserve(next) > widestPerPlayerReserve(before) ? "widestDm" : kind.far === "exempt" || FAR_TREATMENT[op.t] === "own" ? "today" : "dmAdd";
     return this.#sizes.check(next, grown, growth, before, viewer.role, far, kind.far === "exempt");
   }
 
