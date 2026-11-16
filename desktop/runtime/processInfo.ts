@@ -221,14 +221,15 @@ export function parsePsList(stdout: string): ListedProcess[] {
 }
 
 /**
- * The Windows listing: each postgres.exe, and each cmd.exe, which pg_ctl
- * starts the postmaster through, with its command line, program and
- * session, and the session this runs in, as one JSON object.
+ * The Windows listing: each postgres.exe, each cmd.exe, which pg_ctl
+ * starts the postmaster through, and each pg_ctl.exe, whose restricted
+ * copy may yet start one, with its command line, program and session, and
+ * the session this runs in, as one JSON object.
  */
 export const WINDOWS_LIST_SCRIPT = [
   "$ErrorActionPreference = 'Stop'",
   "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false",
-  "$rows = @(Get-CimInstance Win32_Process -Filter \"Name = 'postgres.exe' OR Name = 'cmd.exe'\" | ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; name = [string]$_.Name; line = $_.CommandLine; exe = $_.ExecutablePath; session = [int]$_.SessionId } })",
+  "$rows = @(Get-CimInstance Win32_Process -Filter \"Name = 'postgres.exe' OR Name = 'cmd.exe' OR Name = 'pg_ctl.exe'\" | ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; name = [string]$_.Name; line = $_.CommandLine; exe = $_.ExecutablePath; session = [int]$_.SessionId } })",
   "ConvertTo-Json -Compress -Depth 4 -InputObject ([pscustomobject]@{ session = [System.Diagnostics.Process]::GetCurrentProcess().SessionId; rows = $rows })",
 ].join("; ");
 
@@ -239,8 +240,9 @@ export const WINDOWS_LIST_SCRIPT = [
  * session may still be this user's, so the listing fails, which holds the
  * proof that PostgreSQL ended while it runs, and the log names its pid.
  * One in another session is skipped, and so is one in session 0, where
- * services run. A cmd.exe like that is skipped too: pg_ctl starts its
- * launcher with this user's rights or fewer, so its line can be read.
+ * services run. A cmd.exe or pg_ctl.exe like that is skipped too: pg_ctl
+ * runs its copy and its launcher with this user's rights or fewer, so
+ * their lines can be read.
  */
 export function parseWindowsList(stdout: string): ListedProcess[] {
   const listing: unknown = JSON.parse(stdout.trim());
@@ -310,8 +312,8 @@ async function mayBeOurs(pid: string, err: unknown, files: ProcFiles): Promise<b
  * /proc/<pid>/cmdline, exact bytes split at its NULs, and the program its
  * exe link names. macOS reads ps in a UTF-8 locale: in the C locale ps
  * escapes every other byte, so a data folder named "Tést" would never
- * match. Windows asks Win32_Process for postgres.exe and the cmd.exe
- * pg_ctl starts it through, with their programs (parseWindowsList). A
+ * match. Windows asks Win32_Process for postgres.exe, the cmd.exe pg_ctl
+ * starts it through and pg_ctl.exe, with their programs (parseWindowsList). A
  * listing that fails throws, since it proves nothing either way, and so
  * does one with a process that may be this user's whose command line it
  * can't read (mayBeOurs, parseWindowsList).
