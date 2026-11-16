@@ -21,7 +21,8 @@ import { chance, DM, env, int, member, pick, rng, trap } from "../testutil.ts";
  * route.hexFile.test.ts walks.
  */
 
-export type Case = { state: RoomState; op: OpOf<"token.move">; g: HexGrid };
+/** A room, its holder's move, its grid, and which hexes lie off the rock. */
+export type Case = { state: RoomState; op: OpOf<"token.move">; g: HexGrid; open: (h: Hex) => boolean };
 
 export function caseOf(seed: number, g: HexGrid): Case | null {
   const r = rng(seed * 7919 + (g.orient === "rows" ? 1 : 2));
@@ -120,7 +121,8 @@ export function caseOf(seed: number, g: HexGrid): Case | null {
   const inside = hexStandPlace(g, horse, { size: hexStandAt(g, horse, horse, true).size, ref: goal, squeezed: true });
   const found = findRouteOn({ ...groupWalkWorld(s, ownWalk(horse), { role: "player" }).input, towed: [] }, inside);
   if (!found || found === "none") return null;
-  return { state: s, g, op: { t: "token.move", tokenId: "horse", ...inside, squeeze: true, route: found.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) } };
+  const open = (h: Hex) => h.col >= 0 && h.row >= 0 && h.col < bounds.w && h.row < bounds.h && !solid(h);
+  return { state: s, g, open, op: { t: "token.move", tokenId: "horse", ...inside, squeeze: true, route: found.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) } };
 }
 
 /**
@@ -171,7 +173,7 @@ export function insideCaseOf(seed: number, g: HexGrid): Case | null {
   const inside = hexStandPlace(g, s.tokens.horse, { size: "medium", ref: path[j]!, squeezed: true });
   const found = findRouteOn({ ...groupWalkWorld(s, ownWalk(s.tokens.horse), { role: "player" }).input, towed: [] }, inside);
   if (!found || found === "none") return null;
-  return { state: s, g, op: { t: "token.move", tokenId: "horse", ...inside, squeeze: true, route: found.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) } };
+  return { state: s, g, open: (h) => open.has(hexKey(h)), op: { t: "token.move", tokenId: "horse", ...inside, squeeze: true, route: found.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) } };
 }
 
 /**
@@ -233,6 +235,38 @@ export function withMouse(made: Case, seed: number): Case | null {
   const by = chance(r, 0.7) ? tows[0]! : pick(r, tows);
   s.tokens.mouse = { ...onHex(g, "mouse", "tiny", occupiedHexes(g, by)[0]!, { name: "Mouse", kind: "npc", attached: { to: by.id, kind: "drag" }, ...(by.visibility === "dm" ? { visibility: "dm" as const } : {}) }), elevation: by.elevation };
   return linkHolds(g, s.meta.settings, "drag", s.tokens.mouse, by) ? { ...made, state: s } : null;
+}
+
+/**
+ * `made` with an ogre, Large or now and then Huge, on open ground beside a
+ * creature of one hex the walk drags, which drags it: too big for the file,
+ * the move takes it along by its holder's moments all the same (moveLeg.ts
+ * follow), as live play's hidden ogre behind a goblin (review
+ * HEXFILE-ASTRA-7). Mostly hidden, else every player sees it. Null where
+ * none of one hex is dragged or no place beside one fits it.
+ */
+export function withOgre(made: Case, seed: number): Case | null {
+  const { g } = made;
+  const r = rng(seed * 5023 + (g.orient === "rows" ? 13 : 14));
+  const s = structuredClone(made.state);
+  const tows = Object.values(s.tokens).filter((t): t is Token => t !== undefined && t.attached?.kind === "drag" && occupiedHexes(g, t).length === 1);
+  if (tows.length === 0) return null;
+  const by = pick(r, tows);
+  const size = chance(r, 0.25) ? "huge" : "large";
+  const hidden = chance(r, 0.7);
+  const taken = new Set(Object.values(s.tokens).flatMap((t) => (t ? occupiedHexes(g, t).map(hexKey) : [])));
+  // The hexes two steps round it at most, where a Huge one's middle can stand with its footprint beside it.
+  const ring = (hexes: readonly Hex[]) => hexes.flatMap((h) => [h, ...hexNeighbors(g, h)]);
+  const near = [...new Map(ring(ring(occupiedHexes(g, by))).map((h) => [hexKey(h), h] as const)).values()];
+  while (near.length > 0) {
+    const hex = near.splice(int(r, 0, near.length - 1), 1)[0]!;
+    const ogre = { ...onHex(g, "ogre", size, hex, { name: "Ogre", kind: "npc", attached: { to: by.id, kind: "drag" }, ...(hidden ? { visibility: "dm" as const } : {}) }), elevation: by.elevation };
+    if (occupiedHexes(g, ogre).some((h) => !made.open(h) || taken.has(hexKey(h)))) continue;
+    if (!linkHolds(g, s.meta.settings, "drag", ogre, by)) continue;
+    s.tokens.ogre = ogre;
+    return { ...made, state: s };
+  }
+  return null;
 }
 
 /**
@@ -312,7 +346,7 @@ export function intoCorridor(g: HexGrid, s: RoomState, ref: Hex): OpOf<"token.mo
  * `at`, and the goblin is dragged from the hex `goblin` by the warhorse, or
  * by Bree riding it.
  */
-export function keepOf(g: HexGrid, at: number, goblin: number, by: "horse" | "bree"): { s: RoomState; path: Hex[] } {
+export function keepOf(g: HexGrid, at: number, goblin: number, by: "horse" | "bree"): { s: RoomState; path: Hex[]; open: (h: Hex) => boolean } {
   const bounds = { w: 22, h: 16 };
   const path: Hex[] = [];
   const step = (from: Hex, pick: (n: Hex) => number) => [...hexNeighbors(g, from)].sort((a, b) => pick(a) - pick(b))[0]!;
@@ -336,5 +370,5 @@ export function keepOf(g: HexGrid, at: number, goblin: number, by: "horse" | "br
   s.tokens.horse = { ...horse, ...hexStandPlace(g, horse, { size: "medium", ref: on, squeezed: true }), squeeze: true };
   if (by === "bree") s.tokens.bree = onHex(g, "bree", "medium", on, { name: "Bree", kind: "pc", ownerIds: ["p1"], attached: { to: "horse", kind: "ride", steer: true } });
   s.tokens.gob = onHex(g, "gob", "medium", path[goblin]!, { name: "Goblin", kind: "npc", ownerIds: ["p1"], attached: { to: by, kind: "drag" } });
-  return { s, path };
+  return { s, path, open: (q) => q.col >= 0 && q.row >= 0 && q.col < bounds.w && q.row < bounds.h && !solid(q) };
 }

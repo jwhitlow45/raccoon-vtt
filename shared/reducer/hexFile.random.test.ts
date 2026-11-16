@@ -16,10 +16,10 @@ import { COLUMNS, onHex, ROWS } from "../rules/hexWalls.testkit.ts";
 import { planWalks, walkedIn } from "../rules/moveLeg.ts";
 import { groundUnder, onSqueezedLattice, ownWalk } from "../rules/movement.ts";
 import { footing, footprintGround } from "../rules/heights.ts";
-import { planTrapMove, trapHits, trapLandings, trapMoments, trapWalks } from "../rules/traps.ts";
+import { planTrapMove, trapHits, trapLandings, trapMoments, trapSpotHeights, trapWalks } from "../rules/traps.ts";
 import { groupWalkWorld } from "../rules/walkWorld.ts";
 import { chance, DM, env, int, P1, P2, pick, rng, template, trap } from "../testutil.ts";
-import { caseOf, insideCaseOf, keepOf, raised, wayInto, withImpAhead, withMouse, withRises, withStop, type Case } from "./hexFile.testkit.ts";
+import { caseOf, insideCaseOf, keepOf, raised, wayInto, withImpAhead, withMouse, withOgre, withRises, withStop, type Case } from "./hexFile.testkit.ts";
 
 /**
  * Random walks in single file on hexes (RIDE-SINGLE-FILE-HEX and
@@ -312,6 +312,22 @@ const HEIGHTS = [
   [40, 25],
   [0, 30],
 ] as const;
+
+/** The least walks of each kind the moment oracle must meet on each grid, about half of what it meets. */
+const KINDS: readonly (readonly [string, number])[] = [
+  ["in the file", 6000],
+  ["out of the file", 450],
+  ["hidden", 1700],
+  ["Large or bigger", 240],
+  ["riding or carried", 200],
+  ["dragged", 6000],
+  ["in a chain", 2400],
+  ["seen under a hidden holder", 260],
+  ["flying", 6000],
+  ["on raised ground", 1800],
+  ["Pat's", 3300],
+  ["the DM's", 3300],
+];
 
 /** A sphere 5 ft round a creature's hex's middle at height `z`, as a trap's hits read an area. */
 function ballAt(g: HexGrid, t: Token, z: number) {
@@ -640,57 +656,118 @@ for (const [name, g] of [
       assert.ok(cuts >= 1800 && checked >= 2700, `cuts ${cuts}, walks checked ${checked}`);
     });
 
-    test("raised 40 ft and brought down to the ground or to 25 ft, or climbing from the ground to 30 ft, an imp ahead of the holder on some: at every moment the trap step has each walk hex by hex at the height the move and the area sweep have it, on its way to its first hex and never leaving its start too, where it waits on its last hex at their place as well, and an area's hits read it there (review HEXFILE-OPUS-11, HEXFILE-OPUS-12)", () => {
-      let checked = 0;
-      let waiting = 0;
+    test("every walk the move takes along by its holder's moments, of every kind (in the file or too big for it, seen or hidden, ridden, dragged, at the end of a chain, seen under a hidden holder, flying or on raised ground), for Pat and for the DM: at every moment the trap step has it where the move has it, the area sweep's height, its place on its own points and where it waits on its last, an area's hits reading it there, and its triggers read each spot at that height (review HEXFILE-OPUS-11, HEXFILE-OPUS-12, HEXFILE-ASTRA-7)", () => {
+      // Where the trap step and the move may differ by design, each excluded by its rule alone:
+      // - a walk with no moments of its own (no `along`: the lead, what rides it, one dragged by its place, every walk before op
+      //   62) is read spot by spot at its group's step (5.6), its spots on the ground its trace reads, as before op 62, which the
+      //   op 61 differential keeps.
+      // - between its own points the trap step has a walk on its latest one (5.6), where the move's leg and the sweep's hex line have
+      //   it partway, so its place is compared at its own points' moments and once it waits on its last.
+      // - a walk that ends where it started, neither in the file nor carrying one there (moveLeg.ts walkedIn): the move writes none
+      //   of it, and neither the area sweep nor the trap step reads it, as before op 62.
+      // - a stop's poses (stoodAt, stoppedAt): trapMoments reads every moment before any stop, so FU45B-ASTRA-06's stood-at height for
+      //   one that never left its start and FU45B-ASTRA-10/11's kept walks and seats are the stop oracle's (`levelWithHolders`) and
+      //   the landings', which read them against the stored room.
+      const kinds = new Map<string, number>();
+      const count = (kind: string) => kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
+      const differences: string[] = [];
+      let different = 0;
+      const differ = (what: string) => {
+        if (different++ < 5) differences.push(what);
+      };
+      let moments = 0;
+      let placed = 0;
       let moving = 0;
+      let spots = 0;
       for (const [kind, made] of [
         ["", caseOf],
         ["inside ", insideCaseOf],
       ] as const) {
-        for (let seed = 1; seed <= 400; seed++) {
+        for (let seed = 1; seed <= 300; seed++) {
           const room = made(seed, g);
           if (!room) continue;
-          for (const [ahead, start] of [
+          const ogre = withOgre(room, seed);
+          for (const [variant, start] of [
             ["", room],
             ["imp ahead, ", withImpAhead(room, seed)],
             ["mouse in tow, ", withMouse(room, seed)],
+            ["ogre in tow, ", ogre],
+            ["ground raised, ", withRises(room, seed)],
+            ["ogre on raised ground, ", ogre && withRises(ogre, seed)],
           ] as const) {
             if (!start) continue;
-            for (const [up, down] of HEIGHTS) {
+            const rises = variant.endsWith("raised ground, ") || variant === "ground raised, ";
+            for (const [up, down] of rises ? [[0, 0] as const, ...HEIGHTS] : HEIGHTS) {
               const { state: s, op } = raised(start, up, down);
-              const walks = planWalks(op, s, DM, {});
-              const at = trapMoments(op, s, DM, {});
-              const moments = trapWalks(op, s, DM, {}).flatMap((w) => w.spots.map((p) => p.progress));
-              for (const m of walks) {
-                if (!m.along || m.carriedBy === undefined) continue;
-                // The first point of the run it ends on, where it reaches its last hex, its start for one that never leaves it.
-                let k = m.route.length - 1;
-                while (k > 0 && m.route[k - 1]!.x === m.route[k]!.x && m.route[k - 1]!.y === m.route[k]!.y) k--;
-                const reached = m.along[k]!;
-                for (const p of moments) {
-                  const want = pointAt(m.route, p, m.along);
-                  const t = at(p)[m.tokenId]!;
-                  const where = `${kind}seed ${seed}, ${ahead}${up} to ${down} ft, ${m.tokenId} at ${p.join("/")}`;
-                  assert.ok(Math.abs(t.elevation - want.elevation) < 1e-9, `${where}: the trap step at ${t.elevation} ft, the move at ${want.elevation} ft`);
-                  checked++;
-                  // Between its hexes the trap step has it on its latest one, so its place is the move's once it waits on its last.
-                  if (compareAlong(p, reached) >= 0) {
-                    assert.ok(Math.abs(t.x - want.x) < 1e-9 && Math.abs(t.y - want.y) < 1e-9, `${where}: the trap step at ${t.x}, ${t.y}, the move at ${want.x}, ${want.y}`);
-                    waiting++;
+              for (const [who, actor] of [
+                ["Pat", P1],
+                ["the DM", DM],
+              ] as const) {
+                const walks = planWalks(op, s, actor, {});
+                const at = trapMoments(op, s, actor, {});
+                const trapped = trapWalks(op, s, actor, {});
+                const heights = trapSpotHeights(op, s, actor, {});
+                const all = trapped.flatMap((w) => w.spots.map((p) => p.progress));
+                const walked = walkedIn(walks);
+                for (const m of walks) {
+                  if (!m.along || !walked(m)) continue;
+                  const token = s.tokens[m.tokenId]!;
+                  const holder = s.tokens[m.carriedBy!]!;
+                  const link = token.attached!.kind;
+                  for (const [yes, name] of [
+                    [m.file === true, "in the file"],
+                    [m.file !== true, "out of the file"],
+                    [token.visibility === "dm", "hidden"],
+                    [token.size === "large" || token.size === "huge" || token.size === "gargantuan", "Large or bigger"],
+                    [onHolder(link), "riding or carried"],
+                    [link === "drag", "dragged"],
+                    [m.carriedBy !== op.tokenId, "in a chain"],
+                    [token.visibility !== "dm" && holder.visibility === "dm", "seen under a hidden holder"],
+                    [up > 0 || down > 0, "flying"],
+                    [rises, "on raised ground"],
+                    [actor === P1, "Pat's"],
+                    [actor === DM, "the DM's"],
+                  ] as const) {
+                    if (yes) count(name);
                   }
-                  // Where the move has it still coming down or going up there, a sphere round that height catches it.
-                  if (Math.abs(want.elevation - m.route[m.route.length - 1]!.elevation) < 1e-6) continue;
-                  moving++;
-                  const ball = trap("ball", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", rig: { on: ["enter"], who: "any", floor: false, resets: "never", stops: false, foundOnSpring: true, hits: { area: { ...ballAt(g, t, want.elevation + 0.5) } }, actions: [], find: [], notice: false } });
-                  assert.ok(trapHits(ball, { ...s, tokens: at(p) }, []).includes(m.tokenId), `${where}: a sphere round ${want.elevation} ft misses it`);
+                  // The first point of the run it ends on, where it reaches its last place, its start for one that never leaves it.
+                  let k = m.route.length - 1;
+                  while (k > 0 && m.route[k - 1]!.x === m.route[k]!.x && m.route[k - 1]!.y === m.route[k]!.y) k--;
+                  const reached = m.along[k]!;
+                  const own = new Set(m.along.map((p) => p.join("/")));
+                  const where = (p: readonly number[]) => `${kind}seed ${seed}, ${variant}${up} to ${down} ft, ${who}, ${m.tokenId} at ${p.join("/")}`;
+                  for (const p of all) {
+                    const want = pointAt(m.route, p, m.along);
+                    const t = at(p)[m.tokenId]!;
+                    moments++;
+                    if (Math.abs(t.elevation - want.elevation) > 1e-9) differ(`${where(p)}: the trap step at ${t.elevation} ft, the move at ${want.elevation} ft`);
+                    if (own.has(p.join("/")) || compareAlong(p, reached) >= 0) {
+                      placed++;
+                      if (Math.abs(t.x - want.x) > 1e-9 || Math.abs(t.y - want.y) > 1e-9) differ(`${where(p)}: the trap step at ${t.x}, ${t.y}, the move at ${want.x}, ${want.y}`);
+                    }
+                    // Where the move has it still coming down or going up there, a sphere round that height catches it.
+                    if (Math.abs(want.elevation - m.route[m.route.length - 1]!.elevation) < 1e-6) continue;
+                    moving++;
+                    const ball = trap("ball", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", rig: { on: ["enter"], who: "any", floor: false, resets: "never", stops: false, foundOnSpring: true, hits: { area: { ...ballAt(g, t, want.elevation + 0.5) } }, actions: [], find: [], notice: false } });
+                    if (!trapHits(ball, { ...s, tokens: at(p) }, []).includes(m.tokenId)) differ(`${where(p)}: a sphere round ${want.elevation} ft misses it`);
+                  }
+                  const mine = trapped.find((w) => w.tokenId === m.tokenId)!;
+                  mine.spots.forEach((spot, j) => {
+                    spots++;
+                    const want = pointAt(m.route, spot.progress, m.along).elevation;
+                    const height = heights.get(m.tokenId)?.[j];
+                    if (height === undefined || Math.abs(height - want) > 1e-9) differ(`${where(spot.progress)}: its triggers read spot ${j} at ${height} ft, the move has it at ${want} ft`);
+                  });
                 }
               }
             }
           }
         }
       }
-      assert.ok(checked >= 140000 && waiting >= 35000 && moving >= 70000, `moments checked ${checked}, waiting on its last hex ${waiting}, with the move still taking it up or down ${moving}`);
+      assert.deepEqual(differences, [], `${different} differences`);
+      const counts = Object.fromEntries(kinds);
+      assert.ok(moments >= 180000 && placed >= 120000 && moving >= 85000 && spots >= 38000, `moments ${moments}, places ${placed}, still moving ${moving}, spots ${spots}`);
+      for (const [name, least] of KINDS) assert.ok((kinds.get(name) ?? 0) >= least, `walks ${name}: ${kinds.get(name) ?? 0}, ${JSON.stringify(counts)}`);
     });
   });
 }

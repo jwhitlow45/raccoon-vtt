@@ -99,11 +99,11 @@ for (const [name, g] of [
           for (const by of ["horse", "bree"] as const) {
             for (const rat of [false, true]) {
               for (const [up, down] of HEIGHTS) {
-                const { s, path } = keepOf(g, at, at - 1, by);
+                const { s, path, open } = keepOf(g, at, at - 1, by);
                 if (rat) s.tokens.rat = onHex(g, "rat", "tiny", path[at - 1]!, { name: "Rat", kind: "npc", ownerIds: ["p1"], attached: { to: "gob", kind: "drag" } });
                 const op = wayInto(g, s, path[to]!);
                 if (!op) continue;
-                compared(raised({ state: s, op, g }, up, down), up === down, `from ${at} to ${to}, ${by}${rat ? ", a rat" : ""}, ${up} to ${down} ft`);
+                compared(raised({ state: s, op, g, open }, up, down), up === down, `from ${at} to ${to}, ${by}${rat ? ", a rat" : ""}, ${up} to ${down} ft`);
                 drags++;
               }
             }
