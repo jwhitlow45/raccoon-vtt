@@ -2365,8 +2365,11 @@ export class RoomActor {
     // The DM's other adds read the room as a player's do, at the widest, on the DM's line, so the room kept for the players
     // (shared/limits.ts KEPT_FOR_PLAYERS) is there whatever the roster: read at today's, the DM's adds could fill what a
     // player's then lack. The DM's bookkeeping, a move of the players and who sees for themselves (`own`) spend room for the
-    // players' own play, so they read today's roster and the players' line, as before.
-    const far: FarJudge = viewer.role === "player" ? "widest" : widestPerPlayerReserve(next) > widestPerPlayerReserve(before) ? "widestDm" : kind.far === "exempt" || FAR_TREATMENT[op.t] === "own" ? "today" : "dmAdd";
+    // players' own play, so they read today's roster and the players' line, as before. A DM's undo or redo puts back only
+    // what the room held before, so it reads the players' line at the widest, the players' scene's and a Per player
+    // scene's alike (D-261116-027).
+    const restore = FAR_TREATMENT[op.t] === "restore" && kind.far !== "exempt";
+    const far: FarJudge = viewer.role === "player" || restore ? "widest" : widestPerPlayerReserve(next) > widestPerPlayerReserve(before) ? "widestDm" : kind.far === "exempt" || FAR_TREATMENT[op.t] === "own" ? "today" : "dmAdd";
     return this.#sizes.check(next, grown, growth, before, viewer.role, far, kind.far === "exempt", viewer.role === "player" ? viewer.memberId : undefined);
   }
 

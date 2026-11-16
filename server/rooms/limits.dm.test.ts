@@ -496,11 +496,47 @@ describe("a room past the far line on per-player sight alone", () => {
     assert.equal(await answer(r, "dm", { t: "log.chat", text: "Onward" }), "taken", "the DM's chat line");
     assert.equal(await answer(r, "dm", { t: "vision.holders", sceneId: "pp1", on: ["p1"] } as Op), "taken", "who sees for themselves, which spends room for the players' play");
     assert.equal(await answer(r, "dm", { t: "token.delete", tokenId: "gob" }), "taken", "the goblin's delete");
-    const undoGoblin = () => answer(r, "dm", { t: "undo", scope: "play", head: r.clients.dm.head("play", "undo").id } as Op);
-    assert.deepEqual(await undoGoblin(), { code: "quota", message: `could not undo deleting Goblin: ${KEPT_FOR_PLAYERS_FULL}` }, "the DM's Undo that brings it back adds");
+    // An undo puts back only what the room held before, so it reads the players' line (D-261116-027).
+    assert.equal(await answer(r, "dm", { t: "undo", scope: "play", head: r.clients.dm.head("play", "undo").id } as Op), "taken", "the DM's Undo that brings it back");
     assert.equal(await answer(r, "dm", { t: "scene.delete", sceneId: "pp0" }), "taken", "a scene's delete");
-    assert.equal(await undoGoblin(), "taken", "the same Undo once the room is freed");
-    assert.equal(await answer(r, "dm", goblin(r)), "taken", "and the DM's create");
+    assert.equal(await answer(r, "dm", goblin(r)), "taken", "and the DM's create once the room is freed");
+  });
+
+  /** The fewest per-player scenes whose widest reading passes `line`. */
+  const scenesPast = (line: number) => [6, 7, 8, 9, 10, 11, 12, 13, 14].find((n) => farRoomBytes(perPlayerRoom(n), true) > line)!;
+  const undoSetup = (r: Room) => answer(r, "dm", { t: "undo", scope: "setup", head: r.clients.dm.head("setup", "undo").id } as Op);
+
+  test("LP44-UNDO-1: once the room is past the DM's line, the DM's Undo of a creature's, the players' scene's and a Per player scene's delete are taken", async (t) => {
+    const playersLine = FAR.roomBytes - BOOKKEEPING_RESERVE.room;
+    // The players' room in use: the widest reading past the DM's line and a step under the players'.
+    const scenes = scenesPast(playersLine - KEPT_FOR_PLAYERS);
+    const state = perPlayerRoom(scenes);
+    assert.ok(farRoomBytes(state, true) <= playersLine - FAR.byteStep, "a step under the players' line");
+    state.tokens.gob = token("gob", { name: "Goblin", x: 9, y: 9 });
+    const r = await opened(t, state, "used");
+    assert.deepEqual(await answer(r, "dm", goblin(r)), { code: "quota", message: KEPT_FOR_PLAYERS_FULL }, "the DM's new adds still stop at the DM's line");
+    assert.equal(await answer(r, "dm", { t: "token.delete", tokenId: "gob" }), "taken");
+    assert.equal(await answer(r, "dm", { t: "undo", scope: "play", head: r.clients.dm.head("play", "undo").id } as Op), "taken", "the creature's");
+    assert.ok(r.state.tokens.gob, "the goblin is back");
+    assert.equal(await answer(r, "dm", { t: "scene.delete", sceneId: "s1", leavePlayers: true } as Op), "taken");
+    await reopenDm(r);
+    assert.equal(await undoSetup(r), "taken", "the players' scene's");
+    assert.equal(r.state.meta.playerSceneId, "s1", "with the players back on it");
+    assert.equal(await answer(r, "dm", { t: "scene.delete", sceneId: "pp0" }), "taken");
+    assert.equal(await undoSetup(r), "taken", "a Per player scene's");
+    assert.ok(r.state.scenes.pp0, "the Per player scene is back");
+  });
+
+  test("LP44-UNDO-1: past the players' line the DM's Undo of a Per player scene's delete is refused in the room's words and keeps its step", async (t) => {
+    const playersLine = FAR.roomBytes - BOOKKEEPING_RESERVE.room;
+    const scenes = scenesPast(playersLine);
+    assert.ok(farRoomBytes(perPlayerRoom(scenes - 1), true) <= playersLine, "one scene fewer reads under the players' line");
+    const r = await opened(t, perPlayerRoom(scenes), "past");
+    assert.equal(await answer(r, "dm", { t: "scene.delete", sceneId: "pp0" }), "taken");
+    const step = r.clients.dm.head("setup", "undo").id;
+    assert.deepEqual(await undoSetup(r), { code: "quota", message: `could not undo deleting the scene pp0: the room is full: it is at its ${FAR.roomBytes / (1024 * 1024)} MiB size limit` });
+    assert.equal(r.clients.dm.head("setup", "undo").id, step, "the step stays to undo");
+    assert.equal(r.state.scenes.pp0, undefined, "the scene stays deleted");
   });
 
   test("D9: past the line, a player's roll and chat line, which grow the room, are refused", async (t) => {
