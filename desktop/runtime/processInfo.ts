@@ -36,6 +36,11 @@ function powershell(): string {
   return `${process.env.SystemRoot ?? "C:\\Windows"}\\${POWERSHELL}`;
 }
 
+/** Windows' own cmd.exe, which the cluster has pg_ctl start the postmaster through (pgEnv's COMSPEC). */
+export function systemShell(): string {
+  return `${process.env.SystemRoot ?? "C:\\Windows"}\\System32\\cmd.exe`;
+}
+
 /**
  * When a Linux process started, in ms since boot. Field 22 counts clock
  * ticks since boot, at USER_HZ, 100 on every platform the app ships for. The
@@ -215,16 +220,44 @@ export function parsePsList(stdout: string): ListedProcess[] {
   return out;
 }
 
-/** The script's JSON array of `{ pid, line, exe }`. Anything else is a listing that failed. */
+/**
+ * The Windows listing: each postgres.exe, and each cmd.exe, which pg_ctl
+ * starts the postmaster through, with its command line, program and
+ * session, and the session this runs in, as one JSON object.
+ */
+export const WINDOWS_LIST_SCRIPT = [
+  "$ErrorActionPreference = 'Stop'",
+  "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false",
+  "$rows = @(Get-CimInstance Win32_Process -Filter \"Name = 'postgres.exe' OR Name = 'cmd.exe'\" | ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; name = [string]$_.Name; line = $_.CommandLine; exe = $_.ExecutablePath; session = [int]$_.SessionId } })",
+  "ConvertTo-Json -Compress -Depth 4 -InputObject ([pscustomobject]@{ session = [System.Diagnostics.Process]::GetCurrentProcess().SessionId; rows = $rows })",
+].join("; ");
+
+/**
+ * WINDOWS_LIST_SCRIPT's JSON. Anything else is a listing that failed. A
+ * process whose command line Windows won't give is another user's, or runs
+ * with more rights than this one. A postgres.exe like that in this
+ * session may still be this user's, so the listing fails, which holds the
+ * proof that PostgreSQL ended while it runs, and the log names its pid.
+ * One in another session is skipped, and so is one in session 0, where
+ * services run. A cmd.exe like that is skipped too: pg_ctl starts its
+ * launcher with this user's rights or fewer, so its line can be read.
+ */
 export function parseWindowsList(stdout: string): ListedProcess[] {
-  const rows: unknown = JSON.parse(stdout.trim());
-  if (!Array.isArray(rows)) throw new Error(`the process listing was not a list: ${stdout.trim().slice(0, 200)}`);
-  return rows.map((row: { pid?: unknown; line?: unknown; exe?: unknown }) => {
-    if (typeof row?.pid !== "number" || typeof row.line !== "string" || (row.exe != null && typeof row.exe !== "string")) {
+  const listing: unknown = JSON.parse(stdout.trim());
+  const { session, rows } = (listing ?? {}) as { session?: unknown; rows?: unknown };
+  if (typeof session !== "number" || !Array.isArray(rows)) throw new Error(`the process listing was not a list: ${stdout.trim().slice(0, 200)}`);
+  const out: ListedProcess[] = [];
+  for (const row of rows as { pid?: unknown; name?: unknown; line?: unknown; exe?: unknown; session?: unknown }[]) {
+    if (typeof row?.pid !== "number" || typeof row.name !== "string" || typeof row.session !== "number" || (row.line != null && typeof row.line !== "string") || (row.exe != null && typeof row.exe !== "string")) {
       throw new Error(`the process listing had a row it can't read: ${JSON.stringify(row)}`);
     }
-    return { pid: row.pid, commandLine: row.line, exe: typeof row.exe === "string" ? row.exe : null };
-  });
+    if (typeof row.line === "string" && row.line !== "") {
+      out.push({ pid: row.pid, commandLine: row.line, exe: typeof row.exe === "string" ? row.exe : null });
+    } else if (/^postgres\.exe$/i.test(row.name) && row.session === session && row.session !== 0) {
+      throw new Error(`postgres.exe (pid ${row.pid}) runs in this session and its command line can't be read`);
+    }
+  }
+  return out;
 }
 
 /** The /proc reads the Linux listing makes, which tests replace to give the errors a system can. */
@@ -277,11 +310,11 @@ async function mayBeOurs(pid: string, err: unknown, files: ProcFiles): Promise<b
  * /proc/<pid>/cmdline, exact bytes split at its NULs, and the program its
  * exe link names. macOS reads ps in a UTF-8 locale: in the C locale ps
  * escapes every other byte, so a data folder named "Tést" would never
- * match. Windows asks Win32_Process for postgres.exe alone, with its
- * program, and leaves out a process whose command line it can't read:
- * that is another user's, so nothing this user started. A listing that
- * fails throws, since it proves nothing either way, and so does a Linux
- * listing with a process of this user's it can't read (mayBeOurs).
+ * match. Windows asks Win32_Process for postgres.exe and the cmd.exe
+ * pg_ctl starts it through, with their programs (parseWindowsList). A
+ * listing that fails throws, since it proves nothing either way, and so
+ * does one with a process that may be this user's whose command line it
+ * can't read (mayBeOurs, parseWindowsList).
  */
 export async function listProcesses(platform: Platform = process.platform as Platform, files: ProcFiles = procFiles): Promise<ListedProcess[]> {
   if (platform === "linux") {
@@ -308,12 +341,6 @@ export async function listProcesses(platform: Platform = process.platform as Pla
     const { stdout } = await run("/bin/ps", ["-ww", "-axo", "pid=,command="], { env: { ...process.env, LC_ALL: "en_US.UTF-8" }, maxBuffer: 64 * 1024 * 1024, timeout: 30_000 });
     return parsePsList(stdout);
   }
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false",
-    "$rows = @(Get-CimInstance Win32_Process -Filter \"Name = 'postgres.exe'\" | Where-Object { $_.CommandLine } | ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; line = [string]$_.CommandLine; exe = $_.ExecutablePath } })",
-    "ConvertTo-Json -Compress -InputObject $rows",
-  ].join("; ");
-  const { stdout } = await run(powershell(), ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true, timeout: POWERSHELL_LIMIT_MS, maxBuffer: 16 * 1024 * 1024 });
+  const { stdout } = await run(powershell(), ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_LIST_SCRIPT], { windowsHide: true, timeout: POWERSHELL_LIMIT_MS, maxBuffer: 16 * 1024 * 1024 });
   return parseWindowsList(stdout);
 }
