@@ -16,7 +16,7 @@ import { testConfig } from "./auth/testing.ts";
 import { sha256 } from "./auth/tokens.ts";
 import { applySchema } from "./db.ts";
 import { randomIp, Socket, TestClient } from "./rooms/testing.ts";
-import { closeServer, shutDown } from "./shutdown.ts";
+import { closeServer, shutDown, type StepFailure } from "./shutdown.ts";
 
 /**
  * A deploy's shutdown with sockets open (design 15.4, LP5-OPS-3): every
@@ -234,7 +234,7 @@ test("a stop whose snapshot write fails for one room still saves the other, then
     failing = lost;
     await losesOnly(
       closeServer(own, () => pool.end()),
-      [{ roomId: lost, why: "snapshot not written" }],
+      [{ roomId: lost, why: "snapshot behind" }],
     );
     assert.equal(await snapshotSeq(kept), await lastSeq(kept), "the other room saved at its last op");
   } finally {
@@ -274,7 +274,7 @@ test("a stop whose room's unload throws still saves the other room, then fails n
     actor.shutdown = () => Promise.reject(new Error("the room's state would not serialize"));
     await losesOnly(
       closeServer(own, () => pool.end()),
-      [{ roomId: lost, why: "unload failed" }],
+      [{ roomId: lost, why: "snapshot behind" }],
     );
     assert.equal(await snapshotSeq(kept), await lastSeq(kept), "the other room saved at its last op");
   } finally {
@@ -391,7 +391,7 @@ test("a delete whose unload could not save its room and then fails while the ser
     const stopping = closeServer(own, () => pool.end());
     await roomsClosing.promise;
     deleteAnswer.reject(new Error("canceling statement due to statement timeout"));
-    await losesOnly(stopping, [{ roomId, why: "delete failed" }]);
+    await losesOnly(stopping, [{ roomId, why: "snapshot behind" }]);
     await asked;
     assert.equal((await check.query("select 1 from rooms where id = $1", [roomId])).rowCount, 1, "the room is still there");
   } finally {
@@ -445,13 +445,239 @@ test("a delete that fails, tried again and failing again, the second time during
   }
 });
 
+test("a delete whose unload could not save its room and that fails during the sockets' grace leaves the room named unsaved (OPS-SOL-6)", async () => {
+  let doomed = "";
+  const held = deferred();
+  const deleteAnswer = deferred<never>();
+  const pool = poolWith((text, values) => {
+    if (snapshotOf(doomed, text, values)) return Promise.reject(new Error("could not extend file: No space left on device"));
+    if (!text.startsWith("delete from rooms where id = $1") || values?.[0] !== doomed) return null;
+    held.resolve();
+    return deleteAnswer.promise;
+  });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 1_000 } });
+  await own.listen({ port: 0, host: "127.0.0.1" });
+  const lost = await roomWithChange(own, "Doomed");
+  const kept = await roomWithChange(own, "Kept");
+  try {
+    doomed = lost.roomId;
+    const asked = lost.dm.delete(`/api/rooms/${lost.roomId}`, { name: "Doomed" }).catch(() => undefined);
+    await held.promise;
+    // A phone slow to answer the close holds the sockets' grace open while the delete fails.
+    (kept.socket.ws as unknown as { _socket: NetSocket })._socket.pause();
+    let roomsClosing = false;
+    const close = own.rooms.close.bind(own.rooms);
+    own.rooms.close = () => {
+      roomsClosing = true;
+      return close();
+    };
+    const stopping = closeServer(own, () => pool.end());
+    await new Promise((r) => setTimeout(r, 100));
+    deleteAnswer.reject(new Error("canceling statement due to statement timeout"));
+    await asked;
+    assert.equal(roomsClosing, false, "the delete failed before the rooms began to close");
+    await losesOnly(stopping, [{ roomId: lost.roomId, why: "snapshot behind" }]);
+  } finally {
+    lost.socket.ws.terminate();
+    kept.socket.ws.terminate();
+  }
+});
+
+test("a delete of a room whose snapshot could not be written that lands as the rooms close leaves no room behind, and the stop exits 0 (OPS-SOL-6)", async () => {
+  let doomed = "";
+  const held = deferred();
+  const go = deferred();
+  const pool = poolWith((text, values) => {
+    if (snapshotOf(doomed, text, values)) return Promise.reject(new Error("could not extend file: No space left on device"));
+    if (!text.startsWith("delete from rooms where id = $1") || values?.[0] !== doomed) return null;
+    const room = doomed;
+    doomed = "";
+    held.resolve();
+    return go.promise.then(() => pool.query(text, [room])) as Promise<never>;
+  });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 } });
+  await own.listen({ port: 0, host: "127.0.0.1" });
+  const { roomId, dm, socket } = await roomWithChange(own, "Doomed");
+  try {
+    doomed = roomId;
+    const asked = dm.delete(`/api/rooms/${roomId}`, { name: "Doomed" });
+    await held.promise;
+    const roomsClosing = deferred();
+    const close = own.rooms.close.bind(own.rooms);
+    own.rooms.close = () => {
+      const closing = close();
+      roomsClosing.resolve();
+      return closing;
+    };
+    const codes: number[] = [];
+    const stopping = shutDown(own, () => pool.end(), { exit: (code) => codes.push(code) });
+    await roomsClosing.promise;
+    await new Promise((r) => setTimeout(r, 50));
+    go.resolve();
+    assert.equal((await asked).statusCode, 204);
+    await stopping;
+    assert.deepEqual(codes, [0], "the stop waited for the delete and exits 0");
+  } finally {
+    socket.ws.terminate();
+  }
+});
+
+test("a room whose replay failed is behind its last change by design, and the stop does not count it unsaved", async () => {
+  const pool = poolWith(() => null);
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 } });
+  await own.listen({ port: 0, host: "127.0.0.1" });
+  const { roomId, socket } = await roomWithChange(own, "Unreadable");
+  try {
+    // Out of memory as a crash leaves it, behind its last change, and that change stored with no number, which stops a replay.
+    await own.rooms.unload(roomId, undefined, false);
+    await check.query("update room_ops set pub = null where room_id = $1 and seq = (select max(seq) from room_ops where room_id = $1)", [roomId]);
+    assert.equal((await own.rooms.acquire(roomId)).replayFailed, true);
+    await closeServer(own, () => pool.end());
+  } finally {
+    socket.ws.terminate();
+  }
+});
+
+test("a room this process only tried to delete is checked too: a delete that fails names a lag the room already had", async () => {
+  const before = poolWith(() => null);
+  const first = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool: before, ws: { closeGraceMs: 300 } });
+  await first.listen({ port: 0, host: "127.0.0.1" });
+  const { roomId, socket } = await roomWithChange(first, "Lagging");
+  socket.ws.terminate();
+  // An earlier process left the room behind its last change, as a crash does.
+  await first.rooms.unload(roomId, undefined, false);
+  await closeServer(first, () => before.end()).catch(() => undefined);
+  const pool = poolWith((text, values) => (text.startsWith("delete from rooms where id = $1") && values?.[0] === roomId ? Promise.reject(new Error("canceling statement due to statement timeout")) : null));
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 } });
+  await own.listen({ port: 0, host: "127.0.0.1" });
+  await assert.rejects(own.gateway.deleteRoom(roomId), /statement timeout/);
+  await losesOnly(
+    closeServer(own, () => pool.end()),
+    [{ roomId, why: "snapshot behind" }],
+  );
+});
+
+/** A seeded generator of numbers in [0, 1), so a failing random run can be run again. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+test("random snapshot and delete failures around a stop: it fails naming exactly the rooms it touched whose snapshot is behind their last change (OPS-SOL-6)", { timeout: 180_000 }, async () => {
+  const seed = Number(process.env.SHUTDOWN_SEED ?? Math.floor(Math.random() * 2 ** 31));
+  const random = mulberry32(seed);
+  const pick = <T>(of: readonly T[]): T => of[Math.floor(random() * of.length)]!;
+  type Plan = { snapshotsFail: "never" | "first" | "after the early deletes"; deleteAt: "never" | "before the stop" | "in the grace" | "as the rooms close"; deleteFails: boolean };
+  for (let trial = 0; trial < 8; trial++) {
+    // The first trial is a stop with nothing failing, which must exit clean.
+    const plans: Plan[] = [0, 1, 2].map(() =>
+      trial === 0
+        ? { snapshotsFail: "never", deleteAt: "never", deleteFails: false }
+        : {
+            snapshotsFail: pick(["never", "first", "after the early deletes"] as const),
+            deleteAt: pick(["never", "before the stop", "in the grace", "as the rooms close"] as const),
+            deleteFails: random() < 0.5,
+          },
+    );
+    const why = `seed ${seed}, trial ${trial}: ${JSON.stringify(plans)}`;
+    const failing = new Set<string>();
+    // A room's delete reaches the database and waits for its gate, then fails or goes through as the gate says.
+    const gates = new Map<string, { fail: boolean; reached: ReturnType<typeof deferred<void>>; answer: ReturnType<typeof deferred<void>> }>();
+    const pool = poolWith((text, values) => {
+      const roomId = typeof values?.[0] === "string" ? values[0] : "";
+      if (failing.has(roomId) && snapshotOf(roomId, text, values)) return Promise.reject(new Error("could not extend file: No space left on device"));
+      const gate = text.startsWith("delete from rooms where id = $1") ? gates.get(roomId) : undefined;
+      if (!gate) return null;
+      gate.reached.resolve();
+      return gate.answer.promise.then(() => {
+        gates.delete(roomId);
+        return gate.fail ? Promise.reject(new Error("canceling statement due to statement timeout")) : pool.query(text, values);
+      }) as Promise<never>;
+    });
+    const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 400 } });
+    await own.listen({ port: 0, host: "127.0.0.1" });
+    const rooms = await Promise.all(plans.map((_, i) => roomWithChange(own, `Random ${i}`)));
+    const slow = await roomWithChange(own, "Slow");
+    const asked: Array<Promise<unknown>> = [];
+    try {
+      const del = (i: number): Promise<unknown> => {
+        const request = rooms[i]!.dm.delete(`/api/rooms/${rooms[i]!.roomId}`, { name: `Random ${i}` }).catch(() => undefined);
+        asked.push(request);
+        return request;
+      };
+      const gate = (i: number) => {
+        const opened = { fail: plans[i]!.deleteFails, reached: deferred(), answer: deferred() };
+        gates.set(rooms[i]!.roomId, opened);
+        return opened;
+      };
+      plans.forEach((plan, i) => plan.snapshotsFail === "first" && failing.add(rooms[i]!.roomId));
+      for (const [i, plan] of plans.entries()) {
+        if (plan.deleteAt !== "before the stop") continue;
+        gate(i).answer.resolve();
+        await del(i);
+      }
+      plans.forEach((plan, i) => plan.snapshotsFail === "after the early deletes" && failing.add(rooms[i]!.roomId));
+      const held = new Map<number, ReturnType<typeof gate>>();
+      for (const [i, plan] of plans.entries()) {
+        if (plan.deleteAt !== "in the grace" && plan.deleteAt !== "as the rooms close") continue;
+        const opened = gate(i);
+        held.set(i, opened);
+        void del(i);
+        await opened.reached.promise;
+      }
+      (slow.socket.ws as unknown as { _socket: NetSocket })._socket.pause();
+      const roomsClosing = deferred();
+      const close = own.rooms.close.bind(own.rooms);
+      own.rooms.close = () => {
+        const closing = close();
+        roomsClosing.resolve();
+        return closing;
+      };
+      const stopping = closeServer(own, () => pool.end()).then(
+        () => [] as readonly StepFailure[],
+        (err: { failures?: readonly StepFailure[] }) => err.failures ?? [],
+      );
+      await new Promise((r) => setTimeout(r, 50));
+      for (const [i, opened] of held) if (plans[i]!.deleteAt === "in the grace") opened.answer.resolve();
+      await roomsClosing.promise;
+      for (const [i, opened] of held) if (plans[i]!.deleteAt === "as the rooms close") opened.answer.resolve();
+      const failures = await stopping;
+      await Promise.all(asked);
+
+      const ids = [...rooms.map((r) => r.roomId), slow.roomId];
+      const { rows } = await check.query<{ id: string }>(
+        `select r.id from rooms r
+           left join room_snapshots s on s.room_id = r.id
+           left join lateral (select max(o.seq) as seq from room_ops o where o.room_id = r.id) o on true
+         where r.id = any($1::text[]) and coalesce(s.seq, 0) < coalesce(o.seq, 0)`,
+        [ids],
+      );
+      const behind = rows.map((r) => r.id).sort();
+      assert.deepEqual(failures.filter((f) => f.step !== "rooms"), [], why);
+      const named = (failures.find((f) => f.step === "rooms")?.rooms ?? []).map((r) => r.roomId).sort();
+      assert.deepEqual(named, behind, `the rooms named are those behind (${why})`);
+      assert.ok((failures.find((f) => f.step === "rooms")?.rooms ?? []).every((r) => r.why === "snapshot behind"), why);
+    } finally {
+      for (const room of [...rooms, slow]) room.socket.ws.terminate();
+      await Promise.all(asked);
+    }
+  }
+});
+
 test("a delete that lands while the server stops a room leaves it deleted, and the stop exits 0 (LP44-OPS-1)", async () => {
   let watched = "";
   const deleted = deferred();
   // The stop's check of the room waits for the delete, so the room's row is gone when the stop reads it.
   const pool = poolWith((text, values) => {
-    // The stop's read of the room's stored snapshot, not the quota check of its snapshot write, which the delete waits behind.
-    if (!watched || values?.[0] !== watched || !text.includes("select seq::text from room_snapshots where room_id = $1")) return null;
+    // The stop's read of what its rooms have stored, not the quota check of the room's snapshot write, which the delete waits behind.
+    const ids = values?.[0];
+    if (!watched || !Array.isArray(ids) || !ids.includes(watched) || !text.includes("left join room_snapshots")) return null;
     watched = "";
     return deleted.promise.then(() => pool.query(text, values)) as Promise<never>;
   });

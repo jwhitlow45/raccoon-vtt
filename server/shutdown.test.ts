@@ -48,8 +48,8 @@ function fakeApp(fake: Fake = {}): { app: FastifyInstance; logged: Logged[] } {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 test("the stop's steps fit its deadline with 2 s left for the pool (design 15.4)", () => {
-  // The sockets' grace and the second for those cut off (rooms/ws.ts), the rooms, the socket writes (closeServer).
-  const steps = 2_000 + 1_000 + DEFAULT_MANAGER_OPTIONS.closeTimeoutMs + 2_000;
+  // The sockets' grace and the second for those cut off (rooms/ws.ts), the rooms and their check, the socket writes (closeServer).
+  const steps = 2_000 + 1_000 + DEFAULT_MANAGER_OPTIONS.closeTimeoutMs + DEFAULT_MANAGER_OPTIONS.auditTimeoutMs + 2_000;
   assert.ok(steps + 2_000 <= SHUTDOWN_DEADLINE_MS, `${steps} ms of steps in a ${SHUTDOWN_DEADLINE_MS} ms stop`);
 });
 
@@ -91,7 +91,7 @@ test("a stop stuck on a promise nothing will settle still reaches the forced exi
 });
 
 const ROOMS: UnsavedRoom[] = [
-  { roomId: "AAAA0000", why: "snapshot not written" },
+  { roomId: "AAAA0000", why: "snapshot behind" },
   { roomId: "BBBB0000", why: "timed out" },
 ];
 const losses: Array<{ name: string; fake: Fake; endPool?: () => Promise<void>; failed: StepFailure }> = [

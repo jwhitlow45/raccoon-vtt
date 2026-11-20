@@ -30,8 +30,10 @@ export type ManagerOptions = {
   minIdleMs: number;
   /** How long a room with no sockets and nothing to do stays loaded. */
   idleUnloadMs: number;
-  /** How long close() waits for actors to finish and write snapshots: 18 s, so the stop's other steps fit in its 25 s (design 15.4). */
+  /** How long close() waits for actors to finish and write snapshots, and for deletes in flight: 16 s, so the stop's other steps fit in its 25 s (design 15.4). */
   closeTimeoutMs: number;
+  /** How long close() then waits for its one read of what every room it touched has stored: 2 s. */
+  auditTimeoutMs: number;
   snapshotBudget: Partial<SnapshotBudgetLimits>;
   actor: Partial<ActorOptions>;
   now: Clock;
@@ -43,7 +45,8 @@ export const DEFAULT_MANAGER_OPTIONS: ManagerOptions = {
   minLoadedMs: 10 * 60_000,
   minIdleMs: 10 * 60_000,
   idleUnloadMs: 60_000,
-  closeTimeoutMs: 18_000,
+  closeTimeoutMs: 16_000,
+  auditTimeoutMs: 2_000,
   snapshotBudget: {},
   actor: {},
   now: Date.now,
@@ -58,29 +61,17 @@ type Entry = {
   createdIp: string | null;
   unloading: Promise<void> | null;
   idleTimer: NodeJS.Timeout | null;
-  /** Whether its unload writes a snapshot, as a shutdown's, an eviction's and a delete's do and a crash's on request does not. */
-  saves: boolean;
-  /** Whether its unload threw, which the unload logs and gets past. */
-  failed: boolean;
 };
 
-/** A room the shutdown cannot show saved, and why (server/shutdown.ts names each). */
-export type UnsavedRoom = { roomId: string; why: "unload failed" | "snapshot not written" | "delete failed" | "timed out" | "not checked" };
-
 /**
- * A room's deletion, from its unload to the database's answer. Its unload
- * writes the room's snapshot at its last commit, `lastSeq`, once the unload
- * has read it (null when nothing was loaded to save), and a stop checks
- * that it did unless the row is gone.
+ * A room the shutdown cannot show saved, and why (server/shutdown.ts names
+ * each): its stored snapshot is behind its last stored change, its unload or
+ * delete was still running at the deadline, or the read that checks it
+ * failed.
  */
-type Deletion = { done: Promise<void>; lastSeq: number | null };
+export type UnsavedRoom = { roomId: string; why: "snapshot behind" | "timed out" | "not checked" };
 
 const DAY_MS = 24 * 60 * 60_000;
-
-/** The commit a room's snapshot should hold once it leaves memory, or null when it holds nothing to save: never loaded, or a replay that failed, which is never snapshotted by design. */
-function savedSeqOf(entry: Entry): number | null {
-  return entry.actor && !entry.actor.replayFailed ? entry.actor.committed.seq : null;
-}
 
 /**
  * A deletion of asset rows for one room (docs/design/design-v1-dm-tools.md 3.19),
@@ -114,7 +105,12 @@ export class RoomManager {
   #locks = new Map<string, Promise<void>>();
   #closing = false;
   #unsavedAtClose: readonly UnsavedRoom[] | null = null;
-  #deletions = new Map<string, Deletion>();
+  /** Every room this process loaded or began to delete, kept for the life of the process: the rooms its stop answers for. */
+  #touched = new Set<string>();
+  /** Rooms whose replay failed when they last loaded, which are never snapshotted by design. */
+  #unsavable = new Set<string>();
+  /** Each delete in flight, until the database answers it. */
+  #deletions = new Map<string, Promise<void>>();
   #pruneTimer: NodeJS.Timeout;
   #deleteListeners: Array<(roomId: string) => void> = [];
 
@@ -283,37 +279,34 @@ export class RoomManager {
 
   /**
    * A room's deletion (the gateway's): `remove` unloads it through
-   * unloadForDelete and deletes its row. It is kept until the database
-   * answers, so a shutdown meanwhile waits to see the row gone or the room
-   * saved (close()).
+   * unloadForDelete and deletes its row. A stop waits for it until the
+   * database answers, and then reads whether the room is gone.
    */
   async deleting<T>(roomId: string, remove: () => Promise<T>): Promise<T> {
+    this.#touched.add(roomId);
     let settle!: () => void;
-    const deletion: Deletion = { done: new Promise<void>((resolve) => (settle = resolve)), lastSeq: null };
-    this.#deletions.set(roomId, deletion);
+    const done = new Promise<void>((resolve) => (settle = resolve));
+    this.#deletions.set(roomId, done);
     try {
       return await remove();
     } finally {
       settle();
-      if (this.#deletions.get(roomId) === deletion) this.#deletions.delete(roomId);
+      if (this.#deletions.get(roomId) === done) this.#deletions.delete(roomId);
     }
   }
 
   /**
    * Closes the room's sockets with 4009 and drops it from memory ahead of
    * deleting its rows. It writes the room's snapshot as any unload does, so
-   * a delete that fails, however often it is tried again, never leaves the
-   * room out of memory behind its last commit (OPS-SOL-4, OPS-SOL-5). A
-   * delete that succeeds pays one snapshot write, which its row's cascade
-   * removes.
+   * a delete that fails, however often it is tried again, leaves the room
+   * saved on disk. A delete that succeeds pays one snapshot write, which its
+   * row's cascade removes.
    */
   async unloadForDelete(roomId: string): Promise<void> {
     for (const listener of this.#deleteListeners) listener(roomId);
     const entry = this.#entries.get(roomId);
     if (!entry) return;
     await (entry.unloading ?? this.#unload(entry, { code: CLOSE.roomClosed, snapshot: true }));
-    const deletion = this.#deletions.get(roomId);
-    if (deletion) deletion.lastSeq = savedSeqOf(entry);
   }
 
   /** Unloads one room on request (tests and the admin tools). Without the snapshot it behaves like a crash. */
@@ -329,45 +322,45 @@ export class RoomManager {
 
   /**
    * Shutdown (design 15.4): sockets already closed with 1012 by the socket
-   * layer, actors finish and write snapshots, bounded in time. It resolves
-   * with every room it cannot show saved and never rejects, so one room's
-   * failure stops no other room's snapshot, and the stop names them all and
-   * exits 1 (server/shutdown.ts). An actor logs a snapshot write that fails
-   * and goes on, so a room counts as saved only once its stored snapshot
-   * reads its last commit, or once its row is gone, deleted on purpose. A
-   * room being deleted is checked after the database answers its delete,
-   * loaded or not, so a delete that fails leaves it unsaved.
+   * layer, actors finish and write snapshots, and deletes in flight get the
+   * database's answer, bounded in time. Then one read of what is stored
+   * checks every room this process touched: each that still exists must
+   * have its snapshot at its last stored change, and one deleted counts as
+   * done. It answers from the database alone, whatever went wrong on the
+   * way (a snapshot write an actor logged and got past, an unload that
+   * threw, a delete that failed), and leaves out rooms this process never
+   * touched, so an older crash's lag fails no stop. It resolves with every
+   * room it cannot show saved and never rejects, so one room's failure
+   * stops no other room's snapshot, and the stop names them all and exits 1
+   * (server/shutdown.ts).
    */
   async close(): Promise<readonly UnsavedRoom[]> {
     this.#closing = true;
     clearInterval(this.#pruneTimer);
-    const entries = new Map([...this.#entries.values()].map((entry) => [entry.roomId, entry]));
-    const roomIds = new Set([...entries.keys(), ...this.#deletions.keys()]);
-    const checked = new Map<string, UnsavedRoom["why"] | null>();
-    const work = Promise.all(
-      [...roomIds].map(async (roomId) => {
-        const entry = entries.get(roomId);
-        if (entry) await (entry.unloading ?? this.#unload(entry, { code: CLOSE.restarting, snapshot: true }));
-        // Read after the unload: a delete may begin while the stop unloads the room, and waits for that unload.
-        const deletion = this.#deletions.get(roomId);
-        if (deletion) await deletion.done;
-        const lastSeq = deletion ? (entry ? savedSeqOf(entry) : deletion.lastSeq) : entry?.saves ? savedSeqOf(entry) : null;
-        checked.set(roomId, await this.#unsavedWhy(roomId, lastSeq, { failed: entry?.failed ?? false, deleting: deletion !== undefined }));
-      }),
-    );
-    let timer: NodeJS.Timeout | undefined;
-    const deadline = new Promise<"late">((resolve) => {
-      timer = setTimeout(() => resolve("late"), this.options.closeTimeoutMs);
-    });
-    if ((await Promise.race([work, deadline])) === "late") this.#log.error({ rooms: roomIds.size - checked.size }, "room shutdown did not finish in time");
-    clearTimeout(timer);
-    // A room still loading or being deleted at the deadline would have been saved or gone by now, so it counts too.
-    const unsaved = [...roomIds].flatMap((roomId): UnsavedRoom[] => {
-      const entry = entries.get(roomId);
-      const late = (entry?.saves ?? false) || this.#deletions.has(roomId);
-      const why = checked.has(roomId) ? checked.get(roomId) : late ? "timed out" : null;
-      return why ? [{ roomId, why }] : [];
-    });
+    const settled = (async () => {
+      await Promise.all([...this.#entries.values()].map((entry) => entry.unloading ?? this.#unload(entry, { code: CLOSE.restarting, snapshot: true })));
+      // A delete may begin while the stop unloads its room, and waits for that unload.
+      while (this.#deletions.size > 0) await Promise.all(this.#deletions.values());
+    })();
+    if ((await within(settled, this.options.closeTimeoutMs)) === "late") this.#log.error({ rooms: this.#entries.size + this.#deletions.size }, "room shutdown did not finish in time");
+    const late = new Set([...this.#entries.keys(), ...this.#deletions.keys()]);
+    const unsaved: UnsavedRoom[] = [...late].map((roomId) => ({ roomId, why: "timed out" }));
+    const checked = [...this.#touched].filter((roomId) => !late.has(roomId) && !this.#unsavable.has(roomId));
+    if (checked.length > 0) {
+      const behind = this.#pool.query<{ id: string }>(
+        `select r.id from rooms r
+           left join room_snapshots s on s.room_id = r.id
+           left join lateral (select max(o.seq) as seq from room_ops o where o.room_id = r.id) o on true
+         where r.id = any($1::text[]) and coalesce(s.seq, 0) < coalesce(o.seq, 0)`,
+        [checked],
+      );
+      behind.catch(() => undefined);
+      const read = await within(behind, this.options.auditTimeoutMs);
+      if (read === "late") this.#log.error({ rooms: checked.length }, "room snapshots could not be checked at shutdown");
+      else if (read instanceof Error) this.#log.error({ err: read, rooms: checked.length }, "room snapshots could not be checked at shutdown");
+      if (read === "late" || read instanceof Error) unsaved.push(...checked.map((roomId) => ({ roomId, why: "not checked" as const })));
+      else unsaved.push(...read.rows.map((row) => ({ roomId: row.id, why: "snapshot behind" as const })));
+    }
     if (unsaved.length > 0) this.#log.error({ rooms: unsaved }, "rooms not saved at shutdown");
     this.#unsavedAtClose = unsaved;
     return unsaved;
@@ -376,32 +369,6 @@ export class RoomManager {
   /** What the last close() could not show saved, or null before it has finished. */
   get unsavedAtClose(): readonly UnsavedRoom[] | null {
     return this.#unsavedAtClose;
-  }
-
-  /**
-   * Why a room the stop has done with is not saved at `lastSeq`, its last
-   * commit, or null when it is, when its row is gone, or when there is
-   * nothing to save (`lastSeq` null).
-   */
-  async #unsavedWhy(roomId: string, lastSeq: number | null, how: { failed: boolean; deleting: boolean }): Promise<UnsavedRoom["why"] | null> {
-    if (lastSeq === null) return null;
-    try {
-      const { rows } = await this.#pool.query<{ room: boolean; seq: string | null }>(
-        "select exists (select 1 from rooms where id = $1) as room, (select seq::text from room_snapshots where room_id = $1) as seq",
-        [roomId],
-      );
-      const row = rows[0];
-      if (!row?.room) {
-        this.#log.info({ roomId }, "room deleted during shutdown");
-        return null;
-      }
-      if (how.failed) return "unload failed";
-      if (Number(row.seq ?? 0) >= lastSeq) return null;
-      return how.deleting ? "delete failed" : "snapshot not written";
-    } catch (err) {
-      this.#log.error({ err, roomId }, "room snapshot could not be checked at shutdown");
-      return "not checked";
-    }
   }
 
   #load(info: RoomInfo): Entry {
@@ -421,9 +388,8 @@ export class RoomManager {
       createdIp: info.createdIp,
       unloading: null,
       idleTimer: null,
-      saves: false,
-      failed: false,
     };
+    this.#touched.add(info.roomId);
     entry.loading.catch(() => undefined);
     entry.loading = RoomActor.load({
       pool: this.#pool,
@@ -438,6 +404,8 @@ export class RoomManager {
       .then((actor) => {
         if (!actor) throw new RoomNotFoundError(info.roomId);
         entry.actor = actor;
+        if (actor.replayFailed) this.#unsavable.add(info.roomId);
+        else this.#unsavable.delete(info.roomId);
         this.#log.info({ roomId: info.roomId, seq: actor.committed.seq, readOnly: actor.readOnly }, "room loaded");
         // A room nobody connects to after loading still has to leave memory eventually.
         this.#onIdle(entry, actor);
@@ -471,13 +439,11 @@ export class RoomManager {
       clearTimeout(entry.idleTimer);
       entry.idleTimer = null;
     }
-    entry.saves = opts.snapshot;
     entry.unloading = (async () => {
       try {
         const actor = await entry.loading.catch(() => null);
         if (actor) await actor.shutdown(opts);
       } catch (err) {
-        entry.failed = true;
         this.#log.error({ err, roomId: entry.roomId }, "room unload failed");
       } finally {
         if (this.#entries.get(entry.roomId) === entry) this.#entries.delete(entry.roomId);
@@ -515,5 +481,20 @@ export class RoomManager {
     } catch (err) {
       this.#log.warn({ err }, "id row prune failed");
     }
+  }
+}
+
+/** `work`'s value, or its error, if it settles within `ms`, else "late". */
+async function within<T>(work: Promise<T>, ms: number): Promise<T | Error | "late"> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work.catch((err: unknown) => (err instanceof Error ? err : new Error(String(err)))),
+      new Promise<"late">((resolve) => {
+        timer = setTimeout(() => resolve("late"), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }
