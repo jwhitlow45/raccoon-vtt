@@ -329,7 +329,9 @@ export class RoomManager {
    * done. It answers from the database alone, whatever went wrong on the
    * way (a snapshot write an actor logged and got past, an unload that
    * threw, a delete that failed), and leaves out rooms this process never
-   * touched, so an older crash's lag fails no stop. It resolves with every
+   * touched, so an older crash's lag fails no stop. A room it touched but
+   * never loaded (its load failed, or only a delete of it failed) that was
+   * already behind is named all the same. It resolves with every
    * room it cannot show saved and never rejects, so one room's failure
    * stops no other room's snapshot, and the stop names them all and exits 1
    * (server/shutdown.ts).
