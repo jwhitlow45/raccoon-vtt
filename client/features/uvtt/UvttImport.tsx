@@ -53,8 +53,16 @@ function Entry(props: { label: string; hint: string; target: ImportTarget; full?
                 }
               : {})}
           />
-          <Help>{props.hint}</Help>
-          {props.several ? <Help>{SEVERAL_HINT}</Help> : null}
+          {/* One hint under the picker, as the scene phases' picker has: a second would line up with the first, an edge the picker's padded words miss. */}
+          <Help>
+            <span>{props.hint}</span>
+            {props.several ? (
+              <>
+                {" "}
+                <span>{SEVERAL_HINT}</span>
+              </>
+            ) : null}
+          </Help>
           {tooBig ? (
             <div role="alert">
               <Note>{tooBig}</Note>
